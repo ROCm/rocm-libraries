@@ -82,7 +82,7 @@ the caller must apply both. A pre-kernel that does so is a follow-up.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Tuple
 
 from rocke.core.ir import BF16, F32, KernelDef
@@ -465,6 +465,16 @@ class MlaPrefillSpec:
 
     def fwd_kernel_name(self) -> str:
         return self._name("mla_prefill_fwd_gfx942")
+
+    def fwd_kernel_identity(self) -> str:
+        """The forward kernel's name without the device's XCD count.
+
+        Dispatch sets ``num_xcds`` from the device's CU count, so one layout
+        has a name per device class (``_x6``, ``_x8``, none). A record about
+        the layout rather than the device -- a test's measured resource
+        budget -- keys on this, so it applies on every device class.
+        """
+        return replace(self, num_xcds=0).fwd_kernel_name()
 
     def _name(self, stem: str) -> str:
         return (

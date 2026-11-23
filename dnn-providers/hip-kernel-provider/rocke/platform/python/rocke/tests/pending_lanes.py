@@ -1419,6 +1419,8 @@ MEASURED_BUDGETS: tuple[MeasuredBudget, ...] = (
             24,
         ),
     ),
+    # Keyed by MlaPrefillSpec.fwd_kernel_identity(), the name without the
+    # device's XCD count: the 6- and 8-XCD variants spill the same bytes.
     *_measured(
         _MLA_PREFILL,
         _LLVM_24_CI,

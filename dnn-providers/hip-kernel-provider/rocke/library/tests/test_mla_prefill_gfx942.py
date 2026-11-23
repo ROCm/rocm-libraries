@@ -51,6 +51,24 @@ def _spec(**kw) -> MlaPrefillSpec:
     return MlaPrefillSpec(num_heads=kw.pop("num_heads", 16), **kw)
 
 
+def _shipped_spec(num_cus: int = 0) -> MlaPrefillSpec:
+    """The spec dispatch ships for a DeepSeek-V3-shaped request; ``num_cus``
+    0 takes the live device's CU count when it is a gfx942."""
+    from dispatch.mla import MLARequest, dispatch_mla
+
+    return dispatch_mla(
+        MLARequest(
+            num_heads=128,
+            total_q=64,
+            num_seqs=2,
+            max_seqlen_k=96,
+            arch="gfx942",
+            num_kv_blocks=12,
+            num_cus=num_cus,
+        )
+    ).spec
+
+
 def _assert_no_private_memory(case: unittest.TestCase, ir: str) -> None:
     case.assertNotIn("alloca", ir)
     case.assertNotIn("addrspace(5)", ir)
@@ -342,6 +360,14 @@ class TestMlaPrefillHeadsPerWg(unittest.TestCase):
         self.assertIn("num_xcds", reason)
         self.assertIn("_x6", _hpw_spec(num_xcds=6).fwd_kernel_name())
 
+    def test_kernel_identity_drops_only_the_xcd_count(self):
+        self.assertEqual(
+            _hpw_spec(num_xcds=6).fwd_kernel_identity(), _hpw_spec().fwd_kernel_name()
+        )
+        self.assertEqual(
+            _hpw_spec().fwd_kernel_identity(), _hpw_spec().fwd_kernel_name()
+        )
+
     def test_eight_heads_admitted(self):
         # k_rope is a quarter of the c_kv tile, so at 512 threads its staging
         # narrows to 2-wide chunks rather than being refused.
@@ -456,6 +482,8 @@ class _OccupancyGuard:
         except ImportError as exc:  # pragma: no cover - environment-dependent
             require_tools_or_skip(f"comgr toolchain unavailable: {exc}")
         cls.kernel_name = art.kernel_name
+        # Measured budgets key on the layout, not the device's XCD count.
+        cls.kernel_identity = cls.spec.fwd_kernel_identity()
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "mla_prefill_fwd.hsaco"
             path.write_bytes(bytes(art.hsaco))
@@ -476,7 +504,7 @@ class _OccupancyGuard:
         """No scratch, unless the loaded compiler is one this kernel has a
         measured budget for (``rocke.tests.pending_lanes.MEASURED_BUDGETS``)."""
         allowance = measured_scratch_allowance(
-            _MEASURED_BUDGETS_PATH, self.kernel_name, loaded_compiler_build()
+            _MEASURED_BUDGETS_PATH, self.kernel_identity, loaded_compiler_build()
         )
         self.assertLessEqual(self.res.scratch_bytes, allowance)
 
@@ -492,26 +520,30 @@ class TestShippedLayoutOccupancy(_OccupancyGuard, unittest.TestCase):
     """The layout dispatch ships for a DeepSeek-V3-shaped request."""
 
     def test_every_measured_budget_names_this_kernel(self):
-        """A budget whose kernel name no longer matches the shipped layout's
-        (a re-tuned dispatch) would silently stop applying."""
+        """A budget whose kernel identity no longer matches the shipped
+        layout's (a re-tuned dispatch) would silently stop applying."""
         self.assertLessEqual(
-            measured_budget_kernels(_MEASURED_BUDGETS_PATH), {self.kernel_name}
+            measured_budget_kernels(_MEASURED_BUDGETS_PATH), {self.kernel_identity}
         )
 
     @staticmethod
     def make_spec():
-        from dispatch.mla import MLARequest, dispatch_mla
+        return _shipped_spec()
 
-        return dispatch_mla(
-            MLARequest(
-                num_heads=128,
-                total_q=64,
-                num_seqs=2,
-                max_seqlen_k=96,
-                arch="gfx942",
-                num_kv_blocks=12,
-            )
-        ).spec
+
+class TestShippedLayoutBudgetKey(unittest.TestCase):
+    """The shipped layout's measured budget applies on every device class."""
+
+    def test_every_xcd_count_dispatch_picks_shares_the_budgeted_identity(self):
+        # 80 CUs is no whole number of 38-CU XCDs (launch order), 228 and 304
+        # are 6 and 8 XCDs: every XCD count dispatch derives for gfx942.
+        specs = [_shipped_spec(num_cus=num_cus) for num_cus in (80, 228, 304)]
+        self.assertEqual({spec.num_xcds for spec in specs}, {0, 6, 8})
+        self.assertEqual(len({spec.fwd_kernel_name() for spec in specs}), 3)
+        budgeted = measured_budget_kernels(_MEASURED_BUDGETS_PATH)
+        for spec in specs:
+            with self.subTest(num_xcds=spec.num_xcds):
+                self.assertEqual(budgeted, {spec.fwd_kernel_identity()})
 
 
 class TestDefaultLayoutOccupancy(_OccupancyGuard, unittest.TestCase):
