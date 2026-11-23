@@ -927,3 +927,543 @@ def batchnorm2d_signature(spec: BatchNorm2DSpec):
         .build()
     )
 
+
+# ===================================================================== #
+# Cross-CTA spatial-split reduction (two-kernel, workspace-based)
+# ===================================================================== #
+#
+# Motivating gap: the single-kernel path above grids one CTA per
+# (channels_per_block) channels -- for a large-H*W/small-C shape (e.g.
+# N=1,C=16,H=640,W=640 on gfx950's 256 CUs) that is as few as 16 CTAs, most
+# of the device idle, and there is no axis to split one channel's spatial
+# reduction across more CTAs without a cross-CTA combine step. Unlike
+# GEMM's split-K (plain float accumulation, composes under a single atomic
+# add), a Welford (mean, M2, count) triple does **not** compose under
+# atomics, so this is a genuine two-kernel design, not an epilogue tweak:
+#
+#   1. :func:`build_batchnorm2d_reduce_partial` -- one CTA per
+#      ``(channel-group, spatial split)``, writes a partial ``(mean, M2,
+#      count)`` triple per split to a caller-owned workspace.
+#   2. :func:`build_batchnorm2d_combine_apply` -- one CTA per channel-group
+#      (same grid as the single-kernel path), merges that channel's
+#      ``split_hw`` partials via the SAME :func:`welford_block_reduce_stable`
+#      /``_wave_prologue`` primitive the single-kernel reduction already
+#      uses (feeding each thread one workspace slot instead of a row-sweep
+#      partial -- the merge math does not care where a thread's ``(mean,
+#      M2, count)`` came from), updates the running stats, and performs the
+#      normal pass-2 normalize+write.
+#
+# Deliberately NOT wired into ``rocke.dispatch.families.batchnorm``'s
+# ``KernelCandidate``/``dispatch_batchnorm`` surface: that abstraction is
+# built around one candidate = one kernel launch plus a static
+# (grid, block) pair, with no notion of an inter-kernel workspace a caller
+# must allocate/zero/thread through two launches. Extending that shared
+# abstraction to a multi-kernel candidate is a bigger, cross-family change
+# than this feature's scope -- callers that want this lever build+launch
+# the two kernels directly, in order, sharing one ``Workspace`` buffer
+# sized by :func:`batchnorm2d_split_workspace_floats`.
+#
+# Training-only: inference has no batch reduction to split.
+
+
+@dataclass(frozen=True)
+class BatchNorm2DSplitSpec:
+    """One cross-CTA spatial-split batchnorm2d reduction instance.
+
+    Shares ``n/c/h/w/block_size/vec/dtype/channels_per_block/fast_reduce/
+    wave_size`` field names with :class:`BatchNorm2DSpec` by convention, not
+    inheritance -- this is a standalone, training-only spec for the
+    two-kernel path above, not a drop-in for the single-kernel builders.
+    """
+
+    n: int
+    c: int
+    h: int
+    w: int
+    split_hw: int
+    block_size: int = 256
+    vec: int = 4
+    dtype: DType = "f16"
+    channels_per_block: int = 1
+    fast_reduce: bool = False
+    wave_size: int = 64
+    name: str = "rocke_batchnorm2d_split"
+
+    @property
+    def hw(self) -> int:
+        return self.h * self.w
+
+    @property
+    def hw_chunk(self) -> int:
+        """Per-split spatial chunk size: ``ceil(H*W / split_hw)``.
+
+        The last split's actual valid range can be shorter than this (when
+        ``H*W`` is not a multiple of ``split_hw``) -- every read in
+        :func:`build_batchnorm2d_reduce_partial` is masked against the true
+        ``H*W`` bound, not just this chunk size, so a short last split only
+        contributes fewer valid elements rather than reading out of range.
+        """
+        return -(-self.hw // self.split_hw)
+
+    def kernel_name(self, suffix: str) -> str:
+        return kernel_name_join(
+            self.name,
+            self.dtype,
+            f"N{self.n}C{self.c}H{self.h}W{self.w}",
+            f"b{self.block_size}",
+            f"v{self.vec}",
+            f"split{self.split_hw}",
+            f"cpb{self.channels_per_block}" if self.channels_per_block != 1 else "",
+            suffix,
+            flags={"fr": self.fast_reduce},
+        )
+
+
+def batchnorm2d_split_workspace_floats(spec: BatchNorm2DSplitSpec) -> int:
+    """f32 element count the caller must allocate (and need not zero-init:
+    every slot is written exactly once by :func:`build_batchnorm2d_reduce_partial`
+    before :func:`build_batchnorm2d_combine_apply` reads it) for
+    ``Workspace``: one ``(mean, M2, count)`` triple per ``(channel, split
+    index)``."""
+    return int(spec.c) * int(spec.split_hw) * 3
+
+
+def is_valid_split_spec(
+    spec: BatchNorm2DSplitSpec, arch: str = "gfx950"
+) -> Tuple[bool, str]:
+    """Return ``(ok, reason)`` for one split-reduction config on ``arch``.
+
+    ``split_hw <= block_size`` is required: :func:`build_batchnorm2d_combine_apply`
+    gives each thread at most one workspace slot (``tid < split_hw``), not a
+    per-thread loop over multiple slots -- ``split_hw`` is meant to stay
+    small (amortizing one CTA's worth of spatial work across a handful of
+    CTAs), so this is not a practical limitation.
+    """
+    from ...core.arch import ArchTarget
+
+    try:
+        target = ArchTarget.from_gfx(arch)
+    except KeyError as e:
+        return False, str(e)
+
+    if spec.n <= 0 or spec.c <= 0 or spec.h <= 0 or spec.w <= 0:
+        return False, "n, c, h, w must all be positive"
+    if spec.split_hw <= 1:
+        return False, "split_hw must be > 1 (use the single-kernel path otherwise)"
+    if spec.channels_per_block <= 0:
+        return False, "channels_per_block must be positive"
+    if spec.c % spec.channels_per_block != 0:
+        return False, (
+            f"c {spec.c} not divisible by channels_per_block "
+            f"{spec.channels_per_block}"
+        )
+    if spec.split_hw > spec.block_size:
+        return False, (
+            f"split_hw {spec.split_hw} > block_size {spec.block_size}: the "
+            "combine kernel gives each thread at most one workspace slot"
+        )
+    if spec.fast_reduce and spec.block_size % spec.wave_size != 0:
+        return False, (
+            f"fast_reduce requires block_size {spec.block_size} divisible by "
+            f"wave_size {spec.wave_size}"
+        )
+
+    ok, why = validate_io(
+        IOSpecRule(
+            dtype=spec.dtype,
+            block_size=spec.block_size,
+            vec=spec.vec,
+            n_per_block=None,  # every HW chunk is masked, not exact-fit
+        )
+    )
+    if not ok:
+        return False, why
+
+    if spec.block_size > target.max_threads_per_block:
+        return False, (
+            f"block_size {spec.block_size} > max_threads_per_block "
+            f"{target.max_threads_per_block} on {arch}"
+        )
+
+    bytes_lds = 3 * spec.block_size * 4
+    if not target.fits_lds(bytes_lds):
+        return False, (
+            f"LDS budget {bytes_lds} > {target.lds_capacity_bytes} cap on {arch}"
+        )
+
+    return True, ""
+
+
+def batchnorm2d_reduce_partial_grid(
+    c: int, spec: BatchNorm2DSplitSpec
+) -> Tuple[int, int, int]:
+    return (int(c) // spec.channels_per_block, int(spec.split_hw), 1)
+
+
+def build_batchnorm2d_reduce_partial(spec: BatchNorm2DSplitSpec) -> KernelDef:
+    """Kernel A of the split-reduction pair.
+
+    Grid ``(C // channels_per_block, split_hw, 1)``: ``block_id_x`` selects
+    the channel-group (same meaning as the single-kernel path's grid),
+    ``block_id_y`` selects which of this channel's ``split_hw`` spatial
+    chunks this CTA reduces. Writes that chunk's ``(mean, M2, count)`` triple
+    to ``Workspace[(channel*split_hw + split_id)*3 + {0,1,2}]`` -- no
+    running-stat update, no ``Y`` write; that is
+    :func:`build_batchnorm2d_combine_apply`'s job once every split for a
+    channel has landed in the workspace.
+
+    Every element this kernel reads is masked via ``select`` (branch-free,
+    the same idiom ``build_batchnorm2d``'s HW tail uses): ``hw_chunk`` is
+    not generally divisible by ``block_size * vec``, and the last split's
+    chunk can run past ``H*W``, so every thread's sweep is masked uniformly
+    rather than split into a fast/tail pair -- simpler and correct; this is
+    new infrastructure, not yet perf-tuned the way the single-kernel path's
+    fast path is.
+    """
+    ok, why = is_valid_split_spec(spec)
+    if not ok:
+        raise ValueError(f"invalid batchnorm2d split spec: {why}")
+
+    io_ty = io_ir_type(spec.dtype)
+    BS, VEC = spec.block_size, spec.vec
+    N, C, HW = spec.n, spec.c, spec.hw
+    hw_chunk = spec.hw_chunk
+    chunks_per_thread = -(-hw_chunk // (BS * VEC))
+    CPB = spec.channels_per_block
+
+    b = IRBuilder(spec.kernel_name("reduce"))
+    b.kernel.attrs["max_workgroup_size"] = BS
+
+    X = b.param("X", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
+    Workspace = b.param("Workspace", PtrType(F32, "global"), noalias=True)
+    _ = b.param("N", I32)  # noqa: F841 - ABI symmetry; baked as spec.n
+    _ = b.param("C", I32)  # noqa: F841 - ABI symmetry; baked as spec.c
+    _ = b.param("H", I32)  # noqa: F841 - ABI symmetry; baked as spec.h
+    _ = b.param("W", I32)  # noqa: F841 - ABI symmetry; baked as spec.w
+
+    tid = b.thread_id_x()
+    base_channel = b.block_id_x()
+    split_id = b.block_id_y()
+
+    lds_mean = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_mean").base
+    lds_m2 = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_m2").base
+    lds_count = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_count").base
+
+    hw_start = b.mul(split_id, b.const_i32(hw_chunk))
+    c_hw = b.const_i32(HW)
+
+    # Total valid-element count for this split, independent of ``cb``
+    # (every channel in this CTA's channels_per_block group shares the same
+    # spatial chunk): ``hw_start < HW`` always holds for a split_id the
+    # launch grid actually produces (``hw_chunk = ceil(HW/split_hw)`` means
+    # the last split's start is strictly < HW), so ``remaining`` is always
+    # positive and this needs no additional clamp. Computed once here
+    # (not re-derived from the per-thread masked ``count_p`` sums) because
+    # ``welford_block_reduce_stable`` only returns ``(mean, var)``, not the
+    # merged count -- ``M2 = var * count`` needs this exact total to invert.
+    remaining = b.sub(c_hw, hw_start)
+    valid_len = b.smin(remaining, b.const_i32(hw_chunk))
+    total_count = b.sitofp_f32(b.mul(b.const_i32(N), valid_len))
+
+    for cb in range(CPB):
+        if CPB == 1:
+            channel = base_channel
+        else:
+            channel = b.add(b.mul(base_channel, b.const_i32(CPB)), b.const_i32(cb))
+            if cb > 0:
+                b.sync()
+
+        sum_p = b.const_f32(0.0)
+        sumsq_p = b.const_f32(0.0)
+        count_p = b.const_f32(0.0)
+
+        for n in range(N):
+            row_n = b.add(b.const_i32(n * C), channel)
+            row_base = b.mul(row_n, c_hw)
+            for k in range(chunks_per_thread):
+                for i in range(VEC):
+                    local = b.add(
+                        b.const_i32(k * BS * VEC + i), b.mul(tid, b.const_i32(VEC))
+                    )
+                    idx_local = b.add(hw_start, local)
+                    valid = b.land(
+                        b.cmp_lt(local, b.const_i32(hw_chunk)),
+                        b.cmp_lt(idx_local, c_hw),
+                    )
+                    idx_safe = b.smin(idx_local, b.const_i32(HW - 1))
+                    flat = b.add(row_base, idx_safe)
+                    x_raw = load_scalar_as_f32(b, X, flat, dtype=spec.dtype)
+                    x_masked = b.select(valid, x_raw, b.const_f32(0.0))
+                    valid_f = b.select(valid, b.const_f32(1.0), b.const_f32(0.0))
+                    sum_p = b.fadd(sum_p, x_masked)
+                    sumsq_p = b.fadd(sumsq_p, b.fmul(x_masked, x_masked))
+                    count_p = b.fadd(count_p, valid_f)
+
+        is_empty = b.fcmp("oeq", count_p, b.const_f32(0.0))
+        safe_count = b.select(is_empty, b.const_f32(1.0), count_p)
+        mean_p = b.fdiv(sum_p, safe_count)
+        m2_p = b.select(
+            is_empty,
+            b.const_f32(0.0),
+            b.fsub(sumsq_p, b.fmul(mean_p, sum_p)),
+        )
+        mean_p = b.select(is_empty, b.const_f32(0.0), mean_p)
+
+        if spec.fast_reduce:
+            mean, var = welford_block_reduce_stable_wave_prologue(
+                b,
+                mean_p,
+                m2_p,
+                count_p,
+                lds_mean,
+                lds_m2,
+                lds_count,
+                tid,
+                block_size=BS,
+                wave_size=spec.wave_size,
+            )
+        else:
+            mean, var = welford_block_reduce_stable(
+                b,
+                mean_p,
+                m2_p,
+                count_p,
+                lds_mean,
+                lds_m2,
+                lds_count,
+                tid,
+                block_size=BS,
+            )
+
+        with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
+            slot = b.mul(
+                b.add(b.mul(channel, b.const_i32(spec.split_hw)), split_id),
+                b.const_i32(3),
+            )
+            # welford_block_reduce_stable returns (mean, variance =
+            # M2_total/count_total), not M2 itself -- re-derive
+            # M2_total = var * total_count so the combine kernel's merge
+            # input matches build_batchnorm2d's pass-1 shape exactly,
+            # (mean, M2, count), not (mean, variance, count).
+            m2_out = b.fmul(var, total_count)
+            b.global_store(Workspace, slot, mean)
+            b.global_store(Workspace, b.add(slot, b.const_i32(1)), m2_out)
+            b.global_store(Workspace, b.add(slot, b.const_i32(2)), total_count)
+
+    return b.kernel
+
+
+def batchnorm2d_combine_apply_grid(
+    c: int, spec: BatchNorm2DSplitSpec
+) -> Tuple[int, int, int]:
+    return (int(c) // spec.channels_per_block, 1, 1)
+
+
+def build_batchnorm2d_combine_apply(spec: BatchNorm2DSplitSpec) -> KernelDef:
+    """Kernel B of the split-reduction pair.
+
+    Grid ``(C // channels_per_block, 1, 1)`` -- same grid as the single-
+    kernel path. Each thread ``tid < split_hw`` reads one workspace slot for
+    its channel (the Welford identity -- ``mean=0, M2=0, count=0`` -- for
+    ``tid >= split_hw``, via the same branch-free ``select`` masking
+    ``build_batchnorm2d``'s HW tail uses), merges all ``split_hw`` partials
+    with the SAME :func:`welford_block_reduce_stable`/``_wave_prologue``
+    primitive the single-kernel path's pass 1 reduction uses -- that merge
+    math does not care whether a thread's partial came from a row sweep or
+    a workspace read. Updates the running stats, then re-reads ``X`` and
+    writes the normalized ``Y`` over the full ``H*W``: structurally the same
+    pass 2 as :func:`build_batchnorm2d`'s NG==1 training path (including its
+    HW scalar tail), just always in "reload" mode since nothing is cached
+    across the kernel-launch boundary.
+
+    Does not support ``save_mean_invstd`` (out of scope for this first cut
+    of the split-reduction lever).
+    """
+    ok, why = is_valid_split_spec(spec)
+    if not ok:
+        raise ValueError(f"invalid batchnorm2d split spec: {why}")
+
+    io_ty = io_ir_type(spec.dtype)
+    BS, VEC = spec.block_size, spec.vec
+    N, C, HW = spec.n, spec.c, spec.hw
+    CPB = spec.channels_per_block
+    split_hw = spec.split_hw
+
+    vec_bs = BS * VEC
+    chunks_main = HW // vec_bs
+    ept_row_main = chunks_main * VEC
+    main_elems_per_row = ept_row_main * BS
+    tail_per_row = HW - main_elems_per_row
+    tail_chunks = (tail_per_row + BS - 1) // BS if tail_per_row else 0
+
+    b = IRBuilder(spec.kernel_name("combine"))
+    b.kernel.attrs["max_workgroup_size"] = BS
+
+    X = b.param("X", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
+    Workspace = b.param(
+        "Workspace", PtrType(F32, "global"), noalias=True, readonly=True
+    )
+    Gamma = b.param(
+        "Gamma", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16
+    )
+    Beta = b.param(
+        "Beta", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16
+    )
+    Y = b.param("Y", PtrType(io_ty, "global"), noalias=True, writeonly=True, align=16)
+    RunningMean = b.param("RunningMean", PtrType(F32, "global"), noalias=True)
+    RunningVar = b.param("RunningVar", PtrType(F32, "global"), noalias=True)
+    _ = b.param("N", I32)  # noqa: F841 - ABI symmetry; baked as spec.n
+    _ = b.param("C", I32)  # noqa: F841 - ABI symmetry; baked as spec.c
+    _ = b.param("H", I32)  # noqa: F841 - ABI symmetry; baked as spec.h
+    _ = b.param("W", I32)  # noqa: F841 - ABI symmetry; baked as spec.w
+    eps = b.param("eps", F32)
+    momentum = b.param("momentum", F32)
+
+    tid = b.thread_id_x()
+    base_channel = b.block_id_x()
+
+    x_view = make_naive_tensor_view_packed(X, shape=(N * C, HW), dtype=io_ty)
+    y_view = make_naive_tensor_view_packed(Y, shape=(N * C, HW), dtype=io_ty)
+
+    lds_mean = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_mean").base
+    lds_m2 = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_m2").base
+    lds_count = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_count").base
+
+    for cb in range(CPB):
+        if CPB == 1:
+            channel = base_channel
+        else:
+            channel = b.add(b.mul(base_channel, b.const_i32(CPB)), b.const_i32(cb))
+            if cb > 0:
+                b.sync()
+
+        has_slot = b.cmp_lt(tid, b.const_i32(split_hw))
+        slot_tid = b.select(has_slot, tid, b.const_i32(0))
+        slot = b.mul(
+            b.add(b.mul(channel, b.const_i32(split_hw)), slot_tid), b.const_i32(3)
+        )
+        mean_raw = b.global_load_f32(Workspace, slot)
+        m2_raw = b.global_load_f32(Workspace, b.add(slot, b.const_i32(1)))
+        count_raw = b.global_load_f32(Workspace, b.add(slot, b.const_i32(2)))
+        mean_p = b.select(has_slot, mean_raw, b.const_f32(0.0))
+        m2_p = b.select(has_slot, m2_raw, b.const_f32(0.0))
+        count_p = b.select(has_slot, count_raw, b.const_f32(0.0))
+
+        if spec.fast_reduce:
+            mean, var = welford_block_reduce_stable_wave_prologue(
+                b,
+                mean_p,
+                m2_p,
+                count_p,
+                lds_mean,
+                lds_m2,
+                lds_count,
+                tid,
+                block_size=BS,
+                wave_size=spec.wave_size,
+            )
+        else:
+            mean, var = welford_block_reduce_stable(
+                b,
+                mean_p,
+                m2_p,
+                count_p,
+                lds_mean,
+                lds_m2,
+                lds_count,
+                tid,
+                block_size=BS,
+            )
+
+        with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
+            old_mean = b.global_load_f32(RunningMean, channel)
+            old_var = b.global_load_f32(RunningVar, channel)
+            one_minus_mom = b.fsub(b.const_f32(1.0), momentum)
+            new_running_mean = b.fadd(
+                b.fmul(one_minus_mom, old_mean), b.fmul(momentum, mean)
+            )
+            new_running_var = b.fadd(
+                b.fmul(one_minus_mom, old_var), b.fmul(momentum, var)
+            )
+            b.global_store(RunningMean, channel, new_running_mean)
+            b.global_store(RunningVar, channel, new_running_var)
+
+        inv_std = b.rsqrt(b.fadd(var, eps))
+        gamma_v = load_scalar_as_f32(b, Gamma, channel, dtype=spec.dtype)
+        beta_v = load_scalar_as_f32(b, Beta, channel, dtype=spec.dtype)
+        scale = b.fmul(inv_std, gamma_v)
+
+        for n in range(N):
+            row_n = b.add(b.const_i32(n * C), channel)
+            y_tile_n = make_tile_window(
+                y_view, lengths=(1, HW), origin=(row_n, b.const_i32(0))
+            )
+            x_tile_n = make_tile_window(
+                x_view, lengths=(1, HW), origin=(row_n, b.const_i32(0))
+            )
+
+            def pass2_body(n_off, _k, _x_scalars, _x_tile_n=x_tile_n):
+                x_scalars = _x_tile_n.load_vec_as_f32(b, b.const_i32(0), n_off, n=VEC)
+                return [
+                    b.fadd(b.fmul(b.fsub(x_scalars[i], mean), scale), beta_v)
+                    for i in range(VEC)
+                ]
+
+            pass2_row_chunks(
+                b,
+                y_tile_n,
+                tid=tid,
+                block_size=BS,
+                vec=VEC,
+                elems_per_thread=ept_row_main,
+                body=pass2_body,
+                cached_f32=(),
+            )
+
+            for tc in range(tail_chunks):
+                idx_col = b.add(b.const_i32(main_elems_per_row + tc * BS), tid)
+                valid_tail = b.cmp_lt(idx_col, b.const_i32(HW))
+                with b.scf_if(valid_tail):
+                    flat = b.add(b.mul(row_n, b.const_i32(HW)), idx_col)
+                    x_raw = load_scalar_as_f32(b, X, flat, dtype=spec.dtype)
+                    y_val = b.fadd(b.fmul(b.fsub(x_raw, mean), scale), beta_v)
+                    store_scalar_from_f32(b, Y, flat, y_val, dtype=spec.dtype)
+
+    return b.kernel
+
+
+def batchnorm2d_split_signature(spec: BatchNorm2DSplitSpec, *, kind: str):
+    """``kind="reduce"`` for :func:`build_batchnorm2d_reduce_partial`'s ABI,
+    ``kind="combine"`` for :func:`build_batchnorm2d_combine_apply`'s."""
+    from ...helpers.spec import SignatureBuilder
+
+    sb = SignatureBuilder()
+    if kind == "reduce":
+        sb.ptr("X", spec.dtype).ptr("Workspace", "f32")
+    elif kind == "combine":
+        (
+            sb.ptr("X", spec.dtype)
+            .ptr("Workspace", "f32")
+            .ptr("Gamma", spec.dtype)
+            .ptr("Beta", spec.dtype)
+            .ptr("Y", spec.dtype)
+            .ptr("RunningMean", "f32")
+            .ptr("RunningVar", "f32")
+        )
+    else:
+        raise ValueError(f"unknown batchnorm2d split kernel kind {kind!r}")
+    return (
+        sb.scalar("N", "i32")
+        .scalar("C", "i32")
+        .scalar("H", "i32")
+        .scalar("W", "i32")
+        .build()
+        if kind == "reduce"
+        else sb.scalar("N", "i32")
+        .scalar("C", "i32")
+        .scalar("H", "i32")
+        .scalar("W", "i32")
+        .scalar("eps", "f32")
+        .scalar("momentum", "f32")
+        .build()
+    )

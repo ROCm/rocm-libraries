@@ -390,6 +390,48 @@ parity runs on the matching device and is not implied by the ✅ here.
     tail-heavy candidate. `n_groups>1` now shares this same masked-tail
     support, scoped to `hw_threads = block_size // n_groups` (see the
     `n_groups` entry above).
+  - **Cross-CTA spatial-split reduction** (new, standalone -- not wired
+    into `dispatch_batchnorm`): a two-kernel, workspace-based design
+    targeting the opposite gap from the tail -- large-`H*W`/small-`C`
+    shapes (e.g. `N=1,C=16,H=640,W=640`) where one CTA per channel leaves
+    most of the device idle (as few as 16 CTAs on gfx950's 256 CUs) and
+    there is no axis to split one channel's spatial reduction across more
+    CTAs. Unlike GEMM split-K (plain float accumulation, composes under a
+    single atomic add), a Welford `(mean, M2, count)` triple does not
+    compose under atomics, so this needs two kernels, not an epilogue
+    tweak: `build_batchnorm2d_reduce_partial` (one CTA per
+    `(channel-group, spatial split)`, writes a partial `(mean, M2, count)`
+    to a caller-owned workspace, every read masked via `select`/`smin`) and
+    `build_batchnorm2d_combine_apply` (one CTA per channel-group, merges
+    that channel's `split_hw` partials with the SAME
+    `welford_block_reduce_stable`/`_wave_prologue` primitive the
+    single-kernel path's reduction already uses, then performs the normal
+    pass-2 normalize+write, including the HW scalar tail above).
+    Implemented in both engines, byte-identity-verified (18 new parity
+    configs across both kernels, `N>1`, `channels_per_block>1`,
+    `fast_reduce`, and a non-divisible-by-`split_hw` shape, all 4 LLVM
+    flavors, see `batchnorm2d_split_emit.py`/`.c`). The split-Welford merge
+    math was also independently cross-checked against a direct batch
+    mean/variance computation in plain numpy (not GPU execution) and found
+    numerically identical to float64 precision. **Deliberately not wired
+    into `dispatch_batchnorm`/`KernelCandidate`**: that abstraction assumes
+    one candidate = one kernel launch with no inter-kernel workspace
+    contract, and extending it to a multi-kernel candidate is a bigger,
+    cross-family change than this feature's scope -- callers build and
+    launch the two kernels directly, in order, sharing one `Workspace`
+    buffer sized by `batchnorm2d_split_workspace_floats`. Training-only (no
+    batch reduction to split in inference); does not support
+    `save_mean_invstd`. **Not GPU-verified this round**: no GPU-numeric
+    test harness was added for this two-kernel-launch-plus-workspace shape
+    (the existing single-kernel-launch harness in `differential/numeric.py`
+    does not fit it without its own orchestration logic, which needs a live
+    GPU to validate rather than write blind), and it is **not
+    dispatch- or benchmark-measured** -- this is infrastructure proven
+    correct by construction (byte-identity in both engines + an independent
+    numpy cross-check of the split-Welford merge math against a direct
+    batch mean/variance) and ready for a GPU-available follow-up to add
+    GPU-numeric coverage, wire up an example two-launch orchestration, and
+    measure against the single-kernel path on the shapes it targets.
 - **`add_rmsnorm2d_rdquant` on gfx1151 (RDNA):** only `out_dtype="i8"` is
   supported. fp8/bf8 output needs the CDNA-only `v_cvt_pk_{fp8,bf8}_f32`
   conversion, so fp8/bf8 specs are rejected by the validator on non-CDNA

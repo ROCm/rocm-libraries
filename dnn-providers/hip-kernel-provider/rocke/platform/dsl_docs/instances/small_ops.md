@@ -624,6 +624,56 @@ spanning training/inference, `N>1`, `channels_per_block>1`, and
 22-28) and dispatch-tested (`combos()`/`batchnorm_sweep_space` non-empty for
 `14x14`/`24x24`/`56x56`).
 
+**Cross-CTA spatial-split reduction (new, standalone -- not wired into the
+dispatcher).** The single-kernel path above grids one CTA per
+`channels_per_block` channels; for a large-`H*W`/small-`C` shape (e.g.
+`N=1,C=16,H=640,W=640`) that leaves most of gfx950's 256 CUs idle, and there
+is no axis to split one channel's spatial reduction across more CTAs. Unlike
+GEMM split-K (plain float accumulation composes under one atomic add), a
+Welford `(mean, M2, count)` triple does not, so this is a genuine two-kernel
+design:
+
+```text
+build_batchnorm2d_reduce_partial(spec):   # kernel A
+  grid = (C // channels_per_block, split_hw, 1)
+  block_id_y selects this channel's spatial chunk (ceil(H*W / split_hw))
+  every read masked via select/smin (chunk size and the last split's
+    shorter remainder are both handled by masking, not a fast/tail split)
+  -> one (mean, M2, count) triple per (channel, split) into Workspace
+
+build_batchnorm2d_combine_apply(spec):    # kernel B
+  grid = (C // channels_per_block, 1, 1)          # same grid as the single-kernel path
+  thread tid < split_hw reads one Workspace slot (else the Welford
+    identity, same select-masking idiom as the HW tail above)
+  merged via the SAME welford_block_reduce_stable / _wave_prologue the
+    single-kernel path's own reduction uses -- that merge math does not
+    care whether a thread's partial came from a row sweep or a workspace
+    read, so no new reduction primitive was needed
+  -> running-stat update, then the normal pass-2 normalize+write (reusing
+     the HW scalar tail above, always in "reload" mode)
+```
+
+Deliberately **not** wired into `rocke.dispatch.families.batchnorm`'s
+`KernelCandidate`/`dispatch_batchnorm`: that abstraction is one candidate =
+one kernel launch with no inter-kernel workspace contract, and extending it
+to a multi-kernel candidate is a bigger, cross-family change than this
+feature's scope. Callers build and launch the two kernels directly, in
+order, sharing one `Workspace` buffer sized by
+`batchnorm2d_split_workspace_floats` (`C * split_hw * 3` f32 elements).
+Training-only; does not support `save_mean_invstd`.
+
+Byte-identity-verified in both engines (18 new parity configs across both
+kernels -- training, `N>1`, `channels_per_block>1`, `fast_reduce`, and a
+`H*W` not divisible by `split_hw` -- all 4 LLVM flavors, see
+`batchnorm2d_split_emit.py`/`.c`). The split-Welford merge math was also
+independently cross-checked against a direct batch mean/variance computation
+in plain numpy (not GPU execution) and found numerically identical to
+float64 precision. **Not GPU-verified, not dispatch-wired, not
+benchmark-measured** -- this round's deliverable is infrastructure proven
+correct by construction; a GPU-available follow-up should add GPU-numeric
+coverage, an example two-launch orchestration, and measure against the
+single-kernel path on the shapes it targets.
+
 ## Transpose2D
 
 File:

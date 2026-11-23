@@ -132,6 +132,81 @@ rocke_status_t rocke_batchnorm2d_lower_to_llvm(const rocke_batchnorm2d_spec_t* s
                                                char* err,
                                                size_t err_cap);
 
+/* ------------------------------------------------------ cross-CTA split reduction
+ *
+ * C99 port of rocke/instances/common/batchnorm2d.py's
+ * BatchNorm2DSplitSpec / build_batchnorm2d_reduce_partial /
+ * build_batchnorm2d_combine_apply: a two-kernel, workspace-based design for
+ * large-H*W/small-C shapes where one CTA per channel leaves most CUs idle.
+ * See the Python module's "Cross-CTA spatial-split reduction" section for
+ * the full design rationale (why this needs two kernels, not an atomic
+ * epilogue). Deliberately standalone (no dispatch/KernelCandidate wiring,
+ * no save_mean_invstd) -- see that section's docstring for scope notes. */
+typedef struct rocke_batchnorm2d_split_spec
+{
+    int n;
+    int c;
+    int h;
+    int w;
+    int split_hw;
+    int block_size; /* default 256 */
+    int vec; /* default 4   */
+    const char* dtype; /* default "f16" ("f16"|"bf16") */
+    int channels_per_block; /* default 1 */
+    bool fast_reduce; /* default false */
+    int wave_size; /* default 64 */
+    const char* name; /* default "rocke_batchnorm2d_split" */
+} rocke_batchnorm2d_split_spec_t;
+
+/* Default-constructed spec (every field == Python dataclass default). The
+ * caller must still set n/c/h/w/split_hw. */
+rocke_batchnorm2d_split_spec_t rocke_batchnorm2d_split_spec_default(void);
+
+/* BatchNorm2DSplitSpec.hw property: h * w. */
+int rocke_batchnorm2d_split_hw(const rocke_batchnorm2d_split_spec_t* spec);
+
+/* BatchNorm2DSplitSpec.hw_chunk property: ceil(h*w / split_hw). */
+int rocke_batchnorm2d_split_hw_chunk(const rocke_batchnorm2d_split_spec_t* spec);
+
+/* batchnorm2d_split_workspace_floats(spec): f32 element count the caller
+ * must allocate for Workspace (c * split_hw * 3). */
+int rocke_batchnorm2d_split_workspace_floats(const rocke_batchnorm2d_split_spec_t* spec);
+
+/* is_valid_split_spec(spec, arch) -> (ok, reason). Same reason/arch
+ * contract as rocke_batchnorm2d_is_valid_spec. */
+bool rocke_batchnorm2d_is_valid_split_spec(const rocke_batchnorm2d_split_spec_t* spec,
+                                           const char* arch,
+                                           char* reason,
+                                           size_t reason_cap);
+
+/* batchnorm2d_reduce_partial_grid(c, spec) -> (c/cpb, split_hw, 1). */
+rocke_status_t rocke_batchnorm2d_reduce_partial_grid(
+    int c, const rocke_batchnorm2d_split_spec_t* spec, int out[3]);
+
+/* batchnorm2d_combine_apply_grid(c, spec) -> (c/cpb, 1, 1). */
+rocke_status_t rocke_batchnorm2d_combine_apply_grid(
+    int c, const rocke_batchnorm2d_split_spec_t* spec, int out[3]);
+
+/* build_batchnorm2d_reduce_partial(spec): kernel A of the split-reduction
+ * pair. Builds into `b` (already rocke_ir_builder_init'd); returns b->kernel
+ * or NULL with b's sticky error set. */
+rocke_kernel_def_t* rocke_build_batchnorm2d_reduce_partial(
+    rocke_ir_builder_t* b, const rocke_batchnorm2d_split_spec_t* spec);
+
+/* Convenience: init `b` with spec.kernel_name("reduce"), then build. */
+rocke_kernel_def_t* rocke_build_batchnorm2d_reduce_partial_new(
+    rocke_ir_builder_t* b, const rocke_batchnorm2d_split_spec_t* spec);
+
+/* build_batchnorm2d_combine_apply(spec): kernel B of the split-reduction
+ * pair. Builds into `b` (already rocke_ir_builder_init'd); returns b->kernel
+ * or NULL with b's sticky error set. */
+rocke_kernel_def_t* rocke_build_batchnorm2d_combine_apply(
+    rocke_ir_builder_t* b, const rocke_batchnorm2d_split_spec_t* spec);
+
+/* Convenience: init `b` with spec.kernel_name("combine"), then build. */
+rocke_kernel_def_t* rocke_build_batchnorm2d_combine_apply_new(
+    rocke_ir_builder_t* b, const rocke_batchnorm2d_split_spec_t* spec);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
