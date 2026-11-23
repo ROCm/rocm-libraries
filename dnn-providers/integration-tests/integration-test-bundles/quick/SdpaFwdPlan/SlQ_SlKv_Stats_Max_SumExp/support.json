@@ -16,6 +16,9 @@
         "support": {
           "gfx942": [
             "linux"
+          ],
+          "gfx950": [
+            "linux"
           ]
         }
       }
@@ -32,6 +35,9 @@
         ],
         "support": {
           "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
             "linux"
           ]
         }

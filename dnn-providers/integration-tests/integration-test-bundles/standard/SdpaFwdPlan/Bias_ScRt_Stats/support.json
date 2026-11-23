@@ -8,6 +8,9 @@
         "support": {
           "gfx942": [
             "linux"
+          ],
+          "gfx950": [
+            "linux"
           ]
         }
       }
@@ -26,6 +29,9 @@
         "support": {
           "gfx942": [
             "linux"
+          ],
+          "gfx950": [
+            "linux"
           ]
         }
       }
@@ -38,6 +44,22 @@
         ],
         "support": {
           "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_cdna_dualwave": [
+      {
+        "cases": [
+          "bf16_8231afa61f43376c",
+          "fp16_cac75816120eee36"
+        ],
+        "support": {
+          "gfx950": [
             "linux"
           ]
         }

@@ -7,9 +7,21 @@
           "bf16_4ff0f373a6eca17c",
           "bf16_8ad5652480cee0b2",
           "bf16_c544b81344d13c95",
-          "bf16_cac9c50290cc2590",
           "bf16_d1a9c7a3df1232ac",
           "bf16_de3b0ea4b6f6f546"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "bf16_cac9c50290cc2590"
         ],
         "support": {
           "gfx942": [
@@ -93,6 +105,9 @@
         "support": {
           "gfx942": [
             "linux"
+          ],
+          "gfx950": [
+            "linux"
           ]
         }
       }
@@ -138,6 +153,37 @@
         ],
         "support": {
           "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_cdna_dualwave": [
+      {
+        "cases": [
+          "bf16_4ff0f373a6eca17c",
+          "bf16_8ad5652480cee0b2",
+          "bf16_9be214804a355a36",
+          "bf16_ae30a9f33a8ca438",
+          "bf16_cac9c50290cc2590",
+          "fp16_1114944282dda459",
+          "fp16_16945d12b44b759e",
+          "fp16_16bd353044e7ead6",
+          "fp16_387ae73746979284",
+          "fp16_70ebdc6e724374fc",
+          "fp16_73ec5ce1c12e32bb",
+          "fp16_8aa306e573b59809",
+          "fp16_a9c1cbf08bb3a3b2",
+          "fp16_b0bc5cd5ade709db",
+          "fp16_f3b41c6e07c26820",
+          "fp16_f9194e77c03f394a",
+          "fp16_fe7a90e94a151709"
+        ],
+        "support": {
+          "gfx950": [
             "linux"
           ]
         }

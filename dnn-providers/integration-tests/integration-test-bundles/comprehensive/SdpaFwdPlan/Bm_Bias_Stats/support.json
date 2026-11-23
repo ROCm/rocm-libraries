@@ -7,12 +7,24 @@
           "bf16_465a3c98d4ba044d",
           "bf16_63a30cc2363712ab",
           "bf16_680c736882333339",
-          "bf16_7176a4ca350af0d5",
           "bf16_7488894357e5a00c",
           "bf16_77898b75648a85d1",
           "bf16_c813276f8487a955",
           "bf16_cb767a9fe99efb7f",
           "bf16_cd088058b37add37"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "bf16_7176a4ca350af0d5"
         ],
         "support": {
           "gfx942": [
@@ -139,6 +151,9 @@
         "support": {
           "gfx942": [
             "linux"
+          ],
+          "gfx950": [
+            "linux"
           ]
         }
       }
@@ -193,6 +208,45 @@
         ],
         "support": {
           "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_cdna_dualwave": [
+      {
+        "cases": [
+          "bf16_09bdfb6056f43b71",
+          "bf16_465a3c98d4ba044d",
+          "bf16_680c736882333339",
+          "bf16_7176a4ca350af0d5",
+          "bf16_77898b75648a85d1",
+          "bf16_a5831e2539ffe147",
+          "bf16_af54f75c8b5a9b9b",
+          "bf16_c122e134b598be67",
+          "bf16_cb767a9fe99efb7f",
+          "bf16_cd088058b37add37",
+          "bf16_d719fd06b0c2951c",
+          "bf16_f1482b918ab747f3",
+          "fp16_1e1062571cace72d",
+          "fp16_481124ef75d03359",
+          "fp16_5fbb4e9157e27b99",
+          "fp16_75e478b0408698d2",
+          "fp16_854418dab3fb6894",
+          "fp16_9d090cd499070ab0",
+          "fp16_a393779e56625365",
+          "fp16_a98253b53e24d29a",
+          "fp16_c2d9b59271d4d95b",
+          "fp16_cb1502d70de3e345",
+          "fp16_cf32b0e0da90ee34",
+          "fp16_dd33ec452d5caeb2",
+          "fp16_f0ffd2468e1cdf65"
+        ],
+        "support": {
+          "gfx950": [
             "linux"
           ]
         }

@@ -9,7 +9,6 @@
           "bf16_2b07e122e71a8161",
           "bf16_394579173700eeb9",
           "bf16_3dd7871ab863a144",
-          "bf16_6371a74dc652ac1f",
           "bf16_74820ff7dcc9bcc4",
           "bf16_82dbe6930b1417c6",
           "bf16_9254b7b6a9ecc08a",
@@ -17,6 +16,19 @@
           "bf16_a0ebb320cd0c99a6",
           "bf16_a8ec1e1fad5b3915",
           "bf16_abb5e69759d7e6a9"
+        ],
+        "support": {
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      },
+      {
+        "cases": [
+          "bf16_6371a74dc652ac1f"
         ],
         "support": {
           "gfx942": [
@@ -174,6 +186,9 @@
         "support": {
           "gfx942": [
             "linux"
+          ],
+          "gfx950": [
+            "linux"
           ]
         }
       }
@@ -248,6 +263,50 @@
         ],
         "support": {
           "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ],
+    "hipkernel:flydsl_sdpa_cdna_dualwave": [
+      {
+        "cases": [
+          "bf16_035e09a5e4fce743",
+          "bf16_18b29000969c0253",
+          "bf16_1eba54f7f677448d",
+          "bf16_2b07e122e71a8161",
+          "bf16_2eac0906f3adc211",
+          "bf16_2f56c9efc3bb0f44",
+          "bf16_3dd7871ab863a144",
+          "bf16_5df3a5c0be5f23d3",
+          "bf16_6371a74dc652ac1f",
+          "bf16_74820ff7dcc9bcc4",
+          "bf16_77bcd637783cf9fc",
+          "bf16_82dbe6930b1417c6",
+          "bf16_87965030dccc4a66",
+          "bf16_a8ec1e1fad5b3915",
+          "bf16_b99acb3b46f7d99e",
+          "bf16_bb313a349e124ba2",
+          "bf16_e8ccd7e6916e6d47",
+          "fp16_0c223141ed58c428",
+          "fp16_460f76a20e3cf223",
+          "fp16_462c1f682e0bb43b",
+          "fp16_58e8164af84e118b",
+          "fp16_5a77cca6c5d04b30",
+          "fp16_6eafd87d78aae116",
+          "fp16_b6e821a032311322",
+          "fp16_bf5f21864603c505",
+          "fp16_c0b58a94402f65ec",
+          "fp16_c2528a7361a3e9f3",
+          "fp16_ca76d8d715c25e4e",
+          "fp16_eca7143834c6521b",
+          "fp16_feb5bd7d1fafd9ce"
+        ],
+        "support": {
+          "gfx950": [
             "linux"
           ]
         }
