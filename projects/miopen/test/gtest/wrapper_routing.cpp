@@ -18,6 +18,7 @@
 #ifdef MIOPEN_ENABLE_HIPDNN_WRAPPER
 
 #include "../../src/private/hipdnn_graph.hpp"
+#include "../../src/private/lru_cache.hpp"
 #include "../../src/private/routing.hpp"
 
 #include <miopen/logger.hpp>
@@ -1380,6 +1381,85 @@ TEST(CPU_WrapperRoutingReentry_NONE, AProblemThatCannotBePopulatedIsNeverBuilt)
     EXPECT_EQ(result.second, miopenStatusUnsupportedOp);
     EXPECT_EQ(acquire.builds, 0);
     hipdnn::ClearForwardedFailure();
+}
+
+namespace graph_eviction {
+
+// Reports, when destroyed, whether `mutex` was held. try_lock runs on another thread: calling it
+// on a mutex this thread already owns is undefined, and a blocking lock would hang the test.
+struct TrackedGraph
+{
+    std::mutex* mutex           = nullptr;
+    bool* destroyed             = nullptr;
+    bool* lockHeldAtDestruction = nullptr;
+
+    ~TrackedGraph()
+    {
+        if(mutex == nullptr)
+            return;
+        bool acquired = false;
+        std::thread([&] {
+            acquired = mutex->try_lock();
+            if(acquired)
+                mutex->unlock();
+        }).join();
+        *lockHeldAtDestruction = !acquired;
+        *destroyed             = true;
+    }
+};
+
+struct KeyHash
+{
+    size_t operator()(const hipdnn::PlanKey& key) const
+    {
+        size_t seed = std::hash<const void*>{}(key.handle);
+        for(const int64_t value : key.problem)
+            seed ^= static_cast<size_t>(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        return seed;
+    }
+};
+
+} // namespace graph_eviction
+
+// A full cache drops its oldest graph when the next one is cached. Destroying a graph runs
+// plugin code, which must not happen while the wrapper holds its plan lock, as for
+// ReleaseHandle: a plugin that called back into the wrapper from there would wait on a lock
+// its own thread holds.
+TEST(CPU_WrapperRoutingReentry_NONE, AGraphEvictedByTheNextBuildIsDestroyedAfterTheLockIsReleased)
+{
+    using Graph = graph_eviction::TrackedGraph;
+    miopen::wrapper::LruCache<hipdnn::PlanKey, std::shared_ptr<Graph>, graph_eviction::KeyHash>
+        cache(1);
+    std::mutex mutex;
+    bool destroyed   = false;
+    bool lockHeld    = false;
+    const auto build = [](Graph&) { return 0; };
+
+    hipdnn::PlanKey first;
+    first.problem = {1};
+    hipdnn::PlanKey second;
+    second.problem = {2};
+
+    // The result is dropped at once, so the cache holds the only reference to the graph.
+    hipdnn::AcquireGraphWith<Graph>(
+        cache,
+        mutex,
+        first,
+        [&](Graph& graph) {
+            graph.mutex                 = &mutex;
+            graph.destroyed             = &destroyed;
+            graph.lockHeldAtDestruction = &lockHeld;
+            return true;
+        },
+        build,
+        graph_steps::FailureOf);
+    ASSERT_FALSE(destroyed);
+
+    hipdnn::AcquireGraphWith<Graph>(
+        cache, mutex, second, [](Graph&) { return true; }, build, graph_steps::FailureOf);
+
+    ASSERT_TRUE(destroyed) << "the first graph was not evicted";
+    EXPECT_FALSE(lockHeld) << "the evicted graph was destroyed while the plan lock was held";
 }
 
 TEST(CPU_WrapperRoutingReentry_NONE, AGraphRunsInsideAHipdnnCallAndClearsEarlierFailures)
