@@ -147,8 +147,8 @@ finalized operation descriptors, so the control flow maps one to one. The data d
 - cuDNN's parameter descriptors (convolution, pointwise, matmul, reduction, resample, RNG) don't exist;
   hipDNN sets those attributes on the operation;
 - pointwise slots differ (X/B/T/Y/DX/DY vs IN_0/IN_1/IN_2/OUT_0);
-- hipDNN's heuristic descriptor has one mode, FALLBACK; cuDNN's modes A and B correspond to hipDNN
-  prediction policies, set as a policy order;
+- hipDNN's heuristic descriptor has the modes FALLBACK, A (alias INSTANT) and B, which match cuDNN's and
+  select the hipDNN policy list (modes A and B select the prediction policies);
 - hipDNN has no JSON plans, alpha/beta or unified norm operation, and reports numerical notes only per engine ([RFC 0025](./0025_NumericalNotes.md)); knobs are strings and
   engine IDs are 64-bit hashes;
 - hipDNN allocates new descriptors on get, where cuDNN fills the caller's.
@@ -243,8 +243,9 @@ runs no heuristics and needs no GPU.
 
 ### 3.5 Engine selection
 
-- **Modes.** As on the v9 graph API, A and B select hipDNN's ModeA and ModeB prediction policies, sent
-  as the policy order `[Config, ModeA|ModeB, StaticOrdering]` on a FALLBACK-mode heuristic; the v0.x
+- **Modes.** As on the v9 graph API, A and B select hipDNN's ModeA and ModeB prediction policies, by setting the
+  backend heuristic mode (`HIPDNN_HEUR_MODE_A` / `_B`, whose policy list is `[Config, ModeA|ModeB,
+  StaticOrdering]`; FALLBACK sets `HIPDNN_HEUR_MODE_FALLBACK`, the static order); the v0.x
   builders treat INSTANT as A (NVIDIA's alias). They only reorder: every mode returns the FALLBACK
   engines, each with its default config, so mode B's predicted knobs and the policies' ranking metric
   are not carried. `get_heuristics_list` accepts `HeurMode_t::OPENSOURCE`, which runs fallback

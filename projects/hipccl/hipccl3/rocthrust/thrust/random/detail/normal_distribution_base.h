@@ -36,8 +36,8 @@
 #include <thrust/pair.h>
 #include <thrust/random/uniform_real_distribution.h>
 
-#include <cmath>
-#include <limits>
+#include _THRUST_STD_INCLUDE(cmath)
+#include _THRUST_STD_INCLUDE(limits)
 
 #if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/random/detail/erfcinv.h>
@@ -119,10 +119,10 @@ protected:
   {
     // implementation from Boost
     // allow for Koenig lookup
-    using std::cos;
-    using std::log;
-    using std::sin;
-    using std::sqrt;
+    using _THRUST_STD::cos;
+    using _THRUST_STD::log;
+    using _THRUST_STD::sin;
+    using _THRUST_STD::sqrt;
 
     if (!m_valid)
     {
@@ -153,7 +153,7 @@ private:
 template <typename RealType>
 struct normal_distribution_base
 {
-#if THRUST_HAS_CUDA_COMPILER() && !THRUST_CUDA_COMPILER(NVHPC)
+#if THRUST_CUDA_COMPILATION() && !THRUST_CUDA_COMPILER(NVHPC)
   using type = normal_distribution_nvcc<RealType>;
 #else
   using type = normal_distribution_portable<RealType>;

@@ -110,7 +110,11 @@ def _split_tree(tmp_path: Path) -> Path:
             ("sdpa_bwd_dq", {"role_order": "auto", "reduce_symbol": ""}),
         )
     ]
-    gen_descriptors._write(tmp_path, gen_descriptors.build_documents(rows, "gfx950"))
+    # Built against tmp_path, still empty: synthetic rows fingerprint their own engine id, and
+    # the shipped content files its trained models under the real one.
+    gen_descriptors._write(
+        tmp_path, gen_descriptors.build_documents(rows, "gfx950", tmp_path)
+    )
     return tmp_path
 
 
