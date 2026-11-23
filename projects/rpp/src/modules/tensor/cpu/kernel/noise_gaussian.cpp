@@ -277,7 +277,7 @@ inline void gaussian_noise_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPtr srcDe
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowStateBoxMuller xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pGaussianNoiseParams[2];
@@ -358,7 +358,7 @@ inline void gaussian_noise_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPtr srcDe
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowStateBoxMuller xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pGaussianNoiseParams[2];
@@ -437,7 +437,7 @@ inline void gaussian_noise_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPtr srcDe
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowStateBoxMuller xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pGaussianNoiseParams[2];
@@ -512,7 +512,7 @@ inline void gaussian_noise_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPtr srcDe
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowStateBoxMuller xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pGaussianNoiseParams[2];
@@ -595,7 +595,7 @@ inline void gaussian_noise_u8_u8_host_impl(Rpp8u* srcPtrImage, RpptDescPtr srcDe
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowStateBoxMuller xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pGaussianNoiseParams[2];
@@ -713,7 +713,7 @@ inline void gaussian_noise_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDescPtr sr
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowStateBoxMuller xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pGaussianNoiseParams[2];
@@ -784,7 +784,7 @@ inline void gaussian_noise_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDescPtr sr
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowStateBoxMuller xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pGaussianNoiseParams[2];
@@ -853,7 +853,7 @@ inline void gaussian_noise_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDescPtr sr
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowStateBoxMuller xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pGaussianNoiseParams[2];
@@ -918,7 +918,7 @@ inline void gaussian_noise_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDescPtr sr
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowStateBoxMuller xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pGaussianNoiseParams[2];
@@ -996,7 +996,7 @@ inline void gaussian_noise_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDescPtr sr
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowStateBoxMuller xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pGaussianNoiseParams[2];
@@ -1112,14 +1112,14 @@ inline void gaussian_noise_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptDescPtr sr
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pGaussianNoiseParams[2];
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
             rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
                                                     pxXorwowStateX, &pxXorwowStateCounter);
             compute_gaussian_noise_params_initialize_8_host_avx(mean, stdDev, pGaussianNoiseParams);
 #else
             __m128i pxXorwowStateX[5], pxXorwowStateCounter;
             __m128 pGaussianNoiseParams[2];
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
             rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
                                                     pxXorwowStateX, &pxXorwowStateCounter);
             compute_gaussian_noise_params_initialize_4_host_sse(mean, stdDev, pGaussianNoiseParams);
@@ -1195,14 +1195,14 @@ inline void gaussian_noise_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptDescPtr sr
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pGaussianNoiseParams[2];
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
             rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
                                                     pxXorwowStateX, &pxXorwowStateCounter);
             compute_gaussian_noise_params_initialize_8_host_avx(mean, stdDev, pGaussianNoiseParams);
 #else
             __m128i pxXorwowStateX[5], pxXorwowStateCounter;
             __m128 pGaussianNoiseParams[2];
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
             rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
                                                     pxXorwowStateX, &pxXorwowStateCounter);
             compute_gaussian_noise_params_initialize_4_host_sse(mean, stdDev, pGaussianNoiseParams);
@@ -1276,14 +1276,14 @@ inline void gaussian_noise_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptDescPtr sr
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pGaussianNoiseParams[2];
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
             rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
                                                     pxXorwowStateX, &pxXorwowStateCounter);
             compute_gaussian_noise_params_initialize_8_host_avx(mean, stdDev, pGaussianNoiseParams);
 #else
             __m128i pxXorwowStateX[5], pxXorwowStateCounter;
             __m128 pGaussianNoiseParams[2];
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
             rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
                                                     pxXorwowStateX, &pxXorwowStateCounter);
             compute_gaussian_noise_params_initialize_4_host_sse(mean, stdDev, pGaussianNoiseParams);
@@ -1350,14 +1350,14 @@ inline void gaussian_noise_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptDescPtr sr
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pGaussianNoiseParams[2];
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
             rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
                                                     pxXorwowStateX, &pxXorwowStateCounter);
             compute_gaussian_noise_params_initialize_8_host_avx(mean, stdDev, pGaussianNoiseParams);
 #else
             __m128i pxXorwowStateX[5], pxXorwowStateCounter;
             __m128 pGaussianNoiseParams[2];
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
             rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
                                                     pxXorwowStateX, &pxXorwowStateCounter);
             compute_gaussian_noise_params_initialize_4_host_sse(mean, stdDev, pGaussianNoiseParams);
@@ -1443,14 +1443,14 @@ inline void gaussian_noise_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptDescPtr sr
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pGaussianNoiseParams[2];
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
             rpp_host_rng_xorwow_state_offsetted_avx(xorwowInitialStatePtr, xorwowState, rowOffset,
                                                     pxXorwowStateX, &pxXorwowStateCounter);
             compute_gaussian_noise_params_initialize_8_host_avx(mean, stdDev, pGaussianNoiseParams);
 #else
             __m128i pxXorwowStateX[5], pxXorwowStateCounter;
             __m128 pGaussianNoiseParams[2];
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
             rpp_host_rng_xorwow_state_offsetted_sse(xorwowInitialStatePtr, xorwowState, rowOffset,
                                                     pxXorwowStateX, &pxXorwowStateCounter);
             compute_gaussian_noise_params_initialize_4_host_sse(mean, stdDev, pGaussianNoiseParams);
@@ -1556,7 +1556,7 @@ inline void gaussian_noise_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPtr srcDe
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowStateBoxMuller xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pGaussianNoiseParams[2];
@@ -1637,7 +1637,7 @@ inline void gaussian_noise_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPtr srcDe
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowStateBoxMuller xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pGaussianNoiseParams[2];
@@ -1716,7 +1716,7 @@ inline void gaussian_noise_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPtr srcDe
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowStateBoxMuller xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pGaussianNoiseParams[2];
@@ -1791,7 +1791,7 @@ inline void gaussian_noise_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPtr srcDe
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowStateBoxMuller xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pGaussianNoiseParams[2];
@@ -1874,7 +1874,7 @@ inline void gaussian_noise_i8_i8_host_impl(Rpp8s* srcPtrImage, RpptDescPtr srcDe
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowStateBoxMuller xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pGaussianNoiseParams[2];

@@ -173,13 +173,11 @@ inline void compute_salt_and_pepper_noise_48_host(__m128* p, __m128i* pxXorwowSt
                                           pxXorwowStateCounter, pSaltAndPepperNoiseParams);
 }
 
-inline void salt_and_pepper_noise_u8_u8_host_impl(Rpp8u *srcPtrImage, RpptDescPtr srcDescPtr,
-                                                   Rpp8u *dstPtrImage, RpptDescPtr dstDescPtr,
-                                                   Rpp32f noiseProbability, Rpp32f saltProbability,
-                                                   Rpp8u salt, Rpp8u pepper,
-                                                   RpptXorwowState *xorwowInitialStatePtr,
-                                                   Rpp32u offset, RpptROI roi,
-                                                   RppLayoutParams layoutParams, Rpp32u intraThreads) {
+inline void salt_and_pepper_noise_u8_u8_host_impl(
+    Rpp8u* srcPtrImage, RpptDescPtr srcDescPtr, Rpp8u* dstPtrImage, RpptDescPtr dstDescPtr,
+    Rpp32f noiseProbability, Rpp32f saltProbability, Rpp8u salt, Rpp8u pepper,
+    RpptXorwowState* xorwowInitialStatePtr, Rpp32u offset, RpptROI roi,
+    RppLayoutParams layoutParams, Rpp32u intraThreads) {
     Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
     Rpp8u *srcPtrChannel, *dstPtrChannel;
@@ -203,7 +201,7 @@ inline void salt_and_pepper_noise_u8_u8_host_impl(Rpp8u *srcPtrImage, RpptDescPt
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowState xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pSaltAndPepperNoiseParams[4];
@@ -281,7 +279,7 @@ inline void salt_and_pepper_noise_u8_u8_host_impl(Rpp8u *srcPtrImage, RpptDescPt
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowState xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pSaltAndPepperNoiseParams[4];
@@ -354,7 +352,7 @@ inline void salt_and_pepper_noise_u8_u8_host_impl(Rpp8u *srcPtrImage, RpptDescPt
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowState xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pSaltAndPepperNoiseParams[4];
@@ -422,7 +420,7 @@ inline void salt_and_pepper_noise_u8_u8_host_impl(Rpp8u *srcPtrImage, RpptDescPt
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowState xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pSaltAndPepperNoiseParams[4];
@@ -514,7 +512,7 @@ inline void salt_and_pepper_noise_u8_u8_host_impl(Rpp8u *srcPtrImage, RpptDescPt
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowState xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pSaltAndPepperNoiseParams[4];
@@ -594,23 +592,19 @@ RppStatus salt_and_pepper_noise_u8_u8_host_tensor(
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        salt_and_pepper_noise_u8_u8_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr,
-                                               noiseProbability, saltProbability, salt, pepper,
-                                               xorwowInitialStatePtr, offset, roi, layoutParams,
-                                               intraThreads);
+        salt_and_pepper_noise_u8_u8_host_impl(
+            srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, noiseProbability, saltProbability,
+            salt, pepper, xorwowInitialStatePtr, offset, roi, layoutParams, intraThreads);
     }
 
     return RPP_SUCCESS;
 }
 
-
-inline void salt_and_pepper_noise_f32_f32_host_impl(Rpp32f *srcPtrImage, RpptDescPtr srcDescPtr,
-                                                     Rpp32f *dstPtrImage, RpptDescPtr dstDescPtr,
-                                                     Rpp32f noiseProbability, Rpp32f saltProbability,
-                                                     Rpp32f salt, Rpp32f pepper,
-                                                     RpptXorwowState *xorwowInitialStatePtr,
-                                                     Rpp32u offset, RpptROI roi,
-                                                     RppLayoutParams layoutParams, Rpp32u intraThreads) {
+inline void salt_and_pepper_noise_f32_f32_host_impl(
+    Rpp32f* srcPtrImage, RpptDescPtr srcDescPtr, Rpp32f* dstPtrImage, RpptDescPtr dstDescPtr,
+    Rpp32f noiseProbability, Rpp32f saltProbability, Rpp32f salt, Rpp32f pepper,
+    RpptXorwowState* xorwowInitialStatePtr, Rpp32u offset, RpptROI roi,
+    RppLayoutParams layoutParams, Rpp32u intraThreads) {
     Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
     Rpp32f *srcPtrChannel, *dstPtrChannel;
@@ -640,7 +634,7 @@ inline void salt_and_pepper_noise_f32_f32_host_impl(Rpp32f *srcPtrImage, RpptDes
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowState xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pSaltAndPepperNoiseParams[4];
@@ -720,7 +714,7 @@ inline void salt_and_pepper_noise_f32_f32_host_impl(Rpp32f *srcPtrImage, RpptDes
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowState xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pSaltAndPepperNoiseParams[4];
@@ -795,7 +789,7 @@ inline void salt_and_pepper_noise_f32_f32_host_impl(Rpp32f *srcPtrImage, RpptDes
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowState xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pSaltAndPepperNoiseParams[4];
@@ -865,7 +859,7 @@ inline void salt_and_pepper_noise_f32_f32_host_impl(Rpp32f *srcPtrImage, RpptDes
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowState xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pSaltAndPepperNoiseParams[4];
@@ -909,8 +903,8 @@ inline void salt_and_pepper_noise_f32_f32_host_impl(Rpp32f *srcPtrImage, RpptDes
                 compute_salt_and_pepper_noise_12_host(p, p + 1, p + 2, pxXorwowStateX,
                                                       &pxXorwowStateCounter,
                                                       pSaltAndPepperNoiseParams);
-                rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTempR, dstPtrTempG, dstPtrTempB,
-                               p);
+                rpp_simd_store(rpp_store12_f32pln3_to_f32pln3, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, p);
 #endif
                 srcPtrTempR += vectorIncrementPerChannel;
                 srcPtrTempG += vectorIncrementPerChannel;
@@ -962,7 +956,7 @@ inline void salt_and_pepper_noise_f32_f32_host_impl(Rpp32f *srcPtrImage, RpptDes
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowState xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pSaltAndPepperNoiseParams[4];
@@ -1017,7 +1011,6 @@ inline void salt_and_pepper_noise_f32_f32_host_impl(Rpp32f *srcPtrImage, RpptDes
     }
 }
 
-
 // Save this output to a file and manually insert it into noise_salt_and_pepper.cpp
 // Insert it right before 'RppStatus salt_and_pepper_noise_f32_f32_host_tensor('
 
@@ -1047,22 +1040,19 @@ RppStatus salt_and_pepper_noise_f32_f32_host_tensor(
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        salt_and_pepper_noise_f32_f32_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr,
-                                                 noiseProbability, saltProbability, salt, pepper,
-                                                 xorwowInitialStatePtr, offset, roi, layoutParams,
-                                                 intraThreads);
+        salt_and_pepper_noise_f32_f32_host_impl(
+            srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, noiseProbability, saltProbability,
+            salt, pepper, xorwowInitialStatePtr, offset, roi, layoutParams, intraThreads);
     }
 
     return RPP_SUCCESS;
 }
 
-inline void salt_and_pepper_noise_f16_f16_host_impl(Rpp16f *srcPtrImage, RpptDescPtr srcDescPtr,
-                                                     Rpp16f *dstPtrImage, RpptDescPtr dstDescPtr,
-                                                     Rpp32f noiseProbability, Rpp32f saltProbability,
-                                                     Rpp16f salt, Rpp16f pepper,
-                                                     RpptXorwowState *xorwowInitialStatePtr,
-                                                     Rpp32u offset, RpptROI roi,
-                                                     RppLayoutParams layoutParams, Rpp32u intraThreads) {
+inline void salt_and_pepper_noise_f16_f16_host_impl(
+    Rpp16f* srcPtrImage, RpptDescPtr srcDescPtr, Rpp16f* dstPtrImage, RpptDescPtr dstDescPtr,
+    Rpp32f noiseProbability, Rpp32f saltProbability, Rpp16f salt, Rpp16f pepper,
+    RpptXorwowState* xorwowInitialStatePtr, Rpp32u offset, RpptROI roi,
+    RppLayoutParams layoutParams, Rpp32u intraThreads) {
     Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
     Rpp16f *srcPtrChannel, *dstPtrChannel;
@@ -1092,7 +1082,7 @@ inline void salt_and_pepper_noise_f16_f16_host_impl(Rpp16f *srcPtrImage, RpptDes
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowState xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pSaltAndPepperNoiseParams[4];
@@ -1131,8 +1121,8 @@ inline void salt_and_pepper_noise_f16_f16_host_impl(Rpp16f *srcPtrImage, RpptDes
                 compute_salt_and_pepper_noise_12_host(p, p + 1, p + 2, pxXorwowStateX,
                                                       &pxXorwowStateCounter,
                                                       pSaltAndPepperNoiseParams);
-                rpp_simd_store(rpp_store12_f32pln3_to_f16pln3, dstPtrTempR, dstPtrTempG, dstPtrTempB,
-                               p);
+                rpp_simd_store(rpp_store12_f32pln3_to_f16pln3, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, p);
 #endif
                 srcPtrTemp += vectorIncrement;
                 dstPtrTempR += vectorIncrementPerChannel;
@@ -1177,7 +1167,7 @@ inline void salt_and_pepper_noise_f16_f16_host_impl(Rpp16f *srcPtrImage, RpptDes
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowState xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pSaltAndPepperNoiseParams[4];
@@ -1257,7 +1247,7 @@ inline void salt_and_pepper_noise_f16_f16_host_impl(Rpp16f *srcPtrImage, RpptDes
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowState xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pSaltAndPepperNoiseParams[4];
@@ -1332,7 +1322,7 @@ inline void salt_and_pepper_noise_f16_f16_host_impl(Rpp16f *srcPtrImage, RpptDes
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowState xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pSaltAndPepperNoiseParams[4];
@@ -1376,8 +1366,8 @@ inline void salt_and_pepper_noise_f16_f16_host_impl(Rpp16f *srcPtrImage, RpptDes
                 compute_salt_and_pepper_noise_12_host(p, p + 1, p + 2, pxXorwowStateX,
                                                       &pxXorwowStateCounter,
                                                       pSaltAndPepperNoiseParams);
-                rpp_simd_store(rpp_store12_f32pln3_to_f16pln3, dstPtrTempR, dstPtrTempG, dstPtrTempB,
-                               p);
+                rpp_simd_store(rpp_store12_f32pln3_to_f16pln3, dstPtrTempR, dstPtrTempG,
+                               dstPtrTempB, p);
 #endif
                 srcPtrTempR += vectorIncrementPerChannel;
                 srcPtrTempG += vectorIncrementPerChannel;
@@ -1429,7 +1419,7 @@ inline void salt_and_pepper_noise_f16_f16_host_impl(Rpp16f *srcPtrImage, RpptDes
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowState xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pSaltAndPepperNoiseParams[4];
@@ -1484,7 +1474,6 @@ inline void salt_and_pepper_noise_f16_f16_host_impl(Rpp16f *srcPtrImage, RpptDes
     }
 }
 
-
 RppStatus salt_and_pepper_noise_f16_f16_host_tensor(
     Rpp16f* srcPtr, RpptDescPtr srcDescPtr, Rpp16f* dstPtr, RpptDescPtr dstDescPtr,
     Rpp32f* noiseProbabilityTensor, Rpp32f* saltProbabilityTensor, Rpp32f* saltValueTensor,
@@ -1510,23 +1499,19 @@ RppStatus salt_and_pepper_noise_f16_f16_host_tensor(
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        salt_and_pepper_noise_f16_f16_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr,
-                                                 noiseProbability, saltProbability, salt, pepper,
-                                                 xorwowInitialStatePtr, offset, roi, layoutParams,
-                                                 intraThreads);
+        salt_and_pepper_noise_f16_f16_host_impl(
+            srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, noiseProbability, saltProbability,
+            salt, pepper, xorwowInitialStatePtr, offset, roi, layoutParams, intraThreads);
     }
 
     return RPP_SUCCESS;
 }
 
-
-inline void salt_and_pepper_noise_i8_i8_host_impl(Rpp8s *srcPtrImage, RpptDescPtr srcDescPtr,
-                                                   Rpp8s *dstPtrImage, RpptDescPtr dstDescPtr,
-                                                   Rpp32f noiseProbability, Rpp32f saltProbability,
-                                                   Rpp8s salt, Rpp8s pepper,
-                                                   RpptXorwowState *xorwowInitialStatePtr,
-                                                   Rpp32u offset, RpptROI roi,
-                                                   RppLayoutParams layoutParams, Rpp32u intraThreads) {
+inline void salt_and_pepper_noise_i8_i8_host_impl(
+    Rpp8s* srcPtrImage, RpptDescPtr srcDescPtr, Rpp8s* dstPtrImage, RpptDescPtr dstDescPtr,
+    Rpp32f noiseProbability, Rpp32f saltProbability, Rpp8s salt, Rpp8s pepper,
+    RpptXorwowState* xorwowInitialStatePtr, Rpp32u offset, RpptROI roi,
+    RppLayoutParams layoutParams, Rpp32u intraThreads) {
     Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
     Rpp8s *srcPtrChannel, *dstPtrChannel;
@@ -1550,7 +1535,7 @@ inline void salt_and_pepper_noise_i8_i8_host_impl(Rpp8s *srcPtrImage, RpptDescPt
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowState xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pSaltAndPepperNoiseParams[4];
@@ -1628,7 +1613,7 @@ inline void salt_and_pepper_noise_i8_i8_host_impl(Rpp8s *srcPtrImage, RpptDescPt
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowState xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pSaltAndPepperNoiseParams[4];
@@ -1701,7 +1686,7 @@ inline void salt_and_pepper_noise_i8_i8_host_impl(Rpp8s *srcPtrImage, RpptDescPt
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowState xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pSaltAndPepperNoiseParams[4];
@@ -1769,7 +1754,7 @@ inline void salt_and_pepper_noise_i8_i8_host_impl(Rpp8s *srcPtrImage, RpptDescPt
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowState xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pSaltAndPepperNoiseParams[4];
@@ -1861,7 +1846,7 @@ inline void salt_and_pepper_noise_i8_i8_host_impl(Rpp8s *srcPtrImage, RpptDescPt
 #pragma omp parallel for if (intraThreads > 1) num_threads(intraThreads)
         for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
             RpptXorwowState xorwowState;
-            Rpp32u rowOffset = offset + i * roi.xywhROI.roiWidth;
+            Rpp32u rowOffset = offset + i * srcDescPtr->strides.hStride;
 #if __AVX2__
             __m256i pxXorwowStateX[5], pxXorwowStateCounter;
             __m256 pSaltAndPepperNoiseParams[4];
@@ -1941,10 +1926,9 @@ RppStatus salt_and_pepper_noise_i8_i8_host_tensor(
         srcPtrImage = srcPtr + batchCount * srcDescPtr->strides.nStride;
         dstPtrImage = dstPtr + batchCount * dstDescPtr->strides.nStride;
 
-        salt_and_pepper_noise_i8_i8_host_impl(srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr,
-                                               noiseProbability, saltProbability, salt, pepper,
-                                               xorwowInitialStatePtr, offset, roi, layoutParams,
-                                               intraThreads);
+        salt_and_pepper_noise_i8_i8_host_impl(
+            srcPtrImage, srcDescPtr, dstPtrImage, dstDescPtr, noiseProbability, saltProbability,
+            salt, pepper, xorwowInitialStatePtr, offset, roi, layoutParams, intraThreads);
     }
 
     return RPP_SUCCESS;
