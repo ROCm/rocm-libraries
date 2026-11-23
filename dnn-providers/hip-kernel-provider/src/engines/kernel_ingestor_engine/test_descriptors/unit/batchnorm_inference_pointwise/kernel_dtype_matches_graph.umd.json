@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "7a314a10-c60d-4485-bda1-8235fafc0388",
+  "name": "kernel dtype and activation match the graph's",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.batchnorm_inference_pointwise.kernel_match"
+}

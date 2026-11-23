@@ -34,7 +34,8 @@ add_executable(
 
 # Add the dummy kernel for running the tests
 include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/KernelEmbedding.cmake")
-add_kernels_for_embedding(TARGET hip_kernel_provider_tests FILES ${CMAKE_CURRENT_SOURCE_DIR}/kernels/vector_add.cpp)
+add_kernels_for_embedding(TARGET hip_kernel_provider_tests FILES ${CMAKE_CURRENT_SOURCE_DIR}/kernels/vector_add.cpp
+                                                                 ${CMAKE_CURRENT_SOURCE_DIR}/kernels/two_entry_points.cpp)
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # The kernel sources the ingestor engine's unit descriptor set names. Each key is the
@@ -50,6 +51,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         KEYS kernels/PointwiseAdd.cpp
              kernels/PointwiseMul.cpp
              kernels/PointwiseSub.cpp
+    )
+    add_kernels_for_embedding(
+        TARGET hip_kernel_provider_tests
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/test_descriptors/unit/batchnorm_inference_pointwise/kernels/BatchnormInferencePointwise.cpp"
+        KEYS kernels/BatchnormInferencePointwise.cpp
     )
 endif()
 embed_kernel_sources(

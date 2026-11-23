@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "id": "37ee3ca9-65ae-4fb3-ac87-080a2b2f8d44",
+  "name": "hipkernel:BatchnormInferencePointwise",
+  "sdk_version": "1.0.0",
+  "graph_match": {
+    "native": "hipkernel.batchnorm_inference_pointwise.graph_match"
+  },
+  "metadata": "146d003f-ba37-490c-b083-8f016f3e4e20",
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

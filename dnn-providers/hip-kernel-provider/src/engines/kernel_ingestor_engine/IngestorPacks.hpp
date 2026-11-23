@@ -54,6 +54,10 @@ void resetPointwiseModuleCache();
 void registerStandalonePointwiseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetStandalonePointwiseModuleCache();
 
+/// @see packs/BatchnormInferencePointwiseNative.cpp
+void registerBatchnormInferencePointwiseSymbols(
+    hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+
 /// @see packs/ConvNative.cpp
 void registerConvFwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetConvFwdModuleCache();

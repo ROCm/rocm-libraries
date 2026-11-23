@@ -19,6 +19,9 @@ const std::vector<IngestorPack>& ingestorPacks()
         {"hipkernel:StandalonePointwise",
          &registerStandalonePointwiseSymbols,
          &resetStandalonePointwiseModuleCache},
+        {"hipkernel:BatchnormInferencePointwise",
+         &registerBatchnormInferencePointwiseSymbols,
+         nullptr},
         {"hipkernel:ConvFwd", &registerConvFwdSymbols, &resetConvFwdModuleCache},
 #ifdef HIPDNN_ENGINE_FLYDSL
         // Compiled only when FlyDSL staged a shard; see the gate in this directory's

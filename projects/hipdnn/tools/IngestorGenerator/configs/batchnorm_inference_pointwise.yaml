@@ -1,0 +1,76 @@
+# A fused two-node test fixture: [BatchnormInference, Pointwise], the first multi-node
+# graph match an ingestor engine serves (ALMIOPEN-3070). Mirrors the HIP MLOps engine's
+# fused batchnorm-inference-plus-activation plans. The activation the Pointwise node
+# applies is a KMD field that a kernel-scoped matcher compares against the graph, and its
+# clip bounds are bound tokens.
+
+engine:
+  name: hipkernel:BatchnormInferencePointwise
+  sdk_version: "1.0.0"
+  behavior_notes: [runtime_compilation]
+  heuristic: none
+
+kmd_fields:
+  - name: dtype
+    type: string
+  - name: activation
+    type: string
+
+graph_match:
+  shape: disjoint_attributes
+  discriminator: none
+
+kernel_source_kind: embedded_source
+workspace_policy: none
+
+# The authored set under test_descriptors/ this bundle is written into: the unit-test
+# binary embeds the kernel source.
+authored_subpath: unit
+
+packs:
+  - name: batchnorm_inference_pointwise
+    kernels:
+      - name: batchnorm_inference_pointwise.f32_identity
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/BatchnormInferencePointwise.cpp
+          entry_point: BatchnormInferencePointwise
+        metadata:
+          dtype: FLOAT
+          activation: IDENTITY
+        priority: 0
+      - name: batchnorm_inference_pointwise.f32_relu
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/BatchnormInferencePointwise.cpp
+          entry_point: BatchnormInferencePointwise
+        metadata:
+          dtype: FLOAT
+          activation: RELU
+        priority: 0
+      - name: batchnorm_inference_pointwise.f32_clipped_relu
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/BatchnormInferencePointwise.cpp
+          entry_point: BatchnormInferencePointwise
+        metadata:
+          dtype: FLOAT
+          activation: CLIPPED_RELU
+        priority: 0
+      - name: batchnorm_inference_pointwise.f32_clamp
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/BatchnormInferencePointwise.cpp
+          entry_point: BatchnormInferencePointwise
+        metadata:
+          dtype: FLOAT
+          activation: CLAMP
+        priority: 0
+
+# The direct-load dialect compiles from `source_file`/`entry_point` at plan-build time and
+# hydrates no builder object, so every field is matcher-only.
+specialization:
+  metadata_fields: []
+  matcher_only_fields: [dtype, activation]
+  bindings: {}
+  vocabulary: {}

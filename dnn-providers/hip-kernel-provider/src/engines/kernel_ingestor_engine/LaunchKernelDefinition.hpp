@@ -28,6 +28,9 @@
  *
  * Launch order, workspace and the hand-off between launches stay with the native handler:
  * the descriptor only says what each launch is.
+ *
+ * entryPointKernelDefinition is the `embedded_source` counterpart: one translation unit,
+ * several entry points, selected by the handler rather than listed in the descriptor.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -81,6 +84,49 @@ inline hipdnn_plugin_sdk::ingestor::KernelDefinition
                                                          {},
                                                          kernel.prepared,
                                                          kernel.preparedBy};
+}
+
+/// The definition of entry point @p entryPoint of the `embedded_source` kernel @p kernel.
+///
+/// A single-launch UKD whose native handler launches further kernels by symbol (RFC 0021 §3)
+/// names one entry point of its translation unit; the handler reaches the others through
+/// this. The copy has `source.entryPoint` set to @p entryPoint and is otherwise @p kernel's,
+/// so buildIngestorKernelCode compiles the same file with the same options. The compiler's
+/// module cache keys on (file, options), so every entry point after the first resolves out
+/// of the program the first one compiled. `embedded_source` cannot appear in a `sources`
+/// map, which is why this exists beside launchKernelDefinition rather than through it.
+///
+/// Throws INVALID_VALUE when @p kernel carries `sources`, when its source kind is not
+/// `embedded_source` (a kpack entry's symbol is bound to a recorded signature and digest), or
+/// when @p entryPoint is empty.
+inline hipdnn_plugin_sdk::ingestor::KernelDefinition
+    entryPointKernelDefinition(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
+                               const std::string& entryPoint)
+{
+    const std::string label
+        = hipdnn_plugin_sdk::ingestor::describeDescriptor("kernel", kernel.name, kernel.kernelId);
+    if(!kernel.sources.empty())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+            label + " carries launches ('sources'); select one with launchKernelDefinition");
+    }
+    if(kernel.source.kind != hipdnn_plugin_sdk::ingestor::KernelSourceKind::EMBEDDED_SOURCE)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+            label + " is not an 'embedded_source' kernel, so it has no entry point '" + entryPoint
+                + "' to select");
+    }
+    if(entryPoint.empty())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE, label + " was asked for an empty entry point");
+    }
+
+    hipdnn_plugin_sdk::ingestor::KernelDefinition definition = kernel;
+    definition.source.entryPoint = entryPoint;
+    return definition;
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

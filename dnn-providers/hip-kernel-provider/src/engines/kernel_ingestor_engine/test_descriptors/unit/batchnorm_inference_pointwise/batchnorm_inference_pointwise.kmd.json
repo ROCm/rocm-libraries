@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "id": "146d003f-ba37-490c-b083-8f016f3e4e20",
+  "name": "BatchnormInferencePointwise variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "activation",
+      "type": "string"
+    }
+  ]
+}

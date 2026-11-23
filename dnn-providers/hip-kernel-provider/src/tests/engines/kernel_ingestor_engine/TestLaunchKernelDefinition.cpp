@@ -7,7 +7,9 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -24,6 +26,8 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "PackedKernelSource.hpp"
+#include "compilation/HiprtcKernelCompiler.hpp"
+#include "compilation/KernelCompileOptions.hpp"
 #include "compilation/KpackKernelLoader.hpp"
 #include "compilation/KpackModuleCache.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
@@ -267,6 +271,164 @@ TEST(TestLaunchKernelDefinition, ChecksTheLaunchsOwnSignatureBeforeLoadingItsArc
         // Reaching the loader is the pass: the agreeing launch got past the comparison.
         EXPECT_NE(std::string(error.what()).find("does not exist"), std::string::npos)
             << error.what();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Entry points of an embedded_source kernel
+// ---------------------------------------------------------------------------
+
+/// The embedded test source with two entry points (tests/kernels/two_entry_points.cpp).
+constexpr const char* TWO_ENTRY_POINTS_FILE = "two_entry_points.cpp";
+constexpr const char* FILL_ENTRY_POINT = "two_entry_points_fill";
+constexpr const char* ADD_ENTRY_POINT = "two_entry_points_add";
+
+KernelDefinition makeEmbeddedKernel()
+{
+    KernelDefinition kernel;
+    kernel.kernelId.fill(0x41);
+    kernel.packId.fill(0x42);
+    kernel.dispatchId.fill(0x43);
+    kernel.name = "two_entry_points";
+    kernel.source.kind = KernelSourceKind::EMBEDDED_SOURCE;
+    kernel.source.sourceFile = TWO_ENTRY_POINTS_FILE;
+    kernel.source.entryPoint = FILL_ENTRY_POINT;
+    kernel.metadata["dtype"] = std::string("INT32");
+    kernel.priority = 3;
+    kernel.originDirectory = "/tree/embedded";
+    kernel.treeRoot = "/tree";
+    return kernel;
+}
+
+/// The message of the INVALID_VALUE @p kernel's entry point @p entryPoint is refused with.
+std::string entryPointRefusalOf(const KernelDefinition& kernel, const std::string& entryPoint)
+{
+    try
+    {
+        (void)entryPointKernelDefinition(kernel, entryPoint);
+    }
+    catch(const HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+        return error.what();
+    }
+    ADD_FAILURE() << "expected entryPointKernelDefinition to refuse '" << entryPoint << "'";
+    return {};
+}
+
+TEST(TestEntryPointKernelDefinition, TakesTheEntryPointAndKeepsTheRest)
+{
+    const KernelDefinition fill = makeEmbeddedKernel();
+    const KernelDefinition add = entryPointKernelDefinition(fill, ADD_ENTRY_POINT);
+
+    EXPECT_EQ(add.source.kind, KernelSourceKind::EMBEDDED_SOURCE);
+    EXPECT_EQ(add.source.entryPoint, ADD_ENTRY_POINT);
+    EXPECT_EQ(add.source.sourceFile, fill.source.sourceFile);
+    EXPECT_TRUE(add.sources.empty());
+
+    EXPECT_EQ(add.kernelId, fill.kernelId);
+    EXPECT_EQ(add.packId, fill.packId);
+    EXPECT_EQ(add.dispatchId, fill.dispatchId);
+    EXPECT_EQ(add.name, fill.name);
+    EXPECT_EQ(add.priority, fill.priority);
+    EXPECT_EQ(add.originDirectory, fill.originDirectory);
+    EXPECT_EQ(add.treeRoot, fill.treeRoot);
+    EXPECT_TRUE(add.metadata == fill.metadata);
+
+    // The kernel is untouched.
+    EXPECT_EQ(fill.source.entryPoint, FILL_ENTRY_POINT);
+}
+
+TEST(TestEntryPointKernelDefinition, RefusesAKernelThatCarriesLaunches)
+{
+    const std::string what = entryPointRefusalOf(makeDecodeKernel(), ADD_ENTRY_POINT);
+
+    EXPECT_NE(what.find("launchKernelDefinition"), std::string::npos) << what;
+}
+
+TEST(TestEntryPointKernelDefinition, RefusesAKernelThatIsNotEmbeddedSource)
+{
+    KernelDefinition single;
+    single.name = "single";
+    single.source = makeLaunchSource("rocke_single", {});
+
+    const std::string what = entryPointRefusalOf(single, ADD_ENTRY_POINT);
+
+    EXPECT_NE(what.find("'embedded_source'"), std::string::npos) << what;
+    EXPECT_NE(what.find(ADD_ENTRY_POINT), std::string::npos) << what;
+}
+
+TEST(TestEntryPointKernelDefinition, RefusesAnEmptyEntryPoint)
+{
+    const std::string what = entryPointRefusalOf(makeEmbeddedKernel(), "");
+
+    EXPECT_NE(what.find("empty entry point"), std::string::npos) << what;
+}
+
+/// Compiles the two-entry-point source once through the shared hiprtc compiler and launches
+/// both entry points in order: fill writes a value, add adds to it.
+TEST(TestEntryPointKernelDefinitionDevice, LaunchesTwoEntryPointsOutOfOneProgram)
+{
+    SKIP_IF_NO_DEVICES();
+
+    using hip_kernel_provider::compilation::HiprtcKernelCompiler;
+
+    hipDeviceProp_t properties{};
+    ASSERT_EQ(hipGetDeviceProperties(&properties, 0), hipSuccess);
+    DeviceProperties deviceProperties;
+    deviceProperties.gcnArchName = properties.gcnArchName;
+    deviceProperties.warpSize = properties.warpSize;
+    const GraphFixture graph(buildConvFwdGraph(data_objects::DataType::HALF), deviceProperties);
+    const auto& tensors = graph.context().graph.getTensorMap();
+    ASSERT_FALSE(tensors.empty());
+    const hip_kernel_provider::compilation::KernelCompileOptions options(tensors.begin()->second,
+                                                                         properties);
+
+    const HiprtcKernelCompiler compiler;
+    hip_kernel_provider::compilation::KpackModuleCache kpackCache;
+    const hip_kernel_provider::compilation::KpackKernelLoader loader{kpackCache};
+    const std::vector<KernelArgument> noRecordedSignature;
+
+    const KernelDefinition kernel = makeEmbeddedKernel();
+    auto fill = buildIngestorKernelCode(
+        compiler, loader, graph.context(), kernel, options, noRecordedSignature);
+    const size_t afterFirst = HiprtcKernelCompiler::moduleCache().size();
+    EXPECT_TRUE(HiprtcKernelCompiler::moduleCache().contains(TWO_ENTRY_POINTS_FILE, options));
+
+    auto add = buildIngestorKernelCode(compiler,
+                                       loader,
+                                       graph.context(),
+                                       entryPointKernelDefinition(kernel, ADD_ENTRY_POINT),
+                                       options,
+                                       noRecordedSignature);
+
+    // Same file and options: the second entry point came out of the program the first compiled.
+    EXPECT_EQ(HiprtcKernelCompiler::moduleCache().size(), afterFirst);
+
+    constexpr unsigned int COUNT = 64;
+    int* device = nullptr;
+    ASSERT_EQ(hipMalloc(&device, COUNT * sizeof(int)), hipSuccess);
+    const std::unique_ptr<int, decltype(&hipFree)> deviceGuard(device, &hipFree);
+    hipStream_t stream = nullptr;
+    ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
+    const std::unique_ptr<std::remove_pointer_t<hipStream_t>, decltype(&hipStreamDestroy)>
+        streamGuard(stream, &hipStreamDestroy);
+
+    for(IngestorKernelCode* code : {&fill, &add})
+    {
+        code->setBlockSize(COUNT);
+        code->setGridSize(1);
+    }
+    fill.kernelForStream(stream).launch(stream, device, 7);
+    add.kernelForStream(stream).launch(stream, device, 5);
+    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+
+    std::vector<int> host(COUNT, 0);
+    ASSERT_EQ(hipMemcpy(host.data(), device, COUNT * sizeof(int), hipMemcpyDeviceToHost),
+              hipSuccess);
+    for(unsigned int i = 0; i < COUNT; ++i)
+    {
+        EXPECT_EQ(host[i], 12) << "element " << i;
     }
 }
 

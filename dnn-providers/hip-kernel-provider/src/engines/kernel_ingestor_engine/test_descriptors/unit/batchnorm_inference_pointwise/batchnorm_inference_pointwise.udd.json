@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "1bd2a057-635a-4255-b651-a7e12a79716d",
+  "name": "BatchnormInferencePointwise dispatch",
+  "dispatch_symbol": "hipkernel.batchnorm_inference_pointwise.dispatch"
+}

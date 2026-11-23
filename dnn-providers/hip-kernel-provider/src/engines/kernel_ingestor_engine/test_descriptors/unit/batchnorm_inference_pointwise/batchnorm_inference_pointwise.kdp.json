@@ -1,0 +1,91 @@
+{
+  "version": "1.0",
+  "id": "355e595d-711a-478d-9a7f-1390d8e3ba0f",
+  "name": "hipkernel:batchnorm_inference_pointwise",
+  "matchers": [
+    "7a314a10-c60d-4485-bda1-8235fafc0388"
+  ],
+  "engine": "37ee3ca9-65ae-4fb3-ac87-080a2b2f8d44",
+  "dispatch": "1bd2a057-635a-4255-b651-a7e12a79716d",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "37ee3ca9-65ae-4fb3-ac87-080a2b2f8d44",
+          "kmd_id": "146d003f-ba37-490c-b083-8f016f3e4e20",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "dtype",
+            "activation"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "6b88cce6-c051-4d1b-a9cb-e5652c508ae8",
+      "name": "batchnorm_inference_pointwise.f32_identity",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchnormInferencePointwise.cpp",
+        "entry_point": "BatchnormInferencePointwise"
+      },
+      "metadata": {
+        "dtype": "FLOAT",
+        "activation": "IDENTITY"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "4967d632-81b6-4188-9086-d5c58810b42a",
+      "name": "batchnorm_inference_pointwise.f32_relu",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchnormInferencePointwise.cpp",
+        "entry_point": "BatchnormInferencePointwise"
+      },
+      "metadata": {
+        "dtype": "FLOAT",
+        "activation": "RELU"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "e3b9795d-7e96-466a-8da9-26dcc1bbab57",
+      "name": "batchnorm_inference_pointwise.f32_clipped_relu",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchnormInferencePointwise.cpp",
+        "entry_point": "BatchnormInferencePointwise"
+      },
+      "metadata": {
+        "dtype": "FLOAT",
+        "activation": "CLIPPED_RELU"
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "b93c7516-e1af-48d8-926f-be6362a40220",
+      "name": "batchnorm_inference_pointwise.f32_clamp",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchnormInferencePointwise.cpp",
+        "entry_point": "BatchnormInferencePointwise"
+      },
+      "metadata": {
+        "dtype": "FLOAT",
+        "activation": "CLAMP"
+      },
+      "priority": 0
+    }
+  ],
+  "arch": []
+}
