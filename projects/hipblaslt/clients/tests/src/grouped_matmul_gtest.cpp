@@ -1023,6 +1023,8 @@ namespace
     TEST_F(GroupedMatmul, smoke_CallerErrorPendingIsNotALaunchFailure)
     {
         Case tc;
+        // T/N has grouped solutions on gfx942 and gfx950; N/N has none on gfx950.
+        tc.opA                = HIPBLAS_OP_T;
         tc.groups             = {{64, 48, 32}, {17, 5, 64}, {33, 70, 40}};
         tc.reruns             = {tc.groups, tc.groups};
         tc.callerErrorPending = true;
