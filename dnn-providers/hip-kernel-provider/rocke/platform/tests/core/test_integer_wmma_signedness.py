@@ -99,8 +99,15 @@ def test_every_integer_row_is_listed_with_its_operand_dtypes():
         assert op.b_dtype[0] == ("i" if flag_b == "i1 1" else "u"), op_id
 
 
-@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
-@pytest.mark.parametrize("op_id, gfx, flags", _ROWS)
+@pytest.mark.parametrize(
+    "op_id, gfx, flags, flavor",
+    [
+        (op_id, gfx, flags, flavor)
+        for op_id, gfx, flags in _ROWS
+        for flavor in LLVM_FLAVORS
+        if MATRIX_CALLS[op_id].lowers_at(flavor)
+    ],
+)
 def test_both_engines_pass_the_flags_the_row_gives(op_id, gfx, flags, flavor):
     text = lower_with_both_engines(_kernel(gfx, op_id), gfx, flavor)
     assert _flags(text, MATRIX_CALLS[op_id].intrinsic) == flags

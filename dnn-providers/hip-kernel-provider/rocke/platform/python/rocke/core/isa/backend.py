@@ -34,10 +34,10 @@ from typing import Callable, Dict, Tuple, Union
 from ..arch import ArchTarget, known_arches, listed_arch_for
 from ..arch.wmma_scale import gfx1250_scaled_wmma
 from ..ir import BF16, F16, F32, I32, I64, Op, VectorType
-from ..llvm_profile import _supports_llvm23_target_ops
+from ..llvm_profile import supports_llvm23_target_ops
 from ..tf32 import tf32_mma_target_error
 from ..wmma import validate_unscaled_wmma
-from .matrix_call_lowering import emit_matrix_call
+from .matrix_call_lowering import emit_matrix_call, refuse_llvm23_matrix_op
 from .matrix_calls import MATRIX_CALLS
 from .matrix_operand_forms import f8f6f4_operand_form
 from .wmma_scale import ScaledWmmaLLVM
@@ -291,11 +291,9 @@ class ISABackend:
         spec = gfx1250_scaled_wmma(op.name)
         if spec is None:
             raise NotImplementedError(f"unsupported scaled WMMA op {op.name!r}")
+        if not supports_llvm23_target_ops(lowerer._flavor):
+            refuse_llvm23_matrix_op(spec.op_id, lowerer._flavor)
         name = f"tile.{spec.op_id}"
-        if not _supports_llvm23_target_ops(lowerer._flavor):
-            raise NotImplementedError(
-                f"{name} requires llvm23 (ROCm 7.13+), got {lowerer._flavor}"
-            )
         if len(op.operands) != 5 or len(op.results) != 1:
             raise ValueError(f"{name} expects 5 operands and 1 result")
         if op.operands[2].type != VectorType(F32, 8) or op.result.type != VectorType(

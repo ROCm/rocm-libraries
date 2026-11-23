@@ -213,13 +213,23 @@ def require_arbiter_llvm_flavor() -> str:
 def assert_kernel_target_accepts(kernel: KernelDef, target: str) -> None:
     """Lower ``kernel`` for ``target`` with the Python engine, whose IR the C++ engine must match,
     at the flavor of the arbiter's clang, and fail unless the module compiles and links; skip,
-    naming the reason, when no verdict is possible on this host."""
+    naming the reason, when no verdict is possible on this host.
+
+    A kernel the lowering refuses at the arbiter's flavor only for that flavor's emission profile
+    (:class:`rocke.core.llvm_profile.LlvmProfileRefusal`: an instruction whose call is a newer
+    LLVM's form) is one this compiler cannot judge, skipped as :func:`skip_without_verdict` skips
+    any other cannot-judge verdict. Any other refusal fails the test."""
+    from rocke.core.llvm_profile import LlvmProfileRefusal
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
     flavor = require_arbiter_llvm_flavor()
-    assert_target_accepts(
-        _lower_kernel_to_llvm_python(kernel, arch=target, llvm_flavor=flavor), target
-    )
+    try:
+        ir_text = _lower_kernel_to_llvm_python(kernel, arch=target, llvm_flavor=flavor)
+    except LlvmProfileRefusal as refusal:
+        skip_without_verdict(
+            f"the arbiter's {flavor} compiler predates what this kernel lowers to: {refusal}"
+        )
+    assert_target_accepts(ir_text, target)
 
 
 def _require_accepted(verdict: Verdict, text: str, target: str) -> None:

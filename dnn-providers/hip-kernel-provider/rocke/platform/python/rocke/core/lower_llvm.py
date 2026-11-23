@@ -131,7 +131,7 @@ from .llvm_profile import (
     _flavor_at_least,
     _flavor_for_llvm,
     _is_modern_flavor,
-    _supports_llvm23_target_ops,
+    supports_llvm23_target_ops,
 )
 
 
@@ -2156,7 +2156,7 @@ class _Lowerer:
             raise ValueError(
                 f"{op} requires a target with {fact.value}, got {arch.gfx}"
             )
-        if not _supports_llvm23_target_ops(self._flavor):
+        if not supports_llvm23_target_ops(self._flavor):
             raise ValueError(f"{op} requires LLVM flavor llvm23, got {self._flavor}")
 
     # ----- constant folding helpers -----
