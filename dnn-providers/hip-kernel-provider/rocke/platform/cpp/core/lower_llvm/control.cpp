@@ -496,7 +496,7 @@ static void _op_vector_fma(rocke_lower_t* L, const rocke_op_t* op)
     if(!(strcmp(elem_name, "f16") == 0 || strcmp(elem_name, "bf16") == 0
          || strcmp(elem_name, "f32") == 0))
     {
-        rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "vector_fma: unsupported element type %s", elem_name);
+        rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "vector_fma: unsupported element type '%s'", elem_name);
     }
     const char* intrin_key = rocke_arena_printf(&L->arena, "fmuladd.v%d%s", count, elem_name);
     rocke_ll_need(L, intrin_key);
