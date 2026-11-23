@@ -892,6 +892,26 @@ TEST_F(internal_level2_bsrsv_analysis_reuse, mixed_width_own_reuse_keeps_structu
     EXPECT_EQ(stored_pivot<int64_t>(), 3);
 }
 
+// Block row 3 has no diagonal block, which the non-unit analysis records in the
+// i64 pivot. A unit-diagonal solve removes that structural zero, so it must
+// reset all 64 bits of the pivot to the no-pivot value.
+TEST_F(internal_level2_bsrsv_analysis_reuse, solve_core_unit_diagonal_resets_i64_pivot)
+{
+    ASSERT_NO_FATAL_FAILURE(build(3));
+    ASSERT_EQ(
+        (analysis<int64_t, int64_t>(rocsparse_fill_mode_lower, rocsparse_analysis_policy_force)),
+        rocsparse_status_success);
+    EXPECT_EQ(stored_pivot<int64_t>(), 3);
+
+    ASSERT_EQ(rocsparse_set_mat_diag_type(descr.d, rocsparse_diag_type_unit),
+              rocsparse_status_success);
+    ASSERT_EQ((solve_stored<int64_t, int64_t>()), rocsparse_status_success);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    EXPECT_EQ(stored_pivot<int64_t>(), std::numeric_limits<int64_t>::max());
+    expect_solution(rocsparse_ut::to_host(*d_y),
+                    reference(a32, true, rocsparse_operation_none, rocsparse_diag_type_unit));
+}
+
 // bsrsv_solve_core must reject an analysis of another width even when the
 // pivot it is given has the right type. The i64 analysis comes first: read as
 // i32, its row map still holds valid block rows, so a solve that skipped the
