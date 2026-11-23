@@ -51,14 +51,14 @@ template <class Derived, class InputIt, class StencilIt, class Predicate>
 InputIt THRUST_HOST_DEVICE
 remove_if(execution_policy<Derived>& policy, InputIt first, InputIt last, StencilIt stencil, Predicate predicate)
 {
-  return hip_rocprim::copy_if(policy, first, last, stencil, first, thrust::not_fn(predicate));
+  return hip_rocprim::copy_if(policy, first, last, stencil, first, _THRUST_STD::not_fn(predicate));
 }
 
 THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class InputIt, class Predicate>
 InputIt THRUST_HOST_DEVICE remove_if(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate)
 {
-  return hip_rocprim::copy_if(policy, first, last, first, thrust::not_fn(predicate));
+  return hip_rocprim::copy_if(policy, first, last, first, _THRUST_STD::not_fn(predicate));
 }
 
 template <class Derived, class InputIt, class T>
@@ -80,21 +80,21 @@ OutputIt THRUST_HOST_DEVICE remove_copy_if(
   OutputIt result,
   Predicate predicate)
 {
-  return hip_rocprim::copy_if(policy, first, last, stencil, result, thrust::not_fn(predicate));
+  return hip_rocprim::copy_if(policy, first, last, stencil, result, _THRUST_STD::not_fn(predicate));
 }
 
 template <class Derived, class InputIt, class OutputIt, class Predicate>
 OutputIt THRUST_HOST_DEVICE
 remove_copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, Predicate predicate)
 {
-  return hip_rocprim::copy_if(policy, first, last, result, thrust::not_fn(predicate));
+  return hip_rocprim::copy_if(policy, first, last, result, _THRUST_STD::not_fn(predicate));
 }
 
 template <class Derived, class InputIt, class OutputIt, class T>
 OutputIt THRUST_HOST_DEVICE
 remove_copy(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, const T& value)
 {
-  thrust::detail::equal_to_value<T> pred(value);
+  thrust::detail::equal_to_value<T> pred{value};
   return hip_rocprim::remove_copy_if(policy, first, last, result, pred);
 }
 
