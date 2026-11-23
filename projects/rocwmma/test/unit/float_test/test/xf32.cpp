@@ -428,6 +428,23 @@ TEST_F(XFloat32Test, StdFunctions)
         << "std::real";
 }
 
+// Test Case: type traits of rocwmma_xfloat32
+// rocWMMA classifies xfloat32 through its own traits and must not specialize
+// the std:: type traits ([meta.rqmts]/4), which the MSVC STL rejects.
+TEST_F(XFloat32Test, TypeTraits)
+{
+    EXPECT_TRUE(rocwmma::is_arithmetic<rocwmma_xfloat32>::value);
+    EXPECT_TRUE(rocwmma::is_floating_point<rocwmma_xfloat32>::value);
+    EXPECT_TRUE(rocwmma::is_signed<rocwmma_xfloat32>::value);
+    EXPECT_TRUE(rocwmma::is_arithmetic_v<rocwmma_xfloat32>);
+    EXPECT_TRUE(rocwmma::is_floating_point_v<rocwmma_xfloat32>);
+    EXPECT_TRUE(rocwmma::is_signed_v<rocwmma_xfloat32>);
+
+    EXPECT_FALSE(std::is_arithmetic<rocwmma_xfloat32>::value);
+    EXPECT_FALSE(std::is_floating_point<rocwmma_xfloat32>::value);
+    EXPECT_FALSE(std::is_signed<rocwmma_xfloat32>::value);
+}
+
 // Test Case: std::numeric_limits<rocwmma_xfloat32>
 // Verifies that the specialized numeric_limits provides correct floating-point properties.
 TEST_F(XFloat32Test, NumericLimits)

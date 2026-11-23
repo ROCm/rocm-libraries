@@ -164,6 +164,32 @@ TEST_F(Float8Test, TypeTraitsE5M2Fnuz)
     EXPECT_TRUE(is_signed<hip_fp8_e5m2_fnuz>::value);
 }
 
+// rocWMMA classifies its fp8 types through its own traits. It must not
+// specialize the std:: type traits ([meta.rqmts]/4): the MSVC STL rejects
+// such specializations at compile time.
+template <typename T>
+void expectRocwmmaFloatTraitsOnly()
+{
+    EXPECT_TRUE(rocwmma::is_arithmetic<T>::value);
+    EXPECT_TRUE(rocwmma::is_floating_point<T>::value);
+    EXPECT_TRUE(rocwmma::is_signed<T>::value);
+    EXPECT_TRUE(rocwmma::is_arithmetic_v<T>);
+    EXPECT_TRUE(rocwmma::is_floating_point_v<T>);
+    EXPECT_TRUE(rocwmma::is_signed_v<T>);
+
+    EXPECT_FALSE(std::is_arithmetic<T>::value);
+    EXPECT_FALSE(std::is_floating_point<T>::value);
+    EXPECT_FALSE(std::is_signed<T>::value);
+}
+
+TEST_F(Float8Test, TypeTraitsNotStdSpecializations)
+{
+    expectRocwmmaFloatTraitsOnly<hip_fp8_e4m3>();
+    expectRocwmmaFloatTraitsOnly<hip_fp8_e5m2>();
+    expectRocwmmaFloatTraitsOnly<hip_fp8_e4m3_fnuz>();
+    expectRocwmmaFloatTraitsOnly<hip_fp8_e5m2_fnuz>();
+}
+
 // --- Tests for make_hip_fp8_from_bits functions ---
 TEST_F(Float8Test, MakeHipFp8E4M3FromBits)
 {

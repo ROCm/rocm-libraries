@@ -192,7 +192,7 @@ namespace rocwmma
             else
             {
                 auto value = ((rowIdx - padM) * n + (colIdx - padN)) % 5;
-                mat[index] = ((value % 5) && std::is_signed<DataT>::value)
+                mat[index] = ((value % 5) && rocwmma::is_signed<DataT>::value)
                                  ? -static_cast<DataT>(value)
                                  : static_cast<DataT>(value);
             }
@@ -213,8 +213,9 @@ namespace rocwmma
         if(rowIdx < m && colIdx < n)
         {
             auto value = (rowIdx * n + colIdx) % 3;
-            mat[index] = ((value % 3) && std::is_signed<DataT>::value) ? -static_cast<DataT>(value)
-                                                                       : static_cast<DataT>(value);
+            mat[index] = ((value % 3) && rocwmma::is_signed<DataT>::value)
+                             ? -static_cast<DataT>(value)
+                             : static_cast<DataT>(value);
         }
     }
 
@@ -234,8 +235,9 @@ namespace rocwmma
         if(rowIdx < m && colIdx < k)
         {
             auto value = (rowIdx * k + colIdx) % 5;
-            mat[index] = ((value % 3) && std::is_signed<DataT>::value) ? -static_cast<DataT>(value)
-                                                                       : static_cast<DataT>(value);
+            mat[index] = ((value % 3) && rocwmma::is_signed<DataT>::value)
+                             ? -static_cast<DataT>(value)
+                             : static_cast<DataT>(value);
         }
     }
 

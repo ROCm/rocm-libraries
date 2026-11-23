@@ -54,9 +54,9 @@ namespace rocwmma
         err |= (!std::is_same<DataT, typename PackTraits::UnpackedT>::value);
 
         // Check consistency of packed vs unpacked types
-        if(std::is_floating_point<typename PackTraits::UnpackedT>::value)
+        if(rocwmma::is_floating_point<typename PackTraits::UnpackedT>::value)
         {
-            err |= (!std::is_floating_point<typename PackTraits::PackedT>::value);
+            err |= (!rocwmma::is_floating_point<typename PackTraits::PackedT>::value);
         }
         else if(std::is_integral<typename PackTraits::UnpackedT>::value)
         {
