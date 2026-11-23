@@ -26,6 +26,7 @@
  * ************************************************************************ */
 
 #include "UserDrivenTuningParser.hpp"
+#include "OnlineTuner.hpp"
 #include "rocblaslt_secure_env.hpp"
 #include "utility.hpp"
 
@@ -159,6 +160,8 @@ namespace TensileLite
 
             std::atomic<bool> announced{false};
 
+            std::atomic<bool> onlineScopeLogged[static_cast<size_t>(OnlineScopeEvent::Count)]{};
+
             mutable std::mutex                        mutex;
             std::unordered_set<ProblemOverride>       startKeys;
             std::unordered_set<ProblemOverride>       doneKeys;
@@ -233,10 +236,11 @@ namespace TensileLite
 
                 const auto&    counters    = TuningCounters::instance();
                 const uint64_t invalidated = counters.invalidated.load();
+                const uint64_t unrecorded  = counters.unrecorded.load();
 
                 // All zeroes would read as "the cache served nothing" when the
                 // cache was never reached at all.
-                if(shapes == 0 && tuned == 0 && invalidated == 0
+                if(shapes == 0 && tuned == 0 && invalidated == 0 && unrecorded == 0
                    && counters.entriesLoaded.load() == 0)
                     return;
 
@@ -244,6 +248,8 @@ namespace TensileLite
                 msg << "tuning-cache: summary shapes=" << shapes << " matched=" << matched
                     << " fellback=" << fellback << " tuned=" << tuned
                     << " invalidated=" << invalidated;
+                if(TuningModeSingleton::getInstance().mode() == TuningMode::Online)
+                    msg << " unrecorded=" << unrecorded;
 
                 std::ostream*               os = m_sink ? m_sink : &std::cerr;
                 std::lock_guard<std::mutex> lock(log_mutex);
@@ -296,11 +302,18 @@ namespace TensileLite
             break;
         }
 
-        const char* modeName = tuning.mode() == TuningMode::Tune ? "tune" : "cache";
-
         std::ostringstream msg;
-        msg << "mode=" << modeName << " path=" << tuning.cachePath() << " load=" << statusName
+        msg << "mode=" << tuningModeName(tuning.mode()) << " path=" << tuning.cachePath()
+            << " load=" << statusName
             << " loaded=" << TuningCounters::instance().entriesLoaded.load();
+
+        // The settings online explores with, as the tuner applies them.
+        if(tuning.mode() == TuningMode::Online)
+        {
+            const auto& tuner = rocblaslt::OnlineTuner::getInstance();
+            msg << " K=" << tuner.topK() << " R=" << tuner.repeats()
+                << " cold=" << tuner.coldCalls();
+        }
 
         if(status == TuningLoadStatus::NoPath)
             msg << "; set HIPBLASLT_TUNING_CACHE_PATH or tuning does nothing";
@@ -320,10 +333,10 @@ namespace TensileLite
         static_cast<void>(emitter);
     }
 
-    void recordTuningLookup(const ProblemOverride& key, bool matched)
+    bool recordTuningLookup(const ProblemOverride& key, bool matched)
     {
         if(TuningModeSingleton::getInstance().mode() == TuningMode::Off)
-            return;
+            return false;
 
         DiagnosticsState&           state = DiagnosticsState::instance();
         std::lock_guard<std::mutex> lock(state.mutex);
@@ -331,6 +344,7 @@ namespace TensileLite
         auto inserted = state.lookups.try_emplace(key, matched);
         if(!inserted.second && matched)
             inserted.first->second = true;
+        return inserted.second;
     }
 
     bool recordTuningInvalidation(const ProblemOverride& key, const TunedEntry& entry)
@@ -411,10 +425,52 @@ namespace TensileLite
         return false;
     }
 
+    void noteOnlineScopeEvent(OnlineScopeEvent kind)
+    {
+        DiagnosticsState& state = DiagnosticsState::instance();
+        if(!state.infoOn())
+            return;
+
+        std::atomic<bool>& logged = state.onlineScopeLogged[static_cast<size_t>(kind)];
+        if(logged.exchange(true))
+            return;
+
+        std::ostringstream msg;
+        msg << "tuning-cache: online-not-tuned ";
+        switch(kind)
+        {
+        case OnlineScopeEvent::AdaptiveSmCount:
+            msg << "hipblasLtMatmul under HIPBLASLT_ADAPTIVE_SM_COUNT; runs as with online off";
+            break;
+        case OnlineScopeEvent::HeuristicQuery:
+            msg << "hipblasLtMatmulAlgoGetHeuristic; never explored, its algo launched untimed";
+            break;
+        case OnlineScopeEvent::CallerSuppliedAlgo:
+            msg << "hipblasLtMatmul with an algo; launched as given, never timed";
+            break;
+        case OnlineScopeEvent::Count:
+            return;
+        }
+        log_info(__func__, msg.str());
+    }
+
+    void noteOnlineEventPairCap(int device, int cap)
+    {
+        if(!DiagnosticsState::instance().infoOn())
+            return;
+
+        std::ostringstream msg;
+        msg << "tuning-cache: online-event-pair-cap device=" << device << " cap=" << cap
+            << "; a launch ran untimed, see HIPBLASLT_TUNING_MAX_EVENT_PAIRS";
+        log_info(__func__, msg.str());
+    }
+
     void resetTuningDiagnosticsForTest()
     {
         DiagnosticsState& state = DiagnosticsState::instance();
         state.announced         = false;
+        for(std::atomic<bool>& logged : state.onlineScopeLogged)
+            logged = false;
 
         std::lock_guard<std::mutex> lock(state.mutex);
         state.startKeys.clear();

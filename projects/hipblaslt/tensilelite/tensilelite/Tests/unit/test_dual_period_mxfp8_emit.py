@@ -189,6 +189,65 @@ def test_prefetch_local_read_is_name_only(dual_src):
 
     assert instructions(_emit_dual_period_kernel(plr=1)) == instructions(dual_src)
 
+def test_odd_phase_tail_swaps_scale_write_half(dual_src):
+    """An odd residual re-enters mid-epoch, so the write half needs a step.
+
+    The scale SRDs are already where the tail wants them -- the kernel seeds
+    one epoch in the preloop and advances once per epoch it consumes -- so the
+    only thing out of phase is which LDS half the tail's own scale load lands
+    in.  Nothing here may touch Srd+0/+1/+2.
+    """
+    align_start = dual_src.index(
+        "dual-period tail: test completed-DepthU parity for scale LDS")
+    align_end = dual_src.index("label_SubtileTailScalePhased:", align_start)
+    tail_start = dual_src.index("/* TAILLOOP */", align_end)
+    alignment = dual_src[align_start:align_end]
+
+    parity_test = next(
+        ln for ln in dual_src.splitlines()
+        if "dual-period tail: test completed-DepthU parity for scale LDS" in ln)
+    assert parity_test.lstrip().startswith("s_bitcmp1_b32")
+    assert re.search(r",\s*7(?:\s|//)", parity_test), parity_test
+    assert "s_cbranch_scc0 label_SubtileTailScalePhased" in alignment
+
+    for tc in ("MXSA", "MXSB"):
+        swap = next(
+            ln for ln in alignment.splitlines()
+            if f"sgprLocalWriteBaseAddr{tc}" in ln)
+        assert swap.lstrip().startswith("s_xor_b32"), swap
+        assert f"sgprSwap{tc}" in swap, swap
+
+    assert not re.search(r"SrdMXS[AB]\+?\d*\]", alignment), (
+        "tail scale phase fixup must not touch the scale SRDs:\n%s" % alignment)
+    assert align_start < align_end < tail_start
+
+
+def test_preloop_seeds_one_scale_epoch(dual_src):
+    """PGR2 seeds two data iterations but only the one epoch that covers them.
+
+    A second scale prefetch would cover data the preloop never fetched, and
+    its SRD advance would leave every later epoch load one epoch past the
+    data frontier.  So the preloop issues one DTL load per scale tensor, no
+    scale SRD advance, and no write-half swap -- the mainloop body owns the
+    advance-swap-load cadence from there.
+    """
+    preloop = []
+    for ln in dual_src.splitlines():
+        if ln.strip() == "label_LoopBeginL:":
+            break
+        preloop.append(ln)
+    preloop = "\n".join(preloop)
+
+    assert preloop.count("DTL b128 load") == 2, preloop.count("DTL b128 load")
+    assert "Scale SRD update" not in preloop
+    assert not re.search(r"swap MXS\w+ GR m0", preloop)
+
+    wait = next(ln for ln in preloop.splitlines()
+                if "Wait GR" in ln and "SA=" in ln and "s_branch" not in ln)
+    assert "SA=0 SB=0" in wait, (
+        "preloop wait must retire the seeded epoch, not leave one in flight: %s"
+        % wait)
+
 
 def test_no_scale_local_read_in_preloop(dual_src):
     """The pre-loop prefetches data operands but not scales.

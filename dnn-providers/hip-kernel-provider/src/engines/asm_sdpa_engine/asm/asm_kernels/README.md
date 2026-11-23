@@ -1,20 +1,21 @@
 # ASM Kernel Binaries — Provenance
 
 This directory holds vendored GPU code-object (`.co`) binaries from the AITER
-project for both forward and backward FMHA kernels. The forward and backward
-snapshots were taken from **different** AITER commits (see table below).
+project for both forward and backward FMHA kernels. Each module's release is in
+`aiter_pins.json` and its `SOURCE.md`.
 
 | Kernel group | AITER commit | Platforms | Per-arch SOURCE.md |
 |---|---|---|---|
-| `fmha_v3_fwd` (gfx942, gfx950) | `commit` (objects) and `abi_commit` (host code) of each `<arch>/fmha_v3_fwd` module in `aiter_fwd_pins.json` | gfx942, gfx950 | `gfx942/fmha_v3_fwd/SOURCE.md`, `gfx950/fmha_v3_fwd/SOURCE.md` |
-| `fmha_v3_bwd` (gfx942, gfx950) | `cdcfa833bdf554ca75594c90dde4316ea9b50199` (v0.1.13) | gfx942, gfx950 | `gfx942/fmha_v3_bwd/SOURCE.md`, `gfx950/fmha_v3_bwd/SOURCE.md` |
+| `fmha_v3_fwd` (gfx942, gfx950) | `commit` (objects) and `abi_commit` (host code) of each `<arch>/fmha_v3_fwd` module in `aiter_pins.json` | gfx942, gfx950 | `gfx942/fmha_v3_fwd/SOURCE.md`, `gfx950/fmha_v3_fwd/SOURCE.md` |
+| `fmha_v3_bwd` (gfx942, gfx950) | `a0c4b69c146d94e393984bbe553b704e8c89a5e4` (v0.1.29) | gfx942, gfx950 | `gfx942/fmha_v3_bwd/SOURCE.md`, `gfx950/fmha_v3_bwd/SOURCE.md` |
 
-The forward kernels are pinned in `aiter_fwd_pins.json`, which records for each
-forward module the AITER commit of its objects, the AITER host code the engine
-mirrors, and the upstream rows left out with the reason. The per-arch
-`SOURCE.md` files are generated from it by the
-`hipdnn-aiter-asm-sdpa-fwd-sync` skill. The forward and backward kernels come
-from different AITER commits, so check each group against its own row above.
+Every module is pinned in `aiter_pins.json`, keyed `<arch>/<module>`. For each
+forward and backward module the pin records the AITER release and commit of its
+objects, the AITER host code the engine mirrors, and the upstream rows or CSVs
+left out, with the reason. The `hipdnn-aiter-asm-sdpa-fwd-sync` skill writes the
+pin and generates every module's `SOURCE.md` from it; edit neither by hand.
+Change what a module leaves out with the skill's `plan --exclude`,
+`--drop-exclude` or `--include`, then `apply`.
 
 ## Directory layout notes
 
@@ -24,30 +25,150 @@ from different AITER commits, so check each group against its own row above.
   and `MI300/` for every other gfx942 device, including MI300X and MI300A. gfx950 stores its
   objects flat.
 - **Backward kernels** (`fmha_v3_bwd/`): AITER stores these flat (no MI300/MI308 split) because
-  backward kernels only support bf16/fp16 (no fp8), so the same binary works on both MI300X and
-  MI300A. SHA256 manifests for each arch are recorded in the per-arch `SOURCE.md` files.
+  backward kernels only support bf16/fp16 (no fp8), so the same binary works on every gfx942
+  device, MI308X included. SHA256 manifests for each arch are recorded in the per-arch
+  `SOURCE.md` files.
+
+## Forward precision
+
+The gfx950 bf16 hd256 forward kernels (group mode only) multiply Q by
+scale × log2(e) and round the product to bf16 before QK^T, where the hd128 and
+hd192x128 kernels keep that factor in fp32. Their error grows with the
+attention scale. For inputs in [-1, 1], a model of this rounding keeps their
+error inside the 1e-2 bf16 tolerance of the GPU registry tests at the standard
+scale 1/sqrt(256); at scale 1.0, which a graph gets when it sets no scale, a
+group-mode case reaches about 0.016. The limit is in AITER's kernels, which
+AITER launches at any scale too, so the engine adds no precision bound on the
+scale for them. The GPU registry tests run every forward row at scale
+1/sqrt(hdim_q).
+
+## Backward tables
+
+Each `fmha_v3_bwd/` directory holds AITER's backward CSV tables, one per kernel
+stage: ODO (computes D from O and dO), DQDKDV (computes dQ, dK and dV), and the
+post stages DQ_CONVERT and DQ_SHUFFLE (write dQ from the dQ accumulator). The
+engine builds its kernel registry from these tables. Column terms used below:
+
+- `atomic32` selects the dQ accumulator: 1 is **A32** (FP32, the default) and
+  0 is **A16** (16-bit). The engine knob `hipkernel.sdpa.bwd.accumulator_type`
+  picks it (`a32` or `a16`).
+- `pssk` is 1 for a kernel that handles any sequence length (padded K/V
+  sequence), and `pddv` is 1 for one that handles a head dim padded up to the
+  row's head dim. A **psskddv** row has both set.
+- `mode` is 0 for batch mode and 1 for group (varlen) mode.
+
+Not every row is dispatched:
+
+- **`fmha_bwd_dq_shuffle.csv` (gfx950 only):** vendored and used. With the A16
+  accumulator, gfx950 writes dQ through the DQ_SHUFFLE post stage for every
+  D_qk other than 64. gfx942 does not vendor this table: its A16 kernels write
+  dQ themselves, and AITER never runs a shuffle stage there.
+- **Group (varlen) rows (`mode = 1`):** vendored but not dispatched. The engine
+  declines group mode, so it serves batch-mode rows (`mode = 0`) only.
+- **hd256 rows (gfx950):** vendored but not dispatched. Every hd256 row is a
+  group row, and the engine declines head dims above 128 on gfx950 except
+  D_qk = 192 with D_v = 128.
+- **hd64 and hd192 x hd192 batch rows (gfx950):** vendored but not
+  dispatched. AITER's gfx950 gate (`can_impl_fmha_v3_bwd_gfx950`) sends these
+  head dims to CK, and `isBatchShapeSupported` declines them too. The hd192
+  dq_convert and dq_shuffle rows are used: D_qk = 192 with D_v = 128 keys the
+  post stage on hdim_q 192. The hd192 odo rows are not used, because odo keys
+  on padded hdim_v (128).
+
+## Data-type contract
+
+`SdpaFwdPlanBuilder` and `SdpaBwdPlanBuilder` decline (in `isApplicable`, with a logged
+reason) any graph outside this contract:
+
+| Tensor / attribute | Forward (`SdpaFwdPlanBuilder`, gfx942/gfx950) | Backward (`SdpaBwdPlanBuilder`, gfx942) |
+|---|---|---|
+| Q, K, V | BF16, or FP8_E4M3_FNUZ (gfx942 kernels only, scalar q/k/v descales required) | BF16 or FP16 |
+| O | BF16 | same dtype as Q (not yet checked by `isApplicable`; tracked in ALMIOPEN-3050) |
+| dO, dQ, dK, dV | — | same dtype as Q |
+| Stats (LSE) | FP32 (optional output) | FP32 (required input) |
+| Node `compute_data_type` | FLOAT | FLOAT |
+| `mma_core_mode` | UNSET, or HALF/BFLOAT16 for BF16 inputs | — |
+| Descale Q, K, V (FP8 only) | FLOAT scalars, non-virtual, non-pass-by-value device tensors | — |
+
+- **Accumulation.** QKᵀ, the online softmax and PV accumulate in fp32 inside the kernels;
+  no intermediate tensor is exposed. Backward dQ accumulates through an fp32 workspace by
+  default (`a32`). The `sdpa.bwd.accumulator_type=a16` knob opts into the 16-bit path.
+- **Intermediate data type.** Neither builder reads the graph's `intermediate_data_type`.
+  The frontend uses it only to type unset virtual tensors, and it is `(cache_ignore)` in
+  `graph.fbs`. These single-node kernels expose no intermediate tensor, so both builders
+  decline a virtual or pass-by-value operand tensor instead (forward: Q, K, V, O, Stats and the
+  FP8 descales; backward: every operand). Neither has a device buffer, and execute needs a
+  pointer for every operand.
+- **Enforcement.** Any other combination is declined in `isApplicable` with a logged reason,
+  except the backward O dtype noted in the table.
 
 ## Verified Kernel Matrix
 
-The backward dispatch (`SdpaBwdPlanBuilder`) can resolve kernels for any
-`(dtype, head-dim)` combination present in the CSV registry, but only some of
-those combinations have been calibrated against a CPU backward reference. The
-table below records which are **verified** (numerically validated) and which are
-**unverified** (dispatch succeeds, but results have not been checked against a
-reference).
+Every graph the backward engine accepts runs a kernel AITER ships. The engine
+follows AITER's choice of kernel (the gate in `aiter/ops/mha.py` and
+`get_heuristic_kernel()` in `mha_bwd.cu`) with these deliberate differences:
 
-| dtype | hd64 | hd128 | hd192 |
+- A `pssk = 0` DQDKDV row also needs every (batch, head) offset its kernel
+  forms in 32 bits to fit (`psskOffOffsetsFitU32`), which AITER does not check.
+  Otherwise the engine takes a `pssk = 1` row.
+- When no row has exactly the requested `pssk` and `pddv`, the engine takes the
+  smallest qualifying (`pssk`, `pddv`); AITER takes whichever its map yields last.
+- The engine serves two cases AITER sends to CK: Sq ≤ 16, and gfx942 bands with
+  left bound 0 and right bound 0 or unbounded
+  ([SDPA backward test plan §4.6](../../../../../../integration-tests/docs/test-plans/sdpa-bwd.md#46-asm_sdpa_engine-scope)).
+
+A dispatch whose kernel has been checked on a GPU against the CPU backward
+reference, at the head dims it runs, is **verified**.
+
+The verified list is `K_VERIFIED_KERNELS` in `plans/SdpaBwdPlanBuilder.cpp`.
+Each entry names an arch, a dtype and the head dims of DQDKDV registry rows.
+`isVerifiedDispatch()` counts a dispatch as verified only when both of these
+hold:
+
+1. The DQDKDV row matches an entry on arch, dtype, row `hdim_q` and row `hdim_v`.
+2. The graph's head dims equal the row's head dims, so no head-dim padding
+   applies.
+
+An entry is added only when every batch row that a graph with the entry's head
+dims can select has passed on a GPU at the row's own head dims. The table lists
+those rows by (`pssk`, `pddv`), accumulator and mask.
+
+| Arch | dtype | D_qk x D_v | Rows: (pssk, pddv) accumulator, masks |
 |---|---|---|---|
-| bf16 | unverified | **verified** | unverified |
-| fp16 | unverified | **verified** | unverified |
+| gfx942 | bf16 | 64 x 64 | (1, 0) A32, 0-2; (0, 0) A16, 0-1 |
+| gfx942 | bf16 | 128 x 128 | (1, 1) A32, 0-3; (0, 0) A32, 0-1; (0, 0) A16, 0-1 |
+| gfx942 | bf16 | 192 x 192 | (1, 1) A32, 0-2 |
+| gfx942 | fp16 | 64 x 64 | (1, 0) A32, 0-2; (0, 0) A16, 0-1 |
+| gfx942 | fp16 | 128 x 128 | (1, 1) A32, 0-3; (0, 0) A32, 0-1; (0, 0) A16, 0-1 |
+| gfx942 | fp16 | 192 x 192 | (1, 1) A32, 0-2 |
+| gfx950 | bf16 | 128 x 128 | (1, 1) A16 and A32, 0-4 |
+| gfx950 | bf16 | 192 x 128 | (1, 1) A16 and A32, 0-2 |
+| gfx950 | fp16 | 128 x 128 | (1, 1) A16 and A32, 0-4 |
+| gfx950 | fp16 | 192 x 128 | (1, 1) A16 and A32, 0-2 |
 
-This matrix is the source of truth for the `verified` flag computed in
-`SdpaBwdPlanBuilder.cpp` (`computeDispatchTuples`). At runtime, dispatch emits a
-one-time log per `(dtype, hdim, mask)`:
+The GPU runs are `IntegrationGpuSdpaBwdBf16` and `IntegrationGpuSdpaBwdFp16`
+(instances `Smoke` and `Comprehensive`), which passed on MI300X (gfx942) and
+MI355X (gfx950) in PR #15484. Each row in the table is selected by at least one
+of those cases at the row's own head dims.
 
-- **verified** kernel → `INFO` line confirming the configuration is validated.
-- **unverified** kernel → `WARN` line stating the results are not validated
+The gfx950 192 x 128 rows carry `pssk = 1` and `pddv = 1` in their CSV,
+although their object names end in `_pssk`. The bf16 rows are the RTNE ones:
+the engine never selects the RTNA or RTZ rows.
+
+Every other configuration the engine accepts is unverified, which means any
+padded head dim. That includes the gfx942 hd128 A16 rows with `pddv = 1`
+(`*_a16*_pddv`): an unpadded request takes the `pddv = 0` row beside them, so
+they run only for padded head dims.
+
+Dispatch logs once per (arch, dtype, row head dims, mask, accumulator,
+verified):
+
+- **Verified** kernel: an `INFO` line confirming the configuration is checked.
+- **Unverified** kernel: a `WARN` line stating the results are not validated
   against a CPU reference.
 
-When a configuration is calibrated, update both this table and the `verified`
-predicate in `computeDispatchTuples` so the documentation and code stay in sync.
+An unverified configuration keeps its `WARN` until it passes on a GPU. When
+every row that a new key's graphs can select has passed at the row's own head
+dims, add the key to `K_VERIFIED_KERNELS`, its rows to the table above, and a
+case for one of its rows to the `TestSdpaBwdVerifiedDispatch` unit tests, in
+the same change.

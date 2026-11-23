@@ -27,11 +27,16 @@
 #include <gtest/gtest.h>
 #include <vector>
 
-typedef std::tuple<int> rsamg_extpi_fallback_tuple;
+typedef std::tuple<int, int> rsamg_extpi_fallback_tuple;
 
-// Number of coarse points the single fine point is strongly connected to. 512 stays inside the
-// LDS capacity of the fill kernel, 4200 forces the host fallback.
-std::vector<int> rsamg_extpi_fallback_size = {512, 4200};
+// Number of coarse points the single fine point is strongly connected to. 100 and 512 stay inside
+// the LDS capacity of the fill kernel, 4200 forces the host fallback. 100 selects the 128-entry
+// hash tables of a full wavefront.
+std::vector<int> rsamg_extpi_fallback_size = {100, 512, 4200};
+
+// Row of the fine point. In row 1, the first wavefront of the first block holds a coarse point
+// and returns early.
+std::vector<int> rsamg_extpi_fallback_centre = {0, 1};
 
 class parameterized_rsamg_extpi_host_fallback
     : public testing::TestWithParam<rsamg_extpi_fallback_tuple>
@@ -46,7 +51,8 @@ protected:
 Arguments setup_rsamg_extpi_fallback_arguments(rsamg_extpi_fallback_tuple tup)
 {
     Arguments arg;
-    arg.size = std::get<0>(tup);
+    arg.size  = std::get<0>(tup);
+    arg.index = std::get<1>(tup);
     return arg;
 }
 
@@ -64,4 +70,5 @@ TEST_P(parameterized_rsamg_extpi_host_fallback, rsamg_extpi_host_fallback_double
 
 INSTANTIATE_TEST_CASE_P(rsamg_extpi_host_fallback,
                         parameterized_rsamg_extpi_host_fallback,
-                        testing::Combine(testing::ValuesIn(rsamg_extpi_fallback_size)));
+                        testing::Combine(testing::ValuesIn(rsamg_extpi_fallback_size),
+                                         testing::ValuesIn(rsamg_extpi_fallback_centre)));
