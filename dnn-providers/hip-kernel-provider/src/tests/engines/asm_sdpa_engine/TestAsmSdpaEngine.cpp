@@ -327,7 +327,10 @@ TEST_F(TestAsmSdpaEngine, GetDetailsReportsKnobsOfApplicableBuilderOnly)
     engine.addPlanBuilder(std::move(declining));
     engine.addPlanBuilder(std::move(serving));
 
+    // getDetails reads the graph's node types for the numerical notes.
+    const NodeList noNodes;
     const hipdnn_test_sdk::utilities::MockGraph graph;
+    EXPECT_CALL(graph, nodeWrappers()).WillRepeatedly(::testing::ReturnRef(noNodes));
     hipdnnPluginConstData_t detailsOut;
     engine.getDetails(_handle, graph, detailsOut);
     const EngineDetailsWrapper engineDetails(detailsOut.ptr, detailsOut.size);
