@@ -11,6 +11,7 @@ The base class's optional MT_DU filtering still runs via ``apply``.
 
 from typing import Dict, List, Sequence, Tuple
 
+from geko.config_generator.constants import mx_format
 from geko.config_generator.fork_params.hw_profiles.gfx1250.cluster_dim import (
     select_cluster_dims,
     tile_grid,
@@ -231,19 +232,60 @@ def _mi_num_waves(entry: Dict[str, ForkParameter]) -> int:
     return waves
 
 
-class _GFX1250TDMFuseOneWave:
-    """Keep one-wave MI groups at TDMFuse=0.
+def _tdm_fuse_builds(value: int, waves: int, both_scales: bool) -> bool:
+    """Whether TensileLite builds ``TDMFuse=value`` on a workgroup of ``waves`` waves.
 
-    Tensile rejects TDMFuse 1-3 on one wave ("TDMFuse=%d needs more than one
-    wave ... Use TDMFuse=0 on one wave"): those values split a descriptor set's
-    loads across waves. A flat TDMFuse that the profile pins to 1 would leave
-    every one-wave MI without a valid kernel, so when any MI group has one wave
-    the flat parameter moves into the MI groups: one-wave groups get the values
-    that build there (0), every other group keeps the profile's values.
+    Solution.py rejects TDMFuse 1-3 on one wave ("TDMFuse=%d needs more than one
+    wave"), and with MX scales on both tensors it rejects TDMFuse 2 and 3 on any
+    wave count but 2 and 4 ("TDMFuse=%d with MX scales on both tensors supports
+    2 or 4 waves"). ``waves`` 0 means the MI cannot be read; it keeps every value.
+    """
+    if value == 0 or waves == 0:
+        return True
+    if waves == 1:
+        return False
+    if value in (2, 3) and both_scales:
+        return waves in (2, 4)
+    return True
+
+
+def _dedupe_entries(entries: GroupDimension) -> GroupDimension:
+    """Drop repeated MI group entries, keyed on their values, keeping the first."""
+    seen = set()
+    out = []
+    for e in entries:
+        key = tuple(sorted((name, repr(fp.values)) for name, fp in e.items()))
+        if key not in seen:
+            seen.add(key)
+            out.append(e)
+    return out
+
+
+class _GFX1250TDMFuseWaveCount:
+    """Give each MI group the TDMFuse values TensileLite builds on its wave count.
+
+    TDMFuse 1-3 split a descriptor set's loads across waves, so Tensile rejects
+    them on one wave, and with MX scales on both tensors TDMFuse 2 and 3 build
+    only on 2 or 4 waves (see :func:`_tdm_fuse_builds`). geko's MX problems put
+    one block size on A and B, so both scales are live whenever the problem is
+    MX. A flat TDMFuse would leave those MIs with draws that cannot build, so
+    when some MI group cannot build every flat value, TDMFuse moves into the MI
+    groups: each group gets one single-valued entry per value it builds, and a
+    group that builds none of them gets TDMFuse 0. Otherwise the flat parameter
+    stays as it is.
     """
 
+    def _mx_scales_on_both(self) -> bool:
+        gemm = getattr(self, "config", {}).get("GemmProblem")
+        if gemm is None:
+            return False
+        try:
+            return mx_format(gemm, self.config.get("ARCH")) is not None
+        except ValueError:
+            return False
+
     @mark_post_process
-    def keep_one_wave_tdm_fuse_zero(
+    def fit_tdm_fuse_to_wave_count(
         self,
         fork_params: Dict[str, ForkParameter],
         mi_groups: GroupDimension,
@@ -252,13 +294,18 @@ class _GFX1250TDMFuseOneWave:
         fp = fork_params.get("TDMFuse")
         if fp is None or not isinstance(fp.values, list):
             return fork_params, mi_groups
-        if not any(_mi_num_waves(e) == 1 for e in mi_groups):
+        both_scales = self._mx_scales_on_both()
+        per_entry = [
+            [v for v in fp.values if _tdm_fuse_builds(v, _mi_num_waves(e), both_scales)] or [0]
+            for e in mi_groups
+        ]
+        if all(values == list(fp.values) for values in per_entry):
             return fork_params, mi_groups
-        one_wave = [v for v in fp.values if v == 0] or [0]
-        coupled = []
-        for entry in mi_groups:
-            values = one_wave if _mi_num_waves(entry) == 1 else list(fp.values)
-            coupled.append({**entry, "TDMFuse": self._make_param("TDMFuse", values)})
+        coupled = [
+            {**entry, "TDMFuse": self._make_param("TDMFuse", [v])}
+            for entry, values in zip(mi_groups, per_entry)
+            for v in values
+        ]
         del fork_params["TDMFuse"]
         return fork_params, coupled
 
@@ -296,17 +343,20 @@ class _GFX1250SegmentInterleaveLayout:
 
       * every MI gets an entry per other LDSSegmentInterleave value (0) and
         per TDMFuse value: TDMFuse 0, the layout the 1 entries use, and every
-        TDMFuse value the MI already had (the profile's 1, which keeps
-        TemporalHintA/B independent; see ``GFX1250GAParams.tdm_fuse`` and
-        _GFX1250TemporalHintCoupling, which runs next). A
-        one-wave MI keeps only TDMFuse 0, as _GFX1250TDMFuseOneWave decided;
+        TDMFuse value the MI already had (the profile's 1, and 3 for MX
+        problems, which keep TemporalHintA/B independent; see
+        ``GFX1250GAParams.tdm_fuse`` and _GFX1250TemporalHintCoupling, which
+        runs next). A one-wave MI keeps only TDMFuse 0, and an MI on which
+        Tensile rejects 3 does not get it, as _GFX1250TDMFuseWaveCount decided;
       * an MI that can interleave (:func:`_can_interleave`) also gets one
         entry with ``LDSSegmentInterleave=1`` and ``TDMFuse=0``. MIs that
         cannot interleave get no such entry.
 
-    TDMFuse is read from the MI group when _GFX1250TDMFuseOneWave has
-    already moved it there, otherwise from the flat parameter, which is then
-    dropped. Without any TDMFuse the 0 entries carry none. The step does
+    TDMFuse is read from the MI group when _GFX1250TDMFuseWaveCount has
+    already moved it there, one entry per value, otherwise from the flat
+    parameter, which is then dropped. The copies an MI gets from each of its
+    TDMFuse entries are merged, so every (LDSSegmentInterleave, TDMFuse) pair
+    appears once per MI. Without any TDMFuse the 0 entries carry none. The step does
     nothing when the flat LDSSegmentInterleave is missing, inactive, or does
     not offer 1 next to another value (for instance after Rule C narrowed it
     to [0] because no MI can interleave).
@@ -353,7 +403,7 @@ class _GFX1250SegmentInterleaveLayout:
         del fork_params["LDSSegmentInterleave"]
         if flat_tdm is not None:
             del fork_params["TDMFuse"]
-        return fork_params, coupled
+        return fork_params, _dedupe_entries(coupled)
 
 
 def _flat_values(fp):
@@ -371,9 +421,11 @@ class _GFX1250TemporalHintCoupling:
     TemporalHintA and TemporalHintB agree (Solution.py, Components/NonTemporal.py):
     (0, 1) and (1, 0) build the (0, 0) code under another kernel name, so Ductile
     would build and time them as separate kernels. Under ``TDMFuse > 0`` A and B
-    have descriptor sets of their own and every (A, B) pair builds its own kernel.
+    have descriptor sets of their own (TDMFuse 1: {A, MXSA} + {MXSB, B};
+    TDMFuse 3: {B, MXSA, MXSB} + {A}), each set's hints follow its data tensor,
+    and every (A, B) pair builds its own kernel.
 
-    So once TDMFuse lives in the MI groups (_GFX1250TDMFuseOneWave,
+    So once TDMFuse lives in the MI groups (_GFX1250TDMFuseWaveCount,
     _GFX1250SegmentInterleaveLayout), the flat TemporalHintA/B move into the MI
     groups as well, one single-valued entry per pair: entries with ``TDMFuse > 0``
     get every (A, B) pair of the flat values, entries with ``TDMFuse = 0`` only the
@@ -588,15 +640,15 @@ class _GFX1250ClusterDimCoupling:
 # about to drop would be needlessly conservative. Listing the narrowing first
 # here therefore runs it second. _GFX1250ClusterDimCoupling is listed first so
 # it runs last, on the final, de-duplicated MI groups. Before it, in run order:
-# _GFX1250TDMFuseOneWave; _GFX1250SegmentInterleaveLayout, which reads the
-# TDMFuse the one-wave step left on each group and so must follow it, and runs
+# _GFX1250TDMFuseWaveCount; _GFX1250SegmentInterleaveLayout, which reads the
+# TDMFuse the wave-count step left on each group and so must follow it, and runs
 # after the narrowing so Rule C has already dropped an LDSSegmentInterleave=1
 # that no MI can build; and _GFX1250SourceSwapSplit, which repeats every
 # (MI, LDSSegmentInterleave, TDMFuse) entry once per SourceSwap value right
 # before the coupling, so the coupling ranks each entry on the tile it builds.
 # Each per-shape copy inherits its entry's SourceSwap, LDSSegmentInterleave and
 # TDMFuse. The steps therefore run as: _GFX1250WaveTileFilter,
-# _GFX1250GeometryNarrowing, _GFX1250DropMIGroupGSU, _GFX1250TDMFuseOneWave,
+# _GFX1250GeometryNarrowing, _GFX1250DropMIGroupGSU, _GFX1250TDMFuseWaveCount,
 # _GFX1250SegmentInterleaveLayout, _GFX1250TemporalHintCoupling,
 # _GFX1250SourceSwapSplit, _GFX1250ClusterDimCoupling.
 class GFX1250GAPostProcessor(
@@ -605,7 +657,7 @@ class GFX1250GAPostProcessor(
     _GFX1250SourceSwapSplit,
     _GFX1250TemporalHintCoupling,
     _GFX1250SegmentInterleaveLayout,
-    _GFX1250TDMFuseOneWave,
+    _GFX1250TDMFuseWaveCount,
     _GFX1250DropMIGroupGSU,
     _GFX1250GeometryNarrowing,
     _GFX1250WaveTileFilter,

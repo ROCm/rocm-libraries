@@ -554,26 +554,34 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
 
     @param
     def tdm_fuse(self, ctx: SizeContext) -> ForkParameter:
-        """Pinned [1] -- {A, MXSA} + {MXSB, B}, so A and B never share a TDM load.
+        """[1], plus 3 for MX problems -- groupings where A and B never share a TDM load.
+
+        TDMFuse picks which tensors share a TDM descriptor set (Components/TDMFuse.py):
+        0 {A, B} + {MXSA, MXSB} (develop's default), 1 {A, MXSA} + {MXSB, B},
+        2 {A, MXSA, MXSB} + {B}, 3 {B, MXSA, MXSB} + {A}.
 
         A ``tensor_load_to_lds`` carries one set of th/scope/nv bits for every
-        tensor it moves. Under TDMFuse=0 (develop's default, {A, B} + {MXSA, MXSB})
-        A and B share that instruction, so a TemporalHint is applied only when
-        TemporalHintA and TemporalHintB agree: of the four (A, B) pairs swept
-        below, (0, 1) and (1, 0) both build the (0, 0) kernel and only (1, 1)
-        differs. TDMFuse=1 gives A and B a descriptor set each, so every pair
-        builds its own kernel. Once TDMFuse is coupled per MI group,
-        ``_GFX1250TemporalHintCoupling`` in post_processor.py moves
-        TemporalHintA/B into the groups and gives TDMFuse=0 entries only the
-        agreeing pairs.
+        tensor it moves. Under TDMFuse=0 A and B share that instruction, so a
+        TemporalHint is applied only when TemporalHintA and TemporalHintB agree:
+        of the four (A, B) pairs swept below, (0, 1) and (1, 0) both build the
+        (0, 0) kernel and only (1, 1) differs. TDMFuse 1 and 3 give A and B a
+        descriptor set each, so every pair builds its own kernel. Once TDMFuse is
+        coupled per MI group, ``_GFX1250TemporalHintCoupling`` in
+        post_processor.py moves TemporalHintA/B into the groups and gives
+        TDMFuse=0 entries only the agreeing pairs.
 
-        TDMFuse 1-3 need more than one wave; ``_GFX1250TDMFuseOneWave`` in
-        post_processor.py keeps one-wave MIs at TDMFuse=0. TDMFuse>0 also rules
-        out the paired LDS layout, so ``_GFX1250SegmentInterleaveLayout`` gives
-        LDSSegmentInterleave=1 entries TDMFuse=0 and offers the
-        LDSSegmentInterleave=0 entries both TDMFuse 0 and 1.
+        3 is offered for MX problems only: without MX scales TDMFuse 1-3 all
+        reduce to {A} + {B} and issue the same loads, so 3 would rebuild the
+        TDMFuse=1 kernel under another name. 2 is not offered.
+
+        TDMFuse 1-3 need more than one wave, and with MX scales on both tensors
+        TDMFuse 3 builds only on 2 or 4 waves; ``_GFX1250TDMFuseWaveCount`` in
+        post_processor.py gives each MI the values it builds. TDMFuse>0 also
+        rules out the paired LDS layout, so ``_GFX1250SegmentInterleaveLayout``
+        gives LDSSegmentInterleave=1 entries TDMFuse=0 and offers the
+        LDSSegmentInterleave=0 entries TDMFuse 0 next to the values above.
         """
-        return self._make_param("TDMFuse", [1])
+        return self._make_param("TDMFuse", [1, 3] if self._mx_block() else [1])
 
     @param
     def compact_loop_store(self, ctx: SizeContext) -> ForkParameter:
