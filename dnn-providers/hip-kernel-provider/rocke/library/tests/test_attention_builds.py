@@ -30,7 +30,7 @@ import unittest
 import pytest
 
 from rocke import lower_kernel_to_llvm
-from rocke.runtime.comgr import loaded_compiler_info
+from rocke.tests.comgr import loaded_compiler_build
 from rocke.tests.compiler_tools import require_tools_or_skip
 from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until
 from rocke.tests.pending_lanes import (
@@ -208,7 +208,7 @@ def _assert_resources_fit(art, *, arch: str, kernel_name: str = ""):
     scratch = res.scratch_bytes
     if scratch is not None:
         max_scratch = measured_scratch_allowance(
-            _MEASURED_BUDGETS_PATH, kernel_name, loaded_compiler_info()
+            _MEASURED_BUDGETS_PATH, kernel_name, loaded_compiler_build()
         )
         assert scratch <= max_scratch, (
             f"{name} spills {scratch} B to scratch on {arch} (VGPR {res.vgpr_count}), "

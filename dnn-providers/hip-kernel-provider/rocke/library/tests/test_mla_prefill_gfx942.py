@@ -21,7 +21,12 @@ import unittest
 from pathlib import Path
 
 from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.tests.comgr import loaded_compiler_build
 from rocke.tests.compiler_tools import require_tools_or_skip
+from rocke.tests.pending_lanes import (
+    measured_budget_kernels,
+    measured_scratch_allowance,
+)
 
 from kernels.mla.mla_prefill_gfx942 import (
     MlaPrefillSpec,
@@ -37,6 +42,9 @@ from kernels.mla.mla_prefill_gfx942 import (
 )
 
 from ._compiler_test_utils import skip_where_compiler_refuses_option
+
+# This file's path in rocke.tests.pending_lanes.MEASURED_BUDGETS.
+_MEASURED_BUDGETS_PATH = "library/tests/test_mla_prefill_gfx942.py"
 
 
 def _spec(**kw) -> MlaPrefillSpec:
@@ -447,6 +455,7 @@ class _OccupancyGuard:
                 )
         except ImportError as exc:  # pragma: no cover - environment-dependent
             require_tools_or_skip(f"comgr toolchain unavailable: {exc}")
+        cls.kernel_name = art.kernel_name
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "mla_prefill_fwd.hsaco"
             path.write_bytes(bytes(art.hsaco))
@@ -463,8 +472,13 @@ class _OccupancyGuard:
         self.assertIsNotNone(self.res.vgpr_count)
         self.assertLessEqual(self.res.vgpr_count, self.VGPRS_PER_SIMD // 2)
 
-    def test_no_scratch(self):
-        self.assertEqual(self.res.scratch_bytes, 0)
+    def test_scratch_within_budget(self):
+        """No scratch, unless the loaded compiler is one this kernel has a
+        measured budget for (``rocke.tests.pending_lanes.MEASURED_BUDGETS``)."""
+        allowance = measured_scratch_allowance(
+            _MEASURED_BUDGETS_PATH, self.kernel_name, loaded_compiler_build()
+        )
+        self.assertLessEqual(self.res.scratch_bytes, allowance)
 
     def test_two_workgroups_per_cu(self):
         vgpr = -(-self.res.vgpr_count // 8) * 8
@@ -476,6 +490,13 @@ class _OccupancyGuard:
 
 class TestShippedLayoutOccupancy(_OccupancyGuard, unittest.TestCase):
     """The layout dispatch ships for a DeepSeek-V3-shaped request."""
+
+    def test_every_measured_budget_names_this_kernel(self):
+        """A budget whose kernel name no longer matches the shipped layout's
+        (a re-tuned dispatch) would silently stop applying."""
+        self.assertLessEqual(
+            measured_budget_kernels(_MEASURED_BUDGETS_PATH), {self.kernel_name}
+        )
 
     @staticmethod
     def make_spec():

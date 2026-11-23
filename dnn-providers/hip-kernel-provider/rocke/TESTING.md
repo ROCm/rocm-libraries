@@ -1399,8 +1399,8 @@ with its reason, owner and expiry. It holds three kinds of record:
 | Kind | Records | Expired entry |
 |---|---|---|
 | `PendingTest` | a test file (or one test of it, `node`) waiting for a lane; the file is not known to be broken. Under a lane no CI entry runs yet (a scheduled run, an unlanded PR) it covers every case of the file; under a lane CI lacks (torch, a gfx950 or gfx1250 runner, the C++ engine's Python modules) it covers only the cases that declare that lane where they skip (below). One entry per lane a file's cases wait for; a file under a lane that waits for torch imports torch | warns, and fails only a change that touches the registry or that file (every scheduled run under `--strict-expiry`) |
-| `MeasuredBudget` | the scratch bytes one test allows one kernel on one compiler while its retune is decided | as `PendingTest` |
-| `QuarantinedTest` | one test known to fail (a flake, or a defect that turns develop red), by item id `<file>::<node name>`; a name without parameters covers all of them. Needs an issue (`AICK-1234`, `ROCm/<repo>#<n>`, or `none filed yet`); may name the GPU arches it fails on, to be held out there only; at most `QUARANTINE_CAP` (10) at once | always fails |
+| `MeasuredBudget` | the scratch bytes one test allows one kernel on the compilers it was measured on (`Compilers`: an LLVM major, llvm-project commits, or both; two builds of one major can differ), while its retune is decided; any other compiler gets the strict rule | as `PendingTest` |
+| `QuarantinedTest` | one test known to fail (a flake, or a defect that turns develop red), by item id `<file>::<node name>`; a name without parameters covers all of them. Needs an issue (`AICK-1234`, `ROCm/<repo>#<n>`, or `none filed yet`); may name the GPU arches and the compilers (`Compilers`) it fails with, to be held out there only; at most `QUARANTINE_CAP` (10) at once | always fails |
 
 **A skipped case names its lane where it skips.** The lanes are
 [`rocke.tests.lanes`](platform/python/rocke/tests/lanes.py). A case that skips
@@ -1432,9 +1432,10 @@ its own arch, a missing installed artifact) names no lane, and no entry can
 cover it: it shows up in limbo until it is fixed or quarantined.
 
 The pytest roots of `platform/tests` and `library/tests` skip a quarantined test
-with the reason `quarantined: <issue>` (plus `on <arch>` for an arch-scoped
-entry), so it stays visible in every report; `ROCKE_QUARANTINE=ignore` runs it
-to debug or fix it. A pending file that fails once its lane runs moves to
+with the reason `quarantined: <issue>` (plus `on <arch>` for an arch-scoped entry
+and `with llvm-project <commit>`, or `with LLVM <major>`, for a compiler-scoped
+one), so it stays visible in every report; `ROCKE_QUARANTINE=ignore` runs it to
+debug or fix it. A pending file that fails once its lane runs moves to
 quarantine; it does not stay pending.
 
 Two checks hold the tree to the registry. The PR gate

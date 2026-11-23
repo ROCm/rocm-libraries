@@ -56,17 +56,21 @@ The file-level check cannot see single cases. ``tools/limbo_audit.py`` checks
 them: from the run records (``rocke.tests.run_records``) of CI lanes, it fails
 on each case no lane ran that :func:`waiting_entry` finds no record for.
 
+Measured budgets and quarantines apply to some compiler builds only; both name
+them the same way (:class:`Compilers`): by LLVM major, by the llvm-project
+commits of the builds, or by both.
+
 A measured budget is the other kind of record: a test's resource check allows
-one kernel the bytes one compiler is measured to spill, while the kernel owners
-decide its retune. The allowance applies only on that compiler (matched by LLVM
-major); on any other the test's strict rule holds. It carries the same reason,
-owner and expiry, and the same check reports it stale or expired.
+one kernel the bytes the named compilers are measured to spill, while the
+kernel owners decide its retune. With any other compiler the test's strict rule
+holds. It carries the same reason, owner and expiry, and the same check reports
+it stale or expired.
 
     MeasuredBudget(
         path="library/tests/test_example.py",  # the test file that applies it
         kernel_name="rocke_example_kernel",
         scratch_bytes=40,
-        llvm_major=24,
+        compilers=Compilers(llvm_major=24),
         reason="spills 40 B at its VGPR cap on LLVM 24; LLVM 20 spills none",
         owner="kernel owners; issue: none filed yet",
         expires="2027-01-31",
@@ -77,10 +81,9 @@ red) and is held out of every run until it is fixed. It names one pytest item,
 or every parameter of one test function, and the issue that tracks the fix
 (``NO_ISSUE_FILED`` until one is filed). A test that fails only on some GPU
 arches names them, and is held out on those arches only; one that fails only
-when built by some compilers (a defect of one compiler build) names the
-llvm-project commits of those builds, and is held out only while the loaded
-COMGR's compiler is one of them. The pytest roots of
-``platform/tests`` and ``library/tests`` skip it with the reason
+when built by some compilers (a defect of one compiler build) names them, and
+is held out only while the loaded COMGR's compiler is one of them. The pytest
+roots of ``platform/tests`` and ``library/tests`` skip it with the reason
 ``quarantined: <issue>`` (``rocke.tests.quarantine``), so it stays visible in
 every report; ``ROCKE_QUARANTINE=ignore`` runs it anyway. Rules stricter than a
 pending entry's hold it: an expired quarantine always fails the check, and at
@@ -94,7 +97,7 @@ most ``QUARANTINE_CAP`` tests may be quarantined at once.
         expires="2027-01-31",
         arches=("gfx950",),  # optional: the GPU arches it fails on
         runs_files=(),  # optional: test files it runs in a child process
-        llvm_commits=("424729dba653",),  # optional: the compiler builds it fails with
+        compilers=Compilers(llvm_commits=("424729dba653",)),  # optional
     )
 
 Paths, owners and issues are plain text: no links.
@@ -106,9 +109,9 @@ import datetime
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from ..core.arch.target import known_arches
+from .comgr import CompilerBuild
 from .lanes import (
     BINDING_LANE,
     CI_TEST_TOOLS,
@@ -133,9 +136,6 @@ from .lanes import (
     lanes_waited_for,
 )
 
-if TYPE_CHECKING:
-    from ..runtime.comgr import CompilerInfo
-
 __all__ = [
     "MEASURED_BUDGETS",
     "NO_ISSUE_FILED",
@@ -145,6 +145,7 @@ __all__ = [
     "QUARANTINE_SKIP_PREFIX",
     "QUARANTINE_TREES",
     "TEST_FILE_ROOTS",
+    "Compilers",
     "MeasuredBudget",
     "PendingTest",
     "QuarantinedTest",
@@ -257,18 +258,69 @@ class PendingTest:
         return datetime.date.fromisoformat(self.expires)
 
 
+# An llvm-project commit: at least 12 of its lowercase hex digits.
+_LLVM_COMMIT = re.compile(r"[0-9a-f]{12,40}")
+
+
+@dataclass(frozen=True)
+class Compilers:
+    """The compiler builds a measured budget or a quarantine applies to: those
+    of LLVM major ``llvm_major``, those built from one of the llvm-project
+    commits ``llvm_commits`` (each at least 12 hex digits), or, when both are
+    given, those that are both. Two builds of one LLVM major can differ (one
+    spills where the other does not), so a record measured on one build names
+    its commit."""
+
+    llvm_major: int | None = None
+    llvm_commits: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.llvm_major is None and not self.llvm_commits:
+            raise ValueError(
+                "Compilers failed - llvm_major=None, llvm_commits=(), expected an "
+                "LLVM major, llvm-project commits or both"
+            )
+        if self.llvm_major is not None and (
+            isinstance(self.llvm_major, bool)
+            or not isinstance(self.llvm_major, int)
+            or self.llvm_major <= 0
+        ):
+            raise ValueError(
+                f"Compilers failed - llvm_major={self.llvm_major!r}, expected a "
+                "positive integer"
+            )
+        if not isinstance(self.llvm_commits, tuple) or not all(
+            isinstance(commit, str) and _LLVM_COMMIT.fullmatch(commit)
+            for commit in self.llvm_commits
+        ):
+            raise ValueError(
+                f"Compilers failed - llvm_commits={self.llvm_commits!r}, expected a "
+                "tuple of llvm-project commits, each 12 to 40 lowercase hex digits"
+            )
+
+    def include(self, build: CompilerBuild) -> bool:
+        """Whether ``build`` (``rocke.tests.comgr.loaded_compiler_build()``) is
+        one of these compilers; a build whose major or commit is unknown is
+        none of those that name it."""
+        if self.llvm_major is not None and build.llvm_major != self.llvm_major:
+            return False
+        return not self.llvm_commits or (
+            build.llvm_commit is not None
+            and build.llvm_commit.startswith(self.llvm_commits)
+        )
+
+
 @dataclass(frozen=True)
 class MeasuredBudget:
-    """The scratch bytes one test allows one kernel on one compiler, pending a
+    """The scratch bytes one test allows one kernel on some compilers, pending a
     retune. What the bytes bound is the test's own check: total spill, or spill
     above a reference build of the same kernel."""
 
     path: str
     kernel_name: str
     scratch_bytes: int
-    # The LLVM major of the compiler the bytes were measured on; on any other
-    # compiler the allowance is 0.
-    llvm_major: int
+    # The compilers the bytes were measured on; on any other the allowance is 0.
+    compilers: Compilers
     reason: str
     owner: str
     expires: str
@@ -280,13 +332,20 @@ class MeasuredBudget:
                 f"MeasuredBudget failed - path={self.path!r}, kernel_name is empty, "
                 "expected the exact kernel name"
             )
-        for field_name in ("scratch_bytes", "llvm_major"):
-            value = getattr(self, field_name)
-            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-                raise ValueError(
-                    f"MeasuredBudget failed - kernel_name={self.kernel_name!r}, "
-                    f"{field_name}={value!r}, expected a positive integer"
-                )
+        if (
+            isinstance(self.scratch_bytes, bool)
+            or not isinstance(self.scratch_bytes, int)
+            or self.scratch_bytes <= 0
+        ):
+            raise ValueError(
+                f"MeasuredBudget failed - kernel_name={self.kernel_name!r}, "
+                f"scratch_bytes={self.scratch_bytes!r}, expected a positive integer"
+            )
+        if not isinstance(self.compilers, Compilers):
+            raise TypeError(
+                f"MeasuredBudget failed - kernel_name={self.kernel_name!r}, "
+                f"compilers={self.compilers!r}, expected a Compilers"
+            )
         _require_recorded(
             "MeasuredBudget", self.path, self.reason, self.owner, self.expires
         )
@@ -307,8 +366,6 @@ NO_ISSUE_FILED = "none filed yet"
 QUARANTINE_SKIP_PREFIX = "quarantined: "
 # Where test files live, relative to the rocke directory.
 TEST_FILE_ROOTS: tuple[str, ...] = ("platform", "library")
-# An llvm-project commit: at least 12 of its lowercase hex digits.
-_LLVM_COMMIT = re.compile(r"[0-9a-f]{12,40}")
 # A Jira id (AICK-1234), a GitHub issue (ROCm/rocm-libraries#123) or
 # NO_ISSUE_FILED.
 _ISSUE = re.compile(
@@ -326,11 +383,10 @@ class QuarantinedTest:
     class. ``arches`` names the GPU arches it fails on, where it is held out;
     empty (the default) holds it out everywhere. ``runs_files`` names the test
     files the quarantined test runs in a child process, which it holds out
-    with it. ``llvm_commits`` names the llvm-project commits (at least 12 hex
-    digits) of the compiler builds it fails with, and holds it out only while
-    the loaded COMGR's compiler was built from one of them
-    (``rocke.runtime.comgr.loaded_compiler_commit``); empty (the default)
-    holds it out whatever the compiler.
+    with it. ``compilers`` names the compiler builds it fails with, and holds
+    it out only while the loaded COMGR's compiler is one of them
+    (``rocke.tests.comgr.loaded_compiler_build``); None (the default) holds it
+    out whatever the compiler.
     """
 
     test_id: str
@@ -340,7 +396,7 @@ class QuarantinedTest:
     expires: str
     arches: tuple[str, ...] = ()
     runs_files: tuple[str, ...] = ()
-    llvm_commits: tuple[str, ...] = ()
+    compilers: Compilers | None = None
 
     def __post_init__(self) -> None:
         path, separator, node_name = self.test_id.partition("::")
@@ -379,14 +435,10 @@ class QuarantinedTest:
             )
         for child in self.runs_files:
             _require_test_path("QuarantinedTest", child)
-        if not isinstance(self.llvm_commits, tuple) or not all(
-            isinstance(commit, str) and _LLVM_COMMIT.fullmatch(commit)
-            for commit in self.llvm_commits
-        ):
-            raise ValueError(
+        if self.compilers is not None and not isinstance(self.compilers, Compilers):
+            raise TypeError(
                 f"QuarantinedTest failed - test_id={self.test_id!r}, "
-                f"llvm_commits={self.llvm_commits!r}, expected a tuple of "
-                "llvm-project commits, each 12 to 40 lowercase hex digits"
+                f"compilers={self.compilers!r}, expected a Compilers or None"
             )
 
     @property
@@ -408,15 +460,11 @@ class QuarantinedTest:
         GPU): always when it names no arches, else only on one it names."""
         return not self.arches or arch in self.arches
 
-    def holds_out_with(self, llvm_commit: str | None) -> bool:
-        """Whether this entry holds its test out when the loaded compiler was
-        built from the llvm-project commit ``llvm_commit`` (None: unknown):
-        always when it names no commits, else only for one it names; an
-        unknown compiler is none of them."""
-        return not self.llvm_commits or (
-            llvm_commit is not None
-            and any(llvm_commit.startswith(commit) for commit in self.llvm_commits)
-        )
+    def holds_out_with(self, build: CompilerBuild) -> bool:
+        """Whether this entry holds its test out when the loaded compiler is
+        ``build``: always when it names no compilers, else only for one of
+        them (:meth:`Compilers.include`)."""
+        return self.compilers is None or self.compilers.include(build)
 
     def covers(self, path: str, node_name: str) -> bool:
         """Whether this entry quarantines the item ``node_name`` of ``path``."""
@@ -1223,18 +1271,25 @@ PENDING: tuple[PendingTest, ...] = (
 
 _ATTENTION_BUILDS = "library/tests/test_attention_builds.py"
 _GDN_DECODE_FUSED = "library/tests/test_gdn_decode_fused.py"
+_MLA_PREFILL = "library/tests/test_mla_prefill_gfx942.py"
 _COMPILER_20 = "ROCm 7.1 (AMD clang 20.0.0git, roc-7.1.0 25425)"
 # The llvm-project commits of two LLVM 24 compiler builds: the one CI pins, and
 # one a ROCm install ships.
 _LLVM_24_CI_COMMIT = "424729dba653"
 _LLVM_24_ROCM_INSTALL_COMMIT = "d6f6cb691863"
 _COMPILER_24 = f"AMD clang 24.0.0git (llvm-project {_LLVM_24_CI_COMMIT})"
+_LLVM_20 = Compilers(llvm_major=20)
+_LLVM_24 = Compilers(llvm_major=24)
+_LLVM_24_CI = Compilers(llvm_major=24, llvm_commits=(_LLVM_24_CI_COMMIT,))
+_LLVM_24_ROCM_INSTALL = Compilers(
+    llvm_major=24, llvm_commits=(_LLVM_24_ROCM_INSTALL_COMMIT,)
+)
 _SPILL_RETUNE_OWNER = "kernel owners; issue: none filed yet"
 _SPILL_RETUNE_EXPIRES = "2026-12-31"
 
 
 def _measured(
-    path: str, llvm_major: int, reason: str, *allowances: tuple[str, int]
+    path: str, compilers: Compilers, reason: str, *allowances: tuple[str, int]
 ) -> tuple[MeasuredBudget, ...]:
     """One spill-retune budget per ``(kernel name, bytes)``, all for one reason."""
     return tuple(
@@ -1242,7 +1297,7 @@ def _measured(
             path,
             kernel_name,
             scratch_bytes,
-            llvm_major,
+            compilers,
             reason,
             _SPILL_RETUNE_OWNER,
             _SPILL_RETUNE_EXPIRES,
@@ -1254,7 +1309,7 @@ def _measured(
 MEASURED_BUDGETS: tuple[MeasuredBudget, ...] = (
     *_measured(
         _ATTENTION_BUILDS,
-        20,
+        _LLVM_20,
         "gfx942 fp16 D128 tiled-2d, the shipped default geometry (wpe2): "
         f"{_COMPILER_20} caps VGPR at 256 for its 2-wave tuning and spills this "
         f"many bytes; {_COMPILER_24} compiles it with no scratch",
@@ -1265,7 +1320,7 @@ MEASURED_BUDGETS: tuple[MeasuredBudget, ...] = (
     ),
     *_measured(
         _ATTENTION_BUILDS,
-        20,
+        _LLVM_20,
         "gfx942 fp16 D128 paged prefill at the BN=64 tile (wpe2; paged V takes the "
         f"DMA path): {_COMPILER_20} caps VGPR at 256 and spills this many bytes; "
         f"{_COMPILER_24} compiles it with no scratch",
@@ -1276,7 +1331,7 @@ MEASURED_BUDGETS: tuple[MeasuredBudget, ...] = (
     ),
     *_measured(
         _ATTENTION_BUILDS,
-        24,
+        _LLVM_24,
         "gfx942 D128 paged prefill at the BN=32 tile (wpe2, window skip): "
         f"{_COMPILER_24} caps VGPR at 256 for its 2-wave tuning and spills this "
         "many bytes (fp16, bf16); ROCm 7.1 (LLVM 20) compiles both with no scratch",
@@ -1291,7 +1346,7 @@ MEASURED_BUDGETS: tuple[MeasuredBudget, ...] = (
     ),
     *_measured(
         _ATTENTION_BUILDS,
-        24,
+        _LLVM_24,
         "gfx942 dispatched bf16 D64 causal prefill (wpe4, K padded to 8): "
         f"{_COMPILER_24} caps VGPR at 128 and spills this many bytes (without, "
         "with LSE); ROCm 7.1 (LLVM 20) compiles both with no scratch",
@@ -1306,7 +1361,7 @@ MEASURED_BUDGETS: tuple[MeasuredBudget, ...] = (
     ),
     *_measured(
         _GDN_DECODE_FUSED,
-        24,
+        _LLVM_24,
         "gfx950 single-wave conv_once decode, f32 state, WTK 4, conv only: "
         f"{_COMPILER_24} spills this many bytes more loading the rows first than "
         "late (0 B late); ROCm 7.1 (LLVM 20) spills neither",
@@ -1321,7 +1376,7 @@ MEASURED_BUDGETS: tuple[MeasuredBudget, ...] = (
     ),
     *_measured(
         _GDN_DECODE_FUSED,
-        24,
+        _LLVM_24,
         "gfx950 single-wave conv_once decode, f32 state, WTK 4, KDA gate, conv and "
         f"norm with out_lds and norm_gate_once: {_COMPILER_24} spills this many "
         "bytes more loading the rows first than late (0 B late); ROCm 7.1 "
@@ -1333,6 +1388,18 @@ MEASURED_BUDGETS: tuple[MeasuredBudget, ...] = (
         (
             "rocke_gdn_decode_bf16_kh16_vh16_dk128_dv128_w1k4b1_stf32_kda_lhnt_shnt_l2_cv_rn_xcd_sr_ic_co_ngo_olds",
             24,
+        ),
+    ),
+    *_measured(
+        _MLA_PREFILL,
+        _LLVM_24_CI,
+        "gfx942 bf16 MLA prefill forward, the shipped layout (4 waves, VGPR cap "
+        f"256): {_COMPILER_24} spills this many bytes; the LLVM 24 build of "
+        f"llvm-project {_LLVM_24_ROCM_INSTALL_COMMIT} compiles it with no scratch, "
+        "and LLVM 20 does not accept the -amdgpu-mfma-vgpr-form option it needs",
+        (
+            "mla_prefill_fwd_gfx942_h128_n128r64v128_rkv512_q32k16_rt32_w4_hpw2_qpw2_bf16",
+            12,
         ),
     ),
 )
@@ -1347,20 +1414,19 @@ def measured_budget_kernels(path: str) -> frozenset[str]:
 
 
 def measured_scratch_allowance(
-    path: str, kernel_name: str, compiler: CompilerInfo | None
+    path: str, kernel_name: str, build: CompilerBuild
 ) -> int:
     """The scratch bytes the test file ``path`` allows ``kernel_name`` when
-    built by ``compiler`` (``rocke.runtime.comgr.loaded_compiler_info()``): its
-    measured budget when the compiler's LLVM major is the measured one, else 0."""
-    if compiler is None or compiler.llvm_version is None:
-        return 0
+    built by ``build`` (``rocke.tests.comgr.loaded_compiler_build()``): its
+    measured budget when ``build`` is one of the compilers it was measured on,
+    else 0."""
     return next(
         (
             budget.scratch_bytes
             for budget in MEASURED_BUDGETS
             if budget.path == path
             and budget.kernel_name == kernel_name
-            and budget.llvm_major == compiler.llvm_version[0]
+            and budget.compilers.include(build)
         ),
         0,
     )
@@ -1373,10 +1439,10 @@ def _quarantined(
     expires: str,
     *test_ids: str,
     arches: tuple[str, ...] = (),
-    llvm_commits: tuple[str, ...] = (),
+    compilers: Compilers | None = None,
 ) -> tuple[QuarantinedTest, ...]:
     """One entry per test id, all quarantined for the same issue and reason (on
-    ``arches`` and with the compilers of ``llvm_commits`` only, when given)."""
+    ``arches`` and with ``compilers`` only, when given)."""
     return tuple(
         QuarantinedTest(
             test_id,
@@ -1385,7 +1451,7 @@ def _quarantined(
             owner,
             expires,
             arches=arches,
-            llvm_commits=llvm_commits,
+            compilers=compilers,
         )
         for test_id in test_ids
     )
@@ -1441,7 +1507,7 @@ QUARANTINED: tuple[QuarantinedTest, ...] = (
         f"{_DGRAD_CORRECTNESS}::test_fp16_resnet_shape",
         f"{_DGRAD_CORRECTNESS}::test_fp16_stride1",
         arches=("gfx950",),
-        llvm_commits=(_LLVM_24_ROCM_INSTALL_COMMIT,),
+        compilers=_LLVM_24_ROCM_INSTALL,
     ),
     *_quarantined(
         NO_ISSUE_FILED,
@@ -1452,15 +1518,7 @@ QUARANTINED: tuple[QuarantinedTest, ...] = (
         "2026-12-15",
         f"{_DGRAD_CORRECTNESS}::test_fp16_depthwise_stride2",
         arches=("gfx950",),
-        llvm_commits=(_LLVM_24_CI_COMMIT,),
-    ),
-    QuarantinedTest(
-        "library/tests/test_mla_prefill_gfx942.py::TestShippedLayoutOccupancy::test_no_scratch",
-        NO_ISSUE_FILED,
-        "the amd-llvm of the current TheRock pin spills 12 bytes on the shipped "
-        "layout, which the test requires to compile without scratch",
-        "kernel owners",
-        "2026-12-31",
+        compilers=_LLVM_24_CI,
     ),
 )
 
@@ -1482,7 +1540,7 @@ def waiting_entry(
         (entry for entry in QUARANTINED if path in entry.runs_files), None
     )
     if quarantine is not None and (
-        not (quarantine.arches or quarantine.llvm_commits)
+        not (quarantine.arches or quarantine.compilers)
         or (reason is not None and reason.startswith(QUARANTINE_SKIP_PREFIX))
     ):
         return quarantine

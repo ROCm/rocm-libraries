@@ -52,9 +52,9 @@ from typing import Protocol
 import pytest
 from _pytest.mark.expression import Expression
 from rocke.assets import platform_root
-from rocke.runtime.comgr import CompilerInfo
 from rocke.tests import in_tree_suites
 from rocke.tests import lanes as rocke_lanes
+from rocke.tests.comgr import CompilerBuild
 from rocke.tests.ctest_listing import configure_installed_ctest, list_ctest_entries
 from rocke.tests.lanes import (
     COMPREHENSIVE_CASES,
@@ -72,6 +72,7 @@ from rocke.tests.pending_lanes import (
     PENDING,
     QUARANTINE_CAP,
     QUARANTINED,
+    Compilers,
     MeasuredBudget,
     PendingTest,
     QuarantinedTest,
@@ -884,22 +885,48 @@ def test_every_measured_budget_is_current(request):
     )
 
 
-def test_a_measured_budget_applies_only_on_its_compiler():
+def test_a_measured_budget_applies_only_on_its_compilers():
+    def budget(compilers):
+        return MeasuredBudget(
+            "library/tests/test_x.py",
+            "rocke_x",
+            12,
+            compilers,
+            "why",
+            "o",
+            "2027-01-31",
+        )
+
+    ci_build = "424729dba65359a5e521ab2e729af131c8a5b0d4"
+    other_build = "d6f6cb691863e9258034ab48c1dfce21689d5606"
+    by_major = budget(Compilers(llvm_major=24))
+    by_commit = budget(Compilers(llvm_commits=("424729dba653",)))
+    by_both = budget(Compilers(llvm_major=24, llvm_commits=("424729dba653",)))
+    assert by_major.compilers.include(CompilerBuild(24, other_build))
+    assert by_major.compilers.include(CompilerBuild(24, None))
+    assert not by_major.compilers.include(CompilerBuild(20, None))
+    assert not by_major.compilers.include(CompilerBuild(None, ci_build))
+    # Two builds of one LLVM major: only the measured one is allowed the bytes.
+    assert by_commit.compilers.include(CompilerBuild(24, ci_build))
+    assert not by_commit.compilers.include(CompilerBuild(24, other_build))
+    assert not by_commit.compilers.include(CompilerBuild(24, None))
+    assert by_both.compilers.include(CompilerBuild(24, ci_build))
+    assert not by_both.compilers.include(CompilerBuild(23, ci_build))
+
+
+def test_the_registry_allows_a_measured_budget_on_its_compilers_only():
     budget = MEASURED_BUDGETS[0]
-
-    def compiler(llvm_version):
-        return CompilerInfo(llvm_version, "test", None, None, None)
-
-    measured_on = compiler((budget.llvm_major, 0, 0))
+    major = budget.compilers.llvm_major
+    assert major is not None
+    measured_on = CompilerBuild(major, None)
     assert (
         measured_scratch_allowance(budget.path, budget.kernel_name, measured_on)
         == budget.scratch_bytes
     )
-    other = compiler((budget.llvm_major - 1, 0, 0))
+    other = CompilerBuild(major - 1, None)
     assert measured_scratch_allowance(budget.path, budget.kernel_name, other) == 0
-    assert measured_scratch_allowance(budget.path, budget.kernel_name, None) == 0
-    unqueried = compiler(None)
-    assert measured_scratch_allowance(budget.path, budget.kernel_name, unqueried) == 0
+    unknown = CompilerBuild(None, None)
+    assert measured_scratch_allowance(budget.path, budget.kernel_name, unknown) == 0
     assert measured_scratch_allowance(budget.path, "rocke_other", measured_on) == 0
     other_file = "library/tests/test_x.py"
     assert measured_scratch_allowance(other_file, budget.kernel_name, measured_on) == 0
@@ -913,7 +940,7 @@ def test_a_measured_budget_needs_a_positive_size_and_its_recorded_reason():
             "path": "library/tests/test_x.py",
             "kernel_name": "rocke_x",
             "scratch_bytes": 8,
-            "llvm_major": 24,
+            "compilers": Compilers(llvm_major=24),
             "reason": "why",
             "owner": "owner",
             "expires": "2027-01-31",
@@ -926,14 +953,26 @@ def test_a_measured_budget_needs_a_positive_size_and_its_recorded_reason():
         budget(kernel_name=" ")
     with pytest.raises(ValueError, match="scratch_bytes=0, expected a positive"):
         budget(scratch_bytes=0)
-    with pytest.raises(ValueError, match="llvm_major=True, expected a positive"):
-        budget(llvm_major=True)
+    with pytest.raises(TypeError, match="compilers=24, expected a Compilers"):
+        budget(compilers=24)
     with pytest.raises(ValueError, match="owner is empty"):
         budget(owner="")
     with pytest.raises(ValueError, match="expected plain text"):
         budget(reason="see https://x")
     with pytest.raises(ValueError, match="expected an ISO date"):
         budget(expires="next month")
+
+
+def test_compilers_name_a_major_or_commits_of_the_right_shape():
+    with pytest.raises(ValueError, match="expected an LLVM major, llvm-project"):
+        Compilers()
+    with pytest.raises(ValueError, match="llvm_major=True, expected a positive"):
+        Compilers(llvm_major=True)
+    with pytest.raises(ValueError, match="llvm_major=0, expected a positive"):
+        Compilers(llvm_major=0)
+    for llvm_commits in (("424729dba65",), ("424729DBA653",), "424729dba653"):
+        with pytest.raises(ValueError, match="expected a tuple of llvm-project"):
+            Compilers(llvm_commits=llvm_commits)
 
 
 def _quarantined(test_id: str, **overrides: object) -> QuarantinedTest:
@@ -966,9 +1005,8 @@ def test_a_quarantined_test_needs_an_item_an_issue_and_its_recorded_reason():
         _quarantined("library/tests/test_x.py::test_y", arches=("gfx9999",))
     with pytest.raises(ValueError, match="expected a tuple of known gfx arches"):
         _quarantined("library/tests/test_x.py::test_y", arches="gfx950")
-    for llvm_commits in (("424729dba65",), ("424729DBA653",), "424729dba653"):
-        with pytest.raises(ValueError, match="expected a tuple of llvm-project"):
-            _quarantined("library/tests/test_x.py::test_y", llvm_commits=llvm_commits)
+    with pytest.raises(TypeError, match="expected a Compilers or None"):
+        _quarantined("library/tests/test_x.py::test_y", compilers=("424729dba653",))
     github = _quarantined(
         "library/tests/test_x.py::test_y", issue="ROCm/rocm-libraries#1"
     )
@@ -988,17 +1026,19 @@ def test_a_quarantine_that_names_arches_holds_its_test_out_on_those_only():
 
 
 def test_a_quarantine_that_names_compilers_holds_its_test_out_with_those_only():
-    ci_build = "424729dba65359a5e521ab2e729af131c8a5b0d4"
-    other_build = "d6f6cb691863e9258034ab48c1dfce21689d5606"
+    ci_build = CompilerBuild(24, "424729dba65359a5e521ab2e729af131c8a5b0d4")
+    other_build = CompilerBuild(24, "d6f6cb691863e9258034ab48c1dfce21689d5606")
+    unknown = CompilerBuild(None, None)
     any_compiler = _quarantined("library/tests/test_x.py::test_y")
     assert any_compiler.holds_out_with(ci_build)
-    assert any_compiler.holds_out_with(None)
+    assert any_compiler.holds_out_with(unknown)
     with_ci_build = _quarantined(
-        "library/tests/test_x.py::test_y", llvm_commits=("424729dba653",)
+        "library/tests/test_x.py::test_y",
+        compilers=Compilers(llvm_commits=("424729dba653",)),
     )
     assert with_ci_build.holds_out_with(ci_build)
     assert not with_ci_build.holds_out_with(other_build)
-    assert not with_ci_build.holds_out_with(None)
+    assert not with_ci_build.holds_out_with(unknown)
 
 
 def test_a_quarantined_function_covers_its_parameters_and_a_case_only_itself():

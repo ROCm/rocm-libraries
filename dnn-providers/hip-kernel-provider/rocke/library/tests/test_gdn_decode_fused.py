@@ -16,7 +16,7 @@ import unittest
 import numpy as np
 import pytest
 from rocke.numeric import storage
-from rocke.runtime.comgr import loaded_compiler_info
+from rocke.tests.comgr import loaded_compiler_build
 from rocke.tests.pending_lanes import (
     measured_budget_kernels,
     measured_scratch_allowance,
@@ -339,7 +339,7 @@ class TestFusedEmission(unittest.TestCase):
                 hoisted = hoisted_outcome.scratch_bytes()
                 late = late_outcome.scratch_bytes()
                 extra = measured_scratch_allowance(
-                    _MEASURED_BUDGETS_PATH, name, loaded_compiler_info()
+                    _MEASURED_BUDGETS_PATH, name, loaded_compiler_build()
                 )
                 self.assertLessEqual(
                     hoisted,
