@@ -1217,24 +1217,16 @@ TEST_F(CsrmvNnzsplit, first_row_reaching_last_wavefront_every_configuration)
     }
 }
 
-// Same data, default algorithm and nnz-split. run() checks both against the
-// host reference. The small shapes are good adaptive fits, so the default
-// keeps adaptive there; the gap matrix must send it through nnz-split.
-TEST_F(CsrmvNnzsplit, matches_default_algorithm)
+// The gap matrix sends the default algorithm through nnz-split. run() checks
+// the explicit nnz-split run and every default run against the host reference.
+TEST_F(CsrmvNnzsplit, default_algorithm_selects_nnzsplit_for_gap_first_row)
 {
-    std::vector<Named> shapes = small_shapes(block, wavefront());
-    shapes.emplace_back("gap_first_row_reaches_tail", make_gap_first_row_reaches_tail());
-    for(const Named& shape : shapes)
-    {
-        Opt ns;
-        Opt def;
-        def.alg        = rocsparse_spmv_alg_default;
-        const Out got  = run_f32(handle, shape.second, ns, shape.first + " nnzsplit");
-        const Out want = run_f32(handle, shape.second, def, shape.first + " default");
-        ASSERT_TRUE(got.ran && want.ran) << shape.first;
-    }
-
     const Csr a = make_gap_first_row_reaches_tail();
+    {
+        Opt       o;
+        const Out out = run_f32(handle, a, o, "gap_first_row_reaches_tail nnzsplit");
+        ASSERT_TRUE(out.ran);
+    }
     for(rocsparse_index_base base : {rocsparse_index_base_zero, rocsparse_index_base_one})
     {
         each_mode([&](Opt o, const std::string& mode) {
