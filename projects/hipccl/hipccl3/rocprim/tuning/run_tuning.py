@@ -152,7 +152,10 @@ def run_tuning(
 class RunTuningParser(Parser):
     @classmethod
     def get_run_tuning_parser(cls):
-        parser = cls.get_parser()
+        # Leave --strategy unset by default so each tuner's own default applies:
+        # brute_force for most algorithms, dual_annealing for those whose search
+        # space is too large to enumerate.
+        parser = cls.get_parser(default_strategy=None)
         parser.description = "Run tuning for algorithms matching the specified regex"
         parser.add_argument(
             "--algo-regex",

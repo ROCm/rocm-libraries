@@ -116,7 +116,10 @@ class CheckParam:
 class Tuner(BaseTuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
-        return TunerArgs(algo_full_name="device_radix_sort_onesweep")
+        # The search space is too large to brute force (~1800 valid configs per type).
+        return TunerArgs(
+            algo_full_name="device_radix_sort_onesweep", strategy="dual_annealing"
+        )
 
     def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)

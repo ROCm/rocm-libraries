@@ -34,36 +34,40 @@ Inclusive range for params tuning, edit these to adjust tuning grid range.
 """
 RADIX_BITS = [6, 7, 8]
 BLOCK_SIZES = [128, 256]
-IPT = list(range(1, 18)) 
+IPT = list(range(1, 18))
 WARP_SMALL_LWS = [8, 16, 32]
-WARP_SMALL_IPT = list(range(1, 18)) 
+WARP_SMALL_IPT = list(range(1, 18))
 WARP_SMALL_BS = [128, 256]
 WARP_PARTITION = [5, 64, 3000]
 WARP_MEDIUM_LWS = [16, 32]
-WARP_MEDIUM_IPT = list(range(1, 18)) 
+WARP_MEDIUM_IPT = list(range(1, 18))
 WARP_MEDIUM_BS = [128, 256]
+
 
 class Tuner(BaseTuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
-        return TunerArgs(algo_full_name='device_segmented_radix_sort')
+        # The search space is too large to brute force (~2.1M configs per type).
+        return TunerArgs(
+            algo_full_name="device_segmented_radix_sort", strategy="dual_annealing"
+        )
 
     def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)
 
     def _get_tune_params(self, types: Dict[str, Any]) -> OrderedDict:
         params = OrderedDict()
-        params['radix_bits'] = RADIX_BITS
-        params['block_size_x'] = BLOCK_SIZES
-        params['ipt'] = IPT
-        params['warp_partitioning_allowed'] = [1]
-        params['warp_small_lws'] = WARP_SMALL_LWS
-        params['warp_small_ipt'] = WARP_SMALL_IPT
-        params['warp_small_bs'] = WARP_SMALL_BS
-        params['warp_partition'] = WARP_PARTITION
-        params['warp_medium_lws'] = WARP_MEDIUM_LWS
-        params['warp_medium_ipt'] = WARP_MEDIUM_IPT
-        params['warp_medium_bs'] = WARP_MEDIUM_BS
+        params["radix_bits"] = RADIX_BITS
+        params["block_size_x"] = BLOCK_SIZES
+        params["ipt"] = IPT
+        params["warp_partitioning_allowed"] = [1]
+        params["warp_small_lws"] = WARP_SMALL_LWS
+        params["warp_small_ipt"] = WARP_SMALL_IPT
+        params["warp_small_bs"] = WARP_SMALL_BS
+        params["warp_partition"] = WARP_PARTITION
+        params["warp_medium_lws"] = WARP_MEDIUM_LWS
+        params["warp_medium_ipt"] = WARP_MEDIUM_IPT
+        params["warp_medium_bs"] = WARP_MEDIUM_BS
 
         return params
 
@@ -72,13 +76,13 @@ class Tuner(BaseTuner):
         TUNING_SHARED_MAX = 65536
 
         def validate(params):
-            bs = params['block_size_x']
-            ipt = params['ipt']
-            rb = params['radix_bits']
-            warp_small_lws = params['warp_small_lws']
-            warp_small_ipt = params['warp_small_ipt']
-            warp_medium_lws = params['warp_medium_lws']
-            warp_medium_ipt = params['warp_medium_ipt']
+            bs = params["block_size_x"]
+            ipt = params["ipt"]
+            rb = params["radix_bits"]
+            warp_small_lws = params["warp_small_lws"]
+            warp_small_ipt = params["warp_small_ipt"]
+            warp_medium_lws = params["warp_medium_lws"]
+            warp_medium_ipt = params["warp_medium_ipt"]
             item_size = key_size
             if types["value_type"] != "rocprim::empty_type":
                 item_size += TYPE_CONFIGS[types["value_type"]].size
@@ -91,13 +95,16 @@ class Tuner(BaseTuner):
 
             # Warp sorts keep their items in shared memory as well, and unknown targets
             # compile every target's configs, so they must fit in 64 KiB too
-            if item_size * params['warp_small_bs'] * warp_small_ipt > TUNING_SHARED_MAX:
+            if item_size * params["warp_small_bs"] * warp_small_ipt > TUNING_SHARED_MAX:
                 return False
-            if item_size * params['warp_medium_bs'] * warp_medium_ipt > TUNING_SHARED_MAX:
+            if (
+                item_size * params["warp_medium_bs"] * warp_medium_ipt
+                > TUNING_SHARED_MAX
+            ):
                 return False
 
             if types["value_type"] == "rocprim::empty_type":
-                return key_size * bs * ipt < TUNING_SHARED_MAX 
+                return key_size * bs * ipt < TUNING_SHARED_MAX
             else:
                 val_size = TYPE_CONFIGS[types["value_type"]].size
                 return (key_size + val_size) * bs * ipt <= TUNING_SHARED_MAX

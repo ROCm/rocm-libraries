@@ -117,8 +117,9 @@ class TunerArgs:
     """Maximum number of function evaluations for the tuning strategy
     """
 
-    strategy: str = "dual_annealing"
-    """Tuning strategy to use (e.g. "dual_annealing", "brute_force").
+    strategy: str = "brute_force"
+    """Tuning strategy to use (e.g. "brute_force", "dual_annealing"). Tuners whose
+    search space is too large to enumerate override this in _get_default_args.
     """
 
     output_dir: str = "../output"

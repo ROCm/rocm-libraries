@@ -39,15 +39,17 @@ IPT = list(range(33))
 class Tuner(BaseTuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
-        return TunerArgs(algo_full_name='device_radix_sort_block_sort')
+        return TunerArgs(
+            algo_full_name="device_radix_sort_block_sort", strategy="dual_annealing"
+        )
 
     def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)
 
     def _get_tune_params(self, types: Dict[str, Any]) -> OrderedDict:
         params = OrderedDict()
-        params['block_size_x'] = BLOCK_SIZES
-        params['ipt'] = IPT
+        params["block_size_x"] = BLOCK_SIZES
+        params["ipt"] = IPT
         return params
 
     def _get_restrictions(self, types: Dict[str, Any]) -> Callable[[dict], bool]:
@@ -57,12 +59,12 @@ class Tuner(BaseTuner):
         max_shared_memory = 65536 - 2000
         # legacy tuner: std::max(sizeof(Key), sizeof(Value));
         max_size_per_element = max(key_size, val_size)
+
         def validate(params):
-            block_size = params['block_size_x']
-            ipt = params['ipt']
+            block_size = params["block_size_x"]
+            ipt = params["ipt"]
             max_ipt = min(32, max_shared_memory // (block_size * max_size_per_element))
             min_ipt = 1024 // block_size
-
 
             return min_ipt <= ipt <= max_ipt
 

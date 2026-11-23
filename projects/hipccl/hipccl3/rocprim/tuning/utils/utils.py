@@ -35,7 +35,7 @@ class Parser:
         default_bytes: Optional[int] = None,
         default_max_feval: int = 100,
         default_output_dir: str = "../output",
-        default_strategy: str = "dual_annealing",
+        default_strategy: Optional[str] = None,
     ):
         parser = argparse.ArgumentParser()
 
@@ -67,7 +67,7 @@ class Parser:
             "--strategy",
             type=str,
             default=default_strategy,
-            help=f"Strategy Kernel Tuner will use (default: {default_strategy})",
+            help=f"Strategy Kernel Tuner will use (default: {default_strategy or 'per-algorithm, brute_force unless the tuner overrides it'})",
         )
         parser.add_argument(
             "--simulation-mode",
