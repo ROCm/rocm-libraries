@@ -1227,17 +1227,14 @@ TEST_F(HostInternalBranches, copy_csrmv_info)
               info.adaptive.first_row      = 0;
               info.adaptive.last_row       = 1;
               info.adaptive.num_split_rows = 1;
-              info.lrb.size                = 1;
               info.index_type_I            = itype;
               info.index_type_J            = jtype;
               info.descr                   = nullptr;
               info.csr_row_ptr             = nullptr;
               info.csr_col_ind             = nullptr;
               alloc(reinterpret_cast<void**>(&info.adaptive.row_blocks));
-              alloc(reinterpret_cast<void**>(&info.adaptive.wg_flags));
               alloc(reinterpret_cast<void**>(&info.adaptive.wg_ids));
               alloc(&info.adaptive.split_rows);
-              alloc(reinterpret_cast<void**>(&info.lrb.wg_flags));
               alloc(&info.lrb.rows_offsets_scratch);
               alloc(&info.lrb.rows_bins);
               alloc(&info.lrb.n_rows_bins);
@@ -1261,10 +1258,8 @@ TEST_F(HostInternalBranches, copy_csrmv_info)
     // The device arrays of an info, each written with a distinct pattern.
     auto arrays = [](_rocsparse_csrmv_info& info) {
         return std::vector<void*>{info.adaptive.row_blocks,
-                                  info.adaptive.wg_flags,
                                   info.adaptive.wg_ids,
                                   info.adaptive.split_rows,
-                                  info.lrb.wg_flags,
                                   info.lrb.rows_offsets_scratch,
                                   info.lrb.rows_bins,
                                   info.lrb.n_rows_bins};
@@ -1279,7 +1274,6 @@ TEST_F(HostInternalBranches, copy_csrmv_info)
         EXPECT_EQ(d.adaptive.first_row, s.adaptive.first_row);
         EXPECT_EQ(d.adaptive.last_row, s.adaptive.last_row);
         EXPECT_EQ(d.adaptive.num_split_rows, s.adaptive.num_split_rows);
-        EXPECT_EQ(d.lrb.size, s.lrb.size);
         EXPECT_EQ(d.index_type_I, s.index_type_I);
         EXPECT_EQ(d.index_type_J, s.index_type_J);
     };

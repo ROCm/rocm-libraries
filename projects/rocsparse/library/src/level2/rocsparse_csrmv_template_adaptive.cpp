@@ -468,10 +468,6 @@ rocsparse_status
             RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&csrmv_info->adaptive.row_blocks,
                                                          sizeof(I) * csrmv_info->adaptive.size,
                                                          handle->stream));
-            RETURN_IF_HIP_ERROR(
-                rocsparse_hipMallocAsync(&csrmv_info->adaptive.wg_flags,
-                                         sizeof(uint32_t) * csrmv_info->adaptive.size,
-                                         handle->stream));
             RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&csrmv_info->adaptive.wg_ids,
                                                          sizeof(J) * csrmv_info->adaptive.size,
                                                          handle->stream));
@@ -482,11 +478,6 @@ rocsparse_status
                                                          sizeof(I) * csrmv_info->adaptive.size,
                                                          hipMemcpyHostToDevice,
                                                          stream));
-            RETURN_IF_HIP_ERROR(
-                rocsparse_hipMemsetAsync(csrmv_info->adaptive.wg_flags,
-                                         0,
-                                         sizeof(uint32_t) * csrmv_info->adaptive.size,
-                                         stream));
             RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(csrmv_info->adaptive.wg_ids,
                                                          wg_ids.data(),
                                                          sizeof(J) * csrmv_info->adaptive.size,
@@ -562,7 +553,6 @@ namespace rocsparse
                                 J    m,
                                 I    nnz,
                                 const I* __restrict__ row_blocks,
-                                uint32_t* __restrict__ wg_flags,
                                 const J* __restrict__ wg_ids,
                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                 const I* __restrict__ csr_row_ptr,
@@ -587,7 +577,6 @@ namespace rocsparse
                     m,
                     nnz,
                     row_blocks,
-                    wg_flags,
                     wg_ids,
                     alpha,
                     csr_row_ptr,
@@ -820,9 +809,7 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
 
         // Run different csrmv kernels, one workgroup per row block. A row-block
         // count above the grid.x limit is split into consecutive launches on the
-        // same stream rather than grid-strided: the workgroups of a long row wait
-        // on the flag of its first workgroup, which never comes after them, so a
-        // later launch only ever waits on a flag an earlier launch already set.
+        // same stream.
         const int64_t nblocks = static_cast<int64_t>(info->adaptive.size) - 1;
         const int64_t chunk   = rocsparse::get_grid_size_x(handle, nblocks, gen_wg);
         for(int64_t offset = 0; offset < nblocks; offset += chunk)
@@ -840,7 +827,6 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
         m,                                                            \
         nnz,                                                          \
         static_cast<I*>(info->adaptive.row_blocks) + offset,          \
-        info->adaptive.wg_flags + offset,                             \
         static_cast<J*>(info->adaptive.wg_ids) + offset,              \
         ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
         csr_row_ptr,                                                  \
