@@ -25,7 +25,6 @@ from uhd_gen.features import (
     evaluator_feature_semantics_revision,
     resolve_feature_evaluator,
 )
-from uhd_gen.lgbm_to_flatbuffer import build_gbdt_model
 from uhd_gen.promote import (
     PromoteError,
     _apply,
@@ -34,7 +33,9 @@ from uhd_gen.promote import (
     parse_uhd_ids,
     run_promote,
 )
+from uhd_gen.optional import safe_signature
 from uhd_gen.provenance import snapshot_provenance
+from uhd_gen.tests.model_bin import leaf_model
 
 UED = "6d2b90f4-8c15-4a37-9e58-04b7c3fa1d62"
 KMD = "3f8a1c07-52d9-4e61-b0a4-9c7d61e2830f"
@@ -48,11 +49,15 @@ OPAQUE_SIGNATURE = ("$graph.work",)
 pytestmark = pytest.mark.usefixtures("evaluator")
 
 
-@functools.cache
 def _hash(signature=KERNEL_SIGNATURE, encoding=None):
     """The features digest the loader recomputes."""
+    return _hash_of(json.dumps(list(signature), sort_keys=True), encoding)
+
+
+@functools.cache
+def _hash_of(signature: str, encoding):
     return compute_features_hash(
-        list(signature),
+        json.loads(signature),
         json.loads(encoding) if encoding else None,
         resolve_feature_evaluator(),
     )
@@ -68,17 +73,12 @@ def _weights(
     num_features=None,
 ):
     """A `tree_data` artifact the runtime would load."""
-    ensemble = {
-        "tree_info": [{"tree_structure": {"leaf_value": leaf}}],
-        "max_feature_idx": (num_features or len(signature)) - 1,
-        "objective": "regression",
-    }
-    return build_gbdt_model(
-        ensemble,
+    return leaf_model(
         features_hash or _hash(tuple(signature)),
+        num_features or len(signature),
+        leaf=leaf,
+        grouped=grouped,
         training_arches=training_arches,
-        group_by_feature_index=0 if grouped else -1,
-        groups=[(0.0, ensemble)] if grouped else None,
     )
 
 
@@ -1123,7 +1123,14 @@ def test_train_rejects_malformed_identity_before_outputs(tmp_path, malformed):
     assert not (tmp_path / "model" / "heuristic.uhd.json").exists()
 
 
-def _opaque_model(root, *, identity=NEW, revision="aiter-fwd-1", declared=NEW):
+def _opaque_model(
+    root,
+    *,
+    identity=NEW,
+    revision="aiter-fwd-1",
+    declared=NEW,
+    signature=OPAQUE_SIGNATURE,
+):
     """A model for an engine with no UED, trained against a selector revision only.
 
     `declared` is the provider's declared id (binding.uhd_id), or None.
@@ -1135,8 +1142,8 @@ def _opaque_model(root, *, identity=NEW, revision="aiter-fwd-1", declared=NEW):
         "name": "model",
         "adapter": "tree_data",
         "objective": "max",
-        "features_signature": list(OPAQUE_SIGNATURE),
-        "features_hash": _hash(OPAQUE_SIGNATURE),
+        "features_signature": list(signature),
+        "features_hash": _hash(signature),
         "trained_against": provenance,
         "score": {"metric": "tflops", "calibrated": True, "transform": "identity"},
         "tree_data": {"artifact": "model.bin"},
@@ -1154,7 +1161,7 @@ def _opaque_model(root, *, identity=NEW, revision="aiter-fwd-1", declared=NEW):
             "binding": binding,
         },
     )
-    (root / "model.bin").write_bytes(_weights(signature=OPAQUE_SIGNATURE))
+    (root / "model.bin").write_bytes(_weights(signature=signature))
     return root
 
 
@@ -1180,6 +1187,45 @@ def test_a_model_for_an_engine_with_no_ued_installs_without_touching_a_role_map(
     assert (installed / "model.bin").read_bytes() == _weights(
         signature=OPAQUE_SIGNATURE
     )
+
+
+def test_an_opaque_model_reading_an_optional_feature_bare_is_refused_before_any_write(
+    tmp_path,
+):
+    """RFC 0019 §6.7 and §6.8 item 9 hold for an engine with no UED too: the unguarded scale
+    would leave a graph without it unscorable, while the unknown work a tflops model reads
+    bare is not.
+    """
+    tree = _tree(tmp_path / "tree")
+    scale = "$graph.nodes[0].attn_scale_value"
+    target = {"role": "predict_engine", "arch": "gfx950"}
+    model = _opaque_model(tmp_path / "model", signature=(scale, "$graph.flops"))
+    before = _files(tmp_path)
+    with pytest.raises(
+        PromoteError, match=r"attn_scale_value.*value_or_default"
+    ) as refusal:
+        build_plan(model, tree, "ASM_SDPA_ENGINE", **target)
+    assert "graph.flops" not in str(refusal.value)
+    assert _files(tmp_path) == before
+
+    # The refusals the plan makes itself come first, as for an engine with a UED.
+    undeclared = _opaque_model(
+        tmp_path / "undeclared", declared=None, signature=(scale, "$graph.flops")
+    )
+    with pytest.raises(PromoteError, match="--uhd-id tflops="):
+        build_plan(undeclared, tree, "ASM_SDPA_ENGINE", **target)
+
+    guarded = (
+        {"value_or_default": [scale, 1.0]},
+        "$graph.flops",
+    )
+    plan = build_plan(
+        _opaque_model(tmp_path / "guarded", signature=guarded),
+        tree,
+        "ASM_SDPA_ENGINE",
+        **target,
+    )
+    assert plan.ued_path is None
 
 
 def test_an_opaque_model_cannot_take_an_identity_already_installed(tmp_path):
@@ -1789,6 +1835,8 @@ def test_the_shipped_gfx950_rankers_signature_is_refused_for_reading_unexposed_k
         if not entry.startswith("$kernel.")
         or entry in ("$kernel.block_m", "$kernel.block_n")
     )
+    # Scorable on every graph too: a time model must read unknown work through a default.
+    admissible = tuple(safe_signature(list(admissible), metric)[0])
     build_plan(
         _attention_ranker(tmp_path / "admissible", tree, metric, admissible),
         tree,
@@ -1883,3 +1931,39 @@ def test_uhd_id_names_the_model_being_promoted_and_never_renames_it(tmp_path):
 def test_malformed_uhd_id_lists_are_refused(values, refusal):
     with pytest.raises(ValueError, match=refusal):
         parse_uhd_ids(values)
+
+
+def test_a_model_reading_an_optional_feature_bare_is_refused_before_any_write(tmp_path):
+    """RFC 0019 §6.7 and §6.8 item 9: a graph that leaves the scale unset would be
+    unscorable."""
+    tree = _tree(tmp_path / "tree")
+    before = _files(tree)
+    model = _model(
+        tmp_path / "model",
+        tree,
+        signature=("$graph.nodes[0].attn_scale_value", "$kernel.block_size"),
+        metric="tflops",
+    )
+    with pytest.raises(PromoteError, match=r"attn_scale_value.*value_or_default"):
+        build_plan(model, tree)
+    assert _files(tree) == before
+
+
+@pytest.mark.parametrize("metric,installs", [("tflops", True), ("time", False)])
+def test_unknown_work_may_be_read_bare_only_by_a_model_of_a_metric_derived_from_it(
+    tmp_path, metric, installs
+):
+    """Where the work is unknown, so is throughput: a tflops model rightly reports nothing
+    there, but a time model must still score the graph."""
+    tree = _tree(tmp_path / "tree")
+    model = _model(
+        tmp_path / "model",
+        tree,
+        signature=("$graph.flops", "$kernel.block_size"),
+        metric=metric,
+    )
+    if installs:
+        _apply(build_plan(model, tree))
+    else:
+        with pytest.raises(PromoteError, match=r"graph\.flops"):
+            build_plan(model, tree)
