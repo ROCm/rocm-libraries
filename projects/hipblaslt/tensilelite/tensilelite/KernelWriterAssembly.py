@@ -24814,7 +24814,7 @@ class KernelWriterAssembly(KernelWriter):
     """
     mod = Module("swizzled-TDM remaining rows")
     tile01 = tP["tile01Idx"]
-    mi = kernel["MatrixInstM"] if tile01 == 0 else kernel["MatrixInstN"]
+    mi = tP["swzGeom"].mi                       # rows of one nO tile (the host block), not the WMMA's rows
     size, wg = ("SizeI", "WorkGroup0") if tile01 == 0 else ("SizeJ", "WorkGroup1")
     assert mi & (mi - 1) == 0 and mt % mi == 0
     mod.add(SAddU32(sgpr(dstSgpr), sgpr(size), mi - 1, f"swizzled dim1: {size} + MI({mi})-1"))

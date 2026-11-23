@@ -23,6 +23,7 @@ for every wave and lane: each 16-byte read must return exactly the operand bytes
 the WMMA expects (zero past K or the free size) and must only touch written LDS.
 """
 
+import itertools
 import pytest
 
 from tensilelite.Components.SwizzledTdmLayout import SwizzledTdmGeometry
@@ -100,7 +101,7 @@ def simulate(sol, tc, sizeFree, sizeK, wg):
     tile01 = 0 if tc == "A" else 1
     wgM, wgN = sol["MIWaveGroup"]
     brot = tc == "B" and sol.get("LDSSegmentBRotate")
-    spans = bool(seg) and g.vw * mi >= g.macroTile // numComp and not seg.get("bBaseline")
+    spans = bool(seg) and g.vw * mi * g.stack >= g.macroTile // numComp and not seg.get("bBaseline")
     compNO = None
     if seg and not spans and g.waveTile // g.vw > 1:
         compNO = g.nORows // numComp
@@ -142,27 +143,26 @@ def simulate(sol, tc, sizeFree, sizeK, wg):
                         regs = [i * 65536 for i in range(4)]
                     kMl, nIdx = divmod(lane, mi)
                     for u in range(kSteps):
-                        for nt in range(g.waveTile):
-                            for r in range(g.numKChunk):
-                                comp, imm = g.readOffsetElems(nt, r, compNO)
-                                offBytes = (comp * readStride if compNO is not None else 0) \
-                                    + int((imm + u * g.kStepPerMI) * bpe)
-                                regIdx, immB = g.selectReadRegister(offBytes, windows)
-                                addr = ldsBase + baseBytes + regs[regIdx] + immB
-                                ntE = (nt + g.waveTile // 2) % g.waveTile if (brot and pair) else nt
-                                vIdx, eIdx = divmod(ntE, g.vw)
-                                f = wg * g.macroTile + (vIdx * g.vw * g.numWaves + w * g.vw) * mi \
-                                    + g.vw * nIdx + eIdx
-                                k0 = kIter * int(du * bpe) + u * int(miK * bpe) + r * 32 + kMl * 16
-                                for b in range(16):
-                                    a = addr + b
-                                    assert a in lds, ("%s: read of unwritten LDS byte %d (kIter=%d tail=%s wave=(%d,%d) "
-                                                      "lane=%d nt=%d r=%d u=%d)" % (tc, a, kIter, tail, wM, wN, lane, nt, r, u))
-                                    want = expected_tag(f, k0 + b, sizeFree, kb)
-                                    assert lds[a] == want, (
-                                        "%s: kIter=%d tail=%s wave=(%d,%d) lane=%d nt=%d r=%d u=%d byte=%d: read %s, "
-                                        "WMMA expects %s" % (tc, kIter, tail, wM, wN, lane, nt, r, u, b, lds[a], want))
-                                checked += 16
+                        for nt, sub, r in itertools.product(range(g.waveTile), range(g.stack), range(g.numKChunk)):
+                            comp, imm = g.readOffsetElems(nt, r, compNO, sub)
+                            offBytes = (comp * readStride if compNO is not None else 0) \
+                                + int((imm + u * g.kStepPerMI) * bpe)
+                            regIdx, immB = g.selectReadRegister(offBytes, windows)
+                            addr = ldsBase + baseBytes + regs[regIdx] + immB
+                            ntE = (nt + g.waveTile // 2) % g.waveTile if (brot and pair) else nt
+                            vIdx, eIdx = divmod(ntE, g.vw)
+                            f = wg * g.macroTile + ((vIdx * g.numWaves + w) * g.stack * g.vw + sub * g.vw) * mi \
+                                + g.vw * nIdx + eIdx
+                            k0 = kIter * int(du * bpe) + u * int(miK * bpe) + r * 16 * g.kM + kMl * 16
+                            for b in range(16):
+                                a = addr + b
+                                assert a in lds, ("%s: read of unwritten LDS byte %d (kIter=%d tail=%s wave=(%d,%d) "
+                                                  "lane=%d nt=%d r=%d u=%d)" % (tc, a, kIter, tail, wM, wN, lane, nt, r, u))
+                                want = expected_tag(f, k0 + b, sizeFree, kb)
+                                assert lds[a] == want, (
+                                    "%s: kIter=%d tail=%s wave=(%d,%d) lane=%d nt=%d r=%d u=%d byte=%d: read %s, "
+                                    "WMMA expects %s" % (tc, kIter, tail, wM, wN, lane, nt, r, u, b, lds[a], want))
+                            checked += 16
     return checked
 
 

@@ -38,6 +38,7 @@ from ..Common.LdsReadPlan import (
     make_local_read_loop_plan,
 )
 
+import itertools
 from math import ceil
 
 class LocalReadVALU(LocalRead):
@@ -850,7 +851,7 @@ class LocalReadMFMA(LocalRead):
         LocalReadX  = instruction.getInst(0)
         maxLDSConstOffset = writer.states.regCaps["maxLDSConstOffset"]
         regsPerLoad = int(blockWidth)                    # VGPRs per ds_load_b128
-        regsPerNtile = geom.numKChunk * regsPerLoad
+        regsPerNtile = geom.stack * geom.numKChunk * regsPerLoad   # a stacked (32-row) tile reads `stack` nO tiles
         swapByteOff = tP["localReadSwapByteOffset"]
         numLra      = writer.states.a.numVgprLocalReadAddr if tP["isA"] else writer.states.b.numVgprLocalReadAddr
         # HalfPLR splits the per-iteration Valu block into rotating half-block groups (G0/G1/G2);
@@ -867,32 +868,31 @@ class LocalReadMFMA(LocalRead):
                 and geom.waveTile // geom.vw > 1:
             compNO     = geom.nORows // (kernel["NumWaves"] // 2)   # nO rows per LDS component
             readStride = segOff.get("readStrideBytes" + tc, segOff["writeStrideBytes"])
-        for nt in range(geom.waveTile):
-            for r in range(geom.numKChunk):
-                # localReadOffset carries the K-sub-iteration progression in the immediate (like the
-                # normal reader) so it auto-resets to 0 each DepthU via localReadInitPointers; this is
-                # what keeps multi-main-loop-iteration (K>DepthU) reading the correct swapped-buffer K.
-                comp, off = geom.readOffsetBytes(nt, r, tP["localReadOffset"], compNO, readStride)
-                off += swapByteOff
-                if compNO is not None and tc == "B" and kernel.get("LDSSegmentBRotate"):
-                    # B-rotate swaps LocalReadAddrB+0/+1 per SIMD pair: register h must serve component h.
-                    assert off // maxLDSConstOffset == comp, \
-                        "LDSSegmentBRotate: swizzled B nt=%u (component %u) does not read through LocalReadAddrB+%u" \
-                        % (nt, comp, comp)
-                reg = nt * regsPerNtile + r * regsPerLoad
-                regIdx, offSplit = geom.selectReadRegister(off, windows, maxLDSConstOffset)
-                assert 0 <= regIdx < numLra, \
-                    "swizzledTDM %s read at LDS offset %d needs LocalReadAddr%s+%d, but only %d address registers exist" \
-                    % (tc, off, tc, regIdx, numLra)
-                srcAddr  = vgpr("LocalReadAddr%s+%u" % (tc, regIdx))
-                ds = DSModifiers(na=1, offset=offSplit)
-                if halfPLR:
-                    destVgpr = vgpr(writer.getHalfPLRValuStr(writer.states.halfPLRGroups, reg, tc), blockWidth)
-                else:
-                    destVgpr = vgpr("Valu%s_X%u_I%u+%u" % (tc, bufferIdx, iui, reg), blockWidth)
-                localReadCode = imod.add(Module("LocalRead%s swizzledTDM nt%u r%u" % (tc, nt, r)))
-                self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds,
-                                  module=localReadCode, comment="swizzledTDM L->Reg nt=%u r=%u" % (nt, r))
+        for nt, sub, r in itertools.product(range(geom.waveTile), range(geom.stack), range(geom.numKChunk)):
+            # localReadOffset carries the K-sub-iteration progression in the immediate (like the
+            # normal reader) so it auto-resets to 0 each DepthU via localReadInitPointers; this is
+            # what keeps multi-main-loop-iteration (K>DepthU) reading the correct swapped-buffer K.
+            comp, off = geom.readOffsetBytes(nt, r, tP["localReadOffset"], compNO, readStride, sub)
+            off += swapByteOff
+            if compNO is not None and tc == "B" and kernel.get("LDSSegmentBRotate"):
+                # B-rotate swaps LocalReadAddrB+0/+1 per SIMD pair: register h must serve component h.
+                assert off // maxLDSConstOffset == comp, \
+                    "LDSSegmentBRotate: swizzled B nt=%u (component %u) does not read through LocalReadAddrB+%u" \
+                    % (nt, comp, comp)
+            reg = nt * regsPerNtile + (sub * geom.numKChunk + r) * regsPerLoad
+            regIdx, offSplit = geom.selectReadRegister(off, windows, maxLDSConstOffset)
+            assert 0 <= regIdx < numLra, \
+                "swizzledTDM %s read at LDS offset %d needs LocalReadAddr%s+%d, but only %d address registers exist" \
+                % (tc, off, tc, regIdx, numLra)
+            srcAddr  = vgpr("LocalReadAddr%s+%u" % (tc, regIdx))
+            ds = DSModifiers(na=1, offset=offSplit)
+            if halfPLR:
+                destVgpr = vgpr(writer.getHalfPLRValuStr(writer.states.halfPLRGroups, reg, tc), blockWidth)
+            else:
+                destVgpr = vgpr("Valu%s_X%u_I%u+%u" % (tc, bufferIdx, iui, reg), blockWidth)
+            localReadCode = imod.add(Module("LocalRead%s swizzledTDM nt%u s%u r%u" % (tc, nt, sub, r)))
+            self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds,
+                              module=localReadCode, comment="swizzledTDM L->Reg nt=%u r=%u%s" % (nt, r, " s=%u" % sub if geom.stack > 1 else ""))
         return imod, Module(), Module()
 
 

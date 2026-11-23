@@ -13,6 +13,7 @@ from rocisa.functions import vectorMultiply64Bpe, vectorMultiplyBpe, scalarMulti
 from rocisa.enum import TemporalHint, CacheScope
 from math import log2, ceil
 from ..Common.MxScaleLayout import mxFreeTile, mxGl2CoalescedDim
+from ..Common.Utilities import SWIZZLE_BLOCK_ROWS
 
 # Bit 15 of the packed GSU kernel argument selects how the summation loop is cut
 # up between the GSU groups, and the two layouts need different start offsets and
@@ -67,7 +68,7 @@ class GL2PrefetchLoad(GL2Prefetch):
             # are separated by MI*paddedK. Treat each row as the perpendicular
             # dimension and its cache regions as the coalesced dimension.
             du: int = kernel["_DepthU%s" % subTc]
-            swizzleMi: int = kernel["MatrixInstM"] if subTc == "A" else kernel["MatrixInstN"]
+            swizzleMi: int = SWIZZLE_BLOCK_ROWS
             rowSliceBytes: int = round(swizzleMi * du * bpe)
             assert mt % swizzleMi == 0, "swizzled-TDM MacroTile must contain whole MI rows"
             assert du % tp["swizzleK"] == 0, \

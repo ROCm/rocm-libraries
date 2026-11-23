@@ -82,7 +82,7 @@ REJECTED = [
     (_c("tdm_onlyA", TDMInst=1), "TDMA and TDMB must be enabled simultaneously"),
     (_c("tdmsplit", TDMSplit=True), "TDMSplit is currently disabled"),
     (_c("1lds", **{"1LDSBuffer": 1}), "1LDSBuffer must be 0 for TDM"),
-    (_c("lsi_B_f4", dtype="f4", LDSSegmentInterleave=1), "swizzle-B LSI: F4 not validated"),
+    (_c("lsi_B_f4", dtype="f4", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1), "swizzle-B LSI: F4 not validated"),
     (_c("lsi_B_wg41", wt=(1, 2), wg=(4, 1), VectorWidthB=2, LDSSegmentInterleave=1),
      "swizzle-B LSI: only MIWaveGroup=[2,2]"),
     # LSI, B not spanning its LDS component, with the nO rows of a vIdx group not dividing evenly over

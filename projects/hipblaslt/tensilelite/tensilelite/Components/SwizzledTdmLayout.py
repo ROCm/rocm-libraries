@@ -22,6 +22,8 @@ in elements unless named *Bytes; descriptor extents are in descriptor units
 from dataclasses import dataclass
 from typing import Mapping, Optional, Sequence, Tuple
 
+from ..Common.Utilities import SWIZZLE_BLOCK_ROWS
+
 TDM_PAD_INTERVAL_LIMIT = 1024  # largest block (bytes) the TDM descriptor's pad_interval field can describe
 MAX_LDS_CONST_OFFSET = 65536   # ds_load immediate range; a larger offset selects LocalReadAddr+i
 
@@ -35,7 +37,7 @@ PAD_K_BYTES = 64
 @dataclass(frozen=True)
 class SwizzledTdmGeometry:
     bpe: float          # element bytes (0.5 for F4)
-    mi: int             # MI extent along the swizzled free dim (MatrixInstM for A, MatrixInstN for B)
+    mi: int             # rows of one nO tile along the swizzled free dim: SWIZZLE_BLOCK_ROWS, the host block
     wave: int           # wavefront size
     miInputPerThread: int  # elements of one WMMA operand per lane (MIInputPerThread{A,B})
     depthU: int         # _DepthU{A,B}
@@ -44,14 +46,17 @@ class SwizzledTdmGeometry:
     numWaves: int       # MIWaveGroup along the free dim
     vw: int             # VectorWidth{A,B}
     padElems: int = 0   # LdsPad{A,B} (VW>1 per-nO-tile pad), elements
+    stack: int = 1      # nO tiles one WMMA operand tile spans (MatrixInst{M,N} // mi; 2 for 32x16x128)
 
     # ---- construction -------------------------------------------------------------------
     @classmethod
     def fromKernel(cls, kernel: Mapping, tc: str) -> "SwizzledTdmGeometry":
         tile01 = 0 if tc == "A" else 1
         padElems = kernel["LdsPad%s" % tc] if kernel["LdsBlockSizePerPad%s" % tc] else 0
+        miRows = kernel["MatrixInstM"] if tile01 == 0 else kernel["MatrixInstN"]
+        assert miRows % SWIZZLE_BLOCK_ROWS == 0, "the WMMA must span whole %d-row swizzle blocks" % SWIZZLE_BLOCK_ROWS
         return cls(bpe=kernel["ProblemType"]["DataType%s" % tc].numBytes(),
-                   mi=kernel["MatrixInstM"] if tile01 == 0 else kernel["MatrixInstN"],
+                   mi=SWIZZLE_BLOCK_ROWS, stack=miRows // SWIZZLE_BLOCK_ROWS,
                    wave=kernel["WavefrontSize"],
                    miInputPerThread=kernel["MIInputPerThread%s" % tc],
                    depthU=kernel["_DepthU%s" % tc],
@@ -103,8 +108,8 @@ class SwizzledTdmGeometry:
 
     @property
     def numKChunk(self) -> int:
-        """ds_load_b128 per lane per WMMA operand (kO blocks per MatrixInstK)."""
-        return self.miInputPerThread // self.innerK
+        """ds_load_b128 per lane per nO tile of a WMMA operand (kO blocks per MatrixInstK)."""
+        return self.miInputPerThread // self.stack // self.innerK
 
     @property
     def kStepPerMI(self) -> int:
@@ -215,7 +220,7 @@ class SwizzledTdmGeometry:
 
     def waveBase(self, wtid0: int) -> int:
         """Per-wave LDS element offset of its nO band (when it does not REPLACE by an LSI jump)."""
-        return wtid0 * self.vw * self.nOTile
+        return wtid0 * self.vw * self.stack * self.nOTile
 
     def padBaseBytes(self, baseBytes: int) -> int:
         """Lane/wave base with the per-nO-tile pad applied (lraFinalOffset)."""
@@ -223,27 +228,29 @@ class SwizzledTdmGeometry:
             return baseBytes
         return baseBytes + (baseBytes // self.nOTileBytes) * self.padBytes
 
-    def readOffsetElems(self, nt: int, r: int, compNO: Optional[int] = None) -> Tuple[int, int]:
-        """(component, element immediate) of ds_load (nt, r).
+    def readOffsetElems(self, nt: int, r: int, compNO: Optional[int] = None, s: int = 0) -> Tuple[int, int]:
+        """(component, element immediate) of ds_load (nt, s, r).
 
-        nt = vIdx*vw + eIdx. compNO (nO rows per LDS component) is given for
+        nt = vIdx*vw + eIdx; s < stack selects the nO tile within a stacked (32-row) WMMA tile. compNO (nO rows per LDS component) is given for
         LDSSegmentInterleave when B does not span its component: the vIdx group then
         selects the component. Otherwise the component is 0."""
         vIdx, eIdx = divmod(nt, self.vw)
-        vNO = vIdx * self.vw * self.numWaves
+        # A tile covers vw*stack nO rows; its row r (= 16*s + lane column) sits at vw*r + eIdx, so the sub-tile
+        # s starts vw nO tiles in (the lane/eIdx parts are in laneBase and the immediate).
+        vNO = vIdx * self.vw * self.numWaves * self.stack + s * self.vw
         comp = 0
         if compNO is not None:
-            assert compNO % (self.vw * self.numWaves) == 0, "a vIdx group must not straddle a component"
+            assert compNO % (self.vw * self.numWaves * self.stack) == 0, "a vIdx group must not straddle a component"
             comp, vNO = divmod(vNO, compNO)
         return comp, vNO * self.nOStridePadded + eIdx * self.innerK + r * self.kOStride
 
     def readOffsetBytes(self, nt: int, r: int, extraElems: int = 0, compNO: Optional[int] = None,
-                        readStride: int = 0) -> Tuple[int, int]:
+                        readStride: int = 0, s: int = 0) -> Tuple[int, int]:
         """(component, byte offset from LocalReadAddr+0) of ds_load (nt, r).
 
         extraElems is the K-sub-iteration progression (localReadOffset); the component jump
         (readStride, post-pad) is added when compNO is given (see readOffsetElems)."""
-        comp, imm = self.readOffsetElems(nt, r, compNO)
+        comp, imm = self.readOffsetElems(nt, r, compNO, s)
         return comp, comp * readStride + int(round((imm + extraElems) * self.bpe))
 
     @staticmethod

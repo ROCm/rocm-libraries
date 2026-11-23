@@ -96,7 +96,7 @@ from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, rou
 from .Validators.MXScaleFormat import validateHostPreSwizzle128x4, validateMXScaleFormatCombination
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
-from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor, plsinDataTypes, swizzleTensorMaxDepthU
+from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor, plsinDataTypes, swizzleTensorMaxDepthU, SWIZZLE_BLOCK_ROWS
 
 
 def _oneSidedMX(state):
@@ -5576,6 +5576,13 @@ class Solution(collections.abc.Mapping):
           if bpeTc not in (0.5, 1, 2):
             reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM supports F4 and 1-/2-byte data types only (got {bpeTc} bytes)")
             return
+          # The host swizzle (client DataInitialization and the hipBLASLt user layout) blocks 16 free-dim rows
+          # per nO tile; the kernel's block is that, whatever the WMMA's own rows (a taller WMMA, e.g.
+          # 32x16x128, reads several nO tiles per operand tile: SwizzledTdmGeometry.stack, not enabled yet).
+          miRows = state["MatrixInstM"] if tc == "A" else state["MatrixInstN"]
+          if miRows != SWIZZLE_BLOCK_ROWS:
+            reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM requires a {SWIZZLE_BLOCK_ROWS}-row WMMA {'M' if tc == 'A' else 'N'} (got {miRows})")
+            return
           # StreamK starts a workgroup mid-tile in K at StreamKLocalStart * GlobalReadIncs; the swizzled-TDM
           # GlobalReadIncs already carry the MI-row factor (GSU.graIncrements), so no extra scaling is needed.
           # The swizzled read and host swizzle assume both operands are K-major (TN). Other layouts are
@@ -5739,7 +5746,7 @@ class Solution(collections.abc.Mapping):
           # MI_M*DepthU is a multiple of the 256B bank cycle). Break it the same way: a 16B pad per
           # mO-tile, deposited through TDM iterate-mode. VW==1 stays unpadded and byte-identical.
           bpeA = state["ProblemType"]["DataTypeA"].numBytes()                # 0.5 for F4 (packed bytes)
-          mOStrideBytes = int(state["MatrixInstM"] * state["_DepthUA"] * bpeA)  # per-mO LDS tile size
+          mOStrideBytes = int(SWIZZLE_BLOCK_ROWS * state["_DepthUA"] * bpeA)  # per-mO LDS tile size
           if swizzleAIsTDM and state["VectorWidthA"] > 1:
             state["LdsBlockSizePerPadA"] = mOStrideBytes
             state["LdsPadA"] = int(16 / bpeA)                                  # 16B = 4-bank shift (ds_load b128 width), in elements
@@ -5783,7 +5790,7 @@ class Solution(collections.abc.Mapping):
           # LdsPad*bpe) and works for any block size. VW==1 stays unpadded (already conflict-free) and
           # byte-identical to before. See initTDMDescriptor / _localReadSwizzledTDM for the read match.
           bpeB = state["ProblemType"]["DataTypeB"].numBytes()                # 0.5 for F4 (packed bytes)
-          nOStrideBytes = int(state["MatrixInstN"] * state["_DepthUB"] * bpeB)  # per-nO LDS tile size
+          nOStrideBytes = int(SWIZZLE_BLOCK_ROWS * state["_DepthUB"] * bpeB)  # per-nO LDS tile size
           if swizzleBIsTDM and state["VectorWidthB"] > 1:
             state["LdsBlockSizePerPadB"] = nOStrideBytes
             state["LdsPadB"] = int(16 / bpeB)                                  # 16B = 4-bank shift (ds_load b128 width), in elements
