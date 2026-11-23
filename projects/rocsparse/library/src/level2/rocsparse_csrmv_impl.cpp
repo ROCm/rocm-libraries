@@ -208,6 +208,10 @@ rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          ha
     {
         p_csrmv_info[0]->alg = alg;
     }
+    if(p_csrmv_info[0] != nullptr)
+    {
+        p_csrmv_info[0]->analysis_alg = alg;
+    }
 
     return rocsparse_status_success;
 }
@@ -400,6 +404,15 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle             handle,
                                       "LRB algorithm does not support symmetric matrices");
             alg = rocsparse::csrmv_alg_rowsplit;
         }
+    }
+
+    // The analysis only holds data for the algorithm it was built for.
+    if(alg != rocsparse::csrmv_alg_rowsplit && csrmv_info != nullptr
+       && csrmv_info->analysis_alg != alg)
+    {
+        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+            rocsparse_status_invalid_value,
+            "The csrmv analysis was performed for a different algorithm");
     }
 
     switch(alg)

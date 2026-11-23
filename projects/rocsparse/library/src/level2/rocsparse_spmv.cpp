@@ -610,6 +610,15 @@ namespace rocsparse
                 // detected via the cached info object, instead of relying on the
                 // descriptor-wide mat->analysed flag.
                 rocsparse_csrmv_info csrmv_info = mat->info->get_csrmv_info();
+
+                // An analysis for another algorithm or operation is replaced.
+                if(csrmv_info != nullptr && !csrmv_info->is_analysis_for(alg_csrmv, trans))
+                {
+                    delete csrmv_info;
+                    csrmv_info = nullptr;
+                    mat->info->set_csrmv_info(nullptr);
+                }
+
                 if(csrmv_info == nullptr)
                 {
                     RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrmv_analysis(handle,
@@ -689,6 +698,19 @@ namespace rocsparse
                 // slot), instead of relying on the descriptor-wide mat->analysed
                 // flag.
                 rocsparse_csrmv_info csrmv_info = mat->info->get_csrmv_info();
+
+                // An analysis for another algorithm or operation is replaced. It is
+                // stored for the CSR operation that the CSC product maps to.
+                const rocsparse_operation trans_csr = (trans == rocsparse_operation_none)
+                                                          ? rocsparse_operation_transpose
+                                                          : rocsparse_operation_none;
+                if(csrmv_info != nullptr && !csrmv_info->is_analysis_for(alg_csrmv, trans_csr))
+                {
+                    delete csrmv_info;
+                    csrmv_info = nullptr;
+                    mat->info->set_csrmv_info(nullptr);
+                }
+
                 if(csrmv_info == nullptr)
                 {
                     RETURN_IF_ROCSPARSE_ERROR((rocsparse::cscmv_analysis(handle,

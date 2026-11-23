@@ -33,6 +33,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <utility>
 
 using namespace level2;
 
@@ -200,6 +201,100 @@ namespace
                 if(HasFailure())
                     return;
             }
+    }
+
+    TEST_F(L2DeviceCsrmvRows, algorithms_share_one_descriptor)
+    {
+        // The preprocess stage keeps its analysis in the matrix descriptor. Preprocessing with
+        // another algorithm or operation replaces it, and compute refuses an analysis that was
+        // built for another algorithm.
+        const auto A = make_csr_by_length<float>(
+            2000, 12007, 0, [](int32_t i) { return (i % 250) == 7 ? 10000 : 1 + (i % 4); });
+        device_csr<float, int32_t, int32_t> dA(A);
+        ASSERT_TRUE(dA.ok());
+        spmat_guard mat;
+        ASSERT_EQ(rocsparse_create_csr_descr(&mat.d,
+                                             A.m,
+                                             A.n,
+                                             A.nnz(),
+                                             dA.ptr,
+                                             dA.ind,
+                                             dA.val,
+                                             rocsparse_indextype_i32,
+                                             rocsparse_indextype_i32,
+                                             to_base(A.base),
+                                             rocsparse_datatype_f32_r),
+                  rocsparse_status_success);
+        scoped_pointer_mode mode(handle, false);
+
+        const float alpha = 1.5f;
+        const float beta  = -0.5f;
+
+        // Runs one product on fresh x and y, with or without the preprocess stage, and checks
+        // the status of the compute stage and, if it succeeds, y.
+        const auto run = [&](rocsparse_spmv_alg  alg,
+                             rocsparse_operation trans,
+                             bool                preprocess,
+                             rocsparse_status    want = rocsparse_status_success) {
+            SCOPED_TRACE(::testing::Message() << "alg=" << alg << " trans=" << trans);
+            const std::vector<float> x  = make_vector<float>(trans_size(trans, A.m, A.n, true), 2);
+            const std::vector<float> y0 = make_vector<float>(trans_size(trans, A.m, A.n, false), 9);
+            device_vector<float>     dx(x), dy(y0);
+            dnvec_guard              vx, vy;
+            ASSERT_EQ(rocsparse_create_dnvec_descr(&vx.d, x.size(), dx, rocsparse_datatype_f32_r),
+                      rocsparse_status_success);
+            ASSERT_EQ(rocsparse_create_dnvec_descr(&vy.d, y0.size(), dy, rocsparse_datatype_f32_r),
+                      rocsparse_status_success);
+            const auto spmv = [&](rocsparse_spmv_stage stage, size_t* bytes, void* buffer) {
+                return rocsparse_spmv(handle,
+                                      trans,
+                                      &alpha,
+                                      mat.d,
+                                      vx.d,
+                                      &beta,
+                                      vy.d,
+                                      rocsparse_datatype_f32_r,
+                                      alg,
+                                      stage,
+                                      bytes,
+                                      buffer);
+            };
+            size_t bytes = 0;
+            ASSERT_EQ(spmv(rocsparse_spmv_stage_buffer_size, &bytes, nullptr),
+                      rocsparse_status_success);
+            device_vector<char> buffer(std::max<size_t>(bytes, 1));
+            if(preprocess)
+                ASSERT_EQ(spmv(rocsparse_spmv_stage_preprocess, &bytes, buffer),
+                          rocsparse_status_success);
+            ASSERT_EQ(spmv(rocsparse_spmv_stage_compute, &bytes, buffer), want);
+            if(want == rocsparse_status_success)
+                EXPECT_TRUE(
+                    expect_near(csr_gemv(A, trans, alpha, x, beta, y0), to_host(dy), "spmv y"));
+        };
+
+        const auto op_n = rocsparse_operation_none;
+        const auto op_t = rocsparse_operation_transpose;
+        const std::pair<rocsparse_spmv_alg, rocsparse_operation> steps[]
+            = {{rocsparse_spmv_alg_csr_adaptive, op_n},
+               {rocsparse_spmv_alg_csr_lrb, op_n},
+               {rocsparse_spmv_alg_csr_nnzsplit, op_n},
+               {rocsparse_spmv_alg_csr_rowsplit, op_n},
+               {rocsparse_spmv_alg_csr_adaptive, op_n},
+               {rocsparse_spmv_alg_csr_nnzsplit, op_t},
+               {rocsparse_spmv_alg_csr_lrb, op_n},
+               {rocsparse_spmv_alg_default, op_n},
+               {rocsparse_spmv_alg_csr_adaptive, op_t},
+               {rocsparse_spmv_alg_csr_adaptive, op_n},
+               {rocsparse_spmv_alg_csr_nnzsplit, op_n}};
+        for(const auto& [alg, trans] : steps)
+        {
+            run(alg, trans, true);
+            if(HasFailure())
+                return;
+        }
+
+        // The descriptor holds the nnz-split analysis now, which LRB cannot use.
+        run(rocsparse_spmv_alg_csr_lrb, op_n, false, rocsparse_status_invalid_value);
     }
 
     TEST_F(L2DeviceCsrmvRows, mixed_lengths_with_empty_rows)

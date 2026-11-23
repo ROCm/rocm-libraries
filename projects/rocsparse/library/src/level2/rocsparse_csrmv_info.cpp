@@ -50,6 +50,7 @@ void _rocsparse_csrmv_info::clear()
     this->index_type_J    = deprecated_rocsparse_indextype_u16;
     this->alg             = rocsparse::csrmv_alg_default;
     this->max_nnz_per_row = -1;
+    this->analysis_alg    = rocsparse::csrmv_alg_default;
 }
 
 rocsparse::csrmv_alg _rocsparse_csrmv_info::alg_for(rocsparse_operation operation) const
@@ -69,6 +70,24 @@ rocsparse::csrmv_alg _rocsparse_csrmv_info::choose_alg(const _rocsparse_csrmv_in
         return csrmv_info->alg_for(operation);
     }
     return rocsparse::csrmv_map_default(operation);
+}
+
+bool _rocsparse_csrmv_info::is_analysis_for(rocsparse::csrmv_alg alg,
+                                            rocsparse_operation  operation) const
+{
+    if(alg == rocsparse::csrmv_alg_rowsplit)
+    {
+        return true;
+    }
+    if(operation != this->trans)
+    {
+        return false;
+    }
+    if(alg == rocsparse::csrmv_alg_default)
+    {
+        return this->alg != rocsparse::csrmv_alg_default;
+    }
+    return alg == this->analysis_alg;
 }
 
 /********************************************************************************
@@ -116,6 +135,7 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
     previously_created |= (dest->index_type_J != deprecated_rocsparse_indextype_u16);
     previously_created |= (dest->alg != rocsparse::csrmv_alg_default);
     previously_created |= (dest->max_nnz_per_row >= 0);
+    previously_created |= (dest->analysis_alg != rocsparse::csrmv_alg_default);
 
     if(previously_created)
     {
@@ -142,6 +162,7 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
         invalid |= (dest->index_type_J != src->index_type_J);
         invalid |= (dest->alg != src->alg);
         invalid |= (dest->max_nnz_per_row != src->max_nnz_per_row);
+        invalid |= (dest->analysis_alg != src->analysis_alg);
 
         if(invalid)
         {
@@ -289,6 +310,7 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
     dest->index_type_J       = src->index_type_J;
     dest->alg                = src->alg;
     dest->max_nnz_per_row    = src->max_nnz_per_row;
+    dest->analysis_alg       = src->analysis_alg;
 
     // Not owned by the info struct. Just pointers to externally allocated memory
     dest->descr       = src->descr;
