@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -81,6 +81,13 @@ namespace rocsparse
                                     rocsparse_indextype       coo_col_indextype,
                                     const void*               coo_col_ind,
                                     rocsparse_coomv_info*     coomv_info);
+
+    // Only the atomic analysis of a non-transposed matrix runs on the device: it
+    // copies the longest row to the host and synchronizes the stream.
+    inline bool coomv_analysis_synchronizes(rocsparse_operation trans, rocsparse_coomv_alg alg)
+    {
+        return alg == rocsparse_coomv_alg_atomic && trans == rocsparse_operation_none;
+    }
 
     rocsparse_status coomv(rocsparse_handle          handle,
                            rocsparse_operation       trans,

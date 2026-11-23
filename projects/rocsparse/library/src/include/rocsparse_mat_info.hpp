@@ -174,10 +174,13 @@ public:
     // descriptor, because it must not synchronize the device; the SpMV info
     // of the previous arrays is ignored until the next preprocess destroys it.
     // clear_spmv_info_if_stale returns rocsparse_status_invalid_value, and keeps
-    // the stale info, when destroying it would synchronize the device while
+    // the stale info, when destroying it, or for COO the analysis that replaces
+    // it (coomv_analysis_synchronizes), would synchronize the device while
     // stream is being captured.
     bool             is_spmv_info_current(uint64_t arrays_stamp) const;
-    rocsparse_status clear_spmv_info_if_stale(hipStream_t stream, uint64_t arrays_stamp);
+    rocsparse_status clear_spmv_info_if_stale(hipStream_t stream,
+                                              uint64_t    arrays_stamp,
+                                              bool        coomv_analysis_synchronizes = false);
 
     void set_sorted_coo2csr_info(rocsparse::sorted_coo2csr_info_t* value);
     rocsparse::sorted_coo2csr_info_t* get_sorted_coo2csr_info();

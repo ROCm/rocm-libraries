@@ -351,18 +351,21 @@ bool _rocsparse_mat_info::is_spmv_info_current(uint64_t arrays_stamp) const
 }
 
 rocsparse_status _rocsparse_mat_info::clear_spmv_info_if_stale(hipStream_t stream,
-                                                               uint64_t    arrays_stamp)
+                                                               uint64_t    arrays_stamp,
+                                                               bool coomv_analysis_synchronizes)
 {
     if(this->m_spmv_stamp == arrays_stamp)
     {
         return rocsparse_status_success;
     }
 
-    // Freeing the csrmv and bsrmv info synchronizes the device, and so can the
-    // analysis that replaces a COO info (the atomic algorithm copies to the host).
-    // Both are illegal while the stream is being captured. The stale info is kept,
-    // so that a call outside the capture can still free it.
-    if(this->csrmv_info != nullptr || this->bsrmv_info != nullptr || this->coomv_info != nullptr)
+    // Freeing the csrmv and bsrmv info synchronizes the device. Deleting the coomv
+    // info does not, but the COO analysis that replaces it synchronizes the stream
+    // when coomv_analysis_synchronizes. Both are illegal while the stream is being
+    // captured. The stale info is kept, so that a call outside the capture can
+    // still free it.
+    if(this->csrmv_info != nullptr || this->bsrmv_info != nullptr
+       || (this->coomv_info != nullptr && coomv_analysis_synchronizes))
     {
         hipStreamCaptureStatus capture_status = hipStreamCaptureStatusNone;
         RETURN_IF_HIP_ERROR(hipStreamIsCapturing(stream, &capture_status));

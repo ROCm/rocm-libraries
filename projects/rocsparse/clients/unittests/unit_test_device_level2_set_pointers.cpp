@@ -495,6 +495,21 @@ namespace
             return v1(rocsparse_spmv_stage_preprocess, m_buffer ? m_buffer->ptr : nullptr);
         }
 
+        // Replaces the v2 descriptor and queries the size of its analysis buffer, so
+        // that analysis_stage() can run without allocating, for instance during a capture.
+        rocsparse_status new_descr_analysis_buffer_size(size_t* bytes)
+        {
+            new_v2_descr();
+            m_analyzed = true;
+            return v2_buffer_size(rocsparse_v2_spmv_stage_analysis, bytes);
+        }
+
+        // The v2 analysis stage alone.
+        rocsparse_status analysis_stage(size_t bytes, void* buffer)
+        {
+            return v2(rocsparse_v2_spmv_stage_analysis, bytes, buffer);
+        }
+
         // Destroys the rocsparse_spmv_descr (v2).
         rocsparse_status destroy_v2_descr()
         {
@@ -1265,14 +1280,21 @@ namespace
     }
 
     // The first preprocess after set_pointers frees the analysis of the previous
-    // arrays, which synchronizes the device. While the handle stream is being
-    // captured, it returns invalid_value without freeing anything, and the
-    // preprocess that follows outside the capture analyzes the new arrays.
+    // arrays. For CSR, CSC and BSR the free synchronizes the device; for COO only
+    // the atomic analysis of a non-transposed matrix that replaces it does. While
+    // the handle stream is being captured, a preprocess (v1) or analysis (v2, on a
+    // new rocsparse_spmv_descr) that would synchronize returns invalid_value
+    // without freeing anything, and the one that follows outside the capture
+    // analyzes the new arrays. The others analyze the new arrays during the
+    // capture and leave it active.
     template <typename T>
-    void preprocess_during_capture(rocsparse_handle handle, fmt f, const config& c)
+    void preprocess_during_capture(rocsparse_handle handle,
+                                   fmt              f,
+                                   const config&    c,
+                                   rocsparse_status expected)
     {
         SCOPED_TRACE(::testing::Message()
-                     << fmt_name(f) << " alg=" << c.alg << " trans=" << c.trans);
+                     << fmt_name(f) << " alg=" << c.alg << " trans=" << c.trans << " v2=" << c.v2);
 
         const scenario<T, int32_t> sc = make_scenario<T, int32_t>(f, 0);
         device_problem<T, int32_t> d1(sc.p1), d2(sc.p2);
@@ -1287,6 +1309,14 @@ namespace
         EXPECT_TRUE(expect_near(s.want(sc.p1), s.y(), "initial product"));
         ASSERT_EQ(set_pointers(mat, sc.p2, d2), rocsparse_status_success);
 
+        size_t                               bytes = 0;
+        std::unique_ptr<device_vector<char>> buffer;
+        if(c.v2)
+        {
+            ASSERT_EQ(s.new_descr_analysis_buffer_size(&bytes), rocsparse_status_success);
+            buffer.reset(new device_vector<char>(std::max<size_t>(bytes, 1)));
+        }
+
         hipStream_t saved = nullptr;
         ASSERT_EQ(rocsparse_get_stream(handle, &saved), rocsparse_status_success);
         hipStream_t capture = nullptr;
@@ -1295,9 +1325,10 @@ namespace
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
         ASSERT_EQ(hipStreamBeginCapture(capture, hipStreamCaptureModeGlobal), hipSuccess);
-        rocsparse_status st = rocsparse_status_success;
-        EXPECT_NO_THROW(st = s.preprocess_stage());
-        EXPECT_EQ(st, rocsparse_status_invalid_value) << "preprocess during the capture";
+        rocsparse_status st = rocsparse_status_internal_error;
+        EXPECT_NO_THROW(st = c.v2 ? s.analysis_stage(bytes, bytes ? buffer->ptr : nullptr)
+                                  : s.preprocess_stage());
+        EXPECT_EQ(st, expected) << "preprocess during the capture";
         hipStreamCaptureStatus status = hipStreamCaptureStatusNone;
         EXPECT_EQ(hipStreamIsCapturing(capture, &status), hipSuccess);
         EXPECT_EQ(status, hipStreamCaptureStatusActive);
@@ -1312,8 +1343,11 @@ namespace
         EXPECT_EQ(hipStreamDestroy(capture), hipSuccess);
         ASSERT_FALSE(::testing::Test::HasFailure());
 
-        s.preprocess();
-        ASSERT_FALSE(::testing::Test::HasFatalFailure());
+        if(expected != rocsparse_status_success)
+        {
+            s.preprocess();
+            ASSERT_FALSE(::testing::Test::HasFatalFailure());
+        }
         ASSERT_EQ(s.compute(), rocsparse_status_success);
         EXPECT_TRUE(expect_near(s.want(sc.p2), s.y(), "product after the capture"));
     }
@@ -1325,14 +1359,37 @@ namespace
             config c;
             c.alg   = fc.second.alg;
             c.trans = fc.second.trans;
-            preprocess_during_capture<double>(handle, fc.first, c);
+            preprocess_during_capture<double>(handle, fc.first, c, rocsparse_status_invalid_value);
             if(HasFailure())
                 return;
         }
-        // Atomic COO analysis synchronizes, so it is refused during capture too.
-        config coo;
-        coo.alg = rocsparse_spmv_alg_coo_atomic;
-        preprocess_during_capture<double>(handle, fmt::coo, coo);
+
+        struct coo_case
+        {
+            rocsparse_spmv_alg  alg;
+            rocsparse_operation trans;
+            rocsparse_status    expected;
+        };
+        const coo_case coo_cases[]
+            = {{rocsparse_spmv_alg_default, rocsparse_operation_none, rocsparse_status_success},
+               {rocsparse_spmv_alg_coo, rocsparse_operation_none, rocsparse_status_success},
+               {rocsparse_spmv_alg_coo_atomic,
+                rocsparse_operation_transpose,
+                rocsparse_status_success},
+               {rocsparse_spmv_alg_coo_atomic,
+                rocsparse_operation_none,
+                rocsparse_status_invalid_value}};
+        for(const bool v2 : {false, true})
+            for(const coo_case& cc : coo_cases)
+            {
+                config c;
+                c.alg   = cc.alg;
+                c.trans = cc.trans;
+                c.v2    = v2;
+                preprocess_during_capture<double>(handle, fmt::coo, c, cc.expected);
+                if(HasFailure())
+                    return;
+            }
     }
 
     // A second analysis on the same v2 descriptor, after set_pointers, must not
