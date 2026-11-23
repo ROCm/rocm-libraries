@@ -11482,8 +11482,15 @@ class KernelWriterAssembly(KernelWriter):
     lastRegTag=None
 
     spool = self.sgprPool.getPool()
+    # checkOutAligned can leave an alignment hole tagged with the next variable's name; taking the
+    # hole's tag as seen would keep that variable live through the store, and the store kernargs
+    # (scale / bias / activation) would then need a fresh aligned block. Tail-folding kernels skip
+    # such holes (other kernels keep their codegen).
+    skipHoles = kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]
     for i in range(0, self.sgprPool.size()):
       regTag = spool[i].tag
+      if skipHoles and spool[i].status != RegisterPool.Status.InUse:
+        continue
       if regTag != lastRegTag:
         lastRegTag = regTag
         if lastRegTag in keptSgprs:

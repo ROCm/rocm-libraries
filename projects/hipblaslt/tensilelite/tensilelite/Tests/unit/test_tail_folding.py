@@ -314,3 +314,32 @@ def test_fold_sgprs_released_before_store(tmp_path, stagger):
         names.append("TailFoldPad")
     for n in names:
         assert re.search(r"^\.set sgpr%s, UNDEF" % n, asm, re.M), n
+
+
+def _next_free_sgpr(asm):
+    return int(re.search(r"\.amdhsa_next_free_sgpr (\d+)", asm).group(1))
+
+
+@pytest.mark.parametrize("amaxd", [0, 1], ids=["bias_sav_act", "amaxd"])
+@pytest.mark.parametrize("pgl", [0, 1])
+def test_fold_store_kernargs_reuse_loop_sgprs(tmp_path, monkeypatch, amaxd, pgl):
+    # bias + ScaleAlphaVec + activation (+ amaxD) kernels load 13 store-kernarg SGPRs after the loop
+    # into the SGPRs endSummation frees. An alignment hole tagged with the next SGPR's name must not
+    # keep that SGPR live, or the store block moves past every loop SGPR (+9..+12 SGPRs). The fold
+    # kernel stays within the fold's own SGPRs (TailFoldStep 2 + GL2FoldThreshold 1 + alignment).
+    config = _config([("PrefetchGL2", pgl), ("PrefetchGL2SAddr", bool(pgl)), ("MatrixInstruction", [16, 16, 32, 1, 1, 4, 4, 2, 2])])
+    problem = config["BenchmarkProblems"][0][0]
+    problem.update(UseBias=1, BiasDataTypeList=["b"], UseScaleAB="Scalar", UseScaleAlphaVec=1, Activation=True,
+                   ActivationType="all")
+    final = [{"BiasTypeArgs": ["b"]}, {"ActivationArgs": [[{"Enum": "none"}]]}]
+    if amaxd:
+        problem.update(OutputAmaxD=True, DataTypeAmaxD="s", UseScaleCD=True)
+    config["BenchmarkProblems"][0][1]["BenchmarkFinalParameters"] += final
+    fold = _emit_one(tmp_path, config, "tf_store_fold.yaml")
+    assert CEIL in fold and "label_TailLoopBeginL" not in fold
+    import sys
+    import tensilelite.SolutionStructs.Solution  # noqa: F401  (the package re-exports the class under the same name)
+    monkeypatch.setattr(sys.modules["tensilelite.SolutionStructs.Solution"], "tdmSeparateABDescriptors", lambda state: True)   # fold unsupported -> develop code
+    dev = _emit_one(tmp_path, config, "tf_store_dev.yaml")
+    assert CEIL not in dev and "label_TailLoopBeginL" in dev
+    assert _next_free_sgpr(fold) - _next_free_sgpr(dev) <= 4
