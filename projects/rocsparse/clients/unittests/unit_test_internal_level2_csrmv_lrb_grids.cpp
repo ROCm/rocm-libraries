@@ -53,6 +53,8 @@
 // for bins 11 to 14, so the limits cover both "one row per wave" (grid raised
 // to num_wgs_per_row) and "two rows per wave" (limit 7, bins 11 and 12).
 // Results are checked per bin, so a failure names the kernel that dropped rows.
+// LRB processes only bins 0 to 31, so its analysis rejects a row in bin 32 or
+// above; the CsrmvLrbAnalysis tests check that limit (AISPARSE-1105).
 //
 // PARTIAL_SCALE_Y. The adaptive analysis trims leading and trailing runs of
 // more than 32 * 256 empty rows out of the adaptive kernel; y is then scaled by
@@ -644,6 +646,7 @@ namespace
 
     using CsrmvLrbGrids      = HandleTest;
     using CsrmvAdaptiveGrids = HandleTest;
+    using CsrmvLrbAnalysis   = HandleTest;
 }
 
 // ---------------------------------------------------------------------------
@@ -698,13 +701,13 @@ TEST_F(CsrmvLrbGrids, unclamped_grid_matches_host)
 // reject it. Such a row needs 64-bit offsets and 64-bit column indices.
 // ---------------------------------------------------------------------------
 
-TEST_F(CsrmvLrbGrids, analysis_rejects_row_longer_than_2_pow_31)
+TEST_F(CsrmvLrbAnalysis, rejects_row_longer_than_2_pow_31)
 {
     check_lrb_preprocess_one_row(handle, (int64_t(1) << 31) + 1, rocsparse_status_not_implemented);
 }
 
 // A row of exactly 2^31 non-zeros is in bin 31, the last bin LRB processes.
-TEST_F(CsrmvLrbGrids, analysis_accepts_row_of_2_pow_31)
+TEST_F(CsrmvLrbAnalysis, accepts_row_of_2_pow_31)
 {
     check_lrb_preprocess_one_row(handle, int64_t(1) << 31, rocsparse_status_success);
 }
