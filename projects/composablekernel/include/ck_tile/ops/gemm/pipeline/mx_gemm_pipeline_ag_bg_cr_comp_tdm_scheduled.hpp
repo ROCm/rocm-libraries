@@ -1148,6 +1148,33 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                     acc, a_tile, b_tile, k0, parity, buffer, next_buffer);
         }
 
+        /// The last K tile, after the loop: Steps K steps in buffer parity and nothing else. No
+        /// tile follows, so it reads no next tile, refills no buffer and prefetches nothing: a
+        /// refill's s_wait_dscnt counts next-tile reads, which the compiler drops here. With
+        /// PrefetchLdsRead, a_tile and b_tile hold step 0, read by the tile before.
+        template <index_t Steps>
+        CK_TILE_DEVICE void
+        tail_tile(AccTile& acc, ATile& a_tile, BTile& b_tile, index_t parity) const
+        {
+            const index_t buffer = BufferBase(parity);
+            if constexpr(!kPrefetchLdsRead)
+                wait_next_tile();
+            static_for<0, Steps, 1>{}([&](auto s) {
+                constexpr index_t step = decltype(s)::value;
+                if constexpr(!kPrefetchLdsRead || step > 0)
+                {
+                    a_tile = block_gemm.LocalPrefetchA(buffer, step);
+                    block_gemm.template LocalPrefetchB<0, kRn>(b_tile, buffer, step);
+                    step_wait<0>();
+                }
+                gemm<false, 0, kRn>(acc, a_tile, b_tile);
+                // Each step's reads feed its own WMMAs: the region ends the step, so the reads
+                // of later steps stay after it.
+                if constexpr(!kSourceOrder)
+                    __builtin_amdgcn_sched_barrier(0);
+            });
+        }
+
         /// The K loop: full_tiles whole K tiles, then the K tail with Traits::kHasTail.
         /// TailNum is the base's for full_tiles; TailNumber::Full has the odd tile and the K
         /// tail's buffer chosen at run time.
@@ -1207,23 +1234,27 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             if constexpr(TailNum == TailNumber::Full)
             {
                 if(integer_modulo_nonnegative<2>(full_tiles))
-                    k_tile<kKSteps, 0>(acc, a_tile, b_tile, pairs_end, 0);
+                {
+                    // The odd tile feeds the K tail, or without one is the last tile.
+                    if constexpr(Traits::kHasTail)
+                        k_tile<kKSteps, 0>(acc, a_tile, b_tile, pairs_end, 0);
+                    else
+                        tail_tile<kKSteps>(acc, a_tile, b_tile, 0);
+                }
             }
             if constexpr(Traits::kHasTail)
             {
                 // The K tail is one more tile: its TDM loads are clipped at K and only its first
-                // tail_steps K steps are read. With TailNumber::Full the GL2 prefetch takes its
-                // parity as even, which only changes which lines are hinted.
+                // tail_steps K steps are read.
                 static_assert(Traits::kTailSteps < kKSteps,
                               "comp_tdm_scheduled: tail steps < k_steps");
                 constexpr index_t kTailParity = TailNum == TailNumber::One ? 1 : 0;
-                k_tile<Traits::kTailSteps, kTailParity>(
-                    acc,
-                    a_tile,
-                    b_tile,
-                    full_tiles * kTileK,
-                    TailNum == TailNumber::Full ? integer_modulo_nonnegative<2>(full_tiles)
-                                                : kTailParity);
+                tail_tile<Traits::kTailSteps>(acc,
+                                              a_tile,
+                                              b_tile,
+                                              TailNum == TailNumber::Full
+                                                  ? integer_modulo_nonnegative<2>(full_tiles)
+                                                  : kTailParity);
             }
             // No workgroup may exit while a TDM load into its LDS is in flight: with multicast,
             // peers' loads write here too.

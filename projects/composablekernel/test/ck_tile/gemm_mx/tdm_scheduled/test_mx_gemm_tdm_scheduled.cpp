@@ -175,6 +175,36 @@ TEST(MxGemmTdmScheduled, EightBitTypes)
         1000, 1001, 2048 + 96);
 }
 
+// The tile after the K loop reads no next tile and refills no buffer. Each schedule variant with
+// a K tail after an odd and an even whole-tile count, one whole tile included; SplitB without a
+// cluster is the variant whose refill waited on the next tile's reads.
+TEST(MxGemmTdmScheduled, KTailAfterLoop)
+{
+    using S = Shape<true, true, 1>;
+    for(index_t tiles : {1, 7, 8})
+    {
+        const index_t K = tiles * 256 + 96;
+        check<Kernel<fp8_t, bf8_t, fp8_t, 128, 128, 256, 2, 2, 16, Tu<1, 1>, S>>(1000, 1000, K);
+        check<Kernel<fp8_t, bf8_t, fp8_t, 128, 128, 256, 2, 2, 16, Tu<1, 1, 4, true, false>, S>>(
+            1000, 1000, K);
+        check<Kernel<fp8_t, bf8_t, fp8_t, 128, 128, 256, 2, 2, 16, Tu<1, 1, 4, false, false>, S>>(
+            1000, 1000, K);
+    }
+    using Fp4K1024 = Kernel<pk_fp4_t,
+                            pk_fp4_t,
+                            fp8_t,
+                            128,
+                            128,
+                            1024,
+                            2,
+                            2,
+                            32,
+                            Tu<1, 1>,
+                            Shape<false, false, 1>>;
+    check<Fp4K1024>(512, 512, 3 * 1024 + 128);
+    check<Fp4K1024>(512, 512, 4 * 1024 + 128);
+}
+
 TEST(MxGemmTdmScheduled, Edges)
 {
     using Edge = Fp4Big<fp8_t, Tu<1, 1>, Shape<true, true, 0>>;
