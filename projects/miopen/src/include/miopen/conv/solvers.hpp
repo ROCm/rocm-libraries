@@ -4637,7 +4637,6 @@ extern template struct TransposedConvMPBidirectWinograd_xdlops<5, 3>;
 extern template struct TransposedConvMPBidirectWinograd_xdlops<6, 3>;
 #if defined(__clang__) && defined(CONV_MP_BIDIRECTIONAL_WINOGRAD_CPP)
 #pragma clang diagnostic pop
-
 #endif
 
 /// Forward 2D depthwise convolution (channels-per-group == 1) for RDNA.

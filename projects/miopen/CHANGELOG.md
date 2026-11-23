@@ -151,6 +151,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   the kernels that support it, instead of staging fp32 and casting. With
   `MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC` set, only kernels that accumulate into dW atomically
   are rejected.
+* [Conv] The AI config-selection heuristic may now pick CK's split-K autodeduce (`split_k = -1`,
+  CK chooses `k_batch` at run time) for the 2D and 3D grouped backward-weights CK xdlops solvers,
+  which previously rejected that candidate and fell through to an explicit split-K value. This can
+  change the default grouped backward-weights kernel pick, and therefore run time, on gfx942 and
+  gfx950; deterministic mode still rejects `-1`.
 
 ### Removed
 * [Conv] Stopped shipping the per-solver `{arch}_{solver}_kernel_config_encoder.tn.model` files; the
