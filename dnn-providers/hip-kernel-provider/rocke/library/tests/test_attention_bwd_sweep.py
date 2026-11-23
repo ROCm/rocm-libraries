@@ -11,6 +11,7 @@ CPU only; nothing is compiled or timed.
 
 from __future__ import annotations
 
+import itertools
 import json
 import re
 from pathlib import Path
@@ -267,6 +268,42 @@ def test_g4_slicing_is_enumerated_with_block_k4_in_stage_h():
     assert len(sw.g4_slicing_values(cr, allrel)) == 1
     # the default pair keeps the earlier candidate keys
     assert c.with_knobs(g4_slicing="step").key() == c.key()
+
+
+def test_full_crossing_keeps_exactly_the_combinations_whose_couplings_hold():
+    """The full level crosses a point with the stage's registry knobs knob by
+    knob, dropping a prefix as soon as a coupling fails; it keeps exactly the
+    combinations, in product order, that testing every whole combination
+    keeps (stage H: a default start point and one with the merged barrier,
+    which gates ``ring_issue``)."""
+    full = sw.Release(sw.ALL_RELEASED, "full")
+    for arch in ("gfx942", "gfx950"):
+        sl = _sl(arch, 64)
+        start = sw.Candidate.make(sl, sw.default_knobs(sl))
+        for c in (start, start.with_knobs(barrier_merge="on")):
+            pts = sw.schedule_values(c, full, extras=False)
+            for p in pts[:: len(pts) // 2]:
+                kept = sw.with_extras(c, full, [p], sw.SCHEDULE_EXTRA)
+                assert kept
+                assert kept == _every_combination(c, full, p, sw.SCHEDULE_EXTRA)
+
+
+def _every_combination(c, rel, point, names):
+    """``point`` crossed with every whole combination of ``names`` whose
+    couplings all hold, each combination tested on its own."""
+    ctx = sw._knob_context(c, point)
+    axes = [
+        (n, sw._extra_values(c, rel, n, ctx, coupled=False))
+        for n in names
+        if rel.has(n)
+    ]
+    out = []
+    for combo in itertools.product(*(vals for _, vals in axes)):
+        q = {**point, **dict(zip((n for n, _ in axes), combo))}
+        qctx = {**ctx, **q}
+        if all(sw.backward_axis(n).applies(q[n], qctx) for n, _ in axes):
+            out.append(q)
+    return out
 
 
 def test_backend_alloc_dedupes_with_a_policy_none_resolution():
