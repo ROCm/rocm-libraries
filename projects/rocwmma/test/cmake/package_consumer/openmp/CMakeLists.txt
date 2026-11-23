@@ -19,6 +19,3 @@ target_link_libraries(rocwmma_openmp_consumer PRIVATE roc::rocwmma)
 
 enable_testing()
 add_test(NAME rocwmma_openmp_consumer COMMAND rocwmma_openmp_consumer)
-
-# Use the owned traits even when this consumer is configured independently.
-target_compile_definitions(rocwmma_openmp_consumer PRIVATE ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS=0)

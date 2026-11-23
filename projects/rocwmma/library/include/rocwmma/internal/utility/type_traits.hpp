@@ -35,12 +35,16 @@
 #error "ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS must be 0 or 1"
 #endif
 
-#if defined(__HIPCC_RTC__)
-
-// HIPRTC has always used rocWMMA's own traits; the legacy switch has no effect here.
+// Keep =0 accepted for migrated build scripts, but never silently accept an
+// application request to restore the removed standard-library specializations.
 #ifndef ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS
 #define ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS 0
+#elif ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS
+#error \
+    "rocWMMA legacy std trait specializations were removed in 5.0; use rocwmma::is_arithmetic, rocwmma::is_floating_point, and rocwmma::is_signed"
 #endif
+
+#if defined(__HIPCC_RTC__)
 
 namespace rocwmma
 {
@@ -107,19 +111,6 @@ namespace rocwmma
 #else
 
 #include <type_traits>
-
-// Legacy std specializations are now opt-in. Owned rocwmma:: traits are
-// available in every mode, including the default used by new consumers.
-#ifndef ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS
-#define ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS 0
-#endif
-
-#if defined(ROCWMMA_SUPPRESS_LEGACY_STD_TRAIT_DEPRECATION) \
-    && ROCWMMA_SUPPRESS_LEGACY_STD_TRAIT_DEPRECATION
-#define ROCWMMA_DETAIL_DEPRECATED_STD_TRAIT(MSG)
-#else
-#define ROCWMMA_DETAIL_DEPRECATED_STD_TRAIT(MSG) [[deprecated(MSG)]]
-#endif
 
 namespace rocwmma
 {

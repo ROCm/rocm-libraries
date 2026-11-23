@@ -14,8 +14,7 @@ project(rocwmma_type_traits_consumer LANGUAGES CXX HIP)
 find_package(rocwmma REQUIRED CONFIG)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-# This standalone consumer intentionally does not inherit the test suite's
-# explicit opt-out: it must exercise the behavior shipped to an unmodified user.
+# Leave compatibility defines unset to exercise an unmodified package consumer.
 add_executable(rocwmma_type_traits_consumer test_type_traits.hip)
 set_target_properties(rocwmma_type_traits_consumer PROPERTIES HIP_STANDARD 17 HIP_STANDARD_REQUIRED ON)
 target_link_libraries(rocwmma_type_traits_consumer PRIVATE roc::rocwmma)
@@ -39,4 +38,4 @@ set_tests_properties(rocwmma_type_traits_gemm PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME rocwmma_type_traits_compiler
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_type_traits.py"
     --compiler "${CMAKE_HIP_COMPILER}" --arch "${_test_arch}"
-    --include "${_rocwmma_include}" --stage 2)
+    --include "${_rocwmma_include}")

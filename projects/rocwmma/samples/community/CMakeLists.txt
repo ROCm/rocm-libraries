@@ -24,9 +24,6 @@
  #
  ###############################################################################
 
-# Samples demonstrate the permanent rocWMMA trait API.
-add_compile_definitions(ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS=0)
-
 if (NOT ROCWMMA_SAMPLES_INCLUDE_DIR)
   set(ROCWMMA_SAMPLES_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 endif()

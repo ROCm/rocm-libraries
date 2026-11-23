@@ -111,10 +111,6 @@ else()
     endif()
 endif()
 
-# Exercise the permanent trait API throughout the suite, including regression
-# executables and shared support objects created outside the main target helper.
-add_compile_definitions(ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS=0)
-
 set(ROCWMMA_TEST_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR})
 set(ROCWMMA_COMMON_TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/hip_device.cpp
                                 ${CMAKE_CURRENT_SOURCE_DIR}/rocwmma_gtest_main.cpp)

@@ -71,11 +71,9 @@ The `type_traits` consumer intentionally leaves the compatibility selector unset
 It checks owned traits, compiles a real FP16 GEMM with the shipped default, and
 registers a GPU execution test (reported as skipped when no device is available).
 Its host check and Python compiler/diagnostic checks need no GPU. The compiler
-checks cover explicit modes, restrictive-STL rejection, header order, per-use
-deprecation, and suppression using installed headers through a system include
-path. The STL's ability to accept legacy specializations is probed independently
-of rocWMMA's default selection. Positive legacy diagnostic cases are inapplicable
-when the STL rejects them; the explicit-override failure is still checked.
+checks cover the default behavior, the explicit no-op, rejection of the removed
+legacy mode, and header order using installed headers through a system include
+path.
 
 ## Registering another consumer
 

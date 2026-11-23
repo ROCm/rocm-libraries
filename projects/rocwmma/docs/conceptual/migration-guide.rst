@@ -13,6 +13,10 @@ Migration guide for rocWMMA
 Type-trait migration starting in rocWMMA 3.0
 -------------------------------------------
 
+rocWMMA 5.0.0 removes the legacy standard-library specializations. An explicit
+legacy request now fails with a migration diagnostic; ``=0`` remains accepted
+as a no-op. The deprecation-suppression macro no longer has any effect.
+
 Use ``rocwmma::is_arithmetic``, ``rocwmma::is_floating_point``, and
 ``rocwmma::is_signed`` when classifying rocWMMA numeric types. Their ``_v``
 forms have the same answers as the corresponding class traits. Include
@@ -73,13 +77,13 @@ release numbers are assigned during release preparation.
    * - 4.0.0
      - Legacy specializations off
      - Available with deprecation diagnostics
-   * - 5.0.0 (planned)
+   * - 5.0.0
      - Owned traits only
      - Compilation error
 
-In 4.0.0, legacy specializations default off on every toolchain. Migrate all
-affected queries before upgrading, or explicitly request temporary legacy
-compatibility where the STL permits it.
+In 4.0.0, legacy specializations defaulted off on every toolchain, with an
+explicit temporary compatibility option where the STL permitted it. That
+option is no longer available in 5.0.0.
 
 In 3.0.0, the automatic default considers both the STL and compiler annotation
 support: libc++ 20 or newer, or MSVC STL defining its type-trait prohibition
@@ -100,17 +104,18 @@ Use ``=1`` only as temporary compatibility through rocWMMA 4.0.0. Values other
 than 0 and 1 are unsupported. In 5.0.0, ``=0`` remains accepted as a no-op so
 migrated build scripts continue to work; ``=1`` reports the removal.
 
-Set the option before any rocWMMA includes and consistently across translation
-units, dependent libraries and precompiled headers. Owned traits have stable
+For 3.0 and 4.0, set the option before any rocWMMA includes and consistently
+across translation units, dependent libraries and precompiled headers. Owned traits have stable
 answers in both modes, but optional standard specializations can still change
 generic template definitions and overload selection across translation units.
-These switches do not change HIPRTC's existing owned-trait implementation.
+HIPRTC's owned-trait implementation is unchanged. In 5.0.0, an explicit
+legacy request also produces the removal diagnostic under HIPRTC.
 
-Deprecation diagnostics
-^^^^^^^^^^^^^^^^^^^^^^
+Deprecation diagnostics in 3.0 and 4.0
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Legacy class specializations carry ``[[deprecated]]`` attributes. Merely
-including rocWMMA or using its owned traits does not emit a migration warning.
+In 3.0 and 4.0, legacy class specializations carry ``[[deprecated]]``
+attributes. Merely including rocWMMA or using its owned traits does not emit a migration warning.
 Uses of the legacy standard traits can warn, including uses in system-header
 templates instantiated by an application. Such warnings can fail builds using
 ``-Werror``.
