@@ -261,9 +261,12 @@ public:
     const std::shared_ptr<Op>& operator[](std::size_t i) const { return ops[i]; }
     const std::string& TypeString(std::size_t i) const { return type_strings[i]; }
     /// Whether instance i may run a problem that does (or does not) need a large-tensor instance.
+    /// Both directions matter: a large-tensor instance is not a valid answer for a problem that
+    /// does not need one, it only costs occupancy and picks a kernel tuned for shapes this problem
+    /// cannot have.
     bool Serves(std::size_t i, bool require_large_tensor) const
     {
-        return !require_large_tensor || large_tensor[i];
+        return require_large_tensor == large_tensor[i];
     }
 
     /// Index of the first instance with the type string, or Size() if there is none.
@@ -355,6 +358,16 @@ std::vector<std::string> FillValidKernelsIDs(const ProblemDescriptionType& probl
     {
         if(instances.Serves(idx, require_large_tensor) && args.IsSupportedBy(instances[idx]))
             valid_kernels.push_back(instances.TypeString(idx));
+    }
+    // If the only registered instances are large-tensor ones, take them: a slower
+    // instance is better than making the solver inapplicable.
+    if(valid_kernels.empty() && !require_large_tensor)
+    {
+        for(size_t idx = 0; idx < instances.Size(); ++idx)
+        {
+            if(instances.Serves(idx, /*require_large_tensor=*/true) && args.IsSupportedBy(instances[idx]))
+                valid_kernels.push_back(instances.TypeString(idx));
+        }
     }
     // When require_large_tensor is true and no large-tensor instances are
     // registered for this DeviceOp, returning an empty list is the intended
