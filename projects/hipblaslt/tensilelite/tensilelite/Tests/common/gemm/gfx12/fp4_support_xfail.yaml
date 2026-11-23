@@ -43,7 +43,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
         - LDSTrInst: [True]
         - ExpandPointerSwap: [False]
-        - 1LDSBuffer: [1]
+        - 1LDSBuffer: [0]
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 64, 1, 1, 1, 1, 1, 1]  # Use 16x16x64 for A0 (not 32x16x128)

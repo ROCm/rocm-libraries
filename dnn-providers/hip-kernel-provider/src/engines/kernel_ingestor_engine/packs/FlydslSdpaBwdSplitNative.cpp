@@ -119,6 +119,7 @@ using native::HAS_BIAS_FIELD;
 using native::HEAD_DIM_FIELD;
 using native::INT32_LIMIT;
 using native::LADDER;
+using native::launchAxisFits;
 using native::PADDED_FIELD;
 using native::REDUCE_LAUNCH;
 using native::REDUCE_SYMBOL_FIELD;
@@ -899,8 +900,10 @@ std::optional<Grid>
         x = facts.numHeads;
         y = blocks(facts.seqLenQ, row.blockM);
     }
-    // x may be as wide as int32; y and z are limited to 65535.
-    if(!x || !y || *x > INT32_LIMIT || *y > GRID_YZ_LIMIT || facts.batch > GRID_YZ_LIMIT)
+    // x may be as wide as int32 workgroups and 32 bits of work-items; y and z are limited to
+    // 65535.
+    if(!x || !y || *x > INT32_LIMIT || !launchAxisFits(*x, blockThreadsOf(slot, row))
+       || *y > GRID_YZ_LIMIT || facts.batch > GRID_YZ_LIMIT)
     {
         return std::nullopt;
     }

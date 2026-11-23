@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -59,7 +59,7 @@ TYPED_TEST(TransformOutputIteratorReduceByKeyTest, TestTransformOutputIteratorRe
       thrust::host,
       h_keys.begin(),
       h_keys.end(),
-      thrust::make_transform_iterator(h_values.begin(), thrust::negate<T>()),
+      thrust::make_transform_iterator(h_values.begin(), _THRUST_STD::negate<T>()),
       thrust::discard_iterator<T>{},
       h_result.begin());
     // run on device
@@ -69,7 +69,7 @@ TYPED_TEST(TransformOutputIteratorReduceByKeyTest, TestTransformOutputIteratorRe
       d_keys.end(),
       d_values.begin(),
       thrust::discard_iterator<T>{},
-      thrust::make_transform_output_iterator(d_result.begin(), thrust::negate<T>()));
+      thrust::make_transform_output_iterator(d_result.begin(), _THRUST_STD::negate<T>()));
 
     ASSERT_EQ(h_result, d_result);
   }

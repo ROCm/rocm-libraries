@@ -4,7 +4,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 
 ## (Unreleased) rocSOLVER
-## (Unreleased) rocSOLVER 3.39
 
 ### Added
 ### Changed
@@ -12,7 +11,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Optimized
 ### Resolved issues
 
-* Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
 * SYTF2, SYTRF and LASYF could choose different pivots in different threads (the diagonal element
   used to choose the pivot was read while it was being interchanged), which gave wrong
   factorizations, and memory access faults, for some matrices
@@ -23,6 +21,14 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Known issues
 ### Upcoming changes
+
+
+
+## rocSOLVER 3.39.0 for ROCm 10.3.0
+
+### Resolved issues
+
+* Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
 
 
 
