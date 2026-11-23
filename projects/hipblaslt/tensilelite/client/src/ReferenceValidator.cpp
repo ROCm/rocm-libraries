@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "ReferenceValidator.hpp"
+#include "ClientProblemFactory.hpp"
 #include "ResultComparison.hpp"
 #include "ResultReporter.hpp"
 #include "TimingInstrumentation.hpp"
@@ -50,6 +51,20 @@ namespace TensileLite
             m_elementsToValidate = args["num-elements-to-validate"].as<int>();
             m_printValids        = args["print-valids"].as<bool>();
             m_printMax           = args["print-max"].as<int>();
+
+            // --split-devices: the operand the split does not cut may be shared (see
+            // splitPlacementError), and then every device's kernel reads the owner's copy.
+            if(args.count("split-devices") && args["split-devices"].as<int>() > 1
+               && args.count("split-placement") && args.count("split-dim"))
+            {
+                auto const placement = args["split-placement"].as<std::string>();
+                auto const splitN    = args["split-dim"].as<std::string>() == "N";
+                if(placement.size() == 4)
+                {
+                    m_sharedA = splitN && placement[0] == 'S';
+                    m_sharedB = !splitN && placement[1] == 'S';
+                }
+            }
 
             m_printTensorA             = args["print-tensor-a"].as<bool>();
             m_printTensorB             = args["print-tensor-b"].as<bool>();
@@ -124,9 +139,13 @@ namespace TensileLite
                 {
                     ScopedTimer timer("cpu_data_init");
                     m_referenceInputs.clear();
-                    forEachDevice(*m_devices, [&](DeviceContext& ctx) {
-                        m_referenceInputs.push_back(ctx.dataInit->prepareCPUInputs(problem));
-                    });
+                    for(size_t d = 0; d < m_devices->size(); d++)
+                    {
+                        ScopedDevice device((*m_devices)[d]->deviceId);
+                        m_referenceInputs.push_back(
+                            (*m_devices)[d]->dataInit->prepareCPUInputs(deviceProblem(d)));
+                    }
+                    redirectSharedInputs();
                 }
 
                 if(auto const* gemm = dynamic_cast<ContractionProblemGemm const*>(problem);
@@ -135,14 +154,48 @@ namespace TensileLite
 
                 {
                     ScopedTimer timer("cpu_reference_gemm");
-                    for(auto const& reference : m_referenceInputs)
-                        SolveCPU(problem, reference.get(), m_elementsToValidate);
+                    for(size_t d = 0; d < m_referenceInputs.size(); d++)
+                        SolveCPU(deviceProblem(d), m_referenceInputs[d].get(), m_elementsToValidate);
                 }
 
                 if(auto const* gemm = dynamic_cast<ContractionProblemGemm const*>(problem);
                    gemm != nullptr && gemm->fusedA2A() == FusedA2A::GemmA2A)
                     referenceRecvs(*gemm);
             }
+        }
+
+        void ReferenceValidator::redirectSharedInputs()
+        {
+            if((!m_sharedA && !m_sharedB) || m_referenceInputs.size() < 2)
+                return;
+            // The owner is the last device, as in main.cpp (attachFullOutput). The pointers refer
+            // to the owner's DataInitialization host buffers, which outlive the reference inputs,
+            // and the reference only reads A and B, so nothing is copied or freed here. The same
+            // pointers serve the per-solution recomputation in preSolution.
+            auto const& owner = dynamic_cast<ContractionInputs const&>(*m_referenceInputs.back());
+            for(size_t d = 0; d + 1 < m_referenceInputs.size(); d++)
+            {
+                auto& inputs = dynamic_cast<ContractionInputs&>(*m_referenceInputs[d]);
+                if(m_sharedA)
+                {
+                    inputs.a      = owner.a;
+                    inputs.batchA = owner.batchA;
+                    inputs.scaleA = owner.scaleA;
+                    inputs.mxsa   = owner.mxsa;
+                }
+                if(m_sharedB)
+                {
+                    inputs.b      = owner.b;
+                    inputs.batchB = owner.batchB;
+                    inputs.scaleB = owner.scaleB;
+                    inputs.mxsb   = owner.mxsb;
+                }
+            }
+        }
+
+        ContractionProblem* ReferenceValidator::deviceProblem(size_t card) const
+        {
+            return m_split ? m_split->sliceProblem(m_problem, card) : m_problem;
         }
 
         void ReferenceValidator::preSolution(ContractionSolution* const solution)
@@ -177,7 +230,7 @@ namespace TensileLite
                         PerSolutionScope() { g_inPerSolutionReference = true; }
                         ~PerSolutionScope() { g_inPerSolutionReference = false; }
                     } perSolutionScope;
-                    SolveCPU(m_problem, m_referenceInputs[d].get(), m_elementsToValidate);
+                    SolveCPU(deviceProblem(d), m_referenceInputs[d].get(), m_elementsToValidate);
                 }
             }
         }
@@ -229,7 +282,7 @@ namespace TensileLite
                         rv &= validate(problems->gemms[j], reference.grouped[j], result.grouped[j]);
                     }
                 }
-                else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
+                else if(auto problem = dynamic_cast<ContractionProblemGemm*>(deviceProblem(card)))
                 {
                     // These copy the whole ContractionInputs structs (including their vectors).
                     std::optional<ContractionInputs> reference;
@@ -240,6 +293,30 @@ namespace TensileLite
                         result.emplace(dynamic_cast<ContractionInputs const&>(*inputs));
                     }
                     rv = validate(*problem, *reference, *result);
+
+                    // OutputPeerD: this card's D also holds the slice of every other card.
+                    if(m_split != nullptr && problem->outputPeerD())
+                    {
+                        auto const* full   = dynamic_cast<ContractionProblemGemm const*>(m_problem);
+                        if(full == nullptr)
+                            throw std::runtime_error("OutputPeerD needs a plain GEMM problem.");
+                        const auto  bytes  = static_cast<int64_t>(full->d().elementBytes());
+                        const auto  mine   = static_cast<int64_t>(m_split->sliceOffsetInD(m_problem, card));
+                        for(size_t other = 0; other < m_devices->size(); other++)
+                        {
+                            if(other == card)
+                                continue;
+                            ContractionInputs peer = *result;
+                            const auto theirs = static_cast<int64_t>(m_split->sliceOffsetInD(m_problem, other));
+                            peer.d = static_cast<char*>(result->d) + (theirs - mine) * bytes;
+                            ContractionInputs otherReference = dynamic_cast<ContractionInputs const&>(*m_referenceInputs[other]);
+                            auto* otherProblem
+                                = dynamic_cast<ContractionProblemGemm*>(deviceProblem(other));
+                            if(otherProblem == nullptr)
+                                throw std::runtime_error("OutputPeerD needs a plain GEMM problem.");
+                            rv &= validate(*otherProblem, otherReference, peer);
+                        }
+                    }
                 }
                 else
                 {
@@ -276,6 +353,20 @@ namespace TensileLite
 
         void ReferenceValidator::validateSlots(std::vector<size_t> const& slots)
         {
+            // OutputPeerD: a card's D is also written by the other cards' kernels, so every card
+            // must be done before any card's D is read. Reading one card's results only waits for
+            // that card.
+            if(m_split != nullptr)
+            {
+                auto const* gemm = dynamic_cast<ContractionProblemGemm const*>(m_problem);
+                if(gemm != nullptr && gemm->outputPeerD())
+                    for(size_t d = 0; d < m_devices->size(); d++)
+                    {
+                        ScopedDevice device((*m_devices)[d]->deviceId);
+                        HIP_CHECK_EXC(hipDeviceSynchronize());
+                    }
+            }
+
             for(size_t d = 0; d < m_devices->size(); d++)
             {
                 ScopedDevice device((*m_devices)[d]->deviceId);

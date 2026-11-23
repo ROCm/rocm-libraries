@@ -371,12 +371,15 @@ namespace rocsparse
                 - dw[batch_stride * (m - 3) + gid] * x[batch_stride * (m - 1) + gid],
             d[batch_stride * (m - 3) + gid]);
 
-        x[batch_stride * (m - 4) + gid] = rocsparse::scaled_div(
-            x[batch_stride * (m - 4) + gid]
-                - du[batch_stride * (m - 4) + gid] * x[batch_stride * (m - 3) + gid]
-                - dw[batch_stride * (m - 4) + gid] * x[batch_stride * (m - 2) + gid]
-                - r3[batch_count * (m - 4) + gid] * x[batch_stride * (m - 1) + gid],
-            d[batch_stride * (m - 4) + gid]);
+        if(m >= 4)
+        {
+            x[batch_stride * (m - 4) + gid] = rocsparse::scaled_div(
+                x[batch_stride * (m - 4) + gid]
+                    - du[batch_stride * (m - 4) + gid] * x[batch_stride * (m - 3) + gid]
+                    - dw[batch_stride * (m - 4) + gid] * x[batch_stride * (m - 2) + gid]
+                    - r3[batch_count * (m - 4) + gid] * x[batch_stride * (m - 1) + gid],
+                d[batch_stride * (m - 4) + gid]);
+        }
 
         for(rocsparse_int i = m - 5; i >= 0; i--)
         {

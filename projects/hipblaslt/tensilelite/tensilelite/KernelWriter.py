@@ -23,6 +23,7 @@
 ################################################################################
 
 from .ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
+from .CustomKernels import magicSizeSemantic
 from rocisa import rocIsa, countInstruction, countGlobalRead, \
             countLocalRead, countLocalWrite, countWeightedLocalRead, countWeightedLocalWrite, countMFMA, getMFMAs
 from .ir import SBitcmp1B32
@@ -76,6 +77,8 @@ from .Common.Capabilities import archCapOverrides
 from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, splatFirst
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
   parseStinkyTofuRegisterAllocation, SW_INSTRUCTION_PREFETCH_AUTO
+from .Common.LdsReadPlan import effective_lrvw_tile, effective_lrvw_unroll, \
+  force_lrvw_tile_one
 from .SolutionStructs.Naming import getKernelFileBase, getKernelNameMin
 from .Toolchain.Component import Assembler
 
@@ -302,7 +305,7 @@ class StateValues:
   lrvwUnrollMetadata: int                = 0 # For Sparse Metadat
 
   numMfmaPerIter: int                    = 0
-  SubTileIdx: int                       = 0
+  SubTileIdx: int                        = 0
   subtileLdsSwizzle: bool                = False
   subtileIterateModeA: bool              = False
   subtileIterateModeB: bool              = False
@@ -370,7 +373,7 @@ class StateValues:
   startVgprAddressDbg: int               = -1
   startVgprAlphaTmp: int                 = -1
   startVgprSerial: int                   = -1
-  startVgprPersistentConsts: int                 = -1
+  startVgprPersistentConsts: int         = -1
   numVgprSKConsts: int                   = 0
   startVgprIdentityMatrix: int           = -1
   startVgprInfCheck: int                 = -1
@@ -427,7 +430,7 @@ class StateValues:
   numStoreSgprInstExt: int               = 0 # For pose-loop kernel args
   numSgprAddressBias: int                = 0
   numSgprAddressGSUSync: int             = 0
-  numSgprPersistent: int                    = 0
+  numSgprPersistent: int                 = 0
   tileProcessing: TileProcessingSettings               = field(default_factory=TileProcessingSettings)
   BiasType: int                          = 0
   BiasStride: int                        = 0
@@ -8223,9 +8226,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     #     drains dependent local reads before the pack code, so lrvwTile > 1 is supported
     isCMS = kernel["UseCustomMainLoopSchedule"]
     isMfmaXf32 = kernel["UseMFMAF32XEmulation"]
-    forceLrvwTile1A = kernel["ProblemType"]["MacDataTypeA"].numBytes() >= 4 and \
-      (kernel["EnableMatrixInstruction"] and kernel["MIInputPerThread"] > 1) and \
-      not (kernel["UseF32XEmulation"] and (isMfmaXf32 or isCMS or self.states.asmCaps["HasWMMA_V3"]))
+    miInputPerThreadA = kernel["MIInputPerThread"] if kernel["EnableMatrixInstruction"] else 1
+    miInputPerThreadB = kernel["MIInputPerThreadB"] if kernel["EnableMatrixInstruction"] else 1
+    forceLrvwTile1A = force_lrvw_tile_one(
+      kernel["ProblemType"]["MacDataTypeA"].numBytes(),
+      kernel["EnableMatrixInstruction"], miInputPerThreadA,
+      kernel["UseF32XEmulation"], isMfmaXf32, isCMS,
+      self.states.asmCaps["HasWMMA_V3"])
     # LDSTr: ds_read_tr delivers one tile row per lane per instruction, so the
     # tile-direction width of a single local read is 1 regardless of VectorWidthA
     # (LocalRead issues VectorWidthA separate reads, one per row of a VW-group).
@@ -8235,26 +8242,27 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # allocated when enableLDSTr is set (see vgprAllocationImplClassic).
     if kernel["enableLDSTrA"]:
       self.states.lrvwTileA = 1
-    elif not kernel["UnrollMajorLDSA"] and not forceLrvwTile1A:
-      self.states.lrvwTileA = kernel["VectorWidthA"]
-      if kernel["ProblemType"]["MXBlockA"]:
-        self.states.lrvwTileMXSA = kernel["VectorWidthA"]
     else:
-      self.states.lrvwTileA = 1
-    forceLrvwTile1B = kernel["ProblemType"]["MacDataTypeB"].numBytes() >= 4 and \
-      (kernel["EnableMatrixInstruction"] and kernel["MIInputPerThreadB"] > 1) and \
-      not (kernel["UseF32XEmulation"] and (isMfmaXf32 or isCMS or self.states.asmCaps["HasWMMA_V3"]))
-    # See the enableLDSTrA comment above. Note this branch deliberately does not
-    # touch lrvwTileMXSB: enableLDSTrB implies not UnrollMajorLDSB, so today's
-    # LDSTr kernels already take the first branch and never reach that assignment.
+      self.states.lrvwTileA = effective_lrvw_tile(
+        kernel["VectorWidthA"], kernel["UnrollMajorLDSA"],
+        kernel["ProblemType"]["MacDataTypeA"].numBytes(),
+        kernel["EnableMatrixInstruction"], miInputPerThreadA,
+        kernel["UseF32XEmulation"], isMfmaXf32, isCMS,
+        self.states.asmCaps["HasWMMA_V3"])
+    forceLrvwTile1B = force_lrvw_tile_one(
+      kernel["ProblemType"]["MacDataTypeB"].numBytes(),
+      kernel["EnableMatrixInstruction"], miInputPerThreadB,
+      kernel["UseF32XEmulation"], isMfmaXf32, isCMS,
+      self.states.asmCaps["HasWMMA_V3"])
     if kernel["enableLDSTrB"]:
       self.states.lrvwTileB = 1
-    elif not kernel["UnrollMajorLDSB"] and not forceLrvwTile1B:
-      self.states.lrvwTileB = kernel["VectorWidthB"]
     else:
-      if kernel["ProblemType"]["MXBlockB"]:
-        self.states.lrvwTileMXSB = 1
-      self.states.lrvwTileB = 1
+      self.states.lrvwTileB = effective_lrvw_tile(
+        kernel["VectorWidthB"], kernel["UnrollMajorLDSB"],
+        kernel["ProblemType"]["MacDataTypeB"].numBytes(),
+        kernel["EnableMatrixInstruction"], miInputPerThreadB,
+        kernel["UseF32XEmulation"], isMfmaXf32, isCMS,
+        self.states.asmCaps["HasWMMA_V3"])
 
     if kernel["ProblemType"]["MXBlockA"]:
       if ((self.states.asmCaps["HasWMMA_V3"] and kernel["MXScaleFormat"] == "InMemorySwizzle")
@@ -8304,31 +8312,23 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if kernel["ProblemType"]["MXBlockB"]:
         self.states.numVgprBufferPackMXSB = 1
 
-    if kernel["UnrollMajorLDSA"]:
-      self.states.lrvwUnrollA = kernel["LocalReadVectorWidthA"]
-    else:
-      self.states.lrvwUnrollA = 1
+    self.states.lrvwUnrollA = effective_lrvw_unroll(
+      kernel["LocalReadVectorWidthA"], kernel["UnrollMajorLDSA"])
     if kernel["ProblemType"]["MXBlockA"]:
       self.states.lrvwUnrollMXSA = 1
 
-    if kernel["UnrollMajorLDSB"]:
-      self.states.lrvwUnrollB = kernel["LocalReadVectorWidthB"]
-    else:
-      self.states.lrvwUnrollB = 1
+    self.states.lrvwUnrollB = effective_lrvw_unroll(
+      kernel["LocalReadVectorWidthB"], kernel["UnrollMajorLDSB"])
     if kernel["ProblemType"]["MXBlockB"]:
       self.states.lrvwUnrollMXSB = 1
 
     if kernel["ProblemType"]["MXBlockA"]:
-      if kernel["UnrollMajorLDSMXSA"]:
-        self.states.lrvwUnrollMXSA = kernel["LocalReadVectorWidthMXS"]
-      else:
-        self.states.lrvwUnrollMXSA = 1
+      self.states.lrvwUnrollMXSA = effective_lrvw_unroll(
+        kernel["LocalReadVectorWidthMXS"], kernel["UnrollMajorLDSMXSA"])
 
     if kernel["ProblemType"]["MXBlockB"]:
-      if kernel["UnrollMajorLDSMXSB"]:
-        self.states.lrvwUnrollMXSB = kernel["LocalReadVectorWidthMXS"]
-      else:
-        self.states.lrvwUnrollMXSB = 1
+      self.states.lrvwUnrollMXSB = effective_lrvw_unroll(
+        kernel["LocalReadVectorWidthMXS"], kernel["UnrollMajorLDSMXSB"])
 
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       if kernel["UnrollMajorLDSMetadata"]:
@@ -11336,6 +11336,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         self.states.numStoreSgprNameSizes.append(1)
       storeSgprLoad += self.states.numActivationTypeArgSize + self.states.numactivationArgTotalSize
 
+    # The distance to the peer D (64-bit) follows the activation arguments, as in the kernel
+    # signature.
+    if kernel["ProblemType"]["OutputPeerD"]:
+      storeSgprLoad += self.states.rpga
+      self.states.numStoreSgprNames.append("DeltaPeerD")
+      self.states.numStoreSgprNameSizes.append(self.states.rpga)
+
     self.states.numStoreSgprToLoad = storeSgprLoad
     if self.db["InitLds"] : print ("\n***WARNING: InitLds enabled, may impact performance\n")
     if self.db["InitSgpr"] : print ("\n***WARNING: InitSgpr enabled, may impact performance\n")
@@ -12093,6 +12100,18 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       and kernel["PrefetchGL2"] == 0 \
       and self.states.numItersPLR == 0
 
+  def _needsLoopSkipPGRSync(self, kernel):
+    # PGR2 with a loop counter of 2 skips the unroll loop and enters the first
+    # NGLL from the prologue, with the second prefetched tile still in flight.
+    # With fewer than two prefetched local-read iterations the NGLL starts with
+    # a planner barrier whose tensorcnt drain covers that edge; draining it
+    # separately lets the wait pass drop that drain, which the loop exit and the
+    # NLL behind the OptNLL dispatch still need. So sync only for PLR >= 2.
+    return kernel["PrefetchGlobalRead"] == 2 \
+      and not kernel["SuppressNoLoadLoop"] \
+      and self._usesMainLoopTokenBarrierPlanner(kernel) \
+      and self.states.numItersPLR >= 2
+
   def postMainLoopBarrierCheckAndReset(self, kernel, rootModule):
     """
     Rebuild SBarrier placement from dynamic memory-token usage:
@@ -12137,7 +12156,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           keptItems.append(item)
         elif isinstance(item, SBarrier) \
              and "-3" not in str(item).split("//", 1)[0] \
-             and "single-loop PGR bypass sync" not in str(item):
+             and "PGR bypass sync" not in str(item):
           # Pass-2 rebuilds only workgroup-scope barriers from token-state
           # transitions, so only those are cleared here. Cluster-scope split
           # barriers (s_barrier_signal/wait -3), e.g. the StreamKMulticast
@@ -12620,12 +12639,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # -- Packed-batch magic divisors -------------------------------------------
     for i, _ in enumerate(kernel["PackedC0IdxChars"][:-1]):
       idx = kernel["PackedC0IndicesX"][i]
-      _reg("uint32", "MagicNumberSize", idx)
-      _reg("uint32", "MagicShiftSize", idx)
+      _reg("uint32", magicSizeSemantic("MagicNumberSize", kernel["MagicDivAlg"]), idx)
+      _reg("uint32", magicSizeSemantic("MagicShiftSize", kernel["MagicDivAlg"]), idx)
     for i, _ in enumerate(kernel["PackedC1IdxChars"][:-1]):
       idx = kernel["PackedC1IndicesX"][i]
-      _reg("uint32", "MagicNumberSize", idx)
-      _reg("uint32", "MagicShiftSize", idx)
+      _reg("uint32", magicSizeSemantic("MagicNumberSize", kernel["MagicDivAlg"]), idx)
+      _reg("uint32", magicSizeSemantic("MagicShiftSize", kernel["MagicDivAlg"]), idx)
 
     # -- Alpha / Beta ----------------------------------------------------------
     numSgprAlpha = max(1, int(self.states.bpeCinternal / 4))
@@ -12716,6 +12735,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if kernel["ProblemType"]["ActivationType"] in ['all', 'hipblaslt_all']:
         _reg("uint32", "ActivationTypeArg")
 
+    # -- Peer D output ---------------------------------------------------------
+    if kernel["ProblemType"]["OutputPeerD"]:
+      _reg("int64", "DeltaPeerD")
+
     # -- Amax output -----------------------------------------------------------
     if kernel["ProblemType"]["OutputAmaxD"]:
       _reg("address", "AddressAmaxOut")
@@ -12738,6 +12761,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # One entry for the whole fixed-size fusegemmm a2a segment
     if isFusedA2A(kernel["ProblemType"]):
       _reg("uint32", "FusedA2ASegment")
+
+    if kernel["ProblemType"]["StochasticRounding"] and not self.states.asmCaps["v_prng_b32"]:
+      _reg("uint32", "RNDSeed")
 
   def _getKernelSource(self, kernel: Solution):
     """

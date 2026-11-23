@@ -312,6 +312,18 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             SubtractsInTheRightDirection
     )
 
+    hkp_product_offers_engine(_standalone_pointwise_available "hipkernel:StandalonePointwise")
+    if(_standalone_pointwise_available)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            SUITES TestStandalonePointwisePacks
+            EXPECTED_CASES
+                ShipsOneShapeDynamicKernelPerArchitecture
+                EveryKernelDeclaresTheDynamicLaunchSignature
+        )
+    endif()
+
     # FlyDSL's kernels ship in the production shard, so their census addresses that
     # pack, narrowed to the architectures FlyDSL ships for: the product pack may be
     # wired for an architecture FlyDSL has no objects for, where these suites would find
@@ -562,6 +574,28 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 EveryKernelDeclaresTheFortyFourSlotSignature
         )
     endif()
+    # The trained models of every FlyDSL engine, over every architecture a FlyDSL op ships
+    # for: one suite, because each case checks whichever FlyDSL engines the shard holds.
+    # HKP_REQUIRE_DVC_DESCRIPTORS is set on the file with the rocKE ModelBinding files below.
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
+        set(_hkp_flydsl_model_arches "")
+        foreach(_hkp_op rmsnorm rmsnorm_bwd sdpa_aiw sdpa_cdna sdpa_cdna_decode sdpa_cdna_dualwave
+                        sdpa_rdna sdpa_rdna_decode sdpa_bwd_merged sdpa_bwd_split)
+            list(APPEND _hkp_flydsl_model_arches ${HIPKERNELPROVIDER_FLYDSL_ARCHS_${_hkp_op}})
+        endforeach()
+        list(REMOVE_DUPLICATES _hkp_flydsl_model_arches)
+        if(_hkp_flydsl_model_arches)
+            hkp_register_census_tests(
+                TARGET hip_kernel_provider_census_tests
+                PACK_NAME product
+                ARCHES ${_hkp_flydsl_model_arches}
+                SUITES TestFlydslModelBinding
+                EXPECTED_CASES
+                    EveryBoundL2KernelRankerLoads
+                    EveryBoundL1EnginePredictorLoadsAndMatchesThisBuild
+            )
+        endif()
+    endif()
 
     # The cases every generated Test<Engine>Packs suite below registers, shared by the
     # attention and RDNA calls.
@@ -619,7 +653,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(_hkp_companion_suites CatalogTiles catalog_tiles ModelBinding model_binding)
     set_source_files_properties(
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dModelBinding.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseModelBinding.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx1250ConvDgradAotModelBinding.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestFlydslModelBinding.cpp"
         PROPERTIES COMPILE_DEFINITIONS
             "HKP_REQUIRE_DVC_DESCRIPTORS=$<BOOL:${HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS}>")
     set(_hkp_catalog_tiles_cases_gfx950_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
@@ -636,6 +672,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         EveryShippedKernelIsBottomRightCausalWithoutAWindow
         TheShippedGqaRatioListIsTheCatalogsRatios)
     set(_hkp_model_binding_cases_gfx942_unified_3d
+        TheBoundL2KernelRankerLoads
+        TheBoundL1EnginePredictorLoadsAndMatchesThisBuild)
+    set(_hkp_model_binding_cases_gfx942_dense
         TheBoundL2KernelRankerLoads
         TheBoundL1EnginePredictorLoadsAndMatchesThisBuild)
 

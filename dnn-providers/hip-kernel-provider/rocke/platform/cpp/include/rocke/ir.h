@@ -1133,11 +1133,18 @@ rocke_value_t* rocke_b_smem_alloc_ex(rocke_ir_builder_t* b,
                                      int rank,
                                      const char* name_hint,
                                      int exclusive);
+/* Scalar global loads and stores. `align` is the alignment, in bytes, the
+ * caller guarantees for the accessed element: 0 records the op's default (1
+ * for rocke_b_global_load and rocke_b_global_store, 2 for
+ * rocke_b_global_load_f16, the element width for the typed wrappers); a
+ * negative `align` or one that is not a power of two is refused with
+ * ROCKE_ERR_VALUE and the Python engine's text (see the error model above).
+ * rocke_b_masked_global_load passes its `align` to rocke_b_global_load. */
 rocke_value_t* rocke_b_global_load(rocke_ir_builder_t* b,
                                    rocke_value_t* ptr,
                                    rocke_value_t* idx,
                                    const rocke_type_t* dtype,
-                                   int align /* <=0 => 1 */);
+                                   int align /* 0 => 1 */);
 rocke_value_t* rocke_b_global_load_f16(rocke_ir_builder_t* b,
                                        rocke_value_t* ptr,
                                        rocke_value_t* idx,
@@ -1187,17 +1194,17 @@ rocke_value_t* rocke_b_masked_global_load(rocke_ir_builder_t* b,
                                           int align);
 void rocke_b_global_store(
     rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, rocke_value_t* value, int align);
-/* `align` <= 0 records the natural alignment of the access: its byte width
- * when that is a power of two, else the element width. A positive `align`
+/* `align` 0 records the natural alignment of the access: its byte width when
+ * that is a power of two, else the element width. A negative `align` or one
  * that is not a power of two is refused with ROCKE_ERR_VALUE and the Python
  * engine's text (see the error model above). The same holds for
- * rocke_b_global_store_vN. */
+ * rocke_b_global_store_vN and the _ex / _f16 forms of both. */
 rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
                                       rocke_value_t* ptr,
                                       rocke_value_t* idx,
                                       const rocke_type_t* dtype,
                                       int n,
-                                      int align /* <=0 => default */);
+                                      int align /* 0 => default */);
 /* Like rocke_b_global_load_vN with options; opts == NULL means all defaults,
  * and the plain rocke_b_global_load_vN forwards here with NULL.
  * ROCKE_TEMPORAL_STREAMING records the `nontemporal=True` attr (lowered to
@@ -1838,7 +1845,7 @@ void rocke_b_global_store_vN(rocke_ir_builder_t* b,
                              rocke_value_t* idx,
                              rocke_value_t* value,
                              int n,
-                             int align /* <=0 => default */);
+                             int align /* 0 => default */);
 /* Like rocke_b_global_store_vN with options (NULL = all defaults); the plain
  * form forwards here with NULL. temporal_hint as for rocke_b_global_load_vN_ex
  * (gfx942 / gfx950: `nt` only; other targets fail at lowering). */

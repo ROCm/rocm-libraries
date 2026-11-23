@@ -86,6 +86,45 @@ TEST(TestSdpaFwdNode, PreValidateChecksDiagonalBandBounds)
     EXPECT_EQ(validate(std::nullopt, -2), error_code_t::INVALID_VALUE);
 }
 
+TEST(TestSdpaFwdNode, PreValidateRejectsBothDeprecatedCausalFlags)
+{
+    // causal_mask and causal_mask_bottom_right name different alignments; either alone is valid.
+    const auto validate = [](bool causalMask, bool causalMaskBottomRight) {
+        auto attrs = makeMinimalAttrs(
+            makeTensor4D(2, 8, 16, 64), makeTensor4D(2, 8, 32, 64), makeTensor4D(2, 8, 32, 64));
+        attrs.causal_mask = causalMask;
+        attrs.causal_mask_bottom_right = causalMaskBottomRight;
+        const GraphAttributes graphAttrs;
+        const SdpaFwdNode node(std::move(attrs), graphAttrs);
+        return node.pre_validate_node();
+    };
+    EXPECT_EQ(validate(false, false).code, error_code_t::OK);
+    EXPECT_EQ(validate(true, false).code, error_code_t::OK);
+    EXPECT_EQ(validate(false, true).code, error_code_t::OK);
+
+    const auto err = validate(true, true);
+    EXPECT_EQ(err.code, error_code_t::GRAPH_NOT_SUPPORTED);
+    EXPECT_NE(err.err_msg.find("causal_mask_bottom_right"), std::string::npos) << err.err_msg;
+    EXPECT_NE(err.err_msg.find("diagonal_alignment"), std::string::npos) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateSetterCallsForBothCausalMasksStayValid)
+{
+    // The setters write diagonal_alignment and right_bound, not the deprecated members, so
+    // calling both leaves the later alignment in effect and the node valid.
+    auto attrs = makeMinimalAttrs(
+        makeTensor4D(2, 8, 16, 64), makeTensor4D(2, 8, 32, 64), makeTensor4D(2, 8, 32, 64));
+    attrs.set_causal_mask(true).set_causal_mask_bottom_right(true);
+
+    const GraphAttributes graphAttrs;
+    const SdpaFwdNode node(std::move(attrs), graphAttrs);
+    const auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+    EXPECT_EQ(node.attributes.diagonal_alignment, DiagonalAlignment::BOTTOM_RIGHT);
+    ASSERT_TRUE(node.attributes.right_bound.has_value());
+    EXPECT_EQ(node.attributes.right_bound.value(), 0);
+}
+
 TEST(TestSdpaFwdNode, PreValidateSucceedsGQA)
 {
     // num_heads=8, num_kv_heads=2 — 8 % 2 == 0, GQA valid
@@ -932,6 +971,40 @@ TEST(TestSdpaFwdNode, PreValidateDrainRunsBeforeShapeChecks)
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(err.err_msg.find("score modifier"), std::string::npos) << err.err_msg;
     EXPECT_EQ(err.err_msg.find("rank"), std::string::npos) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PostValidateFailsNegativeStrideOnO)
+{
+    auto q = makeTensor4D(2, 8, 16, 64);
+    q->set_stride({8192, 1024, 64, 1});
+    auto k = makeTensor4D(2, 8, 32, 64);
+    k->set_stride({16384, 2048, 64, 1});
+    auto v = makeTensor4D(2, 8, 32, 64);
+    v->set_stride({16384, 2048, 64, 1});
+
+    SdpaAttributes attrs;
+    attrs.set_name("SdpaNode");
+    attrs.set_q(q);
+    attrs.set_k(k);
+    attrs.set_v(v);
+    auto o = makeTensor4D(2, 8, 16, 64);
+    o->set_stride({8192, 1024, 64, -1});
+    attrs.set_o(o);
+
+    GraphAttributes graphAttrs;
+    graphAttrs.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+    SdpaFwdNode node(std::move(attrs), graphAttrs);
+
+    auto err = node.pre_validate_node();
+    ASSERT_EQ(err.code, error_code_t::OK) << err.err_msg;
+    err = node.infer_properties_node();
+    ASSERT_EQ(err.code, error_code_t::OK) << err.err_msg;
+
+    err = node.post_validate_node();
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+    EXPECT_NE(err.err_msg.find("got -1 on axis 3"), std::string::npos) << err.err_msg;
 }
 
 // -- Rule 6c: cu_seq_len_q / cu_seq_len_kv --

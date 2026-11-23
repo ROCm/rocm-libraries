@@ -19,6 +19,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <hip/hip_runtime.h>
@@ -387,6 +388,105 @@ TEST(TestBundleVerificationHarness, DeviceSentinelFillMatchesTheHostFill)
             << "uid " << uid;
     }
 }
+
+class TestPackedStridedHostSentinelFill
+    : public ::testing::TestWithParam<hipdnn_flatbuffers_sdk::data_objects::DataType>
+{
+};
+
+TEST_P(TestPackedStridedHostSentinelFill, PackedStridedHostSentinelFillMatchesTensorFill)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    const auto dataType = GetParam();
+
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<int64_t> dims = {2, 3};
+    const std::vector<int64_t> strides = {1, 2};
+    const auto attribute
+        = CreateTensorAttributesDirect(builder, 1, "output", dataType, &strides, &dims);
+    builder.Finish(attribute);
+
+    const auto* tensorAttributes
+        = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
+    const std::unordered_map<int64_t, const TensorAttributes*> attributes{{1, tensorAttributes}};
+    const auto outputs
+        = detail::allocateSentinelOutputs(attributes, {1}, TensorMap{}, {}, /*onDevice=*/false);
+
+    auto expected = hipdnn_test_sdk::detail::createTensor(dataType, dims, strides);
+    expected->fillWithSentinelValue();
+    ASSERT_TRUE(outputs.at(1)->isPacked());
+    ASSERT_EQ(outputs.at(1)->elementSpace(), expected->elementSpace());
+    EXPECT_EQ(std::memcmp(outputs.at(1)->rawHostData(),
+                          expected->rawHostData(),
+                          expected->elementSpace() * expected->elementSize()),
+              0);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    AllSupportedTypes,
+    TestPackedStridedHostSentinelFill,
+    ::testing::Values(hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                      hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                      hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                      hipdnn_flatbuffers_sdk::data_objects::DataType::DOUBLE,
+                      hipdnn_flatbuffers_sdk::data_objects::DataType::UINT8,
+                      hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                      hipdnn_flatbuffers_sdk::data_objects::DataType::INT8,
+                      hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
+                      hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2,
+                      hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E8M0,
+                      hipdnn_flatbuffers_sdk::data_objects::DataType::FP4_E2M1,
+                      hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E2M3,
+                      hipdnn_flatbuffers_sdk::data_objects::DataType::FP6_E3M2,
+                      hipdnn_flatbuffers_sdk::data_objects::DataType::INT4,
+                      hipdnn_flatbuffers_sdk::data_objects::DataType::INT64,
+                      hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                      hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ,
+                      hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2_FNUZ),
+    [](const ::testing::TestParamInfo<hipdnn_flatbuffers_sdk::data_objects::DataType>& info) {
+        using hipdnn_flatbuffers_sdk::data_objects::DataType;
+        switch(info.param)
+        {
+        case DataType::FLOAT:
+            return "float";
+        case DataType::HALF:
+            return "half";
+        case DataType::BFLOAT16:
+            return "bfloat16";
+        case DataType::DOUBLE:
+            return "double";
+        case DataType::UINT8:
+            return "uint8";
+        case DataType::INT32:
+            return "int32";
+        case DataType::INT8:
+            return "int8";
+        case DataType::FP8_E4M3:
+            return "fp8_e4m3";
+        case DataType::FP8_E5M2:
+            return "fp8_e5m2";
+        case DataType::FP8_E8M0:
+            return "fp8_e8m0";
+        case DataType::FP4_E2M1:
+            return "fp4_e2m1";
+        case DataType::FP6_E2M3:
+            return "fp6_e2m3";
+        case DataType::FP6_E3M2:
+            return "fp6_e3m2";
+        case DataType::INT4:
+            return "int4";
+        case DataType::INT64:
+            return "int64";
+        case DataType::BOOLEAN:
+            return "boolean";
+        case DataType::FP8_E4M3_FNUZ:
+            return "fp8_e4m3_fnuz";
+        case DataType::FP8_E5M2_FNUZ:
+            return "fp8_e5m2_fnuz";
+        default:
+            return "unset";
+        }
+    });
 } // namespace
 
 TEST_F(TestGoldenHarnessFixture, GraphOnlyRuntimePbvValuesAreFilledEndToEnd)
