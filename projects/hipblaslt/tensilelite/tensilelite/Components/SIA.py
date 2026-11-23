@@ -28,7 +28,7 @@ from rocisa.container import DSModifiers, HolderContainer, replaceHolder
 
 from rocisa.instruction import SWaitCnt, SWaitAlu, DSStoreB128, DSStoreB64, DSStoreB32
 
-from ..ir import sched_is_tensor_load_to_lds
+from ..ir import sched_is_tensor_load_to_lds, sched_is_ds_store_b128, sched_is_waitcnt
 from ..Common import roundUp, print2
 from ..Common.MxScaleLayout import splatFirst
 from ..Component import SIA
@@ -1209,7 +1209,7 @@ def splitDSInstructionIntoSmaller(writer, kernel, item, numLocalWritesPerSched, 
         return None, 0, 0
 
     itemList = item.flatitems()
-    instruction = next(filter(lambda inst: isinstance(inst, DSStoreB128), itemList))
+    instruction = next(filter(lambda inst: sched_is_ds_store_b128(inst), itemList))
     miLatency = writer.states.miLatency
     div       = 1
     dsOffset  = 0
@@ -1288,7 +1288,7 @@ def hasHolderInWaitCnt(module: Item):
             tmpHasHolder, tmpList = hasHolderInWaitCnt(item)
             hasHolder = hasHolder or tmpHasHolder
             wcList.extend(tmpList)
-    elif isinstance(module, SWaitCnt):
+    elif sched_is_waitcnt(module):
         wcList.append(module)
         if isinstance(module.dscnt, HolderContainer) or \
            isinstance(module.kmcnt, HolderContainer) or \

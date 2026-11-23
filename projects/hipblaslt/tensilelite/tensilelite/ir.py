@@ -154,6 +154,31 @@ def sched_is_tensor_load_to_lds(item):
   return isinstance(item, _rocisa_instruction.TensorLoadToLds)
 
 
+def sched_is_ds_load(item):
+  """True for any LDS (DS) read instruction."""
+  return isinstance(item, _rocisa_instruction.DSLoadInstruction)
+
+
+def sched_is_ds_load_b128(item):
+  """True specifically for a 128-bit LDS read (ds_load_b128)."""
+  return isinstance(item, _rocisa_instruction.DSLoadB128)
+
+
+def sched_is_ds_store(item):
+  """True for any LDS (DS) write instruction."""
+  return isinstance(item, _rocisa_instruction.DSStoreInstruction)
+
+
+def sched_is_ds_store_b128(item):
+  """True specifically for a 128-bit LDS write (ds_store_b128)."""
+  return isinstance(item, _rocisa_instruction.DSStoreB128)
+
+
+def sched_is_waitcnt(item):
+  """True for an s_waitcnt instruction."""
+  return isinstance(item, _rocisa_instruction.SWaitCnt)
+
+
 class _LogicalBackend:
   """Construction backend that builds StinkyTofu logical IR instead of rocisa.
 

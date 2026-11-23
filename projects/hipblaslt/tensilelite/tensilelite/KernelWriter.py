@@ -45,6 +45,7 @@ from .ir import BranchInstruction, BufferLoadB128, BufferLoadB192, BufferLoadB32
   SCSelectB32, SLShiftLeftB32, SLShiftRightB32, SMFMAInstruction, SMovB32, SMovB64, SNop, SEndpgm, SOrB32, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, TensorLoadToLds, SCMovB32, SCMovB64, t16
 from .ir import sched_is_mfma, sched_is_smfma, sched_is_mxmfma, sched_is_tensor_load_to_lds
+from .ir import sched_is_ds_load, sched_is_ds_load_b128, sched_is_ds_store, sched_is_waitcnt
 from .ir import SSchedulingFence
 from .ir import set_active_version as _set_active_ir_version
 from rocisa.register import RegisterPool
@@ -1996,7 +1997,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                 for readsIter in range(vacancy["atIter"], iteration + self.states.numItersPLR):
                   if (vacancy["atMfmaIndex"] % numMfmaPerIter == 0 or readsIter != vacancy["atIter"]) and \
                       (vacancy["noReadsAtThisIter"] or readsIter <= vacancy["atIter"] + self.states.numItersPLR):
-                    if isinstance(self.localReadsWait[readsIter], SWaitCnt):
+                    if sched_is_waitcnt(self.localReadsWait[readsIter]):
                       self.localReadsWait[readsIter].dscnt += 1
             else:
               # make sure the localread sequence remain the same
@@ -2020,7 +2021,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             if len(lrItems) <= n:
               break
             item = lrItems[n]
-            if not isinstance(item, DSLoadB128):
+            if not sched_is_ds_load_b128(item):
               continue
             if len(fifo) < (16 / numWaves):
               fifo.append(currentMFMA)
@@ -2033,7 +2034,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           if len(lrItems) <= n:
             break
           item = lrItems[n]
-          if not isinstance(item, DSLoadB128):
+          if not sched_is_ds_load_b128(item):
             numToBeIssued += 1
             continue
           # The FIFO length is 16 so that each wave has 16/numWaves buffer.
@@ -2371,13 +2372,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           instsToCheck = mfma + packItems
           numDsInsts = 0
           lastDsCnt = -1
-          for ds in filter(lambda j: isinstance(j, (DSLoadInstruction, DSStoreInstruction, SWaitCnt)), reversed(prevIterCode.flatitems() + iterCode.flatitems())):
-            if isinstance(ds, DSLoadInstruction) and hasAnyDependency(ds, instsToCheck):
+          for ds in filter(lambda j: sched_is_ds_load(j) or sched_is_ds_store(j) or sched_is_waitcnt(j), reversed(prevIterCode.flatitems() + iterCode.flatitems())):
+            if sched_is_ds_load(ds) and hasAnyDependency(ds, instsToCheck):
               break
 
-            if isinstance(ds, DSLoadInstruction) and not hasAnyDependency(ds, instsToCheck) or isinstance(ds, DSStoreInstruction):
+            if sched_is_ds_load(ds) and not hasAnyDependency(ds, instsToCheck) or sched_is_ds_store(ds):
               numDsInsts += 1
-            elif isinstance(ds, SWaitCnt):
+            elif sched_is_waitcnt(ds):
               if ds.dscnt >= 0 and lastDsCnt == -1:
                 lastDsCnt = ds.dscnt + numDsInsts
 
@@ -2886,7 +2887,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     else:
       assert 0, "Unsupported scheduleIterAlg=%u"%scheduleIterAlg
 
-    if isinstance(waitCode, SWaitCnt):
+    if sched_is_waitcnt(waitCode):
 
       # Set the waitCount, based on the new iter schedule
       dscnt = waitCode.dscnt
@@ -4530,7 +4531,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       localWriteMemToken = MemTokenData([self.states.ldsWriteTokenIdx])
       for _, localWriteCode in self.codes.perIterLocalWrite:
         for item in localWriteCode.flatitems():
-          if isinstance(item, DSStoreInstruction):
+          if sched_is_ds_store(item):
             item.setMemToken(localWriteMemToken)
             # Keep debug/comment text aligned with the actual updated memory token.
             if isinstance(item.comment, str):
