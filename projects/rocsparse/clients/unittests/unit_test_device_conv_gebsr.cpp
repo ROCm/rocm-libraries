@@ -1043,8 +1043,8 @@ namespace
         }
     }
 
-    // No stored blocks: every column pointer is the index base. The arrays of nnzb
-    // elements, the buffer, and bsr_row_ptr when mb == 0 may be null.
+    // No stored blocks: every column pointer is the index base, and the input arrays,
+    // the arrays of nnzb elements, and the buffer may be null.
     TEST_F(ConvGebsr, Gebsr2GebscEmpty)
     {
         const I rdim = 2, cdim = 3;
@@ -1087,7 +1087,7 @@ namespace
                                                      nb,
                                                      0,
                                                      nullptr,
-                                                     mb == 0 ? nullptr : d_ptr.get(),
+                                                     nullptr,
                                                      nullptr,
                                                      rdim,
                                                      cdim,
@@ -1141,9 +1141,9 @@ namespace
         return {status, num_nodes};
     }
 
-    // bsc_col_ptr (nb + 1 elements), bsr_row_ptr (mb + 1 elements), and the arrays of nnzb
-    // elements are checked before the quick return: a null array is rejected whenever its
-    // size is positive, whatever the other dimensions are, and nothing is launched.
+    // If mb, nb, or nnzb is zero, every array and the buffer may be null, and the quick
+    // return fills bsc_col_ptr only when it is not null. A matrix with stored blocks still
+    // rejects null arrays before anything is launched.
     TEST_F(ConvGebsr, Gebsr2GebscNullPointers)
     {
         using R      = std::pair<rocsparse_status, size_t>;
@@ -1173,29 +1173,17 @@ namespace
                     });
                 };
 
-                EXPECT_EQ(convert(3, 4, 0, d_ptr, nullptr), R(st_ptr, 0));
-                EXPECT_EQ(convert(3, 4, 0, nullptr, nullptr), R(st_ptr, 0));
-                EXPECT_EQ(convert(0, 4, 0, d_ptr, nullptr), R(st_ptr, 0));
+                EXPECT_EQ(convert(3, 4, 0, d_ptr, nullptr), R(st_ok, 0));
+                EXPECT_EQ(convert(3, 4, 0, nullptr, nullptr), R(st_ok, 0));
+                EXPECT_EQ(convert(0, 4, 0, d_ptr, nullptr), R(st_ok, 0));
                 EXPECT_EQ(convert(3, 0, 0, d_ptr, nullptr), R(st_ok, 0));
+                EXPECT_EQ(convert(0, 4, 1, d_ptr, nullptr), R(st_ok, 0));
 
-                EXPECT_EQ(convert(3, 4, 0, nullptr, d_cptr), R(st_ptr, 0));
-                EXPECT_EQ(convert(3, 0, 0, nullptr, d_cptr), R(st_ptr, 0));
+                EXPECT_EQ(convert(3, 4, 0, nullptr, d_cptr), R(st_ok, 1));
+                EXPECT_EQ(convert(0, 4, 1, nullptr, d_cptr), R(st_ok, 1));
 
-                EXPECT_EQ(convert(0, 4, 1, d_ptr, d_cptr), R(st_ptr, 0));
+                EXPECT_EQ(convert(3, 4, 2, d_ptr, d_cptr), R(st_ptr, 0));
             }
-
-        DevBuf<I>     d_ind(0);
-        DevBuf<float> d_val(0);
-        size_t        size = 0;
-        EXPECT_EQ(rocsparse_sgebsr2gebsc_buffer_size(
-                      handle, 3, 4, 0, d_val, nullptr, d_ind, rdim, cdim, &size),
-                  st_ptr);
-        EXPECT_EQ(rocsparse_sgebsr2gebsc_buffer_size(
-                      handle, 3, 0, 0, d_val, nullptr, d_ind, rdim, cdim, &size),
-                  st_ptr);
-        EXPECT_EQ(rocsparse_sgebsr2gebsc_buffer_size(
-                      handle, 0, 4, 0, d_val, nullptr, d_ind, rdim, cdim, &size),
-                  st_ok);
     }
 
     // ------------------------------------------------------------------------------
