@@ -4,7 +4,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 
 ## (Unreleased) rocSOLVER
-## (Unreleased) rocSOLVER 3.39
 
 ### Added
 ### Changed
@@ -12,13 +11,20 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Optimized
 ### Resolved issues
 
-* Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
 * Fixed wrong eigenvalues in STEDCJ, and therefore in SYEVDJ/HEEVDJ and SYGVDJ/HEGVDJ, when two
   nearly equal eigenvalues of the merged blocks were not deflated (the deflation criterion is now
   that of LAPACK's xLAED2).
 
 ### Known issues
 ### Upcoming changes
+
+
+
+## rocSOLVER 3.39.0 for ROCm 10.3.0
+
+### Resolved issues
+
+* Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
 
 
 
