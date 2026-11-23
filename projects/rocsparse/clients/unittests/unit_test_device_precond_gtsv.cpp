@@ -31,6 +31,7 @@
 
 #include "unit_test_device_precond_common.hpp"
 
+#include <limits>
 #include <sstream>
 #include <string>
 
@@ -730,10 +731,65 @@ TEST_F(PrecondTridiagonal, interleaved_batch_argument_validation)
 
 // Uniform scaling of a nonsingular tridiagonal system does not change the solution,
 // but the QR kernel used to form |z|^2 and 1/|z|^2 directly. Orders 4 and 17, with
-// scales outside the square root of each format's range. A sentinel of 77 sits on
-// either side of every array the solver writes.
+// scales outside the square root of each format's range. A sentinel sits on either
+// side of every array the solver writes.
 namespace
 {
+    // Solves one tridiagonal system with batch count and stride 1. `x` is the solution
+    // without the sentinels, which are checked here.
+    template <typename T>
+    void solve_interleaved_padded(rocsparse_handle               handle,
+                                  rocsparse_gtsv_interleaved_alg alg,
+                                  const std::vector<T>&          dl,
+                                  const std::vector<T>&          d,
+                                  const std::vector<T>&          du,
+                                  const std::vector<T>&          rhs,
+                                  std::vector<T>&                x)
+    {
+        x.clear();
+        const rocsparse_int m = static_cast<rocsparse_int>(d.size());
+
+        device_vector<T> ddl{pad_with_sentinel(dl)}, dd{pad_with_sentinel(d)},
+            ddu{pad_with_sentinel(du)}, dx{pad_with_sentinel(rhs)};
+        ASSERT_TRUE(ddl.ptr && dd.ptr && ddu.ptr && dx.ptr);
+
+        const rocsparse_int batch_count  = 1;
+        const rocsparse_int batch_stride = 1;
+        size_t              buffer_size  = 0;
+        ASSERT_EQ(interleaved_buffer_size<T>(handle,
+                                             alg,
+                                             m,
+                                             ddl.ptr + 1,
+                                             dd.ptr + 1,
+                                             ddu.ptr + 1,
+                                             dx.ptr + 1,
+                                             batch_count,
+                                             batch_stride,
+                                             &buffer_size),
+                  rocsparse_status_success);
+        ASSERT_GT(buffer_size, 0u);
+
+        device_vector<char> buffer{buffer_size};
+        ASSERT_TRUE(buffer.ptr);
+        ASSERT_EQ(interleaved_solve<T>(handle,
+                                       alg,
+                                       m,
+                                       ddl.ptr + 1,
+                                       dd.ptr + 1,
+                                       ddu.ptr + 1,
+                                       dx.ptr + 1,
+                                       batch_count,
+                                       batch_stride,
+                                       buffer.ptr),
+                  rocsparse_status_success);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        const auto got = to_host(dx);
+        ASSERT_EQ(got.size(), static_cast<size_t>(m) + 2);
+        expect_padding_untouched(got);
+        x.assign(got.begin() + 1, got.end() - 1);
+    }
+
     template <typename T>
     void run_qr_uniform_scale(rocsparse_handle               handle,
                               rocsparse_gtsv_interleaved_alg alg,
@@ -772,67 +828,36 @@ namespace
             rhs[j] = from_cd<T>(b);
         }
 
-        const T sentinel = make_value<T>(77.0, 0.0);
-        auto    pad      = [&](const std::vector<T>& v) {
-            std::vector<T> out(static_cast<size_t>(m) + 2, sentinel);
-            for(int32_t j = 0; j < m; ++j)
-                out[static_cast<size_t>(j) + 1] = v[j];
-            return out;
-        };
+        std::vector<T> x;
+        solve_interleaved_padded<T>(handle, alg, dl, d, du, rhs, x);
+        if(!x.empty())
+            expect_solution(x, want, "solution");
+    }
 
-        device_vector<T> ddl{pad(dl)}, dd{pad(d)}, ddu{pad(du)}, dx{pad(rhs)};
-        ASSERT_TRUE(ddl.ptr && dd.ptr && ddu.ptr && dx.ptr);
+    // A diagonal system whose last unknown is finite, but only just: H / (0.6 + 0.6i) with
+    // H + iH on the right-hand side is the real number H / 0.6. A division that adds the
+    // two products of its numerator before the final scaling overflows on the way.
+    template <typename T>
+    void run_large_quotient(rocsparse_handle handle, rocsparse_gtsv_interleaved_alg alg, double half_max)
+    {
+        const std::vector<T> dl(4, make_value<T>(0.0)), du(4, make_value<T>(0.0));
+        const std::vector<T> d    = {make_value<T>(1.0),
+                                  make_value<T>(1.0),
+                                  make_value<T>(1.0),
+                                  make_value<T>(0.6, 0.6)};
+        const std::vector<T> rhs  = {make_value<T>(1.0),
+                                    make_value<T>(1.0),
+                                    make_value<T>(1.0),
+                                    make_value<T>(half_max, half_max)};
+        const std::vector<T> want = {make_value<T>(1.0),
+                                     make_value<T>(1.0),
+                                     make_value<T>(1.0),
+                                     make_value<T>(half_max / 0.6)};
 
-        const rocsparse_int batch_count  = 1;
-        const rocsparse_int batch_stride = 1;
-        size_t              buffer_size  = 0;
-        ASSERT_EQ(PRECOND_CALL(T,
-                               gtsv_interleaved_batch_buffer_size,
-                               handle,
-                               alg,
-                               static_cast<rocsparse_int>(m),
-                               ddl.ptr + 1,
-                               dd.ptr + 1,
-                               ddu.ptr + 1,
-                               dx.ptr + 1,
-                               batch_count,
-                               batch_stride,
-                               &buffer_size),
-                  rocsparse_status_success);
-        ASSERT_GT(buffer_size, 0u);
-
-        device_vector<char> buffer{buffer_size};
-        ASSERT_TRUE(buffer.ptr);
-        ASSERT_EQ(PRECOND_CALL(T,
-                               gtsv_interleaved_batch,
-                               handle,
-                               alg,
-                               static_cast<rocsparse_int>(m),
-                               ddl.ptr + 1,
-                               dd.ptr + 1,
-                               ddu.ptr + 1,
-                               dx.ptr + 1,
-                               batch_count,
-                               batch_stride,
-                               buffer.ptr),
-                  rocsparse_status_success);
-        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-
-        const auto got = to_host(dx);
-        ASSERT_EQ(got.size(), static_cast<size_t>(m) + 2);
-        EXPECT_DOUBLE_EQ(re(got.front()), 77.0);
-        EXPECT_DOUBLE_EQ(im(got.front()), 0.0);
-        EXPECT_DOUBLE_EQ(re(got.back()), 77.0);
-        EXPECT_DOUBLE_EQ(im(got.back()), 0.0);
-
-        const double tol = is_single_precision<T> ? 1.0e-4 : 1.0e-8;
-        for(int32_t j = 0; j < m; ++j)
-        {
-            const T& got_j = got[static_cast<size_t>(j) + 1];
-            ASSERT_TRUE(std::isfinite(re(got_j)) && std::isfinite(im(got_j))) << "x[" << j << "]";
-            EXPECT_NEAR(re(got_j), re(want[j]), tol) << "x[" << j << "]";
-            EXPECT_NEAR(im(got_j), im(want[j]), tol) << "x[" << j << "]";
-        }
+        std::vector<T> x;
+        solve_interleaved_padded<T>(handle, alg, dl, d, du, rhs, x);
+        if(!x.empty())
+            expect_close(x, want);
     }
 }
 
@@ -847,9 +872,11 @@ TEST_F(PrecondTridiagonal, interleaved_qr_uniform_scale_keeps_solution)
             run_qr_uniform_scale<float>(handle, alg, m, 1.0);
             run_qr_uniform_scale<float>(handle, alg, m, 1.0e20);
             run_qr_uniform_scale<float>(handle, alg, m, 1.0e-20);
+            run_qr_uniform_scale<float>(handle, alg, m, 1.0e-25);
             run_qr_uniform_scale<rocsparse_float_complex>(handle, alg, m, 1.0);
             run_qr_uniform_scale<rocsparse_float_complex>(handle, alg, m, 1.0e20);
             run_qr_uniform_scale<rocsparse_float_complex>(handle, alg, m, 1.0e-20);
+            run_qr_uniform_scale<rocsparse_float_complex>(handle, alg, m, 1.0e-25);
 
             run_qr_uniform_scale<double>(handle, alg, m, 1.0);
             run_qr_uniform_scale<double>(handle, alg, m, 1.0e200);
@@ -873,5 +900,19 @@ TEST_F(PrecondTridiagonal, interleaved_qr_uniform_scale_keeps_solution)
             run_qr_uniform_scale<rocsparse_float_complex>(handle, alg, 4, 1.0, zero_dl, zero_du);
             run_qr_uniform_scale<rocsparse_double_complex>(handle, alg, 4, 1.0, zero_dl, zero_du);
         }
+    }
+}
+
+TEST_F(PrecondTridiagonal, interleaved_qr_complex_division_keeps_large_finite_quotient)
+{
+    const rocsparse_gtsv_interleaved_alg algs[]
+        = {rocsparse_gtsv_interleaved_alg_default, rocsparse_gtsv_interleaved_alg_qr};
+    for(const auto alg : algs)
+    {
+        SCOPED_TRACE("alg=" + std::to_string(static_cast<int>(alg)));
+        run_large_quotient<rocsparse_float_complex>(
+            handle, alg, 0.5 * std::numeric_limits<float>::max());
+        run_large_quotient<rocsparse_double_complex>(
+            handle, alg, 0.5 * std::numeric_limits<double>::max());
     }
 }

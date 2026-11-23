@@ -122,8 +122,10 @@ namespace rocsparse
 
             // The reflector depends only on the ratios of diag, v1, and v2. Divide by
             // the largest one before squaring: v1^2 + v2^2 overflows or underflows once
-            // the bands leave the square root of the floating-point range, and a zero
-            // squared length would skip the reflection and return a wrong solution.
+            // the bands leave the square root of the floating-point range. The squared
+            // length of the scaled values can still round to zero when v1 and v2 are tiny
+            // next to diag, so whether there is anything to eliminate is decided from
+            // the entries themselves below, not from that squared length.
             T scale = rocsparse::max(rocsparse::abs(diag),
                                      rocsparse::max(rocsparse::abs(v1), rocsparse::abs(v2)));
             T sd    = diag;
@@ -138,7 +140,9 @@ namespace rocsparse
 
             T v1v2sq = rocsparse::fma(sv1, sv1, sv2 * sv2);
 
-            if(v1v2sq != static_cast<T>(0))
+            // Skipping on v1v2sq == 0 would also skip a lower coefficient that is nonzero
+            // but small next to diag. That row still has to be eliminated.
+            if(v1 != static_cast<T>(0) || v2 != static_cast<T>(0))
             {
                 T val  = rocsparse::sqrt(rocsparse::fma(sd, sd, v1v2sq));
                 T a_ii = (rocsparse::gt(sd, static_cast<T>(0))) ? sd + val : sd - val;

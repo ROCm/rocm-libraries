@@ -29,7 +29,6 @@
 list(APPEND ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_device_precond_kernels.cpp
   unit_test_device_precond_generic.cpp
-  unit_test_device_precond_gpsv.cpp
   unit_test_device_precond_gtsv.cpp
   unit_test_device_precond_gpsv.cpp
   unit_test_device_precond_itilu0.cpp

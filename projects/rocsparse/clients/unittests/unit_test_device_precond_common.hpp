@@ -283,6 +283,30 @@ namespace precond_ut
         return false;
     }
 
+    // Value of the entries placed around an array handed to a solver, to see whether the
+    // solver wrote outside the entries it owns.
+    constexpr double padding_sentinel = 77.0;
+
+    // One sentinel on either side of v. Hand the solver `device_vector.ptr + 1`.
+    template <typename T>
+    std::vector<T> pad_with_sentinel(const std::vector<T>& v)
+    {
+        std::vector<T> out(v.size() + 2, make_value<T>(padding_sentinel));
+        std::copy(v.begin(), v.end(), out.begin() + 1);
+        return out;
+    }
+
+    // The sentinels on either side of a vector made by pad_with_sentinel are unchanged.
+    template <typename T>
+    void expect_padding_untouched(const std::vector<T>& padded)
+    {
+        ASSERT_GE(padded.size(), size_t(2));
+        EXPECT_DOUBLE_EQ(re(padded.front()), padding_sentinel);
+        EXPECT_DOUBLE_EQ(im(padded.front()), 0.0);
+        EXPECT_DOUBLE_EQ(re(padded.back()), padding_sentinel);
+        EXPECT_DOUBLE_EQ(im(padded.back()), 0.0);
+    }
+
     // ------------------------------------------------------------------
     // Scalar CSR matrices
     // ------------------------------------------------------------------

@@ -28,6 +28,8 @@
 
 #include <type_traits>
 
+// Division without squaring the denominator is rocsparse::scaled_div, in rocsparse_common.hpp.
+
 namespace rocsparse
 {
     // cos = conj(f) / hypot(|f|, |g|) and sin = conj(g) / hypot(|f|, |g|), for real and complex T.
@@ -87,42 +89,6 @@ namespace rocsparse
             // Divide the components by the real hypotenuse. Complex operator/ squares its denominator.
             cos_theta = T(fr * inv, -fi * inv);
             sin_theta = T(gr * inv, -gi * inv);
-        }
-    }
-
-    // a / b for real and complex T.
-    // A real quotient is a single division. For complex T, operator/ computes 1/|b|^2 and leaves
-    // the floating-point range when |b| is far from 1, so b is scaled by its larger component
-    // first and the denominator lies in [1, 2].
-    template <typename T>
-    __device__ __forceinline__ T scaled_div(T a, T b)
-    {
-        if constexpr(std::is_same<T, float>() || std::is_same<T, double>())
-        {
-            return a / b;
-        }
-        else
-        {
-            auto br = rocsparse::real(b);
-            auto bi = rocsparse::imag(b);
-
-            using real_t = decltype(br);
-
-            real_t scale = rocsparse::max(rocsparse::abs(br), rocsparse::abs(bi));
-            if(scale == static_cast<real_t>(0))
-            {
-                return a / b;
-            }
-
-            br /= scale;
-            bi /= scale;
-
-            real_t inv_denom = static_cast<real_t>(1) / rocsparse::fma(br, br, bi * bi);
-            auto   ar        = rocsparse::real(a) / scale;
-            auto   ai        = rocsparse::imag(a) / scale;
-
-            return T(rocsparse::fma(ar, br, ai * bi) * inv_denom,
-                     rocsparse::fma(ai, br, -ar * bi) * inv_denom);
         }
     }
 }
