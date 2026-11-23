@@ -2837,8 +2837,8 @@ struct FmhaFwdKernel
                 else
                     return i_nhead_split;
             }();
-            const index_t i_m0                                = i_tile_m * FmhaPipeline::kM0;
-            const index_t i_n1                                = i_tile_n * FmhaPipeline::kN1;
+            const index_t i_m0 = i_tile_m * FmhaPipeline::kM0;
+            const index_t i_n1 = i_tile_n * FmhaPipeline::kN1;
 
             long_index_t batch_offset_q                        = 0;
             long_index_t batch_offset_k                        = 0; // unused for paged-kvcache
@@ -3822,19 +3822,20 @@ struct FmhaFwdKernel
                         quant.qk_bytes = integer_divide_ceil(kargs.hdim_q, 32);
                         quant.cols_v   = kargs.hdim_v;
                     }
-                    return FmhaPipeline{}(static_cast<decltype(args)&&>(args)...,
-                                          tdm_soft_cap,
-                                          tdm_soft_cap_rcp,
-                                          tdm_randval_dram_window,
-                                          tdm_dropout,
-                                          quant,
-                                          [&]() -> index_t {
-                                              if constexpr(kSplitKV)
-                                                  return kargs.num_splits;
-                                              else
-                                                  return 1;
-                                          }(),
-                                          i_split);
+                    return FmhaPipeline{}(
+                        static_cast<decltype(args)&&>(args)...,
+                        tdm_soft_cap,
+                        tdm_soft_cap_rcp,
+                        tdm_randval_dram_window,
+                        tdm_dropout,
+                        quant,
+                        [&]() -> index_t {
+                            if constexpr(kSplitKV)
+                                return kargs.num_splits;
+                            else
+                                return 1;
+                        }(),
+                        i_split);
                 }
                 else if constexpr(kTakesTdmDescales && kBlockQScale)
                 {

@@ -612,8 +612,8 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                 const index_t tiles_per_split =
                     integer_divide_ceil(integer_divide_ceil(end - start, kN0), num_splits);
                 const index_t split_start = start + i_split * tiles_per_split * kN0;
-                end   = min(end, split_start + tiles_per_split * kN0);
-                start = min(split_start, end);
+                end                       = min(end, split_start + tiles_per_split * kN0);
+                start                     = min(split_start, end);
             }
             return ck_tile::make_tuple(0, start, end);
         }

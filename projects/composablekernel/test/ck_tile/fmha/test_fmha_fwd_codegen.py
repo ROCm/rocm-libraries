@@ -703,9 +703,13 @@ message(\"options:${{options}}\")
             with self.subTest(receipt=receipt):
                 _, kernels = _generate(receipt, [128])
                 self.assertTrue(kernels)
-                self.assertEqual({k.F_pipeline.tag for k in kernels}, {"qr_tdm_pingpong"})
+                self.assertEqual(
+                    {k.F_pipeline.tag for k in kernels}, {"qr_tdm_pingpong"}
+                )
                 self.assertTrue(all(k.F_hdim == 128 for k in kernels))
-                self.assertEqual({(k.F_tile.F_bm0, k.F_tile.F_bn0) for k in kernels}, tiles)
+                self.assertEqual(
+                    {(k.F_tile.F_bm0, k.F_tile.F_bn0) for k in kernels}, tiles
+                )
                 self.assertEqual(len(kernels), len({k.filename for k in kernels}))
                 for kernel in kernels:
                     source = kernel.render()
@@ -885,7 +889,11 @@ message(\"options:${{options}}\")
                     self.assertEqual({k.F_dtype for k in kernels}, set(dtypes))
                     for dtype in dtypes:
                         self.assertEqual(
-                            {(k.F_hdim, k.F_tile.F_bn1) for k in kernels if k.F_dtype == dtype},
+                            {
+                                (k.F_hdim, k.F_tile.F_bn1)
+                                for k in kernels
+                                if k.F_dtype == dtype
+                            },
                             {(h, h) for h in _SCHED_HDIMS[dtype]},
                         )
                     self.assertEqual({k.F_pipeline.F_packgqa for k in kernels}, {"f"})
@@ -1383,7 +1391,11 @@ class TestCompiledGfx125D192Dispatch(unittest.TestCase):
                     )
                 # fp16/bf16 have no scheduled pipeline left to filter on
                 _, sched_kernels = get_fwd_blobs(
-                    ["gfx1250"], f"*bf16*{_SCHED_PIPELINE}*", receipt, [-1], "simplified"
+                    ["gfx1250"],
+                    f"*bf16*{_SCHED_PIPELINE}*",
+                    receipt,
+                    [-1],
+                    "simplified",
                 )
                 self.assertFalse(sched_kernels)
 
@@ -1686,7 +1698,11 @@ class TestGfx125V128Codegen(unittest.TestCase):
                     self.assertEqual(
                         {k.F_pipeline.tag for k in kernels},
                         {"qr_tdm_pingpong"}
-                        | ({"qr_tdm_fp8_sched"} if hdim in _SCHED_HDIMS[dtype] else set()),
+                        | (
+                            {"qr_tdm_fp8_sched"}
+                            if hdim in _SCHED_HDIMS[dtype]
+                            else set()
+                        ),
                     )
                     pingpong = [
                         k for k in kernels if k.F_pipeline.tag == "qr_tdm_pingpong"
@@ -2784,7 +2800,9 @@ int main() {
         # takes the 64-row tile).
         for grid in ({}, big):
             self.assertEqual(run(**square, **grid), [kernel(128)])
-            self.assertEqual(run(**square, **causal, **grid), [kernel(128, mask="causal")])
+            self.assertEqual(
+                run(**square, **causal, **grid), [kernel(128, mask="causal")]
+            )
         self.assertEqual(run(seqlen_q=640, seqlen_k=640, **big), [kernel(128)])
         window = dict(mask=3, window_size_left=255, window_size_right=0)
         self.assertEqual(run(**square, **window, **big), [kernel(64, mask="s_mask")])
@@ -3132,16 +3150,48 @@ class SplitKVQrTdmTiles(unittest.TestCase):
             self.assertEqual(kernel.F_tile.F_bn0, 64, kernel.filename)
 
     def test_qr_tdm_covers_every_gfx125_split_kv_head_dim(self):
-        # qr_tdm backs every split-kv head-dim bucket but d512 (none before pingpong's):
-        # its own (32/64/128/256), and pingpong's 96/160/192 buckets on the next qr_tdm tile
-        # up, so the calls pingpong refuses (group mode, bias, paged KV, ...) still dispatch
-        tdm = self._tdm_kernels()
         self.assertEqual(
-            sorted({kernel.F_hdim for kernel in tdm}), [32, 64, 96, 128, 160, 192, 256]
+            sorted({kernel.F_hdim for kernel in self._tdm_kernels()}),
+            [32, 64, 128, 256],
         )
-        for kernel in tdm:
-            up = next(t for t in (32, 64, 128, 256) if t >= kernel.F_hdim)
-            self.assertEqual(kernel.F_tile.F_bn1, up, kernel.filename)
+
+    def test_pingpong_only_buckets_fall_back_on_the_next_qr_tdm_bucket(self):
+        # the split-KV buckets 96/160/192 hold qr_tdm_pingpong's instances, then dispatch the
+        # next qr_tdm bucket up's padded instances (no copies compiled for them)
+        from codegen.ops.fmha_fwd_splitkv import write_blobs
+
+        with tempfile.TemporaryDirectory() as out:
+            write_blobs(["gfx1250"], Path(out), "@*bf16_batch*", 0, [-1], "simplified")
+            api = (Path(out) / "fmha_fwd_splitkv_api.cpp").read_text()
+            files = {p.name for p in Path(out).glob("fmha_fwd_splitkv_d*.cpp")}
+        # each dtype's head-dim buckets: "if(t.hdim_q <= h && t.hdim_v <= h) {"
+        cases = re.split(r"if\(t\.hdim_q <= ", api)
+        bucket = {}
+        for case in cases[1:]:
+            h = int(re.match(r"\d+", case).group(0))
+            bucket[h] = bucket.get(h, "") + case
+        for h, up in ((96, 128), (160, 256), (192, 256)):
+            with self.subTest(bucket=h):
+                traits = re.findall(
+                    r"fmha_fwd_splitkv_traits_<(\d+), FmhaFwdBf16, [^;]*?BlockFmhaPipelineEnum::(\w+),",
+                    bucket[h],
+                )
+                tags = [tag for _, tag in traits]
+                self.assertIn("QRKSVS_TDM_PINGPONG", tags)
+                self.assertIn("QRKSVS_TDM", tags)
+                # pingpong's own instances first, then the aliases of bucket `up`
+                last_pp = max(
+                    i for i, t in enumerate(tags) if t == "QRKSVS_TDM_PINGPONG"
+                )
+                first_tdm = min(i for i, t in enumerate(tags) if t == "QRKSVS_TDM")
+                self.assertLess(last_pp, first_tdm)
+                self.assertEqual({int(d) for d, t in traits if t == "QRKSVS_TDM"}, {up})
+                self.assertFalse(
+                    any(
+                        f.startswith(f"fmha_fwd_splitkv_d{h}_") and "qr_tdm_v" in f
+                        for f in files
+                    )
+                )
 
     def test_qr_tdm_owns_logits_soft_cap(self):
         # The soft cap entries that dispatch on an exact head dim must be

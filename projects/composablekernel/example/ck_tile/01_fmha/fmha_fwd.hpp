@@ -1292,45 +1292,45 @@ auto fmha_fwd_splitkv_pingpong_create_kargs_and_grids(fmha_fwd_splitkv_args args
 {
     static_assert(Kernel::kSplitKV && !Kernel::kIsGroupMode);
     fmha_fwd_args f{};
-    f.q_ptr                = args.q_ptr;
-    f.k_ptr                = args.k_ptr;
-    f.v_ptr                = args.v_ptr;
-    f.bias_ptr             = args.bias_ptr;
-    f.lse_ptr              = args.lse_acc_ptr;
-    f.o_ptr                = args.o_acc_ptr;
-    f.sink_ptr             = args.sink_ptr;
-    f.seqlen_q             = args.seqlen_q;
-    f.seqlen_k             = args.seqlen_k;
-    f.batch                = args.batch;
-    f.max_seqlen_q         = args.max_seqlen_q;
-    f.hdim_q               = args.hdim_q;
-    f.hdim_v               = args.hdim_v;
-    f.nhead_q              = args.nhead_q;
-    f.nhead_k              = args.nhead_k;
-    f.scale_s              = args.scale_s;
-    f.logits_soft_cap      = args.logits_soft_cap;
-    f.stride_q             = args.stride_q;
-    f.stride_k             = args.stride_k;
-    f.stride_v             = args.stride_v;
-    f.stride_bias          = args.stride_bias;
-    f.stride_o             = args.stride_o_acc;
-    f.nhead_stride_q       = args.nhead_stride_q;
-    f.nhead_stride_k       = args.nhead_stride_k;
-    f.nhead_stride_v       = args.nhead_stride_v;
-    f.nhead_stride_bias    = args.nhead_stride_bias;
-    f.nhead_stride_lse     = args.nhead_stride_lse_acc;
-    f.nhead_stride_o       = args.nhead_stride_o_acc;
-    f.batch_stride_q       = args.batch_stride_q;
-    f.batch_stride_k       = args.batch_stride_k;
-    f.batch_stride_v       = args.batch_stride_v;
-    f.batch_stride_bias    = args.batch_stride_bias;
-    f.batch_stride_lse     = args.batch_stride_lse_acc;
-    f.batch_stride_o       = args.batch_stride_o_acc;
-    f.window_size_left     = args.window_size_left;
-    f.window_size_right    = args.window_size_right;
-    f.sink_size            = args.sink_size;
-    f.mask_type            = args.mask_type;
-    f.drop_seed_offset     = std::make_pair(uint64_t{0}, uint64_t{0});
+    f.q_ptr                      = args.q_ptr;
+    f.k_ptr                      = args.k_ptr;
+    f.v_ptr                      = args.v_ptr;
+    f.bias_ptr                   = args.bias_ptr;
+    f.lse_ptr                    = args.lse_acc_ptr;
+    f.o_ptr                      = args.o_acc_ptr;
+    f.sink_ptr                   = args.sink_ptr;
+    f.seqlen_q                   = args.seqlen_q;
+    f.seqlen_k                   = args.seqlen_k;
+    f.batch                      = args.batch;
+    f.max_seqlen_q               = args.max_seqlen_q;
+    f.hdim_q                     = args.hdim_q;
+    f.hdim_v                     = args.hdim_v;
+    f.nhead_q                    = args.nhead_q;
+    f.nhead_k                    = args.nhead_k;
+    f.scale_s                    = args.scale_s;
+    f.logits_soft_cap            = args.logits_soft_cap;
+    f.stride_q                   = args.stride_q;
+    f.stride_k                   = args.stride_k;
+    f.stride_v                   = args.stride_v;
+    f.stride_bias                = args.stride_bias;
+    f.stride_o                   = args.stride_o_acc;
+    f.nhead_stride_q             = args.nhead_stride_q;
+    f.nhead_stride_k             = args.nhead_stride_k;
+    f.nhead_stride_v             = args.nhead_stride_v;
+    f.nhead_stride_bias          = args.nhead_stride_bias;
+    f.nhead_stride_lse           = args.nhead_stride_lse_acc;
+    f.nhead_stride_o             = args.nhead_stride_o_acc;
+    f.batch_stride_q             = args.batch_stride_q;
+    f.batch_stride_k             = args.batch_stride_k;
+    f.batch_stride_v             = args.batch_stride_v;
+    f.batch_stride_bias          = args.batch_stride_bias;
+    f.batch_stride_lse           = args.batch_stride_lse_acc;
+    f.batch_stride_o             = args.batch_stride_o_acc;
+    f.window_size_left           = args.window_size_left;
+    f.window_size_right          = args.window_size_right;
+    f.sink_size                  = args.sink_size;
+    f.mask_type                  = args.mask_type;
+    f.drop_seed_offset           = std::make_pair(uint64_t{0}, uint64_t{0});
     f.q_descale_ptr              = args.q_descale_ptr;
     f.k_descale_ptr              = args.k_descale_ptr;
     f.v_descale_ptr              = args.v_descale_ptr;
@@ -1348,10 +1348,10 @@ auto fmha_fwd_splitkv_pingpong_create_kargs_and_grids(fmha_fwd_splitkv_args args
     f.batch_stride_v_descale     = args.batch_stride_v_descale;
     f.block_scale_size_q         = args.block_scale_size_q;
     f.block_scale_size_kv        = args.block_scale_size_kv;
-    auto [kargs, grids]    = fmha_fwd_create_kargs_and_grids<Kernel>(f);
-    kargs.num_splits       = args.num_splits;
-    kargs.split_stride_o   = args.split_stride_o_acc;
-    kargs.split_stride_lse = args.split_stride_lse_acc;
+    auto [kargs, grids]          = fmha_fwd_create_kargs_and_grids<Kernel>(f);
+    kargs.num_splits             = args.num_splits;
+    kargs.split_stride_o         = args.split_stride_o_acc;
+    kargs.split_stride_lse       = args.split_stride_lse_acc;
     grids.x *= args.num_splits;
     return ck_tile::make_tuple(kargs, grids);
 }
@@ -1804,8 +1804,9 @@ template <ck_tile::index_t HDim_,
           bool kPadSK_,
           bool kPadD_,
           bool kPadDv_,
-          int kOccupancy_                                  = -1,
-          ck_tile::BlockAttentionQuantScaleEnum QScaleEnum_ = ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE>
+          int kOccupancy_ = -1,
+          ck_tile::BlockAttentionQuantScaleEnum QScaleEnum_ =
+              ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE>
 struct fmha_fwd_splitkv_traits_
 {
     static constexpr ck_tile::index_t HDim           = HDim_;
@@ -1840,6 +1841,10 @@ void fmha_fwd_splitkv_oneshot_(const ck_tile::stream_config&, fmha_fwd_splitkv_a
 
 template <typename Traits_, typename Arch = void>
 std::string fmha_fwd_splitkv_get_name_();
+
+// qr_tdm_pingpong's split-KV instances: whether their kernel (the forward one) takes the call
+template <typename Traits_, typename Arch = void>
+bool fmha_fwd_splitkv_supported_(const fmha_fwd_splitkv_args&);
 
 template <ck_tile::index_t HDim_,
           typename DataType_,

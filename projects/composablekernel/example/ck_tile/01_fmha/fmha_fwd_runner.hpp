@@ -148,7 +148,8 @@ int override_num_splits_if_necessary(int batch,
                                      [[maybe_unused]] int hdim_v,
                                      float p_drop,
                                      int num_splits,
-                                     [[maybe_unused]] int kv_elem_bytes = 2)
+                                     [[maybe_unused]] int kv_elem_bytes   = 2,
+                                     [[maybe_unused]] bool pingpong_split = true)
 {
     int device;
     auto status = hipGetDevice(&device);
@@ -189,23 +190,26 @@ int override_num_splits_if_necessary(int batch,
             // with them). gfx1250 d128 32/8 heads, batch 1..8 x 4k..128k keys, end to end (main
             // + combine), geomean of the best split count (worst): bf16 0.992 (0.947), fp8
             // 0.987 (0.927), MX 0.984 (0.929).
-            // Every gfx125 split-kv instance needs hdim % 8 == 0, so other head
-            // dims must not be split or no instance would match.
+            // qr_tdm's split-kv instances (the fallback of what pingpong refuses) and the fp8 /
+            // MX pingpong ones need whole 8-element head dims: keep other head dims whole.
             if(hdim_q % 8 != 0 || hdim_v % 8 != 0)
                 return 1;
-            // The workgroups the split kernel launches a split: a KV head's single-query heads
-            // fold into one 16-row tile (as the split-KV dispatch merges them, up to 16 a KV
-            // head), other queries take 16-row tiles a head up to 16 rows, 64-row ones past.
+            // The workgroups the split kernel launches a split. pingpong_split: the call takes
+            // qr_tdm_pingpong's split-KV (batch mode, no bias, soft cap, KV cache or sink
+            // tokens), whose dispatch folds a KV head's single-query heads (up to 16) into one
+            // 16-row tile; its 16-row tile takes every query of fp8 / MX and of d512 (no
+            // other split-kv tile there), else queries past 16 rows take qr_tdm's 64-row one.
             const int ratio  = nhead / std::max(nhead_k, 1);
-            const bool merge = max_seqlen_q == 1 && ratio > 1 && ratio <= 16;
+            const bool merge = pingpong_split && max_seqlen_q == 1 && ratio > 1 && ratio <= 16;
             const int rows   = merge ? ratio : max_seqlen_q;
-            const int tile   = rows <= 16 ? 16 : 64;
-            const int blocks = batch * (merge ? std::max(nhead_k, 1) : nhead) *
+            const bool only_decode_tile = kv_elem_bytes == 1 || hdim_q > 256;
+            const int tile              = rows <= 16 || only_decode_tile ? 16 : 64;
+            const int blocks            = batch * (merge ? std::max(nhead_k, 1) : nhead) *
                                ck_tile::integer_divide_ceil(rows, tile);
-            const int wgps   = props.multiProcessorCount;
+            const int wgps = props.multiProcessorCount;
             if(blocks >= wgps)
                 return 1;
-            const int by_grid = ck_tile::integer_divide_ceil(2 * wgps, blocks);
+            const int by_grid   = ck_tile::integer_divide_ceil(2 * wgps, blocks);
             const int key_bytes = std::max(1, (hdim_q + hdim_v) * kv_elem_bytes);
             const int min_keys  = ck_tile::integer_divide_ceil(256 * 1024, key_bytes);
             const int by_keys   = std::max(1, ck_tile::integer_divide_ceil(max_seqlen_k, min_keys));
@@ -739,25 +743,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
              ? batch * std::max(1, ck_tile::integer_divide_ceil(max_seqlen_k, page_block_size))
              : 0);
 
-    // legalize num_splits according to other options
-    if(num_splits < 1)
-    {
-        // a sliding window bounds the keys each query visits
-        const int window_keys =
-            mask.left >= 0 && mask.right >= 0
-                ? std::min<int>(max_seqlen_k, mask.left + mask.right + 1 + max_seqlen_q)
-                : max_seqlen_k;
-        num_splits = override_num_splits_if_necessary(batch,
-                                                      nhead,
-                                                      nhead_k,
-                                                      max_seqlen_q,
-                                                      window_keys,
-                                                      hdim_q,
-                                                      hdim_v,
-                                                      p_drop,
-                                                      num_splits,
-                                                      static_cast<int>(sizeof(KDataType)));
-    }
+    // legalize num_splits according to other options (the heuristic's choice, num_splits < 1,
+    // is made past the pack_gqa decision below, on the shape the kernel runs)
+    const bool auto_num_splits = num_splits < 1;
     if(128 < num_splits)
     {
         std::cerr << "num_splits greater than 128 is not supported" << std::endl;
@@ -877,17 +865,18 @@ fwd_result fmha_fwd_run(mode_enum mode,
                       << shape_seqlen_q << " % " << block_scale_size_q_
                       << "). ignoring the 'pack_gqa' option" << std::endl;
         }
-        // split-KV restores the parallelism the folded heads give up
-        else if(num_splits <= 1 && pack_gqa_costs_parallelism(
-                    [&] {
-                        fmha_fwd_traits traits;
-                        init_traits(traits);
-                        return traits;
-                    }(),
-                    shape_batch,
-                    nhead,
-                    nhead_ratio,
-                    shape_seqlen_q))
+        // split-KV (requested, or left to the heuristic) restores the parallelism the folded
+        // heads give up
+        else if(num_splits == 1 && pack_gqa_costs_parallelism(
+                                       [&] {
+                                           fmha_fwd_traits traits;
+                                           init_traits(traits);
+                                           return traits;
+                                       }(),
+                                       shape_batch,
+                                       nhead,
+                                       nhead_ratio,
+                                       shape_seqlen_q))
         {
             std::cerr << "pack_gqa would leave this short query too few blocks on a small grid "
                          "(see pack_gqa_costs_parallelism). ignoring the 'pack_gqa' option"
@@ -898,6 +887,32 @@ fwd_result fmha_fwd_run(mode_enum mode,
             pack_gqa_nhead    = nhead_k;
             pack_gqa_seqlen_q = nhead_ratio * shape_seqlen_q;
         }
+    }
+
+    // the split count the heuristic picks, on the packed shape where pack_gqa folds the heads
+    if(num_splits < 1)
+    {
+        const bool packed = pack_gqa_nhead != nhead;
+        const int rows_q  = packed ? pack_gqa_seqlen_q : max_seqlen_q;
+        // a sliding window bounds the keys each query visits (an unbounded side, all of them)
+        const int window_keys =
+            mask.left >= 0 && mask.right >= 0
+                ? std::min<int>(max_seqlen_k, mask.left + mask.right + 1 + rows_q)
+                : max_seqlen_k;
+        // the calls qr_tdm_pingpong's split-KV takes (else qr_tdm's)
+        const bool pingpong_split = mode == mode_enum::batch && bias.type == bias_enum::no_bias &&
+                                    logits_soft_cap == 0.f && !use_kvcache && mask.sink == 0;
+        num_splits = override_num_splits_if_necessary(batch,
+                                                      pack_gqa_nhead,
+                                                      nhead_k,
+                                                      rows_q,
+                                                      window_keys,
+                                                      hdim_q,
+                                                      hdim_v,
+                                                      p_drop,
+                                                      num_splits,
+                                                      static_cast<int>(sizeof(KDataType)),
+                                                      pingpong_split);
     }
 
     const ck_tile::index_t num_block_scale_q =
@@ -1651,7 +1666,6 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     args.batch_stride_k_descale = nhead_k;
                     args.batch_stride_v_descale = nhead_k;
                 }
-
             }
             if constexpr(std::is_same_v<fmha_fwd_args, std::decay_t<decltype(args)>>)
             {
@@ -1921,7 +1935,10 @@ fwd_result fmha_fwd_run(mode_enum mode,
             fmha_fwd_splitkv_args fmha_splitkv_args;
             init_args(fmha_splitkv_args);
 
-            return fmha_fwd_splitkv(fmha_splitkv_traits, fmha_splitkv_args, sc);
+            const float t = fmha_fwd_splitkv(fmha_splitkv_traits, fmha_splitkv_args, sc);
+            // a split the heuristic chose that no split-KV instance takes: run it whole
+            if(0 <= t || !auto_num_splits || use_kvcache)
+                return t;
         }
 #endif // CK_TILE_FMHA_FWD_SPLITKV_API
         fmha_fwd_traits fmha_traits;
