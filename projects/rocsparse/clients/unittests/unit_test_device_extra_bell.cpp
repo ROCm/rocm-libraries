@@ -25,7 +25,9 @@
 //
 // Generic spmm with a blocked ELL matrix that has no stored blocks (the
 // product is zero, so C = beta * C), with a blocked ELL matrix built by
-// dense_to_sparse, and with formats spmm does not support.
+// dense_to_sparse, with formats spmm does not support, and with blocked ELL
+// shapes it rejects: a partial last block row or column, or a C whose rows
+// differ from A.
 //
 #include "unit_test_extra_common.hpp"
 
@@ -380,7 +382,11 @@ namespace
 TEST_F(ExtraBell, spmm_partial_block_not_implemented)
 {
     run_bell_spmm_shape(handle, 4, 3, 2, 4, rocsparse_status_not_implemented);
+    if(HasFatalFailure())
+        return;
     run_bell_spmm_shape(handle, 3, 4, 2, 3, rocsparse_status_not_implemented);
+    if(HasFatalFailure())
+        return;
     run_bell_spmm_shape(handle, 3, 3, 2, 3, rocsparse_status_not_implemented);
 }
 
@@ -389,8 +395,14 @@ TEST_F(ExtraBell, spmm_partial_block_not_implemented)
 TEST_F(ExtraBell, spmm_result_rows_must_match_A)
 {
     run_bell_spmm_shape(handle, 2, 2, 2, 2, rocsparse_status_success);
+    if(HasFatalFailure())
+        return;
     run_bell_spmm_shape(handle, 2, 2, 2, 4, rocsparse_status_invalid_size);
+    if(HasFatalFailure())
+        return;
     run_bell_spmm_shape(handle, 2, 2, 2, 8, rocsparse_status_invalid_size);
+    if(HasFatalFailure())
+        return;
     // A mismatched C is a size error even when A also has a partial block.
     run_bell_spmm_shape(handle, 4, 3, 2, 2, rocsparse_status_invalid_size);
 }
