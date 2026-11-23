@@ -36,6 +36,7 @@ HIP_LAUNCH_PARAM_END = ctypes.c_void_p(3)
 
 hipMemcpyHostToDevice = 1
 hipMemcpyDeviceToHost = 2
+hipMemcpyDeviceToDevice = 3
 
 
 class HipError(RuntimeError):
@@ -200,11 +201,31 @@ _hipMemcpyAsync = _b(
     ctypes.c_int,
     ctypes.c_void_p,
 )
+_hipMemcpy2DAsync = _b(
+    "hipMemcpy2DAsync",
+    ctypes.c_void_p,
+    ctypes.c_size_t,
+    ctypes.c_void_p,
+    ctypes.c_size_t,
+    ctypes.c_size_t,
+    ctypes.c_size_t,
+    ctypes.c_int,
+    ctypes.c_void_p,
+)
 _hipMemset = _b("hipMemset", ctypes.c_void_p, ctypes.c_int, ctypes.c_size_t)
 _hipMemsetAsync = _b(
     "hipMemsetAsync",
     ctypes.c_void_p,
     ctypes.c_int,
+    ctypes.c_size_t,
+    ctypes.c_void_p,
+)
+_hipMemset2DAsync = _b(
+    "hipMemset2DAsync",
+    ctypes.c_void_p,
+    ctypes.c_size_t,
+    ctypes.c_int,
+    ctypes.c_size_t,
     ctypes.c_size_t,
     ctypes.c_void_p,
 )
@@ -897,8 +918,63 @@ class Runtime:
             "hipMemcpyD2H",
         )
 
+    def memcpy2d_d2d_async(
+        self,
+        dst: int,
+        dst_pitch: int,
+        src: int,
+        src_pitch: int,
+        width: int,
+        height: int,
+        stream: int = 0,
+    ) -> None:
+        """Queue a copy of ``height`` rows of ``width`` bytes from device address
+        ``src`` to device address ``dst`` on ``stream`` (``hipMemcpy2DAsync``):
+        row ``r`` starts ``r * src_pitch`` bytes past ``src`` and lands
+        ``r * dst_pitch`` bytes past ``dst``; each pitch is at least ``width``.
+        Ordered against the stream's launches by FIFO alone, as
+        :meth:`memset_async` is."""
+        _check(
+            _hipMemcpy2DAsync(
+                ctypes.c_void_p(dst),
+                dst_pitch,
+                ctypes.c_void_p(src),
+                src_pitch,
+                width,
+                height,
+                hipMemcpyDeviceToDevice,
+                ctypes.c_void_p(stream),
+            ),
+            "hipMemcpy2DAsyncD2D",
+        )
+
     def memset(self, ptr: int, value: int, nbytes: int) -> None:
         _check(_hipMemset(ctypes.c_void_p(ptr), value, nbytes), "hipMemset")
+
+    def memset2d_async(
+        self,
+        ptr: int,
+        pitch: int,
+        value: int,
+        width: int,
+        height: int,
+        stream: int = 0,
+    ) -> None:
+        """Queue a fill of ``height`` rows of ``width`` bytes with byte ``value``
+        on ``stream`` (``hipMemset2DAsync``): row ``r`` starts ``r * pitch``
+        bytes past ``ptr``, and ``pitch`` is at least ``width``. Ordered as
+        :meth:`memset_async` is."""
+        _check(
+            _hipMemset2DAsync(
+                ctypes.c_void_p(ptr),
+                pitch,
+                value,
+                width,
+                height,
+                ctypes.c_void_p(stream),
+            ),
+            "hipMemset2DAsync",
+        )
 
     def memset_async(self, ptr: int, value: int, nbytes: int, stream: int = 0) -> None:
         """Queue a fill on ``stream`` instead of draining the device for it.

@@ -709,10 +709,10 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting(
         TORCH_IN_CI,
-        "its GPU numerics compare against a torch reference; without torch in the "
-        "CI test environment those cases skip",
-        "rocKE library; torch in the CI test environment or a numpy reference "
-        "(issue AICK-3334 for attention)",
+        "its torch-caller cases bind torch GPU tensors, as the production callers "
+        "do; without torch in the CI test environment those cases skip (the "
+        "DeviceArray cases run)",
+        "rocKE library attention",
         "2027-01-31",
         "library/tests/sdpa/test_dense_sdpa_numeric.py",
         "library/tests/sdpa/test_unified_sdpa_numeric.py",

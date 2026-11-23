@@ -203,5 +203,5 @@ def test_stats_of_another_dtype_are_refused():
     req = replace(make_request(d=64), stats=packed((2, 4, 8, 1), "fp32"))
     tensors = {n: strided_tensor(getattr(req, n)) for n in ("q", "k", "v", "o")}
     tensors["stats"] = torch.zeros(req.stats.dims, dtype=torch.float16)
-    with pytest.raises(ValueError, match="stats must be torch.float32"):
+    with pytest.raises(ValueError, match="stats must be fp32"):
         _DensePlan(req, tensors)

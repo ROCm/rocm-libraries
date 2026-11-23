@@ -6,38 +6,35 @@
 Every ``cases.py`` case the dense binding admits on the live arch, all tiers,
 is bound with ``sdpa_dense_bind``, launched twice (the second launch reuses
 the bound buffers) and compared with ``sdpa_reference``, fully masked rows
-included (O = 0, LSE = -inf).
+included (O = 0, LSE = -inf). The arrays are rocKE ``DeviceArray`` s, so no
+torch is needed; a few cases also run with torch tensors, the production
+callers' kind.
 """
 
 from __future__ import annotations
 
 import pytest
-from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until
-
-torch = import_or_skip_until("torch", TORCH_IN_CI)
+from rocke.tests.gpu import probe_device_arch
+from rocke.tests.lanes import TORCH_IN_CI, arch_skip_reason, import_or_skip_until
 
 from dispatch.sdpa.bind_dense import sdpa_dense_admits, sdpa_dense_bind
-from rocke.core.arch import base_arch_from_target_id
-
 from tests.sdpa import cases as C
-from tests.sdpa import helpers as H
-from tests.sdpa.binding_harness import bind_tensors, outputs
+from tests.sdpa.binding_harness import bind_and_check, torch_caller_cases
 from tests.sdpa.request_bridge import request_from_case
 
-
-def _arch():
-    if not torch.cuda.is_available():
-        return None
-    arch = base_arch_from_target_id(torch.cuda.get_device_properties(0).gcnArchName)
-    return arch if arch in ("gfx942", "gfx950") else None
-
-
-ARCH = _arch()
+_ARCHES = ("gfx942", "gfx950")
+_FOUND, _ABSENCE = probe_device_arch()
+ARCH = _FOUND if _FOUND in _ARCHES else None
 
 pytestmark = [
     pytest.mark.gpu,
     pytest.mark.skipif(
-        ARCH is None, reason="needs a gfx942 or gfx950 GPU with ROCm torch"
+        ARCH is None,
+        reason=arch_skip_reason(
+            _ARCHES,
+            f"the dense SDPA binding numerics need one of {list(_ARCHES)}; "
+            f"found {_FOUND or _ABSENCE}",
+        ),
     ),
 ]
 
@@ -55,13 +52,15 @@ _CASES = (
 @pytest.mark.parametrize("case", _CASES, ids=[c.id for c in _CASES])
 def test_admitted_case_matches_sdpa_reference(case):
     req = request_from_case(case, ARCH)
-    inputs = H.materialize(case)
-    tensors = bind_tensors(case, H.to_torch(inputs, device="cuda"), req)
+    assert bind_and_check(sdpa_dense_bind, case, req, kind="device_array") == []
 
-    binding = sdpa_dense_bind(req, tensors)
-    binding.launch()
-    binding.launch()
-    torch.cuda.synchronize()
 
-    o, lse = outputs(case, tensors, req)
-    assert H.compare(case, o, lse, H.evaluate(inputs)) == []
+_TORCH_CASES = torch_caller_cases(_CASES)
+
+
+@pytest.mark.parametrize("case", _TORCH_CASES, ids=[c.id for c in _TORCH_CASES])
+def test_torch_callers_match_sdpa_reference(case):
+    """The production callers pass torch tensors: a few cases with them."""
+    import_or_skip_until("torch", TORCH_IN_CI)
+    req = request_from_case(case, ARCH)
+    assert bind_and_check(sdpa_dense_bind, case, req, kind="torch") == []

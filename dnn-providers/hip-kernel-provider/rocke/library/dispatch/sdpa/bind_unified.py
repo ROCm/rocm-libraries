@@ -17,7 +17,8 @@ request is declined when the band the unified kernels would compute is not
 the band it asked for, and a request that pins a dispatch choice is declined.
 
 :func:`sdpa_unified_bind` binds an admitted request's tensors to a launch on
-the production route (``run_unified_attention_torch`` with no tuning spec).
+the production route (``run_unified_attention_torch`` with no tuning spec),
+on torch tensors or :class:`rocke.runtime.device_array.DeviceArray` s alike.
 """
 
 from __future__ import annotations
@@ -25,10 +26,20 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 from kernels.common._sdpa_seqlen import validate_lengths
 from rocke.core.arch import known_arches
 from rocke.dispatch.core import TorchBinding
-from rocke.runtime.torch_interop import device_tensor, empty_workspace, torch_dtype
+from rocke.runtime.device_array import (
+    ArrayInfo,
+    array_info,
+    copy_elements,
+    dense_strides,
+    device_values,
+    device_workspace,
+    host_values,
+    zero_elements,
+)
 
 from dispatch.attention import (
     ATTENTION_ROUTE_REGISTRY,
@@ -40,7 +51,7 @@ from dispatch.attention import (
 from dispatch.attention.common import Alignment, AttentionBand
 
 from .bind_shared import (
-    TORCH_DTYPES,
+    ELEMENT_TYPES,
     Operand,
     asked_band,
     band_text,
@@ -49,6 +60,7 @@ from .bind_shared import (
     keeps_asked_keys,
     launch_stream,
     nonfinite_scale_reject,
+    require_one_device,
     to_attention_request,
     value_rejects,
 )
@@ -270,7 +282,7 @@ def _host_lengths(req_tensor, tensors, key: str):
     if req_tensor is None:
         return None
     check_dtype(key, tensors[key], req_tensor)
-    return tensors[key].detach().reshape(-1).cpu().numpy()
+    return host_values(tensors[key]).reshape(-1)
 
 
 def _lengths(given, key: str, operand: Operand, batch: int, extent: int):
@@ -294,22 +306,20 @@ class _LaunchPlan:
     """The unified paged ABI for one bound request.
 
     Lengths are snapshotted and buffers allocated once, at bind time, so the
-    kernel sees the same tensors on every launch (the 2D path replays graphs
+    kernel sees the same arrays on every launch (the 2D path replays graphs
     keyed on them). Each launch copies the caller's current data in and the
     outputs back, except for an operand the kernel reads or writes in place
-    (``q_inplace``, ``o_inplace``, ``k_inplace``, ``v_inplace``).
+    (``q_inplace``, ``o_inplace``, ``k_inplace``, ``v_inplace``). Buffers are
+    of the caller's kind (``device_workspace``); copies are queued on the
+    launch stream.
     """
 
     def __init__(self, req: SdpaRequest, tensors: Mapping[str, Any]) -> None:
         import dataclasses
 
-        dtype = torch_dtype(TORCH_DTYPES[req.dtype])
-        device = tensors["q"].device
-        for name in ("k", "v", "o", "stats"):
-            if name in tensors and tensors[name].device != device:
-                raise ValueError(
-                    f"{name}: expected a tensor on {device}, got {tensors[name].device}"
-                )
+        dtype = ELEMENT_TYPES[req.dtype]
+        like = tensors["q"]
+        require_one_device(tensors)
 
         def offsets(name: str, fallback: str | None = None):
             key = f"ragged_offset_{name}"
@@ -359,14 +369,14 @@ class _LaunchPlan:
         self.q_packed = self.q.packed_view(cu)
         self.q_inplace = self.q_packed is not None
         if not self.q_inplace:
-            self.q_packed = empty_workspace(
-                (cu[-1], req.h_q, req.d_qk), dtype=dtype, device=device
+            self.q_packed = device_workspace(
+                (cu[-1], req.h_q, req.d_qk), dtype, like=like
             )
         self.o_packed = self.o.packed_view(cu)
         self.o_inplace = self.o_packed is not None
         if not self.o_inplace:
-            self.o_packed = empty_workspace(
-                (cu[-1], req.h_q, req.d_v), dtype=dtype, device=device
+            self.o_packed = device_workspace(
+                (cu[-1], req.h_q, req.d_v), dtype, like=like
             )
 
         # Identity page table, exactly ceil(S_kv / block) wide: the scalar
@@ -376,32 +386,36 @@ class _LaunchPlan:
         # 4-warp body) read a KV tile's trailing rows past a sequence's own
         # length, masked but still dereferenced, so they must be finite.
         slots = batch * self.pages
+        bind_stream = launch_stream(None, like.device, "unified")
         self.k_cache = self.k.paged_view(self.kv_len, self.block)
         self.k_inplace = self.k_cache is not None
         if not self.k_inplace:
-            self.k_cache = empty_workspace(
-                (slots, self.block, req.h_k, req.d_qk), dtype=dtype, device=device
-            ).zero_()
+            self.k_cache = device_workspace(
+                (slots, self.block, req.h_k, req.d_qk), dtype, like=like
+            )
+            zero_elements(array_info(self.k_cache), stream=bind_stream)
         self.v_cache = self.v.paged_view(self.kv_len, self.block)
         self.v_inplace = self.v_cache is not None
         if not self.v_inplace:
-            self.v_cache = empty_workspace(
-                (slots, self.block, req.h_v, req.d_v), dtype=dtype, device=device
-            ).zero_()
-
-        int32 = torch_dtype("int32")
-        self.block_table = device_tensor(range(slots), dtype=int32, device=device).view(
-            batch, self.pages
-        )
-        self.cu_seqlens_q = device_tensor(cu, dtype=int32, device=device)
-        self.seqused_k = device_tensor(self.kv_len, dtype=int32, device=device)
-        self.lse = (
-            None
-            if self.stats is None
-            else empty_workspace(
-                (cu[-1], req.h_q, 1), dtype=torch_dtype("float32"), device=device
+            self.v_cache = device_workspace(
+                (slots, self.block, req.h_v, req.d_v), dtype, like=like
             )
+            zero_elements(array_info(self.v_cache), stream=bind_stream)
+
+        self.block_table = device_values(
+            np.arange(slots, dtype=np.int32).reshape(batch, self.pages), like=like
         )
+        self.cu_seqlens_q = device_values(np.asarray(cu, np.int32), like=like)
+        self.seqused_k = device_values(np.asarray(self.kv_len, np.int32), like=like)
+        self.lse = None
+        self.neg_inf = None
+        if self.stats is not None:
+            self.lse = device_workspace((cu[-1], req.h_q, 1), "fp32", like=like)
+            # The -inf a padded row's LSE gets, copied from here (a memset
+            # writes bytes, not an FP32 value).
+            self.neg_inf = device_values(
+                np.full(req.h_q * req.s_q, -np.inf, np.float32), like=like
+            )
 
     def kernel_tensors(self) -> dict[str, Any]:
         return {
@@ -414,51 +428,85 @@ class _LaunchPlan:
             "block_table": self.block_table,
         }
 
-    def pack(self) -> None:
+    def pack(self, stream: int = 0) -> None:
+        """Copy the caller's Q, K and V rows into the kernel's buffers, queued
+        on ``stream``."""
         cu = self.cu
         if not self.q_inplace:
+            packed = array_info(self.q_packed)
             for b, n in enumerate(self.q_len):
                 if n:
-                    self.q_packed[cu[b] : cu[b] + n].copy_(self.q.rows(b, n))
+                    copy_elements(
+                        _token_rows(packed, cu[b], n), self.q.rows(b, n), stream=stream
+                    )
         span = self.pages * self.block
-        k_rows = self.k_cache.view(-1, span, *self.k_cache.shape[2:])
-        v_rows = self.v_cache.view(-1, span, *self.v_cache.shape[2:])
-        for b, n in enumerate(self.kv_len):
-            if n and not self.k_inplace:
-                k_rows[b, :n].copy_(self.k.rows(b, n))
-            if n and not self.v_inplace:
-                v_rows[b, :n].copy_(self.v.rows(b, n))
+        for operand, cache, inplace in (
+            (self.k, self.k_cache, self.k_inplace),
+            (self.v, self.v_cache, self.v_inplace),
+        ):
+            if inplace:
+                continue
+            # The cache as one run of token rows: batch b's start at b * span.
+            slots, block, *row = array_info(cache).shape
+            shape = (slots * block, *row)
+            tokens = array_info(cache).view(shape, dense_strides(shape))
+            for b, n in enumerate(self.kv_len):
+                if n:
+                    copy_elements(
+                        _token_rows(tokens, b * span, n),
+                        operand.rows(b, n),
+                        stream=stream,
+                    )
 
-    def unpack(self) -> None:
-        """Scatter O and LSE back. Rows past a batch's query length are O = 0
-        and LSE = -inf, as hipDNN's reference writes them."""
+    def unpack(self, stream: int = 0) -> None:
+        """Scatter O and LSE back, queued on ``stream``. Rows past a batch's
+        query length are O = 0 and LSE = -inf, as hipDNN's reference writes
+        them."""
         cu = self.cu
+        packed = array_info(self.o_packed)
+        lse = None if self.lse is None else array_info(self.lse)
         for b, n in enumerate(self.q_len):
             if n and not self.o_inplace:
-                self.o.rows(b, n).copy_(self.o_packed[cu[b] : cu[b] + n])
+                copy_elements(
+                    self.o.rows(b, n), _token_rows(packed, cu[b], n), stream=stream
+                )
             if n < self.o.extent and not self.o.desc.ragged:
-                self.o.tensor[b, :, n:, :].zero_()
+                zero_elements(self.o.tail(b, n), stream=stream)
             if self.stats is None:
                 continue
             if n:
-                self.stats.rows(b, n).copy_(self.lse[cu[b] : cu[b] + n])
+                copy_elements(
+                    self.stats.rows(b, n), _token_rows(lse, cu[b], n), stream=stream
+                )
             if n < self.stats.extent and not self.stats.desc.ragged:
-                self.stats.tensor[b, :, n:, :].fill_(float("-inf"))
+                tail = self.stats.tail(b, n)
+                neg_inf = array_info(self.neg_inf).view(
+                    tail.shape, dense_strides(tail.shape)
+                )
+                copy_elements(tail, neg_inf, stream=stream)
+
+
+def _token_rows(info: ArrayInfo, start: int, n: int) -> ArrayInfo:
+    """Rows ``[start, start + n)`` of a dense ``[tokens, ...]`` buffer."""
+    row = info.strides[0]
+    return info.view((n, *info.shape[1:]), info.strides, offset=start * row)
 
 
 def sdpa_unified_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBinding:
-    """Bind an admitted request and its device tensors to a unified launch.
+    """Bind an admitted request and its device arrays to a unified launch.
 
     ``tensors`` holds ``q``, ``k``, ``v``, ``o`` and, when the request sets
     them, ``stats``, ``seq_len_q`` / ``seq_len_kv`` and
     ``ragged_offset_<operand>`` (V, O and stats fall back to K's, Q's and Q's
-    offsets). A dense operand is its logical BHSD tensor with the request's
-    strides; a ragged one is its contiguous packed buffer. Every tensor's
-    dtype must be the one its request descriptor names. The launch runs on
-    Torch's current stream through the production route
-    (``run_unified_attention_torch`` with no tuning spec, ``backend="auto"``):
-    tiled 2D and split-KV (3D) both write LSE on gfx942/gfx950, so the launch
-    defers to the kernel's own path selection rather than re-deciding it here.
+    offsets): torch tensors or :class:`rocke.runtime.device_array.DeviceArray`
+    s. A dense operand is its logical BHSD array with the request's strides; a
+    ragged one is its contiguous packed buffer. Every array's element type
+    must be the one its request descriptor names. The launch runs on the
+    current stream (Torch's, or HIP's null stream without torch) through the
+    production route (``run_unified_attention_torch`` with no tuning spec,
+    ``backend="auto"``): tiled 2D and split-KV (3D) both write LSE on
+    gfx942/gfx950, so the launch defers to the kernel's own path selection
+    rather than re-deciding it here.
 
     Lengths and offsets are read once, here; rebind after changing them.
     Raises ``ValueError`` with the admission reason for a declined request.
@@ -476,12 +524,12 @@ def sdpa_unified_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBind
     if plan.problem.total_q:
         validate_tuning_attention_tensors(plan.problem, plan.kernel_tensors())
     scale = float(req.scale)
-    device = plan.q_packed.device
+    device = tensors["q"].device
 
     def launch(*, stream: Any = None) -> None:
-        """Pack, launch and unpack, all on Torch's current stream."""
+        """Pack, launch and unpack, all on the current stream."""
         launch_on = launch_stream(stream, device, "unified")
-        plan.pack()
+        plan.pack(launch_on)
         if plan.problem.total_q:
             run_unified_attention_torch(
                 problem=plan.problem,
@@ -492,6 +540,6 @@ def sdpa_unified_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBind
                 stream=launch_on,
                 lse=plan.lse,
             )
-        plan.unpack()
+        plan.unpack(launch_on)
 
     return TorchBinding(launch=launch, grid=(0, 0, 0), block=(0, 0, 0))
