@@ -7,7 +7,7 @@
 
 Architecture: gfx950
 GemmType: F8B8F8S_NT
-Source: rocm-libraries 1a33436bd6, 2026-11-16
+Source: rocm-libraries 1a33436bd6, 2026-11-21
 DepthU: [32, 64, 128, 256, 512, 1024]  # searched
 MatrixInstructions:
   - {MatrixInstruction: [16, 16, 128, 1, 1, 1, 1, 4, 1], DepthU: [128, 256, 512, 1024]}  # MT64x16
@@ -560,7 +560,7 @@ MatrixInstructions:
 #   [16, 16, 128, 1, 1, 1, 21, 4, 1]  MT64x336  +17.2%  Kernel Uses 192000 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 1, 22, 4, 1]  MT64x352  +11.6%  Kernel Uses 182784 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 1, 23, 4, 1]  MT64x368  +2.1%  Kernel Uses 167296 > 163840 bytes of LDS
-#   [16, 16, 128, 1, 1, 1, 24, 4, 1]  MT64x384  +5.5%  Kernel Uses 172800 > 163840 bytes of LDS
+#   [16, 16, 128, 1, 1, 1, 24, 4, 1]  MT64x384  +5.0%  Kernel Uses 172032 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 1, 25, 4, 1]  MT64x400  +9.6%  Kernel Uses 179584 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 1, 26, 4, 1]  MT64x416  +13.4%  Kernel Uses 185856 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 1, 27, 4, 1]  MT64x432  +17.1%  Kernel Uses 191872 > 163840 bytes of LDS
@@ -605,7 +605,7 @@ MatrixInstructions:
 #   [16, 16, 128, 1, 1, 2, 17, 4, 1]  MT128x272  +8.6%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=278, sgprs=70
 #   [16, 16, 128, 1, 1, 2, 18, 4, 1]  MT128x288  +9.7%  Kernel Uses 179712 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 2, 19, 4, 1]  MT128x304  +18.8%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=304, sgprs=70
-#   [16, 16, 128, 1, 1, 2, 20, 4, 1]  MT128x320  +6.4%  Kernel Uses 174336 > 163840 bytes of LDS
+#   [16, 16, 128, 1, 1, 2, 20, 4, 1]  MT128x320  +5.0%  Kernel Uses 172032 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 2, 21, 4, 1]  MT128x336  +24.1%  Kernel Uses 203264 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 2, 22, 4, 1]  MT128x352  +13.4%  Kernel Uses 185856 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 2, 23, 4, 1]  MT128x368  +27.2%  Kernel Uses 208384 > 163840 bytes of LDS
@@ -1188,7 +1188,7 @@ MatrixInstructions:
 #   [16, 16, 128, 1, 1, 19, 5, 1, 4]  MT304x320  +9.7%  Kernel Uses 179712 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 19, 6, 1, 4]  MT304x384  +0.8%  Kernel Uses 165120 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 20, 1, 1, 4]  MT320x64  +9.8%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=281, sgprs=70
-#   [16, 16, 128, 1, 1, 20, 2, 1, 4]  MT320x128  +6.4%  Kernel Uses 174336 > 163840 bytes of LDS
+#   [16, 16, 128, 1, 1, 20, 2, 1, 4]  MT320x128  +5.0%  Kernel Uses 172032 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 20, 3, 1, 4]  MT320x192  +20.4%  Kernel Uses 197248 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 20, 4, 1, 4]  MT320x256  +25.0%  Kernel Uses 204800 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 20, 5, 1, 4]  MT320x320  +0.8%  Kernel Uses 165120 > 163840 bytes of LDS
@@ -1207,7 +1207,7 @@ MatrixInstructions:
 #   [16, 16, 128, 1, 1, 23, 3, 1, 4]  MT368x192  +9.4%  Kernel Uses 179200 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 23, 4, 1, 4]  MT368x256  +5.9%  Kernel Uses 173568 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 23, 5, 1, 4]  MT368x320  +0.8%  Kernel Uses 165120 > 163840 bytes of LDS
-#   [16, 16, 128, 1, 1, 24, 1, 1, 4]  MT384x64  +5.4%  Kernel Uses 172672 > 163840 bytes of LDS
+#   [16, 16, 128, 1, 1, 24, 1, 1, 4]  MT384x64  +5.0%  Kernel Uses 172032 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 24, 2, 1, 4]  MT384x128  +20.2%  Kernel Uses 196864 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 24, 3, 1, 4]  MT384x192  +25.0%  Kernel Uses 204800 > 163840 bytes of LDS
 #   [16, 16, 128, 1, 1, 24, 4, 1, 4]  MT384x256  +0.6%  Kernel Uses 164864 > 163840 bytes of LDS

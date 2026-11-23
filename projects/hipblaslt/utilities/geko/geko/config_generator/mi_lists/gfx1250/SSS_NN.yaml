@@ -7,7 +7,7 @@
 
 Architecture: gfx1250
 GemmType: SSS_NN
-Source: rocm-libraries 1a33436bd6, 2026-11-17
+Source: rocm-libraries 1a33436bd6, 2026-11-21
 DepthU: [64, 128, 256, 512]  # searched
 MatrixInstructions:
   - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 1, 4, 1], DepthU: [64, 128, 256]}  # MT64x16
@@ -746,12 +746,12 @@ MatrixInstructions:
 #   [16, 16, 4, 1, 1, 3, 13, 1, 4]  MT48x832  -0.1%  overflowed resources.  errorCode=12, msg="tail LDS reset has one block stride and a divergent pair h
 #   [16, 16, 4, 1, 1, 3, 15, 1, 4]  MT48x960  -0.1%  overflowed resources.  errorCode=12, msg="tail LDS reset has one block stride and a divergent pair h
 #   [16, 16, 4, 1, 1, 4, 9, 1, 4]  MT64x576  -0.2%  overflowed resources.  errorCode=12, msg="tail LDS reset has one block stride and a divergent pair h
-#   [16, 16, 4, 1, 1, 4, 11, 1, 4]  MT64x704  -0.1%  overflowed resources.  errorCode=12, msg="tail LDS reset has one block stride and a divergent pair h
+#   [16, 16, 4, 1, 1, 4, 11, 1, 4]  MT64x704  -0.2%  overflowed resources.  errorCode=12, msg="tail LDS reset has one block stride and a divergent pair h
 #   [16, 16, 4, 1, 1, 4, 13, 1, 4]  MT64x832  +0.0%  overflowed resources.  errorCode=12, msg="tail LDS reset has one block stride and a divergent pair h
 #   [16, 16, 4, 1, 1, 4, 15, 1, 4]  MT64x960  +7.4%  overflowed resources.  errorCode=12, msg="tail LDS reset has one block stride and a divergent pair h
 #   [16, 16, 4, 1, 1, 5, 9, 1, 4]  MT80x576  -0.2%  overflowed resources.  errorCode=12, msg="tail LDS reset has one block stride and a divergent pair h
 #   [16, 16, 4, 1, 1, 5, 11, 1, 4]  MT80x704  -0.2%  overflowed resources.  errorCode=12, msg="tail LDS reset has one block stride and a divergent pair h
-#   [16, 16, 4, 1, 1, 6, 9, 1, 4]  MT96x576  -0.1%  overflowed resources.  errorCode=12, msg="tail LDS reset has one block stride and a divergent pair h
+#   [16, 16, 4, 1, 1, 6, 9, 1, 4]  MT96x576  -0.2%  overflowed resources.  errorCode=12, msg="tail LDS reset has one block stride and a divergent pair h
 #   [16, 16, 4, 1, 1, 7, 9, 1, 4]  MT112x576  +0.3%  overflowed resources.  errorCode=12, msg="tail LDS reset has one block stride and a divergent pair h
 #   [16, 16, 4, 1, 1, 9, 7, 1, 4]  MT144x448  +0.2%  overflowed resources.  errorCode=12, msg="tail LDS reset has one block stride and a divergent pair h
 #   [16, 16, 4, 1, 1, 12, 5, 1, 4]  MT192x320  +1.0%  overflowed resources.  errorCode=1, msg="too many vgprs", vgprs=1034, sgprs=72

@@ -7,7 +7,7 @@
 
 Architecture: gfx950
 GemmType: I8II_NN
-Source: rocm-libraries 1a33436bd6, 2026-11-17
+Source: rocm-libraries 1a33436bd6, 2026-11-20
 DepthU: [32, 64, 128, 256, 512, 1024]  # searched
 MatrixInstructions:
   - {MatrixInstruction: [16, 16, 64, 1, 1, 1, 1, 4, 1], DepthU: [64, 128, 256, 512]}  # MT64x16

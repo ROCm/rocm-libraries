@@ -7,7 +7,7 @@
 
 Architecture: gfx950
 GemmType: BBS_NN
-Source: rocm-libraries 1a33436bd6, 2026-11-16
+Source: rocm-libraries 1a33436bd6, 2026-11-20
 DepthU: [32, 64, 128, 256, 512, 1024]  # searched
 MatrixInstructions:
   - {MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 4, 1], DepthU: [32, 64, 128, 256, 512]}  # MT64x16
@@ -1287,7 +1287,7 @@ MatrixInstructions:
 #   [16, 16, 32, 1, 1, 23, 5, 2, 2]  MT736x160  +5.5%  Kernel Uses 172800 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 24, 4, 2, 2]  MT768x128  +3.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=264, sgprs=72
 #   [16, 16, 32, 1, 1, 25, 4, 2, 2]  MT800x128  +24.4%  Kernel Uses 203776 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 26, 4, 2, 2]  MT832x128  +12.7%  Kernel Uses 184704 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 26, 4, 2, 2]  MT832x128  +12.5%  Kernel Uses 184320 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 27, 3, 2, 2]  MT864x96  +10.9%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=284, sgprs=72
 #   [16, 16, 32, 1, 1, 27, 4, 2, 2]  MT864x128  +27.5%  Kernel Uses 208896 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 28, 3, 2, 2]  MT896x96  +12.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=287, sgprs=72
@@ -1302,7 +1302,7 @@ MatrixInstructions:
 #   [16, 16, 32, 1, 1, 8, 13, 1, 4]  MT128x832  +5.9%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=271, sgprs=72
 #   [16, 16, 32, 1, 1, 8, 14, 1, 4]  MT128x896  +20.2%  Kernel Uses 196864 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 9, 12, 1, 4]  MT144x768  +14.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=294, sgprs=72
-#   [16, 16, 32, 1, 1, 10, 11, 1, 4]  MT160x704  +2.0%  Kernel Uses 167040 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 10, 11, 1, 4]  MT160x704  +1.5%  Kernel Uses 166272 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 11, 10, 1, 4]  MT176x640  +0.3%  Kernel Uses 164352 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 12, 9, 1, 4]  MT192x576  +12.5%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=288, sgprs=72
 #   [16, 16, 32, 1, 1, 13, 8, 1, 4]  MT208x512  +10.2%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=282, sgprs=72

@@ -7,7 +7,7 @@
 
 Architecture: gfx950
 GemmType: HF8S_TN
-Source: rocm-libraries 1a33436bd6, 2026-11-16
+Source: rocm-libraries 1a33436bd6, 2026-11-21
 DepthU: [32, 64, 128, 256, 512, 1024]  # searched
 MatrixInstructions:
   - {MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 4, 1], DepthU: [32, 64, 128, 256, 512]}  # MT64x16
@@ -1402,7 +1402,7 @@ MatrixInstructions:
 #   [32, 32, 16, 1, 1, 12, 2, 2, 2]  MT768x128  +5.0%  Kernel Uses 172032 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 13, 2, 2, 2]  MT832x128  +12.5%  Kernel Uses 184320 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 14, 2, 2, 2]  MT896x128  +21.2%  Kernel Uses 198656 > 163840 bytes of LDS
-#   [32, 32, 16, 1, 1, 4, 6, 1, 4]  MT128x768  +5.9%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=271, sgprs=94
+#   [32, 32, 16, 1, 1, 4, 6, 1, 4]  MT128x768  +5.0%  Kernel Uses 172032 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 4, 7, 1, 4]  MT128x896  +20.0%  Kernel Uses 196608 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 7, 4, 1, 4]  MT224x512  +15.0%  Kernel Uses 188416 > 163840 bytes of LDS
 #   [32, 32, 16, 1, 1, 9, 3, 1, 4]  MT288x384  +5.0%  Kernel Uses 172032 > 163840 bytes of LDS

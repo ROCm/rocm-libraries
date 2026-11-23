@@ -7,7 +7,7 @@
 
 Architecture: gfx942
 GemmType: I8II_NT
-Source: rocm-libraries 1a33436bd6, 2026-11-18
+Source: rocm-libraries 1a33436bd6, 2026-11-20
 DepthU: [32, 64, 128, 256, 512, 1024]  # searched
 MatrixInstructions:
   - {MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 4, 1], DepthU: [32, 64, 128, 256, 512]}  # MT64x16
@@ -1847,11 +1847,11 @@ MatrixInstructions:
 #   [16, 16, 32, 1, 1, 3, 29, 4, 1]  MT192x464  +3.0%  Kernel Uses 67488 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 3, 31, 4, 1]  MT192x496  +2.8%  Kernel Uses 67392 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 3, 33, 4, 1]  MT192x528  +7.5%  Kernel Uses 70464 > 65536 bytes of LDS
-#   [16, 16, 32, 1, 1, 3, 34, 4, 1]  MT192x544  +10.0%  Kernel Uses 72064 > 65536 bytes of LDS
+#   [16, 16, 32, 1, 1, 3, 34, 4, 1]  MT192x544  +9.0%  Kernel Uses 71424 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 3, 35, 4, 1]  MT192x560  +12.2%  Kernel Uses 73536 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 3, 36, 4, 1]  MT192x576  +14.8%  Kernel Uses 75264 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 3, 37, 4, 1]  MT192x592  +16.9%  Kernel Uses 76608 > 65536 bytes of LDS
-#   [16, 16, 32, 1, 1, 3, 38, 4, 1]  MT192x608  +19.3%  Kernel Uses 78208 > 65536 bytes of LDS
+#   [16, 16, 32, 1, 1, 3, 38, 4, 1]  MT192x608  +18.4%  Kernel Uses 77568 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 4, 23, 4, 1]  MT256x368  +1.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=259, sgprs=70
 #   [16, 16, 32, 1, 1, 4, 25, 4, 1]  MT256x400  +2.8%  Kernel Uses 67360 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 4, 26, 4, 1]  MT256x416  +0.6%  Kernel Uses 65920 > 65536 bytes of LDS
@@ -1868,7 +1868,7 @@ MatrixInstructions:
 #   [16, 16, 32, 1, 1, 7, 15, 4, 1]  MT448x240  +2.8%  Kernel Uses 67392 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 7, 16, 4, 1]  MT448x256  +4.3%  Kernel Uses 68352 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 8, 13, 4, 1]  MT512x208  +6.3%  Kernel Uses 69696 > 65536 bytes of LDS
-#   [16, 16, 32, 1, 1, 8, 14, 4, 1]  MT512x224  +8.8%  Kernel Uses 71296 > 65536 bytes of LDS
+#   [16, 16, 32, 1, 1, 8, 14, 4, 1]  MT512x224  +7.8%  Kernel Uses 70656 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 9, 11, 4, 1]  MT576x176  +3.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=264, sgprs=70
 #   [16, 16, 32, 1, 1, 9, 12, 4, 1]  MT576x192  +10.5%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=283, sgprs=70
 #   [16, 16, 32, 1, 1, 10, 11, 4, 1]  MT640x176  +21.1%  too many vgprs after _initKernel (body skipped)
@@ -1896,9 +1896,9 @@ MatrixInstructions:
 #   [16, 16, 32, 1, 1, 5, 23, 2, 2]  MT160x736  +36.3%  too many vgprs after _initKernel (body skipped)
 #   [16, 16, 32, 1, 1, 6, 17, 2, 2]  MT192x544  +5.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=269, sgprs=70
 #   [16, 16, 32, 1, 1, 6, 18, 2, 2]  MT192x576  +12.9%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=289, sgprs=70
-#   [16, 16, 32, 1, 1, 6, 19, 2, 2]  MT192x608  +19.2%  Kernel Uses 78144 > 65536 bytes of LDS
+#   [16, 16, 32, 1, 1, 6, 19, 2, 2]  MT192x608  +18.4%  Kernel Uses 77568 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 7, 15, 2, 2]  MT224x480  +9.0%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=279, sgprs=70
-#   [16, 16, 32, 1, 1, 7, 16, 2, 2]  MT224x512  +9.0%  Kernel Uses 71424 > 65536 bytes of LDS
+#   [16, 16, 32, 1, 1, 7, 16, 2, 2]  MT224x512  +7.8%  Kernel Uses 70656 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 8, 13, 2, 2]  MT256x416  +3.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=264, sgprs=70
 #   [16, 16, 32, 1, 1, 8, 14, 2, 2]  MT256x448  +4.1%  Kernel Uses 68224 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 9, 12, 2, 2]  MT288x384  +0.8%  Kernel Uses 66048 > 65536 bytes of LDS
@@ -1908,10 +1908,10 @@ MatrixInstructions:
 #   [16, 16, 32, 1, 1, 13, 8, 2, 2]  MT416x256  +3.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=264, sgprs=70
 #   [16, 16, 32, 1, 1, 14, 8, 2, 2]  MT448x256  +4.3%  Kernel Uses 68352 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 15, 7, 2, 2]  MT480x224  +9.0%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=279, sgprs=70
-#   [16, 16, 32, 1, 1, 16, 7, 2, 2]  MT512x224  +8.7%  Kernel Uses 71232 > 65536 bytes of LDS
+#   [16, 16, 32, 1, 1, 16, 7, 2, 2]  MT512x224  +7.8%  Kernel Uses 70656 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 17, 6, 2, 2]  MT544x192  +5.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=269, sgprs=70
 #   [16, 16, 32, 1, 1, 18, 6, 2, 2]  MT576x192  +12.9%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=289, sgprs=70
-#   [16, 16, 32, 1, 1, 19, 6, 2, 2]  MT608x192  +19.3%  Kernel Uses 78208 > 65536 bytes of LDS
+#   [16, 16, 32, 1, 1, 19, 6, 2, 2]  MT608x192  +18.2%  Kernel Uses 77440 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 20, 5, 2, 2]  MT640x160  +1.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=259, sgprs=70
 #   [16, 16, 32, 1, 1, 21, 5, 2, 2]  MT672x160  +16.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=299, sgprs=70
 #   [16, 16, 32, 1, 1, 22, 5, 2, 2]  MT704x160  +22.3%  too many vgprs after _initKernel (body skipped)
@@ -1938,7 +1938,7 @@ MatrixInstructions:
 #   [16, 16, 32, 1, 1, 11, 10, 1, 4]  MT176x640  +21.5%  too many vgprs after _initKernel (body skipped)
 #   [16, 16, 32, 1, 1, 12, 9, 1, 4]  MT192x576  +10.5%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=283, sgprs=70
 #   [16, 16, 32, 1, 1, 13, 8, 1, 4]  MT208x512  +6.6%  Kernel Uses 69888 > 65536 bytes of LDS
-#   [16, 16, 32, 1, 1, 14, 8, 1, 4]  MT224x512  +9.0%  Kernel Uses 71424 > 65536 bytes of LDS
+#   [16, 16, 32, 1, 1, 14, 8, 1, 4]  MT224x512  +7.8%  Kernel Uses 70656 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 15, 7, 1, 4]  MT240x448  +2.8%  Kernel Uses 67392 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 16, 7, 1, 4]  MT256x448  +4.0%  Kernel Uses 68160 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 17, 6, 1, 4]  MT272x384  +3.1%  Kernel Uses 67584 > 65536 bytes of LDS
@@ -1957,11 +1957,11 @@ MatrixInstructions:
 #   [16, 16, 32, 1, 1, 29, 4, 1, 4]  MT464x256  +7.8%  Kernel Uses 70656 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 31, 3, 1, 4]  MT496x192  +2.8%  Kernel Uses 67392 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 33, 3, 1, 4]  MT528x192  +7.5%  Kernel Uses 70464 > 65536 bytes of LDS
-#   [16, 16, 32, 1, 1, 34, 3, 1, 4]  MT544x192  +9.9%  Kernel Uses 72000 > 65536 bytes of LDS
+#   [16, 16, 32, 1, 1, 34, 3, 1, 4]  MT544x192  +8.7%  Kernel Uses 71232 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 35, 3, 1, 4]  MT560x192  +12.2%  Kernel Uses 73536 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 36, 3, 1, 4]  MT576x192  +14.6%  Kernel Uses 75072 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 37, 3, 1, 4]  MT592x192  +16.9%  Kernel Uses 76608 > 65536 bytes of LDS
-#   [16, 16, 32, 1, 1, 38, 3, 1, 4]  MT608x192  +19.2%  Kernel Uses 78144 > 65536 bytes of LDS
+#   [16, 16, 32, 1, 1, 38, 3, 1, 4]  MT608x192  +18.1%  Kernel Uses 77376 > 65536 bytes of LDS
 #   [16, 16, 32, 1, 1, 39, 2, 1, 4]  MT624x128  +5.9%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=271, sgprs=70
 #   [16, 16, 32, 1, 1, 41, 2, 1, 4]  MT656x128  +16.0%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=297, sgprs=70
 #   [16, 16, 32, 1, 1, 43, 2, 1, 4]  MT688x128  +26.2%  too many vgprs after _initKernel (body skipped)

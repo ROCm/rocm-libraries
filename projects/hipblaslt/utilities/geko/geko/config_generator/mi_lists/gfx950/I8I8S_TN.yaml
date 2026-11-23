@@ -7,7 +7,7 @@
 
 Architecture: gfx950
 GemmType: I8I8S_TN
-Source: rocm-libraries 1a33436bd6, 2026-11-17
+Source: rocm-libraries 1a33436bd6, 2026-11-21
 DepthU: [32, 64, 128, 256, 512, 1024]  # searched
 MatrixInstructions:
   - {MatrixInstruction: [16, 16, 64, 1, 1, 1, 1, 4, 1], DepthU: [64, 128, 256, 512, 1024]}  # MT64x16
@@ -1596,7 +1596,7 @@ MatrixInstructions:
   - {MatrixInstruction: [16, 16, 32, 1, 1, 3, 25, 2, 2], DepthU: [32, 64]}  # MT96x800
   - {MatrixInstruction: [16, 16, 32, 1, 1, 3, 26, 2, 2], DepthU: [32, 64]}  # MT96x832
   - {MatrixInstruction: [16, 16, 32, 1, 1, 3, 27, 2, 2], DepthU: [32, 64]}  # MT96x864
-  - {MatrixInstruction: [16, 16, 32, 1, 1, 3, 28, 2, 2], DepthU: [32]}  # MT96x896
+  - {MatrixInstruction: [16, 16, 32, 1, 1, 3, 28, 2, 2], DepthU: [32, 64]}  # MT96x896
   - {MatrixInstruction: [16, 16, 32, 1, 1, 3, 29, 2, 2], DepthU: [32]}  # MT96x928
   - {MatrixInstruction: [16, 16, 32, 1, 1, 3, 30, 2, 2], DepthU: [32]}  # MT96x960
   - {MatrixInstruction: [16, 16, 32, 1, 1, 3, 31, 2, 2], DepthU: [32]}  # MT96x992
@@ -1925,7 +1925,7 @@ MatrixInstructions:
   - {MatrixInstruction: [16, 16, 32, 1, 1, 6, 13, 1, 4], DepthU: [32, 64]}  # MT96x832
   - {MatrixInstruction: [16, 16, 32, 1, 1, 6, 14, 1, 4], DepthU: [32, 64]}  # MT96x896
   - {MatrixInstruction: [16, 16, 32, 1, 1, 6, 15, 1, 4], DepthU: [32]}  # MT96x960
-  - {MatrixInstruction: [16, 16, 32, 1, 1, 6, 16, 1, 4], DepthU: [32]}  # MT96x1024
+  - {MatrixInstruction: [16, 16, 32, 1, 1, 6, 16, 1, 4], DepthU: [32, 64]}  # MT96x1024
   - {MatrixInstruction: [16, 16, 32, 1, 1, 7, 1, 1, 4], DepthU: [32, 64, 128, 256]}  # MT112x64
   - {MatrixInstruction: [16, 16, 32, 1, 1, 7, 2, 1, 4], DepthU: [32, 64, 128, 256]}  # MT112x128
   - {MatrixInstruction: [16, 16, 32, 1, 1, 7, 3, 1, 4], DepthU: [32, 64, 128, 256]}  # MT112x192
@@ -3340,7 +3340,7 @@ MatrixInstructions:
 #   [32, 32, 32, 1, 1, 7, 4, 2, 2]  MT448x256  +2.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=262, sgprs=72
 #   [32, 32, 32, 1, 1, 13, 2, 2, 2]  MT832x128  +1.6%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=257, sgprs=82
 #   [32, 32, 32, 1, 1, 14, 2, 2, 2]  MT896x128  +7.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=276, sgprs=74
-#   [32, 32, 32, 1, 1, 4, 7, 1, 4]  MT128x896  +7.4%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=275, sgprs=76
+#   [32, 32, 32, 1, 1, 4, 7, 1, 4]  MT128x896  +3.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=264, sgprs=72
 #   [32, 32, 32, 1, 1, 14, 2, 1, 4]  MT448x256  +10.2%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=282, sgprs=72
 #   [32, 32, 32, 1, 1, 25, 1, 1, 4]  MT800x128  +11.3%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=285, sgprs=94
 #   [32, 32, 32, 1, 1, 26, 1, 1, 4]  MT832x128  +19.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=305, sgprs=82

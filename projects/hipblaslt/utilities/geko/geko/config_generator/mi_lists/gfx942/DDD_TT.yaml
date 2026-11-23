@@ -7,7 +7,7 @@
 
 Architecture: gfx942
 GemmType: DDD_TT
-Source: rocm-libraries 1a33436bd6, 2026-11-17
+Source: rocm-libraries 1a33436bd6, 2026-11-20
 DepthU: [8, 16, 32, 64, 128, 256]  # searched
 MatrixInstructions:
   - {MatrixInstruction: [16, 16, 4, 1, 1, 1, 1, 4, 1], DepthU: [16, 32, 64]}  # MT64x16

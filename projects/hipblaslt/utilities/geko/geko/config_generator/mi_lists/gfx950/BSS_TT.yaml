@@ -7,7 +7,7 @@
 
 Architecture: gfx950
 GemmType: BSS_TT
-Source: rocm-libraries 1a33436bd6, 2026-11-17
+Source: rocm-libraries 1a33436bd6, 2026-11-21
 DepthU: [32, 64, 128, 256, 512, 1024]  # searched
 MatrixInstructions:
   - {MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 4, 1], DepthU: [32, 64, 128, 256, 512]}  # MT64x16
@@ -1238,7 +1238,7 @@ MatrixInstructions:
 #   [16, 16, 32, 1, 1, 8, 14, 4, 1]  MT512x224  +15.0%  Kernel Uses 188416 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 9, 12, 4, 1]  MT576x192  +12.5%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=288, sgprs=72
 #   [16, 16, 32, 1, 1, 10, 11, 4, 1]  MT640x176  +0.3%  Kernel Uses 164352 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 11, 10, 4, 1]  MT704x160  +2.0%  Kernel Uses 167040 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 11, 10, 4, 1]  MT704x160  +1.5%  Kernel Uses 166272 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 12, 9, 4, 1]  MT768x144  +14.8%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=294, sgprs=72
 #   [16, 16, 32, 1, 1, 13, 8, 4, 1]  MT832x128  +5.9%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=271, sgprs=72
 #   [16, 16, 32, 1, 1, 14, 8, 4, 1]  MT896x128  +20.2%  Kernel Uses 196864 > 163840 bytes of LDS
@@ -1253,7 +1253,7 @@ MatrixInstructions:
 #   [16, 16, 32, 1, 1, 4, 23, 2, 2]  MT128x736  +16.4%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=298, sgprs=72
 #   [16, 16, 32, 1, 1, 4, 24, 2, 2]  MT128x768  +3.1%  overflowed resources.  errorCode=4, msg="Occupancy limit", vgprs=264, sgprs=72
 #   [16, 16, 32, 1, 1, 4, 25, 2, 2]  MT128x800  +24.4%  Kernel Uses 203776 > 163840 bytes of LDS
-#   [16, 16, 32, 1, 1, 4, 26, 2, 2]  MT128x832  +12.7%  Kernel Uses 184704 > 163840 bytes of LDS
+#   [16, 16, 32, 1, 1, 4, 26, 2, 2]  MT128x832  +12.5%  Kernel Uses 184320 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 4, 27, 2, 2]  MT128x864  +27.5%  Kernel Uses 208896 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 4, 28, 2, 2]  MT128x896  +20.2%  Kernel Uses 196992 > 163840 bytes of LDS
 #   [16, 16, 32, 1, 1, 4, 29, 2, 2]  MT128x928  +1.2%  Kernel Uses 165888 > 163840 bytes of LDS
