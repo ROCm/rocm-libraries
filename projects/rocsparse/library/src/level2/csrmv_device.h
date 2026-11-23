@@ -29,9 +29,8 @@
 
 namespace rocsparse
 {
-    // y = beta * y + sum_i gamma_i * z_i for one row. beta == 0 does not read y, so a NaN
-    // already there does not reach the result. The caller runs this in its own kernel, before
-    // any workgroup atomic-adds into the same row.
+    // y[row] = beta * y[row] + sum_i gamma_i * z_i[row]. beta == 0 does not read y, so a NaN
+    // already there does not reach the result.
     template <typename Y, typename Z, typename T>
     ROCSPARSE_DEVICE_ILF void csrmv_apply_beta_extras(Y*              y,
                                                       int64_t         row,
@@ -250,22 +249,8 @@ namespace rocsparse
         for(int64_t idx = gid; idx < required_threads; idx += stride)
         {
             const int64_t row = (idx < first_row) ? idx : last_row + (idx - first_row);
-
-            T sum = static_cast<T>(0);
-            if(beta != static_cast<T>(0))
-            {
-                sum = beta * static_cast<T>(y[row]);
-            }
-            for(rocsparse_int i = 0; i < num_extra; ++i)
-            {
-                T gamma = gamma_device_array[i];
-                if(gamma != static_cast<T>(0))
-                {
-                    sum = rocsparse::fma<T>(
-                        gamma, rocsparse::nontemporal_load(z_arrays[i] + row), sum);
-                }
-            }
-            y[row] = static_cast<Y>(sum);
+            rocsparse::csrmv_apply_beta_extras(
+                y, row, beta, num_extra, gamma_device_array, z_arrays);
         }
     }
 

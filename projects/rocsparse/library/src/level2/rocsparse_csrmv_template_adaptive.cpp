@@ -853,7 +853,7 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
 
         if(info->adaptive.first_row > 0 || info->adaptive.last_row < m)
         {
-            // Scale y by beta from rows [0, first_row) and [last_row, m)
+            // y = beta * y + sum_i gamma_i * z_i in the rows [0, first_row) and [last_row, m)
             J first_row        = info->adaptive.first_row;
             J last_row         = info->adaptive.last_row;
             J required_threads = (first_row - 0) + (m - last_row);
