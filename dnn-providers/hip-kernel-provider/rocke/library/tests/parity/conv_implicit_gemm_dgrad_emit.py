@@ -1242,6 +1242,8 @@ def _spec(idx: int):
 
     if 57 <= idx <= 66:
         return _tf32_spec(idx)
+    if 67 <= idx <= 70:
+        return _split_k_cshuffle_spec(idx)
 
     raise SystemExit(f"unknown config index {idx}")
 
@@ -1331,6 +1333,64 @@ def _tf32_spec(idx: int):
     }
     base.update(kw)
     return DgradConvSpec(**base), arch
+
+
+# Split-K with the cshuffle epilogue on gfx950 (the cached split-K form): the
+# staged tile is atomic-added into dX through the tilde address function, in
+# packed <2 x dtype> pairs for a 16-bit dX. 16x16x32 atom, 8-wide loads, K-outer
+# LDS. Keep in lockstep with make_cfg_split_k_cshuffle() in
+# conv_implicit_gemm_dgrad_emit.c.
+#   67: fp16, stride 2 (tilde sub-GEMMs), 32x128x64 tile, 2x4 warps, split_k=4,
+#       dX width 2 (one pair per thread per row run)
+#   68: bf16, stride 1, groups=2 (the group base in the dX address), compv3,
+#       split_k=2, dX width 2
+#   69: fp16, stride 1, 64x128x64 tile, 2x4 warps, split_k=8, dX width 8
+#       (four pairs per thread)
+#   70: fp16, split_k=2, dX width 1 (no packed pair): rejected by both engines
+def _split_k_cshuffle_spec(idx: int):
+    stride, groups, kw = {
+        67: (2, 1, dict(tile_m=32, tile_n=128, split_k=4)),
+        68: (
+            1,
+            2,
+            dict(data=ConvDataSpec("bf16", "bf16", "bf16"), pipeline="compv3"),
+        ),
+        69: (1, 1, dict(tile_n=128, split_k=8, vector_size_c=8)),
+        70: (1, 1, dict(vector_size_c=1)),
+    }[idx]
+    base = dict(
+        problem=_cp(
+            N=2,
+            Hi=16,
+            Wi=16,
+            C=64 * groups,
+            K=128 * groups,
+            Y=3,
+            X=3,
+            sH=stride,
+            sW=stride,
+            pH=1,
+            pW=1,
+            groups=groups,
+        ),
+        tile_m=64,
+        tile_n=64,
+        tile_k=64,
+        warp_m=2,
+        warp_n=4,
+        warp_tile_m=16,
+        warp_tile_n=16,
+        warp_tile_k=32,
+        pipeline="mem",
+        epilogue="cshuffle",
+        lds_k_outer=True,
+        vector_size_a=8,
+        vector_size_b=8,
+        vector_size_c=2,
+        split_k=2,
+    )
+    base.update(kw)
+    return DgradConvSpec(**base), "gfx950"
 
 
 def main() -> int:

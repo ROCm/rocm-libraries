@@ -6955,6 +6955,7 @@ namespace rocalution
         // S_ij = { 1   if i != j and -a_ij > eps * max(-a_ik) for k != i
         //        { 0   otherwise
         //
+        // where row i is scaled by -1 first if its diagonal is negative.
         // This means, S_ij is 1, only if i strongly depends on j.
         // S has been extended to also work with matrices that do not have
         // fully non-positive off-diagonal entries.
@@ -7011,16 +7012,19 @@ namespace rocalution
             ValueType cond = (sign ? max_a_ik : min_a_ik) * static_cast<ValueType>(eps);
 
             // Fill S
+            bool depends = false;
             for(PtrType j = row_begin; j < row_end; ++j)
             {
                 int       col = this->mat_.col[j];
                 ValueType val = this->mat_.val[j];
 
-                cast_S->vec_[j] = (col != i) && (val < cond);
+                cast_S->vec_[j] = (col != i) && (sign ? val > cond : val < cond);
+                depends         = depends || cast_S->vec_[j];
             }
 
-            // If cond is zero -> i is independent of other grid points
-            if(cond == static_cast<ValueType>(0))
+            // i is an F point from the start if it depends on no other point. cond can round
+            // to zero although i depends on other points.
+            if(!depends)
             {
                 cast_cf->vec_[i] = 2;
             }
@@ -7061,6 +7065,8 @@ namespace rocalution
         S_row_offset[0] = 0;
 
         // Split into C and F
+        // A point that depends on i is no F point yet, since it depends on some point. So
+        // lambda_i counts each such point once and starts below n, the number of buckets.
         std::vector<int> lambda(this->nrow_);
 
         for(int i = 0; i < this->nrow_; ++i)
@@ -7068,7 +7074,8 @@ namespace rocalution
             int temp = 0;
             for(PtrType j = S_row_offset[i]; j < S_row_offset[i + 1]; ++j)
             {
-                temp += (cast_cf->vec_[S_col[j]] == 0 ? 1 : 2);
+                assert(cast_cf->vec_[S_col[j]] == 0);
+                ++temp;
             }
 
             lambda[i] = temp;
@@ -7288,7 +7295,6 @@ namespace rocalution
 
             if(global == true)
             {
-                // COVERAGE_EXCL_NO_MPI_START
                 PtrType gst_row_begin = cast_gst->mat_.row_offset[i];
                 PtrType gst_row_end   = cast_gst->mat_.row_offset[i + 1];
 
@@ -7299,7 +7305,6 @@ namespace rocalution
                     min_a_ik = (min_a_ik < val) ? min_a_ik : val;
                     max_a_ik = (max_a_ik > val) ? max_a_ik : val;
                 }
-                // COVERAGE_EXCL_NO_MPI_STOP
             }
 
             // Threshold to check for strength of connection
@@ -7311,7 +7316,7 @@ namespace rocalution
                 int       col = this->mat_.col[j];
                 ValueType val = this->mat_.val[j];
 
-                if(col != i && val < cond)
+                if(col != i && (sign ? val > cond : val < cond))
                 {
                     // col is strongly connected to i
                     cast_S->vec_[j] = true;
@@ -7330,7 +7335,6 @@ namespace rocalution
 
             if(global == true)
             {
-                // COVERAGE_EXCL_NO_MPI_START
                 PtrType gst_row_begin = cast_gst->mat_.row_offset[i];
                 PtrType gst_row_end   = cast_gst->mat_.row_offset[i + 1];
 
@@ -7339,7 +7343,7 @@ namespace rocalution
                     int       col = cast_gst->mat_.col[j];
                     ValueType val = cast_gst->mat_.val[j];
 
-                    if(val < cond)
+                    if(sign ? val > cond : val < cond)
                     {
                         // col is strongly connected to i
                         cast_S->vec_[j + this->nnz_] = true;
@@ -7355,7 +7359,6 @@ namespace rocalution
                         cast_w->vec_[col + this->nrow_] += 1.0f;
                     }
                 }
-                // COVERAGE_EXCL_NO_MPI_STOP
             }
         }
 
@@ -10333,9 +10336,10 @@ namespace rocalution
             cast_G->vec_[i] = -2;
         }
 
-        int      Usize    = 0;
-        PtrType* ind_diag = NULL;
-        allocate_host(this->nrow_, &ind_diag);
+        int Usize = 0;
+
+        // A row without diagonal counts as a zero diagonal
+        std::vector<ValueType> diag(this->nrow_, static_cast<ValueType>(0));
 
         // Build U
         for(int i = 0; i < this->nrow_; ++i)
@@ -10350,13 +10354,13 @@ namespace rocalution
                 }
                 else
                 {
-                    ind_diag[i] = j;
+                    diag[i] = this->mat_.val[j];
                 }
             }
 
             sum *= static_cast<ValueType>(5);
 
-            if(this->mat_.val[ind_diag[i]] > sum)
+            if(diag[i] > sum)
             {
                 cast_G->vec_[i] = -1;
                 ++Usize;
@@ -10400,7 +10404,7 @@ namespace rocalution
             ValueType max_a_ij = static_cast<ValueType>(0);
             PtrType   min_j    = -1;
             bool      neg      = false;
-            if(this->mat_.val[ind_diag[i]] < static_cast<ValueType>(0))
+            if(diag[i] < static_cast<ValueType>(0))
             {
                 neg = true;
             }
@@ -10464,8 +10468,6 @@ namespace rocalution
 
             ++nc;
         }
-
-        free_host(&ind_diag);
 
         return true;
     }
@@ -10551,9 +10553,10 @@ namespace rocalution
             cast_G->vec_[i] = -2;
         }
 
-        int      Usize    = 0;
-        PtrType* ind_diag = NULL;
-        allocate_host(this->nrow_, &ind_diag);
+        int Usize = 0;
+
+        // A row without diagonal counts as a zero diagonal
+        std::vector<ValueType> diag(this->nrow_, static_cast<ValueType>(0));
 
         // Build U
         for(int i = 0; i < this->nrow_; ++i)
@@ -10568,7 +10571,7 @@ namespace rocalution
                 }
                 else
                 {
-                    ind_diag[i] = j;
+                    diag[i] = this->mat_.val[j];
                 }
             }
 
@@ -10583,7 +10586,7 @@ namespace rocalution
 
             sum *= static_cast<ValueType>(5);
 
-            if(this->mat_.val[ind_diag[i]] > sum)
+            if(diag[i] > sum)
             {
                 cast_G->vec_[i] = -1;
                 ++Usize;
@@ -10627,7 +10630,7 @@ namespace rocalution
             ValueType max_a_ij = static_cast<ValueType>(0);
             int       min_j    = -1;
             bool      neg      = false;
-            if(this->mat_.val[ind_diag[i]] < static_cast<ValueType>(0))
+            if(diag[i] < static_cast<ValueType>(0))
             {
                 neg = true;
             }
@@ -10729,8 +10732,6 @@ namespace rocalution
 
             ++nc;
         }
-
-        free_host(&ind_diag);
 
         return true;
     }
@@ -11416,106 +11417,101 @@ namespace rocalution
     {
         assert(vec.GetSize() == this->nrow_);
 
-        if(this->nnz_ > 0)
-        {
-            const HostVector<ValueType>* cast_vec
-                = dynamic_cast<const HostVector<ValueType>*>(&vec);
-            assert(cast_vec != NULL);
+        const HostVector<ValueType>* cast_vec = dynamic_cast<const HostVector<ValueType>*>(&vec);
+        assert(cast_vec != NULL);
 
-            PtrType*   row_offset = NULL;
-            int*       col        = NULL;
-            ValueType* val        = NULL;
+        PtrType*   row_offset = NULL;
+        int*       col        = NULL;
+        ValueType* val        = NULL;
 
-            int nrow = this->nrow_;
-            int ncol = this->ncol_;
+        int nrow = this->nrow_;
+        int ncol = this->ncol_;
 
-            allocate_host(nrow + 1, &row_offset);
-            row_offset[0] = 0;
+        allocate_host(nrow + 1, &row_offset);
+        row_offset[0] = 0;
 
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-            for(int i = 0; i < nrow; ++i)
+        for(int i = 0; i < nrow; ++i)
+        {
+            bool add = true;
+
+            row_offset[i + 1] = this->mat_.row_offset[i + 1] - this->mat_.row_offset[i];
+
+            for(PtrType j = this->mat_.row_offset[i]; j < this->mat_.row_offset[i + 1]; ++j)
             {
-                bool add = true;
-
-                row_offset[i + 1] = this->mat_.row_offset[i + 1] - this->mat_.row_offset[i];
-
-                for(PtrType j = this->mat_.row_offset[i]; j < this->mat_.row_offset[i + 1]; ++j)
+                if(this->mat_.col[j] == idx)
                 {
-                    if(this->mat_.col[j] == idx)
-                    {
-                        add = false;
-                        break;
-                    }
-                }
-
-                if(add == true && cast_vec->vec_[i] != static_cast<ValueType>(0))
-                {
-                    ++row_offset[i + 1];
-                }
-
-                if(add == false && cast_vec->vec_[i] == static_cast<ValueType>(0))
-                {
-                    --row_offset[i + 1];
+                    add = false;
+                    break;
                 }
             }
 
-            for(int i = 0; i < nrow; ++i)
+            if(add == true && cast_vec->vec_[i] != static_cast<ValueType>(0))
             {
-                row_offset[i + 1] += row_offset[i];
+                ++row_offset[i + 1];
             }
 
-            PtrType nnz = row_offset[nrow];
+            if(add == false && cast_vec->vec_[i] == static_cast<ValueType>(0))
+            {
+                --row_offset[i + 1];
+            }
+        }
 
-            allocate_host(nnz, &col);
-            allocate_host(nnz, &val);
+        for(int i = 0; i < nrow; ++i)
+        {
+            row_offset[i + 1] += row_offset[i];
+        }
+
+        PtrType nnz = row_offset[nrow];
+
+        allocate_host(nnz, &col);
+        allocate_host(nnz, &val);
 
 // Fill new CSR matrix
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-            for(int i = 0; i < nrow; ++i)
+        for(int i = 0; i < nrow; ++i)
+        {
+            PtrType k = row_offset[i];
+            PtrType j = this->mat_.row_offset[i];
+
+            for(; j < this->mat_.row_offset[i + 1]; ++j)
             {
-                PtrType k = row_offset[i];
-                PtrType j = this->mat_.row_offset[i];
-
-                for(; j < this->mat_.row_offset[i + 1]; ++j)
+                if(this->mat_.col[j] < idx)
                 {
-                    if(this->mat_.col[j] < idx)
-                    {
-                        col[k] = this->mat_.col[j];
-                        val[k] = this->mat_.val[j];
-                        ++k;
-                    }
-                    else
-                    {
-                        break;
-                    }
-                }
-
-                if(cast_vec->vec_[i] != static_cast<ValueType>(0))
-                {
-                    col[k] = idx;
-                    val[k] = cast_vec->vec_[i];
+                    col[k] = this->mat_.col[j];
+                    val[k] = this->mat_.val[j];
                     ++k;
-                    ++j;
                 }
-
-                for(; j < this->mat_.row_offset[i + 1]; ++j)
+                else
                 {
-                    if(this->mat_.col[j] > idx)
-                    {
-                        col[k] = this->mat_.col[j];
-                        val[k] = this->mat_.val[j];
-                        ++k;
-                    }
+                    break;
                 }
             }
 
-            this->Clear();
-            this->SetDataPtrCSR(&row_offset, &col, &val, row_offset[nrow], nrow, ncol);
+            if(cast_vec->vec_[i] != static_cast<ValueType>(0))
+            {
+                col[k] = idx;
+                val[k] = cast_vec->vec_[i];
+                ++k;
+            }
+
+            for(; j < this->mat_.row_offset[i + 1]; ++j)
+            {
+                if(this->mat_.col[j] > idx)
+                {
+                    col[k] = this->mat_.col[j];
+                    val[k] = this->mat_.val[j];
+                    ++k;
+                }
+            }
         }
+
+        this->Clear();
+        this->SetDataPtrCSR(&row_offset, &col, &val, row_offset[nrow], nrow, ncol);
 
         return true;
     }
@@ -11526,29 +11522,25 @@ namespace rocalution
         assert(vec != NULL);
         assert(vec->GetSize() == this->nrow_);
 
-        if(this->nnz_ > 0)
-        {
-            HostVector<ValueType>* cast_vec = dynamic_cast<HostVector<ValueType>*>(vec);
-            assert(cast_vec != NULL);
+        HostVector<ValueType>* cast_vec = dynamic_cast<HostVector<ValueType>*>(vec);
+        assert(cast_vec != NULL);
 
-            _set_omp_backend_threads(this->local_backend_, this->nrow_);
+        _set_omp_backend_threads(this->local_backend_, this->nrow_);
 
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-            for(int ai = 0; ai < this->nrow_; ++ai)
-            {
-                // Initialize with zero
-                cast_vec->vec_[ai] = static_cast<ValueType>(0);
+        for(int ai = 0; ai < this->nrow_; ++ai)
+        {
+            // Initialize with zero
+            cast_vec->vec_[ai] = static_cast<ValueType>(0);
 
-                for(PtrType aj = this->mat_.row_offset[ai]; aj < this->mat_.row_offset[ai + 1];
-                    ++aj)
+            for(PtrType aj = this->mat_.row_offset[ai]; aj < this->mat_.row_offset[ai + 1]; ++aj)
+            {
+                if(idx == this->mat_.col[aj])
                 {
-                    if(idx == this->mat_.col[aj])
-                    {
-                        cast_vec->vec_[ai] = this->mat_.val[aj];
-                        break;
-                    }
+                    cast_vec->vec_[ai] = this->mat_.val[aj];
+                    break;
                 }
             }
         }
@@ -11561,105 +11553,101 @@ namespace rocalution
     {
         assert(vec.GetSize() == this->ncol_);
 
-        if(this->nnz_ > 0)
+        const HostVector<ValueType>* cast_vec = dynamic_cast<const HostVector<ValueType>*>(&vec);
+        assert(cast_vec != NULL);
+
+        PtrType*   row_offset = NULL;
+        int*       col        = NULL;
+        ValueType* val        = NULL;
+
+        int nrow = this->nrow_;
+        int ncol = this->ncol_;
+
+        allocate_host(nrow + 1, &row_offset);
+        row_offset[0] = 0;
+
+        // Compute nnz of row idx
+        int nnz_idx = 0;
+
+        for(int i = 0; i < ncol; ++i)
         {
-            const HostVector<ValueType>* cast_vec
-                = dynamic_cast<const HostVector<ValueType>*>(&vec);
-            assert(cast_vec != NULL);
-
-            PtrType*   row_offset = NULL;
-            int*       col        = NULL;
-            ValueType* val        = NULL;
-
-            int nrow = this->nrow_;
-            int ncol = this->ncol_;
-
-            allocate_host(nrow + 1, &row_offset);
-            row_offset[0] = 0;
-
-            // Compute nnz of row idx
-            int nnz_idx = 0;
-
-            for(int i = 0; i < ncol; ++i)
+            if(cast_vec->vec_[i] != static_cast<ValueType>(0))
             {
-                if(cast_vec->vec_[i] != static_cast<ValueType>(0))
-                {
-                    ++nnz_idx;
-                }
+                ++nnz_idx;
             }
+        }
 
-            // Fill row_offset
-            PtrType shift = nnz_idx - this->mat_.row_offset[idx + 1] + this->mat_.row_offset[idx];
+        // Fill row_offset
+        PtrType shift = nnz_idx - this->mat_.row_offset[idx + 1] + this->mat_.row_offset[idx];
 
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-            for(int i = 0; i < nrow + 1; ++i)
+        for(int i = 0; i < nrow + 1; ++i)
+        {
+            if(i < idx + 1)
             {
-                if(i < idx + 1)
-                {
-                    row_offset[i] = this->mat_.row_offset[i];
-                }
-                else
-                {
-                    row_offset[i] = this->mat_.row_offset[i] + shift;
-                }
+                row_offset[i] = this->mat_.row_offset[i];
             }
+            else
+            {
+                row_offset[i] = this->mat_.row_offset[i] + shift;
+            }
+        }
 
-            PtrType nnz = row_offset[nrow];
+        PtrType nnz = row_offset[nrow];
 
-            // Fill col and val
-            allocate_host(nnz, &col);
-            allocate_host(nnz, &val);
+        // Fill col and val
+        allocate_host(nnz, &col);
+        allocate_host(nnz, &val);
 
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-            for(int i = 0; i < nrow; ++i)
+        for(int i = 0; i < nrow; ++i)
+        {
+            // Rows before idx
+            if(i < idx)
             {
-                // Rows before idx
-                if(i < idx)
+                for(PtrType j = row_offset[i]; j < row_offset[i + 1]; ++j)
                 {
-                    for(PtrType j = row_offset[i]; j < row_offset[i + 1]; ++j)
-                    {
-                        col[j] = this->mat_.col[j];
-                        val[j] = this->mat_.val[j];
-                    }
-
-                    // Row == idx
+                    col[j] = this->mat_.col[j];
+                    val[j] = this->mat_.val[j];
                 }
-                else if(i == idx)
+
+                // Row == idx
+            }
+            else if(i == idx)
+            {
+                PtrType k = row_offset[i];
+
+                for(int j = 0; j < ncol; ++j)
                 {
-                    PtrType k = row_offset[i];
-
-                    for(int j = 0; j < ncol; ++j)
+                    if(cast_vec->vec_[j] != static_cast<ValueType>(0))
                     {
-                        if(cast_vec->vec_[j] != static_cast<ValueType>(0))
-                        {
-                            col[k] = j;
-                            val[k] = cast_vec->vec_[j];
-                            ++k;
-                        }
-                    }
-
-                    // Rows after idx
-                }
-                else if(i > idx)
-                {
-                    PtrType k = row_offset[i];
-
-                    for(PtrType j = this->mat_.row_offset[i]; j < this->mat_.row_offset[i + 1]; ++j)
-                    {
-                        col[k] = this->mat_.col[j];
-                        val[k] = this->mat_.val[j];
+                        col[k] = j;
+                        val[k] = cast_vec->vec_[j];
                         ++k;
                     }
                 }
-            }
 
-            this->Clear();
-            this->SetDataPtrCSR(&row_offset, &col, &val, nnz, nrow, ncol);
+                // Rows after idx
+            }
+            else if(i > idx)
+            {
+                PtrType k = row_offset[i];
+
+                for(PtrType j = this->mat_.row_offset[i]; j < this->mat_.row_offset[i + 1]; ++j)
+                {
+                    col[k] = this->mat_.col[j];
+                    val[k] = this->mat_.val[j];
+                    ++k;
+                }
+            }
         }
+
+        this->Clear();
+        this->SetDataPtrCSR(&row_offset, &col, &val, nnz, nrow, ncol);
 
         return true;
     }
@@ -11670,19 +11658,16 @@ namespace rocalution
         assert(vec != NULL);
         assert(vec->GetSize() == this->ncol_);
 
-        if(this->nnz_ > 0)
+        HostVector<ValueType>* cast_vec = dynamic_cast<HostVector<ValueType>*>(vec);
+        assert(cast_vec != NULL);
+
+        _set_omp_backend_threads(this->local_backend_, this->nrow_);
+
+        cast_vec->Zeros();
+
+        for(PtrType aj = this->mat_.row_offset[idx]; aj < this->mat_.row_offset[idx + 1]; ++aj)
         {
-            HostVector<ValueType>* cast_vec = dynamic_cast<HostVector<ValueType>*>(vec);
-            assert(cast_vec != NULL);
-
-            _set_omp_backend_threads(this->local_backend_, this->nrow_);
-
-            cast_vec->Zeros();
-
-            for(PtrType aj = this->mat_.row_offset[idx]; aj < this->mat_.row_offset[idx + 1]; ++aj)
-            {
-                cast_vec->vec_[this->mat_.col[aj]] = this->mat_.val[aj];
-            }
+            cast_vec->vec_[this->mat_.col[aj]] = this->mat_.val[aj];
         }
 
         return true;

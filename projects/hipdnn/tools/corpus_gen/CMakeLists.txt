@@ -50,6 +50,7 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
             "share_not_a_number|--without-engine,--operations,.,--sweep-share,x|1|--sweep-share needs a number"
             "count_empty|--without-engine,--operations,.,--count,{empty}|1|--count needs a number, not ''"
             "ceiling_zero|--without-engine,--operations,.,--ceiling,0|1|--ceiling needs a number of at least 1, not '0'"
+            "form_floor_negative|--without-engine,--operations,.,--form-floor,-1|1|--form-floor needs a number of at least 0"
             "restarts_zero|--without-engine,--operations,.,--restarts,0|1|--restarts needs a number of at least 1"
             "share_negative|--without-engine,--operations,.,--model-share,-0.5|1|--model-share needs a number of at least 0"
             "seed_negative|--without-engine,--operations,.,--seed,-1|1|--seed needs a number of at least 0"
@@ -63,8 +64,8 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
         set(_model_shapes "${CMAKE_CURRENT_BINARY_DIR}/model_shapes.csv")
         file(WRITE "${_model_shapes}"
              "name,q.batch,q.heads,q.heads_kv,q.seqlen_q,q.seqlen_k,q.head_dim,q.is_causal,"
-             "q.alignment,q.generate_stats,q.dtype\n"
-             "llama3-70b prefill,1,64,8,4096,4096,128,true,top_left,false,bf16\n")
+             "q.alignment,q.generate_stats,q.dtype,q.form\n"
+             "llama3-70b prefill,1,64,8,4096,4096,128,true,top_left,false,bf16,plain\n")
         foreach(_run IN ITEMS
                 "without_engine|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,4|0|4"
                 # No --operations: the declarations staged beside the tool.
@@ -72,6 +73,16 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
                 "empty|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,4,--keep,q.M=-7|2|0"
                 # With quotas and no --count, the corpus is the quotas alone.
                 "regime_quota|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-quota,decode_short_mha=3|0|3"
+                # One form axis of eight labels: one graph under each, and nothing else. Each
+                # label is a value of the manifest's own `form` column and a reported quota.
+                "form_floor|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--form-floor,1|0|8|plain,scale_unset,scale_tensor,dropout,padded,ragged,bias,sink"
+                # The backward declares six of them: no sink token, and no ragged form.
+                "form_floor_sdpa_bwd|--without-engine,--operations,${_operations_dir},--operation,sdpa_bwd,--form-floor,1|0|6|plain,scale_unset,scale_tensor,dropout,padded,bias"
+                # Both floors at once, narrowed to one form so that the six regimes the constraints
+                # exclude and the seven other forms are short: one graph fills a regime's floor
+                # and the form's, so `requested` is the graphs plus the larger of the two
+                # shortfalls (CorpusGenRun.cmake), not the floors' sum.
+                "regime_and_form_floor|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-floor,1,--form-floor,1,--keep,q.form=padded|0|18|padded"
                 # A sweep with no share still delivers the regimes the quotas name.
                 "regime_quota_without_sweep|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-quota,decode_short_mha=3,--sweep-share,0|0|3"
                 "model_shapes|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--model-shapes,${_model_shapes},--count,1,--model-share,1,--sweep-share,0|0|1"
@@ -83,11 +94,16 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
             list(GET _fields 1 _args)
             list(GET _fields 2 _exit)
             list(GET _fields 3 _graphs)
+            list(LENGTH _fields _field_count)
+            set(_forms "")
+            if(_field_count GREATER 4)
+                list(GET _fields 4 _forms)
+            endif()
             set(_test hipdnn_corpus_gen_cli_run_${_name})
             add_test(NAME ${_test}
                 COMMAND ${CMAKE_COMMAND} "-DTOOL=$<TARGET_FILE:hipdnn_corpus_gen_tool>"
                         "-DCLI_ARGS=${_args}" "-DEXPECTED_EXIT=${_exit}"
-                        "-DEXPECTED_GRAPHS=${_graphs}"
+                        "-DEXPECTED_GRAPHS=${_graphs}" "-DEXPECTED_FORMS=${_forms}"
                         "-DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/${_test}"
                         -P "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/CorpusGenRun.cmake")
             set_tests_properties(${_test} PROPERTIES TIMEOUT 120)
