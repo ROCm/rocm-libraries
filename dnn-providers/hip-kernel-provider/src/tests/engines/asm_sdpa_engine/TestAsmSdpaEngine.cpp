@@ -317,12 +317,14 @@ TEST(TestAsmSdpaEngineDeclaration, TheSelectorRevisionNamesTheKernelSurfaceAndNo
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 /// A shipped model that records another revision is refused at load and the engine reports
-/// no estimate, silently; this is where that fails the build.
+/// no estimate, silently; one declared for an architecture other than the one it ships for
+/// answers devices it was never measured on. This is where either fails the build.
 TEST(TestAsmSdpaEngineDeclaration, ShippedL1ModelsRecordTheRevisionThisBuildComputes)
 {
     EXPECT_TRUE(hip_kernel_provider::shipped_model_gate::shippedL1ModelsBindThisBuild(
         AsmSdpaEngine::engineName(),
-        "asm_sdpa",
+        "dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/"
+        "AsmSdpaSelectorRevision.cmake",
         shipped_models::MODELS,
         HKP_SELECTOR_DUMP_DIR,
         AsmSdpaEngine::L1_MODEL_IDS,

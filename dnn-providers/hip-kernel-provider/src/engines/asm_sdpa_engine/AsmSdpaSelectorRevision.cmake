@@ -13,6 +13,27 @@ include("${CMAKE_CURRENT_LIST_DIR}/../../../cmake/HkpSourceDigest.cmake")
 # inputs: a missing input lets a stale model silently pick the wrong engine; an extra one
 # expires models for unrelated changes.
 #
+# Retraining. Any edit to an input, a comment or a clang-tidy fix included, moves the
+# revision and expires both shipped models (descriptors/predict_engine/<arch>/): the loader
+# refuses them, and ShippedL1ModelsRecordTheRevisionThisBuildComputes in
+# src/tests/engines/asm_sdpa_engine/TestAsmSdpaEngine.cpp fails the build. The change that
+# moves the revision retrains both, with the hipDNN UHD pipeline, for each of gfx942
+# (MI300X) and gfx950 (MI355X):
+#   1. Measure at the new revision: collect a corpus of ASM_SDPA_ENGINE on that SKU
+#      (uhd-collect), or carry the previous revision's rows forward (uhd-dataset-carry-
+#      forward) where re-measured graphs show the change moved no timing.
+#   2. Train with role predict_engine, metric tflops and the architecture's id from
+#      AsmSdpaEngine::L1_MODEL_IDS (uhd-generate; locally, `uhd_gen generate ... --uhd-id
+#      <id>`), so the compiled-in id still binds, then validate it on that SKU
+#      (uhd-validate).
+#   3. Apply the model's packet, which writes asm_sdpa_engine_tflops.uhd.json and .bin
+#      under descriptors/predict_engine/<arch>/.
+# A change that provably leaves every kernel choice alone (a file moved, or an input added
+# that is byte-identical at the commit the models were trained at) may instead relabel
+# both models' trained_against.selector_revision, with that proof in the commit message.
+# The selector dumps of the two commits (HkpSelectorManifest.cmake) name the inputs that
+# changed.
+#
 # CONFIGURE_DEPENDS makes every input a configure dependency so an edit or a new kernel
 # reconfigures. Test fixture trees omit it: they are rewritten on each configure.
 # MANIFEST writes the selector dump of these inputs (HkpSourceDigest.cmake).

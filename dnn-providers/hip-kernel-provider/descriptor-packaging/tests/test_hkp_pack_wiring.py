@@ -193,6 +193,77 @@ def test_a_root_wired_without_enable_rocke_fails_configure(consumer):
     assert "was wired without ENABLE_ROCKE" in diagnostic
 
 
+_STAGED = "eng/predict_engine/gfx942/m.bin"
+
+
+def _stage(source):
+    """STAGE_FILES for one pair: the consumer's m.bin, under _STAGED in the packed tree."""
+    return f'STAGE_FILES "{source}/m.bin" {_STAGED}'
+
+
+def test_a_staged_file_lands_in_the_packed_tree_and_follows_its_source(consumer):
+    """A STAGE_FILES pair is copied into OUT_ROOT by the pack command itself, after the
+    packer (which wipes the tree) has run, so it ships beside what was packed. Its source
+    is an input: editing it copies it again on the next build."""
+    (consumer.source / "m.bin").write_bytes(b"first model")
+    consumer.wire("ENABLE_ROCKE OFF " + _stage("${CMAKE_CURRENT_SOURCE_DIR}"))
+    consumer.configure()
+    consumer.build()
+
+    staged = consumer.build_dir / "off" / _STAGED
+    assert staged.read_bytes() == b"first model"
+    assert (consumer.build_dir / "off" / "invocation.json").is_file()
+
+    (consumer.source / "m.bin").write_bytes(b"second model")
+    consumer.build()
+    assert staged.read_bytes() == b"second model"
+
+
+def test_a_dropped_stage_pair_repacks_and_leaves_its_file_out(consumer):
+    """Dropping a pair changes the pack's input manifest, which forces a repack; the
+    repack wipes OUT_ROOT, so the file is gone rather than left behind from before."""
+    (consumer.source / "m.bin").write_bytes(b"model")
+    consumer.wire("ENABLE_ROCKE OFF " + _stage("${CMAKE_CURRENT_SOURCE_DIR}"))
+    consumer.configure()
+    consumer.build()
+    staged = consumer.build_dir / "off" / _STAGED
+    assert staged.is_file()
+
+    consumer.wire("ENABLE_ROCKE OFF")
+    consumer.configure()
+    consumer.build()
+    assert not staged.exists()
+    assert (consumer.build_dir / "off" / "invocation.json").is_file()
+
+
+@pytest.mark.parametrize(
+    ("stage_files", "diagnostic"),
+    [
+        (
+            'STAGE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/m.bin"',
+            "has an odd STAGE_FILES list",
+        ),
+        (
+            'STAGE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/m.bin" ../m.bin',
+            "which is not a path inside OUT_ROOT",
+        ),
+        (
+            'STAGE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/m.bin" /rooted/m.bin',
+            "which is not a path inside OUT_ROOT",
+        ),
+    ],
+    ids=["odd-list", "climbs-out", "rooted"],
+)
+def test_a_stage_pair_that_cannot_land_inside_the_tree_fails_configure(
+    consumer, stage_files, diagnostic
+):
+    """A pair missing its destination, or one that would write outside OUT_ROOT, is a
+    configure error rather than a file that silently never ships."""
+    (consumer.source / "m.bin").write_bytes(b"model")
+    consumer.wire(f"ENABLE_ROCKE OFF {stage_files}")
+    assert diagnostic in consumer.configure(success=False)
+
+
 def _collected_ids(command, *, drop_marker=False):
     """The test ids a registered pytest command selects, listed rather than run."""
     argv = [a for a in command if a != "-v"]

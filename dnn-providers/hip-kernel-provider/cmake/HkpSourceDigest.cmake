@@ -13,10 +13,10 @@ include_guard(GLOBAL)
 # digest does not depend on GLOB order. Text is hashed with LF line endings, so CRLF and LF
 # checkouts of one commit agree; a code object (.co) is bytes, which git never converts.
 #
-# MANIFEST writes the selector dump `uhd_gen restamp` reads: the engine's name, its full
-# revision (<prefix><digest>), and each input's relative path and hash exactly as hashed
-# here. Two dumps of one engine differ by the inputs that changed, which is what tells a
-# restamp whether a recorded model can still be trusted.
+# MANIFEST writes the selector dump: the engine's name, its full revision
+# (<prefix><digest>), and each input's relative path and hash exactly as hashed here. Two
+# dumps of one engine differ by the inputs that changed, which is what tells whether a
+# recorded model can still describe the build.
 function(hkp_source_digest _out_digest _base_dir)
     cmake_parse_arguments(PARSE_ARGV 2 _arg "" "MANIFEST;ENGINE;PREFIX" "")
     set(_inputs ${_arg_UNPARSED_ARGUMENTS})

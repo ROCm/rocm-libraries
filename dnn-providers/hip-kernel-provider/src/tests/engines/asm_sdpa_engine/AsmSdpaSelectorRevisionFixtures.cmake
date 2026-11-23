@@ -11,6 +11,11 @@
 # the engine tree, and the revision after each probe edit. Run by a build step whose
 # dependencies are the engine's files, not at configure time: it copies the tree twice and
 # runs the recipe once per probe, each run hashing every kernel.
+
+# A -P script starts with every policy unset; without this CMP0053 is OLD, the @ escape
+# below does nothing, and every run warns.
+cmake_minimum_required(VERSION 3.25.2)
+
 foreach(_required ENGINE_DIR WORK_DIR OUTPUT)
     if(NOT ${_required})
         message(FATAL_ERROR "AsmSdpaSelectorRevisionFixtures: -D${_required}=... is required.")
