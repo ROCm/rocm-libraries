@@ -25,7 +25,7 @@
 // rocsparse_sparse_to_sparse: formats outside the dispatch table (SELL and beyond) are
 // rejected before it is indexed, intermediate CSR arrays are sized with the index types
 // stored on that descriptor and oversized counts are rejected before any allocation,
-// a null target value array is a structural conversion when the route supports it, and
+// a null target value array is a symbolic conversion when the route supports it, and
 // an empty conversion can be captured.
 
 #include "unit_test_device_conv_common.hpp"
@@ -46,13 +46,10 @@ using namespace convut;
 
 namespace
 {
-    using ConvS2s = ConvTest;
+    using ConvS2sControl = ConvTest;
 
     constexpr auto st_ni   = rocsparse_status_not_implemented;
-    constexpr auto idx32   = i32;
     constexpr auto idx64   = rocsparse_indextype_i64;
-    constexpr auto base    = base0;
-    constexpr auto f32_r   = f32;
     constexpr auto f64_c   = rocsparse_datatype_f64_c;
     constexpr auto alg     = rocsparse_sparse_to_sparse_alg_default;
     constexpr auto stage_a = rocsparse_sparse_to_sparse_stage_analysis;
@@ -75,7 +72,7 @@ namespace
     static_assert(k_formats[6] == rocsparse_format_bsr);
     static_assert(k_formats[7] == rocsparse_format_sell);
 
-    const char* fmt_name(rocsparse_format format)
+    const char* format_name(rocsparse_format format)
     {
         switch(format)
         {
@@ -402,9 +399,9 @@ namespace
                                                  mat->a.get(),
                                                  mat->b.get(),
                                                  mat->c.get(),
-                                                 idx32,
-                                                 base,
-                                                 f32_r),
+                                                 i32,
+                                                 base0,
+                                                 f32),
                       st_ok);
             break;
         }
@@ -416,7 +413,7 @@ namespace
                 upload_f(mat->b.get(), {2.f});
             });
             EXPECT_EQ(rocsparse_create_coo_aos_descr(
-                          &mat->descr, 1, 1, 1, mat->a.get(), mat->b.get(), idx32, base, f32_r),
+                          &mat->descr, 1, 1, 1, mat->a.get(), mat->b.get(), i32, base0, f32),
                       st_ok);
             break;
         }
@@ -435,10 +432,10 @@ namespace
                                                  mat->a.get(),
                                                  mat->b.get(),
                                                  mat->c.get(),
-                                                 idx32,
-                                                 idx32,
-                                                 base,
-                                                 f32_r),
+                                                 i32,
+                                                 i32,
+                                                 base0,
+                                                 f32),
                       st_ok);
             break;
         }
@@ -457,10 +454,10 @@ namespace
                                                  mat->a.get(),
                                                  mat->b.get(),
                                                  mat->c.get(),
-                                                 idx32,
-                                                 idx32,
-                                                 base,
-                                                 f32_r),
+                                                 i32,
+                                                 i32,
+                                                 base0,
+                                                 f32),
                       st_ok);
             break;
         }
@@ -472,7 +469,7 @@ namespace
                 upload_f(mat->b.get(), {2.f});
             });
             EXPECT_EQ(rocsparse_create_ell_descr(
-                          &mat->descr, 1, 1, mat->a.get(), mat->b.get(), 1, idx32, base, f32_r),
+                          &mat->descr, 1, 1, mat->a.get(), mat->b.get(), 1, i32, base0, f32),
                       st_ok);
             break;
         }
@@ -493,10 +490,10 @@ namespace
                                                  mat->a.get(),
                                                  mat->b.get(),
                                                  mat->c.get(),
-                                                 idx32,
-                                                 idx32,
-                                                 base,
-                                                 f32_r),
+                                                 i32,
+                                                 i32,
+                                                 base0,
+                                                 f32),
                       st_ok);
             break;
         }
@@ -509,7 +506,7 @@ namespace
             });
             EXPECT_EQ(
                 rocsparse_create_bell_descr(
-                    &mat->descr, 1, 1, dir_r, 1, 1, mat->a.get(), mat->b.get(), idx32, base, f32_r),
+                    &mat->descr, 1, 1, dir_r, 1, 1, mat->a.get(), mat->b.get(), i32, base0, f32),
                 st_ok);
             break;
         }
@@ -530,10 +527,10 @@ namespace
                                                   mat->a.get(),
                                                   mat->b.get(),
                                                   mat->c.get(),
-                                                  idx32,
-                                                  idx32,
-                                                  base,
-                                                  f32_r),
+                                                  i32,
+                                                  i32,
+                                                  base0,
+                                                  f32),
                       st_ok);
             break;
         }
@@ -589,7 +586,7 @@ namespace
         {
             // One row stores ell_width columns; this matrix's width is 1.
             EXPECT_EQ(nnz, 1) << label;
-            const auto col = download_idx(mat.a.get(), idx32, 1);
+            const auto col = download_idx(mat.a.get(), i32, 1);
             const auto val = download_f(mat.b.get(), 1);
             ASSERT_EQ(col.size(), 1u);
             EXPECT_EQ(col[0], 0) << label;
@@ -599,8 +596,8 @@ namespace
         EXPECT_EQ(nnz, 1) << label;
         if(mat.format == rocsparse_format_coo)
         {
-            const auto row = download_idx(mat.a.get(), idx32, 1);
-            const auto col = download_idx(mat.b.get(), idx32, 1);
+            const auto row = download_idx(mat.a.get(), i32, 1);
+            const auto col = download_idx(mat.b.get(), i32, 1);
             const auto val = download_f(mat.c.get(), 1);
             EXPECT_EQ(row[0], 0) << label;
             EXPECT_EQ(col[0], 0) << label;
@@ -608,7 +605,7 @@ namespace
         }
         else if(mat.format == rocsparse_format_coo_aos)
         {
-            const auto ind = download_idx(mat.a.get(), idx32, 2);
+            const auto ind = download_idx(mat.a.get(), i32, 2);
             const auto val = download_f(mat.b.get(), 1);
             EXPECT_EQ(ind[0], 0) << label;
             EXPECT_EQ(ind[1], 0) << label;
@@ -616,8 +613,8 @@ namespace
         }
         else
         {
-            const auto ptr = download_idx(mat.a.get(), idx32, 2);
-            const auto ind = download_idx(mat.b.get(), idx32, 1);
+            const auto ptr = download_idx(mat.a.get(), i32, 2);
+            const auto ind = download_idx(mat.b.get(), i32, 1);
             const auto val = download_f(mat.c.get(), 1);
             EXPECT_EQ(ptr[0], 0) << label;
             EXPECT_EQ(ptr[1], 1) << label;
@@ -685,11 +682,11 @@ namespace
 
     // --- index widening ------------------------------------------------------
 
-    struct HostIdx
+    struct DevIdx
     {
         rocsparse_indextype type;
         Bytes               mem;
-        explicit HostIdx(rocsparse_indextype t, const std::vector<int64_t>& host)
+        explicit DevIdx(rocsparse_indextype t, const std::vector<int64_t>& host)
             : type(t)
             , mem(std::max<size_t>(host.size(), 1) * idx_width(t))
         {
@@ -762,12 +759,12 @@ namespace
             cols.push_back(entry.col);
             vals.push_back(entry.val);
         }
-        HostIdx       row_buf(src_type, rows);
-        HostIdx       col_buf(src_type, cols);
+        DevIdx        row_buf(src_type, rows);
+        DevIdx        col_buf(src_type, cols);
         DevBuf<float> val_buf(vals);
         // Column pointers and row indices are filled by the conversion.
-        HostIdx       csc_ptr(col_ptr_type, std::vector<int64_t>(3, 0));
-        HostIdx       csc_row(row_ind_type, std::vector<int64_t>(entries.size(), 0));
+        DevIdx        csc_ptr(col_ptr_type, std::vector<int64_t>(3, 0));
+        DevIdx        csc_row(row_ind_type, std::vector<int64_t>(entries.size(), 0));
         DevBuf<float> csc_val(std::vector<float>(entries.size(), 0.f));
 
         Spmat source, target;
@@ -779,8 +776,8 @@ namespace
                                              col_buf.mem.get(),
                                              val_buf.get(),
                                              src_type,
-                                             base,
-                                             f32_r),
+                                             base0,
+                                             f32),
                   st_ok);
         ASSERT_EQ(rocsparse_create_csc_descr(&target,
                                              2,
@@ -791,8 +788,8 @@ namespace
                                              csc_val.get(),
                                              col_ptr_type,
                                              row_ind_type,
-                                             base,
-                                             f32_r),
+                                             base0,
+                                             f32),
                   st_ok);
         const std::string label = "coo " + idx_name(src_type) + " -> csc ptr "
                                   + idx_name(col_ptr_type) + " row " + idx_name(row_ind_type);
@@ -826,11 +823,11 @@ namespace
             cols.push_back(entry.col);
             vals.push_back(entry.val);
         }
-        HostIdx       row_buf(src_type, rows);
-        HostIdx       col_buf(src_type, cols);
+        DevIdx        row_buf(src_type, rows);
+        DevIdx        col_buf(src_type, cols);
         DevBuf<float> val_buf(vals);
-        HostIdx       bsr_ptr(row_ptr_type, std::vector<int64_t>(3, 0));
-        HostIdx       bsr_col(col_ind_type, std::vector<int64_t>(entries.size(), 0));
+        DevIdx        bsr_ptr(row_ptr_type, std::vector<int64_t>(3, 0));
+        DevIdx        bsr_col(col_ind_type, std::vector<int64_t>(entries.size(), 0));
         DevBuf<float> bsr_val(std::vector<float>(entries.size(), 0.f));
         Spmat         source, target;
         ASSERT_EQ(rocsparse_create_coo_descr(&source,
@@ -841,8 +838,8 @@ namespace
                                              col_buf.mem.get(),
                                              val_buf.get(),
                                              src_type,
-                                             base,
-                                             f32_r),
+                                             base0,
+                                             f32),
                   st_ok);
         ASSERT_EQ(rocsparse_create_bsr_descr(&target,
                                              2,
@@ -855,8 +852,8 @@ namespace
                                              bsr_val.get(),
                                              row_ptr_type,
                                              col_ind_type,
-                                             base,
-                                             f32_r),
+                                             base0,
+                                             f32),
                   st_ok);
         const std::string label = "coo " + idx_name(src_type) + " -> bsr ptr "
                                   + idx_name(row_ptr_type) + " col " + idx_name(col_ind_type);
@@ -890,10 +887,10 @@ namespace
             ind.push_back(entry.col);
             vals.push_back(entry.val);
         }
-        HostIdx       aos(src_type, ind);
+        DevIdx        aos(src_type, ind);
         DevBuf<float> aval(vals);
-        HostIdx       csc_ptr(col_ptr_type, std::vector<int64_t>(3, 0));
-        HostIdx       csc_row(row_ind_type, std::vector<int64_t>(entries.size(), 0));
+        DevIdx        csc_ptr(col_ptr_type, std::vector<int64_t>(3, 0));
+        DevIdx        csc_row(row_ind_type, std::vector<int64_t>(entries.size(), 0));
         DevBuf<float> csc_val(std::vector<float>(entries.size(), 0.f));
         Spmat         source, target;
         ASSERT_EQ(rocsparse_create_coo_aos_descr(&source,
@@ -903,8 +900,8 @@ namespace
                                                  aos.mem.get(),
                                                  aval.get(),
                                                  src_type,
-                                                 base,
-                                                 f32_r),
+                                                 base0,
+                                                 f32),
                   st_ok);
         ASSERT_EQ(rocsparse_create_csc_descr(&target,
                                              2,
@@ -915,8 +912,8 @@ namespace
                                              csc_val.get(),
                                              col_ptr_type,
                                              row_ind_type,
-                                             base,
-                                             f32_r),
+                                             base0,
+                                             f32),
                   st_ok);
         const std::string label = "coo_aos " + idx_name(src_type) + " -> csc ptr "
                                   + idx_name(col_ptr_type) + " row " + idx_name(row_ind_type);
@@ -944,11 +941,11 @@ namespace
         const std::vector<int64_t> ptr     = {0, 2, 3};
         const std::vector<int64_t> row_ind = {0, 1, 0};
         const std::vector<float>   vals    = {1.f, 3.f, 2.f};
-        HostIdx                    csc_ptr(col_ptr_type, ptr);
-        HostIdx                    csc_row(row_ind_type, row_ind);
+        DevIdx                     csc_ptr(col_ptr_type, ptr);
+        DevIdx                     csc_row(row_ind_type, row_ind);
         DevBuf<float>              csc_val(vals);
-        HostIdx                    coo_row(coo_type, std::vector<int64_t>(3, 0));
-        HostIdx                    coo_col(coo_type, std::vector<int64_t>(3, 0));
+        DevIdx                     coo_row(coo_type, std::vector<int64_t>(3, 0));
+        DevIdx                     coo_col(coo_type, std::vector<int64_t>(3, 0));
         DevBuf<float>              coo_val(std::vector<float>(3, 0.f));
         Spmat                      source, target;
         ASSERT_EQ(rocsparse_create_csc_descr(&source,
@@ -960,8 +957,8 @@ namespace
                                              csc_val.get(),
                                              col_ptr_type,
                                              row_ind_type,
-                                             base,
-                                             f32_r),
+                                             base0,
+                                             f32),
                   st_ok);
         ASSERT_EQ(rocsparse_create_coo_descr(&target,
                                              2,
@@ -971,8 +968,8 @@ namespace
                                              coo_col.mem.get(),
                                              coo_val.get(),
                                              coo_type,
-                                             base,
-                                             f32_r),
+                                             base0,
+                                             f32),
                   st_ok);
         const std::string label = "csc ptr " + idx_name(col_ptr_type) + " row "
                                   + idx_name(row_ind_type) + " -> coo " + idx_name(coo_type);
@@ -1034,52 +1031,41 @@ namespace
                       void*            values,
                       Spmat&           descr)
     {
-        if(format == rocsparse_format_coo)
+        switch(format)
         {
+        case rocsparse_format_coo:
             ASSERT_EQ(rocsparse_create_coo_descr(
-                          &descr, 1, 1, nnz, primary, secondary, values, idx32, base, f32_r),
+                          &descr, 1, 1, nnz, primary, secondary, values, i32, base0, f32),
                       st_ok);
-        }
-        else if(format == rocsparse_format_coo_aos)
-        {
-            ASSERT_EQ(rocsparse_create_coo_aos_descr(
-                          &descr, 1, 1, nnz, primary, values, idx32, base, f32_r),
-                      st_ok);
-        }
-        else if(format == rocsparse_format_csr)
-        {
-            ASSERT_EQ(rocsparse_create_csr_descr(
-                          &descr, 1, 1, nnz, primary, secondary, values, idx32, idx32, base, f32_r),
-                      st_ok);
-        }
-        else if(format == rocsparse_format_csc)
-        {
-            ASSERT_EQ(rocsparse_create_csc_descr(
-                          &descr, 1, 1, nnz, primary, secondary, values, idx32, idx32, base, f32_r),
-                      st_ok);
-        }
-        else if(format == rocsparse_format_ell)
-        {
+            break;
+        case rocsparse_format_coo_aos:
             ASSERT_EQ(
-                rocsparse_create_ell_descr(&descr, 1, 1, primary, values, nnz, idx32, base, f32_r),
+                rocsparse_create_coo_aos_descr(&descr, 1, 1, nnz, primary, values, i32, base0, f32),
                 st_ok);
-        }
-        else if(format == rocsparse_format_bsr)
-        {
-            ASSERT_EQ(rocsparse_create_bsr_descr(&descr,
-                                                 1,
-                                                 1,
-                                                 nnz,
-                                                 dir_r,
-                                                 1,
-                                                 primary,
-                                                 secondary,
-                                                 values,
-                                                 idx32,
-                                                 idx32,
-                                                 base,
-                                                 f32_r),
+            break;
+        case rocsparse_format_csr:
+            ASSERT_EQ(rocsparse_create_csr_descr(
+                          &descr, 1, 1, nnz, primary, secondary, values, i32, i32, base0, f32),
                       st_ok);
+            break;
+        case rocsparse_format_csc:
+            ASSERT_EQ(rocsparse_create_csc_descr(
+                          &descr, 1, 1, nnz, primary, secondary, values, i32, i32, base0, f32),
+                      st_ok);
+            break;
+        case rocsparse_format_ell:
+            ASSERT_EQ(
+                rocsparse_create_ell_descr(&descr, 1, 1, primary, values, nnz, i32, base0, f32),
+                st_ok);
+            break;
+        case rocsparse_format_bsr:
+            ASSERT_EQ(
+                rocsparse_create_bsr_descr(
+                    &descr, 1, 1, nnz, dir_r, 1, primary, secondary, values, i32, i32, base0, f32),
+                st_ok);
+            break;
+        default:
+            FAIL() << "no shell descriptor for " << format_name(format);
         }
     }
 
@@ -1132,8 +1118,8 @@ namespace
                      target);
         ASSERT_NE(target.get(), nullptr);
 
-        const std::string label = std::string(fmt_name(pair.source)) + " -> "
-                                  + fmt_name(pair.target)
+        const std::string label = std::string(format_name(pair.source)) + " -> "
+                                  + format_name(pair.target)
                                   + (with_values ? " numeric" : " symbolic");
         SCOPED_TRACE(label);
 
@@ -1181,34 +1167,34 @@ namespace
         EXPECT_EQ(nnz, 1);
         if(pair.target == rocsparse_format_coo)
         {
-            const auto row = download_idx(dst_primary.get(), idx32, 1);
-            const auto col = download_idx(dst_secondary.get(), idx32, 1);
+            const auto row = download_idx(dst_primary.get(), i32, 1);
+            const auto col = download_idx(dst_secondary.get(), i32, 1);
             EXPECT_EQ(row[0], 0);
             EXPECT_EQ(col[0], 0);
         }
         else if(tgt_aos)
         {
-            const auto ind = download_idx(dst_primary.get(), idx32, 2);
+            const auto ind = download_idx(dst_primary.get(), i32, 2);
             EXPECT_EQ(ind[0], 0);
             EXPECT_EQ(ind[1], 0);
         }
         else if(pair.target == rocsparse_format_csr || pair.target == rocsparse_format_bsr)
         {
-            const auto ptr = download_idx(dst_primary.get(), idx32, 2);
-            const auto col = download_idx(dst_secondary.get(), idx32, 1);
+            const auto ptr = download_idx(dst_primary.get(), i32, 2);
+            const auto col = download_idx(dst_secondary.get(), i32, 1);
             EXPECT_EQ(ptr[0], 0);
             EXPECT_EQ(ptr[1], 1);
             EXPECT_EQ(col[0], 0);
         }
         else if(pair.target == rocsparse_format_ell)
         {
-            const auto col = download_idx(dst_primary.get(), idx32, 1);
+            const auto col = download_idx(dst_primary.get(), i32, 1);
             EXPECT_EQ(col[0], 0);
         }
         else if(pair.target == rocsparse_format_csc)
         {
-            const auto ptr = download_idx(dst_primary.get(), idx32, 2);
-            const auto row = download_idx(dst_secondary.get(), idx32, 1);
+            const auto ptr = download_idx(dst_primary.get(), i32, 2);
+            const auto row = download_idx(dst_secondary.get(), i32, 1);
             EXPECT_EQ(ptr[0], 0);
             EXPECT_EQ(ptr[1], 1);
             EXPECT_EQ(row[0], 0);
@@ -1247,29 +1233,28 @@ namespace
         switch(format)
         {
         case rocsparse_format_coo:
-            ASSERT_EQ(rocsparse_create_coo_descr(&descr, m, n, nnz, a, b, c, idx32, base, f32_r),
+            ASSERT_EQ(rocsparse_create_coo_descr(&descr, m, n, nnz, a, b, c, i32, base0, f32),
                       st_ok);
             break;
         case rocsparse_format_coo_aos:
-            ASSERT_EQ(rocsparse_create_coo_aos_descr(&descr, m, n, nnz, a, c, idx32, base, f32_r),
+            ASSERT_EQ(rocsparse_create_coo_aos_descr(&descr, m, n, nnz, a, c, i32, base0, f32),
                       st_ok);
             break;
         case rocsparse_format_csr:
-            ASSERT_EQ(
-                rocsparse_create_csr_descr(&descr, m, n, nnz, a, b, c, idx32, idx32, base, f32_r),
-                st_ok);
+            ASSERT_EQ(rocsparse_create_csr_descr(&descr, m, n, nnz, a, b, c, i32, i32, base0, f32),
+                      st_ok);
             break;
         default:
-            FAIL() << "no capture descriptor for " << fmt_name(format);
+            FAIL() << "no capture descriptor for " << format_name(format);
         }
     }
 
     void run_capture(rocsparse_handle handle, const CaptureCase& cc)
     {
-        const std::string label = std::string(fmt_name(cc.source)) + " -> " + fmt_name(cc.target)
-                                  + " m " + std::to_string(cc.m) + " n " + std::to_string(cc.n)
-                                  + " nnz " + std::to_string(cc.nnz) + (cc.alias ? " alias" : "")
-                                  + (cc.values ? "" : " symbolic");
+        const std::string label = std::string(format_name(cc.source)) + " -> "
+                                  + format_name(cc.target) + " m " + std::to_string(cc.m) + " n "
+                                  + std::to_string(cc.n) + " nnz " + std::to_string(cc.nnz)
+                                  + (cc.alias ? " alias" : "") + (cc.values ? "" : " symbolic");
         SCOPED_TRACE(label);
         clear_hip_error();
 
@@ -1283,7 +1268,7 @@ namespace
         {
             std::vector<int64_t> ptr(static_cast<size_t>(cc.m + 1), cc.nnz);
             ptr[0] = 0;
-            upload_idx(src_a.get(), idx32, ptr);
+            upload_idx(src_a.get(), i32, ptr);
         }
         if(cc.nnz > 0)
         {
@@ -1356,7 +1341,7 @@ namespace
         EXPECT_EQ(nnz, cc.nnz);
         if(cc.target == rocsparse_format_csr)
         {
-            const auto ptr = download_idx(out[0]->get(), idx32, static_cast<size_t>(cc.m + 1));
+            const auto ptr = download_idx(out[0]->get(), i32, static_cast<size_t>(cc.m + 1));
             EXPECT_EQ(ptr.front(), 0);
             EXPECT_EQ(ptr.back(), cc.nnz);
         }
@@ -1450,11 +1435,11 @@ namespace
     // target with int64_t indices for its expansion.
     struct WideBsr
     {
-        HostIdx       ptr;
-        HostIdx       col;
+        DevIdx        ptr;
+        DevIdx        col;
         DevBuf<float> val;
-        HostIdx       coo_row;
-        HostIdx       coo_col;
+        DevIdx        coo_row;
+        DevIdx        coo_col;
         DevBuf<float> coo_val;
         Spmat         source;
         Spmat         target;
@@ -1478,8 +1463,8 @@ namespace
                                                  val.get(),
                                                  type,
                                                  type,
-                                                 base,
-                                                 f32_r),
+                                                 base0,
+                                                 f32),
                       st_ok);
             EXPECT_EQ(rocsparse_create_coo_descr(&target,
                                                  k_wide_block_dim,
@@ -1489,8 +1474,8 @@ namespace
                                                  coo_col.mem.get(),
                                                  coo_val.get(),
                                                  idx64,
-                                                 base,
-                                                 f32_r),
+                                                 base0,
+                                                 f32),
                       st_ok);
         }
 
@@ -1504,7 +1489,7 @@ namespace
         }
     };
 
-    TEST_F(ConvS2s, SellSourceEachStageWritesNothing)
+    TEST_F(ConvS2sControl, SellSourceEachStageWritesNothing)
     {
         auto source = make_tiny(rocsparse_format_sell, true);
         auto target = make_tiny(rocsparse_format_csr, false);
@@ -1512,7 +1497,7 @@ namespace
         expect_rejected(handle, source->descr, target->descr, *target, "sell -> csr");
     }
 
-    TEST_F(ConvS2s, SellTargetEachStageWritesNothing)
+    TEST_F(ConvS2sControl, SellTargetEachStageWritesNothing)
     {
         auto source = make_tiny(rocsparse_format_csr, true);
         auto target = make_tiny(rocsparse_format_sell, false);
@@ -1520,7 +1505,7 @@ namespace
         expect_rejected(handle, source->descr, target->descr, *target, "csr -> sell");
     }
 
-    TEST_F(ConvS2s, FormatOutsideTableWritesNothing)
+    TEST_F(ConvS2sControl, FormatOutsideTableWritesNothing)
     {
         // The public API cannot build these descriptors, so the format is set directly.
         for(const int value : {static_cast<int>(rocsparse_format_sell) + 1, -1})
@@ -1542,14 +1527,14 @@ namespace
         }
     }
 
-    TEST_F(ConvS2s, FormatSweepEveryEnum)
+    TEST_F(ConvS2sControl, FormatSweepEveryEnum)
     {
         for(rocsparse_format source_format : k_formats)
         {
             for(rocsparse_format target_format : k_formats)
             {
                 const std::string label
-                    = std::string(fmt_name(source_format)) + " -> " + fmt_name(target_format);
+                    = std::string(format_name(source_format)) + " -> " + format_name(target_format);
                 SCOPED_TRACE(label);
                 clear_hip_error();
                 auto source = make_tiny(source_format, true);
@@ -1598,9 +1583,9 @@ namespace
         }
     }
 
-    TEST_F(ConvS2s, IndexWidthThroughIntermediate)
+    TEST_F(ConvS2sControl, IndexWidthThroughIntermediate)
     {
-        constexpr rocsparse_indextype types[] = {idx32, idx64};
+        constexpr rocsparse_indextype types[] = {i32, idx64};
         for(auto src : types)
         {
             for(auto a : types)
@@ -1616,7 +1601,7 @@ namespace
         }
     }
 
-    TEST_F(ConvS2s, SymbolicNullTargetValues)
+    TEST_F(ConvS2sControl, SymbolicNullTargetValues)
     {
         for(const auto& pair : k_symbolic)
         {
@@ -1625,7 +1610,7 @@ namespace
         }
     }
 
-    TEST_F(ConvS2s, IntermediateCountOverflow)
+    TEST_F(ConvS2sControl, IntermediateCountOverflow)
     {
         // Each case has one count whose byte size, or one product of counts, does not fit.
         // The host pointers are never read: the count is rejected before any allocation.
@@ -1636,11 +1621,11 @@ namespace
                 = static_cast<int64_t>(std::numeric_limits<size_t>::max() / sizeof(int64_t)) + 1;
             Spmat source, target;
             ASSERT_EQ(rocsparse_create_coo_descr(
-                          &source, 4, 1LL << 60, nnz, &dummy, &dummy, &dummy, idx32, base, f32_r),
+                          &source, 4, 1LL << 60, nnz, &dummy, &dummy, &dummy, i32, base0, f32),
                       st_ok);
             ASSERT_EQ(
                 rocsparse_create_csc_descr(
-                    &target, 4, 1LL << 60, nnz, &dummy, &dummy, &dummy, idx64, idx64, base, f32_r),
+                    &target, 4, 1LL << 60, nnz, &dummy, &dummy, &dummy, idx64, idx64, base0, f32),
                 st_ok);
             expect_count_rejected(handle, source, target, "column bytes");
         }
@@ -1651,11 +1636,11 @@ namespace
                   + 1;
             Spmat source, target;
             ASSERT_EQ(rocsparse_create_coo_descr(
-                          &source, 4, 1LL << 60, nnz, &dummy, &dummy, &dummy, idx32, base, f64_c),
+                          &source, 4, 1LL << 60, nnz, &dummy, &dummy, &dummy, i32, base0, f64_c),
                       st_ok);
             ASSERT_EQ(
                 rocsparse_create_csc_descr(
-                    &target, 4, 1LL << 60, nnz, &dummy, &dummy, &dummy, idx64, idx32, base, f64_c),
+                    &target, 4, 1LL << 60, nnz, &dummy, &dummy, &dummy, idx64, i32, base0, f64_c),
                 st_ok);
             expect_count_rejected(handle, source, target, "value bytes");
         }
@@ -1664,10 +1649,10 @@ namespace
             constexpr int64_t rows = 1LL << 61;
             Spmat             source, target;
             ASSERT_EQ(rocsparse_create_coo_descr(
-                          &source, rows, 2, 1, &dummy, &dummy, &dummy, idx64, base, f32_r),
+                          &source, rows, 2, 1, &dummy, &dummy, &dummy, idx64, base0, f32),
                       st_ok);
             ASSERT_EQ(rocsparse_create_csc_descr(
-                          &target, rows, 2, 1, &dummy, &dummy, &dummy, idx64, idx64, base, f32_r),
+                          &target, rows, 2, 1, &dummy, &dummy, &dummy, idx64, idx64, base0, f32),
                       st_ok);
             expect_count_rejected(handle, source, target, "row pointer bytes");
         }
@@ -1687,11 +1672,11 @@ namespace
                                                  &dummy,
                                                  idx64,
                                                  idx64,
-                                                 base,
-                                                 f32_r),
+                                                 base0,
+                                                 f32),
                       st_ok);
             ASSERT_EQ(rocsparse_create_coo_descr(
-                          &target, 3 * brows, 6, 0, &dummy, &dummy, &dummy, idx64, base, f32_r),
+                          &target, 3 * brows, 6, 0, &dummy, &dummy, &dummy, idx64, base0, f32),
                       st_ok);
             expect_count_rejected(handle, source, target, "bsr entry count");
         }
@@ -1704,13 +1689,13 @@ namespace
         expect_one_entry(*target, "csr -> csc after overflow");
     }
 
-    TEST_F(ConvS2s, BsrExpansionFitsIndexType)
+    TEST_F(ConvS2sControl, BsrExpansionFitsIndexType)
     {
         // The intermediate CSR matrix keeps the int32_t source column type, so an
         // expansion past the int32_t range is rejected before anything is allocated.
         constexpr int64_t too_wide = 1LL << 28;
         {
-            WideBsr bsr(idx32, too_wide);
+            WideBsr bsr(i32, too_wide);
             expect_count_rejected(handle, bsr.source, bsr.target, "i32 2^28 block columns");
         }
         {
@@ -1727,10 +1712,10 @@ namespace
                                                  &dummy,
                                                  &dummy,
                                                  &dummy,
-                                                 idx32,
-                                                 idx32,
-                                                 base,
-                                                 f32_r),
+                                                 i32,
+                                                 i32,
+                                                 base0,
+                                                 f32),
                       st_ok);
             ASSERT_EQ(rocsparse_create_coo_descr(&target,
                                                  k_wide_block_dim * too_wide,
@@ -1740,15 +1725,15 @@ namespace
                                                  &dummy,
                                                  &dummy,
                                                  idx64,
-                                                 base,
-                                                 f32_r),
+                                                 base0,
+                                                 f32),
                       st_ok);
             expect_count_rejected(handle, source, target, "i32 2^28 block rows");
         }
         {
             // The widest int32_t expansion still converts.
             constexpr int64_t widest = std::numeric_limits<int32_t>::max() / k_wide_block_dim;
-            WideBsr           bsr(idx32, widest);
+            WideBsr           bsr(i32, widest);
             SCOPED_TRACE("i32 widest");
             ASSERT_EQ(run_permissive(handle, bsr.source, bsr.target, nullptr), st_ok);
             bsr.expect_last_columns(widest);
@@ -1762,16 +1747,15 @@ namespace
         }
     }
 
-    TEST_F(ConvS2s, EmptyEllThroughIntermediate)
+    TEST_F(ConvS2sControl, EmptyEllThroughIntermediate)
     {
         // A 0-row ELL still needs a one-element intermediate CSR row pointer.
         // csr_set_pointers rejects a null one, including when m is 0.
         Spmat source, target;
-        ASSERT_EQ(
-            rocsparse_create_ell_descr(&source, 0, 3, nullptr, nullptr, 0, idx32, base, f32_r),
-            st_ok);
+        ASSERT_EQ(rocsparse_create_ell_descr(&source, 0, 3, nullptr, nullptr, 0, i32, base0, f32),
+                  st_ok);
         ASSERT_EQ(rocsparse_create_coo_descr(
-                      &target, 0, 3, 0, nullptr, nullptr, nullptr, idx32, base, f32_r),
+                      &target, 0, 3, 0, nullptr, nullptr, nullptr, i32, base0, f32),
                   st_ok);
         S2sDescr descr;
         ASSERT_EQ(rocsparse_create_sparse_to_sparse_descr(&descr, source, target, alg), st_ok);
@@ -1794,7 +1778,7 @@ namespace
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
     }
 
-    TEST_F(ConvS2s, CaptureMatchesEager)
+    TEST_F(ConvS2sControl, CaptureMatchesEager)
     {
         for(const auto& cc : k_capture)
         {
