@@ -37,7 +37,6 @@
 #include "unit_test_device_level2_common.hpp"
 
 #include <algorithm>
-#include <limits>
 #include <sstream>
 #include <string>
 
@@ -468,7 +467,9 @@ namespace
 
     // bsrmv with the scalars that the kernels special-case: alpha == 0 (the matrix
     // must not matter, y = beta * y) and beta == 0 (y must be overwritten, so a NaN
-    // already in y must not survive).
+    // already in y must not survive). With `known_nan_y`, a y that comes back NaN in
+    // every entry (a kernel computing beta * y for every row) sets it instead of
+    // failing; any other result is checked as usual.
     template <typename T>
     void check_bsrmv_scalars(rocsparse_handle    handle,
                              int32_t             bd,
@@ -477,7 +478,8 @@ namespace
                              T                   alpha,
                              T                   beta,
                              bool                nan_y,
-                             bool                device_mode)
+                             bool                device_mode,
+                             bool*               known_nan_y = nullptr)
     {
         const int32_t mb  = 7;
         const int32_t nb  = 9;
@@ -525,6 +527,12 @@ namespace
                            dy),
                   rocsparse_status_success);
         const std::vector<T> got = to_host(dy);
+        if(known_nan_y != nullptr
+           && std::all_of(got.begin(), got.end(), [](const T& v) { return has_nan(v); }))
+        {
+            *known_nan_y = true;
+            return;
+        }
         if(nan_y)
             expect_no_nan(got, "bsrmv y with beta == 0");
         EXPECT_TRUE(expect_near(want, got, "bsrmv y"));
@@ -850,15 +858,16 @@ namespace
         //
         // Known defect: on a wave64 GPU the float-only 5x5 and 8x8 kernels
         // (sbsrxmvn_5x5_device / sbsrxmvn_8x8_device) compute beta * y[row] without
-        // the beta == 0 guard the other kernels have, so a NaN in y survives. Those
-        // two cases are left out there until the kernels are fixed; the double 5x5
-        // and 8x8 cases below take the guarded generic kernels and stay in.
-        const bool wave64 = (rocsparse_ut::device_warp_size() == 64);
+        // the beta == 0 guard the other kernels have, so the NaN in y survives in every
+        // entry. Found by reading the kernels, not observed on wave64 hardware. Those
+        // two cases accept that result and the test is skipped after all the others
+        // have run; any other result fails. The double 5x5 and 8x8 cases below take
+        // the guarded generic kernels and are checked as usual.
+        const bool wave64    = (rocsparse_ut::device_warp_size() == 64);
+        bool       known_nan = false;
         for(const int32_t bd : {2, 3, 4, 5, 8, 9, 16, 17})
             for(const bool device : {false, true})
             {
-                if(wave64 && (bd == 5 || bd == 8))
-                    continue;
                 check_bsrmv_scalars<float>(handle,
                                            bd,
                                            (bd & 1) ? rocsparse_direction_row
@@ -867,7 +876,8 @@ namespace
                                            1.5f,
                                            0.0f,
                                            true,
-                                           device);
+                                           device,
+                                           wave64 && (bd == 5 || bd == 8) ? &known_nan : nullptr);
                 if(::testing::Test::HasFailure())
                     return;
             }
@@ -886,6 +896,9 @@ namespace
                                                      rocsparse_float_complex(0.0f, 0.0f),
                                                      true,
                                                      true);
+        if(known_nan && !::testing::Test::HasFailure())
+            GTEST_SKIP() << "the wave64 float 5x5 / 8x8 bsrmv kernels read y when beta == 0 "
+                            "(known library defect); every other case passed";
     }
 
     TEST_F(L2DeviceBsrmv, empty_matrix_scales_y_by_beta)
