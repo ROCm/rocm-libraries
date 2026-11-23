@@ -55,50 +55,50 @@ HKP_POINTWISE_DEVICE inline float evaluate(const Metadata& meta, float a, float 
 {
     switch(meta.operation)
     {
-    case 1:
+    case 1: // ABS
         return fabsf(a);
-    case 2:
+    case 2: // ADD
         return a + b;
-    case 8:
+    case 8: // CMP_GT
         return a > b ? 1.0f : 0.0f;
-    case 19:
+    case 19: // GELU_APPROX_TANH_FWD
     {
         const float inner = sqrtf(2.0f / 3.14159265f) * (a + 0.044715f * a * a * a);
         return 0.5f * a * (1.0f + tanhf(inner));
     }
-    case 21:
+    case 21: // GELU_FWD
         return 0.5f * a * (1.0f + erff(a / sqrtf(2.0f)));
-    case 23:
+    case 23: // IDENTITY
         return a;
-    case 28:
+    case 28: // MAX_OP
         return a < b ? b : a;
-    case 29:
+    case 29: // MIN_OP
         return b < a ? b : a;
-    case 30:
+    case 30: // MUL
         return a * b;
-    case 31:
+    case 31: // NEG
         return -a;
-    case 33:
+    case 33: // RELU_BWD
         return a * (b > 0.0f ? 1.0f : 0.0f);
-    case 34:
+    case 34: // RELU_FWD
         return a <= 0.0f ? 0.0f * a + 0.0f : a;
-    case 36:
+    case 36: // SIGMOID_BWD
     {
         const float sigmoid = 1.0f / (1.0f + expf(-b));
         return a * (sigmoid * (1.0f - sigmoid));
     }
-    case 37:
+    case 37: // SIGMOID_FWD
         return 1.0f / (1.0f + expf(-a));
-    case 42:
+    case 42: // SUB
         return a - b;
-    case 44:
+    case 44: // SWISH_FWD
         return a / (1.0f + expf(-a));
-    case 46:
+    case 46: // TANH_BWD
     {
         const float value = tanhf(b);
         return a * (1.0f - value * value);
     }
-    case 47:
+    case 47: // TANH_FWD
         return tanhf(a);
     default:
         return NAN;
