@@ -2031,7 +2031,9 @@ _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_const_spmat_descr that,
         ((that->format == rocsparse_format_csr) && (format == rocsparse_format_csc))
             || ((that->format == rocsparse_format_csc) && (format == rocsparse_format_csr)),
         "it isn't a switch of format between rocsparse_format_csr and rocsparse_format_csc");
-    descr[0] = that->descr[0];
+    // The view points to the arrays of that.
+    this->arrays_stamp = that->arrays_stamp;
+    descr[0]           = that->descr[0];
     switch(descr->fill_mode)
     {
     case rocsparse_fill_mode_lower:
@@ -4018,15 +4020,16 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
-namespace
+namespace rocsparse
 {
     // The line profile and the SpMV analysis describe the arrays that the
-    // descriptor is leaving. Nothing is freed here: this must not synchronize
-    // the device, which another stream may be capturing.
-    void discard_pattern_analysis(rocsparse_spmat_descr descr)
+    // descriptor is leaving; a new stamp marks them stale. Nothing is freed
+    // here: this must not synchronize the device, which another stream may be
+    // capturing.
+    static void renew_arrays_stamp(rocsparse_spmat_descr descr)
     {
         descr->line_profile.known = false;
-        descr->pattern_stamp      = rocsparse::next_spmat_pattern_stamp();
+        descr->arrays_stamp       = rocsparse::next_spmat_arrays_stamp();
     }
 }
 
@@ -4047,7 +4050,7 @@ try
     ROCSPARSE_CHECKARG_POINTER(2, coo_col_ind);
     ROCSPARSE_CHECKARG_POINTER(3, coo_val);
 
-    discard_pattern_analysis(descr);
+    rocsparse::renew_arrays_stamp(descr);
 
     descr->row_data = coo_row_ind;
     descr->col_data = coo_col_ind;
@@ -4079,6 +4082,8 @@ try
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, coo_ind);
     ROCSPARSE_CHECKARG_POINTER(2, coo_val);
+
+    rocsparse::renew_arrays_stamp(descr);
 
     descr->ind_data = coo_ind;
     descr->val_data = coo_val;
@@ -4115,7 +4120,7 @@ try
     ROCSPARSE_CHECKARG(
         3, csr_val, descr->nnz > 0 && csr_val == nullptr, rocsparse_status_invalid_pointer);
 
-    discard_pattern_analysis(descr);
+    rocsparse::renew_arrays_stamp(descr);
 
     descr->row_data = csr_row_ptr;
     descr->col_data = csr_col_ind;
@@ -4154,7 +4159,7 @@ try
     ROCSPARSE_CHECKARG(
         3, csc_val, descr->nnz > 0 && csc_val == nullptr, rocsparse_status_invalid_pointer);
 
-    discard_pattern_analysis(descr);
+    rocsparse::renew_arrays_stamp(descr);
 
     descr->row_data = csc_row_ind;
     descr->col_data = csc_col_ptr;
@@ -4186,6 +4191,8 @@ try
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, ell_col_ind);
     ROCSPARSE_CHECKARG_POINTER(2, ell_val);
+
+    rocsparse::renew_arrays_stamp(descr);
 
     descr->col_data = ell_col_ind;
     descr->val_data = ell_val;
@@ -4220,7 +4227,7 @@ try
     ROCSPARSE_CHECKARG(
         3, bsr_val, descr->nnz > 0 && bsr_val == nullptr, rocsparse_status_invalid_pointer);
 
-    discard_pattern_analysis(descr);
+    rocsparse::renew_arrays_stamp(descr);
 
     descr->row_data = bsr_row_ptr;
     descr->col_data = bsr_col_ind;
@@ -4260,6 +4267,8 @@ try
                        bell_val,
                        brows * descr->ell_cols > 0 && bell_val == nullptr,
                        rocsparse_status_invalid_pointer);
+
+    rocsparse::renew_arrays_stamp(descr);
 
     descr->col_data = bell_col_ind;
     descr->val_data = bell_val;

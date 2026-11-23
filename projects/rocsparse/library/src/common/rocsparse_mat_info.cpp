@@ -345,15 +345,15 @@ void _rocsparse_mat_info::clear_spmv_info()
     }
 }
 
-bool _rocsparse_mat_info::is_spmv_info_current(uint64_t pattern_stamp) const
+bool _rocsparse_mat_info::is_spmv_info_current(uint64_t arrays_stamp) const
 {
-    return this->m_spmv_stamp == pattern_stamp;
+    return this->m_spmv_stamp == arrays_stamp;
 }
 
 rocsparse_status _rocsparse_mat_info::clear_spmv_info_if_stale(hipStream_t stream,
-                                                               uint64_t    pattern_stamp)
+                                                               uint64_t    arrays_stamp)
 {
-    if(this->m_spmv_stamp == pattern_stamp)
+    if(this->m_spmv_stamp == arrays_stamp)
     {
         return rocsparse_status_success;
     }
@@ -376,7 +376,7 @@ rocsparse_status _rocsparse_mat_info::clear_spmv_info_if_stale(hipStream_t strea
     }
 
     this->clear_spmv_info();
-    this->m_spmv_stamp = pattern_stamp;
+    this->m_spmv_stamp = arrays_stamp;
     return rocsparse_status_success;
 }
 

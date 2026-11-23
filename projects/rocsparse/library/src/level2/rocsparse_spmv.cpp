@@ -422,11 +422,13 @@ namespace rocsparse
             }
             case rocsparse_spmv_stage_preprocess:
             {
-                // Run the analysis only if it has not been performed yet,
-                // detected via the cached coomv info object, instead of relying
-                // on the descriptor-wide mat->analysed flag.
+                // clear_spmv_info_if_stale first drops an info computed for
+                // arrays replaced by rocsparse_*_set_pointers. Then run the
+                // analysis only if it has not been performed yet, detected via
+                // the cached coomv info object, instead of relying on the
+                // descriptor-wide mat->analysed flag.
                 RETURN_IF_ROCSPARSE_ERROR(
-                    mat->info->clear_spmv_info_if_stale(handle->stream, mat->pattern_stamp));
+                    mat->info->clear_spmv_info_if_stale(handle->stream, mat->arrays_stamp));
                 rocsparse_coomv_info coomv_info = mat->info->get_coomv_info();
                 if(coomv_info == nullptr)
                 {
@@ -451,7 +453,7 @@ namespace rocsparse
             case rocsparse_spmv_stage_compute:
             {
                 const rocsparse_coomv_info coomv_info
-                    = mat->info->is_spmv_info_current(mat->pattern_stamp)
+                    = mat->info->is_spmv_info_current(mat->arrays_stamp)
                           ? mat->info->get_coomv_info()
                           : nullptr;
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::coomv(handle,
@@ -537,11 +539,13 @@ namespace rocsparse
 
             case rocsparse_spmv_stage_preprocess:
             {
-                // Run the analysis only if it has not been performed yet,
-                // detected via the cached info object, instead of relying on the
+                // clear_spmv_info_if_stale first drops an info computed for
+                // arrays replaced by rocsparse_*_set_pointers. Then run the
+                // analysis only if it has not been performed yet, detected via
+                // the cached info object, instead of relying on the
                 // descriptor-wide mat->analysed flag.
                 RETURN_IF_ROCSPARSE_ERROR(
-                    mat->info->clear_spmv_info_if_stale(handle->stream, mat->pattern_stamp));
+                    mat->info->clear_spmv_info_if_stale(handle->stream, mat->arrays_stamp));
                 rocsparse_bsrmv_info bsrmv_info = mat->info->get_bsrmv_info();
                 if(bsrmv_info == nullptr)
                 {
@@ -569,7 +573,7 @@ namespace rocsparse
             case rocsparse_spmv_stage_compute:
             {
                 const rocsparse_bsrmv_info bsrmv_info
-                    = mat->info->is_spmv_info_current(mat->pattern_stamp)
+                    = mat->info->is_spmv_info_current(mat->arrays_stamp)
                           ? mat->info->get_bsrmv_info()
                           : nullptr;
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::bsrmv(handle,
@@ -618,11 +622,13 @@ namespace rocsparse
                 //
                 // If algorithm 1 or default is selected and analysis step is required
                 //
-                // Run the analysis only if it has not been performed yet,
-                // detected via the cached info object, instead of relying on the
+                // clear_spmv_info_if_stale first drops an info computed for
+                // arrays replaced by rocsparse_*_set_pointers. Then run the
+                // analysis only if it has not been performed yet, detected via
+                // the cached info object, instead of relying on the
                 // descriptor-wide mat->analysed flag.
                 RETURN_IF_ROCSPARSE_ERROR(
-                    mat->info->clear_spmv_info_if_stale(handle->stream, mat->pattern_stamp));
+                    mat->info->clear_spmv_info_if_stale(handle->stream, mat->arrays_stamp));
                 rocsparse_csrmv_info csrmv_info = mat->info->get_csrmv_info();
                 if(csrmv_info == nullptr)
                 {
@@ -649,7 +655,7 @@ namespace rocsparse
             case rocsparse_spmv_stage_compute:
             {
                 const rocsparse_csrmv_info csrmv_info
-                    = mat->info->is_spmv_info_current(mat->pattern_stamp)
+                    = mat->info->is_spmv_info_current(mat->arrays_stamp)
                           ? mat->info->get_csrmv_info()
                           : nullptr;
                 RETURN_IF_ROCSPARSE_ERROR(
@@ -702,12 +708,13 @@ namespace rocsparse
 
             case rocsparse_spmv_stage_preprocess:
             {
-                // Run the analysis only if it has not been performed yet,
-                // detected via the cached info object (CSC reuses the csrmv_info
-                // slot), instead of relying on the descriptor-wide mat->analysed
-                // flag.
+                // clear_spmv_info_if_stale first drops an info computed for
+                // arrays replaced by rocsparse_*_set_pointers. Then run the
+                // analysis only if it has not been performed yet, detected via
+                // the cached info object (CSC reuses the csrmv_info slot),
+                // instead of relying on the descriptor-wide mat->analysed flag.
                 RETURN_IF_ROCSPARSE_ERROR(
-                    mat->info->clear_spmv_info_if_stale(handle->stream, mat->pattern_stamp));
+                    mat->info->clear_spmv_info_if_stale(handle->stream, mat->arrays_stamp));
                 rocsparse_csrmv_info csrmv_info = mat->info->get_csrmv_info();
                 if(csrmv_info == nullptr)
                 {
@@ -733,7 +740,7 @@ namespace rocsparse
             case rocsparse_spmv_stage_compute:
             {
                 const rocsparse_csrmv_info csrmv_info
-                    = mat->info->is_spmv_info_current(mat->pattern_stamp)
+                    = mat->info->is_spmv_info_current(mat->arrays_stamp)
                           ? mat->info->get_csrmv_info()
                           : nullptr;
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::cscmv(handle,
