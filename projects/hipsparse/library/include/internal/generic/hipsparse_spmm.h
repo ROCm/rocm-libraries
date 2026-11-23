@@ -70,7 +70,9 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p matB, \p matC, \p beta, or
 *          \p pBufferSizeInBytes is nullptr, or \p opA or \p opB is invalid.
-*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType, or \p alg is currently not supported.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType, or \p alg is currently not supported,
+*          or, with the ROCm backend, \p matA is a BSR matrix and the batch count of \p matA, \p matB, or
+*          \p matC is not 1.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpMM_bufferSize(hipsparseHandle_t           handle,
@@ -140,7 +142,8 @@ hipsparseStatus_t hipsparseSpMM_bufferSize(hipsparseHandle_t           handle,
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p matB, \p matC, \p beta, or
 *               \p externalBuffer pointer is invalid.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType, or \p alg is
-*               currently not supported.
+*               currently not supported, or, with the ROCm backend, \p matA is a BSR matrix and
+*               the batch count of \p matA, \p matB, or \p matC is not 1.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
@@ -277,7 +280,9 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  \p hipsparseSpMM supports \ref HIPSPARSE_INDEX_32I and \ref HIPSPARSE_INDEX_64I index precisions
 *  for storing the row pointer and column indices arrays of the sparse matrices.
 *
-*  \p hipsparseSpMM also supports batched computation for CSR, CSC, COO and Blocked ELL matrices. There are three supported batch modes:
+*  \p hipsparseSpMM also supports batched computation for CSR, CSC and COO matrices. Batched computation is not
+*  supported for Blocked ELL matrices, and with the ROCm backend it is not supported for BSR matrices either.
+*  There are three supported batch modes:
 *  \f[
 *      C_i = A \times B_i \\
 *      C_i = A_i \times B \\
@@ -345,7 +350,8 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p matB, \p matC, \p beta, or
 *               \p externalBuffer pointer is invalid.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType, or \p alg is
-*               currently not supported.
+*               currently not supported, or, with the ROCm backend, \p matA is a BSR matrix and
+*               the batch count of \p matA, \p matB, or \p matC is not 1.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpMM(hipsparseHandle_t           handle,
