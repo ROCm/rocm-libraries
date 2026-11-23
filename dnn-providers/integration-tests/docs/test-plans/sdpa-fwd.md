@@ -925,8 +925,10 @@ contents or on the GPU. Such a case can pass by chance, so a pass does not show
 that the engine is correct for it.
 
 Use a list of exact names from measured failures only for a defect that has no
-known trigger. For example, the ALMIOPEN-3212 entry names the one case that
-showed the defect.
+known trigger.
+
+ALMIOPEN-3212 has no entry. Its case, `full_SdpaFwdPlan_Rng.bf16_edb982e24ace0136`,
+is not skipped: the defect did not reproduce in 60 runs on gfx942 and gfx950.
 
 ALMIOPEN-3123, ALMIOPEN-3124, ALMIOPEN-3126 and ALMIOPEN-3211 have no entry.
 With the ALMIOPEN-3123 fix, `ASM_SDPA_ENGINE` declines a graph that has a block
