@@ -215,6 +215,9 @@ add_library(
     engines/plans/MiopenConvPlanBuilder.cpp
     engines/plans/MiopenConvWrwPlan.cpp
     engines/plans/MiopenPointwiseTensorChecks.cpp
+    engines/plans/MiopenReductionChecks.cpp
+    engines/plans/MiopenReductionPlan.cpp
+    engines/plans/MiopenReductionPlanBuilder.cpp
     engines/plans/MiopenResampleFwdChecks.cpp
     engines/plans/MiopenResampleFwdPlan.cpp
     engines/plans/MiopenResampleFwdPlanBuilder.cpp
@@ -227,6 +230,7 @@ add_library(
     MiopenConvDescriptor.cpp
     MiopenPluginPublic.cpp
     MiopenPoolingDescriptor.cpp
+    MiopenReduceTensorDescriptor.cpp
     MiopenTensor.cpp
     MiopenUtils.cpp
 )

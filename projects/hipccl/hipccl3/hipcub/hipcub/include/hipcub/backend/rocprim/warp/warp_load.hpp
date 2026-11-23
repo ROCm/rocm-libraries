@@ -48,13 +48,10 @@ enum WarpLoadAlgorithm
     WARP_LOAD_TRANSPOSE
 };
 
-template<
-    class InputT,
-    int ITEMS_PER_THREAD,
-    WarpLoadAlgorithm ALGORITHM = WARP_LOAD_DIRECT,
-    int LOGICAL_WARP_THREADS = HIPCUB_DEVICE_WARP_THREADS,
-    int ARCH = HIPCUB_ARCH
->
+template<class InputT,
+         int               ITEMS_PER_THREAD,
+         WarpLoadAlgorithm ALGORITHM            = WARP_LOAD_DIRECT,
+         int               LOGICAL_WARP_THREADS = HIPCUB_DEVICE_WARP_THREADS>
 class WarpLoad
 {
 private:

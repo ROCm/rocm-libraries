@@ -8,6 +8,7 @@
 #include "engines/plans/MiopenBinaryPointwisePlanBuilder.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "engines/plans/MiopenConvPlanBuilder.hpp"
+#include "engines/plans/MiopenReductionPlanBuilder.hpp"
 #include "engines/plans/MiopenResampleFwdPlanBuilder.hpp"
 #include "engines/plans/MiopenUnaryActivationPlanBuilder.hpp"
 
@@ -53,6 +54,7 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
              engine->addPlanBuilder(std::make_unique<MiopenConvFwdBiasActivPlanBuilder>(false));
              engine->addPlanBuilder(std::make_unique<MiopenUnaryActivationPlanBuilder>());
              engine->addPlanBuilder(std::make_unique<MiopenBinaryPointwisePlanBuilder>());
+             engine->addPlanBuilder(std::make_unique<MiopenReductionPlanBuilder>());
              engine->addPlanBuilder(std::make_unique<MiopenResampleFwdPlanBuilder>());
 
              return engine;
@@ -65,7 +67,8 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
                                                             HipdnnMiopenContext>> {
              auto engine = std::make_unique<MiopenEngine>(MIOPEN_ENGINE_DETERMINISTIC_ID);
 
-             // Batchnorm doesn't support deterministic mode.
+             // Batchnorm doesn't support deterministic mode. Neither does reduction: MIOpen
+             // documents no determinism guarantee for miopenReduceTensor.
              engine->addPlanBuilder(std::make_unique<MiopenConvPlanBuilder>(true));
              engine->addPlanBuilder(std::make_unique<MiopenConvFwdBiasActivPlanBuilder>(true));
              engine->addPlanBuilder(std::make_unique<MiopenUnaryActivationPlanBuilder>());
