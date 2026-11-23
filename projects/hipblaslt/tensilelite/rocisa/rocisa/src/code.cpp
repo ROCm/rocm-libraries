@@ -172,6 +172,17 @@ void init_code(nb::module_ m)
     // schedOpcodeName() let the scheduler classify the leaf (see ir.py).
     nb::class_<rocisa::LogicalLeaf, rocisa::Item>(m_code, "LogicalLeaf")
         .def("__str__", &rocisa::LogicalLeaf::toString)
+        // Lifecycle (logical-IR migration, Phase 2 §7.5): the scheduler deep-copies
+        // items it moves between iteration buckets (deepcopy(item) / deepcopy(src)).
+        // Mirror Module's __deepcopy__ so a bare leaf is deep-copyable: clone the
+        // carrier node (new Item identity, as a rocisa instruction copy would get).
+        // The wrapped LogicalInstruction is shared via shared_ptr, which is safe
+        // while leaves are read-only from Python; an independent copy of the logical
+        // instruction is only needed once mutation accessors exist (Phase 3).
+        .def("__deepcopy__",
+             [](const rocisa::LogicalLeaf& self, nb::dict&) {
+                 return new rocisa::LogicalLeaf(self);
+             })
         .def("schedCategory", &rocisa::LogicalLeaf::schedCategory)
         .def("schedOpcodeName", &rocisa::LogicalLeaf::schedOpcodeName);
 
