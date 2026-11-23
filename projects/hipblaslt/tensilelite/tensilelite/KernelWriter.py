@@ -4747,9 +4747,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.codes.gl2PrefetchIncrement = Module()
       # TailFolding: the last k-tile is partial; stop one k-tile earlier so no prefetch passes K.
       if kernel.get("_TailFolding", False) and self.tailFoldingGL2Clamp(kernel):
-        # TailFolding: PGR+GL2, +1 when K has a tail (selected once before the loop)
-        self.codes.gl2PrefetchIncrement.add(SCmpLeU32(loopCounter, sgpr("GL2FoldThreshold"), \
-          comment="TailFolding: counterL <= PGR+GL2 (+1 if K tail)"))
+        # TailFolding: PGR+GL2, +1 when K has a tail, recomputed here (no SGPR kept across the loop)
+        with self.allocTmpSgpr(1, tag="gl2FoldThreshold") as tmp:
+          self.codes.gl2PrefetchIncrement.add(SAndB32(dst=sgpr(tmp.idx), src0=sgpr("SizesSum+%u" % self.states.unrollIdx), \
+            src1=kernel["DepthU"] - 1, comment="TailFolding: SCC = (K %% %u != 0)" % kernel["DepthU"]))
+          self.codes.gl2PrefetchIncrement.add(SAddCU32(dst=sgpr(tmp.idx), src0=kernel["PrefetchGlobalRead"] + kernel["PrefetchGL2"], src1=0, \
+            comment="TailFolding: GL2 threshold = PGR+GL2 (+1 if K tail)"))
+          self.codes.gl2PrefetchIncrement.add(SCmpLeU32(loopCounter, sgpr(tmp.idx), \
+            comment="TailFolding: counterL <= PGR+GL2 (+1 if K tail)"))
       else:
         self.codes.gl2PrefetchIncrement.add(SCmpLeU32(loopCounter, kernel["PrefetchGlobalRead"] + kernel["PrefetchGL2"], \
           comment="counterL<=PGR+GL2"))
@@ -6364,11 +6369,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       with (self.allocTmpSgpr(1, tag="gl2FoldPreLoop") if gl2Fold else contextlib.nullcontext()) as tmp:
         if gl2Fold:
           # TailFolding: when K has a tail the last k-tile is partial, so every GL2 prefetch threshold
-          # is one higher. Select the loop's PGR+GL2(+1) once here; the pre-loop ones are GL2 lower.
+          # is one higher: PGR (+1) here, PGR+1 (+1) below, PGR+GL2 (+1) recomputed in the loop.
           module.add(SAndB32(dst=sgpr(tmp.idx), src0=sgpr("SizesSum+%u" % self.states.unrollIdx), \
             src1=kernel["DepthU"] - 1, comment="TailFolding: SCC = (K %% %u != 0)" % kernel["DepthU"]))
-          module.add(SCSelectB32(dst=sgpr("GL2FoldThreshold"), src0=pgr + gl2 + 1, src1=pgr + gl2, comment="TailFolding: GL2 threshold = PGR+GL2 (+1 if K tail)"))
-          module.add(SSubU32(dst=sgpr(tmp.idx), src0=sgpr("GL2FoldThreshold"), src1=gl2, comment="TailFolding: pre-loop GL2 threshold = PGR (+1 if K tail)"))
+          module.add(SAddCU32(dst=sgpr(tmp.idx), src0=pgr, src1=0, comment="TailFolding: pre-loop GL2 threshold = PGR (+1 if K tail)"))
           module.add(SCmpLeU32(src0=loopCounter, src1=sgpr(tmp.idx), comment="TailFolding: counterL <= PGR (+1 if K tail)"))
         else:
           module.add(SCmpLeU32(src0=loopCounter, src1=hex(pgr), comment="counterL<=PGR"))
@@ -6377,7 +6381,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         module.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
         if gl2 == 2:
           if gl2Fold:
-            module.add(SSubU32(dst=sgpr(tmp.idx), src0=sgpr("GL2FoldThreshold"), src1=1, comment="TailFolding: pre-loop GL2 threshold = PGR+1 (+1 if K tail)"))
+            module.add(SAddU32(dst=sgpr(tmp.idx), src0=sgpr(tmp.idx), src1=1, comment="TailFolding: pre-loop GL2 threshold = PGR+1 (+1 if K tail)"))
             module.add(SCmpLeU32(src0=loopCounter, src1=sgpr(tmp.idx), comment="TailFolding: counterL <= PGR+1 (+1 if K tail)"))
           else:
             module.add(SCmpLeU32(src0=loopCounter, src1=hex(pgr+1), comment="counterL<=PGR+1"))

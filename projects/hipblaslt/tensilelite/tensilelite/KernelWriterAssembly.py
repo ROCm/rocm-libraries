@@ -592,9 +592,36 @@ class KernelWriterAssembly(KernelWriter):
     """The kernel carries runtime GSU (GSUSumIdx / GSU args): GlobalSplitU > 0 or -1."""
     return kernel["GlobalSplitU"] > 0 or kernel["GlobalSplitU"] == -1
 
+  def tailFoldStepShift(self, kernel):
+    """Shift that turns the per-wave TDM address increment tdmABIncs (bytes along K) into the K dim step in
+    the field's position (bit 16 of the low dword), or None when the step cannot be derived from it.
+
+    A and B must keep K contiguous at unit stride with K dim fields that step DU elements per k-tile (not
+    packed sub-byte F6/F4), unmirrored and unswizzled, with the same power-of-2 element size, so one
+    increment * 2^shift is the step of whichever tensor this wave carries: << 16 for 1-byte types (their
+    K dim counts bytes = elements), << 15 for 2-byte, << 14 for 4-byte."""
+    if not (kernel["NumWaves"] > 1 and not tdmPairOnEveryWave(kernel, "A", "B")) or self.states.globalReadIncsUseVgpr:
+      return None
+    pt = kernel["ProblemType"]
+    unrollDim = pt["IndicesSummation"][self.states.unrollIdx]
+    unitBytes = set()
+    for tc in ("A", "B"):
+      field = tdmKDimField(kernel, tc)
+      if field is None or field[1] != kernel["DepthU"] or pt.get("SwizzleTensor%s" % tc) or unrollDim in pt["MirrorDims%s" % tc] \
+         or not self.isConstUnitStride(self.strideRef(tc, unrollDim)):
+        return None
+      incBytes = kernel["_DepthU%s" % tc] * pt["DataType%s" % tc].numBytes()
+      if incBytes != int(incBytes) or int(incBytes) % field[1]:
+        return None
+      unitBytes.add(int(incBytes) // field[1])
+    if len(unitBytes) != 1 or not isPow2(next(iter(unitBytes))):
+      return None
+    return 16 - int(log2(next(iter(unitBytes))))
+
   def tailFoldNeedsStepSgpr(self, kernel) -> bool:
-    """TailFoldStep lives in SGPRs when it is not a codegen constant (runtime GSU) or StaggerU needs it."""
-    return self.tailFoldGsu(kernel) or self.states.staggerUCode
+    """TailFoldStep lives in SGPRs when it is not a codegen constant (runtime GSU) or StaggerU needs it, and it
+    cannot be derived from the TDM address increment (tailFoldStepShift)."""
+    return (self.tailFoldGsu(kernel) or self.states.staggerUCode) and self.tailFoldStepShift(kernel) is None
 
   def tailFoldInit(self, kernel, kSgpr, loopCounter, tmp) -> Module:
     """Tail folding (fixed at codegen): the partial last k-tile is one more unroll iteration, the kernel has no
@@ -636,6 +663,20 @@ class KernelWriterAssembly(KernelWriter):
       if kStep is not None:
         stepLo, stepHi = kStep
         what = "wrapIter ? -(splitIters-1)*step : step"
+      elif self.tailFoldGsu(kernel) and self.tailFoldStepShift(kernel) is not None:
+        # the step is this wave's address increment ((GSUC ? 1 : GSU) * DU * bytes) in K dim units, moved to
+        # the field's position; its high half (GSU * DU >= 2^16) goes to the next dword
+        shift = self.tailFoldStepShift(kernel)
+        inc = sgpr("tdm%s%sIncs" % (tcA, tcB))
+        with self.allocTmpSgpr(2, tag="tailFoldStepFromInc") as t:
+          module.add(SLShiftLeftB32(dst=sgpr(t.idx), shiftHex=hex(shift), src=inc,
+                                    comment="TailFolding: K dim step = address increment << %u (low half)" % shift))
+          module.add(SLShiftRightB32(dst=sgpr(t.idx + 1), shiftHex=hex(32 - shift), src=inc,
+                                     comment="TailFolding: K dim step = address increment << %u (high half)" % shift))
+          what = "(GSUC ? 1 : GSU) * %u" % step
+          module.add(SSubU32(dst=lo, src0=lo, src1=sgpr(t.idx), comment="TailFolding: K dim -= %s (low half)" % what))
+          module.add(SSubBU32(dst=hi, src0=hi, src1=sgpr(t.idx + 1), comment="TailFolding: K dim -= %s (high half)" % what))
+        return module
       elif self.tailFoldGsu(kernel):
         stepLo, stepHi = sgpr("TailFoldStep"), sgpr("TailFoldStep+1")
         what = "(GSUC ? 1 : GSU) * %u" % step
@@ -1505,8 +1546,6 @@ class KernelWriterAssembly(KernelWriter):
         gl2Tensors.append("Metadata")
       for tc in gl2Tensors:
         module.add(self.defineSgpr(f"GL2PrefetchInc{tc}", numGL2IncSgpr, numGL2IncSgpr))
-      if kernel.get("_TailFolding", False) and self.tailFoldingGL2Clamp(kernel):
-        module.add(self.defineSgpr("GL2FoldThreshold", 1))
       if GL2PrefetchLoad.useSAddr(kernel):
         for tc in gl2Tensors:
           module.add(self.defineSgpr(f"GL2PrefetchBase{tc}", 2, 2))
@@ -7938,8 +7977,9 @@ class KernelWriterAssembly(KernelWriter):
                 comment="Compute actual stagger start for this tile"))
       module.add(SLShiftLeftB32(dst=sgpr("StaggerUIter"), src=sgpr("StaggerUIter"), \
                 shiftHex=sgpr(staggerUStrideShift), comment="shift by StaggerUStride"))
-      if kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]:
+      if kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"] and self.tailFoldNeedsStepSgpr(kernel):
         # wrapping from this split's last k-tile back to its first: K dim += (splitIters - 1) * step
+        # (with tailFoldStepShift the loop derives it from WrapU, -(splitIters - 1) * increment)
         t = tmpSgpr
         module.add(SSubU32(dst=sgpr(t + 2), src0=sgpr("OrigLoopCounter"), src1=1, comment="TailFolding: splitIters - 1"))
         module.add(SCMovB32(dst=sgpr(t + 2), src=0, comment="TailFolding: (no iteration)"))
@@ -8145,13 +8185,23 @@ class KernelWriterAssembly(KernelWriter):
       if field is None:
         raise RuntimeError("tail folding: %s keeps K in no single descriptor field" % tc)
       lo, hi = sgpr("tdm%sGroup1+%u" % (tc, field[0])), sgpr("tdm%sGroup1+%u" % (tc, field[0] + 1))
-      with self.allocTmpSgpr(3, 2, tag="tailFoldStaggerStart") as t:
-        imod.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(t.idx), sgpr(t.idx + 1), sgpr("StaggerUIter"), sgpr("TailFoldStep"),
-                                                     comment="TailFolding: stagger start = StaggerUIter * step"))
-        imod.add(SMulI32(dst=sgpr(t.idx + 2), src0=sgpr("StaggerUIter"), src1=sgpr("TailFoldStep+1"), comment="TailFolding: (step high)"))
-        imod.add(SAddU32(dst=sgpr(t.idx + 1), src0=sgpr(t.idx + 1), src1=sgpr(t.idx + 2), comment="TailFolding: stagger start (high)"))
-        imod.add(SSubU32(dst=lo, src0=lo, src1=sgpr(t.idx), comment="TailFolding: K dim -= stagger start (low half)"))
-        imod.add(SSubBU32(dst=hi, src0=hi, src1=sgpr(t.idx + 1), comment="TailFolding: K dim -= stagger start (high half)"))
+      shift = self.tailFoldStepShift(kernel)
+      if shift is not None:
+        # offsetSgpr = StaggerUIter * the address increment (64-bit): in K dim units it is the stagger start
+        assert offsetSgpr % 2 == 0, "s_lshl_b64 needs an even SGPR pair"
+        with self.allocTmpSgpr(2, 2, tag="tailFoldStaggerStart") as t:
+          imod.add(SLShiftLeftB64(dst=sgpr(t.idx, 2), shiftHex=hex(shift), src=sgpr(offsetSgpr, 2),
+                                  comment="TailFolding: stagger start = stagger offset << %u" % shift))
+          imod.add(SSubU32(dst=lo, src0=lo, src1=sgpr(t.idx), comment="TailFolding: K dim -= stagger start (low half)"))
+          imod.add(SSubBU32(dst=hi, src0=hi, src1=sgpr(t.idx + 1), comment="TailFolding: K dim -= stagger start (high half)"))
+      else:
+        with self.allocTmpSgpr(3, 2, tag="tailFoldStaggerStart") as t:
+          imod.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(t.idx), sgpr(t.idx + 1), sgpr("StaggerUIter"), sgpr("TailFoldStep"),
+                                                       comment="TailFolding: stagger start = StaggerUIter * step"))
+          imod.add(SMulI32(dst=sgpr(t.idx + 2), src0=sgpr("StaggerUIter"), src1=sgpr("TailFoldStep+1"), comment="TailFolding: (step high)"))
+          imod.add(SAddU32(dst=sgpr(t.idx + 1), src0=sgpr(t.idx + 1), src1=sgpr(t.idx + 2), comment="TailFolding: stagger start (high)"))
+          imod.add(SSubU32(dst=lo, src0=lo, src1=sgpr(t.idx), comment="TailFolding: K dim -= stagger start (low half)"))
+          imod.add(SSubBU32(dst=hi, src0=hi, src1=sgpr(t.idx + 1), comment="TailFolding: K dim -= stagger start (high half)"))
 
     if skipLabel is not None:
       imod.add(skipLabel)
@@ -26735,7 +26785,12 @@ class KernelWriterAssembly(KernelWriter):
                 comment="select WrapU or normal inc (lo)"))
         mod.add(SCSelectB32(dst=sgpr(incTmpHi), src0=wrapHi, src1=0, \
                 comment="select WrapU or normal inc (hi)"))
-        if tfStagger:
+        if tfStagger and self.tailFoldStepShift(kernel) is not None:
+          # the selected increment (WrapU = -(splitIters-1)*inc on the wrapIter) in K dim units is the K dim step
+          shift = self.tailFoldStepShift(kernel)
+          mod.add(SLShiftLeftB64(dst=sgpr(kStep.idx, 2), shiftHex=hex(shift), src=sgpr(incTmpLo, 2),
+                                 comment="TailFolding: K dim step = (wrapIter ? WrapU : inc) << %u" % shift))
+        elif tfStagger:
           # the wrap goes back from this split's last k-tile to its first: K dim += (splitIters-1)*step
           mod.add(SCSelectB32(dst=sgpr(kStep.idx), src0=sgpr("TailFoldWrapK"), src1=sgpr("TailFoldStep"),
                               comment="TailFolding: K dim step = wrapIter ? -(splitIters-1)*step : step (low)"))
