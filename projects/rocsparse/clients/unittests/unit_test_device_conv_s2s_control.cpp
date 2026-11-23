@@ -1694,13 +1694,21 @@ namespace
         // The intermediate CSR matrix keeps the int32_t source column type, so an
         // expansion past the int32_t range is rejected before anything is allocated.
         constexpr int64_t too_wide = 1LL << 28;
+        constexpr int64_t widest   = std::numeric_limits<int32_t>::max() / k_wide_block_dim;
         {
             WideBsr bsr(i32, too_wide);
             expect_count_rejected(handle, bsr.source, bsr.target, "i32 2^28 block columns");
         }
         {
+            // The first rejected count: 2^31 expanded columns.
+            WideBsr bsr(i32, widest + 1);
+            expect_count_rejected(handle, bsr.source, bsr.target, "i32 widest + 1 block columns");
+        }
+        {
             // One block in 2^28 block rows. The host pointers are never read: the
-            // expansion is rejected before any allocation.
+            // expansion is rejected before any allocation. A boundary count is not
+            // used, because a regressed check would allocate and launch kernels on
+            // these host pointers.
             int   dummy = 0;
             Spmat source, target;
             ASSERT_EQ(rocsparse_create_bsr_descr(&source,
@@ -1732,8 +1740,7 @@ namespace
         }
         {
             // The widest int32_t expansion still converts.
-            constexpr int64_t widest = std::numeric_limits<int32_t>::max() / k_wide_block_dim;
-            WideBsr           bsr(i32, widest);
+            WideBsr bsr(i32, widest);
             SCOPED_TRACE("i32 widest");
             ASSERT_EQ(run_permissive(handle, bsr.source, bsr.target, nullptr), st_ok);
             bsr.expect_last_columns(widest);
