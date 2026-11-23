@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -1696,6 +1697,40 @@ TEST(TestSdpaFwdPlanRowStats, ExecuteWritesMaxAndSumExpConsistentWithLse)
     }
 }
 
+TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsCuSeqLen)
+{
+    // The reference does not implement cu_seq_len_*. padding_mask stays false so only the
+    // cu_seq_len reject can decline the graph and keep it from running as full-length attention.
+    const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        planBuilder;
+
+    // Control: the same graph without cu_seq_len is accepted, so the reject below declines it.
+    {
+        auto baseline = makeRawSdpaFwdGraph(SdpaAttributesT{});
+        const GraphWrapper baselineWrapper(baseline.GetBufferPointer(), baseline.GetSize());
+        ASSERT_TRUE(
+            planBuilder.isApplicable(baselineWrapper.getNode(0), baselineWrapper.getTensorMap()));
+    }
+
+    for(const bool useKv : {false, true})
+    {
+        SdpaAttributesT attrs;
+        if(useKv)
+        {
+            attrs.cu_seq_len_kv_tensor_uid = 52;
+        }
+        else
+        {
+            attrs.cu_seq_len_q_tensor_uid = 52;
+        }
+        auto graphBuilder = makeRawSdpaFwdGraph(attrs);
+        const GraphWrapper graphWrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+
+        EXPECT_FALSE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()))
+            << "SdpaFwdPlanBuilder must reject cu_seq_len_" << (useKv ? "kv" : "q");
+    }
+}
+
 TEST(TestSdpaFwdPlanBuilder, IsApplicableAndExecutesWithStatsOutput)
 {
     // A graph configured to emit the softmax log-sum-exp (LSE) stats output is supported.
@@ -2013,14 +2048,23 @@ TEST(TestSdpaFwdPlanBuilder, BothDeprecatedCausalMasksThrow)
     const std::vector<int64_t> dims = {1, 2, 4, 8};
     SdpaFwdTensorBundle<float> bundle(dims, dims, dims, getGlobalTestSeed());
 
+    // The frontend rejects the pair, so the second flag is set on the serialized graph, as a
+    // graph that bypasses the frontend would carry it.
     auto graphTuple = buildSdpaFwdGraph(bundle,
                                         DataType::FLOAT,
                                         /*causalMask=*/true,
-                                        /*causalMaskBottomRight=*/true);
+                                        /*causalMaskBottomRight=*/false);
     auto& graph = std::get<0>(graphTuple);
     auto [bin, err] = graph->to_binary();
     ASSERT_TRUE(err.is_good()) << err.get_message();
-    const GraphWrapper wrapper(bin.data(), bin.size());
+
+    auto graphT = std::unique_ptr<GraphT>(GetGraph(bin.data())->UnPack());
+    auto* attrs = graphT->nodes.front()->attributes.AsSdpaAttributes();
+    ASSERT_NE(attrs, nullptr);
+    attrs->causal_mask_bottom_right = true;
+    flatbuffers::FlatBufferBuilder bothFlags;
+    bothFlags.Finish(CreateGraph(bothFlags, graphT.get()));
+    const GraphWrapper wrapper(bothFlags.GetBufferPointer(), bothFlags.GetSize());
 
     const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         planBuilder;
@@ -2446,11 +2490,6 @@ TEST(TestSdpaFwdPlanMask, UnsupportedMaskDtypeHasNoPlan)
         FAIL() << "An INT32 mask must not resolve to a plan";
     }
     catch(const CpuReferenceNotApplicableError& e)
-    {
-        FAIL() << "Expected the registry error naming the mask dtype, got not-applicable: "
-               << e.what();
-    }
-    catch(const std::runtime_error& e)
     {
         EXPECT_NE(std::string(e.what()).find("mask=INT32"), std::string::npos) << e.what();
     }

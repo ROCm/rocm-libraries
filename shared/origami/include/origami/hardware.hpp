@@ -275,6 +275,52 @@ class ORIGAMI_EXPORT hardware_t {
   }
 
   /**
+   * @brief Whether a gfx1250 device with @p n_cu WGPs is the 6-XCD part: 192 WGPs, or 96 in a
+   *        DPX partition.  No 8-XCD partition has these counts; 64 and 32 WGPs are ambiguous
+   *        and keep the 8-XCD row.
+   */
+  static constexpr bool gfx1250_wgps_select_6xcd(size_t n_cu) noexcept {
+    return n_cu == 192 || n_cu == 96;
+  }
+
+  /**
+   * @brief gfx1250-only architecture constants, by the device's WGP count (@p n_cu, 0 = the
+   *        8-XCD part).
+   *
+   * 8-XCD part (256 WGPs, 1.9 GHz memory): peak tensor-DMA read bandwidth L2 41.93 TB/s,
+   * sustained DRAM 17.13 TB/s.  6-XCD part (1.65 GHz memory), measured on a 96-WGP DPX/NPS2
+   * partition: L2 14.75 TB/s, DRAM 8.64 TB/s; both scale with the WGPs of the partition
+   * (192 WGPs unmeasured).  The quadratic is the fraction of the DRAM peak reached vs active
+   * WGPs in 256-WGP units (compute_mem_bw_from_occupancy rescales to the part's N_CU).  mem3 is
+   * the DRAM peak scaled by memory/engine clock, and mem_clock_ratio is engine/memory clock.
+   */
+  static constexpr architecture_constants get_gfx1250_arch_constants(size_t n_cu = 0) noexcept {
+    auto c            = get_gfx950_arch_constants(std::nullopt);
+    c.mem2_perf_ratio = NO_MALL_AVAILABLE;
+    c.simds_per_cu    = 4;
+    c.l1_capacity     = 0;  // tensor-DMA loads bypass L1
+    if (gfx1250_wgps_select_6xcd(n_cu)) {
+      const double partition       = static_cast<double>(n_cu) / 96.0;
+      // Refit on the 145-size N-sweep of this part: the fit moved the base model's peaks (L2 41.93,
+      // DRAM 19.725 TB/s) to 41.302 and 18.383 TB/s; applied here as those ratios.
+      c.mem1_perf_ratio            = 14.75 * (41301.81761089743 / 41930.0) * partition;
+      c.mem3_perf_ratio            = 8.637 * (18382.976995668938 / 19725.454545454544) * 1.65 / 2.4 * partition;
+      std::get<0>(c.mem_bw_per_wg_coefficients) = -1.447e-5;
+      std::get<1>(c.mem_bw_per_wg_coefficients) = 7.683e-3;
+      std::get<2>(c.mem_bw_per_wg_coefficients) = -1.314e-3;
+      c.mem_clock_ratio            = 2.4 / 1.65;
+      return c;
+    }
+    c.mem1_perf_ratio            = 41.93;
+    c.mem3_perf_ratio            = 17.13 * 1.9 / 2.4;
+    std::get<0>(c.mem_bw_per_wg_coefficients) = -1.81e-5;
+    std::get<1>(c.mem_bw_per_wg_coefficients) = 8.43e-3;
+    std::get<2>(c.mem_bw_per_wg_coefficients) = -1.42e-3;
+    c.mem_clock_ratio            = 2.4 / 1.9;
+    return c;
+  }
+
+  /**
    * @brief Get architecture-specific constants for a given architecture.
    *
    * Returns the pre-configured constants (memory performance ratios, bandwidth
@@ -285,11 +331,14 @@ class ORIGAMI_EXPORT hardware_t {
    * @param pci_chip_id For gfx950 only: optional PCI chip id; @c std::nullopt selects the
    *                    default id75a0 row; low 16 bits @c 0x75a8 selects the id75a8 row.
    *                    Ignored for all other architectures.
+   * @param n_cu For gfx1250 only: the device's WGP count, which selects the part's row
+   *             (see @ref get_gfx1250_arch_constants); 0 selects the 8-XCD part.
    * @return architecture_constants Constants for the specified architecture
    */
   static constexpr architecture_constants get_arch_constants(
       architecture_t arch,
-      std::optional<int> pci_chip_id = std::nullopt) noexcept {
+      std::optional<int> pci_chip_id = std::nullopt,
+      size_t n_cu = 0) noexcept {
     switch (arch) {
       case architecture_t::gfx90a:
         return {5.5, 1.21875121875121875122 * 1.2, 1.2, 4, std::make_tuple(0, 0.03, 0), 1.5, 4, 16 * 1024};
@@ -315,7 +364,7 @@ class ORIGAMI_EXPORT hardware_t {
         return {4.86133, 1.21875121875121875122 * 1.28305, 0.420583, 2, std::make_tuple(0, 0.13169, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1150:
         // AMD Strix Point iGPU
-        return {1.497, NO_MALL_AVAILABLE, 0.077, 16, std::make_tuple(0, 0.18, 0), 1.5, 2, 32 * 1024};
+        return {1.497, NO_MALL_AVAILABLE, 0.0300383, 2, std::make_tuple(0, 0.18, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1151:
         // AMD Strix Halo iGPU
         return {2.47, 1.21875121875121875122 * 0.93, 0.215, 2, std::make_tuple(0, 0.22, 0), 1.5, 2, 32 * 1024};
@@ -325,22 +374,8 @@ class ORIGAMI_EXPORT hardware_t {
       case architecture_t::gfx1153:
         // AMD Radeon 820M iGPU
         return {0.240, NO_MALL_AVAILABLE, 0.066, 2, std::make_tuple(0, 0.19, 0), 1.5, 2, 32 * 1024};
-      case architecture_t::gfx1250: {
-        // Measured at a 2.4 GHz engine clock and 1.9 GHz memory clock.  Peak tensor-DMA read
-        // bandwidth: L2 41.93 TB/s, sustained DRAM 17.13 TB/s.  The quadratic is the fraction
-        // of the DRAM peak reached vs active WGPs (fit on 256 WGPs, rescaled to the part's N_CU
-        // by compute_mem_bw_from_occupancy).  mem3 is the DRAM peak scaled by memory/engine
-        // clock, and mem_clock_ratio is engine/memory clock.
-        auto c                       = get_gfx950_arch_constants(std::nullopt);
-        c.mem1_perf_ratio            = 41.93;
-        c.mem2_perf_ratio            = NO_MALL_AVAILABLE;
-        c.mem3_perf_ratio            = 17.13 * 1.9 / 2.4;
-        c.mem_bw_per_wg_coefficients = std::make_tuple(-1.81e-5, 8.43e-3, -1.42e-3);
-        c.mem_clock_ratio            = 2.4 / 1.9;
-        c.simds_per_cu               = 4;
-        c.l1_capacity                = 0;  // tensor-DMA loads bypass L1
-        return c;
-      }
+      case architecture_t::gfx1250:
+        return get_gfx1250_arch_constants(n_cu);
       default: return {0, 0, 0, 0, std::make_tuple(0, 0, 0), 0, 4, 32 * 1024};
     }
   }

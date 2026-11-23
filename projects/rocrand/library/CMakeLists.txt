@@ -52,6 +52,11 @@ configure_file(
 
 add_library(rocrand ${rocRAND_HIP_SRCS})
 
+# Restrict exported symbols to the public C API
+if(BUILD_SHARED_LIBS AND NOT WIN32)
+    target_link_options(rocrand PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/rocrand.map")
+endif()
+
 if(WIN32)
     configure_file("${PROJECT_SOURCE_DIR}/library/include/rocrand/rocrand_in.rc.in"
                    "${PROJECT_BINARY_DIR}/library/include/rocrand/rocrand_in.rc"

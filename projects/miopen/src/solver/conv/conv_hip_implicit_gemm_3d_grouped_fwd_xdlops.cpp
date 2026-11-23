@@ -45,6 +45,7 @@
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE);
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CK_DEFAULT_KERNELS)
 
 namespace miopen {
@@ -207,9 +208,12 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
         MIOPEN_LOG_I2("Step 1: Index override not set, proceeding to next step");
     }
 
-    // 2. Hard-coded heuristics for BF16/FP16 on gfx942 and gfx950 only
+    // 2. Hard-coded heuristics for BF16/FP16 on gfx942 only
+    //    (set MIOPEN_DEBUG_..._HARDCODE=0 to skip and fall through to the AI model).
+    //    gfx950 has no hard-coded rule here, so its picks come from the AI model.
     if((problem.GetInDataType() == miopenBFloat16 || problem.GetInDataType() == miopenHalf) &&
-       (ctx.GetStream().GetDeviceName() == "gfx942" || ctx.GetStream().GetDeviceName() == "gfx950"))
+       ctx.GetStream().GetDeviceName() == "gfx942" &&
+       !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE))
     {
         MIOPEN_LOG_I2("Step 2: Attempting hard-coded heuristics for "
                       << (problem.GetInDataType() == miopenBFloat16 ? "BF16" : "FP16"));
@@ -318,21 +322,6 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
                 }
             }
         }
-        else if(ctx.GetStream().GetDeviceName() == "gfx950")
-        {
-            if(index == 0 && ((problem.GetInDataType() == miopenHalf) ||
-                              (problem.GetInDataType() == miopenBFloat16)))
-            {
-                if(problem.GetInDepth() >= 3 && problem.GetInWidth() >= 256)
-                {
-                    found_index = find_kernel(
-                        11,
-                        "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<256, 256, 256, "
-                        "32, Default, 32, 32, 4, 4, 8, 8, 8, 1, 1, "
-                        "BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>");
-                }
-            }
-        }
 
         if(found_index.has_value())
         {
@@ -363,13 +352,11 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
 
         bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
-        auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool try_tf32) {
-            return loader.FillValidKernels(
-                CKSolverType::GrpConv3dFwd, p, p.GetInDataType(), try_tf32);
-        };
-
-        auto ck_val_creator = MakeCKValidatorCreator(
-            loader, CKSolverType::GrpConv3dFwd, problem.GetInDataType(), mode_use_tf32);
+        auto ck_val_creator = MakeCKValidatorCreator(loader,
+                                                     CKSolverType::GrpConv3dFwd,
+                                                     problem.GetInDataType(),
+                                                     mode_use_tf32,
+                                                     k3DFwdSolverConfig.uses_split_k);
 
         // Note: No KTN runner needed for 3D (supports_ktn = false)
         if(RunAIHeuristics(k3DFwdSolverConfig,
@@ -377,7 +364,6 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
                            ctx,
                            problem,
                            false,
-                           fill_valid_kernels,
                            nullptr,
                            ck_val_creator,
                            mode_use_tf32))

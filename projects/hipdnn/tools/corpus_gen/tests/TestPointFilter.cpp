@@ -100,3 +100,16 @@ TEST(TestPointFilter, APointWithoutTheFilteredParameterFails)
     const ProblemPoint elsewhere{{"m", int64_t{4096}}, {"n", int64_t{4096}}};
     EXPECT_FALSE(keeps({{"dtype", "bf16"}}, elsewhere));
 }
+
+TEST(TestPointFilter, AValueIsAdmittedWhenNoClauseNamesItsParameterOrOneNamesTheValue)
+{
+    const std::vector<KeepClause> clauses{
+        {"dtype", "bf16"}, {"dtype", "fp16"}, {"is_causal", "true"}};
+
+    EXPECT_TRUE(admitsValue(clauses, "dtype", std::string("fp16")));
+    EXPECT_FALSE(admitsValue(clauses, "dtype", std::string("fp32")));
+    EXPECT_TRUE(admitsValue(clauses, "is_causal", true));
+    EXPECT_FALSE(admitsValue(clauses, "is_causal", false));
+    EXPECT_TRUE(admitsValue(clauses, "layout", std::string("bhsd"))) << "no clause names layout";
+    EXPECT_TRUE(admitsValue({}, "dtype", std::string("fp32")));
+}

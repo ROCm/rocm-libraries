@@ -3,7 +3,7 @@
 Documentation for hipBLAS is available at
 [https://rocm.docs.amd.com/projects/hipBLAS/en/latest/](https://rocm.docs.amd.com/projects/hipBLAS/en/latest/).
 
-## hipBLAS 3.9.0
+## (Unreleased) hipBLAS 3.9.0
 
 ### Changed
 
@@ -15,8 +15,10 @@ Documentation for hipBLAS is available at
 * Fix `hipblas-test` failing to link in Debug, with undefined references to `ref_syrk_ex` and `ref_herk_ex`. The gtest type filter constructed a polymorphic filter object, which forced the compiler to instantiate reference calls for type combinations those tests never run. At `-O0` those references survived to the linker. 
 * Fix `hipblas-test` crashing during process teardown after the tests had passed, on a host whose installed googletest is newer than the 1.11 headers bundled with the clients. The clients compiled against the bundled headers and linked the system library, and googletest 1.12 added a virtual function that shifted the listener vtable. The client build now finds the bundled googletest ahead of the system one.
 * Fix the hipBLAS library build with libc++. `library/src/include/exceptions.hpp` catches `std::bad_alloc` and relied on a transitive `<new>` include that libstdc++ provides and libc++ does not.
+* Fix the hipBLAS-GB/s column reported by `hipblas-bench`. `ger`, `her`, `her2`, `hpr`, and `hpr2` counted the read of `A` but not its write, so the reported bandwidth was about half of the traffic moved. `iamax` counted `x` twice. `hpmv` did not scale the vector traffic by the element size. `syr2k`, `symm`, `hemm`, `dgmm`, `geam`, and `trtri` returned bytes instead of gigabytes, so the reported bandwidth was 10^9 times too high. The counts also used 32-bit arithmetic, which overflows for matrix orders above 46340. GFLOP/s was unaffected.
+* Fix `hipblas-test` and `hipblas-bench` initialization. Host buffers were filled from `rand()` and one shared `std::mt19937` inside OpenMP loops. `rand()` takes a process-wide lock, so large Level 1 problems on a many-core host spent almost all of their time in that lock, and sharing `std::mt19937` across threads is a data race. Which thread wrote an element also depended on the thread count, so a failure was not reproducible across runs or machines. Each block is now generated from a seed taken from the calling thread and the block position, so a fill is identical for any thread count. `hipblas_seedrand()` still restarts the sequence. The library is unchanged. Input values differ from the previous generator.
 
-## hipBLAS 3.8.0
+## hipBLAS 3.8.0 for ROCm 10.2.0
 
 ### Added
 
@@ -27,13 +29,13 @@ Documentation for hipBLAS is available at
 * The minimum required CMake version is now 3.17, for the library and the clients. `FindCUDAToolkit`, used by the CUDA backend, was added in that release.
 * `hipblasSetWorkspace` chooses whether the rocBLAS backend may grow its device workspace. A non-null workspace with a nonzero size is a fixed limit and is never resized, which caps device memory for the handle. A later call that needs more, such as `trsmBatched` or `trsmStridedBatched` with a large `batchCount`, returns `HIPBLAS_STATUS_ALLOC_FAILED` even when free device memory remains. Passing `nullptr` or a size of 0 returns the handle to rocBLAS-managed memory, which starts from a default size and grows as needed. `HIPBLAS_WORKSPACE_CONFIG=:0:0` selects that same managed mode for callers that configure the workspace through the environment, such as PyTorch. With the rocBLAS backend, set `ROCBLAS_VERBOSE_ERROR=1` to print the required and available sizes when a fixed workspace is too small for `trsm`.
 
-## hipBLAS 3.7.0
+## hipBLAS 3.7.0 for ROCm 10.1.0
 
 ### Added
 
 * Level 3 grouped batched GEMM functions `hipblasSgemmGroupedBatched`, `hipblasDgemmGroupedBatched`, `hipblasGemmGroupedBatchedEx`, and `hipblasGemmGroupedBatchedExWithFlags` for both C and FORTRAN, including ILP64 API (`_64` name suffix).
 
-## hipBLAS 3.6.0
+## hipBLAS 3.6.0 for ROCm 10.0.0
 
 ### Added
 

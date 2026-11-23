@@ -4,8 +4,10 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <functional>
 #include <iostream>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -20,6 +22,7 @@
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/EngineOrdering.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginTypeTraits.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/SdpaGraphMutators.hpp>
@@ -223,12 +226,25 @@ TEST(TestContainer, EachDiscoveredSetsSharedStateIsItsOwnAndIsHandedOutUnchanged
     const auto& sets = discoverDescriptorSets();
     ASSERT_FALSE(sets.empty());
 
-    // The schema id is what a state exposes of the set it was built from, so a slot
-    // serving another set's state shows up only between sets whose schemas differ.
-    std::set<hipdnn_plugin_sdk::ingestor::DescriptorId> schemaIds;
+    // The schema ids are what a state exposes of the set it was built from (one per kernel
+    // slot of a slotted engine), so a slot serving another set's state shows up only
+    // between sets whose schemas differ.
+    const auto schemaIdsOfSet = [](const hipdnn_plugin_sdk::ingestor::DescriptorSet& set) {
+        std::vector<hipdnn_plugin_sdk::ingestor::DescriptorId> ids;
+        if(set.slots.empty())
+        {
+            ids.push_back(set.schema.id);
+        }
+        for(const auto& slot : set.slots)
+        {
+            ids.push_back(slot.schema.id);
+        }
+        return ids;
+    };
+    std::set<std::vector<hipdnn_plugin_sdk::ingestor::DescriptorId>> schemaIds;
     for(const auto& set : sets)
     {
-        schemaIds.insert(set.schema.id);
+        schemaIds.insert(schemaIdsOfSet(set));
     }
     ASSERT_GE(schemaIds.size(), 2U)
         << "every discovered set shares one metadata schema, so a mispaired slot is invisible";
@@ -238,7 +254,13 @@ TEST(TestContainer, EachDiscoveredSetsSharedStateIsItsOwnAndIsHandedOutUnchanged
         const auto state = discoveredSharedState(set.engine.id);
         ASSERT_NE(state.get(), nullptr)
             << "no shared state for descriptor set '" << set.engine.name << "'";
-        EXPECT_EQ(state->slots().front().schema.id, set.schema.id)
+        std::vector<hipdnn_plugin_sdk::ingestor::DescriptorId> stateIds;
+        stateIds.reserve(state->slots().size());
+        for(const auto& slot : state->slots())
+        {
+            stateIds.push_back(slot.schema.id);
+        }
+        EXPECT_EQ(stateIds, schemaIdsOfSet(set))
             << "the id of '" << set.engine.name << "' serves the state of another set";
         // Shared, not rebuilt or handed out once: a second lookup is the same object.
         EXPECT_EQ(discoveredSharedState(set.engine.id).get(), state.get())
@@ -419,10 +441,14 @@ TEST(TestContainer, GetEngineNameRejectsANullNameArgument)
               HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
-// The provider's schema guard's opt-in list (GraphSchema.hpp): the built-in engines claim graph
-// schema 1.4.0 (each of them gates ragged tensors, declared alignments and offset multipliers),
-// and the six FlyDSL SDPA engines claim 1.4.0 too, the SDK's newest (their UEDs' sdk_version,
-// their matchers reviewed against every field up to it). The gfx950 rocKE conv dgrad engine
+// The provider's schema guard's opt-in list (GraphSchema.hpp): the HIP MLOps and HIP Flash2
+// engines claim graph schema 1.4.0 (each of them gates ragged tensors, declared alignments and
+// offset multipliers), and the ASM SDPA engine and the six FlyDSL SDPA forward engines claim 1.6.0,
+// the SDK's newest (their forward matchers also gate cu_seq_len), and the two FlyDSL SDPA
+// backward engines claim 1.4.0 (their UEDs' sdk_version; their matchers reviewed against every field
+// up to it, and a backward graph never carries cu_seq_len). So does the RDNA WMMA prefill engine,
+// whose matcher gates paged K/V, ragged Q / O and their offset multipliers, and every declared
+// alignment. The gfx950 rocKE conv dgrad engine
 // claims 1.3.0: its graph matcher gates alignment (multiples of 16 bytes) and declines ragged
 // tensors. Every other engine stays at or below the 1.2.0 baseline, so ragged, aligned and
 // multiplier graphs never reach it. Opting an engine in is an edit here, reviewed with that
@@ -431,15 +457,18 @@ TEST(TestContainer, PinsEveryEnginesDeclaredGraphSchema)
 {
     const std::map<std::string, std::string> optedIn{
         {"hipkernel:Gfx950ConvDgradAot", "1.3.0"},
-        {std::string(hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_NAME), "1.4.0"},
+        {"hipkernel:Gfx1151WmmaAttention", "1.4.0"},
+        {std::string(hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_NAME), "1.6.0"},
         {std::string(hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_NAME), "1.4.0"},
         {std::string(hipdnn_data_sdk::utilities::HIP_FLASH2_ENGINE_NAME), "1.4.0"},
-        {"hipkernel:flydsl_sdpa_rdna", "1.4.0"},
-        {"hipkernel:flydsl_sdpa_rdna_decode", "1.4.0"},
-        {"hipkernel:flydsl_sdpa_aiw", "1.4.0"},
-        {"hipkernel:flydsl_sdpa_cdna", "1.4.0"},
-        {"hipkernel:flydsl_sdpa_cdna_dualwave", "1.4.0"},
-        {"hipkernel:flydsl_sdpa_cdna_decode", "1.4.0"}};
+        {"hipkernel:flydsl_sdpa_rdna", "1.6.0"},
+        {"hipkernel:flydsl_sdpa_rdna_decode", "1.6.0"},
+        {"hipkernel:flydsl_sdpa_aiw", "1.6.0"},
+        {"hipkernel:flydsl_sdpa_cdna", "1.6.0"},
+        {"hipkernel:flydsl_sdpa_cdna_dualwave", "1.6.0"},
+        {"hipkernel:flydsl_sdpa_cdna_decode", "1.6.0"},
+        {"hipkernel:flydsl_sdpa_bwd_merged", "1.4.0"},
+        {"hipkernel:flydsl_sdpa_bwd_split", "1.4.0"}};
     Container container;
     auto& manager = container.getEngineManager();
     const auto baseline = providerBaselineGraphSchema();
@@ -510,6 +539,7 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
     };
 
     // The engines that serve this graph on gfx90a, gfx942 and gfx950, and no others.
+    // NOLINTNEXTLINE(misc-const-correctness)
     size_t expected = 0;
 #ifdef HIPDNN_ENGINE_ASM_SDPA
     // The assembly kernels are built for gfx942 and gfx950 only.
@@ -586,7 +616,7 @@ TEST(TestContainer, GetAllEngineIds)
 }
 
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
-// The provider at engine plugin API 1.4.0 with its schema guard (core/GraphSchema.hpp): a packed
+// The provider at engine plugin API 1.6.0 with its schema guard (core/GraphSchema.hpp): a packed
 // (THD) SDPA graph, schema 1.4.0 through its ragged offset multipliers, reaches the FlyDSL SDPA
 // engines, which opted in, and no other engine claims it.
 TEST(TestContainer, RoutesAPackedSdpaGraphOnlyToTheFlydslEngines)
@@ -656,5 +686,144 @@ TEST(TestContainer, RoutesARaggedSdpaGraphToTheAsmEngine)
     const auto ids = manager.getApplicableEngineIds(handle, raggedGraph);
     EXPECT_NE(std::find(ids.begin(), ids.end(), asm_sdpa_engine::AsmSdpaEngine::staticId()),
               ids.end());
+}
+
+// With the default static ordering the ASM engine ranks above every other engine that
+// serves SDPA forward (EngineOrdering.hpp), so it runs every graph it accepts. These are
+// the forward classes it serves through causal masks, stats and group-mode lengths, several
+// of which no other engine serves; each must rank ASM first. An output the kernels cannot
+// address must leave ASM out of the list, so the graph falls to another engine or to none.
+TEST(TestContainer, RanksTheAsmEngineFirstForTheSdpaForwardGraphsItServes)
+{
+    SKIP_IF_NO_DEVICES();
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    namespace sdpa = hipdnn_test_sdk::utilities::sdpa;
+
+    Handle handle;
+    const auto deviceString = hip_kernel_provider_common::getDeviceString(handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP() << "the ASM forward kernels ship for gfx942 and gfx950 only";
+    }
+
+    const std::vector<int64_t> dims{4, 8, 256, 128};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, {3, 1, 2, 0});
+    // A bf16 head-dim-128 [B, S, H, D] graph.
+    const auto bshdGraph = [&](bool withStats,
+                               bool causalMask,
+                               bool paddingMask = false,
+                               hipdnn_test_sdk::utilities::CuSeqLenSides cuSeqLenSides
+                               = hipdnn_test_sdk::utilities::CuSeqLenSides::NONE) {
+        return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(dims,
+                                                                   strides,
+                                                                   dims,
+                                                                   strides,
+                                                                   dims,
+                                                                   strides,
+                                                                   dims,
+                                                                   strides,
+                                                                   DataType::BFLOAT16,
+                                                                   DataType::FLOAT,
+                                                                   /*withAttnMask=*/false,
+                                                                   /*withScale=*/false,
+                                                                   withStats,
+                                                                   /*alibiMask=*/false,
+                                                                   paddingMask,
+                                                                   causalMask,
+                                                                   /*overrideShapeEnabled=*/false,
+                                                                   DataType::UNSET,
+                                                                   cuSeqLenSides);
+    };
+    const auto mutate
+        = [](flatbuffers::FlatBufferBuilder&& builder, const std::function<void(GraphT&)>& change) {
+              auto graph = UnPackGraph(builder.GetBufferPointer());
+              change(*graph);
+              flatbuffers::FlatBufferBuilder mutated;
+              mutated.Finish(CreateGraph(mutated, graph.get()));
+              return mutated;
+          };
+    const auto tensorNamed = [](GraphT& graph, const std::string& name) -> TensorAttributesT& {
+        for(auto& tensor : graph.tensors)
+        {
+            if(tensor->name == name)
+            {
+                return *tensor;
+            }
+        }
+        throw std::runtime_error("No tensor named " + name);
+    };
+    const auto group = [&](flatbuffers::FlatBufferBuilder&& builder) {
+        return sdpa::withRaggedTensors(std::move(builder), {"q", "k", "v", "o"});
+    };
+
+    struct Case
+    {
+        std::string name;
+        flatbuffers::FlatBufferBuilder graph;
+        bool asmServes;
+    };
+    std::vector<Case> cases;
+    // Top-left causal with K and V on the Q/O offset table, so both sides share their lengths.
+    cases.push_back({"group top-left causal, one offset table",
+                     mutate(group(bshdGraph(false, true)),
+                            [&](GraphT& graph) {
+                                const auto qoOffsetUid
+                                    = tensorNamed(graph, "q").ragged_offset_tensor_uid;
+                                tensorNamed(graph, "k").ragged_offset_tensor_uid = qoOffsetUid;
+                                tensorNamed(graph, "v").ragged_offset_tensor_uid = qoOffsetUid;
+                            }),
+                     true});
+    // AITER's [H, total_q] LSE, ragged on the Q/O offset table.
+    const auto withGroupStats = [&](GraphT& graph) {
+        auto& stats = tensorNamed(graph, "stats");
+        stats.strides = {dims[2], dims[0] * dims[2], 1, 1};
+        stats.ragged_offset_tensor_uid = tensorNamed(graph, "q").ragged_offset_tensor_uid;
+        stats.ragged_offset_multiplier = 1;
+    };
+    cases.push_back({"group stats", mutate(group(bshdGraph(true, false)), withGroupStats), true});
+    cases.push_back(
+        {"group cu_seq_len with padding_mask",
+         group(bshdGraph(false, false, true, hipdnn_test_sdk::utilities::CuSeqLenSides::BOTH)),
+         true});
+    // The batch-mode causal rows ship for gfx942 only.
+    if(deviceString == "gfx942")
+    {
+        cases.push_back({"batch top-left causal at S_q == S_kv", bshdGraph(false, true), true});
+        cases.push_back({"batch causal with stats", bshdGraph(true, true), true});
+    }
+    // Outputs whose slices overlap: batch mode with the O batch stride equal to its head
+    // stride, and group mode with an O head stride of 0.
+    cases.push_back({"batch O batch stride equal to its head stride",
+                     mutate(bshdGraph(false, false),
+                            [&](GraphT& graph) {
+                                auto& o = tensorNamed(graph, "o");
+                                o.strides[0] = o.strides[1];
+                            }),
+                     false});
+    cases.push_back({"group O head stride 0",
+                     mutate(group(bshdGraph(false, false)),
+                            [&](GraphT& graph) { tensorNamed(graph, "o").strides[1] = 0; }),
+                     false});
+
+    Container container;
+    auto& manager = container.getEngineManager();
+    const auto asmId = asm_sdpa_engine::AsmSdpaEngine::staticId();
+    for(auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.name);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            testCase.graph.GetBufferPointer(), testCase.graph.GetSize());
+        auto ids = manager.getApplicableEngineIds(handle, graph);
+        hipdnn_data_sdk::utilities::sortEngineIds(ids);
+        if(testCase.asmServes)
+        {
+            ASSERT_FALSE(ids.empty());
+            EXPECT_EQ(ids.front(), asmId);
+        }
+        else
+        {
+            EXPECT_EQ(std::find(ids.begin(), ids.end(), asmId), ids.end());
+        }
+    }
 }
 #endif

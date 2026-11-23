@@ -290,7 +290,7 @@ void pygraphBindings(nb::module_& m)
             [](PyGraph& g, const std::vector<HeuristicMode>& modes) {
                 throwIfBad(g.create_execution_plans(modes));
             },
-            nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
+            nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::A},
             "Create execution plans with the given heuristic modes.")
         .def(
             "create_execution_plan_ext",
@@ -344,7 +344,7 @@ void pygraphBindings(nb::module_& m)
                 throwIfBad(g.build(g.resolveHandle(handle), modes, policy));
             },
             nb::arg("handle"),
-            nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
+            nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::A},
             nb::arg("policy") = BuildPlanPolicy::HEURISTICS_CHOICE,
             "hipdnn.Graph.build(handle, modes, policy), raising instead of returning a bad "
             "Error: validate(), build_operation_graph(handle), create_execution_plans(modes), "
@@ -523,7 +523,7 @@ void pygraphBindings(nb::module_& m)
             [](PyGraph& g, const std::vector<HeuristicMode>& modes) {
                 throwIfBad(g.add_all_engines(modes));
             },
-            nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
+            nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::A},
             "Add every engine applicable to the built operation graph as a plan spec.")
         .def(
             "set_ranking_metric",

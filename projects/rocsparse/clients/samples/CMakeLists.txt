@@ -48,6 +48,11 @@ endfunction()
 # weird compiler flags on Windows.
 if(NOT WIN32)
   add_rocsparse_example(example_c_headers.c)
+  add_rocsparse_example(example_c_headers_debugging.c)
+  foreach(target example_c_headers example_c_headers_debugging)
+    set_target_properties(${target} PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+    target_compile_options(${target} PRIVATE -pedantic-errors -Werror=strict-prototypes)
+  endforeach()
 endif()
 
 # Auxiliary

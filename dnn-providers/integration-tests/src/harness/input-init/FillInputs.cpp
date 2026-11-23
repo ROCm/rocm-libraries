@@ -346,29 +346,6 @@ void setRmsnormBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::
 
 // ── Block-scale quantization ─────────────────────────────────────────────────
 
-// Largest magnitude a recipe can produce.
-float recipeMagnitude(const FillRecipe& recipe)
-{
-    if(recipe.kind == FillRecipe::Kind::FIXED)
-    {
-        return std::fabs(recipe.value);
-    }
-    if(recipe.kind == FillRecipe::Kind::VALUES && recipe.list != nullptr)
-    {
-        return std::visit(
-            [](const auto& numbers) {
-                float magnitude = 0.0f;
-                for(const auto number : numbers)
-                {
-                    magnitude = std::max(magnitude, std::fabs(static_cast<float>(number)));
-                }
-                return magnitude;
-            },
-            *recipe.list);
-    }
-    return std::max(std::fabs(recipe.lo), std::fabs(recipe.hi));
-}
-
 void setBlockScaleDequantizeInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
                                          InputFillRecipes& recipes)
 {
@@ -385,7 +362,7 @@ void setBlockScaleDequantizeInitDefaults(const hipdnn_flatbuffers_sdk::data_obje
     // amax < 1 keeps e = 0 and peaks at 2 * amax. UE8M0 has no mantissa bits,
     // so the [0.5, 2] * 2^-e draw discretizes to three powers of two. An
     // operand in [-1, 1] gives e = 0, i.e. [0.5, 2].
-    const float amax = recipeMagnitude(recipes.fill(a->x_tensor_uid()));
+    const float amax = recipes.fill(a->x_tensor_uid()).maxMagnitude();
     const int e = amax >= 1.0f ? std::ilogb(amax) : 0;
     recipes.setDefault(a->scale_tensor_uid(),
                        FillRecipe::free(std::ldexp(0.5f, -e), std::ldexp(2.0f, -e)));
@@ -418,8 +395,8 @@ void setSdpaBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Nod
     recipes.setDefault(a->dropout_scale_tensor_uid(), FillRecipe::free(0.1f, 1.0f));
     recipes.setDefault(a->dropout_scale_inv_tensor_uid(), FillRecipe::free(0.1f, 1.0f));
 
-    // Overwritten by fillInputs() with the forward of Q, K and V. The fill stands only
-    // where the CPU forward rejects the shapes, and the backward reference fails those.
+    // Overwritten by fillInputs() with the forward of Q, K and V; a node whose forward
+    // cannot be derived is unsupported, so this fill is never verified against.
     recipes.setDefault(a->o_tensor_uid(), FillRecipe::free(0.0f, 1.0f));
     recipes.setDefault(a->stats_tensor_uid(), FillRecipe::free(0.0f, 1.0f));
 }
@@ -716,6 +693,7 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
                       InputTensorMap& inputs,
                       const std::vector<int64_t>& ownedUids,
                       InputFillRecipes& recipes,
+                      IReferenceExecutors& referenceExecutors,
                       DeviceInputFiller* device,
                       const std::vector<TensorAlias>& aliases)
 {
@@ -836,7 +814,8 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
 
     // O and the LSE of an SDPA backward node are outputs of a forward, not free inputs:
     // once Q, K and V hold their values, recompute them. Done after the waits, since
-    // the forward reads Q, K and V on the host.
+    // the forward reads Q, K and V. With a device filler it runs on the device too: the
+    // CPU forward costs seconds per graph at real sequence lengths.
     for(flatbuffers::uoffset_t i = 0; i < graph.nodes()->size(); ++i)
     {
         const auto& node = *graph.nodes()->Get(i);
@@ -845,7 +824,12 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
         {
             continue;
         }
-        if(auto why = deriveSdpaBackwardForwardOutputs(graph, *sdpaBackward, inputs, ownedUids))
+        if(auto why = deriveSdpaBackwardForwardOutputs(graph,
+                                                       *sdpaBackward,
+                                                       inputs,
+                                                       ownedUids,
+                                                       referenceExecutors,
+                                                       /*onDevice=*/device != nullptr))
         {
             const auto* name = node.name();
             return FillResult::unsupported(

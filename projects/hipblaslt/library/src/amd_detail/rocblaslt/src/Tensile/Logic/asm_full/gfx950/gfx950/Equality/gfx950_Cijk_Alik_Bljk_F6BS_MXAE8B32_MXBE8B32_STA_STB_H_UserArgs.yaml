@@ -137,12 +137,85 @@ Solutions:
   MIWaveTile: [8, 8]
   MIInputPerThread: 32
   MXScaleFormat: HostPreSwizzle128x4
+- SolutionIndex: 2
+  CustomKernelName: rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_4096x4096x2048_c0c1_kbd6c3ec4bc
+  KernelLanguage: Assembly
+  Valid: true
+  EnableMatrixInstruction: true
+  ISA: [9, 5, 0]
+  MatrixInstM: 16
+  MatrixInstN: 16
+  MatrixInstK: 128
+  MatrixInstB: 1
+  MatrixInstBM: 1
+  MIBlock: [16, 16, 128, 1, 1, 1]
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [8, 8]
+  MIInputPerThread: 32
+  MXScaleFormat: HostPreSwizzle128x4
+- SolutionIndex: 3
+  CustomKernelName: rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_4096x4096x6144_c0c1_ke767b25fce
+  KernelLanguage: Assembly
+  Valid: true
+  EnableMatrixInstruction: true
+  ISA: [9, 5, 0]
+  MatrixInstM: 16
+  MatrixInstN: 16
+  MatrixInstK: 128
+  MatrixInstB: 1
+  MatrixInstBM: 1
+  MIBlock: [16, 16, 128, 1, 1, 1]
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [8, 8]
+  MIInputPerThread: 32
+  MXScaleFormat: HostPreSwizzle128x4
+- SolutionIndex: 4
+  CustomKernelName: rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_32768x4096x2048_c0c1_kd369500cb3
+  KernelLanguage: Assembly
+  Valid: true
+  EnableMatrixInstruction: true
+  ISA: [9, 5, 0]
+  MatrixInstM: 16
+  MatrixInstN: 16
+  MatrixInstK: 128
+  MatrixInstB: 1
+  MatrixInstBM: 1
+  MIBlock: [16, 16, 128, 1, 1, 1]
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [8, 8]
+  MIInputPerThread: 32
+  MXScaleFormat: HostPreSwizzle128x4
+- SolutionIndex: 5
+  CustomKernelName: rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_32768x4096x6144_c0c1_k3063b64df0
+  KernelLanguage: Assembly
+  Valid: true
+  EnableMatrixInstruction: true
+  ISA: [9, 5, 0]
+  MatrixInstM: 16
+  MatrixInstN: 16
+  MatrixInstK: 128
+  MatrixInstB: 1
+  MatrixInstBM: 1
+  MIBlock: [16, 16, 128, 1, 1, 1]
+  MIWaveGroup: [2, 2]
+  MIWaveTile: [8, 8]
+  MIInputPerThread: 32
+  MXScaleFormat: HostPreSwizzle128x4
 IndexOrder: [2, 3, 0, 1]
 ExactLogic:
 - - [4096, 4096, 1, 65536]
   - [0, 4152080.0]
 - - [4096, 4096, 1, 131584]
   - [1, 4057250.0]
+# 1.0 marks a unique key. It is not a measurement.
+- - [4096, 4096, 1, 2048]
+  - [2, 1.0]
+- - [4096, 4096, 1, 6144]
+  - [3, 1.0]
+- - [32768, 4096, 1, 2048]
+  - [4, 1.0]
+- - [32768, 4096, 1, 6144]
+  - [5, 1.0]
 RangeLogic: null
 TileSelectionIndices: null
 PerfMetric: DeviceEfficiency
