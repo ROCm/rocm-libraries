@@ -37,16 +37,11 @@
 namespace rocsparse
 {
     // Blocked ELL stores whole blocks, so ell_cols may round the column count
-    // up to a multiple of the block size. Reject a width past that, and fall
-    // back to cols when the rounded width does not fit in int64_t.
+    // up to a multiple of the block size. ell_cols must already be a whole
+    // number of blocks; comparing block counts cannot overflow.
     static bool bell_ell_cols_too_wide(int64_t cols, int64_t ell_block_dim, int64_t ell_cols)
     {
-        const int64_t block_cols = rocsparse::ceil_div(cols, ell_block_dim);
-        if(size_product_overflows(block_cols, ell_block_dim))
-        {
-            return ell_cols > cols;
-        }
-        return ell_cols > block_cols * ell_block_dim;
+        return ell_cols / ell_block_dim > rocsparse::ceil_div(cols, ell_block_dim);
     }
 }
 
