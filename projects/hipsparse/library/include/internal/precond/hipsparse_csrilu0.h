@@ -85,8 +85,9 @@ hipsparseStatus_t
  *  read by \ref hipsparseScsrilu02 "hipsparseXcsrilu02()", using the pointer mode set when
  *  calling this function, so they must remain valid until then.
  *
- *  \note With the ROCm backend, a negative \p tol replaces no value, and a diagonal entry
- *  that is exactly zero after the optional boost is reported by \ref hipsparseXcsrilu02_zeroPivot.
+ *  \note With the ROCm backend, a negative \p tol disables the replacement, and a diagonal
+ *  entry that is exactly zero after the optional boost is reported by
+ *  \ref hipsparseXcsrilu02_zeroPivot.
  *
  *  \deprecated
  *  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be
@@ -130,8 +131,9 @@ hipsparseStatus_t hipsparseScsrilu02_numericBoost(
  *  read by \ref hipsparseScsrilu02 "hipsparseXcsrilu02()", using the pointer mode set when
  *  calling this function, so they must remain valid until then.
  *
- *  \note With the ROCm backend, a negative \p tol replaces no value, and a diagonal entry
- *  that is exactly zero after the optional boost is reported by \ref hipsparseXcsrilu02_zeroPivot.
+ *  \note With the ROCm backend, a negative \p tol disables the replacement, and a diagonal
+ *  entry that is exactly zero after the optional boost is reported by
+ *  \ref hipsparseXcsrilu02_zeroPivot.
  *
  *  \deprecated
  *  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be
@@ -177,8 +179,9 @@ hipsparseStatus_t hipsparseDcsrilu02_numericBoost(hipsparseHandle_t handle,
  *  read by \ref hipsparseScsrilu02 "hipsparseXcsrilu02()", using the pointer mode set when
  *  calling this function, so they must remain valid until then.
  *
- *  \note With the ROCm backend, a negative \p tol replaces no value, and a diagonal entry
- *  that is exactly zero after the optional boost is reported by \ref hipsparseXcsrilu02_zeroPivot.
+ *  \note With the ROCm backend, a negative \p tol disables the replacement, and a diagonal
+ *  entry that is exactly zero after the optional boost is reported by
+ *  \ref hipsparseXcsrilu02_zeroPivot.
  *
  *  \deprecated
  *  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be
@@ -224,8 +227,9 @@ hipsparseStatus_t hipsparseCcsrilu02_numericBoost(hipsparseHandle_t handle,
  *  read by \ref hipsparseScsrilu02 "hipsparseXcsrilu02()", using the pointer mode set when
  *  calling this function, so they must remain valid until then.
  *
- *  \note With the ROCm backend, a negative \p tol replaces no value, and a diagonal entry
- *  that is exactly zero after the optional boost is reported by \ref hipsparseXcsrilu02_zeroPivot.
+ *  \note With the ROCm backend, a negative \p tol disables the replacement, and a diagonal
+ *  entry that is exactly zero after the optional boost is reported by
+ *  \ref hipsparseXcsrilu02_zeroPivot.
  *
  *  \deprecated
  *  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be

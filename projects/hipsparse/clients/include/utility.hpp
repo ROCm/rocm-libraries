@@ -4553,7 +4553,7 @@ int host_csrilu0(int                  m,
                     val[diag_j] = diag_val;
                 }
 
-                // A pivot that is still zero after the optional boost is a numerical zero.
+                // A pivot that is zero after the optional boost is a numerical zero.
                 if(diag_val == make_DataType<T>(0.0))
                 {
                     return col_j + idx_base;
@@ -4602,7 +4602,7 @@ int host_csrilu0(int                  m,
                 }
             }
 
-            // A pivot that is still zero after the optional boost is a numerical zero.
+            // A pivot that is zero after the optional boost is a numerical zero.
             if(val[j] == make_DataType<T>(0))
             {
                 return ai + idx_base;
@@ -4771,7 +4771,7 @@ inline void host_bsrilu02(hipsparseDirection_t    dir,
                     bsr_val[BSR_IND(j, bi, bi, dir)] = diag;
                 }
 
-                // A pivot that is still zero after the optional boost is a numerical zero.
+                // A pivot that is zero after the optional boost is a numerical zero.
                 if(diag == make_DataType<T>(0))
                 {
                     *numeric_pivot = std::min(*numeric_pivot, bsr_col_ind[j]);
