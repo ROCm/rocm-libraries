@@ -2050,11 +2050,13 @@ GFX125_D64_SCHED_M64_CONSTRAINT = CppConstraint(
     " || (get_num_blocks(128) <= num_cus && a.max_seqlen_q >= 2048)"
 )
 
-# D128 scheduled M64: the same grid rule as D64, kept as its own value because each head dim's
-# crossover is an independent measurement. Not yet re-measured for D128.
+# D128 scheduled M64: the D64 grid rule, except that the one-block-per-CU case with long queries
+# excludes sliding windows. There every Q tile has the same windowed K range, so M64 balances
+# nothing and costs more K/V loads per row (measured 6-9 % slower than M128 for window 2047,
+# while causal attention with short or no prefix gains 3-9 %).
 GFX125_D128_SCHED_M64_CONSTRAINT = CppConstraint(
     "get_num_blocks(128) < num_cus"
-    " || (get_num_blocks(128) <= num_cus && a.max_seqlen_q >= 2048)"
+    " || (get_num_blocks(128) <= num_cus && a.max_seqlen_q >= 2048 && a.window_size_left < 0)"
 )
 
 # GenericAttentionMask causal has a different measured crossover from the
