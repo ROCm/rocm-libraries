@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from typing import Optional, OrderedDict, Callable, Dict, Any
+from typing import Optional, OrderedDict, Callable, Dict, Any, List
 import sys
 import os
 
@@ -44,6 +44,15 @@ class Tuner(BaseTuner):
 
     def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)
+
+    def _get_compiler_options(self) -> List[str]:
+        # benchmark_device_adjacent_difference is built at -O1 to work around
+        # ROCm/llvm-project#2616 (see benchmark/CMakeLists.txt), so tune at -O1 too.
+        # Remove this override once the benchmark is back at -O3.
+        return [
+            "-O1" if option == "-O3" else option
+            for option in super()._get_compiler_options()
+        ]
 
     def _get_tune_params(
         self, key_type: str, value_type: Optional[str] = None

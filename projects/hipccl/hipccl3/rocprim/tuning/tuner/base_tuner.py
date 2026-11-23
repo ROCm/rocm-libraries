@@ -536,6 +536,9 @@ class BaseTuner(ABC):
         monorepo_dir = (pathlib.Path(BASE_DIR) / "../../../../..").resolve()
         rocprim_dir = (pathlib.Path(BASE_DIR) / "..").resolve()
         return [
+            # Match the Release build of the benchmarks (rocPRIM's default build type).
+            "-O3",
+            "-DNDEBUG",
             "-fPIC",
             "-std=c++17",
             f"-I{rocprim_dir / 'rocprim/include'}",
