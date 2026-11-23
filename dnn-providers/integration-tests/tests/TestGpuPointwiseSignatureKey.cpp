@@ -117,8 +117,8 @@ PointwiseTuple binarySignature(DataType in0, DataType in1, DataType out, DataTyp
     return {PointwiseMode::UNSET, in0, in1, K_NONE, out, compute};
 }
 
-PointwiseTuple ternarySignature(
-    DataType in0, DataType in1, DataType in2, DataType out, DataType compute)
+PointwiseTuple
+    ternarySignature(DataType in0, DataType in1, DataType in2, DataType out, DataType compute)
 {
     return {PointwiseMode::UNSET, in0, in1, in2, out, compute};
 }
