@@ -181,6 +181,8 @@ class TestDgradCppValidator(unittest.TestCase):
         eng = _engine()
         cases = [(91, {}), (93, {}), (102, {}), (126, {}), (71, {}), (75, {})]
         cases += [(91, dict(tile_n=128, warp_n=2)), (71, dict(tapk_prefetch=0))]
+        # cshuffle_no_alias: the C tile's bytes are added to A/B, not overlaid.
+        cases += [(2, dict(cshuffle_no_alias=True)), (16, dict(cshuffle_no_alias=True))]
         for idx, kw in cases:
             spec, arch = _cfg(idx)
             s = _mutate(spec, kw)

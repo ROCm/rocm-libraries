@@ -13,9 +13,8 @@ dropped would build the default kernel under the knob's name and fail here.
 The dgrad / wgrad / Stage 2 bindings also refuse a key they do not read, so a
 dataclass field added without a binding twin fails every case below rather
 than building the default kernel. A field the C++ spec cannot carry (a fused
-accumulator epilogue on wgrad, and on dgrad until its kernel name carries the
-epilogue tag; an explicit LDS layout object) is refused unless it is the
-default.
+accumulator epilogue on wgrad; an explicit LDS layout object) is refused unless
+it is the default.
 """
 
 from __future__ import annotations
@@ -297,9 +296,9 @@ class TestConvBindingForwardsKnobs(unittest.TestCase):
                     call(dict(d, bogus_knob=1), arch)
 
     def test_refuses_a_fused_epilogue_it_cannot_carry(self):
-        # wgrad has no C++ epilogue twin; the C++ dgrad builder has one but
-        # its kernel name lacks the epilogue tag. The identity epilogue (what
-        # _flat_dict passes for every case above) is admitted.
+        # wgrad has no C++ epilogue twin (dgrad has one, and test_dgrad covers
+        # it). The identity epilogue (what _flat_dict passes for every case
+        # above) is admitted.
         from kernels.common._conv_implicit_gemm_common import (
             ConvAccumulatorEpilogue,
         )
@@ -309,16 +308,42 @@ class TestConvBindingForwardsKnobs(unittest.TestCase):
         relu = _conv_acc_epilogue_to_dict(ConvAccumulatorEpilogue(scale=2.0, relu=True))
         wg, warch = _emitter_spec("conv_implicit_gemm_wgrad_emit", 0)
         dg, darch = _emitter_spec("conv_implicit_gemm_dgrad_emit", 91)
+        d = _flat_dict(wg)
+        eng.conv_wgrad_lower_llvm(dict(d, acc_epilogue=None), warch)
+        with self.assertRaisesRegex(ValueError, "acc_epilogue"):
+            eng.conv_wgrad_lower_llvm(dict(d, acc_epilogue=relu), warch)
         for call, d, arch in (
             (eng.conv_wgrad_lower_llvm, _flat_dict(wg), warch),
             (eng.conv_dgrad_lower_llvm, _flat_dict(dg), darch),
         ):
             with self.subTest(call=call.__name__):
-                call(dict(d, acc_epilogue=None), arch)
-                with self.assertRaisesRegex(ValueError, "acc_epilogue"):
-                    call(dict(d, acc_epilogue=relu), arch)
                 with self.assertRaisesRegex(ValueError, "lds_layout"):
                     call(dict(d, lds_layout="xor_swizzled"), arch)
+
+    def test_dgrad_acc_epilogue_reaches_the_kernel_name(self):
+        # A fused epilogue builds Python's kernel under Python's name (the
+        # epilogue tag), so it cannot share a symbol with the identity build.
+        from kernels.common._conv_implicit_gemm_common import (
+            ConvAccumulatorEpilogue,
+        )
+        from kernels.common.conv_implicit_gemm_dgrad import (
+            build_implicit_gemm_conv_dgrad,
+        )
+
+        eng = _engine()
+        spec, arch = _emitter_spec("conv_implicit_gemm_dgrad_emit", 91)
+        epi = ConvAccumulatorEpilogue(bias=-0.5, relu=True, clamp_max=6.0)
+        spec = dataclasses.replace(spec, acc_epilogue=epi)
+        ll = eng.conv_dgrad_lower_llvm(_flat_dict(spec), arch)
+        self.assertIn(epi.tag(), ll)
+        self.assertEqual(ll, _python_ll(build_implicit_gemm_conv_dgrad, spec, arch))
+        bad = ConvAccumulatorEpilogue(clamp_min=1.0, clamp_max=0.0)
+        with self.assertRaisesRegex(RuntimeError, "clamp_min must be <= clamp_max"):
+            eng.conv_dgrad_lower_llvm(
+                _flat_dict(dataclasses.replace(spec, acc_epilogue=bad)), arch
+            )
+        with self.assertRaisesRegex(ValueError, "acc_epilogue' must be a dict"):
+            eng.conv_dgrad_lower_llvm(dict(_flat_dict(spec), acc_epilogue=1), arch)
 
     def test_the_cover_reaches_every_emitter_knob(self):
         """The index tuples are a cover of the emitters' knob fields; an
@@ -364,11 +389,6 @@ class TestConvBindingForwardsKnobs(unittest.TestCase):
         eng.conv_implicit_gemm_lower_llvm(dict(d, a_direct=0), arch=arch)
         with self.assertRaisesRegex(ValueError, "a_direct"):
             eng.conv_implicit_gemm_lower_llvm(dict(d, a_direct=1), arch=arch)
-        dg, darch = _emitter_spec("conv_implicit_gemm_dgrad_emit", 91)
-        with self.assertRaisesRegex(ValueError, "cshuffle_no_alias"):
-            eng.conv_dgrad_lower_llvm(
-                dict(_flat_dict(dg), cshuffle_no_alias=True), darch
-            )
 
 
 if __name__ == "__main__":

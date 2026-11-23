@@ -2280,13 +2280,15 @@ rocke_dgrad_conv_spec_t conv_dgrad_build_spec(const py::dict& d, std::deque<std:
     ROCKE_CONV_DGRAD_KNOB_FIELDS(ROCKE_KNOB_INT, ROCKE_KNOB_BOOL)
 #undef ROCKE_KNOB_INT
 #undef ROCKE_KNOB_BOOL
-    refuse_unported_conv_field(d, "conv_dgrad", "cshuffle_no_alias");
-    /* The C++ dgrad builder applies a fused accumulator epilogue, but its
-     * kernel name does not carry the epilogue's tag (Python's does): a
-     * non-identity epilogue would build a kernel under another kernel's
-     * name, so it is refused here. An explicit LDS layout object has no dict
-     * form the binding reads. */
-    refuse_non_identity_acc_epilogue(d, "conv_dgrad");
+    s.cshuffle_no_alias = dict_bool(d, "cshuffle_no_alias", s.cshuffle_no_alias);
+    if(d.contains("acc_epilogue") && !d["acc_epilogue"].is_none())
+    {
+        if(!py::isinstance<py::dict>(d["acc_epilogue"]))
+            throw py::value_error("rocke_library_engine: conv_dgrad field 'acc_epilogue' "
+                                  "must be a dict");
+        fill_conv_acc_epilogue(&s.acc_epilogue, d["acc_epilogue"].cast<py::dict>());
+    }
+    /* An explicit LDS layout object has no dict form the binding reads. */
     refuse_unported_conv_field(d, "conv_dgrad", "lds_layout");
     static const std::unordered_set<std::string> known = [] {
         std::unordered_set<std::string> k = {"problem",

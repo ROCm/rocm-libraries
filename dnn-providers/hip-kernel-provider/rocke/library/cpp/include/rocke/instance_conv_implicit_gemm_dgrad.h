@@ -244,6 +244,11 @@ typedef struct rocke_dgrad_conv_spec
      * stores only the dX pixels with (X-1)/2 <= wi < Wi - (X-1)/2; with
      * xh_epi_lin the linear store offset accepts row and plane gaps. */
     bool xh_dx_wmask;
+    /* DgradConvSpec.cshuffle_no_alias: the cshuffle C tile gets its own LDS
+     * bytes instead of aliasing the A/B tiles (the LDS charge adds them, the
+     * epilogue drops its step-0 WAR barriers). Not in the kernel name, as in
+     * Python. Default false; pipeline="wavelet" is unaliased either way. */
+    bool cshuffle_no_alias;
 } rocke_dgrad_conv_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */

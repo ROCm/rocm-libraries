@@ -34,7 +34,7 @@
 #include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/instance_conv_abi.h" /* rocke_conv_arg_names, emit_param_block */
-#include "rocke/instance_conv_implicit_gemm.h" /* rocke_conv_acc_epilogue_default */
+#include "rocke/instance_conv_implicit_gemm.h" /* rocke_conv_acc_epilogue_default / _tag */
 #include "rocke/instance_conv_implicit_gemm_dgrad.h"
 #include "rocke/instance_conv_implicit_gemm_internal.h" /* rocke_conv_build_ctx_t, phase fns */
 #include "rocke/instance_conv_m_band.h"
@@ -207,11 +207,18 @@ static int _dgrad_default_lds_k_pad(int tile_k)
 static rocke_conv_lds_layout_t _dgrad_effective_lds_layout(const rocke_dgrad_conv_spec_t* spec);
 static const char* _dgrad_mma_family(const char* arch);
 
+/* Python `spec.cshuffle_no_alias or spec.pipeline == "wavelet"`: the wavelet
+ * pipeline keeps A/B live across both branches, so it cannot alias C onto
+ * them either. */
+static bool _dgrad_cshuffle_no_alias(const rocke_dgrad_conv_spec_t* s)
+{
+    return s->cshuffle_no_alias || (s->pipeline && strcmp(s->pipeline, "wavelet") == 0);
+}
+
 /* Python _dgrad_lds_charge: (A/B bytes, C bytes, total bytes) of LDS the
  * builder allocates. One A and one B tile whatever the pipeline (compv4 is a
- * schedule policy here; async_dma / unroll_k are rejected). The spec has no
- * cshuffle_no_alias field (Python's default False), so only the wavelet
- * pipeline keeps C unaliased. */
+ * schedule policy here; async_dma / unroll_k are rejected). C is unaliased
+ * under cshuffle_no_alias and on the wavelet pipeline. */
 /* Python DgradConvSpec.dy_halo_lds_rows: LDS rows of the staged dY halo tile,
  * tile_m + (Y-1)*halo_max_wo + (X-1) pixels padded to whole loader passes
  * (block_size threads x 8 elements), plus the trailing all-zero row. */
@@ -274,7 +281,7 @@ static void _dgrad_lds_charge(const rocke_dgrad_conv_spec_t* s, long* ab, long* 
     bool cshuffle = s->epilogue && strcmp(s->epilogue, "cshuffle") == 0;
     const int mch = s->cshuffle_m_chunks > 1 ? s->cshuffle_m_chunks : 1;
     long c_bytes = cshuffle ? (long)(s->tile_m / mch) * s->tile_n * c_dtype_bytes : 0;
-    bool no_alias = s->pipeline && strcmp(s->pipeline, "wavelet") == 0;
+    bool no_alias = _dgrad_cshuffle_no_alias(s);
     *ab = ab_bytes;
     *c = c_bytes;
     *total = no_alias ? ab_bytes + c_bytes : (ab_bytes > c_bytes ? ab_bytes : c_bytes);
@@ -357,6 +364,15 @@ rocke_status_t
             return ROCKE_ERR_VALUE;                                   \
         n += w_;                                                      \
     } while(0)
+    /* acc_epilogue.tag(): a part after "{pipeline}_{epilogue}", dropped
+     * (kernel_name_join) when the epilogue is the identity. */
+    {
+        char tag[256];
+        if(rocke_conv_acc_epilogue_tag(&s->acc_epilogue, tag, sizeof(tag)) != ROCKE_OK)
+            return ROCKE_ERR_VALUE;
+        if(tag[0])
+            ROCKE_DGRAD_NAME_APPEND("_%s", tag);
+    }
     /* Flag order must match Python's kernel_name_join flags dict:
      * async, kouter, spk, ukd, kp, tapk, noxcd, halo, hprio, hkp, hwo, tf32. C previously emitted spk before async, which only
      * diverged for a spec setting both -- none exists -- but the K-outer flag
@@ -2398,6 +2414,7 @@ static void _emit_dgrad_cshuffle_epilogue(rocke_ir_builder_t* b,
                           spec->warp_tile_k);
     rocke_cshuffle_epilogue_t epi = rocke_cshuffle_epilogue_from_grid(atom, grid, max_store_vec);
     epi.out_dtype = spec->dtype_d;
+    epi.no_alias = _dgrad_cshuffle_no_alias(spec);
     if(spec->cshuffle_m_chunks > 1)
         epi.m_chunks = spec->cshuffle_m_chunks;
     /* epi_lds_barriers (ping-pong): every epilogue barrier LDS-only */
@@ -3549,6 +3566,7 @@ static void _emit_dgrad_box_cshuffle_epilogue(rocke_ir_builder_t* b,
     rocke_cshuffle_epilogue_t epi
         = rocke_cshuffle_epilogue_from_grid(atom, grid, _dgrad_store_vec(spec));
     epi.out_dtype = spec->dtype_d;
+    epi.no_alias = spec->cshuffle_no_alias;
     epi.war_barriers = 1;
     epi.m_chunks = spec->cshuffle_m_chunks;
     epi.lds_barriers = spec->epi_lds_barriers; /* the epilogue's barriers LDS-only */
@@ -4214,6 +4232,7 @@ static void _emit_dgrad_tilde_cshuffle_epilogue(rocke_ir_builder_t* b,
     int max_store_vec = _dgrad_store_vec(spec);
     rocke_cshuffle_epilogue_t epi = rocke_cshuffle_epilogue_from_grid(atom, grid, max_store_vec);
     epi.out_dtype = spec->dtype_d;
+    epi.no_alias = _dgrad_cshuffle_no_alias(spec);
     /* Split-K (MFMA): atomic-add the staged tile into dX through the same
      * address function (Python atomic_dx_ptr). */
     if(atomic_dx_ptr != NULL)
@@ -9691,6 +9710,18 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_dgrad(rocke_ir_builder_t* b,
     if(_dgrad_mma_dtype_conflict(spec, NULL, reason, sizeof(reason)))
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", reason);
+        return NULL;
+    }
+    /* validate()'s acc_epilogue clamp-order check, a bare ValueError too
+     * (is_valid_dgrad_spec does not repeat it). */
+    if(spec->acc_epilogue.has_clamp_min && spec->acc_epilogue.has_clamp_max
+       && spec->acc_epilogue.clamp_min > spec->acc_epilogue.clamp_max)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "acc_epilogue clamp_min must be <= clamp_max (got %g > %g)",
+                        spec->acc_epilogue.clamp_min,
+                        spec->acc_epilogue.clamp_max);
         return NULL;
     }
     if(!rocke_dgrad_conv_is_valid_spec(spec, arch, reason, sizeof(reason)))
