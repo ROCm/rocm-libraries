@@ -9,7 +9,7 @@
 # rather than duplicated so `check_ir_validity` and `check_arch_domain` cannot
 # drift on what the question is, even though they act on the answer differently.
 #
-# Not a CLI entry point -- hence the leading underscore, as with _hostcaps.py.
+# Not a CLI entry point -- hence the leading underscore, as with _bounded_run.py.
 
 from __future__ import annotations
 

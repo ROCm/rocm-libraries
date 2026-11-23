@@ -74,14 +74,11 @@ _DATA = Path(str(resource_files("rocke.core.arch") / "data"))
 
 # Import the generator for its constants and its decl-table merge rule, so the
 # gate cannot disagree with the tool about what "the decl table for a flavor"
-# means. `_hostcaps` rides along on the same path entry; it is shared with
-# `tools/check_byte_identity.py`, so the pool-sizing test below covers both
-# callers.
+# means.
 if str(_ROCKE / "tools") not in sys.path:
     sys.path.insert(0, str(_ROCKE / "tools"))
 import _bounded_run as B
 import gen_arch_domain as G
-from _hostcaps import available_cpus
 
 
 def _columns() -> list[tuple[str, Path]]:
@@ -112,62 +109,15 @@ class DeclarationTableTest(unittest.TestCase):
         self.assertTrue(all("addrspace(15)" in llvm24[key] for key in changed))
 
 
-class AvailableCpusTest(unittest.TestCase):
-    """The worker cap must reflect this process's share, not the host's size.
+class WorkerCountTest(unittest.TestCase):
+    """The worker cap must reflect this process's share, not the host's size
+    (rocke.tests.host_cpus.available_cpus, whose own tests cover the quotas).
 
     `os.cpu_count()` reports the machine -- observed at 384 against an affinity
     of 2 on a scheduler-pinned host. Oversubscribing is not just slow: a
     load-dependent `probe_error` makes the artifact nondeterministic and
     `--check` flaky.
     """
-
-    def _root(self, files: dict[str, str]) -> Path:
-        root = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, root, True)
-        for rel, text in files.items():
-            path = root / rel
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text)
-        return root
-
-    def test_a_cpu_quota_caps_the_worker_count(self):
-        # Asserted as "<= 1", not "== 1": affinity also feeds the minimum, so
-        # the guarantee is that a quota can only ever lower the answer.
-        for label, files in (
-            ("v2", {"cpu.max": "100000 100000"}),
-            (
-                "v1",
-                {"cpu/cpu.cfs_quota_us": "100000", "cpu/cpu.cfs_period_us": "100000"},
-            ),
-        ):
-            with self.subTest(cgroup=label):
-                self.assertLessEqual(available_cpus(self._root(files)), 1)
-
-    def test_a_fractional_quota_still_leaves_one_worker(self):
-        """Half a CPU is a *rate*, not half a process. Rounding down gives a
-        zero-worker pool, which is a hang rather than a slow sweep."""
-        root = self._root({"cpu.max": "50000 100000"})
-        self.assertEqual(available_cpus(root), 1)
-
-    def test_no_quota_does_not_lower_the_answer(self):
-        """`max` and a negative v1 quota both mean unlimited -- neither is a
-        cap of zero, which is what parsing them as numbers would produce."""
-        for label, files in (
-            ("v2-max", {"cpu.max": "max 100000"}),
-            (
-                "v1-negative",
-                {"cpu/cpu.cfs_quota_us": "-1", "cpu/cpu.cfs_period_us": "100000"},
-            ),
-            ("absent", {}),
-        ):
-            with self.subTest(cgroup=label):
-                root = self._root(files)
-                self.assertEqual(available_cpus(root), available_cpus(root / "nope"))
-
-    def test_the_answer_is_always_a_usable_worker_count(self):
-        for files in ({}, {"cpu.max": "garbage"}, {"cpu.max": "0 0"}):
-            with self.subTest(files=sorted(files)):
-                self.assertGreaterEqual(available_cpus(self._root(files)), 1)
 
     def test_no_tool_sizes_a_pool_from_the_machine(self):
         """The helper only helps the callers that ask it.

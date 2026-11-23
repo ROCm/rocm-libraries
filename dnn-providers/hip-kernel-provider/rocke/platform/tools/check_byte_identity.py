@@ -39,10 +39,12 @@ import sys
 import tempfile
 from pathlib import Path
 
-from _hostcaps import available_cpus
-
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parents[0] if HERE.name != "tools" else HERE.parent  # tools -> rocKE
+if str(ROCKE / "python") not in sys.path:
+    sys.path.insert(0, str(ROCKE / "python"))
+from rocke.tests.host_cpus import available_cpus
+
 RUN_DIFF = ROCKE / "tests" / "instances" / "differential" / "run_diff.py"
 # Library-owned C++ mirrors (library/cpp, added by platform/CMakeLists.txt when
 # the sibling tree exists). Absent from a platform-only copy of this tree.
@@ -65,9 +67,6 @@ TARGET_OP_PROFILE_FAMILIES = (
 
 def _selected_profile_supports_target_ops() -> bool:
     """Resolve the selected lane once and query its structural profile."""
-    python_root = ROCKE / "python"
-    if str(python_root) not in sys.path:
-        sys.path.insert(0, str(python_root))
     from rocke.core.lower_llvm import (
         _resolve_llvm_flavor,
         _supports_llvm23_target_ops,

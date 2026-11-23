@@ -45,10 +45,10 @@ PYROOT = PLATFORM / "python"
 LIBRARY = ROCKE / "library"
 
 # Explicit rather than relying on sys.path[0]: that only holds while this file
-# is the entry point, and the helper is needed whether it is run or imported.
-if str(HERE) not in sys.path:
-    sys.path.insert(0, str(HERE))
-from _hostcaps import available_cpus
+# is the entry point, and the package is needed whether it is run or imported.
+if str(PYROOT) not in sys.path:
+    sys.path.insert(0, str(PYROOT))
+from rocke.tests.host_cpus import available_cpus
 
 # The rolled gate verifies one parametric recipe per axis at several values,
 # sampled and held out. Pinning the count here rather than in the CI workflow

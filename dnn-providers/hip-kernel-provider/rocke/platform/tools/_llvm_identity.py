@@ -13,7 +13,7 @@
 # must agree on what the mismatch *is*. Two copies of this regex would drift the
 # moment a vendor changed its version banner.
 #
-# Not a CLI entry point -- hence the leading underscore, as with _hostcaps.py.
+# Not a CLI entry point -- hence the leading underscore, as with _bounded_run.py.
 
 from __future__ import annotations
 

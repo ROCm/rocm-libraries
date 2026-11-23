@@ -526,13 +526,16 @@ def test_explicit_fixture_override_is_resolved_before_pytest_changes_directory(
     assert env["ROCKE_STORAGE_TEST"] == str(executable)
 
 
-def test_installed_runner_bootstraps_staged_hostcaps(runner, tmp_path):
-    installed_tests = tmp_path / "installed" / "tests"
-    arch_domain = installed_tests / "arch_domain"
-    arch_domain.mkdir(parents=True)
+def test_installed_runner_imports_the_package_beside_its_tests(runner, tmp_path):
+    """An installed provider tree holds the rocke package beside tests/, not
+    under python/; the runner finds it there in an isolated interpreter."""
+    installed = tmp_path / "installed"
+    installed_tests = installed / "tests"
+    installed_tests.mkdir(parents=True)
     shutil.copy2(runner.TESTS / "run_all.py", installed_tests / "run_all.py")
-    shutil.copy2(
-        Path(inspect.getfile(runner.available_cpus)), arch_domain / "_hostcaps.py"
+    package = Path(inspect.getfile(runner.available_cpus)).parents[1]
+    shutil.copytree(
+        package, installed / "rocke", ignore=shutil.ignore_patterns("__pycache__")
     )
 
     proc = subprocess.run(

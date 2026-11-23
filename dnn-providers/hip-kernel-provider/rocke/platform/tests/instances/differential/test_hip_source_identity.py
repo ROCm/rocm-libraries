@@ -133,7 +133,7 @@ FAMILIES = run_diff.find_families(python_only=True)
 
 # At most this many families are checked at once, ahead of the tests that read
 # them: one worker thread per CPU this process may use (run_diff's
-# tools/_hostcaps.py count). The cap bounds memory, as a family's check holds
+# rocke.tests.host_cpus count). The cap bounds memory, as a family's check holds
 # all of its kernels until it has compared them.
 MAX_PREFETCHED_FAMILIES = 8
 

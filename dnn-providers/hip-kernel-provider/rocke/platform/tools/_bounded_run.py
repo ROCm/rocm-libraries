@@ -6,7 +6,7 @@
 # command. Shared by the tools under this directory that give a compiler a time
 # budget.
 #
-# Not a CLI entry point -- hence the leading underscore, as with _hostcaps.py.
+# Not a CLI entry point -- hence the leading underscore, as with _flavor_gate.py.
 # `run_bounded` itself runs this file as a script, as the session leader of each
 # command on Linux (see `_lead_session`); nothing else should.
 

@@ -176,7 +176,7 @@ def test_each_tools_dir_gets_its_own_copy_of_the_tool(tmp_path):
         assert Path(loaded.__file__).parent == directory.resolve()
         for imported in (
             loaded._requires_newer_flavor,
-            loaded.available_cpus,
+            loaded._load_corpus,
             loaded.tool_identity,
         ):
             assert Path(imported.__code__.co_filename).parent == directory.resolve()

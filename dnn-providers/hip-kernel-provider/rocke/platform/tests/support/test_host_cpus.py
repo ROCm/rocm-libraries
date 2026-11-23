@@ -3,7 +3,8 @@
 """rocke.tests.host_cpus.available_cpus takes the narrowest of the process's CPU
 affinity and every CPU quota of the cgroups it belongs to, nested cgroups and a
 cgroup mounted below its hierarchy root included. Each case writes a cgroup tree
-and the process's cgroup and mount tables, and fixes the affinity."""
+and the process's cgroup and mount tables, and fixes the affinity, or writes
+only the mount and reads it as the process's own cgroup."""
 
 from __future__ import annotations
 
@@ -83,3 +84,55 @@ def test_available_cpus_honors_affinity_without_a_quota(tmp_path, monkeypatch):
         )
         == 2
     )
+
+
+def _cgroup_root(tmp_path, files: dict[str, str]):
+    """A cgroup mount at ``tmp_path`` holding ``files``, for a process whose own
+    cgroup and mount tables are absent: the mount itself is read."""
+    for rel, text in files.items():
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    return tmp_path, tmp_path / "no-proc-cgroup", tmp_path / "no-mountinfo"
+
+
+@pytest.mark.parametrize(
+    "files",
+    [
+        {"cpu.max": "100000 100000"},
+        {"cpu/cpu.cfs_quota_us": "100000", "cpu/cpu.cfs_period_us": "100000"},
+    ],
+    ids=["v2", "v1"],
+)
+def test_a_cpu_quota_caps_the_count(tmp_path, files):
+    # "<= 1", not "== 1": affinity also feeds the minimum, so a quota can only
+    # ever lower the answer.
+    assert host_cpus.available_cpus(*_cgroup_root(tmp_path, files)) <= 1
+
+
+def test_a_fractional_quota_still_leaves_one_cpu(tmp_path):
+    """Half a CPU is a rate, not half a process: rounding down would size a
+    pool of zero workers, a hang rather than a slow run."""
+    root = _cgroup_root(tmp_path, {"cpu.max": "50000 100000"})
+    assert host_cpus.available_cpus(*root) == 1
+
+
+@pytest.mark.parametrize(
+    "files",
+    [
+        {"cpu.max": "max 100000"},
+        {"cpu/cpu.cfs_quota_us": "-1", "cpu/cpu.cfs_period_us": "100000"},
+        {},
+    ],
+    ids=["v2-max", "v1-negative", "absent"],
+)
+def test_no_quota_does_not_lower_the_count(tmp_path, files):
+    """``max`` and a negative v1 quota both mean unlimited, not a cap of zero."""
+    root = _cgroup_root(tmp_path, files)
+    unlimited = _cgroup_root(tmp_path / "empty", {})
+    assert host_cpus.available_cpus(*root) == host_cpus.available_cpus(*unlimited)
+
+
+@pytest.mark.parametrize("files", [{}, {"cpu.max": "garbage"}, {"cpu.max": "0 0"}])
+def test_the_count_is_always_a_usable_worker_count(tmp_path, files):
+    assert host_cpus.available_cpus(*_cgroup_root(tmp_path, files)) >= 1

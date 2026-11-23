@@ -112,7 +112,6 @@ from pathlib import Path
 from typing import Callable, Iterator, NamedTuple
 
 from _bounded_run import run_bounded, stop_all
-from _hostcaps import available_cpus
 from _llvm_identity import flavor_of_clang, tool_identity
 
 HERE = Path(__file__).resolve().parent
@@ -141,6 +140,7 @@ _bootstrap_sys_path()
 
 from rocke.core.arch import domain as _domain
 from rocke.tests.ci_shard import ACTIVATION_FLAG, current_shard, header_line
+from rocke.tests.host_cpus import available_cpus
 
 SCHEMA = _domain.SCHEMA
 # The committed columns are package data, not source-tree data. Resolving them

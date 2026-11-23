@@ -50,7 +50,6 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from _hostcaps import available_cpus
 from _llvm_identity import flavor_of_clang, tool_identity
 
 HERE = Path(__file__).resolve().parent
@@ -81,6 +80,7 @@ from rocke.helpers.tiling.traits import (
     MmaTraits,
     load_mma_traits,
 )
+from rocke.tests.host_cpus import available_cpus
 
 # Matrix builtins: dense and scaled MFMA, sparse SMFMAC, dense and scaled WMMA,
 # sparse SWMMAC.

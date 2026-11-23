@@ -488,15 +488,14 @@ if(ROCKE_INSTALL_TESTS)
     # compiler). The rest of tests/instances/differential needs the C++ build and
     # stays out of the installed tree (see the tests/ install below); these files
     # are the Python-only check: the runner, its batch worker, the golden store
-    # and file, and the CPU-count helper the runner imports from tools/. The
-    # HIP source identity gate reuses the runner and worker, and lowers through
-    # the installed rocke_ir_lower_cli (rocke_hip_source_identity below).
+    # and file. The HIP source identity gate reuses the runner and worker, and
+    # lowers through the installed rocke_ir_lower_cli (rocke_hip_source_identity
+    # below).
     set(_ROCKE_DIFFERENTIAL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests/instances/differential")
     install(FILES "${_ROCKE_DIFFERENTIAL_DIR}/run_diff.py"
                   "${_ROCKE_DIFFERENTIAL_DIR}/python_batch_worker.py"
                   "${_ROCKE_DIFFERENTIAL_DIR}/golden_store.py"
                   "${_ROCKE_DIFFERENTIAL_DIR}/test_hip_source_identity.py"
-                  "${CMAKE_CURRENT_SOURCE_DIR}/tools/_hostcaps.py"
             DESTINATION ${ROCKE_TEST_INSTALL_DIR}/tests/instances/differential)
     install(FILES "${_ROCKE_DIFFERENTIAL_DIR}/golden/llvm_gfx_all.json"
             DESTINATION ${ROCKE_TEST_INSTALL_DIR}/tests/instances/differential/golden)
@@ -639,7 +638,6 @@ if(ROCKE_INSTALL_TESTS)
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_corpus.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_bounded_run.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_flavor_gate.py"
-            "${CMAKE_CURRENT_SOURCE_DIR}/tools/_hostcaps.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/_llvm_identity.py"
             DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/arch_domain")
 

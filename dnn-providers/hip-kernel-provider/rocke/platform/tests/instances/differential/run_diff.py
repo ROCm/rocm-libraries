@@ -103,16 +103,14 @@ LIBRARY_ARCHIVE_NAME = "librocke_library.a"
 LIBRARY_ARCHIVE: Path | None = None
 TMP = Path(tempfile.gettempdir()) / "rocke_diff"
 TMP.mkdir(parents=True, exist_ok=True)
-TOOLS = ROCKE / "tools"  # absent in an installed tree, which ships _hostcaps.py here
 # A script launch gets HERE from Python automatically; import-by-path does not.
 # Bootstrap these homes explicitly so this module has the same imports in focused
 # pytest and in isolated xdist workers as it does at its command-line entry point.
 # The rocke package (PYROOT) serves golden_store's golden_file import.
-for module_root in (HERE, TOOLS, PYROOT):
+for module_root in (HERE, PYROOT):
     if module_root.is_dir() and str(module_root) not in sys.path:
         sys.path.insert(0, str(module_root))
 
-from _hostcaps import available_cpus  # noqa: E402 -- tools path bootstrap above
 from python_batch_worker import canonical_digest  # noqa: E402 -- HERE bootstrap above
 from golden_store import (  # noqa: E402 -- HERE bootstrap above
     IR_CANONICAL,
@@ -122,6 +120,7 @@ from golden_store import (  # noqa: E402 -- HERE bootstrap above
 )
 from rocke.core.golden_file import rerecord_hint
 from rocke.tests.ci_shard import ACTIVATION_FLAG, Shard, current_shard, header_line
+from rocke.tests.host_cpus import available_cpus
 from rocke.tests.staged_payload import point_locators_at_staged_payload
 
 # The differential golden's name in the golden index, printed in its re-record

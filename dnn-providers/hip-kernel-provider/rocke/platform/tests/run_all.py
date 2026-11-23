@@ -47,16 +47,13 @@ TOOLS = ROCKE / "tools"
 # instead of restating them here and letting the two drift.
 if str(ROCKE / "python") not in sys.path:
     sys.path.insert(0, str(ROCKE / "python"))
-# Source runs keep helpers under tools/. Installed tests stage the same helper
-# beside the arch-domain generator instead. Bootstrap the first complete home so
-# importing this runner by path never depends on another test's sys.path changes.
-for helper_root in (TOOLS, TESTS / "arch_domain"):
-    if (helper_root / "_hostcaps.py").is_file():
-        if str(helper_root) not in sys.path:
-            sys.path.insert(0, str(helper_root))
-        break
+# An installed provider tree holds the package beside tests/ rather than under
+# python/; add it where it is, so importing this runner by path never depends on
+# another test's sys.path changes.
+if (ROCKE / "rocke").is_dir() and str(ROCKE) not in sys.path:
+    sys.path.insert(0, str(ROCKE))
 
-from _hostcaps import available_cpus
+from rocke.tests.host_cpus import available_cpus
 
 # Files that may reference an absolute repo path or a path that escapes rocke/platform/
 # break the verbatim-copy contract. Enforce on code/build files only (docs are

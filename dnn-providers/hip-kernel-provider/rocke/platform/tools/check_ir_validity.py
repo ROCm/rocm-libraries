@@ -59,7 +59,6 @@ from pathlib import Path
 
 from _corpus import load_corpus as _load_corpus
 from _flavor_gate import requires_newer_flavor as _requires_newer_flavor
-from _hostcaps import available_cpus
 from _llvm_identity import flavor_of_clang, tool_identity
 
 HERE = Path(__file__).resolve().parent
@@ -364,6 +363,7 @@ def main() -> int:
     args = ap.parse_args()
 
     _bootstrap_sys_path()
+    from rocke.tests.host_cpus import available_cpus
     from rocke_ir_parity_harness import current_flavor
 
     corpus = _load_corpus(args.cases)
