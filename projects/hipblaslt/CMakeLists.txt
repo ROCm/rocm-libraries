@@ -47,9 +47,10 @@ set(hipblaslt_VERSION_MINOR "${PROJECT_VERSION_MINOR}")
 set(hipblaslt_VERSION_PATCH "${PROJECT_VERSION_PATCH}")
 set(hipblaslt_VERSION_TWEAK "${PROJECT_VERSION_TWEAK}")
 
-# The SONAME (libhipblaslt.so.<major>) is independent of the product version.
-# Bump it only for an ABI break; binaries linked against libhipblaslt.so.1
-# stop loading when the major number changes.
+# rocm_set_soversion takes the SONAME from the major part, so "1.5" gives
+# libhipblaslt.so.1 and names the file libhipblaslt.so.1.5. Bump the major
+# only for an ABI break; binaries linked against libhipblaslt.so.1 stop
+# loading when it changes.
 set(HIPBLASLT_SOVERSION "1.5")
 set(hipblaslt_SOVERSION "${HIPBLASLT_SOVERSION}")
 
