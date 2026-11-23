@@ -805,8 +805,8 @@ set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
     "tests/library/tests/test_convolution_forward_aot_numeric.py"
     "tests/library/tests/test_conv_direct_tf32_mfma.py::TestDirectTf32Gpu"
     "tests/library/tests/test_conv_direct_tf32_scalar.py::TestGpuCorrectness"
-    # The sweep sampler (test_sweep_candidates) compiles exact-fp32 grid
-    # specs for minutes; it stays a manual run.
+    # The sweep sampler (test_sweep_candidates), an exhaustive item, runs in
+    # rocke_library_conv_sweep_gpu_pytest below.
     "tests/library/tests/test_conv_direct_nongrouped_tf32.py::TestNongroupedF32Gpu::test_cases"
     "tests/library/tests/test_conv_direct_nongrouped_tf32.py::TestNongroupedF32Gpu::test_one_binary_serves_every_shape"
     "tests/library/tests/test_attention_dense_gfx942_numeric.py"
@@ -855,6 +855,20 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_gpu_pytest PROPERTIES\n"
        "  LABELS \"ckc;python;gpu\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  RESOURCE_LOCK ${_ROCKE_INSTALLED_GPU_RESOURCE_LOCK}\n"
+       "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")
+
+# The fp32/tf32 non-grouped direct-conv sweep sampler (the exhaustive item of
+# test_conv_direct_nongrouped_tf32.py): it compiles and runs a sample of the
+# exact-fp32 sweep grid, 14 subtests (measured wall time on gfx942: about
+# 7 s). Scheduled CI only (the comprehensive tier); the entry above runs the
+# file's fixed cases and its one-binary check.
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_conv_sweep_gpu_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_conv_direct_nongrouped_tf32.py::TestNongroupedF32Gpu::test_sweep_candidates\" -v -rs ${_ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT})\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_conv_sweep_gpu_pytest PROPERTIES\n"
+       "  LABELS \"ckc;python;conv;gpu;comprehensive;full\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  RESOURCE_LOCK ${_ROCKE_INSTALLED_GPU_RESOURCE_LOCK}\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")

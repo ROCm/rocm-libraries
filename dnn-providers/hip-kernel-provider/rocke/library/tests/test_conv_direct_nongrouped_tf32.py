@@ -31,6 +31,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
+import pytest
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.numeric import storage
 from rocke.numeric.compare import peak_relative_error
@@ -636,6 +637,7 @@ class TestNongroupedF32Gpu(unittest.TestCase):
                     )
                     self.assertTrue(ok, f"{case.id} {dt}: rel_err {rel:.3e}")
 
+    @pytest.mark.exhaustive
     def test_sweep_candidates(self):
         for dt in _F32_DTYPES:
             p = _problem(dt, N=2, W=48, kpg=128)

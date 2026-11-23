@@ -1201,12 +1201,11 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     PendingTest(
         "library/tests/test_conv_direct_nongrouped_tf32.py",
-        EXHAUSTIVE_CASES,
-        "a sweep sampler that compiles exact-fp32 grid specs for minutes; no entry "
-        "selects it (its GPU entry leaves it to a manual run): mark it exhaustive or "
-        "drop it",
-        "rocKE library; issue: none filed yet",
-        "2026-12-15",
+        COMPREHENSIVE_CASES,
+        "the sweep sampler runs only in rocke_library_conv_sweep_gpu_pytest, a "
+        "comprehensive-tier entry",
+        "rocKE library",
+        "2027-01-31",
         node="TestNongroupedF32Gpu::test_sweep_candidates",
     ),
     PendingTest(

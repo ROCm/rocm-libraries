@@ -428,3 +428,5 @@ test_categories:
       - "rocke_library_engine_parity_exhaustive_pytest"
       # gfx950 GPU; the score-modifier mixes (each modifier once runs in standard).
       - "rocke_library_attention_biased_mixes_gpu_pytest"
+      # GPU; the fp32/tf32 direct-conv sweep sampler (its fixed cases run in standard).
+      - "rocke_library_conv_sweep_gpu_pytest"
