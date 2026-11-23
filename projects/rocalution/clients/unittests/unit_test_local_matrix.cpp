@@ -4422,8 +4422,8 @@ TEST(local_matrix_preconditions, violations_end_the_program)
 // the file, the function and the whole expression.
 TEST(local_matrix_preconditions, null_pointer_arguments_end_the_program)
 {
-    // Float only: the asserts are in code that both precisions share
-    using T = float;
+    // One precision, as for LocalVector: the asserts are in code that both precisions share
+    using T = double;
 
     const int64_t n = 100;
 
