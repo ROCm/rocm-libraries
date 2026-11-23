@@ -6532,6 +6532,137 @@ class TestPartitionZeroIssueOrder:
             "at-entry", "drain", "real", "drain-again", "m0-wait-state",
             "after-label", "drain-unmarked", "not-relaxed"]
 
+    @staticmethod
+    def _dmaLoad(comment):
+        from rocisa.container import MUBUFModifiers, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128
+        return BufferLoadB128(dst=None, vaddr=vgpr(0), saddr=sgpr("SrdA", 4), soffset=0,
+                              mubuf=MUBUFModifiers(offen=True, lds=True), comment=comment)
+
+    def _ngllTail(self):
+        from rocisa.code import Label, Module
+        from rocisa.instruction import SBarrier, SWaitCnt
+        ngll = Module("NGLL_C1")
+        ngll.add(Label("SkipToNGLL", ""))
+        ngll.add(self._read("B MT=n+1 tile=5 K=0 read=1"))
+        ngll.add(SWaitCnt(vlcnt=0, comment="ngll-drain"))
+        ngll.add(SBarrier(comment="ngll-barrier"))
+        return ngll
+
+    def _nll(self, name="NLL_C1"):
+        from rocisa.code import Module
+        from rocisa.instruction import SBarrier, SBranch, SWaitCnt
+        nll = Module(name)
+        nll.add(SWaitCnt(dscnt=0, comment="nll-lr"))
+        nll.add(SWaitCnt(vlcnt=0, comment="nll-vm"))
+        nll.add(SBarrier(comment="nll-open"))
+        nll.add(self._read("B MT=n tile=6 K=0 read=0"))
+        nll.add(SWaitCnt(dscnt=0, comment="nll-lr-2"))
+        nll.add(SWaitCnt(vlcnt=0, comment="nll-vm-2"))
+        nll.add(SBarrier(comment="nll-fence"))
+        nll.add(SBranch(labelName="label_SkipToEnd", comment="skip other exit paths"))
+        return nll
+
+    def test_exit_syncs_drop_what_the_ngll_drain_settled(self):
+        from rocisa.code import Module
+        from rocisa.instruction import SBarrier, SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import dropRedundantExitSyncs
+
+        self._gfx950()
+        main = Module("MAINLOOP_C1")
+        main.add(SWaitCnt(vlcnt=0, comment="main-drain"))
+        main.add(SWaitCnt(vlcnt=0, comment="main-dominated"))
+        main.add(SBarrier(comment="main-barrier"))
+        outer = Module()
+        outer.add(main)
+        outer.add(self._ngllTail())
+        outer.add(self._nll())
+
+        dropRedundantExitSyncs(outer, 1)
+
+        assert [inst.comment for inst in main.flatitems()] == [
+            "main-drain", "main-dominated", "main-barrier"]
+        assert [getattr(inst, "comment", "") for inst in outer.flatitems()][4:] == [
+            "B MT=n+1 tile=5 K=0 read=1", "ngll-drain", "ngll-barrier",
+            "nll-lr", "B MT=n tile=6 K=0 read=0", "nll-lr-2", "nll-fence",
+            "skip other exit paths"]
+
+    def test_exit_syncs_keep_a_barrier_an_lds_write_needs(self):
+        from rocisa.code import Label, Module
+        from rocisa.instruction import SBarrier, SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import dropRedundantExitSyncs
+
+        self._gfx950()
+        body = Module("NLL_C1")
+        body.add(SWaitCnt(vlcnt=0, comment="drain"))
+        body.add(SBarrier(comment="first"))
+        body.add(SBarrier(comment="before-write"))
+        body.add(self._dmaLoad("A MT=n+2 tile=0 K=0 i=0"))
+        body.add(SBarrier(comment="after-write"))
+        body.add(SWaitCnt(dscnt=0, comment="lgkm-drain"))
+        body.add(self._read("A MT=n tile=0 K=0 read=0"))
+        body.add(self._read("A MT=n tile=0 K=0 read=1"))
+        body.add(SWaitCnt(dscnt=3, comment="covers-both"))
+        body.add(SWaitCnt(dscnt=1, comment="real"))
+        body.add(SWaitCnt(vlcnt=0, comment="vm-real"))
+        body.add(Label("Join", ""))
+        body.add(SWaitCnt(dscnt=15, comment="at-counter-max"))
+        body.add(SWaitCnt(dscnt=0, comment="after-label"))
+        body.add(SBarrier(comment="last"))
+        outer = Module()
+        outer.add(body)
+
+        dropRedundantExitSyncs(outer, 0)
+
+        assert [getattr(inst, "comment", "") for inst in body.flatitems()
+                if isinstance(inst, (SWaitCnt, SBarrier))] == [
+            "drain", "first", "before-write", "after-write", "lgkm-drain", "real", "vm-real",
+            "after-label", "last"]
+
+    def _preloop(self, issueAfterBarrier):
+        from rocisa.code import Module
+        from rocisa.instruction import SBarrier, SCBranchSCC1, SWaitCnt
+        preloop = Module("PRELOOP")
+        preloop.add(SWaitCnt(vlcnt=0, comment="preloop-drain"))
+        preloop.add(SBarrier(comment="preloop-barrier"))
+        preloop.add(self._read("SA seed"))
+        if issueAfterBarrier:
+            preloop.add(self._dmaLoad("A MT=1 tile=0 K=0 i=0"))
+        preloop.add(SCBranchSCC1(labelName="label_SkipToNLL", comment="skip to NLL"))
+        return preloop
+
+    def _skipToNllKernel(self, issueAfterBarrier):
+        from rocisa.code import Label, Module
+        outer = Module()
+        outer.add(self._preloop(issueAfterBarrier))
+        outer.add(Module("Mainloop"))
+        outer.add(self._ngllTail())
+        outer.add(Label("SkipToNLL", ""))
+        nll = self._nll("NLL_C0")
+        outer.add(nll)
+        return outer, nll
+
+    def test_exit_syncs_carry_a_vouched_skip_into_nll(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import dropRedundantExitSyncs
+
+        self._gfx950()
+        outer, nll = self._skipToNllKernel(issueAfterBarrier=False)
+        dropRedundantExitSyncs(outer, 2, {"label_SkipToNLL"})
+        assert [inst.comment for inst in nll.flatitems()] == [
+            "nll-lr", "B MT=n tile=6 K=0 read=0", "nll-lr-2", "nll-fence",
+            "skip other exit paths"]
+
+    def test_exit_syncs_keep_the_nll_entry_unless_the_skip_is_vouched_and_quiet(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import dropRedundantExitSyncs
+
+        self._gfx950()
+        for issueAfterBarrier, drained in ((False, set()), (True, {"label_SkipToNLL"})):
+            outer, nll = self._skipToNllKernel(issueAfterBarrier)
+            dropRedundantExitSyncs(outer, 2, drained)
+            assert [inst.comment for inst in nll.flatitems()] == [
+                "nll-lr", "nll-vm", "nll-open", "B MT=n tile=6 K=0 read=0",
+                "nll-lr-2", "nll-fence", "skip other exit paths"], (issueAfterBarrier, drained)
+
 
 class TestUniformEpochOverwriteSync:
     """Each uniform-epoch A/B load waits out the reads of the LDS it overwrites."""

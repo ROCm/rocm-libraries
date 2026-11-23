@@ -869,27 +869,36 @@ def test_ngll_copies_open_like_their_main_loop_role(exit_src):
         assert _opening(body)[2] != "s_waitcnt vmcnt(0)", ngll
 
 
-def test_nll_copies_wait_behind_their_first_mfma(exit_src):
-    """The NLL drains every load, but behind its first MFMA, as the main loop
-    waits; that MFMA waits on no LDS read issued in the body."""
-    for nll, role in (("NLL_C1", "MAINLOOP_C1"), ("NLL_C0", "MAINLOOP_C0")):
-        reads, at, opener = _opening(_region_lines(exit_src, nll))
-        assert (reads, opener) == (0, "s_waitcnt vmcnt(0)"), nll
-        assert at == _opening(_region_lines(exit_src, role))[1], nll
+def test_nll_copies_wait_on_no_load(exit_src):
+    """The NGLL ahead of each NLL, and the preloop's skip to NLL, enter it with
+    every load drained, so the NLL has no vmcnt; its first MFMA waits on no LDS
+    read issued in the body."""
+    for nll in ("NLL_C1", "NLL_C0"):
+        body = _region_lines(exit_src, nll)
+        first = next(k for k, c in enumerate(body) if c.startswith("v_mfma"))
+        assert not any(c.startswith("ds_read") for c in body[:first]), nll
+        assert not any("vmcnt" in c for c in body), nll
 
 
 def test_8x10_balanced_reads_follow_their_opening_barrier(balanced_8x10):
-    from tensilelite.Components.Subtile.InstructionScheduler import _isBarrier
+    """Each balanced read follows the barrier that publishes its tile. An NLL
+    has dropped its opening barrier, so that is the NGLL's last one, and no LDS
+    write may come between the body's entry and the read."""
+    from tensilelite.Components.Subtile.InstructionScheduler import _isBarrier, _writesLds
     for body, reads, _applied in balanced_8x10[1]:
         items = list(body.flatitems())
-        barrier = next(k for k, inst in enumerate(items) if _isBarrier(inst))
         at = [next(k for k, inst in enumerate(items) if inst is read) for read in reads]
+        if body.name.startswith("NLL"):
+            assert not any(_writesLds(inst) for inst in items[:max(at)]), body.name
+            continue
+        barrier = next(k for k, inst in enumerate(items) if _isBarrier(inst))
         assert all(k > barrier for k in at), (body.name, barrier, at)
 
 
 def test_8x10_balanced_reads_have_one_covering_wait(balanced_8x10):
     """Between each balanced read and its first consumer MFMA exactly one
-    lgkm wait retires it: none is missing and none is redundant."""
+    lgkm wait retires it: none is missing and none is redundant. lgkmcnt holds
+    at most 15 ops, so a read with 15 issued behind it has returned unwaited."""
     from tensilelite.Components.Subtile.InstructionScheduler import (
         _incrementsLgkm, _instructionRegisterSpans, _isMfma, _isWaitCnt,
         _lgkmCovers, _readsSpans)
@@ -906,7 +915,8 @@ def test_8x10_balanced_reads_have_one_covering_wait(balanced_8x10):
                     covering += 1
                 if _incrementsLgkm(inst):
                     issued += 1
-            assert covering == 1, (body.name, read.comment, covering)
+            assert covering == 1 or (covering == 0 and issued >= 15), \
+                (body.name, read.comment, covering, issued)
 
 
 def _vmcnt_sequence(src):

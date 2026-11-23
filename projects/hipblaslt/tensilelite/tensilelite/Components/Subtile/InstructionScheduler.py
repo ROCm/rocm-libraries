@@ -2723,6 +2723,181 @@ def _bodyLeaves(module):
     return out
 
 
+_MAX_VM_COUNT = 63
+
+
+def _vmCount(wait):
+    """The VMEM count an s_waitcnt waits for, or None when it does not wait on it.
+
+    gfx9 counts loads and stores on one vmcnt, so the two halves add up.
+    """
+    if getattr(wait, "waitAll", False):
+        return 0
+    if wait.vlcnt < 0 and wait.vscnt < 0:
+        return None
+    return max(wait.vlcnt, 0) + max(wait.vscnt, 0)
+
+
+def _issuedCounts(inst):
+    """(lgkm, VMEM) counts inst may add, (None, None) for raw text.
+
+    A scalar load adds one per dword, at most two; a FLAT op adds to both.
+    """
+    if isinstance(inst, TextBlock):
+        return (0, 0) if _isComment(inst) else (None, None)
+    name = type(inst).__name__
+    if isinstance(inst, SMemLoadInstruction) or name.startswith(
+            ("SLoad", "SBufferLoad", "SStore", "SAtomic")):
+        return 2, 0
+    if name.startswith("Flat"):
+        return 1, 1
+    vm = isinstance(inst, (GlobalReadInstruction, GlobalWriteInstruction)) or name.startswith(
+        ("Buffer", "TBuffer", "Global", "Scratch"))
+    return int(_mayIncrementLgkm(inst)), int(vm)
+
+
+def _writesLds(inst) -> bool:
+    return isinstance(inst, LocalWriteInstruction) or _isDirectToLdsLoad(inst)
+
+
+class _ExitSyncState:
+    """Upper bounds on the lgkm and VMEM ops in flight (None when unknown), and
+    whether the last barrier passed with no VMEM op in flight and no LDS write
+    issued since (settled)."""
+
+    __slots__ = ("lgkm", "vm", "settled")
+
+    def __init__(self, lgkm=None, vm=None, settled=False):
+        self.lgkm, self.vm, self.settled = lgkm, vm, settled
+
+    def join(self, other):
+        top = lambda a, b: None if a is None or b is None else max(a, b)
+        return _ExitSyncState(top(self.lgkm, other.lgkm), top(self.vm, other.vm),
+                              self.settled and other.settled)
+
+
+def _ldsQuietToNextBarrier(leaves, start) -> bool:
+    """Whether straight-line code after leaves[start] reaches a barrier with no LDS write."""
+    for _container, inst in leaves[start + 1:]:
+        if _isBarrier(inst):
+            return True
+        if (_isControlFlow(inst) or _writesLds(inst)
+                or (isinstance(inst, TextBlock) and not _isComment(inst))):
+            return False
+    return False
+
+
+def dropRedundantExitSyncs(module, firstExit, drainedJoins=()):
+    """Remove the waits and barriers of the exit code that retire nothing.
+
+    Edits module.items()[firstExit:], the NGLL/NLL exits after the main loop;
+    the items ahead are only read. Each counter carries an upper bound on its
+    ops in flight: a wait for N leaves at most N and each op issued adds what
+    it can. The hardware holds at most 15 lgkm and 63 VMEM ops, so a wait at
+    that count never stalls. The half of a wait whose count reaches the bound
+    goes, and the wait with it when nothing is left. A wait for all, one that
+    counts stores (vscnt) and the m0 wait state of an LDS-DMA load stay.
+
+    A barrier orders every wave's LDS accesses before it against the others'
+    after it, which matters only when one side writes. One goes when the
+    previous barrier passed with no VMEM op in flight (an LDS-DMA load writes
+    when it retires) and straight-line code with no LDS write runs from there
+    to the next barrier. The last barrier before a label, a branch, raw text
+    or the end stays.
+
+    State is unknown after raw text and at a label, except a label in
+    drainedJoins: the caller vouches that each branch to it is taken with no
+    VMEM op in flight at the last barrier, and every such branch must be a
+    short branch with nothing issued between that barrier and it. Code after
+    an unconditional branch is reached only through its label.
+    """
+    leaves, firstExitLeaf = [], None
+    for index, item in enumerate(module.items()):
+        if index == firstExit:
+            firstExitLeaf = len(leaves)
+        if _isCodeModule(item):
+            leaves.extend(_bodyLeaves(item))
+        else:
+            leaves.append((module, item))
+    if firstExitLeaf is None:
+        return
+    spacers = _m0WaitStateIds(module)
+    branchesIn = {name: 0 for name in drainedJoins}
+    for _container, inst in leaves:
+        target = getattr(inst, "labelName", None)
+        if target in branchesIn:
+            branchesIn[target] += 1
+    vouched = {name: 0 for name in drainedJoins}
+
+    state = _ExitSyncState()
+    quiet = False
+    removed = []
+    for index, (container, inst) in enumerate(leaves):
+        mutable = index >= firstExitLeaf
+        if isinstance(inst, Label):
+            name = inst.getLabelName()
+            if name in vouched and 0 < branchesIn[name] == vouched[name]:
+                joined = _ExitSyncState(None, 0, True)
+                state = joined if state is None else state.join(joined)
+            else:
+                state = _ExitSyncState()
+            quiet = False
+            continue
+        if state is None:
+            state = _ExitSyncState()
+        if _isControlFlow(inst):
+            name = type(inst).__name__
+            target = getattr(inst, "labelName", None)
+            if target in vouched and name.startswith("SCBranch") and quiet:
+                vouched[target] += 1
+            if name == "SBranch" or name.startswith("SSetPC"):
+                state = None
+            elif not name.startswith("SCBranch"):
+                state = _ExitSyncState()
+            continue
+        if isinstance(inst, TextBlock):
+            if not _isComment(inst):
+                state, quiet = _ExitSyncState(), False
+            continue
+        if _isWaitCnt(inst):
+            if (mutable and not getattr(inst, "waitAll", False) and inst.vscnt < 0
+                    and id(inst) not in spacers):
+                lgkm, vm = _lgkmCount(inst), _vmCount(inst)
+                if lgkm is not None and (lgkm >= _MAX_LGKM_COUNT or (
+                        state.lgkm is not None and lgkm >= state.lgkm)):
+                    inst.dscnt = inst.kmcnt = -1
+                if vm is not None and (vm >= _MAX_VM_COUNT or (
+                        state.vm is not None and vm >= state.vm)):
+                    inst.vlcnt = -1
+                if _lgkmCount(inst) is None and _vmCount(inst) is None:
+                    removed.append((container, inst))
+                    continue
+            lgkm, vm = _lgkmCount(inst), _vmCount(inst)
+            if lgkm is not None:
+                state.lgkm = lgkm if state.lgkm is None else min(state.lgkm, lgkm)
+            if vm is not None:
+                state.vm = vm if state.vm is None else min(state.vm, vm)
+            continue
+        if _isBarrier(inst):
+            if mutable and state.settled and _ldsQuietToNextBarrier(leaves, index):
+                removed.append((container, inst))
+                continue
+            state.settled = state.vm == 0
+            quiet = True
+            continue
+        lgkm, vm = _issuedCounts(inst)
+        if lgkm and state.lgkm is not None:
+            state.lgkm += lgkm
+        if vm:
+            quiet = False
+            if state.vm is not None:
+                state.vm += vm
+        if _writesLds(inst):
+            state.settled, quiet = False, False
+    for container, inst in removed:
+        container.removeItem(inst)
+
+
 def _isOrderFence(inst) -> bool:
     """Nothing moves across a wait, a barrier, a branch, a label, or an
     instruction that only spaces hazards or priorities."""
@@ -5414,9 +5589,12 @@ def deferBalancedCurrentCellWait(
         if _isWaitCnt(inst) and _isFullLgkmDrain(inst):
             break
         if _isMfma(inst) and _readsSpans(inst, dests):
-            out.insert(k, SWaitCnt(
-                dscnt=0 if scalar else min(issuedAfter, _MAX_LGKM_COUNT),
-                comment="Wait for balanced current-cell LR"))
+            # lgkmcnt holds at most 15 ops: with 15 issued after the reads they
+            # have returned, and lgkmcnt(15) would never stall.
+            if scalar or issuedAfter < _MAX_LGKM_COUNT:
+                out.insert(k, SWaitCnt(
+                    dscnt=0 if scalar else issuedAfter,
+                    comment="Wait for balanced current-cell LR"))
             break
         scalar = scalar or isinstance(inst, SMemLoadInstruction)
         if _incrementsLgkm(inst):

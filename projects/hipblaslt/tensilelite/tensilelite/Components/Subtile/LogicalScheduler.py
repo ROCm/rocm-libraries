@@ -1025,6 +1025,9 @@ class LogicalScheduler:
         # GR atoms the preloop leaves in flight on its skip to NGLL, all of them
         # younger than every MT0 load; None when the preloop does not bound them.
         self._preloopNgllInflight: Optional[WaitGRCounts] = None
+        # True when the preloop's skip to NLL is only taken after a vmcnt(0) and
+        # its barrier, so dropRedundantExitSyncs may carry that state into NLL.
+        self._preloopNllSkipDrained = False
         # Exit-body label -> C0 entry scale VGPRs the body ahead of it refreshed.
         self._entryScalesRefreshedBefore: Dict[str, set] = {}
         # (leftovers, C1 MFMA count) of the C1 tail refreshes NGLL_C1 re-places.
@@ -5368,6 +5371,7 @@ class LogicalScheduler:
         Returns [1 partition][1 subIterK][EmittedModules] to match emit() shape.
         """
         self._preloopNgllInflight = None
+        self._preloopNllSkipDrained = False
         if self.config.pgr == 0:
             # PGR=0 has no GR/LR pipeline, but the mainloop's first MFMA still
             # accumulates into D, so the accumulators must be zeroed first.
@@ -5476,6 +5480,9 @@ class LogicalScheduler:
                     ])
                 else:
                     self._preloopNgllInflight = self._wait_gr_counts_for_ops(mt1_ops)
+                    # Both arms below reach skip(LE 1, NLL) only through a zero-count
+                    # WaitGR and the barrier: the MT1 arm is entered on LoopCounter > 1.
+                    self._preloopNllSkipDrained = True
                     if self.config.uniformPgrEpoch:
                         mt1_counts = self._wait_gr_counts_for_ops(mt1_ops)
                         no_mt1_label = "SubtilePreloopNoMT1"
@@ -5535,6 +5542,9 @@ class LogicalScheduler:
                     ])
                 else:
                     self._preloopNgllInflight = self._wait_gr_counts_for_ops(mt1_grs)
+                    # As above: skip(LE 1, NLL) is reached only through a zero-count
+                    # WaitGR and the barrier.
+                    self._preloopNllSkipDrained = True
                     if self.config.uniformPgrEpoch:
                         mt1_ops = self._make_preloop_mt1_grs()
                         mt1_counts = self._wait_gr_counts_for_ops(mt1_ops)
@@ -7850,6 +7860,7 @@ class LogicalScheduler:
         mainloop = self._emitMainloopPhase(writer, kernel, plsin,
                                            isGfx1250, exitLabels)
         module.add(mainloop)
+        firstExitItem = len(module.items())
 
         # ── NGLL + NLL exit paths ──
         hasNGLL = self.config.pgr >= 2
@@ -7962,6 +7973,7 @@ class LogicalScheduler:
             dropRelaxedFencesThatRetireNothing(self._mainLoopBodies(mainloop))
         clearPartitionZeroOverwriteMarks()
         self._dropExitDominatedLgkmWaits(module)
+        self._dropRedundantExitSyncs(writer, kernel, module, firstExitItem)
         if self.config.uniformPgrEpoch and not self.halfDisjoint:
             from .InstructionScheduler import checkMainLoopLdsOverwrites
             checkMainLoopLdsOverwrites(
@@ -8011,6 +8023,26 @@ class LogicalScheduler:
                     walk(item)
 
         walk(module)
+
+    def _dropRedundantExitSyncs(self, writer, kernel, module, firstExitItem):
+        """Run dropRedundantExitSyncs on the exits that follow the main loop.
+
+        The preloop's skip to NLL carries its drained state into NLL only when
+        build_preloop vouched for it and the skip is a short branch. The PAP
+        preloop leaves the previous tile's prefetch in flight, so it never does.
+        """
+        from rocisa.code import Label
+        from .InstructionScheduler import dropRedundantExitSyncs
+        if not (self.config.uniformPgrEpoch and self.config.dualPeriodScale):
+            return
+        papPreloop = (kernel.get("UseSubtileImpl")
+                      and kernel.get("PrefetchAcrossPersistent")
+                      and hasStaticAssignment(kernel))
+        drained = set()
+        if (self._preloopNllSkipDrained and not papPreloop
+                and not getattr(writer.states, "postLoopStoreInNll", False)):
+            drained.add(Label("SkipToNLL", "").getLabelName())
+        dropRedundantExitSyncs(module, firstExitItem, drained)
 
     def emitTailLoop(self, writer, kernel):
         """Emit the tail loop body only (no counter setup, no skip branch).
