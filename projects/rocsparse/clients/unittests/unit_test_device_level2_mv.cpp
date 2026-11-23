@@ -191,8 +191,10 @@ namespace
                           c.device ? dbeta.ptr : &beta,
                           dy);
         }
-        // rocsparse_csrmv.h documents not_implemented for a matrix type other than
-        // general; a symmetric product that succeeds is checked.
+        // rocsparse_csrmv.h still documents not_implemented for a matrix type other
+        // than general, but the library implements the symmetric product for real
+        // data: the cases with must_succeed require it. The other symmetric cases
+        // also accept not_implemented; a symmetric product that succeeds is checked.
         if(sym && !c.must_succeed)
             ASSERT_TRUE(st == rocsparse_status_success || st == rocsparse_status_not_implemented)
                 << st;
