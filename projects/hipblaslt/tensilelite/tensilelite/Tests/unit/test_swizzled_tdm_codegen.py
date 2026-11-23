@@ -60,6 +60,21 @@ REGRESSIONS = [
     _case("lsi_A_f8_wt4", "A", "f8", wt=(4, 2), VectorWidthA=4, VectorWidthB=2, LDSSegmentInterleave=1),
     _case("lsi_AB_f8", "AB", "f8", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1),
     _case("lsi_A_bf16_du512", "A", "bf16", DepthU=512, VectorWidthA=2, LDSSegmentInterleave=1),
+    # LSI on F4 / MXF4 swizzled operands (validated on real HW).
+    _case("lsi_A_f4", "A", "f4", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1),
+    _case("lsi_A_mxf4_wt4", "A", "mxf4", wt=(4, 2), VectorWidthA=4, VectorWidthB=2, LDSSegmentInterleave=1),
+    _case("lsi_B_f4", "B", "f4", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1),
+    _case("lsi_B_mxf4_vidx", "B", "mxf4", wt=(2, 4), VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1),
+    _case("lsi_B_mxf4_vidx_brot", "B", "mxf4", wt=(2, 4), VectorWidthA=2, VectorWidthB=2,
+          LDSSegmentInterleave=1, LDSSegmentBRotate=1),
+    _case("lsi_AB_mxf4", "AB", "mxf4", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1),
+    # ... and on the stacked 32-row operand of the 32x16x128 WMMA (B under SourceSwap, A without).
+    _case("lsi_B_mxf4_32x16", "B", "mxf4", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1, miMN=(32, 16)),
+    _case("lsi_B_mxf4_32x16_vidx", "B", "mxf4", wt=(2, 4), VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1,
+          miMN=(32, 16)),
+    _case("lsi_A_mxf4_32x16_nss", "A", "mxf4", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1,
+          miMN=(32, 16), SourceSwap=False),
+    _case("lsi_AB_mxf4_32x16", "AB", "mxf4", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1, miMN=(32, 16)),
     # F4 is packed bytes: innerK / pad derive from a 0.5-byte element.
     # One wave: TDM is not wave-separated, so the single-descriptor start address / descriptor init run.
     _case("one_wave_B", "B", "f8", wg=(1, 1)),
