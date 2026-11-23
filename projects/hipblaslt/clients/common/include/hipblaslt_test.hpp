@@ -285,12 +285,20 @@ inline void hipblaslt_expect_status(hipblasStatus_t status, hipblasStatus_t expe
 // drop such parameters before they register as tests.
 bool is_known_bug_for_platform(const Arguments& arg);
 
-// fast_check cases in the stress and sdc_hunt categories need tens of GiB or run for many
-// minutes. A run with no gtest filter (TheRock runs hipblaslt-test unfiltered) skips them; a
-// filter that selects them, such as the ctest tier patterns, runs them.
+// fast_check cases in the stress category need tens of GiB, and those in sdc_hunt run for many
+// minutes. A run whose filter selects nothing in particular (no filter, "*", or exclusions only,
+// as in Math CI's unfiltered precheckin) skips both. A stress case runs under any other filter,
+// and a memory shortfall skips it with the amounts. An sdc_hunt case runs only when a positive
+// pattern names sdc_hunt: a broad filter such as *matmul* would otherwise spend most of a
+// suite's time limit on it.
 inline bool hipblaslt_category_needs_a_filter(const char* category)
 {
     return !strcmp(category, "stress") || !strcmp(category, "sdc_hunt");
+}
+
+inline bool hipblaslt_category_needs_its_name_in_the_filter(const char* category)
+{
+    return !strcmp(category, "sdc_hunt");
 }
 
 inline bool hipblaslt_gtest_filter_given()
@@ -300,16 +308,33 @@ inline bool hipblaslt_gtest_filter_given()
     return !positive.empty() && positive != "*";
 }
 
-#define SKIP_UNLESS_SELECTED_BY_FILTER()                                                    \
-    do                                                                                      \
-    {                                                                                       \
-        const auto& _sf_arg = GetParam();                                                   \
-        if(_sf_arg.fast_check && hipblaslt_category_needs_a_filter(_sf_arg.category)        \
-           && !hipblaslt_gtest_filter_given())                                              \
-            GTEST_SKIP() << "the " << _sf_arg.category                                      \
-                         << " fast_check cases run only when a gtest filter selects them, " \
-                            "for example --gtest_filter=*"                                  \
-                         << _sf_arg.category << "*";                                        \
+// A category name has no ':', so finding it in the positive part of the filter means one of
+// the ':'-separated positive patterns contains it.
+inline bool hipblaslt_gtest_filter_names(const char* category)
+{
+    const std::string filter   = ::testing::GTEST_FLAG(filter);
+    const std::string positive = filter.substr(0, filter.find('-'));
+    return positive.find(category) != std::string::npos;
+}
+
+inline bool hipblaslt_skip_on_demand_case(const Arguments& arg)
+{
+    if(!arg.fast_check || !hipblaslt_category_needs_a_filter(arg.category))
+        return false;
+    if(hipblaslt_category_needs_its_name_in_the_filter(arg.category))
+        return !hipblaslt_gtest_filter_names(arg.category);
+    return !hipblaslt_gtest_filter_given();
+}
+
+#define SKIP_UNLESS_SELECTED_BY_FILTER()                                          \
+    do                                                                            \
+    {                                                                             \
+        const auto& _sf_arg = GetParam();                                         \
+        if(hipblaslt_skip_on_demand_case(_sf_arg))                                \
+            GTEST_SKIP() << "the " << _sf_arg.category                            \
+                         << " fast_check cases run only on request, for example " \
+                            "--gtest_filter=*"                                    \
+                         << _sf_arg.category << "*";                              \
     } while(0)
 
 // The tests are instantiated by filtering through the RocBlasLt_Data stream

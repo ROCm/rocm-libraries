@@ -47,13 +47,13 @@ TYPED_TEST(MinAndMaxTests, TestMin)
   // 2 < 3
   T two(2), three(3);
   ASSERT_EQ(two, _THRUST_STD::min(two, three));
-  ASSERT_EQ(two, _THRUST_STD::min(two, three, thrust::less<T>()));
+  ASSERT_EQ(two, _THRUST_STD::min(two, three, _THRUST_STD::less<T>()));
 
   ASSERT_EQ(two, _THRUST_STD::min(three, two));
-  ASSERT_EQ(two, _THRUST_STD::min(three, two, thrust::less<T>()));
+  ASSERT_EQ(two, _THRUST_STD::min(three, two, _THRUST_STD::less<T>()));
 
-  ASSERT_EQ(three, _THRUST_STD::min(two, three, thrust::greater<T>()));
-  ASSERT_EQ(three, _THRUST_STD::min(three, two, thrust::greater<T>()));
+  ASSERT_EQ(three, _THRUST_STD::min(two, three, _THRUST_STD::greater<T>()));
+  ASSERT_EQ(three, _THRUST_STD::min(three, two, _THRUST_STD::greater<T>()));
 
   using KV = key_value<T, T>;
   KV two_and_two(two, two);
@@ -63,11 +63,11 @@ TYPED_TEST(MinAndMaxTests, TestMin)
   ASSERT_EQ_QUIET(two_and_two, _THRUST_STD::min(two_and_two, two_and_three));
   ASSERT_EQ_QUIET(two_and_three, _THRUST_STD::min(two_and_three, two_and_two));
 
-  ASSERT_EQ_QUIET(two_and_two, _THRUST_STD::min(two_and_two, two_and_three, thrust::less<KV>()));
-  ASSERT_EQ_QUIET(two_and_three, _THRUST_STD::min(two_and_three, two_and_two, thrust::less<KV>()));
+  ASSERT_EQ_QUIET(two_and_two, _THRUST_STD::min(two_and_two, two_and_three, _THRUST_STD::less<KV>()));
+  ASSERT_EQ_QUIET(two_and_three, _THRUST_STD::min(two_and_three, two_and_two, _THRUST_STD::less<KV>()));
 
-  ASSERT_EQ_QUIET(two_and_two, _THRUST_STD::min(two_and_two, two_and_three, thrust::greater<KV>()));
-  ASSERT_EQ_QUIET(two_and_three, _THRUST_STD::min(two_and_three, two_and_two, thrust::greater<KV>()));
+  ASSERT_EQ_QUIET(two_and_two, _THRUST_STD::min(two_and_two, two_and_three, _THRUST_STD::greater<KV>()));
+  ASSERT_EQ_QUIET(two_and_three, _THRUST_STD::min(two_and_three, two_and_two, _THRUST_STD::greater<KV>()));
 }
 
 TYPED_TEST(MinAndMaxTests, TestMax)
@@ -79,13 +79,13 @@ TYPED_TEST(MinAndMaxTests, TestMax)
   // 2 < 3
   T two(2), three(3);
   ASSERT_EQ(three, _THRUST_STD::max(two, three));
-  ASSERT_EQ(three, _THRUST_STD::max(two, three, thrust::less<T>()));
+  ASSERT_EQ(three, _THRUST_STD::max(two, three, _THRUST_STD::less<T>()));
 
   ASSERT_EQ(three, _THRUST_STD::max(three, two));
-  ASSERT_EQ(three, _THRUST_STD::max(three, two, thrust::less<T>()));
+  ASSERT_EQ(three, _THRUST_STD::max(three, two, _THRUST_STD::less<T>()));
 
-  ASSERT_EQ(two, _THRUST_STD::max(two, three, thrust::greater<T>()));
-  ASSERT_EQ(two, _THRUST_STD::max(three, two, thrust::greater<T>()));
+  ASSERT_EQ(two, _THRUST_STD::max(two, three, _THRUST_STD::greater<T>()));
+  ASSERT_EQ(two, _THRUST_STD::max(three, two, _THRUST_STD::greater<T>()));
 
   using KV = key_value<T, T>;
   KV two_and_two(two, two);
@@ -95,9 +95,9 @@ TYPED_TEST(MinAndMaxTests, TestMax)
   ASSERT_EQ_QUIET(two_and_two, _THRUST_STD::max(two_and_two, two_and_three));
   ASSERT_EQ_QUIET(two_and_three, _THRUST_STD::max(two_and_three, two_and_two));
 
-  ASSERT_EQ_QUIET(two_and_two, _THRUST_STD::max(two_and_two, two_and_three, thrust::less<KV>()));
-  ASSERT_EQ_QUIET(two_and_three, _THRUST_STD::max(two_and_three, two_and_two, thrust::less<KV>()));
+  ASSERT_EQ_QUIET(two_and_two, _THRUST_STD::max(two_and_two, two_and_three, _THRUST_STD::less<KV>()));
+  ASSERT_EQ_QUIET(two_and_three, _THRUST_STD::max(two_and_three, two_and_two, _THRUST_STD::less<KV>()));
 
-  ASSERT_EQ_QUIET(two_and_two, _THRUST_STD::max(two_and_two, two_and_three, thrust::greater<KV>()));
-  ASSERT_EQ_QUIET(two_and_three, _THRUST_STD::max(two_and_three, two_and_two, thrust::greater<KV>()));
+  ASSERT_EQ_QUIET(two_and_two, _THRUST_STD::max(two_and_two, two_and_three, _THRUST_STD::greater<KV>()));
+  ASSERT_EQ_QUIET(two_and_three, _THRUST_STD::max(two_and_three, two_and_two, _THRUST_STD::greater<KV>()));
 }

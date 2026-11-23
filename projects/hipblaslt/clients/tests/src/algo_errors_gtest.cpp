@@ -9,6 +9,7 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdlib>
@@ -53,8 +54,7 @@ namespace
         return algo;
     }
 
-    // One FP16 NN problem. The buffers are never read: every call under test
-    // returns before a kernel is launched.
+    // One FP16 NN problem. Tests that launch a kernel fill the buffers it reads.
     class AlgoErrors : public ::testing::Test
     {
     protected:
@@ -163,6 +163,28 @@ namespace
         auto freeBuffer = [](void* p) { static_cast<void>(hipFree(p)); };
         const std::unique_ptr<void, decltype(freeBuffer)> workspaceOwner(workspace, freeBuffer);
 
+        // The grouped problems run concurrently, so the second writes its own D. Its
+        // alpha differs, so a D shared with the first problem fails the check.
+        void* secondD = nullptr;
+        ASSERT_EQ(hipMalloc(&secondD, kSize * kSize * sizeof(uint16_t)), hipSuccess);
+        const std::unique_ptr<void, decltype(freeBuffer)> secondDOwner(secondD, freeBuffer);
+        float                                             secondAlpha = 2.0f;
+
+        // FP16 bit patterns. With A and B all ones, each element of D is alpha * kSize.
+        constexpr uint16_t kOne = 0x3c00, k128 = 0x5800, k256 = 0x5c00;
+        for(void* buffer : {a, b, c})
+            ASSERT_EQ(hipMemsetD16(buffer, kOne, kSize * kSize), hipSuccess);
+        auto allEqual = [](const void* buffer, uint16_t value) {
+            std::vector<uint16_t> host(kSize * kSize);
+            EXPECT_EQ(hipMemcpy(host.data(),
+                                buffer,
+                                host.size() * sizeof(uint16_t),
+                                hipMemcpyDeviceToHost),
+                      hipSuccess);
+            return std::all_of(
+                host.begin(), host.end(), [value](uint16_t x) { return x == value; });
+        };
+
         for(const int32_t uniformOrder : {1, 0})
         {
             SCOPED_TRACE("uniform summation order " + std::to_string(uniformOrder));
@@ -200,6 +222,8 @@ namespace
             std::vector<int64_t>                     size(2, kSize), batch(2, 1);
             std::vector<hipblaslt_ext::GemmEpilogue> epilogues(2);
             std::vector<hipblaslt_ext::GemmInputs>   ins(2, inputs());
+            ins[1].setD(secondD);
+            ins[1].setAlpha(&secondAlpha);
             ASSERT_EQ(grouped.setProblem(size, size, size, batch, epilogues, ins),
                       HIPBLAS_STATUS_SUCCESS);
             grouped.setMaxWorkspaceBytes(kWorkspace);
@@ -238,8 +262,12 @@ namespace
             EXPECT_EQ(gemm.initialize(plainAlgo, workspace, false), HIPBLAS_STATUS_SUCCESS);
             EXPECT_EQ(gemm.run(nullptr), HIPBLAS_STATUS_SUCCESS);
             EXPECT_EQ(grouped.initialize(groupedAlgo, workspace, false), HIPBLAS_STATUS_SUCCESS);
+            for(void* buffer : {d, secondD})
+                ASSERT_EQ(hipMemset(buffer, 0, kSize * kSize * sizeof(uint16_t)), hipSuccess);
             EXPECT_EQ(grouped.run(nullptr), HIPBLAS_STATUS_SUCCESS);
             EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+            EXPECT_TRUE(allEqual(d, k128));
+            EXPECT_TRUE(allEqual(secondD, k256));
 
             EXPECT_EQ(matmul(groupedAlgo), HIPBLAS_STATUS_INVALID_VALUE);
             EXPECT_EQ(gemm.initialize(groupedAlgo, workspace, false),

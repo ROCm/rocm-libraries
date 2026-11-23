@@ -218,6 +218,12 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
 /**
  * @brief Retrieves the required workspace size for a specific engine configuration and an operation graph.
  *
+ * The returned size MUST be at least the workspace of any execution context this plugin creates
+ * from the same engine configuration and operation graph. hipDNN filters by this value before it
+ * creates an execution context (deselect_workspace_greater_than()). When a workspace limit is
+ * set, hipDNN rejects a context its call creates over the limit; otherwise it rejects nothing
+ * and logs a WARN when WARN logging is enabled.
+ *
  * @param[in] handle The engine plugin handle.
  * @param[in] engine_config A pointer to a structure where the serialized `EngineConfig` from `engine_config.fbs`
  *                          is stored.

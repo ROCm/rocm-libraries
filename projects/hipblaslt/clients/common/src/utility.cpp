@@ -43,7 +43,7 @@
 #include <stdlib.h>
 #include <string>
 
-#include "client/include/Utility.hpp"
+#include "include/Utility.hpp"
 
 #include <Tensile/hip/HipHardware.hpp>
 
