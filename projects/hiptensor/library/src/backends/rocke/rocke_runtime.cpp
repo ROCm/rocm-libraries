@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <algorithm>
+#include <charconv>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -545,9 +546,10 @@ namespace hiptensor
             {
                 return fallback;
             }
-            char* end    = nullptr;
-            auto  parsed = std::strtod(value.c_str(), &end);
-            return end == value.c_str() ? fallback : parsed;
+            // independent of the C locale, unlike strtod
+            double parsed = 0.0;
+            auto   result = std::from_chars(value.data(), value.data() + value.size(), parsed);
+            return result.ec == std::errc() ? parsed : fallback;
         }
 
         PackKernel const*

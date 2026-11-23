@@ -186,11 +186,16 @@ namespace hiptensor
                 {
                     continue;
                 }
-                if(hipMalloc(&tensors[s].ptr, bytes[s]) != hipSuccess
-                   || hipMemset(tensors[s].ptr, 0x3C, bytes[s]) != hipSuccess)
+                if(hipMalloc(&tensors[s].ptr, bytes[s]) != hipSuccess)
                 {
                     tensors[s].ptr = nullptr;
                     result.note    = "cannot allocate the timing buffers";
+                    return HIPTENSOR_STATUS_SUCCESS;
+                }
+                // tensors[s] keeps the allocation, so its destructor frees it
+                if(hipMemset(tensors[s].ptr, 0x3C, bytes[s]) != hipSuccess)
+                {
+                    result.note = "cannot initialize the timing buffers";
                     return HIPTENSOR_STATUS_SUCCESS;
                 }
             }

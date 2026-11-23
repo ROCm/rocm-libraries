@@ -24,7 +24,7 @@
  *
  *******************************************************************************/
 
-// The Python-free runtime of the rocKE backend: the kernel pack reader, the code object loader
+// The runtime of the rocKE backend: the kernel pack reader, the code object loader
 // and the launch program a plan holds.
 //
 // A kernel pack (rocke.htpk, written by pack/rocke_pack_builder.cpp at build time) holds the code

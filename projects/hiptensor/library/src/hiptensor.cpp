@@ -969,6 +969,18 @@ hiptensorStatus_t hiptensorEstimateWorkspaceSize(const hiptensorHandle_t        
                                                  const hiptensorWorksizePreference_t  workspacePref,
                                                  uint64_t* workspaceSizeEstimate)
 {
+    using hiptensor::Logger;
+    auto& logger = Logger::instance();
+
+    hiptensorStatus_t checkResult = HIPTENSOR_STATUS_SUCCESS;
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, handle);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, desc);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, workspaceSizeEstimate);
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
     // The backend a plan of this operation would select estimates its workspace.
     hiptensor::backend::EstimateContext context;
     context.handle        = handle;
@@ -984,6 +996,19 @@ hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handl
                                       const hiptensorPlanPreference_t      pref,
                                       uint64_t                             workspaceSizeLimit)
 {
+    using hiptensor::Logger;
+    auto& logger = Logger::instance();
+
+    hiptensorStatus_t checkResult = HIPTENSOR_STATUS_SUCCESS;
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, handle);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, plan);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, desc);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, pref);
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
+
     (*plan)                     = new hiptensorPlan();
     hiptensorPlan_t newPlan     = *plan;
     newPlan->mRequiredWorkspace = workspaceSizeLimit;
@@ -1033,7 +1058,13 @@ hiptensorStatus_t hiptensorCreatePlan(const hiptensorHandle_t              handl
 
     // The backend is selected and prepared now, for every operation. The plan keeps its own copy
     // of the descriptors, so the problem the backend checks is the one every execution runs.
-    return hiptensor::backend::createPlanBackend(handle, newPlan, workspaceSizeLimit);
+    auto status = hiptensor::backend::createPlanBackend(handle, newPlan, workspaceSizeLimit);
+    if(status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        delete newPlan;
+        *plan = nullptr;
+    }
+    return status;
 }
 
 hiptensorStatus_t hiptensorDestroyPlan(hiptensorPlan_t plan)

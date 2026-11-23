@@ -34,6 +34,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -236,6 +237,9 @@ namespace hiptensor
             std::unique_ptr<IPrepared> primary;
             std::unique_ptr<IPrepared> shadow;
             DeviceAllocation           shadowOutput;
+            // Held for a whole A/B execution: concurrent executions of the plan share
+            // shadowOutput.
+            std::mutex shadowMutex;
         };
     } // namespace backend
 } // namespace hiptensor

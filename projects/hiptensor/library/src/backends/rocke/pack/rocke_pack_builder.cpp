@@ -39,7 +39,7 @@
 // sources: same kernels, code objects, kernel records, routes and selection models; only the two
 // header strings (compiler id, rocKE version) name this builder's toolchain unless --compiler-id /
 // --rocke-version override them. rocKE's tests assert that equality
-// (library/tests/test_hiptensor_pack_cross_check.py); hipTensor's build never runs Python.
+// (library/tests/test_hiptensor_pack_cross_check.py).
 //
 // Every kernel family is built with rocKE's C++ builders (the descriptor tables of the Python
 // reference): ew, reduce, rreduce (the tuned reduction classes of rocKE's reduction route

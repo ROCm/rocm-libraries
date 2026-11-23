@@ -495,6 +495,12 @@ set(_HIPTENSOR_HOST_TESTS
   util_test
   yaml_test
 )
+if(HIPTENSOR_ENABLE_ROCKE_BACKEND)
+  list(APPEND _HIPTENSOR_HOST_TESTS rocke_backend_test)
+  if(HIPTENSOR_ENABLE_ROCKE_JIT)
+    list(APPEND _HIPTENSOR_HOST_TESTS rocke_jit_test rocke_gett_jit_test)
+  endif()
+endif()
 
 # Device tests encoded as "binary|config-or-NONE". The config path is
 # relative to a per-category config root (bin/hiptensor/configs/<category>/),
@@ -702,6 +708,34 @@ foreach(_hiptensor_family "quick|validation/quick" "standard|validation/standard
         _hiptensor_emit_test("${_hiptensor_dev_bin} ${_hiptensor_suffix}" "${_hiptensor_cmd}")
     endforeach()
 endforeach()
+
+# rocKE tests that need an environment of their own, emitted once under quick like the host tests.
+# The selection model test reads the models installed next to it (rocke_select).
+if(HIPTENSOR_ENABLE_ROCKE_BACKEND)
+    function(_hiptensor_emit_env_test test_name command environment)
+        _hiptensor_emit_test("${test_name} quick" "${command}")
+        file(APPEND "${INSTALL_TEST_FILE}"
+             "set_tests_properties(\"${test_name} quick\" PROPERTIES ENVIRONMENT \"${environment}\")\n")
+    endfunction()
+    _hiptensor_emit_env_test(rocke_select_model_test "\"../rocke_select_model_test\""
+                             "HIPTENSOR_ROCKE_TEST_SELECT_MODEL_DIR=rocke_select")
+    _hiptensor_emit_env_test(rocke_backend_test_f64_route
+                             "\"../rocke_backend_test\" --gtest_filter=*RockeContraction*"
+                             "HIPTENSOR_ROCKE_CONTRACTION_ROUTE=f64")
+    if(HIPTENSOR_ENABLE_ROCKE_JIT)
+        _hiptensor_emit_env_test(rocke_backend_test_jit "\"../rocke_backend_test\""
+                                 "HIPTENSOR_ROCKE_TEST_JIT=1;HIPTENSOR_ROCKE_JIT=all")
+    endif()
+    rocm_install(
+        DIRECTORY "${HIPTENSOR_ROCKE_SELECT_MODEL_DIR}/"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}/rocke_select"
+        COMPONENT tests
+        FILES_MATCHING
+        PATTERN "*.model"
+        PATTERN "*.check"
+        PATTERN "tools" EXCLUDE
+    )
+endif()
 
 # ffm-quick / ffm-full: device only. ffm-quick uses emulation/quick, ffm-full
 # uses emulation/full (they are now distinct sets, not aliases).

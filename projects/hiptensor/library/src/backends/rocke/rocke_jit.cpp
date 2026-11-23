@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -1418,6 +1419,20 @@ namespace hiptensor
                     }
                     return entry;
                 }
+                // Completes the build for the callers waiting on it when a step below throws.
+                struct FlightGuard
+                {
+                    KernelCache&       flights;
+                    std::string const& key;
+                    bool               finished = false;
+                    ~FlightGuard()
+                    {
+                        if(!finished)
+                        {
+                            flights.finish(key, nullptr, false);
+                        }
+                    }
+                } flight{cache, specKey};
                 std::string why;
                 Digest      id{};
                 double      frontMs = 0.0, compileMs = 0.0;
@@ -1464,6 +1479,7 @@ namespace hiptensor
                     // a disabled compile is a test setting, not a property of the kernel
                     remember = !envFlag("HIPTENSOR_ROCKE_JIT_NO_COMPILE");
                 }
+                flight.finished = true;
                 cache.finish(specKey, entry, remember);
                 return entry;
             }
@@ -1672,9 +1688,9 @@ namespace hiptensor
             // HIPTENSOR_JIT_MAX_MS: compile budget of one plan; past it, the remaining launches
             // keep their pack kernels (cache hits are still taken)
             double budget = 0.0;
-            if(auto v = getEnvironmentVariable("HIPTENSOR_JIT_MAX_MS"); v && !v->empty())
+            if(auto v = getEnvironmentVariable("HIPTENSOR_JIT_MAX_MS"); v)
             {
-                budget = std::atof(v->c_str());
+                std::from_chars(v->data(), v->data() + v->size(), budget);
             }
             auto const  dc = deviceClassOf(device);
             std::string firstReason;

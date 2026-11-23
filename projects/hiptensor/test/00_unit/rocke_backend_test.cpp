@@ -3376,7 +3376,7 @@ namespace
     // tanh, exp, log), as opA (the una classes) and as opC, on data with each operator's special
     // arguments (NaN, infinities, signed zeros, -1 outside the domain of sqrt and log, 0 at the
     // pole of the reciprocal and log): against a long double reference, within the error bounds
-    // of the programmer's guide (ulp of the compute type per operator, then the sum and the one
+    // of library/src/backends/rocke/README.rst (ulp of the compute type per operator, then the sum and the one
     // rounding to D). NaN must be NaN, infinities and zeros exact.
     struct OperatorReductionCase
     {
@@ -3393,7 +3393,7 @@ namespace
                   << (c.onC ? " on C" : " on A") << (c.row ? " row" : " col");
     }
 
-    // The programmer's guide's bound of `u` in ulp of the compute type (f32, or f64 for f64).
+    // The rocKE README's bound of `u` in ulp of the compute type (f32, or f64 for f64).
     double operatorUlp(hiptensorOperator_t u, bool f64)
     {
         switch(u)
@@ -4349,7 +4349,7 @@ namespace
                   << int(c.b) << "_" << int(c.d) << (c.scale ? "_scale" : "_bilinear");
     }
 
-    // The accuracy class of a recipe (programmers-guide.rst): products per element product,
+    // The accuracy class of a recipe (library/src/backends/rocke/README.rst): products per element product,
     // the relative error of a product's representation, the accumulation's unit roundoff.
     struct RecipeClass
     {
@@ -7121,7 +7121,7 @@ namespace
     // elementwise binary and trinary operations with an operator per input, reductions with opA
     // and opC, contractions with opA, opB and opC (each route), trinary contractions with opA
     // to opD, and the special values. References in long double; the bound of each operator is
-    // its documented maximum error in ulps of the compute type (programmer's guide).
+    // its documented maximum error in ulps of the compute type (library/src/backends/rocke/README.rst).
 
     hiptensorOperator_t const kUnaryOps[]
         = {HIPTENSOR_OP_IDENTITY, HIPTENSOR_OP_SQRT,    HIPTENSOR_OP_RELU, HIPTENSOR_OP_CONJ,

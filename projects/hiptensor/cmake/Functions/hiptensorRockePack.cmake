@@ -32,9 +32,8 @@
 # every target of HIPTENSOR_ROCKE_PACK_TARGETS into <build>/share/hiptensor/rocke/<target>/
 # rocke.htpk. The packs are installed to share/hiptensor/rocke. With HIPTENSOR_ROCKE_PACK_DIR set,
 # prebuilt packs from that directory are installed instead and no pack is built. The kernel
-# selection models of HIPTENSOR_ROCKE_SELECT_MODEL_DIR are written into the packs. Neither the
-# pack build nor the library runs Python. (rocKE's tests check that the packs equal the ones
-# rocKE's Python engine writes for the same sources; that check is rocKE's, not this build's.)
+# selection models of HIPTENSOR_ROCKE_SELECT_MODEL_DIR are written into the packs. The build runs
+# one Python script, rocKE's arch-domain table generator (hiptensor_add_rocke_engine).
 #
 # The JIT (HIPTENSOR_ENABLE_ROCKE_JIT) builds its kernels with rocKE's C++ kernel builders linked
 # into the library. Its contraction route (rocKE's tensor GETT planner) also reads the GEMM

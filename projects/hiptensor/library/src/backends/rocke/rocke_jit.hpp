@@ -33,7 +33,7 @@
 // allows them. A specialized kernel is built for the problem's values by rocKE's C++ kernel
 // builder (rocke/instance_hiptensor_aot.h, the twin of rocKE's jit_ew.py, linked into the
 // library), lowered to LLVM IR for the linked compiler's flavor and compiled with COMGR
-// (rocke_comgr.hpp). No Python runs, and the JIT needs no data file of its own. Plans created with
+// (rocke_comgr.hpp). The JIT needs no data file of its own. Plans created with
 // HIPTENSOR_JIT_MODE_NONE never reach this code. The contraction JIT (rocke_gett_jit.hpp) builds the
 // launches of rocKE's tensor GETT planner through jitKernel() and keeps them in the same cache.
 //

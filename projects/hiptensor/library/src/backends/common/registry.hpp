@@ -98,7 +98,11 @@ namespace hiptensor
                                             uint64_t          workspaceSizeLimit);
 
         // Runs a plan through its backends (A/B shadow first, when there is one).
-        hiptensorStatus_t executePlan(hiptensorHandle_t   handle,
+        // HIPTENSOR_STATUS_INVALID_VALUE when the plan is not of the operation `kind` that the
+        // calling API `apiName` executes.
+        hiptensorStatus_t executePlan(char const*         apiName,
+                                      OpKind              kind,
+                                      hiptensorHandle_t   handle,
                                       hiptensorPlan_t     plan,
                                       Scalars const&      scalars,
                                       Buffers const&      buffers,

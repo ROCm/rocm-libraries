@@ -597,8 +597,15 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
     buffers.C   = C;
     buffers.out = D;
 
-    return hiptensor::backend::executePlan(
-        handle, plan, scalars, buffers, workspace, workspaceSize, cfg);
+    return hiptensor::backend::executePlan("hiptensorContract",
+                                           hiptensor::backend::OpKind::Contraction,
+                                           handle,
+                                           plan,
+                                           scalars,
+                                           buffers,
+                                           workspace,
+                                           workspaceSize,
+                                           cfg);
 }
 
 hiptensorStatus_t contractionCreatePlanPreference(const hiptensorHandle_t   handle,
@@ -1799,6 +1806,13 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
     buffers.D   = D;
     buffers.out = E;
 
-    return hiptensor::backend::executePlan(
-        handle, plan, scalars, buffers, workspace, workspaceSize, cfg);
+    return hiptensor::backend::executePlan("hiptensorContractTrinary",
+                                           hiptensor::backend::OpKind::ContractionTrinary,
+                                           handle,
+                                           plan,
+                                           scalars,
+                                           buffers,
+                                           workspace,
+                                           workspaceSize,
+                                           cfg);
 }

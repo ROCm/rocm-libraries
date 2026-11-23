@@ -39,6 +39,7 @@
 #include "backends/rocke/rocke_backend.hpp"
 #endif
 #include "data_types.hpp"
+#include "handle.hpp"
 #include "logger.hpp"
 #include "platform.hpp"
 #include "registry.hpp"
@@ -548,6 +549,17 @@ namespace hiptensor
                 return status;
             }
 
+            if(handle == nullptr)
+            {
+                return HIPTENSOR_STATUS_NOT_INITIALIZED;
+            }
+            // Backends load, time and select kernels for the handle's device.
+            if(auto status = checkHandleDevice(handle, "hiptensorCreatePlan");
+               status != HIPTENSOR_STATUS_SUCCESS)
+            {
+                return status;
+            }
+
             auto state = std::make_unique<PlanBackendState>();
             if(auto status = makeProblem(*plan->mOpDesc, handle->getDevice(), state->problem);
                status != HIPTENSOR_STATUS_SUCCESS)
@@ -620,7 +632,9 @@ namespace hiptensor
             return HIPTENSOR_STATUS_SUCCESS;
         }
 
-        hiptensorStatus_t executePlan(hiptensorHandle_t   handle,
+        hiptensorStatus_t executePlan(char const*         apiName,
+                                      OpKind              kind,
+                                      hiptensorHandle_t   handle,
                                       hiptensorPlan_t     plan,
                                       Scalars const&      scalars,
                                       Buffers const&      buffers,
@@ -628,11 +642,34 @@ namespace hiptensor
                                       uint64_t            workspaceSize,
                                       LaunchConfig const& cfg)
         {
-            auto& state   = *plan->mBackend;
-            auto  context = PlanContext{handle, plan, 0};
+            auto& state = *plan->mBackend;
+            if(state.problem.kind != kind)
+            {
+                char msg[256];
+                snprintf(msg,
+                         sizeof(msg),
+                         "The plan's operation (%s) is not the one this function executes (%s) "
+                         "(%s)",
+                         opKindName(state.problem.kind),
+                         opKindName(kind),
+                         hiptensorGetErrorString(HIPTENSOR_STATUS_INVALID_VALUE));
+                Logger::instance()->logError(apiName, msg);
+                return HIPTENSOR_STATUS_INVALID_VALUE;
+            }
+            if(auto status = checkHandleDevice(handle, apiName); status != HIPTENSOR_STATUS_SUCCESS)
+            {
+                return status;
+            }
+
+            auto context = PlanContext{handle, plan, 0};
 
             // The shadow backend runs first, into its own buffer, so that both backends read the
             // same inputs even when the output aliases an input.
+            std::unique_lock<std::mutex> shadowLock;
+            if(state.shadow != nullptr)
+            {
+                shadowLock = std::unique_lock<std::mutex>(state.shadowMutex);
+            }
             bool shadowRan = false;
             if(state.shadow != nullptr && buffers.out != nullptr)
             {

@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -56,6 +57,14 @@ namespace hiptensor
                     }
                 }
 
+                // A finite number in [first, last), independent of the C locale. Returns the
+                // end of the number, or nullptr.
+                char const* parseFinite(char const* first, char const* last, double& value)
+                {
+                    auto const [next, error] = std::from_chars(first, last, value);
+                    return error == std::errc() && std::isfinite(value) ? next : nullptr;
+                }
+
                 template <typename T>
                 bool parseList(std::string const& text, std::vector<T>& out)
                 {
@@ -72,20 +81,27 @@ namespace hiptensor
                         {
                             break;
                         }
-                        char* next = nullptr;
                         if constexpr(std::is_floating_point_v<T>)
                         {
-                            out.push_back(std::strtod(p, &next));
+                            double      value = 0.0;
+                            char const* next  = parseFinite(p, end, value);
+                            if(next == nullptr)
+                            {
+                                return false;
+                            }
+                            out.push_back(static_cast<T>(value));
+                            p = next;
                         }
                         else
                         {
+                            char* next = nullptr;
                             out.push_back(static_cast<T>(std::strtol(p, &next, 10)));
+                            if(next == p)
+                            {
+                                return false;
+                            }
+                            p = next;
                         }
-                        if(next == p)
-                        {
-                            return false;
-                        }
-                        p = next;
                     }
                     return true;
                 }
@@ -172,12 +188,13 @@ namespace hiptensor
                         }
                         model.routes[size_t(route)] = true;
                     }
-                    char* end   = nullptr;
-                    bool  valid = head[3].rfind("margin=", 0) == 0 && head[3].size() > 7;
+                    bool valid = head[3].rfind("margin=", 0) == 0 && head[3].size() > 7;
                     if(valid)
                     {
-                        model.margin = std::strtod(head[3].c_str() + 7, &end);
-                        valid = *end == '\0' && std::isfinite(model.margin) && model.margin >= 0.0;
+                        auto const& text = head[3];
+                        auto const* last = text.data() + text.size();
+                        valid            = parseFinite(text.data() + 7, last, model.margin) == last
+                                && model.margin >= 0.0;
                     }
                     if(!valid)
                     {

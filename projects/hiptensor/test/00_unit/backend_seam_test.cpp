@@ -163,6 +163,9 @@ namespace
         hiptensorStatus_t planStatus = HIPTENSOR_STATUS_SUCCESS;
         hiptensorStatus_t execStatus = HIPTENSOR_STATUS_SUCCESS;
         bool              skipped    = false;
+        // The device refused the operation descriptor (for example a contraction on a device
+        // without matrix cores for its compute type), so no backend saw the problem.
+        bool deviceRefused = false;
     };
 
     constexpr float alphaValue = 2.0f;
@@ -386,7 +389,8 @@ namespace
         if(outcome.planStatus == HIPTENSOR_STATUS_ARCH_MISMATCH
            || outcome.planStatus == HIPTENSOR_STATUS_NOT_SUPPORTED)
         {
-            outcome.skipped = true;
+            outcome.skipped       = true;
+            outcome.deviceRefused = true;
             return outcome;
         }
         EXPECT_EQ(outcome.planStatus, HIPTENSOR_STATUS_SUCCESS);
@@ -627,13 +631,23 @@ TEST(BackendSeamTest, DeclinedProblemsAreNotSupportedWithoutFallback)
     {
         LogCapture log;
         auto       outcome = run(op, nullptr);
+        if(outcome.deviceRefused)
+        {
+            // The f32 elementwise and reduction kernels exist for every device; only the
+            // contractions may be unsupported.
+            EXPECT_TRUE(op == Op::Contraction || op == Op::ContractionTrinary) << opName(op);
+            continue;
+        }
         if(log.contains(servedBy("rocke", op)))
         {
             // Served, and checked by run().
             continue;
         }
         EXPECT_TRUE(outcome.skipped) << opName(op);
-        EXPECT_EQ(outcome.planStatus, HIPTENSOR_STATUS_NOT_SUPPORTED) << opName(op);
+        // ARCH_MISMATCH when rocKE has no kernels for the device, NOT_SUPPORTED otherwise
+        EXPECT_TRUE(outcome.planStatus == HIPTENSOR_STATUS_NOT_SUPPORTED
+                    || outcome.planStatus == HIPTENSOR_STATUS_ARCH_MISMATCH)
+            << opName(op) << ": " << hiptensorGetErrorString(outcome.planStatus);
         EXPECT_TRUE(
             log.contains(std::string("Backend rocke declined the ") + opName(op) + " problem"))
             << opName(op) << "\n"

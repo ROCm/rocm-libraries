@@ -64,7 +64,15 @@ hiptensorStatus_t hiptensorElementwiseBinaryExecute(const hiptensorHandle_t hand
     buffers.C   = C;
     buffers.out = D;
 
-    return hiptensor::backend::executePlan(handle, plan, scalars, buffers, nullptr, 0, cfg);
+    return hiptensor::backend::executePlan("hiptensorElementwiseBinaryExecute",
+                                           hiptensor::backend::OpKind::ElementwiseBinary,
+                                           handle,
+                                           plan,
+                                           scalars,
+                                           buffers,
+                                           nullptr,
+                                           0,
+                                           cfg);
 }
 
 hiptensorStatus_t hiptensor::ckbackend::elementwiseBinary(hiptensorHandle_t            handle,

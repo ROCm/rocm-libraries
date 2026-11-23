@@ -188,8 +188,15 @@ hiptensorStatus_t hiptensorReduce(const hiptensorHandle_t handle,
     buffers.C   = C;
     buffers.out = D;
 
-    return hiptensor::backend::executePlan(
-        handle, plan, scalars, buffers, workspace, workspaceSize, cfg);
+    return hiptensor::backend::executePlan("hiptensorReduce",
+                                           hiptensor::backend::OpKind::Reduction,
+                                           handle,
+                                           plan,
+                                           scalars,
+                                           buffers,
+                                           workspace,
+                                           workspaceSize,
+                                           cfg);
 }
 
 hiptensorStatus_t hiptensor::ckbackend::reduce(hiptensorHandle_t            handle,
@@ -393,12 +400,13 @@ hiptensorStatus_t hiptensor::ckbackend::reduce(hiptensorHandle_t            hand
     if(C && C != D)
     {
         // CK API can only process $D = alpha * reduce(A) + beta * D$
-        // Need to copy C to D if C != D
-        auto hipStatus = hipMemcpy(D,
-                                   C,
-                                   hiptensor::elementsFromLengths(descC->mLengths)
-                                       * hiptensor::hiptensorDataTypeSize(descC->mType),
-                                   hipMemcpyDeviceToDevice);
+        // Need to copy C to D if C != D, on the caller's stream so that the kernel reads it
+        auto hipStatus = hipMemcpyAsync(D,
+                                        C,
+                                        hiptensor::elementsFromLengths(descC->mLengths)
+                                            * hiptensor::hiptensorDataTypeSize(descC->mType),
+                                        hipMemcpyDeviceToDevice,
+                                        stream);
         if(hipStatus != hipSuccess)
         {
             hiptensor::clearHipError();

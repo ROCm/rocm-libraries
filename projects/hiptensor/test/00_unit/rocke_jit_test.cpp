@@ -1018,7 +1018,7 @@ namespace
         if(kind == 3)
         {
             // an independent reference: long double over the inputs as stored (f16), with the
-            // programmer's guide's bound 2 (K + 4) u |alpha| sum |a b| + 2 u |d| + 4 u |beta c|
+            // rocKE README's bound 2 (K + 4) u |alpha| sum |a b| + 2 u |d| + 4 u |beta c|
             // (u = 2^-24: f32 accumulation and D); NaN must be NaN, infinities exact. It holds
             // for every candidate, also those whose split order varies between runs. On gfx90a the
             // f16 MFMA instructions of the 16-bit routes flush subnormal f16 operands to zero (a

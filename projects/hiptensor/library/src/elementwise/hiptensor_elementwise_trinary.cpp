@@ -69,7 +69,15 @@ hiptensorStatus_t hiptensorElementwiseTrinaryExecute(const hiptensorHandle_t han
     buffers.C   = C;
     buffers.out = D;
 
-    return hiptensor::backend::executePlan(handle, plan, scalars, buffers, nullptr, 0, cfg);
+    return hiptensor::backend::executePlan("hiptensorElementwiseTrinaryExecute",
+                                           hiptensor::backend::OpKind::ElementwiseTrinary,
+                                           handle,
+                                           plan,
+                                           scalars,
+                                           buffers,
+                                           nullptr,
+                                           0,
+                                           cfg);
 }
 
 hiptensorStatus_t hiptensor::ckbackend::elementwiseTrinary(hiptensorHandle_t            handle,

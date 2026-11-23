@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -33,7 +34,6 @@
 #include <string>
 
 #include "data_types.hpp"
-#include "elementwise/elementwise_execute.hpp"
 #include "logger.hpp"
 #include "plan_cache.hpp"
 #include "platform.hpp"
@@ -91,44 +91,6 @@ namespace hiptensor
                                       uint64_t                     workspaceSize,
                                       backend::LaunchConfig const& cfg) const override
                 {
-                    // an elementwise operation whose every input has a zero scaling factor:
-                    // D = +0 without reading an input or running the program's kernels (the
-                    // other backend does the same, elementwise_execute.hpp)
-                    if(auto const* desc = context.plan != nullptr ? context.plan->mOpDesc : nullptr;
-                       desc != nullptr && buffers.out != nullptr)
-                    {
-                        auto const type = desc->mOperationType;
-                        if(type == HIPTENSOR_PERMUTATION || type == HIPTENSOR_ELEMENTWISE_BINARY
-                           || type == HIPTENSOR_ELEMENTWISE_TRINARY)
-                        {
-                            auto const compute = convertToComputeType(desc->mScalarType);
-                            std::vector<void const*> used{scalars.alpha};
-                            if(type == HIPTENSOR_ELEMENTWISE_TRINARY)
-                            {
-                                used.push_back(scalars.beta);
-                            }
-                            if(type != HIPTENSOR_PERMUTATION)
-                            {
-                                used.push_back(scalars.gamma);
-                            }
-                            std::vector<double> values;
-                            for(auto const* s : used)
-                            {
-                                if(s == nullptr)
-                                {
-                                    values.clear();
-                                    break;
-                                }
-                                values.push_back(readVal<double>(s, compute));
-                            }
-                            auto const* out
-                                = type == HIPTENSOR_PERMUTATION ? desc->mDescB : desc->mDescD;
-                            if(out != nullptr && elementwiseAllScalesZero(values))
-                            {
-                                return elementwiseZeroOutput(*out, buffers.out, cfg.stream);
-                            }
-                        }
-                    }
                     return runProgram(
                         mProgram, scalars, buffers, workspace, workspaceSize, cfg.stream);
                 }
@@ -138,12 +100,8 @@ namespace hiptensor
                 Program           mProgram;
             };
 
-            bool envSet(char const* name)
-            {
-                auto value = getEnvironmentVariable(name);
-                return value && !value->empty() && *value != "0";
-            }
-
+            // A positive integer, or "all"; anything else (including trailing characters) is
+            // the fallback.
             int envInt(char const* name, int fallback)
             {
                 auto value = getEnvironmentVariable(name);
@@ -155,9 +113,11 @@ namespace hiptensor
                 {
                     return std::numeric_limits<int>::max();
                 }
-                char* end = nullptr;
-                long  v   = std::strtol(value->c_str(), &end, 10);
-                return end != value->c_str() && v > 0 ? static_cast<int>(v) : fallback;
+                int         v     = 0;
+                char const* first = value->data();
+                char const* last  = first + value->size();
+                auto [end, ec]    = std::from_chars(first, last, v);
+                return ec == std::errc{} && end == last && v > 0 ? v : fallback;
             }
 
             // HIPTENSOR_ROCKE_SELECT=static: the static order instead of the pack's model.
@@ -230,8 +190,13 @@ namespace hiptensor
             // HIPTENSOR_JIT_MAX_MS: the compile budget of one plan (0: none).
             double jitBudgetMs()
             {
-                auto v = getEnvironmentVariable("HIPTENSOR_JIT_MAX_MS");
-                return v && !v->empty() ? std::atof(v->c_str()) : 0.0;
+                auto   v      = getEnvironmentVariable("HIPTENSOR_JIT_MAX_MS");
+                double budget = 0.0;
+                if(v)
+                {
+                    std::from_chars(v->data(), v->data() + v->size(), budget);
+                }
+                return budget;
             }
 
             CandidateOptions
@@ -464,7 +429,9 @@ namespace hiptensor
                     {
                         reason = "KERNEL_RANK " + std::to_string(rank) + " is past the "
                                  + std::to_string(candidates.size()) + " rocKE candidates";
-                        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+                        // an invalid request, not a decline: the fallback backend would run
+                        // its own kernel instead of the requested rank
+                        return HIPTENSOR_STATUS_INVALID_VALUE;
                     }
                     bool decided = false;
                     if(rank > 0)
@@ -475,7 +442,8 @@ namespace hiptensor
                     }
                     if(!decided && cache != nullptr)
                     {
-                        auto const uid = cache->querySolutionUidByHash(hash);
+                        auto const uid
+                            = cache->querySolutionUid(plan->mOpDesc, backend::kRockeBackendName);
                         if(uid != 0)
                         {
                             for(size_t i = 0; i < candidates.size(); i++)
@@ -519,8 +487,13 @@ namespace hiptensor
                                              : autotune(problem, candidates, timed, reps, result);
                            status != HIPTENSOR_STATUS_SUCCESS)
                         {
-                            reason = "the measured selection failed";
-                            return status;
+                            // as when its allocations fail: the selector's pick is used
+                            static_cast<void>(hipGetLastError());
+                            result        = AutotuneResult{};
+                            result.winner = -1;
+                            result.note   = std::string("the measured selection failed (")
+                                          + hiptensorGetErrorString(status)
+                                          + "); the selector's pick is used";
                         }
                         note = recipeNote.empty() || result.note.empty()
                                    ? recipeNote + result.note

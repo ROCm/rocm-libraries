@@ -60,7 +60,15 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
     buffers.A   = A;
     buffers.out = B;
 
-    return hiptensor::backend::executePlan(handle, plan, scalars, buffers, nullptr, 0, cfg);
+    return hiptensor::backend::executePlan("hiptensorPermute",
+                                           hiptensor::backend::OpKind::Permute,
+                                           handle,
+                                           plan,
+                                           scalars,
+                                           buffers,
+                                           nullptr,
+                                           0,
+                                           cfg);
 }
 
 hiptensorStatus_t hiptensor::ckbackend::permute(hiptensorHandle_t            handle,
