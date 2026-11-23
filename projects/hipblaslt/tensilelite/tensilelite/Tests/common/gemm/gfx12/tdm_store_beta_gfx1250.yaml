@@ -543,6 +543,7 @@ BenchmarkProblems:
         - StreamK: [3]
         - PrefetchAcrossPersistent: [1]
         - StaggerU: [0]
+        - CompactLoopStore: [false, true]
         - Groups:
           - - StreamKForceDPOnly: [1]
               TDMStoreInst: [false, true]
@@ -1737,6 +1738,7 @@ BenchmarkProblems:
       - StreamK: [3]
       - PrefetchAcrossPersistent: [1]
       - StaggerU: [0]
+      - CompactLoopStore: [false, true]
       - Groups:
         - - StreamKForceDPOnly: [1]
             TDMStoreInst: [false, true]
