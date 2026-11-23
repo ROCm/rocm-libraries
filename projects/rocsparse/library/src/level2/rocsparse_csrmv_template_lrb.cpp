@@ -474,6 +474,10 @@ namespace rocsparse
                                            bool            is_host_mode)
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
+        if(beta == static_cast<T>(1) && num_extra == 0)
+        {
+            return;
+        }
         const J       bin_start = n_rows_bins[bin_id];
         const int64_t stride    = static_cast<int64_t>(hipGridDim_x) * WG_SIZE;
         for(int64_t i = static_cast<int64_t>(hipBlockIdx_x) * WG_SIZE + hipThreadIdx_x; i < n_rows;

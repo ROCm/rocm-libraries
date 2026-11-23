@@ -33,9 +33,11 @@
 //
 #include "unit_test_device_level2_common.hpp"
 
+#include <cstring>
 #include <deque>
 #include <limits>
 #include <string>
+#include <type_traits>
 
 using namespace level2;
 
@@ -828,6 +830,132 @@ namespace
             p.expect_y(want);
     }
 
+    // -0, +inf, -inf and a signaling NaN by bit pattern. Scaling one of them by 1 can change
+    // its bits: the NaN is quieted, and -0 can come back as +0 after narrowing.
+    template <typename R>
+    R special_real(int k)
+    {
+        if constexpr(is_integer<R>())
+            return static_cast<R>(k - 7);
+        else
+        {
+            using B = std::conditional_t<sizeof(R) == 2,
+                                         uint16_t,
+                                         std::conditional_t<sizeof(R) == 4, uint32_t, uint64_t>>;
+            static_assert(sizeof(B) == sizeof(R), "unexpected floating-point size");
+            B bits[4];
+            if constexpr(std::is_same<R, double>::value)
+            {
+                const B b[4] = {0x8000000000000000ull,
+                                0x7ff0000000000000ull,
+                                0xfff0000000000000ull,
+                                0x7ff4000000000000ull};
+                std::copy(b, b + 4, bits);
+            }
+            else if constexpr(std::is_same<R, float>::value)
+            {
+                const B b[4] = {0x80000000u, 0x7f800000u, 0xff800000u, 0x7fa00000u};
+                std::copy(b, b + 4, bits);
+            }
+            else if constexpr(std::is_same<R, _Float16>::value)
+            {
+                const B b[4] = {0x8000, 0x7c00, 0xfc00, 0x7d00};
+                std::copy(b, b + 4, bits);
+            }
+            else
+            {
+                const B b[4] = {0x8000, 0x7f80, 0xff80, 0x7fa0};
+                std::copy(b, b + 4, bits);
+            }
+            R r;
+            std::memcpy(&r, &bits[k % 4], sizeof(R));
+            return r;
+        }
+    }
+
+    // For a complex y, (1, inf) * 1 also has a NaN real part.
+    template <typename Y>
+    Y special_y(int64_t i)
+    {
+        if constexpr(is_complex<Y>::value)
+        {
+            using R = typename real_of<Y>::type;
+            switch(i % 4)
+            {
+            case 0:
+                return Y(R(1), special_real<R>(1));
+            case 1:
+                return Y(special_real<R>(0), R(-1));
+            case 2:
+                return Y(special_real<R>(3), R(2));
+            default:
+                return Y(special_real<R>(2), special_real<R>(0));
+            }
+        }
+        else
+            return special_real<Y>(static_cast<int>(i % 4));
+    }
+
+    // alpha = 0 and beta = 1 without extras leave every bit of y as it was, also in rows
+    // that several workgroups share.
+    template <typename C, typename I, typename J>
+    void run_untouched_case(rocsparse_handle handle, const extra_case& c)
+    {
+        using A = typename C::A;
+        using X = typename C::X;
+        using Y = typename C::Y;
+        using T = typename C::T;
+        SCOPED_TRACE(::testing::Message() << c);
+
+        const host_matrix<A> a = make_matrix<A>(c.shape);
+        std::vector<X>       x(a.n);
+        for(int32_t i = 0; i < a.n; ++i)
+            x[i] = value_at<X>(i);
+        // The long rows are 16 apart; i / 16 gives each of them a different value.
+        std::vector<Y> y0(a.m);
+        for(int32_t i = 0; i < a.m; ++i)
+            y0[i] = special_y<Y>(i + i / 16);
+
+        device_problem<C, I, J> p(a, c.base, x, y0);
+        const T                 alpha = make<T>(0, 0);
+        const T                 beta  = make<T>(1, 0);
+        device_vector<T>        dalpha(std::vector<T>(1, alpha));
+        device_vector<T>        dbeta(std::vector<T>(1, beta));
+        if(::testing::Test::HasFailure())
+            return;
+
+        scoped_pointer_mode mode(handle, c.device);
+
+        spmv_descr_guard descr;
+        ASSERT_TRUE(descr.d);
+        ASSERT_EQ(set_basic_inputs(handle, descr.d, c.alg, c.trans, type_of<T>(), type_of<T>()),
+                  rocsparse_status_success);
+        const void* palpha
+            = c.device ? static_cast<const void*>(dalpha.ptr) : static_cast<const void*>(&alpha);
+        const void* pbeta
+            = c.device ? static_cast<const void*>(dbeta.ptr) : static_cast<const void*>(&beta);
+        run_v2_spmv(handle, descr.d, p.mat.d, p.vx.d, p.vy.d, palpha, pbeta);
+        if(::testing::Test::HasFailure())
+            return;
+
+        const std::vector<Y> want = device_problem<C, I, J>::guarded(y0);
+        const std::vector<Y> got  = to_host(p.dy);
+        ASSERT_EQ(got.size(), want.size());
+        size_t bad   = 0;
+        size_t first = 0;
+        for(size_t i = 0; i < want.size(); ++i)
+        {
+            if(std::memcmp(&got[i], &want[i], sizeof(Y)) != 0)
+            {
+                if(bad == 0)
+                    first = i;
+                ++bad;
+            }
+        }
+        EXPECT_EQ(bad, 0u) << "y elements changed, first at y["
+                           << static_cast<int64_t>(first) - y_guard << "]";
+    }
+
     template <typename C>
     void run_extra_case(rocsparse_handle handle, const extra_case& c)
     {
@@ -1102,6 +1230,24 @@ namespace
                 if(::testing::Test::HasFailure())
                     return;
             }
+    }
+
+    TYPED_TEST(L2DeviceV2SpmvExtraTypes, alpha_zero_beta_one_keeps_y_bits)
+    {
+        // The long rows are split over several workgroups by the adaptive algorithm and
+        // fall in the LRB long-row bins; the medium rows reach LRB bins 11 and 12.
+        for(const auto shape : {shape_long_rows, shape_medium_rows})
+            for(const auto alg : all_csr_algs)
+                for(const bool device : {false, true})
+                {
+                    extra_case c;
+                    c.shape  = shape;
+                    c.alg    = alg;
+                    c.device = device;
+                    run_untouched_case<TypeParam, int32_t, int32_t>(this->handle, c);
+                    if(::testing::Test::HasFailure())
+                        return;
+                }
     }
 
     TYPED_TEST(L2DeviceV2SpmvExtraTypes, enable_extra_toggle)

@@ -548,6 +548,10 @@ namespace rocsparse
                                                 bool            is_host_mode)
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
+        if(beta == static_cast<T>(1) && num_extra == 0)
+        {
+            return;
+        }
         const int64_t stride = static_cast<int64_t>(hipGridDim_x) * SCALE_WG;
         for(int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * SCALE_WG + hipThreadIdx_x;
             gid < nblocks;
