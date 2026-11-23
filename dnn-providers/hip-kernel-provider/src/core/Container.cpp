@@ -122,11 +122,12 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
                  engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaBwdPlanBuilder>());
                  return engine;
              },
-             // Reviewed against graph schema 1.4.0: the forward serves ragged Q/K/V/O whose
-             // offset multiplier equals the sequence stride (AITER group mode), the backward
-             // declines ragged tensors, and both decline alignments that are not a multiple of
+             // Reviewed against graph schema 1.6.0: the forward serves ragged Q/K/V/O whose
+             // offset multiplier equals the sequence stride (AITER group mode), with
+             // cu_seq_len_q/kv only in that mode, the backward declines ragged tensors and has
+             // no cu_seq_len fields, and both decline alignments that are not a multiple of
              // 16 bytes.
-             builtInEnginesGraphSchema()},
+             Version{hipdnn_plugin_sdk::K_CU_SEQ_LEN_MIN_API_VERSION}},
 #endif
         };
 

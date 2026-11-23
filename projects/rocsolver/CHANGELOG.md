@@ -4,7 +4,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 
 ## (Unreleased) rocSOLVER
-## (Unreleased) rocSOLVER 3.39
 
 ### Added
 
@@ -42,14 +41,20 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
   matrices, and of ORGQR/UNGQR and ORGQL/UNGQL for large matrices.
 
 ### Resolved issues
-
-* Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
 ### Known issues
 
 * HSEQR (when it uses the multishift QR algorithm), GEBAL (for n >= 256) and GEEV synchronize
   the stream, so they cannot be captured in a HIP graph.
 
 ### Upcoming changes
+
+
+
+## rocSOLVER 3.39.0 for ROCm 10.3.0
+
+### Resolved issues
+
+* Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
 
 
 
