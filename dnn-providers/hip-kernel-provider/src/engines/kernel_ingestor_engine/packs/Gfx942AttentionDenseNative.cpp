@@ -38,7 +38,7 @@
  * `build_attention_dense`, packaged (kind: rocke -> kpack) for gfx942 only. Matching and
  * dispatch, the [2^-64, 2^4] scale range included, are shared with the gfx950 twin
  * (AttentionDenseNative.cpp); what is gfx942's own is bound here: the gfx942 tile rules, the
- * causal sliding window baked per candidate with this engine's zero-trip guard, the stats
+ * causal sliding window baked per candidate, the stats
  * (LSE) output an emit_lse candidate writes, the launch grid each candidate is built for
  * (the qb_minor, bt_hkv_minor or hq_minor_swz block order, or the D128 persistent grid),
  * and the v1 launch contract.
@@ -209,7 +209,7 @@ constexpr attention_dense::AttentionDenseArch gfx942Arch()
     // The head fields of the KMD are canonical build inputs, never compared.
     arch.isSupportedTile = &isSupportedGfx942AttentionDenseTile;
     arch.geometry = &gfx942Geometry;
-    arch.windowReachesKeys = &gfx942AttentionDenseWindowReachesKeys;
+    arch.servesWindows = true;
     // An emit_lse candidate writes the stats output; the catalog pairs each kernel with one.
     arch.candidateWritesLse = &candidateWritesLse;
     // Each candidate's grid: a block order of the one-CTA-per-block grid, or (D128) the

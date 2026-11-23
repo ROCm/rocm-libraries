@@ -598,6 +598,18 @@ inline bool isDSAtomic(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_DSAtomic);
 }
 
+// Every DS-class access, both directions: what a GIR `Ds` action can be realized by. A write is
+// as much an access as a read -- `GirAccessData` carries the direction, the opcode does not.
+inline bool isDSAccess(const StinkyInstruction& inst) {
+    return isDSRead(inst) || isDSWrite(inst) || isDSAtomic(inst);
+}
+
+// The tensor-op family a GIR `Tensor` action can be realized by. Extend as it grows
+// (tensor_store), the same way isAsyncMemOp is extended.
+inline bool isTensorAccess(const StinkyInstruction& inst) {
+    return isTensorLoad(inst);
+}
+
 inline bool isBarrier(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_Barrier);
 }

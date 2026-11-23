@@ -134,7 +134,10 @@ endif()
 # of librocalution_hip to the definitions in the executable
 if(SUPPORT_HIP AND NOT WIN32)
   target_sources(rocalution-unit-test-lifecycle PRIVATE hip_fault_injection.cpp)
-  target_compile_definitions(rocalution-unit-test-lifecycle PRIVATE ROCALUTION_UNIT_TEST_HIP_FAULTS)
+  target_compile_definitions(rocalution-unit-test-lifecycle PRIVATE
+    ROCALUTION_UNIT_TEST_HIP_FAULTS
+    $<$<STREQUAL:$<TARGET_PROPERTY:rocalution_hip,TYPE>,SHARED_LIBRARY>:ROCALUTION_UNIT_TEST_SHARED_HIP>
+  )
   target_link_libraries(rocalution-unit-test-lifecycle PRIVATE
     roc::rocblas
     roc::rocsparse

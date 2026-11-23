@@ -43,10 +43,17 @@ def retry(
 
 
 @retry(max_attempts=3, delay_seconds=2, exceptions=(TimeoutError,))
-def get_modified_paths(base_ref: str) -> set[str]:
-    """Returns paths of files changed relative to the base reference."""
+def get_modified_paths(base_ref: str, detect_renames: bool = True) -> set[str]:
+    """Returns paths of files changed relative to the base reference.
+
+    With rename detection a rename reports only its destination; pass
+    detect_renames=False to get the source path as well.
+    """
+    command = ["git", "diff", "--name-only", base_ref]
+    if not detect_renames:
+        command.insert(2, "--no-renames")
     result = subprocess.run(
-        ["git", "diff", "--name-only", base_ref],
+        command,
         capture_output=True,
         text=True,
         check=True,

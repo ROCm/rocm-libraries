@@ -45,7 +45,27 @@ namespace
     {
         static const void* base = [] {
             Dl_info info{};
-            dladdr(reinterpret_cast<void*>(&rocalution::rocalution_init_hip), &info);
+            if(dladdr(reinterpret_cast<void*>(&rocalution::rocalution_init_hip), &info) == 0)
+            {
+                std::fprintf(stderr, "hip_fault_injection: rocalution_init_hip not found\n");
+                std::abort();
+            }
+
+#ifdef ROCALUTION_UNIT_TEST_SHARED_HIP
+            // Code compiled without -fPIE and linked into a non-PIE executable takes the
+            // address of rocalution_init_hip from a PLT entry in the executable, and then
+            // no call from librocalution_hip would be recognized
+            Dl_info self{};
+            dladdr(reinterpret_cast<void*>(&rocalution_hip_base), &self);
+            if(info.dli_fbase == self.dli_fbase)
+            {
+                std::fprintf(stderr,
+                             "hip_fault_injection: rocalution_init_hip resolves to the "
+                             "executable, not to librocalution_hip; compile with -fPIE\n");
+                std::abort();
+            }
+#endif
+
             return info.dli_fbase;
         }();
 

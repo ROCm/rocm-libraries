@@ -3,7 +3,7 @@
 **Status:** Draft
 **Owner:** @doctorcolinsmith
 **Technical Lead:** @ntrost57
-**Last Updated:** 2026-10-30
+**Last Updated:** 2026-11-23
 
 This document describes how rocALUTION is tested today, which signals actually gate a merge, and where
 the gaps are. It follows the ROCm-wide TESTING.md template and is written as a description of the
@@ -77,7 +77,7 @@ HIP_VISIBLE_DEVICES=0 gpu-run ./rocalution-unit-test
 ```
 
 > When any `ROCALUTION_EMULATION_*` var is set, GPU-heavy infrastructure suites (`local_matrix_*`,
-> `local_vector`, `backend`, `preconditioner` except its repeated-move test, MPI infra) call `GTEST_SKIP()`, and
+> `local_vector`, `backend` except its two OpenMP tests, `preconditioner` except its repeated-move test, MPI infra) call `GTEST_SKIP()`, and
 > solver suites shrink their parameter lists. If no emulation variables are set, the full set of parameter combinations is exercised.
 
 **3. Add the right kind of test:** see [Choosing the Right Test Type](#choosing-the-right-test-type).
@@ -253,7 +253,7 @@ transfers and multi-node communication behave as expected.
 | Preconditioners | Jacobi, GS/SGS, ILU/ILUT/IC, ItILU0, (AI)Chebyshev, FSAI, SPAI, TNS, AS/RAS, multi-colored GS/SGS/ILU, multi-elimination, variable |
 | Structures (GPU) | `local_matrix` ops / conversions, `local_vector` |
 | Other | Chebyshev iteration, mixed precision, iterative-solver integration (`test_itersolver`, coverage-only) |
-| MPI (`SUPPORT_MPI`) | `global_matrix`, `global_vector`, `parallel_manager`, `global_amg` (multi-rank AMG setup) |
+| MPI (`SUPPORT_MPI`) | `global_matrix`, `global_vector`, `parallel_manager`, `global_amg` (multi-rank AMG setup, and `ReBuildNumeric()` with host levels) |
 
 **Tiers (environment-variable driven, mapped to CTest categories when built inside the monorepo with
 `shared/ctest/`):**
@@ -303,10 +303,9 @@ a review of each suite confirms that the unit tests cover all of its checks, on 
 in every CI job that runs the suite. A suite that is covered is then deleted, not maintained next to
 the unit tests. The `local_matrix_allocations`, `local_matrix_zero`, `local_matrix_set_data_ptr`,
 `local_matrix_multicoloring`, `local_matrix_itsolve`, `local_matrix_solve` and `local_stencil_bad_args`
-suites have been deleted on that basis. The Jenkins test command runs both unit-test binaries after
-`rocalution-test`, so the Jenkins lanes still run these checks. A clients-only build (`install.sh
---clients-only`) doesn't build the unit tests, and the `rtest.xml` sets run only
-`rocalution-test`, so clients-only builds and `rtest.xml` runs no longer run these checks. The
+suites have been deleted on that basis. The Jenkins test command runs both unit-test binaries before
+`rocalution-test`, so the Jenkins lanes still run these checks. Clients-only builds and
+`rtest.xml` runs no longer run them (see [Known Gaps Summary](#known-gaps-summary)). The
 solver, preconditioner and AMG suites stay as the integration layer.
 
 ---
@@ -376,8 +375,8 @@ Internal AMD **Jenkins** pipelines (`.jenkins/`) are legacy, running on older GP
 HIP+OpenMP), host (`--host`), and MPI (`--host --mpi=on --no-openmp`).
 
 > **Important nuance:** the Jenkins `runTestCommand` GTest filter is commented out, so those legacy
-> lanes run the **full** `rocalution-test` suite (no emulation subset), followed by
-> `rocalution-unit-test` and `rocalution-unit-test-lifecycle`. The intended
+> lanes run the **full** `rocalution-test` suite (no emulation subset), after
+> `rocalution-unit-test` and `rocalution-unit-test-lifecycle`, which run unfiltered. The intended
 > `*checkin*` / `*nightly*` filters match no current test names. The modern TheRock gate, by
 > contrast, selects the subset through the `ROCALUTION_EMULATION_*` env var of the CTest category.
 
@@ -549,7 +548,8 @@ device configurations are not ASAN-covered.
 | No per-architecture perf baseline reproducible from this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo output files only |
 | Tier not encoded in test names; legacy `*checkin*`/`*nightly*` filters match nothing | Medium | Medium | Tiering works via `ROCALUTION_EMULATION_*`; Jenkins runs full suite |
 | No `known_bugs.yaml` / quarantine mechanism for `rocalution-test` | Medium | Medium | The unit tests skip known bugs with `KNOWN_BUG`; flaky tests handled ad-hoc |
-| `rocalution-test` structure suites duplicate unit tests (see Integration Testing Strategy) | Low | Low | Both run; each suite is deleted once a review confirms that the unit tests cover it |
+| `rocalution-test` structure suites duplicate unit tests (see Integration Testing Strategy) | Low | Low | Both run; each suite is deleted once a review confirms that the unit tests cover it, after which only the unit tests check it |
+| A clients-only build (`install.sh --clients-only`) cannot build the unit tests; the `rtest.xml` sets run only `rocalution-test` | Low | Medium | Neither runs in CI; the checks of the deleted structure suites run only through the unit-test binaries |
 | Unit tests not built on Windows (they use POSIX calls such as `alarm`, and some helpers do not compile there) | Medium | Medium | Windows runs `rocalution-test` only |
 | Device-code coverage not captured | Medium | Medium | Host-only LLVM coverage |
 | MPI/multi-node validation is partial; global stencil test commented out | Medium | Medium | Nightly MPI variant build |

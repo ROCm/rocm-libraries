@@ -24,10 +24,16 @@ def evaluator() -> str:
 
 _REPORTING_EVALUATOR = """\
 import json, subprocess, sys
-result = subprocess.run([{real!r}], input=sys.stdin.buffer.read(), capture_output=True)
+result = subprocess.run(
+    [{real!r}, *sys.argv[1:]], input=sys.stdin.buffer.read(), capture_output=True
+)
 if result.returncode:
     sys.stderr.buffer.write(result.stderr)
     sys.exit(result.returncode)
+if sys.argv[1:]:
+    # --lint and --optional-features report no revision.
+    sys.stdout.buffer.write(result.stdout)
+    sys.exit(0)
 response = json.loads(result.stdout)
 response.pop("feature_semantics_revision", None)
 if {revision!r} is not None:
