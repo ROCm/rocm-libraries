@@ -148,13 +148,32 @@ if not _UNIT_MODULES:
 
 @pytest.mark.parametrize("mod", _UNIT_MODULES)
 def test_unit(mod):
-    """Run in-package units that pytest does not otherwise collect.
+    """Run in-package units that pytest does not otherwise collect, in a child
+    pytest process, which reports each unit's skips.
 
     Most are pure Python. A few exercise a source-matched engine when the caller
     already supplied one, but this lane never constructs native artifacts.
     """
-    r = _run([sys.executable, "-m", "unittest", "-v", f"rocke.portable_ir.tests.{mod}"])
-    assert r.returncode == 0, r.stderr[-4000:] or r.stdout[-4000:]
+    unit_dir = Path(next(iter(_unit_tests.__path__)))
+    r = _run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            str(unit_dir / f"{mod}.py"),
+            "-q",
+            "-rs",
+            "-p",
+            "no:cacheprovider",
+            # Replaces platform/tests/pytest.ini: the child reads none of this
+            # suite's options.
+            "-c",
+            os.devnull,
+            "--rootdir",
+            str(unit_dir),
+        ]
+    )
+    assert r.returncode == 0, r.stdout[-4000:] + r.stderr[-4000:]
 
 
 def test_record_coverage():
