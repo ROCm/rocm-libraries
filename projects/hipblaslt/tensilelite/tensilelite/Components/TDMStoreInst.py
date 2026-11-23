@@ -522,9 +522,9 @@ def emitTDMStoreLoadC(gwb) -> Module:
   sizeJ = kw.sizeRef(gwb.kernel["ProblemType"]["Index1"])
   skipLoad = Label(kw.labels.getNameInc("TDMStoreLoadCSkip"), "no column of this wave is inside C")
   tdm = TensorDataMoverStore([_stagedTileToken(gwb)])
-  with kw.allocTmpSgpr(8, alignment=4, tag="tdmLoadCDescGroup1") as group1, \
-      kw.allocTmpSgpr(4, alignment=4, tag="tdmLoadCDescGroup0") as group0:
-    with kw.allocTmpSgpr(2, tag="tdmLoadCTmp") as tmp:
+  with kw.allocTmpSgpr(8, alignment=4, tag="TDMStoreInst load-C descriptor group1") as group1, \
+      kw.allocTmpSgpr(4, alignment=4, tag="TDMStoreInst load-C descriptor group0") as group0:
+    with kw.allocTmpSgpr(2, tag="TDMStoreInst load-C temporaries") as tmp:
       _tdmStoreDescriptor(gwb, module, tdm, group0.idx, group1.idx, tmp, "C")
       module.add(_skipTest(gwb, sizeJ, tmp))
       module.add(SCBranchSCC1(labelName=skipLoad.getLabelName(), comment="skip the load"))
@@ -552,9 +552,9 @@ def emitTDMStoreFlush(gwb) -> Module:
   sizeJ = kw.sizeRef(gwb.kernel["ProblemType"]["Index1"])
   skipStore = Label(kw.labels.getNameInc("TDMStoreSkip"), "no column of this wave is inside D")
   tdm = TensorDataMoverStore([_stagedTileToken(gwb)])
-  with kw.allocTmpSgpr(8, alignment=4, tag="tdmStoreDescGroup1") as group1, \
-      kw.allocTmpSgpr(4, alignment=4, tag="tdmStoreDescGroup0") as group0:
-    with kw.allocTmpSgpr(2, tag="tdmStoreTmp") as tmp:
+  with kw.allocTmpSgpr(8, alignment=4, tag="TDMStoreInst store descriptor group1") as group1, \
+      kw.allocTmpSgpr(4, alignment=4, tag="TDMStoreInst store descriptor group0") as group0:
+    with kw.allocTmpSgpr(2, tag="TDMStoreInst store temporaries") as tmp:
       _tdmStoreDescriptor(gwb, module, tdm, group0.idx, group1.idx, tmp, "D")
       # StinkyRemoveWaitCntPass keeps a wait marked stinky-keep; nothing re-derives this one.
       module.add(SWaitCnt(dscnt=0, comment="staging stores done " + STINKY_KEEP))

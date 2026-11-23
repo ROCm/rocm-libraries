@@ -1580,6 +1580,17 @@ def test_one_sided_tdm_loads_are_rejected(gp_gfx1250, gfx1250_iim, assembler, ca
   assert "Currently TDMA and TDMB must be enabled simultaneously" in capsys.readouterr().out
 
 
+def test_lds_reject_names_the_staged_tile(gp_gfx1250, gfx1250_iim, assembler, capsys):
+  """The fp32 D tile of an MT256x512 kernel, staged over the main-loop buffers, takes more LDS than the kernel has, and
+  the LDS reject says that TDMStoreInst stages it, with its size and offset."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 8, 16, 2, 2], TDMStoreInst=True,
+                       ProblemType={"DestDataType": "s"})
+  out = capsys.readouterr().out
+  assert not sol.get("Valid") and asm is None, out
+  why = "; TDMStoreInst stages a %u-byte D tile from LDS offset %u" % (tdmStoreLdsBytes(sol), sol["_TDMStoreLdsOffset"])
+  assert re.search(r"Kernel Uses \d+ > \d+ bytes of LDS" + re.escape(why), out), out
+
+
 def _dsBytes(module):
   """The bytes of each DS store and load of an emitted module, from its mnemonics."""
   return [int(m.group(1)) // 8 for line in str(module).splitlines()
