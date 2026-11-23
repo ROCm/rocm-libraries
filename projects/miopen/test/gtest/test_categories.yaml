@@ -603,7 +603,6 @@ gfx11_common_patterns: &gfx11_common_patterns
   - "*GPU_Dropout_FP16*"
   - "*GPU_GroupConv3D_BackwardData_FP16.GroupConv3D_BackwardData_half_Test*"
   - "*GPU_GroupConv3D_BackwardData_BFP16.GroupConv3D_BackwardData_bfloat16_Test*"
-  - "*GPU_UnitTestConvSolverImplicitGemmGroup*" # issue: ALMIOPEN-1841
   - "Smoke/GPU_MultiMarginLoss*"
   - "*CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDevApplicability_FP16.ConvHipImplicitGemmGroupWrwXdlops*"
   # Slow tests to exclude (from #3362)
@@ -734,6 +733,32 @@ exclude_gpu:
       - "comprehensive"
       - "full"
       - "ex_gpu_gfx115X"
+
+  exclude_gpu_gfx117X:
+    test_patterns:
+      # gfx1170 reproduces the FP16 backward dw tolerance failures tracked in
+      # ROCm/rocm-libraries#15056. Remove when that issue is fixed.
+      - "Full/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/124"
+      - "Full/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/127"
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx117X"
+
+  exclude_gpu_gfx117X_windows:
+    test_patterns:
+      # gfx1170: the large untiled GPU reference can hit the Windows watchdog.
+      # Quarantine only the reproduced FP32 and FP16 large-memory cases.
+      - "Standard/GPU_GemmWrwUniversal_LargeMemory_FP32.GemmWrwUniversal/0"
+      - "Standard/GPU_GemmWrwUniversal_LargeMemory_FP16.GemmWrwUniversal/0"
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx117X"
 
   exclude_gpu_gfx950:
     test_patterns:

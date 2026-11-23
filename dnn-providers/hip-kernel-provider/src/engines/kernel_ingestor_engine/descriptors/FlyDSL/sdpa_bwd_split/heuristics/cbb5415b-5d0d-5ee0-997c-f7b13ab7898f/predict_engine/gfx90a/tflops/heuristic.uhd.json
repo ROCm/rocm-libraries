@@ -1,0 +1,922 @@
+{
+  "version": "1.1",
+  "id": "f19435c1-43c6-4e84-a50a-a946ce8b5da6",
+  "name": "hipkernel:flydsl_sdpa_bwd_split (gfx90a, 204 contribution(s))",
+  "adapter": "mlp_data",
+  "features_signature": [
+    "$flydsl_sdpa_bwd_split.batch",
+    "$flydsl_sdpa_bwd_split.bias_unstaged",
+    "$flydsl_sdpa_bwd_split.class",
+    "$flydsl_sdpa_bwd_split.dropout",
+    "$flydsl_sdpa_bwd_split.dtype",
+    "$flydsl_sdpa_bwd_split.gqa_pack",
+    "$flydsl_sdpa_bwd_split.head_dim_qk",
+    "$flydsl_sdpa_bwd_split.head_dim_v",
+    "$flydsl_sdpa_bwd_split.heads",
+    "$flydsl_sdpa_bwd_split.kv_heads",
+    "$flydsl_sdpa_bwd_split.seq_kv",
+    "$flydsl_sdpa_bwd_split.seq_q",
+    "$flydsl_sdpa_bwd_split.v_heads",
+    "$graph.arithmetic_intensity",
+    "$graph.flops",
+    "$graph.flops_by_type.SdpaBackwardAttributes",
+    "$graph.logical_bytes",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_mask.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_scale_value",
+        1.0
+      ]
+    },
+    "$graph.nodes[0].data_dependent",
+    "$graph.nodes[0].diagonal_alignment",
+    "$graph.nodes[0].dk.data_type",
+    "$graph.nodes[0].dk.dims[0]",
+    "$graph.nodes[0].dk.dims[1]",
+    "$graph.nodes[0].dk.dims[2]",
+    "$graph.nodes[0].dk.dims[3]",
+    "$graph.nodes[0].dk.numel",
+    "$graph.nodes[0].dk.strides[0]",
+    "$graph.nodes[0].dk.strides[1]",
+    "$graph.nodes[0].dk.strides[2]",
+    "$graph.nodes[0].do.data_type",
+    "$graph.nodes[0].do.dims[0]",
+    "$graph.nodes[0].do.dims[1]",
+    "$graph.nodes[0].do.dims[2]",
+    "$graph.nodes[0].do.dims[3]",
+    "$graph.nodes[0].do.numel",
+    "$graph.nodes[0].do.strides[0]",
+    "$graph.nodes[0].do.strides[1]",
+    "$graph.nodes[0].do.strides[2]",
+    "$graph.nodes[0].dq.data_type",
+    "$graph.nodes[0].dq.dims[0]",
+    "$graph.nodes[0].dq.dims[1]",
+    "$graph.nodes[0].dq.dims[2]",
+    "$graph.nodes[0].dq.dims[3]",
+    "$graph.nodes[0].dq.numel",
+    "$graph.nodes[0].dq.strides[0]",
+    "$graph.nodes[0].dq.strides[1]",
+    "$graph.nodes[0].dq.strides[2]",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dropout_probability",
+        0.0
+      ]
+    },
+    "$graph.nodes[0].dv.data_type",
+    "$graph.nodes[0].dv.dims[0]",
+    "$graph.nodes[0].dv.dims[1]",
+    "$graph.nodes[0].dv.dims[2]",
+    "$graph.nodes[0].dv.dims[3]",
+    "$graph.nodes[0].dv.numel",
+    "$graph.nodes[0].dv.strides[0]",
+    "$graph.nodes[0].dv.strides[1]",
+    "$graph.nodes[0].dv.strides[2]",
+    "$graph.nodes[0].flops",
+    "$graph.nodes[0].k.data_type",
+    "$graph.nodes[0].k.dims[0]",
+    "$graph.nodes[0].k.dims[1]",
+    "$graph.nodes[0].k.dims[2]",
+    "$graph.nodes[0].k.dims[3]",
+    "$graph.nodes[0].k.numel",
+    "$graph.nodes[0].k.strides[0]",
+    "$graph.nodes[0].k.strides[1]",
+    "$graph.nodes[0].k.strides[2]",
+    "$graph.nodes[0].o.data_type",
+    "$graph.nodes[0].o.dims[0]",
+    "$graph.nodes[0].o.dims[1]",
+    "$graph.nodes[0].o.dims[2]",
+    "$graph.nodes[0].o.dims[3]",
+    "$graph.nodes[0].o.numel",
+    "$graph.nodes[0].o.strides[0]",
+    "$graph.nodes[0].o.strides[1]",
+    "$graph.nodes[0].o.strides[2]",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].offset.virtual",
+        -1
+      ]
+    },
+    "$graph.nodes[0].padding_mask",
+    "$graph.nodes[0].q.data_type",
+    "$graph.nodes[0].q.dims[0]",
+    "$graph.nodes[0].q.dims[1]",
+    "$graph.nodes[0].q.dims[2]",
+    "$graph.nodes[0].q.dims[3]",
+    "$graph.nodes[0].q.numel",
+    "$graph.nodes[0].q.strides[0]",
+    "$graph.nodes[0].q.strides[1]",
+    "$graph.nodes[0].q.strides[2]",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].right_bound",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seed.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_kv.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].seq_len_q.virtual",
+        -1
+      ]
+    },
+    "$graph.nodes[0].stats.dims[0]",
+    "$graph.nodes[0].stats.dims[1]",
+    "$graph.nodes[0].stats.dims[2]",
+    "$graph.nodes[0].stats.numel",
+    "$graph.nodes[0].stats.strides[0]",
+    "$graph.nodes[0].stats.strides[1]",
+    "$graph.nodes[0].v.data_type",
+    "$graph.nodes[0].v.dims[0]",
+    "$graph.nodes[0].v.dims[1]",
+    "$graph.nodes[0].v.dims[2]",
+    "$graph.nodes[0].v.dims[3]",
+    "$graph.nodes[0].v.numel",
+    "$graph.nodes[0].v.strides[0]",
+    "$graph.nodes[0].v.strides[1]",
+    "$graph.nodes[0].v.strides[2]",
+    "$graph.tensor_count",
+    "$graph.tensors[0].data_type",
+    "$graph.tensors[0].dims[0]",
+    "$graph.tensors[0].dims[1]",
+    "$graph.tensors[0].dims[2]",
+    "$graph.tensors[0].dims[3]",
+    "$graph.tensors[0].strides[0]",
+    "$graph.tensors[0].strides[1]",
+    "$graph.tensors[0].strides[2]",
+    "$graph.tensors[1].data_type",
+    "$graph.tensors[1].dims[0]",
+    "$graph.tensors[1].dims[1]",
+    "$graph.tensors[1].dims[2]",
+    "$graph.tensors[1].dims[3]",
+    "$graph.tensors[1].strides[0]",
+    "$graph.tensors[1].strides[1]",
+    "$graph.tensors[1].strides[2]",
+    "$graph.tensors[2].data_type",
+    "$graph.tensors[2].dims[0]",
+    "$graph.tensors[2].dims[1]",
+    "$graph.tensors[2].dims[2]",
+    "$graph.tensors[2].dims[3]",
+    "$graph.tensors[2].strides[0]",
+    "$graph.tensors[2].strides[1]",
+    "$graph.tensors[2].strides[2]",
+    "$graph.tensors[3].data_type",
+    "$graph.tensors[3].dims[0]",
+    "$graph.tensors[3].dims[1]",
+    "$graph.tensors[3].dims[2]",
+    "$graph.tensors[3].dims[3]",
+    "$graph.tensors[3].strides[0]",
+    "$graph.tensors[3].strides[1]",
+    "$graph.tensors[3].strides[2]",
+    "$graph.tensors[4].data_type",
+    "$graph.tensors[4].dims[0]",
+    "$graph.tensors[4].dims[1]",
+    "$graph.tensors[4].dims[2]",
+    "$graph.tensors[4].dims[3]",
+    "$graph.tensors[4].strides[0]",
+    "$graph.tensors[4].strides[1]",
+    "$graph.tensors[4].strides[2]",
+    "$graph.tensors[5].dims[0]",
+    "$graph.tensors[5].dims[1]",
+    "$graph.tensors[5].dims[2]",
+    "$graph.tensors[5].strides[0]",
+    "$graph.tensors[5].strides[1]",
+    "$graph.tensors[6].data_type",
+    "$graph.tensors[6].dims[0]",
+    "$graph.tensors[6].dims[1]",
+    "$graph.tensors[6].dims[2]",
+    "$graph.tensors[6].dims[3]",
+    "$graph.tensors[6].strides[0]",
+    "$graph.tensors[6].strides[1]",
+    "$graph.tensors[6].strides[2]",
+    "$graph.tensors[7].data_type",
+    "$graph.tensors[7].dims[0]",
+    "$graph.tensors[7].dims[1]",
+    "$graph.tensors[7].dims[2]",
+    "$graph.tensors[7].dims[3]",
+    "$graph.tensors[7].strides[0]",
+    "$graph.tensors[7].strides[1]",
+    "$graph.tensors[7].strides[2]",
+    "$graph.tensors[8].data_type",
+    "$graph.tensors[8].dims[0]",
+    "$graph.tensors[8].dims[1]",
+    "$graph.tensors[8].dims[2]",
+    "$graph.tensors[8].dims[3]",
+    "$graph.tensors[8].strides[0]",
+    "$graph.tensors[8].strides[1]",
+    "$graph.tensors[8].strides[2]",
+    {
+      "if": [
+        {
+          "present": [
+            "$graph.nodes[0].q.dims[0]",
+            "$graph.nodes[0].k.dims[0]"
+          ]
+        },
+        {
+          "*": [
+            "$graph.nodes[0].q.dims[0]",
+            "$graph.nodes[0].q.dims[1]"
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "present": [
+            "$graph.nodes[0].q.dims[0]",
+            "$graph.nodes[0].k.dims[0]"
+          ]
+        },
+        {
+          "/": [
+            "$graph.nodes[0].q.dims[1]",
+            "$graph.nodes[0].k.dims[1]"
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "present": [
+            "$graph.nodes[0].q.dims[0]",
+            "$graph.nodes[0].k.dims[0]"
+          ]
+        },
+        {
+          "*": [
+            {
+              "*": [
+                "$graph.nodes[0].q.dims[0]",
+                "$graph.nodes[0].q.dims[1]"
+              ]
+            },
+            "$graph.nodes[0].q.dims[2]",
+            "$graph.nodes[0].k.dims[2]"
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "present": [
+            "$graph.nodes[0].q.dims[0]",
+            "$graph.nodes[0].k.dims[0]"
+          ]
+        },
+        {
+          "/": [
+            "$graph.nodes[0].k.dims[2]",
+            "$graph.nodes[0].q.dims[2]"
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "present": [
+            "$graph.nodes[0].q.dims[0]",
+            "$graph.nodes[0].k.dims[0]"
+          ]
+        },
+        {
+          "*": [
+            {
+              "*": [
+                "$graph.nodes[0].q.dims[0]",
+                "$graph.nodes[0].q.dims[1]"
+              ]
+            },
+            {
+              "ceil_div": [
+                "$graph.nodes[0].q.dims[2]",
+                64
+              ]
+            }
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "present": [
+            "$graph.nodes[0].q.dims[0]",
+            "$graph.nodes[0].k.dims[0]"
+          ]
+        },
+        {
+          "*": [
+            {
+              "*": [
+                "$graph.nodes[0].q.dims[0]",
+                "$graph.nodes[0].q.dims[1]"
+              ]
+            },
+            {
+              "ceil_div": [
+                "$graph.nodes[0].q.dims[2]",
+                128
+              ]
+            }
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "present": [
+            "$graph.nodes[0].q.dims[0]",
+            "$graph.nodes[0].k.dims[0]"
+          ]
+        },
+        {
+          "ceil_div": [
+            "$graph.nodes[0].k.dims[2]",
+            128
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "present": [
+            "$graph.nodes[0].q.dims[0]",
+            "$graph.nodes[0].k.dims[0]"
+          ]
+        },
+        {
+          "/": [
+            "$graph.nodes[0].q.dims[2]",
+            {
+              "*": [
+                {
+                  "ceil_div": [
+                    "$graph.nodes[0].q.dims[2]",
+                    128
+                  ]
+                },
+                128
+              ]
+            }
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "present": [
+            "$graph.nodes[0].q.dims[0]",
+            "$graph.nodes[0].k.dims[0]"
+          ]
+        },
+        {
+          "/": [
+            "$graph.nodes[0].k.dims[2]",
+            {
+              "*": [
+                {
+                  "ceil_div": [
+                    "$graph.nodes[0].k.dims[2]",
+                    128
+                  ]
+                },
+                128
+              ]
+            }
+          ]
+        },
+        -1
+      ]
+    },
+    {
+      "if": [
+        {
+          "present": [
+            "$graph.nodes[0].q.dims[0]",
+            "$graph.nodes[0].k.dims[0]"
+          ]
+        },
+        {
+          "value_or_default": [
+            {
+              "/": [
+                "$graph.nodes[0].flops",
+                {
+                  "*": [
+                    2,
+                    {
+                      "*": [
+                        "$graph.nodes[0].q.dims[0]",
+                        "$graph.nodes[0].q.dims[1]"
+                      ]
+                    },
+                    "$graph.nodes[0].q.dims[2]",
+                    "$graph.nodes[0].k.dims[2]",
+                    {
+                      "+": [
+                        "$graph.nodes[0].q.dims[3]",
+                        "$graph.nodes[0].v.dims[3]"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            -1
+          ]
+        },
+        -1
+      ]
+    }
+  ],
+  "features_hash": "sha256:1edd8b73d5bea6ab",
+  "trained_against": {
+    "ued": {
+      "id": "cbb5415b-5d0d-5ee0-997c-f7b13ab7898f",
+      "revision": "1.0"
+    },
+    "kmds": [
+      {
+        "slot": "prep",
+        "id": "8ce86793-4738-5da1-a889-79c7848adad2",
+        "revision": "1.0"
+      },
+      {
+        "slot": "dkdv",
+        "id": "df3383c6-3bca-5b83-8832-e5f237096398",
+        "revision": "1.0"
+      },
+      {
+        "slot": "dq",
+        "id": "8da45ce1-8683-521f-94bb-f27dfd070750",
+        "revision": "1.0"
+      }
+    ],
+    "umd": [
+      {
+        "id": "49378aeb-a085-5fa8-b8ed-5714c86504d8",
+        "revision": "1.0"
+      },
+      {
+        "id": "84aeac1a-6f54-596b-882f-f1c212e1a75d",
+        "revision": "1.0"
+      },
+      {
+        "id": "ebb70883-2a0a-5813-a000-496088249139",
+        "revision": "1.0"
+      }
+    ],
+    "selector_revision": "generic-untuned-v1/786df9c8e086198272bfe2e686aeae6bd80556527ac00925e881b71e6eee93b4",
+    "feature_semantics_revision": 1
+  },
+  "objective": "max",
+  "score": {
+    "metric": "tflops",
+    "calibrated": true,
+    "transform": "log"
+  },
+  "mlp_data": {
+    "artifact": "model.bin",
+    "hash": "011f8cec7116211213bb1f4a9ebd2cb12ba096c3e6e5c7176903467db6cf1de3"
+  },
+  "categorical_encoding": {
+    "$flydsl_sdpa_bwd_split.dtype": {
+      "bf16": 0,
+      "f16": 1
+    }
+  }
+}

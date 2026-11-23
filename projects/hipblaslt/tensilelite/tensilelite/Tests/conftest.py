@@ -40,6 +40,20 @@ if testdir not in sys.path:
     sys.path.insert(0, testdir)
 sys.path.append(rootdir)
 
+
+def pytest_report_header(config):
+    # pytest captures the workers' "Launching N threads" lines; show each worker's pool budget.
+    import importlib
+
+    # One --tx entry per pytest-xdist worker, after -n auto and --maxprocesses are applied.
+    workers = len(getattr(config.option, "tx", None) or []) or 1
+    try:
+        parallel = importlib.import_module("tensilelite.Common.Parallel")
+        return parallel.describePoolSizeBudget(workers)
+    except Exception as e:  # a header must never fail the session
+        return "TensileLite pool budget: unavailable (%s)" % e
+
+
 def pytest_addoption(parser):
     parser.addoption("--tensile-options")
     parser.addoption("--global-parameters")

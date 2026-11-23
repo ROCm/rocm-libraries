@@ -139,7 +139,11 @@ built library gained less than 3% keep hipBLASLt's previous kernels.
 A custom kernel takes the logic file's problem type, so the plain files carry
 the plain-GEMM one (no bias, activation or scale vector), and the bias files
 the same type with a bias of D's type. A kernel with a bias epilogue serves
-both, with a null bias address in a plain GEMM.
+both, with a null bias address in a plain GEMM. The `custom.config`
+`Features` also restrict each solution's own problem type: `SupportsActivation`
+and `SupportsScaleAlpha` are false for every kernel, and `SupportsBias` for the
+five kernels without a bias epilogue, so a kernel rejects what it does not
+support even in a Bias/SAV logic file.
 
 Within one device's logic, hipBLASLt searches the plain-GEMM placeholder library
 before the Bias/SAV ones, and `Equality` before `Range` inside a placeholder.
@@ -174,7 +178,8 @@ for its type and `n` that lists that `n`'s tiles:
 epilogue (`custom_vllm_wvsplitk_{bf16,f16}_tn_n<N>.yaml` runs them without a
 bias), `custom_vllm_wvsplitk_{bf16,f16}_tn_n<N>.yaml` for the other five.
 `AddCustomConfig` writes `SupportsBias: false`; the kernels with a bias
-epilogue set it to `true`. To refresh one, delete the existing block first:
+epilogue set it to `true`, or their solutions in the bias files would reject
+GEMMs with a bias. To refresh one, delete the existing block first:
 `AddCustomConfig` will not overwrite it. Replacement assembly must stay at code
 object version 4 (see `../README.md`) and keep its `.amdgcn_target` /
 `.amdhsa_code_object_version` directives.

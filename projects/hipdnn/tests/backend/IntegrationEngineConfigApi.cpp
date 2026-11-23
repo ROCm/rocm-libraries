@@ -91,7 +91,7 @@ TEST_F(IntegrationEngineConfigApi, GetMaxWorkspaceSize)
                                         nullptr,
                                         &maxWorkspaceSize),
               HIPDNN_STATUS_SUCCESS);
-    EXPECT_EQ(maxWorkspaceSize, 1024);
+    EXPECT_EQ(maxWorkspaceSize, 2048);
 }
 
 TEST_F(IntegrationEngineConfigApi, GetAttributeBeforeFinalization)
