@@ -16,6 +16,7 @@
  */
 
 #include <thrust/complex.h>
+#include _THRUST_STD_INCLUDE(cmath)
 
 #include <cmath>
 #include <complex>
@@ -161,14 +162,14 @@ TYPED_TEST(VariousComplexTest, isinf)
 {
   using T = typename TestFixture::T;
   T inf   = std::numeric_limits<T>::infinity();
-  ASSERT_EQ(std::isinf(inf), thrust::detail::complex::isinf(inf));
+  ASSERT_EQ(std::isinf(inf), _THRUST_STD::isinf(inf));
 
   run_rng_test<T, true>(
     [](const T& x) {
       return std::isinf(x);
     },
     [](const T& x) {
-      return thrust::detail::complex::isinf(x);
+      return _THRUST_STD::isinf(x);
     });
 }
 
@@ -176,14 +177,14 @@ TYPED_TEST(VariousComplexTest, isnan)
 {
   using T = typename TestFixture::T;
   T nan   = std::numeric_limits<T>::quiet_NaN();
-  ASSERT_EQ(std::isnan(nan), thrust::detail::complex::isnan(nan));
+  ASSERT_EQ(std::isnan(nan), _THRUST_STD::isnan(nan));
 
   run_rng_test<T, true>(
     [](const T& x) {
       return std::isnan(x);
     },
     [](const T& x) {
-      return thrust::detail::complex::isnan(x);
+      return _THRUST_STD::isnan(x);
     });
 }
 
@@ -195,7 +196,7 @@ TYPED_TEST(VariousComplexTest, signbit)
       return std::signbit(x);
     },
     [](const T& x) {
-      return thrust::detail::complex::signbit(x);
+      return _THRUST_STD::signbit(x);
     });
 }
 
@@ -207,7 +208,7 @@ TYPED_TEST(VariousComplexTest, isfinite)
       return std::isfinite(x);
     },
     [](const T& x) {
-      return thrust::detail::complex::isfinite(x);
+      return _THRUST_STD::isfinite(x);
     });
 }
 
@@ -218,7 +219,7 @@ TEST(VariousComplexTest, copysign)
       return std::copysign(x, y);
     },
     [](const double& x, const double& y) {
-      return thrust::detail::complex::copysign(x, y);
+      return _THRUST_STD::copysign(x, y);
     });
 }
 
@@ -229,7 +230,7 @@ TEST(VariousComplexTest, copysignf)
       return std::copysignf(x, y);
     },
     [](const float x, const float y) {
-      return thrust::detail::complex::copysign(x, y);
+      return _THRUST_STD::copysign(x, y);
     });
 }
 
@@ -242,7 +243,7 @@ TYPED_TEST(VariousComplexTest, log1p)
       return std::log1p(x);
     },
     [](const double& x) {
-      return thrust::detail::complex::log1p(x);
+      return _THRUST_STD::log1p(x);
     });
 }
 
@@ -253,7 +254,7 @@ TEST(VariousComplexTest, log1pf)
       return std::log1pf(x);
     },
     [](const float& x) {
-      return thrust::detail::complex::log1p(x);
+      return _THRUST_STD::log1p(x);
     });
 }
 #  endif
@@ -267,7 +268,7 @@ TEST(VariousComplexTest, hypot)
       return std::hypot(x, y);
     },
     [](const double& x, const double& y) {
-      return thrust::detail::complex::hypot(x, y);
+      return _THRUST_STD::hypot(x, y);
     });
 }
 
@@ -278,7 +279,7 @@ TEST(VariousComplexTest, hypotf)
       return std::hypotf(x, y);
     },
     [](const float& x, const float& y) {
-      return thrust::detail::complex::hypotf(x, y);
+      return _THRUST_STD::hypot(x, y);
     });
 }
 
