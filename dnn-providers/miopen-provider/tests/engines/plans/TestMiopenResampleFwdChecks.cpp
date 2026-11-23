@@ -567,18 +567,29 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForIndexWithChannelsLastTensor
 }
 
 // Workaround for ALMIOPEN-3295 (see Workarounds.hpp): MIOpen's BFLOAT16 max pooling can write an
-// index into the padding, so an index with padding is declined. Remove this test with the
-// workaround; the two accept tests below stay.
+// index into the padding, so an index with padding is declined. Padding in one spatial dimension is
+// enough. Remove this test with the workaround; the accept tests below stay.
 TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForBfloat16IndexWithPadding)
 {
     expectDeclined(ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
                                                 {2, 3, 6, 6},
                                                 {3, 3},
                                                 {2, 2},
-                                                {1, 1},
+                                                {0, 1},
                                                 DataType::BFLOAT16,
                                                 DataType::INT32),
                    "on BFLOAT16 tensors requires zero padding");
+}
+
+TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForHalfIndexWithPadding)
+{
+    expectAccepted(ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
+                                                {2, 3, 6, 6},
+                                                {3, 3},
+                                                {2, 2},
+                                                {1, 1},
+                                                DataType::HALF,
+                                                DataType::INT32));
 }
 
 TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForBfloat16IndexWithoutPadding)
