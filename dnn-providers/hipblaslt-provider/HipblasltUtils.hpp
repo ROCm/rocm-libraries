@@ -118,12 +118,20 @@ enum class MatrixOrder
 
 MatrixOrder matrixOrder(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides);
 
+// Leading dimension hipBLASLt uses for the matrix formed by the last two dims:
+// the row stride of a row-major matrix (the column count when the matrix has a
+// single row) or the column stride of a column-major matrix. The stride of a
+// size-1 dim is ignored. Throws BAD_PARAM for an unsupported layout.
+int64_t leadingDimension(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor);
+
 // hipBLASLt transpose op for an input matrix: row-major -> HIPBLAS_OP_N,
 // column-major -> HIPBLAS_OP_T. Throws BAD_PARAM for any other layout.
 hipblasOperation_t operandTranspose(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor);
 
-// Throws BAD_PARAM unless the output matrix is row-major.
+// Throws BAD_PARAM unless the output matrix is row-major with a positive leading
+// dimension (a zero leading dimension would make output rows alias).
 void requireRowMajorOutput(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor);
 

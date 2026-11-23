@@ -155,6 +155,27 @@ hipblasOperation_t operandTranspose(
         HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Unsupported stride for input matrix: " + tensor.name());
 }
 
+int64_t leadingDimension(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor)
+{
+    const auto& dims = tensor.dims();
+    const auto& strides = tensor.strides();
+    const auto order = matrixOrder(dims, strides);
+    if(order == MatrixOrder::UNSUPPORTED)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Unsupported matrix: only column major and row major matrices are supported");
+    }
+
+    const auto rank = dims.size();
+    if(order == MatrixOrder::ROW_MAJOR)
+    {
+        return (dims[rank - 2] == 1) ? dims[rank - 1] : strides[rank - 2]; // row stride
+    }
+    return strides[rank - 1]; // column stride
+}
+
 void requireRowMajorOutput(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor)
 {
@@ -164,6 +185,14 @@ void requireRowMajorOutput(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Unsupported output layout: hipBLASLt engine requires a row-major output matrix: "
                 + tensor.name());
+    }
+    const auto ld = leadingDimension(tensor);
+    if(ld == 0)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Output leading dimension must be positive, rows would alias. UID: "
+                + std::to_string(tensor.uid()));
     }
 }
 

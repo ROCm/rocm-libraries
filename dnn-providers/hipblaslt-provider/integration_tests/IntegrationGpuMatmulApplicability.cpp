@@ -336,9 +336,23 @@ protected:
         }
 
         // A and B in logical row-major order; the device copies lay them out by their strides.
+        // The reference reads them back through the offsets, so a stride-0 operand, whose logical
+        // elements share one storage slot, is computed from the value that slot holds.
         const auto a = rounded(randomUniform(batch * m * k, 11U), c.ioType);
         const auto b = rounded(randomUniform(batch * k * n, 22U), c.ioType);
         const auto bias = rounded(randomUniform(n, 33U), DataType::FLOAT);
+        const auto laidOutA = scatter(a, aOffsets);
+        const auto laidOutB = scatter(b, bOffsets);
+        std::vector<float> aEff(a.size());
+        std::vector<float> bEff(b.size());
+        for(size_t idx = 0; idx < a.size(); ++idx)
+        {
+            aEff[idx] = laidOutA[aOffsets[idx]];
+        }
+        for(size_t idx = 0; idx < b.size(); ++idx)
+        {
+            bEff[idx] = laidOutB[bOffsets[idx]];
+        }
 
         std::vector<float> reference(batch * m * n);
         for(size_t bi = 0; bi < batch; ++bi)
@@ -350,7 +364,7 @@ protected:
                     float acc = 0.0f;
                     for(size_t p = 0; p < k; ++p)
                     {
-                        acc += a[(bi * m + i) * k + p] * b[(bi * k + p) * n + j];
+                        acc += aEff[(bi * m + i) * k + p] * bEff[(bi * k + p) * n + j];
                     }
                     if(c.withBias)
                     {
@@ -372,8 +386,8 @@ protected:
         const size_t extent = spanOf(outOffsets);
         const size_t outBytes = (extent + GUARD_ELEMENTS) * elementSize(c.finalType);
 
-        const auto aBytes = encode(scatter(a, aOffsets), c.ioType);
-        const auto bBytes = encode(scatter(b, bOffsets), c.ioType);
+        const auto aBytes = encode(laidOutA, c.ioType);
+        const auto bBytes = encode(laidOutB, c.ioType);
         const auto biasBytes = encode(bias, DataType::FLOAT);
         const std::vector<float> outInit(extent + GUARD_ELEMENTS, GUARD_VALUE);
         const auto outInitBytes = encode(outInit, c.finalType);
@@ -482,17 +496,6 @@ TEST_F(IntegrationGpuMatmulApplicability, ColumnMajorOutputDeclines)
     expectDeclinedBeforeBuildPlans(c);
 }
 
-// Positive control: the same shapes with a row-major output build and match the reference.
-TEST_F(IntegrationGpuMatmulApplicability, RowMajorOutputMatchesReference)
-{
-    MatmulCase c;
-    c.m = 8;
-    c.k = 16;
-    c.n = 12;
-    c.cStrides = {12, 1};
-    expectMatchesReference(c, FP32_TOLERANCE);
-}
-
 // A size-1 dimension's stride is arbitrary; [M,1] with strides [1,M] is a contiguous column.
 // Fails if the output layout is derived from the non-canonical stride and written wrongly.
 class IntegrationGpuMatmulApplicabilityUnitColumn : public IntegrationGpuMatmulApplicability,
@@ -515,6 +518,72 @@ TEST_P(IntegrationGpuMatmulApplicabilityUnitColumn,
 INSTANTIATE_TEST_SUITE_P(IntegrationGpuMatmulApplicability,
                          IntegrationGpuMatmulApplicabilityUnitColumn,
                          ::testing::Values<int64_t>(8, 33));
+
+// A broadcast operand has a zero leading dimension: every row (or column) reads the same storage.
+// Fails if the provider declines a zero leading dimension on A or B, or reads the operand with a
+// non-zero leading dimension.
+struct ZeroLeadingDimensionParam
+{
+    const char* name;
+    DataType ioType;
+    std::vector<int64_t> aStrides;
+    std::vector<int64_t> bStrides;
+};
+
+class IntegrationGpuMatmulApplicabilityZeroLd
+    : public IntegrationGpuMatmulApplicability,
+      public ::testing::WithParamInterface<ZeroLeadingDimensionParam>
+{
+};
+
+TEST_P(IntegrationGpuMatmulApplicabilityZeroLd, ZeroLeadingDimensionOperandMatchesReference)
+{
+    const auto& p = GetParam();
+    MatmulCase c;
+    c.m = 8;
+    c.k = 16;
+    c.n = 12;
+    c.ioType = p.ioType;
+    c.finalType = p.ioType;
+    c.aStrides = p.aStrides;
+    c.bStrides = p.bStrides;
+    expectMatchesReference(c, p.ioType == DataType::HALF ? FP16_TOLERANCE : FP32_TOLERANCE);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    IntegrationGpuMatmulApplicability,
+    IntegrationGpuMatmulApplicabilityZeroLd,
+    ::testing::Values(ZeroLeadingDimensionParam{"ARowMajorFloat", DataType::FLOAT, {0, 1}, {}},
+                      ZeroLeadingDimensionParam{"AColumnMajorFloat", DataType::FLOAT, {1, 0}, {}},
+                      ZeroLeadingDimensionParam{"BRowMajorFloat", DataType::FLOAT, {}, {0, 1}},
+                      ZeroLeadingDimensionParam{"BColumnMajorFloat", DataType::FLOAT, {}, {1, 0}},
+                      ZeroLeadingDimensionParam{"ARowMajorHalf", DataType::HALF, {0, 1}, {}},
+                      ZeroLeadingDimensionParam{"AColumnMajorHalf", DataType::HALF, {1, 0}, {}},
+                      ZeroLeadingDimensionParam{"BRowMajorHalf", DataType::HALF, {}, {0, 1}},
+                      ZeroLeadingDimensionParam{"BColumnMajorHalf", DataType::HALF, {}, {1, 0}}),
+    [](const ::testing::TestParamInfo<ZeroLeadingDimensionParam>& info) {
+        return std::string(info.param.name);
+    });
+
+// An output with a zero leading dimension would have every row written over the same storage.
+// The frontend accepts the stride (it only rejects negative ones), so the decline must come from
+// the engine, after validate.
+// Fails if the provider accepts a zero-leading-dimension output.
+TEST_F(IntegrationGpuMatmulApplicability, ZeroLeadingDimensionOutputDeclines)
+{
+    MatmulCase c;
+    c.m = 8;
+    c.k = 16;
+    c.n = 12;
+    c.cStrides = {0, 1};
+    Graph graph;
+    const std::string stage = buildGraph(graph, c);
+    EXPECT_FALSE(stage.empty()) << "the provider accepted a zero-leading-dimension output";
+    EXPECT_NE(stage.rfind("validate", 0), 0U)
+        << "rejected by the frontend before the engine saw the graph: " << stage;
+    EXPECT_NE(stage.rfind("build_plans", 0), 0U)
+        << "declined only at build_plans, after the engine was selected: " << stage;
+}
 
 // The engine runs the epilogue on the FP32 accumulator, so a virtual intermediate narrower than
 // FLOAT cannot be honored, whatever the final output type.

@@ -197,7 +197,7 @@ struct FloatTensorHolder
 };
 } // namespace
 
-TEST(TestHipblasltMatrixLayout, NonPositiveLeadingDimensionThrows)
+TEST(TestHipblasltMatrixLayout, NegativeLeadingDimensionThrows)
 {
     struct Row
     {
@@ -208,11 +208,9 @@ TEST(TestHipblasltMatrixLayout, NonPositiveLeadingDimensionThrows)
     const std::vector<Row> rows = {
         // Row-major: the leading dimension is the row stride.
         {{6, 8}, {-1, 1}},
-        {{6, 8}, {0, 1}},
         {{2, 6, 8}, {48, -1, 1}},
         // Column-major: the leading dimension is the column stride.
         {{6, 8}, {1, -1}},
-        {{6, 8}, {1, 0}},
         {{2, 6, 8}, {48, 1, -1}},
     };
 
@@ -225,6 +223,36 @@ TEST(TestHipblasltMatrixLayout, NonPositiveLeadingDimensionThrows)
                      hipdnn_plugin_sdk::HipdnnPluginException)
             << "strides " << row.strides[row.strides.size() - 2] << ","
             << row.strides[row.strides.size() - 1];
+    }
+}
+
+// Fails if a zero leading dimension, which hipBLASLt computes correctly for a broadcast
+// operand, is rejected by the layout.
+TEST(TestHipblasltMatrixLayout, ZeroLeadingDimensionIsAccepted)
+{
+    struct Row
+    {
+        std::vector<int64_t> dims;
+        std::vector<int64_t> strides;
+    };
+
+    const std::vector<Row> rows = {
+        {{6, 8}, {0, 1}},
+        {{2, 6, 8}, {48, 0, 1}},
+        {{6, 8}, {1, 0}},
+        {{2, 6, 8}, {48, 1, 0}},
+    };
+
+    for(const auto& row : rows)
+    {
+        const FloatTensorHolder holder(row.dims, row.strides);
+        hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper const tensorWrapper(
+            holder.attrs);
+        EXPECT_NO_THROW({
+            HipblasltMatrixLayout const matLayout(tensorWrapper);
+            EXPECT_NE(matLayout.matrixLayout(), nullptr);
+        }) << "strides "
+           << row.strides[row.strides.size() - 2] << "," << row.strides[row.strides.size() - 1];
     }
 }
 

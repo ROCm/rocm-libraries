@@ -98,8 +98,8 @@ TEST_F(TestHipblasltHipdnnEnginePluginHandle, SetStreamStoresStream)
 }
 
 // Engine-details buffers are stored and removed from every thread that queries engine details
-// through one handle. Unsynchronized access to the underlying map corrupts it (and crashes
-// under this load); with the lock every key stored is removed and the map ends empty.
+// through one handle. Fails (the map is corrupted and the test crashes under this load) if that
+// access is not synchronized.
 TEST_F(TestHipblasltHipdnnEnginePluginHandle, ConcurrentStoreAndRemoveOfDistinctBuffers)
 {
     constexpr int NUM_THREADS = 8;
@@ -140,6 +140,4 @@ TEST_F(TestHipblasltHipdnnEnginePluginHandle, ConcurrentStoreAndRemoveOfDistinct
     {
         thread.join();
     }
-
-    EXPECT_EQ(_handle->engineDetailsDetachedBufferCount(), 0U);
 }

@@ -10,7 +10,7 @@ hipBLASLt is **column-major**; hipDNN's output is **row-major**. To produce `C =
 
 A matrix (the last two dimensions of a tensor) is row-major when `dims[-1] == 1` or `stride[-1] == 1`; otherwise it is column-major when `dims[-2] == 1` or `stride[-2] == 1`; otherwise it is not supported. A size-1 dimension therefore accepts any stride. The same rule derives the transpose flag and the hipBLASLt matrix layout.
 
-The leading dimension the layout uses (the row stride of a row-major matrix, the column stride of a column-major one) must be positive; the engine declines a matrix whose leading dimension is zero or negative. A size-1 dimension's stride is never used, so it does not have to be positive.
+The leading dimension the layout uses (the row stride of a row-major matrix, the column stride of a column-major one) must not be negative for A and B; the engine declines a matrix whose leading dimension is negative. Zero is allowed for A and B, for example a broadcast operand whose rows or columns repeat. The output's leading dimension must be positive, because a zero leading dimension would make its rows alias. A size-1 dimension's stride is never used, so it does not have to be positive.
 
 The output must be row-major under this rule. The tensor written to the output (the activation output, else the bias output, else the matmul output) is checked, and the engine declines a column-major output.
 

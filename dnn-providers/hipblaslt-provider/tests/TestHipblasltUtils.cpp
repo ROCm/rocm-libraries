@@ -330,6 +330,72 @@ TEST(TestHipblasltUtils, RequireRowMajorOutputAcceptsOnlyRowMajor)
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
+TEST(TestHipblasltUtils, LeadingDimensionFollowsMatrixOrder)
+{
+    struct Row
+    {
+        std::vector<int64_t> dims;
+        std::vector<int64_t> strides;
+        int64_t expected;
+    };
+
+    const std::vector<Row> rows = {
+        // Row-major: the row stride.
+        {{4, 8}, {10, 1}, 10},
+        {{2, 4, 8}, {40, 10, 1}, 10},
+        // Column-major: the column stride.
+        {{4, 8}, {1, 6}, 6},
+        {{2, 4, 8}, {48, 1, 6}, 6},
+        // A single-row row-major matrix has no row stride: ld is the column count.
+        {{1, 8}, {-3, 1}, 8},
+        // A size-1 column count is row-major and the stride of that dim is ignored.
+        {{4, 1}, {3, -5}, 3},
+        // Zero and negative leading dimensions are reported as they are.
+        {{4, 8}, {0, 1}, 0},
+        {{4, 8}, {1, 0}, 0},
+        {{4, 8}, {-2, 1}, -2},
+        {{4, 8}, {1, -2}, -2},
+    };
+
+    for(const auto& row : rows)
+    {
+        const TensorHolder holder(row.dims, row.strides);
+        EXPECT_EQ(
+            leadingDimension(hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper(
+                holder.attrs)),
+            row.expected)
+            << "dims " << row.dims.size() << "d last " << row.dims.back() << " strides "
+            << row.strides[row.strides.size() - 2] << "," << row.strides.back();
+    }
+}
+
+TEST(TestHipblasltUtils, LeadingDimensionThrowsOnUnsupportedLayout)
+{
+    const TensorHolder holder({4, 8}, {16, 2});
+    EXPECT_THROW(
+        leadingDimension(
+            hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper(holder.attrs)),
+        hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// Fails if a zero-ld output, whose rows would alias, is accepted, or if a positive-ld
+// row-major output is declined.
+TEST(TestHipblasltUtils, RequireRowMajorOutputRejectsZeroLeadingDimension)
+{
+    using hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper;
+
+    const TensorHolder zeroLd({4, 8}, {0, 1});
+    EXPECT_THROW(requireRowMajorOutput(TensorAttributesWrapper(zeroLd.attrs)),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+
+    const TensorHolder zeroLdBatched({2, 4, 8}, {32, 0, 1});
+    EXPECT_THROW(requireRowMajorOutput(TensorAttributesWrapper(zeroLdBatched.attrs)),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+
+    const TensorHolder positiveLd({4, 8}, {10, 1});
+    EXPECT_NO_THROW(requireRowMajorOutput(TensorAttributesWrapper(positiveLd.attrs)));
+}
+
 // ============================================================================
 // FindTensorAttributes
 // ============================================================================

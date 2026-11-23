@@ -470,8 +470,9 @@ TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableAcceptsSingletonBatchA
 }
 
 // A matrix layout takes its leading dimension from the stride of the matrix's non-unit-stride
-// axis; a zero or negative one is declined before any plan is built. A is [4, 8] and B is
-// [8, 5], so strides {s, 1} are row-major and {1, s} column-major with ld = s.
+// axis. A negative one is declined before any plan is built; a zero one is accepted for A and B
+// and declined for the output. A is [4, 8] and B is [8, 5], so strides {s, 1} are row-major and
+// {1, s} column-major with ld = s.
 struct LeadingDimensionCase
 {
     const char* name;
@@ -486,7 +487,7 @@ class TestHipblasltMatmulPlanBuilderLeadingDimensionCases
 };
 
 TEST_P(TestHipblasltMatmulPlanBuilderLeadingDimensionCases,
-       IsApplicableDeclinesNonPositiveLeadingDimension)
+       IsApplicableDeclinesNegativeLeadingDimension)
 {
     const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
@@ -497,7 +498,8 @@ TEST_P(TestHipblasltMatmulPlanBuilderLeadingDimensionCases,
     GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "Leading dimension must be positive"))
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_INFO, "Leading dimension must not be negative"))
         << recorder.getRecordedLogsAsString();
 }
 
@@ -506,11 +508,55 @@ INSTANTIATE_TEST_SUITE_P(
     TestHipblasltMatmulPlanBuilderLeadingDimensionCases,
     ::testing::Values(LeadingDimensionCase{"ARowMajorNegative", "A", {-1, 1}},
                       LeadingDimensionCase{"AColumnMajorNegative", "A", {1, -1}},
-                      LeadingDimensionCase{"ARowMajorZero", "A", {0, 1}},
                       LeadingDimensionCase{"BRowMajorNegative", "B", {-1, 1}},
-                      LeadingDimensionCase{"BColumnMajorNegative", "B", {1, -1}},
-                      LeadingDimensionCase{"BColumnMajorZero", "B", {1, 0}}),
+                      LeadingDimensionCase{"BColumnMajorNegative", "B", {1, -1}}),
     [](const auto& info) { return std::string(info.param.name); });
+
+// Fails if a zero leading dimension on A or B, which hipBLASLt computes correctly for a
+// broadcast operand, is declined.
+TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableAcceptsZeroLeadingDimensionOnInputs)
+{
+    const std::vector<LeadingDimensionCase> cases = {
+        {"ARowMajorZero", "A", {0, 1}},
+        {"AColumnMajorZero", "A", {1, 0}},
+        {"BRowMajorZero", "B", {0, 1}},
+        {"BColumnMajorZero", "B", {1, 0}},
+    };
+
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.name);
+        const auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+        auto builder = withTensorStrides(
+            createBatchedGraph(
+                {4, 8}, {8, 1}, {8, 5}, {5, 1}, {4, 5}, {5, 1}, PointwiseMode::UNSET),
+            testCase.tensorName,
+            testCase.strides);
+        GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+        (void)_planBuilder.isApplicable(_handle, graph);
+        EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "eading dimension must"))
+            << recorder.getRecordedLogsAsString();
+    }
+}
+
+// Fails if a zero-ld output, whose rows would alias, is accepted.
+TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableDeclinesZeroLeadingDimensionOutput)
+{
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    auto builder = withTensorStrides(
+        createBatchedGraph({4, 8}, {8, 1}, {8, 5}, {5, 1}, {4, 5}, {5, 1}, PointwiseMode::UNSET),
+        "C_matmul",
+        {0, 1});
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_INFO, "Output leading dimension must be positive"))
+        << recorder.getRecordedLogsAsString();
+}
 
 // The stride of a size-1 dimension is never a leading dimension, so a non-positive one is
 // not declined for it: A [1, 8] reads its leading dimension from the column count.
@@ -523,7 +569,7 @@ TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableIgnoresNonPositiveStri
     GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     (void)_planBuilder.isApplicable(_handle, graph);
-    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "Leading dimension must be positive"))
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "eading dimension must"))
         << recorder.getRecordedLogsAsString();
 }
 

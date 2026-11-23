@@ -26,23 +26,20 @@ HipblasltMatrixLayout::HipblasltMatrixLayout(
     // a size-1 dim):
     // - Column-major matrix: use the dimensions and the strides as-is since
     //   hipBLASLt expects column-major layout.
-    // - Row-major matrix: swap the dimensions and the strides. A size-1 row
-    //   count has no row stride, so ld is the column count of the row-major matrix.
+    // - Row-major matrix: swap the dimensions and the strides.
+    // The leading dimension comes from hipblaslt_utils::leadingDimension.
     uint64_t rows;
     uint64_t cols;
-    int64_t ld;
     const auto order = hipblaslt_utils::matrixOrder(dims, strides);
     if(order == hipblaslt_utils::MatrixOrder::ROW_MAJOR)
     {
         rows = static_cast<uint64_t>(dims[rank - 1]);
         cols = static_cast<uint64_t>(dims[rank - 2]);
-        ld = (dims[rank - 2] == 1) ? dims[rank - 1] : strides[rank - 2]; // row stride
     }
     else if(order == hipblaslt_utils::MatrixOrder::COLUMN_MAJOR)
     {
         rows = static_cast<uint64_t>(dims[rank - 2]);
         cols = static_cast<uint64_t>(dims[rank - 1]);
-        ld = strides[rank - 1]; // column stride
     }
     else
     {
@@ -51,11 +48,14 @@ HipblasltMatrixLayout::HipblasltMatrixLayout(
             "Unsupported matrix: only column major and row major matrices are supported");
     }
 
-    // hipBLASLt does not reject every non-positive ld (-1 passes) and reads out of bounds with it.
-    // Only the ld this layout actually uses is checked; the stride of a size-1 dim is ignored.
-    PLUGIN_THROW_IF_TRUE(ld <= 0,
+    // hipBLASLt does not reject every negative ld (-1 passes) and reads out of bounds with it.
+    // A zero ld is computed correctly for an operand whose rows or columns repeat; the output
+    // additionally rejects it in hipblaslt_utils::requireRowMajorOutput. Only the ld this layout
+    // actually uses is checked; the stride of a size-1 dim is ignored.
+    const auto ld = hipblaslt_utils::leadingDimension(tensor);
+    PLUGIN_THROW_IF_TRUE(ld < 0,
                          HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                         "Leading dimension must be positive, got " + std::to_string(ld)
+                         "Leading dimension must not be negative, got " + std::to_string(ld)
                              + ". UID: " + std::to_string(_uid));
 
     THROW_ON_HIPBLASLT_FAILURE(

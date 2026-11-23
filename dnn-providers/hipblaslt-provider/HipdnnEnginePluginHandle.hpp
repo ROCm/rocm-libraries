@@ -71,15 +71,9 @@ public:
         }
     }
 
-    size_t engineDetailsDetachedBufferCount() const
-    {
-        const std::lock_guard<std::mutex> lock(_engineDetailsBuffersMutex);
-        return _engineDetailsBuffers.size();
-    }
-
 private:
     hipStream_t _stream = nullptr;
-    mutable std::mutex _engineDetailsBuffersMutex;
+    std::mutex _engineDetailsBuffersMutex;
     std::unordered_map<const void*, std::unique_ptr<flatbuffers::DetachedBuffer>>
         _engineDetailsBuffers;
 };

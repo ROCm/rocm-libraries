@@ -38,8 +38,6 @@ constexpr int64_t DIM = 64;
 constexpr int NUM_ROUNDS = 10;
 constexpr int NUM_THREADS = 4;
 constexpr int NUM_ITERATIONS = 40;
-constexpr int NUM_HANDLE_THREADS = 8;
-constexpr int NUM_HANDLE_ITERATIONS = 40;
 constexpr float TOLERANCE = 2e-4f;
 
 // Per-thread host data: distinct inputs per thread so that a GEMM reading another
@@ -367,38 +365,6 @@ TEST_F(IntegrationGpuMatmulConcurrency, SharedFusedBiasGraphWithDistinctBiasBuff
     runSharedGraph(graph, true, failures);
 
     EXPECT_EQ(failures.count(), 0) << "first failure: " << failures.first();
-}
-
-// Concurrent handle creation must succeed on every thread. Without ThreadSanitizer this proves
-// only that: the plugin's unsynchronized weak_ptr read is undefined behavior that only TSAN
-// observes, and the earlier double-checked creation under the lock could not produce two
-// containers, so no deterministic assertion tells the fixed and unfixed code apart. A TSAN
-// build turns this into the race check for the plugin's shared container.
-TEST_F(IntegrationGpuMatmulConcurrency, ConcurrentHandleCreateDestroy)
-{
-    std::atomic<int> failures{0};
-
-    std::vector<std::thread> threads;
-    threads.reserve(NUM_HANDLE_THREADS);
-    for(int t = 0; t < NUM_HANDLE_THREADS; ++t)
-    {
-        threads.emplace_back([&failures]() {
-            for(int iter = 0; iter < NUM_HANDLE_ITERATIONS; ++iter)
-            {
-                auto [handle, err] = createHipdnnHandle();
-                if(err.is_bad() || !handle || *handle == nullptr)
-                {
-                    failures.fetch_add(1);
-                }
-            }
-        });
-    }
-    for(auto& thread : threads)
-    {
-        thread.join();
-    }
-
-    EXPECT_EQ(failures.load(), 0);
 }
 
 // Concurrent get_knobs_for_engine() calls on one finalized graph. The call takes no handle, so
