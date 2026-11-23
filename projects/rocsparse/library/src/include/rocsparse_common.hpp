@@ -2825,10 +2825,12 @@ namespace rocsparse
             const I p = perm[j];
 
             // Gather values from A and store them to T with respect to the
-            // given row / column permutation
-            for(I bi = lid; bi < block_dim; bi += BSRDIM)
+            // given row / column permutation. BSR_IND forms bi * block_dim and
+            // bj * block_dim in the type of bi and bj, which pass INT32_MAX
+            // from block_dim 46342.
+            for(int64_t bi = lid; bi < block_dim; bi += BSRDIM)
             {
-                for(I bj = wid; bj < block_dim; bj += BSRDIM)
+                for(int64_t bj = wid; bj < block_dim; bj += BSRDIM)
                 {
                     bsr_val_T[BSR_IND(j, bi, bj, dir)] = bsr_val_A[BSR_IND(p, bj, bi, dir)];
                 }
