@@ -231,10 +231,10 @@ deprecated AMG interface, `src/utils/` and `src/base/host/host_io.*` are tested 
 tests reach them, and they are excluded from all coverage reports (see [Coverage](#coverage)).
 
 **Coverage expectation:** the long-term ROCm-wide goal is >95% line coverage of hardware-independent
-pursued in phases. The Codecov `rocALUTION-unit` flag is held to 80% (see [Coverage](#coverage)).
-rocALUTION's host-code coverage is meaningful because a large share of the algorithm code runs on
-the CPU. The GPU backend duplicates those algorithms in device code, which
-host-side instrumentation does not capture. See [Coverage](#coverage).
+paths, pursued in phases. The Codecov `rocALUTION-unit` flag is held to 80%. rocALUTION's host-code
+coverage is meaningful because a large share of the algorithm code runs on the CPU. The GPU backend
+duplicates those algorithms in device code, which host-side instrumentation does not capture. See
+[Coverage](#coverage).
 
 ---
 
