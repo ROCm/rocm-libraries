@@ -65,6 +65,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - AdaptiveGemm: [0, 1]
         - TDMStoreInst: [true]
+        - CompactLoopStore: [false, true]
         - SourceSwap: [False, True]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -99,6 +100,7 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - GlobalSplitU: [1, -1]
         - TDMStoreInst: [true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -134,6 +136,7 @@ BenchmarkProblems:
         - WorkGroupMapping: [8]
         - StreamK: [3]
         - TDMStoreInst: [true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -165,6 +168,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         - AdaptiveGemm: [0, 1]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -195,6 +199,7 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1, 1]
         - GlobalSplitU: [1]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -222,6 +227,7 @@ BenchmarkProblems:
         - StoreVectorWidth: [4]
         - GlobalSplitU: [1]
         - TDMStoreInst: [true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -253,6 +259,7 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - GlobalSplitU: [1]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -285,6 +292,7 @@ BenchmarkProblems:
         - StreamK: [3]
         - StreamKForceDPOnly: [1]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -311,6 +319,7 @@ BenchmarkProblems:
         - WorkGroupMapping: [8]
         - StreamK: [4, 5]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -345,6 +354,7 @@ BenchmarkProblems:
             - GlobalSplitUAlgorithm: [MultipleBufferSingleKernel]
               AdaptiveGemmGSUA: [1]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -380,6 +390,7 @@ BenchmarkProblems:
               AdaptiveGemmGSUA: [0]
               AssertFree0ElementMultiple: [2]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -406,6 +417,7 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - GlobalSplitU: [1]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -437,6 +449,7 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - GlobalSplitU: [1]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -469,6 +482,7 @@ BenchmarkProblems:
         - StreamKForceDPOnly: [0, 1]
         - ClusterDim: [[2, 1], [4, 1]]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -498,6 +512,7 @@ BenchmarkProblems:
         - PrefetchAcrossPersistent: [1]
         - StaggerU: [0]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -562,6 +577,7 @@ BenchmarkProblems:
         - StoreVectorWidth: [1, 8]
         - GlobalSplitU: [1]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -592,6 +608,7 @@ BenchmarkProblems:
         - WorkGroupMapping: [8]
         - StreamK: [3]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -621,6 +638,7 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - GlobalSplitU: [-1]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -651,6 +669,7 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - GlobalSplitU: [1]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -685,6 +704,7 @@ BenchmarkProblems:
             - StoreRemapVectorWidth: [-1]
               SourceSwap: [True]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -730,6 +750,7 @@ BenchmarkProblems:
         - PrefetchAcrossPersistent: [0, 1]
         - ReuseAcrossPersistent: [1]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -760,6 +781,7 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - GlobalSplitU: [1]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -801,6 +823,7 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - GlobalSplitU: [1]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -832,6 +855,7 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - GlobalSplitU: [1]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -858,6 +882,7 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - GlobalSplitU: [1]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -893,6 +918,7 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - GlobalSplitU: [1]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -928,6 +954,7 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - GlobalSplitU: [1]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -991,6 +1018,7 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - WavefrontSize: [32]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -1043,6 +1071,7 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - TDMInst: [3]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -1078,6 +1107,7 @@ BenchmarkProblems:
         - TransposeLDSMetadata: [-1]
         - LdsPadMetadata: [0]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -1110,6 +1140,7 @@ BenchmarkProblems:
         - TransposeLDSMetadata: [-1]
         - LdsPadMetadata: [0]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -1151,6 +1182,7 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - StaggerU: [0]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -1184,6 +1216,7 @@ BenchmarkProblems:
         - WorkGroup: [[16, 16, 4]]
         - DepthU: [128]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -1219,6 +1252,7 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - StoreVectorWidth: [1, -1]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -1248,6 +1282,7 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - StoreVectorWidth: [1, -1]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -1314,6 +1349,7 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - StoreVectorWidth: [1, -1]
         - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -1341,6 +1377,7 @@ BenchmarkProblems:
       - GlobalSplitU: [1]
       - AdaptiveGemm: [0, 1]
       - TDMStoreInst: [true]
+      - CompactLoopStore: [false, true]
       - SourceSwap: [false, true]
       BenchmarkJoinParameters: null
       BenchmarkFinalParameters:
@@ -1367,6 +1404,7 @@ BenchmarkProblems:
       - StoreVectorWidth: [-1]
       - GlobalSplitU: [1, -1]
       - TDMStoreInst: [true]
+      - CompactLoopStore: [false, true]
       BenchmarkJoinParameters: null
       BenchmarkFinalParameters:
       - ProblemSizes:
@@ -1394,6 +1432,7 @@ BenchmarkProblems:
       - WorkGroupMapping: [8]
       - StreamK: [3]
       - TDMStoreInst: [true]
+      - CompactLoopStore: [false, true]
       BenchmarkJoinParameters: null
       BenchmarkFinalParameters:
       - ProblemSizes:
@@ -1418,6 +1457,7 @@ BenchmarkProblems:
       - GlobalSplitU: [1]
       - AdaptiveGemm: [0, 1]
       - TDMStoreInst: [false, true]
+      - CompactLoopStore: [false, true]
       BenchmarkJoinParameters: null
       BenchmarkFinalParameters:
       - ProblemSizes:
@@ -1440,6 +1480,7 @@ BenchmarkProblems:
       - StoreVectorWidth: [2, 4]
       - GlobalSplitU: [1]
       - TDMStoreInst: [true]
+      - CompactLoopStore: [false, true]
       BenchmarkJoinParameters: null
       BenchmarkFinalParameters:
       - ProblemSizes:
@@ -1463,6 +1504,7 @@ BenchmarkProblems:
       - StoreVectorWidth: [-1]
       - GlobalSplitU: [1]
       - TDMStoreInst: [false, true]
+      - CompactLoopStore: [false, true]
       BenchmarkJoinParameters: null
       BenchmarkFinalParameters:
       - ProblemSizes:
@@ -1490,6 +1532,7 @@ BenchmarkProblems:
       - StreamK: [3]
       - StreamKForceDPOnly: [1]
       - TDMStoreInst: [false, true]
+      - CompactLoopStore: [false, true]
       BenchmarkJoinParameters: null
       BenchmarkFinalParameters:
       - ProblemSizes:
@@ -1512,6 +1555,7 @@ BenchmarkProblems:
       - WorkGroupMapping: [8]
       - StreamK: [4, 5]
       - TDMStoreInst: [false, true]
+      - CompactLoopStore: [false, true]
       BenchmarkJoinParameters: null
       BenchmarkFinalParameters:
       - ProblemSizes:
@@ -1539,6 +1583,7 @@ BenchmarkProblems:
           - GlobalSplitUAlgorithm: [MultipleBufferSingleKernel]
             AdaptiveGemmGSUA: [1]
       - TDMStoreInst: [false, true]
+      - CompactLoopStore: [false, true]
       BenchmarkJoinParameters: null
       BenchmarkFinalParameters:
       - ProblemSizes:
@@ -1568,6 +1613,7 @@ BenchmarkProblems:
             AdaptiveGemmGSUA: [0]
             AssertFree0ElementMultiple: [2]
       - TDMStoreInst: [false, true]
+      - CompactLoopStore: [false, true]
       BenchmarkJoinParameters: null
       BenchmarkFinalParameters:
       - ProblemSizes:
@@ -1589,6 +1635,7 @@ BenchmarkProblems:
       - StoreVectorWidth: [-1]
       - GlobalSplitU: [1]
       - TDMStoreInst: [false, true]
+      - CompactLoopStore: [false, true]
       BenchmarkJoinParameters: null
       BenchmarkFinalParameters:
       - ProblemSizes:
@@ -1612,6 +1659,7 @@ BenchmarkProblems:
       - StoreVectorWidth: [-1]
       - GlobalSplitU: [1]
       - TDMStoreInst: [false, true]
+      - CompactLoopStore: [false, true]
       BenchmarkJoinParameters: null
       BenchmarkFinalParameters:
       - ProblemSizes:
@@ -1641,6 +1689,7 @@ BenchmarkProblems:
         - [2, 1]
         - [4, 1]
       - TDMStoreInst: [false, true]
+      - CompactLoopStore: [false, true]
       BenchmarkJoinParameters: null
       BenchmarkFinalParameters:
       - ProblemSizes:
@@ -1665,6 +1714,7 @@ BenchmarkProblems:
       - PrefetchAcrossPersistent: [1]
       - StaggerU: [0]
       - TDMStoreInst: [false, true]
+      - CompactLoopStore: [false, true]
       BenchmarkJoinParameters: null
       BenchmarkFinalParameters:
       - ProblemSizes:
@@ -1722,6 +1772,7 @@ BenchmarkProblems:
           - StoreRemapVectorWidth: [-1]
             SourceSwap: [true]
       - TDMStoreInst: [false, true]
+      - CompactLoopStore: [false, true]
       BenchmarkJoinParameters: null
       BenchmarkFinalParameters:
       - ProblemSizes:
@@ -1748,6 +1799,7 @@ BenchmarkProblems:
         - [16, 16, 4]
       - DepthU: [128]
       - TDMStoreInst: [false, true]
+      - CompactLoopStore: [false, true]
       BenchmarkJoinParameters: null
       BenchmarkFinalParameters:
       - ProblemSizes:
@@ -1775,6 +1827,7 @@ BenchmarkProblems:
       - AdaptiveGemm: [0]
       - ActivationFuncCall: [true]
       - TDMStoreInst: [false, true]
+      - CompactLoopStore: [false, true]
       BenchmarkJoinParameters: null
       BenchmarkFinalParameters:
       - ProblemSizes:
@@ -1832,6 +1885,7 @@ BenchmarkProblems:
       - LdsBlockSizePerPadB: [0]
       - WavefrontSize: [32]
       - TDMStoreInst: [false, true]
+      - CompactLoopStore: [false, true]
       BenchmarkForkParameters: null
       JoinParameters: null
       BenchmarkJoinParameters: null
@@ -1892,6 +1946,7 @@ BenchmarkProblems:
       - WavefrontSize: [32]
       - ConvertAfterDS: [false]
       - TDMStoreInst: [false, true]
+      - CompactLoopStore: [false, true]
       BenchmarkForkParameters: null
       JoinParameters: null
       BenchmarkJoinParameters: null
