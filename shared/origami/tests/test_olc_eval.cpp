@@ -140,7 +140,7 @@ candidate_set_t ranked_candidates(const problem_t& p, const hardware_t& hw) {
     config_t    c = make_config(s.mt_m, s.mt_n, s.mt_k, s.mi_m, s.mi_n, s.mi_k, false, 8, s.occ, 0,
                                 0, s.sk);
     c.workspace_size            = std::numeric_limits<size_t>::max();
-    c.workspace_size_per_elem_c = std::numeric_limits<size_t>::max();
+    c.workspace_size_per_elem_c = 4;
     c.index                     = i;
     auto& tp                    = c.tensile();
     tp.wave_group_m             = s.wg_m;
@@ -159,23 +159,6 @@ candidate_set_t ranked_candidates(const problem_t& p, const hardware_t& hw) {
     cand.origami_latency              = ranked[i].latency;
     cand.fields.num_loads_coalesced_a = 1;
     cand.fields.num_loads_coalesced_b = 1;
-    // A static Stream-K launch: one workgroup per resident slot, at most one per tile.
-    const config_t& c   = out.configs[i];
-    auto&           sk  = cand.fields.streamk;
-    auto ceil_div       = [](std::uint64_t a, std::uint64_t b) { return (a + b - 1) / b; };
-    sk.valid            = true;
-    sk.is_streamk       = c.stream_k != 0;
-    sk.mt_x             = c.mt.m;
-    sk.mt_y             = c.mt.n;
-    sk.workspace_size_per_elem_c = 4;
-    sk.cu_occupancy              = c.occupancy;
-    sk.cu_count                  = 256;
-    sk.tiles      = ceil_div(p.size.m, c.mt.m) * ceil_div(p.size.n, c.mt.n) * std::max<size_t>(p.batch, 1);
-    sk.iters_per_tile = std::max<std::uint64_t>(ceil_div(p.size.k, c.mt.k), 1);
-    sk.final_grid = std::min<std::uint64_t>(sk.tiles, 256 * static_cast<std::uint64_t>(std::max(c.occupancy, 1)));
-    sk.sk_tiles   = sk.tiles;
-    sk.sk_split   = 1;
-    sk.reduction  = reduction_t::tree;
     out.candidates.push_back(cand);
   }
   return out;

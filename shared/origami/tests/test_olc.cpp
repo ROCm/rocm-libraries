@@ -136,28 +136,6 @@ struct candidate_set_t {
   std::vector<candidate_t> candidates;
 };
 
-// A plausible static Stream-K launch for a synthetic config: one workgroup per resident slot,
-// at most one per tile (no hipBLASLt needed).
-streamk_launch_t synthetic_launch(const problem_t& p, const config_t& c) {
-  streamk_launch_t sk;
-  sk.valid      = true;
-  sk.is_streamk = c.stream_k != 0;
-  sk.mt_x       = c.mt.m;
-  sk.mt_y       = c.mt.n;
-  sk.workspace_size_per_elem_c = 4;
-  sk.cu_occupancy              = c.occupancy;
-  sk.cu_count                  = 256;
-  if (!sk.is_streamk) return sk;
-  auto ceil_div     = [](std::uint64_t a, std::uint64_t b) { return (a + b - 1) / b; };
-  sk.tiles          = ceil_div(p.size.m, c.mt.m) * ceil_div(p.size.n, c.mt.n) * std::max<size_t>(p.batch, 1);
-  sk.iters_per_tile = std::max<std::uint64_t>(ceil_div(p.size.k, c.mt.k), 1);
-  sk.final_grid     = std::min<std::uint64_t>(sk.tiles, 256 * static_cast<std::uint64_t>(std::max(c.occupancy, 1)));
-  sk.sk_tiles       = sk.tiles;
-  sk.sk_split       = 1;
-  sk.reduction      = reduction_t::tree;
-  return sk;
-}
-
 // Ten configs, ranked by Origami the way hipBLASLt does it.
 candidate_set_t ranked_candidates(const problem_t& p, const hardware_t& hw, bool with_fields) {
   struct spec_t {
@@ -176,7 +154,7 @@ candidate_set_t ranked_candidates(const problem_t& p, const hardware_t& hw, bool
     config_t    c = make_config(s.mt_m, s.mt_n, s.mt_k, s.mi_m, s.mi_n, s.mi_k, false, 8, s.occ, 0,
                                 0, s.sk);
     c.workspace_size            = std::numeric_limits<size_t>::max();
-    c.workspace_size_per_elem_c = std::numeric_limits<size_t>::max();
+    c.workspace_size_per_elem_c = 4;
     c.index                     = i;
     auto& tp                    = c.tensile();
     tp.wave_group_m             = s.wg_m;
@@ -196,7 +174,6 @@ candidate_set_t ranked_candidates(const problem_t& p, const hardware_t& hw, bool
     if (with_fields) {
       cand.fields.num_loads_coalesced_a = 1;
       cand.fields.num_loads_coalesced_b = 1;
-      cand.fields.streamk               = synthetic_launch(p, out.configs[i]);
     }
     out.candidates.push_back(cand);
   }
@@ -496,9 +473,9 @@ TEST_CASE("OLC: compatibility checks", "[nn][olc]") {
   SECTION("build identity carries the compiled schema") {
     const auto b = build_identity();
     REQUIRE(b.feature_schema_hash ==
-            "sha256:5435d0bc46ede3603afe949d528c25277909fb630ad21fd825cd6cb7fe12aded");
+            "sha256:c2eb5fa5276cb5926ce9c8d7a76e8ab12e0b5a165bb446ec668ff7436653f0f3");
     REQUIRE(b.feature_schema_hash == features::schema().hash);
-    REQUIRE(features::schema().columns.size() == 161);
+    REQUIRE(features::schema().columns.size() == 159);
     REQUIRE(features::schema().columns == features::slot_names());
     REQUIRE(b.origami_source_hash.rfind("sha256:", 0) == 0);
   }
@@ -622,15 +599,6 @@ TEST_CASE("OLC: ranks by origami * exp(yhat) and falls back", "[nn][olc]") {
     const auto res = b->rank(p, hw, cs.candidates.data(), cs.candidates.size());
     REQUIRE(res.status == status_t::missing_feature);
     REQUIRE(res.detail.find("kernel field") != std::string::npos);
-  }
-  SECTION("Stream-K launch not provided") {
-    auto cs = ranked_candidates(p, hw, true);
-    cs.candidates[4].fields.streamk.valid = false;
-    const auto res = b->rank(p, hw, cs.candidates.data(), cs.candidates.size());
-    REQUIRE(res.status == status_t::missing_feature);
-    REQUIRE(res.detail.find("candidate 4") != std::string::npos);
-    REQUIRE(res.detail.find("sk_") != std::string::npos);
-    for (std::size_t i = 0; i < res.order.size(); ++i) REQUIRE(res.order[i] == i);
   }
   SECTION("rejected candidate") {
     auto cs                          = ranked_candidates(p, hw, true);
@@ -796,8 +764,8 @@ TEST_CASE("OLC: FP8 model slot, stamps and dtype gating", "[nn][olc]") {
       REQUIRE(x8[at("d_lds_bytes_eff")] == x16[at("d_lds_bytes_eff")] / 2);
       REQUIRE(x8[at("f_grvw_bytes_a")] == x16[at("f_grvw_bytes_a")] / 2);
       REQUIRE(x8[at("f_gwvw_bytes_d")] == x16[at("f_gwvw_bytes_d")]);
-      REQUIRE(x8[at("sk_fixup_bytes_over_output")] == x16[at("sk_fixup_bytes_over_output")]);
-      with_partials += x8[at("sk_fixup_bytes_over_output")] > 0;
+      REQUIRE(x8[at("l_fixup_bytes_over_output")] == x16[at("l_fixup_bytes_over_output")]);
+      with_partials += x8[at("l_fixup_bytes_over_output")] > 0;
     }
     REQUIRE(with_partials > 0);
   }
@@ -953,179 +921,76 @@ config_t config_from_record(const parity_table_t& t, const std::vector<double>& 
   return c;
 }
 
-// kernel_fields_t of a row: the coalesced-load counts and the Stream-K launch (ski_* columns,
-// reduction coded as reduction_t, -1 = none).
+// kernel_fields_t of a row: the coalesced-load counts.
 kernel_fields_t fields_from_row(const parity_table_t& t, const std::vector<double>& r) {
   auto            v = [&](const char* name) { return r[t.col(name)]; };
-  auto            u = [&](const char* name) { return static_cast<std::uint64_t>(v(name)); };
   kernel_fields_t kf;
   kf.num_loads_coalesced_a = static_cast<int>(v("nlc_a"));
   kf.num_loads_coalesced_b = static_cast<int>(v("nlc_b"));
-  auto& sk                 = kf.streamk;
-  sk.valid                 = true;
-  sk.is_streamk            = v("ski_streamk") != 0;
-  sk.final_grid            = u("ski_final_grid");
-  sk.tiles                 = u("ski_tiles");
-  sk.sk_tiles              = u("ski_sk_tiles");
-  sk.sk_split              = u("ski_sk_split");
-  sk.reduction             = v("ski_reduction") < 0
-                                 ? reduction_t::none
-                                 : static_cast<reduction_t>(static_cast<std::uint32_t>(v("ski_reduction")));
-  sk.is_dynamic                = v("ski_is_dynamic") != 0;
-  sk.dp_only                   = v("ski_dp_only") != 0;
-  sk.iters_per_tile            = u("ski_iters_per_tile");
-  sk.mt_x                      = u("ski_mt_x");
-  sk.mt_y                      = u("ski_mt_y");
-  sk.workspace_size_per_elem_c = u("ski_ws_per_elem_c");
-  sk.cu_occupancy              = static_cast<int>(v("ski_cu_occupancy"));
-  sk.cu_count                  = u("ski_cu_count");
   return kf;
 }
 
 }  // namespace
 
-TEST_CASE("OLC: Stream-K launch columns (schema v4)", "[nn][olc]") {
-  // Partial tiles of the static split by brute force (no whole-tile shortcut), as
-  // Schema v4's streamk_partials states it: distinct cut tiles, every cut a partial.
-  auto brute = [](std::uint64_t sk, std::uint64_t iters, std::uint64_t G) {
-    streamk_partials_t out;
-    if (G == 0 || sk == 0 || iters == 0) return out;
-    const std::uint64_t T = sk * iters, W = T / G, E = T % G;
-    std::vector<std::uint64_t> cut;
-    for (std::uint64_t g = 1; g < G; ++g) {
-      const std::uint64_t s = g * W + std::min(g, E);
-      if (s % iters) cut.push_back(s / iters);
-    }
-    out.partials = cut.size();
-    std::sort(cut.begin(), cut.end());
-    out.split_tiles =
-        static_cast<std::uint64_t>(std::unique(cut.begin(), cut.end()) - cut.begin());
-    return out;
+TEST_CASE("OLC: Stream-K launch columns (schema v5)", "[nn][olc]") {
+  // The origami_launch columns are launch_terms of the launch the candidate's context models.
+  const auto hw = gfx950();
+  const auto ix = [](const char* name) {
+    const int i = features::slot_index(name);
+    REQUIRE(i >= 0);
+    return static_cast<std::size_t>(i);
   };
-  streamk_launch_t base;
-  base.valid = base.is_streamk = true;
-  base.reduction               = reduction_t::tree;
-  base.sk_split                = 1;
-
-  SECTION("static split: hand example and brute force") {
-    auto d = base;
-    d.tiles = d.sk_tiles = 10;
-    d.iters_per_tile     = 4;
-    d.final_grid         = 3;  // T 40, W 13, E 1: starts 14 and 27 cut tiles 3 and 6
-    auto pt              = streamk_partials(d);
-    REQUIRE(pt.partials == 2);
-    REQUIRE(pt.split_tiles == 2);
-    int with_cuts = 0, shortcut = 0;
-    for (std::uint64_t sk : {1, 2, 7, 64, 255, 256, 1000})
-      for (std::uint64_t iters : {1, 2, 3, 8, 13, 64})
-        for (std::uint64_t G : {1, 2, 3, 100, 256, 512, 999, 1024}) {
-          d.tiles = d.sk_tiles = sk;
-          d.iters_per_tile     = iters;
-          d.final_grid         = G;
-          const auto mine = streamk_partials(d), ref = brute(sk, iters, G);
-          INFO("sk " << sk << " iters " << iters << " G " << G);
-          REQUIRE(mine.partials == ref.partials);
-          REQUIRE(mine.split_tiles == ref.split_tiles);
-          with_cuts += ref.partials > 0;
-          shortcut += (sk * iters) % G == 0 && ((sk * iters) / G) % iters == 0;
+  REQUIRE(features::slot_names().size() == 159);
+  REQUIRE(features::schema().columns.back() == "l_resident_timesteps");
+  for (const auto& n : features::slot_names()) REQUIRE(n.rfind("sk_", 0) != 0);
+  int split = 0, not_streamk = 0;
+  for (const auto& p : {make_problem(1000, 3000, 4096, transpose_t::N, transpose_t::T, 2),
+                        make_problem(4096, 4096, 512, transpose_t::N, transpose_t::N),
+                        make_problem(333, 2048, 8192, transpose_t::T, transpose_t::N)})
+    for (bool uso : {false, true}) {
+      auto pu                    = p;
+      pu.uniform_summation_order = uso;
+      const auto                cs = ranked_candidates(pu, hw, true);
+      std::vector<double>       f(features::slot_names().size());
+      std::vector<std::uint8_t> avail(f.size());
+      for (const auto& cand : cs.candidates) {
+        REQUIRE(features::extract(pu, hw, cand, f.data(), nullptr, avail.data()));
+        REQUIRE(std::all_of(avail.begin(), avail.end(), [](auto a) { return a == 1; }));
+        const auto& c = *cand.config;
+        const auto  I = gemm::compute_gemm_intermediates(pu, hw, c, cand.origami_latency);
+        const auto  L = gemm::compute_context_launch(pu, hw, c, I.context);
+        REQUIRE(L.final_grid == (c.stream_k > 0 ? I.context.num_wgs : 0));
+        const auto t = streamk::launch_terms(pu, L);
+        REQUIRE(f[ix("l_split_tiles_frac")] == t.split_tiles_frac);
+        REQUIRE(f[ix("l_fixup_bytes_over_output")] == t.fixup_bytes_over_output);
+        REQUIRE(f[ix("l_resident_timesteps")] == t.timesteps);
+        if (c.stream_k == 0) {
+          ++not_streamk;
+          REQUIRE(f[ix("l_split_tiles_frac")] == 0.0);
+          REQUIRE(f[ix("l_resident_timesteps")] == 0.0);
+          continue;
         }
-    REQUIRE(with_cuts > 50);
-    REQUIRE(shortcut > 20);
-  }
-  SECTION("parallel, dynamic, DP-only and non-Stream-K launches") {
-    auto d       = base;
-    d.tiles      = 40;
-    d.sk_tiles   = 3;
-    d.sk_split   = 3;
-    d.final_grid = 120;
-    d.reduction  = reduction_t::parallel;
-    auto pt      = streamk_partials(d);
-    REQUIRE(pt.partials == 120);
-    REQUIRE(pt.split_tiles == 40);
-    d.is_dynamic = true;
-    REQUIRE(streamk_partials(d).partials == 0);
-    d            = base;
-    d.tiles = d.sk_tiles = 10;
-    d.iters_per_tile     = 4;
-    d.final_grid         = 3;
-    d.dp_only            = true;
-    REQUIRE(streamk_partials(d).partials == 0);
-    d.dp_only    = false;
-    d.is_streamk = false;
-    REQUIRE(streamk_partials(d).partials == 0);
-  }
-  SECTION("columns") {
-    const auto hw = gfx950();
-    auto       cs = ranked_candidates(make_problem(4096, 4096, 4096, transpose_t::N, transpose_t::N),
-                                      hw, true);
-    const auto p  = make_problem(1000, 3000, 4096, transpose_t::N, transpose_t::T, 2);
-    const auto ix = [](const char* name) {
-      const int i = features::slot_index(name);
-      REQUIRE(i >= 0);
-      return static_cast<std::size_t>(i);
-    };
-    REQUIRE(features::slot_names().size() == 161);
-    REQUIRE(features::schema().columns.back() == "sk_timesteps_launched");
-    std::vector<double>       f(features::slot_names().size());
-    std::vector<std::uint8_t> avail(f.size());
-    candidate_t               cand = cs.candidates[0];
-
-    cand.fields.streamk.valid      = true;
-    cand.fields.streamk.is_streamk = false;
-    REQUIRE(features::extract(p, hw, cand, f.data(), nullptr, avail.data()));
-    REQUIRE(f[ix("sk_grid_over_tiles")] == 1.0);
-    for (const char* c : {"sk_split_tiles_frac", "sk_fixup_bytes_over_output",
-                          "sk_num_wgs_launched", "sk_timesteps_launched"})
-      REQUIRE(f[ix(c)] == 0.0);
-    REQUIRE(std::all_of(avail.begin(), avail.end(), [](auto a) { return a == 1; }));
-
-    cand.fields.streamk.valid = false;
-    REQUIRE(features::extract(p, hw, cand, f.data(), nullptr, avail.data()));
-    for (std::size_t j = 0; j < f.size(); ++j)
-      REQUIRE(avail[j] == (features::slot_names()[j].rfind("sk_", 0) == 0 ? 0 : 1));
-
-    // Static launch with cuts; bf16 D (2 bytes), occupancy 2.
-    auto& sk          = cand.fields.streamk;
-    sk                = base;
-    sk.tiles          = 10;
-    sk.sk_tiles       = 10;
-    sk.iters_per_tile = 4;
-    sk.final_grid     = 3;
-    sk.mt_x           = 256;
-    sk.mt_y           = 128;
-    sk.workspace_size_per_elem_c = 4;
-    sk.cu_occupancy              = 2;
-    sk.cu_count                  = 256;
-    REQUIRE(features::extract(p, hw, cand, f.data()));
-    REQUIRE(f[ix("sk_grid_over_tiles")] == 3.0 / 10.0);
-    REQUIRE(f[ix("sk_split_tiles_frac")] == 2.0 / 10.0);
-    REQUIRE(f[ix("sk_fixup_bytes_over_output")] ==
-            ((2.0 * 2.0) * (256.0 * 128.0 * 4.0)) / (1000.0 * 3000.0 * 2.0 * 2.0));
-    REQUIRE(f[ix("sk_num_wgs_launched")] == 3.0);
-    REQUIRE(f[ix("sk_timesteps_launched")] == 1.0 * 10.0 / 3.0);
-    // Waves count resident slots on the CU budget: smCountTarget if 0 < it < N_CU.
-    sk.final_grid = 1000;
-    sk.tiles = sk.sk_tiles = 1000;
-    for (auto [budget, slots] : std::vector<std::pair<size_t, double>>{
-             {0, 512.0}, {224, 448.0}, {256, 512.0}, {300, 512.0}}) {
-      auto pb    = p;
-      pb.num_cus = budget;
-      REQUIRE(features::extract(pb, hw, cand, f.data()));
-      INFO("budget " << budget);
-      REQUIRE(f[ix("sk_timesteps_launched")] == std::ceil(1000.0 / slots) * 1000.0 / 1000.0);
+        split += f[ix("l_split_tiles_frac")] > 0.0;
+        // Waves count resident slots on the CU budget.
+        const double slots = 256.0 * std::max(c.occupancy, 1);
+        const double grid  = static_cast<double>(I.context.num_wgs);
+        REQUIRE(f[ix("l_resident_timesteps")] ==
+                std::ceil(grid / slots) * static_cast<double>(I.context.num_output_tiles) / grid);
+      }
     }
-  }
+  REQUIRE(split > 0);
+  REQUIRE(not_streamk > 0);
 }
 
 TEST_CASE("OLC: features match the training feature builder", "[nn][olc]") {
-  // parity_reference_v4.csv / _v4_tf32.csv / _v4_fp8.csv: samples of the v4 reference vectors at
+  // parity_reference_v5.csv / _v5_tf32.csv / _v5_fp8.csv: samples of the v5 reference vectors at
   // this Origami (device hardware, recorded Origami top 10s, default CU budget, per-macro-tile
-  // non-temporal availability per config, each candidate's Stream-K launch from hipBLASLt's
-  // computeStreamKDecisions).
+  // non-temporal availability per config, the prediction row's per-element workspace and
+  // per-tile-extras capability, uniform summation order on).
   fs::path path;
-  SECTION("reference sample, BF16") { path = kData / "parity_reference_v4.csv"; }
-  SECTION("reference sample, TF32") { path = kData / "parity_reference_v4_tf32.csv"; }
-  SECTION("reference sample, FP8") { path = kData / "parity_reference_v4_fp8.csv"; }
+  SECTION("reference sample, BF16") { path = kData / "parity_reference_v5.csv"; }
+  SECTION("reference sample, TF32") { path = kData / "parity_reference_v5_tf32.csv"; }
+  SECTION("reference sample, FP8") { path = kData / "parity_reference_v5_fp8.csv"; }
   REQUIRE(fs::is_regular_file(path));
   const auto               t  = read_parity(path);
   const auto               hw = hardware_from_table(t);
@@ -1215,8 +1080,8 @@ TEST_CASE("OLC: tile-latency terms rebuild compute_tile_latency", "[nn][olc]") {
   };
 
   SECTION("reference vectors") {
-    for (const fs::path path : {kData / "parity_reference_v4.csv", kData / "parity_reference_v4_tf32.csv",
-                                kData / "parity_reference_v4_fp8.csv"}) {
+    for (const fs::path path : {kData / "parity_reference_v5.csv", kData / "parity_reference_v5_tf32.csv",
+                                kData / "parity_reference_v5_fp8.csv"}) {
       REQUIRE(fs::is_regular_file(path));
       const auto         t  = read_parity(path);
       const auto         hw = hardware_from_table(t);
@@ -1290,8 +1155,8 @@ namespace {
 const fs::path kShipped = olc_shipped_models();
 const fs::path kDigests = kData / "feature_digests.txt";
 
-constexpr const char* kParitySamples[] = {"parity_reference_v4.csv", "parity_reference_v4_tf32.csv",
-                                          "parity_reference_v4_fp8.csv"};
+constexpr const char* kParitySamples[] = {"parity_reference_v5.csv", "parity_reference_v5_tf32.csv",
+                                          "parity_reference_v5_fp8.csv"};
 
 // "<sample>\t<column>" -> sha256 of the column over the sample's rows, as the model reads it
 // (non-finite -> 0, -0 -> +0; binary64, little-endian, row order). Column pred_cycles is Origami's

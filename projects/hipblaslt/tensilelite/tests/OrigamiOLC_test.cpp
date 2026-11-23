@@ -1,9 +1,9 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Origami Learned Correction (OLC) in TensileLite: the Stream-K launch the hook passes the
-// re-rank, the switch, the dtype classes of logic files and problems, and the shipped models
-// against the built library.
+// Origami Learned Correction (OLC) in TensileLite: the Stream-K launch OLC reads from Origami's
+// context against the launch hipBLASLt takes, the switch, the dtype classes of logic files and
+// problems, and the shipped models against the built library.
 
 #include <Tensile/OrigamiOLC.hpp>
 
@@ -11,6 +11,7 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/hip/HipHardware.hpp>
+#include <origami/gemm_intermediates.hpp>
 #include <origami/hardware.hpp>
 #include <origami/nn/olc/load_validate.hpp>
 #include <origami/nn/nn.hpp>
@@ -73,111 +74,74 @@ namespace
         return p;
     }
 
-    void expectSameLaunch(origami::nn::olc::streamk_launch_t const&     sk,
-                          TensileLite::ContractionSolution const&           s,
-                          TensileLite::ContractionProblemGemm const&        p,
-                          TensileLite::hip::HipAMDGPU const&                device)
-    {
-        const auto d = s.computeStreamKDecisions(p, device);
-        EXPECT_TRUE(sk.valid);
-        EXPECT_TRUE(sk.is_streamk);
-        EXPECT_EQ(sk.final_grid, d.grid());
-        EXPECT_EQ(sk.tiles, d.tiles);
-        EXPECT_EQ(sk.sk_tiles, d.skTiles());
-        EXPECT_EQ(sk.sk_split, d.skSplit());
-        EXPECT_EQ(sk.reduction, d.reduction);
-        EXPECT_EQ(sk.is_dynamic, d.isDynamic);
-        EXPECT_EQ(sk.dp_only, d.dpOnly);
-        EXPECT_EQ(sk.iters_per_tile, std::max<size_t>(1, p.getItersPerTile(s.sizeMapping)));
-        EXPECT_EQ(sk.mt_x, 128u);
-        EXPECT_EQ(sk.mt_y, 128u);
-        EXPECT_EQ(sk.workspace_size_per_elem_c, 4u);
-        EXPECT_EQ(sk.cu_occupancy, 2);
-        EXPECT_EQ(sk.cu_count, 256u);
-    }
 } // namespace
 
-// The Stream-K launch the hook hands OLC is computeStreamKDecisions on the call's own
-// problem: it follows the problem's CU budget and workspace, as the launch does.
-TEST(OrigamiOLC, StreamKLaunchIsTheDecision)
+// OLC reads the Stream-K launch from Origami's context (gemm_intermediates_t::launch): with the
+// inputs the prediction row passes (the kernel's per-element workspace and per-tile-extras
+// capability, the call's CU budget and uniform summation order), it is the launch
+// computeStreamKDecisions takes.
+TEST(OrigamiOLC, ContextLaunchIsTheDecision)
 {
     namespace TL      = TensileLite;
     const auto device = makeDevice();
+    const auto& hw    = *device.analyticalHardware;
     TL::ContractionSolution s;
     makeStreamK(s);
-    int withPartials = 0, budgetMoved = 0, fellBack = 0;
-    for(auto [m, n, k] : std::vector<std::array<size_t, 3>>{{4096, 4224, 512},
-                                                           {1024, 1024, 8192},
-                                                           {512, 512, 16384},
-                                                           {2048, 1024, 4096},
-                                                           {1536, 1536, 2048},
-                                                           {768, 768, 12288},
-                                                           {3072, 3200, 1024},
-                                                           {256, 4096, 30000}})
-    {
-        SCOPED_TRACE(std::to_string(m) + "x" + std::to_string(n) + "x" + std::to_string(k));
-        auto       p    = makeProblem(m, n, k);
-        const auto full = TL::OrigamiOLC::streamKLaunch(s, p, device);
-        expectSameLaunch(full, s, p, device);
-        const bool partials = origami::nn::olc::streamk_partials(full).partials > 0;
-        withPartials += partials;
+    int withPartials = 0, compared = 0;
+    for(int uso : {0, 1})
+        for(int perTile : {0, 1})
+            for(int budget : {0, 224})
+                for(auto [m, n, k] : std::vector<std::array<size_t, 3>>{{4096, 4224, 512},
+                                                                       {1024, 1024, 8192},
+                                                                       {512, 512, 16384},
+                                                                       {2048, 1024, 4096},
+                                                                       {1536, 1536, 2048},
+                                                                       {768, 768, 12288},
+                                                                       {3072, 3200, 1024},
+                                                                       {256, 4096, 30000}})
+                {
+                    SCOPED_TRACE(std::to_string(m) + "x" + std::to_string(n) + "x"
+                                 + std::to_string(k) + " uso " + std::to_string(uso) + " perTile "
+                                 + std::to_string(perTile) + " budget " + std::to_string(budget));
+                    s.internalArgsSupport.perTileExtraIters = perTile != 0;
+                    auto p = TL::ContractionProblemGemm::GEMM(
+                        false, false, m, n, k, m, n, m, 1.0, false, 1);
+                    p.setComputeInputTypeA(rocisa::DataType::Float);
+                    p.setComputeInputTypeB(rocisa::DataType::Float);
+                    p.setWorkspaceSize(std::numeric_limits<size_t>::max());
+                    p.setParams().setUniformSummationOrder(uso);
+                    p.setParams().setSmCountTarget(budget);
+                    const auto d = s.computeStreamKDecisions(p, device);
 
-        // CU budget: smCountTarget reaches the grid selection.
-        p.setParams().setSmCountTarget(224);
-        const auto budget = TL::OrigamiOLC::streamKLaunch(s, p, device);
-        expectSameLaunch(budget, s, p, device);
-        budgetMoved += budget.final_grid != full.final_grid;
-
-        // No workspace: no partials fit, so the launch is data parallel (Origami's grid
-        // selection reads the workspace, and the workspace fallback backs it) -- what a launch
-        // given less workspace than the heuristic saw would run instead.
-        p.setParams().setSmCountTarget(0);
-        p.setWorkspaceSize(0);
-        const auto none = TL::OrigamiOLC::streamKLaunch(s, p, device);
-        expectSameLaunch(none, s, p, device);
-        EXPECT_EQ(origami::nn::olc::streamk_partials(none).partials, 0u);
-        if(partials)
-        {
-            EXPECT_EQ(none.final_grid, none.tiles);
-            ++fellBack;
-        }
-    }
+                    origami::problem_t op;
+                    op.size                    = {m, n, k};
+                    op.num_cus                 = static_cast<size_t>(budget);
+                    op.uniform_summation_order = uso != 0;
+                    origami::config_t c;
+                    c.mt                        = {128, 128, 64};
+                    c.mi                        = {16, 16, 32};
+                    c.occupancy                 = 2;
+                    c.workspace_size            = std::numeric_limits<size_t>::max();
+                    c.workspace_size_per_elem_c = 4;
+                    c.stream_k                  = 3;
+                    origami::tensile_params_t tp;
+                    tp.stream_k_per_tile_extra_iters = perTile != 0;
+                    c.backend                        = tp;
+                    const origami::gemm::context_t ctx(op, hw, c);
+                    const auto L = origami::gemm::compute_context_launch(op, hw, c, ctx);
+                    EXPECT_EQ(L.final_grid, d.grid());
+                    EXPECT_EQ(L.tiles, d.tiles);
+                    EXPECT_EQ(L.reduction, d.reduction);
+                    EXPECT_EQ(L.sk_tiles, d.skTiles());
+                    EXPECT_EQ(L.sk_split, d.skSplit());
+                    EXPECT_EQ(L.is_dynamic, d.isDynamic);
+                    EXPECT_EQ(L.iters_per_tile,
+                              std::max<size_t>(1, p.getItersPerTile(s.sizeMapping)));
+                    withPartials += origami::streamk::launch_partials(L).partials > 0;
+                    ++compared;
+                }
+    EXPECT_EQ(compared, 64);
     EXPECT_GT(withPartials, 0);
-    EXPECT_GT(budgetMoved, 0);
-    EXPECT_GT(fellBack, 0);
-}
-
-TEST(OrigamiOLC, StreamKLaunchOfOtherKernels)
-{
-    namespace TL      = TensileLite;
-    const auto device = makeDevice();
-    TL::ContractionSolution s;
-    makeStreamK(s, false);
-    const auto p  = makeProblem(4096, 4096, 4096);
-    const auto sk = TL::OrigamiOLC::streamKLaunch(s, p, device);
-    EXPECT_TRUE(sk.valid);
-    EXPECT_FALSE(sk.is_streamk);
-    EXPECT_EQ(sk.final_grid, 0u);
-    EXPECT_EQ(sk.mt_x, 128u);
-
-    // Not an AMDGPU: no launch to describe; a model that needs one falls back.
-    struct OtherHardware : TL::Hardware
-    {
-        std::string description() const override
-        {
-            return "other";
-        }
-        size_t id() const override
-        {
-            return 0;
-        }
-        std::string archName() const override
-        {
-            return "other";
-        }
-    } other;
-    makeStreamK(s);
-    EXPECT_FALSE(TL::OrigamiOLC::streamKLaunch(s, p, other).valid);
 }
 
 // Off unless HIPBLASLT_ORIGAMI_OLC=1: deserialization loads no model (nn_models.olc stays

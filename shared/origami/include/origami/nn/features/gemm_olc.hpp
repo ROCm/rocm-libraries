@@ -13,19 +13,19 @@
 #include "origami/origami_export.h"
 #include "origami/types.hpp"
 
-// Feature extractor of OLC: feature schema v4 (c6-4), one row of float64 columns
+// Feature extractor of OLC: feature schema v5 (c6-5), one row of float64 columns
 // per (problem, candidate) from Origami's own intermediates, the candidate's config and the
 // caller's kernel fields (olc::kernel_fields_t).
 namespace origami::nn::features::gemm_olc {
 
-constexpr std::size_t num_columns = 161;
+constexpr std::size_t num_columns = 159;
 
 constexpr const char* catalog_id         = "gemm_olc";
-constexpr const char* schema_id          = "origami-olc-gfx950-c6@4";
+constexpr const char* schema_id          = "origami-olc-gfx950-c6@5";
 constexpr const char* feature_names_hash =
-    "sha256:5435d0bc46ede3603afe949d528c25277909fb630ad21fd825cd6cb7fe12aded";
+    "sha256:c2eb5fa5276cb5926ce9c8d7a76e8ab12e0b5a165bb446ec668ff7436653f0f3";
 
-/// The compiled feature schema (c6-4, 161 columns: c6-3 plus the streamk_launch group).
+/// The compiled feature schema (c6-5, 159 columns: c6-3 plus the origami_launch group).
 ORIGAMI_EXPORT const olc::feature_schema_t& schema();
 
 /// Every column the extractor computes, in schema order.

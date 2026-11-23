@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "origami/origami_export.h"
-#include "origami/streamk.hpp"
 #include "origami/types.hpp"
 
 /**
@@ -72,20 +71,6 @@ struct deployment_t {
 };
 
 /**
- * @brief The Stream-K launch the caller makes for one candidate on this problem
- * (@see origami::streamk::launch_t). The streamk_launch columns (sk_*) are
- * origami::streamk::launch_terms of it; a model that uses them falls back with missing_feature
- * when valid is false.
- */
-using streamk_launch_t   = origami::streamk::launch_t;
-using streamk_partials_t = origami::streamk::partials_t;
-
-/// Partial tiles a launch writes (feature schema v4, streamk_partials; streamk::launch_partials).
-inline streamk_partials_t streamk_partials(const streamk_launch_t& launch) {
-  return origami::streamk::launch_partials(launch);
-}
-
-/**
  * @brief Kernel fields the caller knows that config_t does not carry.
  *
  * Filled from the solution's library record (hipBLASLt: ContractionSolution::sizeMapping),
@@ -95,7 +80,6 @@ inline streamk_partials_t streamk_partials(const streamk_launch_t& launch) {
 struct kernel_fields_t {
   int num_loads_coalesced_a = -1;  ///< sizeMapping.NumLoadsCoalescedA
   int num_loads_coalesced_b = -1;  ///< sizeMapping.NumLoadsCoalescedB
-  streamk_launch_t streamk{};      ///< per call: the launch on this problem
 };
 
 /// One candidate in Origami's ranked order.

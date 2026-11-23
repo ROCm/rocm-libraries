@@ -158,7 +158,7 @@ std::vector<origami::config_t> olc_configs() {
     const auto& s = specs[i];
     auto c = make_config(s.mt_m, s.mt_n, s.mt_k, s.mi_m, s.mi_n, s.mi_k, false, 8, s.occ, 0, 0, s.sk);
     c.workspace_size            = std::numeric_limits<size_t>::max();
-    c.workspace_size_per_elem_c = std::numeric_limits<size_t>::max();
+    c.workspace_size_per_elem_c = 4;
     c.index                     = i;
     auto& tp                    = c.tensile();
     tp.wave_group_m             = s.wg_m;
@@ -170,27 +170,10 @@ std::vector<origami::config_t> olc_configs() {
   return configs;
 }
 
-// One workgroup per resident slot, at most one per tile.
-olc::kernel_fields_t olc_fields(const origami::problem_t& p, const origami::config_t& c) {
+olc::kernel_fields_t olc_fields(const origami::problem_t&, const origami::config_t&) {
   olc::kernel_fields_t f;
   f.num_loads_coalesced_a = 1;
   f.num_loads_coalesced_b = 1;
-  auto& sk                    = f.streamk;
-  sk.valid                    = true;
-  sk.is_streamk               = c.stream_k != 0;
-  sk.mt_x                     = c.mt.m;
-  sk.mt_y                     = c.mt.n;
-  sk.workspace_size_per_elem_c = 4;
-  sk.cu_occupancy             = c.occupancy;
-  sk.cu_count                 = 256;
-  if (!sk.is_streamk) return f;
-  auto ceil_div     = [](std::uint64_t a, std::uint64_t b) { return (a + b - 1) / b; };
-  sk.tiles          = ceil_div(p.size.m, c.mt.m) * ceil_div(p.size.n, c.mt.n) * p.batch;
-  sk.iters_per_tile = std::max<std::uint64_t>(ceil_div(p.size.k, c.mt.k), 1);
-  sk.final_grid     = std::min<std::uint64_t>(sk.tiles, 256 * static_cast<std::uint64_t>(c.occupancy));
-  sk.sk_tiles       = sk.tiles;
-  sk.sk_split       = 1;
-  sk.reduction      = origami::reduction_t::tree;
   return f;
 }
 
@@ -255,14 +238,14 @@ TEST_CASE("NN: load_olc_model loads an ORIOLC model for its deployment", "[nn][o
   const auto handle = origami::nn::load_olc_model(b.path, b.target, b.identity, &status, &detail);
   REQUIRE(handle >= 0);
   REQUIRE(status == olc::status_t::ok);
-  REQUIRE(detail.rfind("loaded 300 trees, 161 features", 0) == 0);
+  REQUIRE(detail.rfind("loaded 300 trees, 159 features", 0) == 0);
 
   const origami::nn::model_info_t* info = origami::nn::model_info(handle);
   REQUIRE(info != nullptr);
   REQUIRE(info->backend == origami::nn::backend_id_t::olc_v1);
   REQUIRE(info->arch == "gfx950");
   REQUIRE(info->features.catalog_id == "gemm_olc");
-  REQUIRE(info->features.interaction_dim == 161);
+  REQUIRE(info->features.interaction_dim == 159);
 
   // Cached by path.
   REQUIRE(origami::nn::load_olc_model(b.path, b.target, b.identity) == handle);

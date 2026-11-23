@@ -122,30 +122,6 @@ namespace TensileLite
                                                  origami::nn::olc::library_diff_t& diff,
                                                  std::string&                         error);
 
-        /**
-         * The Stream-K launch of @p solution on @p problem, as the model's streamk_launch
-         * columns read it: solution.computeStreamKDecisions(problem, hardware), the snapshot
-         * solve() takes its Stream-K launch from (same reduction, grid and workspace-fallback
-         * helpers as resolveStreamKSettings), plus problem.getItersPerTile and the kernel's
-         * sizeMapping values. The problem is the one hipBLASLt builds for the call, so its CU
-         * budget (smCountTarget), workspace size, Stream-K tile-scheduling mode and
-         * uniform-summation-order flag are those of the call; the hardware is the device's,
-         * with its TENSILE_* persistent-grid settings.
-         *
-         * The launch takes the same decision as long as it runs this problem on this device
-         * with at least the workspace the problem carries here. hipBLASLt sets that to the
-         * heuristic's maximum workspace (HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES) and launches
-         * with the workspace passed to the matmul call: a smaller launch workspace can move the
-         * grid (Origami's grid selection reads it) or trigger the workspace fallback to a
-         * data-parallel grid, which the columns did not see.
-         *
-         * @return valid = false if the device is not an AMDGPU or the decision throws.
-         */
-        TENSILELITEHOST_EXPORT origami::nn::olc::streamk_launch_t
-                               streamKLaunch(ContractionSolution const&    solution,
-                                             ContractionProblemGemm const& problem,
-                                             Hardware const&               hardware);
-
         /// Per entry of a prediction row's solution list, the position of the first entry with
         /// the same solutionName.
         template <typename SolutionList>
@@ -170,9 +146,8 @@ namespace TensileLite
          * (origami::nn::olc::rerank_source_t). prepare() applies the row's own adjustment of
          * the analytical order (@p adjust) before the re-rank sees it. A row config is a
          * candidate if its solution passes the row's predicates (@p matches) and is the first of
-         * its name; its kernel fields are its sizeMapping's NumLoadsCoalesced and its Stream-K
-         * launch on this problem. The predicate verdicts it takes are kept for the row's walk
-         * (verdict()).
+         * its name; its kernel fields are its sizeMapping's NumLoadsCoalesced. The predicate
+         * verdicts it takes are kept for the row's walk (verdict()).
          */
         template <typename MyProblem, typename MySolution, typename Matches, typename Adjust>
         class RerankSource final : public origami::nn::olc::rerank_source_t
@@ -180,15 +155,11 @@ namespace TensileLite
         public:
             using SolutionList = std::vector<std::pair<int, std::shared_ptr<MySolution>>>;
 
-            RerankSource(MyProblem const&                  problem,
-                         Hardware const&                   hardware,
-                         SolutionList const&               solutions,
+            RerankSource(SolutionList const&               solutions,
                          std::vector<std::uint32_t> const& nameIds,
                          Matches const&                    matches,
                          Adjust const&                     adjust)
-                : m_problem(problem)
-                , m_hardware(hardware)
-                , m_solutions(solutions)
+                : m_solutions(solutions)
                 , m_nameIds(nameIds)
                 , m_matches(matches)
                 , m_adjust(adjust)
@@ -238,7 +209,6 @@ namespace TensileLite
                 acceptedNames().push_back(name);
                 fields.num_loads_coalesced_a = solution->sizeMapping.NumLoadsCoalescedA;
                 fields.num_loads_coalesced_b = solution->sizeMapping.NumLoadsCoalescedB;
-                fields.streamk               = streamKLaunch(*solution, m_problem, m_hardware);
                 return true;
             }
 
@@ -311,8 +281,6 @@ namespace TensileLite
                 return n;
             }
 
-            MyProblem const&                  m_problem;
-            Hardware const&                   m_hardware;
             SolutionList const&               m_solutions;
             std::vector<std::uint32_t> const& m_nameIds;
             Matches const&                    m_matches;

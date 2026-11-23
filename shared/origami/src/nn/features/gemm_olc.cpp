@@ -1,11 +1,11 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Feature extractor of OLC: feature schema v4 (c6-4, 161 float64
+// Feature extractor of OLC: feature schema v5 (c6-5, 159 float64
 // columns; f_nt_gate reads the per-macro-tile non-temporal availability on config_t; the
-// streamk_launch columns sk_* are streamk::launch_terms of the caller's Stream-K launch,
-// kernel_fields_t::streamk).
-// Every column outside streamk_launch is a raw problem_t / config_t / kernel field or one of
+// origami_launch columns l_* are streamk::launch_terms of the Stream-K launch Origami's context
+// models, gemm_intermediates_t::launch_terms).
+// Every column is a raw problem_t / config_t / kernel field or one of
 // Origami's intermediates (gemm::compute_gemm_intermediates, one evaluation per candidate); the
 // training feature builder reads the same intermediates through the Python bindings. The only
 // arithmetic here is the five log columns (monotone transforms, each language's own log) and the
@@ -24,14 +24,12 @@
 
 #include "origami/gemm.hpp"
 #include "origami/gemm_intermediates.hpp"
-#include "origami/streamk.hpp"
 
 namespace origami::nn::features::gemm_olc {
 
 using olc::candidate_t;
 using olc::feature_schema_t;
 using olc::kernel_fields_t;
-using olc::streamk_launch_t;
 
 // Extractor slots, in schema order.
 #define ORIGAMI_OLC_FEATURES(X) \
@@ -191,11 +189,9 @@ using olc::streamk_launch_t;
   X(v2_mem_l2_share)              \
   X(v2_mem_dram_share)            \
   X(v2_lds_over_mfma)             \
-  X(sk_grid_over_tiles)           \
-  X(sk_split_tiles_frac)          \
-  X(sk_fixup_bytes_over_output)   \
-  X(sk_num_wgs_launched)          \
-  X(sk_timesteps_launched)
+  X(l_split_tiles_frac)           \
+  X(l_fixup_bytes_over_output)    \
+  X(l_resident_timesteps)
 
 namespace {
 
@@ -218,9 +214,9 @@ constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
 }  // namespace
 
 const feature_schema_t& schema() {
-  static const feature_schema_t v4{schema_id, feature_names_hash,
+  static const feature_schema_t v5{schema_id, feature_names_hash,
                                    std::vector<std::string>(kNames, kNames + kNumFeatures)};
-  return v4;
+  return v5;
 }
 
 const std::vector<std::string>& slot_names() {
@@ -436,23 +432,10 @@ bool extract(const problem_t&   p,
   f[v2_mem_dram_share]            = I.mem_dram_share;
   f[v2_lds_over_mfma]             = I.lds_over_mfma;
 
-  // ---- v4: the Stream-K launch (schema v4 streamk_launch) -------------------------------------
-  {
-    const streamk_launch_t& sk = kf.streamk;
-    if (!sk.valid) {
-      if (available)
-        for (int j : {sk_grid_over_tiles, sk_split_tiles_frac, sk_fixup_bytes_over_output,
-                      sk_num_wgs_launched, sk_timesteps_launched})
-          available[j] = 0;
-    } else {
-      const streamk::launch_terms_t t = streamk::launch_terms(p, sk);
-      f[sk_grid_over_tiles]         = t.grid_over_tiles;
-      f[sk_split_tiles_frac]        = t.split_tiles_frac;
-      f[sk_fixup_bytes_over_output] = t.fixup_bytes_over_output;
-      f[sk_num_wgs_launched]        = t.num_wgs;
-      f[sk_timesteps_launched]      = t.timesteps;
-    }
-  }
+  // ---- v5: the Stream-K launch of the context (schema v5 origami_launch) ------------------------
+  f[l_split_tiles_frac]        = I.launch_terms.split_tiles_frac;
+  f[l_fixup_bytes_over_output] = I.launch_terms.fixup_bytes_over_output;
+  f[l_resident_timesteps]      = I.launch_terms.timesteps;
   return true;
 }
 

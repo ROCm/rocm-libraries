@@ -223,8 +223,7 @@ namespace TensileLite
                                        MySolution,
                                        decltype(matches),
                                        decltype(keepOrder)>
-                rerankSource(
-                    problem, hardware, solution_list, solution_name_ids, matches, keepOrder);
+                rerankSource(solution_list, solution_name_ids, matches, keepOrder);
 
             auto considerSolution = [&](std::shared_ptr<MySolution> const& solution) {
                 const int known = rerankSource.verdict(solution.get());

@@ -333,44 +333,6 @@ namespace TensileLite
             return handle;
         }
 
-        origami::nn::olc::streamk_launch_t streamKLaunch(ContractionSolution const&    solution,
-                                                           ContractionProblemGemm const& problem,
-                                                           Hardware const&               hardware)
-        {
-            origami::nn::olc::streamk_launch_t sk;
-            AMDGPU const* gpu = dynamic_cast<AMDGPU const*>(&hardware);
-            if(gpu == nullptr)
-                return sk;
-            auto const& sm               = solution.sizeMapping;
-            sk.is_streamk                = sm.isStreamK();
-            sk.mt_x                      = sm.macroTile.x;
-            sk.mt_y                      = sm.macroTile.y;
-            sk.workspace_size_per_elem_c = sm.workspaceSizePerElemC;
-            sk.cu_occupancy              = sm.CUOccupancy;
-            sk.cu_count                  = static_cast<std::uint64_t>(gpu->computeUnitCount);
-            if(sk.is_streamk)
-            {
-                try
-                {
-                    const auto d      = solution.computeStreamKDecisions(problem, hardware);
-                    sk.final_grid     = d.grid();
-                    sk.tiles          = d.tiles;
-                    sk.sk_tiles       = d.skTiles();
-                    sk.sk_split       = d.skSplit();
-                    sk.reduction      = d.reduction;
-                    sk.is_dynamic     = d.isDynamic;
-                    sk.dp_only        = d.dpOnly;
-                    sk.iters_per_tile = std::max<size_t>(1, problem.getItersPerTile(sm));
-                }
-                catch(std::exception const&)
-                {
-                    return sk;
-                }
-            }
-            sk.valid = true;
-            return sk;
-        }
-
         void setLoadLoggers(Logger accepted, Logger refused)
         {
             acceptedSlot() = std::move(accepted);
