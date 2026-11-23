@@ -45,6 +45,7 @@
 #  include <thrust/system/hip/detail/execution_policy.h>
 #  include <thrust/system/hip/detail/parallel_for.h>
 #  include <thrust/system/hip/detail/util.h>
+#  include <thrust/tuple.h>
 #  include <thrust/zip_function.h>
 
 #  include _THRUST_LIBCXX_INCLUDE(functional)
