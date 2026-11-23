@@ -944,17 +944,24 @@ TEST_F(TestCudnnCompatibilityV8BuilderLowering, LayerNormNormalizedDimCountFromS
     };
     // A full-rank scale normalizes from its first non-1 dim on, else the scale's rank. [1, C, 1, 1]
     // is cuDNN's layer-norm layout: [B*S, H, 1, 1] activations, here x [2, 3, 1, 1]; hipDNN's
-    // backward node rejects any count under 3 for it. A lower-rank scale is right-aligned
-    // (padded with leading 1s) before that rule: [1, 5] on x [2, 3, 4, 5] pads to [1, 1, 1, 5],
-    // so it normalizes only the last dim, not the 1-valued dim it was padded with. A
-    // rank-reduced scale with no dimension other than 1 anywhere is ambiguous and falls back
-    // to its own rank instead: [1, 1, 1] on x [1, 1, 1, 1] -> 3, not the full-rank default of 1.
+    // backward node rejects any count under 3 for it. A lower-rank scale equal to x's own
+    // trailing dims takes that rank directly (a hipDNN extension develop already had):
+    // [3, 4, 4] on x [2, 3, 4, 4] -> 3; [1, 14, 14] on x [2, 1, 14, 14] -> 3 with batch-only
+    // saved statistics [2]. Any other lower-rank scale is right-aligned (padded with
+    // leading 1s) before the first-non-1 rule: [1, 5] on x [2, 3, 4, 5] pads to
+    // [1, 1, 1, 5], normalizing only the last dim, not the 1-valued dim it was padded
+    // with; [1, 1] on x [2, 3, 4, 1] pads to [1, 1, 1, 1] and finds no non-1 dim either,
+    // so it also normalizes only the last dim. An all-ones rank-reduced scale equal to
+    // x's own trailing all-ones dims is the same equal-trailing-dims rule: [1, 1, 1] on
+    // x [1, 1, 1, 1] -> 3, not the full-rank default of 1.
     for(const DimCase& item : {DimCase{{1, 1, 1, 4}, {2, 3, 4, 1}, 1},
                                DimCase{{1, 1, 4, 4}, {2, 3, 1, 1}, 2},
                                DimCase{{1, 3, 4, 4}, {2, 1, 1, 1}, 3},
                                DimCase{{1, 3, 1, 1}, {2, 1, 1, 1}, 3, {2, 3, 1, 1}},
                                DimCase{{3, 4, 4}, {2}, 3},
+                               DimCase{{1, 14, 14}, {2}, 3, {2, 1, 14, 14}},
                                DimCase{{1, 5}, {2, 3, 4, 1}, 1, {2, 3, 4, 5}},
+                               DimCase{{1, 1}, {2, 3, 4}, 1, {2, 3, 4, 1}},
                                DimCase{{1, 1, 1}, {1}, 3, {1, 1, 1, 1}}})
     {
         SCOPED_TRACE(std::to_string(item.scale.size()) + "-D scale, "

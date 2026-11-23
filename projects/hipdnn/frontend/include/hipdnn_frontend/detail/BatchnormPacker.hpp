@@ -64,8 +64,9 @@ inline Error createBatchnormOperation(
                                       tensorDescs,
                                       "batchnorm PREV_RUNNING_VARIANCE"));
     // cuDNN sets the momentum (exponential moving-average factor) on the operation only when
-    // the previous running mean and variance are both present; without them momentum has
-    // nothing to weight, and the backend rejects a momentum-without-running-stats build.
+    // the previous running mean is present; hipDNN checks the previous running mean and
+    // variance, which gives the same result because validation requires all running
+    // statistics to be provided together.
     if(attributes.get_prev_running_mean() && attributes.get_prev_running_variance())
     {
         HIPDNN_CHECK_ERROR(

@@ -480,14 +480,14 @@ TEST(TestLayerNormNode, InferPropertiesSetsNormalizedDimCountWithAlternativeLayo
     EXPECT_EQ(node.attributes.get_normalized_dim_count(), 3);
 }
 
-TEST(TestLayerNormNode, InferPropertiesSetsNormalizedDimCountForAmbiguousAllOnesScale)
+TEST(TestLayerNormNode, InferPropertiesSetsNormalizedDimCountForRankReducedAllOnesScale)
 {
-    // x and scale all-ones, scale rank below rank(x): the right-aligned scan finds no
-    // non-1 dim anywhere in the scale, so normalizedDimCount falls back to the scale's own
-    // rank (ambiguous case) rather than the full-rank default of 1. Mirrors test_sdk's
-    // layer-norm backward graphs (x [1,1,1,1], scale [1,1,1]), which develop accepted via
-    // k = scale rank; the PR's right-aligned rule previously defaulted this case to k = 1
-    // and rejected the (also rank-reduced) saved-stats tensors.
+    // x and scale all-ones, scale rank below rank(x): the scale equals x's own trailing
+    // dims (both all 1s), so normalizedDimCount takes the scale's rank directly (rule 2 of
+    // deriveLayernormNormalizedDimCount). Mirrors test_sdk's layer-norm backward graphs (x
+    // [1,1,1,1], scale [1,1,1]), which develop accepted via k = scale rank; the PR's
+    // right-aligned-only rule previously defaulted this case to k = 1 and rejected the
+    // (also rank-reduced) saved-stats tensors.
     auto x = makeTensor({1, 1, 1, 1});
 
     auto scale = makeTensor({1, 1, 1});
@@ -1173,6 +1173,39 @@ TEST(TestLayerNormNode, InferPropertiesRightAlignsLowerRankScaleWithLeadingOnes)
 
     err = node.pre_validate_node();
     EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestLayerNormNode, PreValidateAcceptsRankReducedScaleEqualToXTrailingDimsWithBatchStats)
+{
+    // x [2, 1, 14, 14] with scale/bias [1, 14, 14]: the scale equals x's own trailing 3
+    // dims, so normalizedDimCount takes the scale's rank directly (rule 2), k = 3, and the
+    // mean/inv_variance [2] (batch dims only) are valid. The right-aligned-only rule
+    // previously inferred k = 2 (the first non-1 padded dim is at index 2) and rejected
+    // these rank-1 saved statistics.
+    auto attrs = makeShapedAttrs({2, 1, 14, 14}, {1, 14, 14}, {2});
+
+    const GraphAttributes graphAttrs;
+    const LayerNormNode node(std::move(attrs), graphAttrs);
+    auto err = node.pre_validate_node();
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestLayerNormNode, PreValidateAcceptsLowerRankScaleCoveringOnlyXUnitDim)
+{
+    // x [2, 3, 4, 1]: a scale of [1, 1] does not equal x's trailing 2 dims ([4, 1]), so
+    // rule 2 does not apply; right-aligning to [1, 1, 1, 1] and scanning for a non-1 dim
+    // (rule 3) finds none, so k stays at its default of 1 and the graph is accepted, the
+    // same as the already-accepted full-rank [1] and [1, 1, 1, 1] scales.
+    for(const std::vector<int64_t>& scaleDims :
+        {std::vector<int64_t>{1, 1}, std::vector<int64_t>{1}, std::vector<int64_t>{1, 1, 1, 1}})
+    {
+        auto attrs = makeShapedAttrs({2, 3, 4, 1}, scaleDims);
+        const GraphAttributes graphAttrs;
+        const LayerNormNode node(std::move(attrs), graphAttrs);
+        auto err = node.pre_validate_node();
+        EXPECT_EQ(err.code, error_code_t::OK)
+            << "scale rank " << scaleDims.size() << ": " << err.err_msg;
+    }
 }
 
 TEST(TestLayerNormNode, PreValidateFailsChannelsFirstScale)

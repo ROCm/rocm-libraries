@@ -1085,17 +1085,33 @@ TEST(TestLayernormBackwardNode, PreValidateNodeRejectsAllOnesScaleOnNonUnitX)
     EXPECT_EQ(error.code, error_code_t::INVALID_VALUE) << error.err_msg;
 }
 
-TEST(TestLayernormBackwardNode, PreValidateNodeAcceptsAmbiguousAllOnesRankReducedScale)
+TEST(TestLayernormBackwardNode, PreValidateNodeAcceptsRankReducedAllOnesScale)
 {
-    // x and scale all-ones, scale rank below rank(x): the right-aligned scan finds no
-    // non-1 dim anywhere in the scale, so normalizedDimCount falls back to the scale's own
-    // rank (ambiguous case) rather than the full-rank default of 1. Mirrors test_sdk's
-    // layer-norm backward graphs (x [1,1,1,1], scale [1,1,1], mean/inv_variance [1]), which
-    // develop accepted via k = scale rank = 3; the PR's right-aligned rule previously
-    // defaulted this case to k = 1 and rejected the rank-1 saved-stats tensors ("Mean tensor
-    // rank must be 3 (batch dims of x) or 4 (rank of x), got 1").
+    // x and scale all-ones, scale rank below rank(x): the scale equals x's own trailing
+    // dims (both all 1s), so normalizedDimCount takes the scale's rank directly (rule 2 of
+    // deriveLayernormNormalizedDimCount). Mirrors test_sdk's layer-norm backward graphs (x
+    // [1,1,1,1], scale [1,1,1], mean/inv_variance [1]), which develop accepted via
+    // k = scale rank = 3; the PR's right-aligned-only rule previously defaulted this case
+    // to k = 1 and rejected the rank-1 saved-stats tensors ("Mean tensor rank must be 3
+    // (batch dims of x) or 4 (rank of x), got 1").
     const GraphAttributes graphAttributes;
     const LayernormBackwardNode node(createShapedAttributes({1, 1, 1, 1}, {1, 1, 1}, {1}),
+                                     graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
+}
+
+TEST(TestLayernormBackwardNode,
+     PreValidateNodeAcceptsRankReducedScaleEqualToXTrailingDimsWithBatchStats)
+{
+    // x [2, 1, 14, 14] with scale/dscale/dbias [1, 14, 14]: the scale equals x's own
+    // trailing 3 dims, so normalizedDimCount takes the scale's rank directly (rule 2),
+    // k = 3, and the saved mean/inv_variance [2] (batch dims only) are valid. The
+    // right-aligned-only rule previously inferred k = 2 (the first non-1 padded dim is at
+    // index 2) and rejected these rank-1 saved statistics.
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(createShapedAttributes({2, 1, 14, 14}, {1, 14, 14}, {2}),
                                      graphAttributes);
 
     auto error = node.pre_validate_node();
