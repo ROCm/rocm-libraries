@@ -25,10 +25,11 @@
 //
 // Generic spmm with a blocked ELL matrix that has no stored blocks (the
 // product is zero, so C = beta * C) or a few stored blocks, including a row
-// count that the block dimension does not divide, i64 indices in base one and
-// a C without padding, with a transposed or batched blocked ELL product that
-// spmm rejects, with a blocked ELL matrix built by dense_to_sparse, and with
-// formats spmm does not support.
+// count that the block dimension does not divide (also with a block wider
+// than the kernel tile), i64 indices in base one and a C without padding,
+// with a transposed or batched blocked ELL product that spmm rejects, with a
+// blocked ELL matrix built by dense_to_sparse, and with formats spmm does not
+// support.
 //
 #include "unit_test_extra_common.hpp"
 
@@ -184,7 +185,8 @@ namespace
     void run_bell_product(rocsparse_handle handle, const BellRun& r)
     {
         SCOPED_TRACE("rows=" + std::to_string(r.rows) + " kb=" + std::to_string(r.kb)
-                     + " n=" + std::to_string(r.n) + " cols=" + std::to_string(r.cols)
+                     + " bd=" + std::to_string(r.bd) + " n=" + std::to_string(r.n)
+                     + " cols=" + std::to_string(r.cols)
                      + " order=" + std::to_string(static_cast<int>(r.order))
                      + " device=" + std::to_string(r.device));
         SCOPED_TRACE("itype=" + std::to_string(static_cast<int>(r.itype))
@@ -293,6 +295,28 @@ TEST_F(ExtraBell, stored_blocks_i64_base_one_tight_ldc)
                 if(HasFatalFailure())
                     return;
             }
+}
+
+TEST_F(ExtraBell, partial_block_row_wider_than_tile)
+{
+    // A block dimension of 33 is wider than the widest kernel tile (32), so a
+    // thread handles rows r and r + 32 of its block row. With 41 rows the last
+    // block row holds 8 rows, and on the second pass every thread has to skip
+    // its row. C has no padding: a write to a row past the last row of C lands
+    // in the next column of C (column order) or in the guard after C.
+    for(rocsparse_order order : {rocsparse_order_column, rocsparse_order_row})
+    {
+        BellRun r;
+        r.rows    = 41;
+        r.bd      = 33;
+        r.kb      = 2;
+        r.cols    = r.bd;
+        r.order   = order;
+        r.ldc_pad = 0;
+        run_bell_product(handle, r);
+        if(HasFatalFailure())
+            return;
+    }
 }
 
 TEST_F(ExtraBell, transpose_is_not_implemented_on_every_stage)
