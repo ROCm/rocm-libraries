@@ -743,8 +743,12 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                         const index_t row0      = is_a ? cluster_m0 : cluster_n0;
                         const index_t unclamped = row0 + integer_divide_nonnegative<lines>(index);
                         const index_t row = edge ? min(unclamped, (is_a ? M : N) - 1) : unclamped;
-                        const index_t offset =
+                        // A partial tile's lines past the end of the row are clamped to its last
+                        // byte: past the last row's they are past the end of the buffer.
+                        const index_t k_offset =
                             k_byte + integer_modulo_nonnegative<lines>(index) * line;
+                        const index_t offset =
+                            Traits::kHasTail ? min(k_offset, packed_k - 1) : k_offset;
                         const index_t row_bytes = DramRowBytes<is_a>();
                         const uint8_t* base     = Bytes(DramWindow<is_a>());
                         if constexpr(wide)

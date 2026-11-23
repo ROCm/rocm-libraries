@@ -25,6 +25,11 @@ using Fp4C4x4      = Fp4Big<fp8_t, Tu<4, 4>, Shape<false, false, 0>>;
 using Fp4C4x4Tail1 = Fp4Big<fp8_t, Tu<4, 4>, Shape<false, false, 1>>;
 using Fp4C4x4Tail3 = Fp4Big<fp8_t, Tu<4, 4>, Shape<false, false, 3>>;
 
+// FP4 128x128x1024 with a one-step K tail.
+template <typename Tuning>
+using Fp4K1024 =
+    Kernel<pk_fp4_t, pk_fp4_t, fp8_t, 128, 128, 1024, 2, 2, 32, Tuning, Shape<false, false, 1>>;
+
 TEST(MxGemmTdmScheduled, Fp4EvenTiles) { check<Fp4C4x4>(1024, 1024, 2048); }
 TEST(MxGemmTdmScheduled, Fp4LongK) { check<Fp4C4x4>(1024, 1024, 65536); }
 TEST(MxGemmTdmScheduled, Fp4OddTiles)
@@ -190,19 +195,19 @@ TEST(MxGemmTdmScheduled, KTailAfterLoop)
         check<Kernel<fp8_t, bf8_t, fp8_t, 128, 128, 256, 2, 2, 16, Tu<1, 1, 4, false, false>, S>>(
             1000, 1000, K);
     }
-    using Fp4K1024 = Kernel<pk_fp4_t,
-                            pk_fp4_t,
-                            fp8_t,
-                            128,
-                            128,
-                            1024,
-                            2,
-                            2,
-                            32,
-                            Tu<1, 1>,
-                            Shape<false, false, 1>>;
-    check<Fp4K1024>(512, 512, 3 * 1024 + 128);
-    check<Fp4K1024>(512, 512, 4 * 1024 + 128);
+    check<Fp4K1024<Tu<1, 1>>>(512, 512, 3 * 1024 + 128);
+    check<Fp4K1024<Tu<1, 1>>>(512, 512, 4 * 1024 + 128);
+}
+
+// FP4 tile_k 1024: two GL2 lines per row. With a K tail of 512 or less, the tail's second line
+// starts past the end of its row, and of the last row of A and B past the end of the buffer: the
+// GL2 prefetch clamps it to the row's last byte.
+TEST(MxGemmTdmScheduled, Gl2PrefetchKTail)
+{
+    check<Fp4K1024<Tu<1, 1>>>(512, 512, 2 * 1024 + 32);
+    check<Fp4K1024<Tu<1, 1>>>(512, 512, 3 * 1024 + 32);
+    check<Fp4K1024<Tu<2, 2>>>(512, 512, 4 * 1024 + 128);
+    check<Fp4K1024<Tu<2, 2>>>(512, 512, 5 * 1024 + 32);
 }
 
 TEST(MxGemmTdmScheduled, Edges)

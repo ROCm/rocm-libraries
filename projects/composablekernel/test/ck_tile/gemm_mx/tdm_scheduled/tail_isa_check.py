@@ -12,6 +12,8 @@ and checks their ISA:
 - dscnt: at every tensor_load_to_lds, every ds_load still in flight was issued after the barrier
   before the refill's own one. A refill overwrites a buffer once its reads have drained, while
   the next tile's reads, issued after the publish barrier, may stay in flight.
+- gl2_clamp: with a K tail, every GL2 prefetch address in the K loop goes through a v_min: a
+  partial tile's data lines are clamped to the end of the row, as its scale lines are.
 - vgpr: with --baseline REV, each kernel's VGPR count and scratch next to REV's pipeline headers;
   more scratch than the baseline fails.
 
@@ -77,8 +79,12 @@ class Instance:
     source_order: bool = False
     single_tail: bool = False
 
-    def post_loop_refill_free(self):
-        return not (self.single_tail and self.tail_steps)
+    def checks(self):
+        """The check() options of the instance's kernels."""
+        return dict(
+            post_loop_refill_free=not (self.single_tail and self.tail_steps),
+            gl2_clamp=self.tail_steps > 0,
+        )
 
     def tail_nums(self):
         return ["Full"] if self.single_tail else ["One", "Two"]
@@ -227,9 +233,86 @@ def check_dscnt(path):
     return failures
 
 
-def check(asm, post_loop_refill_free=True):
+REG = re.compile(
+    r"\b([vs])(\d+)(?:\s*/\*v(\d+)\*/)?|\b([vs])\[(\d+):(\d+)\](?:\s*/\*v\[(\d+):(\d+)\]\*/)?"
+)
+# Instructions whose first operand is a register they write.
+WRITES = re.compile(r"^\s*(v_|s_|ds_load|global_load|buffer_load|scratch_load)")
+NO_DEST = re.compile(
+    r"^\s*s_(cmp|bitcmp|cbranch|branch|wait|barrier|nop|set|sleep|endpgm|delay|setprio|"
+    r"cluster|prefetch|dcache|icache|ttrace|sendmsg)"
+)
+CLAMP = re.compile(r"^\s*[vs]_(min|med3|min3)\w*\s")
+
+
+def regs(operands):
+    """The VGPRs and SGPRs ("v12", "s4") of an operand string; with VGPR MSBs the real VGPR is in
+    the comment."""
+    found = set()
+    for m in REG.finditer(operands):
+        if m.group(1):
+            found.add(f"{m.group(1)}{m.group(3) or m.group(2)}")
+        else:
+            lo, hi = (
+                (m.group(7), m.group(8)) if m.group(7) else (m.group(5), m.group(6))
+            )
+            found.update(f"{m.group(4)}{r}" for r in range(int(lo), int(hi) + 1))
+    return found
+
+
+def split_operands(line):
+    """(mnemonic, first operand, the other operands) of an instruction line."""
+    text = line.split(";")[0].strip()
+    mnemonic, _, rest = text.partition(" ")
+    depth, i = 0, 0
+    for i, c in enumerate(rest):
+        depth += c == "["
+        depth -= c == "]"
+        if c == "," and depth == 0:
+            return mnemonic, rest[:i], rest[i + 1 :]
+    return mnemonic, rest, ""
+
+
+def address_clamped(path, at):
+    """Whether a min (v_ or s_min, v_med3, v_min3) computes part of the address of the
+    instruction at path[at]: a backward slice over the registers it reads."""
+    _, first, rest = split_operands(path[at][1])
+    wanted = regs(first + "," + rest)
+    for i in range(at - 1, -1, -1):
+        line = path[i][1]
+        if not wanted:
+            return False
+        if not WRITES.match(line) or NO_DEST.match(line):
+            continue
+        _, dst, src = split_operands(line)
+        written = regs(dst) & wanted
+        if not written:
+            continue
+        if CLAMP.match(line):
+            return True
+        wanted = (wanted - written) | regs(src)
+    return False
+
+
+def check_gl2_clamp(pre, loop_body):
+    """Failures of a kernel with a K tail: a GL2 prefetch in the K loop whose address no v_min
+    clamps (the data lines' offset to the end of the row). Edge instances clamp the row with a
+    v_min too, so only instances without edges tell the clamps apart."""
+    path = pre + loop_body + loop_body
+    failures = []
+    for at in range(len(pre) + len(loop_body), len(path)):
+        num, line = path[at]
+        if "global_prefetch" in line and not address_clamped(path, at):
+            failures.append(
+                f"line {num}: GL2 prefetch address not clamped: {line.strip()}"
+            )
+    return failures
+
+
+def check(asm, post_loop_refill_free=True, gl2_clamp=False):
     """The failures of a kernel's ISA. post_loop_refill_free is false when a tile that refills
-    follows the loop: TailNumber::Full's odd tile, which feeds the K tail."""
+    follows the loop: TailNumber::Full's odd tile, which feeds the K tail. gl2_clamp: every GL2
+    prefetch address in the K loop goes through a v_min."""
     body, start = kernel_body(asm)
     numbered = [(start + i + 1, line) for i, line in enumerate(body)]
     loop = k_loop(body)
@@ -252,6 +335,8 @@ def check(asm, post_loop_refill_free=True):
         for f in check_dscnt(path):
             if f not in failures:
                 failures.append(f)
+    if gl2_clamp and loop_body:
+        failures += check_gl2_clamp(pre, loop_body)
     return failures
 
 
@@ -328,7 +413,7 @@ def main():
             for job in jobs:
                 inst, tail_num = job
                 asm = new[job].result()
-                failures = check(asm, inst.post_loop_refill_free())
+                failures = check(asm, **inst.checks())
                 vgprs, scratch = kernel_stats(asm)
                 line = (
                     f"{inst.name:32} {tail_num:4} vgprs {vgprs:3} scratch {scratch:4}"
@@ -336,7 +421,7 @@ def main():
                 base_failures = []
                 if overlay:
                     base_asm = base[job].result()
-                    base_failures = check(base_asm, inst.post_loop_refill_free())
+                    base_failures = check(base_asm, **inst.checks())
                     base_vgprs, base_scratch = kernel_stats(base_asm)
                     line += (
                         f"  baseline vgprs {base_vgprs:3} scratch {base_scratch:4}"
