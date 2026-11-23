@@ -947,13 +947,36 @@ namespace
         return q;
     }
 
-    // C is D: the drivers get the arrays of D as those of C. The group rows have to come out as
-    // alpha * A * B + beta * D, the other rows as D.
+    // Which arrays of D the drivers get as those of C. The columns are always shared.
+    enum class alias_layout
+    {
+        all, // C is D
+        values, // C has a row pointer of its own, with the offsets of D
+        pattern // C has values of its own
+    };
+
+    std::string to_string(alias_layout layout)
+    {
+        switch(layout)
+        {
+        case alias_layout::all:
+            return "C is D";
+        case alias_layout::values:
+            return "C shares the columns and values of D";
+        case alias_layout::pattern:
+            return "C shares the row pointer and columns of D";
+        }
+        return "";
+    }
+
+    // C over arrays of D. The group rows of C have to come out as alpha * A * B + beta * D, the
+    // other rows as they were; D changes only where it shares its values with C.
     template <typename I, typename J, typename T>
     void check_values_alias(rocsparse_handle handle, value_stage stage, bool tiled = false)
     {
         const T alpha = value<T>(2, 1);
         const T beta  = value<T>(3, -1);
+        const T fill  = value<T>(-7, 2);
 
         device_vector<T> d_alpha(std::vector<T>{alpha}), d_beta(std::vector<T>{beta});
         ASSERT_TRUE(d_alpha.ptr && d_beta.ptr);
@@ -966,7 +989,9 @@ namespace
                 const auto              ref   = reference(p, true, alpha, beta);
                 const std::vector<bool> group = p.in_group();
 
-                std::vector<T> want = p.D.val;
+                // The values of C when it starts from those of D, and when it starts from fill.
+                std::vector<T> want_shared = p.D.val;
+                std::vector<T> want_own(p.D.val.size(), fill);
                 for(J r = 0; r < p.m; ++r)
                 {
                     const I begin = p.D.ptr[r] - p.D.base;
@@ -976,54 +1001,76 @@ namespace
                     {
                         for(I k = begin; k < end; ++k)
                         {
-                            want[k] = ref[r].vals[k - begin];
+                            want_shared[k] = ref[r].vals[k - begin];
+                            want_own[k]    = ref[r].vals[k - begin];
                         }
                     }
                 }
 
-                for(const pass_setting& s : pass_settings(tiled, p.n))
+                for(const alias_layout layout :
+                    {alias_layout::all, alias_layout::values, alias_layout::pattern})
                 {
-                    for(const rocsparse_pointer_mode mode :
-                        {rocsparse_pointer_mode_host, rocsparse_pointer_mode_device})
+                    for(const pass_setting& s : pass_settings(tiled, p.n))
                     {
-                        SCOPED_TRACE("n " + std::to_string(p.n) + ", " + to_string(s) + ", "
-                                     + to_string(p.b)
-                                     + (mode == rocsparse_pointer_mode_host ? ", host scalars"
-                                                                            : ", device scalars"));
+                        for(const rocsparse_pointer_mode mode :
+                            {rocsparse_pointer_mode_host, rocsparse_pointer_mode_device})
+                        {
+                            SCOPED_TRACE("n " + std::to_string(p.n) + ", " + to_string(s) + ", "
+                                         + to_string(p.b) + ", " + to_string(layout)
+                                         + (mode == rocsparse_pointer_mode_host
+                                                ? ", host scalars"
+                                                : ", device scalars"));
 
-                        device_csr<I, J, T> A(p.A), B(p.B), D(p.D);
-                        device_vector<J>    d_perm(p.perm), d_offset(std::vector<J>{p.offset});
-                        auto                workspace = make_workspace<I, J>(handle, s, p.n);
+                            device_csr<I, J, T> A(p.A), B(p.B), D(p.D);
+                            device_vector<J>    d_perm(p.perm), d_offset(std::vector<J>{p.offset});
+                            device_vector<I>    d_ptr_C(p.D.ptr);
+                            device_vector<T>    d_val_C(std::vector<T>(p.D.val.size(), fill));
+                            auto                workspace = make_workspace<I, J>(handle, s, p.n);
 
-                        const bool on_device = mode == rocsparse_pointer_mode_device;
+                            const I* ptr_C
+                                = layout == alias_layout::values ? d_ptr_C.ptr : D.ptr.ptr;
+                            T* val_C = layout == alias_layout::pattern ? d_val_C.ptr : D.val.ptr;
 
-                        ASSERT_EQ(rocsparse_set_pointer_mode(handle, mode),
-                                  rocsparse_status_success);
+                            const bool on_device = mode == rocsparse_pointer_mode_device;
 
-                        const rocsparse_status status = run_values(handle,
-                                                                   workspace,
-                                                                   p,
-                                                                   stage,
-                                                                   true,
-                                                                   on_device ? d_alpha.ptr : &alpha,
-                                                                   on_device ? d_beta.ptr : &beta,
-                                                                   d_offset,
-                                                                   d_perm,
-                                                                   A,
-                                                                   B,
-                                                                   D,
-                                                                   D.ptr.ptr,
-                                                                   D.ind.ptr,
-                                                                   D.val.ptr);
+                            ASSERT_EQ(rocsparse_set_pointer_mode(handle, mode),
+                                      rocsparse_status_success);
 
-                        ASSERT_EQ(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host),
-                                  rocsparse_status_success);
-                        ASSERT_EQ(status, rocsparse_status_success);
-                        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-                        expect_tiles(workspace, s);
+                            const rocsparse_status status
+                                = run_values(handle,
+                                             workspace,
+                                             p,
+                                             stage,
+                                             true,
+                                             on_device ? d_alpha.ptr : &alpha,
+                                             on_device ? d_beta.ptr : &beta,
+                                             d_offset,
+                                             d_perm,
+                                             A,
+                                             B,
+                                             D,
+                                             ptr_C,
+                                             D.ind.ptr,
+                                             val_C);
 
-                        expect_same(to_host(D.ind), p.D.ind, "columns of C = D");
-                        expect_same(to_host(D.val), want, "values of C = D");
+                            ASSERT_EQ(
+                                rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host),
+                                rocsparse_status_success);
+                            ASSERT_EQ(status, rocsparse_status_success);
+                            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+                            expect_tiles(workspace, s);
+
+                            expect_same(to_host(D.ind), p.D.ind, "columns of C = D");
+                            if(layout == alias_layout::pattern)
+                            {
+                                expect_same(to_host(d_val_C), want_own, "values of C");
+                                expect_same(to_host(D.val), p.D.val, "values of D");
+                            }
+                            else
+                            {
+                                expect_same(to_host(D.val), want_shared, "values of C = D");
+                            }
+                        }
                     }
                 }
             }

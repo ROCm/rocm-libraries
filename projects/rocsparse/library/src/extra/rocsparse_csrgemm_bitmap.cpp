@@ -963,8 +963,8 @@ namespace rocsparse
     }
 
     // Clears the pass's rows of C and adds both terms into them through its rank index. A row
-    // walked in tiles is cleared by its first tile only. When C is D, the rows are scaled by beta
-    // instead of cleared, and only the product is added.
+    // walked in tiles is cleared by its first tile only. When C shares its values with D, the rows
+    // are scaled by beta instead of cleared, and only the product is added.
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, typename I, typename J, typename T>
     rocsparse_status csrgemm_bitmap_values_pass(rocsparse_handle                      handle,
                                                 const csrgemm_bitmap_workspace<I, J>& workspace,
@@ -987,10 +987,10 @@ namespace rocsparse
         const int64_t entry_first = layout.h_entry_offset[pass.base];
         const int64_t entry_last  = layout.h_entry_offset[pass.base + pass.count];
 
-        // C is D, which rocsparse_spgemm allows when both have the same
-        // sparsity pattern: an entry of D is then in its place in C already.
-        const bool in_place
-            = D.row_ptr != nullptr && D.row_ptr == csr_row_ptr_C && values.val_D == csr_val_C;
+        // C shares its values with D, which rocsparse_spgemm allows when both have
+        // the same sparsity pattern: an entry of D is then in its place in C
+        // already, and clearing C would erase it before it is added.
+        const bool in_place = D.row_ptr != nullptr && values.val_D == csr_val_C;
 
         if(pass.first_tile && in_place)
         {

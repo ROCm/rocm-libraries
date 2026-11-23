@@ -694,7 +694,7 @@ namespace rocsparse
     }
 
     // Scales the group's rows of C by beta. Takes the place of the clear when C
-    // is D, whose rows are then already in their places in C.
+    // shares its values with D, whose entries are then already in their places in C.
     template <uint32_t BLOCKSIZE, typename I, typename J, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrgemm_bitmap_scale_val_kernel(J slot_base,
