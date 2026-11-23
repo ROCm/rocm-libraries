@@ -311,32 +311,6 @@ namespace
     }
 
     template <typename T>
-    T* upload(const std::vector<T>& host)
-    {
-        if(host.empty())
-            return nullptr;
-        T* p = nullptr;
-        EXPECT_EQ(hipMalloc(&p, host.size() * sizeof(T)), hipSuccess);
-        if(p == nullptr)
-            return nullptr;
-        EXPECT_EQ(hipMemcpy(p, host.data(), host.size() * sizeof(T), hipMemcpyHostToDevice),
-                  hipSuccess);
-        return p;
-    }
-
-    struct device_free
-    {
-        void* p = nullptr;
-        ~device_free()
-        {
-            if(p)
-            {
-                (void)hipFree(p);
-            }
-        }
-    };
-
-    template <typename T>
     void expect_coo_public(rocsparse_handle                  handle,
                            rocsparse_int                     m,
                            rocsparse_int                     n,
@@ -348,15 +322,11 @@ namespace
                            rocsparse_storage_mode            storage,
                            rocsparse_data_status             expected)
     {
-        const rocsparse_int  nnz = static_cast<rocsparse_int>(rows.size());
-        std::vector<T>       vals(static_cast<size_t>(nnz), scalar<T>(1));
-        device_free          row_mem{upload(rows)};
-        device_free          col_mem{upload(cols)};
-        device_free          val_mem{upload(vals)};
-        const T*             val   = static_cast<const T*>(val_mem.p);
-        const rocsparse_int* row   = static_cast<const rocsparse_int*>(row_mem.p);
-        const rocsparse_int* col   = static_cast<const rocsparse_int*>(col_mem.p);
-        size_t               bytes = 0;
+        const rocsparse_int          nnz = static_cast<rocsparse_int>(rows.size());
+        device_vector<rocsparse_int> row(rows);
+        device_vector<rocsparse_int> col(cols);
+        device_vector<T>             val(std::vector<T>(rows.size(), scalar<T>(1)));
+        size_t                       bytes = 0;
         ASSERT_EQ(
             coo_buffer<T>(handle, m, n, nnz, val, row, col, base, type, uplo, storage, &bytes),
             rocsparse_status_success);
@@ -425,7 +395,6 @@ namespace
         std::vector<int>      cols;
         rocsparse_data_status sorted;
         rocsparse_data_status unsorted;
-        bool                  general_only;
     };
 
     // Sorted storage is ordered by row, then by column, with no repeated coordinate.
@@ -434,15 +403,15 @@ namespace
     const std::vector<coo_case>& general_coo_cases()
     {
         static const std::vector<coo_case> cases = {
-            {"valid", {0, 0, 1}, {0, 1, 1}, k_ok, k_ok, true},
-            {"duplicate", {0, 0, 1}, {0, 0, 1}, k_dup, k_dup, true},
-            {"duplicate_last", {0, 1, 1}, {0, 1, 1}, k_dup, k_dup, true},
-            {"descending_row", {1, 0, 0}, {1, 0, 1}, k_sort, k_ok, true},
-            {"descending_col", {0, 0, 1}, {1, 0, 1}, k_sort, k_ok, true},
-            {"duplicate_unsorted", {0, 1, 0}, {0, 1, 0}, k_sort, k_dup, true},
-            {"duplicate_row_separated", {0, 0, 0}, {0, 1, 0}, k_sort, k_dup, true},
-            {"duplicate_col_separated", {0, 1, 0}, {0, 0, 0}, k_sort, k_dup, true},
-            {"invalid_index", {-1, 0, 1}, {0, 1, 1}, k_idx, k_idx, true},
+            {"valid", {0, 0, 1}, {0, 1, 1}, k_ok, k_ok},
+            {"duplicate", {0, 0, 1}, {0, 0, 1}, k_dup, k_dup},
+            {"duplicate_last", {0, 1, 1}, {0, 1, 1}, k_dup, k_dup},
+            {"descending_row", {1, 0, 0}, {1, 0, 1}, k_sort, k_ok},
+            {"descending_col", {0, 0, 1}, {1, 0, 1}, k_sort, k_ok},
+            {"duplicate_unsorted", {0, 1, 0}, {0, 1, 0}, k_sort, k_dup},
+            {"duplicate_row_separated", {0, 0, 0}, {0, 1, 0}, k_sort, k_dup},
+            {"duplicate_col_separated", {0, 1, 0}, {0, 0, 0}, k_sort, k_dup},
+            {"invalid_index", {-1, 0, 1}, {0, 1, 1}, k_idx, k_idx},
         };
         return cases;
     }
@@ -451,23 +420,23 @@ namespace
     {
         if(uplo == rocsparse_fill_mode_lower)
         {
-            return {{"valid", {0, 1, 1}, {0, 0, 1}, k_ok, k_ok, false},
-                    {"duplicate", {1, 1, 1}, {0, 0, 1}, k_dup, k_dup, false},
-                    {"duplicate_last", {0, 1, 1}, {0, 0, 0}, k_dup, k_dup, false},
-                    {"descending_row", {1, 0}, {0, 0}, k_sort, k_ok, false},
-                    {"descending_col", {1, 1}, {1, 0}, k_sort, k_ok, false},
-                    {"duplicate_separated", {1, 0, 1}, {0, 0, 0}, k_sort, k_dup, false},
-                    {"duplicate_row_separated", {1, 1, 1}, {0, 1, 0}, k_sort, k_dup, false},
-                    {"wrong_triangle", {0}, {1}, k_fill, k_fill, false}};
+            return {{"valid", {0, 1, 1}, {0, 0, 1}, k_ok, k_ok},
+                    {"duplicate", {1, 1, 1}, {0, 0, 1}, k_dup, k_dup},
+                    {"duplicate_last", {0, 1, 1}, {0, 0, 0}, k_dup, k_dup},
+                    {"descending_row", {1, 0}, {0, 0}, k_sort, k_ok},
+                    {"descending_col", {1, 1}, {1, 0}, k_sort, k_ok},
+                    {"duplicate_separated", {1, 0, 1}, {0, 0, 0}, k_sort, k_dup},
+                    {"duplicate_row_separated", {1, 1, 1}, {0, 1, 0}, k_sort, k_dup},
+                    {"wrong_triangle", {0}, {1}, k_fill, k_fill}};
         }
-        return {{"valid", {0, 0, 1}, {0, 1, 1}, k_ok, k_ok, false},
-                {"duplicate", {0, 0, 1}, {1, 1, 1}, k_dup, k_dup, false},
-                {"duplicate_last", {0, 0, 0}, {0, 1, 1}, k_dup, k_dup, false},
-                {"descending_row", {1, 0}, {1, 1}, k_sort, k_ok, false},
-                {"descending_col", {0, 0}, {1, 0}, k_sort, k_ok, false},
-                {"duplicate_separated", {0, 1, 0}, {1, 1, 1}, k_sort, k_dup, false},
-                {"duplicate_row_separated", {0, 0, 0}, {0, 1, 0}, k_sort, k_dup, false},
-                {"wrong_triangle", {1}, {0}, k_fill, k_fill, false}};
+        return {{"valid", {0, 0, 1}, {0, 1, 1}, k_ok, k_ok},
+                {"duplicate", {0, 0, 1}, {1, 1, 1}, k_dup, k_dup},
+                {"duplicate_last", {0, 0, 0}, {0, 1, 1}, k_dup, k_dup},
+                {"descending_row", {1, 0}, {1, 1}, k_sort, k_ok},
+                {"descending_col", {0, 0}, {1, 0}, k_sort, k_ok},
+                {"duplicate_separated", {0, 1, 0}, {1, 1, 1}, k_sort, k_dup},
+                {"duplicate_row_separated", {0, 0, 0}, {0, 1, 0}, k_sort, k_dup},
+                {"wrong_triangle", {1}, {0}, k_fill, k_fill}};
     }
 
     template <typename T>
@@ -494,10 +463,6 @@ namespace
                                       : triangle_coo_cases(uplo);
                         for(const auto& item : cases)
                         {
-                            if(item.general_only && !general)
-                                continue;
-                            if(!item.general_only && general)
-                                continue;
                             SCOPED_TRACE(std::string(type_name) + " " + item.name + " type "
                                          + std::to_string(type) + " uplo " + std::to_string(uplo)
                                          + " base " + std::to_string(b) + " storage "
@@ -538,11 +503,9 @@ namespace
                            rocsparse_storage_mode            storage,
                            rocsparse_data_status             expected)
     {
-        device_free          col_mem{upload(cols)};
-        device_free          val_mem{upload(vals)};
-        const T*             dval  = static_cast<const T*>(val_mem.p);
-        const rocsparse_int* dcol  = static_cast<const rocsparse_int*>(col_mem.p);
-        size_t               bytes = 0;
+        device_vector<rocsparse_int> dcol(cols);
+        device_vector<T>             dval(vals);
+        size_t                       bytes = 0;
         ASSERT_EQ(ell_buffer<T>(handle,
                                 m,
                                 n,
@@ -580,10 +543,8 @@ namespace
     void ell_pack(const std::vector<std::vector<int>>& rows,
                   int                                  width,
                   int                                  base,
-                  std::vector<I>&                      cols,
-                  std::vector<float>&                  vals_unused)
+                  std::vector<I>&                      cols)
     {
-        (void)vals_unused;
         const int64_t m = static_cast<int64_t>(rows.size());
         cols.assign(static_cast<size_t>(m * width), static_cast<I>(-1));
         for(int64_t row = 0; row < m; ++row)
@@ -610,9 +571,8 @@ namespace
     {
         SCOPED_TRACE(std::string(type_name) + " " + name + " base " + std::to_string(base_of(base))
                      + " storage " + std::to_string(storage) + (spmat ? " spmat" : " api"));
-        std::vector<I>     cols;
-        std::vector<float> ignore;
-        ell_pack<I>(rows, width, base_of(base), cols, ignore);
+        std::vector<I> cols;
+        ell_pack<I>(rows, width, base_of(base), cols);
         std::vector<T> vals(cols.size(), scalar<T>(1));
         if(!spmat)
         {
@@ -748,8 +708,8 @@ namespace
         device_vector<T>             dval(vals);
         descr_guard                  descr;
         hyb_guard                    hyb;
-        ASSERT_EQ(descr.p == nullptr, false);
-        ASSERT_EQ(hyb.p == nullptr, false);
+        ASSERT_NE(descr.p, nullptr);
+        ASSERT_NE(hyb.p, nullptr);
         ASSERT_EQ(rocsparse_set_mat_index_base(descr.p, base), rocsparse_status_success);
         ASSERT_EQ(
             csr2hyb<T>(handle, m, n, descr.p, dval.ptr, drow.ptr, dcol.ptr, hyb.p, ell_width, part),
@@ -1076,8 +1036,7 @@ namespace
     {
         const I            m = static_cast<I>(rows.size());
         std::vector<I>     cols;
-        std::vector<float> ignore;
-        ell_pack<I>(rows, static_cast<int>(width), base_of(base), cols, ignore);
+        ell_pack<I>(rows, static_cast<int>(width), base_of(base), cols);
         device_vector<I> dcol(cols);
 
         rocsparse::check_matrix_ell_workspace ws;
@@ -1414,7 +1373,10 @@ TEST_F(CheckMatrixDefects, EmptyAndSingle)
 }
 
 // The kernels run more than one block of 256 threads, so pairs are planted at the
-// first and last entries and across the boundary between entries 255 and 256.
+// first and last entries and across the boundary between entries 255 and 256 of the
+// sorted input. The unsorted duplicate pass scans a sorted copy, so the same pairs cover
+// those threads in unsorted storage too; the shuffled input adds a pair whose entries
+// are far apart in storage.
 TEST_F(CheckMatrixDefects, CooScale)
 {
     const coo_coords sorted   = scale_coo_sorted();
@@ -1444,13 +1406,7 @@ TEST_F(CheckMatrixDefects, CooScale)
         expect_coo_scale(handle, "shuffled", unsorted, base, s_mode, k_sort);
         expect_coo_scale(handle, "shuffled", unsorted, base, u_mode, k_ok);
         expect_coo_scale(
-            handle, "shuffled_dup_first", with_copy(unsorted, 0, 1), base, u_mode, k_dup);
-        expect_coo_scale(
-            handle, "shuffled_dup_last", with_copy(unsorted, last - 1, last), base, u_mode, k_dup);
-        expect_coo_scale(
-            handle, "shuffled_dup_boundary", with_copy(unsorted, 255, 256), base, u_mode, k_dup);
-        expect_coo_scale(
-            handle, "shuffled_dup_first_last", with_copy(unsorted, 0, last), base, u_mode, k_dup);
+            handle, "shuffled_dup_far_apart", with_copy(unsorted, 0, last), base, u_mode, k_dup);
     }
 }
 
@@ -1593,30 +1549,13 @@ TEST_F(CheckMatrixDefects, EllUnsortedBatchFitsSortLaunch)
     }
 }
 
-// The helpers allocate the queried size plus a canary and check that the canary is
-// unchanged. This runs every format and storage mode, with sizes above one block.
-TEST_F(CheckMatrixDefects, TemporaryBufferCanary)
+// A HYB matrix whose ELL and COO parts both span more than one block of 256 threads.
+TEST_F(CheckMatrixDefects, HybScale)
 {
-    const coo_coords sorted = scale_coo_sorted();
     for(auto base : {rocsparse_index_base_zero, rocsparse_index_base_one})
         for(auto storage : {rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted})
         {
-            expect_coo_scale(handle, "valid", sorted, base, storage, k_ok);
-            expect_coo_scale(handle, "dup", with_copy(sorted, 255, 256), base, storage, k_dup);
-            expect_ell_scale(handle, "valid", scale_ell_sorted(), base, storage, k_ok);
             expect_hyb_scale(handle, "valid", false, base, storage, k_ok);
             expect_hyb_scale(handle, "dup_coo_tail", true, base, storage, k_dup);
-            expect_coo_public<float>(handle,
-                                     2,
-                                     2,
-                                     shift_base({0, 1, 0}, base_of(base), false),
-                                     shift_base({0, 1, 0}, base_of(base), false),
-                                     base,
-                                     rocsparse_matrix_type_general,
-                                     rocsparse_fill_mode_lower,
-                                     storage,
-                                     storage == rocsparse_storage_mode_sorted ? k_sort : k_dup);
-            expect_ell<float, int32_t>(
-                handle, "s", "small", 2, 4, 3, {{2, -1, 2}, {0, 1, 3}}, base, storage, k_ok, false);
         }
 }
