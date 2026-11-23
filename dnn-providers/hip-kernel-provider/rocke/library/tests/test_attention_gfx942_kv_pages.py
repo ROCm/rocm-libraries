@@ -26,7 +26,7 @@ from kernels.gfx942.attention_tiled_2d import (
 )
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.runtime.device_array import DeviceArray
-from rocke.runtime.hip_module import get_device_free_memory
+from rocke.runtime.hip_module import get_device_total_memory
 from rocke.tests.gpu import current_device_arch_in
 
 from ._attention_paged_reference import (
@@ -220,9 +220,9 @@ def test_i64_decode_reads_past_2gib(gfx942):
     first_past = 2**31 // block_bytes
     num_blocks = first_past + 128
     pages = seqlen // _BLOCK_SIZE
-    free = get_device_free_memory()
-    if free is None or free < 2 * num_blocks * block_bytes + (1 << 30):
-        pytest.skip("needs about 5 GiB of free device memory")
+    total = get_device_total_memory()
+    if total is None or total < 2 * num_blocks * block_bytes + (1 << 30):
+        pytest.skip("needs a device with about 5 GiB of memory")
     rng = np.random.default_rng(2)
     shape = (num_blocks, _BLOCK_SIZE, num_kv_heads, _HEAD_SIZE)
     k, v = np.zeros(shape, np.uint16), np.zeros(shape, np.uint16)

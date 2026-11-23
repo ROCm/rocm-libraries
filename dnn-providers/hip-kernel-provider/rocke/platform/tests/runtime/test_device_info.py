@@ -160,3 +160,20 @@ def test_gpu_free_memory_shrinks_by_an_allocation() -> None:
     during = hip_module.get_device_free_memory()
     del held
     assert during is not None and during <= before - (256 << 20)
+
+
+def test_gpu_total_memory_is_fixed_while_an_allocation_is_held() -> None:
+    """hipMemGetInfo's total bytes stay the same while a 256 MiB buffer is held,
+    and bound the free bytes."""
+    from rocke.runtime.launcher import DeviceMem
+    from rocke.tests.gpu import current_device_arch
+
+    current_device_arch()
+    before = hip_module.get_device_total_memory()
+    assert before is not None and before > 0
+    held = DeviceMem(256 << 20)
+    during = hip_module.get_device_total_memory()
+    free = hip_module.get_device_free_memory()
+    del held
+    assert during == before
+    assert free is not None and free <= before - (256 << 20)

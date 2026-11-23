@@ -30,7 +30,7 @@ import numpy as np
 import pytest
 
 from rocke.core.arch import generic_arch_from_target_id
-from rocke.runtime.hip_module import get_device_arch
+from rocke.runtime.hip_module import get_device_arch, get_device_total_memory
 from rocke.tests.lanes import skip_needing_arch
 
 _ARCH = generic_arch_from_target_id(get_device_arch() or "")
@@ -748,17 +748,6 @@ _FAR_CASES = {
 _FAR_BYTES = (4 << 30) + (512 << 20)  # per cache
 
 
-def _free_device_bytes():
-    """Free memory of the current device (hipMemGetInfo)."""
-    from rocke.runtime.hip_module import _resolve_hip
-
-    free, total = ctypes.c_size_t(), ctypes.c_size_t()
-    status = _resolve_hip().hipMemGetInfo(ctypes.byref(free), ctypes.byref(total))
-    if status != 0:
-        pytest.fail(f"hipMemGetInfo failed with status {status}")
-    return free.value
-
-
 @pytest.mark.gpu
 @_NEEDS_RDNA
 @pytest.mark.parametrize("case", sorted(_FAR_CASES))
@@ -834,8 +823,9 @@ def test_paged_cache_past_4gib(case):
     page_bytes = page_elems * np.dtype(kv_np).itemsize
     n_pages = -(-_FAR_BYTES // page_bytes)
     # Two caches past 4 GiB each, plus room for the rest of the case.
-    if _free_device_bytes() < 2 * n_pages * page_bytes + (1 << 30):
-        pytest.skip("needs about 10 GiB of free device memory")
+    total = get_device_total_memory()
+    if total is None or total < 2 * n_pages * page_bytes + (1 << 30):
+        pytest.skip("needs a device with about 10 GiB of memory")
     pages = [-(-n // ps) for n in lens_k]
     # Physical pages: a few low ones, then pages past 2 GiB and past 4 GiB,
     # shuffled across the sequences.

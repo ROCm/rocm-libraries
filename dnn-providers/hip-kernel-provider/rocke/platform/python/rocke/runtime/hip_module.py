@@ -396,16 +396,34 @@ def get_device_num_cus(device: int = 0) -> Optional[int]:
     return int(v.value) if rc == 0 and v.value > 0 else None
 
 
-def get_device_free_memory() -> int | None:
-    """Free bytes on HIP's current device (``hipMemGetInfo``), or ``None`` if the
-    runtime cannot be queried. Torch-free twin of ``torch.cuda.mem_get_info``'s
-    first value, e.g. for a test that needs a large allocation to fit."""
+def _device_memory_info() -> tuple[int, int] | None:
+    """``(free, total)`` bytes of HIP's current device (``hipMemGetInfo``), or
+    ``None`` if the runtime cannot be queried."""
     free, total = ctypes.c_size_t(0), ctypes.c_size_t(0)
     try:
         rc = _hipMemGetInfo(ctypes.byref(free), ctypes.byref(total))
     except (AttributeError, OSError):
         return None
-    return int(free.value) if rc == 0 else None
+    return (int(free.value), int(total.value)) if rc == 0 else None
+
+
+def get_device_free_memory() -> int | None:
+    """Free bytes on HIP's current device (``hipMemGetInfo``), or ``None`` if the
+    runtime cannot be queried. Torch-free twin of ``torch.cuda.mem_get_info``'s
+    first value. It changes with what every process on the device holds, so it
+    is no test for whether a device can run a case (see
+    :func:`get_device_total_memory`)."""
+    info = _device_memory_info()
+    return None if info is None else info[0]
+
+
+def get_device_total_memory() -> int | None:
+    """Total bytes of HIP's current device (``hipMemGetInfo``), or ``None`` if the
+    runtime cannot be queried. It is fixed for the device, so a test that needs a
+    large allocation decides on it whether the device can run the case and gets
+    the same answer whatever else runs on the device."""
+    info = _device_memory_info()
+    return None if info is None else info[1]
 
 
 # Per-device ``clusterLaunch`` answers; a device's capability does not change

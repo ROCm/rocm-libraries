@@ -25,7 +25,7 @@ import numpy as np
 import pytest
 from kernels import UnifiedAttentionProblem
 from kernels.common import attention_unified as au
-from rocke.runtime.hip_module import get_device_free_memory
+from rocke.runtime.hip_module import get_device_total_memory
 from rocke.tests.gpu import current_device_arch_in
 
 from ._attention_paged_reference import round_to_half
@@ -70,9 +70,9 @@ def _problem(dtype: str, head_size: int, block_size: int, num_kv_blocks: int = 0
 @pytest.fixture
 def gfx942_with_room():
     current_device_arch_in(("gfx942",), "the gfx942 cfvst past-2 GiB check")
-    free = get_device_free_memory()
-    if free is None or free < _GPU_BYTES_NEEDED:
-        pytest.skip(f"needs {_GPU_BYTES_NEEDED >> 30} GiB of free device memory")
+    total = get_device_total_memory()
+    if total is None or total < _GPU_BYTES_NEEDED:
+        pytest.skip(f"needs a device with {_GPU_BYTES_NEEDED >> 30} GiB of memory")
 
 
 def _clean_launch_caches():
