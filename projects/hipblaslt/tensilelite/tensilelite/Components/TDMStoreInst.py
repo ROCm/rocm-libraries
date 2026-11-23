@@ -20,17 +20,21 @@ TDMStoreInst for a kernel, not which paths it covers.
 
 A path is a store block of the store-width cascade generateBetaModules builds, one per vector width,
 and turning TDMStoreInst on only changes which store each block emits: it adds, drops and moves no
-block, label or branch. With AdaptiveGemm=0 the narrowest masked block is the only one narrower than
+block, label or branch of the cascade. The one addition is in a MultipleBufferSingleKernel kernel with
+MbskPrefetchMethod 0, whose reduced tile globalWriteElements then generates twice, through the TDM block
+and through buffer_store, behind a compare of the runtime GSU and a branch to the copy
+(tdmStoreRejectReason). With AdaptiveGemm=0 the narrowest masked block is the only one narrower than
 the store vector width, which every M-edge workgroup takes. With AdaptiveGemm=1 an M-edge workgroup
 takes the widest block whose vector width divides SizeI, so the masked block of the store vector
 width also stores the M-edge tiles of a SizeI it divides. At store vector width 1 the narrowest masked
 block is the one of the store vector width, so EdgeM and EdgeN are that same single block.
 
-The block runs in the phases of GlobalWriteBatchWriter. With beta != 0, _prolog of the first batch
-calls emitTDMStoreSetup and emitTDMStoreLoadC, so the C tile is in LDS before any element reads it,
-and every element reads its C with emitTDMStoreLoadCElement in place of the buffer load. With
-beta == 0, _emitNonatomicAdd calls emitTDMStoreSetup for the first batch. _emitNonatomicAdd stages
-the D of every batch with emitTDMStoreStaging and calls emitTDMStoreFlush after the last batch.
+The block runs in the phases of GlobalWriteBatchWriter. _prolog of the first batch calls
+emitTDMStoreSetup and, with beta != 0, emitTDMStoreLoadC, so the C tile is in LDS before any element
+reads it, and every element reads its C with emitTDMStoreLoadCElement in place of the buffer load,
+except in the edge blocks of a kernel with per-element outputs beyond C and D, which keep their buffer
+loads of C. _emitNonatomicAdd stages the D of every batch with emitTDMStoreStaging; emitTDMStoreFlush
+runs after the last batch, or after the CompactLoopStore loop.
 generateBetaModules picks the blocks with tdmStoreBlocks; Solution checks a configuration
 with tdmStoreRejectReason and its store vectors with tdmStoreVectorRejectReason, and reserves the staged tile with
 tdmStoreLdsBytes, at _TDMStoreLdsOffset after the epilogue vectors, over the main-loop buffers when
@@ -82,10 +86,11 @@ def tdmStoreRejectReason(state):
 
   Solution rejects TDMStoreInst without the HasTDM assembler capability before it asks this. The TDM
   block stages the converted D tile in LDS and stores it once, after the last store batch, with one
-  tensor_store_from_lds per wave. That needs fp32 D, fp64 or complex float D from accumulators of their type, int32 or
-  int8 D from int32 accumulators, or bf16, fp16, fp8 or bf8 D converted from fp32 accumulators, written directly to D, by a GlobalSplitU=1 kernel, by
-  the workgroup that reduces a MultipleBufferSingleKernel tile (below), or by a persistent kernel,
-  which stores each tile it completes, and no LDS data kept from one persistent tile to the next. A StreamKAtomic
+  tensor_store_from_lds per wave. That needs fp32 D, fp64, complex float or complex double D from accumulators of their
+  type, int32 or int8 D from int32 accumulators, or bf16, fp16, fp8 or bf8 D converted from fp32 accumulators. The D
+  tile must be written directly to D, by a GlobalSplitU=1 kernel, by the workgroup that reduces a
+  MultipleBufferSingleKernel tile (below), or by a persistent kernel, which stores each tile it completes, and no LDS
+  data may be kept from one persistent tile to the next. A StreamKAtomic
   kernel adds its tiles to D with atomics, so none of its blocks would store through the TDM block.
   With PrefetchAcrossPersistent the next tile's loads write the main-loop buffers during the epilogue,
   so the staged tile lies after them (_TDMStoreOverMainLoop is False) and its LDS accesses carry the
@@ -375,8 +380,10 @@ def emitTDMStoreLoadCElement(gwb, addrCalc, data, vc0) -> Module:
   An odd 2-byte fp16 element goes to the high half of its own VGPR, where readInput loads it, with
   ds_load_u16_d16_hi. tdmStoreRejectReason admits fp16 D only from fp32 accumulators, so readInput's low-half
   rule for HHH_WMMA kernels never applies here. A 1-byte element, fp8, bf8 or int8 C at vector width 1, goes to the low byte of its VGPR with
-  ds_load_u8, which zero-fills the rest as readInput's byte load does on gfx1250. Only that half is read afterwards, so it does not matter that a d16 load writes
-  all 32 bits of its VGPR on gfx1250, where ECC zero-fills the other half. A DS load reads at most
+  ds_load_u8, which zero-fills the rest as readInput's byte load does on gfx1250. Only that half is read afterwards -- the beta
+  multiply selects it with op_sel -- so it does not matter whether the other half of the VGPR keeps its old value or
+  is zeroed. On gfx1250 it is zeroed: ECC is always on and a VGPR is written a whole DWORD at a time (MI400 Shader
+  Programming Guide 10.1, PDF p299). A DS load reads at most
   16 bytes, so a wider vector, such as bf16 at store vector width 16, is read 16 bytes at a time.
   """
   module = Module("TDMStoreLoadCElement")

@@ -611,9 +611,9 @@ def test_optnll_store_goes_through_the_tdm_block(gp_gfx1250, gfx1250_iim, assemb
 
 @pytest.mark.parametrize("adaptive", [0, 1])
 def test_turning_it_on_only_adds_the_tdm_blocks(gp_gfx1250, gfx1250_iim, assembler, capsys, adaptive):
-  """TDMStoreInst adds, drops or moves no global-write label or branch to one, so it never checks the
-  alignment of the columns, and a kernel with it on equals its switched-off twin outside the blocks it
-  stores through the TDM block."""
+  """In a kernel without MultipleBufferSingleKernel, TDMStoreInst adds, drops or moves no global-write label or
+  branch to one, so it never checks the alignment of the columns, and a kernel with it on equals its switched-off
+  twin outside the blocks it stores through the TDM block."""
   asms = {}
   for tdm in (False, True):
     sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=tdm, AdaptiveGemm=adaptive)
@@ -1496,8 +1496,7 @@ def test_local_split_u_stages_each_element_after_the_lsu_offset(gp_gfx1250, gfx1
 
 
 # The DS offset field is 16-bit unsigned. An element wider than one DS instruction is staged as
-# offset + piece * width, so the piece that has to fit is the LAST one. Checking only the element's own
-# offset let a vector starting near the top of a 64 KiB page emit offset:65536, which the assembler rejects
+# offset + piece * width, so the piece that has to fit is the LAST one; the assembler rejects offset:65536
 # with "expected a 16-bit unsigned offset".
 
 @pytest.mark.parametrize("offset, span", [
@@ -1534,9 +1533,9 @@ def test_lds_split_folds_the_whole_offset_when_the_page_remainder_cannot_hold_th
   assert tdmStoreLdsSplit(0xFFE0, 32) == (0xFFE0, 0)
 
 
-def test_lds_split_is_not_the_masking_form_that_emitted_offset_65536():
-  """The original code folded `offset & ~0xFFFF` and returned `offset & 0xFFFF`, never consulting the span, so
-  an element at 0x1FFE0 staged in 32-byte pieces emitted offset:65536. Pin that case."""
+def test_lds_split_is_not_the_masking_form():
+  """Folding `offset & ~0xFFFF` and keeping `offset & 0xFFFF` without the span would put the second 32-byte piece of
+  an element at 0x1FFE0 at offset:65536. Pin that case."""
   offset, span = 0x1FFE0, 32
   assert (offset & 0xFFFF) + span > DS_OFFSET_MAX, "premise: the masking form overflows here"
   high, low = tdmStoreLdsSplit(offset, span)
