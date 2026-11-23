@@ -133,7 +133,6 @@ namespace rocsparse
                                               rocsparse_handle    handle,
                                               bool                conj_B,
                                               rocsparse_direction dir,
-                                              rocsparse_operation trans_A,
                                               J                   mb,
                                               J                   n,
                                               J                   kb,
@@ -246,7 +245,6 @@ namespace rocsparse
         rocsparse_handle          handle,                          \
         bool                      conj_B,                          \
         rocsparse_direction       dir,                             \
-        rocsparse_operation       trans_A,                         \
         J                         mb,                              \
         J                         n,                               \
         J                         kb,                              \

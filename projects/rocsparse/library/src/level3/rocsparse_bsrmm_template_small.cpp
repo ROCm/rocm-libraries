@@ -154,7 +154,6 @@ namespace rocsparse
     rocsparse_status bsrmmnn_template_small(rocsparse_handle          handle,
                                             bool                      conj_B,
                                             rocsparse_direction       dir,
-                                            rocsparse_operation       trans_A,
                                             J                         mb,
                                             J                         n,
                                             J                         kb,
@@ -260,7 +259,6 @@ namespace rocsparse
     rocsparse_status bsrmmnt_template_small(rocsparse_handle          handle,
                                             bool                      conj_B,
                                             rocsparse_direction       dir,
-                                            rocsparse_operation       trans_A,
                                             J                         mb,
                                             J                         n,
                                             J                         kb,
@@ -329,7 +327,6 @@ namespace rocsparse
         rocsparse_handle          handle,                        \
         bool                      conj_B,                        \
         rocsparse_direction       dir,                           \
-        rocsparse_operation       trans_A,                       \
         JTYPE                     mb,                            \
         JTYPE                     n,                             \
         JTYPE                     kb,                            \
@@ -426,7 +423,6 @@ INSTANTIATE(float, int64_t, int64_t, int8_t, int8_t, float);
         rocsparse_handle          handle,                        \
         bool                      conj_B,                        \
         rocsparse_direction       dir,                           \
-        rocsparse_operation       trans_A,                       \
         JTYPE                     mb,                            \
         JTYPE                     n,                             \
         JTYPE                     kb,                            \
