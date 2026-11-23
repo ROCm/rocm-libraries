@@ -231,18 +231,6 @@ namespace rocsparse
 //
 //
 //
-template <typename T, typename I>
-inline void dprint(I size_, const T* v, const char* name_ = nullptr, I short_size_ = 20)
-{
-    T* p = new T[size_];
-    rocsparse_hipMemcpy(p, v, sizeof(T) * size_, hipMemcpyDeviceToHost);
-    for(I i = 0; i < rocsparse::min(size_, short_size_); ++i)
-    {
-        std::cout << "" << ((name_) ? name_ : "a") << "[" << i << "]" << p[i] << std::endl;
-    }
-    delete[] p;
-}
-
 #define THROW_IF_HIPLAUNCHKERNELGGL_ERROR(K, G, T, M, S, ...)                                     \
     do                                                                                            \
     {                                                                                             \
