@@ -9,7 +9,7 @@
 
 _common_excludes: &common_excludes
   - "*DISABLED*"
-  # The SDPA forward plan bundles run in the SDPA engine lanes only.
+  # The SdpaFwdPlan bundles are generic SDPA forward tests for every SDPA engine; this provider has no SDPA engine.
   - "*_SdpaFwdPlan_*"
 
 test_categories:

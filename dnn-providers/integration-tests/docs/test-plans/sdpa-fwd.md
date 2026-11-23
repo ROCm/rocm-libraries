@@ -10,22 +10,35 @@ everything the operation could vary. It ends with the bundles that the
 integration suite runs. Each step removes cases for a stated reason, so you can
 check every step.
 
-The files that this document describes are:
+The files of the plan in this repository are:
 
 | File | What it holds |
 |---|---|
 | [`test-plans/sdpa-fwd/model.yaml`](../../test-plans/sdpa-fwd/model.yaml) | The model: the settings, their values, the labels, the tier recipe. |
 | [`test-plans/sdpa-fwd/rules.yaml`](../../test-plans/sdpa-fwd/rules.yaml) | The rules that remove combinations. |
-| [`test-plans/sdpa-fwd/injections.yaml`](../../test-plans/sdpa-fwd/injections.yaml) | The cases that are added on purpose, outside the generated sets. |
-| [`test-plans/sdpa-fwd/timings-gfx942.csv`](../../test-plans/sdpa-fwd/timings-gfx942.csv), [`timings-gfx950.csv`](../../test-plans/sdpa-fwd/timings-gfx950.csv) | The measured time of each case on one GPU. |
-| [`test-plans/sdpa-fwd/levels.csv.sha256`](../../test-plans/sdpa-fwd/levels.csv.sha256) | The SHA-256 of the generated CSV. |
-| [`test-plans/sdpa-fwd/levels.csv`](../../test-plans/sdpa-fwd/levels.csv) | A copy of the generated CSV, so that you can compare your file with it. No tool reads it. |
-| [`scripts/sdpa_case_flow_poc/`](../../scripts/sdpa_case_flow_poc/README.md) | The generator: it turns the files above into the CSV. |
-| `integration-test-bundles/<tier>/SdpaFwdPlan/<Topology>/` | The bundles: one sweep per tier and topology. They are not on this branch; the pipeline in [`scripts/sdpa_case_flow_poc/README.md`](../../scripts/sdpa_case_flow_poc/README.md#from-the-csv-to-bundles) makes them. |
+| [`test-plans/sdpa-fwd/layers/`](../../test-plans/sdpa-fwd/layers/) | The layer files: Layer 0 (the axes), Layer 1 (the definition rules) and Layer 2 (the frontend rules). |
+| [`docs/test-plans/sdpa-fwd/axes.md`](sdpa-fwd/axes.md) | The axis catalogue: every axis, what it is for and its full values. |
+| `integration-test-bundles/<tier>/SdpaFwdPlan/<Topology>/` | The bundles: one sweep per tier and topology (section 9). |
+| The TOML file of each SDPA engine's lane, for example [`ASM_SDPA_ENGINE.toml`](../../../hip-kernel-provider/config/ASM_SDPA_ENGINE.toml) | The skips of the cases that hit known defects of that engine (section 10). |
+| The `*test_categories_integration.yaml` file of each lane | Which lanes run the cases (section 9.5). |
 
-The generator makes the CSV of all cases from the files above (section 8). The
-repository also holds a copy of that CSV, only for comparison. The generator is
-a PoC.
+Three programs made the cases:
+
+- The **case generator** reads two plan input files and writes the **case
+  list**: a CSV file with one row per case (section 8). The input files are
+  `model.yaml` (the settings, their values, the labels and the tier recipe,
+  section 4) and `rules.yaml` (the rules that remove combinations, section 5).
+- The **graph exporter** turns each row of the case list into a hipDNN graph
+  (section 9.2).
+- The **bundle tools** choose the rows that a bundle can hold (section 9.1)
+  and pass their graphs to the suite's importer,
+  `migration-scripts/import_graph.py`, which writes the sweeps (section 9.3).
+
+The case generator, the graph exporter, the row selection of the bundle tools
+and the case list are not in the repository: they are a PoC that is still
+being developed. The importer is in the repository. Until the rest is, the
+bundles are the record of the cases, and this document tells how the plan
+input files became the bundles.
 
 ### Words used in this document
 
@@ -33,15 +46,39 @@ a PoC.
 |---|---|
 | tensor | A multi-dimensional array of numbers, for example a 4-D array of size batch × heads × length × head size. |
 | CSV | A text table: one line per row, with commas between the fields. |
-| YAML, JSON, TOML | Three text formats for structured data. The model files are YAML, the graphs are JSON, the engine configuration files are TOML. |
+| YAML, JSON, TOML | Three text formats for structured data. The plan input files are YAML, the graphs are JSON, the engine configuration files are TOML. |
 | SHA-256 | A 64-digit hex number computed from the bytes of a file. If one byte changes, the number changes. Two files with the same SHA-256 are the same file. |
 | hex | Base-16 numbers, written with the digits `0`-`9` and `a`-`f`. |
 | arch | The GPU architecture name, for example `gfx942` or `gfx950`. |
 | fp8, bf16, fp16, fp32 | Number formats of 8, 16, 16 and 32 bits. fp8 has variants, for example E4M3 (4 exponent bits, 3 mantissa bits). |
 | descale | A factor that turns stored fp8 numbers back into their real values. |
 | BHSD, BSHD | The order of the dimensions of a tensor in memory: B batch, H heads, S sequence length, D head size. |
+| ragged | A tensor that packs sequences of different lengths one after the other. Offsets tell where each sequence starts. |
 | CTest, GTest | CTest is the test runner of CMake. GTest (GoogleTest) is the C++ test framework of the suite. |
 | plugin | A shared library that hipDNN loads at run time. A provider plugin holds one or more engines. |
+| tier | `quick`, `standard`, `comprehensive` or `full` (section 7). RFC 0022, `sdpa-bwd.md`, the `levels:` recipe in `model.yaml` and the `level` column of the case list call it a level. The `level` field of an axis in `model.yaml` means something else: which call decides the axis value (`graph`, `execute` or `both`). |
+| shape class | One set of concrete sizes: S, H, M, L or X (section 7). The plan files hold them under `level_labels.shape_tiers`, and the case list in its `shape_tier` column. |
+
+### Relation to RFC 0022
+
+[RFC 0022](../../../../projects/hipdnn/docs/rfcs/0022_PerOpTestPlans.md)
+(Per-Op Test Plans) sets the method for a per-op test plan. This plan follows
+its shape sets (S, L, M, H, X), its per-case FLOP ceilings and its four levels,
+which this document calls tiers (quick, standard, comprehensive, full). It
+departs from the RFC as the table shows. "Not recorded" means that no plan file
+gives the reason.
+
+| RFC 0022 element | What this plan does | Deviation and why |
+|---|---|---|
+| §8.2 level budgets: ~5 min, ~30 min, ≤ 60 min, none, for the whole suite | `levels` in `model.yaml` sets 5, 30, 120 min and none, and measures only this plan's cases against them (section 7). | The RFC budget is for the whole suite, not one plan. For `comprehensive` the plan uses 120 min, from TheRock's tier policy (< 2 h), which `projects/hipdnn/docs/TESTING.md` repeats. That policy is also for a whole tier. The plan uses 120 min as the ceiling for its own cases in one engine run. Each SDPA lane's tier YAML gives its comprehensive tier a 60-minute budget for all of its cases, so the share of this plan must stay well below 60 min. |
+| §7 per-case ceilings in FLOP and in MB | `ceiling_mflop` only: 20, 200, 8,000, none (section 7). | No memory ceiling. Why: not recorded. |
+| §4, §15 (I1): a generator writes the bundles from the declarations | `model.yaml` and `rules.yaml` are in the repository. The case generator, the graph exporter, the row selection and the case list are not (section 1). | The bundles cannot be made again from the repository. Why: the programs are a PoC still being developed. |
+| §4, §9: each case has a `purpose` and maps to a plan item | Case metadata has no `purpose` and no `plan_items`. Each case links to its case-list row by `case_key` (section 9.4). | No purpose tag, and the trace runs through a file that is not in the repository. Why: not recorded. |
+| §8.3, §13.1 step 10: claims are harvested | Every `support.json` is empty (section 11). | No claims. Why: they come in a later change, tracked in ALMIOPEN-3225. |
+| §8.4, P2: the plan never names an engine, and the same bundles run on every lane | The base case is one that `ASM_SDPA_ENGINE` accepts (section 4). Every SDPA engine lane runs the cases (section 9.5), and each engine's TOML file holds the skips for its defects (section 10). | The HIP_MLOPS, MIOPEN and hipBLASLt lanes exclude the cases because they have no SDPA support. The FlyDSL SDPA lanes run the 8 run-time zero and negative scale cases too (section 9.5). Why the base case is engine-specific: not recorded. |
+| §6, §8.1: each level holds `expected_rejection` bundles | No rejection cases. Requests that hipDNN must refuse belong to a separate rejection suite (sections 3 and 11). | Why: not recorded. |
+| §12: golden cases, at least the G-A anchors | No golden data. Each output is checked against the GPU and CPU SDPA references (section 9.4). | Why: not recorded. |
+| §13.2 template: pass criteria, trade-off register, exhaustive mode | No such sections. `choice` rules in `rules.yaml` record each judgement call with its reason (section 5). Fuzzer hints mark the value axes that only a fuzzer uses (section 3). | Why: not recorded. |
 
 ## Contents
 
@@ -52,11 +89,11 @@ a PoC.
 5. [The rules file](#5-the-rules-file)
 6. [Generating the cases](#6-generating-the-cases)
 7. [Tiers](#7-tiers)
-8. [The CSV](#8-the-csv)
+8. [The case list](#8-the-case-list)
 9. [From rows to bundles](#9-from-rows-to-bundles)
 10. [Known engine defects and their skips](#10-known-engine-defects-and-their-skips)
 11. [Limits and what comes next](#11-limits-and-what-comes-next)
-12. [How to regenerate](#12-how-to-regenerate)
+- [Generator workbench (POC branch only)](#generator-workbench-poc-branch-only)
 
 ## 1. Why this plan exists
 
@@ -84,14 +121,23 @@ cases that:
 - has an expected answer for each case, so that a wrong output fails.
 
 This plan makes that list from a written **model** and written **rules**,
-with a script. A person does not pick cases one by one. To change the list,
-change the model or a rule, and run the script again.
+with the case generator. A person does not pick cases one by one. To change the
+list, change the model or a rule, and generate the list again.
 
 ## 2. The theoretical base
 
 The first step lists everything the forward operation could vary, with no
 thought about what makes sense or what hipDNN can express. This list is
 **Layer 0**.
+
+- [`axes.md`](sdpa-fwd/axes.md) gives every axis and why: what it is for, its
+  full values and why some values are chosen.
+- [`layers/L0-axes.yaml`](../../test-plans/sdpa-fwd/layers/L0-axes.yaml) holds
+  the same axes in machine-readable form.
+- [`layers/L1-definition.yaml`](../../test-plans/sdpa-fwd/layers/L1-definition.yaml)
+  holds the narrowing by meaning (section 3).
+
+Terms:
 
 - An **axis** is one thing that a case can vary. Example: `dtype_q`, the number
   format of Q.
@@ -113,11 +159,11 @@ them with a small number of cases. For this reason, the plan measures its size
 in pairs, not in combinations.
 
 The layer numbers in sections 2 and 3 come from the layer files in
-`test-plans/sdpa-fwd/layers/`. The script
-`scripts/sdpa_case_flow_poc/layers/layer_counts.py` counts them by arithmetic:
-it enumerates the size axes, splits the other axes into independent groups, and
-multiplies the counts of the groups. It splits a large group again by fixing
-one axis at a time. It does not list the combinations one by one.
+[`test-plans/sdpa-fwd/layers/`](../../test-plans/sdpa-fwd/layers/). A script
+that is not in the repository counted them by arithmetic: it enumerates the size
+axes, splits the other axes into independent groups, and multiplies the counts
+of the groups. It splits a large group again by fixing one axis at a time. It
+does not list the combinations one by one.
 
 ## 3. Narrowing: meaning, then the frontend
 
@@ -150,13 +196,14 @@ builds the graph. Examples:
 - `F-SCALE-TENSOR-BY-VALUE`: a scale tensor must be passed by value, so a
   scale in device memory cannot be stated.
 
-Layer 2 has 17 frontend rules. They leave about 3.2 × 10³⁷ combinations and
+Layer 2 has 18 frontend rules. They leave about 3.2 × 10³⁷ combinations and
 52,348 valid pairs.
 
-Some values and combinations have meaning, but the frontend cannot state them,
-refuses them, or is to refuse them. Layer 2 removes them. The model does not hold the values of
-`F-INDEX-TENSORS-INT32`. It holds the values of the other rules below, and the rule removes
-them from every row. `F-PAGED-NEEDS-SEQ-LENS` removes a combination, not a value:
+Layer 2 also removes values and combinations that have meaning but that the
+frontend cannot state or refuses (or will refuse). The model holds the values
+of each rule below, and the rule removes them from every row. Two exceptions:
+the model does not hold the values of `F-INDEX-TENSORS-INT32`, and
+`F-PAGED-NEEDS-SEQ-LENS` removes a combination, not a value. The rules:
 
 - `F-SINK-FLOAT-ONLY`: the frontend takes only an fp32 sink, so a sink in any
   other format cannot be stated. This is a possible frontend defect.
@@ -186,15 +233,14 @@ are not for test-case generation. They are hints for a fuzzer. The choice rule
 `CH-FUZZER-HINTS` keeps every case at the axis's ordinary value (`ordinary` or
 `none`) and never uses `scale_value` = `non_finite`.
 
-A removed combination is not lost. When the frontend accepts a meaningless
-request, that request comes back as a **rejection probe** in
-`injections.yaml`: a case that expects hipDNN to refuse it. Rejection probes
-are not part of this plan's bundles.
+A removed combination is not tested by this plan. When the frontend accepts a
+meaningless request, the test that expects hipDNN to refuse it belongs to a
+separate rejection suite, not to this plan's bundles.
 
 ## 4. The model
 
-The model (`model.yaml`) is the Layer 2 space in a form that a script can
-use. It has 92 axes (39 of them child axes) and 339 values.
+The model (`model.yaml`) is the Layer 2 space in a form that the case
+generator can read. It has 92 axes (39 of them child axes) and 346 values.
 
 **Classes, not numbers.** Most size axes hold a **class**, chosen by meaning.
 Example: `batch_size` is `one` or `many`. A **relationship** axis says how two
@@ -202,9 +248,6 @@ sizes relate. Example: `seq_q_vs_seq_kv` is `shorter`, `equal` or `longer`.
 The **class-to-value table** (`class_to_value` in `model.yaml`) turns each
 class into numbers. Example: `k_head_sharing = gqa` means the K head count is
 the query head count divided by 4, at least 2.
-
-Rules hold only for the values that were tested. A result at head size 128
-says nothing about head size 80.
 
 **Base case.** `base_cases.shared` is the plain case that other cases start
 from: bf16 in and out, fp32 compute, batch 2, 8 heads, head size 128,
@@ -240,8 +283,8 @@ Each axis also has:
 
 **Answer-key rules.** Some combinations have no expected answer, although each
 value alone has one. `level_labels.answer_key_needs` lists them, with ids
-`AK-*`. Example: `AK-Q-O-FORMATS` lists the (Q format, O format) pairs that the
-reference executors support. A tier that must be fully checkable applies these
+`AK-*`. Example: `AK-Q-O-FORMATS` lists the (Q format, O format) pairs that no
+reference executor supports. A tier that must be fully checkable applies these
 rules.
 
 **Inputs that share memory.** With `tensor_overlap = inputs_overlap`, one input
@@ -249,16 +292,16 @@ is a view into another input's buffer: V inside K, or K inside Q when V's head
 size is larger. The view reads through its owner's strides, so its layout
 values (`strides_*`, `dim_order_*`) are `inherited`. Two rules keep this true:
 `D-INPUTS-OVERLAP-VIEW-DTYPE` (the view has its owner's format) and
-`D-INPUTS-OVERLAP-VIEW-LAYOUT` (only the view is `inherited`). The graph builder
-gives the view no buffer of its own when the batch is padded, K and V are not
-paged, and every dimension of the view fits inside its owner's; a bundle then
-records the view in its metadata `aliases`. Otherwise the view keeps a buffer of
-its own and the runner lists the overlap in `unrealised_contents`.
+`D-INPUTS-OVERLAP-VIEW-LAYOUT` (only the view is `inherited`). The graph
+exporter gives the view no buffer of its own when the batch is padded, K and V
+are not paged, and every dimension of the view fits inside its owner's; a
+bundle then records the view in its metadata `aliases`. Otherwise the row is
+not a bundle (section 9.1).
 
 **Numeric domains.** `numeric_domains` gives, for each size axis, the smallest
 and largest size the frontend takes, the range of each class, and boundary
 values (powers of two, multiples of 16 to 128, and the values next to them).
-Each entry cites its source: the frontend line where the frontend sets a limit,
+Each entry cites its source: the frontend code where the frontend sets a limit,
 otherwise the rule or entry it follows.
 
 **Bridges.** `level_labels.bridges` (B1 to B14) name pairs of axes in different
@@ -278,22 +321,22 @@ alignment".
   token-count offset list per side, with GQA and bottom-right causal, a sliding
   window, a bias, longer slots than sequences, INT64 offsets, a packed Stats,
   ragged queries over dense K/V, fp16, and one head-major case for contrast;
-  and 16 more public-model shapes at their real head counts and head sizes (Llama 3.1
-  and 3.2, Qwen2.5, Phi-3 and Phi-4, Gemma 3, DeepSeek-V3 including MLA decode
-  with head sizes 576 and 512, gpt-oss) and two paged serving defaults.
+  and 16 more public-model shapes at their real head counts and head sizes
+  (Llama 3.1 and 3.2, Qwen2.5, Phi-3 and Phi-4, Gemma 3, DeepSeek-V3 including
+  MLA decode with head sizes 576 and 512, gpt-oss) and two paged serving
+  defaults.
 - **Seeds** (`level_labels.seeds`, 15 entries): combinations that public
   defect reports or serving workloads showed to matter. Example: S1, Stats with
   ragged queries over a paged GQA decode.
 - **Coverage rows** (origin `coverage`): every value whose answer key is not
   "no" is in a row that the references can check. If no other row holds a value
-  that way, the generator adds the checkable row with the fewest changes that
-  holds it, in full at shape tier S. The levels summary lists each added row,
-  and each value that no checkable row can hold.
+  that way, the case generator adds the checkable row with the fewest changes
+  that holds it, in full at shape class S.
 
 ## 5. The rules file
 
-`rules.yaml` holds every rule. The script applies all rules at once; their
-order has no effect. Each rule has a `kind`:
+`rules.yaml` holds every rule. The case generator applies all rules at once;
+their order has no effect. Each rule has a `kind`:
 
 | Kind | Ids | Meaning | When to change it |
 |---|---|---|---|
@@ -312,11 +355,15 @@ Each rule also has a `form`:
 | `setting` | Records a choice about how the model is built. It removes nothing. |
 | `covered` | A policy rule whose requests another rule already removes. |
 
-The model applies 46 exclusion rules: 33 definition, 12 frontend and 1 choice.
-Together they make 14,226 of the 58,766 structurally possible pairs invalid.
-44,540 valid pairs remain. One more definition exclusion,
-`D-RAGGED-NO-OVERLAP`, removes nothing: the value it forbids is not in the
-model.
+The model applies 49 exclusion rules: 34 definition, 12 frontend, 2 choice and
+1 policy. Together they make 14,226 of the 58,766 structurally possible pairs invalid.
+44,540 valid pairs remain. Eight Layer 1 rules have no entry in the file,
+because the values they forbid are not in the model: `D-SCALE-DEFAULT-DZERO`,
+`D-SOFTCAP-ZERO`, `D-RAGGED-NO-OVERLAP`, `D-RAGGED-WHOLE-TOKENS`,
+`D-SEQLEN-NOT-NEGATIVE`, `D-DROPOUT-MASK-BINARY`, `D-REL-HEAD-DIM` and
+`D-REL-MAXLEN`. Seven definition rules exist only in the file, because they
+relate values that only the model has (the `D-REL-*` rules that Layer 1 does
+not list).
 
 Example of a `forbid`:
 
@@ -330,23 +377,36 @@ Example of a `forbid`:
 With one key, a window cannot cover "some but not all" keys, so these rows
 are removed.
 
-The frontend rule `F-NO-NEGATIVE-STRIDE` removes negative strides. It names
-ticket ALMIOPEN-3114, which asks hipDNN to refuse these requests. The requests
-come back as rejection probe MV-22.
+The plan files cite the hipDNN source as `ABBREV::function`: the file
+abbreviation, then the function or field. A quoted string after the function is
+an error message or a condition in it. FBS fields are written as
+`FBS SdpaAttributes::field`. The frontend abbreviations are listed under
+`api_record.paths` in [`model.yaml`](../../test-plans/sdpa-fwd/model.yaml),
+relative to `projects/hipdnn/`. For example, `SA` is
+`frontend/include/hipdnn_frontend/attributes/SdpaAttributes.hpp` and `NODE` is
+`frontend/include/hipdnn_frontend/node/SdpaFwdNode.hpp`. The reference-executor
+abbreviations (`PU`, `CSK`, `GSK`, `RSD`, `RTB`, `SRI`) are listed in the
+comment above `level_labels.answer_key_needs` in `model.yaml`, with paths from
+the repository root. `UTIL` is
+`projects/hipdnn/frontend/include/hipdnn_frontend/node/detail/Utilities.hpp`;
+`TFBS` and `GFBS` appear only in `layers/L2-frontend.yaml`, whose header
+defines them. A file without an abbreviation is written `<file>::<function>`. Every citation
+is at the commit in `api_record.sha`, unless it names a later commit
+(`at <sha>`).
 
 ## 6. Generating the cases
 
-The script builds rows. A **row** is one value for every active axis. A
-**case** is a row at one **shape tier** (one set of concrete sizes, section 7).
+The case generator builds rows. A **row** is one value for every active axis. A
+**case** is a row at one **shape class** (one set of concrete sizes, section 7).
 One row can give several cases.
 
-The script uses these methods:
+The case generator uses these methods:
 
 - **Low-change pairwise.** Each row starts from the base case and changes as few
-  settings as possible. First, the script covers every pair that a row with at
-  most 3 changes can hold. Then it covers the pairs that need 4 changes, then
-  5, and so on, until every pair is covered. A child axis that its parent
-  switches on does not count as a change. Example: base case plus
+  settings as possible. First, the case generator covers every pair that a row
+  with at most 3 changes can hold. Then it covers the pairs that need 4
+  changes, then 5, and so on, until every pair is covered. A child axis that
+  its parent switches on does not count as a change. Example: base case plus
   `bias = present` plus `alignment_k = element_aligned` plus
   `alignment_o = element_aligned` is 3 changes; `bias_broadcast` and
   `bias_dtype` follow from `bias = present` and do not count. A failure in a
@@ -357,28 +417,25 @@ The script uses these methods:
   for the pairs that no bundle can hold (see "Rows a bundle can hold").
 - **One-at-a-time.** The base case with exactly one value changed (plus any
   value that a rule forces).
-- **Targeted, real-world and seed rows** (section 4). The script completes each
-  one with the fewest extra changes that obey the rules.
+- **Targeted, real-world and seed rows** (section 4). The case generator
+  completes each one with the fewest extra changes that obey the rules.
 
 **Token-major ragged rows.** A ragged tensor is usually stored token-major
 (`bshd`, the layout varlen attention calls THD). In a row with a ragged Q side,
 `dim_order_q = bshd` and `dim_order_o = bshd` count as no change, as the base
 value `bhsd` does. The same holds for K and V on a ragged K/V side. A search
-for the fewest changes tries `bshd` first in such a row
-(`generator_hints.plain_when` in `model.yaml`). This applies to the low-change
-rows, the size-sweep crossings and the coverage rows. Packed rows take any
-order.
+for the fewest changes tries `bshd` first in such a row. This applies to the
+low-change rows, the size-sweep crossings and the coverage rows. Packed rows
+take any order.
 
 **Rows a bundle can hold.** Some rows need a harness capability before a
 bundle can hold them, for example an output written over an input, or random
-dropout without the dumped mask (`generator_hints.harness_needs` lists the rows
-of each capability; an axis names in `harness_needs` the values that need one).
-Every tier has
-`bundle_first: true`. Its low-change steps take only the pairs that a row with
-no such need can hold, and build only such rows. So each of those pairs is in a
-row that a bundle can hold. Then packed pairwise covers the tier's other pairs,
-for example a ragged setting with a mask, in a few rows. When two values cost
-the same number of changes, the script takes the value with no need first.
+dropout without the dumped mask. Every tier builds bundle rows first: its
+low-change steps take only the pairs that a row with no such need can hold,
+and build only such rows. So each of those pairs is in a row that a bundle can
+hold. Then packed pairwise covers the tier's other pairs, for example a ragged
+setting with a mask, in a few rows. When two values cost the same number of
+changes, the case generator takes the value with no need first.
 
 **Super-setting.** In the quick tier, the data-type axes (`dtype_q`,
 `dtype_k_vs_q`, `dtype_v_vs_q`, `dtype_o`, `dtype_stats`, `compute_precision`)
@@ -389,8 +446,8 @@ combinations.
 **Warm start.** A tier asks only for the pairs that lower tiers did not cover
 already.
 
-**Determinism.** The script uses seed 2893. The same model, rules, timing files
-and seed give the same CSV, byte for byte.
+**Determinism.** The case generator uses seed 2893. The same model, rules,
+timings (section 7) and seed give the same case list, byte for byte.
 
 ## 7. Tiers
 
@@ -402,50 +459,47 @@ The tier of each case comes from the labels and from a short **recipe**
 (`levels:` at the end of `model.yaml`). The tiers are a draft; the labels and
 the recipe are open to review.
 
-| Tier | Values it takes | Must every case be checkable? | Pairs | Extra rows | Shape tiers | Per-case ceiling | Budget |
+| Tier | Values it takes | Must every case be checkable? | Pairs | Extra rows | Shape classes | Per-case ceiling | Budget |
 |---|---|---|---|---|---|---|---|
 | quick | `usage` common; `changes_numbers` not "no"; answer key yes or partial | yes | all, bundle rows first, low-change; packed for the rest | real-world rows and checkable seeds | S | 20 MFLOP | 5 min |
 | standard | as quick, plus `usage` rare | yes | all, bundle rows first, low-change; packed for the rest | targeted | S, H, M | 200 MFLOP | 30 min |
-| comprehensive | as standard | yes | within groups and bridges, bundle rows first, low-change; packed for the rest | one-at-a-time at S and L | S, H, M, L (one per row) | 8,000 MFLOP | 60 min |
+| comprehensive | as standard | yes | within groups and bridges, bundle rows first, low-change; packed for the rest | one-at-a-time at S and L | S, H, M, L (one per row) | 8,000 MFLOP | 120 min |
 | full | every `usage` (also `fringe`) and every `changes_numbers`; answer key yes or partial | yes | all, bundle rows first, low-change; packed for the rest | one-at-a-time at S and L; uncheckable singles at S; the base case at X | S, H, M, L, X | none | none |
 
 **Uncheckable singles.** A case is uncheckable when it holds a value whose
 answer key is "no", or a combination of an answer-key rule
 (`level_labels.answer_key_needs`). No reference can compute its expected output.
 No tier pairs such a value or combination with other settings. Instead, full
-holds one case for each of them, at shape tier S (`uncheckable_singles: S`).
-Each single is origin `one-at-a-time` with detail `uncheckable <target>`: the
-target is `<axis>=<value>`, or `<rule id>#<index>` for a combination. A single
-holds only its own uncheckable reason when a valid row can; the levels summary
-lists the singles that hold more. A target that no valid row can hold has no
-single. The harness reports a single that an engine accepts as Unverifiable.
+holds one case for each of them, at shape class S. A single holds only its own
+uncheckable reason when a valid row can. A target that no valid row can hold
+has no single. The harness reports a single that an engine accepts as
+Unverifiable (section 10.5).
 
-**Size sweep.** Each level names the size-sweep rows it takes (`size_sweep`
+**Size sweep.** Each tier names the size-sweep rows it takes (`size_sweep`
 in `levels:`). quick takes the typical sizes, which are most likely to pass.
 standard takes the corner sizes, which are most likely to find a defect: on the
 plain case, and crossed with the settings whose `size_sensitive` label is
-"yes". comprehensive takes standard's crossings again at shape tier L. full
-takes the stress sizes of shape tier X.
+"yes". comprehensive takes standard's crossings again at shape class L. full
+takes the stress sizes of shape class X.
 
-The generator derives the sweep sizes from `numeric_domains`, `size_sweep`,
-the shape tiers and `class_to_value`. Each size is one row (origin
-`size-sweep`): the plain row, or for a crossing the row with the fewest changes
-that holds the crossed value, with one size changed. The row starts from the
-sizes of shape tier S (tier L for comprehensive), and its class columns follow
-its sizes. The `sizes` column gives every size. The levels summary lists the
-derived sizes per axis, the rows per label, and every row the generator did
-not make, with the reason (a rule, a label, an answer-key rule, a numeric
-domain, the cost model's fitted range, or a ceiling above tier S). The sizes
+The case generator derives the sweep sizes from `numeric_domains`,
+`size_sweep`, the shape classes and `class_to_value`. Each size is one row
+(origin `size-sweep`): the plain row, or for a crossing the row with the fewest
+changes that holds the crossed value, with one size changed. The row starts
+from the sizes of shape class S (L for comprehensive), and its class
+columns follow its sizes. The `sizes` column gives every size. The sizes
 override sets the batch, the head counts, the sequence lengths and the head
 sizes. Page size and the window bounds get only a stress row: the class value
-that reaches the key length, at the key length of shape tier X.
+that reaches the key length, at the key length of shape class X.
 
 Corner sizes sit next to a representative size or, for the sequence lengths
 and the head sizes only, next to a tile edge (64, 128, 256): the edge and the
 sizes one below and one above it (`size_sweep.corner.tile_edge_axes`). The
 batch and the head count keep small corner sizes. Each crossed setting value
 takes 3 entries of the interleaved corner list, and the next value starts 3
-entries further on, so the values share out every corner size.
+entries further on, so the values share out every corner size. This is why the
+bundles hold odd head sizes such as 63, 65, 95, 97, 127 and 129, and a Q / K
+head size that differs from V's.
 
 The base value of each axis is always allowed. A required child axis whose
 values all have `changes_numbers` "no" (for example `max_seq_len_kv` under
@@ -455,13 +509,13 @@ paging) does not hold its parent back.
 2 × B × H_q × S_q × S_kv × (d_qk + d_v).
 
 Most comprehensive and full cases are rows of a lower tier at a larger shape
-tier. Example: a standard row at shape tier L is a comprehensive case, because
-standard does not run shape tier L.
+class. Example: a standard row at shape class L is a comprehensive case,
+because standard does not run shape class L.
 
-**Shape tiers** (`level_labels.shape_tiers`). A tier gives the size of every
-`many`; a `one` stays 1.
+**Shape classes** (`level_labels.shape_tiers`). A shape class gives the size of
+every `many`; a `one` stays 1.
 
-| Shape tier | Batch | Query heads | Length (equal / short side) | Purpose |
+| Shape class | Batch | Query heads | Length (equal / short side) | Purpose |
 |---|---|---|---|---|
 | S small | 2 | 8 | 64 / 32 | the feature works |
 | H hazard | 3 | 8 | 127 / 65 | odd batch; lengths one off a 64/128 tile edge |
@@ -472,64 +526,63 @@ standard does not run shape tier L.
 Rules that keep a tier small:
 
 - An S case is never removed by a ceiling: S is the smallest form of a case.
-- In comprehensive, each row keeps exactly one shape tier. A tier above S goes
+- In comprehensive, each row keeps exactly one shape class. A class above S goes
   only to a row that changes a size-sensitive setting. Every value keeps at
   least one M case and one L case. The cases that comprehensive drops go to
   full.
-- **Fill.** If a tier has spare time, the script pulls cases down from higher
-  tiers until the tier uses 50 % of its budget. A pulled case must fit the
-  tier's shapes, ceiling, labels and change limit.
-- **Cost.** The time of a case comes from a per-case timing file
-  (`timings-gfx942.csv`, `timings-gfx950.csv`). The times were measured on
-  one gfx942 node and one gfx950 node with the PoC runner
-  (`src/sdpa-case-flow-runner/`). A case that was not
-  measured gets a fitted estimate: a + b × MFLOP + c × tensor-MB. Each tier
-  run adds 10 s of overhead. gfx942 is the budget basis.
-- **Over budget.** The script only reports; it does not move cases.
+- **Fill.** If a tier has spare time, the case generator pulls cases down from
+  higher tiers until the tier uses 50 % of its budget. A pulled case must fit
+  the tier's shapes, ceiling, labels and change limit.
+- **Cost.** A **case runner**, a PoC program that runs one case on one engine
+  and on a reference, measured the time of earlier cases on one gfx942 node and
+  one gfx950 node. A model fitted to these times gives the cost of a case:
+  a + b × MFLOP + c × tensor-MB. No case of this case list has a measured time.
+  The model gives the time of every case: 26,885 cases are `modelled` and 364
+  are `UNMEASURED`, outside the range of the measurements. Each tier run adds
+  10 s of overhead. gfx942 is the budget basis.
+- **Over budget.** The case generator only reports; it does not move cases.
 
-Result for the generated CSV (section 8; times are the summed
-`est_seconds` columns plus the overhead):
+Result for the case list (section 8). Budget use is the summed `est_seconds`
+columns of the cumulative cases plus the overhead, as a percentage of the tier's
+budget in the tier table above:
 
-| Tier | Cases in this tier | Cumulative cases | Cumulative s, gfx942 | Cumulative s, gfx950 | Budget use, gfx942 |
-|---|---|---|---|---|---|
-| quick | 1,506 | 1,506 | 63.3 | 51.1 | 21.1 % |
-| standard | 9,555 | 11,061 | 580.7 | 436.6 | 32.3 % |
-| comprehensive | 4,643 | 15,704 | 2,333.2 | 1,685.0 | 64.8 % |
-| full | 11,545 | 27,249 | 7,043.4 | 5,052.0 | — |
+| Tier | Cases in this tier | Cumulative cases | Budget use, gfx942 | Budget use, gfx950 |
+|---|---|---|---|---|
+| quick | 1,506 | 1,506 | 21.1 % | 17.0 % |
+| standard | 9,555 | 11,061 | 32.3 % | 24.3 % |
+| comprehensive | 4,643 | 15,704 | 32.4 % | 23.4 % |
+| full | 11,545 | 27,249 | — | — |
 
-These times are the PoC runner's times (`src/sdpa-case-flow-runner/`) for one engine
-run plus one reference run. The suite does more work per case, so its times are larger.
+These percentages come from the model's estimates of the case runner's time for
+one engine run plus one reference run. The suite does more work per case, so its
+budget use is larger.
 
-**Seeds.** The script completes each of the 15 seeds with the fewest changes
-under the rules and the answer-key rules. A seed whose row the references can
-check goes to quick, at shape S. Any other seed goes to full. Whether the
-references can check a seed's row is decided by the labels of quick, standard and
-comprehensive (full's `uncheckable_singles` does not count). 14 seeds are in
-quick; `S3b-vllm-fp8kv-paged` is in full, because a K or V format that differs
-from Q has answer key "no". In the CSV a seed row has `origin` `real_world` and
-`detail` `seed:<id>`. When a seed's row equals a row that the tier already
-holds, the two merge, and that row's `detail` carries the seed name.
+**Seeds.** The case generator completes each of the 15 seeds with the fewest
+changes under the rules and the answer-key rules. A seed whose row the
+references can check goes to quick, at shape class S. Any other seed goes to full.
+Whether the references can check a seed's row is decided by the labels of
+quick, standard and comprehensive (full's uncheckable singles do not count).
+14 seeds are in quick; `S3b-vllm-fp8kv-paged` is in full, because a K or V
+format that differs from Q has answer key "no". In the case list a seed row has
+`origin` `real_world` and `detail` `seed:<id>`. When a seed's row equals a row
+that the tier already holds, the two merge, and that row's `detail` carries
+the seed name.
 
-## 8. The CSV
+## 8. The case list
 
-The CSV of all cases is generated. Run the generator to make it (section 12).
-The generator writes `levels.csv`. The repository holds a copy at
-[`test-plans/sdpa-fwd/levels.csv`](../../test-plans/sdpa-fwd/levels.csv), so
-that you can compare your file with it. No tool reads that copy.
+The case generator writes the case list as a CSV file. The case list is not in
+the repository (see the start of this document). This section describes it,
+because the bundles' metadata points into it (section 9.4) and because the
+counts in sections 7 and 9 come from it.
 
 The same input files and the same seed always give the same file, byte for
-byte. Its SHA-256 is in
-[`test-plans/sdpa-fwd/levels.csv.sha256`](../../test-plans/sdpa-fwd/levels.csv.sha256).
+byte. The case list of these bundles has the SHA-256
+`4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81`. Each case
+records it in its metadata `generated_from_sha256`.
 
-A CTest test, `hipdnn_sdpa_fwd_levels_regenerate_python_tests`, makes the CSV
-again and compares its SHA-256 with that file. When a change to the model, the
-timing files or the generator changes the CSV, write the new SHA-256 to that
-file, and copy the new CSV to `test-plans/sdpa-fwd/levels.csv`, in the same
-change.
-
-`levels.csv` has one row per case: 27,249 rows. It has no quoted fields. A `-`
-means that a child axis is not active in that row. Each row has 105 columns: 13
-case columns, then 92 axis columns.
+The case list has one row per case: 27,249 rows. It has no quoted fields. A
+`-` means that a child axis is not active in that row. Each row has 105
+columns: 13 case columns, then 92 axis columns.
 
 **Case columns (13).**
 
@@ -537,9 +590,9 @@ case columns, then 92 axis columns.
 |---|---|
 | `case_id` | `lv-NNNN`, the row number. A change to the model can shift it. Do not use it as a key. |
 | `level` | The tier: `quick`, `standard`, `comprehensive` or `full`. |
-| `shape_tier` | `S`, `H`, `M`, `L` or `X`. |
+| `shape_tier` | The shape class: `S`, `H`, `M`, `L` or `X`. |
 | `origin` | `low-change`, `pairwise` (packed), `one-at-a-time`, `targeted`, `real_world`, `size-sweep` or `coverage`. |
-| `detail` | For low-change rows: the number of changes. For size-sweep rows: the label, the size and the crossed value. For coverage rows: the value. For other rows: the id of the targeted case, real-world case or seed. |
+| `detail` | For low-change rows: the number of changes. For size-sweep rows: the label, the size and the crossed value. For coverage rows: the value. For uncheckable singles: `uncheckable <axis>=<value>` or `uncheckable <rule id>#<index>`. For other rows: the id of the targeted case, real-world case or seed. |
 | `filled_from` | Empty, or the tier that the recipe gave the case before a fill pulled it down. |
 | `est_seconds` | The time of the case on gfx942. |
 | `cost_source` | `measured`, `modelled` or `UNMEASURED` (outside the range of the fitted estimate). |
@@ -564,90 +617,124 @@ A bundle holds a graph and, for each case, a few fixed values. Some tensor
 contents are also bundle contents: page tables and the offsets of a packed page
 table, ragged offsets, `seq_len` values, block masks, descale lists, a caller's
 dropout mask, and dropout seeds and offsets held in device memory. A row that
-a bundle cannot express or compare stays in the generated CSV, and the
-selection step (`scripts/sdpa_case_flow_poc/bundles/select_rows.py`) skips it for
-the reasons below.
+a bundle cannot express or compare stays in the case list, and the bundle tools
+skip it for the reasons below.
 
 The first two reasons say that a bundle cannot express or compare the row. The
-last one is an extra exclusion: the row could be a bundle, but the selection step
-leaves it out. The Rows column counts every row that has the reason. A row can have several
-reasons, so the counts overlap and do not add up to the number of excluded rows.
+last one is an extra exclusion: the row could be a bundle, but the bundle tools
+leave it out. The Rows column counts every row that has the reason. A row can
+have several reasons, so the counts overlap and do not add up to the number of
+excluded rows.
 
 | Reason | Why the row is not a bundle | Rows |
 |---|---|---|
-| `tensor_overlap` | An output written over an input, inputs that share memory on a row with paged K and V, and inputs that share memory on a ragged row need control of the pointers that a bundle does not have. Inputs that share memory on a padded, non-paged row are bundle contents (metadata `aliases`). The generator holds no view larger than its owner (rule `D-REL-VIEW-FITS-OWNER`) and no inputs that share memory on a ragged row (rule `CH-RAGGED-SHARED-MEMORY-LATER`). | 57 |
+| `tensor_overlap` | An output written over an input, inputs that share memory on a row with paged K and V, and inputs that share memory on a ragged row need control of the pointers that a bundle does not have. Inputs that share memory on a padded, non-paged row are bundle contents (metadata `aliases`). The case generator holds no view larger than its owner (rule `D-REL-VIEW-FITS-OWNER`) and no inputs that share memory on a ragged row (rule `CH-RAGGED-SHARED-MEMORY-LATER`). | 57 |
 | `ragged_query_without_tokens` | A ragged Q gives no query token to compare: every sequence length is 0, or the lengths come from the Q offsets and a zero sequence stride makes every offset 0. Its outputs have no element to compare, and a comparison that compares no element passes without a check. | 56 |
 | `dropout_without_rng_dump` | Random dropout without an `rng_dump` output has no oracle: the references check random dropout only through the dumped mask. | 4 (4 otherwise expressible) |
 
-These are the rows that the selection step chooses from the current
-`levels.csv`, which has 27,249 rows. 27,132 rows become bundles and 117 rows
-are excluded. Of the excluded rows, 113 have at least one of the first two
-reasons. The other 4 could be bundles but have only dropout without
-`rng_dump`; 3 of them are uncheckable singles. A data start past an aligned allocation start (`element_aligned`, `sub_element`) is a bundle
-content: the case's metadata `start_offsets` gives the offset of each such
-tensor. When the case has per-sequence query lengths in a `seq_len_q` tensor,
-the metadata `live_rows` marks the dense Stats, logit-max and sum-of-exponents
-outputs, so that a comparison skips their rows past each sequence's length. The bundle set in
-the tree is regenerated from this selection later.
+27,132 of the 27,249 rows became bundles and 117 rows are excluded. Of the
+excluded rows, 113 have at least one of the first two reasons. The other 4
+could be bundles but have only dropout without `rng_dump`; 3 of them are
+uncheckable singles.
 
-The selection step never changes the model or the generated rows. It only
-filters. To bring a row back, change the filter and regenerate the bundles.
+A data start past an aligned allocation start (`element_aligned`,
+`sub_element`) is a bundle content: the case's metadata `start_offsets` gives
+the offset of each such tensor. When the case has per-sequence query lengths (a
+`seq_len_q` tensor, or a ragged Q whose offsets give the lengths), the metadata
+`live_rows` marks the dense Stats, logit-max
+and sum-of-exponents outputs, so that a comparison skips their rows past each
+sequence's length.
 
-| Tier | All rows | Bundle rows | Sweeps | Largest sweep | Summed `est_seconds` of the bundle rows, gfx942 / gfx950 |
+The bundle tools never change the model or the rows of the case list. They only
+filter. To bring a row back, the filter of the bundle tools must change and the
+bundles must be made again.
+
+| Tier | All rows | Bundle rows | Sweeps | Largest sweep | Summed `est_seconds` of the bundle rows as % of the tier's budget, gfx942 / gfx950 |
 |---|---|---|---|---|---|
-| quick | 1,506 | 1,500 | 143 | 353 | 53.1 / 41.0 |
-| standard | 9,555 | 9,519 | 379 | 2,174 | 515.8 / 384.2 |
-| comprehensive | 4,643 | 4,622 | 334 | 966 | 1,745.8 / 1,243.7 |
-| full | 11,545 | 11,491 | 466 | 2,451 | 4,693.0 / 3,354.7 |
-| total | 27,249 | 27,132 | 1,322 | | |
+| quick | 1,506 | 1,500 | 87 | 492 | 17.7 % / 13.7 % |
+| standard | 9,555 | 9,519 | 231 | 2,584 | 28.7 % / 21.3 % |
+| comprehensive | 4,643 | 4,622 | 203 | 1,237 | 24.2 % / 17.3 % |
+| full | 11,545 | 11,491 | 294 | 2,452 | — |
+| total | 27,249 | 27,132 | 815 | | |
 
 ### 9.2 How a graph is made from a row
 
-The PoC graph builder (`src/sdpa-case-flow-poc/CaseGraph.cpp`, run by
-`hipdnn_sdpa_case_flow_runner --export-graphs`) makes the graphs. The
-discovery program `hipdnn_sdpa_case_flow_discovery` uses the same graph
-builder; the README of the generator tells what each program is for
-([The two C++ programs](../../scripts/sdpa_case_flow_poc/README.md#the-two-c-programs)). The
-`"generator": "hipdnn_sdpa_case_flow_runner"` field in each case's metadata
-names this graph builder.
+The graph exporter makes the graphs. The `generator` field in each case's
+metadata holds the name of this program (`hipdnn_sdpa_case_flow_runner`), and
+`generator_version` its version.
 
-1. The PoC graph builder reads the row and the class-to-value table, and makes
+1. The graph exporter reads the row and the class-to-value table, and makes
    concrete sizes, strides, formats and attributes.
 2. It builds the graph with the hipDNN frontend and calls `validate()`.
-3. It writes the graph as JSON text with `Graph::to_json()`. This is the same
+3. It serializes the graph to JSON with `Graph::to_json()`. This is the same
    converter that the suite's graph capture uses. No GPU is needed.
 
 The graphs exported for gfx942 and for gfx950 are the same for every bundle
-row once the bundle import renumbers the tensor uids
-(`scripts/sdpa_case_flow_poc/bundles/compare_exports.py`): each number format
-is the same on every GPU (`class_to_value` in `model.yaml`).
+row once the bundle import renumbers the tensor uids: each number format is the
+same on every GPU (`class_to_value` in `model.yaml`). So the FNUZ fp8 formats
+are their own values of `dtype_q`, and every GPU loads every case.
 
 ### 9.3 Topologies and sweeps
 
-A sweep cannot add or drop a tensor. So the cases of one sweep must have the
-same set of tensors. The **topology** of a row is that set, plus the form of
-each scalar tensor (passed by value at build time, or supplied at run time).
+The **topology** of a row is the set of its tensors, plus the form of each
+scalar tensor (passed by value at build time, or supplied at run time) and
+whether Stats is ragged.
 
-The topology name lists the optional tensors in a fixed order, one token
-each. A row with only Q, K, V and O is `Base`. Examples:
+The topology name lists the optional tensors (every tensor except Q, K, V and
+O), one token each, in the order of the table. For a cell with two or more
+tokens, the name uses them in the order that the cell lists them.
 
-| Topology | Tensors beyond Q, K, V, O |
+| Token | Tensor |
 |---|---|
-| `Stats` | the per-row log-sum-exp output |
+| `RgQ`, `RgK`, `RgV`, `RgO`, `RgSt` | the ragged offsets of Q, K, V, O and Stats, one list each |
+| `RgQs`, `RgKvs` | one ragged offset list for the whole Q side or the whole K/V side |
+| `SlQ`, `SlKv` | the per-sequence lengths of the query side and of the key side |
+| `Bm` | a block mask |
 | `Bias` | an additive bias |
-| `ScRt` | a scale supplied at run time |
-| `DqBv_DkBv_DvBv` | fp8 descales of Q, K and V, passed by value |
-| `Stats_DqBv_DkBv_DvBv` | Stats plus the three descales |
+| `Sink` | sink logits |
+| `ScBv`, `ScRt` | the attention scale, passed by value or supplied at run time |
+| `DSeed`, `DSeedBv`, `DOff`, `DOffBv` | the dropout seed and offset, in device memory or passed by value |
+| `DMask` | a caller-supplied dropout mask |
+| `DScBv` | the dropout scale, passed by value |
+| `Rng` | the dumped dropout pattern (`rng_dump`) |
+| `Stats`, `StatsRg` | the per-row log-sum-exp output, dense or ragged |
+| `Max`, `SumExp` | the per-row logit maximum and sum of exponents |
+| `AmaxS`, `AmaxO` | the absolute maximum of the scores and of O (fp8) |
+| `Dq`, `DqBv` | the descale of Q: a list in device memory, or passed by value |
+| `Dk`, `DkBv` | the descale of K, in the same two forms |
+| `Dv`, `DvBv` | the descale of V, in the same two forms |
+| `DsBv` | the descale of the scores, passed by value |
+| `SsBv`, `SoBv` | the fp8 scale of the scores and of O, passed by value |
+| `PtK`, `PtKOff` | the page table of K, and the offsets of a packed page table of K |
+| `PtV`, `PtVOff` | the page table of V, and the offsets of a packed page table of V |
+| `PtKv` | one page table shared by K and V |
+
+A ragged Stats that shares the `RgQs` list has no `RgSt` token.
 
 A name longer than 64 characters keeps its first tokens and ends with 6 hex
-digits of a hash. The 27,249 rows have 484 topologies; the bundle rows use 469.
-One sweep holds the cases of one tier and one topology.
+digits of a hash.
+
+A sweep cannot add a tensor, but a case can leave tensors out: its
+`absent_tensors` lists the template tensors that its graph does not have
+([File Formats](../file-formats.md)). So one sweep's template holds the union of
+the tensors of several topologies. The bundle tools group per tier: they sort
+the topologies largest first and put each one into the smallest earlier
+superset that can hold it. A superset can hold a topology when the topology's
+tensors are a subset of its tensors and the two have the same scale form, the
+same dropout input form, the same page tables and the same ragged offsets. A
+topology that fits none starts a new superset. Every superset is the topology
+of a row, and the sweep folder takes its name. So there is no `Base` folder:
+the rows with only Q, K, V and O run in sweeps whose other tensors are absent
+for them. The 27,132 bundle rows fill 815 sweeps under 307 folder names; 23,946
+cases name absent tensors.
 
 The suite's import tool `migration-scripts/import_graph.py` groups the graphs.
 Its default behaviour does not change. The grouping uses opt-in flags
 ([Grouped import for generated cases](../../migration-scripts/README.md#grouped-import-for-generated-cases-opt-in)):
 
 - `--op-dir SdpaFwdPlan --topology <Topology>` name the folders.
+- `--superset-templates` lets a graph whose tensors are a subset of a sweep's
+  template join that sweep, with its missing tensors in `absent_tensors`.
 - `--template-attributes` and `--template-alignment` let node attributes and
   tensor alignment vary from case to case in one sweep.
 - `--skeleton-value-form` keeps scale forms (by value or at run time) in
@@ -663,40 +750,63 @@ These sweeps use the compact layout. Each child of `values` and each sibling
 of `values` is on its own line, and each tensor is on its own line.
 `import_mode.format` records the layout, and an append keeps it.
 
+After a change to the bundle tree, run `scripts/verify_support_claims.py`.
+`SUPPORT_MATRIX_OVERVIEW.md` is refreshed in a PR of its own, not here, so it
+may lag the bundle change until then
+([Support Matrix](../support-matrix.md)).
+
 ### 9.4 Ids, names and metadata
 
-- **Case id**: `<dtype_q>_<case_key>`, for example `bf16_52c686d72f0c4623`.
+- **Case id**: `<dtype_q>_<case_key>`, for example `bf16_0b94e9a2e5764569`.
 - **GTest name**: `<tier>_SdpaFwdPlan_<Topology>.<case id>`, for example
-  `quick_SdpaFwdPlan_Base.bf16_52c686d72f0c4623`.
-- **Metadata** of each case: `format_version`, `generator`,
-  `generator_version`, `reference_source`, `seed`, `case_key`, `csv_case_id`
-  and `generated_from_sha256` (the SHA-256 of the generated CSV). Use
-  `case_key` to find the row in the generated CSV (section 8).
-- **`cases.csv`**: `reference_source` names `test-plans/sdpa-fwd/cases.csv`.
-  That file is not stored in the repository;
-  `scripts/sdpa_case_flow_poc/bundles/annotate_csv.py` writes it. It is `levels.csv` with five columns
-  added at the end of each row: `topology`, `bundle_status`,
-  `exclusion_reasons`, `bundle_path` and `gtest_name`. Remove these five
-  columns and you get `levels.csv` byte for byte. Its rows have the same
-  `case_key` values as `levels.csv`, so `case_key` links each case to its
-  row in `levels.csv`.
+  `quick_SdpaFwdPlan_Bias_Sink.bf16_0b94e9a2e5764569`.
+- **Metadata** of each case: `format_version`, `generator` (the name of the
+  graph exporter), `generator_version`, `reference_source`, `seed`,
+  `case_key`, `csv_case_id`, `generated_from_sha256` (the SHA-256 of the case
+  list) and `inputs`. Some cases also have `start_offsets`, `live_rows`
+  (section 9.1) and `aliases` (section 4). Use `case_key` to find the row in
+  the case list (section 8).
+- **`reference_source`** names `test-plans/sdpa-fwd/cases.csv`: the copy of
+  the case list that the bundles came from, which is not in the repository
+  (section 1). That copy is the case list of section 8 with five columns added
+  at the end of each row by the bundle tools: `topology`, `bundle_status`,
+  `exclusion_reasons`, `bundle_path` and `gtest_name`. Its rows have the same
+  `case_key` values as the case list, so `case_key` links each case to its row.
 - **Seed**: the input seed of a case is the first 8 hex digits of its
   `case_key`, masked to 31 bits. Example: `case_key` `a69ef8a0…` gives seed
   0x269ef8a0 = 647,952,544.
-- **Inputs**: the suite fills the input tensors. A scale that is supplied at
-  run time gets a fixed fill in `metadata.inputs`
-  (`{"kind": "fixed", "value": …}`).
+- **Inputs**: the suite fills the input tensors. `metadata.inputs` gives a seed
+  for each input. An input whose contents matter gives them too: a scale that
+  is supplied at run time gets a fixed fill (`{"kind": "fixed", "value": …}`),
+  and page tables, offsets, lengths, block masks, descale lists, dropout masks
+  and dropout seeds and offsets get their exact values
+  (`{"kind": "values", …}`).
 
 The bundles have no golden data. The suite checks each output against the
 hipDNN GPU and CPU SDPA reference executors.
 
 ### 9.5 Lanes
 
-A **lane** is one engine's run of the suite. The `ASM_SDPA_ENGINE` lane selects
-every op folder whose name contains `Sdpa`, so it runs these cases. The
-HIP_MLOPS, MIOPEN and hipBLASLt lanes have no SDPA support. Their tier YAML
-files exclude `*_SdpaFwdPlan_*`, so they do not load these cases only to
-decline them.
+A **lane** is one engine's run of the suite. The cases are generic SDPA
+forward tests, so every SDPA engine lane runs them. The `ASM_SDPA_ENGINE` lane
+selects every op folder whose name contains `Sdpa`. The other SDPA engine lanes
+of the hip-kernel provider, the rocKE attention engines
+(`hipkernel:Gfx942AttentionDense`, `hipkernel:Gfx942AttentionUnified2D`,
+`hipkernel:Gfx942AttentionUnified3d`, `hipkernel:Gfx950AttentionDense`,
+`hipkernel:Gfx950AttentionUnified2D` and `hipkernel:Gfx950AttentionUnified3D`) and the FlyDSL SDPA engines
+(`hipkernel:flydsl_sdpa_*`), select `<tier>_SdpaFwdPlan_*` in each tier of
+their tier YAML file, beside their own `SdpaFwd` bundles. A case that an engine
+does not accept is declined, and the suite skips it. The HIP_MLOPS, MIOPEN and
+hipBLASLt lanes have no SDPA support. Their tier YAML files exclude
+`*_SdpaFwdPlan_*`, so they do not load these cases only to decline them.
+
+The FlyDSL SDPA lanes also run the 8 cases whose attention scale is a
+run-time tensor holding zero or a negative value (4 standard, 1 comprehensive,
+3 full). Every FlyDSL SDPA lane declines the 4 zero-scale cases.
+`flydsl_sdpa_cdna` and `flydsl_sdpa_rdna` pass the 4 negative-scale cases,
+which have a bias, and the other FlyDSL SDPA lanes decline them. A
+comprehensive CI run on gfx94X, gfx950, gfx90a and Windows gfx110X ran these
+cases without a skip, and none failed.
 
 ## 10. Known engine defects and their skips
 
@@ -706,15 +816,30 @@ gets a **skip**: an entry in the engine's TOML file that tells the suite not to
 run the case. The case stays in its tier. This section tells how the skips for
 these cases were made, and how to remove them.
 
-The skips are in
-[`ASM_SDPA_ENGINE.toml`](../../../hip-kernel-provider/config/ASM_SDPA_ENGINE.toml),
-after the comment line `-- SdpaFwdPlan known engine defects --`. Read that file
-for the current list. This document does not copy it.
+The skips are in the TOML file of each engine's lane (the file that the lane
+passes as `--test-config`). Engines that share a TOML file share its skips: a
+skip in
+[`hipkernel_Gfx950Attention.toml`](../../../hip-kernel-provider/config/hipkernel_Gfx950Attention.toml)
+applies to all three gfx950 rocKE attention engines, and a skip in
+[`hipkernel_flydsl_sdpa.toml`](../../../hip-kernel-provider/config/hipkernel_flydsl_sdpa.toml)
+applies to all six FlyDSL SDPA forward engines. Only
+[`ASM_SDPA_ENGINE.toml`](../../../hip-kernel-provider/config/ASM_SDPA_ENGINE.toml)
+holds defect skips, after the comment line
+`-- SdpaFwdPlan known engine defects --`.
+Read the TOML files for the current list. This document does not copy it.
+
+A refusal at run time is not a defect, but the suite cannot yet accept a
+refusal as the expected outcome (ALMIOPEN-3247). The FlyDSL SDPA lanes have
+no skips for the 8 run-time zero and negative scale cases: no FlyDSL SDPA
+lane refuses them at run time (section 9.5).
+`ASM_SDPA_ENGINE` declines most of these cases. Its TOML file skips the
+4 cases that it refuses at run time, under ALMIOPEN-3247.
 
 ### 10.1 Running the cases
 
-1. Run the `ASM_SDPA_ENGINE` lane of `hipdnn_integration_tests` (section 9.5)
-   on the `SdpaFwdPlan` cases of each tier, on a gfx942 GPU and on a gfx950 GPU.
+1. Run each SDPA engine's lane of `hipdnn_integration_tests` (section 9.5)
+   on the `SdpaFwdPlan` cases of each tier, on a GPU of each architecture that
+   the engine supports: gfx942 and gfx950 for `ASM_SDPA_ENGINE`.
 2. Run each tier two times, once with each **input fill**. The input fill is
    how the suite makes the input data. The default fill makes large inputs on
    the GPU. The host fill (`HIPDNN_TEST_HOST_INPUT_FILL=1`) makes every input on
@@ -733,7 +858,7 @@ A case that failed with either fill counts as a failure.
 
 Each failure must have a known cause before it gets a skip.
 
-1. Find the case's row in the generated CSV with the `case_key` in the case's
+1. Find the case's row in the case list with the `case_key` in the case's
    metadata (section 9.4). The row gives every setting of the case.
 2. Read the failure message. It names each output tensor that does not match,
    for example O, Stats, Max or Sum_exp.
@@ -747,23 +872,23 @@ Each failure must have a known cause before it gets a skip.
 
 Do not skip a failure that has no ticket.
 
-A case can have the triggers of more than one defect. A skip applies to the
-whole test, and the first entry that matches a test is the one that the suite
-uses. So such a case is skipped under one ticket only. Use the ticket of the
-defect that the failure message shows, for example the defect that makes the
-failing tensor wrong. The case still has its other defects. Section 10.4 tells
-what to do about them when a fix lands.
+A case can have the triggers of more than one defect. Such a case is in the
+entry of each of those defects (section 10.3). A skip applies to the whole
+test, and the first entry that matches a test is the one that the suite uses.
+So the suite reports the skip under one ticket only. The case still has its
+other defects. Section 10.4 tells what to do about them when a fix lands.
 
 ### 10.3 Writing a skip entry
 
 A skip entry is a `[[test_skips]]` table
-([File Formats](../file-formats.md)). Write one entry for each defect and each
-set of GPUs. An entry has three fields:
+([File Formats](../file-formats.md)). A defect may have more than one entry,
+for example one that lists globs and one that lists exact names. Give each
+entry a comment that says which of the defect's cases it covers. An entry has
+these fields:
 
 ```toml
 # SdpaFwdPlan cases that <trigger, in a few words>.
 [[test_skips]]
-archs = ["gfx942", "gfx950"]
 filters = [
     "<tier>_SdpaFwdPlan_<Topology>.*",
     "<tier>_SdpaFwdPlan_<Topology>.<case id>",
@@ -771,10 +896,6 @@ filters = [
 reason = "ALMIOPEN-NNNN: <what the engine does wrong>"
 ```
 
-- `archs`: the GPUs on which the failure was seen. Do not add a GPU on which
-  the case passed, or on which it was not run. The suite matches each value as
-  part of the GPU's architecture name, so `gfx942` matches
-  `gfx942:sramecc+:xnack-`.
 - `filters`: GTest names (section 9.4). A name can hold `*`, which matches any
   run of characters. A name with `*` is a **glob**; a name without `*` is an
   **exact name**.
@@ -782,61 +903,175 @@ reason = "ALMIOPEN-NNNN: <what the engine does wrong>"
   the ticket key, then a colon, then the defect in one short sentence. When a
   second ticket blocks the check (for example, a reference executor cannot yet
   check the case), name that ticket in the sentence too.
+- `archs` (optional): the GPU architectures on which the entry applies. An
+  entry without `archs` applies on every GPU. Add `archs` only when the defect
+  is specific to an architecture. Then list every architecture of the affected
+  family, not only the GPUs on which the cases were run. For example, the
+  `FP8_E4M3_FNUZ` entry lists the FNUZ-native targets `gfx940`, `gfx941` and
+  `gfx942`. The suite matches each value as part of the GPU's architecture
+  name, so `gfx942` matches `gfx942:sramecc+:xnack-`.
 
-Use a glob only when it is safe. A glob is safe when, on every GPU in `archs`,
-every case that it matches either failed with this defect or was declined.
-Otherwise, list exact names. Some defects give a wrong output only with some
-input data. For those defects, always list exact names: a glob could hide a case
-that passes.
+#### Which cases an entry covers
+
+An entry covers every case that has the defect's trigger: the layout, the
+setting or the value that the ticket names. It covers those cases on every GPU,
+unless the defect is specific to an architecture. It covers them also when some
+of them pass today. Some defects give a result that depends on the memory
+contents or on the GPU. Such a case can pass by chance, so a pass does not show
+that the engine is correct for it. Examples:
+
+- ALMIOPEN-3041: every case with a Q, K, V or O head-dim stride other than 1.
+  The engine reads memory outside the layout, so the result depends on the
+  contents of that memory.
+- ALMIOPEN-3042: every case with self-overlapping Q, K or V sequence strides,
+  and every case with a Stats layout that the kernel cannot address. The
+  result depends on the input data and on the memory contents.
+
+ALMIOPEN-3123, ALMIOPEN-3124, ALMIOPEN-3126 and ALMIOPEN-3211 have no entry.
+Since rocm-libraries #15768, `ASM_SDPA_ENGINE` declines the 1,526 cases that
+the ALMIOPEN-3124, ALMIOPEN-3126 and ALMIOPEN-3211 entries skipped (628
+`standard`, 257 `comprehensive` and 601 `full`). With those entries removed,
+the engine declined every one of these cases on gfx942 and on gfx950, in
+3 runs with each fill.
+
+With the ALMIOPEN-3123 fix (#15768), With its fix (rocm-libraries #15768),
+`ASM_SDPA_ENGINE` declines a graph that has a block mask, or a dropout mask
+and a dropout scale. The engine declines, on gfx942 and gfx950 with both
+fills, the 445 trigger cases that failed before the fix (207 `standard`, 111
+`comprehensive` and 127 `full`). On the `quick`, `standard` and
+`comprehensive` tiers, the fix moved 123 cases on gfx942 and 120 on gfx950
+from passed to declined, and no case failed. The other `full` tier trigger
+cases were not run after the fix.
+
+The `ASM_SDPA_ENGINE` results on the `SdpaFwdPlan` cases with the fix, per
+tier (each tier's own cases), with the GPU reference and the default fill:
+
+| Tier | Cases | gfx942 passed / declined / skipped | gfx950 passed / declined / skipped |
+|---|---|---|---|
+| quick | 1,500 | 170 / 1,204 / 126 | 150 / 1,342 / 8 |
+| standard | 9,519 | 320 / 8,440 / 759 | 302 / 8,915 / 302 |
+| comprehensive | 4,622 | 151 / 4,207 / 264 | 137 / 4,410 / 75 |
+
+No case failed. A skipped case matches a `[[test_skips]]` entry of
+`ASM_SDPA_ENGINE.toml`. The skips differ by GPU because the `FP8_E4M3_FNUZ`
+entry applies on gfx942 only. That run still had the ALMIOPEN-3124,
+ALMIOPEN-3126 and ALMIOPEN-3211 entries. The table counts the cases that they
+skipped as declined: 608 `standard` and 253 `comprehensive` cases on gfx942,
+and 628 and 257 on gfx950. gfx942 has 24 fewer because the `FP8_E4M3_FNUZ`
+entry comes first and still skips them.
+
+Use a list of exact names from measured failures only for a defect that has no
+known trigger. For example, the ALMIOPEN-3212 entry names the one case that
+showed the defect.
+
+#### Building an entry from the bundles
+
+Build a trigger-based entry from the bundle data, not from the results of a
+run:
+
+1. Read the graph and the metadata (section 9.4) of every `SdpaFwdPlan` case.
+2. Select each case that has the trigger. For example, select each case with a
+   tensor whose head-dim stride is not 1. For a scale, read the scale's value in
+   the graph, or its fixed fill in `metadata.inputs`.
+3. Put the GTest name of each selected case in `filters`.
+4. Replace exact names with a glob only when every case that the glob matches
+   has the trigger.
+
+Build the entry again in the same way when the bundles change. A run does not
+change the entry.
 
 A glob also skips the declined cases that it matches. The suite then records no
-result for those cases on that GPU.
+result for those cases.
 
-Check the entries before you commit them. Apply the entries to the recorded
-results of section 10.1. Every failure must be skipped. No passing case may be
-skipped. Each skipped failure must be skipped under a ticket whose trigger the
-case has.
+#### Checking the entries
+
+Check the entries before you commit them:
+
+1. Apply each trigger-based entry to the bundles. Every case with the trigger
+   must match the entry. Every case that the entry matches must have the
+   trigger.
+2. Apply all the entries to the recorded results of section 10.1. Every failure
+   must be skipped, under a ticket whose trigger the case has, or under the
+   ticket of section 10.5. A skipped case that passes is correct when it has
+   the trigger.
 
 ### 10.4 Removing a skip when a fix lands
 
 1. When a fix for a ticket lands, find every entry whose `reason` starts with
    that ticket key. Delete those entries in the change that lands the fix.
-2. Run the cases again on every GPU in the deleted entries' `archs`.
+2. Run the cases that those entries matched (section 10.1). Run them on gfx942
+   and on gfx950. For an entry with `archs`, run them on a GPU of the listed
+   architectures.
 3. A case that passes, or that the engine declines, needs nothing more.
-4. A case that still fails has another defect (section 10.2). Add it to the
-   entry for that defect's ticket, with the rules of section 10.3.
+4. A case that still fails has another defect (section 10.2). If that defect
+   has a trigger, make sure that its entry matches the case (section 10.3). If
+   that defect has no known trigger, add the case to its entry as an exact
+   name.
 
-Some known defects need a setting that no bundle can express, for example a
-packed page table. Rows with such a setting are excluded (section 9.1), so
-these defects need no skip.
+A known defect that needs a setting that no bundle can express needs no skip:
+rows with such a setting are excluded (section 9.1).
+
+### 10.5 Unverifiable cases
+
+An uncheckable single (section 7) that the engine accepts is reported as
+Unverifiable, and an unverifiable case fails. The cause is a gap in the
+references, not an engine defect: no reference can compute the expected output
+of the case. Such a case gets a skip whose ticket is the one that blocks the
+check, for example a reference executor that does not take the case's setting.
+The entry omits `archs`, because the gap is the same on every GPU. Delete the
+entry when the blocking ticket is fixed, then follow section 10.4.
 
 ## 11. Limits and what comes next
 
 - The cases come from a PoC. The labels, the tier recipe and the budgets are a
-  draft for review.
+  draft for review. The programs that made the cases are not all in the
+  repository (section 1).
 - No **support claims** are recorded for these cases. A support claim is a
   `support.json` file beside a sweep. It says that an engine supports a case on
-  a given GPU ([Support Matrix](../support-matrix.md)). Claims come in a later
-  change.
-- 403 rows are not bundles. 385 of them need settings a bundle cannot express
-  or compare (§ 9.1), mostly tensors that share memory. The other 18 have random
-  dropout without `rng_dump`. They are rows of the generated CSV, but no bundle
-  holds them.
+  a given GPU ([Support Matrix](../support-matrix.md)). Each sweep's
+  `support.json` is empty. Claims come in a later change, tracked in
+  ALMIOPEN-3225.
+- The support features name a broadcast q's layout by a convention, because
+  a stride-0 dim has no position in memory (`scripts/support_features/sdpa.py`).
+  Four broadcast-q cases have the strides `(h*d, d, 0, 1)` on b, h, s, d and
+  read `layout:sbhd`. An expand along s of a bhsd q gives the same strides, so
+  the label cannot tell the two apart.
+- 117 rows of the case list are not bundles (section 9.1).
 - `ASM_SDPA_ENGINE` declines every graph that declares a tensor alignment
-  below 16 bytes. So a runner pinned to it gets no engine result for an
-  `element_aligned` or `sub_element` row. The GPU reference reads and writes
-  that row's tensors at the shifted data starts. Below the CPU reference's
-  size limit, the runner compares the two references.
-- The rejection probes and the API-path variants in `injections.yaml` are not
-  bundles. They belong to a rejection suite.
+  below 16 bytes. So its lane gets no engine result for an `element_aligned` or
+  `sub_element` row.
+- Requests that hipDNN must refuse, and one request stated through different
+  API routes, are not bundles. They belong to a rejection suite.
 - The sizes override cannot set the page size or the window bounds, so the
   size sweep gives them no typical or corner sizes.
-- The suite is expected to read the CSV directly in a later step. The bundles
-  under `SdpaFwdPlan` will then be removed.
+- The suite is expected to read the case list directly in a later step. The
+  bundles under `SdpaFwdPlan` will then be removed.
 
-## 12. How to regenerate
+## Generator workbench (POC branch only)
 
-**The CSV.** Run the generator from `dnn-providers/integration-tests/scripts`.
+This section applies only to the generator workbench branch, which carries the
+case generator in the repository. It does not apply to `develop`. On this
+branch, the statements above that the case generator and the case list are not
+in the repository do not hold: the files below are present.
+
+| File | What it holds |
+|---|---|
+| [`test-plans/sdpa-fwd/injections.yaml`](../../test-plans/sdpa-fwd/injections.yaml) | The cases that are added on purpose, outside the generated sets: rejection probes, API-path variants, controls. The `probe` keys in `rules.yaml` name its entries. |
+| [`test-plans/sdpa-fwd/timings-gfx942.csv`](../../test-plans/sdpa-fwd/timings-gfx942.csv), [`timings-gfx950.csv`](../../test-plans/sdpa-fwd/timings-gfx950.csv) | The measured time of each case on one GPU. |
+| [`test-plans/sdpa-fwd/levels.csv`](../../test-plans/sdpa-fwd/levels.csv) | A copy of the generated case list, so that you can compare your file with it. No tool reads it. |
+| [`test-plans/sdpa-fwd/levels.csv.sha256`](../../test-plans/sdpa-fwd/levels.csv.sha256) | The SHA-256 of the generated case list. |
+| [`scripts/sdpa_case_flow_poc/`](../../scripts/sdpa_case_flow_poc/README.md) | The generator: it turns `model.yaml`, `rules.yaml`, `injections.yaml` and the timing files into the case list. |
+
+On this branch the `comprehensive` tier in `model.yaml` has `budget_min: 60`,
+not the 120 min that section 7 and the RFC table name. With 120, the fill step
+pulls full-tier cases down into `comprehensive` until the tier uses 50 % of its
+budget, so the case list, its SHA-256 and the bundle names change. With 60 the
+generated case list matches `levels.csv.sha256` and the bundle tree in the
+repository.
+
+### How to regenerate
+
+**The case list.** Run the generator from `dnn-providers/integration-tests/scripts`.
 It needs Python 3 and PyYAML. It takes about 10 minutes.
 
 ```bash
@@ -856,7 +1091,11 @@ To check the result, compare the SHA-256 of `levels.csv` with
 sha256sum <output folder>/levels.csv
 ```
 
-The test `scripts/test_sdpa_fwd_levels_regenerate.py` runs these two steps.
+The test `scripts/test_sdpa_fwd_levels_regenerate.py` (CTest
+`hipdnn_sdpa_fwd_levels_regenerate_python_tests`) runs these two steps. When a
+change to the model, the timing files or the generator changes the case list,
+write the new SHA-256 to `levels.csv.sha256` and copy the new file to
+`test-plans/sdpa-fwd/levels.csv` in the same change.
 
 You can also compare your file with the committed copy, byte for byte. Run
 this from `dnn-providers/integration-tests/scripts`. `cmp` prints nothing when
@@ -866,10 +1105,11 @@ the files are the same:
 cmp <output folder>/levels.csv ../test-plans/sdpa-fwd/levels.csv
 ```
 
-**The bundles.** The steps that turn CSV rows into bundles (sections 9.1 to 9.4)
-are in [`scripts/sdpa_case_flow_poc/README.md`](../../scripts/sdpa_case_flow_poc/README.md#from-the-csv-to-bundles).
-The bundles under `SdpaFwdPlan` are not on this branch; those steps make them.
-The last step compares your bundles with ours.
+**The bundles.** The steps that turn case-list rows into bundles (sections 9.1
+to 9.4) are in [`scripts/sdpa_case_flow_poc/README.md`](../../scripts/sdpa_case_flow_poc/README.md#from-the-csv-to-bundles).
+The bundles under `SdpaFwdPlan` are tracked in the repository; a regenerated
+tree that differs from them must keep the `ASM_SDPA_ENGINE.toml` filter checks
+passing (section 10.3).
 
 After a change to the bundle tree, run `scripts/verify_support_claims.py` and
 regenerate `SUPPORT_MATRIX_OVERVIEW.md` with
