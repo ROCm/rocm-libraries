@@ -2301,8 +2301,9 @@ __device__ I laed4_alt(I n,
 /** STEDC_MERGEVALUES_KERNEL solves the secular equation for every pair of sub-blocks
     that need to be merged.
         - Call this kernel with batch_count groups in y, and as many groups in x as needed
-          to cover n (i.e. n_groups_x * groups_size_x >= n). Workgroup size is STEDC_SOLVE_BDIM
-          (= warp size). **/
+          to cover n (i.e. n_groups_x * groups_size_x >= n). Workgroup size depends on whether
+          the reference secular equation solver is used (defaulting to STEDC_SOLVE_BDIM in
+          this case) or warpSize (otherwise). **/
 
 template <typename S, typename I>
 ROCSOLVER_KERNEL void __launch_bounds__(STEDC_SOLVE_BDIM)
