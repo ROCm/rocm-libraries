@@ -18,7 +18,7 @@
 
 #include <thrust/detail/config/libcxx.h>
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(detail/libcxx/include/stdexcept)
+#  include _THRUST_STD_INCLUDE(__host_stdlib/stdexcept)
 #else
 #  include <thrust/detail/libcxx_wrapper/std/__cccl/attributes.h>
 #  include <thrust/detail/libcxx_wrapper/std/__cccl/exceptions.h>

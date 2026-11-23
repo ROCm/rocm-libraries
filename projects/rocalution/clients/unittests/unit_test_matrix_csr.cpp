@@ -719,31 +719,18 @@ TYPED_TEST(matrix_csr, replace_column_vector)
         expect_same(csr_of(*A), from_dense(ref.n, ref.n, D));
     };
 
-    auto checks = [&] {
-        // Rows 1 and 3 hold column 2 and lose it, row 2 keeps it with a new value
-        std::vector<T> column(ref.n, T(0));
-        column[2] = 70;
-        {
-            SCOPED_TRACE("removed and replaced entries");
-            expect_replaced(column);
-        }
-
-        KNOWN_BUG("inserting an entry drops the next entry of its row");
-
-        // Row 4 does not hold column 2 and gains it before its column 3
-        column[4] = 90;
-        SCOPED_TRACE("an inserted entry");
-        expect_replaced(column);
-    };
-
-    if(TypeParam::backend == Backend::Accelerator)
+    // Rows 1 and 3 hold column 2 and lose it, row 2 keeps it with a new value
+    std::vector<T> column(ref.n, T(0));
+    column[2] = 70;
     {
-        KNOWN_BUG("the scan does not write the last row offset, so a garbage nnz leads to an "
-                  "illegal memory access that ends the process");
-        expect_in_child(checks);
-        return;
+        SCOPED_TRACE("removed and replaced entries");
+        expect_replaced(column);
     }
-    checks();
+
+    // Row 4 does not hold column 2 and gains it before its column 3
+    column[4] = 90;
+    SCOPED_TRACE("an inserted entry");
+    expect_replaced(column);
 }
 
 TYPED_TEST(matrix_csr, replace_row_vector)
@@ -1083,8 +1070,6 @@ TYPED_TEST(matrix_csr, connectivity_order_sorts_the_rows_by_their_non_zeros)
     std::vector<int> p = values_of(*perm);
     ASSERT_TRUE(is_permutation(p));
 
-    KNOWN_BUG("it returns perm[new] = old instead of the perm[old] = new that Permute takes");
-
     Csr<T> sorted = permuted(ref, p);
     for(int i = 1; i < sorted.n; ++i)
     {
@@ -1171,6 +1156,51 @@ TYPED_TEST(matrix_csr, maximal_independent_set)
             }
         }
         EXPECT_NE(in_set, coupled) << "row " << i;
+    }
+}
+
+// On a nonsymmetric pattern a row can couple to a member of the set that is not coupled to
+// it. The set is independent and maximal in the pattern of A + A^T, and its members take the
+// first size positions. Row i + 1 of the lower bidiagonal matrix couples to row i only, and
+// the lower triangle of general(8) also couples row 6 to row 1.
+TYPED_TEST(matrix_csr, maximal_independent_set_of_a_nonsymmetric_pattern)
+{
+    using T = typename TypeParam::value_type;
+    const Csr<T> matrices[]
+        = {filtered(general<T>(6), [](int i, int j, T) { return j == i || j == i - 1; }),
+           filtered(general<T>(8), [](int i, int j, T) { return j <= i; })};
+
+    for(const Csr<T>& ref : matrices)
+    {
+        SCOPED_TRACE("n " + std::to_string(ref.n));
+        auto A = this->make(ref);
+        ASSERT_IN_LOOP(A != nullptr);
+
+        int  size = 0;
+        auto perm = make_vector(TypeParam::backend, std::vector<int>());
+        ASSERT_IN_LOOP(A->MaximalIndependentSet(size, perm.get()));
+
+        std::vector<int> p = values_of(*perm);
+        ASSERT_IN_LOOP(is_permutation(p));
+        EXPECT_EQ(size, ref.n / 2);
+
+        const Csr<T> At = transposed(ref);
+        for(int i = 0; i < ref.n; ++i)
+        {
+            bool in_set  = p[i] < size;
+            bool coupled = false;
+            for(const Csr<T>* B : {&ref, &At})
+            {
+                for(PtrType j = B->row_offset[i]; j < B->row_offset[i + 1]; ++j)
+                {
+                    if(B->col[j] != i && p[B->col[j]] < size)
+                    {
+                        coupled = true;
+                    }
+                }
+            }
+            EXPECT_NE(in_set, coupled) << "row " << i;
+        }
     }
 }
 
@@ -1872,8 +1902,6 @@ TYPED_TEST(host_matrix_csr, rows_and_columns_of_a_matrix_without_entries)
 {
     using T     = typename TypeParam::value_type;
     const int n = 4;
-
-    KNOWN_BUG("rows and columns of a matrix without entries are neither extracted nor replaced");
 
     HostMatrixCSR<T> A(descriptor());
     A.AllocateCSR(0, n, n);

@@ -60,7 +60,7 @@ corpora:
 arms:
   - name: selection
     install_tree: /shared/sweeps/ingestor/install
-    expected_descriptors: 840
+    expected_descriptors: 52
 
 # The arm to run once and DISCARD, so round 1 does not measure a cool device. Name the
 # arm above or an explicit null; an absent key is refused rather than defaulted.

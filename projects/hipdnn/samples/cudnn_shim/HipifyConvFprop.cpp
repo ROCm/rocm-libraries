@@ -168,7 +168,8 @@ int main(int argc, char** argv)
         {
             return fail("build_operation_graph", error);
         }
-        // hipDNN accepts mode A but logs a warning and uses its fallback engine selection.
+        // Mode A ranks engines by their engine-level predictions (hipDNN's ModeA policy); with
+        // no installed model it selects as FALLBACK does.
         if(auto error = graph.create_execution_plans({fe::HeurMode_t::A}); error.is_bad())
         {
             return fail("create_execution_plans", error);

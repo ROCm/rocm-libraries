@@ -1,7 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// CPU-only unit tests for the cross-arch LGBM solver picker. No GPU required.
+// Unit tests for the cross-arch LGBM solver picker. All but two are CPU-only.
+// GPU_LgbmPickerStrictArch_FP16 and GPU_LgbmPickerStrictArch_FP32 need a HIP device for their
+// MockHandle.
 // Two kinds of checks:
 //   * self-contained invariants (vocab loads and is self-consistent; the
 //     scoring seam picks a valid in-range candidate deterministically), and
@@ -16,9 +18,17 @@
 
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 
+#include <miopen/conv/heuristics/lgbm_common.hpp>
 #include <miopen/conv/heuristics/lgbm_pick.hpp>
 #include <miopen/conv/heuristics/lgbm_metadata.hpp>
 #include <miopen/conv/heuristics/lgbm_forest.hpp>
+
+#include <miopen/conv/problem_description.hpp>
+#include <miopen/convolution.hpp>
+#include <miopen/handle.hpp>
+#include <miopen/tensor.hpp>
+
+#include "gtest_common.hpp" // DevDescription, MockHandle
 
 #include <miopen/db_path.hpp>
 #include <miopen/filesystem.hpp>
@@ -26,16 +36,24 @@
 
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <cmath>
+#include <exception>
 #include <fstream>
+#include <memory>
+#include <string_view>
 #include <vector>
 
 namespace {
 
+using miopen::ai::lgbm::GfxVocabCode;
 using miopen::ai::lgbm::kNumFeatures;
 using miopen::ai::lgbm::LgbmForest;
 using miopen::ai::lgbm::LgbmMetadata;
+using miopen::ai::lgbm::NormalizeArchName;
+using miopen::ai::lgbm::PickSolverRanked;
 using miopen::ai::lgbm::ScoreCandidateMatrixForTest;
+using miopen::ai::lgbm::SetNumeric;
 
 // ---------------------------------------------------------------------------
 // Metadata loader
@@ -137,6 +155,168 @@ TEST_F(CPU_LgbmPicker_NONE, ScoresCandidateMatrix)
     std::vector<std::vector<double>> bad(1, std::vector<double>(4, 0.0));
     EXPECT_EQ(ScoreCandidateMatrixForTest(bad), -1);
     EXPECT_EQ(ScoreCandidateMatrixForTest({}), -1);
+}
+
+// gfx1250 parts report their device name as "gfx1250-strict". The model vocab only has the
+// base name, so the L1 lookup must treat both the same (and stay strict about anything else).
+TEST_F(CPU_LgbmPicker_NONE, StrictArchScoresLikeBaseArch)
+{
+    // The suffix rule mirrors legacy_ck_common.hpp: everything from the first '-' is dropped.
+    EXPECT_EQ(NormalizeArchName("gfx1250-strict"), "gfx1250");
+    EXPECT_EQ(NormalizeArchName("gfx1250"), "gfx1250");
+    EXPECT_EQ(NormalizeArchName("gfx942-strict"), "gfx942");
+    EXPECT_EQ(NormalizeArchName("gfx1250-other"), "gfx1250");
+    EXPECT_EQ(NormalizeArchName("gfx9999-strict"), "gfx9999");
+    EXPECT_EQ(NormalizeArchName("gfx9999"), "gfx9999");
+    EXPECT_EQ(NormalizeArchName(""), "");
+
+    // Same vocab code, and it is the code the vocab itself assigns to the base name.
+    const int code = GfxVocabCode("gfx1250");
+    ASSERT_GE(code, 0) << "gfx1250 is expected in the shipped rank vocab";
+    EXPECT_EQ(code, meta.CategoricalCode("gfx_id", "gfx1250"));
+    EXPECT_EQ(GfxVocabCode("gfx1250-strict"), code);
+    EXPECT_EQ(GfxVocabCode("gfx942-strict"), GfxVocabCode("gfx942"));
+    EXPECT_GE(GfxVocabCode("gfx942"), 0);
+    EXPECT_NE(GfxVocabCode("gfx942"), code);
+
+    // An arch outside the vocab still takes the unseen path (-1), with or without a suffix.
+    EXPECT_EQ(GfxVocabCode("gfx9999"), -1);
+    EXPECT_EQ(GfxVocabCode("gfx9999-strict"), -1);
+    EXPECT_EQ(GfxVocabCode("gfx1250x"), -1);
+    EXPECT_EQ(GfxVocabCode(""), -1);
+
+    const auto& forest = LgbmForest::GetRank();
+    if(!forest.IsReady())
+        GTEST_SKIP() << "rank model unavailable";
+
+    // Score every solver in the vocab on two fixed problem rows with the gfx_id column set from
+    // GfxVocabCode, the same way PickSolverRanked fills it. gfx1250 and gfx1250-strict must
+    // give bit-identical scores; the unseen arch (missing branch) must not, or the comparison
+    // would not be sensitive to the gfx_id column at all.
+    constexpr int kIdxGfxId      = 53; // lgbm_model_meta.json rank.feature_order
+    constexpr int kIdxSolverName = 54;
+    static_assert(kIdxSolverName == kNumFeatures - 1);
+
+    const auto score = [&](const std::string& device_name, int solver_code, int variant) {
+        std::array<LgbmEntry, kNumFeatures> row{};
+        for(int i = 0; i < kNumFeatures; ++i)
+            SetNumeric(row[i], 1.0 + static_cast<double>((i * (variant + 1)) % 7));
+        const int gfx               = GfxVocabCode(device_name);
+        row[kIdxGfxId].missing      = gfx < 0 ? -1 : 0;
+        row[kIdxGfxId].fvalue       = gfx < 0 ? 0.0 : static_cast<double>(gfx);
+        row[kIdxSolverName].missing = 0;
+        row[kIdxSolverName].fvalue  = static_cast<double>(solver_code);
+        return forest.Score(row.data(), row.size());
+    };
+
+    bool unseen_differs = false;
+    for(int variant = 0; variant < 2; ++variant)
+    {
+        for(const auto& solver : meta.Solvers())
+        {
+            const int sc          = meta.SolverCode(solver);
+            const double base     = score("gfx1250", sc, variant);
+            const double strict   = score("gfx1250-strict", sc, variant);
+            const double unseen   = score("gfx9999", sc, variant);
+            const double unseen_s = score("gfx9999-strict", sc, variant);
+            EXPECT_EQ(strict, base) << solver;
+            EXPECT_EQ(unseen_s, unseen) << solver;
+            unseen_differs = unseen_differs || unseen != base;
+        }
+    }
+    EXPECT_TRUE(unseen_differs) << "gfx_id column has no effect on any score; test is vacuous";
+}
+
+// The same check through the production entry point. The test above scores with a hand-built
+// row, so it passes even if PickSolverRanked looks the gfx_id up with the raw device name.
+// A mock handle reports the device name, everything else comes from the real device.
+// One fixture per data type, each with its own control.
+template <miopenDataType_t DataType>
+class LgbmPickerStrictArch : public CPU_LgbmPicker_NONE
+{
+protected:
+    static std::unique_ptr<MockHandle> MakeHandle(std::string_view name)
+    {
+        // gfx1250 is a 32 CU, wave32 part in gtest_common.cpp; every name gets the same values.
+        return std::make_unique<MockHandle>(DevDescription{name, 32, 32}, false);
+    }
+
+    static miopen::conv::ProblemDescription MakeProblem(miopen::conv::Direction dir,
+                                                        miopenDataType_t dtype,
+                                                        int n,
+                                                        int c,
+                                                        int k,
+                                                        int hw,
+                                                        int fil,
+                                                        int groups)
+    {
+        const miopen::TensorDescriptor x(dtype, {n, c, hw, hw});
+        const miopen::TensorDescriptor w(dtype, {k, c / groups, fil, fil});
+        const miopen::TensorDescriptor y(dtype, {n, k, hw, hw}); // same-size output
+        const int pad = fil / 2;
+        const miopen::ConvolutionDescriptor conv(
+            2, miopenConvolution, miopenPaddingDefault, {pad, pad}, {1, 1}, {1, 1}, {0, 0}, groups);
+        return dir == miopen::conv::Direction::Forward
+                   ? miopen::conv::ProblemDescription(x, w, y, conv, dir)
+                   : miopen::conv::ProblemDescription(y, w, x, conv, dir);
+    }
+
+    void CheckPickSolverRankedMatchesBaseArch()
+    {
+        std::unique_ptr<MockHandle> base, strict, unseen, unseen_strict;
+        try
+        {
+            base          = MakeHandle("gfx1250");
+            strict        = MakeHandle("gfx1250-strict");
+            unseen        = MakeHandle("gfx9999");
+            unseen_strict = MakeHandle("gfx9999-strict");
+        }
+        catch(const std::exception& e)
+        {
+            GTEST_SKIP() << "no HIP device for the mock handle: " << e.what();
+        }
+        ASSERT_EQ(base->GetDeviceName(), "gfx1250");
+        ASSERT_EQ(strict->GetDeviceName(), "gfx1250-strict");
+
+        int problems        = 0;
+        bool unseen_differs = false;
+        using miopen::conv::Direction;
+        for(const auto dir :
+            {Direction::Forward, Direction::BackwardData, Direction::BackwardWeights})
+        {
+            // n, c, k, hw, fil, groups
+            for(const auto& s : {std::array<int, 6>{16, 64, 64, 56, 3, 1},
+                                 std::array<int, 6>{32, 256, 128, 14, 1, 1},
+                                 std::array<int, 6>{2, 64, 64, 28, 3, 4}})
+            {
+                const auto problem = MakeProblem(dir, DataType, s[0], s[1], s[2], s[3], s[4], s[5]);
+                const auto ranked  = PickSolverRanked(problem, *base);
+                ASSERT_FALSE(ranked.empty()) << "gfx1250 is in the vocab and must be scored";
+                EXPECT_EQ(PickSolverRanked(problem, *strict), ranked);
+
+                const auto ranked_unseen = PickSolverRanked(problem, *unseen);
+                EXPECT_EQ(PickSolverRanked(problem, *unseen_strict), ranked_unseen);
+                // Unseen arch: scored through the missing branch, or abstains.
+                unseen_differs = unseen_differs || ranked_unseen != ranked;
+                ++problems;
+            }
+        }
+        ASSERT_EQ(problems, 9);
+        EXPECT_TRUE(unseen_differs) << "gfx_id has no effect on any ranking; test is vacuous";
+    }
+};
+
+using GPU_LgbmPickerStrictArch_FP16 = LgbmPickerStrictArch<miopenHalf>;
+using GPU_LgbmPickerStrictArch_FP32 = LgbmPickerStrictArch<miopenFloat>;
+
+TEST_F(GPU_LgbmPickerStrictArch_FP16, PickSolverRankedMatchesBaseArch)
+{
+    CheckPickSolverRankedMatchesBaseArch();
+}
+
+TEST_F(GPU_LgbmPickerStrictArch_FP32, PickSolverRankedMatchesBaseArch)
+{
+    CheckPickSolverRankedMatchesBaseArch();
 }
 
 // ---------------------------------------------------------------------------

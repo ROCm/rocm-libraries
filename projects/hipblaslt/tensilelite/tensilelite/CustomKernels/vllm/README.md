@@ -151,8 +151,9 @@ where hipBLASLt's own kernel wins have no row. Rows never overlap, since
 hipBLASLt takes the first row that contains the problem.
 
 The files carry the plain-GEMM problem type (no bias, activation or scale
-vector), because a custom kernel takes the logic file's problem type and these
-kernels support none of those.
+vector). The `custom.config` `Features` `SupportsBias`, `SupportsActivation` and
+`SupportsScaleAlpha` being false also restrict each such solution's own problem type, so these kernels
+would reject such problems even in a Bias/SAV logic file.
 
 Within one device's logic, hipBLASLt searches the plain-GEMM placeholder library
 before the Bias/SAV ones, and `Equality` before `Range` inside a placeholder.
@@ -210,7 +211,8 @@ for its type and `n`, `custom_vllm_wvsplitk_{bf16,f16}_tn_n<N>.yaml` (or
 `custom_vllm_wvsplitkq_f8_{bf16,f16}_tn_bias_n<N>.yaml` for the FP8 kernels,
 which `custom_vllm_wvsplitkq_f8_{bf16,f16}_tn_n<N>.yaml` runs without a bias),
 which lists that `n`'s tiles. `AddCustomConfig` writes `SupportsBias: false`;
-the FP8 kernels set it to `true`. To refresh one, delete the existing block first:
+the FP8 kernels set it to `true`, or their solutions in the bias files would
+reject GEMMs with a bias. To refresh one, delete the existing block first:
 `AddCustomConfig` will not overwrite it. Replacement assembly must stay at code
 object version 4 (see `../README.md`) and keep its `.amdgcn_target` /
 `.amdhsa_code_object_version` directives.

@@ -26,6 +26,7 @@
 
 #include <Tensile/msgpack/MessagePack.hpp>
 
+#include <Tensile/LongPath.hpp>
 #include <Tensile/msgpack/Loading.hpp>
 
 #include <charconv>
@@ -104,7 +105,7 @@ namespace TensileLite
     {
         try
         {
-            std::ifstream in(gz_filename, std::ios::binary | std::ios::ate);
+            std::ifstream in(longPathSafe(gz_filename), std::ios::binary | std::ios::ate);
             if(!in.is_open())
             {
                 return false;
@@ -224,7 +225,7 @@ namespace TensileLite
 
             // Probe for a zlib-compressed variant first
             std::string gz_filename = base_filename + ".zlib";
-            if(std::filesystem::exists(gz_filename))
+            if(std::filesystem::exists(longPathSafe(gz_filename)))
             {
                 if(readCompressedMsgObject(gz_filename, result))
                     return true;
@@ -235,7 +236,7 @@ namespace TensileLite
             }
 
             // Fall back to uncompressed file
-            std::ifstream in(base_filename, std::ios::in | std::ios::binary);
+            std::ifstream in(longPathSafe(base_filename), std::ios::in | std::ios::binary);
             if(!in.is_open())
             {
                 if(Debug::Instance().printDataInit())

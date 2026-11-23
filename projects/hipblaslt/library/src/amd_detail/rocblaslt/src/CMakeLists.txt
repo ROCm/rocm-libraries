@@ -7,6 +7,7 @@ target_sources(hipblaslt
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/Debug.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/handle.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/OnlineTuner.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocblaslt_adaptive_sm_controller.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocblaslt_auxiliary.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocblaslt_grouped_matmul.cpp"
@@ -21,6 +22,13 @@ target_sources(hipblaslt
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/rocblaslt_transform.cpp"
 )
+
+if(HIPBLASLT_ENABLE_LOCAL_KERNELS)
+    target_sources(hipblaslt
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/local_kernel_store.cpp"
+    )
+endif()
 target_include_directories(hipblaslt PRIVATE "${PROJECT_SOURCE_DIR}/device-library")
 # hipblaslt itself is compiled as HIP. The rocRoller ranker includes C++20
 # headers, so it is a separate C++ library and hipblaslt only calls it.
