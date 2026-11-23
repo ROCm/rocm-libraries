@@ -35,6 +35,7 @@ import unittest
 from pathlib import Path
 
 import numpy as np
+import pytest
 from rocke.runtime.hip_module import get_device_arch
 
 GPU_ARCH = get_device_arch(0)
@@ -388,6 +389,9 @@ class TestDirectMfmaDgradCachedNumeric(unittest.TestCase):
                         bad, 0, f"{label}: {bad}/{out.size} elements outside tolerance"
                     )
 
+    # Fills a kernel cache and runs every fused plan of each shape: about half
+    # a minute on gfx942, so CI places it as a weighed shard key.
+    @pytest.mark.rocke_shard_cost(25)
     def test_cached_binaries_on_adversarial_shapes(self):
         for label, shape in _SHAPES:
             self._check_shape(label, shape)
