@@ -283,11 +283,12 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  The \ref hipsparseSpMV_preprocess stage does not support hipGraph.
 *
 *  \note
-*  With the rocSPARSE backend, the \ref hipsparseSpMV_bufferSize, \ref hipsparseSpMV_preprocess, and \p hipsparseSpMV
-*  routines retire the state kept for the arrays replaced by \ref hipsparseCsrSetPointers, \ref hipsparseCscSetPointers,
-*  or \ref hipsparseCooSetPointers. If the arrays were replaced and the stream of \p handle is being captured, these routines return
-*  \ref HIPSPARSE_STATUS_INVALID_VALUE and leave the capture valid, because analyzing the new arrays synchronizes the
-*  device. The retired state is destroyed by the next call made outside the capture.
+*  With the rocSPARSE backend, \ref hipsparseCsrSetPointers, \ref hipsparseCscSetPointers, and \ref hipsparseCooSetPointers
+*  retire the state kept for the previous arrays. The next \ref hipsparseSpMV_bufferSize, \ref hipsparseSpMV_preprocess, or
+*  \p hipsparseSpMV call destroys it and analyzes the new arrays, which synchronizes the device. While the stream of \p handle
+*  is being captured, these routines then return \ref HIPSPARSE_STATUS_INVALID_VALUE, whatever the algorithm, and leave the
+*  capture valid; the next call made outside the capture proceeds. A capture of another stream is not detected and must not be
+*  in progress. A graph that captured \p hipsparseSpMV on the previous arrays must not be launched after that call.
 *
 *  @param[in]
 *  handle          handle to the hipSPARSE library context queue.

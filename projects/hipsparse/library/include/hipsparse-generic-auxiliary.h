@@ -635,10 +635,13 @@ hipsparseStatus_t hipsparseConstBlockedEllGet(hipsparseConstSpMatDescr_t spMatDe
 *  \details
 *  \p hipsparseCsrSetPointers sets the fields of the sparse CSR matrix descriptor.
 *  \note
-*  With the rocSPARSE backend, the SpMV analysis cached for the previous arrays is discarded, also when the same
-*  pointers are passed. The next \ref hipsparseSpMV_bufferSize, \ref hipsparseSpMV_preprocess, or \ref hipsparseSpMV
-*  call analyzes the new arrays, and while the stream is being captured it returns \ref HIPSPARSE_STATUS_INVALID_VALUE.
-*  \ref hipsparseSpMatSetValues keeps the analysis, so updating only the values does not discard it.
+*  With the rocSPARSE backend, the SpMV state cached for the previous arrays is retired, also when the same
+*  pointers are passed. Retiring it frees nothing. \ref hipsparseSpMatSetValues keeps that state, so use it to update
+*  only the values. The next \ref hipsparseSpMV_bufferSize, \ref hipsparseSpMV_preprocess, or \ref hipsparseSpMV
+*  call destroys the retired state and analyzes the new arrays, which synchronizes the device, so no stream may be
+*  captured while it runs: while the stream of the handle is being captured, it returns
+*  \ref HIPSPARSE_STATUS_INVALID_VALUE, whatever the algorithm, but a capture of another stream is not detected.
+*  A graph that captured \ref hipsparseSpMV on the previous arrays must not be launched after that call.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCsrSetPointers(hipsparseSpMatDescr_t spMatDescr,
@@ -653,10 +656,13 @@ hipsparseStatus_t hipsparseCsrSetPointers(hipsparseSpMatDescr_t spMatDescr,
 *  \details
 *  \p hipsparseCscSetPointers sets the fields of the sparse CSC matrix descriptor.
 *  \note
-*  With the rocSPARSE backend, the SpMV analysis cached for the previous arrays is discarded, also when the same
-*  pointers are passed. The next \ref hipsparseSpMV_bufferSize, \ref hipsparseSpMV_preprocess, or \ref hipsparseSpMV
-*  call analyzes the new arrays, and while the stream is being captured it returns \ref HIPSPARSE_STATUS_INVALID_VALUE.
-*  \ref hipsparseSpMatSetValues keeps the analysis, so updating only the values does not discard it.
+*  With the rocSPARSE backend, the SpMV state cached for the previous arrays is retired, also when the same
+*  pointers are passed. Retiring it frees nothing. \ref hipsparseSpMatSetValues keeps that state, so use it to update
+*  only the values. The next \ref hipsparseSpMV_bufferSize, \ref hipsparseSpMV_preprocess, or \ref hipsparseSpMV
+*  call destroys the retired state and analyzes the new arrays, which synchronizes the device, so no stream may be
+*  captured while it runs: while the stream of the handle is being captured, it returns
+*  \ref HIPSPARSE_STATUS_INVALID_VALUE, whatever the algorithm, but a capture of another stream is not detected.
+*  A graph that captured \ref hipsparseSpMV on the previous arrays must not be launched after that call.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCscSetPointers(hipsparseSpMatDescr_t spMatDescr,
@@ -671,10 +677,13 @@ hipsparseStatus_t hipsparseCscSetPointers(hipsparseSpMatDescr_t spMatDescr,
 *  \details
 *  \p hipsparseCooSetPointers sets the fields of the sparse COO matrix descriptor.
 *  \note
-*  With the rocSPARSE backend, the SpMV analysis cached for the previous arrays is discarded, also when the same
-*  pointers are passed. The next \ref hipsparseSpMV_bufferSize, \ref hipsparseSpMV_preprocess, or \ref hipsparseSpMV
-*  call analyzes the new arrays, and while the stream is being captured it returns \ref HIPSPARSE_STATUS_INVALID_VALUE.
-*  \ref hipsparseSpMatSetValues keeps the analysis, so updating only the values does not discard it.
+*  With the rocSPARSE backend, the SpMV state cached for the previous arrays is retired, also when the same
+*  pointers are passed. Retiring it frees nothing. \ref hipsparseSpMatSetValues keeps that state, so use it to update
+*  only the values. The next \ref hipsparseSpMV_bufferSize, \ref hipsparseSpMV_preprocess, or \ref hipsparseSpMV
+*  call destroys the retired state and analyzes the new arrays, which synchronizes the device, so no stream may be
+*  captured while it runs: while the stream of the handle is being captured, it returns
+*  \ref HIPSPARSE_STATUS_INVALID_VALUE, whatever the algorithm, but a capture of another stream is not detected.
+*  A graph that captured \ref hipsparseSpMV on the previous arrays must not be launched after that call.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCooSetPointers(hipsparseSpMatDescr_t spMatDescr,
