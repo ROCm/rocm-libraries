@@ -34,8 +34,17 @@
 #include "rocsparse_memstat.hpp"
 #include "rocsparse_scalar.hpp"
 #include "rocsparse_singularity.hpp"
+
+#include <limits>
+
 namespace rocsparse
 {
+    // a and b are non-negative.
+    inline bool size_product_overflows(int64_t a, int64_t b)
+    {
+        return a > 0 && b > std::numeric_limits<int64_t>::max() / a;
+    }
+
     template <typename T>
     inline size_t align_size(size_t size)
     {

@@ -27,7 +27,6 @@
 #include "rocsparse_handle.hpp"
 #include "rocsparse_utility.hpp"
 #include <iomanip>
-#include <limits>
 #include <map>
 
 #include <hip/hip_runtime_api.h>
@@ -37,12 +36,6 @@
 
 namespace rocsparse
 {
-    // a and b are non-negative.
-    static bool size_product_overflows(int64_t a, int64_t b)
-    {
-        return a > 0 && b > std::numeric_limits<int64_t>::max() / a;
-    }
-
     // Blocked ELL stores whole blocks, so ell_cols may round the column count
     // up to a multiple of the block size. Reject a width past that, and fall
     // back to cols when the rounded width does not fit in int64_t.
