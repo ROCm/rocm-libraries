@@ -1117,10 +1117,8 @@ namespace
 
         Bytes dst_primary(tgt_aos || pair.target != rocsparse_format_coo ? 8 : 4);
         Bytes dst_secondary(4);
-        Bytes dst_extra(4);
         fill_bytes(dst_primary, k_sentinel);
         fill_bytes(dst_secondary, k_sentinel);
-        fill_bytes(dst_extra, k_sentinel);
         void* target_values = with_values ? numeric_values.get() : nullptr;
         Spmat target;
         // Numeric targets are created at the final nnz. A symbolic target has a null
