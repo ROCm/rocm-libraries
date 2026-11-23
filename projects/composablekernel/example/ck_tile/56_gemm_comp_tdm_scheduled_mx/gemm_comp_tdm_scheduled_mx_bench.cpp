@@ -353,11 +353,11 @@ int run_kernel(const Options& o)
     return bad ? 1 : 0;
 }
 
-/// Runs pipeline P in the variant of K's whole-tile count.
+/// Runs pipeline P in the variant of the loop's tile count.
 template <typename P>
 int run(const Options& o)
 {
-    const index_t full_tiles = o.K / P::kTileK;
+    const index_t full_tiles = P::GetFullTiles(o.K);
     return P::TailHandler(
         [&](auto, auto tail_num) {
             using PT = typename P::template WithTailNum<decltype(tail_num)::value>;

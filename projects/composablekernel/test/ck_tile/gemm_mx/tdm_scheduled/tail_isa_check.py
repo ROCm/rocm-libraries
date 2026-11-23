@@ -12,8 +12,9 @@ and checks their ISA:
 - dscnt: at every tensor_load_to_lds, every ds_load still in flight was issued after the barrier
   before the refill's own one. A refill overwrites a buffer once its reads have drained, while
   the next tile's reads, issued after the publish barrier, may stay in flight.
-- gl2_clamp: with a K tail, every GL2 prefetch address in the K loop goes through a v_min: a
-  partial tile's data lines are clamped to the end of the row, as its scale lines are.
+- gl2_clamp: every GL2 prefetch address in the K loop goes through a min: a partial tile's data
+  lines are clamped to the end of the row, as its scale lines are. Any instance may prefetch one:
+  its K tail, or a partial last tile of every K step that the loop runs.
 - vgpr: with --baseline REV, each kernel's VGPR count and scratch next to REV's pipeline headers;
   more scratch than the baseline fails.
 
@@ -81,10 +82,7 @@ class Instance:
 
     def checks(self):
         """The check() options of the instance's kernels."""
-        return dict(
-            post_loop_refill_free=not (self.single_tail and self.tail_steps),
-            gl2_clamp=self.tail_steps > 0,
-        )
+        return dict(post_loop_refill_free=not (self.single_tail and self.tail_steps))
 
     def tail_nums(self):
         return ["Full"] if self.single_tail else ["One", "Two"]
@@ -135,7 +133,16 @@ INSTANCES = [
     ),
     Instance("half_b_single_tail", single_tail=True),
     Instance("half_b_single_tail_no_tail", tail_steps=0, single_tail=True),
-    # kSplitCluster: the tuned FP4 4x4 cluster, tail 1 and 3.
+    # No edge and no K tail: the loop may still run a partial last tile.
+    Instance("half_b_whole", edge=(False, False), tail_steps=0),
+    # kSplitCluster: the tuned FP4 4x4 cluster, tail 0, 1 and 3.
+    Instance(
+        "fp4_cluster_4x4_no_tail",
+        cluster=(4, 4),
+        edge=(False, False),
+        tail_steps=0,
+        **FP4_256,
+    ),
     Instance("fp4_cluster_4x4", cluster=(4, 4), edge=(False, False), **FP4_256),
     Instance(
         "fp4_cluster_4x4_tail_3",
@@ -309,7 +316,7 @@ def check_gl2_clamp(pre, loop_body):
     return failures
 
 
-def check(asm, post_loop_refill_free=True, gl2_clamp=False):
+def check(asm, post_loop_refill_free=True, gl2_clamp=True):
     """The failures of a kernel's ISA. post_loop_refill_free is false when a tile that refills
     follows the loop: TailNumber::Full's odd tile, which feeds the K tail. gl2_clamp: every GL2
     prefetch address in the K loop goes through a v_min."""

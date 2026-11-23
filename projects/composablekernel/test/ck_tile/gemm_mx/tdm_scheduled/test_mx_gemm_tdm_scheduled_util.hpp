@@ -75,12 +75,12 @@ struct WithTailNum<ck_tile::MxGemmKernel<Partitioner, P, Epilogue>, T>
 };
 
 /// Calls f(WithTailNum<Kernel, T>{}) with T the TailNum of K: the pipeline's TailHandler picks
-/// TailNumber::One or Two from the whole-tile count on the host.
+/// TailNumber::One or Two from the loop's tile count on the host.
 template <typename Kernel, typename F>
 auto for_tail_num(index_t K, F&& f)
 {
     using P                  = typename Kernel::GemmPipeline;
-    const index_t full_tiles = K / P::kTileK;
+    const index_t full_tiles = P::GetFullTiles(K);
     return P::TailHandler(
         [&](auto, auto tail_num) { return f(WithTailNum<Kernel, decltype(tail_num)::value>{}); },
         P::BlockHasHotloop(full_tiles),

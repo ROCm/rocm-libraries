@@ -210,6 +210,24 @@ TEST(MxGemmTdmScheduled, Gl2PrefetchKTail)
     check<Fp4K1024<Tu<2, 2>>>(512, 512, 5 * 1024 + 32);
 }
 
+// A partial last tile of every K step (K mod tile_k above tile_k - 128) runs in the loop as one
+// more tile on an instance without a K tail, zero-filled past K, its last K step partial (its
+// scales zero-padded). Loop tile counts 3, 8 and 9 run the TailNumber::One and Two kernels.
+TEST(MxGemmTdmScheduled, LongKTailInTheLoop)
+{
+    using S = Shape<false, false, 0>;
+    for(index_t tiles : {2, 7, 8})
+    {
+        check<Kernel<fp8_t, bf8_t, fp8_t, 128, 128, 128, 2, 2, 16, Tu<1, 1>, S>>(
+            1024, 1024, tiles * 128 + 32);
+        check<Kernel<fp8_t, bf8_t, fp8_t, 128, 128, 256, 2, 2, 16, Tu<1, 1>, S>>(
+            1024, 1024, tiles * 256 + 160);
+        check<Kernel<fp8_t, bf8_t, fp8_t, 128, 128, 256, 2, 2, 16, Tu<1, 1, 4, false, false>, S>>(
+            1024, 1024, tiles * 256 + 256 - 32);
+        check<Fp4C4x4>(1024, 1024, tiles * 512 + 416);
+    }
+}
+
 TEST(MxGemmTdmScheduled, Edges)
 {
     using Edge = Fp4Big<fp8_t, Tu<1, 1>, Shape<true, true, 0>>;
