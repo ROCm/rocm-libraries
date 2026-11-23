@@ -954,10 +954,10 @@ constexpr std::array<ForwardCase, 16> kD64ExpandedCases = [] {
     return cases;
 }();
 
-// D64 N128 inputs whose M128 grid exceeds the CU count, so the M64 tile's grid predicate fails
-// and the M128xN128 scheduled tile runs (every other D64 N128 input here takes M64). Appended so
-// every earlier case index remains stable.
-constexpr std::array<ForwardCase, 2> kD64M128GridCases{{
+// D64 and D128 N128 inputs whose M128 grid exceeds the CU count, so the M64 tile's grid predicate
+// fails and the M128xN128 scheduled tile runs (every other D64 or D128 N128 scheduled input here
+// takes M64). Appended so every earlier case index remains stable.
+constexpr std::array<ForwardCase, 4> kSchedM128GridCases{{
     {"D64GroupGridAboveCuM128Dense",
      64,
      128,
@@ -978,12 +978,32 @@ constexpr std::array<ForwardCase, 2> kD64M128GridCases{{
      1,
      SequencePointers::AboveCuGrid,
      128},
+    {"D128GroupGridAboveCuM128Dense",
+     128,
+     128,
+     1024,
+     mask_enum::no_mask,
+     false,
+     1,
+     1,
+     SequencePointers::AboveCuGrid,
+     128},
+    {"D128GroupGridAboveCuM128BottomRight",
+     128,
+     128,
+     1024,
+     mask_enum::mask_bottom_right,
+     false,
+     1,
+     1,
+     SequencePointers::AboveCuGrid,
+     128},
 }};
 
 constexpr int kCaseCount =
     static_cast<int>(kCases.size() + kAdditionalCases.size() + kVirtualSinkCases.size() +
                      kSelectorCases.size() + kPartialQueryCases.size() + kD64WideTileCases.size() +
-                     kD64ExpandedCases.size() + kD64M128GridCases.size());
+                     kD64ExpandedCases.size() + kSchedM128GridCases.size());
 
 const ForwardCase& GetCase(int index)
 {
@@ -1007,7 +1027,7 @@ const ForwardCase& GetCase(int index)
     index -= static_cast<int>(kD64WideTileCases.size());
     if(index < static_cast<int>(kD64ExpandedCases.size()))
         return kD64ExpandedCases[index];
-    return kD64M128GridCases[index - kD64ExpandedCases.size()];
+    return kSchedM128GridCases[index - kD64ExpandedCases.size()];
 }
 
 enum class ValuePattern
@@ -1178,11 +1198,14 @@ std::string ExpectedKernel(const ForwardCase& c,
     const int n               = c.virtual_sink ? 64 : c.expected_n;
     // Finite virtual sinks use the qr_tdm fallback; sched is specialized for null sink.
     const bool use_scheduled = c.scheduled && !c.virtual_sink;
-    // D64 scheduled N128 takes the M64 tile when the M128 grid leaves CUs idle, or fills each CU
-    // once with at least 2048 query rows (GFX125_D64_SCHED_M64_CONSTRAINT in the codegen).
+    // D64 and D128 scheduled N128 take the M64 tile when the M128 grid leaves CUs idle, or fills
+    // each CU once with at least 2048 query rows; for D128 the latter only without a sliding
+    // window (GFX125_D64_SCHED_M64_CONSTRAINT and GFX125_D128_SCHED_M64_CONSTRAINT in the codegen).
     const std::size_t cus = static_cast<std::size_t>(num_cus);
-    const bool sched_m64  = use_scheduled && c.dimension == 64 && n == 128 &&
-                           (m128_blocks < cus || (m128_blocks <= cus && max_seqlen_q >= 2048));
+    const bool fill_once =
+        m128_blocks <= cus && max_seqlen_q >= 2048 && (c.dimension == 64 || c.window_size_left < 0);
+    const bool sched_m64 = use_scheduled && (c.dimension == 64 || c.dimension == 128) && n == 128 &&
+                           (m128_blocks < cus || fill_once);
     const int m      = c.scheduled && !sched_m64 ? 128 : 64;
     std::string name = "fmha_fwd_d" + std::to_string(c.dimension) + "_" + kDataType +
                        (group ? "_group_b" : "_batch_b") + std::to_string(m) + "x" +
@@ -1484,9 +1507,9 @@ TEST_P(QrTdmSchedForward, GeneratedDispatcherAndIndependentFp32)
     }
     if(c.pointers == SequencePointers::AboveCuGrid)
     {
-        // D192: every N128 predicate except grid<=CU is true. D64: every N128 predicate is
-        // true and only the M64 grid predicate fails. No fabricated maximum or empty sequence
-        // is used to make this branch reachable on any CU count.
+        // D192: every N128 predicate except grid<=CU is true. D64 and D128: every N128
+        // predicate is true and only the M64 grid predicate fails. No fabricated maximum or
+        // empty sequence is used to make this branch reachable on any CU count.
         ASSERT_EQ(args.max_seqlen_q, 128);
         ASSERT_EQ(args.seqlen_k, c.key_length * batch);
         ASSERT_EQ(args.seqlen_k_ptr, nullptr);

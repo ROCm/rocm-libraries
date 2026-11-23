@@ -18,10 +18,11 @@ template <int HeadDim,
           bool Lse      = false,
           typename Data = ck_tile::bf16_t,
           int N         = 128,
-          int ValueDim  = 128>
+          int ValueDim  = 128,
+          int M         = 128>
 struct Model
 {
-    using Shape  = ck_tile::TileFmhaShape<ck_tile::sequence<128, N, 32, ValueDim, 32, HeadDim>,
+    using Shape  = ck_tile::TileFmhaShape<ck_tile::sequence<M, N, 32, ValueDim, 32, HeadDim>,
                                           ck_tile::sequence<4, 1, 1>,
                                           ck_tile::sequence<16, 16, 32>,
                                           ck_tile::sequence<4, 1, 1>,

@@ -251,9 +251,10 @@ struct Gfx125TraitScoreLayout
         typename Problem::KDataType,
         float,
         4 * 32,
-        ck_tile::TileGemmShape<ck_tile::sequence<128, Problem::BlockFmhaShape::kN0, 32>,
-                               typename Problem::BlockFmhaShape::Gemm0BlockWarps,
-                               typename Problem::BlockFmhaShape::Gemm0WarpTile>>;
+        ck_tile::TileGemmShape<
+            ck_tile::sequence<Problem::BlockFmhaShape::kM0, Problem::BlockFmhaShape::kN0, 32>,
+            typename Problem::BlockFmhaShape::Gemm0BlockWarps,
+            typename Problem::BlockFmhaShape::Gemm0WarpTile>>;
     using GemmPolicy = ck_tile::BlockGemmARegBRegCRegV2CustomPolicy<
         typename Problem::QDataType,
         typename Problem::KDataType,
@@ -278,7 +279,7 @@ CK_TILE_HOST_DEVICE constexpr bool CheckScoreDescriptor()
     bool valid = true;
     // Start with CK's physical per-thread descriptor coordinates and compare every offset
     // against the production mapping, independently of its Decode/ValidateBijection helpers.
-    for(int m = 0; m < 2; ++m)
+    for(int m = 0; m < Mapping::kNumMIter; ++m)
         for(int n = 0; n < Mapping::kNumNIter; ++n)
             for(int element = 0; element < 8; ++element)
             {
@@ -319,8 +320,9 @@ CK_TILE_HOST_DEVICE bool CheckScorePairRoundtrip(int lane)
     for(int offset = 0; offset < ScoreTile::get_thread_buffer_size(); ++offset)
         score.get_thread_buffer()[offset] =
             ck_tile::bit_cast<float>(ScoreBits(offset, lane, false));
-    bool valid = true;
-    ck_tile::static_ford<ck_tile::sequence<4, Mapping::kPairsPerMsb>>{}([&](auto indices) {
+    bool valid     = true;
+    using MsbPairs = ck_tile::sequence<Mapping::kNumMsb, Mapping::kPairsPerMsb>;
+    ck_tile::static_ford<MsbPairs>{}([&](auto indices) {
         constexpr int msb  = indices[ck_tile::number<0>{}];
         constexpr int pair = indices[ck_tile::number<1>{}];
         // CK descriptor, rather than Mapping::GetThreadBufferOffset, selects the expected pair.
@@ -656,6 +658,10 @@ using Configs = ::testing::Types<
         typename ck_tile::test::Model<64, false, true, true, ck_tile::half_t, 64, 64>::Problem>,
     ScheduleConfig<typename ck_tile::test::Model<128>::Problem>,
     ScheduleConfig<typename ck_tile::test::Model<128, true, true, true, ck_tile::half_t>::Problem>,
+    ScheduleConfig<typename ck_tile::test::
+                       Model<128, false, false, true, ck_tile::bf16_t, 128, 128, 64>::Problem>,
+    ScheduleConfig<typename ck_tile::test::
+                       Model<128, true, true, true, ck_tile::half_t, 128, 128, 64>::Problem>,
     ScheduleConfig<
         typename ck_tile::test::Model<192, false, false, true, ck_tile::bf16_t, 64>::Problem>,
     ScheduleConfig<

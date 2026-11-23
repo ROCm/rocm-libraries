@@ -8,10 +8,10 @@ namespace {
 
 using namespace ck_tile;
 
-template <typename T, int D, int N, int V>
+template <typename T, int D, int N, int V, int M = 128>
 struct Config
 {
-    using Problem  = typename test::Model<D, false, false, true, T, N, V>::Problem;
+    using Problem  = typename test::Model<D, false, false, true, T, N, V, M>::Problem;
     using Geometry = FmhaTdmSchedGeometryFor<Problem>;
     using Policy   = FmhaTdmSchedPolicyFor<Problem>;
 };
@@ -43,6 +43,8 @@ using Configs = ::testing::Types<Config<bf16_t, 64, 64, 64>,
                                  Config<half_t, 64, 64, 64>,
                                  Config<bf16_t, 128, 128, 128>,
                                  Config<half_t, 128, 128, 128>,
+                                 Config<bf16_t, 128, 128, 128, 64>,
+                                 Config<half_t, 128, 128, 128, 64>,
                                  Config<bf16_t, 192, 64, 128>,
                                  Config<half_t, 192, 64, 128>,
                                  Config<bf16_t, 192, 128, 128>,
@@ -61,13 +63,18 @@ TYPED_TEST(QrTdmSchedConfig, GeometryAndDerivedTails)
     using T = typename P::Tuning;
     EXPECT_EQ(G::kWaves, 4);
     EXPECT_EQ(G::kWaveSize, 32);
-    EXPECT_EQ(G::kQueryRowsPerWave, 32);
+    // M128: two 16-row WMMA row tiles per wave; M64 (D128 here): one.
+    EXPECT_EQ(G::kQueryRowsPerWave, G::kM == 64 ? 16 : 32);
+    EXPECT_EQ(G::kQkMIter, G::kM == 64 ? 1 : 2);
+    EXPECT_EQ(G::kPvMIter, G::kM == 64 ? 1 : 2);
     EXPECT_EQ(G::kQkStages, G::kN / 32);
     EXPECT_EQ(G::kPvStages, G::kN / 32);
     EXPECT_EQ(G::kKSuLoadCount, G::kHeadDimQK / 8);
     EXPECT_EQ(G::kVStageLoadCount, G::kDv / 8);
-    EXPECT_EQ(G::kQkWmmasPerWaveKvTile, G::kN * G::kHeadDimQK / 256);
-    EXPECT_EQ(G::kPvWmmasPerWaveKvTile, G::kN * G::kDv / 256);
+    // 16x16x32 WMMAs per wave and KV tile: row tiles x column tiles x K steps.
+    EXPECT_EQ(G::kQkWmmasPerWaveKvTile,
+              (G::kQueryRowsPerWave / 16) * (G::kN / 16) * (G::kHeadDimQK / 32));
+    EXPECT_EQ(G::kPvWmmasPerWaveKvTile, (G::kQueryRowsPerWave / 16) * (G::kDv / 16) * (G::kN / 32));
     EXPECT_TRUE(G::PRepackLayout::kInThread);
     EXPECT_EQ(T::kKWait, 1);
     EXPECT_EQ(T::kVWait, 1);
@@ -138,10 +145,9 @@ TYPED_TEST(QrTdmSchedConfig, WmmaSourceKeepDepth)
 {
     using G = typename TypeParam::Geometry;
     using P = typename TypeParam::Policy;
-    // Every configuration here is an M128 tile (two row groups per wave). The D64 N64 and D192
-    // N128 tiles keep no WMMA source alive; D128 N128 and D192 N64 keep the last three. (D64 M64
-    // tiles, not listed here, keep two.) Pin the shipped values.
-    EXPECT_EQ(G::kQkMIter, 2);
+    // The D64 N64 and D192 N128 tiles keep no WMMA source alive; D128 N128 (M128 and M64) and
+    // D192 N64 keep the last three. (D64 M64 tiles, not listed here, keep two.) Pin the shipped
+    // values.
     constexpr bool keep_none =
         (G::kHeadDimQK == 64 && G::kN == 64) || (G::kHeadDimQK == 192 && G::kN == 128);
     EXPECT_EQ(P::kWmmaSourceKeepDepth, keep_none ? 0 : 3);
