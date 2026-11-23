@@ -4424,8 +4424,6 @@ class GlobalWriteBatchWriter:
       forceSlc:     force the slc bit regardless of NonTemporalD.
     """
     module = Module("16bitSubtilePairedStore")
-    if __import__("os").environ.get("STORE_CACHELINE_ALIGN_MARK"):
-      module.add(SNop(waitState=10, comment="STAGGER_MARK arm=10 NON-WOVEN paired store"))
     # Composed from Phase1 (pack/address) + Phase2 (shuffle/store).  On the fallback
     # LDS path the split lets PLSIN interleave MFMAs across the ~88-cycle
     # ds_bpermute latency; the gfx950 permlane16 path has no lgkmcnt dependency.
@@ -4448,8 +4446,6 @@ class GlobalWriteBatchWriter:
     (permlane + buffer_store) stays after the convert has filled vPack.
     """
     module = Module("16bitSubtilePairedStoreWoven")
-    if __import__("os").environ.get("STORE_CACHELINE_ALIGN_MARK"):
-      module.add(SNop(waitState=9, comment="STAGGER_MARK arm=9 WOVEN store (staggered)"))
     staggered = self._staggerStoreActive() and pairIdx >= self._staggerStartPair()
     vPack = self._pairPackQuad(pairIdx)
     hoistVoff = staggered and self._cachelineAlignVoffHoistKey(addrCalc) is not None
@@ -4742,8 +4738,6 @@ class GlobalWriteBatchWriter:
     mask is involved. Followed by the WAR wait states the store needs when its soffset
     is not an SGPR."""
     module = Module("16bitSubtilePairedStorePhase2b")
-    if __import__("os").environ.get("STORE_CACHELINE_ALIGN_MARK"):
-      module.add(SNop(waitState=12, comment="STAGGER_MARK=12 Phase2b deferred-store entry"))
     ntd = self._epilogueNtd()
     isGlc = bool(ntd & 0x1)
     isSlc = bool((ntd & 0x2) or forceSlc)
@@ -5238,8 +5232,6 @@ class GlobalWriteBatchWriter:
     T = self.cvtVgprStruct.vgprCachelineAlignTmp
     half = 64
     module = Module("16bitSubtileStaggerCachelineAlign")
-    if __import__("os").environ.get("STORE_CACHELINE_ALIGN_MARK"):
-      module.add(SNop(waitState=13, comment="STAGGER_MARK=13 align blend entry"))
     hoist = aA == self.PLAIN_ADDR
     key = self._cachelineAlignVoffHoistKey(addrA) if hoist else None
     voffLive = hoist and self.parentWriter.states.subtileCachelineAlignVoffHoisted == key
