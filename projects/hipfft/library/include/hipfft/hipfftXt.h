@@ -34,9 +34,8 @@
 #include <cufftXt.h>
 #endif
 
-#ifndef _WIN32
-#include <cstddef>
-#endif
+#include <hip/library_types.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
