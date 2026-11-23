@@ -1392,6 +1392,61 @@ namespace
             }
     }
 
+    // With the null stream as handle stream, querying its capture status fails
+    // with hipErrorStreamCaptureImplicit while a blocking stream is being captured.
+    // The preprocess after set_pointers returns invalid_value, as during a capture
+    // of the handle stream, and the preprocess after the capture analyzes the new
+    // arrays.
+    TEST_F(L2SetPointers, preprocess_after_set_pointers_on_the_null_stream_during_capture)
+    {
+        using T                 = double;
+        using I                 = int32_t;
+        const scenario<T, I> sc = make_scenario<T, I>(fmt::csr, 0);
+        device_problem<T, I> d1(sc.p1), d2(sc.p2);
+
+        hipStream_t saved = nullptr;
+        ASSERT_EQ(rocsparse_get_stream(handle, &saved), rocsparse_status_success);
+        ASSERT_EQ(rocsparse_set_stream(handle, nullptr), rocsparse_status_success);
+
+        spmat_guard mat;
+        create(mat, sc.p1, d1);
+        ASSERT_FALSE(HasFatalFailure());
+        config c;
+        c.alg = rocsparse_spmv_alg_csr_adaptive;
+        session<T> s(handle, c, mat.d, sc.p1.rows, sc.p1.cols);
+        s.preprocess();
+        ASSERT_FALSE(HasFatalFailure());
+        ASSERT_EQ(s.compute(), rocsparse_status_success);
+        EXPECT_TRUE(expect_near(s.want(sc.p1), s.y(), "initial product"));
+        ASSERT_EQ(set_pointers(mat, sc.p2, d2), rocsparse_status_success);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        hipStream_t capture = nullptr;
+        ASSERT_EQ(hipStreamCreate(&capture), hipSuccess);
+        device_vector<char> scratch(size_t(256));
+        ASSERT_EQ(hipStreamBeginCapture(capture, hipStreamCaptureModeGlobal), hipSuccess);
+        EXPECT_EQ(hipMemsetAsync(scratch.ptr, 0, scratch.n, capture), hipSuccess);
+
+        rocsparse_status st = rocsparse_status_success;
+        EXPECT_NO_THROW(st = s.preprocess_stage());
+        EXPECT_EQ(st, rocsparse_status_invalid_value) << "preprocess during the capture";
+
+        hipGraph_t graph = nullptr;
+        EXPECT_EQ(hipStreamEndCapture(capture, &graph), hipSuccess);
+        if(graph != nullptr)
+        {
+            EXPECT_EQ(hipGraphDestroy(graph), hipSuccess);
+        }
+        EXPECT_EQ(hipStreamDestroy(capture), hipSuccess);
+        ASSERT_FALSE(HasFailure());
+
+        s.preprocess();
+        ASSERT_FALSE(HasFatalFailure());
+        ASSERT_EQ(s.compute(), rocsparse_status_success);
+        EXPECT_TRUE(expect_near(s.want(sc.p2), s.y(), "product after the capture"));
+        EXPECT_EQ(rocsparse_set_stream(handle, saved), rocsparse_status_success);
+    }
+
     // A second analysis on the same v2 descriptor, after set_pointers, must not
     // adopt the CSR, CSC or BSR info built for the previous arrays.
     template <typename T>

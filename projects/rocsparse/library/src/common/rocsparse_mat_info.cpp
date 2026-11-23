@@ -367,8 +367,20 @@ rocsparse_status _rocsparse_mat_info::clear_spmv_info_if_stale(hipStream_t strea
     if(this->csrmv_info != nullptr || this->bsrmv_info != nullptr
        || (this->coomv_info != nullptr && coomv_analysis_synchronizes))
     {
+        // On the null stream, the query fails with hipErrorStreamCaptureImplicit
+        // while a blocking stream is being captured, which the synchronization
+        // would break as well.
         hipStreamCaptureStatus capture_status = hipStreamCaptureStatusNone;
-        RETURN_IF_HIP_ERROR(hipStreamIsCapturing(stream, &capture_status));
+        const hipError_t       query          = hipStreamIsCapturing(stream, &capture_status);
+        if(query == hipErrorStreamCaptureImplicit)
+        {
+            (void)hipGetLastError();
+            capture_status = hipStreamCaptureStatusActive;
+        }
+        else
+        {
+            RETURN_IF_HIP_ERROR(query);
+        }
         if(capture_status != hipStreamCaptureStatusNone)
         {
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
