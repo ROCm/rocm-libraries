@@ -92,6 +92,9 @@ class TestDgradWmmaSpec(unittest.TestCase):
             why = dgrad_wmma_reason(DirectDgradWmmaSpec(problem=problem, **knobs))
             self.assertIsNotNone(why, knobs)
             self.assertIn(needle, why)
+        # Only dX channels need 16-byte rows; the dY tail is zero-filled.
+        for k in (36, 37):
+            self.assertIsNone(dgrad_wmma_reason(DirectDgradWmmaSpec(problem=_problem(K=k))))
         p = DirectConvProblem(
             N=1, H=8, W=8, groups=1, cpg=16, kpg=16, KH=3, KW=3, PAD=1, stride=3
         )
@@ -587,6 +590,11 @@ _CASES = (
     # Grouped, cpg 48 over 32-channel blocks: the weight load and the dX
     # store clip at the group boundary.
     (dict(N=2, H=9, W=12, C=96, K=64, groups=2), dict(tiles_c=1, tiles_p=2)),
+    # kpg not a multiple of 8: the last dY chunk is clipped and zero-filled
+    # by TDM, with 72-byte (and odd-element) pixel strides.
+    (dict(N=2, H=13, W=21, C=64, K=36), dict(tiles_c=1, tiles_p=2, ck=64)),
+    (dict(N=2, H=9, W=12, C=64, K=74, groups=2), dict(tiles_c=1, tiles_p=2)),
+    (dict(N=2, H=13, W=21, C=64, K=37, dtype="fp16"), dict(tiles_c=1, tiles_p=2)),
     # PAD = K - 1: no halo cell is left unwritten (no zero fill).
     (dict(N=2, H=9, W=12, C=32, K=32, PAD=2), dict(tiles_c=1, tiles_p=2)),
     (

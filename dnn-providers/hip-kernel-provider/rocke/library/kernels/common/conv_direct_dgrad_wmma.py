@@ -405,7 +405,10 @@ def dgrad_wmma_reason(spec: DirectDgradWmmaSpec, arch: str = "gfx1250") -> str |
             return f"packed kpg {spec.kpg_eff} > ck {spec.ck} (one dY chunk)"
         if spec.cpg_eff > spec.block_c:
             return f"packed cpg {spec.cpg_eff} > block_c {spec.block_c}"
-    if spec.cpg_eff % 8 or spec.kpg_eff % 8:
+    # dX rows are stored by TDM in 16-byte runs; dY channels (the reduction)
+    # are clipped per chunk and zero-filled by the transfer, so any kpg works
+    # unpacked (TDM takes element-granular strides and addresses).
+    if spec.cpg_eff % 8 or (G > 1 and spec.kpg_eff % 8):
         return (
             f"cpg {spec.cpg_eff} and kpg {spec.kpg_eff} must be multiples of 8"
             " (16-byte rows)"
