@@ -90,6 +90,13 @@ class NotLocalFullTileElementsMFMA(NotLocalFullTileElements):
         vectorWidth0 = kernel["VectorWidthA"]        if kernel["SourceSwap"] else kernel["VectorWidthA"] * kernel["MIOutputVectorWidth"]
         vectorWidth1 = kernel["VectorWidthB"] * kernel["MIOutputVectorWidth"] if kernel["SourceSwap"] else kernel["VectorWidthB"]
 
+        if kernel.get("WaveTileContiguousA"):
+            if kernel["SourceSwap"]:
+                totalTT0, totalTT1 = kernel["MIWaveTile"][0], kernel["MIWaveTile"][1] * outputsPerThread
+                vectorWidth0, vectorWidth1 = 1, 8
+            else:
+                vectorWidth0 = 8
+
         while storeVectorWidth >= minStoreVectorWidth:
             elements_temp = []
             for tt1 in range(0, ceil(totalTT1//vectorWidth1)):

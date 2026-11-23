@@ -34,6 +34,9 @@ struct FrontendSinkCase
 {
     const char* name;
     FrontendSdpaSpec spec;
+    /// Runs only in the Comprehensive* instantiation of its group (standardTierCases,
+    /// comprehensiveTierCases).
+    bool comprehensiveOnly = false;
 };
 
 std::vector<FrontendSinkCase> frontendSinkCases()
@@ -80,6 +83,7 @@ std::vector<FrontendParityCase> frontendPaddedDropoutCases()
     spec.seqLensKv = {100, 0};
     spec.name = "dropout_under_padding_top_left_keyless";
     cases.push_back({"DropoutUnderPaddingTopLeftWithAKeylessBatch", spec});
+    cases.back().comprehensiveOnly = true;
     return cases;
 }
 
@@ -104,6 +108,7 @@ std::vector<FrontendParityCase> frontendPackedDropoutCases()
     spec.packedLensKv = {100, 0};
     spec.name = "dropout_over_packed_sequences_top_left_keyless";
     cases.push_back({"DropoutOverPackedSequencesTopLeftWithAKeylessSequence", spec});
+    cases.back().comprehensiveOnly = true;
     return cases;
 }
 
@@ -203,23 +208,35 @@ std::vector<FrontendParityCase> frontendParityExtrasCases()
     return cases;
 }
 
+/// The dual-wave test shapes: SMALL is the standard tier's, LARGE the comprehensive tier's.
+enum class DualwaveShape
+{
+    SMALL,
+    LARGE,
+};
+
 /// head_dim 256 on gfx950's dual-wave kernel (vendored-kernel modification 43: 4 waves of 32
 /// rows), pinned there: several KV tiles with ragged tails, GQA, no mask and a bottom-right
 /// diagonal off zero with the LSE. Other GPUs serve them on their first-ranked FlyDSL engine.
-std::vector<FrontendParityCase> frontendDualwaveHeadDim256Cases()
+/// SMALL is 200 x 300 (two query blocks of 128 with a 72-row tail, ten KV tiles of 32 with a
+/// 12-key tail) and, with the LSE, 140 x 250 (a 12-row tail, eight KV tiles with a ragged tail,
+/// the diagonal 110 off zero); LARGE is 640 x 700 and 300 x 700.
+std::vector<FrontendParityCase> frontendDualwaveHeadDim256Cases(DualwaveShape shape)
 {
+    const bool small = shape == DualwaveShape::SMALL;
     std::vector<FrontendParityCase> cases;
     FrontendSdpaSpec spec;
     spec.headSize = 256;
-    spec.seqQ = 640;
-    spec.seqKv = 700;
+    spec.seqQ = small ? 200 : 640;
+    spec.seqKv = small ? 300 : 700;
     spec.rightBound.reset();
     spec.engine = "hipkernel:flydsl_sdpa_cdna_dualwave";
     spec.engineArch = "gfx950";
     spec.name = "dualwave_head_dim_256";
     cases.push_back({"NoMask", spec});
     spec.rightBound = 0;
-    spec.seqQ = 300;
+    spec.seqQ = small ? 140 : 300;
+    spec.seqKv = small ? 250 : 700;
     spec.dataType = hipdnn_frontend::DataType::HALF;
     spec.name = "dualwave_head_dim_256_bottom_right";
     cases.push_back({"BottomRightCausal", spec});
@@ -263,16 +280,19 @@ std::vector<FrontendParityCase> frontendOddHeadDimCases()
     d23.packedLensKv = {143, 40};
     d23.name = "head_dim_23_packed";
     cases.push_back({"HeadDim23Packed", d23});
+    cases.back().comprehensiveOnly = true;
     auto f32 = base;
     f32.headSize = 37;
     f32.dataType = DataType::FLOAT;
     f32.name = "head_dim_37_f32";
     cases.push_back({"HeadDim37F32", f32});
+    cases.back().comprehensiveOnly = true;
     auto pair = base;
     pair.headSize = 64;
     pair.valueHeadSize = 37;
     pair.name = "query_key_64_value_37";
     cases.push_back({"QueryKey64Value37", pair});
+    cases.back().comprehensiveOnly = true;
     return cases;
 }
 
@@ -299,68 +319,88 @@ TEST_P(IntegrationGpuFlydslSdpaFrontendParity, ServesTheGraphAsTheCpuReferenceDo
     validateServeAndVerify(sdpa, testCase.spec.dataType);
 }
 
-INSTANTIATE_TEST_SUITE_P(PaddedDropout,
+INSTANTIATE_TEST_SUITE_P(StandardPaddedDropout,
                          IntegrationGpuFlydslSdpaFrontendParity,
-                         ::testing::ValuesIn(frontendPaddedDropoutCases()),
+                         ::testing::ValuesIn(standardTierCases(frontendPaddedDropoutCases())),
                          [](const ::testing::TestParamInfo<FrontendParityCase>& info) {
                              return std::string(info.param.name);
                          });
 
-INSTANTIATE_TEST_SUITE_P(PackedDropout,
+INSTANTIATE_TEST_SUITE_P(ComprehensivePaddedDropout,
                          IntegrationGpuFlydslSdpaFrontendParity,
-                         ::testing::ValuesIn(frontendPackedDropoutCases()),
+                         ::testing::ValuesIn(comprehensiveTierCases(frontendPaddedDropoutCases())),
                          [](const ::testing::TestParamInfo<FrontendParityCase>& info) {
                              return std::string(info.param.name);
                          });
 
-INSTANTIATE_TEST_SUITE_P(LeftOnlyWindow,
+INSTANTIATE_TEST_SUITE_P(StandardPackedDropout,
+                         IntegrationGpuFlydslSdpaFrontendParity,
+                         ::testing::ValuesIn(standardTierCases(frontendPackedDropoutCases())),
+                         [](const ::testing::TestParamInfo<FrontendParityCase>& info) {
+                             return std::string(info.param.name);
+                         });
+
+INSTANTIATE_TEST_SUITE_P(ComprehensivePackedDropout,
+                         IntegrationGpuFlydslSdpaFrontendParity,
+                         ::testing::ValuesIn(comprehensiveTierCases(frontendPackedDropoutCases())),
+                         [](const ::testing::TestParamInfo<FrontendParityCase>& info) {
+                             return std::string(info.param.name);
+                         });
+
+INSTANTIATE_TEST_SUITE_P(StandardLeftOnlyWindow,
                          IntegrationGpuFlydslSdpaFrontendParity,
                          ::testing::ValuesIn(frontendLeftOnlyWindowCases()),
                          [](const ::testing::TestParamInfo<FrontendParityCase>& info) {
                              return std::string(info.param.name);
                          });
 
-INSTANTIATE_TEST_SUITE_P(ValueHeads,
+INSTANTIATE_TEST_SUITE_P(StandardValueHeads,
                          IntegrationGpuFlydslSdpaFrontendParity,
                          ::testing::ValuesIn(frontendValueHeadsCases()),
                          [](const ::testing::TestParamInfo<FrontendParityCase>& info) {
                              return std::string(info.param.name);
                          });
 
-INSTANTIATE_TEST_SUITE_P(ParityExtras,
+INSTANTIATE_TEST_SUITE_P(StandardParityExtras,
                          IntegrationGpuFlydslSdpaFrontendParity,
                          ::testing::ValuesIn(frontendParityExtrasCases()),
                          [](const ::testing::TestParamInfo<FrontendParityCase>& info) {
                              return std::string(info.param.name);
                          });
 
-// On gfx950, the dual-wave kernel it is pinned to, in every tier; on other GPUs, which serve it on
-// their first-ranked engine, in the comprehensive (nightly) tier: the two take ~30 s on a gfx11
-// CI runner.
-INSTANTIATE_TEST_SUITE_P(
-    DualwaveHeadDim256,
-    IntegrationGpuFlydslSdpaFrontendParity,
-    ::testing::ValuesIn(pinnedCasesOnTheirArch(frontendDualwaveHeadDim256Cases())),
-    [](const ::testing::TestParamInfo<FrontendParityCase>& info) {
-        return std::string(info.param.name);
-    });
-
-INSTANTIATE_TEST_SUITE_P(
-    ComprehensiveDualwaveHeadDim256,
-    IntegrationGpuFlydslSdpaFrontendParity,
-    ::testing::ValuesIn(pinnedCasesElsewhere(frontendDualwaveHeadDim256Cases())),
-    [](const ::testing::TestParamInfo<FrontendParityCase>& info) {
-        return std::string(info.param.name);
-    });
-
-INSTANTIATE_TEST_SUITE_P(OddHeadDims,
+// The small shapes on gfx950, the dual-wave kernel they are pinned to, in the standard tier. The
+// large shapes run in the comprehensive (nightly) tier on every GPU: gfx950 on the dual-wave
+// kernel, the others on their first-ranked engine (~30 s on a gfx11 CI runner).
+INSTANTIATE_TEST_SUITE_P(StandardDualwaveHeadDim256,
                          IntegrationGpuFlydslSdpaFrontendParity,
-                         ::testing::ValuesIn(frontendOddHeadDimCases()),
+                         ::testing::ValuesIn(pinnedCasesOnTheirArch(
+                             frontendDualwaveHeadDim256Cases(DualwaveShape::SMALL))),
                          [](const ::testing::TestParamInfo<FrontendParityCase>& info) {
                              return std::string(info.param.name);
                          });
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(ComprehensiveDualwaveHeadDim256,
+                         IntegrationGpuFlydslSdpaFrontendParity,
+                         ::testing::ValuesIn(frontendDualwaveHeadDim256Cases(DualwaveShape::LARGE)),
+                         [](const ::testing::TestParamInfo<FrontendParityCase>& info) {
+                             return std::string(info.param.name);
+                         });
+
+INSTANTIATE_TEST_SUITE_P(StandardOddHeadDims,
+                         IntegrationGpuFlydslSdpaFrontendParity,
+                         ::testing::ValuesIn(standardTierCases(frontendOddHeadDimCases())),
+                         [](const ::testing::TestParamInfo<FrontendParityCase>& info) {
+                             return std::string(info.param.name);
+                         });
+
+INSTANTIATE_TEST_SUITE_P(ComprehensiveOddHeadDims,
+                         IntegrationGpuFlydslSdpaFrontendParity,
+                         ::testing::ValuesIn(comprehensiveTierCases(frontendOddHeadDimCases())),
+                         [](const ::testing::TestParamInfo<FrontendParityCase>& info) {
+                             return std::string(info.param.name);
+                         });
+
+INSTANTIATE_TEST_SUITE_P(Standard,
                          IntegrationGpuFlydslSdpaFrontend,
                          ::testing::ValuesIn(frontendSinkCases()),
                          [](const ::testing::TestParamInfo<FrontendSinkCase>& info) {

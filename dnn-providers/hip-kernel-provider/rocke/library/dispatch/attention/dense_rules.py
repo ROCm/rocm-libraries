@@ -73,6 +73,15 @@ def _gfx942_dense_inert_knobs(spec) -> dict:
     }
 
 
+def _gfx942_order_per_problem(spec) -> bool:
+    """Whether the base sets its grid's decode order from the problem (the bias
+    geometry follows the mask), not from the spec's own policy: the order is then a
+    recorded field, and stays an axis with the grid kind and the KV split. A candidate
+    that pins its order for every problem (``DenseSpace.pinned_axes``) never records it.
+    """
+    return bool(spec.use_additive_bias) and spec.nonpersist_decode != "auto"
+
+
 @dataclass(frozen=True)
 class _DenseTuningArch:
     """What the shared dense walk needs to know about one arch's dense body.
@@ -132,13 +141,11 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
     "gfx942": _DenseTuningArch(
         # persistent is itself an axis here, so the persistent-only knobs stay
         # and the per-spec duplicate check drops them on non-persistent specs.
-        # A variant that pins the block order (qbminor) pins the grid kind with
-        # it: no persistence, no other order, no KV split, so every spec it
-        # offers launches the same kind of grid as its default (block_m stays a
-        # knob and sizes it).
+        # A candidate that pins the block order (qbminor, the AOT grids) pins the
+        # grid kind with it, through ``DenseSpace.pinned_axes``, not through the
+        # base spec: a spec whose order is set (the bias geometry's) does not say
+        # whether the order is pinned for every problem or picked for this one.
         scope={
-            "persistent": lambda s: s.nonpersist_decode == "auto",
-            "nonpersist_decode": lambda s: s.nonpersist_decode == "auto",
             # A base that pins its persistent decode (the ingestor's persistent
             # grid) pins the CTA count with it: the decode's legality was checked
             # at that count, and the launch passes exactly that many CTAs.
@@ -154,9 +161,7 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
             "causal_diag_split": lambda s: (
                 bool(s.causal) and int(s.sliding_window) == 0
             ),
-            "kv_segments": lambda s: (
-                kv_split_admits(s) and s.nonpersist_decode == "auto"
-            ),
+            "kv_segments": kv_split_admits,
             "window_wave_skip": lambda s: bool(s.causal) and int(s.sliding_window) > 0,
         },
         policy_knobs=("use_cfvst", "use_exp2_fast", "v_row_pad", "use_v_swizzle"),
@@ -405,11 +410,17 @@ class DenseSpace(WavesPerEuSpace):
     # The axes this candidate walks, or None for every declared dense axis in
     # scope. An empty set leaves the default spec alone.
     axis_names: Optional[frozenset] = None
+    # Axes the candidate's grid fixes for every problem (a variant that pins the
+    # block order pins the grid kind and the KV split with it, so every spec it
+    # offers launches the kind of grid its default does): dropped from its space
+    # whatever the base spec says, and the decode order is never recorded for it.
+    pinned_axes: frozenset = frozenset()
 
     def recorded(self, base):
         # A moving bottom-right diagonal on the default grid resolves its query
         # tile and KV-segment count per problem (the short-chunk rule), so both
-        # are recorded there. Every other base keeps its key unchanged.
+        # are recorded there, and the gfx942 bias geometry records its decode order
+        # (below). Every other base keeps its key unchanged.
         moving = getattr(base, "causal_bottom_right", False) and int(
             base.seqlen_q
         ) != int(base.seqlen_kv)
@@ -419,10 +430,23 @@ class DenseSpace(WavesPerEuSpace):
             fields = fields | {"causal_diag_split"}
         if moving and not base.persistent:
             fields = fields | {"block_m", "kv_segments"}
+        if (
+            self.arch == "gfx942"
+            and "nonpersist_decode" not in self.pinned_axes
+            and _gfx942_order_per_problem(base)
+        ):
+            # The bias geometry picks the grid's decode order from the mask, so the
+            # order is resolved per problem like the tile it goes with. A base that
+            # leaves it to the spec's own policy resolves nothing here, and neither
+            # does a candidate that pins it: the ingestor's grids keep their key as
+            # it was, with a bias too.
+            fields = fields | {"nonpersist_decode"}
         return fields
 
     def axes(self, base):
-        axes = dense_axes_for(base, self.arch)
+        axes = tuple(
+            a for a in dense_axes_for(base, self.arch) if a.name not in self.pinned_axes
+        )
         if self.axis_names is None:
             return axes
         return tuple(a for a in axes if a.name in self.axis_names)

@@ -227,5 +227,6 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaCdnaPacks.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdPacks.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdSplitPacks.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslModelBinding.cpp
     )
 endif()

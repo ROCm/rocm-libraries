@@ -34,9 +34,11 @@
  * `build_attention_dense`, packaged (kind: rocke -> kpack) for gfx950 only. Matching and
  * dispatch, the [2^-64, 2^4] scale range included, are shared with the gfx942 twin
  * (AttentionDenseNative.cpp); what is gfx950's own is bound here: the block_m {128, 256}
- * tiles with their LDS budget, no sliding window, a head-count comparison because the
- * catalog lists each head configuration as its own entry, and the v1 (8-argument) and v2
- * (10-argument) launch contracts.
+ * tiles with their LDS budget, no sliding window, and the v1 (8-argument) and v2
+ * (10-argument) launch contracts. A kernel built with an additive bias (the
+ * use_additive_bias KMD field) takes the v3 contract, which adds the bias pointer and its
+ * strides: 14 arguments. No head count is compared: the kernel reads both as kernargs
+ * taken from the graph.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -78,6 +80,11 @@ constexpr attention_dense::AttentionDenseArch gfx950Arch()
     // asks for one. Bound anyway, so a variant built with a window is never matched.
     arch.tokens.slidingWindow = "gfx950_attention_dense.sliding_window";
     arch.tokens.scaleBits = "gfx950_attention_dense.scale_bits";
+    arch.tokens.bias = "gfx950_attention_dense.bias";
+    arch.tokens.biasUid = "gfx950_attention_dense.bias.uid";
+    arch.tokens.biasStrideBatch = "gfx950_attention_dense.bias.stride_batch";
+    arch.tokens.biasStrideHead = "gfx950_attention_dense.bias.stride_head";
+    arch.tokens.biasStrideQuery = "gfx950_attention_dense.bias.stride_query";
     arch.isSupportedTile = &isSupportedGfx950AttentionDenseTile;
     arch.geometry = &gfx950Geometry;
     // No catalog variant carries a non-zero sliding_window, so a windowed mask has no
@@ -85,14 +92,20 @@ constexpr attention_dense::AttentionDenseArch gfx950Arch()
     arch.servesWindows = false;
     // No catalog variant writes LSE, so every stats output declines under 'stats'.
     arch.candidateWritesLse = nullptr;
+    arch.candidateAddsBias = &attention_dense::candidateAdditiveBias;
     arch.currentContract = {GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2,
                             attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
     arch.legacyContract = {GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1,
                            attention_dense::AttentionDenseAbi::BAKED_HEAD_COUNTS};
+    arch.biasContract = {GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3,
+                         attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS};
     return arch;
 }
 
 constexpr attention_dense::AttentionDenseArch GFX950_ARCH = gfx950Arch();
+static_assert(GFX950_ARCH.isConsistent(),
+              "gfx950Arch(): a served feature's token is unspelled, or the bias hook and the bias "
+              "contract do not come together (their tokens, name and kernel-argument form)");
 
 std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& context)
 {
@@ -271,8 +284,8 @@ void resetGfx950AttentionDenseModuleCache()
 namespace
 {
 
-/// This engine's dispatch handler for the current (v2) or the legacy (v1) contract,
-/// process-lifetime. Both share one module cache and loader.
+/// This engine's dispatch handler for the current (v2, which also serves v3) or the legacy
+/// (v1) contract, process-lifetime. Both share one module cache and loader.
 const IKernelDispatchHandler<Handle>& gfx950AttentionDenseDispatchHandler(bool legacy)
 {
     static const compilation::KpackKernelLoader s_kpackLoader(
@@ -291,9 +304,12 @@ void registerGfx950AttentionDenseSymbols(SymbolScope<Handle>& scope)
     scope.add(std::string(GRAPH_MATCHER_SYMBOL), &gfx950AttentionDenseGraphMatches);
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &kernelMatches);
     scope.add(std::string(SCORE_SYMBOL), &scoreKernel);
-    // The UDD's unversioned name dispatches the catalog, all of which takes v2.
+    // The UDD's unversioned name dispatches the catalog: plain kernels take v2 and bias
+    // kernels v3, both served (and saved under) by the current handler.
     scope.add(std::string(DISPATCH_SYMBOL), &gfx950AttentionDenseDispatchHandler(/*legacy=*/false));
     scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2),
+              &gfx950AttentionDenseDispatchHandler(/*legacy=*/false));
+    scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3),
               &gfx950AttentionDenseDispatchHandler(/*legacy=*/false));
     // Kept so plans saved under v1 still load and launch their 8-argument code object.
     scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1),

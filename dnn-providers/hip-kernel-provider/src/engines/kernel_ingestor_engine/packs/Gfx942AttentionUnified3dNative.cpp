@@ -401,8 +401,8 @@ bool maskAccepted(const data_objects::SdpaAttributes& attributes)
  * masks, block masks and a device scale tensor. The catalog holds no kernel for any of them.
  *
  * Batch and Skv are not limited here: the kernel takes both at run time (grid and
- * seq_lens). kernelMatches declines each candidate whose num_segments would take an
- * i32-indexed tensor to 2^31 elements at the graph's batch.
+ * seq_lens). kernelMatches declines each candidate whose num_segments would take segm_output
+ * past 2^31 elements at the graph's batch.
  *
  * @warning Returning std::nullopt empties this engine's WHOLE catalog.
  */
@@ -808,10 +808,11 @@ std::optional<Unified3dTraits> candidateTraits(const KernelDefinition& kernel)
  * segment, and segments with no keys contribute nothing), so they are the scorer's to
  * rank.
  *
- * One limit does depend on batch: the kernels index segm_output, segm_max/expsum, Q and O
- * with i32 element offsets, so a candidate whose num_segments takes any of them to 2^31
- * elements at the graph's batch is declined (gfx942Unified3dIndicesFitInt32). A candidate
- * with fewer segments may still match the same graph.
+ * One limit does depend on batch: the kernels index segm_output with i32 element offsets,
+ * and it is the largest tensor they index (segm_max/expsum, Q and O are never larger), so a
+ * candidate whose num_segments takes it past 2^31 elements at the graph's batch is declined
+ * (gfx942Unified3dIndicesFitInt32). A candidate with fewer segments may still match the same
+ * graph.
  */
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
@@ -844,8 +845,8 @@ bool kernelMatches(const MatchContext& context,
                                << " [i32_index]: batch " << problem->batch << " x query heads "
                                << problem->numQueryHeads << " x num_segments "
                                << traits->numSegments << " x head size " << problem->headSize
-                               << " reaches 2^31 elements; the kernels index segm_output, "
-                                  "segm_max/expsum, Q and O with signed 32-bit offsets");
+                               << " leaves no segm_output within 2^31 elements; the kernels "
+                                  "index it with signed 32-bit offsets");
         return false;
     }
     return true;
@@ -1156,8 +1157,7 @@ public:
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "gfx942 unified 3d: kernel '" + toString(kernel.kernelId)
-                    + "' would index segm_output, segm_max/expsum, Q or O past 2^31 elements "
-                      "at batch "
+                    + "' would index segm_output past 2^31 elements at batch "
                     + std::to_string(problem.batch) + " with " + std::to_string(traits->numSegments)
                     + " segments (i32 offsets)");
         }
@@ -1185,8 +1185,9 @@ public:
         Unified3dLaunchState state;
         state.binding = binding;
         state.problem = problem;
-        // The i32-index check above bounds Hq (and so Hkv <= Hq) and batch; check the
-        // narrowing anyway so a future caller cannot truncate a head count silently.
+        // The scratch bound above keeps batch and Hq at or below 2^31 (exactly 2^31 elements
+        // is admitted), so this check is what refuses a count of exactly 2^31 for the kernels'
+        // i32 arguments; it also covers Hkv.
         if(state.problem.batch > std::numeric_limits<int32_t>::max()
            || state.problem.numQueryHeads > std::numeric_limits<int32_t>::max()
            || state.problem.numKvHeads > std::numeric_limits<int32_t>::max())

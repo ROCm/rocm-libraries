@@ -5,14 +5,18 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
+#include <hipdnn_plugin_sdk/ingestor/SavedDispatch.hpp>
 
 #include "tests/engines/kernel_ingestor_engine/packs/AttentionDenseTestArch.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/AttentionDenseTestGraphs.hpp"
@@ -49,6 +53,15 @@
  * bytes -- so an exchange of two like slots, or a slot under another name, is refused by
  * name alone. `offset` is printed and never compared, which is why every expectation
  * below carries zero for it.
+ *
+ * Both arches also ship use_additive_bias kernels, which take the ten arguments then the
+ * bias pointer and its three strides (fourteen), last after any lse_ptr; a bias graph
+ * prepares that form and a plain graph the ten-argument one. The saved plan of a bias kernel
+ * (gfx942 dispatch v2, gfx950 v3) restores against the same. Those cases run on the arches
+ * that serve a bias (biasServingArches()).
+ *
+ * The last section pins AttentionDenseArch::isConsistent(), the rule each engine static_asserts
+ * on its descriptor, as compile-time checks on broken descriptors.
  *
  * No device, no compile and no launch: the archive named here does not exist, and both
  * the signature refusal and the archive's absence are raised on the host.
@@ -496,6 +509,404 @@ TEST(TestGfx950AttentionDenseSignature, RefusesThePersistentFiveArgumentForm)
                   bakedPersistentAbi(),
                   "the persistent form does not ship in this catalog");
 }
+
+// =============================================================================
+// The additive-bias form
+// =============================================================================
+
+namespace
+{
+
+/// graph_match over the default graph, or over it with a [B, 1, Sq, Skv] fp32 attn_mask when
+/// @p bias, then prepare() over a descriptor of @p arch recording @p recorded whose
+/// use_additive_bias is @p bias too. The message prepare() throws; empty if it returned.
+std::string biasPrepareFailure(const AttentionDenseTestArch& arch,
+                               const std::vector<KernelArgument>& recorded,
+                               bool bias)
+{
+    const Graph graph(arch, bias ? withBias({BATCH, 1, SEQ, SEQ}) : GraphSpec{});
+    const auto bound = graph.match();
+    EXPECT_TRUE(bound.has_value()) << "graph_match declined the fixture graph, so prepare() "
+                                      "never ran and no case below means anything";
+    if(!bound.has_value())
+    {
+        return {};
+    }
+    auto kernel = makeKernel(arch, recorded);
+    kernel.metadata[std::string("use_additive_bias")] = int64_t{bias ? 1 : 0};
+    return attention_dense_graphs::prepareFailure(graph, *bound, kernel);
+}
+
+/// Asserts the pack refuses @p recorded on signature grounds. @p bias makes both the graph
+/// and the candidate a bias one.
+void expectBiasRefused(const AttentionDenseTestArch& arch,
+                       const std::vector<KernelArgument>& recorded,
+                       const char* what,
+                       bool bias)
+{
+    const std::string failure = biasPrepareFailure(arch, recorded, bias);
+    ASSERT_FALSE(failure.empty()) << what << ": prepare() did not fail at all";
+    EXPECT_NE(failure.find(MISMATCH_MARKER), std::string::npos)
+        << what << ", but the failure was: " << failure;
+}
+
+/// A tile the kernel is built with, so the saved block_m reads back.
+constexpr int64_t SAVED_BLOCK_M = 256;
+
+/// No device. A restore that passes the signature comparison and the launch values stops
+/// at the device load, which refuses a negative ordinal on the host.
+constexpr int NO_DEVICE = -1;
+
+/// The fragment only the restore's signature refusal carries, ahead of MISMATCH_MARKER.
+constexpr const char* RESTORE_MISMATCH_MARKER
+    = "the saved kernel's arguments do not match what this provider launches";
+
+/// The fragment of the device-ordinal refusal that follows every restore check.
+constexpr const char* NO_DEVICE_MARKER = "which names no device";
+
+/// Valid launch values for the fixture graph under @p arch's plain contract, or its bias
+/// contract with the fixture's full [B, Hq, Sq, Skv] bias when @p withBias, and with the
+/// stats output @p statsUid where the arch saves one. Every value reads back, so only the
+/// recorded signature can stop a restore before the device load.
+hipdnn_plugin_sdk::ingestor::SavedLaunchInputs savedLaunchInputs(const AttentionDenseTestArch& arch,
+                                                                 bool withBias,
+                                                                 int64_t statsUid
+                                                                 = ATTENTION_DENSE_NO_STATS)
+{
+    AttentionDenseBinding binding;
+    binding.q = Q_UID;
+    binding.k = K_UID;
+    binding.v = V_UID;
+    binding.o = O_UID;
+    binding.scale = SCALE;
+    binding.stats = statsUid;
+
+    AttentionDenseProblem problem;
+    problem.batch = BATCH;
+    problem.seqLenQ = SEQ;
+    problem.seqLenKv = SEQ;
+    problem.numQueryHeads = HEADS;
+    problem.numKvHeads = HEADS;
+    problem.headSize = HEAD_SIZE;
+    problem.dataType = data_objects::DataType::BFLOAT16;
+
+    if(withBias)
+    {
+        binding.bias = AttentionDenseBias{BIAS_UID,
+                                          {static_cast<int32_t>(HEADS * SEQ * SEQ),
+                                           static_cast<int32_t>(SEQ * SEQ),
+                                           static_cast<int32_t>(SEQ)}};
+    }
+    return {std::string(withBias ? arch.biasContractSymbol : arch.plainContractSymbol),
+            arch.launchValues(binding, problem, SAVED_BLOCK_M)};
+}
+
+/// What restoreLaunch() threw. SUCCESS with no message means it returned, which no case
+/// expects.
+struct RestoreFailure
+{
+    hipdnnPluginStatus_t status = HIPDNN_PLUGIN_STATUS_SUCCESS;
+    std::string message;
+};
+
+/// Runs the restoreLaunch() of the handler registered under the saved contract over valid
+/// plain (or, @p withBias, bias) launch values and a saved kernel whose recorded argument
+/// list is @p recorded, and returns what it throws.
+RestoreFailure restoreFailure(const AttentionDenseTestArch& arch,
+                              const std::vector<KernelArgument>& recorded,
+                              bool withBias,
+                              int64_t statsUid = ATTENTION_DENSE_NO_STATS)
+{
+    registerNativeIngestorSymbols();
+
+    const auto saved = savedLaunchInputs(arch, withBias, statsUid);
+    const auto* handler
+        = hipdnn_plugin_sdk::ingestor::DispatchRegistry<Handle>::resolve(saved.dispatchSymbol);
+    EXPECT_NE(handler, nullptr);
+    if(handler == nullptr)
+    {
+        return {};
+    }
+
+    hipdnn_plugin_sdk::ingestor::SavedKernelCode code;
+    code.kernelId
+        = hipdnn_flatbuffers_sdk::utilities::parseUuid("00000000-0000-4000-8000-0000000051a1");
+    code.sourceKind = hipdnn_plugin_sdk::ingestor::KernelSourceKind::KPACK;
+    code.symbol = "attention_dense";
+    code.target = std::string(arch.gcnArchName);
+    code.recordedSignature = recorded;
+
+    try
+    {
+        static_cast<void>(handler->restoreLaunch(saved, std::move(code), NO_DEVICE));
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        return {error.getStatus(), error.getMessage()};
+    }
+    return {};
+}
+
+/// The arches that serve an additive bias.
+class TestAttentionDenseBiasSignature
+    : public ::testing::TestWithParam<const AttentionDenseTestArch*>
+{
+protected:
+    static const AttentionDenseTestArch& arch()
+    {
+        return *GetParam();
+    }
+};
+
+} // namespace
+
+/// The positive control for a bias variant: a bias graph on a bias candidate recording the
+/// fourteen arguments the builder declares gets past the comparison to the loader.
+TEST_P(TestAttentionDenseBiasSignature, AcceptsTheBiasAbiThePythonDeclares)
+{
+    const std::string failure = biasPrepareFailure(arch(), pythonBiasAbi(), /*bias=*/true);
+    ASSERT_FALSE(failure.empty()) << "the archive named by the fixture does not exist, so "
+                                     "prepare() cannot have succeeded";
+    EXPECT_EQ(failure.find(MISMATCH_MARKER), std::string::npos)
+        << "the pack refused the argument list the rocKE builder declares: " << failure;
+}
+
+TEST_P(TestAttentionDenseBiasSignature, RefusesTheTenArgumentFormForABiasCandidate)
+{
+    // A bias candidate whose object records no bias tail: the launch would write four
+    // arguments past the end of its kernarg segment.
+    expectBiasRefused(arch(), pythonAbi(), "a bias variant takes the bias tail", /*bias=*/true);
+}
+
+TEST_P(TestAttentionDenseBiasSignature, RefusesTheBiasFormForAPlainCandidate)
+{
+    expectBiasRefused(
+        arch(), pythonBiasAbi(), "a plain variant takes no bias tail", /*bias=*/false);
+}
+
+TEST_P(TestAttentionDenseBiasSignature, RefusesEachExchangeOfTwoBiasStrides)
+{
+    // Same kind and size; accepted, the kernel would stride over heads by the batch pitch.
+    const auto abi = pythonBiasAbi();
+    for(std::size_t first = abi.size() - 3; first < abi.size(); ++first)
+    {
+        for(std::size_t second = first + 1; second < abi.size(); ++second)
+        {
+            auto exchanged = abi;
+            std::swap(exchanged.at(first), exchanged.at(second));
+            const std::string what = abi.at(first).name + " <-> " + abi.at(second).name;
+            expectBiasRefused(arch(), exchanged, what.c_str(), /*bias=*/true);
+        }
+    }
+}
+
+// =============================================================================
+// Restoring a saved plan
+// =============================================================================
+
+/// The positive control for the refusal below. The ten-argument form that the plain
+/// contract restores passes the signature comparison and the launch values and reaches the
+/// device load.
+TEST_P(TestAttentionDenseBiasSignature, RestoresTheTenArgumentFormPastTheComparison)
+{
+    const auto failure = restoreFailure(arch(), pythonAbi(), /*withBias=*/false);
+    EXPECT_EQ(failure.status, HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR) << failure.message;
+    EXPECT_NE(failure.message.find(NO_DEVICE_MARKER), std::string::npos) << failure.message;
+    EXPECT_EQ(failure.message.find(MISMATCH_MARKER), std::string::npos) << failure.message;
+}
+
+/// The plain contract holds no bias, so a bias plan saves under the bias contract. A plain
+/// payload that names a bias kernel anyway (forged, or edited) records the fourteen-argument
+/// list. The restore must refuse it as incompatible, and must not launch a bias kernel with
+/// ten arguments.
+TEST_P(TestAttentionDenseBiasSignature, RefusesToRestoreAPlainPlanThatRecordsTheBiasForm)
+{
+    const auto failure = restoreFailure(arch(), pythonBiasAbi(), /*withBias=*/false);
+    EXPECT_EQ(failure.status, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE) << failure.message;
+    EXPECT_NE(failure.message.find(RESTORE_MISMATCH_MARKER), std::string::npos) << failure.message;
+    EXPECT_NE(failure.message.find(MISMATCH_MARKER), std::string::npos) << failure.message;
+}
+
+/// The positive control for the refusal below. The fourteen-argument form that the bias
+/// contract restores passes the signature comparison and the bias values and reaches the
+/// device load.
+TEST_P(TestAttentionDenseBiasSignature, RestoresTheFourteenArgumentFormPastTheComparison)
+{
+    const auto failure = restoreFailure(arch(), pythonBiasAbi(), /*withBias=*/true);
+    EXPECT_EQ(failure.status, HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR) << failure.message;
+    EXPECT_NE(failure.message.find(NO_DEVICE_MARKER), std::string::npos) << failure.message;
+    EXPECT_EQ(failure.message.find(MISMATCH_MARKER), std::string::npos) << failure.message;
+}
+
+/// A bias payload that names a plain kernel records the ten-argument list. The restore must
+/// refuse it as incompatible, and must not pass four bias arguments the kernel does not
+/// declare.
+TEST_P(TestAttentionDenseBiasSignature, RefusesToRestoreABiasPlanThatRecordsTheTenArgumentForm)
+{
+    const auto failure = restoreFailure(arch(), pythonAbi(), /*withBias=*/true);
+    EXPECT_EQ(failure.status, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE) << failure.message;
+    EXPECT_NE(failure.message.find(RESTORE_MISMATCH_MARKER), std::string::npos) << failure.message;
+    EXPECT_NE(failure.message.find(MISMATCH_MARKER), std::string::npos) << failure.message;
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestAttentionDenseBiasSignature,
+                         ::testing::ValuesIn(biasServingArches()),
+                         attentionDenseArchName);
+
+// =============================================================================
+// gfx942: the bias beside the stats output
+// =============================================================================
+
+/// A bias kernel that writes LSE records lse_ptr and then the bias tail, and a graph that
+/// binds a stats output and a bias is prepared on it. The tail first, or no tail, is refused.
+TEST(TestGfx942AttentionDenseSignature, AcceptsTheLseBiasFormOnlyWithTheTailLast)
+{
+    const auto& arch = GFX942_ATTENTION_DENSE;
+    const Graph graph(arch, withStats(withBias({BATCH, 1, SEQ, SEQ})));
+    const auto bound = graph.match();
+    ASSERT_TRUE(bound.has_value()) << "graph_match declined the fixture graph";
+
+    const auto failureOf = [&](const std::vector<KernelArgument>& recorded) {
+        auto kernel = makeKernel(arch, recorded);
+        kernel.metadata[std::string("use_additive_bias")] = int64_t{1};
+        return attention_dense_graphs::prepareFailure(graph, *bound, kernel);
+    };
+
+    const std::string accepted = failureOf(pythonLseBiasAbi());
+    ASSERT_FALSE(accepted.empty()) << "prepare() cannot succeed without the archive";
+    EXPECT_EQ(accepted.find(MISMATCH_MARKER), std::string::npos) << accepted;
+
+    auto tailFirst = pythonBiasAbi();
+    tailFirst.push_back(KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "lse_ptr"});
+    EXPECT_NE(failureOf(tailFirst).find(MISMATCH_MARKER), std::string::npos);
+    EXPECT_NE(failureOf(pythonLseAbi()).find(MISMATCH_MARKER), std::string::npos)
+        << "a graph with a bias needs the bias tail";
+    EXPECT_NE(failureOf(pythonBiasAbi()).find(MISMATCH_MARKER), std::string::npos)
+        << "a graph with stats needs lse_ptr";
+}
+
+/// The same for a saved plan: a bias plan with a stats output restores the LSE form with the
+/// tail last, and refuses the form without the tail.
+TEST(TestGfx942AttentionDenseSignature, RestoresTheLseBiasFormOfABiasPlanWithStats)
+{
+    const auto& arch = GFX942_ATTENTION_DENSE;
+    constexpr int64_t STATS = 7;
+    const auto restored = restoreFailure(arch, pythonLseBiasAbi(), /*withBias=*/true, STATS);
+    EXPECT_EQ(restored.status, HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR) << restored.message;
+    EXPECT_NE(restored.message.find(NO_DEVICE_MARKER), std::string::npos) << restored.message;
+
+    const auto tailless = restoreFailure(arch, pythonLseAbi(), /*withBias=*/true, STATS);
+    EXPECT_EQ(tailless.status, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE) << tailless.message;
+    EXPECT_NE(tailless.message.find(RESTORE_MISMATCH_MARKER), std::string::npos)
+        << tailless.message;
+}
+
+// =============================================================================
+// The arch descriptor's coherence rule
+// =============================================================================
+//
+// Each engine static_asserts AttentionDenseArch::isConsistent() on its own descriptor, so a
+// shipped descriptor is checked where it is defined. That says nothing about a BROKEN one: a
+// branch of isConsistent() could be loosened and both engines would still build. These are
+// compile-time checks too, so a loosened rule fails this file's build. Each descriptor below is
+// a coherent one (stats and a bias served) with one rule broken, and must read as inconsistent.
+
+namespace
+{
+
+using attention_dense::AttentionDenseAbi;
+using attention_dense::AttentionDenseArch;
+
+/// A hook the descriptors below carry: isConsistent() reads whether one is set, never calls it.
+std::optional<bool> unreachedHook(const hipdnn_plugin_sdk::ingestor::KernelDefinition& /*kernel*/)
+{
+    return std::nullopt;
+}
+
+/// A descriptor that serves stats and a bias, with every rule of isConsistent() met.
+constexpr AttentionDenseArch coherentArch()
+{
+    AttentionDenseArch arch{};
+    arch.tokens.stats = "arch.stats";
+    arch.tokens.bias = "arch.bias";
+    arch.tokens.biasUid = "arch.bias.uid";
+    arch.tokens.biasStrideBatch = "arch.bias.stride_batch";
+    arch.tokens.biasStrideHead = "arch.bias.stride_head";
+    arch.tokens.biasStrideQuery = "arch.bias.stride_query";
+    arch.candidateWritesLse = &unreachedHook;
+    arch.candidateAddsBias = &unreachedHook;
+    arch.currentContract = {"arch.dispatch.v2", AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
+    arch.legacyContract = {"arch.dispatch.v1", AttentionDenseAbi::BAKED_HEAD_COUNTS};
+    arch.biasContract = {"arch.dispatch.v3", AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS};
+    return arch;
+}
+
+/// Whether the coherent descriptor, after @p edit, still reads as consistent.
+template <typename Edit>
+constexpr bool consistentAfter(Edit edit)
+{
+    AttentionDenseArch arch = coherentArch();
+    edit(arch);
+    return arch.isConsistent();
+}
+
+} // namespace
+
+// The rule is not simply "refuse everything": a coherent descriptor, a plain one that serves
+// neither stats nor a bias (gfx950 serves no stats) and one with no superseded contract (gfx942
+// has none) are all accepted.
+static_assert(consistentAfter([](AttentionDenseArch&) {}),
+              "the coherent baseline must be consistent, or no refusal below means anything");
+static_assert(consistentAfter([](AttentionDenseArch& arch) {
+                  arch.candidateWritesLse = nullptr;
+                  arch.candidateAddsBias = nullptr;
+                  arch.biasContract = {};
+              }),
+              "a descriptor that serves neither stats nor a bias is consistent");
+static_assert(consistentAfter([](AttentionDenseArch& arch) { arch.legacyContract = {}; }),
+              "a descriptor with no superseded contract is consistent");
+
+// A served stats output needs its token spelled.
+static_assert(!consistentAfter([](AttentionDenseArch& arch) { arch.tokens.stats = {}; }),
+              "stats served with no stats token must be refused");
+
+// A bias hook and a bias contract come together.
+static_assert(!consistentAfter([](AttentionDenseArch& arch) { arch.biasContract = {}; }),
+              "a bias hook without a bias contract must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) { arch.candidateAddsBias = nullptr; }),
+              "a bias contract without a bias hook must be refused");
+
+// A served bias spells all five of its tokens.
+static_assert(!consistentAfter([](AttentionDenseArch& arch) { arch.tokens.bias = {}; }),
+              "a served bias with no bias token must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) { arch.tokens.biasUid = {}; }),
+              "a served bias with no bias uid token must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) { arch.tokens.biasStrideBatch = {}; }),
+              "a served bias with no batch stride token must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) { arch.tokens.biasStrideHead = {}; }),
+              "a served bias with no head stride token must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) { arch.tokens.biasStrideQuery = {}; }),
+              "a served bias with no query stride token must be refused");
+
+// The bias contract's kernel arguments follow the current contract's, and its name is its own.
+static_assert(
+    !consistentAfter([](AttentionDenseArch& arch) {
+        arch.currentContract.abi = AttentionDenseAbi::BAKED_HEAD_COUNTS;
+    }),
+    "a bias contract after a current contract that bakes the head counts must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) {
+    arch.biasContract.abi = AttentionDenseAbi::RUNTIME_HEAD_COUNTS;
+}),
+              "a bias contract that launches the form without the bias must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) {
+    arch.biasContract.symbol = arch.currentContract.symbol;
+}),
+              "a bias contract under the current contract's name must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) {
+    arch.biasContract.symbol = arch.legacyContract.symbol;
+}),
+              "a bias contract under the legacy contract's name must be refused");
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
 

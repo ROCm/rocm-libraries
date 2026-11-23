@@ -837,7 +837,7 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 |---|---|
 | `configs/scale_add.yaml` | Single-pack engine, like the shipped `conv_fwd`: one pack, one operation, its `graph_match` both admits the node type and validates shape |
 | `configs/binary_ops.yaml` | Multi-pack engine, like the shipped `pointwise`: one pack per operation sharing one KMD/UED/UHD/UDD, each naming its own operation-scoped UMD via `discriminator` |
-| `configs/gfx950_attention_dense.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionDense` descriptors: 52 rocKE kernels in the `variants` form, a builder lowered by `hkp_pack` at build time |
+| `configs/gfx950_attention_dense.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionDense` descriptors: 60 rocKE kernels (52 plus 8 additive-bias) in the `variants` form, a builder lowered by `hkp_pack` at build time |
 | `configs/gfx950_attention_dense.engine.yaml` | That engine's manifest: the registry space the selection is drawn from, its `reduction:` classification, ground-truth graph template and `launch_surface:` audit |
 | `configs/gfx950_conv_fwd_aot_seed.yaml` | Sharded multi-pack engine: one pack per dtype and no `discriminator`, so no operation-scoped UMD. It is also an engine that names another engine's native symbols (`native_symbols_from`): the test-only seed of `hipkernel:Gfx950ConvFwdAot`, written by `tools/make_conv_aot_config.py` |
 | `configs/gfx950_attention_unified_2d.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionUnified2D` descriptors: rocKE prefill kernels per head/dtype/mask cell, served through a host-derived identity paged-KV block table. Kernel and geometry counts: the bundle README, `rocKE/gfx950_attention_unified_2d/README.md` |
@@ -1049,10 +1049,26 @@ enumerate:
     - fields: [mask_type]         # enum request fields take member names
       values: [TOP_LEFT_CAUSAL, NO_MASK]
   sweep_level: production         # the registry sweep level
-  space: slice | full             # full: every sweep spec sharing the cell's feature fields
+  space: slice | full             # full: every sweep spec sharing the cell's feature fields (a feature entry may narrow it)
   free_fields: [block_m, block_n] # slice only: fields that may differ from select_spec
-  spec_fields: [dtype, head_size] # slice only: spec fields the KDP carries
-  max_kernels: 52                 # slice only: more is an error
+  feature_fields:                 # optional: boolean spec fields a cell turns on; declared here
+                                  # only, and applied to every `also` section too
+    use_additive_bias:            # must be a metadata field, in every section's spec_fields (if
+                                  # set) and in reduction.fields.feature (with a reduction
+                                  # block: an empty or absent list names no feature), and not
+                                  # in free_fields
+      name_token: _addb           # inserted after the template's last slot: ..._bn64_addb.gfx950
+      free_fields: [block_m]      # optional: the fields the cell sweeps. slice: a subset of
+                                  # free_fields. full: a subset of reduction.fields.performance,
+                                  # and every other performance knob stays at the cell default
+      select: {block_m: 128}      # optional: keep only the specs with these values. Keys come
+                                  # from this entry's free_fields, else free_fields (slice) or
+                                  # every performance knob (full). The cell's default is the
+                                  # kept spec equal to the registry default elsewhere. Two
+                                  # features' selects must agree
+  spec_fields: [dtype, head_size, use_additive_bias]  # slice only: spec fields the KDP carries
+  max_kernels: 60                 # slice only: more is an error. Every space refuses two
+                                  # kernels with one name
   # The two keys below serve a rule-driven candidate (attention_dense is not one); see
   # configs/gfx942_attention_unified_3d.engine.yaml and the text below.
   # selector_fields: [batch, seqlen_k, kv_block_size]  # optional: cell fields that only steer select_spec
@@ -1074,7 +1090,7 @@ launches:                         # optional: copied onto every kernel's kernel_
 
 reduction:                        # copied into the selection; read by tools/variant_reduce.py
   fields:
-    feature: [dtype, head_size]   # spec/metadata fields that define a cell
+    feature: [dtype, head_size, use_additive_bias]   # spec/metadata fields that define a cell
     performance:                  # tuning knobs, in priority order
       - {name: block_m, divides: seqlen_q}   # applicable when seqlen_q % block_m == 0; the target must be a kmd_fields name
       - {name: exp_per_pv_step, unset_resolves_by: resolved_exp_per_pv_step}  # resolves a None knob
@@ -1093,7 +1109,9 @@ ground_truth:                     # optional; read by tools/ground_truth.py grap
 ```
 
 Each cell's request is `Request(**fixed, **pin, **cell)`; a declined cell exits 2. Metadata
-fields and name slots the spec lacks are read from the request. A field sits in at most
+fields and name slots the spec lacks are read from the request. `--shapes` keys a shape by
+its cell fields; one the shape omits takes the request class's default (a shape with no
+`use_attn_bias` is a bias-off shape, not a GAP). A field sits in at most
 one `reduction.fields` list; in `space: full`, a varying field in none is held at its
 registry default with a WARN. `reduction:` never reaches a descriptor; a selection's arm
 or flat kernel may carry `default: true`, the variant its cell always keeps. An optional
@@ -1170,10 +1188,24 @@ them; duplicate kernel names after merging still exit 2.
 
 A `space: full` section (the primary or an `also`) projects its own varying performance
 knobs; the catalog's projected knobs are the union over sections, and `--plan-space`
-counts every section. A registry candidate that pairs its kernel with a reduce kernel (a
-`reduce_spec` beside the `kernel_spec`, as the attention split-KV tuning specs do) needs
-`launches`, built from one module builder, or the enumerator exits 2: the catalog would
-ship the kernel without the reduce the dispatcher launches after it.
+counts every section.
+
+A `feature_fields` entry's `free_fields` and `select` narrow a full space per cell, before
+the knobs are projected: a cell turning the feature on varies only the performance knobs
+`free_fields` names (every other one stays at the cell's registry default, without a
+WARN), keeps only the specs with the values `select` names, and counts against
+`aot_budget_per_arch` as narrowed. A cell turning on two features varies the intersection of
+their `free_fields`. A knob no cell still varies after narrowing is not projected.
+`feature_fields` is declared on `enumerate` only and applies to every `also` section too:
+each section narrows its own cells in its own space (a `space: slice` section against its
+`free_fields`, a `space: full` one against the performance knobs). The manifest check reads
+`free_fields` and `select` against the space of `enumerate` itself. A narrowing that leaves a
+cell with no spec exits 2, in the build and in `--plan-space`.
+
+A registry candidate that pairs its kernel with a reduce kernel (a `reduce_spec` beside
+the `kernel_spec`, as the attention split-KV tuning specs do) needs `launches`, built from
+one module builder, or the enumerator exits 2: the catalog would ship the kernel without
+the reduce the dispatcher launches after it.
 
 A packaged `rocke` `kernel_source` (or the pack's `kernel_defaults`, which every kernel
 inherits) may set `target: native | generic`, the processor `hkp_pack` compiles each shard
