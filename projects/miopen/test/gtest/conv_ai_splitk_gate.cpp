@@ -32,7 +32,6 @@
 #include <miopen/tensor.hpp>
 #include <map>
 
-
 using miopen::solver::conv::CkSplitkAutoDeduce;
 using miopen::solver::conv::SolverHeuristicConfig;
 
@@ -112,7 +111,6 @@ TEST_F(CPU_SplitKAutodeduceGate_NONE, NonSplitKSolverAcceptsOnlyZero)
     EXPECT_FALSE(cfg.IsValidSplitK(CkSplitkAutoDeduce));
 }
 
-
 // End-to-end test: with the real solver gate (IsValidSplitK from GetWrw2DSolverHeuristicConfig),
 // SelectBestVocabCandidate must return split_k=-1 for a shape where the model's top-1 is -1.
 //
@@ -152,22 +150,20 @@ TEST_F(CPU_SplitKAutodeduceEndToEnd_NONE, Wrw2DPicksAutodeduceWithRealGate)
     // Gate using the ACTUAL shipped solver config (not a hand-crafted copy).
     // If supports_split_k_autodeduce is false in the solver, IsValidSplitK(-1) returns false
     // and the -1 pick is rejected -> pick->second != -1 -> this test fails.
-    const auto& cfg   = GetWrw2DSolverHeuristicConfig();
-    const auto gate   = [&cfg](const std::string&, int sk, bool) {
-        return cfg.IsValidSplitK(sk);
-    };
+    const auto& cfg = GetWrw2DSolverHeuristicConfig();
+    const auto gate = [&cfg](const std::string&, int sk, bool) { return cfg.IsValidSplitK(sk); };
 
-    const auto pick =
-        miopen::ai::tuning::candidate_selection::SelectBestVocabCandidate(
-            arch, solver, feats, /*use_tf32=*/false, gate);
+    const auto pick = miopen::ai::tuning::candidate_selection::SelectBestVocabCandidate(
+        arch, solver, feats, /*use_tf32=*/false, gate);
 
     ASSERT_TRUE(pick.has_value())
         << "SelectBestVocabCandidate returned nullopt — model load or md5 guard failed. "
            "Check conv_ai_asset_smoke tests for the root cause.";
 
     EXPECT_EQ(pick->second, miopen::solver::conv::CkSplitkAutoDeduce)
-        << "Expected split_k=-1 (autodeduce) but got " << pick->second << ".
-"
+        << "Expected split_k=-1 (autodeduce) but got " << pick->second
+        << ".
+           "
         << "This means supports_split_k_autodeduce=false in the actual solver config "
            "(k2DWrwSolverConfig in conv_hip_implicit_gemm_grouped_wrw_xdlops.cpp). "
            "The PR #16500 change enabling autodeduce for Wrw was reverted or not applied.";
