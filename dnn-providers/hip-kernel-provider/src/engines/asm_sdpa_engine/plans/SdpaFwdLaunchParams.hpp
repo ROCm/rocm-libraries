@@ -6,6 +6,7 @@
 #include "SdpaFwdParams.hpp"
 
 #include <cstdint>
+#include <string>
 
 namespace asm_sdpa_engine
 {
@@ -19,14 +20,21 @@ struct SdpaFwdLaunchParams
     uint32_t tuneOpt;
 };
 
-// Threads per block the forward kernel for these head dims is launched with:
-// hd192x128 kernels use 4 wavefronts (256 threads) on all architectures, hd128
-// and other kernels use 8 wavefronts (512 threads). Batch and group mode launch
-// the same block. SdpaFwdPlanBuilder checks this value against the resolved
-// kernel's max_flat_workgroup_size, so it is the only place the block is chosen.
-inline unsigned int fwdBlockDimX(unsigned int headDimQk, unsigned int headDimV)
+// Threads per block the forward kernel is launched with: hd192x128 kernels use
+// 4 wavefronts (256 threads) on all architectures, as does the group-mode bf16
+// hd256/gfx950 kernel; the others use 8 wavefronts (512 threads).
+// SdpaFwdPlanBuilder checks this value against the resolved kernel's
+// max_flat_workgroup_size, so it is the only place the block is chosen.
+inline unsigned int fwdBlockDimX(const std::string& arch,
+                                 unsigned int headDimQk,
+                                 unsigned int headDimV,
+                                 bool isBf16,
+                                 bool isGroupMode)
 {
-    return (headDimQk == 192U && headDimV == 128U) ? 256U : 512U;
+    const bool isHd192x128 = headDimQk == 192U && headDimV == 128U;
+    const bool isHd256Bf16Gfx950Group
+        = arch == "gfx950" && headDimQk == 256U && isBf16 && isGroupMode;
+    return (isHd192x128 || isHd256Bf16Gfx950Group) ? 256U : 512U;
 }
 
 // Ports AITER's forward grid math (get_grid_dim, mha_fwd.cu). Batch mode sets
@@ -38,7 +46,8 @@ inline unsigned int fwdBlockDimX(unsigned int headDimQk, unsigned int headDimV)
 // group tensors are logical [B, H, S, D] with batch carried by gridDimY, so Q-tiles
 // come from the per-batch seqLen S (not a packed total_q); per-batch ragged offsets
 // locate each batch's tokens. The hd192x128 kernel uses 256-wide blocks on all
-// architectures.
+// architectures. The gfx950 bf16 hd256 kernel never merges causal Q-tiles (tgDiv=1)
+// and uses 256-wide blocks in group mode.
 inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
 {
     SdpaFwdLaunchParams lp{};
@@ -52,6 +61,10 @@ inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
     const bool isGroupMode = params.group.has_value();
     const bool isHd192x128 = params.headDimQk == 192 && params.headDimV == 128;
     const bool isHd192x128Gfx942 = isHd192x128 && isGfx942;
+    // inBytesPerElement is 2 only for bf16 inputs (1 for fp8).
+    const bool isBf16 = params.inBytesPerElement == 2U;
+    const bool isHd256Bf16Gfx950
+        = params.archString == "gfx950" && params.headDimQk == 256 && isBf16;
     const bool masked = params.maskType != plan_utils::MaskType::NO_MASK;
 
     // tune_opt: default 5; downgrade to 3 when masked and either nhead is
@@ -68,19 +81,21 @@ inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
     lp.tuneOpt = tuneOpt;
 
     // tgDiv=2 merges the causal head/tail Q-tiles onto shared workgroups; the
-    // group hd192x128/gfx942 kernel keeps them separate (tgDiv=1).
+    // group hd192x128/gfx942 and the bf16 hd256/gfx950 kernels keep them separate
+    // (tgDiv=1).
     unsigned int tgDiv = masked ? 2U : 1U;
-    if(isGfx942 && isGroupMode && isHd192x128)
+    if((isGfx942 && isGroupMode && isHd192x128) || isHd256Bf16Gfx950)
     {
         tgDiv = 1U;
     }
 
     // Group mode: hipDNN's S_q is the maximum per-batch Q length, so every batch gets
     // ceil(S_q / tileSizeQo) tiles and the kernel reads each batch's real length from the
-    // ptr_qseq offsets. Precondition, not checked: S_q >= max_b(offset[b+1] - offset[b]).
-    // An understated S_q launches too few tiles and silently leaves the tail rows of the
-    // longer batches unwritten. Checking it would need a device-to-host copy of the offset
-    // tensor and a stream sync before every launch, so it stays a caller contract.
+    // table behind ptr_qseq: cu_seq_len_q when the graph has it, else the Q/O ragged
+    // offsets. Precondition, not checked: S_q >= max_b(table[b+1] - table[b]). An
+    // understated S_q launches too few tiles and silently leaves the tail rows of the
+    // longer batches unwritten. Checking it would need a device-to-host copy of that table
+    // and a stream sync before every launch, so it stays a caller contract.
     const unsigned int qTiles = (params.seqLenQ + params.tileSizeQo - 1U) / params.tileSizeQo;
 
     unsigned int gdx = (qTiles + tgDiv - 1U) / tgDiv;
@@ -104,7 +119,8 @@ inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
     lp.gridDimY = gdy;
     lp.gridDimZ = gdz;
 
-    lp.blockDimX = fwdBlockDimX(params.headDimQk, params.headDimV);
+    lp.blockDimX
+        = fwdBlockDimX(params.archString, params.headDimQk, params.headDimV, isBf16, isGroupMode);
 
     return lp;
 }

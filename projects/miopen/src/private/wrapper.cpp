@@ -4,8 +4,9 @@
 // Public wrapper for the MIOpen public/private library split: the extern "C"
 // stubs for the entry points that do more than pass a call through, and for the
 // wrapper's own functions in <miopen/hipdnn_forwarding.h>. Every other entry
-// point in <miopen/miopen.h> has a generated pass-through stub in
-// wrapper_passthrough.cpp. This file is compiled into libMIOpen.so.
+// point in <miopen/miopen.h> or <miopen/miopen_internal.h> has a generated
+// pass-through stub in wrapper_passthrough.cpp. This file is compiled into
+// libMIOpen.so.
 //
 // Apart from miopenGetErrorString and the wrapper's own functions (which have
 // no _impl), each stub opens with a dispatch macro (routing.hpp), which forwards
@@ -15,15 +16,16 @@
 // private library's definitions are renamed to _impl by force-including
 // miopen_private_rename.h, so these stubs are the only definitions of the public
 // miopenFoo names. This file is compiled without that rename header, so it sees
-// the public names from <miopen/miopen.h>.
+// the public names declared in <miopen/miopen.h> and
+// <miopen/miopen_internal.h>.
 //
 // To give an entry point custom behaviour, move its stub from
 // wrapper_passthrough.cpp into this file, edit it, and rerun
 // script/generate_wrapper_sources.py, which skips every entry point defined
 // here. Forgetting to rerun it leaves two definitions of the stub and a
 // "duplicate symbol" (lld) or "multiple definition" (GNU ld) link error. A new
-// miopen.h entry point needs no edit here. A new wrapper-only function does: it
-// is declared in hipdnn_forwarding.h, listed in
+// entry point in miopen.h or miopen_internal.h needs no edit here. A new
+// wrapper-only function does: it is declared in hipdnn_forwarding.h, listed in
 // test/public_abi/wrapper_only_symbols.txt, and its stub is written here.
 //
 // Pass the stub's own function token to MIOPEN_WRAPPER_DISPATCH, never a string

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -30,8 +30,8 @@ void TestMinElementSimple()
   ASSERT_EQUAL(*thrust::min_element(data.begin(), data.end()), 1);
   ASSERT_EQUAL(thrust::min_element(data.begin(), data.end()) - data.begin(), 2);
 
-  ASSERT_EQUAL(*thrust::min_element(data.begin(), data.end(), thrust::greater<T>()), 5);
-  ASSERT_EQUAL(thrust::min_element(data.begin(), data.end(), thrust::greater<T>()) - data.begin(), 1);
+  ASSERT_EQUAL(*thrust::min_element(data.begin(), data.end(), _THRUST_STD::greater<T>()), 5);
+  ASSERT_EQUAL(thrust::min_element(data.begin(), data.end(), _THRUST_STD::greater<T>()) - data.begin(), 1);
 }
 DECLARE_VECTOR_UNITTEST(TestMinElementSimple);
 
@@ -42,12 +42,12 @@ void TestMinElementWithTransform()
 
   Vector data{3, 5, 1, 2, 5, 1};
 
-  ASSERT_EQUAL(*thrust::min_element(thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
-                                    thrust::make_transform_iterator(data.end(), thrust::negate<T>())),
+  ASSERT_EQUAL(*thrust::min_element(thrust::make_transform_iterator(data.begin(), _THRUST_STD::negate<T>()),
+                                    thrust::make_transform_iterator(data.end(), _THRUST_STD::negate<T>())),
                -5);
-  ASSERT_EQUAL(*thrust::min_element(thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
-                                    thrust::make_transform_iterator(data.end(), thrust::negate<T>()),
-                                    thrust::greater<T>()),
+  ASSERT_EQUAL(*thrust::min_element(thrust::make_transform_iterator(data.begin(), _THRUST_STD::negate<T>()),
+                                    thrust::make_transform_iterator(data.end(), _THRUST_STD::negate<T>()),
+                                    _THRUST_STD::greater<T>()),
                -1);
 }
 DECLARE_VECTOR_UNITTEST(TestMinElementWithTransform);
@@ -64,9 +64,9 @@ void TestMinElement(const size_t n)
   ASSERT_EQUAL(h_min - h_data.begin(), d_min - d_data.begin());
 
   typename thrust::host_vector<T>::iterator h_max =
-    thrust::min_element(h_data.begin(), h_data.end(), thrust::greater<T>());
+    thrust::min_element(h_data.begin(), h_data.end(), _THRUST_STD::greater<T>());
   typename thrust::device_vector<T>::iterator d_max =
-    thrust::min_element(d_data.begin(), d_data.end(), thrust::greater<T>());
+    thrust::min_element(d_data.begin(), d_data.end(), _THRUST_STD::greater<T>());
 
   ASSERT_EQUAL(h_max - h_data.begin(), d_max - d_data.begin());
 }
@@ -111,9 +111,9 @@ void TestMinElementWithBigIndexesHelper(int magnitude)
 {
   thrust::counting_iterator<long long> begin(1);
   thrust::counting_iterator<long long> end = begin + (1ll << magnitude);
-  ASSERT_EQUAL(thrust::distance(begin, end), 1ll << magnitude);
+  ASSERT_EQUAL(_THRUST_STD::distance(begin, end), 1ll << magnitude);
 
-  ASSERT_EQUAL(*thrust::min_element(thrust::device, begin, end, thrust::greater<long long>()), (1ll << magnitude));
+  ASSERT_EQUAL(*thrust::min_element(thrust::device, begin, end, _THRUST_STD::greater<long long>()), (1ll << magnitude));
 }
 
 void TestMinElementWithBigIndexes()
