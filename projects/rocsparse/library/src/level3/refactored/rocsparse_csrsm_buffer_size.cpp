@@ -83,8 +83,10 @@ rocsparse_status rocsparse::csrsm_analysis_buffer_size(rocsparse_handle         
     // int workspace2
     p_buffer_size_in_bytes[0] += rocsparse::align_size(sizeof(int32_t) * M);
 
+    // The end bits match the csrsv analysis sorts: int32_t depth keys, then
+    // column-index keys for the transpose.
     uint32_t              startbit            = 0;
-    uint32_t              endbit              = rocsparse::clz(M);
+    uint32_t              endbit              = rocsparse::radix_end_bit<int32_t>(M);
     static constexpr bool using_double_buffer = true;
 
     {
@@ -130,9 +132,12 @@ rocsparse_status rocsparse::csrsm_analysis_buffer_size(rocsparse_handle         
         RETURN_IF_ROCSPARSE_ERROR((calc) ? rocsparse_status_success
                                          : rocsparse_status_internal_error);
 
-        size_t transpose_size{};
+        const uint32_t transpose_endbit = (A->col_type == rocsparse_indextype_i64)
+                                              ? rocsparse::radix_end_bit<int64_t>(M)
+                                              : rocsparse::radix_end_bit<int32_t>(M);
+        size_t         transpose_size{};
         RETURN_IF_ROCSPARSE_ERROR(
-            calc(handle, A->nnz, startbit, endbit, &transpose_size, using_double_buffer));
+            calc(handle, A->nnz, startbit, transpose_endbit, &transpose_size, using_double_buffer));
 
         transpose_size += rocsparse::align_size(sizeof_J * A->nnz);
         transpose_size += rocsparse::align_size(sizeof_I * A->nnz);

@@ -65,8 +65,10 @@ rocsparse_status rocsparse::csrsv_analysis_buffer_size(rocsparse_handle         
     // rocsparse_int workspace2
     *buffer_size += ((sizeof(int32_t) * A->rows - 1) / 256 + 1) * 256;
 
+    // The end bits match the analysis sorts: int32_t depth keys in sort2 and
+    // column-index keys in sort.
     uint32_t startbit = 0;
-    uint32_t endbit   = rocsparse::clz(A->rows);
+    uint32_t endbit   = rocsparse::radix_end_bit<int32_t>(A->rows);
 
     size_t rocprim_size = 0;
 
@@ -87,8 +89,11 @@ rocsparse_status rocsparse::csrsv_analysis_buffer_size(rocsparse_handle         
         auto calculate_size
             = rocsparse::find_radix_sort_pairs_buffer_size(A->col_type, A->row_type);
 
+        const uint32_t transpose_endbit = (A->col_type == rocsparse_indextype_i64)
+                                              ? rocsparse::radix_end_bit<int64_t>(A->rows)
+                                              : rocsparse::radix_end_bit<int32_t>(A->rows);
         RETURN_IF_ROCSPARSE_ERROR(
-            (calculate_size(handle, A->nnz, startbit, endbit, &transpose_size, true)));
+            (calculate_size(handle, A->nnz, startbit, transpose_endbit, &transpose_size, true)));
         // rocPRIM does not support in-place sorting, so we need an additional buffer
         // rocsparse_int max_nnz
         transpose_size += 256 + ((sizeof(int32_t) * A->rows - 1) / 256 + 1) * 256;
