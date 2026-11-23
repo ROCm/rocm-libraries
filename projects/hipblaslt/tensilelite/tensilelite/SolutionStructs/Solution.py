@@ -92,7 +92,7 @@ from ..Toolchain.Component import Assembler
 from ..Components.CustomSchedule import hasCustomSchedule
 
 from ..Component import TensorDataMover
-from ..Components.TDMStoreInst import tdmStoreLdsBytes, tdmStoreRejectReason
+from ..Components.TDMStoreInst import tdmStoreLdsBytes, tdmStoreRejectReason, tdmStoreVectorRejectReason
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateHostPreSwizzle128x4, validateMXScaleFormatCombination
@@ -8355,6 +8355,11 @@ class Solution(collections.abc.Mapping):
               state["_VectorStore"] = 0
             else:
               reject(state, printRejectionReason, "packedC0 Assembly requires AF0EM>=VectorWidth or not VectorStore (for stores)")
+
+    tdmStoreReject = tdmStoreVectorRejectReason(state)
+    if tdmStoreReject:
+      reject(state, printRejectionReason, tdmStoreReject)
+      return
 
     state["_PrefetchAcrossPersistentEnabled"] = bool(state["PrefetchAcrossPersistent"])
     state["AssignedDerivedParameters"] = True
