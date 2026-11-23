@@ -9,6 +9,7 @@ import importlib
 import os
 
 import pytest
+from rocke.tests.run_records import note_deselection
 
 
 def architecture_available(
@@ -106,10 +107,22 @@ def select_reference_items(config, items) -> None:
         callspec = getattr(item, "callspec", None)
         params = callspec.params if callspec else {}
         case_arch = params.get("architecture")
-        keep = case_arch in (None, architecture)
+        if case_arch not in (None, architecture):
+            note_deselection(
+                item,
+                f"deselected: a {case_arch} reference case; this entry checks "
+                f"{architecture}",
+            )
+            deselected.append(item)
         # Only a reference slot, parametrized by both, names its variant.
-        if keep and variant and case_arch:
-            keep = params.get("variant") in (None, variant)
-        (selected if keep else deselected).append(item)
+        elif variant and case_arch and params.get("variant") not in (None, variant):
+            note_deselection(
+                item,
+                f"deselected: a {params['variant']} reference variant; this entry "
+                f"checks {variant}",
+            )
+            deselected.append(item)
+        else:
+            selected.append(item)
     items[:] = selected
     config.hook.pytest_deselected(items=deselected)
