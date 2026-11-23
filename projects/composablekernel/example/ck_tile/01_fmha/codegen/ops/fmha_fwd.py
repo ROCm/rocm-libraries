@@ -2007,10 +2007,15 @@ GFX125_D192_N128_CONSTRAINT = CppConstraint(
 # least 2 (batch, head) pairs per num_cus (HIP's multiProcessorCount, 256 there);
 # with fewer, or with longer aligned queries, it loses up to 21%. A block count does
 # not draw that line: 16 x 16 heads of 512 rows (2048 blocks) lose 10%, while 1792 x 1
-# heads of 32 rows (1792 blocks) win 1.5x.
+# heads of 32 rows (1792 blocks) win 1.5x. In group mode qr_tdm_sched wins from 128
+# rows: on group-mode GQA prefill (16 or 8 query heads per KV head, 32-64 sequences of
+# 128-256 rows, prefix 0-71K keys, BF16) it takes 0.77-0.92x pingpong's time with
+# clang 24 and clang 23, so group mode keeps pingpong only below 128 rows, where
+# qr_tdm_sched does not apply.
 GFX125_QR_TDM_PINGPONG_RANGE = (
     "a.max_seqlen_q < 640"
     " && a.batch * a.nhead_q >= 2 * static_cast<ck_tile::index_t>(num_cus)"
+    " && (!t.is_group_mode || a.max_seqlen_q < 128)"
 )
 
 # Paired gfx1250 FP16/BF16 measurements cover both layouts, supported padded strides,

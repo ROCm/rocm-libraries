@@ -3344,6 +3344,44 @@ int main() {
             run(seqlen_q=100, seqlen_k=512, **big), [kernel("qr_tdm_pingpong", 64)]
         )
         self.assertEqual(run(seqlen_q=100, seqlen_k=512), [kernel("qr_tdm", 64)])
+        # Group mode: qr_tdm_sched from 128 rows on the same big grids (it beats
+        # qr_tdm_pingpong on group-mode GQA prefill), qr_tdm_pingpong only below.
+        pingpong_ids = {
+            index
+            for k, index in dispatch.kernel_ids
+            if k.F_pipeline.tag == "qr_tdm_pingpong"
+        }
+        for cus, batch, rows, prefix in (
+            (256, 64, 128, 0),
+            (256, 32, 256, 32768),
+            (256, 64, 532, 0),
+            (96, 16, 512, 73216),
+        ):
+            self.assertIn(
+                run(
+                    num_cus=cus,
+                    group=1,
+                    batch=batch,
+                    nhead_q=16,
+                    nhead_k=1,
+                    seqlen_q=batch * rows,
+                    max_seqlen_q=rows,
+                    seqlen_k=batch * (rows + prefix),
+                    **causal,
+                )[0],
+                sched_ids,
+                (cus, batch, rows, prefix),
+            )
+        self.assertIn(
+            run(
+                group=1,
+                seqlen_q=1280 * 100,
+                max_seqlen_q=100,
+                seqlen_k=1280 * 512,
+                **big,
+            )[0],
+            pingpong_ids,
+        )
 
 
 class SplitKVQrTdmTiles(unittest.TestCase):

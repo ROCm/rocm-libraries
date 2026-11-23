@@ -18,6 +18,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 * Improved FMHA forward performance on gfx1250 for the FP16/BF16 qr_tdm_sched kernels by trying a 128-by-128 Q/K sequence tile for head dimension 64 and forming causal and sliding-window mask bounds once per row. Square top-left/bottom-right sliding windows with right window 0 now use the batch-local workgroup order of qr_tdm and scheduled head dimension 64/128 kernels, and the XCD grouping of eligible scheduled BF16 head dimension 128 MHA kernels.
 * Improved FMHA forward performance on gfx1250 for group-mode FP16/BF16 qr_tdm_sched kernels with head dimensions 64 and 128 on small grids, with a 64-by-128 Q/K tile that the dispatcher selects when the 128-row grid leaves CUs idle, or fills each CU once with at least 2048 query rows (for head dimension 128 only without a sliding window).
+* Changed the gfx1250 FMHA forward dispatcher to send group-mode FP16/BF16 head dimension 128 queries of 128 to 639 rows on large grids to qr_tdm_sched instead of qr_tdm_pingpong, which is faster there (measured with BF16); batch mode, and group-mode queries shorter than 128 rows, keep qr_tdm_pingpong.
 * Improved FMHA forward performance of the gfx1250 FP16/BF16 qr_tdm_sched kernels with newer compilers, by forming the row maxima pairwise and keeping the WMMA source registers alive until the next LDS loads may overwrite them.
 
 ### Resolved issues
