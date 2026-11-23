@@ -27,6 +27,14 @@
      0.8 GB and up per call) or --flush-mb <MiB> (hipblas-bench rotates through copies of the operands so they
      are evicted between calls) to measure memory bandwidth on parts with a large L2 or Infinity Cache.
 
+     Choosing --flush-mb: hipblas-bench makes MiB / (bytes of a call's operands) copies, rounded up, and
+     uses a different copy on each call. Set it larger than all the cache an operand can stay in: L2 plus,
+     where the GPU has one, the memory-side last-level cache (Infinity Cache / MALL). About twice their
+     combined size is a safe choice; a smaller value leaves the operands of small problems in cache.
+     Problems whose operands are already as large as MiB are not copied. Larger values only cost device
+     memory and setup time: hipblas-bench uses at most 90% of the free device memory and warns when the
+     request does not fit.
+
      Functions without a theoretical maximum in machine_spec.yaml (for example the banded BLAS2 functions,
      whose arithmetic intensity depends on the band width) are skipped with a message.
 
