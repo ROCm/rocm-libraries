@@ -1099,6 +1099,44 @@ def test_classic_pap_saves_direct_to_lds_bank_state_after_priming():
     assert writer.states.ldsTensorTokenIdx == writer.states.memTokenLdsBuffer1
 
 
+@pytest.mark.parametrize(
+    "no_tail_loop, k_start, guarded",
+    [(False, "StreamKLocalStart", True), (True, "StreamKLocalStart", False), (False, None, False)],
+    ids=["streamk-tail", "streamk-no-tail-loop", "data-parallel"],
+)
+def test_classic_tdm_pap_skips_loads_for_next_range_without_full_iteration(no_tail_loop, k_start, guarded):
+    """A StreamK range holding only the partial last K iteration must not issue PAP loads.
+
+    Its first-PGR TDM read starts at the K-advanced base, where tensor dim1 no
+    longer clips K, so the full-DepthU read can run past the end of A/B.
+    """
+    from rocisa.code import Label
+
+    writer = _ClassicPapWriter(version=(12, 5, 0))
+    writer.labels = _StubLabels()
+    writer.loopCounterName = lambda kernel, loop_idx: "LoopCounterL"
+    writer.states.currentTileWork = SimpleNamespace(k_start=k_start)
+    kernel = _classic_kernel(enableTDMA=True, enableTDMB=True, NoTailLoop=no_tail_loop)
+    tpa, tpb = _tensor_parameters()
+
+    items = _module_items(writer.setupPrefetchAcrossPersistentLoads(kernel, tpa, tpb))
+    checks = _instruction_indices(items, kwa_module.SCmpEQU32, src_contains="LoopCounterL")
+    skips = [i for i, item in enumerate(items)
+             if isinstance(item, kwa_module.SCBranchSCC1) and "PapSkipZeroIterLoads" in str(item)]
+    joins = [i for i, item in enumerate(items)
+             if isinstance(item, Label) and "PapSkipZeroIterLoads" in str(item)]
+
+    if not guarded:
+        assert not checks and not skips and not joins
+        return
+    gr_a = _module_index(items, "globalReadDo_A")
+    gr_b = _module_index(items, "globalReadDo_B")
+    primed = _instruction_index(items, kwa_module.SMovB32, "s[sgprPersistentPrefetchState]", "1")
+    assert len(checks) == len(skips) == len(joins) == 1
+    assert checks[0] < skips[0] < gr_a
+    assert gr_b < joins[0] < primed
+
+
 def _assert_loop_counters_checkpointed_in_vgprs(writer, items):
     loop_vgpr = next(base for base, _, tag in writer.vgprPool.checked_out if tag == "PAP loop counters")
     orig_loop_vgpr = loop_vgpr + 1

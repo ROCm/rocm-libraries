@@ -3818,6 +3818,19 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         lambda tP: emitTensorLoad(tP["MX"], skipWait=True),
         lambda: emitTensorLoad(tensorParameters2nd, skipWait=skip2ndWaitForDtl))
 
+    # A next K range holding only the partial last iteration runs no unrolled
+    # iteration, so its first PGR group is never consumed. Its full-DepthU TDM
+    # read would start at the K-advanced base, where tensor dim1 (SizeL) no
+    # longer bounds K, and can run past the end of A/B.
+    skipZeroIterLoads = None
+    if (kernel["enableTDMA"] and kernel["enableTDMB"] and not kernel["NoTailLoop"]
+        and self.states.currentTileWork.k_start is not None):
+      skipZeroIterLoads = Label(self.labels.getNameInc("PapSkipZeroIterLoads"), "")
+      module.add(SCmpEQU32(src0=sgpr(self.loopCounterName(kernel, self.states.unrollIdx)), src1=0,
+                           comment="PAP: next K range has no full DepthU iteration?"))
+      module.add(SCBranchSCC1(labelName=skipZeroIterLoads.getLabelName(),
+                              comment="PAP: skip loads past the next range's K extent"))
+
     staggerState = borrowedStaggerState() if papPrefetchUsesStagger else []
     if staggerState:
       numStaggerSnapshotSgprs = sum(size for _, size in staggerState)
@@ -3827,6 +3840,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         restoreBorrowedStaggerState(tmpSgprInfo.idx, staggerState)
     else:
       emitPrefetchGroup()
+    if skipZeroIterLoads is not None:
+      module.add(skipZeroIterLoads)
     module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=1, comment="first PGR group for next persistent iter prefetched"))
     if ((kernel["DirectToLdsA"] or kernel["DirectToLdsB"])
         and not (kernel["enableTDMA"] and kernel["enableTDMB"])):
