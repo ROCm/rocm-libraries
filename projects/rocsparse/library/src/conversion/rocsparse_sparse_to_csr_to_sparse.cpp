@@ -316,8 +316,6 @@ rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle            
         {
         case rocsparse_format_ell:
         {
-            size_t col_bytes = 0;
-            size_t val_bytes = 0;
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::counted_bytes(
                 intermediate->nnz, rocsparse::indextype_sizeof(intermediate->col_type), col_bytes));
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::counted_bytes(
