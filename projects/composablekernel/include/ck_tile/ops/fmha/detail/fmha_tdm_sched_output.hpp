@@ -94,6 +94,8 @@ static_assert(FmhaTdmSchedOutputFragments::kNumFragments *
 static_assert(FmhaTdmSchedOutputFragments::ValidateMapping());
 static_assert(FmhaTdmSchedOutputFragmentsFor<2, 1>::kNumFragments == 4 &&
               FmhaTdmSchedOutputFragmentsFor<2, 1>::ValidateMapping());
+static_assert(FmhaTdmSchedOutputFragmentsFor<4, 1>::kNumFragments == 8 &&
+              FmhaTdmSchedOutputFragmentsFor<4, 1>::ValidateMapping());
 
 // Each wave copies only the rows it staged, so no barrier follows the staging. The async store
 // has no bounds check: rows past num_valid_rows are clamped to the wave's last valid row.

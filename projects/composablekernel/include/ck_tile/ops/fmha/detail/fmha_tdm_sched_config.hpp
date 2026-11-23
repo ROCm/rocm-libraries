@@ -250,12 +250,11 @@ struct FmhaTdmSchedSupportedGeometry
                     (Geometry::kHeadDimQK == 128 && Geometry::kDv == 128 && Geometry::kN == 128) ||
                     (Geometry::kHeadDimQK == 192 && Geometry::kDv == 128 &&
                      (Geometry::kN == 64 || Geometry::kN == 128)))) ||
-                      (Geometry::kM == 64 && ((Geometry::kHeadDimQK == 64 && Geometry::kDv == 64 &&
-                                               (Geometry::kN == 64 || Geometry::kN == 128)) ||
-                                              (Geometry::kHeadDimQK == 128 &&
-                                               Geometry::kDv == 128 && Geometry::kN == 128))),
+                      (Geometry::kM == 64 && Geometry::kN == 128 &&
+                       ((Geometry::kHeadDimQK == 64 && Geometry::kDv == 64) ||
+                        (Geometry::kHeadDimQK == 128 && Geometry::kDv == 128))),
                   "qr_tdm_sched supports M128 D64/V64 N64/N128, D128/V128 N128, D192/V128 "
-                  "N64/N128, or M64 D64/V64 N64/N128, D128/V128 N128");
+                  "N64/N128, or M64 D64/V64 N128, D128/V128 N128");
     static_assert(Geometry::kWaves == 4 && Geometry::kWaveSize == 32,
                   "qr_tdm_sched requires four wave32 waves");
     static_assert(Geometry::kQkWmmaK == 32 && Geometry::kPvWmmaK == 32,
