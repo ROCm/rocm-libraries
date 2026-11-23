@@ -289,35 +289,37 @@ inline void
 /// the L1.
 inline void expectEveryPackedKernelIdentified(const hipdnn_plugin_sdk::ingestor::DescriptorSet& set)
 {
-    std::vector<const hipdnn_plugin_sdk::ingestor::KernelDescriptorPack*> packs;
+    const auto expectIdentified
+        = [](const hipdnn_plugin_sdk::ingestor::KernelDescriptorPack& pack) {
+              for(const auto& kernel : pack.kernels)
+              {
+                  if(kernel.sources.empty())
+                  {
+                      EXPECT_FALSE(kernel.source.identity.empty())
+                          << "kernel " << kernel.name << " carries no code identity";
+                  }
+                  for(const auto& [launch, source] : kernel.sources)
+                  {
+                      EXPECT_FALSE(source.identity.empty())
+                          << "kernel " << kernel.name << " launch " << launch
+                          << " carries no code identity";
+                  }
+              }
+          };
+    auto packCount = set.packs.size();
     for(const auto& pack : set.packs)
     {
-        packs.push_back(&pack);
+        expectIdentified(pack);
     }
     for(const auto& slot : set.slots)
     {
+        packCount += slot.packs.size();
         for(const auto& pack : slot.packs)
         {
-            packs.push_back(&pack);
+            expectIdentified(pack);
         }
     }
-    ASSERT_FALSE(packs.empty()) << "the engine loaded no packs";
-    for(const auto* pack : packs)
-    {
-        for(const auto& kernel : pack->kernels)
-        {
-            if(kernel.sources.empty())
-            {
-                EXPECT_FALSE(kernel.source.identity.empty())
-                    << "kernel " << kernel.name << " carries no code identity";
-            }
-            for(const auto& [launch, source] : kernel.sources)
-            {
-                EXPECT_FALSE(source.identity.empty()) << "kernel " << kernel.name << " launch "
-                                                      << launch << " carries no code identity";
-            }
-        }
-    }
+    EXPECT_NE(packCount, 0u) << "the engine loaded no packs";
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

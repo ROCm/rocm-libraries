@@ -176,7 +176,11 @@ public:
                     // Either side recording none leaves nothing to compare.
                     if(!trainedCodegen.empty() && !codegenRevision.empty()
                        && trainedCodegen != codegenRevision
-                       && detail::firstInProcess(_engine.name + "|" + metric + "|" + arch))
+                       && detail::firstInProcess(std::string(_engine.name)
+                                                     .append("|")
+                                                     .append(metric)
+                                                     .append("|")
+                                                     .append(arch)))
                     {
                         HIPDNN_PLUGIN_LOG_WARN(
                             "ingestor: engine '"
