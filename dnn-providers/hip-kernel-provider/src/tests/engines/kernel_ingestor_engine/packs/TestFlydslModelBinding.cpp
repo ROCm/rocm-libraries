@@ -21,16 +21,13 @@
 
 /**
  * @file TestFlydslModelBinding.cpp
- * @brief Census of the trained models the FlyDSL engines bind for the shard's
- *        architecture: each bound ranker (L2) must survive the loader's pre-flight, and
- *        each bound engine predictor (L1) must record the selector revision this build
- *        computes.
+ * @brief Census of the trained rankers (L2) the FlyDSL engines bind for the shard's
+ *        architecture: each bound ranker must survive the loader's pre-flight. Their engine
+ *        predictors (L1) are checked with every other engine's by TestShippedEnginePredictors.
  *
- * A model stamped with another revision is refused by GenericEngine (the estimate reports
- * PredictionStatus::UNAVAILABLE) with only a log line, and a ranker the loader refuses
- * leaves the kernels in priority order; every other census and generator check stays
- * green. This suite reads the revision the way makeEngine() does and fails instead, as
- * the rocKE ModelBinding suites do (ModelBindingTestSupport.hpp).
+ * A ranker the loader refuses leaves the kernels in priority order with only a log line;
+ * every other census and generator check stays green. This suite fails instead, as the
+ * rocKE ModelBinding suites do (ModelBindingTestSupport.hpp).
  *
  * One suite covers every FlyDSL engine, because FlyDSL ops ship for different
  * architectures: each case checks the engines this shard holds and fails if it holds
@@ -111,19 +108,6 @@ TEST(TestFlydslModelBinding, EveryBoundL2KernelRankerLoads)
             continue;
         }
         expectBoundRankerLoads(*set, METRIC, arch);
-    }
-}
-
-TEST(TestFlydslModelBinding, EveryBoundL1EnginePredictorLoadsAndMatchesThisBuild)
-{
-    const auto sets = loadedFlydslSets();
-    ASSERT_FALSE(sets.empty()) << "this shard holds no FlyDSL engine";
-    const auto arch = shardArch(sets);
-    ASSERT_FALSE(arch.empty());
-    for(const auto* set : sets)
-    {
-        SCOPED_TRACE(set->engine.name + " on " + arch);
-        expectBoundPredictorMatchesThisBuild(*set, METRIC, arch);
     }
 }
 
