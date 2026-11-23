@@ -37,6 +37,11 @@ ALLOWED = [
     _c("auto_ldspad_B", LdsPadB=-1, LdsBlockSizePerPadB=-1),
     _c("auto_ldspad_A", side="A", LdsPadA=-1, LdsBlockSizePerPadA=-1),
     _c("auto_ldspad_AB", side="AB", LdsPadA=-1, LdsBlockSizePerPadA=-1, LdsPadB=-1, LdsBlockSizePerPadB=-1),
+    # 32x16x128 WMMA = two stacked 16x16x128: its 32-row operand (B under SourceSwap, else A) reads two nO tiles
+    *[_c("mxf4_32x16_%s" % side, side=side, dtype="mxf4", miMN=(32, 16)) for side in ("A", "B", "AB")],
+    _c("mxf4_32x16_vwb2", dtype="mxf4", VectorWidthB=2, miMN=(32, 16)),
+    _c("mxf4_32x16_vwa2_nss", side="A", dtype="mxf4", VectorWidthA=2, miMN=(32, 16), SourceSwap=False),
+    *[_c("mxf4_32x16_nss_%s" % side, side=side, dtype="mxf4", miMN=(32, 16), SourceSwap=False) for side in ("A", "B", "AB")],
     _c("vwb2", VectorWidthB=2), _c("vwa2_A", side="A", VectorWidthA=2),
     _c("vwb4", wt=(4, 4), VectorWidthB=4), _c("f4_vwb2", dtype="f4", VectorWidthB=2),
     # wave layouts, including a one-nO free dim over two wave components
@@ -83,6 +88,8 @@ REJECTED = [
     (_c("tdmsplit", TDMSplit=True), "TDMSplit is currently disabled"),
     (_c("1lds", **{"1LDSBuffer": 1}), "1LDSBuffer must be 0 for TDM"),
     (_c("lsi_B_f4", dtype="f4", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1), "swizzle-B LSI: F4 not validated"),
+    (_c("mxf4_32x16_A_lsi", side="A", dtype="mxf4", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1,
+        miMN=(32, 16), SourceSwap=False), "swizzle-A LSI: stacked (32-row) WMMA not supported"),
     (_c("lsi_B_wg41", wt=(1, 2), wg=(4, 1), VectorWidthB=2, LDSSegmentInterleave=1),
      "swizzle-B LSI: only MIWaveGroup=[2,2]"),
     # LSI, B not spanning its LDS component, with the nO rows of a vIdx group not dividing evenly over

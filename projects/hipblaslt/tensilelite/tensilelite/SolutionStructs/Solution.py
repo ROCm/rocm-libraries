@@ -5577,11 +5577,12 @@ class Solution(collections.abc.Mapping):
             reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM supports F4 and 1-/2-byte data types only (got {bpeTc} bytes)")
             return
           # The host swizzle (client DataInitialization and the hipBLASLt user layout) blocks 16 free-dim rows
-          # per nO tile; the kernel's block is that, whatever the WMMA's own rows (a taller WMMA, e.g.
-          # 32x16x128, reads several nO tiles per operand tile: SwizzledTdmGeometry.stack, not enabled yet).
+          # per nO tile. A taller WMMA operand (32x16x128 = two stacked 16x16x128: MatrixInstM for A,
+          # MatrixInstN for B, which SourceSwap makes the 32-row one) reads two consecutive nO tiles. The
+          # stacked read is implemented without LDSSegmentInterleave (see segment_interleave).
           miRows = state["MatrixInstM"] if tc == "A" else state["MatrixInstN"]
-          if miRows != SWIZZLE_BLOCK_ROWS:
-            reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM requires a {SWIZZLE_BLOCK_ROWS}-row WMMA {'M' if tc == 'A' else 'N'} (got {miRows})")
+          if miRows not in (SWIZZLE_BLOCK_ROWS, 2 * SWIZZLE_BLOCK_ROWS):
+            reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM requires a {SWIZZLE_BLOCK_ROWS}- or {2 * SWIZZLE_BLOCK_ROWS}-row WMMA {'M' if tc == 'A' else 'N'} (got {miRows})")
             return
           # StreamK starts a workgroup mid-tile in K at StreamKLocalStart * GlobalReadIncs; the swizzled-TDM
           # GlobalReadIncs already carry the MI-row factor (GSU.graIncrements), so no extra scaling is needed.

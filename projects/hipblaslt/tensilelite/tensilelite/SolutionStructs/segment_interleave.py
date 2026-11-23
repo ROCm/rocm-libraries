@@ -410,6 +410,10 @@ def evaluate(state):
     if _swzB and hasattr(_dtB, "numBytes") and _dtB.numBytes() < 1:
         return _no("swizzle-B LSI: F4 not validated")
     if tuple(state.get("ISA", ()))[:2] != (12, 5):             return _no("not gfx1250")
+    # A stacked (32-row) swizzled operand reads several nO tiles per WMMA tile; the component maths here assumes one.
+    for _tc in "AB":
+        if pt.get("SwizzleTensor" + _tc) and state["MatrixInst" + ("M" if _tc == "A" else "N")] > 16:
+            return _no("swizzle-%s LSI: stacked (32-row) WMMA not supported" % _tc)
     if not (state.get("enableTDMA") and state.get("enableTDMB") and state["NumWaves"] > 1):
         return _no("not wave-separated TDM")
     if state.get("LocalSplitU", 1) > 1:

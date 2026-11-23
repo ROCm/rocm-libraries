@@ -41,7 +41,7 @@ DTYPES = {
 }
 
 
-def swizzled_params(iim, side="B", dtype="f8", wt=(2, 2), wg=(2, 2), pt=None, workgroup=(16, 16, 1), **fork):
+def swizzled_params(iim, side="B", dtype="f8", wt=(2, 2), wg=(2, 2), pt=None, workgroup=(16, 16, 1), miMN=(16, 16), **fork):
     """Solution parameters for a TN swizzle-``side`` ("A", "B" or "AB") gfx1250 kernel."""
     from tensilelite.Common.Architectures import gfxToIsa
     from tensilelite.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters
@@ -64,7 +64,7 @@ def swizzled_params(iim, side="B", dtype="f8", wt=(2, 2), wg=(2, 2), pt=None, wo
         params["LdsPad" + tc] = 0 if swz else -1
         params["LdsBlockSizePerPad" + tc] = 0 if swz else -1
     params.update(fork)
-    mi = [16, 16, d["miK"], 1, 1, wt[0], wt[1], wg[0], wg[1]]
+    mi = [miMN[0], miMN[1], d["miK"], 1, 1, wt[0], wt[1], wg[0], wg[1]]
     params.update({"ProblemType": problem_type, "ISA": isa, "MatrixInstruction": mi,
                    "WorkGroup": list(workgroup)})
     params.update(matrixInstructionToMIParameters(mi, isa, params["WavefrontSize"], problem_type,

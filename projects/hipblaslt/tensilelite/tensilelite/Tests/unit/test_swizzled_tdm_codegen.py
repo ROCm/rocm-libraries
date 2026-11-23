@@ -81,6 +81,14 @@ REGRESSIONS = [
     _case("f4_A_vwa2_small_tile", "A", "f4", VectorWidthA=2, DepthU=128),
     _case("f4_B_vwb4_pad", "B", "f4", wt=(4, 4), VectorWidthB=4),
     _case("mxf4_AB", "AB", "mxf4"),
+    # 32x16x128 WMMA: the 32-row operand is B under SourceSwap, A without
+    _case("mxf4_B_32x16", "B", "mxf4", miMN=(32, 16)),
+    _case("mxf4_AB_32x16", "AB", "mxf4", miMN=(32, 16)),
+    _case("mxf4_A_32x16_nss", "A", "mxf4", miMN=(32, 16), SourceSwap=False),
+    _case("mxf4_AB_32x16_nss", "AB", "mxf4", miMN=(32, 16), SourceSwap=False),
+    _case("mxf4_B_32x16_vwb2", "B", "mxf4", VectorWidthB=2, miMN=(32, 16)),
+    _case("mxf4_A_32x16_vwa2_nss", "A", "mxf4", VectorWidthA=2, miMN=(32, 16), SourceSwap=False),
+    _case("mxf4_B_32x16_gsu4", "B", "mxf4", miMN=(32, 16), GlobalSplitU=4),
 ]
 
 # Broad sweep: side x data type x wave layout x vector width.
@@ -168,3 +176,16 @@ def test_swizzled_tdm_regressions(_gp_gfx1250, gfx1250_iim, assembler, cfg):
 def test_swizzled_tdm_sweep(_gp_gfx1250, gfx1250_iim, assembler, cfg):
     sol, src, kwa = _generate(cfg, gfx1250_iim, assembler)
     check_source(sol, src, kwa)
+
+
+@pytest.mark.parametrize("side,fork", [("B", {}), ("A", dict(SourceSwap=False)), ("AB", dict(SourceSwap=False))])
+def test_stacked_wmma_descriptor_counts_16_row_blocks(_gp_gfx1250, gfx1250_iim, assembler, capsys, side, fork):
+    """A 32x16x128 WMMA reads two 16-row nO tiles, but the host buffer and the TDM descriptor count 16-row
+    blocks: dim1 (rows left) in 32-row units loads only half of the macro-tile (the rest stays zero)."""
+    params = H.swizzled_params(gfx1250_iim, side, "mxf4", miMN=(32, 16), **fork)
+    sol = H.derive(params, assembler, gfx1250_iim)
+    assert sol["Valid"], capsys.readouterr().out[-1500:]
+    err, src, _ = H.codegen(sol, assembler)
+    assert err == 0
+    assert "swizzled dim1: SizeI + MI(16)-1" in src or "swizzled dim1: SizeJ + MI(16)-1" in src
+    assert "MI(32)" not in src

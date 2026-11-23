@@ -202,6 +202,22 @@ CASES = [
     _c("B_bf16_lsi_window", "B", "bf16", DepthU=512, VectorWidthA=2, LDSSegmentInterleave=1, TDMIterateMode=1),
     _c("B_bf16_lsi_window_brot", "B", "bf16", DepthU=512, VectorWidthA=2, LDSSegmentInterleave=1,
        LDSSegmentBRotate=1, TDMIterateMode=1),
+    # 32x16x128 WMMA (MX-F4 only) = two stacked 16x16x128: the 32-row operand reads two nO tiles per WMMA tile.
+    # SourceSwap (default) makes it B, SourceSwap=False makes it A.
+    _c("B_mxf4_32x16", "B", "mxf4", miMN=(32, 16)), _c("AB_mxf4_32x16", "AB", "mxf4", miMN=(32, 16)),
+    _c("B_mxf4_32x16_wt12", "B", "mxf4", wt=(1, 2), miMN=(32, 16)),
+    _c("B_mxf4_32x16_wg41", "B", "mxf4", wt=(1, 1), wg=(4, 1), miMN=(32, 16)),
+    _c("A_mxf4_32x16", "A", "mxf4", miMN=(32, 16), SourceSwap=False),
+    _c("AB_mxf4_32x16_nss", "AB", "mxf4", miMN=(32, 16), SourceSwap=False),
+    _c("A_mxf4_32x16_wt21", "A", "mxf4", wt=(2, 1), miMN=(32, 16), SourceSwap=False),
+    _c("A_mxf4_32x16_wg14", "A", "mxf4", wt=(1, 1), wg=(1, 4), miMN=(32, 16), SourceSwap=False),
+    # VW>1: the vw tiles of a group interleave their rows at vw*r + e over the 32 rows of the stacked tile
+    _c("B_mxf4_32x16_vwb2", "B", "mxf4", VectorWidthB=2, miMN=(32, 16)),
+    _c("B_mxf4_32x16_vwb4", "B", "mxf4", wt=(4, 4), VectorWidthB=4, miMN=(32, 16)),
+    _c("AB_mxf4_32x16_vw2", "AB", "mxf4", VectorWidthA=2, VectorWidthB=2, miMN=(32, 16)),
+    _c("A_mxf4_32x16_vwa2", "A", "mxf4", VectorWidthA=2, miMN=(32, 16), SourceSwap=False),
+    _c("A_mxf4_32x16_vwa4", "A", "mxf4", wt=(4, 4), VectorWidthA=4, miMN=(32, 16), SourceSwap=False),
+    _c("AB_mxf4_32x16_vw2_nss", "AB", "mxf4", VectorWidthA=2, VectorWidthB=2, miMN=(32, 16), SourceSwap=False),
 ]
 
 
