@@ -31,7 +31,7 @@ namespace rocsparse
 {
     // Duplicate pass of the unsorted ELL check. It expects the status slot at the start of
     // temp_buffer to hold success, and temp_buffer to have the size that
-    // check_matrix_ell_workspace_query returns for the same batch_limit.
+    // check_matrix_ell_workspace_query returns for the same limits.
     template <typename I>
     rocsparse_status check_matrix_ell_unsorted_duplicates(rocsparse_handle       handle,
                                                           I                      m,
@@ -41,23 +41,18 @@ namespace rocsparse
                                                           rocsparse_index_base   idx_base,
                                                           rocsparse_data_status* data_status,
                                                           void*                  temp_buffer,
-                                                          int64_t                batch_limit
-                                                          = check_matrix_ell_sort_batch_limit)
+                                                          const check_matrix_ell_sort_limits& limits
+                                                          = check_matrix_ell_sort_limits{})
     {
         check_matrix_ell_workspace ws;
         RETURN_IF_ROCSPARSE_ERROR(check_matrix_ell_workspace_query<I>(
-            handle, m, n, ell_width, rocsparse_storage_mode_unsorted, ws, batch_limit));
+            handle, m, n, ell_width, rocsparse_storage_mode_unsorted, ws, limits));
 
-        const int64_t batch_rows = check_matrix_ell_rows_per_batch(m, ell_width, batch_limit);
-
-        char* ptr            = reinterpret_cast<char*>(temp_buffer) + ws.status_bytes;
-        void* rocprim_buffer = ptr;
-        ptr += ws.rocprim_slot;
-        int64_t* offsets = reinterpret_cast<int64_t*>(ptr);
-        ptr += ws.offset_bytes;
-        I* gathered = reinterpret_cast<I*>(ptr);
-        ptr += ws.array_bytes;
-        I* gathered_alt = reinterpret_cast<I*>(ptr);
+        const int64_t batch_rows = ws.batch_rows;
+        void*    rocprim_buffer  = check_matrix_workspace_at<char>(temp_buffer, ws.rocprim_offset);
+        int64_t* offsets      = check_matrix_workspace_at<int64_t>(temp_buffer, ws.offsets_offset);
+        I*       gathered     = check_matrix_workspace_at<I>(temp_buffer, ws.keys_offset);
+        I*       gathered_alt = check_matrix_workspace_at<I>(temp_buffer, ws.keys_alt_offset);
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::check_matrix_ell_gather_device<256, I>),
                                            dim3((m - 1) / 256 + 1),

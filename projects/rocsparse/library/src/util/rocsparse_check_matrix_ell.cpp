@@ -45,9 +45,8 @@ rocsparse_status rocsparse::check_matrix_ell_core(rocsparse_handle       handle,
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    // The workspace query rejects the same widths.
-    if(storage == rocsparse_storage_mode_unsorted
-       && static_cast<int64_t>(ell_width) > rocsparse::check_matrix_ell_sort_batch_limit)
+    if(!rocsparse::check_matrix_ell_sort_supported(
+           storage, ell_width, rocsparse::check_matrix_ell_sort_limits{}))
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
     }

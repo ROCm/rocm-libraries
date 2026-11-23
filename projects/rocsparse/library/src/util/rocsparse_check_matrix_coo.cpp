@@ -46,17 +46,11 @@ namespace rocsparse
         RETURN_IF_ROCSPARSE_ERROR(check_matrix_coo_workspace_query<I>(
             handle, m, n, nnz, idx_base, rocsparse_storage_mode_unsorted, ws));
 
-        char* ptr            = reinterpret_cast<char*>(temp_buffer) + ws.status_bytes;
-        void* rocprim_buffer = ptr;
-        ptr += ws.rocprim_slot;
-
-        I* col0 = reinterpret_cast<I*>(ptr);
-        ptr += ws.array_bytes;
-        I* col1 = reinterpret_cast<I*>(ptr);
-        ptr += ws.array_bytes;
-        I* row0 = reinterpret_cast<I*>(ptr);
-        ptr += ws.array_bytes;
-        I* row1 = reinterpret_cast<I*>(ptr);
+        void* rocprim_buffer = check_matrix_workspace_at<char>(temp_buffer, ws.rocprim_offset);
+        I*    col0           = check_matrix_workspace_at<I>(temp_buffer, ws.cols_offset);
+        I*    col1           = check_matrix_workspace_at<I>(temp_buffer, ws.cols_alt_offset);
+        I*    row0           = check_matrix_workspace_at<I>(temp_buffer, ws.rows_offset);
+        I*    row1           = check_matrix_workspace_at<I>(temp_buffer, ws.rows_alt_offset);
 
         const size_t bytes = sizeof(I) * static_cast<size_t>(nnz);
         RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
