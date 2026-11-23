@@ -31,9 +31,12 @@ namespace TensileLite
         {
             struct KernelArguments
             {
-                uint32_t itersPerWG = 0;
-                uint32_t grid       = 0;
-                uint32_t skTiles    = 0;
+                uint32_t itersPerWG  = 0;
+                uint32_t grid        = 0;
+                uint32_t skTiles     = 0;
+                uint32_t magicNumber = 0;
+                uint32_t magicShift  = 0;
+                uint32_t totalIters  = 0;
             };
 
             struct Split
@@ -43,13 +46,8 @@ namespace TensileLite
             };
 
             /**
-             * Compute the static two-tile StreamK split.
-             *
-             * Single source of truth for arithmetic that used to be written out twice
-             * in ContractionSolution.cpp (the StreamK=3 packer and the StreamK=5 static
-             * packer) and is now also read by checkUniformSummationOrder(), which
-             * proves a property of exactly this split. A third copy would let the gate
-             * silently start proving a property of a split the kernel does not perform.
+             * Compute the static two-tile StreamK split (tree and atomic reduction).
+             * Parallel reduction uses computeParallelReductionSplit() instead.
              *
              * @param tiles        Batch-inclusive tile count, getNumTiles(sizeMapping, 1).
              * @param itersPerTile getItersPerTile(sizeMapping), clamped to at least 1.
@@ -60,13 +58,63 @@ namespace TensileLite
              *                     ContractionSolution::skKGranularity(). 1 leaves
              *                     the historical flat space unchanged.
              */
+            TENSILELITEHOST_EXPORT static Split computeSplit(size_t tiles,
+                                                             size_t itersPerTile,
+                                                             size_t skGrid,
+                                                             int    skFullTiles,
+                                                             bool   forceDPOnly,
+                                                             size_t kGranularity = 1);
+
+            /**
+             * Compute the static split of a parallel-reduction launch.
+             *
+             * @param tiles        Batch-inclusive tile count. Must be nonzero; callers
+             *                     use computeSplit() for an empty problem.
+             * @param itersPerTile getItersPerTile(sizeMapping), clamped to at least 1.
+             * @param grid         Resolved StreamK grid.
+             * @param kGranularity Iterations per indivisible K unit.
+             */
             TENSILELITEHOST_EXPORT static Split
-                computeSplit(size_t tiles,
-                             size_t itersPerTile,
-                             size_t skGrid,
-                             int    skFullTiles,
-                             bool   forceDPOnly,
-                             size_t kGranularity = 1);
+                computeParallelReductionSplit(size_t tiles,
+                                              size_t itersPerTile,
+                                              size_t grid,
+                                              size_t kGranularity = 1);
+
+            /**
+             * Sets only the magicNumber / magicShift words of `args`
+             * The other words are left untouched.
+             */
+            TENSILELITEHOST_EXPORT static void
+                calculateMagicDivision(KernelArguments& args,
+                                       size_t           itersPerTile,
+                                       size_t           kGranularity,
+                                       bool             uniformSummationOrderActive);
+
+            /**
+             * Computes every kernel argument of a static launch.
+             *
+             * @param numTiles      Batch-inclusive tile count the grid was sized for.
+             * @param itersPerTile  Iterations per tile; clamped to at least 1.
+             * @param grid          Resolved StreamK grid.
+             * @param reduction     Resolved reduction. Parallel packs the split factor
+             *                      grid / numTiles (computeParallelReductionSplit());
+             *                      anything else packs the two-tile split from
+             *                      computeSplit().
+             * @param skFullTiles   AMDGPU::skFullTiles (TENSILE_STREAMK_FULL_TILES).
+             * @param uniformSummationOrderActive
+             *                      Capability AND mode (the kernel has the runtime
+             *                      gate and the problem asked for the mode). Sets
+             *                      Slot2Bits::UniformSummationOrderBit in magicShift.
+             * @param kGranularity  Iterations per indivisible K unit.
+             */
+            TENSILELITEHOST_EXPORT static KernelArguments
+                calculateKernelArgs(size_t               numTiles,
+                                    size_t               itersPerTile,
+                                    size_t               grid,
+                                    origami::reduction_t reduction,
+                                    int                  skFullTiles,
+                                    bool                 uniformSummationOrderActive,
+                                    size_t               kGranularity = 1);
 
             /**
              * Whether every output tile of a static two-tile StreamK split is folded
@@ -160,6 +208,25 @@ namespace TensileLite
                                                                 size_t          tiles,
                                                                 size_t          itersPerTile,
                                                                 size_t          kGranularity = 1);
+
+            /**
+             * Computes every kernel argument of a dynamic launch: the work-queue
+             * items from items() plus the launch grid.
+             *
+             * @param hardware      Source of the AMDGPU skTiles / skSplit overrides.
+             * @param tiles         Tile count the work queue covers.
+             * @param itersPerTile  Iterations per tile; clamped to at least 1.
+             * @param grid          Resolved StreamK grid. Must cover every work
+             *                      queue (assertGridCoversQueues()).
+             * @param kGranularity  Iterations per indivisible K unit. Chunk
+             *                      boundaries are rounded onto that unit.
+             */
+            TENSILELITEHOST_EXPORT static KernelArguments
+                calculateKernelArgs(Hardware const& hardware,
+                                    size_t          tiles,
+                                    size_t          itersPerTile,
+                                    size_t          grid,
+                                    size_t          kGranularity = 1);
 
             /**
              * Work item i sits in queue i % numQueues, and a workgroup pops only its
@@ -263,6 +330,14 @@ namespace TensileLite
         {
             std::variant<Static::KernelArguments, Dynamic::KernelArguments> words
                 = Static::KernelArguments{};
+        };
+
+        // The words generateCustomCall() has already packed and the family they
+        // belong to.
+        struct ArgumentCache
+        {
+            WorkAssignment family;
+            ArgumentSlots  slots;
         };
 
         // Snapshot of the StreamK launch-parameter DECISIONS for one

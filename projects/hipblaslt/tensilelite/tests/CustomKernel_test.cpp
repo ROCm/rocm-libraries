@@ -39,6 +39,7 @@
 
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
+#include <Tensile/MagicDivision.hpp>
 #ifndef TENSILE_YAML
 #include <Tensile/msgpack/MessagePack.hpp>
 #endif
@@ -802,4 +803,496 @@ TEST(CustomKernelTest, ByteStridesNeedAnIntegerKernelArgument)
                 << e.what();
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// StreamK scheduling arguments of a handwritten custom kernel.
+//
+// generateCustomCall() and generateSingleCall() pack the same words from
+// StreamK::Static / StreamK::Dynamic::calculateKernelArgs(), so a descriptor in
+// the right family has to receive exactly the bytes a generated kernel of that
+// mode receives.
+// ---------------------------------------------------------------------------
+namespace
+{
+    enum class StreamKMode
+    {
+        Static,
+        Dynamic,
+    };
+
+    char const* toString(StreamKMode mode)
+    {
+        switch(mode)
+        {
+        case StreamKMode::Static:
+            return "Static";
+        case StreamKMode::Dynamic:
+            return "Dynamic";
+        }
+        return "?";
+    }
+
+    StreamK::WorkAssignment assignmentOf(StreamKMode mode)
+    {
+        switch(mode)
+        {
+        case StreamKMode::Static:
+            return StreamK::WorkAssignment::StaticGrid;
+        case StreamKMode::Dynamic:
+            return StreamK::WorkAssignment::DynamicWorkQueue;
+        }
+        return StreamK::WorkAssignment::StaticGrid;
+    }
+
+    // The scheduling words of one mode, in kernel-argument order: the name the
+    // generated packer gives the word, and the semantic a descriptor asks for.
+    struct SchedulingWord
+    {
+        char const*       generatedName;
+        CustomArgSemantic semantic;
+        char const*       customName;
+    };
+
+    std::vector<SchedulingWord> schedulingWords(StreamKMode mode)
+    {
+        using S = CustomArgSemantic;
+        switch(mode)
+        {
+        case StreamKMode::Static:
+            return {{"itersPerTile", S::ItersPerTile, "ItersPerTile"},
+                    {"magicNumberItersPerTile", S::MagicNumberItersPerTile, "MagicNumberItersPerTile"},
+                    {"magicShiftItersPerTile", S::MagicShiftItersPerTile, "MagicShiftItersPerTile"},
+                    {"SKItersPerWG", S::SKItersPerWG, "SKItersPerWG"},
+                    {"skGrid", S::SKGrid, "SKGrid"},
+                    {"skTiles", S::SKTilesAndSplit, "SKTilesAndSplit"}};
+        case StreamKMode::Dynamic:
+            return {{"ItersPerTile", S::ItersPerTile, "ItersPerTile"},
+                    {"TotalItems", S::TotalItems, "TotalItems"},
+                    {"SKTiles", S::SKTiles, "SKTiles"},
+                    {"SKSplit", S::SKSplit, "SKSplit"},
+                    {"SKItersPerWI", S::SKItersPerWI, "SKItersPerWI"},
+                    {"SKGrid", S::SKGrid, "SKGrid"}};
+        }
+        return {};
+    }
+
+    void configureStreamK(ContractionSolution& solution,
+                          StreamK::WorkAssignment       assignment,
+                          bool                 perTileExtraIters = false)
+    {
+        solution.kernelName                                 = "streamk_probe";
+        solution.sizeMapping.tileProcessingStrategy         = TileProcessingStrategy::StreamK;
+        solution.sizeMapping.workAssignment                 = assignment;
+        solution.sizeMapping.macroTile                      = TensileLite::dim3(128, 128, 1);
+        solution.sizeMapping.depthU                         = 64;
+        solution.sizeMapping.workGroupSize                  = TensileLite::dim3(256, 1, 1);
+        solution.sizeMapping.waveNum                        = 4;
+        solution.sizeMapping.matrixInstruction              = {16, 16, 4, 1};
+        solution.sizeMapping.workGroupMapping               = 1;
+        solution.sizeMapping.workGroupMappingXCC            = 1;
+        solution.sizeMapping.CUOccupancy                    = 1;
+        solution.internalArgsSupport.version                = 3;
+        solution.internalArgsSupport.useUniversalArgs       = true;
+        solution.internalArgsSupport.persistentLoopArgsVersion = 0;
+        solution.internalArgsSupport.perTileExtraIters      = perTileExtraIters;
+    }
+
+    // A handwritten twin of a generated StreamK solution: same sizeMapping, a
+    // descriptor that asks for `words` and no others.
+    void makeHandwritten(ContractionSolution&             solution,
+                         std::vector<CustomArgSemantic> const& words,
+                         TensileLite::dim3                macrotile = TensileLite::dim3(128, 128, 64))
+    {
+        solution.customKernel.name      = "streamk_probe";
+        solution.customKernel.macrotile = macrotile;
+        solution.customKernel.threads   = TensileLite::dim3(256, 1, 1);
+        solution.customKernel.grid
+            = {CustomGridSize::StreamKNoBatch, CustomGridSize::One, CustomGridSize::One};
+        solution.customKernel.args.clear();
+        for(auto semantic : words)
+            solution.customKernel.args.push_back({CustomArgType::uint32, semantic});
+    }
+
+    std::vector<CustomArgSemantic> semanticsOf(StreamKMode mode)
+    {
+        std::vector<CustomArgSemantic> out;
+        for(auto const& word : schedulingWords(mode))
+            out.push_back(word.semantic);
+        return out;
+    }
+
+    ContractionProblemGemm streamKProblem(size_t m = 257, size_t n = 385, size_t k = 129, size_t batches = 3)
+    {
+        auto problem = ContractionProblemGemm::GEMM(
+            false, false, m, n, k, m, std::max(size_t{1}, k), m, 1.0, false, batches);
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        problem.setAlphaType(rocisa::DataType::Float);
+        problem.setBetaType(rocisa::DataType::Float);
+        problem.setParams().setUniformSummationOrder(0);
+        return problem;
+    }
+
+    uint32_t word(KernelArguments const& args, std::string const& name)
+    {
+        auto it = KernelArguments::const_iterator(args, name);
+        if(it == args.end())
+            throw std::runtime_error("Missing packed argument " + name);
+        auto field = *it;
+        EXPECT_EQ(field.second, sizeof(uint32_t)) << name;
+        uint32_t result = 0;
+        std::memcpy(&result, field.first, sizeof(result));
+        return result;
+    }
+
+    size_t tileCount(ContractionProblemGemm const& problem, size_t mt0 = 128, size_t mt1 = 128)
+    {
+        const size_t m = (problem.freeSizeA(0) + mt0 - 1) / mt0;
+        const size_t n = (problem.freeSizeB(0) + mt1 - 1) / mt1;
+        size_t       b = 1;
+        for(size_t i = 0; i < problem.batchIndices().size(); ++i)
+            b *= problem.batchSize(i);
+        return m * n * b;
+    }
+}
+
+// (a) A handwritten descriptor in the right family receives, word for word, what a
+// generated kernel of the same mode receives.
+TEST(CustomKernelTest, StreamKCustomWordsMatchTheGeneratedPacker)
+{
+    struct Shape
+    {
+        size_t k, batches;
+    };
+    struct Launch
+    {
+        size_t               tilesMultiple; // grid = tilesMultiple * tiles, or a fixed grid when 0
+        size_t               fixedGrid;
+        origami::reduction_t reduction;
+    };
+
+    for(auto mode : {StreamKMode::Static, StreamKMode::Dynamic})
+    for(bool uniformSummationOrder : {false, true})
+    for(bool kUnit : {false, true})
+    for(auto shape : {Shape{129, 3}, Shape{65, 1}, Shape{0, 2}})
+    for(auto launchSpec : {Launch{0, 5, origami::reduction_t::tree},
+                           Launch{0, 7, origami::reduction_t::tree},
+                           Launch{1, 0, origami::reduction_t::tree},
+                           Launch{2, 0, origami::reduction_t::parallel}})
+    {
+        // The parallel split factor is a static StreamK notion; the dynamic queue is tree-only.
+        if(launchSpec.reduction == origami::reduction_t::parallel && mode == StreamKMode::Dynamic)
+            continue;
+
+        SCOPED_TRACE(::testing::Message()
+                     << toString(mode) << " uso=" << uniformSummationOrder << " kUnit=" << kUnit
+                     << " K=" << shape.k << " batches=" << shape.batches << " grid="
+                     << launchSpec.fixedGrid << "+" << launchSpec.tilesMultiple << "xTiles"
+                     << " reduction=" << static_cast<int>(launchSpec.reduction));
+
+        ContractionSolution generated;
+        configureStreamK(generated, assignmentOf(mode), /*perTileExtraIters*/ true);
+        ContractionSolution custom;
+        configureStreamK(custom, assignmentOf(mode), /*perTileExtraIters*/ true);
+        makeHandwritten(custom, semanticsOf(mode));
+        if(kUnit)
+        {
+            // A K unit wider than one iteration pads every tile.
+            generated.problemType.mxScaleFormat = static_cast<int>(MXScaleFormat::HostPreSwizzle);
+            custom.problemType.mxScaleFormat    = static_cast<int>(MXScaleFormat::HostPreSwizzle);
+            ASSERT_GT(generated.skKGranularity(), size_t{1});
+        }
+
+        auto problem = streamKProblem(257, 385, shape.k, shape.batches);
+        problem.setParams().setUniformSummationOrder(uniformSummationOrder ? 1 : 0);
+
+        auto device = probeDevice();
+
+        const size_t tiles = tileCount(problem);
+        StreamKSettings launch;
+        launch.grid = launchSpec.tilesMultiple ? launchSpec.tilesMultiple * tiles
+                                               : launchSpec.fixedGrid;
+        launch.reduction  = launchSpec.reduction;
+        launch.totalTiles = tiles;
+
+        auto const generatedCall
+            = generated.generateSingleCall<true>(problem, ContractionInputs{}, device, launch, GSUSettings{});
+        auto const customCall
+            = custom.generateCustomCall<true>(problem, ContractionInputs{}, device, launch);
+
+        for(auto const& w : schedulingWords(mode))
+            EXPECT_EQ(word(customCall.args, w.customName), word(generatedCall.args, w.generatedName))
+                << w.customName;
+    }
+}
+
+namespace
+{
+    // The static packing as it was before calculateStreamKArgs, written out
+    // independently so a change to the shared packer cannot move both sides.
+    struct LegacyStatic
+    {
+        uint32_t magicNumber = 0, magicShift = 0, totalIters = 0, itersPerWG = 0, skTiles = 0;
+    };
+
+    LegacyStatic legacyStatic(size_t               numTiles,
+                        size_t               itersPerTile,
+                        size_t               grid,
+                        origami::reduction_t reduction,
+                        int                  fullTiles)
+    {
+        LegacyStatic out;
+        if(grid == 0)
+            return out;
+        itersPerTile    = std::max(itersPerTile, size_t{1});
+        out.totalIters  = static_cast<uint32_t>(numTiles * itersPerTile);
+        out.magicNumber = magicNumberAlg2(static_cast<uint32_t>(itersPerTile), &out.magicShift);
+        if(reduction == origami::reduction_t::parallel)
+        {
+            const uint32_t skSplit = static_cast<uint32_t>(grid / numTiles);
+            out.itersPerWG = static_cast<uint32_t>(itersPerTile) / std::max(skSplit, uint32_t(1));
+            out.skTiles    = skSplit;
+        }
+        else
+        {
+            size_t skTotalTiles = grid;
+            if(numTiles % grid != 0)
+            {
+                const size_t skT = numTiles > grid ? grid * fullTiles + numTiles % grid : numTiles;
+                skTotalTiles     = std::min(skT, numTiles);
+            }
+            out.itersPerWG = static_cast<uint32_t>(skTotalTiles * itersPerTile / grid);
+            out.skTiles    = static_cast<uint32_t>(skTotalTiles);
+        }
+        return out;
+    }
+}
+
+// (b) The static semantics keep the bytes they had before the shared packer. The
+// descriptor's semantic declares the words, so a kernel whose sizeMapping is not StreamK
+// receives them too.
+TEST(CustomKernelTest, StreamKCustomStaticKeepsItsLegacyBytes)
+{
+    const std::vector<CustomArgSemantic> staticWords{CustomArgSemantic::ItersPerTile,
+                                                  CustomArgSemantic::TotalIters,
+                                                  CustomArgSemantic::MagicNumberItersPerTile,
+                                                  CustomArgSemantic::MagicShiftItersPerTile,
+                                                  CustomArgSemantic::SKItersPerWG,
+                                                  CustomArgSemantic::SKGrid,
+                                                  CustomArgSemantic::SKTilesAndSplit};
+
+    for(bool streamKPolicy : {true, false})
+    for(auto reduction : {origami::reduction_t::tree, origami::reduction_t::parallel})
+    for(size_t gridMultiple : {size_t{0}, size_t{1}, size_t{2}})
+    for(size_t fixedGrid : {size_t{0}, size_t{5}, size_t{7}})
+    {
+        const size_t grid = gridMultiple ? gridMultiple * 36 : fixedGrid;
+        // Parallel reduction packs grid / tiles, which only means something above one split.
+        if(reduction == origami::reduction_t::parallel && (grid < 36 || grid % 36 != 0))
+            continue;
+
+        SCOPED_TRACE(::testing::Message() << "streamKPolicy=" << streamKPolicy << " grid=" << grid
+                                          << " reduction=" << static_cast<int>(reduction));
+
+        ContractionSolution custom;
+        configureStreamK(custom, StreamK::WorkAssignment::StaticGrid);
+        if(!streamKPolicy)
+            custom.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::None;
+        makeHandwritten(custom, staticWords);
+
+        auto problem = streamKProblem();
+        ASSERT_EQ(tileCount(problem), 36u);
+        auto device = probeDevice();
+
+        StreamKSettings launch;
+        launch.grid      = grid;
+        launch.reduction = reduction;
+
+        auto const call = custom.generateCustomCall<true>(problem, ContractionInputs{}, device, launch);
+
+        const auto expected = legacyStatic(36, 3, grid, reduction, device.skFullTiles);
+        EXPECT_EQ(word(call.args, "ItersPerTile"), grid ? 3u : 0u);
+        EXPECT_EQ(word(call.args, "TotalIters"), expected.totalIters);
+        EXPECT_EQ(word(call.args, "MagicNumberItersPerTile"), expected.magicNumber);
+        EXPECT_EQ(word(call.args, "MagicShiftItersPerTile"), expected.magicShift);
+        EXPECT_EQ(word(call.args, "SKItersPerWG"), expected.itersPerWG);
+        EXPECT_EQ(word(call.args, "SKGrid"), static_cast<uint32_t>(grid));
+        EXPECT_EQ(word(call.args, "SKTilesAndSplit"), expected.skTiles);
+    }
+}
+
+// Uniform summation order is the one deliberate change to the static words: a kernel
+// that declares the runtime gate now receives bit 29 of MagicShiftItersPerTile when
+// the problem asks for the mode, as a generated kernel does. Without the capability
+// or without the mode the word is the legacy one.
+TEST(CustomKernelTest, StreamKCustomStaticUniformSummationOrderBitNeedsCapabilityAndMode)
+{
+    for(bool capable : {false, true})
+    for(bool requested : {false, true})
+    {
+        SCOPED_TRACE(::testing::Message() << "capable=" << capable << " requested=" << requested);
+        ContractionSolution custom;
+        configureStreamK(custom, StreamK::WorkAssignment::StaticGrid, capable);
+        makeHandwritten(custom, {CustomArgSemantic::MagicShiftItersPerTile});
+
+        auto problem = streamKProblem();
+        problem.setParams().setUniformSummationOrder(requested ? 1 : 0);
+        auto device = probeDevice();
+
+        StreamKSettings launch;
+        launch.grid      = 36;
+        launch.reduction = origami::reduction_t::tree;
+
+        auto const call = custom.generateCustomCall<true>(problem, ContractionInputs{}, device, launch);
+        const uint32_t shift = word(call.args, "MagicShiftItersPerTile");
+        EXPECT_EQ((shift & StreamK::Slot2Bits::UniformSummationOrderBit) != 0, capable && requested);
+        EXPECT_EQ(shift & ~StreamK::Slot2Bits::UniformSummationOrderBit,
+                  legacyStatic(36, 3, 36, launch.reduction, device.skFullTiles).magicShift);
+    }
+}
+
+// ItersPerTile and every packed word divide K by the DepthU the launch was sized
+// from, sizeMapping.depthU, not by customKernel.macrotile.z, which a descriptor may
+// leave at zero.
+TEST(CustomKernelTest, StreamKCustomItersPerTileFollowsTheSizeMappingDepthU)
+{
+    for(size_t macrotileZ : {size_t{0}, size_t{64}, size_t{32}})
+    {
+        SCOPED_TRACE(macrotileZ);
+        ContractionSolution custom;
+        configureStreamK(custom, StreamK::WorkAssignment::StaticGrid);
+        makeHandwritten(custom,
+                        {CustomArgSemantic::ItersPerTile},
+                        TensileLite::dim3(128, 128, macrotileZ));
+
+        auto problem = streamKProblem();
+        auto device  = probeDevice();
+        StreamKSettings launch;
+        launch.grid = 36;
+
+        auto const call = custom.generateCustomCall<true>(problem, ContractionInputs{}, device, launch);
+        EXPECT_EQ(word(call.args, "ItersPerTile"),
+                  std::max<size_t>(1, problem.getItersPerTile(custom.sizeMapping)));
+    }
+}
+
+// (c) A descriptor's StreamK words must all belong to one family, fixed by the first
+// StreamK semantic packed. Anything else would be handed words packed for another
+// mode and run the wrong schedule silently.
+namespace
+{
+    void setUpHandwritten(ContractionSolution&                  solution,
+                          StreamK::WorkAssignment                        assignment,
+                          std::vector<CustomArgSemantic> const& words)
+    {
+        configureStreamK(solution, assignment);
+        makeHandwritten(solution, words);
+    }
+
+    using S = CustomArgSemantic;
+
+    // The family check runs while generateCustomCall() packs the descriptor, so this
+    // is how a descriptor is accepted or refused.
+    KernelInvocation packCustomCall(ContractionSolution& solution, size_t grid = 36)
+    {
+        StreamKSettings launch;
+        launch.grid = grid;
+        auto device = probeDevice();
+        return solution.generateCustomCall<false>(
+            streamKProblem(), ContractionInputs{}, device, launch);
+    }
+}
+
+TEST(CustomKernelTest, StreamKFamilyMatchingDescriptorsAreAccepted)
+{
+    for(auto mode : {StreamKMode::Static, StreamKMode::Dynamic})
+    {
+        SCOPED_TRACE(toString(mode));
+        ContractionSolution solution;
+        setUpHandwritten(solution, assignmentOf(mode), semanticsOf(mode));
+        EXPECT_NO_THROW(solution.validatePersistentLoopArgs());
+        EXPECT_NO_THROW(packCustomCall(solution));
+    }
+    // Words every family shares, and no StreamK words at all, fit any assignment.
+    for(auto assignment :
+        {StreamK::WorkAssignment::StaticGrid, StreamK::WorkAssignment::DynamicWorkQueue, StreamK::WorkAssignment::Hybrid})
+    {
+        ContractionSolution solution;
+        setUpHandwritten(
+            solution, assignment, {S::ItersPerTile, S::SKGrid, S::AddressA});
+        EXPECT_NO_THROW(packCustomCall(solution));
+    }
+}
+
+TEST(CustomKernelTest, StreamKFamilyRejectsDescriptorsThatMixFamilies)
+{
+    const std::vector<std::vector<CustomArgSemantic>> mixed{
+        {S::SKItersPerWG, S::SKTiles},
+        {S::MagicNumberItersPerTile, S::SKSplit},
+        {S::SKTiles, S::SKItersPerWG},
+        // TotalIters is a static word.
+        {S::TotalIters, S::SKTiles},
+        {S::TotalItems, S::TotalIters},
+    };
+    for(auto assignment :
+        {StreamK::WorkAssignment::StaticGrid, StreamK::WorkAssignment::DynamicWorkQueue, StreamK::WorkAssignment::Hybrid})
+    for(auto const& words : mixed)
+    {
+        ContractionSolution solution;
+        setUpHandwritten(solution, assignment, words);
+        try
+        {
+            packCustomCall(solution);
+            ADD_FAILURE() << "a descriptor that mixes StreamK families was accepted";
+        }
+        catch(std::runtime_error const& e)
+        {
+            EXPECT_NE(std::string(e.what()).find("mixes StreamK argument families"),
+                      std::string::npos)
+                << e.what();
+        }
+    }
+}
+
+// A static word on a launch without a grid is all zeros, but it still fixes the
+// family, so a dynamic word after it is refused as on any other launch.
+TEST(CustomKernelTest, StreamKFamilyIsCheckedOnALaunchWithoutAGrid)
+{
+    ContractionSolution solution;
+    setUpHandwritten(solution, StreamK::WorkAssignment::StaticGrid, {S::SKItersPerWG, S::SKTiles});
+    EXPECT_THROW(packCustomCall(solution, 0), std::runtime_error);
+}
+
+// ItersPerTile divides K by the DepthU the launch was sized from.
+TEST(CustomKernelTest, StreamKCustomRejectsADescriptorWithoutDepthU)
+{
+    ContractionSolution solution;
+    setUpHandwritten(
+        solution, StreamK::WorkAssignment::StaticGrid, semanticsOf(StreamKMode::Static));
+    solution.sizeMapping.depthU = 0;
+    EXPECT_THROW(packCustomCall(solution), std::runtime_error);
+}
+
+// With a K unit wider than one iteration the flat iteration space counts tiles padded
+// to a whole unit, and TotalIters is that extent, not tiles * ItersPerTile.
+TEST(CustomKernelTest, StreamKCustomTotalItersMeasuresPaddedTiles)
+{
+    ContractionSolution custom;
+    configureStreamK(custom, StreamK::WorkAssignment::StaticGrid);
+    makeHandwritten(custom, {S::ItersPerTile, S::TotalIters});
+    custom.problemType.mxScaleFormat = static_cast<int>(MXScaleFormat::HostPreSwizzle);
+    const size_t unit = custom.skKGranularity();
+    ASSERT_GT(unit, size_t{1});
+
+    auto problem = streamKProblem(); // 36 tiles of 3 iterations
+    auto device  = probeDevice();
+    StreamKSettings launch;
+    launch.grid = 7;
+
+    auto const   call = custom.generateCustomCall<true>(problem, ContractionInputs{}, device, launch);
+    const size_t padded = StreamK::paddedItersPerTile(3, unit);
+    ASSERT_NE(padded, size_t{3});
+    EXPECT_EQ(word(call.args, "ItersPerTile"), 3u);
+    EXPECT_EQ(word(call.args, "TotalIters"), 36 * padded);
 }

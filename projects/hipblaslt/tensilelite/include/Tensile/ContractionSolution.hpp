@@ -34,8 +34,10 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include <Tensile/Tensile.hpp>
@@ -138,6 +140,7 @@ namespace TensileLite
         X_MACRO(NumWorkGroups) \
         /* Persistent and legacy scheduling args */ \
         X_MACRO(ItersPerTile) \
+        /* Static StreamK */ \
         X_MACRO(MagicNumberItersPerTile) \
         X_MACRO(MagicShiftItersPerTile) \
         X_MACRO(TotalIters) \
@@ -190,7 +193,12 @@ namespace TensileLite
         X_MACRO(AddressScaleZeroA) \
         X_MACRO(ScaleBlockSizeA) \
         X_MACRO(ESMRuntimeSupported) \
-        X_MACRO(DeltaPeerD)
+        X_MACRO(DeltaPeerD) \
+        /* Dynamic StreamK */ \
+        X_MACRO(TotalItems) \
+        X_MACRO(SKTiles) \
+        X_MACRO(SKSplit) \
+        X_MACRO(SKItersPerWI)
 
     enum class CustomArgSemantic
     {
@@ -1313,6 +1321,51 @@ namespace TensileLite
 
     private:
         void validateStreamKClusterDescriptor() const;
+
+        [[nodiscard]] StreamK::ArgumentSlots
+            calculateStreamKArgs(StreamK::WorkAssignment mode,
+                                 Hardware const&         hardware,
+                                 Problem const&          problem,
+                                 StreamKSettings const&  launch,
+                                 dim3 const&             tiles,
+                                 uint32_t                itersPerTile) const;
+
+        // A descriptor's StreamK words all belong to one family, fixed by the first
+        // semantic that packs them. Packs them if `cache` is empty; otherwise throws if
+        // `mode` is not the family already cached.
+        StreamK::ArgumentCache const& getStreamKArgs(std::optional<StreamK::ArgumentCache>& cache,
+                                                     StreamK::WorkAssignment                mode,
+                                                     Hardware const&                        hardware,
+                                                     Problem const&                         problem,
+                                                     StreamKSettings const&                 launch,
+                                                     dim3 const&                            tiles) const;
+
+        template <StreamK::WorkAssignment Mode>
+        auto const& getStreamKArgsHelper(std::optional<StreamK::ArgumentCache>& cache,
+                                         Hardware const&                        hardware,
+                                         Problem const&                         problem,
+                                         StreamKSettings const&                 launch,
+                                         dim3 const&                            tiles) const
+        {
+            if constexpr(Mode == StreamK::WorkAssignment::StaticGrid)
+            {
+                static StreamK::Static::KernelArguments const zero{};
+                // Asked first so a launch without a grid still fixes and checks the family.
+                auto const& args = getStreamKArgs(cache, Mode, hardware, problem, launch, tiles);
+                if(launch.grid == 0)
+                    return zero;
+                return std::get<StreamK::Static::KernelArguments>(args.slots.words);
+            }
+            else if constexpr(Mode == StreamK::WorkAssignment::DynamicWorkQueue)
+            {
+                return std::get<StreamK::Dynamic::KernelArguments>(
+                    getStreamKArgs(cache, Mode, hardware, problem, launch, tiles).slots.words);
+            }
+            else
+            {
+                static_assert(Mode != Mode, "Custom kernels do not pack Hybrid StreamK arguments yet");
+            }
+        }
 
         // tiles is the total number of partial tiles, including batches and
         // splits. The caller supplies it using either GSU tiles or a StreamK grid.
