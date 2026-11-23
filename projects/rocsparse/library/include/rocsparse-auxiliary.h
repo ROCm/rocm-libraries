@@ -2784,12 +2784,19 @@ rocsparse_status rocsparse_const_bsr_get(rocsparse_const_spmat_descr descr,
  *  used, also when the same pointers are passed after their contents changed. Call the buffer size and
  *  preprocess stages of \p rocsparse_spmv again to analyze the new arrays; a compute stage without them still
  *  computes the product, with an algorithm that does not need preprocessing. The compute stage of an analyzed
- *  \p rocsparse_spmv_descr also still computes the product. Analyses computed by \p rocsparse_spsv,
- *  \p rocsparse_spsm and \p rocsparse_spmm are not discarded.
+ *  \p rocsparse_spmv_descr also still computes the product. To change only the values, use
+ *  \ref rocsparse_spmat_set_values instead.
  *
- *  This routine frees nothing and does not synchronize the device; the next preprocess stage of
- *  \p rocsparse_spmv frees the previous analysis and returns \ref rocsparse_status_invalid_value if the
- *  stream of its handle is being captured.
+ *  This routine frees nothing and does not synchronize the device. The next preprocess stage of
+ *  \p rocsparse_spmv, or analysis stage of \p rocsparse_v2_spmv, replaces the previous analysis. With
+ *  \ref rocsparse_spmv_alg_coo_atomic and \ref rocsparse_operation_none, that synchronizes the device, so no
+ *  stream may be captured while it runs: it returns \ref rocsparse_status_invalid_value and keeps the
+ *  previous analysis if the stream of its handle is being captured, but a capture of another stream is not
+ *  detected.
+ *
+ *  Call the buffer size and preprocess stages of \p rocsparse_spmm again too. The preprocess stages of
+ *  \p rocsparse_spsv and \p rocsparse_spsm do not recompute an existing analysis: create a new sparse
+ *  matrix descriptor to solve with the new arrays.
  *
  *  @param[inout]
  *  descr   the pointer to the sparse matrix descriptor.
@@ -2835,10 +2842,19 @@ rocsparse_status
  *  \p rocsparse_spmv again to analyze the new arrays; a compute stage without them still computes the
  *  product, with an algorithm that does not need preprocessing. If a \p rocsparse_spmv_descr holds an analysis
  *  of the previous arrays, its compute stage returns \ref rocsparse_status_invalid_value, and a new
- *  \p rocsparse_spmv_descr has to be created and analyzed. This routine frees nothing and does not
- *  synchronize the device; the next preprocess stage of \p rocsparse_spmv frees the previous analysis and
- *  returns \ref rocsparse_status_invalid_value if the stream of its handle is being captured. Analyses
- *  computed by \p rocsparse_spsv, \p rocsparse_spsm and \p rocsparse_spmm are not discarded.
+ *  \p rocsparse_spmv_descr has to be created and analyzed. To change only the values and keep these
+ *  analyses, use \ref rocsparse_spmat_set_values instead.
+ *
+ *  This routine frees nothing and does not synchronize the device. The next preprocess stage of
+ *  \p rocsparse_spmv frees the previous analysis, which synchronizes the device, so no stream may be
+ *  captured while it runs: it returns \ref rocsparse_status_invalid_value and frees nothing if the stream
+ *  of its handle is being captured, but a capture of another stream is not detected. A graph that captured
+ *  the compute stage of \p rocsparse_spmv on the previous arrays must not be launched after that preprocess
+ *  stage, which frees the analysis buffers that the graph uses.
+ *
+ *  Call the buffer size and preprocess stages of \p rocsparse_spmm again too. The preprocess stages of
+ *  \p rocsparse_spsv and \p rocsparse_spsm do not recompute an existing analysis: create a new sparse
+ *  matrix descriptor to solve with the new arrays.
  *
  *  @param[inout]
  *  descr   the pointer to the sparse matrix descriptor.
@@ -2867,10 +2883,19 @@ rocsparse_status rocsparse_csr_set_pointers(rocsparse_spmat_descr descr,
  *  \p rocsparse_spmv again to analyze the new arrays; a compute stage without them still computes the
  *  product, with an algorithm that does not need preprocessing. If a \p rocsparse_spmv_descr holds an analysis
  *  of the previous arrays, its compute stage returns \ref rocsparse_status_invalid_value, and a new
- *  \p rocsparse_spmv_descr has to be created and analyzed. This routine frees nothing and does not
- *  synchronize the device; the next preprocess stage of \p rocsparse_spmv frees the previous analysis and
- *  returns \ref rocsparse_status_invalid_value if the stream of its handle is being captured. Analyses
- *  computed by \p rocsparse_spsv, \p rocsparse_spsm and \p rocsparse_spmm are not discarded.
+ *  \p rocsparse_spmv_descr has to be created and analyzed. To change only the values and keep these
+ *  analyses, use \ref rocsparse_spmat_set_values instead.
+ *
+ *  This routine frees nothing and does not synchronize the device. The next preprocess stage of
+ *  \p rocsparse_spmv frees the previous analysis, which synchronizes the device, so no stream may be
+ *  captured while it runs: it returns \ref rocsparse_status_invalid_value and frees nothing if the stream
+ *  of its handle is being captured, but a capture of another stream is not detected. A graph that captured
+ *  the compute stage of \p rocsparse_spmv on the previous arrays must not be launched after that preprocess
+ *  stage, which frees the analysis buffers that the graph uses.
+ *
+ *  Call the buffer size and preprocess stages of \p rocsparse_spmm again too. The preprocess stages of
+ *  \p rocsparse_spsv and \p rocsparse_spsm do not recompute an existing analysis: create a new sparse
+ *  matrix descriptor to solve with the new arrays.
  *
  *  @param[inout]
  *  descr       the pointer to the sparse matrix descriptor.
@@ -2892,6 +2917,10 @@ rocsparse_status rocsparse_csc_set_pointers(rocsparse_spmat_descr descr,
 
 /*! \ingroup aux_module
  *  \brief Set the column indices and values array in the sparse ELL matrix descriptor.
+ *
+ *  \note
+ *  The preprocess stage of \p rocsparse_spsv does not recompute an existing analysis: create a new sparse
+ *  matrix descriptor to solve with the new arrays.
  *
  *  @param[inout]
  *  descr       the pointer to the sparse matrix descriptor.
@@ -2916,10 +2945,19 @@ rocsparse_status
  *  \p rocsparse_spmv again to analyze the new arrays; a compute stage without them still computes the
  *  product, with an algorithm that does not need preprocessing. If a \p rocsparse_spmv_descr holds an analysis
  *  of the previous arrays, its compute stage returns \ref rocsparse_status_invalid_value, and a new
- *  \p rocsparse_spmv_descr has to be created and analyzed. This routine frees nothing and does not
- *  synchronize the device; the next preprocess stage of \p rocsparse_spmv frees the previous analysis and
- *  returns \ref rocsparse_status_invalid_value if the stream of its handle is being captured. Analyses
- *  computed by \p rocsparse_spsv, \p rocsparse_spsm and \p rocsparse_spmm are not discarded.
+ *  \p rocsparse_spmv_descr has to be created and analyzed. To change only the values and keep these
+ *  analyses, use \ref rocsparse_spmat_set_values instead.
+ *
+ *  This routine frees nothing and does not synchronize the device. The next preprocess stage of
+ *  \p rocsparse_spmv frees the previous analysis, which synchronizes the device, so no stream may be
+ *  captured while it runs: it returns \ref rocsparse_status_invalid_value and frees nothing if the stream
+ *  of its handle is being captured, but a capture of another stream is not detected. A graph that captured
+ *  the compute stage of \p rocsparse_spmv on the previous arrays must not be launched after that preprocess
+ *  stage, which frees the analysis buffers that the graph uses.
+ *
+ *  Call the buffer size and preprocess stages of \p rocsparse_spmm again too. The preprocess stages of
+ *  \p rocsparse_spsv and \p rocsparse_spsm do not recompute an existing analysis: create a new sparse
+ *  matrix descriptor to solve with the new arrays.
  *
  *  @param[inout]
  *  descr   the pointer to the sparse matrix descriptor.
