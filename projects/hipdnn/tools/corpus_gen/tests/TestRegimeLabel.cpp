@@ -437,11 +437,10 @@ class TestShippedValueWeights : public ::testing::TestWithParam<std::string>
 TEST_P(TestShippedValueWeights,
        AFocusedSearchRealisesTheDeclaredValueWeightsAndProbesOnlyTheLanesItNeeds)
 {
-    // layout 2:1:1 and scale 2:1:1 in both, window 3:1:1:1 in sdpa_fwd, which alone declares one;
-    // the form is unweighted. The regime quota and floor path splits its need over categorical
-    // lanes, so a lane-even split would make every value 1/3 (window none 1/4) however the main
-    // search is weighted.
-    const bool forward = GetParam() == "sdpa_fwd";
+    // layout 2:1:1:1:1, scale 2:1:1, window 3:1:1:1 and value_head_dim 3:1 in both; the form is
+    // unweighted. The regime quota and floor path splits its need over categorical lanes, so a
+    // lane-even split would make every value even (bshd 1/4 here, window none 1/4) however the
+    // main search is weighted.
     const auto metadata = test::shippedOperation(GetParam());
     std::string error;
     const auto focus = compileRegimeFocus(metadata, "decode_long_mha", error);
@@ -484,23 +483,26 @@ TEST_P(TestShippedValueWeights,
               }
               return static_cast<double>(held) / static_cast<double>(counted);
           };
-    EXPECT_NEAR(shareOf("layout", "bshd", false), 0.5, 0.05);
-    EXPECT_NEAR(shareOf("layout", "bhsd", false), 0.25, 0.05);
+    // A decode regime holds no qkv_packed graph (a fused QKV projection is self-attention, and a
+    // decode step has one query against a long cache), so the layouts left share 2:1:1:1.
+    EXPECT_NEAR(shareOf("layout", "bshd", false), 0.4, 0.05);
+    EXPECT_NEAR(shareOf("layout", "bhsd", false), 0.2, 0.05);
     EXPECT_NEAR(shareOf("scale", "inv_sqrt_d", false), 0.5, 0.1);
     EXPECT_NEAR(shareOf("scale", "inv_sqrt_d", true), statedInvSqrtD, 0.03);
-    // No form is starved: each holds at least 0.4 of an even share, though the three that fewer
-    // combinations can hold (scale_unset, scale_tensor, ragged) hold less than the others.
+    // No form is starved. The three that fewer combinations can hold sit below an even share by
+    // construction: scale_unset and scale_tensor take inv_sqrt_d only (half the scale weight),
+    // and ragged the token-major layouts only (bshd's 2 of 5 here, with no qkv_packed in a
+    // decode regime). Around that the sampled lanes vary by a fifth, so each form is held to a
+    // quarter of an even share; a stride that aliased a form away left it none.
     for(const auto& form : formParameter->values)
     {
         EXPECT_GE(shareOf("form", form, false),
-                  0.4 / static_cast<double>(formParameter->values.size()))
+                  0.25 / static_cast<double>(formParameter->values.size()))
             << form;
     }
-    if(forward)
-    {
-        EXPECT_NEAR(shareOf("window", "none", false), 0.5, 0.1);
-        EXPECT_NEAR(shareOf("window", "local_128", false), 1.0 / 6.0, 0.08);
-    }
+    EXPECT_NEAR(shareOf("window", "none", false), 0.5, 0.1);
+    EXPECT_NEAR(shareOf("window", "local_128", false), 1.0 / 6.0, 0.08);
+    EXPECT_NEAR(shareOf("value_head_dim", "same", false), 0.75, 0.08);
 
     // A floor of 60 needs at most 60 lanes of the declared lanes; running each of them once would
     // cost its whole budget.
@@ -520,7 +522,7 @@ INSTANTIATE_TEST_SUITE_P(SdpaDeclarations,
 
 TEST(TestRegimeFocus, AFocusedSearchUnderAKeepSpendsItsLanesOnTheCombinationsTheKeepAdmits)
 {
-    // The forward's 6912 combinations are past the bound of 1024, and a sample drawn before the
+    // The forward's 23040 combinations are past the bound of 1024, and a sample drawn before the
     // keep leaves a few of the 6 combinations the keep admits that can hold a problem, or none.
     const auto metadata = test::shippedOperation("sdpa_fwd");
     std::string error;

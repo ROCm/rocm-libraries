@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "operation": "sdpa_bwd",
   "display_name": "Scaled Dot-Product Attention, Backward",
-  "description": "Gradients of scaled dot-product attention: dq, dk and dv from dO, given q, k, v, the forward output o and its softmax statistics. Its problem space is sdpa_fwd's without the sliding window, the sink and ragged forms and generate_stats.",
+  "description": "Gradients of scaled dot-product attention: dq, dk and dv from dO, given q, k, v, the forward output o and its softmax statistics. Its problem space is sdpa_fwd's without the sink form and generate_stats; its ragged form carries the per-batch lengths the forward's compact one leaves out.",
   "parameters": {
     "batch": {
       "type": "int64"
@@ -34,6 +34,18 @@
       ],
       "description": "Per-head width. 8 and up: narrower is not an attention head, and without a range the search spends half its draws below 16."
     },
+    "value_head_dim": {
+      "type": "enum",
+      "values": [
+        "same",
+        "mla"
+      ],
+      "weights": {
+        "same": 3,
+        "mla": 1
+      },
+      "description": "Width of V, and so of O (and dO, dV), against Q and K's head_dim. same (default): equal, as nearly every model has. mla: 64 narrower, DeepSeek's multi-head latent attention, whose Q and K carry a 64-wide rotary part that V does not -- 192/128 in prefill and training, 576/512 with the latent absorbed in decode. hipDNN requires only Q and K's last dims to agree (SdpaFwdNode Rule 2, SdpaBwdNode Rule 3; O, dO and dV take V's), and ASM SDPA and FlyDSL ship kernels for such pairs. Declared only with head_dim >= 128, so V keeps 64 or more."
+    },
     "is_causal": {
       "type": "bool",
       "description": "Decode is always causal (RFC 0019.13 \u00a712.3)"
@@ -59,14 +71,18 @@
       "values": [
         "bshd",
         "bhsd",
-        "kv_bhsd"
+        "kv_bhsd",
+        "sbhd",
+        "qkv_packed"
       ],
       "weights": {
         "bshd": 2,
         "bhsd": 1,
-        "kv_bhsd": 1
+        "kv_bhsd": 1,
+        "sbhd": 1,
+        "qkv_packed": 1
       },
-      "description": "Memory order of the attention operands; dims stay (B, H, S, D) and the order lives in the strides. bshd (default) is token-major for every tensor, [S*H*D, D, H*D, 1]. bhsd is head-major for every tensor, [H*S*D, S*D, D, 1]. kv_bhsd is the decode KV cache: Q, O (and dO, dQ) token-major and K, V (and dK, dV) head-major. Statistics stay row-major. Which layouts an engine serves differs a great deal, so this is a declared axis and the engine oracle filters it; it is not part of the regime label. Extents of 1 make layouts alias (with seqlen_q 1 and heads 1, kv_bhsd is bhsd; with seqlen_k 1 and heads_kv 1, it is bshd), so the constraints below leave kv_bhsd out of those points: the same graph would otherwise be listed under two layouts."
+      "description": "Memory order of the attention operands; dims stay (B, H, S, D) and the order lives in the strides. bshd (default) is token-major for every tensor, [S*H*D, D, H*D, 1]. bhsd is head-major for every tensor, [H*S*D, S*D, D, 1]. kv_bhsd is the decode KV cache: Q, O (and dO, dQ) token-major and K, V (and dK, dV) head-major. Statistics stay row-major. Which layouts an engine serves differs a great deal, so this is a declared axis and the engine oracle filters it; it is not part of the regime label. Extents of 1 make layouts alias (with seqlen_q 1 and heads 1, kv_bhsd is bhsd; with seqlen_k 1 and heads_kv 1, it is bshd), so the constraints below leave kv_bhsd out of those points: the same graph would otherwise be listed under two layouts. sbhd is sequence-major, Megatron's [S, B, H, D]: [H*D, D, B*H*D, 1] for every tensor; with one batch, or one row in both sequences, it is bshd, so it is declared only where batch > 1 and a sequence is longer than 1. qkv_packed: Q, K and V (and dQ, dK, dV) are views of one fused QKV projection, a row of heads*head_dim + heads_kv*head_dim + heads_kv*value width per token, so each has [S*R, W, R, 1] for its own width W; O and dO stay token-major. A fused QKV projection is self-attention, so qkv_packed is declared only with seqlen_q == seqlen_k. The ragged form packs tokens through offset tensors and needs token-major strides, so it is declared only with the token-major bshd and qkv_packed."
     },
     "scale": {
       "type": "enum",
@@ -82,6 +98,22 @@
       },
       "description": "The attention scale. inv_sqrt_d (default) is 1/sqrt(head_dim). unit is 1.0, a model that folds the scale into Q. jitter is 1/sqrt(head_dim) times (0.5 + 0.15 * r) for r = (seqlen_k + 3*seqlen_q + batch + head_dim) % 13, a deterministic stand-in for an arbitrary scale in [0.5, 2.3] times the standard one. The modulus is 13 so that power-of-two extents, which fill the archetypes, spread over 12 of the 13 residues instead of landing on one, and no residue gives exactly 1 (so jitter is never the inv_sqrt_d graph). Never 0: a zero scale means unset and omits the attribute. It is the stated value only where the form states one: scale_unset states none and scale_tensor passes it as a runtime tensor, so those two take inv_sqrt_d (the constraints below), and one graph is not listed under three scales."
     },
+    "window": {
+      "type": "enum",
+      "values": [
+        "none",
+        "local_128",
+        "local_1024",
+        "local_4096"
+      ],
+      "weights": {
+        "none": 3,
+        "local_128": 1,
+        "local_1024": 1,
+        "local_4096": 1
+      },
+      "description": "Sliding window: local_N keeps the N keys ending at the diagonal (left bound N; the right bound is whatever the mask sets, 0 under a causal mask). none (default) has no left bound. The left bound is never 0, which the frontend rejects. The frontend accepts a left bound under any mask, so the window is not tied to a causal mask here; an engine that serves windows only causally is filtered by the oracle. A window with seqlen_q > seqlen_k is excluded: with the diagonal anchored top-left, every query row from seqlen_k + N - 1 on would keep no key at all."
+    },
     "form": {
       "type": "enum",
       "values": [
@@ -90,9 +122,10 @@
         "scale_tensor",
         "dropout",
         "padded",
+        "ragged",
         "bias"
       ],
-      "description": "Which optional attributes and tensors the graph binds (RFC 0019 \u00a76.7, absent is not zero, and \u00a76.8 rule 9: a model must tolerate any optional feature a valid graph leaves unbound). One aspect varies per graph from the plain baseline, so every optional input appears both present and absent without crossing them all. Only the forms built for the backward: its schema has no sink token, and no ragged form is built for it yet. plain states the scale and binds nothing optional; scale_unset leaves the scale unstated; scale_tensor gives it as a pass-by-value tensor; dropout adds Philox dropout with an INT64 seed and offset; padded adds per-batch seq_len_q and seq_len_kv; bias adds an additive [1, 1, seqlen_q, seqlen_k] bias (attn_mask only: no dbias is written). A --model-shapes file with no `q.form` column reads every row as plain; a column left empty in a row is refused. Every form is an even stratum, and the forms are not weighted (unlike layout and scale), so the cut to --count takes each form evenly, as far as the first pass holds it. Without --count the forms declared in fewer combinations get fewer graphs: scale_unset and scale_tensor take inv_sqrt_d only. --form-floor tops each form up to its count. Interactions: the form decides whether the `scale` facet applies (scale_unset and scale_tensor ignore it, so they are held at inv_sqrt_d). Every other pairing with layout and scale is a valid graph; an engine that serves only some of them is filtered by the oracle."
+      "description": "Which optional attributes and tensors the graph binds (RFC 0019 \u00a76.7, absent is not zero, and \u00a76.8 rule 9: a model must tolerate any optional feature a valid graph leaves unbound). One aspect varies per graph from the plain baseline, so every optional input appears both present and absent without crossing them all. Only the forms built for the backward: its schema has no sink token. plain states the scale and binds nothing optional; scale_unset leaves the scale unstated; scale_tensor gives it as a pass-by-value tensor; dropout adds Philox dropout with an INT64 seed and offset; padded adds per-batch seq_len_q and seq_len_kv; ragged packs Q, O, dO, dQ and the statistics through one offset tensor and K, V, dK and dV through another, with the per-batch lengths and padding mask beside them (cuDNN's THD backward; the forward's ragged is compact THD, without lengths); bias adds an additive [1, 1, seqlen_q, seqlen_k] bias (attn_mask only: no dbias is written). A --model-shapes file with no `q.form` column reads every row as plain; a column left empty in a row is refused. Every form is an even stratum, and the forms are not weighted (unlike layout, scale and window), so the cut to --count takes each form evenly, as far as the first pass holds it. Without --count the forms declared in fewer combinations get fewer graphs: scale_unset and scale_tensor take inv_sqrt_d only and ragged takes the token-major layouts (bshd, qkv_packed) only. --form-floor tops each form up to its count. Interactions: the form decides whether the `scale` facet applies (scale_unset and scale_tensor ignore it, so they are held at inv_sqrt_d) and which `layout` is meaningful (ragged is token-major: bshd and qkv_packed only). Every other pairing with layout, window and scale is a valid graph; an engine that serves only some of them is filtered by the oracle."
     }
   },
   "stratification_axis": "arithmetic_intensity",
@@ -281,6 +314,15 @@
           }
         },
         {
+          "label": "ragged",
+          "when": {
+            "==": [
+              "$q.form",
+              "ragged"
+            ]
+          }
+        },
+        {
           "label": "bias",
           "when": {
             "==": [
@@ -294,22 +336,6 @@
     }
   ],
   "constraints": [
-    {
-      "or": [
-        {
-          "<=": [
-            "$q.seqlen_q",
-            "$q.seqlen_k"
-          ]
-        },
-        {
-          "==": [
-            "$q.is_causal",
-            false
-          ]
-        }
-      ]
-    },
     {
       "<=": [
         "$q.heads_kv",
@@ -330,6 +356,22 @@
               "==": [
                 "$q.is_causal",
                 true
+              ]
+            },
+            {
+              "<": [
+                "$q.seqlen_q",
+                "$q.seqlen_k"
+              ]
+            }
+          ]
+        },
+        {
+          "and": [
+            {
+              "!=": [
+                "$q.window",
+                "none"
               ]
             },
             {
@@ -417,6 +459,112 @@
           ]
         }
       ]
+    },
+    {
+      "or": [
+        {
+          "==": [
+            "$q.value_head_dim",
+            "same"
+          ]
+        },
+        {
+          "<=": [
+            128,
+            "$q.head_dim"
+          ]
+        }
+      ]
+    },
+    {
+      "or": [
+        {
+          "!=": [
+            "$q.layout",
+            "sbhd"
+          ]
+        },
+        {
+          "and": [
+            {
+              ">": [
+                "$q.batch",
+                1
+              ]
+            },
+            {
+              "or": [
+                {
+                  ">": [
+                    "$q.seqlen_q",
+                    1
+                  ]
+                },
+                {
+                  ">": [
+                    "$q.seqlen_k",
+                    1
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "or": [
+        {
+          "!=": [
+            "$q.layout",
+            "qkv_packed"
+          ]
+        },
+        {
+          "==": [
+            "$q.seqlen_q",
+            "$q.seqlen_k"
+          ]
+        }
+      ]
+    },
+    {
+      "or": [
+        {
+          "==": [
+            "$q.window",
+            "none"
+          ]
+        },
+        {
+          "<=": [
+            "$q.seqlen_q",
+            "$q.seqlen_k"
+          ]
+        }
+      ]
+    },
+    {
+      "or": [
+        {
+          "!=": [
+            "$q.form",
+            "ragged"
+          ]
+        },
+        {
+          "==": [
+            "$q.layout",
+            "bshd"
+          ]
+        },
+        {
+          "==": [
+            "$q.layout",
+            "qkv_packed"
+          ]
+        }
+      ]
     }
   ],
   "// kernel_catalog": [
@@ -438,7 +586,9 @@
   "model_shape_defaults": {
     "form": "plain",
     "layout": "bshd",
-    "scale": "inv_sqrt_d"
+    "scale": "inv_sqrt_d",
+    "value_head_dim": "same",
+    "window": "none"
   },
   "graph_builder": {
     "function": "sdpaBackward",
@@ -459,14 +609,103 @@
         "kind": "expr",
         "value": [
           {
-            "*": [
+            "if": [
               {
-                "*": [
-                  "$q.seqlen_q",
-                  "$q.heads"
+                "==": [
+                  "$q.layout",
+                  "bhsd"
                 ]
               },
-              "$q.head_dim"
+              {
+                "*": [
+                  {
+                    "*": [
+                      "$q.heads",
+                      "$q.seqlen_q"
+                    ]
+                  },
+                  "$q.head_dim"
+                ]
+              },
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "sbhd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      "$q.heads",
+                      "$q.head_dim"
+                    ]
+                  },
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.layout",
+                          "qkv_packed"
+                        ]
+                      },
+                      {
+                        "*": [
+                          "$q.seqlen_q",
+                          {
+                            "+": [
+                              {
+                                "*": [
+                                  {
+                                    "+": [
+                                      "$q.heads",
+                                      "$q.heads_kv"
+                                    ]
+                                  },
+                                  "$q.head_dim"
+                                ]
+                              },
+                              {
+                                "*": [
+                                  "$q.heads_kv",
+                                  {
+                                    "if": [
+                                      {
+                                        "==": [
+                                          "$q.value_head_dim",
+                                          "mla"
+                                        ]
+                                      },
+                                      {
+                                        "-": [
+                                          "$q.head_dim",
+                                          64
+                                        ]
+                                      },
+                                      "$q.head_dim"
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "*": [
+                          {
+                            "*": [
+                              "$q.seqlen_q",
+                              "$q.heads"
+                            ]
+                          },
+                          "$q.head_dim"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
             ]
           },
           {
@@ -496,9 +735,77 @@
               },
               "$q.head_dim",
               {
-                "*": [
-                  "$q.heads",
-                  "$q.head_dim"
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "sbhd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      {
+                        "*": [
+                          "$q.batch",
+                          "$q.heads"
+                        ]
+                      },
+                      "$q.head_dim"
+                    ]
+                  },
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.layout",
+                          "qkv_packed"
+                        ]
+                      },
+                      {
+                        "+": [
+                          {
+                            "*": [
+                              {
+                                "+": [
+                                  "$q.heads",
+                                  "$q.heads_kv"
+                                ]
+                              },
+                              "$q.head_dim"
+                            ]
+                          },
+                          {
+                            "*": [
+                              "$q.heads_kv",
+                              {
+                                "if": [
+                                  {
+                                    "==": [
+                                      "$q.value_head_dim",
+                                      "mla"
+                                    ]
+                                  },
+                                  {
+                                    "-": [
+                                      "$q.head_dim",
+                                      64
+                                    ]
+                                  },
+                                  "$q.head_dim"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "*": [
+                          "$q.heads",
+                          "$q.head_dim"
+                        ]
+                      }
+                    ]
+                  }
                 ]
               }
             ]
@@ -521,22 +828,132 @@
         "kind": "expr",
         "value": [
           {
-            "*": [
+            "if": [
               {
-                "*": [
-                  "$q.seqlen_k",
-                  "$q.heads_kv"
+                "==": [
+                  "$q.layout",
+                  "bhsd"
                 ]
               },
-              "$q.head_dim"
+              {
+                "*": [
+                  {
+                    "*": [
+                      "$q.heads_kv",
+                      "$q.seqlen_k"
+                    ]
+                  },
+                  "$q.head_dim"
+                ]
+              },
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "kv_bhsd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      {
+                        "*": [
+                          "$q.heads_kv",
+                          "$q.seqlen_k"
+                        ]
+                      },
+                      "$q.head_dim"
+                    ]
+                  },
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.layout",
+                          "sbhd"
+                        ]
+                      },
+                      {
+                        "*": [
+                          "$q.heads_kv",
+                          "$q.head_dim"
+                        ]
+                      },
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.layout",
+                              "qkv_packed"
+                            ]
+                          },
+                          {
+                            "*": [
+                              "$q.seqlen_k",
+                              {
+                                "+": [
+                                  {
+                                    "*": [
+                                      {
+                                        "+": [
+                                          "$q.heads",
+                                          "$q.heads_kv"
+                                        ]
+                                      },
+                                      "$q.head_dim"
+                                    ]
+                                  },
+                                  {
+                                    "*": [
+                                      "$q.heads_kv",
+                                      {
+                                        "if": [
+                                          {
+                                            "==": [
+                                              "$q.value_head_dim",
+                                              "mla"
+                                            ]
+                                          },
+                                          {
+                                            "-": [
+                                              "$q.head_dim",
+                                              64
+                                            ]
+                                          },
+                                          "$q.head_dim"
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "*": [
+                              {
+                                "*": [
+                                  "$q.seqlen_k",
+                                  "$q.heads_kv"
+                                ]
+                              },
+                              "$q.head_dim"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
             ]
           },
           {
             "if": [
               {
-                "!=": [
+                "==": [
                   "$q.layout",
-                  "bshd"
+                  "bhsd"
                 ]
               },
               {
@@ -545,22 +962,117 @@
                   "$q.head_dim"
                 ]
               },
-              "$q.head_dim"
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "kv_bhsd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      "$q.seqlen_k",
+                      "$q.head_dim"
+                    ]
+                  },
+                  "$q.head_dim"
+                ]
+              }
             ]
           },
           {
             "if": [
               {
-                "!=": [
+                "==": [
                   "$q.layout",
-                  "bshd"
+                  "bhsd"
                 ]
               },
               "$q.head_dim",
               {
-                "*": [
-                  "$q.heads_kv",
-                  "$q.head_dim"
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "kv_bhsd"
+                    ]
+                  },
+                  "$q.head_dim",
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.layout",
+                          "sbhd"
+                        ]
+                      },
+                      {
+                        "*": [
+                          {
+                            "*": [
+                              "$q.batch",
+                              "$q.heads_kv"
+                            ]
+                          },
+                          "$q.head_dim"
+                        ]
+                      },
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.layout",
+                              "qkv_packed"
+                            ]
+                          },
+                          {
+                            "+": [
+                              {
+                                "*": [
+                                  {
+                                    "+": [
+                                      "$q.heads",
+                                      "$q.heads_kv"
+                                    ]
+                                  },
+                                  "$q.head_dim"
+                                ]
+                              },
+                              {
+                                "*": [
+                                  "$q.heads_kv",
+                                  {
+                                    "if": [
+                                      {
+                                        "==": [
+                                          "$q.value_head_dim",
+                                          "mla"
+                                        ]
+                                      },
+                                      {
+                                        "-": [
+                                          "$q.head_dim",
+                                          64
+                                        ]
+                                      },
+                                      "$q.head_dim"
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "*": [
+                              "$q.heads_kv",
+                              "$q.head_dim"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
                 ]
               }
             ]
@@ -575,7 +1087,23 @@
           "$q.batch",
           "$q.heads_kv",
           "$q.seqlen_k",
-          "$q.head_dim"
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.value_head_dim",
+                  "mla"
+                ]
+              },
+              {
+                "-": [
+                  "$q.head_dim",
+                  64
+                ]
+              },
+              "$q.head_dim"
+            ]
+          }
         ]
       },
       {
@@ -583,46 +1111,427 @@
         "kind": "expr",
         "value": [
           {
-            "*": [
+            "if": [
               {
-                "*": [
-                  "$q.seqlen_k",
-                  "$q.heads_kv"
+                "==": [
+                  "$q.layout",
+                  "bhsd"
                 ]
               },
-              "$q.head_dim"
+              {
+                "*": [
+                  {
+                    "*": [
+                      "$q.heads_kv",
+                      "$q.seqlen_k"
+                    ]
+                  },
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.value_head_dim",
+                          "mla"
+                        ]
+                      },
+                      {
+                        "-": [
+                          "$q.head_dim",
+                          64
+                        ]
+                      },
+                      "$q.head_dim"
+                    ]
+                  }
+                ]
+              },
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "kv_bhsd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      {
+                        "*": [
+                          "$q.heads_kv",
+                          "$q.seqlen_k"
+                        ]
+                      },
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.value_head_dim",
+                              "mla"
+                            ]
+                          },
+                          {
+                            "-": [
+                              "$q.head_dim",
+                              64
+                            ]
+                          },
+                          "$q.head_dim"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.layout",
+                          "sbhd"
+                        ]
+                      },
+                      {
+                        "*": [
+                          "$q.heads_kv",
+                          {
+                            "if": [
+                              {
+                                "==": [
+                                  "$q.value_head_dim",
+                                  "mla"
+                                ]
+                              },
+                              {
+                                "-": [
+                                  "$q.head_dim",
+                                  64
+                                ]
+                              },
+                              "$q.head_dim"
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.layout",
+                              "qkv_packed"
+                            ]
+                          },
+                          {
+                            "*": [
+                              "$q.seqlen_k",
+                              {
+                                "+": [
+                                  {
+                                    "*": [
+                                      {
+                                        "+": [
+                                          "$q.heads",
+                                          "$q.heads_kv"
+                                        ]
+                                      },
+                                      "$q.head_dim"
+                                    ]
+                                  },
+                                  {
+                                    "*": [
+                                      "$q.heads_kv",
+                                      {
+                                        "if": [
+                                          {
+                                            "==": [
+                                              "$q.value_head_dim",
+                                              "mla"
+                                            ]
+                                          },
+                                          {
+                                            "-": [
+                                              "$q.head_dim",
+                                              64
+                                            ]
+                                          },
+                                          "$q.head_dim"
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "*": [
+                              {
+                                "*": [
+                                  "$q.seqlen_k",
+                                  "$q.heads_kv"
+                                ]
+                              },
+                              {
+                                "if": [
+                                  {
+                                    "==": [
+                                      "$q.value_head_dim",
+                                      "mla"
+                                    ]
+                                  },
+                                  {
+                                    "-": [
+                                      "$q.head_dim",
+                                      64
+                                    ]
+                                  },
+                                  "$q.head_dim"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
             ]
           },
           {
             "if": [
               {
-                "!=": [
+                "==": [
                   "$q.layout",
-                  "bshd"
+                  "bhsd"
                 ]
               },
               {
                 "*": [
                   "$q.seqlen_k",
-                  "$q.head_dim"
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.value_head_dim",
+                          "mla"
+                        ]
+                      },
+                      {
+                        "-": [
+                          "$q.head_dim",
+                          64
+                        ]
+                      },
+                      "$q.head_dim"
+                    ]
+                  }
                 ]
               },
-              "$q.head_dim"
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "kv_bhsd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      "$q.seqlen_k",
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.value_head_dim",
+                              "mla"
+                            ]
+                          },
+                          {
+                            "-": [
+                              "$q.head_dim",
+                              64
+                            ]
+                          },
+                          "$q.head_dim"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.value_head_dim",
+                          "mla"
+                        ]
+                      },
+                      {
+                        "-": [
+                          "$q.head_dim",
+                          64
+                        ]
+                      },
+                      "$q.head_dim"
+                    ]
+                  }
+                ]
+              }
             ]
           },
           {
             "if": [
               {
-                "!=": [
+                "==": [
                   "$q.layout",
-                  "bshd"
+                  "bhsd"
                 ]
               },
-              "$q.head_dim",
               {
-                "*": [
-                  "$q.heads_kv",
+                "if": [
+                  {
+                    "==": [
+                      "$q.value_head_dim",
+                      "mla"
+                    ]
+                  },
+                  {
+                    "-": [
+                      "$q.head_dim",
+                      64
+                    ]
+                  },
                   "$q.head_dim"
+                ]
+              },
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "kv_bhsd"
+                    ]
+                  },
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.value_head_dim",
+                          "mla"
+                        ]
+                      },
+                      {
+                        "-": [
+                          "$q.head_dim",
+                          64
+                        ]
+                      },
+                      "$q.head_dim"
+                    ]
+                  },
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.layout",
+                          "sbhd"
+                        ]
+                      },
+                      {
+                        "*": [
+                          {
+                            "*": [
+                              "$q.batch",
+                              "$q.heads_kv"
+                            ]
+                          },
+                          {
+                            "if": [
+                              {
+                                "==": [
+                                  "$q.value_head_dim",
+                                  "mla"
+                                ]
+                              },
+                              {
+                                "-": [
+                                  "$q.head_dim",
+                                  64
+                                ]
+                              },
+                              "$q.head_dim"
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.layout",
+                              "qkv_packed"
+                            ]
+                          },
+                          {
+                            "+": [
+                              {
+                                "*": [
+                                  {
+                                    "+": [
+                                      "$q.heads",
+                                      "$q.heads_kv"
+                                    ]
+                                  },
+                                  "$q.head_dim"
+                                ]
+                              },
+                              {
+                                "*": [
+                                  "$q.heads_kv",
+                                  {
+                                    "if": [
+                                      {
+                                        "==": [
+                                          "$q.value_head_dim",
+                                          "mla"
+                                        ]
+                                      },
+                                      {
+                                        "-": [
+                                          "$q.head_dim",
+                                          64
+                                        ]
+                                      },
+                                      "$q.head_dim"
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "*": [
+                              "$q.heads_kv",
+                              {
+                                "if": [
+                                  {
+                                    "==": [
+                                      "$q.value_head_dim",
+                                      "mla"
+                                    ]
+                                  },
+                                  {
+                                    "-": [
+                                      "$q.head_dim",
+                                      64
+                                    ]
+                                  },
+                                  "$q.head_dim"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
                 ]
               }
             ]
@@ -637,7 +1546,23 @@
           "$q.batch",
           "$q.heads",
           "$q.seqlen_q",
-          "$q.head_dim"
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.value_head_dim",
+                  "mla"
+                ]
+              },
+              {
+                "-": [
+                  "$q.head_dim",
+                  64
+                ]
+              },
+              "$q.head_dim"
+            ]
+          }
         ]
       },
       {
@@ -645,14 +1570,99 @@
         "kind": "expr",
         "value": [
           {
-            "*": [
+            "if": [
               {
-                "*": [
-                  "$q.seqlen_q",
-                  "$q.heads"
+                "==": [
+                  "$q.layout",
+                  "bhsd"
                 ]
               },
-              "$q.head_dim"
+              {
+                "*": [
+                  {
+                    "*": [
+                      "$q.heads",
+                      "$q.seqlen_q"
+                    ]
+                  },
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.value_head_dim",
+                          "mla"
+                        ]
+                      },
+                      {
+                        "-": [
+                          "$q.head_dim",
+                          64
+                        ]
+                      },
+                      "$q.head_dim"
+                    ]
+                  }
+                ]
+              },
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "sbhd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      "$q.heads",
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.value_head_dim",
+                              "mla"
+                            ]
+                          },
+                          {
+                            "-": [
+                              "$q.head_dim",
+                              64
+                            ]
+                          },
+                          "$q.head_dim"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "*": [
+                      {
+                        "*": [
+                          "$q.seqlen_q",
+                          "$q.heads"
+                        ]
+                      },
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.value_head_dim",
+                              "mla"
+                            ]
+                          },
+                          {
+                            "-": [
+                              "$q.head_dim",
+                              64
+                            ]
+                          },
+                          "$q.head_dim"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
             ]
           },
           {
@@ -666,10 +1676,42 @@
               {
                 "*": [
                   "$q.seqlen_q",
-                  "$q.head_dim"
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.value_head_dim",
+                          "mla"
+                        ]
+                      },
+                      {
+                        "-": [
+                          "$q.head_dim",
+                          64
+                        ]
+                      },
+                      "$q.head_dim"
+                    ]
+                  }
                 ]
               },
-              "$q.head_dim"
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.value_head_dim",
+                      "mla"
+                    ]
+                  },
+                  {
+                    "-": [
+                      "$q.head_dim",
+                      64
+                    ]
+                  },
+                  "$q.head_dim"
+                ]
+              }
             ]
           },
           {
@@ -680,11 +1722,80 @@
                   "bhsd"
                 ]
               },
-              "$q.head_dim",
               {
-                "*": [
-                  "$q.heads",
+                "if": [
+                  {
+                    "==": [
+                      "$q.value_head_dim",
+                      "mla"
+                    ]
+                  },
+                  {
+                    "-": [
+                      "$q.head_dim",
+                      64
+                    ]
+                  },
                   "$q.head_dim"
+                ]
+              },
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "sbhd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      {
+                        "*": [
+                          "$q.batch",
+                          "$q.heads"
+                        ]
+                      },
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.value_head_dim",
+                              "mla"
+                            ]
+                          },
+                          {
+                            "-": [
+                              "$q.head_dim",
+                              64
+                            ]
+                          },
+                          "$q.head_dim"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "*": [
+                      "$q.heads",
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.value_head_dim",
+                              "mla"
+                            ]
+                          },
+                          {
+                            "-": [
+                              "$q.head_dim",
+                              64
+                            ]
+                          },
+                          "$q.head_dim"
+                        ]
+                      }
+                    ]
+                  }
                 ]
               }
             ]
@@ -699,7 +1810,23 @@
           "$q.batch",
           "$q.heads",
           "$q.seqlen_q",
-          "$q.head_dim"
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.value_head_dim",
+                  "mla"
+                ]
+              },
+              {
+                "-": [
+                  "$q.head_dim",
+                  64
+                ]
+              },
+              "$q.head_dim"
+            ]
+          }
         ]
       },
       {
@@ -707,14 +1834,99 @@
         "kind": "expr",
         "value": [
           {
-            "*": [
+            "if": [
               {
-                "*": [
-                  "$q.seqlen_q",
-                  "$q.heads"
+                "==": [
+                  "$q.layout",
+                  "bhsd"
                 ]
               },
-              "$q.head_dim"
+              {
+                "*": [
+                  {
+                    "*": [
+                      "$q.heads",
+                      "$q.seqlen_q"
+                    ]
+                  },
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.value_head_dim",
+                          "mla"
+                        ]
+                      },
+                      {
+                        "-": [
+                          "$q.head_dim",
+                          64
+                        ]
+                      },
+                      "$q.head_dim"
+                    ]
+                  }
+                ]
+              },
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "sbhd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      "$q.heads",
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.value_head_dim",
+                              "mla"
+                            ]
+                          },
+                          {
+                            "-": [
+                              "$q.head_dim",
+                              64
+                            ]
+                          },
+                          "$q.head_dim"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "*": [
+                      {
+                        "*": [
+                          "$q.seqlen_q",
+                          "$q.heads"
+                        ]
+                      },
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.value_head_dim",
+                              "mla"
+                            ]
+                          },
+                          {
+                            "-": [
+                              "$q.head_dim",
+                              64
+                            ]
+                          },
+                          "$q.head_dim"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
             ]
           },
           {
@@ -728,10 +1940,42 @@
               {
                 "*": [
                   "$q.seqlen_q",
-                  "$q.head_dim"
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.value_head_dim",
+                          "mla"
+                        ]
+                      },
+                      {
+                        "-": [
+                          "$q.head_dim",
+                          64
+                        ]
+                      },
+                      "$q.head_dim"
+                    ]
+                  }
                 ]
               },
-              "$q.head_dim"
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.value_head_dim",
+                      "mla"
+                    ]
+                  },
+                  {
+                    "-": [
+                      "$q.head_dim",
+                      64
+                    ]
+                  },
+                  "$q.head_dim"
+                ]
+              }
             ]
           },
           {
@@ -742,11 +1986,80 @@
                   "bhsd"
                 ]
               },
-              "$q.head_dim",
               {
-                "*": [
-                  "$q.heads",
+                "if": [
+                  {
+                    "==": [
+                      "$q.value_head_dim",
+                      "mla"
+                    ]
+                  },
+                  {
+                    "-": [
+                      "$q.head_dim",
+                      64
+                    ]
+                  },
                   "$q.head_dim"
+                ]
+              },
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "sbhd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      {
+                        "*": [
+                          "$q.batch",
+                          "$q.heads"
+                        ]
+                      },
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.value_head_dim",
+                              "mla"
+                            ]
+                          },
+                          {
+                            "-": [
+                              "$q.head_dim",
+                              64
+                            ]
+                          },
+                          "$q.head_dim"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "*": [
+                      "$q.heads",
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.value_head_dim",
+                              "mla"
+                            ]
+                          },
+                          {
+                            "-": [
+                              "$q.head_dim",
+                              64
+                            ]
+                          },
+                          "$q.head_dim"
+                        ]
+                      }
+                    ]
+                  }
                 ]
               }
             ]
@@ -769,14 +2082,103 @@
         "kind": "expr",
         "value": [
           {
-            "*": [
+            "if": [
               {
-                "*": [
-                  "$q.seqlen_q",
-                  "$q.heads"
+                "==": [
+                  "$q.layout",
+                  "bhsd"
                 ]
               },
-              "$q.head_dim"
+              {
+                "*": [
+                  {
+                    "*": [
+                      "$q.heads",
+                      "$q.seqlen_q"
+                    ]
+                  },
+                  "$q.head_dim"
+                ]
+              },
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "sbhd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      "$q.heads",
+                      "$q.head_dim"
+                    ]
+                  },
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.layout",
+                          "qkv_packed"
+                        ]
+                      },
+                      {
+                        "*": [
+                          "$q.seqlen_q",
+                          {
+                            "+": [
+                              {
+                                "*": [
+                                  {
+                                    "+": [
+                                      "$q.heads",
+                                      "$q.heads_kv"
+                                    ]
+                                  },
+                                  "$q.head_dim"
+                                ]
+                              },
+                              {
+                                "*": [
+                                  "$q.heads_kv",
+                                  {
+                                    "if": [
+                                      {
+                                        "==": [
+                                          "$q.value_head_dim",
+                                          "mla"
+                                        ]
+                                      },
+                                      {
+                                        "-": [
+                                          "$q.head_dim",
+                                          64
+                                        ]
+                                      },
+                                      "$q.head_dim"
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "*": [
+                          {
+                            "*": [
+                              "$q.seqlen_q",
+                              "$q.heads"
+                            ]
+                          },
+                          "$q.head_dim"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
             ]
           },
           {
@@ -806,9 +2208,77 @@
               },
               "$q.head_dim",
               {
-                "*": [
-                  "$q.heads",
-                  "$q.head_dim"
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "sbhd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      {
+                        "*": [
+                          "$q.batch",
+                          "$q.heads"
+                        ]
+                      },
+                      "$q.head_dim"
+                    ]
+                  },
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.layout",
+                          "qkv_packed"
+                        ]
+                      },
+                      {
+                        "+": [
+                          {
+                            "*": [
+                              {
+                                "+": [
+                                  "$q.heads",
+                                  "$q.heads_kv"
+                                ]
+                              },
+                              "$q.head_dim"
+                            ]
+                          },
+                          {
+                            "*": [
+                              "$q.heads_kv",
+                              {
+                                "if": [
+                                  {
+                                    "==": [
+                                      "$q.value_head_dim",
+                                      "mla"
+                                    ]
+                                  },
+                                  {
+                                    "-": [
+                                      "$q.head_dim",
+                                      64
+                                    ]
+                                  },
+                                  "$q.head_dim"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "*": [
+                          "$q.heads",
+                          "$q.head_dim"
+                        ]
+                      }
+                    ]
+                  }
                 ]
               }
             ]
@@ -831,22 +2301,132 @@
         "kind": "expr",
         "value": [
           {
-            "*": [
+            "if": [
               {
-                "*": [
-                  "$q.seqlen_k",
-                  "$q.heads_kv"
+                "==": [
+                  "$q.layout",
+                  "bhsd"
                 ]
               },
-              "$q.head_dim"
+              {
+                "*": [
+                  {
+                    "*": [
+                      "$q.heads_kv",
+                      "$q.seqlen_k"
+                    ]
+                  },
+                  "$q.head_dim"
+                ]
+              },
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "kv_bhsd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      {
+                        "*": [
+                          "$q.heads_kv",
+                          "$q.seqlen_k"
+                        ]
+                      },
+                      "$q.head_dim"
+                    ]
+                  },
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.layout",
+                          "sbhd"
+                        ]
+                      },
+                      {
+                        "*": [
+                          "$q.heads_kv",
+                          "$q.head_dim"
+                        ]
+                      },
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.layout",
+                              "qkv_packed"
+                            ]
+                          },
+                          {
+                            "*": [
+                              "$q.seqlen_k",
+                              {
+                                "+": [
+                                  {
+                                    "*": [
+                                      {
+                                        "+": [
+                                          "$q.heads",
+                                          "$q.heads_kv"
+                                        ]
+                                      },
+                                      "$q.head_dim"
+                                    ]
+                                  },
+                                  {
+                                    "*": [
+                                      "$q.heads_kv",
+                                      {
+                                        "if": [
+                                          {
+                                            "==": [
+                                              "$q.value_head_dim",
+                                              "mla"
+                                            ]
+                                          },
+                                          {
+                                            "-": [
+                                              "$q.head_dim",
+                                              64
+                                            ]
+                                          },
+                                          "$q.head_dim"
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "*": [
+                              {
+                                "*": [
+                                  "$q.seqlen_k",
+                                  "$q.heads_kv"
+                                ]
+                              },
+                              "$q.head_dim"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
             ]
           },
           {
             "if": [
               {
-                "!=": [
+                "==": [
                   "$q.layout",
-                  "bshd"
+                  "bhsd"
                 ]
               },
               {
@@ -855,22 +2435,117 @@
                   "$q.head_dim"
                 ]
               },
-              "$q.head_dim"
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "kv_bhsd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      "$q.seqlen_k",
+                      "$q.head_dim"
+                    ]
+                  },
+                  "$q.head_dim"
+                ]
+              }
             ]
           },
           {
             "if": [
               {
-                "!=": [
+                "==": [
                   "$q.layout",
-                  "bshd"
+                  "bhsd"
                 ]
               },
               "$q.head_dim",
               {
-                "*": [
-                  "$q.heads_kv",
-                  "$q.head_dim"
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "kv_bhsd"
+                    ]
+                  },
+                  "$q.head_dim",
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.layout",
+                          "sbhd"
+                        ]
+                      },
+                      {
+                        "*": [
+                          {
+                            "*": [
+                              "$q.batch",
+                              "$q.heads_kv"
+                            ]
+                          },
+                          "$q.head_dim"
+                        ]
+                      },
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.layout",
+                              "qkv_packed"
+                            ]
+                          },
+                          {
+                            "+": [
+                              {
+                                "*": [
+                                  {
+                                    "+": [
+                                      "$q.heads",
+                                      "$q.heads_kv"
+                                    ]
+                                  },
+                                  "$q.head_dim"
+                                ]
+                              },
+                              {
+                                "*": [
+                                  "$q.heads_kv",
+                                  {
+                                    "if": [
+                                      {
+                                        "==": [
+                                          "$q.value_head_dim",
+                                          "mla"
+                                        ]
+                                      },
+                                      {
+                                        "-": [
+                                          "$q.head_dim",
+                                          64
+                                        ]
+                                      },
+                                      "$q.head_dim"
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "*": [
+                              "$q.heads_kv",
+                              "$q.head_dim"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
                 ]
               }
             ]
@@ -885,7 +2560,23 @@
           "$q.batch",
           "$q.heads_kv",
           "$q.seqlen_k",
-          "$q.head_dim"
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.value_head_dim",
+                  "mla"
+                ]
+              },
+              {
+                "-": [
+                  "$q.head_dim",
+                  64
+                ]
+              },
+              "$q.head_dim"
+            ]
+          }
         ]
       },
       {
@@ -893,46 +2584,427 @@
         "kind": "expr",
         "value": [
           {
-            "*": [
+            "if": [
               {
-                "*": [
-                  "$q.seqlen_k",
-                  "$q.heads_kv"
+                "==": [
+                  "$q.layout",
+                  "bhsd"
                 ]
               },
-              "$q.head_dim"
+              {
+                "*": [
+                  {
+                    "*": [
+                      "$q.heads_kv",
+                      "$q.seqlen_k"
+                    ]
+                  },
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.value_head_dim",
+                          "mla"
+                        ]
+                      },
+                      {
+                        "-": [
+                          "$q.head_dim",
+                          64
+                        ]
+                      },
+                      "$q.head_dim"
+                    ]
+                  }
+                ]
+              },
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "kv_bhsd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      {
+                        "*": [
+                          "$q.heads_kv",
+                          "$q.seqlen_k"
+                        ]
+                      },
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.value_head_dim",
+                              "mla"
+                            ]
+                          },
+                          {
+                            "-": [
+                              "$q.head_dim",
+                              64
+                            ]
+                          },
+                          "$q.head_dim"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.layout",
+                          "sbhd"
+                        ]
+                      },
+                      {
+                        "*": [
+                          "$q.heads_kv",
+                          {
+                            "if": [
+                              {
+                                "==": [
+                                  "$q.value_head_dim",
+                                  "mla"
+                                ]
+                              },
+                              {
+                                "-": [
+                                  "$q.head_dim",
+                                  64
+                                ]
+                              },
+                              "$q.head_dim"
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.layout",
+                              "qkv_packed"
+                            ]
+                          },
+                          {
+                            "*": [
+                              "$q.seqlen_k",
+                              {
+                                "+": [
+                                  {
+                                    "*": [
+                                      {
+                                        "+": [
+                                          "$q.heads",
+                                          "$q.heads_kv"
+                                        ]
+                                      },
+                                      "$q.head_dim"
+                                    ]
+                                  },
+                                  {
+                                    "*": [
+                                      "$q.heads_kv",
+                                      {
+                                        "if": [
+                                          {
+                                            "==": [
+                                              "$q.value_head_dim",
+                                              "mla"
+                                            ]
+                                          },
+                                          {
+                                            "-": [
+                                              "$q.head_dim",
+                                              64
+                                            ]
+                                          },
+                                          "$q.head_dim"
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "*": [
+                              {
+                                "*": [
+                                  "$q.seqlen_k",
+                                  "$q.heads_kv"
+                                ]
+                              },
+                              {
+                                "if": [
+                                  {
+                                    "==": [
+                                      "$q.value_head_dim",
+                                      "mla"
+                                    ]
+                                  },
+                                  {
+                                    "-": [
+                                      "$q.head_dim",
+                                      64
+                                    ]
+                                  },
+                                  "$q.head_dim"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
             ]
           },
           {
             "if": [
               {
-                "!=": [
+                "==": [
                   "$q.layout",
-                  "bshd"
+                  "bhsd"
                 ]
               },
               {
                 "*": [
                   "$q.seqlen_k",
-                  "$q.head_dim"
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.value_head_dim",
+                          "mla"
+                        ]
+                      },
+                      {
+                        "-": [
+                          "$q.head_dim",
+                          64
+                        ]
+                      },
+                      "$q.head_dim"
+                    ]
+                  }
                 ]
               },
-              "$q.head_dim"
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "kv_bhsd"
+                    ]
+                  },
+                  {
+                    "*": [
+                      "$q.seqlen_k",
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.value_head_dim",
+                              "mla"
+                            ]
+                          },
+                          {
+                            "-": [
+                              "$q.head_dim",
+                              64
+                            ]
+                          },
+                          "$q.head_dim"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.value_head_dim",
+                          "mla"
+                        ]
+                      },
+                      {
+                        "-": [
+                          "$q.head_dim",
+                          64
+                        ]
+                      },
+                      "$q.head_dim"
+                    ]
+                  }
+                ]
+              }
             ]
           },
           {
             "if": [
               {
-                "!=": [
+                "==": [
                   "$q.layout",
-                  "bshd"
+                  "bhsd"
                 ]
               },
-              "$q.head_dim",
               {
-                "*": [
-                  "$q.heads_kv",
+                "if": [
+                  {
+                    "==": [
+                      "$q.value_head_dim",
+                      "mla"
+                    ]
+                  },
+                  {
+                    "-": [
+                      "$q.head_dim",
+                      64
+                    ]
+                  },
                   "$q.head_dim"
+                ]
+              },
+              {
+                "if": [
+                  {
+                    "==": [
+                      "$q.layout",
+                      "kv_bhsd"
+                    ]
+                  },
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.value_head_dim",
+                          "mla"
+                        ]
+                      },
+                      {
+                        "-": [
+                          "$q.head_dim",
+                          64
+                        ]
+                      },
+                      "$q.head_dim"
+                    ]
+                  },
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.layout",
+                          "sbhd"
+                        ]
+                      },
+                      {
+                        "*": [
+                          {
+                            "*": [
+                              "$q.batch",
+                              "$q.heads_kv"
+                            ]
+                          },
+                          {
+                            "if": [
+                              {
+                                "==": [
+                                  "$q.value_head_dim",
+                                  "mla"
+                                ]
+                              },
+                              {
+                                "-": [
+                                  "$q.head_dim",
+                                  64
+                                ]
+                              },
+                              "$q.head_dim"
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "if": [
+                          {
+                            "==": [
+                              "$q.layout",
+                              "qkv_packed"
+                            ]
+                          },
+                          {
+                            "+": [
+                              {
+                                "*": [
+                                  {
+                                    "+": [
+                                      "$q.heads",
+                                      "$q.heads_kv"
+                                    ]
+                                  },
+                                  "$q.head_dim"
+                                ]
+                              },
+                              {
+                                "*": [
+                                  "$q.heads_kv",
+                                  {
+                                    "if": [
+                                      {
+                                        "==": [
+                                          "$q.value_head_dim",
+                                          "mla"
+                                        ]
+                                      },
+                                      {
+                                        "-": [
+                                          "$q.head_dim",
+                                          64
+                                        ]
+                                      },
+                                      "$q.head_dim"
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "*": [
+                              "$q.heads_kv",
+                              {
+                                "if": [
+                                  {
+                                    "==": [
+                                      "$q.value_head_dim",
+                                      "mla"
+                                    ]
+                                  },
+                                  {
+                                    "-": [
+                                      "$q.head_dim",
+                                      64
+                                    ]
+                                  },
+                                  "$q.head_dim"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
                 ]
               }
             ]
@@ -952,8 +3024,40 @@
       },
       {
         "name": "statsStrides",
-        "kind": "strides_of",
-        "of": "statsDims"
+        "kind": "expr",
+        "value": [
+          {
+            "*": [
+              "$q.heads",
+              "$q.seqlen_q"
+            ]
+          },
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.form",
+                  "ragged"
+                ]
+              },
+              1,
+              "$q.seqlen_q"
+            ]
+          },
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.form",
+                  "ragged"
+                ]
+              },
+              "$q.heads",
+              1
+            ]
+          },
+          1
+        ]
       },
       {
         "name": "statsDataType",
@@ -1043,6 +3147,43 @@
         }
       },
       {
+        "name": "leftBound",
+        "kind": "expr",
+        "value": [
+          {
+            "when": {
+              "!=": [
+                "$q.window",
+                "none"
+              ]
+            },
+            "value": {
+              "if": [
+                {
+                  "==": [
+                    "$q.window",
+                    "local_128"
+                  ]
+                },
+                128,
+                {
+                  "if": [
+                    {
+                      "==": [
+                        "$q.window",
+                        "local_1024"
+                      ]
+                    },
+                    1024,
+                    4096
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
         "name": "causalMask",
         "kind": "direct",
         "source": "$q.is_causal"
@@ -1128,6 +3269,31 @@
         "constant": "int32"
       },
       {
+        "name": "offsetsDims",
+        "kind": "expr",
+        "value": [
+          {
+            "+": [
+              "$q.batch",
+              1
+            ]
+          },
+          1,
+          1,
+          1
+        ]
+      },
+      {
+        "name": "offsetsStrides",
+        "kind": "strides_of",
+        "of": "offsetsDims"
+      },
+      {
+        "name": "offsetsDataType",
+        "kind": "constant",
+        "constant": "int32"
+      },
+      {
         "name": "biasDims",
         "kind": "expr",
         "value": [
@@ -1149,9 +3315,9 @@
       }
     ],
     "// types": "Operands carry the declared dtype; accumulation and the score matrix are fp32. Left to default, compute follows io and every fp16/bf16 graph is uniform half precision, which hip-kernel-provider's SdpaFwdPlanBuilder and SdpaBwdPlanBuilder refuse outright ('compute_data_type must be FLOAT') and the ingestor engines decline at graph_match -- a live-engine corpus then admits nothing, indistinguishable from naming an engine that does not exist. The softmax statistics saved by the forward pass are fp32.",
-    "// layout": "BSHD (the default): dims stay (B, H, S, D) and the layout lives in the strides, token-major, as the shipped bundles lay them out. Not row-major: strides_of would give BHSD, and rocKE's dense kernels take no stride kernargs -- stride_q_tok is baked as Hq*D -- so their matcher (hasBshdStrides) declines every BHSD graph. AITER serves BSHD too, so the default keeps both engines in the contest. The `layout` parameter adds bhsd (head-major, [H*S*D, S*D, D, 1]) and kv_bhsd (Q/O token-major, K/V head-major, the decode KV cache); the batch stride is the same in both orders, so only the head and sequence strides differ. An engine that serves only some of them is filtered by the oracle, per combination, not by a measurement.",
+    "// layout": "BSHD (the default): dims stay (B, H, S, D) and the layout lives in the strides, token-major, as the shipped bundles lay them out. Not row-major: strides_of would give BHSD, and rocKE's dense kernels take no stride kernargs -- stride_q_tok is baked as Hq*D -- so their matcher (hasBshdStrides) declines every BHSD graph. AITER serves BSHD too, so the default keeps both engines in the contest. The `layout` parameter adds bhsd (head-major, [H*S*D, S*D, D, 1]) and kv_bhsd (Q/O token-major, K/V head-major, the decode KV cache), whose batch stride is BSHD's, so only the head and sequence strides differ; sbhd (Megatron's sequence-major order, batch stride H*D) and qkv_packed (Q, K and V as views of one fused QKV projection row, O token-major). value_head_dim mla narrows V, O (and dO, dV) by 64, so their strides use the value width wherever Q's use head_dim. An engine that serves only some of them is filtered by the oracle, per combination, not by a measurement.",
     "// scale": "attnScale is the plain form's stated scale, not left to the schema's optional: rocKE's dense matcher declines a graph with no attn_scale_value (the scale is a required f32 kernarg and guessing 1/sqrt(D) is what it refuses to do), so a corpus that was all scale_unset would empty a rocKE corpus. 1/sqrt(head_dim) is the standard scale and what the shipped bundles carry. The other forms leave it out (scale_unset, scale_tensor) or keep it (the rest), and the live-engine oracle drops the forms an engine refuses, which is how rocKE's corpus stays free of them. The `scale` parameter chooses the stated value for the forms that state one; scale_unset states none and scale_tensor passes the value as a runtime tensor, so a constraint holds the facet at inv_sqrt_d there instead of listing the same graph (or tensors differing only in their default) under three scales.",
-    "// form": "One optional aspect per graph, everything else as the plain graph has it. The conventions are hipDNN's own: SdpaBwdNode requires seq_len_q and seq_len_kv, INT32 [B, 1, 1, 1], when padding_mask is set (detail::validateIndexTensor, Rule 9); the scale tensor is a single-element pass-by-value tensor (validateScalarParameter, Rule 10b), given as a runtime parameter whose default is the plain form's scale; the bias takes Q's dtype and dims [1, 1, seqlen_q, seqlen_k], row-major (Rule 7: last two dims equal seq_q and seq_kv, or 1), and dbias stays unset. The dropout seed and offset are INT64 [1, 1, 1, 1] device tensors as the test SDK builds the forward's (RaggedSdpaDensifyTestGraphs.hpp withPhiloxDropout); the frontend states no rule for them and no explicit dropout mask is needed, so that one is the test SDK's convention, not a validated one. There is no kernel_catalog here to hold a plain constant, and no ragged or sink form: the backward schema has no ragged offsets or sink token. Facet interactions are constraints, not builder guards: `scale` is held at inv_sqrt_d under scale_unset and scale_tensor. Everything else crosses freely (padded, dropout and bias with every layout), since the frontend validators, the CPU and GPU references and the engine matchers state those as valid or as an engine-level decline, which the oracle filters."
+    "// form": "One optional aspect per graph, everything else as the plain graph has it. The conventions are hipDNN's own: SdpaBwdNode requires seq_len_q and seq_len_kv, INT32 [B, 1, 1, 1], when padding_mask is set (detail::validateIndexTensor, Rule 9); the scale tensor is a single-element pass-by-value tensor (validateScalarParameter, Rule 10b), given as a runtime parameter whose default is the plain form's scale; the bias takes Q's dtype and dims [1, 1, seqlen_q, seqlen_k], row-major (Rule 7: last two dims equal seq_q and seq_kv, or 1), and dbias stays unset. The dropout seed and offset are INT64 [1, 1, 1, 1] device tensors as the test SDK builds the forward's (RaggedSdpaDensifyTestGraphs.hpp withPhiloxDropout); the frontend states no rule for them and no explicit dropout mask is needed, so that one is the test SDK's convention, not a validated one. There is no kernel_catalog here to hold a plain constant, and no sink form: the backward schema has no sink token. ragged is cuDNN's THD backward: Q, O, dO, dQ and the statistics share one INT32 [B+1, 1, 1, 1] offset tensor and K, V, dK and dV another, each multiplier the tensor's token stride (the statistics packed token-major, [seqlen_q*heads, 1, heads, 1], as the forward writes them), with seq_len_q, seq_len_kv and the padding mask beside them (SdpaBwdNode Rule 9). The lengths are not optional here: FlyDSL's backward, the engine that serves ragged, declines offsets without them (checkVarlen), while the forward's compact THD form (the test SDK's makeVllmGraph) has none. Facet interactions are constraints, not builder guards: `scale` is held at inv_sqrt_d under scale_unset and scale_tensor, and `ragged` to the token-major layouts (bshd, qkv_packed). Everything else crosses freely (padded, dropout and bias with every layout and window), since the frontend validators, the CPU and GPU references and the engine matchers state those as valid or as an engine-level decline, which the oracle filters."
   },
   "archetypes": [
     {
@@ -1388,7 +3554,7 @@
     },
     {
       "name": "cross_attention",
-      "note": "more queries than keys, from different tensors: diffusion and encoder-decoder attention over a short text or memory sequence. Bidirectional, since a causal mask is declared only for seqlen_q <= seqlen_k",
+      "note": "more queries than keys, from different tensors: diffusion and encoder-decoder attention over a short text or memory sequence. Bidirectional, as such attention is; a causal mask over more queries than keys is declared too (top-left, where every query row keeps a key), reached by exploration",
       "values": {
         "batch": [
           1,
@@ -1492,6 +3658,6 @@
     "exploration": 0.2
   },
   "// archetypes": "Recorded transformer configurations (RFC 0019.13 \u00a712.3). Decode and prefill are the same operation and different problems -- seqlen_q of 1 against a long cache is memory bound, and a square prefill is compute bound -- so each is anchored separately rather than left to a range over seqlen_q.",
-  "// neighbourhood": "head_dim moves among the widths shipped models use rather than scaling, since an interpolated 100 or 144 is not a configuration anyone ships. seqlen_k mirrors seqlen_q at ratios >= 1, which keeps the seqlen_q <= seqlen_k relation satisfied by construction for a causal mask rather than by rejection.",
+  "// neighbourhood": "head_dim moves among the widths shipped models use rather than scaling, since an interpolated 100 or 144 is not a configuration anyone ships. seqlen_k mirrors seqlen_q at ratios >= 1, the relation of decoder attention (prefill and append); more queries than keys comes from exploration and the cross attention archetype.",
   "// mixture": "Same shares as conv_fwd; see the note there."
 }

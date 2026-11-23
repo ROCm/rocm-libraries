@@ -227,19 +227,83 @@ struct ProblemCorpus
 namespace detail
 {
 
+/// A reproducible pseudo-random key for part @p index under @p seed (splitmix64): the tie-break
+/// of apportion, so equal remainders are not always settled in favour of the earliest parts,
+/// which the enumeration order would turn into a bias toward the first value of the leading
+/// parameters; also the round function of ScatteredOrder.
+inline uint64_t tieKey(uint64_t seed, size_t index)
+{
+    uint64_t z = seed + 0x9e3779b97f4a7c15ULL * (static_cast<uint64_t>(index) + 1);
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    return z ^ (z >> 31);
+}
+
+/// A fixed bijection of [0, @p total), the order a product too large to take whole is walked in:
+/// a balanced Feistel network over the bits of the smallest even power of two at least @p total,
+/// its rounds keyed by tieKey, cycle-walked (applied again until the value is in range), which
+/// keeps it a bijection of [0, total). Unlike a stride through the product, it ties no digit of
+/// the mixed-radix index to another: even a stride coprime to the product moves some digits
+/// together, and sdpa_fwd's 23040 combinations walked at a stride of 14239 held 1 scale_unset
+/// combination where 56 were due, because the one scale that form admits was a value of the
+/// digit the stride had tied to it.
+class ScatteredOrder
+{
+public:
+    explicit ScatteredOrder(size_t total)
+        : _total(total)
+    {
+        while(_halfBits < 32 && (uint64_t{1} << (2 * _halfBits)) < total)
+        {
+            ++_halfBits;
+        }
+        _halfMask = (uint64_t{1} << _halfBits) - 1;
+    }
+
+    /// The combination index visited at @p step, for a step below the total.
+    size_t operator()(size_t step) const
+    {
+        uint64_t value = step;
+        do
+        {
+            value = permute(value);
+        } while(value >= _total);
+        return static_cast<size_t>(value);
+    }
+
+private:
+    static constexpr uint64_t ROUNDS = 4;
+
+    uint64_t permute(uint64_t value) const
+    {
+        uint64_t left = value >> _halfBits;
+        uint64_t right = value & _halfMask;
+        for(uint64_t round = 0; round < ROUNDS; ++round)
+        {
+            const uint64_t mixed = left ^ (tieKey(round, static_cast<size_t>(right)) & _halfMask);
+            left = right;
+            right = mixed;
+        }
+        return (left << _halfBits) | right;
+    }
+
+    size_t _total;
+    uint64_t _halfBits = 1;
+    uint64_t _halfMask = 1;
+};
+
 /// The cross product of every categorical parameter's declared values that @p keep admits, at
 /// most @p limit of it plus whatever keeps every admitted value present; @p total receives the
 /// full size of the admitted product, 0 when @p keep admits no value of some parameter.
 ///
 /// Past the limit the product is sampled, not cut to a prefix (a prefix keeps only the first
 /// values of the earliest parameters), and each value the sample missed gets a combination of
-/// its own, so a model trained on the corpus has seen every value (§5.2). The sample steps
-/// through the product by a stride coprime to its size, so it visits distinct combinations in a
-/// fixed, scattered order: an even stride aliases with the mixed-radix index and leaves whole
-/// value triples out (sdpa_fwd's 6912 combinations at a stride of 6.75 have no kv_bhsd, jitter,
-/// local_4096 one). @p live, when given, says which combinations can hold a problem (see
-/// excludedByCategoricals): only those are sampled, so the limit is spent on combinations that
-/// count. Declaration order keeps the result reproducible.
+/// its own, so a model trained on the corpus has seen every value (§5.2). The sample walks the
+/// product in a fixed pseudo-random order (ScatteredOrder), so it visits distinct combinations
+/// spread over every pair of values rather than along whichever digits a stride ties together.
+/// @p live, when given, says which combinations can hold a problem (see excludedByCategoricals):
+/// only those are sampled, so the limit is spent on combinations that count. The order is a
+/// fixed function of the product, so the result is reproducible.
 ///
 /// @p constraintEmpty, when given, receives how many combinations of the admitted product @p
 /// live refuses, counted over the whole product and not only the part the sample walks: past
@@ -313,28 +377,15 @@ inline std::vector<ProblemPoint>
         return combinations;
     }
 
-    // The stride nearest the golden ratio of the product that shares no factor with it, so the
-    // walk index * stride % total is a permutation of the product.
-    size_t stride
-        = std::max<size_t>(1, static_cast<size_t>(static_cast<double>(total) * 0.6180339887));
-    while(std::gcd(stride, total) != 1)
-    {
-        ++stride;
-    }
-    // The walk's product index after @p step strides, by repeated addition modulo the total so
-    // a large product cannot overflow.
-    const auto next = [&](size_t index) {
-        return index >= total - stride ? index - (total - stride) : index + stride;
-    };
+    const ScatteredOrder order(total);
     const auto counts = [&live](const ProblemPoint& point) { return !live || live(point); };
 
     combinations.reserve(limit);
     size_t visited = 0;
-    size_t cursor = 0;
     size_t empty = 0;
-    for(; visited < total && combinations.size() < limit; ++visited, cursor = next(cursor))
+    for(; visited < total && combinations.size() < limit; ++visited)
     {
-        auto point = at(cursor);
+        auto point = at(order(visited));
         if(counts(point))
         {
             combinations.push_back(std::move(point));
@@ -346,10 +397,9 @@ inline std::vector<ProblemPoint>
     }
     if(constraintEmpty != nullptr)
     {
-        auto ahead = cursor;
-        for(size_t step = visited; step < total; ++step, ahead = next(ahead))
+        for(size_t step = visited; step < total; ++step)
         {
-            empty += counts(at(ahead)) ? 0 : 1;
+            empty += counts(at(order(step))) ? 0 : 1;
         }
         *constraintEmpty = empty;
     }
@@ -369,10 +419,9 @@ inline std::vector<ProblemPoint>
                 continue;
             }
             bool found = false;
-            auto ahead = cursor;
-            for(size_t step = visited; step < total && !found; ++step, ahead = next(ahead))
+            for(size_t step = visited; step < total && !found; ++step)
             {
-                auto point = at(ahead);
+                auto point = at(order(step));
                 if(point.at(name) == value && counts(point))
                 {
                     combinations.push_back(std::move(point));
@@ -587,18 +636,6 @@ inline std::vector<double> combinationSizes(const OperationMetadata& metadata,
         *converged = change < 1e-6;
     }
     return sizes;
-}
-
-/// A reproducible pseudo-random key for part @p index under @p seed (splitmix64): the tie-break
-/// of apportion, so equal remainders are not always settled in favour of the earliest parts,
-/// which the enumeration order would turn into a bias toward the first value of the leading
-/// parameters.
-inline uint64_t tieKey(uint64_t seed, size_t index)
-{
-    uint64_t z = seed + 0x9e3779b97f4a7c15ULL * (static_cast<uint64_t>(index) + 1);
-    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
-    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
-    return z ^ (z >> 31);
 }
 
 /// Splits @p total into whole parts in proportion to @p sizes. The parts sum to @p total exactly

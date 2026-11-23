@@ -725,17 +725,18 @@ struct SdpaOperands
     /// Dropout's Philox seed and offset.
     std::optional<TensorSpec> seed;
     std::optional<TensorSpec> dropoutOffset;
+
+    /// The offset tensors that the graph's tensors name as their ragged offsets, written as
+    /// graph tensors of their own. The offsets live on the tensors, not on the node, so both
+    /// directions carry them.
+    std::vector<TensorSpec> raggedOffsets;
 };
 
-/// The forward's operands: those both directions take, and the two only it has.
+/// The forward's operands: those both directions take, and the one only it has.
 struct SdpaForwardOperands : SdpaOperands
 {
     /// The attention-sink logits.
     std::optional<TensorSpec> sink;
-
-    /// The offset tensors that q, k, v, o or stats name as their ragged offsets, written as
-    /// graph tensors of their own.
-    std::vector<TensorSpec> raggedOffsets;
 };
 
 namespace detail
@@ -878,8 +879,7 @@ inline GraphBytes sdpaForward(const TensorSpec& q,
 /// @brief Scaled dot-product attention, backward. Stats from the forward pass are required,
 ///        not optional: the backward pass reads them rather than recomputing the softmax.
 ///
-/// The backward schema has no sink token, and no ragged form is built for it yet (the offsets
-/// live on the tensors, so the schema could carry one), so @p operands is the shared set.
+/// The backward schema has no sink token, so @p operands is the shared set.
 inline GraphBytes sdpaBackward(const TensorSpec& q,
                                const TensorSpec& k,
                                const TensorSpec& v,
@@ -905,6 +905,10 @@ inline GraphBytes sdpaBackward(const TensorSpec& q,
         detail::addTensor(builder, dk),
         detail::addTensor(builder, dv)};
     detail::addSdpaOperandTensors<fb::SdpaBackwardAttributesBuilder>(builder, tensors, operands);
+    for(const auto& offsets : operands.raggedOffsets)
+    {
+        tensors.push_back(detail::addTensor(builder, offsets));
+    }
 
     fb::SdpaBackwardAttributesBuilder attributes(builder);
     attributes.add_q_tensor_uid(q.uid);
