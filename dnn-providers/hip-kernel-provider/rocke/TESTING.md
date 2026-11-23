@@ -877,7 +877,9 @@ own part of them: the costed keys heaviest first, the others by a hash salted
 apart from the shard's. Each item runs in exactly one worker. The entry's log
 shows each worker's output as it comes, every line prefixed with `[w<index>]`.
 The few GPU tests of such an entry (the platform pytest parts have some) share
-the shard's GPU among the workers. A run with `--collect-only`, `-x`,
+the shard's GPU among the workers. `rocke_library_gpu_pytest` takes workers
+too, its workers sharing the shard's GPU: its tests compile their kernels on
+the CPU before they launch them. A run with `--collect-only`, `-x`,
 `--maxfail`, `--junitxml` or another option that needs one process runs in one
 process. The workers of entries that a parallel `ctest -j` runs at once take
 their CPU blocks from a rotation the entry picks from its process id, so they

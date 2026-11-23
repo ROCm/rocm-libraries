@@ -847,7 +847,7 @@ foreach(_rocke_gpu_test ${_ROCKE_LIBRARY_GPU_TEST_RELPATHS})
          " \"${ROCKE_TEST_CTEST_REL}${_rocke_gpu_test}\"")
 endforeach()
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_library_gpu_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_GPU_TESTS} -v -rs)\n")
+       "add_test(rocke_library_gpu_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS}${_ROCKE_LIBRARY_GPU_TESTS} -v -rs)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_gpu_pytest PROPERTIES\n"
        "  LABELS \"ckc;python;gpu\"\n"

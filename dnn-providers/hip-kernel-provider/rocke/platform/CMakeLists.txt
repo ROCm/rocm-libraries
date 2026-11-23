@@ -170,7 +170,9 @@ set(_ROCKE_INSTALLED_PYTEST
 # ${_ROCKE_INSTALLED_PYTEST}: CTest runs a shard's entries one at a time, and
 # the rocke.tests.ctest_workers plugin runs the entry's share in worker
 # processes, each on its own block of the CPUs; the few GPU tests of such an
-# entry share the shard's GPU among the workers.
+# entry share the shard's GPU among the workers. rocke_library_gpu_pytest takes
+# it too, its workers sharing the shard's GPU: its tests compile their kernels
+# on the CPU before they launch them.
 set(_ROCKE_INSTALLED_PYTEST_WORKERS "-p rocke.tests.ctest_workers --rocke-workers 4")
 
 # Return the installed-CTestTestfile text that registers rocke_pytest_<part>,
