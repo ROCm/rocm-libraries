@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -306,6 +306,12 @@ hipsparseStatus_t hipsparseCsr2cscEx2_bufferSize(hipsparseHandle_t     handle,
                                                  hipsparseCsr2CscAlg_t alg,
                                                  size_t*               pBufferSizeInBytes)
 {
+    // Reject a valType that is not a hipDataType (INVALID_VALUE) or that hipSPARSE
+    // does not support (NOT_SUPPORTED). The switch below then handles the types
+    // this routine implements.
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(valType, &backend_data_type));
+
     switch(valType)
     {
     case HIP_R_32F:
@@ -410,6 +416,12 @@ hipsparseStatus_t hipsparseCsr2cscEx2(hipsparseHandle_t     handle,
                                       hipsparseCsr2CscAlg_t alg,
                                       void*                 buffer)
 {
+    // Reject a valType that is not a hipDataType (INVALID_VALUE) or that hipSPARSE
+    // does not support (NOT_SUPPORTED). The switch below then handles the types
+    // this routine implements.
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(valType, &backend_data_type));
+
     switch(valType)
     {
     case HIP_R_32F:

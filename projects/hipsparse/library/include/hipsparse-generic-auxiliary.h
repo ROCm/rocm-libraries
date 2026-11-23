@@ -38,6 +38,13 @@ extern "C" {
 *  \details
 *  \p hipsparseCreateSpVec creates a sparse vector descriptor. It should be
 *  destroyed at the end using hipsparseDestroySpVec().
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spVecDescr is nullptr,
+*          a size is negative, or an array is nullptr when it must hold at least one element) or
+*          \p valueType is not a \p hipDataType.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
+*          support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateSpVec(hipsparseSpVecDescr_t* spVecDescr,
@@ -57,6 +64,13 @@ hipsparseStatus_t hipsparseCreateSpVec(hipsparseSpVecDescr_t* spVecDescr,
 *  \details
 *  \p hipsparseCreateConstSpVec creates a const sparse vector descriptor. It should be
 *  destroyed at the end using hipsparseDestroySpVec().
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spVecDescr is nullptr,
+*          a size is negative, or an array is nullptr when it must hold at least one element) or
+*          \p valueType is not a \p hipDataType.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
+*          support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateConstSpVec(hipsparseConstSpVecDescr_t* spVecDescr,
@@ -169,6 +183,13 @@ hipsparseStatus_t hipsparseSpVecSetValues(hipsparseSpVecDescr_t spVecDescr, void
 *  \details
 *  \p hipsparseCreateCoo creates a sparse COO matrix descriptor. It should be
 *  destroyed at the end using \p hipsparseDestroySpMat.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
+*          a size is negative, or an array is nullptr when it must hold at least one element) or
+*          \p valueType is not a \p hipDataType.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
+*          support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateCoo(hipsparseSpMatDescr_t* spMatDescr,
@@ -189,6 +210,13 @@ hipsparseStatus_t hipsparseCreateCoo(hipsparseSpMatDescr_t* spMatDescr,
 *  \details
 *  \p hipsparseCreateConstCoo creates a sparse COO matrix descriptor. It should be
 *  destroyed at the end using \p hipsparseDestroySpMat.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
+*          a size is negative, or an array is nullptr when it must hold at least one element) or
+*          \p valueType is not a \p hipDataType.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
+*          support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateConstCoo(hipsparseConstSpMatDescr_t* spMatDescr,
@@ -209,6 +237,13 @@ hipsparseStatus_t hipsparseCreateConstCoo(hipsparseConstSpMatDescr_t* spMatDescr
 *  \details
 *  \p hipsparseCreateCooAoS creates a sparse COO (AoS) matrix descriptor. It should be
 *  destroyed at the end using \p hipsparseDestroySpMat.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
+*          a size is negative, or an array is nullptr when it must hold at least one element) or
+*          \p valueType is not a \p hipDataType.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
+*          support.
 */
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")
 HIPSPARSE_EXPORT
@@ -229,6 +264,13 @@ hipsparseStatus_t hipsparseCreateCooAoS(hipsparseSpMatDescr_t* spMatDescr,
 *  \details
 *  \p hipsparseCreateCsr creates a sparse CSR matrix descriptor. It should be
 *  destroyed at the end using \p hipsparseDestroySpMat.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
+*          a size is negative, or an array is nullptr when it must hold at least one element) or
+*          \p valueType is not a \p hipDataType.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
+*          support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateCsr(hipsparseSpMatDescr_t* spMatDescr,
@@ -250,6 +292,13 @@ hipsparseStatus_t hipsparseCreateCsr(hipsparseSpMatDescr_t* spMatDescr,
 *  \details
 *  \p hipsparseCreateConstCsr creates a sparse CSR matrix descriptor. It should be
 *  destroyed at the end using \p hipsparseDestroySpMat.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
+*          a size is negative, or an array is nullptr when it must hold at least one element) or
+*          \p valueType is not a \p hipDataType.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
+*          support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateConstCsr(hipsparseConstSpMatDescr_t* spMatDescr,
@@ -271,6 +320,13 @@ hipsparseStatus_t hipsparseCreateConstCsr(hipsparseConstSpMatDescr_t* spMatDescr
 *  \details
 *  \p hipsparseCreateCsc creates a sparse CSC matrix descriptor. It should be
 *  destroyed at the end using \p hipsparseDestroySpMat.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
+*          a size is negative, or an array is nullptr when it must hold at least one element) or
+*          \p valueType is not a \p hipDataType.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
+*          support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateCsc(hipsparseSpMatDescr_t* spMatDescr,
@@ -292,6 +348,13 @@ hipsparseStatus_t hipsparseCreateCsc(hipsparseSpMatDescr_t* spMatDescr,
 *  \details
 *  \p hipsparseCreateConstCsc creates a sparse CSC matrix descriptor. It should be
 *  destroyed at the end using \p hipsparseDestroySpMat.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
+*          a size is negative, or an array is nullptr when it must hold at least one element) or
+*          \p valueType is not a \p hipDataType.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
+*          support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateConstCsc(hipsparseConstSpMatDescr_t* spMatDescr,
@@ -313,6 +376,13 @@ hipsparseStatus_t hipsparseCreateConstCsc(hipsparseConstSpMatDescr_t* spMatDescr
 *  \details
 *  \p hipsparseCreateBlockedEll creates a sparse Blocked ELL matrix descriptor. It should be
 *  destroyed at the end using \p hipsparseDestroySpMat.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
+*          a size is negative, or an array is nullptr when it must hold at least one element) or
+*          \p valueType is not a \p hipDataType.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
+*          support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateBlockedEll(hipsparseSpMatDescr_t* spMatDescr,
@@ -333,6 +403,13 @@ hipsparseStatus_t hipsparseCreateBlockedEll(hipsparseSpMatDescr_t* spMatDescr,
 *  \details
 *  \p hipsparseCreateConstBlockedEll creates a sparse Blocked ELL matrix descriptor. It should be
 *  destroyed at the end using \p hipsparseDestroySpMat.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
+*          a size is negative, or an array is nullptr when it must hold at least one element) or
+*          \p valueType is not a \p hipDataType.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
+*          support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateConstBlockedEll(hipsparseConstSpMatDescr_t* spMatDescr,
@@ -353,6 +430,13 @@ hipsparseStatus_t hipsparseCreateConstBlockedEll(hipsparseConstSpMatDescr_t* spM
 *  \details
 *  \p hipsparseCreateSlicedEll creates a sparse Sliced ELL matrix descriptor. It should be
 *  destroyed at the end using \p hipsparseDestroySpMat.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
+*          a size is negative, or an array is nullptr when it must hold at least one element) or
+*          \p valueType is not a \p hipDataType.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
+*          support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateSlicedEll(hipsparseSpMatDescr_t* spMatDescr,
@@ -376,6 +460,13 @@ hipsparseStatus_t hipsparseCreateSlicedEll(hipsparseSpMatDescr_t* spMatDescr,
 *  \details
 *  \p hipsparseCreateConstSlicedEll creates a sparse Sliced ELL matrix descriptor. It should be
 *  destroyed at the end using \p hipsparseDestroySpMat.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
+*          a size is negative, or an array is nullptr when it must hold at least one element) or
+*          \p valueType is not a \p hipDataType.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
+*          support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMatDescr,
@@ -399,6 +490,13 @@ hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMa
 *  \details
 *  \p hipsparseCreateBsr creates a sparse BSR matrix descriptor. It should be
 *  destroyed at the end using \p hipsparseDestroySpMat.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
+*          a size is negative, or an array is nullptr when it must hold at least one element) or
+*          \p valueType is not a \p hipDataType.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
+*          support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateBsr(hipsparseSpMatDescr_t* spMatDescr,
@@ -423,6 +521,13 @@ hipsparseStatus_t hipsparseCreateBsr(hipsparseSpMatDescr_t* spMatDescr,
 *  \details
 *  \p hipsparseCreateConstBsr creates a sparse BSR matrix descriptor. It should be
 *  destroyed at the end using \p hipsparseDestroySpMat.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p spMatDescr is nullptr,
+*          a size is negative, or an array is nullptr when it must hold at least one element) or
+*          \p valueType is not a \p hipDataType.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
+*          support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateConstBsr(hipsparseConstSpMatDescr_t* spMatDescr,
@@ -830,8 +935,11 @@ hipsparseStatus_t hipsparseSpMatSetAttribute(hipsparseSpMatDescr_t     spMatDesc
 *  destroyed at the end using hipsparseDestroyDnVec().
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
-*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not support.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p valueType is not a \p hipDataType.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p dnVecDescr is nullptr,
+*          a size is negative, or an array is nullptr when it must hold at least one element) or
+*          \p valueType is not a \p hipDataType.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
+*          support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateDnVec(hipsparseDnVecDescr_t* dnVecDescr,
@@ -848,8 +956,11 @@ hipsparseStatus_t hipsparseCreateDnVec(hipsparseDnVecDescr_t* dnVecDescr,
 *  destroyed at the end using hipsparseDestroyDnVec().
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
-*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not support.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p valueType is not a \p hipDataType.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p dnVecDescr is nullptr,
+*          a size is negative, or an array is nullptr when it must hold at least one element) or
+*          \p valueType is not a \p hipDataType.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
+*          support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateConstDnVec(hipsparseConstDnVecDescr_t* dnVecDescr,
@@ -942,6 +1053,13 @@ hipsparseStatus_t hipsparseDnVecSetValues(hipsparseDnVecDescr_t dnVecDescr, void
 *  \details
 *  \p hipsparseCreateDnMat creates a dense matrix descriptor. It should be
 *  destroyed at the end using hipsparseDestroyDnMat().
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p dnMatDescr is nullptr,
+*          a size is negative, or an array is nullptr when it must hold at least one element) or
+*          \p valueType is not a \p hipDataType.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
+*          support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateDnMat(hipsparseDnMatDescr_t* dnMatDescr,
@@ -959,6 +1077,13 @@ hipsparseStatus_t hipsparseCreateDnMat(hipsparseDnMatDescr_t* dnMatDescr,
 *  \details
 *  \p hipsparseCreateConstDnMat creates a dense matrix descriptor. It should be
 *  destroyed at the end using hipsparseDestroyDnMat().
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE an argument is invalid (for example \p dnMatDescr is nullptr,
+*          a size is negative, or an array is nullptr when it must hold at least one element) or
+*          \p valueType is not a \p hipDataType.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not
+*          support.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateConstDnMat(hipsparseConstDnMatDescr_t* dnMatDescr,

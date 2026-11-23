@@ -512,12 +512,6 @@ namespace hipsparse
         case HIP_R_8F_E4M3:
         case HIP_R_8F_E5M2:
 #endif
-#if CUDART_VERSION >= 12080
-        case HIP_R_8F_UE8M0:
-        case HIP_R_6F_E2M3:
-        case HIP_R_6F_E3M2:
-        case HIP_R_4F_E2M1:
-#endif
             return HIPSPARSE_STATUS_NOT_SUPPORTED;
         default:
             return HIPSPARSE_STATUS_INVALID_VALUE;

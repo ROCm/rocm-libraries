@@ -196,4 +196,83 @@ TEST_P(status_handling, spmat_rejects_unsupported_datatype)
 #endif
 }
 
+TEST_P(status_handling, csr2csc_ex2_rejects_unsupported_datatype)
+{
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
+    // The valType check runs before the handle and the arrays are used, so this
+    // test passes none of them.
+    const hipDataType not_a_type  = static_cast<hipDataType>(-1);
+    size_t            buffer_size = 0;
+
+    for(hipDataType val_type : {HIP_R_8U, HIP_C_16F})
+    {
+        EXPECT_EQ(hipsparseCsr2cscEx2_bufferSize(nullptr,
+                                                 1,
+                                                 1,
+                                                 0,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 val_type,
+                                                 HIPSPARSE_ACTION_NUMERIC,
+                                                 HIPSPARSE_INDEX_BASE_ZERO,
+                                                 HIPSPARSE_CSR2CSC_ALG_DEFAULT,
+                                                 &buffer_size),
+                  HIPSPARSE_STATUS_NOT_SUPPORTED);
+        EXPECT_EQ(hipsparseCsr2cscEx2(nullptr,
+                                      1,
+                                      1,
+                                      0,
+                                      nullptr,
+                                      nullptr,
+                                      nullptr,
+                                      nullptr,
+                                      nullptr,
+                                      nullptr,
+                                      val_type,
+                                      HIPSPARSE_ACTION_NUMERIC,
+                                      HIPSPARSE_INDEX_BASE_ZERO,
+                                      HIPSPARSE_CSR2CSC_ALG_DEFAULT,
+                                      nullptr),
+                  HIPSPARSE_STATUS_NOT_SUPPORTED);
+    }
+
+    EXPECT_EQ(hipsparseCsr2cscEx2_bufferSize(nullptr,
+                                             1,
+                                             1,
+                                             0,
+                                             nullptr,
+                                             nullptr,
+                                             nullptr,
+                                             nullptr,
+                                             nullptr,
+                                             nullptr,
+                                             not_a_type,
+                                             HIPSPARSE_ACTION_NUMERIC,
+                                             HIPSPARSE_INDEX_BASE_ZERO,
+                                             HIPSPARSE_CSR2CSC_ALG_DEFAULT,
+                                             &buffer_size),
+              HIPSPARSE_STATUS_INVALID_VALUE);
+    EXPECT_EQ(hipsparseCsr2cscEx2(nullptr,
+                                  1,
+                                  1,
+                                  0,
+                                  nullptr,
+                                  nullptr,
+                                  nullptr,
+                                  nullptr,
+                                  nullptr,
+                                  nullptr,
+                                  not_a_type,
+                                  HIPSPARSE_ACTION_NUMERIC,
+                                  HIPSPARSE_INDEX_BASE_ZERO,
+                                  HIPSPARSE_CSR2CSC_ALG_DEFAULT,
+                                  nullptr),
+              HIPSPARSE_STATUS_INVALID_VALUE);
+#endif
+}
+
 INSTANTIATE_TEST_SUITE_P(pre_checkin, status_handling, testing::Values(0));
