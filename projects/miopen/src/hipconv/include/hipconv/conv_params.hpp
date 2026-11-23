@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstddef>
+#include <limits>
 #include <optional>
 #include <string_view>
 
@@ -152,26 +153,48 @@ struct ConvParams
         }
     }
 
-    // Overwrite (p, q, e) with the output size implied by the input size, filter,
-    // padding, stride, and dilation.
+    // The output size (p, q, e) the input size, filter, padding, stride and dilation imply.
+    //
+    // 64-bit, since w + 2 * pad_w can overflow an int when the output size along w does not.
+    // Divides by the strides, so call it only on a layer is_valid() accepts.
+    std::array<long long, 3> expected_output_size() const
+    {
+        ConvParams par = *this;
+        par.normalize_unused_axes();
+        auto extent =
+            [](long long x, long long kx, long long pad, long long stride, long long dil) {
+            return (x + 2 * pad - dil * (kx - 1) - 1) / stride + 1;
+        };
+        return {extent(par.h, par.kh, par.pad_h, par.stride_h, par.dilation_h),
+                extent(par.w, par.kw, par.pad_w, par.stride_w, par.dilation_w),
+                extent(par.d, par.kd, par.pad_d, par.stride_d, par.dilation_d)};
+    }
+
+    // Overwrite (p, q, e) with expected_output_size(); the cast to int wraps an extent past
+    // INT_MAX, and output_size_matches() then rejects the layer.
     void compute_output_size()
     {
+        const auto [ep, eq, ee] = expected_output_size();
         normalize_unused_axes();
-        p = (h + 2 * pad_h - dilation_h * (kh - 1) - 1) / stride_h + 1;
-        q = (w + 2 * pad_w - dilation_w * (kw - 1) - 1) / stride_w + 1;
-        e = (d + 2 * pad_d - dilation_d * (kd - 1) - 1) / stride_d + 1;
+        p = static_cast<int>(ep);
+        q = static_cast<int>(eq);
+        e = static_cast<int>(ee);
     }
 
     // Same as compute_output_size with additionally returning true if p, q, and e
     // were each originally either
     // 1) unset (== -1)
-    // 2) or match the computed value
+    // 2) or match the computed value,
+    // and no computed value exceeds INT_MAX.
     auto compute_output_size_checked() -> bool
     {
+        bool fits = true;
+        for(const long long x : expected_output_size())
+            fits = fits && x <= std::numeric_limits<int>::max();
         const int p_original = p, q_original = q, e_original = e;
         compute_output_size();
-        return (p_original == -1 || p == p_original) && (q_original == -1 || q == q_original) &&
-               (e_original == -1 || e == e_original);
+        return fits && (p_original == -1 || p == p_original) &&
+               (q_original == -1 || q == q_original) && (e_original == -1 || e == e_original);
     }
 
     bool is_valid() const
@@ -219,6 +242,16 @@ struct ConvParams
         return !output_is_empty();
     }
 
+    // True when the layer passes is_valid() and p, q and e equal expected_output_size();
+    // false while any is unset.
+    bool output_size_matches() const
+    {
+        if(!is_valid())
+            return false;
+        const auto [ep, eq, ee] = expected_output_size();
+        return p == ep && q == eq && e == ee;
+    }
+
     // True when, on some used axis, the dilated filter is wider than the padded input.
     //
     // Computed without division, so it is defined for any stride. compute_output_size
@@ -235,6 +268,9 @@ struct ConvParams
     }
 
     // The conv2d layer this one is equivalent to, or a copy when there is none.
+    //
+    // Also a copy when the layer fails is_valid, sets a p, q or e that differs from the computed
+    // size, or has a computed size past INT_MAX; otherwise p, q and e are computed.
     //
     // A conv1d, a conv3d whose depth is not convolved, and a spatially pointwise
     // conv3d each reduce to a conv2d by reshaping alone. Total rather than

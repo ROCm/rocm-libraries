@@ -83,15 +83,12 @@ namespace
     }
 }
 
-// utils/def.hpp enables assert with NDEBUG, but the HIP sources include ROCm
-// headers afterwards that disable it again, so release builds have no asserts there
-#ifdef NDEBUG
-#define REQUIRE_HIP_ASSERTS()                                                            \
-    KNOWN_BUG("the HIP sources include ROCm headers after utils/def.hpp, which disable " \
-              "assert again with NDEBUG")
-#else
-#define REQUIRE_HIP_ASSERTS()
-#endif
+#define REQUIRE_HIP_ASSERTS()                                                                \
+    if(!rocalution_unit::hip_has_asserts)                                                    \
+    {                                                                                        \
+        KNOWN_BUG("the HIP sources include ROCm headers after utils/def.hpp, which disable " \
+                  "assert again with NDEBUG");                                               \
+    }
 
 class backend_hip : public testing::Test
 {

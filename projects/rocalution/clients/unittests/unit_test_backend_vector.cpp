@@ -1274,8 +1274,10 @@ TYPED_TEST(host_vector_amax, ties_resolve_to_the_smallest_index_on_several_threa
         v.Allocate(n);
         v.CopyFromData(c.a.data());
 
-        // The order of the merge changes from call to call
-        for(int call = 0; call < 20; ++call)
+        // The order of the merge is not controlled, and the first thread to start usually
+        // merges first. A merge in which the first thread wins a tie fails only on the
+        // calls where the second thread merges first, so the test repeats the call.
+        for(int call = 0; call < 200; ++call)
         {
             T             value = T(0);
             const int64_t index = v.Amax(value);

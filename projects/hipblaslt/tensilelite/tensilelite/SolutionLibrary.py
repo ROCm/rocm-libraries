@@ -30,6 +30,7 @@ from . import Contractions
 from .Common import state, IsaInfo
 from .Common.Architectures import gfxToIsa, supportsChipIdPredicate
 from .SolutionStructs.Naming import getSolutionNameMin, getKernelNameMin
+from .SolutionStructs.CompactSolution import hydrateSolution
 from .SolutionStructs.Problem import isFusedA2A, splitFusedA2ARow
 
 class SingleSolutionLibrary:
@@ -101,7 +102,7 @@ class MatchingLibrary:
             3: Properties.Property("FreeSizeB", index=0),
             1: Properties.Property("BoundSize", index=0)
         }
-        if distance == "Equality" or distance == "GridBased":
+        if distance in ("Equality", "GridBased", "MeshBased"):
             propertyKeys[0] = Properties.Property("BatchSize", index=0)
 
         if distance == "Range":
@@ -140,7 +141,7 @@ class MatchingLibrary:
                 key = list([row[0][i] for i in keyOrder])
                 if fusedA2A:
                     key += splitFusedA2ARow(row[0], problemType)[2]
-                if distance == "GridBased":
+                if distance in ("GridBased", "MeshBased"):
                     entry = {"key": key, "index": value}
                 else:
                     entry = {"key": key, "index": value, "speed": row[1][1]}
@@ -484,6 +485,8 @@ class MasterSolutionLibrary:
                     predicate = Properties.Predicate(tag="EqualityMatching")
                 elif d["Library"]["distance"] == "Range":
                     predicate = Properties.Predicate(tag="RangeMatching")
+                elif d["Library"]["distance"] == "MeshBased":
+                    predicate = Properties.Predicate(tag="MeshBasedMatching")
                 else:
                     predicate = Properties.Predicate(tag="GridBasedMatching") # to make different from TruePred
 
@@ -690,8 +693,11 @@ class MasterSolutionLibrary:
 
     def applyNaming(self, splitGSU: bool):
         for s in list(self.solutions.values()):
-            s.name = getSolutionNameMin(s.originalSolution.getKernels()[0], splitGSU)
-            s.kernelName = getKernelNameMin(s.originalSolution.getKernels()[0], splitGSU)
+            # Hydrated once per solution: naming reads hundreds of state keys,
+            # which on a CompactSolution would otherwise each be a fallback.
+            kernel = hydrateSolution(s.originalSolution).getKernels()[0]
+            s.name = getSolutionNameMin(kernel, splitGSU)
+            s.kernelName = getKernelNameMin(kernel, splitGSU)
 
     def remapSolutionIndicesStartingFrom(self, curIndex):
         reIndexMap = {}
