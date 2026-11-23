@@ -12745,6 +12745,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       _reg("uint32", "SKSplit")
       _reg("uint32", "SKItersPerWI")
       _reg("uint32", "SKGrid")
+    elif hasHybridAssignment(kernel):
+      _reg("uint32", "ItersPerTile")
+      _reg("uint32", "HybridMagicNumberItersPerTileOrTotalItems")
+      _reg("uint32", "HybridMagicShiftItersPerTileOrSKTiles")
+      _reg("uint32", "HybridSKItersPerWGOrSKSplit")
+      _reg("uint32", "HybridSKGridOrSKItersPerWI")
+      _reg("uint32", "HybridSKTilesAndSplitOrSKGrid")
     elif isStreamK(kernel):
       _reg("uint32", "ItersPerTile")
       _reg("uint32", "MagicNumberItersPerTile")

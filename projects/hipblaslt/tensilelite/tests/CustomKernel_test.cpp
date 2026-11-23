@@ -817,6 +817,7 @@ namespace
     {
         Static,
         Dynamic,
+        Hybrid,
     };
 
     char const* toString(StreamKMode mode)
@@ -827,6 +828,8 @@ namespace
             return "Static";
         case StreamKMode::Dynamic:
             return "Dynamic";
+        case StreamKMode::Hybrid:
+            return "Hybrid";
         }
         return "?";
     }
@@ -839,6 +842,8 @@ namespace
             return StreamK::WorkAssignment::StaticGrid;
         case StreamKMode::Dynamic:
             return StreamK::WorkAssignment::DynamicWorkQueue;
+        case StreamKMode::Hybrid:
+            return StreamK::WorkAssignment::Hybrid;
         }
         return StreamK::WorkAssignment::StaticGrid;
     }
@@ -863,6 +868,13 @@ namespace
                     S::SKSplit,
                     S::SKItersPerWI,
                     S::SKGrid};
+        case StreamKMode::Hybrid:
+            return {S::ItersPerTile,
+                    S::HybridMagicNumberItersPerTileOrTotalItems,
+                    S::HybridMagicShiftItersPerTileOrSKTiles,
+                    S::HybridSKItersPerWGOrSKSplit,
+                    S::HybridSKGridOrSKItersPerWI,
+                    S::HybridSKTilesAndSplitOrSKGrid};
         }
         return {};
     }
@@ -941,7 +953,7 @@ namespace
 
 TEST(CustomKernelTest, StreamKFamilyMatchingDescriptorsAreAccepted)
 {
-    for(auto mode : {StreamKMode::Static, StreamKMode::Dynamic})
+    for(auto mode : {StreamKMode::Static, StreamKMode::Dynamic, StreamKMode::Hybrid})
     {
         SCOPED_TRACE(toString(mode));
         ContractionSolution solution;
@@ -965,10 +977,13 @@ TEST(CustomKernelTest, StreamKFamilyRejectsDescriptorsThatMixFamilies)
     const std::vector<std::vector<CustomArgSemantic>> mixed{
         {S::SKItersPerWG, S::SKTiles},
         {S::MagicNumberItersPerTile, S::SKSplit},
+        {S::TotalItems, S::HybridSKGridOrSKItersPerWI},
+        {S::SKTilesAndSplit, S::HybridMagicShiftItersPerTileOrSKTiles},
         {S::SKTiles, S::SKItersPerWG},
         // TotalIters is a static word.
         {S::TotalIters, S::SKTiles},
         {S::TotalItems, S::TotalIters},
+        {S::TotalIters, S::HybridSKGridOrSKItersPerWI},
     };
     for(auto assignment :
         {StreamK::WorkAssignment::StaticGrid, StreamK::WorkAssignment::DynamicWorkQueue, StreamK::WorkAssignment::Hybrid})
