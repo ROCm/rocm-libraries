@@ -7370,6 +7370,14 @@ class Solution(collections.abc.Mapping):
         # Non-persistent auto mode disables interleave when pairing fails. Persistent
         # kernels keep the unpaired interleave offsets, swaps and byte count above.
         state["LDSSegmentInterleave"] = 0
+    # Contiguous A skips the aligned unpaired buffer-stride reservation above.
+    # Reject both a failed pairing attempt and persistent paths that skip it.
+    if state.get("WaveTileContiguousA") and state["LDSSegmentInterleave"] == 1 \
+        and not state["LDSSegInterleaveOffsets"].get("pairedBuffers"):
+      reject(state, printRejectionReason,
+             "WaveTileContiguousA with LDSSegmentInterleave requires paired LDS buffers; "
+             "unpaired fallback is not supported")
+      return
     if state["LDSSegmentInterleave"] == 0 and not state["TDMSplit"]:
       state["LDSSegInterleaveOffsets"] = {}
 

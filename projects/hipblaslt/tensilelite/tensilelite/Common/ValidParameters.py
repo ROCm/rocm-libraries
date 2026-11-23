@@ -451,6 +451,8 @@ validParameters = { # we need to make sure this matches develop
     # VectorWidthA and inherited VectorWidthMXSA retain their values.
     # WTA == VWA (MIWaveTile[0] == VectorWidthA) keeps the original path.
     # B keeps its VectorWidthB layout and iterate setting.
+    # When active with LDSSegmentInterleave, requires paired LDS buffers;
+    # persistent unpaired fallback (including PrefetchAcrossPersistent) is rejected.
     "WaveTileContiguousA": [False, True],
     # Persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
