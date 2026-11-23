@@ -492,13 +492,6 @@ class TestShippedLayoutOccupancy(_OccupancyGuard, unittest.TestCase):
             )
         ).spec
 
-    @unittest.skip(
-        "the amd-llvm in the current TheRock pin spills 12 bytes on this "
-        "layout; re-enable once the kernel compiles without scratch again"
-    )
-    def test_no_scratch(self):
-        super().test_no_scratch()
-
 
 class TestDefaultLayoutOccupancy(_OccupancyGuard, unittest.TestCase):
     """The single-head default, which dispatch falls back to."""
