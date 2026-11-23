@@ -360,12 +360,11 @@ namespace TensileLite
             inline void calculateKforSwizzling(rocisa::DataType datatype,
                                                size_t&          MiK,
                                                size_t&          MiKv,
-                                               size_t&          PackK,
-                                               bool             isGfx1250 = false)
+                                               size_t&          PackK)
             {
-                // gfx1250 WMMA_V3 swizzle (TDM path) uses a 32-byte K block: one 16-byte ds_load_b128
-                // per lane-half x 2 lane-halves. In elements that is BK = 32/bpe (F8/I8: 32, F16/BF16: 16),
-                // i.e. MiK = BK/PackK with PackK = 2 below. gfx942 MFMA keeps the wider blocks.
+                // The same K block on every architecture. gfx1250's kernel reads 32-byte K blocks and
+                // gfx942's 64-byte ones, but flattening (kO, kM) gives the 16-byte K block index in both,
+                // so the staged bytes only depend on the padded K (see swizzledPaddedKUnit).
                 switch(datatype)
                 {
                 case rocisa::DataType::Float:
@@ -382,11 +381,11 @@ namespace TensileLite
                     break;
                 case rocisa::DataType::Half:
                 case rocisa::DataType::BFloat16:
-                    MiK  = isGfx1250 ? 8 : 16;
+                    MiK  = 16;
                     MiKv = 4;
                     break;
                 case rocisa::DataType::Int8:
-                    MiK  = isGfx1250 ? 16 : 32;
+                    MiK  = 32;
                     MiKv = 8;
                     break;
                 case rocisa::DataType::Float8_fnuz:
@@ -399,9 +398,8 @@ namespace TensileLite
                 case rocisa::DataType::BFloat8Float8:
                 case rocisa::DataType::E8:
                 case rocisa::DataType::E5M3:
-                    // gfx1250 F8 WMMA_V3 (16x16x128) swizzle uses BK=32 (MiK=16); gfx942 MFMA uses BK=64
-                    // (MiK=32). PackK = 16/MiKv/1 = 2 for both, so gfx1250 gives BK=MiK*PackK=32.
-                    MiK  = isGfx1250 ? 16 : 32;
+                    // BK = MiK * PackK = 64 elements (64 B); PackK = 16/MiKv/1 = 2.
+                    MiK  = 32;
                     MiKv = 8;
                     break;
                 case rocisa::DataType::Float4:
@@ -415,13 +413,14 @@ namespace TensileLite
                 PackK = 16 / MiKv / rocisa::GetElementSize(datatype);
             }
 
-            // K elements a swizzled tensor's rows are padded to. gfx942 pads to its swizzle K block;
-            // gfx1250 swizzles in smaller K blocks (32 B) but pads to 64 B as well. Flattening the K block
-            // indices gives the same bytes for either block size, so with the same padding the layout is
-            // identical on both architectures and one hipblasLtOrder_t (COL16_4R*, K in 64 B) covers both.
-            inline size_t swizzledPaddedKUnit(size_t swizzleK, float elementBytes, bool isGfx1250)
+            // K elements a swizzled tensor's rows are padded to: its swizzle K block, or 64 bytes when
+            // padTo64Bytes is set (gfx1250; hipblasLtOrder_t COL16_4R* pads K to 64 B). For the 1- and
+            // 2-byte types the swizzle K block is already 64 B, so the flag only matters for F4, whose
+            // gfx942/gfx950 kernels pad to 32 B (their swizzleGeometry layoutK is 64 elements) and must
+            // keep doing so.
+            inline size_t swizzledPaddedKUnit(size_t swizzleK, float elementBytes, bool padTo64Bytes)
             {
-                if(!isGfx1250)
+                if(!padTo64Bytes)
                     return swizzleK;
                 const size_t padK = static_cast<size_t>(64.0f / elementBytes);
                 return std::max(swizzleK, padK);
@@ -431,14 +430,14 @@ namespace TensileLite
                                                                 size_t                  miM_N,
                                                                 size_t                  miK,
                                                                 size_t                  packK,
-                                                                bool                    isGfx1250)
+                                                                bool                    padTo64Bytes)
             {
                 // TODO: currently [0][1] = k, (m or n) is based on TN, need to make this generic in the future
                 const auto k         = desc.sizes()[0];
                 const auto m_n       = desc.sizes()[1];
                 const auto b         = desc.sizes()[2];
                 const auto swizzleK
-                    = swizzledPaddedKUnit(miK * packK, desc.elementBytes(), isGfx1250);
+                    = swizzledPaddedKUnit(miK * packK, desc.elementBytes(), padTo64Bytes);
                 const auto paddedM_N = DGen::roundUp(m_n, miM_N);
                 const auto paddedK   = DGen::roundUp(k, swizzleK);
                 const auto perBatch  = paddedM_N * paddedK;
@@ -477,11 +476,11 @@ namespace TensileLite
             };
 
             inline SwizzleStageGeometry swizzleStageGeometry(const TensorDescriptor& desc,
-                                                             bool                    isGfx1250)
+                                                             bool                    padTo64Bytes)
             {
                 SwizzleStageGeometry g;
                 size_t               MiK = 0, MiKv = 0, PackK = 0;
-                calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK, isGfx1250);
+                calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK);
                 g.unrolledSize = desc.sizes()[0];
                 g.tiledSize    = desc.sizes()[1];
 
@@ -501,7 +500,7 @@ namespace TensileLite
                 // K is padded to a whole number of swizzle K blocks (see swizzledPaddedKUnit);
                 // the effective element is one byte for sub-byte types.
                 g.padUnitK
-                    = swizzledPaddedKUnit(g.effMiK * g.effPackK, g.effectiveElem, isGfx1250);
+                    = swizzledPaddedKUnit(g.effMiK * g.effPackK, g.effectiveElem, padTo64Bytes);
                 g.paddedShape = {DGen::roundUp(g.tiledSize, g.miM_N),
                                  DGen::roundUp(g.effUnrolled, g.padUnitK)};
                 // Batched: each batch is swizzled on its own and placed at the problem's
@@ -522,7 +521,7 @@ namespace TensileLite
                        << g.batchStride << " is smaller than one padded swizzled batch ("
                        << g.perBatchNative << " elements = alignUp(" << g.tiledSize << ", "
                        << g.miM_N << ") x alignUp(" << g.unrolledSize << ", "
-                       << swizzledPaddedKUnit(MiK * PackK, desc.elementBytes(), isGfx1250) << "))";
+                       << swizzledPaddedKUnit(MiK * PackK, desc.elementBytes(), padTo64Bytes) << "))";
                     throw std::runtime_error(ss.str());
                 }
                 if(g.isSubByte && g.srcLd != g.unrolledSize)

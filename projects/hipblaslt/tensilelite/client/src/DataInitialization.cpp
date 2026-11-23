@@ -958,7 +958,7 @@ namespace TensileLite
                 HIP_CHECK_EXC(hipGetDevice(&m_deviceId));
                 HIP_CHECK_EXC(hipGetDeviceProperties(&prop, m_deviceId));
                 m_mxScaleLayout = mxScaleLayoutForArchName(prop.gcnArchName);
-                m_isGfx1250     = std::string(prop.gcnArchName).find("gfx1250") != std::string::npos;
+                m_padSwizzledKTo64B = std::string(prop.gcnArchName).find("gfx1250") != std::string::npos;
             }
 
             m_rotatingBuffer
@@ -1034,9 +1034,9 @@ namespace TensileLite
                             //TODO: support more swizzle types,
                             //      currently, if A then it means MiM = 16, if B then it means MiN = 16
                             size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
-                            detail::calculateKforSwizzling(dataType, MiK, MiKv, PackK, m_isGfx1250);
+                            detail::calculateKforSwizzling(dataType, MiK, MiKv, PackK);
                             numAllocatedElements = detail::getSwizzledTensorNumAllocatedElements(
-                                problem.tensors()[i], MiM_N, MiK, PackK, m_isGfx1250);
+                                problem.tensors()[i], MiM_N, MiK, PackK, m_padSwizzledKTo64B);
                             numAllocatedBytes = multiplyElementSize(
                                 numAllocatedElements, rocisa::GetElementSize(dataType));
                         }
@@ -1663,10 +1663,10 @@ namespace TensileLite
                         //TODO: support more swizzle types,
                         //      currently, if A then it means MiM = 16, if B then it means MiN = 16
                         size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
-                        detail::calculateKforSwizzling(problem.tensors()[i].dataType(), MiK, MiKv, PackK, m_isGfx1250);
+                        detail::calculateKforSwizzling(problem.tensors()[i].dataType(), MiK, MiKv, PackK);
                         padding = pUnit.maxElements
                                   - detail::getSwizzledTensorNumAllocatedElements(
-                                      problem.tensors()[i], MiM_N, MiK, PackK, m_isGfx1250);
+                                      problem.tensors()[i], MiM_N, MiK, PackK, m_padSwizzledKTo64B);
                     }
                 }
                 padding = multiplyElementSize(
@@ -2841,10 +2841,10 @@ namespace TensileLite
                             //TODO: support more swizzle types,
                             //      currently, if A then it means MiM = 16, if B then it means MiN = 16
                             size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
-                            detail::calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK, m_isGfx1250);
+                            detail::calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK);
                             swizzlePadding
                                 = detail::getSwizzledTensorNumAllocatedElements(
-                                      desc, MiM_N, MiK, PackK, m_isGfx1250)
+                                      desc, MiM_N, MiK, PackK, m_padSwizzledKTo64B)
                                   - desc.totalAllocatedElements();
                         }
 
@@ -3101,7 +3101,7 @@ namespace TensileLite
                 if(needSwizzle)
                 {
                     using Tensor = Tensor::Manipulation::Tensor;
-                    const auto geom = detail::swizzleStageGeometry(desc, m_isGfx1250);
+                    const auto geom = detail::swizzleStageGeometry(desc, m_padSwizzledKTo64B);
 
                     auto swizzleKey = std::make_tuple(i,
                                                       toBitWidth(desc.dataType()),

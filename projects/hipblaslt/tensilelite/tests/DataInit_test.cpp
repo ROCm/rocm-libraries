@@ -1169,18 +1169,20 @@ namespace
     };
 
     // Stage a descriptor of dtype with the source filled by srcByte and return the staged bytes.
-    std::vector<uint8_t> stageCase(const SwizzleCase& c, bool isGfx1250, size_t& padK)
+    std::vector<uint8_t> stageCase(const SwizzleCase& c, bool padTo64Bytes, size_t& padK)
     {
         // The kernel sees [K, free, batch]: dim0 = K (fastest).
         TensorDescriptor desc("a", c.dtype, {c.k, c.n, c.batches}, {1, c.ld, c.bs});
-        const auto       g = swizzleStageGeometry(desc, isGfx1250);
+        const auto       g = swizzleStageGeometry(desc, padTo64Bytes);
         padK               = g.paddedShape[1];
 
-        std::vector<uint8_t> src((c.batches - 1) * c.bs + (c.n - 1) * c.ld + c.k, 0);
+        std::vector<uint8_t> src(((c.batches - 1) * c.bs + (c.n - 1) * c.ld + c.k) * c.bytes, 0);
         for(size_t b = 0; b < c.batches; ++b)
             for(size_t n = 0; n < c.n; ++n)
                 for(size_t k = 0; k < c.k; ++k)
-                    src[b * c.bs + n * c.ld + k] = srcByte(b, n, k, c.ld, c.bs);
+                    for(size_t j = 0; j < c.bytes; ++j)
+                        src[(b * c.bs + n * c.ld + k) * c.bytes + j]
+                            = uint8_t(srcByte(b, n, k, c.ld, c.bs) + j);
 
         auto                 staged = stageSwizzledTensor(desc, src.data(), g);
         std::vector<uint8_t> out(staged.getNumBytes());
@@ -1215,48 +1217,46 @@ TEST(SwizzledPaddedK, Gfx1250PadsToSixtyFourBytes)
     EXPECT_EQ(swizzledPaddedKUnit(256, 1.0f, true), 256u) << "a larger block is never narrowed";
 }
 
-TEST(SwizzledKBlock, Gfx1250UsesThirtyTwoByteBlocks)
+TEST(SwizzledKBlock, IsTheSameOnEveryArchitecture)
 {
+    // One K block per data type everywhere (the gfx942 one): gfx1250 only differs in how K is padded,
+    // and the flattened (kO, kM) index makes the staged bytes independent of the block size.
     struct Row
     {
         rocisa::DataType dtype;
-        size_t           mik942, mik1250;
+        size_t           mik;
     };
-    const Row rows[] = {{rocisa::DataType::Half, 16, 8},
-                        {rocisa::DataType::BFloat16, 16, 8},
-                        {rocisa::DataType::Int8, 32, 16},
-                        {rocisa::DataType::Float8, 32, 16},
-                        {rocisa::DataType::BFloat8, 32, 16},
-                        {rocisa::DataType::Float4, 32, 32}};
+    const Row rows[] = {{rocisa::DataType::Half, 16},
+                        {rocisa::DataType::BFloat16, 16},
+                        {rocisa::DataType::Int8, 32},
+                        {rocisa::DataType::Float8, 32},
+                        {rocisa::DataType::BFloat8, 32},
+                        {rocisa::DataType::Float4, 32}};
     for(const auto& r : rows)
     {
         size_t MiK = 0, MiKv = 0, PackK = 0;
-        calculateKforSwizzling(r.dtype, MiK, MiKv, PackK, false);
-        EXPECT_EQ(MiK, r.mik942) << int(r.dtype);
-        MiK = MiKv = PackK = 0;
-        calculateKforSwizzling(r.dtype, MiK, MiKv, PackK, true);
-        EXPECT_EQ(MiK, r.mik1250) << int(r.dtype);
+        calculateKforSwizzling(r.dtype, MiK, MiKv, PackK);
+        EXPECT_EQ(MiK, r.mik) << int(r.dtype);
     }
     size_t MiK = 0, MiKv = 0, PackK = 0;
-    EXPECT_THROW(calculateKforSwizzling(rocisa::DataType::None, MiK, MiKv, PackK, true),
+    EXPECT_THROW(calculateKforSwizzling(rocisa::DataType::None, MiK, MiKv, PackK),
                  std::runtime_error);
 }
 
-TEST(SwizzledAllocation, SameOnBothArchitecturesForEveryK)
+TEST(SwizzledAllocation, SameWithAndWithoutThe64ByteKPaddingForEveryK)
 {
-    // Different K blocks, same 64-byte K padding: the allocation (and so the layout) must match.
-    // (F4 is the exception: gfx942/gfx950 keep their 32-byte padding, see the F4 test below.)
+    // 1- and 2-byte types: the swizzle K block is already 64 bytes, so padding K to 64 bytes (gfx1250)
+    // changes nothing. (F4 is the exception: gfx942/gfx950 keep their 32-byte padding, see the F4 test.)
     for(auto dtype : {rocisa::DataType::Float8, rocisa::DataType::BFloat16, rocisa::DataType::Half,
                       rocisa::DataType::Int8})
     {
         for(size_t k = 1; k <= 300; k += 7)
         {
             TensorDescriptor desc("a", dtype, {k, 20, 1});
-            size_t           MiK = 0, MiKv = 0, PackK = 0, MiK2 = 0, MiKv2 = 0, PackK2 = 0;
-            calculateKforSwizzling(dtype, MiK, MiKv, PackK, false);
-            calculateKforSwizzling(dtype, MiK2, MiKv2, PackK2, true);
+            size_t           MiK = 0, MiKv = 0, PackK = 0;
+            calculateKforSwizzling(dtype, MiK, MiKv, PackK);
             EXPECT_EQ(getSwizzledTensorNumAllocatedElements(desc, kMi, MiK, PackK, false),
-                      getSwizzledTensorNumAllocatedElements(desc, kMi, MiK2, PackK2, true))
+                      getSwizzledTensorNumAllocatedElements(desc, kMi, MiK, PackK, true))
                 << int(dtype) << " K=" << k;
         }
     }
@@ -1265,7 +1265,7 @@ TEST(SwizzledAllocation, SameOnBothArchitecturesForEveryK)
 TEST(SwizzledAllocation, PadsFreeDimAndKAndHonoursTheBatchStride)
 {
     size_t MiK = 0, MiKv = 0, PackK = 0;
-    calculateKforSwizzling(rocisa::DataType::Float8, MiK, MiKv, PackK, true);
+    calculateKforSwizzling(rocisa::DataType::Float8, MiK, MiKv, PackK);
     // K=100 -> 128, N=20 -> 32: one batch is 4096 elements.
     EXPECT_EQ(getSwizzledTensorNumAllocatedElements(
                   TensorDescriptor("a", rocisa::DataType::Float8, {100, 20, 1}), kMi, MiK, PackK, true),
@@ -1304,18 +1304,29 @@ TEST(SwizzledStaging, Gfx1250MatchesTheHostLayoutModel)
     }
 }
 
-TEST(SwizzledStaging, IdenticalBytesOnGfx942AndGfx1250)
+TEST(SwizzledStaging, IdenticalBytesWithAndWithoutThe64ByteKPadding)
 {
-    // F8: gfx942 swizzles in 64-byte K blocks, gfx1250 in 32-byte ones; flattening (kO, kM) gives
-    // the same bytes once K is padded the same way.
-    for(size_t k : {size_t(40), size_t(64), size_t(150), size_t(256)})
+    // gfx942 swizzles in 64-byte K blocks, gfx1250 kernels read 32-byte ones; flattening (kO, kM) gives
+    // the same bytes once K is padded the same way, and for the 1- and 2-byte types the swizzle K block
+    // is already 64 B, so the 64-byte padding flag (gfx1250) changes nothing.
+    struct Row
     {
-        SwizzleCase c{rocisa::DataType::Float8, 1, k, 24, 1, k, 0};
-        size_t      pad942 = 0, pad1250 = 0;
-        auto        a = stageCase(c, false, pad942);
-        auto        b = stageCase(c, true, pad1250);
-        EXPECT_EQ(pad942, pad1250) << "K=" << k;
-        EXPECT_EQ(a, b) << "K=" << k;
+        rocisa::DataType dtype;
+        size_t           bytes;
+    };
+    for(const Row r : {Row{rocisa::DataType::Float8, 1}, Row{rocisa::DataType::BFloat8, 1},
+                       Row{rocisa::DataType::Int8, 1}, Row{rocisa::DataType::BFloat16, 2},
+                       Row{rocisa::DataType::Half, 2}})
+    {
+        for(size_t k : {size_t(40), size_t(64), size_t(150), size_t(256)})
+        {
+            SwizzleCase c{r.dtype, r.bytes, k, 24, 1, k, 0};
+            size_t      pad942 = 0, pad1250 = 0;
+            auto        a = stageCase(c, false, pad942);
+            auto        b = stageCase(c, true, pad1250);
+            EXPECT_EQ(pad942, pad1250) << int(r.dtype) << " K=" << k;
+            EXPECT_EQ(a, b) << int(r.dtype) << " K=" << k;
+        }
     }
 }
 
