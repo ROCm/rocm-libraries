@@ -28,7 +28,7 @@ from rocke.runtime.comgr import CompilerInfo
 from rocke.runtime.compiler_options import measured_answers, require_accepted
 from rocke.tests.compiler_tools import REQUIRE_COMPILER_TOOLS_ENV, require_tools_or_skip
 
-from . import _attention_bwd_resources, _gdn_decode_compile
+from . import _attention_bwd_resources, _parallel_compile
 from ._attention_bwd_resources import compile_or_skip
 from ._compiler_test_utils import (
     skip_where_compiler_refuses_option,
@@ -245,7 +245,7 @@ def test_a_batch_reports_each_kernels_failure_on_that_kernel(monkeypatch):
         return compile_one(comgr_input)
 
     monkeypatch.setattr(compile_module, "compile_comgr_input", compile_or_refuse)
-    monkeypatch.setattr(_gdn_decode_compile, "available_cpus", lambda: 1)
+    monkeypatch.setattr(_parallel_compile, "available_cpus", lambda: 1)
     outcomes = compile_each([good, unlowerable, uncompilable])
     assert [o.kernel_name for o in outcomes] == [
         good.name,

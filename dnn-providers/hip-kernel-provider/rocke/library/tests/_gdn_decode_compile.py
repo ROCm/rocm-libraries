@@ -16,33 +16,24 @@ or a distro llvm-objdump that cannot read an AMDGPU code object, takes that
 policy with the tool's own message. A code object whose scratch size cannot be
 parsed skips.
 
-COMGR compiles one module at a time in a process, so a test that checks many
-kernels compiles them together (:func:`compile_each`) in worker
-processes, one per CPU this process may use, up to
-:data:`MAX_COMPILE_WORKERS`. The kernels are lowered here and their code
-objects read here; a worker only runs COMGR on the lowered text, which gives the
-code object ``compile_kernel`` would.
+A test that checks many kernels compiles them together (:func:`compile_each`):
+the kernels are lowered and their code objects read here, and COMGR runs on the
+lowered text in worker processes (``_parallel_compile.compile_in_workers``).
 """
 
 from __future__ import annotations
 
-import multiprocessing
-import pickle
 import tempfile
 import unittest
 from collections.abc import Sequence
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
 from rocke.tests.compiler_tools import require_tools_or_skip
 
-from ._worker_process import available_cpus
+from ._parallel_compile import compile_in_workers
 
 ARCH = "gfx950"
-
-#: The most worker processes one batch compiles in; each loads its own COMGR.
-MAX_COMPILE_WORKERS = 8
 
 
 def _toolchain():
@@ -101,15 +92,7 @@ def compile_each(kernels: Sequence, arch: str = ARCH) -> list[CompileOutcome]:
             outcomes.append(CompileOutcome(kernel.name, None, error))
         else:
             outcomes.append(None)
-    workers = min(available_cpus(), MAX_COMPILE_WORKERS, len(inputs))
-    if workers <= 1:
-        results = [_code_object_or_error(comgr_input) for comgr_input in inputs]
-    else:
-        with ProcessPoolExecutor(
-            max_workers=workers, mp_context=multiprocessing.get_context("spawn")
-        ) as pool:
-            results = list(pool.map(_code_object_or_error, inputs))
-    compiled = iter(zip(inputs, results))
+    compiled = iter(zip(inputs, compile_in_workers(inputs)))
     merged = []
     for outcome in outcomes:
         if outcome is None:
@@ -117,21 +100,6 @@ def compile_each(kernels: Sequence, arch: str = ARCH) -> list[CompileOutcome]:
             outcome = CompileOutcome(comgr_input.kernel_name, hsaco, error)
         merged.append(outcome)
     return merged
-
-
-def _code_object_or_error(comgr_input) -> tuple[bytes | None, BaseException | None]:
-    """``compile_comgr_input`` of one lowered kernel, or the error it raised (as
-    sent back from a worker: the original when it pickles, else its text)."""
-    from rocke.helpers.compile import compile_comgr_input
-
-    try:
-        return compile_comgr_input(comgr_input), None
-    except Exception as error:  # noqa: BLE001 - reported on its kernel
-        try:
-            pickle.dumps(error)
-        except Exception:  # noqa: BLE001 - any pickling failure
-            error = RuntimeError(f"{type(error).__name__}: {error}")
-        return None, error
 
 
 def _code_object_resources(hsaco: bytes):
