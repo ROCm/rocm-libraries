@@ -63,7 +63,7 @@ else()
     endif()
 endif()
 
-get_target_property(composable_kernel_INCLUDES composable_kernel::device_other_operations INTERFACE_INCLUDE_DIRECTORIES)
+get_target_property(composable_kernel_INCLUDES ${HIPTENSOR_CK_INCLUDE_TARGET} INTERFACE_INCLUDE_DIRECTORIES)
 
 # ABI export-surface guard. Host-only (no GPU): runs scripts/check_exported_symbols.py over the
 # built libhiptensor.so and fails if any symbol outside the public allowlist is exported. The
@@ -455,8 +455,10 @@ endif()
 # Test entries for the install-tree category filters.
 #
 # Two building-block lists keep the three filters distinct in intent:
-#   _HIPTENSOR_HOST_TESTS   - host-only (non-device) tests. They take no config and
-#                             no run-count flags.
+#   _HIPTENSOR_HOST_TESTS   - tests that take no config and no run-count flags. Some
+#                             of them (e.g. concurrency_test) still run on the GPU;
+#                             listing them here only keeps them out of the
+#                             per-config and FFM families below.
 #   _HIPTENSOR_DEVICE_TESTS - device tests. Each runs with --hot_runs 1 --cold_runs 0
 #                             and, where applicable, a custom config via -y.
 #
@@ -477,6 +479,7 @@ endif()
 
 set(_HIPTENSOR_HOST_TESTS
   batched_contraction_test
+  concurrency_test
   contraction_mode_test
   elementwise_cpu_test
   elementwise_mode_test
@@ -518,6 +521,7 @@ set(_HIPTENSOR_DEVICE_TESTS
   "complex_scale_contraction_test_m5n5k5|01_contraction/complex_scale_test_params_rank5.yaml"
   "complex_scale_contraction_test_m6n6k6|01_contraction/complex_scale_test_params_rank6.yaml"
   "plan_cache_test|01_contraction/plan_cache_test_params.yaml"
+  "plan_cache_lru_test|NONE"
   "plan_lifetime_test|NONE"
   "trinary_bilinear_contraction_test|NONE"
   "trinary_scale_contraction_test|NONE"

@@ -1,9 +1,12 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <cstdint>
+
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 
 #include "ApplicabilityChecks.hpp"
 #include "core/Utils.hpp"
@@ -12,6 +15,46 @@ using namespace hip_kernel_provider::core::utils;
 
 namespace hip_kernel_provider
 {
+
+void checkNormalizationActivationModeSupported(
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attributes,
+    bool isBwd,
+    const std::string& normalizationName)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
+    if(attributes.operation() == PointwiseMode::IDENTITY)
+    {
+        return;
+    }
+    if(attributes.operation() != PointwiseMode::RELU_FWD
+       && attributes.operation() != PointwiseMode::RELU_BWD)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Unsupported activation mode for " + normalizationName
+                + " fusion: " + EnumNamePointwiseMode(attributes.operation()) + ".");
+    }
+    if(attributes.operation() != (isBwd ? PointwiseMode::RELU_BWD : PointwiseMode::RELU_FWD))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            normalizationName + " fused activation mode must match the normalization direction.");
+    }
+    if(attributes.relu_lower_clip_slope().has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            normalizationName + " fused activation does not support Leaky ReLU.");
+    }
+    if(attributes.relu_lower_clip().has_value() && attributes.relu_lower_clip().value() != 0.0f
+       && !attributes.relu_upper_clip().has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            normalizationName
+                + " fused activation does not support standard ReLU with a non-zero lower_clip.");
+    }
+}
 
 // --- Tensor Descriptor Implementation ---
 
@@ -215,6 +258,39 @@ void IValidator::validateConsistentShapes(const std::vector<int64_t>& tensorIds,
         const auto& tensorAttr = findTensorAttributes(_tensorMap, tensorId);
         const std::vector<int64_t> dims(tensorAttr.dims()->begin(), tensorAttr.dims()->end());
         if(dims != referenceShape)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                           errorMessage);
+        }
+    }
+}
+
+void IValidator::validateNoVirtualTensors(const std::vector<int64_t>& tensorIds,
+                                          const std::string& errorMessage)
+{
+    for(const auto tensorId : tensorIds)
+    {
+        if(findTensorAttributes(_tensorMap, tensorId).virtual_())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                           errorMessage);
+        }
+    }
+}
+
+void IValidator::checkEpsilonSupported(int64_t epsilonTensorId) const
+{
+    hipdnn_plugin_sdk::makeScalarOperand(_tensorMap, epsilonTensorId, "Epsilon");
+}
+
+void IValidator::validateElementCountFitsUint32(const std::vector<int64_t>& dims,
+                                                const std::string& errorMessage)
+{
+    int64_t elements = 1;
+    for(const auto dim : dims)
+    {
+        if(__builtin_mul_overflow(elements, dim, &elements)
+           || elements >= static_cast<int64_t>(UINT32_MAX))
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                            errorMessage);

@@ -137,6 +137,12 @@ class TunerArgs:
     seed: int = -1
     arch_name: Optional[str] = None
 
+    param_overrides: Optional[str] = None
+    """JSON object that replaces the values of tune parameters, used to narrow or widen
+    the search (e.g. for staged tuning). Each value is a single value, a list of values,
+    or "best" to pin the parameter to the best entry in that type's existing cache.
+    """
+
     def update_with_kwargs(self, **kwargs):
         for k, v in kwargs.items():
             if k in self.__dict__.keys() and not v is None:
@@ -178,6 +184,9 @@ class BaseTuner(ABC):
         self.save_metadata = args.save_metadata
         self.strategy = args.strategy
         self.seed = None if args.seed == -1 else args.seed
+        self.param_overrides = (
+            json.loads(args.param_overrides) if args.param_overrides else {}
+        )
 
         if not self.exclude_default_config:
             with open(
@@ -316,7 +325,9 @@ class BaseTuner(ABC):
 
         # If any required key is not in the pre-existing config, then we need to warn the user
         # and skip running the default case.
-        if any((not required_key in default_tune_params) for required_key in required_keys):
+        if any(
+            (not required_key in default_tune_params) for required_key in required_keys
+        ):
             warnings.warn(
                 "Existing default configuration does not match tunable parameters."
             )
@@ -364,6 +375,46 @@ class BaseTuner(ABC):
             print(f"Error: {str(e)}")
             raise
 
+    def _get_search_tune_params(self, types: Dict[str, Any]) -> OrderedDict:
+        """Returns the tune parameters with param_overrides applied. Parameter names and
+        order are kept, so existing cache files stay compatible."""
+        params = self._get_tune_params(types)
+        best = None
+        for name, value in self.param_overrides.items():
+            if name not in params:
+                raise ValueError(
+                    f"Unknown tune parameter '{name}' in param_overrides, expected one of {list(params.keys())}"
+                )
+            if value == "best":
+                if best is None:
+                    best = self._get_best_cached_config(types)
+                if best is None:
+                    warnings.warn(
+                        f"No cached results for {types}, '{name}' is not pinned"
+                    )
+                    continue
+                value = best[name]
+            params[name] = value if isinstance(value, list) else [value]
+        return params
+
+    def _get_best_cached_config(self, types: Dict[str, Any]) -> Optional[Dict]:
+        """Returns the fastest finite entry of this type's cache file, if any."""
+        cache_file = self._get_cache_file_path(types)
+        if not cache_file.exists():
+            return None
+        content = cache_file.read_text()
+        try:
+            cache = json.loads(content)
+        except json.JSONDecodeError:
+            # An interrupted Kernel Tuner run leaves the cache file unterminated.
+            cache = json.loads(content.rstrip().rstrip(",") + "}}")
+        timed = [
+            e
+            for e in cache.get("cache", {}).values()
+            if isinstance(e.get("time"), (int, float)) and np.isfinite(e["time"])
+        ]
+        return min(timed, key=lambda e: e["time"]) if timed else None
+
     def generate_wrapper(
         self,
         config: OrderedDict,
@@ -410,7 +461,7 @@ class BaseTuner(ABC):
             "kernel_source": wrapper_string,
             "problem_size": self._get_problem_size(types),
             "arguments": [np.uint64(self.bytes_size)],
-            "tune_params": self._get_tune_params(types),
+            "tune_params": self._get_search_tune_params(types),
             "strategy": self.strategy,
             "grid_div_x": self._get_grid_div_x(),
             "cache": str(self._get_cache_file_path(types)),

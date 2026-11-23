@@ -8,7 +8,10 @@ of ASM_SDPA_ENGINE.toml are what the generator writes, that the generator is
 deterministic, that every written case is legal and traceable to the plan,
 that the cases up to nightly cover every required pair of axis values, and
 that every case id resolves to exactly one tolerance row. The same generated
-block and its row resolution are checked in the FlyDSL backward engine TOML."""
+block and its row resolution are checked in the FlyDSL backward engine TOML.
+They also check the engine TOML files of every provider: each entry has only
+the keys the harness reads, and each filter that names SdpaFwdPlan matches a
+checked-in case."""
 
 from __future__ import annotations
 
@@ -42,6 +45,13 @@ ENGINE_TIER_YAML = (
     SCRIPTS.parents[1]
     / "hip-kernel-provider"
     / "ASM_SDPA_ENGINE_test_categories_integration.yaml"
+)
+DNN_PROVIDERS = SCRIPTS.parents[1]
+ENGINE_TOMLS = sorted(
+    [
+        *DNN_PROVIDERS.glob("*/config/*.toml"),
+        *DNN_PROVIDERS.glob("*/src/engines/*/config/*.toml"),
+    ]
 )
 NUMPY_MISSING = importlib.util.find_spec("numpy") is None
 
@@ -325,6 +335,169 @@ def test_test_skips_match_written_cases(written):
     for block in text.split("[[test_skips]]")[1:]:
         for f in re.findall(r'"([^"]*SdpaBackward[^"]*)"', block.split("[[")[0]):
             assert any(fnmatch.fnmatchcase(n, f) for n in names), f
+
+
+# The keys TestSettings.hpp reads from each section of an engine TOML file.
+TOML_SECTION_KEYS = {
+    "meta": {"version"},
+    "test_skips": {"filters", "reason", "archs", "platforms"},
+    "tolerance_overrides": {"filters", "atol", "rtol"},
+    "validator_overrides": {"filters", "tensors", "validator", "rms_threshold"},
+    "conv_fwd_tolerance.float": {"summation_order"},
+}
+_TOML_HEADER = re.compile(r"^\[\[?([A-Za-z_]+(?:\.[A-Za-z_]+)*)\]\]?$")
+_TOML_KEY = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*)\s*=")
+
+
+def _toml_entries(path):
+    """(section, keys, filters) for each table of an engine TOML file.
+
+    The files hold only tables of `key = value` lines whose arrays list quoted
+    strings, so a line-based reading suffices; any other line fails the test."""
+    entries, current = [], None
+    in_array = False
+    for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        where = f"{path.name}:{number}"
+        if in_array:
+            assert re.fullmatch(r'("[^"]*",?\s*)*(#.*)?|\]', line), where
+            current[2].extend(re.findall(r'"([^"]*)"', line))
+            in_array = line != "]"
+            continue
+        header = _TOML_HEADER.match(line)
+        if header:
+            current = (header.group(1), [], [])
+            entries.append(current)
+            continue
+        key = _TOML_KEY.match(line)
+        assert key and current is not None, where
+        current[1].append(key.group(1))
+        value = line[key.end() :].strip()
+        if key.group(1) == "filters":
+            current[2].extend(re.findall(r'"([^"]*)"', value))
+        in_array = value.startswith("[") and not value.rstrip(",").endswith("]")
+    return entries
+
+
+def _sdpa_fwd_plan_names():
+    return [
+        f"{sweep.parts[-4]}_SdpaFwdPlan_{sweep.parts[-2]}.{case['id']}"
+        for sweep in sorted(BUNDLES.glob("*/SdpaFwdPlan/*/sweep.json"))
+        for case in json.loads(sweep.read_text(encoding="utf-8"))["cases"]
+    ]
+
+
+def _check_known_keys(path):
+    for section, keys, _ in _toml_entries(path):
+        assert section in TOML_SECTION_KEYS, (path.name, section)
+        unknown = set(keys) - TOML_SECTION_KEYS[section]
+        assert not unknown, (path.name, section, sorted(unknown))
+
+
+def _check_sdpa_fwd_plan_filters(path, names):
+    exact = set(names)
+    for section, _, filters in _toml_entries(path):
+        for f in filters:
+            if "SdpaFwdPlan" not in f:
+                continue
+            where = (path.name, section, f)
+            if not any(c in f for c in "*?["):
+                assert f in exact, where
+                continue
+            assert any(fnmatch.fnmatchcase(n, f) for n in names), where
+
+
+def test_engine_toml_entries_have_known_keys():
+    """A misspelled key is not an error for the harness: a misspelled `archs`
+    makes a skip apply on every GPU.
+
+    Blind spots: only section and key names are checked, not values, so a
+    typo in an `archs` or `platforms` value, a wrong value type and a missing
+    key all pass. Only the files that ENGINE_TOMLS finds are checked."""
+    assert ENGINE_TOML in ENGINE_TOMLS
+    for path in ENGINE_TOMLS:
+        _check_known_keys(path)
+
+
+def test_engine_toml_sdpa_fwd_plan_filters_match_cases():
+    """Every filter of every engine TOML that names SdpaFwdPlan selects at
+    least one checked-in SdpaFwdPlan case (no stale entry).
+
+    Blind spots: only filters that contain the word SdpaFwdPlan are checked,
+    so a typo in that word (for example SdpaFwdPln) hides the filter from
+    this test. A glob passes when it matches at least one case, so a glob that
+    matches more cases than intended is not caught. The `archs` and
+    `platforms` of the entry are not compared with where the case runs."""
+    names = _sdpa_fwd_plan_names()
+    assert names
+    for path in ENGINE_TOMLS:
+        _check_sdpa_fwd_plan_filters(path, names)
+
+
+_SYNTHETIC_SKIP = """\
+[[test_skips]]
+filters = ["{name}"]
+reason = "synthetic"
+{archs_key} = ["gfx942"]
+"""
+
+
+def test_known_keys_check_fails_on_a_misspelled_key(tmp_path):
+    path = tmp_path / "engine.toml"
+    path.write_text(_SYNTHETIC_SKIP.format(name="x", archs_key="archs"))
+    _check_known_keys(path)
+    path.write_text(_SYNTHETIC_SKIP.format(name="x", archs_key="arch"))
+    with pytest.raises(AssertionError, match="'arch'"):
+        _check_known_keys(path)
+
+
+_SYNTHETIC_CONV_TOLERANCE = """\
+[{section}]
+{key} = 9.0
+"""
+
+
+@pytest.mark.parametrize(
+    ("section", "key", "rejected"),
+    [
+        ("conv_fwd_tolerance.float", "summation_ordr", "'summation_ordr'"),
+        ("conv_fwd_tolerance.half", "summation_order", "'conv_fwd_tolerance.half'"),
+        ("conv_fwd_tolerance", "summation_order", "'conv_fwd_tolerance'"),
+    ],
+)
+def test_known_keys_check_fails_on_a_wrong_dotted_section_entry(
+    tmp_path, section, key, rejected
+):
+    path = tmp_path / "engine.toml"
+    path.write_text(
+        _SYNTHETIC_CONV_TOLERANCE.format(
+            section="conv_fwd_tolerance.float", key="summation_order"
+        )
+    )
+    _check_known_keys(path)
+    path.write_text(_SYNTHETIC_CONV_TOLERANCE.format(section=section, key=key))
+    with pytest.raises(AssertionError, match=re.escape(rejected)):
+        _check_known_keys(path)
+
+
+@pytest.mark.parametrize(
+    "unmatched",
+    [
+        "PR_SdpaFwdPlan_Folder.no_such_case",
+        "PR_SdpaFwdPlan_NoSuchFolder.*",
+    ],
+)
+def test_sdpa_fwd_plan_filter_check_fails_on_an_unmatched_filter(tmp_path, unmatched):
+    names = ["PR_SdpaFwdPlan_Folder.case_a", "PR_SdpaFwdPlan_Folder.case_b"]
+    path = tmp_path / "engine.toml"
+    for matched in (names[0], "PR_SdpaFwdPlan_Folder.*"):
+        path.write_text(_SYNTHETIC_SKIP.format(name=matched, archs_key="archs"))
+        _check_sdpa_fwd_plan_filters(path, names)
+    path.write_text(_SYNTHETIC_SKIP.format(name=unmatched, archs_key="archs"))
+    with pytest.raises(AssertionError, match="no_such_case|NoSuchFolder"):
+        _check_sdpa_fwd_plan_filters(path, names)
 
 
 def test_quarantined_cases_are_rejection_probes(written):

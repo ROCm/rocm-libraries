@@ -60,6 +60,8 @@ batch when `seq_len_q/kv` are set).
   - The CPU executor and the dense and ragged GPU references all compose this way, through `PlanUtils.hpp`
     `extractDiagonalBandParams`, as the frontend documents (`SdpaAttributes.hpp:128-135`). Pinned for the ragged
     GPU reference by `TestGpuSdpaRaggedFwdPlanDeprecatedCausal`.
+  - Setting both deprecated flags is rejected by `SdpaFwdNode` and `SdpaBwdNode` `pre_validate_node`
+    (`validateSdpaDeprecatedCausalFlags`).
   - The rocKE `sdpa_reference.py` (hip-kernel-provider) still forces `(-1, 0)`.
 - **Contract:** compose, as cuDNN does. All references use `extractDiagonalBandParams` semantics.
 
@@ -236,6 +238,8 @@ batch when `seq_len_q/kv` are set).
 - **hipDNN today:** the CPU backward computes dBias in the bias tensor's shape and dtype, summing over broadcast
   dims. Band-masked positions and dead rows give 0. Pinned by finite differences
   (`TestCpuFpReferenceSdpaGradCheckDBias`, mutation-checked against using the scaled dS).
+  `SdpaBwdNode` rejects a dBias with no bias, or whose dims or dtype differ from the bias's, and fills empty dBias
+  dims and dtype from the bias.
 - **Contract:** cuDNN. A dBias whose shape or dtype differs from the bias is declined.
 
 ### SEM-015: Dropout
@@ -414,6 +418,15 @@ batch when `seq_len_q/kv` are set).
   element-unit offsets and head-major packing (hip-kernel-provider `flydsl/COVERAGE.md` §5.9, §7.10; SEM-028).
   That holds for a valid table: the caller must keep each origin plus its length inside the allocation, with no
   two batches overlapping. The engines never read the table values on the host, so this is not checked.
+  The ASM SDPA forward engine (gfx942, gfx950; AITER group mode) serves ragged Q, K, V and O whose offsets are in
+  token units (multiplier equal to the sequence stride), Q and O on one INT32 `[B+1, 1, 1, 1]` table and K and V on
+  another, with an optional stats tensor laid out as AITER's `[H, total_q]` LSE (ragged on the Q/O table, sequence
+  stride 1, head stride at least `B * S_q` when `H > 1`), and optional `cu_seq_len_q/kv` with `padding_mask`. It writes
+  only each batch's rows, so gap rows of O and the LSE between or after batches are left unwritten. It reads the
+  table values only on the device, so the caller must also keep: each length at most its side's `S_max` (the kernel
+  takes the raw offset difference, not `min(diff, S_max)`, when there is no `cu_seq_len`); each Q origin plus its
+  length at most the stats head stride; and every O and LSE row inside its allocation, with no two batches
+  overlapping (`SdpaFwdArgsBuilder.hpp`, `SdpaFwdLaunchParams.hpp`).
 
 ## vLLM forms
 
@@ -455,9 +468,9 @@ batch when `seq_len_q/kv` are set).
   means and which engines serve it.
 - **cuDNN:** frontend 1.24 requires both seq_len tensors with `padding_mask` (SEM-008), ragged operands included
   (`node/sdpa_support_surface.h`). cuDNN 9.25 (cudnn-frontend from v1.27.0; v1.25.0 and v1.26.0 reject the mixed form) spells the same
-  form `cu_seq_len_q` (cumulative query offsets) + `seq_len_kv`. The hipDNN frontend accepts `cu_seq_len_q`, but every engine and reference declines
-  it (see `KNOWN_DIVERGENCES.md`, "SDPA cumulative sequence lengths"), so the cuDNN spelling does not run yet;
-  the hipDNN spelling below does.
+  form `cu_seq_len_q` (cumulative query lengths) + `seq_len_kv`. The hipDNN frontend accepts `cu_seq_len_q`, but every engine and reference declines
+  this mixed form (see `KNOWN_DIVERGENCES.md`, "SDPA cumulative sequence lengths"; the ASM SDPA engine takes
+  `cu_seq_len_*` only on both sides), so the cuDNN spelling does not run yet; the hipDNN spelling below does.
 - **PyTorch / AOTriton:** varlen attention packs Q through `cu_seqlens_q` and K/V through `cu_seqlens_k`; `seqused_k`
   gives each sequence's used keys (at most its K slot) and there is no `seqused_q`. AOTriton reads Q's lengths from
   `cu_seqlens_q` and K's from `seqused_k` (its `varlen_seqused_k` bits). vLLM's non-paged call has dense or packed

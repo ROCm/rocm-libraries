@@ -190,6 +190,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -450,6 +451,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -698,6 +700,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -961,6 +964,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -1241,6 +1245,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -1501,6 +1506,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -1775,6 +1781,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -2038,6 +2045,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -2301,6 +2309,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -2552,6 +2561,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -2815,6 +2825,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([
@@ -3077,6 +3088,7 @@
       'WaveSeparateGlobalReadB': 0,
       'WaveSeparateGlobalReadMetadata': 0,
       'WaveSplitK': False,
+      'WaveTileContiguousA': False,
       'WavefrontSize': -1,
       'WorkAssignment': 'StaticGrid',
       'WorkGroup': list([

@@ -442,7 +442,7 @@ namespace TensileLite
                     {
                         ScopedTimer timer(gpuInputCategory("gpu_input_reset_rotating_init",
                                                            "gpu_input_prep_rotating_init"));
-                        auto mem = m_rm->getRotatingMemory();
+                        auto const& mem = m_rm->getRotatingMemory();
                         // init mode 1 rotating data
                         for(size_t j = 1; j < mem.size(); j++)
                             for(size_t i = 0; i < m_vdata.size(); i++)
@@ -953,10 +953,21 @@ namespace TensileLite
             }
             virtual void preBenchmarkRun() override {}
             virtual void postBenchmarkRun() override {}
+            // --split-devices: this instance serves one device, which runs its slice of the
+            // problem the listeners are given.
+            void setSlice(ClientProblemFactory const* fullFactory, size_t device)
+            {
+                m_sliceFactory = fullFactory;
+                m_sliceDevice  = device;
+            }
+
             virtual void preProblem(ContractionProblem* const problem) override
             {
+                ContractionProblem* current = problem;
+                if(m_sliceFactory)
+                    current = m_sliceFactory->sliceProblem(problem, m_sliceDevice);
                 m_currentGemmProblem
-                    = dynamic_cast<ContractionProblemGemm const*>(problem);
+                    = dynamic_cast<ContractionProblemGemm const*>(current);
                 m_currentSolution          = nullptr;
                 m_mxPreswizzleMiK          = -1;
                 m_cpuInputsReadyForProblem = false;
@@ -1262,6 +1273,9 @@ namespace TensileLite
             int32_t                         m_rotatingMode = 0;
 
             int m_deviceId = 0;
+
+            ClientProblemFactory const* m_sliceFactory = nullptr;
+            size_t                      m_sliceDevice  = 0;
 
             ContractionSolution const*  m_currentSolution   = nullptr;
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;
