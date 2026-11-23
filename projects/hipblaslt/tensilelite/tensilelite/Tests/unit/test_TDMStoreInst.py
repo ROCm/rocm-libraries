@@ -1616,3 +1616,62 @@ def test_store_vector_widths_3_and_6_are_staged_whole_or_rejected(gp_gfx1250, gf
   assert whole(lambda: emitTDMStoreStaging(gwb, [(0, 0, 0)])) == accepted
   if beta and accepted:
     assert whole(lambda: emitTDMStoreLoadCElement(gwb, SimpleNamespace(coordOffset0=0, coordOffset1=0), 20, 0))
+
+
+_FOLD = "LDS offset above 64 KiB"
+
+
+def _instructions(module):
+  """The instructions of an emitted module, without comments."""
+  return [code for code in map(_code, str(module).splitlines()) if re.match(r"[a-z][a-z0-9_]* ", code)]
+
+
+def _stagedAddresses(module, base, tmp):
+  """(the LDS byte each DS store of an emitted module addresses, from its address VGPR, the fold last added to that
+  VGPR and its DS offset; the number of folds)."""
+  value, addresses, folds = {base: 0}, [], 0
+  for line in str(module).splitlines():
+    code = _code(line)
+    if _FOLD in line:
+      dst, src, high = [operand.strip() for operand in code.split(None, 1)[1].split(",")]
+      assert (re.sub(r"\D", "", dst), re.sub(r"\D", "", src)) == (str(tmp), str(base)), line
+      value[tmp], folds = int(high, 16), folds + 1
+    elif code.startswith("ds_store"):
+      addr = int(re.sub(r"\D", "", code.split(None, 1)[1].split(",")[0]))
+      offset = re.search(r"offset:(\d+)", code)
+      addresses.append(value[addr] + (int(offset.group(1)) if offset else 0))
+  return addresses, folds
+
+
+def test_staging_adds_each_fold_once_per_batch(gp_gfx1250, gfx1250_iim):
+  """Only DS stores, which write no VGPR, run between the elements a batch stages, so an element whose offset needs the
+  64 KiB fold already in tmpVgpr reuses it: with one batch each fold is added once per run of elements that share
+  it, and every DS store addresses the byte it addresses when each element is staged on its own, with every other
+  instruction the same. The C read-back is emitted between other code of the element loop, so it adds the fold of
+  every element that needs one."""
+  from types import SimpleNamespace
+  from toolchain_test_helpers import use_isa
+  from tensilelite.Components.TDMStoreInst import emitTDMStoreLoadCElement, emitTDMStoreStaging
+
+  use_isa((12, 5, 0), 32)
+  bpe, mt0, base, tmp = 4, 256, 10, 11
+  states = SimpleNamespace(bpeCexternalGSU1=bpe, bpr=4, c=SimpleNamespace(startVgprValu=0),
+                           memTokenLdsBuffer0=0, memTokenEpilogue=0)
+  gwb = SimpleNamespace(parentWriter=SimpleNamespace(states=states), gwvw=1, tdmStoreLdsBase=base, tmpVgpr=tmp,
+                        kernel={"MacroTile0": mt0, "_TDMStoreOverMainLoop": True,
+                                "ProblemType": {"DestDataType": DataType("s")}})
+  # Columns 62 and 63 lie below 64 KiB, 64 to 66 in the first fold and 130 in the second; then 63, which needs
+  # none and leaves the second fold in tmpVgpr, and 64, which needs the first again.
+  elements = [(i, row, column) for i, (row, column) in enumerate(
+    [(0, 62), (255, 63), (0, 64), (7, 65), (255, 66), (0, 130), (9, 130), (1, 63), (2, 64)])]
+  expected = [(column * mt0 + row) * bpe for _, row, column in elements]
+  batch = emitTDMStoreStaging(gwb, elements)
+  singles = [emitTDMStoreStaging(gwb, [element]) for element in elements]
+  addresses, folds = _stagedAddresses(batch, base, tmp)
+  assert addresses == [address for single in singles for address in _stagedAddresses(single, base, tmp)[0]] == expected
+  assert (folds, sum(_stagedAddresses(single, base, tmp)[1] for single in singles)) == (3, 6)
+  others = lambda module: [code for code in _instructions(module) if not code.startswith("v_add")]
+  assert others(batch) == [code for single in singles for code in others(single)]
+  loads = [emitTDMStoreLoadCElement(gwb, SimpleNamespace(coordOffset0=row, coordOffset1=column), 20, 0)
+           for _, row, column in elements]
+  assert [str(load).count(_FOLD) for load in loads] == [int(address > DS_OFFSET_MAX) for address in expected]

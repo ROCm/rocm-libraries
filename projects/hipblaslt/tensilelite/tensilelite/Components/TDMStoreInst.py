@@ -310,14 +310,17 @@ def tdmStoreLdsSplit(offset, span=0):
   return high, offset - high
 
 
-def _tdmStoreLdsAddress(gwb, module: Module, coordOffset0, coordOffset1, span=0):
-  """Return the VGPR and DS offset of element (coordOffset0, coordOffset1) of the staged tile."""
+def _tdmStoreLdsAddress(gwb, module: Module, coordOffset0, coordOffset1, span=0, folded=None):
+  """Return the VGPR and DS offset of element (coordOffset0, coordOffset1) of the staged tile, and the fold tmpVgpr
+  then holds. folded is the fold tmpVgpr already holds, base + folded, when the caller knows that nothing has written
+  tmpVgpr since; an element with that fold reuses it."""
   offset = (coordOffset1 * gwb.kernel["MacroTile0"] + coordOffset0) * gwb.parentWriter.states.bpeCexternalGSU1
   high, low = tdmStoreLdsSplit(offset, span)
   if not high:
-    return gwb.tdmStoreLdsBase, low
-  module.add(VAddU32(dst=vgpr(gwb.tmpVgpr), src0=vgpr(gwb.tdmStoreLdsBase), src1=hex(high), comment="LDS offset above 64 KiB"))
-  return gwb.tmpVgpr, low
+    return gwb.tdmStoreLdsBase, low, folded
+  if high != folded:
+    module.add(VAddU32(dst=vgpr(gwb.tmpVgpr), src0=vgpr(gwb.tdmStoreLdsBase), src1=hex(high), comment="LDS offset above 64 KiB"))
+  return gwb.tmpVgpr, low, high
 
 
 def _handoffBarriersLds(kernel):
@@ -376,8 +379,9 @@ def emitTDMStoreLoadCElement(gwb, addrCalc, data, vc0) -> Module:
   bpl = kw.states.bpeCexternalGSU1 * gwb.gwvw
   # A DS load reads at most 16 bytes, so the vector is read in pieces at offset + piece * width and the LAST
   # piece is the one that has to fit the 16-bit field.
-  addr, offset = _tdmStoreLdsAddress(gwb, module, addrCalc.coordOffset0, addrCalc.coordOffset1,
-                                     span=max(0, bpl - min(bpl, 16)))
+  # The read-back of each element is emitted between other code of the element loop, which may write tmpVgpr.
+  addr, offset, _ = _tdmStoreLdsAddress(gwb, module, addrCalc.coordOffset0, addrCalc.coordOffset1,
+                                        span=max(0, bpl - min(bpl, 16)))
   comment = "load C element (%u, %u)" % (addrCalc.coordOffset0, addrCalc.coordOffset1)
   memToken = MemTokenData([_stagedTileToken(gwb)])
   if bpl == 2 and gwb.kernel["ProblemType"]["DestDataType"].isHalf() and vc0 % 2:
@@ -411,12 +415,15 @@ def emitTDMStoreStaging(gwb, stagedElements) -> Module:
   width = min(bps, 32)
   numRegs = max(1, width // kw.states.bpr)
   regsPerElement = max(1, kw.states.bpeCexternalGSU1 // kw.states.bpr)
+  # Only the DS stores below run between the elements of the batch, and they write no VGPR, so a fold added to
+  # tmpVgpr for one element still holds for the next.
+  folded = None
   for sumIdx, coordOffset0, coordOffset1 in stagedElements:
     # dsStore writes at most 32 bytes, so a wider vector is staged at offset + piece * width; the last piece
     # is what has to fit the 16-bit field. A 32-byte piece is itself two 16-byte stores, the second of them
     # at a further 16, so the span is measured in the 16 bytes one DS instruction really writes.
-    addr, offset = _tdmStoreLdsAddress(gwb, module, coordOffset0, coordOffset1,
-                                       span=max(0, bps - min(width, 16)))
+    addr, offset, folded = _tdmStoreLdsAddress(gwb, module, coordOffset0, coordOffset1,
+                                               span=max(0, bps - min(width, 16)), folded=folded)
     for piece in range(bps // width):
       src = vgpr(formatting(sumIdx * regsPerElement + piece * numRegs, "ValuC+", kw.states.c.startVgprValu), numRegs)
       module.add(dsStore(width, dstAddr=vgpr(addr), src=src, ds=DSModifiers(offset=offset + piece * width),
