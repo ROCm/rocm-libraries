@@ -29,6 +29,8 @@ set(SUPPORTED_ARCHITECTURES
     "gfx950:xnack+"
     "gfx1250:xnack-"
     "gfx1250-strict:xnack-"
+    "gfx1250:xnack+"
+    "gfx1250-strict:xnack+"
 )
 
 # Base architectures - used when "all" is specified for GPU_TARGETS
@@ -48,8 +50,8 @@ if(HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN")
         "gfx90a:xnack+"
         "gfx942:xnack+"
         "gfx950:xnack+"
-        "gfx1250"
-        "gfx1250-strict"
+        "gfx1250:xnack+"
+        "gfx1250-strict:xnack+"
         )
 else()
     # Host-only ASAN and non-sanitized builds use the regular architecture list.
@@ -132,12 +134,34 @@ function(tensilelite_sanitizer_requires_xnack output_var)
     endif()
 endfunction()
 
+# The target a device ASAN build offloads an architecture to.
+#
+# Device ASAN instruments accesses that only resolve under XNACK replay, so a
+# bare architecture is promoted to ":xnack+" to ask the loader for it. gfx1250
+# and its steppings are promoted too: xnack-any would run under either setting,
+# and ASAN needs the one it cannot pick for itself.
+#
+# The promoted spelling is then put to the compiler rather than assumed. A
+# toolchain that does not take ":xnack+" on this architecture gets the bare name
+# back, because the alternative is a target ID it refuses outright -- and for an
+# xnack-any architecture the bare form still loads under XNACK, so nothing ASAN
+# depends on is lost. tensilelite_normalize_xnack_archs is what asks; it keeps
+# a spelling both forms are refused for, so a typo stays an error rather than
+# degrading to a name the compiler happens to accept.
 function(tensilelite_offload_target output_var arch)
-    set(_xnack_capable gfx908 gfx90a gfx942 gfx950) #gfx1250 support xnack_any so don't need to explicit ":xnack+"
+    set(_xnack_capable gfx908 gfx90a gfx942 gfx950 gfx1250 gfx1250-strict)
     set(_target "${arch}")
     tensilelite_sanitizer_requires_xnack(_requires_xnack)
     if(_requires_xnack AND NOT "${arch}" MATCHES ":" AND "${arch}" IN_LIST _xnack_capable)
-        set(_target "${arch}:xnack+")
+        tensilelite_normalize_xnack_archs(_target "${arch}:xnack+")
+        # Said out loud: the result is an ASAN build running xnack-any, which
+        # is what this used to do unconditionally and is easy to mistake for
+        # the mode having been asked for.
+        if(NOT "${_target}" MATCHES ":xnack\\+$")
+            message(STATUS
+                "Device ASAN: ${CMAKE_CXX_COMPILER} does not accept ${arch}:xnack+; "
+                "building ${_target} instead.")
+        endif()
     endif()
     set(${output_var} "${_target}" PARENT_SCOPE)
 endfunction()
@@ -259,3 +283,19 @@ function(tensilelite_normalize_xnack_archs output_var)
     endforeach()
     set(${output_var} "${_normalized}" PARENT_SCOPE)
 endfunction()
+
+# Settles the ":xnack+" the ASAN list was written with, now that there is a
+# function to ask the compiler. Deferred to here because the list is built at
+# include time, above the probe.
+#
+# tensilelite_offload_target cannot do it: it promotes a bare name, and these
+# arrive already qualified, so it passes them through. Without this the `all`
+# list reached TensileCreateLibrary still spelling a target ID the compiler
+# refuses, while hip::device -- normalized later, in CMakeLists.txt -- got the
+# bare one. Both halves of the build now ask for the same thing.
+#
+# BASE only: SUPPORTED says what a target may be called, not what this build
+# will ask for, and it already names both spellings.
+if(HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN")
+    tensilelite_normalize_xnack_archs(BASE_ARCHITECTURES ${BASE_ARCHITECTURES})
+endif()

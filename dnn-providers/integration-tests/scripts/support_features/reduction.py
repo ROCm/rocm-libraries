@@ -6,12 +6,11 @@
 ``reduction_attributes.fbs``. Unlike the other ops, the serializer
 (``utilities/json/ReductionAttributes.hpp``) writes the ports at the top of
 the node, beside ``mode``, not under ``inputs`` and ``outputs``; its reader
-takes a missing ``is_deterministic`` as false. No provider implements the
-op, so the dtypes are those the CPU reference executor registers
-(``ReductionSignatureKey``): ``x`` in each float dtype, ``y`` in its dtype
-or fp32. The integration tests' GPU reference takes more pairs, but it
-checks a result rather than computing one for a caller, so those raise. By
-group:
+takes a missing ``is_deterministic`` as false. The dtypes are those the CPU
+reference executor registers (``ReductionSignatureKey``): ``x`` in each float
+dtype, ``y`` in its dtype or fp32. The integration tests' GPU reference takes
+more pairs, but it checks a result rather than computing one for a caller, so
+those raise. By group:
 
 - ``mode`` (exclusive): the reduction, by its serialized name.
 - ``dtype`` (exclusive): the dtype of ``x``.

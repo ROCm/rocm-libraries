@@ -17,6 +17,9 @@ Documentation for rocSPARSE is available at
 * `install.sh -d` no longer builds and installs GoogleTest from source.
 * The 24 SuiteSparse test matrices are now stored with DVC in `clients/matrices`. Run `dvc pull -R projects/rocsparse/clients/matrices` before building the tests. In a sparse checkout, add the repository-root `.dvc` directory first with `git sparse-checkout add .dvc`. By default, CMake configuration fails when matrices are missing instead of downloading them from SuiteSparse. Configure with `-DALLOW_FETCH_DEPS=ON` to download them instead, which also applies to `ROCSPARSE_TEST_MIRROR`. The `--matrices-dir` and `--matrices-dir-install` options of `install.sh` and the `--matrices-dir` option of `rmake.py` still download missing matrices.
 
+### Optimized
+* Reduced the size of the rocSPARSE shared library. The host code of each kernel launch and HIP error check is now emitted once instead of at every call site. The exported API is unchanged.
+
 ### Resolved issues
 * Fixed `rocsparse_cgpsv_interleaved_batch` and `rocsparse_zgpsv_interleaved_batch` writing before `x` for a system of order 3. The QR back-substitution always updated row `m - 4`. At `m = 3` that index is `-batch_stride + batch`, so each batch wrote one complex value before the caller's `x` and read the diagonals and workspace at the same negative index. The routine accepts `m >= 3`; the update now runs only when `m >= 4`. The three solution entries were already correct.
 * Fixed `rocsparse_spvv` returning `rocsparse_status_invalid_pointer` when the sparse or dense vector is created with `rocsparse_create_const_spvec_descr` or `rocsparse_create_const_dnvec_descr`. It read the arrays of the mutable fields, which the const constructors leave null.

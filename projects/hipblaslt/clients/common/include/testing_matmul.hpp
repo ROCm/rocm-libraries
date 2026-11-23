@@ -2306,7 +2306,7 @@ private:
 // partitions of a GPU in DPX mode when the current device is one of them (see partition_devices.hpp),
 // and all on the current device otherwise (SPX: the same result, only for checking results, not for speed).
 // Partition 0 runs on the caller's handle and stream; this holds the others (handle, stream,
-// workspace, events). A, B, C and D live in the caller's device 0 buffers. A tensor placed Shared
+// workspace, counters). A, B, C and D live in the caller's device 0 buffers. A tensor placed Shared
 // is read (or written) by the other partitions over peer access; a Replicated one gets a full
 // copy on every partition device (inputs copied from device 0 in initialize(), the slices of a
 // replicated D gathered back into the device 0 D by gatherD()), so the copy-back, the check and
@@ -2337,10 +2337,10 @@ public:
         {
             std::vector<hipblasLtHandle_t> handles{handle0};
             m_streams.push_back(stream0);
-            // One counter per partition, in host memory every device can reach: run() orders
-            // the partitions with stream writes and waits on them. Created here, so that run()
-            // only enqueues.
-            for(int i = 0; i < int(arg.partitions); i++)
+            // One counter per partition plus one for checkpoint(), in host memory every device
+            // can reach: the partitions are ordered with stream writes and waits on them.
+            // Created here, so that run() only enqueues.
+            for(int i = 0; i <= int(arg.partitions); i++)
             {
                 void* word = nullptr;
                 check(hipHostMalloc(
@@ -2586,29 +2586,55 @@ public:
         return m_gemm->initialize(algo, workspaces, true, m_streams);
     }
 
+    // Ready, set, go: the other partitions wait for the work already queued on stream0 (a
+    // sentinel fill of D, for example). Needed once after such work, not on every launch.
+    void checkpoint()
+    {
+        const uint64_t gate = ++m_gate;
+        check(hipStreamWriteValue64(m_streams[0], m_counters.back(), gate, 0),
+              "hipStreamWriteValue64");
+        for(size_t i = 1; i < m_streams.size(); i++)
+            check(hipStreamWaitValue64(
+                      m_streams[i], m_counters.back(), gate, hipStreamWaitValueGte),
+                  "hipStreamWaitValue64");
+    }
+
+    // The instruction cache flush of --flush on the other partitions; the caller's stream gets
+    // its own from the timing loop. So every partition starts its next slice after a flush.
+    void flushOthers(int32_t grid)
+    {
+        int previous = 0;
+        check(hipGetDevice(&previous), "hipGetDevice");
+        for(size_t i = 1; i < m_streams.size(); i++)
+        {
+            check(hipSetDevice(m_devices[i]), "hipSetDevice");
+            hipblaslt_bench::launch_flush_icache(grid, m_streams[i]);
+        }
+        check(hipSetDevice(previous), "hipSetDevice");
+    }
+
     // One launch of every partition, joined on the GPU (PartitionedGemm::run does not join
-    // them). stream0 writes the launch number into its counter after the work already queued on
-    // it, and the other partitions wait for that before their slice. After its slice every other
-    // partition writes the number into its own counter, and stream0 waits for all of them, so
-    // stream0 sees the whole span and the next launch starts when this one has finished
+    // them), the way the TensileLite client joins a split: after its slice every partition
+    // writes the launch number into its own counter and waits for the other counters. So
+    // stream0 sees the whole span, and the next launch starts when this one has finished
     // everywhere.
     hipblasStatus_t run()
     {
-        const uint64_t launch = ++m_launch;
-        check(hipStreamWriteValue64(m_streams[0], m_counters[0], launch, 0),
-              "hipStreamWriteValue64");
-        for(size_t i = 1; i < m_streams.size(); i++)
-            check(hipStreamWaitValue64(m_streams[i], m_counters[0], launch, hipStreamWaitValueGte),
-                  "hipStreamWaitValue64");
         auto status = m_gemm->run(m_streams);
-        if(status != HIPBLAS_STATUS_SUCCESS)
+        if(status != HIPBLAS_STATUS_SUCCESS || m_streams.size() < 2)
             return status;
-        for(size_t i = 1; i < m_streams.size(); i++)
+        const uint64_t launch = ++m_launch;
+        const size_t count = m_streams.size();
+        for(size_t i = 0; i < count; i++)
         {
             check(hipStreamWriteValue64(m_streams[i], m_counters[i], launch, 0),
                   "hipStreamWriteValue64");
-            check(hipStreamWaitValue64(m_streams[0], m_counters[i], launch, hipStreamWaitValueGte),
-                  "hipStreamWaitValue64");
+            for(size_t k = 1; k < count; k++)
+                check(hipStreamWaitValue64(m_streams[i],
+                                           m_counters[(i + k) % count],
+                                           launch,
+                                           hipStreamWaitValueGte),
+                      "hipStreamWaitValue64");
         }
         return status;
     }
@@ -2631,8 +2657,9 @@ private:
     std::vector<int>                                       m_devices; // device of each partition
     std::vector<hipStream_t>                               m_streams; // [0] is the caller's
     std::vector<void*>                                     m_workspaces; // partitions 1..N-1
-    std::vector<uint64_t*>                                 m_counters; // per partition, host memory
+    std::vector<uint64_t*>                                 m_counters; // per partition + gate, host memory
     uint64_t                                               m_launch = 0;
+    uint64_t                                               m_gate   = 0;
     std::unique_ptr<hipblaslt_experimental::PartitionedGemm> m_gemm;
 };
 
@@ -6897,6 +6924,9 @@ void testing_matmul_with_bias(const Arguments& arg,
         if(arg.amaxD)
             for(auto& amax : dAmaxD)
                 CHECK_HIP_ERROR(hipMemsetAsync(amax.buf(), 0xFF, amax.getNumBytes(), stream));
+        // The fills are queued on this stream only; hold the other partitions until they ran.
+        if(partitionedRun)
+            partitionedRun->checkpoint();
     };
     // The checks compare the first launch of each solution. Copy its outputs to the host before a
     // later launch can change them: under c_equal_d each launch reads the previous launch's D as
@@ -8019,6 +8049,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                         .launch([&](size_t, int64_t i) {
                             int b = static_cast<int>(i % block_count);
                             runCandidate(b);
+                            if(partitioned && searchCfg.flush)
+                                partitionedRun->flushOthers(searchCfg.flush_grid);
                         }),
                     timingAbort);
             }

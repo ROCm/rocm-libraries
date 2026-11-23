@@ -200,6 +200,8 @@ int main(int argc, char** argv)
     ++launch;
     for(int j = 0; j < partitions; j++)
     {
+        // Stream capture (hipGraph) needs the stream's own device current here.
+        CHECK_HIP_ERROR(hipSetDevice(j));
         join[j][0].writeValue.value64 = launch;
         for(int i = 1; i < partitions; i++)
             join[j][i].waitValue.value64 = launch;

@@ -178,6 +178,23 @@ def lint(signature: list, metric: str | None, executable=None) -> list[dict]:
     return _ask("--lint", request, executable, "unguarded")
 
 
+def optional_guards(names, metric: str | None, executable=None) -> dict[str, object]:
+    """The published columns among `names` a model of `metric` must read through
+    value_or_default, each with the default it reads when unbound: those the evaluator's lint
+    flags when read bare, so a recipe that guards exactly these passes the lint."""
+    names = list(names)
+    return {
+        found["reference"][1:]: default_for(found["reference"], found)
+        for found in lint(["$" + name for name in names], metric, executable)
+    }
+
+
+def guarded_read(reference: str, default) -> dict:
+    """`reference` (`$name`) read through value_or_default: a graph that leaves it unbound
+    reads `default`."""
+    return {"value_or_default": [reference, default]}
+
+
 def _wrap(node, targets: dict):
     """`node` with every read of a reference in `targets` taking its default when unbound.
 
@@ -186,7 +203,7 @@ def _wrap(node, targets: dict):
     """
     if isinstance(node, str):
         if node in targets:
-            return {"value_or_default": [node, targets[node]]}
+            return guarded_read(node, targets[node])
         return node
     if isinstance(node, list):
         return [_wrap(item, targets) for item in node]

@@ -51,6 +51,11 @@ struct Parameter
     /// Representative values (§5.2); used for weighting, not bounding.
     std::vector<ParameterValue> commonValues;
 
+    /// Relative frequency of an ENUM's values, by value; a value not listed weighs 1, and no
+    /// entries means every value is equally frequent. Validated at load: each key is a declared
+    /// value and each weight is positive.
+    std::map<std::string, double> weights;
+
     std::string description;
 
     /// The values of an ENUM or BOOL parameter; empty for numeric types.
@@ -70,6 +75,28 @@ struct Parameter
             result.emplace_back(true);
         }
         return result;
+    }
+
+    double weightOf(const std::string& value) const
+    {
+        const auto found = weights.find(value);
+        return found == weights.end() ? 1.0 : found->second;
+    }
+
+    /// How many times more often than average (over the declared values) @p value occurs: 1 for
+    /// every value of an unweighted parameter.
+    double relativeWeight(const std::string& value) const
+    {
+        if(weights.empty() || values.empty())
+        {
+            return 1.0;
+        }
+        double total = 0.0;
+        for(const auto& declared : values)
+        {
+            total += weightOf(declared);
+        }
+        return weightOf(value) * static_cast<double>(values.size()) / total;
     }
 };
 
@@ -253,6 +280,10 @@ struct OperationMetadata
 
     /// See KernelCatalogSource.hpp. Empty means the operation has no kernel pool.
     KernelCatalog kernelCatalog;
+
+    /// Parameters a model-shape CSV may lack a column for, and what its rows then mean. Distinct
+    /// from the pack constants: a parameter absent from both is still refused.
+    std::map<std::string, ParameterValue> modelShapeDefaults;
 
     GraphBuilderSpec graphBuilder;
 
@@ -693,6 +724,43 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
                                    range[1].is_null() ? std::numeric_limits<int64_t>::max()
                                                       : range[1].get<int64_t>()};
             }
+            if(body.contains("weights"))
+            {
+                if(parameter.type != ParameterType::ENUM)
+                {
+                    load.errors.push_back("parameter '" + name
+                                          + "' declares weights but is not an enum");
+                }
+                else
+                {
+                    for(const auto& [value, weight] : body.at("weights").items())
+                    {
+                        if(std::find(parameter.values.begin(), parameter.values.end(), value)
+                           == parameter.values.end())
+                        {
+                            std::string message = "parameter '";
+                            message.append(name)
+                                .append("' weights undeclared value '")
+                                .append(value)
+                                .append("'");
+                            load.errors.push_back(std::move(message));
+                        }
+                        else if(!weight.is_number() || !(weight.get<double>() > 0.0))
+                        {
+                            std::string message = "parameter '";
+                            message.append(name)
+                                .append("' weight for '")
+                                .append(value)
+                                .append("' must be a number above 0");
+                            load.errors.push_back(std::move(message));
+                        }
+                        else
+                        {
+                            parameter.weights[value] = weight.get<double>();
+                        }
+                    }
+                }
+            }
             if(body.contains("common_values"))
             {
                 for(const auto& value : body.at("common_values"))
@@ -864,6 +932,31 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
         }
     }
 
+    // What a model-shape file that predates a parameter means by it. Enums only, and each value
+    // must be a declared one: a default no shape could take would be a corpus of other problems.
+    // Named: `items()` over the temporary `value()` returns would dangle.
+    const auto shapeDefaults = root.value("model_shape_defaults", nlohmann::json::object());
+    for(const auto& [key, value] : shapeDefaults.items())
+    {
+        const auto* parameter = metadata.find(key);
+        if(parameter == nullptr || parameter->type != ParameterType::ENUM)
+        {
+            load.errors.push_back("model_shape_defaults names '" + key
+                                  + "', which is not a declared enum parameter");
+        }
+        else if(!value.is_string()
+                || std::find(
+                       parameter->values.begin(), parameter->values.end(), value.get<std::string>())
+                       == parameter->values.end())
+        {
+            load.errors.push_back("model_shape_defaults sets '" + key
+                                  + "' to a value it does not declare");
+        }
+        else
+        {
+            metadata.modelShapeDefaults[key] = value.get<std::string>();
+        }
+    }
     if(root.contains("graph_builder"))
     {
         const auto& builder = root.at("graph_builder");

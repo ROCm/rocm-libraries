@@ -337,7 +337,7 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
     // operands: the carry-out is a second dest (dst1) and, for the _ci form, the
     // carry-in is a trailing src. rocisa emits these (dst1=VCC / src2=VCC) and the
     // rocisa->asm converter keeps them, so the DAG scheduler and wait passes see
-    // the VCC def/use. The logical factory (and adaptor's to_stinky_logical) drop
+    // the VCC def/use. The logical factory drops
     // them, which left the scheduler blind to the VCC hazard and relied on a text
     // post-process to re-insert vcc *after* scheduling. Re-attach them here so the
     // asm IR matches the native converter (dst, vcc, src0, src1[, vcc]).
@@ -345,8 +345,8 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
         const logical::Opcode op = irInst->getOpcode();
         if (op == logical::VAddCOU32 || op == logical::VSubCoU32 || op == logical::VAddCCOU32) {
             const StinkyRegister vcc = StinkyRegister::getVCCRegister(getWaveFrontSize(arch));
-            // Add VCC only when the operand list does not already carry it. The factory /
-            // adaptor logical path DROPS VCC, so it must be re-attached here. But the
+            // Add VCC only when the operand list does not already carry it. The logical
+            // factory DROPS VCC, so it must be re-attached here. But the
             // rocisa->logical converter KEEPS it (CommonInstruction::getDstParams returns
             // {dst, dst1=VCC} and getSrcParams keeps the _ci carry-in), so re-adding
             // unconditionally would emit a duplicate "vcc_lo" operand and diverge from
