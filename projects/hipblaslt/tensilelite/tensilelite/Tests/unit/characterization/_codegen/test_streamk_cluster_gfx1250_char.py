@@ -10,8 +10,8 @@ StreamK preLoop. Under clustering, defineAndResources leaves the cluster-decoded
 rank in WorkGroup0/1/2; the reread would overwrite it, so the enableCluster
 guard skips it.
 
-Uses normal StreamK=3 with ClusterDim=[2, 1]; the guard applies equally to
-StreamK modes 3, 4, and 5.
+Uses StreamK/StaticGrid with ClusterDim=[2, 1] and tree reduction. The same
+geometry uses B multicast with the spatial cluster schedule.
 """
 
 import os

@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "7dfb2580-44c9-5aef-90d6-0c5cc31a75b5",
+  "name": "flydsl sdpa_cdna_dualwave dispatch",
+  "dispatch_symbol": "hipkernel.flydsl_sdpa_cdna_dualwave.dispatch"
+}

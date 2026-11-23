@@ -7,6 +7,7 @@
 #include "IGraphOperation.hpp"
 #include <array>
 #include <flatbuffers/detached_buffer.h>
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <memory>
@@ -149,12 +150,24 @@ public:
         createFromJsonGraph(GraphDescriptor& desc, const char* jsonGraph, size_t jsonByteSize);
 
     virtual hipdnnHandle_t getHandle() const;
+    /// Returns the graph id, or std::nullopt if the graph has no id yet.
+    virtual std::optional<std::array<uint8_t, 16>> getGraphId() const;
     virtual bool isOverrideShapeEnabled() const;
 
     virtual bool hasRaggedTensors() const;
     virtual bool hasNonDefaultTensorAlignment() const;
     virtual bool hasRaggedOffsetMultiplier() const;
+    /// True when any SDPA forward operation carries cu_seq_len_q / cu_seq_len_kv.
+    virtual bool hasCuSeqLen() const;
     virtual bool isRuntimePassByValueEnabled() const;
+
+    /// Minimum engine plugin API version this graph requires. The single place that gathers the
+    /// graph's feature flags for hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(), shared
+    /// by the version stamp (buildGraph) and the plugin applicability filter, so a new floor
+    /// cannot be wired into one and missed in the other. The override-shape and runtime
+    /// pass-by-value flags are inputs because each caller obtains them its own way.
+    const hipdnn_data_sdk::utilities::Version&
+        requiredEngineApiVersion(bool isOverrideShapeEnabled, bool isRuntimePassByValue) const;
 
     static hipdnnBackendDescriptorType_t getStaticType();
 

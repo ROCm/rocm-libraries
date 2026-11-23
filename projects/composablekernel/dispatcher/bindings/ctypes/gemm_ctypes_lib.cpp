@@ -30,7 +30,7 @@
 
 // Host-side B-preshuffle utilities. For a weight-preshuffled kernel the device
 // expects B already reordered into the pipeline's packed layout; this is the
-// SAME transform Old-TE's gemm_preshuffle profiler applies (shuffle_b /
+// SAME transform Old-TE's gemm_preshuffle profiler applies (shuffle_b_v0 /
 // shuffle_b_permuteN in tensor_shuffle_utils.hpp) so the bridge produces
 // byte-for-byte identical B, hence identical results.
 #include "ck_tile/host/host_tensor.hpp"
@@ -52,7 +52,6 @@ using namespace ck_tile::dispatcher;
 using namespace ck_tile::dispatcher::backends;
 using Priority = ck_tile::dispatcher::Registry::Priority;
 
-#if defined(GEMM_KEY_DTYPE_A)
 // Host-side B-preshuffle utilities.
 //
 // Whether a kernel preshuffles its B operand is a CAPABILITY THE KERNEL CARRIES
@@ -62,13 +61,11 @@ using Priority = ck_tile::dispatcher::Registry::Priority;
 // no `GEMM_KEY_PRESHUFFLE` capability macro. These helpers are templated on the
 // kernel type so they are only instantiated for a preshuffled kernel: the
 // non-preshuffle `if constexpr` branch is discarded before instantiation, so
-// shuffle_b is never instantiated for a tile geometry that was never meant to be
-// shuffled. The one remaining preprocessor guard (`GEMM_KEY_DTYPE_A`) only asks
-// "is this a modern codegen header?" -- it mirrors the legacy-header fallback in
-// dispatcher_initialize() and is NOT a preshuffle capability switch.
+// shuffle_b_v0 is never instantiated for a tile geometry that was never meant to be
+// shuffled.
 
 // Adapter exposing the force-included kernel's tile geometry under the field
-// names ck_tile::shuffle_b / shuffle_b_permuteN expect. Mirrors Old-TE's
+// names ck_tile::shuffle_b_v0 / shuffle_b_permuteN expect. Mirrors Old-TE's
 // gemm_preshuffle_benchmark.hpp::KernelConfig so the permutation is identical.
 template <typename Kernel>
 struct BridgePreshuffleConfig
@@ -91,7 +88,7 @@ struct BridgePreshuffleConfig
 // Preshuffle host B into the packed layout the device pipeline reads. Returns a
 // contiguous host buffer of the shuffled bytes.
 //
-// The shuffle utils (shuffle_b / shuffle_b_permuteN) take a rank-2 HostTensor
+// The shuffle utils (shuffle_b_v0 / shuffle_b_permuteN) take a rank-2 HostTensor
 // with lengths {K, N} whose PHYSICAL buffer is N-outer / K-contiguous -- exactly
 // Old-TE's b_k_n, built as host_tensor_descriptor(K, N, stride, is_row_major=
 // false) for the rcr kernel's column-major BLayout. The bridge runner hands B in
@@ -108,7 +105,7 @@ static ck_tile::HostTensor<T> preshuffle_host_b(const T* b_host, int64_t K, int6
     // host_tensor_descriptor takes a compile-time bool_constant. BLayout is the
     // force-included kernel's own B layout alias; for the rcr preshuffle kernel
     // it is column-major, giving lengths {K, N} with strides {1, K} (N-outer,
-    // K-contiguous) -- the exact physical order shuffle_b / shuffle_b_permuteN
+    // K-contiguous) -- the exact physical order shuffle_b_v0 / shuffle_b_permuteN
     // expect and that the runner supplies for a 'c' B operand.
     constexpr bool kBRowMajor = std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::RowMajor>;
     // Byte-identity correctness contract: the whole shuffle argument (the runner
@@ -143,12 +140,15 @@ static ck_tile::HostTensor<T> preshuffle_host_b(const T* b_host, int64_t K, int6
     }
     else
     {
-        return ck_tile::shuffle_b<Config>(b_k_n);
+        // Match the native WeightPreshufflePipelineAGmemBGmemCRegV2 example.
+        // gfx1250 loads B in 16-byte chunks; shuffle_b interleaves those chunks
+        // differently when a lane holds more than one chunk.
+        return ck_tile::shuffle_b_v0<Config>(b_k_n);
     }
 }
 
 // Shuffled-B cache key: the identity of the source B plus the transform that
-// produced the shuffled bytes. permute_n distinguishes shuffle_b (false) from
+// produced the shuffled bytes. permute_n distinguishes shuffle_b_v0 (false) from
 // shuffle_b_permuteN (true), so the two transforms never alias one entry if a
 // process ever mixes them.
 struct ShuffleKey
@@ -240,7 +240,6 @@ static const BDataType* get_shuffled_b(const BDataType* b_host, int64_t K, int64
     }
     return it->second->data();
 }
-#endif // GEMM_KEY_DTYPE_A
 
 // Global dispatcher (initialized once, managed via shared_ptr for safe cleanup)
 static std::shared_ptr<Dispatcher> g_dispatcher = nullptr;
@@ -280,7 +279,6 @@ int dispatcher_initialize()
     // kernel_key.hpp, whose accepted strings match the codegen's emitted values
     // byte-for-byte.
     KernelKey key;
-#ifdef GEMM_KEY_DTYPE_A
     key.signature.dtype_a             = string_to_dtype(GEMM_KEY_DTYPE_A);
     key.signature.dtype_b             = string_to_dtype(GEMM_KEY_DTYPE_B);
     key.signature.dtype_c             = string_to_dtype(GEMM_KEY_DTYPE_C);
@@ -325,51 +323,16 @@ int dispatcher_initialize()
     key.algorithm.vector_size_b = GEMM_KEY_VECTOR_SIZE_B;
     key.algorithm.vector_size_c = GEMM_KEY_VECTOR_SIZE_C;
 #endif
+#ifdef GEMM_KEY_NUM_SLOTS
+    // A non-default comp_tdm_pc ring is part of the kernel name too.
+    key.algorithm.num_slots   = GEMM_KEY_NUM_SLOTS;
+    key.algorithm.publish_lag = GEMM_KEY_PUBLISH_LAG;
+#endif
+#ifdef GEMM_KEY_RUN_AHEAD
+    // So is a non-default comp_tdm_ra ring.
+    key.algorithm.run_ahead = GEMM_KEY_RUN_AHEAD;
+#endif
     key.gfx_arch = GFX_ARCH;
-#else
-    // Fallback default for headers generated before GEMM_KEY_* macros existed
-    // (fp16 / rcr / compv4-cshuffle-intrawave, 128x128x32). The macro path
-    // above is the source of truth for any freshly generated kernel.
-    key.signature.dtype_a   = DataType::FP16;
-    key.signature.dtype_b   = DataType::FP16;
-    key.signature.dtype_c   = DataType::FP16;
-    key.signature.dtype_acc = DataType::FP32;
-    // Derive A/B/C layouts from the force-included kernel's own layout types
-    // instead of hardcoding rcr. The dispatcher's supports() gate is layout-aware
-    // (it only constrains a dimension that an operand's inner axis maps to), so a
-    // wrong key layout makes it reject valid problems -- e.g. a crr kernel does not
-    // gate K, but with a hardcoded rcr key supports() would apply rcr's K-gate and
-    // reject TileK=192 problems that Old-TE runs. ALayout/BLayout/CLayout are the
-    // global aliases exported by the kernel header under CK_TILE_SINGLE_KERNEL_INCLUDE.
-    using RowMajorLayout = ck_tile::tensor_layout::gemm::RowMajor;
-    key.signature.layout_a =
-        std::is_same_v<ALayout, RowMajorLayout> ? LayoutTag::RowMajor : LayoutTag::ColMajor;
-    key.signature.layout_b =
-        std::is_same_v<BLayout, RowMajorLayout> ? LayoutTag::RowMajor : LayoutTag::ColMajor;
-    key.signature.layout_c =
-        std::is_same_v<CLayout, RowMajorLayout> ? LayoutTag::RowMajor : LayoutTag::ColMajor;
-    key.signature.transpose_a         = false;
-    key.signature.transpose_b         = false;
-    key.signature.grouped             = false;
-    key.signature.split_k             = 1;
-    key.signature.elementwise_op      = "PassThrough";
-    key.signature.num_d_tensors       = 0;
-    key.signature.structured_sparsity = false;
-
-    key.algorithm.tile_shape      = {128, 128, 32};
-    key.algorithm.wave_shape      = {2, 2, 1};
-    key.algorithm.warp_tile_shape = {32, 32, 16};
-    key.algorithm.pipeline        = Pipeline::CompV4;
-    key.algorithm.scheduler       = Scheduler::Intrawave;
-    key.algorithm.epilogue        = Epilogue::CShuffle;
-    key.algorithm.block_size      = 256;
-    key.algorithm.double_buffer   = true;
-    key.algorithm.persistent      = false;
-    key.algorithm.preshuffle      = false;
-    key.algorithm.transpose_c     = false;
-    key.algorithm.num_wave_groups = 1;
-    key.gfx_arch                  = GFX_ARCH;
-#endif // GEMM_KEY_DTYPE_A
 
     // Register kernel using types from force-included header
     auto kernel =
@@ -565,7 +528,6 @@ int dispatcher_run_gemm(
         cleanup_gpu_mem();
         return -1;
     }
-#if defined(GEMM_KEY_DTYPE_A)
     // Metadata-driven B upload: the kernel's own Preshuffle trait (emitted by the
     // codegen as SelectedKernel::Preshuffle) decides whether B is reordered on the
     // host before the copy -- no capability macro. The unused branch is discarded
@@ -604,17 +566,6 @@ int dispatcher_run_gemm(
             return -1;
         }
     }
-#else
-    // Legacy header (pre-GEMM_KEY_* codegen): no Preshuffle trait and no
-    // preshuffle kernels are generated for it -- copy B verbatim.
-    if(hipMemcpy(
-           B_dev, B_host, static_cast<size_t>(K) * N * sizeof(BDataType), hipMemcpyHostToDevice) !=
-       hipSuccess)
-    {
-        cleanup_gpu_mem();
-        return -1;
-    }
-#endif // GEMM_KEY_DTYPE_A
     if(hipMemset(C_dev, 0, static_cast<size_t>(M) * N * sizeof(CDataType)) != hipSuccess)
     {
         cleanup_gpu_mem();
@@ -776,14 +727,12 @@ void dispatcher_cleanup()
 {
     g_dispatcher.reset();
     g_initialized = false;
-#if defined(GEMM_KEY_DTYPE_A)
     // Release the process-lifetime shuffled-B cache so an embedding library that
     // calls dispatcher_cleanup() frees the held HostTensors instead of leaking
     // them until process exit (the benchmark process never calls cleanup, but a
     // library consumer should get its memory back). Empty for non-preshuffle
     // kernels, where clear() is a no-op.
     g_shuffled_b_cache.clear();
-#endif
 }
 
 } // extern "C"

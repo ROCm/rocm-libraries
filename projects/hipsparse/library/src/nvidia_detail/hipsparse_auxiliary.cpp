@@ -57,6 +57,11 @@ hipsparseStatus_t hipsparseGetVersion(hipsparseHandle_t handle, int* version)
         return HIPSPARSE_STATUS_NOT_INITIALIZED;
     }
 
+    if(version == nullptr)
+    {
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+
     *version = hipsparseVersionMajor * 100000 + hipsparseVersionMinor * 100 + hipsparseVersionPatch;
 
     return HIPSPARSE_STATUS_SUCCESS;

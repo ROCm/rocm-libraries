@@ -20,8 +20,11 @@ def requires_newer_flavor(exc: BaseException) -> bool:
     """Whether ``exc`` is an instance refusing a too-old LLVM flavor.
 
     Matches the emitter's wording -- ``requires llvm23 (ROCm 7.13+), got
-    llvm22`` -- not the exception type: the refusal is a bare
+    llvm22`` from the instruction emitters, ``requires LLVM flavor llvm23, got
+    llvm22`` from the llvm23-gated target ops (TDM tensor moves, clusters,
+    ...) -- not the exception type: the refusal is a bare
     ``NotImplementedError``/``ValueError``, which the lowerer also raises for
-    genuine defects. Anything not saying "requires llvmNN" stays fatal.
+    genuine defects. Anything not saying "requires [LLVM flavor] llvmNN" stays
+    fatal.
     """
-    return bool(re.search(r"requires llvm\d+", str(exc)))
+    return bool(re.search(r"requires (?:LLVM flavor )?llvm\d+", str(exc)))

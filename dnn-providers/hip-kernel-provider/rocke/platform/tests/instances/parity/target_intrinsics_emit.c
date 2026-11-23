@@ -6,7 +6,10 @@
  * target_intrinsics_emit.py so run_diff.py can byte-compare the two engines'
  * .ll; see that file for why substring smoke tests were not enough.
  *
- * arch = gfx950, flavor = AUTO (matches the Python side).
+ * Each config lowers for the target in ARCHES, at flavor = AUTO; both match the
+ * Python side, which says why a config needs a target that has its intrinsics.
+ *
+ * Configs 10..12 cover arith.fdot2 (f16, bf16) and the bf16 4x4x4 MFMA atom.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -172,7 +175,50 @@ static void build_scheduler_hints(rocke_ir_builder_t* b)
     rocke_b_s_alloc_vgpr(b, 8);
     rocke_b_asyncmark(b);
     rocke_b_wait_asyncmark(b, 3);
+    rocke_b_ret(b);
+}
+
+static void build_wait_event(rocke_ir_builder_t* b)
+{
     rocke_b_s_wait_event(b, 1);
+    rocke_b_ret(b);
+}
+
+static void build_fdot2(rocke_ir_builder_t* b, const rocke_type_t* elem)
+{
+    rocke_value_t* a_ptr = global_ptr_param(b, "A", elem, 4);
+    rocke_value_t* d_ptr = global_ptr_param(b, "D", rocke_f32(), 4);
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+    rocke_value_t* two = rocke_b_const_i32(b, 2);
+    rocke_value_t* idx = rocke_b_mul(b, tid, two);
+    rocke_value_t* a = rocke_b_global_load_vN(b, a_ptr, idx, elem, 2, 0);
+    rocke_value_t* acc = rocke_b_global_load(b, d_ptr, tid, rocke_f32(), 4);
+    rocke_value_t* dot = rocke_b_fdot2(b, a, a, acc);
+    rocke_b_global_store(b, d_ptr, tid, dot, 4);
+    rocke_b_ret(b);
+}
+
+static void build_fdot2_f16(rocke_ir_builder_t* b)
+{
+    build_fdot2(b, rocke_f16());
+}
+
+static void build_fdot2_bf16(rocke_ir_builder_t* b)
+{
+    build_fdot2(b, rocke_bf16());
+}
+
+static void build_mfma_4x4x4_bf16(rocke_ir_builder_t* b)
+{
+    rocke_value_t* a_ptr = global_ptr_param(b, "A", rocke_bf16(), 8);
+    rocke_value_t* d_ptr = global_ptr_param(b, "D", rocke_f32(), 16);
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+    rocke_value_t* four = rocke_b_const_i32(b, 4);
+    rocke_value_t* idx = rocke_b_mul(b, tid, four);
+    rocke_value_t* a = rocke_b_global_load_vN(b, a_ptr, idx, rocke_bf16(), 4, 0);
+    rocke_value_t* acc = rocke_b_zero_vec_f32(b, 4);
+    rocke_value_t* out = rocke_b_mfma_f32_4x4x4_bf16(b, a, a, acc);
+    rocke_b_global_store_vN(b, d_ptr, idx, out, 4, 0);
     rocke_b_ret(b);
 }
 
@@ -188,9 +234,31 @@ static const build_fn_t BUILDERS[] = {
     build_av_b128,
     build_scheduler_hints,
     build_warp_shuffle_xor_dpp,
+    build_wait_event,
+    build_fdot2_f16,
+    build_fdot2_bf16,
+    build_mfma_4x4x4_bf16,
 };
 
 static const int NUM_BUILDERS = (int)(sizeof(BUILDERS) / sizeof(BUILDERS[0]));
+
+/* The target each config lowers for; must match ARCHES in the Python emitter. */
+static const char* const ARCHES[] = {
+    "gfx1250", /* async LDS copies exist only on gfx1250 */
+    "gfx1250",
+    "gfx1250", /* s.prefetch.inst */
+    "gfx950",
+    "gfx1201", /* permlane16/permlane64 are RDNA */
+    "gfx950",
+    "gfx950",
+    "gfx1250", /* s.alloc.vgpr and the async marks */
+    "gfx950", /* the DPP shuffles */
+    "gfx1201", /* s.wait.event */
+    "gfx950", /* arith.fdot2 f16 */
+    "gfx950", /* arith.fdot2 bf16 */
+    "gfx950", /* bf16 4x4x4 MFMA */
+};
+static const int NUM_ARCHES = (int)(sizeof(ARCHES) / sizeof(ARCHES[0]));
 
 int main(int argc, char** argv)
 {
@@ -212,6 +280,11 @@ int main(int argc, char** argv)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
+    }
+    if(NUM_ARCHES != NUM_BUILDERS)
+    {
+        fprintf(stderr, "ARCHES has %d targets for %d configs\n", NUM_ARCHES, NUM_BUILDERS);
+        return 1;
     }
 
     rocke_ir_builder_t b;
@@ -236,7 +309,7 @@ int main(int argc, char** argv)
         char err[ROCKE_ERR_MSG_CAP];
         err[0] = 0;
         rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
-            kernel, ROCKE_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text, err, sizeof err);
+            kernel, ROCKE_LLVM_FLAVOR_AUTO, ARCHES[idx], &llvm_text, err, sizeof err);
         if(st != ROCKE_OK || !llvm_text)
         {
             fprintf(stderr, "lower failed: status=%d err=%s\n", (int)st, err);

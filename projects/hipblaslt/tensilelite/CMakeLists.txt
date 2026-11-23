@@ -47,8 +47,8 @@ cmake_dependent_option(TENSILELITE_ENABLE_MXDATAGENERATOR
 set(BUILD_SHARED_LIBS "${TENSILELITE_BUILD_SHARED_LIBS}")
 
 if(TENSILELITE_STANDALONE)
-    if(TENSILELITE_ENABLE_CLIENT OR TENSILELITE_BUILD_TESTING OR TENSILELITE_ENABLE_AUTOBUILD OR BUILD_TESTING)
-        message(FATAL_ERROR "The TensileLite client, tests, and autobuild scripts require the hipBLASLt build.")
+    if(TENSILELITE_ENABLE_CLIENT OR TENSILELITE_BUILD_TESTING OR BUILD_TESTING)
+        message(FATAL_ERROR "The TensileLite client and tests require the hipBLASLt build.")
     endif()
 
     find_package(hip REQUIRED)
@@ -89,12 +89,38 @@ if(TENSILELITE_ENABLE_HOST_ASAN AND TENSILELITE_ENABLE_HOST_TSAN)
     message(FATAL_ERROR "ASAN and TSAN cannot be enabled simultaneously")
 endif()
 
-add_subdirectory(rocisa)
+# One list of the host sources the MessagePack writer needs. tensilelite-host
+# compiles them, and the no-host / YAML writer links the same list.
+set(TENSILELITE_HOST_SOURCES
+    "${CMAKE_CURRENT_LIST_DIR}/src/Activation.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/AMDGPU.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/ContractionProblem.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/ContractionSolution.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/DataTypes.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/Debug.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/EmbeddedData.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/EmbeddedLibrary.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/KernelArguments.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/KernelLanguageTypes.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/MLFeatures.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/MLPNet.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/PerformanceMetricTypes.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/ScalarValueTypes.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/StreamK.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/TensorDescriptor.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/TensorOps.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/Tensile.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/Utils.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/hip/HipHardware.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/hip/HipSolutionAdapter.cpp"
+)
+set(TENSILELITE_HOST_MSGPACK_SOURCES
+    "${CMAKE_CURRENT_LIST_DIR}/src/msgpack/MessagePack.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/msgpack/SolutionState.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/msgpack/Writing.cpp"
+)
 
-if(TENSILELITE_ENABLE_AUTOBUILD)
-    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-    include(tensilelite_auto_build)
-endif()
+add_subdirectory(rocisa)
 
 if(TENSILELITE_ENABLE_HOST)
     find_package(ZLIB REQUIRED)
@@ -114,7 +140,7 @@ if(TENSILELITE_ENABLE_HOST)
         target_link_options(tensilelite-host PRIVATE "LINKER:--exclude-libs,ALL")
     endif()
 
-    target_compile_features(tensilelite-host PUBLIC cxx_std_17)
+    target_compile_features(tensilelite-host PUBLIC cxx_std_20)
 
     include(GenerateExportHeader)
     generate_export_header(tensilelite-host
@@ -126,6 +152,12 @@ if(TENSILELITE_ENABLE_HOST)
         PUBLIC
             $<BUILD_INTERFACE:__HIP_HCC_COMPAT_MODE__=1> # if we don't have this we fail tests on 942_304cu
     )
+
+    # PUBLIC because it changes the layout of MasterSolutionLibrary: every target
+    # that includes the TensileLite headers has to agree on it.
+    if(HIPBLASLT_ENABLE_LOCAL_KERNELS)
+        target_compile_definitions(tensilelite-host PUBLIC TENSILELITE_ENABLE_LOCAL_KERNELS)
+    endif()
 
     if(TENSILELITE_ENABLE_HOST_ASAN)
         # Apply sanitizer only to host code, not device code

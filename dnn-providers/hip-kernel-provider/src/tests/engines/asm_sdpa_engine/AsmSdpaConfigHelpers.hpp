@@ -7,7 +7,6 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "asm_fmha_v3_fwd_configs.hpp"
@@ -17,6 +16,19 @@
 
 namespace asm_sdpa_engine
 {
+
+/// Which set of per-batch lengths the integration fixture writes into a group-mode case's
+/// offset and cumulative length tables (the sets live in IntegrationGpuSdpaForward.cpp).
+enum class GroupLengths
+{
+    /// Every batch spans several Q-tiles and has at least as many keys as queries.
+    STANDARD,
+    /// A batch with more queries than keys (fully masked rows under bottom-right causal), a
+    /// batch with no queries and a batch with no keys.
+    EDGE,
+    /// One batch that spans several Q-tiles and has at least as many keys as queries.
+    SINGLE_BATCH,
+};
 
 /**
  * @brief Lightweight, GPU-free parameters for building an SDPA forward graph.
@@ -31,11 +43,28 @@ struct GraphTestCase
 
     int64_t batch = 2;
     int64_t numHeads = 4;
+    /// K/V head count; unset means numHeads (multi-head attention).
+    std::optional<int64_t> numHeadsKv;
     int64_t seqQ = 256;
     int64_t seqKv = 128;
 
     std::optional<float> attnScale;
     bool withStats = false;
+    /// The graph's mma_core_mode; the attribute stays unset when this is unset.
+    std::optional<hipdnn_frontend::DataType> mmaCoreMode;
+    /// Group mode only: Q, K, V and O read one ragged offset table (K_QO_RAGGED_OFFSET_NAME),
+    /// so every batch's Q and K/V lengths are equal.
+    bool sharedOffsetTable = false;
+    /// Group mode only: the graph carries cu_seq_len_q/kv (K_CU_SEQ_LEN_*_NAME) with
+    /// padding_mask, so the ragged offset tables hold each batch's physical start and the
+    /// cumulative tables its logical length.
+    bool cuSeqLens = false;
+    /// cuSeqLens only: cu_seq_len_q and cu_seq_len_kv name one table (K_CU_SEQ_LEN_Q_NAME),
+    /// so every batch's Q and K/V lengths are equal while K/V keep their own ragged offsets.
+    bool sharedCuSeqLen = false;
+    /// Group mode only: the per-batch lengths of the offset and cumulative length tables. The
+    /// batch count must match the set's.
+    GroupLengths groupLengths = GroupLengths::STANDARD;
 
     std::string name;
     std::string arch;
@@ -109,6 +138,27 @@ std::string getConfigDescription(const fmha_v3_fwdConfig& config);
  */
 GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config, bool withStats = false);
 
+/// The kpack TOC keys SdpaFwdPlanBuilder resolves @p config to on @p arch: gfx942 ships
+/// each forward object once per MI300 and MI308 variant, gfx950 once without a variant.
+std::vector<std::string> getFwdKernelTocKeys(const fmha_v3_fwdConfig& config,
+                                             const std::string& arch);
+
+/// Names of the INT32 [B+1, 1, 1, 1] token offset tables buildSdpaFwdGraph gives a
+/// group-mode graph: Q and O share the first, K and V the second (or the first too, with
+/// GraphTestCase::sharedOffsetTable).
+inline constexpr const char* K_QO_RAGGED_OFFSET_NAME = "qo_ragged_offset";
+inline constexpr const char* K_KV_RAGGED_OFFSET_NAME = "kv_ragged_offset";
+
+/// Names of the INT32 [B+1, 1, 1, 1] cumulative length tables a GraphTestCase::cuSeqLens
+/// graph carries (only the first, with GraphTestCase::sharedCuSeqLen).
+inline constexpr const char* K_CU_SEQ_LEN_Q_NAME = "cu_seq_len_q";
+inline constexpr const char* K_CU_SEQ_LEN_KV_NAME = "cu_seq_len_kv";
+
+/// Names of the INT32 [B, 1, 1, 1] per-batch lengths buildSdpaFwdReferenceGraph gives in
+/// place of the cumulative tables (only the first, with GraphTestCase::sharedCuSeqLen).
+inline constexpr const char* K_SEQ_LEN_Q_NAME = "seq_len_q";
+inline constexpr const char* K_SEQ_LEN_KV_NAME = "seq_len_kv";
+
 /// An SDPA forward graph together with its STATS output attribute.
 struct SdpaFwdGraph
 {
@@ -119,24 +169,14 @@ struct SdpaFwdGraph
 
 /// Builds the SDPA forward graph topology described by @p testCase, enabling stats when
 /// testCase.withStats is set and returning that output's attribute alongside the graph so
-/// callers can address it by identity.
+/// callers can address it by identity. Every tensor has a fixed uid. A group-mode stats
+/// output is AITER's varlen LSE [H, B * S_q]: element (b, h, s) at qoOffset[b] + h * B * S_q
+/// + s, ragged on the Q/O offset table with a multiplier of 1.
 SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase);
 
-/// GraphTestCase descriptors for every config in @p configMap, stats-enabled when
-/// @p withStats is set. ConfigType requires matching configToTestCase and
-/// getConfigDescription overloads.
-template <typename ConfigType>
-std::vector<GraphTestCase>
-    getCompatibleGraphTestCases(const std::unordered_map<std::string, ConfigType>& configMap,
-                                bool withStats = false)
-{
-    std::vector<GraphTestCase> testCases;
-    testCases.reserve(configMap.size());
-    for(const auto& [key, config] : configMap)
-    {
-        testCases.push_back(configToTestCase(config, withStats));
-    }
-    return testCases;
-}
+/// Builds the graph the hipDNN CPU reference runs for a GraphTestCase::cuSeqLens case, whose
+/// cumulative length tables it does not take: buildSdpaFwdGraph's graph with the same uids,
+/// except that seq_len_q/kv (K_SEQ_LEN_*_NAME) replace cu_seq_len_q/kv.
+SdpaFwdGraph buildSdpaFwdReferenceGraph(const GraphTestCase& testCase);
 
 } // namespace asm_sdpa_engine

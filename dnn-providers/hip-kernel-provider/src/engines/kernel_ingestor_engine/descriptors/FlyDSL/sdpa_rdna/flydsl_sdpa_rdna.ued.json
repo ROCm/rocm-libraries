@@ -1,0 +1,37 @@
+{
+  "version": "1.0",
+  "id": "a03fe29e-61a4-5f70-9bc3-b43ec75b1530",
+  "name": "hipkernel:flydsl_sdpa_rdna",
+  "sdk_version": "1.6.0",
+  "graph_match": {
+    "native": "hipkernel.flydsl_sdpa_rdna.graph_match"
+  },
+  "sort_kernel_catalog": {
+    "default": "4757c57d-f563-5463-9b4a-d22d0c4e1332"
+  },
+  "predict_engine": {
+    "default": "deafb91e-7100-5f5e-8de7-bccd0bfb5bb5",
+    "gfx1100": [
+      "64e2c397-6110-4d62-a94b-1465d58a4741"
+    ],
+    "gfx1101": [
+      "c472baba-16a2-4d69-af87-f4e0f1cc5dd1"
+    ],
+    "gfx1151": [
+      "64c14275-9c65-4eeb-ac5c-b298bf3f2259"
+    ],
+    "gfx1201": [
+      "a5fd7fbb-52ed-4856-b65f-65a98a69d799"
+    ]
+  },
+  "metadata": "330ae779-3bb5-5a68-9a64-75bfdcbfd1fe",
+  "knobs": [
+    "block_m",
+    "block_n",
+    "dv_split",
+    "hd_pair"
+  ],
+  "behavior_notes": [
+    "supports_graph_capture"
+  ]
+}

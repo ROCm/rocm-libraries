@@ -15,13 +15,17 @@
 # Group 1 signal/wait are before group 0 signal/wait in the source; the scheduler
 # must not let group 0's wait slip past group 1's post-barrier load.
 #
+# The source nests the pairs (signal signal wait wait). The hardware holds one
+# signal per barrier id in flight, so the scheduler must alternate them: after a
+# signal on -1 the next barrier on -1 is a wait.
+#
 # Pre-barrier loads appear before signals (within-group ordering preserved)
 # CHECK: ds_load_b128 v[0:3], v16
 # CHECK: ds_load_b128 v[4:7], v20
-# Both signals appear (one per group, scheduler may interleave)
-# CHECK-COUNT-2: s_barrier_signal
-# Both waits appear
-# CHECK-COUNT-2: s_barrier_wait
+# CHECK: s_barrier_signal -1
+# CHECK-NEXT: s_barrier_wait -1
+# CHECK-NEXT: s_barrier_signal -1
+# CHECK-NEXT: s_barrier_wait -1
 # Post-barrier loads appear somewhere after the first wait (exact interleaving is scheduler-chosen)
 # CHECK-DAG: ds_load_b128 v[8:11], v24
 # CHECK-DAG: ds_load_b128 v[12:15], v28

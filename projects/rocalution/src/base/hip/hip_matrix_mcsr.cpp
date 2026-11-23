@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -131,8 +131,7 @@ namespace rocalution
         this->ncol_ = ncol;
         this->nnz_  = nnz;
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         this->mat_.row_offset = *row_offset;
         this->mat_.col        = *col;
@@ -148,8 +147,7 @@ namespace rocalution
         assert(this->ncol_ >= 0);
         assert(this->nnz_ >= 0);
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         *row_offset = this->mat_.row_offset;
         *col        = this->mat_.col;
@@ -196,7 +194,11 @@ namespace rocalution
             assert(this->nrow_ == cast_mat->nrow_);
             assert(this->ncol_ == cast_mat->ncol_);
 
-            copy_h2d(this->nrow_ + 1, cast_mat->mat_.row_offset, this->mat_.row_offset);
+            if(cast_mat->mat_.row_offset != NULL)
+            {
+                copy_h2d(this->nrow_ + 1, cast_mat->mat_.row_offset, this->mat_.row_offset);
+            }
+
             copy_h2d(this->nnz_, cast_mat->mat_.col, this->mat_.col);
             copy_h2d(this->nnz_, cast_mat->mat_.val, this->mat_.val);
         }
@@ -231,7 +233,11 @@ namespace rocalution
             assert(this->nrow_ == cast_mat->nrow_);
             assert(this->ncol_ == cast_mat->ncol_);
 
-            copy_d2h(this->nrow_ + 1, this->mat_.row_offset, cast_mat->mat_.row_offset);
+            if(this->mat_.row_offset != NULL)
+            {
+                copy_d2h(this->nrow_ + 1, this->mat_.row_offset, cast_mat->mat_.row_offset);
+            }
+
             copy_d2h(this->nnz_, this->mat_.col, cast_mat->mat_.col);
             copy_d2h(this->nnz_, this->mat_.val, cast_mat->mat_.val);
         }
@@ -265,7 +271,11 @@ namespace rocalution
             assert(this->nrow_ == hip_cast_mat->nrow_);
             assert(this->ncol_ == hip_cast_mat->ncol_);
 
-            copy_d2d(this->nrow_ + 1, hip_cast_mat->mat_.row_offset, this->mat_.row_offset);
+            if(hip_cast_mat->mat_.row_offset != NULL)
+            {
+                copy_d2d(this->nrow_ + 1, hip_cast_mat->mat_.row_offset, this->mat_.row_offset);
+            }
+
             copy_d2d(this->nnz_, hip_cast_mat->mat_.col, this->mat_.col);
             copy_d2d(this->nnz_, hip_cast_mat->mat_.val, this->mat_.val);
         }
@@ -309,7 +319,11 @@ namespace rocalution
             assert(this->nrow_ == hip_cast_mat->nrow_);
             assert(this->ncol_ == hip_cast_mat->ncol_);
 
-            copy_d2d(this->nrow_ + 1, this->mat_.row_offset, hip_cast_mat->mat_.row_offset);
+            if(this->mat_.row_offset != NULL)
+            {
+                copy_d2d(this->nrow_ + 1, this->mat_.row_offset, hip_cast_mat->mat_.row_offset);
+            }
+
             copy_d2d(this->nnz_, this->mat_.col, hip_cast_mat->mat_.col);
             copy_d2d(this->nnz_, this->mat_.val, hip_cast_mat->mat_.val);
         }
@@ -350,11 +364,15 @@ namespace rocalution
             assert(this->nrow_ == cast_mat->nrow_);
             assert(this->ncol_ == cast_mat->ncol_);
 
-            copy_h2d(this->nrow_ + 1,
-                     cast_mat->mat_.row_offset,
-                     this->mat_.row_offset,
-                     true,
-                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
+            if(cast_mat->mat_.row_offset != NULL)
+            {
+                copy_h2d(this->nrow_ + 1,
+                         cast_mat->mat_.row_offset,
+                         this->mat_.row_offset,
+                         true,
+                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
+            }
+
             copy_h2d(this->nnz_,
                      cast_mat->mat_.col,
                      this->mat_.col,
@@ -397,11 +415,15 @@ namespace rocalution
             assert(this->nrow_ == cast_mat->nrow_);
             assert(this->ncol_ == cast_mat->ncol_);
 
-            copy_d2h(this->nrow_ + 1,
-                     this->mat_.row_offset,
-                     cast_mat->mat_.row_offset,
-                     true,
-                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
+            if(this->mat_.row_offset != NULL)
+            {
+                copy_d2h(this->nrow_ + 1,
+                         this->mat_.row_offset,
+                         cast_mat->mat_.row_offset,
+                         true,
+                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
+            }
+
             copy_d2h(this->nnz_,
                      this->mat_.col,
                      cast_mat->mat_.col,
@@ -443,11 +465,15 @@ namespace rocalution
             assert(this->nrow_ == hip_cast_mat->nrow_);
             assert(this->ncol_ == hip_cast_mat->ncol_);
 
-            copy_d2d(this->nrow_ + 1,
-                     hip_cast_mat->mat_.row_offset,
-                     this->mat_.row_offset,
-                     true,
-                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
+            if(hip_cast_mat->mat_.row_offset != NULL)
+            {
+                copy_d2d(this->nrow_ + 1,
+                         hip_cast_mat->mat_.row_offset,
+                         this->mat_.row_offset,
+                         true,
+                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
+            }
+
             copy_d2d(this->nnz_,
                      hip_cast_mat->mat_.col,
                      this->mat_.col,
@@ -499,17 +525,21 @@ namespace rocalution
             assert(this->nrow_ == hip_cast_mat->nrow_);
             assert(this->ncol_ == hip_cast_mat->ncol_);
 
-            copy_d2h(this->nrow_ + 1,
-                     this->mat_.row_offset,
-                     hip_cast_mat->mat_.row_offset,
-                     true,
-                     HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
-            copy_d2h(this->nnz_,
+            if(this->mat_.row_offset != NULL)
+            {
+                copy_d2d(this->nrow_ + 1,
+                         this->mat_.row_offset,
+                         hip_cast_mat->mat_.row_offset,
+                         true,
+                         HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
+            }
+
+            copy_d2d(this->nnz_,
                      this->mat_.col,
                      hip_cast_mat->mat_.col,
                      true,
                      HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
-            copy_d2h(this->nnz_,
+            copy_d2d(this->nnz_,
                      this->mat_.val,
                      hip_cast_mat->mat_.val,
                      true,

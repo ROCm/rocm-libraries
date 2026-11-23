@@ -1,0 +1,121 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Miscellaneous Parameters not covered elsewhere
+# ExpandPointerSwap: [False, True] - Expand pointer swaps into inline constants
+# InterleaveAlpha: [0, 1, 2] - Alpha interleaving mode
+# UnrollLoopSwapGlobalReadOrder: [0, 1] - Swap GR order in unroll loop
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: True
+  PrintSolutionRejectionReason: True
+  DataInitTypeA: 3
+  DataInitTypeB: 2
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  PrintLevel: 1
+  Architecture: gfx1250
+
+BenchmarkProblems:
+  # ExpandPointerSwap
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [1]  # Requires PGR=1 for pointer swap
+        - ExpandPointerSwap: [False, True]  # TEST expand pointer swap
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 64]
+          - Exact: [128, 128, 1, 128]
+          - Exact: [256, 256, 1, 256]
+          - Range: [ [64, 64, 256], [64, 64, 256], [1], [64] ]
+
+  # InterleaveAlpha - REMOVED: Not supported with MatrixInstruction on gfx1250
+  # reject: Matrix instruction doesn't support InterleaveAlpha
+
+  # UnrollLoopSwapGlobalReadOrder
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [2]  # Required >=2 for UnrollLoopSwapGlobalReadOrder
+        - ExpandPointerSwap: [False]  # Must be False with UnrollLoopSwapGlobalReadOrder
+        - UnrollLoopSwapGlobalReadOrder: [0, 1]  # TEST swap GR order
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 64]
+          - Exact: [128, 128, 1, 128]
+          - Exact: [256, 256, 1, 256]
+          - Range: [ [64, 64, 128], [64, 64, 128], [1], [64] ]
+
+  # Combined misc parameters
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [2]  # Need >=2 for UnrollLoopSwapGlobalReadOrder
+        - ExpandPointerSwap: [False]  # Must be False with UnrollLoopSwapGlobalReadOrder
+        - UnrollLoopSwapGlobalReadOrder: [1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+          - Exact: [512, 512, 1, 512]
+          - Range: [ [128, 128, 512], [128, 128, 512], [1], [256] ]

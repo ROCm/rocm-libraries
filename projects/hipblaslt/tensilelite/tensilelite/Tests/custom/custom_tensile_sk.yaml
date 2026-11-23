@@ -14,6 +14,7 @@ GlobalParameters:
   Device: 0
   PrintSolutionRejectionReason: True
   ValidateMetadata: True
+  UniformSummationOrder: 0
 
 BenchmarkProblems:
   -

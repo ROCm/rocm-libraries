@@ -4,10 +4,10 @@ These tests capture the expected scheduling output at specific pipeline steps
 to detect unintended regressions. 
 """
 
-from Tensile.Components.Subtile.Kernel import (
+from tensilelite.Components.Subtile.Kernel import (
     TileInfo, AB_B8, AB_B16, AB_B4, MXSA_B4, MXSB_B4, CD_F32,
 )
-from Tensile.Components.Subtile.LogicalScheduler import (
+from tensilelite.Components.Subtile.LogicalScheduler import (
     GRPlacementStrategy,
     LogicalScheduler,
     ReadGranularity,
@@ -50,6 +50,8 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None, waveGroup=(2, 2)):
         "DepthU": depthU,
         "_DepthUA": depthU,
         "_DepthUB": depthU,
+        "_ScalePeriodUA": depthU,
+        "_ScalePeriodUB": depthU,
         "MacroTileA": MT0,
         "MacroTileB": MT1,
         "MacroTile0": MT0,

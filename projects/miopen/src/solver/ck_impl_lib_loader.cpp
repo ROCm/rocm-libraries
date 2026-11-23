@@ -7,12 +7,16 @@
 #include <miopen/conv_solution.hpp>
 #include <miopen/execution_context.hpp>
 #include <miopen/conv/problem_description.hpp>
+#include <miopen/conv/heuristics/default_config_cache.hpp>
 #include <miopen/env.hpp>
 #include <miopen/logger.hpp>
 
 #include <miopen/filesystem.hpp>
 
+#include <algorithm>
 #include <cstdlib>
+#include <optional>
+#include <string>
 #include <type_traits>
 
 #ifdef _WIN32
@@ -462,10 +466,11 @@ ConvSolution CkImplLibLoader::ExtractSolution(ck_impl_status_t status,
 
 // -- Solver-parameterized wrappers --------------------------------------------
 
-std::vector<std::string> CkImplLibLoader::FillValidKernels(CKSolverType solver,
-                                                           const conv::ProblemDescription& problem,
-                                                           miopenDataType_t dtype,
-                                                           bool use_tf32) const
+std::vector<std::string>
+CkImplLibLoader::FillValidKernels(CKSolverType solver,
+                                  const miopen::conv::ProblemDescription& problem,
+                                  miopenDataType_t dtype,
+                                  bool use_tf32) const
 {
     if(!IsLoaded())
         return {};
@@ -477,7 +482,7 @@ std::vector<std::string> CkImplLibLoader::FillValidKernels(CKSolverType solver,
 
 std::vector<std::string>
 CkImplLibLoader::FillValidKernelsWithTf32Fallback(CKSolverType solver,
-                                                  const conv::ProblemDescription& problem,
+                                                  const miopen::conv::ProblemDescription& problem,
                                                   miopenDataType_t dtype,
                                                   bool& use_tf32) const
 {
@@ -491,7 +496,7 @@ CkImplLibLoader::FillValidKernelsWithTf32Fallback(CKSolverType solver,
 }
 
 bool CkImplLibLoader::IsApplicable(CKSolverType solver,
-                                   const conv::ProblemDescription& problem,
+                                   const miopen::conv::ProblemDescription& problem,
                                    miopenDataType_t dtype,
                                    bool use_tf32) const
 {
@@ -505,7 +510,7 @@ bool CkImplLibLoader::IsApplicable(CKSolverType solver,
 }
 
 bool CkImplLibLoader::IsArgsSupported(CKSolverType solver,
-                                      const conv::ProblemDescription& problem,
+                                      const miopen::conv::ProblemDescription& problem,
                                       const std::string& kernel_id,
                                       miopenDataType_t dtype,
                                       bool use_tf32) const
@@ -520,7 +525,7 @@ bool CkImplLibLoader::IsArgsSupported(CKSolverType solver,
 }
 
 size_t CkImplLibLoader::GetWorkspaceSize(CKSolverType solver,
-                                         const conv::ProblemDescription& problem,
+                                         const miopen::conv::ProblemDescription& problem,
                                          miopenDataType_t dtype,
                                          bool use_tf32) const
 {
@@ -535,7 +540,7 @@ size_t CkImplLibLoader::GetWorkspaceSize(CKSolverType solver,
 
 ConvSolution CkImplLibLoader::GetSolution(CKSolverType solver,
                                           const ExecutionContext& ctx,
-                                          const conv::ProblemDescription& problem,
+                                          const miopen::conv::ProblemDescription& problem,
                                           const std::string& kernel_id,
                                           bool use_tf32) const
 {
@@ -545,6 +550,62 @@ ConvSolution CkImplLibLoader::GetSolution(CKSolverType solver,
     auto status       = solver_fns_[ToSolverIndex(solver)].get_solution(
         &ctx, &problem, kernel_id.c_str(), use_tf32, &ptr);
     return ExtractSolution(status, ptr, "get_solution");
+}
+
+bool CkImplLibLoader::IsArgsSupportedTf32Aware(CKSolverType solver,
+                                               const miopen::conv::ProblemDescription& problem,
+                                               const std::string& kernel_id) const
+{
+    const auto dtype = problem.GetInDataType();
+    const bool tf32  = (dtype == miopenFloat) && problem.UseTF32();
+    // Try TF32 first when requested, then fall back to FP32: a restored config carries only
+    // kernel_id, so a TF32-only id must still validate, and an id chosen via the FP32 fallback
+    // (no TF32 instance) must validate as FP32. IsArgsSupported handles the "<type>+<split_k>"
+    // kernel_id form, so no suffix stripping is needed here.
+    if(tf32 && IsArgsSupported(solver, problem, kernel_id, dtype, true))
+        return true;
+    return IsArgsSupported(solver, problem, kernel_id, dtype, false);
+}
+
+ConvSolution CkImplLibLoader::GetSolutionTf32Aware(CKSolverType solver,
+                                                   const ExecutionContext& ctx,
+                                                   const miopen::conv::ProblemDescription& problem,
+                                                   const std::string& kernel_id) const
+{
+    const auto dtype = problem.GetInDataType();
+    bool use_tf32    = (dtype == miopenFloat) && problem.UseTF32();
+    // A perf-db-restored config carries only kernel_id; if it was chosen via the FP32 fallback (no
+    // TF32 instance for this problem) a TF32 build would fail and log a spurious error. Decide
+    // before building: use TF32 only if kernel_id is in the TF32 valid set -- the same predicate
+    // the config build used in FillValidKernelsWithTf32Fallback. IsArgsSupported cannot decide it:
+    // with use_tf32 it falls back to the FP32 instances. Building the TF32 valid set asks CK about
+    // every TF32 instance, and this runs on every solution query of an FP32 problem with TF32 on,
+    // so the answer is memoized per solver and (problem, kernel_id); the problem part of the key is
+    // DefaultConfigKey's, which covers everything the valid set depends on.
+    if(use_tf32)
+    {
+        auto key = conv::DefaultConfigKey({}, ctx, problem, false);
+        key += '\n';
+        key += kernel_id;
+        use_tf32 =
+            tf32_kernel_ids_[ToSolverIndex(solver)]
+                .GetOrCompute(
+                    key,
+                    [&] {
+                        // bwd-data/wrw solvers store kernel_id as "<type>+<split_k>", but
+                        // FillValidKernels returns the bare type string; strip the suffix before
+                        // the membership test, as the invoker does.
+                        const auto pos = kernel_id.find_last_of('+');
+                        const auto type_string =
+                            (pos == std::string::npos) ? kernel_id : kernel_id.substr(0, pos);
+                        const auto tf32_kernels = FillValidKernels(solver, problem, dtype, true);
+                        return std::optional<bool>{std::find(tf32_kernels.begin(),
+                                                             tf32_kernels.end(),
+                                                             type_string) != tf32_kernels.end()};
+                    })
+                .value_or(false);
+    }
+    return GetSolution(solver, ctx, problem, kernel_id, use_tf32);
 }
 
 std::vector<std::string> CkImplLibLoader::GetAllKernelTypeStrings(CKSolverType solver) const

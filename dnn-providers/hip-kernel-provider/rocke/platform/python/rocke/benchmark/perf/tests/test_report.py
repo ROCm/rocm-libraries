@@ -191,14 +191,21 @@ class TestDiff(unittest.TestCase):
 
 class TestFormatting(unittest.TestCase):
     def test_format_record_smoke(self):
-        rec = _rec(
-            busy=1000, total=1050, waves=16384, spread={"busy_cycles_pct": 2.1}, n=5
-        )
-        txt = report.format_record(rec)
-        self.assertIn("gfx950", txt)
-        self.assertIn("busy_cycles", txt)
-        self.assertIn("n=5", txt)
-        self.assertIn("panel", txt)
+        for arch in ("gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                rec = _rec(
+                    arch=arch,
+                    busy=1000,
+                    total=1050,
+                    waves=16384,
+                    spread={"busy_cycles_pct": 2.1},
+                    n=5,
+                )
+                txt = report.format_record(rec)
+                self.assertIn(arch, txt)
+                self.assertIn("busy_cycles", txt)
+                self.assertIn("n=5", txt)
+                self.assertIn("panel", txt)
 
     def test_format_diff_smoke(self):
         txt = report.format_diff(

@@ -25,6 +25,7 @@
 #include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrmv.hpp"
+#include "rocsparse_csrmv_lrb.hpp"
 #include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 

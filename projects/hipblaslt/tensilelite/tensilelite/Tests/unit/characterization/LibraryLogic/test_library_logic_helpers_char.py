@@ -1,5 +1,5 @@
 ################################################################################
-# Characterization tests for Tensile.LibraryLogic — pure helper layer.
+# Characterization tests for tensilelite.LibraryLogic — pure helper layer.
 #
 # ADD-ONLY. LibraryLogic.py is dominated by the LogicAnalyzer class (~1200 lines
 # of benchmark-data analysis over per-problem winner arrays) plus
@@ -13,7 +13,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("Tensile.LibraryLogic")
+M = importlib.import_module("tensilelite.LibraryLogic")
 
 
 # ---------------------------------------------------------------------------

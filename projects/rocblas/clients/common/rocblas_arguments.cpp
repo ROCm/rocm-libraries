@@ -156,7 +156,8 @@ void Arguments::init()
 
     use_hipblaslt = -1;
 
-    cleanup = true;
+    cleanup    = true;
+    size_query = false;
 }
 
 bool Arguments::validate()

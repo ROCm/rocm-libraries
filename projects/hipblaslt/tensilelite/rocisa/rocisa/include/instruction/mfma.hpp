@@ -159,7 +159,7 @@ namespace rocisa
         // _scale instruction with scale=0 to avoid a Base layer issue where
         // VOP3PX2/VOP3PX3 instructions may not execute atomically. This is NOT needed
         // on the base gfx1250 build, so it is gated on a per-build toggle set only for
-        // gfx1250-strict / gfx1250v0 (see rocIsa::setForceScaledWMMA, driven from
+        // gfx1250-strict (see rocIsa::setForceScaledWMMA, driven from
         // StinkyTofuArchName in KernelWriter) rather than on the shared ISA (12,5,0),
         // which cannot tell the steppings apart.
         bool forceScaledWMMA() const
@@ -171,10 +171,20 @@ namespace rocisa
             return isWMMA && rocIsa::getInstance().getForceScaledWMMA() && isLowPrecision;
         }
 
+        // gfx1250 K=128 FP8/BF8 uses the dedicated v_wmma_*_16x16x128_{fp8,bf8}_{fp8,bf8}
+        // opcodes instead of f8f6f4. They are absent on V0 (gfx1250-strict), so the
+        // strict build (forceScaledWMMA toggle) keeps the scaled f8f6f4 form.
+        bool useNativeFp8WMMA() const
+        {
+            return capOrDefault(getAsmCaps(), "HasWMMA_V3") && variant[2] == 128
+                   && !rocIsa::getInstance().getForceScaledWMMA();
+        }
+
         std::string typeConvert(InstType iType) const
         {
             size_t f8f6f4_k = capOrDefault(getAsmCaps(), "HasWMMA_V3") ? 128 : 64;
             size_t f4_t     = capOrDefault(getAsmCaps(), "HasWMMA_V3") ? 32 : 0;
+            bool   useF8f6f4 = (variant[2] >= f8f6f4_k) && !useNativeFp8WMMA();
 
             switch(iType)
             {
@@ -195,13 +205,13 @@ namespace rocisa
             case InstType::INST_XF32:
                 return "xf32";
             case InstType::INST_F8:
-                return (variant[2] >= f8f6f4_k) ? "f8f6f4" : "fp8_fp8";
+                return useF8f6f4 ? "f8f6f4" : "fp8_fp8";
             case InstType::INST_BF8:
-                return (variant[2] >= f8f6f4_k) ? "f8f6f4" : "bf8_bf8";
+                return useF8f6f4 ? "f8f6f4" : "bf8_bf8";
             case InstType::INST_F8_BF8:
-                return (variant[2] >= f8f6f4_k) ? "f8f6f4" : "fp8_bf8";
+                return useF8f6f4 ? "f8f6f4" : "fp8_bf8";
             case InstType::INST_BF8_F8:
-                return (variant[2] >= f8f6f4_k) ? "f8f6f4" : "bf8_fp8";
+                return useF8f6f4 ? "f8f6f4" : "bf8_fp8";
             case InstType::INST_F6:
             case InstType::INST_BF6:
             case InstType::INST_F6_B6:
@@ -289,7 +299,8 @@ namespace rocisa
                 = !neg ? "" : (capOrDefault(getAsmCaps(), "HasWMMA_V1") ? " neg_lo:[1,1,1]" : " neg_lo:[1,1]");
             std::string inputPermuteStr = "";
             std::string scaleStr        = "";
-            if(capOrDefault(getAsmCaps(), "HasMFMA_f8f6f4"))
+            // Only f8f6f4 opcodes use CBSZ/BLGP to select operand formats.
+            if(capOrDefault(getAsmCaps(), "HasMFMA_f8f6f4") && typeConvert(instType) == "f8f6f4")
             {
                 switch(instType)
                 {
@@ -350,31 +361,24 @@ namespace rocisa
             }
             else if(capOrDefault(getAsmCaps(), "HasWMMA_f8f6f4"))
             {
+                bool fp8Fmt = (variant[2] > 64) && !useNativeFp8WMMA();
                 switch(instType)
                 {
                 case InstType::INST_F8:
                     inputPermuteStr
-                        = (variant[2] > 64)
-                              ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP8"
-                              : "";
+                        = fp8Fmt ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP8" : "";
                     break;
                 case InstType::INST_BF8:
                     inputPermuteStr
-                        = (variant[2] > 64)
-                              ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_BF8"
-                              : "";
+                        = fp8Fmt ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_BF8" : "";
                     break;
                 case InstType::INST_F8_BF8:
                     inputPermuteStr
-                        = (variant[2] > 64)
-                              ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_BF8"
-                              : "";
+                        = fp8Fmt ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_BF8" : "";
                     break;
                 case InstType::INST_BF8_F8:
                     inputPermuteStr
-                        = (variant[2] > 64)
-                              ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP8"
-                              : "";
+                        = fp8Fmt ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP8" : "";
                     break;
                 case InstType::INST_F6:
                     inputPermuteStr

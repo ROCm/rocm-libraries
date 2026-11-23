@@ -18,15 +18,18 @@
     'DataTypeMXSB',
     'DestDataType',
     'F32XdlMathOp',
-    'FusedGemmA2A',
+    'FusedA2A',
     'Gradient',
     'GroupedGemm',
     'HighPrecisionAccumulate',
     'IndexAssignmentsA',
     'IndexAssignmentsB',
     'IndexAssignmentsLD',
+    'Int4EncodingA',
     'MXBlockA',
     'MXBlockB',
+    'MXBlockFreeA',
+    'MXBlockFreeB',
     'MacDataTypeA',
     'MacDataTypeB',
     'MetadataLayout',
@@ -39,6 +42,9 @@
     'NumIndicesLD',
     'OperationType',
     'OutputAmaxD',
+    'OutputPeerD',
+    'ScaleBlockSizesA',
+    'ScaleZeroPointA',
     'SetConstStrideA',
     'SetConstStrideB',
     'SetConstStrideBias',
@@ -118,8 +124,8 @@
     'F32XdlMathOp': list([
       'int',
     ]),
-    'FusedGemmA2A': list([
-      'bool',
+    'FusedA2A': list([
+      'str',
     ]),
     'Gradient': list([
       'bool',
@@ -139,10 +145,19 @@
     'IndexAssignmentsLD': list([
       'list',
     ]),
+    'Int4EncodingA': list([
+      'str',
+    ]),
     'MXBlockA': list([
       'int',
     ]),
     'MXBlockB': list([
+      'int',
+    ]),
+    'MXBlockFreeA': list([
+      'int',
+    ]),
+    'MXBlockFreeB': list([
       'int',
     ]),
     'MacDataTypeA': list([
@@ -179,6 +194,15 @@
       'str',
     ]),
     'OutputAmaxD': list([
+      'bool',
+    ]),
+    'OutputPeerD': list([
+      'bool',
+    ]),
+    'ScaleBlockSizesA': list([
+      'list',
+    ]),
+    'ScaleZeroPointA': list([
       'bool',
     ]),
     'SetConstStrideA': list([

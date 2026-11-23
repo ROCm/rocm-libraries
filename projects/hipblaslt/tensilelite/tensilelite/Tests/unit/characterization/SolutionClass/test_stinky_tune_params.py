@@ -30,8 +30,8 @@ import sys
 
 import pytest
 
-from Tensile.SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin
-from Tensile.SolutionStructs.Solution import Solution
+from tensilelite.SolutionStructs.Naming import getKernelNameMin, getSolutionNameMin
+from tensilelite.SolutionStructs.Solution import Solution
 
 pytestmark = pytest.mark.unit
 
@@ -101,8 +101,8 @@ def test_constructor_unset_adds_no_key(solution, assembler, isa_info_map):
 
 
 def test_info_notice_announced_once_per_distinct_value(solution, assembler, isa_info_map, capsys):
-    S = sys.modules["Tensile.SolutionStructs.Solution"]  # the package re-exports the class
-    from Tensile.Common import setVerbosity
+    S = sys.modules["tensilelite.SolutionStructs.Solution"]  # the package re-exports the class
+    from tensilelite.Common import setVerbosity
 
     setVerbosity(1)
     config = dict(solution)

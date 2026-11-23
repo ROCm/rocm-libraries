@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from Tensile.CustomKernels import _metadataArgToCustomArg
-from Tensile.RocRollerWgm import (
+from tensilelite.CustomKernels import _metadataArgToCustomArg
+from tensilelite.RocRollerWgm import (
     WGM_ROLE_ORDER,
     classify_wgm_expression,
     evaluate_wgm,

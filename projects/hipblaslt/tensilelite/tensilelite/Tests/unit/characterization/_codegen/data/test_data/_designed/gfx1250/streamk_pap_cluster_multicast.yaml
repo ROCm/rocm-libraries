@@ -63,7 +63,7 @@ BenchmarkProblems:
         - WorkAssignment: [StaticGrid]
         - StreamKAtomic: [0]
         - PersistentXCCMapping: [0]
-        - ClusterDim: [[4, 1], [2, 2]]
+        - ClusterDim: [[4, 1], [2, 2], [1, 4]]
         - StaggerU: [0]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]

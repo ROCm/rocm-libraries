@@ -16,8 +16,7 @@ Knobs are runtime-configurable parameters that control engine behavior, performa
 2. **Knob Metadata**: Understanding knob types, constraints, and default values
 3. **Setting Knob Values**: Creating execution plans with custom knob settings
 4. **Knob Validation**: Validating settings against knob constraints
-5. **Knob Value Types**: Using integer, float, and string knobs
-6. **Real Execution**: Running graphs with different knob configurations
+5. **Real Execution**: Running a batchnorm inference graph with default or benchmarking knob settings
 
 ## Building
 
@@ -25,75 +24,62 @@ The sample is built as part of the hipDNN samples:
 
 ```bash
 cd /path/to/hipdnn/samples/build
-cmake ..
-make knobs_usage
+cmake -G Ninja ..
+ninja hipdnn_sample_knobs_usage
 ```
+
+The executable is created in `build/bin`.
 
 ## Running
 
 ### Basic Usage
 
 ```bash
-./knobs_usage
+./bin/hipdnn_sample_knobs_usage
 ```
 
-This runs all demonstrations including actual graph executions.
+This runs all demonstrations, then executes the graph with default knob values.
 
-### Skip Execution Examples
+### Execute with Benchmarking Enabled
 
-To see knob API demonstrations without running graphs:
+To execute the graph with `global.benchmarking=1`:
 
 ```bash
-./knobs_usage --skip-execution
+./bin/hipdnn_sample_knobs_usage --benchmark
 ```
-
-This is faster and useful when you only want to learn about the knob API.
 
 ### Help
 
 ```bash
-./knobs_usage --help
+./bin/hipdnn_sample_knobs_usage --help
 ```
 
 ## Sample Output
 
-The sample produces detailed output organized into sections:
+The sample prints its output in these sections:
 
 ```
-=========================================
-  hipDNN Knobs Usage Sample
-=========================================
+hipDNN Knobs Usage Sample
 
-1. Querying Available Knobs
-   - Lists all knobs for an engine
-   - Shows knob metadata (type, description, constraints, defaults)
+Querying Knobs (vector):
+   - Lists all knobs for the top-ranked engine
+   - Shows knob type, default value, and constraint
 
-2. Using Knob Lookup Map
+Querying Knobs (map):
    - Demonstrates map-based knob lookup
-   - Shows how to find specific knobs by ID
+   - Looks up global.benchmarking by ID
 
-3. Using Default Knob Values
-   - Creates execution plan with defaults
-   - Demonstrates simplest knob usage
+Setting KnobSettings:
+   - Sets global.benchmarking=1 and global.workspace_size_limit=64MB
+   - Creates an execution plan with these settings
 
-4. Setting Custom Knob Values
-   - Shows how to set integer knob values
-   - Demonstrates creating plans with custom settings
-
-5. Knob Validation
+Validating KnobSettings:
    - Validates settings against constraints
-   - Shows both valid and invalid examples
+   - Shows a valid (1) and an invalid (5) value for global.benchmarking
 
-6. Different Knob Value Types
-   - Integer knobs (int64_t)
-   - Float knobs (double)
-   - String knobs
-
-7. Execution with Default Knobs
-   - Runs actual batchnorm graph with defaults
-
-8. Execution with Benchmarking Enabled
-   - Runs graph with global.benchmarking=1
+Execution OK, output[0..4]: ...
+   - Runs a batchnorm inference graph with default knobs, or with
+     global.benchmarking=1 when --benchmark is given
 ```
 
 ## Key Code Patterns
@@ -113,8 +99,8 @@ for (const auto& knob : knobs) {
 
 ```cpp
 std::vector<KnobSetting> settings;
-settings.emplace_back("global.benchmarking", 1);
-settings.emplace_back("global.workspace_size_limit", 64 * 1024 * 1024);
+settings.emplace_back("global.benchmarking", static_cast<int64_t>(1));
+settings.emplace_back("global.workspace_size_limit", static_cast<int64_t>(64 * 1024 * 1024));
 
 auto error = graph.create_execution_plan_ext(engineId, settings);
 ```
@@ -122,7 +108,7 @@ auto error = graph.create_execution_plan_ext(engineId, settings);
 ### Validate Knob Settings
 
 ```cpp
-KnobSetting setting("global.benchmarking", 1);
+KnobSetting setting("global.benchmarking", static_cast<int64_t>(1));
 auto validationError = knob.validate(setting);
 
 if (validationError.is_good()) {

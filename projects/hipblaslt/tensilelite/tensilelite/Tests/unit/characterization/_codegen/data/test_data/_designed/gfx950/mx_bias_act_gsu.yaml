@@ -4,7 +4,7 @@
 ################################################################################
 # R6 DESIGNED config — gfx950 MXFP8 rich GEMM: bias + activation + GSU fork.
 #
-# Targets uncovered arms in Tensile/KernelWriterAssembly.py for gfx950:
+# Targets uncovered arms in tensilelite/KernelWriterAssembly.py for gfx950:
 #
 #   isgfx950 MX shiftK / tail zeroing (lines ~8725-8830):
 #     MXBlockA=32, MXBlockB=32 with isgfx950=True reaches the separate

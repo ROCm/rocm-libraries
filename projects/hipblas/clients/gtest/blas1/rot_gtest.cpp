@@ -55,7 +55,7 @@ namespace
                     return false;
 
                 // type filters
-                return static_cast<bool>(FILTER<T...>{});
+                return FILTER<T...>::value;
             }
         };
 

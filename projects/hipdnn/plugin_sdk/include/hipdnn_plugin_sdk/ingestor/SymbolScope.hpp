@@ -9,8 +9,7 @@
 #include <utility>
 #include <vector>
 
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
-
+#include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 namespace hipdnn_plugin_sdk::ingestor
 {
 
@@ -66,6 +65,22 @@ public:
     {
         ScoreRegistry::registerSymbol(symbol, scorer);
         recordUndo(&ScoreRegistry::unregisterSymbol, symbol);
+    }
+
+    /// Registered under the symbol of a kernel-scoped matcher; see CandidateFilterFn.
+    /// @throws std::runtime_error if @p symbol is already registered.
+    void add(const std::string& symbol, CandidateFilterFn filter)
+    {
+        CandidateFilterRegistry::registerSymbol(symbol, filter);
+        recordUndo(&CandidateFilterRegistry::unregisterSymbol, symbol);
+    }
+
+    /// Registered under the symbol of a kernel-scoped matcher; see KernelPrepareFn.
+    /// @throws std::runtime_error if @p symbol is already registered.
+    void add(const std::string& symbol, KernelPrepareFn prepare)
+    {
+        KernelPrepareRegistry::registerSymbol(symbol, prepare);
+        recordUndo(&KernelPrepareRegistry::unregisterSymbol, symbol);
     }
 
     /// @p handler must outlive every plan built from it; packs use a

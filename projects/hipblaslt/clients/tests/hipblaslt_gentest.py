@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 # ########################################################################
 # Copyright (C) 2022-2023 Advanced Micro Devices, Inc.
 #
@@ -46,6 +46,13 @@ INT_RANGE_RE = re.compile(
 
 # Regex for include: YAML extension
 INCLUDE_RE = re.compile(r'include\s*:\s*([-.\w/]+)')
+
+# Keys that hipBLASLt profile logs (HIPBLASLT_LOG_MASK 64 and 128) write but that are
+# not Arguments fields. They are accepted and ignored so that a profile log can be
+# replayed with hipblaslt-bench --yaml. In particular, swizzleA and swizzleB do not set
+# swizzle_a and swizzle_b.
+PROFILE_LOG_KEYS = frozenset(
+    {'call_count', 'any_stride', 'swizzleA', 'swizzleB', 'kernel_name', 'solution_Name'})
 
 args = {}
 testcases = set()
@@ -326,8 +333,30 @@ def gen_shape_combinations(M: List, N: List, K: List) -> Tuple[List, List, List]
     problem_sizes = list(product(M, N, K))
     return tuple(tuple(s[i] for s in problem_sizes) for i in range(len(problem_sizes[0])))
 
+def char_array_bytes(name, value, ctype):
+    """Encode a string for a fixed-size char array, keeping room for its terminator.
+
+    ctypes silently stores a value that exactly fills the array with no NUL, and the
+    C++ side then reads past the field, so reject that as well as anything longer.
+    """
+    data = bytes(value, 'utf_8')
+    size = ctypes.sizeof(ctype)
+    if len(data) >= size:
+        sys.exit(f"{name} '{value}' is {len(data)} bytes, but the field holds at most "
+                 f"{size - 1} plus its terminator\n")
+    return data
+
+
 def write_test(test):
     """Write the test case out to the binary file if not seen already"""
+
+    # A key that is not an Arguments field would otherwise be dropped silently,
+    # leaving the test to run with that field's default.
+    fields = {name for name, _ in param['Arguments']._fields_}
+    unknown = set(test) - fields - PROFILE_LOG_KEYS
+    if unknown:
+        sys.exit("Unknown test argument(s) in " + str(test.get('name', '')) +
+                 ": " + ", ".join(sorted(unknown)))
 
     # For each argument declared in arguments, we generate a positional
     # argument in the Arguments constructor. For strings, we pass the
@@ -339,7 +368,7 @@ def write_test(test):
         try:
             if issubclass(ctype, ctypes.Array):
                 if issubclass(ctype._type_, ctypes.c_char):
-                    arg.append(bytes(test[name], 'utf_8'))
+                    arg.append(char_array_bytes(name, test[name], ctype))
                 else:
                     try:
                         arg.append(ctype(*test[name]))

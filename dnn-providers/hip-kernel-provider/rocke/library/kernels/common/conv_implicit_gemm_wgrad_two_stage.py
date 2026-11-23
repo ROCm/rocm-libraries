@@ -64,7 +64,6 @@ from typing import Optional, Tuple
 
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
-    _wg_K,
     _wg_M,
     _wg_N,
     build_implicit_gemm_conv_wgrad,
@@ -222,22 +221,23 @@ def build_implicit_gemm_conv_wgrad_two_stage(
     # Resolve split_k=-1 (auto sentinel) before the guard so callers can pass
     # split_k=-1 and get the heuristic value rather than a confusing rejection.
     if spec.split_k == -1:
-        from rocke.helpers.split_k import select_split_k_wgrad
+        from kernels.common.conv_split_k import resolve_conv_split_k
 
-        resolved = select_split_k_wgrad(
-            wg_M=spec.wg_M,
-            wg_N=spec.wg_N,
-            wg_K=_wg_K(spec.problem),
+        resolved = resolve_conv_split_k(
+            "wgrad",
+            spec.problem,
+            arch=arch,
+            dtype=spec.data.dtype_d,
             tile_m=spec.tile_m,
             tile_n=spec.tile_n,
             tile_k=spec.tile_k,
-            arch=arch,
-            # See the note in build_implicit_gemm_conv_wgrad: the merged
-            # group count is the real CTA multiplier. Equal at gm == 1.
-            groups=spec.grid_groups,
             block_size=spec.block_size,
-        ).split_k
-        spec = dc_replace(spec, split_k=resolved)
+            group_merge=spec.group_merge,
+            ws_replicas=spec.ws_replicas,
+            reduction="workspace",
+            allow_unsplit=False,
+        )
+        spec = dc_replace(spec, split_k=resolved.split_k)
 
     if spec.split_k <= 1:
         raise ValueError(

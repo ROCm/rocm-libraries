@@ -45,7 +45,7 @@ struct generator_config_selector<ROCRAND_RNG_PSEUDO_MT19937, T>
             case target_arch::gfx1170: return 128;
             case target_arch::gfx1171: return 128;
             case target_arch::gfx1201: return 64;
-            case target_arch::gfx950: return 1024;
+            case target_arch::gfx950: return 512;
             default: return generator_config_defaults<ROCRAND_RNG_PSEUDO_MT19937, T>::threads;
         }
     }

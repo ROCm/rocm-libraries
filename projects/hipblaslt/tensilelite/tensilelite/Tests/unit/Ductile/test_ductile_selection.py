@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Extended tests for Tensile.ductile.core.selection targeting uncovered paths.
+"""Extended tests for tensilelite.ductile.core.selection targeting uncovered paths.
 
 Covers: Beta, Random, Rank, Tournament, RouletteWheel, Truncation; elitism paths;
 replacement=False; __repr__ methods; and Selection base __call__ size contract.
@@ -10,8 +10,8 @@ replacement=False; __repr__ methods; and Selection base __call__ size contract.
 import numpy as np
 import pytest
 
-from Tensile.ductile.core import Selection
-from Tensile.ductile.core.population import Individual, Population
+from tensilelite.ductile.core import Selection
+from tensilelite.ductile.core.population import Individual, Population
 
 pytestmark = pytest.mark.unit
 

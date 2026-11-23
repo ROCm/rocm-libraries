@@ -32,6 +32,14 @@
 
 namespace hiptensor
 {
+    // HIP keeps the error of a failed call until hipGetLastError() reads it, and CK checks
+    // hipGetLastError() after every kernel launch and throws on any error. Call this after
+    // handling a failed HIP call so a later, unrelated launch does not report it again.
+    inline void clearHipError()
+    {
+        (void)hipGetLastError();
+    }
+
     class HipDevice
     {
     public:
@@ -49,6 +57,8 @@ namespace hiptensor
             GFX1151          = 0x1151,
             GFX1152          = 0x1152,
             GFX1153          = 0x1153,
+            GFX1170          = 0x1170,
+            GFX1171          = 0x1171,
             GFX1200          = 0x1200,
             GFX1201          = 0x1201,
             GFX1250          = 0x1250,
@@ -62,8 +72,14 @@ namespace hiptensor
             UNSUPPORTED_WARP_SIZE = 0u,
         };
 
+        // Does not query HIP; the object reports an unsupported device until initialize() succeeds.
         HipDevice();
         ~HipDevice() = default;
+
+        // Queries the properties of the given device. Leaves the object unchanged on failure.
+        hipError_t initialize(hipDevice_t deviceId);
+
+        hipDeviceProp_t const& getProperties() const;
 
         hipDevice_t  getDeviceId() const;
         hipGcnArch_t getGcnArch() const;

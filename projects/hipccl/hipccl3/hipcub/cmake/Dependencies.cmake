@@ -89,6 +89,10 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "Global flag to cause add_library() to crea
 
 foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
   set(USER_${SHARED_OPTION} ${${SHARED_OPTION}})
+  unset(USER_CACHED_${SHARED_OPTION})
+  if(DEFINED CACHE{${SHARED_OPTION}})
+    get_property(USER_CACHED_${SHARED_OPTION} CACHE ${SHARED_OPTION} PROPERTY VALUE)
+  endif()
   set(${SHARED_OPTION} OFF)
 endforeach()
 
@@ -426,7 +430,7 @@ endif(USER_BUILD_TEST)
 
 # CUB (only for CUDA platform)
 if(HIP_COMPILER STREQUAL "nvcc")
-  set(CCCL_MINIMUM_VERSION 3.0.0)
+  set(CCCL_MINIMUM_VERSION 3.1.4)
   if(NOT DOWNLOAD_CUB)
     find_package(CCCL ${CCCL_MINIMUM_VERSION} CONFIG)
   endif()
@@ -495,7 +499,6 @@ else()
         LOG_BUILD TRUE
         LOG_INSTALL TRUE
       )
-      override_cache_variable(BUILD_CODE_COVERAGE OFF BOOL)
       FetchContent_MakeAvailable(prim)
 
       if(NOT TARGET roc::rocprim)
@@ -505,13 +508,20 @@ else()
       if(NOT TARGET roc::rocprim_hip)
         add_library(roc::rocprim_hip ALIAS rocprim_hip)
       endif()
-      restore_cache_variable(BUILD_CODE_COVERAGE BOOL)
     endif()
   endif()
+
+  # libhipcxx (only for ROCm platform) - hard dependency, see require_libhipcxx.cmake
+  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/modules")
+  include(require_libhipcxx)
+  hipccl_require_libhipcxx(3.4)
 endif()
 
 foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
   set(${SHARED_OPTION} ${USER_${SHARED_OPTION}})
+  if(DEFINED USER_CACHED_${SHARED_OPTION})
+    set_property(CACHE ${SHARED_OPTION} PROPERTY VALUE "${USER_CACHED_${SHARED_OPTION}}")
+  endif()
 endforeach()
 
 # Restore user global state

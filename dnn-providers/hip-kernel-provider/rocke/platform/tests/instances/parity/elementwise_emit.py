@@ -51,6 +51,9 @@ def _spec(idx: int) -> ElementwiseSpec:
         return ElementwiseSpec(op="relu", dtype="f64", block_size=128, vec=2)
     if idx == 12:
         return ElementwiseSpec(op="max", dtype="f64", block_size=512, vec=2)
+    if idx == 13:
+        # f64 abs lowers through ``llvm.fabs.f64``.
+        return ElementwiseSpec(op="abs", dtype="f64", block_size=256, vec=2)
     raise SystemExit(f"unknown config index {idx}")
 
 

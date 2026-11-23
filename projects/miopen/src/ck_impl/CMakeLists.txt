@@ -109,10 +109,12 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     # top-level CMakeLists.txt). These CK-impl plugins device-compile the same way the main
     # MIOpen library does, so without this their device objects fail to link with undefined
     # __ubsan_handle_*_abort symbols. -Xarch_device scopes -fno-sanitize=undefined to the device
-    # sub-compile only, so host code keeps UBSan.
+    # sub-compile only, so host code keeps UBSan. The link option keeps clang from linking the
+    # host-side ubsan_offload runtime into the plugin (see src/CMakeLists.txt).
     if(MIOPEN_DISABLE_DEVICE_UBSAN)
         target_compile_options(${lib_name} PRIVATE
             "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_device -fno-sanitize=undefined>")
+        target_link_options(${lib_name} PRIVATE "SHELL:-Xarch_device -fno-sanitize=undefined")
     endif()
 
     # Mark as building the DLL for dllexport on Windows
@@ -161,12 +163,25 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     target_link_libraries(${lib_name} PRIVATE hip::device)
 
     # These plugins consume MIOpen's internal C++ types (ConvSolution,
-    # InvokerFactory, ProblemDescription, etc.), not its C API, so they must link
-    # whichever library carries those symbols. _MIOPEN_IMPL_TARGET names it in
-    # either configuration: the single MIOpen library by default, or
-    # MIOpen_private when MIOPEN_ENABLE_HIPDNN_WRAPPER=ON splits the internals out
-    # behind a public wrapper that exports only the C API.
+    # InvokerFactory, ProblemDescription, etc.) and call one C API function (see
+    # below), so they must link whichever library carries those symbols.
+    # _MIOPEN_IMPL_TARGET names it in either configuration: the single MIOpen
+    # library by default, or MIOpen_private when MIOPEN_ENABLE_HIPDNN_WRAPPER=ON
+    # splits the internals out behind a public wrapper that exports only the C
+    # API.
     target_link_libraries(${lib_name} PRIVATE ${_MIOPEN_IMPL_TARGET})
+
+    # The plugins call miopenConvolutionABBackwardWeightsGetWorkSpaceSize through
+    # inline code in implicitgemm_ck_util_common.hpp. With the split on, the
+    # private library exports it only as _impl, so these sources need the same
+    # rename as the private library.
+    if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
+        miopen_apply_private_rename(${lib_name})
+    endif()
+
+    # Embed a Windows VERSIONINFO resource; see miopen_embed_version_resource() in
+    # src/CMakeLists.txt, defined before this subdirectory is added and so visible here.
+    miopen_embed_version_resource(${lib_name} "MIOpen CK Grouped-Conv Plugin (${arch_base})" ${lib_name})
 
     # Install alongside MIOpen
     set_target_properties(${lib_name} PROPERTIES INSTALL_RPATH "$ORIGIN")

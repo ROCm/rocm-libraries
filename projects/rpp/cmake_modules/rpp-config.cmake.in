@@ -67,6 +67,15 @@ if(NOT TARGET @PROJECT_NAME@::@PROJECT_NAME@)
   endif()
 endif ()
 
+find_path(@PROJECT_NAME@_HALF_INCLUDE_DIR
+  NAMES half/half.hpp half.hpp
+  HINTS "${PACKAGE_PREFIX_DIR}/include" "$ENV{ROCM_PATH}/include")
+mark_as_advanced(@PROJECT_NAME@_HALF_INCLUDE_DIR)
+if(@PROJECT_NAME@_HALF_INCLUDE_DIR)
+  set_property(TARGET @PROJECT_NAME@::@PROJECT_NAME@ APPEND PROPERTY
+    INTERFACE_INCLUDE_DIRECTORIES "${@PROJECT_NAME@_HALF_INCLUDE_DIR}")
+endif()
+
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(
     @PROJECT_NAME@

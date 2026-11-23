@@ -94,7 +94,7 @@ def test_arm1_force_true_from_global_parameters():
     Exercises the public-input arm directly by reading from globalParameters
     as the production code does.  Does not reach the filesystem probe.
     """
-    from Tensile.Common.GlobalParameters import globalParameters
+    from tensilelite.Common.GlobalParameters import globalParameters
 
     # Snapshot and restore to avoid cross-test contamination.
     original = globalParameters["ForceRedoBenchmarkProblems"]
@@ -114,7 +114,7 @@ def test_arm1_force_false_from_global_parameters():
     When force is False, the predicate outcome depends on arm2 (file probe).
     This pins that arm1 does not short-circuit the OR when False.
     """
-    from Tensile.Common.GlobalParameters import globalParameters
+    from tensilelite.Common.GlobalParameters import globalParameters
 
     original = globalParameters["ForceRedoBenchmarkProblems"]
     try:
@@ -136,7 +136,7 @@ def test_arm1_default_is_bool():
     Pins the type so regressions in GlobalParameters.py are caught.
     The canonical default (line 101 of GlobalParameters.py) is True.
     """
-    from Tensile.Common.GlobalParameters import globalParameters
+    from tensilelite.Common.GlobalParameters import globalParameters
 
     assert isinstance(globalParameters["ForceRedoBenchmarkProblems"], bool)
 

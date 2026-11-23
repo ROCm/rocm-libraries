@@ -5,10 +5,12 @@
  *
  * Grid / workgroup-id remapping helpers for chiplet locality.
  *
- * This phase ports ONLY:
- *   chiplet_aware_super_tile_dynamic
+ * Public entries:
+ *   chiplet_aware_super_tile_dynamic, chiplet_aware_super_tile,
+ *   chiplet_transform_chunked_runtime, xcd_remap_gated, xcd_remap_contiguous,
+ *   xcd_remap_plane
  *
- * which is the runtime composition of:
+ * The super-tile entries compose:
  *   chiplet_transform_chunked_dynamic  (helper, ported here as a file-local
  *                                       static so the public entry is exact)
  *   super_tile_swizzle_dynamic         (likewise)
@@ -81,6 +83,73 @@ rocke_super_tile_swizzle_result_t rocke_chiplet_aware_super_tile(rocke_ir_builde
                                                                  int wgm,
                                                                  int num_xcds,
                                                                  int chunk_size);
+
+/* XCD-contiguous remap with a runtime chunk (shape-generic kernels).
+ *
+ * Python signature:
+ *   chiplet_transform_chunked_runtime(
+ *       b, wgid, *, num_wgs, num_xcds, chunk_size=None)
+ *
+ * wgid / num_wgs / chunk_size are i32 SSA Values; chunk_size may be NULL
+ * (Python None), in which case the chunk is num_wgs / num_xcds. The chunk is
+ * clamped to >= 1 in-kernel. num_xcds is a compile-time int. On invalid args
+ * the builder's sticky error is set and NULL is returned.
+ */
+rocke_value_t* rocke_chiplet_transform_chunked_runtime(rocke_ir_builder_t* b,
+                                                       rocke_value_t* wgid,
+                                                       rocke_value_t* num_wgs,
+                                                       int num_xcds,
+                                                       rocke_value_t* chunk_size);
+
+/* Result of rocke_xcd_remap_plane. Python returns the tuple (x, y). */
+typedef struct rocke_xcd_remap_plane_result
+{
+    rocke_value_t* x; /* i32 SSA, remapped x within the plane */
+    rocke_value_t* y; /* i32 SSA, remapped y within the plane */
+} rocke_xcd_remap_plane_result_t;
+
+/* Chunked XCD remap with runtime XCD count and chunk (kernargs); the identity
+ * when either is <= 0.
+ *
+ * Python: xcd_remap(b, wgid, *, num_wgs, num_xcds=n, chunk=chunk,
+ *                   mode="gated")
+ *
+ * All arguments are i32 SSA Values. The other chunked forms of the Python
+ * entry point (compile-time or runtime-chunk) are the existing
+ * rocke_chiplet_transform_chunked_* helpers.
+ */
+rocke_value_t* rocke_xcd_remap_gated(rocke_ir_builder_t* b,
+                                     rocke_value_t* wgid,
+                                     rocke_value_t* num_wgs,
+                                     rocke_value_t* n,
+                                     rocke_value_t* chunk);
+
+/* One contiguous ceil(npid / num_xcds) range per XCD; a bijection of
+ * [0, npid).
+ *
+ * Python: xcd_remap(b, pid, *, num_wgs=npid, num_xcds=num_xcds,
+ *                   mode="contiguous")
+ *
+ * pid / npid are i32 SSA Values; num_xcds is a compile-time int.
+ */
+rocke_value_t* rocke_xcd_remap_contiguous(rocke_ir_builder_t* b,
+                                          rocke_value_t* pid,
+                                          rocke_value_t* npid,
+                                          int num_xcds);
+
+/* Gated remap of one gx * gy batch plane; returns the remapped (x, y).
+ *
+ * Python: xcd_remap_plane(b, x, y, *, gx, gy, num_xcds=n, chunk=chunk)
+ *
+ * All arguments are i32 SSA Values; gx must be >= 1 at run time.
+ */
+rocke_xcd_remap_plane_result_t rocke_xcd_remap_plane(rocke_ir_builder_t* b,
+                                                     rocke_value_t* x,
+                                                     rocke_value_t* y,
+                                                     rocke_value_t* gx,
+                                                     rocke_value_t* gy,
+                                                     rocke_value_t* n,
+                                                     rocke_value_t* chunk);
 
 #ifdef __cplusplus
 } /* extern "C" */

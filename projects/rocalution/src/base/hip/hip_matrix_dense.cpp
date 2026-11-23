@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -126,8 +126,7 @@ namespace rocalution
 
         this->Clear();
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         this->nrow_ = nrow;
         this->ncol_ = ncol;
@@ -144,8 +143,7 @@ namespace rocalution
         assert(this->nnz_ >= 0);
         assert(this->nnz_ == this->nrow_ * this->ncol_);
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         *val = this->mat_.val;
 
@@ -441,7 +439,7 @@ namespace rocalution
             assert(this->nrow_ == hip_cast_mat->nrow_);
             assert(this->ncol_ == hip_cast_mat->ncol_);
 
-            copy_d2h(this->nnz_,
+            copy_d2d(this->nnz_,
                      this->mat_.val,
                      hip_cast_mat->mat_.val,
                      true,
@@ -591,7 +589,7 @@ namespace rocalution
 
             rocblas_status status;
 
-            ValueType beta = static_cast<ValueType>(0);
+            ValueType beta = static_cast<ValueType>(1);
 
             if(DENSE_IND_BASE == 0)
             {
@@ -686,6 +684,18 @@ namespace rocalution
         }
 
         return true;
+    }
+
+    template <typename ValueType>
+    void HIPAcceleratorMatrixDENSE<ValueType>::LUAnalyse(void)
+    {
+        // do nothing
+    }
+
+    template <typename ValueType>
+    void HIPAcceleratorMatrixDENSE<ValueType>::LUAnalyseClear(void)
+    {
+        // do nothing
     }
 
     template <typename ValueType>

@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from .CustomKernels import getCustomKernelConfig
+from .CustomKernels import getCustomKernelConfig, readCustomKernelConfig
 from .ExecutionPolicy import normalize_execution_policy_with_defaults
 from rocisa.enum import DataTypeEnum
 from . import SolutionLibrary
@@ -65,7 +65,7 @@ try:
     import yaml
 except ImportError:
     printExit(
-        "You must install PyYAML to use Tensile (to parse config files). See http://pyyaml.org/wiki/PyYAML for installation instructions."
+        "You must install PyYAML to use TensileLite (to parse config files). See http://pyyaml.org/wiki/PyYAML for installation instructions."
     )
 
 try:
@@ -260,6 +260,7 @@ def writeJson(filename, data):
         json_object = json.dumps(data, option=json.OPT_INDENT_2).decode("utf-8") if 'orjson' in sys.modules else json.dumps(data, indent=2)
         f.write(json_object)
 
+
 def writeMsgPack(filename, data):
     """Writes data to file in compressed Message Pack format (.dat.zlib)."""
     BinaryLibraryIO.writeMessagePack(filename, data)
@@ -438,7 +439,7 @@ def parseSolutionsData(
 
     versionString = data[0]["MinimumRequiredVersion"]
     if not versionIsCompatible(versionString):
-        printWarning("Version = {} in solution file {} does not match Tensile version = {}" \
+        printWarning("Version = {} in solution file {} does not match TensileLite version = {}" \
                 .format(srcFile, versionString, __version__) )
 
     if "ProblemSizes" not in data[1]:
@@ -551,8 +552,7 @@ def parseLibraryLogicFile(
         printSolutionRejectionReason: bool,
         printIndexAssignmentInfo: bool,
         isaInfoMap: Dict[str, IsaInfo],
-        lazyLibraryLoading: bool,
-        archRenames: Optional[Dict[str, str]] = None,
+        lazyLibraryLoading: bool
     ):
     """Wrapper function to read and parse a library logic file."""
     return parseLibraryLogicData(
@@ -563,9 +563,71 @@ def parseLibraryLogicFile(
                printSolutionRejectionReason,
                printIndexAssignmentInfo,
                isaInfoMap,
-               lazyLibraryLoading,
-               archRenames,
+               lazyLibraryLoading
            )
+
+
+def _companionCsvXzPath(yamlPath):
+    p = yamlPath + ".csv.xz"
+    return p if os.path.isfile(p) else None
+
+
+def _loadMeshTableFromCsvXz(csvXzPath):
+    import csv as _csv
+    import lzma
+
+    table = []
+    with lzma.open(csvXzPath, "rt") as f:
+        reader = _csv.reader(f)
+        header = next(reader)
+        numCols = len(header)
+        if numCols == 6:
+            if header != ["M", "N", "batch", "K", "solutionIdx", "speed"]:
+                raise ValueError(
+                    f"{csvXzPath}: unexpected 6-column header: {header}"
+                )
+            hasSpeed = True
+        elif numCols == 5:
+            if header != ["M", "N", "batch", "K", "solutionIdx"]:
+                raise ValueError(
+                    f"{csvXzPath}: unexpected 5-column header: {header}"
+                )
+            hasSpeed = False
+        else:
+            raise ValueError(
+                f"{csvXzPath}: expected 5 or 6 columns, got {numCols}: {header}"
+            )
+        for lineNum, row in enumerate(reader, start=2):
+            if len(row) != numCols:
+                raise ValueError(
+                    f"{csvXzPath}:{lineNum}: expected {numCols} columns, "
+                    f"got {len(row)}"
+                )
+            key = [int(row[0]), int(row[1]), int(row[2]), int(row[3])]
+            if hasSpeed:
+                try:
+                    speed = float(row[5])
+                except (ValueError, IndexError) as e:
+                    raise ValueError(
+                        f"{csvXzPath}:{lineNum}: invalid speed value: {row[5]!r}"
+                    ) from e
+            else:
+                speed = 0.0
+            table.append([key, [int(row[4]), speed]])
+    return table
+
+
+def _validateTableSolutionIndices(table, solutions, sourcePath):
+    validIndices = {s["SolutionIndex"] for s in solutions}
+    if not validIndices:
+        return
+    csvIndices = {entry[1][0] for entry in table}
+    invalid = csvIndices - validIndices
+    if invalid:
+        raise ValueError(
+            f"{sourcePath}: references {len(invalid)} solution "
+            f"index(es) not in YAML: {sorted(invalid)[:20]}"
+        )
 
 
 def prepareLibraryLogicDict(data: dict[str, Any]) -> None:
@@ -595,7 +657,7 @@ def prepareLibraryLogicDict(data: dict[str, Any]) -> None:
         data["Library"]["indexOrder"] = None
         data["Library"]["table"] = [0, len(data["Solutions"])]
         data["Library"]["distance"] = None
-    elif libraryType in ("Equality", "GridBased", "Range"):
+    elif libraryType in ("Equality", "GridBased", "MeshBased", "Range"):
         data["LibraryType"] = "Matching"
         data["Library"] = {}
         data["Library"]["indexOrder"] = data["IndexOrder"]
@@ -673,6 +735,55 @@ def reorderSolutionDictForDictMerge(state: Dict[str, Any]) -> Dict[str, Any]:
     return bundle["Solutions"][0]
 
 
+def _warnReplacedPredicates(customKernelName, customConfig, declared, srcFile):
+    """Warn when custom.config replaces a predicate value the logic file itself declares.
+
+    custom.config wins for every key it declares, so a logic file that narrows or widens
+    a predicate differently would otherwise change meaning without notice.
+    """
+    for key, value in customConfig.items():
+        if key.startswith("Assert") and key in declared and declared[key] != value:
+            printWarning(f"custom kernel '{customKernelName}': custom.config {key} = {value!r} "
+                         f"replaces {declared[key]!r} from {srcFile}")
+
+
+def _problemTypeForCustomKernel(problemType, features, printIndexAssignmentInfo, srcFile):
+    """Return the ProblemType one custom-kernel solution is built from.
+
+    The logic file's ProblemType is shared (UseBias and hipblaslt_all stay on for
+    every other solution). A handwritten kernel whose custom.config Features declare
+    SupportsBias, SupportsActivation or SupportsScaleAlpha false has no such kernargs,
+    so that one solution must reject those problems and fall through. A config
+    without Features, or with the flag absent or true, is never restricted. The
+    config ProblemType flags are deliberately not consulted, so kernels that predate
+    Features keep their behaviour.
+
+    Returns the shared problemType itself when Features apply no restriction or the
+    restriction changes nothing (the logic file already has bias, activation and
+    scale-alpha-vector off), otherwise a new ProblemType built from a copy of its
+    state with the restriction applied. Neither argument is modified.
+    """
+    if not isinstance(features, dict):
+        return problemType
+    restrictBias = features.get("SupportsBias", True) is False
+    restrictScaleAlphaVec = features.get("SupportsScaleAlpha", True) is False
+    restrictActivation = features.get("SupportsActivation", True) is False
+    if not (restrictBias or restrictActivation or restrictScaleAlphaVec):
+        return problemType
+    state = dict(problemType.state)
+    if restrictScaleAlphaVec:
+        state["UseScaleAlphaVec"] = 0
+    if restrictBias:
+        state["UseBias"] = 0
+    if restrictActivation:
+        # ProblemType treats a present Activation key as enabled even when the
+        # value is false, unless ActivationType is outside all/hipblaslt_all.
+        state.pop("Activation", None)
+        state["ActivationType"] = "none"
+    restricted = ProblemType(state, printIndexAssignmentInfo, srcFile=srcFile, raiseOnTypeMismatch=False)
+    return problemType if restricted.state == problemType.state else restricted
+
+
 def parseLibraryLogicData(
         data,
         srcFile,
@@ -681,14 +792,9 @@ def parseLibraryLogicData(
         printSolutionRejectionReason: bool,
         printIndexAssignmentInfo: bool,
         isaInfoMap: Dict[str, IsaInfo],
-        lazyLibraryLoading: bool,
-        archRenames: Optional[Dict[str, str]] = None,
+        lazyLibraryLoading: bool
     ):
-    """Parses the data of a library logic file.
-
-    ``archRenames`` maps a declared ArchitectureName to the name the library is
-    keyed and its files are named by, for a build alias (see ARCH_BUILD_ALIASES).
-    """
+    """Parses the data of a library logic file."""
     # Reset the type mismatch collector at the start to capture all type
     # mismatches from both ProblemType and Solution constructors
     resetTypeMismatchCollector()
@@ -698,14 +804,30 @@ def parseLibraryLogicData(
     elif isinstance(data, dict):
         prepareLibraryLogicDict(data)
 
-    if archRenames:
-        data["ArchitectureName"] = archRenames.get(data["ArchitectureName"], data["ArchitectureName"])
+    if data.get("Library", {}).get("distance") == "MeshBased" and srcFile:
+        companion = _companionCsvXzPath(srcFile)
+        if data.get("Library", {}).get("table"):
+            if companion:
+                printWarning(f"Companion CSV {companion} ignored — "
+                             f"table already present in YAML")
+        else:
+            if not companion:
+                printExit(f"No companion CSV found for {srcFile} and "
+                          f"ExactLogic is empty")
+            else:
+                data["Library"]["table"] = _loadMeshTableFromCsvXz(companion)
+                data["ExactLogic"] = data["Library"]["table"]
+                _validateTableSolutionIndices(
+                    data["Library"]["table"], data.get("Solutions", []), companion
+                )
+
+
     if "CUCount" not in data:
         data["CUCount"] = None
     normalizeLogicProblemType(data["ProblemType"])
 
     if not versionIsCompatible(data["MinimumRequiredVersion"]):
-        printWarning("Version = {} in library logic file {} does not match Tensile version = {}" \
+        printWarning("Version = {} in library logic file {} does not match TensileLite version = {}" \
                 .format(srcFile, data["MinimumRequiredVersion"], __version__) )
 
     # unpack problemType
@@ -724,6 +846,7 @@ def parseLibraryLogicData(
 
     # unpack solution
     def solutionStateToSolution(solutionState, assembler, isaInfoMap) -> Optional[Solution]:
+        declared = dict(solutionState)
         solutionState = fillSolutionDefaults(solutionState, libDefaults)
 
         if "KernelLanguage" not in solutionState.keys():
@@ -745,22 +868,33 @@ def parseLibraryLogicData(
         elif solutionState.get("CustomKernelName", ""):
             customKernelName = solutionState["CustomKernelName"]
 
+        features = None
         if customKernelName:
             isp = {}
             if "InternalSupportParams" in solutionState:
                 isp = solutionState["InternalSupportParams"]
             try:
-                customConfig = getCustomKernelConfig(customKernelName, isp)
+                rawConfig = readCustomKernelConfig(customKernelName)
+                # getCustomKernelConfig drops Features, so keep the declaration.
+                features = rawConfig.get("Features")
+                customConfig = getCustomKernelConfig(customKernelName, isp, kernelConfig=rawConfig)
             except (RuntimeError, KeyError, TypeError) as e:
                 printWarning(f"Skipping custom kernel '{customKernelName}': "
                              f"missing or invalid custom.config ({e})")
                 return None
+            _warnReplacedPredicates(customKernelName, customConfig, declared, srcFile)
             solutionState = normalize_execution_policy_with_defaults(customConfig, solutionState)
 
             if "MatrixInstruction" in customConfig and len(customConfig["MatrixInstruction"]) != 4:
                 raise ValueError(f"Custom kernel MatrixInstruction can only be of length 4, found {customConfig['MatrixInstruction']}")
-        # overwrite problemType if any
-        solutionState["ProblemType"] = problemType
+        if len(problemType.get("ScaleBlockSizesA", [])) > 1:
+            args = solutionState.get("CustomKernel", {}).get("args", [])
+            if not any(a.get("semantic") == "ScaleBlockSizeA" for a in args):
+                raise ValueError("ScaleBlockSizesA requires a custom runtime group-size argument")
+        # A restricting custom.config must not leak into the library ProblemType
+        # that every other solution shares.
+        solutionState["ProblemType"] = _problemTypeForCustomKernel(
+            problemType, features, printIndexAssignmentInfo, srcFile)
         if 'MacDataTypeA' not in solutionState["ProblemType"]: #it will either be set as d['MacDataType'] or a specified input
             solutionState["ProblemType"]['MacDataTypeA'] = getRealDataTypeA(solutionState["ProblemType"]['DataType'])
 
@@ -976,7 +1110,7 @@ def createLibraryLogic(
     Args:
         schedulePrefix: Schedule name string (e.g. ``"tensilelite"``).
         architectureName: Lowercase GPU architecture tag (e.g. ``"gfx950"``).
-        deviceNames: ROCm / Tensile device name strings for this logic file.
+        deviceNames: ROCm / TensileLite device name strings for this logic file.
         libraryType: Library tuning mode (e.g. ``"GridBased"``, ``"Equality"``).
         logicTuple: ``(problemType, solutions, indexOrder, exactLogic, rangeLogic,
             optional tileSelectionSolutions, optional tileSelectionIndices,

@@ -104,9 +104,10 @@ install(
     PATTERN "*.h.in" EXCLUDE
 )
 
-# Install generated version header
+# Install generated version headers
 install(
     FILES "${CMAKE_CURRENT_BINARY_DIR}/include/hipdnn_test_sdk/version.h"
+          "${CMAKE_CURRENT_BINARY_DIR}/include/hipdnn_test_sdk/version_number.h"
     DESTINATION ${HIP_DNN_TEST_SDK_INSTALL_INCLUDE_DIR}/hipdnn_test_sdk
     COMPONENT Development
 )

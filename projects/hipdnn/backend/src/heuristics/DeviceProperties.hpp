@@ -33,10 +33,10 @@ hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT queryDeviceProperties(in
 /**
  * @brief Query device properties for the device selected by a handle's stream.
  *
- * Resolves concrete streams to their owning device via hipStreamGetDevice.
- * Default stream tokens (nullptr, hipStreamLegacy, hipStreamPerThread) resolve
- * to the calling thread's live current device via hipGetDevice. Delegates to
- * the explicit-id overload; this is the canonical acquisition path inside the backend.
+ * Resolves the device with hipdnnHandle::getDevice(): concrete streams map to their owning
+ * device, default stream tokens (nullptr, hipStreamLegacy, hipStreamPerThread) to the calling
+ * thread's live current device. Delegates to the explicit-id overload; this is the canonical
+ * device-properties acquisition path inside the backend.
  *
  * RFC 0007 Reference: Section 6.2
  *

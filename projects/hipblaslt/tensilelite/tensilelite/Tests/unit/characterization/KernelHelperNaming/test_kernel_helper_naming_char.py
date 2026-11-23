@@ -4,7 +4,7 @@
 ################################################################################
 
 """Characterization tests for the naming/orchestration surface of
-``Tensile.KernelHelperNaming``: ``KernelHelperEnum``, ``kernelObjectNameCallables``,
+``tensilelite.KernelHelperNaming``: ``KernelHelperEnum``, ``kernelObjectNameCallables``,
 and the per-helper ``*Names`` functions (conversion / activation-enum-header /
 activation-function / reduction / beta-only), driven over a real solution +
 flag-toggled variants. The ``init*`` object-construction functions build
@@ -14,7 +14,7 @@ import importlib
 
 import pytest
 
-K = importlib.import_module("Tensile.KernelHelperNaming")
+K = importlib.import_module("tensilelite.KernelHelperNaming")
 
 pytestmark = pytest.mark.unit
 

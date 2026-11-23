@@ -13,7 +13,7 @@ inner function no longer has the `if libraryFile is None` guard).
 
 import inspect
 
-from Tensile.ClientWriter import writeClientConfig
+from tensilelite.ClientWriter import writeClientConfig
 
 
 def test_writeClientConfig_libraryFile_is_required():

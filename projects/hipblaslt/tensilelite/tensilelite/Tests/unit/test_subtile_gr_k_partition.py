@@ -28,7 +28,7 @@
 
 import pytest
 
-from Tensile.SolutionStructs.Validators.Subtile import _subtileGRKPartitionIsBuggy
+from tensilelite.SolutionStructs.Validators.Subtile import _subtileGRKPartitionIsBuggy
 
 
 # (loadRatioGR, localSubtileGrid) -> expected buggy?

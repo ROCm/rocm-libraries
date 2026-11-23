@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "4eb62f3a-d5c7-44a8-90b2-f1a3b62cee4b",
+  "name": "MultiLaunch kernel matcher",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.multi_launch.kernel_match"
+}

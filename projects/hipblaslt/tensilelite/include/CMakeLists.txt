@@ -31,6 +31,7 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Float6.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Float8_BFloat8.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Half.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Int4.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Int8.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Int8x4.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_XFloat32.hpp"
@@ -40,13 +41,16 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/EmbeddedLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ExactLogicLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/FreeSizeLibrary.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/FusedA2A.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/FusedA2AKernArg.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/GranularitySelectionLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/KernelArguments.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/KernelLanguageTypes.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/LongPath.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MLFeatures.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MLPClassification.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MLPClassificationLibrary.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MXScaleFormat.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MapLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MasterSolutionLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MatchingLibrary.hpp"
@@ -59,7 +63,9 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Properties.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/RocRollerWgmKernargs.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/PropertyMatching.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ReadMostlyMap.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ScalarValueTypes.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ScaleAlphaVec.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization/Base.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization/Containers.hpp"
@@ -83,6 +89,7 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionBlobCache.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionLibrary_fwd.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/StreamK.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Task.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Tensile.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Tensile_fwd.hpp"
@@ -91,6 +98,8 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/TensorDescriptor_fwd.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/TensorOps.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/TensorOps_fwd.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/LocalKernelIndex.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/LocalKernelLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Utils.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/UtilsOrigami.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/geom.hpp"
@@ -102,6 +111,7 @@ target_sources(tensilelite-host
             BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}"
             FILES
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/EmbeddedData.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MagicDivision.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionMapLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionValidation.hpp"
 )
@@ -120,6 +130,7 @@ else()
             FILE_SET tensilelite_public_headers TYPE HEADERS
                 FILES
                     "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/msgpack/MessagePack.hpp"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/msgpack/SolutionState.hpp"
         PRIVATE
             FILE_SET tensilelite_private_headers TYPE HEADERS
                 FILES

@@ -1,8 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// See graph.fbs for the semantics of this annotation.
+// See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "work_data_dependent";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
@@ -10,7 +11,9 @@ table MoeGroupedMatmulBwdAttributes {
     // Required input tensor UIDs
     doutput_tensor_uid:            long (cache_uid);
     token_tensor_uid:              long (cache_uid);
-    first_token_offset_tensor_uid: long (cache_uid);
+    // Per-expert row boundaries: only rows inside an expert's range are reduced into
+    // its weight gradient, so the values decide how many rows are computed.
+    first_token_offset_tensor_uid: long (cache_uid, work_data_dependent);
 
     // Required output tensor UID
     dweight_tensor_uid:            long (cache_uid);

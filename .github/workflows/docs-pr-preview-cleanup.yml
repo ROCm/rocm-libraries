@@ -15,6 +15,9 @@ permissions:
 
 jobs:
   cleanup:
+    # Docs previews only support branches in this repository. Fork PRs cannot
+    # have previews to clean up and do not receive the required secrets.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - name: Checkout docs-config only

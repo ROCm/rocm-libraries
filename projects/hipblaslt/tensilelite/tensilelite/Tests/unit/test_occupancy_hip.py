@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """
-Integration tests: Tensile CUOccupancy vs HIP hardware ground truth.
+Integration tests: TensileLite CUOccupancy vs HIP hardware ground truth.
 
 Assembles minimal kernels, loads them via HIP, and asserts that
 getOccupancy() / getVgprOccupancy() match
@@ -27,10 +27,10 @@ pytestmark = pytest.mark.unit
 # ── HIP availability and helpers (test-layer only) ─────────────────────────────
 from occupancy_hip_testutil import HIP_AVAILABLE, _hip, _hip_check
 
-# ── rocisa / Tensile imports ────────────────────────────────────────────────────
+# ── rocisa / TensileLite imports ────────────────────────────────────────────────
 from rocisa import rocIsa
-from Tensile.Common.Architectures import gfxToIsa
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.Common.Architectures import gfxToIsa
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 
 
 # ── GPU detection ───────────────────────────────────────────────────────────────
@@ -87,12 +87,19 @@ def _init_rocisa(gfx: str):
     return ri
 
 
-def _make_writer(ri) -> KernelWriterAssembly:
-    """Construct a minimal KernelWriterAssembly with arch/reg caps wired in."""
+def _make_writer(ri, gfx: str, wave_size: int = 64) -> KernelWriterAssembly:
+    """Construct a minimal KernelWriterAssembly with arch/reg caps wired in.
+
+    getVgprOccupancy derives the waves-per-SIMD cost of a workgroup from
+    kernel["WavefrontSize"], so it must carry the same wave size the kernel is
+    assembled with (_init_rocisa's setKernel and _build_minimal_kernel_asm).
+    """
     kw = object.__new__(KernelWriterAssembly)
     kw.states = SimpleNamespace(
         archCaps=ri.getArchCaps(),
         regCaps=ri.getRegCaps(),
+        version=tuple(gfxToIsa(gfx)),
+        kernel={"WavefrontSize": wave_size},
     )
     return kw
 
@@ -251,9 +258,9 @@ def _query_hip_occupancy(co_path: str, num_threads: int) -> int:
 
 def tensile_occ_to_hip_blocks(cu_occupancy: int, num_threads: int,
                                wave_size: int = 64, num_simds: int = 4) -> int:
-    """Return expected HIP blocks-per-CU given Tensile's CUOccupancy.
+    """Return expected HIP blocks-per-CU given TensileLite's CUOccupancy.
 
-    For gfx9 (4 SIMDs × 64-wide wavefront), Tensile's CUOccupancy equals
+    For gfx9 (4 SIMDs × 64-wide wavefront), TensileLite's CUOccupancy equals
     hipModuleOccupancyMaxActiveBlocksPerMultiprocessor (1:1 relationship).
     """
     _ = (num_threads, wave_size, num_simds)
@@ -263,7 +270,7 @@ def tensile_occ_to_hip_blocks(cu_occupancy: int, num_threads: int,
 # ── Test parametrization ────────────────────────────────────────────────────────
 #
 # Each entry: (required_gfx, num_vgprs, lds_bytes, num_threads, label)
-# VGPRs are multiples of 8 so Tensile's 8-dword alignment and HIP's 4-dword granule agree.
+# VGPRs are multiples of 8 so TensileLite's 8-dword alignment and HIP's 4-dword granule agree.
 # _MIN_LDS=256 avoids getLdsLimitedOccupancy divide-by-zero (represents no LDS constraint).
 
 _MIN_LDS = 256   # minimum LDS allocation granule; getLdsLimitedOccupancy crashes on 0
@@ -314,6 +321,23 @@ OCCUPANCY_CASES = [
 ]
 
 
+# ── Fixture guard ───────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("gfx", sorted({p.values[0] for p in OCCUPANCY_CASES}))
+def test_writer_stub_supports_getoccupancy(gfx):
+    """The stub must carry every states field getOccupancy reads.
+
+    This needs no GPU, unlike the test it guards: a field missing from the stub
+    raises AttributeError on the runners that do have one of these GPUs, before
+    any occupancy value is ever compared.
+    """
+    ri = _init_rocisa(gfx)
+    kw = _make_writer(ri, gfx)
+    double_vgpr = bool(ri.getArchCaps().get("ArchAccUnifiedRegs", 0))
+    occ = kw.getOccupancy(256, 8, 16, _MIN_LDS, 0, double_vgpr)
+    assert isinstance(occ, int) and occ > 0
+
+
 # ── Main test ───────────────────────────────────────────────────────────────────
 
 @pytest.mark.skipif(not HIP_AVAILABLE, reason="hip-python not installed")
@@ -325,15 +349,15 @@ OCCUPANCY_CASES = [
 def test_hip_occupancy_matches_tensile(
     required_gfx, num_vgprs, lds_bytes, num_threads, description, tmp_path
 ):
-    """HIP ground-truth: assemble a minimal kernel, query HIP, assert equality with Tensile."""
+    """HIP ground-truth: assemble a minimal kernel, query HIP, assert equality with tensilelite."""
     if GFX_TARGET != required_gfx:
         pytest.skip(
             f"Test requires {required_gfx}, detected {GFX_TARGET}"
         )
 
-    # ── 1. Tensile prediction ─────────────────────────────────────────────────
+    # ── 1. TensileLite prediction ─────────────────────────────────────────────
     ri = _init_rocisa(required_gfx)
-    kw = _make_writer(ri)
+    kw = _make_writer(ri, required_gfx)
     arch_caps = ri.getArchCaps()
 
     # doubleVgpr=True on ArchAccUnifiedRegs architectures (gfx90a / gfx942 / gfx950)
@@ -363,7 +387,7 @@ def test_hip_occupancy_matches_tensile(
     hip_blocks_per_cu = _query_hip_occupancy(co_path, num_threads)
 
     # ── 4. Convert and compare ────────────────────────────────────────────────
-    # Tensile CUOccupancy == hipModuleOccupancyMaxActiveBlocksPerMultiprocessor (1:1)
+    # TensileLite CUOccupancy == hipModuleOccupancyMaxActiveBlocksPerMultiprocessor (1:1)
     expected_blocks_per_cu = tensile_occ_to_hip_blocks(
         tensile_occ, num_threads, wave_size=wave_size
     )
@@ -375,16 +399,16 @@ def test_hip_occupancy_matches_tensile(
     print(f"  num_vgprs:               {num_vgprs}")
     print(f"  lds_bytes:               {lds_bytes}")
     print(f"  num_threads:             {num_threads}")
-    print(f"  Tensile CUOccupancy:     {tensile_occ} blocks/CU")
+    print(f"  TensileLite CUOccupancy: {tensile_occ} blocks/CU")
     print(f"  HIP blocks/CU:           {hip_blocks_per_cu}")
     print(f"  Expected blocks/CU:      {expected_blocks_per_cu}")
 
     assert hip_blocks_per_cu == expected_blocks_per_cu, (
-        f"Tensile CUOccupancy={tensile_occ} blocks/CU, "
+        f"TensileLite CUOccupancy={tensile_occ} blocks/CU, "
         f"but HIP reports {hip_blocks_per_cu} blocks/CU.\n"
         f"  arch={required_gfx}, MaxWavesPerSimd={arch_caps.get('MaxWavesPerSimd')}, "
         f"num_vgprs={num_vgprs}, lds_bytes={lds_bytes}, num_threads={num_threads}.\n"
-        f"  If Tensile over-reports, check that fix/gfx950-tensile-occupancy is applied "
+        f"  If TensileLite over-reports, check that fix/gfx950-tensile-occupancy is applied "
         f"and rocisa is rebuilt."
     )
 
@@ -395,7 +419,7 @@ def test_hip_occupancy_matches_tensile(
 @pytest.mark.skipif(GFX_TARGET != "gfx950", reason="Requires gfx950 GPU")
 def test_gfx950_occupancy_not_overcounted(tmp_path):
     """
-    Explicit regression test: Tensile must NOT return CUOccupancy > 8 for gfx950.
+    Explicit regression test: TensileLite must NOT return CUOccupancy > 8 for gfx950.
 
     Before fix/gfx950-tensile-occupancy, getVgprOccupancy() used a hardcoded
     maxOccupancy=10 (the gfx908 value), causing CUOccupancy=10 for any kernel
@@ -403,7 +427,7 @@ def test_gfx950_occupancy_not_overcounted(tmp_path):
     This test fails if the fix is absent or reverted.
     """
     ri = _init_rocisa("gfx950")
-    kw = _make_writer(ri)
+    kw = _make_writer(ri, "gfx950")
     arch_caps = ri.getArchCaps()
 
     assert arch_caps["MaxWavesPerSimd"] == 8, (
@@ -431,6 +455,6 @@ def test_gfx950_occupancy_not_overcounted(tmp_path):
         "unexpected – MaxWavesPerSimd=8 should cap this."
     )
     assert cu_occ == hip_blocks, (
-        f"Tensile CUOccupancy={cu_occ} != HIP blocks/CU={hip_blocks}. "
-        "Tensile is over- or under-reporting occupancy for gfx950."
+        f"TensileLite CUOccupancy={cu_occ} != HIP blocks/CU={hip_blocks}. "
+        "TensileLite is over- or under-reporting occupancy for gfx950."
     )

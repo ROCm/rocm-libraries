@@ -1,0 +1,20 @@
+// Insert into plugin_sdk/tests/heuristics/TestEngineFeatures.cpp, into the `cases` vector of
+// TEST(TestEngineFeatures, EveryNodeTypeHasDeclaredWorkOrNoCountingConvention).
+// Skip it when {{ op.name }} is listed in NO_COUNTING_CONVENTION instead.
+// single() gives the tensors uids 1, 2, ... in shape order. Set every attribute the
+// formula reads, and replace the expected 0.0: published work is never 0, so the
+// entry fails until the formula and its expected value are filled in.
+
+        // TODO: the formula, e.g. 2 * x.numel (128).
+        {[] {
+             {{ op.fbs_t_type }} op;
+{% for f, dims in op.work_model_test_tensors %}
+             op.{{ f.fbs_field }} = {{ loop.index }};
+{% endfor %}
+             return single({
+{%- for f, dims in op.work_model_test_tensors -%}
+{{ '{' }}{{ dims | join(', ') if dims else '/* TODO: ' ~ f.name ~ ' dims */' }}{{ '}' }}{{ ', ' if not loop.last }}
+{%- endfor -%}
+}, op);
+         },
+         0.0 /* TODO: expected FLOPs */},

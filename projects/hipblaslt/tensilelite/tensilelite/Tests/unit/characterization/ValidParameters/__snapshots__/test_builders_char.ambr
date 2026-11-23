@@ -1359,6 +1359,7 @@
 # name: test_valid_parameters_key_roster
   list([
     '1LDSBuffer',
+    'A2ASubRounds',
     'ActivationAlt',
     'ActivationFuncCall',
     'ActivationFused',
@@ -1367,18 +1368,25 @@
     'AdaptiveGemmNTAB',
     'AssertAIGreaterThanEqual',
     'AssertAILessThanEqual',
+    'AssertAlphaValue',
+    'AssertAnySizeLessThan',
     'AssertFree0ElementMultiple',
     'AssertFree1ElementMultiple',
+    'AssertMXScalesPreSwizzled',
     'AssertSizeEqual',
     'AssertSizeGreaterThan',
     'AssertSizeLessThan',
     'AssertStrideAEqual',
+    'AssertStrideAMultiple',
     'AssertStrideBEqual',
+    'AssertStrideBMultiple',
     'AssertStrideCEqual',
     'AssertStrideDEqual',
     'AssertSummationElementMultiple',
+    'AssertTensorBytesLessThan',
     'BufferLoad',
     'BufferStore',
+    'ClusterAIDMapping',
     'ClusterDim',
     'ClusterLocalRead',
     'CompactLoopStore',
@@ -1416,6 +1424,7 @@
     'LDSSegmentBRotate',
     'LDSSegmentInterleave',
     'LDSTrInst',
+    'LDSTrStoreShuffle',
     'LdsBlockSizePerPadA',
     'LdsBlockSizePerPadB',
     'LdsBlockSizePerPadMXSA',
@@ -1468,8 +1477,11 @@
     'NumLoadsCoalescedB',
     'OptNoLoadLoop',
     'PersistentXCCMapping',
+    'PostLoopStoreInNll',
     'PrefetchAcrossPersistent',
     'PrefetchGL2',
+    'PrefetchGL2Inc64Bit',
+    'PrefetchGL2SAddr',
     'PrefetchGlobalRead',
     'PrefetchGlobalReadA',
     'PrefetchGlobalReadB',
@@ -1488,6 +1500,7 @@
     'StaggerUMapping',
     'StaggerUStride',
     'StinkyTofuParameters',
+    'StinkyTofuRegisterAllocation',
     'StorePriorityOpt',
     'StoreRemapVectorWidth',
     'StoreSyncOpt',
@@ -1538,6 +1551,7 @@
     'WaveSeparateGlobalReadA',
     'WaveSeparateGlobalReadB',
     'WaveSplitK',
+    'WaveTileContiguousA',
     'WavefrontSize',
     'WorkAssignment',
     'WorkGroup',
@@ -1555,6 +1569,15 @@
         -1,
         0,
         1,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'A2ASubRounds': dict({
+      'head': list([
+        1,
+        2,
+        4,
       ]),
       'len': 3,
       'type': 'list',
@@ -1614,6 +1637,17 @@
       'type': 'int',
       'value': -1,
     }),
+    'AssertAlphaValue': dict({
+      'head': list([
+        1,
+      ]),
+      'len': 1,
+      'type': 'list',
+    }),
+    'AssertAnySizeLessThan': dict({
+      'type': 'int',
+      'value': -1,
+    }),
     'AssertFree0ElementMultiple': dict({
       'head': list([
         1,
@@ -1632,6 +1666,10 @@
       'len': 9,
       'type': 'list',
     }),
+    'AssertMXScalesPreSwizzled': dict({
+      'type': 'int',
+      'value': -1,
+    }),
     'AssertSizeEqual': dict({
       'type': 'int',
       'value': -1,
@@ -1648,7 +1686,15 @@
       'type': 'int',
       'value': -1,
     }),
+    'AssertStrideAMultiple': dict({
+      'type': 'int',
+      'value': -1,
+    }),
     'AssertStrideBEqual': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'AssertStrideBMultiple': dict({
       'type': 'int',
       'value': -1,
     }),
@@ -1669,6 +1715,10 @@
       'len': 9,
       'type': 'list',
     }),
+    'AssertTensorBytesLessThan': dict({
+      'type': 'int',
+      'value': -1,
+    }),
     'BufferLoad': dict({
       'head': list([
         False,
@@ -1681,6 +1731,14 @@
       'head': list([
         False,
         True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'ClusterAIDMapping': dict({
+      'head': list([
+        -2,
+        -1,
       ]),
       'len': 2,
       'type': 'list',
@@ -2015,6 +2073,15 @@
       'len': 2,
       'type': 'list',
     }),
+    'LDSTrStoreShuffle': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
     'LdsBlockSizePerPadA': dict({
       'head': list([
         -1,
@@ -2164,7 +2231,7 @@
         'NoSwizzle',
         'HostPreSwizzle',
       ]),
-      'len': 4,
+      'len': 5,
       'type': 'list',
     }),
     'MacroTile': dict({
@@ -2475,6 +2542,14 @@
       'len': 8,
       'type': 'list',
     }),
+    'PostLoopStoreInNll': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
     'PrefetchAcrossPersistent': dict({
       'head': list([
         0,
@@ -2490,6 +2565,22 @@
         2,
       ]),
       'len': 3,
+      'type': 'list',
+    }),
+    'PrefetchGL2Inc64Bit': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'PrefetchGL2SAddr': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
       'type': 'list',
     }),
     'PrefetchGlobalRead': dict({
@@ -2631,6 +2722,10 @@
       'type': 'list',
     }),
     'StinkyTofuParameters': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'StinkyTofuRegisterAllocation': dict({
       'type': 'int',
       'value': -1,
     }),
@@ -3069,6 +3164,14 @@
       'type': 'list',
     }),
     'WaveSplitK': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'WaveTileContiguousA': dict({
       'head': list([
         False,
         True,

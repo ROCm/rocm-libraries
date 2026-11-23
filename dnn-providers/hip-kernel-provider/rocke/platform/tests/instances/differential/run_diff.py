@@ -36,7 +36,9 @@
 #
 # Per-family statuses, and which of them the gate lets exit zero, are the
 # GATE_PASS / GATE_FAIL maps below; the rule over them is gate_verdict(), unit-
-# tested host-only in test_gate_verdict.py next to this file.
+# tested host-only in test_gate_verdict.py next to this file; the golden
+# routing (golden_file_for and the checks over it) in
+# tests/instances/test_differential_golden_routing.py, which is installed.
 #
 # Build output goes to /tmp (repo tree is slow NFS). No git operations.
 
@@ -58,32 +60,121 @@ from typing import NamedTuple
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parents[2]  # rocKE root (differential -> instances -> tests -> rocKE)
 CKC = ROCKE  # engine build root (cmake -S <ROCKE> produces librocke_core.a)
-PYROOT = ROCKE / "python"  # holds rocke
-LIB_ROOT = (
-    ROCKE.parent / "library"
-)  # kernels.*, builders.*, dispatch.* top-level packages
+
+
+def _python_and_library_roots(root: Path) -> tuple[Path, Path]:
+    """Where the rocke package and the library packages (kernels.*, builders.*,
+    dispatch.*) live, for a source checkout or an installed test tree.
+
+    Source: ``<root>/python/rocke`` and ``<root>/../library``. Installed (the
+    CMake test install, where this directory ships for the Python-only golden
+    check): the rocke package sits beside ``tests/`` (provider layout) or in
+    ``<prefix>/lib/pythonX.Y/site-packages`` (standalone layout), and the
+    library under ``tests/library``.
+    """
+    if (root / "python" / "rocke").is_dir():
+        return root / "python", root.parent / "library"
+    library = root / "tests" / "library"
+    if (root / "rocke").is_dir():
+        return root, library
+    pyver = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    for lib in ("lib", "lib64"):
+        site_packages = root.parent / lib / pyver / "site-packages"
+        if (site_packages / "rocke").is_dir():
+            return site_packages, library
+    return root, library  # rocke must then come from PYTHONPATH
+
+
+PYROOT, LIB_ROOT = _python_and_library_roots(ROCKE)
 PARITY = ROCKE / "tests" / "instances" / "parity"
-LIB_PARITY = ROCKE.parent / "library" / "tests" / "parity"
+LIB_PARITY = LIB_ROOT / "tests" / "parity"
 INCLUDE = ROCKE / "cpp" / "include"
+# Library-owned C++ mirrors (library/cpp): a library family's emitter compiles
+# against these headers plus the library archive, linked ahead of
+# librocke_core.a. Platform-only copies of this tree have neither.
+LIB_CPP = LIB_ROOT / "cpp"
+LIB_INCLUDE = LIB_CPP / "include"
+LIBRARY_ARCHIVE_NAME = "librocke_library.a"
+# Set by main() from --library-archive; None when no library archive was built.
+LIBRARY_ARCHIVE: Path | None = None
 TMP = Path(tempfile.gettempdir()) / "rocke_diff"
 TMP.mkdir(parents=True, exist_ok=True)
-TOOLS = ROCKE / "tools"
-if str(TOOLS) not in sys.path:
-    sys.path.insert(0, str(TOOLS))
+TOOLS = ROCKE / "tools"  # absent in an installed tree, which ships _hostcaps.py here
+# A script launch gets HERE from Python automatically; import-by-path does not.
+# Bootstrap both homes explicitly so this module has the same imports in focused
+# pytest and in isolated xdist workers as it does at its command-line entry point.
+for module_root in (HERE, TOOLS):
+    if module_root.is_dir() and str(module_root) not in sys.path:
+        sys.path.insert(0, str(module_root))
 
 from _hostcaps import available_cpus  # noqa: E402 -- tools path bootstrap above
+from python_batch_worker import canonical_digest  # noqa: E402 -- HERE bootstrap above
+from golden_store import (  # noqa: E402 -- HERE bootstrap above
+    IR_CANONICAL,
+    LL,
+    GoldenStore,
+    compare,
+)
 
 # L5 golden anchor: committed per-(mode,family,config) reference shas. This is
 # the absolute regression anchor -- any future change that alters an emitted
 # .ll / canonical-ir for a blessed config fails --check-golden.
 GOLDEN_DIR = HERE / "golden"
 GOLDEN_FILE = GOLDEN_DIR / "llvm_gfx_all.json"
+# Families discovered under library/tests/parity are blessed into a library-
+# owned golden beside their emitters, so a library codegen change re-blesses a
+# library file only. Each family is anchored in exactly one of the two files.
+LIB_GOLDEN_DIR = LIB_PARITY / "golden"
+LIB_GOLDEN_FILE = LIB_GOLDEN_DIR / "llvm_gfx_all.json"
+
+
+def golden_file_for(src_dir: Path) -> Path:
+    """The golden file that anchors families discovered in ``src_dir``."""
+    return LIB_GOLDEN_FILE if Path(src_dir) == LIB_PARITY else GOLDEN_FILE
+
+
 PYTHON_BATCH_WORKER = HERE / "python_batch_worker.py"
 
 
-def golden_key(mode, canonical):
-    """Stable key under which a run's shas are stored in the golden file."""
-    return "ir_canonical" if (mode == "ir" and canonical) else mode
+def golden_kind(mode, canonical):
+    """The golden section a run records or checks: LLVM IR or canonical IR."""
+    if mode == "ll":
+        return LL
+    if mode == "ir" and canonical:
+        return IR_CANONICAL
+    raise SystemExit(
+        f"--record-golden / --check-golden need --mode ll or --mode ir --canonical "
+        f"(got --mode {mode}{' --canonical' if canonical else ''})"
+    )
+
+
+def _llvm_flavors() -> tuple[str, ...]:
+    if str(PY_REF_ROOT) not in sys.path:
+        sys.path.insert(0, str(PY_REF_ROOT))
+    from rocke.core.lower_llvm import LLVM_FLAVORS
+
+    return tuple(LLVM_FLAVORS)
+
+
+def pin_llvm_flavor(requested: str) -> str:
+    """The LLVM flavor this run emits for, exported to both emitters.
+
+    `requested` (``--flavor``) wins; otherwise ROCKE_LLVM_FLAVOR, otherwise the
+    flavor rocke resolves for this host. Exporting it means every emitter
+    process writes IR for the same flavor the golden records or checks.
+    """
+    flavors = _llvm_flavors()
+    flavor = (requested or os.environ.get("ROCKE_LLVM_FLAVOR", "")).strip().lower()
+    if not flavor:
+        from rocke.core.lower_llvm import _resolve_llvm_flavor
+
+        flavor = _resolve_llvm_flavor()
+    if flavor not in flavors:
+        raise SystemExit(
+            f"unknown LLVM flavor {flavor!r}, expected one of {list(flavors)}"
+        )
+    os.environ["ROCKE_LLVM_FLAVOR"] = flavor
+    return flavor
 
 
 def collect_ref_shas(results):
@@ -100,7 +191,8 @@ def collect_ref_shas(results):
 
 
 MAX_CFG = 256  # default cap on config enumeration per family
-FAMILY_MAX_CFG = {"gfx1250_lowering": 512}
+# conv_direct_grouped's fp32 / tf32 configs start at index 201 and run past 256.
+FAMILY_MAX_CFG = {"gfx1250_lowering": 512, "conv_direct_grouped": 512}
 TIMEOUT = 120  # seconds per emitter invocation
 
 
@@ -109,26 +201,10 @@ def config_limit(family: str) -> int:
     return FAMILY_MAX_CFG.get(family, MAX_CFG)
 
 
-_CANON = None
-
-
-def _canon(text):
-    """Canonicalize ck.dsl.ir/v1 text (stable SSA ids, loc stripped) for
-    semantic diff. Lazily imports the Python reference canonicalizer; used on
-    BOTH the C and Python emitted IR so a byte mismatch that is only incidental
-    SSA-id renumbering shows up as CANON_EQUAL, while real structural drift
-    (differing attrs / op order) shows up as STRUCT_DRIFT."""
-    global _CANON
-    if _CANON is None:
-        if str(PYROOT) not in sys.path:
-            sys.path.insert(0, str(PYROOT))
-        from rocke.core.ir_serialize import canonicalize, parse
-
-        _CANON = (canonicalize, parse)
-    canonicalize, parse = _CANON
-    # canonicalize takes a KernelDef -> parse the emitted text first. A parse
-    # failure here means the text is not valid/round-trippable ck.dsl.ir/v1.
-    return canonicalize(parse(text))
+def _reference_python_on_path() -> None:
+    """Make the reference rocke importable in this process (canonical hashing)."""
+    if str(PY_REF_ROOT) not in sys.path:
+        sys.path.insert(0, str(PY_REF_ROOT))
 
 
 def sh(b: bytes) -> str:
@@ -173,15 +249,17 @@ def archive_build_id(archive: Path) -> str:
         return f"<unavailable: {e}>"
 
 
-def find_families():
+def find_families(python_only=False):
+    """Every parity family: a `<name>_emit.c` / `<name>_emit.py` pair. A
+    Python-only run needs just the Python emitter (an installed test tree
+    ships no C sources)."""
     fams = []
     for src_dir in (PARITY, LIB_PARITY):
         if not src_dir.exists():
             continue
-        for c in sorted(src_dir.glob("*_emit.c")):
-            name = c.name[: -len("_emit.c")]
-            py = src_dir / f"{name}_emit.py"
-            if py.exists():
+        for py in sorted(src_dir.glob("*_emit.py")):
+            name = py.name[: -len("_emit.py")]
+            if python_only or (src_dir / f"{name}_emit.c").exists():
                 fams.append((name, src_dir))
     return fams
 
@@ -190,32 +268,61 @@ _BUILD_INPUT_DIGESTS: dict[Path, str] = {}
 _BUILD_INPUT_DIGESTS_LOCK = threading.Lock()
 
 
-def _shared_build_input_digest(archive: Path) -> str:
+def _library_link_inputs(src_dir: Path) -> tuple[list[str], list[str]]:
+    """Extra ``-I`` flags and archives for an emitter in ``src_dir``.
+
+    Only library emitters see the library headers and archive; platform
+    emitters keep compiling against the platform engine alone, which is what
+    keeps platform free of any library dependency.
+    """
+    if Path(src_dir) != LIB_PARITY:
+        return [], []
+    includes = ["-I", str(LIB_INCLUDE)] if LIB_INCLUDE.is_dir() else []
+    archives = [str(LIBRARY_ARCHIVE)] if LIBRARY_ARCHIVE is not None else []
+    return includes, archives
+
+
+def library_sources_present() -> bool:
+    """True when library/cpp carries C++ that a library emitter may link."""
+    return any((LIB_CPP / "instances").rglob("*.cpp"))
+
+
+def _shared_build_input_digest(archive: Path, extra_archives=()) -> str:
     """Hash immutable shared build inputs once per differential process."""
     archive = archive.resolve()
+    extra = tuple(Path(a).resolve() for a in extra_archives)
+    key = (archive, extra)
     with _BUILD_INPUT_DIGESTS_LOCK:
-        cached = _BUILD_INPUT_DIGESTS.get(archive)
+        cached = _BUILD_INPUT_DIGESTS.get(key)
         if cached is not None:
             return cached
         digest = hashlib.sha256()
-        digest.update(archive.read_bytes())
-        for header in sorted(INCLUDE.rglob("*")):
-            if header.is_file():
-                digest.update(header.relative_to(INCLUDE).as_posix().encode("utf-8"))
-                digest.update(header.read_bytes())
+        for linked in (archive, *extra):
+            digest.update(linked.read_bytes())
+        include_roots = [INCLUDE]
+        if extra and LIB_INCLUDE.is_dir():
+            include_roots.append(LIB_INCLUDE)
+        for root in include_roots:
+            for header in sorted(root.rglob("*")):
+                if header.is_file():
+                    digest.update(root.name.encode("utf-8"))
+                    digest.update(header.relative_to(root).as_posix().encode("utf-8"))
+                    digest.update(header.read_bytes())
         compiler = shutil.which("c++")
         if compiler:
             compiler_path = Path(compiler)
             digest.update(str(compiler_path.resolve()).encode("utf-8"))
             digest.update(compiler_path.read_bytes())
         result = digest.hexdigest()
-        _BUILD_INPUT_DIGESTS[archive] = result
+        _BUILD_INPUT_DIGESTS[key] = result
         return result
 
 
-def _native_emitter_fingerprint(source: Path, archive: Path, command: list[str]) -> str:
+def _native_emitter_fingerprint(
+    source: Path, archive: Path, command: list[str], extra_archives=()
+) -> str:
     digest = hashlib.sha256()
-    digest.update(_shared_build_input_digest(archive).encode("ascii"))
+    digest.update(_shared_build_input_digest(archive, extra_archives).encode("ascii"))
     digest.update(source.read_bytes())
     digest.update(json.dumps(command, separators=(",", ":")).encode("utf-8"))
     return digest.hexdigest()
@@ -231,6 +338,7 @@ def compile_c(name, archive, src_dir=None):
     cache_dir = archive.parent / "rocke_diff_emitters"
     cache_dir.mkdir(parents=True, exist_ok=True)
     output_stem = cache_dir / f"{name}_emit_c"
+    lib_includes, lib_archives = _library_link_inputs(src_dir)
     # The engine archive is C++20; emitters are compiled as C++20 against it.
     # A content fingerprint safely reuses the executable across invocations;
     # all public headers are included conservatively because each emitter's
@@ -240,14 +348,18 @@ def compile_c(name, archive, src_dir=None):
         "-std=c++20",
         "-I",
         str(INCLUDE),
+        *lib_includes,
         str(src),
+        # Library archive first: its objects reference rocke_core symbols, and
+        # a static link resolves left to right.
+        *lib_archives,
         str(archive),
         "-lm",
         *(["-ldl", "-pthread"] if sys.platform == "linux" else []),
         "-o",
         str(output_stem),
     ]
-    fingerprint = _native_emitter_fingerprint(src, archive, cmd)
+    fingerprint = _native_emitter_fingerprint(src, archive, cmd, lib_archives)
     out = cache_dir / f"{name}_emit_c_{fingerprint[:16]}"
     if out.is_file():
         return out, ""
@@ -300,11 +412,8 @@ def _emission(
     canonical_sha = None
     canonical_error = None
     if canonical and output:
-        try:
-            text = output.decode("utf-8", "replace")
-            canonical_sha = sh(_canon(text).encode("utf-8"))
-        except Exception as exc:  # noqa: BLE001 -- recorded in the verdict
-            canonical_error = f"{type(exc).__name__}: {exc}"
+        _reference_python_on_path()
+        canonical_sha, canonical_error = canonical_digest(output)
     return Emission(
         returncode,
         bool(output),
@@ -388,15 +497,22 @@ def _run_python_batch(
     mode: str = "ll",
     src_dir: Path | None = None,
     canonical: bool = False,
+    digest_in_worker: bool = False,
 ) -> BatchResult:
-    """Emit one family's configurations with a deadline for each invocation."""
+    """Emit one family's configurations with a deadline for each invocation.
+
+    With `canonical`, the canonical hash is computed here from the worker's
+    output files, or, with `digest_in_worker`, by the worker itself (in
+    parallel across families; nothing is written to disk)."""
     if src_dir is None:
         src_dir = PARITY
     indices = list(indices)
     with tempfile.TemporaryDirectory(prefix="rocke-python-batch-") as directory:
         output_dir = Path(directory)
         args = [sys.executable, str(PYTHON_BATCH_WORKER)]
-        if canonical:
+        if canonical and digest_in_worker:
+            args += ["--canonical"]
+        elif canonical:
             args += ["--output-dir", str(output_dir)]
         args += [
             str(src_dir / f"{name}_emit.py"),
@@ -450,7 +566,16 @@ def _run_python_batch(
                             raise ValueError(
                                 "batch worker returned different config index"
                             )
-                        if canonical:
+                        if canonical and digest_in_worker:
+                            emission = Emission(
+                                record["returncode"],
+                                record["has_output"],
+                                record["sha256"],
+                                record["stderr"],
+                                record["canonical_sha"],
+                                record["canonical_error"],
+                            )
+                        elif canonical:
                             output = (output_dir / f"{record['idx']}.out").read_bytes()
                             emission = _emission(
                                 record["returncode"],
@@ -510,9 +635,21 @@ def _run_python_batch(
                 reader.join(timeout=1)
 
 
-def mode_unsupported(err: str) -> bool:
-    e = err.lower()
-    return "usage" in e or "unknown mode" in e or "too many arg" in e
+# How an emitter that does not implement a mode rejects it: the same way it
+# rejects any bad argv -- exit status 2, no output, and its own one-line
+# message as the last line on stderr. Only that line is read. A failing config
+# exits 1 with a traceback whose source lines and file paths can contain any
+# text (a traceback can print an emitter's `usage="usage: ..."` argument), so
+# searching the whole stderr would let one rejected config drop its family.
+_MODE_REJECTION_PREFIXES = ("unknown mode", "usage:")
+
+
+def mode_unsupported(emission: Emission) -> bool:
+    """True when `emission` is the emitter refusing the mode itself."""
+    if emission.returncode != 2 or emission.has_output:
+        return False
+    lines = [line.strip() for line in emission.error.splitlines() if line.strip()]
+    return bool(lines) and lines[-1].lower().startswith(_MODE_REJECTION_PREFIXES)
 
 
 def _is_end_emission(emission: Emission) -> bool:
@@ -632,7 +769,7 @@ def _batch_complete(emissions: list[Emission], mode: str, limit: int = MAX_CFG) 
         _is_end_emission(tail)
         or tail.returncode < 0
         or tail.returncode == 124
-        or (mode != "ll" and mode_unsupported(tail.error))
+        or (mode != "ll" and mode_unsupported(tail))
     )
 
 
@@ -687,7 +824,7 @@ def _run_family_hashed(name, binpath, mode, canonical, src_dir):
     range_drift = None
     for idx, (c_emission, p_emission) in enumerate(zip(c_emissions, p_emissions)):
         if mode != "ll" and (
-            mode_unsupported(c_emission.error) or mode_unsupported(p_emission.error)
+            mode_unsupported(c_emission) or mode_unsupported(p_emission)
         ):
             return configs, range_drift, True, None
         c_end = _is_end_emission(c_emission)
@@ -885,6 +1022,63 @@ def _default_family_workers(family_count: int, _mode: str) -> int:
     )
 
 
+def python_reference_shas(name, mode, canonical, src_dir):
+    """One family's Python reference hashes, {config index: sha}, without the
+    C++ engine: what a golden records. Returns (shas, error); a family whose
+    emitter does not accept the mode yields ({}, None)."""
+    limit = config_limit(name)
+    batch = _run_python_batch(
+        name,
+        range(limit),
+        mode,
+        src_dir=src_dir,
+        canonical=canonical,
+        digest_in_worker=True,
+    )
+    if batch.error:
+        return {}, f"Python batch failed: {batch.error}"
+    emissions = batch.emissions
+    if not _batch_complete(emissions, mode, limit):
+        detail = f": {emissions[-1].error}" if emissions and emissions[-1].error else ""
+        return {}, f"Python returned {len(emissions)} records{detail}"
+    shas = {}
+    for idx, emission in enumerate(emissions):
+        if mode != "ll" and mode_unsupported(emission):
+            return {}, None
+        if _is_end_emission(emission):
+            break
+        if emission.returncode < 0 or emission.returncode == 124:
+            return shas, f"config {idx}: {emission.error or 'crashed'}"
+        if emission.has_output:
+            shas[str(idx)] = (
+                emission.canonical_sha or emission.output_sha
+                if canonical
+                else emission.output_sha
+            )
+    return shas, None
+
+
+def python_reference_families(families, mode, canonical, family_workers):
+    """`python_reference_shas` for every family, concurrently. Returns
+    ({family: {idx: sha}}, [(family, error)])."""
+    shas, errors = {}, []
+    if not families:
+        return shas, errors
+    with ThreadPoolExecutor(max_workers=family_workers) as pool:
+        futures = {
+            pool.submit(python_reference_shas, name, mode, canonical, src_dir): name
+            for name, src_dir in families
+        }
+        for future in as_completed(futures):
+            name = futures[future]
+            family_shas, error = future.result()
+            if error:
+                errors.append((name, error))
+            if family_shas:
+                shas[name] = family_shas
+    return shas, sorted(errors)
+
+
 def _run_families(
     families: list[tuple[str, Path]],
     archive: Path,
@@ -924,6 +1118,18 @@ def _run_families(
 
 
 def main():
+    """Run the CLI without leaking its pinned flavor to in-process callers."""
+    previous_flavor = os.environ.get("ROCKE_LLVM_FLAVOR")
+    try:
+        return _main()
+    finally:
+        if previous_flavor is None:
+            os.environ.pop("ROCKE_LLVM_FLAVOR", None)
+        else:
+            os.environ["ROCKE_LLVM_FLAVOR"] = previous_flavor
+
+
+def _main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", default="ll", choices=["ll", "ir", "verify"])
     ap.add_argument(
@@ -937,7 +1143,18 @@ def main():
         default=str(Path(tempfile.gettempdir()) / "rocke_verify" / "librocke_core.a"),
     )
     ap.add_argument(
+        "--library-archive",
+        default="",
+        help="the library-owned C++ mirrors (librocke_library.a from library/cpp); "
+        f"default: {LIBRARY_ARCHIVE_NAME} beside --archive, when it exists",
+    )
+    ap.add_argument(
         "--only", default="", help="comma-separated family substrings to include"
+    )
+    ap.add_argument(
+        "--exclude",
+        default="",
+        help="comma-separated family names to leave out (applied after --only)",
     )
     ap.add_argument(
         "--pyroot",
@@ -974,7 +1191,32 @@ def main():
         "anchor check only -- its exit code answers 'does output match the "
         "blessed shas', not the parity question the default run gates on.",
     )
+    ap.add_argument(
+        "--flavor",
+        default="",
+        help="LLVM flavor to emit for and to record / check under (llvm20, "
+        "llvm22, llvm23); default ROCKE_LLVM_FLAVOR, else the host's flavor. "
+        "--python-only --mode ll takes a comma-separated list and handles "
+        "each flavor in turn",
+    )
+    ap.add_argument(
+        "--golden-file",
+        default=str(GOLDEN_FILE),
+        help="golden file to record into / check against (default: the committed one)",
+    )
+    ap.add_argument(
+        "--python-only",
+        action="store_true",
+        help="with --record-golden / --check-golden: run only the Python "
+        "reference emitters (no C++ engine, no archive). The golden records "
+        "Python reference hashes, and the flavor is a lowering argument, so "
+        "any host can record or check every flavor this way.",
+    )
     args = ap.parse_args()
+    if args.record_golden and args.check_golden:
+        ap.error("--record-golden and --check-golden are exclusive")
+    if args.python_only and not (args.record_golden or args.check_golden):
+        ap.error("--python-only only runs the golden record / check")
 
     global PY_REF_ROOT, SHIM_DIR
     if args.pyroot:
@@ -983,20 +1225,99 @@ def main():
     if args.shim:
         SHIM_DIR = Path(args.shim)
 
+    golden = args.record_golden or args.check_golden
+    kind = golden_kind(args.mode, args.canonical) if golden else None
+    flavors = [f for f in args.flavor.split(",") if f.strip()] or [""]
+    if len(flavors) > 1 and not (args.python_only and kind == LL):
+        ap.error("several --flavor values need --python-only --mode ll")
+
+    fams = find_families(python_only=args.python_only)
+    if args.only:
+        subs = [s for s in args.only.split(",") if s]
+        fams = [(n, d) for n, d in fams if any(s in n for s in subs)]
+    if args.exclude:
+        excluded = {s for s in args.exclude.split(",") if s}
+        kept = [(n, d) for n, d in fams if n not in excluded]
+        if fams and not kept:
+            # The caller compares these families in another lane.
+            print(
+                f"[diff] every selected family is excluded ({args.exclude}); nothing to do"
+            )
+            return 0
+        fams = kept
+    # A filtered run records or checks only the families it ran.
+    scope = [name for name, _ in fams] if (args.only or args.exclude) else None
+
+    jobs = args.jobs or _default_family_workers(len(fams), args.mode)
+    if args.python_only:
+        if not fams:
+            # Checking nothing would print GOLDEN OK; recording nothing would
+            # empty the section. A typo in --only must not do either.
+            print(f"\nNO_FAMILIES: {GATE_FAIL['NO_FAMILIES']}")
+            return 1
+        status = 0
+        for requested in flavors:
+            flavor = pin_llvm_flavor(requested)
+            print(
+                f"mode={args.mode}  flavor={flavor}  families={len(fams)}  "
+                f"jobs={jobs}  python-only"
+            )
+            cur, errors = python_reference_families(
+                fams, args.mode, args.canonical, jobs
+            )
+            if errors:
+                print("\n=== PYTHON REFERENCE FAILURES ===")
+                for family, error in errors:
+                    print(f"  {family}: {error}")
+                print(
+                    f"\nnothing recorded or checked for {flavor}: a family did not finish"
+                )
+                status = 1
+                continue
+            status |= _golden_step(args, kind, flavor, cur, scope, [], fams)
+        return status
+
+    # A golden is per flavor, so its runs always pin one; a plain parity run
+    # leaves each emitter to resolve its own unless --flavor is given.
+    flavor = pin_llvm_flavor(flavors[0]) if (golden or args.flavor) else "host"
+
     archive = Path(args.archive)
     if not archive.exists():
         sys.exit(
             f"archive not found: {archive}  (build: cmake -S {CKC} -B /tmp/rocke_verify && cmake --build /tmp/rocke_verify -j)"
         )
 
-    fams = find_families()
-    if args.only:
-        subs = [s for s in args.only.split(",") if s]
-        fams = [(n, d) for n, d in fams if any(s in n for s in subs)]
+    global LIBRARY_ARCHIVE
+    library_archive = (
+        Path(args.library_archive)
+        if args.library_archive
+        else archive.parent / LIBRARY_ARCHIVE_NAME
+    )
+    if library_archive.exists():
+        LIBRARY_ARCHIVE = library_archive.resolve()
+    elif args.library_archive:
+        sys.exit(f"library archive not found: {library_archive}")
 
-    jobs = args.jobs or _default_family_workers(len(fams), args.mode)
-    print(f"mode={args.mode}  families={len(fams)}  jobs={jobs}  archive={archive}")
+    # A library emitter linked without the library archive fails to link, which
+    # would read as COMPILE_FAIL on every family instead of naming the cause.
+    if (
+        LIBRARY_ARCHIVE is None
+        and library_sources_present()
+        and any(d == LIB_PARITY for _, d in fams)
+    ):
+        sys.exit(
+            f"library/cpp carries C++ mirrors but no {LIBRARY_ARCHIVE_NAME} was "
+            f"found beside {archive}; build the rocke_library_core target too "
+            "(tools/check_byte_identity.py does), or pass --library-archive"
+        )
+
+    print(
+        f"mode={args.mode}  flavor={flavor}  families={len(fams)}  jobs={jobs}  "
+        f"archive={archive}"
+    )
     print(f"engine build-id: {archive_build_id(archive)}")
+    if LIBRARY_ARCHIVE is not None:
+        print(f"library archive: {LIBRARY_ARCHIVE}")
     results = _run_families(
         fams,
         archive,
@@ -1020,21 +1341,89 @@ def main():
             print(f"  {status:16s} {family}: {reason}")
     print(f"\ndashboard: {args.json}")
 
-    # ---- L5 golden anchor -------------------------------------------------
-    if args.record_golden or args.check_golden:
-        key = golden_key(args.mode, args.canonical)
-        cur = collect_ref_shas(results)
-        GOLDEN_DIR.mkdir(parents=True, exist_ok=True)
-        store = {}
-        if GOLDEN_FILE.exists():
-            store = json.loads(GOLDEN_FILE.read_text())
+    if golden:
+        return _golden_step(
+            args, kind, flavor, collect_ref_shas(results), scope, failures, fams
+        )
+    return exit_code
 
+
+def _explicit_golden_file(args) -> bool:
+    """--golden-file names one file for every family, overriding the routing."""
+    return Path(args.golden_file).resolve() != GOLDEN_FILE.resolve()
+
+
+def _golden_files(args, fams) -> dict[Path, set[str]]:
+    """Each golden file this run records into or checks, with the families it
+    anchors. A family is anchored beside its emitters (platform or library);
+    an explicit --golden-file takes every family."""
+    if _explicit_golden_file(args):
+        return {Path(args.golden_file): {name for name, _ in fams}}
+    files: dict[Path, set[str]] = {}
+    for name, src_dir in fams:
+        files.setdefault(golden_file_for(src_dir), set()).add(name)
+    return files
+
+
+def _misrouted_families(kind, flavor, fams) -> list[str]:
+    """Run families blessed in a golden file other than the one anchoring them.
+
+    Checked against the wrong file, a family's configs read as NEW
+    (informational) and the check prints GOLDEN OK; its blessings in the
+    other file name the misrouting instead."""
+    sections = {
+        path: GoldenStore.load(path).section(kind, flavor)
+        for path in (GOLDEN_FILE, LIB_GOLDEN_FILE)
+    }
+    found = []
+    for name, src_dir in fams:
+        home = golden_file_for(src_dir)
+        found.extend(
+            f"{name} (anchored in {home}, blessed in {path})"
+            for path, section in sections.items()
+            if path != home and name in section
+        )
+    return sorted(found)
+
+
+def _golden_step(args, kind, flavor, cur, scope, failures, fams):
+    """Record `cur` into the golden, or check it against the golden, one
+    golden file at a time."""
+    files = _golden_files(args, fams)
+    if args.check_golden and len(files) > 1:
+        sections = {
+            path: GoldenStore.load(path).section(kind, flavor) for path in files
+        }
+        twice = sorted(set.intersection(*(set(s) for s in sections.values())))
+        if twice:
+            print("\nGOLDEN CONFLICT: blessed in two golden files: " + ", ".join(twice))
+            return 1
+    if args.check_golden and not _explicit_golden_file(args):
+        misrouted = _misrouted_families(kind, flavor, fams)
+        if misrouted:
+            print("\nGOLDEN MISROUTED: blessed outside their golden file:")
+            for line in misrouted:
+                print(f"  {line}")
+            return 1
+    status = 0
+    for golden_file, names in files.items():
+        file_scope = None if scope is None else [f for f in scope if f in names]
+        if file_scope == []:
+            continue
+        file_cur = {f: v for f, v in cur.items() if f in names}
+        status |= _golden_step_file(
+            args, kind, flavor, golden_file, file_cur, file_scope, failures
+        )
+    return status
+
+
+def _golden_step_file(args, kind, flavor, golden_file, cur, scope, failures):
+    """Record `cur` into `golden_file`, or check it against that file."""
+    store = GoldenStore.load(golden_file)
+    where = f"{kind}[{flavor}]" if kind == LL else kind
     if args.record_golden:
         # The golden records the PYTHON reference sha per config, which is the
         # source of truth regardless of whether the C engine currently agrees.
-        # A C-vs-Python DRIFT family is reported as a caveat (e.g. the known
-        # pre-existing gfx950_attention_tiled_2d_fastkv_regp ir drift) but does
-        # not invalidate the reference shas being blessed.
         if failures:
             print(
                 "\nNOTE: recording golden from a run the gate would fail: "
@@ -1044,57 +1433,49 @@ def main():
                 "nothing blesses FEWER configs than a clean run would, and the "
                 "missing ones return later as NEW (unblessed), not as MISSING."
             )
-        store[key] = cur
+        removed = store.record(kind, flavor, cur, families=scope)
+        store.save(golden_file)
         nblessed = sum(len(v) for v in cur.values())
-        GOLDEN_FILE.write_text(json.dumps(store, indent=2, sort_keys=True) + "\n")
-        print(
-            f"\nrecorded golden[{key}]: {len(cur)} families, {nblessed} configs "
-            f"-> {GOLDEN_FILE}"
+        what = (
+            f"{len(scope)} selected families" if scope is not None else "all families"
         )
+        print(
+            f"\nrecorded golden {where} ({what}): {len(cur)} families, {nblessed} "
+            f"configs -> {golden_file}"
+        )
+        if removed:
+            print(
+                f"REMOVED from the golden {where} (no hashes in this run): "
+                + ", ".join(removed)
+            )
         return 0
 
-    if args.check_golden:
-        ref = store.get(key)
-        if not ref:
-            print(
-                f"\nNO GOLDEN for key '{key}'. Bless first: "
-                f"run_diff.py --mode {args.mode}"
-                f"{' --canonical' if args.canonical else ''} --record-golden"
-            )
-            return 1
-        mism, missing, extra = [], [], []
-        for fam, cfgs in ref.items():
-            cur_fam = cur.get(fam, {})
-            for idx, sha in cfgs.items():
-                got = cur_fam.get(idx)
-                if got is None:
-                    missing.append((fam, idx))
-                elif got != sha:
-                    mism.append((fam, idx))
-        for fam, cfgs in cur.items():
-            for idx in cfgs:
-                if idx not in ref.get(fam, {}):
-                    extra.append((fam, idx))
-        print(f"\n=== GOLDEN CHECK (key={key}) ===")
-        print(f"  blessed configs : {sum(len(v) for v in ref.values())}")
-        print(f"  UNBLESSED CHANGE: {len(mism)}")
-        print(f"  MISSING (gone)  : {len(missing)}")
-        print(f"  NEW (unblessed) : {len(extra)}")
-        for fam, idx in (mism + missing)[:30]:
-            print(f"    {fam}[{idx}]")
-        if mism or missing:
-            print(
-                "\nGOLDEN MISMATCH: emitted output changed vs the committed "
-                "anchor. If this change is expected & reviewed, re-bless with "
-                "--record-golden; otherwise you introduced a regression."
-            )
-            return 1
-        if extra:
-            print("\nNew configs not in golden (informational; re-bless to add).")
-        print("GOLDEN OK")
-        return 0
-
-    return exit_code
+    blessed = store.section(kind, flavor)
+    if not blessed:
+        print(
+            f"\nNO GOLDEN for {where}. Bless first: run_diff.py --mode {args.mode}"
+            f"{' --canonical' if args.canonical else ''} --flavor {flavor} --record-golden"
+        )
+        return 1
+    result = compare(blessed, cur, families=scope)
+    print(f"\n=== GOLDEN CHECK ({where}, {golden_file}) ===")
+    print(f"  blessed configs : {result.blessed}")
+    print(f"  UNBLESSED CHANGE: {len(result.changed)}")
+    print(f"  MISSING (gone)  : {len(result.missing)}")
+    print(f"  NEW (unblessed) : {len(result.new)}")
+    for fam, idx in (result.changed + result.missing)[:30]:
+        print(f"    {fam}[{idx}]")
+    if not result.ok:
+        print(
+            "\nGOLDEN MISMATCH: emitted output changed vs the committed "
+            "anchor. If this change is expected & reviewed, re-bless with "
+            "--record-golden; otherwise you introduced a regression."
+        )
+        return 1
+    if result.new:
+        print("\nNew configs not in golden (informational; re-bless to add).")
+    print("GOLDEN OK")
+    return 0
 
 
 if __name__ == "__main__":

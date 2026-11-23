@@ -108,6 +108,61 @@ class TestRoundTrip:
             k.kernel_source.spec for k in want
         ]
 
+    def test_arms_whose_policy_resolves_an_unpinned_knob_differently_round_trip(
+        self, tmp_path
+    ):
+        """Two arms of one shape leave use_exp2_fast to the kernel's policy, which
+        resolves it to 1 on one and 0 on the other, beside a third arm that pins it.
+        A shape has one `resolved` value per field, so the arms must state theirs."""
+        long_form = _enumerated(
+            [
+                _kernel(
+                    "attn.bf16_sq512_bm128_eu1",
+                    {"dtype": "bf16", "seqlen_q": 512, "block_m": 128},
+                    {
+                        "dtype": "BF16",
+                        "seqlen_q": 512,
+                        "block_m": 128,
+                        "use_exp2_fast": 1,
+                    },
+                ),
+                _kernel(
+                    "attn.bf16_sq512_bm256_eu0",
+                    {"dtype": "bf16", "seqlen_q": 512, "block_m": 256},
+                    {
+                        "dtype": "BF16",
+                        "seqlen_q": 512,
+                        "block_m": 256,
+                        "use_exp2_fast": 0,
+                    },
+                ),
+                _kernel(
+                    "attn.bf16_sq512_bm256_e1",
+                    {
+                        "dtype": "bf16",
+                        "seqlen_q": 512,
+                        "block_m": 256,
+                        "use_exp2_fast": True,
+                    },
+                    {
+                        "dtype": "BF16",
+                        "seqlen_q": 512,
+                        "block_m": 256,
+                        "use_exp2_fast": 1,
+                    },
+                ),
+            ]
+        )
+        compact = _compact(long_form)
+        factorise_config._round_trip(long_form, compact)
+        got = _expand(tmp_path, compact)
+        want = _enumerate(tmp_path, long_form)
+        assert [k.name for k in got] == [k.name for k in want]
+        assert [k.metadata for k in got] == [k.metadata for k in want]
+        assert [k.kernel_source.spec for k in got] == [
+            k.kernel_source.spec for k in want
+        ]
+
     def test_a_vocabulary_field_outside_the_spec_round_trips(self, tmp_path):
         """A vocabulary field the spec does not carry reaches the compact form as a
         matcher-spelling `resolved` value, which the expansion must accept."""
@@ -141,6 +196,47 @@ class TestRoundTrip:
         broken["packs"][0]["variants"][0]["shapes"][0]["seqlen_q"] = 99
         with pytest.raises(factorise_config.FactoriseError, match="round trip"):
             factorise_config._round_trip(SAMPLE, broken)
+
+    def test_constant_launches_survive_the_compaction(self, tmp_path):
+        long_form = copy.deepcopy(SAMPLE)
+        launches = {"segment": {}, "reduce": {"role": "reduce"}}
+        for kernel in long_form["packs"][0]["kernels"]:
+            kernel["kernel_source"]["launches"] = copy.deepcopy(launches)
+        compact = _compact(long_form)
+        assert compact["packs"][0]["kernel_defaults"]["launches"] == launches
+        factorise_config._round_trip(long_form, compact)
+        for kernel in _expand(tmp_path, compact):
+            assert list(kernel.kernel_source.launches) == ["segment", "reduce"]
+            assert kernel.kernel_source.launches["reduce"].role == "reduce"
+
+    def test_launches_the_compact_form_cannot_carry_are_refused(self):
+        """Every kernel names the same launches but one states a different override,
+        so the launches are not constant across the set and the compact form would
+        give every kernel the same launches (or none); the round trip must not let
+        that ship."""
+        long_form = copy.deepcopy(SAMPLE)
+        for index, kernel in enumerate(long_form["packs"][0]["kernels"]):
+            kernel["kernel_source"]["launches"] = {
+                "segment": {},
+                "reduce": {
+                    "role": "reduce",
+                    **({"builder": "build_x"} if not index else {}),
+                },
+            }
+        compact = _compact(long_form)
+        with pytest.raises(factorise_config.FactoriseError, match="launches"):
+            factorise_config._round_trip(long_form, compact)
+
+    def test_launches_differing_only_in_a_role_are_refused(self):
+        long_form = copy.deepcopy(SAMPLE)
+        for index, kernel in enumerate(long_form["packs"][0]["kernels"]):
+            kernel["kernel_source"]["launches"] = {
+                "segment": {},
+                "reduce": {"role": "reduce" if index else "merge"},
+            }
+        compact = _compact(long_form)
+        with pytest.raises(factorise_config.FactoriseError, match="launches"):
+            factorise_config._round_trip(long_form, compact)
 
 
 class TestHoisting:
@@ -595,3 +691,45 @@ class TestTheReductionCarriersSurvive:
             False,
             True,
         ]
+
+
+class TestSlottedPacks:
+    """A slotted config is factorised pack by pack; its round trip also holds the slot
+    declarations and each pack's header."""
+
+    SLOTTED = Path(__file__).parent / "fixtures" / "slotted_three_slot.yaml"
+    KNOBS = {"prep": [], "dkdv": ["block_m", "num_warps"], "dq": ["block_m"]}
+
+    def _compact(self):
+        from codegen.config_loader import read_yaml
+
+        original = read_yaml(self.SLOTTED)
+        compact = copy.deepcopy({k: v for k, v in original.items() if k != "packs"})
+        compact["packs"] = [
+            factorise_config.factorise_pack(pack, self.KNOBS[pack["slot"]], {})
+            for pack in original["packs"]
+        ]
+        return original, compact
+
+    def test_each_pack_keeps_its_header_and_the_round_trip_holds(self):
+        original, compact = self._compact()
+        for before, after in zip(original["packs"], compact["packs"]):
+            for key in ("name", "slot", "arch", "discriminator"):
+                assert after.get(key) == before.get(key)
+        factorise_config._round_trip(original, compact)
+
+    def test_a_changed_slot_declaration_is_refused(self):
+        original, compact = self._compact()
+        (dkdv,) = [s for s in compact["slots"] if s["name"] == "dkdv"]
+        dkdv["ranker"] = False
+        with pytest.raises(
+            factorise_config.FactoriseError, match="'slots' declaration"
+        ):
+            factorise_config._round_trip(original, compact)
+
+    def test_a_changed_pack_header_is_refused(self):
+        original, compact = self._compact()
+        (dq_full,) = [p for p in compact["packs"] if p["name"] == "dq_full"]
+        dq_full["discriminator"] = "partial"
+        with pytest.raises(factorise_config.FactoriseError, match="a pack's header"):
+            factorise_config._round_trip(original, compact)

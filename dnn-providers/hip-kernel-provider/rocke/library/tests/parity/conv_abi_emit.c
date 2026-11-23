@@ -13,8 +13,9 @@
  *   8  direct fwd       9  direct dgrad
  *  10  fwd problem block          11  fwd problem block 3-D
  *  12  deep_fused_conv_pool signature (2-D)
- *  13  fwd two_stage (rejected)   14  direction "bwd" (rejected)
+ *  13  fwd two_stage (split-K)    14  direction "bwd" (rejected)
  *  15  direct wgrad                16  direct "bwd" (rejected)
+ *  17  fwd 3-D two_stage (split-K) 18  dgrad two_stage (rejected)
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -121,6 +122,12 @@ int main(int argc, char** argv)
         break;
     case 16:
         ok = rocke_conv_direct_arg_names("bwd", &list);
+        break;
+    case 17:
+        ok = rocke_conv_arg_names("fwd", true, true, &list);
+        break;
+    case 18:
+        ok = rocke_conv_arg_names("dgrad", false, true, &list);
         break;
     default:
         fprintf(stderr, "unknown config index %d\n", idx);

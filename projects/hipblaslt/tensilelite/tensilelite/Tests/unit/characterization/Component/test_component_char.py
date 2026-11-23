@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.Component``: the pure ``PartialMatch``
+"""Characterization tests for ``tensilelite.Component``: the pure ``PartialMatch``
 matcher and the ``Component`` registry/search surface
 (``matches``/``findAll``/``find``/``componentPath``/``commentHeader``).
 
@@ -17,8 +17,8 @@ import types
 
 import pytest
 
-from Tensile.Component import Component, PartialMatch
-from Tensile.Components.DecouplePGR import dcpLdsSide
+from tensilelite.Component import Component, PartialMatch
+from tensilelite.Components.DecouplePGR import dcpLdsSide
 
 # NOTE: Component.py ends with `from .Components import *`, which rebinds the
 # module-level name `LocalRead` to the Components.LocalRead submodule. The real

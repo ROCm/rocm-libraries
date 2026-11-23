@@ -1,0 +1,1349 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "4_8_16_16_fp32_nchw_relu",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "operation": "relu_fwd",
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp32",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp32.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp32"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp32_nchw_relu6",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "operation": "relu_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp32",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp32.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp32"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp32_nchw_clamp",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "operation": "relu_fwd",
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp32",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp32.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp32"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp32_nchw_leaky",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "operation": "relu_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": 0.009999999776482582,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp32",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp32.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp32"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp32_nchw_sigmoid",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "operation": "sigmoid_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp32",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp32.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp32"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp32_nchw_tanh",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "operation": "tanh_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp32",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp32.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp32"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp32_nhwc_relu",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "operation": "relu_fwd",
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp32",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp32.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp32"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp32_nhwc_relu6",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "operation": "relu_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp32",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp32.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp32"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp32_nhwc_clamp",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "operation": "relu_fwd",
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp32",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp32.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp32"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp32_nhwc_leaky",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "operation": "relu_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": 0.009999999776482582,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp32",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp32.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp32"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp32_nhwc_sigmoid",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "operation": "sigmoid_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp32",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp32.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp32"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp32_nhwc_tanh",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "operation": "tanh_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp32",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp32.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp32"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp16_nchw_relu",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "operation": "relu_fwd",
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp16",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp16.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp16"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp16_nchw_relu6",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "operation": "relu_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp16",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp16.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp16"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp16_nchw_clamp",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "operation": "relu_fwd",
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp16",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp16.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp16"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp16_nchw_leaky",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "operation": "relu_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": 0.009999999776482582,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp16",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp16.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp16"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp16_nchw_sigmoid",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "operation": "sigmoid_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp16",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp16.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp16"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp16_nchw_tanh",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "operation": "tanh_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp16",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp16.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp16"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp16_nhwc_relu",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "operation": "relu_fwd",
+          "relu_lower_clip": 0.0,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp16",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp16.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp16"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp16_nhwc_relu6",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "operation": "relu_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 6.0
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp16",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp16.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp16"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp16_nhwc_clamp",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "operation": "relu_fwd",
+          "relu_lower_clip": 0.10000000149011612,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": 0.5
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp16",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp16.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp16"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp16_nhwc_leaky",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "operation": "relu_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": 0.009999999776482582,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp16",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp16.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp16"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp16_nhwc_sigmoid",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "operation": "sigmoid_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp16",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp16.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp16"
+      }
+    },
+    {
+      "id": "4_8_16_16_fp16_nhwc_tanh",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              4,
+              8,
+              16,
+              16
+            ],
+            "strides": [
+              2048,
+              1,
+              128,
+              8
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "operation": "tanh_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "ported from c++ tests",
+        "generator_version": "1.0.0",
+        "operation": "Smoke/IntegrationGpuActivationForwardFp16",
+        "seed": 1,
+        "notes": "Ported from C++ graph test Smoke/IntegrationGpuActivationForwardFp16.Correctness",
+        "reference_source": "c++ integration suite: Smoke/IntegrationGpuActivationForwardFp16"
+      }
+    }
+  ]
+}

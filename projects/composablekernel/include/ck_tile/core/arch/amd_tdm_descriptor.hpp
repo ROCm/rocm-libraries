@@ -1,14 +1,18 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
+#include <cstddef>
+
+#include "ck_tile/core/arch/amd_buffer_coherence.hpp"
 #include "ck_tile/core/arch/amd_wave_read_first_lane.hpp"
 #include "ck_tile/core/container/sequence.hpp"
 #include "ck_tile/core/container/tuple.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
 #include "ck_tile/core/numeric/type_convert.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
+#include "ck_tile/core/utility/bit_cast.hpp"
 
 namespace ck_tile {
 
@@ -23,6 +27,18 @@ struct TDMLdsPaddingConfig
     uint32_t pad_interval{0};
     uint32_t pad_amount{0};
 };
+
+/// The TDMLdsPaddingConfig of pad_bytes of LDS padding after every period_bytes. Both fields are
+/// biased by one: pad_interval is log2 of the period in dwords, minus 1 (a power of two of at
+/// least 2 dwords), and pad_amount the pad in dwords, minus 1.
+CK_TILE_HOST_DEVICE constexpr TDMLdsPaddingConfig make_tdm_lds_padding_config(index_t period_bytes,
+                                                                              index_t pad_bytes)
+{
+    uint32_t log2 = 0;
+    for(index_t dwords = period_bytes / 4; dwords > 1; dwords >>= 1)
+        ++log2;
+    return {log2 - 1, static_cast<uint32_t>(pad_bytes / 4 - 1)};
+}
 
 struct TDMIterationConfig
 {
@@ -50,6 +66,8 @@ struct TDMConfig
 
 union TDM_GROUP0
 {
+    CK_TILE_DEVICE constexpr TDM_GROUP0() : bitfield{0, 0, 0, 0} {}
+
     CK_TILE_DEVICE TDM_GROUP0(uintptr_t lds_addr_in,
                               uintptr_t global_addr_in,
                               uint32_t gather_idx_size_in,
@@ -68,6 +86,12 @@ union TDM_GROUP0
     {
         global_addr_lo = value & 0xFFFFFFFF;
         global_addr_hi = (value >> 32);
+    }
+
+    /// The 57-bit global address that globalAddr() stored.
+    CK_TILE_DEVICE uint64_t getGlobalAddr() const
+    {
+        return (static_cast<uint64_t>(global_addr_hi) << 32) | global_addr_lo;
     }
 
     struct
@@ -266,20 +290,19 @@ union TDM_GROUP2_MODE0
             uint32_t global_addr_increment_lo;
         };
 
+        // Each 16-bit pair is one struct: a bitfield alone in a union takes the whole uint32_t,
+        // which would move the upper field out of sgpr3.
         union
         {
             struct
             {
-                union
-                {
-                    uint32_t tensor_dim2_stride_hi : 16;
-                    uint32_t global_addr_increment_hi : 16;
-                };
-                union
-                {
-                    uint32_t tile_dim3 : 16;
-                    uint32_t iterate_count : 16;
-                };
+                uint32_t tensor_dim2_stride_hi : 16;
+                uint32_t tile_dim3 : 16;
+            };
+            struct
+            {
+                uint32_t global_addr_increment_hi : 16;
+                uint32_t iterate_count : 16;
             };
             uint32_t sgpr3;
         };
@@ -337,6 +360,54 @@ union TDM_GROUP2
     int32x4_t bitfield;
 };
 
+static_assert(sizeof(TDM_GROUP2_MODE0) == 16, "group 2 fields must fit its four SGPRs");
+static_assert(sizeof(TDM_GROUP2) == 16, "group 2 fields must fit its four SGPRs");
+
+/// The groups of a load of rank 2 or less (groups 3 and 4 zero), for a caller that builds them
+/// once and keeps them in registers. Group 1 comes first: its int32x8_t is 32-byte aligned, and
+/// after group 0 it would add 16 bytes of padding that amd_wave_read_first_lane reads as well.
+struct TDMGroups
+{
+    TDM_GROUP1 g1;
+    TDM_GROUP0 g0;
+    TDM_GROUP2 g2;
+};
+static_assert(sizeof(TDMGroups) == 64, "TDMGroups must hold its 16 SGPRs without padding");
+
+/// TENSOR_LOAD_TO_LDS of a load of rank 2 or less (groups 3 and 4 zero) from groups the caller
+/// built, for a caller that keeps them in registers across loads and updates only the fields
+/// that change. amd_tdm_load(const TDMDescriptor&) instead builds every group on each call.
+template <amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default>
+CK_TILE_DEVICE void amd_tdm_load([[maybe_unused]] const TDM_GROUP0& group0,
+                                 [[maybe_unused]] const TDM_GROUP1& group1,
+                                 [[maybe_unused]] const TDM_GROUP2& group2)
+{
+#if CK_TILE_ENABLE_TDM_FEATURE
+    __builtin_amdgcn_tensor_load_to_lds(bit_cast<uint32x4_t>(group0.bitfield),
+                                        group1.bitfield,
+                                        group2.bitfield,
+                                        int32x4_t{0, 0, 0, 0},
+                                        int32x8_t{},
+                                        static_cast<index_t>(coherence));
+#endif
+}
+
+/// amd_tdm_load of groups built once, with group 0's LDS and global addresses and the extent of
+/// dimension Dim replaced: the fields that change from one load of a tile to the next.
+template <index_t Dim,
+          amd_buffer_coherence_enum coherence = amd_buffer_coherence_enum::coherence_default>
+CK_TILE_DEVICE void
+amd_tdm_load(TDMGroups groups, uint32_t lds_addr, uint64_t global_addr, uint32_t extent)
+{
+    static_assert(Dim == 0 || Dim == 1, "TDM: groups hold the extents of dimensions 0 and 1");
+    groups.g0 = TDM_GROUP0{lds_addr, global_addr, 0, 0};
+    if constexpr(Dim == 0)
+        groups.g1.tensorDim0(extent);
+    else
+        groups.g1.tensorDim1(extent);
+    amd_tdm_load<coherence>(groups.g0, groups.g1, groups.g2);
+}
+
 union TDM_GROUP3_MODE0
 {
     struct
@@ -388,6 +459,91 @@ union TDM_GROUP3
     int32x4_t bitfield;
 };
 
+/**
+ * @brief The unit in which the TDM counts a tensor of T.
+ *
+ * The TDM counts dims, tile dims and strides in units of its data size, which is 1, 2, 4 or 8
+ * bytes. A T of one of those sizes is its own unit. Any other T, such as pk_fp6x16_t (sixteen
+ * 6-bit values in 12 bytes), is counted in units of kFallbackUnitBytes, units_per_element of them
+ * per element. An element is one object of T: a whole pack for a packed type. TDMDescriptor
+ * converts the caller's element counts to these units.
+ *
+ * The k-prefixed members are the inputs (kFallbackUnitBytes is the one knob); the lower-case
+ * members are what callers use.
+ *
+ * @tparam T Element type of the global tensor, as passed to TDMDescriptor.
+ *
+ * @note A 12-byte pack could also be counted in dwords (a 4-byte unit, three per pack);
+ * kFallbackUnitBytes selects the unit.
+ */
+template <typename T>
+struct TDMElementTraits
+{
+    /** sizeof(T). */
+    static constexpr index_t kElementBytes = sizeof(T);
+    /** Whether T is its own TDM unit (1, 2, 4 or 8 bytes). */
+    static constexpr bool kIsUnitSized =
+        kElementBytes == 1 || kElementBytes == 2 || kElementBytes == 4 || kElementBytes == 8;
+    /** TDM unit, in bytes, for a T that is not its own unit. */
+    static constexpr index_t kFallbackUnitBytes = 1;
+
+    /** Bytes per TDM unit. */
+    static constexpr index_t unit_bytes = kIsUnitSized ? kElementBytes : kFallbackUnitBytes;
+    // Protects against a kFallbackUnitBytes that is not a TDM data size, or that does not divide
+    // sizeof(T): the TDM can only count whole units of 1, 2, 4 or 8 bytes.
+    static_assert(unit_bytes == 1 || unit_bytes == 2 || unit_bytes == 4 || unit_bytes == 8,
+                  "TDMElementTraits: kFallbackUnitBytes must be a TDM data size (1, 2, 4 or 8)");
+    static_assert(kElementBytes % unit_bytes == 0,
+                  "TDMElementTraits: sizeof(T) must be a whole number of TDM units");
+
+    /** TDM units per element of T. */
+    static constexpr index_t units_per_element = kElementBytes / unit_bytes;
+
+    /** TDM_GROUP1::data_size: log2 of unit_bytes. */
+    static constexpr uint32_t data_size_code = unit_bytes == 8   ? 3u
+                                               : unit_bytes == 4 ? 2u
+                                               : unit_bytes == 2 ? 1u
+                                                                 : 0u;
+
+    /**
+     * Alignment of a global pointer to T: the TDM unit, so that every address the TDM generates
+     * (a byte base address plus whole units) is unit-aligned, and at least alignof(T), because
+     * buffer_view holds the pointer as a T* and offsets it in elements of T. This equals sizeof(T)
+     * for 1-, 2-, 4- and 8-byte scalars. A 12-byte 6-bit pack has a 1-byte unit, so its 4 comes
+     * from alignof(T) alone, not from the TDM.
+     */
+    static constexpr std::size_t alignment = static_cast<std::size_t>(unit_bytes) > alignof(T)
+                                                 ? static_cast<std::size_t>(unit_bytes)
+                                                 : alignof(T);
+
+    /**
+     * Largest box extent along the contiguous dim, in elements of T: TDM_GROUP1::tile_dim0 is 16
+     * bits and counts units.
+     */
+    static constexpr index_t max_box_dim0 = 0xFFFF / units_per_element;
+};
+
+/**
+ * @brief A TDM descriptor (D#) for a tensor of DataType.
+ *
+ * globalDim, globalStrides and boxDim count elements of DataType. An element is one object of
+ * DataType: a whole pack for a packed type (one pk_fp6x16_t holds 16 values), so callers pass
+ * value counts divided by PackedSize. The descriptor converts element counts to TDM units
+ * (TDMElementTraits<DataType>): the contiguous dim (index 0), its box extent and every stride are
+ * multiplied by units_per_element. The other dims and box extents (counts of rows), the gather
+ * row indices, the global and LDS addresses (bytes) and every TDMConfig field (LDS padding in
+ * dwords; the iterate increments, which no caller uses) reach the hardware unchanged. Converted
+ * values must fit their fields: 32 bits for tensor_dim0, 16 for tile_dim0 and 48 for the strides.
+ * buffer_view's tdm_get and tdm_store check tile_dim0 at compile time; debug builds assert all
+ * three.
+ *
+ * An element type that is not its own TDM unit is supported for rank <= 2 only: the group 2 and
+ * 3 strides are not converted to TDM units.
+ *
+ * @tparam DataType     Element type of the global tensor.
+ * @tparam TensorRank   Number of tensor dims (rank <= 2 for a type that is not its own unit).
+ * @tparam IsGatherMode Gather rows by index; tile_dim1 then carries the row-index count.
+ */
 template <typename DataType, index_t TensorRank, bool IsGatherMode = false>
 class TDMDescriptor
 {
@@ -413,7 +569,8 @@ class TDMDescriptor
 
     CK_TILE_DEVICE ~TDMDescriptor() = default;
 
-    // Getters for the descriptor properties
+    // Getters for the descriptor properties. Dims, strides and box extents are the caller's
+    // element counts, not TDM units.
     CK_TILE_DEVICE const void* getGlobalAddress() const { return m_globalAddress; }
     CK_TILE_DEVICE void* getLocalAddress() const { return m_localAddress; }
     CK_TILE_DEVICE const uint32_t* getGlobalDim() const { return m_globalDim; }
@@ -463,7 +620,32 @@ class TDMDescriptor
         }
     }
 
+    /// Groups 0 to 2 of a load of rank 2 or less, unlike getResourceDescriptorGroup with group 2
+    /// set (iterate mode) and not read-first-lane'd: for amd_tdm_load(g0, g1, g2) by a caller
+    /// that keeps them in registers and updates only the fields that change.
+    CK_TILE_DEVICE TDMGroups getGroups() const
+    {
+        static_assert(TensorRank <= 2 && !IsGatherMode, "TDM: getGroups is for rank <= 2 loads");
+        TDMGroups groups;
+        groups.g0 = TDM_GROUP0{reinterpret_cast<uintptr_t>(m_localAddress),
+                               reinterpret_cast<uintptr_t>(m_globalAddress),
+                               static_cast<uint32_t>(m_rowIdxSize),
+                               0u};
+        configureGroup1(groups.g1);
+        configureGroup2(groups.g2);
+        return groups;
+    }
+
     private:
+    using ElementTraits                       = TDMElementTraits<DataType>;
+    static constexpr index_t kUnitsPerElement = ElementTraits::units_per_element;
+    // Protects the group 2 and 3 strides: configureGroup2/3 write strides [2] and [3] without
+    // converting them to TDM units, so for an element type that is not its own unit they would
+    // count elements, not units.
+    static_assert(kUnitsPerElement == 1 || TensorRank <= 2,
+                  "TDM: an element type that is not its own TDM unit is supported for rank <= 2 "
+                  "only");
+
     const void* m_globalAddress     = nullptr;
     void* m_localAddress            = nullptr;
     const uint32_t* m_globalDim     = nullptr;
@@ -474,22 +656,63 @@ class TDMDescriptor
     TDMGatherIndexSize m_rowIdxSize;
     uint32_t m_rowIndexCount = m_rowIdxSize == TDMGatherIndexSize::Row16bit_Index ? 16 : 8;
 
+    // Element-to-unit conversions (see the class comment). configureGroup1 reads m_globalDim,
+    // m_globalStrides and m_boxDim only through these. Types that are their own unit take the
+    // unchanged branch.
+    template <index_t I>
+    CK_TILE_DEVICE uint32_t tensorDimInUnits(number<I>) const
+    {
+        if constexpr(I == 0 && kUnitsPerElement != 1)
+        {
+            assert(m_globalDim[I] <= 0xFFFFFFFFu / static_cast<uint32_t>(kUnitsPerElement) &&
+                   "TDM tensor_dim0 in TDM units exceeds 32 bits");
+            return m_globalDim[I] * static_cast<uint32_t>(kUnitsPerElement);
+        }
+        else
+        {
+            return m_globalDim[I];
+        }
+    }
+
+    template <index_t I>
+    CK_TILE_DEVICE uint64_t tensorDimStrideInUnits(number<I>) const
+    {
+        if constexpr(kUnitsPerElement != 1)
+        {
+            // Every TDM stride field is 48 bits wide.
+            assert(m_globalStrides[I] <=
+                       ((uint64_t{1} << 48) - 1) / static_cast<uint64_t>(kUnitsPerElement) &&
+                   "TDM stride in TDM units exceeds its 48-bit field");
+            return m_globalStrides[I] * static_cast<uint64_t>(kUnitsPerElement);
+        }
+        else
+        {
+            return m_globalStrides[I];
+        }
+    }
+
+    template <index_t I>
+    CK_TILE_DEVICE uint16_t tileDimInUnits(number<I>) const
+    {
+        if constexpr(I == 0 && kUnitsPerElement != 1)
+        {
+            assert(m_boxDim[I] <= ElementTraits::max_box_dim0 &&
+                   "TDM tile_dim0 is 16 bits: box[0] in TDM units exceeds 65535");
+            return static_cast<uint16_t>(static_cast<uint32_t>(m_boxDim[I]) *
+                                         static_cast<uint32_t>(kUnitsPerElement));
+        }
+        else
+        {
+            return m_boxDim[I];
+        }
+    }
+
     // Helper functions for configuring TDM groups
     CK_TILE_DEVICE void configureGroup1(TDM_GROUP1& group1) const
     {
         group1.workgroup_mask = m_tdmCfg.workgroup_mask;
 
-        auto getDataSizeCode = [](size_t byte_size) constexpr -> uint32_t {
-            if(byte_size == 8)
-                return 3;
-            if(byte_size == 4)
-                return 2;
-            if(byte_size == 2)
-                return 1;
-            return 0;
-        };
-
-        group1.data_size              = getDataSizeCode(sizeof(DataType));
+        group1.data_size              = ElementTraits::data_size_code;
         group1.atomic_barrier_enable  = m_tdmCfg.atomic_barrier_enable;
         group1.iterate_enable         = m_tdmCfg.iterate_enable;
         group1.pad_enable             = m_tdmCfg.pad_enable;
@@ -501,8 +724,8 @@ class TDMDescriptor
         static_for<0, 2, 1>{}([&](auto i) {
             if constexpr(i < TensorRank)
             {
-                group1.tensorDim(i, m_globalDim[i]);
-                group1.tensorDimStride(i, m_globalStrides[i]);
+                group1.tensorDim(i, tensorDimInUnits(i));
+                group1.tensorDimStride(i, tensorDimStrideInUnits(i));
             }
         });
 
@@ -511,13 +734,13 @@ class TDMDescriptor
             static_for<0, 3, 1>{}([&](auto i) {
                 if constexpr(i < TensorRank)
                 {
-                    group1.tileDim(i, m_boxDim[i]);
+                    group1.tileDim(i, tileDimInUnits(i));
                 }
             });
         }
         else
         {
-            group1.tileDim(0, m_boxDim[0]);
+            group1.tileDim(0, tileDimInUnits(number<0>{}));
             // when in gather mode, this specifies the number of indices that are valid
             group1.tileDim(1, m_rowIndexCount);
         }

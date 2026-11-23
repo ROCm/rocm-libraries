@@ -24,8 +24,6 @@ target_compile_options(hipsparse-clients-common PUBLIC -Wall)
 target_compile_definitions(hipsparse-clients-common PRIVATE GOOGLE_TEST)
 
 # GTest is required for arg_check.cpp and unit.cpp
-find_package(GTest REQUIRED)
-
 target_link_libraries(hipsparse-clients-common 
     PUBLIC 
         roc::hipsparse

@@ -128,7 +128,8 @@ rocke_value_t* rocke_b_zero_vec(rocke_ir_builder_t* b, const rocke_type_t* elem,
     if(rocke_type_eq(elem, rocke_f16()) || rocke_type_eq(elem, rocke_bf16())
        || rocke_type_eq(elem, rocke_f64()) || rocke_type_eq(elem, rocke_fp8e4m3())
        || rocke_type_eq(elem, rocke_bf8e5m2()) || rocke_type_eq(elem, rocke_i8())
-       || rocke_type_eq(elem, rocke_i16()) || rocke_type_eq(elem, rocke_i32()))
+       || rocke_type_eq(elem, rocke_u8()) || rocke_type_eq(elem, rocke_i16())
+       || rocke_type_eq(elem, rocke_i32()))
     {
         hint = cz_hint(b, n);
         if(!hint)
@@ -144,6 +145,48 @@ rocke_value_t* rocke_b_zero_vec(rocke_ir_builder_t* b, const rocke_type_t* elem,
 rocke_value_t* rocke_b_add(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
 {
     return rocke_i_binop(b, ROCKE_OP_ARITH_ADD, a, c, "add");
+}
+
+/* Python _check_unsigned_int_operands: both lowerings read the operands as
+ * uint32_t / uint64_t by width, so they are two i32 or two i64 values. Returns
+ * false (with the builder error set) when they are not. */
+static bool check_unsigned_int_operands(rocke_ir_builder_t* b,
+                                        const char* op_name,
+                                        const rocke_value_t* a,
+                                        const rocke_value_t* c)
+{
+    if(!a || !c)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s NULL operand", op_name);
+        return false;
+    }
+    if(!rocke_type_eq(a->type, c->type)
+       || (!rocke_i_type_is(a->type, "i32") && !rocke_i_type_is(a->type, "i64")))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "%s expects two i32 or two i64 operands, got %s / %s",
+                        op_name,
+                        a->type->name,
+                        c->type->name);
+        return false;
+    }
+    return true;
+}
+
+rocke_value_t* rocke_b_add_nuw(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
+{
+    rocke_value_t* operands[2];
+    rocke_attr_map_t at;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!check_unsigned_int_operands(b, "add_nuw", a, c))
+        return NULL;
+    operands[0] = a;
+    operands[1] = c;
+    at = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &at, "wrap", "nuw");
+    return rocke_i_op1(b, ROCKE_OP_ARITH_ADD, operands, 2, a->type, &at, "add");
 }
 
 rocke_value_t* rocke_b_sub(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
@@ -320,6 +363,35 @@ rocke_value_t*
     return rocke_i_op1(b, ROCKE_OP_ARITH_FMA, operands, 3, a->type, NULL, "fma");
 }
 
+/* Python IRBuilder.fdot2: a, c are the same vec<f16|bf16 x2>, d is f32. */
+rocke_value_t*
+    rocke_b_fdot2(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c, rocke_value_t* d)
+{
+    rocke_value_t* operands[3];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!a || !c || !d)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "fdot2 NULL operand");
+    const rocke_type_t* at = a->type;
+    const int ok_vec
+        = at && at->kind == ROCKE_TYPE_VECTOR && at->count == 2 && at->elem
+          && at->elem->kind == ROCKE_TYPE_SCALAR
+          && (at->elem->scalar == ROCKE_SCALAR_F16 || at->elem->scalar == ROCKE_SCALAR_BF16)
+          && rocke_type_eq(at, c->type);
+    if(!ok_vec || !rocke_type_eq(d->type, rocke_f32()))
+        return (rocke_value_t*)rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "fdot2 expects (vec<f16|bf16 x2>, same, f32); got %s, %s, %s",
+            a->type->name,
+            c->type->name,
+            d->type->name);
+    operands[0] = a;
+    operands[1] = c;
+    operands[2] = d;
+    return rocke_i_op1(b, ROCKE_OP_ARITH_FDOT2, operands, 3, rocke_f32(), NULL, "fdot2");
+}
+
 rocke_value_t* rocke_b_fmax(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
 {
     return rocke_i_binop(b, ROCKE_OP_ARITH_FMAX, a, c, "fmax");
@@ -436,6 +508,15 @@ rocke_value_t* rocke_b_cmp_ne(rocke_ir_builder_t* b, rocke_value_t* a, rocke_val
     return cmp_impl(b, a, c, "ne", "ne");
 }
 
+rocke_value_t* rocke_b_cmp_ult(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
+{
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!check_unsigned_int_operands(b, "cmp_ult", a, c))
+        return NULL;
+    return cmp_impl(b, a, c, "ult", "ult");
+}
+
 rocke_value_t*
     rocke_b_fcmp(rocke_ir_builder_t* b, const char* pred, rocke_value_t* a, rocke_value_t* c)
 {
@@ -484,6 +565,20 @@ rocke_value_t* rocke_b_exp2(rocke_ir_builder_t* b, rocke_value_t* a)
 rocke_value_t* rocke_b_exp2_fast(rocke_ir_builder_t* b, rocke_value_t* a)
 {
     return rocke_i_unop(b, ROCKE_OP_MATH_EXP2_FAST, a, "exp2f");
+}
+
+rocke_value_t* rocke_b_ldexp(rocke_ir_builder_t* b, rocke_value_t* value, rocke_value_t* exponent)
+{
+    char err[256];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!value || !exponent)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "ldexp: NULL operand");
+    if(const char* error
+       = rocke_i_ldexp_types_error(value->type, exponent->type, rocke_f32(), err, sizeof err))
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", error);
+    rocke_value_t* ops[2] = {value, exponent};
+    return rocke_i_op1(b, ROCKE_OP_MATH_LDEXP, ops, 2, rocke_f32(), NULL, "ldexp");
 }
 
 rocke_value_t* rocke_b_log2(rocke_ir_builder_t* b, rocke_value_t* a)

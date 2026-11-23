@@ -85,6 +85,9 @@ class _RecordingRuntime:
     def memset(self, ptr, value, nbytes):
         self.memsets.append((ptr, value, nbytes))
 
+    def memset_async(self, ptr, value, nbytes, stream):
+        self.memsets.append((ptr, value, nbytes))
+
 
 class _RecordingLauncher:
     def __init__(self):
@@ -102,7 +105,7 @@ def _launch_host(spec, arch):
     stage2 = _RecordingLauncher()
     # Pre-seed the Stage 2 memo so the workspace reduction needs no compiler.
     stage2_memo = {(spec.data.dtype_d, spec.ws_replicas): stage2}
-    run, free, pool = _streamk_launch(
+    run, extras, pool = _streamk_launch(
         rt=rt,
         launcher=launcher,
         spec=spec,
@@ -114,7 +117,7 @@ def _launch_host(spec, arch):
         KernelLauncher=None,
         LaunchConfig=LaunchConfig,
     )
-    return rt, launcher, stage2, run, free, pool
+    return rt, launcher, stage2, run, extras, pool
 
 
 class TestStreamKSweepLaunchHost(unittest.TestCase):
@@ -140,7 +143,7 @@ class TestStreamKSweepLaunchHost(unittest.TestCase):
                 spec = _spec(
                     _ALL_DP, arch=self.ARCH, reduction=reduction, dtype_d=dtype_d
                 )
-                rt, launcher, stage2, run, free, _ = _launch_host(spec, self.ARCH)
+                rt, launcher, stage2, run, extras, _ = _launch_host(spec, self.ARCH)
                 # One (stub) allocation, never a zero-byte one.
                 self.assertEqual(len(rt.allocs), 1)
                 (ws,) = rt.allocs
@@ -152,7 +155,7 @@ class TestStreamKSweepLaunchHost(unittest.TestCase):
                     self.assertEqual(values["sk_flags"], ws)
                     self.assertEqual(values["sk_partials"], ws)
                 self.assertEqual(len(stage2.calls), reduction == "workspace")
-                free()
+                rt.free(extras["ws_ptr"])
                 self.assertEqual(rt.freed, [ws])
 
     def test_split_partition_lays_out_flags_then_partials(self):
@@ -167,7 +170,7 @@ class TestStreamKSweepLaunchHost(unittest.TestCase):
             spec, arch=self.ARCH
         )
         self.assertGreater(flags_bytes, 0)
-        rt, launcher, _, run, free, _ = _launch_host(spec, self.ARCH)
+        rt, launcher, _, run, extras, _ = _launch_host(spec, self.ARCH)
         (ws,) = rt.allocs
         self.assertEqual(rt.allocs[ws], flags_bytes + partials_bytes)
         run()
@@ -176,7 +179,7 @@ class TestStreamKSweepLaunchHost(unittest.TestCase):
         self.assertEqual(values["sk_partials"], ws + flags_bytes)
         # linear/tree reset only the flag table before each launch.
         self.assertEqual(rt.memsets, [(ws, 0, flags_bytes)])
-        free()
+        rt.free(extras["ws_ptr"])
         self.assertEqual(rt.freed, [ws])
 
 
@@ -240,7 +243,7 @@ class TestStreamKSweepLaunchGpu(unittest.TestCase):
             rt.memcpy_h2d(bufs[1], u8(X), X.nbytes)
             # Poison dW: a reduction that leaves it alone must overwrite it.
             rt.memset(bufs[2], 0xFF if reduction != "atomic" else 0, dW.nbytes)
-            run, free, _ = _streamk_launch(
+            run, extras, _ = _streamk_launch(
                 rt=rt,
                 launcher=launcher,
                 spec=spec,
@@ -256,7 +259,7 @@ class TestStreamKSweepLaunchGpu(unittest.TestCase):
                 run()
                 synchronize_and_release(0)
             finally:
-                free()
+                rt.free(extras["ws_ptr"])
             rt.memcpy_d2h(u8(dW), bufs[2], dW.nbytes)
         finally:
             for b in bufs:

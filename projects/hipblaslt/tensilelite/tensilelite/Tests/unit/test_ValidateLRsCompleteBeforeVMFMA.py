@@ -25,12 +25,12 @@
 from typing import Any, Optional
 from rocisa.instruction import SWaitCnt
 
-from Tensile.Components.CMSValidator import (
+from tensilelite.Components.CMSValidator import (
     add_local_read_constraints,
     index_for_force_unroll_sub_iter, lr_needed_by_mfma,
 )
 from cms_validation_base import CMSValidationTestBase
-from Tensile.Common import IsaVersion
+from tensilelite.Common import IsaVersion
 
 
 class TestValidateLRsCompleteBeforeVMFMA(CMSValidationTestBase):

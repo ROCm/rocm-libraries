@@ -429,7 +429,8 @@ namespace
             {
                 if(m != nullptr)
                 {
-                    (void)rocsparse_destroy_spmat_descr(m);
+                    rocsparse_clients_log_rocsparse_error("rocsparse_destroy_spmat_descr",
+                                                          rocsparse_destroy_spmat_descr(m));
                 }
             }
         }
@@ -538,10 +539,11 @@ namespace
             clamp.reset(new ScopedMaxGridSizeX(handle, limit));
         }
 
-        std::unique_ptr<device_vector<J>> c_ind;
-        std::unique_ptr<device_vector<T>> c_val;
-        size_t                            buffer_size = 0;
-        void*                             buffer      = nullptr;
+        std::unique_ptr<device_vector<J>>    c_ind;
+        std::unique_ptr<device_vector<T>>    c_val;
+        std::unique_ptr<device_vector<char>> buffer_owner;
+        size_t                               buffer_size = 0;
+        void*                                buffer      = nullptr;
 
         auto spgemm = [&](rocsparse_spgemm_stage stage) {
             return rocsparse_spgemm(handle,
@@ -561,11 +563,10 @@ namespace
         };
 
         rocsparse_status status = spgemm(rocsparse_spgemm_stage_buffer_size);
-        if(status == rocsparse_status_success
-           && hipMalloc(&buffer, std::max<size_t>(buffer_size, 1)) != hipSuccess)
+        if(status == rocsparse_status_success)
         {
-            buffer = nullptr;
-            status = rocsparse_status_memory_error;
+            buffer_owner.reset(new device_vector<char>(std::max<size_t>(buffer_size, 1)));
+            buffer = buffer_owner->ptr;
         }
         if(status == rocsparse_status_success)
         {
@@ -584,11 +585,7 @@ namespace
             const int64_t bs = op.a.block_dim * op.a.block_dim;
             c_ind.reset(new device_vector<J>(static_cast<size_t>(std::max<int64_t>(nnz, 1))));
             c_val.reset(new device_vector<T>(static_cast<size_t>(std::max<int64_t>(nnz * bs, 1))));
-            if(c_ind->ptr == nullptr || c_val->ptr == nullptr)
-            {
-                status = rocsparse_status_memory_error;
-            }
-            else if(bsr)
+            if(bsr)
             {
                 status = rocsparse_bsr_set_pointers(descrs.c, c_ptr.ptr, c_ind->ptr, c_val->ptr);
             }
@@ -615,10 +612,6 @@ namespace
         if(status == rocsparse_status_success && hipDeviceSynchronize() != hipSuccess)
         {
             status = rocsparse_status_internal_error;
-        }
-        if(buffer != nullptr)
-        {
-            (void)hipFree(buffer);
         }
         if(status != rocsparse_status_success)
         {

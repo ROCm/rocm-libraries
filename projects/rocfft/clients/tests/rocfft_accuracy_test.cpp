@@ -21,6 +21,7 @@
 #include <gtest/gtest.h>
 #include <math.h>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -67,6 +68,10 @@ static user_mp_launch_command get_mp_launch_command()
     }
     return ret;
 }
+
+// fft_vs_reference_impl only calls this check if it exists, so guard against it vanishing
+static_assert(
+    std::is_member_function_pointer_v<decltype(&rocfft_params::validate_work_memory_devices)>);
 
 void fft_vs_reference(rocfft_params& params, bool round_trip)
 {
@@ -120,7 +125,8 @@ TEST_P(accuracy_test, vs_fftw)
     }
     case fft_params::fft_mp_lib_mpi:
     {
-        // Multi-proc FFT.
+        // Multi-proc FFT. With ROCFFT_RCCL_ENABLE, the worker uses RCCL for
+        // the transpose when every rank's bricks use one device; otherwise MPI A2A/P2P.
         static const auto mp_launch_command = get_mp_launch_command();
 
         if(mp_launch_command.exe.empty())

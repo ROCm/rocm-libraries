@@ -26,8 +26,6 @@
 
 set(HIPTENSOR_REDUCTION_SOURCES
    ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_reduction.cpp
-   ${CMAKE_CURRENT_SOURCE_DIR}/reduction_cpu_reference.cpp
-   ${CMAKE_CURRENT_SOURCE_DIR}/reduction_cpu_reference_instances.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/reduction_solution.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/reduction_solution_1_1_f16_f32_instance.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/reduction_solution_2_1_f16_f32_instance.cpp
@@ -117,4 +115,10 @@ set(HIPTENSOR_REDUCTION_SOURCES
    ${CMAKE_CURRENT_SOURCE_DIR}/reduction_solution_registry.cpp
 )
 
+hiptensor_set_host_only_sources(
+   ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_reduction.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/reduction_solution.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/reduction_solution_instances.cpp
+   ${CMAKE_CURRENT_SOURCE_DIR}/reduction_solution_registry.cpp
+)
 add_hiptensor_component(hiptensor_reduction ${HIPTENSOR_REDUCTION_SOURCES})

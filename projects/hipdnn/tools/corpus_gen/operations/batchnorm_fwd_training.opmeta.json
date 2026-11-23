@@ -1,0 +1,803 @@
+{
+  "schema_version": "1.0",
+  "operation": "batchnorm_fwd_training",
+  "display_name": "Batch Normalization, Forward Training",
+  "description": "Normalizes an [N, C, (D,) H, W] activation with statistics computed per channel, writes those statistics, optionally updates running statistics, and optionally applies an activation in the same graph.",
+  "parameters": {
+    "N": {
+      "type": "int64"
+    },
+    "C": {
+      "type": "int64"
+    },
+    "H": {
+      "type": "int64"
+    },
+    "W": {
+      "type": "int64"
+    },
+    "spatial": {
+      "type": "enum",
+      "values": [
+        "3d",
+        "2d"
+      ],
+      "description": "2-D ([N, C, H, W]) or 3-D ([N, C, D, H, W]) problems."
+    },
+    "D": {
+      "type": "int64",
+      "description": "Depth; 1 and absent from the tensors for 2-D problems."
+    },
+    "layout": {
+      "type": "enum",
+      "values": [
+        "channels_first",
+        "channels_last"
+      ],
+      "description": "NCHW/NCDHW or NHWC/NDHWC memory order of the activations."
+    },
+    "dtype": {
+      "type": "enum",
+      "values": [
+        "fp32",
+        "fp16",
+        "bf16"
+      ]
+    },
+    "runningStats": {
+      "type": "enum",
+      "values": [
+        "yes",
+        "no"
+      ],
+      "description": "Whether the pass also updates running mean and variance (prev -> next, blended by momentum)."
+    },
+    "fusion": {
+      "type": "enum",
+      "values": [
+        "activation",
+        "none"
+      ],
+      "description": "Whether an activation follows the batchnorm in the same graph."
+    },
+    "mode": {
+      "type": "enum",
+      "values": [
+        "RELU_FWD",
+        "SIGMOID_FWD",
+        "TANH_FWD",
+        "ELU_FWD",
+        "SWISH_FWD",
+        "GELU_FWD"
+      ],
+      "description": "The activation, a FlatBuffers PointwiseMode enumerator name with its parameters unset."
+    }
+  },
+  "constraints": [
+    {
+      "or": [
+        {
+          "==": [
+            "$q.spatial",
+            "3d"
+          ]
+        },
+        {
+          "==": [
+            "$q.D",
+            1
+          ]
+        }
+      ]
+    },
+    {
+      "or": [
+        {
+          "!=": [
+            "$q.fusion",
+            "none"
+          ]
+        },
+        {
+          "==": [
+            "$q.mode",
+            "RELU_FWD"
+          ]
+        }
+      ]
+    },
+    {
+      ">": [
+        {
+          "*": [
+            {
+              "*": [
+                {
+                  "*": [
+                    "$q.N",
+                    "$q.H"
+                  ]
+                },
+                "$q.W"
+              ]
+            },
+            "$q.D"
+          ]
+        },
+        1
+      ]
+    }
+  ],
+  "// constraints": "D is 1 for 2-D problems (it is then absent from the tensors); an activation-free graph pins mode rather than repeat itself under every mode; training and backward statistics need more than one value per channel.",
+  "stratification_axis": "working_set",
+  "regimes": {
+    "n": {
+      "parameter": "N",
+      "buckets": [
+        1,
+        8,
+        32,
+        128
+      ]
+    },
+    "c": {
+      "parameter": "C",
+      "buckets": [
+        16,
+        64,
+        256,
+        1024
+      ]
+    },
+    "h": {
+      "parameter": "H",
+      "buckets": [
+        7,
+        14,
+        56,
+        224
+      ]
+    }
+  },
+  "graph_builder": {
+    "function": "batchnormForwardTraining",
+    "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
+    "arguments": [
+      {
+        "name": "xDims",
+        "kind": "expr",
+        "value": [
+          "$q.N",
+          "$q.C",
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": "$q.D"
+          },
+          "$q.H",
+          "$q.W"
+        ]
+      },
+      {
+        "name": "xStrides",
+        "kind": "expr",
+        "value": [
+          {
+            "*": [
+              {
+                "*": [
+                  "$q.C",
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.spatial",
+                          "3d"
+                        ]
+                      },
+                      "$q.D",
+                      1
+                    ]
+                  }
+                ]
+              },
+              {
+                "*": [
+                  "$q.H",
+                  "$q.W"
+                ]
+              }
+            ]
+          },
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.layout",
+                  "channels_last"
+                ]
+              },
+              1,
+              {
+                "*": [
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.spatial",
+                          "3d"
+                        ]
+                      },
+                      "$q.D",
+                      1
+                    ]
+                  },
+                  {
+                    "*": [
+                      "$q.H",
+                      "$q.W"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": {
+              "if": [
+                {
+                  "==": [
+                    "$q.layout",
+                    "channels_last"
+                  ]
+                },
+                {
+                  "*": [
+                    {
+                      "*": [
+                        "$q.H",
+                        "$q.W"
+                      ]
+                    },
+                    "$q.C"
+                  ]
+                },
+                {
+                  "*": [
+                    "$q.H",
+                    "$q.W"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.layout",
+                  "channels_last"
+                ]
+              },
+              {
+                "*": [
+                  "$q.W",
+                  "$q.C"
+                ]
+              },
+              "$q.W"
+            ]
+          },
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.layout",
+                  "channels_last"
+                ]
+              },
+              "$q.C",
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "name": "scaleDims",
+        "kind": "expr",
+        "value": [
+          1,
+          "$q.C",
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": 1
+          },
+          1,
+          1
+        ]
+      },
+      {
+        "name": "scaleStrides",
+        "kind": "strides_of",
+        "of": "scaleDims"
+      },
+      {
+        "name": "biasDims",
+        "kind": "expr",
+        "value": [
+          1,
+          "$q.C",
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": 1
+          },
+          1,
+          1
+        ]
+      },
+      {
+        "name": "biasStrides",
+        "kind": "strides_of",
+        "of": "biasDims"
+      },
+      {
+        "name": "yDims",
+        "kind": "expr",
+        "value": [
+          "$q.N",
+          "$q.C",
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": "$q.D"
+          },
+          "$q.H",
+          "$q.W"
+        ]
+      },
+      {
+        "name": "yStrides",
+        "kind": "expr",
+        "value": [
+          {
+            "*": [
+              {
+                "*": [
+                  "$q.C",
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.spatial",
+                          "3d"
+                        ]
+                      },
+                      "$q.D",
+                      1
+                    ]
+                  }
+                ]
+              },
+              {
+                "*": [
+                  "$q.H",
+                  "$q.W"
+                ]
+              }
+            ]
+          },
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.layout",
+                  "channels_last"
+                ]
+              },
+              1,
+              {
+                "*": [
+                  {
+                    "if": [
+                      {
+                        "==": [
+                          "$q.spatial",
+                          "3d"
+                        ]
+                      },
+                      "$q.D",
+                      1
+                    ]
+                  },
+                  {
+                    "*": [
+                      "$q.H",
+                      "$q.W"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": {
+              "if": [
+                {
+                  "==": [
+                    "$q.layout",
+                    "channels_last"
+                  ]
+                },
+                {
+                  "*": [
+                    {
+                      "*": [
+                        "$q.H",
+                        "$q.W"
+                      ]
+                    },
+                    "$q.C"
+                  ]
+                },
+                {
+                  "*": [
+                    "$q.H",
+                    "$q.W"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.layout",
+                  "channels_last"
+                ]
+              },
+              {
+                "*": [
+                  "$q.W",
+                  "$q.C"
+                ]
+              },
+              "$q.W"
+            ]
+          },
+          {
+            "if": [
+              {
+                "==": [
+                  "$q.layout",
+                  "channels_last"
+                ]
+              },
+              "$q.C",
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "name": "meanDims",
+        "kind": "expr",
+        "value": [
+          1,
+          "$q.C",
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": 1
+          },
+          1,
+          1
+        ]
+      },
+      {
+        "name": "meanStrides",
+        "kind": "strides_of",
+        "of": "meanDims"
+      },
+      {
+        "name": "invVarianceDims",
+        "kind": "expr",
+        "value": [
+          1,
+          "$q.C",
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": 1
+          },
+          1,
+          1
+        ]
+      },
+      {
+        "name": "invVarianceStrides",
+        "kind": "strides_of",
+        "of": "invVarianceDims"
+      },
+      {
+        "name": "prevRunningMeanDims",
+        "kind": "expr",
+        "value": [
+          1,
+          "$q.C",
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": 1
+          },
+          1,
+          1
+        ]
+      },
+      {
+        "name": "prevRunningMeanStrides",
+        "kind": "strides_of",
+        "of": "prevRunningMeanDims"
+      },
+      {
+        "name": "prevRunningVarianceDims",
+        "kind": "expr",
+        "value": [
+          1,
+          "$q.C",
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": 1
+          },
+          1,
+          1
+        ]
+      },
+      {
+        "name": "prevRunningVarianceStrides",
+        "kind": "strides_of",
+        "of": "prevRunningVarianceDims"
+      },
+      {
+        "name": "nextRunningMeanDims",
+        "kind": "expr",
+        "value": [
+          1,
+          "$q.C",
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": 1
+          },
+          1,
+          1
+        ]
+      },
+      {
+        "name": "nextRunningMeanStrides",
+        "kind": "strides_of",
+        "of": "nextRunningMeanDims"
+      },
+      {
+        "name": "nextRunningVarianceDims",
+        "kind": "expr",
+        "value": [
+          1,
+          "$q.C",
+          {
+            "when": {
+              "==": [
+                "$q.spatial",
+                "3d"
+              ]
+            },
+            "value": 1
+          },
+          1,
+          1
+        ]
+      },
+      {
+        "name": "nextRunningVarianceStrides",
+        "kind": "strides_of",
+        "of": "nextRunningVarianceDims"
+      },
+      {
+        "name": "runningStats",
+        "kind": "direct",
+        "source": "$q.runningStats"
+      },
+      {
+        "name": "fusion",
+        "kind": "direct",
+        "source": "$q.fusion"
+      },
+      {
+        "name": "mode",
+        "kind": "direct",
+        "source": "$q.mode"
+      },
+      {
+        "name": "dataType",
+        "kind": "dtype_of",
+        "source": "$q.dtype"
+      },
+      {
+        "name": "statsDataType",
+        "kind": "constant",
+        "constant": "float"
+      },
+      {
+        "name": "computeDataType",
+        "kind": "constant",
+        "constant": "float"
+      },
+      {
+        "name": "intermediateDataType",
+        "kind": "constant",
+        "constant": "float"
+      }
+    ],
+    "// types": "Activations carry the declared dtype; the per-channel statistics and affine tensors are fp32 (statsDataType), which is the only form MIOpen and HIP_MLOPS take; fused intermediates are fp32 and accumulation is fp32."
+  },
+  "archetypes": [
+    {
+      "name": "cnn_stage",
+      "note": "batchnorm after a convolution stage of a ResNet-style network: square spatial extent",
+      "values": {
+        "N": [
+          1,
+          8,
+          32,
+          64,
+          128
+        ],
+        "C": [
+          64,
+          128,
+          256,
+          512,
+          1024,
+          2048
+        ],
+        "H": [
+          7,
+          14,
+          28,
+          56,
+          112
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "D": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "video_stage",
+      "note": "a 3-D (video or volumetric) network stage: a short depth over a square frame",
+      "values": {
+        "N": [
+          1,
+          4,
+          8,
+          16
+        ],
+        "C": [
+          64,
+          128,
+          256,
+          512
+        ],
+        "D": [
+          4,
+          8,
+          16
+        ],
+        "H": [
+          14,
+          28,
+          56,
+          112
+        ],
+        "W": [
+          "$q.H"
+        ]
+      }
+    }
+  ],
+  "neighbourhood": {
+    "N": {
+      "kind": "scale",
+      "factors": [
+        0.5,
+        1,
+        2
+      ]
+    },
+    "C": {
+      "kind": "multiple",
+      "of": 8,
+      "steps": [
+        -2,
+        -1,
+        0,
+        1,
+        2
+      ]
+    },
+    "H": {
+      "kind": "scale",
+      "factors": [
+        0.5,
+        1,
+        2
+      ]
+    },
+    "W": {
+      "kind": "mirror",
+      "of": "H",
+      "ratios": [
+        1
+      ]
+    }
+  },
+  "mixture": {
+    "archetypes": 0.2,
+    "neighbourhood": 0.6,
+    "exploration": 0.2
+  }
+}

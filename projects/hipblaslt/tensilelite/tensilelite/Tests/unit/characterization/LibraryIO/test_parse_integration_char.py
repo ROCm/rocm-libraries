@@ -49,7 +49,7 @@ from typing import List
 
 import pytest
 
-import Tensile.LibraryIO as L
+import tensilelite.LibraryIO as L
 
 pytestmark = pytest.mark.unit
 
@@ -135,7 +135,7 @@ def test_parse_library_logic_data_version_warning(assembler, isa_info_map, capsy
     ]
     assert warnings == [
         "Tensile::WARNING: Version = {} in library logic file 1.0.0 "
-        "does not match Tensile version = {}".format(_FIXTURE, L.__version__)
+            "does not match TensileLite version = {}".format(_FIXTURE, L.__version__)
     ]
     assert _summarize_logic(logic) == snapshot
 
@@ -147,7 +147,10 @@ def test_parse_library_logic_data_version_warning(assembler, isa_info_map, capsy
 def test_parse_library_logic_data_custom_kernel(assembler, isa_info_map, monkeypatch, snapshot):
     # CustomKernelName set + an (empty) config -> the custom-kernel merge branch
     # runs; getCustomKernelConfig is monkeypatched so no real kernel is needed.
-    monkeypatch.setattr(L, "getCustomKernelConfig", lambda name, isp: {})
+    # readCustomKernelConfig is patched too because the synthetic kernel has no
+    # file; an empty config declares no Features.
+    monkeypatch.setattr(L, "getCustomKernelConfig", lambda name, isp, kernelConfig=None: {})
+    monkeypatch.setattr(L, "readCustomKernelConfig", lambda name: {})
     data = _raw_dict()
     data["Solutions"][0]["CustomKernelName"] = "synthetic_kernel"
     # InternalSupportParams present -> the isp-extraction branch also runs.
@@ -161,8 +164,9 @@ def test_parse_library_logic_data_custom_kernel(assembler, isa_info_map, monkeyp
 def test_parse_library_logic_data_custom_kernel_bad_mi(assembler, isa_info_map, monkeypatch):
     # A custom-kernel config with a MatrixInstruction of length != 4 -> ValueError
     # before Solution construction (so MI consistency is irrelevant).
+    monkeypatch.setattr(L, "readCustomKernelConfig", lambda name: {})
     monkeypatch.setattr(
-        L, "getCustomKernelConfig", lambda name, isp: {"MatrixInstruction": [1, 2, 3]}
+        L, "getCustomKernelConfig", lambda name, isp, kernelConfig=None: {"MatrixInstruction": [1, 2, 3]}
     )
     data = _raw_dict()
     data["Solutions"][0]["CustomKernelName"] = "synthetic_kernel"
@@ -230,7 +234,7 @@ def test_parse_solutions_data_version_warning(written_solutions, assembler, isa_
     ]
     assert warnings == [
         "Tensile::WARNING: Version = {} in solution file 1.0.0 "
-        "does not match Tensile version = {}".format(written_solutions, L.__version__)
+            "does not match TensileLite version = {}".format(written_solutions, L.__version__)
     ]
     assert {
         "n_solutions": len(solutions),

@@ -71,6 +71,9 @@ ConvBwdPlan::ConvBwdPlan(const HipdnnMiopenHandle& handle,
     : _params(std::move(params))
     , _executionSettings(executionSettings)
 {
+    miopen_utils::setBenchmarkingFindMode(_params.conv().convDescriptor(),
+                                          _executionSettings.benchmarkingEnabled());
+
     // Validate that there are solutions available for this configuration.
     size_t solutionCount;
     THROW_ON_MIOPEN_FAILURE(
@@ -137,9 +140,6 @@ void ConvBwdPlan::execute(const HipdnnMiopenHandle& handle,
         workspaceSize = _workspaceSize;
     }
 
-    const ScopedTuningPolicy tuningGuard(handle.miopenHandle,
-                                         _executionSettings.benchmarkingEnabled());
-
     // Algorithm selection is performed on first execute() call rather than in constructor
     // because miopenFindConvolutionBackwardDataAlgorithm requires device memory buffers.
     // These buffers are only available during execute(), not during plan construction.
@@ -161,21 +161,21 @@ void ConvBwdPlan::execute(const HipdnnMiopenHandle& handle,
             std::vector<miopenConvAlgoPerf_t> perfResults(static_cast<size_t>(requestCount));
             int returnedAlgoCount;
 
-            THROW_ON_MIOPEN_FAILURE(
-                miopenFindConvolutionBackwardDataAlgorithm(handle.miopenHandle,
-                                                           _params.dy().tensorDescriptor(),
-                                                           yBuffer.ptr,
-                                                           _params.w().tensorDescriptor(),
-                                                           wBuffer.ptr,
-                                                           _params.conv().convDescriptor(),
-                                                           _params.dx().tensorDescriptor(),
-                                                           xBuffer.ptr,
-                                                           requestCount,
-                                                           &returnedAlgoCount,
-                                                           perfResults.data(),
-                                                           workspace,
-                                                           workspaceSize,
-                                                           false));
+            THROW_ON_MIOPEN_FAILURE(miopenFindConvolutionBackwardDataAlgorithm(
+                handle.miopenHandle,
+                _params.dy().tensorDescriptor(),
+                yBuffer.ptr,
+                _params.w().tensorDescriptor(),
+                wBuffer.ptr,
+                _params.conv().convDescriptor(),
+                _params.dx().tensorDescriptor(),
+                xBuffer.ptr,
+                requestCount,
+                &returnedAlgoCount,
+                perfResults.data(),
+                workspace,
+                workspaceSize,
+                _executionSettings.benchmarkingEnabled()));
 
             if(returnedAlgoCount <= 0)
             {

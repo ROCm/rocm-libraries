@@ -14,6 +14,7 @@ from __future__ import annotations
 import pytest
 
 from rocke.helpers.tiling.layouts import make_tile_desc
+from rocke.tests.arch_marks import arch_specific
 
 
 def test_reproduces_ck_tile_a_dram_distribution() -> None:
@@ -97,6 +98,7 @@ def test_rdna3_wmma16_a_duplicated_inputs() -> None:
     assert enc.register_to_rh_minor == (0,)
 
 
+@arch_specific(("gfx950",), reason="mxfp6 A-scale layout exists on gfx950 only")
 def test_mxfp6_scale_thread_broadcast_across_k_blocks() -> None:
     """gfx950 mxfp6 A-scale (per K-block, wave64): one E8M0 scale per M-row, duplicated across the
     4 k_blk lane-groups -- lanes m, m+16, m+32, m+48 share it -> thread_broadcast=4 (a separate operand

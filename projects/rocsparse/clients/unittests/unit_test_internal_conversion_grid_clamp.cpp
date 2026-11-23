@@ -106,6 +106,10 @@
 using namespace rocsparse_ut;
 namespace
 {
+    // Index type of the rocsparse_int buffers below (i64 with rocsparse_ILP64).
+    constexpr rocsparse_indextype rocsparse_int_type
+        = sizeof(rocsparse_int) == 4 ? rocsparse_indextype_i32 : rocsparse_indextype_i64;
+
     // A grid.x limit far below what any length below asks for, so the great
     // majority of the work is reached only by the grid-stride loop.
     constexpr int clamped_grid_x = 3;
@@ -743,10 +747,10 @@ TEST_F(ConversionGrids, convert_array_data_narrowing_grid_stride)
 }
 
 // The f64 -> f32 conversion error is reduced on the device, copied back
-// asynchronously and printed by convert_array. The host may only read the copy
-// after the stream synchronization, so the printed value must be the exact
-// maximum error. The largest error sits in the last item, reached only by the
-// stride loop.
+// asynchronously and written to the debug log by convert_array. The host may only
+// read the copy after the stream synchronization, so the logged value must be the
+// exact maximum error. The largest error sits in the last item, reached only by the
+// stride loop. Nothing is printed to stdout.
 TEST_F(ConversionGrids, convert_array_data_narrowing_reports_error)
 {
     std::vector<double> source(convert_nitems);
@@ -765,13 +769,13 @@ TEST_F(ConversionGrids, convert_array_data_narrowing_reports_error)
     ASSERT_GT(expected_error, 0.0);
 
     std::ostringstream expected;
-    expected << "rocsparse_convert_array numerical conversion error " << expected_error
-             << " invalid data." << std::endl;
+    expected << "rocsparse_convert_array numerical conversion error " << expected_error;
 
     device_vector<double> d_source(source);
     device_vector<float>  d_target(std::vector<float>(convert_nitems, -1.0f));
 
     ScopedMaxGridSizeX clamp(handle, clamped_grid_x);
+    ScopedDebugLog     log(handle);
     testing::internal::CaptureStdout();
     const rocsparse_status status  = rocsparse::convert_array(handle,
                                                              convert_nitems,
@@ -782,7 +786,8 @@ TEST_F(ConversionGrids, convert_array_data_narrowing_reports_error)
     const std::string      printed = testing::internal::GetCapturedStdout();
 
     ASSERT_EQ(status, rocsparse_status_success);
-    EXPECT_EQ(printed, expected.str());
+    EXPECT_EQ(printed, "");
+    EXPECT_NE(log.sink.str().find(expected.str()), std::string::npos) << log.sink.str();
 }
 
 // ===========================================================================
@@ -841,8 +846,8 @@ void run_extract(rocsparse_handle handle, int grid_limit)
                                          d_row_ptr.ptr,
                                          d_col_ind.ptr,
                                          d_val.ptr,
-                                         rocsparse_indextype_i32,
-                                         rocsparse_indextype_i32,
+                                         rocsparse_int_type,
+                                         rocsparse_int_type,
                                          rocsparse_index_base_zero,
                                          rocsparse_datatype_f32_r),
               rocsparse_status_success);
@@ -854,8 +859,8 @@ void run_extract(rocsparse_handle handle, int grid_limit)
                                          d_t_row_ptr.ptr,
                                          d_t_col_ind.ptr,
                                          d_t_val.ptr,
-                                         rocsparse_indextype_i32,
-                                         rocsparse_indextype_i32,
+                                         rocsparse_int_type,
+                                         rocsparse_int_type,
                                          rocsparse_index_base_zero,
                                          rocsparse_datatype_f32_r),
               rocsparse_status_success);
@@ -978,8 +983,8 @@ TEST_F(ConversionGrids, extract_empty)
                                          d_row_ptr.ptr,
                                          d_col_ind.ptr,
                                          d_val.ptr,
-                                         rocsparse_indextype_i32,
-                                         rocsparse_indextype_i32,
+                                         rocsparse_int_type,
+                                         rocsparse_int_type,
                                          rocsparse_index_base_one,
                                          rocsparse_datatype_f32_r),
               rocsparse_status_success);
@@ -991,8 +996,8 @@ TEST_F(ConversionGrids, extract_empty)
                                          d_t_row_ptr.ptr,
                                          d_t_col_ind.ptr,
                                          d_t_val.ptr,
-                                         rocsparse_indextype_i32,
-                                         rocsparse_indextype_i32,
+                                         rocsparse_int_type,
+                                         rocsparse_int_type,
                                          rocsparse_index_base_one,
                                          rocsparse_datatype_f32_r),
               rocsparse_status_success);

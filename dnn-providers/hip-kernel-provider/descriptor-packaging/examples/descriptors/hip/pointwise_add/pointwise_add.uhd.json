@@ -2,6 +2,9 @@
   "version": "1.0",
   "id": "82ee7153-4bf4-5d98-8afb-cbbd81eb45b2",
   "name": "example pointwise selector",
-  "kind": "native",
-  "payload": "hipkernel.pointwise.score"
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.pointwise.score"
+  }
 }

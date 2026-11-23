@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "314784cc-5d55-54b3-a5ce-160aeed54a19",
+  "name": "flydsl sdpa_cdna_dualwave selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.flydsl_sdpa_cdna_dualwave.score"
+  }
+}

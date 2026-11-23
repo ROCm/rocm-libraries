@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -129,18 +129,33 @@ rocsparse_bench::rocsparse_bench(int& argc, char**& argv)
     routine(this->config.function_name.c_str());
 
     // Device query
-    int devs;
-    if(hipGetDeviceCount(&devs) != hipSuccess)
+    int              devs         = 0;
+    const hipError_t count_status = hipGetDeviceCount(&devs);
+    if(count_status != hipSuccess)
     {
-        std::cerr << "Error: cannot get device count" << std::endl;
-        exit(-1);
+        std::cerr << "rocsparse-bench error: cannot get device count: "
+                  << hipGetErrorString(count_status) << " (" << count_status << ")" << std::endl;
+        exit(EXIT_FAILURE);
     }
+
     auto device_id = this->config.device_id;
-    // Set device
-    if(hipSetDevice(device_id) != hipSuccess || device_id >= devs)
+
+    // Validate the requested device before selecting it, so that an out of range ID is
+    // reported rather than handed to hipSetDevice.
+    if(device_id < 0 || device_id >= devs)
     {
-        std::cerr << "Error: cannot set device ID " << device_id << std::endl;
-        exit(-1);
+        std::cerr << "rocsparse-bench error: invalid device ID " << device_id << " (detected "
+                  << devs << " device(s))" << std::endl;
+        exit(EXIT_FAILURE);
+    }
+
+    // Set device
+    const hipError_t set_status = hipSetDevice(device_id);
+    if(set_status != hipSuccess)
+    {
+        std::cerr << "rocsparse-bench error: cannot set device ID " << device_id << ": "
+                  << hipGetErrorString(set_status) << " (" << set_status << ")" << std::endl;
+        exit(EXIT_FAILURE);
     }
 }
 
@@ -164,21 +179,39 @@ rocsparse_int rocsparse_bench::get_device_id() const
 // This is used for backward compatibility.
 void rocsparse_bench::info_devices(std::ostream& out_) const
 {
-    int devs;
-    if(hipGetDeviceCount(&devs) != hipSuccess)
+    int              devs         = 0;
+    const hipError_t count_status = hipGetDeviceCount(&devs);
+    if(count_status != hipSuccess)
     {
-        std::cerr << "Error: cannot get device count" << std::endl;
-        exit(1);
+        std::cerr << "rocsparse-bench error: cannot get device count: "
+                  << hipGetErrorString(count_status) << " (" << count_status << ")" << std::endl;
+        exit(EXIT_FAILURE);
     }
+
+    const rocsparse_int device_id = this->get_device_id();
 
     std::cout << "Query device success: there are " << devs << " devices" << std::endl;
     for(int i = 0; i < devs; ++i)
     {
         hipDeviceProp_t prop;
-        if(hipGetDeviceProperties(&prop, i) != hipSuccess)
+
+        // This inventory is informational only and covers every device, including ones
+        // this run will not use, so a failure here warns unless it is the selected device.
+        const hipError_t prop_status = hipGetDeviceProperties(&prop, i);
+        if(prop_status != hipSuccess)
         {
-            std::cerr << "rocsparse-bench error: cannot get device properties" << std::endl;
-            exit(1);
+            if(i == device_id)
+            {
+                std::cerr
+                    << "rocsparse-bench error: cannot get properties of the selected device ID "
+                    << device_id << ": " << hipGetErrorString(prop_status) << " (" << prop_status
+                    << ")" << std::endl;
+                exit(EXIT_FAILURE);
+            }
+            std::cerr << "rocsparse-bench warning: cannot get properties of device ID " << i << ": "
+                      << hipGetErrorString(prop_status) << " (" << prop_status << ")" << std::endl;
+            (void)hipGetLastError(); // don't leak this into the first kernel-launch check
+            continue;
         }
 
         out_ << "Device ID " << i << ": " << prop.name << std::endl;
@@ -191,12 +224,14 @@ void rocsparse_bench::info_devices(std::ostream& out_) const
     // Print header.
     //
     {
-        rocsparse_int   device_id = this->get_device_id();
-        hipDeviceProp_t prop;
-        if(hipGetDeviceProperties(&prop, device_id) != hipSuccess)
+        hipDeviceProp_t  prop;
+        const hipError_t prop_status = hipGetDeviceProperties(&prop, device_id);
+        if(prop_status != hipSuccess)
         {
-            std::cerr << "rocsparse-bench error: cannot get device properties" << std::endl;
-            exit(1);
+            std::cerr << "rocsparse-bench error: cannot get properties of the selected device ID "
+                      << device_id << ": " << hipGetErrorString(prop_status) << " (" << prop_status
+                      << ")" << std::endl;
+            exit(EXIT_FAILURE);
         }
 
         out_ << "Using device ID " << device_id << " (" << prop.name << ") for rocSPARSE"

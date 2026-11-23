@@ -396,10 +396,10 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndSca
     sdpaAttrs.set_dbias(dbias);
     sdpaAttrs.set_alibi_mask(true);
     sdpaAttrs.set_padding_mask(true);
-    sdpaAttrs.set_causal_mask(true);
-    sdpaAttrs.set_causal_mask_bottom_right(true);
+    // Only one deprecated causal flag may be set; SdpaBwdNode rejects the pair.
+    sdpaAttrs.causal_mask_bottom_right = true;
     sdpaAttrs.set_attn_scale(0.125f);
-    sdpaAttrs.set_diagonal_band_left_bound(0);
+    sdpaAttrs.set_diagonal_band_left_bound(2); // hipDNN rejects 0 (SEM-005)
     sdpaAttrs.set_diagonal_band_right_bound(128);
     sdpaAttrs.set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);
 
@@ -572,10 +572,10 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndSca
     ASSERT_TRUE(sdpa->dbias_tensor_uid.has_value());
     EXPECT_EQ(sdpa->dbias_tensor_uid.value(), K_SDPA_BWD_TENSOR_DBIAS_UID);
 
-    // ALL boolean attributes set to true
+    // Boolean attributes; causal_mask stays false because the pair is rejected
     EXPECT_TRUE(sdpa->alibi_mask);
     EXPECT_TRUE(sdpa->padding_mask);
-    EXPECT_TRUE(sdpa->causal_mask);
+    EXPECT_FALSE(sdpa->causal_mask);
     EXPECT_TRUE(sdpa->causal_mask_bottom_right);
 
     // Float scalars
@@ -587,7 +587,7 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndSca
 
     // Integer scalars
     ASSERT_TRUE(sdpa->left_bound.has_value());
-    EXPECT_EQ(sdpa->left_bound.value(), 0);
+    EXPECT_EQ(sdpa->left_bound.value(), 2);
 
     ASSERT_TRUE(sdpa->right_bound.has_value());
     EXPECT_EQ(sdpa->right_bound.value(), 128);

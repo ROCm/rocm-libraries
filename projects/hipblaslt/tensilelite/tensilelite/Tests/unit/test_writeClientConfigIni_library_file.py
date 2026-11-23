@@ -11,7 +11,7 @@ to library/TensileLibrary.yaml (flat) and the client crashed in LLVM.
 
 import inspect
 
-from Tensile.ClientWriter import writeClientConfigIni
+from tensilelite.ClientWriter import writeClientConfigIni
 
 
 def test_libraryFile_is_a_required_parameter():
@@ -72,7 +72,7 @@ def test_benchmarkProblems_cached_path_passes_libraryFile():
     Catches the regression where the cached path silently relied on
     writeClientConfigIni's default.
     """
-    import Tensile.BenchmarkProblems as bp
+    import tensilelite.BenchmarkProblems as bp
     src = inspect.getsource(bp._benchmarkProblemType)
     calls = _extract_calls(src, "writeClientConfigIni")
     assert calls, "expected writeClientConfigIni call(s) in _benchmarkProblemType"
@@ -86,7 +86,7 @@ def test_benchmarkProblems_cached_path_passes_libraryFile():
 
 def test_ClientWriter_internal_caller_passes_libraryFile():
     """CreateBenchmarkClientParametersForSizes (ClientWriter.py:782) must pass libraryFile."""
-    import Tensile.ClientWriter as cw
+    import tensilelite.ClientWriter as cw
     src = inspect.getsource(cw.CreateBenchmarkClientParametersForSizes)
     calls = _extract_calls(src, "writeClientConfigIni")
     assert calls, "expected writeClientConfigIni call(s) in CreateBenchmarkClientParametersForSizes"

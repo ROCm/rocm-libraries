@@ -24,7 +24,7 @@
 ################################################################################
 
 """Characterization tests for the problem-size holders in
-``Tensile.SolutionStructs.Problem``: ``ProblemSizeRange``, ``Problem``,
+``tensilelite.SolutionStructs.Problem``: ``ProblemSizeRange``, ``Problem``,
 ``ExactList`` / ``ExactDict``, ``ProblemSizesMock`` / ``ProblemSizesMockDummy``,
 and ``ProblemSizes``. Driven against a default ``ProblemType`` with small
 configs; ``printExit`` paths (``sys.exit(-1)``) are pinned via
@@ -33,7 +33,7 @@ configs; ``printExit`` paths (``sys.exit(-1)``) are pinned via
 
 import pytest
 
-from Tensile.SolutionStructs.Problem import (
+from tensilelite.SolutionStructs.Problem import (
     ProblemType,
     _defaultProblemType,
     ProblemSizeRange,

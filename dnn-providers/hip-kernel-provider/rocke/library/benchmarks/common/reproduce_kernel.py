@@ -70,14 +70,14 @@ def job_and_builder(identity: KernelIdentity):
     and the family's ``build(job, arch, dtype)``."""
     if identity.is_direct:
         from kernels.conv.direct_aot_jobs import (
-            build_direct_job,
             direct_job_for_identity,
+            direct_kernel_for_job,
         )
 
-        return direct_job_for_identity(identity), build_direct_job
-    from kernels.conv.aot_jobs import build_kernel, job_for_identity
+        return direct_job_for_identity(identity), direct_kernel_for_job
+    from kernels.conv.aot_jobs import job_for_identity, kernel_for_job
 
-    return job_for_identity(identity), build_kernel
+    return job_for_identity(identity), kernel_for_job
 
 
 def reproduce(
@@ -135,6 +135,7 @@ def reproduce(
                 comgr_input.llvm_text,
                 isa=comgr_input.isa,
                 options=list(comgr_input.options),
+                fresh_process=comgr_input.fresh_process,
             )
         except Exception as e:  # noqa: BLE001 - reported per kernel
             log(f"  [error] compile failed: {type(e).__name__}: {e}")

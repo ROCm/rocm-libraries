@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -222,6 +222,36 @@ nullptr, a_type, lda, nullptr, b_type, ldb, zero, nullptr, c_type, ldc,
 dD, d_type, ldd, compute_type, algo, solution_index, flags));
 
         // clang-format on
+
+        // Source-kernel path alignment, reusing the buffers above with each dimension reduced by
+        // one so a pointer shifted by up to one element stays in bounds. Non-batched buffers need
+        // only element alignment: a half-element shift is rejected, while a full-element shift,
+        // which need not be 8-byte aligned, is accepted.
+        {
+            static constexpr int32_t c_source_solution_index = -2; // library-internal source GEMM
+
+            Ti* A = dA;
+            Ti* B = dB;
+            To* C = dC;
+            To* D = dD;
+
+            const void* A_half = reinterpret_cast<char*>(A) + sizeof(Ti) / 2;
+            const void* B_half = reinterpret_cast<char*>(B) + sizeof(Ti) / 2;
+            const void* C_half = reinterpret_cast<char*>(C) + sizeof(To) / 2;
+            void*       D_half = reinterpret_cast<char*>(D) + sizeof(To) / 2;
+
+            // clang-format off
+            DAPI_EXPECT(rocblas_status_invalid_size, rocblas_gemm_ex_fn, (handle, transA, transB, M - 1, N - 1, K - 1,
+                        alpha, A_half, a_type, lda, B_half, b_type, ldb, beta, C_half, c_type, ldc,
+                        D_half, d_type, ldd, compute_type, rocblas_gemm_algo_solution_index,
+                        c_source_solution_index, flags));
+
+            DAPI_CHECK(rocblas_gemm_ex_fn, (handle, transA, transB, M - 1, N - 1, K - 1,
+                       alpha, A + 1, a_type, lda, B + 1, b_type, ldb, beta, C + 1, c_type, ldc,
+                       D + 1, d_type, ldd, compute_type, rocblas_gemm_algo_solution_index,
+                       c_source_solution_index, flags));
+            // clang-format on
+        }
     }
 }
 

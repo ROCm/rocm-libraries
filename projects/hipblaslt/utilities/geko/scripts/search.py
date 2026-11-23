@@ -2,9 +2,13 @@
 # SPDX-License-Identifier: MIT
 
 import argparse
+import sys
 
+import geko.device as device
+from geko import logger
 from geko.paths import resolve_hipblaslt_path
 from geko.pipeline import run_search
+from geko.search import SEARCH_PROFILES
 from geko.utils import parse_devices
 
 
@@ -66,10 +70,18 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--duration",
-        type=float,
-        default=0.04,
-        help="Target dense-search benchmark duration per GEMM (seconds)",
+        "--search-profile",
+        dest="search_profile",
+        type=str,
+        default="thorough",
+        choices=sorted(SEARCH_PROFILES),
+        help=(
+            "Search profile: bundles the hipblaslt-bench --adaptive timing "
+            "knobs. 'fast' (single dense pass, cheapest), 'balanced' "
+            "(two-stage: cheap screen + strict re-verify of its top-K "
+            "candidates), or 'thorough' (tightest convergence/ceiling knobs, "
+            "most expensive). Defaults to 'thorough'."
+        ),
     )
     parser.add_argument(
         "--custom-lib-src",
@@ -99,9 +111,30 @@ def main() -> None:
             "clock frequency telemetry. Off by default."
         ),
     )
+    parser.add_argument(
+        "--skip-gpu-check",
+        dest="skip_gpu_check",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip the GPU device pre-flight check (verifies at least as many "
+            "GPU devices are visible as requested via --devices). The check "
+            "relies on a device-enumerator tool (amdgpu-arch / "
+            "rocm_agent_enumerator / rocminfo on Linux, hipinfo on Windows) "
+            "being on PATH (e.g. $ROCM_PATH/bin); if none is found the check "
+            "is skipped with a warning rather than blocking."
+        ),
+    )
 
     args = parser.parse_args()
     devices = parse_devices(args.devices)
+
+    if not args.skip_gpu_check:
+        gpu_check_rc = device.main(len(devices))
+        if gpu_check_rc != 0:
+            logger.error("GPU check failed; aborting.")
+            sys.exit(gpu_check_rc)
+
     hipblaslt_path = resolve_hipblaslt_path(
         explicit=args.hipblaslt, anchor=__file__, require_built=True
     )
@@ -114,7 +147,7 @@ def main() -> None:
         up_thr=args.up_thr,
         workdir=args.workdir,
         verbose=args.verbose,
-        duration=args.duration,
+        profile=args.search_profile,
         bench_freq=args.bench_freq,
         custom_lib_src=args.custom_lib_src,
     )

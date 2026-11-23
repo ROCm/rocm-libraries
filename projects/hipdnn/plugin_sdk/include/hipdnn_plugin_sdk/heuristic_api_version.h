@@ -32,7 +32,7 @@
  * Incremented when backward-compatible features are added.
  * Plugins with older minor versions can still be loaded.
  */
-#define HIPDNN_HEURISTIC_API_VERSION_MINOR 0
+#define HIPDNN_HEURISTIC_API_VERSION_MINOR 1
 
 /**
  * @brief Patch version of the heuristic plugin C ABI
@@ -40,10 +40,10 @@
  * Incremented for bug fixes and non-functional changes.
  * Does not affect compatibility.
  */
-#define HIPDNN_HEURISTIC_API_VERSION_PATCH 1
+#define HIPDNN_HEURISTIC_API_VERSION_PATCH 0
 // NOLINTEND(modernize-macro-to-enum)
 
 /**
  * @brief Full version string in semantic versioning format
  */
-#define HIPDNN_HEURISTIC_API_VERSION "0.0.1"
+#define HIPDNN_HEURISTIC_API_VERSION "0.1.0"

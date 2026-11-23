@@ -46,7 +46,6 @@
     }
 
 //! [doc example]
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
 
 template <typename T>
 static rocsparse_datatype datatype_of();
@@ -373,15 +372,4 @@ int main()
     return 0;
 }
 
-#else
-
-int main()
-{
-    std::cout << "rocsparse was built without the diagonal solve "
-                 "(BUILD_WITH_DIAGONAL_SOLVE=OFF)"
-              << std::endl;
-    return 0;
-}
-
-#endif
 //! [doc example]

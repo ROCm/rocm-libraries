@@ -13,6 +13,10 @@
 #        and examples. Until that's not fixed, we have to save/restore them.
 foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
   set(USER_${SHARED_OPTION} ${${SHARED_OPTION}})
+  unset(USER_CACHED_${SHARED_OPTION})
+  if(DEFINED CACHE{${SHARED_OPTION}})
+    get_property(USER_CACHED_${SHARED_OPTION} CACHE ${SHARED_OPTION} PROPERTY VALUE)
+  endif()
   set(${SHARED_OPTION} OFF)
 endforeach()
 
@@ -305,13 +309,10 @@ if(${LINK_HIP_DEVICE_LIBS} AND NOT GRAFT_THRUST_ONTO_BINARIES)
   endif()
 endif()
 
-# Search for libhipcxx if requested (default: ON)
-if(${ROCTHRUST_USE_LIBHIPCXX})
-  find_package(libhipcxx)
-  if (NOT TARGET libhipcxx::libhipcxx)
-    message(STATUS "libhipcxx installation not found. Using deprecated rocThrust fallback implementation.  Please switch to using libhipcxx.")
-  endif()
-endif()
+# libhipcxx - hard dependency, see require_libhipcxx.cmake
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/modules")
+include(require_libhipcxx)
+hipccl_require_libhipcxx(3.4)
 
 # Test dependencies
 if(USER_BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
@@ -445,7 +446,7 @@ if(USER_BUILD_BENCHMARK)
     set(_ROCTHRUST_SAVED_BUILD_TEST "${BUILD_TEST}")
     set(BUILD_BENCHMARK OFF)
     set(BUILD_TEST OFF)
-    
+
     FetchContent_Declare(
       rocrand
       SOURCE_DIR    ${ROCRAND_PATH}
@@ -471,4 +472,7 @@ endif()
 # Restore user global state
 foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
   set(${SHARED_OPTION} ${USER_${SHARED_OPTION}})
+  if(DEFINED USER_CACHED_${SHARED_OPTION})
+    set_property(CACHE ${SHARED_OPTION} PROPERTY VALUE "${USER_CACHED_${SHARED_OPTION}}")
+  endif()
 endforeach()

@@ -233,12 +233,12 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVS
         {
 #if CK_TILE_FMHA_FWD_FAST_EXP2
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                         BiasEnum == BlockAttentionBiasEnum::ALIBI)
+                         BiasEnum == BlockAttentionBiasEnum::ALIBI || kHasLogitsSoftCap)
                 set_tile(m, sink_v * C_LOG2E * scale_s);
             else
                 set_tile(m, sink_v * C_LOG2E);
 #else
-            set_tile(m, sink_v);
+            set_tile(m, sink_v * scale_s);
 #endif
             set_tile(l, SMPLComputeDataType{1.0f});
         }
@@ -385,7 +385,10 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVS
                 __builtin_amdgcn_sched_barrier(
                     0); // prevent from messing up the order of global loads
             }
-            const auto bias_tile = load_tile(bias_dram_window); // load bias tile
+            // No per-element OOB branch: padded scores are masked to -inf, padded rows are not
+            // stored, and the buffer range check returns 0 past the end.
+            const auto bias_tile =
+                load_tile(bias_dram_window, number<-1>{}, bool_constant<false>{});
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
             {
                 __builtin_amdgcn_sched_barrier(

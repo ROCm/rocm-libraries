@@ -3,7 +3,7 @@
 
 import pytest
 
-from Tensile.KernelWriter import _needsPreLoopLocalReadDrain
+from tensilelite.KernelWriter import _needsPreLoopLocalReadDrain
 
 
 @pytest.mark.parametrize(

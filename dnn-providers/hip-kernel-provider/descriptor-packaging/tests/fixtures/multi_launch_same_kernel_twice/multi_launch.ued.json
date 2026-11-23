@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "id": "1b83fc07-a294-41d5-8d8f-ce70e39fbb18",
+  "name": "hipkernel:MultiLaunch",
+  "graph_match": {
+    "native": "hipkernel.multi_launch.graph_match"
+  },
+  "sort_kernel_catalog": {
+    "default": "3da51e29-c4b6-43f7-8fa1-e092a51bdd3a"
+  },
+  "metadata": "2c940d18-b3a5-42e6-9e90-df81f40acc29"
+}

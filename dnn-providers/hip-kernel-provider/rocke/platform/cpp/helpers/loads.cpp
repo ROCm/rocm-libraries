@@ -10,6 +10,8 @@
  */
 #include "rocke/helper_rocke.helpers.loads.h"
 
+#include <string.h>
+
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* ============================================================================
@@ -92,6 +94,156 @@ rocke_status_t rocke_coalesced_tile_loader_from_tile(int tile_rows,
         out->vector_axis_row = false; /* vector_axis="col" default */
         out->has_inner_dim = false; /* inner_dim default None */
         out->inner_dim = 0;
+        out->has_col_xor = false; /* col_xor default None */
+        memset(out->col_xor, 0, sizeof(out->col_xor));
+        out->elem_dtype = NULL; /* elem_dtype default F16 */
+    }
+    return ROCKE_OK;
+}
+
+rocke_status_t rocke_lds_col_xor_params(int tile_cols, int chunk, int out[4])
+{
+    int c;
+    int rows_per_cycle;
+    int row_shift;
+    int chunk_log2;
+
+    /* Python:
+     *   c = tile_cols // chunk
+     *   if chunk < 1 or chunk & (chunk - 1): raise ValueError
+     *   if c < 2 or tile_cols % chunk or c & (c - 1) or c > 16: raise ValueError
+     *   rows_per_cycle = max(1, 8 // c)
+     *   return rows_per_cycle.bit_length() - 1, c - 1, chunk.bit_length() - 1, 3
+     */
+    if(out == NULL || chunk < 1 || (chunk & (chunk - 1)) != 0 || tile_cols < 0)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    c = tile_cols / chunk;
+    if(c < 2 || tile_cols % chunk != 0 || (c & (c - 1)) != 0 || c > 16)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    rows_per_cycle = 8 / c > 1 ? 8 / c : 1;
+    row_shift = 0;
+    while((1 << (row_shift + 1)) <= rows_per_cycle)
+    {
+        ++row_shift;
+    }
+    chunk_log2 = 0;
+    while((1 << (chunk_log2 + 1)) <= chunk)
+    {
+        ++chunk_log2;
+    }
+    out[0] = row_shift;
+    out[1] = c - 1;
+    out[2] = chunk_log2;
+    out[3] = 3;
+    return ROCKE_OK;
+}
+
+rocke_value_t* rocke_swizzle_lds_col(rocke_ir_builder_t* b,
+                                     rocke_value_t* row,
+                                     rocke_value_t* col,
+                                     const int col_xor[4])
+{
+    rocke_value_t* r;
+    rocke_value_t* sel;
+    rocke_value_t* flip;
+    rocke_value_t* shifted;
+
+    if(b != NULL && b->status != ROCKE_OK)
+    {
+        return NULL;
+    }
+    if(col_xor == NULL)
+    {
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "swizzle_lds_col: NULL col_xor");
+    }
+    /* Python (each const_i32 is created right before the op that takes it):
+     *   r = b.lshr(row, b.const_i32(row_shift)) if row_shift else row
+     *   sel = b.land(r, b.const_i32(chunk_mask))
+     *   flip = b.land(b.lshr(row, b.const_i32(flip_shift)), b.const_i32(1))
+     *   sel = b.xor(sel, flip)
+     *   return b.xor(col, b.shl(sel, b.const_i32(chunk_log2)))
+     */
+    r = row;
+    if(col_xor[0] != 0)
+    {
+        rocke_value_t* c_shift = rocke_b_const_i32(b, col_xor[0]);
+        r = rocke_b_lshr(b, row, c_shift);
+    }
+    {
+        rocke_value_t* c_mask = rocke_b_const_i32(b, col_xor[1]);
+        sel = rocke_b_land(b, r, c_mask);
+    }
+    {
+        rocke_value_t* c_flip = rocke_b_const_i32(b, col_xor[3]);
+        rocke_value_t* hi = rocke_b_lshr(b, row, c_flip);
+        rocke_value_t* c_one = rocke_b_const_i32(b, 1);
+        flip = rocke_b_land(b, hi, c_one);
+    }
+    sel = rocke_b_xor(b, sel, flip);
+    {
+        rocke_value_t* c_log2 = rocke_b_const_i32(b, col_xor[2]);
+        shifted = rocke_b_shl(b, sel, c_log2);
+    }
+    return rocke_b_xor(b, col, shifted);
+}
+
+rocke_status_t rocke_coalesced_tile_loader_set_col_xor(rocke_coalesced_tile_loader_t* self,
+                                                       const int col_xor[4])
+{
+    int i;
+    int chunk;
+    int chunks;
+    long long group;
+
+    if(self == NULL || col_xor == NULL)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    /* Python __post_init__:
+     *   four non-negative ints;
+     *   row_shift <= 31, flip_shift <= 31, chunk_log2 <= 30 (i32 shifts);
+     *   chunk = 1 << chunk_log2; chunks = tile_cols // chunk
+     *   group = 1 << (chunk_mask | 1).bit_length()
+     *   tile_cols % chunk == 0, chunks >= group, chunks % group == 0;
+     *   vector_axis == "col" -> chunk % load_vec == 0. */
+    for(i = 0; i < 4; ++i)
+    {
+        if(col_xor[i] < 0)
+        {
+            return ROCKE_ERR_VALUE;
+        }
+    }
+    /* rocke_swizzle_lds_col shifts i32 values by these: 32 or more is poison. */
+    if(col_xor[0] > 31 || col_xor[3] > 31 || col_xor[2] > 30)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    /* The chunk index is XORed with values below `group` (chunk_mask and the
+     * flip bit), which permutes aligned groups of `group` chunks: each row must
+     * hold whole groups, or a store leaves its row. */
+    chunk = 1 << col_xor[2];
+    chunks = self->tile_cols / chunk;
+    group = 2;
+    while(group <= (long long)(col_xor[1] | 1))
+    {
+        group <<= 1;
+    }
+    if(self->tile_cols % chunk != 0 || chunks < group || chunks % group != 0)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    if(!self->vector_axis_row && (self->load_vec <= 0 || chunk % self->load_vec != 0))
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    self->has_col_xor = true;
+    for(i = 0; i < 4; ++i)
+    {
+        self->col_xor[i] = col_xor[i];
     }
     return ROCKE_OK;
 }
@@ -146,6 +298,73 @@ static int ctl_span(const rocke_coalesced_tile_loader_t* self)
                                  : rocke_coalesced_tile_loader_cols_per_vec(self);
 }
 
+/* Python _ELEM_BYTES = {"f16": 2, "bf16": 2, "f32": 4, "i32": 4}: the byte
+ * width of a loader element type, 0 for an unsupported one. NULL is the F16
+ * default. */
+static int loads_elem_bytes(const rocke_type_t* dtype)
+{
+    if(dtype == NULL || dtype == rocke_f16() || dtype == rocke_bf16())
+        return 2;
+    if(dtype == rocke_f32() || dtype == rocke_i32())
+        return 4;
+    return 0;
+}
+
+/* True on the historical fp16 path (elem_dtype None/F16), which keeps its
+ * f16-specific builder calls; any other element type takes the dtype-generic
+ * builder calls the Python loader makes. */
+static bool ctl_is_f16(const rocke_coalesced_tile_loader_t* self)
+{
+    return self->elem_dtype == NULL || self->elem_dtype == rocke_f16();
+}
+
+/* Python: raise ValueError(f"CoalescedTileLoader: unsupported elem_dtype ...").
+ * Returns the element byte width, or 0 after setting the builder error. */
+static int ctl_elem_bytes_or_err(rocke_ir_builder_t* b, const rocke_coalesced_tile_loader_t* self)
+{
+    int eb = loads_elem_bytes(self->elem_dtype);
+    if(eb == 0)
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "CoalescedTileLoader: unsupported elem_dtype '%s'",
+                        self->elem_dtype->name);
+    return eb;
+}
+
+/* One chunk read through the buffer resource: Python
+ *   b.buffer_load(rsrc, safe, c0, dtype)            if load_vec == 1
+ *   b.buffer_load_vN(rsrc, safe, c0, dtype, load_vec)  otherwise */
+static rocke_value_t* ctl_buffer_read(rocke_ir_builder_t* b,
+                                      const rocke_coalesced_tile_loader_t* self,
+                                      rocke_value_t* rsrc,
+                                      rocke_value_t* safe,
+                                      rocke_value_t* c0)
+{
+    if(ctl_is_f16(self))
+        return (self->load_vec == 1)
+                   ? rocke_b_buffer_load_f16(b, rsrc, safe, c0)
+                   : rocke_b_buffer_load_vN_f16(b, rsrc, safe, c0, self->load_vec / 2);
+    return (self->load_vec == 1)
+               ? rocke_b_buffer_load(b, rsrc, safe, c0, self->elem_dtype)
+               : rocke_b_buffer_load_vN(b, rsrc, safe, c0, self->elem_dtype, self->load_vec);
+}
+
+/* One chunk read through a raw global pointer: Python
+ *   b.global_load(ptr, off_elems, dtype) / b.global_load_vN(ptr, off_elems, dtype, n) */
+static rocke_value_t* ctl_global_read(rocke_ir_builder_t* b,
+                                      const rocke_coalesced_tile_loader_t* self,
+                                      rocke_value_t* ptr,
+                                      rocke_value_t* off_elems)
+{
+    if(ctl_is_f16(self))
+        return (self->load_vec == 1)
+                   ? rocke_b_global_load_f16(b, ptr, off_elems, 0)
+                   : rocke_b_global_load_vN_f16(b, ptr, off_elems, self->load_vec, 0);
+    return (self->load_vec == 1)
+               ? rocke_b_global_load(b, ptr, off_elems, self->elem_dtype, 0)
+               : rocke_b_global_load_vN(b, ptr, off_elems, self->elem_dtype, self->load_vec, 0);
+}
+
 /* Python CoalescedTileLoader._decode_row_col: map vec_idx -> (row, col).
  *   idx0  = b.div(vec_idx, c_span)
  *   idx1  = b.mod(vec_idx, c_span)
@@ -177,7 +396,9 @@ static void ctl_decode_row_col(rocke_ir_builder_t* b,
 
 /* Python CoalescedTileLoader._store_tile: write a loaded chunk to LDS.
  *   row mode + load_vec>1: scatter load_vec f16 elements to [row+i, col].
- *   otherwise: one smem_store (f16 scalar for load_vec==1, else vN). */
+ *   otherwise: one smem_store (f16 scalar for load_vec==1, else vN).
+ * With col_xor the LDS column goes through rocke_swizzle_lds_col first (per
+ * scattered element in row mode). */
 static void ctl_store_tile(rocke_ir_builder_t* b,
                            const rocke_coalesced_tile_loader_t* self,
                            rocke_value_t* smem_dst,
@@ -191,19 +412,34 @@ static void ctl_store_tile(rocke_ir_builder_t* b,
         for(i = 0; i < self->load_vec; ++i)
         {
             rocke_value_t* r = (i != 0) ? rocke_b_add(b, row, rocke_b_const_i32(b, i)) : row;
+            /* col_xor: each scattered element takes its own row's XOR. */
+            rocke_value_t* c
+                = self->has_col_xor ? rocke_swizzle_lds_col(b, r, col, self->col_xor) : col;
             rocke_value_t* el = rocke_b_vec_extract(b, v, i);
             rocke_value_t* indices[2];
             indices[0] = r;
-            indices[1] = col;
-            rocke_b_smem_store_f16(b, smem_dst, indices, 2, el);
+            indices[1] = c;
+            if(ctl_is_f16(self))
+                rocke_b_smem_store_f16(b, smem_dst, indices, 2, el);
+            else
+                rocke_b_smem_store_vN(b, smem_dst, indices, 2, el, 1);
         }
     }
     else
     {
         rocke_value_t* indices[2];
+        if(self->has_col_xor)
+        {
+            col = rocke_swizzle_lds_col(b, row, col, self->col_xor);
+        }
         indices[0] = row;
         indices[1] = col;
-        if(self->load_vec == 1)
+        if(!ctl_is_f16(self))
+        {
+            /* b.smem_store_vN(smem_dst, [row, col], v, load_vec) */
+            rocke_b_smem_store_vN(b, smem_dst, indices, 2, v, self->load_vec);
+        }
+        else if(self->load_vec == 1)
         {
             rocke_b_smem_store_f16(b, smem_dst, indices, 2, v);
         }
@@ -262,17 +498,21 @@ void rocke_coalesced_tile_loader_load(rocke_ir_builder_t* b,
     }
 
     /* Python:
+     *   elem_bytes     = _ELEM_BYTES.get(self.elem_dtype.name)  (ValueError if None)
      *   c_threads      = b.const_i32(self.block_size)
      *   c_load_vec     = b.const_i32(self.load_vec)
      *   c_span         = b.const_i32(rows_per_vec if row else cols_per_vec)
-     *   c_half_bytes   = b.const_i32(2)
+     *   c_elem_bytes   = b.const_i32(elem_bytes)
      *   c0             = b.const_i32(0)
      *   c_oob          = b.const_i32(self.oob_sentinel)
      */
+    const int elem_bytes = ctl_elem_bytes_or_err(b, self);
+    if(elem_bytes == 0)
+        return;
     c_threads = rocke_b_const_i32(b, self->block_size);
     c_load_vec = rocke_b_const_i32(b, self->load_vec);
     c_span = rocke_b_const_i32(b, ctl_span(self));
-    c_half_bytes = rocke_b_const_i32(b, 2);
+    c_half_bytes = rocke_b_const_i32(b, elem_bytes);
     c0 = rocke_b_const_i32(b, 0);
     c_oob = rocke_b_const_i32(b, self->oob_sentinel);
 
@@ -327,47 +567,23 @@ void rocke_coalesced_tile_loader_load(rocke_ir_builder_t* b,
                 safe = off_bytes;
             }
 
-            if(self->load_vec == 1)
-            {
-                /* Python:
-                 *   v = b.buffer_load_f16(rsrc, safe, c0)
-                 *   self._store_tile(b, smem_dst, row, col, v)
-                 */
-                rocke_value_t* v = rocke_b_buffer_load_f16(b, rsrc, safe, c0);
-                ctl_store_tile(b, self, smem_dst, row, col, v);
-            }
-            else
-            {
-                /* Python:
-                 *   dwords = self.load_vec // 2
-                 *   v = b.buffer_load_vN_f16(rsrc, safe, c0, dwords)
-                 *   self._store_tile(b, smem_dst, row, col, v)  # vN or row-scatter
-                 */
-                int dwords = self->load_vec / 2;
-                rocke_value_t* v = rocke_b_buffer_load_vN_f16(b, rsrc, safe, c0, dwords);
-                ctl_store_tile(b, self, smem_dst, row, col, v);
-            }
+            /* Python:
+             *   v = b.buffer_load(rsrc, safe, c0, dtype)        (load_vec == 1)
+             *   v = b.buffer_load_vN(rsrc, safe, c0, dtype, n)  (otherwise)
+             *   self._store_tile(b, smem_dst, row, col, v)      # vN or row-scatter
+             */
+            rocke_value_t* v = ctl_buffer_read(b, self, rsrc, safe, c0);
+            ctl_store_tile(b, self, smem_dst, row, col, v);
         }
         else
         {
-            if(self->load_vec == 1)
-            {
-                /* Python:
-                 *   v = b.global_load_f16(ptr, off_elems)
-                 *   self._store_tile(b, smem_dst, row, col, v)
-                 */
-                rocke_value_t* v = rocke_b_global_load_f16(b, ptr, off_elems, 0);
-                ctl_store_tile(b, self, smem_dst, row, col, v);
-            }
-            else
-            {
-                /* Python:
-                 *   v = b.global_load_vN_f16(ptr, off_elems, self.load_vec)
-                 *   self._store_tile(b, smem_dst, row, col, v)  # vN or row-scatter
-                 */
-                rocke_value_t* v = rocke_b_global_load_vN_f16(b, ptr, off_elems, self->load_vec, 0);
-                ctl_store_tile(b, self, smem_dst, row, col, v);
-            }
+            /* Python:
+             *   v = b.global_load(ptr, off_elems, dtype)        (load_vec == 1)
+             *   v = b.global_load_vN(ptr, off_elems, dtype, n)  (otherwise)
+             *   self._store_tile(b, smem_dst, row, col, v)      # vN or row-scatter
+             */
+            rocke_value_t* v = ctl_global_read(b, self, ptr, off_elems);
+            ctl_store_tile(b, self, smem_dst, row, col, v);
         }
     }
 }
@@ -421,10 +637,13 @@ void rocke_coalesced_tile_loader_load_global(rocke_ir_builder_t* b,
     }
 
     /* Same constants as load() — byte-identical SSA prefix. */
+    const int elem_bytes = ctl_elem_bytes_or_err(b, self);
+    if(elem_bytes == 0)
+        return;
     c_threads = rocke_b_const_i32(b, self->block_size);
     c_load_vec = rocke_b_const_i32(b, self->load_vec);
     c_span = rocke_b_const_i32(b, ctl_span(self));
-    c_half_bytes = rocke_b_const_i32(b, 2);
+    c_half_bytes = rocke_b_const_i32(b, elem_bytes);
     c0 = rocke_b_const_i32(b, 0);
     c_oob = rocke_b_const_i32(b, self->oob_sentinel);
 
@@ -464,17 +683,11 @@ void rocke_coalesced_tile_loader_load_global(rocke_ir_builder_t* b,
             rocke_value_t* off_bytes = rocke_b_mul(b, off_elems, c_half_bytes);
             rocke_value_t* safe
                 = (valid != NULL) ? rocke_b_select(b, valid, off_bytes, c_oob) : off_bytes;
-            if(self->load_vec == 1)
-                v = rocke_b_buffer_load_f16(b, rsrc, safe, c0);
-            else
-                v = rocke_b_buffer_load_vN_f16(b, rsrc, safe, c0, self->load_vec / 2);
+            v = ctl_buffer_read(b, self, rsrc, safe, c0);
         }
         else
         {
-            if(self->load_vec == 1)
-                v = rocke_b_global_load_f16(b, ptr, off_elems, 0);
-            else
-                v = rocke_b_global_load_vN_f16(b, ptr, off_elems, self->load_vec, 0);
+            v = ctl_global_read(b, self, ptr, off_elems);
         }
 
         staged->vecs[e].row = row;
@@ -585,9 +798,13 @@ void rocke_coalesced_tile_loader_slot_offsets(rocke_ir_builder_t* b,
     }
 
     /* Python:
-     *   c_elem_bytes = b.const_i32(elem_bytes)   -- 2: this port loads 16-bit
+     *   elem_bytes   = _ELEM_BYTES.get(self.elem_dtype.name)  (ValueError if None)
+     *   c_elem_bytes = b.const_i32(elem_bytes)
      *   c_oob        = b.const_i32(self.oob_sentinel) */
-    rocke_value_t* c_half_bytes = rocke_b_const_i32(b, 2);
+    const int elem_bytes = ctl_elem_bytes_or_err(b, self);
+    if(elem_bytes == 0)
+        return;
+    rocke_value_t* c_half_bytes = rocke_b_const_i32(b, elem_bytes);
     rocke_value_t* c_oob = rocke_b_const_i32(b, self->oob_sentinel);
 
     for(int e = 0; e < slots->count; ++e)
@@ -621,10 +838,7 @@ void rocke_coalesced_tile_loader_issue_slots(rocke_ir_builder_t* b,
     int count = slots->count;
     for(int e = 0; e < count; ++e)
     {
-        rocke_value_t* v
-            = (self->load_vec == 1)
-                  ? rocke_b_buffer_load_f16(b, rsrc, offsets[e], c0)
-                  : rocke_b_buffer_load_vN_f16(b, rsrc, offsets[e], c0, self->load_vec / 2);
+        rocke_value_t* v = ctl_buffer_read(b, self, rsrc, offsets[e], c0);
         staged->vecs[e].row = slots->vecs[e].row;
         staged->vecs[e].col = slots->vecs[e].col;
         staged->vecs[e].v = v;
@@ -632,18 +846,126 @@ void rocke_coalesced_tile_loader_issue_slots(rocke_ir_builder_t* b,
     staged->count = count;
 }
 
+void rocke_coalesced_tile_loader_load_async_to_lds(rocke_ir_builder_t* b,
+                                                   const rocke_coalesced_tile_loader_t* self,
+                                                   rocke_value_t* tid,
+                                                   rocke_value_t* smem_dst,
+                                                   rocke_loads_descriptor_fn descriptor,
+                                                   void* descriptor_user,
+                                                   rocke_value_t* ptr,
+                                                   rocke_value_t* num_bytes,
+                                                   int coherency)
+{
+    if(b != NULL && b->status != ROCKE_OK)
+        return;
+    if(self == NULL || descriptor == NULL || ptr == NULL || smem_dst == NULL || num_bytes == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "load_async_to_lds: NULL argument");
+        return;
+    }
+    if(self->vector_axis_row)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "CoalescedTileLoader.load_async_to_lds supports only vector_axis='col' "
+                        "(the copy cannot transpose on store)");
+        return;
+    }
+    if(self->has_col_xor)
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "CoalescedTileLoader.load_async_to_lds does not support col_xor");
+        return;
+    }
+    /* This port loads 16-bit elements (see slot_offsets). */
+    const int width = self->load_vec * 2;
+    if(width != 4 && width != 8 && width != 16)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "global_load_async_to_lds moves 4, 8 or 16 bytes per lane; a "
+                        "%d x 2 B chunk is %d B",
+                        self->load_vec,
+                        width);
+        return;
+    }
+
+    /* Python: zero = b.zero_vec(self.elem_dtype, self.load_vec). This port
+     * takes the zero's type from the destination LDS tile (f16 or bf16: the
+     * 16-bit elements this port loads). */
+    const rocke_type_t* lds_elem
+        = (smem_dst->type != NULL && smem_dst->type->kind == ROCKE_TYPE_SMEM) ? smem_dst->type->elem
+                                                                              : NULL;
+    if(lds_elem == NULL
+       || (strcmp(lds_elem->name, "f16") != 0 && strcmp(lds_elem->name, "bf16") != 0))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "load_async_to_lds: the LDS tile must hold f16 or bf16 (got %s)",
+                        lds_elem != NULL ? lds_elem->name : "a non-LDS value");
+        return;
+    }
+    rocke_value_t* zero = rocke_b_zero_vec(b, lds_elem, self->load_vec);
+    rocke_value_t* c_elem_bytes = rocke_b_const_i32(b, 2);
+    rocke_ctl_staged_t slots;
+    rocke_coalesced_tile_loader_plan_slots(b, self, tid, &slots);
+    for(int e = 0; e < slots.count; ++e)
+    {
+        rocke_value_t* idx[2];
+        idx[0] = slots.vecs[e].row;
+        idx[1] = slots.vecs[e].col;
+        /* Python: off_elems, valid = descriptor(b, row, col) */
+        rocke_value_t* valid = NULL;
+        rocke_value_t* off_elems = descriptor(b, idx[0], idx[1], &valid, descriptor_user);
+        /* Python: in_bounds = b.cmp_ult(b.mul(off_elems, c_elem_bytes), num_bytes)
+         * -- unsigned, as the buffer resource's range check: a byte offset
+         * at or past 2 GiB (negative as i32) is out of range, not below. */
+        rocke_value_t* off_bytes = rocke_b_mul(b, off_elems, c_elem_bytes);
+        rocke_value_t* in_bounds = rocke_b_cmp_ult(b, off_bytes, num_bytes);
+        valid = (valid == NULL) ? in_bounds : rocke_b_land(b, valid, in_bounds);
+        rocke_if_else_t ie = rocke_b_scf_if_else(b, valid);
+        rocke_b_region_enter(b, ie.then_region);
+        rocke_b_global_load_async_to_lds(b, ptr, off_elems, smem_dst, idx, 2, width, coherency, 0);
+        rocke_b_region_leave(b);
+        rocke_b_region_enter(b, ie.else_region);
+        rocke_b_smem_store_vN_f16(b, smem_dst, idx, 2, zero, self->load_vec);
+        rocke_b_region_leave(b);
+    }
+}
+
 /* ============================================================================
  * AsyncTileLoader / AsyncTileLoaderSlot
  * ========================================================================== */
 
+/* choose_dwords with Python's `elem_bytes` argument: each chunk carries
+ * d * 4 / elem_bytes elements (2-byte elements: d * 2 halves). */
+static rocke_status_t atl_choose_dwords(int tile_rows,
+                                        int tile_cols,
+                                        int block_size,
+                                        int elem_bytes,
+                                        int max_dwords,
+                                        int contig_cols,
+                                        int* out);
+
 rocke_status_t rocke_async_tile_loader_choose_dwords(
     int tile_rows, int tile_cols, int block_size, int max_dwords, int contig_cols, int* out)
+{
+    return atl_choose_dwords(tile_rows, tile_cols, block_size, 2, max_dwords, contig_cols, out);
+}
+
+static rocke_status_t atl_choose_dwords(int tile_rows,
+                                        int tile_cols,
+                                        int block_size,
+                                        int elem_bytes,
+                                        int max_dwords,
+                                        int contig_cols,
+                                        int* out)
 {
     /* Python:
      *   if max_dwords > 4: max_dwords = 4
      *   for d in (4, 3, 1):
      *       if d > max_dwords: continue
-     *       halves = d * 2
+     *       halves = (d * 4) // elem_bytes
      *       if tile_cols % halves != 0: continue
      *       chunks = (tile_rows*tile_cols) // halves
      *       if chunks < block_size: continue
@@ -666,7 +988,7 @@ rocke_status_t rocke_async_tile_loader_choose_dwords(
         {
             continue;
         }
-        halves = d * 2;
+        halves = (d * 4) / elem_bytes;
         /* A chunk must lie entirely inside one contiguous run of columns
          * (Python: contig_cols is not None and (elems > contig_cols or
          * contig_cols % elems != 0) -> skip). contig_cols == 0 means None. */
@@ -708,6 +1030,19 @@ rocke_status_t rocke_async_tile_loader_from_tile(int tile_rows,
                                                  int contig_cols,
                                                  rocke_async_tile_loader_t* out)
 {
+    return rocke_async_tile_loader_from_tile_typed(
+        tile_rows, tile_cols, block_size, wave_size, NULL, max_dwords, contig_cols, out);
+}
+
+rocke_status_t rocke_async_tile_loader_from_tile_typed(int tile_rows,
+                                                       int tile_cols,
+                                                       int block_size,
+                                                       int wave_size,
+                                                       const rocke_type_t* elem_dtype,
+                                                       int max_dwords,
+                                                       int contig_cols,
+                                                       rocke_async_tile_loader_t* out)
+{
     int d;
     int halves;
     int chunks;
@@ -715,20 +1050,26 @@ rocke_status_t rocke_async_tile_loader_from_tile(int tile_rows,
     rocke_status_t st;
 
     /* Python:
-     *   d = cls.choose_dwords(...)
-     *   halves = d * 2
+     *   eb = _ELEM_BYTES.get(elem_dtype.name)  (ValueError if None)
+     *   d = cls.choose_dwords(..., elem_bytes=eb, ...)
+     *   halves = (d * 4) // eb
      *   chunks = (tile_rows * tile_cols) // halves
      *   passes = (chunks + block_size - 1) // block_size
      *   return cls(... dwords=d, chunks_total=chunks,
      *              chunks_per_pass=block_size, passes=passes)
      */
-    st = rocke_async_tile_loader_choose_dwords(
-        tile_rows, tile_cols, block_size, max_dwords, contig_cols, &d);
+    const int elem_bytes = loads_elem_bytes(elem_dtype);
+    if(elem_bytes == 0)
+    {
+        return ROCKE_ERR_VALUE;
+    }
+    st = atl_choose_dwords(
+        tile_rows, tile_cols, block_size, elem_bytes, max_dwords, contig_cols, &d);
     if(st != ROCKE_OK)
     {
         return st;
     }
-    halves = d * 2;
+    halves = (d * 4) / elem_bytes;
     chunks = (tile_rows * tile_cols) / halves;
     passes = (chunks + block_size - 1) / block_size;
     if(out != NULL)
@@ -742,14 +1083,18 @@ rocke_status_t rocke_async_tile_loader_from_tile(int tile_rows,
         out->chunks_per_pass = block_size;
         out->passes = passes;
         out->contig_cols = contig_cols;
+        out->elem_dtype = elem_dtype;
     }
     return ROCKE_OK;
 }
 
 int rocke_async_tile_loader_halves_per_chunk(const rocke_async_tile_loader_t* self)
 {
-    /* Python: return dwords * 2 */
-    return (self == NULL) ? 0 : self->dwords * 2;
+    /* Python elems_per_chunk: return (dwords * 4) // _ELEM_BYTES[elem_dtype] */
+    if(self == NULL)
+        return 0;
+    const int eb = loads_elem_bytes(self->elem_dtype);
+    return (eb == 0) ? 0 : (self->dwords * 4) / eb;
 }
 
 int rocke_async_tile_loader_bytes_per_chunk(const rocke_async_tile_loader_t* self)
@@ -875,7 +1220,16 @@ void rocke_async_tile_loader_slot_issue(rocke_ir_builder_t* b,
      *   c_chunks_per_row = b.const_i32(L.chunks_per_row)
      */
     L = &self->loader;
-    c_half_bytes = rocke_b_const_i32(b, 2);
+    const int elem_bytes = loads_elem_bytes(L->elem_dtype);
+    if(elem_bytes == 0)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "AsyncTileLoader: unsupported elem_dtype '%s'",
+                        L->elem_dtype->name);
+        return;
+    }
+    c_half_bytes = rocke_b_const_i32(b, elem_bytes);
     c_oob = rocke_b_const_i32(b, oob_sentinel);
     c0 = rocke_b_const_i32(b, 0);
     c_chunks_per_row = rocke_b_const_i32(b, rocke_async_tile_loader_chunks_per_row(L));

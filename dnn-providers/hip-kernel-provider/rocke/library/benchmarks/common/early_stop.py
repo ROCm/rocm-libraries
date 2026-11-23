@@ -17,6 +17,14 @@ that is killed still leaves what it measured), and
 file. ``benchmark_conv_compare.py`` uses that to seed the implicit-GEMM sweep
 with the direct-conv results. Cases are matched by their normalized geometry,
 dtype and direction, so the two scripts' problem types meet on one key.
+
+What is reported and what is pruned are measured differently. The pruning
+probes (the first launch, the warmup) are back-to-back block launches, cheap
+and the same for every kernel. The reported time is measured with the sweep's
+``--timing`` (:data:`benchmarks.common.batched_timing.TIMINGS`): by default
+one stalled event pair per launch and the median, as hipDNN measures. A staged
+time carries a fixed per-call cost a block probe does not, so the bound a
+block probe is held to is, if anything, looser -- pruning stays safe.
 """
 
 from __future__ import annotations
@@ -148,7 +156,13 @@ class EarlyStop:
         *,
         seed_ms: Optional[float] = None,
         record_key: Optional[str] = None,
+        timing: str = "block",
     ) -> None:
+        from benchmarks.common.batched_timing import TIMINGS
+
+        if timing not in TIMINGS:
+            raise ValueError(f"timing must be one of {TIMINGS}, got {timing!r}")
+        self.timing = timing
         self.factor = factor
         self.after = after
         self.n_measured = 0
@@ -162,6 +176,10 @@ class EarlyStop:
         # (HOPELESS_MARGIN past the bound) rather than the full warmup.
         self.last_hopeless = False
         self.record_key = record_key
+        # Checked once, lazily, so a device without hipStreamWaitValue32 fails
+        # with one clear error instead of retrying the gate's construction (and
+        # printing nothing to say why) on every kernel of the case.
+        self._gate_checked = False
 
     @classmethod
     def for_case(cls, args, problem: object, dtype: str, direction: str) -> "EarlyStop":
@@ -173,6 +191,7 @@ class EarlyStop:
             args.early_stop_after,
             seed_ms=seeds.get(key),
             record_key=key if getattr(args, "early_stop_record", None) else None,
+            timing=getattr(args, "timing", "block"),
         )
 
     def measure(
@@ -224,12 +243,12 @@ class EarlyStop:
                 self.n_stopped += 1
                 return None
             # The probe was the warmup; only the timed loop is left.
-            ms = time_launches(fn, warmup=0, iters=iters, stream=stream)
+            ms = self._timed(fn, warmup=0, iters=iters, stream=stream)
         elif probing:
             # The probe was the first warmup launch.
-            ms = time_launches(fn, warmup=warmup - 1, iters=iters, stream=stream)
+            ms = self._timed(fn, warmup=warmup - 1, iters=iters, stream=stream)
         else:
-            ms = time_launches(fn, warmup=warmup, iters=iters, stream=stream)
+            ms = self._timed(fn, warmup=warmup, iters=iters, stream=stream)
         if passed is False:
             return ms
         self.n_measured += 1
@@ -238,6 +257,50 @@ class EarlyStop:
         if self.record_key is not None:
             _record(self.record_key, ms)
         return ms
+
+    def _timed(self, fn, *, warmup: int, iters: int, stream: int) -> float:
+        """The reported time of ``fn``, measured with :attr:`timing`."""
+        if self.timing == "staged":
+            from statistics import median
+
+            from rocke.runtime import time_launches_staged
+            from rocke.runtime.hip_module import HipError
+            from rocke.runtime.stall_gate import default_gate
+
+            if not self._gate_checked:
+                self._gate_checked = True
+                try:
+                    default_gate()
+                except HipError as e:
+                    raise HipError(
+                        f"{e}; this device cannot be timed with --timing "
+                        f"staged, rerun with --timing block"
+                    ) from e
+            return median(
+                time_launches_staged(fn, warmup=warmup, iters=iters, stream=stream)
+            )
+        from rocke.runtime import time_launches
+
+        return time_launches(fn, warmup=warmup, iters=iters, stream=stream)
+
+    def note(self, ms: float, *, passed: Optional[bool] = None) -> None:
+        """Record a time this object did not measure itself.
+
+        For a sweep that ranks its kernels another way (see
+        :mod:`benchmarks.common.batched_timing`) and so never calls
+        :meth:`measure`, but still has to leave ``--early-stop-record`` the
+        case's best time -- ``benchmark_conv_compare.py`` seeds the
+        implicit-GEMM sweep from that file. A kernel that failed verification
+        is ignored here for the same reason it is in :meth:`measure`: a
+        wrong-but-fast kernel would prune every correct one in the seeded run.
+        """
+        if passed is False:
+            return
+        self.n_measured += 1
+        if self.best_ms is None or ms < self.best_ms:
+            self.best_ms = ms
+        if self.record_key is not None:
+            _record(self.record_key, ms)
 
     def report(self, label: str) -> None:
         """Print the line for a kernel :meth:`measure` just skipped."""

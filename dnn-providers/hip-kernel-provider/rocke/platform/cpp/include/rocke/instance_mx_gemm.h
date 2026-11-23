@@ -12,19 +12,25 @@
  *   is_valid_spec(spec, arch)         rocke_mx_gemm_is_valid_spec(...)
  *   build_mx_gemm(spec, arch)         rocke_build_mx_gemm(...)
  *   mx_gemm_grid(spec)                rocke_mx_gemm_grid(...)
+ *   mx_gemm_element_format(dt, arch)  rocke_mx_gemm_element_format(...)
  *   (+ convenience: init-from-spec)   rocke_build_mx_gemm_new(...)
  *   (+ convenience: build -> lower)   rocke_mx_gemm_lower_to_llvm(...)
  *
  * The MX GEMM uses the OCP MX-spec shared-exponent format: each 32-element
- * mantissa block carries one 8-bit unbiased E8M0 scale. v1 ships fp8e4m3 /
- * bf8e5m2 mantissa, group_k=32, 16x16 tiles, wave64, f32 output. The body
- * uses the fp8/bf8 16x16x32 MFMA atom plus an explicit per-group E8M0 decode +
- * scale-apply chain (decode_mx_scale_e8m0).
+ * mantissa block carries one 8-bit biased E8M0 scale (bias 127). It reads
+ * fp8e4m3 / bf8e5m2 mantissas with group_k=32, wave64, f32 output. One wave
+ * computes a 32x32 output tile; a workgroup is block_tile_m/32 x
+ * block_tile_n/32 waves. A target with the E8M0-scaled MFMA (gfx950) applies
+ * the scales in the instruction and recomputes a tile whose codes are past
+ * largest_safe_mx_scale_code the second way; any target sums each group with
+ * two 32x32x16 MFMAs and adds it with add_mx_scaled_dot. See the Python module
+ * docstring.
  *
  * SPEC AS AN EXPLICIT C STRUCT. The Python dataclass is a frozen value type with
  * defaults. In C the caller fills a rocke_mx_gemm_spec_t;
  * rocke_mx_gemm_spec_default() returns a struct with every field at the Python
- * dataclass default (M/N/K must still be set).
+ * dataclass default; the fields Python requires (M, N, K) are 0 and must
+ * still be set.
  *
  * Error model mirrors the rest of the C port: build/lower route errors through
  * the sticky-error IRBuilder (rocke_b_*); the validity gate returns a bool + a
@@ -36,6 +42,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "rocke/helper_rocke.helpers.mx_scale.h"
 #include "rocke/ir.h"
 #include "rocke/lower_llvm.h"
 
@@ -53,26 +60,31 @@ typedef struct rocke_mx_gemm_spec
     int M;
     int N;
     int K;
+    int block_tile_m; /* workgroup output tile rows, default 32 */
+    int block_tile_n; /* workgroup output tile columns, default 128 */
     const char* mantissa_dtype; /* "fp8e4m3" (default) | "bf8e5m2"     */
     int group_k; /* MX shared-exponent block size, default 32 */
-    int block_tile_m; /* default 16 */
-    int block_tile_n; /* default 16 */
     const char* name; /* default "rocke_mx_gemm" */
-    bool per_input_row; /* default true (v1 experimental scale mode) */
 } rocke_mx_gemm_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The
  * caller must still set M / N / K. */
 rocke_mx_gemm_spec_t rocke_mx_gemm_spec_default(void);
 
-/* MxGemmSpec.block_size property: MFMA path uses one wave64 warp per CTA = 64. */
-int rocke_mx_gemm_block_size(const rocke_mx_gemm_spec_t* spec);
+/* MxGemmSpec.waves property: waves per workgroup, one per 32x32 tile of the
+ * block tile. Wide, so any int tile gives the exact count. */
+long long rocke_mx_gemm_waves(const rocke_mx_gemm_spec_t* spec);
 
-/* MxGemmSpec.atom property: the fp8 / bf8 16x16x32 MFMA atom selected from
- * mantissa_dtype. Returns a pointer into the static MFMA catalog, or NULL on
- * the Python ValueError path ((block_tile_m, block_tile_n) != (16, 16) or an
- * unsupported mantissa_dtype). Do NOT free/mutate the returned pointer. */
-const struct rocke_mfma_atom* rocke_mx_gemm_atom(const rocke_mx_gemm_spec_t* spec);
+/* MxGemmSpec.block_size property: 64 threads per wave. Wide like
+ * rocke_mx_gemm_waves, so rocke_mx_gemm_is_valid_spec compares the exact size
+ * with the hardware cap instead of a wrapped one. */
+long long rocke_mx_gemm_block_size(const rocke_mx_gemm_spec_t* spec);
+
+/* MxGemmSpec.group_atom property: the fp8 / bf8 32x32x16 MFMA atom that sums
+ * a scale group's unscaled products (two per group), selected from
+ * mantissa_dtype. Returns a pointer into the static MFMA catalog, or NULL for
+ * a NULL spec. Do NOT free/mutate the returned pointer. */
+const struct rocke_mfma_atom* rocke_mx_gemm_group_atom(const rocke_mx_gemm_spec_t* spec);
 
 /* MxGemmSpec.kernel_name() -> NUL-terminated into out (capacity out_cap).
  * Joins name, "M{M}N{N}K{K}", mantissa_dtype, "gk{group_k}",
@@ -114,7 +126,20 @@ rocke_status_t rocke_mx_gemm_lower_to_llvm(const rocke_mx_gemm_spec_t* spec,
                                            char* err,
                                            size_t err_cap);
 
-/* mx_gemm_grid(spec) -> (n_tiles, m_tiles, 1). Any out-param may be NULL. */
+/* mx_gemm_element_format(mantissa_dtype, arch): the element format the
+ * arch's MFMA reads for mantissa_dtype (the FNUZ encodings on gfx942, the OCP
+ * ones on gfx950); its largest value bounds the products the scaled MFMA sums
+ * (rocke_largest_safe_mx_scale_code). Returns a
+ * pointer to a static format, or NULL with the Python-matching message in err
+ * (capacity err_cap, may be NULL). */
+const rocke_mx_element_format_t* rocke_mx_gemm_element_format(const char* mantissa_dtype,
+                                                              const char* arch,
+                                                              char* err,
+                                                              size_t err_cap);
+
+/* mx_gemm_grid(spec) -> (n_tiles, m_tiles, 1). Any out-param may be NULL.
+ * A NULL spec or a workgroup tile that is not positive (an invalid spec)
+ * gives the empty grid (0, 0, 1). */
 void rocke_mx_gemm_grid(const rocke_mx_gemm_spec_t* spec, int* out_gx, int* out_gy, int* out_gz);
 
 #ifdef __cplusplus

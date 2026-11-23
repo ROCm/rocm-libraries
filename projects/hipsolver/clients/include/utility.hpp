@@ -354,6 +354,16 @@ inline bool hipsolver_isnan(hipsolverDoubleComplex arg)
     return std::isnan(arg.real()) || std::isnan(arg.imag());
 }
 
+//------------------------------------------------------------------------------
+// max that propagates NaNs consistently:
+//   hipsolver_max_nan( 1,   NaN ) = NaN
+//   hipsolver_max_nan( NaN, 1   ) = NaN
+template <typename T>
+inline T hipsolver_max_nan(T x, T y)
+{
+    return (hipsolver_isnan(y) || y >= x) ? y : x;
+}
+
 /* =============================================================================================== */
 /* Complex / real helpers.                                                                         */
 

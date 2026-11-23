@@ -1,0 +1,128 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <vector>
+
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
+#include <hipdnn_plugin_sdk/EngineManager.hpp>
+
+#include "ApplicabilityPool.hpp"
+#include "GraphSchema.hpp"
+#include "Handle.hpp"
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include <hipdnn_plugin_sdk/ingestor/StagedApplicability.hpp>
+#endif
+
+namespace hip_kernel_provider::core
+{
+
+/// Offloaded work, in catalog variants, below which a call stays on the caller thread. An
+/// override of DEFAULT_MIN_OFFLOAD_VARIANTS, for calibration.
+static constexpr const char* APPLICABILITY_MIN_OFFLOAD_VARIANTS_ENV_NAME
+    = "HIPDNN_APPLICABILITY_MIN_OFFLOAD_VARIANTS";
+
+/// The smallest offload measured to beat staying inline on gfx950 dense-attention packs.
+static constexpr std::size_t DEFAULT_MIN_OFFLOAD_VARIANTS = 50;
+
+/// Upper bound on the total threads, caller included, one applicability call uses.
+static constexpr std::size_t MAX_APPLICABILITY_THREADS = 9;
+
+/// Parses a HIPDNN_APPLICABILITY_MIN_OFFLOAD_VARIANTS value. Empty returns the default.
+/// Anything but a non-negative integer logs a WARN and returns the default.
+std::size_t parseMinOffloadVariants(const std::string& raw);
+
+/// Read on every call that has two or more pending engines, never cached.
+std::size_t minOffloadVariantsFromEnv();
+
+/// Threads, caller included, for `pending` engines on `cpus` CPUs: min(pending, cpus,
+/// MAX_APPLICABILITY_THREADS). Never less than 1.
+std::size_t resolveTotalThreads(std::size_t pending, std::size_t cpus) noexcept;
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+/// Applies each of ENGINE_ORDER_RULES (IngestorPacks.hpp), in the table's order, to
+/// @p engineIds: when the rule's two engines are both in the list and the other one comes
+/// first, the preferred one is rotated into the other's place. Every other id keeps its
+/// position relative to the rest, and a list holding neither engine, or already in order, is
+/// untouched.
+void applyEngineOrderRules(std::vector<int64_t>& engineIds);
+#endif
+
+/// The provider's engine manager. Adds threaded applicability for staged (ingestor) engines:
+/// with at least two of them registered, a call whose pending engines have enough variants left
+/// to walk finishes all but the largest on pool threads. Below that, every call is the base
+/// class's sequential loop or its equivalent on the caller thread.
+class ApplicabilityManager : public hipdnn_plugin_sdk::EngineManager<Handle, Settings, Context>
+{
+public:
+    using Base = hipdnn_plugin_sdk::EngineManager<Handle, Settings, Context>;
+
+    /// pool must outlive every getApplicableEngineIds call.
+    explicit ApplicabilityManager(ApplicabilityPool& pool);
+
+    /// Hides the base: the manager tracks which engines are staged and the newest graph schema
+    /// each understands (GraphSchema.hpp; the provider baseline unless the engine opts in).
+    /// Register through this type.
+    void addEngine(std::unique_ptr<Engine> engine,
+                   std::string_view name = {},
+                   const hipdnn_data_sdk::utilities::Version& maxGraphSchema
+                   = providerBaselineGraphSchema());
+
+    /// Same ids, in the same order, as the base class's loop (with applyEngineOrderRules applied
+    /// to every path's result), and an engine that throws is skipped the same way: it is
+    /// inapplicable and the others are still reported. But for the provider's schema guard: an
+    /// engine whose declared schema is below the graph's floor (graphSchemaFloor) declines it
+    /// without running.
+    std::vector<int64_t> getApplicableEngineIds(Handle& handle, const IGraph& opGraph);
+
+    std::size_t stagedEngineCount() const noexcept;
+
+    /// The newest graph schema the engine @p engineId was registered as understanding.
+    hipdnn_data_sdk::utilities::Version maxGraphSchema(int64_t engineId) const;
+
+private:
+    /// Whether the engine @p engineId understands a graph whose floor is @p floor.
+    bool understands(int64_t engineId, const hipdnn_data_sdk::utilities::Version& floor) const;
+
+    /// understands(), logging the decline when the guard holds the engine back.
+    bool admits(int64_t engineId, const hipdnn_data_sdk::utilities::Version& floor) const;
+
+    std::unordered_map<int64_t, hipdnn_data_sdk::utilities::Version> _maxGraphSchema;
+
+    /// The applicable ids of one call, in the order the call's path produces them, before the
+    /// provider's engine order rules (applyEngineOrderRules) are applied.
+    std::vector<int64_t> collectApplicableEngineIds(Handle& handle, const IGraph& opGraph);
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+    using StagedEngine = hipdnn_plugin_sdk::ingestor::IStagedApplicability<Handle>;
+
+    struct Entry
+    {
+        int64_t id;
+        Engine* engine;
+        StagedEngine* staged;
+    };
+
+    /// The staged path, with the schema guard applied per engine against @p floor.
+    std::vector<int64_t> getApplicableEngineIdsStaged(
+        Handle& handle, const IGraph& opGraph, const hipdnn_data_sdk::utilities::Version& floor);
+
+    // Inside the guard: the pool is only used by the staged path, and an unused private
+    // reference member fails -Werror (-Wunused-private-field) in a build without the ingestor.
+    ApplicabilityPool& _pool;
+    // The base class's iteration order, rebuilt on every addEngine.
+    std::vector<Entry> _entries;
+#endif
+
+    std::size_t _stagedCount = 0;
+};
+
+} // namespace hip_kernel_provider::core

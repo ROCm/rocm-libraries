@@ -73,6 +73,7 @@ BLOCK_SIZES = (16, 32)
 def _reset_caches() -> None:
     au._2D_LAUNCHERS.clear()
     au._2D_LAUNCH_META.clear()
+    au._2D_KV_ADDR_LIMITS.clear()
     au._ATTN_TILED_CACHE.clear()
 
 

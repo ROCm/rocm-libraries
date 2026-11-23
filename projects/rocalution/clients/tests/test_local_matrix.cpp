@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -384,6 +384,16 @@ GENERATE_TEST_CASES(local_matrix_test, testing_write_file_MTX, write_file_mtx_to
 // Test case for LocalMatrix::WriteFileRSIO
 GENERATE_TEST_CASES(local_matrix_test, testing_write_file_RSIO, write_file_RSIO)
 
+// Test case for LocalMatrix::ReadFileRSIO with a file of the other precision
+GENERATE_TEST_CASES(local_matrix_test,
+                    testing_read_file_RSIO_mixed_precision,
+                    read_file_RSIO_mixed_precision)
+
+// Test case for LocalMatrix::WriteFileRSIO when closing the file fails
+GENERATE_TEST_CASES(local_matrix_test,
+                    testing_write_file_RSIO_close_failure,
+                    write_file_RSIO_close_failure)
+
 // Test case for LocalMatrix::CopyFromAsync
 GENERATE_TEST_CASES_DEVICE(local_matrix_test, testing_local_copy_from_async, local_copy_from_async)
 
@@ -404,6 +414,30 @@ GENERATE_TEST_CASES_DEVICE(local_matrix_test,
 GENERATE_TEST_CASES_DEVICE(local_matrix_test,
                            testing_local_move_to_host_async,
                            local_move_to_host_async)
+
+// Test case for LocalMatrix::MoveToHostAsync followed by LocalMatrix::Sync
+GENERATE_TEST_CASES_DEVICE(local_matrix_test,
+                           testing_local_move_to_host_async_sync,
+                           local_move_to_host_async_sync)
+
+// Test case for LocalMatrix::MoveToAcceleratorAsync followed by LocalMatrix::Sync
+GENERATE_TEST_CASES_DEVICE(local_matrix_test,
+                           testing_local_move_to_accelerator_async_sync,
+                           local_move_to_accelerator_async_sync)
+// Test case for LocalMatrix::MoveToAcceleratorAsync called repeatedly before Sync
+GENERATE_TEST_CASES_DEVICE(local_matrix_test,
+                           testing_local_move_to_accelerator_async_repeated,
+                           local_move_to_accelerator_async_repeated)
+
+// Test case for LocalMatrix::CopyFromAsync followed by MoveToAcceleratorAsync before Sync
+GENERATE_TEST_CASES_DEVICE(local_matrix_test,
+                           testing_local_copy_from_async_move_to_accelerator_async,
+                           local_copy_from_async_move_to_accelerator_async)
+
+// Test case for LocalMatrix::MoveToHostAsync called repeatedly before Sync
+GENERATE_TEST_CASES_DEVICE(local_matrix_test,
+                           testing_local_move_to_host_async_repeated,
+                           local_move_to_host_async_repeated)
 
 // Test case for LocalMatrix::Apply
 GENERATE_P_TEST_CASES(parameterized_local_matrix_test, testing_local_apply, local_apply)

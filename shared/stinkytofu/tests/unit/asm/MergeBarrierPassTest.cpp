@@ -23,9 +23,9 @@
 // Unit tests for StinkyMergeBarrierPass.
 //
 // The pass runs after StinkyDAGSchedulerPass and fuses Layer 2 overlapping
-// barrier groups that sit closer than DagFeatures::mergeBarrierThreshold cycles
-// apart into a single multi-token group. These tests build barrier groups
-// directly in a self-loop body block and publish the scheduler analysis result.
+// barrier groups when no matrix instruction is issued between them. Cycle
+// distance is not a gate. These tests build barrier groups directly in a
+// self-loop body block and publish the scheduler analysis result.
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -44,9 +44,6 @@
 
 using namespace stinkytofu;
 using namespace stinkytofu::test;
-
-// Default used by the pass when mergeBarrierThreshold is left at the sentinel 0.
-static constexpr int kCdna5MergeBarrierThreshold = 11;
 
 class MergeBarrierPassTest : public ::testing::Test {
    protected:
@@ -89,6 +86,20 @@ class MergeBarrierPassTest : public ::testing::Test {
         return inst;
     }
 
+    // Scaled WMMA used by mxf8. It carries IF_MXWMMA, not only IF_WMMA, and
+    // isMatrixInstruction must still see it as a matrix issue.
+    StinkyInstruction* createScaleWmma() {
+        AsmIRBuilder builder(*bb, arch);
+        const HwInstDesc* desc = getMCIDByUOp(GFX::v_wmma_scale_f32_16x16x128_f8f6f4, arch);
+        if (desc == nullptr) return nullptr;
+        StinkyInstruction* inst = builder.create(desc);
+        inst->addDestReg(StinkyRegister("v", 0, 8));
+        inst->addSrcReg(StinkyRegister("v", 16, 8));
+        inst->addSrcReg(StinkyRegister("v", 16, 8));
+        inst->addSrcReg(StinkyRegister("v", 0, 8));
+        return inst;
+    }
+
     std::vector<std::pair<StinkyInstruction*, StinkyInstruction*>> legalBarrierGroups() {
         std::vector<std::pair<StinkyInstruction*, StinkyInstruction*>> groups;
         for (auto it = bb->begin(); it != bb->end(); ++it) {
@@ -103,9 +114,10 @@ class MergeBarrierPassTest : public ::testing::Test {
     }
 
     // Run BuildImplicitDependency (to attach LDS pseudo tokens to barriers) then
-    // MergeBarrier with the given cycle threshold (0 => pass default). Most
-    // tests publish the forward Layer 2 relation for each consecutive group;
-    // dedicated gate tests can omit or reverse it.
+    // MergeBarrier. mergeThreshold is accepted so existing call sites stay
+    // stable; the pass no longer consults it. Most tests publish the forward
+    // Layer 2 relation for each consecutive group; dedicated gate tests can
+    // omit or reverse it.
     void runPasses(int mergeThreshold, bool publishOverlap = true, bool reverseOverlap = false) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
@@ -165,19 +177,24 @@ class MergeBarrierPassTest : public ::testing::Test {
 
     // First barrier of the given mnemonic in program order.
     StinkyInstruction* firstBarrier(const std::string& mnem) const {
+        return nthBarrier(mnem, 0);
+    }
+
+    StinkyInstruction* nthBarrier(const std::string& mnem, int n) const {
+        int seen = 0;
         for (const IRBase& ir : *bb) {
             if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
             auto* inst = const_cast<StinkyInstruction*>(cast<StinkyInstruction>(&ir));
             const char* m = inst->getHwInstDesc() ? inst->getHwInstDesc()->mnemonic : nullptr;
-            if (m && std::string(m) == mnem) return inst;
+            if (m && std::string(m) == mnem && seen++ == n) return inst;
         }
         return nullptr;
     }
 };
 
-// Two directly-adjacent barrier groups (distance 0) merge under the default
-// threshold, collapsing to a single signal/wait pair carrying both tokens.
-TEST_F(MergeBarrierPassTest, AdjacentGroupsMergeWithDefaultThreshold) {
+// The later signal is already immediately after the earlier wait, so there is
+// nothing to hoist. Both groups stay, each with its own tokens.
+TEST_F(MergeBarrierPassTest, AdjacentGroupsMerge) {
     createSignal(0);
     createWait(0);
     createSignal(1);
@@ -186,14 +203,14 @@ TEST_F(MergeBarrierPassTest, AdjacentGroupsMergeWithDefaultThreshold) {
     EXPECT_EQ(countByMnemonic("s_barrier_signal"), 2);
     EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
 
-    runPasses(/*mergeThreshold=*/0);  // 0 => default kCdna5MergeBarrierThreshold
+    runPasses(/*mergeThreshold=*/0);
 
-    EXPECT_EQ(countByMnemonic("s_barrier_signal"), 1);
-    EXPECT_EQ(countByMnemonic("s_barrier_wait"), 1);
-
-    // Surviving barriers carry the union of both token sets.
-    EXPECT_EQ(tokensOf(firstBarrier("s_barrier_signal")), (std::vector<int>{0, 1}));
-    EXPECT_EQ(tokensOf(firstBarrier("s_barrier_wait")), (std::vector<int>{0, 1}));
+    EXPECT_EQ(countByMnemonic("s_barrier_signal"), 2);
+    EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
+    EXPECT_EQ(tokensOf(firstBarrier("s_barrier_signal")), (std::vector<int>{0}));
+    EXPECT_EQ(tokensOf(firstBarrier("s_barrier_wait")), (std::vector<int>{0}));
+    EXPECT_EQ(tokensOf(nthBarrier("s_barrier_signal", 1)), (std::vector<int>{1}));
+    EXPECT_EQ(tokensOf(nthBarrier("s_barrier_wait", 1)), (std::vector<int>{1}));
 }
 
 TEST_F(MergeBarrierPassTest, MissingLayer2OverlapPairPreventsMerge) {
@@ -221,46 +238,56 @@ TEST_F(MergeBarrierPassTest, ReverseLayer2OverlapPairPreventsMerge) {
     EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
 }
 
-// Distance strictly below the threshold merges; equal-or-above does not.
-TEST_F(MergeBarrierPassTest, ThresholdBoundaryControlsMerge) {
+// Non-matrix instructions between the groups do not hide a barrier, so the
+// later signal is hoisted to just after the earlier wait. Its wait stays
+// after the fillers.
+TEST_F(MergeBarrierPassTest, NonMatrixInstructionsBetweenStillMerge) {
     createSignal(0);
     createWait(0);
-    // Neutral VALU filler (neither token producer nor consumer).
-    StinkyInstruction* f0 = createVAddInBlock(bb, arch, /*dest=*/40, /*s0=*/0, /*s1=*/1);
-    StinkyInstruction* f1 = createVAddInBlock(bb, arch, /*dest=*/41, /*s0=*/2, /*s1=*/3);
+    int cycles = 0;
+    StinkyInstruction* firstFiller = nullptr;
+    for (int i = 0; i < 20; ++i) {
+        StinkyInstruction* filler =
+            createVAddInBlock(bb, arch, /*dest=*/40 + i, /*s0=*/0, /*s1=*/1);
+        if (firstFiller == nullptr) firstFiller = filler;
+        cycles += filler->issueCycles;
+    }
     createSignal(1);
     createWait(1);
 
-    const int distance = f0->issueCycles + f1->issueCycles;
-    ASSERT_GT(distance, 0) << "filler must contribute a positive cycle distance";
-
-    // Threshold equal to the distance: dist >= threshold, so no merge.
-    runPasses(/*mergeThreshold=*/distance);
+    ASSERT_GT(cycles, 11);
+    runPasses(/*mergeThreshold=*/1);
     EXPECT_EQ(countByMnemonic("s_barrier_signal"), 2);
     EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
+    EXPECT_EQ(tokensOf(firstBarrier("s_barrier_signal")), (std::vector<int>{0}));
+    EXPECT_EQ(tokensOf(firstBarrier("s_barrier_wait")), (std::vector<int>{0}));
+    StinkyInstruction* moved = nthBarrier("s_barrier_signal", 1);
+    EXPECT_EQ(tokensOf(moved), (std::vector<int>{1}));
+    EXPECT_EQ(tokensOf(nthBarrier("s_barrier_wait", 1)), (std::vector<int>{1}));
+    EXPECT_EQ(getPos(moved), getPos(firstBarrier("s_barrier_wait")) + 1);
+    EXPECT_LT(getPos(firstFiller), getPos(nthBarrier("s_barrier_wait", 1)));
 }
 
-TEST_F(MergeBarrierPassTest, DistanceBelowThresholdMerges) {
+// One issued WMMA is enough queued latency to hide the later barrier.
+TEST_F(MergeBarrierPassTest, MatrixInstructionBetweenPreventsMerge) {
     createSignal(0);
     createWait(0);
-    StinkyInstruction* f0 = createVAddInBlock(bb, arch, /*dest=*/40, /*s0=*/0, /*s1=*/1);
-    StinkyInstruction* f1 = createVAddInBlock(bb, arch, /*dest=*/41, /*s0=*/2, /*s1=*/3);
+    StinkyInstruction* wmma = createScaleWmma();
+    ASSERT_NE(wmma, nullptr);
+    ASSERT_TRUE(isMatrixInstruction(*wmma));
     createSignal(1);
     createWait(1);
 
-    const int distance = f0->issueCycles + f1->issueCycles;
+    runPasses(/*mergeThreshold=*/100000);
 
-    // Threshold one above the distance: dist < threshold, so merge.
-    runPasses(/*mergeThreshold=*/distance + 1);
-    EXPECT_EQ(countByMnemonic("s_barrier_signal"), 1);
-    EXPECT_EQ(countByMnemonic("s_barrier_wait"), 1);
-    EXPECT_EQ(tokensOf(firstBarrier("s_barrier_signal")), (std::vector<int>{0, 1}));
+    EXPECT_EQ(countByMnemonic("s_barrier_signal"), 2);
+    EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
+    EXPECT_EQ(countByMnemonic("v_wmma_scale_f32_16x16x128_f8f6f4"), 1);
 }
 
-// A producer of a merged token sitting between the two groups is ordered against
-// the merged barrier. Since the pass never moves instructions, the merge must be
-// skipped even when the distance is below threshold.
-TEST_F(MergeBarrierPassTest, TokenProducerBetweenPreventsMerge) {
+// A producer of the later group's token sits before that barrier. Folding the
+// later barrier back would put the producer after it, so the merge is skipped.
+TEST_F(MergeBarrierPassTest, LaterTokenProducerBetweenPreventsMerge) {
     createSignal(0);
     createWait(0);
     // Producer of token 1 (writes LDS token 1).
@@ -277,22 +304,26 @@ TEST_F(MergeBarrierPassTest, TokenProducerBetweenPreventsMerge) {
     EXPECT_EQ(countByMnemonic("tensor_load_to_lds"), 1);
 }
 
-// A consumer of a merged token (ds_read of token 0, guarded by the first group)
-// sitting between the groups is likewise ordered against the merged barrier, so
-// the merge is skipped without moving anything.
-TEST_F(MergeBarrierPassTest, TokenConsumerBetweenPreventsMerge) {
+// The earlier barrier does not move. A producer of its token may stay between
+// the hoisted signal and the later wait.
+TEST_F(MergeBarrierPassTest, EarlierTokenProducerBetweenStillMerges) {
     createSignal(0);
     createWait(0);
-    // Consumer of token 0 (reads LDS token 0).
-    createDSLoadInBlock(bb, arch, /*destReg=*/20, /*addrReg=*/30, /*memTokens=*/{0});
+    StinkyInstruction* load =
+        createTensorLoadInBlock(bb, arch, /*s0=*/8, /*s1=*/16, /*memTokens=*/{0});
     createSignal(1);
     createWait(1);
 
     runPasses(/*mergeThreshold=*/100000);
 
-    // No merge: both barrier groups remain intact.
     EXPECT_EQ(countByMnemonic("s_barrier_signal"), 2);
     EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
+    EXPECT_EQ(countByMnemonic("tensor_load_to_lds"), 1);
+    EXPECT_EQ(tokensOf(firstBarrier("s_barrier_signal")), (std::vector<int>{0}));
+    StinkyInstruction* hoisted = nthBarrier("s_barrier_signal", 1);
+    EXPECT_EQ(getPos(hoisted), getPos(firstBarrier("s_barrier_wait")) + 1);
+    EXPECT_LT(getPos(hoisted), getPos(load));
+    EXPECT_LT(getPos(load), getPos(nthBarrier("s_barrier_wait", 1)));
 }
 
 // signal / filler / wait is NOT a legal group (must be adjacent signal+wait),
@@ -326,43 +357,51 @@ TEST_F(MergeBarrierPassTest, SplitPairDoesNotMergeWithOtherToken) {
     EXPECT_EQ(tokensOf(firstBarrier("s_barrier_signal")), (std::vector<int>{0}));
 }
 
-// Canonical merge pattern: adjacent signal+wait (T0), filler, adjacent
-// signal+wait (T1) with T0 ≠ T1.
+// Adjacent signal+wait (T0), filler, adjacent signal+wait (T1). The later
+// signal moves to just after the earlier wait; the later wait stays after
+// the filler. Tokens are not unioned.
 TEST_F(MergeBarrierPassTest, LegalDifferentTokenGroupsMerge) {
     createSignal(0);
     createWait(0);
-    createVAddInBlock(bb, arch, /*dest=*/40, /*s0=*/0, /*s1=*/1);
+    StinkyInstruction* filler = createVAddInBlock(bb, arch, /*dest=*/40, /*s0=*/0, /*s1=*/1);
     createSignal(1);
     createWait(1);
 
     runPasses(/*mergeThreshold=*/100000);
 
-    EXPECT_EQ(countByMnemonic("s_barrier_signal"), 1);
-    EXPECT_EQ(countByMnemonic("s_barrier_wait"), 1);
-    EXPECT_EQ(tokensOf(firstBarrier("s_barrier_signal")), (std::vector<int>{0, 1}));
-    EXPECT_EQ(tokensOf(firstBarrier("s_barrier_wait")), (std::vector<int>{0, 1}));
+    EXPECT_EQ(countByMnemonic("s_barrier_signal"), 2);
+    EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
+    EXPECT_EQ(tokensOf(firstBarrier("s_barrier_signal")), (std::vector<int>{0}));
+    EXPECT_EQ(tokensOf(firstBarrier("s_barrier_wait")), (std::vector<int>{0}));
+    StinkyInstruction* hoisted = nthBarrier("s_barrier_signal", 1);
+    EXPECT_EQ(tokensOf(hoisted), (std::vector<int>{1}));
+    EXPECT_EQ(tokensOf(nthBarrier("s_barrier_wait", 1)), (std::vector<int>{1}));
+    EXPECT_EQ(getPos(hoisted), getPos(firstBarrier("s_barrier_wait")) + 1);
+    EXPECT_LT(getPos(filler), getPos(nthBarrier("s_barrier_wait", 1)));
 }
 
-// An instruction between the groups that touches an *unrelated* token (not in
-// either group's set) does not constrain the merged barrier, so the merge still
-// happens when the distance is below threshold.
+// An instruction between the groups that touches an unrelated token does not
+// block the signal hoist.
 TEST_F(MergeBarrierPassTest, UnrelatedTokenBetweenStillMerges) {
     createSignal(0);
     createWait(0);
-    // Producer of token 5 — outside the merged set {0, 1}.
-    createTensorLoadInBlock(bb, arch, /*s0=*/8, /*s1=*/16, /*memTokens=*/{5});
+    StinkyInstruction* load =
+        createTensorLoadInBlock(bb, arch, /*s0=*/8, /*s1=*/16, /*memTokens=*/{5});
     createSignal(1);
     createWait(1);
 
     runPasses(/*mergeThreshold=*/100000);
 
-    EXPECT_EQ(countByMnemonic("s_barrier_signal"), 1);
-    EXPECT_EQ(countByMnemonic("s_barrier_wait"), 1);
+    EXPECT_EQ(countByMnemonic("s_barrier_signal"), 2);
+    EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
     EXPECT_EQ(countByMnemonic("tensor_load_to_lds"), 1);
-    EXPECT_EQ(tokensOf(firstBarrier("s_barrier_signal")), (std::vector<int>{0, 1}));
+    EXPECT_EQ(tokensOf(firstBarrier("s_barrier_signal")), (std::vector<int>{0}));
+    EXPECT_LT(getPos(nthBarrier("s_barrier_signal", 1)), getPos(load));
+    EXPECT_LT(getPos(load), getPos(nthBarrier("s_barrier_wait", 1)));
 }
 
-// Three back-to-back groups collapse into one multi-token group (chained merge).
+// Already-adjacent groups have no gap to hoist across, so a chain stays as
+// three separate pairs.
 TEST_F(MergeBarrierPassTest, ChainedGroupsCollapse) {
     createSignal(0);
     createWait(0);
@@ -371,12 +410,13 @@ TEST_F(MergeBarrierPassTest, ChainedGroupsCollapse) {
     createSignal(2);
     createWait(2);
 
-    runPasses(/*mergeThreshold=*/0);  // default threshold, all adjacent
+    runPasses(/*mergeThreshold=*/0);
 
-    EXPECT_EQ(countByMnemonic("s_barrier_signal"), 1);
-    EXPECT_EQ(countByMnemonic("s_barrier_wait"), 1);
-    EXPECT_EQ(tokensOf(firstBarrier("s_barrier_signal")), (std::vector<int>{0, 1, 2}));
-    EXPECT_EQ(tokensOf(firstBarrier("s_barrier_wait")), (std::vector<int>{0, 1, 2}));
+    EXPECT_EQ(countByMnemonic("s_barrier_signal"), 3);
+    EXPECT_EQ(countByMnemonic("s_barrier_wait"), 3);
+    EXPECT_EQ(tokensOf(nthBarrier("s_barrier_signal", 0)), (std::vector<int>{0}));
+    EXPECT_EQ(tokensOf(nthBarrier("s_barrier_signal", 1)), (std::vector<int>{1}));
+    EXPECT_EQ(tokensOf(nthBarrier("s_barrier_signal", 2)), (std::vector<int>{2}));
 }
 
 // Barrier groups outside any loop body are left untouched — the pass only
@@ -396,9 +436,4 @@ TEST_F(MergeBarrierPassTest, NonLoopBlockUntouched) {
     // Adjacent groups, but not in a loop body → no merge.
     EXPECT_EQ(countByMnemonic("s_barrier_signal"), 2);
     EXPECT_EQ(countByMnemonic("s_barrier_wait"), 2);
-}
-
-// The compile-time default mirrors the documented value.
-TEST(MergeBarrierConstants, KnownDefault) {
-    EXPECT_EQ(kCdna5MergeBarrierThreshold, 11);
 }

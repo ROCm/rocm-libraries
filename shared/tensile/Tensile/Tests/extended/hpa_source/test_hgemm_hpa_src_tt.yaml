@@ -1,3 +1,10 @@
+TestParameters:
+  # Expected failure: clang 24 crashes in the AMDGPU backend while compiling the
+  # generated source kernel ("Cannot select: f32 = Constant<-1>").
+  # Tracked by ROCM-33452. Remove this mark when the compiler is fixed.
+  # xfail_strict is on, so this test fails (XPASS) once the compiler is fixed.
+  marks: [xfail]
+
 GlobalParameters:
   MinimumRequiredVersion: 4.2.0
   NumElementsToValidate: -1

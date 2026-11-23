@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2021 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -68,6 +68,9 @@ namespace rocalution
                               BaseVector<ValueType>*       out) const;
 
         virtual bool MatMatMult(const BaseMatrix<ValueType>& A, const BaseMatrix<ValueType>& B);
+
+        virtual void LUAnalyse(void);
+        virtual void LUAnalyseClear(void);
 
         virtual bool ReplaceColumnVector(int idx, const BaseVector<ValueType>& vec);
         virtual bool ReplaceRowVector(int idx, const BaseVector<ValueType>& vec);

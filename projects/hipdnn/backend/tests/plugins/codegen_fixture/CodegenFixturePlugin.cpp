@@ -78,6 +78,21 @@ void CodegenFixtureEngine::initializeExecutionContext(
     executionContext.setPlan(std::make_unique<CodegenFixturePlan>());
 }
 
+hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT CodegenFixtureEngine::getPrediction(
+    CodegenFixtureHandle& handle,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config,
+    hipdnnEnginePredictionKind_t kind,
+    bool evaluate) const
+{
+    if(kind == HIPDNN_ENGINE_PREDICTION_CONFIGURATION)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "The fixture has no configurations to predict");
+    }
+    return IEngine::getPrediction(handle, opGraph, config, kind, evaluate);
+}
+
 CodegenFixtureContainer::CodegenFixtureContainer()
 {
     _engineManager.addEngine(std::make_unique<CodegenFixtureEngine>());

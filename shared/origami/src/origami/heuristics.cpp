@@ -153,36 +153,7 @@ namespace origami {
 
 void heuristic_params_t::merge_with(const heuristic_params_t& other) {
   // Latency component weights
-  weight_tile_total    = other.weight_tile_total;
-  tail_loop_overhead   = other.tail_loop_overhead;
-  tile_fixed_overhead  = other.tile_fixed_overhead;
-
-  // Empirical constants
-  main_memory_load_latency            = other.main_memory_load_latency;
-  occupancy_decay_base                = other.occupancy_decay_base;
-  mall_depth_sq                       = other.mall_depth_sq;
-  mall_cold_floor                     = other.mall_cold_floor;
-  l2_depth_sq                         = other.l2_depth_sq;
-  l2_cold_floor                       = other.l2_cold_floor;
-  l2_pollution_penalty                = other.l2_pollution_penalty;
-  l2_amp_ceiling_batched              = other.l2_amp_ceiling_batched;
-  l2_amp_ceiling_k_split              = other.l2_amp_ceiling_k_split;
-  l2_amp_ceiling_skinny               = other.l2_amp_ceiling_skinny;
-  l2_depth_penalty                    = other.l2_depth_penalty;
-  l1_hit_rate_ceiling_skinny          = other.l1_hit_rate_ceiling_skinny;
-  epilogue_acc_read_parallelism       = other.epilogue_acc_read_parallelism;
-  epilogue_cycles_per_bounds_check    = other.epilogue_cycles_per_bounds_check;
-  epilogue_scalar_store_penalty       = other.epilogue_scalar_store_penalty;
-  epilogue_bytes_per_vectorized_store = other.epilogue_bytes_per_vectorized_store;
-  epilogue_cache_line_bytes           = other.epilogue_cache_line_bytes;
-  epilogue_workspace_bytes_per_elem   = other.epilogue_workspace_bytes_per_elem;
-  epilogue_salu_overhead              = other.epilogue_salu_overhead;
-  epilogue_l_barrier                  = other.epilogue_l_barrier;
-  epilogue_l_smem                     = other.epilogue_l_smem;
-  postgsu_compute_bytes               = other.postgsu_compute_bytes;
-  postgsu_kernel_launch_overhead      = other.postgsu_kernel_launch_overhead;
-  postgsu_threads_per_wg              = other.postgsu_threads_per_wg;
-  postgsu_wavefront_size              = other.postgsu_wavefront_size;
+  weight_tile_total = other.weight_tile_total;
 
   // Main loop efficiency
   main_loop_efficiency = other.main_loop_efficiency;
@@ -411,44 +382,8 @@ bool heuristics_database_t::has_hand_optimized_entry(hardware_t::architecture_t 
 }
 
 void heuristics_database_t::initialize_defaults() {
-  // ========================================================================
-  // HEURISTIC 1: Problematic tile configuration (MT64x32x32)
-  // ========================================================================
-  {
-    auto key    = make_tile_key(64, 32, 32, transpose_t::N, transpose_t::N);
-    key.a_dtype = data_type_t::BFloat16;
-    key.b_dtype = data_type_t::BFloat16;
-
-    heuristic_params_t params;
-    params.weight_tile_total = 10.0;
-
-    add_entry(key, params);
-  }
-
-  // ========================================================================
-  // HEURISTIC 2: CMS Kernel Efficiencies
-  // ========================================================================
+  // CMS kernel efficiencies
   register_cms_kernels(*this);
-
-  // ========================================================================
-  // HEURISTIC 3: Reject gfx950 BF16 TN subtile kernels for small K
-  // ========================================================================
-  // Subtile kernels are not competitive when the reduction dimension is small
-  // (K < 512). Scoped to gfx950 BF16 TN (a_transpose=T, b_transpose=N).
-  {
-    heuristic_params_t reject_params;
-    reject_params.reject = true;
-
-    // K < 512
-    heuristic_key_t key;
-    key.arch        = hardware_t::architecture_t::gfx950;
-    key.mi_dtype    = data_type_t::BFloat16;
-    key.a_transpose = transpose_t::T;
-    key.b_transpose = transpose_t::N;
-    key.subtile     = true;
-    key.max_k       = 511;
-    add_entry(key, reject_params);
-  }
 }
 
 // ============================================================================

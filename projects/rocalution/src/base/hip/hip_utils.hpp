@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -64,6 +64,17 @@
             LOG_INFO("File: " << file << "; line: " << line);    \
             exit(1);                                             \
         }                                                        \
+    }
+
+#define CHECK_HIP_STATUS(stat_t)                                      \
+    {                                                                 \
+        hipError_t err_t = (stat_t);                                  \
+        if(err_t != hipSuccess)                                       \
+        {                                                             \
+            LOG_INFO("HIP error: " << hipGetErrorString(err_t));      \
+            LOG_INFO("File: " << __FILE__ << "; line: " << __LINE__); \
+            exit(1);                                                  \
+        }                                                             \
     }
 
 #define CHECK_ROCBLAS_ERROR(stat_t, file, line)               \

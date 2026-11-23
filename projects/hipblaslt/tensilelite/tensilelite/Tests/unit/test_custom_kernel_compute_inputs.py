@@ -10,10 +10,10 @@ FP6 kernel has no per-operand types and must keep DataType for both inputs.
 
 import pytest
 
-from Tensile.Common.DataType import DataType
-from Tensile.Contractions import ProblemType as ContractionProblemType
-from Tensile.CustomKernels import readCustomKernelConfig
-from Tensile.SolutionStructs.Problem import ProblemType as SolutionProblemType
+from tensilelite.Common.DataType import DataType
+from tensilelite.Contractions import ProblemType as ContractionProblemType
+from tensilelite.CustomKernels import readCustomKernelConfig
+from tensilelite.SolutionStructs.Problem import ProblemType as SolutionProblemType
 
 pytestmark = pytest.mark.unit
 

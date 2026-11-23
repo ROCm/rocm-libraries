@@ -229,6 +229,8 @@ TEST(PciChipIdTest, HardwareSelectionWithPciChipId)
 
     // Create a simple problem
     auto problem = ContractionProblemGemm::GEMM(false, false, 1024, 1024, 1024, 1024, 1024, 1024, 1.0, false, 1);
+    // Placeholder solutions test chip-ID routing without USO launch validation.
+    problem.setParams().setUniformSummationOrder(0);
 
     // Find best solution - should match device-specific
     auto solution = lib.findBestSolution(problem, *hardware);

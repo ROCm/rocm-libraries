@@ -10,11 +10,11 @@
 #include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <unordered_map>
 
 #include "MatmulGraphTestUtils.hpp"
 
+#include "harness/CpuReferenceGraphExecutorAdapter.hpp"
 #include "harness/gpu-graph-executor/detail/GpuMatmulPlan.hpp"
 #include "harness/gpu-graph-executor/detail/GpuMatmulSignatureKey.hpp"
 #include "harness/gpu-graph-executor/detail/GpuPlanBuilderRegistry.hpp"
@@ -522,7 +522,7 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& aDims,
     cpuVariantPack[B_UID] = bTensor.rawHostData();
     cpuVariantPack[C_UID] = cpuC.rawHostData();
 
-    CpuReferenceGraphExecutor cpuExecutor;
+    hipdnn_integration_tests::CpuReferenceGraphExecutorAdapter cpuExecutor;
     cpuExecutor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), cpuVariantPack);
     cpuC.markHostModified();
 

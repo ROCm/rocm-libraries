@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -136,8 +136,7 @@ namespace rocalution
 
         this->Clear();
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         this->mat_.num_diag = num_diag;
         this->nrow_         = nrow;
@@ -167,8 +166,7 @@ namespace rocalution
             assert(this->nnz_ == this->nrow_ * this->mat_.num_diag);
         }
 
-        DISCARD_HIP_ERROR(hipDeviceSynchronize());
-        CHECK_HIP_ERROR(__FILE__, __LINE__);
+        CHECK_HIP_STATUS(hipDeviceSynchronize());
 
         *offset = this->mat_.offset;
         *val    = this->mat_.val;
@@ -510,12 +508,12 @@ namespace rocalution
             assert(this->nrow_ == hip_cast_mat->nrow_);
             assert(this->ncol_ == hip_cast_mat->ncol_);
 
-            copy_d2h(this->mat_.num_diag,
+            copy_d2d(this->mat_.num_diag,
                      this->mat_.offset,
                      hip_cast_mat->mat_.offset,
                      true,
                      HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
-            copy_d2h(this->nnz_,
+            copy_d2d(this->nnz_,
                      this->mat_.val,
                      hip_cast_mat->mat_.val,
                      true,

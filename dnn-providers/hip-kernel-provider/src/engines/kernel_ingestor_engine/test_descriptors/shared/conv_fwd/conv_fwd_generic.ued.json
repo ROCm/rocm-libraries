@@ -5,7 +5,9 @@
   "graph_match": {
     "native": "hipkernel.conv_fwd.graph_match"
   },
-  "heuristic": "e8066dca-b56e-4dfa-8755-a1e1bcadf09f",
+  "sort_kernel_catalog": {
+    "default": "e8066dca-b56e-4dfa-8755-a1e1bcadf09f"
+  },
   "metadata": "a7745b41-dcd5-4b4f-89ca-a98f608dba38",
   "knobs": [
     "block_size"

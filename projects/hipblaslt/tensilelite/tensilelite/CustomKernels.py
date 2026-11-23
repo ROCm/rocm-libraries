@@ -32,6 +32,13 @@ import yaml
 
 import os
 
+# rocRoller kernels embed their full kernel graph in .amdgpu_metadata, which the
+# pure-Python SafeLoader takes over a second per kernel to parse.
+try:
+    from yaml import CSafeLoader as SafeLoader
+except ImportError:
+    from yaml import SafeLoader
+
 # ---------------------------------------------------------------------------
 # Mapping from amdgpu_metadata arg .name -> CustomArgSemantic string
 # ---------------------------------------------------------------------------
@@ -57,6 +64,8 @@ _METADATA_NAME_TO_SEMANTIC = {
     "ComputeUnits":           "ComputeUnits",
     "AddressScaleA":          "AddressScaleA",
     "AddressScaleB":          "AddressScaleB",
+    "AddressScaleZeroA":      "AddressScaleZeroA",
+    "groupSize":              "ScaleBlockSizeA",
     "AddressScaleC":          "AddressScaleC",
     "AddressScaleD":          "AddressScaleD",
     "AddressMXScaleA":        "AddressMXScaleA",
@@ -86,10 +95,12 @@ _METADATA_NAME_TO_SEMANTIC = {
     "SKItersPerWG":           "SKItersPerWG",
     "skGrid":                 "SKGrid",
     "skTiles":                "SKTilesAndSplit",
+    "ESMRuntimeSupported":    "ESMRuntimeSupported",
     "batchOffsetD":           "BatchOffsetD",
     "batchOffsetC":           "BatchOffsetC",
     "batchOffsetA":           "BatchOffsetA",
     "batchOffsetB":           "BatchOffsetB",
+    "RNDSeed":                "RNDSeed",
 }
 
 _ACTIVATION_ARG_INDEX = {
@@ -102,14 +113,16 @@ _ACTIVATION_ARG_INDEX = {
 # Top-level custom.config keys that are not in validParameters but must survive
 # the parameter-validation/strip pass in getCustomKernelConfig.
 #
-# These two are consumed structurally by Tensile (ProblemType drives the
+# These two are consumed structurally by TensileLite (ProblemType drives the
 # solution; InternalSupportParams threads through to the kernel writer) and
 # would otherwise be popped because they're not tunable parameters.
 #
-# Provenance-only keys (Source, Version, Features) are deliberately NOT in this
-# set: getCustomKernelConfig drops them so they don't pollute the solution
-# dict, while validateCustomKernelMetadata still sees them via its independent
-# readCustomKernelConfig call.
+# Source, Version and Features are deliberately NOT in this set:
+# getCustomKernelConfig drops them so they don't pollute the solution dict, while
+# validateCustomKernelMetadata (its own readCustomKernelConfig call) and LibraryIO
+# (the raw config it passes to getCustomKernelConfig) still see them. Features SupportsBias, SupportsActivation and
+# SupportsScaleAlpha set to false make LibraryIO restrict that solution's
+# ProblemType so it rejects bias, activation and scale-alpha-vector problems.
 _PASSTHROUGH_KEYS = {"ProblemType", "InternalSupportParams", "KernelLanguage", "CustomKernelName"}
 
 def isCustomKernelConfig(config):
@@ -198,37 +211,99 @@ def getCustomKernelSource(name, rocmVersion, directory=None):
         if "amdhsa_user_sgpr_kernarg_preload" not in line
     )
 
-def _readEmbeddedYaml(name, directory=None):
-    """Parse the YAML payload between '---' and '...' inside .amdgpu_metadata.
+_CUSTOM_CONFIG_KEY = re.compile(r"custom\.config:(\s|$)")
 
-    The .s files emitted under this branch contain exactly one such block;
-    we stop at the first '...' and return whatever yaml.safe_load returns
-    (typically a mapping with 'custom.config' and 'amdhsa.kernels' keys).
-    """
-    contents = getCustomKernelContents(name, directory)
+def _embeddedYamlLines(contents):
+    """Lines between '---' and the first '...' of the .amdgpu_metadata block."""
     inYaml = False
-    yamlLines = []
     for line in contents.splitlines():
         if line == "---":
             inYaml = True
             continue
         if line == "..." and inYaml:
-            break
+            return
         if inYaml:
-            yamlLines.append(line)
+            yield line
+
+def _customConfigYaml(contents):
+    """Text of the top-level custom.config entry, or None if it is not found.
+
+    The entry runs until the next line that starts in column 0 with something
+    other than a comment.
+
+    The scan continues to the end of the block, and a second column-0
+    "custom.config:" line makes the result None. PyYAML keeps the last of two
+    duplicate keys, and the same line can sit inside a multi-line quoted scalar
+    of an earlier key, so the first match is not safe to slice on its own; the
+    whole block decides instead.
+
+    The text ends with a newline so that a block scalar ending the entry keeps
+    its final newline, as it does in a whole-block parse.
+    """
+    section = None
+    inEntry = False
+    for line in _embeddedYamlLines(contents):
+        if _CUSTOM_CONFIG_KEY.match(line):
+            if section is not None:
+                return None
+            section = [line]
+            inEntry = True
+        elif inEntry:
+            if line and line[0] not in " \t#":
+                inEntry = False
+            else:
+                section.append(line)
+    return None if section is None else "\n".join(section) + "\n"
+
+def _readEmbeddedYaml(name, directory=None, customConfigOnly=False):
+    """Parse the YAML payload between '---' and '...' inside .amdgpu_metadata.
+
+    The .s files emitted under this branch contain exactly one such block;
+    we stop at the first '...' and return whatever the safe loader returns
+    (typically a mapping with 'custom.config' and 'amdhsa.kernels' keys).
+
+    customConfigOnly parses just the custom.config entry, a few KB inside a
+    block that can be 1 MB (rocRoller's serialized kernel graph). The rest of
+    the block is not parsed, so errors in it go unnoticed. The whole block is
+    parsed when custom.config is not found in its usual form, appears more than
+    once, or the slice does not parse.
+    """
+    contents = getCustomKernelContents(name, directory)
+    if customConfigOnly:
+        text = _customConfigYaml(contents)
+        if text is not None:
+            try:
+                return yaml.load(text, Loader=SafeLoader)
+            except yaml.YAMLError:
+                # The slice can cut valid YAML: a flow collection closed in
+                # column 0, or an alias to an anchor defined outside the entry.
+                # The whole block parses those, and reports a real error in
+                # custom.config.
+                pass
     try:
-        return yaml.safe_load("\n".join(yamlLines))
+        # The final newline keeps the last block scalar's own newline, which
+        # the slice above keeps as well.
+        return yaml.load("\n".join(_embeddedYamlLines(contents)) + "\n", Loader=SafeLoader)
     except yaml.YAMLError as e:
         raise RuntimeError(f"Failed to parse YAML for custom kernel '{name}': {e}") from e
 
 def readCustomKernelConfig(name, directory=None):
-    parsed = _readEmbeddedYaml(name, directory)
+    parsed = _readEmbeddedYaml(name, directory, customConfigOnly=True)
     if not isinstance(parsed, dict) or "custom.config" not in parsed:
         raise RuntimeError(f"Custom kernel '{name}' has no custom.config in its .amdgpu_metadata")
     config = parsed["custom.config"]
     if not isinstance(config, dict):
         raise RuntimeError(f"Custom kernel '{name}' custom.config must be a YAML mapping")
     return config
+
+def magicSizeSemantic(base, magicDivAlg):
+    """Return the algorithm-specific semantic for a packed-dimension magic divisor."""
+    if magicDivAlg not in (1, 2):
+        raise RuntimeError(
+            f"Unsupported MagicDivAlg {magicDivAlg!r} for packed-dimension "
+            f"{base}: expected 1 or 2")
+    return "%sAlg%d" % (base, magicDivAlg)
+
 
 def _metadataArgToCustomArg(metaArg, kernelName=None):
     """Convert a single amdgpu_metadata .args entry to a CustomKernel arg dict.
@@ -292,7 +367,7 @@ def _metadataArgToCustomArg(metaArg, kernelName=None):
     if m:
         return {"type": argType, "semantic": "StrideE%s" % m.group(1)}
 
-    m = re.match(r"(MagicNumberSize|MagicShiftSize)(\w)", name)
+    m = re.match(r"((?:MagicNumberSize|MagicShiftSize)Alg[12])(\w)$", name)
     if m:
         from .Common.Constants import INDEX_CHARS
         idx = INDEX_CHARS.index(m.group(2))
@@ -310,7 +385,7 @@ def _metadataArgToCustomArg(metaArg, kernelName=None):
         f"Unknown amdgpu_metadata arg name '{name}'{where} while auto-inferring "
         f"a CustomKernel block. Either add an explicit CustomKernel: section "
         f"to custom.config, or extend _METADATA_NAME_TO_SEMANTIC in "
-        f"Tensile/CustomKernels.py."
+        f"tensilelite/CustomKernels.py."
     )
 
 _HEADER_SEMANTIC_ORDER = {
@@ -318,25 +393,47 @@ _HEADER_SEMANTIC_ORDER = {
 }
 
 def validateCustomPersistentArgs(kernelConfig):
-    """Require an argument descriptor for DataParallel argument layout version 1."""
+    """Validate the scheduling payload of a versioned persistent descriptor."""
     version = kernelConfig.get("InternalSupportParams", {}).get("PersistentLoopArgsVersion", 0)
-    if type(version) is not int or version not in (0, 1):
+    if type(version) is not int or version not in (0, 1, 2):
         raise ValueError("Unsupported PersistentLoopArgsVersion")
     outer_version = kernelConfig.get("InternalSupportParams", {}).get("KernArgsVersion", 3)
     if type(outer_version) is not int or outer_version not in (0, 1, 2, 3):
         raise ValueError("Unsupported KernArgsVersion")
-    if version == 1 and outer_version != 3:
-        raise ValueError("PersistentLoopArgsVersion=1 requires KernArgsVersion=3")
+    if version in (1, 2) and outer_version != 3:
+        raise ValueError(f"PersistentLoopArgsVersion={version} requires KernArgsVersion=3")
     descriptor = kernelConfig.get("CustomKernel")
     if not isinstance(descriptor, dict) or not descriptor.get("name"):
-        if version == 1 and kernelConfig.get("CustomKernelName"):
-            raise ValueError("DataParallel argument layout version 1 requires a custom-kernel argument descriptor")
+        if version in (1, 2) and kernelConfig.get("CustomKernelName"):
+            raise ValueError(f"Persistent argument layout version {version} requires a custom-kernel argument descriptor")
         return
     args = descriptor.get("args", [])
     persistentGridArgIndices = [i for i, arg in enumerate(args) if arg.get("semantic") == "PersistentGrid"]
     if version == 0:
         if persistentGridArgIndices:
             raise ValueError("PersistentGrid requires PersistentLoopArgsVersion=1")
+        return
+    if version == 2:
+        expected = ["ItersPerTile", "MagicNumberItersPerTile", "MagicShiftItersPerTile",
+                    "SKItersPerWG", "SKGrid", "SKTilesAndSplit"]
+        forbidden = {"PersistentGrid", "TotalIters", "AddressSynchronizer", "Synchronizer", "GSUSync"}
+        scheduling = [(i, arg) for i, arg in enumerate(args)
+                      if arg.get("semantic") in set(expected) | forbidden]
+        if ([arg.get("semantic") for _, arg in scheduling] != expected
+                or any(arg.get("type") != "uint32" or arg.get("padding", 0)
+                       for _, arg in scheduling)
+                or any(right[0] != left[0] + 1
+                       for left, right in zip(scheduling, scheduling[1:]))):
+            raise ValueError("StreamK version-2 scheduling arguments must be six adjacent uint32 values")
+        for semantic in ("AddressWorkspace", "AddressFlags"):
+            pointers = [arg for arg in args if arg.get("semantic") == semantic]
+            if (len(pointers) != 1 or pointers[0].get("type") != "address"
+                    or pointers[0].get("padding", 0)):
+                raise ValueError(f"StreamK version-2 requires one {semantic} pointer")
+        # An omitted workspace declaration is derived from the authoritative
+        # problem compute type by Solution._assignCustomKernelParameters.
+        if descriptor.get("workspaceType", "None") not in ("None", "StreamKWithReduction"):
+            raise ValueError("StreamK version-2 requires tree partial workspace")
         return
     legacy = {"MagicNumberItersPerTile", "MagicShiftItersPerTile", "TotalIters",
               "SKItersPerWG", "SKGrid", "SKTilesAndSplit", "AddressWorkspace", "AddressFlags",
@@ -386,7 +483,13 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
             f"section to custom.config."
         )
 
-    args = [_metadataArgToCustomArg(a, kernelName) for a in kernelMeta[".args"]]
+    metadataArgs = kernelMeta[".args"]
+    args = [_metadataArgToCustomArg(a, kernelName) for a in metadataArgs]
+    if args and args[-1]["semantic"] == "ScaleBlockSizeA":
+        last = metadataArgs[-1]
+        padding = kernelMeta[".kernarg_segment_size"] - last[".offset"] - last[".size"]
+        if padding:
+            args[-1]["padding"] = padding
 
     # UseUniversalArgs kernels expect a header (GemmInfo, InternalArgs, ...) at
     # the start of the kernel argument buffer, followed by the data args.  The
@@ -421,7 +524,7 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
 
     # DataParallel assigns whole tiles to persistent workgroups. Ordinary GEMM
     # uses strategy None and reaches the tile-grid branches below.
-    if isPersistentDataParallel(kernelConfig) or isp.get("PersistentLoopArgsVersion", 0) == 1:
+    if isPersistentDataParallel(kernelConfig) or isp.get("PersistentLoopArgsVersion", 0) in (1, 2):
         grid = ["PersistentGrid", "One", "One"]
     elif isPersistent(kernelConfig):
         # sk.grid already counts every batch's tiles, so the launch must not
@@ -458,7 +561,7 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
     }
 
 def getCustomKernelConfig(
-    kernelName: str, internalSupportParams: dict, directory: str = None
+    kernelName: str, internalSupportParams: dict, directory: str = None, kernelConfig: dict = None
 ) -> dict:
     """
     Retrieves and validates the configuration for a custom kernel.
@@ -468,6 +571,8 @@ def getCustomKernelConfig(
         internalSupportParams: A dictionary of internal support parameters to be merged with the kernel configuration.
         directory: Optional directory where custom kernel files are located.
             Defaults to bundled package resources.
+        kernelConfig: The custom.config already read with readCustomKernelConfig; it is modified in place.
+            Read from the kernel when None.
 
     Returns:
         dict: The validated configuration dictionary for the custom kernel.
@@ -475,12 +580,24 @@ def getCustomKernelConfig(
     Raises:
         RuntimeError: If the custom kernel configuration is missing required fields or if there is an error reading the configuration.
     """
-    kernelConfig = readCustomKernelConfig(kernelName, directory)
+    if kernelConfig is None:
+        kernelConfig = readCustomKernelConfig(kernelName, directory)
     if "InternalSupportParams" not in kernelConfig:
         raise RuntimeError(f"Custom kernel {kernelName} config must have 'InternalSupportParams'")
 
     if "KernArgsVersion" not in kernelConfig["InternalSupportParams"]:
         raise RuntimeError(f"Custom kernel {kernelName} config must have 'KernArgsVersion'")
+
+    # A handwritten kernel skips the derivation that resolves "Auto", and the
+    # runtime picks which scale modes it serves from this field.
+    problemType = kernelConfig.get("ProblemType", {})
+    if (problemType.get("MXBlockA", 0) or problemType.get("MXBlockB", 0)) and kernelConfig.get(
+            "MXScaleFormat") not in ("NoSwizzle", "HostPreSwizzle", "InMemorySwizzle",
+                                     "HostPreSwizzle128x4"):
+        raise RuntimeError(
+            f"Custom kernel {kernelName} has MX scales, so its config must set 'MXScaleFormat' to "
+            "the scale layout it reads: NoSwizzle, HostPreSwizzle, InMemorySwizzle or "
+            "HostPreSwizzle128x4")
 
     kernelIsp = kernelConfig["InternalSupportParams"]
     # Missing metadata describes a prebuilt legacy payload, even when the
@@ -523,6 +640,9 @@ def getCustomKernelConfig(
     kernelConfig["KernelLanguage"] = "Assembly"
 
     if "CustomKernel" not in kernelConfig:
+        # Only a kernel without an explicit CustomKernel block needs
+        # amdhsa.kernels; the rocRoller kernels embed about 1 MB of it, so it is
+        # parsed here and not for every kernel.
         fullYaml = _readEmbeddedYaml(kernelName, directory)
         kernelConfig["CustomKernel"] = _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig)
 
@@ -542,13 +662,13 @@ def getCustomKernelConfig(
 ################################################################################
 
 _EXTERNAL_HINT = (
-    "External kernels carry their full Tensile-side interface in custom.config. "
-    "To inject one from a Tensile test YAML, run:\n"
-    "  python -m Tensile.AddCustomConfig <file.s> --yaml <test.yaml>\n"
+    "External kernels carry their full TensileLite-side interface in custom.config. "
+    "To inject one from a TensileLite test YAML, run:\n"
+    "  python -m tensilelite.AddCustomConfig <file.s> --yaml <test.yaml>\n"
 )
 
 _TENSILE_HINT = (
-    "Tensile-generated kernels only need InternalSupportParams.KernArgsVersion in "
+    "TensileLite-generated kernels only need InternalSupportParams.KernArgsVersion in "
     "custom.config; ProblemType and tuning state come from the consuming logic file "
     "or test YAML. If the field is missing, regenerate the kernel with the current "
     "kernel writer."
@@ -569,13 +689,13 @@ def _missingMetadataMessage(kind, name, filepath, missing):
 def validateCustomKernelMetadata(name, directory=None):
     """Validates that a kernel has an embedded custom.config with required fields.
 
-    Tensile-generated kernels (no Source.Origin) only need
+    TensileLite-generated kernels (no Source.Origin) only need
     InternalSupportParams.KernArgsVersion -- the only field
     `getCustomKernelConfig` actually requires at runtime. Their ProblemType and
     tuning state live in the consuming logic file or test YAML and are merged
     on top of custom.config there.
 
-    External kernels (Source.Origin present) carry their full Tensile-side
+    External kernels (Source.Origin present) carry their full TensileLite-side
     interface and provenance in custom.config: Source, Features, Version,
     InternalSupportParams.KernArgsVersion, ProblemType, MatrixInstruction, and
     a CustomKernel block with args/macrotile/threads/grid.
@@ -627,9 +747,11 @@ def validateCustomKernelMetadata(name, directory=None):
         else:
             ck_missing = _requiredFieldsMissing(custom_kernel, ["args", "macrotile", "threads", "grid"])
             missing.extend(f"CustomKernel.{field}" for field in ck_missing)
+            if not isinstance(custom_kernel.get("uniformSummationOrder", False), bool):
+                missing.append("CustomKernel.uniformSummationOrder (true or false)")
 
     if missing:
-        kind = "External" if is_external else "Tensile"
+        kind = "External" if is_external else "TensileLite"
         return False, _missingMetadataMessage(kind, name, filepath, missing)
 
     return True, f"Kernel '{name}' metadata is valid"

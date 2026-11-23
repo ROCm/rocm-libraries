@@ -9,7 +9,7 @@
   "matchers": [
     "umd-pointwise"
   ],
-  "engine": "ued-pointwise",
+  "engine": "841676cc-ade9-57e6-8401-129f1bc6915e",
   "dispatch": "udd-pointwise",
   "kernelDescriptors": [
     {
@@ -37,8 +37,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "ued-pointwise",
-              "kmd_id": "kmd-pointwise",
+              "engine_id": "841676cc-ade9-57e6-8401-129f1bc6915e",
+              "kmd_id": "1c2360d5-bee5-5f75-a6df-31569e136d4d",
               "metadata_fields": [],
               "matcher_only_fields": [
                 "block_size",
@@ -76,8 +76,8 @@
           "schema_version": 1,
           "consumers": [
             {
-              "engine_id": "ued-pointwise",
-              "kmd_id": "kmd-pointwise",
+              "engine_id": "841676cc-ade9-57e6-8401-129f1bc6915e",
+              "kmd_id": "1c2360d5-bee5-5f75-a6df-31569e136d4d",
               "metadata_fields": [],
               "matcher_only_fields": [
                 "block_size",

@@ -12,8 +12,8 @@ Sparse metadata is out of scope; LdsPadMetadata keeps its own narrow list.
 
 import pytest
 
-from Tensile.Common.ValidParameters import checkParametersAreValid, validParametersForArch
-from Tensile.SolutionStructs.LdsPadding import (
+from tensilelite.Common.ValidParameters import checkParametersAreValid, validParametersForArch
+from tensilelite.SolutionStructs.LdsPadding import (
     get_fp4_mt_config,
     get_fp8_mt_config,
     get_fp16_mt_config,
@@ -55,9 +55,9 @@ def _solverOutputs(mt, miWaveTile, miWaveGroup, usesTDM):
         if miWaveTile % vw:
             continue
         yield "LdsPadA", get_fp32_mt_config(
-            mt, "pad", vw, 2, miWaveGroup, 2, miWaveTile, _K_B32, usesTDM)
+            mt, "pad", vw, 2, miWaveGroup, 2, miWaveTile, _K_B32, usesTDM, lrvwTile=1)
         yield "LdsBlockSizePerPadA", get_fp32_mt_config(
-            mt, "perBlock", vw, 2, miWaveGroup, 2, miWaveTile, _K_B32, usesTDM)
+            mt, "perBlock", vw, 2, miWaveGroup, 2, miWaveTile, _K_B32, usesTDM, lrvwTile=1)
 
 
 

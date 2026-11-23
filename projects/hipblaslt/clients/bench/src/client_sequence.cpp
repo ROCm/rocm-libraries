@@ -381,6 +381,8 @@ int main(int argc, char** argv)
         hipblaslt_cerr << "Usage: " << argv[0] << " yaml-config.yaml" << std::endl;
         exit(1);
     }
+    if(!hipblaslt_timing_allowed_with_adaptive_sm_count())
+        exit(1);
     auto              inputFile = llvm::MemoryBuffer::getFile(argv[1]);
     LayerConfigIO     rv;
     llvm::yaml::Input yin((*inputFile)->getMemBufferRef());

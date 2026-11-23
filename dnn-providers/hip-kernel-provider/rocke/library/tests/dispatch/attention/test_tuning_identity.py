@@ -184,16 +184,24 @@ class TestCanonicalKnobs(unittest.TestCase):
 
 class TestProblemIndependentIdentity(unittest.TestCase):
     def test_same_knobs_same_config_key_on_other_problems(self):
+        """The config id never depends on the problem. The compiled-kernel identity
+        does exactly when the kernel bakes the shape: the gfx950 dense persistent
+        body reads it at runtime, so both problems share one kernel, while the
+        unified tiled kernel bakes it and splits."""
         shapes = (_req(), _req(batch=4, seqlen_q=4096, seqlen_k=4096, nhead_q=64))
-        for spec_id, knobs in (
-            (_DENSE, {"pv_priority": 2}),
-            (_UNIFIED, {"use_register_pv": True}),
+        for spec_id, knobs, one_kernel in (
+            (_DENSE, {"pv_priority": 2}, True),
+            (_UNIFIED, {"use_register_pv": True}, False),
         ):
             with self.subTest(spec_id=spec_id):
                 a, b = (tuning_spec_with_knobs(r, spec_id, knobs) for r in shapes)
                 self.assertEqual(a.config_key, b.config_key)
                 self.assertEqual(a.tuning_id, b.tuning_id)
-                self.assertNotEqual(spec_identity(a), spec_identity(b))
+                if one_kernel:
+                    self.assertTrue(a.kernel_spec.runtime_shape)
+                    self.assertEqual(spec_identity(a), spec_identity(b))
+                else:
+                    self.assertNotEqual(spec_identity(a), spec_identity(b))
 
     def test_identity_ignores_wrapper_metadata(self):
         spec = attention_tuning_spec(_req(), _UNIFIED)

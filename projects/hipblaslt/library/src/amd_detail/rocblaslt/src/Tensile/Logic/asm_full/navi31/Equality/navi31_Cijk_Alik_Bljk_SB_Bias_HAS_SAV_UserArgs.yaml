@@ -313,7 +313,7 @@ Solutions:
   MacroTile1: 8
   MacroTileA: 8
   MacroTileB: 8
-  MaxOccupancy: 40
+  MaxOccupancy: 64
   NoLdsWriteCode: false
   NoTailLoop: false
   NumElementsPerThread: 1
@@ -427,7 +427,7 @@ Solutions:
   MacroTile1: 16
   MacroTileA: 16
   MacroTileB: 16
-  MaxOccupancy: 40
+  MaxOccupancy: 64
   NoLdsWriteCode: false
   NoTailLoop: false
   NumElementsPerThread: 4
@@ -541,7 +541,7 @@ Solutions:
   MacroTile1: 8
   MacroTileA: 8
   MacroTileB: 8
-  MaxOccupancy: 40
+  MaxOccupancy: 64
   NoLdsWriteCode: false
   NoTailLoop: false
   NumElementsPerThread: 1
@@ -1364,7 +1364,7 @@ Solutions:
   MacroTileB: 128
   MathClocksUnrolledLoop: 0
   MaxLDS: 65536
-  MaxOccupancy: 40
+  MaxOccupancy: 3
   MbskPrefetchMethod: 0
   MfmaInitCVgprs: false
   MinGRIncPerMfma: 1

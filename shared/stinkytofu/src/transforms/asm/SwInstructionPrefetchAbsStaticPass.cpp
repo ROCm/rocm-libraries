@@ -57,6 +57,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/SwPrefetchRelCommon.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterBudget.hpp"
 
 namespace stinkytofu {
 
@@ -134,6 +135,10 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
         m_baseSgpr = baseSgpr;
     }
 
+    void setAfterSgprCompact(bool on) {
+        m_afterSgprCompact = on;
+    }
+
     int getBaseSgpr() const {
         return m_baseSgpr;
     }
@@ -201,8 +206,19 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
             return PreservedAnalyses::all();
         }
 
-        // Gate 2: base SGPR pair must be reserved.
-        if (m_baseSgpr < 0) {
+        // Gate 2: a base SGPR pair must be available. Compact rewrites the
+        // producer's numbering, so the Tensile-reserved triple may now hold other
+        // values; this burst sits at kernel entry, so it takes a block from inside
+        // the final numbering instead. Kept in a local: the reservation Tensile
+        // passed in stays the pass's configuration.
+        int baseSgpr = m_baseSgpr;
+        if (m_afterSgprCompact && baseSgpr >= 0) {
+            baseSgpr = static_cast<int>(absPrefetchEntrySgprBase(func));
+            if (m_debug)
+                *m_debugStream << "[" << getName() << "] baseSgpr " << m_baseSgpr << " -> "
+                               << baseSgpr << " (entry block after compact)\n";
+        }
+        if (baseSgpr < 0) {
             if (m_debug)
                 *m_debugStream << "[" << getName()
                                << "] no-op: baseSgpr not configured (pass -1)\n";
@@ -217,13 +233,13 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
 
         // Count N (fixed point). The burst we insert at entry-begin grows the kernel by
         //   I = kBurstFixedBytes (s_getpc_b64=4 + s_add_i32(+label literal)=8 + s_add_u32=4
-        //                         + s_addc_u32=4 = 20, plus the optional XNACK s_wait_xcnt 0 = 4)
+        //                         + s_addc_u32=4 = 20)
         //     + N * kPrefetchInstBytes (each s_prefetch_inst)
         // bytes, shifting the whole body down by I. That can push one extra 4 KiB grid step past
         // the (now larger) tail, so N must be solved against the POST-insertion total. Because
         // I (<= ~hundreds of bytes) is far smaller than the 4 KiB grid step, two iterations
-        // converge. When the XNACK wait is off, this reverts to 20 (byte-identical to before).
-        constexpr int64_t kBurstFixedBytes = 20 + kSwPrefetchXnackWaitBytes;
+        // converge.
+        constexpr int64_t kBurstFixedBytes = 20;
         constexpr int64_t kPrefetchInstBytes = 8;
         const int64_t P0 = kSwPrefetchFirstGlobalByte;
         auto countN = [](int64_t total) {
@@ -264,7 +280,7 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
 
         if (m_debug) {
             *m_debugStream << "[" << getName() << "] Phase 2 abs-static insert: totalLayoutBytes="
-                           << phase1.totalLayoutBytes << " baseSgpr=" << m_baseSgpr
+                           << phase1.totalLayoutBytes << " baseSgpr=" << baseSgpr
                            << " N_prefetches=" << N << "\n";
         }
 
@@ -290,14 +306,14 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
         // the final order is: [prologue] siteLabel, getpc, add*, pf_0..pf_{N-1}, [original body].
         {
             AsmIRBuilder builder(*burstBB, archId);
-            const uint32_t baseLo = static_cast<uint32_t>(m_baseSgpr);
-            const uint32_t baseHi = static_cast<uint32_t>(m_baseSgpr + 1);
+            const uint32_t baseLo = static_cast<uint32_t>(baseSgpr);
+            const uint32_t baseHi = static_cast<uint32_t>(baseSgpr + 1);
             // Scratch SGPR (base+2): holds the PC-relative offset for the address computation
             // (rocisa long-branch idiom). Dead after s_add_u32. klength uses the simm5 immediate
             // (0x1f), so no separate length register is needed.
             // To drop this scratch entirely (2 SGPRs total) switch the two adds to the
             // @rel32@lo+4 / @rel32@hi+12 relocation form (offset encoded in the instruction).
-            const uint32_t tmp = static_cast<uint32_t>(m_baseSgpr + 2);
+            const uint32_t tmp = static_cast<uint32_t>(baseSgpr + 2);
 
             // label_Do_SW_PrefetchAbs_entry
             StinkyInstruction* siteLabel =
@@ -333,17 +349,8 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
             addHi->addSrcReg(StinkyRegister(0));
             burstBB->insertIR(insertAt, addHi);
 
-            // XNACK safety: one s_wait_xcnt 0 before the contiguous prefetch burst (Method 2 — a
-            // single drain covers the whole back-to-back group). No-op when the toggle is off or
-            // the opcode is unavailable. Its 4 bytes are modeled in kBurstFixedBytes above and
-            // absorbed for real by the post-insertion re-accumulate (phase2 below).
-            if (kSwPrefetchEmitXnackWait) {
-                if (const HwInstDesc* xcntDesc = getMCIDByUOp(GFX::s_wait_xcnt, archId)) {
-                    StinkyInstruction* xcnt = builder.create(xcntDesc);
-                    xcnt->addSrcReg(StinkyRegister(0));  // xcnt = 0
-                    burstBB->insertIR(insertAt, xcnt);
-                }
-            }
+            // The scalar getpc/add setup is a non-memory boundary before the prefetch burst, so no
+            // explicit XCNT drain is needed here.
 
             // N × s_prefetch_inst s[base:base+1], k*kSpacing, null, 0x1f
             //   length = ((slength=null=0) + (klength imm=31)) & 31 + 1 = 32 lines = 4096 B.
@@ -462,6 +469,7 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
     }
 
     int m_baseSgpr = -1;
+    bool m_afterSgprCompact = false;
     int m_totalPrefetchInserted = 0;
     int64_t m_totalBytes = 0;
     int64_t m_byteOffsetBase = 0;
@@ -476,9 +484,11 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
 char SwInstructionPrefetchAbsStaticPass::ID = 0;
 
 std::unique_ptr<Pass> createSwInstructionPrefetchAbsStaticPass(int baseSgpr,
-                                                               const std::string& debugOutputPath) {
+                                                               const std::string& debugOutputPath,
+                                                               bool afterSgprCompact) {
     auto p = std::make_unique<SwInstructionPrefetchAbsStaticPass>();
     p->setBaseSgpr(baseSgpr);
+    p->setAfterSgprCompact(afterSgprCompact);
     p->setDebugOutputPath(debugOutputPath);
     if (!debugOutputPath.empty()) p->setDebug(true);
     return p;
@@ -486,9 +496,11 @@ std::unique_ptr<Pass> createSwInstructionPrefetchAbsStaticPass(int baseSgpr,
 
 std::unique_ptr<Pass> createSwInstructionPrefetchAbsStaticPass(StinkyAsmModule& module) {
     auto p = std::make_unique<SwInstructionPrefetchAbsStaticPass>();
-    // Base SGPR pair is auto-allocated in Tensile (KernelWriter._initKernel) and passed
-    // via the module option SwInstructionPrefetchAbsBaseSgpr (-1 = off → pass no-ops).
+    // Tensile reserves a 3-SGPR triple and passes the base here (-1 = off).
+    // After SGPR compact that triple may already hold other values, so the pass
+    // then takes an entry block from the final numbering instead.
     p->setBaseSgpr(module.getModuleOptions().SwInstructionPrefetchAbsBaseSgpr);
+    p->setAfterSgprCompact(module.getModuleOptions().sgprsCompacted());
     if (!module.getOutputDir().empty()) {
         const std::string costBasename =
             module.getOutputName().empty() ? module.getName() : module.getOutputName();

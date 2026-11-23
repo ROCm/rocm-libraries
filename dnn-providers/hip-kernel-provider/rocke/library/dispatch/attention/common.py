@@ -54,8 +54,15 @@ from enum import IntEnum
 from operator import index
 from typing import Any, Tuple
 
+from kernels.common._spec_checks import require_bool
+
+# Re-exported, never redeclared: the tiled kernel specs name their band by these
+# ordinals (``mask_type()``), so the ordinals have one home, beside that mapping.
+from kernels.common.attention_mask_type import AttentionMaskType
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
+    gfx942_3d_kv_needs_i64_addr,
+    kv_addr_width_for_builder,
     # Re-exported, never redeclared. The kernel owns what it covers; dispatch's
     # job is to state that coverage as a Capability so it can be filtered and
     # queried without probing. Copying the numbers would drift in the one
@@ -70,19 +77,12 @@ from rocke.dispatch.core import KernelCandidate, OperatorRequest, selector_match
 from rocke.dispatch.tuning.identity import jsonable, normalize_knobs
 
 FAMILY = "attention_unified"
-ATTENTION_ABI_VERSION = "hipkg-attention-unified/v1"
-
-
-class AttentionMaskType(IntEnum):
-    """Attention-mask ordinals matching ``plan_utils::MaskType``.
-
-    These are mask kinds, not hipDNN ``DiagonalAlignment`` ordinals.
-    """
-
-    NO_MASK = 0
-    TOP_LEFT_CAUSAL = 1
-    BOTTOM_RIGHT_CAUSAL = 2
-    SLIDING_WINDOW = 3
+# v2: the gfx942 and gfx950 tiled kernels take the head counts and the sliding
+# window as kernargs.
+ATTENTION_ABI_VERSION = "hipkg-attention-unified/v2"
+# The query-side options of a packed request: each is an ``AttentionRequest``
+# field, the feature it reports, and the RDNA WMMA prefill spec field it sets.
+QUERY_SIDE_OPTIONS = ("dense_q", "seqused_q")
 
 
 _ATTENTION_MASK_ORDINALS = tuple(mask_type.value for mask_type in AttentionMaskType)
@@ -198,7 +198,8 @@ class AttentionRequest(OperatorRequest):
     kv_layout: str = "paged"  # "paged" | "strided" (non-paged decode)
     # Also write the natural-log softmax normalizer (LSE) into a caller-owned
     # FP32 ``tensors["lse"]``. Reported as the ``lse`` feature, so only
-    # candidates whose kernels implement it (dense, RDNA WMMA) admit it.
+    # candidates whose kernels implement it (dense, RDNA WMMA, and the
+    # gfx942/gfx950 unified split-KV and tiled 2D paths) admit it.
     emit_lse: bool = False
     # Serve runtime head widths from one compiled bucket: ``hdim_q``/``hdim_v``
     # are the bucket maxima, and any widths the kernel takes up to them (RDNA
@@ -206,6 +207,16 @@ class AttentionRequest(OperatorRequest):
     # count. Reported as the ``runtime_head_dims`` feature, so only candidates
     # whose kernels implement it (RDNA WMMA) admit it.
     runtime_head_dims: bool = False
+    # Query-side options of a packed request (hipDNN's paged SDPA graphs).
+    # ``dense_q`` (paged only): Q / O (and LSE) are batch-strided
+    # ``[B, seqlen_q, Hq, D]`` with no ``cu_seqlens_q``. ``seqused_q`` (ragged
+    # or paged): an INT32 ``tensors["seqused_q"]`` gives each sequence's live
+    # query rows; with ``dense_q`` the rows past it are padding (O = 0, LSE =
+    # -inf), otherwise they belong to no sequence. Reported as the ``dense_q``
+    # / ``seqused_q`` features, so only candidates whose kernels implement them
+    # (the RDNA WMMA prefill) admit them.
+    dense_q: bool = False
+    seqused_q: bool = False
 
     def __post_init__(self) -> None:
         # ONE ``__post_init__``, normalizing both fields. Two of them is not two
@@ -223,6 +234,11 @@ class AttentionRequest(OperatorRequest):
 
     def normalized(self) -> dict:
         d = asdict(self)
+        # The query-side options join the identity only when set, so every
+        # request without them keeps the request_hash it had before they existed.
+        for name in QUERY_SIDE_OPTIONS:
+            if d[name] is False:
+                del d[name]
         d["dtype"] = self.dtype.lower()
         # IntEnum and raw-int callers describe the same request/cache identity.
         d["mask_type"] = _parse_attention_mask_type(self.mask_type).value
@@ -309,6 +325,9 @@ class AttentionRequest(OperatorRequest):
             active.add("lse")
         if self.runtime_head_dims:
             active.add("runtime_head_dims")
+        active.update(
+            name for name in QUERY_SIDE_OPTIONS if getattr(self, name) is True
+        )
         if bool(self.use_sinks):
             active.add("sinks")
         if bool(self.use_fp8):
@@ -415,6 +434,13 @@ def _request_errors(
             "runtime_head_dims must be a bool, got "
             f"{type(req.runtime_head_dims).__name__}"
         )
+    # Checked before any candidate coerces them: bool("false") is True, so a
+    # string flag would select an fp8 kernel, and bool(None) is False, so a
+    # missing encoding would pass as OCP instead of being refused.
+    for field in (*QUERY_SIDE_OPTIONS, "use_fp8", "fp8_fnuz"):
+        value = getattr(req, field)
+        if type(value) is not bool:
+            errors.append(f"{field} must be a bool, got {type(value).__name__}")
     for field in ("batch", "nhead_q", "nhead_k", "seqlen_q", "seqlen_k", "hdim_q"):
         if int(getattr(req, field)) <= 0:
             errors.append(f"{field} must be positive")
@@ -435,6 +461,10 @@ def _request_errors(
         errors.append(f"unsupported dense tensor layout {req.tensor_layout!r}")
     if layout in ("ragged", "paged") and tensor_layout != "auto":
         errors.append("tensor_layout is only valid for dense attention")
+    if req.dense_q is True and layout != "paged":
+        errors.append("dense_q requires layout='paged'")
+    if req.seqused_q is True and layout not in ("ragged", "paged"):
+        errors.append("seqused_q requires layout='ragged' or 'paged'")
     try:
         mask_type = _parse_attention_mask_type(req.mask_type)
     except ValueError as exc:
@@ -759,26 +789,27 @@ def normalize_band(
     return AttentionBand(left_bound, right_bound, align)
 
 
-def _attention_band(req: AttentionRequest) -> Tuple[bool, int]:
-    """``(causal_top_left, right_bound)`` the unified kernels compute for ``req``.
+def attention_band(req: AttentionRequest) -> AttentionBand:
+    """The band the unified kernels compute for ``req``.
 
     Requests the unified family does not serve (other arches, and the explicit
     ``window_*`` fields, which carry their own bounds) get the default mask: the
     problem is then only a geometry carrier, e.g. for the gfx1151 launch grid.
+    The single home for this decision -- callers outside this package (e.g. the
+    SDPA gates) use the same function internal callers do.
     """
     explicit = req.window_left is not None or (
         req.window_right is not None and int(req.window_right) >= 0
     )
     if not _uses_band_dispatch(req, explicit):
-        return False, 0
-    band = normalize_band(req)
-    return band.top_left, band.kernel_right_bound
+        return AttentionBand(None, 0, Alignment.BOTTOM_RIGHT)
+    return normalize_band(req)
 
 
 def _problem_with_num_cus(
     req: AttentionRequest, num_cus: int
 ) -> UnifiedAttentionProblem:
-    top_left, right_bound = _attention_band(req)
+    band = attention_band(req)
     # total_q = batch * seqlen_q (the flattened query rows). num_seqs = batch.
     return UnifiedAttentionProblem(
         total_q=int(req.batch) * int(req.seqlen_q),
@@ -796,13 +827,18 @@ def _problem_with_num_cus(
         fp8_fnuz=bool(req.fp8_fnuz),
         num_cus=int(num_cus),
         target_ctas=int(req.target_ctas),
-        causal_top_left=top_left,
-        right_bound=right_bound,
+        causal_top_left=band.top_left,
+        right_bound=band.kernel_right_bound,
+        emit_lse=bool(req.emit_lse),
     )
 
 
-def _problem(req: AttentionRequest) -> UnifiedAttentionProblem:
-    """The production-routing problem, including the live-device CU policy."""
+def attention_problem(req: AttentionRequest) -> UnifiedAttentionProblem:
+    """The production-routing problem, including the live-device CU policy.
+
+    The single home for this decision -- callers outside this package (e.g.
+    the SDPA gates) use the same function internal callers do.
+    """
     return _problem_with_num_cus(req, _resolve_num_cus(req))
 
 
@@ -812,10 +848,18 @@ def _tuning_problem(req: AttentionRequest) -> UnifiedAttentionProblem:
     A tuning candidate already fixes path and geometry, so it does not consume
     the live-device CU heuristic used by production routing. Keep its base a
     pure function of the request: honor an explicit ``num_cus`` and otherwise
-    use the deterministic cross-compile fallback.
+    take the arch's full-part CU count (the static table the split-K heuristics
+    use). Only the split-rule segment count and the dispatcher's K/V layout
+    knobs read it, and a partitioned or smaller part passes its own ``num_cus``.
     """
+    from rocke.helpers.split_k import ARCH_NUM_CUS
+
     num_cus = int(req.num_cus)
-    return _problem_with_num_cus(req, num_cus if num_cus > 0 else 120)
+    if num_cus <= 0:
+        if req.arch not in ARCH_NUM_CUS:
+            raise ValueError(f"no CU count known for {req.arch}; pass num_cus")
+        num_cus = ARCH_NUM_CUS[req.arch]
+    return _problem_with_num_cus(req, num_cus)
 
 
 # Shared pin-selector: identical across families, so it lives in the dispatch
@@ -856,6 +900,24 @@ class AttentionSpec:
     right_bound: int = 0
     # Left bound, part of kernel_name() for every mask.
     sliding_window: int = 0
+    # The optional LSE output is a distinct kernel (the split-KV reduce takes one
+    # more pointer), so it must not collapse onto the LSE-off kernel_name /
+    # spec_hash either. LSE-off leaves both exactly as before the field existed
+    # (see :meth:`identity`).
+    emit_lse: bool = False
+
+    def __post_init__(self) -> None:
+        # identity() and kernel_name() branch on emit_lse, so a truthy non-bool
+        # (1, "yes") would silently produce an LSE identity: refuse it instead.
+        require_bool("emit_lse", self.emit_lse)
+
+    def identity(self) -> dict:
+        """``spec_hash`` payload: every field, except ``emit_lse`` when it is off,
+        so an LSE-off spec keeps the hash that stored caches already hold."""
+        payload = asdict(self)
+        if not self.emit_lse:
+            del payload["emit_lse"]
+        return payload
 
     def kernel_name(self) -> str:
         if self.kernel_name_override:
@@ -878,6 +940,8 @@ class AttentionSpec:
             parts.append("rbu" if self.right_bound < 0 else f"rb{self.right_bound}")
         if self.sliding_window > 0:
             parts.append(f"sw{self.sliding_window}")
+        if self.emit_lse:
+            parts.append("lse")
         return kernel_name_join(*parts)
 
 
@@ -889,6 +953,20 @@ def _dense_kernel_module(arch: str):
     else:
         raise ValueError(f"no dense attention kernel for arch {arch!r}")
     return attention_dense
+
+
+def dense_scale_range(arch: str) -> Tuple[float, float]:
+    """``(low, high)`` the ``arch`` dense kernels accept for ``scale``.
+
+    Public, so a caller outside this package (e.g. the SDPA gate) names the
+    range instead of copying the bounds. Every dense arch shares
+    ``DENSE_MIN_SCALE`` / ``DENSE_MAX_SCALE``, the range each dense runner
+    enforces through ``check_dense_scale``.
+    """
+    from kernels.common.attention_dense_spec import DENSE_MAX_SCALE, DENSE_MIN_SCALE
+
+    _dense_kernel_module(arch)  # raise for an arch with no dense kernel
+    return DENSE_MIN_SCALE, DENSE_MAX_SCALE
 
 
 @dataclass(frozen=True)
@@ -957,7 +1035,20 @@ class AttentionTuningSpec:
                 return None
             if not is_dataclass(spec):
                 raise TypeError(f"tuning kernel spec must be a dataclass, got {spec!r}")
-            return tuple((f.name, repr(getattr(spec, f.name))) for f in fields(spec))
+            # LSE fields at their defaults are left out (emit_lse off, lse_layout
+            # token-major), so those keys and the spec_hash taken over them are the
+            # ones stored before the fields existed. The RDNA WMMA prefill
+            # ``dense_q`` / ``seqused_q`` layout options (from the request's fields
+            # of the same names) are left out the same way while they are off.
+            return tuple(
+                (f.name, repr(getattr(spec, f.name)))
+                for f in fields(spec)
+                if not (
+                    f.name in ("emit_lse", *QUERY_SIDE_OPTIONS)
+                    and not getattr(spec, f.name)
+                )
+                and not (f.name == "lse_layout" and spec.lse_layout == "token_major")
+            )
 
         return (
             "explicit",
@@ -1012,8 +1103,10 @@ class AttentionTuningSpec:
                 f"{self.path!r} specs launch through their candidate's grid"
             )
         if self.path == "3d":
+            from kernels.common.attention_unified import _num_q_blocks
+
             block_q = max(1, 16 // problem.num_queries_per_kv)
-            qblocks = problem.total_q // block_q + problem.num_seqs
+            qblocks = _num_q_blocks(problem, block_q, decode_grid=ks.use_decode_grid)
             return (int(qblocks), int(problem.num_kv_heads), int(ks.num_segments))
         if self.builder_kind == "gfx942_4warp_gqa":
             from kernels.common.attention_unified import gfx942_4warp_launch_grid
@@ -1046,17 +1139,26 @@ class AttentionTuningSpec:
         return (64 * int(self.kernel_spec.num_warps), 1, 1)
 
     def with_num_kv_blocks(self, num_kv_blocks: int) -> "AttentionTuningSpec":
-        """Specialize i32/i64 paged addressing once the physical cache is known.
+        """Retarget a paged spec to the physical cache once it is known.
 
-        Addressing width is a runtime specialization, not a configuration: it
-        changes :meth:`identity` (a different binary) but never ``tuning_id``,
+        Unified paths pick i32/i64 K/V addressing from it; dense paged bakes the
+        cache extent itself as its K/V buffer bound, so each cache size is its own
+        binary. Either way this is a runtime specialization, not a configuration:
+        it changes :meth:`identity` (a different binary) but never ``tuning_id``,
         so an id recorded after binding still replays from the request.
         """
         count = int(num_kv_blocks)
         if count < 0:
             raise ValueError("num_kv_blocks must be non-negative")
         if self.path == "dense":
-            return self  # contiguous K/V: nothing to retarget
+            if not self.kernel_spec.paged:
+                return self  # contiguous K/V: nothing to retarget
+            # The paged kernel bakes the cache extent as its K/V buffer bound.
+            return replace(
+                self,
+                kernel_spec=replace(self.kernel_spec, num_kv_blocks=count),
+                num_kv_blocks=count,
+            )
         kernel_spec = self.kernel_spec
         if not hasattr(kernel_spec, "use_i64_kv_addr"):
             return replace(self, num_kv_blocks=count)
@@ -1067,7 +1169,26 @@ class AttentionTuningSpec:
             * int(kernel_spec.head_size)
             * elem_bytes
         )
-        use_i64 = count > 0 and count * block_stride > 0x8000_0000
+        if self.path == "3d" and self.arch == "gfx942":
+            # No i64 path: the flag marks a cache past what the spec's K/V
+            # loader reads, and the spec's __post_init__ refuses it.
+            use_i64 = gfx942_3d_kv_needs_i64_addr(
+                count,
+                block_stride,
+                kv_fp8=kernel_spec.kv_storage_dtype == "fp8e4m3",
+                use_wide_kv_load=kernel_spec.use_wide_kv_load,
+                tile_size=kernel_spec.tile_size,
+                head_size=kernel_spec.head_size,
+            )
+        else:
+            # A builder with no i64 path (gfx942 4-warp GQA) shares its spec
+            # class with the default builder, so no __post_init__ can refuse the
+            # flag the way the gfx942 3D spec does. It stays i32 up to its
+            # element limit and is refused at bind time past that, not at
+            # compile.
+            use_i64 = kv_addr_width_for_builder(
+                self.builder_kind, count, block_stride, elem_bytes
+            )
         return replace(
             self,
             kernel_spec=replace(kernel_spec, use_i64_kv_addr=use_i64),

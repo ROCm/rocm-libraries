@@ -1,0 +1,484 @@
+#!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# tests/parity/conv_direct_fwd_wmma_emit.py -- Python reference emitter for
+# the wave32 WMMA direct forward parity harness. Selects one of N sampled spec
+# configs by argv[1], builds the DirectFwdWmmaSpec, builds the kernel via
+# build_direct_fwd_wmma(spec, arch=<cfg arch>) and prints the LLVM IR to
+# stdout so it can be byte-compared with the C emitter
+# conv_direct_fwd_wmma_emit.c.
+#
+# Config index map (gfx1250, 3x3 PAD 1 stride 1, dense cpg 64 / kpg 96 unless
+# noted):
+#   0  bf16, defaults (2x4 waves, 4x4 tiles, tile_w 16, ck 32, 2 stages)
+#   1  fp16, 2 images of 8-wide tiles, 3 stages, prefetch + iterative-ilp
+#   2  bf16, 2 images, split_barrier + wave_epilogue + prefetch
+#   3  bf16, row_ring, 6x8 tiles (upper VGPR banks), tile_w 32, 3 stages
+#   4  fp16, tap_ring, 3 stages
+#   5  bf16, stride 2, no phase split, prefetch
+#   6  bf16, stride 2, phase_split, ck 64, prefetch
+#   7  bf16, 2x2 PAD 0 stride 2 (patch merge), phase_split
+#   8  bf16, pack_groups 8 (groups 8, cpg = kpg = 4), prefetch
+#   9  fp16, pack_groups 4 (groups 4, cpg = kpg = 8), stride 2, phase_split,
+#      2 images
+#  10  bf16, dilation 1x2 (PAD 2), ck 64, prefetch
+#  11  bf16, dilation 3x1, stride 2, 2 images, prefetch
+#  12  bf16, pingpong, 4x10 tiles
+#  13  fp16, pingpong, pp_group 3, iterative-ilp
+#  14  bf16, tap_reuse, prefetch
+#  15  bf16, tap_reuse + tap_shift, tile_w 32
+#  16  bf16, tap_reuse + tap_shift, dilation 1x2 (PAD 2), split_barrier
+#  17  bf16, stride 2, phase_split + row_ring, 3 stages
+#  18  bf16, stride 2, phase_split + pingpong, pp_group 2
+#  19  rejected by both engines: gfx950 (wave64, no TDM)
+#  20  rejected by both engines: stride 3
+#  21  bf16, 5x5 PAD 2, prefetch + max-ilp
+#  1 x R on a 1-D signal (H 1, W 300, PAD 0, "same" column padding):
+#  (one output row per block: tile_w = the block's pixels)
+#  22  bf16, 1x3, 1x4 waves, 2x4 tiles
+#  23  fp16, 1x7 dilation 3, 3 stages, prefetch + split_barrier
+#  24  bf16, 1x11, pingpong, 4x8 tiles
+#  25  fp16, 1x3, cpg = kpg = 128, ck 64
+#  26  rejected by both engines: 1x3 dilation 3 stride 2
+#  27  rejected by both engines: 1x7 dilation 3, column PAD 19
+#  28  fp16, 1x11 dilation 5, 1x8 waves
+#  rectangular filters with per-axis "same" padding and 3x3 stride-2 "valid"
+#  (2 images unless noted, prefetch + iterative-ilp):
+#  29  bf16, 7x1 on 17x17, 1x4 waves, 4x5 tiles, tile_w 20
+#  30  fp16, 1x7 on 17x17, 2x2 waves, 1x5 tiles, 3 stages
+#  31  bf16, 3x1 on 8x8, one image, 4x2 waves, 3 stages
+#  32  fp16, 1x3 on 8x8, 2x2 waves, 2x4 tiles
+#  33  bf16, 3x3 PAD 0 stride 2 on 35x35, 2x2 waves, 2x5 tiles
+#  34  fp16, 3x3 PAD 0 stride 2 on 17x17, phase_split
+#  35  rejected by both engines: 7x1 with pack_groups 2
+#  36  rejected by both engines: 3x1 dilated 2x1
+#  strided GEMM (strided_view) over the stride-2 filters without overlap:
+#  37  bf16, 1x1 s2, 2x2 waves, 4x4 tiles, tile_w 8, ck 64
+#  38  fp16, 1x1 s2, fold_n, 3 stages, prefetch + iterative-ilp
+#  39  bf16, 2x2 s2 (two 128-channel patch runs), fold_n, tile_w 32, prefetch
+#  40  fp16, 2x2 s2, 3 stages, prefetch
+#  41  bf16, 1x1 s2, cpg 256, 2x1 waves of 1x1 tiles, ck 128, 3 stages
+#  42  rejected by both engines: fold_n without strided_view
+#  43  rejected by both engines: strided_view on a padded 3x3
+#  1-D strided filters over a polyphase view (poly_view; H 1, PAD 0):
+#  44  bf16, 1x16 stride 8, column PAD 4, W 512, 1x4 waves, ck 64, prefetch
+#  45  fp16, 1x4 stride 2, column PAD 1, W 600, 2x2 waves, ck 32, 3 stages
+#  46  fp16, 1x16 stride 8, column PAD 4, 2x2 waves of 4x8 tiles, prefetch
+#  47  rejected by both engines: 1x3 stride 2 (R not a multiple of S)
+#  48  rejected by both engines: cpg 96 with ck 64 (a chunk spans two pixels)
+#  row-ring stride-2 rows (kpg 128):
+#  49  fp16, 3x3 s2, phase_split + row_ring, 2x5 waves, tile_w 40, 3 stages,
+#      prefetch + iterative-ilp
+#  50  bf16, 3x3 s2, row_ring, four images of 8-wide tiles, 3 stages
+from _emit_common import run_emit
+from kernels.common.conv_direct_fwd_wmma import (
+    DirectFwdWmmaSpec,
+    build_direct_fwd_wmma,
+)
+from kernels.common.conv_direct_grouped import DirectConvProblem
+
+
+def _p(
+    *,
+    KH=3,
+    PAD=1,
+    dtype="bf16",
+    stride=1,
+    groups=1,
+    cpg=64,
+    kpg=96,
+    dil_h=1,
+    dil_w=1,
+):
+    return DirectConvProblem(
+        N=2,
+        H=20,
+        W=24,
+        groups=groups,
+        cpg=cpg,
+        kpg=kpg,
+        KH=KH,
+        KW=KH,
+        PAD=PAD,
+        stride=stride,
+        dtype=dtype,
+        dil_h=dil_h,
+        dil_w=dil_w,
+    )
+
+
+def _p1d(R, d, pw, *, dtype="bf16", stride=1, cpg=64, kpg=96):
+    return DirectConvProblem(
+        N=2,
+        H=1,
+        W=300,
+        groups=1,
+        cpg=cpg,
+        kpg=kpg,
+        KH=1,
+        KW=R,
+        PAD=0,
+        pad_w=pw,
+        stride=stride,
+        dtype=dtype,
+        dil_w=d,
+    )
+
+
+def _pr(KH, KW, PAD, pw, H, W, *, dtype="bf16", stride=1, **kw):
+    return DirectConvProblem(
+        N=2,
+        H=H,
+        W=W,
+        groups=kw.get("groups", 1),
+        cpg=kw.get("cpg", 64),
+        kpg=kw.get("kpg", 96),
+        KH=KH,
+        KW=KW,
+        PAD=PAD,
+        pad_w=pw,
+        stride=stride,
+        dtype=dtype,
+        dil_h=kw.get("dil_h", 1),
+    )
+
+
+def _k(wk, wp, tk, tp, tw, tn, ck, st, **kw):
+    return dict(
+        waves_k=wk,
+        waves_p=wp,
+        tiles_k=tk,
+        tiles_p=tp,
+        tile_w=tw,
+        tile_n=tn,
+        ck=ck,
+        stages=st,
+        **kw,
+    )
+
+
+PF = dict(prefetch=True, sched="iterative-ilp")
+SV = dict(strided_view=True)
+PV = dict(poly_view=True)
+
+
+def _spec(idx: int):
+    S = DirectFwdWmmaSpec
+    cfgs = {
+        0: (S(problem=_p()), "gfx1250"),
+        1: (
+            S(problem=_p(dtype="fp16"), **_k(2, 4, 2, 2, 8, 2, 32, 3, **PF)),
+            "gfx1250",
+        ),
+        2: (
+            S(
+                problem=_p(),
+                **_k(
+                    1,
+                    4,
+                    4,
+                    6,
+                    16,
+                    2,
+                    32,
+                    2,
+                    split_barrier=True,
+                    wave_epilogue=True,
+                    **PF,
+                ),
+            ),
+            "gfx1250",
+        ),
+        3: (S(problem=_p(), **_k(1, 8, 6, 8, 32, 1, 32, 3, row_ring=True)), "gfx1250"),
+        4: (
+            S(problem=_p(dtype="fp16"), **_k(2, 4, 2, 4, 16, 1, 32, 3, tap_ring=True)),
+            "gfx1250",
+        ),
+        5: (S(problem=_p(stride=2), **_k(1, 4, 6, 2, 16, 1, 32, 2, **PF)), "gfx1250"),
+        6: (
+            S(
+                problem=_p(stride=2),
+                **_k(2, 2, 1, 4, 16, 1, 64, 2, phase_split=True, **PF),
+            ),
+            "gfx1250",
+        ),
+        7: (
+            S(
+                problem=_p(KH=2, PAD=0, stride=2),
+                **_k(1, 4, 2, 2, 16, 1, 64, 2, phase_split=True),
+            ),
+            "gfx1250",
+        ),
+        8: (
+            S(
+                problem=_p(groups=8, cpg=4, kpg=4),
+                **_k(1, 4, 2, 4, 32, 1, 32, 2, pack_groups=8, **PF),
+            ),
+            "gfx1250",
+        ),
+        9: (
+            S(
+                problem=_p(dtype="fp16", stride=2, groups=4, cpg=8, kpg=8),
+                **_k(2, 4, 1, 2, 32, 2, 32, 2, pack_groups=4, phase_split=True, **PF),
+            ),
+            "gfx1250",
+        ),
+        10: (
+            S(problem=_p(PAD=2, dil_w=2), **_k(1, 4, 2, 6, 16, 1, 64, 2, **PF)),
+            "gfx1250",
+        ),
+        11: (
+            S(problem=_p(stride=2, dil_h=3), **_k(1, 4, 2, 2, 32, 2, 32, 2, **PF)),
+            "gfx1250",
+        ),
+        12: (
+            S(problem=_p(), **_k(2, 4, 4, 10, 16, 1, 32, 2, pingpong=True)),
+            "gfx1250",
+        ),
+        13: (
+            S(
+                problem=_p(dtype="fp16"),
+                **_k(
+                    2,
+                    4,
+                    4,
+                    6,
+                    16,
+                    1,
+                    32,
+                    2,
+                    pingpong=True,
+                    pp_group=3,
+                    sched="iterative-ilp",
+                ),
+            ),
+            "gfx1250",
+        ),
+        14: (
+            S(problem=_p(), **_k(1, 4, 4, 4, 16, 1, 32, 2, tap_reuse=True, **PF)),
+            "gfx1250",
+        ),
+        15: (
+            S(
+                problem=_p(),
+                **_k(1, 4, 2, 4, 32, 1, 32, 2, tap_reuse=True, tap_shift=True),
+            ),
+            "gfx1250",
+        ),
+        16: (
+            S(
+                problem=_p(PAD=2, dil_w=2),
+                **_k(
+                    1,
+                    4,
+                    2,
+                    4,
+                    16,
+                    1,
+                    32,
+                    2,
+                    tap_reuse=True,
+                    tap_shift=True,
+                    split_barrier=True,
+                ),
+            ),
+            "gfx1250",
+        ),
+        17: (
+            S(
+                problem=_p(stride=2),
+                **_k(1, 4, 2, 2, 16, 1, 32, 3, phase_split=True, row_ring=True),
+            ),
+            "gfx1250",
+        ),
+        18: (
+            S(
+                problem=_p(stride=2),
+                **_k(
+                    2,
+                    4,
+                    2,
+                    2,
+                    16,
+                    1,
+                    32,
+                    2,
+                    phase_split=True,
+                    pingpong=True,
+                    pp_group=2,
+                ),
+            ),
+            "gfx1250",
+        ),
+        19: (S(problem=_p()), "gfx950"),
+        20: (S(problem=_p(stride=3)), "gfx1250"),
+        21: (
+            S(
+                problem=_p(KH=5, PAD=2),
+                **_k(1, 4, 2, 4, 16, 1, 32, 2, prefetch=True, sched="max-ilp"),
+            ),
+            "gfx1250",
+        ),
+        22: (S(problem=_p1d(3, 1, 1), **_k(1, 4, 2, 4, 256, 1, 32, 2)), "gfx1250"),
+        23: (
+            S(
+                problem=_p1d(7, 3, 9, dtype="fp16"),
+                **_k(2, 4, 4, 4, 256, 1, 32, 3, prefetch=True, split_barrier=True),
+            ),
+            "gfx1250",
+        ),
+        24: (
+            S(problem=_p1d(11, 1, 5), **_k(2, 4, 4, 8, 512, 1, 32, 2, pingpong=True)),
+            "gfx1250",
+        ),
+        25: (
+            S(
+                problem=_p1d(3, 1, 1, dtype="fp16", cpg=128, kpg=128),
+                **_k(2, 4, 4, 4, 256, 1, 64, 2),
+            ),
+            "gfx1250",
+        ),
+        26: (S(problem=_p1d(3, 3, 3, stride=2)), "gfx1250"),
+        27: (S(problem=_p1d(7, 3, 19)), "gfx1250"),
+        28: (
+            S(problem=_p1d(11, 5, 25, dtype="fp16"), **_k(1, 8, 2, 4, 512, 1, 32, 2)),
+            "gfx1250",
+        ),
+        29: (
+            S(problem=_pr(7, 1, 3, 0, 17, 17), **_k(1, 4, 4, 5, 20, 2, 32, 2, **PF)),
+            "gfx1250",
+        ),
+        30: (
+            S(
+                problem=_pr(1, 7, 0, 3, 17, 17, dtype="fp16"),
+                **_k(2, 2, 1, 5, 20, 2, 32, 3, **PF),
+            ),
+            "gfx1250",
+        ),
+        31: (
+            S(problem=_pr(3, 1, 1, 0, 8, 8), **_k(4, 2, 2, 2, 8, 1, 32, 3, **PF)),
+            "gfx1250",
+        ),
+        32: (
+            S(
+                problem=_pr(1, 3, 0, 1, 8, 8, dtype="fp16"),
+                **_k(2, 2, 2, 4, 8, 2, 32, 2, **PF),
+            ),
+            "gfx1250",
+        ),
+        33: (
+            S(
+                problem=_pr(3, 3, 0, -1, 35, 35, stride=2),
+                **_k(2, 2, 2, 5, 20, 2, 32, 2, **PF),
+            ),
+            "gfx1250",
+        ),
+        34: (
+            S(
+                problem=_pr(3, 3, 0, -1, 17, 17, dtype="fp16", stride=2),
+                **_k(4, 2, 2, 5, 20, 2, 32, 2, phase_split=True, **PF),
+            ),
+            "gfx1250",
+        ),
+        35: (
+            S(
+                problem=_pr(7, 1, 3, 0, 17, 17, groups=2, cpg=8, kpg=8),
+                pack_groups=2,
+            ),
+            "gfx1250",
+        ),
+        36: (S(problem=_pr(3, 1, 2, 0, 17, 17, dil_h=2)), "gfx1250"),
+        37: (
+            S(problem=_p(KH=1, PAD=0, stride=2), **_k(2, 2, 4, 4, 8, 1, 64, 2, **SV)),
+            "gfx1250",
+        ),
+        38: (
+            S(
+                problem=_p(KH=1, PAD=0, stride=2, dtype="fp16"),
+                **_k(2, 1, 4, 4, 8, 1, 64, 3, fold_n=True, **SV, **PF),
+            ),
+            "gfx1250",
+        ),
+        39: (
+            S(
+                problem=_p(KH=2, PAD=0, stride=2),
+                **_k(1, 2, 4, 4, 32, 1, 64, 2, fold_n=True, **SV, **PF),
+            ),
+            "gfx1250",
+        ),
+        40: (
+            S(
+                problem=_p(KH=2, PAD=0, stride=2, dtype="fp16"),
+                **_k(2, 1, 4, 4, 8, 1, 64, 3, **SV, **PF),
+            ),
+            "gfx1250",
+        ),
+        41: (
+            S(
+                problem=_p(KH=1, PAD=0, stride=2, cpg=256),
+                **_k(2, 1, 1, 1, 8, 1, 128, 3, **SV, **PF),
+            ),
+            "gfx1250",
+        ),
+        42: (S(problem=_p(KH=1, PAD=0, stride=2), fold_n=True), "gfx1250"),
+        43: (S(problem=_p(stride=2), **SV), "gfx1250"),
+        44: (
+            S(
+                problem=_pr(1, 16, 0, 4, 1, 512, stride=8),
+                **_k(1, 4, 4, 4, 256, 1, 64, 2, **PV, **PF),
+            ),
+            "gfx1250",
+        ),
+        45: (
+            S(
+                problem=_pr(1, 4, 0, 1, 1, 600, dtype="fp16", stride=2),
+                **_k(2, 2, 2, 4, 128, 1, 32, 3, **PV),
+            ),
+            "gfx1250",
+        ),
+        46: (
+            S(
+                problem=_pr(1, 16, 0, 4, 1, 512, dtype="fp16", stride=8),
+                **_k(2, 2, 4, 8, 256, 1, 64, 2, **PV, **PF),
+            ),
+            "gfx1250",
+        ),
+        47: (S(problem=_pr(1, 3, 0, 1, 1, 600, stride=2), **PV), "gfx1250"),
+        49: (
+            S(
+                problem=_p(stride=2, dtype="fp16", kpg=128),
+                **_k(2, 5, 4, 4, 40, 1, 32, 3, phase_split=True, row_ring=True, **PF),
+            ),
+            "gfx1250",
+        ),
+        50: (
+            S(
+                problem=_p(stride=2, kpg=128),
+                **_k(2, 4, 4, 4, 8, 4, 32, 3, row_ring=True),
+            ),
+            "gfx1250",
+        ),
+        48: (
+            S(
+                problem=_pr(1, 4, 0, 1, 1, 600, stride=2, cpg=96),
+                **_k(2, 2, 2, 4, 128, 1, 64, 2, **PV),
+            ),
+            "gfx1250",
+        ),
+    }
+    if idx not in cfgs:
+        raise SystemExit(f"unknown config index {idx}")
+    return cfgs[idx]
+
+
+def main() -> int:
+    return run_emit(
+        _spec,
+        build_direct_fwd_wmma,
+        usage="usage: conv_direct_fwd_wmma_emit.py <config_index>\n",
+    )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

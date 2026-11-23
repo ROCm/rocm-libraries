@@ -95,7 +95,16 @@ DEF_ARCH(GfxYourArch,
     .wavefront = 64,            // 64 for CDNA, 32 for RDNA
     .maxVGPR = 256, .maxSGPR = 102, .maxAGPR = 256,
     .totalVgprPerSimd = 512,    // physical VGPR file per SIMD
-    .vgprAllocGranule = 8,
+    .vgprAllocGranule = 8,      // what the hardware reserves in; confirm it rather
+                                // than copy it. Assemble `.amdhsa_next_free_vgpr N`
+                                // for the target and disassemble: the value you get
+                                // back is the granule at work.
+    .maxWavesPerSimd = 8,       // wave slots per SIMD. Occupancy is capped here once
+                                // a kernel is small enough that registers stop binding
+    .packedWorkitemId = 1,      // 1 when the dispatch packs X, Y and Z into v0, so one
+                                // VGPR arrives filled however many dimensions are
+                                // enabled. 0 for the unpacked convention, one VGPR per
+                                // enabled dimension. LLVM calls this `packed-tid`.
     .defaultCycle = 4, .defaultLatency = 4)   // 4 for CDNA, 1 for RDNA
 ```
 
@@ -310,16 +319,23 @@ library was built with, so a v0-only build hands callers v0's cost table transpa
 
 ## Running a tensilelite YAML through stinkytofu
 
-tensilelite reaches stinkytofu through `rocisa`. Two switches drive it:
+tensilelite reaches stinkytofu through native `rocisa`: the rocisa -> logical -> asm lowering
+(`toStinkyTofuModule`) is compiled directly into `_rocisa`, so there is no separate backend shim
+and no per-process redirect to set up. Two things drive it:
 
-- **Per-solution:** set `ScheduleIterAlg: 4` in the solution. `Solution.py` remaps this to
+- **Per-solution opt-in:** set `ScheduleIterAlg: 4` in the solution. `Solution.py` remaps this to
   `_StinkyTofuOptLevel=3` and rejects it if rocisa was built without the stinkytofu backend or
   the ISA has no backend.
-- **Per-process:** `ROCISA_BACKEND=stinkytofu` redirects `import rocisa` to the
-  `rocisa_stinkytofu_adaptor` shim (backed by `_stinkytofu.so`) instead of native `_rocisa`.
+- **Lowering path (module option):** `LowerViaLogicalIR` selects the logical-IR lowering path
+  inside `toStinkyTofuModule` (KernelWriter builds rocisa, which is lowered rocisa -> logical IR
+  -> asm IR). It defaults to on; override it with the `StinkyTofuLowerViaLogicalIR` global
+  parameter or a `StinkyTofuModuleOptions` entry.
 
 ```bash
-export PYTHONPATH=/path/to/shared/stinkytofu/build/lib:$PYTHONPATH
-export ROCISA_BACKEND=stinkytofu
-./Tensile/bin/Tensile config.yaml ./out    # config.yaml uses ScheduleIterAlg: 4
+# rocisa already contains the stinkytofu backend; just run a solution that opts in.
+../../projects/hipblaslt/tensilelite/tensilelite/bin/Tensile config.yaml ./out    # config.yaml uses ScheduleIterAlg: 4
 ```
+
+> **Removed:** the old `ROCISA_BACKEND=stinkytofu` env switch and the `rocisa_stinkytofu_adaptor`
+> Python shim no longer exist. stinkytofu is linked into `_rocisa` and reached natively; the
+> rocisa -> logical conversion lives in C++ (`src/conversion/rocisa/ToStinkyTofuUtils.cpp`).

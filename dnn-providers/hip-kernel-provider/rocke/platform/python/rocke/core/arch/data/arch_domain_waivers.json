@@ -1,0 +1,5 @@
+{
+  "_comment": "Hand-edited, reviewed escape hatch for the arch-domain lane; see the arch-domain section of rocke/TESTING.md. A waiver names one measured cell (key, arch, flavor) that is wrong: the intrinsic does lower on that target, but the committed column says arch_absent. Both engines then report that cell as a warning instead of refusing the lowering. Waive a wrong measurement, never a kernel bug: a kernel that demands an intrinsic its target cannot lower is fixed in the kernel. Each entry needs a reason that says what is wrong with the measurement; put tracker references in the commit message. check_arch_domain.py fails once a waived cell no longer measures negative, so the entry is deleted in the change that fixes the column.",
+  "schema": "rocke.arch_domain_waivers/v1",
+  "waivers": []
+}

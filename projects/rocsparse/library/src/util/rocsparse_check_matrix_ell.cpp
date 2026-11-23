@@ -104,7 +104,7 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        if(m * ell_width == 0)
+        if(static_cast<int64_t>(m) * ell_width == 0)
         {
             // clear output status to success
             *data_status = rocsparse_data_status_success;
@@ -135,8 +135,8 @@ rocsparse_status rocsparse::check_matrix_ell_checkarg(rocsparse_handle       han
     ROCSPARSE_CHECKARG_SIZE(1, m);
     ROCSPARSE_CHECKARG_SIZE(2, n);
     ROCSPARSE_CHECKARG_SIZE(3, ell_width);
-    ROCSPARSE_CHECKARG_ARRAY(4, (m * ell_width), ell_val);
-    ROCSPARSE_CHECKARG_ARRAY(5, (m * ell_width), ell_col_ind);
+    ROCSPARSE_CHECKARG_ARRAY(4, (static_cast<int64_t>(m) * ell_width), ell_val);
+    ROCSPARSE_CHECKARG_ARRAY(5, (static_cast<int64_t>(m) * ell_width), ell_col_ind);
     ROCSPARSE_CHECKARG_ENUM(6, idx_base);
     ROCSPARSE_CHECKARG_ENUM(7, matrix_type);
     ROCSPARSE_CHECKARG(7,

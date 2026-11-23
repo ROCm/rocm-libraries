@@ -75,7 +75,13 @@ typedef enum
      * @{
      */
 
-    /** @brief Heuristic search mode (hipdnnBackendHeuristicMode_t) */
+    /**
+     * @brief Heuristic mode (hipdnnBackendHeurMode_t); required before finalize
+     *
+     * Selects the heuristic policy list when neither HIPDNN_HEUR_POLICY_ORDER nor
+     * HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT is set: FALLBACK ranks without models,
+     * A (INSTANT) by engine-level predictions, B by configuration-level predictions.
+     */
     HIPDNN_ATTR_ENGINEHEUR_MODE = 100,
 
     /** @brief Operation graph to find engines for (backend descriptor) */
@@ -107,11 +113,24 @@ typedef enum
      *      either a policy name, which is hashed via policyNameToId, or a raw
      *      decimal int64 policy ID).
      *   2. This descriptor attribute, if set.
-     *   3. Built-in default: [SelectionHeuristic::Config, SelectionHeuristic::StaticOrdering].
+     *   3. The list HIPDNN_ATTR_ENGINEHEUR_MODE selects: FALLBACK
+     *      [SelectionHeuristic::Config, SelectionHeuristic::StaticOrdering], A
+     *      [Config, SelectionHeuristic::ModeA, StaticOrdering], B
+     *      [Config, SelectionHeuristic::ModeB, StaticOrdering].
      *
      * Type: HIPDNN_TYPE_INT64
      */
     HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT = 106,
+
+    /**
+     * @brief Ranking metric the prediction policies order engines by (HIPDNN_TYPE_CHAR,
+     * extension; RFC 0019 §11.4).
+     *
+     * A name registered in hipdnn_data_sdk/utilities/RankingMetrics.hpp; others fail with
+     * HIPDNN_STATUS_BAD_PARAM. Empty means "tflops"; HIPDNN_HEUR_RANKING_METRIC overrides it.
+     * Every result EngineConfig carries the effective metric, which reads return after finalize.
+     */
+    HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT = 107,
 
     /** @} */
 
@@ -132,6 +151,24 @@ typedef enum
 
     /** @brief Required workspace size in bytes */
     HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE = 203,
+
+    /** @brief Whether the prediction read from this configuration evaluates its model
+     * (int64, in, default 1). Set to 0 to describe the binding and features without
+     * running the model. Set before reading HIPDNN_ATTR_ENGINECFG_PREDICTION_EXT.
+     */
+    HIPDNN_ATTR_ENGINECFG_PREDICTION_EVALUATE_EXT = 204,
+
+    /** @brief Read-only configuration-kind prediction for this configuration's knobs, as one
+     * HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT (root EnginePrediction) that lives until the
+     * descriptor is destroyed. Readable on an unfinalized, knob-only configuration.
+     */
+    HIPDNN_ATTR_ENGINECFG_PREDICTION_EXT = 205,
+
+    /** @brief Ranking metric this configuration is predicted and built in (HIPDNN_TYPE_CHAR,
+     * extension; RFC 0019 §11.4). Unregistered names fail with HIPDNN_STATUS_BAD_PARAM; empty
+     * means "tflops". Readable before finalize; reads return the effective metric.
+     */
+    HIPDNN_ATTR_ENGINECFG_RANKING_METRIC_EXT = 206,
 
     /** @} */
 
@@ -416,6 +453,49 @@ typedef enum
      * `EnginePluginResourceManager::resolveEngineName()`.
      */
     HIPDNN_ATTR_ENGINE_NAME_EXT = 1008,
+
+    /** @brief Whether the engine-kind prediction read from this engine evaluates its model
+     * (int64, in, default 1). Set to 0 to describe the model binding and feature map
+     * without running the model. Set before finalizing the engine descriptor.
+     */
+    HIPDNN_ATTR_ENGINE_PREDICTION_EVALUATE_EXT = 1009,
+
+    /** @brief Read-only engine-kind prediction in HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT, as
+     * one HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT (root EnginePrediction) that lives until the
+     * descriptor is destroyed. Engines without a model report UNAVAILABLE rather than failing.
+     */
+    HIPDNN_ATTR_ENGINE_PREDICTION_EXT = 1010,
+
+    /** @brief Zero-based offset into this engine's matched catalog (int64, in, default 0).
+     * Set before finalizing the engine descriptor.
+     */
+    HIPDNN_ATTR_ENGINE_CANDIDATE_OFFSET_EXT = 1011,
+
+    /** @brief Maximum catalog entries returned by one read of
+     * HIPDNN_ATTR_ENGINE_CANDIDATES_EXT (int64, in, must be in [1, 10000], default 10000).
+     * Set before finalizing the engine descriptor.
+     */
+    HIPDNN_ATTR_ENGINE_CANDIDATE_LIMIT_EXT = 1012,
+
+    /** @brief Knob choices restricting the enumerated catalog, as an array of finalized
+     * HIPDNN_BACKEND_KNOB_CHOICE_DESCRIPTOR descriptors (HIPDNN_TYPE_BACKEND_DESCRIPTOR, in).
+     * Unset knobs are unconstrained; default knob values never restrict discovery.
+     * Set before finalizing the engine descriptor.
+     */
+    HIPDNN_ATTR_ENGINE_CANDIDATE_SCOPE_EXT = 1013,
+
+    /** @brief Read-only EngineDetails carrying candidate_page, as one
+     * HIPDNN_TYPE_FLATBUFFER_DATA_STRUCT_EXT that lives until the descriptor is destroyed. An
+     * offset beyond the total count is invalid. Engines that cannot enumerate report
+     * HIPDNN_STATUS_NOT_SUPPORTED rather than an empty page.
+     */
+    HIPDNN_ATTR_ENGINE_CANDIDATES_EXT = 1014,
+
+    /** @brief Ranking metric HIPDNN_ATTR_ENGINE_PREDICTION_EXT answers in (HIPDNN_TYPE_CHAR,
+     * extension; RFC 0019 §11.4). Unregistered names fail with HIPDNN_STATUS_BAD_PARAM; empty
+     * means "tflops"; no other metric is substituted. Set before finalize.
+     */
+    HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT = 1015,
 
     /** @} */
 
@@ -922,6 +1002,12 @@ typedef enum
 
     /** @brief Compute data type for SDPA forward */
     HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT = 2641,
+
+    /** @brief Cumulative sequence length Q tensor for SDPA forward (optional, INT32, shape (B+1,1,1,1)) */
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_QDESC = 2642,
+
+    /** @brief Cumulative sequence length KV tensor for SDPA forward (optional, INT32, shape (B+1,1,1,1)) */
+    HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_KVDESC = 2643,
 
     /** @} */
 

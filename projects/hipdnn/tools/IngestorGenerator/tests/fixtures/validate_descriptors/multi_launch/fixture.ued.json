@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "id": "c2b3a8d0-4c8e-4a55-93a9-2f6cf47f0b21",
+  "name": "hipkernel:ValidateFixtureMultiLaunch",
+  "graph_match": {
+    "native": "hipkernel.fixture_multi_launch.graph_match"
+  },
+  "sort_kernel_catalog": {
+    "default": "e1d5f6a7-7a61-4b3c-8a47-0d3a1b9c5e31"
+  },
+  "metadata": "5b0b0c1e-62a6-4d36-8f0f-6f2d1e1c9a11",
+  "knobs": [
+    "block_size"
+  ]
+}

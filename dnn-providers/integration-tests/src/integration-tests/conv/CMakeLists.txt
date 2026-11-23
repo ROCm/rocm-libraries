@@ -4,10 +4,3 @@
 add_always_built_test_sources(
     IntegrationConvForwardSerializeRoundTrip.cpp
 )
-
-add_cpp_graph_test_sources(
-    IntegrationGpuConvForward.cpp
-    IntegrationGpuConvBackwardData.cpp
-    IntegrationGpuConvBackwardWeights.cpp
-    IntegrationGpuConvFwdBiasActiv.cpp
-)

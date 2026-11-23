@@ -53,10 +53,14 @@ ninja
 | **Namespace** | cudnn_frontend | hipdnn_frontend |
 | **Handle Creation** | cudnnCreate(&handle) | hipdnnCreate(&handle) |
 | **Handle Destruction** | cudnnDestroy(handle) | hipdnnDestroy(handle) |
-| **Heuristics Modes** | All cuDNN heuristic modes | Currently only HeurMode_t::FALLBACK |
+| **Heuristics Modes** | All cuDNN heuristic modes | HeurMode_t::A, HeurMode_t::B, and HeurMode_t::FALLBACK |
 | **Operation Support** | All cuDNN operations | [Operation Support](./OperationSupport.md) |
 | **Device Memory Utility** | Surface<type> | MigratableMemory<type> |
 | **Device Memory Access** | Surface<type>::devPtr | MigratableMemory<type>::deviceData() |
+
+### cuDNN Compatibility Headers
+
+hipDNN also provides cuDNN-spelled headers under `frontend/include/hipdnn_compatibility/cudnn/` (for example, `#include <hipdnn_compatibility/cudnn/cudnn_frontend.h>`). These headers let hipified code keep cuDNN type names. They are installed only when hipDNN is built with `HIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON`. See the samples in [`samples/cudnn_shim/`](../samples/cudnn_shim/).
 
 ### Tensor Dimensions and Layouts
 
@@ -148,13 +152,13 @@ broadcasting rules (dimensions compared right-to-left; compatible if equal or 1)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 ```
 
-### 2. Lack of Heuristic Modes
+### 2. Prediction Modes and Static Order Rank Alike
 
-**Error**: Missing Heuristic modes A and B
+**Error**: `HeurMode_t::A`, `HeurMode_t::B` and `HeurMode_t::FALLBACK` select the same engine order
 
-**Cause**: The heuristic implementation in hipDNN has yet to be implemented
+**Cause**: Mode A ranks engines by their graph-level UHD prediction; mode B prefers a calibrated configuration prediction and falls back to the graph-level prediction for each engine. Neither benchmarks the graph. The frontend forwards the requested mode to the backend as `HIPDNN_HEUR_MODE_A`, `HIPDNN_HEUR_MODE_B` or `HIPDNN_HEUR_MODE_FALLBACK`, and the mode selects the heuristic descriptor's policy list: `SelectionHeuristic::Config`, then `SelectionHeuristic::ModeA` (mode A) or `SelectionHeuristic::ModeB` (mode B), then `SelectionHeuristic::StaticOrdering`. `HeurMode_t::FALLBACK` is model-free: `SelectionHeuristic::Config`, then `SelectionHeuristic::StaticOrdering`. If no applicable engine has a usable prediction for the ranking metric (`tflops` by default, see `graph::set_ranking_metric()`), the prediction policy declines and static engine selection runs, so plan creation does not fail for want of a model; in that case `A`, `B` and `FALLBACK` legitimately rank alike. `HIPDNN_HEUR_POLICY_ORDER` overrides the whole policy list and `HIPDNN_HEUR_RANKING_METRIC` the ranking metric. When a list of modes is given, the frontend queries once per mode in the order given and concatenates the results, skipping an engine an earlier mode already returned; `{A, FALLBACK}` is therefore `A`'s ranking. An empty list is an error. cudnn-frontend has no default mode list; hipDNN's is `{HeurMode_t::A}`, so a call that names no mode ranks by prediction where a model exists. Pass `{HeurMode_t::FALLBACK}` for the static order.
 
-**Fix**: Use a combination of `graph::get_ranked_engine_ids()` and `graph::set_preferred_engine_id_ext()` if you need more detailed control over engine selection.
+**Fix**: Install compatible trained models for the selected device architecture. For direct control over engine selection, combine `graph::get_ranked_engine_ids()` and `graph::set_preferred_engine_id_ext()`.
 
 ### 3. Device Memory Utilities
 

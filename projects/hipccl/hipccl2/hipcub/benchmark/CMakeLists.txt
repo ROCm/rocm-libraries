@@ -23,6 +23,10 @@
 # Force CMake to find Git immediately so ${GIT_EXECUTABLE} is populated
 find_package(Git REQUIRED)
 
+if(NOT WIN32 AND NOT HIP_COMPILER STREQUAL "nvcc")
+  find_package(amd_smi REQUIRED)
+endif()
+
 # Get the current branch, or fall back to DETACHED
 execute_process(
   COMMAND ${GIT_EXECUTABLE} symbolic-ref -q --short HEAD

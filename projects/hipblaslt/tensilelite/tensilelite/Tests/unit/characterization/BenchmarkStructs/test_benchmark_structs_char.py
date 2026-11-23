@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``Tensile.BenchmarkStructs``: the pure parameter
+"""Characterization tests for ``tensilelite.BenchmarkStructs``: the pure parameter
 helpers, the fork-permutation cartesian product, and ``BenchmarkStep``. The
 ``BenchmarkProcess`` config->steps integration builder needs full benchmark
 configs (see target.md)."""
@@ -13,7 +13,7 @@ import types
 
 import pytest
 
-B = importlib.import_module("Tensile.BenchmarkStructs")
+B = importlib.import_module("tensilelite.BenchmarkStructs")
 
 pytestmark = pytest.mark.unit
 

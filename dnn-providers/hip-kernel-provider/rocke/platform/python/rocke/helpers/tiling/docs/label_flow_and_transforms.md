@@ -4,6 +4,9 @@ How a datum's **identity** moves through a kernel's dataflow: `global → LDS �
 store`. General to ANY tiling kernel (GEMM, elementwise, conv, SDPA). The atom-local case (POSITION ≠ LABEL at
 one MMA output) is in `mma_is_machinery.md`; this generalizes it across spaces.
 
+A "transform" here is a **fragment transform** (a datum moves between register / LDS positions). A
+**coordinate transform** (loop coordinates -> tensor coordinates) is a different thing: `tensor_transforms_api.md`.
+
 ## The law
 
 > **A LABEL is a datum's identity. It flows INVARIANT. A transform changes WHERE a datum lives (its

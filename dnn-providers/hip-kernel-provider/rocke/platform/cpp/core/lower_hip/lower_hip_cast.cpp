@@ -33,24 +33,6 @@ static const rocke_value_t* h_res(const rocke_op_t* op)
 
 /* ----------------------------- arith: int width casts ---------------------- */
 
-static const char* h_unsigned_int_type(const rocke_type_t* t)
-{
-    const char* name = t ? t->name : NULL;
-    if(!name)
-        return NULL;
-    if(__builtin_strcmp(name, "i1") == 0)
-        return "bool";
-    if(__builtin_strcmp(name, "i8") == 0 || __builtin_strcmp(name, "u8") == 0)
-        return "uint8_t";
-    if(__builtin_strcmp(name, "i16") == 0)
-        return "uint16_t";
-    if(__builtin_strcmp(name, "i32") == 0)
-        return "uint32_t";
-    if(__builtin_strcmp(name, "i64") == 0)
-        return "uint64_t";
-    return NULL;
-}
-
 /* Zero extension must cast through the unsigned spelling of the source type.
  * A direct int8_t -> int/int64_t cast sign-extends bytes 0x80..0xff. */
 static rocke_status_t rocke_h_op_arith_zext(rocke_h_lowerer_t* lw, const rocke_op_t* op)
@@ -58,7 +40,7 @@ static rocke_status_t rocke_h_op_arith_zext(rocke_h_lowerer_t* lw, const rocke_o
     const rocke_value_t* v = op->operands[0];
     const rocke_value_t* r = h_res(op);
     const char* t = rocke_h_type_to_hip(lw, r->type);
-    const char* source_unsigned = h_unsigned_int_type(v->type);
+    const char* source_unsigned = rocke_h_unsigned_int_type(v->type);
     if(!source_unsigned)
     {
         return rocke_h_fail(lw,
@@ -208,10 +190,12 @@ static rocke_status_t rocke_h_op_arith_sitofp_f32(rocke_h_lowerer_t* lw, const r
 
 /* def _op_arith_uitofp_f32(self, op):
  *     # u8 -> f32: a uint8_t converts exactly.
+ *     _refuse_non_u8_source(op)
  *     (v,) = op.operands
  *     self._emit(f"float {_name(op.result)} = (float){_name(v)};") */
 static rocke_status_t rocke_h_op_arith_uitofp_f32(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
+    rocke_i_refuse_non_u8_source(op);
     const rocke_value_t* v = op->operands[0];
     const rocke_value_t* r = h_res(op);
     rocke_h_emitf(lw, "float %s = (float)%s;", rocke_h_name(lw, r), rocke_h_name(lw, v));

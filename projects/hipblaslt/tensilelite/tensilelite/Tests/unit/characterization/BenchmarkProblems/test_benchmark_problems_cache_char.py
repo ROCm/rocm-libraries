@@ -1,5 +1,5 @@
 ################################################################################
-# Characterization tests for Tensile.BenchmarkProblems — cache helper layer.
+# Characterization tests for tensilelite.BenchmarkProblems — cache helper layer.
 #
 # ADD-ONLY. BenchmarkProblems.py is a benchmark build/run orchestrator that pulls
 # in KernelWriter / ClientWriter / KernelWriterAssembly / Assembler (codegen +
@@ -18,7 +18,7 @@ import yaml
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("Tensile.BenchmarkProblems")
+M = importlib.import_module("tensilelite.BenchmarkProblems")
 
 
 def _step(**over):
@@ -54,6 +54,24 @@ def test_cache_data_matches_false():
     step = _step()
     other = _cache_dict(_step(forkParams={"b": 999}))
     assert M._cacheDataMatches(other, step) is False
+
+
+def test_contiguous_a_default_separates_legacy_cache():
+    from copy import deepcopy
+    from tensilelite.BenchmarkStructs import BenchmarkProcess
+
+    step = BenchmarkProcess(
+        {"OperationType": "GEMM", "DataType": "S"},
+        {"BenchmarkCommonParameters": [],
+         "BenchmarkFinalParameters": [{"ProblemSizes": [{"Exact": [16, 16, 16]}]}]},
+        False, gfxName="gfx1250",
+    )[0]
+    assert step.constantParams["WaveTileContiguousA"] is False
+    legacy = deepcopy(step)
+    del legacy.constantParams["WaveTileContiguousA"]
+    assert M._computeCacheKey(step, ["gfx1250"]) != M._computeCacheKey(legacy, ["gfx1250"])
+    assert M._cacheDataMatches(_cache_dict(legacy), step) is False
+    assert M._cacheDataMatches(_cache_dict(step), step) is True
 
 
 def test_cache_data_rejects_older_kernel_naming():

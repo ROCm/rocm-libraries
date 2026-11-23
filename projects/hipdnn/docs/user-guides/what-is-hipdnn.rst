@@ -57,7 +57,7 @@ Components
 
 - **Frontend**: A header-only C++ library that provides the industry-standard API for interacting with hipDNN. The frontend wraps the backend C API to provide a more user-friendly C++ interface.
 - **Backend**: A shared library that provides a C API for hipDNN. The backend is the core component of hipDNN. It acts as a plugin loader and manager, connecting problems to engines (provided via plugins) that can solve them.
-- **SDKs**: Header-only libraries that provide shared utilities and interfaces. hipDNN provides three SDKs: the Data SDK (graph schemas and data structures), Plugin SDK (plugin API and utilities), and Test SDK (testing utilities and CPU reference implementations).
+- **SDKs**: Header-only libraries that provide shared utilities and interfaces. hipDNN provides four SDKs: the Data SDK (shared types, tensor and memory utilities), FlatBuffers SDK (graph schemas and data structures), Plugin SDK (plugin API and utilities), and Test SDK (testing utilities and CPU reference implementations).
 - **Plugins**: Plugins provide additional operational support or performance improvements.
 
 Engine provider plugins

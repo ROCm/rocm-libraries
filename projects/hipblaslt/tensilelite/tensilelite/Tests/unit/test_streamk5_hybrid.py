@@ -8,13 +8,13 @@ is covered by sk_hybrid.yaml kernel tests.
 """
 
 # Prime the component registry before StreamK imports (avoids circular import).
-from Tensile.KernelWriterAssembly import KernelWriterAssembly  # noqa: F401
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly  # noqa: F401
 
 from rocisa.instruction import SAndB32, SLShiftLeftB32, SLShiftRightB32, SXorB32
 
-from Tensile.Common.ValidParameters import validParameters
-from Tensile.Components.TileProcessingStrategy import TileProcessingStrategy
-from Tensile.Components.StreamK import (
+from tensilelite.Common.ValidParameters import validParameters
+from tensilelite.Components.TileProcessingStrategy import TileProcessingStrategy
+from tensilelite.Components.StreamK import (
     StreamK,
     StreamKHybrid,
     StreamKTwoTileDPFirst,

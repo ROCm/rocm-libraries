@@ -20,6 +20,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+if(NOT WIN32)
+  find_package(amd_smi REQUIRED)
+endif()
+
 option(BENCHMARK_CONFIG_TUNING "Benchmark device-level functions using various configs" OFF)
 option(BENCHMARK_AUTOTUNED_TYPES_ONLY "Benchmark autotuned types only, which lowers the benchmarking runtime" OFF)
 

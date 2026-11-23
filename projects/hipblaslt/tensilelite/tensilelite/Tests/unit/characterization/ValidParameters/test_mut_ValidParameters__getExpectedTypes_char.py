@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """Mutation-targeted characterization tests for
-``Tensile.Common.ValidParameters._getExpectedTypes``.
+``tensilelite.Common.ValidParameters._getExpectedTypes``.
 
 These pin the helper's current behavior: it skips the ``-1`` sentinel, rejects
 empty lists and invalid scalar values (raising ``ValueError``), and builds a
@@ -14,7 +14,7 @@ from ``int``.
 
 import pytest
 
-from Tensile.Common.ValidParameters import _getExpectedTypes
+from tensilelite.Common.ValidParameters import _getExpectedTypes
 
 pytestmark = pytest.mark.unit
 

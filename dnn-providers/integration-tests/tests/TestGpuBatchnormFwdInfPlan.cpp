@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "harness/CpuReferenceGraphExecutorAdapter.hpp"
 #include "harness/gpu-graph-executor/detail/GpuBatchnormFwdInfPlan.hpp"
 #include "harness/gpu-graph-executor/detail/GpuPlanBuilderRegistry.hpp"
 #include <hipdnn-gpu-ref/GpuFpReferenceCommon.hpp>
@@ -13,7 +14,6 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
@@ -269,7 +269,7 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
     cpuVariantPack[nodeAttributes->mean_tensor_uid()] = meanTensor.rawHostData();
     cpuVariantPack[nodeAttributes->inv_variance_tensor_uid()] = invVarianceTensor.rawHostData();
 
-    CpuReferenceGraphExecutor cpuExecutor;
+    hipdnn_integration_tests::CpuReferenceGraphExecutorAdapter cpuExecutor;
     cpuExecutor.execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), cpuVariantPack);
     cpuY.markHostModified();
 
