@@ -23,10 +23,6 @@ import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence, Tuple
 
-import numpy as np
-
-from ..numeric.storage import host_dtype
-
 if TYPE_CHECKING:
     from .device_array import ArrayInfo
 
@@ -183,6 +179,10 @@ def torch_host_values(tensor: Any):
     types numpy has no type for (bf16, fp8, FNUZ fp8) come back as raw bits of
     the same width. Only reached with a live tensor, so torch is already
     imported."""
+    import numpy as np
+
+    from ..numeric.storage import host_dtype
+
     info = torch_array_info(tensor)
     torch = sys.modules["torch"]
     flat = tensor.detach().contiguous().cpu().reshape(-1)
@@ -214,6 +214,8 @@ def torch_strided_view(tensor: Any, shape: Sequence[int], strides: Sequence[int]
 def torch_device_values(values, *, device: Any):
     """A torch tensor on ``device`` holding the host numpy ``values`` (the torch
     side of :func:`rocke.runtime.device_array.device_values`)."""
+    import numpy as np
+
     torch = sys.modules["torch"]
     return torch.from_numpy(np.ascontiguousarray(values)).to(device)
 
