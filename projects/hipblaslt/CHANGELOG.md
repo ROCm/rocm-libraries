@@ -6,6 +6,18 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
+* Extension API `hipblaslt_ext::experimental::PartitionedGemm` that runs one GEMM as slices on the devices of
+  a partitioned GPU (for example, a device in DPX mode; gfx1250 only, `setProblem` returns
+  `HIPBLAS_STATUS_NOT_SUPPORTED` elsewhere), with one handle, stream, and workspace per partition,
+  `SplitDim::M`, `SplitDim::N` or `SplitDim::Batch`, and one pointer per partition for each
+  matrix (the same pointer shares a matrix, different pointers replicate it). hipBLASLt
+  allocates and copies nothing and does not enable peer access: every partition's slices must be
+  accessible from its device, otherwise the run faults like any GEMM given an inaccessible pointer.
+  Only plain GEMM is supported; the device user arguments overloads return `HIPBLAS_STATUS_NOT_SUPPORTED`.
+  This is a beta API: it may change in a future release.
+  Added `hipblaslt-bench --partitions N --split_dim M|N|B` (which runs `testing_matmul` through
+  `PartitionedGemm` with the same data, reference and verification), the `partitioned_gemm_ext`
+  tests in `hipblaslt-test` and `samples/31_hipblaslt_gemm_partitioned_ext`.
 * Device scalar alpha on gfx1250 through
   `HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_SCALAR_BETA_HOST_EXT`, Extension API
   `GemmInputs::setScaleAlphaScalar()` / `getScaleAlphaScalar()`, and
@@ -28,6 +40,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Fixed `hipblaslt-bench` and `hipblaslt-test` rejecting a compute-input type override for A alone and accepting an unsupported override for B alone.
 * Fixed `hipblasLtMatmul` and `hipblaslt_ext::Gemm::initialize` accepting an algo for a grouped GEMM solution, and `hipblaslt_ext::GroupedGemm::initialize` accepting one for a non-grouped solution. They now return `HIPBLAS_STATUS_INVALID_VALUE`.
 * Fixed `hipblaslt_ext::GroupedGemm::initialize` with `useUserArgs = false` accepting an algo for a hand-written kernel (gfx942 only) whose problem predicates a GEMM of the group fails. It now returns `HIPBLAS_STATUS_INVALID_VALUE`, as `hipblaslt_ext::Gemm::initialize` does. With `useUserArgs = true` the sizes come from device memory and are not checked.
+* Fixed `hipblasLtMatrixLayoutSetAttribute` accepting a `HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE` value that is not a `hipblasLtBatchMode_t`. A matmul with such a layout ran its main kernel in strided mode, but the GSU output-conversion kernel read C and D as pointer arrays. It now returns `HIPBLAS_STATUS_INVALID_VALUE`.
 * Fixed the extension API examples that passed `stream` as the `useUserArgs` argument of `initialize`, and the device user arguments examples that ran with an undefined buffer.
 * Fixed `hipblaslt.h`, `hipblaslt-ext-op.h`, and `hipblaslt-local-kernel.h` failing to compile in a C translation unit. The C++ standard library includes, the default member initializers in `hipblasLtMatmulHeuristicResult_t`, the `static_cast` in the `*_INVALID` macros, and the C++-only `hipblaslt_e8.h` and `hipblaslt_e5m3.h` types now apply only to C++. In C, the `HIP_R_*_EXT` type ids are enumeration constants, so two C files that include the headers no longer fail to link with duplicate symbols. C++ consumers see no change.
 

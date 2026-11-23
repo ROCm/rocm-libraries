@@ -36,10 +36,14 @@ from codegen_common import (
     GFX1250_ARCH,  # noqa: F401 (re-exported)
     GEMM_TDM_CSHUFFLE_PIPELINES,
     GFX1250_ONLY_PIPELINES,
+    TDM_EPILOGUES,
     TDM_PAD_REJECT_REASON,  # noqa: F401 (re-exported)
     TDM_PIPELINES,
     COMP_TDM_V3,
     tdm_pipeline_epilogue,
+    TDM_STAGED_EPILOGUE,
+    TDM_STAGED_LAYOUT_REJECT_REASON,  # noqa: F401 (re-exported)
+    tdm_staged_layout_reject_reason,
     gfx1250_comp_async_8bit_warp_tile_k_rejected,  # noqa: F401 (re-exported)
     gfx1250_fp32_tile_reject_reason,
     gfx1250_pipeline_reject_reason,
@@ -91,10 +95,6 @@ log = logging.getLogger(__name__)
 # The gfx1250 pipeline constants (TDM_PIPELINES, GFX1250_ONLY_PIPELINES, the
 # reject reasons) live in codegen_common next to gfx1250_pipeline_reject_reason
 # so the codegen, arch_filter and python/gemm_utils share one rule set.
-
-
-def _is_power_of_two(x: int) -> bool:
-    return x > 0 and (x & (x - 1)) == 0
 
 
 # ============================================================================
@@ -679,9 +679,9 @@ using ADataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.datatype]};
 using BDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.datatype]};
 using CDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[output_dtype]};
 using AccDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[acc_dtype]};
-// Layout aliases in the global namespace so single-kernel consumers (the
-// ctypes lib's fallback key derivation and the preshuffle B-shuffle) can query
-// this kernel's operand layouts by type.
+// Layout aliases in the global namespace so single-kernel consumers (e.g. the
+// ctypes lib's preshuffle B-shuffle) can query this kernel's operand layouts by
+// type.
 {self._multi_abd_global_exports(config, ns_name)}
 using ALayout = {ns_name}::ALayout;
 using BLayout = {ns_name}::BLayout;
@@ -762,7 +762,7 @@ using CLayout = {ns_name}::CLayout;
     def _tdm_k_batch_guard(self, config: KernelConfig, indent: str) -> str:
         """Host-side split-K guard for the TDM pipelines (empty otherwise).
 
-        TdmEpilogue ignores the memory operation, so k_batch > 1 would leave a
+        The TDM epilogues ignore the memory operation, so k_batch > 1 would leave a
         partial C without any error. GEMM_TDM_CSHUFFLE_PIPELINES on cshuffle can
         split K, and GemmKernel::IsSupportedArgument checks it, as in the Tile
         Engine instance builder.
@@ -1386,7 +1386,7 @@ using CLayout = {ns_name}::CLayout;
 
     def _epilogue_code(self, config: KernelConfig) -> str:
         """Generate epilogue code"""
-        if config.trait.epilogue == "tdm":
+        if config.trait.epilogue in TDM_EPILOGUES:
             return self._tdm_epilogue_code(config)
         if config.variant == GemmVariant.BATCHED:
             # Respect the requested epilogue: the batched sweep space includes
@@ -1469,18 +1469,27 @@ using CLayout = {ns_name}::CLayout;
         using GemmEpilogue = DefaultGemm2DEpilogue<EpilogueProblem>;"""
 
     def _tdm_epilogue_code(self, config: KernelConfig) -> str:
-        """TdmEpilogue over the CShuffle problem (gfx1250 TDM pipelines only).
+        """TDM epilogue over the CShuffle problem (gfx1250 TDM pipelines only).
 
-        Only the plain, preshuffle, batched and Stream-K GEMM variants can host it:
-        TdmEpilogue has no D tensors and ignores the split-K memory operation
-        (Stream-K pairs it with linear/tree reduction only, see
-        streamk_trait_reject_reason).
+        "tdm" emits TdmEpilogue; "tdmstaged" emits
+        TdmEpilogueStagedForPipeline<EpilogueProblem, 1, GemmPipeline>, so every
+        launcher must define GemmPipeline before the epilogue. Only the plain,
+        preshuffle and batched GEMM variants can host both; Stream-K hosts tdm only
+        (its launcher names the pipeline SkGemmPipeline, and it pairs tdm with
+        linear/tree reduction only, see streamk_trait_reject_reason). The TDM
+        epilogues have no D tensors and ignore the split-K memory operation.
         """
+        epilogue = config.trait.epilogue
         if config.trait.pipeline not in TDM_PIPELINES:
             raise ValueError(
-                f"epilogue=tdm requires a TDM pipeline {TDM_PIPELINES}, "
+                f"epilogue={epilogue} requires a TDM pipeline {TDM_PIPELINES}, "
                 f"got {config.trait.pipeline}"
             )
+        staged_reason = tdm_staged_layout_reject_reason(epilogue, self.layout)
+        if staged_reason:
+            raise ValueError(staged_reason)
+        if epilogue == TDM_STAGED_EPILOGUE and config.variant == GemmVariant.STREAM_K:
+            raise ValueError(f"epilogue={epilogue} is not supported for stream_k")
         if config.variant == GemmVariant.BATCHED:
             transpose_c = "UniversalGemmProblem::TransposeC"
             num_wave_groups = "1"
@@ -1493,8 +1502,13 @@ using CLayout = {ns_name}::CLayout;
             num_wave_groups = "NumWaveGroups"
         else:
             raise ValueError(
-                f"epilogue=tdm is not supported for GEMM variant {config.variant.value}"
+                f"epilogue={epilogue} is not supported for GEMM variant {config.variant.value}"
             )
+        gemm_epilogue = (
+            "TdmEpilogueStagedForPipeline<EpilogueProblem, 1, GemmPipeline>"
+            if epilogue == TDM_STAGED_EPILOGUE
+            else "TdmEpilogue<EpilogueProblem>"
+        )
         return f"""
         using EpilogueProblem = CShuffleEpilogueProblem<
             ADataType, BDataType, tuple<>, AccDataType, CDataType,
@@ -1502,7 +1516,7 @@ using CLayout = {ns_name}::CLayout;
             TilePartitioner::MPerBlock, TilePartitioner::NPerBlock,
             WarpPerBlock_M, WarpPerBlock_N, WarpTileM, WarpTileN, WarpTileK,
             {transpose_c}, {num_wave_groups}, false, 1, 1, DoubleSmemBuffer>;
-        using GemmEpilogue = TdmEpilogue<EpilogueProblem>;"""
+        using GemmEpilogue = {gemm_epilogue};"""
 
 
 # ============================================================================
@@ -1708,8 +1722,8 @@ class UnifiedGemmCodegen:
 
         # Match tile_engine default configs for GEMM/Preshuffle/Multi-D
         # See: tile_engine/ops/gemm/configs/default_config.json
-        #      tile_engine/ops/gemm_preshuffle/configs/default_config.json
-        #      tile_engine/ops/gemm_multi_d/configs/default_config.json
+        #      tile_engine/ops/gemm/gemm_preshuffle/configs/default_config.json
+        #      tile_engine/ops/gemm/gemm_multi_d/configs/default_config.json
         return {
             "tile_config": {
                 # tile_m/n/k: 64-256 step 64 = [64, 128, 192, 256]
@@ -2178,7 +2192,7 @@ class UnifiedGemmCodegen:
     def _gfx1250_pipeline_reject_reason(
         self, tile: TileConfig, trait: TraitConfig, variant: GemmVariant
     ) -> str:
-        """Why a comp_async / comp_tdm* / tdm-epilogue config is rejected.
+        """Why a comp_async / comp_tdm* / TDM-epilogue config is rejected.
 
         Returns an empty string when the config is accepted. Delegates to
         codegen_common.gfx1250_pipeline_reject_reason, the rule set shared with
@@ -2236,7 +2250,8 @@ class UnifiedGemmCodegen:
             scheduler: Trait scheduler to validate against (defaults to
                 ``intrawave`` for the same reason).
             epilogue: Trait epilogue to validate against (defaults to ``tdm``
-                for the TDM pipelines, which require it, else ``cshuffle``).
+                for the TDM pipelines, which require a TDM epilogue, else
+                ``cshuffle``).
             num_slots: comp_tdm_pc ring slots (0 = default), for the LDS budget.
         """
         if not self.arch_filter or not HAS_ARCH_FILTER:
