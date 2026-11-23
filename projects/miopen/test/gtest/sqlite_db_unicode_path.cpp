@@ -21,6 +21,7 @@
 #include <miopen/sqlite_db.hpp>
 #include <gtest/gtest.h>
 
+#include <ostream>
 #include <string>
 #include <vector>
 
@@ -36,13 +37,23 @@ namespace fs = miopen::fs;
 
 namespace {
 
-class UnicodeDir : public ::testing::TestWithParam<std::u8string>
+// gtest prints each test parameter. Printing a std::u8string needs gtest itself built as C++20
+// (testing::internal::PrintU8StringTo), so the parameter is a struct with its own PrintTo.
+struct DirName
+{
+    const char* label;
+    std::u8string utf8;
+};
+
+void PrintTo(const DirName& name, std::ostream* os) { *os << name.label; }
+
+class UnicodeDir : public ::testing::TestWithParam<DirName>
 {
 protected:
     void SetUp() override
     {
         dir =
-            fs::temp_directory_path() / (u8"miopen_sqlite_" + GetParam() + u8"_" +
+            fs::temp_directory_path() / (u8"miopen_sqlite_" + GetParam().utf8 + u8"_" +
                                          fs::path(std::to_string(MIOPEN_TEST_GETPID())).u8string());
         fs::remove_all(dir);
         ASSERT_TRUE(fs::create_directories(dir));
@@ -65,11 +76,12 @@ class CPU_KernDbUnicodePath_NONE : public UnicodeDir
 {
 };
 
-const auto kDirNames = testing::Values(u8"ascii",
-                                       u8"Jos\u00e9",          // in the Windows-1252 code page
-                                       u8"\u9648\u9e4f\u5b87", // CJK, as in issue #11903
-                                       u8"\u674e1",            // UTF-8 not valid as GBK
-                                       u8"\u738b \u4f1f");     // UTF-8 not valid as GBK
+const auto kDirNames =
+    testing::Values(DirName{"ascii", u8"ascii"},
+                    DirName{"U+00E9", u8"Jos\u00e9"},             // in the Windows-1252 code page
+                    DirName{"CJK", u8"\u9648\u9e4f\u5b87"},       // CJK, as in issue #11903
+                    DirName{"U+674E_1", u8"\u674e1"},             // UTF-8 not valid as GBK
+                    DirName{"U+738B_U+4F1F", u8"\u738b \u4f1f"}); // UTF-8 not valid as GBK
 
 } // namespace
 
