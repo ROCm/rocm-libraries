@@ -151,6 +151,13 @@ END_HIPCUB_NAMESPACE
 #define HIPCUB_CLANG_SUPPRESS_WARNING_WITH_PUSH(w)
 #endif // __clang__
 
+// Used by libhipcxx.
+#define HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH     \
+    HIPCUB_CLANG_SUPPRESS_WARNING_PUSH            \
+    HIPCUB_CLANG_SUPPRESS_WARNING("-Wdeprecated") \
+    HIPCUB_CLANG_SUPPRESS_WARNING("-Wdeprecated-declarations")
+#define HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP HIPCUB_CLANG_SUPPRESS_WARNING_POP
+
 /// hipCUB error reporting macro (prints error messages to stderr)
 #if (defined(DEBUG) || defined(_DEBUG)) && !defined(HIPCUB_STDERR)
     #define HIPCUB_STDERR

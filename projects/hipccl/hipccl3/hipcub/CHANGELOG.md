@@ -79,8 +79,6 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
   * `HIPCUB_TEMPLATE`
   * `HIPCUB_ASSERT`
   * `HIPCUB_ASSERT_CUDA_API`
-  * `HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH`
-  * `HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP`
   * `HIPCUB_HOST`
   * `HIPCUB_DEVICE`
   * `HIPCUB_HOST_DEVICE`
