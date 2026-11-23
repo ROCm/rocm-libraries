@@ -99,7 +99,7 @@ from kernels.common.attention_bwd import (
     lds_plan,
     register_estimates,
 )
-from kernels.common.attention_bwd_dq import validate_attn_bwd_dq_spec
+from kernels.common.attention_bwd_dq import AttnBwdDqSpec, validate_attn_bwd_dq_spec
 from kernels.common.attention_bwd_plan import AUX_KNOBS, DQ_KNOBS
 from kernels.common.attention_bwd_plan import RUNTIME_KNOBS as PLAN_RUNTIME_KNOBS
 
@@ -594,10 +594,41 @@ def rule_token(message: str) -> str:
     return "coupling"
 
 
-@cache
-def _legality(sl: SliceKey, knobs: tuple, runtime: tuple) -> Legality:
+def legality(c: Candidate) -> Legality:
     """The registry's legality (the family validator, then the emission
-    check), plus the register estimates and the LDS footprint."""
+    check), plus the register estimates and the LDS footprint.
+
+    Composed from two memos so a structure search holds one entry per kernel,
+    not one per candidate: the main kernel's legality (:func:`_main_legality`,
+    shared by every dQ variant of one main structure; the register estimates
+    and the LDS footprint are the main kernel's) and, on a split point, the dQ
+    kernel's validation (:func:`_validated_dq`, shared by every main structure
+    that builds the same dQ kernel)."""
+    main_knobs = tuple(kv for kv in c.knobs if kv[0] not in DQ_KNOBS)
+    main = _main_legality(c.slice, main_knobs, c.runtime)
+    if not main.ok:
+        return main
+    s = main.resolved
+    dq_knobs = c.dq_knobs()
+    if s.dq_mode == "split":
+        # the dQ kernel the plan builds for this main spec, validated alike
+        try:
+            dq_spec = s.dq_spec(**dq_knobs)
+        except ValueError as ex:
+            return Legality(False, "dq_" + rule_token(str(ex)), str(ex)[:300], s)
+        dq, error = _validated_dq(dq_spec, c.slice.arch)
+        if dq is None:
+            return Legality(False, "dq_" + rule_token(error), error[:300], s)
+        return replace(main, dq=dq)
+    if dq_knobs:
+        return Legality(False, "coupling", "dQ kernel knobs need dq_mode='split'", s)
+    return main
+
+
+@cache
+def _main_legality(sl: SliceKey, knobs: tuple, runtime: tuple) -> Legality:
+    """:func:`legality` of the main kernel alone (``knobs`` without the dQ
+    kernel's, :data:`DQ_KNOBS`, which are not main spec fields)."""
     c = Candidate(sl, knobs, runtime)
     try:
         spec = c.spec()
@@ -613,16 +644,6 @@ def _legality(sl: SliceKey, knobs: tuple, runtime: tuple) -> Legality:
         bad = _dense_problem(c, s)
         if bad is not None:
             return Legality(False, bad[0], bad[1][:300], s)
-    dq = None
-    dq_knobs = c.dq_knobs()
-    if s.dq_mode == "split":
-        # the dQ kernel the plan builds for this main spec, validated alike
-        try:
-            dq = validate_attn_bwd_dq_spec(s.dq_spec(**dq_knobs), sl.arch)
-        except ValueError as ex:
-            return Legality(False, "dq_" + rule_token(str(ex)), str(ex)[:300], s)
-    elif dq_knobs:
-        return Legality(False, "coupling", "dQ kernel knobs need dq_mode='split'", s)
     est = register_estimates(s, sl.arch)
     return Legality(
         True,
@@ -632,12 +653,17 @@ def _legality(sl: SliceKey, knobs: tuple, runtime: tuple) -> Legality:
         est["arch_vgpr"],
         est["agpr"],
         lds_footprint_bytes(s, sl.arch),
-        dq,
     )
 
 
-def legality(c: Candidate) -> Legality:
-    return _legality(c.slice, c.knobs, c.runtime)
+@cache
+def _validated_dq(spec: AttnBwdDqSpec, arch: str) -> tuple[AttnBwdDqSpec | None, str]:
+    """``(resolved split dQ spec, "")``, or ``(None, the validator's
+    message)``."""
+    try:
+        return validate_attn_bwd_dq_spec(spec, arch), ""
+    except ValueError as ex:
+        return None, str(ex)
 
 
 def effective_key(c: Candidate) -> str:
