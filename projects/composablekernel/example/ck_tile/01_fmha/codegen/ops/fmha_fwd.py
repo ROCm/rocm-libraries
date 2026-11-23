@@ -2050,6 +2050,13 @@ GFX125_D64_SCHED_M64_CONSTRAINT = CppConstraint(
     " || (get_num_blocks(128) <= num_cus && a.max_seqlen_q >= 2048)"
 )
 
+# D128 scheduled M64: the same grid rule as D64, kept as its own value because each head dim's
+# crossover is an independent measurement. Not yet re-measured for D128.
+GFX125_D128_SCHED_M64_CONSTRAINT = CppConstraint(
+    "get_num_blocks(128) < num_cus"
+    " || (get_num_blocks(128) <= num_cus && a.max_seqlen_q >= 2048)"
+)
+
 # GenericAttentionMask causal has a different measured crossover from the
 # simplified mask. Its non-local specialization must not accept finite windows.
 GFX125_D64_N128_GENERIC_CAUSAL_CONSTRAINT = CppConstraint(
@@ -2113,6 +2120,14 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         ),
         (128, 128): (
             FmhaFwdTileSize(128, 128, 32, 128, 32, 128, 4, 1, 1, 4, 1, 1, 16, 16, 32, 16, 16, 32, 1),
+            # M64: four waves of 16 query rows, N128 as for D64.
+            FmhaFwdTileSize(
+                64, 128, 32, 128, 32, 128,
+                4, 1, 1, 4, 1, 1,
+                16, 16, 32, 16, 16, 32,
+                1,
+                F_constraint=CppConstraint() & GFX125_D128_SCHED_M64_CONSTRAINT,
+            ),
         ),
         (192, 128): (
             FmhaFwdTileSize(
@@ -2495,6 +2510,8 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 result[(128, 128)].extend(
                     copy.deepcopy(cls._QR_TDM_SCHED_TILES[(128, 128)])
                 )
+                # As for D64: ascending bm0, the stable sort keeps each pipeline's order.
+                result[(128, 128)].sort(key=lambda tile: tile.F_bm0)
                 result[(192, 128)].extend(
                     copy.deepcopy(cls._QR_TDM_SCHED_TILES[(192, 128)])
                 )
