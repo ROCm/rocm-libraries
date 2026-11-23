@@ -1032,8 +1032,7 @@ TEST_F(HostInternalBranches, hip_error_macros)
     const std::string      detected
         = "hip error detected: code '" + std::to_string(static_cast<int>(error))
           + "', name 'hipErrorInvalidDevice', description '" + hipGetErrorString(error) + "'";
-    const std::string message  = "macro message, ";
-    const std::string throwing = "throwing exception due to ";
+    const std::string message = "macro message, ";
 
     struct Case
     {
@@ -1052,11 +1051,11 @@ TEST_F(HostInternalBranches, hip_error_macros)
             [](hipError_t e, int& l) { return int(return_with_message_if_hip_error(e, l)); },
             mapped},
            {"throw_if_hip_error",
-            throwing + detected,
+            detected,
             [](hipError_t e, int& l) { return int(throw_if_hip_error(e, l)); },
             mapped},
            {"throw_with_message_if_hip_error",
-            message + throwing + detected,
+            message + detected,
             [](hipError_t e, int& l) { return int(throw_with_message_if_hip_error(e, l)); },
             mapped},
            {"forward_if_hip_error",
