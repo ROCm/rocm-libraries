@@ -195,6 +195,9 @@ void RunInstance(const Instance& inst, uint32_t batch, uint32_t height, uint32_t
 
     auto src_dev = handle.Write(src);
     auto dst_dev = handle.Write(dst);
+    // the host copy of the sentinel buffer is not needed any more (the result is read back into
+    // it below): this keeps the largest tests at two host copies of the tensor, not three
+    std::vector<T>().swap(dst);
 
     // the arguments and the grid of BatchedTransposeSolution
     const uint32_t dim_h     = (height + inst.tile_y - 1) / inst.tile_y;
