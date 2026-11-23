@@ -40,22 +40,10 @@
 #include <type_traits>
 
 using namespace level2;
+using rocsparse_ut::dt_of;
 
 namespace
 {
-    template <typename T>
-    struct is_complex : std::false_type
-    {
-    };
-    template <>
-    struct is_complex<rocsparse_float_complex> : std::true_type
-    {
-    };
-    template <>
-    struct is_complex<rocsparse_double_complex> : std::true_type
-    {
-    };
-
     template <typename T>
     constexpr bool is_integer()
     {
@@ -63,20 +51,9 @@ namespace
     }
 
     template <typename T>
-    rocsparse_datatype type_of()
-    {
-        if constexpr(std::is_same<T, int8_t>::value)
-            return rocsparse_datatype_i8_r;
-        else if constexpr(std::is_same<T, int32_t>::value)
-            return rocsparse_datatype_i32_r;
-        else
-            return rocsparse_ut::dt_of<T>();
-    }
-
-    template <typename T>
     T make(int re, int im)
     {
-        if constexpr(is_complex<T>::value)
+        if constexpr(is_complex_v<T>)
             return T(re, im);
         else if constexpr(std::is_same<T, rocsparse_bfloat16>::value)
             return rocsparse_bfloat16(static_cast<float>(re));
@@ -87,7 +64,7 @@ namespace
     template <typename T>
     double real_part(const T& v)
     {
-        if constexpr(is_complex<T>::value)
+        if constexpr(is_complex_v<T>)
             return static_cast<double>(std::real(v));
         else if constexpr(std::is_same<T, rocsparse_bfloat16>::value)
             return static_cast<double>(static_cast<float>(v));
@@ -98,7 +75,7 @@ namespace
     template <typename T>
     double imag_part(const T& v)
     {
-        if constexpr(is_complex<T>::value)
+        if constexpr(is_complex_v<T>)
             return static_cast<double>(std::imag(v));
         else
             return 0.0;
@@ -108,7 +85,7 @@ namespace
     To convert(const From& v)
     {
         using R = typename real_of<To>::type;
-        if constexpr(is_complex<To>::value)
+        if constexpr(is_complex_v<To>)
             return To(static_cast<R>(real_part(v)), static_cast<R>(imag_part(v)));
         else if constexpr(std::is_same<To, rocsparse_bfloat16>::value)
             return rocsparse_bfloat16(static_cast<float>(real_part(v)));
@@ -168,7 +145,7 @@ namespace
     template <typename T>
     std::string type_name()
     {
-        switch(type_of<T>())
+        switch(dt_of<T>())
         {
         case rocsparse_datatype_i8_r:
             return "i8";
@@ -474,8 +451,16 @@ namespace
         gamma_all_zero
     };
 
-    // extra_toggle: 0 leaves the extras enabled, 1 disables them after rocsparse_spmv_set_extra
-    // (the result must not contain them), 2 disables and enables them again.
+    enum toggle_kind
+    {
+        // The extras stay enabled.
+        toggle_none,
+        // Disabled after rocsparse_spmv_set_extra; the result must not contain them.
+        toggle_disabled,
+        // Disabled, then enabled again.
+        toggle_reenabled
+    };
+
     struct extra_case
     {
         rocsparse_spmv_alg  alg          = rocsparse_spmv_alg_default;
@@ -485,7 +470,7 @@ namespace
         special_kind        special      = special_none;
         gamma_kind          gammas       = gamma_nonzero;
         int                 extras       = 0;
-        int                 extra_toggle = 0;
+        toggle_kind         extra_toggle = toggle_none;
         int                 base         = 0;
         bool                device       = false;
     };
@@ -531,8 +516,11 @@ namespace
             , z(c.extras, std::vector<T>(ys))
         {
             // Most of x is zero for the long rows, so that the partial row sums the
-            // algorithms add to a half precision y stay exactly representable.
-            const int32_t x_period = (c.shape == shape_long_rows)     ? 64
+            // algorithms add to a half precision y stay exactly representable. op(A) = A^T
+            // spreads a row over many entries of y, at most 5 terms each, so x stays dense.
+            const bool    tr       = (c.trans != rocsparse_operation_none);
+            const int32_t x_period = tr                               ? 1
+                                     : (c.shape == shape_long_rows)   ? 64
                                      : (c.shape == shape_medium_rows) ? 16
                                                                       : 1;
             for(int32_t i = 0; i < xs; ++i)
@@ -645,7 +633,7 @@ namespace
                                                  rocsparse_ut::it_of<I>(),
                                                  rocsparse_ut::it_of<J>(),
                                                  to_base(base),
-                                                 type_of<A>()),
+                                                 dt_of<A>()),
                       rocsparse_status_success);
             if(a.symmetric)
             {
@@ -655,9 +643,9 @@ namespace
                           rocsparse_status_success);
             }
             EXPECT_EQ(rocsparse_create_dnvec_descr(
-                          &vx.d, static_cast<int64_t>(x.size()), dx.ptr, type_of<X>()),
+                          &vx.d, static_cast<int64_t>(x.size()), dx.ptr, dt_of<X>()),
                       rocsparse_status_success);
-            EXPECT_EQ(rocsparse_create_dnvec_descr(&vy.d, ys, dy.ptr + y_guard, type_of<Y>()),
+            EXPECT_EQ(rocsparse_create_dnvec_descr(&vy.d, ys, dy.ptr + y_guard, dt_of<Y>()),
                       rocsparse_status_success);
         }
 
@@ -682,26 +670,6 @@ namespace
             expect_result<Y>(want, std::vector<Y>(all.begin() + y_guard, all.end() - y_guard));
         }
     };
-
-    // Runs one stage of rocsparse_v2_spmv and returns its status.
-    inline rocsparse_status v2_spmv_stage(rocsparse_handle        handle,
-                                          rocsparse_spmv_descr    descr,
-                                          rocsparse_spmat_descr   A,
-                                          rocsparse_dnvec_descr   x,
-                                          rocsparse_dnvec_descr   y,
-                                          const void*             alpha,
-                                          const void*             beta,
-                                          rocsparse_v2_spmv_stage stage)
-    {
-        size_t           bytes = 0;
-        rocsparse_status st
-            = rocsparse_v2_spmv_buffer_size(handle, descr, A, x, y, stage, &bytes, nullptr);
-        if(st != rocsparse_status_success)
-            return st;
-        device_vector<char> dbuf(std::max<size_t>(bytes, 1));
-        return rocsparse_v2_spmv(
-            handle, descr, alpha, A, x, beta, y, stage, bytes, bytes ? dbuf.ptr : nullptr, nullptr);
-    }
 
     // gamma and z descriptors for rocsparse_spmv_set_extra.
     template <typename T>
@@ -729,12 +697,12 @@ namespace
                           extras,
                           device ? static_cast<void*>(dgamma.ptr)
                                  : static_cast<void*>(const_cast<T*>(gamma.data())),
-                          type_of<T>()),
+                          dt_of<T>()),
                       rocsparse_status_success);
             for(int e = 0; e < extras; ++e)
             {
                 vz.emplace_back();
-                EXPECT_EQ(rocsparse_create_dnvec_descr(&vz.back().d, ys, dz[e].ptr, type_of<T>()),
+                EXPECT_EQ(rocsparse_create_dnvec_descr(&vz.back().d, ys, dz[e].ptr, dt_of<T>()),
                           rocsparse_status_success);
                 zs.push_back(vz.back().d);
             }
@@ -766,8 +734,14 @@ namespace
         const case_data<C> d(c, xs, ys);
 
         const std::vector<std::vector<T>> no_z;
-        const std::vector<T>              want = reference<C>(
-            a, c.trans, d.alpha, d.x, d.beta, d.y0, d.gamma, c.extra_toggle == 1 ? no_z : d.z);
+        const std::vector<T>              want = reference<C>(a,
+                                                 c.trans,
+                                                 d.alpha,
+                                                 d.x,
+                                                 d.beta,
+                                                 d.y0,
+                                                 d.gamma,
+                                                 c.extra_toggle == toggle_disabled ? no_z : d.z);
 
         device_problem<C, I, J> p(a, c.base, d.x, d.y0);
         device_vector<T>        dalpha(std::vector<T>(1, d.alpha));
@@ -780,15 +754,15 @@ namespace
 
         spmv_descr_guard descr;
         ASSERT_TRUE(descr.d);
-        ASSERT_EQ(set_basic_inputs(handle, descr.d, c.alg, c.trans, type_of<T>(), type_of<T>()),
+        ASSERT_EQ(set_basic_inputs(handle, descr.d, c.alg, c.trans, dt_of<T>(), dt_of<T>()),
                   rocsparse_status_success);
         if(c.extras > 0)
         {
             ASSERT_EQ(ex.set(handle, descr.d), rocsparse_status_success);
-            if(c.extra_toggle >= 1)
+            if(c.extra_toggle != toggle_none)
                 ASSERT_EQ(set_input(handle, descr.d, rocsparse_spmv_input_enable_extra, int32_t(0)),
                           rocsparse_status_success);
-            if(c.extra_toggle == 2)
+            if(c.extra_toggle == toggle_reenabled)
                 ASSERT_EQ(set_input(handle, descr.d, rocsparse_spmv_input_enable_extra, int32_t(1)),
                           rocsparse_status_success);
         }
@@ -803,28 +777,28 @@ namespace
         // algorithm is chosen.
         const bool quick_return
             = !c.device && c.special == special_alpha_zero_beta_one
-              && (c.extras == 0 || c.extra_toggle == 1 || c.gammas == gamma_all_zero);
+              && (c.extras == 0 || c.extra_toggle == toggle_disabled || c.gammas == gamma_all_zero);
         const rocsparse_status expected
             = (a.symmetric && c.alg == rocsparse_spmv_alg_csr_lrb && !quick_return)
                   ? rocsparse_status_not_implemented
                   : rocsparse_status_success;
-        rocsparse_status st = v2_spmv_stage(handle,
-                                            descr.d,
-                                            p.mat.d,
-                                            p.vx.d,
-                                            p.vy.d,
-                                            palpha,
-                                            pbeta,
-                                            rocsparse_v2_spmv_stage_analysis);
+        rocsparse_status st = run_v2_spmv_stage(handle,
+                                                descr.d,
+                                                p.mat.d,
+                                                p.vx.d,
+                                                p.vy.d,
+                                                palpha,
+                                                pbeta,
+                                                rocsparse_v2_spmv_stage_analysis);
         if(st == rocsparse_status_success)
-            st = v2_spmv_stage(handle,
-                               descr.d,
-                               p.mat.d,
-                               p.vx.d,
-                               p.vy.d,
-                               palpha,
-                               pbeta,
-                               rocsparse_v2_spmv_stage_compute);
+            st = run_v2_spmv_stage(handle,
+                                   descr.d,
+                                   p.mat.d,
+                                   p.vx.d,
+                                   p.vy.d,
+                                   palpha,
+                                   pbeta,
+                                   rocsparse_v2_spmv_stage_compute);
         ASSERT_EQ(st, expected);
         if(expected == rocsparse_status_success)
             p.expect_y(want);
@@ -877,7 +851,7 @@ namespace
     template <typename Y>
     Y special_y(int64_t i)
     {
-        if constexpr(is_complex<Y>::value)
+        if constexpr(is_complex_v<Y>)
         {
             using R = typename real_of<Y>::type;
             switch(i % 4)
@@ -928,7 +902,7 @@ namespace
 
         spmv_descr_guard descr;
         ASSERT_TRUE(descr.d);
-        ASSERT_EQ(set_basic_inputs(handle, descr.d, c.alg, c.trans, type_of<T>(), type_of<T>()),
+        ASSERT_EQ(set_basic_inputs(handle, descr.d, c.alg, c.trans, dt_of<T>(), dt_of<T>()),
                   rocsparse_status_success);
         const void* palpha
             = c.device ? static_cast<const void*>(dalpha.ptr) : static_cast<const void*>(&alpha);
@@ -983,7 +957,7 @@ namespace
         spmv_descr_guard descr;
         ASSERT_TRUE(descr.d);
         ASSERT_EQ(set_basic_inputs(
-                      handle, descr.d, c.alg, rocsparse_operation_none, type_of<T>(), type_of<T>()),
+                      handle, descr.d, c.alg, rocsparse_operation_none, dt_of<T>(), dt_of<T>()),
                   rocsparse_status_success);
         {
             scoped_pointer_mode mode(handle, set_on_device);
@@ -1055,7 +1029,7 @@ namespace
 
         spmv_descr_guard descr;
         ASSERT_TRUE(descr.d);
-        ASSERT_EQ(set_basic_inputs(handle, descr.d, c.alg, c.trans, type_of<T>(), type_of<T>()),
+        ASSERT_EQ(set_basic_inputs(handle, descr.d, c.alg, c.trans, dt_of<T>(), dt_of<T>()),
                   rocsparse_status_success);
         ASSERT_EQ(ex1.set(handle, descr.d), rocsparse_status_success);
 
@@ -1066,26 +1040,26 @@ namespace
         auto compute = [&](const std::vector<T>& want, const char* what) {
             SCOPED_TRACE(what);
             p.reset_y(d1.y0);
-            ASSERT_EQ(v2_spmv_stage(handle,
+            ASSERT_EQ(run_v2_spmv_stage(handle,
+                                        descr.d,
+                                        p.mat.d,
+                                        p.vx.d,
+                                        p.vy.d,
+                                        palpha,
+                                        pbeta,
+                                        rocsparse_v2_spmv_stage_compute),
+                      rocsparse_status_success);
+            p.expect_y(want);
+        };
+
+        ASSERT_EQ(run_v2_spmv_stage(handle,
                                     descr.d,
                                     p.mat.d,
                                     p.vx.d,
                                     p.vy.d,
                                     palpha,
                                     pbeta,
-                                    rocsparse_v2_spmv_stage_compute),
-                      rocsparse_status_success);
-            p.expect_y(want);
-        };
-
-        ASSERT_EQ(v2_spmv_stage(handle,
-                                descr.d,
-                                p.mat.d,
-                                p.vx.d,
-                                p.vy.d,
-                                palpha,
-                                pbeta,
-                                rocsparse_v2_spmv_stage_analysis),
+                                    rocsparse_v2_spmv_stage_analysis),
                   rocsparse_status_success);
         compute(want_one, "one extra");
         ASSERT_EQ(set_input(handle, descr.d, rocsparse_spmv_input_enable_extra, int32_t(0)),
@@ -1119,6 +1093,24 @@ namespace
                                                rocsparse_spmv_alg_csr_lrb,
                                                rocsparse_spmv_alg_csr_nnzsplit};
 
+    struct index_and_base
+    {
+        index_kind index;
+        int        base;
+    };
+
+    const std::vector<index_and_base> all_indices_and_bases = {{index_i32_i32, 0},
+                                                               {index_i32_i32, 1},
+                                                               {index_i64_i32, 0},
+                                                               {index_i64_i32, 1},
+                                                               {index_i64_i64, 0},
+                                                               {index_i64_i64, 1}};
+
+    // csrmv returns before choosing an algorithm for a matrix without entries, so its index
+    // types and base only reach the analysis.
+    const std::vector<index_and_base> empty_matrix_indices_and_bases
+        = {{index_i32_i32, 0}, {index_i64_i64, 1}};
+
     bool supports_transpose(rocsparse_spmv_alg alg)
     {
         return alg == rocsparse_spmv_alg_default || alg == rocsparse_spmv_alg_csr_rowsplit
@@ -1132,46 +1124,55 @@ namespace
         // The operations of op(A): conjugate transpose only for a complex compute type.
         static std::vector<rocsparse_operation> transposes()
         {
-            if(is_complex<typename C::T>::value)
+            if(is_complex_v<typename C::T>)
                 return {rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose};
             return {rocsparse_operation_transpose};
         }
 
-        // Runs `c` for every CSR algorithm, index width, index base and pointer mode.
+        // Runs `c` for every CSR algorithm, the given index widths and bases, and both
+        // pointer modes.
         template <typename F>
-        void sweep_with(extra_case c, F run)
+        void sweep_with(extra_case c, F run, const std::vector<index_and_base>& indices)
         {
             for(const auto alg : all_csr_algs)
             {
                 if(c.trans != rocsparse_operation_none && !supports_transpose(alg))
                     continue;
-                for(const auto index : {index_i32_i32, index_i64_i32, index_i64_i64})
-                    for(const int base : {0, 1})
-                        for(const bool device : {false, true})
-                        {
-                            c.alg    = alg;
-                            c.index  = index;
-                            c.base   = base;
-                            c.device = device;
-                            run(handle, c);
-                            if(::testing::Test::HasFailure())
-                                return;
-                        }
+                for(const auto& ib : indices)
+                    for(const bool device : {false, true})
+                    {
+                        c.alg    = alg;
+                        c.index  = ib.index;
+                        c.base   = ib.base;
+                        c.device = device;
+                        run(handle, c);
+                        if(::testing::Test::HasFailure())
+                            return;
+                    }
             }
         }
 
-        void sweep(const extra_case& c)
+        void sweep(const extra_case&                  c,
+                   const std::vector<index_and_base>& indices = all_indices_and_bases)
         {
-            sweep_with(c, [](rocsparse_handle h, const extra_case& e) { run_extra_case<C>(h, e); });
+            sweep_with(
+                c,
+                [](rocsparse_handle h, const extra_case& e) { run_extra_case<C>(h, e); },
+                indices);
         }
 
         void sweep_reuse(const extra_case& c)
         {
-            sweep_with(c, [](rocsparse_handle h, const extra_case& e) { run_reuse_case<C>(h, e); });
+            sweep_with(
+                c,
+                [](rocsparse_handle h, const extra_case& e) { run_reuse_case<C>(h, e); },
+                all_indices_and_bases);
         }
 
         // Sweeps `shape` with 0, 1 and 3 extras and every special case of alpha and beta.
-        void sweep_specials(shape_kind shape, rocsparse_operation trans)
+        void sweep_specials(shape_kind                         shape,
+                            rocsparse_operation                trans,
+                            const std::vector<index_and_base>& indices = all_indices_and_bases)
         {
             for(const int extras : {0, 1, 3})
                 for(const auto special : all_specials)
@@ -1181,7 +1182,7 @@ namespace
                     c.trans   = trans;
                     c.extras  = extras;
                     c.special = special;
-                    sweep(c);
+                    sweep(c, indices);
                     if(::testing::Test::HasFailure())
                         return;
                 }
@@ -1252,7 +1253,7 @@ namespace
         for(const auto trans : ops)
             for(const auto shape : {shape_empty, shape_no_rows, shape_no_cols})
             {
-                this->sweep_specials(shape, trans);
+                this->sweep_specials(shape, trans, empty_matrix_indices_and_bases);
                 if(::testing::Test::HasFailure())
                     return;
             }
@@ -1322,7 +1323,7 @@ namespace
 
     TYPED_TEST(L2DeviceV2SpmvExtraTypes, enable_extra_toggle)
     {
-        for(const int toggle : {1, 2})
+        for(const auto toggle : {toggle_disabled, toggle_reenabled})
             for(const int extras : {1, 3})
             {
                 extra_case c;

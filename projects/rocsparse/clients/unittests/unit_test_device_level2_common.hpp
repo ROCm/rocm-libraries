@@ -64,6 +64,9 @@ namespace level2
     };
 
     template <typename T>
+    inline constexpr bool is_complex_v = !std::is_same<typename real_of<T>::type, T>::value;
+
+    template <typename T>
     constexpr bool is_single()
     {
         return std::is_same<typename real_of<T>::type, float>::value;
@@ -876,6 +879,33 @@ namespace level2
         return st;
     }
 
+    // Runs one stage of rocsparse_v2_spmv, with a buffer of the size it asks for, and
+    // returns its status.
+    inline rocsparse_status run_v2_spmv_stage(rocsparse_handle        handle,
+                                              rocsparse_spmv_descr    descr,
+                                              rocsparse_spmat_descr   A,
+                                              rocsparse_dnvec_descr   x,
+                                              rocsparse_dnvec_descr   y,
+                                              const void*             alpha,
+                                              const void*             beta,
+                                              rocsparse_v2_spmv_stage stage)
+    {
+        size_t           bytes = 0;
+        rocsparse_status st
+            = rocsparse_v2_spmv_buffer_size(handle, descr, A, x, y, stage, &bytes, nullptr);
+        if(st != rocsparse_status_success)
+        {
+            return st;
+        }
+        device_vector<char> dbuf(std::max<size_t>(bytes, 1));
+        if(dbuf.ptr == nullptr)
+        {
+            return rocsparse_status_memory_error;
+        }
+        return rocsparse_v2_spmv(
+            handle, descr, alpha, A, x, beta, y, stage, bytes, bytes ? dbuf.ptr : nullptr, nullptr);
+    }
+
     // Runs the analysis and compute stages of rocsparse_v2_spmv.
     inline void run_v2_spmv(rocsparse_handle      handle,
                             rocsparse_spmv_descr  descr,
@@ -887,22 +917,7 @@ namespace level2
     {
         for(const auto stage : {rocsparse_v2_spmv_stage_analysis, rocsparse_v2_spmv_stage_compute})
         {
-            size_t bytes = 0;
-            ASSERT_EQ(rocsparse_v2_spmv_buffer_size(handle, descr, A, x, y, stage, &bytes, nullptr),
-                      rocsparse_status_success);
-            device_vector<char> dbuf(std::max<size_t>(bytes, 1));
-            ASSERT_TRUE(dbuf.ptr);
-            ASSERT_EQ(rocsparse_v2_spmv(handle,
-                                        descr,
-                                        alpha,
-                                        A,
-                                        x,
-                                        beta,
-                                        y,
-                                        stage,
-                                        bytes,
-                                        bytes ? dbuf.ptr : nullptr,
-                                        nullptr),
+            ASSERT_EQ(run_v2_spmv_stage(handle, descr, A, x, y, alpha, beta, stage),
                       rocsparse_status_success);
         }
     }
