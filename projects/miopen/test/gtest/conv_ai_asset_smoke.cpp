@@ -82,32 +82,29 @@ std::string FileMd5Hex(const miopen::fs::path& p)
 {
     // Read entire file
     std::ifstream f(p, std::ios::binary);
-    if(!f) return "";
+    if(!f)
+        return "";
     std::vector<unsigned char> data((std::istreambuf_iterator<char>(f)), {});
 
     // MD5 implementation (RFC 1321) — self-contained, no OpenSSL dependency.
     // Included here rather than via a header to keep the test self-contained.
-    auto leftrotate = [](uint32_t x, uint32_t c) -> uint32_t {
-        return (x << c) | (x >> (32 - c));
-    };
+    auto leftrotate = [](uint32_t x, uint32_t c) -> uint32_t { return (x << c) | (x >> (32 - c)); };
     static const uint32_t K[64] = {
-        0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee, 0xf57c0faf, 0x4787c62a,
-        0xa8304613, 0xfd469501, 0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be,
-        0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821, 0xf61e2562, 0xc040b340,
-        0x265e5a51, 0xe9b6c7aa, 0xd62f105d, 0x02441453, 0xd8a1e681, 0xe7d3fbc8,
-        0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed, 0xa9e3e905, 0xfcefa3f8,
-        0x676f02d9, 0x8d2a4c8a, 0xfffa3942, 0x8771f681, 0x6d9d6122, 0xfde5380c,
-        0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70, 0x289b7ec6, 0xeaa127fa,
-        0xd4ef3085, 0x04881d05, 0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665,
-        0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039, 0x655b59c3, 0x8f0ccc92,
-        0xffeff47d, 0x85845dd1, 0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1,
-        0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391};
-    static const uint32_t S[64] = {7,  12, 17, 22, 7,  12, 17, 22, 7,  12, 17, 22, 7,
-                                    12, 17, 22, 5,  9,  14, 20, 5,  9,  14, 20, 5,  9,
-                                    14, 20, 5,  9,  14, 20, 4,  11, 16, 23, 4,  11, 16,
-                                    23, 4,  11, 16, 23, 4,  11, 16, 23, 6,  10, 15, 21,
-                                    6,  10, 15, 21, 6,  10, 15, 21, 6,  10, 15, 21};
-    uint64_t msg_len = data.size();
+        0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee, 0xf57c0faf, 0x4787c62a, 0xa8304613,
+        0xfd469501, 0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be, 0x6b901122, 0xfd987193,
+        0xa679438e, 0x49b40821, 0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa, 0xd62f105d,
+        0x02441453, 0xd8a1e681, 0xe7d3fbc8, 0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed,
+        0xa9e3e905, 0xfcefa3f8, 0x676f02d9, 0x8d2a4c8a, 0xfffa3942, 0x8771f681, 0x6d9d6122,
+        0xfde5380c, 0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70, 0x289b7ec6, 0xeaa127fa,
+        0xd4ef3085, 0x04881d05, 0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665, 0xf4292244,
+        0x432aff97, 0xab9423a7, 0xfc93a039, 0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1,
+        0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1, 0xf7537e82, 0xbd3af235, 0x2ad7d2bb,
+        0xeb86d391};
+    static const uint32_t S[64] = {7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+                                   5, 9,  14, 20, 5, 9,  14, 20, 5, 9,  14, 20, 5, 9,  14, 20,
+                                   4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+                                   6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21};
+    uint64_t msg_len            = data.size();
     data.push_back(0x80);
     while(data.size() % 64 != 56)
         data.push_back(0);
@@ -127,20 +124,41 @@ std::string FileMd5Hex(const miopen::fs::path& p)
         for(int i = 0; i < 64; i++)
         {
             uint32_t FF, g;
-            if(i < 16) { FF = (B & C) | (~B & D); g = i; }
-            else if(i < 32) { FF = (D & B) | (~D & C); g = (5 * i + 1) % 16; }
-            else if(i < 48) { FF = B ^ C ^ D; g = (3 * i + 5) % 16; }
-            else { FF = C ^ (B | ~D); g = (7 * i) % 16; }
+            if(i < 16)
+            {
+                FF = (B & C) | (~B & D);
+                g  = i;
+            }
+            else if(i < 32)
+            {
+                FF = (D & B) | (~D & C);
+                g  = (5 * i + 1) % 16;
+            }
+            else if(i < 48)
+            {
+                FF = B ^ C ^ D;
+                g  = (3 * i + 5) % 16;
+            }
+            else
+            {
+                FF = C ^ (B | ~D);
+                g  = (7 * i) % 16;
+            }
             FF += A + K[i] + M[g];
-            A = D; D = C; C = B; B += leftrotate(FF, S[i]);
+            A = D;
+            D = C;
+            C = B;
+            B += leftrotate(FF, S[i]);
         }
-        a0 += A; b0 += B; c0 += C; d0 += D;
+        a0 += A;
+        b0 += B;
+        c0 += C;
+        d0 += D;
     }
     std::ostringstream ss;
     for(uint32_t w : {a0, b0, c0, d0})
         for(int i = 0; i < 4; i++)
-            ss << std::hex << std::setw(2) << std::setfill('0')
-               << ((w >> (8 * i)) & 0xff);
+            ss << std::hex << std::setw(2) << std::setfill('0') << ((w >> (8 * i)) & 0xff);
     return ss.str();
 }
 
@@ -148,17 +166,18 @@ std::string FileMd5Hex(const miopen::fs::path& p)
 std::string BinHeaderMd5(const miopen::fs::path& p)
 {
     std::ifstream f(p, std::ios::binary);
-    if(!f) return "";
+    if(!f)
+        return "";
     f.seekg(28);
     std::array<char, 32> buf{};
     f.read(buf.data(), 32);
-    if(f.gcount() != 32) return "";
+    if(f.gcount() != 32)
+        return "";
     return std::string(buf.data(), 32);
 }
 
-miopen::conv::ProblemDescription MakeProblem(bool is3d,
-                                             miopenDataType_t dtype,
-                                             miopen::conv::Direction dir)
+miopen::conv::ProblemDescription
+MakeProblem(bool is3d, miopenDataType_t dtype, miopen::conv::Direction dir)
 {
     if(is3d)
     {
@@ -166,14 +185,14 @@ miopen::conv::ProblemDescription MakeProblem(bool is3d,
         miopen::TensorDescriptor wei(dtype, std::vector<int>{64, 64, 3, 3, 3});
         miopen::TensorDescriptor out(dtype, std::vector<int>{1, 64, 8, 56, 56});
         miopen::ConvolutionDescriptor conv(
-            3, miopenConvolution, miopenPaddingDefault, {1,1,1}, {1,1,1}, {1,1,1}, {0,0,0});
+            3, miopenConvolution, miopenPaddingDefault, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0});
         return miopen::conv::ProblemDescription(in, wei, out, conv, dir);
     }
     miopen::TensorDescriptor in(dtype, std::vector<int>{1, 64, 56, 56});
     miopen::TensorDescriptor wei(dtype, std::vector<int>{64, 64, 3, 3});
     miopen::TensorDescriptor out(dtype, std::vector<int>{1, 64, 56, 56});
     miopen::ConvolutionDescriptor conv(
-        2, miopenConvolution, miopenPaddingDefault, {1,1}, {1,1}, {1,1}, {0,0});
+        2, miopenConvolution, miopenPaddingDefault, {1, 1}, {1, 1}, {1, 1}, {0, 0});
     return miopen::conv::ProblemDescription(in, wei, out, conv, dir);
 }
 
@@ -225,18 +244,18 @@ TEST_P(CPU_ConvAiAssetSmoke_NONE, InputEncoderLoadsAndRuns)
 // re-stamping the .bin header.
 TEST_P(CPU_ConvAiAssetSmoke_NONE, BinMd5MatchesInputEncoder)
 {
-    const auto as  = GetParam();
+    const auto as = GetParam();
     if(!AssetsPresent(as))
         GTEST_SKIP() << "No assets for " << as.arch << "/" << as.solver;
 
-    const auto db      = miopen::GetSystemDbPath();
+    const auto db       = miopen::GetSystemDbPath();
     const auto enc_path = db / (as.arch + "_" + as.solver + "_input_encoder.tn.model");
     const auto bin_path = db / (as.arch + "_" + as.solver + "_kernel_config_embeddings.bin");
 
     const auto file_md5   = FileMd5Hex(enc_path);
     const auto header_md5 = BinHeaderMd5(bin_path);
 
-    ASSERT_FALSE(file_md5.empty())   << "Could not read input encoder: " << enc_path;
+    ASSERT_FALSE(file_md5.empty()) << "Could not read input encoder: " << enc_path;
     ASSERT_FALSE(header_md5.empty()) << "Could not read .bin header md5: " << bin_path;
     EXPECT_EQ(file_md5, header_md5)
         << as.arch << "/" << as.solver

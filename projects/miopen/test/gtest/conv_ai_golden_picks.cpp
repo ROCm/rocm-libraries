@@ -16,11 +16,12 @@
 //
 // Design:
 //   - CPU-only (no GPU execution). SelectBestVocabCandidate + GetFeaturesND make no GPU calls.
-//   - Parameterized over (arch, solver, shape) triples.
+//   - Parameterized over (arch, solver, shape) triples covering gfx942, gfx950, and gfx1250.
 //   - Shapes are small to keep CPU inference fast.
-//   - Expected picks are verified on gfx950 hardware against the shipped models. Update them by
-//     running with MIOPEN_ENABLE_LOGGING=1 MIOPEN_LOG_LEVEL=6 and grepping for
-//     "Lazy-applicability selected:".
+//   - Expected picks captured on gfx950 hardware with MIOPEN_DEVICE_ARCH forced per arch (Nov
+//     2026). gfx1250 picks are "SKIP" until a build with matching fdeep/keras version is available.
+//   - Update by running: MIOPEN_ENABLE_LOGGING=1 MIOPEN_LOG_LEVEL=6 MIOPEN_DEVICE_ARCH=<arch>
+//     MIOpenDriver convfp16 ... and grepping for "Lazy-applicability selected:".
 //   - A pick mismatch is a hard failure: the model is not producing the expected output. Either
 //     the models were updated (expected: update this file) or something regressed unexpectedly.
 
@@ -30,10 +31,10 @@
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
 #include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
 #include <miopen/conv/problem_description.hpp>
-#include <miopen/tensor.hpp>
 #include <miopen/convolution.hpp>
 #include <miopen/db_path.hpp>
 #include <miopen/filesystem.hpp>
+#include <miopen/tensor.hpp>
 #include <string>
 #include <vector>
 
@@ -45,78 +46,74 @@ struct GoldenCase
 {
     const char* arch;
     const char* solver;
-    // 2D shape: n, c, h, w, k, filt_y, filt_x, pad, stride, groups
     int n, c, h, w, k, fy, fx, pad, stride, groups;
-    bool is3d;      // reserved for future 3D cases
-    int d, fz, dpad, dstride; // 3D extras (unused when !is3d)
+    bool is3d;
+    int d, fz, dpad, dstride;
     miopenDataType_t dtype;
     miopen::conv::Direction dir;
-    const char* expected_pick; // base_kernel+split_k suffix, or "SKIP" to skip this case
+    const char* expected_pick; // "SKIP" = not yet captured; otherwise must match exactly
 };
 
-// Expected picks captured on gfx950 hardware with the shipped models (Nov 2026).
-// Update by running: MIOPEN_ENABLE_LOGGING=1 MIOPEN_LOG_LEVEL=6 MIOpenDriver convfp16 ...
-// and grepping for "Lazy-applicability selected: <pick> (split_k=N,".
-// Format: "<base_kernel_id>+<split_k>".
+// clang-format off
+// Expected picks captured on gfx950 hardware with MIOPEN_DEVICE_ARCH forced per arch (Nov 2026).
+// gfx1250: SKIP — fdeep/keras mismatch in capture env; populate when matching build available.
+// 3D: SKIP — 3D CK plugin absent in capture build; populate on 3D-enabled build.
 static const GoldenCase kGoldenCases[] = {
-    // === gfx950 2D Fwd FP16 ===
-    {"gfx950", "ConvHipImplicitGemmGroupFwdXdlops",
-     1, 64, 56, 56, 64, 3, 3, 1, 1, 1, false, 0, 0, 0, 0,
-     miopenHalf, miopen::conv::Direction::Forward,
+    // gfx942 Fwd
+    {"gfx942","ConvHipImplicitGemmGroupFwdXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::Forward,
+     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<128, 16, 32, 64, OddC, 16, 16, 1, 1, 8, 8, 4, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v1>+1"},
+    {"gfx942","ConvHipImplicitGemmGroupFwdXdlops",1,128,28,28,128,1,1,0,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::Forward,
+     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<64, 16, 16, 128, Filter1x1Pad0, 16, 16, 1, 1, 8, 8, 4, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v1>+1"},
+    {"gfx942","ConvHipImplicitGemmGroupFwdXdlops",4,32,112,112,32,3,3,1,1,2,false,0,0,0,0,miopenHalf,miopen::conv::Direction::Forward,
+     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<128, 128, 16, 64, OddC, 16, 16, 4, 1, 8, 8, 2, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v2>+1"},
+    // gfx942 Bwd
+    {"gfx942","ConvHipImplicitGemmGroupBwdXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardData,
+     "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 64, 16, 16, Default, 16, 16, 1, 1, 16, 2, 1, 1>+1"},
+    {"gfx942","ConvHipImplicitGemmGroupBwdXdlops",1,128,28,28,128,1,1,0,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardData,
+     "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 1, 8, 2, 1, 1>+1"},
+    {"gfx942","ConvHipImplicitGemmGroupBwdXdlops",4,32,112,112,32,3,3,1,1,2,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardData,
+     "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 64, 16, 16, Default, 32, 32, 1, 1, 16, 8, 1, 1>+1"},
+    // gfx942 Wrw
+    {"gfx942","ConvHipImplicitGemmGroupWrwXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
+     "DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3<256l+128m, 128, 64, 32, Default, 8, 2, 2, 4, 4, 2, 4, 1, 1, 2>+16"},
+    {"gfx942","ConvHipImplicitGemmGroupWrwXdlops",1,128,28,28,128,1,1,0,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
+     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64, 64, 32, 4, Filter1x1Stride1Pad0, 8, 2, 1, 8, 4, 8, 2, 1, 1, 8>+8"},
+    {"gfx942","ConvHipImplicitGemmGroupWrwXdlops",4,32,112,112,32,3,3,1,1,2,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
+     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64, 32, 64, 4, Default, 8, 1, 2, 2, 2, 8, 4, 1, 1, 8>+64"},
+
+    // gfx950 Fwd
+    {"gfx950","ConvHipImplicitGemmGroupFwdXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::Forward,
      "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<64, 16, 16, 128, OddC, 16, 16, 1, 1, 8, 8, 4, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v1>+1"},
-    {"gfx950", "ConvHipImplicitGemmGroupFwdXdlops",
-     1, 128, 28, 28, 128, 1, 1, 0, 1, 1, false, 0, 0, 0, 0,
-     miopenHalf, miopen::conv::Direction::Forward,
+    {"gfx950","ConvHipImplicitGemmGroupFwdXdlops",1,128,28,28,128,1,1,0,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::Forward,
      "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<256, 64, 64, 32, Filter1x1Stride1Pad0, 16, 16, 2, 2, 4, 4, 4, 1, 1, 1>+1"},
-    {"gfx950", "ConvHipImplicitGemmGroupFwdXdlops",
-     4, 32, 112, 112, 32, 3, 3, 1, 1, 2, false, 0, 0, 0, 0,
-     miopenHalf, miopen::conv::Direction::Forward,
+    {"gfx950","ConvHipImplicitGemmGroupFwdXdlops",4,32,112,112,32,3,3,1,1,2,false,0,0,0,0,miopenHalf,miopen::conv::Direction::Forward,
      "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_DirectLoad<64, 16, 16, 64, Default, 16, 16, 1, 1, 8, 8, 4, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1>+1"},
-
-    // === gfx950 2D Bwd FP16 ===
-    {"gfx950", "ConvHipImplicitGemmGroupBwdXdlops",
-     1, 64, 56, 56, 64, 3, 3, 1, 1, 1, false, 0, 0, 0, 0,
-     miopenHalf, miopen::conv::Direction::BackwardData,
+    // gfx950 Bwd
+    {"gfx950","ConvHipImplicitGemmGroupBwdXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardData,
      "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 64, 16, 16, Default, 16, 16, 1, 1, 16, 8, 1, 1>+1"},
-    {"gfx950", "ConvHipImplicitGemmGroupBwdXdlops",
-     1, 128, 28, 28, 128, 1, 1, 0, 1, 1, false, 0, 0, 0, 0,
-     miopenHalf, miopen::conv::Direction::BackwardData,
+    {"gfx950","ConvHipImplicitGemmGroupBwdXdlops",1,128,28,28,128,1,1,0,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardData,
      "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 64, 16, 16, Filter1x1Stride1Pad0, 16, 16, 1, 1, 16, 1, 1, 1>+1"},
-    {"gfx950", "ConvHipImplicitGemmGroupBwdXdlops",
-     4, 32, 112, 112, 32, 3, 3, 1, 1, 2, false, 0, 0, 0, 0,
-     miopenHalf, miopen::conv::Direction::BackwardData,
+    {"gfx950","ConvHipImplicitGemmGroupBwdXdlops",4,32,112,112,32,3,3,1,1,2,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardData,
      "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 64, 16, 16, Default, 16, 16, 1, 1, 16, 8, 1, 1>+1"},
-
-    // === gfx950 2D Wrw FP16 ===
-    {"gfx950", "ConvHipImplicitGemmGroupWrwXdlops",
-     1, 64, 56, 56, 64, 3, 3, 1, 1, 1, false, 0, 0, 0, 0,
-     miopenHalf, miopen::conv::Direction::BackwardWeights,
+    // gfx950 Wrw
+    {"gfx950","ConvHipImplicitGemmGroupWrwXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
      "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_DirectLoad<128, 16, 32, 64, Default, 8, 1, 1, 8, 8, 8, 8, 1, 1, 4>+16"},
-    {"gfx950", "ConvHipImplicitGemmGroupWrwXdlops",
-     1, 128, 28, 28, 128, 1, 1, 0, 1, 1, false, 0, 0, 0, 0,
-     miopenHalf, miopen::conv::Direction::BackwardWeights,
+    {"gfx950","ConvHipImplicitGemmGroupWrwXdlops",1,128,28,28,128,1,1,0,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
      "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_DirectLoad<128, 16, 64, 64, Default, 8, 1, 2, 8, 8, 8, 8, 1, 1, 4>+16"},
-    {"gfx950", "ConvHipImplicitGemmGroupWrwXdlops",
-     4, 32, 112, 112, 32, 3, 3, 1, 1, 2, false, 0, 0, 0, 0,
-     miopenHalf, miopen::conv::Direction::BackwardWeights,
+    {"gfx950","ConvHipImplicitGemmGroupWrwXdlops",4,32,112,112,32,3,3,1,1,2,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
      "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_DirectLoad<128, 16, 64, 64, Default, 8, 1, 2, 8, 8, 8, 8, 1, 1, 4>+64"},
 
-    // === 3D cases: golden not yet captured (need a 3D-enabled build) — skipped ===
-    // Add entries here with expected_pick = "SKIP" until golden values are measured,
-    // then replace with the actual pick strings.
-    {"gfx950", "ConvHipImplicitGemm3DGroupFwdXdlops",
-     1, 32, 56, 56, 32, 3, 3, 1, 1, 1, true, 8, 3, 1, 1,
-     miopenHalf, miopen::conv::Direction::Forward,
-     "SKIP"},
-    {"gfx950", "ConvHipImplicitGemm3DGroupBwdXdlops",
-     1, 32, 56, 56, 32, 3, 3, 1, 1, 1, true, 8, 3, 1, 1,
-     miopenHalf, miopen::conv::Direction::BackwardData,
-     "SKIP"},
-    {"gfx950", "ConvHipImplicitGemm3DGroupWrwXdlops",
-     1, 32, 56, 56, 32, 3, 3, 1, 1, 1, true, 8, 3, 1, 1,
-     miopenHalf, miopen::conv::Direction::BackwardWeights,
-     "SKIP"},
+    // gfx1250 — SKIP: fdeep/keras mismatch in capture env; populate when matching build available
+    {"gfx1250","ConvHipImplicitGemmGroupFwdXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::Forward,"SKIP"},
+    {"gfx1250","ConvHipImplicitGemmGroupBwdXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardData,"SKIP"},
+    {"gfx1250","ConvHipImplicitGemmGroupWrwXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,"SKIP"},
+
+    // 3D (gfx950) — SKIP: 3D CK plugin absent in capture build; populate on 3D-enabled build
+    {"gfx950","ConvHipImplicitGemm3DGroupFwdXdlops",1,32,56,56,32,3,3,1,1,1,true,8,3,1,1,miopenHalf,miopen::conv::Direction::Forward,"SKIP"},
+    {"gfx950","ConvHipImplicitGemm3DGroupBwdXdlops",1,32,56,56,32,3,3,1,1,1,true,8,3,1,1,miopenHalf,miopen::conv::Direction::BackwardData,"SKIP"},
+    {"gfx950","ConvHipImplicitGemm3DGroupWrwXdlops",1,32,56,56,32,3,3,1,1,1,true,8,3,1,1,miopenHalf,miopen::conv::Direction::BackwardWeights,"SKIP"},
 };
+// clang-format on
 
 bool AssetsPresent(const std::string& arch, const std::string& solver)
 {
@@ -130,33 +127,45 @@ miopen::conv::ProblemDescription MakeProblem(const GoldenCase& tc)
 {
     if(tc.is3d)
     {
-        miopen::TensorDescriptor in(tc.dtype,  {tc.n, tc.c, tc.d, tc.h, tc.w});
-        miopen::TensorDescriptor wei(tc.dtype, {tc.k, tc.c/tc.groups, tc.fz, tc.fy, tc.fx});
-        int od = (tc.d + 2*tc.dpad - tc.fz)/tc.dstride + 1;
-        int oh = (tc.h + 2*tc.pad - tc.fy)/tc.stride + 1;
-        int ow = (tc.w + 2*tc.pad - tc.fx)/tc.stride + 1;
+        miopen::TensorDescriptor in(tc.dtype, {tc.n, tc.c, tc.d, tc.h, tc.w});
+        miopen::TensorDescriptor wei(tc.dtype, {tc.k, tc.c / tc.groups, tc.fz, tc.fy, tc.fx});
+        int od = (tc.d + 2 * tc.dpad - tc.fz) / tc.dstride + 1;
+        int oh = (tc.h + 2 * tc.pad - tc.fy) / tc.stride + 1;
+        int ow = (tc.w + 2 * tc.pad - tc.fx) / tc.stride + 1;
         miopen::TensorDescriptor out(tc.dtype, {tc.n, tc.k, od, oh, ow});
-        miopen::ConvolutionDescriptor conv(3, miopenConvolution, miopenPaddingDefault,
-            {tc.dpad, tc.pad, tc.pad}, {tc.dstride, tc.stride, tc.stride}, {1,1,1}, {0,0,0});
+        miopen::ConvolutionDescriptor conv(3,
+                                           miopenConvolution,
+                                           miopenPaddingDefault,
+                                           {tc.dpad, tc.pad, tc.pad},
+                                           {tc.dstride, tc.stride, tc.stride},
+                                           {1, 1, 1},
+                                           {0, 0, 0});
         return {in, wei, out, conv, tc.dir};
     }
-    miopen::TensorDescriptor in(tc.dtype,  {tc.n, tc.c, tc.h, tc.w});
-    miopen::TensorDescriptor wei(tc.dtype, {tc.k, tc.c/tc.groups, tc.fy, tc.fx});
-    int oh = (tc.h + 2*tc.pad - tc.fy)/tc.stride + 1;
-    int ow = (tc.w + 2*tc.pad - tc.fx)/tc.stride + 1;
+    miopen::TensorDescriptor in(tc.dtype, {tc.n, tc.c, tc.h, tc.w});
+    miopen::TensorDescriptor wei(tc.dtype, {tc.k, tc.c / tc.groups, tc.fy, tc.fx});
+    int oh = (tc.h + 2 * tc.pad - tc.fy) / tc.stride + 1;
+    int ow = (tc.w + 2 * tc.pad - tc.fx) / tc.stride + 1;
     miopen::TensorDescriptor out(tc.dtype, {tc.n, tc.k, oh, ow});
-    miopen::ConvolutionDescriptor conv(2, miopenConvolution, miopenPaddingDefault,
-        {tc.pad, tc.pad}, {tc.stride, tc.stride}, {1,1}, {0,0});
+    miopen::ConvolutionDescriptor conv(2,
+                                       miopenConvolution,
+                                       miopenPaddingDefault,
+                                       {tc.pad, tc.pad},
+                                       {tc.stride, tc.stride},
+                                       {1, 1},
+                                       {0, 0});
     return {in, wei, out, conv, tc.dir};
 }
 
 std::string CaseName(const ::testing::TestParamInfo<GoldenCase>& info)
 {
     const auto& tc = info.param;
-    std::string s  = std::string(tc.arch) + "_" + tc.solver + "_n" + std::to_string(tc.n) +
-                    "_c" + std::to_string(tc.c) + "_h" + std::to_string(tc.h) +
-                    "_k" + std::to_string(tc.k) + "_g" + std::to_string(tc.groups);
-    for(char& c : s) if(c == ' ' || c == '-') c = '_';
+    std::string s  = std::string(tc.arch) + "_" + tc.solver + "_n" + std::to_string(tc.n) + "_c" +
+                    std::to_string(tc.c) + "_h" + std::to_string(tc.h) + "_k" +
+                    std::to_string(tc.k) + "_g" + std::to_string(tc.groups);
+    for(char& c : s)
+        if(c == ' ' || c == '-')
+            c = '_';
     return s;
 }
 
@@ -171,9 +180,12 @@ TEST_P(CPU_ConvAiGoldenPicks_NONE, PickMatchesGolden)
     const auto& tc = GetParam();
 
     if(std::string(tc.expected_pick) == "SKIP")
-        GTEST_SKIP() << "Golden pick not yet captured for 3D solver "
-                     << tc.arch << "/" << tc.solver
-                     << " — run with MIOPEN_LOG_LEVEL=6 on a 3D-enabled build to populate.";
+        GTEST_SKIP() << "Golden pick not yet captured for " << tc.arch << "/" << tc.solver
+                     << " — run with MIOPEN_ENABLE_LOGGING=1 MIOPEN_LOG_LEVEL=6 "
+                        "MIOPEN_DEVICE_ARCH="
+                     << tc.arch
+                     << " MIOpenDriver convfp16 ... and grep for "
+                        "'Lazy-applicability selected:' to populate.";
 
     if(!AssetsPresent(tc.arch, tc.solver))
         GTEST_SKIP() << "No assets for " << tc.arch << "/" << tc.solver;
@@ -181,10 +193,10 @@ TEST_P(CPU_ConvAiGoldenPicks_NONE, PickMatchesGolden)
     const auto prob  = MakeProblem(tc);
     const auto feats = miopen::solver::conv::GetFeaturesND(prob, /*max_cu=*/304, tc.arch);
 
-    // accept_all: we test the pure model ranking, not the runtime IsValidSplitK gate.
+    // accept_all: tests the pure model ranking, not the runtime IsValidSplitK gate.
     // A separate test (conv_ai_nd_kernel_tuning_utils.cpp) covers the gate itself.
     const auto accept_all = [](const std::string&, int, bool) { return true; };
-    const auto pick = SelectBestVocabCandidate(tc.arch, tc.solver, feats, false, accept_all);
+    const auto pick       = SelectBestVocabCandidate(tc.arch, tc.solver, feats, false, accept_all);
 
     ASSERT_TRUE(pick.has_value())
         << tc.arch << "/" << tc.solver
@@ -197,8 +209,8 @@ TEST_P(CPU_ConvAiGoldenPicks_NONE, PickMatchesGolden)
         << "  expected: " << tc.expected_pick << "\n"
         << "  actual:   " << pick->first << "\n"
         << "This means the model was retrained (update this file) or something regressed. "
-           "Re-capture with: MIOPEN_ENABLE_LOGGING=1 MIOPEN_LOG_LEVEL=6 MIOpenDriver convfp16 "
-           "... and grep for 'Lazy-applicability selected:'.";
+           "Re-capture with: MIOPEN_ENABLE_LOGGING=1 MIOPEN_LOG_LEVEL=6 MIOPEN_DEVICE_ARCH="
+        << tc.arch << " MIOpenDriver convfp16 ... grep 'Lazy-applicability selected:'.";
 }
 
 INSTANTIATE_TEST_SUITE_P(Full,
