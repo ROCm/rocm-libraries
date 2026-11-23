@@ -126,14 +126,16 @@ extern "C" {
 *  CSR matrix format is currently supported.
 *  \note \f$\alpha == beta == 0\f$ is invalid.
 *  \note It is permissible to pass the same sparse matrix for \f$C\f$ and \f$D\f$ if both
-*  matrices have the same sparsity pattern, i.e. if the sparsity pattern of
-*  \f$op(A) \cdot op(B)\f$ is contained in the sparsity pattern of \f$D\f$. If \p alpha and
-*  \p beta are not null and \f$D\f$ has non-zero entries, \ref rocsparse_spgemm_stage_nnz
-*  checks this condition: if it does not hold, it returns
+*  matrices have the same sparsity pattern, that is, if the sparsity pattern of
+*  \f$op(A) \cdot op(B)\f$ is contained in the sparsity pattern of \f$D\f$, and \f$D\f$ has no
+*  duplicate entries. If \p alpha and \p beta are not null and \f$D\f$ has non-zero entries,
+*  \ref rocsparse_spgemm_stage_nnz checks the pattern: if it is not contained, it returns
 *  \ref rocsparse_status_invalid_value and leaves the matrix unchanged. The other stages do
-*  not check it. If \p beta is not null, \f$D\f$ has non-zero entries, and \f$C\f$ and
-*  \f$D\f$ share their row pointer array but have different index bases, every stage
-*  returns \ref rocsparse_status_invalid_value.
+*  not check it. Under the same condition, \ref rocsparse_spgemm_stage_symbolic requires
+*  \f$D\f$ to be sorted, and returns \ref rocsparse_status_requires_sorted_storage if it is not.
+*  \note If \p beta is not null, \f$D\f$ has non-zero entries, and \f$C\f$ and \f$D\f$ share
+*  their row pointer array but have different index bases, every stage returns
+*  \ref rocsparse_status_invalid_value.
 *  \note Currently, only \p trans_A == \ref rocsparse_operation_none is supported.
 *  \note Currently, only \p trans_B == \ref rocsparse_operation_none is supported.
 *  \note This function is non-blocking and executed asynchronously with respect to the
@@ -194,7 +196,9 @@ extern "C" {
 *          allocated.
 *  \retval rocsparse_status_requires_sorted_storage \f$B\f$ or \f$D\f$ is unsorted, or
 *          \f$C\f$ in the numeric stage, and a row of \f$C\f$ has a hash table that does not
-*          fit in shared memory.
+*          fit in shared memory; or, in the \ref rocsparse_spgemm_stage_symbolic stage, the
+*          same sparse matrix is passed for \f$C\f$ and \f$D\f$, \p alpha and \p beta are not
+*          null, \f$D\f$ has non-zero entries, and \f$D\f$ is unsorted.
 *  \retval rocsparse_status_not_implemented
 *          \p trans_A != \ref rocsparse_operation_none or
 *          \p trans_B != \ref rocsparse_operation_none.
