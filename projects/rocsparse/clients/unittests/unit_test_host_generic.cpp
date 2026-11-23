@@ -1088,7 +1088,7 @@ TEST_F(GenericSparseToDense, bad_args)
 }
 
 // ===========================================================================
-// rocsparse_dense_to_sparse : dense (3x3 identity) -> CSR
+// rocsparse_dense_to_sparse : dense -> CSR / CSC / COO
 // ===========================================================================
 class GenericDenseToSparse : public HandleTest
 {
@@ -1178,7 +1178,8 @@ TEST_F(GenericDenseToSparse, device_pointer_mode)
 {
     // In device pointer mode, the analysis still stores the number of non-zeros in the
     // host-side descriptor, and every stage leaves the handle in device pointer mode.
-    // Each analysis starts from a seeded count, so a stage that skips the store fails.
+    // Each analysis starts from a seeded count with bits above 2^32 set, so a skipped
+    // store or a 32-bit store into the 64-bit count fails.
     // Column-major 3x3 dense matrix:
     //   1 0 2
     //   0 0 3
@@ -1186,12 +1187,12 @@ TEST_F(GenericDenseToSparse, device_pointer_mode)
     const auto            alg = rocsparse_dense_to_sparse_alg_default;
     device_vector<float>  dense{std::vector<float>{1, 0, 4, 0, 0, 0, 2, 3, 0}};
     device_vector<char>   tmp{(size_t)64};
-    device_vector<int>    ptr{(size_t)4};
+    device_vector<int>    offsets{(size_t)4};
     device_vector<int>    row_ind{(size_t)4};
     device_vector<int>    col_ind{(size_t)4};
     device_vector<float>  val{(size_t)4};
     rocsparse_dnmat_descr mA = nullptr;
-    ASSERT_TRUE(dense.ptr && tmp.ptr && ptr.ptr && row_ind.ptr && col_ind.ptr && val.ptr);
+    ASSERT_TRUE(dense.ptr && tmp.ptr && offsets.ptr && row_ind.ptr && col_ind.ptr && val.ptr);
     ASSERT_EQ(rocsparse_create_dnmat_descr(&mA, 3, 3, 3, dense.ptr, DT, rocsparse_order_column),
               rocsparse_status_success);
     ASSERT_EQ(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device),
@@ -1232,14 +1233,14 @@ TEST_F(GenericDenseToSparse, device_pointer_mode)
 
     {
         SCOPED_TRACE("CSR");
-        ASSERT_EQ(
-            rocsparse_create_csr_descr(&mB, 3, 3, 0, ptr.ptr, nullptr, nullptr, IT, IT, BASE, DT),
-            rocsparse_status_success);
-        analyse(mA, mB, 4);
-        ASSERT_EQ(rocsparse_csr_set_pointers(mB, ptr.ptr, col_ind.ptr, val.ptr),
+        ASSERT_EQ(rocsparse_create_csr_descr(
+                      &mB, 3, 3, 0, offsets.ptr, nullptr, nullptr, IT, IT, BASE, DT),
+                  rocsparse_status_success);
+        ASSERT_NO_FATAL_FAILURE(analyse(mA, mB, 4));
+        ASSERT_EQ(rocsparse_csr_set_pointers(mB, offsets.ptr, col_ind.ptr, val.ptr),
                   rocsparse_status_success);
         convert(mB);
-        EXPECT_EQ(to_host(ptr), (std::vector<int>{0, 2, 3, 4}));
+        EXPECT_EQ(to_host(offsets), (std::vector<int>{0, 2, 3, 4}));
         EXPECT_EQ(to_host(col_ind), (std::vector<int>{0, 2, 2, 0}));
         EXPECT_EQ(to_host(val), (std::vector<float>{1, 2, 3, 4}));
         EXPECT_EQ(rocsparse_destroy_spmat_descr(mB), rocsparse_status_success);
@@ -1247,14 +1248,14 @@ TEST_F(GenericDenseToSparse, device_pointer_mode)
 
     {
         SCOPED_TRACE("CSC");
-        ASSERT_EQ(
-            rocsparse_create_csc_descr(&mB, 3, 3, 0, ptr.ptr, nullptr, nullptr, IT, IT, BASE, DT),
-            rocsparse_status_success);
-        analyse(mA, mB, 4);
-        ASSERT_EQ(rocsparse_csc_set_pointers(mB, ptr.ptr, row_ind.ptr, val.ptr),
+        ASSERT_EQ(rocsparse_create_csc_descr(
+                      &mB, 3, 3, 0, offsets.ptr, nullptr, nullptr, IT, IT, BASE, DT),
+                  rocsparse_status_success);
+        ASSERT_NO_FATAL_FAILURE(analyse(mA, mB, 4));
+        ASSERT_EQ(rocsparse_csc_set_pointers(mB, offsets.ptr, row_ind.ptr, val.ptr),
                   rocsparse_status_success);
         convert(mB);
-        EXPECT_EQ(to_host(ptr), (std::vector<int>{0, 2, 2, 4}));
+        EXPECT_EQ(to_host(offsets), (std::vector<int>{0, 2, 2, 4}));
         EXPECT_EQ(to_host(row_ind), (std::vector<int>{0, 2, 0, 1}));
         EXPECT_EQ(to_host(val), (std::vector<float>{1, 4, 2, 3}));
         EXPECT_EQ(rocsparse_destroy_spmat_descr(mB), rocsparse_status_success);
@@ -1264,7 +1265,7 @@ TEST_F(GenericDenseToSparse, device_pointer_mode)
         SCOPED_TRACE("COO");
         ASSERT_EQ(rocsparse_create_coo_descr(&mB, 3, 3, 0, nullptr, nullptr, nullptr, IT, BASE, DT),
                   rocsparse_status_success);
-        analyse(mA, mB, 4);
+        ASSERT_NO_FATAL_FAILURE(analyse(mA, mB, 4));
         ASSERT_EQ(rocsparse_coo_set_pointers(mB, row_ind.ptr, col_ind.ptr, val.ptr),
                   rocsparse_status_success);
         convert(mB);
@@ -1275,7 +1276,9 @@ TEST_F(GenericDenseToSparse, device_pointer_mode)
     }
 
     // The empty dense matrices take the quick return of the analysis: no rows for the
-    // row-wise CSR and COO counts, no columns for the column-wise CSC count.
+    // row-wise CSR and COO counts, no columns for the column-wise CSC count. Nothing reads
+    // the workspace after these analyses, so they are not wrapped in
+    // ASSERT_NO_FATAL_FAILURE, and every failing case is reported.
     rocsparse_dnmat_descr no_rows = nullptr;
     rocsparse_dnmat_descr no_cols = nullptr;
     ASSERT_EQ(
@@ -1287,18 +1290,18 @@ TEST_F(GenericDenseToSparse, device_pointer_mode)
 
     {
         SCOPED_TRACE("CSR with no rows");
-        ASSERT_EQ(
-            rocsparse_create_csr_descr(&mB, 0, 3, 0, ptr.ptr, nullptr, nullptr, IT, IT, BASE, DT),
-            rocsparse_status_success);
+        ASSERT_EQ(rocsparse_create_csr_descr(
+                      &mB, 0, 3, 0, offsets.ptr, nullptr, nullptr, IT, IT, BASE, DT),
+                  rocsparse_status_success);
         analyse(no_rows, mB, 0);
         EXPECT_EQ(rocsparse_destroy_spmat_descr(mB), rocsparse_status_success);
     }
 
     {
         SCOPED_TRACE("CSC with no columns");
-        ASSERT_EQ(
-            rocsparse_create_csc_descr(&mB, 3, 0, 0, ptr.ptr, nullptr, nullptr, IT, IT, BASE, DT),
-            rocsparse_status_success);
+        ASSERT_EQ(rocsparse_create_csc_descr(
+                      &mB, 3, 0, 0, offsets.ptr, nullptr, nullptr, IT, IT, BASE, DT),
+                  rocsparse_status_success);
         analyse(no_cols, mB, 0);
         EXPECT_EQ(rocsparse_destroy_spmat_descr(mB), rocsparse_status_success);
     }
