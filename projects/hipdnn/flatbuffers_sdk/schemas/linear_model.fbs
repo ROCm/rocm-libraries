@@ -1,0 +1,107 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+file_identifier "HLIN";
+
+/// One basis term: how a feature-row slot is turned into a model input.
+///
+///     t = x                       (transform 0, identity)
+///     t = log(1 + max(x, 0))      (transform 1, log1p of the non-negative part)
+///     z = clamp((t - mean) / scale, lo, hi)
+///
+/// A NaN `x` (a missing or unbound feature) gives z = 0, the training mean. [lo, hi] is the
+/// range the term took in training, so a problem outside it is scored as its nearest
+/// training neighbour rather than extrapolated.
+table LinearBasisTerm {
+    /// Slot of the feature row this term reads, within 0..LinearModel.num_features.
+    feature:int32;
+
+    /// 0 identity, 1 log1p(max(x, 0)). Any other value is refused at load.
+    transform:ubyte = 0;
+
+    /// Centre and spread of t over the training rows; finite, scale > 0.
+    mean:double = 0.0;
+    scale:double = 1.0;
+
+    /// Clamp of z, finite, lo <= hi.
+    lo:double = 0.0;
+    hi:double = 0.0;
+}
+
+/// The coefficients scoring one kernel configuration (or one family of configurations).
+table LinearConfig {
+    /// The values of LinearModel.key_features (or family_features) that identify this entry,
+    /// one per key slot, in that order. Empty for LinearModel.global. Two keys are equal when
+    /// every value is equal as a double, all NaNs counting as one value.
+    key:[double];
+
+    /// 1 + LinearModel.basis.size() values: the intercept, then one coefficient per basis
+    /// term. Finite.
+    coefficients:[double];
+
+    /// The smallest slowdown this entry was seen to have in training (log scale, >= 0 for a
+    /// model fitted on slowdown relative to the best candidate). A prediction below it is
+    /// raised to it, so a measured configuration that was never the best in training cannot
+    /// be extrapolated into the winner. A family or global entry describes configurations
+    /// training never measured; uhd_gen writes floor 0 for it, so it carries no such
+    /// guarantee. Finite.
+    floor:double = 0.0;
+}
+
+/// Per-configuration linear ranker (RFC 0019 §7 "linear_data" adapter).
+///
+/// A within-catalog ranker: the score of a candidate is its predicted log slowdown against
+/// the best candidate for the same problem, so LOWER IS BETTER and the UHD declares
+/// `objective: "min"`. It is not a physical estimate (no `score.metric`, never calibrated,
+/// identity transform) and cannot serve `predict_engine`.
+///
+/// Prediction for a feature row x:
+///     z[j]  = clamp((t_j(x[basis[j].feature]) - mean_j) / scale_j, lo_j, hi_j)
+///     entry = the `configs` entry whose key equals x at `key_features`,
+///             else the `families` entry whose key equals x at `family_features`,
+///             else `global`
+///     score = max(entry.coefficients . [1, z], entry.floor)
+/// The intercept is coefficients[0]. Per-row cost is one hash lookup and one dot product.
+table LinearModel {
+    /// Number of features expected in the input vector.
+    num_features:int32;
+
+    /// Hash of the features_signature this model was built against (sha256:...).
+    /// Must match the UHD's features_hash for the model to load.
+    features_hash:string;
+
+    /// Feature-row slots whose values together identify a kernel configuration.
+    key_features:[int32];
+
+    /// Feature-row slots of a coarser key, for a configuration the model never saw in
+    /// training. May be empty, in which case `families` is empty too.
+    family_features:[int32];
+
+    /// The model inputs, shared by every entry.
+    basis:[LinearBasisTerm];
+
+    /// One entry per configuration seen in training, keyed by key_features. Keys unique.
+    configs:[LinearConfig];
+
+    /// One entry per family, keyed by family_features. Keys unique.
+    families:[LinearConfig];
+
+    /// Scores a configuration matching neither a config nor a family. Its key is empty.
+    global:LinearConfig;
+
+    /// Model metadata.
+    framework:string;           // "rellin"
+    training_date:string;       // ISO 8601 timestamp
+    num_training_samples:int64;
+
+    /// Model provenance (RFC 0019 §8.3, §13).
+    /// GPU architectures the model was trained on (e.g., ["gfx942", "gfx1100"]).
+    training_arches:[string];
+
+    /// Semantic version of the model (e.g., "1.0.0").
+    model_version:string;
+}
+
+root_type LinearModel;

@@ -22,6 +22,10 @@ _BACKEND_FRAGMENT_TEMPLATES: tuple[tuple[str, str], ...] = (
     ("fragments/operation_type_enum.j2", "operation_type_enum.txt"),
     ("fragments/node_unpack_override.j2", "node_unpack_override.txt"),
     ("fragments/packer_name_addition.j2", "packer_name_addition.txt"),
+    ("fragments/fbs_tensor_fields.j2", "fbs_tensor_fields.txt"),
+    ("fragments/node_flops_overload.j2", "node_flops_overload.txt"),
+    ("fragments/logical_flops_case.j2", "logical_flops_case.txt"),
+    ("fragments/work_model_test_case.j2", "work_model_test_case.txt"),
 )
 
 BACKEND_FRAGMENT_FILENAMES: tuple[str, ...] = tuple(
@@ -227,7 +231,7 @@ class DescriptorGenerator:
             out_path.parent.mkdir(parents=True, exist_ok=True)
             content = self._render_template(template_name, config)
             out_path.write_text(content)
-            written.append(str(rel_path))
+            written.append(rel_path.as_posix())
 
         fragments_dir = output_dir / "fragments"
         fragments_dir.mkdir(parents=True, exist_ok=True)
@@ -273,7 +277,7 @@ class DescriptorGenerator:
             out_path.parent.mkdir(parents=True, exist_ok=True)
             content = self._render_template(template_name, config)
             out_path.write_text(content)
-            written.append(str(rel_path))
+            written.append(rel_path.as_posix())
 
         test_templates = {
             "test_attributes.cpp.j2": Path("frontend/tests")
@@ -291,7 +295,7 @@ class DescriptorGenerator:
             out_path.parent.mkdir(parents=True, exist_ok=True)
             content = self._render_template(template_name, config)
             out_path.write_text(content)
-            written.append(str(rel_path))
+            written.append(rel_path.as_posix())
 
         # Frontend fragment templates
         fragment_templates = {
@@ -371,7 +375,7 @@ class DescriptorGenerator:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         content = self._render_template("constants.hpp.j2", config)
         out_path.write_text(content)
-        return [str(rel_path)]
+        return [rel_path.as_posix()]
 
     def _render_template(self, template_name: str, config: OperationConfig) -> str:
         try:

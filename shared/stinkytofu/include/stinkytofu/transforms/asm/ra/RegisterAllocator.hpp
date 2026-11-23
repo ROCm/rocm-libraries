@@ -29,6 +29,8 @@
 // write srcRegs/destRegs. Those belong to AllocationConstraints,
 // AllocationVerifier, and destroyAttachedSSA.
 
+#include <string>
+
 #include "stinkytofu/Export.hpp"
 #include "stinkytofu/analysis/asm/ssa/SSALiveIntervals.hpp"
 #include "stinkytofu/core/Function.hpp"
@@ -59,6 +61,15 @@ struct AllocationContext {
     /// prefix of the function. Values outside the scope keep their lifted
     /// register; the verifier and destruction still need a total colouring.
     AllocationScope scope;
+
+    /// Search the 256-register VGPR bank the producer used for a block before
+    /// the rest of the file (RegisterAllocationOptions::Quadrant::Prefer). A
+    /// preference, not a constraint: a policy that ignores it is still correct.
+    bool preferProducerQuadrant = false;
+
+    /// When non-empty, the file a policy may write its placement table to
+    /// (RegisterAllocationOptions::blockDumpPrefix).
+    std::string blockDumpPath;
 };
 
 /// What lowering must support for this allocator's output to be applicable.

@@ -26,7 +26,7 @@ GEKO provides an end-to-end solution for optimizing GEMM kernels in hipBLASLt th
 ### Optimization Workflow
 Generates the most optimized kernels for individual sizes and datatypes. There are three main steps:
 
-1. **Configuration Phase** (`scripts/configure.py`): Analyze hipblaslt logs (actual workload) → Generate tensilelite configuration yamls for tuning. There are different options to create one config file per size for the best performance, or cluster similar sizes in the same config file for more efficient tuning.
+1. **Configuration Phase** (`scripts/configure.py`): Analyze hipblaslt logs (actual workload) → Generate TensileLite configuration yamls for tuning. There are different options to create one config file per size for the best performance, or cluster similar sizes in the same config file for more efficient tuning.
 
 2. **Optimization Phase** (`scripts/optimize.py`): Run GEMM kernel optimization → Benchmark → Filter → Create final library. There are different options to use (Genetic Algorithm for the best performance, or exhaustive kernel search across all possible kernel based on the yaml configuration file parameters for experiments).
 
@@ -38,7 +38,7 @@ Optimization Workflow:
 ```
 hipBLASLt Logs → Configure → Optimize   →    Benchmark → Filter → Merge
       ↓             ↓           ↓               ↓          ↓        ↓
-  YAML logs      Tensile     Tuning         Performance  Final   hipBLASLt
+  YAML logs      TensileLite Tuning         Performance  Final   hipBLASLt
                  Configs  (Ductile or full)   Analysis   Library Integration
 ```
 
@@ -95,7 +95,7 @@ geko/
 │   ├── bench.py        # Core benchmark execution
 │   ├── log.py          # hipBLASLt log file parsing
 │   └── utils.py        # Benchmark parsing utilities
-├── optim/              # Ductile/Tensile tensilelite configuration and execution
+├── optim/              # Ductile/TensileLite configuration and execution
 │   ├── optim.py        # Optimization and result analysis
 │   └── utils.py        # Progress tracking and device management
 ├── search.py           # Dense search workflow (offline tuning)
@@ -103,7 +103,7 @@ geko/
 │   ├── library.py      # Library and LibraryCollection classes
 │   ├── operations.py   # Library loading, merging, creation, etc.
 │   └── _bank.py        # Solution bank utilities
-├── config_generator/   # Tensile configuration generation utilities
+├── config_generator/   # TensileLite configuration generation utilities
 │   ├── config.yaml     # Example configuration template
 │   ├── config_generator.py
 │   ├── config_merger.py
@@ -145,7 +145,7 @@ workdir/
 ├── summary.csv                    # GEMM contribution analysis
 ├── gemms.csv                      # Extracted unique GEMMs
 ├── optimizations/                 # Phase 1: Configuration output
-│   ├── BBS_TN_0.yaml              # Tensile config for GEMM type
+│   ├── BBS_TN_0.yaml              # TensileLite config for GEMM type
 │   ├── BBS_TN_0.sh                # Execution script
 │   ├── F8BS_TN_1.yaml             # Another GEMM configuration
 │   ├── ...
@@ -157,7 +157,7 @@ workdir/
 │       └── *-optimization.log     # Optimization logs
 ├── libs/                          # Merged optimized libraries
 │   └── *.yaml                     # Individual library per GEMM type
-├── tensile/library/*.dat          # Compiled Tensile libraries
+├── tensile/library/*.dat          # Compiled TensileLite libraries
 ├── benchmarks/                    # Benchmark configurations
 │   ├── *_bench.yaml               # Generated benchmark inputs
 │   └── *_verify.yaml              # Verification inputs
@@ -183,7 +183,7 @@ workdir/
 │   └── failed_jobs.log            # Failed benchmark log
 ├── libs/                          # Extracted winning kernels
 │   └── *.yaml                     # Individual library per GEMM type
-├── tensile/library/*.dat          # Compiled Tensile libraries
+├── tensile/library/*.dat          # Compiled TensileLite libraries
 ├── benchmarks/                    # Benchmark configurations
 │   └── *_bench.yaml               # Generated benchmark inputs
 ├── results/                       # Performance analysis
@@ -413,13 +413,14 @@ See [`tests/README.md`](tests/README.md) for further details on the test layout.
 ### `--search` options
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--duration SEC` | `0.04` | Target dense-search benchmark duration per GEMM. |
+| `--search-profile {fast,balanced,thorough}` | `thorough` | Search profile bundling the `hipblaslt-bench --adaptive` timing knobs: `fast` (single dense pass, cheapest), `balanced` (two-stage: cheap screen + strict re-verify of its top-K candidates), or `thorough` (tightest convergence/ceiling knobs, most expensive). See `geko.search.SEARCH_PROFILES`. |
 | `--custom-lib-src PATH` | _none_ | Optional source logic directory used to build a reference custom library (`workdir/ref_build`) for summarize/search/analyze comparisons. |
 
 ### `--bench` options
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--benchmark-duration SEC` | `0.5` | Target seconds per cold and per timed phase of `hipblaslt-bench`. |
+| `--benchmark-duration SEC` | `0.5` | Measurement time of each GEMM benchmark using `hipblaslt-bench --adaptive`. About 2.4x faster than a 1 s fixed-iteration run, with ratios about 3.8x more repeatable. With `--no-benchmark-adaptive`, the target seconds per cold and per timed phase instead. |
+| `--no-benchmark-adaptive` | _off_ | Disable adaptive timing and use fixed iteration counts scaled from a probe run. |
 | `--custom-lib-src PATH` | _none_ | Optional source logic directory used to build a reference custom library (`workdir/ref_build`) and benchmark against it. |
 | `--custom-lib-dir PATH` | _none_ | Optional pre-built custom library directory containing `library/**/TensileLibrary_lazy_gfx*.dat` (or `.dat.zlib`). If set together with `--custom-lib-src`, this flag wins. |
 
@@ -491,7 +492,7 @@ The full template (StreamK, search space, MI filtering, `SIZE_OPTION=1` grid mod
 
 ### 1. Ductile-based Optimization
 
-Tunes new kernel parameters using a Genetic Algorithm (via Ductile) or exhaustive Tensile grid search. Produces the highest performance gains but takes hours.
+Tunes new kernel parameters using a Genetic Algorithm (via Ductile) or exhaustive TensileLite grid search. Produces the highest performance gains but takes hours.
 
 #### Option A: Single CLI command
 
@@ -502,7 +503,7 @@ Tunes new kernel parameters using a Genetic Algorithm (via Ductile) or exhaustiv
 
 #### Option B: Two-step script control (recommended — lets you review configs before tuning)
 
-**Step 1 — Configure** (`scripts/configure.py`): parse the log, group GEMMs by type, generate tensilelite configs.
+**Step 1 — Configure** (`scripts/configure.py`): parse the log, group GEMMs by type, generate TensileLite configs.
 
 **Options:**
 | Option | Description | Default |
@@ -527,7 +528,7 @@ my_optimization/
 ├── hipblaslt-log-mask64.yaml / hipblaslt-log-mask64.out  # Baseline benchmark
 ├── summary.csv / gemms.csv           # GEMM contribution analysis
 └── optimizations/
-    ├── BBS_TN_0.yaml                 # Tensile config per GEMM type
+    ├── BBS_TN_0.yaml                 # TensileLite config per GEMM type
     ├── BBS_TN_0.sh
     └── ...
 ```
@@ -551,7 +552,7 @@ GEKO:INFO [configure:main] Configuration phase completed successfully!
 | `-n, --n_slots` | Max concurrent optimization jobs per device | 4 |
 | `--up_thr` | Performance uplift threshold | 1.03 (3%) |
 | `--err_thr` | Error threshold for filtering | 0.03 |
-| `--client_build_dir` | Directory path for tensilelite client build | build_tmp |
+| `--client_build_dir` | Directory path for TensileLite client build | build_tmp |
 | `--no_retry` | Do not retry failed optimizations | False |
 | `-v, --verbose` | Logging verbosity (0=WARNING, 1=INFO, 2=DEBUG) | 1 |
 | `--bench-freq` | Enable `HIPBLASLT_BENCH_FREQ` during benchmark runs | False |
@@ -574,7 +575,7 @@ Output:
 my_optimization/
 ├── optimizations/build_*/            # Per-GEMM tuning results and logs
 ├── libs/                             # Merged libraries
-├── tensile/library/*.dat             # Compiled Tensile libraries
+├── tensile/library/*.dat             # Compiled TensileLite libraries
 ├── benchmarks/                       # Benchmark inputs
 ├── results/raw_results.csv / final_results.csv
 └── final_libs/                       # Ready for integration
@@ -585,7 +586,7 @@ my_optimization/
 
 ```bash
 HIPBLASLT_PATH="/path/to/rocm-libraries/projects/hipblaslt"
-LIBRARY_DIR="${HIPBLASLT_PATH}/library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx950/Equality/"
+LIBRARY_DIR="${HIPBLASLT_PATH}/library/src/amd_detail/rocblaslt/src/Tensile/Logic/asm_full/gfx950/gfx950/Equality/"
 
 ${HIPBLASLT_PATH}/tensilelite/tensilelite/bin/TensileMergeLibrary \
   --no_eff --force_merge True \
@@ -638,7 +639,7 @@ Equivalent to Option A but takes the workload log as a positional argument and u
 | `--keep_thr` | Filter threshold (% of total time) | 0.1 |
 | `--up_thr` | Performance uplift threshold | 1.03 (3%) |
 | `-w, --workdir` | Working directory | workdir |
-| `--duration` | Target benchmark duration per GEMM (seconds) | 0.04 |
+| `--search-profile {fast,balanced,thorough}` | Search profile bundling the adaptive timing knobs | thorough |
 | `--custom-lib-src` | Source logic directory for building reference custom library | None |
 | `-v, --verbose` | Logging verbosity (0=WARNING, 1=INFO, 2=DEBUG) | 1 |
 | `--bench-freq` | Enable `HIPBLASLT_BENCH_FREQ` during benchmark runs | False |
@@ -753,7 +754,7 @@ results = bench.compare(
 Orchestrates multi-GPU kernel optimization.
 
 **Key Functions:**
-- `optim.configure()` - Generate Tensile configurations
+- `optim.configure()` - Generate TensileLite configurations
 - `optim.run()` - Execute multi-GPU optimization
 - `optim.analyze()` - Benchmark and filter optimized kernels
 
@@ -825,7 +826,7 @@ df = pd.DataFrame([
 
 configs = search.configure(
     df=df,
-    duration=0.04,  # Target 40ms benchmark duration
+    profile="thorough",  # "fast", "balanced", or "thorough" (see geko.search.SEARCH_PROFILES)
     iters=100,
     cold_iters=20,
     rotating=512
@@ -861,7 +862,7 @@ summary_df, uniq_df = bench.log.summarize(
 )
 
 # 2. Configure and run search
-configs = search.configure(summary_df, duration=0.04)
+configs = search.configure(summary_df, profile="thorough")
 winners = search.run(
     hipblaslt_path="/path/to/hipblaslt",
     configs=configs,
@@ -891,7 +892,7 @@ library.from_dataframe(results, "workdir/libs").dump("workdir/final_libs")
 
 ### `geko.library` - Library Management Module
 
-Manages Tensile library loading, merging, and manipulation.
+Manages TensileLite library loading, merging, and manipulation.
 
 **Key Classes:**
 - `Library` - Represents a single kernel library
@@ -960,11 +961,11 @@ Defines typed data structures with validation.
 ```python
 from geko.schemas import GemmType, GemmConfig
 
-# Prefer factory constructors (they keep Tensile + hipBLASLt fields consistent).
+# Prefer factory constructors (they keep TensileLite + hipBLASLt fields consistent).
 gemm_type = GemmType.from_hipblaslt(
     "T", "N", "f16_r", "f16_r", "f16_r", "f32_r"
 )
-# Or from tensilelite YAML codes only:
+# Or from TensileLite YAML codes only:
 # gemm_type = GemmType.from_tensile("N", "T", "H", "H", "S")
 
 gemm_config = GemmConfig(
@@ -982,7 +983,7 @@ Common utilities for the framework.
 
 **Key Functions:** 
 - `run_silent_command()` - Execute shell commands silently
-- `build_tensilelite_client()` - Build the tensilelite client (cached by hipBLASLt git hash)
+- `build_tensilelite_client()` - Build the TensileLite client (cached by hipBLASLt git hash)
 - `parse_devices()` - Parse a comma-separated device string into a list of device IDs
 
 **Example Usage:**
@@ -995,7 +996,7 @@ from geko.utils import (
 # Run command silently
 run_silent_command(["ls", "-la", "/tmp"])
 
-# Build tensilelite client
+# Build TensileLite client
 hipblaslt_path = "/path/to/rocm-libraries/projects/hipblaslt"
 build_dir = "build_tmp"
 build_tensilelite_client(hipblaslt_path, build_dir)
@@ -1090,7 +1091,7 @@ summary_df, uniq_df = bench.log.summarize(
 )
 
 # Phase 2: Configure and run search
-configs = search.configure(summary_df, duration=0.04)
+configs = search.configure(summary_df, profile="thorough")
 winners = search.run(
     hipblaslt_path,
     configs=configs,
@@ -1193,7 +1194,7 @@ Common causes:
 - Failure to benchmark a hipBLASLt log file.
 - Invalid GEMM types.
 - No solutions found for a given GEMM type and size.
-- No tensilelite configurations are generated.
+- No TensileLite configurations are generated.
 
 **Solutions:**
 
@@ -1226,7 +1227,7 @@ If the benchmark fails, check for:
 
 **Invalid GEMM Types:**
 Check the supported data types in hipBLASLt:
-- Visit the [tensilelite DataType definitions](https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblaslt/tensilelite/tensilelite/Common/DataType.py)
+- Visit the [TensileLite DataType definitions](https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblaslt/tensilelite/tensilelite/Common/DataType.py)
 - Verify your log file contains valid `a_type`, `b_type`, `c_type`, and `compute_type` combinations
 - Example valid types: `f16_r`, `bf16_r`, `f32_r`, `f8_r`, `bf8_r`
 
@@ -1245,7 +1246,7 @@ If you encounter errors like "No solutions found":
 - **Important GEMMs**: Contact the GEMM Optimization team for support
 - **Non-critical GEMMs**: Remove the problematic GEMM from your hipBLASLt log file
 
-**No tensilelite Configurations Generated:**
+**No TensileLite Configurations Generated:**
 If `scripts/configure.py` produces no configuration files:
 ```bash
 # Lower the keep threshold to include more GEMMs

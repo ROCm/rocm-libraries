@@ -24,7 +24,11 @@
  *
  *******************************************************************************/
 
+#include <algorithm>
 #include <cstddef>
+#include <limits>
+#include <optional>
+#include <tuple>
 #include <miopen/conv/solvers.hpp>
 #include <miopen/env.hpp>
 #include <miopen/handle.hpp>
@@ -363,6 +367,97 @@ GetImplicitGemmGtcDynamicWrwXdlopsNHWCKernel(
     return std::make_tuple(block_size, grid_size, occupancy);
 }
 
+// Gemm-k split exactly as GetSolution() passes it to the kernel:
+// {gemm_k_global_splits, gemm_k_per_wg}. For nxe == 1 one gemm-k index covers
+// tensor_a_thread_lengths[1] consecutive batch rows.
+static std::tuple<size_t, size_t>
+ComputeWrwGemmKSplit(const ProblemDescription& problem,
+                     const PerformanceConfigAsmImplicitGemmGTCWrwXdlopsNHWC& config,
+                     size_t grid_size,
+                     size_t num_cu,
+                     size_t splits_4G)
+{
+    const int n  = ProblemInterpreter::GetBatchN(problem);
+    const int ho = ProblemInterpreter::GetOutputHeightHo(problem);
+    const int wo = ProblemInterpreter::GetOutputWidthWo(problem);
+
+    size_t gemm_k_global_splits =
+        config.gemm_k_global_split >= 1
+            ? ComputeGemmKGlobalSplitsWith2DMerge(grid_size, config.gemm_k_global_split, num_cu)
+            : 1;
+    size_t min_n_per_block = config.nxe == 1 ? config.tensor_a_thread_lengths[1] : 1;
+    size_t nb_per_block =
+        config.nxe == 1 ? config.tensor_a_cluster_lengths[1] : config.gemm_k_per_block;
+
+    if(gemm_k_global_splits == 0)
+        gemm_k_global_splits = 1;
+
+    // compute workload for 1 workgroup and update gemmk splits (remove the ones compute 0 data)
+    size_t gemmk = integer_divide_ceil(static_cast<size_t>(n) / splits_4G, min_n_per_block) *
+                   static_cast<size_t>(ho) * static_cast<size_t>(wo);
+    size_t gemmk_per_wg = integer_divide_ceil(gemmk, gemm_k_global_splits);
+
+    gemmk_per_wg         = (gemmk_per_wg + nb_per_block - 1) / nb_per_block * nb_per_block;
+    gemm_k_global_splits = integer_divide_ceil(gemmk, gemmk_per_wg);
+    return std::make_tuple(gemm_k_global_splits, gemmk_per_wg);
+}
+
+// The kernels read batch rows past N: the padding rows of the last pack of
+// tensor_a_thread_lengths[1] rows (FP16/BF16 nxe == 1 kernels pack 4 or 8 rows), and the tail
+// of the last gemm-k split. They rely on the buffer range check to return zero for those rows,
+// but the row offsets are 32-bit, so a row whose offset reaches 4 GiB wraps back into the
+// tensor and adds real data to the weight gradient. Accept a config only if every row it can
+// read ends at or below 4 GiB in both activation tensors.
+//
+// Workgroup bz reads exactly the gemm-k range [bz * gemmk_per_wg, (bz + 1) * gemmk_per_wg). The
+// kernels load one gemm-k block in the prologue and one per body iteration while s_kitr > 0,
+// with s_knum = round_up(gemmk_per_wg << log2(tensor_a_thread_lengths[1]), gemm_k_per_block),
+// and ComputeWrwGemmKSplit() rounds gemmk_per_wg up to nb_per_block, which is
+// gemm_k_per_block / tensor_a_thread_lengths[1]. So the end of the last split is the last row
+// read and no margin is needed.
+static bool
+WrwPaddedBatchFitsBufferOffsets(const ExecutionContext& ctx,
+                                const ProblemDescription& problem,
+                                const PerformanceConfigAsmImplicitGemmGTCWrwXdlopsNHWC& config)
+{
+    const int hi         = ProblemInterpreter::GetInputHeightHi(problem);
+    const int wi         = ProblemInterpreter::GetInputWidthWi(problem);
+    const int n          = ProblemInterpreter::GetBatchN(problem);
+    const int k          = ProblemInterpreter::GetOutputChannelK(problem);
+    const int c          = ProblemInterpreter::GetInputChannelC(problem);
+    const int ho         = ProblemInterpreter::GetOutputHeightHo(problem);
+    const int wo         = ProblemInterpreter::GetOutputWidthWo(problem);
+    const auto data_type = ProblemInterpreter::GetInputDataType(problem);
+
+    const auto splits_4G =
+        igemm_split_batch_size(hi, wi, ho, wo, n, k, c, miopen::GetTypeSize(data_type));
+    if(splits_4G <= 0)
+        return false;
+
+    size_t grid_size;
+    std::tie(std::ignore, grid_size, std::ignore) =
+        GetImplicitGemmGtcDynamicWrwXdlopsNHWCKernel(problem, config);
+    size_t gemm_k_global_splits, gemmk_per_wg;
+    std::tie(gemm_k_global_splits, gemmk_per_wg) =
+        ComputeWrwGemmKSplit(problem,
+                             config,
+                             grid_size,
+                             ctx.GetStream().GetMaxComputeUnits(),
+                             static_cast<size_t>(splits_4G));
+
+    const size_t rows_per_gemm_k = config.nxe == 1 ? std::max(config.tensor_a_thread_lengths[1],
+                                                              config.tensor_b_thread_lengths[1])
+                                                   : 1;
+    const size_t gemm_k_read     = gemm_k_global_splits * gemmk_per_wg;
+    const size_t rows_read =
+        integer_divide_ceil(gemm_k_read, static_cast<size_t>(ho) * wo) * rows_per_gemm_k;
+
+    const size_t type_size     = miopen::GetTypeSize(data_type);
+    const size_t in_row_bytes  = static_cast<size_t>(c) * hi * wi * type_size;
+    const size_t out_row_bytes = static_cast<size_t>(k) * ho * wo * type_size;
+    return rows_read * std::max(in_row_bytes, out_row_bytes) <= (static_cast<size_t>(1) << 32);
+}
+
 size_t PerformanceConfigAsmImplicitGemmGTCWrwXdlopsNHWC::ComputeKernelOccupancy() const
 {
     size_t acc_usage = gemm_m_per_block * gemm_n_per_block / BlockSize();
@@ -458,7 +553,7 @@ void PerformanceConfigAsmImplicitGemmGTCWrwXdlopsNHWC::SetParamsForKSplit(
     gemm_k_global_split = occupancy;
 }
 
-void PerformanceConfigAsmImplicitGemmGTCWrwXdlopsNHWC::HeuristicInit(
+void PerformanceConfigAsmImplicitGemmGTCWrwXdlopsNHWC::HeuristicInitIgnoringBatchPadding(
     const ExecutionContext& ctx, const ProblemDescription& problem)
 {
     static const std::vector<std::tuple<int, int, int>> tile_list_fp32 = {
@@ -710,6 +805,63 @@ void PerformanceConfigAsmImplicitGemmGTCWrwXdlopsNHWC::HeuristicInit(
     }
 }
 
+void PerformanceConfigAsmImplicitGemmGTCWrwXdlopsNHWC::HeuristicInit(
+    const ExecutionContext& ctx, const ProblemDescription& problem)
+{
+    HeuristicInitIgnoringBatchPadding(ctx, problem);
+    if(WrwPaddedBatchFitsBufferOffsets(ctx, problem, *this))
+        return;
+
+    // The usual choice reads batch rows whose 32-bit offsets wrap (see
+    // WrwPaddedBatchFitsBufferOffsets). Take the least-padding config that is valid and does not
+    // wrap. If there is none, keep the usual choice; IsApplicable() then rejects the problem.
+    const int k                   = ProblemInterpreter::GetOutputChannelK(problem);
+    const int c                   = ProblemInterpreter::GetInputChannelC(problem);
+    const int y                   = ProblemInterpreter::GetFilterHeightY(problem);
+    const int x                   = ProblemInterpreter::GetFilterWidthX(problem);
+    const auto group              = ProblemInterpreter::GetGroupCountG(problem);
+    const auto num_cu             = ctx.GetStream().GetMaxComputeUnits();
+    const auto non_split_gridsize = 600;
+    const auto gemm_m             = k / group;
+
+    std::optional<PerformanceConfigAsmImplicitGemmGTCWrwXdlopsNHWC> best;
+    size_t best_pad = std::numeric_limits<std::size_t>::max();
+    for(const auto& config : GetWrwXdlopsNHWCConfigList())
+    {
+        auto candidate = config;
+        size_t current_grid_size;
+        size_t occupancy;
+        std::tie(std::ignore, current_grid_size, occupancy) =
+            GetImplicitGemmGtcDynamicWrwXdlopsNHWCKernel(problem, config);
+        if(current_grid_size <= non_split_gridsize ||
+           ComputeGemmKGlobalSplitsWith2DMerge(current_grid_size, occupancy, num_cu) != 0)
+            candidate.SetParamsForKSplit(problem, occupancy);
+        if(!candidate.IsValid(problem) || !WrwPaddedBatchFitsBufferOffsets(ctx, problem, candidate))
+            continue;
+
+        // Same padding cost as the gemm-k padding search in HeuristicInitIgnoringBatchPadding.
+        auto gemm_n = (c / group) * y * x;
+        if(problem.IsFp32())
+        {
+            const auto c_vec_min = config.tensor_b_thread_lengths[3];
+            const auto c_padded  = ((c / group) + c_vec_min - 1) / c_vec_min * c_vec_min;
+            gemm_n = (c_padded * y * x + config.gemm_n_per_block - 1) / config.gemm_n_per_block *
+                     config.gemm_n_per_block;
+        }
+        const size_t pad =
+            ComputeMatrixPadSize(gemm_m, config.gemm_m_per_block, 0, config.gemm_k_per_block) +
+            ComputeMatrixPadSize(gemm_n, config.gemm_n_per_block, 0, config.gemm_k_per_block) +
+            ComputeMatrixPadSize(gemm_m, config.gemm_m_per_block, gemm_n, config.gemm_n_per_block);
+        if(pad < best_pad)
+        {
+            best_pad = pad;
+            best     = candidate;
+        }
+    }
+    if(best)
+        CopyParameters(*best);
+}
+
 bool PerformanceConfigAsmImplicitGemmGTCWrwXdlopsNHWC::SetNextValue(const ProblemDescription&)
 {
     if(use_spare_set)
@@ -833,6 +985,12 @@ bool PerformanceConfigAsmImplicitGemmGTCWrwXdlopsNHWC::IsValid(
     return true;
 }
 
+bool PerformanceConfigAsmImplicitGemmGTCWrwXdlopsNHWC::IsValid(
+    const ExecutionContext& ctx, const ProblemDescription& problem) const
+{
+    return IsValid(problem) && WrwPaddedBatchFitsBufferOffsets(ctx, problem, *this);
+}
+
 PerformanceConfigAsmImplicitGemmGTCWrwXdlopsNHWC
 ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC::GetDefaultPerformanceConfig(
     const ExecutionContext& ctx, const ProblemDescription& problem) const
@@ -843,11 +1001,11 @@ ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC::GetDefaultPerformanceConfig(
     return pp;
 }
 bool ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC::IsValidPerformanceConfig(
-    const ExecutionContext&,
+    const ExecutionContext& ctx,
     const ProblemDescription& problem,
     const PerformanceConfigAsmImplicitGemmGTCWrwXdlopsNHWC& config) const
 {
-    return config.IsValidValue() && config.IsValid(problem);
+    return config.IsValidValue() && config.IsValid(ctx, problem);
 }
 
 PerformanceConfigAsmImplicitGemmGTCWrwXdlopsNHWC
@@ -892,7 +1050,11 @@ bool ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC::IsApplicable(
     if(!problem.AllTensorsDimsFitIntoInt())
         return false;
 
-    if(igemm_tensor_size_exceeds_asm_gtc_addressing(problem))
+    // The full 4 GiB window was validated against a GPU reference on gfx950 only.
+    const auto max_wrw_bytes = device_name == "gfx950"
+                                   ? static_cast<std::size_t>(0xffffffffULL)
+                                   : static_cast<std::size_t>(std::numeric_limits<int>::max());
+    if(igemm_tensor_size_exceeds_asm_gtc_addressing(problem, max_wrw_bytes))
         return false;
 
     if(!problem.IsFp32() && !problem.IsFp16() &&
@@ -910,15 +1072,16 @@ bool ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC::IsApplicable(
     if(target.isXnackEnabled())
         return false;
 
-    if(0 ==
-       igemm_split_batch_size(ProblemInterpreter::GetInputHeightHi(problem),
+    // A single batch split only; see igemm_tensor_size_exceeds_asm_gtc_addressing() and #11805.
+    if(igemm_split_batch_size(ProblemInterpreter::GetInputHeightHi(problem),
                               ProblemInterpreter::GetInputWidthWi(problem),
                               ProblemInterpreter::GetOutputHeightHo(problem),
                               ProblemInterpreter::GetOutputWidthWo(problem),
                               ProblemInterpreter::GetBatchN(problem),
                               ProblemInterpreter::GetOutputChannelK(problem),
                               ProblemInterpreter::GetInputChannelC(problem),
-                              miopen::GetTypeSize(ProblemInterpreter::GetInputDataType(problem))))
+                              miopen::GetTypeSize(ProblemInterpreter::GetInputDataType(problem))) !=
+       1)
         return false;
 
     {
@@ -931,6 +1094,15 @@ bool ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC::IsApplicable(
             GetImplicitGemmGtcDynamicWrwXdlopsNHWCKernel(problem, largest_config);
 
         if(current_block_size * current_grid_size * current_splits_4G > 0xffffffffULL)
+            return false;
+    }
+
+    // The default config must keep its batch reads inside 32-bit offsets. HeuristicInit()
+    // prefers such a config; this rejects problems where none exists.
+    {
+        PerformanceConfigAsmImplicitGemmGTCWrwXdlopsNHWC heuristic;
+        heuristic.HeuristicInit(ctx, problem);
+        if(!WrwPaddedBatchFitsBufferOffsets(ctx, problem, heuristic))
             return false;
     }
 
@@ -1079,25 +1251,13 @@ ConvSolution ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC::GetSolution(
                                c,
                                miopen::GetTypeSize(ProblemInterpreter::GetInputDataType(problem)));
 
-    size_t gemm_k_global_splits =
-        config.gemm_k_global_split >= 1
-            ? ComputeGemmKGlobalSplitsWith2DMerge(
-                  grid_size, config.gemm_k_global_split, ctx.GetStream().GetMaxComputeUnits())
-            : 1;
-    size_t min_n_per_block = config.nxe == 1 ? config.tensor_a_thread_lengths[1] : 1;
-    size_t nb_per_block =
-        config.nxe == 1 ? config.tensor_a_cluster_lengths[1] : config.gemm_k_per_block;
-
-    if(gemm_k_global_splits == 0)
-        gemm_k_global_splits = 1;
-
-    // compute workload for 1 workgroup and update gemmk splits (remove the ones compute 0 data)
-    size_t gemmk = integer_divide_ceil(static_cast<size_t>(n) / splits_4G, min_n_per_block) *
-                   static_cast<size_t>(ho) * static_cast<size_t>(wo);
-    size_t gemmk_per_wg = integer_divide_ceil(gemmk, gemm_k_global_splits);
-
-    gemmk_per_wg         = (gemmk_per_wg + nb_per_block - 1) / nb_per_block * nb_per_block;
-    gemm_k_global_splits = integer_divide_ceil(gemmk, gemmk_per_wg);
+    size_t gemm_k_global_splits, gemmk_per_wg;
+    std::tie(gemm_k_global_splits, gemmk_per_wg) =
+        ComputeWrwGemmKSplit(problem,
+                             config,
+                             grid_size,
+                             ctx.GetStream().GetMaxComputeUnits(),
+                             static_cast<size_t>(splits_4G));
 
     const auto required_workspace_size = GetWorkspaceSize(ctx, problem);
     result.workspace_sz                = required_workspace_size;

@@ -4,11 +4,11 @@
 
 from itertools import product
 import subprocess
-import sys
 
 import pytest
 
 from rocke.core.arch.target import _gfx1250_scale_combination_valid
+from rocke.tests.subprocess_launcher import rocke_python_command
 
 _MODULE = "rocke.examples.gfx1250.gemm.scale_formats_gemm"
 
@@ -33,8 +33,7 @@ def test_scale_format_wmma_numeric(
     gpu_env, matrix_path, output_dtype, a, b, sa, sb, route
 ):
     result = subprocess.run(
-        [
-            sys.executable,
+        rocke_python_command(
             "-m",
             _MODULE,
             "--output-dtype",
@@ -59,7 +58,7 @@ def test_scale_format_wmma_numeric(
             "256",
             "--case",
             "all",
-        ],
+        ),
         env=gpu_env,
         capture_output=True,
         text=True,

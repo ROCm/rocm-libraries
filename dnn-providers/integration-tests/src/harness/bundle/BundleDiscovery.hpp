@@ -7,13 +7,16 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -97,6 +100,47 @@ inline bool isDescendantOf(const std::filesystem::path& path, const std::filesys
 
     return ancestorIt == normalizedAncestor.end();
 }
+
+namespace detail
+{
+
+// True when isDescendantOf(path, a) holds for some `a` whose lexically_normal() form
+// is in `normalizedAncestors`. The cost is one set lookup per level of `path`.
+inline bool hasAncestorIn(const std::filesystem::path& path,
+                          const std::set<std::filesystem::path>& normalizedAncestors)
+{
+    auto current = path.lexically_normal();
+    while(true)
+    {
+        if(normalizedAncestors.count(current) != 0)
+        {
+            return true;
+        }
+        auto parent = current.parent_path();
+        if(parent == current)
+        {
+            break;
+        }
+        current = std::move(parent);
+    }
+    // The walk stops at the root path, for example "/" or "C:\" on Windows. The element
+    // sequence of `path` also starts with its root name ("C:") and with the empty sequence.
+    return normalizedAncestors.count(current.root_name()) != 0
+           || normalizedAncestors.count(std::filesystem::path{}) != 0;
+}
+
+inline std::set<std::filesystem::path>
+    lexicallyNormalSet(const std::vector<std::filesystem::path>& paths)
+{
+    std::set<std::filesystem::path> normalized;
+    for(const auto& path : paths)
+    {
+        normalized.insert(path.lexically_normal());
+    }
+    return normalized;
+}
+
+} // namespace detail
 
 // The directory `path` resolves to, or the path itself when it cannot be resolved,
 // for comparing the directories a walk has descended through.
@@ -199,50 +243,6 @@ inline std::filesystem::path relativeToRoot(const std::filesystem::path& path,
                                             const std::filesystem::path& root)
 {
     return path.lexically_normal().lexically_relative(root.lexically_normal());
-}
-
-// Generic recursive file scanner. It carries no bundle knowledge; graph vs
-// companion vs sweep filtering is layered on top by isGraphFile() and
-// discoverBundles().
-inline std::vector<std::filesystem::path>
-    scanFilesByExtension(const std::filesystem::path& directory, const std::string& extension)
-{
-    std::vector<std::filesystem::path> paths;
-    forEachBundleTreeEntry(directory, [&](const std::filesystem::directory_entry& entry) {
-        if(entry.is_regular_file() && entry.path().extension() == extension)
-        {
-            paths.push_back(entry.path());
-        }
-    });
-    std::sort(paths.begin(), paths.end());
-    return paths;
-}
-
-// Returns every leaf directory at or under root. Leaf folders with no graph .json
-// are warned as likely incomplete bundles, except for recognized sweep roots and
-// sweep golden-data leaves.
-inline std::vector<std::filesystem::path> findLeafDirectories(const std::filesystem::path& root)
-{
-    std::set<std::filesystem::path> withSubdir;
-    std::set<std::filesystem::path> allDirs;
-    allDirs.insert(root);
-    forEachBundleTreeEntry(root, [&](const std::filesystem::directory_entry& entry) {
-        if(entry.is_directory())
-        {
-            allDirs.insert(entry.path());
-            withSubdir.insert(entry.path().parent_path());
-        }
-    });
-
-    std::vector<std::filesystem::path> leaves;
-    for(const auto& dir : allDirs)
-    {
-        if(withSubdir.find(dir) == withSubdir.end())
-        {
-            leaves.push_back(dir);
-        }
-    }
-    return leaves;
 }
 
 // Companion file kinds that mark a .json as metadata for a graph instead of a
@@ -366,61 +366,159 @@ inline DerivedTestName deriveTestName(const std::filesystem::path& jsonPath,
     return {deriveSuiteName(relativeDir, jsonPath), sanitizeForGtest(jsonPath.stem().string())};
 }
 
-// A sweep root is any directory with both graph.template.json and sweep.json.
-// It registers one logical test per cases[].id, and normal graph discovery skips
-// every JSON file below it so templates, manifests, and golden metadata do not
-// become direct tests.
+namespace detail
+{
+
+// What one walk of a bundle tree finds. Directories are keyed by the path that the
+// walk gives them. The entries directly in the root carry `rootContentsKey` as their
+// parent path, which can differ from the root as given (for example "data" for "data/").
+struct BundleTreeListing
+{
+    std::filesystem::path root;
+    std::filesystem::path rootContentsKey;
+    std::set<std::filesystem::path> directories; // the root and every walked directory
+    std::set<std::filesystem::path> parentsOfDirectories;
+    std::set<std::filesystem::path> parentsOfGraphFiles;
+    std::set<std::filesystem::path> parentsOfTemplateFiles;
+    std::set<std::filesystem::path> parentsOfManifestFiles;
+    std::vector<std::filesystem::path> jsonFiles; // every regular .json file, sorted
+
+    std::filesystem::path contentsKey(const std::filesystem::path& directory) const
+    {
+        return directory == root ? rootContentsKey : directory;
+    }
+
+    bool isLeaf(const std::filesystem::path& directory) const
+    {
+        return parentsOfDirectories.count(contentsKey(directory)) == 0;
+    }
+
+    bool holdsGraphFile(const std::filesystem::path& directory) const
+    {
+        return parentsOfGraphFiles.count(contentsKey(directory)) != 0;
+    }
+
+    // The test of isSweepBundleRoot(), applied to the walked entries. The walk skips a
+    // control file that is a directory symlink cycle or a directory it cannot list, so
+    // such a folder is not a sweep root here, but isSweepBundleRoot() accepts it.
+    bool isSweepRoot(const std::filesystem::path& directory) const
+    {
+        const auto key = contentsKey(directory);
+        return parentsOfTemplateFiles.count(key) != 0 && parentsOfManifestFiles.count(key) != 0;
+    }
+};
+
+// Walks the tree at `root` once and records what discovery needs from it.
+inline BundleTreeListing listBundleTree(const std::filesystem::path& root)
+{
+    BundleTreeListing listing;
+    listing.root = root;
+    listing.rootContentsKey = (root / "entry").parent_path();
+    listing.directories.insert(root);
+    forEachBundleTreeEntry(root, [&](const std::filesystem::directory_entry& entry) {
+        const auto& path = entry.path();
+        if(entry.is_directory())
+        {
+            listing.directories.insert(path);
+            listing.parentsOfDirectories.insert(path.parent_path());
+        }
+        else if(entry.is_regular_file() && path.extension() == ".json")
+        {
+            listing.jsonFiles.push_back(path);
+            if(isGraphFile(path))
+            {
+                listing.parentsOfGraphFiles.insert(path.parent_path());
+            }
+        }
+        if(isSweepTemplateFile(path) && entry.exists())
+        {
+            listing.parentsOfTemplateFiles.insert(path.parent_path());
+        }
+        if(isSweepManifestFile(path) && entry.exists())
+        {
+            listing.parentsOfManifestFiles.insert(path.parent_path());
+        }
+    });
+    std::sort(listing.jsonFiles.begin(), listing.jsonFiles.end());
+    return listing;
+}
+
+inline std::vector<std::filesystem::path> sweepRootsIn(const BundleTreeListing& listing)
+{
+    std::vector<std::filesystem::path> sweepDirs;
+    for(const auto& directory : listing.directories)
+    {
+        if(listing.isSweepRoot(directory))
+        {
+            sweepDirs.push_back(directory);
+        }
+    }
+    return sweepDirs;
+}
+
+} // namespace detail
+
+// A sweep root is any directory where the walk finds both graph.template.json and
+// sweep.json, by the rule of BundleTreeListing::isSweepRoot(). It registers one
+// logical test per cases[].id, and normal graph discovery skips every JSON file
+// below it so templates, manifests, and golden metadata do not become direct tests.
 inline std::vector<std::filesystem::path>
     findSweepDirectories(const std::filesystem::path& bundleDir)
 {
-    std::set<std::filesystem::path> sweepDirs;
-    if(isSweepBundleRoot(bundleDir))
+    return detail::sweepRootsIn(detail::listBundleTree(bundleDir));
+}
+
+namespace detail
+{
+
+// Leaf folders of the listing that hold no graph .json. Sweep roots are not
+// reported. Golden tensor directories under a sweep are leaves by design; they are
+// data, not incomplete bundle folders, so they are not reported either.
+inline std::vector<std::filesystem::path>
+    findEmptyLeafFolders(const BundleTreeListing& listing,
+                         const std::vector<std::filesystem::path>& sweepDirs)
+{
+    std::vector<std::filesystem::path> goldenDirs;
+    goldenDirs.reserve(sweepDirs.size());
+    for(const auto& sweepDir : sweepDirs)
     {
-        sweepDirs.insert(bundleDir);
+        goldenDirs.push_back(sweepDir / "golden");
     }
+    const auto normalizedGoldenDirs = lexicallyNormalSet(goldenDirs);
 
-    forEachBundleTreeEntry(bundleDir, [&](const std::filesystem::directory_entry& entry) {
-        if(entry.is_directory() && isSweepBundleRoot(entry.path()))
-        {
-            sweepDirs.insert(entry.path());
-        }
-    });
-
-    return {sweepDirs.begin(), sweepDirs.end()};
-}
-
-// Golden tensor directories under a sweep are leaves by design; they are data,
-// not incomplete bundle folders, so empty-leaf warnings skip them.
-inline bool isSweepGoldenLeaf(const std::filesystem::path& leaf,
-                              const std::vector<std::filesystem::path>& sweepDirs)
-{
-    return std::any_of(sweepDirs.begin(), sweepDirs.end(), [&](const auto& sweepDir) {
-        return isDescendantOf(leaf, sweepDir / "golden");
-    });
-}
-
-inline void warnOnEmptyLeafFolders(const std::filesystem::path& bundleDir,
-                                   const std::vector<std::filesystem::path>& sweepDirs)
-{
-    for(const auto& leaf : findLeafDirectories(bundleDir))
+    std::vector<std::filesystem::path> emptyLeaves;
+    for(const auto& directory : listing.directories)
     {
-        if(isSweepBundleRoot(leaf) || isSweepGoldenLeaf(leaf, sweepDirs))
+        if(!listing.isLeaf(directory) || listing.isSweepRoot(directory)
+           || hasAncestorIn(directory, normalizedGoldenDirs))
         {
             continue;
         }
-
-        const bool hasGraph
-            = std::any_of(std::filesystem::directory_iterator(leaf),
-                          std::filesystem::directory_iterator(),
-                          [](const std::filesystem::directory_entry& entry) {
-                              return entry.is_regular_file() && isGraphFile(entry.path());
-                          });
-        if(!hasGraph)
+        if(!listing.holdsGraphFile(directory))
         {
-            HIPDNN_PLUGIN_LOG_WARN("Skipping empty bundle leaf folder (no graph .json): " << leaf);
+            emptyLeaves.push_back(directory);
         }
     }
+    return emptyLeaves;
 }
+
+inline std::vector<std::filesystem::path>
+    findEmptyLeafFolders(const std::filesystem::path& bundleDir,
+                         const std::vector<std::filesystem::path>& sweepDirs)
+{
+    return findEmptyLeafFolders(listBundleTree(bundleDir), sweepDirs);
+}
+
+inline void warnOnEmptyLeafFolders(const BundleTreeListing& listing,
+                                   const std::vector<std::filesystem::path>& sweepDirs)
+{
+    for(const auto& leaf : findEmptyLeafFolders(listing, sweepDirs))
+    {
+        HIPDNN_PLUGIN_LOG_WARN("Skipping empty bundle leaf folder (no graph .json): " << leaf);
+    }
+}
+
+} // namespace detail
 
 // Reads and validates the registration-time shape of sweep.json. Full case
 // validation happens during loading, but discovery needs cases[] ids to be
@@ -428,8 +526,13 @@ inline void warnOnEmptyLeafFolders(const std::filesystem::path& bundleDir,
 // meaningful.
 inline std::vector<std::string> readSweepCaseIds(const std::filesystem::path& sweepPath)
 {
-    std::ifstream stream(sweepPath);
-    if(!stream)
+    std::error_code error;
+    std::ifstream stream;
+    if(std::filesystem::is_regular_file(sweepPath, error))
+    {
+        stream.open(sweepPath);
+    }
+    if(!stream.is_open())
     {
         throw std::runtime_error("Could not open sweep manifest: " + sweepPath.string());
     }
@@ -471,6 +574,194 @@ inline std::vector<std::string> readSweepCaseIds(const std::filesystem::path& sw
     return caseIds;
 }
 
+namespace detail
+{
+
+inline bool isJsonWhitespace(char c)
+{
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+// Counts the elements of the top-level "cases" array of a sweep manifest in one byte
+// pass, without a DOM. Returns nullopt when the scan does not accept the shape: the
+// text is not one complete object, or "cases" is missing, is not an array, occurs more
+// than once, or holds an element that is not an object. The scan compares raw key
+// bytes, so it also gives nullopt when a string at the top level of the object holds an
+// escape.
+inline std::optional<size_t> countSweepCasesWithoutParsing(std::string_view json)
+{
+    constexpr int OBJECT_DEPTH = 1;
+    constexpr int CASES_ARRAY_DEPTH = 2;
+
+    size_t position = 0;
+    while(position < json.size() && isJsonWhitespace(json[position]))
+    {
+        ++position;
+    }
+    if(position == json.size() || json[position] != '{')
+    {
+        return std::nullopt;
+    }
+
+    int depth = 0;
+    bool inString = false;
+    bool escaped = false;
+    bool stringHasEscape = false;
+    size_t stringStart = 0;
+    bool lastStringIsCasesKey = false;
+    bool expectCasesArray = false;
+    bool casesKeySeen = false;
+    bool inCasesArray = false;
+    bool casesArraySeen = false;
+    bool rootClosed = false;
+    size_t caseCount = 0;
+
+    for(; position < json.size(); ++position)
+    {
+        const char c = json[position];
+        if(inString)
+        {
+            if(escaped)
+            {
+                escaped = false;
+            }
+            else if(c == '\\')
+            {
+                escaped = true;
+                stringHasEscape = true;
+            }
+            else if(c == '"')
+            {
+                inString = false;
+                if(depth == OBJECT_DEPTH)
+                {
+                    if(stringHasEscape)
+                    {
+                        return std::nullopt;
+                    }
+                    lastStringIsCasesKey
+                        = json.substr(stringStart, position - stringStart) == "cases";
+                }
+            }
+            continue;
+        }
+        if(isJsonWhitespace(c))
+        {
+            continue;
+        }
+        if(rootClosed)
+        {
+            return std::nullopt;
+        }
+
+        if(inCasesArray && depth == CASES_ARRAY_DEPTH)
+        {
+            if(c == '{')
+            {
+                ++caseCount;
+                ++depth;
+            }
+            else if(c == ']')
+            {
+                --depth;
+                inCasesArray = false;
+            }
+            else if(c != ',')
+            {
+                return std::nullopt;
+            }
+            continue;
+        }
+
+        if(depth == OBJECT_DEPTH)
+        {
+            const bool startsCasesArray = c == '[' && expectCasesArray;
+            const bool endsCasesKey = c == ':' && lastStringIsCasesKey;
+            lastStringIsCasesKey = false;
+            expectCasesArray = false;
+            if(endsCasesKey)
+            {
+                if(casesKeySeen)
+                {
+                    return std::nullopt;
+                }
+                casesKeySeen = true;
+                expectCasesArray = true;
+                continue;
+            }
+            if(startsCasesArray)
+            {
+                inCasesArray = true;
+                casesArraySeen = true;
+            }
+        }
+
+        switch(c)
+        {
+        case '{':
+        case '[':
+            ++depth;
+            break;
+        case '}':
+        case ']':
+            if(depth == 0)
+            {
+                return std::nullopt;
+            }
+            --depth;
+            rootClosed = depth == 0;
+            break;
+        case '"':
+            inString = true;
+            stringHasEscape = false;
+            stringStart = position + 1;
+            break;
+        default:
+            break;
+        }
+    }
+
+    if(inString || !rootClosed || !casesArraySeen)
+    {
+        return std::nullopt;
+    }
+    return caseCount;
+}
+
+} // namespace detail
+
+// The number of cases[] entries in a sweep manifest. A structural scan gives the count
+// without a full parse. Manifests that the scan does not accept go through
+// readSweepCaseIds(), which throws for a malformed manifest.
+inline size_t countSweepCases(const std::filesystem::path& sweepPath)
+{
+    std::error_code error;
+    std::ifstream stream;
+    if(std::filesystem::is_regular_file(sweepPath, error))
+    {
+        stream.open(sweepPath, std::ios::binary);
+    }
+    if(!stream.is_open())
+    {
+        throw std::runtime_error("Could not open sweep manifest: " + sweepPath.string());
+    }
+    std::string content;
+    stream.seekg(0, std::ios::end);
+    const auto size = static_cast<std::streamoff>(stream.tellg());
+    if(size > 0)
+    {
+        content.resize(static_cast<size_t>(size));
+        stream.seekg(0, std::ios::beg);
+        stream.read(content.data(), static_cast<std::streamsize>(size));
+        content.resize(static_cast<size_t>(stream.gcount()));
+    }
+    if(const auto count = detail::countSweepCasesWithoutParsing(content))
+    {
+        return *count;
+    }
+    return readSweepCaseIds(sweepPath).size();
+}
+
 // Converts one sweep root into registerable logical tests. The suite name comes
 // from the sweep directory; the test name comes from the sanitized case id.
 inline std::vector<DiscoveredBundle> discoverSweepCases(const std::filesystem::path& sweepDir,
@@ -490,28 +781,51 @@ inline std::vector<DiscoveredBundle> discoverSweepCases(const std::filesystem::p
     return bundles;
 }
 
-// Recursively discovers all registerable bundle tests under the data root.
+// A sweep root that discovery counted but did not parse, because its suite was not
+// accepted.
+struct UnparsedSweep
+{
+    std::filesystem::path sweepDir;
+    std::string suiteName;
+    size_t caseCount = 0;
+};
+
+// The registerable bundle tests of a discovery, and the sweep roots it did not parse.
+struct BundleDiscoveryResult
+{
+    std::vector<DiscoveredBundle> bundles;
+    std::vector<UnparsedSweep> unparsedSweeps;
+};
+
+// Recursively discovers registerable bundle tests under the data root.
 //
 // Direct bundles: every graph .json accepted by isGraphFile() becomes one test.
-// Template sweeps: every sweep root becomes one test per cases[].id, and all JSON
-// below the sweep root is skipped by direct graph discovery.
+// Template sweeps: every sweep root whose suite name `mayParseSuite` accepts becomes
+// one test per cases[].id. Any other sweep root goes into unparsedSweeps with its case
+// count from countSweepCases(), and registers no test. All JSON below a sweep root is
+// skipped by direct graph discovery.
 //
 // Graceful handling:
 //   - leaf folders without a graph .json warn and skip, so partial DVC pulls or
 //     empty customer folders do not prevent other tests from registering.
 //
 // Hard errors:
-//   - a malformed sweep manifest (unparseable, missing cases[], or a non-string
-//     or duplicate case id) throws: a checked-in manifest must be coherent, so a
-//     broken sweep fails the run rather than silently dropping its cases.
-//   - generated GTest name collisions throw and name both diagnostic paths.
-inline std::vector<DiscoveredBundle> discoverBundles(const std::filesystem::path& bundleDir)
+//   - a malformed manifest of a parsed sweep root (unparseable, missing cases[], or a
+//     non-string or duplicate case id) throws: a checked-in manifest must be coherent,
+//     so a broken sweep fails the run rather than silently dropping its cases. For a
+//     sweep root that is not parsed, only the faults that countSweepCases() finds throw.
+//   - generated GTest name collisions among the registered tests throw and name both
+//     diagnostic paths.
+inline BundleDiscoveryResult
+    discoverBundles(const std::filesystem::path& bundleDir,
+                    const std::function<bool(const std::string& suiteName)>& mayParseSuite)
 {
-    std::vector<DiscoveredBundle> bundles;
+    BundleDiscoveryResult result;
     std::unordered_map<std::string, std::filesystem::path> nameToPath;
 
-    const auto sweepDirs = findSweepDirectories(bundleDir);
-    warnOnEmptyLeafFolders(bundleDir, sweepDirs);
+    const auto listing = detail::listBundleTree(bundleDir);
+    const auto sweepDirs = detail::sweepRootsIn(listing);
+    detail::warnOnEmptyLeafFolders(listing, sweepDirs);
 
     auto registerBundle = [&](DiscoveredBundle bundle) {
         const auto fullName = bundle.fullName();
@@ -524,22 +838,29 @@ inline std::vector<DiscoveredBundle> discoverBundles(const std::filesystem::path
                                      + diagnosticPath.string());
         }
         nameToPath[fullName] = diagnosticPath;
-        bundles.push_back(std::move(bundle));
+        result.bundles.push_back(std::move(bundle));
     };
 
     for(const auto& sweepDir : sweepDirs)
     {
+        const auto sweepPath = sweepDir / "sweep.json";
+        auto suiteName = deriveSuiteName(relativeToRoot(sweepDir, bundleDir), sweepPath);
+        if(!mayParseSuite(suiteName))
+        {
+            const auto caseCount = countSweepCases(sweepPath);
+            result.unparsedSweeps.push_back({sweepDir, std::move(suiteName), caseCount});
+            continue;
+        }
         for(auto& bundle : discoverSweepCases(sweepDir, bundleDir))
         {
             registerBundle(std::move(bundle));
         }
     }
 
-    for(const auto& jsonPath : scanFilesByExtension(bundleDir, ".json"))
+    const auto normalizedSweepDirs = detail::lexicallyNormalSet(sweepDirs);
+    for(const auto& jsonPath : listing.jsonFiles)
     {
-        if(std::any_of(sweepDirs.begin(), sweepDirs.end(), [&](const auto& sweepDir) {
-               return isDescendantOf(jsonPath, sweepDir);
-           }))
+        if(detail::hasAncestorIn(jsonPath, normalizedSweepDirs))
         {
             continue;
         }
@@ -552,7 +873,14 @@ inline std::vector<DiscoveredBundle> discoverBundles(const std::filesystem::path
         registerBundle({jsonPath, derived.suiteName, derived.testName, std::nullopt});
     }
 
-    return bundles;
+    return result;
+}
+
+// Discovers every registerable bundle test under the data root and parses every sweep
+// manifest. The rules are those of the overload above with every suite accepted.
+inline std::vector<DiscoveredBundle> discoverBundles(const std::filesystem::path& bundleDir)
+{
+    return discoverBundles(bundleDir, [](const std::string&) { return true; }).bundles;
 }
 
 } // namespace hipdnn_integration_tests::bundle

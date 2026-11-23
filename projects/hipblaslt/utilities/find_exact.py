@@ -32,7 +32,7 @@ try:
     import yaml
 except ImportError:
     assert 0 and \
-        "You must install PyYAML to use Tensile (to parse config files). See http://pyyaml.org/wiki/PyYAML for installation instructions."
+        "You must install PyYAML to use TensileLite (to parse config files). See http://pyyaml.org/wiki/PyYAML for installation instructions."
 
 from dataclasses import dataclass, field
 try:
@@ -86,7 +86,7 @@ defaultCreateLogicOptions = {}  # Currently unused
 # Functions
 #####################################################
 #########
-# Need to find a way to call these functions from Tensile package.
+# Need to find a way to call these functions from the TensileLite package.
 def ensurePath(path):
   try:
     os.makedirs(path)

@@ -1,265 +1,220 @@
 .. meta::
    :description: Install rocALUTION
-   :keywords: rocALUTION, ROCm, library, API, install, linux, build, HIP SDK
+   :keywords: rocALUTION, ROCm, library, API, install, linux, HPC SDK
 
 .. _install-rocalution:
 
-********************************
+******************
 Install rocALUTION
-********************************
+******************
+
+You can install rocALUTION on Linux from prebuilt packages either as part of
+the ROCm HPC SDK, as standalone packages, or from a ROCm Core SDK tarball
+release. Before you begin, verify that your operating system and environment
+are supported using the installation selector on :doc:`Install ROCm HPC SDK
+<rocm:components/hpc-sdk/install>`.
+
+For advanced workflows, source builds, or custom configurations, see
+:doc:`Build rocALUTION from source <./rocALUTION-build-from-source>`.
+
+.. _install-rocalution-hpc-sdk:
+
+Install the ROCm HPC SDK
+========================
+
+rocALUTION is part of the ROCm HPC SDK on Linux. It is not included in the
+ROCm Core SDK through the standard ``amdrocm`` metapackage; it is installed
+through the opt-in ``amdrocm-hpc-sdk`` metapackage. This is the recommended
+installation method for the most complete installation.
 
-.. _linux-installation:
+For instructions, see :doc:`Install ROCm HPC SDK
+<rocm:components/hpc-sdk/install>` and use the selector panel to view
+instructions for your system environment. For ROCm core installation, see
+:doc:`Install AMD ROCm <rocm:install/rocm>`.
 
-You can install rocALUTION as part of the AMD ROCm software stack on Linux,
-or build it from source. Install ROCm before you build or use rocALUTION.
+.. _install-rocalution-linux:
 
-When you install rocALUTION through ROCm, you get a single-node, accelerator-enabled library.
-If you need a different configuration, such as multi-node or distributed execution, build rocALUTION from source.
+Install rocALUTION standalone on Linux
+======================================
 
-.. _windows-installation:
+Alternatively, you can use the ``amdrocm-rocalution`` packages to install
+rocALUTION without the full ROCm HPC SDK.
 
-Prerequisites
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+1. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` to
+   install dependencies and configure GPU access permissions.
 
-You need a ROCm enabled platform to use rocALUTION. For more information, including a list of supported GPUs and Linux distributions, see the `ROCm on Linux install guide <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/index.html>`__.
+2. Install the rocALUTION packages that match your desired ROCm version,
+   development package needs, and AMD GPU architecture. Package names use the
+   following format:
 
-You need the following prerequisites to build rocALUTION from source:
+   .. code-block:: shell-session
 
-- `git <https://git-scm.com/>`__
-- `CMake <https://cmake.org/>`__ (version 3.5 or later)
-- `rocBLAS <https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html>`__
-- `rocSPARSE <https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/index.html>`__
-- `rocRAND <https://rocm.docs.amd.com/projects/rocRAND/en/latest/index.html>`__
-- `rocPRIM <https://rocm.docs.amd.com/projects/rocPRIM/en/latest/index.html>`__
-- `Python <https://www.python.org/>`__
-- `PyYAML <https://pypi.org/project/PyYAML/>`__
+      amdrocm-rocalution<rocm_version><-llvm_target>
+      amdrocm-rocalution<-dev/-devel><rocm_version>
 
-Install these components before you build rocALUTION. Refer to their respective documentation for install instructions.
+   Where:
 
-For multi-node configurations, you must also install:
+   * ``<-dev/-devel>`` is the development package suffix (headers and CMake
+     configuration files):
 
-- `OpenMP <https://www.openmp.org/>`__
-- `MPI <https://www.mcs.anl.gov/research/projects/mpi/>`__
+     * ``-dev`` is used on Debian-based distributions, including Ubuntu.
 
-Install pre-built packages
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     * ``-devel`` is used on RPM-based distributions, including RHEL and SLES.
 
-Use the following commands to install rocALUTION on Ubuntu or Debian:
+   * ``<rocm_version>`` is the ROCm version to install (for example, ``10.2``).
+     Omit this suffix to install the latest available version. If you include
+     ``<-llvm_target>``, also include ``<rocm_version>`` (for example,
+     ``amdrocm-rocalution10.2-gfx950``).
 
-.. code-block:: shell
+   * ``<-llvm_target>`` (starting with ``gfx``) is used on the runtime package
+     if you are installing for a single AMD GPU architecture. Omit this to
+     install for all architectures at the cost of disk space. To find the
+     LLVM target for an installed GPU, run ``rocminfo | grep gfx``.
 
-   sudo apt-get update
-   sudo apt-get install rocalution
+   .. dropdown:: Supported GPUs and GFX targets
+      :animate: fade-in-slide-down
+      :color: success
+      :icon: note
+      :chevron: down-up
+      :open:
 
-Use the following commands to install rocALUTION on RHEL-based platforms:
+      .. list-table::
+         :header-rows: 1
+         :widths: 25 20 55
 
-.. code-block:: shell
+         * - GPU series
+           - Architecture
+           - LLVM target
+         * - AMD Instinct MI350 series
+           - CDNA 4
+           - ``gfx950``
+         * - AMD Instinct MI300 series
+           - CDNA 3
+           - ``gfx942``
+         * - AMD Instinct MI200 series
+           - CDNA 2
+           - ``gfx90a``
+         * - AMD Instinct MI100 series
+           - CDNA
+           - ``gfx908``
+         * - AMD Radeon AI PRO R9000 / RX 9000 series
+           - RDNA 4
+           - ``gfx1200``, ``gfx1201``
+         * - AMD Radeon PRO W7000 / RX 7000 / PRO V series
+           - RDNA 3
+           - ``gfx1100``, ``gfx1101``, ``gfx1102``
+         * - AMD Radeon PRO W6000 series
+           - RDNA 2
+           - ``gfx1030``
+         * - AMD Ryzen integrated graphics
+           - RDNA 3, RDNA 3.5
+           - ``gfx1103``, ``gfx1150``, ``gfx1151``, ``gfx1152``, ``gfx1153``
 
-   sudo yum update
-   sudo yum install rocalution
+   For example: ``amdrocm-rocalution10.2-gfx950`` and ``amdrocm-rocalution-dev10.2``
 
-Use the following commands to install rocALUTION on SLES:
+   Use the following commands to install the latest rocALUTION runtime and
+   development packages for supported GPU architectures:
 
-.. code-block:: shell
+   .. tab-set::
 
-   sudo zypper refresh
-   sudo zypper install rocalution
+      .. tab-item:: Debian-based distros
 
-.. note::
+         .. code-block:: bash
 
-   On SLES, use ``zypper`` instead of ``dnf``. The ROCm repositories must be
-   configured first, and installing the full ``rocm`` package is usually
-   recommended because rocALUTION depends on other ROCm components.
+            sudo apt install amdrocm-rocalution amdrocm-rocalution-dev
 
-After you install rocALUTION, you can use it like any other library with a C++ API.
-Include the header file in your code to call rocALUTION.
-The rocALUTION shared library becomes a link-time and run-time dependency for your application.
+      .. tab-item:: RHEL-based distros
 
-Build rocALUTION from source
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+         .. code-block:: bash
 
-You don't need to build rocALUTION from source if you install the prebuilt packages described above.
-To build rocALUTION from source, follow the instructions in this section.
+            sudo dnf install amdrocm-rocalution amdrocm-rocalution-devel
 
-You need the `AMD ROCm Platform <https://github.com/ROCm/ROCm>`__ to compile and run rocALUTION.
-When you build rocALUTION from source, select supported versions of the math library dependencies (rocBLAS, rocSPARSE, rocRAND, and rocPRIM).
-Given a version of rocALUTION, you must use versions of these dependencies that are the same or later.
+      .. tab-item:: SLES
 
-Download rocALUTION
-^^^^^^^^^^^^^^^^^^^^^
+         .. code-block:: bash
 
-You can find the rocALUTION source code in the `https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocalution <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocalution>`__ repository.
+            sudo zypper install amdrocm-rocalution amdrocm-rocalution-devel
 
-To limit your local checkout to only the rocALUTION project, configure ``sparse-checkout`` before you clone.
-The partial clone feature (``--filter=blob:none``) reduces how much data you download.
-Use the following commands for a sparse checkout:
+.. _install-rocalution-tarball:
 
-.. note::
+Install from a tarball
+======================
 
-   To include the rocBLAS, rocSPARSE, rocRAND, and rocPRIM dependencies, set the projects for the sparse checkout using ``git sparse-checkout set projects/rocalution projects/rocblas projects/rocsparse projects/rocrand projects/rocprim``.
+The standard ROCm Core SDK tarball installation includes rocALUTION. No additional steps
+are required. For details, see :doc:`Install AMD ROCm <rocm:install/rocm>` and
+select the tarball installation method.
 
-.. code-block:: shell
+The standard ROCm uninstallation process removes rocALUTION. No additional
+steps are required.
 
-   git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
-   cd rocm-libraries
-   git sparse-checkout init --cone
-   git sparse-checkout set projects/rocalution
-   git checkout develop
-   cd projects/rocalution
+.. _install-rocalution-nightly:
 
-.. note::
+Install a nightly build
+=======================
 
-   For ROCm preview releases (7.11, 7.12, 7.13, 7.14), use the ``develop`` branch.
-   For production ROCm 7.2.x, use ``release/rocm-rel-7.2``.
-   To build ROCm 6.4.3 and earlier, use the standalone `rocALUTION repository <https://github.com/ROCm/rocALUTION>`__.
-   For more information, see the documentation associated with the release you want to build.
+The `TheRock <https://github.com/ROCm/TheRock>`__ build system also publishes
+nightly builds for ROCm and its components, including rocALUTION. See
+`Nightly release status
+<https://github.com/ROCm/TheRock#nightly-release-status>`__ for details.
 
-To download the ``develop`` branch for all projects in rocm-libraries, use these commands.
-This process takes longer, but use it if you work with a large number of libraries.
+.. _verify-rocalution-install:
 
-.. code-block:: shell
+Verify your installation
+========================
 
-   git clone -b develop https://github.com/ROCm/rocm-libraries.git
-   cd rocm-libraries/projects/rocalution
+After installing the runtime and development packages (or the ROCm HPC SDK), you
+can verify your installation by compiling and running a minimal smoke test.
 
-Build rocALUTION using the install script
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1. Create a file named ``test_rocalution.cpp``:
 
-Use the ``install.sh`` script to install rocALUTION.
-The following tables describe how to build different packages of the library, including the dependencies and clients.
+   .. code-block:: cpp
 
-.. note::
+      #include <rocalution/rocalution.hpp>
 
-   Run the ``install.sh`` script from the ``projects/rocalution`` directory.
+      int main() {
+          rocalution::init_rocalution();
+          rocalution::info_rocalution();
+          rocalution::stop_rocalution();
+          return 0;
+      }
 
-Use install.sh to build rocALUTION with dependencies
-"""""""""""""""""""""""""""""""""""""""""""""""""""""
+2. Compile and run the program:
 
-The following table lists the common ways to use ``install.sh`` to build the rocALUTION dependencies and library.
+   .. code-block:: bash
 
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
+      hipcc test_rocalution.cpp -lrocalution -o test_rocalution
+      ./test_rocalution
 
-   * - Command
-     - Description
-   * - ``./install.sh -h``
-     - Print the help information.
-   * - ``./install.sh -d``
-     - Build the dependencies and library in your local directory. Use the ``-d`` flag only once. For subsequent invocations of ``install.sh``, you don't need to rebuild the dependencies.
-   * - ``./install.sh``
-     - Build the library in your local directory. The script assumes the dependencies are available.
-   * - ``./install.sh -i``
-     - Build the library, then build and install the rocALUTION package in ``/opt/rocm``. The script prompts you for sudo access. This installs rocALUTION for all users.
-   * - ``./install.sh --mpi=<dir> -i``
-     - Build the library with MPI support enabled, then build and install the rocALUTION package in ``/opt/rocm``.
+   If rocALUTION is installed properly, the program prints the rocALUTION
+   version, confirms that the platform and ``HIP`` accelerator backend are
+   initialized, and lists your detected AMD GPU.
 
-Use install.sh to build rocALUTION with dependencies and clients
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+.. _uninstall-rocalution:
 
-The clients contain example code, unit tests, and benchmarks.
-The following table lists common ways to use ``install.sh`` to build the library, dependencies, and clients.
+Uninstall rocALUTION
+====================
 
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
+If you installed versioned or architecture-specific packages, substitute the
+exact package names used during installation (for example,
+``amdrocm-rocalution10.2-gfx950`` and ``amdrocm-rocalution-dev10.2`` or
+``amdrocm-rocalution-devel10.2``).
 
-   * - Command
-     - Description
-   * - ``./install.sh -dc``
-     - Build the dependencies, library, and client in your local directory. Use the ``-d`` flag only once. For subsequent invocations of ``install.sh``, you don't need to rebuild the dependencies.
-   * - ``./install.sh -c``
-     - Build the library and client in your local directory. The script assumes the dependencies are available.
-   * - ``./install.sh -idc``
-     - Build the library, dependencies, and client, then build and install the rocALUTION package in ``/opt/rocm``. The script prompts you for sudo access. This installs rocALUTION for all users.
-   * - ``./install.sh -ic``
-     - Build the library and client, then build and install the rocALUTION package in ``/opt/rocm``. The script prompts you for sudo access. This installs rocALUTION for all users.
-   * - ``./install.sh -o``
-     - Build the client executables using an already installed version of the library.
+.. tab-set::
 
-Build rocALUTION using individual make commands
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   .. tab-item:: Debian-based distros
 
-The rocALUTION library contains both host and device code, so specify the HIP compiler during the CMake configuration process.
+      .. code-block:: bash
 
-You can build rocALUTION using the following commands:
+         sudo apt autoremove amdrocm-rocalution amdrocm-rocalution-dev
 
-.. note::
+   .. tab-item:: RHEL-based distros
 
-   Run these commands from the ``projects/rocalution`` directory.
+      .. code-block:: bash
 
-.. note::
+         sudo dnf remove amdrocm-rocalution amdrocm-rocalution-devel
 
-   You need CMake 3.5 or later to build rocALUTION.
+   .. tab-item:: SLES
 
-.. code-block:: shell
+      .. code-block:: bash
 
-   # Create and change to build directory
-   mkdir -p build/release
-   cd build/release
-
-   # Default install path is /opt/rocm, use -DCMAKE_INSTALL_PREFIX= to adjust it
-   CXX=/opt/rocm/bin/amdclang++ cmake ../..
-
-   # Compile rocALUTION library
-   make -j$(nproc)
-
-   # Install rocALUTION to /opt/rocm
-   make install
-
-You can also configure the following optional CMake directives:
-
-- ``SUPPORT_HIP``: Enable HIP support. This option is ``ON`` by default.
-- ``SUPPORT_OMP``: Enable OpenMP support. This option is ``ON`` by default.
-- ``SUPPORT_MPI``: Enable MPI support for multi-node execution. This option is ``OFF`` by default.
-- ``BUILD_SHARED_LIBS``: Build rocALUTION as a shared library. This option is ``ON`` by default and is recommended.
-- ``BUILD_EXAMPLES``: Build the example programs. This option is ``ON`` by default.
-
-For example, to build rocALUTION with MPI support enabled:
-
-.. code-block:: shell
-
-   CXX=/opt/rocm/bin/amdclang++ cmake ../.. -DSUPPORT_MPI=ON -DROCM_PATH=/opt/rocm/
-
-Test your rocALUTION installation
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Verify that you built and installed rocALUTION correctly by running the Conjugate Gradient (CG) solver client on a sample Laplacian matrix.
-
-These steps assume you built rocALUTION with client applications enabled (the default configuration).
-
-1. Open a terminal and ensure the ROCm environment is available
-   (for example, ``rocminfo`` and ``hipcc`` are in your ``PATH``).
-
-2. Change to the directory containing the built CG client.
-   For a Release build:
-
-   .. code-block:: shell
-
-      cd build/release/clients/staging
-
-   For a Debug build:
-
-   .. code-block:: shell
-
-      cd build/debug/clients/staging
-
-3. Download a test matrix in Matrix Market format:
-
-   .. code-block:: shell
-
-      wget https://math.nist.gov/pub/MatrixMarket2/Harwell-Boeing/laplace/gr_30_30.mtx.gz
-
-4. Extract the matrix file:
-
-   .. code-block:: shell
-
-      gzip -d gr_30_30.mtx.gz
-
-5. Run the CG solver client:
-
-   .. code-block:: shell
-
-      ./cg gr_30_30.mtx
-
-If your installation succeeded, the solver prints iteration and residual information and converges without errors.
+         sudo zypper remove 'amdrocm-rocalution*'

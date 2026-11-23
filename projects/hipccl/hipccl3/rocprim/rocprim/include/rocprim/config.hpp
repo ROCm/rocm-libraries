@@ -41,6 +41,10 @@
     #include "rocprim_version.hpp"
 #endif
 
+#ifndef ROCPRIM_USE_LEGACY_API
+    #define ROCPRIM_USE_LEGACY_API 1
+#endif
+
 // Inline namespace (e.g. ROCPRIM_300400_NS where 300400 is the rocPRIM version) is used to
 // eliminate issues when shared libraries are built with different versions of rocPRIM so they may
 // have symbols with the same name but different content.

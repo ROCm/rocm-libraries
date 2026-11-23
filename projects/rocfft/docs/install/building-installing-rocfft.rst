@@ -68,6 +68,25 @@ The clients are not built by default. To build them, use ``-DBUILD_CLIENTS=on``.
 The build process downloads and builds GoogleTest and FFTW if they are not already installed.
 rocFFT uses version 1.11 of GoogleTest.
 
+MPI and RCCL
+=============================
+
+MPI distributed transforms require ``-DROCFFT_MPI_ENABLE=ON`` and a GPU-aware MPI.
+On Cray systems also pass ``-DROCFFT_CRAY_MPI_ENABLE=ON``. That option links
+``mpi_gtl_hsa`` and adds the GTL library directory next to the MPI install.
+Leave ``ROCFFT_RCCL_ENABLE`` off for an MPI-only build; that is the default.
+
+The optional RCCL transpose backend was introduced in rocFFT 1.0.39 (ROCm 10.0) for
+single-process plans; multi-process support was added in rocFFT 1.0.42 (ROCm 10.3). Enable it
+with ``-DROCFFT_RCCL_ENABLE=ON``. CMake must be able to ``find_package(rccl)`` from
+the same ROCm prefix used to compile rocFFT (typically ``$ROCM_PATH/lib/cmake``).
+
+Example: MPI-only on a Cray node (no RCCL)::
+
+   cmake -DROCFFT_MPI_ENABLE=ON -DROCFFT_CRAY_MPI_ENABLE=ON \
+     -DCMAKE_PREFIX_PATH="${MPICH_DIR}" \
+     ..
+
 You can build the clients separately from the main library.
 For example, to build all the clients with an existing rocFFT library, invoke CMake from
 within the ``rocm-libraries/projects/rocfft/rocFFT-src/clients`` folder using these commands:

@@ -12,11 +12,12 @@ import os
 import shutil
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
 
-from hkp_pack import pipeline, provenance_sidecar
+from hkp_pack import agreement, pipeline, provenance_sidecar
 from hkp_pack.generic_targets import DEFAULT_TABLE_PATH, GenericTargets
 
 PACKAGING = Path(__file__).resolve().parent.parent
@@ -46,6 +47,14 @@ def _read(path):
 
 def _silent(*_args, **_kwargs):
     pass
+
+
+def _restamp(doc):
+    """Re-publish every launch's descriptor digest over an edited shipped document,
+    so only the check under test can refuse it."""
+    binding = agreement.descriptor_binding(doc)
+    for evidence in doc["provenance"]["effective_spec"].values():
+        evidence["descriptor_digest"] = binding
 
 
 # --- Packing ------------------------------------------------------------------
@@ -225,3 +234,26 @@ def _conftest_only_paths(candidates):
         for p in candidates
         if p and str(p) in sys.path and os.path.abspath(p) not in env_paths
     ]
+
+
+def _restem_uuid_ids(folder, token):
+    """Give every UUID id under `folder` a distinct, deterministic value.
+
+    Stem substitution cannot reach UUID ids, so copied fixtures would collide.
+    uuid5 keeps repeat packs byte-identical.
+    """
+    ids = set()
+    for path in sorted(folder.rglob("*.json")):
+        did = json.loads(path.read_text(encoding="utf-8")).get("id")
+        try:
+            uuid.UUID(str(did))
+        except (ValueError, AttributeError, TypeError):
+            continue
+        ids.add(did)
+    for path in sorted(folder.rglob("*.json")):
+        text = path.read_text(encoding="utf-8")
+        for did in sorted(ids):
+            text = text.replace(
+                did, str(uuid.uuid5(uuid.NAMESPACE_URL, f"hkp-test/{token}/{did}"))
+            )
+        path.write_text(text, encoding="utf-8")

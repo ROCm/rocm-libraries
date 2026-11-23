@@ -8,19 +8,26 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <filesystem>
 #include <set>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+
 #include "ReferenceGraphFixtures.hpp"
+#include "harness/bundle/BundleDiscovery.hpp"
 #include "harness/reference-validation/ReferenceOpCoverage.hpp"
 
 using hipdnn_integration_tests::ReferenceExecutorType;
+using hipdnn_integration_tests::bundle::deriveTestName;
+using hipdnn_integration_tests::bundle::discoverBundles;
 using hipdnn_integration_tests::bundle::findKnownReferenceGap;
 using hipdnn_integration_tests::bundle::formatUncoveredOps;
 using hipdnn_integration_tests::bundle::graphNodeTypes;
 using hipdnn_integration_tests::bundle::K_UNREADABLE_GRAPH;
+using hipdnn_integration_tests::bundle::KnownReferenceGap;
 using hipdnn_integration_tests::bundle::knownReferenceGaps;
 using hipdnn_integration_tests::bundle::NodeAttributes;
 using hipdnn_integration_tests::bundle::referenceCoversGraph;
@@ -28,6 +35,7 @@ using hipdnn_integration_tests::bundle::referenceShapeIsAffordable;
 using hipdnn_integration_tests::bundle::referenceSupportedOps;
 using hipdnn_integration_tests::bundle::uncoveredNodeTypes;
 using hipdnn_integration_tests::bundle::fixtures::buildBatchnormGraph;
+using hipdnn_integration_tests::bundle::fixtures::buildSdpaBackwardGraph;
 using hipdnn_integration_tests::bundle::fixtures::buildSdpaGraph;
 
 // NOLINTBEGIN(readability-identifier-naming)
@@ -152,29 +160,81 @@ TEST(TestReferenceOpCoverage, KnownGapLookupIsScopedToTheReferenceAsked)
     }
 }
 
-// The fp8 batch bundles are a GPU-only gap: the CPU reference implements fp8, so
-// listing them for CPU would wrongly assert it cannot run them. Pins the asymmetry
-// rather than leaving it to a comment.
-TEST(TestReferenceOpCoverage, Fp8BatchGapsAreNotListedForCpu)
+// Both references run the fp8 forward bundles (the GPU plan dequantizes first, as the CPU one
+// does), so neither may list them: a gap entry would stop validating them against golden data.
+TEST(TestReferenceOpCoverage, Fp8BundlesAreNotListedAsGaps)
 {
-    for(const char* bundleId : {"quick_SdpaFwd_bhsd_fp8_hd128_causal_batch_Small.Small",
+    for(const char* bundleId : {"quick_SdpaFwd_bhsd_fp8_hd128_causal_group_Small.Small",
+                                "quick_SdpaFwd_bhsd_fp8_hd128_causal_batch_Small.Small",
                                 "quick_SdpaFwd_bhsd_fp8_hd128_nomask_batch_Small.Small"})
     {
-        EXPECT_NE(findKnownReferenceGap(ReferenceExecutorType::GPU, bundleId), nullptr) << bundleId;
-        EXPECT_EQ(findKnownReferenceGap(ReferenceExecutorType::CPU, bundleId), nullptr)
-            << bundleId << " is listed as a CPU gap, but the CPU reference implements fp8";
+        EXPECT_EQ(findKnownReferenceGap(ReferenceExecutorType::CPU, bundleId), nullptr) << bundleId;
+        EXPECT_EQ(findKnownReferenceGap(ReferenceExecutorType::GPU, bundleId), nullptr) << bundleId;
     }
 }
 
-TEST(TestReferenceOpCoverage, RaggedGapsAreListedForBothReferences)
+// Both references run every BSHD forward bundle: ragged (native ragged plans), paged and ragged Q
+// over paged K/V (the dense plan and the ragged-as-dense rewrite), with or without sinks, and
+// dense graphs with a stats (LSE) output. So neither may list them: a gap entry would stop
+// validating them against golden data. The ids
+// come from discovering the bundles the build copies next to the test binary, so the expected
+// list must name exactly the registered BSHD bundles.
+TEST(TestReferenceOpCoverage, RaggedBundlesAreNotListedAsGaps)
 {
-    for(const char* bundleId : {"quick_SdpaFwd_bshd_bf16_hd128_causal_ragged_Small.Small",
-                                "quick_SdpaFwd_bshd_bf16_hd128_nomask_ragged_Small.Small",
-                                "quick_SdpaFwd_bshd_bf16_hd192_causal_ragged_Small.Small",
-                                "quick_SdpaFwd_bshd_bf16_hd192_nomask_ragged_Small.Small"})
+    const auto dataDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
+                         / "../lib/integration-test-bundles";
+    const auto raggedDir = dataDir / "quick" / "SdpaFwd" / "bshd";
+    ASSERT_TRUE(std::filesystem::is_directory(raggedDir))
+        << "Ragged bundle directory not found: " << raggedDir;
+
+    // Discovery is scoped to the ragged subtree, so names are derived again against the data
+    // root, the way registration names them.
+    std::set<std::string> discovered;
+    for(const auto& bundle : discoverBundles(raggedDir))
     {
-        EXPECT_NE(findKnownReferenceGap(ReferenceExecutorType::CPU, bundleId), nullptr) << bundleId;
+        const auto name = deriveTestName(bundle.jsonPath, dataDir);
+        discovered.insert(name.suiteName + "." + name.testName);
     }
+
+    const std::set<std::string> expected = {
+        "quick_SdpaFwd_bshd_bf16_hd128_causal_ragged_Small.Small",
+        "quick_SdpaFwd_bshd_bf16_hd128_nomask_ragged_Small.Small",
+        "quick_SdpaFwd_bshd_bf16_hd192_causal_ragged_Small.Small",
+        "quick_SdpaFwd_bshd_bf16_hd192_nomask_ragged_Small.Small",
+        "quick_SdpaFwd_bshd_bf16_hd128_causal_paged_Decode.Decode",
+        "quick_SdpaFwd_bshd_bf16_hd128_causal_ragged_paged_Mixed.Mixed",
+        "quick_SdpaFwd_bshd_bf16_hd64_causal_paged_sinks_Decode.Decode",
+        "quick_SdpaFwd_bshd_bf16_hd64_window_ragged_paged_sinks_Mixed.Mixed",
+        "quick_SdpaFwd_bshd_fp16_hd64_causal_paged_SpecDecode.SpecDecode",
+        "quick_SdpaFwd_bshd_fp16_hd64_causal_paged_sinks_Decode.Decode",
+        "quick_SdpaFwd_bshd_fp16_hd64_window_ragged_paged_Mixed.Mixed",
+        "quick_SdpaFwd_bshd_bf16_hd128_causal_gqa_stats_Small.Small",
+        "quick_SdpaFwd_bshd_fp16_hd64_nomask_stats_Small.Small",
+    };
+    EXPECT_EQ(discovered, expected);
+
+    for(const auto& bundleId : discovered)
+    {
+        EXPECT_EQ(findKnownReferenceGap(ReferenceExecutorType::CPU, bundleId), nullptr) << bundleId;
+        EXPECT_EQ(findKnownReferenceGap(ReferenceExecutorType::GPU, bundleId), nullptr) << bundleId;
+    }
+}
+
+// The live table may be empty, so the scoping is also pinned on a table of our own with one id
+// under both references.
+TEST(TestReferenceOpCoverage, KnownGapTableLookupIsScopedToTheReferenceAsked)
+{
+    const std::vector<KnownReferenceGap> gaps = {
+        {ReferenceExecutorType::CPU, "a.Small", "cpu reason"},
+        {ReferenceExecutorType::GPU, "a.Small", "gpu reason"},
+    };
+    for(const auto type : {ReferenceExecutorType::CPU, ReferenceExecutorType::GPU})
+    {
+        const auto* found = findKnownReferenceGap(gaps, type, "a.Small");
+        ASSERT_NE(found, nullptr);
+        EXPECT_EQ(found->reference, type);
+    }
+    EXPECT_EQ(findKnownReferenceGap(gaps, ReferenceExecutorType::GPU, "b.Small"), nullptr);
 }
 
 TEST(TestReferenceOpCoverage, KnownGapLookupMissesAreNull)
@@ -221,6 +281,38 @@ TEST(TestReferenceOpCoverage, CpuSdpaIsLimitedByWorkingSet)
         ReferenceExecutorType::CPU, "quick_SdpaFwd_x.Small", smallGraph.data(), smallGraph.size()));
     EXPECT_FALSE(referenceShapeIsAffordable(
         ReferenceExecutorType::CPU, "quick_SdpaFwd_x.Small", hugeGraph.data(), hugeGraph.size()));
+}
+
+// The scalar CPU backward costs far more than the forward at the same element count, so it
+// has its own cap in multiply-accumulates. The two shapes are the checked-in quick
+// SdpaBackward bundles on either side of it: the 64-row padded/GQA bundles (about a
+// second) and the 256x128 head bundles (tens of seconds each, enough together to time out
+// the whole quick suite).
+TEST(TestReferenceOpCoverage, CpuSdpaBackwardIsLimitedByCost)
+{
+    const auto cheap = buildSdpaBackwardGraph(2, 4, 64, 96, 64);
+    const auto costly = buildSdpaBackwardGraph(1, 1, 256, 256, 128);
+
+    EXPECT_TRUE(referenceShapeIsAffordable(
+        ReferenceExecutorType::CPU, "quick_SdpaBackward_x.Small", cheap.data(), cheap.size()));
+    EXPECT_FALSE(referenceShapeIsAffordable(
+        ReferenceExecutorType::CPU, "quick_SdpaBackward_x.Small", costly.data(), costly.size()));
+}
+
+TEST(TestReferenceOpCoverage, CpuSdpaBackwardIsLimitedToQuickTier)
+{
+    const auto cheap = buildSdpaBackwardGraph(2, 4, 64, 96, 64);
+
+    EXPECT_FALSE(referenceShapeIsAffordable(
+        ReferenceExecutorType::CPU, "standard_SdpaBackward_x.Small", cheap.data(), cheap.size()));
+}
+
+TEST(TestReferenceOpCoverage, SdpaBackwardCostGateIsCpuOnly)
+{
+    const auto costly = buildSdpaBackwardGraph(1, 1, 256, 256, 128);
+
+    EXPECT_TRUE(referenceShapeIsAffordable(
+        ReferenceExecutorType::GPU, "quick_SdpaBackward_x.Small", costly.data(), costly.size()));
 }
 
 // The gate is CPU-only: the GPU reference runs every one of these in milliseconds

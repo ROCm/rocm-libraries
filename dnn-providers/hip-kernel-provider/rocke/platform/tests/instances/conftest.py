@@ -10,31 +10,29 @@ with HIP_VISIBLE_DEVICES, and use ROCKE_LLVM_FLAVOR=llvm23 with matching COMGR.
 from __future__ import annotations
 
 import importlib.util
-import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-_PYROOT = Path(__file__).resolve().parents[2] / "python"
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
+
 _MODULE = "rocke.examples.gfx1250.gemm.block_scaled_gemm_verify"
 
 
 @pytest.fixture(scope="module")
 def gpu_env():
-    env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join([str(_PYROOT), env.get("PYTHONPATH", "")])
+    env = rocke_subprocess_env()
     # Keep HIP initialization out of pytest collection and bound a hung probe.
     probe = subprocess.run(
-        [
-            sys.executable,
+        rocke_python_command(
             "-c",
-            (
-                "from rocke.runtime.hip_module import get_device_arch; "
-                "print(get_device_arch(0))"
-            ),
-        ],
+            "from rocke.runtime.hip_module import get_device_arch; "
+            "print(get_device_arch(0))",
+        ),
         check=False,
         env=env,
         capture_output=True,
@@ -57,8 +55,7 @@ def gpu_env():
 
 def _run_numeric(gpu_env, dtype, matrix_path, route, m, n, k, case, count):
     result = subprocess.run(
-        [
-            sys.executable,
+        rocke_python_command(
             "-m",
             _MODULE,
             "--dtype",
@@ -75,7 +72,7 @@ def _run_numeric(gpu_env, dtype, matrix_path, route, m, n, k, case, count):
             str(k),
             "--case",
             case,
-        ],
+        ),
         check=False,
         env=gpu_env,
         capture_output=True,

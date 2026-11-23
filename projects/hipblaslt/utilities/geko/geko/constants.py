@@ -29,7 +29,8 @@ DTYPE = {
     "f4_r": "F4",
     "f32_c": "C",
     "f64_c": "Z",
-    # I8
+    "i8_r": "I8",
+    "i32_r": "I",
 }
 
 # Bytes per element for hipBLASLt dtype tokens.
@@ -71,6 +72,21 @@ GEMM_LOG_FIELDS = (
     "scaleA",
     "scaleB",
 )
+
+# GEMM_FIELDS and GEMM_LOG_FIELDS are the same GEMM identity fields in two
+# namings (lowercase m/n/k for parsed bench-output rows vs uppercase M/N/K
+# for bench input/config dicts). Some callers (e.g. geko.search's
+# _config_to_gemm_key()/_res_row_to_gemm_key()) build a plain positional
+# tuple from each separately and compare/key on them directly, which only
+# works if both tuples share the same field order. Fail fast at import time
+# if that ever breaks, instead of silently mismatching keys at runtime.
+assert [f.lower() for f in GEMM_LOG_FIELDS] == [f.lower() for f in GEMM_FIELDS], (
+    "GEMM_LOG_FIELDS and GEMM_FIELDS must share the same field order "
+    "(case-insensitive) -- some callers build positional identity keys from "
+    "each separately and assume it. Got "
+    f"GEMM_LOG_FIELDS={GEMM_LOG_FIELDS!r} vs GEMM_FIELDS={GEMM_FIELDS!r}."
+)
+
 GEMM_TYPE_FIELDS = (
     "transA",
     "transB",
@@ -136,6 +152,9 @@ INDEX_TYPE_MAP = {
     2: "f32_c",
     3: "f64_c",
     4: "f16_r",
+    # 5 is TensileLite's Int8x4 (rocisa DataType, packed "4xi8"): a legacy type not
+    # exposed by the hipBLASLt API and absent from every shipped logic file (all
+    # int8 logic uses 8). geko does not support it and treats it as i8_r.
     5: "i8_r",
     6: "i32_r",
     7: "bf16_r",

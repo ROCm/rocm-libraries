@@ -9,27 +9,45 @@
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_frontend/knob/KnobSetting.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 
+#include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <memory>
+#include <string>
+#include <tuple>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 namespace hip_kernel_provider::test_utilities
 {
 
-/// Per-graph verification state that survives repeated executions. The graph must
-/// outlive its context.
+/// Per-graph verification state that survives repeated executions. The graphs must
+/// outlive their context.
 class GraphVerificationContext
 {
 public:
     explicit GraphVerificationContext(hipdnn_frontend::graph::Graph& graph)
         : _graph(graph)
+    {
+    }
+
+    /// Computes the CPU reference by running @p referenceGraph in place of @p graph, for a
+    /// graph the reference executor cannot run when an equivalent one it can run exists.
+    /// The reference graph gives each of @p graph's outputs, and each input both graphs read,
+    /// the same uid. Only the CPU tensors hold the inputs only the reference graph reads.
+    GraphVerificationContext(hipdnn_frontend::graph::Graph& graph,
+                             hipdnn_frontend::graph::Graph& referenceGraph)
+        : _graph(graph)
+        , _referenceGraph(&referenceGraph)
     {
     }
 
@@ -48,13 +66,42 @@ private:
         /// A caller-supplied validator is never rebuilt from the tolerances above; any
         /// later registration for the same output is rejected.
         bool suppliedByCaller = false;
-        std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation> validator;
+        std::shared_ptr<hipdnn_test_sdk::utilities::IReferenceValidation> validator;
     };
 
     hipdnn_frontend::graph::Graph& _graph;
+    hipdnn_frontend::graph::Graph* _referenceGraph = nullptr;
     std::unordered_map<std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>, Registration>
         _registrations;
 };
+
+// The tensors and output validators of one verification. It keeps no reference to a graph,
+// a context or a handle. It stays valid after all three are destroyed.
+struct VerificationRun
+{
+    struct Output
+    {
+        int64_t uid = 0;
+        std::string name;
+        std::shared_ptr<hipdnn_test_sdk::utilities::IReferenceValidation> validator;
+    };
+
+    hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle;
+    hipdnn_test_sdk::utilities::GraphTensorBundle cpuBundle;
+    std::vector<Output> outputs;
+    // The serialized graph the CPU reference runs in place of the executed graph, when the
+    // context has a reference graph; empty otherwise.
+    std::vector<uint8_t> referenceGraph;
+    // The first executeAndValidate call computes the CPU reference and sets this flag.
+    bool referenceReady = false;
+};
+
+/// Runs the CPU reference executor on a serialized graph. Defined in
+/// IntegrationGraphVerificationReference.cpp so the executor's templates are compiled
+/// once per executable rather than in every translation unit that includes this header.
+void executeCpuReferenceGraph(void* graphBuffer,
+                              size_t size,
+                              const std::unordered_map<int64_t, void*>& variantPack);
 
 // NOLINTBEGIN (portability-template-virtual-member-function)
 template <typename DataType, typename TestCaseType>
@@ -106,36 +153,117 @@ protected:
         ASSERT_NO_FATAL_FAILURE(verifyBuiltGraph(context, seed));
     }
 
-    /// Uses the same verification path after a caller builds its engine-pinned plans.
+    /// Uses the same verification path after a caller builds its engine-pinned plans, for
+    /// example with buildPlansForEngine().
     void verifyBuiltGraph(GraphVerificationContext& context, unsigned int seed)
     {
+        VerificationRun run;
+        ASSERT_NO_FATAL_FAILURE(prepareVerification(context, seed, run));
+        ASSERT_NO_FATAL_FAILURE(executeAndValidate(run, context._graph, _handle));
+    }
+
+    /// Builds @p graph's plan on the engine @p engineId with @p knobs, instead of the plan
+    /// the heuristics rank first with its default knobs. verifyBuiltGraph() then runs it.
+    void buildPlansForEngine(hipdnn_frontend::graph::Graph& graph,
+                             int64_t engineId,
+                             const std::vector<hipdnn_frontend::KnobSetting>& knobs)
+    {
+        auto result = graph.build_operation_graph(_handle);
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+        result = graph.create_execution_plan_ext(engineId, knobs);
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+        result = graph.check_support();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+        result = graph.build_plans();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+    }
+
+    // Split in two so a test can work out the right answers once, then check several runs
+    // against them, even runs of a plan loaded after the original graph and handle are gone.
+
+    // Creates and seeds the tensors of the context's graph and resolves a validator for each
+    // output. It seeds the GPU tensors before the CPU tensors. It runs no graph. With a
+    // reference graph, it also creates the CPU tensors only that graph reads, seeds the CPU
+    // tensors from that graph and serializes it into the run.
+    void prepareVerification(GraphVerificationContext& context,
+                             unsigned int seed,
+                             VerificationRun& run)
+    {
+        run = VerificationRun{};
         auto& graph = context._graph;
-        hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle;
-        hipdnn_test_sdk::utilities::GraphTensorBundle cpuBundle;
         std::vector<OutputTensor> outputs;
 
-        generateBundles(graph, cpuBundle, gpuBundle, outputs);
+        generateBundles(graph, run.cpuBundle, run.gpuBundle, outputs);
 
-        initializeBundle(graph, gpuBundle, seed);
-        initializeBundle(graph, cpuBundle, seed);
+        auto* referenceGraph = context._referenceGraph;
+        if(referenceGraph != nullptr)
+        {
+            auto [serialized, error] = referenceGraph->to_binary();
+            ASSERT_TRUE(error.is_good()) << error.get_message();
+            run.referenceGraph = std::move(serialized);
+            ASSERT_NO_FATAL_FAILURE(
+                addReferenceGraphTensors(graph, *referenceGraph, outputs, run.cpuBundle));
+        }
 
-        ASSERT_NO_FATAL_FAILURE(executeGpuGraph(_handle, graph, gpuBundle));
-        ASSERT_NO_FATAL_FAILURE(executeCpuGraph(graph, cpuBundle));
+        initializeBundle(graph, run.gpuBundle, seed);
+        initializeBundle(referenceGraph != nullptr ? *referenceGraph : graph, run.cpuBundle, seed);
 
         ASSERT_NO_FATAL_FAILURE(resolveOutputValidators(context, outputs));
 
-        HIPDNN_PLUGIN_LOG_INFO("Validating " << outputs.size() << " output tensors");
-
         for(const auto& output : outputs)
         {
-            auto& cpuTensor = cpuBundle.tensors.at(output.uid);
-            auto& gpuTensor = gpuBundle.tensors.at(output.uid);
+            run.gpuBundle.outputTensorIds.insert(output.uid);
+            run.outputs.push_back({output.uid,
+                                   output.attr->get_name(),
+                                   context._registrations.at(output.attr).validator});
+        }
+    }
+
+    // Executes graph on the GPU and compares each output with the CPU reference. The first
+    // call computes the reference after the GPU run, from the run's reference graph when it
+    // has one and from graph otherwise. Later calls use that reference again and do not
+    // serialize graph. Before a later call executes, it fills each GPU output with a sentinel,
+    // so an output that the execute does not write fails.
+    void executeAndValidate(VerificationRun& run,
+                            hipdnn_frontend::graph::Graph& graph,
+                            hipdnnHandle_t handle)
+    {
+        ASSERT_FALSE(run.outputs.empty())
+            << "The run has no outputs. Call prepareVerification() first.";
+
+        if(run.referenceReady)
+        {
+            run.gpuBundle.sentinelFillOutputTensors();
+        }
+        ASSERT_NO_FATAL_FAILURE(executeGpuGraph(handle, graph, run.gpuBundle));
+
+        if(!run.referenceReady)
+        {
+            ASSERT_NO_FATAL_FAILURE(prepareReferenceInputs(run.gpuBundle, run.cpuBundle));
+            if(run.referenceGraph.empty())
+            {
+                ASSERT_NO_FATAL_FAILURE(executeCpuGraph(graph, run.cpuBundle));
+            }
+            else
+            {
+                executeCpuReferenceGraph(run.referenceGraph.data(),
+                                         run.referenceGraph.size(),
+                                         run.cpuBundle.toHostVariantPack());
+            }
+            run.referenceReady = true;
+        }
+
+        HIPDNN_PLUGIN_LOG_INFO("Validating " << run.outputs.size() << " output tensors");
+
+        for(const auto& output : run.outputs)
+        {
+            auto& cpuTensor = run.cpuBundle.tensors.at(output.uid);
+            auto& gpuTensor = run.gpuBundle.tensors.at(output.uid);
             gpuTensor->markDeviceModified();
 
-            const auto& registration = context._registrations.at(output.attr);
-            const bool valid = registration.validator->allClose(*cpuTensor, *gpuTensor);
+            const bool valid = output.validator->allClose(*cpuTensor, *gpuTensor);
             ASSERT_TRUE(valid) << "Mismatch found in tensor with id: " << output.uid
-                               << ", name: " << output.attr->get_name();
+                               << ", name: " << output.name;
         }
     }
 
@@ -301,6 +429,99 @@ protected:
         });
     }
 
+    // Adds to the CPU bundle the nonvirtual tensors only @p referenceGraph names, and checks
+    // that it writes every output of @p graph under the same uid. The CPU tensor of a uid both
+    // graphs name is sized from @p graph, and the reference reads it through its own
+    // attributes, so the two must describe it alike.
+    static void addReferenceGraphTensors(hipdnn_frontend::graph::Graph& graph,
+                                         hipdnn_frontend::graph::Graph& referenceGraph,
+                                         const std::vector<OutputTensor>& outputs,
+                                         hipdnn_test_sdk::utilities::GraphTensorBundle& cpuBundle)
+    {
+        std::unordered_map<int64_t, std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>>
+            executedTensors;
+        visitNonVirtualTensors(graph, [&](const auto& tensorAttr, bool /*isOutput*/) {
+            executedTensors.emplace(tensorAttr->get_uid(), tensorAttr);
+        });
+
+        std::unordered_set<int64_t> referenceOutputUids;
+        bool tensorsAgree = true;
+        visitNonVirtualTensors(referenceGraph, [&](const auto& tensorAttr, bool isOutput) {
+            if(isOutput)
+            {
+                referenceOutputUids.insert(tensorAttr->get_uid());
+            }
+            const auto executed = executedTensors.find(tensorAttr->get_uid());
+            if(executed != executedTensors.end())
+            {
+                tensorsAgree &= expectSameTensor(*executed->second, *tensorAttr);
+            }
+            tryAddTensorToBundle(tensorAttr, cpuBundle);
+        });
+        ASSERT_TRUE(tensorsAgree)
+            << "The reference graph describes a tensor of the executed graph differently";
+        for(const auto& output : outputs)
+        {
+            ASSERT_EQ(referenceOutputUids.count(output.uid), 1U)
+                << "The reference graph does not write output " << output.uid << " ("
+                << output.attr->get_name() << ")";
+        }
+    }
+
+    // Calls @p visit(tensor, isOutput) for every nonvirtual input, output and ragged offset
+    // table of @p graph's nodes; a tensor several nodes name is visited once per name.
+    template <typename Visitor>
+    static void visitNonVirtualTensors(hipdnn_frontend::graph::Graph& graph, const Visitor& visit)
+    {
+        const auto visitTensor = [&](const auto& tensorAttr, bool isOutput) {
+            if(tensorAttr->get_is_virtual())
+            {
+                return;
+            }
+            visit(tensorAttr, isOutput);
+            if(tensorAttr->has_ragged_offset())
+            {
+                visit(tensorAttr->get_ragged_offset(), false);
+            }
+        };
+        graph.visit([&](const hipdnn_frontend::graph::INode& node) {
+            for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
+            {
+                visitTensor(tensorAttr, true);
+            }
+            for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
+            {
+                visitTensor(tensorAttr, false);
+            }
+        });
+    }
+
+    // Returns whether @p reference describes the tensor @p executed describes, adding a
+    // failure that shows both when it does not.
+    // get_ragged_offset() is not const, so both tensors are taken by mutable reference.
+    static bool expectSameTensor(hipdnn_frontend::graph::TensorAttributes& executed,
+                                 hipdnn_frontend::graph::TensorAttributes& reference)
+    {
+        const auto describe = [](hipdnn_frontend::graph::TensorAttributes& t) {
+            const int64_t offsetUid = t.has_ragged_offset() ? t.get_ragged_offset()->get_uid() : -1;
+            const int64_t multiplier = t.has_ragged_offset() ? t.get_ragged_offset_multiplier() : 0;
+            return std::make_tuple(t.get_dim(),
+                                   t.get_stride(),
+                                   static_cast<int>(t.get_data_type()),
+                                   offsetUid,
+                                   multiplier);
+        };
+        if(describe(reference) == describe(executed))
+        {
+            return true;
+        }
+        ADD_FAILURE() << "Tensor " << executed.get_uid() << " (" << executed.get_name()
+                      << ") as (dims, strides, data type, ragged offset uid, multiplier): "
+                      << "executed graph " << ::testing::PrintToString(describe(executed))
+                      << ", reference graph " << ::testing::PrintToString(describe(reference));
+        return false;
+    }
+
     /// Seeds every tensor in @p bundle alike. A suite whose operation can confuse two
     /// identically-seeded operands overrides this instead of changing it: other suites
     /// calibrate their tolerances against this seeding.
@@ -312,6 +533,23 @@ protected:
         {
             bundle.randomizeTensor(tensorPair.first, DEFAULT_MIN, DEFAULT_MAX, seed);
         }
+    }
+
+    /// Runs after the GPU graph and before the CPU reference's first run. A suite whose
+    /// reference reads an engine output as its input (SDPA's Philox dropout reads the engine's
+    /// RNG dump as its explicit mask, SEM-015) copies it from @p gpuBundle into @p cpuBundle
+    /// here. Does nothing by default.
+    virtual void prepareReferenceInputs(
+        [[maybe_unused]] hipdnn_test_sdk::utilities::GraphTensorBundle& gpuBundle,
+        [[maybe_unused]] hipdnn_test_sdk::utilities::GraphTensorBundle& cpuBundle)
+    {
+    }
+
+    /// Called with the workspace each GPU execute is about to receive, before the execute.
+    /// A suite whose engine must not depend on the workspace's prior contents overrides this
+    /// to fill it with a pattern; the default leaves the fresh allocation as it is.
+    virtual void prepareWorkspace([[maybe_unused]] void* workspace, [[maybe_unused]] size_t bytes)
+    {
     }
 
     virtual hipStream_t stream() const
@@ -335,6 +573,11 @@ private:
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
         ASSERT_GE(workspaceSize, 0) << result.err_msg;
         hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+        if(workspaceSize > 0)
+        {
+            ASSERT_NO_FATAL_FAILURE(
+                prepareWorkspace(workspace.get(), static_cast<size_t>(workspaceSize)));
+        }
 
         auto variantPack = bundle.toDeviceVariantPack();
         result = graph.execute(handle, variantPack, workspace.get());
@@ -351,7 +594,7 @@ private:
         auto [serializedGraph, serErr] = graph.to_binary();
         ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-        hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
+        executeCpuReferenceGraph(
             serializedGraph.data(), serializedGraph.size(), bundle.toHostVariantPack());
     }
 
@@ -360,18 +603,29 @@ private:
         hipdnn_test_sdk::utilities::GraphTensorBundle& cpuBundle,
         hipdnn_test_sdk::utilities::GraphTensorBundle& gpuBundle)
     {
-        int64_t tensorId = tensorAttr->get_uid();
+        tryAddTensorToBundle(tensorAttr, cpuBundle);
+        tryAddTensorToBundle(tensorAttr, gpuBundle);
+    }
 
+    static void tryAddTensorToBundle(
+        const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& tensorAttr,
+        hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
+    {
         if(tensorAttr->get_is_virtual()
-           || cpuBundle.tensors.find(tensorId) != cpuBundle.tensors.end())
+           || bundle.tensors.find(tensorAttr->get_uid()) != bundle.tensors.end())
         {
             return;
         }
 
-        cpuBundle.addTensor(*tensorAttr,
-                            hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
-        gpuBundle.addTensor(*tensorAttr,
-                            hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
+        bundle.addTensor(*tensorAttr,
+                         hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
+
+        // A ragged tensor's offset table is an input the variant pack must carry, but the
+        // node lists only its primary tensors.
+        if(tensorAttr->has_ragged_offset())
+        {
+            tryAddTensorToBundle(tensorAttr->get_ragged_offset(), bundle);
+        }
     }
 };
 

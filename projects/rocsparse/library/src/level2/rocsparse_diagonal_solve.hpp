@@ -26,8 +26,6 @@
 
 #include "rocsparse-types.h"
 
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
-
 struct _rocsparse_csrsv_info;
 typedef _rocsparse_csrsv_info* rocsparse_csrsv_info;
 
@@ -107,5 +105,3 @@ namespace rocsparse
                                         int64_t                     batch_count,
                                         bool                        conj_x);
 }
-
-#endif

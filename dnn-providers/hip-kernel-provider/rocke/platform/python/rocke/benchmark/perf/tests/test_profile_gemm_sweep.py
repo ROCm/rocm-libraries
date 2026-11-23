@@ -112,13 +112,18 @@ class TestMain(unittest.TestCase):
 
         ex.profile_sweep = fail_sweep
         try:
-            with self.assertRaisesRegex(SystemExit, "profile_gemm_sweep: 1 of 1"):
-                ex.main(["--arch", "gfx950", "--shape", "8x8x8"])
+            for arch in ("gfx942", "gfx950"):
+                with self.subTest(arch=arch), self.assertRaisesRegex(
+                    SystemExit, "profile_gemm_sweep: 1 of 1"
+                ):
+                    ex.main(["--arch", arch, "--shape", "8x8x8"])
         finally:
             ex.profile_sweep = original
 
 
 class TestProfileVariants(unittest.TestCase):
+    ARCH = "gfx950"
+
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.cache = self._tmp.name
@@ -138,7 +143,7 @@ class TestProfileVariants(unittest.TestCase):
                 "ck_b", "sym_b", "/t/b.hsaco", "/t/b.json", {"M": 16, "N": 16, "K": 16}
             ),
         ]
-        recs = ex.profile_variants(variants, "gfx950", repeats=3, cache=self.cache)
+        recs = ex.profile_variants(variants, self.ARCH, repeats=3, cache=self.cache)
         self.assertEqual(len(recs), 2)
         self.assertEqual(len(store.load(cache=self.cache)), 2)  # one per variant
         # identity label = cache_key
@@ -153,9 +158,9 @@ class TestProfileVariants(unittest.TestCase):
         ]
         # run 1 (busy=100), run 2 (busy=200 -> regression)
         ex._harness.profile = lambda *a, **k: _fake_record(*a, **k, _busy=[100])
-        ex.profile_variants(variants, "gfx950", repeats=1, cache=self.cache)
+        ex.profile_variants(variants, self.ARCH, repeats=1, cache=self.cache)
         ex._harness.profile = lambda *a, **k: _fake_record(*a, **k, _busy=[200])
-        ex.profile_variants(variants, "gfx950", repeats=1, cache=self.cache)
+        ex.profile_variants(variants, self.ARCH, repeats=1, cache=self.cache)
 
         ident = schema.identity(store.load(cache=self.cache)[-1])
         result = selfcheck.check_history(store.load(cache=self.cache), ident)
@@ -171,6 +176,10 @@ class TestParseShape(unittest.TestCase):
     def test_parse_shape_bad(self):
         with self.assertRaises(SystemExit):
             ex._parse_shape("nope")
+
+
+class TestProfileVariantsGfx942(TestProfileVariants):
+    ARCH = "gfx942"
 
 
 if __name__ == "__main__":

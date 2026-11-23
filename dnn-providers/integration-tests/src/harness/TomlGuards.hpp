@@ -11,29 +11,23 @@
 
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
+#include "harness/CurrentTestName.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/OutputComparison.hpp"
 
 namespace hipdnn_integration_tests
 {
 
-inline std::string currentTestName()
+// The [[tolerance_overrides]] entry of `settings` that matches `testName`; nullopt for no
+// settings, an empty name, or no matching entry.
+inline std::optional<ToleranceOverride> findTomlToleranceOverride(const TestSettings* settings,
+                                                                  const std::string& testName)
 {
-    auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
-    if(info == nullptr)
-    {
-        return {};
-    }
-    return std::string(info->test_suite_name()) + "." + info->name();
-}
-
-inline std::optional<ToleranceOverride> findTomlToleranceOverride(const std::string& testName)
-{
-    if(testName.empty())
+    if(settings == nullptr || testName.empty())
     {
         return std::nullopt;
     }
-    return TestConfig::get().findToleranceOverride(testName);
+    return settings->findToleranceOverride(testName);
 }
 
 // Applies this engine's [[tolerance_overrides]] entry for `testName`, if one matches.
@@ -43,7 +37,11 @@ inline std::optional<ToleranceOverride> findTomlToleranceOverride(const std::str
 // a test, not a tensor. Logging belongs to gradingForTensor(), which knows both.
 inline bool applyTomlToleranceOverride(const std::string& testName, float& atol, float& rtol)
 {
-    const auto ovr = findTomlToleranceOverride(testName);
+    if(testName.empty())
+    {
+        return false;
+    }
+    const auto ovr = findTomlToleranceOverride(TestConfig::get().testSettings(), testName);
     if(!ovr)
     {
         return false;
@@ -59,14 +57,15 @@ inline bool applyTomlToleranceOverride(const std::string& testName, float& atol,
 //
 // `tensorLabel` must be the label form the TOML globs are written against —
 // bundle::tensorLabel(uid, name), never a raw tensor name.
-inline std::optional<ValidatorOverride> findTomlValidatorOverride(const std::string& testName,
+inline std::optional<ValidatorOverride> findTomlValidatorOverride(const TestSettings* settings,
+                                                                  const std::string& testName,
                                                                   const std::string& tensorLabel)
 {
-    if(testName.empty())
+    if(settings == nullptr || testName.empty())
     {
         return std::nullopt;
     }
-    return TestConfig::get().findValidatorOverride(testName, tensorLabel);
+    return settings->findValidatorOverride(testName, tensorLabel);
 }
 
 // How one output tensor is graded, and the one place that says so out loud.
@@ -133,19 +132,22 @@ inline bundle::ComparisonTolerance
     return bundle::ComparisonTolerance::allClose(atol, rtol);
 }
 
-// gradingForTensor with the overrides looked up in this engine's TOML config.
+// gradingForTensor with the overrides looked up in `settings`, this engine's TOML config
+// (null: none loaded, so the caller's tolerance grades by allclose).
 //
 // Both verification harnesses resolve every output tensor through this, so neither can
-// report a check the other would not have run.
+// report a check the other would not have run. Production passes TestConfig's settings;
+// a test passes its own, so the lookup that runs with an override loaded is this one.
 inline bundle::ComparisonTolerance gradingForTensor(const std::string& testName,
                                                     const std::string& tensorLabel,
+                                                    const TestSettings* settings,
                                                     float atol,
                                                     float rtol)
 {
     return gradingForTensor(testName,
                             tensorLabel,
-                            findTomlValidatorOverride(testName, tensorLabel),
-                            findTomlToleranceOverride(testName),
+                            findTomlValidatorOverride(settings, testName, tensorLabel),
+                            findTomlToleranceOverride(settings, testName),
                             atol,
                             rtol);
 }

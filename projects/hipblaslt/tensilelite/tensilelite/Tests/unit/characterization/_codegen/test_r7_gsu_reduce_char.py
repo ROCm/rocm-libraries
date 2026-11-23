@@ -63,9 +63,9 @@ def _build_kwa(kernel, *, globalReadIncsUseVgpr: bool, labels=None):
     from rocisa.enum import RegisterType
     from rocisa.register import RegisterPool
 
-    from Tensile.Common.Types import DebugConfig
-    from Tensile.KernelWriter import KernelWriter, StateValues
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly, GlobalReadGprRecord
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriter import KernelWriter, StateValues
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly, GlobalReadGprRecord
 
     ri = _rocisa_mod.rocIsa.getInstance()
 
@@ -113,6 +113,7 @@ def _build_kwa(kernel, *, globalReadIncsUseVgpr: bool, labels=None):
 # Minimal kernel for GSUOff (GSU=1) with a single summation index.
 _KERNEL_GSU_OFF = {
     "ProblemType": {
+        "UseScaleAlphaVec": 0,
         "NumIndicesSummation": 1,
         "IndicesSummation": [2],
         "MirrorDimsA": [],
@@ -140,6 +141,7 @@ _KERNEL_GSU_OFF = {
 # Minimal kernel for GSUOn (GSU=4) with a single summation index.
 _KERNEL_GSU_ON = {
     "ProblemType": {
+        "UseScaleAlphaVec": 0,
         "NumIndicesSummation": 1,
         "IndicesSummation": [2],
         "MirrorDimsA": [],
@@ -208,14 +210,14 @@ _TP_B = {
 
 def _get_gsu_off():
     """Return the GSUOff component instance (matches GSU==0 kernel)."""
-    from Tensile.Components.GSU import GSUOff
+    from tensilelite.Components.GSU import GSUOff
 
     return GSUOff()
 
 
 def _get_gsu_on():
     """Return the GSUOn component instance (matches GSU>0 kernel)."""
-    from Tensile.Components.GSU import GSUOn
+    from tensilelite.Components.GSU import GSUOn
 
     return GSUOn()
 

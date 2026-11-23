@@ -25,14 +25,14 @@ import pytest
 
 from rocke.core.ir import I32, IRBuilder, PtrType
 from rocke.core.ir_serialize import serialize
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 from rocke.helpers.magic_division import (
     calculate_magic_numbers,
     do_magic_division,
     do_magic_division_dynamic,
 )
 
-FLAVORS = ("llvm20", "llvm22", "llvm23")
+FLAVORS = LLVM_FLAVORS
 DIVIDENDS = (2**30 - 1, 2**30, 1_610_612_736, 2**31 - 1)
 DIVISORS = (3, 9, 1025, 64)
 

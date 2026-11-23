@@ -84,11 +84,12 @@ def _run(flavor: str) -> dict:
 
 
 def _build_doc() -> dict:
-    from rocke.core.ir_golden import GOLDEN_FLAVORS
+    from rocke.core.ir_golden import GOLDEN_ALIASES, GOLDEN_PROFILE_FLAVORS
 
     return {
         "schema": "kda_gfx942.ir_golden_sha256/v1",
-        "flavors": {flavor: _run(flavor) for flavor in GOLDEN_FLAVORS},
+        "aliases": GOLDEN_ALIASES,
+        "flavors": {flavor: _run(flavor) for flavor in GOLDEN_PROFILE_FLAVORS},
     }
 
 

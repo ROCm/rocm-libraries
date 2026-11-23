@@ -18,8 +18,10 @@ from dataclasses import replace
 
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
+    _has_score_bias,
     _enable_combo_2d,
     _enable_early_v_schedule,
+    _enable_fast_paged_kv_desc,
     _enable_fp8_mfma_qk,
     _enable_gfx942_3d_wide_kv_load,
     _enable_gfx942_bf16_flash,
@@ -31,6 +33,7 @@ from kernels.common.attention_unified import (
     _enable_gfx942_flash_q_direct,
     _enable_gfx942_fp16_flash,
     _enable_i64_kv_addr,
+    _enable_i64_kv_addr_3d,
     _enable_k_single_buffer,
     _enable_mfma_32x32,
     _enable_register_pv,
@@ -203,9 +206,15 @@ def _base_2d_generic_fields(problem: UnifiedAttentionProblem, arch: str) -> dict
     combo = _enable_combo_2d(problem, arch)
     combo_no_sw = combo and problem.sliding_window == 0
     subflags = _enable_transposed_subflags(problem, arch)
-    scalar_state = combo or subflags
+    # Sinks on the transposed 32x32 path seed the running max per lane row, which
+    # only the scalar-state layout maps correctly, so sinks always take it.
+    scalar_state = (
+        combo
+        or subflags
+        or (problem.use_sinks and _enable_transposed_qk_32x32(problem, arch))
+    )
     skip_legacy_qreg = combo or subflags
-    _bias_active = problem.softcap > 0 or problem.use_alibi or problem.use_qq_bias
+    _bias_active = problem.softcap > 0 or _has_score_bias(problem)
     mask_opts = (combo_no_sw and not _bias_active) or subflags
     return dict(
         head_size=problem.head_size,
@@ -232,15 +241,7 @@ def _base_2d_generic_fields(problem: UnifiedAttentionProblem, arch: str) -> dict
         use_transposed_mask_limit=mask_opts,
         use_mfma32_skip_legacy_qreg=skip_legacy_qreg,
         use_early_v_schedule=_enable_early_v_schedule(problem, arch),
-        use_fast_paged_kv_desc=(
-            combo_no_sw
-            and problem.dtype
-            == "bf16"  # fast descriptor is bf16-only (spec validator enforces)
-            and not problem.use_fp8
-            and problem.num_query_heads == 64
-            and problem.num_kv_heads == 8
-            and _select_2d_tile_size(problem, arch) == 64
-        ),
+        use_fast_paged_kv_desc=_enable_fast_paged_kv_desc(problem, arch),
         use_register_pv=_enable_register_pv(problem, arch),
         use_fp8_mfma_qk=_enable_fp8_mfma_qk(problem, arch),
         use_i64_kv_addr=_enable_i64_kv_addr(problem),
@@ -297,9 +298,11 @@ def _spec_gfx950_generic(problem: UnifiedAttentionProblem, arch: str):
     if _enable_k_single_buffer(problem, arch):
         _schedule_fields["use_k_single_buffer"] = True
     # Shared base fields + the gfx950-only schedule tail (disjoint keys).
+    # Additive bias is gfx950-only for now, so it lives in the tail too.
     _spec = UnifiedAttention2DTiledSpec(
         **_base_2d_generic_fields(problem, arch),
         **_schedule_fields,
+        use_additive_bias=problem.use_additive_bias,
         causal_top_left=problem.causal_top_left,
         right_bound=problem.right_bound,
     )
@@ -393,8 +396,12 @@ def _spec_generic_3d(problem: UnifiedAttentionProblem, arch: str):
         kv_storage_dtype=_kv_storage_dtype(problem),
         tile_size_override=tile_size_override,
         use_wide_kv_load=_enable_gfx942_3d_wide_kv_load(problem, arch),
-        use_i64_kv_addr=_enable_i64_kv_addr(problem),
+        use_i64_kv_addr=_enable_i64_kv_addr_3d(problem, arch),
         use_decode_grid=_use_decode_grid(problem, arch),
+        # Additive bias is gfx950-only for now; gfx942's spec has no such field.
+        **(
+            {"use_additive_bias": problem.use_additive_bias} if arch == "gfx950" else {}
+        ),
         **(
             {
                 "kv_cache_policy": _kv_cache_policy_3d(problem, arch),

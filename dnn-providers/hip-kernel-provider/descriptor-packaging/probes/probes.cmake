@@ -22,9 +22,22 @@
 #
 # Without UKDS a probe packs, per compile group of every KDP shipping for its ARCH, one
 # UKD, or for rocke enough UKDs that each value of each varying spec field is packed
-# once; combinations of values are not guaranteed. This file is for named UKDS probes
-# only: an integration that needs specific UKDs (a combination the sweep may miss)
-# packed on every PR adds
+# once; combinations of values are not guaranteed. This file is for named probes: a UKDS
+# subset, or another ROOT (the fixed-arch slotted fixtures below). An integration that
+# needs specific UKDs (a combination the sweep may miss) packed on every PR adds
 #     hkp_add_packaging_probe(ARCH <gfx> NAME <integration> UKDS <ukd-name>...)
 # Automatic probes are named by their bare arch, so a NAME equal to an automatically
 # probed arch is declared twice and fails configure.
+
+# Fixed-arch slotted fixtures (_hkp_wire_fixed_arch_root in HkpPackaging.cmake): a build
+# that does not select the arch packs the root here instead, uninstalled, so packaging
+# signal does not depend on the lane's arches. multi_launch is all rocKE and needs it ON.
+hkp_selected_arches(_hkp_probe_selected _hkp_probe_selected_source)
+if(NOT "gfx950" IN_LIST _hkp_probe_selected)
+    hkp_add_packaging_probe(ARCH gfx950 NAME slotted-hsaco-gfx950
+        ROOT ../tests/fixtures/slotted_hsaco)
+endif()
+if(HIPKERNELPROVIDER_ENABLE_ROCKE AND NOT "gfx1151" IN_LIST _hkp_probe_selected)
+    hkp_add_packaging_probe(ARCH gfx1151 NAME slotted-multi-launch-gfx1151
+        ROOT ../tests/fixtures/slotted_multi_launch)
+endif()

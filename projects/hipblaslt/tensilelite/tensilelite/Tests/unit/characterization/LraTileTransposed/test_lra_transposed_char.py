@@ -44,9 +44,9 @@ pytestmark = pytest.mark.unit
 
 # Module-level import of KernelWriter is required to break the circular import
 # that occurs when tensilelite.Components.LraTileAssignment is imported before the
-# parent Tensile package finishes loading (Component.py line 295:
+# parent TensileLite package finishes loading (Component.py line 295:
 # ``from .Components import *``).  Importing KernelWriter here ensures the
-# Tensile package is fully initialized before any per-test import of a
+# TensileLite package is fully initialized before any per-test import of a
 # specific component module.
 import rocisa  # noqa: F401
 import tensilelite.KernelWriter  # noqa: F401
@@ -59,7 +59,7 @@ import tensilelite.KernelWriter  # noqa: F401
 def _make_writer():
     """Return a minimal mock writer with rocisa register pools."""
 
-    from rocisa._rocisa.enum import Vgpr, Sgpr
+    from rocisa.enum import Vgpr, Sgpr
     from rocisa.register import RegisterPool
     from tensilelite.Common.RegisterPool import allocTmpGpr
 

@@ -158,13 +158,6 @@ block()
 
     if(ROCISA_STANDALONE)
         set(STINKYTOFU_ENABLE_WERROR ON)
-        # Both steppings need the bindings, and they are separate entries in
-        # GPU_TARGETS, so a strict-only build matches neither if only one is named.
-        if("gfx1250" IN_LIST GPU_TARGETS OR "gfx1250-strict" IN_LIST GPU_TARGETS)
-            set(STINKYTOFU_BUILD_PYTHON ON)
-        else()
-            set(STINKYTOFU_BUILD_PYTHON OFF)
-        endif()
         add_subdirectory("${_stinkytofu_src_dir}" stinkytofu EXCLUDE_FROM_ALL)
         set(_stinkytofu_from_subdirectory TRUE)
     else()
@@ -172,11 +165,6 @@ block()
             set(BUILD_SHARED_LIBS OFF)
             set(CMAKE_SKIP_INSTALL_RULES ON)
             set(STINKYTOFU_ENABLE_WERROR ON)
-            if("gfx1250" IN_LIST GPU_TARGETS OR "gfx1250-strict" IN_LIST GPU_TARGETS)
-                set(STINKYTOFU_BUILD_PYTHON ON)
-            else()
-                set(STINKYTOFU_BUILD_PYTHON OFF)
-            endif()
             add_subdirectory("${_stinkytofu_src_dir}" stinkytofu EXCLUDE_FROM_ALL)
         endblock()
         set(_stinkytofu_from_subdirectory TRUE)
@@ -292,49 +280,6 @@ block()
             OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rocisa/_dll_dirs.py"
             CONTENT "DEP_DLLS = [p for p in r'''$<TARGET_RUNTIME_DLLS:_rocisa>'''.split(';') if p]\n"
         )
-    endif()
-
-    # Stage the standalone stinkytofu Python module next to _rocisa so it
-    # resolves from the build tree at runtime.
-    if(TARGET stinkytofu_python)
-        add_dependencies(_rocisa stinkytofu_python)
-
-        set_target_properties(stinkytofu_python PROPERTIES
-            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu"
-            BUILD_RPATH "$ORIGIN"
-            INSTALL_RPATH "$ORIGIN"
-        )
-
-        configure_file(
-            "${_stinkytofu_src_dir}/python_module/stinkytofu/__init__.py"
-            "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/__init__.py"
-            COPYONLY
-        )
-        # The staged _build_info.py drives the standalone _stinkytofu.so guard.
-        configure_file(
-            "${_stinkytofu_src_dir}/python_module/stinkytofu/_build_info.py.in"
-            "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/_build_info.py"
-            @ONLY
-        )
-
-        # Stage intrinsics.st.bc next to _stinkytofu.so for runtime loading.
-        if(TARGET intrinsics_compiled)
-            add_dependencies(_rocisa intrinsics_compiled)
-
-            set(_intrinsics_bc_src "${CMAKE_BINARY_DIR}/intrinsics.st.bc")
-            set(_intrinsics_bc_dst "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/intrinsics.st.bc")
-            add_custom_command(
-                OUTPUT "${_intrinsics_bc_dst}"
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                        "${_intrinsics_bc_src}" "${_intrinsics_bc_dst}"
-                DEPENDS intrinsics_compiled "${_intrinsics_bc_src}"
-                COMMENT "Staging intrinsics.st.bc next to _stinkytofu.so"
-                VERBATIM
-            )
-            add_custom_target(rocisa_stage_intrinsics ALL
-                DEPENDS "${_intrinsics_bc_dst}")
-            add_dependencies(_rocisa rocisa_stage_intrinsics)
-        endif()
     endif()
 
     if(ROCISA_STANDALONE)

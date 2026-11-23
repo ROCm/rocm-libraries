@@ -33,7 +33,7 @@ colon (``gfx942``), so any cooked variant must collapse to that same base.
 
 import pytest
 
-from Tensile.Toolchain.Source import _archNamesFromBundlerTarget
+from tensilelite.Toolchain.Source import _archNamesFromBundlerTarget
 
 pytestmark = pytest.mark.unit
 

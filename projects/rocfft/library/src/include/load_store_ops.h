@@ -26,6 +26,7 @@
 #include <cstring>
 #include <hip/hip_runtime_api.h>
 #include <hip/linker_types.h>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <vector>

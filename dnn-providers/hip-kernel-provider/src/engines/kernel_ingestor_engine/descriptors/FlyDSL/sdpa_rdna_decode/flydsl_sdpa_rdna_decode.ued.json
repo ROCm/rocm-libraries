@@ -1,0 +1,36 @@
+{
+  "version": "1.0",
+  "id": "87d4a0b4-40c8-50a0-af07-cc6e88ecd20d",
+  "name": "hipkernel:flydsl_sdpa_rdna_decode",
+  "sdk_version": "1.6.0",
+  "graph_match": {
+    "native": "hipkernel.flydsl_sdpa_rdna_decode.graph_match"
+  },
+  "sort_kernel_catalog": {
+    "default": "5c419b88-8ce4-5bb5-89c0-c572c5849290"
+  },
+  "predict_engine": {
+    "default": "d9ea0851-b585-536e-8e0f-8ea0d00971c2",
+    "gfx1100": [
+      "e319ac01-24d7-45ee-a996-5c06bd8c7d2e"
+    ],
+    "gfx1101": [
+      "1e0df36a-269a-4830-b833-893d300db159"
+    ],
+    "gfx1151": [
+      "f1107ba4-d764-438d-9ad5-1663b5c4786d"
+    ],
+    "gfx1201": [
+      "abb6e79f-b813-40ab-b4b1-17dc2a006983"
+    ]
+  },
+  "metadata": "8dc88fc8-9501-5c69-b49c-1a45e312639e",
+  "knobs": [
+    "block_m",
+    "block_n",
+    "dv_split"
+  ],
+  "behavior_notes": [
+    "supports_graph_capture"
+  ]
+}

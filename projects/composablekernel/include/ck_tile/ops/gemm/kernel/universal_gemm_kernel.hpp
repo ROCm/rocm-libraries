@@ -8,6 +8,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common.hpp"
+#include "ck_tile/ops/epilogue/tdm_epilogue.hpp"
 #include "ck_tile/host/concat.hpp"
 #include "ck_tile/host/device_prop.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
@@ -16,6 +17,9 @@
 #include "ck_tile/core/utility/type_traits.hpp"
 #include "ck_tile/core/utility/persistent_async_input_scheduler.hpp"
 #include "ck_tile/core/arch/workgroup_barrier.hpp"
+#include "ck_tile/core/arch/amd_tdm_descriptor.hpp"
+#include "ck_tile/ops/gemm/kernel/wavelet_utils.hpp"
+#include "ck_tile/ops/epilogue/tdm_epilogue.hpp"
 
 namespace ck_tile {
 
@@ -213,7 +217,36 @@ struct UniversalGemmKernel
     using AElementWise = remove_cvref_t<typename GemmPipeline::AElementWise>;
     using BElementWise = remove_cvref_t<typename GemmPipeline::BElementWise>;
 
-    static constexpr index_t kBlockSize = GemmPipeline::BlockSize;
+    /**
+     * @brief Whether this epilogue can accumulate C across k_batch splits.
+     *
+     * With k_batch > 1 every split atomically adds into the same C tile. An epilogue that stores
+     * without honouring the atomic_add memory operation (e.g. TdmEpilogue) declares
+     * `SupportsSplitK = false`, whatever its output type: each split would replace C with its own
+     * partial sum. Otherwise the atomic store needs a vector width it can express: a
+     * half-precision epilogue with an odd GetVectorSizeC() has no such path and emits no store at
+     * all, leaving C untouched rather than partial. Both the host rejection in IsSupportedArgument
+     * and the device-side epilogue dispatch read this constant, so the two cannot drift apart.
+     *
+     * CK_TILE_FORCE_SINGLE_TAIL_HANDLER elides the atomic_add arm of that dispatch entirely, so in
+     * that build no epilogue has a split-K store path. It belongs in this constant rather than in a
+     * second #if at the use site, or the host answers "supported" for a device that cannot store.
+     */
+    static constexpr bool EpilogueSupportsSplitK = []() {
+#if defined(CK_TILE_FORCE_SINGLE_TAIL_HANDLER)
+        return false;
+#else
+        return epilogue_can_accumulate_v<EpiloguePipeline> &&
+               (EpiloguePipeline::GetVectorSizeC() % 2 == 0 ||
+                !is_any_of<EDataType, fp16_t, bf16_t>::value);
+#endif
+    }();
+
+    // Wavelet pipelines launch load waves beyond the math waves BlockGemm maps onto the C tile.
+    static constexpr index_t kBlockSize = GemmPipelineLaunchBlockSize<GemmPipeline>;
+
+    /// Named barriers this kernel arms for GemmPipeline; void when it synchronises without them.
+    using barrier_pipeline = barrier_pipeline_of_t<GemmPipeline>;
 
     // Detect persistent kernel support to select appropriate entry point
     struct has_persistent_kernel
@@ -250,22 +283,15 @@ struct UniversalGemmKernel
              TilePartitioner::BlockGemmShape::kclusterK >
          1);
 
-    // Check if TilePartitioner has GetOutputOffset method with kargs and k_id
-    struct has_tile_partitioner_output_offset_impl
-    {
-        template <typename T, typename KernelArgs>
-        using has_get_output_offset_t =
-            decltype(T::GetOutputOffset(std::declval<KernelArgs>(), std::declval<index_t>()));
-
-        static constexpr bool value = []() {
-            if constexpr(is_detected<has_get_output_offset_t, TilePartitioner>{})
-                return true;
-            else
-                return false;
-        }();
-    };
-    static constexpr bool has_tile_partitioner_output_offset =
-        has_tile_partitioner_output_offset_impl::value;
+    template <typename T>
+    using has_grid_2d = decltype(T::kGrid2D);
+    /// The partitioner's GridSize is 2D without a cluster (GemmTile2DNMajorPartitioner).
+    static constexpr bool kPartitionerGrid2D = []() {
+        if constexpr(is_detected<has_grid_2d, TilePartitioner>{})
+            return TilePartitioner::kGrid2D;
+        else
+            return false;
+    }();
 
     static constexpr auto I0 = number<0>();
     static constexpr auto I1 = number<1>();
@@ -296,6 +322,26 @@ struct UniversalGemmKernel
     using KernelArgs =
         UniversalGemmKernelArgs<AsLayout::size(), BsLayout::size(), DsLayout::size()>;
 
+    // Whether TilePartitioner opts into per-k-split output slicing via
+    // GetOutputOffset(kargs, k_id), which a two-stage split-K reduction needs so that each split
+    // writes its own workspace slice.
+    //
+    // Must stay below KernelArgs: the probe names that exact type, so it is ill-formed -- and
+    // silently false for every partitioner -- if declared before the alias.
+    struct has_tile_partitioner_output_offset_impl
+    {
+        // Lvalue, not rvalue: both call sites pass `kargs`, a by-value parameter, as an lvalue.
+        // Probing with an rvalue would miss a `KernelArgs&` overload -- silently re-deadening this
+        // path -- and would accept a `KernelArgs&&` one that then fails to compile at the call.
+        template <typename T>
+        using has_get_output_offset_t =
+            decltype(T::GetOutputOffset(std::declval<KernelArgs&>(), std::declval<index_t>()));
+
+        static constexpr bool value = is_detected<has_get_output_offset_t, TilePartitioner>::value;
+    };
+    static constexpr bool has_tile_partitioner_output_offset =
+        has_tile_partitioner_output_offset_impl::value;
+
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
         // clang-format off
@@ -322,9 +368,12 @@ struct UniversalGemmKernel
 
     CK_TILE_HOST static constexpr auto ClusterSize()
     {
-        return dim3(TilePartitioner::BlockGemmShape::kclusterM,
-                    TilePartitioner::BlockGemmShape::kclusterN,
-                    TilePartitioner::BlockGemmShape::kclusterK);
+        using S = typename TilePartitioner::BlockGemmShape;
+        // The 2D partitioner walks N tiles along grid x and M tiles along grid y.
+        if constexpr(kPartitionerGrid2D)
+            return dim3(S::kclusterN, S::kclusterM, S::kclusterK);
+        else
+            return dim3(S::kclusterM, S::kclusterN, S::kclusterK);
     }
 
     /**
@@ -385,6 +434,13 @@ struct UniversalGemmKernel
         // load imbalance. Uses ceil division to distribute remainder work evenly.
         __device__ SplitKBatchOffset(const KernelArgs& kargs, const index_t k_id = blockIdx.z)
         {
+            if constexpr(!kPipelineSupportsSplitK)
+            {
+                as_k_split_offset.fill(0);
+                bs_k_split_offset.fill(0);
+                splitted_k = kargs.K;
+                return;
+            }
             constexpr auto K1     = TilePartitioner::BlockGemmShape::WarpTile::at(number<2>{});
             const index_t num_all = amd_wave_read_first_lane(
                 kargs.K / K1); // num of all loops not including potential tail
@@ -453,28 +509,146 @@ struct UniversalGemmKernel
     // for skipping validation of launch parameters especially for TDM where padding is unused
     struct has_skip_check_valid_launch_params
     {
-        template <typename T>
-        using has_skip_check_type = decltype(T::skipCheckValidLaunchParams);
-
-        static constexpr bool value = []() {
-            if constexpr(is_detected<has_skip_check_type, GemmPipeline>{})
-                return GemmPipeline::skipCheckValidLaunchParams;
-            else
-                return false;
-        }();
+        static constexpr bool value = pipeline_is_tdm_v<GemmPipeline>;
     };
 
-    /// True for the gfx125 TDM pipelines (CompTDM V1, and V2 through inheritance): they expose
-    /// skipCheckValidLaunchParams, consume tuples of A/B windows and need a TDM epilogue.
+    /// True for the gfx125 TDM pipelines (CompTDM V1, V2 and V3 through inheritance, the
+    /// producer/consumer pipeline and the run-ahead pipeline): they expose
+    /// skipCheckValidLaunchParams and consume tuples of A/B windows. UniversalGemmKernel also pairs
+    /// them with a non-TDM epilogue (e.g. CShuffleEpilogue for split-K), subject to the whole-tile
+    /// checks in IsSupportedArgument unless the pipeline declares kSupportsTdmSplitK (comp_tdm_v3).
     /// Kernels that host them take a dedicated TDM path.
     static constexpr bool kIsTdmPipeline = has_skip_check_valid_launch_params::value;
 
+    /// True for the TDM and named-barrier pipelines, which only run on gfx125
+    /// (pipeline_requires_gfx125_v, shared with the dispatcher's kernel selection).
+    /// IsSupportedArgument rejects them on any other device.
+    static constexpr bool kRequiresGfx125 = pipeline_requires_gfx125_v<GemmPipeline>;
+
+    template <typename T>
+    using has_gemm_kernel_only = decltype(T::kGemmKernelOnly);
+    /// True for a pipeline validated only in this kernel itself, persistent or not (comp_tdm_ra).
+    /// Every kernel that derives from or wraps UniversalGemmKernel static_asserts against it:
+    /// through kIsPlainGemmOnlyPipeline, which it implies, and directly in the batched, Stream-K
+    /// and MX kernels, which accept plain-GEMM-only pipelines.
+    static constexpr bool kIsGemmKernelOnlyPipeline = []() {
+        if constexpr(is_detected<has_gemm_kernel_only, GemmPipeline>{})
+            return static_cast<bool>(GemmPipeline::kGemmKernelOnly);
+        else
+            return false;
+    }();
+
+    template <typename T>
+    using has_plain_gemm_only = decltype(T::kPlainGemmOnly);
+    /// True for a pipeline tested only in the plain, batched, Stream-K and MX GEMM kernels
+    /// (comp_tdm_v3), and for every kIsGemmKernelOnlyPipeline. The multi-D, grouped, multi-ABD
+    /// and batched-contraction kernels static_assert against it.
+    static constexpr bool kIsPlainGemmOnlyPipeline = []() {
+        if constexpr(is_detected<has_plain_gemm_only, GemmPipeline>{})
+            return static_cast<bool>(GemmPipeline::kPlainGemmOnly) || kIsGemmKernelOnlyPipeline;
+        else
+            return kIsGemmKernelOnlyPipeline;
+    }();
+
+    template <typename T>
+    using has_split_k = decltype(T::kSupportsSplitK);
+    /// False for a pipeline that only runs k_batch == 1 (its kernel rejects k_batch != 1):
+    /// SplitKBatchOffset is then the whole K with no offset.
+    static constexpr bool kPipelineSupportsSplitK = []() {
+        if constexpr(is_detected<has_split_k, GemmPipeline>{})
+            return static_cast<bool>(GemmPipeline::kSupportsSplitK);
+        else
+            return true;
+    }();
+
+    template <typename T>
+    using has_exact_pad_mn = decltype(T::kExactPadMN);
+    /// True for a pipeline whose kPadM is false only when its tiles divide M: the E view then pads
+    /// M only as kPadM says.
+    static constexpr bool kPipelineExactPadMN = []() {
+        if constexpr(is_detected<has_exact_pad_mn, GemmPipeline>{})
+            return static_cast<bool>(GemmPipeline::kExactPadMN);
+        else
+            return false;
+    }();
+
+    template <typename T>
+    using has_tdm_split_k = decltype(T::kSupportsTdmSplitK);
+    /// True for a TDM pipeline tested with split-K, including splits that end inside a K tile
+    /// (comp_tdm_v3). With a split-K-capable epilogue (CShuffle) such a pipeline may run
+    /// k_batch > 1 and is exempt from IsSupportedArgument's whole-tile checks. The
+    /// producer/consumer pipeline may also run k_batch > 1 with that epilogue, but only with
+    /// whole-K-tile splits. The other TDM pipelines reject it whatever the epilogue, as does any
+    /// TDM pipeline with a TDM epilogue.
+    static constexpr bool kPipelineSupportsTdmSplitK = []() {
+        if constexpr(is_detected<has_tdm_split_k, GemmPipeline>{})
+            return static_cast<bool>(GemmPipeline::kSupportsTdmSplitK);
+        else
+            return false;
+    }();
+
+    /// @brief Host checks of the C tensor against the epilogue's vector stores: if the contiguous
+    ///        dimension of C is not a multiple of the tile, it needs padding, and it must be a
+    ///        multiple of the C vector size.
+    CK_TILE_HOST static bool IsCTensorSupported(const KernelArgs& kargs)
+    {
+        if constexpr(std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>)
+        {
+            if(kargs.N % TilePartitioner::NPerBlock != 0 && GemmPipeline::kPadN == false)
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR(
+                        "Can't support N that is not a multiple of NPerBlock without padding!");
+                }
+                return false;
+            }
+            if(kargs.N % EpiloguePipeline::GetVectorSizeC() != 0)
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("N is not a multiple of vector load size for C tensor!");
+                }
+                return false;
+            }
+        }
+        else
+        {
+            if(kargs.M % TilePartitioner::MPerBlock != 0 && GemmPipeline::kPadM == false)
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR(
+                        "Can't support M that is not a multiple of MPerBlock without padding!");
+                }
+                return false;
+            }
+            if(kargs.M % EpiloguePipeline::GetVectorSizeC() != 0)
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("M is not a multiple of vector load size for C tensor!");
+                }
+                return false;
+            }
+        }
+        return true;
+    }
+
     /// @brief Host checks shared by the kernels that host a TDM pipeline.
     /// @details The TDM epilogues overwrite E, so split-K is not possible, and the pipelines
-    ///          need at least one K tile. TDM addresses global memory in elements from a byte
-    ///          base address, so A, B and E must be aligned to their element size.
-    ///          IsSupportedArgument returns true for TDM pipelines, so each hosting kernel calls
-    ///          this (and IsTdmDeviceSupported) instead.
+    ///          need at least one K tile. A, B and E must be aligned to
+    ///          TDMElementTraits<T>::alignment: the TDM unit, so that every address the TDM
+    ///          generates (a byte base address plus whole units) is unit-aligned, and at least
+    ///          alignof(T), because buffer_view holds the pointer as a T* and offsets it in
+    ///          elements of T. That is the element size for 1-, 2-, 4- and 8-byte scalars; a
+    ///          12-byte 6-bit pack has a 1-byte unit, so its 4 comes from alignof(T) alone.
+    ///          IsSupportedArgument ends with this check for TDM pipelines, after its k_batch
+    ///          guards and, for a non-TDM epilogue and a pipeline without kSupportsTdmSplitK, its
+    ///          tile-multiple checks, and it rejects every TDM pipeline on a non-gfx125 device
+    ///          first. The MultiD GEMM, grouped GEMM, batched contraction, MX GEMM and Stream-K
+    ///          kernels also call this and IsTdmDeviceSupported themselves, with their own
+    ///          k_batch and operation name.
     CK_TILE_HOST static bool IsTdmArgumentSupported(const char* op_name,
                                                     index_t k_batch,
                                                     index_t K,
@@ -482,8 +656,8 @@ struct UniversalGemmKernel
                                                     const void* b_ptr,
                                                     const void* e_ptr)
     {
-        const auto aligned = [](const void* p, std::size_t elem_size) {
-            return reinterpret_cast<std::uintptr_t>(p) % elem_size == 0;
+        const auto aligned = [](const void* p, std::size_t alignment) {
+            return reinterpret_cast<std::uintptr_t>(p) % alignment == 0;
         };
         if(k_batch != 1)
         {
@@ -493,10 +667,13 @@ struct UniversalGemmKernel
         {
             return RejectTdm(op_name, "requires K > 0");
         }
-        if(!aligned(a_ptr, sizeof(ADataType)) || !aligned(b_ptr, sizeof(BDataType)) ||
-           !aligned(e_ptr, sizeof(EDataType)))
+        if(!aligned(a_ptr, TDMElementTraits<ADataType>::alignment) ||
+           !aligned(b_ptr, TDMElementTraits<BDataType>::alignment) ||
+           !aligned(e_ptr, TDMElementTraits<EDataType>::alignment))
         {
-            return RejectTdm(op_name, "requires element-aligned A/B/E pointers");
+            return RejectTdm(op_name,
+                             "requires A/B/E pointers aligned to TDMElementTraits<T>::alignment "
+                             "(the element size, or 4 bytes for the 12-byte 6-bit packs)");
         }
         return true;
     }
@@ -580,12 +757,93 @@ struct UniversalGemmKernel
 
     CK_TILE_HOST static bool IsSupportedArgument(const KernelArgs& kargs)
     {
-        if constexpr(has_skip_check_valid_launch_params::value)
+        // Named-barrier pipelines and TDM pipelines alike compile only an inert fallback on
+        // other targets, so a non-gfx125 device must be rejected here, not left to return zeros.
+        if constexpr(kRequiresGfx125)
         {
-            return true;
+            if(!is_gfx125_supported())
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("TDM / named-barrier pipelines require gfx1250!");
+                }
+                return false;
+            }
         }
-        if constexpr(EpiloguePipeline::GetVectorSizeC() % 2 != 0 &&
-                     is_any_of<EDataType, fp16_t, bf16_t>::value)
+        // A tensor whose single-dimension byte extent reaches the 2GB buffer-addressing limit
+        // overflows the 32-bit offset arithmetic. Only the 64-bit global load/store path can
+        // address it, so without that path the argument must be rejected rather than silently
+        // producing wrong results.
+        //
+        // This precedes the skipCheckValidLaunchParams short-circuit below. That opt-out exists
+        // for pipelines that bound-clip on real descriptor extents (TDM), so the divisibility
+        // and vector-alignment checks do not apply to them; it is not an opt-out from memory
+        // safety. Skipping this one lets a TDM pipeline form a wrapped global address and fault.
+        if constexpr(!UseLargeTensorGlobalLoad())
+        {
+            auto is_large_tensor = [](auto layout,
+                                      index_t rows,
+                                      index_t cols,
+                                      index_t stride,
+                                      auto data_type) {
+                constexpr size_t SizeLimit = (size_t{1} << 31);
+                constexpr size_t PackedSize =
+                    ck_tile::numeric_traits<remove_cvref_t<decltype(data_type)>>::PackedSize;
+
+                const size_t n =
+                    std::is_same_v<tensor_layout::gemm::RowMajor, remove_cvref_t<decltype(layout)>>
+                        ? static_cast<size_t>(rows)
+                        : static_cast<size_t>(cols);
+                return n * static_cast<size_t>(stride) * sizeof(data_type) / PackedSize >=
+                       SizeLimit;
+            };
+
+            // A and E are addressed through descriptors a derived kernel may restrict to a
+            // single M tile; D is not, so it is checked against the full kargs.M below.
+            const index_t m_extent = SelfType::ClampMToOffsettedTile(kargs.M, 0);
+
+            const bool any_large_tensor = [&]() {
+                bool r = false;
+
+                static_for<0, NumATensor, 1>{}([&](auto i) {
+                    using AiLayout   = remove_cvref_t<std::tuple_element_t<i.value, AsLayout>>;
+                    using AiDataType = remove_cvref_t<std::tuple_element_t<i.value, AsDataType>>;
+                    r                = r || is_large_tensor(
+                                 AiLayout{}, m_extent, kargs.K, kargs.stride_As[i], AiDataType{});
+                });
+                static_for<0, NumBTensor, 1>{}([&](auto i) {
+                    using BiLayout   = remove_cvref_t<std::tuple_element_t<i.value, BsLayout>>;
+                    using BiDataType = remove_cvref_t<std::tuple_element_t<i.value, BsDataType>>;
+                    r                = r || is_large_tensor(
+                                 BiLayout{}, kargs.K, kargs.N, kargs.stride_Bs[i], BiDataType{});
+                });
+                static_for<0, NumDTensor, 1>{}([&](auto i) {
+                    using DiLayout   = remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
+                    using DiDataType = remove_cvref_t<std::tuple_element_t<i.value, DsDataType>>;
+                    r                = r || is_large_tensor(
+                                 DiLayout{}, kargs.M, kargs.N, kargs.stride_Ds[i], DiDataType{});
+                });
+                r = r || is_large_tensor(CLayout{}, m_extent, kargs.N, kargs.stride_E, EDataType{});
+
+                return r;
+            }();
+
+            if(any_large_tensor)
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("Can't support large tensors without the LargeTensors trait!");
+                }
+                return false;
+            }
+        }
+
+        // These k_batch guards precede the skipCheckValidLaunchParams short-circuit below, for the
+        // same reason the large-tensor check above does. Behind it they would report "supported"
+        // for a k_batch beyond the K-step count, where SplitKBatchOffset yields a negative
+        // splitted_k and the A/B descriptor extents underflow, and for an epilogue with no split-K
+        // store path at all, where RunGemm can only trap.
+        if constexpr(!EpilogueSupportsSplitK)
         {
             if(kargs.k_batch != 1)
             {
@@ -602,9 +860,87 @@ struct UniversalGemmKernel
         {
             if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
             {
-                CK_TILE_ERROR("KBatch is too large, part of GPU wouldn't be utilized!");
+                CK_TILE_ERROR("KBatch exceeds the number of K steps: the split offsets would be "
+                              "degenerate!");
             }
             return false;
+        }
+
+        // A TDM pipeline clips its A/B loads to the real extents, which is why the
+        // skipCheckValidLaunchParams short-circuit below drops the divisibility checks. Paired
+        // with a non-TDM epilogue, C is stored through MakeCBlockWindows instead, and the TDM
+        // pipelines run with kPadM = kPadN = false. That view masks the non-contiguous dimension
+        // itself (it pads it for bf16 atomic_add and the 64-bit global path); otherwise a tile
+        // past the last row (row-major) or column (column-major) lies beyond the buffer range and
+        // the hardware drops it. A ragged tile along the contiguous dimension is covered by
+        // neither: its excess lanes address the start of the next row of C, inside the buffer, so
+        // a buffer store or atomic writes them, and a bf16 global atomic is not masked at all.
+        //
+        // Split-K is also held to whole K tiles per split. SplitKBatchOffset cuts K at WarpTile K
+        // granularity. The TDM loads clip each split to its own splitted_k, so a ragged split
+        // would be zero-filled rather than read the next split's data, but only whole-tile splits
+        // have been validated on hardware.
+        //
+        // A pipeline that declares kSupportsTdmSplitK (comp_tdm_v3) is exempt: unlike the other TDM
+        // pipelines, it is validated with a padded C and with splits that end inside a K tile, and
+        // IsCTensorSupported below still checks its C store.
+        if constexpr(kIsTdmPipeline && !is_tdm_epilogue_v<EpiloguePipeline> &&
+                     !kPipelineSupportsTdmSplitK)
+        {
+            constexpr bool kCRowMajor = std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>;
+            if(kCRowMajor ? kargs.N % TilePartitioner::NPerBlock != 0
+                          : kargs.M % TilePartitioner::MPerBlock != 0)
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("A TDM pipeline with a non-TDM epilogue needs the contiguous "
+                                  "dimension of C (N if row-major, M if column-major) to be a "
+                                  "multiple of its block tile!");
+                }
+                return false;
+            }
+            // K % (KPerBlock * k_batch) == 0, written without the int32 product, which can
+            // overflow for a large K and k_batch.
+            if(kargs.k_batch > 1 && (kargs.K % kargs.k_batch != 0 ||
+                                     (kargs.K / kargs.k_batch) % TilePartitioner::KPerBlock != 0))
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("A TDM pipeline needs K to be a multiple of k_batch * KPerBlock "
+                                  "for split-K!");
+                }
+                return false;
+            }
+        }
+
+        if constexpr(has_skip_check_valid_launch_params::value)
+        {
+            // Apply the same TDM checks as the kernels that host a TDM pipeline, including their
+            // split-K rejection: the TDM epilogue overwrites C, and only comp_tdm_v3 and the
+            // producer/consumer pipeline are tested with split-K. A pipeline that declares
+            // kSupportsTdmSplitK (comp_tdm_v3), or the producer/consumer pipeline, with a
+            // split-K-capable epilogue (CShuffle) adds each split into C atomically, its TDM loads
+            // clipped to the split's K range, so k_batch > 1 is not rejected here for it. The
+            // producer/consumer pipeline's whole-tile split checks above already ran.
+            constexpr bool kSplitKValidated =
+                kPipelineSupportsTdmSplitK || is_wavelet_pipeline<GemmPipeline>;
+            const index_t tdm_k_batch =
+                (is_tdm_epilogue_v<EpiloguePipeline> || !kSplitKValidated) ? kargs.k_batch : 1;
+            if(!IsTdmArgumentSupported(
+                   "GEMM", tdm_k_batch, kargs.K, kargs.as_ptr[0], kargs.bs_ptr[0], kargs.e_ptr))
+            {
+                return false;
+            }
+            // A TDM epilogue clips C in hardware. Any other epilogue (CShuffle, with comp_tdm_v3)
+            // writes C with vector stores, which need the usual C checks: an N (M) that is not a
+            // multiple of the tile needs kPadN (kPadM), and N (M) must be a multiple of the C
+            // vector size. Without them a partial vector writes past the row end into the next
+            // row.
+            if constexpr(!is_tdm_epilogue_v<EpiloguePipeline>)
+            {
+                return IsCTensorSupported(kargs);
+            }
+            return true;
         }
 
         const auto vectorSizeA = is_wave32() ? GemmPipeline::template GetVectorSizeA<true>()
@@ -770,45 +1106,9 @@ struct UniversalGemmKernel
             }
         });
 
-        if constexpr(std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>)
+        if(!IsCTensorSupported(kargs))
         {
-            if(kargs.N % TilePartitioner::NPerBlock != 0 && GemmPipeline::kPadN == false)
-            {
-                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                {
-                    CK_TILE_ERROR(
-                        "Can't support N that is not a multiple of NPerBlock without padding!");
-                }
-                return false;
-            }
-            if(kargs.N % EpiloguePipeline::GetVectorSizeC() != 0)
-            {
-                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                {
-                    CK_TILE_ERROR("N is not a multiple of vector load size for C tensor!");
-                }
-                return false;
-            }
-        }
-        else
-        {
-            if(kargs.M % TilePartitioner::MPerBlock != 0 && GemmPipeline::kPadM == false)
-            {
-                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                {
-                    CK_TILE_ERROR(
-                        "Can't support M that is not a multiple of MPerBlock without padding!");
-                }
-                return false;
-            }
-            if(kargs.M % EpiloguePipeline::GetVectorSizeC() != 0)
-            {
-                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                {
-                    CK_TILE_ERROR("M is not a multiple of vector load size for C tensor!");
-                }
-                return false;
-            }
+            return false;
         }
 
         // Verify async scheduler parameters to prevent division-by-zero and invalid memory access
@@ -827,69 +1127,6 @@ struct UniversalGemmKernel
                 if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                 {
                     CK_TILE_ERROR("num_chunks must be positive when chunk_signals is set!");
-                }
-                return false;
-            }
-        }
-
-        // A tensor whose single-dimension byte extent reaches the 2GB buffer-addressing limit
-        // overflows the 32-bit offset arithmetic. Only the 64-bit global load/store path can
-        // address it, so without that path the argument must be rejected rather than silently
-        // producing wrong results.
-        if constexpr(!UseLargeTensorGlobalLoad())
-        {
-            auto is_large_tensor = [](auto layout,
-                                      index_t rows,
-                                      index_t cols,
-                                      index_t stride,
-                                      auto data_type) {
-                constexpr size_t SizeLimit = (size_t{1} << 31);
-                constexpr size_t PackedSize =
-                    ck_tile::numeric_traits<remove_cvref_t<decltype(data_type)>>::PackedSize;
-
-                const size_t n =
-                    std::is_same_v<tensor_layout::gemm::RowMajor, remove_cvref_t<decltype(layout)>>
-                        ? static_cast<size_t>(rows)
-                        : static_cast<size_t>(cols);
-                return n * static_cast<size_t>(stride) * sizeof(data_type) / PackedSize >=
-                       SizeLimit;
-            };
-
-            // A and E are addressed through descriptors a derived kernel may restrict to a
-            // single M tile; D is not, so it is checked against the full kargs.M below.
-            const index_t m_extent = SelfType::ClampMToOffsettedTile(kargs.M, 0);
-
-            const bool any_large_tensor = [&]() {
-                bool r = false;
-
-                static_for<0, NumATensor, 1>{}([&](auto i) {
-                    using AiLayout   = remove_cvref_t<std::tuple_element_t<i.value, AsLayout>>;
-                    using AiDataType = remove_cvref_t<std::tuple_element_t<i.value, AsDataType>>;
-                    r                = r || is_large_tensor(
-                                 AiLayout{}, m_extent, kargs.K, kargs.stride_As[i], AiDataType{});
-                });
-                static_for<0, NumBTensor, 1>{}([&](auto i) {
-                    using BiLayout   = remove_cvref_t<std::tuple_element_t<i.value, BsLayout>>;
-                    using BiDataType = remove_cvref_t<std::tuple_element_t<i.value, BsDataType>>;
-                    r                = r || is_large_tensor(
-                                 BiLayout{}, kargs.K, kargs.N, kargs.stride_Bs[i], BiDataType{});
-                });
-                static_for<0, NumDTensor, 1>{}([&](auto i) {
-                    using DiLayout   = remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
-                    using DiDataType = remove_cvref_t<std::tuple_element_t<i.value, DsDataType>>;
-                    r                = r || is_large_tensor(
-                                 DiLayout{}, kargs.M, kargs.N, kargs.stride_Ds[i], DiDataType{});
-                });
-                r = r || is_large_tensor(CLayout{}, m_extent, kargs.N, kargs.stride_E, EDataType{});
-
-                return r;
-            }();
-
-            if(any_large_tensor)
-            {
-                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
-                {
-                    CK_TILE_ERROR("Can't support large tensors without the LargeTensors trait!");
                 }
                 return false;
             }
@@ -1326,7 +1563,9 @@ struct UniversalGemmKernel
             std::is_same_v<EDataType, bf16_t> && DstInMemOp == memory_operation_enum::atomic_add;
 
         // The 64-bit global path is likewise unmasked, so it needs the same guard.
-        constexpr bool pad_leading_dim = pad_not_contiguous_dim || kCGlobalLoad;
+        constexpr bool pad_leading_dim =
+            pad_not_contiguous_dim ||
+            (kCGlobalLoad && (!kPipelineExactPadMN || GemmPipeline::kPadM));
 
         // Step 2: Create padded view
         const auto& e_pad_view = [&]() {
@@ -1368,6 +1607,24 @@ struct UniversalGemmKernel
         return MakeCBlockWindows<DstInMemOp>(e_ptr, i_m, i_n, e_tensor_desc);
     }
 
+    /// Stands in for the barrier token when the pipeline uses no named barriers.
+    struct NoBarriers
+    {
+    };
+
+    /// @brief Collective, once per launch: each tile must leave the barriers at rest for the next.
+    CK_TILE_DEVICE static auto InitBarriers()
+    {
+        if constexpr(std::is_void_v<barrier_pipeline>)
+        {
+            return NoBarriers{};
+        }
+        else
+        {
+            return barrier_pipeline::template init<SelfType>();
+        }
+    }
+
     /**
      * @brief Runs single GEMM problem cooperatively by whole workgroup.
      *
@@ -1380,8 +1637,10 @@ struct UniversalGemmKernel
      * @param splitk_batch_offset splitk_batch_offset Utility structure used to calculate k batch.
      * @param block_idx_m The GEMM's output M dimension tile index processed by this workgroup.
      * @param block_idx_n The GEMM's output N dimension tile index processed by this workgroup.
+     * @param barriers The token from InitBarriers(); may be omitted without named barriers.
      *
      */
+    template <typename BarrierToken = NoBarriers>
     CK_TILE_DEVICE static void RunGemm(const std::array<const ADataType*, NumATensor>& as_ptr,
                                        const std::array<const BDataType*, NumBTensor>& bs_ptr,
                                        const std::array<const void*, NumDTensor>& ds_ptr,
@@ -1390,8 +1649,12 @@ struct UniversalGemmKernel
                                        const KernelArgs& kargs,
                                        const SplitKBatchOffset& splitk_batch_offset,
                                        const index_t block_idx_m,
-                                       const index_t block_idx_n)
+                                       const index_t block_idx_n,
+                                       const BarrierToken barriers = {})
     {
+        static_assert(std::is_same_v<BarrierToken, decltype(InitBarriers())>,
+                      "pass RunGemm the token from InitBarriers(); only pipelines without named "
+                      "barriers may omit it");
 
         // cluster launch GridDim is aligned to clusterDim, need to skip out-of-bound blocks
         if constexpr(ClusterLaunch)
@@ -1410,60 +1673,95 @@ struct UniversalGemmKernel
             amd_wave_read_first_lane(TilePartitioner::GetLoopNum(splitk_batch_offset.splitted_k));
 
         // Run GEMM cooperatively by whole workgroup.
-        const auto& c_block_tile = GemmPipeline{}.template operator()(
-            as_block_window, AElementWise{}, bs_block_window, BElementWise{}, num_loop, smem_ptr);
+        const auto& c_block_tile = RunGemmPipeline<GemmPipeline>(as_block_window,
+                                                                 AElementWise{},
+                                                                 bs_block_window,
+                                                                 BElementWise{},
+                                                                 num_loop,
+                                                                 smem_ptr,
+                                                                 barriers);
 
         const index_t k_batch = amd_wave_read_first_lane(kargs.k_batch);
         // Run Epilogue Pipeline
         if(k_batch == 1)
         {
-            auto c_block_window = MakeCBlockWindows<memory_operation_enum::set>(
-                e_ptr, kargs, block_idx_m, block_idx_n);
-            EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
-        }
-#if !defined(CK_TILE_FORCE_SINGLE_TAIL_HANDLER)
-        else
-        {
-            if constexpr(EpiloguePipeline::GetVectorSizeC() % 2 == 0 ||
-                         !is_any_of<EDataType, fp16_t, bf16_t>::value)
-            {
-                auto c_block_window = MakeCBlockWindows<memory_operation_enum::atomic_add>(
+            RunWaveletAwareEpilogue<GemmPipeline, EpiloguePipeline>([&]() {
+                auto c_block_window = MakeCBlockWindows<memory_operation_enum::set>(
                     e_ptr, kargs, block_idx_m, block_idx_n);
                 EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
+            });
+        }
+        else
+        {
+            // IsSupportedArgument rejects k_batch != 1 whenever EpilogueSupportsSplitK is false,
+            // ahead of the skipCheckValidLaunchParams short-circuit, so no pipeline can opt out of
+            // that rejection. This cannot be a static_assert -- it is a runtime `if` on k_batch, so
+            // both arms are compiled for every epilogue, including a TDM epilogue, which cannot
+            // accumulate (SupportsSplitK == false) yet is correct and fully supported at
+            // k_batch == 1.
+            if constexpr(EpilogueSupportsSplitK)
+            {
+                RunWaveletAwareEpilogue<GemmPipeline, EpiloguePipeline>([&]() {
+                    auto c_block_window = MakeCBlockWindows<memory_operation_enum::atomic_add>(
+                        e_ptr, kargs, block_idx_m, block_idx_n);
+                    EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
+                });
+            }
+            else
+            {
+                // This epilogue has no split-K store path, so reaching here means the caller
+                // bypassed IsSupportedArgument -- the kernel is directly instantiable and that
+                // check is advisory. Abort rather than return having written no C: a silent empty
+                // output is indistinguishable downstream from a correct run. Costs nothing, the
+                // k_batch == 1 wave never reaches this block and the ISA for that path is
+                // byte-identical with and without the trap. s_trap raises a queue abort the
+                // runtime reports as an exception; it is not a hang and needs no device reset.
+                __builtin_trap();
             }
         }
-#endif
     }
 
     CK_TILE_DEVICE static auto
     GetTileCoordinates(const KernelArgs& kargs) -> tuple<index_t, index_t>
     {
-        index_t iM, iN;
-
-        if constexpr(ClusterLaunch)
+        if constexpr(kPartitionerGrid2D)
         {
-            // Cluster launch: use 2D block indexing
-            const auto blockIdX = amd_wave_read_first_lane(blockIdx.x);
-            const auto blockIdY = amd_wave_read_first_lane(blockIdx.y);
-            const auto [tile_m, tile_n] =
-                TilePartitioner{kargs.M, kargs.N}.GetOutputTileIndex(blockIdX, blockIdY);
-            iM = tile_m;
-            iN = tile_n;
+            // The workgroup ids are wave-uniform already: amd_wave_read_first_lane would hide
+            // from LLVM that the tile origin is a multiple of the tile.
+            const auto [tile_m, tile_n] = TilePartitioner{kargs.M, kargs.N}.GetOutputTileIndex(
+                static_cast<index_t>(blockIdx.x), static_cast<index_t>(blockIdx.y));
+            return make_tuple(tile_m * TilePartitioner::MPerBlock,
+                              tile_n * TilePartitioner::NPerBlock);
         }
         else
         {
-            // Regular launch: use 1D block indexing
-            const auto blockId = amd_wave_read_first_lane(blockIdx.x);
-            const auto [tile_m, tile_n] =
-                TilePartitioner{kargs.M, kargs.N}.GetOutputTileIndex(blockId);
-            iM = tile_m;
-            iN = tile_n;
+            index_t iM, iN;
+
+            if constexpr(ClusterLaunch)
+            {
+                // Cluster launch: use 2D block indexing
+                const auto blockIdX = amd_wave_read_first_lane(blockIdx.x);
+                const auto blockIdY = amd_wave_read_first_lane(blockIdx.y);
+                const auto [tile_m, tile_n] =
+                    TilePartitioner{kargs.M, kargs.N}.GetOutputTileIndex(blockIdX, blockIdY);
+                iM = tile_m;
+                iN = tile_n;
+            }
+            else
+            {
+                // Regular launch: use 1D block indexing
+                const auto blockId = amd_wave_read_first_lane(blockIdx.x);
+                const auto [tile_m, tile_n] =
+                    TilePartitioner{kargs.M, kargs.N}.GetOutputTileIndex(blockId);
+                iM = tile_m;
+                iN = tile_n;
+            }
+
+            const index_t i_m = amd_wave_read_first_lane(iM * TilePartitioner::MPerBlock);
+            const index_t i_n = amd_wave_read_first_lane(iN * TilePartitioner::NPerBlock);
+
+            return make_tuple(i_m, i_n);
         }
-
-        const index_t i_m = amd_wave_read_first_lane(iM * TilePartitioner::MPerBlock);
-        const index_t i_n = amd_wave_read_first_lane(iN * TilePartitioner::NPerBlock);
-
-        return make_tuple(i_m, i_n);
     }
 
     // Helper functions for persistent kernel with cluster support
@@ -1553,15 +1851,43 @@ struct UniversalGemmKernel
         EDataType* e_ptr = static_cast<EDataType*>(kargs.e_ptr);
         if constexpr(has_tile_partitioner_output_offset)
         {
-            const index_t output_offset = TilePartitioner::GetOutputOffset(kargs, blockIdx.z);
-            e_ptr += output_offset;
+            // Wave-uniform, like every other blockIdx read in this file: e_ptr feeds
+            // make_wave_buffer_resource, whose 128-bit descriptor must live in SGPRs. Leaving it
+            // in VGPRs forces a readfirstlane -- or a waterfall -- at the descriptor build, in the
+            // most register-pressure-sensitive part of the kernel.
+            const auto k_id = amd_wave_read_first_lane(static_cast<index_t>(blockIdx.z));
+            e_ptr += TilePartitioner::GetOutputOffset(kargs, k_id);
         }
 
         // allocate LDS
         __shared__ char smem_ptr[GetSmemSize()];
 
-        SelfType::RunGemm(
-            as_ptr, bs_ptr, kargs.ds_ptr, e_ptr, smem_ptr, kargs, splitk_batch_offset, i_m, i_n);
+        // SelfType may hide RunGemm with 9 parameters, so only barrier pipelines add a token.
+        if constexpr(std::is_void_v<barrier_pipeline>)
+        {
+            SelfType::RunGemm(as_ptr,
+                              bs_ptr,
+                              kargs.ds_ptr,
+                              e_ptr,
+                              smem_ptr,
+                              kargs,
+                              splitk_batch_offset,
+                              i_m,
+                              i_n);
+        }
+        else
+        {
+            SelfType::RunGemm(as_ptr,
+                              bs_ptr,
+                              kargs.ds_ptr,
+                              e_ptr,
+                              smem_ptr,
+                              kargs,
+                              splitk_batch_offset,
+                              i_m,
+                              i_n,
+                              InitBarriers());
+        }
     }
 
     // Persistent kernel entry point
@@ -1575,9 +1901,11 @@ struct UniversalGemmKernel
         const auto num_tiles = GetNumTiles(kargs.M, kargs.N);
         const auto num_work  = amd_wave_read_first_lane(num_tiles * kargs.k_batch);
         auto block_id        = GetBlockId();
+        const auto barriers  = InitBarriers();
 
         while(block_id < num_work)
         {
+            // Orders the last tile's LDS reads before this tile's writes; epilogues retire them.
             s_waitcnt_barrier();
             const auto tile_idx = amd_wave_read_first_lane(block_id % num_tiles);
             const auto [iM, iN] = TilePartitioner{kargs.M, kargs.N}.GetOutputTileIndex(tile_idx);
@@ -1617,9 +1945,10 @@ struct UniversalGemmKernel
                 }
             }
 
-            // Get the SplitK offset for this block
-            const auto k_batch = amd_wave_read_first_lane(block_id / num_tiles);
-            const SplitKBatchOffset splitk_batch_offset(kargs, k_batch);
+            // Get the SplitK offset for this block. Named k_id, not k_batch: this is the split
+            // INDEX, while kargs.k_batch is the split COUNT, and GetOutputOffset below reads both.
+            const auto k_id = amd_wave_read_first_lane(block_id / num_tiles);
+            const SplitKBatchOffset splitk_batch_offset(kargs, k_id);
 
             std::array<const ADataType*, NumATensor> as_ptr;
             static_for<0, NumATensor, 1>{}([&](auto i) {
@@ -1637,22 +1966,37 @@ struct UniversalGemmKernel
             EDataType* e_ptr = static_cast<EDataType*>(kargs.e_ptr);
             if constexpr(has_tile_partitioner_output_offset)
             {
-                const index_t output_offset = TilePartitioner::GetOutputOffset(kargs, k_batch);
-                e_ptr += output_offset;
+                e_ptr += TilePartitioner::GetOutputOffset(kargs, k_id);
             }
 
             // allocate LDS
             __shared__ char smem_ptr[GetSmemSize()];
-            // Run the GEMM
-            SelfType::RunGemm(as_ptr,
-                              bs_ptr,
-                              kargs.ds_ptr,
-                              e_ptr,
-                              smem_ptr,
-                              kargs,
-                              splitk_batch_offset,
-                              i_m,
-                              i_n);
+            // Run the GEMM; SelfType may hide RunGemm with 9 parameters.
+            if constexpr(std::is_void_v<barrier_pipeline>)
+            {
+                SelfType::RunGemm(as_ptr,
+                                  bs_ptr,
+                                  kargs.ds_ptr,
+                                  e_ptr,
+                                  smem_ptr,
+                                  kargs,
+                                  splitk_batch_offset,
+                                  i_m,
+                                  i_n);
+            }
+            else
+            {
+                SelfType::RunGemm(as_ptr,
+                                  bs_ptr,
+                                  kargs.ds_ptr,
+                                  e_ptr,
+                                  smem_ptr,
+                                  kargs,
+                                  splitk_batch_offset,
+                                  i_m,
+                                  i_n,
+                                  barriers);
+            }
 
             // Advance to the next work item
             block_id += grid_size;

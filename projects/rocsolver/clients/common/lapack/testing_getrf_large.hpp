@@ -279,7 +279,7 @@ void getrf_large_getError(const rocblas_handle handle,
     for(rocblas_int b = 0; b < bc; ++b)
     { // Pass the matrices here
         err = norm_error('F', n, nrhs, ldb, hB[b], hBRes[b]);
-        *max_err = err > *max_err ? err : *max_err;
+        *max_err = rocblas_max_nan(err, *max_err);
     }
 }
 

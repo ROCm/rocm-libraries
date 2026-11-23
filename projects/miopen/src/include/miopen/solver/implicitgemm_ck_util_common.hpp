@@ -33,6 +33,7 @@
 
 #pragma once
 
+#include <miopen/conv_solution.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/batched_transpose_sol.hpp>

@@ -28,49 +28,52 @@
 #include <algorithm>
 #include <memory>
 #include <string>
-#include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
 
 namespace rocisa
 {
-    std::unordered_map<std::string, std::vector<std::shared_ptr<Module>>>
-        _findActFunc(std::shared_ptr<Module> module)
+    // Keyed groups kept in first-appearance order: the de-dup tail below emits the
+    // surviving functions in iteration order, so an unordered container would make
+    // the emitted activation-function order depend on the hash seed.
+    using ActFuncGroups = std::vector<std::pair<std::string, std::vector<std::shared_ptr<Module>>>>;
+
+    std::vector<std::shared_ptr<Module>>& _actFuncGroup(ActFuncGroups&      groups,
+                                                        const std::string& name)
     {
-        std::unordered_map<std::string, std::vector<std::shared_ptr<Module>>> modFunc;
+        for(auto& [key, mods] : groups)
+        {
+            if(key == name)
+                return mods;
+        }
+        groups.emplace_back(name, std::vector<std::shared_ptr<Module>>{});
+        return groups.back().second;
+    }
+
+    ActFuncGroups _findActFunc(std::shared_ptr<Module> module)
+    {
+        ActFuncGroups modFunc;
         for(auto item : module->items())
         {
             if(auto mod = std::dynamic_pointer_cast<Module>(item))
             {
                 if(mod->name.find("ActFunc_VW") != std::string::npos)
                 {
-                    if(modFunc.find(mod->name) != modFunc.end())
-                    {
-                        modFunc[mod->name].push_back(mod);
-                    }
-                    else
-                    {
-                        modFunc[mod->name] = {mod};
-                    }
+                    _actFuncGroup(modFunc, mod->name).push_back(mod);
                 }
                 else
                 {
                     auto tmp = _findActFunc(mod);
                     for(auto& [key, t] : tmp)
                     {
-                        if(modFunc.find(key) != modFunc.end())
-                        {
-                            modFunc[key].insert(modFunc[key].end(), t.begin(), t.end());
-                        }
-                        else
-                        {
-                            modFunc[key] = t;
-                        }
+                        auto& mods = _actFuncGroup(modFunc, key);
+                        mods.insert(mods.end(), t.begin(), t.end());
                     }
                 }
             }
         }
-        return std::move(modFunc);
+        return modFunc;
     }
 
     void _replaceActBranchLabel(std::shared_ptr<Module> module, std::vector<std::string> labels)

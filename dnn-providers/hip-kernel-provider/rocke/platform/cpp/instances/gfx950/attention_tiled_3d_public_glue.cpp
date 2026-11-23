@@ -9,7 +9,7 @@
  * SCOPE (this TU only):
  *   - The shared spec PODs' _default() / _validate() (__post_init__) and every
  *     @property accessor (num_queries_per_kv, block_m=16, block_q, tile_size,
- *     dtype_ir, binary_search_iters, kernel_name via kernel_name_join). These
+ *     dtype_ir, kernel_name via kernel_name_join). These
  *     spec struct/default definitions are GUARDED against the gfx942 3D header's
  *     duplicate definitions (the two arch ports share the identical frozen
  *     dataclass shape -- see the SHARED SPEC POD note in
@@ -72,6 +72,7 @@
  * _default() definitions below -- the gfx942 TU owns them. The structs are
  * byte-identical so the single shared definition is correct for both. */
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
 #include "rocke/instance_gfx942_attention_tiled_3d.h"
 #include "rocke/instance_gfx950_attention_tiled_3d.h"
 #include "rocke/instance_gfx950_attention_tiled_3d_internal.h"
@@ -212,6 +213,7 @@ rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_de
     s.kv_cache_policy = "all";
     s.use_kv_lds_swizzle = false;
     s.use_wave_page_id_load = false;
+    s.emit_lse = false;
     return s;
 }
 
@@ -221,6 +223,7 @@ rocke_unified_attention_reduce_tiled_spec_t rocke_unified_attention_reduce_tiled
     memset(&s, 0, sizeof(s));
     s.has_waves_per_eu = false;
     s.waves_per_eu = 0;
+    s.emit_lse = false;
     return s;
 }
 
@@ -265,6 +268,20 @@ bool rocke_gfx950_unified_attention_3d_tiled_spec_validate(
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_kv_lds_swizzle needs fp16/bf16 KV");
         return false;
+    }
+    /* The swizzle XORs a row's 16-byte chunk index with row % chunks, which
+     * stays inside the row only for a power-of-two chunk count. */
+    {
+        const int chunks = s->head_size / 8;
+        if(s->use_kv_lds_swizzle && (chunks & (chunks - 1)) != 0)
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "use_kv_lds_swizzle needs head_size / 8 a power of two "
+                            "(got head_size=%d)",
+                            s->head_size);
+            return false;
+        }
     }
     if(s->use_wave_page_id_load && s->kv_storage_dtype != NULL)
     {
@@ -412,7 +429,12 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
 
     snprintf(d_part, sizeof(d_part), "d%d", s->head_size);
     snprintf(b_part, sizeof(b_part), "b%d", s->block_size);
-    snprintf(h_part, sizeof(h_part), "h%dkv%d", s->num_query_heads, s->num_kv_heads);
+    /* Head counts are kernargs; only the GQA ratio is baked. */
+    if(s->num_kv_heads <= 0)
+    {
+        return -1;
+    }
+    snprintf(h_part, sizeof(h_part), "g%d", s->num_query_heads / s->num_kv_heads);
     snprintf(seg_part, sizeof(seg_part), "seg%d", s->num_segments);
 
     parts[np++] = "rocke_uattn3d_tiled";
@@ -442,9 +464,10 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     {
         parts[np++] = "sinks";
     }
+    /* The window size is a kernarg; only whether the body masks one is baked. */
     if(s->sliding_window > 0)
     {
-        snprintf(sw_part, sizeof(sw_part), "sw%d", s->sliding_window);
+        snprintf(sw_part, sizeof(sw_part), "sw");
         parts[np++] = sw_part;
     }
     if(s->has_softcap)
@@ -476,6 +499,10 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     {
         parts[np++] = "wpid";
     }
+    if(s->emit_lse)
+    {
+        parts[np++] = "lse";
+    }
 
     st = rocke_kernel_name_join("", parts, np, NULL, NULL, 0, buf, cap, &out_len);
     if(st != ROCKE_OK)
@@ -502,10 +529,9 @@ const rocke_type_t* rocke_gfx950_unified_attention_reduce_tiled_spec_dtype_ir(
 int rocke_gfx950_unified_attention_reduce_tiled_spec_kernel_name(
     const rocke_unified_attention_reduce_tiled_spec_t* s, char* buf, size_t cap)
 {
-    /* kernel_name_join("rocke_uattn_reduce_tiled", d<HD>, h<NUM_QH>,
-     *   seg<NUM_SEG>, dtype) */
+    /* kernel_name_join("rocke_uattn_reduce_tiled", d<HD>, seg<NUM_SEG>, dtype
+     *   [, "lse"]); the head count is a kernarg. */
     char d_part[32];
-    char h_part[32];
     char seg_part[32];
     const char* parts[8];
     size_t np = 0;
@@ -518,14 +544,16 @@ int rocke_gfx950_unified_attention_reduce_tiled_spec_kernel_name(
     }
 
     snprintf(d_part, sizeof(d_part), "d%d", s->head_size);
-    snprintf(h_part, sizeof(h_part), "h%d", s->num_query_heads);
     snprintf(seg_part, sizeof(seg_part), "seg%d", s->num_segments);
 
     parts[np++] = "rocke_uattn_reduce_tiled";
     parts[np++] = d_part;
-    parts[np++] = h_part;
     parts[np++] = seg_part;
     parts[np++] = (s->dtype != NULL) ? s->dtype : "";
+    if(s->emit_lse)
+    {
+        parts[np++] = "lse";
+    }
 
     st = rocke_kernel_name_join("", parts, np, NULL, NULL, 0, buf, cap, &out_len);
     if(st != ROCKE_OK)
@@ -584,11 +612,11 @@ bool rocke_gfx950_attention_tiled_3d_supports(int head_size,
         ATTN3D950_REASON(reason_buf);
         return false;
     }
-    if(head_size != 64 && head_size != 128 && head_size != 256)
+    if(head_size != 64 && head_size != 128 && head_size != 192 && head_size != 256)
     {
         snprintf(reason_buf,
                  sizeof(reason_buf),
-                 "tiled 3D kernel only supports head_size in {64,128,256} (got %d)",
+                 "tiled 3D kernel only supports head_size in {64,128,192,256} (got %d)",
                  head_size);
         ATTN3D950_REASON(reason_buf);
         return false;
@@ -642,11 +670,8 @@ bool rocke_gfx950_attention_tiled_3d_supports(int head_size,
         ATTN3D950_REASON(reason_buf);
         return false;
     }
-    if(16 % num_queries_per_kv != 0)
-    {
-        ATTN3D950_REASON("tiled 3D kernel needs num_queries_per_kv to divide BLOCK_M=16");
-        return false;
-    }
+    /* A num_queries_per_kv that does not divide BLOCK_M=16 is supported: see
+     * supports_tiled_3d in the Python twin. */
     ATTN3D950_REASON("supported");
     return true;
 #undef ATTN3D950_REASON
@@ -707,8 +732,6 @@ bool rocke_gfx950_attn_tiled_3d_config_from_spec(
     out->BLOCK_M = rocke_gfx950_unified_attention_3d_tiled_spec_block_m(spec);
     out->BLOCK_Q = rocke_gfx950_unified_attention_3d_tiled_spec_block_q(spec);
     out->NQK = rocke_gfx950_unified_attention_3d_tiled_spec_num_queries_per_kv(spec);
-    out->NUM_KV = spec->num_kv_heads;
-    out->NUM_QH = spec->num_query_heads;
     out->NUM_SEG = spec->num_segments;
     out->SLIDING_WINDOW = spec->sliding_window;
     out->USE_SOFTCAP = spec->has_softcap;
@@ -742,8 +765,6 @@ bool rocke_gfx950_attn_tiled_3d_config_from_spec(
     out->PV_N_TILES = out->HD / ROCKE_ATTN3D950_MFMA_N;
 
     out->THREADS = ROCKE_ATTN3D950_SEGMENT_THREADS;
-    out->binary_search_iters
-        = rocke_gfx950_unified_attention_3d_tiled_spec_binary_search_iters(spec);
 
     if(out->PV_N_TILES < 0 || out->PV_N_TILES > 16)
     {
@@ -770,8 +791,6 @@ bool rocke_gfx950_attn_tiled_3d_config_from_spec(
     }
     out->kv_calls_per_tile = (out->T * out->HD) / out->KV_HALVES_PER_CALL;
     out->bytes_per_call = out->KV_HALVES_PER_CALL * 2;
-    out->kv_stride_blk_b = out->BS * out->NUM_KV * out->HD * out->KV_BYTES;
-    out->kv_stride_tok_b = out->NUM_KV * out->HD * out->KV_BYTES;
     out->kv_stride_h_b = out->HD * out->KV_BYTES;
     out->bytes_per_buf = out->T * out->HD * 2;
     out->N_BLOCKS_PER_TILE = out->BS > 0 ? out->T / out->BS : 0;
@@ -796,6 +815,15 @@ bool rocke_gfx950_attn_tiled_3d_config_from_spec(
             return false;
         }
         out->calls_per_block = out->BS / out->tokens_per_call;
+        /* The prologue caches each call's in-page token offset in call_tok_b. */
+        if(out->calls_per_block > 64)
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "%d calls per page exceed the 64-entry offset table",
+                            out->calls_per_block);
+            return false;
+        }
     }
 
     out->fp8_elems_per_chunk = 8;
@@ -856,8 +884,6 @@ bool rocke_gfx950_attn_tiled_3d_reduce_config_from_spec(
 
     out->HD = spec->head_size;
     out->NUM_SEG = spec->num_segments;
-    out->NUM_QH = spec->num_query_heads;
-    out->NUM_KV = spec->num_kv_heads;
     out->dtype = rocke_gfx950_unified_attention_reduce_tiled_spec_dtype_ir(spec);
     out->THREADS = 64;
 
@@ -1013,6 +1039,22 @@ static rocke_kernel_def_t* build_segment_gfx950(rocke_ir_builder_t* b,
         if(strided_kv && spec->use_wave_page_id_load)
         {
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_wave_page_id_load needs paged fp16/bf16 KV");
+            return NULL;
+        }
+        /* An async K/V copy moves KV_HALVES_PER_CALL halves. When that is not a
+         * whole number of rows (head_size 192), each lane derives its own row,
+         * which holds only while a tile is one page and its LDS rows are not
+         * permuted. */
+        if(!strided_kv && spec->kv_storage_dtype == NULL && spec->head_size > 0
+           && ROCKE_ATTN3D950_KV_HALVES_PER_CALL % spec->head_size != 0
+           && ((spec->has_tile_size_override && spec->tile_size_override != spec->block_size)
+               || spec->use_kv_lds_swizzle))
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "head_size=%d K/V copies span partial rows: needs page-sized tiles "
+                            "and no use_kv_lds_swizzle",
+                            spec->head_size);
             return NULL;
         }
 
@@ -1209,6 +1251,10 @@ rocke_status_t rocke_build_unified_attention_3d_tiled_gfx950_lower_to_llvm(
         return ROCKE_ERR_VALUE;
     }
 
+    /* The name carries the GQA ratio: refuse a head pair it cannot be formed
+     * for with the validator's reason, not the encoder's. */
+    if(!rocke_attention_check_head_counts(spec->num_query_heads, spec->num_kv_heads, err, err_cap))
+        return ROCKE_ERR_VALUE;
     if(rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(spec, name, sizeof(name)) < 0)
     {
         rocke_attn3d950_set_err_buf(err, err_cap, "lower_to_llvm: kernel_name encode failed");

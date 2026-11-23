@@ -140,6 +140,41 @@ struct GpuSdpaFwdSignatureKey
                                hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                                hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                                hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        // fp8 E4M3 inputs (OCP and the gfx942 FNUZ encoding) with BF16 output, as on the CPU.
+        addPlanBuilderAllMasks<hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
+        addPlanBuilderAllMasks<hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
+        // fp8 E5M2 inputs (OCP and FNUZ), BF16 or same-format output.
+        addPlanBuilderAllMasks<hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
+        addPlanBuilderAllMasks<hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2>(map);
+        addPlanBuilderAllMasks<hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2_FNUZ,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2_FNUZ,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2_FNUZ,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
+        addPlanBuilderAllMasks<hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2_FNUZ,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2_FNUZ,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2_FNUZ,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2_FNUZ>(map);
+        // fp8 output in the input's format (cuDNN sdpa_fp8: O = O_f * scale_o, SEM-024).
+        addPlanBuilderAllMasks<hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3>(map);
+        addPlanBuilderAllMasks<hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3_FNUZ>(map);
 
         return map;
     }

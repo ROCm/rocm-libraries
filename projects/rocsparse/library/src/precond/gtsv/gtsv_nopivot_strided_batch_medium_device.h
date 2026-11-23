@@ -188,12 +188,11 @@ namespace rocsparse
 
             B_spike[row] = x_shared[tidx];
         }
-
-        // The shared PCR tiles are still live above; synchronise before a caller
-        // looping over the batch overwrites them.
-        __syncthreads();
     }
 
+    // The host launches over chunks of the batch that fit in grid.y, with the pointers
+    // already offset to the first system of the chunk and n the system count of the
+    // chunk, so the workspace offsets below stay in rocsparse_int.
     template <uint32_t BLOCKSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_nopivot_strided_batch_pcr_tiled_forward_kernel(rocsparse_int m,
@@ -214,25 +213,22 @@ namespace rocsparse
                                                              T* __restrict__ du_spike,
                                                              T* __restrict__ B_spike)
     {
-        // n is the batch count. The bound is block uniform, so the barriers inside the
-        // device function stay convergent.
-        for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
-        {
-            rocsparse::gtsv_nopivot_strided_batch_pcr_tiled_forward_device<BLOCKSIZE>(
-                m,
-                load_pointer(dl, bidy, stride),
-                load_pointer(d, bidy, stride),
-                load_pointer(du, bidy, stride),
-                load_pointer(B, bidy, ldb),
-                load_pointer(dl_modified, bidy, m),
-                load_pointer(d_modified, bidy, m),
-                load_pointer(du_modified, bidy, m),
-                load_pointer(B_modified, bidy, m),
-                load_pointer(dl_spike, bidy, num_spikes),
-                load_pointer(d_spike, bidy, num_spikes),
-                load_pointer(du_spike, bidy, num_spikes),
-                load_pointer(B_spike, bidy, num_spikes));
-        }
+        const rocsparse_int bidy = hipBlockIdx_y;
+
+        rocsparse::gtsv_nopivot_strided_batch_pcr_tiled_forward_device<BLOCKSIZE>(
+            m,
+            load_pointer(dl, bidy, stride),
+            load_pointer(d, bidy, stride),
+            load_pointer(du, bidy, stride),
+            load_pointer(B, bidy, ldb),
+            load_pointer(dl_modified, bidy, m),
+            load_pointer(d_modified, bidy, m),
+            load_pointer(du_modified, bidy, m),
+            load_pointer(B_modified, bidy, m),
+            load_pointer(dl_spike, bidy, num_spikes),
+            load_pointer(d_spike, bidy, num_spikes),
+            load_pointer(du_spike, bidy, num_spikes),
+            load_pointer(B_spike, bidy, num_spikes));
     }
 
     template <uint32_t BLOCKSIZE, typename T>
@@ -340,18 +336,28 @@ namespace rocsparse
         const int row_right = (bidx == N - 1) ? (2 * N - 1) : (2 * bidx + 1);
 
         const T d_mod = B_modified[gidx];
+        T       x_final;
 
-        // These are the solved x_interface values that affect this tile
-        const T x_interface_left  = B_spike[row_left];
-        const T x_interface_right = B_spike[row_right];
+        // A diagonal row has no coupling to either interface, so the forward
+        // phase already solved it. The reduced spike system then has zero
+        // diagonal entries and its no-pivot solve can contain NaNs.
+        if(a_mod == static_cast<T>(0) && c_mod == static_cast<T>(0))
+        {
+            x_final = d_mod / b_mod;
+        }
+        else
+        {
+            const T x_interface_left  = B_spike[row_left];
+            const T x_interface_right = B_spike[row_right];
 
-        const T x_final
-            = (d_mod - (a_mod * x_interface_left) - (c_mod * x_interface_right)) / b_mod;
+            x_final = (d_mod - (a_mod * x_interface_left) - (c_mod * x_interface_right)) / b_mod;
+        }
 
         // Store result to global memory
         B[gidx] = x_final;
     }
 
+    // Launched over the same chunks as the forward kernel.
     template <uint32_t BLOCKSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_nopivot_strided_batch_pcr_tiled_backward_kernel(rocsparse_int m,
@@ -365,17 +371,15 @@ namespace rocsparse
                                                               const T* __restrict__ B_spike,
                                                               T* __restrict__ B)
     {
-        // n is the batch count.
-        for(int64_t bidy = hipBlockIdx_y; bidy < n; bidy += hipGridDim_y)
-        {
-            rocsparse::gtsv_nopivot_strided_batch_pcr_tiled_backward_device<BLOCKSIZE>(
-                m,
-                load_pointer(dl_modified, bidy, m),
-                load_pointer(d_modified, bidy, m),
-                load_pointer(du_modified, bidy, m),
-                load_pointer(B_modified, bidy, m),
-                load_pointer(B_spike, bidy, num_spikes),
-                load_pointer(B, bidy, ldb));
-        }
+        const rocsparse_int bidy = hipBlockIdx_y;
+
+        rocsparse::gtsv_nopivot_strided_batch_pcr_tiled_backward_device<BLOCKSIZE>(
+            m,
+            load_pointer(dl_modified, bidy, m),
+            load_pointer(d_modified, bidy, m),
+            load_pointer(du_modified, bidy, m),
+            load_pointer(B_modified, bidy, m),
+            load_pointer(B_spike, bidy, num_spikes),
+            load_pointer(B, bidy, ldb));
     }
 }

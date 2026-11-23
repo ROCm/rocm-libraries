@@ -41,7 +41,8 @@
 #include <thrust/random/detail/linear_feedback_shift_engine_wordmask.h>
 #include <thrust/random/detail/random_core_access.h>
 
-#include <cstddef> // for size_t
+#include _THRUST_STD_INCLUDE(cstddef) // for size_t
+
 #include <iostream>
 
 THRUST_NAMESPACE_BEGIN

@@ -1,0 +1,12 @@
+# Minimums are the versions uhd_gen's suites were verified with (Python 3.12, the oldest
+# numpy 2.5 supports); raise one only with the suites passing on the new version. pyproject.toml
+# reads its dependencies from this file, and the CMake probe imports these modules
+# (HIPDNN_UHD_GEN_PYTHON_MODULES in projects/hipdnn/CMakeLists.txt).
+lightgbm>=4.7.0
+flatbuffers>=25.12.19
+numpy>=2.5.2
+pandas>=3.0.5
+# The Parquet engine pandas lacks; --input reads the published .parquet dataset.
+pyarrow>=25.0.1
+# GroupKFold: training cross-validates by problem, so no shape is on both sides of a fold.
+scikit-learn>=1.9.0

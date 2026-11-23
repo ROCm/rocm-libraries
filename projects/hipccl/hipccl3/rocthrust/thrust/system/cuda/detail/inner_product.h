@@ -36,7 +36,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if _CCCL_HAS_CUDA_COMPILER()
+#if _CCCL_CUDA_COMPILATION()
 #  include <thrust/distance.h>
 #  include <thrust/iterator/transform_iterator.h>
 #  include <thrust/iterator/zip_iterator.h>
@@ -57,7 +57,7 @@ T _CCCL_HOST_DEVICE inner_product(
   ReduceOp reduce_op,
   ProductOp product_op)
 {
-  const auto n     = thrust::distance(first1, last1);
+  const auto n     = _THRUST_STD::distance(first1, last1);
   const auto first = make_transform_iterator(make_zip_iterator(first1, first2), make_zip_function(product_op));
   return cuda_cub::reduce_n(policy, first, n, init, reduce_op);
 }

@@ -10,12 +10,12 @@ from geko.utils import ensure_tensile_importable
 
 
 def main() -> None:
-    """Generate Tensile tuning configs from a hipBLASLt GEMM log (legacy script entry).
+    """Generate TensileLite tuning configs from a hipBLASLt GEMM log (legacy script entry).
 
     Parses CLI flags then calls run_configure (summarize + optim.configure).
     """
     parser = argparse.ArgumentParser(
-        description="Generate Tensile configuration from hipBLASLt logs",
+        description="Generate TensileLite configuration from hipBLASLt logs",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(

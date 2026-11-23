@@ -8,8 +8,13 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <iterator>
+#include <map>
 #include <optional>
+#include <stdexcept>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -21,6 +26,7 @@
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 
 #include "BundleFixtureFiles.hpp"
+#include "SdpaFwdGraphTestUtils.hpp"
 #include "harness/bundle/BundleDiscovery.hpp"
 #include "harness/bundle/BundleRegistration.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
@@ -251,6 +257,46 @@ protected:
         }
 
         std::ofstream(dir / "sweep.json") << sweepJson.dump(2);
+    }
+
+    static void createSweepWithCases(const std::filesystem::path& dir,
+                                     const std::vector<std::string>& caseIds,
+                                     bool withSupportClaims)
+    {
+        std::vector<SweepCaseSpec> cases;
+        cases.reserve(caseIds.size());
+        for(const auto& id : caseIds)
+        {
+            cases.push_back(
+                {id, "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}});
+        }
+        createTemplateSweep(dir, cases);
+        if(withSupportClaims)
+        {
+            std::ofstream(dir / "support.json") << "{}";
+        }
+    }
+
+    // Sweeps and direct bundles over every tier, with and without support claims, and an
+    // empty leaf folder.
+    static void createMixedTierTree(const std::filesystem::path& root)
+    {
+        createSweepWithCases(root / "quick" / "Matmul" / "A", {"c1", "c2"}, true);
+        createSweepWithCases(root / "quick" / "SdpaFwd" / "bhsd_fp16_hd64", {"s1"}, false);
+        createSweepWithCases(
+            root / "quick" / "SdpaFwd" / "bhsd_fp16_hd128_causal_gqa4_Small", {"g1", "g2"}, true);
+        createSweepWithCases(
+            root / "standard" / "SdpaBackward" / "P", {"prbu01_a", "prbu02_b", "other"}, true);
+        createSweepWithCases(root / "standard" / "RMSNorm" / "R", {"r1", "r2"}, true);
+        createSweepWithCases(
+            root / "comprehensive" / "SdpaFwdPlan" / "Q", {"q1", "q2", "q3"}, true);
+        createSweepWithCases(root / "full" / "Matmul" / "F", {"f1"}, false);
+        createMinimalBundle(root / "full" / "Matmul" / "F" / "golden" / "f1", "extra");
+
+        createMinimalBundle(root / "quick" / "Matmul" / "direct", "Small");
+        std::ofstream(root / "quick" / "Matmul" / "direct" / "Small.support.json") << "{}";
+        createMinimalBundle(root / "full" / "Conv" / "direct", "Big");
+        std::filesystem::create_directories(root / "quick" / "Empty" / "leaf");
     }
 
     static const DiscoveredBundle* findByTest(const std::vector<DiscoveredBundle>& bundles,
@@ -485,6 +531,289 @@ TEST_F(TestBundleDiscoveryFixture, LeafWithOnlyMetaJsonWarnsAndSkips)
     EXPECT_TRUE(result.empty());
 }
 
+TEST_F(TestBundleDiscoveryFixture, FindEmptyLeafFoldersReportsOnlyLeavesWithoutAGraph)
+{
+    const auto emptyLeaf = _tempDir / "conv" / "case_12312";
+    std::filesystem::create_directories(emptyLeaf);
+    const auto metaOnlyLeaf = _tempDir / "conv" / "meta_only";
+    std::filesystem::create_directories(metaOnlyLeaf);
+    std::ofstream(metaOnlyLeaf / "meta.json") << "{}";
+    createMinimalBundle(_tempDir / "conv" / "good", "good");
+
+    const auto sweepWithGolden = _tempDir / "quick" / "Op" / "WithGolden";
+    createTemplateSweep(sweepWithGolden,
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
+    const auto sweepWithoutGolden = _tempDir / "quick" / "Op" / "WithoutGolden";
+    createTemplateSweep(sweepWithoutGolden,
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}, false}});
+    ASSERT_TRUE(std::filesystem::is_directory(sweepWithGolden / "golden" / "case0"));
+
+    const auto emptyLeaves = detail::findEmptyLeafFolders(_tempDir, findSweepDirectories(_tempDir));
+
+    const std::vector<std::filesystem::path> expected{emptyLeaf, metaOnlyLeaf};
+    EXPECT_EQ(emptyLeaves, expected);
+}
+
+TEST_F(TestBundleDiscoveryFixture, SweepRootAtTheDataRootIsFound)
+{
+    createTemplateSweep(_tempDir,
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
+
+    const auto sweepDirs = findSweepDirectories(_tempDir);
+    EXPECT_EQ(sweepDirs, std::vector<std::filesystem::path>{_tempDir});
+    EXPECT_TRUE(detail::findEmptyLeafFolders(_tempDir, sweepDirs).empty());
+    const auto result = discoverBundles(_tempDir);
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_EQ(result.front().jsonPath, _tempDir / "sweep.json");
+    EXPECT_EQ(result.front().suiteName, "_");
+}
+
+TEST_F(TestBundleDiscoveryFixture, DataRootWithATrailingSeparatorIsNotALeaf)
+{
+    createMinimalBundle(_tempDir / "conv" / "good", "good");
+    const auto root = _tempDir / "";
+
+    EXPECT_TRUE(detail::findEmptyLeafFolders(root, findSweepDirectories(root)).empty());
+}
+
+TEST_F(TestBundleDiscoveryFixture, SweepRootAtADataRootWithATrailingSeparatorIsFound)
+{
+    createTemplateSweep(_tempDir,
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
+    const auto root = _tempDir / "";
+
+    const auto sweepDirs = findSweepDirectories(root);
+    EXPECT_EQ(sweepDirs, std::vector<std::filesystem::path>{root});
+    EXPECT_TRUE(detail::findEmptyLeafFolders(root, sweepDirs).empty());
+}
+
+// The listing decides sweep roots from the walked entries. It must agree with
+// isSweepBundleRoot() on every directory, the data root included.
+TEST_F(TestBundleDiscoveryFixture, ListingSweepRootCheckAgreesWithIsSweepBundleRoot)
+{
+    createMixedTierTree(_tempDir);
+    const auto templateOnly = _tempDir / "quick" / "Odd" / "TemplateOnly";
+    std::filesystem::create_directories(templateOnly);
+    std::ofstream(templateOnly / "graph.template.json") << "{}";
+    const auto manifestOnly = _tempDir / "quick" / "Odd" / "ManifestOnly";
+    std::filesystem::create_directories(manifestOnly);
+    std::ofstream(manifestOnly / "sweep.json") << "{}";
+    const auto directoryManifest = _tempDir / "quick" / "Odd" / "DirectoryManifest";
+    std::filesystem::create_directories(directoryManifest / "sweep.json");
+    std::ofstream(directoryManifest / "graph.template.json") << "{}";
+
+    for(const auto& root : {_tempDir, _tempDir / ""})
+    {
+        const auto listing = detail::listBundleTree(root);
+        size_t sweepRoots = 0;
+        for(const auto& directory : listing.directories)
+        {
+            EXPECT_EQ(listing.isSweepRoot(directory), isSweepBundleRoot(directory)) << directory;
+            sweepRoots += listing.isSweepRoot(directory) ? 1 : 0;
+        }
+        EXPECT_EQ(sweepRoots, 8u);
+    }
+
+    createTemplateSweep(_tempDir,
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
+    for(const auto& root : {_tempDir, _tempDir / ""})
+    {
+        const auto listing = detail::listBundleTree(root);
+        EXPECT_TRUE(listing.isSweepRoot(root));
+        EXPECT_TRUE(isSweepBundleRoot(root));
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, EmptyLeafFoldersBesideAndInsideASweepAreReported)
+{
+    const auto sweepDir = _tempDir / "quick" / "Op" / "Sweep";
+    createTemplateSweep(sweepDir,
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
+    const auto beside = _tempDir / "quick" / "Op" / "Empty";
+    std::filesystem::create_directories(beside);
+    const auto inside = sweepDir / "notes";
+    std::filesystem::create_directories(inside);
+
+    const auto sweepDirs = findSweepDirectories(_tempDir);
+    EXPECT_EQ(sweepDirs, std::vector<std::filesystem::path>{sweepDir});
+    const std::vector<std::filesystem::path> expected{beside, inside};
+    EXPECT_EQ(detail::findEmptyLeafFolders(_tempDir, sweepDirs), expected);
+}
+
+// A directory named sweep.json marks a sweep root like a file does.
+TEST_F(TestBundleDiscoveryFixture, DirectoryNamedSweepJsonMarksASweepRoot)
+{
+    const auto sweepDir = _tempDir / "quick" / "Op" / "Odd";
+    std::filesystem::create_directories(sweepDir / "sweep.json");
+    std::ofstream(sweepDir / "graph.template.json") << "{}";
+
+    const auto sweepDirs = findSweepDirectories(_tempDir);
+    EXPECT_EQ(sweepDirs, std::vector<std::filesystem::path>{sweepDir});
+    const std::vector<std::filesystem::path> expected{sweepDir / "sweep.json"};
+    EXPECT_EQ(detail::findEmptyLeafFolders(_tempDir, sweepDirs), expected);
+}
+
+// In a sweep that the filter skips, a directory named sweep.json fails discovery with
+// a message that names it.
+TEST_F(TestBundleDiscoveryFixture, DirectoryNamedSweepJsonThrowsWithItsPathWhenTheFilterSkipsIt)
+{
+    const auto sweepDir = _tempDir / "quick" / "Op" / "Odd";
+    std::filesystem::create_directories(sweepDir / "sweep.json");
+    std::ofstream(sweepDir / "graph.template.json") << "{}";
+
+    try
+    {
+        (void)discoverBundles(_tempDir, [](const std::string&) { return false; });
+        FAIL() << "discovery did not throw";
+    }
+    catch(const std::runtime_error& e)
+    {
+        EXPECT_NE(std::string(e.what()).find((sweepDir / "sweep.json").string()), std::string::npos)
+            << e.what();
+    }
+}
+
+// In a sweep that discovery reads, a directory named sweep.json, or a link to a
+// directory, fails discovery with a message that names it.
+TEST_F(TestBundleDiscoveryFixture, DirectoryNamedSweepJsonThrowsWithItsPathWhenTheCasesAreRead)
+{
+    namespace fs = std::filesystem;
+    const auto expectThrowNaming = [](const fs::path& root, const fs::path& sweepJson) {
+        try
+        {
+            (void)discoverBundles(root);
+            ADD_FAILURE() << "discovery did not throw for " << sweepJson;
+        }
+        catch(const std::runtime_error& e)
+        {
+            EXPECT_NE(
+                std::string(e.what()).find("Could not open sweep manifest: " + sweepJson.string()),
+                std::string::npos)
+                << e.what();
+        }
+    };
+
+    const auto directoryRoot = _tempDir / "directory";
+    const auto directorySweep = directoryRoot / "quick" / "Op" / "Odd";
+    fs::create_directories(directorySweep / "sweep.json");
+    std::ofstream(directorySweep / "graph.template.json") << "{}";
+    expectThrowNaming(directoryRoot, directorySweep / "sweep.json");
+
+    const auto linkRoot = _tempDir / "link";
+    const auto linkSweep = linkRoot / "quick" / "Op" / "Linked";
+    const auto target = _tempDir / "target";
+    fs::create_directories(linkSweep);
+    fs::create_directories(target);
+    std::ofstream(linkSweep / "graph.template.json") << "{}";
+    try
+    {
+        fs::create_directory_symlink(target, linkSweep / "sweep.json");
+    }
+    catch(const fs::filesystem_error& e)
+    {
+        GTEST_SKIP() << "cannot create directory symlinks here: " << e.what();
+    }
+    expectThrowNaming(linkRoot, linkSweep / "sweep.json");
+}
+
+// The walk skips a sweep.json that is a directory link back to its own folder, and a
+// link to nothing. Such a folder is not a sweep root, so it is an empty leaf.
+TEST_F(TestBundleDiscoveryFixture, SweepJsonLinkThatTheWalkSkipsMarksNoSweepRoot)
+{
+    namespace fs = std::filesystem;
+    const auto looped = _tempDir / "quick" / "Op" / "Looped";
+    const auto dangling = _tempDir / "quick" / "Op" / "Dangling";
+    for(const auto& dir : {looped, dangling})
+    {
+        fs::create_directories(dir);
+        std::ofstream(dir / "graph.template.json") << "{}";
+    }
+    createMinimalBundle(_tempDir / "quick" / "Op" / "Good", "good");
+    try
+    {
+        fs::create_directory_symlink(looped, looped / "sweep.json");
+        fs::create_symlink(_tempDir / "missing.json", dangling / "sweep.json");
+    }
+    catch(const fs::filesystem_error& e)
+    {
+        GTEST_SKIP() << "cannot create symlinks here: " << e.what();
+    }
+
+    EXPECT_TRUE(isSweepBundleRoot(looped));
+    const auto sweepDirs = findSweepDirectories(_tempDir);
+    EXPECT_TRUE(sweepDirs.empty());
+    EXPECT_EQ(detail::findEmptyLeafFolders(_tempDir, sweepDirs),
+              (std::vector<fs::path>{dangling, looped}));
+
+    std::vector<DiscoveredBundle> result;
+    ASSERT_NO_THROW(result = discoverBundles(_tempDir));
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_EQ(result.front().suiteName, "quick_Op_Good");
+}
+
+TEST_F(TestBundleDiscoveryFixture, SweepRootsAndEmptyLeavesBehindADirectorySymlinkAreFound)
+{
+    const auto root = _tempDir / "root";
+    const auto outside = _tempDir / "outside" / "Linked";
+    createTemplateSweep(outside / "Sweep",
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
+    std::filesystem::create_directories(outside / "Empty");
+    std::filesystem::create_directories(outside / "MetaOnly");
+    std::ofstream(outside / "MetaOnly" / "meta.json") << "{}";
+    createMinimalBundle(outside / "Good", "good");
+    std::filesystem::create_directories(root / "quick");
+    try
+    {
+        std::filesystem::create_directory_symlink(outside, root / "quick" / "Linked");
+    }
+    catch(const std::filesystem::filesystem_error& e)
+    {
+        GTEST_SKIP() << "cannot create directory symlinks here: " << e.what();
+    }
+
+    const auto linked = root / "quick" / "Linked";
+    const auto sweepDirs = findSweepDirectories(root);
+    EXPECT_EQ(sweepDirs, std::vector<std::filesystem::path>{linked / "Sweep"});
+    const std::vector<std::filesystem::path> expected{linked / "Empty", linked / "MetaOnly"};
+    EXPECT_EQ(detail::findEmptyLeafFolders(root, sweepDirs), expected);
+}
+
+// The walk does not list a directory it may not read. Its parent then has no listed
+// subdirectory, so the parent is a leaf.
+TEST_F(TestBundleDiscoveryFixture, ParentOfAnUnlistableDirectoryIsALeaf)
+{
+    namespace fs = std::filesystem;
+    createMinimalBundle(_tempDir / "conv" / "good", "good");
+    const auto parent = _tempDir / "x";
+    const auto locked = parent / "locked";
+    createTemplateSweep(locked / "Sweep",
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
+    fs::permissions(locked, fs::perms::none);
+    // Give the permissions back on every exit, so the scratch directory can be removed.
+    struct RestorePermissions
+    {
+        fs::path path;
+        ~RestorePermissions()
+        {
+            std::error_code error;
+            fs::permissions(path, fs::perms::owner_all, error);
+        }
+    };
+    const RestorePermissions restore{locked};
+
+    std::error_code probeError;
+    const fs::directory_iterator probe(locked, probeError);
+    if(!probeError)
+    {
+        GTEST_SKIP() << "this process can still list a directory with no permissions";
+    }
+
+    const auto sweepDirs = findSweepDirectories(_tempDir);
+    EXPECT_TRUE(sweepDirs.empty());
+    EXPECT_EQ(detail::findEmptyLeafFolders(_tempDir, sweepDirs),
+              std::vector<std::filesystem::path>{parent});
+}
+
 TEST_F(TestBundleDiscoveryFixture, EmptyRootReturnsEmpty)
 {
     auto result = discoverBundles(_tempDir);
@@ -554,18 +883,76 @@ TEST_F(TestBundleDiscoveryFixture, SweepSupportJsonIsNotDiscoveredAsGraph)
     }
 }
 
-TEST_F(TestBundleDiscoveryFixture, ScanFilesByExtensionIsGenericAndSorted)
+TEST_F(TestBundleDiscoveryFixture, BundleTreeListingHoldsRegularJsonFilesSorted)
 {
     std::filesystem::create_directories(_tempDir / "b");
     std::filesystem::create_directories(_tempDir / "a");
     std::ofstream(_tempDir / "b" / "z.json") << "{}";
     std::ofstream(_tempDir / "a" / "m.json") << "{}";
     std::ofstream(_tempDir / "a" / "ignore.txt") << "x";
+    std::filesystem::create_directories(_tempDir / "a" / "dir.json");
 
-    auto files = scanFilesByExtension(_tempDir, ".json");
+    const auto files = detail::listBundleTree(_tempDir).jsonFiles;
     ASSERT_EQ(files.size(), 2u);
     EXPECT_EQ(files[0].filename(), "m.json");
     EXPECT_EQ(files[1].filename(), "z.json");
+}
+
+TEST(TestHasAncestorIn, MatchesIsDescendantOfOnEveryPair)
+{
+    const std::vector<std::filesystem::path> paths{
+        "a",        "a/b",      "a/b/c",        "a/bc",      "a/bc/d",    "a/./b/c",     "a/../a/b",
+        "a//b/c",   "a/b/",     "a/b/c/",       ".",         "../x/a",    "/r/a",        "/r/a/b",
+        "/r/a/bc",  "/r/./a/b", "/r/a/../a/b/", "/r//a/b/c", "/r/a/b/..", "/r/x/../a/b", "C:\\r",
+        "C:\\r\\a", "C:r",      "C:/r/a",       "D:\\r"};
+    const std::vector<std::vector<std::filesystem::path>> ancestorSets{{"a"},
+                                                                       {"a/b"},
+                                                                       {"a/b/"},
+                                                                       {"a/b/c"},
+                                                                       {"a/./b"},
+                                                                       {"a//b"},
+                                                                       {"a/b/../b"},
+                                                                       {"x", "a/bc"},
+                                                                       {".."},
+                                                                       {"."},
+                                                                       {"/"},
+                                                                       {"/r/a"},
+                                                                       {"/r/a/"},
+                                                                       {"/r/a/b", "/r/x"},
+                                                                       {"/r/a/b/c", "a/b"},
+                                                                       {"/r/./a//b/"},
+                                                                       {""},
+                                                                       {"C:"},
+                                                                       {"C:\\"},
+                                                                       {"C:\\r"},
+                                                                       {"D:", "x"}};
+
+    size_t matches = 0;
+    size_t misses = 0;
+    for(const auto& ancestors : ancestorSets)
+    {
+        const auto normalized = detail::lexicallyNormalSet(ancestors);
+        for(const auto& path : paths)
+        {
+            const bool expected
+                = std::any_of(ancestors.begin(), ancestors.end(), [&](const auto& ancestor) {
+                      return isDescendantOf(path, ancestor);
+                  });
+            EXPECT_EQ(detail::hasAncestorIn(path, normalized), expected)
+                << "path '" << path.string() << "', first ancestor '" << ancestors.front().string()
+                << "'";
+            if(expected)
+            {
+                ++matches;
+            }
+            else
+            {
+                ++misses;
+            }
+        }
+    }
+    EXPECT_GT(matches, 0u);
+    EXPECT_GT(misses, 0u);
 }
 
 TEST(TestGraphFile, AllowlistsGraphsAndExcludesCompanions)
@@ -593,6 +980,20 @@ TEST(TestSanitizeForGtest, ReplacesInvalidChars)
     EXPECT_EQ(sanitizeForGtest("resnet50-layer3.v2"), "resnet50_layer3_v2");
     EXPECT_EQ(sanitizeForGtest("name with spaces"), "name_with_spaces");
     EXPECT_EQ(sanitizeForGtest("already_ok"), "already_ok");
+}
+
+// Ops without an "outputs" sub-object name their output with a flat key. The flat
+// inputs beside it, such as resample backward's dy and index, are not outputs.
+TEST(TestExtractOutputUidsFromJson, ReadsFlatOutputKeys)
+{
+    const auto graphJson = nlohmann::json::parse(R"({"nodes": [
+        {"type": "ReductionAttributes", "in_tensor_uid": 0, "out_tensor_uid": 1},
+        {"type": "ResampleFwdAttributes", "x_tensor_uid": 2, "y_tensor_uid": 3},
+        {"type": "ResampleBwdAttributes", "dy_tensor_uid": 4, "index_tensor_uid": 5,
+         "dx_tensor_uid": 6}
+    ]})");
+
+    EXPECT_EQ(detail::extractOutputUidsFromJson(graphJson), (std::vector<int64_t>{1, 3, 6}));
 }
 
 TEST_F(TestBundleDiscoveryFixture, UnparseableJsonIsDiscoveredButLoadThrows)
@@ -1005,8 +1406,102 @@ TEST_F(TestBundleDiscoveryFixture, LoadRaggedBundleLoadsInputsAndGoldenOutputs)
                 tensors.at(uid).get());
         ASSERT_NE(ragged, nullptr) << "uid " << uid;
         EXPECT_EQ(ragged->raggedOffset(), offsetTensor) << "uid " << uid;
-        EXPECT_EQ(ragged->raggedIterationInfo()->rowOffsets, (std::vector<int64_t>{0, 40, 60}))
+        EXPECT_EQ(ragged->raggedIterationInfo()->origins, (std::vector<int64_t>{0, 40}))
             << "uid " << uid;
+        EXPECT_EQ(ragged->raggedIterationInfo()->lengths, (std::vector<int64_t>{2, 1}))
+            << "uid " << uid;
+    }
+}
+
+// Every ragged tensor of a ragged SDPA bundle reads from a blob sized to its elementSpace
+// and takes its per-batch origins and lengths from its offsets and, when the node has
+// them, the seq_len tensors: Stats stored [H,T] (L7a, L7c, L7d), a head-major primary
+// (L6), a shifted origin (L8), non-monotonic origins (L9) and a trailing gap (L14).
+TEST_F(TestBundleDiscoveryFixture, LoadRaggedSdpaBundlesReadsBlobsSizedToElementSpace)
+{
+    for(const auto& layout : fixtures::raggedSdpaLoadableCases())
+    {
+        SCOPED_TRACE(layout.name);
+        const auto dir = _tempDir / "op" / layout.name;
+        fixtures::writeRaggedSdpaCase(dir, layout);
+
+        auto result = loadIntegrationTestBundle(dir / (layout.name + ".json"));
+        ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+        const auto tensors = std::get<IntegrationTestBundle>(result).loadTensors();
+
+        for(const int64_t uid : {fixtures::K_SDPA_Q_UID,
+                                 fixtures::K_SDPA_K_UID,
+                                 fixtures::K_SDPA_V_UID,
+                                 fixtures::K_SDPA_O_UID,
+                                 fixtures::K_SDPA_STATS_UID})
+        {
+            SCOPED_TRACE("uid " + std::to_string(uid));
+            const auto* ragged
+                = dynamic_cast<const hipdnn_data_sdk::utilities::RaggedTensorBase<float>*>(
+                    tensors.at(uid).get());
+            ASSERT_NE(ragged, nullptr);
+            EXPECT_EQ(ragged->elementSpace(),
+                      uid == fixtures::K_SDPA_STATS_UID ? layout.statsSpace : layout.qkvoSpace);
+            ASSERT_TRUE(ragged->raggedIterationInfo().has_value());
+            EXPECT_EQ(ragged->raggedIterationInfo()->lengths, layout.lengths);
+        }
+
+        EXPECT_EQ(tensors.count(fixtures::K_SDPA_SEQ_LEN_Q_UID), layout.seqLen.empty() ? 0u : 1u);
+        EXPECT_EQ(tensors.count(fixtures::K_SDPA_SEQ_LEN_KV_UID), layout.seqLen.empty() ? 0u : 1u);
+    }
+}
+
+// A trailing gap leaves offset[B] past the last row, so a blob sized to offset[B] is larger
+// than the elementSpace: it is rejected, naming the size rule, rather than read.
+TEST_F(TestBundleDiscoveryFixture, LoadRaggedSdpaBundleWithBlobSizedToOffsetBIsRejected)
+{
+    auto layout = fixtures::raggedSdpaTrailingGapCase();
+    ASSERT_EQ(layout.qkvo.offsets.back(), 12);
+    ASSERT_EQ(layout.qkvoSpace, 10u);
+    layout.qkvo.blobElems = static_cast<size_t>(layout.qkvo.offsets.back());
+
+    const auto dir = _tempDir / "op" / "offsetb";
+    fixtures::writeRaggedSdpaCase(dir, layout);
+    auto result = loadIntegrationTestBundle(dir / (layout.name + ".json"));
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+
+    try
+    {
+        std::get<IntegrationTestBundle>(result).loadTensors();
+        FAIL() << "a blob sized to offset[B] must not load";
+    }
+    catch(const std::exception& e)
+    {
+        EXPECT_NE(std::string(e.what()).find("elementSpace"), std::string::npos) << e.what();
+    }
+}
+
+// Without seq_len, a block longer than S_max is capped, so offsets written with the multiplier
+// applied twice still build a layout. The blob, sized to the element space of the intended
+// layout, no longer matches the element space of the one those offsets describe: rejected.
+TEST_F(TestBundleDiscoveryFixture, LoadRaggedSdpaBundleWithDoubledOffsetsIsRejected)
+{
+    auto layout = fixtures::raggedSdpaHeadTokenStatsCase();
+    ASSERT_TRUE(layout.seqLen.empty());
+    ASSERT_EQ(layout.qkvo.offsets, (std::vector<int32_t>{0, 16, 40}));
+    for(auto& offset : layout.qkvo.offsets)
+    {
+        offset *= 2;
+    }
+
+    const auto dir = _tempDir / "op" / "doubled";
+    fixtures::writeRaggedSdpaCase(dir, layout);
+    auto result = loadIntegrationTestBundle(dir / (layout.name + ".json"));
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+
+    try
+    {
+        std::get<IntegrationTestBundle>(result).loadTensors();
+        FAIL() << "offsets written with a doubled multiplier must not load";
+    }
+    catch(const std::exception& e)
+    {
+        EXPECT_NE(std::string(e.what()).find("elementSpace"), std::string::npos) << e.what();
     }
 }
 
@@ -1194,6 +1689,88 @@ TEST_F(TestBundleDiscoveryFixture, DuplicateSweepCaseIdThrows)
     EXPECT_THROW(discoverBundles(_tempDir), std::runtime_error);
 }
 
+TEST_F(TestBundleDiscoveryFixture, SweepCaseScanEqualsTheParsedIdCount)
+{
+    const std::vector<std::string> manifests{
+        R"json({"cases":[]})json",
+        "{ \"cases\" : [ ] }\n",
+        R"json({"template":"graph.template.json","cases":[{"id":"a"},{"id":"b"},{"id":"c"}]})json",
+        R"json({
+  "note": ["{[}],\"\\"],
+  "cases": [
+    {"id": "a{", "values": {"tensors": [{"uid": 0, "dims": [1, 2]}, {"uid": 1}]}},
+    {"id": "b]\"", "values": {"x": {"y": {}}}},
+    {"id": "c,\\"}
+  ],
+  "after": {"k": [1, {"m": 2}]}
+}
+)json",
+        R"json({"nested":{"cases":[{"id":"z1"},{"id":"z2"}]},"cases":[{"id":"a"}]})json",
+        R"json({"label":"cases","cases":[{"id":"a"},{"id":"b"}],"tail":["cases",1]})json"};
+
+    for(size_t index = 0; index < manifests.size(); ++index)
+    {
+        const auto sweepPath = _tempDir / ("sweep" + std::to_string(index) + ".json");
+        std::ofstream(sweepPath, std::ios::binary) << manifests[index];
+        const auto expected = readSweepCaseIds(sweepPath).size();
+
+        const auto scanned = detail::countSweepCasesWithoutParsing(manifests[index]);
+        ASSERT_TRUE(scanned.has_value()) << manifests[index];
+        EXPECT_EQ(*scanned, expected) << manifests[index];
+        EXPECT_EQ(countSweepCases(sweepPath), expected) << manifests[index];
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, SweepCaseScanFallsBackOnShapesItDoesNotAccept)
+{
+    const std::vector<std::string> manifests{
+        R"json([])json",
+        R"json({})json",
+        R"json({"other":[{"id":"a"}]})json",
+        R"json({"cases":{}})json",
+        R"json({"cases":1,"other":[{}]})json",
+        R"json({"cases":{},"other":[{}]})json",
+        R"json({"cases":"a"})json",
+        R"json({"cases":[1]})json",
+        R"json({"cases":["a"]})json",
+        R"json({"cases":[[]]})json",
+        R"json({"cases":[{"id":"a"}],"cases":[]})json",
+        R"json({"cases":1,"cases":[{"id":"a"}]})json",
+        R"json({"cases":[{"id":"a"})json",
+        R"json({"cases":[{"id":"a}]})json",
+        R"json({"cases":[]} {})json",
+        R"json({"ca\u0073es":[{"id":"a"}]})json",
+        R"json({"cases":[{"id":"a"}],"c\u0061ses":[{"id":"a"},{"id":"b"}]})json",
+        R"json({"c\u0061ses":[{"id":"a"},{"id":"b"}],"cases":[{"id":"a"}]})json",
+        R"json({"note":"a\"b","cases":[{"id":"a"}]})json",
+        ""};
+
+    size_t throwingManifests = 0;
+    for(size_t index = 0; index < manifests.size(); ++index)
+    {
+        EXPECT_FALSE(detail::countSweepCasesWithoutParsing(manifests[index]).has_value())
+            << manifests[index];
+
+        const auto sweepPath = _tempDir / ("sweep" + std::to_string(index) + ".json");
+        std::ofstream(sweepPath, std::ios::binary) << manifests[index];
+        std::optional<size_t> parsedCount;
+        try
+        {
+            parsedCount = readSweepCaseIds(sweepPath).size();
+        }
+        catch(const std::runtime_error&)
+        {
+            ++throwingManifests;
+            EXPECT_THROW(countSweepCases(sweepPath), std::runtime_error) << manifests[index];
+            continue;
+        }
+        EXPECT_EQ(countSweepCases(sweepPath), *parsedCount) << manifests[index];
+    }
+    EXPECT_GT(throwingManifests, 0u);
+
+    EXPECT_THROW(countSweepCases(_tempDir / "missing" / "sweep.json"), std::runtime_error);
+}
+
 // resolvePlaceholder falls back to the case-level `values` map when a
 // placeholder key is absent from the per-tensor entry. A top-level template
 // placeholder (no current tensor uid) resolves straight from the global value.
@@ -1312,7 +1889,7 @@ TEST_F(TestBundleDiscoveryFixture, SelectBundlesToLoadCountsExcludedClaimsWhenOb
     BundleRegistrationStats stats;
     SupportClaimCoverage coverage;
     const auto selected = detail::selectBundlesToLoad(
-        discovered, "case_a.*", /*writing=*/false, /*observing=*/true, stats, coverage);
+        discovered, {}, "case_a.*", /*writing=*/false, /*observing=*/true, stats, coverage);
 
     ASSERT_EQ(selected.size(), 1u);
     EXPECT_EQ(selected.front().suiteName, "case_a");
@@ -1340,7 +1917,7 @@ TEST_F(TestBundleDiscoveryFixture, SelectBundlesToLoadLeavesCoverageAloneWhenNot
     BundleRegistrationStats stats;
     SupportClaimCoverage coverage;
     const auto selected = detail::selectBundlesToLoad(
-        discovered, "case_a.*", /*writing=*/false, /*observing=*/false, stats, coverage);
+        discovered, {}, "case_a.*", /*writing=*/false, /*observing=*/false, stats, coverage);
 
     EXPECT_EQ(selected.size(), 1u);
     EXPECT_EQ(stats.excludedByFilter, 1u);
@@ -1360,12 +1937,284 @@ TEST_F(TestBundleDiscoveryFixture, SelectBundlesToLoadKeepsEveryBundleWhenWritin
     BundleRegistrationStats stats;
     SupportClaimCoverage coverage;
     const auto selected = detail::selectBundlesToLoad(
-        discovered, "case_a.*", /*writing=*/true, /*observing=*/false, stats, coverage);
+        discovered, {}, "case_a.*", /*writing=*/true, /*observing=*/false, stats, coverage);
 
     EXPECT_EQ(selected.size(), 2u);
     EXPECT_EQ(stats.discovered, 2u);
     EXPECT_EQ(stats.excludedByFilter, 0u);
     EXPECT_EQ(coverage.graphsFound, 0u);
+}
+
+namespace
+{
+
+const std::string HIP_MLOPS_LANE_FILTER
+    = "quick_*:standard_*:Smoke/*:Quick/*:Standard/*-*DISABLED*";
+const std::string ASM_SDPA_LANE_FILTER
+    = "quick_*Sdpa*:standard_*Sdpa*:Smoke/*Sdpa*-*DISABLED*:*_SdpaBackward_*.prbu01_*:"
+      "*_SdpaBackward_*.prbu03_*:*_SdpaBackward_*.prbu13_*:*_SdpaBackward_*.prbt04_*:"
+      "*_SdpaBackward_*.prbt04n_*:*_SdpaBackward_*.prbr05_*";
+const std::string FLYDSL_SDPA_LANE_FILTER
+    = "quick_SdpaFwd_*.*:standard_SdpaFwd_*.*-*DISABLED*:"
+      "*_SdpaFwd_bhsd_fp16_hd128_causal_gqa4_Small.*:*_SdpaFwd_bhsd_fp16_hd128_causal_mha_Small.*";
+
+struct SelectionOutcome
+{
+    std::vector<std::string> selected;
+    BundleRegistrationStats stats;
+    size_t graphsFound = 0;
+    size_t graphsWithClaims = 0;
+};
+
+std::vector<std::string> describeSelected(const std::vector<DiscoveredBundle>& bundles)
+{
+    std::vector<std::string> described;
+    described.reserve(bundles.size());
+    for(const auto& bundle : bundles)
+    {
+        described.push_back(bundle.fullName() + "|" + bundle.jsonPath.string() + "|"
+                            + (bundle.isTemplateSweepCase() ? bundle.sweep->caseId : ""));
+    }
+    return described;
+}
+
+SelectionOutcome selectionOutcome(std::vector<DiscoveredBundle> bundles,
+                                  const std::string& filter,
+                                  bool observing)
+{
+    SelectionOutcome outcome;
+    SupportClaimCoverage coverage;
+    outcome.selected = describeSelected(detail::selectBundlesToLoad(std::move(bundles),
+                                                                    {},
+                                                                    filter,
+                                                                    /*writing=*/false,
+                                                                    observing,
+                                                                    outcome.stats,
+                                                                    coverage));
+    outcome.graphsFound = coverage.graphsFound;
+    outcome.graphsWithClaims = coverage.graphsWithClaims;
+    return outcome;
+}
+
+BundleDiscoveryResult discoverForFilter(const std::filesystem::path& root,
+                                        const std::string& filter)
+{
+    return discoverBundles(root, [&filter](const std::string& suiteName) {
+        return gtestFilterMaySelectSuite(filter, suiteName);
+    });
+}
+
+// Compares what discoverAndSelectBundles() selects, counts and covers with selection after
+// the full discovery, with and without observing. Returns how many sweep roots the
+// filtered discovery did not parse. Observing must not change that number.
+size_t expectFilteredSelectionMatchesFull(const std::filesystem::path& root,
+                                          const std::vector<DiscoveredBundle>& full,
+                                          const std::string& filter)
+{
+    size_t unparsedSweeps = 0;
+    for(const bool observing : {false, true})
+    {
+        const auto expected = selectionOutcome(full, filter, observing);
+
+        SelectionOutcome actual;
+        SupportClaimCoverage coverage;
+        const auto discovered = detail::discoverAndSelectBundles(
+            root, filter, /*writing=*/false, observing, actual.stats, coverage);
+        if(!discovered.has_value())
+        {
+            ADD_FAILURE() << "filter '" << filter << "': nothing discovered";
+            return 0;
+        }
+        EXPECT_EQ(discovered->dataDir, root) << "filter '" << filter << "'";
+        actual.selected = describeSelected(discovered->bundles);
+        actual.graphsFound = coverage.graphsFound;
+        actual.graphsWithClaims = coverage.graphsWithClaims;
+        if(!observing)
+        {
+            unparsedSweeps = discovered->unparsedSweeps.size();
+        }
+        EXPECT_EQ(discovered->unparsedSweeps.size(), unparsedSweeps)
+            << "filter '" << filter << "', observing " << observing;
+
+        EXPECT_EQ(actual.selected.size(), expected.selected.size()) << "filter '" << filter << "'";
+        EXPECT_TRUE(actual.selected == expected.selected) << "filter '" << filter << "'";
+        EXPECT_EQ(actual.stats.discovered, expected.stats.discovered)
+            << "filter '" << filter << "'";
+        EXPECT_EQ(actual.stats.excludedByFilter, expected.stats.excludedByFilter)
+            << "filter '" << filter << "'";
+        EXPECT_EQ(actual.graphsFound, expected.graphsFound) << "filter '" << filter << "'";
+        EXPECT_EQ(actual.graphsWithClaims, expected.graphsWithClaims)
+            << "filter '" << filter << "'";
+    }
+    return unparsedSweeps;
+}
+
+} // namespace
+
+TEST_F(TestBundleDiscoveryFixture, FilteredDiscoverySelectsAndCountsLikeFullDiscovery)
+{
+    createMixedTierTree(_tempDir);
+    const auto full = discoverBundles(_tempDir);
+    ASSERT_EQ(full.size(), 16u);
+
+    size_t filtersWithUnparsedSweeps = 0;
+    for(const auto& filter : {std::string("*"),
+                              std::string(""),
+                              std::string("quick_*"),
+                              std::string("quick_Matmul_*.*"),
+                              HIP_MLOPS_LANE_FILTER,
+                              ASM_SDPA_LANE_FILTER,
+                              FLYDSL_SDPA_LANE_FILTER,
+                              std::string("*-quick_Matmul_A.*"),
+                              std::string("NoSuchSuite.*")})
+    {
+        const size_t unparsedSweeps = expectFilteredSelectionMatchesFull(_tempDir, full, filter);
+        filtersWithUnparsedSweeps += unparsedSweeps != 0 ? 1 : 0;
+        if(filter == "quick_Matmul_*.*")
+        {
+            EXPECT_GT(unparsedSweeps, 0u);
+        }
+    }
+    EXPECT_GT(filtersWithUnparsedSweeps, 0u);
+}
+
+TEST_F(TestBundleDiscoveryFixture, SelectBundlesToLoadRejectsUnparsedSweepsWhenWriting)
+{
+    createMinimalBundle(_tempDir / "case_a", "graph");
+    const std::vector<UnparsedSweep> unparsed{{_tempDir / "quick" / "S", "quick_S", 1}};
+
+    BundleRegistrationStats stats;
+    SupportClaimCoverage coverage;
+    EXPECT_THROW(detail::selectBundlesToLoad(discoverBundles(_tempDir),
+                                             unparsed,
+                                             "*",
+                                             /*writing=*/true,
+                                             /*observing=*/false,
+                                             stats,
+                                             coverage),
+                 std::logic_error);
+}
+
+TEST_F(TestBundleDiscoveryFixture, MalformedManifestThrowsOnlyWhenTheFilterCanSelectItsSuite)
+{
+    createTemplateSweep(
+        _tempDir / "quick" / "Bad" / "Dup",
+        {{"dup_case_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}},
+         {"dup_case_nchw", "half", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+    createSweepWithCases(_tempDir / "quick" / "Good" / "G", {"g1"}, false);
+
+    const auto filtered = discoverForFilter(_tempDir, "quick_Good_*.*");
+    ASSERT_EQ(filtered.unparsedSweeps.size(), 1u);
+    EXPECT_EQ(filtered.unparsedSweeps.front().suiteName, "quick_Bad_Dup");
+    EXPECT_EQ(filtered.unparsedSweeps.front().caseCount, 2u);
+    EXPECT_EQ(filtered.bundles.size(), 1u);
+
+    EXPECT_THROW(discoverBundles(_tempDir), std::runtime_error);
+    EXPECT_THROW(discoverForFilter(_tempDir, "quick_Bad_*.*"), std::runtime_error);
+}
+
+TEST_F(TestBundleDiscoveryFixture, NameCollisionThrowsWhenTheFilterCanSelectTheSuite)
+{
+    createSweepWithCases(_tempDir / "quick" / "Op-A" / "S", {"c1"}, false);
+    createSweepWithCases(_tempDir / "quick" / "Op_A" / "S", {"c1"}, false);
+
+    EXPECT_THROW(discoverForFilter(_tempDir, "quick_Op_A_S.*"), std::runtime_error);
+    EXPECT_NO_THROW(discoverForFilter(_tempDir, "standard_*"));
+}
+
+TEST(TestHasNoDiscoveredBundles, IsTrueOnlyWithoutBundlesAndWithoutUnparsedCases)
+{
+    const DiscoveredBundle bundle{"quick/S/graph.json", "quick_S", "graph", std::nullopt};
+    const UnparsedSweep sweep{"quick/T", "quick_T", 3};
+    const UnparsedSweep emptySweep{"quick/E", "quick_E", 0};
+
+    EXPECT_TRUE(detail::hasNoDiscoveredBundles({}));
+    EXPECT_TRUE(detail::hasNoDiscoveredBundles({{}, {emptySweep}}));
+    EXPECT_FALSE(detail::hasNoDiscoveredBundles({{bundle}, {}}));
+    EXPECT_FALSE(detail::hasNoDiscoveredBundles({{}, {sweep}}));
+    EXPECT_FALSE(detail::hasNoDiscoveredBundles({{}, {emptySweep, sweep}}));
+    EXPECT_FALSE(detail::hasNoDiscoveredBundles({{bundle}, {sweep}}));
+}
+
+// A tree whose only bundles are sweeps without cases has nothing to discover, also
+// when the filter skips those sweeps.
+TEST_F(TestBundleDiscoveryFixture, ZeroCaseSweepsTheFilterSkipsCountAsNoBundles)
+{
+    createSweepWithCases(_tempDir / "quick" / "Op" / "A", {}, false);
+    createSweepWithCases(_tempDir / "standard" / "Op" / "B", {}, true);
+
+    const auto skipped = discoverBundles(_tempDir, [](const std::string&) { return false; });
+    EXPECT_EQ(skipped.unparsedSweeps.size(), 2u);
+    EXPECT_TRUE(detail::hasNoDiscoveredBundles(skipped));
+
+    const auto parsed = discoverBundles(_tempDir, [](const std::string&) { return true; });
+    EXPECT_TRUE(parsed.unparsedSweeps.empty());
+    EXPECT_TRUE(detail::hasNoDiscoveredBundles(parsed));
+}
+
+// --write-support-claims needs every sweep manifest parsed, whatever the filter.
+TEST_F(TestBundleDiscoveryFixture, DiscoverAndSelectBundlesParsesEverySweepWhenWriting)
+{
+    createMixedTierTree(_tempDir);
+
+    BundleRegistrationStats stats;
+    SupportClaimCoverage coverage;
+    std::optional<detail::DiscoveredBundleSet> discovered;
+    ASSERT_NO_THROW(discovered = detail::discoverAndSelectBundles(_tempDir,
+                                                                  "quick_Matmul_*.*",
+                                                                  /*writing=*/true,
+                                                                  /*observing=*/false,
+                                                                  stats,
+                                                                  coverage));
+
+    ASSERT_TRUE(discovered.has_value());
+    EXPECT_TRUE(discovered->unparsedSweeps.empty());
+    EXPECT_EQ(discovered->bundles.size(), 16u);
+    EXPECT_EQ(stats.discovered, 16u);
+    EXPECT_EQ(stats.excludedByFilter, 0u);
+}
+
+// A tree of sweeps the filter skips is not "no bundles": the zero-tests diagnostic must
+// report their cases as discovered and excluded.
+TEST_F(TestBundleDiscoveryFixture, DiscoverAndSelectBundlesCountsSweepsTheFilterSkips)
+{
+    createSweepWithCases(_tempDir / "quick" / "Op" / "A", {"c1", "c2"}, false);
+    createSweepWithCases(_tempDir / "standard" / "Op" / "B", {"c3"}, true);
+
+    BundleRegistrationStats stats;
+    SupportClaimCoverage coverage;
+    testing::internal::CaptureStderr();
+    const auto discovered = detail::discoverAndSelectBundles(
+        _tempDir, "NoSuchSuite.*", /*writing=*/false, /*observing=*/true, stats, coverage);
+    const auto printed = testing::internal::GetCapturedStderr();
+
+    EXPECT_NE(printed.find("--gtest_filter excluded 3 of 3 discovered bundle test(s) before "
+                           "loading\n"),
+              std::string::npos)
+        << printed;
+    ASSERT_TRUE(discovered.has_value());
+    EXPECT_TRUE(discovered->bundles.empty());
+    EXPECT_EQ(discovered->unparsedSweeps.size(), 2u);
+    EXPECT_EQ(stats.discovered, 3u);
+    EXPECT_EQ(stats.excludedByFilter, 3u);
+    EXPECT_EQ(coverage.graphsFound, 3u);
+    EXPECT_EQ(coverage.graphsWithClaims, 1u);
+}
+
+TEST_F(TestBundleDiscoveryFixture, DiscoverAndSelectBundlesFindsNothingInATreeWithoutCases)
+{
+    createSweepWithCases(_tempDir / "quick" / "Op" / "A", {}, false);
+
+    for(const auto* filter : {"NoSuchSuite.*", "*"})
+    {
+        BundleRegistrationStats stats;
+        SupportClaimCoverage coverage;
+        EXPECT_FALSE(detail::discoverAndSelectBundles(
+                         _tempDir, filter, /*writing=*/false, /*observing=*/false, stats, coverage)
+                         .has_value())
+            << "filter '" << filter << "'";
+        EXPECT_EQ(stats.discovered, 0u) << "filter '" << filter << "'";
+    }
 }
 
 // Reuses the baked-value-plus-runtime-pass-by-value corruption from
@@ -1546,5 +2395,1925 @@ TEST_F(TestBundleDiscoveryFixture, SkippingSyntheticBodySkipsWithItsMessage)
     EXPECT_NE(std::string(results.GetTestPartResult(0).message()).find("nothing validated this"),
               std::string::npos);
 }
+
+// ---------------------------------------------------------------------------
+// Metadata flags that contradict the golden data a bundle declares.
+//
+// "Declared" is read from the checked-in pointer (`{Name}.tensors.dvc`, or a sweep
+// case's golden.path), not from the blobs: on a tree where `dvc pull` has not run the
+// rules must give the same answer.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+void writeFlagsMeta(const std::filesystem::path& dir,
+                    const std::string& name,
+                    const nlohmann::json& flags)
+{
+    nlohmann::json meta = {{"format_version", 1}};
+    meta.update(flags);
+    std::ofstream(dir / (name + ".meta.json")) << meta.dump(2);
+}
+
+// Merges `flags` into the first sweep case's metadata block.
+void setFirstCaseFlags(const std::filesystem::path& sweepDir, const nlohmann::json& flags)
+{
+    nlohmann::json sweepJson;
+    {
+        std::ifstream in(sweepDir / "sweep.json");
+        sweepJson = nlohmann::json::parse(in);
+    }
+    sweepJson["cases"][0]["metadata"].update(flags);
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+}
+
+const nlohmann::json BOTH_REFERENCES_OFF = {{"no_cpu_reference", true}, {"no_gpu_reference", true}};
+
+} // namespace
+
+TEST_F(TestBundleDiscoveryFixture, LoadBundleDisablingBothReferencesWithoutGoldenIsError)
+{
+    const auto dir = _tempDir / "op" / "bothoff";
+    createMinimalBundle(dir, "bothoff");
+    writeFlagsMeta(dir, "bothoff", BOTH_REFERENCES_OFF);
+
+    EXPECT_THROW(loadIntegrationTestBundle(dir / "bothoff.json"), BundleMetadataError);
+
+    // Red, naming the rule -- not a silent skip.
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
+    ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome));
+    EXPECT_NE(std::get<detail::FailedLoad>(outcome).message.find("disables both references"),
+              std::string::npos);
+}
+
+// The pointer is what declares the data. The blobs it names are absent here, as on a
+// machine that has not pulled.
+TEST_F(TestBundleDiscoveryFixture, LoadBundleDisablingBothReferencesWithGoldenPointerLoads)
+{
+    const auto dir = _tempDir / "op" / "bothoffdvc";
+    createMinimalBundle(dir, "bothoffdvc");
+    writeFlagsMeta(dir, "bothoffdvc", BOTH_REFERENCES_OFF);
+    std::ofstream(dir / "bothoffdvc.tensors.dvc") << "outs:\n";
+
+    auto result = loadIntegrationTestBundle(dir / "bothoffdvc.json");
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+    const auto& bundle = std::get<IntegrationTestBundle>(result);
+    EXPECT_TRUE(bundle.metadata.noCpuReference);
+    EXPECT_TRUE(bundle.metadata.noGpuReference);
+    EXPECT_FALSE(bundle.hasGoldenOutputs);
+}
+
+TEST_F(TestBundleDiscoveryFixture, LoadBundleDisablingBothReferencesWithGoldenBlobsLoads)
+{
+    const auto dir = _tempDir / "op" / "bothoffbin";
+    createLoadableBundle(dir, "bothoffbin");
+    writeFlagsMeta(dir, "bothoffbin", BOTH_REFERENCES_OFF);
+
+    auto result = loadIntegrationTestBundle(dir / "bothoffbin.json");
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+    EXPECT_TRUE(std::get<IntegrationTestBundle>(result).hasGoldenOutputs);
+}
+
+// One reference left is enough to verify the bundle, with or without golden data.
+TEST_F(TestBundleDiscoveryFixture, LoadBundleDisablingOneReferenceWithoutGoldenLoads)
+{
+    for(const char* flag : {"no_cpu_reference", "no_gpu_reference"})
+    {
+        SCOPED_TRACE(flag);
+        const auto dir = _tempDir / "op" / flag;
+        createMinimalBundle(dir, "oneoff");
+        writeFlagsMeta(dir, "oneoff", {{flag, true}});
+
+        EXPECT_TRUE(std::holds_alternative<IntegrationTestBundle>(
+            loadIntegrationTestBundle(dir / "oneoff.json")));
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, LoadExpectedRejectionBundleWithoutGoldenLoads)
+{
+    const auto dir = _tempDir / "op" / "rejected";
+    createMinimalBundle(dir, "rejected");
+    writeFlagsMeta(dir, "rejected", {{"expected_rejection", true}});
+
+    auto result = loadIntegrationTestBundle(dir / "rejected.json");
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+    EXPECT_TRUE(std::get<IntegrationTestBundle>(result).metadata.expectedRejection);
+}
+
+// The reference flags are ignored on an expected rejection, so setting both without any
+// golden data is not the both-off error (which would make the combination unsatisfiable:
+// the golden data it demands is the golden data an expected rejection must not have).
+TEST_F(TestBundleDiscoveryFixture, LoadExpectedRejectionBundleIgnoresBothReferenceFlags)
+{
+    const auto dir = _tempDir / "op" / "rejectedbothoff";
+    createMinimalBundle(dir, "rejectedbothoff");
+    writeFlagsMeta(
+        dir,
+        "rejectedbothoff",
+        {{"expected_rejection", true}, {"no_cpu_reference", true}, {"no_gpu_reference", true}});
+
+    EXPECT_TRUE(std::holds_alternative<IntegrationTestBundle>(
+        loadIntegrationTestBundle(dir / "rejectedbothoff.json")));
+}
+
+// An expected rejection is never executed, so golden data beside it can only be a
+// mistake -- and would drag the bundle into the golden-data binary.
+TEST_F(TestBundleDiscoveryFixture, LoadExpectedRejectionBundleWithGoldenIsError)
+{
+    const auto pointerDir = _tempDir / "op" / "rejecteddvc";
+    createMinimalBundle(pointerDir, "rejecteddvc");
+    writeFlagsMeta(pointerDir, "rejecteddvc", {{"expected_rejection", true}});
+    std::ofstream(pointerDir / "rejecteddvc.tensors.dvc") << "outs:\n";
+    EXPECT_THROW(loadIntegrationTestBundle(pointerDir / "rejecteddvc.json"), BundleMetadataError);
+
+    const auto blobDir = _tempDir / "op" / "rejectedbin";
+    createLoadableBundle(blobDir, "rejectedbin");
+    writeFlagsMeta(blobDir, "rejectedbin", {{"expected_rejection", true}});
+    EXPECT_THROW(loadIntegrationTestBundle(blobDir / "rejectedbin.json"), BundleMetadataError);
+}
+
+TEST_F(TestBundleDiscoveryFixture, LoadSweepCaseDisablingBothReferencesWithoutGoldenIsError)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"bothoff_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          /*includeGolden=*/false}});
+    setFirstCaseFlags(sweepDir, BOTH_REFERENCES_OFF);
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+    EXPECT_THROW(loadIntegrationTestBundle(discovered.front()), BundleMetadataError);
+}
+
+TEST_F(TestBundleDiscoveryFixture, LoadSweepCaseDisablingBothReferencesWithGoldenPathLoads)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"bothoff_golden_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1}}});
+    setFirstCaseFlags(sweepDir, BOTH_REFERENCES_OFF);
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+    EXPECT_TRUE(std::holds_alternative<IntegrationTestBundle>(
+        loadIntegrationTestBundle(discovered.front())));
+}
+
+TEST_F(TestBundleDiscoveryFixture, LoadSweepCaseExpectedRejectionWithGoldenIsError)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"rejected_golden_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1}}});
+    setFirstCaseFlags(sweepDir, {{"expected_rejection", true}});
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+    EXPECT_THROW(loadIntegrationTestBundle(discovered.front()), BundleMetadataError);
+}
+
+// ---------------------------------------------------------------------------
+// An expected-rejection bundle has to reach an engine to be rejected by one. One that
+// cannot even load must be red, not the quiet skip an unloadable bundle gets.
+// ---------------------------------------------------------------------------
+
+TEST_F(TestBundleDiscoveryFixture, ClassifyBundleFailsAnExpectedRejectionBundleThatCannotLoad)
+{
+    const auto flaggedDir = _tempDir / "op" / "flagged";
+    createMinimalBundle(flaggedDir, "flagged");
+    std::ofstream(flaggedDir / "flagged.json") << "{not json";
+    writeFlagsMeta(flaggedDir, "flagged", {{"expected_rejection", true}});
+
+    // Control: the same broken graph without the flag keeps the quiet skip.
+    const auto plainDir = _tempDir / "op" / "plain";
+    createMinimalBundle(plainDir, "plain");
+    std::ofstream(plainDir / "plain.json") << "{not json";
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 2u);
+    const auto* flagged = findByTest(discovered, "flagged");
+    const auto* plain = findByTest(discovered, "plain");
+    ASSERT_NE(flagged, nullptr);
+    ASSERT_NE(plain, nullptr);
+
+    auto flaggedOutcome = detail::classifyBundle(*flagged, _sweeps);
+    ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(flaggedOutcome));
+    EXPECT_NE(std::get<detail::FailedLoad>(flaggedOutcome).message.find("expected_rejection"),
+              std::string::npos);
+    EXPECT_TRUE(
+        std::holds_alternative<detail::SkippedLoad>(detail::classifyBundle(*plain, _sweeps)));
+}
+
+TEST_F(TestBundleDiscoveryFixture, ClassifyBundleFailsAnExpectedRejectionSweepCaseThatCannotLoad)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"flagged_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          /*includeGolden=*/false}});
+    setFirstCaseFlags(sweepDir, {{"expected_rejection", true}});
+
+    // A case whose values no longer fill the template's placeholders is an
+    // INVALID_SWEEP_CASE, which is a skip unless the case asked to be rejected.
+    nlohmann::json sweepJson;
+    {
+        std::ifstream in(sweepDir / "sweep.json");
+        sweepJson = nlohmann::json::parse(in);
+    }
+    sweepJson["cases"][0].erase("values");
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
+    ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome));
+    EXPECT_NE(std::get<detail::FailedLoad>(outcome).message.find("expected_rejection"),
+              std::string::npos);
+}
+
+// Registration seeds graphsWithClaims from the same predicate the harness's
+// shouldObserveClaims() applies. A sweep's cases share one support.json, so the file
+// alone cannot exclude a flagged case: only the flag can, and a count the harness will
+// never satisfy would make the summary blame the harness for the gap.
+TEST_F(TestBundleDiscoveryFixture, RegistrationDoesNotCountAnExpectedRejectionCaseAsClaimed)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"claimed_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          /*includeGolden=*/false},
+                         {"rejected_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          /*includeGolden=*/false}});
+
+    nlohmann::json sweepJson;
+    {
+        std::ifstream in(sweepDir / "sweep.json");
+        sweepJson = nlohmann::json::parse(in);
+    }
+    sweepJson["cases"][1]["metadata"]["expected_rejection"] = true;
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+    std::ofstream(sweepDir / "support.json")
+        << R"({"version": 1, "claims": {"E": [{"cases": ["claimed_fp32_nchw"],
+                "support": {"gfx942": ["linux"]}}]}})";
+
+    const detail::DiscoveredBundleSet set{_tempDir, discoverBundles(_tempDir), {}};
+    ASSERT_EQ(set.bundles.size(), 2u);
+
+    const auto before = supportClaimCoverage();
+    const auto loadedBundles
+        = detail::loadDiscoveredBundles(set, /*countFound=*/true, /*countClaims=*/true);
+    ASSERT_TRUE(loadedBundles.has_value());
+    EXPECT_EQ(loadedBundles->size(), 2u);
+
+    EXPECT_EQ(supportClaimCoverage().graphsFound - before.graphsFound, 2u);
+    EXPECT_EQ(supportClaimCoverage().graphsWithClaims - before.graphsWithClaims, 1u);
+}
+
+// An unknown fill kind is an authoring error, not a random fill: the bundle registers
+// a failing test that names the input and the kind.
+TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsFailedLoadForUnknownFillKind)
+{
+    auto dir = _tempDir / "op" / "unknownkind";
+    createMinimalBundle(dir, "unknownkind");
+    std::ofstream(dir / "unknownkind.meta.json")
+        << R"({"format_version": 1, "inputs": {"3": {"kind": "vaules", "values": [1]}}})";
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
+    ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome));
+    const auto& message = std::get<detail::FailedLoad>(outcome).message;
+    EXPECT_NE(message.find("input 3"), std::string::npos) << message;
+    EXPECT_NE(message.find("vaules"), std::string::npos) << message;
+}
+
+TEST_F(TestBundleDiscoveryFixture, ClassifySweepCaseReturnsFailedLoadForUnknownFillKind)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"unknown_kind_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          false, // includeGolden
+                          false, // goldenHasPath
+                          true}}); // includeMetadata
+
+    nlohmann::json sweepJson;
+    {
+        std::ifstream in(sweepDir / "sweep.json");
+        sweepJson = nlohmann::json::parse(in);
+    }
+    sweepJson["cases"][0]["metadata"]["inputs"] = {{"3", {{"kind", "vaules"}}}};
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
+    ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome));
+    const auto& message = std::get<detail::FailedLoad>(outcome).message;
+    EXPECT_NE(message.find("input 3"), std::string::npos) << message;
+    EXPECT_NE(message.find("vaules"), std::string::npos) << message;
+}
+
+// A harness that knows format_version 2 refuses a VALUES fill in version 1 metadata,
+// so a case cannot rely on a fill that an older harness would read as random.
+TEST_F(TestBundleDiscoveryFixture, ClassifySweepCaseReturnsFailedLoadForValuesInFormatVersion1)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"values_v1_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          false, // includeGolden
+                          false, // goldenHasPath
+                          true}}); // includeMetadata
+
+    nlohmann::json sweepJson;
+    {
+        std::ifstream in(sweepDir / "sweep.json");
+        sweepJson = nlohmann::json::parse(in);
+    }
+    auto& metadata = sweepJson["cases"][0]["metadata"];
+    metadata["format_version"] = 1;
+    metadata["inputs"] = {{"3", {{"kind", "values"}, {"values", {1, 2}}}}};
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto outcome = detail::classifyBundle(discovered.front(), _sweeps);
+    ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome));
+    const auto& message = std::get<detail::FailedLoad>(outcome).message;
+    EXPECT_NE(message.find("kind values needs format_version 2"), std::string::npos) << message;
+
+    metadata["format_version"] = 2;
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+    const auto rediscovered = discoverBundles(_tempDir);
+    ASSERT_EQ(rediscovered.size(), 1u);
+    EXPECT_TRUE(std::holds_alternative<IntegrationTestBundle>(
+        loadIntegrationTestBundle(rediscovered.front())));
+}
+
+// ---------------------------------------------------------------------------
+// aliases: the load-time rules
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+nlohmann::json readJsonFile(const std::filesystem::path& path)
+{
+    std::ifstream in(path);
+    return nlohmann::json::parse(in);
+}
+
+void writeJsonFile(const std::filesystem::path& path, const nlohmann::json& json)
+{
+    std::ofstream(path) << json.dump(2);
+}
+
+// Sets the fields of each patch ([{"uid": u, "set": {...}}]) on that tensor of `graph`.
+void setTensorFields(nlohmann::json& graph, const nlohmann::json& patches)
+{
+    for(const auto& patch : patches)
+    {
+        for(auto& tensor : graph.at("tensors"))
+        {
+            if(tensor.at("uid") != patch.at("uid"))
+            {
+                continue;
+            }
+            for(const auto& item : patch.at("set").items())
+            {
+                tensor[item.key()] = item.value();
+            }
+        }
+    }
+}
+
+nlohmann::json aliasMetadata(const nlohmann::json& aliases)
+{
+    return nlohmann::json{{"format_version", 2}, {"aliases", aliases}};
+}
+
+// The FailedLoad message of the one bundle under `root`. Any other outcome is a
+// problem with the test itself, not the thing it's checking, so it throws instead
+// of returning a placeholder a caller's own assertion would then fail against a
+// second time.
+std::string failedLoadMessage(const std::filesystem::path& root, SweepManifestCache& sweeps)
+{
+    const auto discovered = discoverBundles(root);
+    if(discovered.size() != 1)
+    {
+        throw std::runtime_error("expected one bundle under " + root.string() + ", found "
+                                 + std::to_string(discovered.size()));
+    }
+    auto outcome = detail::classifyBundle(discovered.front(), sweeps);
+    if(!std::holds_alternative<detail::FailedLoad>(outcome))
+    {
+        throw std::runtime_error("expected a FailedLoad for " + root.string());
+    }
+    return std::get<detail::FailedLoad>(outcome).message;
+}
+
+// One SDPA backward node: q=1, k=2, v=3, o=4, do=5, stats=6 in; dq=7, dk=8, dv=9 out.
+nlohmann::json sdpaBackwardGraphJson()
+{
+    const auto tensor = [](int64_t uid, bool stats) {
+        return nlohmann::json{
+            {"name", ""},
+            {"uid", uid},
+            {"dims", stats ? std::vector<int64_t>{1, 1, 2, 1} : std::vector<int64_t>{1, 1, 2, 4}},
+            {"strides",
+             stats ? std::vector<int64_t>{2, 2, 1, 1} : std::vector<int64_t>{8, 8, 4, 1}},
+            {"data_type", "float"},
+            {"virtual", false}};
+    };
+    auto tensors = nlohmann::json::array();
+    for(int64_t uid = 1; uid <= 9; ++uid)
+    {
+        tensors.push_back(tensor(uid, uid == 6));
+    }
+    auto graph = nlohmann::json::parse(R"({
+        "name": "sdpa_backward", "compute_data_type": "float", "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "nodes": [{
+            "name": "sdpa_backward", "type": "SdpaBackwardAttributes",
+            "compute_data_type": "float",
+            "inputs": {
+                "q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 3, "o_tensor_uid": 4,
+                "do_tensor_uid": 5, "stats_tensor_uid": 6, "scale_tensor_uid": null,
+                "attn_mask_tensor_uid": null, "seq_len_q_tensor_uid": null,
+                "seq_len_kv_tensor_uid": null, "seed_tensor_uid": null,
+                "offset_tensor_uid": null, "dropout_mask_tensor_uid": null,
+                "dropout_scale_tensor_uid": null, "dropout_scale_inv_tensor_uid": null},
+            "outputs": {
+                "dq_tensor_uid": 7, "dk_tensor_uid": 8, "dv_tensor_uid": 9,
+                "dbias_tensor_uid": null},
+            "parameters": {
+                "alibi_mask": false, "padding_mask": false, "causal_mask": false,
+                "causal_mask_bottom_right": false, "dropout_probability": null,
+                "attn_scale_value": null, "left_bound": null, "right_bound": null,
+                "diagonal_alignment": "TOP_LEFT"}}]
+    })");
+    graph["tensors"] = std::move(tensors);
+    return graph;
+}
+
+struct AliasRuleCase
+{
+    std::string name;
+    std::string aliases;
+    std::string patches;
+    std::string message;
+};
+
+// Each case breaks one rule on the graph of createMinimalBundle() or of a sweep case of
+// createTemplateSweep(): x=0 [2,3,4,5]; uids 1-4 [1,3,1,1] with strides [3,1,1,1];
+// y=5 is the output.
+std::vector<AliasRuleCase> aliasRuleCases()
+{
+    const std::string view3Of2 = R"([{"uid": 3, "of": 2, "byte_offset": 0}])";
+    return {
+        {"view_not_in_graph",
+         R"([{"uid": 9, "of": 2, "byte_offset": 0}])",
+         "[]",
+         "alias view 9 of owner 2: the view is not a tensor of the graph"},
+        {"owner_not_in_graph",
+         R"([{"uid": 3, "of": 9, "byte_offset": 0}])",
+         "[]",
+         "alias view 3 of owner 9: the owner is not a tensor of the graph"},
+        {"view_virtual",
+         view3Of2,
+         R"([{"uid": 3, "set": {"virtual": true}}])",
+         "alias view 3 of owner 2: the view is virtual"},
+        {"view_output",
+         R"([{"uid": 5, "of": 2, "byte_offset": 0}])",
+         "[]",
+         "alias view 5 of owner 2: the view is an output"},
+        {"owner_output",
+         R"([{"uid": 3, "of": 5, "byte_offset": 0}])",
+         "[]",
+         "alias view 3 of owner 5: the owner is an output"},
+        {"view_runtime_pass_by_value",
+         view3Of2,
+         R"([{"uid": 3, "set": {"is_runtime_pass_by_value": true}}])",
+         "alias view 3 of owner 2: the view is passed by value at run time"},
+        {"owner_ragged",
+         view3Of2,
+         R"([{"uid": 2, "set": {"ragged_offset_tensor_uid": 4}}])",
+         "alias view 3 of owner 2: the owner is ragged"},
+        {"sub_byte",
+         view3Of2,
+         R"([{"uid": 2, "set": {"data_type": "fp4_e2m1"}},
+             {"uid": 3, "set": {"data_type": "fp4_e2m1"}}])",
+         "alias view 3 of owner 2: the view has the sub-byte data type FP4_E2M1"},
+        {"data_types_differ",
+         view3Of2,
+         R"([{"uid": 3, "set": {"data_type": "half"}}])",
+         "alias view 3 of owner 2: the view's data type HALF differs from the owner's data type "
+         "FLOAT"},
+        {"offset_not_a_multiple",
+         R"([{"uid": 3, "of": 2, "byte_offset": 2}])",
+         "[]",
+         "alias view 3 of owner 2: byte_offset 2 is not a multiple of the view's element size 4"},
+        {"view_negative_stride",
+         view3Of2,
+         R"([{"uid": 3, "set": {"strides": [3, -1, 1, 1]}}])",
+         "alias view 3 of owner 2: the view has a negative stride"},
+        {"owner_negative_stride",
+         view3Of2,
+         R"([{"uid": 2, "set": {"strides": [3, -1, 1, 1]}}])",
+         "alias view 3 of owner 2: the owner has a negative stride"},
+        {"owner_zero_dim",
+         view3Of2,
+         R"([{"uid": 2, "set": {"dims": [1, 0, 1, 1]}}])",
+         "alias view 3 of owner 2: the owner has a zero dim"},
+        {"owner_size_overflow",
+         view3Of2,
+         R"([{"uid": 2, "set": {"strides": [3, 4611686018427387904, 1, 1]}}])",
+         "alias view 3 of owner 2: the owner's size does not fit in a 64-bit byte count"},
+        {"offset_breaks_alignment",
+         R"([{"uid": 3, "of": 2, "byte_offset": 4}])",
+         "[]",
+         "alias view 3 of owner 2: byte_offset 4 is not a multiple of the view's alignment 16"},
+        {"owner_alignment_below_the_views",
+         view3Of2,
+         R"([{"uid": 3, "set": {"alignment": 32}}])",
+         "alias view 3 of owner 2: the owner's alignment 16 is not a multiple of the view's "
+         "alignment 32"},
+        {"view_constant_value",
+         view3Of2,
+         R"([{"uid": 3, "set": {"value_type": "Float32Value", "value": 1.0}}])",
+         "alias view 3 of owner 2: the view has a constant value"},
+        {"owner_negative_dim",
+         view3Of2,
+         R"([{"uid": 2, "set": {"dims": [1, -3, 1, 1]}}])",
+         "alias view 3 of owner 2: the owner has a negative dim"},
+        {"view_reach_overflow",
+         view3Of2,
+         R"([{"uid": 3, "set": {"strides": [3, 4611686018427387904, 1, 1]}}])",
+         "alias view 3 of owner 2: the view's reach does not fit in a 64-bit byte count"},
+        {"zero_dim_view_offset_past_owner",
+         R"([{"uid": 3, "of": 2, "byte_offset": 16}])",
+         R"([{"uid": 3, "set": {"dims": [1, 0, 1, 1]}}])",
+         "alias view 3 of owner 2: byte_offset 16 is past the end of the owner's 12-byte "
+         "allocation"},
+        {"out_of_bounds",
+         R"([{"uid": 3, "of": 2, "byte_offset": 16}])",
+         "[]",
+         "alias view 3 of owner 2: the view reaches byte 28, past the end of the owner's "
+         "12-byte allocation"},
+    };
+}
+
+} // namespace
+
+TEST_F(TestBundleDiscoveryFixture, AliasRuleViolationsFailTheLoadOfABundle)
+{
+    for(const auto& c : aliasRuleCases())
+    {
+        SCOPED_TRACE(c.name);
+        const auto root = _tempDir / ("direct_" + c.name);
+        const auto dir = root / "op" / "aliased";
+        createMinimalBundle(dir, "aliased");
+        auto graph = readJsonFile(dir / "aliased.json");
+        setTensorFields(graph, nlohmann::json::parse(c.patches));
+        writeJsonFile(dir / "aliased.json", graph);
+        writeJsonFile(dir / "aliased.meta.json", aliasMetadata(nlohmann::json::parse(c.aliases)));
+
+        EXPECT_THROW(loadIntegrationTestBundle(dir / "aliased.json"), BundleMetadataError);
+        const auto message = failedLoadMessage(root, _sweeps);
+        EXPECT_NE(message.find(c.message), std::string::npos) << message;
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, AliasRuleViolationsFailTheLoadOfASweepCase)
+{
+    for(const auto& c : aliasRuleCases())
+    {
+        SCOPED_TRACE(c.name);
+        const auto root = _tempDir / ("sweep_" + c.name);
+        const auto sweepDir = root / "quick" / "BatchnormFwdInference" / "Inference";
+        createTemplateSweep(sweepDir,
+                            {{"aliased_fp32_nchw",
+                              "float",
+                              {2, 3, 4, 5},
+                              {60, 20, 5, 1},
+                              {1, 3, 1, 1},
+                              {3, 1, 1, 1},
+                              false, // includeGolden
+                              false, // goldenHasPath
+                              true}}); // includeMetadata
+        auto sweepJson = readJsonFile(sweepDir / "sweep.json");
+        auto& caseJson = sweepJson["cases"][0];
+        caseJson["metadata"] = aliasMetadata(nlohmann::json::parse(c.aliases));
+        caseJson["tensor_patches"] = nlohmann::json::parse(c.patches);
+        writeJsonFile(sweepDir / "sweep.json", sweepJson);
+
+        const auto message = failedLoadMessage(root, _sweeps);
+        EXPECT_NE(message.find(c.message), std::string::npos) << message;
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, ValidAliasLoadsInABundleAndASweepCase)
+{
+    const auto dir = _tempDir / "op" / "aliased";
+    createMinimalBundle(dir, "aliased");
+    writeJsonFile(
+        dir / "aliased.meta.json",
+        aliasMetadata(nlohmann::json::parse(R"([{"uid": 3, "of": 2, "byte_offset": 0}])")));
+    const auto direct = loadIntegrationTestBundle(dir / "aliased.json");
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(direct));
+    const auto& directAliases = std::get<IntegrationTestBundle>(direct).metadata.aliases;
+    ASSERT_EQ(directAliases.size(), 1u);
+    EXPECT_EQ(directAliases.front(), (hipdnn_integration_tests::TensorAlias{3, 2, 0}));
+
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"aliased_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          false, // includeGolden
+                          false, // goldenHasPath
+                          true}}); // includeMetadata
+    auto sweepJson = readJsonFile(sweepDir / "sweep.json");
+    sweepJson["cases"][0]["metadata"]
+        = aliasMetadata(nlohmann::json::parse(R"([{"uid": 4, "of": 1, "byte_offset": 4}])"));
+    // A view with a zero dim reaches no bytes; its offset stays inside the owner and
+    // follows the view's alignment.
+    sweepJson["cases"][0]["tensor_patches"]
+        = nlohmann::json::parse(R"([{"uid": 4, "set": {"dims": [1, 0, 1, 1], "alignment": 4}}])");
+    writeJsonFile(sweepDir / "sweep.json", sweepJson);
+
+    const auto discovered = discoverBundles(_tempDir);
+    const auto* sweepCase = findByTest(discovered, "aliased_fp32_nchw");
+    ASSERT_NE(sweepCase, nullptr);
+    const auto sweep = loadIntegrationTestBundle(*sweepCase, _sweeps);
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(sweep));
+    EXPECT_EQ(std::get<IntegrationTestBundle>(sweep).metadata.aliases.front(),
+              (hipdnn_integration_tests::TensorAlias{4, 1, 4}));
+}
+
+TEST_F(TestBundleDiscoveryFixture, AliasInABundleWithGoldenDataFailsTheLoad)
+{
+    const std::string rule
+        = "alias view 3 of owner 2: the bundle has golden data or tensor blobs, which store "
+          "each tensor apart";
+
+    const auto directRoot = _tempDir / "direct";
+    const auto dir = directRoot / "op" / "aliased";
+    createMinimalBundle(dir, "aliased");
+    writeJsonFile(
+        dir / "aliased.meta.json",
+        aliasMetadata(nlohmann::json::parse(R"([{"uid": 3, "of": 2, "byte_offset": 0}])")));
+    std::ofstream(dir / "aliased.tensors.dvc") << "outs:\n";
+    const auto directMessage = failedLoadMessage(directRoot, _sweeps);
+    EXPECT_NE(directMessage.find(rule), std::string::npos) << directMessage;
+
+    const auto sweepRoot = _tempDir / "sweep";
+    const auto sweepDir = sweepRoot / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(
+        sweepDir,
+        {{"aliased_fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+    auto sweepJson = readJsonFile(sweepDir / "sweep.json");
+    sweepJson["cases"][0]["metadata"]
+        = aliasMetadata(nlohmann::json::parse(R"([{"uid": 3, "of": 2, "byte_offset": 0}])"));
+    writeJsonFile(sweepDir / "sweep.json", sweepJson);
+    const auto sweepMessage = failedLoadMessage(sweepRoot, _sweeps);
+    EXPECT_NE(sweepMessage.find(rule), std::string::npos) << sweepMessage;
+}
+
+// The input fill of an SDPA backward node replaces O and stats with the forward of Q, K
+// and V, and reads each of them as its own tensor.
+TEST_F(TestBundleDiscoveryFixture, AliasInAGraphWhoseFillDerivesInputsFailsTheLoad)
+{
+    const std::string rule = "alias view 3 of owner 2: the graph's input fill derives some inputs "
+                             "from other inputs";
+    const auto aliases
+        = aliasMetadata(nlohmann::json::parse(R"([{"uid": 3, "of": 2, "byte_offset": 0}])"));
+
+    const auto directRoot = _tempDir / "direct";
+    const auto dir = directRoot / "op" / "aliased";
+    std::filesystem::create_directories(dir);
+    writeJsonFile(dir / "aliased.json", sdpaBackwardGraphJson());
+    writeJsonFile(dir / "aliased.meta.json", aliases);
+    const auto directMessage = failedLoadMessage(directRoot, _sweeps);
+    EXPECT_NE(directMessage.find(rule), std::string::npos) << directMessage;
+
+    const auto sweepRoot = _tempDir / "sweep";
+    const auto sweepDir = sweepRoot / "quick" / "SdpaBackward" / "Aliased";
+    std::filesystem::create_directories(sweepDir);
+    writeJsonFile(sweepDir / "graph.template.json", sdpaBackwardGraphJson());
+    writeJsonFile(
+        sweepDir / "sweep.json",
+        nlohmann::json{{"version", 1},
+                       {"cases",
+                        nlohmann::json::array({nlohmann::json{{"id", "aliased"},
+                                                              {"values", nlohmann::json::object()},
+                                                              {"metadata", aliases}}})}});
+    const auto sweepMessage = failedLoadMessage(sweepRoot, _sweeps);
+    EXPECT_NE(sweepMessage.find(rule), std::string::npos) << sweepMessage;
+}
+
+// Input blobs without golden outputs make a reference-verified bundle, which still
+// reads each input from its own blob.
+TEST_F(TestBundleDiscoveryFixture, AliasInABundleWithInputBlobsFailsTheLoad)
+{
+    const auto dir = _tempDir / "op" / "aliased";
+    createLoadableBundle(dir, "aliased");
+    std::filesystem::remove(dir / "aliased.tensor5.bin");
+    writeJsonFile(
+        dir / "aliased.meta.json",
+        aliasMetadata(nlohmann::json::parse(R"([{"uid": 3, "of": 2, "byte_offset": 0}])")));
+
+    const auto message = failedLoadMessage(_tempDir, _sweeps);
+    EXPECT_NE(message.find("alias view 3 of owner 2: the bundle has golden data or tensor blobs"),
+              std::string::npos)
+        << message;
+}
+
+// The view has no blob, so not every input has one, but the other blobs still store
+// each tensor apart.
+TEST_F(TestBundleDiscoveryFixture, AliasInABundleWithSomeInputBlobsFailsTheLoad)
+{
+    const auto dir = _tempDir / "op" / "aliased";
+    createLoadableBundle(dir, "aliased");
+    std::filesystem::remove(dir / "aliased.tensor3.bin");
+    std::filesystem::remove(dir / "aliased.tensor5.bin");
+    writeJsonFile(
+        dir / "aliased.meta.json",
+        aliasMetadata(nlohmann::json::parse(R"([{"uid": 3, "of": 2, "byte_offset": 0}])")));
+
+    const auto message = failedLoadMessage(_tempDir, _sweeps);
+    EXPECT_NE(message.find("alias view 3 of owner 2: the bundle has golden data or tensor blobs"),
+              std::string::npos)
+        << message;
+}
+
+// Mirrors AliasInABundleWithSomeInputBlobsFailsTheLoad, for a sweep case: the view's
+// own blob and the output's blob are both absent, but the owner's blob (and others)
+// are still present, so the sweep case still stores some tensor apart from the alias.
+TEST_F(TestBundleDiscoveryFixture, AliasInASweepCaseWithSomeInputBlobsFailsTheLoad)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"aliased_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          /*includeGolden=*/true,
+                          /*goldenHasPath=*/true,
+                          /*includeMetadata=*/false}});
+    auto sweepJson = readJsonFile(sweepDir / "sweep.json");
+    sweepJson["cases"][0]["metadata"]
+        = aliasMetadata(nlohmann::json::parse(R"([{"uid": 3, "of": 2, "byte_offset": 0}])"));
+    writeJsonFile(sweepDir / "sweep.json", sweepJson);
+    std::filesystem::remove(sweepDir / "golden" / "aliased_fp32_nchw" / "tensor3.bin");
+    std::filesystem::remove(sweepDir / "golden" / "aliased_fp32_nchw" / "tensor5.bin");
+
+    const auto message = failedLoadMessage(_tempDir, _sweeps);
+    EXPECT_NE(message.find("alias view 3 of owner 2: the bundle has golden data or tensor blobs"),
+              std::string::npos)
+        << message;
+}
+
+// ---------------------------------------------------------------------------
+// start_offsets: the load-time rules
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+nlohmann::json startOffsetMetadata(const std::string& startOffsets,
+                                   const std::string& aliases = std::string())
+{
+    auto metadata = nlohmann::json{{"format_version", 2},
+                                   {"start_offsets", nlohmann::json::parse(startOffsets)}};
+    if(!aliases.empty())
+    {
+        metadata["aliases"] = nlohmann::json::parse(aliases);
+    }
+    return metadata;
+}
+
+struct StartOffsetRuleCase
+{
+    std::string name;
+    std::string startOffsets;
+    std::string aliases;
+    std::string patches;
+    std::string message;
+};
+
+// Each case breaks one rule on the graph of createMinimalBundle() or of a sweep case of
+// createTemplateSweep(): x=0 [2,3,4,5]; uids 1-4 [1,3,1,1]; y=5 is the output. Every
+// tensor has the default alignment 16.
+std::vector<StartOffsetRuleCase> startOffsetRuleCases()
+{
+    const std::string tensor3 = R"([{"uid": 3, "start_offset": 16}])";
+    const std::string view3Of2 = R"([{"uid": 3, "of": 2, "byte_offset": 0}])";
+    return {
+        {"not_in_graph",
+         R"([{"uid": 9, "start_offset": 16}])",
+         "",
+         "[]",
+         "start offset of tensor 9: the tensor is not a tensor of the graph"},
+        {"virtual",
+         tensor3,
+         "",
+         R"([{"uid": 3, "set": {"virtual": true}}])",
+         "start offset of tensor 3: the tensor is virtual"},
+        {"runtime_pass_by_value",
+         tensor3,
+         "",
+         R"([{"uid": 3, "set": {"is_runtime_pass_by_value": true}}])",
+         "start offset of tensor 3: the tensor is passed by value at run time"},
+        {"constant_value",
+         tensor3,
+         "",
+         R"([{"uid": 3, "set": {"value_type": "Float32Value", "value": 1.0}}])",
+         "start offset of tensor 3: the tensor has a constant value"},
+        {"alias_view",
+         tensor3,
+         view3Of2,
+         "[]",
+         "start offset of tensor 3: the tensor is alias view 3 of owner 2; a view moves with "
+         "its owner"},
+        {"sub_byte",
+         tensor3,
+         "",
+         R"([{"uid": 3, "set": {"data_type": "fp4_e2m1"}}])",
+         "start offset of tensor 3: the tensor has the sub-byte data type FP4_E2M1"},
+        {"default_alignment_does_not_divide_the_offset",
+         R"([{"uid": 3, "start_offset": 2}])",
+         "",
+         "[]",
+         "start offset of tensor 3: start_offset 2 is not a multiple of the tensor's "
+         "alignment 16"},
+        {"declared_alignment_does_not_divide_the_offset",
+         R"([{"uid": 5, "start_offset": 6}])",
+         "",
+         R"([{"uid": 5, "set": {"alignment": 4}}])",
+         "start offset of tensor 5: start_offset 6 is not a multiple of the tensor's "
+         "alignment 4"},
+    };
+}
+
+} // namespace
+
+TEST_F(TestBundleDiscoveryFixture, StartOffsetRuleViolationsFailTheLoadOfABundle)
+{
+    for(const auto& c : startOffsetRuleCases())
+    {
+        SCOPED_TRACE(c.name);
+        const auto root = _tempDir / ("direct_" + c.name);
+        const auto dir = root / "op" / "shifted";
+        createMinimalBundle(dir, "shifted");
+        auto graph = readJsonFile(dir / "shifted.json");
+        setTensorFields(graph, nlohmann::json::parse(c.patches));
+        writeJsonFile(dir / "shifted.json", graph);
+        writeJsonFile(dir / "shifted.meta.json", startOffsetMetadata(c.startOffsets, c.aliases));
+
+        EXPECT_THROW(loadIntegrationTestBundle(dir / "shifted.json"), BundleMetadataError);
+        const auto message = failedLoadMessage(root, _sweeps);
+        EXPECT_NE(message.find(c.message), std::string::npos) << message;
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, StartOffsetRuleViolationsFailTheLoadOfASweepCase)
+{
+    for(const auto& c : startOffsetRuleCases())
+    {
+        SCOPED_TRACE(c.name);
+        const auto root = _tempDir / ("sweep_" + c.name);
+        const auto sweepDir = root / "quick" / "BatchnormFwdInference" / "Inference";
+        createTemplateSweep(sweepDir,
+                            {{"shifted_fp32_nchw",
+                              "float",
+                              {2, 3, 4, 5},
+                              {60, 20, 5, 1},
+                              {1, 3, 1, 1},
+                              {3, 1, 1, 1},
+                              false, // includeGolden
+                              false, // goldenHasPath
+                              true}}); // includeMetadata
+        auto sweepJson = readJsonFile(sweepDir / "sweep.json");
+        auto& caseJson = sweepJson["cases"][0];
+        caseJson["metadata"] = startOffsetMetadata(c.startOffsets, c.aliases);
+        caseJson["tensor_patches"] = nlohmann::json::parse(c.patches);
+        writeJsonFile(sweepDir / "sweep.json", sweepJson);
+
+        const auto message = failedLoadMessage(root, _sweeps);
+        EXPECT_NE(message.find(c.message), std::string::npos) << message;
+    }
+}
+
+// An input and an output, each with an alignment that divides its offset, and an alias
+// view of a moved owner whose offset keeps the view's alignment.
+TEST_F(TestBundleDiscoveryFixture, ValidStartOffsetsLoadInABundleAndASweepCase)
+{
+    using hipdnn_integration_tests::TensorStartOffset;
+    const std::string startOffsets
+        = R"([{"uid": 0, "start_offset": 2}, {"uid": 5, "start_offset": 1},
+              {"uid": 2, "start_offset": 4}])";
+    const std::string aliases = R"([{"uid": 3, "of": 2, "byte_offset": 8}])";
+    const auto patches = nlohmann::json::parse(
+        R"([{"uid": 0, "set": {"alignment": 2}},
+            {"uid": 5, "set": {"alignment": 0}},
+            {"uid": 2, "set": {"alignment": 4}},
+            {"uid": 3, "set": {"alignment": 4, "dims": [1, 1, 1, 1]}}])");
+    const std::vector<TensorStartOffset> expected = {{0, 2}, {5, 1}, {2, 4}};
+
+    const auto dir = _tempDir / "op" / "shifted";
+    createMinimalBundle(dir, "shifted");
+    auto graph = readJsonFile(dir / "shifted.json");
+    setTensorFields(graph, patches);
+    writeJsonFile(dir / "shifted.json", graph);
+    writeJsonFile(dir / "shifted.meta.json", startOffsetMetadata(startOffsets, aliases));
+    const auto direct = loadIntegrationTestBundle(dir / "shifted.json");
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(direct));
+    EXPECT_EQ(std::get<IntegrationTestBundle>(direct).metadata.startOffsets, expected);
+
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"shifted_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          false, // includeGolden
+                          false, // goldenHasPath
+                          true}}); // includeMetadata
+    auto sweepJson = readJsonFile(sweepDir / "sweep.json");
+    sweepJson["cases"][0]["metadata"] = startOffsetMetadata(startOffsets, aliases);
+    sweepJson["cases"][0]["tensor_patches"] = patches;
+    writeJsonFile(sweepDir / "sweep.json", sweepJson);
+
+    const auto discovered = discoverBundles(_tempDir);
+    const auto* sweepCase = findByTest(discovered, "shifted_fp32_nchw");
+    ASSERT_NE(sweepCase, nullptr);
+    const auto sweep = loadIntegrationTestBundle(*sweepCase, _sweeps);
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(sweep));
+    EXPECT_EQ(std::get<IntegrationTestBundle>(sweep).metadata.startOffsets, expected);
+}
+
+// The offset applies to the engine's copy only, so a bundle with golden data or tensor
+// blobs keeps them.
+TEST_F(TestBundleDiscoveryFixture, StartOffsetInABundleWithGoldenDataLoads)
+{
+    const auto startOffsets = startOffsetMetadata(R"([{"uid": 5, "start_offset": 16}])");
+
+    const auto dir = _tempDir / "op" / "shifted";
+    createLoadableBundle(dir, "shifted");
+    writeJsonFile(dir / "shifted.meta.json", startOffsets);
+    std::ofstream(dir / "shifted.tensors.dvc") << "outs:\n";
+    const auto direct = loadIntegrationTestBundle(dir / "shifted.json");
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(direct));
+    const auto& directBundle = std::get<IntegrationTestBundle>(direct);
+    EXPECT_TRUE(directBundle.hasGoldenOutputs);
+    EXPECT_EQ(directBundle.metadata.startOffsets.size(), 1u);
+
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(
+        sweepDir,
+        {{"shifted_fp32_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+    auto sweepJson = readJsonFile(sweepDir / "sweep.json");
+    sweepJson["cases"][0]["metadata"] = startOffsets;
+    writeJsonFile(sweepDir / "sweep.json", sweepJson);
+
+    const auto discovered = discoverBundles(_tempDir);
+    const auto* sweepCase = findByTest(discovered, "shifted_fp32_nchw");
+    ASSERT_NE(sweepCase, nullptr);
+    const auto sweep = loadIntegrationTestBundle(*sweepCase, _sweeps);
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(sweep));
+    const auto& sweepBundle = std::get<IntegrationTestBundle>(sweep);
+    EXPECT_TRUE(sweepBundle.hasGoldenOutputs);
+    EXPECT_EQ(sweepBundle.metadata.startOffsets.size(), 1u);
+}
+
+TEST_F(TestBundleDiscoveryFixture, StartOffsetInFormatVersion1MetadataFailsTheLoad)
+{
+    const auto dir = _tempDir / "op" / "shifted";
+    createMinimalBundle(dir, "shifted");
+    writeJsonFile(dir / "shifted.meta.json",
+                  nlohmann::json{{"format_version", 1},
+                                 {"start_offsets",
+                                  nlohmann::json::parse(R"([{"uid": 5, "start_offset": 16}])")}});
+    const auto message = failedLoadMessage(_tempDir, _sweeps);
+    EXPECT_NE(message.find("start_offsets needs format_version 2"), std::string::npos) << message;
+}
+
+// ---------------------------------------------------------------------------
+// live_rows: the load-time rules
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+nlohmann::json liveRowMetadata(const std::string& liveRows,
+                               const std::string& aliases = std::string())
+{
+    auto metadata
+        = nlohmann::json{{"format_version", 2}, {"live_rows", nlohmann::json::parse(liveRows)}};
+    if(!aliases.empty())
+    {
+        metadata["aliases"] = nlohmann::json::parse(aliases);
+    }
+    return metadata;
+}
+
+struct LiveRowRuleCase
+{
+    std::string name;
+    std::string liveRows;
+    std::string aliases;
+    std::string patches;
+    std::string message;
+};
+
+// Lengths for the two batches of y=5, in uid 1.
+constexpr const char* K_INT32_LENGTHS_IN_UID_1
+    = R"({"uid": 1, "set": {"data_type": "int32", "dims": [2, 1, 1, 1], "strides": [1, 1, 1, 1]}})";
+
+// Each case breaks one rule on the graph of createMinimalBundle() or of a sweep case of
+// createTemplateSweep(): x=0 [2,3,4,5]; uids 1-4 [1,3,1,1]; y=5 [2,3,4,5] is the output.
+std::vector<LiveRowRuleCase> liveRowRuleCases()
+{
+    const std::string byLengths = R"([{"uid": 5, "axis": 2, "lengths": 1}])";
+    const std::string lengthsPatch = std::string("[") + K_INT32_LENGTHS_IN_UID_1 + "]";
+    return {
+        {"output_not_in_graph",
+         R"([{"uid": 9, "like": 0}])",
+         "",
+         "[]",
+         "live rows of output 9: the output is not a tensor of the graph"},
+        {"not_an_output",
+         R"([{"uid": 0, "axis": 2, "lengths": 1}])",
+         "",
+         lengthsPatch,
+         "live rows of output 0: the tensor is not a compared output"},
+        {"ragged_output",
+         byLengths,
+         "",
+         std::string(R"([{"uid": 5, "set": {"ragged_offset_tensor_uid": 4}}, )")
+             + K_INT32_LENGTHS_IN_UID_1 + "]",
+         "live rows of output 5: the output is ragged"},
+        {"integer_output",
+         byLengths,
+         "",
+         std::string(R"([{"uid": 5, "set": {"data_type": "int32"}}, )") + K_INT32_LENGTHS_IN_UID_1
+             + "]",
+         "live rows of output 5: the output has the data type INT32, which is not a "
+         "floating-point type"},
+        {"axis_zero",
+         R"([{"uid": 5, "axis": 0, "lengths": 1}])",
+         "",
+         lengthsPatch,
+         "live rows of output 5: axis 0 is not in the range 1 to 3"},
+        {"axis_past_the_rank",
+         R"([{"uid": 5, "axis": 4, "lengths": 1}])",
+         "",
+         lengthsPatch,
+         "live rows of output 5: axis 4 is not in the range 1 to 3"},
+        {"lengths_not_in_graph",
+         R"([{"uid": 5, "axis": 2, "lengths": 9}])",
+         "",
+         "[]",
+         "live rows of output 5: lengths tensor 9 is not a tensor of the graph"},
+        {"lengths_is_an_output",
+         R"([{"uid": 5, "axis": 2, "lengths": 5}])",
+         "",
+         "[]",
+         "live rows of output 5: lengths tensor 5 is not a graph input"},
+        {"lengths_virtual",
+         byLengths,
+         "",
+         R"([{"uid": 1, "set": {"virtual": true}}])",
+         "live rows of output 5: lengths tensor 1 is not a graph input"},
+        {"lengths_runtime_pass_by_value",
+         byLengths,
+         "",
+         R"([{"uid": 1, "set": {"is_runtime_pass_by_value": true}}])",
+         "live rows of output 5: lengths tensor 1 is passed by value at run time"},
+        {"lengths_alias_view",
+         byLengths,
+         R"([{"uid": 1, "of": 2, "byte_offset": 0}])",
+         lengthsPatch,
+         "live rows of output 5: lengths tensor 1 is alias view 1 of owner 2"},
+        {"lengths_float",
+         byLengths,
+         "",
+         R"([{"uid": 1, "set": {"dims": [2, 1, 1, 1], "strides": [1, 1, 1, 1]}}])",
+         "live rows of output 5: lengths tensor 1 has the data type FLOAT, not INT32 or INT64"},
+        {"lengths_count_differs_from_the_batches",
+         byLengths,
+         "",
+         R"([{"uid": 1, "set": {"data_type": "int64"}}])",
+         "live rows of output 5: lengths tensor 1 has 3 elements; the output has 2 batches"},
+        {"like_not_in_graph",
+         R"([{"uid": 5, "like": 9}])",
+         "",
+         "[]",
+         "live rows of output 5: like tensor 9 is not a tensor of the graph"},
+        {"like_virtual",
+         R"([{"uid": 5, "like": 0}])",
+         "",
+         R"([{"uid": 0, "set": {"ragged_offset_tensor_uid": 4, "virtual": true}}])",
+         "live rows of output 5: like tensor 0 is virtual"},
+        {"like_not_ragged",
+         R"([{"uid": 5, "like": 0}])",
+         "",
+         "[]",
+         "live rows of output 5: like tensor 0 is not ragged"},
+        {"like_batches_differ",
+         R"([{"uid": 5, "like": 0}])",
+         "",
+         R"([{"uid": 0, "set": {"ragged_offset_tensor_uid": 4, "dims": [3, 3, 4, 5]}}])",
+         "live rows of output 5: like tensor 0 does not have the same dims[0] as the output"},
+    };
+}
+
+} // namespace
+
+TEST_F(TestBundleDiscoveryFixture, LiveRowRuleViolationsFailTheLoadOfABundle)
+{
+    for(const auto& c : liveRowRuleCases())
+    {
+        SCOPED_TRACE(c.name);
+        const auto root = _tempDir / ("direct_" + c.name);
+        const auto dir = root / "op" / "rows";
+        createMinimalBundle(dir, "rows");
+        auto graph = readJsonFile(dir / "rows.json");
+        setTensorFields(graph, nlohmann::json::parse(c.patches));
+        writeJsonFile(dir / "rows.json", graph);
+        writeJsonFile(dir / "rows.meta.json", liveRowMetadata(c.liveRows, c.aliases));
+
+        EXPECT_THROW(loadIntegrationTestBundle(dir / "rows.json"), BundleMetadataError);
+        const auto message = failedLoadMessage(root, _sweeps);
+        EXPECT_NE(message.find(c.message), std::string::npos) << message;
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, LiveRowRuleViolationsFailTheLoadOfASweepCase)
+{
+    for(const auto& c : liveRowRuleCases())
+    {
+        SCOPED_TRACE(c.name);
+        const auto root = _tempDir / ("sweep_" + c.name);
+        const auto sweepDir = root / "quick" / "BatchnormFwdInference" / "Inference";
+        createTemplateSweep(sweepDir,
+                            {{"rows_fp32_nchw",
+                              "float",
+                              {2, 3, 4, 5},
+                              {60, 20, 5, 1},
+                              {1, 3, 1, 1},
+                              {3, 1, 1, 1},
+                              false, // includeGolden
+                              false, // goldenHasPath
+                              true}}); // includeMetadata
+        auto sweepJson = readJsonFile(sweepDir / "sweep.json");
+        auto& caseJson = sweepJson["cases"][0];
+        caseJson["metadata"] = liveRowMetadata(c.liveRows, c.aliases);
+        caseJson["tensor_patches"] = nlohmann::json::parse(c.patches);
+        writeJsonFile(sweepDir / "sweep.json", sweepJson);
+
+        const auto message = failedLoadMessage(root, _sweeps);
+        EXPECT_NE(message.find(c.message), std::string::npos) << message;
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, ValidLiveRowsLoadInABundleAndASweepCase)
+{
+    using hipdnn_integration_tests::OutputLiveRows;
+    const std::string liveRows = R"([{"uid": 5, "axis": 2, "lengths": 1}])";
+    const auto patches = nlohmann::json::parse(std::string("[") + K_INT32_LENGTHS_IN_UID_1 + "]");
+    const std::vector<OutputLiveRows> expected = {{5, 2, 1, std::nullopt}};
+
+    const auto dir = _tempDir / "op" / "rows";
+    createMinimalBundle(dir, "rows");
+    auto graph = readJsonFile(dir / "rows.json");
+    setTensorFields(graph, patches);
+    writeJsonFile(dir / "rows.json", graph);
+    writeJsonFile(dir / "rows.meta.json", liveRowMetadata(liveRows));
+    const auto direct = loadIntegrationTestBundle(dir / "rows.json");
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(direct));
+    EXPECT_EQ(std::get<IntegrationTestBundle>(direct).metadata.liveRows, expected);
+
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"rows_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          false, // includeGolden
+                          false, // goldenHasPath
+                          true}}); // includeMetadata
+    auto sweepJson = readJsonFile(sweepDir / "sweep.json");
+    sweepJson["cases"][0]["metadata"] = liveRowMetadata(liveRows);
+    sweepJson["cases"][0]["tensor_patches"] = patches;
+    writeJsonFile(sweepDir / "sweep.json", sweepJson);
+
+    const auto discovered = discoverBundles(_tempDir);
+    const auto* sweepCase = findByTest(discovered, "rows_fp32_nchw");
+    ASSERT_NE(sweepCase, nullptr);
+    const auto sweep = loadIntegrationTestBundle(*sweepCase, _sweeps);
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(sweep));
+    EXPECT_EQ(std::get<IntegrationTestBundle>(sweep).metadata.liveRows, expected);
+}
+
+TEST_F(TestBundleDiscoveryFixture, ValidLiveRowsLikeARaggedTensorLoad)
+{
+    using hipdnn_integration_tests::OutputLiveRows;
+    const auto dir = _tempDir / "op" / "rows";
+    createMinimalBundle(dir, "rows");
+    auto graph = readJsonFile(dir / "rows.json");
+    setTensorFields(
+        graph, nlohmann::json::parse(R"([{"uid": 0, "set": {"ragged_offset_tensor_uid": 4}}])"));
+    writeJsonFile(dir / "rows.json", graph);
+    writeJsonFile(dir / "rows.meta.json", liveRowMetadata(R"([{"uid": 5, "like": 0}])"));
+
+    const auto direct = loadIntegrationTestBundle(dir / "rows.json");
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(direct));
+    EXPECT_EQ(std::get<IntegrationTestBundle>(direct).metadata.liveRows,
+              (std::vector<OutputLiveRows>{{5, std::nullopt, std::nullopt, 0}}));
+}
+
+// Live rows change only the comparison, so a bundle with golden data keeps it.
+TEST_F(TestBundleDiscoveryFixture, LiveRowsInABundleWithGoldenDataLoad)
+{
+    const auto dir = _tempDir / "op" / "rows";
+    createLoadableBundle(dir, "rows");
+    auto graph = readJsonFile(dir / "rows.json");
+    setTensorFields(graph,
+                    nlohmann::json::parse(std::string("[") + K_INT32_LENGTHS_IN_UID_1 + "]"));
+    writeJsonFile(dir / "rows.json", graph);
+    writeJsonFile(dir / "rows.meta.json",
+                  liveRowMetadata(R"([{"uid": 5, "axis": 2, "lengths": 1}])"));
+    std::ofstream(dir / "rows.tensors.dvc") << "outs:\n";
+
+    const auto direct = loadIntegrationTestBundle(dir / "rows.json");
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(direct));
+    EXPECT_EQ(std::get<IntegrationTestBundle>(direct).metadata.liveRows.size(), 1u);
+}
+
+TEST_F(TestBundleDiscoveryFixture, LiveRowsInFormatVersion1MetadataFailTheLoad)
+{
+    const auto dir = _tempDir / "op" / "rows";
+    createMinimalBundle(dir, "rows");
+    writeJsonFile(
+        dir / "rows.meta.json",
+        nlohmann::json{{"format_version", 1},
+                       {"live_rows", nlohmann::json::parse(R"([{"uid": 5, "like": 0}])")}});
+    const auto message = failedLoadMessage(_tempDir, _sweeps);
+    EXPECT_NE(message.find("live_rows needs format_version 2"), std::string::npos) << message;
+}
+
+TEST_F(TestBundleDiscoveryFixture, AliasInFormatVersion1MetadataFailsTheLoad)
+{
+    const auto v1Aliases = nlohmann::json{
+        {"format_version", 1},
+        {"aliases", nlohmann::json::parse(R"([{"uid": 3, "of": 2, "byte_offset": 0}])")}};
+
+    const auto directRoot = _tempDir / "direct";
+    const auto dir = directRoot / "op" / "aliased";
+    createMinimalBundle(dir, "aliased");
+    writeJsonFile(dir / "aliased.meta.json", v1Aliases);
+    const auto directMessage = failedLoadMessage(directRoot, _sweeps);
+    EXPECT_NE(directMessage.find("aliases needs format_version 2"), std::string::npos)
+        << directMessage;
+
+    const auto sweepRoot = _tempDir / "sweep";
+    const auto sweepDir = sweepRoot / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"aliased_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          false, // includeGolden
+                          false, // goldenHasPath
+                          true}}); // includeMetadata
+    auto sweepJson = readJsonFile(sweepDir / "sweep.json");
+    sweepJson["cases"][0]["metadata"] = v1Aliases;
+    writeJsonFile(sweepDir / "sweep.json", sweepJson);
+    const auto sweepMessage = failedLoadMessage(sweepRoot, _sweeps);
+    EXPECT_NE(sweepMessage.find("aliases needs format_version 2"), std::string::npos)
+        << sweepMessage;
+}
+
+// ---------------------------------------------------------------------------
+// absent_tensors: optional tensors in sweep templates
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+namespace fx = hipdnn_integration_tests::bundle::fixtures;
+namespace sdpa_utils = hipdnn_integration_tests::test_utils;
+
+constexpr int64_t SINK = sdpa_utils::K_OPTIONAL_SDPA_SINK_UID;
+constexpr int64_t V_UID = sdpa_utils::K_OPTIONAL_SDPA_V_UID;
+constexpr int64_t O_UID = sdpa_utils::K_OPTIONAL_SDPA_O_UID;
+constexpr int64_t STATS = sdpa_utils::K_OPTIONAL_SDPA_STATS_UID;
+
+// The case under test in the sweeps of the absent-tensor rules.
+constexpr const char* ABSENT_CASE_ID = "absent_case";
+
+nlohmann::json supersetGraph()
+{
+    return sdpa_utils::optionalSdpaFwdGraphJson(/*withStats=*/true, /*withSink=*/true);
+}
+
+nlohmann::json graphJsonOf(const IntegrationTestBundle& bundle)
+{
+    nlohmann::json graphJson;
+    hipdnn_flatbuffers_sdk::data_objects::to_json(
+        graphJson, *hipdnn_flatbuffers_sdk::data_objects::GetGraph(bundle.graphBuffer.data()));
+    return graphJson;
+}
+
+// The loaded case `caseId` under `root`; nullopt, with a test failure, when it does not load.
+std::optional<IntegrationTestBundle> loadSweepCase(const std::filesystem::path& root,
+                                                   const std::string& caseId,
+                                                   SweepManifestCache& sweeps)
+{
+    for(const auto& discovered : discoverBundles(root))
+    {
+        if(discovered.testName != caseId)
+        {
+            continue;
+        }
+        auto result = loadIntegrationTestBundle(discovered, sweeps);
+        if(auto* loaded = std::get_if<IntegrationTestBundle>(&result))
+        {
+            return std::move(*loaded);
+        }
+        ADD_FAILURE() << caseId << " did not load: " << toString(std::get<LoadError>(result));
+        return std::nullopt;
+    }
+    ADD_FAILURE() << "no case " << caseId << " under " << root;
+    return std::nullopt;
+}
+
+struct AbsentRuleCase
+{
+    std::string name;
+    // Changes the superset template and the sweep, whose one case marks the sink absent.
+    std::function<void(nlohmann::json& templateJson, nlohmann::json& sweepJson)> edit;
+    std::string message;
+};
+
+std::vector<AbsentRuleCase> absentRuleCases()
+{
+    const auto replaceCase = [](const std::vector<int64_t>& absentUids) {
+        return [absentUids](nlohmann::json&, nlohmann::json& sweep) {
+            sweep["cases"][0]
+                = fx::optionalTensorSweepCase(ABSENT_CASE_ID, supersetGraph(), absentUids);
+        };
+    };
+    const auto metadataField = [](const std::string& key, const nlohmann::json& value) {
+        return [key, value](nlohmann::json&, nlohmann::json& sweep) {
+            sweep["cases"][0]["metadata"][key] = value;
+        };
+    };
+    const auto caseField = [](const std::string& key, const nlohmann::json& value) {
+        return [key, value](nlohmann::json&, nlohmann::json& sweep) {
+            sweep["cases"][0][key] = value;
+        };
+    };
+
+    return {
+        {"no_metadata_block",
+         [](nlohmann::json&, nlohmann::json& sweep) { sweep["cases"][0].erase("metadata"); },
+         "absent_tensors needs case metadata with format_version 2"},
+        {"null_metadata_block",
+         caseField("metadata", nullptr),
+         "absent_tensors needs case metadata with format_version 2"},
+        {"format_version_1",
+         metadataField("format_version", 1),
+         "absent_tensors needs format_version 2"},
+        {"sweep_version_1",
+         [](nlohmann::json&, nlohmann::json& sweep) { sweep["version"] = 1; },
+         "absent_tensors needs sweep version 2, not 1"},
+        {"sweep_without_version",
+         [](nlohmann::json&, nlohmann::json& sweep) { sweep.erase("version"); },
+         "absent_tensors needs sweep version 2, not 1"},
+        {"object_in_place_of_a_list",
+         caseField("absent_tensors", nlohmann::json{{"uid", SINK}}),
+         "absent_tensors must be a non-empty array of integer tensor uids"},
+        {"empty_list",
+         caseField("absent_tensors", nlohmann::json::array()),
+         "absent_tensors must be a non-empty array of integer tensor uids"},
+        {"string_uid",
+         caseField("absent_tensors", nlohmann::json::array({"0"})),
+         "absent_tensors must be a non-empty array of integer tensor uids"},
+        {"duplicate_uid",
+         caseField("absent_tensors", nlohmann::json::array({SINK, SINK})),
+         "absent tensor 0 is named twice in absent_tensors"},
+        {"unknown_uid",
+         caseField("absent_tensors", nlohmann::json::array({9})),
+         "absent tensor 9 is not a tensor of the template"},
+        {"values_tensors_entry",
+         [](nlohmann::json&, nlohmann::json& sweep) {
+             sweep["cases"][0]["values"]["tensors"].push_back(
+                 nlohmann::json{{"uid", SINK}, {"dims", {1, 2, 1, 1}}, {"strides", {2, 1, 1, 1}}});
+         },
+         "absent tensor 0 has a values.tensors entry"},
+        {"case_value_keyed_by_uid",
+         [](nlohmann::json&, nlohmann::json& sweep) {
+             sweep["cases"][0]["values"]["alignment"] = nlohmann::json{{"0", 16}};
+         },
+         "absent tensor 0 is a key of the case value values.alignment.0"},
+        {"tensor_patches_entry",
+         caseField("tensor_patches",
+                   nlohmann::json::array({{{"uid", SINK}, {"set", {{"alignment", 8}}}}})),
+         "absent tensor 0 has a tensor_patches entry"},
+        {"inputs_entry",
+         metadataField("inputs", nlohmann::json{{"0", {{"seed", 3}}}}),
+         "absent tensor 0 has a metadata inputs entry"},
+        {"alias_view",
+         metadataField("aliases",
+                       nlohmann::json::array({{{"uid", SINK}, {"of", 1}, {"byte_offset", 0}}})),
+         "absent tensor 0 is the view of a metadata aliases entry"},
+        {"alias_owner",
+         metadataField("aliases",
+                       nlohmann::json::array({{{"uid", 2}, {"of", SINK}, {"byte_offset", 0}}})),
+         "absent tensor 0 is the owner of a metadata aliases entry"},
+        {"start_offsets_entry",
+         metadataField("start_offsets",
+                       nlohmann::json::array({{{"uid", SINK}, {"start_offset", 16}}})),
+         "absent tensor 0 has a metadata start_offsets entry"},
+        {"live_rows_output",
+         metadataField("live_rows", nlohmann::json::array({{{"uid", SINK}, {"like", O_UID}}})),
+         "absent tensor 0 is named by a metadata live_rows entry"},
+        {"live_rows_lengths",
+         metadataField("live_rows",
+                       nlohmann::json::array({{{"uid", STATS}, {"axis", 2}, {"lengths", SINK}}})),
+         "absent tensor 0 is named by a metadata live_rows entry"},
+        {"live_rows_like",
+         metadataField("live_rows", nlohmann::json::array({{{"uid", STATS}, {"like", SINK}}})),
+         "absent tensor 0 is named by a metadata live_rows entry"},
+        {"golden_declared",
+         caseField("golden", nlohmann::json{{"path", "golden/absent_case/tensors.dvc"}}),
+         "absent_tensors and golden data do not mix"},
+        {"virtual_tensor",
+         [](nlohmann::json& templateJson, nlohmann::json&) {
+             for(auto& tensor : templateJson["tensors"])
+             {
+                 if(tensor["uid"] == SINK)
+                 {
+                     tensor["virtual"] = true;
+                 }
+             }
+         },
+         "absent tensor 0 is virtual"},
+        {"virtual_placeholder",
+         [](nlohmann::json& templateJson, nlohmann::json&) {
+             for(auto& tensor : templateJson["tensors"])
+             {
+                 if(tensor["uid"] == SINK)
+                 {
+                     tensor["virtual"] = "${case.virtual}";
+                 }
+             }
+         },
+         "absent tensor 0 has a virtual flag that is not a literal boolean in the template"},
+        {"port_placeholder",
+         [](nlohmann::json& templateJson, nlohmann::json&) {
+             templateJson["nodes"][0]["inputs"]["sink_token_tensor_uid"] = "${case.sink_uid}";
+         },
+         "absent_tensors needs a uid or null in each node port, and "
+         "nodes[0].inputs.sink_token_tensor_uid holds \"${case.sink_uid}\""},
+        {"float_ports_of_two_nodes",
+         [](nlohmann::json& templateJson, nlohmann::json&) {
+             auto second = templateJson["nodes"][0];
+             second["name"] = "second";
+             second["inputs"]["sink_token_tensor_uid"] = 0.0;
+             templateJson["nodes"].push_back(std::move(second));
+         },
+         "absent tensor 0 is held by node ports of more than one node"},
+        {"ports_of_two_nodes",
+         [](nlohmann::json& templateJson, nlohmann::json&) {
+             auto second = templateJson["nodes"][0];
+             second["name"] = "second";
+             templateJson["nodes"].push_back(std::move(second));
+         },
+         "absent tensor 0 is held by node ports of more than one node"},
+        {"flat_uid_list",
+         [](nlohmann::json& templateJson, nlohmann::json&) {
+             templateJson["nodes"][0]["output_tensor_uids"] = nlohmann::json::array({SINK});
+         },
+         "absent tensor 0 is held by a node outside a node port, at "
+         "nodes[0].output_tensor_uids[0]"},
+        {"uid_field_outside_the_ports",
+         [](nlohmann::json& templateJson, nlohmann::json&) {
+             templateJson["nodes"][0]["attributes"]["extra_tensor_uid"] = SINK;
+         },
+         "absent tensor 0 is held by a node outside a node port, at "
+         "nodes[0].attributes.extra_tensor_uid"},
+        {"tensor_reference",
+         [](nlohmann::json& templateJson, nlohmann::json&) {
+             templateJson["tensors"][0]["ragged_offset_tensor_uid"] = SINK;
+         },
+         "absent tensor 0 is referenced at tensors[0].ragged_offset_tensor_uid"},
+        {"required_port",
+         replaceCase({V_UID}),
+         "the graph with absent tensors [3] does not build; a removed tensor fills a port the "
+         "op requires"},
+        {"last_compared_output",
+         [replaceCase](nlohmann::json& templateJson, nlohmann::json& sweep) {
+             replaceCase({STATS})(templateJson, sweep);
+             for(auto& tensor : templateJson["tensors"])
+             {
+                 if(tensor["uid"] == O_UID)
+                 {
+                     tensor["virtual"] = true;
+                 }
+             }
+         },
+         "removing [5] leaves no output to compare"},
+        {"malformed_tensor_patch",
+         caseField("tensor_patches", nlohmann::json::array({{{"uid", "zero"}}})),
+         "tensor_patch entry is missing an integer uid"},
+    };
+}
+
+// Writes the superset sweep under `root` with its one case `ABSENT_CASE_ID` marking the
+// sink absent, after `edit` changes it.
+void writeAbsentRuleSweep(const std::filesystem::path& root, const AbsentRuleCase& c)
+{
+    auto templateJson = fx::templateOfGraph(supersetGraph());
+    nlohmann::json sweep
+        = {{"version", 2},
+           {"cases",
+            nlohmann::json::array(
+                {fx::optionalTensorSweepCase(ABSENT_CASE_ID, supersetGraph(), {SINK})})}};
+    c.edit(templateJson, sweep);
+    fx::writeTemplateSweep(root / "quick" / "SdpaFwd" / "Optional",
+                           templateJson,
+                           sweep["cases"],
+                           sweep.contains("version") ? sweep["version"] : nlohmann::json());
+}
+
+} // namespace
+
+TEST_F(TestBundleDiscoveryFixture, AbsentTensorRuleViolationsFailTheLoadOfASweepCase)
+{
+    for(const auto& c : absentRuleCases())
+    {
+        SCOPED_TRACE(c.name);
+        const auto root = _tempDir / c.name;
+        writeAbsentRuleSweep(root, c);
+
+        const auto discovered = discoverBundles(root);
+        ASSERT_EQ(discovered.size(), 1u);
+        EXPECT_THROW(loadIntegrationTestBundle(discovered.front(), _sweeps), BundleMetadataError);
+
+        const auto message = failedLoadMessage(root, _sweeps);
+        EXPECT_NE(message.find(std::string("#") + ABSENT_CASE_ID), std::string::npos) << message;
+        EXPECT_NE(message.find(c.message), std::string::npos) << message;
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, UnknownSweepVersionFailsTheLoadOfEveryCase)
+{
+    const auto graph = sdpa_utils::optionalSdpaFwdGraphJson(/*withStats=*/true, /*withSink=*/false);
+    const auto cases = nlohmann::json::array({fx::optionalTensorSweepCase("case_a", graph),
+                                              fx::optionalTensorSweepCase("case_b", graph)});
+
+    const std::vector<std::pair<std::string, nlohmann::json>> versions
+        = {{"integer_3", 3}, {"string_2", "2"}, {"null", nullptr}};
+    for(const auto& [name, version] : versions)
+    {
+        SCOPED_TRACE(name);
+        const auto root = _tempDir / name;
+        const auto sweepDir = root / "quick" / "SdpaFwd" / "Plain";
+        fx::writeTemplateSweep(sweepDir, fx::templateOfGraph(graph), cases, 2);
+        auto sweepJson = readJsonFile(sweepDir / "sweep.json");
+        sweepJson["version"] = version;
+        writeJsonFile(sweepDir / "sweep.json", sweepJson);
+
+        const auto discovered = discoverBundles(root);
+        ASSERT_EQ(discovered.size(), 2u);
+        for(const auto& bundle : discovered)
+        {
+            auto outcome = detail::classifyBundle(bundle, _sweeps);
+            ASSERT_TRUE(std::holds_alternative<detail::FailedLoad>(outcome)) << bundle.testName;
+            const auto& message = std::get<detail::FailedLoad>(outcome).message;
+            std::string expected = "#";
+            expected += bundle.testName;
+            expected += ": sweep version ";
+            expected += version.dump();
+            EXPECT_NE(message.find(expected), std::string::npos) << message;
+            EXPECT_NE(message.find("sweep.json is not 1 or 2"), std::string::npos) << message;
+        }
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, SweepVersion2WithoutAbsentTensorsLoads)
+{
+    const auto graph = sdpa_utils::optionalSdpaFwdGraphJson(/*withStats=*/true, /*withSink=*/false);
+    fx::writeTemplateSweep(_tempDir / "quick" / "SdpaFwd" / "Plain",
+                           fx::templateOfGraph(graph),
+                           nlohmann::json::array({fx::optionalTensorSweepCase("plain", graph)}),
+                           2);
+
+    const auto bundle = loadSweepCase(_tempDir, "plain", _sweeps);
+    ASSERT_TRUE(bundle.has_value());
+    EXPECT_EQ(bundle->outputTensorUids, (std::vector<int64_t>{O_UID, STATS}));
+}
+
+// One superset template (Q, K, V, O, Stats and a sink, every tensor with placeholder dims
+// and strides) gives the same graphs as one template per tensor set.
+TEST_F(TestBundleDiscoveryFixture, AbsentTensorCasesMatchTheirOwnTemplates)
+{
+    const auto superset = supersetGraph();
+    fx::writeTemplateSweep(
+        _tempDir / "superset" / "quick" / "SdpaFwd" / "Superset",
+        fx::templateOfGraph(superset),
+        nlohmann::json::array({fx::optionalTensorSweepCase("all", superset),
+                               fx::optionalTensorSweepCase("sink_absent", superset, {SINK}),
+                               fx::optionalTensorSweepCase("stats_absent", superset, {STATS})}));
+
+    struct Expected
+    {
+        std::string caseId;
+        nlohmann::json graph;
+        int64_t absentUid;
+    };
+    const std::vector<Expected> expected = {
+        {"all", sdpa_utils::optionalSdpaFwdGraphJson(true, true), -1},
+        {"sink_absent", sdpa_utils::optionalSdpaFwdGraphJson(true, false), SINK},
+        {"stats_absent", sdpa_utils::optionalSdpaFwdGraphJson(false, true), STATS},
+    };
+
+    const auto supersetRoot = _tempDir / "superset";
+    ASSERT_EQ(discoverBundles(supersetRoot).size(), 3u);
+    for(const auto& e : expected)
+    {
+        SCOPED_TRACE(e.caseId);
+        const auto separateRoot = _tempDir / ("separate_" + e.caseId);
+        fx::writeTemplateSweep(
+            separateRoot / "quick" / "SdpaFwd" / "Separate",
+            fx::templateOfGraph(e.graph),
+            nlohmann::json::array({fx::optionalTensorSweepCase(e.caseId, e.graph)}),
+            1);
+
+        const auto fromSuperset = loadSweepCase(supersetRoot, e.caseId, _sweeps);
+        const auto fromSeparate = loadSweepCase(separateRoot, e.caseId, _sweeps);
+        ASSERT_TRUE(fromSuperset.has_value());
+        ASSERT_TRUE(fromSeparate.has_value());
+
+        EXPECT_EQ(graphJsonOf(*fromSuperset), graphJsonOf(*fromSeparate));
+        EXPECT_EQ(fromSuperset->outputTensorUids, fromSeparate->outputTensorUids);
+
+        const auto packUids = fx::hostVariantPackUids(*fromSuperset);
+        EXPECT_EQ(packUids, fx::hostVariantPackUids(*fromSeparate));
+        if(e.absentUid >= 0)
+        {
+            EXPECT_EQ(packUids.count(e.absentUid), 0u);
+            EXPECT_EQ(fromSuperset->graphWrapper().getTensorMap().count(e.absentUid), 0u);
+        }
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, AbsentInputAndAbsentOptionalOutputLoad)
+{
+    const auto superset = supersetGraph();
+    fx::writeTemplateSweep(
+        _tempDir / "quick" / "SdpaFwd" / "Superset",
+        fx::templateOfGraph(superset),
+        nlohmann::json::array({fx::optionalTensorSweepCase("sink_absent", superset, {SINK}),
+                               fx::optionalTensorSweepCase("stats_absent", superset, {STATS})}));
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 2u);
+    for(const auto& bundle : discovered)
+    {
+        EXPECT_TRUE(
+            std::holds_alternative<detail::LoadedBundle>(detail::classifyBundle(bundle, _sweeps)))
+            << bundle.testName;
+    }
+
+    const auto sinkAbsent = loadSweepCase(_tempDir, "sink_absent", _sweeps);
+    ASSERT_TRUE(sinkAbsent.has_value());
+    const auto sinkJson = graphJsonOf(*sinkAbsent);
+    EXPECT_TRUE(sinkJson["nodes"][0]["inputs"]["sink_token_tensor_uid"].is_null());
+    EXPECT_EQ(sinkAbsent->metadata.formatVersion, 2);
+    EXPECT_EQ(sinkAbsent->outputTensorUids, (std::vector<int64_t>{O_UID, STATS}));
+
+    const auto statsAbsent = loadSweepCase(_tempDir, "stats_absent", _sweeps);
+    ASSERT_TRUE(statsAbsent.has_value());
+    EXPECT_TRUE(graphJsonOf(*statsAbsent)["nodes"][0]["outputs"]["stats_tensor_uid"].is_null());
+    EXPECT_EQ(statsAbsent->outputTensorUids, (std::vector<int64_t>{O_UID}));
+}
+
+// The absent sink has no values entry, so expanding the template before pruning it asks
+// for the sink's dims; the case would then be a quiet skip, not a loaded case.
+TEST_F(TestBundleDiscoveryFixture, AbsentTensorsArePrunedBeforeTheTemplateIsExpanded)
+{
+    const auto superset = supersetGraph();
+    const auto templateJson = fx::templateOfGraph(superset);
+    const auto caseJson = fx::optionalTensorSweepCase("sink_absent", superset, {SINK});
+    const auto sweepDir = _tempDir / "quick" / "SdpaFwd" / "Superset";
+    fx::writeTemplateSweep(sweepDir, templateJson, nlohmann::json::array({caseJson}));
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+    EXPECT_TRUE(std::holds_alternative<IntegrationTestBundle>(
+        loadIntegrationTestBundle(discovered.front(), _sweeps)));
+
+    try
+    {
+        (void)detail::expandTemplateGraph(templateJson, caseJson, discovered.front());
+        ADD_FAILURE() << "expanding the unpruned template did not throw";
+    }
+    catch(const std::runtime_error& e)
+    {
+        EXPECT_STREQ(e.what(), "Missing per-tensor placeholder value");
+    }
+    EXPECT_NO_THROW((void)detail::expandTemplateGraph(
+        detail::pruneAbsentTensors(templateJson, {SINK}), caseJson, discovered.front()));
+
+    auto withoutAbsentKey = caseJson;
+    withoutAbsentKey.erase("absent_tensors");
+    fx::writeTemplateSweep(sweepDir, templateJson, nlohmann::json::array({withoutAbsentKey}));
+    SweepManifestCache freshSweeps;
+    EXPECT_TRUE(std::holds_alternative<detail::SkippedLoad>(
+        detail::classifyBundle(discoverBundles(_tempDir).front(), freshSweeps)));
+}
+
+TEST_F(TestBundleDiscoveryFixture, AbsentTensorHeldAsAFloatInAPortIsPruned)
+{
+    const auto superset = supersetGraph();
+    auto templateJson = fx::templateOfGraph(superset);
+    templateJson["nodes"][0]["inputs"]["sink_token_tensor_uid"] = 0.0;
+    fx::writeTemplateSweep(
+        _tempDir / "quick" / "SdpaFwd" / "Superset",
+        templateJson,
+        nlohmann::json::array({fx::optionalTensorSweepCase("sink_absent", superset, {SINK})}));
+
+    const auto sinkAbsent = loadSweepCase(_tempDir, "sink_absent", _sweeps);
+    ASSERT_TRUE(sinkAbsent.has_value());
+    EXPECT_TRUE(graphJsonOf(*sinkAbsent)["nodes"][0]["inputs"]["sink_token_tensor_uid"].is_null());
+}
+
+TEST(TestPruneAbsentTensors, RemovesTheTensorsAndNullsTheirPortsOnly)
+{
+    auto graph = fx::templateOfGraph(supersetGraph());
+    graph["nodes"][0]["output_tensor_uids"] = nlohmann::json::array({SINK});
+    graph["nodes"][0]["attributes"]["left_bound"] = SINK;
+
+    auto expected = graph;
+    auto keptTensors = nlohmann::json::array();
+    for(const auto& tensor : graph.at("tensors"))
+    {
+        if(tensor.at("uid") != SINK && tensor.at("uid") != STATS)
+        {
+            keptTensors.push_back(tensor);
+        }
+    }
+    expected["tensors"] = keptTensors;
+    expected["nodes"][0]["inputs"]["sink_token_tensor_uid"] = nullptr;
+    expected["nodes"][0]["outputs"]["stats_tensor_uid"] = nullptr;
+
+    EXPECT_EQ(detail::pruneAbsentTensors(graph, {SINK, STATS}), expected);
+    EXPECT_EQ(detail::pruneAbsentTensors(fx::templateOfGraph(supersetGraph()), {SINK}),
+              fx::templateOfGraph(sdpa_utils::optionalSdpaFwdGraphJson(true, false)));
+}
+
+namespace
+{
+
+// One full discovery of each bundle tree, shared by every test of the suite.
+class TestCheckedInBundleTree : public ::testing::TestWithParam<std::string>
+{
+protected:
+    static void TearDownTestSuite()
+    {
+        s_discovered.clear();
+    }
+
+    void SetUp() override
+    {
+        if(!std::filesystem::is_directory(root()))
+        {
+            GTEST_SKIP() << "No checked-in bundle tree at " << GetParam();
+        }
+        if(s_discovered.find(GetParam()) == s_discovered.end())
+        {
+            s_discovered.emplace(GetParam(), discoverBundles(root()));
+        }
+    }
+
+    static std::filesystem::path root()
+    {
+        return GetParam();
+    }
+
+    static const std::vector<DiscoveredBundle>& discovered()
+    {
+        return s_discovered.at(GetParam());
+    }
+
+    static inline std::map<std::string, std::vector<DiscoveredBundle>> s_discovered;
+};
+
+} // namespace
+
+TEST_P(TestCheckedInBundleTree, SweepCaseScanEqualsTheParsedIdCountForEveryManifest)
+{
+    std::map<std::filesystem::path, size_t> discoveredCaseCounts;
+    for(const auto& bundle : discovered())
+    {
+        if(bundle.isTemplateSweepCase())
+        {
+            ++discoveredCaseCounts[bundle.jsonPath];
+        }
+    }
+
+    const auto sweepDirs = findSweepDirectories(root());
+    ASSERT_FALSE(sweepDirs.empty());
+    size_t scannedCases = 0;
+    for(const auto& sweepDir : sweepDirs)
+    {
+        const auto sweepPath = sweepDir / "sweep.json";
+        const auto found = discoveredCaseCounts.find(sweepPath);
+        const size_t expected = found == discoveredCaseCounts.end() ? 0 : found->second;
+        const auto scanned = countSweepCases(sweepPath);
+        EXPECT_EQ(scanned, expected) << sweepPath.string();
+        std::ifstream stream(sweepPath, std::ios::binary);
+        const std::string content{std::istreambuf_iterator<char>(stream),
+                                  std::istreambuf_iterator<char>()};
+        EXPECT_TRUE(detail::countSweepCasesWithoutParsing(content).has_value())
+            << sweepPath.string();
+        scannedCases += scanned;
+    }
+    EXPECT_GT(scannedCases, 0u);
+}
+
+TEST_P(TestCheckedInBundleTree, FilteredDiscoverySelectsAndCountsLikeFullDiscovery)
+{
+    for(const auto& filter : {HIP_MLOPS_LANE_FILTER,
+                              ASM_SDPA_LANE_FILTER,
+                              FLYDSL_SDPA_LANE_FILTER,
+                              std::string("quick_*")})
+    {
+        expectFilteredSelectionMatchesFull(root(), discovered(), filter);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestCheckedInBundleTree,
+                         ::testing::Values((std::filesystem::path(__FILE__).parent_path() / ".."
+                                            / "integration-test-bundles")
+                                               .string()));
 
 // NOLINTEND(readability-identifier-naming)

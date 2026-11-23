@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -114,8 +114,7 @@ template<int                BLOCK_DIM_X,
          BlockScanAlgorithm INNER_SCAN_ALGORITHM = BLOCK_SCAN_WARP_SCANS,
          hipSharedMemConfig SMEM_CONFIG          = hipSharedMemBankSizeFourByte,
          int                BLOCK_DIM_Y          = 1,
-         int                BLOCK_DIM_Z          = 1,
-         int                ARCH                 = HIPCUB_ARCH /* ignored */>
+         int                BLOCK_DIM_Z          = 1>
 class BlockRadixRank
     : private ::rocprim::block_radix_rank<BLOCK_DIM_X,
                                           RADIX_BITS,
@@ -236,8 +235,7 @@ template<int                BLOCK_DIM_X,
          bool               IS_DESCENDING,
          BlockScanAlgorithm INNER_SCAN_ALGORITHM = BLOCK_SCAN_WARP_SCANS,
          int                BLOCK_DIM_Y          = 1,
-         int                BLOCK_DIM_Z          = 1,
-         int                ARCH                 = HIPCUB_ARCH>
+         int                BLOCK_DIM_Z          = 1>
 class BlockRadixRankMatch
     : private ::rocprim::block_radix_rank<BLOCK_DIM_X,
                                           RADIX_BITS,

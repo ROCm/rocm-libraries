@@ -18,10 +18,10 @@ from kernels.common.attention_unified import UnifiedAttentionProblem
 from kernels.gfx942 import attention_tiled_3d as gfx942_3d
 from kernels.gfx950.attention_tiled_3d import (
     UnifiedAttention3DTiledSpec,
-    UnifiedAttentionReduceTiledSpec,
     build_unified_attention_3d_tiled,
-    build_unified_attention_reduce_tiled,
 )
+
+from ._tiled_3d_binding_ir import lower_like_tiled_3d_binding
 
 
 def _problem(**kw) -> UnifiedAttentionProblem:
@@ -50,6 +50,11 @@ def _problem(**kw) -> UnifiedAttentionProblem:
         ("gfx942", {"total_q": 64, "max_seqlen_q": 4}, "all"),
         ("gfx942", {"use_fp8": True}, "all"),
         ("gfx1250", {}, "all"),
+        # K/V read per call within the last-level cache (256 MiB) stays cached.
+        ("gfx950", {"total_q": 1, "num_seqs": 1, "max_seqlen_k": 16384}, "all"),
+        ("gfx942", {"total_q": 1, "num_seqs": 1, "max_seqlen_k": 16384}, "all"),
+        ("gfx950", {"max_seqlen_k": 4096}, "all"),
+        ("gfx942", {"max_seqlen_k": 4096}, "all"),
     ],
 )
 def test_dispatch_policy(arch, kw, expected):
@@ -77,8 +82,6 @@ def test_fp8_kv_rejects_streaming():
 def test_native_builder_matches_python(kv_layout):
     from dataclasses import asdict
 
-    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-
     engine = pytest.importorskip("rocke_engine")
     spec = UnifiedAttention3DTiledSpec(
         head_size=128,
@@ -95,18 +98,7 @@ def test_native_builder_matches_python(kv_layout):
         use_decode_grid=True,
         kv_cache_policy="stream",
     )
-    reduce = UnifiedAttentionReduceTiledSpec(
-        head_size=128,
-        num_query_heads=32,
-        num_kv_heads=8,
-        dtype="bf16",
-        num_segments=8,
-    )
-    expected = _lower_kernel_to_llvm_python(
-        build_unified_attention_3d_tiled(spec, arch="gfx950"), arch="gfx950"
-    ) + _lower_kernel_to_llvm_python(
-        build_unified_attention_reduce_tiled(reduce, arch="gfx950"), arch="gfx950"
-    )
+    expected = lower_like_tiled_3d_binding(spec, "gfx950")
     actual = engine.gfx950_attention_tiled_3d_lower_llvm(asdict(spec), "gfx950")
     assert actual == expected
 
@@ -199,19 +191,15 @@ def test_gfx942_wide_loader_takes_all_or_stream(policy):
         {"use_wide_kv_load": True, "kv_cache_policy": "stream"},
         {"kv_cache_policy": "nt"},
         {"kv_layout": "strided", "kv_cache_policy": "stream"},
+        {"kv_cache_policy": "stream", "waves_per_eu": 2},
     ],
 )
 def test_gfx942_native_builder_matches_python(kw):
     from dataclasses import asdict
 
-    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-
     engine = pytest.importorskip("rocke_engine")
     spec = _gfx942_spec(num_query_heads=32, num_segments=8, num_seqs=3, **kw)
-    # The gfx942 binding lowers the segment kernel only.
-    expected = _lower_kernel_to_llvm_python(
-        gfx942_3d.build_unified_attention_3d_tiled(spec, arch="gfx942"), arch="gfx942"
-    )
+    expected = lower_like_tiled_3d_binding(spec, "gfx942")
     actual = engine.gfx942_attention_tiled_3d_lower_llvm(asdict(spec), "gfx942")
     assert actual == expected
 

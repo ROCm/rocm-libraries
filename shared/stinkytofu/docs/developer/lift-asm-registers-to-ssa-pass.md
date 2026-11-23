@@ -15,15 +15,22 @@ The existing `buildUseDefChain()` and the pseudo PHIs it places cannot express t
 This pass supplies the missing value identity.
 It is the boundary between the existing physical-register Asm pipeline and anything that reasons about values rather than registers.
 
-The pass converts the final optimized and scheduled physical-register dataflow into attached SSA:
+The pass converts the final optimized and scheduled physical-register dataflow into attached SSA. It is one end of a round trip: everything between lift and destruction reasons about values, and the instruction stream on either side is the same physical program.
 
-```text
-physical non-SSA Asm IR
-  -> LiftAsmRegistersToSSAPass
-  -> physical instructions plus attached SSA metadata on Function/blocks/instructions
-  -> liveness, pressure, and register allocation
-  -> SSA destruction and physical rewrite
+```mermaid
+flowchart TD
+    Phys["physical non-SSA Asm IR<br/>registers are mutable storage"]
+    Tie["TieExecMaskedWritesPass<br/>adds the read a masked write performs"]
+    Lift["LiftAsmRegistersToSSAPass"]
+    Attached["physical instructions<br/>+ attached SSA on Function, blocks, instructions"]
+    Analyse["liveness, pressure, register allocation"]
+    Destroy["destroyAttachedSSA<br/>rewrites operands, clears SSA"]
+
+    Phys --> Tie --> Lift --> Attached --> Analyse --> Destroy
+    Attached -.->|"values keep their PhysicalBinding"| Destroy
 ```
+
+The dashed edge is the round-trip gate in section 12: because every value remembers the register it came from, an identity colouring has to lower back to the input byte for byte.
 
 The pass does not require TensileLite to produce virtual registers.
 A physical register such as `v8` is treated as the name of mutable storage before the pass.
@@ -160,8 +167,9 @@ The pass requires:
 3. only physical allocatable operands; template registers carrying `StinkyRegister::kVirtualBit` are rejected;
 4. complete explicit source and destination register operands;
 5. instruction metadata for tied and read-modify-write operands;
-6. no `GFX::PHI` instructions left in the stream, whatever placed them;
-7. no stale instruction-level `sources` or `users` graph that a later pass expects to remain valid.
+6. `TieExecMaskedWritesPass` must already have run; see section 4.2;
+7. no `GFX::PHI` instructions left in the stream, whatever placed them;
+8. no stale instruction-level `sources` or `users` graph that a later pass expects to remain valid.
 
 Register classes are recognised from the operands themselves, through `isAllocatableReg()` and `isPseudoReg()`.
 No target register description is consulted, so fixed, reserved, and alignment-constrained registers are invisible to the pass; the [attached SSA contract](ssa-representation.md) section 6.1 covers what that costs, and section 14 below lists what is in scope and what is refused.
@@ -183,6 +191,28 @@ Until a target-owned calling convention exists, the rules are:
 
 `kernelHasCallSites()` is what rule 3 is built on: it preflights a whole kernel, so one call anywhere keeps the entire call-connected kernel on the legacy path.
 When the convention does arrive it needs argument, result, clobber, and preserved-register sets; interprocedural SSA does not, because each function keeps its own arena and a value live across a call only has to land in a preserved register or be spilled.
+
+### 4.2. Writes that only some lanes perform
+
+A VALU write under a narrowed `EXEC` updates the active lanes and leaves every other lane holding whatever the destination held already. So in this idiom
+
+```text
+s_mov_b32 exec_lo, vcc_lo     // narrow to the lanes where the condition held
+v_add_nc_u32 v0, v0, 1        // increment there; every other lane keeps its v0
+s_mov_b32 exec_lo, -1         // restore
+```
+
+the add *reads* its own destination, and `dest == src0` is what makes "change it here, keep it there" true. Nothing in the printed operands says so — there is no second read of `v0` for lifting to bind.
+
+Left alone, lifting would treat that write as a full definition, give it a fresh value unrelated to the old one, and let allocation move it elsewhere. The lanes that were supposed to keep their previous value then quietly receive someone else's. That is a miscompile rather than a slow kernel, and in practice it surfaced as a segfault before a single solution ran.
+
+`TieExecMaskedWritesPass` repairs this ahead of the lift by adding the implicit read of the destination that the hardware performs. Lifting then binds that operand like any other, so the old and new values land in one affinity set and stay together through the same mechanism as a read-modify-write tie (section 8).
+
+Because the pass adds an operand that lifting has to bind, the ordering is a requirement and not a preference:
+
+```text
+TieExecMaskedWritesPass -> LiftAsmRegistersToSSAPass
+```
 
 ## 5. Output contract
 
@@ -226,8 +256,8 @@ struct RegKey {
 `RegKey` is the lifter's internal storage key, and `PhysicalBinding` is the legacy-colouring provenance it becomes.
 Neither is an SSA value identity: one key has as many values as it has reaching definitions, which is the entire reason attached SSA exists.
 
-Today `half` is always `RegHalf::NONE`, and the lifter expands an operand with `toRegKey(reg, unit)` for `unit` in `[0, reg.num)`.
-That is correct precisely because True16 is rejected, so every unit is a whole DWORD.
+Today `half` is always `RegHalf::NONE`, and the lifter expands an operand with `toRegKey(reg, unit)` for `unit` in `[0, reg.num)`, so every unit is a whole DWORD.
+That is correct because a True16 half *write* is rejected: a half read occupies the DWORD it selects from rather than half of one, so the expansion only needs every definition to be DWORD-wide.
 
 The rest of this subsection is future work.
 Before supporting True16, introduce one authoritative allocator operand-expansion helper using the architecture rules already encoded by `VGPRHalfKeyer` in `RegHalfKeyer.hpp`:
@@ -483,8 +513,9 @@ Rejected, each with a located diagnostic rather than a silent mishandling:
 accumulator classes  an AGPR and a VGPR can name the same storage on some
                      architectures, so two values over one register would be
                      unsound; needs target register information
-True16 halves        needs sub-DWORD atomic units, normalised from the
-                     architecture rules in RegHalfKeyer.hpp
+True16 half writes   the destination preserves the other half, so it reads the
+                     DWORD it writes, and that read has no operand to bind yet.
+                     Half *reads* are lifted, as reads of the whole DWORD
 unreachable blocks   dominance is undefined there; run
                      StinkyUnreachableBlockElimPass after CFG construction
 entry loop headers   a live-in reaching a loop header has no predecessor edge

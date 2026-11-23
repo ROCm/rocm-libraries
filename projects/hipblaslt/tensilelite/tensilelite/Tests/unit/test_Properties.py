@@ -22,7 +22,7 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""Unit tests for Tensile.Properties (Property and Predicate).
+"""Unit tests for tensilelite.Properties (Property and Predicate).
 
 These are pure data/value classes used for library solution selection; the
 tests assert concrete construction, serialization, equality/hashing, and the
@@ -31,7 +31,7 @@ predicate-ordering rules directly, with no mocking.
 
 import pytest
 
-from Tensile.Properties import Predicate, Property
+from tensilelite.Properties import Predicate, Property
 
 pytestmark = pytest.mark.unit
 
@@ -122,6 +122,7 @@ class TestPredicateOrdering:
             Predicate("FreeSizeMatching"),
             Predicate("EqualityMatching"),
             Predicate("GridBasedMatching"),
+            Predicate("MeshBasedMatching"),
             Predicate("PredictionMatching"),
             Predicate("RangeMatching"),
         ]
@@ -129,6 +130,7 @@ class TestPredicateOrdering:
             "EqualityMatching",
             "RangeMatching",
             "PredictionMatching",
+            "MeshBasedMatching",
             "GridBasedMatching",
             "FreeSizeMatching",
             "TruePred",

@@ -279,3 +279,99 @@ TEST(CallTargetData, DeserializeParsesEscapedCalleeNames) {
     EXPECT_EQ(data->callees[1], "quote\"name");
     EXPECT_EQ(data->callees[2], "back\\slash");
 }
+
+// ---------------------------------------------------------------------------
+// VOP3PModifiers serializer
+//
+// op_sel has to survive a .stir round trip, because its destination element is
+// what tells readsDestination that a narrow write keeps the other half. A
+// kernel written as text has no other way to state that.
+// ---------------------------------------------------------------------------
+
+TEST(VOP3PModifiers, RoundTripsThroughText) {
+    const VOP3PModifiers original({0, 0, 1}, {1, 1}, {2});
+
+    std::ostringstream os;
+    ASSERT_TRUE(ModifierSerializer::serialize(original, os));
+    EXPECT_EQ(os.str(), ", mod.vop3p = { op_sel = [0,0,1], op_sel_hi = [1,1], byte_sel = [2] }");
+
+    Function func("vop3p_test");
+    BasicBlock* bb = func.createBasicBlock("entry");
+    AsmIRBuilder builder(*bb, GfxArchID::Gfx1250);
+    StinkyInstruction* inst =
+        builder.create(getMCIDByUOp(GFX::v_cvt_pk_fp8_f32, GfxArchID::Gfx1250));
+
+    ParsedModifierDict modifiers;
+    modifiers["mod.vop3p"]["op_sel"] = "[0,0,1]";
+    modifiers["mod.vop3p"]["op_sel_hi"] = "[1,1]";
+    modifiers["mod.vop3p"]["byte_sel"] = "[2]";
+    ModifierSerializer::deserialize(inst, modifiers);
+
+    const auto* parsed = inst->getModifier<VOP3PModifiers>();
+    ASSERT_NE(parsed, nullptr);
+    EXPECT_EQ(parsed->op_sel, original.op_sel);
+    EXPECT_EQ(parsed->op_sel_hi, original.op_sel_hi);
+    EXPECT_EQ(parsed->byte_sel, original.byte_sel);
+}
+
+TEST(VOP3PModifiers, DeserializeLeavesUnstatedVectorsEmpty) {
+    Function func("vop3p_partial_test");
+    BasicBlock* bb = func.createBasicBlock("entry");
+    AsmIRBuilder builder(*bb, GfxArchID::Gfx1250);
+    StinkyInstruction* inst =
+        builder.create(getMCIDByUOp(GFX::v_cvt_pk_fp8_f32, GfxArchID::Gfx1250));
+
+    ParsedModifierDict modifiers;
+    modifiers["mod.vop3p"]["op_sel"] = "[0,0,1]";
+    ModifierSerializer::deserialize(inst, modifiers);
+
+    const auto* parsed = inst->getModifier<VOP3PModifiers>();
+    ASSERT_NE(parsed, nullptr);
+    EXPECT_EQ(parsed->op_sel, std::vector<int>({0, 0, 1}));
+    EXPECT_TRUE(parsed->op_sel_hi.empty());
+    EXPECT_TRUE(parsed->byte_sel.empty());
+}
+
+TEST(GirActionData, SerializerRoundTripsStableId) {
+    GirActionData original(17, 5, GirActionKind::Tensor,
+                           {GirAccessData{true, 0, 2, 0, 1, -1, false}});
+    std::ostringstream os;
+    EXPECT_TRUE(ModifierSerializer::serialize(original, os));
+    EXPECT_EQ(os.str(),
+              ", mod.gir_action = { action = 17, anchor = 5, kind = tensor"
+              ", access0_write = 1, access0_operand = 0, access0_ring = 2"
+              ", access0_gen = 0, access0_gdelta = 1 }");
+
+    Function function("gir_action_test");
+    BasicBlock* block = function.createBasicBlock("entry");
+    AsmIRBuilder builder(*block, GfxArchID::Gfx1250);
+    StinkyInstruction* inst = builder.createFence();
+    ParsedModifierDict modifiers;
+    modifiers["mod.gir_action"]["action"] = "17";
+    ModifierSerializer::deserialize(inst, modifiers);
+
+    const auto* parsed = inst->getModifier<GirActionData>();
+    ASSERT_NE(parsed, nullptr);
+    EXPECT_EQ(parsed->actionId, 17u);
+}
+
+// The contract parser rejects a malformed record, so the modifier reader must too: a defaulted
+// action or a kind that falls back to Other names a DIFFERENT action than the fixture wrote.
+TEST(GirActionDataDeathTest, DeserializeRejectsAMissingActionAndAnUnknownKind) {
+    const auto deserialize = [](const ParsedModifierDict& modifiers) {
+        Function function("gir_action_strict");
+        BasicBlock* block = function.createBasicBlock("entry");
+        AsmIRBuilder builder(*block, GfxArchID::Gfx1250);
+        StinkyInstruction* inst = builder.createFence();
+        ModifierSerializer::deserialize(inst, modifiers);
+    };
+
+    ParsedModifierDict missingAction;
+    missingAction["mod.gir_action"]["kind"] = "ds";
+    EXPECT_DEATH(deserialize(missingAction), "needs action=");
+
+    ParsedModifierDict unknownKind;
+    unknownKind["mod.gir_action"]["action"] = "3";
+    unknownKind["mod.gir_action"]["kind"] = "dss";
+    EXPECT_DEATH(deserialize(unknownKind), "unknown kind");
+}

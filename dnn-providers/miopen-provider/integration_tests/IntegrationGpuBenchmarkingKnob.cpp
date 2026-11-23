@@ -78,6 +78,7 @@ INSTANTIATE_TEST_SUITE_P(BenchmarkingSmoke,
                                            OperationType::CONV_BACKWARD_WEIGHTS,
                                            OperationType::BATCHNORM_TRAINING,
                                            OperationType::BATCHNORM_INFERENCE,
+                                           OperationType::BATCHNORM_INFERENCE_VARIANCE_EXT,
                                            OperationType::BATCHNORM_BACKWARD),
                          OperationTypeNameGenerator());
 

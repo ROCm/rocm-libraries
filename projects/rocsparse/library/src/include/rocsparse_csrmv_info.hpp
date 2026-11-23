@@ -25,10 +25,11 @@
 #pragma once
 
 #include "rocsparse_adaptive_info.hpp"
+#include "rocsparse_csrmv_alg.hpp"
+#include "rocsparse_csrmv_nnzsplit_info.hpp"
 #include "rocsparse_indextype_utils.hpp"
 #include "rocsparse_lrb_info.hpp"
 #include "rocsparse_mat_descr.hpp"
-#include "rocsparse_nnzsplit_info.hpp"
 
 /********************************************************************************
  * \brief rocsparse_csrmv_info is a structure holding the rocsparse csrmv info
@@ -36,9 +37,9 @@
  *******************************************************************************/
 typedef struct _rocsparse_csrmv_info
 {
-    _rocsparse_adaptive_info adaptive{};
-    _rocsparse_lrb_info      lrb{};
-    _rocsparse_nnzsplit_info nnzsplit{};
+    _rocsparse_adaptive_info       adaptive{};
+    _rocsparse_lrb_info            lrb{};
+    _rocsparse_csrmv_nnzsplit_info nnzsplit{};
 
     // some data to verify correct execution
     rocsparse_operation         trans = rocsparse_operation_none;
@@ -53,29 +54,32 @@ typedef struct _rocsparse_csrmv_info
     rocsparse_indextype index_type_I = deprecated_rocsparse_indextype_u16;
     rocsparse_indextype index_type_J = deprecated_rocsparse_indextype_u16;
 
-    _rocsparse_csrmv_info() {}
+    // Concrete algorithm stored when analysis was asked for csrmv_alg_default.
+    // Left as csrmv_alg_default when analysis was asked for an explicit
+    // algorithm, so a later default compute does not reuse that choice.
+    rocsparse::csrmv_alg alg = rocsparse::csrmv_alg_default;
 
-    ~_rocsparse_csrmv_info()
-    {
-        this->clear();
-    }
+    // Longest row, when analysis has already walked the host row pointers.
+    // -1 until then. nnz-split reads this from the descriptor. The value stays
+    // on the mat info so a later routine can reuse it.
+    int64_t max_nnz_per_row = -1;
 
-    void clear()
-    {
-        this->adaptive.clear();
-        this->lrb.clear();
-        this->nnzsplit.clear();
-        this->trans        = rocsparse_operation_none;
-        this->m            = 0;
-        this->n            = 0;
-        this->nnz          = 0;
-        this->max_rows     = 0;
-        this->descr        = nullptr;
-        this->csr_row_ptr  = nullptr;
-        this->csr_col_ind  = nullptr;
-        this->index_type_I = deprecated_rocsparse_indextype_u16;
-        this->index_type_J = deprecated_rocsparse_indextype_u16;
-    }
+    _rocsparse_csrmv_info();
+    ~_rocsparse_csrmv_info();
+
+    void clear();
+
+    // Stored algorithm when the caller passes csrmv_alg_default and operation
+    // is the one analysis ran for. Otherwise the static default map. operation
+    // is the caller's operation, compared with this->trans.
+    rocsparse::csrmv_alg alg_for(rocsparse_operation operation) const;
+
+    // Algorithm for a csrmv_alg_default compute. Uses the choice analysis stored
+    // for this operation, or the static map when csrmv_info is null. Row-split
+    // and an empty matrix leave no descriptor, and compute without analysis has
+    // none either.
+    static rocsparse::csrmv_alg choose_alg(const _rocsparse_csrmv_info* csrmv_info,
+                                           rocsparse_operation          operation);
 
 } * rocsparse_csrmv_info, *rocsparse_cscmv_info;
 

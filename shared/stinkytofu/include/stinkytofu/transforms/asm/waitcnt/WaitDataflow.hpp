@@ -76,7 +76,7 @@ enum class WaitReconstruction {
     /// StinkyWaitCntInsertionPass re-derives it from this dataflow. Every
     /// counter in WaitCountSpec lands here.
     WaitCntInsertion,
-    /// Gfx1250HazardPass re-derives it from its XNACK replay-group model, by its
+    /// Gfx1250XnackHazardPass re-derives it from its XNACK replay-group model, by its
     /// own rules rather than from this dataflow. s_wait_xcnt only.
     HazardPass,
     /// Nothing rebuilds it, so stripping one silently drops the hazard it

@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "15262806-d718-5080-861f-4bff06b8c656",
+  "name": "flydsl sdpa_aiw dispatch",
+  "dispatch_symbol": "hipkernel.flydsl_sdpa_aiw.dispatch"
+}

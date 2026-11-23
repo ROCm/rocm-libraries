@@ -31,12 +31,17 @@ _LIBRARY = _TESTS.parent
 _PLATFORM_PYTHON = _LIBRARY.parent / "platform" / "python"
 _GOLDEN = _TESTS / "golden" / "dsa_indexer_ir_sha256.json"
 _SCHEMA = "dsa_indexer.ir_golden_sha256/v1"
-_FLAVORS = ("llvm20", "llvm22", "llvm23")
 _ARCHES = ("gfx942", "gfx950")
 
 for _path in (str(_LIBRARY), str(_PLATFORM_PYTHON)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
+
+from rocke.core.ir_golden import (  # noqa: E402
+    GOLDEN_ALIASES,
+    GOLDEN_FLAVORS,
+    GOLDEN_PROFILE_FLAVORS,
+)
 
 
 def _cases() -> dict[str, Callable]:
@@ -91,12 +96,6 @@ def _cases() -> dict[str, Callable]:
     }
 
 
-def _current_flavor() -> str:
-    from rocke.core.lower_llvm import _resolve_llvm_flavor
-
-    return _resolve_llvm_flavor()
-
-
 def _sha_for(build: Callable, arch: str, flavor: str) -> tuple[str, int]:
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
@@ -109,6 +108,7 @@ def _build_doc() -> dict:
     cases = _cases()
     return {
         "schema": _SCHEMA,
+        "aliases": GOLDEN_ALIASES,
         "arches": {
             arch: {
                 "flavors": {
@@ -119,7 +119,7 @@ def _build_doc() -> dict:
                             for sha, nbytes in [_sha_for(build, arch, flavor)]
                         }
                     }
-                    for flavor in _FLAVORS
+                    for flavor in GOLDEN_PROFILE_FLAVORS
                 }
             }
             for arch in _ARCHES
@@ -127,8 +127,9 @@ def _build_doc() -> dict:
     }
 
 
+@pytest.mark.parametrize("flavor", GOLDEN_FLAVORS)
 @pytest.mark.parametrize("arch", _ARCHES)
-def test_dsa_indexer_ir_matches_golden(arch: str):
+def test_dsa_indexer_ir_matches_golden(arch: str, flavor: str):
     assert _GOLDEN.exists(), (
         f"missing indexer golden fixture; generate it with "
         f"`python {Path(__file__).name} --write`"
@@ -137,15 +138,17 @@ def test_dsa_indexer_ir_matches_golden(arch: str):
     assert golden.get("schema") == _SCHEMA
     assert arch in golden.get("arches", {}), f"no golden recorded for arch {arch!r}"
 
-    flavor = _current_flavor()
+    assert golden.get("aliases", {}) == GOLDEN_ALIASES
+    golden_flavor = golden.get("aliases", {}).get(flavor, flavor)
     arch_doc = golden["arches"][arch]
-    assert flavor in arch_doc.get("flavors", {}), (
+    assert set(arch_doc.get("flavors", {})) == set(GOLDEN_PROFILE_FLAVORS)
+    assert golden_flavor in arch_doc.get("flavors", {}), (
         f"no {arch} indexer golden recorded for LLVM flavor {flavor!r}; "
         "review and re-bless the fixture"
     )
 
     cases = _cases()
-    recorded = arch_doc["flavors"][flavor]["cases"]
+    recorded = arch_doc["flavors"][golden_flavor]["cases"]
     assert set(recorded) == set(cases), (
         f"{arch} indexer golden case set drifted: "
         f"recorded={sorted(recorded)}, current={sorted(cases)}"
@@ -171,5 +174,6 @@ if __name__ == "__main__":
         print(f"wrote {_GOLDEN}")
     else:
         for _arch in _ARCHES:
-            test_dsa_indexer_ir_matches_golden(_arch)
+            for _flavor in GOLDEN_FLAVORS:
+                test_dsa_indexer_ir_matches_golden(_arch, _flavor)
         print("PASS")

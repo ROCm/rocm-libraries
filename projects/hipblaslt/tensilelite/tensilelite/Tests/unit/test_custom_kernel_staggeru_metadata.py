@@ -41,17 +41,18 @@ from typing import Dict, FrozenSet, List, Optional, Sequence, Tuple
 
 import pytest
 
-from Tensile.Common.GlobalParameters import (
+
+from tensilelite.Common.GlobalParameters import (
     defaultBenchmarkCommonParameters,
     defaultInternalSupportParams,
 )
-from Tensile.CustomKernels import (
+from tensilelite.CustomKernels import (
     getAllCustomKernelNames,
     getCustomKernelContents,
     readCustomKernelConfig,
 )
-from Tensile.Components.TDMFuse import tdmWavePartition
-from Tensile.KernelWriterAssembly import KernelWriterAssembly
+from tensilelite.Components.TDMFuse import tdmWavePartition
+from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 from rocisa.code import Module
 
 
@@ -538,15 +539,15 @@ STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
 # checks but are not counted here, so adding either kind does not edit this
 # census.
 EXPECTED_CENSUS = {
-    # Explicit non-zero StaggerU: 24 at 8 and 4 at 4.
-    "declaredNonZero": 28,
+    # Explicit non-zero StaggerU: 24 at 8 and 3 at 4.
+    "declaredNonZero": 27,
     # Of those, the ones with no packed unpack at all: StaggerU is a literal
     # baked into the code, which is exactly why they declare
     # SupportCustomStaggerU: False and why the gate refuses them.
     "declaredNonZeroWithLiteralStagger": 24,
-    "declaredNonZeroReadingPackedArgument": 4,
+    "declaredNonZeroReadingPackedArgument": 3,
     # No StaggerU key at all, so they inherit the default of 32.
-    "undeclared": 32,
+    "undeclared": 18,
 }
 
 
@@ -779,28 +780,15 @@ _CODEGEN_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "characterization", "_codegen"
 )
 
-_LOGIC_ROOT = os.path.normpath(
-    os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        *([".."] * 4),
-        "library",
-        "src",
-        "amd_detail",
-        "rocblaslt",
-        "src",
-        "Tensile",
-        "Logic",
-        "asm_full",
-    )
+_FIXTURE_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "logic_yaml", "staggeru"
 )
 
-# Shipped tuning logic known to contain solutions with SupportCustomStaggerU:
-# False and a non-zero StaggerU.  Two files rather than one so a retune that
-# drops the shape from either still leaves the check with something to assert.
+# Verbatim copies of shipped gfx950_id75a3 Equality logic that holds solutions
+# with SupportCustomStaggerU: False and a non-zero StaggerU.  They are copies so
+# a retune of the shipped corpus cannot change what this test exercises.
 COMPILED_IN_STAGGERU_LOGIC = (
-    "gfx950/gfx950_id75a3/Equality/"
     "gfx950_Cijk_Ailk_Bjlk_BSS_BH_BiasS_HAS_SAV_UserArgs.yaml",
-    "gfx950/gfx950_id75a3/Equality/"
     "gfx950_Cijk_Alik_Bljk_F8B8SS_BH_BiasS_HAS_SAB_SAV_UserArgs.yaml",
 )
 
@@ -863,9 +851,7 @@ def test_generated_kernels_read_stagger_from_the_packed_argument(rel, tmp_path):
     from somewhere the clamp cannot reach.  If the generator ever learns to bake
     a literal StaggerU into a wrap site, this fails and the clause has to widen
     again."""
-    logic = os.path.join(_LOGIC_ROOT, rel)
-    if not os.path.exists(logic):
-        pytest.skip(f"tuning logic tree not present: {rel}")
+    logic = os.path.join(_FIXTURE_DIR, rel)
     if not os.path.isdir(_CODEGEN_DIR):
         pytest.skip("the code generation harness is not present")
     if _CODEGEN_DIR not in sys.path:
@@ -972,6 +958,10 @@ class _Writer:
     def isTdmWaveIdxLive(self, kernel):
         return self._waveIdxLive
 
+    def rapLabel(self, name):
+        # Outside ReuseAcrossPersistent's reuse copy a literal label keeps its name.
+        return name
+
     def _emitTdmWaveSetSkipSCC(self, module, kernel, waves, tc):
         return KernelWriterAssembly._emitTdmWaveSetSkipSCC(self, module, kernel, waves, tc)
 
@@ -999,6 +989,9 @@ class _Writer:
 
     def hoist(self, kernel, tcA="A"):
         return str(KernelWriterAssembly._hoistTdmSharedScaleWrapUSel(self, kernel, tcA))
+
+    def declareStagger(self, kernel):
+        return str(KernelWriterAssembly.declareStaggerParms(self, kernel))
 
 
 def _kernel(tdmFuse=2, numWaves=NUM_WAVES):
@@ -1146,3 +1139,17 @@ def test_hoist_does_not_disturb_the_scale_wrapu_registers():
         if "s_cselect_b32" in line:
             assert line.split(",")[0].endswith("s[sgprWrapUA+0]") or \
                    line.split(",")[0].endswith("s[sgprWrapUA+1]")
+
+
+# ------------------------------------------------------ the packed argument ---
+@pytest.mark.parametrize("pgr", [1, 2, 3])
+def test_declare_stagger_leaves_the_packed_argument_intact(pgr):
+    """Persistent kernels rerun declareStaggerParms per tile from the same sgpr,
+    so the decode may read the packed StaggerU but never write it."""
+    kernel = {"PrefetchGlobalRead": pgr, "ProblemType": {"IndicesBatch": [2]}}
+    text = _Writer(kernel).declareStagger(kernel)
+    instructions = [line.split("//")[0].split() for line in text.splitlines()]
+    written = [i for i in instructions if len(i) > 1 and i[1].rstrip(",") == "s[sgprStaggerU]"]
+    assert not written
+    for mask in sorted(_PACKED_MASKS):
+        assert re.search(r"s_and_b32 s\d+, s\[sgprStaggerU\], %s\b" % mask, text), mask

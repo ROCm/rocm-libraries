@@ -5,7 +5,9 @@
 
 #include <cstdint>
 #include <unordered_map>
+#include <vector>
 
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
@@ -31,6 +33,8 @@
             return false;                                                         \
         }                                                                         \
     } while(0)
+
+struct Handle;
 
 namespace hip_kernel_provider::core::utils
 {
@@ -68,5 +72,28 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& findTensorAttribut
     int64_t uid);
 
 bool isChannelLastLayout(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* tensor);
+
+// Provider kernels assume buffers aligned to a multiple of 16 bytes.
+bool hasOnly16ByteAlignedTensors(
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
+// Builds the EngineDetails flatbuffer of engine `engineId` advertising `knobs`
+// and `behaviorNotes` (hipdnnBehaviorNote_t values), points `detailsOut` at it,
+// and stores the buffer in `handle`, which keeps it alive until hipDNN releases
+// the details.
+void storeEngineDetails(Handle& handle,
+                        int64_t engineId,
+                        const std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>& knobs,
+                        const std::vector<int32_t>& behaviorNotes,
+                        hipdnnPluginConstData_t& detailsOut);
+
+// A `ragged_offset_multiplier` other than 1 only means something on a tensor with a ragged
+// offset; on any other tensor no provider kernel reads it.
+bool hasNoStrayRaggedOffsetMultiplier(
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
 
 } // namespace hip_kernel_provider::core::utils

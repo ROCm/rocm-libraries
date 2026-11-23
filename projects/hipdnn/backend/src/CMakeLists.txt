@@ -68,6 +68,8 @@ add_library(
     heuristics/SelectionHeuristic.cpp
     heuristics/config/ConfigBuiltIn.cpp
     heuristics/static_ordering/StaticOrderingBuiltIn.cpp
+    heuristics/prediction/PredictionPolicy.cpp
+    heuristics/prediction/PredictionBuiltIn.cpp
     plugin/EnginePlugin.cpp
     plugin/EnginePluginResourceManager.cpp
     plugin/HeuristicPlugin.cpp

@@ -196,12 +196,12 @@ ForwardIterator lower_bound(ForwardIterator first, ForwardIterator last, const L
  *  input[3] = 7;
  *  input[4] = 8;
  *
- *  thrust::lower_bound(input.begin(), input.end(), 0, thrust::less<int>()); // returns input.begin()
- *  thrust::lower_bound(input.begin(), input.end(), 1, thrust::less<int>()); // returns input.begin() + 1
- *  thrust::lower_bound(input.begin(), input.end(), 2, thrust::less<int>()); // returns input.begin() + 1
- *  thrust::lower_bound(input.begin(), input.end(), 3, thrust::less<int>()); // returns input.begin() + 2
- *  thrust::lower_bound(input.begin(), input.end(), 8, thrust::less<int>()); // returns input.begin() + 4
- *  thrust::lower_bound(input.begin(), input.end(), 9, thrust::less<int>()); // returns input.end()
+ *  thrust::lower_bound(input.begin(), input.end(), 0, _THRUST_STD::less<int>()); // returns input.begin()
+ *  thrust::lower_bound(input.begin(), input.end(), 1, _THRUST_STD::less<int>()); // returns input.begin() + 1
+ *  thrust::lower_bound(input.begin(), input.end(), 2, _THRUST_STD::less<int>()); // returns input.begin() + 1
+ *  thrust::lower_bound(input.begin(), input.end(), 3, _THRUST_STD::less<int>()); // returns input.begin() + 2
+ *  thrust::lower_bound(input.begin(), input.end(), 8, _THRUST_STD::less<int>()); // returns input.begin() + 4
+ *  thrust::lower_bound(input.begin(), input.end(), 9, _THRUST_STD::less<int>()); // returns input.end()
  *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/lower_bound
@@ -252,12 +252,12 @@ THRUST_HOST_DEVICE ForwardIterator lower_bound(
  *  input[3] = 7;
  *  input[4] = 8;
  *
- *  thrust::lower_bound(input.begin(), input.end(), 0, thrust::less<int>()); // returns input.begin()
- *  thrust::lower_bound(input.begin(), input.end(), 1, thrust::less<int>()); // returns input.begin() + 1
- *  thrust::lower_bound(input.begin(), input.end(), 2, thrust::less<int>()); // returns input.begin() + 1
- *  thrust::lower_bound(input.begin(), input.end(), 3, thrust::less<int>()); // returns input.begin() + 2
- *  thrust::lower_bound(input.begin(), input.end(), 8, thrust::less<int>()); // returns input.begin() + 4
- *  thrust::lower_bound(input.begin(), input.end(), 9, thrust::less<int>()); // returns input.end()
+ *  thrust::lower_bound(input.begin(), input.end(), 0, _THRUST_STD::less<int>()); // returns input.begin()
+ *  thrust::lower_bound(input.begin(), input.end(), 1, _THRUST_STD::less<int>()); // returns input.begin() + 1
+ *  thrust::lower_bound(input.begin(), input.end(), 2, _THRUST_STD::less<int>()); // returns input.begin() + 1
+ *  thrust::lower_bound(input.begin(), input.end(), 3, _THRUST_STD::less<int>()); // returns input.begin() + 2
+ *  thrust::lower_bound(input.begin(), input.end(), 8, _THRUST_STD::less<int>()); // returns input.begin() + 4
+ *  thrust::lower_bound(input.begin(), input.end(), 9, _THRUST_STD::less<int>()); // returns input.end()
  *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/lower_bound
@@ -415,12 +415,14 @@ ForwardIterator upper_bound(ForwardIterator first, ForwardIterator last, const L
  *  input[3] = 7;
  *  input[4] = 8;
  *
- *  thrust::upper_bound(thrust::device, input.begin(), input.end(), 0, thrust::less<int>()); // returns input.begin() +
- * 1 thrust::upper_bound(thrust::device, input.begin(), input.end(), 1, thrust::less<int>()); // returns input.begin() +
- * 1 thrust::upper_bound(thrust::device, input.begin(), input.end(), 2, thrust::less<int>()); // returns input.begin() +
- * 2 thrust::upper_bound(thrust::device, input.begin(), input.end(), 3, thrust::less<int>()); // returns input.begin() +
- * 2 thrust::upper_bound(thrust::device, input.begin(), input.end(), 8, thrust::less<int>()); // returns input.end()
- *  thrust::upper_bound(thrust::device, input.begin(), input.end(), 9, thrust::less<int>()); // returns input.end()
+ *  using _THRUST_STD::less;
+ *
+ *  thrust::upper_bound(thrust::device, input.begin(), input.end(), 0, less<int>()); // returns input.begin() + 1
+ *  thrust::upper_bound(thrust::device, input.begin(), input.end(), 1, less<int>()); // returns input.begin() + 1
+ *  thrust::upper_bound(thrust::device, input.begin(), input.end(), 2, less<int>()); // returns input.begin() + 2
+ *  thrust::upper_bound(thrust::device, input.begin(), input.end(), 3, less<int>()); // returns input.begin() + 2
+ *  thrust::upper_bound(thrust::device, input.begin(), input.end(), 8, less<int>()); // returns input.end()
+ *  thrust::upper_bound(thrust::device, input.begin(), input.end(), 9, less<int>()); // returns input.end()
  *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/upper_bound
@@ -471,12 +473,14 @@ THRUST_HOST_DEVICE ForwardIterator upper_bound(
  *  input[3] = 7;
  *  input[4] = 8;
  *
- *  thrust::upper_bound(input.begin(), input.end(), 0, thrust::less<int>()); // returns input.begin() + 1
- *  thrust::upper_bound(input.begin(), input.end(), 1, thrust::less<int>()); // returns input.begin() + 1
- *  thrust::upper_bound(input.begin(), input.end(), 2, thrust::less<int>()); // returns input.begin() + 2
- *  thrust::upper_bound(input.begin(), input.end(), 3, thrust::less<int>()); // returns input.begin() + 2
- *  thrust::upper_bound(input.begin(), input.end(), 8, thrust::less<int>()); // returns input.end()
- *  thrust::upper_bound(input.begin(), input.end(), 9, thrust::less<int>()); // returns input.end()
+ *  using _THRUST_STD::less;
+ *
+ *  thrust::upper_bound(input.begin(), input.end(), 0, less<int>()); // returns input.begin() + 1
+ *  thrust::upper_bound(input.begin(), input.end(), 1, less<int>()); // returns input.begin() + 1
+ *  thrust::upper_bound(input.begin(), input.end(), 2, less<int>()); // returns input.begin() + 2
+ *  thrust::upper_bound(input.begin(), input.end(), 3, less<int>()); // returns input.begin() + 2
+ *  thrust::upper_bound(input.begin(), input.end(), 8, less<int>()); // returns input.end()
+ *  thrust::upper_bound(input.begin(), input.end(), 9, less<int>()); // returns input.end()
  *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/upper_bound
@@ -631,12 +635,14 @@ bool binary_search(ForwardIterator first, ForwardIterator last, const LessThanCo
  *  input[3] = 7;
  *  input[4] = 8;
  *
- *  thrust::binary_search(thrust::device, input.begin(), input.end(), 0, thrust::less<int>()); // returns true
- *  thrust::binary_search(thrust::device, input.begin(), input.end(), 1, thrust::less<int>()); // returns false
- *  thrust::binary_search(thrust::device, input.begin(), input.end(), 2, thrust::less<int>()); // returns true
- *  thrust::binary_search(thrust::device, input.begin(), input.end(), 3, thrust::less<int>()); // returns false
- *  thrust::binary_search(thrust::device, input.begin(), input.end(), 8, thrust::less<int>()); // returns true
- *  thrust::binary_search(thrust::device, input.begin(), input.end(), 9, thrust::less<int>()); // returns false
+ *  using _THRUST_STD::less;
+ *
+ *  thrust::binary_search(thrust::device, input.begin(), input.end(), 0, less<int>()); // returns true
+ *  thrust::binary_search(thrust::device, input.begin(), input.end(), 1, less<int>()); // returns false
+ *  thrust::binary_search(thrust::device, input.begin(), input.end(), 2, less<int>()); // returns true
+ *  thrust::binary_search(thrust::device, input.begin(), input.end(), 3, less<int>()); // returns false
+ *  thrust::binary_search(thrust::device, input.begin(), input.end(), 8, less<int>()); // returns true
+ *  thrust::binary_search(thrust::device, input.begin(), input.end(), 9, less<int>()); // returns false
  *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/binary_search
@@ -686,12 +692,14 @@ THRUST_HOST_DEVICE bool binary_search(
  *  input[3] = 7;
  *  input[4] = 8;
  *
- *  thrust::binary_search(input.begin(), input.end(), 0, thrust::less<int>()); // returns true
- *  thrust::binary_search(input.begin(), input.end(), 1, thrust::less<int>()); // returns false
- *  thrust::binary_search(input.begin(), input.end(), 2, thrust::less<int>()); // returns true
- *  thrust::binary_search(input.begin(), input.end(), 3, thrust::less<int>()); // returns false
- *  thrust::binary_search(input.begin(), input.end(), 8, thrust::less<int>()); // returns true
- *  thrust::binary_search(input.begin(), input.end(), 9, thrust::less<int>()); // returns false
+ *  using _THRUST_STD::less;
+ *
+ *  thrust::binary_search(input.begin(), input.end(), 0, less<int>()); // returns true
+ *  thrust::binary_search(input.begin(), input.end(), 1, less<int>()); // returns false
+ *  thrust::binary_search(input.begin(), input.end(), 2, less<int>()); // returns true
+ *  thrust::binary_search(input.begin(), input.end(), 3, less<int>()); // returns false
+ *  thrust::binary_search(input.begin(), input.end(), 8, less<int>()); // returns true
+ *  thrust::binary_search(input.begin(), input.end(), 9, less<int>()); // returns false
  *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/binary_search
@@ -887,14 +895,21 @@ equal_range(ForwardIterator first, ForwardIterator last, const LessThanComparabl
  *  input[3] = 7;
  *  input[4] = 8;
  *
- *  thrust::equal_range(thrust::device, input.begin(), input.end(), 0, thrust::less<int>()); // returns [input.begin(),
- * input.begin() + 1) thrust::equal_range(thrust::device, input.begin(), input.end(), 1, thrust::less<int>()); //
- * returns [input.begin() + 1, input.begin() + 1) thrust::equal_range(thrust::device, input.begin(), input.end(), 2,
- * thrust::less<int>()); // returns [input.begin() + 1, input.begin() + 2) thrust::equal_range(thrust::device,
- * input.begin(), input.end(), 3, thrust::less<int>()); // returns [input.begin() + 2, input.begin() + 2)
- *  thrust::equal_range(thrust::device, input.begin(), input.end(), 8, thrust::less<int>()); // returns [input.begin() +
- * 4, input.end()) thrust::equal_range(thrust::device, input.begin(), input.end(), 9, thrust::less<int>()); // returns
- * [input.end(), input.end()) \endcode
+ *  using _THRUST_STD::less;
+ *
+ *  thrust::equal_range(thrust::device, input.begin(), input.end(), 0, less<int>());
+ *  // returns [input.begin(), input.begin() + 1)
+ *  thrust::equal_range(thrust::device, input.begin(), input.end(), 1, less<int>());
+ *  // returns [input.begin() + 1, input.begin() + 1)
+ *  thrust::equal_range(thrust::device, input.begin(), input.end(), 2, less<int>());
+ *  // returns [input.begin() + 1, input.begin() + 2)
+ *  thrust::equal_range(thrust::device, input.begin(), input.end(), 3, less<int>());
+ *  // returns [input.begin() + 2, input.begin() + 2)
+ *  thrust::equal_range(thrust::device, input.begin(), input.end(), 8, less<int>());
+ *  // returns [input.begin() + 4, input.end())
+ *  thrust::equal_range(thrust::device, input.begin(), input.end(), 9, less<int>());
+ *  // returns [input.end(), input.end())
+ *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/equal_range
  *  \see \p lower_bound
@@ -957,13 +972,21 @@ THRUST_HOST_DEVICE thrust::pair<ForwardIterator, ForwardIterator> equal_range(
  *  input[3] = 7;
  *  input[4] = 8;
  *
- *  thrust::equal_range(input.begin(), input.end(), 0, thrust::less<int>()); // returns [input.begin(), input.begin() +
- * 1) thrust::equal_range(input.begin(), input.end(), 1, thrust::less<int>()); // returns [input.begin() + 1,
- * input.begin() + 1) thrust::equal_range(input.begin(), input.end(), 2, thrust::less<int>()); // returns [input.begin()
- * + 1, input.begin() + 2) thrust::equal_range(input.begin(), input.end(), 3, thrust::less<int>()); // returns
- * [input.begin() + 2, input.begin() + 2) thrust::equal_range(input.begin(), input.end(), 8, thrust::less<int>()); //
- * returns [input.begin() + 4, input.end()) thrust::equal_range(input.begin(), input.end(), 9, thrust::less<int>()); //
- * returns [input.end(), input.end()) \endcode
+ *  using ::cuda::std::less;
+ *
+ *  thrust::equal_range(input.begin(), input.end(), 0, less<int>());
+ *  // returns [input.begin(), input.begin() + 1)
+ *  thrust::equal_range(input.begin(), input.end(), 1, less<int>());
+ *  // returns [input.begin() + 1, input.begin() + 1)
+ *  thrust::equal_range(input.begin(), input.end(), 2, less<int>());
+ *  // returns [input.begin() * + 1, input.begin() + 2)
+ *  thrust::equal_range(input.begin(), input.end(), 3, less<int>());
+ *  // returns [input.begin() + 2, input.begin() + 2)
+ *  thrust::equal_range(input.begin(), input.end(), 8, less<int>());
+ *  // returns [input.begin() + 4, input.end())
+ *  thrust::equal_range(input.begin(), input.end(), 9, less<int>());
+ *  // returns [input.end(), input.end())
+ *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/equal_range
  *  \see \p lower_bound
@@ -1181,7 +1204,7 @@ OutputIterator lower_bound(
  *  thrust::lower_bound(input.begin(), input.end(),
  *                      values.begin(), values.end(),
  *                      output.begin(),
- *                      thrust::less<int>());
+ *                      _THRUST_STD::less<int>());
  *
  *  // output is now [0, 1, 1, 2, 4, 5]
  *  \endcode
@@ -1258,7 +1281,7 @@ THRUST_HOST_DEVICE OutputIterator lower_bound(
  *  thrust::lower_bound(input.begin(), input.end(),
  *                      values.begin(), values.end(),
  *                      output.begin(),
- *                      thrust::less<int>());
+ *                      _THRUST_STD::less<int>());
  *
  *  // output is now [0, 1, 1, 2, 4, 5]
  *  \endcode
@@ -1477,7 +1500,7 @@ OutputIterator upper_bound(
  *                      input.begin(), input.end(),
  *                      values.begin(), values.end(),
  *                      output.begin(),
- *                      thrust::less<int>());
+ *                      _THRUST_STD::less<int>());
  *
  *  // output is now [1, 1, 2, 2, 5, 5]
  *  \endcode
@@ -1554,7 +1577,7 @@ THRUST_HOST_DEVICE OutputIterator upper_bound(
  *  thrust::upper_bound(input.begin(), input.end(),
  *                      values.begin(), values.end(),
  *                      output.begin(),
- *                      thrust::less<int>());
+ *                      _THRUST_STD::less<int>());
  *
  *  // output is now [1, 1, 2, 2, 5, 5]
  *  \endcode
@@ -1776,7 +1799,7 @@ OutputIterator binary_search(
  *                        input.begin(), input.end(),
  *                        values.begin(), values.end(),
  *                        output.begin(),
- *                        thrust::less<T>());
+ *                        _THRUST_STD::less<T>());
  *
  *  // output is now [true, false, true, false, true, false]
  *  \endcode
@@ -1854,7 +1877,7 @@ THRUST_HOST_DEVICE OutputIterator binary_search(
  *  thrust::binary_search(input.begin(), input.end(),
  *                        values.begin(), values.end(),
  *                        output.begin(),
- *                        thrust::less<T>());
+ *                        _THRUST_STD::less<T>());
  *
  *  // output is now [true, false, true, false, true, false]
  *  \endcode

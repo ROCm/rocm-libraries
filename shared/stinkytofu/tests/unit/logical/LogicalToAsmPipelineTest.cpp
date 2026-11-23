@@ -31,6 +31,7 @@
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/ir/logical/LogicalToFunctionConverter.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
@@ -115,6 +116,35 @@ TEST_F(IRToAsmPipelineTest, SimpleVectorALU) {
     // TODO: Step 4: Emit assembly string and verify output
 }
 
+// gfx1250 FP4/FP4 scaled WMMA: ToStinkyAsmPass must bake the format cost
+// override onto the asm instruction. The descriptor default is latency 8;
+// Gfx1250Instructions.def overrides FP4/FP4 to latency 4 / co-issue 0x0008.
+TEST_F(IRToAsmPipelineTest, MXMFMAFP4BakesCostOverride) {
+    using namespace stinkytofu::test;
+    Function func("kernel");
+    BasicBlock* entryBB = func.createBasicBlock("entry");
+    entryBB->appendIR(MXMFMA("f8f6f4", "f32", "e8", "e8", 16, 16, 128, 1, vgpr(0, 8), vgpr(8, 8),
+                             vgpr(16, 8), vgpr(0, 8), vgpr(24), vgpr(25), false, false,
+                             "MATRIX_FMT_FP4", "MATRIX_FMT_FP4"));
+
+    PassManager pm;
+    GemmTileConfig config;
+    config.arch = {12, 5, 0};
+    pm.setGemmTileConfig(config);
+    pm.addPass(createToStinkyAsmPass());
+    pm.run(func);
+
+    StinkyInstruction* asmInst = nullptr;
+    for (BasicBlock& bb : func)
+        for (IRBase& ir : bb)
+            if (ir.getType() == IRBase::IRType::StinkyTofu)
+                asmInst = static_cast<StinkyInstruction*>(&ir);
+    ASSERT_NE(asmInst, nullptr);
+    EXPECT_EQ(asmInst->issueCycles, 1);
+    EXPECT_EQ(asmInst->latencyCycles, 4);
+    EXPECT_EQ(asmInst->coIssueWindow, 0x0008);
+}
+
 /**
  * True16Modifiers set on a LogicalInstruction must survive logical->asm
  * lowering and render as the .l/.h operand suffix, for every instruction shape
@@ -122,13 +152,11 @@ TEST_F(IRToAsmPipelineTest, SimpleVectorALU) {
  * on through the logical IR, because op_sel would bypass stinkytofu's
  * true16-aware SSA/wait passes.
  *
- * Scope: this covers lowering and emission only. Producers are tested where
- * they live -- the pure-Python rocisa_stinkytofu_adaptor's
- * t16 -> _apply_true16 -> to_stinky_logical chain in its own
- * tests/test_true16.py and tests/test_emission_consistency.py (the t16-tagged
- * three-path cases), and the C++ bridge's
- * attachTrue16ModifiersFromOperands in the rocisa conversion tests. Do not
- * read a pass here as coverage of either.
+ * Scope: this covers lowering and emission only. It injects an
+ * already-derived True16Modifiers, so it says nothing about whether a
+ * producer tags its operands. That derivation lives in the rocisa->logical
+ * bridge, attachTrue16ModifiersFromOperands. Do not read a pass here as
+ * coverage of that bridge.
  */
 TEST_F(IRToAsmPipelineTest, True16HalfSelectSurvivesLowering) {
     using H = HighBitSel;

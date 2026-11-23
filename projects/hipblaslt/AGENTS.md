@@ -12,13 +12,19 @@ This directory (`projects/hipblaslt`) is one component of the larger `rocm-libra
 
 When authoring, reviewing, or pre-merge-gating a hipBLASLt pull request, use the `hipblaslt-pr-quality` agent skill at [`skills/hipblaslt-pr-quality/SKILL.md`](skills/hipblaslt-pr-quality/SKILL.md). It is a thin overlay that *tightens* the library-agnostic `rocm-pr-quality` base skill (in `ROCm/TheRock` at `skills/rocm-pr-quality/`) for hipBLASLt — it never relaxes a base rule. The skill is advisory and never posts to GitHub/Jira without explicit human approval.
 
+## Verification harness
+
+For the order in which to verify a change (CPU checks first, GPU last) and how the agent scaffolding is
+kept honest across model generations, see [`harness/HARNESS.md`](harness/HARNESS.md). This file and
+`TESTING.md` win on any conflict.
+
 ## Repository layout (high-level)
 
 | Path | Purpose |
 |------|---------|
 | `library/include/hipblaslt/` | Public C/C++ headers (`hipblaslt.h`, `hipblaslt-ext.hpp`, etc.) |
 | `library/src/amd_detail/` | hipBLASLt API implementation (thin layer over rocblaslt) |
-| `library/src/amd_detail/rocblaslt/` | Internal GEMM dispatch, handle/aux, Tensile host integration (`tensile_host.cpp`), user-driven tuning, transform ops, legacy rocRoller kernels under `src/rocroller/` |
+| `library/src/amd_detail/rocblaslt/` | Internal GEMM dispatch, handle/aux, TensileLite host integration (`tensile_host.cpp`), user-driven tuning, transform ops, legacy rocRoller kernels under `src/rocroller/` |
 | `tensilelite/` | Kernel generator + runtime (Python + C++/Nanobind). |
 | `clients/tests/` | gtest binary (`hipblaslt-test`) driven by YAML in `clients/tests/data/` (`matmul_gtest.yaml`, `auxiliary_gtest.yaml`, `smoke_gtest.yaml`, `rocroller_gtest.yaml`, …) |
 | `clients/bench/` | Benchmark binary (`hipblaslt-bench`) |
@@ -26,7 +32,7 @@ When authoring, reviewing, or pre-merge-gating a hipBLASLt pull request, use the
 | `library/include/hipblaslt/hipblaslt_{float8,bfloat6,e5m3,e8,float4,float6,xfloat32}.h` | Custom narrow types |
 | `tasks.py` | Top-level invoke tasks — primary build entry point (`invoke build`) |
 
-The flow at runtime is: user call → `hipblaslt.cpp` → `rocblaslt_mat.cpp` → `tensile_host.cpp` → TensileLite host (`tensilelite/src/`, `tensilelite/include/`) → loaded `.hsaco`/`.co` from device library. The Tensile path is what new work uses; a small set of pre-existing custom kernels under `library/src/amd_detail/rocblaslt/src/rocroller/` still ships alongside (gated by `HIPBLASLT_ENABLE_ROCROLLER`, ON by default; pass `--skip-rocroller` to `invoke build` to drop it).
+The flow at runtime is: user call → `hipblaslt.cpp` → `rocblaslt_mat.cpp` → `tensile_host.cpp` → TensileLite host (`tensilelite/src/`, `tensilelite/include/`) → loaded `.hsaco`/`.co` from device library. The TensileLite path is what new work uses; a small set of pre-existing custom kernels under `library/src/amd_detail/rocblaslt/src/rocroller/` still ships alongside (gated by `HIPBLASLT_ENABLE_ROCROLLER`, ON by default; pass `--skip-rocroller` to `invoke build` to drop it).
 
 ## Build
 

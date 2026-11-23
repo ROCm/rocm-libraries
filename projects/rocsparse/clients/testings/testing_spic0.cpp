@@ -22,10 +22,14 @@
  *
  * ************************************************************************ */
 #include "testing_spic0.hpp"
+#include "rocsparse_check_cholesky.hpp"
+#include "rocsparse_clients_log.hpp"
 #include "rocsparse_clients_objects.hpp"
 #include "rocsparse_clients_spmat_descr.hpp"
 #include "rocsparse_enum.hpp"
 #include "testing.hpp"
+#include <algorithm>
+#include <memory>
 
 namespace rocsparse_clients
 {
@@ -70,7 +74,9 @@ namespace rocsparse_clients
         {
             ROCSPARSE_CLIENTS_ROUTINE_TRACE;
             rocsparse_error* p_error = nullptr;
-            std::ignore = rocsparse_spic0_descr_destroy(this->m_handle, this->m_descr, p_error);
+            rocsparse_clients_log_rocsparse_error(
+                "rocsparse_spic0_descr_destroy",
+                rocsparse_spic0_descr_destroy(this->m_handle, this->m_descr, p_error));
         }
 
         inline operator rocsparse_spic0_descr&()
@@ -183,7 +189,7 @@ void host_csric0(J                    M,
                 if(nnz_entries[col_k] != 0)
                 {
                     I idx     = nnz_entries[col_k];
-                    local_sum = std::fma(csr_val[k], rocsparse_conj(csr_val[idx]), local_sum);
+                    local_sum = std::fma(csr_val[idx], rocsparse_conj(csr_val[k]), local_sum);
                 }
             }
 
@@ -393,17 +399,19 @@ void host_bsric0(rocsparse_direction  direction,
                         {
                             if(direction == rocsparse_direction_row)
                             {
-                                local_sum = std::fma(bsr_val[block_dim * block_dim * l
-                                                             + block_dim * local_row_j + m],
-                                                     rocsparse_conj(bsr_val[idx]),
-                                                     local_sum);
+                                local_sum = std::fma(
+                                    bsr_val[idx],
+                                    rocsparse_conj(bsr_val[block_dim * block_dim * l
+                                                           + block_dim * local_row_j + m]),
+                                    local_sum);
                             }
                             else
                             {
-                                local_sum = std::fma(bsr_val[block_dim * block_dim * l
-                                                             + block_dim * m + local_row_j],
-                                                     rocsparse_conj(bsr_val[idx]),
-                                                     local_sum);
+                                local_sum = std::fma(
+                                    bsr_val[idx],
+                                    rocsparse_conj(bsr_val[block_dim * block_dim * l + block_dim * m
+                                                           + local_row_j]),
+                                    local_sum);
                             }
                         }
                     }
@@ -1127,6 +1135,11 @@ void testing_spic0(const Arguments& arg)
             auto& cpu_numeric_near_pivot = spic0_descr.m_cpu_numeric_near_singularity_position;
             auto& cpu_symbolic_pivot     = spic0_descr.m_cpu_symbolic_singularity_position;
 
+            const bool     csr = (A.get_format() == rocsparse_format_csr);
+            host_vector<T> a_values;
+            if(csr)
+                a_values = A.get_host_values();
+
             rocsparse_clients_spic0_host(spic0_descr, A, &numeric_pivot_tolerance);
             cpu_symbolic_pivot.unit_check(host_symbolic_pivot);
             cpu_numeric_near_pivot.unit_check(host_numeric_pivot);
@@ -1136,6 +1149,37 @@ void testing_spic0(const Arguments& arg)
             // didn't encounter a zero pivot.
             //
             A.near_check_values(host_symbolic_pivot, host_numeric_pivot);
+
+            //
+            // CSR: check L * L^H against A on every instance without a pivot, independently of
+            // host_csric0. The instances share the row offsets and column indices.
+            //
+            if(csr)
+            {
+                const auto&    host   = A.template as<rocsparse_format_csr>().host();
+                const auto&    gold   = A.get_host_values();
+                const int64_t  stride = A.get_stride();
+                host_vector<T> l_values(A.get_device_values().size());
+                l_values.transfer_from(A.get_device_values());
+                for(int64_t b = 0; b < batch_count; ++b)
+                {
+                    if(host_symbolic_pivot[b] != -1 || host_numeric_pivot[b] != -1)
+                        continue;
+                    // The identity is meaningless if the factorization overflowed.
+                    const T* ref = gold.data() + b * stride;
+                    if(std::any_of(ref, ref + host.nnz, [](const T& v) {
+                           return rocsparse_isnan(v) || rocsparse_isinf(v);
+                       }))
+                        continue;
+                    check_csr_cholesky(host.m,
+                                       host.ptr.data(),
+                                       host.ind.data(),
+                                       a_values.data() + b * stride,
+                                       l_values.data() + b * stride,
+                                       host.base,
+                                       "spic0");
+                }
+            }
         }
     }
 
@@ -1158,7 +1202,7 @@ void testing_spic0(const Arguments& arg)
         const int32_t n_calls      = arg.iters;
 
         hipStream_t stream;
-        rocsparse_get_stream(handle, &stream);
+        CHECK_ROCSPARSE_ERROR(rocsparse_get_stream(handle, &stream));
 
         for(int32_t iter = 0; iter < n_cold_calls; ++iter)
         {
@@ -1253,7 +1297,305 @@ void testing_spic0(const Arguments& arg)
     }
 }
 
-void testing_spic0_extra(const Arguments& arg) {}
+namespace
+{
+    // Arrow matrix: diagonal plus a dense last row and column, so no fill-in. A size
+    // of 1100 puts the last row past the csric0 binary-search threshold (max nnz > 512).
+    template <typename T, typename I, typename J>
+    std::unique_ptr<host_csr_matrix<T, I, J>> make_arrow_matrix(J size, J singular_row = -1)
+    {
+        const I nnz = 3 * size - 2;
+        auto    A   = std::make_unique<host_csr_matrix<T, I, J>>(
+            size, size, nnz, rocsparse_index_base_zero);
+
+        I k = 0;
+        for(J i = 0; i < size - 1; ++i)
+        {
+            A->ptr[i]   = k;
+            A->ind[k]   = i;
+            A->val[k++] = (i == singular_row) ? static_cast<T>(0) : static_cast<T>(2);
+            A->ind[k]   = size - 1;
+            A->val[k++] = static_cast<T>(0.5) / static_cast<T>(size);
+        }
+        A->ptr[size - 1] = k;
+        for(J j = 0; j < size; ++j)
+        {
+            A->ind[k] = j;
+            A->val[k++]
+                = (j == size - 1) ? static_cast<T>(2) : static_cast<T>(0.5) / static_cast<T>(size);
+        }
+        A->ptr[size] = k;
+        return A;
+    }
+
+    template <typename T, typename I, typename J>
+    std::unique_ptr<host_gebsr_matrix<T, I, J>> csr_as_bsr1(const host_csr_matrix<T, I, J>& csr)
+    {
+        auto bsr = std::make_unique<host_gebsr_matrix<T, I, J>>(rocsparse_direction_row,
+                                                                csr.m,
+                                                                csr.n,
+                                                                csr.nnz,
+                                                                static_cast<J>(1),
+                                                                static_cast<J>(1),
+                                                                csr.base);
+        for(J i = 0; i < csr.m + 1; ++i)
+        {
+            bsr->ptr[i] = csr.ptr[i];
+        }
+        for(I k = 0; k < csr.nnz; ++k)
+        {
+            bsr->ind[k] = csr.ind[k];
+            bsr->val[k] = csr.val[k];
+        }
+        return bsr;
+    }
+
+    template <typename T, typename I, typename J>
+    void spic0_check_pivots(rocsparse_handle      handle,
+                            rocsparse_spic0_descr spic0_descr,
+                            rocsparse_spic0_stage stage,
+                            int64_t               batch_count,
+                            int64_t               expected,
+                            rocsparse_error*      p_error)
+    {
+        hipStream_t stream;
+        CHECK_ROCSPARSE_ERROR(rocsparse_get_stream(handle, &stream));
+
+        host_dense_vector<int64_t> h_pivot(batch_count);
+        host_dense_vector<int64_t> h_expected(batch_count);
+        CHECK_ROCSPARSE_ERROR(
+            rocsparse_spic0_get_output(handle,
+                                       spic0_descr,
+                                       rocsparse_spic0_output_singularity_position,
+                                       h_pivot,
+                                       sizeof(int64_t),
+                                       p_error));
+        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+        for(int64_t i = 0; i < batch_count; ++i)
+        {
+            h_expected[i] = expected;
+        }
+        std::ignore = stage;
+        h_expected.unit_check(h_pivot);
+    }
+
+    // Factorize batch_count instances aliasing the same values (batch stride 0).
+    template <typename T, typename I, typename J>
+    void spic0_zero_batch_stride(const Arguments&          arg,
+                                 host_csr_matrix<T, I, J>& h_A,
+                                 int64_t                   batch_count,
+                                 bool                      check_values = true)
+    {
+        rocsparse_error*       p_error = nullptr;
+        rocsparse_local_handle local_handle(arg);
+        rocsparse_handle       handle = local_handle;
+
+        device_csr_matrix<T, I, J> d_A(h_A);
+        rocsparse_local_spmat      A(d_A);
+        CHECK_ROCSPARSE_ERROR(rocsparse_csr_set_strided_batch(A, batch_count, 0, 0));
+
+        const rocsparse_spic0_alg       alg                      = rocsparse_spic0_alg_default;
+        const rocsparse_analysis_policy analysis_policy          = rocsparse_analysis_policy_reuse;
+        const rocsparse_datatype        compute_datatype         = get_datatype<T>();
+        const double                    singular_pivot_tolerance = 0.0;
+
+        rocsparse_clients::spic0_descr spic0_descr(handle, batch_count);
+
+        CHECK_ROCSPARSE_ERROR(rocsparse_spic0_set_input(
+            handle, spic0_descr, rocsparse_spic0_input_alg, &alg, sizeof(alg), p_error));
+        CHECK_ROCSPARSE_ERROR(rocsparse_spic0_set_input(handle,
+                                                        spic0_descr,
+                                                        rocsparse_spic0_input_analysis_policy,
+                                                        &analysis_policy,
+                                                        sizeof(analysis_policy),
+                                                        p_error));
+        CHECK_ROCSPARSE_ERROR(rocsparse_spic0_set_input(handle,
+                                                        spic0_descr,
+                                                        rocsparse_spic0_input_compute_datatype,
+                                                        &compute_datatype,
+                                                        sizeof(compute_datatype),
+                                                        p_error));
+        CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+        CHECK_ROCSPARSE_ERROR(rocsparse_spic0_set_input(handle,
+                                                        spic0_descr,
+                                                        rocsparse_spic0_input_singularity_tolerance,
+                                                        &singular_pivot_tolerance,
+                                                        sizeof(double),
+                                                        p_error));
+
+        int64_t struct_pivot   = -1;
+        int64_t numeric_pivot  = -1;
+        int64_t singular_pivot = -1;
+        host_csric0<T, I, J>(h_A.m,
+                             h_A.ptr,
+                             h_A.ind,
+                             h_A.val,
+                             h_A.base,
+                             &struct_pivot,
+                             &numeric_pivot,
+                             &singular_pivot,
+                             singular_pivot_tolerance);
+
+        for(auto stage : {rocsparse_spic0_stage_analysis, rocsparse_spic0_stage_compute})
+        {
+            size_t buffer_size_in_bytes = std::numeric_limits<size_t>::max();
+            CHECK_ROCSPARSE_ERROR(rocsparse_spic0_buffer_size(
+                handle, spic0_descr, A, A, stage, &buffer_size_in_bytes, p_error));
+
+            device_dense_vector<char> buffer(buffer_size_in_bytes);
+            CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size_in_bytes));
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_spic0(
+                handle, spic0_descr, A, A, stage, buffer_size_in_bytes, buffer, p_error));
+
+            const int64_t expected
+                = (stage == rocsparse_spic0_stage_analysis) ? struct_pivot : singular_pivot;
+            spic0_check_pivots<T, I, J>(handle, spic0_descr, stage, batch_count, expected, p_error);
+        }
+
+        if(check_values)
+        {
+            h_A.near_check(d_A);
+        }
+    }
+
+    template <typename T, typename I, typename J>
+    void bsric0_zero_batch_stride(const Arguments&            arg,
+                                  host_gebsr_matrix<T, I, J>& h_A,
+                                  int64_t                     batch_count,
+                                  bool                        check_values = true)
+    {
+        rocsparse_error*       p_error = nullptr;
+        rocsparse_local_handle local_handle(arg);
+        rocsparse_handle       handle = local_handle;
+
+        device_gebsr_matrix<T, I, J> d_A(h_A);
+        rocsparse_local_spmat        A(d_A);
+        CHECK_ROCSPARSE_ERROR(rocsparse_csr_set_strided_batch(A, batch_count, 0, 0));
+
+        const rocsparse_spic0_alg       alg                      = rocsparse_spic0_alg_default;
+        const rocsparse_analysis_policy analysis_policy          = rocsparse_analysis_policy_reuse;
+        const rocsparse_datatype        compute_datatype         = get_datatype<T>();
+        const double                    singular_pivot_tolerance = 0.0;
+
+        rocsparse_clients::spic0_descr spic0_descr(handle, batch_count);
+
+        CHECK_ROCSPARSE_ERROR(rocsparse_spic0_set_input(
+            handle, spic0_descr, rocsparse_spic0_input_alg, &alg, sizeof(alg), p_error));
+        CHECK_ROCSPARSE_ERROR(rocsparse_spic0_set_input(handle,
+                                                        spic0_descr,
+                                                        rocsparse_spic0_input_analysis_policy,
+                                                        &analysis_policy,
+                                                        sizeof(analysis_policy),
+                                                        p_error));
+        CHECK_ROCSPARSE_ERROR(rocsparse_spic0_set_input(handle,
+                                                        spic0_descr,
+                                                        rocsparse_spic0_input_compute_datatype,
+                                                        &compute_datatype,
+                                                        sizeof(compute_datatype),
+                                                        p_error));
+        CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+        CHECK_ROCSPARSE_ERROR(rocsparse_spic0_set_input(handle,
+                                                        spic0_descr,
+                                                        rocsparse_spic0_input_singularity_tolerance,
+                                                        &singular_pivot_tolerance,
+                                                        sizeof(double),
+                                                        p_error));
+
+        int64_t struct_pivot  = -1;
+        int64_t numeric_pivot = -1;
+        host_bsric0<T, I, J>(h_A.block_direction,
+                             h_A.mb,
+                             h_A.row_block_dim,
+                             h_A.ptr,
+                             h_A.ind,
+                             h_A.val,
+                             h_A.base,
+                             &struct_pivot,
+                             &numeric_pivot);
+
+        for(auto stage : {rocsparse_spic0_stage_analysis, rocsparse_spic0_stage_compute})
+        {
+            size_t buffer_size_in_bytes = std::numeric_limits<size_t>::max();
+            CHECK_ROCSPARSE_ERROR(rocsparse_spic0_buffer_size(
+                handle, spic0_descr, A, A, stage, &buffer_size_in_bytes, p_error));
+
+            device_dense_vector<char> buffer(buffer_size_in_bytes);
+            CHECK_HIP_ERROR(hipMemset(buffer, 255 - 1, buffer_size_in_bytes));
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_spic0(
+                handle, spic0_descr, A, A, stage, buffer_size_in_bytes, buffer, p_error));
+
+            const int64_t expected
+                = (stage == rocsparse_spic0_stage_analysis) ? struct_pivot : numeric_pivot;
+            spic0_check_pivots<T, I, J>(handle, spic0_descr, stage, batch_count, expected, p_error);
+        }
+
+        if(check_values)
+        {
+            h_A.near_check(d_A);
+        }
+    }
+}
+
+void testing_spic0_extra(const Arguments& arg)
+{
+    // Parameterized yaml entries call this with a concrete M. The pre_checkin entry
+    // leaves M at the default -1 and is the zero-stride regression.
+    if(arg.M >= 0)
+    {
+        return;
+    }
+
+    // AISPARSE-690: zero batch stride. One matrix per csric0 kernel (hash, binary
+    // search) and one BSR matrix for bsric0. batch_count is the largest count the
+    // unclamped assign_async can launch.
+    using T = float;
+    using I = int32_t;
+    using J = int32_t;
+
+    static constexpr int64_t batch_count = 65536;
+
+    {
+        std::unique_ptr<host_csr_matrix<T, I, J>> h_A(
+            rocsparse_clients::csr_tridiag_matrix_t<T, I, J>::init(4));
+        spic0_zero_batch_stride<T, I, J>(arg, *h_A, batch_count);
+    }
+
+    {
+        std::unique_ptr<host_csr_matrix<T, I, J>> h_A(
+            rocsparse_clients::csr_tridiag_matrix_t<T, I, J>::init(4));
+        h_A->val[0] = static_cast<T>(0);
+        spic0_zero_batch_stride<T, I, J>(arg, *h_A, batch_count, false);
+    }
+
+    {
+        auto h_A = make_arrow_matrix<T, I, J>(1100);
+        spic0_zero_batch_stride<T, I, J>(arg, *h_A, batch_count);
+    }
+
+    {
+        auto h_A = make_arrow_matrix<T, I, J>(1100, 5);
+        spic0_zero_batch_stride<T, I, J>(arg, *h_A, batch_count, false);
+    }
+
+    {
+        // gfx1201 selects bsric0_general. Value comparison is what catches the race:
+        // each instance has its own pivot slot.
+        std::unique_ptr<host_csr_matrix<T, I, J>> h_csr(
+            rocsparse_clients::csr_tridiag_matrix_t<T, I, J>::init(4));
+        auto h_B = csr_as_bsr1<T, I, J>(*h_csr);
+        bsric0_zero_batch_stride<T, I, J>(arg, *h_B, batch_count);
+    }
+
+    {
+        std::unique_ptr<host_csr_matrix<T, I, J>> h_csr(
+            rocsparse_clients::csr_tridiag_matrix_t<T, I, J>::init(4));
+        h_csr->val[0] = static_cast<T>(0);
+        auto h_B      = csr_as_bsr1<T, I, J>(*h_csr);
+        bsric0_zero_batch_stride<T, I, J>(arg, *h_B, batch_count, false);
+    }
+}
 
 #define INSTANTIATE(I, J, T)                                            \
     template void testing_spic0_bad_arg<I, J, T>(const Arguments& arg); \

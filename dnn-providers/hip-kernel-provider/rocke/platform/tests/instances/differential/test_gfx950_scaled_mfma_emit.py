@@ -11,9 +11,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import run_diff
+from rocke.core.lower_llvm import LLVM_FLAVORS
 
 
-@pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23"])
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 def test_scaled_mfma_batch_reenters_and_terminates(monkeypatch, flavor):
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
     batch = run_diff._run_python_batch("gfx950_block_scaled_gemm", [0, 49, 0, 50])

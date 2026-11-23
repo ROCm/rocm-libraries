@@ -180,8 +180,6 @@ SingleWeightBackward::GetSolution(const ExecutionContext& /*context*/,
                 (void)hipEventSynchronize(stop.get());
                 (void)hipEventElapsedTime(&elapsed, start.get(), stop.get());
                 // Clean up
-                (void)hipEventDestroy(start.get());
-                (void)hipEventDestroy(stop.get());
                 handle_.ResetKernelTime();
                 handle_.AccumKernelTime(elapsed);
             };

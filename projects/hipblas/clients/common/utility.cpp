@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -62,8 +62,8 @@ void d_vector_set_pad_length(size_t pad)
     g_DVEC_PAD = pad;
 }
 
-hipblas_rng_t hipblas_rng(69069);
-hipblas_rng_t hipblas_seed(hipblas_rng);
+const hipblas_rng_t        g_hipblas_seed(69069); // A fixed seed to start at
+thread_local hipblas_rng_t t_hipblas_rng = g_hipblas_seed;
 
 int64_t c_i32_overflow = int64_t(std::numeric_limits<int32_t>::max()) + 1; // 2147483648
 

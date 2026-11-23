@@ -8,8 +8,11 @@
 #include <atomic>
 #include <cstdint>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <mutex>
 #include <optional>
 #include <vector>
+
+struct hipdnnHandle;
 
 namespace hipdnn_backend
 {
@@ -36,10 +39,13 @@ private:
     int64_t _engineId = INVALID_ENGINE_ID;
     bool _isOverrideShapeEnabled = false;
 
-    // Cached serialized execution-plan blob. Populated lazily on the first
-    // serializeBackendPlan() call and reused by all subsequent size/fill calls.
-    // A finalized plan is immutable, so this never needs invalidation.
+    // Cached serialized execution-plan blob. A loaded plan starts with the exact plan bytes it was
+    // loaded from (for a graph-and-plan container, only the plan part). A built plan fills it on
+    // its first serializeBackendPlan() call. Every later size/fill call reuses it. A finalized
+    // plan is immutable, so this never needs invalidation.
     mutable std::vector<uint8_t> _serializedPlanCache;
+    // Guards _serializedPlanCache. serializeBackendPlan() is const and can run on several threads.
+    mutable std::mutex _serializedPlanCacheMutex;
 
     // Process-unique plan id. Logs use it to tell plans apart, because a plan address
     // can be reused after the plan is destroyed.
@@ -51,6 +57,10 @@ private:
     // Number of successful hipdnnBackendExecute calls on this plan. The backend
     // logs this count so users can see how often each compiled plan runs.
     std::atomic<uint64_t> _executionCount{0};
+
+    // Device of the handle the plan was finalized or deserialized on. Empty when it could not
+    // be resolved, which disables the execute-time device check.
+    std::optional<int> _device;
 
     static uint64_t nextPlanId();
 
@@ -111,6 +121,13 @@ public:
     // Records one successful submission of this plan and returns the new count (1-based).
     // Thread-safe: concurrent submissions of the same plan get distinct counts.
     uint64_t recordExecution();
+
+    // Binds the plan to the device of handle's stream; a failed query leaves the plan unbound.
+    void recordDevice(const hipdnnHandle& handle);
+
+    // No-op for an unbound plan. Otherwise throws BAD_PARAM if handle's stream is on another
+    // device, or INTERNAL_ERROR if that device cannot be resolved.
+    void validateExecutionDevice(const hipdnnHandle& handle) const;
 
     static hipdnnBackendDescriptorType_t getStaticType();
 

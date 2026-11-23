@@ -57,8 +57,8 @@ constexpr Tolerance kEmbossTolerance = tolerance(1.0, 1e-3, 5e-3);
 
 template <typename T>
 void run_emboss(const TestConfig& cfg, const EmbossParams& op) {
-    // The HIP kernel requires srcDesc.offsetInBytes >= 12 * (kernelSize/2) as read-slack for the
-    // window (RPP_ERROR_LOW_OFFSET otherwise), so src carries a leading pad. dst keeps offset 0.
+    // The kernel clamps the window to the ROI itself, so no caller pad is required. src still
+    // carries a leading pad here to keep a non-zero offsetInBytes covered. dst keeps offset 0.
     RpptDesc srcDesc = make_src_descriptor(cfg);
     RpptDesc dstDesc = make_dst_descriptor(cfg);
     const std::size_t offsetBytes = 12u * (op.kernelSize / 2);

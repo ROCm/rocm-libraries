@@ -6,7 +6,7 @@
 # characterization.
 #
 # Target: exercise the methodlogy-A missing branches in
-# Tensile/KernelWriterConversion.py (115 uncovered lines).
+# tensilelite/KernelWriterConversion.py (115 uncovered lines).
 #
 # Knob family:
 #   GlobalSplitU=[2,4]  -> _GlobalAccumulation=MultipleBuffer

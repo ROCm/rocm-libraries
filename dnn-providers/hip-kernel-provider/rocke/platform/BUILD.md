@@ -70,6 +70,13 @@ cmake --build <build> --target rocke_core -j$(nproc)
 The top-level `<rocke/platform>/CMakeLists.txt` globs `cpp/**/*.cpp` (excluding
 `cpp/bindings/`) into `rocke_core`, with the public ABI headers at `cpp/include`.
 
+Configuring needs a Python 3 interpreter. The engine's copy of the intrinsic
+arch-domain table is generated at build time from the JSON columns under
+`python/rocke/core/arch/data/`, which the Python engine reads directly, by
+`tools/gen_arch_domain_cpp.py` (standard library only). The output goes to
+`<build>/generated/` and is never committed, so regenerating a column with
+`tools/gen_arch_domain.py` reaches both engines with no other step.
+
 Optional sanitizer build for diagnostics (not for shipping): `-DROCKE_SANITIZE=ON`.
 
 ### The shared engine (`librocke.so`)
@@ -198,7 +205,9 @@ can detect a mismatch rather than rely on rebuild discipline.
 `cmake/rocke_build_id.cmake` computes a deterministic, git-independent content
 hash over the repository-owned inputs to the shared engine and replay CLI: the
 linked C++ sources and headers (excluding pybind-only sources), the replay CLI
-source, and the CMake recipes that build and stamp both artifacts.
+source, the CMake recipes that build and stamp both artifacts, and the inputs of
+the generated arch-domain table (the committed columns, `arch_domain_waivers.json`,
+`domain.py` and `tools/gen_arch_domain_cpp.py`).
 
 CMake computes the ID while configuring for diagnostics, then
 `cmake/generate_rocke_build_id.cmake` recomputes it on every build. A source or

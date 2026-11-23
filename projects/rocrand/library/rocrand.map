@@ -1,0 +1,49 @@
+/* rocRAND linker export allowlist. ELF symbol versioning is intended. */
+ROCRAND_1 {
+    global:
+        rocrand_create_discrete_distribution;
+        rocrand_create_generator;
+        rocrand_create_generator_host;
+        rocrand_create_generator_host_blocking;
+        rocrand_create_poisson_distribution;
+        rocrand_destroy_discrete_distribution;
+        rocrand_destroy_generator;
+        rocrand_generate;
+        rocrand_generate_char;
+        rocrand_generate_log_normal;
+        rocrand_generate_log_normal_double;
+        rocrand_generate_log_normal_half;
+        rocrand_generate_long_long;
+        rocrand_generate_normal;
+        rocrand_generate_normal_double;
+        rocrand_generate_normal_half;
+        rocrand_generate_poisson;
+        rocrand_generate_short;
+        rocrand_generate_uniform;
+        rocrand_generate_uniform_double;
+        rocrand_generate_uniform_half;
+        rocrand_get_direction_vectors32;
+        rocrand_get_direction_vectors64;
+        rocrand_get_scramble_constants32;
+        rocrand_get_scramble_constants64;
+        rocrand_get_version;
+        rocrand_h_scrambled_sobol32_direction_vectors;
+        rocrand_h_scrambled_sobol64_direction_vectors;
+        rocrand_h_sobol32_direction_vectors;
+        rocrand_h_sobol64_direction_vectors;
+        rocrand_initialize_generator;
+        rocrand_set_offset;
+        rocrand_set_ordering;
+        rocrand_set_quasi_random_generator_dimensions;
+        rocrand_set_seed;
+        rocrand_set_seed_uint4;
+        rocrand_set_stream;
+    local: *;
+};
+
+/* Exported only for backward compatibility and for rocRAND's internal tests.
+   Not part of the stable API: may be removed in a future release. */
+ROCRAND_PRIVATE_1 {
+    global:
+        rocrand_h_mt19937_jump;
+};

@@ -15,7 +15,6 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
@@ -57,7 +56,7 @@ TEST(TabulateTests, TestTabulateDispatchExplicit)
   thrust::device_vector<int> vec(1);
 
   my_system sys(0);
-  thrust::tabulate(sys, vec.begin(), vec.end(), ::internal::identity{});
+  thrust::tabulate(sys, vec.begin(), vec.end(), _THRUST_STD::identity{});
 
   ASSERT_EQ(true, sys.is_valid());
 }
@@ -74,7 +73,7 @@ TEST(TabulateTests, TestTabulateDispatchImplicit)
 
   thrust::device_vector<int> vec(1);
 
-  thrust::tabulate(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), ::internal::identity{});
+  thrust::tabulate(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), _THRUST_STD::identity{});
 
   ASSERT_EQ(13, vec.front());
 }
@@ -88,7 +87,7 @@ TYPED_TEST(TabulateVectorTests, TestTabulateSimple)
 
   Vector v(5);
 
-  thrust::tabulate(v.begin(), v.end(), ::internal::identity{});
+  thrust::tabulate(v.begin(), v.end(), _THRUST_STD::identity{});
 
   Vector ref{0, 1, 2, 3, 4};
   ASSERT_EQ(v, ref);
@@ -140,7 +139,7 @@ TEST(TabulateTests, TestTabulateToDiscardIterator)
 
     thrust::tabulate(thrust::discard_iterator<thrust::device_system_tag>(),
                      thrust::discard_iterator<thrust::device_system_tag>(size),
-                     ::internal::identity{});
+                     _THRUST_STD::identity{});
   }
 
   // nothing to check -- just make sure it compiles

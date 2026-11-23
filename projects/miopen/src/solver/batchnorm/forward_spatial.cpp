@@ -269,7 +269,8 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
                                       in_cstride,
                                       ylocalsize,
                                       zlocalsize,
-                                      nelements);
+                                      nelements,
+                                      vectorsize);
 
         // WG size for Final kernels (NHWC)
         if(problem.IsLayoutNHWC() && c % 2 == 0 && xlocalsize % 2 == 0)
@@ -333,6 +334,10 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
         build_params.Define("MIO_BN_NCHW", in_nchw);
 
         build_params.Define("HIP_ENABLE_EXTRA_WARP_SYNC_TYPES");
+        if(MIOPEN_USE_RNE_BFLOAT16)
+        {
+            build_params.Define("MIOPEN_USE_RNE_BFLOAT16");
+        }
 
         kernel.kernel_file      = "MIOpenBatchNormFwdTrainSpatial.cpp";
         std::string kernel_name = "MIOpenBatchNormFwdTrainSpatial";

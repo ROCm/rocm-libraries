@@ -33,12 +33,12 @@
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_STD_INCLUDE(__algorithm/min.h)
+#  include _THRUST_STD_INCLUDE(cassert)
+#  include _THRUST_STD_INCLUDE(type_traits)
 #else
 #  include <thrust/detail/algorithm_wrapper.h>
+#  include <type_traits>
 #endif
-
-#include <cassert>
-#include <type_traits>
 
 #include <tbb/parallel_for.h>
 
@@ -87,7 +87,7 @@ struct body
     RandomAccessIterator1 my_last  = first + offset_to_last;
 
     // carefully pass the init value for the interval with raw_reference_cast
-    using sum_type = typename std::decay<decltype(binary_op(*my_first, *my_first))>::type;
+    using sum_type = _THRUST_STD::decay_t<decltype(binary_op(*my_first, *my_first))>::type;
     result[interval_idx] =
       thrust::reduce(thrust::seq, my_first + 1, my_last, sum_type(thrust::raw_reference_cast(*my_first)), binary_op);
   }
@@ -136,7 +136,7 @@ void reduce_intervals(
   using value_type = thrust::detail::it_value_t<RandomAccessIterator1>;
 
   return thrust::system::tbb::detail::reduce_intervals(
-    exec, first, last, interval_size, result, thrust::plus<value_type>());
+    exec, first, last, interval_size, result, _THRUST_STD::plus<value_type>());
 }
 
 } // namespace detail

@@ -1,0 +1,11 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+# The flatc flags that generate ingestor_plan_generated.h from ingestor_plan.fbs.
+# Write one flag on each line. The build ignores blank lines and lines that start with '#'.
+# The build adds --cpp. Do not put --cpp in this file.
+--gen-object-api
+--gen-mutable
+--gen-compare
+--defaults-json
+--scoped-enums

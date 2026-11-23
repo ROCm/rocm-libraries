@@ -362,8 +362,7 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectByPluginSuppliedEngineName)
     // A plugin only keeps an engine whose ID is the hash of the name it reports.
     ASSERT_EQ(hipdnn_data_sdk::utilities::engineNameToId(pluginEngineName()), failingEngineId);
 
-    // create_execution_plans() resets the filter set, so the deselection is
-    // applied afterwards.
+    // The deselection follows plan creation and still removes the plan already created.
     result = graph->create_execution_plans();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -396,8 +395,8 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectByPluginSuppliedEngineName)
     EXPECT_EQ(&chained, graph.get());
 
     result = graph->build_plan_at_index(failingPlanIndex);
-    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
-    EXPECT_NE(result.err_msg.find("barred"), std::string::npos) << result.err_msg;
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_NE(result.err_msg.find("deselect_engines"), std::string::npos) << result.err_msg;
 
     result = graph->build_plan_at_index(otherPlanIndex);
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -424,16 +423,17 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectByUnmatchedEngineNameBarsNot
     for(int64_t index = 0; index < planCount; ++index)
     {
         result = graph->build_plan_at_index(index);
-        EXPECT_EQ(result.err_msg.find("barred"), std::string::npos)
-            << "Plan " << index << " should not be barred by an unmatched name";
+        EXPECT_EQ(result.err_msg.find("filtered"), std::string::npos)
+            << "Plan " << index << " should not be filtered by an unmatched name";
     }
 }
 
-// create_execution_plans() resets the name filter as well as the engine ID filter.
-TEST_F(IntegrationGraphEngineNameFiltering, CreateExecutionPlansResetsNameFilter)
+// A name filter set before create_execution_plans() persists and applies to the plans it
+// creates.
+TEST_F(IntegrationGraphEngineNameFiltering, NameFilterSetBeforeCreateExecutionPlansPersists)
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
-    auto graph = buildGraph("CreateExecutionPlansResetsNameFilter", dims);
+    auto graph = buildGraph("NameFilterSetBeforeCreateExecutionPlansPersists", dims);
 
     graph->deselect_engines(std::vector<std::string>{pluginEngineName()});
 
@@ -441,9 +441,10 @@ TEST_F(IntegrationGraphEngineNameFiltering, CreateExecutionPlansResetsNameFilter
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     const int64_t planCount = graph->get_execution_plan_count();
-    ASSERT_GT(planCount, 0);
+    ASSERT_GT(planCount, 1) << "Need a second plan to show the bar is engine-specific";
 
     int64_t failingPlanIndex = -1;
+    int64_t otherPlanIndex = -1;
     for(int64_t index = 0; index < planCount; ++index)
     {
         std::string planName;
@@ -452,12 +453,20 @@ TEST_F(IntegrationGraphEngineNameFiltering, CreateExecutionPlansResetsNameFilter
         if(planName == pluginEngineName())
         {
             failingPlanIndex = index;
-            break;
+        }
+        else if(otherPlanIndex < 0)
+        {
+            otherPlanIndex = index;
         }
     }
     ASSERT_GE(failingPlanIndex, 0) << "No plan reported the plugin-supplied engine name";
+    ASSERT_GE(otherPlanIndex, 0) << "No plan from another engine to use as a control";
 
     result = graph->build_plan_at_index(failingPlanIndex);
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_NE(result.err_msg.find("deselect_engines"), std::string::npos) << result.err_msg;
+
+    result = graph->build_plan_at_index(otherPlanIndex);
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 }
 
@@ -555,8 +564,8 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectBarsPluginEnginePlan)
         std::vector<int64_t>{hipdnn_tests::plugin_constants::engineId<ExecuteFailsPlugin>()});
 
     result = graph->build_plan_at_index(namedPlanIndex);
-    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
-    EXPECT_NE(result.err_msg.find("barred"), std::string::npos) << result.err_msg;
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_NE(result.err_msg.find("deselect_engines"), std::string::npos) << result.err_msg;
 }
 
 // A plugin whose engine ID is the hash of its name -- the identity
@@ -618,8 +627,8 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectByHashedPluginSuppliedEngine
     EXPECT_EQ(&chained, graph.get());
 
     result = graph->build_plan_at_index(hashedPlanIndex);
-    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
-    EXPECT_NE(result.err_msg.find("barred"), std::string::npos) << result.err_msg;
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_NE(result.err_msg.find("deselect_engines"), std::string::npos) << result.err_msg;
 
     result = graph->build_plan_at_index(otherPlanIndex);
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;

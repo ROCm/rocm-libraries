@@ -7,6 +7,9 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <optional>
+#include <string>
+#include <vector>
 
 #include "HipdnnEnginePluginHandle.hpp"
 #include "TestWorkarounds.hpp"
@@ -394,6 +397,113 @@ TEST(TestMatmulParams, Tensor4DThrowsOnOutputBatchMismatch)
 
     // Should throw - strided input batches
     EXPECT_THROW(MatmulParams(*attrs, graph.getTensorMap()), HipdnnPluginException);
+}
+
+namespace
+{
+int64_t stridedBatchOffset(const HipblasltMatrixLayout& layout)
+{
+    int64_t offset = -1;
+    size_t written = 0;
+    EXPECT_EQ(hipblasLtMatrixLayoutGetAttribute(layout.matrixLayout(),
+                                                HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+                                                &offset,
+                                                sizeof(offset),
+                                                &written),
+              HIPBLAS_STATUS_SUCCESS);
+    EXPECT_EQ(written, sizeof(offset));
+    return offset;
+}
+} // namespace
+
+// A batch axis of extent one never advances, so the C offset is the stride of the next
+// batch axis with extent above one.
+TEST(TestMatmulParams, CLayoutBatchOffsetIgnoresSingletonBatchAxis)
+{
+    // The virtual matmul output is packed; the final output keeps a stride of 5 on the
+    // singleton axis.
+    auto fused = createValidMatmulBiasActivGraph(
+        {2, 1, 4, 8},
+        {32, 32, 8, 1},
+        {2, 1, 8, 5},
+        {40, 40, 5, 1},
+        {2, 1, 4, 5},
+        {20, 5, 5, 1},
+        false,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD);
+    auto builder = mutateGraph(fused, [](auto& g) {
+        for(auto& tensor : g.tensors)
+        {
+            if(tensor->name == "C_matmul")
+            {
+                tensor->strides = {20, 20, 5, 1};
+            }
+        }
+    });
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* activAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(activAttrs, nullptr);
+
+    std::optional<MatmulParams> params;
+    ASSERT_NO_THROW(params.emplace(*matmulAttrs, nullptr, activAttrs, graph.getTensorMap()));
+    EXPECT_EQ(stridedBatchOffset(params->c()), 20);
+}
+
+TEST(TestMatmulParams, ALayoutBatchOffsetIgnoresSingletonBatchAxis)
+{
+    auto builder = createValidMatmulGraph(
+        {4, 1, 4, 8}, {32, 7, 8, 1}, {4, 1, 8, 5}, {40, 40, 5, 1}, {4, 1, 4, 5}, {20, 20, 5, 1});
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* attrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    std::optional<MatmulParams> params;
+    ASSERT_NO_THROW(params.emplace(*attrs, graph.getTensorMap()));
+    EXPECT_EQ(stridedBatchOffset(params->a()), 32);
+}
+
+// With three batch axes the outer strides must account for every axis inside them.
+TEST(TestMatmulParams, ALayoutBatchOffsetNestsThreeBatchAxes)
+{
+    const auto makeGraph = [](const std::vector<int64_t>& aStrides) {
+        return createValidMatmulGraph({2, 2, 3, 4, 8},
+                                      aStrides,
+                                      {2, 2, 3, 8, 5},
+                                      {480, 240, 80, 5, 1},
+                                      {2, 2, 3, 4, 5},
+                                      {240, 120, 40, 5, 1});
+    };
+
+    {
+        auto builder = makeGraph({192, 96, 32, 8, 1});
+        GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+        auto* attrs = graph.getNode(0).attributes_as_MatmulAttributes();
+        ASSERT_NE(attrs, nullptr);
+
+        std::optional<MatmulParams> params;
+        ASSERT_NO_THROW(params.emplace(*attrs, graph.getTensorMap()));
+        EXPECT_EQ(stridedBatchOffset(params->a()), 32);
+    }
+    {
+        auto builder = makeGraph({200, 96, 32, 8, 1});
+        GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+        auto* attrs = graph.getNode(0).attributes_as_MatmulAttributes();
+        ASSERT_NE(attrs, nullptr);
+
+        try
+        {
+            MatmulParams const params(*attrs, graph.getTensorMap());
+            FAIL() << "non-nesting outer batch stride must throw";
+        }
+        catch(const HipdnnPluginException& e)
+        {
+            EXPECT_NE(std::string(e.what()).find("are not uniform"), std::string::npos) << e.what();
+        }
+    }
 }
 
 TEST_F(TestGpuMatmulPlan, CreatesPlanWithValidGraph)

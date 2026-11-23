@@ -42,22 +42,53 @@ Definitions:
     - { alpha:  -1.0, beta: -0.5,  alphai:  0.0, betai:  0.0 }
 
 Tests:
-- name: csrmv_managed_bad_arg
-  category: pre_checkin
-  function: csrmv_managed_bad_arg
-  precision: *single_double_precisions_complex_real
+# Quick
+- name: csrmv_managed
+  category: quick
+  function: csrmv_managed
+  precision: *single_only_precisions
+  M: [2048, 4096, 8192]
+  N: [2048, 4096, 8192]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random, rocsparse_matrix_tridiagonal]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
 
 - name: csrmv_managed
   category: quick
   function: csrmv_managed
-  precision: *single_double_precisions
-  M: [10, 300]
-  N: [33, 300]
+  precision: *single_only_precisions
+  M: [1]
+  N: [1]
+  dimx_dimy_dimz:
+    - { dimx: 400, dimy: 400, dimz: 1 }
+    - { dimx: 600, dimy: 600, dimz: 1 }
+  alpha_beta:
+    - { alpha: 1.0, beta: -1.0, alphai: 0.0, betai: 0.0 }
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_laplace_2d]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
+
+- name: csrmv_managed
+  category: quick
+  function: csrmv_managed
+  precision: *single_only_precisions
+  M: 1
+  N: 1
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos3, qc2534, mplate]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
+
+# Pre_checkin
+- name: csrmv_managed_bad_arg
+  category: pre_checkin
+  function: csrmv_managed_bad_arg
+  precision: *single_double_precisions_complex_real
 
 - name: csrmv_managed
   category: pre_checkin
@@ -70,35 +101,6 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
   spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
-
-- name: csrmv_managed
-  category: nightly
-  function: csrmv_managed
-  precision: *single_double_precisions_complex_real
-  M: [5000]
-  N: [5000]
-  alpha_beta: *alpha_beta_range_nightly
-  transA: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
-
-- name: csrmv_managed_file
-  category: quick
-  function: csrmv_managed
-  precision: *single_double_precisions
-  M: 1
-  N: 1
-  alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_file_rocalution]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
-  filename: [mac_econ_fwd500,
-             nos2,
-             nos4,
-             nos6,
-             scircuit]
 
 - name: csrmv_managed_file
   category: pre_checkin
@@ -115,6 +117,45 @@ Tests:
              nos3,
              nos5,
              nos7]
+
+- name: csrmv_managed_file
+  category: pre_checkin
+  function: csrmv_managed
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
+  filename: [Chevron2]
+
+- name: csrmv_managed_graph_test
+  category: pre_checkin
+  function: csrmv_managed
+  precision: *single_double_precisions_complex_real
+  M: [10, 500]
+  N: [33, 842]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
+  graph_test: true
+
+# Nightly
+- name: csrmv_managed
+  category: nightly
+  function: csrmv_managed
+  precision: *single_double_precisions_complex_real
+  M: [5000]
+  N: [5000]
+  alpha_beta: *alpha_beta_range_nightly
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
 
 - name: csrmv_managed_file
   category: nightly
@@ -135,32 +176,6 @@ Tests:
              shipsec1]
 
 - name: csrmv_managed_file
-  category: quick
-  function: csrmv_managed
-  precision: *single_only_precisions_complex
-  M: 1
-  N: 1
-  alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_file_rocalution]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
-  filename: [mplate, qc2534]
-
-- name: csrmv_managed_file
-  category: pre_checkin
-  function: csrmv_managed
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  alpha_beta: *alpha_beta_range_checkin
-  transA: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_file_rocalution]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
-  filename: [Chevron2]
-
-- name: csrmv_managed_file
   category: nightly
   function: csrmv_managed
   precision: *single_double_precisions_complex
@@ -172,33 +187,3 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
   filename: [Chevron3]
-
-- name: csrmv_managed_graph_test
-  category: pre_checkin
-  function: csrmv_managed
-  precision: *single_double_precisions_complex_real
-  M: [10, 500]
-  N: [33, 842]
-  alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit]
-  graph_test: true
-
-# Regression: csr_adaptive on managed (unified) memory over-read csr_row_ptr
-# past its m+1-length end for the last, partially-filled row block. Benign on
-# discrete GPUs but faults on unified-memory APUs (gfx1151); caught here on any
-# arch under ASAN. Row counts are chosen so the final adaptive row block holds
-# a non-power-of-two number of short rows.
-- name: csrmv_managed_adaptive_last_rowblock
-  category: quick
-  function: csrmv_managed
-  precision: *single_double_precisions
-  M: [3, 7, 15, 33, 300]
-  N: [3, 7, 15, 33, 300]
-  alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]

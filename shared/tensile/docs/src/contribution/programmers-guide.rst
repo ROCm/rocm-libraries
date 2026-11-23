@@ -181,14 +181,6 @@ To enable profiling, use the ``@profile`` decorator, which must be imported from
 .. note::
    Nested profiling is NOT supported due to the existing limitation with the profiling decorator. This implies that if `func1` calls `func2` in a loop, and both are marked for profiling, the resulting ``.prof`` file for `func1` will display incorrect results.
 
-============
-External CI
-============
-
-`Azure Pipelines <https://dev.azure.com/ROCm-CI/ROCm-CI/_build?definitionId=256>`_ are run for every pull request and commit targeting the develop and mainline branches.
-The pipeline packages up the wheel file and runs pre_checkin tests on a gfx942 system.
-`Click <https://dev.azure.com/ROCm-CI/ROCm-CI/_build?definitionId=256>`_ on the job corresponding to the pull request or commit to view execution logs.
-
 ========================
 Building documentation
 ========================

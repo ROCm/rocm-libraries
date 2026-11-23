@@ -33,7 +33,7 @@ def _root() -> Traversable:
 
 
 def _resource(*parts: str) -> Traversable:
-    """Return a package resource under the Tensile package root."""
+    """Return a package resource under the tensilelite package root."""
     item = _root()
     for part in parts:
         item = item / part
@@ -41,7 +41,7 @@ def _resource(*parts: str) -> Traversable:
 
 
 def _resource_text(*parts: str, encoding: str = "utf-8") -> str:
-    """Read a package resource under the Tensile package root as text."""
+    """Read a package resource under the tensilelite package root as text."""
     return _resource(*parts).read_text(encoding=encoding)
 
 
@@ -121,7 +121,7 @@ def custom_kernel_text(name: str) -> str:
 
 def known_bugs_text() -> str:
     """Read the bundled TensileLogic known-bugs YAML resource."""
-    return _resource_text("TensileLogic", "known_bugs.yaml")
+    return _resource_text("logic", "known_bugs.yaml")
 
 
 def ductile_defaults_text() -> str:

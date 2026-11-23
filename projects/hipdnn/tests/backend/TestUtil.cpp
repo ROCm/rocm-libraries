@@ -25,7 +25,7 @@ void createTestHandle(hipdnnHandle_t* handle)
 void createTestGraph(hipdnnBackendDescriptor_t* descriptor, hipdnnHandle_t handle)
 {
     // Any valid graph with at least one node — the specific operation type doesn't matter
-    auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto builder = hipdnn_test_sdk::utilities::createReductionGraph();
     flatbuffers::DetachedBuffer serializedGraph = builder.Release();
 
     ASSERT_EQ(hipdnnBackendCreateAndDeserializeGraph_ext(

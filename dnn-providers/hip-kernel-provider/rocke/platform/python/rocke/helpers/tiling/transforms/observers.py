@@ -10,9 +10,10 @@ and is this A/B pair sound?" before building on it), so they sit on top of the n
 carry no "machinery" import.
 
 MMA safety (:func:`mma_pair_k_aligned`, :func:`mma_operand_layout_sound`, :func:`mma_pair_compatible`): the
-MFMA/WMMA hardware multiply-accumulates by pairing A-slot-s with B-slot-s and summing over K. The sum
-is order-independent, so the K-slot ordering is FREE -- the sole CROSS-OPERAND constraint is that A and
-B share the SAME positional K-distribution. Per-operand soundness (one M per output on A, one N on B) is
+MFMA/WMMA hardware multiply-accumulates every A row with every B column at each instruction K (the K
+coordinate the canonical layouts hold) and sums over K. The sum is order-independent, so the K-slot
+ordering is FREE -- the sole CROSS-OPERAND constraint is that A and B hold the SAME logical K at each
+instruction K, in every row and column. Per-operand soundness (one M per output on A, one N on B) is
 the OTHER half of the sound MAC. :func:`mma_accumulator_flow_consistent` is the separate C store-coordinate
 gate (passed C == machine-derived C), NOT a sound-MAC condition. Correctness SOT: ``docs/mma_is_machinery.md``
 (the three-condition sound MAC); edge-kind SOT: ``docs/label_flow_and_transforms.md``.
@@ -26,12 +27,11 @@ from ._core import (
     Diagnostic,
     ReorderPlan,
     TransformPlan,
-    _atom_k_signature,
     _axis_permutation,
     _classify_maps,
     _dword_aligned,
     _free_relabel,
-    _kdist_from_fwd,
+    _k_relabelling,
     as_forward_map,
     name_permutation,
 )
@@ -159,61 +159,101 @@ def mma_pair_k_aligned(
     a,
     b,
     *,
-    a_free_atoms: int = 1,
-    b_free_atoms: int = 1,
+    a_canon,
+    b_canon,
     k_axis: int = 1,
 ) -> Diagnostic:
-    """DIAGNOSTIC (observer): do A and B share the SAME positional K PER ATOM -- the PAIRWISE half of the
-    sound MAC (correctness SOT: ``docs/mma_is_machinery.md``, condition 3)? Accepts an encoding OR a forward
-    map ``{(lane,reg)->coord}`` for each.
+    """DIAGNOSTIC (observer): do A and B hold the SAME logical K wherever the instruction multiplies
+    them together -- the PAIRWISE half of the sound MAC (correctness SOT: ``docs/mma_is_machinery.md``,
+    condition 3)? Accepts an encoding OR a forward map ``{(lane,reg)->coord}`` for each operand and each
+    canonical.
 
-    The MFMA/WMMA hardware pairs A-slot-s with B-slot-s and sums over K; the sum is order-independent, so the
-    K ORDER is FREE -- the sole cross-operand constraint is that A and B agree on which logical K sits in
-    each paired slot. (Per-operand soundness -- one M/N per output -- is the OTHER half,
-    :func:`mma_operand_layout_sound`.) M/N register order is unconstrained, and K need NOT match any
-    "canonical" atom order (interleaved-A x interleaved-B is valid iff their K-dists match).
+    ``a_canon``/``b_canon`` are the instruction's canonical A and B layouts for the same wave tile
+    (``canonical_layouts(traits, subtiles)``). They are the machine: the instruction multiplies the A
+    value at canonical ``(M, K)`` with the B value at canonical ``(N, K)`` for EVERY M and N of the
+    wave tile that share that canonical (instruction) K, and sums over K. The sum is order-independent,
+    so the K ORDER is FREE, but every A row and every B column must agree on which logical K sits at
+    each instruction K: the operands must relabel K the same way, independently of the free row.
+    Reading the pairing off the canonicals covers every instruction alike -- slot s with slot s on a
+    same-format one, a mixed-width ``f8f6f4`` one (its 8-bit operand holds K in two runs of 16 per lane,
+    its 6/4-bit operand in one run of 32), one whose lane holds several M blocks of A, and a rectangular
+    wave tile of several atoms -- and it is symmetric in A and B. (Per-operand soundness -- one M/N per
+    output -- is the OTHER half, :func:`mma_operand_layout_sound`.)
 
-    Comparison is PER ATOM: ``a_free_atoms``/``b_free_atoms`` are the free-dim atom counts (M-atoms for A,
-    N-atoms for B) the driver walks. A rectangular wave tile (``a_free_atoms != b_free_atoms``) has
-    whole-fragment K-lists of different lengths even though every issued atom pairs the SAME K, so each
-    operand is reduced to its per-atom K signature first (defaults of 1 = whole-fragment compare, for a
-    caller with no plan/atom-counts in hand). Three-tier:
+    Three-tier:
 
-    - ``ok``      -- atom K-signatures match position-for-position.
-    - ``warning`` -- order differs but every lane holds the SAME K set per atom: reconcilable by an
-      in-register reorder (named, not performed).
-    - ``error``   -- a malformed atom tiling, a lane-count mismatch, or lanes holding different K sets.
+    - ``ok``      -- both operands map each instruction K to one K label, the same one. That is the
+      pairwise half of a sound MMA only; :func:`mma_pair_compatible` also checks each operand.
+    - ``warning`` -- not aligned, but an in-register reorder of one operand (``transform_fragment``)
+      aligns it: each row (M or N) of each lane of that operand already holds the K labels the other
+      operand pairs with it.
+    - ``error``   -- an operand not shaped like its canonical, canonicals of two different instructions,
+      or K labels no in-register reorder of one operand reconciles (they differ in set, depend on the
+      free row, or differ between replicas).
     """
-    a_sig, a_reason = _atom_k_signature(
-        _kdist_from_fwd(as_forward_map(a), k_axis), a_free_atoms, "A"
-    )
-    if a_reason:
-        return Diagnostic("error", a_reason)
-    b_sig, b_reason = _atom_k_signature(
-        _kdist_from_fwd(as_forward_map(b), k_axis), b_free_atoms, "B"
-    )
-    if b_reason:
-        return Diagnostic("error", b_reason)
-    if len(a_sig) != len(b_sig):
+    relabellings = {}
+    for role, operand, canon in (("A", a, a_canon), ("B", b, b_canon)):
+        relabelling = _k_relabelling(operand, canon, k_axis=k_axis, role=role)
+        if isinstance(relabelling, str):
+            return Diagnostic("error", relabelling)
+        relabellings[role] = relabelling
+    a_rel, b_rel = relabellings["A"], relabellings["B"]
+    if set(a_rel.labels) != set(b_rel.labels):
         return Diagnostic(
             "error",
-            f"A spans {len(a_sig)} lanes but B spans {len(b_sig)} -- operands not MMA-compatible",
+            f"A's canonical layout holds instruction K {_k_span(a_rel.labels)} but B's holds "
+            f"{_k_span(b_rel.labels)} -- a_canon and b_canon are not the canonical layouts of one "
+            "instruction",
         )
-    mism = [lane for lane, (ak, bk) in enumerate(zip(a_sig, b_sig)) if ak != bk]
-    if not mism:
-        return Diagnostic("ok", "A.K == B.K per atom (labels K-aligned; valid MMA)")
-    lane = mism[0]
-    if all(sorted(a_sig[l]) == sorted(b_sig[l]) for l in range(len(a_sig))):
+    if (
+        a_rel.conflict is None
+        and b_rel.conflict is None
+        and a_rel.labels == b_rel.labels
+    ):
         return Diagnostic(
-            "warning",
-            f"A.K != B.K positionally (lane {lane}: A {a_sig[lane]} vs B {b_sig[lane]}); same K set per "
-            "atom -> reconcilable by an in-register reorder (transform_fragment one operand first)",
+            "ok",
+            "A.K == B.K at every instruction K (K-aligned: the pairwise half of a sound MMA; "
+            "mma_pair_compatible checks both halves)",
         )
+    for fix, other in (("A", "B"), ("B", "A")):
+        target = relabellings[other]
+        if (
+            target.conflict is None
+            and relabellings[fix].unpaired_row(target.labels) is None
+        ):
+            lane, register, instruction_k, label = relabellings[fix].first_disagreement(
+                target.labels
+            )
+            return Diagnostic(
+                "warning",
+                f"A.K != B.K at instruction K {instruction_k} ({fix} lane {lane} register "
+                f"{register} holds K {label}, {other} holds K {target.labels[instruction_k]}); "
+                f"every row of {fix} holds the K labels {other} pairs with it -> reconcilable by "
+                f"an in-register reorder of {fix} (transform_fragment it first)",
+            )
+    for relabelling in (a_rel, b_rel):
+        if relabelling.conflict is not None:
+            return Diagnostic(
+                "error",
+                f"{relabelling.conflict} -- no in-register reorder of one operand fixes it",
+            )
+    lane, free = a_rel.unpaired_row(b_rel.labels)
+    positions = a_rel.rows[(lane, free)]
     return Diagnostic(
         "error",
-        f"A.K and B.K hold different K sets (lane {lane}: A {sorted(a_sig[lane])} vs "
-        f"B {sorted(b_sig[lane])}) -- no in-register reorder reconciles them",
+        f"A.K and B.K hold different K sets (lane {lane}, M {free}: A "
+        f"{sorted(label for _, _, label in positions)} vs B "
+        f"{sorted(b_rel.labels[k] for _, k, _ in positions)} at the same instruction K) -- no "
+        "in-register reorder reconciles them",
     )
+
+
+def _k_span(labels: dict[int, int]) -> str:
+    """The instruction K ``labels`` covers, as ``low..high`` when they run without a gap."""
+    low, high = min(labels), max(labels)
+    if len(labels) == high - low + 1:
+        return f"{low}..{high}"
+    return f"{len(labels)} values from {low} to {high}"
 
 
 def derive_c_distribution(
@@ -396,20 +436,15 @@ def mma_pair_compatible(
     *,
     a_canon: WarpDistributionEncoding,
     b_canon: WarpDistributionEncoding,
-    a_free_atoms: int = 1,
-    b_free_atoms: int = 1,
     k_axis: int = 1,
 ) -> Diagnostic:
-    """Full A x B check: BOTH operands sound (:func:`mma_operand_layout_sound`) AND their K-dists match
-    PER ATOM (the relationship, :func:`mma_pair_k_aligned`). Observer only. ``ok`` iff the pair is a
-    valid, meaningful MMA; else the first failing operand's soundness error, or the K-match diagnostic.
-    The full sound MAC = per-operand soundness (conditions 1-2) + pairwise K-match (3); correctness SOT:
-    ``docs/mma_is_machinery.md``.
-
-    Pass ``a_free_atoms``/``b_free_atoms`` (the free-dim atom counts m_sub/n_sub) so the K-match is per
-    atom -- **REQUIRED for a rectangular wave tile** (``m_sub != n_sub``), whose whole-wave K-lists differ
-    in length. Defaults of 1 (whole-fragment) are only correct for a truly square/single-atom pair with no
-    shape in hand; a caller that HAS the shape (the recorder op, a ``TileMma``) must pass the counts.
+    """Full A x B check: BOTH operands sound (:func:`mma_operand_layout_sound`) AND K-aligned wherever
+    the instruction multiplies them (the relationship, :func:`mma_pair_k_aligned`). Observer only. ``ok``
+    iff the pair is a valid, meaningful MMA; else the first failing operand's soundness error, or the
+    K-match diagnostic. The full sound MAC = per-operand soundness (conditions 1-2) + pairwise K-match
+    (3); correctness SOT: ``docs/mma_is_machinery.md``. ``a_canon``/``b_canon`` are the canonical layouts
+    of the same wave tile and serve both halves: each operand is judged against its own canonical, and
+    the pair is K-matched at the instruction K the two define.
     """
     for enc, canon, role in ((a_enc, a_canon, "A"), (b_enc, b_canon, "B")):
         d = mma_operand_layout_sound(enc, canon, k_axis=k_axis, role=role)
@@ -418,7 +453,7 @@ def mma_pair_compatible(
     return mma_pair_k_aligned(
         a_enc,
         b_enc,
-        a_free_atoms=a_free_atoms,
-        b_free_atoms=b_free_atoms,
+        a_canon=a_canon,
+        b_canon=b_canon,
         k_axis=k_axis,
     )

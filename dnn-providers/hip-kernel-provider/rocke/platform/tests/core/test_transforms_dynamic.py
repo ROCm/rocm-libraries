@@ -505,6 +505,18 @@ class TestPadDynamic:
 # ---------------------------------------------------------------------------
 
 
+def _depends_on(value, source) -> bool:
+    """True when ``source`` feeds ``value`` through some chain of ops."""
+    stack = [value]
+    while stack:
+        v = stack.pop()
+        if v is source:
+            return True
+        if getattr(v, "op", None) is not None:
+            stack.extend(v.op.operands)
+    return False
+
+
 class TestDynamicTensorDescriptor:
     def test_offset_multiplies_by_runtime_strides(self):
         b = _builder()
@@ -605,6 +617,15 @@ class TestDynamicTensorDescriptor:
         with pytest.raises(ValueError, match="missing upper coords"):
             desc.offset(b, x=x)
 
+    @pytest.mark.parametrize("bad", [3.75, "3"])
+    def test_create_rejects_a_non_integer_stride(self, bad):
+        b = _builder()
+        (s0,) = _params(b, "s0")
+        with pytest.raises(TypeError, match=r"strides\[1\]"):
+            DynamicTensorDescriptor.create(
+                "t", coord_names=("a", "b"), strides=(s0, bad)
+            )
+
     def test_create_length_mismatch_rejected(self):
         b = _builder()
         (s0,) = _params(b, "s0")
@@ -618,3 +639,69 @@ class TestDynamicTensorDescriptor:
             "t", coord_names=("a", "b"), strides=(s0, s1)
         )
         assert all(isinstance(s, Value) for s in desc.dynamic_strides)
+
+    def test_int_strides_follow_the_static_rule(self):
+        b = _builder()
+        a, c, d, s = _params(b, "a", "c", "d", "s")
+        desc = DynamicTensorDescriptor.create(
+            "t", coord_names=("a", "c", "d"), strides=(s, 3, 1)
+        )
+        assert desc.dynamic_strides == (s, None, None)
+        start = len(b.kernel.body.ops)
+        off, valid = desc.offset(b, a=a, c=c, d=d)
+        ops = _new_ops(b, start)
+        muls = [op for op in ops if op.name == "arith.mul"]
+        # The Value stride and int stride 3 multiply; int stride 1 does not.
+        assert len(muls) == 2
+        assert muls[0].operands == [a, s]
+        assert muls[1].operands[0] is c
+        assert muls[1].operands[1].op.attrs["value"] == 3
+        env = {id(a): 5, id(c): 7, id(d): 11, id(s): 13}
+        _evaluate(ops, env)
+        assert env[id(off)] == 5 * 13 + 7 * 3 + 11
+        assert valid is None
+
+    def test_offset_i64_split_widens_a_runtime_base_stride(self):
+        b = _builder()
+        blk, tok, d, s_blk, s_tok = _params(b, "blk", "tok", "d", "s_blk", "s_tok")
+        desc = DynamicTensorDescriptor.create(
+            "kv", coord_names=("blk", "tok", "d"), strides=(s_blk, s_tok, 2)
+        )
+        base, within, _ = desc.offset_i64_split(b, "blk", blk=blk, tok=tok, d=d)
+        # base = zext(to_sgpr(blk)) * zext(s_blk), in i64.
+        wide_blk, wide_stride = base.op.operands
+        assert wide_stride.op.operands == [s_blk]
+        assert _depends_on(wide_blk, blk)
+        # within = tok * s_tok + d * 2, in i32.
+        tok_term, d_term = within.op.operands
+        assert tok_term.op.operands == [tok, s_tok]
+        assert d_term.op.operands[0] is d
+        assert d_term.op.operands[1].op.attrs["value"] == 2
+
+    def test_offset_i64_widens_a_runtime_stride(self):
+        b = _builder()
+        blk, d, s_blk = _params(b, "blk", "d", "s_blk")
+        desc = DynamicTensorDescriptor.create(
+            "kv", coord_names=("blk", "d"), strides=(s_blk, 1)
+        )
+        off, _ = desc.offset_i64(b, "blk", blk=blk, d=d)
+        blk_term, d_term = off.op.operands
+        assert blk_term.op.operands[0].op.operands == [blk]
+        assert blk_term.op.operands[1].op.operands == [s_blk]
+        # The int stride-1 term is the coord itself, widened.
+        assert d_term.op.operands == [d]
+
+    def test_move_multiplies_deltas_by_runtime_strides(self):
+        b = _builder()
+        a, c, da, dc, s = _params(b, "a", "c", "da", "dc", "s")
+        desc = DynamicTensorDescriptor.create(
+            "t", coord_names=("a", "c"), strides=(s, 3)
+        )
+        start = len(b.kernel.body.ops)
+        prev, _ = desc.offset(b, a=a, c=c)
+        off, valid = desc.move(b, prev, {"a": a, "c": c}, {"a": da, "c": dc})
+        assert valid is None
+        env = {id(a): 5, id(c): 7, id(da): 2, id(dc): 4, id(s): 13}
+        _evaluate(_new_ops(b, start), env)
+        # The runtime stride scales the delta, not the 1 held in base_strides.
+        assert env[id(off)] == (5 + 2) * 13 + (7 + 4) * 3

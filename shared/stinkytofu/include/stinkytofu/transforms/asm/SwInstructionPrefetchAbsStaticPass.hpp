@@ -54,9 +54,11 @@ class StinkyAsmModule;
 /// klength uses the simm5 immediate (`0x1f`), slength = null — no length SGPR.
 /// Minimum-SGPR alternative (2 SGPRs): `@rel32@lo+4` / `@rel32@hi+12` on the adds.
 ///
-/// **Requires:** `SwInstructionPrefetchAbsBaseSgpr` >= 0 — **3** reserved SGPRs: even-aligned
-/// pair `s[base:base+1]` + scratch `s[base+2]`. Reserved through the prolog and freed at
-/// label_MultiGemmEnd (body reuses → net ~0 pressure). No-op when -1.
+/// **Requires:** `SwInstructionPrefetchAbsBaseSgpr` >= 0 to enable the pass; -1 no-ops.
+/// Without register allocation the Tensile-reserved triple is used as-is (body reuses
+/// it after label_MultiGemmEnd). After SGPR compact that reservation means nothing, so
+/// the burst takes a block from inside the kernel's own range instead — safe because
+/// this burst sits at kernel entry; see absPrefetchEntrySgprBase.
 ///
 /// Mutually exclusive with `SwInstructionPrefetchRelStaticPass` /
 /// `SwInstructionPrefetchRelDynamicPass` — do not run together.
@@ -64,8 +66,11 @@ class StinkyAsmModule;
 
 /// \p baseSgpr  Low index of the reserved 3-SGPR block (even-aligned pair
 ///              s[base:base+1] + scratch s[base+2]). Pass -1 to no-op.
+/// \p afterSgprCompact  SGPR compact has renumbered the kernel, so \p baseSgpr is
+///              only a "prefetch enabled" flag and the block comes from
+///              absPrefetchEntrySgprBase instead.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createSwInstructionPrefetchAbsStaticPass(
-    int baseSgpr, const std::string& debugOutputPath = {});
+    int baseSgpr, const std::string& debugOutputPath = {}, bool afterSgprCompact = false);
 
 /// Overload that reads base SGPR and debug path from \p module options:
 /// `SwInstructionPrefetchAbsBaseSgpr` and `StinkyTofuCostOutputDir`.

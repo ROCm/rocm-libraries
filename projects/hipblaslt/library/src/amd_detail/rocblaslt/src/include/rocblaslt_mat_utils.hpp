@@ -164,17 +164,138 @@ inline rocblaslt_status
     return rocblaslt_status_continue;
 }
 
+inline bool isScaleAlphaVecPointerMode(rocblaslt_pointer_mode pointermode)
+{
+    return pointermode == rocblaslt_pointer_mode_alpha_device_vector_beta_host
+           || pointermode == rocblaslt_pointer_mode_alpha_device_scalar_beta_host_ext;
+}
+
+inline bool isDeviceScalarAlphaPointerMode(rocblaslt_pointer_mode pointermode)
+{
+    return pointermode == rocblaslt_pointer_mode_alpha_device_scalar_beta_host_ext;
+}
+
+inline rocblaslt_status validateDeviceScalarAlphaType(const rocblaslt_matmul_desc descriptor)
+{
+    // Device scalar kernels load one FP32 value from the alpha pointer.
+    if(isDeviceScalarAlphaPointerMode(descriptor->pointermode)
+       && descriptor->scale_type != HIP_R_32F)
+        return rocblaslt_status_invalid_value;
+    return rocblaslt_status_continue;
+}
+
+inline bool isFp6Datatype(hipDataType datatype)
+{
+    return datatype == static_cast<hipDataType>(HIP_R_6F_E2M3)
+           || datatype == static_cast<hipDataType>(HIP_R_6F_E3M2);
+}
+
 inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order)
 {
     if((datatype == HIP_R_16F && order != HIPBLASLT_ORDER_COL16_4R8)
        || (datatype == HIP_R_16BF && order != HIPBLASLT_ORDER_COL16_4R8)
        || (datatype == HIP_R_8F_E4M3 && order != HIPBLASLT_ORDER_COL16_4R16)
        || (datatype == HIP_R_8F_E4M3_FNUZ && order != HIPBLASLT_ORDER_COL16_4R16)
-       || (datatype == HIP_R_4F_E2M1 && order != HIPBLASLT_ORDER_COL16_4R32))
+       || (datatype == HIP_R_4F_E2M1 && order != HIPBLASLT_ORDER_COL16_4R32)
+       || (isFp6Datatype(datatype) && order != HIPBLASLT_ORDER_COL256_R128_EXT))
     {
         return false;
     }
     return true;
+}
+
+/// HIPBLASLT_ORDER_COL256_R128_EXT and HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT
+/// describe one input layout: accepted only together, on both A and B of an FP6 TN GEMM,
+/// except that B may keep HIPBLASLT_ORDER_COL.
+/// Shared by rocblaslt_matmul_valid_args and the ext and grouped setProblem paths.
+/// Returns rocblaslt_status_continue if the problem uses neither or uses them validly.
+inline rocblaslt_status
+    validateFp6Tile128x4Args(hipDataType                                typeA,
+                             hipDataType                                typeB,
+                             hipblasOperation_t                         opA,
+                             hipblasOperation_t                         opB,
+                             hipblasLtOrder_t                           orderA,
+                             hipblasLtOrder_t                           orderB,
+                             RocblasltContractionProblem::ScalingFormat scaleAType,
+                             RocblasltContractionProblem::ScalingFormat scaleBType,
+                             int64_t                                    m,
+                             int64_t                                    n,
+                             int64_t                                    k,
+                             int64_t                                    lda,
+                             int64_t                                    ldb)
+{
+    constexpr auto kScale = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT;
+    const bool     tiledA = orderA == HIPBLASLT_ORDER_COL256_R128_EXT;
+    const bool     tiledB = orderB == HIPBLASLT_ORDER_COL256_R128_EXT;
+    const bool     scaleA = scaleAType == kScale;
+    const bool     scaleB = scaleBType == kScale;
+    // isValidOrderForDatatype for FP6, which the ext and grouped paths do not call.
+    auto fp6OrderOk = [](hipDataType type, hipblasLtOrder_t order) {
+        return !isFp6Datatype(type) || order == HIPBLASLT_ORDER_COL
+               || order == HIPBLASLT_ORDER_ROW || order == HIPBLASLT_ORDER_COL256_R128_EXT;
+    };
+    if(!fp6OrderOk(typeA, orderA) || !fp6OrderOk(typeB, orderB))
+    {
+        log_error(__func__,
+                  "HIP_R_6F_E2M3 and HIP_R_6F_E3M2 support only HIPBLASLT_ORDER_COL, "
+                  "HIPBLASLT_ORDER_ROW and HIPBLASLT_ORDER_COL256_R128_EXT; got orderA=",
+                  static_cast<int>(orderA),
+                  " orderB=",
+                  static_cast<int>(orderB));
+        return rocblaslt_status_invalid_value;
+    }
+    if(!tiledA && !tiledB && !scaleA && !scaleB)
+        return rocblaslt_status_continue;
+    if(!(tiledA && (tiledB || orderB == HIPBLASLT_ORDER_COL) && scaleA && scaleB))
+    {
+        log_error(__func__,
+                  "HIPBLASLT_ORDER_COL256_R128_EXT and "
+                  "HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT must be set together on "
+                  "both A and B, except that B may use HIPBLASLT_ORDER_COL; got orderA=",
+                  static_cast<int>(orderA),
+                  " orderB=",
+                  static_cast<int>(orderB),
+                  " scaleAType=",
+                  rocblaslt_scaling_format_to_string(scaleAType),
+                  " scaleBType=",
+                  rocblaslt_scaling_format_to_string(scaleBType));
+        return rocblaslt_status_invalid_value;
+    }
+    if(!isFp6Datatype(typeA) || !isFp6Datatype(typeB))
+    {
+        log_error(__func__,
+                  "HIPBLASLT_ORDER_COL256_R128_EXT requires HIP_R_6F_E2M3 or HIP_R_6F_E3M2 A and "
+                  "B; got a_type=",
+                  static_cast<int>(typeA),
+                  " b_type=",
+                  static_cast<int>(typeB));
+        return rocblaslt_status_invalid_value;
+    }
+    if(opA != HIPBLAS_OP_T || opB != HIPBLAS_OP_N)
+    {
+        log_error(__func__,
+                  "HIPBLASLT_ORDER_COL256_R128_EXT requires opA = HIPBLAS_OP_T and opB = "
+                  "HIPBLAS_OP_N");
+        return rocblaslt_status_invalid_value;
+    }
+    if(m % 256 != 0 || k % 128 != 0 || n % (tiledB ? 256 : 128) != 0 || lda != k || ldb != k)
+    {
+        log_error(__func__,
+                  "HIPBLASLT_ORDER_COL256_R128_EXT requires m to be a multiple of 256, k a "
+                  "multiple of 128, n a multiple of 256 with B in that order and of 128 "
+                  "otherwise, and lda = ldb = k; got m=",
+                  m,
+                  " n=",
+                  n,
+                  " k=",
+                  k,
+                  " lda=",
+                  lda,
+                  " ldb=",
+                  ldb);
+        return rocblaslt_status_invalid_value;
+    }
+    return rocblaslt_status_continue;
 }
 
 /*******************************************************************************
@@ -206,6 +327,24 @@ inline rocblaslt_status validateMatmulSwizzleArgs(const rocblaslt_matmul_desc   
         log_error(__func__, "Error: Invalid Order for hipDataType B.");
         return rocblaslt_status_invalid_value;
     }
+
+    const bool transA = matmul_descr->op_A != HIPBLAS_OP_N;
+    if(auto status = validateFp6Tile128x4Args(a_type,
+                                              b_type,
+                                              matmul_descr->op_A,
+                                              matmul_descr->op_B,
+                                              matA->order,
+                                              matB->order,
+                                              matmul_descr->scaleAType,
+                                              matmul_descr->scaleBType,
+                                              transA ? matA->n : matA->m,
+                                              matmul_descr->op_B == HIPBLAS_OP_N ? matB->n
+                                                                                 : matB->m,
+                                              transA ? matA->m : matA->n,
+                                              matA->ld,
+                                              matB->ld);
+       status != rocblaslt_status_continue)
+        return status;
 
     if(swizzleA && matA->ld != matA->m)
         log_hints(__func__,
@@ -285,6 +424,106 @@ inline bool problemFitsKernelArgs(int64_t m,
 }
 
 /*******************************************************************************
+ * Host alpha/beta scalar
+ *
+ * Alpha and beta are scalars of the matmul scale type. The ext API does not
+ * carry a scale type (the problem stores HIPBLASLT_DATATYPE_INVALID). The
+ * scalar width then follows the compute type, except for complex A: compute
+ * type is real, so a complex alpha must follow the A type or only the real
+ * part is read. A fixed 4-byte load over-reads a 2-byte HIP_R_16F scalar and
+ * can treat a zero half as nonzero when the next two bytes are nonzero
+ * (ROCM-31553).
+ ******************************************************************************/
+inline hipDataType scalarTypeFromCompute(rocblaslt_compute_type compute_type)
+{
+    switch(compute_type)
+    {
+    case rocblaslt_compute_f16:
+    case rocblaslt_compute_f16_pedantic:
+        return HIP_R_16F;
+    case rocblaslt_compute_f64:
+    case rocblaslt_compute_f64_pedantic:
+        return HIP_R_64F;
+    case rocblaslt_compute_i32:
+    case rocblaslt_compute_i32_pedantic:
+        return HIP_R_32I;
+    default:
+        return HIP_R_32F;
+    }
+}
+
+inline hipDataType alphaBetaScalarType(hipDataType             scale_type,
+                                       rocblaslt_compute_type  compute_type,
+                                       hipDataType             type_a = HIPBLASLT_DATATYPE_INVALID)
+{
+    switch(scale_type)
+    {
+    case HIP_R_16F:
+    case HIP_R_32F:
+    case HIP_R_64F:
+    case HIP_R_32I:
+    case HIP_C_32F:
+    case HIP_C_64F:
+        return scale_type;
+    default:
+        break;
+    }
+    // Ext API: no scale type. Complex alpha is the A type, not the real compute type.
+    if(type_a == HIP_C_32F || type_a == HIP_C_64F)
+        return type_a;
+    return scalarTypeFromCompute(compute_type);
+}
+
+// Reads only the bytes `type` occupies. Unknown types are not loaded and
+// compare as nonzero, so a null A or B stays rejected.
+inline bool hostScalarIsZero(hipDataType type, const void* ptr)
+{
+    if(!ptr)
+        return false;
+
+    switch(type)
+    {
+    case HIP_R_16F:
+        return static_cast<float>(*reinterpret_cast<const hipblasLtHalf*>(ptr)) == 0.f;
+    case HIP_R_32F:
+        return *reinterpret_cast<const float*>(ptr) == 0.f;
+    case HIP_R_64F:
+        return *reinterpret_cast<const double*>(ptr) == 0.0;
+    case HIP_R_32I:
+        return *reinterpret_cast<const int32_t*>(ptr) == 0;
+    case HIP_C_32F:
+    {
+        const auto value = *reinterpret_cast<const hipblaslt_complex_float*>(ptr);
+        return value.real() == 0.f && value.imag() == 0.f;
+    }
+    case HIP_C_64F:
+    {
+        const auto value = *reinterpret_cast<const hipblaslt_complex_double*>(ptr);
+        return value.real() == 0.0 && value.imag() == 0.0;
+    }
+    default:
+        return false;
+    }
+}
+
+// True when a null A or B is not allowed. Host scalars are loaded with the
+// width of `scalar_type`. Device pointer modes are not dereferenced.
+inline bool alphaForbidsNullAB(hipDataType            scalar_type,
+                               rocblaslt_pointer_mode pointermode,
+                               const void*            alpha,
+                               const void*            a,
+                               const void*            b)
+{
+    if(!alpha)
+        return true;
+    if(a && b)
+        return false;
+    if(pointermode != rocblaslt_pointer_mode_host)
+        return true;
+    return !hostScalarIsZero(scalar_type, alpha);
+}
+
+/*******************************************************************************
  * Validate Matmul Arguments
  ******************************************************************************/
 inline rocblaslt_status validateMatmulArgs(int64_t                       m,
@@ -320,9 +559,19 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
                                            int64_t                       batch_offset_c = 0,
                                            int64_t                       batch_offset_d = 0,
                                            const rocblaslt_pointer_mode& pointermode
-                                           = rocblaslt_pointer_mode_host)
+                                           = rocblaslt_pointer_mode_host,
+                                           hipDataType scale_type = HIPBLASLT_DATATYPE_INVALID)
 {
     rocblaslt_status status = rocblaslt_status_continue;
+
+    // The current Matmul host path dereferences both scalars. Keep DEVICE reserved until
+    // device-resident alpha and beta plumbing is implemented; MatrixTransform handles it separately.
+    if(pointermode == rocblaslt_pointer_mode_device)
+        return rocblaslt_status_not_implemented;
+
+    if(pointermode != rocblaslt_pointer_mode_host
+       && !isScaleAlphaVecPointerMode(pointermode))
+        return rocblaslt_status_invalid_value;
 
     if(!(type_a == HIP_R_32F && type_b == HIP_R_32F && type_c == HIP_R_32F && type_d == HIP_R_32F)
        && compute_type == rocblaslt_compute_f32_fast_xf32)
@@ -459,8 +708,10 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
     if(!beta)
         return rocblaslt_status_invalid_pointer;
 
-    // Update for the valid case: ((alpha_in_host && alpha=0) && (A=NULL || B=NULL))
-    bool alpha_A_B_violation = (!alpha || ((pointermode || (*((float*)alpha))) && (!a || !b)));
+    // A host alpha of 0 may leave A or B null. Load alpha at the scalar width:
+    // a 4-byte read of a HIP_R_16F alpha over-reads the caller (ROCM-31553).
+    const bool alpha_A_B_violation = alphaForbidsNullAB(
+        alphaBetaScalarType(scale_type, compute_type, type_a), pointermode, alpha, a, b);
     // pointers must be valid
     if(n && ((k && alpha_A_B_violation) || !c || !d))
         return rocblaslt_status_invalid_pointer;
@@ -696,9 +947,11 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
                                             batch_offset_b,
                                             batch_offset_c,
                                             batch_offset_d,
-                                            matmul_descr->pointermode);
+                                            matmul_descr->pointermode,
+                                            matmul_descr->scale_type);
 
-    const void* alphaVecPtr     = matmul_descr->pointermode ? alpha : nullptr;
+    const void* alphaVecPtr
+        = isScaleAlphaVecPointerMode(matmul_descr->pointermode) ? alpha : nullptr;
     auto        epilogue_status = rocblaslt_epilogue_valid_args(matmul_descr->epilogue,
                                                          num_rows_d,
                                                          num_cols_d,
@@ -723,6 +976,10 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
                                                          gradient);
 
     // rocblaslt_epilogue_valid_args must to be called otherwise bias_type will be garbage value
+    auto alphaTypeStatus = validateDeviceScalarAlphaType(matmul_descr);
+    if(alphaTypeStatus != rocblaslt_status_continue)
+        return alphaTypeStatus;
+
     if(matmul_status != rocblaslt_status_continue)
         return matmul_status;
 
@@ -744,6 +1001,12 @@ inline void setTo1(const rocblaslt_compute_type& compute_type, const void* onePt
     {
         *((int32_t*)onePtr) = 1.f;
         *dst                = onePtr;
+    }
+    else if(compute_type == rocblaslt_compute_f16 || compute_type == rocblaslt_compute_f16_pedantic)
+    {
+        // A float 1.0 (0x3f800000) read back as a half is 0.
+        *((hipblasLtHalf*)onePtr) = hipblasLtHalf(1.f);
+        *dst                      = onePtr;
     }
     else
     {
@@ -768,8 +1031,11 @@ inline hipblaslt_complex_double get_alpha_beta_scalar(hipDataType type, const vo
             return {static_cast<double>(*(reinterpret_cast<const int32_t*>(ptr))), 0.0};
         
         case HIP_R_16F:
+            return {static_cast<double>(*reinterpret_cast<const hipblasLtHalf*>(ptr)), 0.0};
         case HIP_R_16BF:
-            return {static_cast<double>(*(reinterpret_cast<const float*>(ptr))), 0.0};
+            return {static_cast<double>(static_cast<float>(
+                        *reinterpret_cast<const hipblasLtBfloat16*>(ptr))),
+                    0.0};
 
         case HIP_C_32F:
         {

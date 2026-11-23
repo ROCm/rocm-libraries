@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -413,7 +413,7 @@ namespace rocalution
             std::vector<int64_t> perm(this->nnz_);
 
             // Create identity permutation
-            std::iota(perm.begin(), perm.end(), 0);
+            std::iota(perm.begin(), perm.end(), static_cast<int64_t>(0));
 
             int*       row = this->mat_.row;
             int*       col = this->mat_.col;
@@ -428,7 +428,7 @@ namespace rocalution
             allocate_host(this->nnz_, &this->mat_.val);
 
             // Compare function object to sort by row first, then by column
-            std::sort(perm.begin(), perm.end(), [&](const int& a, const int& b) {
+            std::sort(perm.begin(), perm.end(), [&](const int64_t& a, const int64_t& b) {
                 if(row[a] < row[b])
                     return true;
                 if(row[a] == row[b])
@@ -463,20 +463,25 @@ namespace rocalution
         const HostVector<int>* cast_perm = dynamic_cast<const HostVector<int>*>(&permutation);
         assert(cast_perm != NULL);
 
-        HostMatrixCOO<ValueType> src(this->local_backend_);
-        src.AllocateCOO(this->nnz_, this->nrow_, this->ncol_);
-        src.CopyFrom(*this);
+        {
+            HostMatrixCOO<ValueType> src(this->local_backend_);
+            src.AllocateCOO(this->nnz_, this->nrow_, this->ncol_);
+            src.CopyFrom(*this);
 
-        _set_omp_backend_threads(this->local_backend_, this->nnz_);
+            _set_omp_backend_threads(this->local_backend_, this->nnz_);
 
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-        for(int64_t i = 0; i < this->nnz_; ++i)
-        {
-            this->mat_.row[i] = cast_perm->vec_[src.mat_.row[i]];
-            this->mat_.col[i] = cast_perm->vec_[src.mat_.col[i]];
+            for(int64_t i = 0; i < this->nnz_; ++i)
+            {
+                this->mat_.row[i] = cast_perm->vec_[src.mat_.row[i]];
+                this->mat_.col[i] = cast_perm->vec_[src.mat_.col[i]];
+            }
         }
+
+        // COO entries are kept sorted by row and column
+        this->Sort();
 
         return true;
     }
@@ -490,35 +495,40 @@ namespace rocalution
         const HostVector<int>* cast_perm = dynamic_cast<const HostVector<int>*>(&permutation);
         assert(cast_perm != NULL);
 
-        HostMatrixCOO<ValueType> src(this->local_backend_);
-        src.AllocateCOO(this->nnz_, this->nrow_, this->ncol_);
-        src.CopyFrom(*this);
+        {
+            HostMatrixCOO<ValueType> src(this->local_backend_);
+            src.AllocateCOO(this->nnz_, this->nrow_, this->ncol_);
+            src.CopyFrom(*this);
 
-        _set_omp_backend_threads(this->local_backend_, this->nnz_);
+            _set_omp_backend_threads(this->local_backend_, this->nnz_);
 
-        // TODO
-        // Is there a better way?
-        int* pb = NULL;
-        allocate_host(this->nrow_, &pb);
+            // TODO
+            // Is there a better way?
+            int* pb = NULL;
+            allocate_host(this->nrow_, &pb);
 
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-        for(int i = 0; i < this->nrow_; ++i)
-        {
-            pb[cast_perm->vec_[i]] = i;
-        }
+            for(int i = 0; i < this->nrow_; ++i)
+            {
+                pb[cast_perm->vec_[i]] = i;
+            }
 
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-        for(int64_t i = 0; i < this->nnz_; ++i)
-        {
-            this->mat_.row[i] = pb[src.mat_.row[i]];
-            this->mat_.col[i] = pb[src.mat_.col[i]];
+            for(int64_t i = 0; i < this->nnz_; ++i)
+            {
+                this->mat_.row[i] = pb[src.mat_.row[i]];
+                this->mat_.col[i] = pb[src.mat_.col[i]];
+            }
+
+            free_host(&pb);
         }
 
-        free_host(&pb);
+        // COO entries are kept sorted by row and column
+        this->Sort();
 
         return true;
     }

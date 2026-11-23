@@ -46,17 +46,17 @@ pytest -m unit tensilelite/Tests/unit
 
 ### Coverage is path-mode
 
-Always measure coverage with `--cov=Tensile` — a **filesystem path**, never a dotted module name — combined across `-n4` xdist workers:
+Always measure coverage with `--cov=tensilelite` — a **filesystem path**, never a dotted module name — combined across `-n4` xdist workers:
 
 ```bash
-pytest -m unit -n4 --cov=Tensile --cov-config=pyproject.toml \
+pytest -m unit -n4 --cov=tensilelite --cov-config=pyproject.toml \
   --cov-report=term-missing tensilelite/Tests/unit
 ```
 
 A dotted `--cov` target (e.g. `--cov=tensilelite.Common.DataType`) re-imports `rocisa` and SIGABRTs on duplicate nanobind registration. To read a single module's row, grep the term-missing output (the single-file path prefix does not filter the report):
 
 ```bash
-pytest -m unit --cov=Tensile --cov-config=pyproject.toml \
+pytest -m unit --cov=tensilelite --cov-config=pyproject.toml \
   --cov-report=term-missing tensilelite/Tests/unit | grep "Common/DataType.py"
 ```
 
@@ -221,7 +221,7 @@ A floor-raising PR is a small, behavior-neutral maintenance change. It should to
    ```bash
    python tensilelite/Tests/unit/characterization/tools/coverage_ratchet.py update \
        --current coverage.json \
-       --allow-lower=Tensile/Components/Subtile/SubtileGREmit.py
+       --allow-lower=tensilelite/Components/Subtile/SubtileGREmit.py
    ```
 
    One `--allow-lower` per file, and it lowers only the files named. That is what keeps a run made
@@ -262,7 +262,7 @@ An opt-in local **pre-commit hook** runs the unit + characterization tests affec
 
      ```bash
      pytest <node-id> --snapshot-update
-     # e.g. tensilelite/Tests/unit/characterization/DataType/test_datatype_char.py::test_foo
+     # e.g. tensilelite/Tests/unit/characterization/DataType/test_constructor_char.py::test_init_from_enum
      ```
 
      Read every changed line in the `.ambr` diff and explain the behavior change in your PR description. If the change pins or flips a known-wrong behavior, record a new ADR under `adr/` (or supersede the existing one). A golden diff is a reviewed behavior change, not a chore.

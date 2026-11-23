@@ -106,6 +106,13 @@ public:
             return false;
         }
 
+        // The kernels implement cross-correlation only; they do not flip the filter.
+        if(nodeAttributes->conv_mode()
+           != hipdnn_flatbuffers_sdk::data_objects::ConvMode::CROSS_CORRELATION)
+        {
+            return false;
+        }
+
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->x_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->w_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->y_tensor_uid());

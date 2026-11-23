@@ -1,6 +1,6 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --Gfx1250HazardPass=profile --print-output 2>&1
+# RUN: %stinkytofu-opt --arch gfx1250 %s --Gfx1250XnackHazardPass=profile --print-output 2>&1
 #
-# Gfx1250HazardPass reports where each inserted s_wait_xcnt landed using two
+# Gfx1250XnackHazardPass reports where each inserted s_wait_xcnt landed using two
 # facts about the block holding the drain: whether the block belongs to a loop
 # (the drain is paid on every iteration) and whether it holds a matrix
 # instruction (the drain sits in the MAC pipeline). Both are read from the final

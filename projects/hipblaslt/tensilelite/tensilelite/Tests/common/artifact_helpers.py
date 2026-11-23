@@ -27,12 +27,55 @@
 These utilities are pytest-independent and can be used from standalone scripts.
 """
 
+import ast
 import os
 import tarfile
 import warnings
+from contextlib import contextmanager
 
 
 _TESTS_ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
+
+
+def timing_requested(tensile_args):
+    """Whether ``tensile_args`` turn on ``TimingInstrumentation``.
+
+    Follows Tensile's rule: every ``--global-parameters`` takes the ``key=value`` words up to the
+    next option, they are applied in order, and the last value of a key wins.
+    """
+    enabled = False
+    in_global = False
+    for arg in tensile_args:
+        if arg.startswith("-"):
+            in_global = arg == "--global-parameters"
+        elif in_global and "=" in arg:
+            key, value = arg.split("=", 1)
+            if key == "TimingInstrumentation":
+                try:
+                    # Tensile parses each value with ast.literal_eval and uses it as a flag.
+                    enabled = bool(ast.literal_eval(value.strip()))
+                except (ValueError, SyntaxError):
+                    enabled = False  # Tensile rejects a value that is not a literal.
+    return enabled
+
+
+@contextmanager
+def artifact_timing(category, tensile_args):
+    """Time the block as ``category`` when ``tensile_args`` turn on TimingInstrumentation.
+
+    The block runs outside the Tensile invocation (packing after it, extraction before it), so
+    the record is printed right away in the TIMING:<category>:<ms> format analyze_timing.py reads.
+    """
+    enabled = timing_requested(tensile_args)
+    if not enabled:
+        yield
+        return
+    from tensilelite.Common.TimingInstrumentation import flush_timing_buffer, timing_context
+    try:
+        with timing_context(category, enabled=True):
+            yield
+    finally:
+        flush_timing_buffer()
 
 
 def artifact_name_for_config(config_path):
@@ -77,6 +120,12 @@ def _is_use_cache_file(relpath):
     return False
 
 
+# gzip level of the artifacts. tarfile's default (9) took 137.7 s to pack the 124 gfx942 common
+# artifacts on one core for 397.9 MB; level 4 takes 25.7 s for 443.6 MB (+11.5%). Levels 5 / 6
+# save only 25 / 40 MB more for 5.7 / 20 s more.
+ARTIFACT_COMPRESSLEVEL = 4
+
+
 def compress_output(output_dir, dest_dir=None, name=None):
     """Compress only the files needed for --use-cache into a .tar.gz artifact.
 
@@ -100,7 +149,7 @@ def compress_output(output_dir, dest_dir=None, name=None):
     os.makedirs(dest_dir, exist_ok=True)
     artifact_path = os.path.join(dest_dir, name + ".tar.gz")
     file_count = 0
-    with tarfile.open(artifact_path, "w:gz") as tar:
+    with tarfile.open(artifact_path, "w:gz", compresslevel=ARTIFACT_COMPRESSLEVEL) as tar:
         for root, dirs, files in os.walk(output_dir):
             for f in files:
                 full_path = os.path.join(root, f)
@@ -171,7 +220,7 @@ def extract_artifact(artifact_path, dest_dir):
         warnings.warn(
             f"Extracted artifact '{artifact_path}' contains no code object "
             f"files ({', '.join(code_object_exts)}). The _is_use_cache_file "
-            f"whitelist may be out of sync with the Tensile output layout.",
+            f"whitelist may be out of sync with the TensileLite output layout.",
             stacklevel=2,
         )
 

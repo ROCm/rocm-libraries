@@ -316,15 +316,18 @@ namespace
         {
             if(mat_a != nullptr)
             {
-                (void)rocsparse_destroy_spmat_descr(mat_a);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_spmat_descr",
+                                                      rocsparse_destroy_spmat_descr(mat_a));
             }
             if(mat_b != nullptr)
             {
-                (void)rocsparse_destroy_dnmat_descr(mat_b);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_dnmat_descr",
+                                                      rocsparse_destroy_dnmat_descr(mat_b));
             }
             if(mat_c != nullptr)
             {
-                (void)rocsparse_destroy_dnmat_descr(mat_c);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_dnmat_descr",
+                                                      rocsparse_destroy_dnmat_descr(mat_c));
             }
         }
     };

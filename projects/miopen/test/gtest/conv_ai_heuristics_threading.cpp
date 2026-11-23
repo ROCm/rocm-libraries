@@ -50,8 +50,10 @@ Gpu InstinctDevices() { return Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gf
 std::vector<miopen::fs::path> GetModelFiles(const std::string& arch)
 {
     const auto db = miopen::GetSystemDbPath();
+    // The config encoder is intentionally not shipped (the precomputed embedding table replaces
+    // it), so it is not required here -- the test loads the input encoder, the metadata, and the
+    // table.
     return {db / (arch + "_" + kSolver + "_input_encoder.tn.model"),
-            db / (arch + "_" + kSolver + "_kernel_config_encoder.tn.model"),
             db / (arch + "_" + kSolver + "_metadata.tn.model")};
 }
 
@@ -109,9 +111,6 @@ TEST_P(GPU_AIHeuristicsThreadSafety_FP32, ConcurrentGetFdeepModel)
     for(const auto& name : meta.input_params())
         features[name] = 1.0f;
 
-    const size_t cfg_size = meta.output_params().size() - meta.GetConstantOutputIndices().size();
-    const std::vector<std::vector<float>> candidates(16, std::vector<float>(cfg_size, 0.0f));
-
     std::latch start_line(num_threads);
     std::vector<std::string> errors(num_threads);           // per-thread failure message ("" == ok)
     std::vector<std::vector<float>> input_out(num_threads); // per-thread input-encoder result
@@ -124,11 +123,13 @@ TEST_P(GPU_AIHeuristicsThreadSafety_FP32, ConcurrentGetFdeepModel)
             for(int i = 0; i < iters; ++i)
             {
                 auto enc = model.EncodeInputFeatures(features);
-                auto cfg = model.EncodeKernelConfigs(candidates);
+                // Concurrently load the config embedding table (process-wide static cache + mutex)
+                // -- the shared state this test exists to stress -- alongside the input encoder.
+                const auto& vocab = GetConfigEmbeddingVocab(arch, kSolver);
                 if(enc.empty())
                     throw std::runtime_error("EncodeInputFeatures returned empty");
-                if(cfg.empty() || cfg.front().empty())
-                    throw std::runtime_error("EncodeKernelConfigs returned empty");
+                if(vocab.empty())
+                    throw std::runtime_error("config embedding vocab empty");
                 if(i == 0)
                     input_out[tid] = std::move(enc);
             }

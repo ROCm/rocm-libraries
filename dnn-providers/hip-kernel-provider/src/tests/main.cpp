@@ -207,6 +207,17 @@ int main(int argc, char** argv)
                       << censusArch << "', root='" << censusRoot << "'.\n";
             return 1;
         }
+        // The entry names the shard relative to its own directory, which climbs out of the
+        // test tree and back down (census/<arch>/../../../../arch_content/...). Windows
+        // resolves every file under it as that directory plus the climb, so a deep install
+        // passed MAX_PATH on the longest descriptor path while the shard itself sat well
+        // within it. Hand the loader the absolute, normalized root instead.
+        const auto absoluteRoot = std::filesystem::absolute(censusRoot, error).lexically_normal();
+        if(!error)
+        {
+            hipdnn_data_sdk::utilities::setEnv("HIPDNN_DESCRIPTOR_DIR",
+                                               absoluteRoot.string().c_str());
+        }
 
         const auto* unitTest = testing::UnitTest::GetInstance();
         const testing::TestSuite* suite = nullptr;
@@ -261,6 +272,28 @@ int main(int argc, char** argv)
         }
 
         hipdnn_data_sdk::utilities::setEnv("HIPDNN_DESCRIPTOR_DIR", descriptors.string().c_str());
+    }
+#endif
+
+#ifdef HIPKERNELPROVIDER_FLYDSL_PRODUCT_DESCRIPTOR_RELDIR
+    // FlyDSL's kernels ship in the production shard, which the unit root above does not
+    // reach. An installed plugin finds that shard beside its own module; this binary is
+    // not the plugin, so it names the shard through HIPDNN_DESCRIPTOR_RUNTIME_DIR, the
+    // ingestor's additive root: it ADDS the tree to the search instead of replacing one,
+    // so the unit sets stay loaded.
+    //
+    // Set only when this binary was built with FlyDSL active, and never over a value the
+    // caller supplied. Unlike the root above this one does not fail the process when it
+    // resolves to nothing: the cases that need the shard are FlyDSL's own, and on a
+    // device this build ships FlyDSL for they fail when the objects are not there
+    // (reportUnstaged() in FlydslNormDeviceTestSupport.hpp), while every other suite in
+    // this binary is indifferent to it.
+    if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
+    {
+        const auto productDescriptors = hip_kernel_provider::testing::descriptorSetRoot(
+            HIPKERNELPROVIDER_FLYDSL_PRODUCT_DESCRIPTOR_RELDIR);
+        hipdnn_data_sdk::utilities::setEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR",
+                                           productDescriptors.string().c_str());
     }
 #endif
 

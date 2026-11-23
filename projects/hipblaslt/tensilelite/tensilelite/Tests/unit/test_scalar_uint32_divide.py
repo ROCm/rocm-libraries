@@ -53,6 +53,9 @@ VALU = {
     "v_mul_hi_u32": lambda a, b: (a * b) >> 32,
     "v_add_u32": lambda a, b: (a + b) & U32,
     "v_sub_u32": lambda a, b: (a - b) & U32,
+    # gfx12/gfx1250 (HasExplicitNC) spells the carryless int add/sub with _nc.
+    "v_add_nc_u32": lambda a, b: (a + b) & U32,
+    "v_sub_nc_u32": lambda a, b: (a - b) & U32,
 }
 CMPX = {
     "v_cmpx_eq_u32": lambda a, b: a == b,

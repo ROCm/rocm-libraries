@@ -55,6 +55,8 @@ constexpr int64_t K_SDPA_TENSOR_SUM_EXP_UID = 1824;
 constexpr int64_t K_SDPA_TENSOR_RNG_DUMP_UID = 1825;
 constexpr int64_t K_SDPA_TENSOR_AMAX_S_UID = 1826;
 constexpr int64_t K_SDPA_TENSOR_AMAX_O_UID = 1827;
+constexpr int64_t K_SDPA_TENSOR_CU_SEQ_LEN_Q_UID = 1828;
+constexpr int64_t K_SDPA_TENSOR_CU_SEQ_LEN_KV_UID = 1829;
 
 constexpr std::array<int64_t, 4> K_SDPA_TENSOR_STATS_DIMS = {2, 4, 128, 1};
 constexpr std::array<int64_t, 4> K_SDPA_TENSOR_STATS_STRIDES = {512, 128, 1, 1};
@@ -66,5 +68,20 @@ constexpr std::array<int64_t, 4> K_SDPA_TENSOR_ATTN_MASK_STRIDES = {65536, 16384
 // Scalar tensor (volume == 1) for descale/scale/amax/seed/offset
 constexpr std::array<int64_t, 4> K_SDPA_TENSOR_SCALAR_DIMS = {1, 1, 1, 1};
 constexpr std::array<int64_t, 4> K_SDPA_TENSOR_SCALAR_STRIDES = {1, 1, 1, 1};
+
+// Cumulative sequence length tensors: [batch + 1, 1, 1, 1] for batch=2
+constexpr std::array<int64_t, 4> K_SDPA_TENSOR_CU_SEQ_LEN_DIMS = {3, 1, 1, 1};
+constexpr std::array<int64_t, 4> K_SDPA_TENSOR_CU_SEQ_LEN_STRIDES = {1, 1, 1, 1};
+
+// seq_len_q / seq_len_kv: INT32 [batch=2, 1, 1, 1]
+constexpr std::array<int64_t, 4> K_SDPA_TENSOR_SEQ_LEN_DIMS = {2, 1, 1, 1};
+constexpr std::array<int64_t, 4> K_SDPA_TENSOR_SEQ_LEN_STRIDES = {1, 1, 1, 1};
+
+// Paged K/V: K and V read as block containers [num_blocks=2, num_heads=4, block_size=128,
+// head_dim=64]. With max_seq_len_kv = 128 each page table is INT32
+// [batch=2, 1, ceil(128 / 128) = 1, 1].
+constexpr int32_t K_SDPA_PAGED_MAX_SEQ_LEN_KV = 128;
+constexpr std::array<int64_t, 4> K_SDPA_TENSOR_PAGE_TABLE_DIMS = {2, 1, 1, 1};
+constexpr std::array<int64_t, 4> K_SDPA_TENSOR_PAGE_TABLE_STRIDES = {1, 1, 1, 1};
 
 } // namespace hipdnn_tests::constants

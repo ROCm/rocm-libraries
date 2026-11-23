@@ -4,7 +4,7 @@
 ################################################################################
 # P4 DESIGNED config for gfx950 LRA transposed-MFMA paths.
 #
-# Target: Tensile/Components/LraTileAssignment.py
+# Target: tensilelite/Components/LraTileAssignment.py
 # Missing ranges: 144-249, 285-409 (plus 473-592, 611-693 as ceiling evidence)
 #
 # STRATEGY

@@ -66,7 +66,8 @@ namespace
         ~IdentityCsr()
         {
             if(A)
-                (void)rocsparse_destroy_spmat_descr(A);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_spmat_descr",
+                                                      rocsparse_destroy_spmat_descr(A));
         }
     };
 
@@ -88,7 +89,8 @@ namespace
         ~IdentityCoo()
         {
             if(A)
-                (void)rocsparse_destroy_spmat_descr(A);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_spmat_descr",
+                                                      rocsparse_destroy_spmat_descr(A));
         }
     };
 } // namespace
@@ -646,7 +648,8 @@ namespace
         ~DiagCsr()
         {
             if(A)
-                (void)rocsparse_destroy_spmat_descr(A);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_spmat_descr",
+                                                      rocsparse_destroy_spmat_descr(A));
         }
     };
 } // namespace
@@ -1264,4 +1267,45 @@ TEST_F(GenericCheckSpmat, bad_args)
         rocsparse_check_spmat(
             handle, mat.A, &data_status, (rocsparse_check_spmat_stage)99, &buffer_size, nullptr),
         rocsparse_status_invalid_value);
+}
+
+// ---------------------------------------------------------------------------
+// Failure paths of the unit-test helpers: a failed status must throw and name
+// the call, and a failed hipMalloc must not leave a pending HIP error.
+// ---------------------------------------------------------------------------
+TEST(UnitTestUtils, throw_hip_error_names_the_call)
+{
+    EXPECT_NO_THROW(unit_test_throw_hip_error("hipMemcpy", hipSuccess));
+    try
+    {
+        unit_test_throw_hip_error("hipMemcpy", hipErrorInvalidValue);
+        FAIL() << "no exception for a failed status";
+    }
+    catch(const std::runtime_error& e)
+    {
+        EXPECT_NE(std::string(e.what()).find("hipMemcpy"), std::string::npos) << e.what();
+    }
+}
+
+TEST(UnitTestUtils, throw_rocsparse_error_names_the_call)
+{
+    EXPECT_NO_THROW(
+        unit_test_throw_rocsparse_error("rocsparse_create_mat_descr", rocsparse_status_success));
+    try
+    {
+        unit_test_throw_rocsparse_error("rocsparse_create_mat_descr",
+                                        rocsparse_status_invalid_pointer);
+        FAIL() << "no exception for a failed status";
+    }
+    catch(const std::runtime_error& e)
+    {
+        EXPECT_NE(std::string(e.what()).find("rocsparse_create_mat_descr"), std::string::npos)
+            << e.what();
+    }
+}
+
+TEST(UnitTestUtils, device_vector_throws_when_hipMalloc_fails)
+{
+    EXPECT_THROW(device_vector<char>(SIZE_MAX), std::runtime_error);
+    EXPECT_EQ(hipGetLastError(), hipSuccess);
 }

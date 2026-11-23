@@ -51,6 +51,23 @@
           ]
         }
       }
+    ],
+    "hipkernel:flydsl_rmsnorm": [
+      {
+        "cases": [
+          "2_1_1_1_fp32_nchw_194bae",
+          "2_3_1_1_fp16_nhwc",
+          "2_3_4_2_2_bfp16_ncdhw_d505a8",
+          "2_3_4_2_2_fp32_ncdhw_dcfb87",
+          "2_3_4_4_bfp16_nchw_2fefda",
+          "runtime_epsilon"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux"
+          ]
+        }
+      }
     ]
   },
   "version": 1

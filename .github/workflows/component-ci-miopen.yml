@@ -10,10 +10,11 @@
 # also runs clang-tidy static analysis, migrated in from the shared
 # .github/workflows/clang-tidy.yml so it can be made a required check.
 #
-# The HIP package job additionally carries the two gates on the public/private
-# split: a source-only cross-check of its five hand-maintained files, and the
-# public-ABI gate requiring libMIOpen.so's exported public C API to stay
-# identical to the committed baseline.
+# The HIP package job additionally carries the gates on the public/private
+# split: a check that the wrapper's generated files still match miopen.h, a
+# source-only cross-check of the few hand-written parts, and the public-ABI gate
+# requiring libMIOpen.so's exported public C API to stay identical to the
+# committed baseline.
 
 name: "Component CI: MIOpen"
 
@@ -30,7 +31,7 @@ jobs:
   miopen-build:
     name: ${{ matrix.name }}
     container:
-      image: rocm/miopen-dev:multiarch_dev_20260910
+      image: rocm/miopen-dev:multiarch_dev_20261117
     strategy:
       fail-fast: false
       matrix:
@@ -134,20 +135,30 @@ jobs:
             projects/miopen
             shared/ctest
 
-      # The public/private split keeps five files in lockstep by hand: the
-      # public header, the private _impl declarations, the compile-time rename,
-      # the forwarding stubs, and the hipDNN provider's mirror of the rename.
-      # The fifth lives outside projects/miopen, which is why the sparse
-      # checkout above includes the provider directory: the check can only
-      # compare files it can read. This cross-checks them from source alone, so
-      # unlike the ABI gate below it needs no build and runs in seconds -- hence
-      # its placement before the configure step, where it fails fast. It is the
-      # only check that can see signature drift; the symbol-set gate cannot,
-      # because a drifted signature leaves the exported names unchanged. It
-      # rides the same job as that gate to keep both split checks in one place.
+      # The public/private split copies the entry-point lists of miopen.h and
+      # miopen_internal.h into four committed files: the rename list (once in
+      # MIOpen, once in the hipDNN provider), the _impl declarations the wrapper
+      # compiles against, and the wrapper's pass-through stubs. They are generated
+      # by generate_wrapper_sources.py, so an ABI-visible change shows in the PR
+      # diff. This step regenerates them in memory and fails on any difference,
+      # signatures included. The provider's copy lives outside projects/miopen,
+      # hence the provider directory in the sparse checkout above;
+      # --require-provider makes a tree without it fail instead of passing on a
+      # file it never read.
+      #
+      # The hand-written parts are checked from source too: the few stubs in
+      # wrapper.cpp, the wrapper's own functions (declared in
+      # hipdnn_forwarding.h, listed in wrapper_only_symbols.txt, stubbed in
+      # wrapper.cpp), and the provider's declarations of the
+      # GetWorkSpaceSizeRange entry points. None of these checks needs a build,
+      # so unlike the ABI gate below they run in seconds, before the configure
+      # step, and fail fast. They share this job with that gate to keep the
+      # split checks in one place.
       - name: Public/private header consistency check
         if: matrix.job_id == 'hip-package-build'
         run: |
+          python3 projects/miopen/script/generate_wrapper_sources.py --check \
+            --require-provider
           python3 projects/miopen/script/check_public_abi.py check-headers \
             --require-provider
 
@@ -165,7 +176,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/rocm-systems
-          ref: b2099a6b8703c089134ad526253752d26bbbf43a # 2026-09-10
+          ref: 26a2330c02ea5f1191e67d877fe5761c040040fd # 2026-10-08
           path: rocm-systems
           sparse-checkout: |
             emulation/rocjitsu
@@ -173,9 +184,9 @@ jobs:
       - name: Build rocjitsu
         if: matrix.job_id == 'hip-package-build'
         run: |
-          apt-get update && apt-get install -y libdrm-dev
+          apt-get update && apt-get install -y libdrm-dev ninja-build
           cmake -S rocm-systems/emulation/rocjitsu -B rocjitsu-build \
-            -DCMAKE_BUILD_TYPE=Release
+            -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build rocjitsu-build --target rocjitsu_bin rocjitsu_shared -j$(nproc)
       - name: Install clang-tidy deps
         if: matrix.job_id == 'clang-tidy'
@@ -278,6 +289,44 @@ jobs:
             echo "the packaged test list is missing the harness with MIOPEN_ENABLE_HIPDNN_WRAPPER on"
             exit 1
           }
+          # Tier labels are set only inside the flag's block, so a wrapper check registered
+          # outside it would have none, TheRock would never select it, and nothing else
+          # would notice.
+          listing=$(ctest --test-dir parity-off -N -R '^(wrapper_abi_check|wrapper_bare_link_check|forwarding_failure_modes|wrapper_reentry_macro)')
+          printf '%s\n' "$listing" | grep -q '^Total Tests: 0$' || {
+            echo "the wrapper-off tree registers a wrapper check"
+            printf '%s\n' "$listing"
+            exit 1
+          }
+          if grep -Eq '^add_test\((wrapper_abi_check|wrapper_bare_link_check|forwarding_failure_modes|wrapper_reentry_macro)' "parity-off/$packaged"; then
+            echo "the packaged test list registers a wrapper check without MIOPEN_ENABLE_HIPDNN_WRAPPER"
+            exit 1
+          fi
+
+      # TheRock's GPU jobs select the wrapper checks with `-L ^<tier>$ -L ^ex_gpu_<arch>$`.
+      # Dropping the per-architecture entries leaves every other check green, so compare
+      # them against the labels the shared parser derives from test_categories.yaml (the
+      # architectures that have an enabled suite), in the wrapper-on tree and in the
+      # packaged list.
+      - name: Wrapper checks are registered for every architecture with an enabled suite
+        if: matrix.job_id == 'no-ck-build'
+        run: |
+          labels=$(python3 projects/miopen/test/gtest/forwarding_parity_gpu_labels.py \
+            shared/ctest/parse_test_categories.py \
+            projects/miopen/test/gtest/test_categories.yaml)
+          python3 projects/miopen/test/gtest/check_wrapper_registration.py \
+            --labels "$labels" \
+            --ctest-dir parity-on \
+            --packaged parity-on/test/gtest/install_CTestTestfile.cmake
+
+      # The wrapper script tests are one CTest entry that needs no build, so the
+      # configure-only tree is enough. Running them here catches a script change without
+      # the manually dispatched flag-on workflow.
+      # --no-tests=error: ctest exits 0 when -R matches nothing.
+      - name: Wrapper script tests
+        if: matrix.job_id == 'no-ck-build'
+        run: |
+          ctest --test-dir parity-on -R '^test_forwarding_parity_scripts$' --no-tests=error --output-on-failure
 
       # Asserts libMIOpen.so's public ABI against the committed baseline: SONAME,
       # exported public C API symbol set, and no _impl symbol leakage. This is a

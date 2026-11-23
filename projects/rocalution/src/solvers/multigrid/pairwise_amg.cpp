@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -151,8 +151,9 @@ namespace rocalution
         assert(this->build_ == true);
         assert(this->op_ != NULL);
 
+        // Create coarse operator, on the backend of the finest operator
         this->op_level_[0]->Clear();
-        this->op_level_[0]->CloneBackend(*this->op_);
+        this->op_level_[0]->MoveToBackend(*this->op_);
         this->op_level_[0]->ConvertToCSR();
 
         this->trans_level_[0]->CloneBackend(*this->op_);
@@ -164,6 +165,12 @@ namespace rocalution
                                    this->Gsize_level_[0],
                                    this->rG_level_[0],
                                    this->rGsize_level_[0]);
+
+        // Move it to the host, if all coarse levels are
+        if(this->host_level_ == this->levels_ - 1)
+        {
+            this->op_level_[0]->MoveToHost();
+        }
 
         for(int i = 1; i < this->levels_ - 1; ++i)
         {
@@ -187,7 +194,7 @@ namespace rocalution
 
             if(i == this->levels_ - this->host_level_ - 1)
             {
-                this->op_level_[i - 1]->CloneBackend(*this->restrict_op_level_[i - 1]);
+                this->op_level_[i - 1]->MoveToBackend(*this->restrict_op_level_[i - 1]);
             }
         }
 
@@ -261,6 +268,15 @@ namespace rocalution
 
         op.InitialPairwiseAggregation(
             this->beta_, nc, trans, Gsize, &rG, rGsize, this->aggregation_ordering_);
+
+        // Every row is strongly diagonally dominant, so there is no aggregate to coarsen. With a
+        // GlobalMatrix, nc is 0 on every process when it is 0 on one.
+        if(nc == 0)
+        {
+            free_host(&rG);
+            return false;
+        }
+
         op.CoarsenOperator(coarse, nc, nc, *trans, Gsize, rG, rGsize);
 
         int cycle = 0;
@@ -268,9 +284,21 @@ namespace rocalution
         while(static_cast<double>(op.GetM()) / static_cast<double>(coarse->GetM())
               < this->coarsening_factor_)
         {
+            int64_t coarse_m = coarse->GetM();
+
             coarse->FurtherPairwiseAggregation(
                 this->beta_, nc, trans, Gsize, &rG, rGsize, this->aggregation_ordering_);
             op.CoarsenOperator(coarse, nc, nc, *trans, Gsize, rG, rGsize);
+
+            // Each pass doubles the size of the aggregate map. A pass that pairs fewer than half
+            // of the nodes ends the level, and the next level starts again from pairs.
+            if(4 * coarse->GetM() > 3 * coarse_m)
+            {
+                LOG_VERBOSE_INFO(2,
+                                 "*** warning: PairwiseAMG::Build() Pairwise aggregation paired "
+                                 "fewer than half of the nodes, coarsening factor not reached");
+                break;
+            }
 
             ++cycle;
 
@@ -280,6 +308,13 @@ namespace rocalution
                                  "*** warning: PairwiseAMG::Build() Coarsening cannot obtain "
                                  "satisfying coarsening factor");
             }
+        }
+
+        // A level that does not coarsen at all would be followed by identical ones
+        if(coarse->GetM() == op.GetM())
+        {
+            free_host(&rG);
+            return false;
         }
 
         res->CreateFromMap(*trans, op.GetLocalM(), nc, pro);

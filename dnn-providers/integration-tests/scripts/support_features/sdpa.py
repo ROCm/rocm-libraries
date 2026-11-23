@@ -1,0 +1,448 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Feature catalog for ``SdpaAttributes`` (scaled dot-product attention, forward).
+
+The features come from ``sdpa_attributes.fbs``. A few are read from the q / k
+/ v tensors rather than from attributes -- dtype, head dim, head grouping,
+layout and sequence shape -- since the schema carries those only as tensor
+uids. ``head_dim`` reads q and v together: ``192x128`` is a q / k head dim of
+192 with a v head dim of 128, its own kernel rather than a 192. ``layout`` is
+q's stride order, named by its dims from the largest stride to the smallest
+(``bshd``: b, then s, then h, then d), or ``ragged`` when q is packed by
+per-batch offsets (the tensor's ``ragged_offset_tensor_uid``) whatever its
+strides. A stride-0 (broadcast) dim has no stride to order by, so it is placed
+in the gap the other strides leave for it (``stride_order``): a q in bshd
+broadcast along s is ``bshd``. ``broadcast:q``, ``broadcast:k`` and
+``broadcast:v`` say that tensor has stride 0 on a dim of extent > 1.
+
+A stride-0 dim that no gap fits has no position in memory, so its place in the
+label is a convention. Such a dim is the result of ``expand()`` on a size-1 dim.
+It goes outermost if that gives a catalogued layout, else in its bhsd place.
+The strides cannot tell an sbhd q with a zeroed s stride from an expanded
+size-1 s: both are ``(h*d, d, 0, 1)`` on b, h, s, d. Both are ``sbhd``, so
+an expand along s of a bhsd q is ``sbhd`` too. An expand along h,
+``(s*d, 0, d, 1)``, would be the uncatalogued ``hbsd``, so it is ``bhsd``.
+
+Exclusive groups (exactly one feature per graph): ``dtype``, ``head_dim``,
+``heads``, ``layout``, ``mask``, ``seq``, ``scale``. ``dtype`` is q's. The rest
+are optional inputs and outputs, each present or not, and two precision
+features: ``precision:mixed_output``, o's dtype is not q's, as fp8 q / k / v
+with a bf16 o; and ``precision:mixed_input``, k's or v's dtype is not q's.
+
+The value sets of ``dtype``, ``head_dim`` and ``layout`` are not in the schema,
+which types them only as tensors. Each value is listed; a graph outside them
+raises ``FeatureError`` rather than widening the denominator.
+FNUZ fp8 is not folded into OCP fp8: gfx942 runs ``fp8e4m3_fnuz``, gfx950
+``fp8e4m3``, and the two are not bit-compatible. The same holds for e5m2.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Container
+
+from support_features import Feature, FeatureError
+
+NODE_TYPE = "SdpaAttributes"
+SCHEMA_FILE = "sdpa_attributes.fbs"
+SCHEMA_TABLE = "SdpaAttributes"
+
+_FP8_SCALES = (
+    "descale_q_tensor_uid",
+    "descale_k_tensor_uid",
+    "descale_v_tensor_uid",
+    "descale_s_tensor_uid",
+    "scale_s_tensor_uid",
+    "scale_o_tensor_uid",
+)
+MASK_FIELDS = (
+    "causal_mask",
+    "causal_mask_bottom_right",
+    "left_bound",
+    "right_bound",
+    "diagonal_alignment",
+)
+QK_FIELDS = ("q_tensor_uid", "k_tensor_uid")
+QV_FIELDS = ("q_tensor_uid", "v_tensor_uid")
+
+# q's data_type as serialized -> dtype value.
+DTYPES = {
+    "bfloat16": "bf16",
+    "half": "fp16",
+    "float": "fp32",
+    "fp8_e4m3": "fp8e4m3",
+    "fp8_e4m3_fnuz": "fp8e4m3_fnuz",
+    "fp8_e5m2": "fp8e5m2",
+    "fp8_e5m2_fnuz": "fp8e5m2_fnuz",
+}
+# q / k head dim -> the v head dims catalogued with it. v may differ from q / k:
+# the ASM kernels run 192 x 128 (fmha_v3_*/*.csv), and the FlyDSL backward serves
+# 128 x 64 and 256 x 64. The odd sizes sit one either side of 64, 96 and 128.
+_V_HEAD_DIMS = {
+    1: (1, 64, 65, 96, 128, 192, 256, 512, 576),
+    63: (96, 128),
+    64: (1, 64, 95, 96, 128, 192, 256, 512, 576),
+    65: (128, 256),
+    95: (128,),
+    96: (1, 64, 96, 128, 192, 256, 512, 576),
+    97: (128,),
+    127: (128,),
+    128: (1, 63, 64, 65, 95, 96, 97, 127, 128, 129, 192, 256, 512, 576),
+    129: (1, 64, 128),
+    192: (1, 64, 96, 97, 128, 192, 256, 512, 576),
+    256: (1, 64, 96, 127, 128, 192, 256, 512, 576),
+    512: (1, 64, 96, 128, 192, 256, 512, 576),
+    576: (1, 64, 96, 128, 192, 256, 512, 576),
+}
+# (q / k head dim, v head dim) -> head_dim value: ``128`` when they are equal,
+# ``192x128`` when they are not.
+HEAD_DIMS = {
+    (qk, v): str(qk) if qk == v else f"{qk}x{v}"
+    for qk, vs in _V_HEAD_DIMS.items()
+    for v in vs
+}
+# Order of q's dims by decreasing stride -> layout name. Dims are (b, h, s, d).
+LAYOUTS = {
+    (0, 1, 2, 3): "bhsd",
+    (0, 2, 1, 3): "bshd",
+    (0, 2, 3, 1): "bsdh",
+    (2, 0, 1, 3): "sbhd",
+}
+
+FEATURES = (
+    Feature("dtype:bf16", ("q_tensor_uid",)),
+    Feature("dtype:fp16", ("q_tensor_uid",)),
+    Feature("dtype:fp32", ("q_tensor_uid",)),
+    Feature("dtype:fp8e4m3", ("q_tensor_uid",) + _FP8_SCALES),
+    Feature("dtype:fp8e4m3_fnuz", ("q_tensor_uid",) + _FP8_SCALES),
+    Feature("dtype:fp8e5m2", ("q_tensor_uid",) + _FP8_SCALES),
+    Feature("dtype:fp8e5m2_fnuz", ("q_tensor_uid",) + _FP8_SCALES),
+    *(Feature(f"head_dim:{d}", QV_FIELDS) for d in HEAD_DIMS.values()),
+    Feature("heads:mha", QK_FIELDS, "as many k/v heads as q heads"),
+    Feature("heads:gqa", QK_FIELDS, "fewer k/v heads than q heads, more than one"),
+    Feature("heads:mqa", QK_FIELDS, "one k/v head"),
+    *(Feature(f"layout:{name}", ("q_tensor_uid",)) for name in LAYOUTS.values()),
+    Feature("layout:ragged", ("q_tensor_uid",), "q packed by per-batch offsets"),
+    *(
+        Feature(
+            f"broadcast:{port}",
+            (f"{port}_tensor_uid",),
+            f"{port} has stride 0 on a dim of extent > 1",
+        )
+        for port in "qkv"
+    ),
+    Feature("mask:none", MASK_FIELDS),
+    Feature("mask:causal_top_left", MASK_FIELDS),
+    Feature("mask:causal_bottom_right", MASK_FIELDS),
+    Feature("mask:sliding_window", MASK_FIELDS),
+    Feature("seq:q_eq_kv", QK_FIELDS),
+    Feature("seq:q_ne_kv", QK_FIELDS),
+    Feature("seq:decode", ("q_tensor_uid",), "one query position"),
+    Feature(
+        "varlen:seq_lens",
+        ("seq_len_q_tensor_uid", "seq_len_kv_tensor_uid", "padding_mask"),
+        "per-batch sequence lengths, or padding",
+    ),
+    Feature(
+        "varlen:cu_seq_lens",
+        ("cu_seq_len_q_tensor_uid", "cu_seq_len_kv_tensor_uid"),
+        "cumulative sequence lengths (prefix sums, B+1 values)",
+    ),
+    Feature("scale:fixed", ("attn_scale_value",)),
+    Feature("scale:runtime", ("scale_tensor_uid",)),
+    Feature("scale:default", ("attn_scale_value", "scale_tensor_uid")),
+    Feature("out:stats", ("generate_stats", "stats_tensor_uid")),
+    Feature("out:max_sum_exp", ("max_tensor_uid", "sum_exp_tensor_uid")),
+    Feature("out:rng_dump", ("rng_dump_tensor_uid",)),
+    Feature("fp8:amax", ("amax_s_tensor_uid", "amax_o_tensor_uid")),
+    Feature(
+        "precision:mixed_output", ("q_tensor_uid", "o_tensor_uid"), "o is not q's dtype"
+    ),
+    Feature(
+        "precision:mixed_input",
+        ("q_tensor_uid", "k_tensor_uid", "v_tensor_uid"),
+        "k or v is not q's dtype",
+    ),
+    Feature("bias:additive", ("attn_mask_tensor_uid",)),
+    Feature("bias:alibi", ("alibi_mask",)),
+    Feature(
+        "dropout:on",
+        (
+            "dropout_probability",
+            "seed_tensor_uid",
+            "offset_tensor_uid",
+            "dropout_mask_tensor_uid",
+            "dropout_scale_tensor_uid",
+        ),
+    ),
+    Feature(
+        "kv:paged",
+        ("page_table_k_tensor_uid", "page_table_v_tensor_uid", "max_seq_len_kv"),
+    ),
+    Feature("input:block_mask", ("block_mask_tensor_uid",)),
+    Feature("input:sink_token", ("sink_token_tensor_uid",)),
+)
+
+NOT_FEATURES = {
+    "mma_core_mode": "a numerics hint to the engine, not a variant of the op",
+    "implementation": "an engine-selection hint, not a variant of the op",
+}
+
+
+def mask_kind(attrs: dict) -> str:
+    """The mask kind, resolved as ``getMaskType`` (SdpaPlanUtils.hpp) does.
+
+    Forward and backward engines both resolve it this way.
+    """
+    causal = attrs.get("causal_mask")
+    bottom_right = attrs.get("causal_mask_bottom_right")
+    if causal and bottom_right:
+        raise FeatureError("causal_mask and causal_mask_bottom_right are both set")
+    # The deprecated flags win over the bounds.
+    if causal:
+        return "mask:causal_top_left"
+    if bottom_right:
+        return "mask:causal_bottom_right"
+    # An unset bound is unbounded.
+    left = attrs.get("left_bound")
+    right = attrs.get("right_bound")
+    left = -1 if left is None else left
+    right = -1 if right is None else right
+    if left == -1 and right == -1:
+        return "mask:none"
+    if left == -1 and right == 0:
+        if attrs.get("diagonal_alignment") == "BOTTOM_RIGHT":
+            return "mask:causal_bottom_right"
+        return "mask:causal_top_left"
+    return "mask:sliding_window"
+
+
+def ports(node: dict):
+    """``has(port)``: whether ``node`` binds ``port`` as an input or output."""
+    inputs = node.get("inputs") or {}
+    outputs = node.get("outputs") or {}
+
+    def has(port: str) -> bool:
+        return inputs.get(port) is not None or outputs.get(port) is not None
+
+    return has
+
+
+def stride_order(
+    dims: list[int],
+    strides: list[int],
+    layouts: Container[tuple[int, ...]] = LAYOUTS,
+) -> tuple[int, ...]:
+    """The dims by decreasing stride, a stride-0 dim placed where it fits.
+
+    The dims of nonzero stride sort by stride; equal strides (a size-1 dim)
+    keep their bhsd order. A stride-0 dim goes into the innermost gap wide
+    enough for its extent -- below a dim whose stride is at least the extent
+    times the span of the dims inside that gap. One of extent 1 spans nothing,
+    so it goes before the first of them that follows it in bhsd order. One that
+    no gap fits goes outermost if that order is in ``layouts``, else in its
+    bhsd place.
+    """
+    known = sorted((dim for dim in range(4) if strides[dim]), key=lambda d: -strides[d])
+    # slots[i] holds the stride-0 dims placed just inside known[i - 1].
+    slots: list[list[int]] = [[] for _ in range(len(known) + 1)]
+    gapless: list[tuple[int, int]] = []
+    for dim in range(4):
+        if strides[dim]:
+            continue
+        bhsd_slot = next((i for i, d in enumerate(known) if d > dim), len(known))
+        if dims[dim] == 1:
+            slots[bhsd_slot].append(dim)
+            continue
+        span = 1
+        for index in range(len(known), 0, -1):
+            outer = known[index - 1]
+            if strides[outer] >= span * dims[dim]:
+                slots[index].append(dim)
+                break
+            span = max(span, strides[outer] * dims[outer])
+        else:
+            gapless.append((dim, bhsd_slot))
+
+    def order_with(gapless_slots: list[int]) -> tuple[int, ...]:
+        placed = [list(slot) for slot in slots]
+        for (dim, _), slot in zip(gapless, gapless_slots):
+            placed[slot].append(dim)
+        placed = [sorted(slot) for slot in placed]
+        order = list(placed[0])
+        for index, dim in enumerate(known, 1):
+            order += [dim, *placed[index]]
+        return tuple(order)
+
+    outermost = order_with([0] * len(gapless))
+    if outermost in layouts:
+        return outermost
+    return order_with([slot for _, slot in gapless])
+
+
+def broadcast(tensor: dict) -> bool:
+    """Whether ``tensor`` has stride 0 on a dim of extent > 1."""
+    return any(
+        not stride and extent > 1
+        for stride, extent in zip(tensor["strides"], tensor["dims"])
+    )
+
+
+def core_features(
+    node: dict,
+    attrs: dict,
+    tensors_by_uid: dict,
+    *,
+    dtypes: dict[str, str],
+    head_dims: dict[tuple[int, int], str],
+    layouts: dict[tuple[int, ...], str],
+    decode: bool,
+    ragged: bool,
+    mixed_input: bool,
+) -> set[str]:
+    """The exclusive groups shared by forward and backward.
+
+    These are ``dtype``, ``head_dim``, ``heads``, ``layout``, ``mask``, ``seq``
+    and ``scale``. ``decode`` says whether a single query position counts as
+    ``seq:decode`` or as an ordinary ``q_eq_kv`` / ``q_ne_kv`` shape.
+    ``ragged`` says whether a ragged q is ``layout:ragged`` or uncatalogued.
+    ``mixed_input`` says whether a k or v dtype other than q's adds
+    ``precision:mixed_input`` or raises. ``dtypes`` maps a data_type as
+    serialized to its dtype value; ``head_dims`` and ``layouts`` are the
+    catalogued values of their groups, keyed as ``HEAD_DIMS`` and ``LAYOUTS``.
+    """
+    inputs = node.get("inputs") or {}
+    q, k, v = (tensors_by_uid[inputs[f"{port}_tensor_uid"]] for port in "qkv")
+    ranks = [len(t["dims"]) for t in (q, k, v)]
+    if ranks != [4, 4, 4]:
+        raise FeatureError(f"q / k / v rank {' / '.join(map(str, ranks))}, not 4")
+    _, heads_q, seq_q, head_dim_qk = q["dims"]
+    _, heads_kv, seq_kv, _ = k["dims"]
+    head_dim_v = v["dims"][3]
+
+    # type() rather than in: an unhashable value would raise TypeError.
+    dtype = q.get("data_type")
+    if type(dtype) is not str or dtype not in dtypes:
+        raise FeatureError(f"q dtype {dtype!r} is not catalogued")
+    kv_dtypes = (k.get("data_type"), v.get("data_type"))
+    is_mixed_input = kv_dtypes != (dtype, dtype)
+    if is_mixed_input:
+        if not mixed_input:
+            raise FeatureError(
+                f"k / v dtype {kv_dtypes[0]!r} / {kv_dtypes[1]!r} is not q's"
+            )
+        for kv_dtype in kv_dtypes:
+            if type(kv_dtype) is not str or kv_dtype not in dtypes:
+                raise FeatureError(f"k / v dtype {kv_dtype!r} is not catalogued")
+    head_dim = head_dims.get((head_dim_qk, head_dim_v))
+    if head_dim is None:
+        raise FeatureError(f"head dim {head_dim_qk} x {head_dim_v} is not catalogued")
+    if q.get("ragged_offset_tensor_uid") is not None:
+        if not ragged:
+            raise FeatureError("ragged q is not catalogued")
+        layout = "ragged"
+    else:
+        order = stride_order(q["dims"], q["strides"], layouts)
+        if order not in layouts:
+            raise FeatureError(f"q stride order {order} is not a catalogued layout")
+        layout = layouts[order]
+
+    features = {
+        f"dtype:{dtypes[dtype]}",
+        f"head_dim:{head_dim}",
+        f"layout:{layout}",
+        mask_kind(attrs),
+    }
+    if is_mixed_input:
+        features.add("precision:mixed_input")
+    if heads_q == heads_kv:
+        features.add("heads:mha")
+    elif heads_kv == 1:
+        features.add("heads:mqa")
+    else:
+        features.add("heads:gqa")
+    if decode and seq_q == 1:
+        features.add("seq:decode")
+    elif seq_q == seq_kv:
+        features.add("seq:q_eq_kv")
+    else:
+        features.add("seq:q_ne_kv")
+
+    if ports(node)("scale_tensor_uid"):
+        features.add("scale:runtime")
+    elif attrs.get("attn_scale_value") is not None:
+        features.add("scale:fixed")
+    else:
+        features.add("scale:default")
+    return features
+
+
+def mixed_output(node: dict, tensors_by_uid: dict) -> bool:
+    """Whether o's dtype is not q's. A virtual q or o takes the dtype of the op
+    on its other side, which that op's catalog counts."""
+    o_uid = (node.get("outputs") or {}).get("o_tensor_uid")
+    if o_uid is None:
+        raise FeatureError("required port o_tensor_uid is not bound")
+    q, o = tensors_by_uid[node["inputs"]["q_tensor_uid"]], tensors_by_uid[o_uid]
+    o_dtype = o.get("data_type")
+    if type(o_dtype) is not str or o_dtype not in DTYPES:
+        raise FeatureError(f"o dtype {o_dtype!r} is not catalogued")
+    if q.get("virtual") or o.get("virtual"):
+        return False
+    return o_dtype != q["data_type"]
+
+
+def extract(node: dict, tensors_by_uid: dict) -> set[str]:
+    # The forward serializer writes scalars under "attributes" (backward
+    # writes "parameters"; see utilities/json/Sdpa*Attributes.hpp).
+    attrs = node.get("attributes") or {}
+    has = ports(node)
+    features = core_features(
+        node,
+        attrs,
+        tensors_by_uid,
+        dtypes=DTYPES,
+        head_dims=HEAD_DIMS,
+        layouts=LAYOUTS,
+        decode=True,
+        ragged=True,
+        mixed_input=True,
+    )
+
+    for port in "qkv":
+        if broadcast(tensors_by_uid[node["inputs"][f"{port}_tensor_uid"]]):
+            features.add(f"broadcast:{port}")
+    if (
+        has("seq_len_q_tensor_uid")
+        or has("seq_len_kv_tensor_uid")
+        or attrs.get("padding_mask")
+    ):
+        features.add("varlen:seq_lens")
+    if has("cu_seq_len_q_tensor_uid") or has("cu_seq_len_kv_tensor_uid"):
+        features.add("varlen:cu_seq_lens")
+    if attrs.get("generate_stats") or has("stats_tensor_uid"):
+        features.add("out:stats")
+    if has("max_tensor_uid") or has("sum_exp_tensor_uid"):
+        features.add("out:max_sum_exp")
+    if has("rng_dump_tensor_uid"):
+        features.add("out:rng_dump")
+    if has("amax_s_tensor_uid") or has("amax_o_tensor_uid"):
+        features.add("fp8:amax")
+    if mixed_output(node, tensors_by_uid):
+        features.add("precision:mixed_output")
+    if has("attn_mask_tensor_uid"):
+        features.add("bias:additive")
+    if attrs.get("alibi_mask"):
+        features.add("bias:alibi")
+    if (
+        (attrs.get("dropout_probability") or 0) > 0
+        or has("seed_tensor_uid")
+        or has("dropout_mask_tensor_uid")
+    ):
+        features.add("dropout:on")
+    if has("page_table_k_tensor_uid") or has("page_table_v_tensor_uid"):
+        features.add("kv:paged")
+    if has("block_mask_tensor_uid"):
+        features.add("input:block_mask")
+    if has("sink_token_tensor_uid"):
+        features.add("input:sink_token")
+    return features

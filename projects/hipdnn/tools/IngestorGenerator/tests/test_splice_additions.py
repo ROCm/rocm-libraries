@@ -4,9 +4,10 @@
 """Addition-only splice: a scratch render goes into a live engine directory without
 touching a retained identity.
 
-The generator mints new UUIDs on every run, so "regenerate and copy" replaces every
-live id. The splice must keep every retained byte, append only entries whose name is
-new, and refuse (writing nothing) when a retained object changed.
+Ids are random, not derived from content, and a scratch made with --new-ids carries
+new ones, so "regenerate and copy" would replace every live id. The splice must keep
+every retained byte, append only entries whose name is new, and refuse (writing
+nothing) when a retained object changed.
 """
 
 from __future__ import annotations

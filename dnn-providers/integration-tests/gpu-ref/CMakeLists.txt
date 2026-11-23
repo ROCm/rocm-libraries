@@ -30,6 +30,7 @@ add_custom_command(
 
 add_library(
     hipdnn_gpu_ref STATIC
+    src/GpuFpReferenceBlockScale.cpp
     src/GpuReferencePointwise.cpp
     src/GpuFpReferenceConvolution.cpp
     src/GpuFpReferenceLayernorm.cpp
@@ -60,7 +61,7 @@ target_include_directories(
 target_link_libraries(
     hipdnn_gpu_ref
     PUBLIC hipdnn_test_sdk
-    PRIVATE hiprtc::hiprtc hip::host
+    PRIVATE hiprtc::hiprtc hip::host ${CMAKE_DL_LIBS}
 )
 
 target_compile_options(hipdnn_gpu_ref PRIVATE ${INTEGRATION_TESTS_WARNING_COMPILE_OPTIONS})

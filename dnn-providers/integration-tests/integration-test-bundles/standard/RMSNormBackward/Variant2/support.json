@@ -135,6 +135,39 @@
           ]
         }
       }
+    ],
+    "hipkernel:flydsl_rmsnorm_bwd": [
+      {
+        "cases": [
+          "16_3_8_14_14_fp16_ncdhw",
+          "16_3_8_14_14_fp32_ncdhw_1ef169",
+          "1_256_1_1_fp32_nchw_0cd352",
+          "2_16_8_8_bfp16_nchw_281840",
+          "2_16_8_8_bfp16_nchw_ff6d8c",
+          "2_16_8_8_fp16_nchw_c461ce",
+          "2_16_8_8_fp32_nchw_2d77d1",
+          "2_16_8_8_fp32_nchw_f478df",
+          "2_1_1_1_bfp16_nchw_d6481f",
+          "2_1_1_1_fp16_nchw_bb0beb",
+          "2_1_1_1_fp32_nchw_daa6fa",
+          "2_3_4_8_8_bfp16_ncdhw_211fab",
+          "2_3_4_8_8_bfp16_ncdhw_891060",
+          "2_3_4_8_8_fp16_ncdhw_794474",
+          "2_3_4_8_8_fp32_ncdhw_d8879e",
+          "2_3_4_8_8_fp32_ncdhw_f82eca",
+          "32_3_14_1_fp32_nchw_9531e1",
+          "32_3_1_14_bfp16_nchw",
+          "32_3_1_14_fp16_nchw",
+          "32_3_1_14_fp32_nchw_4a28d0",
+          "4096_128_1_1_fp16_nhwc",
+          "4096_128_1_1_fp32_nchw_781f84"
+        ],
+        "support": {
+          "gfx1151": [
+            "linux"
+          ]
+        }
+      }
     ]
   },
   "version": 1

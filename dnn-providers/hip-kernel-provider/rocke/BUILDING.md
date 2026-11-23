@@ -5,7 +5,7 @@
 | Root | Packages | Installed in product? |
 |------|----------|-----------------------|
 | `platform/python` | `rocke` (authoring SDK + engine frontend) | yes (wheel / CMake) |
-| `library`         | `kernels`, `builders`, `dispatch` (SDPA/MHA) | **no** — build-time only |
+| `library`         | `kernels`, `builders`, `dispatch` (SDPA/MHA, conv, ...) | **no** for the Python (build-time only); the C++ mirrors in `library/cpp` ship in the `ckc` package (see "C++ engine") |
 
 The package import name is `rocke`; the SDPA product lives under separate
 top-level packages. Because the two halves sit under different roots, every
@@ -17,11 +17,12 @@ We do **not** scatter `sys.path` surgery across scripts. Instead both roots are
 runs, and `pytest` — from any working directory, with no `PYTHONPATH`.
 
 The only remaining filesystem lookups in the tree are for genuine *non-package*
-data (the `dsl_docs/` tree and the loose `_ua_shape_utils` benchmark helper).
-Those resolve through `rocke.assets` (`platform_root()`, `dsl_docs_dir()`,
+data (the `dsl_docs/` tree, the platform `tools/` scripts and the loose
+`_ua_shape_utils` benchmark helper). Those resolve through `rocke.assets`
+(`platform_root()`, `dsl_docs_dir()`, `platform_tools_dir()`,
 `shape_utils_dir()`), with the roots overridable via `ROCKE_PLATFORM_ROOT` /
-`ROCKE_DSL_DOCS` (`shape_utils_dir()` derives from `dsl_docs_dir()`) — never via
-per-file `parents[N]` math.
+`ROCKE_DSL_DOCS` / `ROCKE_PLATFORM_TOOLS_DIR` (`shape_utils_dir()` derives from
+`dsl_docs_dir()`) — never via per-file `parents[N]` math.
 
 ## Quick start (CMake-managed environment)
 
@@ -119,30 +120,28 @@ guard is designed to catch (regenerate `_DATALAYOUT_*` in
 `core/lower_llvm.py` for the local toolchain) — it is independent of the
 platform/library layout and reproduces identically on `develop`.
 
-One more layout-independent residual appears **only when the C++ engine is not
-built** (a pure-`pip`/Python-fallback checkout, as above):
-`test_rocke_ci_static.py::TestIrParityCoverage::test_ir_cases_match_golden_sha256`
-reports IR drift for 6 `conv/*` cases. The golden hashes track the C++ engine's
-output; #8841 (cshuffle) changed the Python lowerer's conv epilogue IR, so the
-Python-fallback hashes differ until the goldens are regenerated. Like the
-datalayout guard it reproduces identically on `develop` and is unrelated to the
-platform/library split — build the C++ engine (`platform/cpp/`) to run this test
-against its intended baseline. Everything else is green; GPU-only tests skip
-without a device.
+Everything else is green; GPU-only tests skip without a device.
 
 ## Data / asset paths
 
 Non-package assets are located through `rocke.assets`, not path math:
 
 ```python
-from rocke.assets import platform_root, dsl_docs_dir, shape_utils_dir
+from rocke.assets import platform_root, dsl_docs_dir, platform_tools_dir, shape_utils_dir
 ```
 
 Override the roots for out-of-tree consumption with `ROCKE_PLATFORM_ROOT`,
-`ROCKE_DSL_DOCS`.
+`ROCKE_DSL_DOCS`, `ROCKE_PLATFORM_TOOLS_DIR`.
 
 ## C++ engine
 
 The platform C++ engine (`platform/cpp/` → `librocke_core.a`) and its
 `rocke_engine` pybind binding are built by CMake, not pip, and are intentionally
-not part of any wheel. See `platform/BUILD.md`.
+not part of any wheel. See `platform/BUILD.md`. The same configure also builds
+the library families' C++ mirrors (`library/cpp/` → `librocke_library.a`, beside
+`librocke_core.a`) and, with `ROCKE_BUILD_PYBIND=ON`, their `rocke_library_engine`
+binding beside `rocke_engine`; `-DROCKE_BUILD_LIBRARY_CPP=OFF` skips them.
+`cmake --install` puts the library archive and headers into the same `ckc`
+package: a C/C++ consumer of a library family (e.g. the conv API in
+`rocke/instance_conv_*.h`) links `ckc::rocke_library`, which brings
+`ckc::rocke_core` with it.

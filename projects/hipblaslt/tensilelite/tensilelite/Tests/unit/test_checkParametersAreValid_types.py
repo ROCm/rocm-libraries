@@ -19,15 +19,15 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
-"""Strict type-check coverage for Tensile.Common.ValidParameters.checkParametersAreValid."""
+"""Strict type-check coverage for tensilelite.Common.ValidParameters.checkParametersAreValid."""
 
 import pytest
 
-from Tensile.Common.ValidParameters import (
+from tensilelite.Common.ValidParameters import (
     checkParametersAreValid,
     validParameters,
 )
-from Tensile.Common.TypeValidationErrors import ConfigTypeError
+from tensilelite.Common.TypeValidationErrors import ConfigTypeError
 
 
 class TestBoolIntTrap:
@@ -139,7 +139,7 @@ class TestSkipSet:
         # of ints, converted downstream. So any type passes -- but the
         # legacy value-membership check still runs against the allowed
         # list. Use the sentinel (0, 0, 0) which is always present.
-        from Tensile.Common.Types import IsaVersion
+        from tensilelite.Common.Types import IsaVersion
         checkParametersAreValid(("ISA", [IsaVersion(0, 0, 0)]), validParameters)
 
 

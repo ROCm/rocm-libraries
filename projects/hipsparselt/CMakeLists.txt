@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.25.2)
 
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Generate compile commands json file." ON)
 
-project(hipsparselt VERSION 0.2.9 LANGUAGES CXX)
+project(hipsparselt VERSION 0.2.10 LANGUAGES CXX)
 
 # ROCm libraries root (for shared/ctest and other shared resources)
 # Only set default when not already defined (e.g. by superproject / rocm-libraries).
@@ -108,8 +108,33 @@ if(NOT HIPSPARSELT_ENABLE_CUDA)
     elseif(GPU_TARGETS STREQUAL "all")
         hipsparselt_get_base_architectures(GPU_TARGETS)
     else()
+        # A device ASAN build needs the XNACK mode named, and an explicitly
+        # requested target arrives bare: TheRock's sanitizer stanza rewrites
+        # gfx90a/gfx942/gfx950 only, so gfx1250 reaches us as itself. Promoted
+        # here, before validation, so the list that is checked is the one the
+        # build will use. Settled against the compiler straight after, which
+        # hands back the bare name on a toolchain that refuses the qualifier --
+        # the same answer the `all` list gets.
+        if(HIPSPARSELT_ENABLE_ASAN OR BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
+            hipsparselt_offload_targets(GPU_TARGETS ${GPU_TARGETS})
+        endif()
         hipsparselt_validate_gpu_targets("${GPU_TARGETS}")
     endif()
+
+    # Save original targets (with :xnack- suffix) for TensileCreateLibrary, which
+    # needs the suffix the next line strips for hip::device. A normal variable,
+    # as hipBLASLt keeps it: both readers are inside this configure -- the
+    # create_device_library() call below, and the embedded hipBLASLt, which
+    # inherits it through block(). A cache entry would additionally be offered
+    # as something to set, and then overwritten from GPU_TARGETS on the next
+    # configure, since it is derived rather than chosen.
+    set(TENSILELITE_GPU_TARGETS "${GPU_TARGETS}")
+
+    # Strip xnack suffix from xnack_any platforms (e.g. gfx1250) for hip::device
+    # offload targets. find_package(hip) bakes GPU_TARGETS into --offload-arch on
+    # hip::device, and xnack_any platforms must use the bare arch.
+    hipsparselt_normalize_xnack_archs(GPU_TARGETS ${GPU_TARGETS})
+
     message(STATUS "Building for GPU targets: ${GPU_TARGETS}")
 endif()
 
@@ -222,6 +247,11 @@ if(HIPSPARSELT_ENABLE_HIP)
             OUTPUT_DIR "${_hipsparselt_tensile_out}"
             CODEGEN_ROOT "${HIPBLASLT_TENSILELITE_PATH}"
             PYTHON_EXECUTABLE "${Python_EXECUTABLE}"
+            # The unstripped targets: TensileCreateLibrary keys its capability
+            # overrides on the xnack suffix, which GPU_TARGETS has had removed
+            # for hip::device. Stated here rather than left to the default in
+            # create_device_library, so this call and hipBLASLt's cannot drift.
+            ARCHES ${TENSILELITE_GPU_TARGETS}
             ${_hipsparselt_codegen_host_sanitizer_args}
             ${_hipsparselt_codegen_product_args}
         )

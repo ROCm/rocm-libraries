@@ -24,12 +24,14 @@ from typing import Any, Dict, List, Sequence, Tuple
 import yaml
 
 from geko import logger, _set_log_level
+import geko.device as device
 from geko.config_generator.load_input_config import load_prepared_config_from_yaml, validate_mx_arch_support
 from geko.config_generator.constants import LIST_FORWARDED_KEYS, mx_format, mx_scale_code
 from geko.constants import SUPPORTED_ARCH, canonical_arch
 from geko.paths import resolve_hipblaslt_path
 from geko.pipeline import run_bench, run_configure, run_optimize, run_search
 from geko.schemas import GemmConfig, GemmType
+from geko.search import SEARCH_PROFILES
 from geko.utils import parse_devices
 
 # Sample tuning YAML path shown when --list input is missing or invalid.
@@ -182,17 +184,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="Performance uplift threshold for kernel filtering",
     )
     parser.add_argument(
-        "--duration",
-        type=float,
-        default=0.04,
-        help="Target benchmark duration in seconds (used with --search)",
+        "--search-profile",
+        dest="search_profile",
+        type=str,
+        default="thorough",
+        choices=sorted(SEARCH_PROFILES),
+        help=(
+            "Search profile used with --search: bundles the hipblaslt-bench "
+            "--adaptive timing knobs. 'fast' (single dense pass, cheapest), "
+            "'balanced' (two-stage: cheap screen + strict re-verify of its "
+            "top-K candidates), or 'thorough' (tightest convergence/ceiling "
+            "knobs, most expensive). Defaults to 'thorough'."
+        ),
     )
     parser.add_argument(
         "--benchmark-duration",
         type=float,
         default=0.5,
         metavar="SEC",
-        help="Target seconds per cold and per timed phase when using --bench",
+        help=(
+            "Used with --bench: measurement time in seconds of each GEMM "
+            "benchmark. With --no-benchmark-adaptive, target seconds per cold "
+            "and per timed phase instead."
+        ),
+    )
+    parser.add_argument(
+        "--no-benchmark-adaptive",
+        dest="adaptive_benchmark",
+        action="store_false",
+        default=True,
+        help=(
+            "Used with --bench: disable adaptive timing and use fixed "
+            "iteration counts scaled from a probe run instead."
+        ),
     )
     parser.add_argument(
         "--custom-lib-src",
@@ -230,6 +254,20 @@ def build_parser() -> argparse.ArgumentParser:
             "collection / output overhead during offline tuning."
         ),
     )
+    parser.add_argument(
+        "--skip-gpu-check",
+        dest="skip_gpu_check",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip the GPU device pre-flight check (verifies at least as many "
+            "GPU devices are visible as requested via --devices). The check "
+            "relies on a device-enumerator tool (amdgpu-arch / "
+            "rocm_agent_enumerator / rocminfo on Linux, hipinfo on Windows) "
+            "being on PATH (e.g. $ROCM_PATH/bin); if none is found the check "
+            "is skipped with a warning rather than blocking."
+        ),
+    )
     return parser
 
 
@@ -253,12 +291,14 @@ class CliArgs:
     search_space: str | None
     workdir: str | None
     up_thr: float
-    duration: float
     benchmark_duration: float
     custom_lib_src: str | None
     custom_lib_dir: str | None
     retry: bool
     bench_freq: bool
+    skip_gpu_check: bool = False
+    search_profile: str = "thorough"
+    adaptive_benchmark: bool = True
 
 
 def parse_cli_args(argv: Sequence[str] | None) -> CliArgs:
@@ -332,12 +372,14 @@ def parse_cli_args(argv: Sequence[str] | None) -> CliArgs:
         search_space=ns.search_space,
         workdir=ns.workdir,
         up_thr=ns.up_thr,
-        duration=ns.duration,
+        search_profile=ns.search_profile,
         benchmark_duration=ns.benchmark_duration,
         custom_lib_src=ns.custom_lib_src,
         custom_lib_dir=ns.custom_lib_dir,
         retry=not ns.no_retry,
         bench_freq=ns.bench_freq,
+        skip_gpu_check=ns.skip_gpu_check,
+        adaptive_benchmark=ns.adaptive_benchmark,
     )
 
 
@@ -360,6 +402,15 @@ def dispatch(args: CliArgs, anchor: str | None = None) -> int:
     _set_log_level(args.verbose)
     logger.info(f"Run directory: {run_root_str}")
     logger.info(f"hipBLASLt path: '{hipblaslt_path}'")
+
+    if not args.skip_gpu_check:
+        gpu_check_rc = device.main(len(args.devices))
+        if gpu_check_rc == 1:
+            logger.error("GPU check: device enumeration timed out; aborting.")
+            return 1
+        if gpu_check_rc == 2:
+            logger.error("GPU check: insufficient GPU devices found; aborting.")
+            return 2
 
     log_path: Path
     config_overrides: Dict[str, Any] = {}
@@ -403,6 +454,7 @@ def dispatch(args: CliArgs, anchor: str | None = None) -> int:
             bench_freq=args.bench_freq,
             custom_lib_src=args.custom_lib_src,
             custom_lib_dir=args.custom_lib_dir,
+            adaptive_benchmark=args.adaptive_benchmark,
         )
     if args.search:
         run_search(
@@ -413,7 +465,7 @@ def dispatch(args: CliArgs, anchor: str | None = None) -> int:
             up_thr=args.up_thr,
             workdir=run_root_str,
             verbose=args.verbose,
-            duration=args.duration,
+            profile=args.search_profile,
             bench_freq=args.bench_freq,
             custom_lib_src=args.custom_lib_src,
         )

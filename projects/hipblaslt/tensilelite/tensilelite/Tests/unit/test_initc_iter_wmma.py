@@ -39,7 +39,7 @@ def _endCounter(pgr, suppress=False, halfPLR=False, rap=False):
     # a bare stub self are sufficient. Import lazily to keep module import light.
     from types import SimpleNamespace
 
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 
     kernel = {
         "PrefetchGlobalRead": pgr,
@@ -97,7 +97,7 @@ def test_rap_threshold_is_zero_whatever_the_prefetch_depth():
 )
 def test_cluster_barrier_split_wave_loop(halfPLR, clusterBarrier, initCIterWmma, expected):
     """Wave-split stays off while InitCIterWmma owns accumulator init."""
-    from Tensile.KernelWriter import clusterBarrierSplitWaveLoop
+    from tensilelite.KernelWriter import clusterBarrierSplitWaveLoop
 
     kernel = {
         "HalfPLR": halfPLR,

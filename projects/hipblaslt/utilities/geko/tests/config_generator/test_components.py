@@ -335,7 +335,7 @@ def test_gfx1250_generic_policy_entries_are_valid_tensile_policies(
     An UnsupportedExecutionPolicy escapes Solution() and aborts the whole tuning
     run, so persistent-only options must never meet TileProcessingStrategy None.
     """
-    execution_policy = pytest.importorskip("Tensile.ExecutionPolicy")
+    execution_policy = pytest.importorskip("tensilelite.ExecutionPolicy")
     size = (4096, 4096, 1, 4096)
     cfg = _prepared(ARCH="gfx1250_96cu", search_space="generic", backend="ductile", TRANSA="T",
                     StreamK=True, LIBRARY_TYPE=library_type, Sizes=[list(size)])

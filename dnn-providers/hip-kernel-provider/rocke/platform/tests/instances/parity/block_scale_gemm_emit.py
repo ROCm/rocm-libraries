@@ -70,6 +70,28 @@ def _spec(idx: int) -> BlockScaleGemmSpec:
             group_size_mnk=(1, 1, 160),
             **common,
         )
+    # Configs 6 and 7 share each A and B scale between two rows and two
+    # columns, and have an odd number of K groups (3 and 5), so the kernel
+    # runs both its K-group loops: the one that takes two groups per
+    # iteration, once or twice, and the one that takes the last group.
+    if idx == 6:
+        return BlockScaleGemmSpec(
+            M=32,
+            N=32,
+            K=192,
+            mantissa_dtype="fp8e4m3",
+            group_size_mnk=(2, 2, 64),
+            **common,
+        )
+    if idx == 7:
+        return BlockScaleGemmSpec(
+            M=48,
+            N=48,
+            K=320,
+            mantissa_dtype="bf8e5m2",
+            group_size_mnk=(2, 2, 64),
+            **common,
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 

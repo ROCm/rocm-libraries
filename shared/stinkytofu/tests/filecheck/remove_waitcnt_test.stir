@@ -16,7 +16,7 @@
 #   - s_wait_kmcnt: insertion is region-scoped, so an s_load in the kernel
 #     prologue (argument preload) never enters its dataflow and its in-region
 #     consumer would be left unguarded.
-#   - s_wait_xcnt: rebuilt by Gfx1250HazardPass, not by the dataflow, so it is
+#   - s_wait_xcnt: rebuilt by Gfx1250XnackHazardPass, not by the dataflow, so it is
 #     only stripped where that pass's placement is accepted (O3).
 #
 # A pass config is fixed per invocation, so each non-default policy needs its
