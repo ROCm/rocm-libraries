@@ -83,7 +83,7 @@ __device__ void sytf2_device_upper(const rocblas_int tid,
         }
         __syncthreads();
 
-        if(std::max(absakk, colmax) == 0 || std::isnan(absakk))
+        if(rocblas_max_nan(absakk, colmax) == 0 || std::isnan(absakk))
         {
             // singularity found (or a NaN pivot, as in LAPACK's xSYTF2)
             if(tid == 0 && _info == 0)
@@ -260,7 +260,7 @@ __device__ void sytf2_device_lower(const rocblas_int tid,
         }
         __syncthreads();
 
-        if(std::max(absakk, colmax) == 0 || std::isnan(absakk))
+        if(rocblas_max_nan(absakk, colmax) == 0 || std::isnan(absakk))
         {
             // singularity found (or a NaN pivot, as in LAPACK's xSYTF2)
             if(tid == 0 && _info == 0)

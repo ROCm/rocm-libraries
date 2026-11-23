@@ -160,7 +160,7 @@ __device__ void lasyf_device_upper(const rocblas_int tid,
 
         // (as in LAPACK's xLASYF, a NaN pivot is not singular, except in column 0, factored last,
         // where there is no off-diagonal element to search for an interchange)
-        if(std::max(absakk, colmax) == 0 || (k == 0 && std::isnan(absakk)))
+        if(rocblas_max_nan(absakk, colmax) == 0 || (k == 0 && std::isnan(absakk)))
         {
             // singularity found: column k of A is the updated column in W
             if(tid == 0 && _info == 0)
@@ -413,7 +413,7 @@ __device__ void lasyf_device_lower(const rocblas_int tid,
 
         // (as in LAPACK's xLASYF, a NaN pivot is not singular, except in column n - 1, factored
         // last, where there is no off-diagonal element to search for an interchange)
-        if(std::max(absakk, colmax) == 0 || (k == n - 1 && std::isnan(absakk)))
+        if(rocblas_max_nan(absakk, colmax) == 0 || (k == n - 1 && std::isnan(absakk)))
         {
             // singularity found: column k of A is the updated column in W
             if(tid == 0 && _info == 0)
