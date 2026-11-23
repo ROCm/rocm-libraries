@@ -5,6 +5,11 @@ Documentation for rocWMMA is available at
 
 ## Unreleased
 
+### Breaking default change for rocWMMA 4.0.0
+
+* **The legacy `std::` type-trait specializations are now disabled by default on every toolchain.** Standard `is_arithmetic`, `is_floating_point`, and `is_signed` queries for the affected FP8/BF8/XF32 class types are false. Migrate queries to the corresponding `rocwmma::` traits to preserve classification, overload selection, and negative input generation.
+* `ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS=1` remains a temporary, deprecated escape hatch only on STLs that accept the forbidden specializations. It does not repair standard `_v` implementations that bypass class traits. **rocWMMA 5.0.0 will remove this escape hatch in the following ROCm release.** See the [migration guide](docs/conceptual/migration-guide.rst).
+
 ### Breaking changes and deprecations for rocWMMA 3.0.0
 
 * **Migrate FP8/BF8/XF32 type queries to `rocwmma::is_arithmetic`, `rocwmma::is_floating_point`, and `rocwmma::is_signed`, including their `_v` forms.** These are now independently owned traits in every mode. Unqualified queries after importing both `std` and `rocwmma` can become ambiguous, and code relying on the old aliases' exact type identity must be updated.

@@ -108,18 +108,10 @@ namespace rocwmma
 
 #include <type_traits>
 
-// Keep the legacy default only where the STL does not diagnose these forbidden
-// specializations. An explicit application setting takes precedence. Test the
-// STL and attribute support together: the compiler alone does not select its STL.
+// Legacy std specializations are now opt-in. Owned rocwmma:: traits are
+// available in every mode, including the default used by new consumers.
 #ifndef ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS
-#if ((defined(_LIBCPP_VERSION) && _LIBCPP_VERSION >= 200000)                         \
-     || (defined(_MSVC_STL_VERSION) && defined(_NO_SPECIALIZATIONS_OF_TYPE_TRAITS))) \
-    && (__has_cpp_attribute(_Clang::__no_specializations__)                          \
-        || __has_cpp_attribute(msvc::no_specializations))
 #define ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS 0
-#else
-#define ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS 1
-#endif
 #endif
 
 #if defined(ROCWMMA_SUPPRESS_LEGACY_STD_TRAIT_DEPRECATION) \

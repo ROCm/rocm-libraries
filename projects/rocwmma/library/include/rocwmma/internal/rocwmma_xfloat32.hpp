@@ -396,7 +396,7 @@ namespace std
 {
     template <>
     struct ROCWMMA_DETAIL_DEPRECATED_STD_TRAIT(
-        "use rocwmma::is_arithmetic; legacy std traits default off in 4.0 and are removed in 5.0")
+        "use rocwmma::is_arithmetic; legacy std traits are opt-in in 4.0 and are removed in 5.0")
         is_arithmetic<rocwmma_xfloat32> : rocwmma::is_arithmetic<rocwmma_xfloat32>
     {
     };
@@ -410,7 +410,7 @@ namespace std
 
     template <>
     struct ROCWMMA_DETAIL_DEPRECATED_STD_TRAIT(
-        "use rocwmma::is_signed; legacy std traits default off in 4.0 and are removed in 5.0")
+        "use rocwmma::is_signed; legacy std traits are opt-in in 4.0 and are removed in 5.0")
         is_signed<rocwmma_xfloat32> : rocwmma::is_signed<rocwmma_xfloat32>
     {
     };

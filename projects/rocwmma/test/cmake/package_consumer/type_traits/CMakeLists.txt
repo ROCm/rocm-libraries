@@ -39,4 +39,4 @@ set_tests_properties(rocwmma_type_traits_gemm PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME rocwmma_type_traits_compiler
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_type_traits.py"
     --compiler "${CMAKE_HIP_COMPILER}" --arch "${_test_arch}"
-    --include "${_rocwmma_include}" --stage 1)
+    --include "${_rocwmma_include}" --stage 2)

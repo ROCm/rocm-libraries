@@ -118,7 +118,7 @@ namespace std
 {
     template <>
     struct ROCWMMA_DETAIL_DEPRECATED_STD_TRAIT(
-        "use rocwmma::is_arithmetic; legacy std traits default off in 4.0 and are removed in 5.0")
+        "use rocwmma::is_arithmetic; legacy std traits are opt-in in 4.0 and are removed in 5.0")
         is_arithmetic<hip_fp8_e4m3> : rocwmma::is_arithmetic<hip_fp8_e4m3>
     {
     };
@@ -132,14 +132,14 @@ namespace std
 
     template <>
     struct ROCWMMA_DETAIL_DEPRECATED_STD_TRAIT(
-        "use rocwmma::is_signed; legacy std traits default off in 4.0 and are removed in 5.0")
+        "use rocwmma::is_signed; legacy std traits are opt-in in 4.0 and are removed in 5.0")
         is_signed<hip_fp8_e4m3> : rocwmma::is_signed<hip_fp8_e4m3>
     {
     };
 
     template <>
     struct ROCWMMA_DETAIL_DEPRECATED_STD_TRAIT(
-        "use rocwmma::is_arithmetic; legacy std traits default off in 4.0 and are removed in 5.0")
+        "use rocwmma::is_arithmetic; legacy std traits are opt-in in 4.0 and are removed in 5.0")
         is_arithmetic<hip_fp8_e5m2> : rocwmma::is_arithmetic<hip_fp8_e5m2>
     {
     };
@@ -153,14 +153,14 @@ namespace std
 
     template <>
     struct ROCWMMA_DETAIL_DEPRECATED_STD_TRAIT(
-        "use rocwmma::is_signed; legacy std traits default off in 4.0 and are removed in 5.0")
+        "use rocwmma::is_signed; legacy std traits are opt-in in 4.0 and are removed in 5.0")
         is_signed<hip_fp8_e5m2> : rocwmma::is_signed<hip_fp8_e5m2>
     {
     };
 
     template <>
     struct ROCWMMA_DETAIL_DEPRECATED_STD_TRAIT(
-        "use rocwmma::is_arithmetic; legacy std traits default off in 4.0 and are removed in 5.0")
+        "use rocwmma::is_arithmetic; legacy std traits are opt-in in 4.0 and are removed in 5.0")
         is_arithmetic<hip_fp8_e4m3_fnuz> : rocwmma::is_arithmetic<hip_fp8_e4m3_fnuz>
     {
     };
@@ -174,14 +174,14 @@ namespace std
 
     template <>
     struct ROCWMMA_DETAIL_DEPRECATED_STD_TRAIT(
-        "use rocwmma::is_signed; legacy std traits default off in 4.0 and are removed in 5.0")
+        "use rocwmma::is_signed; legacy std traits are opt-in in 4.0 and are removed in 5.0")
         is_signed<hip_fp8_e4m3_fnuz> : rocwmma::is_signed<hip_fp8_e4m3_fnuz>
     {
     };
 
     template <>
     struct ROCWMMA_DETAIL_DEPRECATED_STD_TRAIT(
-        "use rocwmma::is_arithmetic; legacy std traits default off in 4.0 and are removed in 5.0")
+        "use rocwmma::is_arithmetic; legacy std traits are opt-in in 4.0 and are removed in 5.0")
         is_arithmetic<hip_fp8_e5m2_fnuz> : rocwmma::is_arithmetic<hip_fp8_e5m2_fnuz>
     {
     };
@@ -195,7 +195,7 @@ namespace std
 
     template <>
     struct ROCWMMA_DETAIL_DEPRECATED_STD_TRAIT(
-        "use rocwmma::is_signed; legacy std traits default off in 4.0 and are removed in 5.0")
+        "use rocwmma::is_signed; legacy std traits are opt-in in 4.0 and are removed in 5.0")
         is_signed<hip_fp8_e5m2_fnuz> : rocwmma::is_signed<hip_fp8_e5m2_fnuz>
     {
     };

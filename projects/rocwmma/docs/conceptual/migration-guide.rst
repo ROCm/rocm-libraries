@@ -70,12 +70,16 @@ release numbers are assigned during release preparation.
    * - 3.0.0
      - Legacy specializations on where supported; off on known restrictive STLs
      - Available, subject to compiler/STL restrictions
-   * - 4.0.0 (planned)
+   * - 4.0.0
      - Legacy specializations off
      - Available with deprecation diagnostics
    * - 5.0.0 (planned)
      - Owned traits only
      - Compilation error
+
+In 4.0.0, legacy specializations default off on every toolchain. Migrate all
+affected queries before upgrading, or explicitly request temporary legacy
+compatibility where the STL permits it.
 
 In 3.0.0, the automatic default considers both the STL and compiler annotation
 support: libc++ 20 or newer, or MSVC STL defining its type-trait prohibition
