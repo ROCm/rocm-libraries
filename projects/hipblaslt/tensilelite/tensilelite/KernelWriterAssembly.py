@@ -9754,9 +9754,11 @@ class KernelWriterAssembly(KernelWriter):
     """[A2ABlockLo, A2ABlockLo + A2ABlockCount) := this work-group's batch: whole token blocks
     whose work-groups add up to about FusedNumCu. Its size does not affect forward progress.
 
-    The batch splits into ceil(A2ABlockCount / GK) peer groups of GK or GK - 1 blocks, the larger
-    first, GK = ceil(A2ABlockCount / (W-1)). With G the group of this work-group's block and gLo
-    that group's first block, A2AShardIdx := G + 1 and A2AFlagRow := gLo * (W-1)."""
+    The batch splits into NG peer groups of GK or GK - 1 blocks, the larger first. With
+    A2APeerGroups 0, GK = ceil(A2ABlockCount / (W-1)) and NG = ceil(A2ABlockCount / GK);
+    otherwise NG = min(W-1, A2ABlockCount, A2APeerGroups) and GK = ceil(A2ABlockCount / NG).
+    With G the group of this work-group's block and gLo that group's first block,
+    A2AShardIdx := G + 1 and A2AFlagRow := gLo * (W-1)."""
     module = Module("a2aBatchSpan")
     layout = fusedA2AKernArgLayout()
     numCu  = self.sgprPool.checkOut(1, tag="a2aBatchSpan_numCu", preventOverflow=False)
@@ -9794,47 +9796,64 @@ class KernelWriterAssembly(KernelWriter):
 
     self.a2aBatchCount(module, iB, numCu, acc, bHi, "A2ABlockLo", vgprRes, ww)
 
-    module.add(SSubU32(dst=sgpr(bHi), src0=sgpr("A2AW"), src1=1, comment="W - 1"))
-    module.add(SMaxU32(dst=sgpr(bHi), src0=sgpr(bHi), src1=1,
-                       comment="peer queue count, at least 1"))
-    module.add(SAddU32(dst=sgpr(acc), src0=sgpr("A2ABlockCount"), src1=sgpr(bHi),
-                       comment="count + W-1"))
-    module.add(SSubU32(dst=sgpr(acc), src0=sgpr(acc), src1=1, comment="count + W-2"))
-    module.add(scalarUInt24DivideAndRemainder(qReg=acc, dReg=acc, divReg=bHi, rReg=-1,
-        tmpVgprRes=vgprRes, wavewidth=ww, doRemainder=False,
-        comment="GK = ceil(count / (W-1))"))
-    module.add(SAddU32(dst=sgpr(bHi), src0=sgpr("A2ABlockCount"), src1=sgpr(acc),
-                       comment="count + GK"))
-    module.add(SSubU32(dst=sgpr(bHi), src0=sgpr(bHi), src1=1, comment="count + GK - 1"))
-    module.add(scalarUInt24DivideAndRemainder(qReg=bHi, dReg=bHi, divReg=acc, rReg=-1,
-        tmpVgprRes=vgprRes, wavewidth=ww, doRemainder=False,
-        comment="NG = ceil(count / GK)"))
-    module.add(SMulI32(dst=sgpr("A2AShardCounter"), src0=sgpr(bHi), src1=sgpr(acc),
-                       comment="NG * GK"))
-    module.add(SSubU32(dst=sgpr("A2AShardCounter"), src0=sgpr("A2AShardCounter"),
-                       src1=sgpr("A2ABlockCount"), comment="s = NG * GK - count"))
-    module.add(SSubU32(dst=sgpr(bHi), src0=sgpr(bHi), src1=sgpr("A2AShardCounter"),
-                       comment="a = NG - s: the groups of GK blocks"))
-    module.add(SMulI32(dst=sgpr("A2AShardIdx"), src0=sgpr(bHi), src1=sgpr(acc),
-                       comment="t = a * GK"))
-    module.add(SSubU32(dst=sgpr("A2AShardCounter"), src0=sgpr("WorkGroup1"),
-                       src1=sgpr("A2ABlockLo"), comment="b - bLo"))
-    module.add(SCmpGeU32(src0=sgpr("A2AShardCounter"), src1=sgpr("A2AShardIdx"),
-                         comment="b - bLo >= t: in a group of GK - 1"))
-    module.add(SCSelectB32(dst=sgpr(bHi), src0=sgpr(bHi), src1=0, comment="base = a or 0"))
-    module.add(SSubBU32(dst=sgpr(acc), src0=sgpr(acc), src1=0, comment="d = GK or GK - 1"))
-    module.add(SSubU32(dst=sgpr("A2AShardCounter"), src0=sgpr("A2AShardCounter"),
-                       src1=sgpr(bHi), comment="b - bLo - base"))
-    module.add(scalarUInt24DivideAndRemainder(qReg="A2AShardIdx", dReg="A2AShardCounter",
-        divReg=acc, rReg=-1, tmpVgprRes=vgprRes, wavewidth=ww, doRemainder=False,
-        comment="G = (b - bLo - base) / d"))
-    module.add(SMulI32(dst=sgpr(acc), src0=sgpr("A2AShardIdx"), src1=sgpr(acc), comment="G * d"))
-    module.add(SAddU32(dst=sgpr(acc), src0=sgpr(acc), src1=sgpr(bHi), comment="G * d + base"))
+    peerGroups = kernel["A2APeerGroups"]
     # A2AShardCounter holds gLo until the flag row is set.
-    module.add(SAddU32(dst=sgpr("A2AShardCounter"), src0=sgpr(acc), src1=sgpr("A2ABlockLo"),
-                       comment="gLo = bLo + G * d + base"))
-    module.add(SAddU32(dst=sgpr("A2AShardIdx"), src0=sgpr("A2AShardIdx"), src1=1,
-                       comment="first gathered segment = G + 1"))
+    if peerGroups == 1:
+      module.add(SMovB32(dst=sgpr("A2AShardCounter"), src=sgpr("A2ABlockLo"), comment="gLo = bLo"))
+      module.add(SMovB32(dst=sgpr("A2AShardIdx"), src=1, comment="first gathered segment = G + 1"))
+    else:
+      module.add(SSubU32(dst=sgpr(bHi), src0=sgpr("A2AW"), src1=1, comment="W - 1"))
+      module.add(SMaxU32(dst=sgpr(bHi), src0=sgpr(bHi), src1=1,
+                         comment="peer queue count, at least 1"))
+      if peerGroups == 0:
+        module.add(SAddU32(dst=sgpr(acc), src0=sgpr("A2ABlockCount"), src1=sgpr(bHi),
+                           comment="count + W-1"))
+        module.add(SSubU32(dst=sgpr(acc), src0=sgpr(acc), src1=1, comment="count + W-2"))
+        module.add(scalarUInt24DivideAndRemainder(qReg=acc, dReg=acc, divReg=bHi, rReg=-1,
+            tmpVgprRes=vgprRes, wavewidth=ww, doRemainder=False,
+            comment="GK = ceil(count / (W-1))"))
+        module.add(SAddU32(dst=sgpr(bHi), src0=sgpr("A2ABlockCount"), src1=sgpr(acc),
+                           comment="count + GK"))
+        module.add(SSubU32(dst=sgpr(bHi), src0=sgpr(bHi), src1=1, comment="count + GK - 1"))
+        module.add(scalarUInt24DivideAndRemainder(qReg=bHi, dReg=bHi, divReg=acc, rReg=-1,
+            tmpVgprRes=vgprRes, wavewidth=ww, doRemainder=False,
+            comment="NG = ceil(count / GK)"))
+      else:
+        module.add(SMinU32(dst=sgpr(bHi), src0=sgpr(bHi), src1=sgpr("A2ABlockCount"),
+                           comment="min(W-1, count)"))
+        module.add(SMinU32(dst=sgpr(bHi), src0=sgpr(bHi), src1=peerGroups,
+                           comment="NG = min(W-1, count, A2APeerGroups)"))
+        module.add(SAddU32(dst=sgpr(acc), src0=sgpr("A2ABlockCount"), src1=sgpr(bHi),
+                           comment="count + NG"))
+        module.add(SSubU32(dst=sgpr(acc), src0=sgpr(acc), src1=1, comment="count + NG - 1"))
+        module.add(scalarUInt24DivideAndRemainder(qReg=acc, dReg=acc, divReg=bHi, rReg=-1,
+            tmpVgprRes=vgprRes, wavewidth=ww, doRemainder=False,
+            comment="GK = ceil(count / NG)"))
+      module.add(SMulI32(dst=sgpr("A2AShardCounter"), src0=sgpr(bHi), src1=sgpr(acc),
+                         comment="NG * GK"))
+      module.add(SSubU32(dst=sgpr("A2AShardCounter"), src0=sgpr("A2AShardCounter"),
+                         src1=sgpr("A2ABlockCount"), comment="s = NG * GK - count"))
+      module.add(SSubU32(dst=sgpr(bHi), src0=sgpr(bHi), src1=sgpr("A2AShardCounter"),
+                         comment="a = NG - s: the groups of GK blocks"))
+      module.add(SMulI32(dst=sgpr("A2AShardIdx"), src0=sgpr(bHi), src1=sgpr(acc),
+                         comment="t = a * GK"))
+      module.add(SSubU32(dst=sgpr("A2AShardCounter"), src0=sgpr("WorkGroup1"),
+                         src1=sgpr("A2ABlockLo"), comment="b - bLo"))
+      module.add(SCmpGeU32(src0=sgpr("A2AShardCounter"), src1=sgpr("A2AShardIdx"),
+                           comment="b - bLo >= t: in a group of GK - 1"))
+      module.add(SCSelectB32(dst=sgpr(bHi), src0=sgpr(bHi), src1=0, comment="base = a or 0"))
+      module.add(SSubBU32(dst=sgpr(acc), src0=sgpr(acc), src1=0, comment="d = GK or GK - 1"))
+      module.add(SSubU32(dst=sgpr("A2AShardCounter"), src0=sgpr("A2AShardCounter"),
+                         src1=sgpr(bHi), comment="b - bLo - base"))
+      module.add(scalarUInt24DivideAndRemainder(qReg="A2AShardIdx", dReg="A2AShardCounter",
+          divReg=acc, rReg=-1, tmpVgprRes=vgprRes, wavewidth=ww, doRemainder=False,
+          comment="G = (b - bLo - base) / d"))
+      module.add(SMulI32(dst=sgpr(acc), src0=sgpr("A2AShardIdx"), src1=sgpr(acc), comment="G * d"))
+      module.add(SAddU32(dst=sgpr(acc), src0=sgpr(acc), src1=sgpr(bHi), comment="G * d + base"))
+      module.add(SAddU32(dst=sgpr("A2AShardCounter"), src0=sgpr(acc), src1=sgpr("A2ABlockLo"),
+                         comment="gLo = bLo + G * d + base"))
+      module.add(SAddU32(dst=sgpr("A2AShardIdx"), src0=sgpr("A2AShardIdx"), src1=1,
+                         comment="first gathered segment = G + 1"))
 
     self.vgprPool.checkIn(tmpVgpr)
     self.sgprPool.checkIn(bHi)
@@ -10102,28 +10121,48 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SCSelectB32(dst=sgpr(srank), src0=sgpr(peerGrp), src1=sgpr(srank),
                            comment="wrap s once at W"))
 
+    peerGroups = kernel["A2APeerGroups"]
     tmpVgpr = self.vgprPool.checkOutAligned(4, 2, tag="a2aEnq_groupSeed")
     with self.allocTmpSgpr(2, tag="a2aEnq_groupSeedSgpr") as tmpSgprInfo:
       wm1 = tmpSgprInfo.idx
       gk  = tmpSgprInfo.idx + 1
-      module.add(SSubU32(dst=sgpr(wm1), src0=sgpr("A2AW"), src1=1, comment="W - 1"))
-      module.add(SAddU32(dst=sgpr(gk), src0=sgpr("A2ABlockCount"), src1=sgpr(wm1),
-                         comment="count + W-1"))
-      module.add(SSubU32(dst=sgpr(gk), src0=sgpr(gk), src1=1, comment="count + W-2"))
-      module.add(scalarUInt24DivideAndRemainder(
-          qReg=gk, dReg=gk, divReg=wm1, rReg=-1,
-          tmpVgprRes=ContinuousRegister(idx=tmpVgpr, size=4),
-          wavewidth=kernel["WavefrontSize"], doRemainder=False,
-          comment="GK = ceil(count / (W-1))"))
-      module.add(VMovB32(dst=vgpr(vGK), src=sgpr(gk), comment="GK -> packet state"))
-      module.add(SAddU32(dst=sgpr(wm1), src0=sgpr("A2ABlockCount"), src1=sgpr(gk),
-                         comment="count + GK"))
-      module.add(SSubU32(dst=sgpr(wm1), src0=sgpr(wm1), src1=1, comment="count + GK - 1"))
-      module.add(scalarUInt24DivideAndRemainder(
-          qReg=size, dReg=wm1, divReg=gk, rReg=-1,
-          tmpVgprRes=ContinuousRegister(idx=tmpVgpr, size=4),
-          wavewidth=kernel["WavefrontSize"], doRemainder=False,
-          comment="non-empty groups = ceil(count / GK)"))
+      if peerGroups == 0:
+        module.add(SSubU32(dst=sgpr(wm1), src0=sgpr("A2AW"), src1=1, comment="W - 1"))
+        module.add(SAddU32(dst=sgpr(gk), src0=sgpr("A2ABlockCount"), src1=sgpr(wm1),
+                           comment="count + W-1"))
+        module.add(SSubU32(dst=sgpr(gk), src0=sgpr(gk), src1=1, comment="count + W-2"))
+        module.add(scalarUInt24DivideAndRemainder(
+            qReg=gk, dReg=gk, divReg=wm1, rReg=-1,
+            tmpVgprRes=ContinuousRegister(idx=tmpVgpr, size=4),
+            wavewidth=kernel["WavefrontSize"], doRemainder=False,
+            comment="GK = ceil(count / (W-1))"))
+        module.add(VMovB32(dst=vgpr(vGK), src=sgpr(gk), comment="GK -> packet state"))
+        module.add(SAddU32(dst=sgpr(wm1), src0=sgpr("A2ABlockCount"), src1=sgpr(gk),
+                           comment="count + GK"))
+        module.add(SSubU32(dst=sgpr(wm1), src0=sgpr(wm1), src1=1, comment="count + GK - 1"))
+        module.add(scalarUInt24DivideAndRemainder(
+            qReg=size, dReg=wm1, divReg=gk, rReg=-1,
+            tmpVgprRes=ContinuousRegister(idx=tmpVgpr, size=4),
+            wavewidth=kernel["WavefrontSize"], doRemainder=False,
+            comment="non-empty groups = ceil(count / GK)"))
+      elif peerGroups == 1:
+        module.add(VMovB32(dst=vgpr(vGK), src=sgpr("A2ABlockCount"), comment="GK -> packet state"))
+        module.add(SMovB32(dst=sgpr(size), src=1, comment="NG = 1"))
+      else:
+        module.add(SSubU32(dst=sgpr(wm1), src0=sgpr("A2AW"), src1=1, comment="W - 1"))
+        module.add(SMinU32(dst=sgpr(size), src0=sgpr(wm1), src1=sgpr("A2ABlockCount"),
+                           comment="min(W-1, count)"))
+        module.add(SMinU32(dst=sgpr(size), src0=sgpr(size), src1=peerGroups,
+                           comment="NG = min(W-1, count, A2APeerGroups)"))
+        module.add(SAddU32(dst=sgpr(gk), src0=sgpr("A2ABlockCount"), src1=sgpr(size),
+                           comment="count + NG"))
+        module.add(SSubU32(dst=sgpr(gk), src0=sgpr(gk), src1=1, comment="count + NG - 1"))
+        module.add(scalarUInt24DivideAndRemainder(
+            qReg=gk, dReg=gk, divReg=size, rReg=-1,
+            tmpVgprRes=ContinuousRegister(idx=tmpVgpr, size=4),
+            wavewidth=kernel["WavefrontSize"], doRemainder=False,
+            comment="GK = ceil(count / NG)"))
+        module.add(VMovB32(dst=vgpr(vGK), src=sgpr(gk), comment="GK -> packet state"))
       module.add(VWritelaneB32(dst=vgpr(vGK), src0=sgpr(size), src1=1, comment="NG -> lane 1"))
     self.vgprPool.checkIn(tmpVgpr)
 
@@ -10138,7 +10177,7 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SMulI32(dst=sgpr(pad), src0=sgpr("A2ABlockCount"), src1=COPY_PACKET_DWORDS * 4,
                        comment="one COPY per block"))
     module.add(SAddU32(dst=sgpr(size), src0=sgpr(size), src1=sgpr(pad),
-                       comment="reservation = count COPYs + ceil(count / GK) ATOMICs"))
+                       comment="reservation = count COPYs + NG ATOMICs"))
     if subRounds > 1:
       module.add(SLShiftLeftB32(dst=sgpr(size), shiftHex=log2(subRounds), src=sgpr(size),
                                 comment="one pass per sub-round"))

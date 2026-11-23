@@ -19,6 +19,7 @@ in the A2A registers. The enqueuer's group seed and group loop head, run on a gr
 of batches, visit each queue's peer groups in order.
 """
 
+import functools
 import itertools
 import math
 import os
@@ -49,7 +50,8 @@ _EPS = re.compile(r"\.amdhsa_kernel \S*_EPS(\d+)_")
 _ULSGRO = re.compile(r"\.amdhsa_kernel \S*_ULSGRO(\d+)_")
 _USI = re.compile(r"\.amdhsa_kernel \S*_USI(\d+)_")
 _DEPTHU = re.compile(r"\.amdhsa_kernel \S*_MT\d+x\d+x(\d+)_")
-_GROUPS = [0, 1, 2, 3, 4, 5, 6]
+_PEER_GROUPS = re.compile(r"\.amdhsa_kernel \S*_AAPG(\d+)_")
+_GROUPS = [0, 1, 2, 3, 4, 5, 6, 7]
 _LIMIT = 24
 
 _A2A_GEMM_MARKERS = (
@@ -181,12 +183,31 @@ def _run(insts, regs):
     return regs
 
 
-def _group_sizes(n, W):
-    """Block counts of the peer groups of a batch of n blocks, in order."""
-    gk = -(-n // max(W - 1, 1))
-    ng = -(-n // gk)
+def _group_sizes(n, W, cap=0):
+    """Block counts of the peer groups of a batch of n blocks, in order; cap is A2APeerGroups."""
+    if cap:
+        ng = min(max(W - 1, 1), n, cap)
+        gk = -(-n // ng)
+    else:
+        gk = -(-n // max(W - 1, 1))
+        ng = -(-n // gk)
     s = ng * gk - n
     return [gk] * (ng - s) + [gk - 1] * s
+
+
+@functools.cache
+def _peer_group_kernels():
+    """(A2APeerGroups, basename, source) of one A2ASubRounds 1 kernel per A2APeerGroups value."""
+    [(base, src, _err)] = emit_kernels_from_config(_CONFIG, limit=1, arch=_ARCH,
+                                                   size_group_index=_GROUPS[-2])
+    kernels = [(0, base, src)]
+    for base, src, _err in emit_kernels_from_config(_CONFIG, limit=_LIMIT, arch=_ARCH,
+                                                    size_group_index=_GROUPS[-1]):
+        if _SUB_ROUNDS.search(src).group(1) == "1":
+            kernels.append((int(_PEER_GROUPS.search(src).group(1)), base, src))
+    kernels.sort(key=lambda kernel: kernel[0])
+    assert [k for k, _b, _s in kernels] == [0, 1, 2, 7], [b for _k, b, _s in kernels]
+    return kernels
 
 
 def _group_of(i, sizes):
@@ -275,61 +296,60 @@ def test_a2a_gemm_gfx950_emits_assembly(group):
 
 
 def test_a2a_gemm_gfx950_batch_span():
-    [(base, src, _err)] = emit_kernels_from_config(_CONFIG, limit=1, arch=_ARCH,
-                                                   size_group_index=_GROUPS[-1])
-    numCuReg, insts = _batch_span(src)
     assert _group_sizes(16, 8) == [3, 3, 3, 3, 2, 2] and _group_sizes(22, 4) == [8, 7, 7]
     assert _group_sizes(8, 8) == [2, 2, 2, 2] and _group_sizes(8, 4) == [3, 3, 2]
+    assert _group_sizes(16, 8, 7) == [3, 3, 2, 2, 2, 2, 2] and _group_sizes(8, 8, 7) == [2, 1, 1, 1, 1, 1, 1]
+    assert _group_sizes(16, 8, 1) == [16] and _group_sizes(5, 8, 2) == [3, 2]
     shapes = list(itertools.product((32, 256), range(2, 9), (2, 11, 12, 32, 44), (2, 7, 8, 44)))
     # F = 1, numCu = n: batches of exactly n blocks, then a short last batch.
     shapes += [(n, W, 1, 2 * n + max(n // 3, 1)) for W in range(1, 9) for n in range(1, 41)]
-    for numCu, W, F, T in shapes:
-        for b in range(T):
-            regs = _run(insts, {numCuReg: numCu, "s[sgprA2AW]": W,
-                                "s[sgprWorkGroup1]": b, "s[sgprNumWorkGroups0]": F,
-                                "s[sgprNumWorkGroups1]": T})
-            iB = b * F // numCu
-            bLo = -(-iB * numCu // F)
-            bHi = min(-(-(iB + 1) * numCu // F), T)
-            g, gLo = _group_of(b - bLo, _group_sizes(bHi - bLo, W))
-            got = [regs[f"s[sgpr{r}]"] for r in ("A2ABlockLo", "A2ABlockCount", "A2AShardIdx",
-                                                 "A2AShardCounter")]
-            assert got == [bLo, bHi - bLo, g + 1, bLo + gLo], \
-                f"Kernel {base!r}: numCu={numCu} W={W} F={F} T={T} b={b} -> {got}"
+    for cap, base, src in _peer_group_kernels():
+        numCuReg, insts = _batch_span(src)
+        for numCu, W, F, T in shapes:
+            for b in range(T):
+                regs = _run(insts, {numCuReg: numCu, "s[sgprA2AW]": W,
+                                    "s[sgprWorkGroup1]": b, "s[sgprNumWorkGroups0]": F,
+                                    "s[sgprNumWorkGroups1]": T})
+                iB = b * F // numCu
+                bLo = -(-iB * numCu // F)
+                bHi = min(-(-(iB + 1) * numCu // F), T)
+                g, gLo = _group_of(b - bLo, _group_sizes(bHi - bLo, W, cap))
+                got = [regs[f"s[sgpr{r}]"] for r in ("A2ABlockLo", "A2ABlockCount", "A2AShardIdx",
+                                                     "A2AShardCounter")]
+                assert got == [bLo, bHi - bLo, g + 1, bLo + gLo], \
+                    f"Kernel {base!r}: numCu={numCu} W={W} F={F} T={T} b={b} -> {got}"
 
 
 def test_a2a_gemm_gfx950_group_walk():
-    [(base, src, _err)] = emit_kernels_from_config(_CONFIG, limit=1, arch=_ARCH,
-                                                   size_group_index=_GROUPS[-1])
-    [seed] = re.finditer(r"^[^\n]*// W - 1 *\n[^\n]*// count \+ W-1 *$(?:(?!// count \+ W-1).)*?// NG -> lane 1 *$",
-                         src, re.M | re.S)
-    [walk] = re.finditer(r"^[^\n]*// blocks left on this queue *$.*?// first block of this group *$",
-                         src, re.M | re.S)
-    pre, _, head = walk.group(0).partition("\nlabel_a2a_group_loop")
-    head = head.partition("\n")[2]
-    vGK = int(re.search(r"^v_mov_b32 v(\d+), s\d+ +// GK -> packet state$", seed.group(0), re.M).group(1))
-    for lo, hi in re.findall(r"^v_\w+ v\[?(\d+)(?::(\d+)\])?,", src[seed.end():walk.start()], re.M):
-        assert not int(lo) <= vGK <= int(hi or lo), f"Kernel {base!r}: v{vGK} written before the group loop"
-    qReg = re.search(r"^s_add_u32 \S+, (s\d+), 1 +// i \+ 1$", pre, re.M).group(1)
-    loReg = re.search(r"^s_add_u32 (\S+), \1, (s\d+) +// first block of group g$", pre, re.M).group(2)
-    rowReg, nBlkReg = re.search(r"^s_sub_u32 (\S+), \1, (\S+) +// first block of this group$",
-                                head, re.M).groups()
-    setup, head = _insts(seed.group(0)) + _insts(pre), _insts(head)
-    bLo = 1000
-    for W in range(2, 9):
-        for n in range(1, 71):
-            sizes = _group_sizes(n, W)
-            starts = [sum(sizes[:g]) for g in range(len(sizes))]
-            for i in range(W - 1):
-                regs = _run(setup, {"s[sgprA2AW]": W, "s[sgprA2ABlockCount]": n, qReg: i, loReg: bLo})
-                got, left = [], n
-                while left > 0 and len(got) <= len(sizes):
-                    regs = _run(head, regs)
-                    got.append((regs[rowReg] - bLo, regs[nBlkReg]))
-                    left -= regs[nBlkReg]
-                order = [g for g in itertools.chain(range(i, -1, -1), range(W - 2, i, -1)) if g < len(sizes)]
-                assert got == [(starts[g], sizes[g]) for g in order], \
-                    f"Kernel {base!r}: W={W} n={n} queue {i} places (first, count) {got}"
+    for cap, base, src in _peer_group_kernels():
+        [seed] = re.finditer(r"// wrap s once at W *\n(.*?// NG -> lane 1 *)$", src, re.M | re.S)
+        [walk] = re.finditer(r"^[^\n]*// blocks left on this queue *$.*?// first block of this group *$",
+                             src, re.M | re.S)
+        pre, _, head = walk.group(0).partition("\nlabel_a2a_group_loop")
+        head = head.partition("\n")[2]
+        vGK = int(re.search(r"^v_mov_b32 v(\d+), \S+ +// GK -> packet state$", seed.group(1), re.M).group(1))
+        for lo, hi in re.findall(r"^v_\w+ v\[?(\d+)(?::(\d+)\])?,", src[seed.end():walk.start()], re.M):
+            assert not int(lo) <= vGK <= int(hi or lo), f"Kernel {base!r}: v{vGK} written before the group loop"
+        qReg = re.search(r"^s_add_u32 \S+, (s\d+), 1 +// i \+ 1$", pre, re.M).group(1)
+        loReg = re.search(r"^s_add_u32 (\S+), \1, (s\d+) +// first block of group g$", pre, re.M).group(2)
+        rowReg, nBlkReg = re.search(r"^s_sub_u32 (\S+), \1, (\S+) +// first block of this group$",
+                                    head, re.M).groups()
+        setup, head = _insts(seed.group(1)) + _insts(pre), _insts(head)
+        bLo = 1000
+        for W in range(2, 9):
+            for n in range(1, 71):
+                sizes = _group_sizes(n, W, cap)
+                starts = [sum(sizes[:g]) for g in range(len(sizes))]
+                for i in range(W - 1):
+                    regs = _run(setup, {"s[sgprA2AW]": W, "s[sgprA2ABlockCount]": n, qReg: i, loReg: bLo})
+                    got, left = [], n
+                    while left > 0 and len(got) <= len(sizes):
+                        regs = _run(head, regs)
+                        got.append((regs[rowReg] - bLo, regs[nBlkReg]))
+                        left -= regs[nBlkReg]
+                    order = [g for g in itertools.chain(range(i, -1, -1), range(W - 2, i, -1)) if g < len(sizes)]
+                    assert got == [(starts[g], sizes[g]) for g in order], \
+                        f"Kernel {base!r}: W={W} n={n} queue {i} places (first, count) {got}"
 
 
 @pytest.mark.parametrize("group", _GROUPS)

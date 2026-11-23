@@ -276,6 +276,40 @@ BenchmarkProblems:
           # One batch of 128 blocks, 2 groups of 64: two passes per group.
           - Exact: {sizes: [512, 32768, 1, 768], world: 3}
 
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]   # MT 256x256
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ExpandPointerSwap: [False]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - WorkGroupMapping: [1]
+        - A2ASubRounds: [1, 2]
+        - A2APeerGroups: [1, 2, 7]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: {sizes: [3072, 2048, 1, 4096], world: 2}
+          # Batches of 22, 21 and 1 token blocks.
+          - Exact: {sizes: [3072, 11264, 1, 2048], world: 4}
+          - Exact: {sizes: [3072, 11264, 1, 4096], world: 8}
+          # One batch of 8 blocks; 7 groups: 2/1/1/1/1/1/1.
+          - Exact: {sizes: [8192, 2048, 1, 8192], world: 8}
+          # Two batches of 16 blocks; 7 groups: 3/3/2/2/2/2/2.
+          - Exact: {sizes: [4096, 8192, 1, 4096], world: 8}
+          - Exact: {sizes: [2816, 1792, 1, 2560], world: 5}
+          # Fewer token blocks than peer queues.
+          - Exact: {sizes: [3072, 300, 1, 4096], world: 8}
+          # One batch of 128 blocks; 1 group: three passes.
+          - Exact: {sizes: [512, 32768, 1, 768], world: 3}
+
 LibraryLogic:
   ScheduleName: "a2a_gemm_loop_gfx950"
   DeviceNames: ["Device 75a0"]

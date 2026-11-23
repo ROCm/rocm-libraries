@@ -1359,6 +1359,7 @@
 # name: test_valid_parameters_key_roster
   list([
     '1LDSBuffer',
+    'A2APeerGroups',
     'A2ASubRounds',
     'ActivationAlt',
     'ActivationFuncCall',
@@ -1572,6 +1573,15 @@
         1,
       ]),
       'len': 3,
+      'type': 'list',
+    }),
+    'A2APeerGroups': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
       'type': 'list',
     }),
     'A2ASubRounds': dict({
