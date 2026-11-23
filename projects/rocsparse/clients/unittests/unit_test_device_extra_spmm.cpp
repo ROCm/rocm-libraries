@@ -804,15 +804,19 @@ TEST_F(ExtraSpmm, bsr_index_base_one)
 // only the last partial of a run of blocks that end in the same row. A row of
 // 1026 * 1024 + 10 non-zeros fills blocks 0 to 1025, so the run covers every
 // thread of the first 1024-block pass of that reduction and spills into the
-// second. Adding every partial of the run instead of the last one is only
-// visible when the last non-atomic store to the C entry does not come from the
-// wavefront holding the complete prefix: within a wavefront the stores
-// collapse to the highest lane, and across wavefronts the last store wins.
-// Which wavefront that is depends on the hardware; on gfx1201 (wave32) it is
-// reproducibly not the top one, so the mutant is killed there. On wave64
-// parts this has not been verified and the mutant may compute the correct
-// value. The run spans all 32 (16 on wave64) wavefronts of the first
-// block-reduce pass so that as many wavefronts as possible compete.
+// second. A reduction that adds every partial of the run instead of only the
+// last one has several threads store to the same C entry without atomics, and
+// the result is wrong only when the store that lands last comes from a
+// wavefront without the complete prefix. Which store lands last is not defined
+// by the memory model or the ISA. On the GPUs tried so far (gfx1201, wave32),
+// stores from one wavefront to the same address resolve to the highest lane,
+// across wavefronts the last store wins, and that wavefront is reproducibly not
+// the one with the complete prefix, so the defect shows there. On other parts
+// (wave64 in particular) it may give the right value, or show up within a
+// single wavefront. The correct result itself is deterministic: only the last
+// thread of each run writes, and the two passes are separated by a barrier.
+// The run spans all 32 (16 on wave64) wavefronts of the first block-reduce
+// pass so that as many wavefronts as possible compete.
 // ---------------------------------------------------------------------------
 TEST_F(ExtraSpmm, coo_segmented_row_spanning_whole_blocks)
 {
