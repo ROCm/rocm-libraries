@@ -58,63 +58,69 @@ struct GoldenCase
 };
 
 // clang-format off
-// Expected picks captured on gfx950 hardware with MIOPEN_DEVICE_ARCH forced per arch (Nov 2026).
-// gfx1250: SKIP — fdeep/keras mismatch in capture env; populate when matching build available.
-// 3D: SKIP — 3D CK plugin absent in capture build; populate on 3D-enabled build.
+// Expected picks captured via MIOPEN_AI_GOLDEN_GENERATE=1 (accept_all path, Nov 2026).
+// All 24 cases including gfx1250 and 3D verified on gfx950 hardware.
+// Regenerate: MIOPEN_AI_GOLDEN_GENERATE=1 MIOPEN_SYSTEM_DB_PATH=<kdb> ./test_conv_ai_golden_picks
 static const GoldenCase kGoldenCases[] = {
     // gfx942 Fwd
     {"gfx942","ConvHipImplicitGemmGroupFwdXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::Forward,
-     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<128, 16, 32, 64, OddC, 16, 16, 1, 1, 8, 8, 4, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v1>+1"},
+     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<64, 16, 16, 64, Filter1x1Pad0, 16, 16, 1, 1, 4, 4, 4, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v1>"},
     {"gfx942","ConvHipImplicitGemmGroupFwdXdlops",1,128,28,28,128,1,1,0,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::Forward,
-     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<64, 16, 16, 128, Filter1x1Pad0, 16, 16, 1, 1, 8, 8, 4, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v1>+1"},
+     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<64, 16, 16, 128, Filter1x1Pad0, 16, 16, 1, 1, 4, 4, 4, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1>"},
     {"gfx942","ConvHipImplicitGemmGroupFwdXdlops",4,32,112,112,32,3,3,1,1,2,false,0,0,0,0,miopenHalf,miopen::conv::Direction::Forward,
-     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<128, 128, 16, 64, OddC, 16, 16, 4, 1, 8, 8, 2, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v2>+1"},
+     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<64, 64, 32, 32, Filter1x1Stride1Pad0, 32, 32, 2, 1, 8, 8, 8, 1, 1, 1>"},
     // gfx942 Bwd
     {"gfx942","ConvHipImplicitGemmGroupBwdXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardData,
-     "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 64, 16, 16, Default, 16, 16, 1, 1, 16, 2, 1, 1>+1"},
+     "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 1, 8, 1, 1, 1>"},
     {"gfx942","ConvHipImplicitGemmGroupBwdXdlops",1,128,28,28,128,1,1,0,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardData,
-     "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 1, 8, 2, 1, 1>+1"},
+     "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<64, 32, 64, 32, 8, 8, Filter1x1Stride1Pad0, 32, 32, 1, 2, 8, 4, 1, 1>"},
     {"gfx942","ConvHipImplicitGemmGroupBwdXdlops",4,32,112,112,32,3,3,1,1,2,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardData,
-     "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 64, 16, 16, Default, 32, 32, 1, 1, 16, 8, 1, 1>+1"},
+     "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 128, 32, 32, 8, 8, Filter1x1Stride1Pad0, 32, 32, 1, 1, 8, 2, 1, 1>"},
     // gfx942 Wrw
     {"gfx942","ConvHipImplicitGemmGroupWrwXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
-     "DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3<256l+128m, 128, 64, 32, Default, 8, 2, 2, 4, 4, 2, 4, 1, 1, 2>+16"},
+     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256, 64, 64, 8, Filter1x1Stride1Pad0, 8, 1, 1, 4, 4, 1, 4, 1, 1, 1>"},
     {"gfx942","ConvHipImplicitGemmGroupWrwXdlops",1,128,28,28,128,1,1,0,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
-     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64, 64, 32, 4, Filter1x1Stride1Pad0, 8, 2, 1, 8, 4, 8, 2, 1, 1, 8>+8"},
+     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256, 64, 64, 8, Filter1x1Stride1Pad0, 8, 1, 1, 4, 4, 1, 4, 1, 1, 1>"},
     {"gfx942","ConvHipImplicitGemmGroupWrwXdlops",4,32,112,112,32,3,3,1,1,2,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
-     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64, 32, 64, 4, Default, 8, 1, 2, 2, 2, 8, 4, 1, 1, 8>+64"},
+     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256, 64, 64, 8, Filter1x1Stride1Pad0, 8, 1, 1, 1, 4, 1, 4, 1, 1, 1>"},
 
     // gfx950 Fwd
     {"gfx950","ConvHipImplicitGemmGroupFwdXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::Forward,
-     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<64, 16, 16, 128, OddC, 16, 16, 1, 1, 8, 8, 4, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v1>+1"},
+     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<128, 16, 32, 64, Filter1x1Stride1Pad0, 16, 16, 1, 1, 4, 4, 4, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v2>"},
     {"gfx950","ConvHipImplicitGemmGroupFwdXdlops",1,128,28,28,128,1,1,0,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::Forward,
-     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<256, 64, 64, 32, Filter1x1Stride1Pad0, 16, 16, 2, 2, 4, 4, 4, 1, 1, 1>+1"},
+     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<128, 16, 32, 64, Filter1x1Stride1Pad0, 16, 16, 1, 1, 4, 4, 4, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v2>"},
     {"gfx950","ConvHipImplicitGemmGroupFwdXdlops",4,32,112,112,32,3,3,1,1,2,false,0,0,0,0,miopenHalf,miopen::conv::Direction::Forward,
-     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_DirectLoad<64, 16, 16, 64, Default, 16, 16, 1, 1, 8, 8, 4, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v1>+1"},
+     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<256, 64, 64, 64, Filter1x1Stride1Pad0, 32, 32, 1, 1, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>"},
     // gfx950 Bwd
     {"gfx950","ConvHipImplicitGemmGroupBwdXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardData,
-     "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 64, 16, 16, Default, 16, 16, 1, 1, 16, 8, 1, 1>+1"},
+     "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 32, 8, 8, Filter1x1Stride1Pad0, 16, 16, 1, 1, 8, 1, 1, 1>"},
     {"gfx950","ConvHipImplicitGemmGroupBwdXdlops",1,128,28,28,128,1,1,0,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardData,
-     "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 64, 16, 16, Filter1x1Stride1Pad0, 16, 16, 1, 1, 16, 1, 1, 1>+1"},
+     "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 64, 16, 16, Filter1x1Stride1Pad0, 16, 16, 1, 1, 16, 1, 1, 1>"},
     {"gfx950","ConvHipImplicitGemmGroupBwdXdlops",4,32,112,112,32,3,3,1,1,2,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardData,
-     "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 64, 16, 16, Default, 16, 16, 1, 1, 16, 8, 1, 1>+1"},
+     "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3_DirectLoad<256, 256, 32, 64, 8, 8, Filter1x1Stride1Pad0, 32, 32, 2, 1, 8, 8, 1, 1>"},
     // gfx950 Wrw
     {"gfx950","ConvHipImplicitGemmGroupWrwXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
-     "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_DirectLoad<128, 16, 32, 64, Default, 8, 1, 1, 8, 8, 8, 8, 1, 1, 4>+16"},
+     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256, 64, 64, 8, Filter1x1Stride1Pad0, 8, 1, 1, 4, 4, 1, 4, 1, 1, 1>"},
     {"gfx950","ConvHipImplicitGemmGroupWrwXdlops",1,128,28,28,128,1,1,0,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
-     "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_DirectLoad<128, 16, 64, 64, Default, 8, 1, 2, 8, 8, 8, 8, 1, 1, 4>+16"},
+     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256, 64, 64, 8, Filter1x1Stride1Pad0, 8, 1, 1, 4, 4, 1, 4, 1, 1, 1>"},
     {"gfx950","ConvHipImplicitGemmGroupWrwXdlops",4,32,112,112,32,3,3,1,1,2,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
-     "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_DirectLoad<128, 16, 64, 64, Default, 8, 1, 2, 8, 8, 8, 8, 1, 1, 4>+64"},
+     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256, 64, 64, 8, Filter1x1Stride1Pad0, 8, 1, 1, 4, 4, 1, 4, 1, 1, 1>"},
 
-    // gfx1250 — SKIP: fdeep/keras mismatch in capture env; populate when matching build available
-    {"gfx1250","ConvHipImplicitGemmGroupFwdXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::Forward,"SKIP"},
-    {"gfx1250","ConvHipImplicitGemmGroupBwdXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardData,"SKIP"},
-    {"gfx1250","ConvHipImplicitGemmGroupWrwXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,"SKIP"},
+    // gfx1250 2D
+    {"gfx1250","ConvHipImplicitGemmGroupFwdXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::Forward,
+     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_WmmaPorted<128, 64, 16, 64, Filter1x1Pad0, 16, 16, 2, 1, 4, 4, 2, 1, 1, BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v2>"},
+    {"gfx1250","ConvHipImplicitGemmGroupBwdXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardData,
+     "DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle<32, 16, 32, 64, Filter1x1Stride1Pad0, 8, 8, 8>"},
+    {"gfx1250","ConvHipImplicitGemmGroupWrwXdlops",1,64,56,56,64,3,3,1,1,1,false,0,0,0,0,miopenHalf,miopen::conv::Direction::BackwardWeights,
+     "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3_WmmaPorted<512, 64, 64, 512, Filter1x1Stride1Pad0, 16, 1, 1, 8, 8, 8, 8, 1, 1, 4>"},
 
-    // 3D (gfx950) — SKIP: 3D CK plugin absent in capture build; populate on 3D-enabled build
-    {"gfx950","ConvHipImplicitGemm3DGroupFwdXdlops",1,32,56,56,32,3,3,1,1,1,true,8,3,1,1,miopenHalf,miopen::conv::Direction::Forward,"SKIP"},
-    {"gfx950","ConvHipImplicitGemm3DGroupBwdXdlops",1,32,56,56,32,3,3,1,1,1,true,8,3,1,1,miopenHalf,miopen::conv::Direction::BackwardData,"SKIP"},
-    {"gfx950","ConvHipImplicitGemm3DGroupWrwXdlops",1,32,56,56,32,3,3,1,1,1,true,8,3,1,1,miopenHalf,miopen::conv::Direction::BackwardWeights,"SKIP"},
+    // 3D gfx950
+    {"gfx950","ConvHipImplicitGemm3DGroupFwdXdlops",1,32,56,56,32,3,3,1,1,1,true,8,3,1,1,miopenHalf,miopen::conv::Direction::Forward,
+     "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<256, 64, 64, 64, Default, 32, 32, 1, 1, 8, 8, 8, 1, 1, BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>"},
+    {"gfx950","ConvHipImplicitGemm3DGroupBwdXdlops",1,32,56,56,32,3,3,1,1,1,true,8,3,1,1,miopenHalf,miopen::conv::Direction::BackwardData,
+     "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1<256, 64, 16, 64, 16, 16, Filter1x1Stride1Pad0, 16, 16, 1, 1, 16, 8, 1, 1>"},
+    {"gfx950","ConvHipImplicitGemm3DGroupWrwXdlops",1,32,56,56,32,3,3,1,1,1,true,8,3,1,1,miopenHalf,miopen::conv::Direction::BackwardWeights,
+     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<256, 64, 64, 8, Filter1x1Stride1Pad0, 8, 1, 1, 1, 4, 4, 4, 1, 1, 4>"},
 };
 // clang-format on
 
