@@ -11,6 +11,18 @@
           ]
         }
       }
+    ],
+    "hipkernel:flydsl_sdpa_rdna": [
+      {
+        "cases": [
+          "bf16_56d6c7262cffe8ac"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ]
+        }
+      }
     ]
   },
   "version": 1
