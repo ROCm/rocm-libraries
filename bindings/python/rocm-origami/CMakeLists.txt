@@ -101,6 +101,7 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/origami/_rocm_init.py"
 )
 
 if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
+    enable_testing()
     add_test(
         NAME "Python: pytest"
         COMMAND ${Python_EXECUTABLE} -m pytest -v
