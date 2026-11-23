@@ -29,6 +29,7 @@ from uhd_gen.optional import (
 from uhd_gen.tests.model_bin import leaf_model
 
 SCALE = "$graph.nodes[0].attn_scale_value"
+DROPOUT = "$graph.nodes[0].dropout_probability"
 Q_DIM = "$graph.nodes[0].q.dims[3]"
 K_DIM = "$graph.nodes[0].k.dims[3]"
 FLOPS = "$graph.flops"
@@ -220,8 +221,9 @@ def test_a_safe_signature_wraps_reads_inside_expressions_and_keeps_presence_cond
 @pytest.mark.parametrize(
     "column,values,kept",
     [
+        # Not attn_scale_value: a proposal never reads a caller-chosen scale (proposal.EXCLUSIONS).
         pytest.param(
-            SCALE[1:], [0.125, None, 0.0625, None, 0.125, 0.25], True, id="float"
+            DROPOUT[1:], [0.125, None, 0.0625, None, 0.125, 0.25], True, id="float"
         ),
         pytest.param(
             "graph.nodes[0].generate_stats",
@@ -229,9 +231,7 @@ def test_a_safe_signature_wraps_reads_inside_expressions_and_keeps_presence_cond
             True,
             id="boolean_object_column",
         ),
-        pytest.param(
-            "graph.nodes[0].dropout_probability", [None] * 6, False, id="all_absent"
-        ),
+        pytest.param("graph.nodes[0].right_bound", [None] * 6, False, id="all_absent"),
         pytest.param(
             Q_DIM[1:], [64, None, 128, 64, None, 32], False, id="not_optional"
         ),
@@ -255,7 +255,7 @@ def test_generate_proposes_an_optional_column_some_rows_leave_unbound(evaluator)
 
     frame = pd.DataFrame(
         {
-            SCALE[1:]: [0.125, None, 0.0625, None, 0.125, 0.25],
+            DROPOUT[1:]: [0.125, None, 0.0625, None, 0.125, 0.25],
             Q_DIM[1:]: [64, None, 128, 64, None, 32],
             "graph.nodes[0].q.dims[0]": [1, 2, 4, 8, 16, 32],
         }
@@ -266,7 +266,7 @@ def test_generate_proposes_an_optional_column_some_rows_leave_unbound(evaluator)
     signature, _, _ = _feature_signature(
         args, frame, set(frame.columns), None, [], False
     )
-    assert signature == [SCALE, "$graph.nodes[0].q.dims[0]"]
+    assert signature == [DROPOUT, "$graph.nodes[0].q.dims[0]"]
 
 
 #: The artifact root class of each adapter whose artifact embeds a features_hash.
@@ -453,6 +453,37 @@ def test_a_gdn_scale_is_rewritten_though_the_signature_reads_no_q_dimension(
     assert report["proof"]["old_refused_rows_when_absent"] == {
         scale: report["proof"]["rows_compared"]
     }
+
+
+def test_a_searched_recipe_is_rewritten_to_the_form_the_search_now_writes(
+    tmp_path, evaluator
+):
+    """A recipe searched before optional reads were guarded: the rewrite wraps its optional
+    dim and its uid presence flag exactly as the search does, and a recipe the search wrote
+    now is already safe."""
+    from uhd_gen.proposal import presence_flag
+    from uhd_gen.rewrite import rewrite_descriptor
+
+    uid, dim = "graph.nodes[0].bias.uid", "graph.nodes[0].bias.dims[1]"
+    searched = [
+        Q_DIM,
+        presence_flag(uid),
+        {"/": [Q_DIM, "$" + dim]},
+        {"*": [{"ceil_div": ["$" + dim, 8]}, 8]},
+    ]
+    path = _installed_model(tmp_path, searched)
+    report = rewrite_descriptor(path, _rewrite_args([path]))
+
+    guarded_dim = {"value_or_default": ["$" + dim, -1]}
+    assert report["status"] == "rewritten"
+    assert [item["reference"] for item in report["wrapped"]] == ["$" + dim, "$" + uid]
+    assert json.loads(path.read_text(encoding="utf-8"))["features_signature"] == [
+        Q_DIM,
+        presence_flag(uid, -1),
+        {"/": [Q_DIM, guarded_dim]},
+        {"*": [{"ceil_div": [guarded_dim, 8]}, 8]},
+    ]
+    assert rewrite_descriptor(path, _rewrite_args([path]))["status"] == "already_safe"
 
 
 def test_an_adapter_whose_artifact_embeds_the_hash_without_a_rule_is_refused(

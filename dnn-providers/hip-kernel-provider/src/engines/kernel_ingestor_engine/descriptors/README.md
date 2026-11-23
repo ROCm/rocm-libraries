@@ -7,6 +7,7 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE bundles below, plus
 
 | Bundle | Engine | Native pack |
 |---|---|---|
+| [`hip/standalone_pointwise/`](hip/standalone_pointwise/README.md) | `hipkernel:StandalonePointwise` | `packs/StandalonePointwiseNative.cpp` |
 | `rocKE/gfx950_attention_dense/` | `hipkernel:Gfx950AttentionDense` | `packs/Gfx950AttentionDenseNative.cpp` |
 | `rocKE/gfx950_attention_unified_2d/` | `hipkernel:Gfx950AttentionUnified2D` | `packs/Gfx950AttentionUnified2DNative.cpp` |
 | `rocKE/gfx950_attention_unified_3d/` | `hipkernel:Gfx950AttentionUnified3D` | `packs/Gfx950AttentionUnified3DNative.cpp` |
@@ -59,8 +60,9 @@ catalogs (`conv/<family>/*.kdp.json`) are in DVC, one `<catalog>.dvc` pointer ea
 [Conv catalogs live in DVC](#conv-catalogs-live-in-dvc) below); naive's three hand-written
 KDPs and every other descriptor stay in git. See `conv/README.md` in the provider tree.
 
-For any other build the root has nothing to pack and production packaging is dormant,
-unless the cache variable below is pointed elsewhere.
+The standalone pointwise HIP pack emits one shape-dynamic code object per configured
+architecture, so production packaging remains active without rocKE, FlyDSL or the conv group
+unless the cache variable below points at a different source root.
 
 ## Authoring a bundle
 
