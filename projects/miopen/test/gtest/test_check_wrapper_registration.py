@@ -28,7 +28,12 @@ import check_wrapper_registration as registration
 
 TIERS = ["quick", "standard", "comprehensive", "full"]
 GPU_LABELS = ["ex_gpu_gfx110X", "ex_gpu_gfx950"]
-CHECKS = ("wrapper_abi_check", "wrapper_bare_link_check", "forwarding_failure_modes")
+CHECKS = (
+    "wrapper_abi_check",
+    "wrapper_bare_link_check",
+    "forwarding_failure_modes",
+    "wrapper_reentry_macro",
+)
 
 
 def registered(drop=(), relabel=None, tiers=TIERS):

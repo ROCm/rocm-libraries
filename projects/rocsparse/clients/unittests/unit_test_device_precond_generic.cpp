@@ -78,7 +78,7 @@ TYPED_TEST(PrecondIluIc, csr_types_policies_batches_and_index_base)
 }
 
 // IC(0) inner sums with several non-zero terms (rows that share columns below the
-// diagonal) through the hash and the binary-search kernel, with real-valued entries.
+// diagonal) through the hash and the binary-search kernel.
 TEST_F(PrecondGeneric, spic0_csr_nonzero_inner_sums_hash)
 {
     run_options opt;
@@ -87,35 +87,49 @@ TEST_F(PrecondGeneric, spic0_csr_nonzero_inner_sums_hash)
     {
         for_all_types([&](auto tag) {
             using T = decltype(tag);
-            check_csr_matrix<Kind::ic, T>(
-                handle, make_lower_band_matrix<T>(60, w, false), opt, "band");
+            check_csr_matrix<Kind::ic, T>(handle, make_lower_band_matrix<T>(60, w), opt, "band");
         });
     }
     // A dense last row over narrow band rows: table sizes 32 .. 512 (lengths below
     // the sizes) and band 3 so that the sums have three terms.
     for(const int32_t fat : {8, 40, 100, 300, 511})
     {
-        check_csr_matrix<Kind::ic, double>(
-            handle, make_fat_row_matrix<double>(fat, false, 3), opt, "fat " + std::to_string(fat));
-        check_csr_matrix<Kind::ic, float>(
-            handle, make_fat_row_matrix<float>(fat, false, 3), opt, "fat " + std::to_string(fat));
+        for_all_types([&](auto tag) {
+            using T = decltype(tag);
+            check_csr_matrix<Kind::ic, T>(
+                handle, make_fat_row_matrix<T>(fat, 3), opt, "fat " + std::to_string(fat));
+        });
     }
     // Band and fat-row matrices (non-zero inner sums) in the other index base.
     const auto one = rocsparse_index_base_one;
     check_csr_matrix<Kind::ic, double>(
-        handle, make_lower_band_matrix<double>(60, 5, false), opt, "band", one);
+        handle, make_lower_band_matrix<double>(60, 5), opt, "band", one);
     check_csr_matrix<Kind::ic, double>(
-        handle, make_fat_row_matrix<double>(520, false, 3), opt, "fat 520", one);
+        handle, make_fat_row_matrix<double>(520, 3), opt, "fat 520", one);
     check_csr_matrix<Kind::ilu, double>(
         handle, with_upper_triangle(make_lower_band_matrix<double>(60, 5)), opt, "band", one);
     check_csr_matrix<Kind::ilu, double>(
-        handle,
-        with_upper_triangle(make_fat_row_matrix<double>(520, true, 3)),
-        opt,
-        "fat 520",
-        one);
+        handle, with_upper_triangle(make_fat_row_matrix<double>(520, 3)), opt, "fat 520", one);
     check_csr_matrix<Kind::ildlt, double>(
-        handle, make_fat_row_matrix<double>(40, true, 3), opt, "fat 40", one);
+        handle, make_fat_row_matrix<double>(40, 3), opt, "fat 40", one);
+}
+
+// On a Hermitian positive definite matrix with every entry stored, IC(0) drops no fill and
+// is the exact Cholesky factorization, so the factor is compared with L itself and not only
+// with the host reference (issue #15943).
+TEST_F(PrecondGeneric, spic0_csr_exact_cholesky_factor)
+{
+    const run_options opt;
+    for_all_types([&](auto tag) {
+        using T      = decltype(tag);
+        const auto r = make_cholesky_reproducer<T>();
+        for(const auto base : {rocsparse_index_base_zero, rocsparse_index_base_one})
+        {
+            run_result<T> out;
+            check_csr_matrix<Kind::ic, T>(handle, r.a, opt, "exact cholesky", base, &out);
+            expect_close(keep_lower_only(r.a, out.values), r.factor);
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -642,6 +656,54 @@ TEST_F(PrecondGeneric, spic0_bsr_long_block_rows)
     }
 }
 
+// The matrix of spic0_csr_exact_cholesky_factor as one 3 x 3 block (inner sums inside
+// the block) and as 1 x 1 blocks (inner sums across block rows).
+TEST_F(PrecondGeneric, spic0_bsr_exact_cholesky_factor)
+{
+    const run_options opt;
+    for_all_types([&](auto tag) {
+        using T      = decltype(tag);
+        const auto r = make_cholesky_reproducer<T>();
+        for(const auto dir : {rocsparse_direction_row, rocsparse_direction_column})
+        {
+            for(const int32_t block_dim : {1, 3})
+            {
+                SCOPED_TRACE("block_dim=" + std::to_string(block_dim));
+                bsr_matrix<T> m;
+                m.block_dim = block_dim;
+                m.dir       = dir;
+                if(block_dim == 1)
+                {
+                    m.mb  = r.a.n;
+                    m.ptr = r.a.ptr;
+                    m.ind = r.a.ind;
+                    m.val = r.a.val;
+                }
+                else
+                {
+                    m.mb  = 1;
+                    m.ptr = {0, 1};
+                    m.ind = {0};
+                    m.val.resize(9);
+                    for(int32_t i = 0; i < 3; ++i)
+                        for(int32_t j = 0; j < 3; ++j)
+                            m.val[dir == rocsparse_direction_row ? 3 * i + j : 3 * j + i]
+                                = r.a.val[3 * i + j];
+                }
+                dev_bsr<T> d;
+                d.init(m);
+                ASSERT_NE(d.A, nullptr);
+                run_result<T> out;
+                run_factorization<Kind::ic, T>(handle, d.A, d.val, 1, opt, out);
+                ASSERT_EQ(out.compute_status, rocsparse_status_success);
+                EXPECT_EQ(out.singularity[0], rocsparse_singularity_none);
+                m.val = out.values;
+                expect_close(keep_lower_only(r.a, expand_bsr(m).val), r.factor);
+            }
+        }
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Row-length regimes of ILDLT(0): hash kernel up to 512 entries (the binary-search kernels
 // are covered by the value and index type combinations below)
@@ -654,10 +716,8 @@ TEST_F(PrecondGeneric, spildlt0_csr_hash_row_lengths)
     {
         check_csr_matrix<Kind::ildlt, double>(
             handle, make_fat_row_matrix<double>(fat), opt, "fat=" + std::to_string(fat));
-        check_csr_matrix<Kind::ildlt, double>(handle,
-                                              make_fat_row_matrix<double>(fat, true, 3),
-                                              opt,
-                                              "band 3 fat=" + std::to_string(fat));
+        check_csr_matrix<Kind::ildlt, double>(
+            handle, make_fat_row_matrix<double>(fat, 3), opt, "band 3 fat=" + std::to_string(fat));
     }
 }
 
@@ -910,8 +970,6 @@ namespace
     void check_all_row_shapes(rocsparse_handle handle, const std::string& what)
     {
         const run_options opt;
-        // spic0 gets no imaginary parts (AISPARSE-903).
-        constexpr bool real_only = (K == Kind::ic);
         // ILU(0) gets the upper triangle as well, or its update would have nothing to do.
         const auto shape = [](const csr_matrix<T>& lower) {
             return (K == Kind::ilu) ? with_upper_triangle(lower) : lower;
@@ -919,19 +977,17 @@ namespace
 
         // Short rows: hash kernel with the smallest table.
         check_csr_matrix<K, T, I, J>(
-            handle, shape(make_lower_band_matrix<T>(12, 3, !real_only)), opt, what + " short rows");
+            handle, shape(make_lower_band_matrix<T>(12, 3)), opt, what + " short rows");
         // A row of 100 entries: hash kernel with a table of 128.
         check_csr_matrix<K, T, I, J>(
-            handle, shape(make_fat_row_matrix<T>(100, !real_only, 3)), opt, what + " fat row 100");
+            handle, shape(make_fat_row_matrix<T>(100, 3)), opt, what + " fat row 100");
         // A row of 520 entries: binary-search kernel.
         // Not for spildlt0 i32 rows / i64 cols: find_csrildlt0_kernel_binsearch_launch
         // dispatches <int32_t, int32_t> whenever row_type is i32 without looking at
         // col_type, so 64-bit column indices are read as 32-bit (AISPARSE-920).
         if constexpr(!(K == Kind::ildlt && sizeof(I) == 4 && sizeof(J) == 8))
-            check_csr_matrix<K, T, I, J>(handle,
-                                         shape(make_fat_row_matrix<T>(520, !real_only, 3)),
-                                         opt,
-                                         what + " fat row 520");
+            check_csr_matrix<K, T, I, J>(
+                handle, shape(make_fat_row_matrix<T>(520, 3)), opt, what + " fat row 520");
     }
 
     template <Kind K, typename T>

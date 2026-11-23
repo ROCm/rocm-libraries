@@ -26,8 +26,13 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
+#include <limits>
+#include <sstream>
 #include <vector>
 
 // GoogleTest-compatible HIP_CHECK macro. FAIL is called to log the Google Test trace.
@@ -174,7 +179,7 @@ testing::AssertionResult verify_vec_eq(const char*           a_str,
 // This function is based on Google Test's DoubleNearPredFormat function.
 // This function stops on the first mismatching element,
 // printing its index and value in decimal and hexadecimal.
-testing::AssertionResult verify_near_element(
+inline testing::AssertionResult verify_near_element(
     const char* a_str, const char* b_str, double a, double b, double abs_error, size_t index)
 {
     double diff = std::fabs(a - b);
@@ -286,27 +291,27 @@ struct EDF
 };
 
 // Perform Two-Sample Kolmogorov-Smirnov Test
-bool ks_test_2(const std::vector<double>& expected,
-               const std::vector<double>& actual,
-               double                     alpha = 0.1)
+inline bool ks_test_2(const std::vector<double>& expected,
+                      const std::vector<double>& actual,
+                      double                     alpha = 0.1)
 {
-    EDF aEDF(expected);
-    EDF eEDF(actual);
+    EDF eEDF(expected);
+    EDF aEDF(actual);
 
-    double n = aEDF.n;
-    double m = eEDF.n;
+    double n = eEDF.n;
+    double m = aEDF.n;
 
-    double max_diff = std::numeric_limits<double>::min();
+    double max_diff = 0.0;
 
     // Calculate the statistical value: the maximum difference between the two EDF.
-    for(const double& x : aEDF.sample)
-    {
-        max_diff = std::max(max_diff, std::abs(aEDF(x) - eEDF(x)));
-    }
-
     for(const double& x : eEDF.sample)
     {
-        max_diff = std::max(max_diff, std::abs(aEDF(x) - eEDF(x)));
+        max_diff = std::max(max_diff, std::abs(eEDF(x) - aEDF(x)));
+    }
+
+    for(const double& x : aEDF.sample)
+    {
+        max_diff = std::max(max_diff, std::abs(eEDF(x) - aEDF(x)));
     }
 
     // calculating the critical value

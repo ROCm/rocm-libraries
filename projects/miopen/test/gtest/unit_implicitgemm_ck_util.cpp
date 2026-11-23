@@ -121,8 +121,8 @@ struct StubbedCKArgs
 };
 
 // A DeviceOpType whose GetInstances() returns two instances that share one
-// GetTypeString(). The cache (CachedCKInstanceIndex) must resolve the kernel_id
-// to the first instance (lowest index), the same one FindConvPtrByID returns.
+// GetTypeString(). CKInstances::Find must resolve the kernel_id to the first
+// instance (lowest index), the one a linear search of GetInstances() finds.
 // ordinal records insertion order so a test can tell which instance was picked.
 struct DuplicateTypeDeviceOp
 {
@@ -233,13 +233,14 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          CPU_UnitTestImplicitGemmCKUtil_NONE,
                          testing::ValuesIn(GetTestCases()));
 
-// Regression guard for the instance cache's first-index invariant. When a
-// DeviceOpType enumerates two instances with the same GetTypeString(), the cache
-// must resolve the kernel_id to the first instance -- the one FindConvPtrByID
-// returns -- because invoker construction and workspace sizing still call
-// FindConvPtrByID and the two must agree. Only the first "duplicate_type" instance
-// is supported here, so replacing the index's emplace with a last-index-wins
-// insert would select the unsupported second instance and flip this to false.
+// Regression guard for the instance catalog's first-index invariant. When a
+// DeviceOpType enumerates two instances with the same GetTypeString(), the
+// catalog must resolve the kernel_id to the first instance, so a kernel_id keeps
+// naming the instance a linear search of GetInstances() finds. Applicability,
+// workspace sizing and invoker construction all look it up through the catalog.
+// Only the first "duplicate_type" instance is supported here, so replacing the
+// index's emplace with a last-index-wins insert would select the unsupported
+// second instance and flip this to false.
 TEST(CPU_UnitTestImplicitGemmCKUtilDuplicateType_NONE, FirstIndexWins)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
