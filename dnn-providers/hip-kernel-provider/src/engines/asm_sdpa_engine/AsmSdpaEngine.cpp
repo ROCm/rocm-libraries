@@ -163,10 +163,15 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPredic
     hipdnnEnginePredictionKind_t kind,
     bool evaluate) const
 {
-    return getPredictionOn(
-        handle, graph, config, kind, evaluate, [&handle]() -> const hipDeviceProp_t& {
-            return hipdnn_plugin_sdk::heuristics::predictionDevice(handle.getStream());
-        });
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+    const DeviceQuery device = [&handle]() -> const hipDeviceProp_t& {
+        return hipdnn_plugin_sdk::heuristics::predictionDevice(handle.getStream());
+    };
+#else
+    // Without the ingestor getPredictionOn answers UNAVAILABLE before it asks for a device.
+    const DeviceQuery device;
+#endif
+    return getPredictionOn(handle, graph, config, kind, evaluate, device);
 }
 
 hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPredictionOn(
