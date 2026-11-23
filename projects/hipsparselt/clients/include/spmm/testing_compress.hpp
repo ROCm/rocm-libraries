@@ -170,7 +170,7 @@ inline unsigned char generate_metadata(int a, int b, int c, int d)
 }
 
 template <typename Ti, typename Tc>
-void compress(const Ti*      in,
+bool compress(const Ti*      in,
               Ti*            out,
               unsigned char* metadata,
               int64_t        m,
@@ -200,6 +200,31 @@ void compress(const Ti*      in,
                                       float,
                                       Ti>;
 
+    // Validate all 2:4 groups before any compressed output is written.
+    // A tile containing four nonzeros in one quartet and zero in the other
+    // must not pass merely because its aggregate count is four.
+    for(int b = 0; b < num_batches; b++)
+        for(int i = 0; i < m; i++)
+            for(int j = 0; j < n; j += tiles_y)
+                for(int group = 0; group < 2; group++)
+                {
+                    int nonzeros = 0;
+                    for(int lane = 0; lane < 4; lane++)
+                    {
+                        int k = group * 4 + lane;
+                        int64_t offset = b * stride_b + i * stride1
+                                         + (j + k) * stride2;
+                        if(static_cast<c_type>(in[offset]) != static_cast<c_type>(0.0f))
+                            nonzeros++;
+                    }
+                    if(nonzeros > 2)
+                    {
+                        hipsparselt_cerr << "Err - The given matrix is not a 2:4 sparse matrix"
+                                         << std::endl;
+                        return false;
+                    }
+                }
+
     for(int b = 0; b < num_batches; b++)
         for(int i = 0; i < m; i++)
         {
@@ -209,9 +234,12 @@ void compress(const Ti*      in,
                 int idx[4];
                 int m_idx = 0;
 
-                auto valid_data = [&](int midx, int index, Ti value) {
+                auto valid_data = [&](int midx, int index, Ti value) -> bool {
+                    if(midx < 0 || midx >= 4)
+                        return false;
                     idx[midx]    = index;
                     values[midx] = value;
+                    return true;
                 };
 
                 for(int k = 0; k < tiles_y; k++)
@@ -223,21 +251,31 @@ void compress(const Ti*      in,
                     {
                         hipsparselt_cerr << "Err - The given matrix is not a 2:4 sparse matrix"
                                          << std::endl;
-                        CHECK_SUCCESS(false);
+                        return false;
                     }
 
                     if((k == 3 && m_idx == 0) || (k == 7 && m_idx == 2))
                     {
                         offset = b * stride_b + i * stride1 + (j + k - 1) * stride2;
                         value  = in[offset];
-                        valid_data(m_idx++, k - 1, value);
+                        if(!valid_data(m_idx++, k - 1, value))
+                        {
+                            hipsparselt_cerr << "Err - The given matrix is not a 2:4 sparse matrix"
+                                             << std::endl;
+                            return false;
+                        }
                     }
                     if((k == 3 && m_idx == 1) || (k == 7 && m_idx == 3)
                        || static_cast<c_type>(value) != static_cast<c_type>(0.0f))
                     {
                         offset = b * stride_b + i * stride1 + (j + k) * stride2;
                         value  = in[offset];
-                        valid_data(m_idx++, k, value);
+                        if(!valid_data(m_idx++, k, value))
+                        {
+                            hipsparselt_cerr << "Err - The given matrix is not a 2:4 sparse matrix"
+                                             << std::endl;
+                            return false;
+                        }
                     }
                 }
                 for(int k = 0; k < 4; k++)
@@ -252,6 +290,7 @@ void compress(const Ti*      in,
                 metadata[metadata_offset] = md;
             }
         }
+    return true;
 }
 
 template <typename Ti, typename To, typename Tc>
@@ -864,7 +903,8 @@ void testing_compress(const Arguments& arg)
         }
 
         if(!arg.sparse_b)
-            compress<Ti, Tc>(hT_pruned,
+        {
+            CHECK_SUCCESS((compress<Ti, Tc>(hT_pruned,
                              reinterpret_cast<Ti*>(hT_gold.data()),
                              hT_gold.data() + metadata_offset,
                              row,
@@ -878,9 +918,11 @@ void testing_compress(const Arguments& arg)
                              m_stride_1,
                              m_stride_2,
                              m_stride,
-                             num_batches);
+                             num_batches)));
+        }
         else
-            compress<Ti, Tc>(hT_pruned,
+        {
+            CHECK_SUCCESS((compress<Ti, Tc>(hT_pruned,
                              reinterpret_cast<Ti*>(hT_gold.data()),
                              hT_gold.data() + metadata_offset,
                              col,
@@ -894,7 +936,8 @@ void testing_compress(const Arguments& arg)
                              m_stride_2,
                              m_stride_1,
                              m_stride,
-                             num_batches);
+                             num_batches)));
+        }
 
         if(arg.timing)
         {
