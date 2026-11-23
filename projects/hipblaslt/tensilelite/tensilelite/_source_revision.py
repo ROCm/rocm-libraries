@@ -29,7 +29,9 @@ Lookup order, for the project root that holds ``setup.py``:
 4. Nothing: the build has no revision, and its version carries no label.
 
 ``TENSILELITE_SOURCE_REVISION`` never overrides a value from steps 1 or 2. If it
-names a different commit, the build fails.
+names a different commit, the build fails. Editable installation hooks reject
+this variable: editable client validation resolves identity from the live source
+tree rather than retaining an installation-time override.
 """
 
 from __future__ import annotations

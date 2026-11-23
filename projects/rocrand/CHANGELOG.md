@@ -5,6 +5,11 @@ Documentation for rocRAND is available at
 
 ## rocRAND 5.3.0 for ROCm 10.3.0
 
+### Changed
+
+* On Linux, `librocrand.so` now exports only its public API. Applications built against this version and run with an older rocRAND may print a non-fatal "no version information available" warning.
+* Replaced offset applied to scrambled Sobol direction vectors with Linear Matrix Scramble. The output of ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32 and ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64 is not bitwise compatible with previous releases.
+
 ### Optimized
 
 * Updated auto tuned configs for `gfx950` on all available engines.
@@ -17,14 +22,7 @@ Documentation for rocRAND is available at
 ### Added
 
 * New unit tests in `test/test_rocrand_cpp_wrapper.cpp` that call `operator()` on each C++ wrapper engine and compare the output distribution with a reference using a two-sample Kolmogorov-Smirnov test.
-
-### Changed
-
-* Replaced offset applied to scrambled Sobol direction vectors with Linear Matrix Scramble. The output of ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL32 and ROCRAND_RNG_QUASI_SCRAMBLED_SOBOL64 is not bitwise compatible with previous releases.
-
-### Added
-
-* Added Sobol direction vector equidistribution and scramble tests
+* Added Sobol direction vector equidistribution and scramble tests.
 
 ## rocRAND 5.2.0 for ROCm 10.2.0
 
