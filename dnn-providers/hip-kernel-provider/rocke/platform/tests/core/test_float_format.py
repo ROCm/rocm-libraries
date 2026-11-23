@@ -27,7 +27,7 @@ import pytest
 from rocke.core.ir import F32, F64, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
+from rocke.tests.engines import native_engine_or_skip
 
 
 def _bits(value: float) -> str:
@@ -123,10 +123,10 @@ def _declared_literals(hip: str, c_type: str) -> list[str]:
 
 
 def test_both_hip_lowerers_spell_float_literals_the_same():
-    rocke_engine = import_or_skip_until("rocke_engine", BINDING_LANE)
+    native = native_engine_or_skip()
     ir = _constants_kernel()
     python_hip = lower_kernel_to_hip(parse(ir), arch="gfx942")
-    native_hip = rocke_engine.lower_serialized_ir_hip(ir, "gfx942")
+    native_hip = native.lower_serialized_ir_to_hip(ir, "gfx942")
     for engine, hip in (("Python", python_hip), ("C++", native_hip)):
         assert _declared_literals(hip, "float") == [
             f32 for _, f32, _ in _HIP_LITERALS

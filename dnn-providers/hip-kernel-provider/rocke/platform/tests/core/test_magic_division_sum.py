@@ -31,7 +31,7 @@ from rocke.helpers.magic_division import (
     do_magic_division,
     do_magic_division_dynamic,
 )
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
+from rocke.tests.engines import native_engine_or_skip
 
 FLAVORS = LLVM_FLAVORS
 DIVIDENDS = (2**30 - 1, 2**30, 1_610_612_736, 2**31 - 1)
@@ -93,7 +93,7 @@ def test_the_sum_is_a_no_unsigned_wrap_add(kernel):
     "kernel", [_static_kernel(3), _dynamic_kernel()], ids=["static", "dynamic"]
 )
 def test_both_engines_emit_the_same_text(kernel):
-    native = import_or_skip_until("rocke_engine", BINDING_LANE)
+    native = native_engine_or_skip()
     ir = serialize(kernel)
     for flavor in FLAVORS:
         python_text = _lower_kernel_to_llvm_python(

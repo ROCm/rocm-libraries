@@ -5,15 +5,17 @@
 
 import importlib.util
 import os
+import posixpath
 import re
 import shutil
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from rocke.core import native_engine
 from rocke.portable_ir.src import online
 from rocke.tests.ctest_listing import configure_installed_ctest, list_ctest_entries
 from rocke.tests.engine_modules import EngineModulesMarker, read_engine_modules_marker
@@ -133,6 +135,16 @@ EXPLICIT_GATES = {
     "rocke_library_counted_structural_gate",
     "rocke_library_counted_compiler_gate",
 }
+
+
+def _cmake_cache(build: Path) -> dict[str, str]:
+    """The ``NAME:TYPE=value`` entries of ``build``'s CMakeCache.txt, by name."""
+    entries = {}
+    for line in (build / "CMakeCache.txt").read_text().splitlines():
+        if line and not line.startswith(("#", "//")) and "=" in line:
+            key, value = line.split("=", 1)
+            entries[key.split(":", 1)[0]] = value
+    return entries
 
 
 def runs_pytest(test):
@@ -348,34 +360,107 @@ def test_every_entry_sets_a_resource_class_timeout(tmp_path, provider_subdir):
         assert not off_limit, (tree.name, off_limit)
 
 
+_NO_SHARED_ENGINE = "the build had ROCKE_BUILD_SHARED_ENGINE off"
+_PROVIDER = "-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR=hip_kernel_provider"
+_SHARED_ENGINE = "-DROCKE_BUILD_SHARED_ENGINE=ON"
+
+
 @requires_cmake
 @pytest.mark.parametrize(
     "cmake_arguments, marker",
     [
-        ((), EngineModulesMarker((), "the build had ROCKE_BUILD_PYBIND off")),
+        (
+            (),
+            EngineModulesMarker(
+                (), "the build had ROCKE_BUILD_PYBIND off", "", _NO_SHARED_ENGINE
+            ),
+        ),
         (
             ('-DROCKE_ENGINE_MODULES_ABSENT_REASON=no "pybind11" in C:\\py',),
-            EngineModulesMarker((), 'no "pybind11" in C:\\py'),
+            EngineModulesMarker((), 'no "pybind11" in C:\\py', "", _NO_SHARED_ENGINE),
         ),
         (
             (f"-DPython3_EXECUTABLE={sys.executable}", "-DROCKE_BUILD_PYBIND=ON"),
-            EngineModulesMarker(("rocke_engine", "rocke_library_engine"), ""),
+            EngineModulesMarker(
+                ("rocke_engine", "rocke_library_engine"), "", "", _NO_SHARED_ENGINE
+            ),
+        ),
+        (
+            (_PROVIDER, _SHARED_ENGINE),
+            EngineModulesMarker(
+                (),
+                "the build had ROCKE_BUILD_PYBIND off",
+                native_engine.shared_library_name(),
+                "",
+            ),
+        ),
+        (
+            (_SHARED_ENGINE,),
+            EngineModulesMarker(
+                (),
+                "the build had ROCKE_BUILD_PYBIND off",
+                "",
+                "a standalone install puts it in the library directory, not beside "
+                "the rocke package",
+            ),
         ),
     ],
-    ids=["pybind-off", "reason-given", "pybind-on"],
+    ids=[
+        "pybind-off",
+        "reason-given",
+        "pybind-on",
+        "shared-provider",
+        "shared-standalone",
+    ],
 )
 def test_the_configure_records_the_engine_modules_it_builds(
     tmp_path, cmake_arguments, marker
 ):
     """The installed guard rocke_engine_modules_check reads this marker: the
-    modules the build makes, or why it makes none (any text, escaped as JSON).
-    The library module is recorded only beside the library tree."""
+    modules the build makes, or why it makes none (any text, escaped as JSON),
+    and the shared engine it installs beside the rocke package, or why none is
+    there. The library module is recorded only beside the library tree."""
     if "-DROCKE_BUILD_PYBIND=ON" in cmake_arguments:
         pytest.importorskip("pybind11", reason="the binding's configure needs it")
         if not (PLATFORM.parent / "library" / "cpp").is_dir():
-            marker = EngineModulesMarker(("rocke_engine",), "")
+            marker = EngineModulesMarker(("rocke_engine",), "", "", _NO_SHARED_ENGINE)
     build, _ = configure_installed_ctest(tmp_path, *cmake_arguments)
     assert read_engine_modules_marker(build / "rocke_engine_modules.json") == marker
+
+
+@requires_cmake
+@pytest.mark.parametrize(
+    "cmake_arguments, strict",
+    [
+        ((_PROVIDER, _SHARED_ENGINE), True),
+        ((_PROVIDER,), False),
+        ((_SHARED_ENGINE,), False),
+    ],
+    ids=["shared-provider", "no-shared-engine", "shared-standalone"],
+)
+def test_pytest_entries_require_the_cpp_engine_where_it_is_installed(
+    tmp_path, cmake_arguments, strict
+):
+    """Where the build installs the shared engine beside the package, every
+    installed pytest entry but the explicit gates loads
+    rocke.tests.require_cpp_engine right after the shard plugin, so a missing
+    engine fails it; where the build installs none there, no entry does."""
+    _, ctest_dir = configure_installed_ctest(tmp_path, *cmake_arguments)
+    pytest_entries = {
+        test["name"]: test["command"]
+        for test in list_ctest_entries(ctest_dir)
+        if runs_pytest(test)
+    }
+    assert pytest_entries
+    for name, command in pytest_entries.items():
+        if name in EXPLICIT_GATES:
+            assert "rocke.tests.require_cpp_engine" not in command, name
+            continue
+        assert command[1:6] == PYTEST_WITH_SHARD_PLUGIN, name
+        assert (
+            command[6:8] == ["-p", "rocke.tests.require_cpp_engine"]
+        ) == strict, name
+        assert ("rocke.tests.require_cpp_engine" in command) == strict, name
 
 
 @requires_cmake
@@ -433,14 +518,22 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             target = f"{provider_subdir}_{target}_test"
         return f"../{target}{executable_suffix}"
 
+    # The replay CLI and the provenance manifest install in
+    # <tests>/portable_ir and are named beside the installed rocke package
+    # (rocke.assets.beside_package): the package's directory is the
+    # CTestTestfile's in provider mode, site-packages in a standalone install.
+    cache = _cmake_cache(build)
+    test_dir = PurePosixPath(cache["CMAKE_INSTALL_BINDIR"])
+    if provider_subdir:
+        test_dir /= provider_subdir
+    package_dir = test_dir if provider_subdir else cache["ROCKE_PYTHON_INSTALL_DIR"]
+    portable_ir = test_dir / "tests" / "portable_ir"
+    beside_package = posixpath.relpath(portable_ir, package_dir)
+    replay_cli = f"rocke_portable_ir_replay_cli{executable_suffix}"
+    manifest = "rocke_portable_ir_provenance.txt"
     expected_artifacts = {
-        "ROCKE_REPLAY_CLI": (
-            f"{test_ctest_rel}tests/portable_ir/"
-            f"rocke_portable_ir_replay_cli{executable_suffix}"
-        ),
-        "ROCKE_PROVENANCE_MANIFEST": (
-            f"{test_ctest_rel}tests/portable_ir/rocke_portable_ir_provenance.txt"
-        ),
+        "ROCKE_REPLAY_CLI": f"{beside_package}/{replay_cli}",
+        "ROCKE_PROVENANCE_MANIFEST": f"{beside_package}/{manifest}",
         "ROCKE_STORAGE_TEST": native_artifact("rocke_storage"),
         "ROCKE_IR_TYPES_TEST": native_artifact("rocke_ir_types"),
         "ROCKE_FLOAT_FORMAT_TEST": native_artifact("rocke_float_format"),

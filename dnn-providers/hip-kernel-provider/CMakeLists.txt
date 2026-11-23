@@ -696,6 +696,23 @@ if(HIPKERNELPROVIDER_ENABLE_ROCKE)
         endif()
     endif()
 
+    # The shared engine (librocke) lets the installed pytest entries run the C++
+    # engine's family-agnostic lowering through its C ABI
+    # (rocke.core.native_engine), with no Python module and so no pybind11. It
+    # installs beside the rocke package (test content: it carries no public
+    # API of the provider) and builds with the tests unless
+    # ROCKE_BUILD_SHARED_ENGINE is set explicitly. Not on Windows: it has not
+    # been built or run there. When it is not built,
+    # ROCKE_SHARED_ENGINE_ABSENT_REASON says why for rocke_engine_modules_check.
+    if(HIPKERNELPROVIDER_ENABLE_TESTS AND NOT DEFINED ROCKE_BUILD_SHARED_ENGINE)
+        if(WIN32)
+            set(ROCKE_SHARED_ENGINE_ABSENT_REASON
+                "Windows provider builds do not build it (it has not been built or run there)")
+        else()
+            set(ROCKE_BUILD_SHARED_ENGINE ON)
+        endif()
+    endif()
+
     # Scope BUILD_TESTING to rocke/ so the rocKE C++ test targets follow the
     # provider's own test switch without changing the rest of this project.
     block()

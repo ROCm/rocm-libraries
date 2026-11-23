@@ -20,7 +20,7 @@ import os
 import unittest
 
 from rocke.tests.arch_marks import arch_specific
-from rocke.tests.lanes import BINDING_LANE, skip_until
+from rocke.tests.engines import native_engine_or_skip
 
 
 def _lower(kernel) -> str:
@@ -217,23 +217,17 @@ class TestGfx950GroupedGemmCppByteIdentity(unittest.TestCase):
     """Dual-engine byte-identity for the grouped/ragged/MoE kernels.
 
     The C++ engine lowers any Python-built kernel through the family-agnostic
-    serialized-IR seam (``rocke_engine.lower_serialized_ir``), so no hand-written
-    C++ builder is needed: this asserts the C++ engine emits **byte-identical**
-    LLVM IR to the Python engine via ``ROCKE_BACKEND=both`` (the differential
-    oracle, which raises on any mismatch). Skipped when the ``rocke_engine``
-    pybind module is not built/importable (build ``cpp/bindings`` to enable).
+    serialized-IR seam (``rocke.core.native_engine.lower_serialized_ir``), so no
+    hand-written C++ builder is needed: this asserts the C++ engine emits
+    **byte-identical** LLVM IR to the Python engine via ``ROCKE_BACKEND=both``
+    (the differential oracle, which raises on any mismatch). Skipped when the
+    shared C++ engine is not found (build the ``rocke_shared`` target to
+    enable).
     """
 
     @classmethod
     def setUpClass(cls):
-        try:
-            import rocke_engine  # noqa: F401
-        except ModuleNotFoundError as e:  # not built / not on sys.path
-            skip_until(
-                BINDING_LANE, reason=f"rocke_engine C++ binding not importable: {e}"
-            )
-        except Exception as e:  # built, but failing to load
-            raise unittest.SkipTest(f"rocke_engine C++ binding not importable: {e}")
+        native_engine_or_skip()
 
     def _assert_cpp_matches_python(self, kernel) -> None:
         import unittest.mock as mock

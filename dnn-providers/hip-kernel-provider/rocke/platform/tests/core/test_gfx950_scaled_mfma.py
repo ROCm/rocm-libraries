@@ -27,6 +27,7 @@ from rocke.instances.gfx950.block_scaled_gemm import (
     is_valid_spec,
 )
 from rocke.tests.arch_marks import arch_specific
+from rocke.tests.engines import native_engine_or_skip
 from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
@@ -150,11 +151,11 @@ def test_wrong_target_rejection(arch):
         _lower_kernel_to_llvm_python(k, arch=arch, llvm_flavor="llvm23")
     with pytest.raises(NotImplementedError, match=f"^{refusal}$"):
         lower_kernel_to_hip(k, arch=arch)
-    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
+    engine = native_engine_or_skip()
     with pytest.raises(RuntimeError, match=f": {refusal}$"):
         engine.lower_serialized_ir(serialize(k), arch, "llvm23")
     with pytest.raises(RuntimeError, match=f": {refusal}$"):
-        engine.lower_serialized_ir_hip(serialize(k), arch)
+        engine.lower_serialized_ir_to_hip(serialize(k), arch)
 
 
 @arch_specific(
@@ -284,7 +285,7 @@ def test_serialized_native_contract_rejection(mutation):
     assert any("scaled MFMA" in str(d) for d in verify(k))
     with pytest.raises(ValueError, match="scaled MFMA"):
         _lower_kernel_to_llvm_python(k, arch="gfx950", llvm_flavor="llvm23")
-    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
+    engine = native_engine_or_skip()
     with pytest.raises(RuntimeError, match="scaled MFMA"):
         engine.lower_serialized_ir(serialize(k), "gfx950", "llvm23")
 

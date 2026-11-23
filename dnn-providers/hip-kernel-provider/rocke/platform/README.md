@@ -80,9 +80,10 @@ cmake --build /tmp/rocke_pybind -j$(nproc)
 export PYTHONPATH="$ROCKE/Python:/tmp/rocke_pybind"   # so `import rocke_engine` resolves
 ```
 
-If `rocke_engine` is not importable, the default `cpp` backend transparently falls
-back to the native Python lowerer (set `ROCKE_CPP_STRICT=1` to make that an
-error). See [`dsl_docs/reference/env_flags.md`](dsl_docs/reference/env_flags.md).
+The default `cpp` backend lowers through the shared engine `librocke` (the
+`rocke_shared` target; point `ROCKE_ONLINE_LIB` at it). If none is found it
+transparently falls back to the native Python lowerer (set `ROCKE_CPP_STRICT=1`
+to make that an error). `rocke_engine` adds the per-family C++ builders. See [`dsl_docs/reference/env_flags.md`](dsl_docs/reference/env_flags.md).
 
 ## Run
 

@@ -57,7 +57,7 @@ from rocke.instances.common.mx_gemm import (
 )
 from rocke.tests.engines import (
     all_engines_backend,
-    available_engines,
+    engine_modules_available,
     lower_spec_with_all_engines,
 )
 from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
@@ -817,7 +817,7 @@ def test_both_engines_refuse_invalid_specs(fields, message):
     spec = MxGemmSpec(**{**base, **fields})
     with pytest.raises(ValueError, match=re.escape(message)):
         build_mx_gemm(spec, arch="gfx950")
-    if "cpp" not in available_engines():
+    if not engine_modules_available():
         skip_until(BINDING_LANE, reason="needs the rocke_engine binding")
     with pytest.raises(RuntimeError, match=re.escape(message)):
         lower_mx_gemm(spec, arch="gfx950", backend="cpp")

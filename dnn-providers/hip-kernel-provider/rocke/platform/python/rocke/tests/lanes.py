@@ -35,6 +35,7 @@ recorded as waiting for that lane (``rocke.tests.run_records``).
 from __future__ import annotations
 
 import importlib
+import os
 import re
 from collections.abc import Collection
 from dataclasses import dataclass
@@ -61,18 +62,21 @@ __all__ = [
     "NIGHTLY_SOURCE",
     "OWNER_DECISION",
     "PR_16482",
+    "REQUIRE_CPP_ENGINE_ENV",
     "SHARED_LIBRARY_LANE",
     "SOURCE_TREE_CASES",
     "TORCH_IN_CI",
     "WEEKLY_EXHAUSTIVE",
     "Lane",
     "arch_skip_reason",
+    "cpp_engine_required",
     "import_or_skip_until",
     "lanes_waited_for",
     "runner_lanes_for",
     "skip_needing_arch",
     "skip_until",
     "skip_until_reason",
+    "skip_until_shared_engine",
 ]
 
 
@@ -155,7 +159,8 @@ OWNER_DECISION = Lane(
 BINDING_LANE = Lane(
     "binding-lane",
     "the C++ engine's Python modules in the CI test tree: the file is in a CI-run "
-    "entry, but its cases skip where the build's Python had no pybind11",
+    "entry, but its cases that need a kernel family's C++ builder skip where the "
+    "build's Python had no pybind11",
     enrolled=True,
 )
 TORCH_IN_CI = Lane(
@@ -226,8 +231,10 @@ MULTI_GPU_RUNNER = Lane(
 SHARED_LIBRARY_LANE = Lane(
     "shared-library-lane",
     "the shared librocke C library in the CI test tree: the file is in a CI-run "
-    "entry, but its cases that load the library skip there, as the provider "
-    "build installs none and the lane does not build one on demand",
+    "entry, but its cases that load the library (the C++ engine's "
+    "family-agnostic lowering, the portable-IR C ABI) skip where the build "
+    "installs none (the Windows provider build) and the lane does not build "
+    "one on demand",
     enrolled=True,
 )
 CI_TEST_TOOLS = Lane(
@@ -301,6 +308,31 @@ def skip_until(*lanes: Lane, reason: str) -> NoReturn:
     raise pytest.skip.Exception(
         skip_until_reason(*lanes, reason=reason), allow_module_level=True
     )
+
+
+#: Set to ``1`` where a run requires the C++ engine: a case whose shared engine
+#: is missing fails instead of skipping (:func:`skip_until_shared_engine`).
+#: The ``rocke.tests.require_cpp_engine`` pytest plugin sets it.
+REQUIRE_CPP_ENGINE_ENV = "ROCKE_REQUIRE_CPP_ENGINE"
+
+
+def cpp_engine_required() -> bool:
+    """Whether this run requires the C++ engine (``ROCKE_REQUIRE_CPP_ENGINE``)."""
+    return os.environ.get(REQUIRE_CPP_ENGINE_ENV, "").strip() not in ("", "0")
+
+
+def skip_until_shared_engine(reason: str) -> NoReturn:
+    """Skip the running case (or class or module), for ``reason``, as waiting
+    for :data:`SHARED_LIBRARY_LANE`, because no shared C++ engine was found;
+    fail it instead where the run requires the C++ engine
+    (:func:`cpp_engine_required`), so such a run cannot pass without it."""
+    __tracebackhide__ = True  # pytest reports the outcome at the caller
+    if cpp_engine_required():
+        pytest.fail(
+            f"{REQUIRE_CPP_ENGINE_ENV}=1 requires the C++ engine: {reason}",
+            pytrace=False,
+        )
+    skip_until(SHARED_LIBRARY_LANE, reason=reason)
 
 
 def import_or_skip_until(module_name: str, lane: Lane) -> ModuleType:

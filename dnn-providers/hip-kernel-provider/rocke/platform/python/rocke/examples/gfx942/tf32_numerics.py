@@ -4,12 +4,15 @@
 
 import argparse
 import ctypes
+import importlib.util
 import json
 import struct
 from pathlib import Path
 
 import numpy as np
 
+from rocke.core import native_engine
+from rocke.core.backend import import_engine
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python, _resolve_llvm_flavor
@@ -129,6 +132,14 @@ def launch(blob, name, a, b, c):
         module.unload()
 
 
+def _cpp_probe_builder():
+    """The rocke_engine module, whose tf32_mma_probe_serialize_ir is the C++
+    probe builder, or None where that pybind11 module is not built."""
+    if importlib.util.find_spec("rocke_engine") is None:
+        return None
+    return import_engine()
+
+
 def run(output_dir, backend="both", shapes=(16, 32)):
     from rocke.runtime.comgr import build_hsaco_from_llvm_ir, resolved_lib_path
     from rocke.runtime.hip_module import get_device_arch
@@ -139,9 +150,14 @@ def run(output_dir, backend="both", shapes=(16, 32)):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     engines = ("python", "cpp") if backend == "both" else (backend,)
-    native = None
+    probe_builder = None
     if "cpp" in engines:
-        import rocke_engine as native  # Required: no fallback.
+        # Required: no fallback to the Python engine. The C++ engine lowers the
+        # Python-built probe through the shared engine's C ABI. The C++ probe
+        # builder is reachable only through the pybind11 module; where that is
+        # built, it must make the same kernel as the Python builder.
+        native_engine.require_native_lowering()
+        probe_builder = _cpp_probe_builder()
     flavor = _resolve_llvm_flavor()
     summary = {
         "arch": arch,
@@ -149,6 +165,10 @@ def run(output_dir, backend="both", shapes=(16, 32)):
         "flavor": flavor,
         "results": [],
     }
+    if "cpp" in engines:
+        summary["cpp_probe_builder_parity"] = (
+            "checked" if probe_builder is not None else "rocke_engine not built"
+        )
     for m in shapes:
         a, b, c, bits, single = corpus(m)
         np.savez(output_dir / f"inputs_{m}.npz", a=a, b=b, c=c)
@@ -161,16 +181,14 @@ def run(output_dir, backend="both", shapes=(16, 32)):
                 kernel = build_tf32_mma_probe(spec)
                 ir = serialize(kernel)
                 if engine == "cpp":
-                    ir_native = native.tf32_mma_probe_serialize_ir(m, mode)
-                    if ir != ir_native:
+                    if (
+                        probe_builder is not None
+                        and probe_builder.tf32_mma_probe_serialize_ir(m, mode) != ir
+                    ):
                         raise RuntimeError(
                             f"m={m} mode={mode}: builder parity mismatch"
                         )
-                    ll = native.lower_serialized_ir(
-                        ir_native,
-                        arch="gfx942",
-                        flavor=flavor,
-                    )
+                    ll = native_engine.lower_serialized_ir(ir, "gfx942", flavor)
                     if ll != _lower_kernel_to_llvm_python(
                         kernel, arch="gfx942", llvm_flavor=flavor
                     ):

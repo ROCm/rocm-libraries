@@ -16,7 +16,6 @@ select chain on the GPU, comparing the f32 bits so that -0.0 is told apart from
 """
 
 import ctypes
-import importlib.util
 import math
 import struct
 
@@ -28,6 +27,7 @@ from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.core.passes import optimize_kernel
 from rocke.helpers import compile_kernel
 from rocke.tests.arch_marks import COVERED_ARCHES
+from rocke.tests.engines import all_engines_backend
 from rocke.helpers.i4_dequant import (
     _FP6_CODEBOOK,
     unpack_fp6_bytes_to_quad_f32,
@@ -125,9 +125,11 @@ def _decode_on_gpu(arch, optimize_ir):
 
     # With the C++ engine present, backend="both" lowers through both engines
     # and requires identical LLVM IR.
-    backend = "both" if importlib.util.find_spec("rocke_engine") else "python"
     artifact = compile_kernel(
-        _decode_kernel(), arch=arch, backend=backend, optimize_ir=optimize_ir
+        _decode_kernel(),
+        arch=arch,
+        backend=all_engines_backend(),
+        optimize_ir=optimize_ir,
     )
     codes = _packed_codes()
     out_bytes = 2 * _FP6_CODES * 4

@@ -31,7 +31,16 @@ from rocke.tests.subprocess_launcher import rocke_subprocess_env
 
 ROCKE = platform_root().parent
 _CHILD_TIMEOUT_SECONDS = 120
-BINDING_FILE = "library/tests/test_attention_ir_cpp_parity.py"
+# A library test file the registry lists under the binding lane alone, derived
+# so the example follows the registry: the audit tests below need one whose
+# only recorded reason is that lane.
+BINDING_FILE = min(
+    path
+    for path in {entry.path for entry in PENDING}
+    if path.startswith("library/tests/")
+    and {entry.lane.name for entry in PENDING if entry.path == path}
+    == {BINDING_LANE.name}
+)
 GFX950_FILE = "platform/tests/instances/test_gfx950_mxfp4_numeric.py"
 QUARANTINED_TEST = "platform/tests/portable_ir/test_portable_ir.py"
 # A source test file that no registry entry names.

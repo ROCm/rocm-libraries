@@ -12,7 +12,7 @@ from rocke.instances.common.gemm_universal import (
 )
 from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
 from rocke.tests.arch_marks import arch_specific
-from rocke.tests.engines import available_engines
+from rocke.tests.engines import available_builder_engines
 from rocke.tests.gpu import current_device_arch_in
 from rocke.tests.universal_gemm import launch_universal_gemm, lower_universal_gemm
 
@@ -67,7 +67,7 @@ def test_gfx942_f16_bf16_lds_swizzle_numeric(tile, warp_tile, pipeline, dtype):
         a = a_int.astype(np.float16)
         bt = bt_int.astype(np.float16)
         c = np.full((m, n), np.nan, dtype=np.float16)
-    for engine in available_engines():
+    for engine in available_builder_engines():
         llvm_ir = lower_universal_gemm(spec, engine, arch=arch)
         result = launch_universal_gemm(llvm_ir, spec, a, bt, arch=arch, c=c)
         got = bf16_to_f32(result).astype(np.float64) if dtype == "bf16" else result

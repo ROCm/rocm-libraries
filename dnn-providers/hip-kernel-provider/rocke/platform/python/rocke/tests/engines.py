@@ -18,17 +18,19 @@ Per engine (``engine`` is one of :data:`ENGINES`):
   ``assert_engine_rejects`` checks the one engine named.
 - ``assert_engine_rejects`` asserts that ``engine`` refuses the kernel with
   exactly ``message``. The Python engine raises ``error_type``; the C++ engine
-  reports through the ``rocke_engine`` binding as a ``RuntimeError`` whose text
-  ends with ``"(status N): " + message``, where ``N`` is the
-  ``rocke_status_t`` that ``error_type`` maps to.
+  reports as a ``RuntimeError`` whose text ends with ``"(status N): " +
+  message``, where ``N`` is the ``rocke_status_t`` that ``error_type`` maps to.
 - ``lower_hip_with_engine`` and ``assert_engine_rejects_hip`` are the same two
   checks for the HIP-source lowering, whose C++ side runs as described below:
-  through the binding or the ``rocke_ir_lower_cli`` program.
+  in process, or through the ``rocke_ir_lower_cli`` program.
 
-A test parametrized over :data:`ENGINES` checks the Python engine in every
-lane, including the lanes that do not build the binding; only its ``"cpp"``
-cases skip there, naming the reason (for the HIP checks, only where the
-program is not supplied either).
+The C++ engine here is the shared ``librocke``, reached through its C ABI by
+``rocke.core.native_engine``: the same serialized-IR entries the
+``rocke_engine`` binding wraps, without needing the binding. A test
+parametrized over :data:`ENGINES` checks the Python engine in every lane,
+including the lanes without the library; only its ``"cpp"`` cases skip there,
+naming the reason (for the HIP checks, only where the program is not supplied
+either).
 
 Both engines at once: ``lower_with_both_engines``,
 ``assert_both_engines_reject``, ``lower_hip_with_both_engines`` and
@@ -38,26 +40,30 @@ Their refusal checks compare the C++ engine's message but not its status,
 which some older refusals do not yet share with the Python engine's exception
 type.
 
-The C++ HIP lowering runs through the binding when it is built, and otherwise
-through the ``rocke_ir_lower_cli`` program that ``ROCKE_IR_LOWER_CLI`` names
-(``tests/core/ir_lower_cli.cpp``), as the installed test tree does; both call
-the engine's one serialized-IR HIP entry. ``skip_without_native_hip_lowering``
+The C++ HIP lowering runs in process when the shared library is found, and
+otherwise through the ``rocke_ir_lower_cli`` program that
+``ROCKE_IR_LOWER_CLI`` names (``tests/core/ir_lower_cli.cpp``); both call the
+engine's one serialized-IR HIP entry. ``skip_without_native_hip_lowering``
 skips a test or module that has neither. ``hip_outcomes_of_both_engines``
 returns each engine's HIP source, or its refusal as a ``HipRefusal`` (error
 type and message), for a test that accepts either as long as the two agree.
 ``python_hip_outcome`` and ``native_hip_outcomes`` are each engine's half, the
 second over many kernels in one call, and ``ir_lower_cli_hip_outcomes`` runs
-the program alone, for a test that holds it to the binding. ``HipRefusal``
-and the exception types that stand for a refusal in both engines live in
-``rocke.tests.hip_outcomes``, which imports no test framework.
+the program alone, for a test that holds it to the in-process entry.
+``HipRefusal`` and the exception types that stand for a refusal in both
+engines live in ``rocke.tests.hip_outcomes``, which imports no test framework.
 
 A test that loops over the engines itself, rather than through ``pytest``
 parameters, iterates ``available_engines()``: the part of :data:`ENGINES` this
-run can drive. The installed wheel has no ``rocke_engine`` binding, so such a
-test runs the Python engine alone there and both engines wherever the binding
-is supplied. ``all_engines_backend`` is the ``backend`` argument that runs those
-same engines through ``compile_kernel`` and similar entry points, and
-``lower_spec_with_all_engines`` lowers an instance spec with them, each engine
+run can drive. The installed wheel has no shared library, so such a test runs
+the Python engine alone there and both engines wherever the library is
+supplied. ``all_engines_backend`` is the ``backend`` argument that runs those
+same engines through ``compile_kernel`` and similar entry points.
+
+A kernel family's C++ builder is reached only through the C++ engine's Python
+modules (``rocke_engine``, ``rocke_library_engine``), which
+``engine_modules_available`` reports. ``lower_spec_with_all_engines`` lowers an
+instance spec with both builders where the modules are built, each engine
 building the kernel with its own builder (``instance_llvm_from_all_engines``
 does the same through an instance's binding entry point, for an instance with
 no ``rocke.core.backend.lower_*`` entry point).
@@ -68,22 +74,27 @@ dispatcher in one row of the source backend matrix (``TESTING.md`` section
 5.1.1, one name per row in :data:`BACKEND_LANES`), asserting the exception that
 row's caller observes.
 
+Where ``ROCKE_REQUIRE_CPP_ENGINE`` requires the C++ engine (set by the
+``rocke.tests.require_cpp_engine`` plugin, which the installed CTest entries
+that count as covering it load), a missing shared library fails each helper's
+``"cpp"`` case instead of skipping it, and ``available_engines()`` keeps
+``"cpp"``: such a run cannot go green without the C++ engine. The C++
+engine's Python modules stay optional there.
+
 Every engine this run can drive, plus the verifier:
 ``assert_refused_everywhere`` and ``assert_accepted_everywhere`` run the Python
 verifier and the LLVM and HIP lowerings of each engine in
 ``available_engines()``. Unlike the both-engine helpers they do not skip when
-the binding is absent.
+the library is absent.
 """
 
 from __future__ import annotations
 
 import dataclasses
-import importlib
 import importlib.util
 import os
 import re
 import subprocess
-import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from types import ModuleType
@@ -91,7 +102,8 @@ from typing import Literal, NoReturn
 
 import pytest
 
-from rocke.core.backend import _lower_via_cpp_engine, cpp_fallbacks
+from rocke.core import native_engine
+from rocke.core.backend import CPP_STRICT_ENV, _lower_via_cpp_engine, cpp_fallbacks
 from rocke.core.ir import KernelDef
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
@@ -103,7 +115,14 @@ from rocke.tests.hip_outcomes import (
     hip_refusal_of,
     python_hip_outcome_of_kernel,
 )
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until, skip_until
+from rocke.tests.lanes import (
+    BINDING_LANE,
+    SHARED_LIBRARY_LANE,
+    cpp_engine_required,
+    import_or_skip_until,
+    skip_until,
+    skip_until_shared_engine,
+)
 
 __all__ = [
     "BACKEND_LANES",
@@ -119,7 +138,10 @@ __all__ = [
     "assert_engine_rejects",
     "assert_engine_rejects_hip",
     "assert_refused_everywhere",
+    "available_builder_engines",
     "available_engines",
+    "engine_modules_available",
+    "hide_shared_engine",
     "hip_outcomes_of_both_engines",
     "instance_llvm_from_all_engines",
     "ir_lower_cli_hip_outcomes",
@@ -128,6 +150,7 @@ __all__ = [
     "lower_spec_with_all_engines",
     "lower_with_both_engines",
     "lower_with_engine",
+    "native_engine_or_skip",
     "native_hip_outcomes",
     "python_hip_outcome",
     "skip_without_cpp_engine",
@@ -137,7 +160,7 @@ __all__ = [
 Engine = Literal["python", "cpp"]
 ENGINES: tuple[Engine, ...] = ("python", "cpp")
 
-# The C++ engine's refusal text, from the binding or rocke_ir_lower_cli:
+# The C++ engine's refusal text, in process or from rocke_ir_lower_cli:
 # "<entry point>: lower failed for arch '<gfx>' (status <code>): <message>".
 _NATIVE_REFUSAL = re.compile(r"\(status (\d+)\): (.*)", re.DOTALL)
 
@@ -154,21 +177,45 @@ _IR_LOWER_CLI_TIMEOUT_S = 90
 
 
 def available_engines() -> tuple[Engine, ...]:
-    """:data:`ENGINES` when the ``rocke_engine`` binding is importable, else
-    ``("python",)``.
+    """:data:`ENGINES` when the C++ engine's shared library is found
+    (``rocke.core.native_engine.native_lowering_available``) or
+    ``ROCKE_REQUIRE_CPP_ENGINE`` requires it, else ``("python",)``: where it is
+    required, a missing library fails the ``"cpp"`` lowering instead of
+    dropping it.
 
     For a test that loops over the engines itself; a ``pytest`` test
     parametrizes over :data:`ENGINES` instead.
     """
-    if importlib.util.find_spec("rocke_engine") is None:
-        return ("python",)
-    return ENGINES
+    if cpp_engine_required() or native_engine.native_lowering_available():
+        return ENGINES
+    return ("python",)
 
 
 def all_engines_backend() -> str:
     """The ``backend`` that lowers with every engine in ``available_engines()``:
-    ``"both"`` when the ``rocke_engine`` binding is importable, else ``"python"``."""
+    ``"both"`` when the C++ engine's shared library is found, else
+    ``"python"``."""
     return "both" if "cpp" in available_engines() else "python"
+
+
+def available_builder_engines() -> tuple[Engine, ...]:
+    """The part of :data:`ENGINES` whose kernel-family builders this run can
+    drive: :data:`ENGINES` when the C++ engine's Python modules are built
+    (:func:`engine_modules_available`), else ``("python",)``.
+
+    For a test that builds a kernel with each engine's own family builder; a
+    test that lowers one Python-built kernel with each engine iterates
+    :func:`available_engines`.
+    """
+    return ENGINES if engine_modules_available() else ("python",)
+
+
+def engine_modules_available() -> bool:
+    """Whether the C++ engine's Python modules are built: the only route to a
+    kernel family's C++ builder (``rocke_engine.<family>_lower_llvm`` and the
+    like). Family-agnostic lowering needs only the shared library; see
+    :func:`available_engines`."""
+    return importlib.util.find_spec("rocke_engine") is not None
 
 
 def lower_spec_with_all_engines(
@@ -181,15 +228,16 @@ def lower_spec_with_all_engines(
     """The LLVM IR of the instance ``spec`` describes, for ``arch``, from every
     engine in ``available_engines()``.
 
-    With the ``rocke_engine`` binding, each engine's builder builds the kernel
-    from the spec (``lower_spec(spec, arch=arch, backend="both")``, an
-    instance's ``rocke.core.backend.lower_*`` entry point), both kernels are
-    lowered, and the two texts must be the same byte for byte. Without it,
+    With the C++ engine's Python modules (:func:`engine_modules_available`),
+    each engine's builder builds the kernel from the spec
+    (``lower_spec(spec, arch=arch, backend="both")``, an instance's
+    ``rocke.core.backend.lower_*`` entry point), both kernels are lowered, and
+    the two texts must be the same byte for byte. Without them,
     ``build_kernel(spec, arch=arch)``, the Python builder, lowered by the
-    default lowerer; a ``lower_*`` entry point needs the binding even for the
+    default lowerer; a ``lower_*`` entry point needs the modules even for the
     Python backend.
     """
-    if "cpp" in available_engines():
+    if engine_modules_available():
         return lower_spec(spec, arch=arch, backend="both").llvm_text
     return lower_kernel_to_llvm(build_kernel(spec, arch=arch), arch=arch)
 
@@ -212,7 +260,7 @@ def instance_llvm_from_all_engines(
     (:func:`lower_spec_with_all_engines` covers those).
     """
     python_ir = _python_llvm(build_kernel(spec, arch=arch), arch, None)
-    if "cpp" in available_engines():
+    if engine_modules_available():
         fields = {
             name: value
             for name, value in dataclasses.asdict(spec).items()
@@ -231,6 +279,21 @@ def _require_native_engine() -> ModuleType:
     return import_or_skip_until("rocke_engine", BINDING_LANE)
 
 
+def native_engine_or_skip() -> ModuleType:
+    """:mod:`rocke.core.native_engine`, the C++ engine's serialized-IR
+    lowering. When no shared library is found, skip the calling test (or
+    module, at import) as waiting for the shared-library lane, or, where
+    ``ROCKE_REQUIRE_CPP_ENGINE`` requires the C++ engine, fail it. A library
+    that is found but does not load, or is from another build, fails the
+    test."""
+    __tracebackhide__ = True  # pytest reports the skip at the caller
+    try:
+        native_engine.require_native_lowering()
+    except native_engine.SharedEngineNotFound as missing:
+        skip_until_shared_engine(str(missing))
+    return native_engine
+
+
 def _validate_engine(engine: Engine) -> None:
     if engine not in ENGINES:
         raise ValueError(f"engine={engine!r}, expected one of {ENGINES}")
@@ -238,10 +301,10 @@ def _validate_engine(engine: Engine) -> None:
 
 def _require_engine(engine: Engine) -> None:
     """Validate ``engine``; for ``"cpp"``, skip the calling test when the
-    binding is not built, before any engine runs."""
+    shared library is not found, before any engine runs."""
     _validate_engine(engine)
     if engine == "cpp":
-        _require_native_engine()
+        native_engine_or_skip()
 
 
 def _require_hip_engine(engine: Engine) -> None:
@@ -273,8 +336,8 @@ def _assert_python_rejects(
 def _assert_native_rejects(
     lower: Callable[[], str], message: str, status: int | None
 ) -> None:
-    """Assert the binding refuses with ``message``, after ``(status N): `` when
-    ``status`` is given."""
+    """Assert the C++ engine refuses with ``message``, after ``(status N): ``
+    when ``status`` is given."""
     with pytest.raises(RuntimeError) as native_error:
         lower()
     text = str(native_error.value)
@@ -282,8 +345,8 @@ def _assert_native_rejects(
 
 
 def _native_refusal_suffix(message: str, status: int | None) -> str:
-    """How the binding's refusal text ends: ``"(status N): " + message``, or
-    ``": " + message`` when ``status`` is not compared."""
+    """How the C++ engine's refusal text ends: ``"(status N): " + message``,
+    or ``": " + message`` when ``status`` is not compared."""
     return f"(status {status}): {message}" if status is not None else f": {message}"
 
 
@@ -292,7 +355,7 @@ def _python_llvm(kernel: KernelDef, arch: str, llvm_flavor: str | None) -> str:
 
 
 def _native_llvm(kernel: KernelDef, arch: str, llvm_flavor: str | None) -> str:
-    _require_native_engine()
+    native_engine_or_skip()
     return _lower_via_cpp_engine(serialize(kernel), arch, llvm_flavor)
 
 
@@ -345,7 +408,7 @@ def assert_engine_rejects(
 
     The Python engine must raise ``error_type`` with exactly ``message``; the
     C++ engine must fail with ``error_type``'s status and the same message
-    after its binding prefix.
+    after its entry-point prefix.
     """
     _require_engine(engine)
     if engine == "python":
@@ -422,7 +485,7 @@ def assert_both_engines_reject(
 
     The C++ engine's status is not compared; see the module docstring.
     """
-    _require_native_engine()
+    native_engine_or_skip()
     _assert_python_rejects(
         lambda: _python_llvm(kernel, arch, llvm_flavor), error_type, message
     )
@@ -487,8 +550,8 @@ def assert_backend_lane_rejects(
     ``lane`` is one of :data:`BACKEND_LANES`. The lane's ``ROCKE_BACKEND`` and
     ``ROCKE_CPP_STRICT`` are set through ``monkeypatch``, and an inherited value
     is cleared where the row leaves the variable unset. ``installed-fallback``
-    also hides the ``rocke_engine`` binding, as in the installed wheel; the
-    ``cpp-*`` and ``both`` lanes skip, naming the reason, when it is not built.
+    also hides the C++ engine's shared library, as in the installed wheel; the
+    ``cpp-*`` and ``both`` lanes skip, naming the reason, when it is not found.
 
     In the ``cpp-strict`` lane the caller sees the C++ engine's own refusal: a
     ``RuntimeError`` (not a subclass) whose text ends with
@@ -497,7 +560,7 @@ def assert_backend_lane_rejects(
     engine's: exactly ``error_type`` (not a subclass) with exactly ``message``.
     The two fallback lanes must also have fallen back for the expected reason:
     ``cpp-permissive`` after the C++ engine refused with ``message``,
-    ``installed-fallback`` after the binding failed to import. Only these two
+    ``installed-fallback`` after the shared library was not found. Only these two
     lanes silence the fallback warning (``ROCKE_CPP_QUIET_FALLBACK``); every
     other lane clears it and must not fall back at all. ``error_type`` must be
     one the C++ status map covers, as for :func:`assert_engine_rejects`; that
@@ -507,8 +570,12 @@ def assert_backend_lane_rejects(
     if lane not in _LANE_ENVIRONMENT:
         raise ValueError(f"lane={lane!r}, expected one of {BACKEND_LANES}")
     status = _native_status(error_type)
+    if lane not in ("python", "installed-fallback"):
+        # Whether a missing engine skips or fails is the run's setting
+        # (ROCKE_REQUIRE_CPP_ENGINE), checked before the lane's own.
+        native_engine_or_skip()
     backend, strict = _LANE_ENVIRONMENT[lane]
-    for variable, value in (("ROCKE_BACKEND", backend), ("ROCKE_CPP_STRICT", strict)):
+    for variable, value in (("ROCKE_BACKEND", backend), (CPP_STRICT_ENV, strict)):
         if value is None:
             monkeypatch.delenv(variable, raising=False)
         else:
@@ -521,9 +588,7 @@ def assert_backend_lane_rejects(
         # from the caller's environment.
         monkeypatch.delenv("ROCKE_CPP_QUIET_FALLBACK", raising=False)
     if lane == "installed-fallback":
-        monkeypatch.setitem(sys.modules, "rocke_engine", None)
-    elif lane != "python":
-        _require_native_engine()
+        hide_shared_engine(monkeypatch)
     fallbacks_before = len(cpp_fallbacks())
     with pytest.raises(Exception) as refusal:
         lower_kernel_to_llvm(kernel, arch=arch, llvm_flavor=llvm_flavor)
@@ -544,6 +609,14 @@ def assert_backend_lane_rejects(
         ), fallbacks
     else:
         assert fallbacks == [], fallbacks
+
+
+def hide_shared_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give this test no shared C++ engine, as in the installed wheel, which
+    ships none, whatever this build has: ``ROCKE_ONLINE_LIB=none``
+    (``native_engine.NO_SHARED_ENGINE``), set through ``monkeypatch``. The cpp
+    backend then fails over with ``BackendError``."""
+    monkeypatch.setenv(native_engine.SHARED_ENGINE_ENV, native_engine.NO_SHARED_ENGINE)
 
 
 def assert_refused_everywhere(
@@ -618,8 +691,8 @@ def python_hip_outcome(ir_text: str, arch: str) -> str | HipRefusal:
 
 
 def _native_refusal(error_text: str) -> HipRefusal | None:
-    """The C++ engine's refusal reported in the binding's ``error_text``, or
-    None when the text is not a refusal (a failure of the binding itself)."""
+    """The C++ engine's refusal reported in ``error_text``, or None when the
+    text is not a refusal (a failure of the transport itself)."""
     refusal = _NATIVE_REFUSAL.search(error_text)
     if refusal is None:
         return None
@@ -638,11 +711,16 @@ def _native_status_refusal(status: int, message: str) -> HipRefusal:
 def skip_without_cpp_engine(error: Exception, reason: str) -> NoReturn:
     """Skip the calling test, for ``reason``, after the C++ engine raised
     ``error`` (a ``rocke.core.backend.BackendError``): as waiting for the
-    binding lane when the engine's module is not installed (the error's cause
-    is the ``ModuleNotFoundError`` ``import_engine`` raises it from), else as a
-    plain skip, so a module that is built but fails to load is not booked as
-    waiting for the lane."""
+    shared-library lane when no shared library was found (the error's cause is
+    ``rocke.core.native_engine.SharedEngineNotFound``; failing instead where
+    ``ROCKE_REQUIRE_CPP_ENGINE`` requires the C++ engine), as waiting for the
+    binding lane when an engine module is not installed (the cause is the
+    ``ModuleNotFoundError`` ``import_engine`` raises it from), else as a plain
+    skip, so an engine that is built but fails to load is not booked as waiting
+    for a lane."""
     __tracebackhide__ = True  # pytest reports the skip at the caller
+    if isinstance(error.__cause__, native_engine.SharedEngineNotFound):
+        skip_until_shared_engine(reason)
     if isinstance(error.__cause__, ModuleNotFoundError):
         skip_until(BINDING_LANE, reason=reason)
     pytest.skip(reason)
@@ -650,33 +728,36 @@ def skip_without_cpp_engine(error: Exception, reason: str) -> NoReturn:
 
 def skip_without_native_hip_lowering() -> None:
     """Skip the calling test, or the module when called at import, as waiting
-    for the binding lane, unless the C++ HIP lowering can run: the
-    ``rocke_engine`` binding is built, or ``ROCKE_IR_LOWER_CLI`` names the
-    ``rocke_ir_lower_cli`` program."""
-    if importlib.util.find_spec("rocke_engine") is None and not os.environ.get(
-        IR_LOWER_CLI_ENV
-    ):
-        skip_until(
-            BINDING_LANE,
-            reason=f"needs the rocke_engine binding, or {IR_LOWER_CLI_ENV} naming "
-            "a built rocke_ir_lower_cli",
-        )
+    for the shared-library lane, unless the C++ HIP lowering can run: the
+    shared library is found, or ``ROCKE_IR_LOWER_CLI`` names the
+    ``rocke_ir_lower_cli`` program. Where ``ROCKE_REQUIRE_CPP_ENGINE`` requires
+    the C++ engine, only the shared library counts, and its absence fails."""
+    if native_engine.native_lowering_available():
+        return
+    if os.environ.get(IR_LOWER_CLI_ENV) and not cpp_engine_required():
+        return
+    skip_until_shared_engine(
+        f"needs the shared librocke ({native_engine.SHARED_ENGINE_ENV}), or "
+        f"{IR_LOWER_CLI_ENV} naming a built rocke_ir_lower_cli"
+    )
 
 
 def native_hip_outcomes(
     kernels: Sequence[tuple[str, str]],
 ) -> list[str | HipRefusal]:
     """The C++ engine's HIP source, or its refusal, for each ``(serialized
-    kernel, arch)`` of ``kernels``, in order: through the ``rocke_engine``
-    binding when it is built, else in one run of the ``rocke_ir_lower_cli``
-    program ``ROCKE_IR_LOWER_CLI`` names."""
-    if importlib.util.find_spec("rocke_engine") is None:
+    kernel, arch)`` of ``kernels``, in order: in process when the shared
+    library is found, else in one run of the ``rocke_ir_lower_cli`` program
+    ``ROCKE_IR_LOWER_CLI`` names. Where ``ROCKE_REQUIRE_CPP_ENGINE`` requires
+    the C++ engine, a missing library fails the caller instead."""
+    if cpp_engine_required():
+        native_engine_or_skip()
+    if not native_engine.native_lowering_available():
         return ir_lower_cli_hip_outcomes(kernels)
-    engine = importlib.import_module("rocke_engine")
     outcomes: list[str | HipRefusal] = []
     for ir_text, arch in kernels:
         try:
-            outcomes.append(engine.lower_serialized_ir_hip(ir_text, arch))
+            outcomes.append(native_engine.lower_serialized_ir_to_hip(ir_text, arch))
         except RuntimeError as error:
             refusal = _native_refusal(str(error))
             if refusal is None:
@@ -696,7 +777,8 @@ def ir_lower_cli_hip_outcomes(
     program = os.environ.get(IR_LOWER_CLI_ENV)
     if not program:
         skip_until(
-            BINDING_LANE, reason=f"set {IR_LOWER_CLI_ENV} to a built rocke_ir_lower_cli"
+            SHARED_LIBRARY_LANE,
+            reason=f"set {IR_LOWER_CLI_ENV} to a built rocke_ir_lower_cli",
         )
     path = Path(program).resolve()
     assert path.is_file(), f"{IR_LOWER_CLI_ENV} names {path}, not a file"

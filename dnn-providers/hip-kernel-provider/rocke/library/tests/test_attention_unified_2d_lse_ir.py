@@ -8,7 +8,7 @@ import re
 
 import pytest
 
-from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.core.lower_llvm import _lower_kernel_to_llvm_python, lower_kernel_to_llvm
 from rocke.core.passes import eliminate_dead_pure_ops
 from rocke.helpers.tiling.lds_conflict import NumBuilder
 
@@ -140,6 +140,14 @@ def _strip_lse(kernel):
     return stores
 
 
+def _lower_edited(kernel, arch):
+    """The Python lowerer's text for a kernel edited by hand here. Renaming
+    values by first use can name a value before the op that defines it, which
+    serialized IR, the C++ engine's input, does not allow (both parsers refuse
+    it), so these comparisons run on the Python engine."""
+    return _lower_kernel_to_llvm_python(kernel, arch=arch)
+
+
 def _canonical_names(kernel):
     """Rename every non-param value by first use, in place. Value names come
     from a builder-wide counter, so LSE ops shift every later name.
@@ -245,8 +253,8 @@ def test_2d_lse_on_ir_minus_lse_output_is_lse_off_ir(arch, branch):
     _drop_dead(off)
     for kernel in (off, on):
         _canonical_names(kernel)
-    off_ir = lower_kernel_to_llvm(off, arch=arch)
-    on_ir = lower_kernel_to_llvm(on, arch=arch)
+    off_ir = _lower_edited(off, arch)
+    on_ir = _lower_edited(on, arch)
     assert on_ir == off_ir, f"LSE on changes more than its output: {arch}/{branch}"
 
 
@@ -449,9 +457,7 @@ def test_gfx950_head_major_minus_lse_output_is_lse_off_ir(branch):
     _drop_dead(off)
     for kernel in (off, on):
         _canonical_names(kernel)
-    assert lower_kernel_to_llvm(on, arch="gfx950") == lower_kernel_to_llvm(
-        off, arch="gfx950"
-    )
+    assert _lower_edited(on, "gfx950") == _lower_edited(off, "gfx950")
 
 
 @pytest.mark.parametrize("branch", _GFX950_BRANCHES)

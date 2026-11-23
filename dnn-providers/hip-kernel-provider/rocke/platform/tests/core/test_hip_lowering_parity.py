@@ -8,7 +8,7 @@ target: every native MFMA and WMMA atom in each target's MMA catalog, the inline
 template and constraints refusals, the s_waitcnt refusal on a target
 without the monolithic instruction, and both forms of the LDS destination of
 tile.async_buffer_load_lds. Each case lowers one small kernel through the
-Python lowerer and, through the rocke_engine binding, the C++ one, and compares
+Python lowerer and the C++ one (``rocke.core.native_engine``), and compares
 the text or the error. The last cases test the rocke.tests.engines HIP helpers
 themselves: given a C++ outcome that disagrees with the Python one, each helper
 fails. They replace the C++ outcome, but the helpers check that the C++ HIP
@@ -45,9 +45,9 @@ from rocke.tests.engines import (
     hip_outcomes_of_both_engines,
     ir_lower_cli_hip_outcomes,
     lower_hip_with_both_engines,
+    native_engine_or_skip,
     native_hip_outcomes,
 )
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
 
 
 def _assert_both_refuse(
@@ -92,13 +92,13 @@ def test_waitcnt_is_refused_where_the_target_has_split_wait_counters(op):
     )
 
 
-def test_ir_lower_cli_reports_what_the_binding_reports():
-    """The installed test tree runs the C++ HIP lowering through
-    rocke_ir_lower_cli, other lanes through the binding: for the same kernels,
-    in one batch, both report the same source and the same refusals, in order,
-    including the parser's refusals of text that is not a kernel. Runs where
-    both are present."""
-    import_or_skip_until("rocke_engine", BINDING_LANE)
+def test_ir_lower_cli_reports_what_the_in_process_entry_reports():
+    """The C++ HIP lowering runs in process where the shared engine is found and
+    through rocke_ir_lower_cli where only the program is supplied: for the same
+    kernels, in one batch, both report the same source and the same refusals,
+    in order, including the parser's refusals of text that is not a kernel.
+    Runs where both are present."""
+    native_engine_or_skip()
     waitcnt = serialize(_waitcnt_kernel("s_waitcnt").kernel)
     no_template = serialize(_inline_asm_kernel(template=None).kernel)
     kernels = [

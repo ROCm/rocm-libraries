@@ -10,7 +10,9 @@ CPOL_ATOMIC_CASCADE_DEV selects ``th:TH_ATOMIC_CASCADE_RT scope:SCOPE_DEV``.
 import unittest
 
 from rocke.core.ir import CPOL_ATOMIC_CASCADE_DEV, F32, I32, IRBuilder, PtrType
-from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.core.ir_serialize import serialize
+from rocke.core.lower_llvm import _lower_kernel_to_llvm_python, lower_kernel_to_llvm
+from rocke.tests.engines import available_engines, native_engine_or_skip
 
 
 def _kernel(cachepolicy: int):
@@ -57,20 +59,32 @@ class TestBufferAtomicFaddF32(unittest.TestCase):
                     _kernel(bad)
 
     def test_lowering_rejects_an_invalid_cachepolicy_attr(self):
-        # Hand-built or imported IR can carry any attr value; the lowerer
-        # (like the C++ one) must refuse it rather than coerce it to an int.
+        # Hand-built or imported IR can carry any attr value; each engine's
+        # lowerer must refuse it rather than coerce it to an int.
+        refusal = (
+            "tile.buffer_atomic_fadd_f32: cachepolicy attr must be an integer in 0..31"
+        )
         for bad in (20.9, 32, -1, True, "20", None):
-            with self.subTest(cachepolicy=bad):
-                k = _kernel(0)
-                (op,) = [
-                    o for o in k.body.ops if o.name == "tile.buffer_atomic_fadd_f32"
-                ]
-                if bad is None:
-                    del op.attrs["cachepolicy"]
-                else:
-                    op.attrs["cachepolicy"] = bad
-                with self.assertRaisesRegex(ValueError, "cachepolicy attr"):
-                    lower_kernel_to_llvm(k, arch="gfx1250")
+            k = _kernel(0)
+            (op,) = [o for o in k.body.ops if o.name == "tile.buffer_atomic_fadd_f32"]
+            if bad is None:
+                del op.attrs["cachepolicy"]
+            else:
+                op.attrs["cachepolicy"] = bad
+            for engine in available_engines():
+                with self.subTest(cachepolicy=bad, engine=engine):
+                    if engine == "python":
+                        with self.assertRaisesRegex(ValueError, f"^{refusal}, got "):
+                            _lower_kernel_to_llvm_python(
+                                k, arch="gfx1250", llvm_flavor="llvm23"
+                            )
+                    else:
+                        with self.assertRaisesRegex(
+                            RuntimeError, rf"\(status 1\): {refusal}$"
+                        ):
+                            native_engine_or_skip().lower_serialized_ir(
+                                serialize(k), "gfx1250", "llvm23"
+                            )
 
     def test_rejects_out_of_range_cachepolicy(self):
         b = IRBuilder("bad_cp")

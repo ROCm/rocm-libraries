@@ -4,10 +4,10 @@
 
 ``tools/check_byte_identity.py`` holds the LLVM-IR route byte-identical between
 the Python and C++ engines. The HIP-source route has a lowerer in each engine as
-well -- ``rocke.core.lower_hip.lower_kernel_to_hip`` and
-``rocke_engine.lower_serialized_ir_hip`` -- and this test holds it to the same
-rule: for every kernel the parity emitters build, both lowerers return the same
-text, or both refuse the kernel with the same error type and message. So that
+well -- ``rocke.core.lower_hip.lower_kernel_to_hip`` and the shared engine's C
+entry ``rocke_lower_serialized_ir_to_hip_text`` -- and this test holds it to
+the same rule: for every kernel the parity emitters build, both lowerers return
+the same text, or both refuse the kernel with the same error type and message. So that
 the rule cannot hold by both refusing everything alike, each family must lower
 at least one kernel to the same source, unless ``FAMILIES_WITHOUT_HIP_LOWERING``
 names what the HIP lowering lacks for it; such a family must lower none, and

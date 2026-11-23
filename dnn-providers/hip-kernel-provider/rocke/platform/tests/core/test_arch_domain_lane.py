@@ -43,6 +43,7 @@ from rocke.core.lower_llvm import (
     ArchDomainWarning,
     lower_kernel_to_llvm,
 )
+from rocke.tests.engines import native_engine_or_skip
 from rocke.tests.lanes import (
     BINDING_LANE,
     SOURCE_TREE_CASES,
@@ -888,6 +889,8 @@ def test_the_cpp_fallback_does_not_warn_twice(monkeypatch: pytest.MonkeyPatch) -
 
     decl, key, arch, flavor = _negative_declare()
     monkeypatch.setenv("ROCKE_BACKEND", "cpp")
+    # The permissive cpp lane: this test is about the fallback itself.
+    monkeypatch.delenv(B.CPP_STRICT_ENV, raising=False)
     monkeypatch.setenv("ROCKE_CPP_QUIET_FALLBACK", "1")
 
     def _boom(*a, **k):
@@ -1379,7 +1382,7 @@ def test_both_mode_flags_refusals_over_different_intrinsics(
 
 
 # --------------------------------------------------------------------------
-# the C++ engine itself (needs the rocke_engine extension)
+# the C++ engine itself (needs the shared C++ engine)
 # --------------------------------------------------------------------------
 
 
@@ -1405,14 +1408,14 @@ def test_the_message_text_is_the_one_the_cpp_engine_pins() -> None:
 def test_the_cpp_engine_refuses_with_the_python_message(
     monkeypatch: pytest.MonkeyPatch, flavor: str
 ) -> None:
-    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
+    engine = native_engine_or_skip()
     from rocke.core.ir_serialize import serialize
 
     cell = arch_domain.load(flavor).lookup(_DPP8_KEY, _DPP8_ARCH)
     if cell is None or not arch_domain.is_negative(cell.status):
         pytest.skip(f"{_DPP8_KEY} is not negative on {_DPP8_ARCH} at {flavor}")
     monkeypatch.setenv(arch_domain.MODE_ENV, "error")
-    with pytest.raises(engine.ArchDomainError) as cpp:
+    with pytest.raises(engine.ArchDomainRefusal) as cpp:
         engine.lower_serialized_ir(
             serialize(_dpp8_kernel()), arch=_DPP8_ARCH, flavor=flavor
         )
@@ -1426,7 +1429,7 @@ def test_the_cpp_engine_refuses_with_the_python_message(
 def test_the_cpp_engine_lowers_outside_error_mode(
     monkeypatch: pytest.MonkeyPatch, mode: str
 ) -> None:
-    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
+    engine = native_engine_or_skip()
     from rocke.core.ir_serialize import serialize
 
     flavor = _refusing_flavor()
@@ -1440,7 +1443,7 @@ def test_the_cpp_engine_lowers_outside_error_mode(
 def test_the_cpp_engine_rejects_a_misspelled_mode_as_python_does(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
+    engine = native_engine_or_skip()
     from rocke.core.ir_serialize import serialize
 
     flavor = _refusing_flavor()
@@ -1462,7 +1465,7 @@ def test_the_cpp_engine_rejects_a_misspelled_mode_for_a_kernel_that_demands_noth
     It used to read it only when a kernel demanded an intrinsic, so a kernel that
     demanded none lowered under a misspelled value because nothing asked.
     """
-    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
+    engine = native_engine_or_skip()
     from rocke.core.ir import IRBuilder
     from rocke.core.ir_serialize import serialize
 
@@ -1479,9 +1482,10 @@ def test_the_cpp_engine_rejects_a_misspelled_mode_for_a_kernel_that_demands_noth
 def test_the_cpp_backend_raises_the_python_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """End to end on the default backend: the engine refuses, the binding
-    raises its ArchDomainError, and the caller gets the Python one."""
-    import_or_skip_until("rocke_engine", BINDING_LANE)
+    """End to end on the default backend: the engine refuses,
+    ``rocke.core.native_engine`` raises its ArchDomainRefusal, and the caller
+    gets the Python one."""
+    native_engine_or_skip()
     flavor = _refusing_flavor()
     monkeypatch.setenv("ROCKE_BACKEND", "cpp")
     monkeypatch.setenv(arch_domain.MODE_ENV, "error")

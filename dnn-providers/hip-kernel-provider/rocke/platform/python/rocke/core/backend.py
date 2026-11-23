@@ -11,13 +11,15 @@ interchangeable engines:
                   behaviour; selectable via ``ROCKE_BACKEND=python`` and
                   used as the differential oracle.
 
-  - ``"cpp"``     the C++ engine, reached through the ``rocke_engine``
-                  Python extension. This is now the DEFAULT lowerer for
+  - ``"cpp"``     the C++ engine. This is now the DEFAULT lowerer for
                   Python-authored kernels: the family-agnostic
-                  ``lower_serialized_ir`` endpoint lowers any kernel from
-                  its serialized IR, byte-identically to the native
-                  lowerer across every family. Per-family spec endpoints
-                  (``gemm_lower_llvm`` / ...) remain available.
+                  serialized-IR entry of the shared ``librocke``, reached
+                  through its C ABI (:mod:`rocke.core.native_engine`),
+                  lowers any kernel from its serialized IR,
+                  byte-identically to the native lowerer across every
+                  family. Per-family spec endpoints (``gemm_lower_llvm`` /
+                  ...) remain available through the ``rocke_engine``
+                  Python extension.
 
   - ``"both"``    run both engines and assert they agree, returning the
                   Python result on success and raising a precise diff on
@@ -39,13 +41,14 @@ The active backend is chosen, in order of precedence:
   3. ``_DEFAULT_BACKEND`` — currently the **C++** engine (flipped from Python).
      The Python engine stays available via ``backend="python"`` /
      ``ROCKE_BACKEND=python``; the cpp path auto-falls back to Python when the
-     binding is unavailable, unless ``ROCKE_CPP_STRICT=1`` is set.
+     engine is unavailable, unless ``ROCKE_CPP_STRICT=1`` is set.
 
 Engine coverage
 ---------------
 
 The default cpp path lowers Python-authored IR through
-``lower_serialized_ir`` (the serialized-IR seam), which is family-agnostic:
+``native_engine.lower_serialized_ir`` (the serialized-IR seam), which is
+family-agnostic:
 any kernel the Python frontend builds can be lowered by the C++ engine. The
 standalone C++ instance emitters (used by the hipDNN provider / C-JIT, no
 Python) cover the broad instance set exercised by the byte-identity gate —
@@ -80,6 +83,8 @@ import os
 import sys
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from . import native_engine
 
 # Public backend identifiers.
 BACKEND_PYTHON = "python"
@@ -240,11 +245,14 @@ def _record_fallback(kernel_name: str, reason: str) -> None:
 # When set, the cpp path does NOT silently fall back to Python: an engine
 # error is raised. The guarantee sweep sets this so a regression surfaces
 # loudly instead of being masked by a fallback.
-_ENV_STRICT = "ROCKE_CPP_STRICT"
+CPP_STRICT_ENV = "ROCKE_CPP_STRICT"
 
 
-def _cpp_strict() -> bool:
-    return os.environ.get(_ENV_STRICT, "").strip() not in ("", "0")
+def cpp_strict() -> bool:
+    """Whether ``ROCKE_CPP_STRICT`` is set: the cpp backend then raises when
+    the C++ engine cannot lower a kernel (including when it is missing) instead
+    of falling back to the Python engine."""
+    return os.environ.get(CPP_STRICT_ENV, "").strip() not in ("", "0")
 
 
 def _lower_via_cpp_engine(
@@ -252,28 +260,33 @@ def _lower_via_cpp_engine(
 ) -> str:
     """Lower serialized ``ck.dsl.ir/v1`` text through the C++ engine.
 
-    Wraps ``rocke_engine.lower_serialized_ir`` (the family-agnostic
-    parse+lower endpoint). ``llvm_flavor`` pins the intrinsic-declaration
-    shape, matching the Python lowerer's ``llvm_flavor`` parameter.
+    The engine is the shared ``librocke``, reached through its C ABI
+    (:func:`rocke.core.native_engine.lower_serialized_ir`, the family-agnostic
+    parse+lower entry), so no compiled Python extension is needed.
+    ``llvm_flavor`` pins the intrinsic-declaration shape, matching the Python
+    lowerer's ``llvm_flavor`` parameter.
 
-    Flavor auto-resolution parity: when ``llvm_flavor is None`` we resolve
-    the flavor in *Python* (via :func:`lower_llvm._resolve_llvm_flavor`)
-    before handing it to the engine, rather than passing ``""`` (engine
-    AUTO). Python queries the COMGR handle retained by its runtime, while
-    standalone native AUTO discovers and queries its own retained candidate.
-    Passing the Python-resolved flavor keeps ``backend="cpp"`` and
-    ``backend="python"`` aligned with the compiler selected by the Python
-    runtime, including a torch-bundled COMGR. An explicit ``llvm_flavor``
-    argument still overrides automatic selection and supports offline emission.
-    Both core resolvers reject automatic selection when compiler evidence is
-    unavailable; offline emission requires an explicit flavor.
-    A native caller that owns a separate compilation stage must
-    pass a flavor matching its compiler; native AUTO does not share its private
-    handle with that stage.
+    Flavor auto-resolution parity: when ``llvm_flavor is None`` the flavor is
+    resolved in *Python* (via :func:`lower_llvm._resolve_llvm_flavor`) and
+    handed to the engine, rather than left to the engine's own AUTO. Python
+    queries the COMGR handle retained by its runtime, while standalone native
+    AUTO discovers and queries its own retained candidate. Passing the
+    Python-resolved flavor keeps ``backend="cpp"`` and ``backend="python"``
+    aligned with the compiler selected by the Python runtime, including a
+    torch-bundled COMGR. An explicit ``llvm_flavor`` argument still overrides
+    automatic selection and supports offline emission. Both core resolvers
+    reject automatic selection when compiler evidence is unavailable; offline
+    emission requires an explicit flavor. A native caller that owns a separate
+    compilation stage must pass a flavor matching its compiler; native AUTO does
+    not share its private handle with that stage.
 
-    Raises :class:`BackendError` if the engine extension is unavailable.
+    Raises :class:`BackendError` if there is no shared engine, before any
+    compiler is queried.
     """
-    engine = import_engine()
+    try:
+        native_engine.require_native_lowering()
+    except native_engine.SharedEngineNotFound as error:
+        raise BackendError(f"the C++ engine is not available: {error}") from error
     flavor = llvm_flavor
     if flavor is None:
         from .lower_llvm import _resolve_llvm_flavor
@@ -282,29 +295,15 @@ def _lower_via_cpp_engine(
     # Validate an explicit flavor in Python, mirroring the native lowerer
     # (lower_llvm raises ``ValueError("unknown LLVM flavor ...")``), so the error
     # contract is backend-INDEPENDENT: backend="cpp" must reject a bad flavor with
-    # the same ValueError as backend="python"/"both", not the engine's RuntimeError
-    # (which only surfaces once the rocke_engine .so is on the path).
+    # the same ValueError as backend="python"/"both".
     from .lower_llvm import LLVM_FLAVORS
 
     if flavor not in LLVM_FLAVORS:
         raise ValueError(f"unknown LLVM flavor {flavor!r}")
-    refused = getattr(engine, "ArchDomainError", None)
     try:
-        return engine.lower_serialized_ir(ir_text, arch=arch, flavor=flavor or "")
-    except (
-        Exception
-    ) as e:  # noqa: BLE001 -- augment a stale-binary footgun, then re-raise
-        if refused is not None and isinstance(e, refused):
-            raise _arch_domain_refusal(str(e)) from None
-        msg = str(e)
-        if "unknown opcode" in msg:
-            so = getattr(engine, "__file__", "<unknown>")
-            raise type(e)(
-                f"{msg}\n[rocke] hint: if this opcode exists in the current "
-                f"rocke source, the loaded rocke_engine binary is STALE — rebuild "
-                f"it (the .so predates the opcode). Loaded from: {so}"
-            ) from e
-        raise
+        return native_engine.lower_serialized_ir(ir_text, arch, flavor)
+    except native_engine.ArchDomainRefusal as refusal:
+        raise _arch_domain_refusal(str(refusal)) from None
 
 
 def _arch_domain_refusal(message: str) -> Exception:
@@ -330,8 +329,8 @@ def _arch_domain_refusal(message: str) -> Exception:
     ):
         return BackendMismatch(
             "the C++ engine refused a lowering that this checkout's arch-domain "
-            f"table does not refuse ({message!r}); the rocke_engine extension "
-            "was built from other columns or waivers -- rebuild it"
+            f"table does not refuse ({message!r}); the engine library was built "
+            "from other columns or waivers -- rebuild it"
         )
     key, arch, flavor, _ = parsed
     return ArchDomainError(key, arch, flavor, cell.status, cell.evidence)
@@ -402,10 +401,7 @@ def lower_kernel_via_backend(
         return python_lower(kernel, llvm_flavor=llvm_flavor, arch=arch)
 
     if arch is None:
-        raise ValueError(
-            "lowering requires an explicit gfx target; "
-            "pass arch=... (there is no default)"
-        )
+        raise ValueError(native_engine.NO_TARGET_MESSAGE)
     _arch = arch
     name = getattr(kernel, "name", "?")
 
@@ -424,7 +420,7 @@ def lower_kernel_via_backend(
             # falling back would only print a misleading "fell back" line first.
             raise
         except BaseException as e:  # noqa: BLE001 -- includes BackendError
-            if _cpp_strict():
+            if cpp_strict():
                 raise
             _record_fallback(name, f"{type(e).__name__}: {e}")
             # No post-pass: the fallback runs the Python lowerer, whose `_need`

@@ -13,7 +13,7 @@ import pytest
 
 from rocke.core.arch import ArchTarget
 from rocke.core.arch.wmma_scale import gfx1250_scaled_wmma
-from rocke.core.backend import _cpp_strict, resolve_backend
+from rocke.core.backend import cpp_strict, resolve_backend
 from rocke.core.isa.wmma_scale import ScaledWmmaLLVM
 from rocke.core.ir import F32, I32, I64, IRBuilder, Param, PtrType, VectorType
 from rocke.core.ir_serialize import parse, serialize
@@ -28,7 +28,7 @@ from rocke.instances.gfx1250.block_scaled_gemm import (
     build_block_scaled_gemm,
     is_valid_spec,
 )
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
+from rocke.tests.engines import native_engine_or_skip
 
 
 def _scaled_atom(dtype="fp8", scale16=False):
@@ -104,11 +104,11 @@ def _assert_scaled_lowering_rejects(kernel, message, engine, *, hip_message=None
     if engine == "native":
         if not neutral:
             pytest.skip("native LLVM uses neutral MMA dispatch")
-        native = import_or_skip_until("rocke_engine", BINDING_LANE)
+        native = native_engine_or_skip()
         with pytest.raises(RuntimeError) as caught:
             native.lower_serialized_ir(ir, arch="gfx1250", flavor="llvm23")
         assert str(caught.value) == (
-            "rocke_engine.lower_serialized_ir: lower failed for arch 'gfx1250' "
+            "rocke_lower_serialized_ir_to_llvm: lower failed for arch 'gfx1250' "
             f"(status 1): {message}"
         )
         return
@@ -373,7 +373,7 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
         # A native rejection is retried in Python unless strict C++ is requested.
         error_type = (
             RuntimeError
-            if resolve_backend() == "cpp" and _cpp_strict()
+            if resolve_backend() == "cpp" and cpp_strict()
             else NotImplementedError
         )
         for flavor in ("llvm20", "llvm22"):
@@ -554,7 +554,7 @@ def _scaled_matrix_error(op_id, role, bad, dtype, register_words=16):
 @pytest.mark.parametrize("dtype", ["fp8", "bf8", "fp6", "bf6", "fp4"])
 def test_scaled_lowering_rejects_sources(scale16, engine, dtype, subtests):
     if engine == "native":
-        import_or_skip_until("rocke_engine", BINDING_LANE)
+        native_engine_or_skip()
     # Every combination reports as a subtest, so a run of only skipped
     # combinations is told apart from one that checked something.
     for concrete, role, kind in product(

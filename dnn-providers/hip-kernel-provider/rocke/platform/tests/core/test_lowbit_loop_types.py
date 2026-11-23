@@ -25,7 +25,7 @@ from rocke.core.ir import (
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 from rocke.tests.arch_marks import COVERED_ARCHES, arch_specific
-from rocke.tests.lanes import BINDING_LANE, skip_until
+from rocke.tests.engines import native_engine_or_skip
 
 
 pytestmark = pytest.mark.filterwarnings(
@@ -159,10 +159,7 @@ class TestLowbitLoopTypes(unittest.TestCase):
         )
 
     def test_python_cpp_bytes_match_for_each_llvm_flavor(self):
-        try:
-            import rocke_engine
-        except ModuleNotFoundError as exc:
-            skip_until(BINDING_LANE, reason=f"rocke_engine extension not built: {exc}")
+        native = native_engine_or_skip()
 
         for trip_count in (None, 0, 1, 3):
             kernel, _ = _build_loop(
@@ -175,7 +172,7 @@ class TestLowbitLoopTypes(unittest.TestCase):
                         python_llvm = _lower_kernel_to_llvm_python(
                             kernel, arch=arch, llvm_flavor=flavor
                         )
-                        cpp_llvm = rocke_engine.lower_serialized_ir(
+                        cpp_llvm = native.lower_serialized_ir(
                             encoded, arch=arch, flavor=flavor
                         )
                         self.assertEqual(cpp_llvm, python_llvm)
@@ -253,12 +250,9 @@ class TestLowbitLoopTypes(unittest.TestCase):
         reason="the lowering has no arch branch and the IR is identical on gfx942 and gfx950; test_python_cpp_bytes_match_for_each_llvm_flavor runs on every covered arch",
     )
     def test_cpp_validates_metadata_counts_in_both_loop_paths(self):
-        try:
-            import rocke_engine
-        except ModuleNotFoundError as exc:
-            skip_until(BINDING_LANE, reason=f"rocke_engine extension not built: {exc}")
+        native = native_engine_or_skip()
         self._check_metadata_counts(
-            lambda kernel: rocke_engine.lower_serialized_ir(
+            lambda kernel: native.lower_serialized_ir(
                 serialize(kernel), arch="gfx950", flavor="llvm20"
             ),
             RuntimeError,
@@ -306,10 +300,7 @@ class TestLowbitLoopTypes(unittest.TestCase):
         reason="the lowering has no arch branch and the IR is identical on gfx942 and gfx950; test_python_cpp_bytes_match_for_each_llvm_flavor runs on every covered arch",
     )
     def test_cpp_rejects_illegal_type_and_malformed_metadata_clearly(self):
-        try:
-            import rocke_engine
-        except ModuleNotFoundError as exc:
-            skip_until(BINDING_LANE, reason=f"rocke_engine extension not built: {exc}")
+        native = native_engine_or_skip()
 
         illegal_types = (
             (Type("i7"), "no LLVM mapping for type i7"),
@@ -325,7 +316,7 @@ class TestLowbitLoopTypes(unittest.TestCase):
             with self.subTest(carry_type=carry_type.name):
                 kernel, _ = _build_loop((("bad", carry_type, ""),))
                 with self.assertRaisesRegex(RuntimeError, re.escape(message)):
-                    rocke_engine.lower_serialized_ir(
+                    native.lower_serialized_ir(
                         serialize(kernel), arch="gfx950", flavor="llvm20"
                     )
 
@@ -335,7 +326,7 @@ class TestLowbitLoopTypes(unittest.TestCase):
             RuntimeError,
             "malformed vector type",
         ):
-            rocke_engine.lower_serialized_ir(
+            native.lower_serialized_ir(
                 serialize(kernel), arch="gfx950", flavor="llvm20"
             )
 

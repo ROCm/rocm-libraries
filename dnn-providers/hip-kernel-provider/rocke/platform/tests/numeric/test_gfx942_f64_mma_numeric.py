@@ -5,20 +5,14 @@ import struct
 
 import numpy as np
 import pytest
-from rocke.core.ir_serialize import serialize
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.instances.gfx942.f64_mma_probe import F64MmaProbeSpec, build_f64_mma_probe
 from rocke.tests.arch_marks import arch_specific
-from rocke.tests.engines import available_engines
+from rocke.tests.engines import available_engines, lower_with_engine
 from rocke.tests.gpu import current_device_arch_in
 
 
 def _llvm(kernel, engine):
-    if engine == "python":
-        return _lower_kernel_to_llvm_python(kernel, arch="gfx942")
-    import rocke_engine as native
-
-    return native.lower_serialized_ir(serialize(kernel), arch="gfx942")
+    return lower_with_engine(kernel, "gfx942", engine=engine)
 
 
 def _launch(ll, name, a, b, c):

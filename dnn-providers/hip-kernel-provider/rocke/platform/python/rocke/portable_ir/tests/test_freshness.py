@@ -4,8 +4,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import hashlib
+import os
 import shutil
 import subprocess
 import tempfile
@@ -13,6 +15,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from rocke import assets
+from rocke.core import engine_provenance, native_engine
 from rocke.portable_ir.src import online
 from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
 
@@ -312,13 +316,16 @@ class TestInstalledProvenanceManifest(unittest.TestCase):
                     clear=True,
                 ),
                 mock.patch.object(
-                    online, "_current_source_build_id", return_value=None
+                    engine_provenance, "source_build_id", return_value=None
                 ),
             ):
                 self.assertEqual(
-                    online.provenance_manifest(), ("1.0.0", "installed-build")
+                    engine_provenance.provenance_manifest(),
+                    ("1.0.0", "installed-build"),
                 )
-                self.assertEqual(online._expected_build_id(), "installed-build")
+                self.assertEqual(
+                    engine_provenance.expected_build_id(), "installed-build"
+                )
 
     def test_manifest_must_match_source_when_both_are_present(self):
         with tempfile.TemporaryDirectory() as td:
@@ -331,18 +338,18 @@ class TestInstalledProvenanceManifest(unittest.TestCase):
                     clear=True,
                 ),
                 mock.patch.object(
-                    online, "_current_source_build_id", return_value="source-build"
+                    engine_provenance, "source_build_id", return_value="source-build"
                 ),
             ):
                 with self.assertRaisesRegex(RuntimeError, "does not match"):
-                    online._expected_build_id()
+                    engine_provenance.expected_build_id()
 
     def test_malformed_manifest_is_rejected(self):
         with tempfile.TemporaryDirectory() as td:
             manifest = Path(td) / "provenance.txt"
             manifest.write_text("missing-build-id\n")
             with self.assertRaisesRegex(RuntimeError, "invalid.*manifest"):
-                online.provenance_manifest(manifest)
+                engine_provenance.provenance_manifest(manifest)
 
 
 class _CleanEnvironmentTest(unittest.TestCase):
@@ -355,13 +362,26 @@ class _CleanEnvironmentTest(unittest.TestCase):
 
 
 class TestLoadedEngineFreshness(_CleanEnvironmentTest):
+    """rocke.core.native_engine is the one loader; online.load goes through it."""
+
+    def setUp(self):
+        super().setUp()
+        self._loaded = (native_engine._engine, native_engine._engine_path)
+        native_engine._engine, native_engine._engine_path = None, None
+
+    def tearDown(self):
+        native_engine._engine, native_engine._engine_path = self._loaded
+        super().tearDown()
+
     def test_stale_engine_fails_once_with_both_build_ids(self):
         lib = _Library("old-build")
         with mock.patch.object(
-            online, "_current_source_build_id", return_value="current-build"
+            engine_provenance, "source_build_id", return_value="current-build"
         ):
-            with self.assertRaisesRegex(RuntimeError, "stale/mixed rocKE engine") as cm:
-                online._check_source_freshness(lib, "cached/librocke.so")
+            with self.assertRaisesRegex(
+                native_engine.StaleSharedEngine, "stale/mixed rocKE engine"
+            ) as cm:
+                native_engine.check_build_id(lib, "cached/librocke.so")
         message = str(cm.exception)
         self.assertIn("old-build", message)
         self.assertIn("current-build", message)
@@ -371,49 +391,47 @@ class TestLoadedEngineFreshness(_CleanEnvironmentTest):
     def test_matching_engine_is_accepted(self):
         lib = _Library("same-build")
         with mock.patch.object(
-            online, "_current_source_build_id", return_value="same-build"
+            engine_provenance, "source_build_id", return_value="same-build"
         ):
-            online._check_source_freshness(lib, "librocke.so")
+            native_engine.check_build_id(lib, "librocke.so")
 
     def test_public_load_rejects_stale_engine_before_binding(self):
         lib = _Library("old-build")
-        online._lib = None
-        online._lib_path = None
         with (
             mock.patch.object(online, "resolve_library_path", return_value="stale.so"),
-            mock.patch.object(online.ctypes, "CDLL", return_value=lib),
+            mock.patch.object(native_engine.ctypes, "CDLL", return_value=lib),
             mock.patch.object(
-                online, "_current_source_build_id", return_value="current-build"
+                engine_provenance, "source_build_id", return_value="current-build"
             ),
             mock.patch.object(online, "_bind") as bind,
         ):
             with self.assertRaisesRegex(RuntimeError, "stale/mixed rocKE engine"):
                 online.load()
         bind.assert_not_called()
+        self.assertIsNone(native_engine.loaded_shared_engine_path())
 
     def test_already_loaded_engine_does_not_rehash_sources(self):
         lib = _Library("current-build")
-        online._lib = lib
-        online._lib_path = str(Path("loaded.so").resolve())
-        try:
-            with mock.patch.object(
-                online, "_current_source_build_id"
-            ) as source_build_id:
-                self.assertIs(online.load(online._lib_path), lib)
-                self.assertIs(online.load(online._lib_path), lib)
-            source_build_id.assert_not_called()
-        finally:
-            online._lib = None
-            online._lib_path = None
+        native_engine._engine = lib
+        native_engine._engine_path = Path("loaded.so").resolve()
+        with (
+            mock.patch.object(engine_provenance, "source_build_id") as build_id,
+            mock.patch.object(online, "_bind"),
+        ):
+            loaded = str(native_engine._engine_path)
+            self.assertIs(online.load(loaded), lib)
+            self.assertIs(online.load(loaded), lib)
+        build_id.assert_not_called()
 
     def test_loaded_engine_cannot_ignore_a_later_explicit_selection(self):
-        online._lib = object()
-        online._lib_path = str(Path("first.so").resolve())
-        with mock.patch.dict("os.environ", {"ROCKE_ONLINE_LIB": "second.so"}):
-            with self.assertRaisesRegex(RuntimeError, "already loaded"):
-                online.load()
-        online._lib = None
-        online._lib_path = None
+        native_engine._engine = object()
+        native_engine._engine_path = Path("first.so").resolve()
+        with tempfile.TemporaryDirectory() as td:
+            second = Path(td) / "second.so"
+            second.touch()
+            with mock.patch.dict("os.environ", {"ROCKE_ONLINE_LIB": str(second)}):
+                with self.assertRaisesRegex(RuntimeError, "already loaded"):
+                    online.load()
 
 
 class TestReplayCliFreshness(_CleanEnvironmentTest):
@@ -431,6 +449,9 @@ class TestReplayCliFreshness(_CleanEnvironmentTest):
                 mock.patch.object(online.subprocess, "run", return_value=proc),
                 mock.patch.object(
                     online, "_current_source_build_id", return_value=None
+                ),
+                mock.patch.object(
+                    engine_provenance, "source_build_id", return_value=None
                 ),
                 mock.patch.object(online, "build_replay_cli") as build,
                 mock.patch.dict(
@@ -455,7 +476,7 @@ class TestReplayCliFreshness(_CleanEnvironmentTest):
             with (
                 mock.patch.object(online.subprocess, "run", return_value=proc),
                 mock.patch.object(
-                    online, "_current_source_build_id", return_value=None
+                    engine_provenance, "source_build_id", return_value=None
                 ),
                 mock.patch.dict(
                     "os.environ",
@@ -477,7 +498,7 @@ class TestReplayCliFreshness(_CleanEnvironmentTest):
         with (
             mock.patch.object(online.subprocess, "run", return_value=proc),
             mock.patch.object(
-                online, "_current_source_build_id", return_value="current-build"
+                engine_provenance, "source_build_id", return_value="current-build"
             ),
         ):
             with self.assertRaisesRegex(
@@ -546,12 +567,65 @@ class TestCacheSelection(_CleanEnvironmentTest):
             self.assertTrue((root / ".build.lock").is_file())
 
     def test_source_less_non_building_probes_return_none(self):
+        """An installed tree whose process has no shared engine
+        (ROCKE_ONLINE_LIB=none, whatever is installed beside the package) and
+        no replay CLI named: the probes find nothing, and building is refused."""
         with (
-            mock.patch.dict("os.environ", {}, clear=True),
+            mock.patch.dict(
+                "os.environ",
+                {native_engine.SHARED_ENGINE_ENV: native_engine.NO_SHARED_ENGINE},
+                clear=True,
+            ),
             mock.patch.object(online, "_current_source_build_id", return_value=None),
         ):
             self.assertIsNone(online.resolve_library_path(build=False))
             self.assertIsNone(online.resolve_replay_cli_path(build=False))
+            with self.assertRaises(native_engine.SharedEngineNotFound):
+                online.resolve_library_path(build=True)
+
+    def test_source_less_probe_finds_the_library_beside_the_package(self):
+        """An installed tree uses the librocke its build installed beside the
+        rocke package, as the provider's test tree does."""
+        with tempfile.TemporaryDirectory() as td:
+            installed = Path(td) / native_engine.shared_library_name()
+            installed.touch()
+            with (
+                mock.patch.dict("os.environ", {}, clear=True),
+                mock.patch.object(
+                    online, "_current_source_build_id", return_value=None
+                ),
+                mock.patch.object(
+                    native_engine,
+                    "installed_shared_engine_path",
+                    return_value=installed,
+                ),
+            ):
+                self.assertEqual(
+                    online.resolve_library_path(build=False), str(installed)
+                )
+
+    def test_a_relative_manifest_is_found_beside_the_package_from_any_directory(
+        self,
+    ):
+        """The installed tree names its manifest relative to the directory
+        holding the rocke package; a process working in another directory
+        still reads it."""
+        with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as cwd:
+            manifest = Path(td) / "provenance.txt"
+            manifest.write_text("1.0.0 installed-build\n")
+            relative = os.path.relpath(manifest, assets.package_parent())
+            with (
+                mock.patch.dict(
+                    "os.environ",
+                    {engine_provenance.PROVENANCE_MANIFEST_ENV: relative},
+                    clear=True,
+                ),
+                contextlib.chdir(cwd),
+            ):
+                self.assertEqual(
+                    engine_provenance.provenance_manifest(),
+                    ("1.0.0", "installed-build"),
+                )
 
     def test_explicit_missing_library_never_falls_back(self):
         with tempfile.TemporaryDirectory() as td:

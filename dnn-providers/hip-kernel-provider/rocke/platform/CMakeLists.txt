@@ -159,7 +159,9 @@ endfunction()
 # Every installed rocKE pytest entry except the explicit gates starts its
 # command with this text. The rocke.tests.ctest_shard plugin and its flag make
 # the entry run only the CI shard's share of its tests. The gates stop on a
-# partial run, so they keep their own command.
+# partial run, so they keep their own command. A build that installs the
+# shared C++ engine beside the package appends the
+# rocke.tests.require_cpp_engine plugin (see ROCKE_BUILD_SHARED_ENGINE below).
 set(_ROCKE_INSTALLED_PYTEST
     "python -m pytest -p rocke.tests.ctest_shard --rocke-shard-from-gtest-env")
 
@@ -338,17 +340,20 @@ set_source_files_properties(
 # hosts; enabling it uniformly keeps one object set portable across consumers.
 set_target_properties(rocke_core_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-# --- Shared engine for the portable-IR replay path ---------------------------
-# The Python-side portable-IR tooling (rocke.portable_ir.src.online) reaches the
-# C++ importer, recipe VM and lowerer through ctypes, which needs a .so rather
-# than the archive. online.build_lib() can produce one on demand, but a CI gate
-# wants a named target it can build and point ROCKE_ONLINE_LIB at, with the link
-# flags living here rather than duplicated in workflow YAML. Supplying the
-# object library directly retains every C ABI entry point without linker-specific
+# --- Shared engine for the ctypes callers -------------------------------------
+# Python reaches the engine's C ABI through ctypes, which needs a .so rather than
+# the archive: rocke.core.native_engine lowers serialized IR through it (the cpp
+# backend and the both-engine tests), and the portable-IR tooling
+# (rocke.portable_ir.src.online) reaches the importer, recipe VM and lowerer the
+# same way. online.build_lib() can produce one on demand, but a CI gate wants a
+# named target it can build and point ROCKE_ONLINE_LIB at, with the link flags
+# living here rather than duplicated in workflow YAML. Supplying the object
+# library directly retains every C ABI entry point without linker-specific
 # whole-archive flags. On Windows, it also gives CMake the .obj files needed to
 # generate the DLL export definition.
 option(ROCKE_BUILD_SHARED_ENGINE
-       "Also link a shared librocke.so (needed by the portable-IR ctypes path)" OFF)
+       "Also link a shared librocke.so (needed by the Python ctypes callers)" OFF)
+set(_ROCKE_SHARED_ENGINE_BESIDE_PACKAGE OFF)
 if(ROCKE_BUILD_SHARED_ENGINE)
   add_library(rocke_shared SHARED $<TARGET_OBJECTS:rocke_core_objects>)
   set_target_properties(rocke_shared PROPERTIES OUTPUT_NAME rocke)
@@ -358,9 +363,33 @@ if(ROCKE_BUILD_SHARED_ENGINE)
   elseif(UNIX)
     target_link_libraries(rocke_shared PRIVATE m)
   endif()
-  install(TARGETS rocke_shared
-          LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-          RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+  # A provider build installs it beside the rocke package, where
+  # rocke.core.native_engine finds it, as the engine's Python modules do, and
+  # only with its tests: there it is test content, and lib/ would make it a
+  # public library of the ROCm install. A standalone install keeps lib/.
+  if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
+    if(ROCKE_INSTALL_TESTS)
+      set(_ROCKE_SHARED_ENGINE_BESIDE_PACKAGE ON)
+      install(TARGETS rocke_shared
+              LIBRARY DESTINATION "${ROCKE_PYTHON_PACKAGE_INSTALL_DIR}"
+              RUNTIME DESTINATION "${ROCKE_PYTHON_PACKAGE_INSTALL_DIR}")
+    endif()
+  else()
+    set(ROCKE_SHARED_ENGINE_ABSENT_REASON
+        "a standalone install puts it in the library directory, not beside the rocke package")
+    install(TARGETS rocke_shared
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+  endif()
+endif()
+
+# Where the build installs the shared engine beside the rocke package, its
+# installed pytest entries count as covering the C++ engine: they load
+# rocke.tests.require_cpp_engine, which sets ROCKE_REQUIRE_CPP_ENGINE=1 and
+# ROCKE_CPP_STRICT=1 for the run, so a missing or broken engine fails them
+# instead of skipping its cases or falling back to the Python engine.
+if(_ROCKE_SHARED_ENGINE_BESIDE_PACKAGE)
+  string(APPEND _ROCKE_INSTALLED_PYTEST " -p rocke.tests.require_cpp_engine")
 endif()
 
 include(CTest)
@@ -453,26 +482,45 @@ if(ROCKE_INSTALL_TESTS)
             DESTINATION ${ROCKE_TEST_INSTALL_DIR})
 
     # Which of the C++ engine's Python modules this build makes, or why it
-    # makes none, for the installed guard rocke_engine_modules_check
-    # (rocke.tests.engine_modules), which fails when a module the build made
-    # does not import. Under tests/, which TheRock's test artifact captures. A
-    # build that decides against the modules (the provider build, on Windows or
-    # without pybind11) says why in ROCKE_ENGINE_MODULES_ABSENT_REASON.
+    # makes none, and whether it makes the shared engine, or why not, for the
+    # installed guard rocke_engine_modules_check (rocke.tests.engine_modules),
+    # which fails when a module or the shared engine the build made does not
+    # load. Under tests/, which TheRock's test artifact captures. A build that
+    # decides against the modules (the provider build, on Windows or without
+    # pybind11) says why in ROCKE_ENGINE_MODULES_ABSENT_REASON, and one that
+    # does not install the shared engine beside the package says why in
+    # ROCKE_SHARED_ENGINE_ABSENT_REASON.
+
+    # `value` as a JSON string literal: its backslashes, then its quotes, escaped.
+    function(_rocke_json_string out_var value)
+      string(REPLACE "\\" "\\\\" value "${value}")
+      string(REPLACE "\"" "\\\"" value "${value}")
+      set(${out_var} "\"${value}\"" PARENT_SCOPE)
+    endfunction()
     get_property(_ROCKE_ENGINE_PYTHON_MODULES GLOBAL PROPERTY ROCKE_ENGINE_PYTHON_MODULES)
     if(_ROCKE_ENGINE_PYTHON_MODULES)
       list(TRANSFORM _ROCKE_ENGINE_PYTHON_MODULES REPLACE "(.+)" "\"\\1\"")
-      list(JOIN _ROCKE_ENGINE_PYTHON_MODULES ", " _rocke_engine_modules_json)
-      set(_rocke_engine_modules_json "{\"modules\": [${_rocke_engine_modules_json}]}")
+      list(JOIN _ROCKE_ENGINE_PYTHON_MODULES ", " _rocke_modules)
+      set(_rocke_modules_fields "\"modules\": [${_rocke_modules}]")
     else()
       if(NOT DEFINED ROCKE_ENGINE_MODULES_ABSENT_REASON)
         set(ROCKE_ENGINE_MODULES_ABSENT_REASON "the build had ROCKE_BUILD_PYBIND off")
       endif()
-      # A JSON string: escape its backslashes, then its quotes.
-      string(REPLACE "\\" "\\\\" _rocke_absent_reason "${ROCKE_ENGINE_MODULES_ABSENT_REASON}")
-      string(REPLACE "\"" "\\\"" _rocke_absent_reason "${_rocke_absent_reason}")
-      set(_rocke_engine_modules_json
-          "{\"modules\": [], \"absent_reason\": \"${_rocke_absent_reason}\"}")
+      _rocke_json_string(_rocke_absent_reason "${ROCKE_ENGINE_MODULES_ABSENT_REASON}")
+      set(_rocke_modules_fields "\"modules\": [], \"absent_reason\": ${_rocke_absent_reason}")
     endif()
+    if(_ROCKE_SHARED_ENGINE_BESIDE_PACKAGE)
+      set(_rocke_shared_engine_fields
+          "\"shared_engine\": \"$<TARGET_FILE_NAME:rocke_shared>\"")
+    else()
+      if(NOT DEFINED ROCKE_SHARED_ENGINE_ABSENT_REASON)
+        set(ROCKE_SHARED_ENGINE_ABSENT_REASON "the build had ROCKE_BUILD_SHARED_ENGINE off")
+      endif()
+      _rocke_json_string(_rocke_absent_reason "${ROCKE_SHARED_ENGINE_ABSENT_REASON}")
+      set(_rocke_shared_engine_fields
+          "\"shared_engine\": \"\", \"shared_engine_absent_reason\": ${_rocke_absent_reason}")
+    endif()
+    set(_rocke_engine_modules_json "{${_rocke_modules_fields}, ${_rocke_shared_engine_fields}}")
     set(_ROCKE_ENGINE_MODULES_MARKER "${CMAKE_CURRENT_BINARY_DIR}/rocke_engine_modules.json")
     file(GENERATE OUTPUT "${_ROCKE_ENGINE_MODULES_MARKER}"
          CONTENT "${_rocke_engine_modules_json}\n")
@@ -704,12 +752,12 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_python_import_smoke PROPERTIES LABELS \"ckc;python;quick\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
-    # The engine modules the build made import from the installed tree, and
-    # lower_kernel_to_llvm lowers through the C++ engine: without this entry,
-    # losing the modules turns thousands of installed tests into skips and
-    # the run stays green. It skips (exit 77) with the marker's reason when the
-    # build made none. Not a pytest entry, so it runs whole on every CI shard;
-    # it costs about a second.
+    # The engine modules and the shared engine the build made load from the
+    # installed tree, and lower_kernel_to_llvm lowers through the C++ engine:
+    # without this entry, losing them turns thousands of installed tests into
+    # skips and the run stays green. It skips (exit 77) with the marker's
+    # reasons when the build made neither. Not a pytest entry, so it runs whole
+    # on every CI shard; it costs about a second.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_engine_modules_check python -m rocke.tests.engine_modules \"${ROCKE_TEST_CTEST_REL}tests/rocke_engine_modules.json\")\n"
            "set_tests_properties(rocke_engine_modules_check PROPERTIES\n"
@@ -883,9 +931,13 @@ if(ROCKE_INSTALL_TESTS)
       # binary named by an environment variable, and skip without it. Point
       # each variable at its installed binary, as tests/run_all.py does for a
       # source build (its NATIVE_PARITY_TESTS), so those cases run here too.
-      # Paths are relative to the CTestTestfile. ROCKE_REPLAY_CLI is the
-      # portable-IR replay CLI and ROCKE_PROVENANCE_MANIFEST its provenance
-      # manifest; ROCKE_UNSIGNED_INT_OPS_CLI is the C API program whose
+      # Paths are relative to the CTestTestfile, except ROCKE_REPLAY_CLI, the
+      # portable-IR replay CLI, and ROCKE_PROVENANCE_MANIFEST, its provenance
+      # manifest: their reader (rocke.assets.beside_package) takes a relative
+      # value beside the installed rocke package, wherever a test runs, so
+      # they are relative to ROCKE_PYTHON_PACKAGE_INSTALL_DIR (the same as the
+      # CTestTestfile's directory in provider mode, not in a standalone
+      # install). ROCKE_UNSIGNED_INT_OPS_CLI is the C API program whose
       # --print-llvm output test_unsigned_int_ops.py compares with the Python
       # builder's text; ROCKE_INTEXPR_CLI is the C++ integer-expression
       # evaluator whose --eval output test_intexpr.py compares with Python's;
@@ -893,10 +945,13 @@ if(ROCKE_INSTALL_TESTS)
       # canonicalize that test_param_facts.py compares with Python's;
       # ROCKE_GPU_CHECKED_VALUE_CLI prints the C++ builder's GPU-check cases
       # and marker verifier messages that test_gpu_checked_value.py compares.
+      file(RELATIVE_PATH _rocke_portable_ir_beside_package
+           "${CMAKE_INSTALL_PREFIX}/${ROCKE_PYTHON_PACKAGE_INSTALL_DIR}"
+           "${CMAKE_INSTALL_PREFIX}/${ROCKE_TEST_INSTALL_DIR}/tests/portable_ir")
       set(_ROCKE_PYTEST_ENVIRONMENT
           "PYTHONPATH=."
-          "ROCKE_REPLAY_CLI=${ROCKE_TEST_CTEST_REL}tests/portable_ir/rocke_portable_ir_replay_cli${CMAKE_EXECUTABLE_SUFFIX}"
-          "ROCKE_PROVENANCE_MANIFEST=${ROCKE_TEST_CTEST_REL}tests/portable_ir/rocke_portable_ir_provenance.txt")
+          "ROCKE_REPLAY_CLI=${_rocke_portable_ir_beside_package}/rocke_portable_ir_replay_cli${CMAKE_EXECUTABLE_SUFFIX}"
+          "ROCKE_PROVENANCE_MANIFEST=${_rocke_portable_ir_beside_package}/rocke_portable_ir_provenance.txt")
       foreach(_rocke_native_parity
               "ROCKE_STORAGE_TEST=rocke_storage"
               "ROCKE_IR_TYPES_TEST=rocke_ir_types"

@@ -150,9 +150,18 @@ Override the roots for out-of-tree consumption with `ROCKE_PLATFORM_ROOT`,
 
 ## C++ engine
 
-The platform C++ engine (`platform/cpp/` → `librocke_core.a`) and its
-`rocke_engine` pybind binding are built by CMake, not pip, and are intentionally
-not part of any wheel. See `platform/BUILD.md`. The same configure also builds
+The platform C++ engine (`platform/cpp/` → `librocke_core.a`), its shared
+library `librocke` (`-DROCKE_BUILD_SHARED_ENGINE=ON`) and its `rocke_engine`
+pybind binding are built by CMake, not pip, and are intentionally not part of
+any wheel.
+
+Python reaches the engine two ways. The default `cpp` backend, and every test
+that compares the two engines on one kernel, lowers serialized IR through
+`librocke`'s C ABI (`rocke.core.native_engine`, ctypes): point
+`ROCKE_ONLINE_LIB` at the built library, or install it beside the `rocke`
+package, as the provider's test build does. Only the tests of a kernel family's
+C++ builder need the `rocke_engine` module (`-DROCKE_BUILD_PYBIND=ON`, which
+needs pybind11 in the build's Python). See `platform/BUILD.md`. The same configure also builds
 the library families' C++ mirrors (`library/cpp/` → `librocke_library.a`, beside
 `librocke_core.a`) and, with `ROCKE_BUILD_PYBIND=ON`, their `rocke_library_engine`
 binding beside `rocke_engine`; `-DROCKE_BUILD_LIBRARY_CPP=OFF` skips them.

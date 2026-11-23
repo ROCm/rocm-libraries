@@ -17,8 +17,9 @@
  *
  *   ROCKE_ABI_VERSION   BINARY. Does this header match this .so? Governs struct
  *                       layouts, enum values and function signatures -- the
- *                       things a C++ caller and the ctypes bindings in
- *                       src/online.py hard-code at their own build time. A
+ *                       things a C++ caller and the ctypes bindings
+ *                       (rocke.core.native_engine, portable_ir/src/online.py)
+ *                       hard-code at their own build time. A
  *                       mismatch here is memory-unsafe, not merely wrong, so
  *                       callers should check it once at load and refuse.
  *

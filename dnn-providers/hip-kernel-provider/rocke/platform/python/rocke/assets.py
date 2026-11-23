@@ -23,6 +23,23 @@ from pathlib import Path
 _PLATFORM_ROOT = Path(__file__).resolve().parents[2]
 
 
+def package_parent() -> Path:
+    """The directory holding the ``rocke`` package (``platform/python`` in a
+    source checkout). An installed test tree puts its test artifacts there,
+    beside the package, and its CTest entries run from it."""
+    return Path(__file__).resolve().parent.parent
+
+
+def beside_package(path: str | os.PathLike[str]) -> Path:
+    """``path``, taken relative to :func:`package_parent` unless absolute.
+
+    For a path an installed test tree names relative to itself, in an
+    environment variable its CTest entries set: it must mean the same file
+    whatever directory a test, or a process a test starts, runs in.
+    """
+    return package_parent() / path
+
+
 def platform_root() -> Path:
     """The ``rocke/platform`` source root (parent of ``python/``, ``dsl_docs/``, ``cpp/``).
 

@@ -37,6 +37,7 @@ import statistics
 import time
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from rocke.core.native_engine import BINARY_ABI
 from rocke.portable_ir.drivers.roll_hsaco_parity import ARCH, _attn, _conv, _gemm
 from rocke.portable_ir.src import abi as _abi
 from rocke.portable_ir.src import guard as _guard
@@ -247,7 +248,7 @@ def main() -> int:
     print(
         f"== cold JIT from CBOR, with admission checks (arch={ARCH}, N={n}) ==\n"
         f"   engine {engine or '?'} build {build_id[:12] or '?'}   "
-        f"recipe ABI {_abi.RECIPE_ABI}, binary ABI {_abi.BINARY_ABI}\n"
+        f"recipe ABI {_abi.RECIPE_ABI}, binary ABI {BINARY_ABI}\n"
     )
 
     rows: List[Dict[str, Any]] = []

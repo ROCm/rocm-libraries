@@ -13,7 +13,7 @@ also brackets the barrier with workgroup release / acquire fences (the
 ``__syncthreads`` sequence; on their own they did not stop the sinking).
 Unfenced barriers keep their emission, so every kernel that does not opt in is
 unchanged. The C++ engine mirror is ``tests/core/test_barrier_fence.cpp``; when
-``rocke_engine`` is built, the two engines' LLVM IR is compared here too.
+the C++ engine is found, the two engines' LLVM IR is compared here too.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import pytest
 from rocke.core.ir import BARRIER_FENCES, IRBuilder
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
+from rocke.tests.engines import native_engine_or_skip
 
 REL = '  fence syncscope("workgroup") release'
 BAR = " call void @llvm.amdgcn.s.barrier()"
@@ -129,10 +129,10 @@ def test_fenced_barrier_hip_emission():
 @pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
 def test_cpp_engine_emits_the_same_fenced_barriers(arch, flavor):
-    rocke_engine = import_or_skip_until("rocke_engine", BINDING_LANE)
+    native = native_engine_or_skip()
     from rocke.core.ir_serialize import serialize
 
     k = _probe()
     py = _lower_kernel_to_llvm_python(k, arch=arch, llvm_flavor=flavor)
-    cpp = rocke_engine.lower_serialized_ir(serialize(k), arch=arch, flavor=flavor)
+    cpp = native.lower_serialized_ir(serialize(k), arch=arch, flavor=flavor)
     assert cpp == py

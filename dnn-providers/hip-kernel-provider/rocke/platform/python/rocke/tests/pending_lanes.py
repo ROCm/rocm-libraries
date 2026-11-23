@@ -602,9 +602,17 @@ PENDING: tuple[PendingTest, ...] = (
         "skips without it, until TheRock's build environment has pybind11",
         "rocKE platform engine; issue: none filed yet",
         "2027-01-31",
+        "library/tests/test_selector_cpp_parity.py",
+    ),
+    *_waiting(
+        SHARED_LIBRARY_LANE,
+        "its cases that lower through the C++ engine's shared library "
+        "(librocke) skip where the build installs none (the Windows provider "
+        "build)",
+        "rocKE platform engine; issue: none filed yet",
+        "2027-01-31",
         "library/tests/test_attention_ir_cpp_parity.py",
         "library/tests/test_gdn_decode_ir_cpp_parity.py",
-        "library/tests/test_selector_cpp_parity.py",
     ),
     *_waiting(
         NIGHTLY_SOURCE,
@@ -849,7 +857,6 @@ PENDING: tuple[PendingTest, ...] = (
         "no pybind11 to build them",
         "rocKE library; issue: none filed yet",
         "2027-01-31",
-        "library/tests/test_attention_bwd_lds_alignment.py",
         "library/tests/test_attention_tiled_3d_kv_cache_policy.py",
         "library/tests/test_attention_tiled_3d_kv_lds_swizzle.py",
         "library/tests/test_attention_tiled_3d_running_max.py",
@@ -873,10 +880,40 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_strided_kv_decode.py",
     ),
     *_waiting(
+        SHARED_LIBRARY_LANE,
+        "its cases that lower through the C++ engine's shared library "
+        "(librocke) skip where the build installs none (the Windows provider "
+        "build)",
+        "rocKE library; issue: none filed yet",
+        "2027-01-31",
+        "library/tests/test_attention_bwd_lds_alignment.py",
+        "library/tests/test_conv_direct_grouped_backend_parity.py",
+    ),
+    *_waiting(
         BINDING_LANE,
         "its cases that lower through the C++ engine's Python modules "
         "(rocke_engine, rocke_library_engine) skip in CI, whose build's Python has "
         "no pybind11 to build them",
+        "rocKE platform; issue: none filed yet",
+        "2027-01-31",
+        "platform/tests/core/test_arch_domain_lane.py",
+        "platform/tests/core/test_f64_mma.py",
+        "platform/tests/core/test_gfx950_scaled_mfma.py",
+        "platform/tests/core/test_mx_scale_decode.py",
+        "platform/tests/core/test_tf32.py",
+        "platform/tests/instances/test_gemm_tdm_padding.py",
+        "platform/tests/instances/test_gemm_tdm_traits_cpp_engine.py",
+        "platform/tests/instances/test_mx_gemm_scale_range.py",
+        "platform/tests/support/test_engine_modules.py",
+        "platform/tests/test_binding_compiler_selection.py",
+        "platform/tests/test_compiler_detection_native.py",
+        "platform/tests/test_rocke.py",
+    ),
+    *_waiting(
+        SHARED_LIBRARY_LANE,
+        "its cases that lower through the C++ engine's shared library "
+        "(librocke) skip where the build installs none (the Windows provider "
+        "build)",
         "rocKE platform; issue: none filed yet",
         "2027-01-31",
         "platform/tests/core/test_arch_domain_lane.py",
@@ -890,7 +927,6 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/tests/core/test_debug_info.py",
         "platform/tests/core/test_ds_read_tr16_b128_gate.py",
         "platform/tests/core/test_dtypes.py",
-        "platform/tests/core/test_f64_mma.py",
         "platform/tests/core/test_f8f6f4_16x16x128.py",
         "platform/tests/core/test_float_format.py",
         "platform/tests/core/test_fp8_scale_conversion_gate.py",
@@ -921,6 +957,7 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/tests/core/test_mma_operand_register_type.py",
         "platform/tests/core/test_mma_result_dtype.py",
         "platform/tests/core/test_mx_scale_decode.py",
+        "platform/tests/core/test_native_engine.py",
         "platform/tests/core/test_nontemporal_lowering.py",
         "platform/tests/core/test_optimization_barrier.py",
         "platform/tests/core/test_packed_only.py",
@@ -940,23 +977,20 @@ PENDING: tuple[PendingTest, ...] = (
         "platform/tests/core/test_workgroup_size.py",
         "platform/tests/core/test_xf32_bf16x3_lowering.py",
         "platform/tests/core/test_zero_vec_and_lds_element_types.py",
-        "platform/tests/instances/test_gemm_tdm_padding.py",
-        "platform/tests/instances/test_gemm_tdm_traits_cpp_engine.py",
+        "platform/tests/instances/differential/test_hip_source_identity.py",
         "platform/tests/instances/test_gfx950_grouped_gemm.py",
-        "platform/tests/instances/test_mx_gemm_scale_range.py",
         "platform/tests/numeric/test_warp_shuffle_xor_dpp_numeric.py",
         "platform/tests/numeric/test_wave_vote_numeric.py",
         "platform/tests/support/test_engine_modules.py",
         "platform/tests/support/test_engines.py",
-        "platform/tests/test_binding_compiler_selection.py",
-        "platform/tests/test_compiler_detection_native.py",
+        "platform/tests/support/test_require_cpp_engine.py",
         "platform/tests/test_rocke.py",
     ),
     *_waiting(
-        BINDING_LANE,
-        "its cases that lower through the C++ engine's Python modules "
-        "(rocke_engine, rocke_library_engine) skip in CI, whose build's Python has "
-        "no pybind11 to build them",
+        SHARED_LIBRARY_LANE,
+        "its cases that lower through the C++ engine's shared library "
+        "(librocke) skip where the build installs none (the Windows provider "
+        "build)",
         "rocKE tiling; issue: none filed yet",
         "2027-01-31",
         "platform/python/rocke/tests/helpers/tiling/mma/test_mma_dtypes.py",
@@ -1182,8 +1216,8 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting(
         SHARED_LIBRARY_LANE,
-        "its cases that load the shared librocke (the portable-IR C ABI) skip in CI, "
-        "which installs none",
+        "its cases that load the shared librocke (the portable-IR C ABI) skip where "
+        "the build installs none (the Windows provider build)",
         "rocKE platform portable IR; issue: none filed yet",
         "2027-01-31",
         "platform/python/rocke/portable_ir/tests/test_abi.py",

@@ -5,8 +5,8 @@
 GDN decode is a Python-only family: its spec and emitter have no C++ twin, and
 ``platform/tools/check_byte_identity.py`` runs no GDN case. The C++ engine
 still lowers every GDN kernel a caller builds (any kernel goes through the
-serialized-IR seam, ``rocke_engine.lower_serialized_ir``), so the two engines'
-lowering of this family's IR must agree. The family golden
+serialized-IR seam, ``rocke.core.native_engine.lower_serialized_ir``), so the
+two engines' lowering of this family's IR must agree. The family golden
 (``test_gdn_decode_golden.py``) pins the *Python* lowering only; this file is
 the other half for the same case set and every golden LLVM flavor: the C++
 engine must produce byte-identical LLVM IR.
@@ -24,7 +24,8 @@ import sys
 from pathlib import Path
 
 import pytest
-from rocke.tests.lanes import BINDING_LANE, skip_until
+from rocke.core import native_engine
+from rocke.tests.engines import native_engine_or_skip
 
 _TESTS = str(Path(__file__).resolve().parent)
 if _TESTS not in sys.path:
@@ -36,19 +37,15 @@ _ARCH = "gfx950"
 
 
 def _engine():
-    expected = os.environ.get("ROCKE_BACKEND") in ("cpp", "both")
-    try:
-        import rocke_engine
-    except ImportError as e:
-        if expected:
+    if os.environ.get("ROCKE_BACKEND") in ("cpp", "both"):
+        try:
+            native_engine.require_native_lowering()
+        except native_engine.SharedEngineNotFound as e:
             pytest.fail(
                 f"ROCKE_BACKEND={os.environ['ROCKE_BACKEND']} expects the C++ "
-                f"engine, but rocke_engine is not importable: {e}"
+                f"engine, but it is not found: {e}"
             )
-        skip_until(
-            BINDING_LANE, reason=f"rocke_engine extension not built/importable: {e}"
-        )
-    return rocke_engine
+    return native_engine_or_skip()
 
 
 def test_gdn_decode_ir_cpp_python_byte_identity():

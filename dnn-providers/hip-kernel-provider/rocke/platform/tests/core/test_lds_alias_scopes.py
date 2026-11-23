@@ -18,7 +18,7 @@ import unittest
 from rocke.core.ir import BF16, F32, IRBuilder, PtrType
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_llvm import LLVM_FLAVORS, lower_kernel_to_llvm
-from rocke.tests.lanes import BINDING_LANE, skip_until
+from rocke.tests.engines import native_engine_or_skip
 
 
 def _kernel(*, scopes: bool, overlap: bool = False):
@@ -103,16 +103,13 @@ class TestLdsAliasScopes(unittest.TestCase):
         self.assertIn(scope["late"], noalias[scope["other"]])
 
     def test_python_cpp_bytes_match(self):
-        try:
-            import rocke_engine
-        except ModuleNotFoundError as exc:
-            skip_until(BINDING_LANE, reason=f"rocke_engine extension not built: {exc}")
+        native = native_engine_or_skip()
         for overlap in (False, True):
             kernel = _kernel(scopes=True, overlap=overlap)
             for flavor in LLVM_FLAVORS:
                 with self.subTest(overlap=overlap, flavor=flavor):
                     self.assertEqual(
-                        rocke_engine.lower_serialized_ir(
+                        native.lower_serialized_ir(
                             serialize(kernel), arch="gfx942", flavor=flavor
                         ),
                         lower_kernel_to_llvm(kernel, arch="gfx942", llvm_flavor=flavor),

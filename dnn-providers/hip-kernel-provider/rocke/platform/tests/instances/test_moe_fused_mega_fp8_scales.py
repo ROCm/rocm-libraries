@@ -56,7 +56,7 @@ from rocke.instances.common.moe_fused_mega_fp8 import (
     moe_fused_mega_fp8_grid,
     moe_fused_mega_fp8_signature,
 )
-from rocke.tests.engines import available_engines, lower_with_engine
+from rocke.tests.engines import engine_modules_available, lower_with_engine
 from rocke.tests.fp8_gemm_checks import (
     EXACT_OPERAND_VALUES,
     GEMM_TOLERANCE,
@@ -105,7 +105,7 @@ def _lowered_llvm(spec: FusedMegaKernelSpecFp8, arch: str) -> str:
     identical."""
     kernel = build_moe_fused_mega_gemm_fp8(spec, arch=arch)
     python_ir = lower_with_engine(kernel, arch, engine="python")
-    if "cpp" in available_engines():
+    if engine_modules_available():
         fields = {
             field: value
             for field, value in dataclasses.asdict(spec).items()

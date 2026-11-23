@@ -194,9 +194,9 @@ Set these to configure the DSL. On Linux use `export NAME=value`; on Windows use
 
 | Variable | Values (default) | Purpose |
 |---|---|---|
-| `ROCKE_BACKEND` | `cpp` \| `python` \| `both` (**cpp**) | Which engine lowers Python-authored kernels. `cpp` = the C++ engine (falls back to Python if `rocke_engine` isn't built); `python` = the native lowerer; `both` = run both and assert byte-identical output (the differential check). |
+| `ROCKE_BACKEND` | `cpp` \| `python` \| `both` (**cpp**) | Which engine lowers Python-authored kernels. `cpp` = the C++ engine (falls back to Python if no shared `librocke` is found); `python` = the native lowerer; `both` = run both and assert byte-identical output (the differential check). |
 | `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` \| `llvm24` (automatic when unset) | Select the LLVM IR flavor (datalayout/intrinsics). Automatic selection lazily queries the loaded COMGR binary's LLVM version and fails if compiler evidence is unavailable. An explicit flavor supports offline IR emission without loading COMGR; it does not change the compiler consuming the IR. COMGR compilation still requires compiler-version evidence and checks the IR's p8 generation against that compiler. See [Compiler detection and provenance](../reference/env_flags.md#compiler-detection-and-provenance) for library selection and lifetime details. |
-| `ROCKE_CPP_STRICT` | `1` (unset) | Make `ROCKE_BACKEND=cpp` **raise** instead of silently falling back to the Python lowerer when `rocke_engine` is unavailable. Use to guarantee you are exercising the C engine. |
+| `ROCKE_CPP_STRICT` | `1` (unset) | Make `ROCKE_BACKEND=cpp` **raise** instead of silently falling back to the Python lowerer when the C++ engine cannot lower a kernel or is not found. Use to guarantee you are exercising the C engine. |
 | `ROCKE_USE_SUDO` | `1` (unset) | The benchmark/sweep harness launches kernels via `sudo -n -E` (for boxes where the user lacks GPU device-group access). |
 
 ### hipDNN provider
@@ -231,7 +231,7 @@ are working on that specific kernel path.
 | `do_action(COMPILE_SOURCE_TO_BC): status=1` | Inspect `comgr.loaded_compiler_info().describe()` and the COMGR diagnostic. AUTO uses loaded compiler evidence; do not choose an override from a ROCm release label (§5). |
 | `No module named 'rocke'` | `PYTHONPATH` not pointing at `rocke/platform/python`. |
 | `torch.cuda.is_available()` is `False` | Not in GPU device groups (§3.3). |
-| `cpp` backend silently uses Python | `rocke_engine` not built/on `PYTHONPATH`; build it (§3.4) and/or set `ROCKE_CPP_STRICT=1` to surface it. |
+| `cpp` backend silently uses Python | no shared `librocke` found; build the `rocke_shared` target and point `ROCKE_ONLINE_LIB` at it, and/or set `ROCKE_CPP_STRICT=1` to surface it. |
 | A persistent-kernel example hangs the compiler | Known on older comgr; use ROCm 7.2. |
 
 For deeper failure modes (stale artifacts, the differential gate), see

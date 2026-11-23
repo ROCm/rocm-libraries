@@ -2977,7 +2977,9 @@ static std::string rocke_engine_flavor_list()
 }
 
 /* Refuse an empty target in the binding: the engine's own refusal names no
- * Python argument. Shared by both serialized-IR bindings. */
+ * Python argument. Shared by both serialized-IR bindings. The text after the
+ * prefix is rocke.core.native_engine.NO_TARGET_MESSAGE, the Python entries'
+ * refusal; tests/core/test_native_engine.py holds the two equal. */
 static void require_serialized_ir_arch(const std::string& arch, const char* entry)
 {
     if(arch.empty())

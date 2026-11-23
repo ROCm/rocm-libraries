@@ -59,7 +59,7 @@ from rocke import (
     select_3d_config,
     use_2d_kernel,
 )
-from rocke.core.backend import _cpp_strict, resolve_backend
+from rocke.core.backend import cpp_strict, resolve_backend
 from rocke.helpers import (
     AsyncTileLoader,
     CoalescedTileLoader,
@@ -72,7 +72,12 @@ from rocke.helpers import (
 )
 from rocke.helpers.compile import _comgr_options_for_kernel
 from rocke.tests.arch_marks import COVERED_ARCHES, arch_specific
-from rocke.tests.engines import skip_without_cpp_engine
+from rocke.tests.engines import (
+    available_engines,
+    hide_shared_engine,
+    native_engine_or_skip,
+    skip_without_cpp_engine,
+)
 from rocke.tests.lanes import (
     BINDING_LANE,
     TORCH_IN_CI,
@@ -159,7 +164,7 @@ def _needs_cpp_engine(test):
 
     @functools.wraps(test)
     def run(self):
-        import_or_skip_until("rocke_engine", BINDING_LANE)
+        native_engine_or_skip()
         test(self)
 
     return run
@@ -1902,15 +1907,14 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
         even though the engine itself supported it.
         """
         from rocke.core import backend as backend_mod
+        from rocke.core import native_engine
         from rocke.core.lower_llvm import LLVM_FLAVORS
 
-        engine = type(
-            "_FakeEngine",
-            (),
-            {"lower_serialized_ir": staticmethod(lambda *a, **k: "lowered")},
-        )()
-        with patch.object(
-            backend_mod, "import_engine", lambda module="rocke_engine": engine
+        with (
+            patch.object(native_engine, "require_native_lowering", lambda: None),
+            patch.object(
+                native_engine, "lower_serialized_ir", lambda *a, **k: "lowered"
+            ),
         ):
             for flavor in LLVM_FLAVORS:
                 with self.subTest(flavor=flavor):
@@ -4077,14 +4081,12 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         """A mask with no register-only encoding on gfx9 CDNA fails loudly in
         every lowerer, naming the supported masks and the LDS fallback; the
         same mask lowers on a ``row_xmask`` target."""
-        import importlib.util
-
         from rocke.core.ir import DPP_XOR_CTRL_NO_ROW_XMASK
         from rocke.core.ir_serialize import serialize
         from rocke.core.lower_hip import lower_kernel_to_hip
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
-        have_cpp = importlib.util.find_spec("rocke_engine") is not None
+        have_cpp = "cpp" in available_engines()
         msg = r"no register-only DPP encoding on gfx942.*1, 2, 3, 7, 8 and 15.*warp_shuffle_xor"
         for mask in range(1, 16):
             if mask in DPP_XOR_CTRL_NO_ROW_XMASK:
@@ -4605,7 +4607,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         b.av_load_b128(p)
         # Permissive C++ mode falls back even when the native engine rejects IR.
         error_type = (
-            RuntimeError if resolve_backend() == "cpp" and _cpp_strict() else TypeError
+            RuntimeError if resolve_backend() == "cpp" and cpp_strict() else TypeError
         )
         with self.assertRaisesRegex(
             error_type,
@@ -4717,7 +4719,7 @@ class TestNewTargetIntrinsics(unittest.TestCase):
         p = b.param("p", PtrType(I32, "lds"), align=4)
         b.s_prefetch_inst(p, b.const_i32(64))
         error_type = (
-            RuntimeError if resolve_backend() == "cpp" and _cpp_strict() else TypeError
+            RuntimeError if resolve_backend() == "cpp" and cpp_strict() else TypeError
         )
         with self.assertRaisesRegex(
             error_type,
@@ -4815,23 +4817,22 @@ class TestNewTargetIntrinsics(unittest.TestCase):
 @arch_specific(("gfx1250",), reason=_RDNA_ONLY)
 @pytest.mark.parametrize("strict", ["0", "1"])
 @pytest.mark.parametrize("op", ["av_load_b128", "s_prefetch_inst"])
-def test_lds_rejection_without_cpp_binding(monkeypatch, strict, op):
-    """Exercise installed CI's missing-binding path even in a native dev build."""
-    import sys
-
+def test_lds_rejection_without_cpp_engine(monkeypatch, strict, op):
+    """Exercise the missing-engine path of an installed wheel even in a native
+    dev build."""
     from rocke.core.backend import BackendError
 
     monkeypatch.setenv("ROCKE_BACKEND", "cpp")
     monkeypatch.setenv("ROCKE_CPP_STRICT", strict)
-    monkeypatch.setitem(sys.modules, "rocke_engine", None)
-    b = IRBuilder("missing_binding_lds")
+    hide_shared_engine(monkeypatch)
+    b = IRBuilder("missing_engine_lds")
     p = b.param("p", PtrType(I32, "lds"), align=16)
     if op == "av_load_b128":
         b.av_load_b128(p)
     else:
         b.s_prefetch_inst(p, b.const_i32(64))
     if strict == "1":
-        error_type, message = BackendError, "rocke_engine.*not importable"
+        error_type, message = BackendError, r"the C\+\+ engine is not available"
     else:
         error_type, message = (
             TypeError,
@@ -4975,12 +4976,7 @@ class TestBothBackendDifferentialGate(unittest.TestCase):
         backend rows (``rocke_ll_backend_for`` and the ISA ``REGISTRY``) fails
         here instead of silently reintroducing a skip.
         """
-        from rocke.core.backend import (
-            BackendError,
-            _lower_via_cpp_engine,
-            _text_diff,
-            import_engine,
-        )
+        from rocke.core.backend import BackendError, _lower_via_cpp_engine, _text_diff
         from rocke.core.ir_serialize import serialize
         from rocke.core.isa.backend import wired_arches
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
@@ -4988,10 +4984,7 @@ class TestBothBackendDifferentialGate(unittest.TestCase):
         arches = wired_arches()
         self.assertIn("gfx1250", arches)
         # Without the engine no arch can be checked: skip the test as a whole.
-        try:
-            import_engine()
-        except BackendError as e:
-            skip_without_cpp_engine(e, f"C++ engine unavailable: {e}")
+        native_engine_or_skip()
         for arch in arches:
             with self.subTest(arch=arch):
                 kernel = self._kernel()

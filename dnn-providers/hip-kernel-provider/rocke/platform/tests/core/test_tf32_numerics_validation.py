@@ -63,12 +63,10 @@ def _run_mocked_cli(fault: str, output_dir: str) -> None:
         kernel = numerics.build_tf32_mma_probe(numerics.Tf32MmaProbeSpec(m, mode))
         return "wrong IR" if fault == "builder parity" else numerics.serialize(kernel)
 
-    native = SimpleNamespace(
-        tf32_mma_probe_serialize_ir=native_ir,
-        lower_serialized_ir=lambda *a, **k: (
-            "wrong LLVM" if fault == "lowerer parity" else "mock LLVM"
-        ),
-    )
+    def native_lowering(*_args, **_kwargs):
+        return "wrong LLVM" if fault == "lowerer parity" else "mock LLVM"
+
+    probe_builder = SimpleNamespace(tf32_mma_probe_serialize_ir=native_ir)
     argv = ["tf32_numerics", "--output-dir", output_dir, "--shape", "16"]
     with (
         patch.object(numerics, "corpus", corpus),
@@ -81,7 +79,9 @@ def _run_mocked_cli(fault: str, output_dir: str) -> None:
         patch.object(hip_module, "get_device_arch", return_value="gfx942"),
         patch.object(comgr, "build_hsaco_from_llvm_ir", return_value=(b"mock", None)),
         patch.object(comgr, "resolved_lib_path", return_value="mock COMGR"),
-        patch.dict(sys.modules, {"rocke_engine": native}),
+        patch.object(numerics.native_engine, "require_native_lowering"),
+        patch.object(numerics.native_engine, "lower_serialized_ir", native_lowering),
+        patch.object(numerics, "_cpp_probe_builder", return_value=probe_builder),
         patch.object(sys, "argv", argv),
     ):
         numerics.main()

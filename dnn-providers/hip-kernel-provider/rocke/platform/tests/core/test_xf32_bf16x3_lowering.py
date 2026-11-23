@@ -47,8 +47,7 @@ from rocke.core.lower_llvm import (
     _lower_kernel_to_llvm_python,
 )
 from rocke.tests.arch_marks import arch_specific
-from rocke.tests.engines import skip_without_cpp_engine
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
+from rocke.tests.engines import native_engine_or_skip, skip_without_cpp_engine
 
 _ARCH = "gfx950"
 _FLAVORS = LLVM_FLAVORS
@@ -606,7 +605,7 @@ class TestLlvmFoldsTheSplit(unittest.TestCase):
 
     def test_the_cpp_engines_folded_split_matches_too(self):
         # Skip the whole sweep, before its first case, without the C++ engine.
-        import_or_skip_until("rocke_engine", BINDING_LANE)
+        native_engine_or_skip()
         self._check_the_hand_derived_values("cpp")
 
     def test_a_finite_payload_never_leaves_an_infinity_in_a_term(self):
@@ -614,7 +613,7 @@ class TestLlvmFoldsTheSplit(unittest.TestCase):
 
     def test_the_cpp_engine_never_leaves_an_infinity_in_a_term_either(self):
         # Skip the whole sweep, before its first case, without the C++ engine.
-        import_or_skip_until("rocke_engine", BINDING_LANE)
+        native_engine_or_skip()
         self._check_no_infinity_in_a_term("cpp")
 
 
@@ -749,9 +748,9 @@ class TestNativeAtomsAreUntouched(unittest.TestCase):
 class TestEngineParity(unittest.TestCase):
     """The #1 invariant: the two engines emit the same bytes for the expansion.
 
-    Needs the ``rocke_engine`` pybind module and skips without it. Where only
-    the archive is built, the same comparison is the ``xf32_bf16x3_mma`` parity
-    family that ``tools/check_byte_identity.py`` runs.
+    Needs the shared C++ engine and skips without it. Where only the archive is
+    built, the same comparison is the ``xf32_bf16x3_mma`` parity family that
+    ``tools/check_byte_identity.py`` runs.
     """
 
     def test_python_cpp_byte_identity_for_every_flavor(self):

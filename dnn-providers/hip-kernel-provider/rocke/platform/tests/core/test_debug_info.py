@@ -40,7 +40,8 @@ from rocke.core import ir as ir_mod
 from rocke.core.ir import F32, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_llvm import _escape_md_string, lower_kernel_to_llvm
-from rocke.tests.lanes import BINDING_LANE, CI_TEST_TOOLS, skip_until
+from rocke.tests.engines import native_engine_or_skip
+from rocke.tests.lanes import CI_TEST_TOOLS, skip_until
 
 THIS_FILE = os.path.abspath(__file__)
 
@@ -501,13 +502,6 @@ class TestInstalledLayout(unittest.TestCase):
         self.assertIn("test_capture_reaches_the_caller_through_a_package_helper", funcs)
 
 
-def engine_or_skip():
-    try:
-        import rocke_engine  # noqa: F401
-    except ModuleNotFoundError as exc:  # pragma: no cover - environment dependent
-        skip_until(BINDING_LANE, reason=f"rocke_engine not importable: {exc}")
-
-
 class TestBothEnginesEmitTheSameDebugInfo(unittest.TestCase):
     """The C++ engine is the default; it must emit the same metadata.
 
@@ -530,7 +524,7 @@ class TestBothEnginesEmitTheSameDebugInfo(unittest.TestCase):
                 os.environ["ROCKE_BACKEND"] = prev
 
     def test_engines_agree_byte_for_byte(self):
-        engine_or_skip()
+        native_engine_or_skip()
         for build in (build_flat, build_loop):
             kernel = build(capture_loc=True)
             cpp = self.lower_with("cpp", kernel)
@@ -540,12 +534,12 @@ class TestBothEnginesEmitTheSameDebugInfo(unittest.TestCase):
 
     def test_both_mode_accepts_a_debug_build(self):
         """`both` is the gate that would catch any drift, so run it directly."""
-        engine_or_skip()
+        native_engine_or_skip()
         ll = self.lower_with("both", build_loop(capture_loc=True))
         self.assertIn("DICompileUnit", ll)
 
     def test_engines_agree_with_capture_off(self):
-        engine_or_skip()
+        native_engine_or_skip()
         kernel = build_loop(capture_loc=False)
         self.assertEqual(
             self.lower_with("cpp", kernel), self.lower_with("python", kernel)
@@ -561,7 +555,7 @@ class TestBothEnginesEmitTheSameDebugInfo(unittest.TestCase):
         and one that never split on it would disagree on Windows -- where it did,
         emitting the entire path as the filename with no directory at all.
         """
-        engine_or_skip()
+        native_engine_or_skip()
         kernel = build_flat(capture_loc=True)
         kernel.body.ops[-1].loc = r"C:\proj\rocke\emit.py:42"
         cpp = self.lower_with("cpp", kernel)
@@ -576,7 +570,7 @@ class TestBothEnginesEmitTheSameDebugInfo(unittest.TestCase):
         )
 
     def test_engines_agree_on_a_path_with_a_semicolon(self):
-        engine_or_skip()
+        native_engine_or_skip()
         kernel = build_flat(capture_loc=True)
         path = native_abs("a;b", "kernel.py")
         kernel.body.ops[-1].loc = ir_mod.join_loc([f"{path}:7"])
@@ -591,7 +585,7 @@ class TestBothEnginesEmitTheSameDebugInfo(unittest.TestCase):
         split. Either way both engines have to agree, and ``;`` must not cut
         the loc into two frames.
         """
-        engine_or_skip()
+        native_engine_or_skip()
         kernel = build_flat(capture_loc=True)
         path = r"C:\proj\a;b\kernel.py"
         kernel.body.ops[-1].loc = ir_mod.join_loc([f"{path}:7"])
@@ -600,7 +594,7 @@ class TestBothEnginesEmitTheSameDebugInfo(unittest.TestCase):
         assert_difile(self, cpp, path)
 
     def test_engines_agree_on_a_quote_in_the_filename(self):
-        engine_or_skip()
+        native_engine_or_skip()
         kernel = build_flat(capture_loc=True)
         path = native_abs('weird"file.py')
         kernel.body.ops[-1].loc = f"{path}:7"

@@ -4,7 +4,6 @@
 
 from dataclasses import replace
 from unittest.mock import patch
-import os
 import re
 import subprocess
 from pathlib import Path
@@ -35,6 +34,7 @@ from rocke.tests.engines import (
     assert_both_engines_reject,
     assert_engine_rejects,
     assert_engine_rejects_hip,
+    native_engine_or_skip,
 )
 from rocke.instances.gfx942.tf32_mma_probe import (
     PREPARATIONS,
@@ -272,16 +272,17 @@ def test_concrete_xf32_uses_catalog_target_diagnostic(m, gfx, flavor):
 
 
 @pytest.mark.parametrize("arch", COVERED_ARCHES)
-def test_arithmetic_rejected_after_serialization(arch):
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
+def test_arithmetic_rejected_after_serialization(arch, flavor):
     b = IRBuilder("bad_arithmetic")
     v = b.param("x", TF32)
     b.add(v, v)
     b.ret()
     with pytest.raises(ValueError, match="TF32 arithmetic"):
-        _lower_kernel_to_llvm_python(b.kernel, arch=arch)
-    native = import_or_skip_until("rocke_engine", BINDING_LANE)
+        _lower_kernel_to_llvm_python(b.kernel, arch=arch, llvm_flavor=flavor)
+    native = native_engine_or_skip()
     with pytest.raises(Exception):
-        native.lower_serialized_ir(serialize(b.kernel), arch=arch)
+        native.lower_serialized_ir(serialize(b.kernel), arch=arch, flavor=flavor)
 
 
 @pytest.mark.parametrize("arch", COVERED_ARCHES)
@@ -307,7 +308,8 @@ def test_arithmetic_rejected_after_serialization(arch):
         "trunc_result",
     ],
 )
-def test_vector_arithmetic_rejected_after_serialization(operation, arch):
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
+def test_vector_arithmetic_rejected_after_serialization(operation, arch, flavor):
     b = IRBuilder("invalid_tf32_vector_arithmetic")
     elem = I32 if operation == "trunc_result" else TF32
     v = b.param("v", VectorType(elem, 2))
@@ -338,12 +340,12 @@ def test_vector_arithmetic_rejected_after_serialization(operation, arch):
     message = "TF32 arithmetic requires an explicit conversion to f32"
     assert any(message in str(d) for d in verify(kernel))
     with pytest.raises(ValueError, match=message):
-        _lower_kernel_to_llvm_python(kernel, arch=arch)
+        _lower_kernel_to_llvm_python(kernel, arch=arch, llvm_flavor=flavor)
     with pytest.raises(ValueError, match=message):
         lower_kernel_to_hip(kernel)
-    native = import_or_skip_until("rocke_engine", BINDING_LANE)
+    native = native_engine_or_skip()
     with pytest.raises(Exception, match=message):
-        native.lower_serialized_ir(ir, arch=arch)
+        native.lower_serialized_ir(ir, arch=arch, flavor=flavor)
 
 
 @pytest.mark.parametrize("arch", COVERED_ARCHES)
@@ -364,7 +366,7 @@ def test_vector_payload_operations_remain_supported(arch):
     kernel = parse(ir)
     assert verify(kernel) == []
     assert "i32x4" in lower_kernel_to_hip(kernel)
-    native = import_or_skip_until("rocke_engine", BINDING_LANE)
+    native = native_engine_or_skip()
     for flavor in LLVM_FLAVORS:
         ll = _lower_kernel_to_llvm_python(kernel, arch=arch, llvm_flavor=flavor)
         assert native.lower_serialized_ir(ir, arch=arch, flavor=flavor) == ll
@@ -391,7 +393,7 @@ def test_global_vector_load(n, align):
     if expected_align < n * 4 or n == 3:
         assert f"{n * 4});" in hip
         assert "__builtin_memcpy" in hip
-    native = import_or_skip_until("rocke_engine", BINDING_LANE)
+    native = native_engine_or_skip()
     for flavor in LLVM_FLAVORS:
         ll = _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor=flavor)
         assert f"load <{n} x i32>" in ll
@@ -408,7 +410,8 @@ def test_global_vector_load_rejects_unsupported_width(n):
 
 
 @pytest.mark.parametrize("arch", COVERED_ARCHES)
-def test_transport(arch):
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
+def test_transport(arch, flavor):
     b = IRBuilder("transport")
     p = b.param("p", PtrType(TF32, "global"))
     i = b.const_i32(0)
@@ -419,10 +422,10 @@ def test_transport(arch):
     b.ret()
     ir = serialize(b.kernel)
     assert serialize(parse(ir)) == ir
-    ll = _lower_kernel_to_llvm_python(b.kernel, arch=arch)
+    ll = _lower_kernel_to_llvm_python(b.kernel, arch=arch, llvm_flavor=flavor)
     assert "load i32" in ll and "store i32" in ll
-    native = import_or_skip_until("rocke_engine", BINDING_LANE)
-    assert native.lower_serialized_ir(ir, arch=arch) == ll
+    native = native_engine_or_skip()
+    assert native.lower_serialized_ir(ir, arch=arch, flavor=flavor) == ll
 
 
 def test_rne_reference_edges():
@@ -475,7 +478,8 @@ def test_rne_reference_edges():
     reason="the lowering has no arch branch and the IR is identical on gfx942 and gfx950; the smoke tests (test_transport and the rejection tests) run on every covered arch",
 )
 @pytest.mark.parametrize("n", [1, 2, 4])
-def test_lds_and_loop_transport(n):
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
+def test_lds_and_loop_transport(n, flavor):
     b = IRBuilder("tf32_lds_loop")
     p = b.param("p", PtrType(TF32, "global"))
     zero = b.const_i32(0)
@@ -492,14 +496,14 @@ def test_lds_and_loop_transport(n):
     b.ret()
     ir = serialize(b.kernel)
     assert serialize(parse(ir)) == ir
-    ll = _lower_kernel_to_llvm_python(b.kernel, arch="gfx950")
+    ll = _lower_kernel_to_llvm_python(b.kernel, arch="gfx950", llvm_flavor=flavor)
     assert "[256 x i8]" in ll
     assert f"phi <{n} x i32>" in ll
     assert "int smem" in lower_kernel_to_hip(
         b.kernel
     ) or "int shared" in lower_kernel_to_hip(b.kernel)
-    native = import_or_skip_until("rocke_engine", BINDING_LANE)
-    assert native.lower_serialized_ir(ir, arch="gfx950") == ll
+    native = native_engine_or_skip()
+    assert native.lower_serialized_ir(ir, arch="gfx950", flavor=flavor) == ll
 
 
 def test_fp32_atom_rejects_tf32_carrier():
@@ -514,31 +518,29 @@ def test_fp32_atom_rejects_tf32_carrier():
     ("gfx942",),
     reason="the probe builds the native gfx942 xf32 MFMA; gfx950 emulates xf32 with bf16x3 rows",
 )
-def test_parsed_mma_rejects_wrong_operands():
-    native = import_or_skip_until("rocke_engine", BINDING_LANE)
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
+def test_parsed_mma_rejects_wrong_operands(flavor):
+    native = native_engine_or_skip()
     for bad in ("vec<i32x2>", "vec<f32x2>", "vec<tf32x4>"):
         ir = serialize(build_tf32_mma_probe(Tf32MmaProbeSpec())).replace(
             "vec<tf32x2>", bad
         )
         with pytest.raises(ValueError, match="XF32 MMA requires"):
-            _lower_kernel_to_llvm_python(parse(ir), arch="gfx942")
+            _lower_kernel_to_llvm_python(parse(ir), arch="gfx942", llvm_flavor=flavor)
         with pytest.raises(Exception):
-            native.lower_serialized_ir(ir, arch="gfx942")
+            native.lower_serialized_ir(ir, arch="gfx942", flavor=flavor)
 
 
 @pytest.fixture(scope="module")
 def tf32_recipe_replay_cli():
-    """Use the launcher-supplied native VM shared by replay suites."""
-    executable = os.environ.get("ROCKE_REPLAY_CLI")
-    if not executable:
-        pytest.skip("Set ROCKE_REPLAY_CLI to the prebuilt native replay CLI")
-    path = Path(executable).resolve()
-    if not path.is_file():
-        pytest.skip(f"TF32 native replay CLI not found: {path}")
+    """The native replay CLI the replay suites share, as
+    ``online.resolve_replay_cli_path`` selects it (``ROCKE_REPLAY_CLI``, taken
+    beside the rocke package when relative, or a source-matched build)."""
     from rocke.portable_ir.src import online
 
     resolved = online.resolve_replay_cli_path(build=False)
-    assert resolved is not None
+    if resolved is None:
+        pytest.skip("Set ROCKE_REPLAY_CLI to the prebuilt native replay CLI")
     return Path(resolved)
 
 
@@ -619,7 +621,7 @@ def test_global_vector_store(n, align, dtype):
         assert f"&{values.name.lstrip('%')}, {n * 4});" in hip
     else:
         assert "*reinterpret_cast<" in hip
-    native = import_or_skip_until("rocke_engine", BINDING_LANE)
+    native = native_engine_or_skip()
     for flavor in LLVM_FLAVORS:
         ll = _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor=flavor)
         store = next(line for line in ll.splitlines() if "store <" in line)
@@ -703,7 +705,7 @@ def test_non_xf32_mma_rejects_tf32_result(m, scalar_result, arch):
     assert any(message in str(d) for d in verify(kernel))
     with pytest.raises(ValueError, match=message):
         lower_kernel_to_hip(kernel, arch=arch)
-    native = import_or_skip_until("rocke_engine", BINDING_LANE)
+    native = native_engine_or_skip()
     for flavor in LLVM_FLAVORS:
         with pytest.raises(ValueError, match=message):
             _lower_kernel_to_llvm_python(kernel, arch=arch, llvm_flavor=flavor)
@@ -742,8 +744,9 @@ def test_concrete_mma_identity_conflict_is_a_verifier_diagnostic(m):
 @pytest.mark.parametrize("m", [16, 32])
 @pytest.mark.parametrize("role", ["accumulator", "result"])
 @pytest.mark.parametrize("bad", ["integer", "tf32", "width"])
-def test_parsed_mma_rejects_wrong_accumulator_and_result(m, role, bad):
-    native = import_or_skip_until("rocke_engine", BINDING_LANE)
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
+def test_parsed_mma_rejects_wrong_accumulator_and_result(m, role, bad, flavor):
+    native = native_engine_or_skip()
     kernel = build_tf32_mma_probe(Tf32MmaProbeSpec(m))
     mma = next(op for op in kernel.body.ops if op.name == "tile.mma")
     value = mma.operands[2] if role == "accumulator" else mma.result
@@ -755,9 +758,9 @@ def test_parsed_mma_rejects_wrong_accumulator_and_result(m, role, bad):
     ir = serialize(kernel)
     message = "XF32 MMA requires" if role == "accumulator" else "XF32 MMA result"
     with pytest.raises(ValueError, match=message):
-        _lower_kernel_to_llvm_python(parse(ir), arch="gfx942")
+        _lower_kernel_to_llvm_python(parse(ir), arch="gfx942", llvm_flavor=flavor)
     with pytest.raises(Exception, match=message):
-        native.lower_serialized_ir(ir, arch="gfx942")
+        native.lower_serialized_ir(ir, arch="gfx942", flavor=flavor)
 
 
 @arch_specific(
@@ -766,7 +769,9 @@ def test_parsed_mma_rejects_wrong_accumulator_and_result(m, role, bad):
 )
 @pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 def test_numeric_harness_auto_flavor(flavor, monkeypatch, tmp_path):
-    import_or_skip_until("rocke_engine", BINDING_LANE)
+    """The numeric harness's C++ engine lowers through the shared engine alone:
+    no Python module is needed to reach the compiler."""
+    native_engine_or_skip()
     from rocke.examples.gfx942 import tf32_numerics
     from rocke.runtime import comgr, hip_module
 

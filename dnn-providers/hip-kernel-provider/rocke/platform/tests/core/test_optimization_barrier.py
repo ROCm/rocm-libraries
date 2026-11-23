@@ -7,7 +7,7 @@ import runpy
 
 import pytest
 
-from rocke.core.backend import _cpp_strict, resolve_backend
+from rocke.core.backend import cpp_strict, resolve_backend
 from rocke.core.ir import (
     BF16,
     BF8E5M2,
@@ -482,7 +482,7 @@ def test_llvm_inline_asm_rejects_non_bool_sideeffect(
     if roundtrip:
         kernel = parse(serialize(kernel))
     exception = (
-        RuntimeError if resolve_backend() == "cpp" and _cpp_strict() else ValueError
+        RuntimeError if resolve_backend() == "cpp" and cpp_strict() else ValueError
     )
     with pytest.raises(exception, match="LLVM inline asm sideeffect must be a boolean"):
         lower_kernel_to_llvm(kernel, arch=arch, llvm_flavor=flavor)

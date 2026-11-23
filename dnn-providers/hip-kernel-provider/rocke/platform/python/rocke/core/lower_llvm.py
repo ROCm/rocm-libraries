@@ -106,6 +106,7 @@ from .mma_operand import (
 from .tf32 import tf32_mma_target_error, tf32_op_error
 
 from .mfma import validate_mfma
+from .native_engine import NO_TARGET_MESSAGE
 from .llvm_profile import (
     LLVM_EMISSION_ALIASES,
     LLVM_EMISSION_FLAVORS,
@@ -1797,10 +1798,7 @@ class _Lowerer:
         from .isa.backend import backend_for
 
         if arch is None:
-            raise ValueError(
-                "lowering requires an explicit gfx target; "
-                "pass arch=... (there is no default)"
-            )
+            raise ValueError(NO_TARGET_MESSAGE)
         self._backend = backend_for(arch)
         flavor = llvm_flavor if llvm_flavor is not None else _resolve_llvm_flavor()
         if flavor not in LLVM_FLAVORS:
@@ -7874,10 +7872,7 @@ def lower_kernel_to_llvm(
     # silently guessed a target otherwise. A requirement enforced on one of two
     # backends is not a requirement.
     if arch is None:
-        raise ValueError(
-            "lowering requires an explicit gfx target; "
-            "pass arch=... (there is no default)"
-        )
+        raise ValueError(NO_TARGET_MESSAGE)
     return lower_kernel_via_backend(
         kernel,
         llvm_flavor=llvm_flavor,

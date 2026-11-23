@@ -86,6 +86,7 @@ from rocke.core.value_sources import MEMORY_READ_OPS
 from rocke.core.verify import verify
 from rocke.helpers.compile import compile_kernel, compile_kernel_via_hipcc
 from rocke.tests.built_programs import assert_refuses_arguments, built_program
+from rocke.tests.engines import assert_engine_rejects, available_engines
 from rocke.tests.gpu import probe_device_arch
 from rocke.tests.lanes import arch_skip_reason, skip_needing_arch
 from rocke.tests.subprocess_launcher import rocke_python_command, rocke_subprocess_env
@@ -450,8 +451,15 @@ NOT_BARE = "gpu_check_failed takes no operands, results or regions"
 def test_verifier_and_every_lowering_refuse_a_failure_path_that_is_not_bare():
     kernel = _failure_path_with_an_operand_kernel()
     assert NOT_BARE in [d.message for d in verify(kernel)]
-    with pytest.raises(ValueError, match=f"^{NOT_BARE}$"):
-        lower_kernel_to_llvm(kernel, arch="gfx942", llvm_flavor="llvm20")
+    for engine in available_engines():
+        assert_engine_rejects(
+            kernel,
+            "gfx942",
+            engine=engine,
+            error_type=ValueError,
+            message=NOT_BARE,
+            llvm_flavor="llvm20",
+        )
     with pytest.raises(ValueError, match=f"^{NOT_BARE}$"):
         lower_kernel_to_hip(kernel, arch="gfx942")
 

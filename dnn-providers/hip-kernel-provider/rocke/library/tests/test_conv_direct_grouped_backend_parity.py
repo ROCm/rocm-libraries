@@ -662,17 +662,20 @@ class TestF32BuilderParity(unittest.TestCase):
                 self.assertTrue(msgs[1].endswith(msgs[0]), msgs)
 
 
-@unittest.skipIf(bool(_SKIP), _SKIP)
 class TestCppLowererOnF32Ir(unittest.TestCase):
     """The C++ lowerer is family-agnostic, so it must lower the Python-built
     fp32 / tf32 kernels to the same ``.ll`` as the Python lowerer -- the XF32
     MFMAs on gfx942, the BF16x3 split on gfx950 and the exact fp32 atoms.
     Each lowerer is called directly, so a C++ refusal fails here instead of
-    passing as a Python fallback."""
+    passing as a Python fallback. It needs the shared engine, not the library
+    module."""
 
     def test_lowerers_agree(self):
         from rocke.core.ir_serialize import serialize
         from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+        from rocke.tests.engines import native_engine_or_skip
+
+        native_engine_or_skip()  # before the sweep: no case runs without it
 
         cases = []
         for arch, m, k in _TF32_ATOMS:

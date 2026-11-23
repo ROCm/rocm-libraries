@@ -11,7 +11,6 @@ the binding. Machines without a gfx942 or gfx950 device skip.
 """
 
 import ctypes
-import importlib.util
 import struct
 
 import numpy as np
@@ -20,7 +19,7 @@ import pytest
 from rocke.core.ir import F32, I32, IRBuilder, PtrType
 from rocke.helpers import compile_kernel
 from rocke.runtime.hip_module import Runtime, get_device_arch
-from rocke.tests.lanes import BINDING_LANE, skip_until
+from rocke.tests.engines import native_engine_or_skip
 
 _WAVE = 64
 _GFX9_MASKS = (1, 2, 3, 7, 8, 15)
@@ -36,8 +35,8 @@ def arch():
 
 @pytest.fixture(params=("python", "cpp"))
 def backend(request):
-    if request.param == "cpp" and importlib.util.find_spec("rocke_engine") is None:
-        skip_until(BINDING_LANE, reason="cpp engine needs the rocke_engine binding")
+    if request.param == "cpp":
+        native_engine_or_skip()
     return request.param
 
 

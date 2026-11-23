@@ -43,7 +43,7 @@ from rocke.tests.comgr import require_comgr_target
 from rocke.tests.compiler_tools import require_tools_or_skip
 from rocke.tests.engines import (
     ENGINES,
-    available_engines,
+    engine_modules_available,
     instance_llvm_from_all_engines,
     lower_with_engine,
 )
@@ -588,7 +588,7 @@ def test_quant_instances_refuse_an_out_dtype_the_target_cannot_write(
     with pytest.raises(ValueError) as error:
         build(spec, arch=arch)
     assert str(error.value) == message
-    if "cpp" in available_engines():
+    if engine_modules_available():
         from rocke.core.backend import import_engine
 
         fields = {k: v for k, v in dataclasses.asdict(spec).items() if v is not None}

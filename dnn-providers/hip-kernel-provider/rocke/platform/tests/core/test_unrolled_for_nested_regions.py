@@ -28,10 +28,9 @@ from rocke.core.ir import I32, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_llvm import LLVM_FLAVORS, lower_kernel_to_llvm
 from rocke.core.verify import verify
-from rocke.tests.engines import lower_with_both_engines
+from rocke.tests.engines import lower_with_both_engines, native_engine_or_skip
 from rocke.tests.gpu import run_on_device
 from rocke.tests.ir_validity import assert_target_accepts
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
 
 LANES = 64
 TRIPS = 4
@@ -437,12 +436,12 @@ def _edit_once(text, old, new):
 
 def _assert_both_parsers_refuse(text, message):
     """Both parsers refuse ``text`` with ``message``: the Python parser with a
-    ValueError, the C++ one (through the binding, when built) with a
+    ValueError, the C++ one (where the shared engine is found) with a
     RuntimeError ending in it."""
     with pytest.raises(ValueError) as refused:
         parse(text)
     assert str(refused.value) == message
-    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
+    engine = native_engine_or_skip()
     with pytest.raises(RuntimeError) as native:
         engine.lower_serialized_ir(text, arch="gfx942", flavor="llvm22")
     assert str(native.value).endswith(": " + message), str(native.value)
@@ -643,7 +642,7 @@ def _loop_named_like_a_renamed_loop_value():
 
 def test_a_loop_named_like_a_renamed_loop_value_defines_each_name_once():
     """Checks the text ``lower_kernel_to_llvm`` emits, so it runs without the
-    C++ engine binding too; ``tests/core/test_unrolled_for_nested_regions.cpp``
+    C++ engine too; ``tests/core/test_unrolled_for_nested_regions.cpp``
     checks the C++ engine's text."""
     text = lower_kernel_to_llvm(_loop_named_like_a_renamed_loop_value(), arch="gfx942")
     assert _names_defined_more_than_once(text) == []
@@ -665,8 +664,7 @@ def test_both_engines_emit_the_same_text(case, flavor):
 def test_each_trip_defines_its_own_values(case):
     """Every SSA name is defined once, and every name read is defined. Checks
     the text ``lower_kernel_to_llvm`` emits, so it also runs where the C++
-    engine binding is not built (the installed test payload), on the Python
-    engine's text there."""
+    engine is not built, on the Python engine's text there."""
     text = lower_kernel_to_llvm(CASES[case][0](), arch="gfx942")
     assert _names_defined_more_than_once(text) == []
     assert _names_read_but_never_defined(text) == []

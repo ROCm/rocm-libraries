@@ -18,7 +18,6 @@ tests/instances/test_mx_gemm_scale_range.py.
 """
 
 import ctypes
-import importlib.util
 import math
 import re
 import struct
@@ -45,6 +44,11 @@ from rocke.helpers.mx_scale import (
 )
 from rocke.instances.common.mx_gemm import MxGemmSpec, build_mx_gemm
 from rocke.tests.arch_marks import COVERED_ARCHES
+from rocke.tests.engines import (
+    all_engines_backend,
+    engine_modules_available,
+    native_engine_or_skip,
+)
 from rocke.tests.lanes import BINDING_LANE, skip_until
 
 pytestmark = pytest.mark.filterwarnings(
@@ -75,10 +79,6 @@ _EXPECTED_HIP = (
     " float c_10 = ((float)NAN);\n"
     " float sel_11 = eq_5 ? c_10 : exp2_9;\n"
 )
-
-
-def _has_cpp_engine():
-    return importlib.util.find_spec("rocke_engine") is not None
 
 
 def _decode_kernel():
@@ -123,15 +123,10 @@ def test_decoder_hip_reads_the_byte_unsigned():
 
 @pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 def test_engines_lower_the_decoder_identically(flavor):
-    if not _has_cpp_engine():
-        skip_until(BINDING_LANE, reason="needs the rocke_engine binding")
-    import rocke_engine
-
+    native = native_engine_or_skip()
     kernel = _decode_kernel()
     python_ll = _lower_kernel_to_llvm_python(kernel, arch="gfx90a", llvm_flavor=flavor)
-    cpp_ll = rocke_engine.lower_serialized_ir(
-        serialize(kernel), arch="gfx90a", flavor=flavor
-    )
+    cpp_ll = native.lower_serialized_ir(serialize(kernel), arch="gfx90a", flavor=flavor)
     assert cpp_ll == python_ll
 
 
@@ -147,7 +142,7 @@ def test_non_byte_input_is_rejected():
 def test_mx_gemm_reads_the_scale_bytes_unsigned_in_both_engines(arch):
     # The C++ MX GEMM builder must emit the same LLVM IR as the Python one;
     # backend="both" lowers through each and fails on any byte difference.
-    if not _has_cpp_engine():
+    if not engine_modules_available():
         skip_until(BINDING_LANE, reason="needs the rocke_engine binding")
     ll = lower_mx_gemm(_mx_gemm_spec(), arch=arch, backend="both").llvm_text
     assert ll.count("zext i8") >= 2  # the A and the B scale bytes
@@ -276,9 +271,10 @@ def _skip_unless_comgr_targets(isa: str) -> None:
 def test_mx_gemm_compiles_for_each_covered_arch(arch):
     # Compile-checked only: MX GEMM numerics need a GPU of the matching arch.
     _skip_unless_comgr_targets(f"amdgcn-amd-amdhsa--{arch}")
-    backend = "both" if _has_cpp_engine() else "python"
     artifact = compile_kernel(
-        build_mx_gemm(_mx_gemm_spec(), arch=arch), arch=arch, backend=backend
+        build_mx_gemm(_mx_gemm_spec(), arch=arch),
+        arch=arch,
+        backend=all_engines_backend(),
     )
     assert artifact.hsaco
 
@@ -302,8 +298,9 @@ def _decode_on_gpu(arch):
 
     # With the C++ engine present, backend="both" lowers through both engines
     # and requires identical LLVM IR.
-    backend = "both" if _has_cpp_engine() else "python"
-    artifact = compile_kernel(_decode_kernel(), arch=arch, backend=backend)
+    artifact = compile_kernel(
+        _decode_kernel(), arch=arch, backend=all_engines_backend()
+    )
     codes = np.arange(_CODES, dtype=np.uint8)
     rt = Runtime()
     module = rt.load_module(artifact.hsaco)

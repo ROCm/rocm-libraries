@@ -1117,13 +1117,15 @@ that the CI test environment does not have.
 
 Use a fresh virtualenv outside the platform tree. Install the test requirements
 from the CI job's TheRock revision; keep Torch out of the minimal lane. Build a
-fresh native extension with `ROCKE_BUILD_PYBIND=ON` for the binding-present rows.
-Run each row in a separate process, with `PYTHONPATH` containing the platform
-Python root and, only where indicated, the matching `cpp/bindings` build directory.
+fresh shared engine (the `rocke_shared` target, `ROCKE_BUILD_SHARED_ENGINE=ON`)
+for the engine-present rows. Run each row in a separate process, with
+`PYTHONPATH` containing the platform Python root and, only where indicated,
+`ROCKE_ONLINE_LIB` naming the built `librocke` (`ROCKE_ONLINE_LIB=none` for the
+engine-absent row).
 
-| Lane | `ROCKE_BACKEND` | `ROCKE_CPP_STRICT` | `rocke_engine` importable? | Rejection observed by the caller |
+| Lane | `ROCKE_BACKEND` | `ROCKE_CPP_STRICT` | Shared engine (`librocke`) found? | Rejection observed by the caller |
 |---|---|---|---|---|
-| Default installed fallback | unset | unset | No | Python exception after the C++ import fails |
+| Default installed fallback | unset | unset | No | Python exception after the C++ engine is not found |
 | Explicit Python | `python` | unset | Either | Python exception |
 | Permissive C++ | `cpp` | `0` | Yes | Python exception after native rejection |
 | Strict C++ | `cpp` | `1` | Yes | Native exception; fallback is an error |
@@ -1158,8 +1160,9 @@ python -m pytest tests -v -rs --timeout=60
 ```
 
 Verify imports before each lane: print `rocke.__file__`, and use
-`importlib.util.find_spec("rocke_engine")` to check binding absence; in the native
-lanes import `rocke_engine` and print its `__file__`. Clear inherited backend,
+`rocke.core.native_engine.native_lowering_available()` to check the engine's
+absence; in the native lanes print `native_engine.loaded_shared_engine_path()`
+after it. Clear inherited backend,
 fixture, and runtime overrides before configuring a lane. In particular, a
 developer's `ROCKE_CPP_STRICT=1` must not leak into the default fallback run.
 Use a unique temporary directory for each validation run (`TMPDIR` on POSIX,
@@ -1307,7 +1310,13 @@ location is `tests/portable_ir/`. `ROCKE_REPLAY_CLI` is the single launcher sett
 for native CLI replay, including TF32 and the portable-IR suites. Installed CTest
 supplies the relative executable path once for the pytest run, enabling all
 consumers of that artifact. It also supplies `ROCKE_PROVENANCE_MANIFEST`, a
-build-generated version/build-ID record installed beside the CLI. Source-less
+build-generated version/build-ID record installed beside the CLI. A relative
+value of either is taken beside the installed `rocke` package (relative to the
+directory holding it, `rocke.assets.beside_package`), not the working directory,
+so a process a test starts elsewhere reads the same files; CMake writes them
+relative to that directory in both install layouts. Read them only through
+`rocke.portable_ir.src.online.resolve_replay_cli_path` and
+`rocke.core.engine_provenance`, never with a path of your own. Source-less
 tests validate the CLI against that independent expectation instead of trying
 to hash or build from unavailable sources.
 

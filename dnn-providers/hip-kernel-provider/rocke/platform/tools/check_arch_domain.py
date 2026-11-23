@@ -205,21 +205,16 @@ def main() -> int:
     flavors = [f for f in wanted_flavors if arch_domain.load(f) is not None]
     skipped = [f for f in wanted_flavors if f not in flavors]
 
-    try:
-        import rocke_engine  # noqa: F401 -- only probing for the C++ pass
-    except ImportError:
-        cpp = False
-    else:
-        cpp = True
+    from rocke.core.native_engine import native_lowering_available
+
+    cpp = native_lowering_available()
 
     print("== rocKE arch-domain lane ==")
     print(f"   cases   : {len(keep)}")
     print(f"   flavors : {', '.join(flavors) or '(none)'}")
     if skipped:
         print(f"   skipped : {', '.join(skipped)} (no committed column)")
-    print(
-        f"   engines : {'python + cpp' if cpp else 'python (rocke_engine not importable)'}"
-    )
+    print(f"   engines : {'python + cpp' if cpp else 'python (no shared C++ engine)'}")
     if not flavors:
         print("\nRESULT: RED - no committed arch-domain column to gate against.")
         return 1

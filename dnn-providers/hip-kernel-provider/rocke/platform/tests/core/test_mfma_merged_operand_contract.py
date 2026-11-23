@@ -8,7 +8,7 @@ from rocke.core.ir import BF16, F32, F64, I32, IRBuilder, VectorType
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
+from rocke.tests.engines import native_engine_or_skip
 
 
 SIGNATURES = [
@@ -61,7 +61,7 @@ def test_new_signatures_reject_malformed_actual_values(
         expected = signature[1] if role in ("src0", "src1") else signature[2]
         error = f"MFMA requires {'src0 and src1' if role in ('src0', 'src1') else 'src2 and dst'} to be {expected.name}"
     if engine == "native":
-        native = import_or_skip_until("rocke_engine", BINDING_LANE)
+        native = native_engine_or_skip()
         with pytest.raises(RuntimeError) as caught:
             native.lower_serialized_ir(
                 serialize(kernel), arch="gfx942", flavor="llvm23"
@@ -85,7 +85,7 @@ def test_new_signatures_keep_valid_emission(signature, concrete, flavor):
     kernel, _ = _kernel(signature, concrete)
     ll = _lower_kernel_to_llvm_python(kernel, arch="gfx942", llvm_flavor=flavor)
     assert "@llvm.amdgcn.mfma." in ll
-    native = import_or_skip_until("rocke_engine", BINDING_LANE)
+    native = native_engine_or_skip()
     # Native serialization uses neutral tile.mma; Python also supports concrete
     # instruction names. Compare both Python dispatch forms with the native form.
     if concrete:

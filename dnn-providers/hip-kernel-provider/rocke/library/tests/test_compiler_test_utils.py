@@ -239,7 +239,9 @@ def test_gdn_compiled_resources_applies_the_policy(
 def test_a_batch_reports_each_kernels_failure_on_that_kernel(monkeypatch):
     # One kernel lowers and compiles, one fails to lower, one fails to compile:
     # each outcome names its own kernel, and the failures raise only when their
-    # own kernel is asked. One worker, so the compile stand-in applies.
+    # own kernel is asked. One worker, so the compile stand-in applies. The
+    # batch is the subject, not an engine: the Python engine lowers it.
+    monkeypatch.setenv("ROCKE_BACKEND", "python")
     good = KernelDef("batch_good", [], Region("entry"))
     unlowerable = KernelDef("batch_unlowerable", [], Region("entry", [Op("no.op")]))
     uncompilable = KernelDef("batch_uncompilable", [], Region("entry"))
