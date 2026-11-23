@@ -5,7 +5,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_kvcache_layout_enum.hpp"
-#include "ck_tile/ops/fmha/pipeline/block_fmha_fwd_decode_pagedkv_pipeline_default_policy.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_fwd_decode_pagedkv_pipeline_tdm_policy.hpp"
 
 namespace ck_tile {
 
@@ -24,8 +24,8 @@ namespace ck_tile {
 // - wave split: each wave runs four pages of its own per step, without barriers, and the waves
 //   are merged once at the end.
 // The result is unnormalized: O relative to the row max m, and the row sum l.
-template <typename Problem_, typename Policy_ = BlockFmhaFwdDecodePagedKVPipelineDefaultPolicy>
-struct BlockFmhaFwdDecodePagedKVPipeline
+template <typename Problem_, typename Policy_ = BlockFmhaFwdDecodePagedKVPipelineTdmPolicy>
+struct BlockFmhaFwdDecodePagedKVPipelineTdm
 {
     using Problem   = remove_cvref_t<Problem_>;
     using Policy    = remove_cvref_t<Policy_>;
@@ -52,7 +52,7 @@ struct BlockFmhaFwdDecodePagedKVPipeline
     // Q and O are fp16 instead of bf16
     static constexpr bool kQoFp16 = std::is_same_v<QDataType, fp16_t>;
 
-    static constexpr const char* name = kWaveSplit ? "wsplit" : "coop";
+    static constexpr const char* name = kWaveSplit ? "tdm_wsplit" : "tdm_coop";
 
     static_assert(kHeadDim == 128 && kM0 == 16 && kN0 == 16 && kNumWarps == 4);
     static_assert(std::is_same_v<KDataType, fp8_t> && std::is_same_v<VDataType, fp8_t>);

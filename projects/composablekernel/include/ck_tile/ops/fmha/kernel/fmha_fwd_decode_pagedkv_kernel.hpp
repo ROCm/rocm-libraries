@@ -12,7 +12,8 @@
 #include <string>
 
 // gfx125 decode attention (one query token per sequence) over a paged fp8 KV cache; the pipeline
-// (BlockFmhaFwdDecodePagedKVPipeline) describes the cache layout and what one workgroup computes.
+// (BlockFmhaFwdDecodePagedKVPipelineTdm) describes the cache layout and what one workgroup
+// computes.
 //
 // Grid (kNumSplits * groups, nhead_k, batch). The splits of one (batch, kv head) divide its key
 // range among them. Each kNumSplits consecutive splits are one workgroup cluster: each stores its

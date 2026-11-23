@@ -8,12 +8,12 @@
 
 namespace ck_tile {
 
-// LDS layout and the KV cache copies of BlockFmhaFwdDecodePagedKVPipeline.
+// LDS layout and the KV cache copies of BlockFmhaFwdDecodePagedKVPipelineTdm.
 //
 // K and V pages are copied to LDS with TDM gathers of rows of 16-byte vectors of one kv head. In
 // the vectorized cache layout those bytes are WMMA operands as they are (S^T = K Q^T and
 // O^T += V^T P^T), so the pipeline reads them back without transposing.
-struct BlockFmhaFwdDecodePagedKVPipelineDefaultPolicy
+struct BlockFmhaFwdDecodePagedKVPipelineTdmPolicy
 {
     // 16-token pages per cache page
     template <typename Problem>

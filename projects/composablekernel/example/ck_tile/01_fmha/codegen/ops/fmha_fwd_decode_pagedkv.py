@@ -48,7 +48,7 @@ using fmha_pipeline_problem_{F_idx} = ck_tile::BlockFmhaFwdDecodePagedKVPipeline
     {F_hdim},
     fmha_trait_{F_idx}>;
 
-using fmha_pipeline_{F_idx} = ck_tile::BlockFmhaFwdDecodePagedKVPipeline<
+using fmha_pipeline_{F_idx} = ck_tile::BlockFmhaFwdDecodePagedKVPipelineTdm<
     fmha_pipeline_problem_{F_idx}>;
 
 using fmha_kernel_{F_idx} = ck_tile::FmhaFwdDecodePagedKVKernel<fmha_pipeline_{F_idx}>;
@@ -120,7 +120,7 @@ class FmhaFwdDecodePagedKVPipeline:
     @property
     def name(self) -> str:
         n = f"ps{self.F_page_size}_"
-        n += "wsplit" if self.F_wave_split == "t" else "coop"
+        n += "tdm_wsplit" if self.F_wave_split == "t" else "tdm_coop"
         return n
 
 

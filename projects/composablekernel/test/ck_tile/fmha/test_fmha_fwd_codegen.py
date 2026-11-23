@@ -2893,7 +2893,7 @@ class TestFwdDecodePagedKVCodegen(unittest.TestCase):
         for name in names:
             self.assertRegex(
                 name,
-                r"^fmha_fwd_decode_pagedkv_d128_(bf16|fp16)_fp8kv_ps(16|64|128)_(coop|wsplit)"
+                r"^fmha_fwd_decode_pagedkv_d128_(bf16|fp16)_fp8kv_ps(16|64|128)_tdm_(coop|wsplit)"
                 r"_s\d+_n?groups$",
             )
         # every instance is reachable from the API exactly once
@@ -2905,7 +2905,7 @@ class TestFwdDecodePagedKVCodegen(unittest.TestCase):
 
     def test_filter_selects_matching_instances(self):
         _, kernels = get_fwd_decode_pagedkv_blobs(
-            ["gfx1250"], "*_bf16_*_ps64_coop_*", 0, [-1]
+            ["gfx1250"], "*_bf16_*_ps64_tdm_coop_*", 0, [-1]
         )
         self.assertEqual(len(kernels), 2 * 16)
         self.assertTrue(
