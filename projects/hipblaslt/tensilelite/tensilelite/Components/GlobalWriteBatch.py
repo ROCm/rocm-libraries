@@ -4739,7 +4739,8 @@ class GlobalWriteBatchWriter:
     the woven module) so the convert-interleave is untouched. Consumes the fully-permlaned
     vPack and the per-pair address slot captured from the pair's Phase1/Phase2a.
     Only reached on the full-tile permlane16 arm (useAlign8 is False there), so no exec
-    mask is involved. WAR s_nop kept defensively (byte-neutral to memory)."""
+    mask is involved. Followed by the WAR wait states the store needs when its soffset
+    is not an SGPR."""
     module = Module("16bitSubtilePairedStorePhase2b")
     if __import__("os").environ.get("STORE_CACHELINE_ALIGN_MARK"):
       module.add(SNop(waitState=12, comment="STAGGER_MARK=12 Phase2b deferred-store entry"))
@@ -4762,9 +4763,12 @@ class GlobalWriteBatchWriter:
       mubuf=MUBUFModifiers(offen=True, offset12=globalOffset, glc=isGlc, slc=isSlc, nt=isNT),
       comment=f"16bit paired dwordx4 store (deferred) tt0={tt0},{tt0+1}"
     ))
+    # gfx940+: a VALU overwriting the data of a store wider than 8 bytes needs 2 wait
+    # states, unless the store's soffset is an SGPR, where the hazard does not exist.
     if _soffTmp is not None:
       self._epilogScratchFree(_soffTmp)
-    module.add(SNop(waitState=0, comment="1 wait state: WAR hazard between deferred store src and next pack dst"))
+    else:
+      module.add(SNop(waitState=1, comment="2 wait states: WAR hazard between deferred store src and next pack dst"))
     assert not any(isinstance(i, SBarrier) for i in module.flatitems()), \
       "PostLoopStoreInNll Phase2b must be barrier-free"
     return module

@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import pytest
 
 from rocisa.code import Module
-from rocisa.container import vgpr
+from rocisa.container import sgpr, vgpr
 from rocisa.instruction import BufferStoreB128, SNop, VPermlane16SwapB32
 
 from tensilelite.Common.GlobalParameters import defaultBenchmarkCommonParameters
@@ -537,6 +537,21 @@ def test_commit_pending_flushes_the_store_then_the_held_row_increments():
     assert insts.index(inc) > stores[0]
     assert w._pendingPhase2b is None
     assert w._deferredSrdDIncs() == []
+
+
+def test_deferred_store_without_an_sgpr_soffset_is_followed_by_two_wait_states():
+    w = _wovenWriter()
+    insts = _insts(w._emit16bitSubtilePairedStorePhase2b(_addr(0), tt0=0))
+    assert isinstance(insts[-2], BufferStoreB128)
+    assert re.fullmatch(r"s_nop\s+1", _text(insts[-1]))
+
+
+def test_deferred_store_with_an_sgpr_soffset_needs_no_wait_state():
+    w = _wovenWriter()
+    w._subtileStoreSoffset = lambda module, addrCalc: (sgpr(60), 60)
+    insts = _insts(w._emit16bitSubtilePairedStorePhase2b(_addr(0), tt0=0))
+    assert isinstance(insts[-1], BufferStoreB128)
+    assert not any(isinstance(i, SNop) for i in insts)
 
 
 def test_commit_with_explicit_pending_leaves_the_writers_pending_alone():
