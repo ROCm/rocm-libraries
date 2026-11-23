@@ -348,17 +348,42 @@ def run(
             if cu_count is not None:
                 env["CU"] = str(cu_count)
 
+            # The prebuilt client must bind the libtensilelite-host it was built
+            # with (YAML library parser). An installed hipblaslt on
+            # LD_LIBRARY_PATH ships a msgpack-only host, which makes the client
+            # abort with "Failed to load solution library". Scope the override
+            # to this Tensile subprocess only, so hipblaslt-bench (analyze step)
+            # keeps binding the install's host.
+            client_lib_dir = str((client_build_dir / "tensilelite").resolve())
+            existing_ld = os.environ.get("LD_LIBRARY_PATH", "")
+            env["LD_LIBRARY_PATH"] = (
+                f"{client_lib_dir}:{existing_ld}" if existing_ld else client_lib_dir
+            )
+
+            tensile_cmd = [
+                hipblaslt_path / "tensilelite/tensilelite/bin/Tensile",
+                self.config,
+                self.build_dir,
+                "--prebuilt-client",
+                client_build_dir / "tensilelite/client/tensilelite-client",
+                "--client-lock",
+                (tuning_dir / f"gpulock_{self.device}").resolve(),
+            ]
+
+            # Tensile sizes its pool from this process's CPU affinity.
+            # GEKO_CPU_SLICES is a comma-separated list of taskset ranges,
+            # one per visible device, so concurrent jobs do not each inherit
+            # the full mask.
+            cpu_slices = [
+                s for s in os.environ.get("GEKO_CPU_SLICES", "").split(",") if s
+            ]
+            if cpu_slices:
+                cpu_slice = cpu_slices[int(self.device) % len(cpu_slices)]
+                tensile_cmd = ["taskset", "-c", cpu_slice, *tensile_cmd]
+
             with open(self.build_dir / f"{self.config_name}-tensilelite.log", "w") as f:
                 proc = subprocess.Popen(
-                    [
-                        hipblaslt_path / "tensilelite/tensilelite/bin/Tensile",
-                        self.config,
-                        self.build_dir,
-                        "--prebuilt-client",
-                        client_build_dir / "tensilelite/client/tensilelite-client",
-                        "--client-lock",
-                        (tuning_dir / f"gpulock_{self.device}").resolve(),
-                    ],
+                    tensile_cmd,
                     env=os.environ | env,
                     stdout=f,
                     stderr=subprocess.STDOUT,
