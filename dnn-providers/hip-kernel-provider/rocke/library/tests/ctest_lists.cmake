@@ -133,6 +133,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # dispatch helpers (rocke.dispatch.core), the benchmarks' early-stop rule and
 # the occupancy calibration tool's parse/compare logic. No GPU, no compiler.
 set(_ROCKE_LIBRARY_HOST_TEST_RELPATHS
+    "tests/library/tests/test_build_time_imports.py"
     "tests/library/tests/dispatch/test_core_helpers.py"
     "tests/library/tests/test_early_stop.py"
     "tests/library/tests/test_calibrate_occupancy.py")
