@@ -169,6 +169,12 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   up to 50x over the GEMM and Winograd fallbacks. Every restored perf config carries an explicit
   split_k instead of auto split-K, so no entry depends on a runtime occupancy query that differs
   between builds.
+* [Conv] Sped up convolution solution queries (`miopenConvolution*GetSolution`,
+  `GetSolutionCount`, `GetWorkSpaceSize` and Find). The run configuration is resolved only for
+  solvers whose workspace depends on it, and the CK grouped solvers keep per-process caches of
+  their instance lists, applicability answers and default backward-weights configurations. The
+  LGBM perf-config picker remembers its ranking per problem. `MIOPEN_DEBUG_CK_PROBLEM_CACHE=0`
+  turns off the per-problem CK caches.
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 

@@ -768,7 +768,8 @@ public:
             return false;
         if(par.kw != cfg_.kw)
             return false;
-        return true;
+        // The kernel decodes an int block index, and HIP launches fewer than 2^32 work items in x.
+        return block_count(par) * cfg_.tiles() * arch::wave_size <= UINT32_MAX;
     }
 
     auto get_weighted_throughput_index(const hipconv::Device& /*dev*/,
@@ -786,6 +787,15 @@ public:
     LaunchParams get_launch_params(const hipconv::Device& /*dev*/,
                                    const hipconv::ConvParams& par) const override
     {
+        LaunchParams launch;
+        launch.grid       = dim3(static_cast<uint32_t>(block_count(par)), 1, 1);
+        launch.block_size = dim3(cfg_.tiles() * arch::wave_size, 1, 1);
+        return launch;
+    }
+
+private:
+    int64_t block_count(const hipconv::ConvParams& par) const
+    {
         auto [gk, p, q] = [](const hipconv::ConvParams& par) -> std::array<int, 3> {
             if(par.direction == hipconv::Direction::Dgrad)
             {
@@ -793,19 +803,11 @@ public:
             }
             return {par.filters_per_group(), par.p, par.q};
         }(par);
-
-        auto blocks_k_g = divup(gk, cfg_.tile_size_k) * par.groups;
-        auto blocks_w   = divup(q, cfg_.tile_size_w);
-        auto blocks_h_n = divup(p, cfg_.tile_size_h) * divup(par.n, cfg_.tile_size_n);
-        auto blocks     = blocks_k_g * blocks_w * blocks_h_n;
-
-        LaunchParams launch;
-        launch.grid       = dim3(blocks, 1, 1);
-        launch.block_size = dim3(cfg_.tiles() * arch::wave_size, 1, 1);
-        return launch;
+        const auto blocks = [](int64_t size, int64_t tile) { return (size + tile - 1) / tile; };
+        return blocks(gk, cfg_.tile_size_k) * par.groups * blocks(q, cfg_.tile_size_w) *
+               blocks(p, cfg_.tile_size_h) * blocks(par.n, cfg_.tile_size_n);
     }
 
-private:
     static auto problem_shape(const hipconv::ConvParams& par) -> std::array<int, 6>
     {
         const bool is_dgrad = par.direction == hipconv::Direction::Dgrad;

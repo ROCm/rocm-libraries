@@ -22,7 +22,9 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <exception>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -43,6 +45,12 @@ using ProblemDescription = miopen::conv::ProblemDescription;
 // Ensure that every call site requests the same number of configs, so that the config
 // index is consistent across calls.
 constexpr std::size_t MAX_CONFIGS = hipconv::ALL_RANKED_CONFIGS;
+
+// hipconv throws std::invalid_argument; Find catches only miopen::Exception.
+static void LogHipConvError(const char* where, const std::exception& ex)
+{
+    MIOPEN_LOG_W("ConvHipConv: " << where << ": " << ex.what());
+}
 
 // The device the context's stream runs on, or nullopt for an architecture hipconv lacks, a
 // handle without compute units (HIPNOGPU) or a libMIOpen built without hipconv's code for
@@ -514,11 +522,19 @@ private:
 void PerformanceConfigConvHipConv::InitFromDevice(const void* device,
                                                   const ProblemDescription& problem)
 {
-    const auto cfgs = GetConfigs(*static_cast<const hipconv::Device*>(device), problem);
-    config_count    = static_cast<int>(cfgs.size());
-    index           = cfgs.empty() ? -1 : 0;
-    kernel          = cfgs.empty() ? nullptr : cfgs[0];
-    descriptor      = cfgs.empty() ? std::string{} : HipConvConfigRecord(cfgs[0]);
+    std::vector<hipconv::ConvKernelHandle> cfgs;
+    try
+    {
+        cfgs = GetConfigs(*static_cast<const hipconv::Device*>(device), problem);
+    }
+    catch(const std::invalid_argument& ex)
+    {
+        LogHipConvError("InitFromDevice", ex);
+    }
+    config_count = static_cast<int>(cfgs.size());
+    index        = cfgs.empty() ? -1 : 0;
+    kernel       = cfgs.empty() ? nullptr : cfgs[0];
+    descriptor   = cfgs.empty() ? std::string{} : HipConvConfigRecord(cfgs[0]);
 }
 
 void PerformanceConfigConvHipConv::HeuristicInit(const ExecutionContext& ctx,
@@ -542,6 +558,7 @@ bool PerformanceConfigConvHipConv::IsValidValue() const { return index >= 0; }
 
 bool PerformanceConfigConvHipConv::IsValid(const ExecutionContext& ctx,
                                            const ProblemDescription& problem) const
+try
 {
     const auto device = ResolveDevice(ctx);
     if(!device.has_value())
@@ -570,6 +587,11 @@ bool PerformanceConfigConvHipConv::IsValid(const ExecutionContext& ctx,
     kernel = found;
     return true;
 }
+catch(const std::invalid_argument& ex)
+{
+    LogHipConvError("IsValid", ex);
+    return false;
+}
 
 bool PerformanceConfigConvHipConv::operator==(const PerformanceConfigConvHipConv& other) const
 {
@@ -594,9 +616,17 @@ bool ConvHipConv::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
     // Every kernel that writes 16-bit dw also writes fp32 dw, so find_config() on the fp32-dw
     // params decides applicability; GetConfigs() is needed only under the deterministic
     // attribute.
-    if(!problem.GetConv().attribute.deterministic)
-        return hipconv::find_config(*device, ToHipconvParams(problem)).has_value();
-    return !GetConfigs(*device, problem).empty();
+    try
+    {
+        if(!problem.GetConv().attribute.deterministic)
+            return hipconv::find_config(*device, ToHipconvParams(problem)).has_value();
+        return !GetConfigs(*device, problem).empty();
+    }
+    catch(const std::invalid_argument& ex)
+    {
+        LogHipConvError("IsApplicable", ex);
+        return false;
+    }
 }
 
 size_t ConvHipConv::GetWorkspaceSize(const ExecutionContext& ctx,
@@ -612,13 +642,23 @@ size_t ConvHipConv::GetWorkspaceSize(const ExecutionContext& ctx,
     size_t size     = GetWorkspaceLayout(plan, 0, 0).GetSize();
     if(const auto device = ResolveDevice(ctx); device.has_value())
     {
-        for(auto* kernel : GetConfigs(*device, problem))
+        // Rethrown: a guessed size could undersize the caller's buffer.
+        try
         {
-            const auto par = GetKernelParams(kernel, *device, problem);
-            const auto wt  = GetWorkspaceLayout(plan,
-                                               GetWgradCastSize(problem, par),
-                                               hipconv::get_workspace_size(kernel, *device, par));
-            size           = std::max(size, wt.GetSize());
+            for(auto* kernel : GetConfigs(*device, problem))
+            {
+                const auto par = GetKernelParams(kernel, *device, problem);
+                const auto wt =
+                    GetWorkspaceLayout(plan,
+                                       GetWgradCastSize(problem, par),
+                                       hipconv::get_workspace_size(kernel, *device, par));
+                size = std::max(size, wt.GetSize());
+            }
+        }
+        catch(const std::invalid_argument& ex)
+        {
+            MIOPEN_THROW(miopenStatusInternalError,
+                         std::string("ConvHipConv: GetWorkspaceSize: ") + ex.what());
         }
     }
     return size;
@@ -635,11 +675,19 @@ float ConvHipConv::GetWti(const ExecutionContext& ctx, const ProblemDescription&
     const auto device = ResolveDevice(ctx);
     if(!device.has_value())
         return wti_approximate_worst;
-    const auto cfgs = GetConfigs(*device, problem);
-    if(cfgs.empty())
+    try
+    {
+        const auto cfgs = GetConfigs(*device, problem);
+        if(cfgs.empty())
+            return wti_approximate_worst;
+        return hipconv::get_weighted_throughput_index(
+            cfgs[0], *device, GetKernelParams(cfgs[0], *device, problem));
+    }
+    catch(const std::invalid_argument& ex)
+    {
+        LogHipConvError("GetWti", ex);
         return wti_approximate_worst;
-    return hipconv::get_weighted_throughput_index(
-        cfgs[0], *device, GetKernelParams(cfgs[0], *device, problem));
+    }
 }
 
 PerformanceConfigConvHipConv
@@ -665,9 +713,9 @@ PerformanceConfigConvHipConv ConvHipConv::Search(const ExecutionContext& ctx,
     return GenericSearch(*this, ctx, problem, invoke_ctx);
 }
 
-ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
-                                      const ProblemDescription& problem,
-                                      const PerformanceConfigConvHipConv& config) const
+static ConvSolution MakeSolution(const ExecutionContext& ctx,
+                                 const ProblemDescription& problem,
+                                 const PerformanceConfigConvHipConv& config)
 {
     ConvSolution result;
 
@@ -863,6 +911,21 @@ ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
     }
 
     return result;
+}
+
+ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
+                                      const ProblemDescription& problem,
+                                      const PerformanceConfigConvHipConv& config) const
+{
+    try
+    {
+        return MakeSolution(ctx, problem, config);
+    }
+    catch(const std::invalid_argument& ex)
+    {
+        LogHipConvError("GetSolution", ex);
+        return {miopenStatusInternalError};
+    }
 }
 
 } // namespace conv
