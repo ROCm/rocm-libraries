@@ -369,7 +369,7 @@ Jenkins first runs `dvc pull -R projects/rocsparse/clients/matrices` (`pullMatri
 | Status | Applies to |
 |---|---|
 | Trusted gate | TheRock CI `standard` category on changed projects: `quick`+`pre_checkin` on `rocsparse-test` (excluding `*known_bug*`) and both unit-test binaries via their `standard` CTest label. Jenkins `precheckin` launches both unit binaries directly |
-| Codecov project status | `rocSPARSE` and `rocSPARSE-unit` fail when coverage is under the 80% target in `codecov.yml`. TheRock does not run this status, and `develop` branch protection has not been confirmed to require it. |
+| Codecov project status | `rocSPARSE` and `rocSPARSE-unit` fail when coverage is under the 80% target in `codecov.yml`. TheRock does not run this status. It is not a required check on PRs today. This is a known gap; making it required would apply to all libraries. |
 | Informational | Unit-test failures inside `coverage_analysis` (ignored so the upload continues); nightly `*nightly*` / comprehensive results; ASAN lane |
 | Unstable / flaky | `known_bug`-tagged cases (excluded from gating) |
 
@@ -566,17 +566,16 @@ device configurations are not ASAN-covered.
 
 This section records what happened to coverage and to library bug fixes after this document
 merged on 2026-09-23. The unit-test layer landed earlier, on 2026-08-12. The numbers are
-measurements. They do not show that the document or the unit tests caused any change: other work
-landed in the same weeks, and a few engineers account for most of the fixes (see below).
+measurements.
 
 ### Coverage history
 
 The blue line is the develop coverage job, the `rocSPARSE` Codecov flag. The green line is the
 `rocSPARSE-unit` flag, which has no reading before 2026-10-14. The two flags do not measure the same
 files, so they cannot be added, averaged, or subtracted. The dashed horizontal line is the 80%
-project target in [`codecov.yml`](../../../../codecov.yml). Codecov reports a failing status below it.
-Whether `develop` branch protection requires that status is not confirmed (see
-[Validation Gates and Ownership](#validation-gates-and-ownership)).
+project target in [`codecov.yml`](../../../../codecov.yml). Codecov reports a failing status below it,
+but that status is not a required check on PRs today. This is a known gap. Making it required would
+apply to all libraries, not only rocSPARSE.
 
 Each point is the upload that the `codecov/rocsparse/develop` Jenkins job made for the latest
 develop commit of that day that has a qualifying upload for both flags. Carried-forward Codecov
