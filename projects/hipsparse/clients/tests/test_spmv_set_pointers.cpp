@@ -394,12 +394,68 @@ namespace
         EXPECT_EQ(s.spmv(mat), HIPSPARSE_STATUS_SUCCESS) << "SpMV after the capture";
         s.check(a2);
     }
+
+    // With the null stream as handle stream, querying its capture status fails with
+    // hipErrorStreamCaptureImplicit while a blocking stream is being captured. The
+    // first hipsparseSpMV after hipsparseCsrSetPointers returns
+    // HIPSPARSE_STATUS_INVALID_VALUE, as during a capture of the handle stream.
+    void run_null_stream_capture()
+    {
+        const compressed h1(a1, false), h2(a2, false);
+        ASSERT_EQ(h1.val.size(), h2.val.size());
+
+        auto p1 = to_device(h1.ptr), i1 = to_device(h1.ind), p2 = to_device(h2.ptr),
+             i2 = to_device(h2.ind);
+        auto v1 = to_device(h1.val), v2 = to_device(h2.val);
+        auto scratch = hipsparse_unique_ptr{device_malloc(256), device_free};
+
+        hipsparseLocalHandle_t handle;
+        hipsparseLocalCsr      mat(m,
+                              n,
+                              h1.val.size(),
+                              p1.get(),
+                              i1.get(),
+                              v1.get(),
+                              HIPSPARSE_INDEX_32I,
+                              HIPSPARSE_INDEX_32I,
+                              HIPSPARSE_INDEX_BASE_ZERO,
+                              HIP_R_64F);
+
+        spmv_check s(handle, HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_SPMV_ALG_DEFAULT);
+        s.run(mat, a1, true, "first arrays");
+        ASSERT_FALSE(testing::Test::HasFailure());
+        ASSERT_EQ(hipsparseCsrSetPointers(mat, p2.get(), i2.get(), v2.get()),
+                  HIPSPARSE_STATUS_SUCCESS);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        const stream_ptr capture = new_stream();
+        ASSERT_EQ(hipStreamBeginCapture(capture.get(), hipStreamCaptureModeGlobal), hipSuccess);
+        EXPECT_EQ(hipMemsetAsync(scratch.get(), 0, 256, capture.get()), hipSuccess);
+        hipsparseStatus_t captured = HIPSPARSE_STATUS_SUCCESS;
+        EXPECT_NO_THROW(captured = s.spmv(mat));
+        EXPECT_EQ(captured, HIPSPARSE_STATUS_INVALID_VALUE) << "SpMV during the capture";
+        hipGraph_t graph = nullptr;
+        EXPECT_EQ(hipStreamEndCapture(capture.get(), &graph), hipSuccess);
+        if(graph != nullptr)
+        {
+            EXPECT_EQ(hipGraphDestroy(graph), hipSuccess);
+        }
+
+        s.reset_y();
+        EXPECT_EQ(s.spmv(mat), HIPSPARSE_STATUS_SUCCESS) << "SpMV after the capture";
+        s.check(a2);
+    }
 }
 
 TEST_P(spmv_set_pointers, csr_capture)
 {
     run_capture(HIPSPARSE_SPMV_ALG_DEFAULT);
     run_capture(HIPSPARSE_SPMV_CSR_ALG1);
+}
+
+TEST_P(spmv_set_pointers, csr_null_stream_capture)
+{
+    run_null_stream_capture();
 }
 
 TEST_P(spmv_set_pointers, coo)

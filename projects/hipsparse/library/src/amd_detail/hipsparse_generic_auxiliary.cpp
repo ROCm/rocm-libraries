@@ -96,8 +96,17 @@ hipsparseStatus_t hipsparseSpMVDescr_st::release_retired_entries(hipsparseHandle
     // the analysis a fresh entry would run. Both are illegal while the stream is
     // being captured. The retired entries are kept, and the caller must not build
     // a new entry, until a call outside the capture releases them.
+    // On the null stream, the query fails with hipErrorStreamCaptureImplicit while
+    // a blocking stream is being captured, which the synchronization would break
+    // as well.
     hipStreamCaptureStatus capture_status = hipStreamCaptureStatusNone;
-    RETURN_IF_HIP_ERROR(hipStreamIsCapturing(stream, &capture_status));
+    const hipError_t       query          = hipStreamIsCapturing(stream, &capture_status);
+    if(query == hipErrorStreamCaptureImplicit)
+    {
+        (void)hipGetLastError();
+        return HIPSPARSE_STATUS_INVALID_VALUE;
+    }
+    RETURN_IF_HIP_ERROR(query);
     if(capture_status != hipStreamCaptureStatusNone)
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
