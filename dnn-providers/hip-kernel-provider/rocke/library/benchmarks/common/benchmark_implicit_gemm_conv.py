@@ -1303,7 +1303,8 @@ def main() -> int:
             "number of parallel compile workers (default: 1, serial). "
             "Uses multiprocessing (ProcessPoolExecutor) so each worker runs "
             "libamd_comgr in its own process, bypassing the GIL. "
-            "Set to 0 to use os.cpu_count() workers."
+            "Set to 0 to use one worker per CPU (os.cpu_count()), but no more "
+            f"than one per {_ITEMS_PER_AUTO_WORKER} kernels to build."
         ),
     )
     parser.add_argument(
@@ -2857,19 +2858,38 @@ def _worker_pool(max_workers: int):
     return ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx)
 
 
+#: Work items each automatically sized pool worker gets at least. A worker
+#: imports the kernel modules before its first item, and the pool starts and
+#: joins its workers one at a time, so one worker per CPU on a many-core host
+#: spends longer starting and stopping than it saves. Measured on a 384-thread
+#: host with a cold COMGR cache, a sweep of a few hundred dgrad combos ran about
+#: three times faster at 16 to 28 combos per worker than at one worker per CPU,
+#: and slower again at 7 or 55 combos per worker.
+_ITEMS_PER_AUTO_WORKER = 16
+
+
+def _pool_size(jobs: int, num_items: int) -> int:
+    """Workers of a pool over ``num_items`` items: ``jobs``, or for ``jobs == 0``
+    one per CPU (``os.cpu_count()``) but no more than one per
+    ``_ITEMS_PER_AUTO_WORKER`` items."""
+    if jobs != 0:
+        return jobs
+    by_work = -(-num_items // _ITEMS_PER_AUTO_WORKER)
+    return max(1, min(os.cpu_count() or 1, by_work))
+
+
 def _build_ir_parallel(work, worker_fn, jobs: int) -> list:
     """Run *worker_fn* over *work* items in parallel, returning non-None results.
 
     When *jobs* == 1 runs serially to avoid subprocess overhead.
-    When *jobs* == 0 uses ``os.cpu_count()`` workers.
+    When *jobs* == 0 sizes the pool with :func:`_pool_size`.
     """
-    import os
     from concurrent.futures import ProcessPoolExecutor, as_completed, BrokenExecutor
 
     if jobs == 1:
         return [r for item in work for r in [worker_fn(item)] if r is not None]
 
-    max_workers = os.cpu_count() if jobs == 0 else jobs
+    max_workers = _pool_size(jobs, len(work))
     results = []
     n_killed = 0
     with _worker_pool(max_workers) as pool:
@@ -2908,9 +2928,8 @@ def _compile_kernels_parallel(kernels, compile_kernel, arch: str, jobs: int) -> 
     ``{name: KernelArtifact}`` dict covering every unique name in *kernels*.
 
     When *jobs* == 1 the compilation is serial (no subprocess overhead).
-    When *jobs* == 0 the worker count defaults to ``os.cpu_count()``.
+    When *jobs* == 0 the pool is sized by :func:`_pool_size`.
     """
-    import os
     from concurrent.futures import ProcessPoolExecutor, as_completed
 
     unique: dict = {}
@@ -2928,8 +2947,8 @@ def _compile_kernels_parallel(kernels, compile_kernel, arch: str, jobs: int) -> 
             artifact_map[name] = compile_kernel(k, arch=arch)
         return artifact_map
 
-    max_workers = os.cpu_count() if jobs == 0 else jobs
     work = [(k, arch) for k in unique.values()]
+    max_workers = _pool_size(jobs, len(work))
 
     print(
         f"Compiling {len(unique)} unique kernels with {max_workers} workers ...",

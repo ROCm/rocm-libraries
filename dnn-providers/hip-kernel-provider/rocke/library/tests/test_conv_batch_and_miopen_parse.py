@@ -12,11 +12,16 @@
   so no fp32 operand crosses torch's 2^32-byte break point.
   ``conv_reference`` refuses an image that alone crosses the cap; those two
   checks exercise the torch reference itself and skip without torch.
+* ``_pool_size`` -- how many compile workers a sweep starts: an explicit
+  ``--jobs`` as given; ``--jobs 0`` one per CPU, but never so many that a
+  worker's start-up outweighs its share of the kernels.
 
 CPU only; no kernel is built or launched.
 """
 
 from __future__ import annotations
+
+import os
 
 import pytest
 
@@ -305,3 +310,30 @@ def test_conv_reference_refuses_an_output_past_the_limit():
     p = ConvProblem(N=1, Hi=8190, Wi=8190, C=4, K=8, Y=1, X=1, pH=1, pW=1)
     with pytest.raises(ValueError, match="2\\*\\*31 limit"):
         _meta_conv_reference(p)
+
+
+# ---------------------------------------------------------------------------
+# _pool_size (the sweep's compile pool)
+# ---------------------------------------------------------------------------
+
+
+def test_pool_size_keeps_an_explicit_job_count():
+    from benchmarks.common.benchmark_implicit_gemm_conv import _pool_size
+
+    assert _pool_size(3, 1000) == 3
+    assert _pool_size(500, 10) == 500
+
+
+def test_pool_size_auto_gives_each_worker_its_share_of_the_work():
+    from benchmarks.common.benchmark_implicit_gemm_conv import (
+        _ITEMS_PER_AUTO_WORKER,
+        _pool_size,
+    )
+
+    cpus = os.cpu_count() or 1
+    # A 444-combo dgrad test sweep: one worker per 16 combos, rounded up.
+    assert _pool_size(0, 444) == min(cpus, -(-444 // _ITEMS_PER_AUTO_WORKER))
+    assert _pool_size(0, 1) == 1
+    assert _pool_size(0, 0) == 1
+    # A full tuning grid: one worker per CPU.
+    assert _pool_size(0, cpus * _ITEMS_PER_AUTO_WORKER * 2) == cpus
