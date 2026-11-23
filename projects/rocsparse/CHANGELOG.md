@@ -76,6 +76,11 @@ Documentation for rocSPARSE is available at
   The following routines share the fixed analysis, but their numeric factorization or solve kernels are still subject to the 32-bit work-item grid limit: `rocsparse_Xcsrilu0` and `rocsparse_Xcsric0`; `rocsparse_spilu0` and `rocsparse_spic0` (CSR format); and `rocsparse_spildlt0`. `rocsparse_Xcsrsm`, `rocsparse_spsm`, and `rocsparse_sptrsm` (CSR, CSC, and COO formats) keep one workgroup per row in their solve and still return `rocsparse_status_invalid_size` above `(2^32 - 1) / blockDim.x` rows, where `blockDim.x` is between 64 and 1024 depending on the number of right-hand sides.
 
   For BSR routines, the row counts above refer to block rows.
+* Fixed the Blocked-ELL analysis of `rocsparse_dense_to_sparse` never returning when the block dimension is larger than 256. The column window of the counting kernel was `(256 / block_dim) * block_dim` columns wide, which is zero above 256, so the kernel looped forever and the analysis blocked in `hipStreamSynchronize`. A block wider than the thread block is now counted one block column at a time. The same routine also had the following fixes:
+  * The conversion no longer writes past the ends of `ell_col_ind` and `ell_val` when a block row has more non-zero blocks than the descriptor's `ell_cols / block_dim`. Such a block row is truncated to the descriptor's width.
+  * A block dimension so large that `n + block_dim - 1` overflows 64-bit arithmetic now returns `rocsparse_status_invalid_size`.
+  * The analysis no longer leaks its workspace when a reduction step fails, and uses the handle buffer when it is large enough.
+  * The analysis of a dense matrix with no rows returned `rocsparse_status_internal_error`. It now sets `ell_cols` to 0 and returns `rocsparse_status_success`.
 
 ### Upcoming changes
 * Deprecated the `rocsparse_sddmm_alg_dense` enum value. It will be removed in a future release, along with its rocBLAS dependency. Use `rocsparse_sddmm_alg_default` instead.
