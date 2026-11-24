@@ -39,8 +39,9 @@ Each line the final `grep -v` leaves must check out another repository; a TheRoc
 ## 1. Does TheRock CI run at all?
 
 Classify every changed file with TheRock's skip-ci patterns: the base patterns plus the repo's `.github/skip-ci-config.toml` at
-`$HEAD`. The loop prints every file (`is_ci_run_required` stops listing at ten). When the pin has no
-`load_skip_ci_config`, it falls back to `_is_path_skippable(path)` (no extension patterns); record that.
+`$HEAD`. The loop prints every file (`is_ci_run_required` stops listing at ten). An external repository passes an empty
+workflow allowlist, so `.github/workflows/` files are classified by the patterns alone. Checked against TheRock `4a6dabfc096b`
+(2026-11-24); if the pin has no `_is_path_unrelated_to_ci`, the block stops.
 
 ```bash
 . ./env.sh; T=$(cat "$SCRATCH/ROCK/T"); export PYTHONPATH=$T/build_tools/github_actions
@@ -48,11 +49,10 @@ C="$SCRATCH/ROCK/skip-ci-config.toml"
 git -C "$CLONE" show "$HEAD:.github/skip-ci-config.toml" > "$C" || { echo "no skip-ci-config at HEAD" >&2; : > "$C"; }
 git -C "$CLONE" diff --name-only "$BASE" "$HEAD" | python3 -c '
 import sys; from pathlib import Path; import configure_ci_path_filters as f
-if hasattr(f, "load_skip_ci_config"):
-    p, _ = f.load_skip_ci_config(extension_config_path=Path(sys.argv[1]))
-    skip = lambda x: f._is_path_skippable_for_patterns(x, p)
-else:
-    print("pin predates skip-ci config: _is_path_skippable only"); skip = f._is_path_skippable
+if not hasattr(f, "_is_path_unrelated_to_ci"):
+    sys.exit("STOP: TheRock pin has no _is_path_unrelated_to_ci")
+p, _ = f.load_skip_ci_config(extension_config_path=Path(sys.argv[1]))
+skip = lambda x: f._is_path_unrelated_to_ci(x, p, set())
 for x in sys.stdin.read().splitlines(): print("[skip]" if skip(x) else "[ci]  ", x)' "$C"
 ```
 
