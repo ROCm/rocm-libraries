@@ -1604,12 +1604,28 @@ CK_TILE_DEVICE void wait_asyncmark()
 }
 #endif
 
+namespace detail {
+// gfx1250 issues the async global->LDS loads with inline asm by default
+// (CK_TILE_USE_AMD_LDS_DIRECT_LOAD_INLINE_ASM). The compiler's asyncmark tracking cannot see
+// inline asm, so wait_asyncmark() emits no wait for those loads and LDS could be read before
+// they land. Wait on the hardware counter as well. N counts instructions here and marks in
+// wait_asyncmark(); every mark covers at least one instruction, so this wait is never looser.
+template <index_t N>
+CK_TILE_DEVICE void wait_inline_asm_async_loads()
+{
+#if defined(__gfx125__) && CK_TILE_USE_AMD_LDS_DIRECT_LOAD_INLINE_ASM
+    __builtin_amdgcn_s_wait_asynccnt(N);
+#endif
+}
+} // namespace detail
+
 template <index_t N = 0>
 CK_TILE_DEVICE void s_wait_asynccnt()
 {
 #if CK_TILE_HAS_ASYNCMARK
     // We consistently asyncmark DMAs, so this will have the same effect on gfx12+.
     wait_asyncmark<N>();
+    detail::wait_inline_asm_async_loads<N>();
 #elif defined(__gfx125__)
     __builtin_amdgcn_s_wait_asynccnt(N);
 #else
@@ -1697,6 +1713,7 @@ CK_TILE_DEVICE void block_sync_lds_async_load()
 {
 #if CK_TILE_HAS_ASYNCMARK
     wait_asyncmark<vmcnt>();
+    detail::wait_inline_asm_async_loads<vmcnt>();
     block_sync_lds();
 #elif defined(__gfx125__)
     __builtin_amdgcn_s_wait_asynccnt(vmcnt);
