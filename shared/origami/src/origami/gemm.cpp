@@ -163,7 +163,13 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
                                              std::max(tparams(config).local_split_u, 1));
     const double spread = static_cast<double>(hardware.simds_per_cu()) /
                           std::min(waves, static_cast<double>(hardware_t::OCCUPANCY_SIMDS));
-    const double per_cu = std::clamp(static_cast<double>(num_wgs) / static_cast<double>(n_cu), std::min(spread, 1.0), 1.0);
+    // The kernel ends with its slowest workgroup: one on the group of SIMDs that holds the
+    // most.  Up to one workgroup per group each has its group to itself; one more and two
+    // share a group.
+    const double cus_per_group = static_cast<double>(hardware_t::OCCUPANCY_SIMDS) / static_cast<double>(hardware.simds_per_cu());
+    const size_t groups        = std::max<size_t>(static_cast<size_t>(static_cast<double>(n_cu) / cus_per_group), 1);
+    const double per_cu        = std::clamp(static_cast<double>(math::safe_ceil_div(num_wgs, groups)) / cus_per_group,
+                                            std::min(spread, 1.0), 1.0);
     if (per_cu < resident_wgs) {
       resident_wgs = per_cu;
       active_cus   = std::min<size_t>(n_cu, static_cast<size_t>(std::llround(static_cast<double>(num_wgs) / per_cu)));
