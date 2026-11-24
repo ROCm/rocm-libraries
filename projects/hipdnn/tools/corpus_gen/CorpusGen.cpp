@@ -640,9 +640,10 @@ nlohmann::json deliveredAnchoredShare(const std::vector<hipdnn_corpus_gen::PoolE
         {"archetypes", archetypes}};
 }
 
-/// Why no draw of @p tally's archetype was admitted, from the first point the oracle refused:
-/// a graph that does not build, or one over the --max-bytes ceiling, is told apart from an
-/// engine or a --keep clause declining it.
+/// Why no draw of @p tally's archetype was admitted. Each refused point kept is classed: a
+/// graph that does not build, one over the --max-bytes ceiling, or one the engine or a --keep
+/// clause declined. Each class present is counted, with an example, since one point does not
+/// tell a size ceiling from an engine that declines the archetype's other sizes too.
 std::string whyNeverAdmitted(const hipdnn_corpus_gen::ArchetypeTally& tally,
                              const hipdnn_corpus_gen::OperationMetadata& metadata,
                              int64_t maxBytes)
@@ -651,23 +652,50 @@ std::string whyNeverAdmitted(const hipdnn_corpus_gen::ArchetypeTally& tally,
     {
         return "no explored combination it fits was given points";
     }
-    if(!tally.refused.has_value())
+    if(tally.refused.empty())
     {
         return "every draw broke a declared constraint or repeated a point";
     }
-    const auto example = hipdnn_corpus_gen::detail::describe(*tally.refused);
-    const auto built = hipdnn_corpus_gen::buildAdmissible(metadata, *tally.refused);
-    if(!built.has_value())
+    struct Class
     {
-        return "its graph does not build, e.g. " + example;
-    }
-    const auto bytes = hipdnn_corpus_gen::graphBytes(*built);
-    if(maxBytes > 0 && bytes > maxBytes)
+        int64_t count = 0;
+        std::string example;
+    };
+    Class unbuildable;
+    Class oversized;
+    Class declined;
+    for(const auto& point : tally.refused)
     {
-        return "over --max-bytes, e.g. " + example + " needs " + std::to_string(bytes >> 20)
-               + " MiB against " + std::to_string(maxBytes >> 20) + " MiB";
+        const auto described = hipdnn_corpus_gen::detail::describe(point);
+        const auto built = hipdnn_corpus_gen::buildAdmissible(metadata, point);
+        Class* into = &declined;
+        std::string example = described;
+        if(!built.has_value())
+        {
+            into = &unbuildable;
+        }
+        else if(const auto bytes = hipdnn_corpus_gen::graphBytes(*built);
+                maxBytes > 0 && bytes > maxBytes)
+        {
+            into = &oversized;
+            example += " needs " + std::to_string(bytes >> 20) + " MiB";
+        }
+        if(into->count++ == 0)
+        {
+            into->example = example;
+        }
     }
-    return "the engine or a --keep clause declined it, e.g. " + example;
+    std::string reasons = "of " + std::to_string(tally.refused.size()) + " refused points kept";
+    const auto add = [&reasons](const Class& found, const std::string& what) {
+        if(found.count > 0)
+        {
+            reasons += "; " + std::to_string(found.count) + " " + what + ", e.g. " + found.example;
+        }
+    };
+    add(oversized, "over --max-bytes (" + std::to_string(maxBytes >> 20) + " MiB)");
+    add(declined, "declined by the engine or a --keep clause");
+    add(unbuildable, "do not build");
+    return reasons;
 }
 
 /// Weighs the sweep's pool of @p pools for the cut (weighGroups) and says on stderr which
