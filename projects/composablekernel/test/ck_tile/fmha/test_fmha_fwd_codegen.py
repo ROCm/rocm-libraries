@@ -2109,14 +2109,16 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 tiles = [
                     tile
                     for tile in inventory[(hdim, 128)]
-                    if factory.is_tile_supported_by_qr_tdm_sched(tile, hdim)
+                    if factory.is_tile_supported_by_qr_tdm_sched(tile, hdim, dtype)
                 ]
                 self.assertEqual(len(tiles), 1 if hdim == 128 else 2)
                 for tile in tiles:
                     # Runtime selection does not change tile compatibility.
                     self.assertTrue(
                         factory.is_tile_supported_by_qr_tdm_sched(
-                            replace(tile, F_constraint=CppConstraint("false")), hdim
+                            replace(tile, F_constraint=CppConstraint("false")),
+                            hdim,
+                            dtype,
                         )
                     )
                     # Every geometry/occupancy change must reject this pairing.
@@ -2130,6 +2132,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                                     factory.is_tile_supported_by_qr_tdm_sched(
                                         replace(tile, **{descriptor.name: value + 1}),
                                         hdim,
+                                        dtype,
                                     )
                                 )
                 # Callers can tune their inventory without changing later calls.
