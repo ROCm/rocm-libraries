@@ -38,8 +38,8 @@ loads of C. _emitNonatomicAdd stages the D of every batch with emitTDMStoreStagi
 runs after the last batch, or after the CompactLoopStore loop.
 generateBetaModules picks the blocks with tdmStoreBlocks; Solution checks a configuration
 with tdmStoreRejectReason and its store vectors with tdmStoreVectorRejectReason, and reserves the staged tile with
-tdmStoreLdsBytes, at _TDMStoreLdsOffset after the epilogue vectors, over the main-loop buffers when
-_TDMStoreOverMainLoop.
+tdmStoreLdsBytes, at _TDMStoreLdsOffset after the epilogue vectors, over the main-loop buffers
+(_TDMStoreOverMainLoop).
 """
 
 from math import log2
@@ -90,9 +90,12 @@ def tdmStoreRejectReason(state):
   MultipleBufferSingleKernel tile (below), or by a persistent kernel, which stores each tile it completes, and no LDS
   data may be kept from one persistent tile to the next. A StreamKAtomic
   kernel adds its tiles to D with atomics, so none of its blocks would store through the TDM block.
-  With PrefetchAcrossPersistent the next tile's loads write the main-loop buffers during the epilogue,
-  so the staged tile lies after them (_TDMStoreOverMainLoop is False) and its LDS accesses carry the
-  epilogue's memory token. ReuseAcrossPersistent keeps A in VGPRs from one tile to the next, so the
+  TDMStoreInst does not support PrefetchAcrossPersistent. PrefetchAcrossPersistent issues the next tile's loads
+  before the epilogue; with TDM loads they are tensor_load_to_lds, and a wave's TENSORcnt completes in issue order,
+  so the s_wait_tensorcnt 0 of the C load and of the store would also wait for that prefetch and leave it nothing
+  to hide. That case motivates the reject, which applies whichever instructions load A and B, so TDMStoreInst has
+  a single rule for PrefetchAcrossPersistent, and the staged tile always lies over the main-loop buffers
+  (_TDMStoreOverMainLoop). ReuseAcrossPersistent keeps A in VGPRs from one tile to the next, so the
   staged tile overwrites nothing it reuses.
   The block also computes the elements outside D and bounds only the C loads and the D store, so
   besides C and D the epilogue may only read the epilogue vectors, bias, ScaleAlphaVec and ScaleAB along
@@ -153,6 +156,10 @@ def tdmStoreRejectReason(state):
     return "TDMStoreInst does not support OutputPeerD"
   if state["StreamKAtomic"]:
     return "TDMStoreInst does not support StreamKAtomic: the kernel adds its tiles to D atomically instead of storing them"
+  if state["PrefetchAcrossPersistent"]:
+    return "TDMStoreInst does not support PrefetchAcrossPersistent, whichever instructions load A and B: with TDM " \
+           "loads the waits for its C load and store would also wait for the next tile's prefetch, which TENSORcnt " \
+           "completes before them, and leave the prefetch nothing to hide"
   if len(state["PackedC0IndicesX"]) != 1 or len(state["PackedC1IndicesX"]) != 1:
     return "TDMStoreInst requires one free index per operand, not packed free indices"
   if _tileDim0(state) > TDM_TILE_DIM_MAX or _waveColumns(state) > TDM_TILE_DIM_MAX:
@@ -373,11 +380,10 @@ def _hybridStaticArmOnly(kernel):
 
 
 def _stagedTileToken(gwb):
-  """The memory token of the staged tile's LDS accesses: that of the main-loop buffer the tile lies over or,
-  when it lies after the main-loop buffers (PrefetchAcrossPersistent), the epilogue's token, so StinkyTofu does
-  not order them after the next tile's loads into those buffers."""
-  states = gwb.parentWriter.states
-  return states.memTokenLdsBuffer0 if gwb.kernel["_TDMStoreOverMainLoop"] else states.memTokenEpilogue
+  """The memory token of the staged tile's LDS accesses: that of the main-loop buffer the tile lies over.
+  tdmStoreRejectReason rejects PrefetchAcrossPersistent, whose next tile's loads would write those buffers during
+  the epilogue."""
+  return gwb.parentWriter.states.memTokenLdsBuffer0
 
 
 def emitTDMStoreLoadCElement(gwb, addrCalc, data, vc0) -> Module:

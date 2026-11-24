@@ -7904,13 +7904,13 @@ class Solution(collections.abc.Mapping):
       state["LdsOffsetBiasNonGSU"] = epilogueOffset
       state["LdsOffsetBiasGSU"] = epilogueOffset
     # The TDM block stages the D tile from a 256-byte boundary after the LDS that is live while it is
-    # written: the vectors, which every store batch reads, and the main-loop buffers unless the tile may
-    # lie over them. It may unless the next tile's loads already write them (PrefetchAcrossPersistent).
+    # written, the vectors, which every store batch reads. The tile lies over the main-loop buffers: every
+    # wave is done with them before the tile is staged, and tdmStoreRejectReason rejects
+    # PrefetchAcrossPersistent, whose next tile's loads would write them during the epilogue.
     tdmStoreBytes = tdmStoreLdsBytes(state)
-    state["_TDMStoreOverMainLoop"] = bool(tdmStoreBytes) and not state["PrefetchAcrossPersistent"]
+    assert not (tdmStoreBytes and state["PrefetchAcrossPersistent"])
+    state["_TDMStoreOverMainLoop"] = bool(tdmStoreBytes)
     liveEnd = state["LdsOffsetBias"] + epilogueSize if epilogueSize else 0
-    if tdmStoreBytes and not state["_TDMStoreOverMainLoop"]:
-      liveEnd = max(liveEnd, ldsNumBytes)
     state["_TDMStoreLdsOffset"] = int(math.ceil(liveEnd / 256) * 256) if tdmStoreBytes else 0
     assert not tdmStoreBytes or state["_TDMStoreLdsOffset"] >= liveEnd
     ldsNumBytes = max(ldsNumBytes, state["LdsOffsetBias"] + epilogueSize, state["_TDMStoreLdsOffset"] + tdmStoreBytes)

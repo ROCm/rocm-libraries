@@ -169,6 +169,9 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
 _TILE = "TDMStoreInst requires the staged tile's tile_dim0 (data_size units) and tile_dim1 (columns per wave) to fit 16 bits"
 _ADAPTIVE = "TDMStoreInst does not support AdaptiveGemm=1 without per-element outputs beyond C and D: every block of " \
   "its store-width cascade would be the same TDM block, so AdaptiveGemm=1 would only add copies of it"
+_PAP_REASON = "TDMStoreInst does not support PrefetchAcrossPersistent, whichever instructions load A and B: with " \
+  "TDM loads the waits for its C load and store would also wait for the next tile's prefetch, which TENSORcnt " \
+  "completes before them, and leave the prefetch nothing to hide"
 _ZGEMM_STATE = {"DestDataType": DataType("z"), "ComputeDataType": DataType("z"), "HighPrecisionAccumulate": False}
 
 
@@ -187,6 +190,7 @@ _ZGEMM_STATE = {"DestDataType": DataType("z"), "ComputeDataType": DataType("z"),
   ({"OutputPeerD": True}, "TDMStoreInst does not support OutputPeerD"),
   (dict(_STREAMK, StreamKAtomic=1),
    "TDMStoreInst does not support StreamKAtomic: the kernel adds its tiles to D atomically instead of storing them"),
+  ({"TileProcessingStrategy": "DataParallel", "GlobalSplitU": 0, "PrefetchAcrossPersistent": 1}, _PAP_REASON),
   ({"PackedC0IndicesX": [0, 2]}, "TDMStoreInst requires one free index per operand, not packed free indices"),
   ({"PackedC1IndicesX": [1, 3]}, "TDMStoreInst requires one free index per operand, not packed free indices"),
   ({"MacroTile0": TDM_TILE_DIM_MAX + 1}, _TILE),
@@ -209,16 +213,12 @@ def test_adaptive_gemm_1_needs_per_element_outputs():
   {"TileProcessingStrategy": "DataParallel", "GlobalSplitU": 0},
   dict(_STREAMK, WorkAssignment="DynamicWorkQueue"),
   dict(_STREAMK, WorkAssignment="Hybrid"),
-  dict(_STREAMK, PrefetchAcrossPersistent=1),
-  {"TileProcessingStrategy": "DataParallel", "GlobalSplitU": 0, "PrefetchAcrossPersistent": 1},
   {"TileProcessingStrategy": "DataParallel", "GlobalSplitU": 0, "ReuseAcrossPersistent": 1},
-  {"TileProcessingStrategy": "DataParallel", "GlobalSplitU": 0, "ReuseAcrossPersistent": 1,
-   "PrefetchAcrossPersistent": 1},
-], ids=["dp", "sk4", "sk5", "sk3_pap", "dp_pap", "dp_rap", "dp_rap_pap"])
+], ids=["dp", "sk4", "sk5", "dp_rap"])
 def test_accepts_persistent_policies(overrides):
   """Every persistent policy stores the tiles it completes directly to D: DataParallel, and
   StreamK with the dynamic work queue (StreamK 4) or the hybrid assignment (StreamK 5) as with the static grid,
-  also with PrefetchAcrossPersistent and ReuseAcrossPersistent."""
+  also with ReuseAcrossPersistent."""
   assert tdmStoreRejectReason(_state(**overrides)) is None
 
 
@@ -1152,68 +1152,40 @@ def _nextLine(lines, start, prefixes):
   return next((i for i in range(start + 1, len(lines)) if _code(lines[i]).startswith(prefixes)), None)
 
 
-@pytest.mark.parametrize("overMainLoop", [True, False])
-def test_staged_tile_token(overMainLoop):
-  """The staged tile's LDS accesses carry the token of the main-loop buffer it lies over, or the epilogue's
-  token when it lies after the main-loop buffers."""
+def test_staged_tile_token():
+  """The staged tile's LDS accesses carry the token of the main-loop buffer it lies over, not the epilogue's."""
   from types import SimpleNamespace
   from tensilelite.Components.TDMStoreInst import _stagedTileToken
   states = SimpleNamespace(memTokenLdsBuffer0=0, memTokenEpilogue=7)
-  gwb = SimpleNamespace(kernel={"_TDMStoreOverMainLoop": overMainLoop}, parentWriter=SimpleNamespace(states=states))
-  assert _stagedTileToken(gwb) == (0 if overMainLoop else 7)
+  gwb = SimpleNamespace(kernel={"_TDMStoreOverMainLoop": True}, parentWriter=SimpleNamespace(states=states))
+  assert _stagedTileToken(gwb) == 0
 
 
-_PAP = {"StreamK": 3, "StreamKForceDPOnly": 1, "PrefetchAcrossPersistent": 1}
+_DATA_PARALLEL = {"StreamK": 3, "StreamKForceDPOnly": 1}
+_PAP = dict(_DATA_PARALLEL, PrefetchAcrossPersistent=1)
 
 
-@pytest.mark.parametrize("vectors", [False, True], ids=["plain", "vectors"])
-def test_pap_stages_after_the_main_loop(gp_gfx1250, gfx1250_iim, assembler, capsys, vectors):
-  """With PrefetchAcrossPersistent the next tile's loads write the main-loop buffers during the epilogue, so
-  the staged tile lies after them and after the vectors, from a 256-byte boundary, and the setup has neither
-  the TENSORcnt drain nor the barrier that hand the main-loop LDS to the staged tile. With the vectors, whose
-  separate region has its own token, no TENSORcnt wait comes between the last WMMA of the tile and the
-  first staging store. The tile is MT128x128: a staged MT256x256 tile takes a PAP kernel past MaxLDS."""
-  extra = {"ProblemType": {"UseBias": 1, "UseScaleAlphaVec": 1}} if vectors else {}
-  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 4, 4, 2, 2], TDMStoreInst=True, **_PAP, **extra)
+def test_pap_rejects_tdm_store(gp_gfx1250, gfx1250_iim, assembler, capsys):
+  """A PrefetchAcrossPersistent kernel is rejected with TDMStoreInst and generates without it."""
+  sol, _ = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 4, 4, 2, 2], TDMStoreInst=True, **_PAP)
+  out = capsys.readouterr().out
+  assert not sol.get("Valid") and "does not support PrefetchAcrossPersistent" in out, out
+  sol, _ = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 4, 4, 2, 2], TDMStoreInst=False, **_PAP)
   assert sol.get("Valid"), capsys.readouterr().out
-  offset, staged = sol["_TDMStoreLdsOffset"], tdmStoreLdsBytes(sol)
-  assert not sol["_TDMStoreOverMainLoop"] and offset > 0 and offset % 256 == 0
-  assert sol["LdsNumBytes"] >= offset + staged
-  if vectors:
-    assert sol["_SeparateEpilogueLds"] and offset >= sol["LdsOffsetBias"] + sol["MacroTile0"] * 4 * 2
-  assert "drain tensor_load_to_lds before reusing its LDS" not in asm
-  assert "all waves are done with the main-loop LDS" not in asm
-  lines = asm.splitlines()
-  first = next(i for i, line in enumerate(lines) if "stage D element" in line)
-  last = max(i for i in range(first) if _code(lines[i]).startswith("v_wmma"))
-  if vectors:
-    assert not any(_code(line).startswith("s_wait_tensorcnt") for line in lines[last:first]), lines[last:first]
 
 
-_RAP = dict(_PAP, ReuseAcrossPersistent=1, DepthU=256, AssertSummationElementMultiple=256, SourceSwap=True)
+_RAP = dict(_DATA_PARALLEL, ReuseAcrossPersistent=1, DepthU=256, AssertSummationElementMultiple=256, SourceSwap=True)
 _FP8_FP32D = {"DataType": "F8", "MacDataTypeA": "F8", "MacDataTypeB": "F8", "DestDataType": "S"}
 
 
-@pytest.mark.parametrize("pap", [0, 1])
-def test_rap_with_tdm_store_generates(gp_gfx1250, gfx1250_iim, assembler, capsys, pap):
+def test_rap_with_tdm_store_generates(gp_gfx1250, gfx1250_iim, assembler, capsys):
   """ReuseAcrossPersistent keeps A in VGPRs from one DataParallel tile to the next: the RAP candidate, fp32 D
-  from fp8 inputs at MT64x256, generates within the register budget at every tdm, with and without
-  PrefetchAcrossPersistent."""
+  from fp8 inputs at MT64x256, generates within the register budget at every tdm."""
   tdm = 1
   sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 128, 1, 1, 2, 8, 2, 2], TDMStoreInst=tdm,
-                       ProblemType=_FP8_FP32D, **dict(_RAP, PrefetchAcrossPersistent=pap))
+                       ProblemType=_FP8_FP32D, **_RAP)
   assert sol.get("Valid"), capsys.readouterr().out
   assert sol["ReuseAcrossPersistent"] and asm and "tensor_store_from_lds " in asm
-
-
-def test_pap_oversized_tile_hits_max_lds(gp_gfx1250, gfx1250_iim, assembler, capsys):
-  """Under PrefetchAcrossPersistent the staged tile adds to the main-loop LDS, and the MaxLDS reject
-  sees the sum: at DepthU 128 the main loop fits without TDMStoreInst and the sum does not."""
-  sol, _ = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, DepthU=128, **_PAP)
-  out = capsys.readouterr().out
-  assert not sol.get("Valid") and "LDS" in out, out
-  sol, _ = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=False, DepthU=128, **_PAP)
-  assert sol.get("Valid"), capsys.readouterr().out
 
 
 @pytest.mark.parametrize("streamk", [0, 3])
@@ -1250,15 +1222,14 @@ _MT128 = [16, 16, 32, 1, 1, 4, 4, 2, 2]
 
 
 @pytest.mark.parametrize("mi, policy", [(None, {"StreamK": 3}), (None, {"StreamK": 3, "StreamKForceDPOnly": 1}),
-                                        (None, {"StreamK": 4}), (None, {"StreamK": 3, "ClusterDim": [2, 1]}),
-                                        (_MT128, _PAP)],
-                         ids=["sk3", "dp", "sk4", "sk3_cluster", "dp_pap"])
+                                        (None, {"StreamK": 4}), (None, {"StreamK": 3, "ClusterDim": [2, 1]})],
+                         ids=["sk3", "dp", "sk4", "sk3_cluster"])
 def test_flush_has_no_duplicate_persistent_barrier(gp_gfx1250, gfx1250_iim, assembler, capsys, mi, policy):
   """With TDM loads the persistent tile handoff ends with a workgroup barrier before the next tile's work, so the
   TDM flush adds none: from the end of every store section with a TDM store to the handoff barrier nothing writes
   LDS. Without TDM
-  loads a StaticGrid StreamK 3 handoff has no barrier, and the flush keeps its own. The PAP kernel and the
-  control are MT128x128, like the PAP tests above."""
+  loads a StaticGrid StreamK 3 handoff has no barrier, and the flush keeps its own. The control is
+  MT128x128."""
   sol, asm = _emit_asm(gfx1250_iim, assembler, mi=mi, TDMStoreInst=True, TDMInst=3, **policy)
   assert sol.get("Valid"), capsys.readouterr().out
   assert _FLUSH_BARRIER not in asm and "tensor_store_from_lds " in asm
@@ -1363,7 +1334,7 @@ _VECTORS = {"ProblemType": {"UseBias": 1, "UseScaleAlphaVec": 1}}
 @pytest.mark.parametrize("overrides", [{}, dict(_VECTORS, GlobalSplitU=-1), dict(_VECTORS, StreamK=3)],
                          ids=["plain", "gsu-1_vectors", "sk3_vectors"])
 def test_staged_tile_over_main_loop_property(gp_gfx1250, gfx1250_iim, assembler, capsys, overrides):
-  """Without PrefetchAcrossPersistent the staged tile lies over the main-loop buffers (_TDMStoreOverMainLoop):
+  """The staged tile lies over the main-loop buffers (_TDMStoreOverMainLoop):
   it starts at 0, or at the first 256-byte boundary after the epilogue vectors, and the setup fences the
   main-loop LDS. TDMStoreInst off reserves no tile."""
   for tdm in (False, True):
@@ -1533,7 +1504,7 @@ def test_lds_split_is_not_the_masking_form():
   assert low + span <= DS_OFFSET_MAX
 
 
-@pytest.mark.parametrize("policy", [{"StreamK": 0}, {"StreamK": 3}, dict(_PAP, mi=_MT128)], ids=["sk0", "sk3", "pap"])
+@pytest.mark.parametrize("policy", [{"StreamK": 0}, {"StreamK": 3}], ids=["sk0", "sk3"])
 def test_c_load_wait_is_kept_before_the_barrier(gp_gfx1250, gfx1250_iim, assembler, capsys, policy):
   """In every beta TDM block the tensor_load_to_lds of C is waited for before the
   barrier after which the threads read C from the staged tile."""
