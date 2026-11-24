@@ -113,6 +113,11 @@ class TunerArgs:
     """Size in bytes for the problem/data to tune with.
     """
 
+    sizes: Optional[List[int]] = None
+    """Sizes in bytes to benchmark every candidate at. The score is the geometric mean
+    over all sizes and benchmark cases. Defaults to [size].
+    """
+
     max_fevals: int = 100
     """Maximum number of function evaluations for the tuning strategy
     """
@@ -167,6 +172,7 @@ class BaseTuner(ABC):
             )
         self.device_id = 0
         self.bytes_size = args.size
+        self.sizes = args.sizes if args.sizes else [args.size]
         self.output_dir = Path(args.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.simulation_mode = args.simulation_mode
@@ -352,7 +358,8 @@ class BaseTuner(ABC):
     ) -> None:
         """Performs auto-tuning for a specific type combination."""
         print(f"\nTuning for {' '.join([str(x) for x in types.values()])}")
-        print(f"Using size: {self.bytes_size} bytes")
+        print(f"Using sizes: {', '.join(str(s) for s in self.sizes)} bytes")
+        self._get_case_results_dir(types).mkdir(parents=True, exist_ok=True)
         strategy_print_message = (
             f"Using strategy: {self.strategy if self.strategy else 'brute_force'}"
         )
@@ -437,6 +444,8 @@ class BaseTuner(ABC):
             "algo_type": self.algo_type,
             "algo_name": self.algo_name,
             "config": config,
+            "sizes": self.sizes,
+            "case_results_dir": str(self._get_case_results_dir(types).resolve()),
             **types,
         }
 
@@ -493,6 +502,13 @@ class BaseTuner(ABC):
     def _get_cache_file_path(self, types: Dict[str, Any]):
         """Return the path of the cache file"""
         return self.output_dir / self._get_cache_file_name(types)
+
+    def _get_case_results_dir(self, types: Dict[str, Any]) -> Path:
+        """Return the directory for the per-case primbench JSON of each candidate.
+        The cache only stores the combined score, so selection rules that need each
+        case and size (worst case against develop, per-size winners) read these."""
+        cache_name = self._get_cache_file_name(types).removesuffix("_cache.json")
+        return self.output_dir / "cases" / cache_name
 
     def _save_output(
         self,

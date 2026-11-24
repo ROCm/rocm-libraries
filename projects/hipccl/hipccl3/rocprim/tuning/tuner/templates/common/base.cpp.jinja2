@@ -13,6 +13,12 @@
 #include <cstdint>
 // Include std::log and std::exp for the score.
 #include <cmath>
+#include <string>
+#include <vector>
+
+// Expands a tune parameter (a macro defined by kernel tuner) to its text, for file names.
+#define TUNING_STRINGIFY_IMPL(x) #x
+#define TUNING_STRINGIFY(x) TUNING_STRINGIFY_IMPL(x)
 {% endblock %}
 
 {% block extern_c_wrapper %}
@@ -41,35 +47,57 @@ extern "C" float {{algo_type}}_{{algo_name}}_wrapper(
     using benchmark_type = {{algo_type}}_{{algo_name}}_benchmark<key_type, value_type, config>;
     {% endblock %}
 
-    {% block primbench_settings %}
-    auto settings = primbench::settings();
-    settings.json_out = "/dev/null";
-    settings.max_warming_secs = 90;
-    settings.max_cooling_secs = 90;
-    settings.size = bytes_size;
-    settings.skip_header = true;
-    {% endblock %}
+    // Per-case results of this candidate are written to
+    // <case_results_dir>/<config>_size<bytes>.json, one file per size.
+    const std::string case_results_prefix = std::string("{{ case_results_dir }}/")
+    {% for name in config %}
+        + "{{ name }}=" + TUNING_STRINGIFY({{ config[name] }}){% if not loop.last %} + "_"{% endif %}
 
-    {% block primbench_args %}
-    char* args[] = { "benchmark-executable" /* primbench requires an executable name for exposing --help */ };
-    {% endblock %}
+    {% endfor %}
+        ;
 
-    {% block primbench_executor %}
-    auto executor = primbench::executor(1, args, settings);
-    {% endblock %}
+    // primbench uses one input size per executor, so run every queued case once per size.
+    const std::vector<size_t> sizes = { {{ sizes | join(", ") }} };
+    (void)bytes_size; // The sizes are rendered into the wrapper instead.
 
-    {% block benchmark_queue %}
-    executor.queue<benchmark_type>();
-    {% endblock %}
+    std::vector<double> all_bytes_per_second;
+    for(const size_t size : sizes)
+    {
+        {% block primbench_settings %}
+        auto settings = primbench::settings();
+        settings.json_out = case_results_prefix + "_size" + std::to_string(size) + ".json";
+        settings.max_warming_secs = 90;
+        settings.max_cooling_secs = 90;
+        settings.size = size;
+        settings.skip_header = true;
+        {% endblock %}
 
-    executor.run();
+        {% block primbench_args %}
+        char* args[] = { "benchmark-executable" /* primbench requires an executable name for exposing --help */ };
+        {% endblock %}
+
+        {% block primbench_executor %}
+        auto executor = primbench::executor(1, args, settings);
+        {% endblock %}
+
+        {% block benchmark_queue %}
+        executor.queue<benchmark_type>();
+        {% endblock %}
+
+        executor.run();
+
+        for(const double& x : executor.get_all_bytes_per_second())
+        {
+            all_bytes_per_second.push_back(x);
+        }
+    }
 
     {% block get_time %}
-    // Geometric mean of ms/GiB over all queued benchmarks, so every shape counts equally.
-    // With a single benchmark this is just its time.
+    // Geometric mean of ms/GiB over all sizes and queued benchmarks, so every size and
+    // shape counts equally. With a single size and benchmark this is just its time.
     double log_sum = 0;
     double n       = 0;
-    for(const double& x : executor.get_all_bytes_per_second())
+    for(const double& x : all_bytes_per_second)
     {
         log_sum += std::log((1000.0 * primbench::GiB) / x);
         n++;
