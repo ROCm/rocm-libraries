@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "83e5010e-57b9-412b-96b3-d57f830c9c79",
+  "name": "graph operation is batchnorm_inference_variance",
+  "scope": "graph",
+  "match_symbol": "hipkernel.hip_mlops.batchnorm_inference_variance_match"
+}

@@ -107,6 +107,34 @@ packs:
           operation: RMSNORM_BWD
         priority: 0
 
+  # Batchnorm inference, from one source with an entry point per form: the inverse variance
+  # the graph supplies, or a variance and epsilon. Each also serves the hand-written builder's
+  # two-node graph, an activation fused after the batchnorm.
+  - name: batchnorm_inference
+    discriminator: batchnorm_inference
+    dispatch: batchnorm_inference
+    kernels:
+      - name: hip_mlops.batchnorm_inference
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/batchnorm/BatchNormFwdInferSpatial.cpp
+          entry_point: BatchNormFwdInferSpatialEstInvVar
+        metadata:
+          operation: BATCHNORM_INFERENCE
+        priority: 0
+  - name: batchnorm_inference_variance
+    discriminator: batchnorm_inference_variance
+    dispatch: batchnorm_inference_variance
+    kernels:
+      - name: hip_mlops.batchnorm_inference_variance
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/batchnorm/BatchNormFwdInferSpatial.cpp
+          entry_point: BatchNormFwdInferSpatialEst
+        metadata:
+          operation: BATCHNORM_INFERENCE_VARIANCE
+        priority: 0
+
 # Embedded source compiled at plan build: every field is matcher-only.
 specialization:
   metadata_fields: []

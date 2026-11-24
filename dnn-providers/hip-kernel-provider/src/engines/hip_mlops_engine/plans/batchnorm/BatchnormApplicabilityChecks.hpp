@@ -9,6 +9,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_backward_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_inference_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 
 namespace hip_kernel_provider::batchnorm
@@ -103,5 +104,40 @@ public:
         const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
         const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr);
 };
+
+namespace batchnorm
+{
+
+/// A one-node graph reads and writes every operand through a device buffer, so none may be
+/// virtual. Fused graphs carry virtual intermediates and are checked per fusion instead.
+///
+/// @throws HipdnnPluginException with BAD_PARAM for a virtual operand.
+void checkOneNodeOperandsNotVirtual(
+    const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
+/// The tensor wiring of a fused inference graph, batchnorm inference then a pointwise
+/// activation on its y: the batchnorm's inputs are not virtual, y is virtual and the
+/// activation's output is not.
+///
+/// @throws HipdnnPluginException with BAD_PARAM when the graph is not wired so.
+void checkInferenceActivationTensors(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
+/// checkInferenceActivationTensors() for inference with a variance rather than its inverse.
+void checkInferenceVarianceExtActivationTensors(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
+} // namespace batchnorm
 
 } // namespace hip_kernel_provider

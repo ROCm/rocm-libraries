@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "2526f790-3182-4083-82d4-f1f9d2138b1c",
+  "name": "HipMlops batchnorm_inference dispatch",
+  "dispatch_symbol": "hipkernel.hip_mlops.batchnorm_inference_dispatch"
+}

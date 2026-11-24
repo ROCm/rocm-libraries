@@ -105,15 +105,17 @@ size_t BatchnormFwdInferencePlan::getWorkspaceSize([[maybe_unused]] const Handle
     return 0;
 }
 
-void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
-                                        const hipDeviceProp_t& deviceProperties)
+BatchnormInferenceKernelBuild
+    buildBatchnormFwdInferenceKernel(const BatchnormFwdInferenceParams& params,
+                                     const std::string& gcnArchName,
+                                     int multiProcessorCount,
+                                     int warpSize)
 {
     // Determine data type configuration
-    auto xDataType = _inferenceParams.x()->data_type();
-    auto yDataType = _inferenceParams.optActivation().has_value()
-                         ? _inferenceParams.activationOut()->data_type()
-                         : _inferenceParams.y()->data_type();
-    auto scaleDataType = _inferenceParams.scale()->data_type();
+    auto xDataType = params.x()->data_type();
+    auto yDataType = params.optActivation().has_value() ? params.activationOut()->data_type()
+                                                        : params.y()->data_type();
+    auto scaleDataType = params.scale()->data_type();
 
     const bool useFp16Mix
         = xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
@@ -133,8 +135,8 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
           && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
 
     // Extract dimensions from x tensor
-    const auto* xDims = _inferenceParams.x()->dims();
-    const auto* xStrides = _inferenceParams.x()->strides();
+    const auto* xDims = params.x()->dims();
+    const auto* xStrides = params.x()->strides();
 
     int batches = 0;
     int channels = 0;
@@ -190,7 +192,7 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
 
     auto inSpatialSize = static_cast<unsigned int>(spatialSize);
 
-    const bool isLayoutChannelLast = isChannelLastLayout(_inferenceParams.x());
+    const bool isLayoutChannelLast = isChannelLastLayout(params.x());
 
     // Calculate vector size based on layout
     auto vectorsize = computeVectorSize(isLayoutChannelLast, channels, inSpatialSize);
@@ -224,8 +226,8 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
 
     zlocalsize = 1;
     const size_t activeThreadsXy = xgridsize * ygridsize;
-    auto maxActiveThreads = static_cast<size_t>(deviceProperties.multiProcessorCount) * 32
-                            * static_cast<size_t>(deviceProperties.warpSize);
+    auto maxActiveThreads
+        = static_cast<size_t>(multiProcessorCount) * 32 * static_cast<size_t>(warpSize);
 
     if(activeThreadsXy < maxActiveThreads)
     {
@@ -238,21 +240,16 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
 
     // Get activation mode
     auto activationMode = ActivationMode::PASTHRU;
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* outputTensor
-        = _inferenceParams.y();
-    if(_inferenceParams.optActivation().has_value() && _inferenceParams.activationOut() != nullptr)
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* outputTensor = params.y();
+    if(params.optActivation().has_value() && params.activationOut() != nullptr)
     {
-        activationMode = (*_inferenceParams.optActivation()).mode;
-        outputTensor = _inferenceParams.activationOut();
+        activationMode = (*params.optActivation()).mode;
+        outputTensor = params.activationOut();
     }
 
     // Prepare compilation options
-    BatchnormKernelCompileOptions options(_inferenceParams.x(),
-                                          outputTensor,
-                                          _inferenceParams.estMean(),
-                                          _inferenceParams.scale(),
-                                          deviceProperties,
-                                          activationMode);
+    BatchnormKernelCompileOptions options(
+        params.x(), outputTensor, params.estMean(), params.scale(), gcnArchName, activationMode);
     options.update("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
     options.update("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
     options.update("HIP_PLUGIN_USE_FPUPCAST", useFp16Upcast);
@@ -265,21 +262,38 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
     options.update("HIP_PLUGIN_BN_CHANNELS", channels);
     options.update("HIP_PLUGIN_BN_SPATIAL_SIZE", spatialSize);
 
-    // Compile kernel and configure launch dimensions
-    _compiledProgram = kernelCompiler.compile("BatchNormFwdInferSpatial.cpp", options);
-    _runnableKernel = _compiledProgram->getKernel("BatchNormFwdInferSpatialEstInvVar");
+    return {std::move(options),
+            "BatchNormFwdInferSpatialEstInvVar",
+            {static_cast<unsigned int>(xlocalsize),
+             static_cast<unsigned int>(ylocalsize),
+             static_cast<unsigned int>(zlocalsize)},
+            {static_cast<unsigned int>(xgridsize / xlocalsize),
+             static_cast<unsigned int>(ygridsize / ylocalsize),
+             static_cast<unsigned int>(zgridsize / zlocalsize)},
+            static_cast<unsigned int>(channelStride),
+            static_cast<unsigned int>(spatialStride),
+            static_cast<unsigned int>(batchStride)};
+}
 
-    _runnableKernel->setBlockSize(static_cast<unsigned int>(xlocalsize),
-                                  static_cast<unsigned int>(ylocalsize),
-                                  static_cast<unsigned int>(zlocalsize));
-    _runnableKernel->setGridSize(static_cast<unsigned int>(xgridsize / xlocalsize),
-                                 static_cast<unsigned int>(ygridsize / ylocalsize),
-                                 static_cast<unsigned int>(zgridsize / zlocalsize));
+void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
+                                        const hipDeviceProp_t& deviceProperties)
+{
+    const auto build = buildBatchnormFwdInferenceKernel(_inferenceParams,
+                                                        std::string(deviceProperties.gcnArchName),
+                                                        deviceProperties.multiProcessorCount,
+                                                        deviceProperties.warpSize);
+
+    // Compile kernel and configure launch dimensions
+    _compiledProgram = kernelCompiler.compile("BatchNormFwdInferSpatial.cpp", build.options);
+    _runnableKernel = _compiledProgram->getKernel(build.entryPoint);
+
+    _runnableKernel->setBlockSize(build.blockSize[0], build.blockSize[1], build.blockSize[2]);
+    _runnableKernel->setGridSize(build.gridSize[0], build.gridSize[1], build.gridSize[2]);
 
     // Store kernel launch parameters
-    _channelStride = static_cast<unsigned int>(channelStride);
-    _spatialStride = static_cast<unsigned int>(spatialStride);
-    _batchStride = static_cast<unsigned int>(batchStride);
+    _channelStride = build.channelStride;
+    _spatialStride = build.spatialStride;
+    _batchStride = build.batchStride;
 }
 
 void BatchnormFwdInferencePlan::execute(const Handle& handle,

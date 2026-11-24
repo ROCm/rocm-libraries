@@ -12,8 +12,10 @@
 #include "compilation/IRunnableKernel.hpp"
 #include "core/Handle.hpp"
 #include "core/Utils.hpp"
+#include "engines/hip_mlops_engine/plans/batchnorm/BatchnormKernelCompileOptions.hpp"
 
 #include <memory>
+#include <string>
 
 namespace hip_kernel_provider
 {
@@ -67,6 +69,17 @@ private:
     std::optional<core::utils::ActivationParams> _optActivation;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _activationOut;
 };
+
+/// The compile options, entry point, 3D geometry and launch strides of the BatchNormFwdInferSpatialEstInvVar
+/// kernel for @p params on @p gcnArchName. The batch dimension's grid fills the device:
+/// @p multiProcessorCount CUs of @p warpSize lanes.
+///
+/// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 3D, 4D or 5D.
+BatchnormInferenceKernelBuild
+    buildBatchnormFwdInferenceKernel(const BatchnormFwdInferenceParams& params,
+                                     const std::string& gcnArchName,
+                                     int multiProcessorCount,
+                                     int warpSize);
 
 class BatchnormFwdInferencePlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {

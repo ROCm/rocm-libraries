@@ -1,0 +1,45 @@
+{
+  "version": "1.0",
+  "id": "87ba0d23-c0e0-4059-ab3f-9936ca594671",
+  "name": "hipkernel:hip_mlops_batchnorm_inference",
+  "matchers": [
+    "05a75960-5aac-431b-b81c-2f47e986c44c",
+    "c40efc15-aad7-46c6-a393-850e79444a9f"
+  ],
+  "engine": "0b6c4367-d91b-471e-be5a-ea77669b8897",
+  "dispatch": "2526f790-3182-4083-82d4-f1f9d2138b1c",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "0b6c4367-d91b-471e-be5a-ea77669b8897",
+          "kmd_id": "b8616f7b-3831-4ef3-93cb-f0d1a01fb102",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "operation"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "501b0e4f-df65-400a-a2b5-084c67024b96",
+      "name": "hip_mlops.batchnorm_inference",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/batchnorm/BatchNormFwdInferSpatial.cpp",
+        "entry_point": "BatchNormFwdInferSpatialEstInvVar"
+      },
+      "metadata": {
+        "operation": "BATCHNORM_INFERENCE"
+      },
+      "priority": 0
+    }
+  ],
+  "arch": []
+}

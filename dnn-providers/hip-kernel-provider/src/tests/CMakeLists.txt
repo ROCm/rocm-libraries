@@ -70,6 +70,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                   "${_hip_mlops_dir}/layernorm/LayernormCommon.hpp"
                   "${_hip_mlops_dir}/rmsnorm/RMSNormFwd.cpp"
                   "${_hip_mlops_dir}/rmsnorm/RMSNormBwd.cpp"
+                  "${_hip_mlops_dir}/batchnorm/BatchNormFwdInferSpatial.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/../engines/hip_mlops_engine/kernels/batchnorm/Configuration.hpp"
                   "${CMAKE_CURRENT_SOURCE_DIR}/../engines/hip_mlops_engine/kernels/types/VectorTypes.hpp"
                   "${CMAKE_CURRENT_SOURCE_DIR}/../engines/hip_mlops_engine/kernels/common/HipKernelActivation.hpp"
                   "${CMAKE_CURRENT_SOURCE_DIR}/../engines/hip_mlops_engine/kernels/common/HipKernelMath.hpp"
@@ -80,6 +82,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                  LayernormCommon.hpp
                  kernels/rmsnorm/RMSNormFwd.cpp
                  kernels/rmsnorm/RMSNormBwd.cpp
+                 kernels/batchnorm/BatchNormFwdInferSpatial.cpp
+                 Configuration.hpp
                  VectorTypes.hpp
                  HipKernelActivation.hpp
                  HipKernelMath.hpp

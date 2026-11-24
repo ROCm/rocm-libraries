@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include <array>
+#include <string>
+
 #include "compilation/KernelCompileOptions.hpp"
 #include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
 
@@ -21,7 +24,23 @@ public:
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* scaleTensorAttrs,
         const hipDeviceProp_t& deviceProps,
         const core::utils::ActivationMode optActivationMode = core::utils::ActivationMode::PASTHRU)
-        : KernelCompileOptions(inputTensorAttrs, deviceProps)
+        : BatchnormKernelCompileOptions(inputTensorAttrs,
+                                        outputTensorAttrs,
+                                        meanTensorAttrs,
+                                        scaleTensorAttrs,
+                                        std::string(deviceProps.gcnArchName),
+                                        optActivationMode)
+    {
+    }
+
+    BatchnormKernelCompileOptions(
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* inputTensorAttrs,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* outputTensorAttrs,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* meanTensorAttrs,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* scaleTensorAttrs,
+        const std::string& gcnArchName,
+        const core::utils::ActivationMode optActivationMode = core::utils::ActivationMode::PASTHRU)
+        : KernelCompileOptions(inputTensorAttrs, gcnArchName)
     {
         addBatchnormDefaults();
 
@@ -76,6 +95,22 @@ private:
         add("HIP_PLUGIN_BN_GRP1_FINAL", 1);
         add("HIP_PLUGIN_BN_GRP2_FINAL", 1);
     }
+};
+
+/// What a batchnorm inference plan compiles and launches: the compile options, the entry point
+/// with its 3D geometry, and the tensor strides the launch passes. Built by
+/// buildBatchnormFwdInferenceKernel() and buildBatchnormFwdInferenceWithVarianceKernel(), which
+/// the HIP MLOps engine's plans and the kernel ingestor's HipMlops packs both call, so the two
+/// engines compile and launch the same program for the same graph.
+struct BatchnormInferenceKernelBuild
+{
+    BatchnormKernelCompileOptions options;
+    const char* entryPoint;
+    std::array<unsigned int, 3> blockSize;
+    std::array<unsigned int, 3> gridSize;
+    unsigned int channelStride;
+    unsigned int spatialStride;
+    unsigned int batchStride;
 };
 
 } // namespace hip_kernel_provider::batchnorm

@@ -10,12 +10,15 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_inference_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/layernorm_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/layernorm_backward_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
@@ -43,6 +46,9 @@
 #include "engines/hip_mlops_engine/plans/RMSnorm/RMSnormApplicabilityChecks.hpp"
 #include "engines/hip_mlops_engine/plans/RMSnorm/RMSnormBwdPlan.hpp"
 #include "engines/hip_mlops_engine/plans/RMSnorm/RMSnormFwdPlan.hpp"
+#include "engines/hip_mlops_engine/plans/batchnorm/BatchnormApplicabilityChecks.hpp"
+#include "engines/hip_mlops_engine/plans/batchnorm/BatchnormFwdInferencePlan.hpp"
+#include "engines/hip_mlops_engine/plans/batchnorm/BatchnormFwdInferenceWithVariancePlan.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormApplicabilityChecks.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormBwdPlan.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormFwdPlan.hpp"
@@ -64,8 +70,9 @@
  * builder accepts, through that builder's own validator, and compiles the same embedded
  * source with the same compile options and launches (buildResampleFwdKernel(),
  * buildLayernormBwdKernel(), buildRMSnormFwdKernel() and friends), so the two engines serve a
- * graph with one program. RMSnorm also serves the hand-written builders' two-node graphs, a
- * ReLU fused after the forward or before the backward.
+ * graph with one program. RMSnorm and batchnorm inference also serve the hand-written
+ * builders' two-node graphs: an activation fused after the forward (and for RMSnorm, before
+ * the backward).
  * The hand-written engine's engine-level checks (ragged and misaligned tensors) run first,
  * here as there.
  *
@@ -96,6 +103,8 @@ constexpr std::string_view LAYERNORM_FWD = "LAYERNORM_FWD";
 constexpr std::string_view LAYERNORM_BWD = "LAYERNORM_BWD";
 constexpr std::string_view RMSNORM_FWD = "RMSNORM_FWD";
 constexpr std::string_view RMSNORM_BWD = "RMSNORM_BWD";
+constexpr std::string_view BATCHNORM_INFERENCE = "BATCHNORM_INFERENCE";
+constexpr std::string_view BATCHNORM_INFERENCE_VARIANCE = "BATCHNORM_INFERENCE_VARIANCE";
 
 // ---------------------------------------------------------------------------
 // Matching
@@ -111,9 +120,10 @@ bool passesEngineChecks(const MatchContext& context)
            && core::utils::hasOnly16ByteAlignedTensors(tensorMap);
 }
 
-/// The RMSnorm operation a two-node graph fuses with a ReLU, or nullopt: the forward then
-/// the activation, or the activation's backward then the backward (the hand-written RMSnorm
-/// builders' two-node case). Throws what the checks throw.
+/// The operation a two-node graph fuses with an activation, or nullopt: RMSnorm's forward
+/// then the activation, or the activation's backward then RMSnorm's backward; or batchnorm
+/// inference then the activation (the hand-written builders' two-node cases). Throws what
+/// the checks throw.
 std::optional<std::string_view> fusedFamilyOf(const MatchContext& context)
 {
     const auto& first = context.graph.getNodeWrapper(0);
@@ -138,6 +148,28 @@ std::optional<std::string_view> fusedFamilyOf(const MatchContext& context)
         rmsnorm::RMSnormValidator(tensorMap).checkBwdActivationTensorConfigSupported(activation,
                                                                                      rmsnorm);
         return RMSNORM_BWD;
+    }
+    if(first.attributesType() == data_objects::NodeAttributes::BatchnormInferenceAttributes
+       && second.attributesType() == data_objects::NodeAttributes::PointwiseAttributes)
+    {
+        const auto& batchnorm = first.attributesAs<data_objects::BatchnormInferenceAttributes>();
+        const auto& activation = second.attributesAs<data_objects::PointwiseAttributes>();
+        batchnorm::checkInferenceActivationTensors(batchnorm, activation, tensorMap);
+        BatchnormValidator(tensorMap).checkInferenceActivationTensorConfigSupported(batchnorm,
+                                                                                    activation);
+        return BATCHNORM_INFERENCE;
+    }
+    if(first.attributesType()
+           == data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt
+       && second.attributesType() == data_objects::NodeAttributes::PointwiseAttributes)
+    {
+        const auto& batchnorm
+            = first.attributesAs<data_objects::BatchnormInferenceAttributesVarianceExt>();
+        const auto& activation = second.attributesAs<data_objects::PointwiseAttributes>();
+        batchnorm::checkInferenceVarianceExtActivationTensors(batchnorm, activation, tensorMap);
+        BatchnormValidator(tensorMap).checkInferenceVarianceExtActivationTensorConfigSupported(
+            batchnorm, activation);
+        return BATCHNORM_INFERENCE_VARIANCE;
     }
     return std::nullopt;
 }
@@ -195,6 +227,16 @@ std::optional<std::string_view> familyOf(const MatchContext& context)
             rmsnorm::RMSnormValidator(tensorMap).checkBwdTensorConfigSupported(
                 node.attributesAs<data_objects::RMSNormBackwardAttributes>());
             return RMSNORM_BWD;
+        case data_objects::NodeAttributes::BatchnormInferenceAttributes:
+            batchnorm::checkOneNodeOperandsNotVirtual(context.graph.getNode(0), tensorMap);
+            BatchnormValidator(tensorMap).checkInferenceTensorConfigSupported(
+                node.attributesAs<data_objects::BatchnormInferenceAttributes>());
+            return BATCHNORM_INFERENCE;
+        case data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt:
+            batchnorm::checkOneNodeOperandsNotVirtual(context.graph.getNode(0), tensorMap);
+            BatchnormValidator(tensorMap).checkInferenceVarianceExtTensorConfigSupported(
+                node.attributesAs<data_objects::BatchnormInferenceAttributesVarianceExt>());
+            return BATCHNORM_INFERENCE_VARIANCE;
         default:
             return std::nullopt;
         }
@@ -306,6 +348,21 @@ private:
     const hipdnnPluginDeviceBuffer_t* _deviceBuffers;
     uint32_t _numDeviceBuffers;
 };
+
+/// The uid of an optional operand the plan params hold, or nullopt.
+std::optional<int64_t> uidOf(const data_objects::TensorAttributes* tensor)
+{
+    return tensor == nullptr ? std::nullopt : std::optional<int64_t>(tensor->uid());
+}
+
+/// The alpha and beta launch arguments of a fused activation, zero without one.
+std::pair<float, float>
+    activationArguments(const std::optional<core::utils::ActivationParams>& activation)
+{
+    return activation.has_value() ? std::make_pair(static_cast<float>(activation->alpha),
+                                                   static_cast<float>(activation->beta))
+                                  : std::make_pair(0.0f, 0.0f);
+}
 
 /// Compiles entry point @p entryPoint of @p kernel's source with @p options and applies a
 /// 1D geometry. Entry points after the first come out of the program the first compiled.
@@ -700,21 +757,6 @@ public:
 // Dispatch: RMSnorm
 // ---------------------------------------------------------------------------
 
-/// The uid of an optional operand the plan params hold, or nullopt.
-std::optional<int64_t> uidOf(const data_objects::TensorAttributes* tensor)
-{
-    return tensor == nullptr ? std::nullopt : std::optional<int64_t>(tensor->uid());
-}
-
-/// The alpha and beta launch arguments of a fused activation, zero without one.
-std::pair<float, float>
-    activationArguments(const std::optional<core::utils::ActivationParams>& activation)
-{
-    return activation.has_value() ? std::make_pair(static_cast<float>(activation->alpha),
-                                                   static_cast<float>(activation->beta))
-                                  : std::make_pair(0.0f, 0.0f);
-}
-
 /// RMSnormFwd(x, scale, bias, y, invRms, epsilon, alpha, beta). Bias and the inverse RMS are
 /// optional; y is the fused activation's output when there is one.
 class PreparedRmsnormFwd : public PreparedHipMlops
@@ -892,6 +934,190 @@ public:
 };
 
 // ---------------------------------------------------------------------------
+// Dispatch: batchnorm inference
+// ---------------------------------------------------------------------------
+
+/// BatchNormFwdInferSpatialEstInvVar(x, y, mean, invVariance, scale, bias, strides..., alpha,
+/// beta), or BatchNormFwdInferSpatialEst(x, y, mean, variance, scale, bias, epsilon,
+/// strides..., alpha, beta) with a variance. y is the fused activation's output when there is
+/// one.
+class PreparedBatchnormInference : public PreparedHipMlops
+{
+public:
+    template <typename Params>
+    PreparedBatchnormInference(IngestorKernelCode code,
+                               const Params& params,
+                               int64_t variance,
+                               std::optional<hipdnn_plugin_sdk::ScalarOperand> epsilon,
+                               const batchnorm::BatchnormInferenceKernelBuild& build)
+        : _code(std::move(code))
+        , _x(params.x()->uid())
+        , _y(params.optActivation().has_value() && params.activationOut() != nullptr
+                 ? params.activationOut()->uid()
+                 : params.y()->uid())
+        , _mean(params.estMean()->uid())
+        , _variance(variance)
+        , _scale(params.scale()->uid())
+        , _bias(params.bias()->uid())
+        , _epsilon(std::move(epsilon))
+        , _strides{build.channelStride, build.spatialStride, build.batchStride}
+        , _activation(activationArguments(params.optActivation()))
+    {
+    }
+
+    const IngestorKernelCode& kernelCode() const override
+    {
+        return _code;
+    }
+
+    void launch(hipStream_t stream,
+                const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                uint32_t numDeviceBuffers,
+                void* /*workspace*/) const override
+    {
+        const Buffers buffer(deviceBuffers, numDeviceBuffers);
+        const auto [channelStride, spatialStride, batchStride] = _strides;
+        const auto [alpha, beta] = _activation;
+        auto& kernel = _code.kernelForStream(stream);
+        // Changing these argument lists means changing BatchNormFwdInferSpatial.cpp with them.
+        if(_epsilon.has_value())
+        {
+            const double epsilon
+                = hipdnn_plugin_sdk::toDouble(hipdnn_plugin_sdk::resolveScalarOperand(
+                    *_epsilon, deviceBuffers, numDeviceBuffers));
+            kernel.launch(stream,
+                          buffer(_x),
+                          buffer(_y),
+                          buffer(_mean),
+                          buffer(_variance),
+                          buffer(_scale),
+                          buffer(_bias),
+                          epsilon,
+                          channelStride,
+                          spatialStride,
+                          batchStride,
+                          alpha,
+                          beta);
+        }
+        else
+        {
+            kernel.launch(stream,
+                          buffer(_x),
+                          buffer(_y),
+                          buffer(_mean),
+                          buffer(_variance),
+                          buffer(_scale),
+                          buffer(_bias),
+                          channelStride,
+                          spatialStride,
+                          batchStride,
+                          alpha,
+                          beta);
+        }
+    }
+
+private:
+    IngestorKernelCode _code;
+    int64_t _x;
+    int64_t _y;
+    int64_t _mean;
+    int64_t _variance;
+    int64_t _scale;
+    int64_t _bias;
+    std::optional<hipdnn_plugin_sdk::ScalarOperand> _epsilon;
+    std::tuple<unsigned int, unsigned int, unsigned int> _strides;
+    std::pair<float, float> _activation;
+};
+
+/// Compiles @p build's entry point of @p kernel's source with its 3D geometry.
+IngestorKernelCode compileBatchnormInference(const compilation::IKernelCompiler& compiler,
+                                             const compilation::KpackKernelLoader& loader,
+                                             const MatchContext& context,
+                                             const KernelDefinition& kernel,
+                                             const batchnorm::BatchnormInferenceKernelBuild& build)
+{
+    auto code = buildIngestorKernelCode(compiler,
+                                        loader,
+                                        context,
+                                        entryPointKernelDefinition(kernel, build.entryPoint),
+                                        build.options,
+                                        {});
+    code.setBlockSize(build.blockSize[0], build.blockSize[1], build.blockSize[2]);
+    code.setGridSize(build.gridSize[0], build.gridSize[1], build.gridSize[2]);
+    return code;
+}
+
+class BatchnormInferenceDispatchHandler : public HipMlopsDispatchHandler
+{
+public:
+    using HipMlopsDispatchHandler::HipMlopsDispatchHandler;
+
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
+                                              const BoundTokens& /*bound*/,
+                                              const KernelDefinition& kernel) const override
+    {
+        const auto& graph = context.graph;
+        const auto& tensorMap = graph.getTensorMap();
+        const auto& attributes
+            = graph.getNodeWrapper(0).attributesAs<data_objects::BatchnormInferenceAttributes>();
+        // A fused graph's activation follows the batchnorm.
+        const auto params
+            = graph.nodeCount() == 2
+                  ? batchnorm::BatchnormFwdInferenceParams(
+                        attributes,
+                        graph.getNodeWrapper(1).attributesAs<data_objects::PointwiseAttributes>(),
+                        tensorMap)
+                  : batchnorm::BatchnormFwdInferenceParams(attributes, tensorMap);
+        const auto& properties = context.deviceProperties;
+        const auto build = batchnorm::buildBatchnormFwdInferenceKernel(
+            params, properties.gcnArchName, properties.multiProcessorCount, properties.warpSize);
+
+        return std::make_unique<PreparedBatchnormInference>(
+            compileBatchnormInference(_compiler, _loader, context, kernel, build),
+            params,
+            params.invVariance()->uid(),
+            std::nullopt,
+            build);
+    }
+};
+
+class BatchnormInferenceVarianceDispatchHandler : public HipMlopsDispatchHandler
+{
+public:
+    using HipMlopsDispatchHandler::HipMlopsDispatchHandler;
+
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
+                                              const BoundTokens& /*bound*/,
+                                              const KernelDefinition& kernel) const override
+    {
+        const auto& graph = context.graph;
+        const auto& tensorMap = graph.getTensorMap();
+        const auto& attributes
+            = graph.getNodeWrapper(0)
+                  .attributesAs<data_objects::BatchnormInferenceAttributesVarianceExt>();
+        // A fused graph's activation follows the batchnorm.
+        const auto params
+            = graph.nodeCount() == 2
+                  ? batchnorm::BatchnormFwdInferenceWithVarianceParams(
+                        attributes,
+                        graph.getNodeWrapper(1).attributesAs<data_objects::PointwiseAttributes>(),
+                        tensorMap)
+                  : batchnorm::BatchnormFwdInferenceWithVarianceParams(attributes, tensorMap);
+        const auto& properties = context.deviceProperties;
+        const auto build = batchnorm::buildBatchnormFwdInferenceWithVarianceKernel(
+            params, properties.gcnArchName, properties.multiProcessorCount, properties.warpSize);
+
+        return std::make_unique<PreparedBatchnormInference>(
+            compileBatchnormInference(_compiler, _loader, context, kernel, build),
+            params,
+            params.estVariance()->uid(),
+            hipdnn_plugin_sdk::makeScalarOperand(
+                tensorMap, attributes.epsilon_tensor_uid(), "Epsilon"),
+            build);
+    }
+};
+
+// ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
 
@@ -931,6 +1157,10 @@ void registerHipMlopsSymbols(SymbolScope<Handle>& scope)
     scope.add("hipkernel.hip_mlops.layernorm_bwd_match", &operationMatches<LAYERNORM_BWD>);
     scope.add("hipkernel.hip_mlops.rmsnorm_fwd_match", &operationMatches<RMSNORM_FWD>);
     scope.add("hipkernel.hip_mlops.rmsnorm_bwd_match", &operationMatches<RMSNORM_BWD>);
+    scope.add("hipkernel.hip_mlops.batchnorm_inference_match",
+              &operationMatches<BATCHNORM_INFERENCE>);
+    scope.add("hipkernel.hip_mlops.batchnorm_inference_variance_match",
+              &operationMatches<BATCHNORM_INFERENCE_VARIANCE>);
 
     scope.add("hipkernel.hip_mlops.resample_fwd_dispatch",
               &dispatchHandler<ResampleFwdDispatchHandler>());
@@ -944,6 +1174,10 @@ void registerHipMlopsSymbols(SymbolScope<Handle>& scope)
               &dispatchHandler<RmsnormFwdDispatchHandler>());
     scope.add("hipkernel.hip_mlops.rmsnorm_bwd_dispatch",
               &dispatchHandler<RmsnormBwdDispatchHandler>());
+    scope.add("hipkernel.hip_mlops.batchnorm_inference_dispatch",
+              &dispatchHandler<BatchnormInferenceDispatchHandler>());
+    scope.add("hipkernel.hip_mlops.batchnorm_inference_variance_dispatch",
+              &dispatchHandler<BatchnormInferenceVarianceDispatchHandler>());
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine
