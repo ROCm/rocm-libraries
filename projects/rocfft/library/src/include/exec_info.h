@@ -100,7 +100,8 @@ private:
     // enough, use that.  If the user specified one that's not big
     // enough, throw invalid work buffer exception.  Otherwise
     // allocate one.
-    void ensure_work_buffer_size(const std::vector<size_t>& sizes_bytes_per_device);
+    void ensure_work_buffer_size(const std::vector<size_t>& sizes_bytes_per_device,
+                                 bool                       have_multigpu_plan);
 
     // pointer to user-specified info - may be null if user never specified one
     const rocfft_execution_info_t* user_info = nullptr;

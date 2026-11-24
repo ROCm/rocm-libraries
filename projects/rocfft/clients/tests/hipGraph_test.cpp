@@ -1,4 +1,4 @@
-// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023, 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 #include "../../shared/hip_object_wrapper.h"
 #include "../../shared/params_gen.h"
 #include "../../shared/rocfft_against_fftw.h"
+#include "../../shared/rocfft_hip.h"
 #include "../../shared/rocfft_params.h"
 #include "rocfft/rocfft.h"
 #include <gtest/gtest.h>
@@ -270,7 +271,7 @@ static void compare_data(const std::vector<rocfft_complex<float>>& original_host
     EXPECT_LT(diff.l_inf / input_norm.l_inf, log2(original_host_data.size()) * MAX_TRANSFORM_ERROR);
 }
 
-TEST(rocfft_UnitTest, hipGraph_execution)
+void hipGraphTest_execute(size_t N, bool expect_work_memory)
 {
     if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
        > unittest_prob)
@@ -278,10 +279,24 @@ TEST(rocfft_UnitTest, hipGraph_execution)
         GTEST_SKIP();
     }
 
+    // This test doesn't allocate work memory itself, and expects
+    // rocFFT to auto-allocate at execute time.  That goes into a
+    // memory pool, so ensure that those are supported before trying
+    // to test.
+    if(expect_work_memory)
+    {
+        int pool_supported = 0;
+        if(hipDeviceGetAttribute(&pool_supported,
+                                 hipDeviceAttributeMemoryPoolsSupported,
+                                 rocfft_scoped_device::current_device())
+           != hipSuccess)
+            GTEST_SKIP() << "unable to query memory pool support";
+        if(!pool_supported)
+            GTEST_SKIP() << "memory pool unsupported for execute-time auto-allocation";
+    }
+
     hipGraph_t     graph      = nullptr;
     hipGraphExec_t graph_exec = nullptr;
-
-    size_t N = 256;
 
     size_t seed = 100;
 
@@ -394,4 +409,18 @@ TEST(rocfft_UnitTest, hipGraph_execution)
     compare_data_exact_match<size_t>(other_stream, host_mem_counter_modified, device_mem_counter);
 
     other_stream.free();
+}
+
+// Test a plan that should not require work memory
+TEST(rocfft_UnitTest, hipGraph_execution_256)
+{
+    hipGraphTest_execute(256, false);
+}
+
+// Test a plan that should require work memory - the test does not
+// allocate it itself, so rocFFT would allocate the memory
+// internally.
+TEST(rocfft_UnitTest, hipGraph_execution_1048576)
+{
+    hipGraphTest_execute(1048576, true);
 }

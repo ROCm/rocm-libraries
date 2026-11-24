@@ -214,6 +214,8 @@ inline namespace rocfft_internal
         {
             std::swap(buf, other.buf);
             std::swap(owned, other.owned);
+            std::swap(stream, other.stream);
+            std::swap(async, other.async);
             std::swap(bsize, other.bsize);
             std::swap(device, other.device);
             std::swap(is_managed_memory, other.is_managed_memory);
@@ -222,6 +224,8 @@ inline namespace rocfft_internal
         {
             std::swap(buf, other.buf);
             std::swap(owned, other.owned);
+            std::swap(stream, other.stream);
+            std::swap(async, other.async);
             std::swap(bsize, other.bsize);
             std::swap(device, other.device);
             std::swap(is_managed_memory, other.is_managed_memory);
@@ -252,38 +256,23 @@ inline namespace rocfft_internal
 
         hipError_t alloc(const size_t size, bool make_it_shared = false)
         {
-            free();
-            // remember the device that was current as of alloc, so we can
-            // free on the correct device
-            auto ret = hipGetDevice(&device);
-            if(ret != hipSuccess)
+            return alloc_base(size, [this, make_it_shared]() {
+                is_managed_memory = use_alloc_managed() || make_it_shared;
+                return is_managed_memory ? hipMallocManaged(&buf, bsize) : hipMalloc(&buf, bsize);
+            });
+        }
+
+        hipError_t alloc_async(const size_t size, hipStream_t stream)
+        {
+            return alloc_base(size, [this, stream]() {
+                auto ret = hipMallocAsync(&buf, bsize, stream);
+                if(ret == hipSuccess)
+                {
+                    this->stream = stream;
+                    this->async  = true;
+                }
                 return ret;
-
-#ifndef ROCFFT_BUILD_INTERNAL
-            if(size > device_memory_accountant::singleton().get_usable_bytes(device))
-            {
-                std::stringstream msg;
-                msg << "Unauthorized device allocation (device ID: " << device << ").\n"
-                    << "\tRequested size is " << byte_size_to_str(size) << "\n"
-                    << device_memory_accountant::singleton().get_details(device);
-                throw DEVICEBUF_MEM_USAGE{msg.str()};
-            }
-#endif
-
-            bsize             = size;
-            is_managed_memory = use_alloc_managed() || make_it_shared;
-            ret = is_managed_memory ? hipMallocManaged(&buf, bsize) : hipMalloc(&buf, bsize);
-            if(ret != hipSuccess)
-            {
-                buf   = nullptr;
-                bsize = 0;
-            }
-
-#ifndef ROCFFT_BUILD_INTERNAL
-            device_memory_accountant::singleton().record_used_bytes(bsize, device);
-#endif
-
-            return ret;
+            });
         }
 
         size_t size() const
@@ -299,7 +288,16 @@ inline namespace rocfft_internal
                 {
                     // free on the device we allocated on
                     rocfft_scoped_device dev(device);
-                    (void)hipFree(buf);
+                    if(async)
+                    {
+                        (void)hipFreeAsync(buf, stream);
+                        stream = nullptr;
+                        async  = false;
+                    }
+                    else
+                    {
+                        (void)hipFree(buf);
+                    }
 #ifndef ROCFFT_BUILD_INTERNAL
                     device_memory_accountant::singleton().release_used_bytes(bsize, device);
 #endif
@@ -338,14 +336,55 @@ inline namespace rocfft_internal
         }
 
     private:
+        template <typename Talloc>
+        hipError_t alloc_base(const size_t size, Talloc allocator)
+        {
+            free();
+
+            // remember the device that was current as of alloc, so we can
+            // free on the correct device
+            auto ret = hipGetDevice(&device);
+            if(ret != hipSuccess)
+                return ret;
+
+#ifndef ROCFFT_BUILD_INTERNAL
+            if(size > device_memory_accountant::singleton().get_usable_bytes(device))
+            {
+                std::stringstream msg;
+                msg << "Unauthorized device allocation (device ID: " << device << ").\n"
+                    << "\tRequested size is " << byte_size_to_str(size) << "\n"
+                    << device_memory_accountant::singleton().get_details(device);
+                throw DEVICEBUF_MEM_USAGE{msg.str()};
+            }
+#endif
+
+            bsize = size;
+
+            ret = allocator();
+
+            if(ret != hipSuccess)
+            {
+                buf   = nullptr;
+                bsize = 0;
+            }
+
+#ifndef ROCFFT_BUILD_INTERNAL
+            device_memory_accountant::singleton().record_used_bytes(bsize, device);
+#endif
+
+            return ret;
+        }
+
         // The GPU buffer
         void* buf = nullptr;
         // whether this object owns the 'buf' pointer (and hence needs to
         // free it)
-        bool   owned             = true;
-        bool   is_managed_memory = false;
-        size_t bsize             = 0;
-        int    device            = 0;
+        bool        owned             = true;
+        bool        is_managed_memory = false;
+        hipStream_t stream            = nullptr;
+        bool        async             = false;
+        size_t      bsize             = 0;
+        int         device            = 0;
     };
 
     // default gpubuf that gives out void* pointers
