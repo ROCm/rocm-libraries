@@ -121,7 +121,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends \
             build-essential ca-certificates cmake curl git libgfortran5 \
-            ninja-build pkg-config python3
+            ninja-build pkg-config python3 python3-pip
 
       - name: Checkout rocm-libraries
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -191,6 +191,46 @@ jobs:
               build_sample \
                 "$ROCM_ROOT/share/rocdecode/samples/videoDecodeRaw" \
                 "$PWD/rj-samples/videoDecodeRaw"
+              ;;
+          esac
+
+      - name: Prepare profiler component tests
+        run: |
+          set -euo pipefail
+          # Mirrors the additional_requirements_files and test builds in
+          # TheRock's fetch_test_configurations.py. The container is
+          # disposable, so install into the system Python.
+          pip_install() {
+            pip3 install --break-system-packages "$@"
+          }
+          case "$COMPONENT" in
+            rocprofiler-compute)
+              pip_install \
+                -r "$ROCM_ROOT/libexec/rocprofiler-compute/requirements.txt" \
+                -r "$ROCM_ROOT/libexec/rocprofiler-compute/requirements-test.txt"
+              ;;
+            rocprofiler-systems)
+              pip_install -r "$ROCM_ROOT/share/rocprofiler-systems/tests/requirements.txt"
+              ;;
+            rocprofiler-sdk)
+              pip_install -r "$ROCM_ROOT/share/rocprofiler-sdk/tests/requirements.txt"
+              export ROCM_PATH="$ROCM_ROOT"
+              export HIP_PATH="$ROCM_ROOT"
+              export HIP_PLATFORM=amd
+              export ROCPROFILER_METRICS_PATH="$ROCM_ROOT/share/rocprofiler-sdk"
+              export LD_LIBRARY_PATH="$ROCM_ROOT/lib:$ROCM_ROOT/lib/rocm_sysdeps/lib:${LD_LIBRARY_PATH:-}"
+              cc="$ROCM_ROOT/lib/llvm/bin/amdclang"
+              cxx="$ROCM_ROOT/lib/llvm/bin/amdclang++"
+              dest="$PWD/rj-samples/rocprofiler-sdk-tests"
+              cmake -S "$ROCM_ROOT/share/rocprofiler-sdk/tests" -B "$dest" -G Ninja \
+                -DCMAKE_PREFIX_PATH="$ROCM_ROOT;$ROCM_ROOT/lib/rocm_sysdeps" \
+                -DCMAKE_HIP_COMPILER="$cxx" \
+                -DCMAKE_HIP_ARCHITECTURES=gfx942 \
+                -DGPU_TARGETS=gfx942 \
+                -DCMAKE_C_COMPILER="$cc" \
+                -DCMAKE_CXX_COMPILER="$cxx" \
+                -DPython3_EXECUTABLE="$(command -v python3)"
+              cmake --build "$dest" --parallel "$(nproc)"
               ;;
           esac
 

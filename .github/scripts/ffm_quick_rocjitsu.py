@@ -202,8 +202,11 @@ ROCDECODE_QUICK_CASES = (
 
 
 def component_name_for(rocm_root: Path, ctest_file: Path) -> str | None:
-    """Name a CTest directory under bin/ or share/."""
-    for root_name in ("bin", "share"):
+    """Name a CTest directory under bin/, share/ or libexec/.
+
+    rocprofiler-compute installs its CTest payload under libexec/.
+    """
+    for root_name in ("bin", "share", "libexec"):
         root = rocm_root / root_name
         try:
             relative = ctest_file.parent.relative_to(root).as_posix()
@@ -257,6 +260,28 @@ def source_quick_group(rocm_root: Path, name: str) -> dict | None:
             return None
         tests = [_quick_test("aqlprofile-legacy-tests", [str(script)])]
         return {"component": name, "directory": rocm_root, "tests": tests}
+    if name == "rocprofiler-sdk":
+        # The nightly ships the SDK tests as a CMake project, not a prebuilt
+        # CTest tree. The workflow configures and builds it into
+        # rj-samples/rocprofiler-sdk-tests, then this runs the whole CTest
+        # tree as one case, as test_rocprofiler_sdk.py does. The spm label is
+        # excluded because those tests need a pinned runner and driver.
+        source = rocm_root / "share" / "rocprofiler-sdk" / "tests"
+        if not (source / "CMakeLists.txt").is_file():
+            return None
+        build = _sample_root() / "rocprofiler-sdk-tests"
+        command = [
+            "ctest",
+            "--test-dir",
+            str(build),
+            "--parallel",
+            "4",
+            "--output-on-failure",
+            "-LE",
+            "spm",
+        ]
+        tests = [_quick_test("rocprofiler-sdk-ctest", command)]
+        return {"component": name, "directory": source, "tests": tests}
     if name == "rocdecode":
         source = rocm_root / "share" / "rocdecode" / "samples" / "videoDecodeRaw"
         video = rocm_root / "share" / "rocdecode" / "video"
@@ -296,7 +321,7 @@ def discover(
 
     groups = []
     seen: set[str] = set()
-    roots = [rocm_root / "bin", rocm_root / "share"]
+    roots = [rocm_root / "bin", rocm_root / "share", rocm_root / "libexec"]
     ctest_files = []
     for root in roots:
         if root.is_dir():
@@ -313,7 +338,7 @@ def discover(
             ).values()
         )
         tests = [test for test in parsed if selects_label(test, pattern)]
-        under_share = "share" in ctest_file.parts
+        under_share = "share" in ctest_file.parts or "libexec" in ctest_file.parts
         if not tests and wanted is not None and under_share:
             tests = [
                 test
@@ -377,6 +402,47 @@ def build_env(rocm_root: Path) -> dict:
     env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
     previous = env.get("LD_LIBRARY_PATH", "")
     env["LD_LIBRARY_PATH"] = lib if not previous else lib + os.pathsep + previous
+    return env
+
+
+PROFILER_COMPONENTS = ("rocprofiler-compute", "rocprofiler-sdk", "rocprofiler-systems")
+
+
+def _prepend_path(env: dict, name: str, entries: list[Path]) -> None:
+    existing = [str(entry) for entry in entries if entry.is_dir()]
+    if not existing:
+        return
+    previous = env.get(name, "")
+    env[name] = os.pathsep.join(existing + ([previous] if previous else []))
+
+
+def component_env(rocm_root: Path, component: str, base: dict) -> dict:
+    """Environment for one component, mirroring TheRock's profiler runners.
+
+    Only the three profiler components get extras, so other components (and
+    the hipRAND sweep) keep the plain ROCM_PATH/PATH/LD_LIBRARY_PATH setup.
+    """
+    if component not in PROFILER_COMPONENTS:
+        return base
+    env = dict(base)
+    env["HIP_PATH"] = str(rocm_root)
+    env["HIP_PLATFORM"] = "amd"
+    env["ROCPROFILER_METRICS_PATH"] = str(rocm_root / "share" / "rocprofiler-sdk")
+    libs = [rocm_root / "lib" / "rocm_sysdeps" / "lib"]
+    llvm_lib = rocm_root / "lib" / "llvm" / "lib"
+    if llvm_lib.is_dir():
+        libs.extend(sorted(llvm_lib.glob("*-linux-gnu")))
+    if component == "rocprofiler-systems":
+        libs = [
+            rocm_root / "lib" / "rocprofiler-systems",
+            rocm_root / "share" / "rocprofiler-systems" / "examples" / "lib",
+        ] + libs
+        env["ROCPROFSYS_INSTALL_DIR"] = str(rocm_root)
+        env["ROCPROFSYS_MAX_THREADS"] = "64"
+        # Open MPI bakes its build-time prefix into its binaries.
+        for name in ("OPAL_PREFIX", "PRTE_PREFIX", "PMIX_PREFIX"):
+            env[name] = str(rocm_root)
+    _prepend_path(env, "LD_LIBRARY_PATH", libs)
     return env
 
 
@@ -568,7 +634,7 @@ def main(argv: list[str] | None = None) -> int:
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    env = build_env(rocm_root)
+    base_env = build_env(rocm_root)
     rocjitsu = Path(args.rocjitsu).resolve()
     config = Path(args.config).resolve()
     deadline = time.monotonic() + args.deadline_seconds
@@ -577,6 +643,7 @@ def main(argv: list[str] | None = None) -> int:
     for group in groups:
         started = time.monotonic()
         results = []
+        env = component_env(rocm_root, group["component"], base_env)
         print(f"COMPONENT {group['component']} tests={len(group['tests'])}", flush=True)
         for test in group["tests"]:
             if time.monotonic() >= deadline:

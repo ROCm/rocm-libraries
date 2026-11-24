@@ -132,6 +132,74 @@ class ParseInstalledCTestTest(unittest.TestCase):
             self.assertEqual(found[0]["directory"], root)
             self.assertEqual(found[0]["tests"][0]["command"], [str(script)])
 
+    def test_libexec_ctest_directory_is_found_by_component_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ctest(
+                root / "libexec" / "rocprofiler-compute",
+                ["quick", "profile"],
+                ["test_utils"],
+            )
+            found = sweep.discover(
+                root, label="^quick$", components=["rocprofiler-compute"]
+            )
+            self.assertEqual(
+                [item["component"] for item in found], ["rocprofiler-compute"]
+            )
+            self.assertEqual(
+                found[0]["directory"], root / "libexec" / "rocprofiler-compute"
+            )
+            self.assertEqual(sweep.missing_components(
+                root, "^quick$", ["rocprofiler-compute"]
+            ), [])
+
+    def test_named_rocprofiler_sdk_runs_built_ctest_tree_without_spm(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tests = root / "share" / "rocprofiler-sdk" / "tests"
+            tests.mkdir(parents=True)
+            (tests / "CMakeLists.txt").write_text("project(t)\n", encoding="utf-8")
+            found = sweep.discover(
+                root, label="^quick$", components=["rocprofiler-sdk"]
+            )
+            self.assertEqual([item["component"] for item in found], ["rocprofiler-sdk"])
+            self.assertEqual(found[0]["directory"], tests)
+            command = found[0]["tests"][0]["command"]
+            self.assertEqual(command[0], "ctest")
+            self.assertTrue(Path(command[command.index("--test-dir") + 1]).is_absolute())
+            self.assertEqual(command[command.index("-LE") + 1], "spm")
+
+    def test_rocprofiler_sdk_without_test_sources_is_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(
+                sweep.missing_components(Path(tmp), "^quick$", ["rocprofiler-sdk"]),
+                ["rocprofiler-sdk"],
+            )
+
+    def test_profiler_components_get_tool_environment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "lib" / "rocm_sysdeps" / "lib").mkdir(parents=True)
+            (root / "lib" / "rocprofiler-systems").mkdir(parents=True)
+            base = {"LD_LIBRARY_PATH": "/base"}
+            env = sweep.component_env(root, "rocprofiler-systems", base)
+            self.assertEqual(env["ROCPROFSYS_INSTALL_DIR"], str(root))
+            self.assertEqual(env["OPAL_PREFIX"], str(root))
+            self.assertTrue(
+                env["LD_LIBRARY_PATH"].startswith(str(root / "lib" / "rocprofiler-systems"))
+            )
+            self.assertTrue(env["LD_LIBRARY_PATH"].endswith("/base"))
+            sdk = sweep.component_env(root, "rocprofiler-sdk", base)
+            self.assertEqual(
+                sdk["ROCPROFILER_METRICS_PATH"], str(root / "share" / "rocprofiler-sdk")
+            )
+            self.assertNotIn("ROCPROFSYS_INSTALL_DIR", sdk)
+            self.assertEqual(base, {"LD_LIBRARY_PATH": "/base"})
+
+    def test_other_components_keep_plain_environment(self):
+        base = {"PATH": "/bin"}
+        self.assertIs(sweep.component_env(Path("/rocm"), "hipRAND", base), base)
+
     def test_rocjitsu_timeout_is_one_hour(self):
         self.assertEqual(sweep.timeout_seconds({"timeout": 300}), 3600)
         self.assertEqual(sweep.timeout_seconds({"timeout": 7200}), 3600)
