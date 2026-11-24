@@ -1,12 +1,17 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <array>
+#include <exception>
 #include <memory>
 #include <optional>
+#include <string>
+#include <vector>
 
 #include <gtest/gtest.h>
 
 #include "MiopenApi.hpp"
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
@@ -18,12 +23,32 @@
 
 #include "HipdnnMiopenHandle.hpp"
 #include "common/ConvolutionCommon.hpp"
+#include "engines/plans/MiopenConvBwdPlan.hpp"
 #include "engines/plans/MiopenConvFwdPlan.hpp"
 #include "engines/plans/MiopenConvPlanBuilder.hpp"
+#include "engines/plans/MiopenConvWrwPlan.hpp"
 
 using namespace miopen_plugin;
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace hipdnn_test_sdk::utilities;
+
+using test_conv_common::CONV_2D_W_DIMS;
+using test_conv_common::CONV_2D_X_DIMS;
+using test_conv_common::CONV_2D_Y_DIMS;
+using test_conv_common::MIXED_LAYOUT_1D_DX_DIMS;
+using test_conv_common::MIXED_LAYOUT_1D_DX_STRIDES;
+using test_conv_common::MIXED_LAYOUT_1D_DY_DIMS;
+using test_conv_common::MIXED_LAYOUT_1D_DY_STRIDES;
+using test_conv_common::MIXED_LAYOUT_1D_W_DIMS;
+using test_conv_common::MIXED_LAYOUT_1D_W_STRIDES;
+using test_conv_common::MIXED_LAYOUT_2D_DATA_TYPE;
+using test_conv_common::MIXED_LAYOUT_2D_DX_DIMS;
+using test_conv_common::MIXED_LAYOUT_2D_DX_STRIDES;
+using test_conv_common::MIXED_LAYOUT_2D_DY_DIMS;
+using test_conv_common::MIXED_LAYOUT_2D_DY_STRIDES;
+using test_conv_common::MIXED_LAYOUT_2D_W_DIMS;
+using test_conv_common::MIXED_LAYOUT_2D_W_STRIDES;
+using test_conv_common::packedStrides;
 
 class TestMiopenConvPlanBuilder : public ::testing::Test
 {
@@ -200,6 +225,448 @@ TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForSupportedGraph)
         const bool applicable = _planBuilder.isApplicable(*_handle, graph);
         EXPECT_TRUE(applicable);
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Forward, backward data and backward weights: graphs and decline helpers
+// ---------------------------------------------------------------------------------------------
+
+using ConvDataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
+
+enum class ConvKind
+{
+    FORWARD,
+    DATA,
+    WEIGHTS
+};
+
+constexpr std::array<ConvKind, 3> ALL_KINDS
+    = {ConvKind::FORWARD, ConvKind::DATA, ConvKind::WEIGHTS};
+constexpr std::array<ConvKind, 2> BACKWARD_KINDS = {ConvKind::DATA, ConvKind::WEIGHTS};
+
+static const char* convKindName(ConvKind kind)
+{
+    if(kind == ConvKind::FORWARD)
+    {
+        return "forward";
+    }
+    if(kind == ConvKind::DATA)
+    {
+        return "backward data";
+    }
+    return "backward weights";
+}
+
+struct ConvTensor
+{
+    std::vector<int64_t> dims;
+    std::vector<int64_t> strides;
+};
+
+// The tensors of a 2D convolution (unit stride, no padding, no dilation) in backward-data roles.
+// Forward poses the same problem with x the shape of dx and y the shape of dy, backward weights
+// with x the shape of dx and dw the shape of w.
+struct ConvGraphSpec
+{
+    ConvTensor dy;
+    ConvTensor w;
+    ConvTensor dx;
+    ConvDataType dataType = ConvDataType::FLOAT;
+};
+
+static ConvGraphSpec uniformPackedSpec(bool channelsLastLayout,
+                                       ConvDataType dataType = ConvDataType::FLOAT)
+{
+    return {{CONV_2D_Y_DIMS, packedStrides(CONV_2D_Y_DIMS, channelsLastLayout)},
+            {CONV_2D_W_DIMS, packedStrides(CONV_2D_W_DIMS, channelsLastLayout)},
+            {CONV_2D_X_DIMS, packedStrides(CONV_2D_X_DIMS, channelsLastLayout)},
+            dataType};
+}
+
+// dy and dx channels-first, w channels-last (the F15 2D bf16 shape).
+static ConvGraphSpec mixedLayoutSpec()
+{
+    return {{MIXED_LAYOUT_2D_DY_DIMS, MIXED_LAYOUT_2D_DY_STRIDES},
+            {MIXED_LAYOUT_2D_W_DIMS, MIXED_LAYOUT_2D_W_STRIDES},
+            {MIXED_LAYOUT_2D_DX_DIMS, MIXED_LAYOUT_2D_DX_STRIDES},
+            MIXED_LAYOUT_2D_DATA_TYPE};
+}
+
+// All channels-last, dx with padded rows.
+static ConvGraphSpec channelsLastNonPackedSpec()
+{
+    ConvGraphSpec spec = uniformPackedSpec(/*channelsLastLayout=*/true);
+    spec.dx.strides = {320, 1, 40, 4};
+    return spec;
+}
+
+// All channels-first, dx with padded rows.
+static ConvGraphSpec channelsFirstNonPackedSpec()
+{
+    ConvGraphSpec spec = uniformPackedSpec(/*channelsLastLayout=*/false);
+    spec.dx.strides = {512, 128, 16, 1};
+    return spec;
+}
+
+// A grouped convolution (2 groups: x has twice the channels of w) with dx padded rows, in
+// channels-first.
+static ConvGraphSpec groupedNonPackedSpec()
+{
+    const std::vector<int64_t> groupedWDims = {CONV_2D_W_DIMS[0], CONV_2D_X_DIMS[1] / 2, 3, 3};
+    ConvGraphSpec spec = uniformPackedSpec(/*channelsLastLayout=*/false);
+    spec.w = {groupedWDims, packedStrides(groupedWDims, /*channelsLastLayout=*/false)};
+    spec.dx.strides = {512, 128, 16, 1};
+    return spec;
+}
+
+// A 1x1 convolution on a [8, 16, 1, 1] channels-first input with a channels-last output, as
+// PyTorch allocates it for such an input: the strides differ from the canonical ones only on the
+// extent-1 dimensions, and all three are strictly in the channels-last order.
+static ConvGraphSpec strictlyChannelsLastSpec()
+{
+    return {{{8, 4, 1, 1}, {4, 1, 4, 4}},
+            {{4, 16, 1, 1}, {16, 1, 1, 1}},
+            {{8, 16, 1, 1}, {16, 1, 1, 1}}};
+}
+
+// A single-channel 46341 x 46341 image as dy and dx (2,147,488,281 elements) with a 1x1 filter.
+static ConvGraphSpec aboveSizeLimitSpec()
+{
+    const std::vector<int64_t> imageDims = {1, 1, 46341, 46341};
+    const std::vector<int64_t> filterDims = {1, 1, 1, 1};
+
+    return {{imageDims, packedStrides(imageDims, /*channelsLastLayout=*/false)},
+            {filterDims, packedStrides(filterDims, /*channelsLastLayout=*/false)},
+            {imageDims, packedStrides(imageDims, /*channelsLastLayout=*/false)},
+            ConvDataType::HALF};
+}
+
+static flatbuffers::FlatBufferBuilder createGraph(ConvKind kind, const ConvGraphSpec& spec)
+{
+    const std::vector<int64_t> noPadding = {0, 0};
+    const std::vector<int64_t> unitStep = {1, 1};
+
+    // The three factories take the same arguments in the same order (x or dx, w or dw, y or dy).
+    const auto build = [&](const auto& factory) {
+        return factory(spec.dx.dims,
+                       spec.dx.strides,
+                       spec.w.dims,
+                       spec.w.strides,
+                       spec.dy.dims,
+                       spec.dy.strides,
+                       noPadding,
+                       noPadding,
+                       unitStep,
+                       unitStep,
+                       spec.dataType);
+    };
+
+    if(kind == ConvKind::FORWARD)
+    {
+        // The forward factory has one more defaulted parameter, so it is reached through a lambda.
+        return build([](const auto&... args) {
+            return hipdnn_test_sdk::utilities::createValidConvFwdGraph(args...);
+        });
+    }
+    if(kind == ConvKind::DATA)
+    {
+        return build(hipdnn_test_sdk::utilities::createValidConvBwdGraph);
+    }
+    return build(hipdnn_test_sdk::utilities::createValidConvWrwGraph);
+}
+
+// The graph builders give all three tensors one data type; this sets them individually, in the
+// order the tensors appear in the graph: x, w, y for forward, dy, w, dx for backward data and
+// x, dy, dw for backward weights.
+static void setConvTensorTypes(const flatbuffers::FlatBufferBuilder& builder,
+                               ConvDataType firstType,
+                               ConvDataType secondType,
+                               ConvDataType thirdType)
+{
+    auto* mutableTensors
+        = hipdnn_flatbuffers_sdk::data_objects::GetMutableGraph(builder.GetBufferPointer())
+              ->mutable_tensors();
+    EXPECT_TRUE(mutableTensors->GetMutableObject(0)->mutate_data_type(firstType));
+    EXPECT_TRUE(mutableTensors->GetMutableObject(1)->mutate_data_type(secondType));
+    EXPECT_TRUE(mutableTensors->GetMutableObject(2)->mutate_data_type(thirdType));
+}
+
+// True when MIOpen itself reports a solution for the graph. The decline tests only mean something
+// when it does: otherwise MIOpen rejects the graph on its own and the provider's check is never
+// exercised.
+static bool
+    miopenReportsSolution(ConvKind kind, const HipdnnMiopenHandle& handle, const IGraph& graph)
+{
+    try
+    {
+        size_t solutionCount = 0;
+        if(kind == ConvKind::FORWARD)
+        {
+            const auto& attr
+                = graph.getNodeWrapper(0)
+                      .attributesAs<
+                          hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes>();
+            const ConvFwdParams params(attr, graph.getTensorMap());
+
+            const auto status
+                = miopenConvolutionForwardGetSolutionCount(handle.miopenHandle,
+                                                           params.w().tensorDescriptor(),
+                                                           params.x().tensorDescriptor(),
+                                                           params.conv().convDescriptor(),
+                                                           params.y().tensorDescriptor(),
+                                                           &solutionCount);
+            return status == miopenStatusSuccess && solutionCount != 0;
+        }
+
+        if(kind == ConvKind::DATA)
+        {
+            const auto& attr
+                = graph.getNodeWrapper(0)
+                      .attributesAs<
+                          hipdnn_flatbuffers_sdk::data_objects::ConvolutionBwdAttributes>();
+            const ConvBwdParams params(attr, graph.getTensorMap());
+
+            const auto status
+                = miopenConvolutionBackwardDataGetSolutionCount(handle.miopenHandle,
+                                                                params.dy().tensorDescriptor(),
+                                                                params.w().tensorDescriptor(),
+                                                                params.conv().convDescriptor(),
+                                                                params.dx().tensorDescriptor(),
+                                                                &solutionCount);
+            return status == miopenStatusSuccess && solutionCount != 0;
+        }
+
+        const auto& attr
+            = graph.getNodeWrapper(0)
+                  .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionWrwAttributes>();
+        const ConvWrwParams params(attr, graph.getTensorMap());
+
+        const auto status
+            = miopenConvolutionBackwardWeightsGetSolutionCount(handle.miopenHandle,
+                                                               params.dy().tensorDescriptor(),
+                                                               params.x().tensorDescriptor(),
+                                                               params.conv().convDescriptor(),
+                                                               params.dw().tensorDescriptor(),
+                                                               &solutionCount);
+        return status == miopenStatusSuccess && solutionCount != 0;
+    }
+    catch(const std::exception&)
+    {
+        return false;
+    }
+}
+
+// The provider must decline a graph MIOpen would otherwise run. Skipped when MIOpen declines it
+// by itself.
+static void expectDeclined(const MiopenConvPlanBuilder& planBuilder,
+                           const HipdnnMiopenHandle& handle,
+                           ConvKind kind,
+                           const flatbuffers::FlatBufferBuilder& builder)
+{
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    if(!miopenReportsSolution(kind, handle, graph))
+    {
+        GTEST_SKIP() << "MIOpen already declines this graph by itself";
+    }
+
+    EXPECT_FALSE(planBuilder.isApplicable(handle, graph));
+}
+
+// The provider must keep a graph MIOpen offers a solution for. Skipped when MIOpen has none, so a
+// MIOpen limitation is not reported as a provider failure.
+static void expectApplicable(const MiopenConvPlanBuilder& planBuilder,
+                             const HipdnnMiopenHandle& handle,
+                             ConvKind kind,
+                             const flatbuffers::FlatBufferBuilder& builder)
+{
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    if(!miopenReportsSolution(kind, handle, graph))
+    {
+        GTEST_SKIP() << "MIOpen reports no solution for this graph";
+    }
+
+    EXPECT_TRUE(planBuilder.isApplicable(handle, graph));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Forward, backward data and backward weights
+// ---------------------------------------------------------------------------------------------
+
+// Controls: a uniform packed convolution (one data type, all tensors channels-first or all
+// channels-last) stays applicable, for forward, backward data and backward weights.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForUniformPackedForwardTensors)
+{
+    // MIOpen offers no solution for some of these combinations on some architectures; such a
+    // combination says nothing about the provider and is left out (the test is skipped only when
+    // every combination is).
+    size_t checkedCount = 0;
+
+    for(const auto kind : ALL_KINDS)
+    {
+        for(const bool channelsLastLayout : {false, true})
+        {
+            for(const auto dataType :
+                {ConvDataType::FLOAT, ConvDataType::HALF, ConvDataType::BFLOAT16})
+            {
+                SCOPED_TRACE(std::string(convKindName(kind)) + " "
+                             + (channelsLastLayout ? "channels-last " : "channels-first ")
+                             + hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType));
+
+                auto builder = createGraph(kind, uniformPackedSpec(channelsLastLayout, dataType));
+                const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+                    builder.GetBufferPointer(), builder.GetSize());
+
+                if(!miopenReportsSolution(kind, *_handle, graph))
+                {
+                    continue;
+                }
+
+                ++checkedCount;
+                EXPECT_TRUE(_planBuilder.isApplicable(*_handle, graph));
+            }
+        }
+    }
+
+    if(checkedCount == 0)
+    {
+        GTEST_SKIP() << "MIOpen reports no solution for any uniform packed graph";
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Forward
+// ---------------------------------------------------------------------------------------------
+
+// ALMIOPEN-3017: x channels-first, w channels-last, y channels-first (the F15 1D bf16 shape).
+// MIOpen reports a solution and Find may pick a solver that computes this wrongly. A 1D graph, so
+// it is built directly: the spec graphs are 2D.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForMixedLayoutForward)
+{
+    expectDeclined(_planBuilder,
+                   *_handle,
+                   ConvKind::FORWARD,
+                   hipdnn_test_sdk::utilities::createValidConvFwdGraph(
+                       MIXED_LAYOUT_1D_DX_DIMS,
+                       MIXED_LAYOUT_1D_DX_STRIDES,
+                       MIXED_LAYOUT_1D_W_DIMS,
+                       MIXED_LAYOUT_1D_W_STRIDES,
+                       MIXED_LAYOUT_1D_DY_DIMS,
+                       MIXED_LAYOUT_1D_DY_STRIDES,
+                       {0},
+                       {0},
+                       {1},
+                       {1},
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16));
+}
+
+// ALMIOPEN-3018: a grouped convolution with x padded rows (strides keep the channels-first order,
+// so the layout is uniform) next to packed w and y.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForNonPackedGroupedForward)
+{
+    expectDeclined(_planBuilder,
+                   *_handle,
+                   ConvKind::FORWARD,
+                   createGraph(ConvKind::FORWARD, groupedNonPackedSpec()));
+}
+
+// An ungrouped 2D convolution with x padded rows stays applicable in either layout: MIOpen
+// computes it correctly.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForNonPackedUngroupedForward)
+{
+    for(const auto& spec : {channelsFirstNonPackedSpec(), channelsLastNonPackedSpec()})
+    {
+        expectApplicable(
+            _planBuilder, *_handle, ConvKind::FORWARD, createGraph(ConvKind::FORWARD, spec));
+    }
+}
+
+// Packed tensors strictly in one layout stay applicable for forward even though their extent-1
+// strides are not the canonical ones.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForStrictlyOneLayoutForward)
+{
+    expectApplicable(_planBuilder,
+                     *_handle,
+                     ConvKind::FORWARD,
+                     createGraph(ConvKind::FORWARD, strictlyChannelsLastSpec()));
+}
+
+// ALMIOPEN-3015: x and w HALF with y FLOAT, layouts uniform and packed. MIOpen reports a solution
+// and then fails at execution or returns garbage.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForMixedDataTypeForward)
+{
+    auto builder = createGraph(ConvKind::FORWARD,
+                               uniformPackedSpec(/*channelsLastLayout=*/false, ConvDataType::HALF));
+    setConvTensorTypes(builder, ConvDataType::HALF, ConvDataType::HALF, ConvDataType::FLOAT);
+
+    expectDeclined(_planBuilder, *_handle, ConvKind::FORWARD, builder);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Backward data and backward weights
+// ---------------------------------------------------------------------------------------------
+
+// ALMIOPEN-3299: dy and dx channels-first, w channels-last. MIOpen reports a solution and returns
+// wrong output. Posed as backward data and as backward weights.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForMixedLayoutBackwardData)
+{
+    for(const auto kind : BACKWARD_KINDS)
+    {
+        SCOPED_TRACE(convKindName(kind));
+        expectDeclined(_planBuilder, *_handle, kind, createGraph(kind, mixedLayoutSpec()));
+    }
+}
+
+// ALMIOPEN-3301: channels-last tensors with padded rows (the layout stays uniform). MIOpen
+// returns wrong output, up to 1e38, infinities and NaN. Posed as backward data and as backward
+// weights.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForNonPackedChannelsLastBackwardData)
+{
+    for(const auto kind : BACKWARD_KINDS)
+    {
+        SCOPED_TRACE(convKindName(kind));
+        expectDeclined(
+            _planBuilder, *_handle, kind, createGraph(kind, channelsLastNonPackedSpec()));
+    }
+}
+
+// Channels-first tensors with padded rows stay applicable: MIOpen computes them correctly. Posed
+// as backward data and as backward weights.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForNonPackedChannelsFirstBackwardData)
+{
+    for(const auto kind : BACKWARD_KINDS)
+    {
+        SCOPED_TRACE(convKindName(kind));
+        expectApplicable(
+            _planBuilder, *_handle, kind, createGraph(kind, channelsFirstNonPackedSpec()));
+    }
+}
+
+// ALMIOPEN-3303: the first two tensors HALF and the last FLOAT, layouts uniform and packed. MIOpen
+// reports a solution and then fails at execution or returns garbage. The tensors are in the order
+// of the graph: dy, w, dx for backward data and x, dy, dw for backward weights.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForMixedDataTypeBackwardData)
+{
+    for(const auto kind : BACKWARD_KINDS)
+    {
+        SCOPED_TRACE(convKindName(kind));
+        auto builder = createGraph(
+            kind, uniformPackedSpec(/*channelsLastLayout=*/false, ConvDataType::HALF));
+        setConvTensorTypes(builder, ConvDataType::HALF, ConvDataType::HALF, ConvDataType::FLOAT);
+
+        expectDeclined(_planBuilder, *_handle, kind, builder);
+    }
+}
+
+// ALMIOPEN-3306: dy and dx of 2,147,488,281 elements. MIOpen offers a solver that faults on it
+// during Find. Descriptor creation allocates nothing, so the graph is cheap to build.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForBackwardDataAboveSizeLimit)
+{
+    expectDeclined(
+        _planBuilder, *_handle, ConvKind::DATA, createGraph(ConvKind::DATA, aboveSizeLimitSpec()));
 }
 
 TEST_F(TestMiopenConvPlanBuilder, GetWorkspaceSizeThrowsForMultiNodeGraph)
