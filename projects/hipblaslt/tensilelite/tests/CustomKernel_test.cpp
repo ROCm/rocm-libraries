@@ -28,6 +28,8 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <functional>
+#include <iostream>
 #include <limits>
 #include <map>
 #include <stdexcept>
@@ -86,6 +88,93 @@ TEST(CustomKernelTest, UniformSummationOrderDeserializes)
         EXPECT_EQ(kernel.name, "probe");
         EXPECT_EQ(kernel.uniformSummationOrder, declared);
     }
+}
+
+// Descriptors written before post kernels existed carry neither key and must
+// keep loading as tree-only kernels without post kernels.
+TEST(CustomKernelTest, PostKernelsDefaultWhenAbsent)
+{
+    msgpack::zone                          zone;
+    std::map<std::string, msgpack::object> fields{
+        {"name", msgpack::object(std::string("probe"), zone)}};
+    msgpack::sbuffer packed;
+    msgpack::pack(packed, fields);
+    auto unpacked = msgpack::unpack(packed.data(), packed.size());
+
+    CustomKernel                    kernel;
+    Serialization::MessagePackInput reader(unpacked.get());
+    reader.input(kernel);
+    ASSERT_TRUE(reader.error.empty()) << reader.error.front();
+    EXPECT_EQ(kernel.streamKReductions,
+              std::vector<CustomReductionMode>{CustomReductionMode::Tree});
+    EXPECT_TRUE(kernel.postKernels.empty());
+}
+
+// An explicit empty list must stay empty so the at-least-one-mode check fires.
+TEST(CustomKernelTest, EmptyReductionsAreNotDefaulted)
+{
+    msgpack::zone                          zone;
+    std::map<std::string, msgpack::object> fields{
+        {"name", msgpack::object(std::string("probe"), zone)},
+        {"streamKReductions", msgpack::object(std::vector<std::string>{}, zone)}};
+    msgpack::sbuffer packed;
+    msgpack::pack(packed, fields);
+    auto unpacked = msgpack::unpack(packed.data(), packed.size());
+
+    CustomKernel                    kernel;
+    Serialization::MessagePackInput reader(unpacked.get());
+    reader.input(kernel);
+    ASSERT_TRUE(reader.error.empty()) << reader.error.front();
+    EXPECT_TRUE(kernel.streamKReductions.empty());
+
+    ContractionSolution solution;
+    solution.customKernel = kernel;
+    EXPECT_THROW(solution.validateCustomPostKernels(), std::runtime_error);
+}
+
+TEST(CustomKernelTest, PostKernelsRoundTrip)
+{
+    CustomKernel kernel;
+    kernel.name       = "probe";
+    kernel.streamKReductions = {CustomReductionMode::Tree, CustomReductionMode::Parallel};
+
+    CustomPostKernel post;
+    post.version = 1;
+    post.name    = "probe_streamKReduce";
+    post.args    = {{CustomArgType::address, CustomArgSemantic::AddressWorkspace},
+                    {CustomArgType::uint32, CustomArgSemantic::SKSplitFactor},
+                    {CustomArgType::uint32, CustomArgSemantic::NumTiles},
+                    {CustomArgType::uint32, CustomArgSemantic::WorkspaceOffsetPartials}};
+    post.threads = TensileLite::dim3(256, 1, 1);
+    post.grid    = {CustomGridSize::TilesBands, CustomGridSize::One, CustomGridSize::One};
+    post.bands   = 4;
+
+    kernel.postKernels = {post};
+
+    Serialization::MessagePackOutput writer;
+    writer.output(kernel);
+    ASSERT_TRUE(writer.error.empty()) << writer.error.front();
+    auto unpacked = msgpack::unpack(writer.buffer.data(), writer.buffer.size());
+
+    CustomKernel                    loaded;
+    Serialization::MessagePackInput reader(unpacked.get());
+    reader.input(loaded);
+    ASSERT_TRUE(reader.error.empty()) << reader.error.front();
+    EXPECT_EQ(loaded.streamKReductions, kernel.streamKReductions);
+    ASSERT_EQ(loaded.postKernels.size(), 1u);
+    auto const& got = loaded.postKernels[0];
+    EXPECT_EQ(got.kind, CustomPostKernelKind::StreamKReduce);
+    EXPECT_EQ(got.version, 1);
+    EXPECT_EQ(got.name, post.name);
+    ASSERT_EQ(got.args.size(), post.args.size());
+    for(size_t i = 0; i < post.args.size(); ++i)
+    {
+        EXPECT_EQ(got.args[i].type, post.args[i].type);
+        EXPECT_EQ(got.args[i].semantic, post.args[i].semantic);
+    }
+    EXPECT_EQ(got.threads.x, 256u);
+    EXPECT_EQ(got.grid.x, CustomGridSize::TilesBands);
+    EXPECT_EQ(got.bands, 4u);
 }
 #endif
 
@@ -802,4 +891,612 @@ TEST(CustomKernelTest, ByteStridesNeedAnIntegerKernelArgument)
                 << e.what();
         }
     }
+}
+
+namespace
+{
+    std::vector<CustomArgDefinition> splitArgs()
+    {
+        return {{CustomArgType::address, CustomArgSemantic::AddressWorkspace},
+                {CustomArgType::uint32, CustomArgSemantic::SKSplitFactor}};
+    }
+
+    void configurePostKernels(ContractionSolution& solution)
+    {
+        solution.sizeMapping.tileProcessingStrategy            = TileProcessingStrategy::StreamK;
+        solution.internalArgsSupport.version                   = 3;
+        solution.internalArgsSupport.persistentLoopArgsVersion = 3;
+        solution.customKernel.name                             = "probe";
+        solution.customKernel.threads                          = TensileLite::dim3(256, 1, 1);
+        solution.customKernel.grid
+            = {CustomGridSize::StreamKNoBatch, CustomGridSize::One, CustomGridSize::One};
+        solution.customKernel.streamKReductions
+            = {CustomReductionMode::Tree, CustomReductionMode::Parallel};
+        solution.customKernel.workspaceType         = CustomWorkspaceType::StreamKWithReduction;
+        solution.customKernel.workspaceSizePerElemC = 4;
+
+        CustomPostKernel post;
+        post.name    = "probe_streamKReduce";
+        post.args    = splitArgs();
+        post.threads = TensileLite::dim3(256, 1, 1);
+
+        solution.customKernel.postKernels = {post};
+    }
+}
+
+// Layout 3 is what keeps a runtime without post-kernel support from running
+// the main kernel alone, so the two must always come together.
+TEST(CustomKernelTest, PostKernelsValidate)
+{
+    {
+        ContractionSolution solution;
+        configurePostKernels(solution);
+        solution.customKernel.args = splitArgs();
+        EXPECT_NO_THROW(solution.validatePersistentLoopArgs());
+    }
+
+    using Solution = ContractionSolution;
+    const std::vector<std::pair<std::function<void(Solution&)>, std::string>> invalid{
+        {[](Solution& s) { s.internalArgsSupport.persistentLoopArgsVersion = 0; },
+         "Post kernels require argument layout version 3"},
+        {[](Solution& s) { s.internalArgsSupport.version = 2; },
+         "version 3 requires KernArgsVersion=3 and post kernels"},
+        {[](Solution& s) {
+             s.customKernel.postKernels.clear();
+             s.customKernel.streamKReductions = {CustomReductionMode::Tree};
+         },
+         "version 3 requires KernArgsVersion=3 and post kernels"},
+        {[](Solution& s) { s.customKernel.streamKReductions = {CustomReductionMode::Tree}; },
+         "Parallel reduction requires a streamKReduce post kernel"},
+        {[](Solution& s) {
+             s.customKernel.postKernels.clear();
+             s.customKernel.streamKReductions                = {CustomReductionMode::Parallel};
+             s.internalArgsSupport.persistentLoopArgsVersion = 0;
+         },
+         "Parallel reduction requires a streamKReduce post kernel"},
+        {[](Solution& s) { s.customKernel.streamKReductions.push_back(CustomReductionMode::Tree); },
+         "distinct known modes"},
+        {[](Solution& s) { s.customKernel.streamKReductions.clear(); },
+         "at least one reduction mode"},
+        {[](Solution& s) { s.customKernel.postKernels[0].name = "other_streamKReduce"; },
+         "Post kernel must be named probe_streamKReduce"},
+        {[](Solution& s) { s.customKernel.postKernels.push_back(s.customKernel.postKernels[0]); },
+         "distinct known kinds"},
+        {[](Solution& s) { s.customKernel.postKernels[0].bands = 0; }, "needs threads and bands"},
+        {[](Solution& s) { s.customKernel.postKernels[0].threads.y = 0; },
+         "needs threads and bands"},
+        {[](Solution& s) { s.customKernel.postKernels[0].threads.z = 0; },
+         "needs threads and bands"},
+        {[](Solution& s) { s.customKernel.postKernels[0].version = 2; }, "unsupported version"},
+        {[](Solution& s) { s.customKernel.generated = true; },
+         "require a handwritten custom kernel"},
+        {[](Solution& s) { s.problemType.outputAmaxD = true; },
+         "do not support amax output or bias-gradient"},
+        {[](Solution& s) {
+             s.problemType.useGradient = true;
+             s.problemType.useBias     = true;
+         },
+         "do not support amax output or bias-gradient"},
+        {[](Solution& s) { s.customKernel.workspaceSizePerElemC = 0; },
+         "requires a Stream-K workspace"},
+        {[](Solution& s) { s.customKernel.workspaceType = CustomWorkspaceType::None; },
+         "requires a Stream-K workspace"},
+        {[](Solution& s) { s.customKernel.grid.x = CustomGridSize::StreamKWithBatch; },
+         "main kernel grid [StreamKNoBatch, One, One]"},
+        {[](Solution& s) { s.customKernel.grid.z = CustomGridSize::Batch; },
+         "main kernel grid [StreamKNoBatch, One, One]"},
+        {[](Solution& s) { s.sizeMapping.workAssignment = WorkAssignment::DynamicWorkQueue; },
+         "require StaticGrid or Hybrid work assignment"},
+        {[](Solution& s) { s.customKernel.grid.x = CustomGridSize::TilesBands; },
+         "main kernel grid must not use TilesBands"},
+        {[](Solution& s) { s.problemType.groupedGemm = true; },
+         "Post kernels do not support grouped GEMM"},
+        {[](Solution& s) {
+             s.customKernel.postKernels[0].args.push_back(
+                 {CustomArgType::uint32, CustomArgSemantic::PersistentGrid});
+         },
+         "PersistentGrid requires persistent loop argument layout 1"},
+        {[](Solution& s) { s.customKernel.args.pop_back(); },
+         "requires main kernel args SKSplitFactor and AddressWorkspace"},
+        {[](Solution& s) { s.customKernel.args.erase(s.customKernel.args.begin()); },
+         "requires main kernel args SKSplitFactor and AddressWorkspace"},
+        {[](Solution& s) { s.customKernel.postKernels[0].args.pop_back(); },
+         "requires streamKReduce args SKSplitFactor and AddressWorkspace"},
+        {[](Solution& s) {
+             auto& args = s.customKernel.postKernels[0].args;
+             args.erase(args.begin());
+         },
+         "requires streamKReduce args SKSplitFactor and AddressWorkspace"},
+        {[](Solution& s) { s.sizeMapping.clusterDim = TensileLite::dim3(2, 1, 1); },
+         "Handwritten custom Stream-K kernels require ClusterDim [1, 1]"},
+        {[](Solution& s) { s.sizeMapping.clusterDim = TensileLite::dim3(1, 2, 1); },
+         "Handwritten custom Stream-K kernels require ClusterDim [1, 1]"},
+        {[](Solution& s) {
+             s.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
+         },
+         "version 3 requires a StreamK solution"},
+        {[](Solution& s) { s.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::None; },
+         "version 3 requires a StreamK solution"},
+    };
+    for(size_t i = 0; i < invalid.size(); ++i)
+    {
+        ContractionSolution solution;
+        configurePostKernels(solution);
+        solution.customKernel.args = splitArgs();
+        invalid[i].first(solution);
+        try
+        {
+            solution.validatePersistentLoopArgs();
+            ADD_FAILURE() << "case " << i << " did not throw";
+        }
+        catch(std::runtime_error const& e)
+        {
+            EXPECT_NE(std::string(e.what()).find(invalid[i].second), std::string::npos)
+                << "case " << i << ": " << e.what();
+        }
+    }
+}
+
+// TilesBands needs the band count only a post kernel supplies, so the main
+// kernel grid may not use it, with or without post kernels.
+TEST(CustomKernelTest, MainGridRefusesTilesBands)
+{
+    ContractionSolution solution;
+    solution.customKernel.name = "probe";
+    solution.customKernel.grid
+        = {CustomGridSize::One, CustomGridSize::TilesBands, CustomGridSize::One};
+    EXPECT_THROW(solution.validatePersistentLoopArgs(), std::runtime_error);
+}
+
+// Parallel reduction needs a Stream-K solution even without post kernels.
+TEST(CustomKernelTest, ParallelReductionRequiresStreamK)
+{
+    ContractionSolution solution;
+    solution.customKernel.name       = "probe";
+    solution.customKernel.streamKReductions = {CustomReductionMode::Parallel};
+    EXPECT_THROW(solution.validateCustomPostKernels(), std::runtime_error);
+}
+
+// The layout-0 grid is not rounded to the cluster size either.
+TEST(CustomKernelTest, HandwrittenStreamKRefusesCluster)
+{
+    ContractionSolution solution;
+    solution.customKernel.name                  = "probe";
+    solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::StreamK;
+    solution.sizeMapping.clusterDim             = TensileLite::dim3(2, 1, 1);
+    EXPECT_THROW(solution.validatePersistentLoopArgs(), std::runtime_error);
+    solution.customKernel.generated = true;
+    EXPECT_NO_THROW(solution.validatePersistentLoopArgs());
+}
+
+TEST(CustomKernelTest, PostKernelsRefuseGroupedGemm)
+{
+    ContractionSolution solution;
+    configurePostKernels(solution);
+    auto expectRefused = [](auto&& launch) {
+        try
+        {
+            launch();
+            ADD_FAILURE() << "launch did not throw";
+        }
+        catch(std::runtime_error const& e)
+        {
+            EXPECT_STREQ(e.what(), "Post kernels are not supported for grouped GEMM");
+        }
+    };
+    expectRefused([&] {
+        solution.solveGroupedGemm({dummyProblem()},
+                                  ContractionSolution::GroupedInputs(),
+                                  probeDevice(),
+                                  nullptr,
+                                  0,
+                                  nullptr);
+    });
+    expectRefused([&] {
+        solution.solveGroupedGemmGPU({dummyProblem()},
+                                     ContractionSolution::GroupedInputs(),
+                                     probeDevice(),
+                                     nullptr,
+                                     nullptr,
+                                     nullptr);
+    });
+}
+
+namespace
+{
+    // FNV-1a over the packed arguments and the launch geometry.
+    struct CallDigest
+    {
+        uint64_t hash = 0xcbf29ce484222325ull;
+
+        void add(void const* data, size_t size)
+        {
+            auto const* bytes = static_cast<uint8_t const*>(data);
+            for(size_t i = 0; i < size; ++i)
+                hash = (hash ^ bytes[i]) * 0x100000001b3ull;
+        }
+
+        void add(TensileLite::dim3 const& d)
+        {
+            for(size_t v : {size_t(d.x), size_t(d.y), size_t(d.z)})
+                add(&v, sizeof(v));
+        }
+    };
+
+    uint64_t digest(KernelInvocation const& call)
+    {
+        CallDigest d;
+        d.add(call.args.data(), call.args.size());
+        d.add(call.workGroupSize);
+        d.add(call.numWorkGroups);
+        d.add(call.numWorkItems);
+        d.add(call.clusterDim);
+        d.add(call.kernelName.data(), call.kernelName.size());
+        return d.hash;
+    }
+
+    // Every semantic the probe problem can pack deterministically.
+    std::vector<CustomArgDefinition> representativeArgs()
+    {
+        using S = CustomArgSemantic;
+        using T = CustomArgType;
+        return {
+            {T::uint32, S::GemmInfo},
+            {T::uint32, S::NumWorkGroups},
+            {T::uint32, S::TensileInternalArg0},
+            {T::uint32, S::TensileInternalArg1},
+            {T::uint32, S::InternalArgs1},
+            {T::uint32, S::SizeFree0},
+            {T::uint32, S::SizeFree1},
+            {T::uint32, S::SizeFree2},
+            {T::uint32, S::SizeSum},
+            {T::uint32, S::SizeSumDiv2},
+            {T::uint32, S::SizeSum1},
+            {T::uint32, S::SizeSum2},
+            {T::address, S::AddressA},
+            {T::address, S::AddressB},
+            {T::address, S::AddressC},
+            {T::address, S::AddressD},
+            {T::uint32, S::StrideA0},
+            {T::uint32, S::StrideA1},
+            {T::uint32, S::StrideB0},
+            {T::uint32, S::StrideB1},
+            {T::uint32, S::StrideC0},
+            {T::uint32, S::StrideC1},
+            {T::uint32, S::StrideD0},
+            {T::uint64, S::StrideD1},
+            {T::uint32, S::StrideCK},
+            {T::uint64, S::StrideA0Bytes},
+            {T::uint64, S::StrideD0Bytes},
+            {T::float32, S::Alpha},
+            {T::float32, S::Beta},
+            {T::int32, S::ComputeUnits},
+            {T::uint32, S::SplitK},
+            {T::uint32, S::OutputBF16},
+            {T::uint32, S::Padding},
+            {T::uint32, S::ConstantZero, 4},
+            {T::uint32, S::ConstantOne},
+            {T::uint32, S::DebugPattern},
+            {T::uint32, S::DebugPattern},
+            {T::address, S::AddressWorkspace},
+            {T::address, S::AddressFlags},
+            {T::address, S::AddressSynchronizer},
+            {T::address, S::Synchronizer},
+            {T::address, S::DebugBuffer},
+            {T::uint32, S::GemmCount},
+            {T::uint32, S::ItersPerTile},
+            {T::uint32, S::MagicNumberItersPerTile},
+            {T::uint32, S::MagicShiftItersPerTile},
+            {T::uint32, S::TotalIters},
+            {T::uint32, S::SKItersPerWG},
+            {T::uint32, S::SKGrid},
+            {T::uint32, S::SKTilesAndSplit},
+            {T::uint32, S::MagicNumberSize, 0, 1},
+            {T::uint32, S::MagicShiftSize, 0, 1},
+            {T::uint32, S::FactorDim},
+            {T::uint32, S::ActivationTypeArg},
+            {T::float32, S::ActivationArg, 0, 0},
+            {T::uint32, S::ActivationArg, 0, 1},
+            {T::uint32, S::GSUSync},
+            {T::int32, S::ESMRuntimeSupported},
+            {T::int64, S::BatchOffsetD},
+            {T::int64, S::BatchOffsetA},
+            {T::int32, S::RR_WorkgroupMapping},
+            {T::uint32, S::RR_MagicMultipleWgm},
+            {T::int32, S::RR_QuotientTilesMByWgm},
+            {T::uint32, S::RR_MagicShiftAndSignWgmMainBlock},
+        };
+    }
+
+    ContractionInputs representativeInputs()
+    {
+        auto              fake = [](uintptr_t address) { return reinterpret_cast<void*>(address); };
+        ContractionInputs inputs;
+        inputs.a              = fake(0xa000);
+        inputs.b              = fake(0xb000);
+        inputs.c              = fake(0xc000);
+        inputs.d              = fake(0xd000);
+        inputs.ws             = fake(0xe000);
+        inputs.Synchronizer   = fake(0xf000);
+        inputs.alpha          = 2.5f;
+        inputs.beta           = -1.25f;
+        inputs.activationArgs = {0.5f};
+        inputs.batchOffsetA   = 0x300000005LL;
+        inputs.batchOffsetD   = 0x100000001LL;
+        return inputs;
+    }
+
+    template <typename T>
+    T namedArg(KernelInvocation const& call, std::string const& name)
+    {
+        auto it = KernelArguments::const_iterator(call.args, name);
+        if(it == call.args.end())
+            throw std::runtime_error("Missing packed argument " + name);
+        auto field = *it;
+        EXPECT_EQ(field.second, sizeof(T)) << name;
+        T result{};
+        std::memcpy(&result, field.first, std::min(sizeof(T), field.second));
+        return result;
+    }
+
+    using Configure = std::function<void(
+        ContractionSolution&, ContractionProblemGemm&, PersistentLaunchSettings&)>;
+
+    struct RepresentativeCall
+    {
+        char const*                                  name;
+        Configure                                    configure;
+        std::function<void(KernelInvocation const&)> expect;
+        size_t                                       argBytes;
+        uint64_t                                     digest;
+    };
+
+    void configureStreamK(ContractionSolution& solution, PersistentLaunchSettings& launch)
+    {
+        solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::StreamK;
+        solution.customKernel.workspaceType         = CustomWorkspaceType::StreamK;
+        solution.customKernel.grid
+            = {CustomGridSize::StreamKWithBatch, CustomGridSize::One, CustomGridSize::One};
+        launch.tileProcessingStrategy = TileProcessingStrategy::StreamK;
+    }
+
+    void* address(KernelInvocation const& call, char const* name)
+    {
+        return namedArg<void*>(call, name);
+    }
+
+    void* const inputWs   = reinterpret_cast<void*>(0xe000);
+    void* const inputSync = reinterpret_cast<void*>(0xf000);
+
+    // Golden digests pinning the byte layout of generateCustomCall's arguments
+    // and launch.
+    std::vector<RepresentativeCall> const& representativeCalls()
+    {
+        static const std::vector<RepresentativeCall> calls{
+            {"tiles",
+             [](auto& solution, auto&, auto&) {
+                 solution.customKernel.grid
+                     = {CustomGridSize::TilesX, CustomGridSize::TilesY, CustomGridSize::Batch};
+             },
+             [](auto const& call) {
+                 EXPECT_EQ(call.numWorkGroups.x, 8u);
+                 EXPECT_EQ(call.numWorkGroups.y, 8u);
+                 EXPECT_EQ(address(call, "AddressD"), reinterpret_cast<void*>(0xd000));
+             },
+             316,
+             0x77e20b50bcd2df0aull},
+            {"tilesFlattened",
+             [](auto& solution, auto&, auto&) {
+                 solution.internalArgsSupport.version = 1;
+                 solution.customKernel.grid
+                     = {CustomGridSize::TilesX, CustomGridSize::TilesY, CustomGridSize::Batch};
+             },
+             [](auto const& call) {
+                 EXPECT_EQ(call.numWorkGroups.x, 64u);
+                 EXPECT_EQ(call.numWorkGroups.y, 1u);
+             },
+             316,
+             0xf5ea9f5546ac715full},
+            {"splitKMultipleBuffer",
+             [](auto& solution, auto& problem, auto&) {
+                 solution.sizeMapping.globalAccumulation = 2;
+                 solution.customKernel.grid
+                     = {CustomGridSize::TilesXYBatchGSU, CustomGridSize::One, CustomGridSize::One};
+                 problem.setParams().setGSU(4);
+             },
+             [](auto const& call) {
+                 EXPECT_EQ(call.numWorkGroups.x, 256u);
+                 EXPECT_EQ(namedArg<uint32_t>(call, "SplitK"), 2u);
+                 EXPECT_EQ(address(call, "AddressC"), inputWs);
+                 EXPECT_EQ(address(call, "AddressD"), inputWs);
+             },
+             316,
+             0x7d33ab2fe5036458ull},
+            {"computeUnits",
+             [](auto& solution, auto& problem, auto&) {
+                 solution.customKernel.grid
+                     = {CustomGridSize::ComputeUnits, CustomGridSize::One, CustomGridSize::One};
+                 problem.setParams().setSmCountTarget(96);
+             },
+             [](auto const& call) {
+                 EXPECT_EQ(call.numWorkGroups.x, 96u);
+                 EXPECT_EQ(namedArg<int32_t>(call, "ComputeUnits"), 96);
+             },
+             316,
+             0x1841435f58750687ull},
+            {"streamKTree",
+             [](auto& solution, auto&, auto& launch) {
+                 configureStreamK(solution, launch);
+                 launch.grid      = 37;
+                 launch.reduction = origami::reduction_t::tree;
+             },
+             [](auto const& call) {
+                 EXPECT_EQ(call.numWorkGroups.x, 37u);
+                 EXPECT_EQ(namedArg<uint32_t>(call, "SKGrid"), 37u);
+                 EXPECT_EQ(address(call, "AddressFlags"), inputSync);
+                 EXPECT_EQ(address(call, "AddressD"), reinterpret_cast<void*>(0xd000));
+             },
+             316,
+             0x4f9b2824978a5ef9ull},
+            {"streamKParallel",
+             [](auto& solution, auto&, auto& launch) {
+                 configureStreamK(solution, launch);
+                 launch.grid      = 128;
+                 launch.reduction = origami::reduction_t::parallel;
+             },
+             // Parallel digests encode the post-kernel contract: the main
+             // kernel keeps the real C and D; partials go through
+             // AddressWorkspace.
+             [](auto const& call) {
+                 EXPECT_EQ(namedArg<uint32_t>(call, "SKTilesAndSplit"), 2u);
+                 EXPECT_EQ(address(call, "AddressFlags"), nullptr);
+                 EXPECT_EQ(address(call, "AddressC"), reinterpret_cast<void*>(0xc000));
+                 EXPECT_EQ(address(call, "AddressD"), reinterpret_cast<void*>(0xd000));
+             },
+             316,
+             0x3f5df171b01d18a8ull},
+            {"streamKParallelPostKernels",
+             [](auto& solution, auto&, auto& launch) {
+                 configureStreamK(solution, launch);
+                 configurePostKernels(solution);
+                 launch.grid      = 192;
+                 launch.reduction = origami::reduction_t::parallel;
+             },
+             [](auto const& call) {
+                 EXPECT_EQ(namedArg<uint32_t>(call, "SKTilesAndSplit"), 3u);
+                 EXPECT_NE(namedArg<uint32_t>(call, "TotalIters"), 0u);
+                 EXPECT_EQ(call.numWorkGroups.x, 192u);
+                 EXPECT_EQ(address(call, "AddressD"), reinterpret_cast<void*>(0xd000));
+             },
+             316,
+             0xcb1e99bb5fad2dadull},
+            {"dataParallelV1Cluster",
+             [](auto& solution, auto&, auto& launch) {
+                 solution.internalArgsSupport.version                   = 3;
+                 solution.internalArgsSupport.persistentLoopArgsVersion = 1;
+                 solution.sizeMapping.clusterDim             = TensileLite::dim3(2, 2, 1);
+                 solution.sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
+                 solution.customKernel.grid
+                     = {CustomGridSize::PersistentGrid, CustomGridSize::One, CustomGridSize::One};
+                 launch.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
+                 launch.grid                   = 64;
+             },
+             [](auto const& call) {
+                 EXPECT_EQ(call.numWorkGroups.x, 32u);
+                 EXPECT_EQ(call.numWorkGroups.y, 2u);
+                 EXPECT_EQ(call.clusterDim.x, 2u);
+             },
+             316,
+             0x03f7667a96fa1a6full},
+        };
+        return calls;
+    }
+
+    template <bool T_Debug>
+    KernelInvocation representativeCall(RepresentativeCall const& call)
+    {
+        ContractionSolution solution;
+        configureProbeKernel(solution, {});
+        solution.kernelName               = "probe";
+        solution.sizeMapping.globalSplitU = 1;
+        solution.customKernel.args        = representativeArgs();
+        auto                     problem  = dummyProblem();
+        PersistentLaunchSettings launch;
+        call.configure(solution, problem, launch);
+        auto device = probeDevice();
+        return solution.generateCustomCall<T_Debug>(
+            problem, representativeInputs(), device, launch);
+    }
+}
+
+// Pins the packed arguments and launch geometry of custom kernels covering the
+// tile, split-K, persistent, DataParallel cluster and Stream-K tree/parallel paths.
+TEST(CustomKernelTest, CustomCallMatchesGoldenDigest)
+{
+    for(auto const& call : representativeCalls())
+    {
+        SCOPED_TRACE(call.name);
+        auto invocation = representativeCall<false>(call);
+        EXPECT_EQ(invocation.args.size(), call.argBytes);
+        EXPECT_EQ(digest(invocation), call.digest) << std::hex << digest(invocation);
+
+        ::testing::internal::CaptureStdout();
+        auto logged = representativeCall<true>(call);
+        ::testing::internal::GetCapturedStdout();
+        EXPECT_EQ(digest(logged), call.digest);
+        call.expect(logged);
+    }
+}
+
+// A post kernel's TilesBands grid launches one workgroup per (tile, band); the
+// main kernel has no bands and keeps rejecting it.
+TEST(CustomKernelTest, TilesBandsLaunchesBandsPerTile)
+{
+    ContractionSolution solution;
+    configureProbeKernel(solution, {});
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, 1024, 768, 1024, 1024, 1024, 1024, 1.0, false, 3);
+    auto                     device = probeDevice();
+    PersistentLaunchSettings launch;
+    auto const               schedule = solution.customCallSchedule(problem, device, launch);
+    vector3<CustomGridSize>  grid{
+        CustomGridSize::TilesBands, CustomGridSize::One, CustomGridSize::One};
+
+    KernelInvocation post;
+    solution.customCallGrid(post, TensileLite::dim3(64, 1, 1), grid, 4, {}, schedule, launch);
+    EXPECT_EQ(post.workGroupSize.x, 64u);
+    EXPECT_EQ(post.numWorkGroups.x, 8u * 6u * 3u * 4u);
+    EXPECT_EQ(post.numWorkGroups.y, 1u);
+    EXPECT_EQ(post.numWorkItems.x, 64u * 8u * 6u * 3u * 4u);
+
+    EXPECT_THROW(
+        solution.customCallGrid(post, TensileLite::dim3(64, 1, 1), grid, 0, {}, schedule, launch),
+        std::runtime_error);
+    solution.customKernel.grid = grid;
+    EXPECT_THROW(solution.generateCustomCall<false>(problem, ContractionInputs(), device, launch),
+                 std::runtime_error);
+}
+
+// In Stream-K parallel reduction AddressC/D and their strides name the real C
+// and D for every kernel; partials are reached only through AddressWorkspace.
+TEST(CustomKernelTest, ParallelReductionKeepsRealCAndD)
+{
+    using S = CustomArgSemantic;
+    using T = CustomArgType;
+
+    ContractionSolution      solution;
+    PersistentLaunchSettings launch;
+    configureProbeKernel(solution, {});
+    configureStreamK(solution, launch);
+    launch.grid      = 128;
+    launch.reduction = origami::reduction_t::parallel;
+    // ldc > M, so the problem strides differ from packed workspace strides.
+    auto problem = ContractionProblemGemm::GEMM(
+        false, false, 1024, 768, 512, 1024, 512, 1536, 1.0, false, 2);
+    auto device = probeDevice();
+    auto inputs = representativeInputs();
+
+    std::vector<CustomArgDefinition> const args{
+        {T::address, S::AddressC},
+        {T::address, S::AddressD},
+        {T::uint32, S::StrideC0},
+        {T::uint32, S::StrideC1},
+        {T::uint32, S::StrideD0},
+        {T::uint32, S::StrideD1},
+        {T::address, S::AddressWorkspace},
+    };
+    auto const       schedule = solution.customCallSchedule(problem, device, launch);
+    KernelInvocation call;
+    solution.customCallGrid(
+        call, solution.customKernel.threads, solution.customKernel.grid, 0, args, schedule, launch);
+    solution.packCustomArgs<false>(call, args, problem, inputs, device, launch, schedule);
+
+    EXPECT_EQ(namedArg<void*>(call, "AddressC"), inputs.c);
+    EXPECT_EQ(namedArg<void*>(call, "AddressD"), inputs.d);
+    EXPECT_EQ(namedArg<uint32_t>(call, "StrideC0"), problem.c().strides()[1]);
+    EXPECT_EQ(namedArg<uint32_t>(call, "StrideC1"), problem.c().strides()[2]);
+    EXPECT_EQ(namedArg<uint32_t>(call, "StrideD0"), problem.d().strides()[1]);
+    EXPECT_EQ(namedArg<uint32_t>(call, "StrideD1"), problem.d().strides()[2]);
+    EXPECT_NE(namedArg<uint32_t>(call, "StrideC0"), 1024u);
+    EXPECT_EQ(namedArg<void*>(call, "AddressWorkspace"), inputWs);
 }

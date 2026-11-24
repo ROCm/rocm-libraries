@@ -918,7 +918,16 @@ class CustomKernel:
                    workspaceSizePerElemC=d.get('workspaceSizePerElemC', 0),
                    workspaceSizePerElemBias=d.get('workspaceSizePerElemBias', 0),
                    generated=d.get('generated', False),
-                   uniformSummationOrder=d.get('uniformSummationOrder', False))
+                   uniformSummationOrder=d.get('uniformSummationOrder', False),
+                   streamKReductions=d.get('streamKReductions', ['tree']),
+                   postKernels=d.get('postKernels', []))
+
+    def state(self):
+        keys = self.StateKeys
+        # Emitted only when declared so kernels without post kernels are unchanged.
+        if self.postKernels or self.streamKReductions != ['tree']:
+            keys = keys + ['streamKReductions', 'postKernels']
+        return {key: state(getattr(self, key)) for key in keys}
 
     def __init__(self, **kwargs):
         for (key, value) in list(kwargs.items()):

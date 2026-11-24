@@ -25,7 +25,7 @@
 from .resources import custom_kernel_names, custom_kernel_text
 from .Common.ValidParameters import checkParametersAreValid, validParameters, newMIValidParameters
 
-from .ExecutionPolicy import isPersistent, isPersistentDataParallel
+from .ExecutionPolicy import hasDynamicAssignment, isPersistent, isPersistentDataParallel, isStreamK
 
 import re
 import yaml
@@ -395,22 +395,25 @@ _HEADER_SEMANTIC_ORDER = {
 def validateCustomPersistentArgs(kernelConfig):
     """Validate the scheduling payload of a versioned persistent descriptor."""
     version = kernelConfig.get("InternalSupportParams", {}).get("PersistentLoopArgsVersion", 0)
-    if type(version) is not int or version not in (0, 1, 2):
+    if type(version) is not int or version not in (0, 1, 2, 3):
         raise ValueError("Unsupported PersistentLoopArgsVersion")
     outer_version = kernelConfig.get("InternalSupportParams", {}).get("KernArgsVersion", 3)
     if type(outer_version) is not int or outer_version not in (0, 1, 2, 3):
         raise ValueError("Unsupported KernArgsVersion")
-    if version in (1, 2) and outer_version != 3:
+    if version in (1, 2, 3) and outer_version != 3:
         raise ValueError(f"PersistentLoopArgsVersion={version} requires KernArgsVersion=3")
     descriptor = kernelConfig.get("CustomKernel")
     if not isinstance(descriptor, dict) or not descriptor.get("name"):
-        if version in (1, 2) and kernelConfig.get("CustomKernelName"):
+        if version in (1, 2, 3) and kernelConfig.get("CustomKernelName"):
             raise ValueError(f"Persistent argument layout version {version} requires a custom-kernel argument descriptor")
         return
     args = descriptor.get("args", [])
     persistentGridArgIndices = [i for i, arg in enumerate(args) if arg.get("semantic") == "PersistentGrid"]
-    if version == 0:
-        if persistentGridArgIndices:
+    # Version 3 is version 0 plus post kernels.
+    if version in (0, 3):
+        postArgs = [arg for post in descriptor.get("postKernels") or [] if isinstance(post, dict)
+                    for arg in post.get("args") or [] if isinstance(arg, dict)]
+        if persistentGridArgIndices or any(arg.get("semantic") == "PersistentGrid" for arg in postArgs):
             raise ValueError("PersistentGrid requires PersistentLoopArgsVersion=1")
         return
     if version == 2:
@@ -449,6 +452,126 @@ def validateCustomPersistentArgs(kernelConfig):
             or descriptor.get("workspaceSizePerElemC", 0)
             or descriptor.get("workspaceSizePerElemBias", 0)):
         raise ValueError("DataParallel custom kernels with argument layout version 1 cannot require partial workspace")
+
+
+POST_KERNEL_KINDS = ("streamKReduce",)
+REDUCTION_MODES = ("tree", "parallel")
+_POST_KERNEL_KEYS = {"kind", "version", "name", "args", "threads", "grid", "bands"}
+_POST_KERNEL_VERSION = 1
+
+def validateCustomPostKernels(kernelConfig):
+    """Validate CustomKernel.streamKReductions and CustomKernel.postKernels.
+
+    Post kernels are launched after the main kernel. They require
+    PersistentLoopArgsVersion 3, which older runtimes reject instead of
+    running the main kernel alone. A ``parallel`` reduction is performed by a
+    ``streamKReduce`` post kernel, so each requires the other. All of these
+    require a Stream-K solution; post kernels also require the main grid
+    [StreamKNoBatch, One, One] and a work assignment other than
+    DynamicWorkQueue. Does not mutate the descriptor.
+    """
+    isp = kernelConfig.get("InternalSupportParams", {})
+    version = isp.get("PersistentLoopArgsVersion", 0)
+    descriptor = kernelConfig.get("CustomKernel")
+    if not isinstance(descriptor, dict):
+        descriptor = {}
+
+    streamKReductions = descriptor.get("streamKReductions", ["tree"])
+    if (not isinstance(streamKReductions, list) or not streamKReductions
+            or any(mode not in REDUCTION_MODES for mode in streamKReductions)
+            or len(set(streamKReductions)) != len(streamKReductions)):
+        raise ValueError(f"CustomKernel.streamKReductions must be a non-empty list of distinct modes from {REDUCTION_MODES}")
+
+    postKernels = descriptor.get("postKernels", [])
+    if not isinstance(postKernels, list):
+        raise ValueError("CustomKernel.postKernels must be a list")
+    kinds = []
+    for post in postKernels:
+        if not isinstance(post, dict) or not _POST_KERNEL_KEYS.issuperset(post):
+            raise ValueError(f"Each post kernel must be a mapping with keys from {sorted(_POST_KERNEL_KEYS)}")
+        kind = post.get("kind")
+        if kind not in POST_KERNEL_KINDS:
+            raise ValueError(f"Unknown post kernel kind {kind!r}; expected one of {POST_KERNEL_KINDS}")
+        if kind in kinds:
+            raise ValueError(f"Duplicate post kernel kind {kind!r}")
+        kinds.append(kind)
+        postVersion = post.get("version", _POST_KERNEL_VERSION)
+        if type(postVersion) is not int or postVersion != _POST_KERNEL_VERSION:
+            raise ValueError(f"Post kernel kind {kind!r} version must be {_POST_KERNEL_VERSION}")
+        expected = f"{descriptor.get('name')}_{kind}"
+        if post.get("name") != expected:
+            raise ValueError(f"Post kernel {post.get('name')!r} must be named {expected!r}")
+        args = post.get("args", [])
+        if not isinstance(args, list) or any(
+                not isinstance(arg, dict) or "type" not in arg or "semantic" not in arg for arg in args):
+            raise ValueError(f"Post kernel {expected!r} args must be a list of type/semantic mappings")
+        for key in ("threads", "grid"):
+            value = post.get(key, ["One"] * 3 if key == "grid" else None)
+            if not isinstance(value, list) or len(value) != 3:
+                raise ValueError(f"Post kernel {expected!r} needs a three-element {key}")
+        if any(type(t) is not int or t < 1 for t in post["threads"]):
+            raise ValueError(f"Post kernel {expected!r} threads must be positive integers")
+        bands = post.get("bands", 1)
+        if type(bands) is not int or bands < 1:
+            raise ValueError(f"Post kernel {expected!r} bands must be a positive integer")
+
+    if "TilesBands" in (descriptor.get("grid") or []):
+        raise ValueError("CustomKernel.grid must not use TilesBands; only post kernels take a band count")
+    if postKernels and kernelConfig.get("ProblemType", {}).get("GroupedGemm", False):
+        raise ValueError("CustomKernel.postKernels do not support GroupedGemm")
+    if postKernels and descriptor.get("generated", False):
+        raise ValueError("CustomKernel.postKernels require a handwritten custom kernel")
+    if ("parallel" in streamKReductions or postKernels or version == 3) and not isStreamK(kernelConfig):
+        raise ValueError("Parallel reduction, post kernels and PersistentLoopArgsVersion=3 require TileProcessingStrategy=StreamK")
+    if ("parallel" in streamKReductions) != ("streamKReduce" in kinds):
+        raise ValueError("CustomKernel.streamKReductions includes parallel if and only if a streamKReduce post kernel is declared")
+    # SKSplitFactor tells the modes apart and gives the reducer the split
+    # count; the partials live in the workspace.
+    splitArgs = {"SKSplitFactor", "AddressWorkspace"}
+    def hasSplitArgs(args):
+        return isinstance(args, list) and splitArgs <= {
+            arg.get("semantic") for arg in args if isinstance(arg, dict)}
+    if "parallel" in streamKReductions:
+        if not hasSplitArgs(descriptor.get("args")):
+            raise ValueError("Parallel reduction requires main kernel args SKSplitFactor and AddressWorkspace")
+        if not all(hasSplitArgs(post.get("args", [])) for post in postKernels if post["kind"] == "streamKReduce"):
+            raise ValueError("Parallel reduction requires streamKReduce args SKSplitFactor and AddressWorkspace")
+    # The tile count already includes the batch, and a dynamic work queue never
+    # runs parallel reduction.
+    if postKernels and descriptor.get("grid") != ["StreamKNoBatch", "One", "One"]:
+        raise ValueError("CustomKernel.postKernels require the main grid [StreamKNoBatch, One, One]")
+    if postKernels and hasDynamicAssignment(kernelConfig):
+        raise ValueError("CustomKernel.postKernels require WorkAssignment StaticGrid or Hybrid")
+    if postKernels and version != 3:
+        raise ValueError("CustomKernel.postKernels requires PersistentLoopArgsVersion=3")
+    if version == 3 and not postKernels:
+        raise ValueError("PersistentLoopArgsVersion=3 requires CustomKernel.postKernels")
+
+
+def validatePostKernelSymbols(kernelName, postKernels, directory=None):
+    """Check that the main kernel comes first in its .s and each post kernel is present.
+
+    The occupancy and auto-inference paths read the first kernel descriptor, so
+    it must be the main kernel's.
+    """
+    contents = getCustomKernelContents(kernelName, directory)
+    first = re.search(r"^\s*\.amdhsa_kernel\s+(\S+)", contents, re.MULTILINE)
+    if first and first.group(1) != kernelName:
+        raise ValueError(f"Custom kernel '{kernelName}' must be the first .amdhsa_kernel, not '{first.group(1)}'")
+    fullYaml = _readEmbeddedYaml(kernelName, directory)
+    kernels = (fullYaml.get("amdhsa.kernels") if isinstance(fullYaml, dict) else None) or []
+    names = [k.get(".name") for k in kernels if isinstance(k, dict)]
+    if not names or names[0] != kernelName:
+        raise ValueError(f"Custom kernel '{kernelName}' must be the first amdhsa.kernels entry")
+    for post in postKernels:
+        if post["name"] not in names:
+            raise ValueError(f"Post kernel '{post['name']}' is not in the amdhsa.kernels of '{kernelName}'")
+        meta = kernels[names.index(post["name"])]
+        maxThreads = meta.get(".max_flat_workgroup_size")
+        threads = post["threads"][0] * post["threads"][1] * post["threads"][2]
+        if maxThreads is not None and threads > maxThreads:
+            raise ValueError(f"Post kernel '{post['name']}' threads {post['threads']} exceed "
+                             f"its .max_flat_workgroup_size {maxThreads}")
 
 
 def _hasRocRollerWgmArgs(args):
@@ -651,8 +774,16 @@ def getCustomKernelConfig(
     kernelConfig["CustomKernel"].setdefault("workspaceSizePerElemC", 0)
     kernelConfig["CustomKernel"].setdefault("workspaceSizePerElemBias", 0)
     kernelConfig["CustomKernelName"] = kernelName
+    for post in kernelConfig["CustomKernel"].get("postKernels") or []:
+        if isinstance(post, dict):
+            post.setdefault("version", _POST_KERNEL_VERSION)
+            post.setdefault("bands", 1)
+            post.setdefault("grid", ["One"] * 3)
 
     validateCustomPersistentArgs(kernelConfig)
+    validateCustomPostKernels(kernelConfig)
+    if kernelConfig["CustomKernel"].get("postKernels"):
+        validatePostKernelSymbols(kernelName, kernelConfig["CustomKernel"]["postKernels"], directory)
 
     return kernelConfig
 
@@ -753,5 +884,13 @@ def validateCustomKernelMetadata(name, directory=None):
     if missing:
         kind = "External" if is_external else "TensileLite"
         return False, _missingMetadataMessage(kind, name, filepath, missing)
+
+    # Post kernels are checked by the same validators getCustomKernelConfig runs.
+    if isinstance(config.get("CustomKernel"), dict) and (
+            config["CustomKernel"].get("postKernels") or "streamKReductions" in config["CustomKernel"]):
+        try:
+            getCustomKernelConfig(name, {}, directory)
+        except (RuntimeError, ValueError) as e:
+            return False, f"Kernel '{name}' post kernel config is invalid ({filepath}): {e}"
 
     return True, f"Kernel '{name}' metadata is valid"

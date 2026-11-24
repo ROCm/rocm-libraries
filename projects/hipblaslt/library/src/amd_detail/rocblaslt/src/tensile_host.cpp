@@ -9872,6 +9872,14 @@ namespace
                     __func__, "code object does not define kernel", entry.second->KernelName());
                 return false;
             }
+            for(auto const& post : entry.second->customKernel.postKernels)
+            {
+                if(adapter.getLocalKernel(function, coPath, post.name) != hipSuccess)
+                {
+                    log_error(__func__, "code object does not define post kernel", post.name);
+                    return false;
+                }
+            }
         }
         return true;
     }
