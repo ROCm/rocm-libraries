@@ -582,8 +582,12 @@ namespace
         {
             if(r.stage == Stage::Plan)
             {
-                GTEST_SKIP() << "no plan for this contraction on this device (status " << r.status
-                             << ")";
+                if(r.status == HIPTENSOR_STATUS_NOT_SUPPORTED)
+                {
+                    GTEST_SKIP() << "no plan for this contraction on this device (status "
+                                 << r.status << ")";
+                }
+                FAIL() << "planning failed with status " << r.status;
             }
             ASSERT_EQ(r.control, HIPTENSOR_STATUS_SUCCESS)
                 << "the plan does not run the contraction with separate buffers";
