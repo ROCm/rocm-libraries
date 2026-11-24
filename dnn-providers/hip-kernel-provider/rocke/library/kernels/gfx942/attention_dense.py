@@ -2776,11 +2776,12 @@ def _build_attention_dense_single_buffer(
             # sweep of pv_loop_order, pv_priority, pv_sched_fence_mask or
             # waves_per_eu. On held-out shapes (case study section 7.1) this order
             # helps the causal D128 persistent kernels and costs on the non-causal
-            # bf16 persistent ones (no effect measured on the fp16 ones); the
-            # persistent gain at short sequence lengths is also there with the
-            # strides alone (a compiler schedule effect). "k_major"
-            # was slower on the causal D128 persistent kernels and spills in places,
-            # so it is not a default. Setting the PV fence or priority knob turns
+            # bf16 persistent ones (no effect measured on the fp16 ones). The gain of
+            # the non-causal short-sequence persistent kernel is there with the
+            # strides alone (a compiler schedule effect); the causal ones pay for
+            # the strides and this order recovers it. "k_major" was slower on the
+            # causal D128 persistent kernels and spills in places, so it is not a
+            # default. Setting the PV fence or priority knob turns
             # this order off: those knobs are defined against the block order.
             pv_in_issue_order = (
                 STRIDED and USE_CFVST and PV_FENCE_MASK is None and not PV_PRIORITY
