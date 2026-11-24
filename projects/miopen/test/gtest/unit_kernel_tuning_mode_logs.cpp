@@ -31,7 +31,7 @@ void ResetAccumulator()
     miopen::SetKernelPhase(miopen::KernelPhase::Unknown);
 }
 
-class CPU_KernelTuningModeLogs_NONE : public ::testing::Test
+class CPU_KernelTuningModeLogs_NONE : public testing::TestWithParam<int>
 {
 protected:
     void SetUp() override { ResetAccumulator(); }
@@ -48,7 +48,7 @@ protected:
 // Pure helper tests
 // ---------------------------------------------------------------------------
 
-TEST_F(CPU_KernelTuningModeLogs_NONE, PhaseToStringMapping)
+TEST_P(CPU_KernelTuningModeLogs_NONE, PhaseToStringMapping)
 {
     using miopen::KernelPhase;
     EXPECT_EQ(miopen::KernelPhaseToString(KernelPhase::Unknown), "unknown");
@@ -58,7 +58,7 @@ TEST_F(CPU_KernelTuningModeLogs_NONE, PhaseToStringMapping)
     EXPECT_EQ(miopen::KernelPhaseToString(KernelPhase::Tuning), "tuning");
 }
 
-TEST_F(CPU_KernelTuningModeLogs_NONE, ScopedKernelPhaseRestoresPrevious)
+TEST_P(CPU_KernelTuningModeLogs_NONE, ScopedKernelPhaseRestoresPrevious)
 {
     using miopen::KernelPhase;
     miopen::SetKernelPhase(KernelPhase::Validation);
@@ -74,7 +74,7 @@ TEST_F(CPU_KernelTuningModeLogs_NONE, ScopedKernelPhaseRestoresPrevious)
     EXPECT_EQ(miopen::GetKernelPhase(), KernelPhase::Validation);
 }
 
-TEST_F(CPU_KernelTuningModeLogs_NONE, IsTransposeOrTransformKernelDetectsPatterns)
+TEST_P(CPU_KernelTuningModeLogs_NONE, IsTransposeOrTransformKernelDetectsPatterns)
 {
     using miopen::IsTransposeOrTransformKernel;
     EXPECT_TRUE(IsTransposeOrTransformKernel("transposeNCHW"));
@@ -88,7 +88,7 @@ TEST_F(CPU_KernelTuningModeLogs_NONE, IsTransposeOrTransformKernelDetectsPattern
     EXPECT_FALSE(IsTransposeOrTransformKernel("MIOpenConvDirUni"));
 }
 
-TEST_F(CPU_KernelTuningModeLogs_NONE, JsonEscapeHandlesSpecialChars)
+TEST_P(CPU_KernelTuningModeLogs_NONE, JsonEscapeHandlesSpecialChars)
 {
     EXPECT_EQ(miopen::JsonEscape("plain"), "plain");
     EXPECT_EQ(miopen::JsonEscape("a\"b"), "a\\\"b");
@@ -103,7 +103,7 @@ TEST_F(CPU_KernelTuningModeLogs_NONE, JsonEscapeHandlesSpecialChars)
 // Env-var gating tests for IsLoggingKernel / IsPerformanceLoggingEnabled
 // ---------------------------------------------------------------------------
 
-TEST_F(CPU_KernelTuningModeLogs_NONE, LoggingDisabledWhenEnvUnset)
+TEST_P(CPU_KernelTuningModeLogs_NONE, LoggingDisabledWhenEnvUnset)
 {
     miopen::env::clear(MIOPEN_PERFORMANCE_LOGS);
     miopen::SetKernelPhase(miopen::KernelPhase::Execution);
@@ -111,7 +111,7 @@ TEST_F(CPU_KernelTuningModeLogs_NONE, LoggingDisabledWhenEnvUnset)
     EXPECT_FALSE(miopen::IsPerformanceLoggingEnabled());
 }
 
-TEST_F(CPU_KernelTuningModeLogs_NONE, LoggingDisabledAtLevelZero)
+TEST_P(CPU_KernelTuningModeLogs_NONE, LoggingDisabledAtLevelZero)
 {
     PerfLogEnv guard{0};
     miopen::SetKernelPhase(miopen::KernelPhase::Execution);
@@ -119,7 +119,7 @@ TEST_F(CPU_KernelTuningModeLogs_NONE, LoggingDisabledAtLevelZero)
     EXPECT_FALSE(miopen::IsPerformanceLoggingEnabled());
 }
 
-TEST_F(CPU_KernelTuningModeLogs_NONE, LowLevelLogsOnlyExecutionPhase)
+TEST_P(CPU_KernelTuningModeLogs_NONE, LowLevelLogsOnlyExecutionPhase)
 {
     PerfLogEnv guard{1};
     EXPECT_TRUE(miopen::IsPerformanceLoggingEnabled());
@@ -138,7 +138,7 @@ TEST_F(CPU_KernelTuningModeLogs_NONE, LowLevelLogsOnlyExecutionPhase)
     }
 }
 
-TEST_F(CPU_KernelTuningModeLogs_NONE, LevelTwoStillExecutionOnly)
+TEST_P(CPU_KernelTuningModeLogs_NONE, LevelTwoStillExecutionOnly)
 {
     PerfLogEnv guard{2};
     miopen::SetKernelPhase(miopen::KernelPhase::Execution);
@@ -147,7 +147,7 @@ TEST_F(CPU_KernelTuningModeLogs_NONE, LevelTwoStillExecutionOnly)
     EXPECT_FALSE(miopen::IsLoggingKernel());
 }
 
-TEST_F(CPU_KernelTuningModeLogs_NONE, HighLevelLogsAllPhases)
+TEST_P(CPU_KernelTuningModeLogs_NONE, HighLevelLogsAllPhases)
 {
     PerfLogEnv guard{3};
     for(auto p : {miopen::KernelPhase::Unknown,
@@ -166,7 +166,7 @@ TEST_F(CPU_KernelTuningModeLogs_NONE, HighLevelLogsAllPhases)
 // Accumulator behavior — no output when disabled, JSON to stderr when enabled
 // ---------------------------------------------------------------------------
 
-TEST_F(CPU_KernelTuningModeLogs_NONE, AccumulatorNoOpWhenLoggingDisabled)
+TEST_P(CPU_KernelTuningModeLogs_NONE, AccumulatorNoOpWhenLoggingDisabled)
 {
     miopen::env::clear(MIOPEN_PERFORMANCE_LOGS);
     miopen::SetKernelPhase(miopen::KernelPhase::Execution);
@@ -187,7 +187,7 @@ TEST_F(CPU_KernelTuningModeLogs_NONE, AccumulatorNoOpWhenLoggingDisabled)
     EXPECT_TRUE(data.current_config.config_name.empty());
 }
 
-TEST_F(CPU_KernelTuningModeLogs_NONE, AddInvokerTimesWarnsWithoutConfig)
+TEST_P(CPU_KernelTuningModeLogs_NONE, AddInvokerTimesWarnsWithoutConfig)
 {
     PerfLogEnv guard{1};
     miopen::SetKernelPhase(miopen::KernelPhase::Execution);
@@ -199,7 +199,7 @@ TEST_F(CPU_KernelTuningModeLogs_NONE, AddInvokerTimesWarnsWithoutConfig)
     EXPECT_NE(captured.find("AddInvokerTimes"), std::string::npos);
 }
 
-TEST_F(CPU_KernelTuningModeLogs_NONE, FlushEmitsJsonAtLevelOne)
+TEST_P(CPU_KernelTuningModeLogs_NONE, FlushEmitsJsonAtLevelOne)
 {
     PerfLogEnv guard{1};
     miopen::SetKernelPhase(miopen::KernelPhase::Execution);
@@ -221,7 +221,7 @@ TEST_F(CPU_KernelTuningModeLogs_NONE, FlushEmitsJsonAtLevelOne)
     EXPECT_NE(captured.find("\"kernels\":null"), std::string::npos);
 }
 
-TEST_F(CPU_KernelTuningModeLogs_NONE, FlushIncludesKernelsArrayAtLevelTwo)
+TEST_P(CPU_KernelTuningModeLogs_NONE, FlushIncludesKernelsArrayAtLevelTwo)
 {
     PerfLogEnv guard{2};
     miopen::SetKernelPhase(miopen::KernelPhase::Execution);
@@ -248,7 +248,7 @@ TEST_F(CPU_KernelTuningModeLogs_NONE, FlushIncludesKernelsArrayAtLevelTwo)
 // files the kernel record itself. That record has to win the config_name at every level,
 // including level 1 where the kernels array is suppressed: without it the log says only
 // that the solver ran, never which kernel produced the time.
-TEST_F(CPU_KernelTuningModeLogs_NONE, KernelRecordNamesConfigAtLevelOne)
+TEST_P(CPU_KernelTuningModeLogs_NONE, KernelRecordNamesConfigAtLevelOne)
 {
     PerfLogEnv guard{1};
     miopen::SetKernelPhase(miopen::KernelPhase::Execution);
@@ -267,7 +267,7 @@ TEST_F(CPU_KernelTuningModeLogs_NONE, KernelRecordNamesConfigAtLevelOne)
     EXPECT_EQ(captured.find("\"config_name\":\"ConvHipConv\""), std::string::npos);
 }
 
-TEST_F(CPU_KernelTuningModeLogs_NONE, LogSolutionNameOnlyEmitsOnChange)
+TEST_P(CPU_KernelTuningModeLogs_NONE, LogSolutionNameOnlyEmitsOnChange)
 {
     PerfLogEnv guard{1};
     miopen::SetKernelPhase(miopen::KernelPhase::Execution);
@@ -298,7 +298,7 @@ TEST_F(CPU_KernelTuningModeLogs_NONE, LogSolutionNameOnlyEmitsOnChange)
     EXPECT_NE(captured.find("\"solution\":\"SolverB\""), std::string::npos);
 }
 
-TEST_F(CPU_KernelTuningModeLogs_NONE, FlushWithoutDataEmitsNothing)
+TEST_P(CPU_KernelTuningModeLogs_NONE, FlushWithoutDataEmitsNothing)
 {
     PerfLogEnv guard{2};
     miopen::SetKernelPhase(miopen::KernelPhase::Execution);
@@ -308,7 +308,7 @@ TEST_F(CPU_KernelTuningModeLogs_NONE, FlushWithoutDataEmitsNothing)
     EXPECT_TRUE(testing::internal::GetCapturedStderr().empty());
 }
 
-TEST_F(CPU_KernelTuningModeLogs_NONE, NonExecutionPhaseSuppressedAtLowLevel)
+TEST_P(CPU_KernelTuningModeLogs_NONE, NonExecutionPhaseSuppressedAtLowLevel)
 {
     PerfLogEnv guard{1};
     miopen::SetKernelPhase(miopen::KernelPhase::Tuning);
@@ -322,7 +322,7 @@ TEST_F(CPU_KernelTuningModeLogs_NONE, NonExecutionPhaseSuppressedAtLowLevel)
     EXPECT_TRUE(testing::internal::GetCapturedStderr().empty());
 }
 
-TEST_F(CPU_KernelTuningModeLogs_NONE, HighLevelEmitsTuningPhase)
+TEST_P(CPU_KernelTuningModeLogs_NONE, HighLevelEmitsTuningPhase)
 {
     PerfLogEnv guard{4};
     miopen::SetKernelPhase(miopen::KernelPhase::Tuning);
@@ -338,3 +338,5 @@ TEST_F(CPU_KernelTuningModeLogs_NONE, HighLevelEmitsTuningPhase)
     // Level 4 shows the kernels array
     EXPECT_NE(captured.find("\"kernels\":["), std::string::npos);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_KernelTuningModeLogs_NONE, testing::Values(0));

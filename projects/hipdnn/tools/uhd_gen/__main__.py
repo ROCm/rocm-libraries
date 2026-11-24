@@ -10,6 +10,7 @@ Subcommands for collection, training, evaluation and descriptor installation:
     evaluate            corpus + trained UHD -> §11.2 regret report
     promote             install that pair into a descriptor tree and point a UED at it
     generate            graph corpus -> public collection -> train/evaluate/promote
+    feature-search      training rows -> a searched feature recipe (recipe.json)
 
 Collect, train and install:
 
@@ -86,6 +87,7 @@ from .lgbm_to_flatbuffer import (
     convert,
     resolve_training_date,
 )
+from .optional import feature_name, safe_signature
 from .promote import add_promote_arguments, run_promote
 from .ranking_metrics import DEFAULT_RANKING_METRIC, RANKING_METRICS, ranking_metric
 from . import score_transform
@@ -218,6 +220,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     add_size_arguments(size)
 
+    from .feature_search import add_feature_search_arguments, run_feature_search
+
+    feature_search = subparsers.add_parser(
+        "feature-search",
+        help="search a feature recipe over the published columns and derived expressions",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    add_feature_search_arguments(feature_search)
+
+    from .rewrite import add_rewrite_arguments, run_rewrite
+
+    rewrite = subparsers.add_parser(
+        "rewrite-signature",
+        help="read an installed UHD's optional features through value_or_default, "
+        "without retraining (RFC 0019 §6.7, §6.8 item 9)",
+    )
+    add_rewrite_arguments(rewrite)
+
     # Split off before the main parser sees flags it does not declare.
     if argv is None:
         argv = sys.argv[1:]
@@ -259,6 +279,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_generate(args)
     if args.command == "size":
         return run_size(args)
+    if args.command == "feature-search":
+        return run_feature_search(args)
     if args.command == "promote":
         return run_promote(args)
     if args.command == "evaluate":
@@ -267,6 +289,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_knobs(args)
     if args.command == "merge":
         return run_merge(args)
+    if args.command == "rewrite-signature":
+        return run_rewrite(args)
     code = _run_train(args)
     if code == 0:
         print(install_hint(args.output_dir, args.role, args.arch, args.uhd_id))
@@ -510,11 +534,25 @@ def add_model_encoding_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 #: The model families `train` fits, one per UHD adapter that ships a trained artifact.
-TRAINED_ADAPTERS = ("tree_data", "linear_data")
+TRAINED_ADAPTERS = ("tree_data", "linear_data", "mlp_data")
+
+#: `train`'s mlp_data options, by flag and argparse destination. They default to None so an
+#: unset one is told from a set one: a flag of another adapter is refused, and `generate`
+#: forwards only what its caller gave.
+_MLP_OPTIONS = (
+    ("--mlp-hidden", "mlp_hidden"),
+    ("--mlp-members", "mlp_members"),
+    ("--mlp-epochs", "mlp_epochs"),
+    ("--mlp-seed", "mlp_seed"),
+    ("--mlp-max-rows", "mlp_max_rows"),
+)
 
 
 def add_adapter_arguments(parser: argparse.ArgumentParser) -> None:
-    """Which model family `train` fits: `train` and `generate` take the same flag."""
+    """Which model family `train` fits, and its options: `train` and `generate` take the
+    same flags."""
+    from .mlp import DEFAULT_EPOCHS, DEFAULT_HIDDEN, DEFAULT_MEMBERS, DEFAULT_SEED
+
     parser.add_argument(
         "--adapter",
         choices=TRAINED_ADAPTERS,
@@ -524,13 +562,62 @@ def add_adapter_arguments(parser: argparse.ArgumentParser) -> None:
         "the best candidate of each problem, for a small catalog; it needs problem identity "
         "(--group-by or a benchmark column), serves no --metric or --calibrated score and no "
         "predict_engine role, and ignores the tree-only options (--num-boost-round, "
-        "--early-stopping, --model-encoding, --leaf-precision, --group-by-feature).",
+        "--early-stopping, --model-encoding, --leaf-precision, --group-by-feature). "
+        "mlp_data: an ensemble of small neural networks fitted to the log of one metric; "
+        "an estimate of one engine's metric for --role predict_engine, a catalog ranker "
+        "(like an ungrouped tree_data model) for --role sort_kernel_catalog, where "
+        "evaluation decides whether it is picked (README, 'The mlp_data adapter'). It "
+        "refuses --group-by-feature, ignores the other tree-only options and takes the "
+        "--mlp-* ones.",
+    )
+    parser.add_argument(
+        "--mlp-hidden",
+        default=None,
+        dest="mlp_hidden",
+        metavar="WIDTHS",
+        help="mlp_data only: comma-separated hidden layer widths of each network, e.g. "
+        f"64,64 (default: {','.join(str(w) for w in DEFAULT_HIDDEN)})",
+    )
+    parser.add_argument(
+        "--mlp-members",
+        type=int,
+        default=None,
+        dest="mlp_members",
+        help=f"mlp_data only: networks in the ensemble (default: {DEFAULT_MEMBERS})",
+    )
+    parser.add_argument(
+        "--mlp-epochs",
+        type=int,
+        default=None,
+        dest="mlp_epochs",
+        help="mlp_data only: epochs of the cosine schedule; a member stops earlier when "
+        f"its validation loss stops improving (default: {DEFAULT_EPOCHS})",
+    )
+    parser.add_argument(
+        "--mlp-seed",
+        type=int,
+        default=None,
+        dest="mlp_seed",
+        help="mlp_data only: seed of the first member; member k uses seed + k, for its "
+        f"initial weights, validation split and shuffles (default: {DEFAULT_SEED})",
+    )
+    parser.add_argument(
+        "--mlp-max-rows",
+        type=int,
+        default=None,
+        dest="mlp_max_rows",
+        help="mlp_data only: subsample a corpus of more rows than this, seeded; 0 uses "
+        "every row (default: 0)",
     )
 
 
 def adapter_args(args: argparse.Namespace) -> list[str]:
-    """The `train` flags that pick the adapter `args` asked for."""
-    return ["--adapter", args.adapter]
+    """The `train` flags that pick the adapter `args` asked for, and its options."""
+    flags = ["--adapter", args.adapter]
+    for flag, dest in _MLP_OPTIONS:
+        if getattr(args, dest) is not None:
+            flags += [flag, str(getattr(args, dest))]
+    return flags
 
 
 def model_encoding_args(args: argparse.Namespace) -> list[str]:
@@ -565,6 +652,23 @@ def _resolve_uhd_id(requested: str | None) -> str:
     return canonical
 
 
+def check_adapter_options(args: argparse.Namespace) -> None:
+    """Refuse an adapter option that does not apply: `train` and `generate` share this, so
+    `generate` refuses before it measures anything."""
+    if args.adapter != "mlp_data":
+        given = [flag for flag, dest in _MLP_OPTIONS if getattr(args, dest) is not None]
+        if given:
+            raise ValueError(
+                f"{', '.join(given)} apply only to --adapter mlp_data, not {args.adapter}"
+            )
+        return
+    if args.group_by_feature:
+        raise ValueError(
+            "--group-by-feature is a tree_data option: an mlp_data model is one "
+            "ensemble per engine"
+        )
+
+
 def _resolve_score(args: argparse.Namespace, immediate: bool) -> None:
     """Settle the metric, label column and objective before any data is read.
 
@@ -573,6 +677,7 @@ def _resolve_score(args: argparse.Namespace, immediate: bool) -> None:
     """
     from .immediate import LABEL_STATISTIC
 
+    check_adapter_options(args)
     if args.adapter == "linear_data":
         _resolve_linear_score(args, immediate)
         return
@@ -583,6 +688,11 @@ def _resolve_score(args: argparse.Namespace, immediate: bool) -> None:
             raise ValueError(
                 f"{args.role} requires --metric: engine selection compares its "
                 "score across engines, so it must name a registered metric"
+            )
+        if args.adapter == "mlp_data":
+            raise ValueError(
+                "mlp_data predicts the log of one registered metric, and its artifact "
+                "names it: pass --metric (--target alone names a column, not a metric)"
             )
         if args.calibrated:
             raise ValueError(
@@ -1119,6 +1229,77 @@ def _fit_linear(
     }
 
 
+def _parse_mlp_hidden(text: str) -> tuple[int, ...]:
+    """`--mlp-hidden`: comma-separated positive widths; empty means no hidden layer."""
+    try:
+        widths = tuple(int(part) for part in text.split(",") if part.strip())
+    except ValueError:
+        raise ValueError(
+            f"--mlp-hidden {text!r} must be comma-separated integers, e.g. 64,64"
+        ) from None
+    if any(width < 1 for width in widths):
+        raise ValueError(f"--mlp-hidden {text!r} widths must be positive")
+    return widths
+
+
+def mlp_fit_options(args: argparse.Namespace) -> dict:
+    """The `fit_mlp` keywords the caller gave as `--mlp-*`; `fit_mlp`'s own defaults stand
+    for the rest."""
+    options = {
+        dest.removeprefix("mlp_"): getattr(args, dest)
+        for _, dest in _MLP_OPTIONS
+        if getattr(args, dest) is not None
+    }
+    if "hidden" in options:
+        options["hidden"] = _parse_mlp_hidden(options["hidden"])
+    return options
+
+
+def _fit_mlp(
+    args: argparse.Namespace,
+    df: pd.DataFrame,
+    matrix: np.ndarray,
+    groups: list | None = None,
+):
+    """The ensemble fit of mlp_data on log(target). Returns the ensemble and what the
+    manifest records. `groups` are the columns identifying a problem (None for a corpus
+    without problem identity)."""
+    from .mlp import fit_mlp
+
+    target = df[args.target].to_numpy(dtype=np.float64)
+    if not np.isfinite(target).all() or (target <= 0).any():
+        # RFC 0019 §8.3: a non-positive measurement is no measurement.
+        raise ValueError(
+            f"target {args.target!r} must contain finite, strictly positive values"
+        )
+    # Rows are candidates of a problem (a catalog) or one engine's measurement of a graph on
+    # a device (an L1 corpus): hold out whole problems for early stopping, keyed as the tree
+    # trainer's GroupKFold keys them (benchmark first, so every device's measurements of one
+    # graph or shape fall on one side). Only rows without problem identity split by row.
+    problems = None
+    if groups:
+        if groups[0] not in df.columns:
+            raise ValueError(
+                f"problem column {groups[0]!r} is not in the corpus, so mlp_data cannot "
+                "hold out whole problems for early stopping"
+            )
+        problems = df.groupby(groups[0]).ngroup().to_numpy()
+    ensemble, fit = fit_mlp(
+        matrix,
+        score_transform.forward(target),
+        groups=problems,
+        **mlp_fit_options(args),
+    )
+    logger.info(
+        "Fitted %d network(s) on %d of %d rows; held-out L1 %.4f in log units",
+        len(ensemble.networks),
+        fit["rows"],
+        fit["rows_available"],
+        fit["validation_l1_log"],
+    )
+    return ensemble, fit
+
+
 def _run_train(args: argparse.Namespace) -> int:
     from .provenance import record_feature_semantics
     from .immediate import ROLE, check_signature_evaluates, validate_signature
@@ -1172,14 +1353,33 @@ def _run_train(args: argparse.Namespace) -> int:
         if not isinstance(signature, list) or not signature:
             raise ValueError("features_signature must be a nonempty JSON array")
         signature = [parse_signature_entry(entry) for entry in signature]
+        # RFC 0019 §6.7 (absent is not zero) and §6.8 item 9: a feature a valid graph may leave
+        # unbound is read through value_or_default, so a row without it trains on the value the
+        # runtime reads.
+        # Wrapping turns a bare read into an expression, so the column check below must look at
+        # the signature as requested: a column no row publishes is a typo, not an absent value.
+        requested_columns = (
+            None
+            if any(isinstance(entry, dict) for entry in signature)
+            else {reference[1:] for reference in signature_references(signature)}
+        )
+        signature, wrapped = safe_signature(
+            signature, args.metric, args.feature_evaluator
+        )
+        if wrapped:
+            logger.info(
+                "Reading %d optional feature(s) through value_or_default: %s",
+                len(wrapped),
+                ", ".join(f"{item['reference']}={item['default']}" for item in wrapped),
+            )
         requested_signature = list(signature)
         references = signature_references(signature)
         if immediate:
             validate_signature(signature)
-        if not any(isinstance(entry, dict) for entry in signature):
+        if requested_columns is not None:
             # A raw reference is a column gather; expression inputs may be legally absent
             # (value_or_default/present), so the shared evaluator decides for those.
-            missing = {reference[1:] for reference in references} - set(df.columns)
+            missing = requested_columns - set(df.columns)
             if missing:
                 raise ValueError(f"Missing feature columns: {sorted(missing)}")
         if args.target not in df.columns:
@@ -1214,10 +1414,7 @@ def _run_train(args: argparse.Namespace) -> int:
             trained_against,
             evaluator_feature_semantics_revision(args.feature_evaluator),
         )
-        names = [
-            entry[1:] if isinstance(entry, str) else f"expression_{index}"
-            for index, entry in enumerate(signature)
-        ]
+        names = [feature_name(entry, index) for index, entry in enumerate(signature)]
         signature, names, matrix, categorical_encoding, pruned_hash, dropped = (
             _drop_constant_features(
                 df,
@@ -1245,6 +1442,10 @@ def _run_train(args: argparse.Namespace) -> int:
             ranker, linear_fit = _fit_linear(args, df, signature, names, matrix, groups)
             model, group_index, group_models = None, -1, []
             early_exit, early_exit_record = [], None
+        elif args.adapter == "mlp_data":
+            ensemble, mlp_fit = _fit_mlp(args, df, matrix, groups)
+            model, group_index, group_models = None, -1, []
+            early_exit, early_exit_record = [], None
         else:
             model, group_index, group_models, (early_exit, early_exit_record) = (
                 _fit_trees(args, df, names, matrix, groups, categorical_encoding)
@@ -1268,6 +1469,19 @@ def _run_train(args: argparse.Namespace) -> int:
             features_hash,
             fb_path,
             num_training_samples=len(df),
+            training_arches=args.training_arches,
+            model_version=args.model_version,
+            training_date=training_date,
+        )
+    elif args.adapter == "mlp_data":
+        from .mlp_to_flatbuffer import write_mlp_model
+
+        model_sha256 = write_mlp_model(
+            ensemble,
+            args.metric,
+            features_hash,
+            fb_path,
+            num_training_samples=mlp_fit["rows"],
             training_arches=args.training_arches,
             model_version=args.model_version,
             training_date=training_date,
@@ -1359,17 +1573,21 @@ def _run_train(args: argparse.Namespace) -> int:
         **(
             linear_fit
             if args.adapter == "linear_data"
-            else {
-                "num_trees": model.num_trees(),
-                "feature_importance": {
-                    name: {"gain": float(gain), "split": int(split)}
-                    for name, gain, split in zip(
-                        names,
-                        model.feature_importance(importance_type="gain"),
-                        model.feature_importance(importance_type="split"),
-                    )
-                },
-            }
+            else (
+                {"adapter": "mlp_data", "mlp_fit": mlp_fit}
+                if args.adapter == "mlp_data"
+                else {
+                    "num_trees": model.num_trees(),
+                    "feature_importance": {
+                        name: {"gain": float(gain), "split": int(split)}
+                        for name, gain, split in zip(
+                            names,
+                            model.feature_importance(importance_type="gain"),
+                            model.feature_importance(importance_type="split"),
+                        )
+                    },
+                }
+            )
         ),
         "num_samples": len(df),
         "input_file": str(input_path.resolve()),
@@ -1377,15 +1595,15 @@ def _run_train(args: argparse.Namespace) -> int:
         "training_arches": args.training_arches or [],
         "model_version": args.model_version,
         **(
-            {}
-            if args.adapter == "linear_data"
-            else {
+            {
                 "training_options": {
                     "num_boost_round": args.num_boost_round,
                     "early_stopping_rounds": args.early_stopping,
                 },
                 "early_exit": early_exit_record,
             }
+            if args.adapter == "tree_data"
+            else {}
         ),
     }
     if immediate:

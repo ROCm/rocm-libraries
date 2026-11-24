@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MIT
 #
 # Provider test-category labeling. Included after all test registrations from
-# the parent tests/CMakeLists.txt to preserve its CMake directory scope.
+# the parent tests/CMakeLists.txt to preserve its CMake directory scope, and
+# likewise from library/cpp/tests/CMakeLists.txt for the tests registered there.
 
 # Apply YAML-driven quick/standard/comprehensive/full tier labels to the tests
 # above. Must run in THIS directory scope: CMake (pre-3.28, which this project's

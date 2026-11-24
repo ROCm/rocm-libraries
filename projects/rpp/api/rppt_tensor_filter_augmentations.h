@@ -238,13 +238,13 @@ RppStatus rppt_emboss(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
  * backend)
  * \param [in] dstDescPtr destination tensor descriptor (Restrictions - numDims = 4,
  * offsetInBytes >= 0, dataType = U8/F16/F32/I8, layout = NCHW/NHWC, c = same as that of srcDescPtr)
- * \param [in] stdDevSpaceTensor spatial standard deviation in pixels (1D tensor in pinned / HIP
- * memory (for HIP backend) or HOST memory (for HOST backend), of size batchSize, for each image in
- * batch, with stdDevSpaceTensor[i] > 0)
+ * \param [in] stdDevSpaceTensor spatial standard deviation in pixels (1D tensor in pinned memory
+ * (for HIP backend) or HOST memory (for HOST backend), of size batchSize, for each image in batch,
+ * with stdDevSpaceTensor[i] > 0)
  * \param [in] stdDevRangeTensor range (intensity) standard deviation in the same units as the
  * pixel values - 0 to 255 scale for Rpp8u/Rpp8s, 0 to 1 scale for Rpp16f/Rpp32f (1D tensor in
- * pinned / HIP memory (for HIP backend) or HOST memory (for HOST backend), of size batchSize, for
- * each image in batch, with stdDevRangeTensor[i] > 0)
+ * pinned memory (for HIP backend) or HOST memory (for HOST backend), of size batchSize, for each
+ * image in batch, with stdDevRangeTensor[i] > 0)
  * \param [in] kernelSize kernel size for bilateral filter (a single Rpp32u odd number with
  * kernelSize = 3/5/7/9 that applies to all images in the batch)
  * \param [in] borderType border type for padding during filtering (Restrictions -

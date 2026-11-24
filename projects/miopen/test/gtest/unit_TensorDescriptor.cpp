@@ -675,34 +675,34 @@ TEST_P(CPU_TensorTestGetLayout_NONE, TensorDescriptor) { this->RunTest(); };
 TEST_P(CPU_TensorTestGetVectorLength_NONE, TensorDescriptor) { this->RunTest(); };
 TEST_P(CPU_TensorTestCheckDimsFitIntoInt_NONE, TensorDescriptor) { this->RunTest(); };
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_TensorTestPossibleLayout4D5D_NONE,
                          testing::ValuesIn(TestPossibleLayout4D5D::GetTestCases()));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_TensorTestGetLayoutT_NONE,
                          testing::ValuesIn(TestGetLayoutT::GetTestCases()));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_TensorTestGetLayoutEnum_NONE,
                          testing::ValuesIn(TestGetLayoutEnum::GetTestCases()));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_TensorTestGetLayoutStr_NONE,
                          testing::ValuesIn(TestGetLayoutStr::GetTestCases()));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_TensorTestLayoutEnumToStr_NONE,
                          testing::ValuesIn(TestLayoutEnumToStr::GetTestCases()));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_TensorTestGetLayout_NONE,
                          testing::ValuesIn(TestGetLayout::GetTestCases()));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_TensorTestGetVectorLength_NONE,
                          testing::ValuesIn(TestGetVectorLength::GetTestCases()));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_TensorTestCheckDimsFitIntoInt_NONE,
                          testing::ValuesIn(TestCheckDimsFitIntoInt::GetTestCases()));

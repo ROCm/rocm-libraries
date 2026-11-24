@@ -52,7 +52,7 @@
 #  include <thrust/type_traits/is_contiguous_iterator.h>
 #  include <thrust/type_traits/unwrap_contiguous_iterator.h>
 
-#  include <cstdint>
+#  include _THRUST_STD_INCLUDE(cstdint)
 
 // rocprim include
 #  include <rocprim/rocprim.hpp>
@@ -144,7 +144,7 @@ THRUST_HOST_DEVICE ValuesOutputIterator inclusive_scan_by_key(
   KeyCompareFunction key_compare_op,
   BinaryFunction scan_op)
 {
-  size_t num_items    = static_cast<size_t>(thrust::distance(key_first, key_last));
+  size_t num_items    = static_cast<size_t>(_THRUST_STD::distance(key_first, key_last));
   hipStream_t stream  = hip_rocprim::stream(policy);
   bool debug_sync     = THRUST_HIP_DEBUG_SYNC_FLAG;
 
@@ -289,7 +289,7 @@ THRUST_HOST_DEVICE ValuesOutputIterator exclusive_scan_by_key(
   KeyCompareFunction key_compare_op,
   BinaryFunction scan_op)
 {
-  size_t num_items    = static_cast<size_t>(thrust::distance(key_first, key_last));
+  size_t num_items    = static_cast<size_t>(_THRUST_STD::distance(key_first, key_last));
   hipStream_t stream  = hip_rocprim::stream(policy);
   bool debug_sync     = THRUST_HIP_DEBUG_SYNC_FLAG;
   if (num_items == 0)
@@ -414,7 +414,7 @@ ValOutputIt THRUST_HOST_DEVICE inclusive_scan_by_key(
   BinaryPred binary_pred)
 {
   return hip_rocprim::inclusive_scan_by_key(
-    policy, key_first, key_last, value_first, value_result, binary_pred, thrust::plus<>());
+    policy, key_first, key_last, value_first, value_result, binary_pred, _THRUST_STD::plus<>());
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class ValOutputIt>
@@ -426,7 +426,7 @@ ValOutputIt THRUST_HOST_DEVICE inclusive_scan_by_key(
   ValOutputIt value_result)
 {
   return hip_rocprim::inclusive_scan_by_key(
-    policy, key_first, key_last, value_first, value_result, thrust::equal_to<>());
+    policy, key_first, key_last, value_first, value_result, _THRUST_STD::equal_to<>());
 }
 
 //---------------------------
@@ -496,7 +496,7 @@ ValOutputIt THRUST_HOST_DEVICE exclusive_scan_by_key(
   BinaryPred binary_pred)
 {
   return hip_rocprim::exclusive_scan_by_key(
-    policy, key_first, key_last, value_first, value_result, init, binary_pred, thrust::plus<>());
+    policy, key_first, key_last, value_first, value_result, init, binary_pred, _THRUST_STD::plus<>());
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class ValOutputIt, class Init>
@@ -509,7 +509,7 @@ ValOutputIt THRUST_HOST_DEVICE exclusive_scan_by_key(
   Init init)
 {
   return hip_rocprim::exclusive_scan_by_key(
-    policy, key_first, key_last, value_first, value_result, init, thrust::equal_to<>());
+    policy, key_first, key_last, value_first, value_result, init, _THRUST_STD::equal_to<>());
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class ValOutputIt>

@@ -15,14 +15,16 @@ sweep per topology under ``integration-test-bundles/<level>/``:
     ConvolutionFwdPointwise/Variant5        conv -> bias -> add(residual) -> relu
     ConvolutionFwdPointwise/Variant6        conv -> relu -> add(residual)
 
-Each directory gets ``graph.template.json``, ``sweep.json`` and an empty
-``support.json`` (claims are harvested with ``--write-support-claims``, never
-written here). The generator is deterministic: the same plan gives the same
-bytes. Every case carries a ``purpose`` (claim | probe) and the plan items it
-implements (``plan_items``) in its metadata. The level rules build the complete
-products; the trims declared in ``conv_fwd_plan.TRIMS`` are removed after case
-ids are assigned, so a trim never renames a surviving case. See
-``docs/test-plans/convolution-fwd.md``.
+Each directory gets ``graph.template.json``, ``sweep.json`` and a ``support.json``
+(existing claims are kept; claims are harvested with ``--write-support-claims``,
+never written here). The generator is deterministic: the same plan gives the same
+bytes. Every case carries a ``purpose`` (claim | probe | regression) and the plan
+items it implements (``plan_items``) in its metadata. When two candidates produce
+the same graph the later one is dropped and its plan items are merged into the
+survivor's ``plan_items``; the survivor's id and seed do not change. The level
+rules build the complete products; the trims declared in ``conv_fwd_plan.TRIMS``
+are removed after case ids are assigned, so a trim never renames a surviving
+case. See ``docs/test-plans/convolution-fwd.md``.
 
 Usage:
     generate_conv_fwd_bundles.py --bundle-dir <integration-test-bundles> [--report] [--dry-run]
@@ -37,6 +39,7 @@ import re
 import shutil
 import sys
 from collections import Counter, defaultdict
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import conv_fwd_plan as P
@@ -108,7 +111,17 @@ def _conv_node(u):
     }
 
 
-def _pw(name, op, in0, in1, out, act_placeholders=False, in0_ph=None, in1_ph=None):
+def _pw(
+    name,
+    op,
+    in0,
+    in1,
+    out,
+    act_placeholders=False,
+    in0_ph=None,
+    in1_ph=None,
+    compute="float",
+):
     inputs = {
         "axis_tensor_uid": None,
         "elu_alpha": None,
@@ -138,12 +151,18 @@ def _pw(name, op, in0, in1, out, act_placeholders=False, in0_ph=None, in1_ph=Non
     if in1_ph:
         inputs["in_1_tensor_uid"] = ph("attributes." + in1_ph)
     return {
-        "compute_data_type": "float",
+        "compute_data_type": compute,
         "inputs": inputs,
         "name": name,
         "outputs": {"out_0_tensor_uid": out},
         "type": "PointwiseAttributes",
     }
+
+
+# The bias-add node computes in the bias tensor's type: MIOpen's conv-bias-activation
+# fusion declines a bias node whose compute type differs from its bias tensor
+# (MiopenConvFwdBiasActivPlanBuilder.cpp, checkComputeTypes). Every other node is float.
+BIAS_COMPUTE = ph("attributes.bias_compute")
 
 
 def template(topo):
@@ -168,6 +187,7 @@ def template(topo):
                 u["t1"],
                 in0_ph="bias_in_0",
                 in1_ph="bias_in_1",
+                compute=BIAS_COMPUTE,
             )
         )
         nodes.append(
@@ -183,7 +203,9 @@ def template(topo):
         inter = {u["t1"]: "Pointwise_1::OUT_0"}
     elif topo == "scale_bias_act":
         nodes.append(_pw("Pointwise_1", "mul", u["y"], u["scale"], u["t1"]))
-        nodes.append(_pw("Pointwise_2", "add", u["t1"], u["bias"], u["t2"]))
+        nodes.append(
+            _pw("Pointwise_2", "add", u["t1"], u["bias"], u["t2"], compute=BIAS_COMPUTE)
+        )
         nodes.append(_pw("Pointwise_3", "relu_fwd", u["t2"], None, u["out"]))
         inter = {u["t1"]: "Pointwise_1::OUT_0", u["t2"]: "Pointwise_2::OUT_0"}
     elif topo == "add_relu":
@@ -191,7 +213,9 @@ def template(topo):
         nodes.append(_pw("Pointwise_2", "relu_fwd", u["t1"], None, u["out"]))
         inter = {u["t1"]: "Pointwise_1::OUT_0"}
     elif topo == "bias_add_relu":
-        nodes.append(_pw("Pointwise_1", "add", u["y"], u["bias"], u["t1"]))
+        nodes.append(
+            _pw("Pointwise_1", "add", u["y"], u["bias"], u["t1"], compute=BIAS_COMPUTE)
+        )
         nodes.append(_pw("Pointwise_2", "add", u["t1"], u["res"], u["t2"]))
         nodes.append(_pw("Pointwise_3", "relu_fwd", u["t2"], None, u["out"]))
         inter = {u["t1"]: "Pointwise_1::OUT_0", u["t2"]: "Pointwise_2::OUT_0"}
@@ -331,8 +355,10 @@ def case_values(c):
     }
     if topo != "conv":
         attrs["conv_y_virtual"] = c["conv_y_virtual"]
+    if "bias" in u:
+        attrs["bias_compute"] = c["bias_t"]
     if topo in P.HAS_ACT_PLACEHOLDERS:
-        op, lo, slope, hi, alpha, sbeta, pbeta = P.ACTS[c["act"]]
+        op, lo, slope, hi, alpha, sbeta, pbeta = P.ACT_PARAMS[c["act"]]
         attrs.update(
             act_operation=op,
             act_relu_lower_clip=lo,
@@ -397,7 +423,8 @@ def case_id(c):
     return "_".join(p for p in parts if p)
 
 
-def sweep_case(c, cid):
+def sweep_case(item):
+    c, cid = item.case, item.id
     values, patches = case_values(c)
     probe = P.probe_reasons(c)
     meta = {
@@ -407,8 +434,8 @@ def sweep_case(c, cid):
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd"
         + ("" if c["topo"] == "conv" else f"+{c['topo']}"),
-        "plan_items": list(c["ids"]),
-        "purpose": "probe" if probe else "claim",
+        "plan_items": item.plan_items(),
+        "purpose": P.purpose(c),
         "size_class": c["size"],
         "seed": _seed(cid, "case"),
         "inputs": input_recipes(c, cid),
@@ -416,6 +443,8 @@ def sweep_case(c, cid):
     notes = []
     if probe:
         notes.append("probe: " + "; ".join(probe))
+    if c.get("regression"):
+        notes.append("regression: " + c["regression"])
     if c.get("src"):
         notes.append(c["src"])
     if notes:
@@ -423,7 +452,10 @@ def sweep_case(c, cid):
     total = sum(P.numel(d) * P.BYTES.get(t, 1) for d, _, t in tensor_specs(c).values())
     if total > (1 << 30):
         meta["minimum_vram_mb"] = int(total * 2 / (1 << 20)) + 1
-    entry = {"id": cid, "values": values, "metadata": meta}
+    # The written id is lowercase_snake_case (verify_golden_bundles.py CASE_ID_PATTERN).
+    # Seeds keep using ``cid`` with its plan item ids (S13a, F20) as written, so the
+    # inputs, and the claims harvested on them, do not change with the id's case.
+    entry = {"id": cid.lower(), "values": values, "metadata": meta}
     if patches:
         entry["tensor_patches"] = patches
     return entry
@@ -501,10 +533,6 @@ def v_override(c):
     return with_(c, ("F35",), override=True)
 
 
-def v_act(c, name):
-    return with_(c, (), act=name)
-
-
 def v_bias(c, kind):
     if kind == "first":
         return with_(c, ("F25first",), bias_first=True)
@@ -569,6 +597,11 @@ class Builder:
     def A(self, aid, pair, **kw):
         return self._make(dict(P.ACCUM_SHAPES[aid]), pair, (aid,), "A", **kw)
 
+    def E(self, eid, dt):
+        e = P.E_SHAPES[eid]
+        lay = e.get("layout", "cf")
+        return self._make(dict(e["shape"]), (lay, dt), (eid,), "E")
+
     def R(self, rid):
         return P.new(**P.shape_R(rid), ids=(rid,), size="R", src=P.r_source(rid))
 
@@ -609,7 +642,16 @@ def rules(lv):
                         else "relu"
                     )
                     add(fuse(base, topo, act=act))
-        add(fuse(b.S("S3", 2, P1), "act", act="sigmoid"))
+        # fp16 channels-first: the sigmoid form MIOpen executes, so quick runs it.
+        add(fuse(b.S("S3", 2, P.PAIRS[2]), "act", act="sigmoid"))
+        # Core matrix: plain conv, conv -> ReLU and conv -> bias -> ReLU over
+        # rank 2 and 3, both layouts and the three core data types, with plain
+        # ReLU, which every engine executes.
+        for topo in ("conv", "act", "bias_act"):
+            for r in (2, 3):
+                for pair in P.PAIRS:
+                    c = b.S("S3", r, pair)
+                    add(c if topo == "conv" else fuse(c, topo, act="relu"))
 
     elif lv == 1:  # PR: what must we test on every PR?
         for r in (1, 2, 3, 4):
@@ -657,6 +699,12 @@ def rules(lv):
         for rid, e in P.R_SHAPES.items():
             if e["level"] == "standard":
                 add(b.R(rid))
+        # An explicit ReLU lower clip of 0 and an explicit slope of 0 are claim
+        # cases in the two topologies that carry an activation.
+        for topo in ("act", "bias_act"):
+            for name in ("relu_clip0", "relu_slope0"):
+                for pair in (P.PAIRS[0], P.PAIRS[2]):
+                    add(fuse(b.S("S2", 2, pair), topo, act=name))
 
     elif lv == 2:  # nightly: what should we test each day, wider per engine?
         for r in (1, 2, 3, 4):
@@ -739,6 +787,26 @@ def rules(lv):
         for rid, e in P.R_SHAPES.items():
             if e["level"] == "comprehensive":
                 add(b.R(rid))
+        # Regressions (plan section 4.2), after every rotated case so no id moves.
+        for topo in ("act", "bias_act"):
+            add(
+                fuse(
+                    b.S("S3", 2, P1),
+                    topo,
+                    act="relu_slope0",
+                    regression="a relu_lower_clip_slope of 0 must run as standard ReLU (#14363)",
+                )
+            )
+        # Layout and stride edges (plan section 3.6), after every other case so no id
+        # moves.
+        for eid, e in P.E_SHAPES.items():
+            for dt in P.CORE_DTYPES:
+                c = b.E(eid, dt)
+                add(
+                    v_layouts(c, e["mix"])
+                    if "mix" in e
+                    else v_nonpacked(c, e["stride"])
+                )
 
     else:  # full: which wider sweeps must exist in the full suite?
         for r in P.RANKS:
@@ -795,14 +863,27 @@ def rules(lv):
     return b.cases
 
 
+@dataclass
+class Item:
+    """A case, its written id and the plan items of the duplicates merged into it."""
+
+    case: dict
+    id: str
+    merged: set = field(default_factory=set)
+
+    def plan_items(self):
+        return sorted(set(self.case["ids"]) | self.merged)
+
+
 def build():
     """All levels, cumulative-deduplicated: a graph appears in the lowest level
-    that holds it. Returns {level: [(case, id)]} and the dropped counts."""
-    seen = set()
+    that holds it, and the plan items of its duplicates merge into that case.
+    Returns {level: [Item]} and the dropped counts."""
+    seen = {}
     result = {}
     dropped = Counter()
     for lv, level in enumerate(P.LEVELS):
-        out, ids = [], Counter()
+        out = []
         for c in rules(lv):
             reason = P.legal(c)
             if reason:
@@ -817,45 +898,32 @@ def build():
                 dropped[f"{level}: over ceiling"] += 1
                 continue
             key = P.canon(c)
-            if key in seen:
+            survivor = seen.get(key)
+            if survivor is not None:
+                survivor.merged.update(c["ids"])
+                dropped[f"{level}: duplicate graph (plan items merged)"] += 1
                 continue
-            seen.add(key)
-            cid = case_id(c)
-            ids[cid] += 1
-            out.append([c, cid])
+            item = Item(c, case_id(c))
+            seen[key] = item
+            out.append(item)
         # an id that collides inside one sweep gets a hash suffix
-        counts = Counter()
-        for c, cid in out:
-            counts[(c["topo"], cid)] += 1
+        counts = Counter((item.case["topo"], item.id) for item in out)
         for item in out:
-            c, cid = item
-            if counts[(c["topo"], cid)] > 1:
-                item[1] = f"{cid}_{P.short_hash(c)}"
+            if counts[(item.case["topo"], item.id)] > 1:
+                item.id = f"{item.id}_{P.short_hash(item.case)}"
         result[level] = out
     dropped.update(apply_trims(result))
     return result, dropped
 
 
 def apply_trims(result):
-    """Remove the products of ``P.TRIMS``. A T10 case survives when no other
-    surviving bias_act case covers its activation x core cell; levels are visited
-    lowest first, so that case is the lowest and first one. Runs after the ids
-    are assigned, so the cases that remain keep their ids."""
+    """Remove the products of ``P.TRIMS``. Runs after the ids are assigned, so the
+    cases that remain keep their ids."""
     removed = Counter()
-    covered = {
-        P.core_cell(c)
-        for level, items in result.items()
-        for c, _ in items
-        if c["topo"] == "bias_act" and P.trim(c, level) is None
-    }
     for level, items in result.items():
         keep = []
         for item in items:
-            c = item[0]
-            t = P.trim(c, level)
-            if t == "T10" and P.core_cell(c) not in covered:
-                covered.add(P.core_cell(c))
-                t = None
+            t = P.trim(item.case, level)
             if t:
                 removed[f"{level}: trimmed {t}"] += 1
             else:
@@ -873,15 +941,17 @@ def dump(obj):
     return json.dumps(obj, indent=2, sort_keys=False) + "\n"
 
 
-def support_json(path, case_ids):
-    """The sidecar of a sweep. Claims are harvested, never written here: an
-    existing sidecar keeps the claims of cases that still exist, so regenerating
-    the bundles does not erase a harvest. A sweep with no sidecar gets an empty one."""
-    claims = (
-        {c for c in support_sidecar.load(path) if c.case in case_ids}
-        if path.exists()
-        else set()
-    )
+def support_json(bundle_dir, level, sub, case_ids):
+    """The sidecar of the sweep ``sub`` (``<op>/<name>``) in ``level``. Claims are
+    harvested, never written here: the existing sidecars of the same sweep in every
+    level keep the claims of cases whose id still exists, so regenerating the
+    bundles, or a case moving to another level, does not erase a harvest. A sweep
+    with no claims gets an empty sidecar."""
+    claims = set()
+    for lv in P.LEVELS:
+        old = bundle_dir / lv / sub / "support.json"
+        claims |= {c for c in support_sidecar.load(old) if c.case in case_ids}
+    path = bundle_dir / level / sub / "support.json"
     return (
         support_sidecar.render(path, claims)
         if claims
@@ -893,16 +963,17 @@ def write_tree(result, bundle_dir, dry_run):
     files = {}
     for level, items in result.items():
         by_topo = defaultdict(list)
-        for c, cid in items:
-            by_topo[c["topo"]].append((c, cid))
+        for item in items:
+            by_topo[item.case["topo"]].append(item)
         for topo, cs in by_topo.items():
             op, name = P.BUNDLE_DIR[topo]
             rel = Path(level) / op / name
             tpl = template(topo)
             need = placeholders(tpl)
             entries = []
-            for c, cid in cs:
-                e = sweep_case(c, cid)
+            for item in cs:
+                cid = item.id
+                e = sweep_case(item)
                 have = set()
 
                 def flat(prefix, v):
@@ -923,7 +994,7 @@ def write_tree(result, bundle_dir, dry_run):
             files[rel / "graph.template.json"] = dump(tpl)
             files[rel / "sweep.json"] = dump({"version": 1, "cases": entries})
             files[rel / "support.json"] = support_json(
-                bundle_dir / rel / "support.json", {cid for _, cid in cs}
+                bundle_dir, level, Path(op) / name, {i.id.lower() for i in cs}
             )
     if dry_run:
         return files
@@ -946,7 +1017,7 @@ def report(result, dropped):
     hdr = ["level"] + list(P.TOPOLOGIES) + ["own", "cumulative"]
     print("  ".join(f"{h:>14}" for h in hdr))
     for level, items in result.items():
-        cnt = Counter(c["topo"] for c, _ in items)
+        cnt = Counter(i.case["topo"] for i in items)
         total += len(items)
         print(
             "  ".join(
@@ -956,12 +1027,12 @@ def report(result, dropped):
         )
     print("\nBy purpose and size class")
     for level, items in result.items():
-        pur = Counter(P.purpose(c) for c, _ in items)
-        sz = Counter(c["size"] for c, _ in items)
+        pur = Counter(P.purpose(i.case) for i in items)
+        sz = Counter(i.case["size"] for i in items)
         print(f"  {level:<14} {dict(pur)}  {dict(sorted(sz.items()))}")
     geo = set()
     for items in result.values():
-        for c, _ in items:
+        for c in (i.case for i in items):
             geo.add(
                 (
                     c["rank"],
@@ -982,9 +1053,12 @@ def report(result, dropped):
     for level, items in result.items():
         if items:
             print(
-                f"  {level:<14} max {max(P.flops(c) for c, _ in items) / 1e9:.3f} GFLOP, "
-                f"max {max(P.fp32_bytes(c) for c, _ in items) / (1 << 20):.1f} MiB"
+                f"  {level:<14} max {max(P.flops(i.case) for i in items) / 1e9:.3f} GFLOP, "
+                f"max {max(P.fp32_bytes(i.case) for i in items) / (1 << 20):.1f} MiB"
             )
+    print("\nTrims (conv_fwd_plan.TRIMS)")
+    for tid, t in P.TRIMS.items():
+        print(f"  {tid}: {t['product']}\n       back when: {t['trigger']}")
     if dropped:
         print("\nDropped:")
         for k, v in sorted(dropped.items()):

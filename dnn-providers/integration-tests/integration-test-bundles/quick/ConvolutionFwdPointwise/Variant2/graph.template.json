@@ -25,7 +25,7 @@
       "type": "ConvolutionFwdAttributes"
     },
     {
-      "compute_data_type": "float",
+      "compute_data_type": "${case.attributes.bias_compute}",
       "inputs": {
         "axis_tensor_uid": null,
         "elu_alpha": null,

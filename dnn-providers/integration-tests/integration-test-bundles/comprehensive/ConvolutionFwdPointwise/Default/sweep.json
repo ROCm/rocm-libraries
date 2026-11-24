@@ -2,7 +2,7 @@
   "version": 1,
   "cases": [
     {
-      "id": "S1_1d_i16_n2c16k32_f1_fp32_cf_relu",
+      "id": "s1_1d_i16_n2c16k32_f1_fp32_cf_relu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -119,7 +119,7 @@
       }
     },
     {
-      "id": "S1_1d_i16_n2c16k32_f1_fp32_cl_relu_lo",
+      "id": "s1_1d_i16_n2c16k32_f1_fp32_cl_relu_lo",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -216,7 +216,7 @@
         "plan_items": [
           "S1"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 925043691,
         "inputs": {
@@ -232,11 +232,12 @@
             "hi": 1.0,
             "seed": 277221472
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S1_1d_i16_n2c16k32_f1_fp16_cf_relu6",
+      "id": "s1_1d_i16_n2c16k32_f1_fp16_cf_relu6",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -353,7 +354,7 @@
       }
     },
     {
-      "id": "S1_1d_i16_n2c16k32_f1_fp16_cl_relu_clamp",
+      "id": "s1_1d_i16_n2c16k32_f1_fp16_cl_relu_clamp",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -470,7 +471,7 @@
       }
     },
     {
-      "id": "S1_1d_i16_n2c16k32_f1_bf16_cf_relu_leaky",
+      "id": "s1_1d_i16_n2c16k32_f1_bf16_cf_relu_leaky",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -567,7 +568,7 @@
         "plan_items": [
           "S1"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1815613233,
         "inputs": {
@@ -583,11 +584,12 @@
             "hi": 1.0,
             "seed": 706857297
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S1_1d_i16_n2c16k32_f1_bf16_cl_sigmoid",
+      "id": "s1_1d_i16_n2c16k32_f1_bf16_cl_sigmoid",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -684,7 +686,7 @@
         "plan_items": [
           "S1"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1244410917,
         "inputs": {
@@ -700,12 +702,11 @@
             "hi": 1.0,
             "seed": 2049647403
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S2_1d_i16_n2c16k32_f3_fp32_cf_tanh",
+      "id": "s2_1d_i16_n2c16k32_f3_fp32_cf_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -802,7 +803,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1415909000,
         "inputs": {
@@ -818,12 +819,11 @@
             "hi": 1.0,
             "seed": 817613784
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S2_1d_i16_n2c16k32_f3_fp32_cl_elu",
+      "id": "s2_1d_i16_n2c16k32_f3_fp32_cl_elu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -941,7 +941,7 @@
       }
     },
     {
-      "id": "S2_1d_i16_n2c16k32_f3_fp16_cf_gelu",
+      "id": "s2_1d_i16_n2c16k32_f3_fp16_cf_gelu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -1059,7 +1059,7 @@
       }
     },
     {
-      "id": "S2_1d_i16_n2c16k32_f3_fp16_cl_gelu_tanh",
+      "id": "s2_1d_i16_n2c16k32_f3_fp16_cl_gelu_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -1177,7 +1177,7 @@
       }
     },
     {
-      "id": "S2_1d_i16_n2c16k32_f3_bf16_cf_swish",
+      "id": "s2_1d_i16_n2c16k32_f3_bf16_cf_swish",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -1295,7 +1295,7 @@
       }
     },
     {
-      "id": "S2_1d_i16_n2c16k32_f3_bf16_cl_softplus",
+      "id": "s2_1d_i16_n2c16k32_f3_bf16_cl_softplus",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -1413,7 +1413,7 @@
       }
     },
     {
-      "id": "S3_1d_i16_n2c16k32_f3_fp32_cf_identity",
+      "id": "s3_1d_i16_n2c16k32_f3_fp32_cf_identity",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -1531,7 +1531,7 @@
       }
     },
     {
-      "id": "S3_1d_i16_n2c16k32_f3_fp32_cl_relu",
+      "id": "s3_1d_i16_n2c16k32_f3_fp32_cl_relu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -1648,7 +1648,7 @@
       }
     },
     {
-      "id": "S3_1d_i16_n2c16k32_f3_fp16_cf_relu_lo",
+      "id": "s3_1d_i16_n2c16k32_f3_fp16_cf_relu_lo",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -1745,7 +1745,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 225612938,
         "inputs": {
@@ -1761,11 +1761,12 @@
             "hi": 1.0,
             "seed": 392062980
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S3_1d_i16_n2c16k32_f3_fp16_cl_relu6",
+      "id": "s3_1d_i16_n2c16k32_f3_fp16_cl_relu6",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -1882,7 +1883,7 @@
       }
     },
     {
-      "id": "S3_1d_i16_n2c16k32_f3_bf16_cf_relu_clamp",
+      "id": "s3_1d_i16_n2c16k32_f3_bf16_cf_relu_clamp",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -1999,7 +2000,7 @@
       }
     },
     {
-      "id": "S3_1d_i16_n2c16k32_f3_bf16_cl_relu_leaky",
+      "id": "s3_1d_i16_n2c16k32_f3_bf16_cl_relu_leaky",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -2096,7 +2097,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1076926273,
         "inputs": {
@@ -2112,11 +2113,12 @@
             "hi": 1.0,
             "seed": 905034339
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S4_1d_i16_n2c16k32_f3_fp32_cf_sigmoid",
+      "id": "s4_1d_i16_n2c16k32_f3_fp32_cf_sigmoid",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -2213,7 +2215,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 57237820,
         "inputs": {
@@ -2229,12 +2231,11 @@
             "hi": 1.0,
             "seed": 804995767
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S4_1d_i16_n2c16k32_f3_fp32_cl_tanh",
+      "id": "s4_1d_i16_n2c16k32_f3_fp32_cl_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -2331,7 +2332,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1790399757,
         "inputs": {
@@ -2347,12 +2348,11 @@
             "hi": 1.0,
             "seed": 1525866146
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S4_1d_i16_n2c16k32_f3_fp16_cf_elu",
+      "id": "s4_1d_i16_n2c16k32_f3_fp16_cf_elu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -2470,7 +2470,7 @@
       }
     },
     {
-      "id": "S4_1d_i16_n2c16k32_f3_fp16_cl_gelu",
+      "id": "s4_1d_i16_n2c16k32_f3_fp16_cl_gelu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -2588,7 +2588,7 @@
       }
     },
     {
-      "id": "S4_1d_i16_n2c16k32_f3_bf16_cf_gelu_tanh",
+      "id": "s4_1d_i16_n2c16k32_f3_bf16_cf_gelu_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -2706,7 +2706,7 @@
       }
     },
     {
-      "id": "S4_1d_i16_n2c16k32_f3_bf16_cl_swish",
+      "id": "s4_1d_i16_n2c16k32_f3_bf16_cl_swish",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -2824,7 +2824,7 @@
       }
     },
     {
-      "id": "S5_1d_i16_n2c16k32_f3_fp32_cf_softplus",
+      "id": "s5_1d_i16_n2c16k32_f3_fp32_cf_softplus",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -2942,7 +2942,7 @@
       }
     },
     {
-      "id": "S5_1d_i16_n2c16k32_f3_fp32_cl_identity",
+      "id": "s5_1d_i16_n2c16k32_f3_fp32_cl_identity",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -3060,7 +3060,7 @@
       }
     },
     {
-      "id": "S5_1d_i16_n2c16k32_f3_fp16_cf_relu",
+      "id": "s5_1d_i16_n2c16k32_f3_fp16_cf_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -3177,7 +3177,7 @@
       }
     },
     {
-      "id": "S5_1d_i16_n2c16k32_f3_fp16_cl_relu_lo",
+      "id": "s5_1d_i16_n2c16k32_f3_fp16_cl_relu_lo",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -3274,7 +3274,7 @@
         "plan_items": [
           "S5"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1424226728,
         "inputs": {
@@ -3290,11 +3290,12 @@
             "hi": 1.0,
             "seed": 1652296149
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S5_1d_i16_n2c16k32_f3_bf16_cf_relu6",
+      "id": "s5_1d_i16_n2c16k32_f3_bf16_cf_relu6",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -3411,7 +3412,7 @@
       }
     },
     {
-      "id": "S5_1d_i16_n2c16k32_f3_bf16_cl_relu_clamp",
+      "id": "s5_1d_i16_n2c16k32_f3_bf16_cl_relu_clamp",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -3528,7 +3529,7 @@
       }
     },
     {
-      "id": "S7_1d_i16_n2c16k32g2_f3_fp32_cf_relu_leaky",
+      "id": "s7_1d_i16_n2c16k32g2_f3_fp32_cf_relu_leaky",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -3625,7 +3626,7 @@
         "plan_items": [
           "S7"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 202885343,
         "inputs": {
@@ -3641,11 +3642,12 @@
             "hi": 1.0,
             "seed": 1109898894
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S7_1d_i16_n2c16k32g2_f3_fp32_cl_sigmoid",
+      "id": "s7_1d_i16_n2c16k32g2_f3_fp32_cl_sigmoid",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -3742,7 +3744,7 @@
         "plan_items": [
           "S7"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1970731722,
         "inputs": {
@@ -3758,12 +3760,11 @@
             "hi": 1.0,
             "seed": 609224483
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S7_1d_i16_n2c16k32g2_f3_fp16_cf_tanh",
+      "id": "s7_1d_i16_n2c16k32g2_f3_fp16_cf_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -3860,7 +3861,7 @@
         "plan_items": [
           "S7"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 433550335,
         "inputs": {
@@ -3876,12 +3877,11 @@
             "hi": 1.0,
             "seed": 1122040194
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S7_1d_i16_n2c16k32g2_f3_fp16_cl_elu",
+      "id": "s7_1d_i16_n2c16k32g2_f3_fp16_cl_elu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -3999,7 +3999,7 @@
       }
     },
     {
-      "id": "S7_1d_i16_n2c16k32g2_f3_bf16_cf_gelu",
+      "id": "s7_1d_i16_n2c16k32g2_f3_bf16_cf_gelu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -4117,7 +4117,7 @@
       }
     },
     {
-      "id": "S7_1d_i16_n2c16k32g2_f3_bf16_cl_gelu_tanh",
+      "id": "s7_1d_i16_n2c16k32g2_f3_bf16_cl_gelu_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -4235,7 +4235,7 @@
       }
     },
     {
-      "id": "S8_1d_i16_n2c32k64g4_f3_fp32_cf_swish",
+      "id": "s8_1d_i16_n2c32k64g4_f3_fp32_cf_swish",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -4353,7 +4353,7 @@
       }
     },
     {
-      "id": "S8_1d_i16_n2c32k64g4_f3_fp32_cl_softplus",
+      "id": "s8_1d_i16_n2c32k64g4_f3_fp32_cl_softplus",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -4471,7 +4471,7 @@
       }
     },
     {
-      "id": "S8_1d_i16_n2c32k64g4_f3_fp16_cf_identity",
+      "id": "s8_1d_i16_n2c32k64g4_f3_fp16_cf_identity",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -4589,7 +4589,7 @@
       }
     },
     {
-      "id": "S8_1d_i16_n2c32k64g4_f3_fp16_cl_relu",
+      "id": "s8_1d_i16_n2c32k64g4_f3_fp16_cl_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -4706,7 +4706,7 @@
       }
     },
     {
-      "id": "S8_1d_i16_n2c32k64g4_f3_bf16_cf_relu_lo",
+      "id": "s8_1d_i16_n2c32k64g4_f3_bf16_cf_relu_lo",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -4803,7 +4803,7 @@
         "plan_items": [
           "S8"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1307574818,
         "inputs": {
@@ -4819,11 +4819,12 @@
             "hi": 1.0,
             "seed": 1514010103
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S8_1d_i16_n2c32k64g4_f3_bf16_cl_relu6",
+      "id": "s8_1d_i16_n2c32k64g4_f3_bf16_cl_relu6",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -4940,7 +4941,7 @@
       }
     },
     {
-      "id": "S9_1d_i16_n8c16k32_f1_fp32_cf_relu_clamp",
+      "id": "s9_1d_i16_n8c16k32_f1_fp32_cf_relu_clamp",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -5057,7 +5058,7 @@
       }
     },
     {
-      "id": "S9_1d_i16_n8c16k32_f1_fp32_cl_relu_leaky",
+      "id": "s9_1d_i16_n8c16k32_f1_fp32_cl_relu_leaky",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -5154,7 +5155,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 585528651,
         "inputs": {
@@ -5170,11 +5171,12 @@
             "hi": 1.0,
             "seed": 936133563
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S9_1d_i16_n8c16k32_f1_fp16_cf_sigmoid",
+      "id": "s9_1d_i16_n8c16k32_f1_fp16_cf_sigmoid",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -5271,7 +5273,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 2033534795,
         "inputs": {
@@ -5287,12 +5289,11 @@
             "hi": 1.0,
             "seed": 440363108
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S9_1d_i16_n8c16k32_f1_fp16_cl_tanh",
+      "id": "s9_1d_i16_n8c16k32_f1_fp16_cl_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -5389,7 +5390,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 568726517,
         "inputs": {
@@ -5405,12 +5406,11 @@
             "hi": 1.0,
             "seed": 1391844740
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S9_1d_i16_n8c16k32_f1_bf16_cf_elu",
+      "id": "s9_1d_i16_n8c16k32_f1_bf16_cf_elu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -5528,7 +5528,7 @@
       }
     },
     {
-      "id": "S9_1d_i16_n8c16k32_f1_bf16_cl_gelu",
+      "id": "s9_1d_i16_n8c16k32_f1_bf16_cl_gelu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -5646,7 +5646,7 @@
       }
     },
     {
-      "id": "S10_1d_i16_n2c16k32_f5_fp32_cf_gelu_tanh",
+      "id": "s10_1d_i16_n2c16k32_f5_fp32_cf_gelu_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -5764,7 +5764,7 @@
       }
     },
     {
-      "id": "S10_1d_i16_n2c16k32_f5_fp32_cl_swish",
+      "id": "s10_1d_i16_n2c16k32_f5_fp32_cl_swish",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -5882,7 +5882,7 @@
       }
     },
     {
-      "id": "S10_1d_i16_n2c16k32_f5_fp16_cf_softplus",
+      "id": "s10_1d_i16_n2c16k32_f5_fp16_cf_softplus",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -6000,7 +6000,7 @@
       }
     },
     {
-      "id": "S10_1d_i16_n2c16k32_f5_fp16_cl_identity",
+      "id": "s10_1d_i16_n2c16k32_f5_fp16_cl_identity",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -6118,7 +6118,7 @@
       }
     },
     {
-      "id": "S10_1d_i16_n2c16k32_f5_bf16_cf_relu",
+      "id": "s10_1d_i16_n2c16k32_f5_bf16_cf_relu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -6235,7 +6235,7 @@
       }
     },
     {
-      "id": "S10_1d_i16_n2c16k32_f5_bf16_cl_relu_lo",
+      "id": "s10_1d_i16_n2c16k32_f5_bf16_cl_relu_lo",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -6332,7 +6332,7 @@
         "plan_items": [
           "S10"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1756156392,
         "inputs": {
@@ -6348,11 +6348,12 @@
             "hi": 1.0,
             "seed": 586403162
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S11_1d_i16_n2c3k16_f7_fp32_cf_relu6",
+      "id": "s11_1d_i16_n2c3k16_f7_fp32_cf_relu6",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -6469,7 +6470,7 @@
       }
     },
     {
-      "id": "S11_1d_i16_n2c3k16_f7_fp32_cl_relu_clamp",
+      "id": "s11_1d_i16_n2c3k16_f7_fp32_cl_relu_clamp",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -6586,7 +6587,7 @@
       }
     },
     {
-      "id": "S11_1d_i16_n2c3k16_f7_fp16_cf_relu_leaky",
+      "id": "s11_1d_i16_n2c3k16_f7_fp16_cf_relu_leaky",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -6683,7 +6684,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1270865734,
         "inputs": {
@@ -6699,11 +6700,12 @@
             "hi": 1.0,
             "seed": 2130221426
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S11_1d_i16_n2c3k16_f7_fp16_cl_sigmoid",
+      "id": "s11_1d_i16_n2c3k16_f7_fp16_cl_sigmoid",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -6800,7 +6802,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1582414476,
         "inputs": {
@@ -6816,12 +6818,11 @@
             "hi": 1.0,
             "seed": 982723874
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S11_1d_i16_n2c3k16_f7_bf16_cf_tanh",
+      "id": "s11_1d_i16_n2c3k16_f7_bf16_cf_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -6918,7 +6919,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 579424334,
         "inputs": {
@@ -6934,12 +6935,11 @@
             "hi": 1.0,
             "seed": 834303042
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S11_1d_i16_n2c3k16_f7_bf16_cl_elu",
+      "id": "s11_1d_i16_n2c3k16_f7_bf16_cl_elu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -7057,7 +7057,7 @@
       }
     },
     {
-      "id": "S13a_1d_i16_n2c16k16g16_f3_fp32_cf_gelu",
+      "id": "s13a_1d_i16_n2c16k16g16_f3_fp32_cf_gelu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -7175,7 +7175,7 @@
       }
     },
     {
-      "id": "S13a_1d_i16_n2c16k16g16_f3_fp32_cl_gelu_tanh",
+      "id": "s13a_1d_i16_n2c16k16g16_f3_fp32_cl_gelu_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -7293,7 +7293,7 @@
       }
     },
     {
-      "id": "S13a_1d_i16_n2c16k16g16_f3_fp16_cl_softplus",
+      "id": "s13a_1d_i16_n2c16k16g16_f3_fp16_cl_softplus",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -7411,7 +7411,7 @@
       }
     },
     {
-      "id": "S13a_1d_i16_n2c16k16g16_f3_bf16_cf_identity",
+      "id": "s13a_1d_i16_n2c16k16g16_f3_bf16_cf_identity",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -7529,7 +7529,7 @@
       }
     },
     {
-      "id": "S13a_1d_i16_n2c16k16g16_f3_bf16_cl_relu",
+      "id": "s13a_1d_i16_n2c16k16g16_f3_bf16_cl_relu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -7646,7 +7646,7 @@
       }
     },
     {
-      "id": "S13b_1d_i16_n2c16k32g16_f3_fp32_cf_relu_lo",
+      "id": "s13b_1d_i16_n2c16k32g16_f3_fp32_cf_relu_lo",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -7743,7 +7743,7 @@
         "plan_items": [
           "S13b"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1335617569,
         "inputs": {
@@ -7759,11 +7759,12 @@
             "hi": 1.0,
             "seed": 316999
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S13b_1d_i16_n2c16k32g16_f3_fp32_cl_relu6",
+      "id": "s13b_1d_i16_n2c16k32g16_f3_fp32_cl_relu6",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -7880,7 +7881,7 @@
       }
     },
     {
-      "id": "S13b_1d_i16_n2c16k32g16_f3_fp16_cf_relu_clamp",
+      "id": "s13b_1d_i16_n2c16k32g16_f3_fp16_cf_relu_clamp",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -7997,7 +7998,7 @@
       }
     },
     {
-      "id": "S13b_1d_i16_n2c16k32g16_f3_fp16_cl_relu_leaky",
+      "id": "s13b_1d_i16_n2c16k32g16_f3_fp16_cl_relu_leaky",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -8094,7 +8095,7 @@
         "plan_items": [
           "S13b"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1222245422,
         "inputs": {
@@ -8110,11 +8111,12 @@
             "hi": 1.0,
             "seed": 1276230218
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S13b_1d_i16_n2c16k32g16_f3_bf16_cf_sigmoid",
+      "id": "s13b_1d_i16_n2c16k32g16_f3_bf16_cf_sigmoid",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -8211,7 +8213,7 @@
         "plan_items": [
           "S13b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1216927341,
         "inputs": {
@@ -8227,12 +8229,11 @@
             "hi": 1.0,
             "seed": 695387281
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S13b_1d_i16_n2c16k32g16_f3_bf16_cl_tanh",
+      "id": "s13b_1d_i16_n2c16k32g16_f3_bf16_cl_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -8329,7 +8330,7 @@
         "plan_items": [
           "S13b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 66808469,
         "inputs": {
@@ -8345,12 +8346,11 @@
             "hi": 1.0,
             "seed": 550731464
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S14_1d_i15_n2c13k17_f3_fp32_cf_elu",
+      "id": "s14_1d_i15_n2c13k17_f3_fp32_cf_elu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -8468,7 +8468,7 @@
       }
     },
     {
-      "id": "S14_1d_i15_n2c13k17_f3_fp32_cl_gelu",
+      "id": "s14_1d_i15_n2c13k17_f3_fp32_cl_gelu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -8586,7 +8586,7 @@
       }
     },
     {
-      "id": "S14_1d_i15_n2c13k17_f3_fp16_cf_gelu_tanh",
+      "id": "s14_1d_i15_n2c13k17_f3_fp16_cf_gelu_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -8704,7 +8704,7 @@
       }
     },
     {
-      "id": "S14_1d_i15_n2c13k17_f3_fp16_cl_swish",
+      "id": "s14_1d_i15_n2c13k17_f3_fp16_cl_swish",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -8822,7 +8822,7 @@
       }
     },
     {
-      "id": "S14_1d_i15_n2c13k17_f3_bf16_cf_softplus",
+      "id": "s14_1d_i15_n2c13k17_f3_bf16_cf_softplus",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -8940,7 +8940,7 @@
       }
     },
     {
-      "id": "S14_1d_i15_n2c13k17_f3_bf16_cl_identity",
+      "id": "s14_1d_i15_n2c13k17_f3_bf16_cl_identity",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -9058,7 +9058,7 @@
       }
     },
     {
-      "id": "S16_1d_i32_n2c16k32_f3_fp32_cf_relu",
+      "id": "s16_1d_i32_n2c16k32_f3_fp32_cf_relu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -9175,7 +9175,7 @@
       }
     },
     {
-      "id": "S16_1d_i32_n2c16k32_f3_fp32_cl_relu_lo",
+      "id": "s16_1d_i32_n2c16k32_f3_fp32_cl_relu_lo",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -9272,7 +9272,7 @@
         "plan_items": [
           "S16"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1682288874,
         "inputs": {
@@ -9288,11 +9288,12 @@
             "hi": 1.0,
             "seed": 1862798480
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S16_1d_i32_n2c16k32_f3_fp16_cf_relu6",
+      "id": "s16_1d_i32_n2c16k32_f3_fp16_cf_relu6",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -9409,7 +9410,7 @@
       }
     },
     {
-      "id": "S16_1d_i32_n2c16k32_f3_fp16_cl_relu_clamp",
+      "id": "s16_1d_i32_n2c16k32_f3_fp16_cl_relu_clamp",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -9526,7 +9527,7 @@
       }
     },
     {
-      "id": "S16_1d_i32_n2c16k32_f3_bf16_cf_relu_leaky",
+      "id": "s16_1d_i32_n2c16k32_f3_bf16_cf_relu_leaky",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -9623,7 +9624,7 @@
         "plan_items": [
           "S16"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 789028393,
         "inputs": {
@@ -9639,11 +9640,12 @@
             "hi": 1.0,
             "seed": 471757837
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S16_1d_i32_n2c16k32_f3_bf16_cl_sigmoid",
+      "id": "s16_1d_i32_n2c16k32_f3_bf16_cl_sigmoid",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -9740,7 +9742,7 @@
         "plan_items": [
           "S16"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1033784782,
         "inputs": {
@@ -9756,12 +9758,11 @@
             "hi": 1.0,
             "seed": 1448592161
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S17_1d_i16_n2c1k16_f3_fp32_cf_tanh",
+      "id": "s17_1d_i16_n2c1k16_f3_fp32_cf_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -9858,7 +9859,7 @@
         "plan_items": [
           "S17"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 364730683,
         "inputs": {
@@ -9874,12 +9875,11 @@
             "hi": 1.0,
             "seed": 2066370366
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S17_1d_i16_n2c1k16_f3_fp32_cl_elu",
+      "id": "s17_1d_i16_n2c1k16_f3_fp32_cl_elu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -9997,7 +9997,7 @@
       }
     },
     {
-      "id": "S17_1d_i16_n2c1k16_f3_fp16_cf_gelu",
+      "id": "s17_1d_i16_n2c1k16_f3_fp16_cf_gelu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -10115,7 +10115,7 @@
       }
     },
     {
-      "id": "S17_1d_i16_n2c1k16_f3_fp16_cl_gelu_tanh",
+      "id": "s17_1d_i16_n2c1k16_f3_fp16_cl_gelu_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -10233,7 +10233,7 @@
       }
     },
     {
-      "id": "S17_1d_i16_n2c1k16_f3_bf16_cf_swish",
+      "id": "s17_1d_i16_n2c1k16_f3_bf16_cf_swish",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -10351,7 +10351,7 @@
       }
     },
     {
-      "id": "S17_1d_i16_n2c1k16_f3_bf16_cl_softplus",
+      "id": "s17_1d_i16_n2c1k16_f3_bf16_cl_softplus",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -10469,7 +10469,7 @@
       }
     },
     {
-      "id": "S18_1d_i16_n2c16k32_f2_fp32_cf_identity",
+      "id": "s18_1d_i16_n2c16k32_f2_fp32_cf_identity",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -10587,7 +10587,7 @@
       }
     },
     {
-      "id": "S18_1d_i16_n2c16k32_f2_fp32_cl_relu",
+      "id": "s18_1d_i16_n2c16k32_f2_fp32_cl_relu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -10705,7 +10705,7 @@
       }
     },
     {
-      "id": "S18_1d_i16_n2c16k32_f2_fp16_cf_relu_lo",
+      "id": "s18_1d_i16_n2c16k32_f2_fp16_cf_relu_lo",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -10819,11 +10819,11 @@
             "seed": 2095094535
           }
         },
-        "notes": "probe: F11 asymmetric padding"
+        "notes": "probe: F11 asymmetric padding; F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S18_1d_i16_n2c16k32_f2_fp16_cl_relu6",
+      "id": "s18_1d_i16_n2c16k32_f2_fp16_cl_relu6",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -10941,7 +10941,7 @@
       }
     },
     {
-      "id": "S18_1d_i16_n2c16k32_f2_bf16_cf_relu_clamp",
+      "id": "s18_1d_i16_n2c16k32_f2_bf16_cf_relu_clamp",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -11059,7 +11059,7 @@
       }
     },
     {
-      "id": "S18_1d_i16_n2c16k32_f2_bf16_cl_relu_leaky",
+      "id": "s18_1d_i16_n2c16k32_f2_bf16_cl_relu_leaky",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -11173,11 +11173,11 @@
             "seed": 707910037
           }
         },
-        "notes": "probe: F11 asymmetric padding"
+        "notes": "probe: F11 asymmetric padding; F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S19_1d_i16_n2c16k32_f16_fp32_cf_sigmoid",
+      "id": "s19_1d_i16_n2c16k32_f16_fp32_cf_sigmoid",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -11274,7 +11274,7 @@
         "plan_items": [
           "S19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 2062533157,
         "inputs": {
@@ -11290,12 +11290,11 @@
             "hi": 1.0,
             "seed": 1723661578
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S19_1d_i16_n2c16k32_f16_fp32_cl_tanh",
+      "id": "s19_1d_i16_n2c16k32_f16_fp32_cl_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -11392,7 +11391,7 @@
         "plan_items": [
           "S19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 877007574,
         "inputs": {
@@ -11408,12 +11407,11 @@
             "hi": 1.0,
             "seed": 420877317
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S19_1d_i16_n2c16k32_f16_fp16_cf_elu",
+      "id": "s19_1d_i16_n2c16k32_f16_fp16_cf_elu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -11531,7 +11529,7 @@
       }
     },
     {
-      "id": "S19_1d_i16_n2c16k32_f16_fp16_cl_gelu",
+      "id": "s19_1d_i16_n2c16k32_f16_fp16_cl_gelu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -11649,7 +11647,7 @@
       }
     },
     {
-      "id": "S19_1d_i16_n2c16k32_f16_bf16_cf_gelu_tanh",
+      "id": "s19_1d_i16_n2c16k32_f16_bf16_cf_gelu_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -11767,7 +11765,7 @@
       }
     },
     {
-      "id": "S19_1d_i16_n2c16k32_f16_bf16_cl_swish",
+      "id": "s19_1d_i16_n2c16k32_f16_bf16_cl_swish",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -11885,7 +11883,7 @@
       }
     },
     {
-      "id": "S20_1d_i16_n2c16k32_f3_fp32_cf_softplus",
+      "id": "s20_1d_i16_n2c16k32_f3_fp32_cf_softplus",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -12003,7 +12001,7 @@
       }
     },
     {
-      "id": "S20_1d_i16_n2c16k32_f3_fp32_cl_identity",
+      "id": "s20_1d_i16_n2c16k32_f3_fp32_cl_identity",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -12121,7 +12119,7 @@
       }
     },
     {
-      "id": "S20_1d_i16_n2c16k32_f3_fp16_cf_relu",
+      "id": "s20_1d_i16_n2c16k32_f3_fp16_cf_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -12238,7 +12236,7 @@
       }
     },
     {
-      "id": "S20_1d_i16_n2c16k32_f3_fp16_cl_relu_lo",
+      "id": "s20_1d_i16_n2c16k32_f3_fp16_cl_relu_lo",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -12335,7 +12333,7 @@
         "plan_items": [
           "S20"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 835361128,
         "inputs": {
@@ -12351,11 +12349,12 @@
             "hi": 1.0,
             "seed": 1957372482
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S20_1d_i16_n2c16k32_f3_bf16_cf_relu6",
+      "id": "s20_1d_i16_n2c16k32_f3_bf16_cf_relu6",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -12472,7 +12471,7 @@
       }
     },
     {
-      "id": "S20_1d_i16_n2c16k32_f3_bf16_cl_relu_clamp",
+      "id": "s20_1d_i16_n2c16k32_f3_bf16_cl_relu_clamp",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -12589,7 +12588,7 @@
       }
     },
     {
-      "id": "S21_1d_i16_n2c16k32_f2_fp32_cf_relu_leaky",
+      "id": "s21_1d_i16_n2c16k32_f2_fp32_cf_relu_leaky",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -12686,7 +12685,7 @@
         "plan_items": [
           "S21"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1530238542,
         "inputs": {
@@ -12702,11 +12701,12 @@
             "hi": 1.0,
             "seed": 1888518289
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S21_1d_i16_n2c16k32_f2_fp32_cl_sigmoid",
+      "id": "s21_1d_i16_n2c16k32_f2_fp32_cl_sigmoid",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -12803,7 +12803,7 @@
         "plan_items": [
           "S21"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 748469408,
         "inputs": {
@@ -12819,12 +12819,11 @@
             "hi": 1.0,
             "seed": 49244161
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S21_1d_i16_n2c16k32_f2_fp16_cf_tanh",
+      "id": "s21_1d_i16_n2c16k32_f2_fp16_cf_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -12921,7 +12920,7 @@
         "plan_items": [
           "S21"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1883253105,
         "inputs": {
@@ -12937,12 +12936,11 @@
             "hi": 1.0,
             "seed": 837873022
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S21_1d_i16_n2c16k32_f2_fp16_cl_elu",
+      "id": "s21_1d_i16_n2c16k32_f2_fp16_cl_elu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -13060,7 +13058,7 @@
       }
     },
     {
-      "id": "S21_1d_i16_n2c16k32_f2_bf16_cf_gelu",
+      "id": "s21_1d_i16_n2c16k32_f2_bf16_cf_gelu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -13178,7 +13176,7 @@
       }
     },
     {
-      "id": "S21_1d_i16_n2c16k32_f2_bf16_cl_gelu_tanh",
+      "id": "s21_1d_i16_n2c16k32_f2_bf16_cl_gelu_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -13296,7 +13294,7 @@
       }
     },
     {
-      "id": "S22_1d_i16_n2c16k32_f3_fp32_cf_swish",
+      "id": "s22_1d_i16_n2c16k32_f3_fp32_cf_swish",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -13414,7 +13412,7 @@
       }
     },
     {
-      "id": "S22_1d_i16_n2c16k32_f3_fp32_cl_softplus",
+      "id": "s22_1d_i16_n2c16k32_f3_fp32_cl_softplus",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -13532,7 +13530,7 @@
       }
     },
     {
-      "id": "S22_1d_i16_n2c16k32_f3_fp16_cf_identity",
+      "id": "s22_1d_i16_n2c16k32_f3_fp16_cf_identity",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -13650,7 +13648,7 @@
       }
     },
     {
-      "id": "S22_1d_i16_n2c16k32_f3_fp16_cl_relu",
+      "id": "s22_1d_i16_n2c16k32_f3_fp16_cl_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -13767,7 +13765,7 @@
       }
     },
     {
-      "id": "S22_1d_i16_n2c16k32_f3_bf16_cf_relu_lo",
+      "id": "s22_1d_i16_n2c16k32_f3_bf16_cf_relu_lo",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -13864,7 +13862,7 @@
         "plan_items": [
           "S22"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 952075255,
         "inputs": {
@@ -13880,11 +13878,12 @@
             "hi": 1.0,
             "seed": 275992411
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S22_1d_i16_n2c16k32_f3_bf16_cl_relu6",
+      "id": "s22_1d_i16_n2c16k32_f3_bf16_cl_relu6",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -14001,7 +14000,7 @@
       }
     },
     {
-      "id": "S1_2d_i16x16_n2c16k32_f1x1_fp32_cf_gelu_tanh",
+      "id": "s1_2d_i16x16_n2c16k32_f1x1_fp32_cf_gelu_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -14131,7 +14130,7 @@
       }
     },
     {
-      "id": "S1_2d_i16x16_n2c16k32_f1x1_fp32_cl_swish",
+      "id": "s1_2d_i16x16_n2c16k32_f1x1_fp32_cl_swish",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -14261,7 +14260,7 @@
       }
     },
     {
-      "id": "S1_2d_i16x16_n2c16k32_f1x1_fp16_cf_softplus",
+      "id": "s1_2d_i16x16_n2c16k32_f1x1_fp16_cf_softplus",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -14391,7 +14390,7 @@
       }
     },
     {
-      "id": "S1_2d_i16x16_n2c16k32_f1x1_fp16_cl_identity",
+      "id": "s1_2d_i16x16_n2c16k32_f1x1_fp16_cl_identity",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -14521,7 +14520,7 @@
       }
     },
     {
-      "id": "S1_2d_i16x16_n2c16k32_f1x1_bf16_cf_relu",
+      "id": "s1_2d_i16x16_n2c16k32_f1x1_bf16_cf_relu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -14650,7 +14649,7 @@
       }
     },
     {
-      "id": "S1_2d_i16x16_n2c16k32_f1x1_bf16_cl_relu_lo",
+      "id": "s1_2d_i16x16_n2c16k32_f1x1_bf16_cl_relu_lo",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -14759,7 +14758,7 @@
         "plan_items": [
           "S1"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 2145926584,
         "inputs": {
@@ -14775,11 +14774,12 @@
             "hi": 1.0,
             "seed": 691675429
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S2_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu6",
+      "id": "s2_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu6",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -14908,7 +14908,7 @@
       }
     },
     {
-      "id": "S2_2d_i16x16_n2c16k32_f3x3_fp32_cl_relu_clamp",
+      "id": "s2_2d_i16x16_n2c16k32_f3x3_fp32_cl_relu_clamp",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -15037,7 +15037,7 @@
       }
     },
     {
-      "id": "S2_2d_i16x16_n2c16k32_f3x3_fp16_cf_relu_leaky",
+      "id": "s2_2d_i16x16_n2c16k32_f3x3_fp16_cf_relu_leaky",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -15146,7 +15146,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 450967119,
         "inputs": {
@@ -15162,11 +15162,12 @@
             "hi": 1.0,
             "seed": 1025031557
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S2_2d_i16x16_n2c16k32_f3x3_fp16_cl_sigmoid",
+      "id": "s2_2d_i16x16_n2c16k32_f3x3_fp16_cl_sigmoid",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -15275,7 +15276,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 782244071,
         "inputs": {
@@ -15291,12 +15292,11 @@
             "hi": 1.0,
             "seed": 486772121
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S2_2d_i16x16_n2c16k32_f3x3_bf16_cf_tanh",
+      "id": "s2_2d_i16x16_n2c16k32_f3x3_bf16_cf_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -15405,7 +15405,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 254141817,
         "inputs": {
@@ -15421,12 +15421,11 @@
             "hi": 1.0,
             "seed": 728292520
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S2_2d_i16x16_n2c16k32_f3x3_bf16_cl_elu",
+      "id": "s2_2d_i16x16_n2c16k32_f3x3_bf16_cl_elu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -15556,7 +15555,7 @@
       }
     },
     {
-      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cl_gelu_tanh",
+      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp32_cl_gelu_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -15686,7 +15685,7 @@
       }
     },
     {
-      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp16_cf_swish",
+      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp16_cf_swish",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -15816,7 +15815,7 @@
       }
     },
     {
-      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp16_cl_softplus",
+      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp16_cl_softplus",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -15946,7 +15945,7 @@
       }
     },
     {
-      "id": "S3_2d_i16x16_n2c16k32_f3x3_bf16_cf_identity",
+      "id": "s3_2d_i16x16_n2c16k32_f3x3_bf16_cf_identity",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -16076,136 +16075,7 @@
       }
     },
     {
-      "id": "S3_2d_i16x16_n2c16k32_f3x3_bf16_cl_relu",
-      "values": {
-        "io_data_type": "bfloat16",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1,
-            1
-          ],
-          "post_padding": [
-            1,
-            1
-          ],
-          "pre_padding": [
-            1,
-            1
-          ],
-          "stride": [
-            1,
-            1
-          ],
-          "conv_y_virtual": true,
-          "act_operation": "relu_fwd",
-          "act_relu_lower_clip": null,
-          "act_relu_lower_clip_slope": null,
-          "act_relu_upper_clip": null,
-          "act_elu_alpha": null,
-          "act_swish_beta": null,
-          "act_softplus_beta": null
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              32
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              1,
-              512,
-              32
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              32,
-              16,
-              3,
-              3
-            ],
-            "strides": [
-              144,
-              1,
-              48,
-              16
-            ],
-            "data_type": "bfloat16"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              2,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              1,
-              256,
-              16
-            ],
-            "data_type": "bfloat16"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_fwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionFwd+act",
-        "plan_items": [
-          "S3"
-        ],
-        "purpose": "claim",
-        "size_class": "S",
-        "seed": 146446637,
-        "inputs": {
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 989141390
-          },
-          "3": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 34682494
-          }
-        }
-      }
-    },
-    {
-      "id": "S4_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_lo",
+      "id": "s4_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_lo",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -16314,7 +16184,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 17325032,
         "inputs": {
@@ -16330,11 +16200,12 @@
             "hi": 1.0,
             "seed": 2115217497
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S4_2d_i16x16_n2c16k32_f3x3_fp32_cl_relu6",
+      "id": "s4_2d_i16x16_n2c16k32_f3x3_fp32_cl_relu6",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -16463,7 +16334,7 @@
       }
     },
     {
-      "id": "S4_2d_i16x16_n2c16k32_f3x3_fp16_cf_relu_clamp",
+      "id": "s4_2d_i16x16_n2c16k32_f3x3_fp16_cf_relu_clamp",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -16592,7 +16463,7 @@
       }
     },
     {
-      "id": "S4_2d_i16x16_n2c16k32_f3x3_fp16_cl_relu_leaky",
+      "id": "s4_2d_i16x16_n2c16k32_f3x3_fp16_cl_relu_leaky",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -16701,7 +16572,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1922958867,
         "inputs": {
@@ -16717,11 +16588,12 @@
             "hi": 1.0,
             "seed": 859378404
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S4_2d_i16x16_n2c16k32_f3x3_bf16_cf_sigmoid",
+      "id": "s4_2d_i16x16_n2c16k32_f3x3_bf16_cf_sigmoid",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -16830,7 +16702,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 2055231014,
         "inputs": {
@@ -16846,12 +16718,11 @@
             "hi": 1.0,
             "seed": 786702416
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S4_2d_i16x16_n2c16k32_f3x3_bf16_cl_tanh",
+      "id": "s4_2d_i16x16_n2c16k32_f3x3_bf16_cl_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -16960,7 +16831,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1411302578,
         "inputs": {
@@ -16976,12 +16847,11 @@
             "hi": 1.0,
             "seed": 947957016
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S5_2d_i16x16_n2c16k32_f3x3_fp32_cf_elu",
+      "id": "s5_2d_i16x16_n2c16k32_f3x3_fp32_cf_elu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -17111,7 +16981,7 @@
       }
     },
     {
-      "id": "S5_2d_i16x16_n2c16k32_f3x3_fp32_cl_gelu",
+      "id": "s5_2d_i16x16_n2c16k32_f3x3_fp32_cl_gelu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -17241,7 +17111,7 @@
       }
     },
     {
-      "id": "S5_2d_i16x16_n2c16k32_f3x3_fp16_cf_gelu_tanh",
+      "id": "s5_2d_i16x16_n2c16k32_f3x3_fp16_cf_gelu_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -17371,7 +17241,7 @@
       }
     },
     {
-      "id": "S5_2d_i16x16_n2c16k32_f3x3_fp16_cl_swish",
+      "id": "s5_2d_i16x16_n2c16k32_f3x3_fp16_cl_swish",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -17501,7 +17371,7 @@
       }
     },
     {
-      "id": "S5_2d_i16x16_n2c16k32_f3x3_bf16_cf_softplus",
+      "id": "s5_2d_i16x16_n2c16k32_f3x3_bf16_cf_softplus",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -17631,7 +17501,7 @@
       }
     },
     {
-      "id": "S5_2d_i16x16_n2c16k32_f3x3_bf16_cl_identity",
+      "id": "s5_2d_i16x16_n2c16k32_f3x3_bf16_cl_identity",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -17761,7 +17631,7 @@
       }
     },
     {
-      "id": "S6_2d_i16x8_n2c16k32_f3x3_fp32_cf_relu",
+      "id": "s6_2d_i16x8_n2c16k32_f3x3_fp32_cf_relu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -17890,7 +17760,7 @@
       }
     },
     {
-      "id": "S6_2d_i16x8_n2c16k32_f3x3_fp32_cl_relu_lo",
+      "id": "s6_2d_i16x8_n2c16k32_f3x3_fp32_cl_relu_lo",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -17999,7 +17869,7 @@
         "plan_items": [
           "S6"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 2059021908,
         "inputs": {
@@ -18015,11 +17885,12 @@
             "hi": 1.0,
             "seed": 1410340764
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S6_2d_i16x8_n2c16k32_f3x3_fp16_cf_relu6",
+      "id": "s6_2d_i16x8_n2c16k32_f3x3_fp16_cf_relu6",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -18148,7 +18019,7 @@
       }
     },
     {
-      "id": "S6_2d_i16x8_n2c16k32_f3x3_fp16_cl_relu_clamp",
+      "id": "s6_2d_i16x8_n2c16k32_f3x3_fp16_cl_relu_clamp",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -18277,7 +18148,7 @@
       }
     },
     {
-      "id": "S6_2d_i16x8_n2c16k32_f3x3_bf16_cf_relu_leaky",
+      "id": "s6_2d_i16x8_n2c16k32_f3x3_bf16_cf_relu_leaky",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -18386,7 +18257,7 @@
         "plan_items": [
           "S6"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1964015961,
         "inputs": {
@@ -18402,11 +18273,12 @@
             "hi": 1.0,
             "seed": 1557042316
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S6_2d_i16x8_n2c16k32_f3x3_bf16_cl_sigmoid",
+      "id": "s6_2d_i16x8_n2c16k32_f3x3_bf16_cl_sigmoid",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -18515,7 +18387,7 @@
         "plan_items": [
           "S6"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 862099758,
         "inputs": {
@@ -18531,12 +18403,11 @@
             "hi": 1.0,
             "seed": 2020624376
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S7_2d_i16x16_n2c16k32g2_f3x3_fp32_cl_elu",
+      "id": "s7_2d_i16x16_n2c16k32g2_f3x3_fp32_cl_elu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -18666,7 +18537,7 @@
       }
     },
     {
-      "id": "S7_2d_i16x16_n2c16k32g2_f3x3_fp16_cf_gelu",
+      "id": "s7_2d_i16x16_n2c16k32g2_f3x3_fp16_cf_gelu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -18796,7 +18667,7 @@
       }
     },
     {
-      "id": "S7_2d_i16x16_n2c16k32g2_f3x3_fp16_cl_gelu_tanh",
+      "id": "s7_2d_i16x16_n2c16k32g2_f3x3_fp16_cl_gelu_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -18926,7 +18797,7 @@
       }
     },
     {
-      "id": "S7_2d_i16x16_n2c16k32g2_f3x3_bf16_cf_swish",
+      "id": "s7_2d_i16x16_n2c16k32g2_f3x3_bf16_cf_swish",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -19056,7 +18927,7 @@
       }
     },
     {
-      "id": "S7_2d_i16x16_n2c16k32g2_f3x3_bf16_cl_softplus",
+      "id": "s7_2d_i16x16_n2c16k32g2_f3x3_bf16_cl_softplus",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -19186,7 +19057,7 @@
       }
     },
     {
-      "id": "S8_2d_i16x16_n2c32k64g4_f3x3_fp32_cf_identity",
+      "id": "s8_2d_i16x16_n2c32k64g4_f3x3_fp32_cf_identity",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -19316,7 +19187,7 @@
       }
     },
     {
-      "id": "S8_2d_i16x16_n2c32k64g4_f3x3_fp32_cl_relu",
+      "id": "s8_2d_i16x16_n2c32k64g4_f3x3_fp32_cl_relu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -19445,7 +19316,7 @@
       }
     },
     {
-      "id": "S8_2d_i16x16_n2c32k64g4_f3x3_fp16_cf_relu_lo",
+      "id": "s8_2d_i16x16_n2c32k64g4_f3x3_fp16_cf_relu_lo",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -19554,7 +19425,7 @@
         "plan_items": [
           "S8"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1942461878,
         "inputs": {
@@ -19570,11 +19441,12 @@
             "hi": 1.0,
             "seed": 887239477
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S8_2d_i16x16_n2c32k64g4_f3x3_fp16_cl_relu6",
+      "id": "s8_2d_i16x16_n2c32k64g4_f3x3_fp16_cl_relu6",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -19703,7 +19575,7 @@
       }
     },
     {
-      "id": "S8_2d_i16x16_n2c32k64g4_f3x3_bf16_cf_relu_clamp",
+      "id": "s8_2d_i16x16_n2c32k64g4_f3x3_bf16_cf_relu_clamp",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -19832,7 +19704,7 @@
       }
     },
     {
-      "id": "S8_2d_i16x16_n2c32k64g4_f3x3_bf16_cl_relu_leaky",
+      "id": "s8_2d_i16x16_n2c32k64g4_f3x3_bf16_cl_relu_leaky",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -19941,7 +19813,7 @@
         "plan_items": [
           "S8"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1847660515,
         "inputs": {
@@ -19957,11 +19829,12 @@
             "hi": 1.0,
             "seed": 1181063746
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S9_2d_i16x16_n8c16k32_f1x1_fp32_cf_sigmoid",
+      "id": "s9_2d_i16x16_n8c16k32_f1x1_fp32_cf_sigmoid",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -20070,7 +19943,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1839147840,
         "inputs": {
@@ -20086,12 +19959,11 @@
             "hi": 1.0,
             "seed": 845472876
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S9_2d_i16x16_n8c16k32_f1x1_fp32_cl_tanh",
+      "id": "s9_2d_i16x16_n8c16k32_f1x1_fp32_cl_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -20200,7 +20072,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 758039771,
         "inputs": {
@@ -20216,12 +20088,11 @@
             "hi": 1.0,
             "seed": 1089287691
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S9_2d_i16x16_n8c16k32_f1x1_fp16_cf_elu",
+      "id": "s9_2d_i16x16_n8c16k32_f1x1_fp16_cf_elu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -20351,7 +20222,7 @@
       }
     },
     {
-      "id": "S9_2d_i16x16_n8c16k32_f1x1_fp16_cl_gelu",
+      "id": "s9_2d_i16x16_n8c16k32_f1x1_fp16_cl_gelu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -20481,7 +20352,7 @@
       }
     },
     {
-      "id": "S9_2d_i16x16_n8c16k32_f1x1_bf16_cf_gelu_tanh",
+      "id": "s9_2d_i16x16_n8c16k32_f1x1_bf16_cf_gelu_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -20611,7 +20482,7 @@
       }
     },
     {
-      "id": "S9_2d_i16x16_n8c16k32_f1x1_bf16_cl_swish",
+      "id": "s9_2d_i16x16_n8c16k32_f1x1_bf16_cl_swish",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -20741,7 +20612,7 @@
       }
     },
     {
-      "id": "S10_2d_i16x16_n2c16k32_f5x5_fp32_cf_softplus",
+      "id": "s10_2d_i16x16_n2c16k32_f5x5_fp32_cf_softplus",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -20871,7 +20742,7 @@
       }
     },
     {
-      "id": "S10_2d_i16x16_n2c16k32_f5x5_fp32_cl_identity",
+      "id": "s10_2d_i16x16_n2c16k32_f5x5_fp32_cl_identity",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -21001,7 +20872,7 @@
       }
     },
     {
-      "id": "S10_2d_i16x16_n2c16k32_f5x5_fp16_cf_relu",
+      "id": "s10_2d_i16x16_n2c16k32_f5x5_fp16_cf_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -21130,7 +21001,7 @@
       }
     },
     {
-      "id": "S10_2d_i16x16_n2c16k32_f5x5_fp16_cl_relu_lo",
+      "id": "s10_2d_i16x16_n2c16k32_f5x5_fp16_cl_relu_lo",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -21239,7 +21110,7 @@
         "plan_items": [
           "S10"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1466338159,
         "inputs": {
@@ -21255,11 +21126,12 @@
             "hi": 1.0,
             "seed": 1264903118
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S10_2d_i16x16_n2c16k32_f5x5_bf16_cf_relu6",
+      "id": "s10_2d_i16x16_n2c16k32_f5x5_bf16_cf_relu6",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -21388,7 +21260,7 @@
       }
     },
     {
-      "id": "S10_2d_i16x16_n2c16k32_f5x5_bf16_cl_relu_clamp",
+      "id": "s10_2d_i16x16_n2c16k32_f5x5_bf16_cl_relu_clamp",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -21517,7 +21389,7 @@
       }
     },
     {
-      "id": "S11_2d_i16x16_n2c3k16_f7x7_fp32_cf_relu_leaky",
+      "id": "s11_2d_i16x16_n2c3k16_f7x7_fp32_cf_relu_leaky",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -21626,7 +21498,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 878221420,
         "inputs": {
@@ -21642,11 +21514,12 @@
             "hi": 1.0,
             "seed": 392501204
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S11_2d_i16x16_n2c3k16_f7x7_fp32_cl_sigmoid",
+      "id": "s11_2d_i16x16_n2c3k16_f7x7_fp32_cl_sigmoid",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -21755,7 +21628,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1255909034,
         "inputs": {
@@ -21771,12 +21644,11 @@
             "hi": 1.0,
             "seed": 894811821
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S11_2d_i16x16_n2c3k16_f7x7_fp16_cf_tanh",
+      "id": "s11_2d_i16x16_n2c3k16_f7x7_fp16_cf_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -21885,7 +21757,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1282401964,
         "inputs": {
@@ -21901,12 +21773,11 @@
             "hi": 1.0,
             "seed": 1897240849
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S11_2d_i16x16_n2c3k16_f7x7_fp16_cl_elu",
+      "id": "s11_2d_i16x16_n2c3k16_f7x7_fp16_cl_elu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -22036,7 +21907,7 @@
       }
     },
     {
-      "id": "S11_2d_i16x16_n2c3k16_f7x7_bf16_cf_gelu",
+      "id": "s11_2d_i16x16_n2c3k16_f7x7_bf16_cf_gelu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -22166,7 +22037,7 @@
       }
     },
     {
-      "id": "S11_2d_i16x16_n2c3k16_f7x7_bf16_cl_gelu_tanh",
+      "id": "s11_2d_i16x16_n2c3k16_f7x7_bf16_cl_gelu_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -22296,7 +22167,7 @@
       }
     },
     {
-      "id": "S12a_2d_i16x16_n2c16k32_f1x3_fp32_cf_swish",
+      "id": "s12a_2d_i16x16_n2c16k32_f1x3_fp32_cf_swish",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -22426,7 +22297,7 @@
       }
     },
     {
-      "id": "S12a_2d_i16x16_n2c16k32_f1x3_fp32_cl_softplus",
+      "id": "s12a_2d_i16x16_n2c16k32_f1x3_fp32_cl_softplus",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -22556,7 +22427,7 @@
       }
     },
     {
-      "id": "S12a_2d_i16x16_n2c16k32_f1x3_fp16_cf_identity",
+      "id": "s12a_2d_i16x16_n2c16k32_f1x3_fp16_cf_identity",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -22686,7 +22557,7 @@
       }
     },
     {
-      "id": "S12a_2d_i16x16_n2c16k32_f1x3_fp16_cl_relu",
+      "id": "s12a_2d_i16x16_n2c16k32_f1x3_fp16_cl_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -22815,7 +22686,7 @@
       }
     },
     {
-      "id": "S12a_2d_i16x16_n2c16k32_f1x3_bf16_cf_relu_lo",
+      "id": "s12a_2d_i16x16_n2c16k32_f1x3_bf16_cf_relu_lo",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -22924,7 +22795,7 @@
         "plan_items": [
           "S12a"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1593972917,
         "inputs": {
@@ -22940,11 +22811,12 @@
             "hi": 1.0,
             "seed": 837234959
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S12a_2d_i16x16_n2c16k32_f1x3_bf16_cl_relu6",
+      "id": "s12a_2d_i16x16_n2c16k32_f1x3_bf16_cl_relu6",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -23073,7 +22945,7 @@
       }
     },
     {
-      "id": "S12b_2d_i16x16_n2c16k32_f3x1_fp32_cf_relu_clamp",
+      "id": "s12b_2d_i16x16_n2c16k32_f3x1_fp32_cf_relu_clamp",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -23202,7 +23074,7 @@
       }
     },
     {
-      "id": "S12b_2d_i16x16_n2c16k32_f3x1_fp32_cl_relu_leaky",
+      "id": "s12b_2d_i16x16_n2c16k32_f3x1_fp32_cl_relu_leaky",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -23311,7 +23183,7 @@
         "plan_items": [
           "S12b"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 946113635,
         "inputs": {
@@ -23327,11 +23199,12 @@
             "hi": 1.0,
             "seed": 1085686395
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S12b_2d_i16x16_n2c16k32_f3x1_fp16_cf_sigmoid",
+      "id": "s12b_2d_i16x16_n2c16k32_f3x1_fp16_cf_sigmoid",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -23440,7 +23313,7 @@
         "plan_items": [
           "S12b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 633904190,
         "inputs": {
@@ -23456,12 +23329,11 @@
             "hi": 1.0,
             "seed": 526040345
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S12b_2d_i16x16_n2c16k32_f3x1_fp16_cl_tanh",
+      "id": "s12b_2d_i16x16_n2c16k32_f3x1_fp16_cl_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -23570,7 +23442,7 @@
         "plan_items": [
           "S12b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1311004572,
         "inputs": {
@@ -23586,12 +23458,11 @@
             "hi": 1.0,
             "seed": 2024732386
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S12b_2d_i16x16_n2c16k32_f3x1_bf16_cf_elu",
+      "id": "s12b_2d_i16x16_n2c16k32_f3x1_bf16_cf_elu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -23721,7 +23592,7 @@
       }
     },
     {
-      "id": "S12b_2d_i16x16_n2c16k32_f3x1_bf16_cl_gelu",
+      "id": "s12b_2d_i16x16_n2c16k32_f3x1_bf16_cl_gelu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -23851,7 +23722,7 @@
       }
     },
     {
-      "id": "S13a_2d_i16x16_n2c16k16g16_f3x3_fp32_cf_gelu_tanh",
+      "id": "s13a_2d_i16x16_n2c16k16g16_f3x3_fp32_cf_gelu_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -23981,7 +23852,7 @@
       }
     },
     {
-      "id": "S13a_2d_i16x16_n2c16k16g16_f3x3_fp32_cl_swish",
+      "id": "s13a_2d_i16x16_n2c16k16g16_f3x3_fp32_cl_swish",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -24111,7 +23982,7 @@
       }
     },
     {
-      "id": "S13a_2d_i16x16_n2c16k16g16_f3x3_fp16_cf_softplus",
+      "id": "s13a_2d_i16x16_n2c16k16g16_f3x3_fp16_cf_softplus",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -24241,7 +24112,7 @@
       }
     },
     {
-      "id": "S13a_2d_i16x16_n2c16k16g16_f3x3_fp16_cl_identity",
+      "id": "s13a_2d_i16x16_n2c16k16g16_f3x3_fp16_cl_identity",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -24371,7 +24242,7 @@
       }
     },
     {
-      "id": "S13a_2d_i16x16_n2c16k16g16_f3x3_bf16_cl_relu_lo",
+      "id": "s13a_2d_i16x16_n2c16k16g16_f3x3_bf16_cl_relu_lo",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -24480,7 +24351,7 @@
         "plan_items": [
           "S13a"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 934059257,
         "inputs": {
@@ -24496,11 +24367,12 @@
             "hi": 1.0,
             "seed": 1978484351
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S13b_2d_i16x16_n2c16k32g16_f3x3_fp32_cf_relu6",
+      "id": "s13b_2d_i16x16_n2c16k32g16_f3x3_fp32_cf_relu6",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -24629,7 +24501,7 @@
       }
     },
     {
-      "id": "S13b_2d_i16x16_n2c16k32g16_f3x3_fp32_cl_relu_clamp",
+      "id": "s13b_2d_i16x16_n2c16k32g16_f3x3_fp32_cl_relu_clamp",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -24758,7 +24630,7 @@
       }
     },
     {
-      "id": "S13b_2d_i16x16_n2c16k32g16_f3x3_fp16_cf_relu_leaky",
+      "id": "s13b_2d_i16x16_n2c16k32g16_f3x3_fp16_cf_relu_leaky",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -24867,7 +24739,7 @@
         "plan_items": [
           "S13b"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 2116994781,
         "inputs": {
@@ -24883,11 +24755,12 @@
             "hi": 1.0,
             "seed": 1090575196
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S13b_2d_i16x16_n2c16k32g16_f3x3_fp16_cl_sigmoid",
+      "id": "s13b_2d_i16x16_n2c16k32g16_f3x3_fp16_cl_sigmoid",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -24996,7 +24869,7 @@
         "plan_items": [
           "S13b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1247782976,
         "inputs": {
@@ -25012,12 +24885,11 @@
             "hi": 1.0,
             "seed": 1768180734
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S13b_2d_i16x16_n2c16k32g16_f3x3_bf16_cf_tanh",
+      "id": "s13b_2d_i16x16_n2c16k32g16_f3x3_bf16_cf_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -25126,7 +24998,7 @@
         "plan_items": [
           "S13b"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 188441082,
         "inputs": {
@@ -25142,12 +25014,11 @@
             "hi": 1.0,
             "seed": 1022783414
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S13b_2d_i16x16_n2c16k32g16_f3x3_bf16_cl_elu",
+      "id": "s13b_2d_i16x16_n2c16k32g16_f3x3_bf16_cl_elu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -25277,7 +25148,7 @@
       }
     },
     {
-      "id": "S14_2d_i15x15_n2c13k17_f3x3_fp32_cf_gelu",
+      "id": "s14_2d_i15x15_n2c13k17_f3x3_fp32_cf_gelu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -25407,7 +25278,7 @@
       }
     },
     {
-      "id": "S14_2d_i15x15_n2c13k17_f3x3_fp32_cl_gelu_tanh",
+      "id": "s14_2d_i15x15_n2c13k17_f3x3_fp32_cl_gelu_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -25537,7 +25408,7 @@
       }
     },
     {
-      "id": "S14_2d_i15x15_n2c13k17_f3x3_fp16_cf_swish",
+      "id": "s14_2d_i15x15_n2c13k17_f3x3_fp16_cf_swish",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -25667,7 +25538,7 @@
       }
     },
     {
-      "id": "S14_2d_i15x15_n2c13k17_f3x3_fp16_cl_softplus",
+      "id": "s14_2d_i15x15_n2c13k17_f3x3_fp16_cl_softplus",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -25797,7 +25668,7 @@
       }
     },
     {
-      "id": "S14_2d_i15x15_n2c13k17_f3x3_bf16_cf_identity",
+      "id": "s14_2d_i15x15_n2c13k17_f3x3_bf16_cf_identity",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -25927,7 +25798,7 @@
       }
     },
     {
-      "id": "S14_2d_i15x15_n2c13k17_f3x3_bf16_cl_relu",
+      "id": "s14_2d_i15x15_n2c13k17_f3x3_bf16_cl_relu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -26056,7 +25927,7 @@
       }
     },
     {
-      "id": "S15_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_lo",
+      "id": "s15_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_lo",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -26165,7 +26036,7 @@
         "plan_items": [
           "S15"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1613295197,
         "inputs": {
@@ -26181,11 +26052,12 @@
             "hi": 1.0,
             "seed": 2064381963
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S15_2d_i16x16_n2c16k32_f3x3_fp32_cl_relu6",
+      "id": "s15_2d_i16x16_n2c16k32_f3x3_fp32_cl_relu6",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -26314,7 +26186,7 @@
       }
     },
     {
-      "id": "S15_2d_i16x16_n2c16k32_f3x3_fp16_cf_relu_clamp",
+      "id": "s15_2d_i16x16_n2c16k32_f3x3_fp16_cf_relu_clamp",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -26443,7 +26315,7 @@
       }
     },
     {
-      "id": "S15_2d_i16x16_n2c16k32_f3x3_fp16_cl_relu_leaky",
+      "id": "s15_2d_i16x16_n2c16k32_f3x3_fp16_cl_relu_leaky",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -26552,7 +26424,7 @@
         "plan_items": [
           "S15"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 865487653,
         "inputs": {
@@ -26568,11 +26440,12 @@
             "hi": 1.0,
             "seed": 1059164231
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S15_2d_i16x16_n2c16k32_f3x3_bf16_cf_sigmoid",
+      "id": "s15_2d_i16x16_n2c16k32_f3x3_bf16_cf_sigmoid",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -26681,7 +26554,7 @@
         "plan_items": [
           "S15"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 2027287024,
         "inputs": {
@@ -26697,12 +26570,11 @@
             "hi": 1.0,
             "seed": 1433498699
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S15_2d_i16x16_n2c16k32_f3x3_bf16_cl_tanh",
+      "id": "s15_2d_i16x16_n2c16k32_f3x3_bf16_cl_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -26811,7 +26683,7 @@
         "plan_items": [
           "S15"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1142005511,
         "inputs": {
@@ -26827,12 +26699,11 @@
             "hi": 1.0,
             "seed": 434878163
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S16_2d_i32x32_n2c16k32_f3x3_fp32_cf_elu",
+      "id": "s16_2d_i32x32_n2c16k32_f3x3_fp32_cf_elu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -26962,7 +26833,7 @@
       }
     },
     {
-      "id": "S16_2d_i32x32_n2c16k32_f3x3_fp32_cl_gelu",
+      "id": "s16_2d_i32x32_n2c16k32_f3x3_fp32_cl_gelu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -27092,7 +26963,7 @@
       }
     },
     {
-      "id": "S16_2d_i32x32_n2c16k32_f3x3_fp16_cf_gelu_tanh",
+      "id": "s16_2d_i32x32_n2c16k32_f3x3_fp16_cf_gelu_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -27222,7 +27093,7 @@
       }
     },
     {
-      "id": "S16_2d_i32x32_n2c16k32_f3x3_fp16_cl_swish",
+      "id": "s16_2d_i32x32_n2c16k32_f3x3_fp16_cl_swish",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -27352,7 +27223,7 @@
       }
     },
     {
-      "id": "S16_2d_i32x32_n2c16k32_f3x3_bf16_cf_softplus",
+      "id": "s16_2d_i32x32_n2c16k32_f3x3_bf16_cf_softplus",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -27482,7 +27353,7 @@
       }
     },
     {
-      "id": "S16_2d_i32x32_n2c16k32_f3x3_bf16_cl_identity",
+      "id": "s16_2d_i32x32_n2c16k32_f3x3_bf16_cl_identity",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -27612,7 +27483,7 @@
       }
     },
     {
-      "id": "S17_2d_i16x16_n2c1k16_f3x3_fp32_cf_relu",
+      "id": "s17_2d_i16x16_n2c1k16_f3x3_fp32_cf_relu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -27741,7 +27612,7 @@
       }
     },
     {
-      "id": "S17_2d_i16x16_n2c1k16_f3x3_fp32_cl_relu_lo",
+      "id": "s17_2d_i16x16_n2c1k16_f3x3_fp32_cl_relu_lo",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -27850,7 +27721,7 @@
         "plan_items": [
           "S17"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1905959882,
         "inputs": {
@@ -27866,11 +27737,12 @@
             "hi": 1.0,
             "seed": 2045654871
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S17_2d_i16x16_n2c1k16_f3x3_fp16_cf_relu6",
+      "id": "s17_2d_i16x16_n2c1k16_f3x3_fp16_cf_relu6",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -27999,7 +27871,7 @@
       }
     },
     {
-      "id": "S17_2d_i16x16_n2c1k16_f3x3_fp16_cl_relu_clamp",
+      "id": "s17_2d_i16x16_n2c1k16_f3x3_fp16_cl_relu_clamp",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -28128,7 +28000,7 @@
       }
     },
     {
-      "id": "S17_2d_i16x16_n2c1k16_f3x3_bf16_cf_relu_leaky",
+      "id": "s17_2d_i16x16_n2c1k16_f3x3_bf16_cf_relu_leaky",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -28237,7 +28109,7 @@
         "plan_items": [
           "S17"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 895628384,
         "inputs": {
@@ -28253,11 +28125,12 @@
             "hi": 1.0,
             "seed": 342091192
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S17_2d_i16x16_n2c1k16_f3x3_bf16_cl_sigmoid",
+      "id": "s17_2d_i16x16_n2c1k16_f3x3_bf16_cl_sigmoid",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -28366,7 +28239,7 @@
         "plan_items": [
           "S17"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 2025319102,
         "inputs": {
@@ -28382,12 +28255,11 @@
             "hi": 1.0,
             "seed": 980620417
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S18_2d_i16x16_n2c16k32_f2x2_fp32_cf_tanh",
+      "id": "s18_2d_i16x16_n2c16k32_f2x2_fp32_cf_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -28513,11 +28385,11 @@
             "seed": 1201980022
           }
         },
-        "notes": "probe: F11 asymmetric padding; F26 non-ReLU activation"
+        "notes": "probe: F11 asymmetric padding"
       }
     },
     {
-      "id": "S18_2d_i16x16_n2c16k32_f2x2_fp32_cl_elu",
+      "id": "s18_2d_i16x16_n2c16k32_f2x2_fp32_cl_elu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -28647,7 +28519,7 @@
       }
     },
     {
-      "id": "S18_2d_i16x16_n2c16k32_f2x2_fp16_cf_gelu",
+      "id": "s18_2d_i16x16_n2c16k32_f2x2_fp16_cf_gelu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -28777,7 +28649,7 @@
       }
     },
     {
-      "id": "S18_2d_i16x16_n2c16k32_f2x2_fp16_cl_gelu_tanh",
+      "id": "s18_2d_i16x16_n2c16k32_f2x2_fp16_cl_gelu_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -28907,7 +28779,7 @@
       }
     },
     {
-      "id": "S18_2d_i16x16_n2c16k32_f2x2_bf16_cf_swish",
+      "id": "s18_2d_i16x16_n2c16k32_f2x2_bf16_cf_swish",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -29037,7 +28909,7 @@
       }
     },
     {
-      "id": "S18_2d_i16x16_n2c16k32_f2x2_bf16_cl_softplus",
+      "id": "s18_2d_i16x16_n2c16k32_f2x2_bf16_cl_softplus",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -29167,7 +29039,7 @@
       }
     },
     {
-      "id": "S19_2d_i16x16_n2c16k32_f16x16_fp32_cf_identity",
+      "id": "s19_2d_i16x16_n2c16k32_f16x16_fp32_cf_identity",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -29297,7 +29169,7 @@
       }
     },
     {
-      "id": "S19_2d_i16x16_n2c16k32_f16x16_fp32_cl_relu",
+      "id": "s19_2d_i16x16_n2c16k32_f16x16_fp32_cl_relu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -29426,7 +29298,7 @@
       }
     },
     {
-      "id": "S19_2d_i16x16_n2c16k32_f16x16_fp16_cf_relu_lo",
+      "id": "s19_2d_i16x16_n2c16k32_f16x16_fp16_cf_relu_lo",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -29535,7 +29407,7 @@
         "plan_items": [
           "S19"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1521810454,
         "inputs": {
@@ -29551,11 +29423,12 @@
             "hi": 1.0,
             "seed": 1308970995
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S19_2d_i16x16_n2c16k32_f16x16_fp16_cl_relu6",
+      "id": "s19_2d_i16x16_n2c16k32_f16x16_fp16_cl_relu6",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -29684,7 +29557,7 @@
       }
     },
     {
-      "id": "S19_2d_i16x16_n2c16k32_f16x16_bf16_cf_relu_clamp",
+      "id": "s19_2d_i16x16_n2c16k32_f16x16_bf16_cf_relu_clamp",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -29813,7 +29686,7 @@
       }
     },
     {
-      "id": "S19_2d_i16x16_n2c16k32_f16x16_bf16_cl_relu_leaky",
+      "id": "s19_2d_i16x16_n2c16k32_f16x16_bf16_cl_relu_leaky",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -29922,7 +29795,7 @@
         "plan_items": [
           "S19"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 62172246,
         "inputs": {
@@ -29938,11 +29811,12 @@
             "hi": 1.0,
             "seed": 759151023
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S20_2d_i16x16_n2c16k32_f3x3_fp32_cf_sigmoid",
+      "id": "s20_2d_i16x16_n2c16k32_f3x3_fp32_cf_sigmoid",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -30051,7 +29925,7 @@
         "plan_items": [
           "S20"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 926470969,
         "inputs": {
@@ -30067,12 +29941,11 @@
             "hi": 1.0,
             "seed": 33032353
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S20_2d_i16x16_n2c16k32_f3x3_fp32_cl_tanh",
+      "id": "s20_2d_i16x16_n2c16k32_f3x3_fp32_cl_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -30181,7 +30054,7 @@
         "plan_items": [
           "S20"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 554937001,
         "inputs": {
@@ -30197,12 +30070,11 @@
             "hi": 1.0,
             "seed": 857708142
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S20_2d_i16x16_n2c16k32_f3x3_fp16_cf_elu",
+      "id": "s20_2d_i16x16_n2c16k32_f3x3_fp16_cf_elu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -30332,7 +30204,7 @@
       }
     },
     {
-      "id": "S20_2d_i16x16_n2c16k32_f3x3_fp16_cl_gelu",
+      "id": "s20_2d_i16x16_n2c16k32_f3x3_fp16_cl_gelu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -30462,7 +30334,7 @@
       }
     },
     {
-      "id": "S20_2d_i16x16_n2c16k32_f3x3_bf16_cf_gelu_tanh",
+      "id": "s20_2d_i16x16_n2c16k32_f3x3_bf16_cf_gelu_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -30592,7 +30464,7 @@
       }
     },
     {
-      "id": "S20_2d_i16x16_n2c16k32_f3x3_bf16_cl_swish",
+      "id": "s20_2d_i16x16_n2c16k32_f3x3_bf16_cl_swish",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -30722,7 +30594,7 @@
       }
     },
     {
-      "id": "S21_2d_i16x16_n2c16k32_f2x2_fp32_cf_softplus",
+      "id": "s21_2d_i16x16_n2c16k32_f2x2_fp32_cf_softplus",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -30852,7 +30724,7 @@
       }
     },
     {
-      "id": "S21_2d_i16x16_n2c16k32_f2x2_fp32_cl_identity",
+      "id": "s21_2d_i16x16_n2c16k32_f2x2_fp32_cl_identity",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -30982,7 +30854,7 @@
       }
     },
     {
-      "id": "S21_2d_i16x16_n2c16k32_f2x2_fp16_cf_relu",
+      "id": "s21_2d_i16x16_n2c16k32_f2x2_fp16_cf_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -31111,7 +30983,7 @@
       }
     },
     {
-      "id": "S21_2d_i16x16_n2c16k32_f2x2_fp16_cl_relu_lo",
+      "id": "s21_2d_i16x16_n2c16k32_f2x2_fp16_cl_relu_lo",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -31220,7 +31092,7 @@
         "plan_items": [
           "S21"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 980050751,
         "inputs": {
@@ -31236,11 +31108,12 @@
             "hi": 1.0,
             "seed": 1530141139
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S21_2d_i16x16_n2c16k32_f2x2_bf16_cf_relu6",
+      "id": "s21_2d_i16x16_n2c16k32_f2x2_bf16_cf_relu6",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -31369,7 +31242,7 @@
       }
     },
     {
-      "id": "S21_2d_i16x16_n2c16k32_f2x2_bf16_cl_relu_clamp",
+      "id": "s21_2d_i16x16_n2c16k32_f2x2_bf16_cl_relu_clamp",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -31498,7 +31371,7 @@
       }
     },
     {
-      "id": "S22_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_leaky",
+      "id": "s22_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_leaky",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -31607,7 +31480,7 @@
         "plan_items": [
           "S22"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 2011529328,
         "inputs": {
@@ -31623,11 +31496,12 @@
             "hi": 1.0,
             "seed": 1920373104
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S22_2d_i16x16_n2c16k32_f3x3_fp32_cl_sigmoid",
+      "id": "s22_2d_i16x16_n2c16k32_f3x3_fp32_cl_sigmoid",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -31736,7 +31610,7 @@
         "plan_items": [
           "S22"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 552459720,
         "inputs": {
@@ -31752,12 +31626,11 @@
             "hi": 1.0,
             "seed": 1736517443
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S22_2d_i16x16_n2c16k32_f3x3_fp16_cf_tanh",
+      "id": "s22_2d_i16x16_n2c16k32_f3x3_fp16_cf_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -31866,7 +31739,7 @@
         "plan_items": [
           "S22"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1127662575,
         "inputs": {
@@ -31882,12 +31755,11 @@
             "hi": 1.0,
             "seed": 659538890
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S22_2d_i16x16_n2c16k32_f3x3_fp16_cl_elu",
+      "id": "s22_2d_i16x16_n2c16k32_f3x3_fp16_cl_elu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -32017,7 +31889,7 @@
       }
     },
     {
-      "id": "S22_2d_i16x16_n2c16k32_f3x3_bf16_cf_gelu",
+      "id": "s22_2d_i16x16_n2c16k32_f3x3_bf16_cf_gelu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -32147,7 +32019,7 @@
       }
     },
     {
-      "id": "S22_2d_i16x16_n2c16k32_f3x3_bf16_cl_gelu_tanh",
+      "id": "s22_2d_i16x16_n2c16k32_f3x3_bf16_cl_gelu_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -32277,7 +32149,7 @@
       }
     },
     {
-      "id": "S1_3d_i16x16x16_n2c16k32_f1x1x1_fp32_cf_gelu",
+      "id": "s1_3d_i16x16x16_n2c16k32_f1x1x1_fp32_cf_gelu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -32419,7 +32291,7 @@
       }
     },
     {
-      "id": "S1_3d_i16x16x16_n2c16k32_f1x1x1_fp32_cl_gelu_tanh",
+      "id": "s1_3d_i16x16x16_n2c16k32_f1x1x1_fp32_cl_gelu_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -32561,7 +32433,7 @@
       }
     },
     {
-      "id": "S1_3d_i16x16x16_n2c16k32_f1x1x1_fp16_cf_swish",
+      "id": "s1_3d_i16x16x16_n2c16k32_f1x1x1_fp16_cf_swish",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -32703,7 +32575,7 @@
       }
     },
     {
-      "id": "S1_3d_i16x16x16_n2c16k32_f1x1x1_fp16_cl_softplus",
+      "id": "s1_3d_i16x16x16_n2c16k32_f1x1x1_fp16_cl_softplus",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -32845,7 +32717,7 @@
       }
     },
     {
-      "id": "S1_3d_i16x16x16_n2c16k32_f1x1x1_bf16_cf_identity",
+      "id": "s1_3d_i16x16x16_n2c16k32_f1x1x1_bf16_cf_identity",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -32987,7 +32859,7 @@
       }
     },
     {
-      "id": "S1_3d_i16x16x16_n2c16k32_f1x1x1_bf16_cl_relu",
+      "id": "s1_3d_i16x16x16_n2c16k32_f1x1x1_bf16_cl_relu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -33128,7 +33000,7 @@
       }
     },
     {
-      "id": "S2_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cf_relu_lo",
+      "id": "s2_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cf_relu_lo",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -33249,7 +33121,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1533008429,
         "inputs": {
@@ -33265,11 +33137,12 @@
             "hi": 1.0,
             "seed": 1653695040
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S2_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl_relu6",
+      "id": "s2_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl_relu6",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -33410,7 +33283,7 @@
       }
     },
     {
-      "id": "S2_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cf_relu_clamp",
+      "id": "s2_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cf_relu_clamp",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -33551,7 +33424,7 @@
       }
     },
     {
-      "id": "S2_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_relu_leaky",
+      "id": "s2_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_relu_leaky",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -33672,7 +33545,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 377190525,
         "inputs": {
@@ -33688,11 +33561,12 @@
             "hi": 1.0,
             "seed": 695418417
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S2_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cf_sigmoid",
+      "id": "s2_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cf_sigmoid",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -33813,7 +33687,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1600493560,
         "inputs": {
@@ -33829,12 +33703,11 @@
             "hi": 1.0,
             "seed": 1038158933
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S2_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl_tanh",
+      "id": "s2_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -33955,7 +33828,7 @@
         "plan_items": [
           "S2"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 457414933,
         "inputs": {
@@ -33971,12 +33844,11 @@
             "hi": 1.0,
             "seed": 838849372
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S3_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cf_elu",
+      "id": "s3_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cf_elu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -34118,7 +33990,7 @@
       }
     },
     {
-      "id": "S3_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl_gelu",
+      "id": "s3_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl_gelu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -34260,7 +34132,7 @@
       }
     },
     {
-      "id": "S3_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cf_gelu_tanh",
+      "id": "s3_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cf_gelu_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -34402,7 +34274,7 @@
       }
     },
     {
-      "id": "S3_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_swish",
+      "id": "s3_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_swish",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -34544,7 +34416,7 @@
       }
     },
     {
-      "id": "S3_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cf_softplus",
+      "id": "s3_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cf_softplus",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -34686,7 +34558,7 @@
       }
     },
     {
-      "id": "S3_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl_identity",
+      "id": "s3_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl_identity",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -34828,7 +34700,7 @@
       }
     },
     {
-      "id": "S4_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cf_relu",
+      "id": "s4_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cf_relu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -34969,7 +34841,7 @@
       }
     },
     {
-      "id": "S4_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl_relu_lo",
+      "id": "s4_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl_relu_lo",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -35090,7 +34962,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1093748738,
         "inputs": {
@@ -35106,11 +34978,12 @@
             "hi": 1.0,
             "seed": 2109596293
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S4_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cf_relu6",
+      "id": "s4_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cf_relu6",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -35251,7 +35124,7 @@
       }
     },
     {
-      "id": "S4_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_relu_clamp",
+      "id": "s4_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_relu_clamp",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -35392,7 +35265,7 @@
       }
     },
     {
-      "id": "S4_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cf_relu_leaky",
+      "id": "s4_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cf_relu_leaky",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -35513,7 +35386,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1413916758,
         "inputs": {
@@ -35529,11 +35402,12 @@
             "hi": 1.0,
             "seed": 1958098175
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S4_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl_sigmoid",
+      "id": "s4_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl_sigmoid",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -35654,7 +35528,7 @@
         "plan_items": [
           "S4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1795182744,
         "inputs": {
@@ -35670,12 +35544,11 @@
             "hi": 1.0,
             "seed": 268810671
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S5_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cf_tanh",
+      "id": "s5_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cf_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -35796,7 +35669,7 @@
         "plan_items": [
           "S5"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1607731056,
         "inputs": {
@@ -35812,12 +35685,11 @@
             "hi": 1.0,
             "seed": 837920498
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S5_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl_elu",
+      "id": "s5_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl_elu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -35959,7 +35831,7 @@
       }
     },
     {
-      "id": "S5_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cf_gelu",
+      "id": "s5_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cf_gelu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -36101,7 +35973,7 @@
       }
     },
     {
-      "id": "S5_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_gelu_tanh",
+      "id": "s5_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_gelu_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -36243,7 +36115,7 @@
       }
     },
     {
-      "id": "S5_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cf_swish",
+      "id": "s5_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cf_swish",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -36385,7 +36257,7 @@
       }
     },
     {
-      "id": "S5_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl_softplus",
+      "id": "s5_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl_softplus",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -36527,7 +36399,7 @@
       }
     },
     {
-      "id": "S6_3d_i16x8x4_n2c16k32_f3x3x3_fp32_cf_identity",
+      "id": "s6_3d_i16x8x4_n2c16k32_f3x3x3_fp32_cf_identity",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -36669,7 +36541,7 @@
       }
     },
     {
-      "id": "S6_3d_i16x8x4_n2c16k32_f3x3x3_fp32_cl_relu",
+      "id": "s6_3d_i16x8x4_n2c16k32_f3x3x3_fp32_cl_relu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -36810,7 +36682,7 @@
       }
     },
     {
-      "id": "S6_3d_i16x8x4_n2c16k32_f3x3x3_fp16_cf_relu_lo",
+      "id": "s6_3d_i16x8x4_n2c16k32_f3x3x3_fp16_cf_relu_lo",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -36931,7 +36803,7 @@
         "plan_items": [
           "S6"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 218837422,
         "inputs": {
@@ -36947,11 +36819,12 @@
             "hi": 1.0,
             "seed": 1579098472
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S6_3d_i16x8x4_n2c16k32_f3x3x3_fp16_cl_relu6",
+      "id": "s6_3d_i16x8x4_n2c16k32_f3x3x3_fp16_cl_relu6",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -37092,7 +36965,7 @@
       }
     },
     {
-      "id": "S6_3d_i16x8x4_n2c16k32_f3x3x3_bf16_cf_relu_clamp",
+      "id": "s6_3d_i16x8x4_n2c16k32_f3x3x3_bf16_cf_relu_clamp",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -37233,7 +37106,7 @@
       }
     },
     {
-      "id": "S6_3d_i16x8x4_n2c16k32_f3x3x3_bf16_cl_relu_leaky",
+      "id": "s6_3d_i16x8x4_n2c16k32_f3x3x3_bf16_cl_relu_leaky",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -37354,7 +37227,7 @@
         "plan_items": [
           "S6"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1951197292,
         "inputs": {
@@ -37370,11 +37243,12 @@
             "hi": 1.0,
             "seed": 1982365195
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S7_3d_i16x16x16_n2c16k32g2_f3x3x3_fp32_cf_sigmoid",
+      "id": "s7_3d_i16x16x16_n2c16k32g2_f3x3x3_fp32_cf_sigmoid",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -37495,7 +37369,7 @@
         "plan_items": [
           "S7"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1963976239,
         "inputs": {
@@ -37511,12 +37385,11 @@
             "hi": 1.0,
             "seed": 1832586850
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S7_3d_i16x16x16_n2c16k32g2_f3x3x3_fp32_cl_tanh",
+      "id": "s7_3d_i16x16x16_n2c16k32g2_f3x3x3_fp32_cl_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -37637,7 +37510,7 @@
         "plan_items": [
           "S7"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 691720210,
         "inputs": {
@@ -37653,12 +37526,11 @@
             "hi": 1.0,
             "seed": 1268760015
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S7_3d_i16x16x16_n2c16k32g2_f3x3x3_fp16_cf_elu",
+      "id": "s7_3d_i16x16x16_n2c16k32g2_f3x3x3_fp16_cf_elu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -37800,7 +37672,7 @@
       }
     },
     {
-      "id": "S7_3d_i16x16x16_n2c16k32g2_f3x3x3_fp16_cl_gelu",
+      "id": "s7_3d_i16x16x16_n2c16k32g2_f3x3x3_fp16_cl_gelu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -37942,7 +37814,7 @@
       }
     },
     {
-      "id": "S7_3d_i16x16x16_n2c16k32g2_f3x3x3_bf16_cf_gelu_tanh",
+      "id": "s7_3d_i16x16x16_n2c16k32g2_f3x3x3_bf16_cf_gelu_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -38084,7 +37956,7 @@
       }
     },
     {
-      "id": "S7_3d_i16x16x16_n2c16k32g2_f3x3x3_bf16_cl_swish",
+      "id": "s7_3d_i16x16x16_n2c16k32g2_f3x3x3_bf16_cl_swish",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -38226,7 +38098,7 @@
       }
     },
     {
-      "id": "S8_3d_i16x16x16_n2c32k64g4_f3x3x3_fp32_cf_softplus",
+      "id": "s8_3d_i16x16x16_n2c32k64g4_f3x3x3_fp32_cf_softplus",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -38368,7 +38240,7 @@
       }
     },
     {
-      "id": "S8_3d_i16x16x16_n2c32k64g4_f3x3x3_fp32_cl_identity",
+      "id": "s8_3d_i16x16x16_n2c32k64g4_f3x3x3_fp32_cl_identity",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -38510,7 +38382,7 @@
       }
     },
     {
-      "id": "S8_3d_i16x16x16_n2c32k64g4_f3x3x3_fp16_cf_relu",
+      "id": "s8_3d_i16x16x16_n2c32k64g4_f3x3x3_fp16_cf_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -38651,7 +38523,7 @@
       }
     },
     {
-      "id": "S8_3d_i16x16x16_n2c32k64g4_f3x3x3_fp16_cl_relu_lo",
+      "id": "s8_3d_i16x16x16_n2c32k64g4_f3x3x3_fp16_cl_relu_lo",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -38772,7 +38644,7 @@
         "plan_items": [
           "S8"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1124173849,
         "inputs": {
@@ -38788,11 +38660,12 @@
             "hi": 1.0,
             "seed": 1727273133
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S8_3d_i16x16x16_n2c32k64g4_f3x3x3_bf16_cf_relu6",
+      "id": "s8_3d_i16x16x16_n2c32k64g4_f3x3x3_bf16_cf_relu6",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -38933,7 +38806,7 @@
       }
     },
     {
-      "id": "S8_3d_i16x16x16_n2c32k64g4_f3x3x3_bf16_cl_relu_clamp",
+      "id": "s8_3d_i16x16x16_n2c32k64g4_f3x3x3_bf16_cl_relu_clamp",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -39074,7 +38947,7 @@
       }
     },
     {
-      "id": "S9_3d_i16x16x16_n8c16k32_f1x1x1_fp32_cf_relu_leaky",
+      "id": "s9_3d_i16x16x16_n8c16k32_f1x1x1_fp32_cf_relu_leaky",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -39195,7 +39068,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 959405442,
         "inputs": {
@@ -39211,11 +39084,12 @@
             "hi": 1.0,
             "seed": 601249935
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S9_3d_i16x16x16_n8c16k32_f1x1x1_fp32_cl_sigmoid",
+      "id": "s9_3d_i16x16x16_n8c16k32_f1x1x1_fp32_cl_sigmoid",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -39336,7 +39210,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1986584039,
         "inputs": {
@@ -39352,12 +39226,11 @@
             "hi": 1.0,
             "seed": 1009570205
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S9_3d_i16x16x16_n8c16k32_f1x1x1_fp16_cf_tanh",
+      "id": "s9_3d_i16x16x16_n8c16k32_f1x1x1_fp16_cf_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -39478,7 +39351,7 @@
         "plan_items": [
           "S9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1582854953,
         "inputs": {
@@ -39494,12 +39367,11 @@
             "hi": 1.0,
             "seed": 894099684
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S9_3d_i16x16x16_n8c16k32_f1x1x1_fp16_cl_elu",
+      "id": "s9_3d_i16x16x16_n8c16k32_f1x1x1_fp16_cl_elu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -39641,7 +39513,7 @@
       }
     },
     {
-      "id": "S9_3d_i16x16x16_n8c16k32_f1x1x1_bf16_cf_gelu",
+      "id": "s9_3d_i16x16x16_n8c16k32_f1x1x1_bf16_cf_gelu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -39783,7 +39655,7 @@
       }
     },
     {
-      "id": "S9_3d_i16x16x16_n8c16k32_f1x1x1_bf16_cl_gelu_tanh",
+      "id": "s9_3d_i16x16x16_n8c16k32_f1x1x1_bf16_cl_gelu_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -39925,7 +39797,7 @@
       }
     },
     {
-      "id": "S10_3d_i16x16x16_n2c16k32_f5x5x5_fp32_cf_swish",
+      "id": "s10_3d_i16x16x16_n2c16k32_f5x5x5_fp32_cf_swish",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -40067,7 +39939,7 @@
       }
     },
     {
-      "id": "S10_3d_i16x16x16_n2c16k32_f5x5x5_fp32_cl_softplus",
+      "id": "s10_3d_i16x16x16_n2c16k32_f5x5x5_fp32_cl_softplus",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -40209,7 +40081,7 @@
       }
     },
     {
-      "id": "S10_3d_i16x16x16_n2c16k32_f5x5x5_fp16_cf_identity",
+      "id": "s10_3d_i16x16x16_n2c16k32_f5x5x5_fp16_cf_identity",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -40351,7 +40223,7 @@
       }
     },
     {
-      "id": "S10_3d_i16x16x16_n2c16k32_f5x5x5_fp16_cl_relu",
+      "id": "s10_3d_i16x16x16_n2c16k32_f5x5x5_fp16_cl_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -40492,7 +40364,7 @@
       }
     },
     {
-      "id": "S10_3d_i16x16x16_n2c16k32_f5x5x5_bf16_cf_relu_lo",
+      "id": "s10_3d_i16x16x16_n2c16k32_f5x5x5_bf16_cf_relu_lo",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -40613,7 +40485,7 @@
         "plan_items": [
           "S10"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1657358917,
         "inputs": {
@@ -40629,11 +40501,12 @@
             "hi": 1.0,
             "seed": 2064777832
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S10_3d_i16x16x16_n2c16k32_f5x5x5_bf16_cl_relu6",
+      "id": "s10_3d_i16x16x16_n2c16k32_f5x5x5_bf16_cl_relu6",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -40774,7 +40647,7 @@
       }
     },
     {
-      "id": "S11_3d_i16x16x16_n2c3k16_f7x7x7_fp32_cf_relu_clamp",
+      "id": "s11_3d_i16x16x16_n2c3k16_f7x7x7_fp32_cf_relu_clamp",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -40915,7 +40788,7 @@
       }
     },
     {
-      "id": "S11_3d_i16x16x16_n2c3k16_f7x7x7_fp32_cl_relu_leaky",
+      "id": "s11_3d_i16x16x16_n2c3k16_f7x7x7_fp32_cl_relu_leaky",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -41036,7 +40909,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 141486997,
         "inputs": {
@@ -41052,11 +40925,12 @@
             "hi": 1.0,
             "seed": 1620746492
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S11_3d_i16x16x16_n2c3k16_f7x7x7_fp16_cf_sigmoid",
+      "id": "s11_3d_i16x16x16_n2c3k16_f7x7x7_fp16_cf_sigmoid",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -41177,7 +41051,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1969178036,
         "inputs": {
@@ -41193,12 +41067,11 @@
             "hi": 1.0,
             "seed": 397899873
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S11_3d_i16x16x16_n2c3k16_f7x7x7_fp16_cl_tanh",
+      "id": "s11_3d_i16x16x16_n2c3k16_f7x7x7_fp16_cl_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -41319,7 +41192,7 @@
         "plan_items": [
           "S11"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1326785462,
         "inputs": {
@@ -41335,12 +41208,11 @@
             "hi": 1.0,
             "seed": 379904242
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S11_3d_i16x16x16_n2c3k16_f7x7x7_bf16_cf_elu",
+      "id": "s11_3d_i16x16x16_n2c3k16_f7x7x7_bf16_cf_elu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -41482,7 +41354,7 @@
       }
     },
     {
-      "id": "S11_3d_i16x16x16_n2c3k16_f7x7x7_bf16_cl_gelu",
+      "id": "s11_3d_i16x16x16_n2c3k16_f7x7x7_bf16_cl_gelu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -41624,7 +41496,7 @@
       }
     },
     {
-      "id": "S12a_3d_i16x16x16_n2c16k32_f1x3x3_fp32_cf_gelu_tanh",
+      "id": "s12a_3d_i16x16x16_n2c16k32_f1x3x3_fp32_cf_gelu_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -41766,7 +41638,7 @@
       }
     },
     {
-      "id": "S12a_3d_i16x16x16_n2c16k32_f1x3x3_fp32_cl_swish",
+      "id": "s12a_3d_i16x16x16_n2c16k32_f1x3x3_fp32_cl_swish",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -41908,7 +41780,7 @@
       }
     },
     {
-      "id": "S12a_3d_i16x16x16_n2c16k32_f1x3x3_fp16_cf_softplus",
+      "id": "s12a_3d_i16x16x16_n2c16k32_f1x3x3_fp16_cf_softplus",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -42050,7 +41922,7 @@
       }
     },
     {
-      "id": "S12a_3d_i16x16x16_n2c16k32_f1x3x3_fp16_cl_identity",
+      "id": "s12a_3d_i16x16x16_n2c16k32_f1x3x3_fp16_cl_identity",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -42192,7 +42064,7 @@
       }
     },
     {
-      "id": "S12a_3d_i16x16x16_n2c16k32_f1x3x3_bf16_cf_relu",
+      "id": "s12a_3d_i16x16x16_n2c16k32_f1x3x3_bf16_cf_relu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -42333,7 +42205,7 @@
       }
     },
     {
-      "id": "S12a_3d_i16x16x16_n2c16k32_f1x3x3_bf16_cl_relu_lo",
+      "id": "s12a_3d_i16x16x16_n2c16k32_f1x3x3_bf16_cl_relu_lo",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -42454,7 +42326,7 @@
         "plan_items": [
           "S12a"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 171877590,
         "inputs": {
@@ -42470,11 +42342,12 @@
             "hi": 1.0,
             "seed": 1950847690
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S13a_3d_i16x16x16_n2c16k16g16_f3x3x3_fp32_cf_relu6",
+      "id": "s13a_3d_i16x16x16_n2c16k16g16_f3x3x3_fp32_cf_relu6",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -42615,7 +42488,7 @@
       }
     },
     {
-      "id": "S13a_3d_i16x16x16_n2c16k16g16_f3x3x3_fp32_cl_relu_clamp",
+      "id": "s13a_3d_i16x16x16_n2c16k16g16_f3x3x3_fp32_cl_relu_clamp",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -42756,7 +42629,7 @@
       }
     },
     {
-      "id": "S13a_3d_i16x16x16_n2c16k16g16_f3x3x3_fp16_cf_relu_leaky",
+      "id": "s13a_3d_i16x16x16_n2c16k16g16_f3x3x3_fp16_cf_relu_leaky",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -42877,7 +42750,7 @@
         "plan_items": [
           "S13a"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 769508073,
         "inputs": {
@@ -42893,11 +42766,12 @@
             "hi": 1.0,
             "seed": 1321217744
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S13a_3d_i16x16x16_n2c16k16g16_f3x3x3_fp16_cl_sigmoid",
+      "id": "s13a_3d_i16x16x16_n2c16k16g16_f3x3x3_fp16_cl_sigmoid",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -43018,7 +42892,7 @@
         "plan_items": [
           "S13a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1344647303,
         "inputs": {
@@ -43034,12 +42908,11 @@
             "hi": 1.0,
             "seed": 2052219392
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S13a_3d_i16x16x16_n2c16k16g16_f3x3x3_bf16_cf_tanh",
+      "id": "s13a_3d_i16x16x16_n2c16k16g16_f3x3x3_bf16_cf_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -43160,7 +43033,7 @@
         "plan_items": [
           "S13a"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1830186593,
         "inputs": {
@@ -43176,12 +43049,11 @@
             "hi": 1.0,
             "seed": 876001183
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S13a_3d_i16x16x16_n2c16k16g16_f3x3x3_bf16_cl_elu",
+      "id": "s13a_3d_i16x16x16_n2c16k16g16_f3x3x3_bf16_cl_elu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -43323,7 +43195,7 @@
       }
     },
     {
-      "id": "S13b_3d_i16x16x16_n2c16k32g16_f3x3x3_fp32_cf_gelu",
+      "id": "s13b_3d_i16x16x16_n2c16k32g16_f3x3x3_fp32_cf_gelu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -43465,7 +43337,7 @@
       }
     },
     {
-      "id": "S13b_3d_i16x16x16_n2c16k32g16_f3x3x3_fp32_cl_gelu_tanh",
+      "id": "s13b_3d_i16x16x16_n2c16k32g16_f3x3x3_fp32_cl_gelu_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -43607,7 +43479,7 @@
       }
     },
     {
-      "id": "S13b_3d_i16x16x16_n2c16k32g16_f3x3x3_fp16_cf_swish",
+      "id": "s13b_3d_i16x16x16_n2c16k32g16_f3x3x3_fp16_cf_swish",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -43749,7 +43621,7 @@
       }
     },
     {
-      "id": "S13b_3d_i16x16x16_n2c16k32g16_f3x3x3_fp16_cl_softplus",
+      "id": "s13b_3d_i16x16x16_n2c16k32g16_f3x3x3_fp16_cl_softplus",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -43891,7 +43763,7 @@
       }
     },
     {
-      "id": "S13b_3d_i16x16x16_n2c16k32g16_f3x3x3_bf16_cf_identity",
+      "id": "s13b_3d_i16x16x16_n2c16k32g16_f3x3x3_bf16_cf_identity",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -44033,7 +43905,7 @@
       }
     },
     {
-      "id": "S13b_3d_i16x16x16_n2c16k32g16_f3x3x3_bf16_cl_relu",
+      "id": "s13b_3d_i16x16x16_n2c16k32g16_f3x3x3_bf16_cl_relu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -44174,7 +44046,7 @@
       }
     },
     {
-      "id": "S14_3d_i15x15x15_n2c13k17_f3x3x3_fp32_cf_relu_lo",
+      "id": "s14_3d_i15x15x15_n2c13k17_f3x3x3_fp32_cf_relu_lo",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -44295,7 +44167,7 @@
         "plan_items": [
           "S14"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 444473670,
         "inputs": {
@@ -44311,11 +44183,12 @@
             "hi": 1.0,
             "seed": 1374690188
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S14_3d_i15x15x15_n2c13k17_f3x3x3_fp32_cl_relu6",
+      "id": "s14_3d_i15x15x15_n2c13k17_f3x3x3_fp32_cl_relu6",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -44456,7 +44329,7 @@
       }
     },
     {
-      "id": "S14_3d_i15x15x15_n2c13k17_f3x3x3_fp16_cf_relu_clamp",
+      "id": "s14_3d_i15x15x15_n2c13k17_f3x3x3_fp16_cf_relu_clamp",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -44597,7 +44470,7 @@
       }
     },
     {
-      "id": "S14_3d_i15x15x15_n2c13k17_f3x3x3_fp16_cl_relu_leaky",
+      "id": "s14_3d_i15x15x15_n2c13k17_f3x3x3_fp16_cl_relu_leaky",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -44718,7 +44591,7 @@
         "plan_items": [
           "S14"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 804769463,
         "inputs": {
@@ -44734,11 +44607,12 @@
             "hi": 1.0,
             "seed": 193137518
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S14_3d_i15x15x15_n2c13k17_f3x3x3_bf16_cf_sigmoid",
+      "id": "s14_3d_i15x15x15_n2c13k17_f3x3x3_bf16_cf_sigmoid",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -44859,7 +44733,7 @@
         "plan_items": [
           "S14"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1757044815,
         "inputs": {
@@ -44875,12 +44749,11 @@
             "hi": 1.0,
             "seed": 1419835708
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S14_3d_i15x15x15_n2c13k17_f3x3x3_bf16_cl_tanh",
+      "id": "s14_3d_i15x15x15_n2c13k17_f3x3x3_bf16_cl_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -45001,7 +44874,7 @@
         "plan_items": [
           "S14"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1040213617,
         "inputs": {
@@ -45017,12 +44890,11 @@
             "hi": 1.0,
             "seed": 757613392
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S15_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cf_elu",
+      "id": "s15_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cf_elu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -45164,7 +45036,7 @@
       }
     },
     {
-      "id": "S15_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl_gelu",
+      "id": "s15_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl_gelu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -45306,7 +45178,7 @@
       }
     },
     {
-      "id": "S15_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cf_gelu_tanh",
+      "id": "s15_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cf_gelu_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -45448,7 +45320,7 @@
       }
     },
     {
-      "id": "S15_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_swish",
+      "id": "s15_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_swish",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -45590,7 +45462,7 @@
       }
     },
     {
-      "id": "S15_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cf_softplus",
+      "id": "s15_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cf_softplus",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -45732,7 +45604,7 @@
       }
     },
     {
-      "id": "S15_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl_identity",
+      "id": "s15_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl_identity",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -45874,7 +45746,7 @@
       }
     },
     {
-      "id": "S16_3d_i32x32x32_n2c16k32_f3x3x3_fp32_cf_relu",
+      "id": "s16_3d_i32x32x32_n2c16k32_f3x3x3_fp32_cf_relu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -46015,7 +45887,7 @@
       }
     },
     {
-      "id": "S16_3d_i32x32x32_n2c16k32_f3x3x3_fp32_cl_relu_lo",
+      "id": "s16_3d_i32x32x32_n2c16k32_f3x3x3_fp32_cl_relu_lo",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -46136,7 +46008,7 @@
         "plan_items": [
           "S16"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 177942690,
         "inputs": {
@@ -46152,11 +46024,12 @@
             "hi": 1.0,
             "seed": 1149118786
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S16_3d_i32x32x32_n2c16k32_f3x3x3_fp16_cf_relu6",
+      "id": "s16_3d_i32x32x32_n2c16k32_f3x3x3_fp16_cf_relu6",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -46297,7 +46170,7 @@
       }
     },
     {
-      "id": "S16_3d_i32x32x32_n2c16k32_f3x3x3_fp16_cl_relu_clamp",
+      "id": "s16_3d_i32x32x32_n2c16k32_f3x3x3_fp16_cl_relu_clamp",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -46438,7 +46311,7 @@
       }
     },
     {
-      "id": "S16_3d_i32x32x32_n2c16k32_f3x3x3_bf16_cf_relu_leaky",
+      "id": "s16_3d_i32x32x32_n2c16k32_f3x3x3_bf16_cf_relu_leaky",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -46559,7 +46432,7 @@
         "plan_items": [
           "S16"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1936680733,
         "inputs": {
@@ -46575,11 +46448,12 @@
             "hi": 1.0,
             "seed": 147649202
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S16_3d_i32x32x32_n2c16k32_f3x3x3_bf16_cl_sigmoid",
+      "id": "s16_3d_i32x32x32_n2c16k32_f3x3x3_bf16_cl_sigmoid",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -46700,7 +46574,7 @@
         "plan_items": [
           "S16"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1849334569,
         "inputs": {
@@ -46716,12 +46590,11 @@
             "hi": 1.0,
             "seed": 1504019063
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S17_3d_i16x16x16_n2c1k16_f3x3x3_fp32_cf_tanh",
+      "id": "s17_3d_i16x16x16_n2c1k16_f3x3x3_fp32_cf_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -46842,7 +46715,7 @@
         "plan_items": [
           "S17"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1312086803,
         "inputs": {
@@ -46858,12 +46731,11 @@
             "hi": 1.0,
             "seed": 1954880907
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S17_3d_i16x16x16_n2c1k16_f3x3x3_fp32_cl_elu",
+      "id": "s17_3d_i16x16x16_n2c1k16_f3x3x3_fp32_cl_elu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -47005,7 +46877,7 @@
       }
     },
     {
-      "id": "S17_3d_i16x16x16_n2c1k16_f3x3x3_fp16_cf_gelu",
+      "id": "s17_3d_i16x16x16_n2c1k16_f3x3x3_fp16_cf_gelu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -47147,7 +47019,7 @@
       }
     },
     {
-      "id": "S17_3d_i16x16x16_n2c1k16_f3x3x3_fp16_cl_gelu_tanh",
+      "id": "s17_3d_i16x16x16_n2c1k16_f3x3x3_fp16_cl_gelu_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -47289,7 +47161,7 @@
       }
     },
     {
-      "id": "S17_3d_i16x16x16_n2c1k16_f3x3x3_bf16_cf_swish",
+      "id": "s17_3d_i16x16x16_n2c1k16_f3x3x3_bf16_cf_swish",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -47431,7 +47303,7 @@
       }
     },
     {
-      "id": "S17_3d_i16x16x16_n2c1k16_f3x3x3_bf16_cl_softplus",
+      "id": "s17_3d_i16x16x16_n2c1k16_f3x3x3_bf16_cl_softplus",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -47573,7 +47445,7 @@
       }
     },
     {
-      "id": "S18_3d_i16x16x16_n2c16k32_f2x2x2_fp32_cf_identity",
+      "id": "s18_3d_i16x16x16_n2c16k32_f2x2x2_fp32_cf_identity",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -47715,7 +47587,7 @@
       }
     },
     {
-      "id": "S18_3d_i16x16x16_n2c16k32_f2x2x2_fp32_cl_relu",
+      "id": "s18_3d_i16x16x16_n2c16k32_f2x2x2_fp32_cl_relu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -47857,7 +47729,7 @@
       }
     },
     {
-      "id": "S18_3d_i16x16x16_n2c16k32_f2x2x2_fp16_cf_relu_lo",
+      "id": "s18_3d_i16x16x16_n2c16k32_f2x2x2_fp16_cf_relu_lo",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -47995,11 +47867,11 @@
             "seed": 749325442
           }
         },
-        "notes": "probe: F11 asymmetric padding"
+        "notes": "probe: F11 asymmetric padding; F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S18_3d_i16x16x16_n2c16k32_f2x2x2_fp16_cl_relu6",
+      "id": "s18_3d_i16x16x16_n2c16k32_f2x2x2_fp16_cl_relu6",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -48141,7 +48013,7 @@
       }
     },
     {
-      "id": "S18_3d_i16x16x16_n2c16k32_f2x2x2_bf16_cf_relu_clamp",
+      "id": "s18_3d_i16x16x16_n2c16k32_f2x2x2_bf16_cf_relu_clamp",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -48283,7 +48155,7 @@
       }
     },
     {
-      "id": "S18_3d_i16x16x16_n2c16k32_f2x2x2_bf16_cl_relu_leaky",
+      "id": "s18_3d_i16x16x16_n2c16k32_f2x2x2_bf16_cl_relu_leaky",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -48421,11 +48293,11 @@
             "seed": 1340542224
           }
         },
-        "notes": "probe: F11 asymmetric padding"
+        "notes": "probe: F11 asymmetric padding; F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S19_3d_i16x16x16_n2c16k32_f16x16x16_fp32_cf_sigmoid",
+      "id": "s19_3d_i16x16x16_n2c16k32_f16x16x16_fp32_cf_sigmoid",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -48546,7 +48418,7 @@
         "plan_items": [
           "S19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1671009192,
         "inputs": {
@@ -48562,12 +48434,11 @@
             "hi": 1.0,
             "seed": 41305793
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S19_3d_i16x16x16_n2c16k32_f16x16x16_fp32_cl_tanh",
+      "id": "s19_3d_i16x16x16_n2c16k32_f16x16x16_fp32_cl_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -48688,7 +48559,7 @@
         "plan_items": [
           "S19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1476737181,
         "inputs": {
@@ -48704,12 +48575,11 @@
             "hi": 1.0,
             "seed": 2052542897
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S19_3d_i16x16x16_n2c16k32_f16x16x16_fp16_cf_elu",
+      "id": "s19_3d_i16x16x16_n2c16k32_f16x16x16_fp16_cf_elu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -48851,7 +48721,7 @@
       }
     },
     {
-      "id": "S19_3d_i16x16x16_n2c16k32_f16x16x16_fp16_cl_gelu",
+      "id": "s19_3d_i16x16x16_n2c16k32_f16x16x16_fp16_cl_gelu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -48993,7 +48863,7 @@
       }
     },
     {
-      "id": "S19_3d_i16x16x16_n2c16k32_f16x16x16_bf16_cf_gelu_tanh",
+      "id": "s19_3d_i16x16x16_n2c16k32_f16x16x16_bf16_cf_gelu_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -49135,7 +49005,7 @@
       }
     },
     {
-      "id": "S19_3d_i16x16x16_n2c16k32_f16x16x16_bf16_cl_swish",
+      "id": "s19_3d_i16x16x16_n2c16k32_f16x16x16_bf16_cl_swish",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -49277,7 +49147,7 @@
       }
     },
     {
-      "id": "S20_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cf_softplus",
+      "id": "s20_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cf_softplus",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -49419,7 +49289,7 @@
       }
     },
     {
-      "id": "S20_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl_identity",
+      "id": "s20_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl_identity",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -49561,7 +49431,7 @@
       }
     },
     {
-      "id": "S20_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cf_relu",
+      "id": "s20_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cf_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -49702,7 +49572,7 @@
       }
     },
     {
-      "id": "S20_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_relu_lo",
+      "id": "s20_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_relu_lo",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -49823,7 +49693,7 @@
         "plan_items": [
           "S20"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 615487659,
         "inputs": {
@@ -49839,11 +49709,12 @@
             "hi": 1.0,
             "seed": 1644091190
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S20_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cf_relu6",
+      "id": "s20_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cf_relu6",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -49984,7 +49855,7 @@
       }
     },
     {
-      "id": "S20_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl_relu_clamp",
+      "id": "s20_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl_relu_clamp",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -50125,7 +49996,7 @@
       }
     },
     {
-      "id": "S21_3d_i16x16x16_n2c16k32_f2x2x2_fp32_cf_relu_leaky",
+      "id": "s21_3d_i16x16x16_n2c16k32_f2x2x2_fp32_cf_relu_leaky",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -50246,7 +50117,7 @@
         "plan_items": [
           "S21"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 1691077450,
         "inputs": {
@@ -50262,11 +50133,12 @@
             "hi": 1.0,
             "seed": 1334033277
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S21_3d_i16x16x16_n2c16k32_f2x2x2_fp32_cl_sigmoid",
+      "id": "s21_3d_i16x16x16_n2c16k32_f2x2x2_fp32_cl_sigmoid",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -50387,7 +50259,7 @@
         "plan_items": [
           "S21"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 689924815,
         "inputs": {
@@ -50403,12 +50275,11 @@
             "hi": 1.0,
             "seed": 211974101
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S21_3d_i16x16x16_n2c16k32_f2x2x2_fp16_cf_tanh",
+      "id": "s21_3d_i16x16x16_n2c16k32_f2x2x2_fp16_cf_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -50529,7 +50400,7 @@
         "plan_items": [
           "S21"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 247767103,
         "inputs": {
@@ -50545,12 +50416,11 @@
             "hi": 1.0,
             "seed": 1081118654
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S21_3d_i16x16x16_n2c16k32_f2x2x2_fp16_cl_elu",
+      "id": "s21_3d_i16x16x16_n2c16k32_f2x2x2_fp16_cl_elu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -50692,7 +50562,7 @@
       }
     },
     {
-      "id": "S21_3d_i16x16x16_n2c16k32_f2x2x2_bf16_cf_gelu",
+      "id": "s21_3d_i16x16x16_n2c16k32_f2x2x2_bf16_cf_gelu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -50834,7 +50704,7 @@
       }
     },
     {
-      "id": "S21_3d_i16x16x16_n2c16k32_f2x2x2_bf16_cl_gelu_tanh",
+      "id": "s21_3d_i16x16x16_n2c16k32_f2x2x2_bf16_cl_gelu_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -50976,7 +50846,7 @@
       }
     },
     {
-      "id": "S22_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cf_swish",
+      "id": "s22_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cf_swish",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -51118,7 +50988,7 @@
       }
     },
     {
-      "id": "S22_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl_softplus",
+      "id": "s22_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl_softplus",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -51260,7 +51130,7 @@
       }
     },
     {
-      "id": "S22_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cf_identity",
+      "id": "s22_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cf_identity",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -51402,7 +51272,7 @@
       }
     },
     {
-      "id": "S22_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_relu",
+      "id": "s22_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -51543,7 +51413,7 @@
       }
     },
     {
-      "id": "S22_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cf_relu_lo",
+      "id": "s22_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cf_relu_lo",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -51664,7 +51534,7 @@
         "plan_items": [
           "S22"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 736189796,
         "inputs": {
@@ -51680,11 +51550,12 @@
             "hi": 1.0,
             "seed": 1716701446
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S22_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl_relu6",
+      "id": "s22_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl_relu6",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -51825,7 +51696,7 @@
       }
     },
     {
-      "id": "S23_4d_i6x6x4x4_n1c16k32_f3x3x3x3_fp32_cf_swish",
+      "id": "s23_4d_i6x6x4x4_n1c16k32_f3x3x3x3_fp32_cf_swish",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -51979,7 +51850,7 @@
       }
     },
     {
-      "id": "S23_4d_i6x6x4x4_n1c16k32_f3x3x3x3_fp32_cl_softplus",
+      "id": "s23_4d_i6x6x4x4_n1c16k32_f3x3x3x3_fp32_cl_softplus",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -52133,7 +52004,7 @@
       }
     },
     {
-      "id": "S23_4d_i6x6x4x4_n1c16k32_f3x3x3x3_fp16_cf_identity",
+      "id": "s23_4d_i6x6x4x4_n1c16k32_f3x3x3x3_fp16_cf_identity",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -52287,7 +52158,7 @@
       }
     },
     {
-      "id": "S23_4d_i6x6x4x4_n1c16k32_f3x3x3x3_fp16_cl_relu",
+      "id": "s23_4d_i6x6x4x4_n1c16k32_f3x3x3x3_fp16_cl_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -52441,7 +52312,7 @@
       }
     },
     {
-      "id": "S23_4d_i6x6x4x4_n1c16k32_f3x3x3x3_bf16_cf_relu_lo",
+      "id": "s23_4d_i6x6x4x4_n1c16k32_f3x3x3x3_bf16_cf_relu_lo",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -52591,11 +52462,11 @@
             "seed": 1620835712
           }
         },
-        "notes": "probe: F1 4D spatial"
+        "notes": "probe: F1 4D spatial; F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S23_4d_i6x6x4x4_n1c16k32_f3x3x3x3_bf16_cl_relu6",
+      "id": "s23_4d_i6x6x4x4_n1c16k32_f3x3x3x3_bf16_cl_relu6",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -52749,7 +52620,7 @@
       }
     },
     {
-      "id": "L1_1d_i1024_n4c128k128_f1_fp32_cl_relu_clamp",
+      "id": "l1_1d_i1024_n4c128k128_f1_fp32_cl_relu_clamp",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -52866,7 +52737,7 @@
       }
     },
     {
-      "id": "L2_1d_i1024_n4c128k128_f3_fp16_cf_relu_leaky",
+      "id": "l2_1d_i1024_n4c128k128_f3_fp16_cf_relu_leaky",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -52963,7 +52834,7 @@
         "plan_items": [
           "L2"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 434589401,
         "inputs": {
@@ -52979,11 +52850,12 @@
             "hi": 1.0,
             "seed": 1568283784
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "L3_1d_i1024_n4c128k128_f3_fp16_cl_sigmoid",
+      "id": "l3_1d_i1024_n4c128k128_f3_fp16_cl_sigmoid",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -53080,7 +52952,7 @@
         "plan_items": [
           "L3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1689103844,
         "inputs": {
@@ -53096,12 +52968,11 @@
             "hi": 1.0,
             "seed": 994556661
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "L4_1d_i1024_n4c128k128_f3_bf16_cf_tanh",
+      "id": "l4_1d_i1024_n4c128k128_f3_bf16_cf_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -53198,7 +53069,7 @@
         "plan_items": [
           "L4"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 648203542,
         "inputs": {
@@ -53214,12 +53085,11 @@
             "hi": 1.0,
             "seed": 1941986469
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "L5_1d_i1024_n4c128k128_f3_bf16_cl_elu",
+      "id": "l5_1d_i1024_n4c128k128_f3_bf16_cl_elu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -53337,7 +53207,7 @@
       }
     },
     {
-      "id": "L7_1d_i1024_n4c128k128g2_f3_fp32_cf_gelu",
+      "id": "l7_1d_i1024_n4c128k128g2_f3_fp32_cf_gelu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -53455,7 +53325,7 @@
       }
     },
     {
-      "id": "L8_1d_i1024_n4c128k128g4_f3_fp32_cl_gelu_tanh",
+      "id": "l8_1d_i1024_n4c128k128g4_f3_fp32_cl_gelu_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -53573,7 +53443,7 @@
       }
     },
     {
-      "id": "L9_1d_i1024_n8c128k128_f1_fp16_cf_swish",
+      "id": "l9_1d_i1024_n8c128k128_f1_fp16_cf_swish",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -53691,7 +53561,7 @@
       }
     },
     {
-      "id": "L10_1d_i1024_n4c128k128_f5_fp16_cl_softplus",
+      "id": "l10_1d_i1024_n4c128k128_f5_fp16_cl_softplus",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -53809,7 +53679,7 @@
       }
     },
     {
-      "id": "L11_1d_i1024_n4c3k128_f7_bf16_cf_identity",
+      "id": "l11_1d_i1024_n4c3k128_f7_bf16_cf_identity",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -53927,7 +53797,7 @@
       }
     },
     {
-      "id": "L13a_1d_i1024_n4c128k128g128_f3_bf16_cl_relu",
+      "id": "l13a_1d_i1024_n4c128k128g128_f3_bf16_cl_relu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -54044,7 +53914,7 @@
       }
     },
     {
-      "id": "L13b_1d_i1024_n4c128k256g128_f3_fp32_cf_relu_lo",
+      "id": "l13b_1d_i1024_n4c128k256g128_f3_fp32_cf_relu_lo",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -54141,7 +54011,7 @@
         "plan_items": [
           "L13b"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 174176438,
         "inputs": {
@@ -54157,11 +54027,12 @@
             "hi": 1.0,
             "seed": 846377309
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "L14_1d_i1023_n4c61k67_f3_fp32_cl_relu6",
+      "id": "l14_1d_i1023_n4c61k67_f3_fp32_cl_relu6",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -54278,7 +54149,7 @@
       }
     },
     {
-      "id": "L16_1d_i1024_n4c128k128_f3_fp16_cf_relu_clamp",
+      "id": "l16_1d_i1024_n4c128k128_f3_fp16_cf_relu_clamp",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -54395,7 +54266,7 @@
       }
     },
     {
-      "id": "L17_1d_i1024_n4c1k128_f3_fp16_cl_relu_leaky",
+      "id": "l17_1d_i1024_n4c1k128_f3_fp16_cl_relu_leaky",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -54492,7 +54363,7 @@
         "plan_items": [
           "L17"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 608595661,
         "inputs": {
@@ -54508,11 +54379,12 @@
             "hi": 1.0,
             "seed": 301144085
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "L18_1d_i1024_n4c128k128_f2_bf16_cf_sigmoid",
+      "id": "l18_1d_i1024_n4c128k128_f2_bf16_cf_sigmoid",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -54626,11 +54498,11 @@
             "seed": 190641926
           }
         },
-        "notes": "probe: F11 asymmetric padding; F26 non-ReLU activation"
+        "notes": "probe: F11 asymmetric padding"
       }
     },
     {
-      "id": "L19_1d_i1024_n1c64k64_f1024_bf16_cl_tanh",
+      "id": "l19_1d_i1024_n1c64k64_f1024_bf16_cl_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -54727,7 +54599,7 @@
         "plan_items": [
           "L19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 682764663,
         "inputs": {
@@ -54743,12 +54615,11 @@
             "hi": 1.0,
             "seed": 1562101110
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "L20_1d_i1024_n4c128k128_f3_fp32_cf_elu",
+      "id": "l20_1d_i1024_n4c128k128_f3_fp32_cf_elu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -54866,7 +54737,7 @@
       }
     },
     {
-      "id": "L21_1d_i1024_n4c128k128_f2_fp32_cl_gelu",
+      "id": "l21_1d_i1024_n4c128k128_f2_fp32_cl_gelu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -54984,7 +54855,7 @@
       }
     },
     {
-      "id": "L22_1d_i1024_n4c128k128_f3_fp16_cf_gelu_tanh",
+      "id": "l22_1d_i1024_n4c128k128_f3_fp16_cf_gelu_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -55102,7 +54973,7 @@
       }
     },
     {
-      "id": "L1_2d_i56x56_n4c128k128_f1x1_fp16_cf_softplus",
+      "id": "l1_2d_i56x56_n4c128k128_f1x1_fp16_cf_softplus",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -55232,7 +55103,7 @@
       }
     },
     {
-      "id": "L2_2d_i56x56_n4c128k128_f3x3_fp16_cl_identity",
+      "id": "l2_2d_i56x56_n4c128k128_f3x3_fp16_cl_identity",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -55362,7 +55233,7 @@
       }
     },
     {
-      "id": "L3_2d_i56x56_n4c128k128_f3x3_bf16_cf_relu",
+      "id": "l3_2d_i56x56_n4c128k128_f3x3_bf16_cf_relu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -55491,7 +55362,7 @@
       }
     },
     {
-      "id": "L4_2d_i56x56_n4c128k128_f3x3_bf16_cl_relu_lo",
+      "id": "l4_2d_i56x56_n4c128k128_f3x3_bf16_cl_relu_lo",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -55600,7 +55471,7 @@
         "plan_items": [
           "L4"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 859004024,
         "inputs": {
@@ -55616,11 +55487,12 @@
             "hi": 1.0,
             "seed": 1514571552
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "L5_2d_i56x56_n4c128k128_f3x3_fp32_cf_relu6",
+      "id": "l5_2d_i56x56_n4c128k128_f3x3_fp32_cf_relu6",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -55749,7 +55621,7 @@
       }
     },
     {
-      "id": "L6_2d_i56x28_n4c128k128_f3x3_fp32_cl_relu_clamp",
+      "id": "l6_2d_i56x28_n4c128k128_f3x3_fp32_cl_relu_clamp",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -55878,7 +55750,7 @@
       }
     },
     {
-      "id": "L7_2d_i56x56_n4c128k128g2_f3x3_fp16_cf_relu_leaky",
+      "id": "l7_2d_i56x56_n4c128k128g2_f3x3_fp16_cf_relu_leaky",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -55987,7 +55859,7 @@
         "plan_items": [
           "L7"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 1644330080,
         "inputs": {
@@ -56003,11 +55875,12 @@
             "hi": 1.0,
             "seed": 1041639676
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "L8_2d_i56x56_n4c128k128g4_f3x3_fp16_cl_sigmoid",
+      "id": "l8_2d_i56x56_n4c128k128g4_f3x3_fp16_cl_sigmoid",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -56116,7 +55989,7 @@
         "plan_items": [
           "L8"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1571638250,
         "inputs": {
@@ -56132,12 +56005,11 @@
             "hi": 1.0,
             "seed": 2089422168
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "L9_2d_i56x56_n8c128k128_f1x1_bf16_cf_tanh",
+      "id": "l9_2d_i56x56_n8c128k128_f1x1_bf16_cf_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -56246,7 +56118,7 @@
         "plan_items": [
           "L9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1335198803,
         "inputs": {
@@ -56262,12 +56134,11 @@
             "hi": 1.0,
             "seed": 288582351
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "L10_2d_i56x56_n2c128k128_f5x5_bf16_cl_elu",
+      "id": "l10_2d_i56x56_n2c128k128_f5x5_bf16_cl_elu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -56397,7 +56268,7 @@
       }
     },
     {
-      "id": "L11_2d_i56x56_n4c3k128_f7x7_fp32_cf_gelu",
+      "id": "l11_2d_i56x56_n4c3k128_f7x7_fp32_cf_gelu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -56527,7 +56398,7 @@
       }
     },
     {
-      "id": "L12a_2d_i56x56_n4c128k128_f1x3_fp32_cl_gelu_tanh",
+      "id": "l12a_2d_i56x56_n4c128k128_f1x3_fp32_cl_gelu_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -56657,7 +56528,7 @@
       }
     },
     {
-      "id": "L12b_2d_i56x56_n4c128k128_f3x1_fp16_cf_swish",
+      "id": "l12b_2d_i56x56_n4c128k128_f3x1_fp16_cf_swish",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -56787,7 +56658,7 @@
       }
     },
     {
-      "id": "L13a_2d_i56x56_n4c128k128g128_f3x3_fp16_cl_softplus",
+      "id": "l13a_2d_i56x56_n4c128k128g128_f3x3_fp16_cl_softplus",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -56917,7 +56788,7 @@
       }
     },
     {
-      "id": "L13b_2d_i56x56_n4c128k256g128_f3x3_bf16_cf_identity",
+      "id": "l13b_2d_i56x56_n4c128k256g128_f3x3_bf16_cf_identity",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -57047,7 +56918,7 @@
       }
     },
     {
-      "id": "L14_2d_i55x55_n4c61k67_f3x3_bf16_cl_relu",
+      "id": "l14_2d_i55x55_n4c61k67_f3x3_bf16_cl_relu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -57176,7 +57047,7 @@
       }
     },
     {
-      "id": "L15_2d_i56x56_n4c128k128_f3x3_fp32_cf_relu_lo",
+      "id": "l15_2d_i56x56_n4c128k128_f3x3_fp32_cf_relu_lo",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -57285,7 +57156,7 @@
         "plan_items": [
           "L15"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 501936540,
         "inputs": {
@@ -57301,11 +57172,12 @@
             "hi": 1.0,
             "seed": 45112116
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "L16_2d_i56x56_n4c128k128_f3x3_fp32_cl_relu6",
+      "id": "l16_2d_i56x56_n4c128k128_f3x3_fp32_cl_relu6",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -57434,7 +57306,7 @@
       }
     },
     {
-      "id": "L17_2d_i56x56_n4c1k128_f3x3_fp16_cf_relu_clamp",
+      "id": "l17_2d_i56x56_n4c1k128_f3x3_fp16_cf_relu_clamp",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -57563,7 +57435,7 @@
       }
     },
     {
-      "id": "L18_2d_i56x56_n4c128k128_f2x2_fp16_cl_relu_leaky",
+      "id": "l18_2d_i56x56_n4c128k128_f2x2_fp16_cl_relu_leaky",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -57689,11 +57561,11 @@
             "seed": 1857421121
           }
         },
-        "notes": "probe: F11 asymmetric padding"
+        "notes": "probe: F11 asymmetric padding; F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "L19_2d_i56x56_n1c64k64_f56x56_bf16_cf_sigmoid",
+      "id": "l19_2d_i56x56_n1c64k64_f56x56_bf16_cf_sigmoid",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -57802,7 +57674,7 @@
         "plan_items": [
           "L19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 516887657,
         "inputs": {
@@ -57818,12 +57690,11 @@
             "hi": 1.0,
             "seed": 1062891111
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "L20_2d_i56x56_n4c128k128_f3x3_bf16_cl_tanh",
+      "id": "l20_2d_i56x56_n4c128k128_f3x3_bf16_cl_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -57932,7 +57803,7 @@
         "plan_items": [
           "L20"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1129698942,
         "inputs": {
@@ -57948,12 +57819,11 @@
             "hi": 1.0,
             "seed": 1934359266
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "L21_2d_i56x56_n4c128k128_f2x2_fp32_cf_elu",
+      "id": "l21_2d_i56x56_n4c128k128_f2x2_fp32_cf_elu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -58083,7 +57953,7 @@
       }
     },
     {
-      "id": "L22_2d_i56x56_n4c128k128_f3x3_fp32_cl_gelu",
+      "id": "l22_2d_i56x56_n4c128k128_f3x3_fp32_cl_gelu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -58213,7 +58083,7 @@
       }
     },
     {
-      "id": "L1_3d_i32x32x32_n2c32k32_f1x1x1_fp16_cl_relu",
+      "id": "l1_3d_i32x32x32_n2c32k32_f1x1x1_fp16_cl_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -58354,7 +58224,7 @@
       }
     },
     {
-      "id": "L2_3d_i32x32x32_n2c32k32_f3x3x3_bf16_cf_relu_lo",
+      "id": "l2_3d_i32x32x32_n2c32k32_f3x3x3_bf16_cf_relu_lo",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -58475,7 +58345,7 @@
         "plan_items": [
           "L2"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 937734340,
         "inputs": {
@@ -58491,11 +58361,12 @@
             "hi": 1.0,
             "seed": 340952845
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "L3_3d_i32x32x32_n2c32k32_f3x3x3_bf16_cl_relu6",
+      "id": "l3_3d_i32x32x32_n2c32k32_f3x3x3_bf16_cl_relu6",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -58636,7 +58507,7 @@
       }
     },
     {
-      "id": "L4_3d_i32x32x32_n2c32k32_f3x3x3_fp32_cf_relu_clamp",
+      "id": "l4_3d_i32x32x32_n2c32k32_f3x3x3_fp32_cf_relu_clamp",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -58777,7 +58648,7 @@
       }
     },
     {
-      "id": "L5_3d_i32x32x32_n2c32k32_f3x3x3_fp32_cl_relu_leaky",
+      "id": "l5_3d_i32x32x32_n2c32k32_f3x3x3_fp32_cl_relu_leaky",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -58898,7 +58769,7 @@
         "plan_items": [
           "L5"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 179661464,
         "inputs": {
@@ -58914,11 +58785,12 @@
             "hi": 1.0,
             "seed": 1770346224
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "L6_3d_i32x32x16_n2c32k32_f3x3x3_fp16_cf_sigmoid",
+      "id": "l6_3d_i32x32x16_n2c32k32_f3x3x3_fp16_cf_sigmoid",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -59039,7 +58911,7 @@
         "plan_items": [
           "L6"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 1154785159,
         "inputs": {
@@ -59055,12 +58927,11 @@
             "hi": 1.0,
             "seed": 1397626862
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "L7_3d_i32x32x32_n2c32k32g2_f3x3x3_fp16_cl_tanh",
+      "id": "l7_3d_i32x32x32_n2c32k32g2_f3x3x3_fp16_cl_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -59181,7 +59052,7 @@
         "plan_items": [
           "L7"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 113520696,
         "inputs": {
@@ -59197,12 +59068,11 @@
             "hi": 1.0,
             "seed": 202493749
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "L8_3d_i32x32x32_n2c32k32g4_f3x3x3_bf16_cf_elu",
+      "id": "l8_3d_i32x32x32_n2c32k32g4_f3x3x3_bf16_cf_elu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -59344,7 +59214,7 @@
       }
     },
     {
-      "id": "L9_3d_i32x32x32_n4c32k32_f1x1x1_bf16_cl_gelu",
+      "id": "l9_3d_i32x32x32_n4c32k32_f1x1x1_bf16_cl_gelu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -59486,7 +59356,7 @@
       }
     },
     {
-      "id": "L10_3d_i32x32x32_n1c16k16_f5x5x5_fp32_cf_gelu_tanh",
+      "id": "l10_3d_i32x32x32_n1c16k16_f5x5x5_fp32_cf_gelu_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -59628,7 +59498,7 @@
       }
     },
     {
-      "id": "L11_3d_i32x32x32_n2c3k32_f7x7x7_fp32_cl_swish",
+      "id": "l11_3d_i32x32x32_n2c3k32_f7x7x7_fp32_cl_swish",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -59770,7 +59640,7 @@
       }
     },
     {
-      "id": "L12a_3d_i32x32x32_n2c32k32_f1x3x3_fp16_cf_softplus",
+      "id": "l12a_3d_i32x32x32_n2c32k32_f1x3x3_fp16_cf_softplus",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -59912,7 +59782,7 @@
       }
     },
     {
-      "id": "L13a_3d_i32x32x32_n2c32k32g32_f3x3x3_fp16_cl_identity",
+      "id": "l13a_3d_i32x32x32_n2c32k32g32_f3x3x3_fp16_cl_identity",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -60054,7 +59924,7 @@
       }
     },
     {
-      "id": "L13b_3d_i32x32x32_n2c32k64g32_f3x3x3_bf16_cf_relu",
+      "id": "l13b_3d_i32x32x32_n2c32k64g32_f3x3x3_bf16_cf_relu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -60195,7 +60065,7 @@
       }
     },
     {
-      "id": "L14_3d_i31x31x31_n1c61k67_f3x3x3_bf16_cl_relu_lo",
+      "id": "l14_3d_i31x31x31_n1c61k67_f3x3x3_bf16_cl_relu_lo",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -60316,7 +60186,7 @@
         "plan_items": [
           "L14"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 1444401140,
         "inputs": {
@@ -60332,11 +60202,12 @@
             "hi": 1.0,
             "seed": 1077011545
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "L15_3d_i32x32x32_n2c32k32_f3x3x3_fp32_cf_relu6",
+      "id": "l15_3d_i32x32x32_n2c32k32_f3x3x3_fp32_cf_relu6",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -60477,7 +60348,7 @@
       }
     },
     {
-      "id": "L16_3d_i32x32x32_n2c32k32_f3x3x3_fp32_cl_relu_clamp",
+      "id": "l16_3d_i32x32x32_n2c32k32_f3x3x3_fp32_cl_relu_clamp",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -60618,7 +60489,7 @@
       }
     },
     {
-      "id": "L17_3d_i32x32x32_n2c1k32_f3x3x3_fp16_cf_relu_leaky",
+      "id": "l17_3d_i32x32x32_n2c1k32_f3x3x3_fp16_cf_relu_leaky",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -60739,7 +60610,7 @@
         "plan_items": [
           "L17"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "L",
         "seed": 1158371267,
         "inputs": {
@@ -60755,11 +60626,12 @@
             "hi": 1.0,
             "seed": 1976923799
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "L18_3d_i32x32x32_n2c32k32_f2x2x2_fp16_cl_sigmoid",
+      "id": "l18_3d_i32x32x32_n2c32k32_f2x2x2_fp16_cl_sigmoid",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -60897,11 +60769,11 @@
             "seed": 158284895
           }
         },
-        "notes": "probe: F11 asymmetric padding; F26 non-ReLU activation"
+        "notes": "probe: F11 asymmetric padding"
       }
     },
     {
-      "id": "L19_3d_i32x32x32_n1c16k16_f32x32x32_bf16_cf_tanh",
+      "id": "l19_3d_i32x32x32_n1c16k16_f32x32x32_bf16_cf_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -61022,7 +60894,7 @@
         "plan_items": [
           "L19"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "L",
         "seed": 747801743,
         "inputs": {
@@ -61038,12 +60910,11 @@
             "hi": 1.0,
             "seed": 756266518
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "L20_3d_i32x32x32_n2c32k32_f3x3x3_bf16_cl_elu",
+      "id": "l20_3d_i32x32x32_n2c32k32_f3x3x3_bf16_cl_elu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -61185,7 +61056,7 @@
       }
     },
     {
-      "id": "L21_3d_i32x32x32_n2c32k32_f2x2x2_fp32_cf_gelu",
+      "id": "l21_3d_i32x32x32_n2c32k32_f2x2x2_fp32_cf_gelu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -61327,7 +61198,7 @@
       }
     },
     {
-      "id": "L22_3d_i32x32x32_n2c32k32_f3x3x3_fp32_cl_gelu_tanh",
+      "id": "l22_3d_i32x32x32_n2c32k32_f3x3x3_fp32_cl_gelu_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -61469,7 +61340,7 @@
       }
     },
     {
-      "id": "M2_2d_i56x56_n8c64k64_f3x3_fp32_cf_gelu_tanh",
+      "id": "m2_2d_i56x56_n8c64k64_f3x3_fp32_cf_gelu_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -61599,7 +61470,7 @@
       }
     },
     {
-      "id": "M2_2d_i56x56_n8c64k64_f3x3_fp32_cl_swish",
+      "id": "m2_2d_i56x56_n8c64k64_f3x3_fp32_cl_swish",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -61729,7 +61600,7 @@
       }
     },
     {
-      "id": "M2_2d_i56x56_n8c64k64_f3x3_fp16_cf_softplus",
+      "id": "m2_2d_i56x56_n8c64k64_f3x3_fp16_cf_softplus",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -61859,7 +61730,7 @@
       }
     },
     {
-      "id": "M2_2d_i56x56_n8c64k64_f3x3_fp16_cl_identity",
+      "id": "m2_2d_i56x56_n8c64k64_f3x3_fp16_cl_identity",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -61989,7 +61860,7 @@
       }
     },
     {
-      "id": "M2_2d_i56x56_n8c64k64_f3x3_bf16_cf_relu",
+      "id": "m2_2d_i56x56_n8c64k64_f3x3_bf16_cf_relu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -62118,7 +61989,7 @@
       }
     },
     {
-      "id": "M2_2d_i56x56_n8c64k64_f3x3_bf16_cl_relu_lo",
+      "id": "m2_2d_i56x56_n8c64k64_f3x3_bf16_cl_relu_lo",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -62227,7 +62098,7 @@
         "plan_items": [
           "M2"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "M",
         "seed": 2060399603,
         "inputs": {
@@ -62243,11 +62114,12 @@
             "hi": 1.0,
             "seed": 546267567
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "M3_2d_i56x56_n8c256k64_f1x1_fp32_cf_relu6",
+      "id": "m3_2d_i56x56_n8c256k64_f1x1_fp32_cf_relu6",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -62376,7 +62248,7 @@
       }
     },
     {
-      "id": "M3_2d_i56x56_n8c256k64_f1x1_fp32_cl_relu_clamp",
+      "id": "m3_2d_i56x56_n8c256k64_f1x1_fp32_cl_relu_clamp",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -62505,7 +62377,7 @@
       }
     },
     {
-      "id": "M3_2d_i56x56_n8c256k64_f1x1_fp16_cf_relu_leaky",
+      "id": "m3_2d_i56x56_n8c256k64_f1x1_fp16_cf_relu_leaky",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -62614,7 +62486,7 @@
         "plan_items": [
           "M3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "M",
         "seed": 258860634,
         "inputs": {
@@ -62630,11 +62502,12 @@
             "hi": 1.0,
             "seed": 891808869
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "M3_2d_i56x56_n8c256k64_f1x1_fp16_cl_sigmoid",
+      "id": "m3_2d_i56x56_n8c256k64_f1x1_fp16_cl_sigmoid",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -62743,7 +62616,7 @@
         "plan_items": [
           "M3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "M",
         "seed": 107497792,
         "inputs": {
@@ -62759,12 +62632,11 @@
             "hi": 1.0,
             "seed": 1872241218
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "M3_2d_i56x56_n8c256k64_f1x1_bf16_cf_tanh",
+      "id": "m3_2d_i56x56_n8c256k64_f1x1_bf16_cf_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -62873,7 +62745,7 @@
         "plan_items": [
           "M3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "M",
         "seed": 463106627,
         "inputs": {
@@ -62889,12 +62761,11 @@
             "hi": 1.0,
             "seed": 606899598
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "M3_2d_i56x56_n8c256k64_f1x1_bf16_cl_elu",
+      "id": "m3_2d_i56x56_n8c256k64_f1x1_bf16_cl_elu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -63024,7 +62895,7 @@
       }
     },
     {
-      "id": "M6_2d_i56x56_n8c96k96g96_f3x3_fp32_cf_gelu",
+      "id": "m6_2d_i56x56_n8c96k96g96_f3x3_fp32_cf_gelu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -63154,7 +63025,7 @@
       }
     },
     {
-      "id": "M6_2d_i56x56_n8c96k96g96_f3x3_fp32_cl_gelu_tanh",
+      "id": "m6_2d_i56x56_n8c96k96g96_f3x3_fp32_cl_gelu_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -63284,7 +63155,7 @@
       }
     },
     {
-      "id": "M6_2d_i56x56_n8c96k96g96_f3x3_fp16_cf_swish",
+      "id": "m6_2d_i56x56_n8c96k96g96_f3x3_fp16_cf_swish",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -63414,7 +63285,7 @@
       }
     },
     {
-      "id": "M6_2d_i56x56_n8c96k96g96_f3x3_fp16_cl_softplus",
+      "id": "m6_2d_i56x56_n8c96k96g96_f3x3_fp16_cl_softplus",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -63544,7 +63415,7 @@
       }
     },
     {
-      "id": "M6_2d_i56x56_n8c96k96g96_f3x3_bf16_cf_identity",
+      "id": "m6_2d_i56x56_n8c96k96g96_f3x3_bf16_cf_identity",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -63674,7 +63545,7 @@
       }
     },
     {
-      "id": "M6_2d_i56x56_n8c96k96g96_f3x3_bf16_cl_relu",
+      "id": "m6_2d_i56x56_n8c96k96g96_f3x3_bf16_cl_relu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -63803,7 +63674,7 @@
       }
     },
     {
-      "id": "M9_3d_i32x32x32_n2c32k32_f3x3x3_fp32_cf_relu_lo",
+      "id": "m9_3d_i32x32x32_n2c32k32_f3x3x3_fp32_cf_relu_lo",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -63924,7 +63795,7 @@
         "plan_items": [
           "M9"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "M",
         "seed": 1761793091,
         "inputs": {
@@ -63940,11 +63811,12 @@
             "hi": 1.0,
             "seed": 853744096
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "M9_3d_i32x32x32_n2c32k32_f3x3x3_fp32_cl_relu6",
+      "id": "m9_3d_i32x32x32_n2c32k32_f3x3x3_fp32_cl_relu6",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -64085,7 +63957,7 @@
       }
     },
     {
-      "id": "M9_3d_i32x32x32_n2c32k32_f3x3x3_fp16_cf_relu_clamp",
+      "id": "m9_3d_i32x32x32_n2c32k32_f3x3x3_fp16_cf_relu_clamp",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -64226,7 +64098,7 @@
       }
     },
     {
-      "id": "M9_3d_i32x32x32_n2c32k32_f3x3x3_fp16_cl_relu_leaky",
+      "id": "m9_3d_i32x32x32_n2c32k32_f3x3x3_fp16_cl_relu_leaky",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -64347,7 +64219,7 @@
         "plan_items": [
           "M9"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "M",
         "seed": 223096846,
         "inputs": {
@@ -64363,11 +64235,12 @@
             "hi": 1.0,
             "seed": 772567592
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "M9_3d_i32x32x32_n2c32k32_f3x3x3_bf16_cf_sigmoid",
+      "id": "m9_3d_i32x32x32_n2c32k32_f3x3x3_bf16_cf_sigmoid",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -64488,7 +64361,7 @@
         "plan_items": [
           "M9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "M",
         "seed": 1983555477,
         "inputs": {
@@ -64504,12 +64377,11 @@
             "hi": 1.0,
             "seed": 1137463198
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "M9_3d_i32x32x32_n2c32k32_f3x3x3_bf16_cl_tanh",
+      "id": "m9_3d_i32x32x32_n2c32k32_f3x3x3_bf16_cl_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -64630,7 +64502,7 @@
         "plan_items": [
           "M9"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "M",
         "seed": 1599609520,
         "inputs": {
@@ -64646,12 +64518,11 @@
             "hi": 1.0,
             "seed": 1747842988
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S3_F30_1d_i16_n2c16k32_f3_fp16_cl_relu",
+      "id": "s3_f30_1d_i16_n2c16k32_f3_fp16_cl_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -64746,8 +64617,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+act",
         "plan_items": [
-          "S3",
-          "F30"
+          "F30",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -64770,7 +64641,7 @@
       }
     },
     {
-      "id": "S3_F31_1d_i16_n2c16k32_f3_fp16_cl_relu",
+      "id": "s3_f31_1d_i16_n2c16k32_f3_fp16_cl_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "half",
@@ -64865,8 +64736,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+act",
         "plan_items": [
-          "S3",
-          "F31"
+          "F31",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -64889,7 +64760,7 @@
       }
     },
     {
-      "id": "S3_F30_2d_i16x16_n2c16k32_f3x3_fp16_cl_relu",
+      "id": "s3_f30_2d_i16x16_n2c16k32_f3x3_fp16_cl_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -64996,8 +64867,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+act",
         "plan_items": [
-          "S3",
-          "F30"
+          "F30",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -65020,7 +64891,7 @@
       }
     },
     {
-      "id": "S3_F31_2d_i16x16_n2c16k32_f3x3_fp16_cl_relu",
+      "id": "s3_f31_2d_i16x16_n2c16k32_f3x3_fp16_cl_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "half",
@@ -65127,8 +64998,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+act",
         "plan_items": [
-          "S3",
-          "F31"
+          "F31",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -65151,7 +65022,7 @@
       }
     },
     {
-      "id": "S3_F30_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_relu",
+      "id": "s3_f30_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -65270,8 +65141,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+act",
         "plan_items": [
-          "S3",
-          "F30"
+          "F30",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -65294,7 +65165,7 @@
       }
     },
     {
-      "id": "S3_F31_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_relu",
+      "id": "s3_f31_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "half",
@@ -65413,8 +65284,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+act",
         "plan_items": [
-          "S3",
-          "F31"
+          "F31",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -65434,6 +65305,136 @@
           }
         },
         "notes": "probe: F31 intermediate type"
+      }
+    },
+    {
+      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_slope0",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1
+          ],
+          "post_padding": [
+            1,
+            1
+          ],
+          "pre_padding": [
+            1,
+            1
+          ],
+          "stride": [
+            1,
+            1
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "relu_fwd",
+          "act_relu_lower_clip": null,
+          "act_relu_lower_clip_slope": 0.0,
+          "act_relu_upper_clip": null,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              32,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              32,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S3"
+        ],
+        "purpose": "regression",
+        "size_class": "S",
+        "seed": 1107310637,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1533646560
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 196034137
+          }
+        },
+        "notes": "regression: a relu_lower_clip_slope of 0 must run as standard ReLU (#14363)"
       }
     }
   ]

@@ -64,7 +64,7 @@ fs::path FindDbRecord_t<TDb>::GetInstalledPathEmbed(const Handle& handle,
     static const auto embed_path = [&] {
         const std::string ext = ".fdb.txt";
         const auto root_path  = GetSystemDbPath();
-        const auto base_name  = handle.GetDbBasename();
+        const auto base_name  = handle.GetSystemDbBasename();
         const auto suffix     = GetSystemFindDbSuffix() + path_suffix;
         const auto filename   = base_name + "." + suffix + ext;
         const auto file_path  = root_path / filename;
@@ -85,7 +85,7 @@ fs::path FindDbRecord_t<TDb>::GetInstalledPathEmbed(const Handle& handle,
                     all_files.push_back(filepath);
             }
 
-            const auto db_id        = handle.GetTargetProperties().DbId();
+            const auto db_id        = handle.GetTargetProperties().SystemDbId();
             const int real_cu_count = handle.GetMaxComputeUnits();
             const int target_cu     = GetSysDbSelectionCu(db_id, real_cu_count);
             int closest_cu          = std::numeric_limits<int>::max();
@@ -132,7 +132,7 @@ fs::path FindDbRecord_t<TDb>::GetInstalledPathFile(const Handle& handle,
     static const fs::path installed_path = [&] {
         const std::string ext = ".fdb.txt";
         const auto root_path  = GetSystemDbPath();
-        const auto base_name  = handle.GetDbBasename();
+        const auto base_name  = handle.GetSystemDbBasename();
         const auto suffix =
             GetSystemFindDbSuffix() + (path_suffix.empty() ? "" : ('.' + path_suffix));
         auto file_path = root_path / (base_name + "." + suffix + ext);
@@ -165,7 +165,7 @@ fs::path FindDbRecord_t<TDb>::GetInstalledPathFile(const Handle& handle,
                 all_files.push_back(filepath);
         }
 
-        const auto db_id        = handle.GetTargetProperties().DbId();
+        const auto db_id        = handle.GetTargetProperties().SystemDbId();
         const int real_cu_count = handle.GetMaxComputeUnits();
         const int target_cu     = GetSysDbSelectionCu(db_id, real_cu_count);
         int closest_cu          = std::numeric_limits<int>::max();

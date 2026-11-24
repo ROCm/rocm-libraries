@@ -33,12 +33,6 @@ from pathlib import Path
 # --------------------------------------------------------------------------
 
 LEVELS = ("quick", "standard", "comprehensive", "full")  # bundle directory names
-LEVEL_NAMES = {
-    "quick": "quick",
-    "standard": "PR",
-    "comprehensive": "nightly",
-    "full": "full",
-}
 
 RANKS = (1, 2, 3)  # core spatial ranks; 4 is a probe (S23)
 LAYOUTS = ("cf", "cl")  # channels-first, channels-last
@@ -98,6 +92,27 @@ ACTS = {
     "identity": ("identity", None, None, None, None, None, None),
 }
 RELU_FAMILY = ("relu", "relu_lo", "relu6", "relu_clamp", "relu_leaky")
+# Equivalent encodings of a ReLU-family activation, not rotated with ACTS. Each is
+# written only by the cases that pin it (plan section 4.2).
+# relu_clip0: an explicit relu_lower_clip of 0 (the accept side of an engine's lower-clip check).
+# relu_slope0: an explicit relu_lower_clip_slope of 0 must run as standard ReLU (#14363).
+ACT_ENCODINGS = {
+    "relu_clip0": ("relu_fwd", 0.0, None, None, None, None, None),
+    "relu_slope0": ("relu_fwd", None, 0.0, None, None, None, None),
+}
+ACT_PARAMS = {**ACTS, **ACT_ENCODINGS}
+# Activations at least one engine executed in the act topology (plan section 4.5).
+EXECUTED_ACTS = ("relu", "relu6", "relu_clamp", "sigmoid", "tanh")
+# ReLU lower clip above 0 and leaky slope: every engine declines them in the fused path.
+# They stay as extra cases that probe the decline.
+PROBE_ACTS = ("relu_lo", "relu_leaky")
+# Activations that are claim cases, per topology with an activation. The bias_act
+# topology executes only the ReLU forms; sigmoid and tanh run in the act topology.
+CLAIM_ACTS = {
+    "act": EXECUTED_ACTS + tuple(ACT_ENCODINGS),
+    "bias_act": tuple(a for a in EXECUTED_ACTS if a in RELU_FAMILY)
+    + tuple(ACT_ENCODINGS),
+}
 
 # Fused topologies. Each is one bundle directory under ConvolutionFwdPointwise/.
 TOPOLOGIES = (
@@ -121,11 +136,7 @@ BUNDLE_DIR = {
 }
 HAS_BIAS = ("bias_act", "scale_bias_act", "bias_add_relu")
 HAS_SCALE = ("scale_bias_act",)
-HAS_RESIDUAL = ("add_relu", "bias_add_relu", "act_add")
 HAS_ACT_PLACEHOLDERS = ("act", "bias_act")  # other fused topologies fix relu_fwd
-
-# F21: value domains the current fill recipes can express (kind free / fixed).
-VALUE_CLASSES = ("uniform", "zero", "const", "large", "tiny")
 
 # Per-level ceilings for each case: (FLOP, bytes of fp32 x + w + y). None = unbounded.
 CEILINGS = {
@@ -306,7 +317,7 @@ def fits(c, level):
 def canon(c):
     """Stable key of the graph: everything that changes the graph or its data,
     nothing that only labels the case."""
-    skip = {"ids", "size", "src"}
+    skip = {"ids", "size", "src", "regression"}
     return json.dumps(
         {k: v for k, v in sorted(c.items()) if k not in skip}, sort_keys=True
     )
@@ -317,7 +328,7 @@ def short_hash(c):
 
 
 # --------------------------------------------------------------------------
-# Purpose (RFC 0021 section 9). Engine independent: a probe exists to exercise a
+# Purpose (RFC 0022 section 9). Engine independent: a probe exists to exercise a
 # feature that is unsupported, awkward or a hazard; a claim is a mainstream graph.
 # --------------------------------------------------------------------------
 
@@ -354,8 +365,11 @@ def probe_reasons(c):
     topo = c["topo"]
     if topo in ("scale_bias_act", "add_relu", "bias_add_relu", "act_add"):
         why.append("F27-F29 topology")
-    if topo in HAS_ACT_PLACEHOLDERS and c["act"] not in RELU_FAMILY:
-        why.append("F26 non-ReLU activation")
+    if topo in HAS_ACT_PLACEHOLDERS:
+        if c["act"] in PROBE_ACTS:
+            why.append("F26 ReLU lower clip or slope that engines decline")
+        elif c["act"] not in CLAIM_ACTS[topo]:
+            why.append("F26 non-ReLU activation")
     if topo in HAS_BIAS and (
         c["bias"] != "channel" or c["bias_t"] != c["xt"] or c["bias_first"]
     ):
@@ -370,7 +384,11 @@ def probe_reasons(c):
 
 
 def purpose(c):
-    return "probe" if probe_reasons(c) else "claim"
+    """probe, regression (a case that pins an escaped bug; claimed like a claim case)
+    or claim."""
+    if probe_reasons(c):
+        return "probe"
+    return "regression" if c.get("regression") else "claim"
 
 
 # --------------------------------------------------------------------------
@@ -764,11 +782,8 @@ def shape_L(sid, r, level="comprehensive"):
             and kw["c"] % 2 == 0
             and kw["k"] % 2 == 0
         ):
-            was_depthwise = kw["g"] == kw["c"]
             kw["c"] //= 2
             kw["k"] //= 2
-            if was_depthwise:
-                kw["g"] = kw["c"]
         else:
             return None
 
@@ -903,37 +918,116 @@ ACCUM_SHAPES = {
     ),  # 3,456
 }
 
+# E: layout and stride edges of real models (nightly). Each shape carries one F15 mix
+# (``mix``: x, w, y layouts) or one F16 stride kind (``stride``, on x and y in
+# ``layout``). E1-E4 and E5-E6 differ from a uniform layout only on extent-1 dims: a
+# 1x1 convolution on an [N, C, 1, 1] input whose output PyTorch allocates
+# channels-last, and a batch-1 input sliced from a wider channel dimension. E7-E12
+# slice the channels of real-size tensors; E13 and E14 mix layouts that agree only
+# once extent-1 strides are ignored.
+E_SHAPES = {
+    "E1": dict(
+        shape=dict(rank=2, n=8, c=256, k=64, g=1, ins=1, f=1), mix=("cf", "cf", "cl")
+    ),
+    "E2": dict(
+        shape=dict(rank=2, n=8, c=64, k=256, g=1, ins=1, f=1), mix=("cf", "cf", "cl")
+    ),
+    "E3": dict(
+        shape=dict(rank=3, n=4, c=128, k=32, g=1, ins=1, f=1), mix=("cf", "cf", "cl")
+    ),
+    "E4": dict(
+        shape=dict(rank=1, n=8, c=256, k=64, g=1, ins=1, f=1), mix=("cf", "cf", "cl")
+    ),
+    "E5": dict(
+        shape=dict(rank=2, n=1, c=64, k=64, g=1, ins=80, f=3, pre=1, post=1),
+        stride="chan",
+        layout="cf",
+    ),
+    "E6": dict(
+        shape=dict(rank=3, n=1, c=32, k=32, g=1, ins=(8, 16, 16), f=3, pre=1, post=1),
+        stride="chan",
+        layout="cf",
+    ),
+    "E7": dict(
+        shape=dict(rank=2, n=8, c=64, k=64, g=1, ins=56, f=3, pre=1, post=1),
+        stride="chan",
+        layout="cf",
+    ),
+    "E8": dict(
+        shape=dict(rank=2, n=8, c=64, k=64, g=1, ins=56, f=3, pre=1, post=1),
+        stride="chan",
+        layout="cl",
+    ),
+    "E9": dict(
+        shape=dict(rank=2, n=8, c=64, k=64, g=64, ins=56, f=3, pre=1, post=1),
+        stride="chan",
+        layout="cf",
+    ),
+    "E10": dict(
+        shape=dict(rank=2, n=8, c=64, k=64, g=64, ins=56, f=3, pre=1, post=1),
+        stride="chan",
+        layout="cl",
+    ),
+    "E11": dict(
+        shape=dict(rank=2, n=8, c=64, k=64, g=2, ins=56, f=3, pre=1, post=1),
+        stride="chan",
+        layout="cf",
+    ),
+    "E12": dict(
+        shape=dict(rank=3, n=2, c=32, k=32, g=1, ins=(8, 28, 28), f=3, pre=1, post=1),
+        stride="chan",
+        layout="cl",
+    ),
+    "E13": dict(
+        shape=dict(rank=2, n=8, c=256, k=256, g=256, ins=1, f=3, pre=1, post=1),
+        mix=("cf", "cf", "cl"),
+    ),
+    "E14": dict(
+        shape=dict(rank=2, n=8, c=1, k=32, g=1, ins=28, f=3), mix=("cf", "cf", "cl")
+    ),
+}
+
 
 # --------------------------------------------------------------------------
-# Trimmed products (plan section 4.3, trade-off register T8-T12). The level rules
-# generate the complete products; the generator then removes these cases, so the
-# cases that remain keep their ids, seeds and claims. T8-T11 remove products that
-# no engine executed on the measured architectures (gfx942 and gfx90a, see plan
-# section 4.5); activations that an engine executes are never trimmed. T12 keeps
-# the geometry classes S24-S62 to plain convolution in nightly and full: an
-# epilogue or a tensor feature does not depend on the geometry class (T1, T4).
-# Each trim names the trigger that brings its product back.
+# Trimmed products (plan section 4.3, trade-off register T8, T9, T11, T12). T10 is
+# retired; trim ids are not reused. The level rules generate the complete
+# products; the generator then removes these cases, so the cases that remain keep
+# their ids, seeds and claims. T8, T9 and T11 remove products that no engine
+# executed on the measured architectures (gfx942 and gfx90a, see plan section
+# 4.5); activations that an engine executes are never trimmed. T12 keeps the
+# geometry classes S24-S62 to plain convolution in nightly and full: an epilogue
+# or a tensor feature does not depend on the geometry class (T1, T4).
 # --------------------------------------------------------------------------
 
-# Activations at least one engine executed in the act topology (plan section 4.5).
-EXECUTED_ACTS = ("relu", "relu6", "relu_clamp", "sigmoid", "tanh")
 UNEXECUTED_TOPOLOGIES = ("scale_bias_act", "add_relu", "bias_add_relu", "act_add")
 # Geometry classes added from the corpus analysis and the engine review (plan
 # section 3.1), and their L forms.
 GEOMETRY_CLASS_SHAPES = tuple(f"{p}{i}" for p in "SL" for i in range(24, 63))
 
+# The single declaration of the trims: the product each removes and the trigger
+# that brings it back. ``trim`` selects the cases; the generator prints this table.
 TRIMS = {
-    "T8": "full: act x every S and L shape for activations no engine executes",
-    "T9": "comprehensive and full: plain repeats of the four fused topologies no engine executes",
-    "T10": "comprehensive and full: fp16 and bf16 bias_act, except one case per activation x core cell",
-    "T11": "full: F13, F19 and F35 paired with every S shape",
-    "T12": "comprehensive and full: geometry classes S24-S62 crossed with fused topologies or features",
+    "T8": dict(
+        product="full: act x every S and L shape for activations no engine executes",
+        trigger="an engine executes the activation: add it to EXECUTED_ACTS",
+    ),
+    "T9": dict(
+        product="comprehensive and full: plain repeats of the four fused topologies no engine executes",
+        trigger="an engine executes the topology: remove it from UNEXECUTED_TOPOLOGIES",
+    ),
+    "T11": dict(
+        product="full: F13, F19 and F35 paired with every S shape",
+        trigger="an engine claims the feature; for F13 and F19 the reference fixes of plan section 6 must land too",
+    ),
+    "T12": dict(
+        product="comprehensive and full: geometry classes S24-S62 crossed with fused topologies or features",
+        trigger="a defect needs a geometry class together with a fusion or a feature, or an engine picks fused kernels by geometry class",
+    ),
 }
 
 
 def trim(c, level):
-    """The trim (key of TRIMS) that removes case ``c`` from ``level``, or None.
-    T10's per-cell exception is applied by the generator, which sees all levels."""
+    """The trim (key of TRIMS) that removes case ``c`` from ``level``, or None."""
     tagged = any(i.startswith("F") for i in c["ids"])
     topo = c["topo"]
     if level == "full" and topo == "act" and c["act"] not in EXECUTED_ACTS:
@@ -947,8 +1041,6 @@ def trim(c, level):
         and any(i in GEOMETRY_CLASS_SHAPES for i in c["ids"])
     ):
         return "T12"
-    if late and topo == "bias_act" and c["xt"] in ("half", "bfloat16") and not tagged:
-        return "T10"
     if (
         level == "full"
         and topo == "conv"
@@ -958,15 +1050,10 @@ def trim(c, level):
     return None
 
 
-def core_cell(c):
-    """The core cell of a fused case, per activation: (act, rank, layout, dtype)."""
-    return (c["act"], c["rank"], c["xl"], c["xt"])
-
-
 # --------------------------------------------------------------------------
 # Value domains (F21). The fill recipes the harness has are 'free' (uniform in
 # [lo, hi]) and 'fixed' (constant). NaN, Inf, subnormal injection and sparsity
-# need harness work (RFC 0021 I4) and are not generated.
+# need harness work (RFC 0022 I4) and are not generated.
 # --------------------------------------------------------------------------
 
 
@@ -986,6 +1073,8 @@ def value_recipes(c):
         # and a rounding error stays small relative to them.
         a = float(f"{math.sqrt(0.5 * DTYPE_MAX[t] / accum_len(c)):.3g}")
         return dict(x=("free", 0.0, a), w=("free", 0.0, a))
+    # Every output stays below the comparison's atol, so a wrong value passes: the
+    # class detects NaN, Inf and faults only.
     if cls == "tiny":
         a = 3e-3 if t == "half" else 1e-20
         return dict(x=("free", -a, a), w=("free", -a, a))

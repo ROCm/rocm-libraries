@@ -60,6 +60,7 @@ extern "C" {
 *  spgemmDescr      SpGEMM descriptor.
 *  @param[out]
 *  bufferSize1      number of bytes of the temporary storage buffer.
+*                   \p bufferSize1 is always a host variable, regardless of the pointer mode.
 *  @param[in]
 *  externalBuffer1  temporary storage buffer allocated by the user.
 *
@@ -142,14 +143,17 @@ hipsparseStatus_t hipsparseSpGEMMreuse_workEstimation(hipsparseHandle_t      han
 *  spgemmDescr      SpGEMM descriptor.
 *  @param[out]
 *  bufferSize2      number of bytes of the temporary storage \p externalBuffer2.
+*                   \p bufferSize2 is always a host variable, regardless of the pointer mode.
 *  @param[in]
 *  externalBuffer2  temporary storage buffer allocated by the user.
 *  @param[out]
 *  bufferSize3      number of bytes of the temporary storage \p externalBuffer3.
+*                   \p bufferSize3 is always a host variable, regardless of the pointer mode.
 *  @param[in]
 *  externalBuffer3  temporary storage buffer allocated by the user.
 *  @param[out]
 *  bufferSize4      number of bytes of the temporary storage \p externalBuffer4.
+*                   \p bufferSize4 is always a host variable, regardless of the pointer mode.
 *  @param[in]
 *  externalBuffer4  temporary storage buffer allocated by the user.
 *
@@ -246,6 +250,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_nnz(hipsparseHandle_t      handle,
 *  spgemmDescr      SpGEMM descriptor.
 *  @param[out]
 *  bufferSize5      number of bytes of the temporary storage \p externalBuffer5.
+*                   \p bufferSize5 is always a host variable, regardless of the pointer mode.
 *  @param[in]
 *  externalBuffer5  temporary storage buffer allocated by the user.
 *
@@ -327,13 +332,13 @@ hipsparseStatus_t hipsparseSpGEMMreuse_copy(hipsparseHandle_t      handle,
 *  @param[in]
 *  opB              sparse matrix \f$B\f$ operation type.
 *  @param[in]
-*  alpha            scalar \f$\alpha\f$.
+*  alpha            scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA             sparse matrix \f$A\f$ descriptor.
 *  @param[in]
 *  matB             sparse matrix \f$B\f$ descriptor.
 *  @param[in]
-*  beta             scalar \f$\beta\f$.
+*  beta             scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[out]
 *  matC             sparse matrix \f$C\f$ descriptor.
 *  @param[in]

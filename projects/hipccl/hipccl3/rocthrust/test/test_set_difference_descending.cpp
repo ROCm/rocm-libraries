@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -39,7 +39,8 @@ TYPED_TEST(SetDifferenceDescendingTests, TestSetDifferenceDescendingSimple)
   Vector ref{5, 2};
   Vector result(2);
 
-  Iterator end = thrust::set_difference(a.begin(), a.end(), b.begin(), b.end(), result.begin(), thrust::greater<T>());
+  Iterator end =
+    thrust::set_difference(a.begin(), a.end(), b.begin(), b.end(), result.begin(), _THRUST_STD::greater<T>());
 
   ASSERT_EQ_QUIET(result.end(), end);
   ASSERT_EQ(ref, result);
@@ -64,8 +65,8 @@ TYPED_TEST(SetDifferenceDescendingPrimitiveTests, TestSetDifferenceDescending)
       thrust::host_vector<T> h_a(temp.begin(), temp.begin() + size);
       thrust::host_vector<T> h_b(temp.begin() + size, temp.end());
 
-      thrust::sort(h_a.begin(), h_a.end(), thrust::greater<T>());
-      thrust::sort(h_b.begin(), h_b.end(), thrust::greater<T>());
+      thrust::sort(h_a.begin(), h_a.end(), _THRUST_STD::greater<T>());
+      thrust::sort(h_b.begin(), h_b.end(), _THRUST_STD::greater<T>());
 
       thrust::device_vector<T> d_a = h_a;
       thrust::device_vector<T> d_b = h_b;
@@ -76,12 +77,12 @@ TYPED_TEST(SetDifferenceDescendingPrimitiveTests, TestSetDifferenceDescending)
       typename thrust::host_vector<T>::iterator h_end;
       typename thrust::device_vector<T>::iterator d_end;
 
-      h_end =
-        thrust::set_difference(h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin(), thrust::greater<T>());
+      h_end = thrust::set_difference(
+        h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin(), _THRUST_STD::greater<T>());
       h_result.resize(h_end - h_result.begin());
 
-      d_end =
-        thrust::set_difference(d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin(), thrust::greater<T>());
+      d_end = thrust::set_difference(
+        d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin(), _THRUST_STD::greater<T>());
 
       d_result.resize(d_end - d_result.begin());
 

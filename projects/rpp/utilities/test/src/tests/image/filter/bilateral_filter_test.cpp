@@ -105,14 +105,10 @@ constexpr Tolerance kBilateralFilterTolerance = tolerance(1.0, 1e-3, 1e-2);
 
 template <typename T>
 void run_bilateral_filter(const TestConfig& cfg, const BilateralFilterParams& op) {
-    // src carries the same leading border pad as gaussian_filter: the HIP filter kernels require
-    // srcDesc.offsetInBytes >= 12 * (kernelSize/2) of read-slack for the KxK window. dst keeps
-    // offset 0, so the golden and comparator index destination elements from 0.
+    // Both descriptors keep offset 0: the API allows offsetInBytes >= 0, and neither backend reads
+    // outside the ROI (border pixels are replicated by clamping, not read from a pad).
     RpptDesc srcDesc = make_src_descriptor(cfg);
     RpptDesc dstDesc = make_dst_descriptor(cfg);
-    const std::size_t offsetBytes = 12u * (op.kernelSize / 2);
-    const std::size_t offsetElems = offsetBytes / dtype_size(cfg.dtype);
-    srcDesc.offsetInBytes = static_cast<Rpp32u>(offsetBytes);
 
     const std::size_t count = element_count(srcDesc);
     const std::size_t imageBytes = count * dtype_size(cfg.dtype);
@@ -128,25 +124,21 @@ void run_bilateral_filter(const TestConfig& cfg, const BilateralFilterParams& op
         roi[i] = roiVec[i];
     }
 
-    // (1) Host golden model. The src buffer is [front pad][image][back pad]; the image base sits
-    // at offsetElems. The destination starts from a DIFFERENT pattern than the source (salt = 1):
-    // at the sr0p1 identity corner the output equals the input, so seeding dst with the input
+    // (1) Host golden model. The destination starts from a DIFFERENT pattern than the source (salt
+    // = 1): at the sr0p1 identity corner the output equals the input, so seeding dst with the input
     // would let a kernel that wrote nothing pass.
-    std::vector<T> src(offsetElems + count + offsetElems), dstInit(count), golden(count),
-        actual(count);
-    fill_input<T>(src.data(), src.size(), cfg.dtype);
+    std::vector<T> src(count), dstInit(count), golden(count), actual(count);
+    fill_input<T>(src.data(), count, cfg.dtype);
     fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/1);
-    T* image = src.data() + offsetElems;
     golden = dstInit;
-    bilateral_filter_reference<T>(image, srcDesc, golden.data(), dstDesc, cfg.dtype, roi.data(),
-                                  XYWH, op.kernelSize, stdDevSpaceTensor.data(),
+    bilateral_filter_reference<T>(src.data(), srcDesc, golden.data(), dstDesc, cfg.dtype,
+                                  roi.data(), XYWH, op.kernelSize, stdDevSpaceTensor.data(),
                                   stdDevRangeTensor.data());
 
-    // (2) Run RPP on the configured backend. RPP adds srcDesc.offsetInBytes to the src pointer
-    // internally, landing on the image base.
-    DeviceTensor srcDev(cfg.backend, src.size() * dtype_size(cfg.dtype));
+    // (2) Run RPP on the configured backend.
+    DeviceTensor srcDev(cfg.backend, imageBytes);
     DeviceTensor dst(cfg.backend, imageBytes);
-    srcDev.write(src.data(), src.size() * dtype_size(cfg.dtype));
+    srcDev.write(src.data(), imageBytes);
     dst.write(dstInit.data(), imageBytes);  // define outside-ROI dst to mirror the golden
 
     RppHandle handle(cfg.backend, cfg.size.n);

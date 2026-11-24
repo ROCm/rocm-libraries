@@ -31,7 +31,7 @@ Two invariants must hold together; either alone is insufficient:
 
 Sibling-DeviceNames consistency is a fact about the shipped corpus, so it is
 enforced by ``TensileLogic --check-all`` via
-``tensilelite.TensileLogic.ValidCorpusConsistency.check_corpus_invariants`` in
+``tensilelite.logic.valid_corpus_consistency.check_corpus_invariants`` in
 every kernel-generating build, and pinned hermetically in
 ``test_valid_corpus_consistency.py``. Everything in this file checks code, and
 none of it reads the corpus.

@@ -2,7 +2,7 @@
   "version": 1,
   "cases": [
     {
-      "id": "S7_1d_i16_n2c16k32g2_f3_fp32_cf_sigmoid",
+      "id": "s7_1d_i16_n2c16k32g2_f3_fp32_cf_sigmoid",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -99,7 +99,7 @@
         "plan_items": [
           "S7"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1705656798,
         "inputs": {
@@ -115,12 +115,11 @@
             "hi": 1.0,
             "seed": 2070868543
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S8_1d_i16_n2c32k64g4_f3_fp32_cl_tanh",
+      "id": "s8_1d_i16_n2c32k64g4_f3_fp32_cl_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -217,7 +216,7 @@
         "plan_items": [
           "S8"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1137328915,
         "inputs": {
@@ -233,12 +232,11 @@
             "hi": 1.0,
             "seed": 1038992165
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S9_1d_i16_n8c16k32_f1_fp16_cf_elu",
+      "id": "s9_1d_i16_n8c16k32_f1_fp16_cf_elu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -356,7 +354,7 @@
       }
     },
     {
-      "id": "S10_1d_i16_n2c16k32_f5_fp16_cl_gelu",
+      "id": "s10_1d_i16_n2c16k32_f5_fp16_cl_gelu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -474,7 +472,7 @@
       }
     },
     {
-      "id": "S11_1d_i16_n2c3k16_f7_bf16_cf_gelu_tanh",
+      "id": "s11_1d_i16_n2c3k16_f7_bf16_cf_gelu_tanh",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -592,7 +590,7 @@
       }
     },
     {
-      "id": "S13a_1d_i16_n2c16k16g16_f3_bf16_cl_swish",
+      "id": "s13a_1d_i16_n2c16k16g16_f3_bf16_cl_swish",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -710,7 +708,7 @@
       }
     },
     {
-      "id": "S7_2d_i16x16_n2c16k32g2_f3x3_fp32_cf_tanh",
+      "id": "s7_2d_i16x16_n2c16k32g2_f3x3_fp32_cf_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -819,7 +817,7 @@
         "plan_items": [
           "S7"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 1485740860,
         "inputs": {
@@ -835,12 +833,11 @@
             "hi": 1.0,
             "seed": 56552660
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S8_2d_i16x16_n2c32k64g4_f3x3_fp32_cl_elu",
+      "id": "s8_2d_i16x16_n2c32k64g4_f3x3_fp32_cl_elu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -970,7 +967,7 @@
       }
     },
     {
-      "id": "S9_2d_i16x16_n8c16k32_f1x1_fp16_cf_gelu",
+      "id": "s9_2d_i16x16_n8c16k32_f1x1_fp16_cf_gelu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -1100,7 +1097,7 @@
       }
     },
     {
-      "id": "S10_2d_i16x16_n2c16k32_f5x5_fp16_cl_gelu_tanh",
+      "id": "s10_2d_i16x16_n2c16k32_f5x5_fp16_cl_gelu_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -1230,7 +1227,7 @@
       }
     },
     {
-      "id": "S11_2d_i16x16_n2c3k16_f7x7_bf16_cf_swish",
+      "id": "s11_2d_i16x16_n2c3k16_f7x7_bf16_cf_swish",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -1360,7 +1357,7 @@
       }
     },
     {
-      "id": "S12a_2d_i16x16_n2c16k32_f1x3_bf16_cl_softplus",
+      "id": "s12a_2d_i16x16_n2c16k32_f1x3_bf16_cl_softplus",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -1490,7 +1487,7 @@
       }
     },
     {
-      "id": "S8_3d_i16x16x16_n2c32k64g4_f3x3x3_fp32_cf_elu",
+      "id": "s8_3d_i16x16x16_n2c32k64g4_f3x3x3_fp32_cf_elu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -1632,7 +1629,7 @@
       }
     },
     {
-      "id": "S9_3d_i16x16x16_n8c16k32_f1x1x1_fp32_cl_gelu",
+      "id": "s9_3d_i16x16x16_n8c16k32_f1x1x1_fp32_cl_gelu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -1774,7 +1771,7 @@
       }
     },
     {
-      "id": "S10_3d_i16x8x4_n2c16k32_f5x5x5_fp16_cf_gelu_tanh",
+      "id": "s10_3d_i16x8x4_n2c16k32_f5x5x5_fp16_cf_gelu_tanh",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -1916,7 +1913,7 @@
       }
     },
     {
-      "id": "S11_3d_i16x16x16_n2c3k16_f7x7x7_fp16_cl_swish",
+      "id": "s11_3d_i16x16x16_n2c3k16_f7x7x7_fp16_cl_swish",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -2058,7 +2055,7 @@
       }
     },
     {
-      "id": "S12a_3d_i16x16x16_n2c16k32_f1x3x3_bf16_cf_softplus",
+      "id": "s12a_3d_i16x16x16_n2c16k32_f1x3x3_bf16_cf_softplus",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -2200,7 +2197,7 @@
       }
     },
     {
-      "id": "S13a_3d_i16x16x16_n2c16k16g16_f3x3x3_bf16_cl_identity",
+      "id": "s13a_3d_i16x16x16_n2c16k16g16_f3x3x3_bf16_cl_identity",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -2342,7 +2339,7 @@
       }
     },
     {
-      "id": "S10_1d_i16_n2c16k32_f5_fp32_cf_gelu",
+      "id": "s10_1d_i16_n2c16k32_f5_fp32_cf_gelu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -2460,7 +2457,7 @@
       }
     },
     {
-      "id": "S11_1d_i16_n2c3k16_f7_fp32_cl_gelu_tanh",
+      "id": "s11_1d_i16_n2c3k16_f7_fp32_cl_gelu_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -2578,7 +2575,7 @@
       }
     },
     {
-      "id": "S13a_1d_i16_n2c16k16g16_f3_fp16_cf_swish",
+      "id": "s13a_1d_i16_n2c16k16g16_f3_fp16_cf_swish",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -2696,7 +2693,7 @@
       }
     },
     {
-      "id": "S13b_1d_i16_n2c16k32g16_f3_fp16_cl_softplus",
+      "id": "s13b_1d_i16_n2c16k32g16_f3_fp16_cl_softplus",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -2814,7 +2811,7 @@
       }
     },
     {
-      "id": "S14_1d_i15_n2c13k17_f3_bf16_cf_identity",
+      "id": "s14_1d_i15_n2c13k17_f3_bf16_cf_identity",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -2932,7 +2929,7 @@
       }
     },
     {
-      "id": "S16_1d_i32_n2c16k32_f3_bf16_cl_relu",
+      "id": "s16_1d_i32_n2c16k32_f3_bf16_cl_relu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -3049,7 +3046,7 @@
       }
     },
     {
-      "id": "S10_2d_i16x16_n2c16k32_f5x5_fp32_cf_gelu_tanh",
+      "id": "s10_2d_i16x16_n2c16k32_f5x5_fp32_cf_gelu_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -3179,7 +3176,7 @@
       }
     },
     {
-      "id": "S11_2d_i16x16_n2c3k16_f7x7_fp32_cl_swish",
+      "id": "s11_2d_i16x16_n2c3k16_f7x7_fp32_cl_swish",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -3309,7 +3306,7 @@
       }
     },
     {
-      "id": "S12a_2d_i16x16_n2c16k32_f1x3_fp16_cf_softplus",
+      "id": "s12a_2d_i16x16_n2c16k32_f1x3_fp16_cf_softplus",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -3439,7 +3436,7 @@
       }
     },
     {
-      "id": "S12b_2d_i16x16_n2c16k32_f3x1_fp16_cl_identity",
+      "id": "s12b_2d_i16x16_n2c16k32_f3x1_fp16_cl_identity",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -3569,7 +3566,7 @@
       }
     },
     {
-      "id": "S13a_2d_i16x16_n2c16k16g16_f3x3_bf16_cf_relu",
+      "id": "s13a_2d_i16x16_n2c16k16g16_f3x3_bf16_cf_relu",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -3698,7 +3695,7 @@
       }
     },
     {
-      "id": "S13b_2d_i16x16_n2c16k32g16_f3x3_bf16_cl_relu_lo",
+      "id": "s13b_2d_i16x16_n2c16k32g16_f3x3_bf16_cl_relu_lo",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -3807,7 +3804,7 @@
         "plan_items": [
           "S13b"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 210907049,
         "inputs": {
@@ -3823,11 +3820,12 @@
             "hi": 1.0,
             "seed": 2031530726
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S11_3d_i16x16x16_n2c3k16_f7x7x7_fp32_cf_swish",
+      "id": "s11_3d_i16x16x16_n2c3k16_f7x7x7_fp32_cf_swish",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -3969,7 +3967,7 @@
       }
     },
     {
-      "id": "S12a_3d_i16x16x16_n2c16k32_f1x3x3_fp32_cl_softplus",
+      "id": "s12a_3d_i16x16x16_n2c16k32_f1x3x3_fp32_cl_softplus",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -4111,7 +4109,7 @@
       }
     },
     {
-      "id": "S13a_3d_i16x16x16_n2c16k16g16_f3x3x3_fp16_cf_identity",
+      "id": "s13a_3d_i16x16x16_n2c16k16g16_f3x3x3_fp16_cf_identity",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -4253,7 +4251,7 @@
       }
     },
     {
-      "id": "S13b_3d_i16x16x16_n2c16k32g16_f3x3x3_fp16_cl_relu",
+      "id": "s13b_3d_i16x16x16_n2c16k32g16_f3x3x3_fp16_cl_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "float",
@@ -4394,7 +4392,7 @@
       }
     },
     {
-      "id": "S14_3d_i15x15x15_n2c13k17_f3x3x3_bf16_cf_relu_lo",
+      "id": "s14_3d_i15x15x15_n2c13k17_f3x3x3_bf16_cf_relu_lo",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -4515,7 +4513,7 @@
         "plan_items": [
           "S14"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 764420369,
         "inputs": {
@@ -4531,11 +4529,12 @@
             "hi": 1.0,
             "seed": 870774771
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S15_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl_relu6",
+      "id": "s15_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl_relu6",
       "values": {
         "io_data_type": "bfloat16",
         "intermediate_data_type": "float",
@@ -4676,136 +4675,7 @@
       }
     },
     {
-      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu",
-      "values": {
-        "io_data_type": "float",
-        "intermediate_data_type": "float",
-        "override_shape": false,
-        "attributes": {
-          "conv_compute": "float",
-          "conv_mode": "CROSS_CORRELATION",
-          "dilation": [
-            1,
-            1
-          ],
-          "post_padding": [
-            1,
-            1
-          ],
-          "pre_padding": [
-            1,
-            1
-          ],
-          "stride": [
-            1,
-            1
-          ],
-          "conv_y_virtual": true,
-          "act_operation": "relu_fwd",
-          "act_relu_lower_clip": null,
-          "act_relu_lower_clip_slope": null,
-          "act_relu_upper_clip": null,
-          "act_elu_alpha": null,
-          "act_swish_beta": null,
-          "act_softplus_beta": null
-        },
-        "tensors": [
-          {
-            "uid": 0,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 1,
-            "dims": [
-              2,
-              32,
-              16,
-              16
-            ],
-            "strides": [
-              8192,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 2,
-            "dims": [
-              32,
-              16,
-              3,
-              3
-            ],
-            "strides": [
-              144,
-              9,
-              3,
-              1
-            ],
-            "data_type": "float"
-          },
-          {
-            "uid": 3,
-            "dims": [
-              2,
-              16,
-              16,
-              16
-            ],
-            "strides": [
-              4096,
-              256,
-              16,
-              1
-            ],
-            "data_type": "float"
-          }
-        ]
-      },
-      "metadata": {
-        "format_version": 1,
-        "generator": "generate_conv_fwd_bundles.py",
-        "generator_version": "1",
-        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
-        "operation": "ConvolutionFwd+act",
-        "plan_items": [
-          "S3"
-        ],
-        "purpose": "claim",
-        "size_class": "S",
-        "seed": 728230167,
-        "inputs": {
-          "2": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1837158629
-          },
-          "3": {
-            "kind": "free",
-            "lo": -1.0,
-            "hi": 1.0,
-            "seed": 1935029052
-          }
-        }
-      }
-    },
-    {
-      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_lo",
+      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_lo",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -4914,7 +4784,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 69979777,
         "inputs": {
@@ -4930,11 +4800,12 @@
             "hi": 1.0,
             "seed": 668841719
           }
-        }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
       }
     },
     {
-      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_clamp",
+      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_clamp",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -5063,7 +4934,7 @@
       }
     },
     {
-      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_leaky",
+      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_leaky",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -5172,7 +5043,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "claim",
+        "purpose": "probe",
         "size_class": "S",
         "seed": 713574104,
         "inputs": {
@@ -5188,11 +5059,141 @@
             "hi": 1.0,
             "seed": 743704145
           }
+        },
+        "notes": "probe: F26 ReLU lower clip or slope that engines decline"
+      }
+    },
+    {
+      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_sigmoid",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1
+          ],
+          "post_padding": [
+            1,
+            1
+          ],
+          "pre_padding": [
+            1,
+            1
+          ],
+          "stride": [
+            1,
+            1
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "sigmoid_fwd",
+          "act_relu_lower_clip": null,
+          "act_relu_lower_clip_slope": null,
+          "act_relu_upper_clip": null,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              32,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              32,
+              16,
+              16
+            ],
+            "strides": [
+              8192,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S3"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 1683160985,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1295795164
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 314008198
+          }
         }
       }
     },
     {
-      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_tanh",
+      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -5301,7 +5302,7 @@
         "plan_items": [
           "S3"
         ],
-        "purpose": "probe",
+        "purpose": "claim",
         "size_class": "S",
         "seed": 2005262911,
         "inputs": {
@@ -5317,12 +5318,11 @@
             "hi": 1.0,
             "seed": 1529231498
           }
-        },
-        "notes": "probe: F26 non-ReLU activation"
+        }
       }
     },
     {
-      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_elu",
+      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_elu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -5452,7 +5452,7 @@
       }
     },
     {
-      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_gelu",
+      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_gelu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -5582,7 +5582,7 @@
       }
     },
     {
-      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_gelu_tanh",
+      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_gelu_tanh",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -5712,7 +5712,7 @@
       }
     },
     {
-      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_swish",
+      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_swish",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -5842,7 +5842,7 @@
       }
     },
     {
-      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_softplus",
+      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_softplus",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -5972,7 +5972,7 @@
       }
     },
     {
-      "id": "S3_2d_i16x16_n2c16k32_f3x3_fp32_cf_identity",
+      "id": "s3_2d_i16x16_n2c16k32_f3x3_fp32_cf_identity",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -6102,7 +6102,7 @@
       }
     },
     {
-      "id": "S3_F30_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu",
+      "id": "s3_f30_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu",
       "values": {
         "io_data_type": "float",
         "intermediate_data_type": "float",
@@ -6209,8 +6209,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+act",
         "plan_items": [
-          "S3",
-          "F30"
+          "F30",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -6233,7 +6233,7 @@
       }
     },
     {
-      "id": "S3_F31_2d_i16x16_n2c16k32_f3x3_fp16_cf_relu",
+      "id": "s3_f31_2d_i16x16_n2c16k32_f3x3_fp16_cf_relu",
       "values": {
         "io_data_type": "half",
         "intermediate_data_type": "half",
@@ -6340,8 +6340,8 @@
         "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
         "operation": "ConvolutionFwd+act",
         "plan_items": [
-          "S3",
-          "F31"
+          "F31",
+          "S3"
         ],
         "purpose": "probe",
         "size_class": "S",
@@ -6361,6 +6361,522 @@
           }
         },
         "notes": "probe: F31 intermediate type"
+      }
+    },
+    {
+      "id": "s2_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_clip0",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1
+          ],
+          "post_padding": [
+            0,
+            0
+          ],
+          "pre_padding": [
+            0,
+            0
+          ],
+          "stride": [
+            1,
+            1
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "relu_fwd",
+          "act_relu_lower_clip": 0.0,
+          "act_relu_lower_clip_slope": null,
+          "act_relu_upper_clip": null,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              32,
+              14,
+              14
+            ],
+            "strides": [
+              6272,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              32,
+              14,
+              14
+            ],
+            "strides": [
+              6272,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S2"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 1304383972,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 84572360
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1942308554
+          }
+        }
+      }
+    },
+    {
+      "id": "s2_2d_i16x16_n2c16k32_f3x3_fp16_cf_relu_clip0",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1
+          ],
+          "post_padding": [
+            0,
+            0
+          ],
+          "pre_padding": [
+            0,
+            0
+          ],
+          "stride": [
+            1,
+            1
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "relu_fwd",
+          "act_relu_lower_clip": 0.0,
+          "act_relu_lower_clip_slope": null,
+          "act_relu_upper_clip": null,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              32,
+              14,
+              14
+            ],
+            "strides": [
+              6272,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              32,
+              14,
+              14
+            ],
+            "strides": [
+              6272,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S2"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 395164673,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1331334093
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 122798189
+          }
+        }
+      }
+    },
+    {
+      "id": "s2_2d_i16x16_n2c16k32_f3x3_fp32_cf_relu_slope0",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1
+          ],
+          "post_padding": [
+            0,
+            0
+          ],
+          "pre_padding": [
+            0,
+            0
+          ],
+          "stride": [
+            1,
+            1
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "relu_fwd",
+          "act_relu_lower_clip": null,
+          "act_relu_lower_clip_slope": 0.0,
+          "act_relu_upper_clip": null,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              32,
+              14,
+              14
+            ],
+            "strides": [
+              6272,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              32,
+              14,
+              14
+            ],
+            "strides": [
+              6272,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S2"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 1679969330,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1738628741
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 306190064
+          }
+        }
+      }
+    },
+    {
+      "id": "s2_2d_i16x16_n2c16k32_f3x3_fp16_cf_relu_slope0",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "float",
+        "override_shape": false,
+        "attributes": {
+          "conv_compute": "float",
+          "conv_mode": "CROSS_CORRELATION",
+          "dilation": [
+            1,
+            1
+          ],
+          "post_padding": [
+            0,
+            0
+          ],
+          "pre_padding": [
+            0,
+            0
+          ],
+          "stride": [
+            1,
+            1
+          ],
+          "conv_y_virtual": true,
+          "act_operation": "relu_fwd",
+          "act_relu_lower_clip": null,
+          "act_relu_lower_clip_slope": 0.0,
+          "act_relu_upper_clip": null,
+          "act_elu_alpha": null,
+          "act_swish_beta": null,
+          "act_softplus_beta": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              32,
+              14,
+              14
+            ],
+            "strides": [
+              6272,
+              196,
+              14,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              32,
+              14,
+              14
+            ],
+            "strides": [
+              6272,
+              196,
+              14,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              32,
+              16,
+              3,
+              3
+            ],
+            "strides": [
+              144,
+              9,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_conv_fwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "ConvolutionFwd+act",
+        "plan_items": [
+          "S2"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 464292071,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 82828143
+          },
+          "3": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 786314744
+          }
+        }
       }
     }
   ]

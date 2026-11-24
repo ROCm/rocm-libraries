@@ -148,7 +148,7 @@ TEST_P(GPU_FusionSetArg_FP16, TestSetArgApiCall)
     ASSERT_EQ(conv_param->weights, wei_dev.get());
 }
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_FusionSetArg_FP16,
                          testing::Combine(testing::Values(miopenActivationRELU),
                                           testing::ValuesIn(GetNetwork1<ConvTestCaseBase>()),
@@ -157,7 +157,9 @@ INSTANTIATE_TEST_SUITE_P(Full,
                                           testing::Values(0.75f),
                                           testing::Values(0.5f)));
 
-TEST(CPU_FusionCreateOpConvForward_FP32, TestInvalidConvLayout)
+using CPU_FusionCreateOpConvForward_FP32 = testing::TestWithParam<int>;
+
+TEST_P(CPU_FusionCreateOpConvForward_FP32, TestInvalidConvLayout)
 {
     std::vector<int> xDims{4, 4, 4, 4};
     std::vector<int> xStrides{1, 4, 16, 64}; // WHCN order
@@ -194,6 +196,8 @@ TEST(CPU_FusionCreateOpConvForward_FP32, TestInvalidConvLayout)
 
     miopenDestroyFusionPlan(fusionPlanDesc);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_FusionCreateOpConvForward_FP32, testing::Values(0));
 
 MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_AMD_WINOGRAD_RXS_F2X3_G1)
 
@@ -376,7 +380,7 @@ TEST_P(GPU_CBAFind2FusionWorkspace_FP32, CBAFind2_testWorkspaceInvalidSize)
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     GPU_CBAFind2FusionWorkspace_FP32,
     testing::Combine(testing::Values(miopenActivationRELU),
                      testing::Values(ConvTestCaseBase{

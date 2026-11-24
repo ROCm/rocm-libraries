@@ -42,7 +42,7 @@ src/integration-tests/      C++ integration tests (mostly opt-in)
 tests/                      harness unit tests; tests/gpu-ref/ reference-executor tests
 cmake/                      add_external_integration_test_target() for providers
 migration-scripts/          capture/import tooling (import_graph.py, find_case.py, ...)
-reference-data-scripts/     golden-data generators and verify_golden_bundles.py
+reference-data-scripts/     golden-data generators, per-op bundle generators (generate_conv_fwd_bundles.py, generate_sdpa_bwd_bundles.py) and verify_golden_bundles.py
 scripts/                    verify_support_claims.py, harvest_support_claims.py (+ support_sidecar.py)
 ```
 

@@ -155,7 +155,7 @@ at runtime. **Write modern typing; do not maintain the legacy `typing`-module fo
 |---|---|---|
 | Function / method / variable | `snake_case` | `build_mfma_gemm`, `lane_decode` |
 | Class / dataclass | `PascalCase` | `MfmaGemmSpec`, `ISABackend`, `MfmaAtom` |
-| Module-private helper | `_leading_underscore` | `_binop`, `_operand`, `_mma_c_frag_len` |
+| Module-private helper | `_leading_underscore` | `_binop`, `_operand`, `_mma_dst_frag_len` |
 | Module-private constant | `_UPPER_SNAKE` | `_SUPPORTED_DTYPES`, `_CATALOG_DTYPE` |
 | Public constant | `UPPER_SNAKE` | `F16`, `I32`, `BF16` |
 
@@ -310,7 +310,8 @@ mechanics:
 
 ## 12. A minimal conforming module
 
-A new `instances/` builder that assembles the rules above (body elided):
+A new `instances/` builder that assembles the rules above (body elided). Its signature
+follows the builder rule in [`platform/AGENTS.md`](../platform/AGENTS.md).
 
 ```python
 """Foo GEMM builder — Spec -> build_* -> KernelDef (host authoring)."""
@@ -341,7 +342,7 @@ def is_valid_spec(spec: FooSpec, arch: str = "gfx950") -> tuple[bool, str]:
     return True, "ok"
 
 
-def build_foo(spec: FooSpec, arch: str = "gfx950") -> KernelDef:
+def build_foo(spec: FooSpec, *, arch: str) -> KernelDef:
     ok, why = is_valid_spec(spec, arch=arch)
     if not ok:
         raise ValueError(f"invalid foo spec for {arch}: {why}")

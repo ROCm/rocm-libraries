@@ -1706,6 +1706,10 @@ miopenConvolutionBackwardWeightsImmediate(miopenHandle_t handle,
  * configuration. Therefore, typically this function should be called at least once for each
  * convolution configuration used.
  *
+ * For a dilated convolution, GEMM workspace is included only when no solver other than GEMM and
+ * the naive reference solvers applies, and when it fits in 85% of the device memory free at the
+ * time of the call, so the result can change between calls.
+ *
  * Since the convolution configuration is determined by tensor and convolution descriptors, the user
  * should ensure that all descriptors contain complete information. For example, if Group/Depthwise
  * convolution mode is used, then miopenSetConvolutionGroupCount() should be called before running
@@ -1871,6 +1875,10 @@ MIOPEN_EXPORT miopenStatus_t miopenConvolutionForwardBias(miopenHandle_t handle,
  * configuration. Therefore, typically this function should be called at least once for each
  * convolution configuration used.
  *
+ * For a dilated convolution, GEMM workspace is included only when no solver other than GEMM and
+ * the naive reference solvers applies, and when it fits in 85% of the device memory free at the
+ * time of the call, so the result can change between calls.
+ *
  * Since the convolution configuration is determined by tensor and convolution descriptors, the user
  * should ensure that all descriptors contain complete information. For example, if Group/Depthwise
  * convolution mode is used, then miopenSetConvolutionGroupCount() should be called before running
@@ -2012,6 +2020,10 @@ miopenConvolutionBackwardData(miopenHandle_t handle,
  * It should be assumed that the required workspace size is different for each convolution
  * configuration. Therefore, typically this function should be called at least once for each
  * convolution configuration used.
+ *
+ * For a dilated convolution, GEMM workspace is included only when no solver other than GEMM and
+ * the naive reference solvers applies, and when it fits in 85% of the device memory free at the
+ * time of the call, so the result can change between calls.
  *
  * Since the convolution configuration is determined by tensor and convolution descriptors, the user
  * should ensure that all descriptors contain complete information. For example, if Group/Depthwise
@@ -6060,6 +6072,16 @@ miopenGetReductionWorkspaceSize(miopenHandle_t handle,
  * input tensor A or must be equal to 1. The dimensions with length equal to 1 indicate the
  * dimensions
  * of A to be reduced.
+ *
+ * The scale factors alpha and beta are read as float, or as double when the data type of tensor A
+ * is double, and are passed to the kernels as float; they are converted to the compute type of the
+ * reduce descriptor. The reduction, the scaling by alpha and the blend with the prior content of
+ * tensor C are made in the compute type, and the result is converted once to the data type of C
+ * (rounded for a floating point type, truncated for an integer type). An integer compute type
+ * truncates a fractional alpha, beta and prior content of C. The prior content of C is not read
+ * when beta, converted to the compute type, is zero. A compute type that cannot hold every value
+ * of the data type of C (for example FP16 compute for FP32 data) rounds the prior content of C
+ * to the compute type.
  *
  * @param handle                   MIOpen Handle (input)
  * @param reduceTensorDesc         Pointer to the ReduceTensor descriptor object (input)

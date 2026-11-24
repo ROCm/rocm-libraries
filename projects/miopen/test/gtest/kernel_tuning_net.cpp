@@ -389,34 +389,34 @@ GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
     GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP16);
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_KernelTuningNetTestConvAsm1x1U_FP32,
                          testing::ValuesIn(GetConvAsm1x1UTestCases_FP32()));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_KernelTuningNetTestConvAsm1x1U_FP16,
                          testing::ValuesIn(GetConvAsm1x1UTestCases_FP16()));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_KernelTuningNetTestConvHipIgemmGroupFwdXdlops_FP32,
                          testing::ValuesIn(GetConvHipIgemmGroupFwdXdlopsTestCases_FP32()));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_KernelTuningNetTestConvHipIgemmGroupFwdXdlops_FP16,
                          testing::ValuesIn(GetConvHipIgemmGroupFwdXdlopsTestCases_FP16()));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_KernelTuningNetTestConvHipIgemmGroupBwdXdlops_FP32,
                          testing::ValuesIn(GetConvHipIgemmGroupBwdXdlopsTestCases_FP32()));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_KernelTuningNetTestConvHipIgemmGroupBwdXdlops_FP16,
                          testing::ValuesIn(GetConvHipIgemmGroupBwdXdlopsTestCases_FP16()));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP32,
                          testing::ValuesIn(GetConvHipIgemmGroupWrwXdlopsTestCases_FP32()));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_KernelTuningNetTestConvHipIgemmGroupWrwXdlops_FP16,
                          testing::ValuesIn(GetConvHipIgemmGroupWrwXdlopsTestCases_FP16()));
