@@ -560,6 +560,10 @@ def build(
         print("--gprof requires --static.")
         sys.exit(2)
 
+    if python and static:
+        print("--python needs a shared libhipblaslt, so it can't be combined with --static.")
+        sys.exit(2)
+
     # PATH setup — use os.pathsep (';' on Windows, ':' on Linux)
     # lib/llvm/bin is Windows-only: the ROCm Windows SDK stores tools there
     sep = os.pathsep

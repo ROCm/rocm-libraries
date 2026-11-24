@@ -14,9 +14,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(Python 3.10 COMPONENTS Interpreter Development.Module REQUIRED)
 find_package(nanobind CONFIG REQUIRED)
 
-# The ROCm that provides HIP. find_package(hipblaslt) honors hipblaslt_ROOT first on its own,
-# like skbuild_plugins/hipblaslt_version_provider.py; hipblaslt_ROOT also counts as the ROCm
-# root when it's the only one set.
+# The ROCm that provides HIP. hipblaslt_ROOT also counts as the ROCm root when it's the only one
+# set.
 if(DEFINED ENV{ROCM_PATH} AND NOT "$ENV{ROCM_PATH}" STREQUAL "")
     set(HIPBLASLT_PY_ROCM "$ENV{ROCM_PATH}")
 elseif(DEFINED ENV{ROCM_HOME} AND NOT "$ENV{ROCM_HOME}" STREQUAL "")
@@ -34,14 +33,35 @@ list(APPEND CMAKE_PREFIX_PATH "${HIPBLASLT_PY_ROCM}")
 
 # hip::host only. Never enable the HIP language: it breaks the Windows CI lanes.
 find_package(hip CONFIG REQUIRED)
-find_package(hipblaslt CONFIG REQUIRED)
+
+# The hipBLASLt the package version came from. The metadata provider resolves it, and
+# find_package looks nowhere else, so both steps use one install even when another one with the
+# same version (and a different git revision) is on CMAKE_PREFIX_PATH.
+execute_process(
+    COMMAND "${Python_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/skbuild_plugins/hipblaslt_version_provider.py"
+    OUTPUT_VARIABLE HIPBLASLT_PY_HIPBLASLT_ROOT
+    ERROR_VARIABLE _provider_error
+    RESULT_VARIABLE _provider_result
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+if(NOT _provider_result EQUAL 0)
+    message(FATAL_ERROR "${_provider_error}")
+endif()
+file(TO_CMAKE_PATH "${HIPBLASLT_PY_HIPBLASLT_ROOT}" HIPBLASLT_PY_HIPBLASLT_ROOT)
+find_package(hipblaslt CONFIG REQUIRED PATHS "${HIPBLASLT_PY_HIPBLASLT_ROOT}" NO_DEFAULT_PATH)
+
+get_target_property(_hipblaslt_type roc::hipblaslt TYPE)
+if(NOT _hipblaslt_type STREQUAL "SHARED_LIBRARY")
+    message(FATAL_ERROR
+        "The bindings need a shared libhipblaslt, but roc::hipblaslt in ${hipblaslt_DIR} is a "
+        "${_hipblaslt_type}. Build hipBLASLt without --static.")
+endif()
 
 if(DEFINED SKBUILD_PROJECT_VERSION
    AND NOT hipblaslt_VERSION VERSION_EQUAL SKBUILD_PROJECT_VERSION)
     message(FATAL_ERROR
         "The package version (${SKBUILD_PROJECT_VERSION}, from hipblaslt-version.h) doesn't match "
-        "the hipBLASLt CMake found (${hipblaslt_VERSION}, in ${hipblaslt_DIR}). Point ROCM_PATH or "
-        "hipblaslt_ROOT at a single install.")
+        "the hipBLASLt CMake found (${hipblaslt_VERSION}, in ${hipblaslt_DIR}).")
 endif()
 
 # Where the build-time hipBLASLt lives. hipblaslt/_build_info.py records it for the import-time

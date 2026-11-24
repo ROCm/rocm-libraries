@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: MIT
 """scikit-build-core metadata provider: the package version is hipBLASLt's version.
 
-It reads hipblaslt-version.h from the hipBLASLt the bindings are built against. The search order
-must match CMakeLists.txt, which checks that find_package(hipblaslt) agrees.
+It reads hipblaslt-version.h from the hipBLASLt the bindings are built against. Run as a script,
+it prints that hipBLASLt's install root, which CMakeLists.txt passes to find_package(hipblaslt),
+so the package version and the library _core links come from the same install.
 """
 
 from __future__ import annotations
@@ -14,7 +15,12 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping
 
-__all__ = ["dynamic_metadata", "find_version_header", "parse_version_header"]
+__all__ = [
+    "dynamic_metadata",
+    "find_build_root",
+    "find_version_header",
+    "parse_version_header",
+]
 
 _DEFINE = re.compile(
     r"^\s*#\s*define\s+HIPBLASLT_VERSION_(MAJOR|MINOR|PATCH)\s+(\d+)\s*$", re.M
@@ -47,6 +53,11 @@ def find_version_header(environ: Mapping[str, str], platform: str) -> Path:
     )
 
 
+def find_build_root(environ: Mapping[str, str], platform: str) -> Path:
+    """The install root whose include/hipblaslt/hipblaslt-version.h the version comes from."""
+    return find_version_header(environ, platform).parents[2]
+
+
 def parse_version_header(text: str) -> str:
     parts = dict(_DEFINE.findall(text))
     missing = {"MAJOR", "MINOR", "PATCH"} - parts.keys()
@@ -68,3 +79,10 @@ def dynamic_metadata(
             header.read_text(encoding="utf-8", errors="replace")
         )
     }
+
+
+if __name__ == "__main__":
+    try:
+        print(find_build_root(os.environ, sys.platform))
+    except RuntimeError as e:
+        sys.exit(str(e))
