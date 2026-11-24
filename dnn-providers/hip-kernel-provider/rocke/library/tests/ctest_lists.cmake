@@ -209,7 +209,7 @@ endif()
 
 # Library attention CPU tests (no GPU required): the gfx950 and gfx942 dense
 # additive-bias host contracts, gfx950 LDS budget model, dense block-order decodes,
-# the dense paged and paged varlen launch checks, spec-wrapper
+# the dense paged and paged varlen launch checks and i64 page bases, spec-wrapper
 # parity gate, the 3D decode split rule
 # and K/V cache policy, the scalar fallback's cache key and block-table stride
 # kernarg, the unified attention running-max carry and keyless guards on the
@@ -247,6 +247,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_dense_decode.py"
     "tests/library/tests/test_attention_dense_gfx942_golden.py"
     "tests/library/tests/test_attention_dense_gfx950_lds.py"
+    "tests/library/tests/test_attention_dense_paged_i64.py"
     "tests/library/tests/test_attention_dense_paged_launch.py"
     "tests/library/tests/test_attention_dense_paged_varlen_launch.py"
     "tests/library/tests/test_attention_dense_gfx950_varlen_kv_bound.py"

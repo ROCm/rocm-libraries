@@ -157,8 +157,11 @@ starts on the default grid). It takes the same tile as a contiguous request wher
 its pages fit that tile (whole pages per KV tile, each wave's rows in one page),
 else the default 256×64 tile. The paged kernel bakes the cache extent, so binding
 retargets `num_kv_blocks` from `k.shape[0]`; `block_tables` and `kv_lens` come
-in with the tensors. The request carries no cache size, so a cache past the
-2 GiB i32 limit is refused at binding, not at selection.
+in with the tensors. A cache past the i32 K/V buffer range (the unified
+threshold, `kv_cache_needs_i64_addr`) also switches the spec to
+`use_i64_kv_addr` there, keeping `tuning_id`. That lifts only the cache-pool
+limit: the request's own K/V extent from the spec maxima (`batch` × the longest
+length × Hkv × D × 2 B) must still stay below 2 GiB, as must its Q extent (below).
 
 `q`/`out` may be packed `[total_q, Hq, D]` with `cu_seqlens_q`, as for the
 unified path. A request with `batch > 1` builds a varlen spec: its lengths are

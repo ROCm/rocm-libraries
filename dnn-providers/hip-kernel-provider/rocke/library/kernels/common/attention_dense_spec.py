@@ -17,7 +17,11 @@ from types import MappingProxyType
 from rocke.core.ir import BF16, F16
 from rocke.helpers.spec import kernel_name_join
 
-from kernels.common._attention_dense_paged import paged_cache_bytes, paged_tile_check
+from kernels.common._attention_dense_paged import (
+    paged_cache_bytes,
+    paged_page_bytes,
+    paged_tile_check,
+)
 from kernels.common.attention_dense_decode import (
     NONPERSIST_DECODES,
     PERSIST_DECODES,
@@ -30,6 +34,7 @@ from kernels.common.attention_dense_decode import (
     PersistQbMajor,
     balance_causal,
 )
+from kernels.common._spec_checks import I32_KV_BUFFER_BYTES, kv_cache_needs_i64_addr
 
 
 _DTYPE_IR = {"bf16": BF16, "fp16": F16}
@@ -140,6 +145,12 @@ class AttentionDenseSpec:
     causal_bottom_right: bool = field(default=False, kw_only=True)
     # Block order of the non-persistent grid; ignored on the persistent one.
     nonpersist_decode: str = field(default="auto", kw_only=True)
+    # Paged only: one buffer resource per page with a 64-bit page base instead of
+    # one i32-addressed resource over the whole cache. Required past the i32 range
+    # (see ``__post_init__``); dispatch sets it at binding from the cache size. A
+    # field rather than derived from it so a small cache can be forced onto the i64
+    # path.
+    use_i64_kv_addr: bool = field(default=False, kw_only=True)
     # XCDs the hardware round-robins workgroups over. A wrong value keeps results
     # correct and only weakens the L2 locality of the XCD-aware block orders.
     chiplet_num_xcds: int = field(default=8, kw_only=True)
@@ -290,6 +301,11 @@ class AttentionDenseSpec:
 
         if type(self.paged) is not bool:
             raise ValueError(f"paged must be a bool, got {type(self.paged).__name__}")
+        if type(self.use_i64_kv_addr) is not bool:
+            raise ValueError(
+                "use_i64_kv_addr must be a bool, got "
+                f"{type(self.use_i64_kv_addr).__name__}"
+            )
         if self.paged:
             if self.block_size <= 0:
                 raise ValueError("paged=True requires block_size > 0")
@@ -304,10 +320,13 @@ class AttentionDenseSpec:
                 raise ValueError(why)
             if self.num_kv_blocks <= 0:
                 raise ValueError("paged=True requires num_kv_blocks > 0")
-            cache_bytes = paged_cache_bytes(self)
-            if cache_bytes > 2**31 - 1:
+            if (
+                kv_cache_needs_i64_addr(self.num_kv_blocks, paged_page_bytes(self))
+                and not self.use_i64_kv_addr
+            ):
                 raise ValueError(
-                    f"paged cache {cache_bytes} B exceeds i32 addressing (2 GiB)"
+                    f"paged cache {paged_cache_bytes(self)} B is past the i32 K/V "
+                    f"buffer range ({I32_KV_BUFFER_BYTES:#x} B): set use_i64_kv_addr"
                 )
             if self.varlen:
                 if self.seqlen_q != self.seqlen_kv:
@@ -346,6 +365,8 @@ class AttentionDenseSpec:
                 raise ValueError(
                     "causal_bottom_right is not yet supported with paged KV"
                 )
+        elif self.use_i64_kv_addr:
+            raise ValueError("use_i64_kv_addr requires paged=True")
         if self.use_sinks and self.paged:
             raise ValueError("use_sinks is not yet supported with paged KV")
         if self.use_sinks and self.varlen:
@@ -584,6 +605,8 @@ class AttentionDenseSpec:
             parts.append("varlen")
         if self.paged:
             parts.extend((f"pgd{self.block_size}", f"nb{self.num_kv_blocks}"))
+            if self.use_i64_kv_addr:
+                parts.append("i64kv")
         parts.extend(self._algorithm_name_parts())
         if self.persistent:
             parts.append(f"persist{self.num_persistent}")

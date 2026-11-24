@@ -36,6 +36,9 @@ from kernels.gfx942.attention_dense import (
 )
 from ._dense_paged_varlen_inputs import (
     PAGED_VARLEN_EDGES,
+    PAGED_VARLEN_RAGGED,
+    check_bad_block_id_reads_the_last_block,
+    check_i64_matches_i32,
     check_paged_varlen,
     check_whole_tile_sequences,
     paged_varlen_lengths,
@@ -2666,6 +2669,212 @@ class TestDensePagedVarlenNumeric:
             block_size,
             d,
         )
+
+
+class TestDensePagedI64Numeric:
+    """Paged K/V with ``use_i64_kv_addr``: per-page buffer resources with a 64-bit
+    page base, on small caches (forced) and on caches past the i32 range."""
+
+    _HQ, _HKV, _D, _BS = 16, 4, 128, 16
+    _PAGE_BYTES = _BS * _HKV * _D * 2
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("block_size", [16, 64])
+    @pytest.mark.parametrize("window", [256, 0])
+    @pytest.mark.parametrize("d", [128, 64])
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    def test_forced_i64_matches_i32_bit_exact(self, dtype, block_size, window, d):
+        """The same small permuted cache (unused pages NaN) through the i64 and
+        the i32 form: an in-page offset or page base off by anything reads a NaN
+        page or wrong keys, so the bits differ."""
+        sq, hq, hkv = 1024, self._HQ, self._HKV
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        torch.manual_seed(0)
+        q = torch.randn(1, sq, hq, d, device="cuda", dtype=tdt)
+        npages = sq // block_size
+        num_kv_blocks = 2 * npages
+        phys = torch.randperm(num_kv_blocks, device="cuda")[:npages]
+        k_cache = torch.full(
+            (num_kv_blocks, block_size, hkv, d), float("nan"), device="cuda", dtype=tdt
+        )
+        v_cache = torch.full_like(k_cache, float("nan"))
+        k_cache[phys] = torch.randn(
+            npages, block_size, hkv, d, device="cuda", dtype=tdt
+        )
+        v_cache[phys] = torch.randn(
+            npages, block_size, hkv, d, device="cuda", dtype=tdt
+        )
+        block_tables = phys.to(torch.int32).view(1, npages).contiguous()
+
+        spec = dataclasses.replace(
+            _spec(
+                dtype,
+                d,
+                hq,
+                hkv,
+                False,
+                sq=sq,
+                sliding_window=window,
+                kv_block_size=block_size,
+            ),
+            num_kv_blocks=num_kv_blocks,
+        )
+        outs = [
+            self._run_paged(
+                dataclasses.replace(spec, use_i64_kv_addr=i64),
+                q,
+                k_cache,
+                v_cache,
+                block_tables,
+            )
+            for i64 in (False, True)
+        ]
+        assert torch.isfinite(outs[1]).all(), "i64 read a NaN (unused) page"
+        assert torch.equal(outs[0], outs[1]), "i64 != i32 bits"
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    def test_reads_the_top_pages_past_the_i32_buffer_range(self):
+        """A cache one page past 0x7FFF0000 bytes with the sequence in its top
+        pages: the last page starts at that offset, which an i32 resource bounded
+        there would read as zeros."""
+        num_kv_blocks = 0x7FFF_0000 // self._PAGE_BYTES + 1
+        self._check_large_cache(num_kv_blocks, first_block=num_kv_blocks - 64)
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    def test_reads_pages_straddling_2gib(self):
+        """Pages on both sides of 2^31 bytes: a sign-extended or wrapped i32 page
+        offset reads the wrong half."""
+        first_past = 2**31 // self._PAGE_BYTES
+        self._check_large_cache(first_past + 64, first_block=first_past - 32)
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("bad_id", [64, -1, 0x7FFF_FFFF], ids=["nb", "neg", "max"])
+    def test_out_of_range_block_id_reads_the_last_block(self, bad_id):
+        """With ``validate_paged=False`` a corrupt block id is clamped to the last
+        block (no fault): the output equals that of a table naming it."""
+        sq, hq, hkv, d = 512, self._HQ, self._HKV, self._D
+        num_kv_blocks = 64
+        tdt = torch.float16
+        torch.manual_seed(0)
+        q = torch.randn(1, sq, hq, d, device="cuda", dtype=tdt)
+        k_cache = torch.randn(num_kv_blocks, self._BS, hkv, d, device="cuda", dtype=tdt)
+        v_cache = torch.randn_like(k_cache)
+        npages = sq // self._BS
+        table = torch.arange(npages, dtype=torch.int32, device="cuda").view(1, npages)
+        spec = dataclasses.replace(
+            _spec("fp16", d, hq, hkv, False, sq=sq, kv_block_size=self._BS),
+            num_kv_blocks=num_kv_blocks,
+            use_i64_kv_addr=True,
+        )
+        bad, clamped = table.clone(), table.clone()
+        bad[0, 3] = bad_id
+        clamped[0, 3] = num_kv_blocks - 1
+        out_bad = self._run_paged(spec, q, k_cache, v_cache, bad, validate_paged=False)
+        out_clamped = self._run_paged(spec, q, k_cache, v_cache, clamped)
+        assert torch.equal(out_bad, out_clamped)
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("window", [256, 0])
+    @pytest.mark.parametrize("d", [128, 64])
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    def test_paged_varlen_forced_i64_matches_i32_bit_exact(self, dtype, d, window):
+        check_i64_matches_i32(
+            run_attention_dense_torch,
+            _paged_varlen_spec,
+            PAGED_VARLEN_RAGGED,
+            16,
+            d,
+            dtype,
+            window,
+        )
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "bad_id", ["nb", -1, 0x7FFF_FFFF], ids=["nb", "neg", "max"]
+    )
+    def test_paged_varlen_out_of_range_block_id_reads_the_last_block(self, bad_id):
+        """The bad id sits in the sixth page of the last sequence, so the clamp
+        must hold past the first sequence's table row."""
+        check_bad_block_id_reads_the_last_block(
+            run_attention_dense_torch,
+            _paged_varlen_spec,
+            PAGED_VARLEN_RAGGED,
+            seq=3,
+            column=5,
+            bad_id=bad_id,
+        )
+
+    def _check_large_cache(self, num_kv_blocks, first_block):
+        """The sequence's pages at permuted ids in ``[first_block, +npages)`` of a
+        cache of ``num_kv_blocks`` pages; only those pages are written. V holds
+        each page's logical index, so a read of the wrong page shows up in the
+        output rather than averaging out as random V would. Compared bit-exact
+        against the contiguous kernel on the same K/V (cfvst off there, as paged V
+        never takes it, for identical arithmetic)."""
+        sq, hq, hkv, d, bs = 1024, self._HQ, self._HKV, self._D, self._BS
+        npages = sq // bs
+        cache_bytes = num_kv_blocks * self._PAGE_BYTES
+        free, _ = torch.cuda.mem_get_info()
+        if free < 2 * cache_bytes + (1 << 30):
+            pytest.skip(f"needs {2 * cache_bytes + (1 << 30)} B free, have {free}")
+        tdt = torch.float16
+        torch.manual_seed(0)
+        q = torch.randn(1, sq, hq, d, device="cuda", dtype=tdt)
+        k = torch.randn(1, sq, hkv, d, device="cuda", dtype=tdt)
+        page_of_key = torch.arange(sq, device="cuda") // bs
+        v = (page_of_key.to(tdt) / npages).view(1, sq, 1, 1).expand(1, sq, hkv, d)
+        v = v.contiguous()
+
+        phys = first_block + torch.randperm(npages, device="cuda")
+        k_cache = torch.empty((num_kv_blocks, bs, hkv, d), device="cuda", dtype=tdt)
+        v_cache = torch.empty_like(k_cache)
+        k_cache[phys] = k[0].view(npages, bs, hkv, d)
+        v_cache[phys] = v[0].view(npages, bs, hkv, d)
+        block_tables = phys.to(torch.int32).view(1, npages).contiguous()
+
+        shipped = _spec("fp16", d, hq, hkv, False, sq=sq)
+        dense_out = torch.empty_like(q)
+        run_attention_dense_torch(
+            spec=dataclasses.replace(shipped, use_cfvst=False),
+            q=q,
+            k=k,
+            v=v,
+            out=dense_out,
+            scale=1.0 / math.sqrt(d),
+        )
+        spec = dataclasses.replace(
+            shipped,
+            paged=True,
+            block_size=bs,
+            num_kv_blocks=num_kv_blocks,
+            use_i64_kv_addr=True,
+        )
+        paged_out = self._run_paged(spec, q, k_cache, v_cache, block_tables)
+        del k_cache, v_cache
+        assert torch.equal(paged_out, dense_out), "paged i64 != dense bits"
+
+    @staticmethod
+    def _run_paged(spec, q, k_cache, v_cache, block_tables, validate_paged=True):
+        out = torch.empty_like(q)
+        run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=k_cache,
+            v=v_cache,
+            out=out,
+            scale=1.0 / math.sqrt(spec.head_size),
+            block_tables=block_tables,
+            kv_lens=torch.tensor([spec.seqlen_kv], device="cuda", dtype=torch.int32),
+            validate_paged=validate_paged,
+        )
+        torch.cuda.synchronize()
+        return out
 
 
 if __name__ == "__main__":

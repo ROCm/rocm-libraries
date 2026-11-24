@@ -15,6 +15,7 @@ Production tiled matrix-core, paged-KV decode:
   Optional fp8 e4m3 (OCP) K/V (`kv_storage_dtype="fp8e4m3"`) with per-tensor `k_scale` /
   `v_scale`, dequantized on load into the bf16/fp16 compute path; default-order grid body
   only, aligned contiguous (non-paged) KV, no sinks
+- `library/kernels/gfx942/attention_dense.py` -- dense flash prefill (contiguous or paged K/V)
 - `library/kernels/common/fmha_mfma.py` (unified MFMA/WMMA forward, MFMA on CDNA / WMMA on RDNA).
   Opt-in `FmhaMfmaSpec.free_stride` adds per-tensor batch strides and rebases Q/K/V/O per batch
   (`global_ptr_add`), so one kernel reads BSHD, BHSD, general strides and packed QKV. Default off and
@@ -584,6 +585,8 @@ logical token/block
 ```
 
 The transform DAG uses `indirect(...)` and `unmerge(...)` so page-table lookup is part of the descriptor rather than scattered through the kernel.
+
+A cache past the i32 K/V buffer range (`kv_cache_needs_i64_addr`, one threshold for the unified and dense kernels) needs `use_i64_kv_addr`, which moves the physical block into a 64-bit base and keeps only the in-block offset 32-bit. Binding sets it from the cache size, since the request does not carry one; it changes the kernel identity, not `tuning_id`. The gfx942/gfx950 dense prefill kernels build one resource per wave and K/V tile over its page and clamp the page id to the last block, so a corrupt table cannot turn into an arbitrary address.
 
 ## Online Softmax
 

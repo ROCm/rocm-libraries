@@ -434,13 +434,16 @@ fed on the long-context, large-cache regime where it wins (§ README).
 
 A paged-KV byte offset is `physical_block · (block_size · num_kv_heads ·
 head_size · dtype_bytes)`. That product overflows a 32-bit hardware buffer
-voffset once the cache exceeds **2 GiB** (~65 K bf16 / ~131 K fp8 blocks) — and
-production caches are far larger (captured traces ~350 K blocks ≈ 11 GiB).
+voffset once the cache reaches about **2 GiB** (~65 K bf16 / ~131 K fp8 blocks) —
+and production caches are far larger (captured traces ~350 K blocks ≈ 11 GiB).
 `_enable_i64_kv_addr` switches the load paths to fold `block · stride` into a
 **64-bit base** (only a small within-block offset stays in the 32-bit field)
-when `num_kv_blocks · block_stride > 2³¹`, so small caches keep the exact fast
-i32 path and only large caches pay the tiny per-block-base cost. Without it,
-large caches silently read garbage (verified `max_abs ≈ 1.4`).
+when `kv_cache_needs_i64_addr` holds: `num_kv_blocks · block_stride` bytes above
+`_I32_KV_BUFFER_BYTES` (`0x7FFF0000`, just under 2 GiB: the i32 path bounds its
+K/V buffer resources at that many `num_records`, and a load past them returns
+zero). Small caches keep the exact fast i32 path and only large caches pay the
+tiny per-block-base cost. Without it, large caches silently read garbage
+(verified `max_abs ≈ 1.4`).
 
 ### 7.3 fp8 KV cache (bf16-Q + fp8-KV)
 
@@ -471,8 +474,11 @@ throughput**. It computes the exact same streaming-softmax core (§2) but bakes
 the shape into the kernel and reshapes the schedule around a 256-row query tile.
 
 - **Compile-time-sized ABI.** `batch / seqlen / heads / head_size / causal /
-  dtype` are constants baked at build time (dense, statically-sized). The only
-  runtime args are the `q/k/v/o` pointers and the `f32` softmax scale $\tau$.
+  dtype` are constants baked at build time (dense, statically-sized). A
+  contiguous persistent kernel's only runtime args are the `q/k/v/o` pointers
+  and the `f32` softmax scale $\tau$; non-persistent kernels also take the shape
+  parameters (prefill README), and paged kernels add `block_tables`, `kv_lens`
+  and the table stride (§8.4).
   The supported scale range is `DENSE_MIN_SCALE`..`DENSE_MAX_SCALE` in
   `kernels/common/attention_dense_spec.py`: `check_dense_scale` there makes
   `run_attention_dense_torch` raise `ValueError` for a NaN or infinite scale and
@@ -644,7 +650,8 @@ buffer. A wave's rows of one KV tile stay inside one page, so each wave looks up
 its page once per tile and the §8.1 schedule is otherwise unchanged. Every lookup
 is bounded by the sequence's live page count $⌈\text{kv\_len}/b⌉$: a lookup past
 it reads block 0, never an unused table column. The cache size is baked in
-(`num_kv_blocks`), as the rest of the shape is.
+(`num_kv_blocks`), as the rest of the shape is, and one buffer resource with
+i32 byte offsets covers the whole cache.
 
 - **One sequence** (`varlen=False`, $B = 1$): Q/O stay `[1, S_q, H_q, d]` and
   `kv_lens[0]` must be $S_k$. Keys must fill whole KV tiles: the padded keys of a
@@ -671,6 +678,14 @@ it reads block 0, never an unused table column. The cache size is baked in
   (the ragged path takes no window). Packed sequences take `hq_minor_swz`
   (`qb_minor` when the query heads do not split evenly over the XCDs): with the
   sequence as the fastest grid digit, each sequence would run on one XCD.
+
+That holds up to the i32 K/V buffer range, the unified kernels' threshold
+(`kv_cache_needs_i64_addr`). Past it, `use_i64_kv_addr` (dispatch sets it at
+binding from the cache size) moves the page into a 64-bit base, as §7.2 does
+for the unified kernels: each wave builds one resource per K/V tile over its
+page, and only the in-page offset stays 32-bit. The page id is clamped to the
+last block first, because an unchecked id in a 64-bit base is an arbitrary
+address: a corrupt table reads a real page instead of faulting.
 
 ---
 

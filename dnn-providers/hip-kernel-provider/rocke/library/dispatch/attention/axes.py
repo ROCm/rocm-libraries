@@ -157,6 +157,8 @@ DENSE_PROBLEM_FIELDS = frozenset(
         "paged",
         "block_size",
         "num_kv_blocks",
+        # Follows the cache size at binding, like num_kv_blocks.
+        "use_i64_kv_addr",
         "use_sinks",
         "causal_bottom_right",
         # A fact of the target GPU, not a tuning choice: the base spec keeps

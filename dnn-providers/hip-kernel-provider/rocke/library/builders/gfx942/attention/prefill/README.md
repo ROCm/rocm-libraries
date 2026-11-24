@@ -39,7 +39,9 @@ query block whose window starts past `seqlen_kv`) is supported: those rows write
 with or without sinks or the LSE output.
 Sliding-window and attention sinks are supported, alone or combined. Paged K/V runs on
 the default grid for the shared spec's paged cohort, with the same per-wave block-table
-lookup as gfx950; paged V always takes the async-DMA path, never conflict-free V. Paged
+lookup as gfx950; paged V always takes the async-DMA path, never conflict-free V. A cache past the i32 K/V buffer
+range takes the same `use_i64_kv_addr` path as gfx950, paged varlen included (one
+resource per wave and K/V tile over its page; see the gfx950 prefill README). Paged
 varlen (packed Q + `cu_seqlens_q`, each sequence's KV
 length from `kv_lens`) bounds each sequence's tails in the kernel, so dispatch also
 uses it for one paged sequence with a partial Q or KV tile: there is no ragged body.

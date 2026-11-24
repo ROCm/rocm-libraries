@@ -42,6 +42,15 @@ CTA count is a formula of the shape) — keep per-shape identity. Baked grid ker
 still take batch and both seqlens as parameters; that ABI does not make a baked
 diagonal safe to reuse for a different sequence-length difference.
 
+Paged K/V (single sequence) reads the cache through one buffer resource over the
+whole cache with i32 offsets. A cache past the i32 K/V buffer range (the unified
+kernels' threshold, `kv_cache_needs_i64_addr`) needs `use_i64_kv_addr`; the spec
+refuses it otherwise, and dispatch sets it at binding from the cache size. Each
+wave then builds one resource per K/V tile over its page, shared by its row copies,
+with a 64-bit page base. The page id is clamped to the last block, since an
+unchecked id in a 64-bit base is an arbitrary address: a corrupt block table reads
+a real page instead of faulting.
+
 Tile/resource knobs are `block_n`, `waves_per_eu`, and `lds_k_group_pad`;
 persistent scheduling knobs are `num_persistent`, `interleave`, and `wide_lds_dma`;
 block-order knobs are `persist_decode`, `nonpersist_decode`, and

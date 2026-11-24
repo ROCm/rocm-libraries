@@ -57,7 +57,8 @@ from enum import IntEnum
 from operator import index
 from typing import Any, Tuple
 
-from kernels.common._spec_checks import require_bool
+from kernels.common._attention_dense_paged import paged_page_bytes
+from kernels.common._spec_checks import kv_cache_needs_i64_addr, require_bool
 
 # Re-exported, never redeclared: the tiled kernel specs name their band by these
 # ordinals (``mask_type()``), so the ordinals have one home, beside that mapping.
@@ -1199,7 +1200,7 @@ class AttentionTuningSpec:
     def with_num_kv_blocks(self, num_kv_blocks: int) -> "AttentionTuningSpec":
         """Retarget a paged spec to the physical cache once it is known.
 
-        Unified paths pick i32/i64 K/V addressing from it; dense paged bakes the
+        Both paths pick i32/i64 K/V addressing from it; dense paged also bakes the
         cache extent itself as its K/V buffer bound, so each cache size is its own
         binary. Either way this is a runtime specialization, not a configuration:
         it changes :meth:`identity` (a different binary) but never ``tuning_id``,
@@ -1211,10 +1212,17 @@ class AttentionTuningSpec:
         if self.path == "dense":
             if not self.kernel_spec.paged:
                 return self  # contiguous K/V: nothing to retarget
-            # The paged kernel bakes the cache extent as its K/V buffer bound.
+            # The paged kernel bakes the cache extent: as its K/V buffer bound, or
+            # past the i32 range as the page-id clamp of its per-page resources.
+            # A spec forced onto the i64 path stays there on a small cache.
+            use_i64 = self.kernel_spec.use_i64_kv_addr or kv_cache_needs_i64_addr(
+                count, paged_page_bytes(self.kernel_spec)
+            )
             return replace(
                 self,
-                kernel_spec=replace(self.kernel_spec, num_kv_blocks=count),
+                kernel_spec=replace(
+                    self.kernel_spec, num_kv_blocks=count, use_i64_kv_addr=use_i64
+                ),
                 num_kv_blocks=count,
             )
         kernel_spec = self.kernel_spec

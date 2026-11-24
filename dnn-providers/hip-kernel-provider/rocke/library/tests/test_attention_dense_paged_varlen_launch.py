@@ -34,7 +34,7 @@ def _module(arch):
     return importlib.import_module(f"kernels.{arch}.attention_dense")
 
 
-def _spec(arch):
+def _spec(arch, i64=False):
     ad = _module(arch)
     spec_cls = getattr(ad, "Gfx942AttentionDenseSpec", None) or ad.AttentionDenseSpec
     return spec_cls(
@@ -50,6 +50,7 @@ def _spec(arch):
         paged=True,
         block_size=_BS,
         num_kv_blocks=_NB,
+        use_i64_kv_addr=i64,
     )
 
 
@@ -70,14 +71,14 @@ def _inputs(**overrides):
     return call
 
 
-def _launch(arch, spec=None, **kw):
+def _launch(arch, spec=None, i64=False, **kw):
     """Run the launcher up to compile; a launch that passes every check raises the
     compile sentinel."""
     ad = _module(arch)
     with mock.patch.dict(ad._DENSE_LAUNCHER_CACHE, clear=True), mock.patch(
         "rocke.helpers.compile.compile_kernel", side_effect=_SENTINEL
     ):
-        ad.run_attention_dense_torch(spec=spec or _spec(arch), **kw)
+        ad.run_attention_dense_torch(spec=spec or _spec(arch, i64), **kw)
 
 
 def _assert_reaches_compile(arch, **kw):
@@ -86,10 +87,15 @@ def _assert_reaches_compile(arch, **kw):
     assert err.value is _SENTINEL
 
 
+# The host rules do not depend on the K/V addressing width.
+_I64 = pytest.mark.parametrize("i64", [False, True], ids=["i32", "i64"])
+
+
+@_I64
 @pytest.mark.parametrize("arch", _ARCHES)
-def test_valid_launch_reaches_compile(arch):
+def test_valid_launch_reaches_compile(arch, i64):
     """Ragged lengths, an empty sequence and garbage in unused table columns."""
-    _assert_reaches_compile(arch, **_inputs())
+    _assert_reaches_compile(arch, i64=i64, **_inputs())
 
 
 _STRUCTURAL = [
@@ -144,14 +150,15 @@ _STRUCTURAL = [
 ]
 
 
+@_I64
 @pytest.mark.parametrize("arch", _ARCHES)
 @pytest.mark.parametrize(
     "overrides,error",
     [pytest.param(o, e, id=i) for i, o, e in _STRUCTURAL],
 )
-def test_structural_rules_hold_without_value_validation(arch, overrides, error):
+def test_structural_rules_hold_without_value_validation(arch, overrides, error, i64):
     with pytest.raises(ValueError, match=error):
-        _launch(arch, **_inputs(**overrides), validate_paged=False)
+        _launch(arch, i64=i64, **_inputs(**overrides), validate_paged=False)
 
 
 def _bad_table():
@@ -192,16 +199,17 @@ _VALUES = [
 ]
 
 
+@_I64
 @pytest.mark.parametrize("arch", _ARCHES)
 @pytest.mark.parametrize(
     "overrides,error",
     [pytest.param(o, e, id=i) for i, o, e in _VALUES],
 )
-def test_value_rules_are_checked_and_skippable(arch, overrides, error):
+def test_value_rules_are_checked_and_skippable(arch, overrides, error, i64):
     with pytest.raises(ValueError, match=error):
-        _launch(arch, **_inputs(**overrides))
+        _launch(arch, i64=i64, **_inputs(**overrides))
     # validate_paged=False skips the synchronized content checks only.
-    _assert_reaches_compile(arch, **_inputs(**overrides), validate_paged=False)
+    _assert_reaches_compile(arch, i64=i64, **_inputs(**overrides), validate_paged=False)
 
 
 @pytest.mark.parametrize("arch", _ARCHES)

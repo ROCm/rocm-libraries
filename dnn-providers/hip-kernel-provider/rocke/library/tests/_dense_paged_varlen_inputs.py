@@ -5,6 +5,7 @@
 numeric tests. Each arch file passes its own runner, spec factory and reference,
 so both arches run the same cases against the same poisoned cache."""
 
+import dataclasses
 import math
 
 import pytest
@@ -14,6 +15,9 @@ torch = pytest.importorskip("torch", reason="ROCm torch required")
 # Per-sequence lengths of a packed paged varlen batch. "edges": tile-aligned (256,
 # 512), page-aligned (48), 1, 17, block_n - 1, block_n + 1 and an empty sequence.
 PAGED_VARLEN_EDGES = [256, 1, 17, 63, 65, 0, 512, 48]
+# A ragged batch for the i64 page-base checks: a long sequence ending inside a Q
+# and a KV tile, a two-page one, an empty one and a tile-aligned one.
+PAGED_VARLEN_RAGGED = [1000, 17, 0, 512]
 _PAD_ID = 0x7FFF_FFFF
 _TORCH_DT = {"fp16": torch.float16, "bf16": torch.bfloat16}
 
@@ -151,3 +155,75 @@ def check_whole_tile_sequences(run, make_spec, single_spec, lens, block_size, d)
         torch.cuda.synchronize()
         got = out[int(cu[b]) : int(cu[b + 1])]
         assert torch.equal(got, out_b[0]), f"D{d} seq{b} len{n}: bits differ"
+
+
+def _run_packed(run, spec, q, k_cache, v_cache, table, kv_lens, cu, **kw):
+    out = torch.full_like(q, float("nan"))
+    run(
+        spec=spec,
+        q=q,
+        k=k_cache,
+        v=v_cache,
+        out=out,
+        scale=1.0 / math.sqrt(spec.head_size),
+        block_tables=table,
+        kv_lens=kv_lens,
+        cu_seqlens_q=cu,
+        **kw,
+    )
+    torch.cuda.synchronize()
+    return out
+
+
+def check_i64_matches_i32(run, make_spec, lens, block_size, d, dtype, window):
+    """One packed launch of ``lens`` through the i64 and the i32 page bases on
+    the same poisoned cache: a page base or in-page offset off by anything reads
+    a NaN page, a NaN slot or wrong keys, so the bits differ."""
+    torch.manual_seed(0)
+    q, _, _, k_cache, v_cache, table, kv_lens, cu = paged_varlen_inputs(
+        lens, block_size, d, dtype
+    )
+    spec = make_spec(lens, block_size, d, dtype, k_cache.shape[0], window=window)
+    assert spec.varlen and not spec.use_i64_kv_addr
+    i32, i64 = (
+        _run_packed(
+            run,
+            dataclasses.replace(spec, use_i64_kv_addr=flag),
+            q,
+            k_cache,
+            v_cache,
+            table,
+            kv_lens,
+            cu,
+        )
+        for flag in (False, True)
+    )
+    assert torch.isfinite(i64).all(), "i64: NaN (unwritten row or bad read)"
+    assert torch.equal(i32, i64), "i64 != i32 bits"
+
+
+def check_bad_block_id_reads_the_last_block(run, make_spec, lens, seq, column, bad_id):
+    """With ``validate_paged=False`` an out-of-range id in a used ``column`` of
+    sequence ``seq`` is clamped to the last block: the output equals that of a
+    table naming it. ``bad_id="nb"`` stands for the cache's block count."""
+    block_size, d, dtype = 16, 128, "fp16"
+    assert column < -(-lens[seq] // block_size), "the column must be read"
+    torch.manual_seed(0)
+    q, _, _, k_cache, v_cache, table, kv_lens, cu = paged_varlen_inputs(
+        lens, block_size, d, dtype
+    )
+    # Finite unused pages, so that reading the last block gives a finite output
+    # that can be compared bit for bit.
+    k_cache = torch.where(k_cache.isnan(), torch.randn_like(k_cache), k_cache)
+    v_cache = torch.where(v_cache.isnan(), torch.randn_like(v_cache), v_cache)
+    num_kv_blocks = k_cache.shape[0]
+    spec = dataclasses.replace(
+        make_spec(lens, block_size, d, dtype, num_kv_blocks), use_i64_kv_addr=True
+    )
+    bad, clamped = table.clone(), table.clone()
+    bad[seq, column] = num_kv_blocks if bad_id == "nb" else bad_id
+    clamped[seq, column] = num_kv_blocks - 1
+    args = (q, k_cache, v_cache)
+    out_bad = _run_packed(run, spec, *args, bad, kv_lens, cu, validate_paged=False)
+    out_clamped = _run_packed(run, spec, *args, clamped, kv_lens, cu)
+    assert torch.equal(out_bad, out_clamped)

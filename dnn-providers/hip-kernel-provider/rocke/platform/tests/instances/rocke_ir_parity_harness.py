@@ -1931,6 +1931,36 @@ def cases():
                 "sliding_window": 256,
             },
         ),
+        # Per-page i64 K/V resources, forced on a small cache.
+        (
+            "paged_i64_swa_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+                "use_i64_kv_addr": True,
+            },
+        ),
+        # ... and on the varlen body, at D64, where the V tail tests the logical
+        # key while the i64 address takes its in-page row.
+        (
+            "paged_varlen_i64_swa_fp16_d64_sq500",
+            {
+                "dtype": "fp16",
+                "batch": 3,
+                "seqlen_q": 500,
+                "seqlen_kv": 500,
+                "head_size": 64,
+                "varlen": True,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 96,
+                "sliding_window": 256,
+                "use_i64_kv_addr": True,
+            },
+        ),
         # --- Attention band: the cuDNN (left = sliding_window, right = right_bound)
         # band on the top-left diagonal. causal=False is the unbounded right side.
         # Non-causal (left-only) window: default + persistent grids.
@@ -2326,6 +2356,33 @@ def cases():
                 "block_size": 16,
                 "num_kv_blocks": 96,
                 "sliding_window": 256,
+            },
+        ),
+        (
+            "paged_i64_swa_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+                "use_i64_kv_addr": True,
+            },
+        ),
+        (
+            "paged_varlen_i64_swa_fp16_d64_sq500",
+            {
+                "dtype": "fp16",
+                "batch": 3,
+                "seqlen_q": 500,
+                "seqlen_kv": 500,
+                "head_size": 64,
+                "varlen": True,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 96,
+                "sliding_window": 256,
+                "use_i64_kv_addr": True,
             },
         ),
     ):

@@ -234,9 +234,11 @@ from kernels.common._attention_dense_paged import (
     declare_paged_params,
     paged_cache_bytes,
     paged_kv_row,
+    paged_in_page_row,
     paged_launch_args,
     paged_seq_setup,
     paged_v_tail_offset,
+    paged_wave_page_rsrc,
     paged_wave_row_base,
     validate_paged_launch,
 )
@@ -1890,10 +1892,15 @@ def _build_attention_dense_single_buffer(
     # valid reads for a larger one (buffer loads past num_records return 0 with no
     # fault). The baked branch keeps const_i32(B*Skv*...) verbatim.
     _kv_elem_bytes = Hkv * D * 2
+    PAGED_I64 = spec.paged and spec.use_i64_kv_addr
     if spec.runtime_shape:
         kv_bytes = b.mul(b.mul(b.mul(batch_p, seqlen_kv_p), hkv_p), b.const_i32(D * 2))
         k_rsrc = b.buffer_rsrc(k, kv_bytes)
         v_rsrc = b.buffer_rsrc(v, kv_bytes)
+    elif PAGED_I64:
+        # One resource per page, built per wave and tile in _async_load: the whole
+        # cache is past what an i32 num_records and voffset can address.
+        k_rsrc = v_rsrc = None
     elif spec.paged:
         # One num_records node per rsrc, as in the baked branch below.
         k_rsrc = b.buffer_rsrc(k, b.const_i32(paged_cache_bytes(spec)))
@@ -2094,7 +2101,13 @@ def _build_attention_dense_single_buffer(
             q_packs.append(b.global_load_vN(q, addr, dtype, 4, align=8))
 
         def _async_load(
-            rsrc, lds_base, tile_key0, group_pad=False, kbuf=None, tail_len=None
+            src,
+            rsrc,
+            lds_base,
+            tile_key0,
+            group_pad=False,
+            kbuf=None,
+            tail_len=None,
         ):
             """Async DMA one K/V tile into LDS. With ``tail_len``, keys at or past
             it copy zeros (:func:`paged_v_tail_offset`)."""
@@ -2105,7 +2118,17 @@ def _build_attention_dense_single_buffer(
                 if kbuf is not None
                 else None
             )
-            if spec.paged:
+            if PAGED_I64:
+                rsrc = paged_wave_page_rsrc(
+                    b,
+                    src,
+                    block_tables,
+                    _pg_seq_base,
+                    _pg_n_pages,
+                    b.add(tile_key0, b.mul(wave, b.const_i32(ROWS_PER_WAVE))),
+                    spec,
+                )
+            elif spec.paged:
                 # A wave's rows of the tile sit in one page (spec paged
                 # validation): one block-table lookup per wave.
                 _wphys_base = paged_wave_row_base(
@@ -2125,7 +2148,9 @@ def _build_attention_dense_single_buffer(
                     row_base = b.smem_ptr_add(lds_base, row_lds_off)
                     gkey = b.add(tile_key0, row)
                     gcol = b.mul(lane, b.const_i32(2))
-                    if spec.paged:
+                    if PAGED_I64:
+                        kv_row = paged_in_page_row(b, gkey, spec.block_size)
+                    elif spec.paged:
                         kv_row = paged_kv_row(b, _wphys_base, gkey, spec.block_size)
                     else:
                         kv_row = gkey
@@ -2168,7 +2193,9 @@ def _build_attention_dense_single_buffer(
                     row_base = b.smem_ptr_add(lds_base, row_lds_off)
                     key = b.add(b.add(tile_key0, row0), sub_row)
                     gkey = key
-                    if spec.paged:
+                    if PAGED_I64:
+                        gkey = paged_in_page_row(b, gkey, spec.block_size)
+                    elif spec.paged:
                         gkey = paged_kv_row(b, _wphys_base, gkey, spec.block_size)
                     voff = b.add(b.add(k_base, b.mul(gkey, _stride_k())), col)
                     voff_bytes = b.mul(voff, b.const_i32(2))
@@ -2184,9 +2211,10 @@ def _build_attention_dense_single_buffer(
             # conflict-free read). Naive (D64): K and V both via async DMA, natural
             # [token, dim].
             tk0 = b.mul(tile_idx, b.const_i32(BN))
-            _async_load(k_rsrc, K_lds_addr, tk0, group_pad=KPAD_D64)
+            _async_load(k, k_rsrc, K_lds_addr, tk0, group_pad=KPAD_D64)
             if not USE_CFVST:
                 _async_load(
+                    v,
                     v_rsrc,
                     V_lds_addr,
                     tk0,
@@ -2196,7 +2224,7 @@ def _build_attention_dense_single_buffer(
         def load_pipeline_k(kbuf, tile_idx):
             """Issue K(tile_idx) DMA into the selected K LDS slot."""
             tk0 = b.mul(tile_idx, b.const_i32(BN))
-            _async_load(k_rsrc, K_lds_addr, tk0, kbuf=kbuf)
+            _async_load(k, k_rsrc, K_lds_addr, tk0, kbuf=kbuf)
 
         def _cfvst_load_v(tile_idx):
             """Issue the cfvst VMEM loads and keep each thread's V tile in VGPRs.

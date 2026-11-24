@@ -304,6 +304,8 @@ def test_binding_and_spec_refuse_non_bool_paged_flags(arch, spec_id):
         result.bind_torch(tensors, unsafe_skip_paged_value_validation="False")
     with pytest.raises(ValueError, match="paged must be a bool"):
         dataclasses.replace(result.spec.kernel_spec, paged="no")
+    with pytest.raises(ValueError, match="use_i64_kv_addr must be a bool"):
+        dataclasses.replace(result.spec.kernel_spec, use_i64_kv_addr=1)
 
 
 @pytest.mark.parametrize("arch,spec_id", _CASES)
@@ -473,6 +475,91 @@ def test_one_sequence_cu_seqlens_q_is_int32_on_the_q_device():
     cu = _one_sequence_cu_seqlens_q(torch.empty(1000, 2, 8))
     assert cu.dtype == torch.int32 and cu.device.type == "cpu"
     assert cu.tolist() == [0, 1000]
+
+
+# Blocks of one page that fill exactly the i32 K/V buffer range.
+_I32_BLOCKS = 0x7FFF_0000 // (_BS * _HKV * _D * 2)
+
+
+@pytest.mark.parametrize("arch,spec_id", _CASES)
+def test_cache_size_specializes_i64_but_keeps_the_id(arch, spec_id):
+    """A cache past the i32 range is a runtime specialization: a different
+    binary (identity), the same configuration (tuning_id)."""
+    from rocke.dispatch.core import spec_identity
+
+    base = dispatch_attention(pinned(_request(arch), spec_id)).spec
+    at_limit = base.with_num_kv_blocks(_I32_BLOCKS)
+    past = base.with_num_kv_blocks(_I32_BLOCKS + 1)
+    assert not at_limit.kernel_spec.use_i64_kv_addr
+    assert past.kernel_spec.use_i64_kv_addr
+    assert past.kernel_spec.num_kv_blocks == past.num_kv_blocks == _I32_BLOCKS + 1
+    assert at_limit.tuning_id == past.tuning_id == base.tuning_id
+    assert spec_identity(past) != spec_identity(at_limit)
+
+
+@pytest.mark.parametrize("arch,spec_id", _CASES)
+def test_forced_i64_survives_retargeting_to_a_small_cache(arch, spec_id):
+    base = dispatch_attention(pinned(_request(arch), spec_id)).spec
+    forced = dataclasses.replace(
+        base, kernel_spec=dataclasses.replace(base.kernel_spec, use_i64_kv_addr=True)
+    )
+    small = forced.with_num_kv_blocks(_SQ // _BS)
+    assert small.kernel_spec.use_i64_kv_addr
+    assert small.kernel_spec.num_kv_blocks == _SQ // _BS
+    assert small.tuning_id == base.tuning_id
+
+
+@pytest.mark.parametrize("arch,spec_id", _CASES)
+def test_binding_a_cache_past_the_i32_range(arch, spec_id):
+    """Binding switches the spec to i64 K/V addressing, which the arch's
+    runner accepts (it gets as far as the compile)."""
+    result = dispatch_attention(pinned(_request(arch), spec_id))
+    q = SimpleNamespace(shape=(1, _SQ, _HQ, _D))
+    cache = CacheStandIn((_I32_BLOCKS + 1, _BS, _HKV, _D))
+    tensors = {
+        "q": q,
+        "k": cache,
+        "v": cache,
+        "out": q,
+        "block_tables": I32DeviceTensor([list(range(_SQ // _BS))]),
+        "kv_lens": I32DeviceTensor([_SQ]),
+    }
+    seen = _bind_until_compile(arch, result, tensors)
+    assert seen["spec"].use_i64_kv_addr
+
+
+@pytest.mark.parametrize("arch,spec_id", _CASES)
+def test_binding_packed_sequences_to_a_cache_past_the_i32_range(arch, spec_id):
+    lens = [1000, 17, 512]
+    cu = [0, lens[0], lens[0] + lens[1], sum(lens)]
+    req = _request(arch, batch=3, seqlen_q=max(lens), seqlen_k=max(lens))
+    result = dispatch_attention(pinned(req, spec_id))
+    assert not result.spec.kernel_spec.use_i64_kv_addr
+    num_kv_blocks = _I32_BLOCKS + 1
+    width = -(-max(lens) // _BS)
+    table, top = [], num_kv_blocks
+    for n in lens:  # pages at the top of the cache, past the i32 range
+        pages = -(-n // _BS)
+        table.append(list(range(top - pages, top)) + [0x7FFF_FFFF] * (width - pages))
+        top -= pages
+    packed = CacheStandIn((sum(lens), _HQ, _D))
+    cache = CacheStandIn((num_kv_blocks, _BS, _HKV, _D))
+    tensors = {
+        "q": packed,
+        "k": cache,
+        "v": cache,
+        "out": packed,
+        "block_tables": I32DeviceTensor(table),
+        "kv_lens": I32DeviceTensor(lens),
+        "cu_seqlens_q": I32DeviceTensor(cu),
+    }
+    seen = _bind_until_compile(arch, result, tensors)
+    bound = result.spec.with_num_kv_blocks(num_kv_blocks)
+    assert seen["spec"] == bound.kernel_spec
+    assert seen["spec"].varlen and seen["spec"].use_i64_kv_addr
+    assert seen["spec"].num_kv_blocks == num_kv_blocks
+    assert bound.tuning_id == result.spec.tuning_id
+    assert seen["q"] is packed and seen["cu_seqlens_q"] is tensors["cu_seqlens_q"]
 
 
 @pytest.mark.parametrize("arch", sorted(_PAGED_SPEC_IDS))

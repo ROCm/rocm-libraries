@@ -304,6 +304,7 @@ _SPEC_PERTURBATIONS = {
     "paged": (False, True),  # legal only at the paged base
     "block_size": (32, 64),  # paged-only
     "num_kv_blocks": (128, 512),  # paged-only
+    "use_i64_kv_addr": (True,),  # paged-only
     "block_m": (128, 512),
     "block_n": (32, 128),
     "waves_per_eu": (3, 4),
@@ -362,8 +363,9 @@ _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
 # lds_num_buffers no longer implicitly enables V prefetch. Every other knob is
 # also perturbed inside the combined pipeline body,
 # including iglp_mode (iglp base) and the persistent-grid fields (persistent base).
-# The paged base is the one baked-shape arm, and the only one paged/block_size/
-# num_kv_blocks/varlen can be perturbed at.
+# The paged bases are the baked-shape arms, and the only ones paged/block_size/
+# num_kv_blocks/varlen/use_i64_kv_addr can be perturbed at; the paged varlen one
+# runs every field, use_i64_kv_addr included, on the multi-sequence body.
 _INJECTIVITY_BASES = {
     "d128_fp16_cfvst": dict(head_size=128, dtype="fp16"),
     "d128_fp16_cfvst_iglp": dict(head_size=128, dtype="fp16", iglp=True),
@@ -451,6 +453,18 @@ _INJECTIVITY_BASES = {
         head_size=128,
         dtype="fp16",
         sliding_window=256,
+        paged=True,
+        block_size=16,
+        num_kv_blocks=256,
+    ),
+    "paged_varlen_d64_fp16": dict(
+        batch=3,
+        seqlen_q=1000,
+        seqlen_kv=1000,
+        head_size=64,
+        dtype="fp16",
+        sliding_window=256,
+        varlen=True,
         paged=True,
         block_size=16,
         num_kv_blocks=256,

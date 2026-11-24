@@ -168,6 +168,21 @@ _KERNEL_RESOURCE_BUDGETS = {
         "max_scratch_bytes": 32,
         "min_waves_per_simd": 2,
     },
+    # gfx942 fp16 D128 paged with i64 page bases (single sequence and varlen): the
+    # same DMA-V path, where the ROCm 7.1 comgr caps VGPR at 256 and spills 20-28 B.
+    # ROCm 7.2 and later fit with no scratch.
+    "rocke_attention_dense_d128_hq32_kv8_bn64_fp16_sq8192_sk8192_causal_swa4096_pgd16_nb512_i64kv_lazyrs_gfx942_b1_wpe2": {
+        "max_scratch_bytes": 32,
+        "min_waves_per_simd": 2,
+    },
+    "rocke_attention_dense_d128_hq16_kv4_bn64_fp16_sq1000_sk1000_causal_varlen_pgd16_nb256_i64kv_lazyrs_nphqminswz_gfx942_b3_wpe2": {
+        "max_scratch_bytes": 32,
+        "min_waves_per_simd": 2,
+    },
+    "rocke_attention_dense_d128_hq16_kv4_bn64_fp16_sq1000_sk1000_causal_swa256_varlen_pgd16_nb256_i64kv_lazyrs_nphqminswz_gfx942_b3_wpe2": {
+        "max_scratch_bytes": 32,
+        "min_waves_per_simd": 2,
+    },
 }
 
 # Every kernel_name ``_assert_resources_fit`` is handed, so a budget whose key no
@@ -1550,7 +1565,8 @@ class TestAttentionHelpers(unittest.TestCase):
             ),  # non-power-of-two (shift/mask gate)
             dict(block_size=4, num_kv_blocks=512),  # < ROWS_PER_WAVE (8)
             dict(block_size=16, num_kv_blocks=0),  # num_kv_blocks 0
-            dict(block_size=16, num_kv_blocks=70000),  # cache > 2 GiB (i32 overflow)
+            # Cache past the i32 range without use_i64_kv_addr.
+            dict(block_size=16, num_kv_blocks=70000),
             dict(block_size=16, num_kv_blocks=512, batch=2),  # multi-seq, not varlen
             dict(block_size=16, num_kv_blocks=512, persistent=True),
             dict(
@@ -1678,8 +1694,10 @@ class TestAttentionHelpers(unittest.TestCase):
     @pytest.mark.compiler_integration
     def test_dense_paged_varlen_compiles_and_fits_budget(self):
         """comgr build + resource budget for paged varlen (D128 / D64, causal /
-        sliding window, fp16 / bf16): the Q tail handling, the V tail select and
-        the guarded store must still fit without spilling."""
+        sliding window, fp16 / bf16, i32 / i64 page bases): the Q tail handling,
+        the V tail select and the guarded store must still fit without spilling."""
+        from dataclasses import replace
+
         for arch, head_size, window, dtype in (
             (arch, *arm)
             for arch in ("gfx942", "gfx950")
@@ -1706,13 +1724,18 @@ class TestAttentionHelpers(unittest.TestCase):
                 block_size=16,
                 num_kv_blocks=256,
             )
-            with self.subTest(
-                arch=arch, head_size=head_size, window=window, dtype=dtype
-            ):
-                k = ad.build_attention_dense(spec, arch=arch)
-                art = _compile_or_skip(k, arch=arch)
-                self.assertGreater(art.hsaco_bytes, 0)
-                _assert_resources_fit(art, arch=arch, kernel_name=k.name)
+            for variant in (spec, replace(spec, use_i64_kv_addr=True)):
+                with self.subTest(
+                    arch=arch,
+                    head_size=head_size,
+                    window=window,
+                    dtype=dtype,
+                    i64=variant.use_i64_kv_addr,
+                ):
+                    k = ad.build_attention_dense(variant, arch=arch)
+                    art = _compile_or_skip(k, arch=arch)
+                    self.assertGreater(art.hsaco_bytes, 0)
+                    _assert_resources_fit(art, arch=arch, kernel_name=k.name)
 
     def test_gfx950_signature_matches_the_built_kernels_params(self):
         """gfx950 ``attention_dense_signature`` matches the built kernel's params.
@@ -2051,6 +2074,8 @@ class TestAttentionHelpers(unittest.TestCase):
         """comgr build + resource-budget net for the PAGED dense prefill
         (fp16/bf16 D128 sliding-window, single-seq). Mirrors the non-paged dense
         budget test; the block_tables indirection adds a load but must still fit."""
+        from dataclasses import replace
+
         for arch in ("gfx942", "gfx950"):
             ad = importlib.import_module(f"kernels.{arch}.attention_dense")
             AttentionDenseSpec = dense_arch_spec_class(ad)
@@ -2072,12 +2097,14 @@ class TestAttentionHelpers(unittest.TestCase):
                         block_size=16,
                         num_kv_blocks=512,
                     )
-                    with self.subTest(dtype=dt):
-                        self.assertIn("pgd16", spec.kernel_name())
-                        k = build_attention_dense(spec, arch=arch)
-                        art = _compile_or_skip(k, arch=arch)
-                        self.assertGreater(art.hsaco_bytes, 0)
-                        _assert_resources_fit(art, arch=arch, kernel_name=k.name)
+                    # Also with per-page i64 K/V resources.
+                    for variant in (spec, replace(spec, use_i64_kv_addr=True)):
+                        with self.subTest(dtype=dt, i64=variant.use_i64_kv_addr):
+                            self.assertIn("pgd16", variant.kernel_name())
+                            k = build_attention_dense(variant, arch=arch)
+                            art = _compile_or_skip(k, arch=arch)
+                            self.assertGreater(art.hsaco_bytes, 0)
+                            _assert_resources_fit(art, arch=arch, kernel_name=k.name)
 
     def test_dense_paged_smaller_tiles_compile_and_fit_budget(self):
         """comgr build + resource-budget net for paged K/V on the smaller dense

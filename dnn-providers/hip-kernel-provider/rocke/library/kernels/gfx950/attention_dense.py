@@ -129,9 +129,11 @@ from kernels.common._attention_dense_paged import (
     declare_paged_params,
     paged_cache_bytes,
     paged_kv_row,
+    paged_in_page_row,
     paged_launch_args,
     paged_seq_setup,
     paged_v_tail_offset,
+    paged_wave_page_rsrc,
     paged_wave_row_base,
     validate_paged_launch,
 )
@@ -962,6 +964,7 @@ def build_attention_dense(
     # loads, a ceil KV tile count, zeroed V tail rows and a guarded O store.
     PAGED_VARLEN = varlen and spec.paged
     RAGGED = spec.ragged
+    PAGED_I64 = spec.paged and spec.use_i64_kv_addr
     LAZY_RESCALE = spec.lazy_rescale
     LAZY_THRESHOLD = float(spec.lazy_rescale_threshold)
     use_sinks = spec.use_sinks
@@ -1172,10 +1175,14 @@ def build_attention_dense(
             b.mul(b.mul(bt, seqlen_q_p), _stride_q()),
             b.mul(hq, b.const_i32(D)),
         )
-        k_base = b.add(
-            b.mul(b.mul(bt, seqlen_kv_p), _stride_k()),
-            b.mul(hkv, b.const_i32(D)),
-        )
+        if PAGED_I64:
+            # The page base is in the resource; the voffset stays within the page.
+            k_base = b.mul(hkv, b.const_i32(D))
+        else:
+            k_base = b.add(
+                b.mul(b.mul(bt, seqlen_kv_p), _stride_k()),
+                b.mul(hkv, b.const_i32(D)),
+            )
 
     if USE_BIAS:
         # This lane's bias row base: the element index of key 0 for its query, which
@@ -1295,16 +1302,20 @@ def build_attention_dense(
     # attention_dense representative-IR golden).
     #
     # Gated on ``spec.paged`` and ``varlen``, not on ``spec.runtime_shape``: the
-    # branches bound DIFFERENT extents (the whole page cache, the end of this
-    # workgroup's packed sequence, the contiguous batch*seqlen_kv rows), so this is
-    # not the removable bookkeeping split that the batch/seqlen param declaration
-    # was. Paged stays first among those: the spec rejects paged varlen, and a page
-    # cache is addressed through block_tables, never through packed offsets. fp8
-    # leads the chain only because the spec rejects it with paged AND varlen, so it
-    # can never contend with either.
+    # branches bound DIFFERENT extents (the whole page cache, or one page past the
+    # i32 range; the end of this workgroup's packed sequence; the contiguous
+    # batch*seqlen_kv rows), so this is not the removable bookkeeping split that the
+    # batch/seqlen param declaration was. Paged stays first among those, paged
+    # varlen included: a page cache is addressed through block_tables, never through
+    # packed K/V offsets. fp8 leads the chain only because the spec rejects it with
+    # paged AND varlen, so it can never contend with either.
     if KV_FP8:
         # The fp8 sync-dequant loader reads K/V with plain in-bounds global loads
         # (aligned KV only), so no bounds-checked buffer resource is built here.
+        k_rsrc = v_rsrc = None
+    elif PAGED_I64:
+        # One resource per page, built per wave and tile in _async_load: the whole
+        # cache is past what an i32 num_records and voffset can address.
         k_rsrc = v_rsrc = None
     elif spec.paged:
         # ``num_kv_blocks`` is not a kernel param, so the cache bound stays baked.
@@ -1361,7 +1372,14 @@ def build_attention_dense(
             seqlen_kv_b = _pg_kv_len
 
     def _async_load(
-        rsrc, lds_base, buf_val, tile_key0, bytes_per_buf, group_bytes, tail_len=None
+        src,
+        rsrc,
+        lds_base,
+        buf_val,
+        tile_key0,
+        bytes_per_buf,
+        group_bytes,
+        tail_len=None,
     ):
         """Async DMA one K/V tile into its LDS layout. With ``tail_len``, keys at or
         past it copy zeros (:func:`paged_v_tail_offset`).
@@ -1375,7 +1393,17 @@ def build_attention_dense(
         group_bytes is the plain unpadded ROWS_PER_INSTR*D pitch, so its layout
         is unchanged."""
         buf_off = b.mul(b.zext(buf_val, I64), b.const_i64(bytes_per_buf))
-        if spec.paged:
+        if PAGED_I64:
+            rsrc = paged_wave_page_rsrc(
+                b,
+                src,
+                block_tables,
+                _pg_seq_base,
+                _pg_n_pages,
+                b.add(tile_key0, b.mul(wave, b.const_i32(ROWS_PER_WAVE))),
+                spec,
+            )
+        elif spec.paged:
             # All ROWS_PER_WAVE rows of this wave fall in ONE page (spec paged
             # validation), so the block_tables lookup is wave-uniform and hoisted out of
             # the row loop; per row it is then an and-mask + add. Every key here is
@@ -1398,7 +1426,9 @@ def build_attention_dense(
                 row_base = b.smem_ptr_add(lds_base, row_lds_off)
                 gkey = b.add(tile_key0, row)
                 gcol = b.mul(lane, b.const_i32(2))
-                if spec.paged:
+                if PAGED_I64:
+                    kv_row = paged_in_page_row(b, gkey, spec.block_size)
+                elif spec.paged:
                     kv_row = paged_kv_row(b, _wphys_base, gkey, spec.block_size)
                 else:
                     kv_row = gkey
@@ -1426,9 +1456,11 @@ def build_attention_dense(
                 row_base = b.smem_ptr_add(lds_base, row_lds_off)
                 key = b.add(b.add(tile_key0, row0), sub_row)
                 gkey = key
-                if spec.paged:
-                    # A group's rows are a subset of the wave's rows, so they stay
-                    # in the wave's page.
+                # A group's rows are a subset of the wave's rows, so they stay in
+                # the wave's page.
+                if PAGED_I64:
+                    gkey = paged_in_page_row(b, gkey, spec.block_size)
+                elif spec.paged:
                     gkey = paged_kv_row(b, _wphys_base, gkey, spec.block_size)
                 voff = b.add(b.add(k_base, b.mul(gkey, _stride_k())), col)
                 voff_bytes = b.mul(voff, b.const_i32(2))
@@ -1440,11 +1472,12 @@ def build_attention_dense(
 
     def async_load_k(lds_base, buf_val, tile_key0):
         _async_load(
-            k_rsrc, lds_base, buf_val, tile_key0, K_BYTES_PER_BUF, K_GROUP_BYTES
+            k, k_rsrc, lds_base, buf_val, tile_key0, K_BYTES_PER_BUF, K_GROUP_BYTES
         )
 
     def async_load_v(lds_base, buf_val, tile_key0):
         _async_load(
+            v,
             v_rsrc,
             lds_base,
             buf_val,

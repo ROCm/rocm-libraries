@@ -11,7 +11,7 @@ block-table lookup per wave serves all of the wave's rows.
 
 from __future__ import annotations
 
-from rocke.core.ir import I32, PtrType
+from rocke.core.ir import I32, I64, PtrType
 
 
 def declare_paged_params(b):
@@ -29,20 +29,19 @@ def declare_paged_params(b):
 _TORCH_CACHE_DTYPES = {"fp16": "torch.float16", "bf16": "torch.bfloat16"}
 
 
+def paged_page_bytes(spec) -> int:
+    """Bytes of one cache page (``block_size`` rows of all kv heads)."""
+    return spec.block_size * spec.num_kv_heads * spec.head_size * spec.kv_elem_bytes
+
+
 def paged_cache_bytes(spec) -> int:
-    """Byte extent of one paged K (or V) cache: the buffer-resource bound.
+    """Byte extent of one paged K (or V) cache: the i32 buffer-resource bound.
 
     The whole cache, not one sequence's logical length: any page id the table can
     name must be in range, and loads past ``num_records`` silently return 0. The
     spec's 2 GiB check uses it too.
     """
-    return (
-        spec.num_kv_blocks
-        * spec.block_size
-        * spec.num_kv_heads
-        * spec.head_size
-        * spec.kv_elem_bytes
-    )
+    return spec.num_kv_blocks * paged_page_bytes(spec)
 
 
 def paged_tile_check(block_size: int, block_m: int, block_n: int) -> tuple[bool, str]:
@@ -75,19 +74,17 @@ def paged_seq_setup(b, bt, kv_lens, bt_stride, block_size: int):
     return seq_base, n_pages, kv_len
 
 
-def paged_wave_row_base(b, block_tables, seq_base, n_pages, wave_key0, block_size: int):
-    """Physical row of the page holding key ``wave_key0`` (``block_id * block_size``).
+def paged_wave_block_id(b, block_tables, seq_base, n_pages, wave_key0, block_size: int):
+    """Physical block id of the page holding key ``wave_key0``.
 
     ``wave_key0`` is the wave's first key of the tile; it must be non-negative, so
     the page split is a shift and a mask. A page past ``n_pages`` reads block 0.
-    The block id is not range-checked. The K/V buffer resource spans the whole cache
-    (:func:`paged_cache_bytes`), so an id slightly past it reads 0, but a large one
-    wraps in the i32 offset and can land on another page: only the launcher's
-    ``validate_paged`` content check catches a corrupt table. An i64 path that folds
-    the block into a 64-bit base must check the id explicitly.
+    The id itself is not range-checked here: the i32 form bounds it by the
+    whole-cache resource (:func:`paged_wave_row_base`), the i64 form clamps it
+    (:func:`paged_page_rsrc`).
     """
     page = b.lshr(wave_key0, b.const_i32(block_size.bit_length() - 1))
-    block_id = b.masked_global_load(
+    return b.masked_global_load(
         block_tables,
         b.add(seq_base, page),
         b.cmp_lt(page, n_pages),
@@ -95,12 +92,63 @@ def paged_wave_row_base(b, block_tables, seq_base, n_pages, wave_key0, block_siz
         dtype=I32,
         align=4,
     )
+
+
+def paged_wave_row_base(b, block_tables, seq_base, n_pages, wave_key0, block_size: int):
+    """Physical row of the page holding key ``wave_key0`` (``block_id * block_size``).
+
+    The K/V buffer resource spans the whole cache (:func:`paged_cache_bytes`), so
+    an id slightly past it reads 0, but a large one wraps in the i32 offset and can
+    land on another page: only the launcher's ``validate_paged`` content check
+    catches a corrupt table.
+    """
+    block_id = paged_wave_block_id(
+        b, block_tables, seq_base, n_pages, wave_key0, block_size
+    )
     return b.mul(block_id, b.const_i32(block_size))
+
+
+def paged_page_rsrc(b, base_ptr, block_id, spec):
+    """Buffer resource over the one page ``block_id`` of the cache at ``base_ptr``
+    (``use_i64_kv_addr``): the 64-bit page base goes into the resource, so the
+    voffset stays within a page (:func:`paged_in_page_row`).
+
+    ``block_id`` must be wave-uniform (one page per wave and tile). Unlike the i32
+    form, nothing bounds a bad id here: it would be an arbitrary 64-bit address. So
+    it is clamped (unsigned, so a negative id clamps too) to the last block: a
+    corrupt table reads a real page instead of faulting; ``validate_paged`` still
+    reports it on the host. ``num_records`` is one page, never the whole cache: a
+    range past the page's allocation could fault.
+    """
+    page_bytes = paged_page_bytes(spec)
+    block_id = b.readfirstlane(block_id)
+    block_id = b.select(
+        b.cmp_ult(block_id, b.const_i32(spec.num_kv_blocks)),
+        block_id,
+        b.const_i32(spec.num_kv_blocks - 1),
+    )
+    page_base = b.mul(b.zext(block_id, I64), b.const_i64(page_bytes))
+    return b.buffer_rsrc(b.global_ptr_add(base_ptr, page_base), b.const_i32(page_bytes))
+
+
+def paged_wave_page_rsrc(b, base_ptr, block_tables, seq_base, n_pages, wave_key0, spec):
+    """Resource over the page holding key ``wave_key0`` (``use_i64_kv_addr``): one
+    per wave and tile, shared by all of the wave's copies of the tile, rows then
+    addressed within the page."""
+    block_id = paged_wave_block_id(
+        b, block_tables, seq_base, n_pages, wave_key0, spec.block_size
+    )
+    return paged_page_rsrc(b, base_ptr, block_id, spec)
+
+
+def paged_in_page_row(b, key, block_size: int):
+    """Row of logical key ``key`` (non-negative) within its page."""
+    return b.land(key, b.const_i32(block_size - 1))
 
 
 def paged_kv_row(b, row_base, key, block_size: int):
     """Cache row of logical key ``key`` (non-negative) in the page at ``row_base``."""
-    return b.add(row_base, b.land(key, b.const_i32(block_size - 1)))
+    return b.add(row_base, paged_in_page_row(b, key, block_size))
 
 
 def paged_v_tail_offset(b, voff_bytes, key, kv_len):
@@ -132,8 +180,10 @@ def validate_paged_launch(
     Always (metadata only), as the unified binding checks its paged inputs:
     ``block_tables`` [batch, >= pages] and ``kv_lens`` [batch] are int32 tensors with
     unit inner stride on the K/V device, and the K/V caches are contiguous GPU tensors
-    on one device with the spec's shape. The kernel bakes the cache layout and takes
-    the buffer bound from the spec (:func:`paged_cache_bytes`), so a strided view or a
+    on one device with the spec's shape. The kernel bakes the cache layout and the
+    cache extent: the i32 form bounds its loads by the whole cache
+    (:func:`paged_cache_bytes`), the i64 form clamps the page id to ``num_kv_blocks``
+    and bounds each page (:func:`paged_page_rsrc`). Either way a strided view or a
     smaller cache would be read at the wrong addresses or past the allocation. Paged varlen also needs
     packed contiguous ``q``/``out`` [total_q, Hq, D] and an int32 ``cu_seqlens_q``
     [batch + 1] there. With ``validate_paged`` the contents are checked too
