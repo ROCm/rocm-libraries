@@ -234,7 +234,6 @@ inline hipError_t get_device_arch([[maybe_unused]] int device_id, target_arch& a
     return hipSuccess;
 }
 
-#if USE_DEVICE_DISPATCH
 /// @brief Queries a device corresponding to a stream using the HIP API.
 /// @param stream The stream in question.
 /// @param device_id Out parameter. The result of the device query is written here.
@@ -251,14 +250,71 @@ inline hipError_t get_device_from_stream(const hipStream_t stream, int& device_i
         }
         return hipSuccess;
     }
+#if defined(__HIP_PLATFORM_AMD__)
     device_id = hipGetStreamDeviceId(stream);
     if(device_id < 0)
     {
         return hipErrorInvalidHandle;
     }
     return hipSuccess;
-}
+#else
+    // No equivalent of hipGetStreamDeviceId outside of the AMD platform. A stream can
+    // only be used from the device it was created on, so the current device is the best
+    // available answer.
+    return hipGetDevice(&device_id);
 #endif
+}
+
+/// @brief Makes a device current for the lifetime of the object, and restores the
+/// previously current device on destruction. Allocations made with \p hipMalloc are
+/// placed on the current device rather than on the device of any particular stream, so
+/// filling a per-device cache requires switching first.
+class scoped_device
+{
+public:
+    explicit scoped_device(const int device_id)
+    {
+        m_status = hipGetDevice(&m_previous_device);
+        if(m_status != hipSuccess || m_previous_device == device_id)
+        {
+            return;
+        }
+        m_status = hipSetDevice(device_id);
+        if(m_status == hipSuccess)
+        {
+            m_restore = true;
+        }
+    }
+
+    scoped_device(const scoped_device&)            = delete;
+    scoped_device& operator=(const scoped_device&) = delete;
+    scoped_device(scoped_device&&)                 = delete;
+    scoped_device& operator=(scoped_device&&)      = delete;
+
+    ~scoped_device()
+    {
+        if(m_restore)
+        {
+            // Nothing useful can be done if restoring fails, and the destructor must not
+            // throw. Clear the error so it is not reported against an unrelated call.
+            if(hipSetDevice(m_previous_device) != hipSuccess)
+            {
+                (void)hipGetLastError();
+            }
+        }
+    }
+
+    /// @return \ref hipSuccess if the device was made current, a different error code otherwise.
+    hipError_t status() const
+    {
+        return m_status;
+    }
+
+private:
+    int        m_previous_device = 0;
+    hipError_t m_status          = hipSuccess;
+    bool       m_restore         = false;
+};
 
 /// @brief Queries the device architecture of a device corresponding to a HIP stream.
 /// @param stream The ID of the HIP stream.
