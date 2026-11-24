@@ -138,15 +138,17 @@ def test_preparation_and_handoff_follow_supported_order(monkeypatch, multicast, 
         expected.append(("s_barrier_wait", "-3"))
     assert machine.barrier_operations == expected
     # Primed re-entry and close must not issue, advance the token, or release
-    # a cluster phase twice.
+    # the PAP cluster phase twice. This kernel has a tail loop, so close still
+    # arrives once for the phase primed entry waits on.
     machine.run(module)
     close = assignment.closeLoop(writer, kernel)
     assert machine.run(close) == "label_PersistentLoopStart"
     assert machine["Mapped"] == 1
     assert machine["Loads"] == machine["TensorToken"] == 1
-    assert machine.barrier_operations == expected + [
-        ("s_barrier_signal", "-1"), ("s_barrier_wait", "-1"),
-    ]
+    reentry = [("s_barrier_signal", "-1"), ("s_barrier_wait", "-1")]
+    if multicast and wave == 0:
+        reentry.append(("s_barrier_signal", "-3"))
+    assert machine.barrier_operations == expected + reentry
     close_text = str(close)
     assert close_text.count("s_wait_dscnt 0") == 1
     assert "s_wait_tensorcnt" not in close_text
