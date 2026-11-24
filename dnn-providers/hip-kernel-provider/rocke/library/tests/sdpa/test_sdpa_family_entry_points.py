@@ -162,7 +162,6 @@ def test_dispatch_all_matches_registered_combos(arch):
 def _declined_by_both(arch):
     base = _ADMITTED[arch]
     return {
-        "bias": replace(base, bias=SdpaBias(packed((2, 4, 8, 8)))),
         "dropout": replace(base, dropout=SdpaDropout(0.1)),
         "block_mask": replace(base, block_mask=packed((2, 4, 1, 1), "uint8")),
         "paged": paged(base),
@@ -186,6 +185,21 @@ def test_all_three_are_empty_when_both_gates_decline(arch, feature):
     assert registered_sdpa_combos(req) == ()
     assert tuple(sdpa_sweep_space(req)) == ()
     assert dispatch_sdpa_all(req) == ()
+
+
+def test_a_bias_reaches_the_unified_combos_where_the_arch_has_bias():
+    """gfx950 serves a bias through the unified tuning variants (the dense gate
+    still declines it); gfx942 has no bias kernel, so nothing serves it."""
+    req = replace(_ADMITTED["gfx950"], bias=SdpaBias(packed((2, 4, 8, 8))))
+    assert sdpa_unified_candidates(req)
+    assert not sdpa_dense_candidates(req)
+    combos = registered_sdpa_combos(req)
+    assert combos
+    assert {c.algorithm for c, _ in combos} == {TUNING_ALGORITHM}
+
+    req = replace(_ADMITTED["gfx942"], bias=SdpaBias(packed((2, 4, 8, 8))))
+    assert not _gate_names(req)
+    assert registered_sdpa_combos(req) == ()
 
 
 def test_all_three_are_empty_for_something_that_is_not_an_sdpa_request():

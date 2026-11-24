@@ -44,11 +44,10 @@
  *
  * ARCH GATE NOTE (validate_tiled_attention_arch). The Python validator
  * (instances/common/attention_arch.py) admits the gfx950 wide-K + ds_read_tr
- * path and the gfx942 narrow 16x16x16 strided-V path. The C arch surface
- * (rocke/helper_rocke.core.arch.h) exposes op_for_shape but not the
- * memory.has_ds_read_tr predicate, so the wide-K admission is reproduced via the
- * catalogued 16x16x32 f16 atom only (the canonical wide-K marker). The fallback
- * reason strings mirror the Python text byte-for-byte.
+ * path and the gfx942 narrow 16x16x16 strided-V path. The wide-K admission here
+ * requires both the catalogued 16x16x32 f16 atom and memory.has_ds_read_tr, as
+ * the Python does. The fallback reason strings mirror the Python text
+ * byte-for-byte.
  */
 #include <math.h>
 #include <stdio.h>
@@ -72,6 +71,7 @@
  * _default() definitions below -- the gfx942 TU owns them. The structs are
  * byte-identical so the single shared definition is correct for both. */
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "rocke/helper_rocke.helpers.attention_arch_caps.h"
 #include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
 #include "rocke/instance_gfx942_attention_tiled_3d.h"
 #include "rocke/instance_gfx950_attention_tiled_3d.h"
@@ -80,10 +80,11 @@
 /* Module consts (Python module-level MFMA_M / MFMA_N). */
 #define ROCKE_ATTN3D950_MFMA_M 16
 #define ROCKE_ATTN3D950_MFMA_N 16
-/* Async K/V feed: one wave64 CTA, 4 DWORDs (8 halves) per lane per async call;
- * every call is one vmcnt event, and the gfx950 vmcnt field is 6 bits. */
+/* Async K/V feed: one wave64 CTA, the widest gfx950 LDS-DMA width per lane per
+ * async call (from the attention capability table: 4 DWORDs, 8 halves); every
+ * call is one vmcnt event, and the gfx950 vmcnt field is 6 bits. */
 #define ROCKE_ATTN3D950_SEGMENT_THREADS 64
-#define ROCKE_ATTN3D950_KV_HALVES_PER_LANE 8
+#define ROCKE_ATTN3D950_KV_HALVES_PER_LANE (rocke_attn_max_lds_dma_dwords("gfx950") * 2)
 #define ROCKE_ATTN3D950_KV_HALVES_PER_CALL \
     (ROCKE_ATTN3D950_SEGMENT_THREADS * ROCKE_ATTN3D950_KV_HALVES_PER_LANE)
 #define ROCKE_ATTN3D950_MAX_VMCNT ((1 << 6) - 1)
@@ -161,9 +162,9 @@ static bool rocke_attn3d950_validate_arch(const char* eff_arch,
         }
         return false;
     }
-    if(rocke_attn3d950_wide_k_available(target))
+    if(rocke_attn3d950_wide_k_available(target) && target->memory.has_ds_read_tr)
     {
-        return true; /* gfx950 wide-K + ds_read_tr path (ds_read_tr not queryable) */
+        return true; /* gfx950 wide-K + ds_read_tr path (validate_tiled_attention_arch) */
     }
     if(rocke_attn3d950_streq(eff_arch, "gfx942") && rocke_attn3d950_narrow_k_available(target))
     {
@@ -200,6 +201,7 @@ rocke_unified_attention_3d_tiled_spec_t rocke_unified_attention_3d_tiled_spec_de
     /* required fields stay zero/NULL (caller must set). Defaulted fields: */
     s.use_alibi = false;
     s.use_qq_bias = false;
+    s.use_additive_bias = false;
     s.num_seqs = 0;
     s.has_waves_per_eu = false;
     s.waves_per_eu = 0;
@@ -400,6 +402,7 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
      *   kv<...> if kv_storage_dtype else "", "sinks" if use_sinks else "",
      *   "sw<sw>" if sw>0 else "", "softcap" if has_softcap else "",
      *   "alibi" if use_alibi else "", "qqb" if use_qq_bias else "",
+     *   "addb" if use_additive_bias else "",
      *   "dg" if use_decode_grid else "",
      *   "kvcp<policy>" if kv_cache_policy != "all" else "",
      *   "kvswz" if use_kv_lds_swizzle else "",
@@ -481,6 +484,10 @@ int rocke_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     if(s->use_qq_bias)
     {
         parts[np++] = "qqb";
+    }
+    if(s->use_additive_bias)
+    {
+        parts[np++] = "addb";
     }
     if(s->use_decode_grid)
     {
@@ -738,6 +745,7 @@ bool rocke_gfx950_attn_tiled_3d_config_from_spec(
     out->USE_SINKS = spec->use_sinks;
     out->USE_ALIBI = spec->use_alibi;
     out->USE_QQ_BIAS = spec->use_qq_bias;
+    out->USE_ADDITIVE_BIAS = spec->use_additive_bias;
     out->KV_FP8 = (spec->kv_storage_dtype != NULL
                    && rocke_attn3d950_streq(spec->kv_storage_dtype, "fp8e4m3"));
     out->I64_KV_ADDR = spec->use_i64_kv_addr;
@@ -773,9 +781,21 @@ bool rocke_gfx950_attn_tiled_3d_config_from_spec(
         return false;
     }
 
-    /* ---- async / fp8 KV feed geometry (Python lines 564-643). CDNA4 async DMA
-     * delivers 4 DWORDS (8 halves) per lane; no wide-b128 sync path. ---- */
-    out->ASYNC_LDS_DWORDS = 4;
+    /* ---- async / fp8 KV feed geometry (Python lines 564-643). The async DMA
+     * delivers the widest gfx950 width, 4 DWORDS (8 halves) per lane; no
+     * wide-b128 sync path. ---- */
+    out->ASYNC_LDS_DWORDS = rocke_attn_max_lds_dma_dwords("gfx950");
+    /* The KV swizzle (one lane payload = one 16-byte chunk) is written for
+     * 4-dword lanes. */
+    if(out->ASYNC_LDS_DWORDS != 4)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "gfx950 tiled 3D attention lane addressing assumes a 4-dword LDS-DMA "
+                        "width; the capability table gives %d",
+                        out->ASYNC_LDS_DWORDS);
+        return false;
+    }
     out->HALVES_PER_LANE = out->ASYNC_LDS_DWORDS * 2; /* 8 */
     out->KV_HALVES_PER_CALL = out->THREADS * ROCKE_ATTN3D950_KV_HALVES_PER_LANE;
 
@@ -1039,6 +1059,11 @@ static rocke_kernel_def_t* build_segment_gfx950(rocke_ir_builder_t* b,
         if(strided_kv && spec->use_wave_page_id_load)
         {
             rocke_i_set_err(b, ROCKE_ERR_VALUE, "use_wave_page_id_load needs paged fp16/bf16 KV");
+            return NULL;
+        }
+        if(strided_kv && spec->use_additive_bias)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "strided KV does not support use_additive_bias");
             return NULL;
         }
         /* An async K/V copy moves KV_HALVES_PER_CALL halves. When that is not a

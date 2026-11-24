@@ -418,10 +418,19 @@ class TestRdnaAttentionSelection(unittest.TestCase):
             {"use_softcap": True},
             {"use_alibi": True},
             {"use_qq_bias": True},
-            {"use_attn_bias": True},
         ):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 dispatch_attention(_request(arch="gfx950", **changes))
+        # gfx950 serves an f32 additive bias (unified tiled kernels), but not a
+        # Q-dtype one; pin the unified candidate's own reason.
+        biased = dispatch_attention(_request(arch="gfx950", use_attn_bias=True))
+        self.assertEqual(biased.candidate.name, "attention_unified_2d")
+        with self.assertRaisesRegex(
+            ValueError, r"attention_unified_2d: [^;]*f32 additive bias only"
+        ):
+            dispatch_attention(
+                _request(arch="gfx950", use_attn_bias=True, attn_bias_dtype="q")
+            )
 
     def test_right_window_rejects_unsupported_combinations(self):
         cases = (

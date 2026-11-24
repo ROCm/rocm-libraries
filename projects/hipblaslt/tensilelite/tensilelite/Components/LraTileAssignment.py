@@ -869,7 +869,8 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         else:
             dividedForBlkId  = (matrixInstTO * kernel["MatrixInstBN"]) if (tile01 == 0) else matrixInstTO
         dividedForWaveId = waveWidth if (tile01 == 0) else (waveWidth * kernel["MIWaveGroup"][0])
-        vectorWidth      = 1 if enableLDSTr else kernel["VectorWidth%s"%tc]
+        contiguousA = kernel.get("WaveTileContiguousA", False) and tc in ("A", "MXSA")
+        vectorWidth      = 1 if enableLDSTr or contiguousA else kernel["VectorWidth%s"%tc]
         if isDTVAB:
             if tP["tlu"]:
                 # DTV + TLU case, glvw and vw are applied to the same direction. No need to apply both.
@@ -942,6 +943,9 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         else:
            strideWave = matrixInstT * num1DBlocks * strideTile * vectorWidth
 
+        if contiguousA:
+            strideWave *= kernel["MIWaveTile"][tile01]
+
         # When one wave's read spans a whole LDS component, the component jump lives in the wave
         # stride. A narrower VW straddles components; then LocalRead applies the jump instead, so
         # keep the baseline wave stride. MX scales use separate addressing; split MXSA's
@@ -955,7 +959,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                 (tc == "B" and not _segOff.get("bBaseline", False)))
         if segILActive:
             _compCols  = kernel["MacroTile%u" % tile01] // (kernel["NumWaves"] // 2)
-            segILWaveSpansComp = wave_tile_span(kernel, tc, vectorWidth) >= _compCols
+            segILWaveSpansComp = contiguousA or wave_tile_span(kernel, tc, vectorWidth) >= _compCols
             # portSplitA (VWA==WaveTileA/2): the A0->A1 segment jump is carried on the wave stride, so force it on.
             if tc == "A" and _segOff.get("portSplitA", False):
                 segILWaveSpansComp = True
@@ -1165,6 +1169,8 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                     # both blocks (lower/upper half-wave), which the WMMA then selects between
                     # via matrix_{a,b}_scale. hiOffset = full tile-half span in bytes.
                     hiOffset = matrixInstT * num1DBlocks * num1DWaves * vectorWidth * strideTile
+                    if contiguousA:
+                        hiOffset = matrixInstT * vectorWidth * strideTile
                     # axis-neutral: tile01==0 -> M axis (MXSA), tile01==1 -> N axis (MXSB)
                     tileDim = "M" if tile01 == 0 else "N"
                     module.add(vectorStaticDivide(dummy, dividendReg, matrixInstTO, tmpVgprRes, \

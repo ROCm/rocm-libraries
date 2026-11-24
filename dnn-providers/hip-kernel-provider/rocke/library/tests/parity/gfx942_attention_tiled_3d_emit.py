@@ -378,10 +378,53 @@ _CONFIGS = {
         use_decode_grid=True,
         waves_per_eu=2,
     ),
+    # idx33: QQ bias alone (no config here enabled it before). The gfx950
+    # twin's mask build order fix (bind cmp_ge/cmp_lt before land, since C's
+    # argument evaluation order is unspecified) was mirrored into this file's
+    # 3D compute without a parity config to pin it -- this is that config.
+    33: dict(
+        head_size=64,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=4,
+        dtype="fp16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_qq_bias=True,
+        kv_storage_dtype=None,
+    ),
+    # idx34: additive bias on gfx942; both engines reject it (BOTH_REJECTED).
+    # The gfx942 Python spec has no use_additive_bias field (TypeError); the C
+    # twin rejects it in rocke_unified_attention_3d_tiled_spec_validate.
+    34: dict(
+        head_size=64,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=4,
+        dtype="fp16",
+        num_segments=8,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        kv_storage_dtype=None,
+    ),
 }
 
 # Configs whose REDUCE kernel is built with emit_lse=True (segment unchanged).
 _REDUCE_LSE = frozenset({20, 21})
+
+# Configs both engines must reject, with the reason each one pins: run_diff
+# requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
+# reason, a typo included).
+_EXPECTED_REJECTIONS = {
+    34: (
+        r"unexpected keyword argument 'use_additive_bias'"
+        r"|use_additive_bias is not implemented on gfx942"
+    ),
+}
 
 
 def _strided_decode(head_size, block_size, tile, dtype, num_segments, heads=(32, 8)):

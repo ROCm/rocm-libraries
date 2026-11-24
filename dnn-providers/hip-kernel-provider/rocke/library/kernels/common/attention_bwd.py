@@ -116,13 +116,14 @@ from functools import cache
 from types import MappingProxyType
 from typing import Optional
 
-from rocke.core.arch import ArchTarget
 from rocke.core.codegen_policy import (
     SCHEDULER_STRATEGY_ATTR,
     normalize_scheduler_strategy,
 )
 from rocke.core.ir import F32, I32, I64, IRBuilder, PtrType
 
+from rocke.helpers import attention_arch_caps as _attn_caps
+from rocke.helpers.attention_arch_caps import ASM_TAIL_NOP_MAX
 from rocke.helpers.attention_band import AttnRuntimeBounds
 from rocke.helpers.spec import non_default_fields, salted_kernel_name
 
@@ -416,7 +417,6 @@ AGPR_ROUTES_BUILT = (None, "vgpr_form", "agpr_fence", "asm_g13")
 # is ``asm_load_hoist`` (the second G1 / G3 GEMM's LDS operand reads issued
 # before the first one's asm cluster).
 ASM_CLUSTERS = ("k_step", "gemm")
-ASM_TAIL_NOP_MAX = 15
 # Issue order and thread distribution of the per-step Q / dO staging copies.
 # "split": each tensor's copy in turn, every chunk's LDS store right after its
 # global load. "loads_first": every Q and dO global load of the step before the
@@ -704,7 +704,8 @@ _ARCH_TRANSPOSE = {
 
 @dataclass(frozen=True)
 class BwdArchFacts:
-    """Backward-relevant facts of one gfx target, read from ``ArchTarget``."""
+    """Backward-relevant facts of one gfx target, read from the attention
+    capability table (:mod:`rocke.helpers.attention_arch_caps`)."""
 
     arch: str
     wave_size: int
@@ -754,26 +755,19 @@ def attn_bwd_arch_facts(arch: str) -> BwdArchFacts:
         raise ValueError(
             f"attention backward does not target {arch!r}; known: {BWD_ARCHS}"
         )
-    t = ArchTarget.from_gfx(arch)
-    path = "mfma" if t.has_mfma else "wmma"
-    agprs = int(t.limits.agprs)
-    wide = False
-    if path == "mfma":
-        for dt in BWD_DTYPES:
-            ops = t.mma.enumerate(
-                family="mma", a_dtype=dt, b_dtype=dt, c_dtype="fp32", m=16, n=16
-            )
-            if any(op.k == 32 and op.wave_size == t.wave_size for op in ops):
-                wide = True
+    c = _attn_caps.attn_arch_caps(arch)
+    wide = c.matrix_path == "mfma" and any(
+        _attn_caps.wide_k_atom_available(arch, dt) for dt in BWD_DTYPES
+    )
     return BwdArchFacts(
         arch=arch,
-        wave_size=int(t.wave_size),
-        matrix_path=path,
-        lds_capacity_bytes=int(t.lds_capacity_bytes),
-        arch_vgprs=int(t.limits.vgprs) - agprs,
-        agprs=agprs,
-        has_tr_read=bool(t.memory.has_ds_read_tr),
-        has_lds_dma=bool(t.memory.has_async_lds),
+        wave_size=c.wave_size,
+        matrix_path=c.matrix_path,
+        lds_capacity_bytes=c.lds_capacity_bytes,
+        arch_vgprs=c.arch_vgprs,
+        agprs=c.agprs,
+        has_tr_read=c.has_tr_read_b64,
+        has_lds_dma=bool(c.lds_dma_dwords),
         wide_k_atom=wide,
     )
 

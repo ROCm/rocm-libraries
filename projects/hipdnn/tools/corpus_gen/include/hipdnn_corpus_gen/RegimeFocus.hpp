@@ -23,14 +23,21 @@
 ///
 /// Regimes defined by an equality (`decode` is `seqlen_q == 1`) are almost never hit by a free
 /// walk, so a focus pins/ties those parameters and walks the rest. Every candidate is still
-/// checked with `regimeLabel`, so a focus never puts a point in the wrong regime.
+/// checked with `regimeLabel` (or, for a form, the form's own facet), so a focus never puts a
+/// point in the wrong regime.
 namespace hipdnn_corpus_gen
 {
 
 /// @brief The relations a regime label pins, and the label itself as the final word.
+///
+/// Also the focus of a form label (`--form-floor`): @ref formAxis then names the axis whose
+/// facet @ref label is read from, instead of the joined regime.
 struct RegimeFocus
 {
     std::string label;
+
+    /// The form axis @ref label belongs to; empty means @ref label is a joined regime label.
+    std::string formAxis;
 
     /// Numeric parameters a clause fixes to a constant (`seqlen_q == 1`).
     std::map<std::string, int64_t> pins;
@@ -188,6 +195,33 @@ inline void foldEqualities(const OperationMetadata& metadata,
 
 } // namespace detail
 
+namespace detail
+{
+
+/// Folds into @p focus what @p axis's clause for @p label pins. Only a label named by exactly
+/// one clause pins anything: several clauses are a disjunction, and `otherwise` implies only
+/// negations.
+inline void foldLabelClause(const OperationMetadata& metadata,
+                            const RegimeAxis& axis,
+                            const std::string& label,
+                            RegimeFocus& focus)
+{
+    std::vector<size_t> clauses;
+    for(size_t i = 0; i < axis.labels.size(); ++i)
+    {
+        if(axis.labels[i] == label)
+        {
+            clauses.push_back(i);
+        }
+    }
+    if(clauses.size() == 1 && clauses.front() < axis.whens.size())
+    {
+        foldEqualities(metadata, axis.whens[clauses.front()], focus);
+    }
+}
+
+} // namespace detail
+
 /// @brief The focus for @p label under @p metadata's declared facets, or nullopt with @p error
 /// set when no assignment of the declared labels spells it.
 ///
@@ -207,22 +241,39 @@ inline std::optional<RegimeFocus> compileRegimeFocus(const OperationMetadata& me
     focus.label = label;
     for(size_t axis = 0; axis < chosen->size(); ++axis)
     {
-        const auto& declared = metadata.regimeLabel[axis];
-        std::vector<size_t> clauses;
-        for(size_t i = 0; i < declared.labels.size(); ++i)
-        {
-            if(declared.labels[i] == (*chosen)[axis])
-            {
-                clauses.push_back(i);
-            }
-        }
-        // Only a label named by exactly one clause pins anything: several clauses are a
-        // disjunction, and `otherwise` implies only negations.
-        if(clauses.size() == 1 && clauses.front() < declared.whens.size())
-        {
-            detail::foldEqualities(metadata, declared.whens[clauses.front()], focus);
-        }
+        detail::foldLabelClause(metadata, metadata.regimeLabel[axis], (*chosen)[axis], focus);
     }
+    return focus;
+}
+
+/// @brief The focus for form @p label of @p axis under @p metadata's `form_label`, or nullopt
+/// with @p error set when @p metadata declares no such axis or label.
+inline std::optional<RegimeFocus> compileFormFocus(const OperationMetadata& metadata,
+                                                   const std::string& axis,
+                                                   const std::string& label,
+                                                   std::string& error)
+{
+    const auto declared
+        = std::find_if(metadata.formLabel.begin(),
+                       metadata.formLabel.end(),
+                       [&](const auto& candidate) { return candidate.name == axis; });
+    if(declared == metadata.formLabel.end())
+    {
+        error = "'" + axis + "' is not a form axis " + metadata.operation + " declares";
+        return std::nullopt;
+    }
+    if(label != declared->otherwise
+       && std::find(declared->labels.begin(), declared->labels.end(), label)
+              == declared->labels.end())
+    {
+        error
+            = "'" + label + "' is not a label of form axis '" + axis + "' of " + metadata.operation;
+        return std::nullopt;
+    }
+    RegimeFocus focus;
+    focus.label = label;
+    focus.formAxis = axis;
+    detail::foldLabelClause(metadata, *declared, label, focus);
     return focus;
 }
 
@@ -299,6 +350,29 @@ inline std::map<std::string, RegimeFocus> regimeFloors(const OperationMetadata& 
     return floors;
 }
 
+/// @brief A focus per label of every form axis @p metadata declares, keyed `<axis>:<label>` (see
+/// formQuotaKey), for `--form-floor`. Each axis's declared labels and its `otherwise`; a label
+/// that compiles to nothing is left out rather than refused, as regimeFloors leaves one out.
+inline std::map<std::string, RegimeFocus> formFloors(const OperationMetadata& metadata)
+{
+    std::map<std::string, RegimeFocus> floors;
+    for(const auto& axis : metadata.formLabel)
+    {
+        std::vector<std::string> options = axis.labels;
+        options.push_back(axis.otherwise);
+        for(const auto& label : options)
+        {
+            std::string error;
+            auto focus = compileFormFocus(metadata, axis.name, label, error);
+            if(focus.has_value())
+            {
+                floors.emplace(formQuotaKey(axis.name, label), std::move(*focus));
+            }
+        }
+    }
+    return floors;
+}
+
 /// @brief What a focused search delivered for one regime.
 struct RegimeSearchResult
 {
@@ -318,6 +392,30 @@ struct RegimeSearchResult
     /// the declaration itself excludes the regime: no engine was ever asked.
     int64_t admissible = 0;
 };
+
+namespace detail
+{
+
+/// The label @p point carries for @p focus: its form axis's facet, or the joined regime label.
+inline std::string focusedLabel(const OperationMetadata& metadata,
+                                const RegimeFocus& focus,
+                                const ProblemPoint& point)
+{
+    if(focus.formAxis.empty())
+    {
+        return regimeLabel(metadata, point);
+    }
+    for(auto& facet : regimeFacets(metadata.formLabel, point))
+    {
+        if(facet.first == focus.formAxis)
+        {
+            return std::move(facet.second);
+        }
+    }
+    return {};
+}
+
+} // namespace detail
 
 /// @brief Up to @p wanted problems in @p focus's regime that @p admits accepts, none of them
 /// @p held.
@@ -434,7 +532,7 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
         {
             const auto point = complete(categorical, Shape{});
             ++outcome.proposed;
-            if(regimeLabel(metadata, point) == focus.label)
+            if(detail::focusedLabel(metadata, focus, point) == focus.label)
             {
                 ++outcome.inRegime;
                 if(detail::satisfiesConstraints(metadata, point) && admits(point)
@@ -519,7 +617,7 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
             const auto point = complete(lane.categorical, shape);
             ++outcome.proposed;
             bool verdict = false;
-            if(regimeLabel(metadata, point) == focus.label)
+            if(detail::focusedLabel(metadata, focus, point) == focus.label)
             {
                 ++outcome.inRegime;
                 if(detail::satisfiesConstraints(metadata, point))

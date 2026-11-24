@@ -58,6 +58,7 @@ from rocke.helpers.attention import (
     use_2d_kernel,
 )
 
+from rocke.helpers.attention_arch_caps import attn_arch_caps
 from rocke.helpers.magic_division import calculate_magic_numbers, do_magic_division
 from rocke.helpers.transforms import (
     TensorDescriptor,
@@ -600,6 +601,12 @@ _GFX942_4WARP_LSE_REFUSAL = (
 )
 
 
+def _scalar_additive_bias_refusal(kind: str) -> str:
+    """Why the scalar ``kind`` ("2D" or "3D") kernel refuses an additive-bias
+    problem: it has no bias score site, so it would drop the bias silently."""
+    return f"scalar {kind} kernel: additive bias runs on the gfx950 tiled kernels only"
+
+
 def supports_native_unified_attention(
     problem: UnifiedAttentionProblem,
     arch: str,
@@ -648,7 +655,7 @@ def supports_native_unified_attention(
     if problem.use_qq_bias:
         return False, "QQ bias is not enabled in CK DSL attention yet"
     if problem.use_additive_bias:
-        return False, "Additive bias is not enabled in CK DSL attention yet"
+        return False, _scalar_additive_bias_refusal("2D")
     rejected = _reject_mask_semantics(problem)
     if rejected is not None:
         return rejected
@@ -670,6 +677,9 @@ def supports_native_unified_attention_tiled(
         or _reject_mask_semantics(problem)
         or _reject_mask_on_arch(problem, arch)
     )
+    if rejected is not None:
+        return rejected
+    rejected = _reject_fp8_format_arch_mismatch(problem, arch)
     if rejected is not None:
         return rejected
     if arch == "gfx1250" and problem.softcap > 0:
@@ -800,29 +810,6 @@ def supports_native_unified_attention_3d_tiled(
             {"use_additive_bias": problem.use_additive_bias} if arch == "gfx950" else {}
         ),
     )
-
-
-def supports_native_unified_attention_coverage(
-    problem: UnifiedAttentionProblem,
-    arch: str,
-) -> Tuple[bool, str]:
-    """The scalar coverage gate (head size, block size, dtype, features), asked
-    about the LSE-off problem.
-
-    The scalar kernel writes no LSE, so the scalar gate refuses ``emit_lse``. The
-    path's own gate (:func:`unified_lse_path_gate`) rules on LSE; this one never does.
-    """
-    if problem.emit_lse:
-        problem = replace(problem, emit_lse=False)
-    return supports_native_unified_attention(problem, arch=arch)
-
-
-def unified_lse_path_gate(path: str) -> Callable[..., Tuple[bool, str]]:
-    """The gate of ``path`` (``"3d"`` split-KV, else tiled 2D). It owns which
-    arches and features can write LSE."""
-    if path == "3d":
-        return supports_native_unified_attention_3d_tiled
-    return supports_native_unified_attention_tiled
 
 
 _ATTN_CACHE: Dict[Tuple, bytes] = {}
@@ -1999,8 +1986,9 @@ def _fp8_qk_loader_fits(
 ) -> bool:
     """True iff the async-fp8 K loader can tile the per-iter K bytes.
 
-    ``raw.ptr.buffer.load.lds`` accepts dwords ∈ {1, 3, 4} = {4, 12, 16}
-    bytes per lane (a hardware quirk -- dwords=2 is rejected). We need
+    The loader exists only in the gfx950 tiled-2D kernel, so the per-lane
+    payloads are gfx950's LDS-DMA widths from the attention capability table
+    (dwords {1, 3, 4} = {4, 12, 16} bytes; there is no 2-dword form). We need
     one of those per-call payloads to evenly tile ``T*HD`` bytes given
     ``num_warps * 64`` lanes per CTA. ``tile_size`` / ``num_warps`` take the
     already-resolved selector outputs when the caller has them.
@@ -2011,8 +1999,8 @@ def _fp8_qk_loader_fits(
         num_warps = _select_2d_num_warps(problem, arch)
     tile_bytes = tile_size * problem.head_size
     threads = num_warps * 64
-    for bpl in (16, 12, 4):
-        payload = threads * bpl
+    for dwords in sorted(attn_arch_caps("gfx950").lds_dma_dwords, reverse=True):
+        payload = threads * dwords * 4
         if tile_bytes >= payload and tile_bytes % payload == 0:
             return True
     return False
@@ -6970,6 +6958,8 @@ def build_unified_attention_2d(
     p = spec.problem
     if p.dtype not in ("fp16", "bf16"):
         raise ValueError("scalar 2D kernel currently supports fp16/bf16")
+    if p.use_additive_bias:
+        raise ValueError(_scalar_additive_bias_refusal("2D"))
     dtype = spec.dtype_ir
     kv_dtype = FP8E4M3 if p.use_fp8 else dtype
     kv_vec_align = 8 if p.use_fp8 else 16
@@ -7192,6 +7182,8 @@ def build_unified_attention_3d(
     """
     validate_arch(arch)
     p = spec.problem
+    if p.use_additive_bias:
+        raise ValueError(_scalar_additive_bias_refusal("3D"))
     dtype = spec.dtype_ir
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = 64
