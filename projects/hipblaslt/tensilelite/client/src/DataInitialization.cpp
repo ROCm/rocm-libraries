@@ -2836,12 +2836,7 @@ namespace TensileLite
                                 initModeToMXMethod(m_vdata[dataTensorEnum].init),
                                 -1.0f,
                                 1.0f,
-                                initModeToMXMethod(m_vdata[scaleTensorEnum].init),
-                                // abc + 3 * batch, as initOneMXSide passes: maf2_0 seeds A, B
-                                // and each batch apart; maf1_0 takes sin/cos and the offset.
-                                // A zero batch stride (broadcast) regenerates batch 0.
-                                static_cast<uint32_t>((isMatrixA ? 0 : 1)
-                                                      + 3 * (batchStrideBytes == 0 ? 0 : b)));
+                                initModeToMXMethod(m_vdata[scaleTensorEnum].init));
             }
         }
 #else  // HIPBLASLT_ENABLE_MXDATAGENERATOR
