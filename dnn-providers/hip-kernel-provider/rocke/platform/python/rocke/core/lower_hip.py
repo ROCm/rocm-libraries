@@ -2395,7 +2395,7 @@ class _Lowerer:
         passed ``_name(smem)`` (the SSA name like ``lds_hist6``)
         rather than the actual ``__shared__`` array
         (``lds_hist6_storage`` from ``smem.op.attrs["_storage"]``);
-        the resulting ``amdclang++ --compile-hip`` failed on
+        the resulting HIP compilation via amdclang++ failed on
         ``moe_sort_histogram`` with ``use of undeclared identifier
         'lds_hist6'``. Every other smem op in this file routes
         through ``smem.op.attrs["_storage"]`` (see e.g.
