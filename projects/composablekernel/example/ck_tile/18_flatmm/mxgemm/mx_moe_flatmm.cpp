@@ -35,13 +35,12 @@
 #include "ck_tile/ops/gemm.hpp"
 #include "ck_tile/ops/moe_flatmm.hpp"
 
-// Block tile 128 x 512 x 256, four waves along N, 16x16x128 scaled WMMA: the tile the MX
-// pipeline is tested with in tile_example_mx_flatmm (fp4). Smaller tiles, which suit MoE better,
-// do not work with the pipeline yet (32-row tiles give wrong results, 256-column tiles race).
+// Block tile 32 x 256 x 256, four waves along N, 16x16x128 scaled WMMA. 32-row tiles keep the
+// padding of each expert's rows small.
 struct MXMoeFlatmmConfig
 {
-    static constexpr ck_tile::index_t M_Tile = 128;
-    static constexpr ck_tile::index_t N_Tile = 512;
+    static constexpr ck_tile::index_t M_Tile = 32;
+    static constexpr ck_tile::index_t N_Tile = 256;
     static constexpr ck_tile::index_t K_Tile = 256;
 
     static constexpr ck_tile::index_t M_Warp = 1;
@@ -80,12 +79,12 @@ static constexpr int kScaleRows   = 32; // rows per block in the gfx1250 layout
 auto create_args(int argc, char* argv[])
 {
     ck_tile::ArgParser arg_parser;
-    arg_parser.insert("experts", "4", "number of experts")
+    arg_parser.insert("experts", "8", "number of experts")
         .insert("NumTokens", "512", "number of tokens")
         .insert("TopK", "2", "experts per token")
         .insert("N",
                 "1024",
-                "N of the GEMM, a multiple of 512 (gemm1_gate_up: 2 x intermediate; gemm2: hidden)")
+                "N of the GEMM, a multiple of 256 (gemm1_gate_up: 2 x intermediate; gemm2: hidden)")
         .insert("K", "1024", "K of the GEMM (gemm1_gate_up: hidden; gemm2: intermediate)")
         .insert("gemm_kind", "gemm1_gate_up", "gemm1_gate_up | gemm2")
         .insert("mx_prec", "fp4xfp4", "A x B data types; supported: fp4xfp4")
@@ -271,7 +270,7 @@ int run(const ck_tile::ArgParser& arg_parser)
     if(topk > experts)
         throw std::runtime_error("TopK must not exceed the number of experts");
     if(K % MXMoeFlatmmConfig::K_Tile != 0 || N % MXMoeFlatmmConfig::N_Tile != 0)
-        throw std::runtime_error("K must be a multiple of K_Tile (256) and N of N_Tile (512)");
+        throw std::runtime_error("K must be a multiple of K_Tile (256) and N of N_Tile (256)");
 
     // ---- routing: top-k distinct experts per token, sorted into expert tiles ----
     std::mt19937 rng(seed);
