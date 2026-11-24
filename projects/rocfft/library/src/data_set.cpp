@@ -243,6 +243,75 @@ size_t data_set_t::get_offset(data_part part) const
     return offsets[part == data_part::IMAGINARY ? 1 : 0];
 }
 
+size_t data_set_t::axis_span(size_t axis) const
+{
+    return (*this)[axis].logical_span();
+}
+
+size_t data_set_t::axis_stride(size_t axis) const
+{
+    return (*this)[axis].inbuffer_stride;
+}
+
+bool data_set_t::same_batch_range(const data_set_t& other) const
+{
+    return std::equal(batch_axes.begin(),
+                      batch_axes.end(),
+                      other.batch_axes.begin(),
+                      other.batch_axes.end(),
+                      [](const auto& a, const auto& b) { return a.has_same_logical_range_as(b); });
+}
+
+bool data_set_t::same_logical_range(const data_set_t& other) const
+{
+    return same_batch_range(other)
+           && std::equal(
+               len_axes.begin(),
+               len_axes.end(),
+               other.len_axes.begin(),
+               other.len_axes.end(),
+               [](const auto& a, const auto& b) { return a.has_same_logical_range_as(b); });
+}
+
+void data_set_t::set_strides_and_distances(std::span<const size_t> values)
+{
+    if(values.size() != get_full_rank())
+        throw std::invalid_argument("Wrong number of strides and distances");
+    for(size_t i = 0; i < values.size(); ++i)
+        (*this)[i].inbuffer_stride = values[i];
+}
+
+void data_set_t::set_axis_stride(size_t axis, size_t stride)
+{
+    (*this)[axis].inbuffer_stride = stride;
+}
+
+void data_set_t::reset_inbuffer(const data_set_t& other)
+{
+    if(!same_logical_range(other))
+        throw std::invalid_argument("Cannot change the logical range of a data set");
+    for(size_t i = 0; i < get_full_rank(); ++i)
+        (*this)[i].inbuffer_stride = other.axis_stride(i);
+    set_array_type_and_offsets(other.array_type, other.offsets);
+}
+
+data_set_t data_set_t::with_axis_span(size_t axis, size_t span) const
+{
+    auto result        = *this;
+    result[axis].upper = result[axis].lower + span;
+    return result;
+}
+
+data_set_t data_set_t::with_element_type(rocfft_array_type            type,
+                                         rocfft_precision             p,
+                                         const std::array<size_t, 2>& new_offsets) const
+{
+    auto result = *this;
+    result.set_array_type_and_offsets(type, new_offsets);
+    result.set_precision(p);
+    return result;
+}
+
 std::vector<size_t> data_set_t::lengths_and_batches() const
 {
     std::vector<size_t> ret(get_full_rank());
@@ -725,34 +794,49 @@ std::vector<size_t> data_set_t::length_axes_by_increasing_strides(bool pin_inner
 
 void data_set_t::reorder_length_axes(const std::vector<size_t>& len_axis_order)
 {
-    std::vector<size_t> current_order(get_len_rank(), 0);
-    std::iota(current_order.begin(), current_order.end(), 0);
-    if(!std::is_permutation(len_axis_order.begin(),
-                            len_axis_order.end(),
-                            current_order.begin(),
-                            current_order.end()))
-    {
-        throw std::invalid_argument("Invalid re-ordering of length axes requested to "
-                                    + ROCFFT_CURRENT_FUNCTION);
-    }
-    if(current_order != len_axis_order) // nothing to do otherwise
-    {
-        const auto len_axis_copy = len_axes;
-        for(size_t dim = 0; dim < get_len_rank(); dim++)
-            len_axes[dim] = len_axis_copy[len_axis_order[dim]];
+    reorder_axes(len_axis_order, axis_scope::length_only);
+}
 
-        if(embedding)
-        {
-            // Update map according to new order
-            for(auto& axis_idx : *embedding)
-            {
-                if(axis_idx >= get_len_rank())
-                    continue; // batch axes are unmodified herein
-                axis_idx = std::distance(
-                    len_axis_order.begin(),
-                    std::find(len_axis_order.begin(), len_axis_order.end(), axis_idx));
-            }
-        }
+std::vector<size_t> data_set_t::axes_by_increasing_inbuffer_strides(axis_scope scope) const
+{
+    const auto&         axes = scope == axis_scope::length_only ? len_axes : batch_axes;
+    std::vector<size_t> order(axes.size());
+    std::iota(order.begin(), order.end(), 0);
+    std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+        return std::tie(axes[a].inbuffer_stride, a) < std::tie(axes[b].inbuffer_stride, b);
+    });
+    return order;
+}
+
+void data_set_t::reorder_axes(std::span<const size_t> order, axis_scope scope)
+{
+    const bool length = scope == axis_scope::length_only;
+    auto&      axes   = length ? len_axes : batch_axes;
+    if(order.size() != axes.size())
+        throw std::invalid_argument("Wrong number of axes to reorder");
+    bool identity = true;
+    for(size_t i = 0; i < order.size(); ++i)
+    {
+        if(order[i] >= order.size()
+           || std::find(order.begin(), order.begin() + i, order[i]) != order.begin() + i)
+            throw std::invalid_argument("Invalid axis permutation");
+        identity &= order[i] == i;
+    }
+    if(identity)
+        return;
+
+    const auto old = axes;
+    for(size_t i = 0; i < order.size(); ++i)
+        axes[i] = old[order[i]];
+
+    if(embedding)
+    {
+        const size_t first = length ? 0 : get_len_rank();
+        for(auto& axis : *embedding)
+            if(axis >= first && axis - first < order.size())
+                axis = first
+                       + std::distance(order.begin(),
+                                       std::find(order.begin(), order.end(), axis - first));
     }
 }
 

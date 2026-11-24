@@ -50,6 +50,12 @@ enum class data_part
     IMAGINARY
 };
 
+enum class axis_scope
+{
+    length_only,
+    batch_only,
+};
+
 /**
  * @return `io_data_label::OUTPUT` for the argument value `io_data_label::INPUT` and vice versa.
  * @throw An `std::invalid_argument` is thrown if `io` is not `io_data_label::INPUT`
@@ -215,6 +221,27 @@ struct data_set_t
      * @throw An `std::invalid_argument` is thrown if `part` does not suit the array type.
      */
     size_t get_offset(data_part part = data_part::ALL) const;
+
+    // Axis indices are flattened: length axes first, then batch axes.
+    size_t axis_span(size_t axis) const;
+    size_t axis_stride(size_t axis) const;
+    bool   same_logical_range(const data_set_t& other) const;
+    bool   same_batch_range(const data_set_t& other) const;
+
+    // Set in-buffer properties without changing logical ranges or the embedding.
+    void set_strides_and_distances(std::span<const size_t> values);
+    void set_axis_stride(size_t axis, size_t stride);
+    void reset_inbuffer(const data_set_t& other);
+
+    // Derive a new stage range or give a new stage its element type.
+    data_set_t with_axis_span(size_t axis, size_t span) const;
+    data_set_t with_element_type(rocfft_array_type            type,
+                                 rocfft_precision             precision,
+                                 const std::array<size_t, 2>& offsets = {0, 0}) const;
+
+    // Orders are relative to scope, and move spans, strides and embedding axes together.
+    std::vector<size_t> axes_by_increasing_inbuffer_strides(axis_scope scope) const;
+    void                reorder_axes(std::span<const size_t> order, axis_scope scope);
     /**
      * @return The spans of the logical index range along all its axes (length followed by batch axes).
      */
@@ -900,7 +927,8 @@ private:
     // Fields need access to private members to erase or reorder length axes in their bricks'
     // layouts and to compare individual axes for undistributed-dimension detection.
     friend struct rocfft_field_t;
-    // LeafNode builds its kernel-only layouts from legacy length/stride members.
+    friend class TreeNode;
+    // Kernel geometry uses an independent descriptor with ABI-specific ranks.
     friend class LeafNode;
     // rocfft-internal-test drives private members directly (see tests/data_set_test_access.h),
     // e.g., reorder_length_axes, or setting array types and precisions as friends do.

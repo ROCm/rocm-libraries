@@ -2448,3 +2448,41 @@ TEST_F(data_set_test, split_length_axis_round_trip)
         EXPECT_EQ(all_offsets(s), all_offsets(d));
     }
 }
+
+TEST_F(data_set_test, inbuffer_reset_requires_identical_bounds)
+{
+    auto       layout      = with_type(data_set_t({1, 2, 0}, {5, 5, 2}, {1, 8, 64}, 2),
+                            rocfft_array_type_complex_interleaved,
+                            rocfft_precision_single);
+    const auto replacement = with_type(data_set_t({1, 2, 0}, {5, 5, 2}, {1, 9, 70}, 2),
+                                       rocfft_array_type_complex_planar,
+                                       rocfft_precision_double,
+                                       {3, 11});
+    layout.reset_inbuffer(replacement);
+    EXPECT_TRUE(layout.same_logical_range(replacement));
+    EXPECT_EQ(layout.strides_and_distances(), replacement.strides_and_distances());
+    EXPECT_EQ(layout.get_precision(), rocfft_precision_single);
+    EXPECT_EQ(layout.get_offset(data_part::REAL), 3);
+    EXPECT_EQ(layout.get_offset(data_part::IMAGINARY), 11);
+
+    const data_set_t shifted({1, 3, 0}, {5, 6, 2}, {1, 12, 81}, 2);
+    EXPECT_THROW(layout.reset_inbuffer(shifted), std::invalid_argument);
+    EXPECT_EQ(layout.strides_and_distances(), replacement.strides_and_distances());
+    EXPECT_THROW(layout.reset_inbuffer(replacement.with_axis_span(0, 3)), std::invalid_argument);
+    EXPECT_THROW(layout.set_strides_and_distances(std::array<size_t, 2>{1, 2}),
+                 std::invalid_argument);
+}
+
+TEST_F(data_set_test, reorder_batch_axes_preserves_embedding)
+{
+    const data_set_t full({0, 0, 0, 0}, {4, 3, 5, 2}, {2, 64, 1, 16});
+    auto             child = full.get_data_set_for_len_axes({1});
+    const auto       order = child.axes_by_increasing_inbuffer_strides(axis_scope::batch_only);
+    ASSERT_EQ(order, (std::vector<size_t>{1, 0, 2}));
+    child.reorder_axes(order, axis_scope::batch_only);
+    EXPECT_EQ(child.batches(), (std::vector<size_t>{5, 4, 2}));
+    EXPECT_EQ(child.distances(), (std::vector<size_t>{1, 2, 16}));
+    EXPECT_TRUE(child.get_embedding_data_set() == full);
+    EXPECT_THROW(child.reorder_axes(std::array<size_t, 3>{0, 0, 1}, axis_scope::batch_only),
+                 std::invalid_argument);
+}
