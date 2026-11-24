@@ -91,6 +91,7 @@ using GPU_UnitTestConvSolverConvDirectDepthwiseFwd2D_FP32  = GPU_UnitTestConvSol
 
 using CPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDevApplicabilityFwd_NONE =
     CPU_UnitTestConvSolverDevApplicabilityFwd_NONE;
+using CPU_UnitTestConvSolverConvDirectDepthwiseFwd2DFilterBounds_NONE = testing::TestWithParam<int>;
 
 TEST_P(GPU_UnitTestConvSolverConvDirectDepthwiseFwd2D_FP16, ConvDirectDepthwiseFwd2D)
 {
@@ -115,7 +116,7 @@ TEST_P(CPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDevApplicabilityFwd_NONE,
 
 // Both sides of each filter bound, on a mocked gfx1151 so the result does not depend
 // on the host GPU. Most rejected shapes are ones the kernel would spill on.
-TEST(CPU_UnitTestConvSolverConvDirectDepthwiseFwd2DFilterBounds_NONE, ConvDirectDepthwiseFwd2D)
+TEST_P(CPU_UnitTestConvSolverConvDirectDepthwiseFwd2DFilterBounds_NONE, ConvDirectDepthwiseFwd2D)
 {
     auto gfx1151 = MockHandle{DevDescription{"gfx1151", 20, 32}, true};
     auto ctx     = miopen::ExecutionContext{&gfx1151};
@@ -163,3 +164,7 @@ INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDevApplicabilityFwd_NONE,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(GetConvTestCases(miopenHalf)[0])));
+
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         CPU_UnitTestConvSolverConvDirectDepthwiseFwd2DFilterBounds_NONE,
+                         testing::Values(0));
