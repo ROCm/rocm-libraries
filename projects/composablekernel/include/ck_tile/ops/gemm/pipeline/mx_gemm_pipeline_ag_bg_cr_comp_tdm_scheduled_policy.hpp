@@ -475,13 +475,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
         return min_i(GetLdsReads<Problem>(), kDscntMax);
     }
 
-    /// Reads of the other buffer left in flight at the cluster late wait, clamped.
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr index_t GetLatePendingReads()
-    {
-        return kPrefetchLdsRead ? GetReadsPerStep<Problem>() : 0;
-    }
-
     /// The first compile-time rule the Problem and this policy break, or Ok. The rules that need
     /// M, N and K are the pipeline's GetUnsupportedReason.
     template <typename Problem>
