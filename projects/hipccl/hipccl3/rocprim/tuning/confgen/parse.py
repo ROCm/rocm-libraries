@@ -96,6 +96,83 @@ def parse_lines(lines: list[str]):
     return configs
 
 
+def parse_fallback_target(header: str) -> frozenset | None:
+    """Returns the target that the generic (unknown) target of a config header forwards
+    to, or None if it returns the algorithm's base config instead."""
+    start = header.find("// TARGET: {'gen': 'unknown'")
+    if start < 0:
+        return None
+    # Only look at the return statement of the generic target's config picker.
+    return_start = header.find("return", start)
+    if return_start < 0:
+        return None
+    return_end = header.find(";", return_start)
+    picker = header[return_start : return_end if return_end >= 0 else len(header)]
+    pattern = r"comp_target<\s*gen::(\w+),\s*target_arch::(\w+),\s*gpu::(\w+),\s*rep::(\w+)\s*>"
+    for gen, arch, gpu, rep in re.findall(pattern, picker):
+        if arch != "unknown":
+            return frozenset({("gen", gen), ("arch", arch), ("gpu", gpu), ("rep", rep)})
+    return None
+
+
+def select_target(targets, target: dict[str, str]) -> frozenset | None:
+    """Returns the target among 'targets' (keys of parse_lines()) that
+    most_common_config() in config_types.hpp picks for 'target': an exact GPU match
+    first, then the arch, then the generation. Returns None if none matches, in which
+    case the library uses the generic target."""
+    best_score = 0
+    best = None
+    for candidate in targets:
+        c = dict(candidate)
+        if c["gpu"] != "generic" and c["gpu"] == target.get("gpu"):
+            score = 3
+        elif c["arch"] != "unknown" and c["arch"] == target.get("arch"):
+            score = 2
+        elif c["gen"] != "unknown" and c["gen"] == target.get("gen"):
+            score = 1
+        else:
+            score = 0
+        # Like the library, strictly better wins and on ties the later entry wins.
+        if score > 0 and score >= best_score:
+            best_score = score
+            best = candidate
+    return best
+
+
+def find_config(
+    configs, fallback_target, target: dict[str, str], types: dict[str, ty.Any]
+) -> dict[str, ty.Any] | None:
+    """Returns the config the library uses for 'types' on 'target', given the parsed
+    configs and fallback target of a config header."""
+    selected = select_target(configs.keys(), target) or fallback_target
+    if selected is None:
+        return None
+    return next(
+        (
+            c
+            for c in configs.get(selected, [])
+            if all(str(c.get(k, "empty_type")) == str(v) for k, v in types.items())
+        ),
+        None,
+    )
+
+
+def parse_gpu_names(config_types: str) -> list[tuple[str, str]]:
+    """Returns the (device name substring, gpu enum) pairs of target_gpu_names in
+    config_types.hpp, which the library uses to detect the GPU."""
+    return re.findall(
+        r'make_tuple<std::string_view, gpu>\("([^"]+)",\s*gpu::(\w+)\)', config_types
+    )
+
+
+def gpu_from_device_name(name: str, gpu_names: list[tuple[str, str]]) -> str:
+    """Returns the gpu enum for a device name, like get_target_gpu_from_name()."""
+    for substring, gpu in gpu_names:
+        if substring in name:
+            return gpu
+    return "generic"
+
+
 def main():
     cli = argparse.ArgumentParser()
     cli.add_argument("--input", "-i", required=True)

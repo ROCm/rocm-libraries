@@ -65,16 +65,23 @@ class Tuner(BaseTuner):
     def _get_restrictions(self, types: Dict[str, Any]) -> Callable[[dict], bool]:
 
         element_size = TYPE_CONFIGS[types["value_type"]].size
-        # based on legacy tuning
+        # Unknown targets build the configs of every target, so they must fit in 64 KiB
+        # even though gfx950 has more.
         MAX_SHARED_MEM = 65536
+        LDS_BANKS = 32
 
         def validate(params):
             block_size = params["block_size_x"]
             ipt = params["ipt"]
+            items_per_block = block_size * ipt
 
-            max_ipt = (MAX_SHARED_MEM // (block_size * element_size * 2)) + element_size
-
-            return ipt < max_ipt
+            # The largest member of the kernel's shared memory union is the transpose
+            # buffer of block_load/block_store, which block_exchange pads for
+            # power-of-two items per thread.
+            padding = (
+                items_per_block // LDS_BANKS if ipt >= 2 and ipt & (ipt - 1) == 0 else 0
+            )
+            return (items_per_block + padding) * element_size <= MAX_SHARED_MEM
 
         return validate
 

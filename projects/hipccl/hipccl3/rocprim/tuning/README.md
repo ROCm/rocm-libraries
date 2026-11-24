@@ -62,11 +62,10 @@ pip3 install jinja2 kernel-tuner numpy
 ./confgen/generate.py --input "./output/*.json" --existing ../rocprim/include/rocprim/device/detail/config/ --output ./tmp --map-gfx gfx90a mi210
 ```
 
-Note that we have to explicitly tell it which specific GPU architecture we're generating the configs for, using `--map-gfx`.
-This is because this information is missing from the output of the tuning scripts.
+The tuner records the GPU it ran on (detected from the device name, like rocPRIM does), so `--map-gfx` is only needed for caches from older tuning runs or to override it.
 
-By default, unknown targets use the algorithm's default config (`*_config_params_base`).
-Pass `--default-tuning fastest` to make unknown targets use the tuned configs of the lowest tuned architecture instead.
+By default, unknown targets keep what the existing header uses (`--default-tuning keep`), or the algorithm's default config (`*_config_params_base`) without `--existing`.
+Pass `--default-tuning base` to use the default config, or `--default-tuning fastest` to make unknown targets use the tuned configs of the lowest tuned architecture instead.
 
 ## Migrating from old tuning infrastructure
 

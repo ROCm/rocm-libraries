@@ -14,7 +14,8 @@ import jinja2
 
 log = logging.getLogger("confgen.generate")
 
-MERGE_SORT_BLOCK_MERGE_MAX_MERGEPATH_ITEMS = 1024
+# Used when no block_sort config is found for a block_merge type.
+MERGE_SORT_DEFAULT_SORTED_TILE = 1024
 
 
 def round_up(value, alignment):
@@ -231,6 +232,34 @@ def keep_baseline_if_close(
     return best
 
 
+def get_sorted_tile(
+    algs, existing_block_sort, target_info: dict[str, str], data: dict[str, ty.Any]
+) -> int:
+    """Returns the items per block of the block_sort config the library uses with a
+    block_merge config: the newly tuned one if block_sort was tuned for this target
+    too, otherwise the existing one. The merge tiles must fit in it
+    (device_merge_sort.hpp)."""
+    type_hash, _ = make_config(data)
+    tuned = (
+        algs.get("device_merge_sort_block_sort", {})
+        .get(frozenset(target_info.items()), {})
+        .get(type_hash)
+    )
+    config = tuned["config"] if tuned else None
+    if config is None and existing_block_sort is not None:
+        import parse as config_parser
+
+        types = {k: data[k] for k in ("key_type", "value_type") if k in data}
+        config = config_parser.find_config(*existing_block_sort, target_info, types)
+    if config is None:
+        log.warning(
+            f"No block_sort config found, limiting merge tiles to "
+            f"{MERGE_SORT_DEFAULT_SORTED_TILE} items"
+        )
+        return MERGE_SORT_DEFAULT_SORTED_TILE
+    return int(config["block_size_x"]) * int(config["ipt"])
+
+
 def derive_gen(arch: str) -> str:
     """Derives the hardware generation from a given architecture."""
     arch_mapping = {
@@ -294,11 +323,12 @@ def main():
     )
     cli.add_argument(
         "--default-tuning",
-        choices=["base", "fastest"],
-        default="base",
-        help="Config for unknown targets: 'base' keeps the algorithm's default "
-        "config (*_config_params_base), 'fastest' aliases to the tuned configs "
-        "of the lowest tuned architecture.",
+        choices=["keep", "base", "fastest"],
+        default="keep",
+        help="Config for unknown targets: 'keep' keeps what the existing header uses "
+        "(the default; same as 'base' without --existing), 'base' uses the "
+        "algorithm's default config (*_config_params_base), 'fastest' aliases to the "
+        "tuned configs of the lowest tuned architecture.",
     )
     cli.add_argument(
         "--baseline-margin",
@@ -320,8 +350,30 @@ def main():
     if not input_glob.endswith(".json"):
         input_glob = f"{input_glob}/*.json"
 
-    # Find all files.
-    file_paths = glob.glob(input_glob)
+    # Find all files. block_sort goes first, because block_merge configs must fit in
+    # its sorted tile.
+    file_paths = sorted(
+        glob.glob(input_glob),
+        key=lambda p: "device_merge_sort_block_merge" in os.path.basename(p),
+    )
+
+    # Find existing configs
+    existing_dir = None
+    if args.existing:
+        existing_dir = pathlib.Path(args.existing)
+        if not existing_dir.exists():
+            log.error(f"Could not find directory: {existing_dir}")
+            quit()
+
+    existing_block_sort = None
+    if existing_dir and (existing_dir / "device_merge_sort_block_sort.hpp").exists():
+        import parse as config_parser
+
+        header = (existing_dir / "device_merge_sort_block_sort.hpp").read_text()
+        existing_block_sort = (
+            config_parser.parse_lines(header.splitlines()),
+            config_parser.parse_fallback_target(header),
+        )
 
     algs: dict[str, dict[frozenset, dict[frozenset, dict[str, ty.Any]]]] = {}
     for file_path in file_paths:
@@ -357,11 +409,16 @@ def main():
                 )
 
             if data["algo_name"] == "device_merge_sort_block_merge":
+                sorted_tile = get_sorted_tile(
+                    algs, existing_block_sort, target_info, data
+                )
                 temp = [
                     c
                     for c in data_filter
-                    if int(c["block_size_x"]) * int(c["ipt"])
-                    <= MERGE_SORT_BLOCK_MERGE_MAX_MERGEPATH_ITEMS
+                    if int(c["block_size_x"]) * int(c["ipt"]) <= sorted_tile
+                    and int(c.get("odd_even_block_size", 0))
+                    * int(c.get("odd_even_ipt", 0))
+                    <= sorted_tile
                 ]
                 if len(temp) < len(data_filter):
                     log.info(
@@ -415,14 +472,6 @@ def main():
         autoescape=jinja2.select_autoescape(),
     )
 
-    # Find existing configs
-    existing_dir = None
-    if args.existing:
-        existing_dir = pathlib.Path(args.existing)
-        if not existing_dir.exists():
-            log.error(f"Could not find directory: {existing_dir}")
-            quit()
-
     # Remember which configs were newly tuned, they take precedence over existing ones
     new_type_hashes = {
         alg_name: {target_hash: set(target) for target_hash, target in targets.items()}
@@ -430,6 +479,7 @@ def main():
     }
 
     # Merge newly generated configs to existing configs
+    existing_fallback = {}
     if existing_dir:
         import parse as config_parser
 
@@ -437,7 +487,9 @@ def main():
             config_file = existing_dir / f"{alg_name}.hpp"
             log.debug(f"Parsing: {config_file}")
             with open(config_file, "r") as file:
-                existing_data = config_parser.parse_lines(file.readlines())
+                header = file.read()
+                existing_data = config_parser.parse_lines(header.splitlines())
+                existing_fallback[alg_name] = config_parser.parse_fallback_target(header)
                 merged_targets = {
                     target_hash: dict(make_config(entry) for entry in target)
                     for target_hash, target in existing_data.items()
@@ -445,6 +497,19 @@ def main():
 
                 for target_hash, target in targets.items():
                     if target_hash not in merged_targets:
+                        new_target = dict(target_hash)
+                        for existing_hash in merged_targets:
+                            existing_target = dict(existing_hash)
+                            if (
+                                existing_target["arch"] == new_target["arch"]
+                                and existing_target["gpu"] != new_target["gpu"]
+                            ):
+                                log.warning(
+                                    f"{alg_name}: adding {new_target['arch']} configs for "
+                                    f"{new_target['gpu']} next to the existing ones for "
+                                    f"{existing_target['gpu']}. Check --map-gfx if they "
+                                    "should be the same GPU."
+                                )
                         merged_targets[target_hash] = {}
 
                     for type_hash, entry in target.items():
@@ -459,7 +524,9 @@ def main():
         resolve_shadowed_configs(targets, new_type_hashes[alg_name])
 
         default_target = None
-        if args.default_tuning == "fastest":
+        if args.default_tuning == "keep" and existing_fallback.get(alg_name):
+            default_target = dict(existing_fallback[alg_name])
+        elif args.default_tuning == "fastest":
             default_target = min(
                 (dict(t) for t in targets.keys() if dict(t)["gen"] != "gcn5"),
                 key=lambda t: int(re.sub("gfx", "", t["arch"]), base=16),

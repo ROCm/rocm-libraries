@@ -24,11 +24,16 @@ from typing import OrderedDict, Callable, Dict, Any
 from math import log2
 import sys
 import os
+import warnings
 
 sys.path.append(f"{os.path.dirname(__file__)}/../")
 
 from utils import TYPE_CONFIGS
 from tuner.base_tuner import BaseTuner, TunerArgs, COMMON_KEY_TYPES, COMMON_VALUE_TYPES
+import confgen.parse
+
+# Used when no block_sort config is found for a type.
+DEFAULT_SORTED_TILE = 1024
 
 """
 Inclusive range for params tuning, edit these to adjust tuning grid range.
@@ -48,6 +53,27 @@ class Tuner(BaseTuner):
 
     def __init__(self, args: TunerArgs) -> None:
         super().__init__(args)
+        (self.block_sort_configs, self.block_sort_fallback) = self._read_config_header(
+            "device_merge_sort_block_sort"
+        )
+
+    def _get_sorted_tile(self, types: Dict[str, Any]) -> int:
+        """Returns the items per block of the block_sort config the library uses for
+        these types on the tuned arch. The benchmark pre-sorts with it, and the library
+        requires the merge tiles to fit in it (device_merge_sort.hpp)."""
+        config = confgen.parse.find_config(
+            self.block_sort_configs,
+            self.block_sort_fallback,
+            self._get_target_info(),
+            types,
+        )
+        if config is None:
+            warnings.warn(
+                f"No block_sort config found for '{types}', limiting merge tiles to "
+                f"{DEFAULT_SORTED_TILE} items"
+            )
+            return DEFAULT_SORTED_TILE
+        return int(config["block_size_x"]) * int(config["ipt"])
 
     def _get_tune_params(self, types: Dict[str, Any]) -> OrderedDict:
         params = OrderedDict()
@@ -70,6 +96,7 @@ class Tuner(BaseTuner):
 
         max_shared_memory = 65536
         max_size_per_element = key_size + val_size
+        sorted_tile = self._get_sorted_tile(types)
 
         def validate(params):
             block_size = params["block_size_x"]
@@ -78,9 +105,14 @@ class Tuner(BaseTuner):
 
             max_ipt_exponent = log2(max_ipt) - 1
 
-            # Items per block above 1024 can exceed the block_sort tile the benchmark
-            # pre-sorts with (hipErrorAssert -> inf), and confgen discards them anyway.
-            return ipt <= (2**max_ipt_exponent) and block_size * ipt <= 1024
+            # The merge tiles must fit in the sorted tile of block_sort, otherwise the
+            # library returns hipErrorAssert (device_merge_sort.hpp).
+            odd_even_tile = params["odd_even_block_size"] * params["odd_even_ipt"]
+            return (
+                ipt <= (2**max_ipt_exponent)
+                and block_size * ipt <= sorted_tile
+                and odd_even_tile <= sorted_tile
+            )
 
         return validate
 

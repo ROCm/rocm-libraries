@@ -191,11 +191,22 @@ class BaseTuner(ABC):
             self.device_properties: hip.hipDeviceProp_t = hip.hipDeviceProp_t()
             (_, self.device_properties) = hip.hipGetDeviceProperties(self.device_id)
             self.arch_name = self.device_properties.gcnArchName.split(":")[0]
+            # Detect the GPU like the library does, so configs are generated for the
+            # right GPU without --map-gfx.
+            device_name = self.device_properties.name
+            if isinstance(device_name, bytes):
+                device_name = device_name.decode(errors="ignore")
+            with open(
+                f"{BASE_DIR}/../rocprim/include/rocprim/device/config_types.hpp"
+            ) as f:
+                gpu_names = confgen.parse.parse_gpu_names(f.read())
+            self.gpu_name = confgen.parse.gpu_from_device_name(device_name, gpu_names)
         else:
             assert (
                 args.arch_name
             ), "Simulation mode requires --arch-name to be specified"
             self.arch_name = args.arch_name
+            self.gpu_name = "generic"
         self.tune_baseline = args.tune_baseline
         self.noise_retries = args.noise_retries
         self.max_fevals = args.max_fevals
@@ -207,12 +218,9 @@ class BaseTuner(ABC):
         )
 
         if self.tune_baseline != "skip":
-            with open(
-                f"{BASE_DIR}/../rocprim/include/rocprim/device/detail/config/{self.algo_full_name}.hpp"
-            ) as f:
-                header = f.read()
-            self.existing_config = confgen.parse.parse_lines(header.splitlines())
-            self.fallback_target = self._parse_fallback_target(header)
+            (self.existing_config, self.fallback_target) = self._read_config_header(
+                self.algo_full_name
+            )
         else:
             self.existing_config = None
             self.fallback_target = None
@@ -286,22 +294,26 @@ class BaseTuner(ABC):
         return {"GiB/s": lambda p: (1000.0 / p["time"])}
 
     @staticmethod
-    def _parse_fallback_target(header: str) -> Optional[frozenset]:
-        """Returns the target that the generic (unknown) target of a config header
-        forwards to, or None if it returns the algorithm's base config instead."""
-        start = header.find("// TARGET: {'gen': 'unknown'")
-        if start < 0:
-            return None
-        # Only look inside the generic target's config picker.
-        end = header.find("\n}\n", start)
-        picker = header[start : end if end >= 0 else len(header)]
-        pattern = r"comp_target<\s*gen::(\w+),\s*target_arch::(\w+),\s*gpu::(\w+),\s*rep::(\w+)\s*>"
-        for gen, arch, gpu, rep in re.findall(pattern, picker):
-            if arch != "unknown":
-                return frozenset(
-                    {("gen", gen), ("arch", arch), ("gpu", gpu), ("rep", rep)}
-                )
-        return None
+    def _read_config_header(algo_full_name: str) -> tuple[Dict, Optional[frozenset]]:
+        """Returns the parsed configs of a config header in rocPRIM, and the target its
+        generic target forwards to (see confgen.parse.parse_fallback_target)."""
+        with open(
+            f"{BASE_DIR}/../rocprim/include/rocprim/device/detail/config/{algo_full_name}.hpp"
+        ) as f:
+            header = f.read()
+        return (
+            confgen.parse.parse_lines(header.splitlines()),
+            confgen.parse.parse_fallback_target(header),
+        )
+
+    def _get_target_info(self) -> Dict[str, str]:
+        """Returns the target being tuned, as in the TARGET comments of config headers."""
+        return {
+            "gen": confgen.generate.derive_gen(self.arch_name),
+            "arch": self.arch_name,
+            "gpu": self.gpu_name,
+            "rep": "amdgcn",
+        }
 
     def _get_baseline_targets(self) -> Dict[str, frozenset]:
         """Returns the targets selected by --tune-baseline, whose configs the library
@@ -321,22 +333,9 @@ class BaseTuner(ABC):
         if self.tune_baseline not in ("current", "both"):
             return targets
 
-        current_gen = confgen.generate.derive_gen(self.arch_name)
-        best_score = 0
-        current = None
-        for target in self.existing_config.keys():
-            t = dict(target)
-            # The library prefers an exact GPU match (score 3), but the tuner only knows
-            # the arch. For now assume there is only one GPU per arch.
-            score = (
-                2
-                if t["arch"] == self.arch_name
-                else 1 if t["gen"] == current_gen else 0
-            )
-            # Like the library, strictly better wins and on ties the later entry wins.
-            if score > 0 and score >= best_score:
-                best_score = score
-                current = target
+        current = confgen.parse.select_target(
+            self.existing_config.keys(), self._get_target_info()
+        )
         if current is None:
             current = self.fallback_target
         if current is not None:
@@ -638,6 +637,10 @@ class BaseTuner(ABC):
                 f.write(new_content)
 
         if not self.simulation_mode:
+            # Record the GPU, so the config generator doesn't need --map-gfx.
+            if self.gpu_name != "generic":
+                self._write_cache_annotation(cache_file, "gpu", self.gpu_name)
+
             # Record which cache entries are the baselines, for the config generator.
             if baselines is not None:
                 self._write_cache_annotation(cache_file, "baselines", baselines)
