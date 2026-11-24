@@ -312,8 +312,8 @@ bool kernelMatches(const MatchContext& context,
     return unified_attention::kernelMatches(context, bound, kernel, ARCH);
 }
 
-/// Scores for the cold ranking. When rocKE would build its light narrow geometry for the graph
-/// (rockeRoutesToNarrow), each narrow kernel scores in (NARROW_FLOOR, NARROW_FLOOR + 1], above
+/// Scores for the cold ranking. For a short prefill rocKE would build its light narrow geometry
+/// for (narrowRanksFirst), each narrow kernel scores in (NARROW_FLOOR, NARROW_FLOOR + 1], above
 /// everything else. Otherwise a production stack scores `PRODUCTION_SCORE`; the cell's default
 /// geometry scores `DEFAULT_SCORE`; every alternative scores `ALTERNATIVE_CEILING - key /
 /// KEY_SPAN`, which lies strictly between zero and ALTERNATIVE_CEILING, so the alternatives
@@ -331,8 +331,11 @@ constexpr double UNSUPPORTED_SCORE = 0.0;
 /// below NARROW_KEY_SPAN, so every narrow kernel scores distinctly and exactly.
 constexpr double NARROW_PREFERENCE_STRIDE = 67108864.0; // 2^26
 constexpr double NARROW_KEY_SPAN = 2199023255552.0; // 2^41
-/// rocKE's short-prefill bound (`1 < max_seqlen_q <= 768`, _enable_gfx942_small_q_narrow).
-constexpr int64_t SHORT_PREFILL_MAX_SEQ_LEN_Q = 768;
+/// The short-prefill bound below which narrow kernels rank first: `1 < max_seqlen_q <= 64`.
+/// Tighter than rocKE's own route (768, _enable_gfx942_small_q_narrow) on purpose: the catalog
+/// ships 1-warp narrow kernels in every cell, and a gfx942 sweep measured them fastest for
+/// Sq <= 64 but well behind the production stack for 64 < Sq <= 768 in the GQA cells.
+constexpr int64_t SHORT_PREFILL_MAX_SEQ_LEN_Q = 64;
 /// rocKE's light narrow geometry (_enable_gfx942_small_q_narrow's docstring and the selectors
 /// it gates): 16 rows per warp, 1 warp for MHA and 2 for GQA, and the KV tile
 /// `_select_2d_tile_size` (:1311-1324) picks off its flash stack: one paged-KV block at D64,
@@ -373,14 +376,14 @@ bool isNarrow(const AttentionUnified2DCandidate& candidate)
 }
 
 /**
- * @brief Whether rocKE's own tiled 2D route builds its light narrow geometry for @p problem,
- *        not its flash (production) stack.
+ * @brief Whether narrow kernels rank first for @p problem: rocKE's light-narrow route,
+ *        restricted to `1 < max_seqlen_q <= SHORT_PREFILL_MAX_SEQ_LEN_Q`.
  *
- * Mirrors dnn-providers/hip-kernel-provider/rocke/library/kernels/common/attention_unified.py
- * (as of 5538d22bdd):
+ * Follows dnn-providers/hip-kernel-provider/rocke/library/kernels/common/attention_unified.py
+ * (as of 5538d22bdd) except for the Sq bound (see SHORT_PREFILL_MAX_SEQ_LEN_Q):
  *
  *  - `_enable_gfx942_small_q_narrow` (:2303-2325): fp16 or bf16, head size 64 or 128,
- *    `1 < max_seqlen_q <= 768`, no window, sinks, softcap or score bias.
+ *    `1 < max_seqlen_q <= 768` in rocKE, no window, sinks, softcap or score bias.
  *  - `_enable_gfx942_fp16_flash` (:2380-2410) keeps fp16 on its flash stack unless the shape
  *    is small-q narrow AND GQA (`num_queries_per_kv > 1`, :2406-2409): fp16 MHA stays on flash
  *    at every Sq.
@@ -393,7 +396,7 @@ bool isNarrow(const AttentionUnified2DCandidate& candidate)
  * graph_match declines a window, sinks, softcap, a score bias and every head size but 64 and
  * 128, and serves dense graphs, so max_seqlen_q is the Q tensor's sequence extent.
  */
-bool rockeRoutesToNarrow(const SdpaShape& problem)
+bool narrowRanksFirst(const SdpaShape& problem)
 {
     if(problem.seqLenQ <= 1 || problem.seqLenQ > SHORT_PREFILL_MAX_SEQ_LEN_Q)
     {
@@ -465,12 +468,12 @@ double narrowScore(const AttentionUnified2DCandidate& candidate, const SdpaShape
  * @brief Ranks candidates that survived kernelMatches. Higher wins.
  *
  * A stable fallback order for cold selection, not a performance model. It follows rocKE's
- * own route for the graph:
+ * own route for the graph, except that narrow kernels rank first only up to
+ * SHORT_PREFILL_MAX_SEQ_LEN_Q:
  *
- *  0. When rocKE builds its light narrow geometry for the graph (rockeRoutesToNarrow) and the
- *     cell ships narrow (16x16 MFMA) kernels, those rank first, nearest rocKE's geometry first.
- *     A cell that ships none keeps the order below, since rocKE's short-prefill kernel is not
- *     in it.
+ *  0. For a short prefill rocKE builds its light narrow geometry for (narrowRanksFirst), when
+ *     the cell ships narrow (16x16 MFMA) kernels, those rank first, nearest rocKE's geometry
+ *     first. A cell that ships none keeps the order below.
  *  1. rocKE's production stack for the cell (the kernel rocKE's own dispatcher builds for a
  *     long prefill of that dtype, head size and ratio, measured by the stage 6 sweep).
  *  2. The head size's default geometry (the catalog cell's default, which a correctness-
@@ -494,7 +497,7 @@ double scoreKernel(const MatchContext& context,
     if(isNarrow(*candidate))
     {
         const auto problem = matchedProblem(context);
-        if(problem.has_value() && rockeRoutesToNarrow(*problem))
+        if(problem.has_value() && narrowRanksFirst(*problem))
         {
             return narrowScore(*candidate, *problem);
         }
