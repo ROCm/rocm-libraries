@@ -554,14 +554,13 @@ HIPFFT_EXPORT hipfftResult hipfftSetAutoAllocation(hipfftHandle plan, int autoAl
  *  */
 HIPFFT_EXPORT hipfftResult hipfftSetWorkArea(hipfftHandle plan, void* workArea);
 
-/*! @brief Generalized version of ::hipfftSetWorkArea accepting multi-device plans.
- *
- *  @param[in] plan Pointer to the (possibly multi-device) FFT plan.
- *  @param[in] workArea Array of pointer(s) to the plan's work area(s), which must
- *  be accessible by the plan's used device(s) (in the same order as communicated
- *  via ::hipfftXtSetGPUs, if used prior).
+/* @cond
+ * This function is defined and documented in hipfftXt.h.  It was
+ * incorrectly added here when introduced, and this incorrect
+ * definition will be removed in a future release.
  *  */
 HIPFFT_EXPORT hipfftResult hipfftXtSetWorkArea(hipfftHandle plan, void** workArea);
+/* @endcond */
 
 /*! @brief Execute a (float) complex-to-complex FFT.
  *
