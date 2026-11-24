@@ -159,6 +159,8 @@ def _fastkv_register_p_spec_error(spec: UnifiedAttention2DTiledSpec) -> str | No
         return "fastKV register-P experiment requires transposed R4"
     if spec.kv_storage_dtype is not None:
         return "fastKV register-P experiment does not support FP8 KV cache"
+    if spec.use_additive_bias:
+        return "fastKV register-P experiment does not support additive bias"
     return None
 
 
