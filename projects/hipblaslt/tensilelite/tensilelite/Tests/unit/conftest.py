@@ -13,7 +13,12 @@ if _CODEGEN_DIR not in sys.path:
     sys.path.insert(0, _CODEGEN_DIR)
 
 from streamk5_test_helpers import mock_streamk_writer  # noqa: F401
-from tensilelite.Tests.gpu_detection import arch_matches, detect_gpu_target, hip_available
+from tensilelite.Tests.gpu_detection import (
+    arch_matches,
+    check_gpu_marks,
+    detect_gpu_target,
+    hip_available,
+)
 from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 from toolchain_test_helpers import (
     cxx_compiler as _cxx_compiler,
@@ -30,8 +35,9 @@ def pytest_collection_modifyitems(config, items):
     """Skip ``gpu``-marked tests the GPU can't run.
 
     ``gpu`` = any GPU; ``gpu("gfx950", ...)`` = one of those (``gfx1250`` covers
-    ``gfx1250-strict``). Nearest mark wins: function/param > class > module.
-    Don't mark both a function and its params; the function's mark wins.
+    ``gfx1250-strict``). One ``gpu`` mark per test, on the param, function, class
+    or module, with positional arch strings only; anything else is a usage error
+    (``check_gpu_marks``).
     Runs after ``-m`` deselection, so ``-m "not gpu"`` never probes the GPU.
     """
     for item in items:
@@ -40,6 +46,7 @@ def pytest_collection_modifyitems(config, items):
         mark = item.get_closest_marker("gpu")
         if mark is None:
             continue
+        check_gpu_marks(item)
         if not hip_available():
             item.add_marker(pytest.mark.skip(reason="needs hip-python"))
             continue
@@ -48,6 +55,21 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(pytest.mark.skip(reason="needs a GPU (none visible to HIP)"))
         elif mark.args and not any(arch_matches(found, a) for a in mark.args):
             item.add_marker(pytest.mark.skip(reason=f"needs {'/'.join(mark.args)}, found {found}"))
+
+
+def pytest_configure(config):
+    """``--require-gpu``: fail the run up front when hip-python or a GPU is missing.
+
+    Checked here rather than per test so that under pytest-xdist the controller
+    reports it as a usage error; raised on a worker it becomes an INTERNALERROR
+    that hides the message.
+    """
+    if not config.getoption("--require-gpu", default=False):
+        return
+    if not hip_available():
+        raise pytest.UsageError("--require-gpu: hip-python is not importable")
+    if detect_gpu_target() is None:
+        raise pytest.UsageError("--require-gpu: HIP reports no GPU, or a HIP error")
 
 
 @pytest.fixture(autouse=True)
@@ -140,6 +162,11 @@ def skip_parametrized_if_cli(request):
 
 
 def pytest_addoption(parser):
+    parser.addoption(
+        "--require-gpu", action="store_true", default=False,
+        help="Fail, instead of skip, when gpu-marked tests are selected but hip-python or a "
+             "GPU is missing (TheRock's standard tier sets it)",
+    )
     parser.addoption(
         "--mn", nargs="+", metavar="M,N",
         help="List of M,N pairs to test, e.g. --mn 23,17 32,32 16,16",

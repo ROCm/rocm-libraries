@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from tensilelite.Tests.gpu_detection import arch_matches
+from tensilelite.Tests.gpu_detection import arch_matches, check_gpu_marks
 
 pytestmark = pytest.mark.unit
 
@@ -57,3 +57,34 @@ def test_no_arch_skip_in_unit_tests():
 ])
 def test_arch_matches(found, wanted, expected):
     assert arch_matches(found, wanted) is expected
+
+
+class _Item:
+    """The part of a pytest item check_gpu_marks reads: its gpu marks, nearest first."""
+
+    def __init__(self, *marks):
+        self.nodeid = "t"
+        self._marks = [m.mark for m in marks]
+
+    def iter_markers(self, name):
+        return (m for m in self._marks if m.name == name)
+
+
+@pytest.mark.parametrize("item", [
+    _Item(pytest.mark.gpu),
+    _Item(pytest.mark.gpu("gfx950", "gfx942")),
+    _Item(pytest.mark.unit, pytest.mark.gpu("gfx1250")),
+], ids=["bare", "archs", "other-marks"])
+def test_check_gpu_marks_accepts(item):
+    check_gpu_marks(item)
+
+
+@pytest.mark.parametrize("item, message", [
+    (_Item(pytest.mark.gpu("gfx950"), pytest.mark.gpu("gfx942")), "2 gpu marks"),
+    (_Item(pytest.mark.gpu("gfx942"), pytest.mark.gpu), "2 gpu marks"),
+    (_Item(pytest.mark.gpu(arch="gfx950")), "arch strings only"),
+    (_Item(pytest.mark.gpu(950)), "arch strings only"),
+], ids=["stacked-or-param", "function-and-class", "keyword", "non-string"])
+def test_check_gpu_marks_rejects(item, message):
+    with pytest.raises(pytest.UsageError, match=message):
+        check_gpu_marks(item)

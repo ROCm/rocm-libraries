@@ -54,7 +54,11 @@ question that this section returns to below. It matters more than the headline c
 
 **Arch gating.** Unit tests: `@pytest.mark.gpu` (any GPU) or `@pytest.mark.gpu("gfx950")`; the
 [conftest](tensilelite/Tests/unit/conftest.py) skips what HIP's device can't run (`TENSILE_GPU_TARGET`
-overrides; `gfx1250` covers `gfx1250-strict`, not the reverse; nearest mark wins). No arch/hip `skipif`
+overrides; `gfx1250` covers `gfx1250-strict`, not the reverse). One `gpu` mark per test, counting
+its param, function, class and module, with positional arch strings only; anything else is a usage
+error. `--require-gpu` (set by TheRock's `standard` tier) fails the run up front when hip-python or
+a GPU is missing, instead of skipping every `gpu` test. The gate covers `Tests/unit` only: elsewhere (e.g.
+`rocisa/test`) `gpu` just selects, and its arch arguments do nothing. No arch/hip `skipif`
 or in-body skip; `test_gpu_marker_guard.py` enforces it. Non-gate code uses `gpu_is(...)`.
 `Tests/common` configs use `skip-gfxNNNN`.
 

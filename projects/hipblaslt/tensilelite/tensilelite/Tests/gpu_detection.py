@@ -169,6 +169,25 @@ def arch_matches(found: str, wanted: str) -> bool:
     return found == wanted or found.startswith(wanted + "-")
 
 
+def check_gpu_marks(item) -> None:
+    """One ``gpu`` mark per test, positional arch strings only; raise a usage error otherwise.
+
+    Counted over the whole chain (param, function, class, module). With several,
+    the one ``get_closest_marker`` returns depends on the test's shape and the
+    pytest version, so the gate could run the test on the wrong arch.
+    """
+    import pytest
+
+    marks = list(item.iter_markers("gpu"))
+    if len(marks) > 1:
+        raise pytest.UsageError(
+            f"{item.nodeid}: {len(marks)} gpu marks across its param, function, class and module; use one")
+    for m in marks:
+        if m.kwargs or not all(isinstance(a, str) for a in m.args):
+            raise pytest.UsageError(
+                f"{item.nodeid}: gpu() takes arch strings only, e.g. gpu(\"gfx950\"); got {m.args} {m.kwargs}")
+
+
 def gpu_is(*archs: str) -> bool:
     """True if the GPU matches any of *archs*. For non-gate code; tests use ``gpu(...)``."""
     found = detect_gpu_target()
