@@ -518,7 +518,11 @@ TEST(TestGfx950AttentionDenseGraphMatch, LogsTheOutputWhenOnlyOsStridesOverlap)
     spec.operand(O_UID).strides = strides;
     const auto decline = loggedDecline(spec);
     EXPECT_EQ(decline.cause, "overlap");
-    EXPECT_NE(decline.detail.find("o overlaps itself"), std::string::npos) << decline.detail;
+    // The line names the operand and shows its dims and strides: B2, 4 heads, 256 tokens of 128.
+    EXPECT_NE(decline.detail.find("o dims (2, 4, 256, 128) with strides (131072, 64, 512, 1) "
+                                  "overlap themselves"),
+              std::string::npos)
+        << decline.detail;
 }
 
 TEST(TestGfx950AttentionDenseGraphMatch, LogsTheCauseOfEachOtherDecline)
@@ -605,10 +609,12 @@ TEST(TestGfx950AttentionDenseGraphMatch, ServesPaddedOutputSequenceStride)
 }
 
 // ---------------------------------------------------------------------------
-// One stride axis at a time. hasBshdStrides ANDs four per-axis clauses, and the layouts
-// above each break two at once (BHSD: head and sequence; padded: sequence and batch).
-// Each case below perturbs exactly one axis of one operand at B=2, H=4, so no axis is
-// unit-extent and exempt, and that axis's clause is the only one that can decline it.
+// One stride axis at a time. The layouts above each move two at once (BHSD: head and
+// sequence; padded: sequence and batch). Each case below perturbs exactly one axis of one
+// operand at B=2, H=4, so no axis is unit-extent and exempt, and the stride predicate
+// (attention_dense::denseStridesAdmit) serves the move or declines it by that axis alone:
+// stride_alignment for a zero stride, overlap for heads that run into the next row, and
+// head_dim_stride for the element axis.
 // ---------------------------------------------------------------------------
 
 /// Indices into a (B, H, S, D) stride vector.
@@ -950,12 +956,11 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesUnsupportedHeadSize)
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesOverflowingOutputExtents)
 {
     // O's extents here are positive and rank-4, so the well-formedness predicate passes
-    // them through, but S * H * D for those extents is 2^63 -- one past INT64_MAX, and that
-    // product is what hasBshdStrides derives O's batch stride from. As ordered, the
-    // head-count compare rejects the graph before O's layout is read; the case exists to
-    // keep the overflow-capable domain reachable and declined. O's strides are written out
-    // as the ordinary dense BSHD spelling of the PROBLEM shape, so no stride value is what
-    // rejects this graph.
+    // them through, but S * H * D for those extents is 2^63 -- one past INT64_MAX, the packed
+    // batch stride of such an O. As ordered, the head-count compare rejects the graph before
+    // O's layout is read; the case exists to keep the overflow-capable domain reachable and
+    // declined. O's strides are written out as the ordinary dense BSHD spelling of the PROBLEM
+    // shape, so no stride value is what rejects this graph.
     const GraphSpec spec;
     EXPECT_TRUE(matchGraph(spec).has_value());
 
@@ -1013,9 +1018,9 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAQueryBatchStrideOf2To67)
 {
     // Q dims {2, 2^30, 2^30, 128}: S * H * D = 2^67, which does not fit in int64_t, and Q
     // and O carry the batch stride 0 it would wrap to beside packed head, row and element
-    // strides. hasBshdStrides forms that product through checkedProduct, which removes the
-    // undefined behaviour but is not observable in any verdict: every graph whose S * H * D
-    // overflows also overflows B * S * H * D, which the Q bound declines.
+    // strides. The stride predicate forms that product only through overflow-checked steps,
+    // which removes the undefined behaviour but is not observable in any verdict: every graph
+    // whose S * H * D overflows also overflows B * S * H * D, which the Q bound declines.
     const std::vector<int64_t> wrappedStrides{0, HEAD_SIZE, (int64_t{1} << 30) * HEAD_SIZE, 1};
     GraphSpec spec;
     spec.numQueryHeads = int64_t{1} << 30;

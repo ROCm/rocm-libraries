@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -43,7 +44,13 @@
  * and applies the result to the kernel code it keeps. No accessor exposes that geometry.
  * TestAttentionDenseGeometry.cpp pins what the functions compute; what prepare() passes
  * them needs a real archive and a real device. The launch values a save stores are tested
- * through gfx94xAttentionDenseLaunchValues() in TestPackLaunchValues.cpp.
+ * through attention_dense::launchValues (launchValuesUnder) in TestPackLaunchValues.cpp. launch()
+ * itself needs a loaded code object, which no host test has; what it hands the kernel is reached
+ * here: the kernel arguments it builds (AttentionDenseKernelArguments), whose constructor refuses
+ * an output that shares memory with an input (requireOutputDisjointFromInputs), and a stats
+ * output that shares memory with an operand or the bias (requireStatsDisjointFromOperands).
+ * launch() has no other way to pass the kernel its pointers, so these tests stand for those
+ * checks of launch().
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
@@ -284,7 +291,7 @@ struct DenseDispatchCase
     Tiles unsupportedTiles;
 };
 
-/// gfx942: off the 32-row quantum (48), past the 1024-thread CTA (1024), and block_n not
+/// gfx942: off the 32-row quantum (48), past the 1024-thread workgroup (1024), and block_n not
 /// dividing block_m (64/128, 256/48).
 const DenseDispatchCase GFX942_DISPATCH{
     &GFX942_ATTENTION_DENSE,
@@ -510,7 +517,7 @@ TEST_P(TestAttentionDenseDispatch, RefusesToPrepareWhenAnOperandTokenNamesNoTens
 /// graph_match is the gate for this and declines such a graph outright where it is not
 /// served, so this case drives the defence-in-depth check in prepare() directly, which nothing
 /// else reaches.
-TEST_P(TestAttentionDenseDispatch, RefusesToPrepareWhenTheOutputTokenNamesANonBshdTensor)
+TEST_P(TestAttentionDenseDispatch, RefusesANonBshdOutputOnlyForABodyThatIgnoresTheStrides)
 {
     const Graph graph(arch(), withUnnamedTensors(arch(), servedGraph()));
     auto tampered = bindingsFor(graph);
@@ -581,6 +588,42 @@ TEST_P(TestAttentionDenseDispatch, RefusesToPrepareWhenAnyOperandBreaksALaunchRu
             EXPECT_NE(failure.find(std::string("(") + defect.reason + "): " + role + " "),
                       std::string::npos)
                 << failure;
+        }
+    }
+}
+
+/// A declared alignment of 0 or less promises nothing about the base address, and as declared it
+/// would pass the predicate's multiple-of-16 test (0 and -16 are both multiples of 16). prepare()
+/// reads it as 1 and refuses it as pointer_alignment, for each operand. The schema's default 16,
+/// and a multiple of it, are prepared.
+TEST_P(TestAttentionDenseDispatch, RefusesToPrepareANonPositiveDeclaredAlignment)
+{
+    const Graph good(arch(), servedGraph());
+    const auto bound = bindingsFor(good);
+    const std::array<std::pair<int64_t, const char*>, 4> operands{
+        {{Q_UID, "q"}, {K_UID, "k"}, {V_UID, "v"}, {O_UID, "o"}}};
+    for(const auto& [uid, role] : operands)
+    {
+        for(const int64_t alignment : {int64_t{0}, int64_t{-16}})
+        {
+            SCOPED_TRACE("uid " + std::to_string(uid) + " alignment " + std::to_string(alignment));
+            auto spec = servedGraph();
+            spec.operand(uid).alignment = alignment;
+            const Graph bad(arch(), spec);
+            const std::string failure = prepareFailure(bad, bound);
+            EXPECT_NE(failure.find(std::string("(pointer_alignment): ") + role
+                                   + " base is 1-byte aligned"),
+                      std::string::npos)
+                << failure;
+        }
+        for(const int64_t alignment : {int64_t{16}, int64_t{32}})
+        {
+            SCOPED_TRACE("uid " + std::to_string(uid) + " alignment " + std::to_string(alignment));
+            auto spec = servedGraph();
+            spec.operand(uid).alignment = alignment;
+            const Graph aligned(arch(), spec);
+            EXPECT_NO_THROW(static_cast<void>(
+                attention_dense_graphs::resolveLaunchOf(aligned, bound, makeKernel(arch()))));
         }
     }
 }
@@ -772,9 +815,7 @@ TEST_P(TestAttentionDenseDispatch, SavesTheKernelsBlockNAndWhetherItReadsTheStri
 {
     const Graph graph(arch(), servedGraph());
     const auto bound = bindingsFor(graph);
-    const auto& engineArch = arch().label == GFX942_ATTENTION_DENSE.label
-                                 ? gfx942AttentionDenseArch()
-                                 : gfx950AttentionDenseArch();
+    const auto& engineArch = arch().engineArch();
     const auto savedValues = [&](const KernelDefinition& kernel) {
         const auto launch = attention_dense_graphs::resolveLaunchOf(graph, bound, kernel);
         return attention_dense::launchValues(launch.binding,
@@ -861,9 +902,16 @@ TEST_P(TestAttentionDenseDispatch, LaunchesTheStridesTheBindingHolds)
         const auto launch
             = attention_dense_graphs::resolveLaunchOf(graph, bindingsFor(graph), kernel);
 
+        // Null operands name no buffer, so the output-overlap check passes them.
         const std::array<void*, 4> operands{nullptr, nullptr, nullptr, nullptr};
         const attention_dense::AttentionDenseKernelArguments arguments(
-            launch, attention_dense::AttentionDenseAbi::RUNTIME_STRIDES, {}, operands, nullptr);
+            launch,
+            attention_dense::AttentionDenseAbi::RUNTIME_STRIDES,
+            {},
+            operands,
+            nullptr,
+            nullptr,
+            arch().label);
         // 4 pointers, scale, 5 shape values, then the strides last.
         ASSERT_EQ(arguments.params().size(), 4U + 1U + 5U + 12U);
         for(std::size_t index = 0; index < 12; ++index)
@@ -877,6 +925,179 @@ TEST_P(TestAttentionDenseDispatch, LaunchesTheStridesTheBindingHolds)
         {
             EXPECT_EQ(*static_cast<const int32_t*>(arguments.params().at(10 + 1)), 65536);
         }
+    }
+}
+
+namespace
+{
+
+/// What building @p launch's kernel arguments over the device pointers @p operands (Q, K, V, O)
+/// throws, as launch() builds them: empty when they are built. The constructor's
+/// output-overlap check (requireOutputDisjointFromInputs) is the only refusal these operands
+/// can meet.
+std::string outputOverlapFailure(const AttentionDenseTestArch& arch,
+                                 const AttentionDenseLaunchInputs& launch,
+                                 const std::array<void*, 4>& operands)
+{
+    try
+    {
+        const attention_dense::AttentionDenseKernelArguments arguments(
+            launch,
+            attention_dense::AttentionDenseAbi::RUNTIME_STRIDES,
+            {},
+            operands,
+            nullptr,
+            nullptr,
+            arch.label);
+        EXPECT_EQ(arguments.params().size(), 4U + 1U + 5U + 12U);
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM) << error.getMessage();
+        return error.getMessage();
+    }
+    return {};
+}
+
+/// What building @p launch's kernel arguments under @p abi over @p operands (Q, K, V, O), @p lse
+/// and @p bias throws, as launch() builds them: empty when they are built, and then they must
+/// number @p count. The constructor's overlap checks are the only refusals these launches can
+/// meet.
+std::string kernelArgumentsFailure(const AttentionDenseTestArch& arch,
+                                   const AttentionDenseLaunchInputs& launch,
+                                   attention_dense::AttentionDenseAbi abi,
+                                   const std::array<void*, 4>& operands,
+                                   void* lse,
+                                   void* bias,
+                                   std::size_t count)
+{
+    try
+    {
+        const attention_dense::AttentionDenseKernelArguments arguments(
+            launch, abi, {}, operands, lse, bias, arch.label);
+        EXPECT_EQ(arguments.params().size(), count);
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM) << error.getMessage();
+        return error.getMessage();
+    }
+    return {};
+}
+
+/// The fragment only the stats-output overlap refusal carries, before the operand it names.
+constexpr std::string_view STATS_OVERLAP_MARKER = "the stats output shares memory with the ";
+
+/// Whether @p failure is the stats-output overlap refusal naming @p operand.
+bool refusesStatsOverlapWith(const std::string& failure, std::string_view operand)
+{
+    return failure.find(std::string(STATS_OVERLAP_MARKER) + std::string(operand) + ";")
+           != std::string::npos;
+}
+
+} // namespace
+
+/// launch() refuses an output that shares memory with an input: the kernels declare O noalias
+/// and write it while other workgroups still read Q, K and V. The kernel arguments launch()
+/// builds make the check, so these build them. Host buffers stand in for the device ones; only
+/// their addresses and the spans the strides give matter. Each operand of the packed served graph
+/// spans B * S * H * D * 2 bytes.
+TEST_P(TestAttentionDenseDispatch, RefusesALaunchWhoseOutputSharesAnInputsMemory)
+{
+    const Graph graph(arch(), servedGraph());
+    const auto launch
+        = attention_dense_graphs::resolveLaunchOf(graph, bindingsFor(graph), makeKernel(arch()));
+    constexpr auto SPAN = static_cast<std::size_t>(BATCH * SEQ * HEADS * HEAD_SIZE * 2);
+    std::vector<uint8_t> storage(4 * SPAN);
+    const auto at
+        = [&storage](std::size_t offset) { return static_cast<void*>(storage.data() + offset); };
+
+    // Four buffers side by side: the output starts on the byte after the value's last one.
+    EXPECT_EQ(outputOverlapFailure(arch(), launch, {at(0), at(SPAN), at(2 * SPAN), at(3 * SPAN)}),
+              "");
+    // The output passed as the query (o == q), over the key, and one element into the value's
+    // end.
+    EXPECT_NE(outputOverlapFailure(arch(), launch, {at(0), at(SPAN), at(2 * SPAN), at(0)})
+                  .find("shares memory with the query input"),
+              std::string::npos);
+    EXPECT_NE(outputOverlapFailure(arch(), launch, {at(0), at(SPAN), at(3 * SPAN), at(SPAN)})
+                  .find("shares memory with the key input"),
+              std::string::npos);
+    EXPECT_NE(
+        outputOverlapFailure(arch(), launch, {at(0), at(SPAN), at(2 * SPAN), at(3 * SPAN - 2)})
+            .find("shares memory with the value input"),
+        std::string::npos);
+    // A null pointer names no buffer to share.
+    EXPECT_EQ(outputOverlapFailure(arch(), launch, {nullptr, at(SPAN), at(2 * SPAN), at(0)}), "");
+}
+
+/// The same check over a fused buffer: Q, K and V cut out of one [B, S, 3, H, D] allocation are
+/// launched (the inputs may share storage, the kernels only read them), and an output cut out of
+/// one [B, S, 4, H, D] allocation with them is refused, though its rows interleave with the
+/// inputs' rather than share an element: the check compares spans.
+TEST_P(TestAttentionDenseDispatch, RefusesALaunchWhoseOutputIsAViewOfAFusedQkvBuffer)
+{
+    constexpr int64_t ROW = HEADS * HEAD_SIZE;
+    const auto fused = [](int64_t slots) {
+        GraphSpec spec = servedGraph();
+        for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
+        {
+            spec.operand(uid).strides
+                = std::vector<int64_t>{SEQ * slots * ROW, HEAD_SIZE, slots * ROW, 1};
+        }
+        return spec;
+    };
+    constexpr auto SLOT = static_cast<std::size_t>(ROW * 2);
+    constexpr auto BUFFER = static_cast<std::size_t>(BATCH * SEQ * 4 * ROW * 2);
+    std::vector<uint8_t> storage(2 * BUFFER);
+    const auto at
+        = [&storage](std::size_t offset) { return static_cast<void*>(storage.data() + offset); };
+
+    // Q, K and V in a three-slot buffer, O packed in a buffer of its own after it.
+    auto qkv = fused(3);
+    qkv.operand(O_UID).strides = std::nullopt;
+    const Graph separate(arch(), qkv);
+    const auto launchSeparate = attention_dense_graphs::resolveLaunchOf(
+        separate, bindingsFor(separate), makeKernel(arch()));
+    EXPECT_EQ(
+        outputOverlapFailure(arch(), launchSeparate, {at(0), at(SLOT), at(2 * SLOT), at(BUFFER)}),
+        "");
+
+    // All four in one four-slot buffer: the output is the fourth slot.
+    const Graph together(arch(), fused(4));
+    const auto launchTogether = attention_dense_graphs::resolveLaunchOf(
+        together, bindingsFor(together), makeKernel(arch()));
+    EXPECT_NE(
+        outputOverlapFailure(arch(), launchTogether, {at(0), at(SLOT), at(2 * SLOT), at(3 * SLOT)})
+            .find("shares memory with the query input"),
+        std::string::npos);
+}
+
+/// A launch whose binding has no stats output passes the kernel no lse_ptr, so the LSE pointer
+/// it is handed is not compared with anything: here it is the output's and then the query's own,
+/// and the arguments are built without it.
+TEST_P(TestAttentionDenseDispatch, IgnoresTheLsePointerOfALaunchWithoutStats)
+{
+    const Graph graph(arch(), servedGraph());
+    const auto launch
+        = attention_dense_graphs::resolveLaunchOf(graph, bindingsFor(graph), makeKernel(arch()));
+    ASSERT_EQ(launch.binding.stats, NO_STATS);
+    constexpr auto SPAN = static_cast<std::size_t>(BATCH * SEQ * HEADS * HEAD_SIZE * 2);
+    std::vector<uint8_t> storage(4 * SPAN);
+    const auto at
+        = [&storage](std::size_t offset) { return static_cast<void*>(storage.data() + offset); };
+    const std::array<void*, 4> operands{at(0), at(SPAN), at(2 * SPAN), at(3 * SPAN)};
+    for(const std::size_t lse : {3 * SPAN, std::size_t{0}})
+    {
+        SCOPED_TRACE(lse);
+        EXPECT_EQ(kernelArgumentsFailure(arch(),
+                                         launch,
+                                         attention_dense::AttentionDenseAbi::RUNTIME_STRIDES,
+                                         operands,
+                                         at(lse),
+                                         nullptr,
+                                         4U + 1U + 5U + 12U),
+                  "");
     }
 }
 
@@ -897,7 +1118,7 @@ TEST_P(TestAttentionDenseDispatch, ReachesTheLoaderForEveryBuildableTile)
 }
 
 /// A candidate whose tile is missing, mistyped, zero, negative, or breaks one of the
-/// arch's tile rules. The grid and CTA come from block_m, so prepare() refuses by name
+/// arch's tile rules. The grid and workgroup come from block_m, so prepare() refuses by name
 /// before the loader -- a zero would otherwise be a division by zero, and any substitute
 /// tile launches this binary with another binary's geometry.
 TEST_P(TestAttentionDenseDispatch, RefusesToPrepareACandidateWithoutASupportedTile)
@@ -1011,6 +1232,46 @@ TEST(TestGfx942AttentionDenseDispatch, RefusesToPrepareWhenTheStatsTokenNamesATe
         ASSERT_FALSE(failure.empty()) << "prepare() did not fail at all";
         EXPECT_NE(failure.find(STATS_MARKER), std::string::npos) << failure;
     }
+}
+
+/// launch() refuses a stats output that shares memory with Q, K, V or O: the kernel writes the
+/// LSE while other workgroups still read the inputs and write the output. Host buffers stand in
+/// for the device ones, as for the output check. The stats output spans B * Hq * Sq * 4 bytes;
+/// each operand B * S * H * D * 2.
+TEST(TestGfx942AttentionDenseDispatch, RefusesALaunchWhoseStatsOutputSharesAnOperandsMemory)
+{
+    const auto& arch = GFX942_ATTENTION_DENSE;
+    const Graph graph(arch, withStats(servedGraph(), STATS_UID));
+    const auto launch = attention_dense_graphs::resolveLaunchOf(
+        graph, bindingsFor(graph), makeKernel(arch, 256, 64, /*writesLse=*/true));
+    ASSERT_EQ(launch.binding.stats, STATS_UID);
+    constexpr auto SPAN = static_cast<std::size_t>(BATCH * SEQ * HEADS * HEAD_SIZE * 2);
+    constexpr auto LSE_SPAN = static_cast<std::size_t>(BATCH * HEADS * SEQ * 4);
+    std::vector<uint8_t> storage(4 * SPAN + LSE_SPAN);
+    const auto at
+        = [&storage](std::size_t offset) { return static_cast<void*>(storage.data() + offset); };
+    const std::array<void*, 4> operands{at(0), at(SPAN), at(2 * SPAN), at(3 * SPAN)};
+    const auto failure = [&](std::size_t lse) {
+        // 4 pointers, scale, 5 shape values, lse_ptr, then the strides.
+        return kernelArgumentsFailure(arch,
+                                      launch,
+                                      attention_dense::AttentionDenseAbi::RUNTIME_STRIDES,
+                                      operands,
+                                      at(lse),
+                                      nullptr,
+                                      4U + 1U + 5U + 1U + 12U);
+    };
+
+    // The stats output on the byte after the output's last one.
+    EXPECT_EQ(failure(4 * SPAN), "");
+    // The stats output passed as the output (lse == o) and as the query, one float into the
+    // key's end, and ending on the value's last byte.
+    EXPECT_TRUE(refusesStatsOverlapWith(failure(3 * SPAN), "output")) << failure(3 * SPAN);
+    EXPECT_TRUE(refusesStatsOverlapWith(failure(0), "query input")) << failure(0);
+    EXPECT_TRUE(refusesStatsOverlapWith(failure(2 * SPAN - 4), "key input"))
+        << failure(2 * SPAN - 4);
+    EXPECT_TRUE(refusesStatsOverlapWith(failure(3 * SPAN - LSE_SPAN), "value input"))
+        << failure(3 * SPAN - LSE_SPAN);
 }
 
 // =============================================================================
@@ -1336,15 +1597,18 @@ TEST_P(TestAttentionDenseBiasDispatch, RefusesABiasContractWithoutABiasBinding)
 
 /// A bias body addresses packed Q/K/V/O: its bias reads are written against them. A strided
 /// graph (every operand BHSD, so no operand is dense BSHD) with a bias must therefore be refused
-/// by name at prepare(), where the kernel match would not have matched, rather than launched at
-/// strides the body ignores, which is a wrong answer with no fault. The same body over a packed
-/// graph gets past the layout check.
+/// by name at prepare(), rather than launched at strides the body ignores, which is a wrong
+/// answer with no fault. The graph match declines such a graph, so the tokens are bound from the
+/// packed graph and prepare() runs over the strided one: the check a caller that skipped the
+/// match meets. The same body over the packed graph gets past the layout check.
 TEST_P(TestAttentionDenseBiasDispatch, RefusesToPrepareAStridedGraphForABiasBody)
 {
+    const Graph packed(arch(), servedBiasGraph());
+    const auto bound = bindingsFor(packed);
     auto spec = servedBiasGraph();
     spec.setEveryLayout(SdpaLayout::BHSD);
     const Graph strided(arch(), spec);
-    const auto bound = bindingsFor(strided);
+    ASSERT_FALSE(strided.match().has_value()) << "the graph match serves a strided bias graph";
 
     const std::string failure
         = prepareFailure(strided, bound, makeBiasKernel(arch(), /*bias=*/true));
@@ -1354,9 +1618,8 @@ TEST_P(TestAttentionDenseBiasDispatch, RefusesToPrepareAStridedGraphForABiasBody
         << failure;
     EXPECT_NE(failure.find(OUTPUT_LAYOUT_MARKER), std::string::npos) << failure;
 
-    const Graph packed(arch(), servedBiasGraph());
     const std::string packedFailure
-        = prepareFailure(packed, bindingsFor(packed), makeBiasKernel(arch(), /*bias=*/true));
+        = prepareFailure(packed, bound, makeBiasKernel(arch(), /*bias=*/true));
     ASSERT_FALSE(packedFailure.empty());
     EXPECT_EQ(packedFailure.find(OUTPUT_LAYOUT_MARKER), std::string::npos) << packedFailure;
 }
@@ -1397,6 +1660,57 @@ TEST(TestGfx942AttentionDenseDispatch, BindsAndPreparesTheBiasAlongsideTheStatsO
     noTail.source.signature = pythonLseAbi();
     const std::string tailless = prepareFailure(graph, bound, noTail);
     EXPECT_NE(tailless.find(SIGNATURE_MARKER), std::string::npos) << tailless;
+}
+
+/// Under a bias contract launch() also refuses a stats output that shares memory with the bias,
+/// measured over the elements the kernel reads: the served bias broadcasts its head axis, so it
+/// spans B * Sq * Skv * 4 bytes. Under a contract that passes no bias pointer the kernel reads no
+/// bias, and the same pointer is not compared.
+TEST(TestGfx942AttentionDenseDispatch, RefusesALaunchWhoseStatsOutputSharesTheBiasMemory)
+{
+    const auto& arch = GFX942_ATTENTION_DENSE;
+    const Graph graph(arch, withStats(servedBiasGraph(), STATS_UID));
+    const auto launch = attention_dense_graphs::resolveLaunchOf(
+        graph, bindingsFor(graph), makeBiasKernel(arch, /*bias=*/true, /*writesLse=*/true));
+    ASSERT_EQ(launch.binding.stats, STATS_UID);
+    ASSERT_TRUE(launch.binding.bias.has_value());
+    constexpr auto SPAN = static_cast<std::size_t>(BATCH * SEQ * HEADS * HEAD_SIZE * 2);
+    constexpr auto LSE_SPAN = static_cast<std::size_t>(BATCH * HEADS * SEQ * 4);
+    constexpr auto BIAS_SPAN = static_cast<std::size_t>(BATCH * SEQ * SEQ * 4);
+    constexpr std::size_t BIAS = 4 * SPAN;
+    std::vector<uint8_t> storage(4 * SPAN + BIAS_SPAN + LSE_SPAN);
+    const auto at
+        = [&storage](std::size_t offset) { return static_cast<void*>(storage.data() + offset); };
+    const std::array<void*, 4> operands{at(0), at(SPAN), at(2 * SPAN), at(3 * SPAN)};
+    const auto failure = [&](std::size_t lse) {
+        // 4 pointers, scale, 5 shape values, lse_ptr, the bias pointer and its 3 strides, then
+        // the strides.
+        return kernelArgumentsFailure(arch,
+                                      launch,
+                                      attention_dense::AttentionDenseAbi::RUNTIME_STRIDES_WITH_BIAS,
+                                      operands,
+                                      at(lse),
+                                      at(BIAS),
+                                      4U + 1U + 5U + 1U + 4U + 12U);
+    };
+
+    // Every buffer of its own: the stats output on the byte after the bias's last one.
+    EXPECT_EQ(failure(BIAS + BIAS_SPAN), "");
+    // The stats output inside the bias, and one float into its end.
+    EXPECT_TRUE(refusesStatsOverlapWith(failure(BIAS + 1024), "additive bias"))
+        << failure(BIAS + 1024);
+    EXPECT_TRUE(refusesStatsOverlapWith(failure(BIAS + BIAS_SPAN - 4), "additive bias"))
+        << failure(BIAS + BIAS_SPAN - 4);
+
+    // The kernel of a contract without the bias tail reads no bias.
+    EXPECT_EQ(kernelArgumentsFailure(arch,
+                                     launch,
+                                     attention_dense::AttentionDenseAbi::RUNTIME_STRIDES,
+                                     operands,
+                                     at(BIAS + 1024),
+                                     at(BIAS),
+                                     4U + 1U + 5U + 1U + 12U),
+              "");
 }
 
 /// The v1 handler is registered only for plans saved before the head counts became runtime

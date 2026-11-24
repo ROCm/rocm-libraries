@@ -6,6 +6,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -21,17 +22,28 @@
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
 
-/// An arch's launch-values writer, restated with one signature: gfx942's takes a launch
-/// grid after the tile, which these cases leave at its default (the qb_minor grid).
-using AttentionDenseLaunchValuesWriter
-    = hipdnn_plugin_sdk::ingestor::MetadataValues (*)(const AttentionDenseBinding&,
-                                                      const AttentionDenseProblem&,
-                                                      int64_t blockM);
-
-inline hipdnn_plugin_sdk::ingestor::MetadataValues gfx942LaunchValues(
-    const AttentionDenseBinding& binding, const AttentionDenseProblem& problem, int64_t blockM)
+/**
+ * @brief The values a save stores for a plan under @p symbol, one of @p arch's contracts: the
+ *        call the dispatch handler's save makes (attention_dense::launchValues) with that
+ *        contract.
+ *
+ * @throws std::invalid_argument when @p symbol names none of @p arch's contracts.
+ */
+inline hipdnn_plugin_sdk::ingestor::MetadataValues
+    launchValuesUnder(std::string_view symbol,
+                      const attention_dense::AttentionDenseArch& arch,
+                      const AttentionDenseBinding& binding,
+                      const AttentionDenseProblem& problem,
+                      int64_t blockM,
+                      const attention_dense::AttentionDenseGrid& grid = {})
 {
-    return gfx942AttentionDenseStridedLaunchValues(binding, problem, blockM);
+    const auto* contract = arch.contractNamed(symbol);
+    if(contract == nullptr)
+    {
+        throw std::invalid_argument(std::string(symbol) + " names no contract of "
+                                    + std::string(arch.label));
+    }
+    return attention_dense::launchValues(binding, problem, blockM, arch, *contract, grid);
 }
 
 /// What a gfx942 or gfx950 dense attention test needs to know about its engine. The pack
@@ -68,8 +80,8 @@ struct AttentionDenseTestArch
     /// with one (empty for an arch that serves none).
     std::string_view plainContractSymbol;
     std::string_view biasContractSymbol;
-    /// The arch's writer of the launch values a save stores.
-    AttentionDenseLaunchValuesWriter launchValues;
+    /// The engine's own descriptor, whose contracts a save writes under (launchValuesUnder).
+    const attention_dense::AttentionDenseArch& (*engineArch)();
 };
 
 inline constexpr AttentionDenseTestArch GFX942_ATTENTION_DENSE{
@@ -87,7 +99,7 @@ inline constexpr AttentionDenseTestArch GFX942_ATTENTION_DENSE{
     "hipkernel:Gfx942AttentionDense",
     "hipkernel.gfx942_attention_dense.dispatch.v3",
     "hipkernel.gfx942_attention_dense.dispatch.v4",
-    &gfx942LaunchValues};
+    &gfx942AttentionDenseArch};
 
 inline constexpr AttentionDenseTestArch GFX950_ATTENTION_DENSE{
     "Gfx950",
@@ -104,7 +116,7 @@ inline constexpr AttentionDenseTestArch GFX950_ATTENTION_DENSE{
     "hipkernel:Gfx950AttentionDense",
     "hipkernel.gfx950_attention_dense.dispatch.v4",
     "hipkernel.gfx950_attention_dense.dispatch.v5",
-    &gfx950AttentionDenseStridedLaunchValues};
+    &gfx950AttentionDenseArch};
 
 /// The arches a case on the additive bias runs on: those that serve one.
 inline std::vector<const AttentionDenseTestArch*> biasServingArches()

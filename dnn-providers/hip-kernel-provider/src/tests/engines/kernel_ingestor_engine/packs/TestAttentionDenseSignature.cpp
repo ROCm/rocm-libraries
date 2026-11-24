@@ -4,6 +4,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -64,7 +65,8 @@
  * on the arches that serve a bias (biasServingArches()).
  *
  * The last section pins AttentionDenseArch::isConsistent(), the rule each engine static_asserts
- * on its descriptor, as compile-time checks on broken descriptors.
+ * on its descriptor, and isContractTable, the one it static_asserts on its contract table, as
+ * compile-time checks on broken descriptors and tables.
  *
  * No device, no compile and no launch: the archive named here does not exist, and both
  * the signature refusal and the archive's absence are raised on the host.
@@ -174,7 +176,7 @@ KernelDefinition makeKernel(const AttentionDenseTestArch& arch,
                             const std::string& persistDecode = "")
 {
     auto kernel = kpackKernel(arch, recorded);
-    // A gfx942 persistent candidate at @p persistDecode, 304 CTAs.
+    // A gfx942 persistent candidate at @p persistDecode, 304 workgroups.
     if(!persistDecode.empty())
     {
         kernel.metadata[std::string("persistent")] = int64_t{1};
@@ -648,8 +650,9 @@ hipdnn_plugin_sdk::ingestor::SavedLaunchInputs savedLaunchInputs(const Attention
                                            static_cast<int32_t>(SEQ * SEQ),
                                            static_cast<int32_t>(SEQ)}};
     }
-    return {std::string(withBias ? arch.biasContractSymbol : arch.plainContractSymbol),
-            arch.launchValues(binding, problem, SAVED_BLOCK_M)};
+    const auto symbol = withBias ? arch.biasContractSymbol : arch.plainContractSymbol;
+    return {std::string(symbol),
+            launchValuesUnder(symbol, arch.engineArch(), binding, problem, SAVED_BLOCK_M)};
 }
 
 /// What restoreLaunch() threw. SUCCESS with no message means it returned, which no case
@@ -727,6 +730,17 @@ TEST_P(TestAttentionDenseBiasSignature, RefusesThePlainFormForABiasCandidate)
     // A bias candidate whose object records no bias tail: the launch passes four arguments
     // the kernel does not declare.
     expectBiasRefused(arch(), pythonAbi(), "a bias variant takes the bias tail", /*bias=*/true);
+}
+
+TEST_P(TestAttentionDenseBiasSignature, RefusesTheBiasFormWithoutStrides)
+{
+    // A bias kernel built before the strides: the ten shape arguments and the bias tail, 14 in
+    // all, the likeliest skew of a bias catalog. The strided bias contract's launch would write
+    // twelve arguments the kernel never declares.
+    expectBiasRefused(arch(),
+                      withBiasTail(pythonShapeAbi()),
+                      "a bias kernel without the strides is not this ABI",
+                      /*bias=*/true);
 }
 
 TEST_P(TestAttentionDenseBiasSignature, RefusesTheBiasFormForAPlainCandidate)
@@ -808,6 +822,16 @@ TEST_P(TestAttentionDenseBiasSignature, RefusesToRestoreABiasPlanThatRecordsTheP
     EXPECT_NE(failure.message.find(MISMATCH_MARKER), std::string::npos) << failure.message;
 }
 
+/// The same pre-stride bias kernel in a plan saved under the strided bias contract (edited, or
+/// paired with a catalog rebuilt between save and load): the restore refuses it as
+/// incompatible rather than launch twelve arguments the kernel never declares.
+TEST_P(TestAttentionDenseBiasSignature, RefusesToRestoreABiasPlanThatRecordsTheFormWithoutStrides)
+{
+    const auto failure = restoreFailure(arch(), withBiasTail(pythonShapeAbi()), /*withBias=*/true);
+    EXPECT_EQ(failure.status, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE) << failure.message;
+    EXPECT_NE(failure.message.find(RESTORE_MISMATCH_MARKER), std::string::npos) << failure.message;
+}
+
 INSTANTIATE_TEST_SUITE_P(,
                          TestAttentionDenseBiasSignature,
                          ::testing::ValuesIn(biasServingArches()),
@@ -862,6 +886,28 @@ TEST(TestGfx942AttentionDenseSignature, RestoresTheLseBiasFormOfABiasPlanWithSta
         << tailless.message;
 }
 
+/// The LSE form of a bias kernel built before the strides (lse_ptr, then the bias tail, and no
+/// strides) is refused for a graph with a bias and a stats output, at prepare() and at restore.
+TEST(TestGfx942AttentionDenseSignature, RefusesTheLseBiasFormWithoutStrides)
+{
+    const auto& arch = GFX942_ATTENTION_DENSE;
+    const auto preStride = withBiasTail(pythonLseShapeAbi());
+
+    const Graph graph(arch, withStats(withBias({BATCH, 1, SEQ, SEQ})));
+    const auto bound = graph.match();
+    ASSERT_TRUE(bound.has_value()) << "graph_match declined the fixture graph";
+    auto kernel = makeKernel(arch, preStride);
+    kernel.metadata[std::string("use_additive_bias")] = int64_t{1};
+    const std::string prepared = attention_dense_graphs::prepareFailure(graph, *bound, kernel);
+    EXPECT_NE(prepared.find(MISMATCH_MARKER), std::string::npos) << prepared;
+
+    constexpr int64_t STATS = 7;
+    const auto restored = restoreFailure(arch, preStride, /*withBias=*/true, STATS);
+    EXPECT_EQ(restored.status, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE) << restored.message;
+    EXPECT_NE(restored.message.find(RESTORE_MISMATCH_MARKER), std::string::npos)
+        << restored.message;
+}
+
 // =============================================================================
 // The arch descriptor's coherence rule
 // =============================================================================
@@ -878,10 +924,15 @@ namespace
 using attention_dense::AttentionDenseAbi;
 using attention_dense::AttentionDenseArch;
 
-/// A hook the descriptors below carry: isConsistent() reads whether one is set, never calls it.
+/// Hooks the descriptors below carry: isConsistent() reads whether one is set, never calls it.
 std::optional<bool> unreachedHook(const hipdnn_plugin_sdk::ingestor::KernelDefinition& /*kernel*/)
 {
     return std::nullopt;
+}
+
+bool unreachedStrideRule(const hipdnn_plugin_sdk::ingestor::KernelDefinition& /*kernel*/)
+{
+    return false;
 }
 
 /// A descriptor that serves stats and a bias, with every rule of isConsistent() met.
@@ -895,6 +946,7 @@ constexpr AttentionDenseArch coherentArch()
     arch.tokens.biasStrideHead = "arch.bias.stride_head";
     arch.tokens.biasStrideQuery = "arch.bias.stride_query";
     arch.candidateWritesLse = &unreachedHook;
+    arch.candidateReadsStrides = &unreachedStrideRule;
     arch.candidateAddsBias = &unreachedHook;
     arch.currentContract = {"arch.dispatch.v4", AttentionDenseAbi::RUNTIME_STRIDES};
     arch.legacyContracts[0] = {"arch.dispatch.v1", AttentionDenseAbi::BAKED_HEAD_COUNTS};
@@ -917,8 +969,8 @@ constexpr bool consistentAfter(Edit edit)
 } // namespace
 
 // The rule is not simply "refuse everything": a coherent descriptor, a plain one that serves
-// neither stats nor a bias (gfx950 serves no stats) and one with no superseded contract (gfx942
-// has none) are all accepted.
+// neither stats nor a bias (gfx950 serves no stats) and one with no superseded contract are all
+// accepted.
 static_assert(consistentAfter([](AttentionDenseArch&) {}),
               "the coherent baseline must be consistent, or no refusal below means anything");
 static_assert(consistentAfter([](AttentionDenseArch& arch) {
@@ -929,6 +981,37 @@ static_assert(consistentAfter([](AttentionDenseArch& arch) {
               "a descriptor that serves neither stats nor a bias is consistent");
 static_assert(consistentAfter([](AttentionDenseArch& arch) { arch.legacyContracts = {}; }),
               "a descriptor with no superseded contract is consistent");
+
+// Every arch has its stride rule, and a named current contract whose kernels take the strides
+// and no bias: the graph match admits strided layouts on every arch.
+static_assert(!consistentAfter([](AttentionDenseArch& arch) {
+    arch.candidateReadsStrides = nullptr;
+}),
+              "an arch without a stride rule must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) { arch.currentContract.symbol = {}; }),
+              "a current contract without a name must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) {
+    arch.candidateAddsBias = nullptr;
+    arch.biasContract = {};
+    arch.currentContract.abi = AttentionDenseAbi::RUNTIME_HEAD_COUNTS;
+}),
+              "a current contract that takes no strides must be refused on an arch without a bias");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) {
+    arch.candidateAddsBias = nullptr;
+    arch.biasContract = {};
+    arch.currentContract.abi = AttentionDenseAbi::RUNTIME_STRIDES_WITH_BIAS;
+}),
+              "a current contract that launches the bias form must be refused");
+
+// No two contracts share a name, so a saved name selects exactly one.
+static_assert(!consistentAfter([](AttentionDenseArch& arch) {
+    arch.legacyContracts[1].symbol = arch.legacyContracts[0].symbol;
+}),
+              "two legacy contracts under one name must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) {
+    arch.legacyContracts[2].symbol = arch.currentContract.symbol;
+}),
+              "a legacy contract under the current contract's name must be refused");
 
 // A served stats output needs its token spelled.
 static_assert(!consistentAfter([](AttentionDenseArch& arch) { arch.tokens.stats = {}; }),
@@ -982,6 +1065,43 @@ static_assert(!consistentAfter([](AttentionDenseArch& arch) {
     arch.biasContract.symbol = arch.legacyContracts[2].symbol;
 }),
               "a bias contract under the legacy bias contract's name must be refused");
+
+// The contract table each engine static_asserts (isContractTable): one current row, and the
+// bias row after it, since a new current version needs a new bias version. A bump that adds a
+// current row but leaves the old bias row in place is refused; a new bias version alone is not.
+namespace
+{
+
+using attention_dense::AttentionDenseContractRole;
+using attention_dense::AttentionDenseContractRow;
+
+constexpr AttentionDenseContractRow tableRow(AttentionDenseContractRole role)
+{
+    return {{"arch.dispatch", AttentionDenseAbi::RUNTIME_STRIDES}, role};
+}
+
+constexpr auto CURRENT_ROW = tableRow(AttentionDenseContractRole::CURRENT);
+constexpr auto BIAS_ROW = tableRow(AttentionDenseContractRole::BIAS);
+constexpr auto LEGACY_ROW = tableRow(AttentionDenseContractRole::LEGACY);
+
+} // namespace
+
+static_assert(attention_dense::isContractTable(std::array{
+                  LEGACY_ROW, LEGACY_ROW, LEGACY_ROW, CURRENT_ROW, BIAS_ROW}),
+              "today's tables (legacy rows, then current, then bias) are contract tables");
+static_assert(attention_dense::isContractTable(std::array{LEGACY_ROW, CURRENT_ROW}),
+              "a table without a bias row is a contract table");
+static_assert(attention_dense::isContractTable(std::array{CURRENT_ROW, LEGACY_ROW, BIAS_ROW}),
+              "a new bias version alone leaves the bias row after the current one");
+static_assert(!attention_dense::isContractTable(std::array{
+                  LEGACY_ROW, LEGACY_ROW, LEGACY_ROW, LEGACY_ROW, BIAS_ROW, CURRENT_ROW}),
+              "a new current version that leaves the old bias row in place must be refused");
+static_assert(!attention_dense::isContractTable(std::array{CURRENT_ROW, BIAS_ROW, CURRENT_ROW}),
+              "two current rows must be refused");
+static_assert(!attention_dense::isContractTable(std::array{LEGACY_ROW, BIAS_ROW}),
+              "a table without a current row must be refused");
+static_assert(!attention_dense::isContractTable(std::array{CURRENT_ROW, BIAS_ROW, BIAS_ROW}),
+              "two bias rows must be refused");
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
 

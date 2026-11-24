@@ -1108,6 +1108,71 @@ TEST_P(TestAttentionDenseBiasMatch, ServesNoBiasGraphWithASlidingWindowFromTheSh
     }
 }
 
+/// A bias body addresses packed Q, K, V and O, so a bias graph whose operands are not packed BSHD
+/// has no candidate. The graph match declines it by name, under the attn_mask cause, naming the
+/// first stride a bias kernel would misread. Each graph without its bias is served (the control
+/// that keeps the decline from passing for its layout alone), as is the packed graph with it.
+TEST_P(TestAttentionDenseBiasMatch, DeclinesABiasOverOperandsThatAreNotPackedBshd)
+{
+    struct Case
+    {
+        const char* what;
+        GraphSpec spec;
+        /// The decline's detail: the first stride that is not packed, and its packed value.
+        const char* stride;
+    };
+    std::vector<Case> cases;
+    auto headMajor = withBias({BATCH, HEADS, SEQ, SEQ});
+    headMajor.setEveryLayout(SdpaLayout::BHSD);
+    cases.push_back({"every operand head-major",
+                     headMajor,
+                     "stride_q_head is 32768, where packed BSHD has 128"});
+    auto keyHeadMajor = withBias({BATCH, HEADS, SEQ, SEQ});
+    keyHeadMajor.operand(K_UID).layout = SdpaLayout::BHSD;
+    cases.push_back({"K head-major", keyHeadMajor, "stride_k_head is 32768"});
+    auto paddedOutput = withBias({BATCH, HEADS, SEQ, SEQ});
+    paddedOutput.operand(O_UID).layout = SdpaLayout::PADDED_BSHD;
+    cases.push_back({"O rows padded by 8", paddedOutput, "stride_o_batch"});
+
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.what);
+        const auto decline = loggedDecline(arch(), c.spec);
+        EXPECT_EQ(decline.cause, "attn_mask") << decline.detail;
+        EXPECT_NE(decline.detail.find("do not read the stride arguments"), std::string::npos)
+            << decline.detail;
+        EXPECT_NE(decline.detail.find(c.stride), std::string::npos) << decline.detail;
+
+        auto withoutBias = c.spec;
+        withoutBias.attnMaskUid = std::nullopt;
+        withoutBias.unnamedTensors.clear();
+        expectServed(arch(), withoutBias);
+    }
+    EXPECT_TRUE(matchGraph(arch(), withBias({BATCH, HEADS, SEQ, SEQ})).has_value());
+}
+
+/// The kernel match holds the same line on its own, for a binding it is handed over a graph the
+/// graph match would have declined: a bias candidate serves the packed graph and not the same
+/// graph with head-major operands, whose strides its body would ignore.
+TEST_P(TestAttentionDenseBiasMatch, ABiasCandidateServesPackedOperandsOnly)
+{
+    const Graph packed(arch(), withBias({BATCH, HEADS, SEQ, SEQ}));
+    const auto bound = packed.match();
+    ASSERT_TRUE(bound.has_value());
+    auto headMajor = withBias({BATCH, HEADS, SEQ, SEQ});
+    headMajor.setEveryLayout(SdpaLayout::BHSD);
+    const Graph strided(arch(), headMajor);
+
+    auto biasKernel = makeKernel(arch(), baseGraph());
+    biasKernel.metadata[std::string("use_additive_bias")] = int64_t{1};
+    const auto serves = [&](const Graph& graph) {
+        return hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
+            std::string(arch().kernelMatchSymbol))(graph.context(), *bound, biasKernel);
+    };
+    EXPECT_TRUE(serves(packed));
+    EXPECT_FALSE(serves(strided));
+}
+
 /// kernel_match reads the bias flag from the binding instead of assuming one; a binding
 /// that lacks it (a renamed token) is refused rather than read as "no bias".
 TEST_P(TestAttentionDenseBiasMatch, RefusesABindingWithoutTheBiasFlag)

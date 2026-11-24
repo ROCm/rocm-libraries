@@ -197,8 +197,9 @@ inline const std::vector<AttentionDenseServedRow>& attentionDenseServedRows()
 }
 
 /**
- * @brief Requires @p arch's candidateReadsStrides to answer, for every kernel @p engineName loads and
- *        for one flip of each body class, what rocKE's `body_serves_strides` answers.
+ * @brief Requires @p arch's stride rule (AttentionDenseArch::readsStrides, what the matching and
+ *        prepare() ask) to answer, for every kernel @p engineName loads and for one flip of each
+ *        body class, what rocKE's `body_serves_strides` answers.
  *
  * Serving a body that does not read its strides is a silent wrong result, and the engine's rule
  * reads KMD fields where rocKE reads the whole spec, so the two are compared where they can
@@ -213,7 +214,6 @@ inline void expectEveryShippedAttentionDenseKernelReadsItsStridesAsRockeSaysItDo
     std::string_view archLabel,
     const attention_dense::AttentionDenseArch& arch)
 {
-    ASSERT_NE(arch.candidateReadsStrides, nullptr) << "the arch declares no stride rule";
     const auto& set = loadedSet(engineName);
 
     std::map<std::string, const AttentionDenseServedRow*> shipped;
@@ -261,7 +261,7 @@ inline void expectEveryShippedAttentionDenseKernelReadsItsStridesAsRockeSaysItDo
         const auto found = shipped.find(name);
         ASSERT_NE(found, shipped.end())
             << "kernel '" << name << "' is shipped but not in the table";
-        const bool engineSays = arch.candidateReadsStrides(definition);
+        const bool engineSays = arch.readsStrides(definition);
         EXPECT_EQ(engineSays, found->second->served)
             << "kernel '" << name << "': the engine says "
             << (engineSays ? "it reads its strides" : "it does not")
@@ -286,7 +286,7 @@ inline void expectEveryShippedAttentionDenseKernelReadsItsStridesAsRockeSaysItDo
                 definition.metadata[override.field] = override.number;
             }
         }
-        const bool engineSays = arch.candidateReadsStrides(definition);
+        const bool engineSays = arch.readsStrides(definition);
         EXPECT_EQ(engineSays, row->served)
             << "kernel '" << row->kernel << "' flipped to " << row->variant << ": the engine says "
             << (engineSays ? "it reads its strides" : "it does not")

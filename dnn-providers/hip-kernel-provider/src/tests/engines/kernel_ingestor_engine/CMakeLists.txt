@@ -103,7 +103,8 @@ target_include_directories(hip_kernel_provider_tests PRIVATE "${_gfx942_u3d_gene
 # build tree from the rocKE source tree, never committed. The input is each arch's shipped kernel
 # descriptor pack (`*_attention_dense.kdp.json`, which records the rocKE spec each kernel is built
 # from), found under the production source root the pack step compiles from; with none the table is
-# empty and the census says so.
+# empty and the census says so. The driver and the `_gfx942_u3d_*` paths are the ones above: the
+# driver runs any table generator it is given, so this gfx950 and gfx942 table shares them.
 set(_dense_served_args)
 set(_dense_served_inputs)
 foreach(_arch gfx950 gfx942)

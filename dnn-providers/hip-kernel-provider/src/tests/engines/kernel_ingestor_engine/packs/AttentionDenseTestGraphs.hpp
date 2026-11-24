@@ -822,10 +822,8 @@ inline const hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>*
 inline AttentionDenseLaunchInputs
     resolveLaunchOf(const Graph& graph, const BoundTokens& bound, const KernelDefinition& kernel)
 {
-    const auto& arch = graph.arch().label == GFX942_ATTENTION_DENSE.label
-                           ? gfx942AttentionDenseArch()
-                           : gfx950AttentionDenseArch();
-    return attention_dense::resolveLaunch(graph.context(), bound, kernel, arch);
+    return attention_dense::resolveLaunch(
+        graph.context(), bound, kernel, graph.arch().engineArch());
 }
 
 /// The message prepare() throws for @p bound and @p kernel over @p graph, or empty if it

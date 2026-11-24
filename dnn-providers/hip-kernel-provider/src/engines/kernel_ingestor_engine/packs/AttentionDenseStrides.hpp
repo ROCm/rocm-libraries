@@ -7,7 +7,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -27,14 +26,21 @@
  * `dense_slab_bytes`, `dense_kv_reach_rows`), check for check and in the same order, with the
  * same decline reasons. Both are pinned to one vectors file
  * (`rocke/platform/tests/golden/attention_dense_stride_vectors.json`), which the Python test
- * and this engine's TestAttentionDenseStrides both run.
+ * and this engine's TestAttentionDenseStrides both run. It also holds the checks the predicate
+ * cannot make, since it sees each operand alone and no address: at launch, the output must not
+ * share bytes with an input (denseOperandSpanBytes and denseOutputOverlapsInput, the twins of the
+ * same module's `_byte_span` and `_refuse_output_overlap`), and the LSE (stats) output must not
+ * share bytes with Q, K, V, O or the additive bias (denseStatsOverlapsOperand, the twin of
+ * `_lse_store._check_lse_buffer`). The vectors file has no rows for these checks, so each side's
+ * own tests pin them; a change to one is made on both sides.
  *
  * Header-only and dependency-free, like AttentionDensePersistent.hpp: pure functions of
  * integers and strings, compiled with or without any engine gate (the FlyDSL helpers compile
- * only under HIPKERNELPROVIDER_ENABLE_FLYDSL, and this must not). Its arithmetic is its own:
- * every product and sum below goes through an overflow-checked step that reports "past the
- * limit" instead of wrapping, and none rejects a zero factor (a canonical stride may be 0),
- * which is why pack_features::checkedMultiply is not used.
+ * only under HIPKERNELPROVIDER_ENABLE_FLYDSL, and this must not). Every product and sum below
+ * goes through the compiler's overflow builtins, as sdpa_graph::checkedProduct does, and reports
+ * "past the limit" instead of wrapping; none rejects a zero factor (a canonical stride may be
+ * 0), which is why pack_features::checkedMultiply is not used. Nor is sdpa_graph::checkedProduct
+ * itself: its header pulls in the flatbuffers data objects, and this one must not.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -70,10 +76,17 @@ inline constexpr std::array<std::string_view, ATTENTION_DENSE_STRIDE_COUNT> DENS
     "stride_o_head",
     "stride_o_token"};
 
-/// Bytes per element of every dense tensor (fp16 and bf16).
+/// Bytes per element of every dense tensor (fp16 and bf16). The Python twin sizes K and V with
+/// `dense_kv_elem_bytes`, which is 1 for the gfx950 fp8 K/V-cache spec. That spec has no twin
+/// here: the graph match admits only BFLOAT16 and HALF operands of one data type, so no fp8 K/V
+/// reaches this predicate. Serving one needs an element-size parameter and a vectors-file row.
 inline constexpr int64_t DENSE_ELEM_BYTES = 2;
-/// Every stride of an axis with extent > 1 is a multiple of this many elements (16 bytes).
-/// One conservative rule for every body: the kernels tolerate less on some operands.
+/// Bytes per element of the LSE (stats) output and of the additive bias: the graph match admits
+/// only FLOAT for both.
+inline constexpr int64_t DENSE_FP32_BYTES = 4;
+/// Every stride of an axis with extent > 1 is a multiple of this many elements (16 bytes of
+/// 2-byte elements). One conservative rule for every body: the kernels tolerate less on some
+/// operands.
 inline constexpr int64_t DENSE_STRIDE_MULTIPLE = 8;
 /// Every operand's base address is a multiple of this many bytes (hipDNN's declared
 /// alignment default).
@@ -152,28 +165,31 @@ struct DenseStrideVerdict
 namespace dense_strides_detail
 {
 
-/// @p left * @p right of two non-negative values, or nullopt past int64_t.
+/// @p left * @p right, or nullopt past int64_t. Every caller passes non-negative values.
 inline std::optional<int64_t> checkedMul(int64_t left, int64_t right)
 {
-    if(left == 0 || right == 0)
-    {
-        return int64_t{0};
-    }
-    if(left > std::numeric_limits<int64_t>::max() / right)
-    {
-        return std::nullopt;
-    }
-    return left * right;
+    int64_t product = 0;
+    return __builtin_mul_overflow(left, right, &product) ? std::nullopt
+                                                         : std::optional<int64_t>(product);
 }
 
-/// @p left + @p right of two non-negative values, or nullopt past int64_t.
+/// @p left + @p right, or nullopt past int64_t. Every caller passes non-negative values.
 inline std::optional<int64_t> checkedAdd(int64_t left, int64_t right)
 {
-    if(left > std::numeric_limits<int64_t>::max() - right)
+    int64_t sum = 0;
+    return __builtin_add_overflow(left, right, &sum) ? std::nullopt : std::optional<int64_t>(sum);
+}
+
+/// @p values as the Python twin prints a tuple: `(2, 8, 512, 128)`.
+template <typename Values>
+std::string tupleText(const Values& values)
+{
+    std::string text = "(";
+    for(const int64_t value : values)
     {
-        return std::nullopt;
+        text += (text.size() > 1 ? ", " : "") + std::to_string(value);
     }
-    return left + right;
+    return text + ")";
 }
 
 inline DenseStrideVerdict decline(DenseStrideReason reason, std::string detail)
@@ -240,7 +256,8 @@ inline AttentionDenseStrides canonicalDenseStrides(const DenseStrideProblem& pro
  *
  * For a tensor of H heads, S tokens and head size D stored token-major with the head fastest:
  * batch stride S*H*D, head stride D, token stride H*D. Q and O take the query heads and
- * seqlen_q, K and V the key/value heads and seqlen_kv. The values are not limited to i32.
+ * seqlen_q, K and V the key/value heads and seqlen_kv. The values are not limited to i32: the
+ * engine's packedI32LaunchStrides is the form bounded to kernel arguments.
  */
 inline std::optional<AttentionDenseStrides> packedLaunchStrides(const DenseStrideProblem& problem)
 {
@@ -269,7 +286,9 @@ inline std::optional<AttentionDenseStrides> packedLaunchStrides(const DenseStrid
  *        (rocKE's `dense_slab_bytes`), or nullopt when it passes int64_t.
  *
  * With elemBytes 1 it counts elements. One function for the host predicate and the kernel's
- * buffer-resource bound, so the gate and `num_records` cannot diverge.
+ * buffer-resource bound, so the gate and `num_records` cannot diverge. Not the unified 3-D
+ * engine's gfx942KvHeadSpan: that kernel has its own element size and limits, and its formula
+ * gives a slab of no rows no special answer.
  */
 inline std::optional<int64_t>
     denseSlabBytes(int64_t rows, int64_t tokenStride, int64_t headSize, int64_t elemBytes)
@@ -324,12 +343,210 @@ inline bool denseQoSlabFits(int64_t seqLenQ, int64_t tokenStride, int64_t headSi
     return elements.has_value() && *elements < DENSE_INT32_LIMIT;
 }
 
+/**
+ * @brief The bytes operand @p tensor (0 = Q, 1 = K, 2 = V, 3 = O) of @p problem spans from its
+ *        base address, one past its last element:
+ *        `2 * ((B - 1) * sB + (H - 1) * sH + (S - 1) * sS + D)`, or nullopt past int64_t.
+ *
+ * rocKE's `_byte_span` (kernels/common/_attention_dense_strides.py) gives the same end,
+ * `elem_bytes * (1 + sum((n - 1) * s))` over the view's four axes: the head-dim axis adds
+ * `D - 1` at stride 1, and the 1 makes it `D`. Both start at the base address: @p strides are
+ * canonical (canonicalDenseStrides), so none is negative and the base is the lowest address the
+ * view reaches. Every extent here is at least 1; Python's twin answers None for an empty view.
+ * The predicate holds this below 2^63 (SIZE_LIMIT), and the launch compares the output's span
+ * with the inputs' (denseOutputOverlapsInput).
+ */
+inline std::optional<int64_t> denseOperandSpanBytes(const DenseStrideProblem& problem,
+                                                    const AttentionDenseStrides& strides,
+                                                    std::size_t tensor)
+{
+    using dense_strides_detail::checkedAdd;
+    using dense_strides_detail::checkedMul;
+    const auto dims = denseOperandDims(problem, tensor);
+    const auto batchOffset = checkedMul(dims.at(0) - 1, strides.at(denseStrideIndex(tensor, 0)));
+    const auto headOffset = checkedMul(dims.at(1) - 1, strides.at(denseStrideIndex(tensor, 1)));
+    const auto elementOffset = batchOffset.has_value() && headOffset.has_value()
+                                   ? checkedAdd(*batchOffset, *headOffset)
+                                   : std::nullopt;
+    const auto baseBytes
+        = elementOffset.has_value() ? checkedMul(DENSE_ELEM_BYTES, *elementOffset) : std::nullopt;
+    const auto slabBytes = denseSlabBytes(
+        dims.at(2), strides.at(denseStrideIndex(tensor, 2)), problem.headSize, DENSE_ELEM_BYTES);
+    return baseBytes.has_value() && slabBytes.has_value() ? checkedAdd(*baseBytes, *slabBytes)
+                                                          : std::nullopt;
+}
+
+/// Whether the byte ranges [@p first, @p first + @p firstBytes) and [@p second, @p second +
+/// @p secondBytes) share a byte. The test conv_aot::bufferRangesDoNotOverlap makes for each pair:
+/// by the difference of the ordered addresses, so a range that ends past the address space does
+/// not wrap. An empty range shares none.
+constexpr bool denseByteRangesIntersect(std::uintptr_t first,
+                                        int64_t firstBytes,
+                                        std::uintptr_t second,
+                                        int64_t secondBytes)
+{
+    if(firstBytes <= 0 || secondBytes <= 0)
+    {
+        return false;
+    }
+    return first <= second ? second - first < static_cast<std::uintptr_t>(firstBytes)
+                           : first - second < static_cast<std::uintptr_t>(secondBytes);
+}
+
+/**
+ * @brief The first input (0 = Q, 1 = K, 2 = V) whose bytes the output's view shares, for
+ *        operands based at @p bases (Q, K, V, O) and addressed with @p strides over
+ *        @p problem; nullopt when O shares none. A zero base (no buffer) is skipped.
+ *
+ * The kernels declare o_ptr noalias and write O while other workgroups still read Q, K and V,
+ * so an output that is a view of an input (O cut out of a fused QKV buffer, or O passed as Q)
+ * gives a wrong result that can change from run to run, with no fault. The inputs may share
+ * storage with each other: the kernels only read them. Spans are compared, not elements, so an
+ * output interleaved with an input without sharing an element is reported too (the
+ * conservative answer). A span past int64_t, which the predicate never admits, counts as
+ * shared.
+ *
+ * The twin of rocKE's `_refuse_output_overlap` (kernels/common/_attention_dense_strides.py),
+ * which `admit_dense_launch_strides` asks before a Python runner launches: the same scope (O
+ * against Q, K and V), the same span test, the same skip of an operand with no address. A change
+ * to the operands checked, or to the span (denseOperandSpanBytes, `_byte_span`), is made on both
+ * sides. The LSE output is held to the same rule against every other buffer, the bias included,
+ * by denseStatsOverlapsOperand (Python's `_lse_store._check_lse_buffer`).
+ */
+inline std::optional<std::size_t>
+    denseOutputOverlapsInput(const DenseStrideProblem& problem,
+                             const AttentionDenseStrides& strides,
+                             const std::array<std::uintptr_t, 4>& bases)
+{
+    constexpr std::size_t OUTPUT = 3;
+    if(bases.at(OUTPUT) == 0)
+    {
+        return std::nullopt;
+    }
+    const auto outputBytes = denseOperandSpanBytes(problem, strides, OUTPUT);
+    for(std::size_t input = 0; input < OUTPUT; ++input)
+    {
+        if(bases.at(input) == 0)
+        {
+            continue;
+        }
+        const auto inputBytes = denseOperandSpanBytes(problem, strides, input);
+        if(!outputBytes.has_value() || !inputBytes.has_value()
+           || denseByteRangesIntersect(
+               bases.at(OUTPUT), *outputBytes, bases.at(input), *inputBytes))
+        {
+            return input;
+        }
+    }
+    return std::nullopt;
+}
+
+/**
+ * @brief The bytes the LSE (stats) output of @p problem spans from its base address:
+ *        `4 * B * Hq * Sq`, or nullopt past int64_t.
+ *
+ * The engine serves only the packed FP32 [B, Hq, Sq, 1] stats tensor (the graph match's
+ * isServableStatsTensor), and the kernel writes row (b, h, s) at element (b * Hq + h) * Sq + s,
+ * so the span is the whole tensor. rocKE's `_check_lse_buffer` takes the same end for the
+ * caller's contiguous buffer, `numel * element_size`.
+ */
+inline std::optional<int64_t> denseStatsSpanBytes(const DenseStrideProblem& problem)
+{
+    using dense_strides_detail::checkedMul;
+    const auto rows = checkedMul(problem.batch, problem.numQueryHeads);
+    const auto elements = rows.has_value() ? checkedMul(*rows, problem.seqLenQ) : std::nullopt;
+    return elements.has_value() ? checkedMul(DENSE_FP32_BYTES, *elements) : std::nullopt;
+}
+
+/**
+ * @brief The bytes the additive bias of @p problem spans from its base address, one past the
+ *        last element the kernel reads:
+ *        `4 * ((B - 1) * sB + (Hq - 1) * sH + (Sq - 1) * sS + Skv)`, or nullopt past int64_t.
+ *
+ * The kernel reads the bias as FP32 [B|1, Hq|1, Sq|1, Skv] with a unit-stride key axis, and
+ * steps the leading axes by @p biasStrides (batch, query head, query row, in elements, none
+ * negative). A broadcast axis has stride 0, so the problem's full extents give the exact end for
+ * it too. rocKE's `_check_lse_buffer` takes the same end for the bias tensor:
+ * `1 + sum((n - 1) * s)` elements over its own extents and strides.
+ */
+inline std::optional<int64_t> denseBiasSpanBytes(const DenseStrideProblem& problem,
+                                                 const std::array<int64_t, 3>& biasStrides)
+{
+    using dense_strides_detail::checkedAdd;
+    using dense_strides_detail::checkedMul;
+    const std::array<int64_t, 3> extents{problem.batch, problem.numQueryHeads, problem.seqLenQ};
+    std::optional<int64_t> elements = problem.seqLenKv;
+    for(std::size_t axis = 0; axis < extents.size() && elements.has_value(); ++axis)
+    {
+        const auto reach = checkedMul(extents.at(axis) - 1, biasStrides.at(axis));
+        elements = reach.has_value() ? checkedAdd(*elements, *reach) : std::nullopt;
+    }
+    return elements.has_value() ? checkedMul(DENSE_FP32_BYTES, *elements) : std::nullopt;
+}
+
+/**
+ * @brief The first buffer whose bytes the LSE (stats) output at @p lseBase shares: 0 = Q,
+ *        1 = K, 2 = V, 3 = O (based at @p bases and addressed with @p strides over @p problem),
+ *        4 = the additive bias at @p biasBase, read with @p biasStrides; nullopt when it shares
+ *        none.
+ *
+ * The kernel writes each row's LSE while other workgroups still read Q, K, V and the bias and
+ * write O, so a stats buffer that shares their bytes gives a wrong result with no fault, as an
+ * output inside an input does (denseOutputOverlapsInput). The spans compared are
+ * denseStatsSpanBytes, denseOperandSpanBytes and denseBiasSpanBytes, not elements, and a span past
+ * int64_t counts as shared. A zero base names no buffer and is skipped: a zero @p lseBase shares
+ * nothing, and the bias is compared only when @p biasBase is nonzero and @p biasStrides holds its
+ * strides (a launch whose kernel reads no bias passes nullopt).
+ *
+ * The twin of rocKE's `_lse_store._check_lse_buffer`, which `validate_dense_lse` asks before a
+ * Python runner launches a kernel that writes LSE: the LSE against q, k, v, out and the optional
+ * tensors, the bias among them. The dense engines serve none of the other optional tensors
+ * (sinks, block tables, varlen offsets). A change to the buffers compared or to a span is made on
+ * both sides.
+ */
+inline std::optional<std::size_t>
+    denseStatsOverlapsOperand(const DenseStrideProblem& problem,
+                              const AttentionDenseStrides& strides,
+                              const std::array<std::uintptr_t, 4>& bases,
+                              std::uintptr_t lseBase,
+                              std::uintptr_t biasBase,
+                              const std::optional<std::array<int64_t, 3>>& biasStrides)
+{
+    constexpr std::size_t BIAS = 4;
+    if(lseBase == 0)
+    {
+        return std::nullopt;
+    }
+    const auto lseBytes = denseStatsSpanBytes(problem);
+    const auto shares
+        = [&lseBytes, lseBase](std::uintptr_t base, const std::optional<int64_t>& bytes) {
+              return !lseBytes.has_value() || !bytes.has_value()
+                     || denseByteRangesIntersect(lseBase, *lseBytes, base, *bytes);
+          };
+    for(std::size_t operand = 0; operand < bases.size(); ++operand)
+    {
+        if(bases.at(operand) != 0
+           && shares(bases.at(operand), denseOperandSpanBytes(problem, strides, operand)))
+        {
+            return operand;
+        }
+    }
+    if(biasBase != 0 && biasStrides.has_value()
+       && shares(biasBase, denseBiasSpanBytes(problem, *biasStrides)))
+    {
+        return BIAS;
+    }
+    return std::nullopt;
+}
+
 namespace dense_strides_detail
 {
 
 /// No two index tuples of the view share an element: walking the axes of extent > 1 by
 /// increasing stride, each stride clears the span of the axes before it. A span past int64_t
-/// is past every stride, so a further axis then overlaps.
+/// is past every stride, so a further axis then overlaps. Not sdpa_graph::elementsDoNotOverlap:
+/// that one also declines when the last axis's span passes int64_t, and this one is pinned to
+/// rocKE's predicate by the shared vectors file (such a tensor is declined here by SIZE_LIMIT).
 inline bool overlapFree(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
 {
     std::vector<std::pair<int64_t, int64_t>> axes;
@@ -370,8 +587,8 @@ inline bool overlapFree(const std::vector<int64_t>& dims, const std::vector<int6
  *  - OVERLAP: no operand overlaps itself;
  *  - POINTER_ALIGNMENT: the base is a multiple of DENSE_POINTER_ALIGN bytes;
  *  - SIZE_LIMIT: every canonical stride is below 2^31, the slab offsets fit (denseKvSlabFits,
- *    denseQoSlabFits), and the byte offset of the last slab's base plus its S rows,
- *    `2 * ((B - 1) * sB + (H - 1) * sH) + 2 * ((S - 1) * sS + D)`, is below 2^63.
+ *    denseQoSlabFits), and the operand's span (denseOperandSpanBytes: the byte offset of the
+ *    last slab's base plus its S rows) is below 2^63.
  *
  * Extent-1 axes are exempt and canonicalized (canonicalDenseStrides); an admitted verdict
  * carries the canonical values. The whole-tensor 2^31 preflight of the spec is a separate
@@ -381,9 +598,8 @@ inline bool overlapFree(const std::vector<int64_t>& dims, const std::vector<int6
 inline DenseStrideVerdict denseStridesAdmit(const DenseStrideProblem& problem,
                                             const std::array<DenseOperand, 4>& operands)
 {
-    using dense_strides_detail::checkedAdd;
-    using dense_strides_detail::checkedMul;
     using dense_strides_detail::decline;
+    using dense_strides_detail::tupleText;
     constexpr std::array<std::string_view, 4> ROLES{"q", "k", "v", "o"};
     constexpr std::array<std::string_view, 3> AXES{"batch", "head", "token"};
     const int64_t headSize = problem.headSize;
@@ -392,10 +608,16 @@ inline DenseStrideVerdict denseStridesAdmit(const DenseStrideProblem& problem,
     {
         const auto& operand = operands.at(tensor);
         const std::string role(ROLES.at(tensor));
-        if(operand.dims.size() != 4 || operand.strides.size() != 4)
+        if(operand.dims.size() != 4)
         {
             return decline(DenseStrideReason::OPERAND,
                            role + " has rank " + std::to_string(operand.dims.size()) + ", not 4");
+        }
+        if(operand.strides.size() != 4)
+        {
+            return decline(DenseStrideReason::OPERAND,
+                           role + " has " + std::to_string(operand.strides.size())
+                               + " strides for its 4 dims, not 4");
         }
         if(operand.isVirtual)
         {
@@ -414,7 +636,8 @@ inline DenseStrideVerdict denseStridesAdmit(const DenseStrideProblem& problem,
         if(!std::equal(want.begin(), want.end(), operand.dims.begin()))
         {
             return decline(DenseStrideReason::OPERAND,
-                           role + " dims (B, H, S, D) differ from the problem's");
+                           role + " dims (B, H, S, D) " + tupleText(operand.dims)
+                               + " differ from the problem's " + tupleText(want));
         }
     }
     for(std::size_t tensor = 0; tensor < 4; ++tensor)
@@ -465,7 +688,9 @@ inline DenseStrideVerdict denseStridesAdmit(const DenseStrideProblem& problem,
         if(!dense_strides_detail::overlapFree(operand.dims, operand.strides))
         {
             return decline(DenseStrideReason::OVERLAP,
-                           std::string(ROLES.at(tensor)) + " overlaps itself");
+                           std::string(ROLES.at(tensor)) + " dims " + tupleText(operand.dims)
+                               + " with strides " + tupleText(operand.strides)
+                               + " overlap themselves");
         }
     }
     for(std::size_t tensor = 0; tensor < 4; ++tensor)
@@ -501,8 +726,6 @@ inline DenseStrideVerdict denseStridesAdmit(const DenseStrideProblem& problem,
                                    + std::to_string(stride) + " is not below 2^31");
             }
         }
-        const int64_t batchStride = canonical.at(denseStrideIndex(tensor, 0));
-        const int64_t headStride = canonical.at(denseStrideIndex(tensor, 1));
         const int64_t tokenStride = canonical.at(denseStrideIndex(tensor, 2));
         const bool isKeyValue = tensor == 1 || tensor == 2;
         const bool fits
@@ -514,21 +737,9 @@ inline DenseStrideVerdict denseStridesAdmit(const DenseStrideProblem& problem,
                            role + " slab with token stride " + std::to_string(tokenStride)
                                + " passes the 32-bit offset limit");
         }
-        const auto dims = denseOperandDims(problem, tensor);
-        const auto batchOffset = checkedMul(dims.at(0) - 1, batchStride);
-        const auto headOffset = checkedMul(dims.at(1) - 1, headStride);
-        const auto elementOffset = batchOffset.has_value() && headOffset.has_value()
-                                       ? checkedAdd(*batchOffset, *headOffset)
-                                       : std::nullopt;
-        const auto baseBytes = elementOffset.has_value()
-                                   ? checkedMul(DENSE_ELEM_BYTES, *elementOffset)
-                                   : std::nullopt;
-        const auto slabBytes = denseSlabBytes(dims.at(2), tokenStride, headSize, DENSE_ELEM_BYTES);
-        const auto lastByte = baseBytes.has_value() && slabBytes.has_value()
-                                  ? checkedAdd(*baseBytes, *slabBytes)
-                                  : std::nullopt;
-        // checkedAdd stops at INT64_MAX = 2^63 - 1, so a sum that is not below 2^63 has no value.
-        if(!lastByte.has_value())
+        // The checked sums stop at INT64_MAX = 2^63 - 1, so a span that is not below 2^63 has
+        // no value.
+        if(!denseOperandSpanBytes(problem, canonical, tensor).has_value())
         {
             return decline(DenseStrideReason::SIZE_LIMIT,
                            role + " slab base offset passes 64 bits");

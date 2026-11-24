@@ -465,20 +465,28 @@ launch_surface:
       window, so a bias graph with a window passes graph_match and then matches no kernel.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp
 
-  # Which candidates may serve a graph whose operands are not packed BSHD.
+  # Which candidates may serve a graph whose operands are not packed BSHD. `use_additive_bias`
+  # is listed for the bias part of the rule, which both arches share in AttentionDenseNative.cpp
+  # (AttentionDenseArch::readsStrides, through this arch's candidateAddsBias hook).
   - name: layout
     python_source: kernels/gfx942/attention_dense.py:body_serves_strides
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseNative.cpp
     kmd_fields: [ragged, lds_num_buffers, v_reg_prefetch, use_additive_bias]
     guard: >
-      candidateReadsStrides() restates rocKE's body_serves_strides: a record reads
-      the strides when it is not ragged, adds no bias (use_additive_bias 0), has one K
-      buffer (lds_num_buffers 1) and no next-tile V prefetch (v_reg_prefetch 0); an
-      absent or mistyped field answers false (an absent use_additive_bias is the KMD
-      default 0). A graph whose operands are not packed BSHD matches only a candidate that
-      reads them, after graphMatches() has run the host stride predicate
-      (denseStridesAdmit) on Q, K, V and O at the loosest tile and kernelMatches()
-      has asked again at the candidate's own block_n.
+      AttentionDenseArch::readsStrides() (AttentionDenseNative.cpp) restates rocKE's
+      body_serves_strides and is what kernelMatches(), prepare() and the census ask.
+      Its bias part is shared by both arches: a record that adds a bias
+      (use_additive_bias 1) reads no strides (BIAS_BODIES_READ_STRIDES is false), nor
+      does one whose bias field is malformed; an absent use_additive_bias is the KMD
+      default 0. Every other record goes to this arch's candidateReadsStrides(): it
+      reads the strides when it is not ragged, has one K buffer (lds_num_buffers 1)
+      and no next-tile V prefetch (v_reg_prefetch 0); an absent or mistyped field
+      answers false. A graph whose operands are not packed BSHD matches only a
+      candidate that reads them, after graphMatches() has run the host stride
+      predicate (denseStridesAdmit) on Q, K, V and O at the loosest tile and
+      kernelMatches() has asked again at the candidate's own block_n; graphMatches()
+      declines such a graph outright when it has an attn_mask (cause attn_mask),
+      since no bias body reads the strides.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseCatalogTiles.cpp
 
   - name: kernargs

@@ -45,15 +45,16 @@
  *
  * The contracts sampled: `hipkernel.pointwise.dispatch.v1`, `hipkernel.conv_fwd.dispatch.v1`,
  * `hipkernel.gfx950_attention_dense.dispatch.v1` and `.v2`, and
- * `hipkernel.gfx942_attention_dense.dispatch.v1` once per argument list it selects: one CTA
- * per block without and with LSE, and the persistent grid with two fast-division pairs and
- * LSE and with three pairs without it. These dense contracts are legacy now; each sample is
- * also launched, on the host, with the argument list its own contract passes, which is
- * the list its saved code object was packed with. The strided contracts that replaced them
- * (`hipkernel.gfx950_attention_dense.dispatch.v4`, `hipkernel.gfx942_attention_dense.dispatch.v3`)
- * are sampled once each. The bias contracts that predate the strides stay sampled as well:
- * `hipkernel.gfx950_attention_dense.dispatch.v3` and `hipkernel.gfx942_attention_dense.dispatch.v2`,
- * the latter on the one-CTA-per-block grid without and with LSE.
+ * `hipkernel.gfx942_attention_dense.dispatch.v1` once per argument list it selects: one
+ * workgroup per block without and with LSE, and the persistent grid with two fast-division
+ * pairs and LSE and with three pairs without it. These dense contracts are legacy now; each
+ * sample is also launched, on the host, with the argument list its own contract passes, which
+ * is the list its saved code object was packed with. The bias contracts that predate the
+ * strides stay sampled, and launched, as well: `hipkernel.gfx950_attention_dense.dispatch.v3`
+ * and `hipkernel.gfx942_attention_dense.dispatch.v2`, the latter on the one-workgroup-per-block
+ * grid without and with LSE. The strided contracts that replaced them are sampled once each: the
+ * plain ones (`hipkernel.gfx950_attention_dense.dispatch.v4`,
+ * `hipkernel.gfx942_attention_dense.dispatch.v3`) and the bias ones (`.v5` and `.v4`).
  *
  * `DISABLED_PrintLaunchContractSamples` below writes a new sample as a ready-to-paste
  * array. It is excluded from every suite and runs only under
@@ -146,10 +147,10 @@ MetadataValues gfx950AttentionDenseSampleValues()
 // gfx942's v1 takes four argument lists, chosen on restore from `stats.uid`, `grid_order`
 // and `persist_decode`; one sample per list. Each holds a shape the gfx942 match serves:
 // seqlen_q a multiple of block_m, Hq a multiple of Hkv, and the persistent grid at D128
-// with the catalog's 304 CTAs. The persistent divisors are not powers of two, so their
+// with the catalog's 304 workgroups. The persistent divisors are not powers of two, so their
 // magic numbers are not the trivial 1.
 
-// One CTA per block at qb_minor, no LSE: 10 arguments.
+// One workgroup per block at qb_minor, no LSE: 10 arguments.
 MetadataValues gfx942AttentionDenseDenseSampleValues()
 {
     return {{"q.uid", int64_t{81}},
@@ -175,7 +176,7 @@ MetadataValues gfx942AttentionDenseDenseSampleValues()
             {"num_persistent", int64_t{0}}};
 }
 
-// One CTA per block at bt_hkv_minor, writing LSE: 11 arguments, lse_ptr last.
+// One workgroup per block at bt_hkv_minor, writing LSE: 11 arguments, lse_ptr last.
 MetadataValues gfx942AttentionDenseDenseLseSampleValues()
 {
     return {
@@ -1977,8 +1978,8 @@ TEST(TestIngestorPlanLaunchContractGoldens, Gfx950AttentionDenseV2SampleGivesThe
 }
 
 // The launch a restored gfx942 plan configures, as makePreparedAttentionDense and
-// PreparedAttentionDense compute it from the saved values: the CTA size, the grid (the
-// arch geometry's on qb_minor, the block order's or num_persistent CTAs otherwise), and on
+// PreparedAttentionDense compute it from the saved values: the workgroup size, the grid (the
+// arch geometry's on qb_minor, the block order's or num_persistent workgroups otherwise), and on
 // the persistent grid the fast-division divisors, in kernarg order, and their magic/shift
 // pairs. None of these is saved, so a value whose meaning changes lands here.
 struct Gfx942SampleLaunch
@@ -2748,19 +2749,55 @@ void expectSampleLaunchesItsOwnArguments(
     }
     EXPECT_EQ(signatureNames, names);
 
-    // Stand-in device buffers: only their addresses travel.
-    std::array<int, 6> buffers{};
-    std::array<void*, 4> operands{};
-    for(size_t index = 0; index < operands.size(); ++index)
+    // Stand-in device buffers, end to end in one host allocation: only their addresses travel,
+    // but the arguments refuse an output whose bytes meet an input's, and a stats output whose
+    // bytes meet any other buffer's, so each buffer gets the span the launch gives it: Q, K, V
+    // and O the span of their strides (denseOperandSpanBytes), the LSE output its packed FP32
+    // tensor (denseStatsSpanBytes) and the bias the elements its strides reach
+    // (denseBiasSpanBytes). A sample without a bias gives the bias a byte.
+    const auto stridesProblem
+        = attention_dense::denseStrideProblem(launch.problem, launch.binding.blockN);
+    const auto spanOf = [&launch, &stridesProblem](size_t index) -> std::optional<int64_t> {
+        if(index < 4)
+        {
+            return attention_dense::denseOperandSpanBytes(
+                stridesProblem, launch.binding.strides, index);
+        }
+        if(index == 4)
+        {
+            return attention_dense::denseStatsSpanBytes(stridesProblem);
+        }
+        if(!launch.binding.bias.has_value())
+        {
+            return int64_t{1};
+        }
+        const auto& biasStrides = launch.binding.bias->strides;
+        return attention_dense::denseBiasSpanBytes(
+            stridesProblem,
+            std::array<int64_t, 3>{biasStrides.at(0), biasStrides.at(1), biasStrides.at(2)});
+    };
+    std::array<size_t, 6> offsets{};
+    size_t end = 0;
+    for(size_t index = 0; index < offsets.size(); ++index)
     {
-        operands.at(index) = &buffers.at(index);
+        offsets.at(index) = end;
+        const auto span = spanOf(index);
+        ASSERT_TRUE(span.has_value()) << index;
+        end += static_cast<size_t>(*span);
     }
-    void* lse = writesLse ? &buffers.at(4) : nullptr;
-    void* bias = attention_dense::addsBias(contract->abi) ? &buffers.at(5) : nullptr;
+    std::vector<std::byte> storage(end);
+    std::array<void*, 6> buffers{};
+    for(size_t index = 0; index < buffers.size(); ++index)
+    {
+        buffers.at(index) = storage.data() + offsets.at(index);
+    }
+    const std::array<void*, 4> operands{buffers.at(0), buffers.at(1), buffers.at(2), buffers.at(3)};
+    void* lse = writesLse ? buffers.at(4) : nullptr;
+    void* bias = attention_dense::addsBias(contract->abi) ? buffers.at(5) : nullptr;
     const auto fastDiv
         = attention_dense::fastDivKernargs(launch.grid, attention_dense::gridShape(launch));
     const attention_dense::AttentionDenseKernelArguments arguments(
-        launch, contract->abi, fastDiv, operands, lse, bias);
+        launch, contract->abi, fastDiv, operands, lse, bias, arch.label);
     const auto& params = arguments.params();
     ASSERT_EQ(params.size(), signature.size());
 
@@ -2775,7 +2812,7 @@ void expectSampleLaunchesItsOwnArguments(
             const auto* address = *static_cast<void* const*>(param);
             const size_t buffer = bufferIndex(name);
             ASSERT_LT(buffer, buffers.size());
-            EXPECT_EQ(address, static_cast<const void*>(&buffers.at(buffer)));
+            EXPECT_EQ(address, buffers.at(buffer));
             continue;
         }
         if(name == "scale")
@@ -2873,6 +2910,32 @@ TEST(TestIngestorPlanLaunchContractGoldens, Gfx942AttentionDenseV1SamplesLaunchT
         &readGfx942AttentionDenseLaunchInputs,
         denseArgumentNames(/*headCounts=*/true,
                            "batch_magic batch_shift gqa_magic gqa_shift nqb_magic nqb_shift"));
+}
+
+/// The four arguments a bias kernel declares after the shape arguments and any lse_ptr.
+constexpr std::string_view BIAS_TAIL_NAMES = "additive_bias_ptr additive_bias_batch_stride "
+                                             "additive_bias_head_stride additive_bias_sq_stride";
+
+// The bias contracts that predate the strides launch their own older argument list: the bias
+// tail last, after lse_ptr where the plan has a stats output, and no strides.
+TEST(TestIngestorPlanLaunchContractGoldens, LegacyBiasSamplesLaunchTheirOwnArguments)
+{
+    expectSampleLaunchesItsOwnArguments(
+        gfx950AttentionDenseArch(),
+        readSample(GFX950_ATTENTION_DENSE_V3_GOLDEN, gfx950AttentionDenseV3SamplePayload()),
+        &readGfx950AttentionDenseLaunchInputs,
+        denseArgumentNames(/*headCounts=*/true, BIAS_TAIL_NAMES));
+    expectSampleLaunchesItsOwnArguments(gfx942AttentionDenseArch(),
+                                        readSample(GFX942_ATTENTION_DENSE_V2_DENSE_BIAS_GOLDEN,
+                                                   gfx942AttentionDenseV2DenseBiasSamplePayload()),
+                                        &readGfx942AttentionDenseLaunchInputs,
+                                        denseArgumentNames(/*headCounts=*/true, BIAS_TAIL_NAMES));
+    expectSampleLaunchesItsOwnArguments(
+        gfx942AttentionDenseArch(),
+        readSample(GFX942_ATTENTION_DENSE_V2_DENSE_LSE_BIAS_GOLDEN,
+                   gfx942AttentionDenseV2DenseLseBiasSamplePayload()),
+        &readGfx942AttentionDenseLaunchInputs,
+        denseArgumentNames(/*headCounts=*/true, "lse_ptr " + std::string(BIAS_TAIL_NAMES)));
 }
 
 constexpr std::string_view STRIDE_NAMES

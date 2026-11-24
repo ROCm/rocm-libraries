@@ -5,9 +5,10 @@
 
 A dense kernel that does not read its twelve stride arguments addresses packed
 [B, S, H, D] storage, so handing it a strided graph is a silent wrong answer. The engine
-decides from the KMD fields of a candidate (``candidateReadsStrides``, one function per
-arch); rocKE decides from the full spec (``kernels.<arch>.attention_dense
-.body_serves_strides``). This script asks rocKE, for the engine's census to compare.
+decides from the KMD fields of a candidate (``AttentionDenseArch::readsStrides``: the bias
+exclusion both arches share, then ``candidateReadsStrides``, one function per arch); rocKE
+decides from the full spec (``kernels.<arch>.attention_dense.body_serves_strides``). This
+script asks rocKE, for the engine's census to compare.
 
     gfx950=PATH gfx942=PATH      each PATH the arch's shipped ``*_attention_dense.kdp.json``
 

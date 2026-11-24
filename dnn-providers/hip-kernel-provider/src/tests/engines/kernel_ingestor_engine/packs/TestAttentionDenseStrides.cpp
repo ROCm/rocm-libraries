@@ -1,12 +1,14 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -497,6 +499,370 @@ TEST(TestAttentionDenseStrides, TheDeclineOrderIsTheReasonOrder)
     ASSERT_FALSE(verdict.ok);
     EXPECT_EQ(verdict.reason, DenseStrideReason::STRIDE_ALIGNMENT);
     EXPECT_NE(verdict.detail.find("o batch"), std::string::npos) << verdict.detail;
+}
+
+// =============================================================================
+// The launch-time output check: the span of each operand, and whether O's meets an input's
+// =============================================================================
+
+namespace
+{
+
+/// The base problem with as many KV heads as query heads, so Q, K, V and O can share a
+/// [B, S, slots, H, D] buffer: B2, H 8, S 64, D128.
+DenseStrideProblem fusableProblem()
+{
+    auto problem = baseProblem();
+    problem.numKvHeads = problem.numQueryHeads;
+    return problem;
+}
+
+/// The strides of every operand cut out of one [B, S, @p slots, H, D] buffer of @p problem.
+AttentionDenseStrides slotStrides(const DenseStrideProblem& problem, int64_t slots)
+{
+    const int64_t row = slots * problem.numQueryHeads * problem.headSize;
+    AttentionDenseStrides strides{};
+    for(std::size_t tensor = 0; tensor < 4; ++tensor)
+    {
+        strides.at(denseStrideIndex(tensor, 0)) = problem.seqLenQ * row;
+        strides.at(denseStrideIndex(tensor, 1)) = problem.headSize;
+        strides.at(denseStrideIndex(tensor, 2)) = row;
+    }
+    return strides;
+}
+
+} // namespace
+
+TEST(TestAttentionDenseStrides, AnOperandSpansTheBytesUpToItsLastElement)
+{
+    // Packed: exactly the tensor, B * S * H * D * 2 bytes. Q and O over 8 heads, K and V over 2.
+    const auto problem = baseProblem();
+    const auto packed = *packedLaunchStrides(problem);
+    EXPECT_EQ(denseOperandSpanBytes(problem, packed, 0), 2 * 64 * 8 * 128 * 2);
+    EXPECT_EQ(denseOperandSpanBytes(problem, packed, 1), 2 * 64 * 2 * 128 * 2);
+    EXPECT_EQ(denseOperandSpanBytes(problem, packed, 3), 2 * 64 * 8 * 128 * 2);
+
+    // One slot of a three-slot buffer: up to the last row's last element, short of the two
+    // slots after it, 2 * ((B - 1) * 3SHD + (H - 1) * D + (S - 1) * 3HD + D) bytes.
+    const auto fused = fusableProblem();
+    const auto strides = slotStrides(fused, 3);
+    const int64_t row = int64_t{3} * 8 * 128;
+    EXPECT_EQ(denseOperandSpanBytes(fused, strides, 1),
+              2 * (64 * row + int64_t{7} * 128 + 63 * row + 128));
+
+    // Extent-1 axes reach nothing: one batch, one query row, one head is one row of D.
+    auto single = baseProblem();
+    single.batch = 1;
+    single.seqLenQ = 1;
+    single.numQueryHeads = 1;
+    EXPECT_EQ(denseOperandSpanBytes(single, *packedLaunchStrides(single), 0), 2 * 128);
+
+    // Past int64_t is reported, not wrapped.
+    auto huge = baseProblem();
+    huge.batch = int64_t{1} << 40;
+    AttentionDenseStrides far = packed;
+    far.at(denseStrideIndex(0, 0)) = int64_t{1} << 30;
+    EXPECT_FALSE(denseOperandSpanBytes(huge, far, 0).has_value());
+}
+
+TEST(TestAttentionDenseStrides, ByteRangesIntersectOnlyWhereTheyShareAByte)
+{
+    // Adjacent, either way round, share none; one byte more does.
+    EXPECT_FALSE(denseByteRangesIntersect(0x1000, 16, 0x1010, 16));
+    EXPECT_FALSE(denseByteRangesIntersect(0x1010, 16, 0x1000, 16));
+    EXPECT_TRUE(denseByteRangesIntersect(0x1000, 17, 0x1010, 16));
+    EXPECT_TRUE(denseByteRangesIntersect(0x1010, 16, 0x1000, 17));
+    // Equal, and one inside the other.
+    EXPECT_TRUE(denseByteRangesIntersect(0x1000, 16, 0x1000, 16));
+    EXPECT_TRUE(denseByteRangesIntersect(0x1000, 4096, 0x1800, 16));
+    // An empty range shares nothing, even at the other's base.
+    EXPECT_FALSE(denseByteRangesIntersect(0x1000, 0, 0x1000, 16));
+    // A range that ends past the address space does not wrap around to low addresses.
+    constexpr auto TOP = std::numeric_limits<std::uintptr_t>::max() - 7;
+    EXPECT_FALSE(denseByteRangesIntersect(TOP, 64, 0, 64));
+    EXPECT_TRUE(denseByteRangesIntersect(TOP, 64, TOP + 4, 1));
+}
+
+TEST(TestAttentionDenseStrides, ReportsTheFirstInputWhoseBytesTheOutputShares)
+{
+    const auto problem = fusableProblem();
+    const auto packed = *packedLaunchStrides(problem);
+    const auto span = static_cast<std::uintptr_t>(*denseOperandSpanBytes(problem, packed, 0));
+    constexpr std::uintptr_t BASE = 0x7f0000000000;
+
+    // Packed tensors in buffers of their own, side by side: no byte shared.
+    EXPECT_FALSE(denseOutputOverlapsInput(
+                     problem, packed, {BASE, BASE + span, BASE + 2 * span, BASE + 3 * span})
+                     .has_value());
+    // The output passed as one of the inputs.
+    for(std::size_t input = 0; input < 3; ++input)
+    {
+        std::array<std::uintptr_t, 4> bases{BASE, BASE + span, BASE + 2 * span, 0};
+        bases.at(3) = bases.at(input);
+        EXPECT_EQ(denseOutputOverlapsInput(problem, packed, bases), input) << input;
+    }
+    // The output starting one element inside the value's last bytes.
+    EXPECT_EQ(denseOutputOverlapsInput(
+                  problem, packed, {BASE, BASE + span, BASE + 2 * span, BASE + 3 * span - 2}),
+              std::size_t{2});
+    // The output ending on the byte before the query, and one element inside it.
+    EXPECT_FALSE(denseOutputOverlapsInput(
+                     problem, packed, {BASE + span, BASE + 2 * span, BASE + 3 * span, BASE})
+                     .has_value());
+    EXPECT_EQ(denseOutputOverlapsInput(
+                  problem, packed, {BASE + span - 2, BASE + 4 * span, BASE + 5 * span, BASE}),
+              std::size_t{0});
+}
+
+TEST(TestAttentionDenseStrides, ComparesTheSpansOfViewsIntoOneFusedBuffer)
+{
+    const auto problem = fusableProblem();
+    constexpr std::uintptr_t BASE = 0x7f0000000000;
+    const std::uintptr_t slot = std::uintptr_t{8} * 128 * 2;
+
+    // Q, K and V cut out of a [B, S, 3, H, D] buffer share its storage: the inputs may, since
+    // the kernels only read them. An output of its own, after the buffer, shares nothing.
+    const auto threeSlots = slotStrides(problem, 3);
+    const auto buffer = static_cast<std::uintptr_t>(2 * 64 * 3 * 8 * 128 * 2);
+    auto strides = threeSlots;
+    const auto packed = *packedLaunchStrides(problem);
+    for(std::size_t axis = 0; axis < 3; ++axis)
+    {
+        strides.at(denseStrideIndex(3, axis)) = packed.at(denseStrideIndex(3, axis));
+    }
+    EXPECT_FALSE(denseOutputOverlapsInput(
+                     problem, strides, {BASE, BASE + slot, BASE + 2 * slot, BASE + buffer})
+                     .has_value());
+
+    // The output as a fourth slot of the same buffer: its rows interleave with the inputs'
+    // without sharing an element, and the spans meet, so it is reported (the conservative
+    // answer), against the query first.
+    const auto fourSlots = slotStrides(problem, 4);
+    EXPECT_EQ(denseOutputOverlapsInput(
+                  problem, fourSlots, {BASE, BASE + slot, BASE + 2 * slot, BASE + 3 * slot}),
+              std::size_t{0});
+
+    // The output written over the key's slot of the three-slot buffer: inside the query's span
+    // too, which is asked first.
+    EXPECT_EQ(denseOutputOverlapsInput(
+                  problem, threeSlots, {BASE, BASE + slot, BASE + 2 * slot, BASE + slot}),
+              std::size_t{0});
+}
+
+TEST(TestAttentionDenseStrides, SkipsAnOperandWithoutABuffer)
+{
+    const auto problem = fusableProblem();
+    const auto packed = *packedLaunchStrides(problem);
+    constexpr std::uintptr_t BASE = 0x7f0000000000;
+    // No output buffer: nothing to compare. No query buffer: the key it sits on is reported.
+    EXPECT_FALSE(denseOutputOverlapsInput(problem, packed, {BASE, BASE, BASE, 0}).has_value());
+    EXPECT_EQ(denseOutputOverlapsInput(problem, packed, {0, BASE, BASE + (1U << 20), BASE}),
+              std::size_t{1});
+}
+
+namespace
+{
+
+/// The bias strides (batch, query head, query row) of a packed FP32 [B, Hq, Sq, Skv] bias.
+std::array<int64_t, 3> packedBiasStrides(const DenseStrideProblem& problem)
+{
+    return {problem.numQueryHeads * problem.seqLenQ * problem.seqLenKv,
+            problem.seqLenQ * problem.seqLenKv,
+            problem.seqLenKv};
+}
+
+/// Where denseStatsOverlapsOperand reports the additive bias.
+constexpr std::size_t BIAS_OPERAND = 4;
+
+} // namespace
+
+TEST(TestAttentionDenseStrides, TheStatsOutputSpansItsWholePackedTensor)
+{
+    // FP32 [B, Hq, Sq, 1]: 4 * 2 * 8 * 64 bytes, whatever the K/V heads.
+    EXPECT_EQ(denseStatsSpanBytes(baseProblem()), 4 * 2 * 8 * 64);
+    auto single = baseProblem();
+    single.batch = 1;
+    single.numQueryHeads = 1;
+    single.seqLenQ = 1;
+    EXPECT_EQ(denseStatsSpanBytes(single), 4);
+
+    // Past int64_t is reported, not wrapped: in the element count (2^60 * 8 rows), and in the
+    // byte count of 2^61 elements. 2^60 elements are 2^62 bytes, which fit.
+    auto huge = baseProblem();
+    huge.batch = int64_t{1} << 60;
+    EXPECT_FALSE(denseStatsSpanBytes(huge).has_value());
+    huge.batch = int64_t{1} << 52;
+    EXPECT_FALSE(denseStatsSpanBytes(huge).has_value());
+    huge.batch = int64_t{1} << 51;
+    EXPECT_EQ(denseStatsSpanBytes(huge), int64_t{1} << 62);
+}
+
+TEST(TestAttentionDenseStrides, TheBiasSpansUpToTheLastElementTheKernelReads)
+{
+    const auto problem = baseProblem();
+    // Packed [B, Hq, Sq, Skv]: exactly the tensor, 4 * B * Hq * Sq * Skv bytes.
+    EXPECT_EQ(denseBiasSpanBytes(problem, packedBiasStrides(problem)), 4 * 2 * 8 * 64 * 64);
+    // The head axis broadcast through stride 0: one head's worth per batch.
+    EXPECT_EQ(denseBiasSpanBytes(problem, {int64_t{64} * 64, 0, 64}), 4 * 2 * 64 * 64);
+    // Every leading axis broadcast: one row of Skv.
+    EXPECT_EQ(denseBiasSpanBytes(problem, {0, 0, 0}), 4 * 64);
+    // Pitched rows end at the last row's last key, short of its padding:
+    // 4 * ((B - 1) * sB + (Hq - 1) * sH + (Sq - 1) * sS + Skv).
+    EXPECT_EQ(denseBiasSpanBytes(problem, {100000, 8000, 96}),
+              4 * (100000 + 7 * 8000 + 63 * 96 + 64));
+
+    // Past int64_t is reported, not wrapped: in a product, and in the byte count.
+    auto huge = baseProblem();
+    huge.batch = int64_t{1} << 40;
+    EXPECT_FALSE(denseBiasSpanBytes(huge, {int64_t{1} << 30, 0, 0}).has_value());
+    EXPECT_FALSE(denseBiasSpanBytes(problem, {int64_t{1} << 62, 0, 0}).has_value());
+}
+
+TEST(TestAttentionDenseStrides, ReportsTheFirstBufferWhoseBytesTheStatsOutputShares)
+{
+    const auto problem = fusableProblem();
+    const auto packed = *packedLaunchStrides(problem);
+    const auto biasStrides = packedBiasStrides(problem);
+    const auto span = static_cast<std::uintptr_t>(*denseOperandSpanBytes(problem, packed, 0));
+    const auto lseSpan = static_cast<std::uintptr_t>(*denseStatsSpanBytes(problem));
+    const auto biasSpan = static_cast<std::uintptr_t>(*denseBiasSpanBytes(problem, biasStrides));
+    constexpr std::uintptr_t BASE = 0x7f0000000000;
+    const std::array<std::uintptr_t, 4> bases{BASE, BASE + span, BASE + 2 * span, BASE + 3 * span};
+    const std::uintptr_t bias = BASE + 4 * span;
+
+    // Every buffer of its own, side by side: the LSE on the byte after the bias's last one, and on
+    // the byte after the output's last one with the bias elsewhere.
+    EXPECT_FALSE(
+        denseStatsOverlapsOperand(problem, packed, bases, bias + biasSpan, bias, biasStrides)
+            .has_value());
+    EXPECT_FALSE(
+        denseStatsOverlapsOperand(problem, packed, bases, BASE + 4 * span, bias + span, biasStrides)
+            .has_value());
+    // The LSE ending on the byte before the query.
+    EXPECT_FALSE(
+        denseStatsOverlapsOperand(problem, packed, bases, BASE - lseSpan, bias, biasStrides)
+            .has_value());
+
+    // The LSE passed as each operand, then as the bias.
+    for(std::size_t operand = 0; operand < 4; ++operand)
+    {
+        EXPECT_EQ(
+            denseStatsOverlapsOperand(problem, packed, bases, bases.at(operand), bias, biasStrides),
+            operand)
+            << operand;
+    }
+    EXPECT_EQ(denseStatsOverlapsOperand(problem, packed, bases, bias, bias, biasStrides),
+              BIAS_OPERAND);
+    // Inside the query, one float into the bias's end, and one float into the query's start.
+    EXPECT_EQ(denseStatsOverlapsOperand(problem, packed, bases, BASE + 1024, bias, biasStrides),
+              std::size_t{0});
+    EXPECT_EQ(
+        denseStatsOverlapsOperand(problem, packed, bases, bias + biasSpan - 4, bias, biasStrides),
+        BIAS_OPERAND);
+    EXPECT_EQ(
+        denseStatsOverlapsOperand(problem, packed, bases, BASE - lseSpan + 4, bias, biasStrides),
+        std::size_t{0});
+}
+
+TEST(TestAttentionDenseStrides, ComparesTheStatsOutputWithSpansNotElements)
+{
+    // A query cut out of a [B, S, 3, H, D] buffer leaves two slots between its rows. An LSE of
+    // exactly that size placed there shares no element with the query, but lies inside its span,
+    // so it is reported (the conservative answer).
+    const auto problem = fusableProblem();
+    const std::uintptr_t slot = std::uintptr_t{8} * 128 * 2;
+    ASSERT_EQ(denseStatsSpanBytes(problem), static_cast<int64_t>(2 * slot));
+    auto strides = *packedLaunchStrides(problem);
+    const auto threeSlots = slotStrides(problem, 3);
+    for(std::size_t axis = 0; axis < 3; ++axis)
+    {
+        strides.at(denseStrideIndex(0, axis)) = threeSlots.at(denseStrideIndex(0, axis));
+    }
+    constexpr std::uintptr_t BASE = 0x7f0000000000;
+    constexpr std::uintptr_t FAR = std::uintptr_t{1} << 30;
+    const std::array<std::uintptr_t, 4> bases{BASE, BASE + FAR, BASE + 2 * FAR, BASE + 3 * FAR};
+    EXPECT_EQ(denseStatsOverlapsOperand(problem, strides, bases, BASE + slot, 0, std::nullopt),
+              std::size_t{0});
+}
+
+TEST(TestAttentionDenseStrides, MeasuresABroadcastBiasByTheElementsTheKernelReads)
+{
+    // A [1, 1, Sq, Skv] bias reads Sq rows of Skv: an LSE on the byte after them shares nothing,
+    // one float earlier it does, and with the batch axis stepped the same LSE lies inside.
+    const auto problem = fusableProblem();
+    const auto packed = *packedLaunchStrides(problem);
+    constexpr std::uintptr_t BIAS = 0x7f0000000000;
+    const std::array<std::uintptr_t, 4> far{BIAS + (std::uintptr_t{1} << 30),
+                                            BIAS + (std::uintptr_t{2} << 30),
+                                            BIAS + (std::uintptr_t{3} << 30),
+                                            BIAS + (std::uintptr_t{4} << 30)};
+    const std::array<int64_t, 3> broadcast{0, 0, 64};
+    const auto end = static_cast<std::uintptr_t>(4 * 64 * 64);
+    ASSERT_EQ(denseBiasSpanBytes(problem, broadcast), 4 * 64 * 64);
+    EXPECT_FALSE(
+        denseStatsOverlapsOperand(problem, packed, far, BIAS + end, BIAS, broadcast).has_value());
+    EXPECT_EQ(denseStatsOverlapsOperand(problem, packed, far, BIAS + end - 4, BIAS, broadcast),
+              BIAS_OPERAND);
+    EXPECT_EQ(denseStatsOverlapsOperand(problem,
+                                        packed,
+                                        far,
+                                        BIAS + end,
+                                        BIAS,
+                                        std::array<int64_t, 3>{int64_t{64} * 64, 0, 64}),
+              BIAS_OPERAND);
+}
+
+TEST(TestAttentionDenseStrides, SkipsABufferTheStatsOutputHasNoAddressFor)
+{
+    const auto problem = fusableProblem();
+    const auto packed = *packedLaunchStrides(problem);
+    const auto biasStrides = packedBiasStrides(problem);
+    constexpr std::uintptr_t BASE = 0x7f0000000000;
+    // No LSE buffer: nothing to compare, though every other buffer sits at one address.
+    EXPECT_FALSE(
+        denseStatsOverlapsOperand(problem, packed, {BASE, BASE, BASE, BASE}, 0, BASE, biasStrides)
+            .has_value());
+    // No query buffer: the key the LSE sits on is reported.
+    EXPECT_EQ(denseStatsOverlapsOperand(problem,
+                                        packed,
+                                        {0, BASE, BASE + (1U << 20), BASE + (2U << 20)},
+                                        BASE,
+                                        0,
+                                        std::nullopt),
+              std::size_t{1});
+    // No bias buffer, or no bias strides (a kernel that reads no bias): the bias is not compared.
+    const std::array<std::uintptr_t, 4> elsewhere{0, 0, 0, 0};
+    EXPECT_FALSE(
+        denseStatsOverlapsOperand(problem, packed, elsewhere, BASE, 0, biasStrides).has_value());
+    EXPECT_FALSE(denseStatsOverlapsOperand(problem, packed, elsewhere, BASE, BASE, std::nullopt)
+                     .has_value());
+}
+
+TEST(TestAttentionDenseStrides, CountsAStatsOrBiasSpanPastInt64AsShared)
+{
+    constexpr std::uintptr_t BASE = 0x7f0000000000;
+    constexpr std::uintptr_t FAR = std::uintptr_t{1} << 40;
+    const auto problem = fusableProblem();
+    const auto packed = *packedLaunchStrides(problem);
+    // A bias whose span passes int64_t is reported wherever it lies.
+    EXPECT_EQ(denseStatsOverlapsOperand(problem,
+                                        packed,
+                                        {0, 0, 0, 0},
+                                        BASE,
+                                        BASE + FAR,
+                                        std::array<int64_t, 3>{int64_t{1} << 62, 0, 0}),
+              BIAS_OPERAND);
+    // An LSE whose span passes int64_t is reported against the first buffer there is, though
+    // that buffer's own span (zero strides: one row of D) lies far from the LSE's base.
+    auto huge = problem;
+    huge.batch = int64_t{1} << 60;
+    ASSERT_EQ(denseOperandSpanBytes(huge, AttentionDenseStrides{}, 2), 2 * 128);
+    EXPECT_EQ(denseStatsOverlapsOperand(
+                  huge, AttentionDenseStrides{}, {0, 0, BASE + FAR, 0}, BASE, 0, std::nullopt),
+              std::size_t{2});
+    EXPECT_EQ(denseStatsOverlapsOperand(
+                  huge, packed, {0, 0, 0, 0}, BASE, BASE + FAR, std::array<int64_t, 3>{0, 0, 0}),
+              BIAS_OPERAND);
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
