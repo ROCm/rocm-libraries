@@ -246,6 +246,7 @@ TargetType extractValueFromTensorValue(const data_objects::TensorAttributes* ten
 /// Converts a stored scalar to a finite float32, rounding to nearest with ties to even.
 /// Throws when the data type and union type disagree, or the value is not finite in float32.
 /// Reads stored runtime defaults too. Callers decide whether to publish them.
+/// Introduced in hipdnn_flatbuffers_sdk 0.3.0.
 inline float extractFiniteFloatFromTensorValue(const data_objects::TensorAttributesT& tensorAttr,
                                                const char* paramName)
 {

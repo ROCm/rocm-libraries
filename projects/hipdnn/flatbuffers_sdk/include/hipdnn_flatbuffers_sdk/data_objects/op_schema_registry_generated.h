@@ -5,6 +5,8 @@
 // scalar attributes, taken from the 'matcher_opcode', 'matcher_input_tensor',
 // 'matcher_output_tensor', and 'matcher_name' schema annotations. Static tables
 // read the caller's buffer in place: no allocation, no reflection.
+//
+// Introduced in hipdnn_flatbuffers_sdk 0.3.0.
 
 #pragma once
 
