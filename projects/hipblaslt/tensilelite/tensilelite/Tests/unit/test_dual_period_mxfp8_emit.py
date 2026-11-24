@@ -880,6 +880,54 @@ def test_nll_copies_wait_on_no_load(exit_src):
         assert not any("vmcnt" in c for c in body), nll
 
 
+def _preloop_mt1_arm(src):
+    """(MT0 loads as (tensor, tile), MT1 load count, the MT1 arm's vmcnt,
+    (tensor, tile) of the preloop's MT0 LDS reads)."""
+    lines = src.splitlines()
+    start = lines.index("/* PRELOOP start */")
+    noMt1 = lines.index("label_SubtilePreloopNoMT1:", start)
+    nll = next(k for k in range(noMt1, len(lines)) if "label_SkipToNLL" in lines[k])
+    loads = [re.search(r"// (A|B|SA|SB) MT=(n|n\+1) tile=(\d+)", ln)
+             for ln in lines[start:noMt1] if ln.startswith("buffer_load")]
+    mt0 = [(m[1], int(m[3])) for m in loads if m[2] == "n"]
+    wait = next(int(re.search(r"vmcnt\((\d+)\)", ln)[1])
+                for ln in lines[start:noMt1] if ln.startswith("s_waitcnt vmcnt"))
+    reads = set()
+    for ln in lines[noMt1:nll]:
+        m = re.search(r"// (A|B|SA|SB) MT=n tile=(\d+)", ln)
+        if ln.startswith("ds_read") and m:
+            reads.add((m[1], int(m[2])))
+    return mt0, sum(m[2] == "n+1" for m in loads), wait, reads
+
+
+def test_preloop_leaves_the_loads_its_reads_skip_in_flight(any_src):
+    """The preloop issues the MT0 loads its own reads use first, so its MT1 arm
+    waits for those alone. MAINLOOP_C0 and the NGLL behind SkipToNGLL retire
+    the rest behind their opening wait and barrier, before any LDS read."""
+    src = any_src
+    mt0, mt1, wait, reads = _preloop_mt1_arm(src)
+    deferred = wait - mt1
+    assert 0 < deferred < len(mt0)
+    assert all(t in ("A", "B") and (t, tile) not in reads for t, tile in mt0[-deferred:])
+    for region in ("MAINLOOP_C0", "NGLL_C1"):
+        body = _region_lines(src, region)
+        first_read = next(k for k, c in enumerate(body) if c.startswith("ds_read"))
+        vm = next(k for k, c in enumerate(body) if "vmcnt" in c)
+        assert vm < first_read, region
+        assert int(re.search(r"vmcnt\((\d+)\)", body[vm])[1]) <= mt1, region
+        assert "s_barrier" in body[vm:first_read], region
+
+
+def test_uniform_epoch_preloop_drains_mt0_when_c0_reads_first(uniform_src):
+    """On the uniform-epoch base MAINLOOP_C0 reads partition 1's tiles before
+    its first wait, so the preloop's MT1 arm keeps waiting for every MT0 load."""
+    body = _region_lines(uniform_src, "MAINLOOP_C0")
+    assert next(k for k, c in enumerate(body) if c.startswith("ds_read")) < \
+        next(k for k, c in enumerate(body) if "vmcnt" in c)
+    _mt0, mt1, wait, _reads = _preloop_mt1_arm(uniform_src)
+    assert wait == mt1
+
+
 def test_8x10_balanced_reads_follow_their_opening_barrier(balanced_8x10):
     """Each balanced read follows the barrier that publishes its tile. An NLL
     has dropped its opening barrier, so that is the NGLL's last one, and no LDS

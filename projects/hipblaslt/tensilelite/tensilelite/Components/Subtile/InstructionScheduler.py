@@ -2898,6 +2898,84 @@ def dropRedundantExitSyncs(module, firstExit, drainedJoins=()):
         container.removeItem(inst)
 
 
+def loadsAfterBranch(module, labelName):
+    """The buffer loads between the branch to labelName and the next s_waitcnt.
+
+    -> (load count, that s_waitcnt)
+    """
+    items = list(module.flatitems())
+    start = next((i for i, inst in enumerate(items)
+                  if getattr(inst, "labelName", None) == labelName), None)
+    assert start is not None, f"no branch to {labelName}"
+    count = 0
+    for inst in items[start + 1:]:
+        if _isWaitCnt(inst):
+            return count, inst
+        count += _isBufferLoad(inst)
+    raise AssertionError(f"no s_waitcnt after the branch to {labelName}")
+
+
+def _codeText(inst) -> str:
+    return str(inst).split("//", 1)[0].strip()
+
+
+def readsAfterBarrier(module, labelName):
+    """The LDS reads module issues behind the first barrier after labelName.
+
+    -> code texts, or empty when anything other than a read, a wait, a scalar
+    compare or control flow follows that barrier, since it could change a
+    read's address before code that repeats it.
+    """
+    items = list(module.flatitems())
+    at = next((i for i, inst in enumerate(items)
+               if isinstance(inst, Label) and inst.getLabelName() == labelName), None)
+    if at is None:
+        return frozenset()
+    barrier = next((i for i in range(at + 1, len(items)) if _isBarrier(items[i])), None)
+    if barrier is None:
+        return frozenset()
+    reads = set()
+    for inst in items[barrier + 1:]:
+        if isinstance(inst, LocalReadInstruction):
+            reads.add(_codeText(inst))
+        elif not (_isComment(inst) or _isWaitCnt(inst) or _isControlFlow(inst)
+                  or type(inst).__name__.startswith("SCmp")):
+            return frozenset()
+    return frozenset(reads)
+
+
+def readsBehindVmemWait(items, bound, landed=frozenset()) -> bool:
+    """Does straight-line code reach a VMEM wait for at most bound and then a
+    barrier before its first LDS read?
+
+    With loads retiring in order, a wait that leaves at most the bound youngest
+    in flight retires every older load, and the barrier extends that to every
+    wave's LDS-DMA writes. A read in landed repeats one already made of data
+    that had landed; it may come first, behind nothing but waits.
+    """
+    waited = False
+    leading = True
+    for inst in items:
+        if isinstance(inst, LocalReadInstruction):
+            if leading and _codeText(inst) in landed:
+                continue
+            return False
+        if not (_isWaitCnt(inst) or _isComment(inst)):
+            leading = False
+        if isinstance(inst, TextBlock):
+            if _isComment(inst):
+                continue
+            return False
+        if _isControlFlow(inst):
+            return False
+        if _isWaitCnt(inst):
+            vm = _vmCount(inst)
+            waited = waited or (vm is not None and vm <= bound)
+        elif _isBarrier(inst) and waited:
+            return True
+    return False
+
+
 def _isOrderFence(inst) -> bool:
     """Nothing moves across a wait, a barrier, a branch, a label, or an
     instruction that only spaces hazards or priorities."""

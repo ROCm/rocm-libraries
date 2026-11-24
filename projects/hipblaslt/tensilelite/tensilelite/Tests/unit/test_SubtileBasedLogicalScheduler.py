@@ -6663,6 +6663,82 @@ class TestPartitionZeroIssueOrder:
                 "nll-lr", "nll-vm", "nll-open", "B MT=n tile=6 K=0 read=0",
                 "nll-lr-2", "nll-fence", "skip other exit paths"], (issueAfterBarrier, drained)
 
+    def test_loads_after_branch_counts_up_to_the_next_wait(self):
+        from rocisa.code import Module
+        from rocisa.instruction import SCBranchSCC1, SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import loadsAfterBranch
+
+        self._gfx950()
+        preloop = Module("PRELOOP")
+        preloop.add(self._dmaLoad("A MT=n tile=0 K=0 i=0"))
+        preloop.add(SCBranchSCC1(labelName="label_SubtilePreloopNoMT1", comment="skip MT1"))
+        preloop.add(self._dmaLoad("A MT=n+1 tile=0 K=0 i=0"))
+        preloop.add(self._dmaLoad("B MT=n+1 tile=0 K=0 i=0"))
+        preloop.add(SWaitCnt(vlcnt=3, comment="mt1-arm"))
+        preloop.add(self._dmaLoad("A MT=n+1 tile=2 K=0 i=0"))
+        preloop.add(SWaitCnt(vlcnt=0, comment="no-mt1"))
+
+        count, wait = loadsAfterBranch(preloop, "label_SubtilePreloopNoMT1")
+        assert (count, wait.comment) == (2, "mt1-arm")
+
+    def test_reads_behind_vmem_wait_needs_a_bounded_wait_then_a_barrier(self):
+        from rocisa.code import Label
+        from rocisa.instruction import SBarrier, SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import readsBehindVmemWait
+
+        self._gfx950()
+        read = self._read("A MT=n tile=4 K=0 read=0")
+        cases = {
+            "wait-barrier-read": ([SWaitCnt(dscnt=0), SWaitCnt(vlcnt=4), SBarrier(), read], True),
+            "loose-wait": ([SWaitCnt(vlcnt=6), SBarrier(), read], False),
+            "barrier-first": ([SBarrier(), SWaitCnt(vlcnt=4), read], False),
+            "read-first": ([read, SWaitCnt(vlcnt=0), SBarrier()], False),
+            "label-first": ([Label("Join", ""), SWaitCnt(vlcnt=0), SBarrier(), read], False),
+            "no-read-no-barrier": ([SWaitCnt(vlcnt=0)], False),
+        }
+        for name, (items, expected) in cases.items():
+            assert readsBehindVmemWait(items, 4) == expected, name
+
+    def test_reads_behind_vmem_wait_lets_a_leading_repeat_of_a_landed_read_first(self):
+        from rocisa.container import vgpr
+        from rocisa.instruction import SBarrier, SWaitCnt, VMovB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _codeText, readsBehindVmemWait)
+
+        self._gfx950()
+        seed = self._read("SB seed")
+        landed = frozenset({_codeText(seed)})
+        tail = [SWaitCnt(vlcnt=4), SBarrier()]
+        assert readsBehindVmemWait([SWaitCnt(dscnt=0), self._read("SB refresh"), *tail], 4, landed)
+        assert not readsBehindVmemWait([self._read("SB refresh"), *tail], 4)
+        moved = VMovB32(dst=vgpr(7), src=0)
+        assert not readsBehindVmemWait([moved, self._read("SB refresh"), *tail], 4, landed)
+
+    def test_reads_after_barrier_needs_a_tail_that_keeps_their_addresses(self):
+        from rocisa.code import Label, Module
+        from rocisa.container import sgpr, vgpr
+        from rocisa.instruction import SBarrier, SCBranchSCC1, SCmpLeU32, VMovB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _codeText, readsAfterBarrier)
+
+        self._gfx950()
+
+        def preloop(extra):
+            module = Module("PRELOOP")
+            module.add(self._read("A before"))
+            module.add(Label("SubtilePreloopWaitDone", ""))
+            module.add(SBarrier())
+            module.add(self._read("SB seed"))
+            module.add(SCmpLeU32(src0=sgpr("LoopCounterL"), src1=1))
+            module.add(SCBranchSCC1(labelName="label_SkipToNLL"))
+            for inst in extra:
+                module.add(inst)
+            return module
+
+        label = "label_SubtilePreloopWaitDone"
+        assert readsAfterBarrier(preloop([]), label) == {_codeText(self._read("SB seed"))}
+        assert readsAfterBarrier(preloop([VMovB32(dst=vgpr(7), src=0)]), label) == frozenset()
+
 
 class TestUniformEpochOverwriteSync:
     """Each uniform-epoch A/B load waits out the reads of the LDS it overwrites."""

@@ -1022,9 +1022,13 @@ class LogicalScheduler:
         self._partitions: Optional[Union[LogicalSchedule, AnnotatedSchedule, AugmentedSchedule]] = None
         self._emitted: Optional[EmittedSchedule] = None
         self._preloop_emitted: Optional[EmittedSchedule] = None
-        # GR atoms the preloop leaves in flight on its skip to NGLL, all of them
-        # younger than every MT0 load; None when the preloop does not bound them.
+        # MT1 GR atoms the preloop issues after every MT0 load: a wait that leaves
+        # at most these in flight on its skip to NGLL drains MT0. None when the
+        # preloop does not bound them.
         self._preloopNgllInflight: Optional[WaitGRCounts] = None
+        # True when the preloop's MT1 arm leaves MT0 loads its own reads do not
+        # use in flight (_order_preloop_mt0_by_first_reads).
+        self._preloopDefersMt0 = False
         # True when the preloop's skip to NLL is only taken after a vmcnt(0) and
         # its barrier, so dropRedundantExitSyncs may carry that state into NLL.
         self._preloopNllSkipDrained = False
@@ -5055,6 +5059,84 @@ class LogicalScheduler:
                     second.append(atom)
         return first + second
 
+    def _defersPreloopMt0(self) -> bool:
+        """May the preloop's MT1 arm leave MT0 loads its reads do not use in flight?
+
+        The PAP preloop issues its MT0 loads in the previous tile, and the
+        PostLoopStoreInNll exits change what follows SkipToNGLL, so both keep
+        the full MT0 drain.
+        """
+        kernel = self._kernel
+        if not (kernel and self.config.uniformPgrEpoch):
+            return False
+        pap = (kernel.get("UseSubtileImpl") and kernel.get("PrefetchAcrossPersistent")
+               and hasStaticAssignment(kernel))
+        return not pap and not kernel.get("PostLoopStoreInNll", False)
+
+    def _c0ReadsBehindMt1Wait(self, mt1_counts: WaitGRCounts) -> bool:
+        """Does every MT0 read of C0's first slot follow a barrier behind a
+        WaitGR that leaves at most the MT1 loads in flight?
+
+        _checkPreloopDeferredMt0 checks the emitted code again.
+        """
+        ems = self._emitted[0][0]
+        byId = {em.moduleId: em for em in ems}
+
+        def within(source):
+            if getattr(source, 'force_drain', False):
+                return True
+            byUnroll = getattr(source, 'wait_gr_counts_by_unroll', None)
+            counts = byUnroll[0] if byUnroll else source.wait_gr_counts
+            if counts is None or counts.use_gr_placement_counts or counts.use_num_gr_total:
+                return False
+            return all(getattr(counts, t) <= getattr(mt1_counts, t)
+                       for t in ('A', 'B', 'SA', 'SB'))
+
+        def behind(em):
+            synced = False
+            while em.before is not None:
+                em = byId.get(em.before)
+                if em is None:
+                    return False
+                if em.opType == 'sync':
+                    synced = True
+                elif em.opType == 'wait_gr' and synced:
+                    return within(em.source)
+            return False
+
+        reads = [em for em in ems if em.opType == 'lr'
+                 and getattr(em.source, 'mtIteration', None) == 0]
+        return bool(reads) and all(behind(em) for em in reads)
+
+    def _order_preloop_mt0_by_first_reads(self, grs: List[GRPlacement],
+                                          lr_tiles: dict):
+        """Split the MT0 GRs into the atoms the preloop reads and the rest.
+
+        The preloop reads partition 0's tiles and seeds the scales, so those
+        atoms issue first and the MT1 arm's wait can leave the rest in flight
+        behind them. MAINLOOP_C0 and the NGLL behind SkipToNGLL drain the rest
+        before their first read (_checkPreloopDeferredMt0). Scale placements
+        stay whole, since each emits a single request. -> (first, rest)
+        """
+        first, rest = [], []
+        for gr in grs:
+            read = lr_tiles.get(gr.tensor)
+            if gr.tensor in ('SA', 'SB') or read is None:
+                first.append(gr)
+                continue
+            gran = self._gr_granularity(gr.tensor)
+            for pos in range(gr.tiles.tileId_start, gr.tiles.tileId_end, gran.mn):
+                for k in range(gr.tiles.subIterK_start, gr.tiles.subIterK_end, gran.k):
+                    atom = GRPlacement(
+                        tensor=gr.tensor, mtIteration=gr.mtIteration,
+                        tiles=MFMATileRange(k, k + gran.k, pos, pos + gran.mn),
+                        subIterK_slot=k, partition=gr.partition,
+                        unrollId=gr.unrollId)
+                    used = (pos < read.tileId_end and read.tileId_start < pos + gran.mn
+                            and k < read.subIterK_end and read.subIterK_start < k + gran.k)
+                    (first if used else rest).append(atom)
+        return first, rest
+
     def _make_preloop_mt1_grs_uid(self, uid: int) -> List[GRPlacement]:
         """Create MT1 GRs for a single uid in the PGR=2 preloop.
 
@@ -5372,6 +5454,7 @@ class LogicalScheduler:
         """
         self._preloopNgllInflight = None
         self._preloopNllSkipDrained = False
+        self._preloopDefersMt0 = False
         if self.config.pgr == 0:
             # PGR=0 has no GR/LR pipeline, but the mainloop's first MFMA still
             # accumulates into D, so the accumulators must be zeroed first.
@@ -5547,11 +5630,19 @@ class LogicalScheduler:
                     self._preloopNllSkipDrained = True
                     if self.config.uniformPgrEpoch:
                         mt1_ops = self._make_preloop_mt1_grs()
-                        mt1_counts = self._wait_gr_counts_for_ops(mt1_ops)
+                        mt0_grs = self._make_gr_all_tensors(0, all_tiles)
+                        deferred = []
+                        if (self._defersPreloopMt0() and self._c0ReadsBehindMt1Wait(
+                                self._wait_gr_counts_for_ops(mt1_ops))):
+                            mt0_grs, deferred = self._order_preloop_mt0_by_first_reads(
+                                mt0_grs, lr_tiles)
+                            self._preloopDefersMt0 = bool(deferred)
+                        mt1_counts = self._wait_gr_counts_for_ops([*deferred, *mt1_ops])
                         no_mt1_label = "SubtilePreloopNoMT1"
                         wait_done_label = "SubtilePreloopWaitDone"
                         emitted = self._to_emitted([
-                            *self._make_gr_all_tensors(0, all_tiles),
+                            *mt0_grs,
+                            *deferred,
                             *self._make_depops_all_tensors(GRIncOp,
                                                            skipScale=skipScaleInc),
                             initC_op,
@@ -7974,6 +8065,7 @@ class LogicalScheduler:
         clearPartitionZeroOverwriteMarks()
         self._dropExitDominatedLgkmWaits(module)
         self._dropRedundantExitSyncs(writer, kernel, module, firstExitItem)
+        self._checkPreloopDeferredMt0(module, mainloop)
         if self.config.uniformPgrEpoch and not self.halfDisjoint:
             from .InstructionScheduler import checkMainLoopLdsOverwrites
             checkMainLoopLdsOverwrites(
@@ -8043,6 +8135,39 @@ class LogicalScheduler:
                 and not getattr(writer.states, "postLoopStoreInNll", False)):
             drained.add(Label("SkipToNLL", "").getLabelName())
         dropRedundantExitSyncs(module, firstExitItem, drained)
+
+    def _checkPreloopDeferredMt0(self, module, mainloop):
+        """Make the preloop's MT1 arm drain MT0 unless both bodies it enters do.
+
+        The MT1 arm leaves part of MT0 in flight, older than every MT1 load.
+        MAINLOOP_C0 and the code behind SkipToNGLL must reach a wait that
+        leaves at most the MT1 loads outstanding, then a barrier, before their
+        first LDS read. Only a leading repeat of a read the preloop made behind
+        its barrier may come first. When C0's first reads were relocated, the preloop
+        issues a copy of them behind its barrier. Either way the arm's wait
+        goes back to the MT1 count.
+        """
+        if not self._preloopDefersMt0:
+            return
+        from rocisa.code import Label
+        from .InstructionScheduler import (
+            loadsAfterBranch, readsAfterBarrier, readsBehindVmemWait)
+        mt1, wait = loadsAfterBranch(self._preloopSchedule,
+                                     Label("SubtilePreloopNoMT1", "").getLabelName())
+        landed = readsAfterBarrier(self._preloopSchedule,
+                                   Label("SubtilePreloopWaitDone", "").getLabelName())
+        entries = [list(self._mainLoopBodies(mainloop)[0].flatitems())]
+        items = list(module.flatitems())
+        ngll = Label("SkipToNGLL", "").getLabelName()
+        at = next((i for i, inst in enumerate(items)
+                   if isinstance(inst, Label) and inst.getLabelName() == ngll), None)
+        if at is not None:
+            entries.append(items[at + 1:])
+        if self._earlyOverwriteVgprs or not all(
+                readsBehindVmemWait(entry, mt1, landed) for entry in entries):
+            wait.vlcnt = mt1
+            wait.comment = f"Wait GR: MT0 landed, {mt1} MT1 loads in flight"
+            self._preloopDefersMt0 = False
 
     def emitTailLoop(self, writer, kernel):
         """Emit the tail loop body only (no counter setup, no skip branch).
