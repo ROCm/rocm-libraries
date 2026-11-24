@@ -105,7 +105,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Fixed build failures of the CK Tile FMHA backward instances for gfx1250 with `--offload-new-driver` by shortening the generated instance names, for example `_srv` instead of `_storerandval` and `_tl` instead of `_trload`.
 * Fixed the CK Tile dispatcher heuristics data pipeline refusing `--capture_hw` on gfx950 and gfx1250 nodes and misparsing kernel names whose pipeline name contains an underscore, such as `comp_tdm_v2`.
 * Fixed the `ck-template-driver` executable not being installed when CK is built with `CK_USE_CODEGEN=ON`.
-* Fixed CK Tile TDM GEMM tile shapes on gfx1250 failing to build because their LDS padding exceeded the LDS size; the padding is now dropped for the operand that needs the most LDS.
+* Fixed CK Tile TDM GEMM tile shapes on gfx1250 that failed to build when LDS padding exceeded the available LDS size. Padding is now removed from the operand with the highest LDS usage.
 
 
 ## Composable Kernel 1.3.0 for ROCm 10.2.0
