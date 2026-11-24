@@ -386,9 +386,9 @@ def main():
         saved = json.loads(manifest.read_text())
         want = {tag.replace("__", "|") for tag, _, _ in jobs}
         missing = sorted(want - set(saved))
-        if missing:
-            sys.exit(f"--no-build: not in {manifest}: {', '.join(missing)}")
-        for t in sorted(want):
+        for t in missing:  # failed or spilled when built: skipped again
+            _log(f"  SKIP {t}: not in {manifest.name} (failed or spilled when built)")
+        for t in sorted(want - set(missing)):
             path, name, st = saved[t]
             if not Path(path).exists():
                 sys.exit(f"--no-build: {path} is gone")
