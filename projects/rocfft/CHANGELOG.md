@@ -31,6 +31,12 @@ Documentation for rocFFT is available at
 * Fixed data races on work memory that could cause sporadic incorrect results for
   multi-device transforms requiring work memory.
 
+### Known issues
+
+* Some multi-device plans may read their input before the work queued on the streams set with
+  `rocfft_execution_info_set_stream` is complete. Synchronize these streams before calling
+  `rocfft_execute`. This issue will be addressed in an upcoming release.
+
 ## rocFFT 1.0.41 for ROCm 10.2
 
 ### Added

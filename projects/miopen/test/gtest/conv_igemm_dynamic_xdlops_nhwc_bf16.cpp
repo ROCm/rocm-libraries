@@ -199,4 +199,4 @@ TEST_P(GPU_Conv2d_BFP16, Bf16Test_conv_igemm_dynamic_xdlops_nhwc_bf16)
     }
 };
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Conv2d_BFP16, testing::Values(GetTestCases("--bfloat16")));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_Conv2d_BFP16, testing::Values(GetTestCases("--bfloat16")));

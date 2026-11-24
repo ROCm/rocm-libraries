@@ -605,28 +605,28 @@ TEST_P(GPU_FindDbWorkspaceCkWrw_BFP16, WorkSpaceSizeReportsMaximumOnFindDbHit)
     EXPECT_EQ(conv.GetWorkSpaceSize(ctx, problem), recorded.front().max_ws);
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_FindDbWorkspaceCkWrw_BFP16,
                          testing::Values(ConvShape{1, {2, 64, 56, 56}, {64, 64, 3, 3}},
                                          ConvShape{1, {2, 128, 28, 28}, {128, 128, 3, 3}}));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_FindDbWorkspace_FP32,
                          testing::Values(miopen::conv::Direction::Forward,
                                          miopen::conv::Direction::BackwardData,
                                          miopen::conv::Direction::BackwardWeights));
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_FindDbWorkspaceFlag_FP32, testing::ValuesIn(FlagProblems()));
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_FindDbWorkspaceFlag_FP16, testing::ValuesIn(FlagProblems()));
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_FindDbWorkspaceFlag_BFP16, testing::ValuesIn(FlagProblems()));
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_FindDbWorkspaceFlag_FP32, testing::ValuesIn(FlagProblems()));
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_FindDbWorkspaceFlag_FP16, testing::ValuesIn(FlagProblems()));
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_FindDbWorkspaceFlag_BFP16, testing::ValuesIn(FlagProblems()));
 
 TEST_P(GPU_FindDbWorkspaceDefaultCache_FP32, CacheHitIsUncachedDefault) { Check(miopenFloat); }
 
 TEST_P(GPU_FindDbWorkspaceDefaultCache_FP16, CacheHitIsUncachedDefault) { Check(miopenHalf); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_FindDbWorkspaceDefaultCache_FP32,
                          testing::ValuesIn(DefaultCacheProblems()));
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_FindDbWorkspaceDefaultCache_FP16,
                          testing::ValuesIn(DefaultCacheProblems()));

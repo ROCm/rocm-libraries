@@ -14,7 +14,9 @@
 // The published FNV-1a 64 test vectors. They pin the constants and the byte order of
 // OutputHash, and the split case shows that hashing in several Add calls is the same as
 // hashing the joined bytes, which the multi-output parity hashes rely on.
-TEST(CPU_HipdnnOutputHash_NONE, MatchesPublishedFnv1aVectors)
+using CPU_HipdnnOutputHash_NONE = ::testing::TestWithParam<int>;
+
+TEST_P(CPU_HipdnnOutputHash_NONE, MatchesPublishedFnv1aVectors)
 {
     const auto hash_of = [](std::initializer_list<std::string> parts) {
         hipdnn_shim_test::OutputHash hash;
@@ -27,3 +29,5 @@ TEST(CPU_HipdnnOutputHash_NONE, MatchesPublishedFnv1aVectors)
     EXPECT_EQ(hash_of({"foobar"}), "85944171f73967e8");
     EXPECT_EQ(hash_of({"foo", "bar"}), "85944171f73967e8");
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_HipdnnOutputHash_NONE, ::testing::Values(0));

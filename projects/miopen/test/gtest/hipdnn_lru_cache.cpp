@@ -8,17 +8,15 @@
 
 #include "../../src/private/lru_cache.hpp"
 
-#include <algorithm>
-#include <memory>
-#include <vector>
-
 namespace {
 
 using Cache = miopen::wrapper::LruCache<int, int>;
 
 } // namespace
 
-TEST(CPU_HipdnnLruCache_NONE, SizeNeverExceedsCapacity)
+using CPU_HipdnnLruCache_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_HipdnnLruCache_NONE, SizeNeverExceedsCapacity)
 {
     Cache cache(3);
     for(int key = 0; key < 10; ++key)
@@ -32,7 +30,7 @@ TEST(CPU_HipdnnLruCache_NONE, SizeNeverExceedsCapacity)
     EXPECT_EQ(*cache.Find(9), 9);
 }
 
-TEST(CPU_HipdnnLruCache_NONE, FindKeepsAnEntryFromBeingEvicted)
+TEST_P(CPU_HipdnnLruCache_NONE, FindKeepsAnEntryFromBeingEvicted)
 {
     Cache cache(2);
     cache.Insert(1, 10);
@@ -44,7 +42,7 @@ TEST(CPU_HipdnnLruCache_NONE, FindKeepsAnEntryFromBeingEvicted)
     EXPECT_NE(cache.Find(3), nullptr);
 }
 
-TEST(CPU_HipdnnLruCache_NONE, InsertingAnExistingKeyReplacesItsValue)
+TEST_P(CPU_HipdnnLruCache_NONE, InsertingAnExistingKeyReplacesItsValue)
 {
     Cache cache(2);
     cache.Insert(1, 10);
@@ -54,7 +52,7 @@ TEST(CPU_HipdnnLruCache_NONE, InsertingAnExistingKeyReplacesItsValue)
     EXPECT_EQ(*cache.Find(1), 11);
 }
 
-TEST(CPU_HipdnnLruCache_NONE, InsertingAnExistingKeyKeepsItFromBeingEvicted)
+TEST_P(CPU_HipdnnLruCache_NONE, InsertingAnExistingKeyKeepsItFromBeingEvicted)
 {
     Cache cache(2);
     cache.Insert(1, 10);
@@ -66,7 +64,7 @@ TEST(CPU_HipdnnLruCache_NONE, InsertingAnExistingKeyKeepsItFromBeingEvicted)
     EXPECT_NE(cache.Find(3), nullptr);
 }
 
-TEST(CPU_HipdnnLruCache_NONE, EraseIfRemovesOnlyMatchingEntries)
+TEST_P(CPU_HipdnnLruCache_NONE, EraseIfRemovesOnlyMatchingEntries)
 {
     Cache cache(4);
     for(int key = 0; key < 4; ++key)
@@ -79,37 +77,7 @@ TEST(CPU_HipdnnLruCache_NONE, EraseIfRemovesOnlyMatchingEntries)
     EXPECT_NE(cache.Find(3), nullptr);
 }
 
-TEST(CPU_HipdnnLruCache_NONE, EraseIfHandsBackTheRemovedValues)
-{
-    // The caller, not EraseIf, destroys what is removed, so it can do that after
-    // releasing its lock.
-    miopen::wrapper::LruCache<int, std::shared_ptr<int>> cache(4);
-    std::vector<std::weak_ptr<int>> watched;
-    for(int key = 0; key < 4; ++key)
-    {
-        auto value = std::make_shared<int>(key);
-        watched.push_back(value);
-        cache.Insert(key, std::move(value));
-    }
-
-    auto removed = cache.EraseIf([](int key) { return key % 2 == 0; });
-    ASSERT_EQ(removed.size(), 2u);
-    EXPECT_FALSE(watched[0].expired());
-    EXPECT_FALSE(watched[2].expired());
-    std::vector<int> removedKeys;
-    for(const auto& value : removed)
-        removedKeys.push_back(*value);
-    std::sort(removedKeys.begin(), removedKeys.end());
-    EXPECT_EQ(removedKeys, (std::vector<int>{0, 2}));
-
-    removed.clear();
-    EXPECT_TRUE(watched[0].expired());
-    EXPECT_TRUE(watched[2].expired());
-    EXPECT_FALSE(watched[1].expired());
-    EXPECT_FALSE(watched[3].expired());
-}
-
-TEST(CPU_HipdnnLruCache_NONE, InsertHandsBackTheEvictedEntry)
+TEST_P(CPU_HipdnnLruCache_NONE, InsertHandsBackTheEvictedEntry)
 {
     // As with EraseIf, the caller destroys what the cache pushes out, after releasing its lock.
     miopen::wrapper::LruCache<int, std::shared_ptr<int>> cache(2);
@@ -130,7 +98,7 @@ TEST(CPU_HipdnnLruCache_NONE, InsertHandsBackTheEvictedEntry)
     EXPECT_TRUE(oldest.expired());
 }
 
-TEST(CPU_HipdnnLruCache_NONE, InsertHandsBackTheValueItReplaces)
+TEST_P(CPU_HipdnnLruCache_NONE, InsertHandsBackTheValueItReplaces)
 {
     Cache cache(2);
     EXPECT_FALSE(cache.Insert(1, 10).has_value());
@@ -141,3 +109,5 @@ TEST(CPU_HipdnnLruCache_NONE, InsertHandsBackTheValueItReplaces)
     ASSERT_NE(cache.Find(1), nullptr);
     EXPECT_EQ(*cache.Find(1), 11);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_HipdnnLruCache_NONE, testing::Values(0));

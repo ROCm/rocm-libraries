@@ -91,21 +91,21 @@ TEST_P(GPU_T5LayerNormBwdTest_BFP16, T5LayerNormBwdTest)
     Verify();
 };
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_T5LayerNormTest_FP32,
                          testing::ValuesIn(T5LayerNormTestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_T5LayerNormTest_FP16,
                          testing::ValuesIn(T5LayerNormTestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_T5LayerNormTest_BFP16,
                          testing::ValuesIn(T5LayerNormTestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_T5LayerNormBwdTest_FP32,
                          testing::ValuesIn(T5LayerNormTestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_T5LayerNormBwdTest_FP16,
                          testing::ValuesIn(T5LayerNormTestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_T5LayerNormBwdTest_BFP16,
                          testing::ValuesIn(T5LayerNormTestConfigs()));

@@ -622,7 +622,7 @@ std::vector<BN3DTestCase> ShimNetwork3D()
 } // namespace
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Full,
     GPU_HipdnnShimBNFwdTrain_FP32,
     testing::Combine(testing::ValuesIn(Network2DSmall<BN2DTestCase>()),
                      testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
@@ -632,7 +632,7 @@ INSTANTIATE_TEST_SUITE_P(
     TestNameGenerator<BN2DTestCase>());
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Full,
     GPU_HipdnnShimBNFwdTrain_FP16,
     testing::Combine(testing::ValuesIn(Network2DSmall<BN2DTestCase>()),
                      testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
@@ -642,7 +642,7 @@ INSTANTIATE_TEST_SUITE_P(
     TestNameGenerator<BN2DTestCase>());
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Full,
     GPU_HipdnnShimBNFwdTrain_BFP16,
     testing::Combine(testing::ValuesIn(Network2DSmall<BN2DTestCase>()),
                      testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
@@ -652,7 +652,7 @@ INSTANTIATE_TEST_SUITE_P(
     TestNameGenerator<BN2DTestCase>());
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Full,
     GPU_HipdnnShimBNFwdTrain3D_FP32,
     testing::Combine(testing::ValuesIn(ShimNetwork3D()),
                      testing::ValuesIn({miopenTensorNCDHW, miopenTensorNDHWC}),
@@ -661,7 +661,7 @@ INSTANTIATE_TEST_SUITE_P(
                      testing::ValuesIn({miopenActivationPASTHRU})),
     TestNameGenerator<BN3DTestCase>());
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_HipdnnShimBNFwdTrainRelu_FP32,
                          testing::Combine(testing::ValuesIn(Network2DSmall<BN2DTestCase>()),
                                           testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
@@ -710,7 +710,7 @@ TEST_P(GPU_HipdnnShimBNInfer3D_FP32, MatchesCpuReference) {}
 TEST_P(GPU_HipdnnShimBNInferRelu_FP32, MatchesCpuReference) {}
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Full,
     GPU_HipdnnShimBNInfer_FP32,
     testing::Combine(testing::ValuesIn(Network2DSmall<BN2DTestCase>()),
                      testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
@@ -720,7 +720,7 @@ INSTANTIATE_TEST_SUITE_P(
     TestNameGenerator<BN2DTestCase>());
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Full,
     GPU_HipdnnShimBNInfer_FP16,
     testing::Combine(testing::ValuesIn(Network2DSmall<BN2DTestCase>()),
                      testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
@@ -730,7 +730,7 @@ INSTANTIATE_TEST_SUITE_P(
     TestNameGenerator<BN2DTestCase>());
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Full,
     GPU_HipdnnShimBNInfer_BFP16,
     testing::Combine(testing::ValuesIn(Network2DSmall<BN2DTestCase>()),
                      testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
@@ -740,7 +740,7 @@ INSTANTIATE_TEST_SUITE_P(
     TestNameGenerator<BN2DTestCase>());
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Full,
     GPU_HipdnnShimBNInfer3D_FP32,
     testing::Combine(testing::ValuesIn(ShimNetwork3D()),
                      testing::ValuesIn({miopenTensorNCDHW, miopenTensorNDHWC}),
@@ -767,7 +767,7 @@ std::vector<BN2DTestCase> ReluNetwork2D()
 
 } // namespace
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_HipdnnShimBNInferRelu_FP32,
                          testing::Combine(testing::ValuesIn(ReluNetwork2D()),
                                           testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
@@ -817,7 +817,7 @@ TEST_P(GPU_HipdnnShimBNBwd_BFP16, MatchesCpuReference) {}
 TEST_P(GPU_HipdnnShimBNBwd3D_FP32, MatchesCpuReference) {}
 TEST_P(GPU_HipdnnShimBNBwdRelu_FP32, MatchesCpuReference) {}
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_HipdnnShimBNBwd_FP32,
                          testing::Combine(testing::ValuesIn(Network2DSmall<BN2DTestCase>()),
                                           testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
@@ -826,7 +826,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::ValuesIn({miopenActivationPASTHRU})),
                          TestNameGenerator<BN2DTestCase>());
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_HipdnnShimBNBwd_FP16,
                          testing::Combine(testing::ValuesIn(Network2DSmall<BN2DTestCase>()),
                                           testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
@@ -835,7 +835,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::ValuesIn({miopenActivationPASTHRU})),
                          TestNameGenerator<BN2DTestCase>());
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_HipdnnShimBNBwd_BFP16,
                          testing::Combine(testing::ValuesIn(Network2DSmall<BN2DTestCase>()),
                                           testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
@@ -844,7 +844,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::ValuesIn({miopenActivationPASTHRU})),
                          TestNameGenerator<BN2DTestCase>());
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_HipdnnShimBNBwd3D_FP32,
                          testing::Combine(testing::ValuesIn(ShimNetwork3D()),
                                           testing::ValuesIn({miopenTensorNCDHW, miopenTensorNDHWC}),
@@ -853,7 +853,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::ValuesIn({miopenActivationPASTHRU})),
                          TestNameGenerator<BN3DTestCase>());
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_HipdnnShimBNBwdRelu_FP32,
                          testing::Combine(testing::ValuesIn(Network2DSmall<BN2DTestCase>()),
                                           testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),

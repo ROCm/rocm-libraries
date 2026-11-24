@@ -97,7 +97,7 @@ const auto& GetTestParams()
 } // namespace
 
 // These LargeMemory GEMM cases are single, deliberately large convolutions
-// (several seconds each) -- too heavy for the Smoke (pre-commit) tier. They run
+// (several seconds each) -- too heavy for the Quick (pre-commit) tier. They run
 // in the Standard tier (every CI/PR) and above. Matched by the
 // */GPU_Gemm*_LargeMemory_* pattern in test_categories.yaml.
 

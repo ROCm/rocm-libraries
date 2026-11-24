@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -68,7 +69,7 @@ hkp_wire_pack_target(
     NAME off
     SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/authored"
     OUT_ROOT "${CMAKE_CURRENT_BINARY_DIR}/off"
-    ARCHES gfx942 HIPCC unused
+    ARCHES gfx942 HIP_COMPILER unused
     ROCM_KPACK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/kpack with spaces"
     """
             + rocke_keywords
@@ -80,7 +81,7 @@ hkp_wire_pack_target(
             f"""enable_testing()
 set(HIPKERNELPROVIDER_ENABLE_TESTS ON)
 set(HIPKERNELPROVIDER_ENABLE_ROCKE {enable_rocke})
-hkp_register_tests("" unused "")
+hkp_register_tests("" unused "" "" "")
 """
         )
 
@@ -106,6 +107,21 @@ hkp_register_tests("" unused "")
 
     def build(self):
         self.run(self.cmake, "--build", self.build_dir, "--target", "hkp_packaging_off")
+
+    def advance_file_clock(self):
+        """Wait until the filesystem clock is past every file the last pack wrote, so an
+        input edited next is newer than the pack's stamp. Back-to-back writes can share
+        a timestamp on a coarse clock, and ninja then sees nothing to redo."""
+        packed = [p for p in (self.build_dir / "off").rglob("*") if p.is_file()]
+        newest = max(p.stat().st_mtime_ns for p in packed)
+        clock = self.root / "filesystem-clock"
+        deadline = time.monotonic() + 10
+        while True:
+            clock.touch()
+            if clock.stat().st_mtime_ns > newest:
+                return
+            assert time.monotonic() < deadline, "filesystem clock did not advance"
+            time.sleep(0.01)
 
     def invocation(self):
         return json.loads(
@@ -191,6 +207,79 @@ def test_a_root_wired_without_enable_rocke_fails_configure(consumer):
     consumer.wire("PACK_JOBS 2")
     diagnostic = consumer.configure(success=False)
     assert "was wired without ENABLE_ROCKE" in diagnostic
+
+
+_STAGED = "eng/predict_engine/gfx942/m.bin"
+
+
+def _stage(source):
+    """STAGE_FILES for one pair: the consumer's m.bin, under _STAGED in the packed tree."""
+    return f'STAGE_FILES "{source}/m.bin" {_STAGED}'
+
+
+def test_a_staged_file_lands_in_the_packed_tree_and_follows_its_source(consumer):
+    """A STAGE_FILES pair is copied into OUT_ROOT by the pack command itself, after the
+    packer (which wipes the tree) has run, so it ships beside what was packed. Its source
+    is an input: editing it copies it again on the next build."""
+    (consumer.source / "m.bin").write_bytes(b"first model")
+    consumer.wire("ENABLE_ROCKE OFF " + _stage("${CMAKE_CURRENT_SOURCE_DIR}"))
+    consumer.configure()
+    consumer.build()
+
+    staged = consumer.build_dir / "off" / _STAGED
+    assert staged.read_bytes() == b"first model"
+    assert (consumer.build_dir / "off" / "invocation.json").is_file()
+
+    consumer.advance_file_clock()
+    (consumer.source / "m.bin").write_bytes(b"second model")
+    consumer.build()
+    assert staged.read_bytes() == b"second model"
+
+
+def test_a_dropped_stage_pair_repacks_and_leaves_its_file_out(consumer):
+    """Dropping a pair changes the pack's input manifest, which forces a repack; the
+    repack wipes OUT_ROOT, so the file is gone rather than left behind from before."""
+    (consumer.source / "m.bin").write_bytes(b"model")
+    consumer.wire("ENABLE_ROCKE OFF " + _stage("${CMAKE_CURRENT_SOURCE_DIR}"))
+    consumer.configure()
+    consumer.build()
+    staged = consumer.build_dir / "off" / _STAGED
+    assert staged.is_file()
+
+    consumer.advance_file_clock()
+    consumer.wire("ENABLE_ROCKE OFF")
+    consumer.configure()
+    consumer.build()
+    assert not staged.exists()
+    assert (consumer.build_dir / "off" / "invocation.json").is_file()
+
+
+@pytest.mark.parametrize(
+    ("stage_files", "diagnostic"),
+    [
+        (
+            'STAGE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/m.bin"',
+            "has an odd STAGE_FILES list",
+        ),
+        (
+            'STAGE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/m.bin" ../m.bin',
+            "which is not a path inside OUT_ROOT",
+        ),
+        (
+            'STAGE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/m.bin" /rooted/m.bin',
+            "which is not a path inside OUT_ROOT",
+        ),
+    ],
+    ids=["odd-list", "climbs-out", "rooted"],
+)
+def test_a_stage_pair_that_cannot_land_inside_the_tree_fails_configure(
+    consumer, stage_files, diagnostic
+):
+    """A pair missing its destination, or one that would write outside OUT_ROOT, is a
+    configure error rather than a file that silently never ships."""
+    (consumer.source / "m.bin").write_bytes(b"model")
+    consumer.wire(f"ENABLE_ROCKE OFF {stage_files}")
+    assert diagnostic in consumer.configure(success=False)
 
 
 def _collected_ids(command, *, drop_marker=False):
@@ -315,7 +404,7 @@ _hkp_wire_root(
     OUT_ROOT "${{CMAKE_CURRENT_BINARY_DIR}}/{name}"
     ARCHES "{arches}"
     ENABLE_ROCKE {enable_rocke}
-    HIPCC unused
+    HIP_COMPILER unused
     ROCM_KPACK_DIR "${{CMAKE_CURRENT_SOURCE_DIR}}/kpack with spaces"
     {keywords}
     EXCLUDE_FOLDERS {exclude})

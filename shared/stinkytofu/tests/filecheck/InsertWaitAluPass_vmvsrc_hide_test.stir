@@ -4,14 +4,14 @@
 # none is emitted. The counts come from the arch's WaitHide entries.
 
 #===----------------------------------------------------------------------===#
-# A TEX read with 11 later TEX reads: hidden, no wait before the op overwriting v0.
+# A TEX read with vmVsrcTex later TEX reads: hidden, no wait before the op overwriting v0.
 #===----------------------------------------------------------------------===#
-# CHECK-LABEL: @gfx1250_vmtex_hidden_11_no_wait
+# CHECK-LABEL: @gfx1250_vmtex_hidden_no_wait
 # CHECK: buffer_load_b32
 # CHECK-NOT: vm_vsrc
 # CHECK: v_mov_b32
 
-st.func @gfx1250_vmtex_hidden_11_no_wait() {
+st.func @gfx1250_vmtex_hidden_no_wait() {
 ^entry:
   v100 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
   v101 = "st.buffer_load_b32"(v1) { issueCycles = 1, latencyCycles = 100 }
@@ -24,20 +24,19 @@ st.func @gfx1250_vmtex_hidden_11_no_wait() {
   v108 = "st.buffer_load_b32"(v8) { issueCycles = 1, latencyCycles = 100 }
   v109 = "st.buffer_load_b32"(v9) { issueCycles = 1, latencyCycles = 100 }
   v110 = "st.buffer_load_b32"(v10) { issueCycles = 1, latencyCycles = 100 }
-  v111 = "st.buffer_load_b32"(v11) { issueCycles = 1, latencyCycles = 100 }
   v0 = "st.v_mov_b32"(v200) { issueCycles = 1, latencyCycles = 5 }
 }
 
 #===----------------------------------------------------------------------===#
-# 10 is one short. The field is 3 bits, so the emitted wait saturates at 6.
+# One TEX read short of vmVsrcTex: not hidden. The field is 3 bits, so the wait saturates at 6.
 #===----------------------------------------------------------------------===#
-# CHECK-LABEL: @gfx1250_vmtex_not_hidden_10_wait
+# CHECK-LABEL: @gfx1250_vmtex_one_short_wait
 # CHECK: buffer_load_b32
 # CHECK: s_wait_alu
 # CHECK-SAME: vm_vsrc = 6
-# CHECK: v_mov_b32
+# CHECK-NEXT: v_mov_b32
 
-st.func @gfx1250_vmtex_not_hidden_10_wait() {
+st.func @gfx1250_vmtex_one_short_wait() {
 ^entry:
   v100 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
   v101 = "st.buffer_load_b32"(v1) { issueCycles = 1, latencyCycles = 100 }
@@ -49,19 +48,18 @@ st.func @gfx1250_vmtex_not_hidden_10_wait() {
   v107 = "st.buffer_load_b32"(v7) { issueCycles = 1, latencyCycles = 100 }
   v108 = "st.buffer_load_b32"(v8) { issueCycles = 1, latencyCycles = 100 }
   v109 = "st.buffer_load_b32"(v9) { issueCycles = 1, latencyCycles = 100 }
-  v110 = "st.buffer_load_b32"(v10) { issueCycles = 1, latencyCycles = 100 }
   v0 = "st.v_mov_b32"(v200) { issueCycles = 1, latencyCycles = 5 }
 }
 
 #===----------------------------------------------------------------------===#
 # Same for LDS, which reads its own count.
 #===----------------------------------------------------------------------===#
-# CHECK-LABEL: @gfx1250_lds_hidden_11_no_wait
+# CHECK-LABEL: @gfx1250_lds_hidden_no_wait
 # CHECK: ds_load_b32
 # CHECK-NOT: vm_vsrc
 # CHECK: v_mov_b32
 
-st.func @gfx1250_lds_hidden_11_no_wait() {
+st.func @gfx1250_lds_hidden_no_wait() {
 ^entry:
   v100 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
   v101 = "st.ds_load_b32"(v1) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
@@ -74,7 +72,6 @@ st.func @gfx1250_lds_hidden_11_no_wait() {
   v108 = "st.ds_load_b32"(v8) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
   v109 = "st.ds_load_b32"(v9) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
   v110 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
-  v111 = "st.ds_load_b32"(v11) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
   v0 = "st.v_mov_b32"(v200) { issueCycles = 1, latencyCycles = 5 }
 }
 
@@ -86,7 +83,7 @@ st.func @gfx1250_lds_hidden_11_no_wait() {
 # CHECK: buffer_load_b32
 # CHECK: s_wait_alu
 # CHECK-SAME: vm_vsrc = 0
-# CHECK: v_mov_b32
+# CHECK-NEXT: v_mov_b32
 
 st.func @gfx1250_tex_lds_between_dont_count() {
 ^entry:

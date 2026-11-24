@@ -1,8 +1,20 @@
 # gtest conventions
 
 Full test-naming rules live on the wiki: https://github.com/ROCm/MIOpen/wiki/GTest-development#naming
-(`Smoke`/`Standard`/`Full`/`Perf`/`Unit` prefixes, `CPU`/`GPU` hardware token, datatype
-suffix). `check_names.py` enforces that schema against `miopen_gtest --gtest_list_tests`.
+(tier prefix, `CPU`/`GPU` hardware token, datatype suffix). `check_names.py` enforces that
+schema against `miopen_gtest --gtest_list_tests`.
+
+The prefix of a parameterized instantiation names the `test_categories.yaml` tier that first
+selects it: `Quick` (quick), `Standard` (standard), `Comprehensive` (comprehensive) or `Full`
+(full, or excluded from every tier). A variant instantiation of the same fixture keeps a suffix
+after the tier word, e.g. `StandardNhwc`. The tiers select by prefix (`Quick*/*`,
+`Standard*/*`, ...), so a new test needs only the right prefix; to move it to another tier,
+rename the prefix. A test with no parameters is still a `TEST_P`: use a fixture on
+`::testing::TestWithParam<int>` (or a `using Suite = ::testing::TestWithParam<int>;` alias) and
+`INSTANTIATE_TEST_SUITE_P(<Tier>, Suite, ::testing::Values(0))`, so its full name is
+`<Tier>/Suite.Test/0`. A plain `TEST`/`TEST_F` has no prefix and runs in no tier, so
+`test/utils/gtest_formating_checks.py` rejects it except for the hipDNN shim surface below.
+`-DMIOPEN_TEST_ALL=Off` builds run only the `Quick*` instantiations.
 
 ## GPU-free database synchronization
 
@@ -30,10 +42,10 @@ skips this runner.
 
 A test belongs to the hipDNN backend-swap surface if its full gtest name contains the
 token `HipdnnShim`. Every shim test carries it in its suite name, e.g.
-`INSTANTIATE_TEST_SUITE_P(Smoke, GPU_HipdnnShimBNFwdTrain_FP32, ...)` or
-`TEST_F(GPU_HipdnnShimConvFwdApi_FP32, ...)`. It cannot go in an instantiation's prefix,
-because `check_names.py` requires that prefix to be one of `Smoke`/`Standard`/`Full`/`Perf`/
-`Unit`.
+`INSTANTIATE_TEST_SUITE_P(Full, GPU_HipdnnShimBNFwdTrain_FP32, ...)` or
+`TEST_F(GPU_HipdnnShimConvFwdApi_FP32, ...)`. It cannot go in an instantiation's prefix, because
+`check_names.py` requires that prefix to be one of `Quick`/`Standard`/`Comprehensive`/`Full`. The
+shim tests use `Full` and every tier excludes `*HipdnnShim*`, so no tier runs them a third time.
 
 The token is deliberately specific: it is a filter, so a generic word like `Forwarding`
 would sooner or later pull in an unrelated test and silently double its runtime.
@@ -46,11 +58,10 @@ reachable through public entry points makes the comparison meaningless.
 Two consequences of that being the only entry path, both easy to "fix" in the wrong
 direction:
 
-- **Shim-surface tests stay out of the `test_categories.yaml` tiers on purpose.** The
-  categorized smoke/standard/full entries turn those patterns into a `--gtest_filter`, so a
-  matching pattern would register a third run of tests the parity entries already run twice.
-  The quick tier's `Smoke/*` would match the `Smoke` instantiations of shim tests, so it
-  excludes `*HipdnnShim*`; add the same exclude to any tier that gains a pattern that broad.
+- **Shim-surface tests stay out of `test_categories.yaml` on purpose.** The categorized
+  quick/standard/comprehensive/full entries turn those patterns into a `--gtest_filter`, so
+  a matching pattern would register a third run of tests the parity entries already run
+  twice. Absence from that file is the design, not a gap.
 - **Excluding a shim-surface test means narrowing the parity filter,** not calling
   `add_gtest_negative_filter`. That function feeds the shard filter, which the parity entries
   do not use, so disabling a shim test through it looks like it worked and changes nothing.
@@ -380,18 +391,19 @@ hipDNN. The wrapper fails that call with `miopenStatusInternalError` instead of 
 again (`ScopedHipdnnCall` and `RejectReentrantCall` in `src/private/hipdnn_graph.cpp`, checked in
 `MIOPEN_WRAPPER_FORWARD`); the full account is in RFC 0001 section 4.7. These tests cover it:
 
-- `CPU_WrapperRoutingReentry_NONE.*` in `wrapper_routing.cpp` test the per-thread guard, the
-  failure it records, the trace line, and the build and run steps (`AcquireGraphWith`,
+- `Quick/CPU_WrapperRoutingReentry_NONE.*` in `wrapper_routing.cpp` test the per-thread guard,
+  the failure it records, the trace line, and the build and run steps (`AcquireGraphWith`,
   `RunGraphWith`) against a stand-in for hipDNN. A re-entry fails the call even when hipDNN
   succeeded, outranks hipDNN's own failure, and is never cached. Like every `CPU_` test in
   `miopen_gtest`, they need a visible device.
-- `CPU_HipdnnEraseOutsideLock_NONE.*` test the two helpers that create and release a handle's
-  hipDNN state without holding the map lock. The plugin's handle destructor takes that lock again
-  (when the plugin is built against the public library), which would deadlock `miopenDestroy`.
-- `CPU_WrapperRoutingReentryMacro_NONE.*` run the dispatch macro itself, through a stub named
-  like an entry point. The route is read from `MIOPEN_HIPDNN_FORWARDING` once per process, so the
-  tests skip unless it enables forwarding. The `wrapper_reentry_macro` ctest entry sets it and
-  fails when a test skips: gtest exits 0 for a skip, and a stray `MIOPEN_DISABLE_HIPDNN_FOR`
+- `Quick/CPU_HipdnnEraseOutsideLock_NONE.*` test the two helpers that create and release a
+  handle's hipDNN state without holding the map lock. The plugin's handle destructor takes that
+  lock again (when the plugin is built against the public library), which would deadlock
+  `miopenDestroy`.
+- `Quick/CPU_WrapperRoutingReentryMacro_NONE.*` run the dispatch macro itself, through a stub
+  named like an entry point. The route is read from `MIOPEN_HIPDNN_FORWARDING` once per process,
+  so the tests skip unless it enables forwarding. The `wrapper_reentry_macro` ctest entry sets it
+  and fails when a test skips: gtest exits 0 for a skip, and a stray `MIOPEN_DISABLE_HIPDNN_FOR`
   would otherwise leave an entry that checks nothing. It needs a visible device (without one,
   `miopen_gtest` aborts at start-up) but no compute, and no hipDNN install: with hipDNN missing
   the route is still hipDNN, so the tests do not skip. It is registered for the build tree and, in
@@ -400,9 +412,9 @@ again (`ScopedHipdnnCall` and `RejectReentrantCall` in `src/private/hipdnn_graph
   The flag-on workflow does not run it because its runner has no device.
 - `miopen-provider-plugin-reentry-guard` (registered by `dnn-providers/miopen-provider` in a
   superbuild that has both) runs `script/check_plugin_reentry.py`, which runs
-  `GPU_HipdnnReentry_FP32.RejectedCallThenDestroyReturns` (`hipdnn_reentry.cpp`): one forwarded
-  convolution on a fresh handle, then `miopenDestroy`. The script makes a stand-in plugin (the
-  provider's own sources built against the public library) the only engine through
+  `Full/GPU_HipdnnReentry_FP32.RejectedCallThenDestroyReturns/0` (`hipdnn_reentry.cpp`): one
+  forwarded convolution on a fresh handle, then `miopenDestroy`. The script makes a stand-in
+  plugin (the provider's own sources built against the public library) the only engine through
   `HIPDNN_PLUGIN_DIR` and sets `MIOPEN_TEST_EXPECT_REENTRY_REJECTION=1`. The test then passes only
   if the convolution failed with `miopenStatusInternalError`, `miopenGetLastForwardedError` agrees,
   the error string has the `[hipDNN-forwarded]` prefix and `miopenDestroy` returned within 30 s.

@@ -663,7 +663,7 @@ std::vector<float> GetBetaValues()
         RunSolver();                                                                               \
     }                                                                                              \
     INSTANTIATE_TEST_SUITE_P(                                                                      \
-        Full,                                                                                      \
+        Standard,                                                                                  \
         GPU_GroupConv##ndim##D_##dir##_##naming_type,                                              \
         testing::Combine(                                                                          \
             testing::ValuesIn(GroupConvTestConfig<ndim>::GetConfigs<Direction::dir>()),            \

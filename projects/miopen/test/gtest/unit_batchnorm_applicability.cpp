@@ -221,7 +221,7 @@ TEST_P(CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE, IsApplicable)
     EXPECT_EQ(solver.IsApplicable(ctx, problem), p.expect_applicable) << p.test_name;
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE,
                          ::testing::ValuesIn(GetParams()));
 
@@ -260,7 +260,7 @@ TEST_P(CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE, IsApplicable
     EXPECT_EQ(solver.IsApplicable(ctx, problem), p.expect_applicable) << p.test_name;
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE,
                          ::testing::ValuesIn(GetParams()));
 
@@ -288,7 +288,7 @@ TEST_P(CPU_BatchNormFwdInferenceApplicabilityTest_NONE, IsApplicable)
     EXPECT_EQ(solver.IsApplicable(ctx, problem), p.expect_applicable) << p.test_name;
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_BatchNormFwdInferenceApplicabilityTest_NONE,
                          ::testing::ValuesIn(GetParams()));
 
@@ -327,7 +327,7 @@ TEST_P(CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE, IsApplicable)
     EXPECT_EQ(solver.IsApplicable(ctx, problem), p.expect_applicable) << p.test_name;
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE,
                          ::testing::ValuesIn(GetParams()));
 
@@ -366,14 +366,16 @@ TEST_P(CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE, IsApplicable
     EXPECT_EQ(solver.IsApplicable(ctx, problem), p.expect_applicable) << p.test_name;
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE,
                          ::testing::ValuesIn(GetParams()));
 
 // The per-activation solver must reject a spatial problem whatever its activation, so an
 // activation the spatial solver rejects fails with NotImplemented instead of running the
 // per-activation kernel on spatial-sized scale and bias buffers.
-TEST(CPU_BatchNormBwdTrainingPerActivationApplicability_NONE, RejectsSpatialProblem)
+using CPU_BatchNormBwdTrainingPerActivationApplicability_NONE = ::testing::TestWithParam<int>;
+
+TEST_P(CPU_BatchNormBwdTrainingPerActivationApplicability_NONE, RejectsSpatialProblem)
 {
     auto ctx       = MakeContext();
     auto xDesc     = MakeTensorDesc(miopenFloat);
@@ -405,3 +407,7 @@ TEST(CPU_BatchNormBwdTrainingPerActivationApplicability_NONE, RejectsSpatialProb
             EXPECT_FALSE(BnBwdTrainingSpatial{}.IsApplicable(ctx, problem));
     }
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         CPU_BatchNormBwdTrainingPerActivationApplicability_NONE,
+                         ::testing::Values(0));

@@ -74,6 +74,7 @@ from ..SolutionStructs.CompactSolution import CompactSolution, compactLibrarySol
 
 from ..CustomYamlLoader import load_logic_gfx_arch, archMatch
 from ..KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
+from ..MatchingTable import numpyAvailable
 from ..KernelWriterAssembly import KernelWriterAssembly
 from ..KernelWriterBase import (
     KERNEL_HELPER_FILENAME_CPP,
@@ -1249,6 +1250,13 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     # raiseIfTypeMismatches() can format the existing fatal aggregate error.
     typeMismatchAggregate: dict = {}
     skippedGemmA2AFusion = 0
+    # The parse workers share this interpreter's environment, so one warning
+    # here covers every table they will keep as row dicts.
+    if not numpyAvailable():
+        printWarning(
+            "NumPy is not installed: matching tables are kept as row dicts, which "
+            "costs the parent several times the memory of the column form"
+        )
     # Every library pulled out of the generator below is retained for the rest
     # of the run, which makes the cyclic collector the dominant cost of this
     # phase (5x) if left running. See deferCyclicGC.
