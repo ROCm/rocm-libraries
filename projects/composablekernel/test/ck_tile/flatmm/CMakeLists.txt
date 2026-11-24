@@ -102,6 +102,16 @@ if(GPU_TARGETS MATCHES "gfx95|gfx125")
     )
     target_compile_options(test_tile_mx_flatmm_persistent PRIVATE ${TEST_FLATMM_COMPILE_OPTIONS})
 
+    # MX (a4w4) MoE GEMM: MoeFlatmmKernel on the MX pipeline, gfx1250 only. Shares its problem
+    # setup and CPU reference with tile_example_mx_moe_flatmm.
+    if(GPU_TARGETS MATCHES "gfx125")
+        add_gtest_executable(test_tile_mx_moe_flatmm test_mx_moe_flatmm.cpp)
+        target_include_directories(test_tile_mx_moe_flatmm PRIVATE
+            ${PROJECT_SOURCE_DIR}/example/ck_tile/18_flatmm/mxgemm
+        )
+        target_compile_options(test_tile_mx_moe_flatmm PRIVATE ${TEST_FLATMM_COMPILE_OPTIONS})
+    endif()
+
     # Umbrella target to build all flatmm tests at once
     add_custom_target(test_tile_mx_flatmm_all)
     add_dependencies(test_tile_mx_flatmm_all
@@ -112,6 +122,9 @@ if(GPU_TARGETS MATCHES "gfx95|gfx125")
         test_tile_mx_flatmm_fp4fp8
         test_tile_mx_flatmm_persistent
     )
+    if(TARGET test_tile_mx_moe_flatmm)
+        add_dependencies(test_tile_mx_flatmm_all test_tile_mx_moe_flatmm)
+    endif()
 else()
     message(DEBUG "Skipping ck_tile MX flatmm tests for current target")
 endif()
