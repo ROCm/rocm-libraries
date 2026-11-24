@@ -278,10 +278,10 @@ TEST_P(GPU_ConvImplicitGemm_FP16, Test_conv_for_implicit_gemm_half)
 };
 
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                              GPU_ConvImplicitGemm_BFP16,
                              testing::Values(GetTestCases("--bfloat16")));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                              GPU_ConvImplicitGemm_FP16,
                              testing::Values(GetTestCases("--half")));

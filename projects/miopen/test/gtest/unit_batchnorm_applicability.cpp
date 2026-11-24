@@ -221,7 +221,7 @@ TEST_P(CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE, IsApplicable)
     EXPECT_EQ(solver.IsApplicable(ctx, problem), p.expect_applicable) << p.test_name;
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_BatchNormFwdTrainingSpatialApplicabilityTest_NONE,
                          ::testing::ValuesIn(GetParams()));
 
@@ -260,7 +260,7 @@ TEST_P(CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE, IsApplicable
     EXPECT_EQ(solver.IsApplicable(ctx, problem), p.expect_applicable) << p.test_name;
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_BatchNormFwdTrainingPerActivationApplicabilityTest_NONE,
                          ::testing::ValuesIn(GetParams()));
 
@@ -288,7 +288,7 @@ TEST_P(CPU_BatchNormFwdInferenceApplicabilityTest_NONE, IsApplicable)
     EXPECT_EQ(solver.IsApplicable(ctx, problem), p.expect_applicable) << p.test_name;
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_BatchNormFwdInferenceApplicabilityTest_NONE,
                          ::testing::ValuesIn(GetParams()));
 
@@ -327,7 +327,7 @@ TEST_P(CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE, IsApplicable)
     EXPECT_EQ(solver.IsApplicable(ctx, problem), p.expect_applicable) << p.test_name;
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_BatchNormBwdTrainingSpatialApplicabilityTest_NONE,
                          ::testing::ValuesIn(GetParams()));
 
@@ -366,6 +366,6 @@ TEST_P(CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE, IsApplicable
     EXPECT_EQ(solver.IsApplicable(ctx, problem), p.expect_applicable) << p.test_name;
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_BatchNormBwdTrainingPerActivationApplicabilityTest_NONE,
                          ::testing::ValuesIn(GetParams()));

@@ -27,6 +27,7 @@ import os.path
 import subprocess
 import time
 from collections import OrderedDict
+from contextlib import contextmanager
 from copy import deepcopy
 from typing import Dict
 
@@ -36,7 +37,7 @@ from ..Toolchain.Component import get_rocm_version
 from .Architectures import isaToGfx
 from .Types import IsaVersion, IsaInfo
 from .Utilities import locateExe, versionIsCompatible, print1, print2, printExit, printWarning, \
-     getVerbosity
+     getVerbosity, setVerbosity
 from .ValidParameters import validISA, validParameters
 
 startTime = time.time()
@@ -276,6 +277,9 @@ globalParameters["PrintTensorAmaxD"] = 0  # Print AmaxD after validation
 # Print final matrix-staging LDS addresses and the gfx1250 segment map during kernel generation.
 globalParameters["PrintLDSLayout"] = False
 globalParameters["PrintWinnersOnly"] = False  # Only print the solutions which become the fastest
+globalParameters["PrintRejectedPredicates"] = (
+    False  # client logs the evaluation of every predicate of solutions rejected by their predicates; needs ClientLogLevel >= 2
+)
 globalParameters["PrintCodeCommands"] = (
     False  # print the commands used to generate the code objects (asm,link,hip-clang, etc)
 )
@@ -347,6 +351,24 @@ globalParameters["LazyLibraryLoading"] = (
 globalParameters["EnableMarker"] = False  # Enable TensileLite markers
 
 globalParameters["UseUserArgs"] = False
+
+# Run each problem split across N consecutive devices (e.g. the two partitions of an NPS2 card).
+# SplitDim M splits A and keeps B replicated; N splits B and keeps A replicated. Each device
+# writes its slice into its own full-size D unless SplitPlacementD is Shared.
+globalParameters["SplitDevices"] = 1
+globalParameters["SplitDim"] = "M"
+# A split run joins the devices after every launch, so a launch starts only when the one before it
+# has finished on every device (the time to compare with an unsplit run). True lets the devices
+# run their launches back to back and only waits for them at the end of a group of enqueues.
+globalParameters["SplitFreeRun"] = False
+# Where each tensor lives when split: "Replicated" (a copy on every device, the default) or
+# "Shared" (one copy that the other devices use over peer access). Only the operand the split does
+# not cut (B for SplitDim M, A for SplitDim N) and D can be shared: a shared B or A is read from
+# the last device, a shared D is written on the first device.
+globalParameters["SplitPlacementA"] = "Replicated"
+globalParameters["SplitPlacementB"] = "Replicated"
+globalParameters["SplitPlacementC"] = "Replicated"
+globalParameters["SplitPlacementD"] = "Replicated"
 
 globalParameters["RotatingBufferSize"] = 0  # Size in MB
 globalParameters["RotatingMode"] = (
@@ -573,6 +595,7 @@ defaultBenchmarkCommonParameters = [
     {"DirectToLds": [0]},
     {"DirectToLdsMetadata": [1]},
     {"UseSubtileImpl": [False]},
+    {"A2ASubRounds": [1]},
     {"UseSgprForGRO": [-1]},
     {"UseInstOffsetForGRO": [0]},
     {"AssertSummationElementMultiple": [1]},
@@ -602,6 +625,7 @@ defaultBenchmarkCommonParameters = [
     {"1LDSBuffer": [0]},
     {"LDSSegmentInterleave": [0]},
     {"LDSSegmentBRotate": [0]},
+    {"WaveTileContiguousA": [False]},
     {"DepthU": [-1]},
     {"NonTemporalE": [0]},
     {"NonTemporalGate": [0]},
@@ -759,6 +783,28 @@ libraryLogicTypeOverrides = {
 # a yaml file is compatible with TensileLite if
 # TensileLite.major == yaml.major and TensileLite.minor.step > yaml.minor.step
 ################################################################################
+@contextmanager
+def preserveGlobalParameters():
+    """Restore caller configuration after nested, in-process library creation.
+
+    Keep the global dictionary object so imports elsewhere still reference it.
+    The nested call also changes verbosity and the ISA allow-list independently
+    of this dictionary. This scope is for sequential calls, not concurrent ones.
+    """
+    saved = deepcopy(globalParameters)
+    savedIsas = validParameters["ISA"]
+    savedIsaValues = deepcopy(savedIsas)
+    savedVerbosity = getVerbosity()
+    try:
+        yield
+    finally:
+        globalParameters.clear()
+        globalParameters.update(saved)
+        savedIsas[:] = savedIsaValues
+        validParameters["ISA"] = savedIsas
+        setVerbosity(savedVerbosity)
+
+
 def restoreDefaultGlobalParameters():
     """
     Restores `globalParameters` back to defaults.

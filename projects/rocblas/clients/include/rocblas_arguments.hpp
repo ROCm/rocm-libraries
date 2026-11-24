@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -95,7 +95,7 @@ struct Arguments
     rocblas_stride stride_x;
     rocblas_stride stride_y;
 
-    size_t user_allocated_workspace;
+    size_t user_allocated_workspace; // bytes passed to rocblas_set_workspace, 0 = rocBLAS-managed
 
     // 64bit
 
@@ -181,7 +181,7 @@ struct Arguments
     bool stochastic_rounding;
     bool outofplace;
     bool HMM; // xnack+
-    bool graph_test;
+    bool graph_test; // capture into a HIP graph and replay, see TESTING.md
     bool repeatability_check;
     bool alpha_beta_stride;
 

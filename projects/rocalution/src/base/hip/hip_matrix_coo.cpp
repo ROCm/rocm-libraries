@@ -509,17 +509,17 @@ namespace rocalution
             assert(this->nrow_ == hip_cast_mat->nrow_);
             assert(this->ncol_ == hip_cast_mat->ncol_);
 
-            copy_d2h(this->nnz_,
+            copy_d2d(this->nnz_,
                      this->mat_.row,
                      hip_cast_mat->mat_.row,
                      true,
                      HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
-            copy_d2h(this->nnz_,
+            copy_d2d(this->nnz_,
                      this->mat_.col,
                      hip_cast_mat->mat_.col,
                      true,
                      HIPSTREAM(_get_backend_descriptor()->HIP_stream_current));
-            copy_d2h(this->nnz_,
+            copy_d2d(this->nnz_,
                      this->mat_.val,
                      hip_cast_mat->mat_.val,
                      true,
@@ -729,6 +729,9 @@ namespace rocalution
             CHECK_HIP_ERROR(__FILE__, __LINE__);
         }
 
+        // COO entries are kept sorted by row and column
+        this->Sort();
+
         return true;
     }
 
@@ -787,6 +790,9 @@ namespace rocalution
 
             free_hip(&pb);
         }
+
+        // COO entries are kept sorted by row and column
+        this->Sort();
 
         return true;
     }

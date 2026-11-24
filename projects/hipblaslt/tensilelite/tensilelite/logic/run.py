@@ -31,33 +31,33 @@ import threading
 import time
 import warnings
 
+from pathlib import Path
+from typing import Dict, FrozenSet, List, NamedTuple, Tuple
+
 import rocisa
 
-from pathlib import Path
-from typing import FrozenSet, List, Dict, NamedTuple, Tuple
-
-from ..Common import ParallelMap2, CPUThreadCount, print1, print2, IsaVersion, IsaInfo, setVerbosity
+from ..Common import CPUThreadCount, IsaInfo, IsaVersion, ParallelMap2, print1, print2, setVerbosity
 from ..Common.Architectures import SUPPORTED_ISA
 from ..Common.Capabilities import makeIsaInfoMap
 from ..Common.GlobalParameters import assignGlobalParameters, defaultSolution
-from ..CustomYamlLoader import load_logic_gfx_arch, archMatch
+from ..CustomYamlLoader import archMatch, load_logic_gfx_arch
 from ..LibraryIO import readYAML
 from ..Toolchain.Validators import validateToolchain
 
-from .parse_arguments import parseArguments, BUNDLED_KNOWN_BUGS
+from .handle_custom_kernel import handleCustomKernel, hasCustomKernel
 from .known_bugs import (
     KnownBugKey,
     is_known_bug,
+    load_bundled_known_bugs,
     load_known_bugs,
     normalize_logic_relative_path,
-    load_bundled_known_bugs,
 )
+from .parse_arguments import BUNDLED_KNOWN_BUGS, parseArguments
 from .valid_chip_id import _validateChipId
 from .valid_corpus_consistency import check_corpus_invariants, report_corpus_invariant_violations
 from .valid_matrix_instruction import _validateMatrixInstruction
 from .valid_work_group import _validateWorkGroup
 from .valid_work_group_mapping_xcc import _validateWorkGroupMappingXCC, reset_reported_failures
-from .handle_custom_kernel import handleCustomKernel, hasCustomKernel
 
 
 class Check(NamedTuple):
@@ -198,8 +198,8 @@ def _runChecks(
     return keep, total, known_bug_skips, chip_id_failures, stale_known_bugs
 
 
-def _setup():
-    args = parseArguments()
+def _setup(argv=None):
+    args = parseArguments() if argv is None else parseArguments(argv)
 
     setVerbosity(args.Verbose)
     jobs = int(args.Jobs)
@@ -217,8 +217,7 @@ def _setup():
     if logicPath.is_file() and logicPath.suffix == ".yaml":
         files = [logicPath]
     else:
-        pattern = "**/*.yaml"
-        files = list(logicPath.glob(pattern))
+        files = list(logicPath.glob(args.LogicFilter))
     if len(files) == 0:
         print1(f"No files found in {logicPath}")
         exit(1)
@@ -260,13 +259,15 @@ def _progress_loop(stop_event: threading.Event, interval: float = 5.0) -> None:
     sys.stdout.flush()
 
 
-def main():
+def main(argv=None):
     # Suppress noisy joblib warnings (serial fallback, timeout) before any imports that pull in joblib
     warnings.filterwarnings("ignore", message=".*will operate in serial mode.*")
     warnings.filterwarnings("ignore", message=".*timeout.*will not be used.*")
 
     reset_reported_failures()
-    jobs, isaInfoMap, logicPath, files, check, args = _setup()
+    jobs, isaInfoMap, logicPath, files, check, args = (
+        _setup() if argv is None else _setup(argv)
+    )
 
     # Cross-file invariants (sibling DeviceNames, Range files matching their
     # Equality sibling's placeholder) run only when --check-all is
@@ -295,7 +296,7 @@ def main():
         )
     except (ValueError, RuntimeError) as e:
         print(f"Error: {e}", file=sys.stderr)
-        exit(1)
+        raise SystemExit(1)
 
     # Use more, smaller batches for better load balancing (workers stay busy as tasks complete)
     num_batches_target = min(len(files), jobs * 8)
@@ -351,4 +352,5 @@ def main():
         )
     strict_stale = getattr(args, "StrictKnownBugs", False) and stale_known_bugs > 0
     if rejects > 0 or chip_id_failures > 0 or strict_stale:
-        exit(1)
+        raise SystemExit(1)
+    return 0

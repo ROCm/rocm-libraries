@@ -442,6 +442,19 @@ namespace
     {
         hipblaslt_ext::GemmPreference gemmPref;
         auto                          max_workspace_size = probHandle->get_available_workspace();
+
+        // Avoid size_t underflow, which would let the heuristic ignore the workspace limit
+        if(extra_malloc > max_workspace_size)
+        {
+            if(!solution_query)
+            {
+                rocblas_internal_ostream msg;
+                print_if_verbose(msg << "rocBLAS warning: hipBLASLt algo not supported due to "
+                                        "insufficient workspace.");
+                return rocblas_status_memory_error;
+            }
+            return rocblas_status_invalid_value; // solution queries report success or invalid value
+        }
         gemmPref.setMaxWorkspaceBytes(max_workspace_size - extra_malloc);
 
         std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResults;

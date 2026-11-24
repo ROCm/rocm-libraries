@@ -48,6 +48,7 @@ namespace rocsparse
     template <uint32_t BLOCKSIZE,
               uint32_t WF_SIZE,
               bool     SLEEP,
+              bool     CHUNKED,
 #ifdef ROCSPARSE_WITH_TRSM_REFACTORING
               bool A_OP_CONJUGATE,
 #endif
@@ -84,31 +85,82 @@ namespace rocsparse
         // one-wavefront-per-row solve on matrices with very short rows.
         const uint32_t batch_index = blockIdx.y;
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-        rocsparse::csrsv_device<BLOCKSIZE,
-                                WF_SIZE,
-                                SLEEP
+
+        // grid.x is clamped, so walk the contiguous chunk of row blocks
+        // grid_x_chunk gives this block. No barrier is needed between row blocks:
+        // diagonal[wid] is only touched by its own wavefront. The two calls are
+        // spelled out because sharing them through a lambda changes the code
+        // generated for complex alpha.
+        if constexpr(CHUNKED)
+        {
+            int64_t first;
+            int64_t last;
+            rocsparse::grid_x_chunk(rocsparse::ceil_div(m, BLOCKSIZE / WF_SIZE),
+                                    hipGridDim_x,
+                                    hipBlockIdx_x,
+                                    first,
+                                    last);
+            for(int64_t block_id = first; block_id < last; ++block_id)
+            {
+                rocsparse::csrsv_device<BLOCKSIZE,
+                                        WF_SIZE,
+                                        SLEEP,
+                                        true
 #ifdef ROCSPARSE_WITH_TRSM_REFACTORING
-                                ,
-                                A_OP_CONJUGATE
+                                        ,
+                                        A_OP_CONJUGATE
 #endif
-                                >(
-            m,
-            alpha,
-            csr_row_ptr,
-            csr_col_ind,
-            rocsparse::load_pointer(csr_val, batch_index, csr_val_stride),
-            csr_val_inc,
-            rocsparse::load_pointer(x, batch_index, x_stride),
-            x_inc,
-            rocsparse::load_pointer(y, batch_index, y_stride),
-            y_inc,
-            rocsparse::load_pointer(done_array, batch_index, static_cast<int64_t>(m)),
-            map,
-            offset,
-            rocsparse::load_pointer(zero_pivot, batch_index, zero_pivot_stride),
-            idx_base,
-            fill_mode,
-            diag_type);
+                                        >(
+                    block_id,
+                    m,
+                    alpha,
+                    csr_row_ptr,
+                    csr_col_ind,
+                    rocsparse::load_pointer(csr_val, batch_index, csr_val_stride),
+                    csr_val_inc,
+                    rocsparse::load_pointer(x, batch_index, x_stride),
+                    x_inc,
+                    rocsparse::load_pointer(y, batch_index, y_stride),
+                    y_inc,
+                    rocsparse::load_pointer(done_array, batch_index, static_cast<int64_t>(m)),
+                    map,
+                    offset,
+                    rocsparse::load_pointer(zero_pivot, batch_index, zero_pivot_stride),
+                    idx_base,
+                    fill_mode,
+                    diag_type);
+            }
+        }
+        else
+        {
+            rocsparse::csrsv_device<BLOCKSIZE,
+                                    WF_SIZE,
+                                    SLEEP,
+                                    false
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+                                    ,
+                                    A_OP_CONJUGATE
+#endif
+                                    >(
+                hipBlockIdx_x,
+                m,
+                alpha,
+                csr_row_ptr,
+                csr_col_ind,
+                rocsparse::load_pointer(csr_val, batch_index, csr_val_stride),
+                csr_val_inc,
+                rocsparse::load_pointer(x, batch_index, x_stride),
+                x_inc,
+                rocsparse::load_pointer(y, batch_index, y_stride),
+                y_inc,
+                rocsparse::load_pointer(done_array, batch_index, static_cast<int64_t>(m)),
+                map,
+                offset,
+                rocsparse::load_pointer(zero_pivot, batch_index, zero_pivot_stride),
+                idx_base,
+                fill_mode,
+                diag_type);
+        }
     }
 
     template <uint32_t BLOCKSIZE,
@@ -151,44 +203,51 @@ namespace rocsparse
         for(int64_t first = 0; first < batch_count;)
         {
             const uint32_t chunk = rocsparse::get_grid_size_y(handle, batch_count - first);
-            dim3           csrsv_blocks((m * handle->wavefront_size - 1) / BLOCKSIZE + 1, chunk);
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::csrsv_kernel<BLOCKSIZE,
-                                         WF_SIZE,
-                                         SLEEP,
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+                handle,
+                rocsparse::ceil_div(m, BLOCKSIZE / WF_SIZE),
+                BLOCKSIZE,
+                [&](auto chunked, uint32_t grid) -> rocsparse_status {
+                    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                        (rocsparse::csrsv_kernel<BLOCKSIZE,
+                                                 WF_SIZE,
+                                                 SLEEP,
+                                                 decltype(chunked)::value,
 #ifdef ROCSPARSE_WITH_TRSM_REFACTORING
-                                         A_OP_CONJUGATE,
+                                                 A_OP_CONJUGATE,
 #endif
-                                         I,
-                                         J,
-                                         T>),
-                csrsv_blocks,
-                csrsv_threads,
-                0,
-                handle->stream,
-                static_cast<J>(m),
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
-                alpha_stride,
-                reinterpret_cast<const I* __restrict__>(csr_row_ptr),
-                reinterpret_cast<const J* __restrict__>(csr_col_ind),
-                reinterpret_cast<const T* __restrict__>(csr_val) + first * csr_val_stride,
-                csr_val_inc,
-                csr_val_stride,
-                reinterpret_cast<const T* __restrict__>(x) + first * x_stride,
-                x_inc,
-                x_stride,
-                reinterpret_cast<T*>(y) + first * y_stride,
-                y_inc,
-                y_stride,
-                done_array + first * m,
-                reinterpret_cast<const J* __restrict__>(map),
-                0,
-                reinterpret_cast<J*>(zero_pivot) + first * zero_pivot_stride,
-                zero_pivot_stride,
-                idx_base,
-                fill_mode,
-                diag_type,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
+                                                 I,
+                                                 J,
+                                                 T>),
+                        dim3(grid, chunk),
+                        csrsv_threads,
+                        0,
+                        handle->stream,
+                        static_cast<J>(m),
+                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
+                        alpha_stride,
+                        reinterpret_cast<const I* __restrict__>(csr_row_ptr),
+                        reinterpret_cast<const J* __restrict__>(csr_col_ind),
+                        reinterpret_cast<const T* __restrict__>(csr_val) + first * csr_val_stride,
+                        csr_val_inc,
+                        csr_val_stride,
+                        reinterpret_cast<const T* __restrict__>(x) + first * x_stride,
+                        x_inc,
+                        x_stride,
+                        reinterpret_cast<T*>(y) + first * y_stride,
+                        y_inc,
+                        y_stride,
+                        done_array + first * m,
+                        reinterpret_cast<const J* __restrict__>(map),
+                        0,
+                        reinterpret_cast<J*>(zero_pivot) + first * zero_pivot_stride,
+                        zero_pivot_stride,
+                        idx_base,
+                        fill_mode,
+                        diag_type,
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
+                    return rocsparse_status_success;
+                }));
             first += chunk;
         }
 

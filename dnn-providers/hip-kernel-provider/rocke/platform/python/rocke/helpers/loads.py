@@ -64,6 +64,61 @@ DescriptorFn = Callable[[IRBuilder, Value, Value], Tuple[Value, Optional[Value]]
 # Bytes per element for the dtypes CoalescedTileLoader / AsyncTileLoader support.
 _ELEM_BYTES: dict = {"f16": 2, "bf16": 2, "f32": 4, "i32": 4}
 
+
+def lds_col_xor_params(tile_cols: int, chunk: int = 8) -> Tuple[int, int, int, int]:
+    """``(row_shift, chunk_mask, chunk_log2, flip_shift)`` of the conflict-free
+    XOR swizzle of an unpadded ``[rows][tile_cols]`` LDS tile read in
+    ``chunk``-element runs (16-bit elements, so a chunk is 16 bytes).
+
+    A row holds ``C = tile_cols // chunk`` chunks. The chunk index is XORed
+    with ``((row >> row_shift) & chunk_mask) ^ ((row >> flip_shift) & 1)``,
+    ``row_shift = log2(8 // C)`` (0 from C = 8 on). Whether one LDS cycle
+    serves 8 lanes x 16 B (32 banks) or 16 lanes x 16 B (64 banks), the
+    consecutive rows a ``ds_load_b128`` phase reads at one chunk then land on
+    distinct banks, and so do the chunks a row-major store phase writes: the
+    first term separates the rows of an 8-row group, the bit-3 flip separates
+    the two 8-row halves of a 16-row group. Only row bits 0-3 are read, so a
+    16-row-aligned fragment can take the term from its lane's in-atom row.
+    Needs ``C`` a power of two, at least 2 and at most 16.
+
+    The bank claim above is made, and tested, only for 16-byte chunks: the
+    default ``chunk = 8`` of 16-bit elements. Any other power-of-two ``chunk``
+    still gives a valid swizzle (each row a permutation of its own columns, so
+    stores and reads stay in the row), but no conflict-freedom is claimed for
+    it; check the banks of such a layout before relying on it.
+
+    This is the row/column form of the XOR swizzle, for a loader that stores
+    from registers into a row of 2 to 16 chunks (16 to 128 columns at the
+    default chunk), whatever the row count.
+    :data:`rocke.helpers.layouts.XOR_SWIZZLE_TABLE` (behind
+    ``LdsLayout.xor_swizzled``) is the byte-offset form, one entry per fixed
+    MFMA-atom tile shape (five shapes); it cannot describe those tile widths
+    and heights, which is why the two coexist. A tile uses one or the other, never
+    both, and its producer and consumer must use the same one.
+    """
+    if chunk < 1 or chunk & (chunk - 1):
+        raise ValueError(f"LDS XOR swizzle chunk must be a power of two, got {chunk}")
+    c = tile_cols // chunk
+    if c < 2 or tile_cols % chunk or c & (c - 1) or c > 16:
+        raise ValueError(f"no LDS XOR swizzle for {tile_cols} columns of {chunk}")
+    rows_per_cycle = max(1, 8 // c)
+    return rows_per_cycle.bit_length() - 1, c - 1, chunk.bit_length() - 1, 3
+
+
+def swizzle_lds_col(b: IRBuilder, row: Value, col: Value, col_xor) -> Value:
+    """``col ^ ((((row >> row_shift) & chunk_mask) ^ ((row >> flip_shift) & 1))
+    << chunk_log2)``: the physical LDS column of logical column ``col`` of tile
+    row ``row`` (both i32). ``col_xor`` is a :func:`lds_col_xor_params` tuple.
+    Writers (:attr:`CoalescedTileLoader.col_xor`) and readers must use the same
+    tuple."""
+    row_shift, chunk_mask, chunk_log2, flip_shift = col_xor
+    r = b.lshr(row, b.const_i32(row_shift)) if row_shift else row
+    sel = b.land(r, b.const_i32(chunk_mask))
+    flip = b.land(b.lshr(row, b.const_i32(flip_shift)), b.const_i32(1))
+    sel = b.xor(sel, flip)
+    return b.xor(col, b.shl(sel, b.const_i32(chunk_log2)))
+
+
 # The two admissible ``vector_axis`` values.  Kept as a module constant so the
 # validation in ``choose_vec`` (classmethod entry point) and ``__post_init__``
 # (direct-construction entry point) can never drift.
@@ -121,6 +176,19 @@ class CoalescedTileLoader:
     # dim) hoist out of the loop. ``None`` (default) is the legacy
     # flat-K behaviour.
     inner_dim: Optional[int] = None
+    # XOR-swizzled LDS columns: a :func:`lds_col_xor_params` tuple
+    # ``(row_shift, chunk_mask, chunk_log2, flip_shift)``. Every LDS store
+    # writes logical ``[row, col]`` to ``[row, swizzle_lds_col(row, col)]``,
+    # which permutes the ``2**chunk_log2``-element chunks of each row by a
+    # row-dependent XOR, so an unpadded tile is read and written without bank
+    # conflicts (no K pad, less LDS per workgroup). The consumer must read
+    # through the same map. Each row must hold whole XOR groups (the
+    # ``2**bit_length(chunk_mask | 1)`` chunks the XOR values span) and the
+    # shifts must fit an i32. In ``"col"`` mode ``load_vec`` must divide the
+    # chunk (a vector never straddles two chunks); in ``"row"`` mode each
+    # scattered element takes its own row's XOR. ``None`` (default):
+    # unswizzled, byte-identical to the historical stores.
+    col_xor: Optional[Tuple[int, int, int, int]] = None
 
     def __post_init__(self) -> None:
         # Fail fast on a mistyped ``vector_axis`` (e.g. "Row"): silently falling
@@ -132,6 +200,42 @@ class CoalescedTileLoader:
                 f"CoalescedTileLoader: vector_axis must be one of "
                 f"{_VALID_VECTOR_AXES}, got {self.vector_axis!r}"
             )
+        if self.col_xor is not None:
+            if len(self.col_xor) != 4 or any(
+                isinstance(x, bool) or not isinstance(x, int) or x < 0
+                for x in self.col_xor
+            ):
+                raise ValueError(
+                    "CoalescedTileLoader: col_xor must be a lds_col_xor_params "
+                    f"tuple of four non-negative ints, got {self.col_xor!r}"
+                )
+            row_shift, chunk_mask, chunk_log2, flip_shift = self.col_xor
+            # swizzle_lds_col shifts i32 values by these amounts; a shift by
+            # 32 or more is poison in LLVM IR.
+            if row_shift > 31 or flip_shift > 31 or chunk_log2 > 30:
+                raise ValueError(
+                    "CoalescedTileLoader: col_xor shifts must fit an i32 "
+                    "(row_shift and flip_shift at most 31, chunk_log2 at most 30), "
+                    f"got {self.col_xor!r}"
+                )
+            # The chunk index is XORed with (row term & chunk_mask) ^ flip bit,
+            # i.e. with values below `group`, which permutes aligned groups of
+            # `group` chunks. Every row must hold whole groups, or a store
+            # leaves its row (or the tile).
+            chunk = 1 << chunk_log2
+            chunks = self.tile_cols // chunk
+            group = 1 << (chunk_mask | 1).bit_length()
+            if self.tile_cols % chunk or chunks < group or chunks % group:
+                raise ValueError(
+                    f"CoalescedTileLoader: col_xor permutes groups of {group} "
+                    f"chunks of {chunk} columns, but a {self.tile_cols}-column "
+                    "row does not hold whole groups"
+                )
+            if self.vector_axis == "col" and chunk % self.load_vec:
+                raise ValueError(
+                    f"CoalescedTileLoader: col_xor needs load_vec ({self.load_vec}) "
+                    f"to divide its {chunk}-column chunk"
+                )
 
     @classmethod
     def choose_vec(
@@ -261,9 +365,17 @@ class CoalescedTileLoader:
         if self.vector_axis == "row" and self.load_vec > 1:
             for i in range(self.load_vec):
                 r = b.add(row, b.const_i32(i)) if i else row
-                b.smem_store_vN(smem_dst, [r, col], b.vec_extract(v, i), 1)
+                # col_xor: each scattered element takes its own row's XOR.
+                c = col if self.col_xor is None else self._swizzle(b, r, col)
+                b.smem_store_vN(smem_dst, [r, c], b.vec_extract(v, i), 1)
         else:
+            if self.col_xor is not None:
+                col = self._swizzle(b, row, col)
             b.smem_store_vN(smem_dst, [row, col], v, self.load_vec)
+
+    def _swizzle(self, b: IRBuilder, row: Value, col: Value) -> Value:
+        """The LDS column ``col_xor`` stores logical ``[row, col]`` at."""
+        return swizzle_lds_col(b, row, col, self.col_xor)
 
     def load_global(
         self,
@@ -494,6 +606,8 @@ class CoalescedTileLoader:
                     safe = off_bytes
                 if self.load_vec == 1:
                     v = b.buffer_load(rsrc, safe, c0, dtype)
+                    if self.col_xor is not None:
+                        col = self._swizzle(b, row, col)
                     b.smem_store_vN(smem_dst, [row, col], v, 1)
                 else:
                     v = b.buffer_load_vN(rsrc, safe, c0, dtype, self.load_vec)
@@ -501,6 +615,8 @@ class CoalescedTileLoader:
             else:
                 if self.load_vec == 1:
                     v = b.global_load(ptr, off_elems, dtype)
+                    if self.col_xor is not None:
+                        col = self._swizzle(b, row, col)
                     b.smem_store_vN(smem_dst, [row, col], v, 1)
                 else:
                     v = b.global_load_vN(ptr, off_elems, dtype, self.load_vec)
@@ -537,6 +653,10 @@ class CoalescedTileLoader:
             raise ValueError(
                 "CoalescedTileLoader.load_async_to_lds supports only vector_axis='col' "
                 "(the copy cannot transpose on store)"
+            )
+        if self.col_xor is not None:
+            raise ValueError(
+                "CoalescedTileLoader.load_async_to_lds does not support col_xor"
             )
         elem_bytes = _ELEM_BYTES.get(self.elem_dtype.name)
         if elem_bytes is None:

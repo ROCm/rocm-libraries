@@ -340,9 +340,11 @@ will:
 
 - Accept all `HeurMode_t` values without error in
   `create_execution_plans()`. Map `A` and `B` to hipDNN's
-  `SelectionHeuristic::ModeA` / `ModeB` prediction policies (RFC 0019 §11.2),
-  and `FALLBACK` and `OPENSOURCE` to hipDNN's fallback/default selection,
-  **WARN**ing that `OPENSOURCE` was not honored.
+  `SelectionHeuristic::ModeA` / `ModeB` prediction policies (RFC 0019 §11.2;
+  backend modes `HIPDNN_HEUR_MODE_A` / `HIPDNN_HEUR_MODE_B`), `FALLBACK` to
+  hipDNN's model-free static selection (`HIPDNN_HEUR_MODE_FALLBACK`), and
+  `OPENSOURCE` to the same fallback selection, **WARN**ing that `OPENSOURCE`
+  was not honored.
 
 **Per-note triage.** Upstream `select_*` keeps only plans carrying the note;
 `deselect_*` drops plans carrying it. Each note is classified by what happens if
