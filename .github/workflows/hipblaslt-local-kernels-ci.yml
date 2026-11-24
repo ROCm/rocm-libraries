@@ -80,10 +80,19 @@ jobs:
           ref: ${{ steps.ci-env.outputs.therock-ref }}
           path: TheRock
           sparse-checkout: build_tools
+      # Without CI_CONFIG_PATH, TheRock falls back to its built-in runner labels.
+      - name: Checkout CI config
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/therock-ci-config
+          ref: main
+          path: ci-config
+          persist-credentials: false
       - name: Select the artifact family and GPU runner of each architecture
         id: matrix
         shell: bash
         env:
+          CI_CONFIG_PATH: ci-config
           EVENT_ACTION: ${{ github.event.action }}
           PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           MANUAL_MULTI_GPU: ${{ inputs.multi_gpu }}

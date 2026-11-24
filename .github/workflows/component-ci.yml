@@ -7,6 +7,15 @@ on:
       - release/therock-*
   pull_request:
   workflow_dispatch:
+    inputs:
+      linux_build_runner:
+        description: Override for the default Linux build runner
+        type: string
+        default: ""
+      windows_build_runner:
+        description: Override for the default Windows build runner
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -28,14 +37,15 @@ jobs:
       logic-corpus: ${{ steps.configure.outputs.hipblaslt_logic_corpus }}
       hipblaslt-rocjitsu-scripts: ${{ steps.configure.outputs.hipblaslt_rocjitsu_scripts }}
       docker-image: ${{ steps.env.outputs.docker-image }}
-      linux-runner: ${{ steps.env.outputs.linux-runner }}
-      windows-runner: ${{ steps.env.outputs.windows-runner }}
+      linux-runner: ${{ inputs.linux_build_runner || fromJSON(steps.ci-runners.outputs.build-runners).linux.default }}
+      windows-runner: ${{ inputs.windows_build_runner || fromJSON(steps.ci-runners.outputs.build-runners).windows.default }}
       therock-ref: ${{ steps.env.outputs.therock-ref }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             .github/actions/ci-env
+            .github/actions/ci-runners
             .github/scripts/ci_utils.py
             .github/scripts/component_ci.py
             .github/scripts/tests/test_component_ci_paths.py
@@ -44,6 +54,8 @@ jobs:
         run: python .github/scripts/tests/test_component_ci_paths.py
       - uses: ./.github/actions/ci-env
         id: env
+      - uses: ./.github/actions/ci-runners
+        id: ci-runners
       - name: Detect changed components
         id: configure
         run: python .github/scripts/component_ci.py
@@ -83,6 +95,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.miopen == 'true'
     uses: ./.github/workflows/component-ci-miopen.yml
+    with:
+      linux_runner: ${{ needs.changes.outputs.linux-runner }}
 
   tensilelite-coverage:
     name: "TensileLite coverage"

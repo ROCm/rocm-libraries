@@ -29,6 +29,11 @@ name: "MIOpen: hipDNN wrapper flag-on"
 
 on:
   workflow_dispatch:
+    inputs:
+      build_runner:
+        description: Override for the default build runner
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -40,9 +45,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ci-runners:
+    name: Select CI runners
+    runs-on: ubuntu-24.04
+    outputs:
+      linux-runner: ${{ inputs.build_runner || fromJSON(steps.ci-runners.outputs.build-runners).linux.default }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/ci-runners
+          persist-credentials: false
+      - id: ci-runners
+        uses: ./.github/actions/ci-runners
+
   flag-on:
     name: MIOpen wrapper flag-on checks
-    runs-on: az-linux-scale-rocm-default-prod
+    needs: ci-runners
+    runs-on: ${{ needs.ci-runners.outputs.linux-runner }}
     # A full release build plus miopen_gtest; well past this means a hang, not a slow build.
     timeout-minutes: 180
     container:
@@ -158,7 +177,8 @@ jobs:
   # plugins are built: they pull in MIOpen_private and the wrapper but not the MIOpen tests.
   flag-on-provider:
     name: MIOpen wrapper with the hipDNN provider
-    runs-on: az-linux-scale-rocm-default-prod
+    needs: ci-runners
+    runs-on: ${{ needs.ci-runners.outputs.linux-runner }}
     timeout-minutes: 180
     container:
       image: rocm/miopen-dev:multiarch_dev_20261117

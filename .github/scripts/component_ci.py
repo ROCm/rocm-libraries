@@ -95,12 +95,14 @@ EXCLUSION_EXCEPTIONS = {
     ],
 }
 
-# Paths that affect every component's CI run: the workflow, this script,
-# and the shared ci-env action. A change here re-triggers all components.
+# Paths that affect every component's CI run: the workflow, this script, and
+# the shared ci-env and ci-runners actions. A change here re-triggers all
+# components.
 INFRA_PATHS = [
     ".github/workflows/component-ci.yml",
     ".github/scripts/component_ci.py",
     ".github/actions/ci-env/**",
+    ".github/actions/ci-runners/**",
 ]
 
 

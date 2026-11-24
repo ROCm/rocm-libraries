@@ -14,6 +14,7 @@ on:
       - "test/therock/lsan.supp"
       - ".github/workflows/hipblaslt-asan-ci.yml"
       - ".github/actions/ci-env/**"
+      - ".github/actions/ci-runners/**"
   push:
     branches: [develop]
     paths: *host_asan_paths
@@ -24,6 +25,18 @@ on:
         type: choice
         options: [quick, standard, comprehensive, full]
         required: true
+      build_runner:
+        description: Override for the default build runner
+        type: string
+        default: ""
+      gfx942_runner:
+        description: Override for the default gfx942 test runner
+        type: string
+        default: ""
+      gfx950_runner:
+        description: Override for the default gfx950 test runner
+        type: string
+        default: ""
   schedule:
     - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
 
@@ -49,7 +62,7 @@ jobs:
       # these jobs exercise its actual math-libs build system.
       therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
       docker_image: ${{ steps.ci-env.outputs.docker-image }}
-      build_runs_on: ${{ steps.ci-env.outputs.linux-runner }}
+      build_runs_on: ${{ inputs.build_runner || fromJSON(steps.ci-runners.outputs.build-runners).linux.default }}
       test_type: ${{ env.TEST_TYPE }}
       build_matrix: ${{ steps.matrix.outputs.build_matrix }}
       test_matrix: ${{ steps.matrix.outputs.test_matrix }}
@@ -66,19 +79,26 @@ jobs:
         id: ci-env
         uses: ./.github/actions/ci-env
 
+      - name: Select CI runners
+        id: ci-runners
+        uses: ./.github/actions/ci-runners
+
       - name: Compute matrices and select timeouts
         id: matrix
+        env:
+          GFX942_RUNNER: ${{ inputs.gfx942_runner || fromJSON(steps.ci-runners.outputs.gpu-runners).gfx94x.linux.test-runs-on-labels }}
+          GFX950_RUNNER: ${{ inputs.gfx950_runner || fromJSON(steps.ci-runners.outputs.gpu-runners).gfx950.linux.test-runs-on-labels }}
         run: |
-          architectures='{
+          architectures=$(jq -n --arg gfx942 "$GFX942_RUNNER" --arg gfx950 "$GFX950_RUNNER" '{
             "gfx942": {
-              "runs_on": "linux-gfx942-1gpu-ccs-csp-ossci-rocm",
+              "runs_on": $gfx942,
               "components": ["hipBLASLt", "hipSPARSELt"]
             },
             "gfx950": {
-              "runs_on": "linux-gfx950-1gpu-ccs-ossci-rocm",
+              "runs_on": $gfx950,
               "components": ["hipBLASLt", "hipSPARSELt"]
             }
-          }'
+          }')
           # Timeouts are set to at least 1.5x observed runtimes.
           timeouts='{
             "gfx942": {

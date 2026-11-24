@@ -32,19 +32,19 @@ on:
       build_runner:
         description: Runner label for the package build
         type: string
-        default: az-linux-scale-rocm-default-prod
+        default: ""
       gfx942_runner:
         description: Runner label for a single gfx942 GPU
         type: string
-        default: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+        default: ""
       gfx950_runner:
         description: Runner label for a single gfx950 GPU
         type: string
-        default: linux-gfx950-1gpu-ccs-ossci-rocm
+        default: ""
       gfx950_2gpu_runner:
         description: Multi-GPU runner label; tests expose two gfx950 devices
         type: string
-        default: linux-gfx950-8gpu-ccs-ossci-rocm
+        default: ""
 
 permissions:
   contents: read
@@ -59,10 +59,25 @@ env:
   ROCM_VERSION: 7.0.2
 
 jobs:
+  ci-runners:
+    name: Select CI runners
+    runs-on: ubuntu-24.04
+    outputs:
+      build-runners: ${{ steps.ci-runners.outputs.build-runners }}
+      gpu-runners: ${{ steps.ci-runners.outputs.gpu-runners }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/ci-runners
+          persist-credentials: false
+      - id: ci-runners
+        uses: ./.github/actions/ci-runners
+
   build-rpms:
     name: Build hipBLASLt and hipSPARSELt RPMs
+    needs: ci-runners
     if: github.repository == 'ROCm/rocm-libraries'
-    runs-on: ${{ inputs.build_runner || 'az-linux-scale-rocm-default-prod' }}
+    runs-on: ${{ inputs.build_runner || fromJSON(needs.ci-runners.outputs.build-runners).linux.default }}
     timeout-minutes: 600
     outputs:
       source_sha: ${{ steps.source.outputs.sha }}
@@ -261,7 +276,7 @@ jobs:
 
   test-rpms:
     name: ${{ matrix.name }}
-    needs: build-rpms
+    needs: [ci-runners, build-rpms]
     if: github.repository == 'ROCm/rocm-libraries'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 300
@@ -270,27 +285,27 @@ jobs:
       matrix:
         include:
           - name: hipBLASLt tests (gfx942)
-            runner: ${{ inputs.gfx942_runner || 'linux-gfx942-1gpu-ccs-csp-ossci-rocm' }}
+            runner: ${{ inputs.gfx942_runner || fromJSON(needs.ci-runners.outputs.gpu-runners).gfx94x.linux.test-runs-on-labels }}
             binary: hipblaslt-test
             artifact_suffix: gfx942
             filter: "*smoke*:*quick*:*pre_checkin*:*nightly*-*known_bug*"
           - name: hipSPARSELt tests (gfx942)
-            runner: ${{ inputs.gfx942_runner || 'linux-gfx942-1gpu-ccs-csp-ossci-rocm' }}
+            runner: ${{ inputs.gfx942_runner || fromJSON(needs.ci-runners.outputs.gpu-runners).gfx94x.linux.test-runs-on-labels }}
             binary: hipsparselt-test
             artifact_suffix: gfx942
             filter: "*smoke*:*quick*:*pre_checkin*:*nightly*-*known_bug*"
           - name: hipBLASLt tests (gfx950)
-            runner: ${{ inputs.gfx950_runner || 'linux-gfx950-1gpu-ccs-ossci-rocm' }}
+            runner: ${{ inputs.gfx950_runner || fromJSON(needs.ci-runners.outputs.gpu-runners).gfx950.linux.test-runs-on-labels }}
             binary: hipblaslt-test
             artifact_suffix: gfx950
             filter: "*smoke*:*quick*:*pre_checkin*:*nightly*-*known_bug*"
           - name: hipSPARSELt tests (gfx950)
-            runner: ${{ inputs.gfx950_runner || 'linux-gfx950-1gpu-ccs-ossci-rocm' }}
+            runner: ${{ inputs.gfx950_runner || fromJSON(needs.ci-runners.outputs.gpu-runners).gfx950.linux.test-runs-on-labels }}
             binary: hipsparselt-test
             artifact_suffix: gfx950
             filter: "*smoke*:*quick*:*pre_checkin*:*nightly*-*known_bug*"
           - name: hipBLASLt multi-GPU tests (2 x gfx950)
-            runner: ${{ inputs.gfx950_2gpu_runner || 'linux-gfx950-8gpu-ccs-ossci-rocm' }}
+            runner: ${{ inputs.gfx950_2gpu_runner || fromJSON(needs.ci-runners.outputs.gpu-runners).gfx950.linux.test-runs-on-multi-gpu-labels }}
             binary: hipblaslt-test
             artifact_suffix: 2xgfx950
             hip_visible_devices: "0,1"

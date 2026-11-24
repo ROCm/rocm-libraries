@@ -20,6 +20,10 @@ name: "Component CI: MIOpen"
 
 on:
   workflow_call:
+    inputs:
+      linux_runner:
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -110,7 +114,7 @@ jobs:
               -DROCM_PATH=/opt/rocm
             build_target: ""
 
-    runs-on: az-linux-scale-rocm-default-prod
+    runs-on: ${{ inputs.linux_runner }}
     steps:
       - name: Runner health status
         run: |

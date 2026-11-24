@@ -76,6 +76,10 @@ on:
         description: "Sampler seed"
         type: number
         default: 0
+      build_runs_on:
+        description: "Override for the default build runner"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -87,14 +91,18 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       therock-ref: ${{ steps.env.outputs.therock-ref }}
-      linux-runner: ${{ steps.env.outputs.linux-runner }}
+      linux-runner: ${{ fromJSON(steps.ci-runners.outputs.build-runners).linux.default }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: .github/actions/ci-env
+          sparse-checkout: |
+            .github/actions/ci-env
+            .github/actions/ci-runners
           persist-credentials: false
       - id: env
         uses: ./.github/actions/ci-env
+      - id: ci-runners
+        uses: ./.github/actions/ci-runners
 
   rocjitsu-race-check-linux:
     name: rocjitsu GEMM race checks (${{ inputs.workload }}, ${{ inputs.amdgpu_families }})
