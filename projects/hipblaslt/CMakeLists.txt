@@ -34,6 +34,14 @@ include(hipblaslt_target_configure_sanitizers)
 include(tensilelite_supported_architectures)
 include(hipblaslt_version)
 
+# A build tree configured before this change caches the old default (1.5.0),
+# which would now read as an explicit override and hide ROCM_VERSION.
+get_property(_hipblaslt_version_doc CACHE HIPBLASLT_PROJECT_VERSION PROPERTY HELPSTRING)
+if(_hipblaslt_version_doc STREQUAL "Semantic version string."
+   AND HIPBLASLT_PROJECT_VERSION STREQUAL "1.5.0")
+    message(STATUS "Clearing HIPBLASLT_PROJECT_VERSION=1.5.0 cached by an older hipBLASLt configure")
+    unset(HIPBLASLT_PROJECT_VERSION CACHE)
+endif()
 set(HIPBLASLT_PROJECT_VERSION "" CACHE STRING
     "Override the hipBLASLt version (X.Y.Z); empty takes ROCM_VERSION, else ${HIPBLASLT_STANDALONE_VERSION}.")
 set(THEROCK_PACKAGE_VERSION "" CACHE STRING

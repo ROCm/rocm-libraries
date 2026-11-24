@@ -246,11 +246,9 @@ namespace
         ASSERT_EQ(hipblasLtGetBuildVersion(buf, sizeof(buf)), HIPBLAS_STATUS_SUCCESS);
         EXPECT_EQ(std::string(buf), kBuildVersion);
 
-        const std::string version = std::to_string(HIPBLASLT_VERSION_MAJOR) + "."
-                                    + std::to_string(HIPBLASLT_VERSION_MINOR) + "."
-                                    + std::to_string(HIPBLASLT_VERSION_PATCH);
-        EXPECT_EQ(kBuildVersion.rfind(version, 0), 0u) << kBuildVersion;
-
+        // The leading identity may be a package version whose base differs from
+        // the product version (configure warns); hipblaslt_version_tests.cmake
+        // covers how it is chosen.
         std::string revision = AUX_BUILD_VERSION_STR(HIPBLASLT_VERSION_TWEAK);
         if(revision.empty())
             revision = "unknown";
