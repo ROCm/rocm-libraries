@@ -24626,7 +24626,7 @@ HIPBLAS_EXPORT hipblasStatus_t
     @param[in]
     beta      [const void *]
               device pointer or host pointer specifying the scalar beta. Same datatype as computeType.
-    @param[in]
+    @param[inout]
     C         [void *]
               device pointer storing matrix C.
     @param[in]
@@ -24846,7 +24846,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasTrsmEx(hipblasHandle_t    handle,
     @param[in]
     beta      [const void *]
               device pointer or host pointer specifying the scalar beta. Same datatype as computeType.
-    @param[in]
+    @param[inout]
     C         [void *]
               device pointer storing matrix C.
     @param[in]
