@@ -321,7 +321,9 @@ TEST_CASE("GEMM: W4A16 dot2 kernels in the tile model's terms", "[gemm][w4a16][d
 TEST_CASE("GEMM: W4A16 Stream-K sharing tiles is not charged whole waves", "[gemm][w4a16]") {
   auto hardware = make_w4a16_gfx1151_hardware();
   auto latency  = [&](size_t m, int stream_k) {
-    auto problem    = make_problem(m, 1536, 2048);
+    // (K = 1984: activations that are not a whole number of pages apart, which a data-parallel
+    // launch would read in step.)
+    auto problem    = make_problem(m, 1536, 1984);
     problem.a_dtype = origami::data_type_t::Int4;
     problem.num_cus = 40;
     auto config     = make_config(256, 96, 64, 16, 16, 16, false, 1, 2, 0, 0, stream_k);
@@ -3624,6 +3626,10 @@ TEST_CASE("GEMM: vectors a whole number of pages apart stream slowly when read i
   const size_t tiles = 2 * 16;
   // K = 2048 bf16 is 4096 B a vector: one workgroup per tile reads the same offset of every
   // vector at a time, and they do not spread over the memory.  Unpadded (0) is that stride.
+  // The kernel waits for the operand at one CU's DRAM rate (42 GB/s) instead of the device's.
+  const double bytes = 1024.0 * 4096.0;
+  const double wait  = bytes / 42.0e9 - bytes / 215.0e9;
+  REQUIRE(latency(4096, tiles) - latency(4096 - 128, tiles) == Approx(wait * 2.9e9).epsilon(0.15));
   REQUIRE(latency(4096, tiles) > 1.5 * latency(4096 - 128, tiles));
   REQUIRE(latency(0, tiles) == latency(4096, tiles));
   REQUIRE(latency(8192, tiles) == latency(4096, tiles));
