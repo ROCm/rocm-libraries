@@ -170,26 +170,26 @@ TEST_P(GPU_TunaNetTest_BFP16, TestSolverPredictionModelBF16)
     TestSolverPredictionModel(problem, expected_solver, device_architecture);
 }
 
-INSTANTIATE_TEST_SUITE_P(SmokeGfx908,
+INSTANTIATE_TEST_SUITE_P(StandardGfx908,
                          GPU_TunaNetTest_FP32,
                          testing::ValuesIn(GetGfx908FloatTestCases()));
 
-INSTANTIATE_TEST_SUITE_P(SmokeGfx908,
+INSTANTIATE_TEST_SUITE_P(StandardGfx908,
                          GPU_TunaNetTest_FP16,
                          testing::ValuesIn(GetGfx908HalfTestCases()));
 
-INSTANTIATE_TEST_SUITE_P(SmokeGfx908,
+INSTANTIATE_TEST_SUITE_P(StandardGfx908,
                          GPU_TunaNetTest_BFP16,
                          testing::ValuesIn(GetGfx908BF16TestCases()));
 
-INSTANTIATE_TEST_SUITE_P(SmokeGfx90a,
+INSTANTIATE_TEST_SUITE_P(StandardGfx90a,
                          GPU_TunaNetTest_FP32,
                          testing::ValuesIn(GetGfx90aFloatTestCases()));
 
-INSTANTIATE_TEST_SUITE_P(SmokeGfx90a,
+INSTANTIATE_TEST_SUITE_P(StandardGfx90a,
                          GPU_TunaNetTest_FP16,
                          testing::ValuesIn(GetGfx90aHalfTestCases()));
 
-INSTANTIATE_TEST_SUITE_P(SmokeGfx90a,
+INSTANTIATE_TEST_SUITE_P(StandardGfx90a,
                          GPU_TunaNetTest_BFP16,
                          testing::ValuesIn(GetGfx90aBF16TestCases()));
