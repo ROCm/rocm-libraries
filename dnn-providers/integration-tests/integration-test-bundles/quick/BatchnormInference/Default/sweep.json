@@ -1142,6 +1142,603 @@
         "seed": 1,
         "reference_source": "c++ integration suite: Smoke/IntegrationGpuBatchnormForwardInference3dUpcastFp16 (derived from 2_3_3_1_1_fp16_ncdhw)"
       }
+    },
+    {
+      "id": "s1_1d_i64_n2c16_fp32_cf",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              16,
+              64
+            ],
+            "strides": [
+              1024,
+              64,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              16,
+              64
+            ],
+            "strides": [
+              1024,
+              64,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_batchnorm_inference_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "BatchnormInference",
+        "plan_items": [
+          "S1",
+          "F7",
+          "F13",
+          "G1"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 529575572,
+        "inputs": {
+          "1": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1690462049
+          },
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1960163177
+          },
+          "3": {
+            "kind": "free",
+            "lo": 0.5,
+            "hi": 1.5,
+            "seed": 957170534
+          },
+          "4": {
+            "kind": "free",
+            "lo": -0.1,
+            "hi": 0.1,
+            "seed": 166410454
+          },
+          "5": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1103045775
+          }
+        },
+        "notes": "quick demo case (ALMIOPEN-2903)"
+      }
+    },
+    {
+      "id": "s1_2d_i16x16_n2c16_fp32_cl",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              1,
+              256,
+              16
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_batchnorm_inference_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "BatchnormInference",
+        "plan_items": [
+          "S1",
+          "F7",
+          "F13",
+          "G4"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 1334627323,
+        "inputs": {
+          "1": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1238619865
+          },
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1940487270
+          },
+          "3": {
+            "kind": "free",
+            "lo": 0.5,
+            "hi": 1.5,
+            "seed": 834762731
+          },
+          "4": {
+            "kind": "free",
+            "lo": -0.1,
+            "hi": 0.1,
+            "seed": 2020849756
+          },
+          "5": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1363935094
+          }
+        },
+        "notes": "quick demo case (ALMIOPEN-2903)"
+      }
+    },
+    {
+      "id": "s1_2d_i16x16_n2c16_fp16_yfp32_cf",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_batchnorm_inference_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "BatchnormInference",
+        "plan_items": [
+          "S1",
+          "F14",
+          "G11"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 91289371,
+        "inputs": {
+          "1": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1334727597
+          },
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 644786982
+          },
+          "3": {
+            "kind": "free",
+            "lo": 0.5,
+            "hi": 1.5,
+            "seed": 728709415
+          },
+          "4": {
+            "kind": "free",
+            "lo": -0.1,
+            "hi": 0.1,
+            "seed": 121977065
+          },
+          "5": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 465442369
+          }
+        },
+        "notes": "quick demo case (ALMIOPEN-2903)"
+      }
+    },
+    {
+      "id": "s1_2d_i16x16_n2c16_fp16_pfp16_cf",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "half"
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_batchnorm_inference_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "BatchnormInference",
+        "plan_items": [
+          "S1",
+          "F15"
+        ],
+        "purpose": "probe",
+        "size_class": "S",
+        "seed": 500048042,
+        "inputs": {
+          "1": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 558715066
+          },
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 2036993328
+          },
+          "3": {
+            "kind": "free",
+            "lo": 0.5,
+            "hi": 1.5,
+            "seed": 1423742714
+          },
+          "4": {
+            "kind": "free",
+            "lo": -0.1,
+            "hi": 0.1,
+            "seed": 1267882120
+          },
+          "5": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 1941651316
+          }
+        },
+        "notes": "probe: F15 statistics in the io type; quick demo case (ALMIOPEN-2903)"
+      }
     }
   ]
 }
