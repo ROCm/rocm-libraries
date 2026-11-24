@@ -24,7 +24,7 @@
 /**
  * @file TestFlydslSdpaBwdSink.cpp
  * @brief The sink, dSink and deterministic-algorithm fields of the FlyDSL SDPA backward graph,
- *        on a gfx950 device.
+ *        on a gfx950 device, and the split engine's sink handling where no sink twin ships.
  *
  * The split engine serves a sink graph. A graph with a dSink runs the prep sink twin and the
  * dsink_reduce kernel (the prep stage's kernel carries a `dsink_reduce` source); a graph with a
@@ -764,6 +764,52 @@ TEST_F(TestGpuFlydslSdpaBwdSink, MergedDeclinesADsinkGraph)
     auto c = sinkCase(DataType::BFLOAT16, false, false, false);
     c.withDsink = true;
     expectDeclined(MERGED_ENGINE, specOfSink(c));
+}
+
+// ---------------------------------------------------------------------------
+// The split engine where no sink twin ships (gfx942, gfx90a, gfx11-generic)
+// ---------------------------------------------------------------------------
+
+/// The split engine opts into dSink on every arch, but only the gfx950 content ships the prep
+/// sink twin. Elsewhere no prep row carries `sink=1`, so a dSink graph finds no kernel and the
+/// engine declines it, while a sink-only graph runs the plain prep rows as on gfx950.
+class TestGpuFlydslSdpaBwdSinkNoTwin : public FlydslSdpaBwdDevice
+{
+protected:
+    TestGpuFlydslSdpaBwdSinkNoTwin()
+        : FlydslSdpaBwdDevice(SPLIT_OPS)
+    {
+    }
+
+    void SetUp() override
+    {
+        FlydslSdpaBwdDevice::SetUp();
+        if(IsSkipped())
+        {
+            return;
+        }
+        const auto arch = packedArchDeviceProperties().gcnArchName;
+        if(arch.rfind("gfx950", 0) == 0)
+        {
+            GTEST_SKIP() << "the gfx950 content ships the sink twin";
+        }
+    }
+};
+
+using TestGpuFlydslSdpaBwdSinkNoTwinBfp16 = TestGpuFlydslSdpaBwdSinkNoTwin;
+
+TEST_F(TestGpuFlydslSdpaBwdSinkNoTwinBfp16, SplitDeclinesADsinkGraph)
+{
+    auto c = sinkCase(DataType::BFLOAT16, false, false, false);
+    c.withDsink = true;
+    expectDeclined(SPLIT_ENGINE, specOfSink(c));
+}
+
+TEST_F(TestGpuFlydslSdpaBwdSinkNoTwinBfp16, SplitServesASinkOnlyGraphWithThePlainPrepRows)
+{
+    auto c = sinkCase(DataType::BFLOAT16, false, false, true);
+    c.withDsink = false;
+    expectServedAs(SPLIT_ENGINE, c);
 }
 
 // ---------------------------------------------------------------------------
