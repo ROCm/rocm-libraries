@@ -247,8 +247,10 @@ TEST_P(TestGpuSdpaBwdFp32, MatchesCpuReference)
     }
     if(c.sink)
     {
-        // D11 bar 2: the dSink reduction runs over B * Sq terms in the CPU's order.
-        assertAllClose(dSinkCpu.value(), dSinkGpu.value(), 1e-4f);
+        // The dSink reduction runs over B * Sq rows in a different order on each side. Measured
+        // worst case on gfx942 and gfx950 is 1.2e-7 (|dSink| up to ~0.53), so TOL_FP32 keeps the
+        // same >100x margin as the other gradients.
+        assertAllClose(dSinkCpu.value(), dSinkGpu.value(), TOL_FP32);
     }
 }
 
