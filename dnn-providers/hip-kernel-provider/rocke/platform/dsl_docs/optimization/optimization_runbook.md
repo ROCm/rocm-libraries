@@ -818,9 +818,9 @@ Consider:
   (e.g. `gemm_universal.gemm_universal_grid`).
 - Avoid putting too much work only in grid-z if it reduces scheduler
   interleaving.
-- Balance blocks across CUs. The MI350X chiplet swizzle in
+- Balance blocks across CUs. The gfx942 / gfx950 chiplet swizzle in
   `helpers/grid.py::chiplet_transform_chunked` (with
-  `NUM_XCDS_MI300X/MI325X/MI350X == 8`) can help.
+  `NUM_XCDS_GFX942` / `NUM_XCDS_GFX950`, both 8) can help.
 - Ensure enough CTAs for occupancy.
 - Avoid too many tiny CTAs with high launch overhead.
 - Avoid too few huge CTAs that underfill the GPU.
@@ -2178,10 +2178,10 @@ measures the whole series at once.
 |---|---|---|---|
 | `chiplet_swizzle` | GEMM / conv | False | Remap WGIDs so contiguous stripes land on the same XCD (L2 reuse). Rejected by `is_valid_dgrad_spec`: the dgrad builder does not implement it (dgrad has `xcd_tile_order`) |
 | `chiplet_wgm` | GEMM / conv | 8 | Super-tile WGM grouping |
-| `chiplet_num_xcds` | GEMM / conv / dense attention | 8 | MI300X / MI325X / MI350X have 8 XCDs; dense attention's XCD-aware block orders read it |
+| `chiplet_num_xcds` | GEMM / conv / dense attention | 8 | gfx950 and the 304-CU gfx942 part have 8 XCDs (the 228-CU gfx942 part has 6); dense attention's XCD-aware block orders read it |
 | `chiplet_chunk_size` | GEMM / conv | 64 | XCD round-robin chunk size |
 | `helpers/grid.py::chiplet_transform_chunked` | helper | — | Pure helper if you author your own kernel |
-| Constants `NUM_XCDS_MI300X / MI325X / MI350X` | `helpers/grid.py` | — | All 8 today |
+| Constants `NUM_XCDS_GFX942` / `NUM_XCDS_GFX950` | `helpers/grid.py` | — | Both 8 |
 
 #### 12.1.M Compiler flags
 

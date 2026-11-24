@@ -37,7 +37,7 @@ Result on this checkout: **PASS: 50, FAIL: 0** in ~2 s on MI355X. Coverage inclu
 - The fusion subsystem (`FusedEpilogue`, `BiasAdd`, `ReLU`, `explain_fn`, `default_lowering_registry`, `FusionLegalizer`, `GreedyFusionScheduler`) constructs and walks an FX graph.
 - The autotuner (`Autotuner`, `AutotuneConfig`, `AutotuneResult`, `make_autotune_key`, `spec_replace`) constructs.
 - Quantization (`quant_max_abs`, `quant_ir_type`, `ir_to_qdtype`, `quantize_scalar_f32`, `dequantize_scalar_to_f32`) round-trips through IR.
-- Chiplet swizzle (`chiplet_transform_chunked` + `NUM_XCDS_MI300X/MI325X/MI350X == 8`) emits IR.
+- Chiplet swizzle (`chiplet_transform_chunked` + `NUM_XCDS_GFX942 == NUM_XCDS_GFX950 == 8`) emits IR.
 
 A small handful of doc inaccuracies surfaced during this verification and were corrected in-place:
 

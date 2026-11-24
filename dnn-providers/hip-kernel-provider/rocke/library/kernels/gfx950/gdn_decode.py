@@ -115,7 +115,7 @@ from rocke.core.ir import (
     TemporalHint,
     Value,
 )
-from rocke.helpers.grid import NUM_XCDS_MI350X, xcd_remap
+from rocke.helpers.grid import NUM_XCDS_GFX950, xcd_remap
 from rocke.helpers.io import (
     io_ir_type,
     load_scalar_as_f32,
@@ -1477,7 +1477,7 @@ def _active_lane(
             b,
             bidx,
             num_wgs=b.mul(a.batch_size, b.const_i32(t.HV * t.BPV)),
-            num_xcds=NUM_XCDS_MI350X,
+            num_xcds=NUM_XCDS_GFX950,
             mode="contiguous",
         )
     b_hv_i = b.div(bidx, b.const_i32(t.BPV))
