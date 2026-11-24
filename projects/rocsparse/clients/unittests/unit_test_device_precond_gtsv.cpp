@@ -838,17 +838,17 @@ namespace
     // H + iH on the right-hand side is the real number H / 0.6. A division that adds the
     // two products of its numerator before the final scaling overflows on the way.
     template <typename T>
-    void run_large_quotient(rocsparse_handle handle, rocsparse_gtsv_interleaved_alg alg, double half_max)
+    void run_large_quotient(rocsparse_handle               handle,
+                            rocsparse_gtsv_interleaved_alg alg,
+                            double                         half_max)
     {
         const std::vector<T> dl(4, make_value<T>(0.0)), du(4, make_value<T>(0.0));
-        const std::vector<T> d    = {make_value<T>(1.0),
-                                  make_value<T>(1.0),
-                                  make_value<T>(1.0),
-                                  make_value<T>(0.6, 0.6)};
+        const std::vector<T> d
+            = {make_value<T>(1.0), make_value<T>(1.0), make_value<T>(1.0), make_value<T>(0.6, 0.6)};
         const std::vector<T> rhs  = {make_value<T>(1.0),
-                                    make_value<T>(1.0),
-                                    make_value<T>(1.0),
-                                    make_value<T>(half_max, half_max)};
+                                     make_value<T>(1.0),
+                                     make_value<T>(1.0),
+                                     make_value<T>(half_max, half_max)};
         const std::vector<T> want = {make_value<T>(1.0),
                                      make_value<T>(1.0),
                                      make_value<T>(1.0),
