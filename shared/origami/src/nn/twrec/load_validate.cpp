@@ -90,6 +90,18 @@ bool finalize_loaded_model(LoadedModel* model) {
     return false;
   }
 
+  // The feature builders fill fixed-size vectors and ranking reads q_dim, i_dim and x_dim
+  // floats from them. A manifest that declares other sizes, even with a matching hash, would
+  // make ranking read past the end of those vectors.
+  namespace gt = features::gemm_tilewright;
+  if (model->q_dim != gt::query_dim || model->i_dim != gt::item_dim ||
+      model->x_dim != gt::interaction_dim) {
+    std::cerr << "TWREC manifest rejected: feature dims " << model->q_dim << "/" << model->i_dim
+              << "/" << model->x_dim << " (query/item/interaction) do not match this build's "
+              << gt::query_dim << "/" << gt::item_dim << "/" << gt::interaction_dim << '\n';
+    return false;
+  }
+
   for (const auto& kv : model->splits) {
     if (!validate_split_rule(kv.second)) return false;
   }

@@ -25,6 +25,7 @@
 #include "origami/nn/filter.hpp"
 #include "origami/nn/nn.hpp"
 #include "origami/nn/twrec/b64_decode.hpp"
+#include "origami/nn/twrec/load_validate.hpp"
 
 namespace {
 
@@ -335,6 +336,92 @@ TEST_CASE("NN: load_model rejects a manifest with a mismatched feature hash",
 
   ScratchManifest mismatched("0000000000000000");
   REQUIRE(origami::nn::load_model(mismatched.path()) == origami::nn::invalid_handle);
+}
+
+// A manifest with the right hash but other feature dimensions must not load: ranking reads
+// q_dim, i_dim and x_dim floats from vectors of the build's fixed sizes. The model is built by
+// hand with every weight sized to its dimensions, so the weight checks alone would accept it and
+// only the dimension check can reject it.
+namespace {
+
+origami::nn::twrec::detail::LoadedModel make_model_with_dims(std::uint32_t q,
+                                                             std::uint32_t i,
+                                                             std::uint32_t x) {
+  namespace tw = origami::nn::twrec::detail;
+  tw::LoadedModel model;
+  model.feature_names_hash = origami::nn::features::gemm_tilewright::feature_names_hash;
+  model.arch               = "gfx950";
+  model.q_dim              = q;
+  model.i_dim              = i;
+  model.x_dim              = x;
+
+  tw::CellModel cm;
+  cm.label        = "cell";
+  cm.embed_dim    = 16;  // the smallest tier the loader accepts
+  cm.hidden_dim   = 48;
+  cm.inter_hidden = 24;
+  const tw::WeightCounts wc =
+      tw::cell_weight_counts(q, i, x, cm.hidden_dim, cm.embed_dim, cm.inter_hidden);
+  cm.q_mean.assign(q, 0.0f);
+  cm.q_std.assign(q, 1.0f);
+  cm.i_mean.assign(i, 0.0f);
+  cm.i_std.assign(i, 1.0f);
+  cm.x_mean.assign(x, 0.0f);
+  cm.x_std.assign(x, 1.0f);
+  cm.q_w0.assign(wc.q_w0, 0.0f);
+  cm.q_b0.assign(wc.q_b0, 0.0f);
+  cm.q_w2.assign(wc.q_w2, 0.0f);
+  cm.q_b2.assign(wc.q_b2, 0.0f);
+  cm.q_w4.assign(wc.q_w4, 0.0f);
+  cm.q_b4.assign(wc.q_b4, 0.0f);
+  cm.i_w0.assign(wc.i_w0, 0.0f);
+  cm.i_b0.assign(wc.i_b0, 0.0f);
+  cm.i_w2.assign(wc.i_w2, 0.0f);
+  cm.i_b2.assign(wc.i_b2, 0.0f);
+  cm.x_w0.assign(wc.x_w0, 0.0f);
+  cm.x_b0.assign(wc.x_b0, 0.0f);
+  cm.x_w2.assign(wc.x_w2, 0.0f);
+  cm.x_b2.assign(wc.x_b2, 0.0f);
+  model.cells.push_back(std::move(cm));
+  return model;
+}
+
+}  // namespace
+
+TEST_CASE("NN: a manifest whose feature dimensions differ from the build's is rejected",
+          "[nn][tilewright]") {
+  namespace tw = origami::nn::twrec::detail;
+  namespace gt = origami::nn::features::gemm_tilewright;
+  const auto q = static_cast<std::uint32_t>(gt::query_dim);
+  const auto i = static_cast<std::uint32_t>(gt::item_dim);
+  const auto x = static_cast<std::uint32_t>(gt::interaction_dim);
+
+  // Control: the build's own dimensions are accepted, so the rejections below are due to the
+  // dimensions alone.
+  {
+    auto model = make_model_with_dims(q, i, x);
+    REQUIRE(tw::finalize_loaded_model(&model));
+  }
+
+  struct Case {
+    const char* name;
+    std::uint32_t q, i, x;
+  };
+  const Case cases[] = {
+      {"one extra query feature", q + 1, i, x},
+      {"one missing query feature", q - 1, i, x},
+      {"one extra item feature", q, i + 1, x},
+      {"one extra interaction feature", q, i, x + 1},
+  };
+  for (const Case& c : cases) {
+    DYNAMIC_SECTION(c.name) {
+      auto model = make_model_with_dims(c.q, c.i, c.x);
+      for (const auto& cm : model.cells) {
+        REQUIRE(tw::validate_cell_weights(cm, model.q_dim, model.i_dim, model.x_dim));
+      }
+      REQUIRE_FALSE(tw::finalize_loaded_model(&model));
+    }
+  }
 }
 
 TEST_CASE("NN: a model for another architecture is not used", "[nn][tilewright]") {

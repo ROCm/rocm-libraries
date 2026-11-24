@@ -27,9 +27,12 @@ target_sources(
 )
 
 if(ORIGAMI_ENABLE_NN)
-    # The library hides its internal symbols, so the decoder under test is compiled in directly.
+    # The library hides its internal symbols, so the decoder and the manifest validation under
+    # test are compiled in directly.
     target_sources(
-        origami-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src/nn/twrec/b64_decode.cpp"
+        origami-tests
+        PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src/nn/twrec/b64_decode.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/../src/nn/twrec/load_validate.cpp"
     )
 endif()
 
