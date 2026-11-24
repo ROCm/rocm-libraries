@@ -9,6 +9,7 @@
 #include "ck_tile/ops/fmha/block/block_masking.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_fwd_kernel_path_markers.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_sched_policy.hpp"
+#include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_sched_fp8.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_output.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_executor.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_pipeline_common.hpp"
@@ -23,7 +24,7 @@ namespace ck_tile {
 template <typename Problem_,
           typename Policy_        = FmhaTdmSchedPolicyFor<Problem_>,
           bool EnableVirtualSink_ = true>
-struct BlockFmhaPipelineQRKSVSTdmSched
+struct BlockFmhaPipelineQRKSVSTdmSched16
 {
     static constexpr auto I0 = number<0>{};
     static constexpr auto I1 = number<1>{};
@@ -1006,6 +1007,34 @@ struct BlockFmhaPipelineQRKSVSTdmSched
                    smem_ptrv1,
                    sink_v);
     }
+};
+
+// The qr_tdm_sched pipeline: the FP8 main loop for 8-bit Q/K/V, the 16-bit one otherwise.
+template <typename Problem_>
+inline constexpr bool kFmhaTdmSchedIsFp8 =
+    sizeof(typename remove_cvref_t<Problem_>::QDataType) == 1;
+
+template <typename Problem_, bool kIsFp8 = kFmhaTdmSchedIsFp8<Problem_>>
+struct FmhaTdmSchedAnyPolicy
+{
+    using type = FmhaTdmSchedPolicyFor<Problem_>;
+};
+template <typename Problem_>
+struct FmhaTdmSchedAnyPolicy<Problem_, true>
+{
+    using type = FmhaTdmSchedFp8PolicyFor<Problem_>;
+};
+template <typename Problem_>
+using FmhaTdmSchedAnyPolicyFor = typename FmhaTdmSchedAnyPolicy<Problem_>::type;
+
+template <typename Problem_,
+          typename Policy_        = FmhaTdmSchedAnyPolicyFor<Problem_>,
+          bool EnableVirtualSink_ = true>
+struct BlockFmhaPipelineQRKSVSTdmSched
+    : std::conditional_t<kFmhaTdmSchedIsFp8<Problem_>,
+                         BlockFmhaPipelineQRKSVSTdmSchedFp8<Problem_, Policy_, EnableVirtualSink_>,
+                         BlockFmhaPipelineQRKSVSTdmSched16<Problem_, Policy_, EnableVirtualSink_>>
+{
 };
 
 } // namespace ck_tile
