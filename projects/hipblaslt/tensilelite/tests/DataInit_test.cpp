@@ -776,6 +776,94 @@ TEST(DataInitializationMafPointerArray, Maf2_0SeedsEachBatchLikeHipblaslt)
     }
 }
 
+// Maf2_0UnitScale selected through the client options, with two batches of A and a broadcast B
+// (batch stride 0). Each batch of each operand must hold generateMXInput's maf2_0_unit_scale draw
+// for its own seed index, as hipBLASLt seeds it (A: 3 * batch; B: 1, batch 0 for every batch),
+// and every block scale must be 1.0 (E8M0 0x7F; padding stays 0). A wrong mode mapping or batch
+// index changes the bytes.
+TEST(DataInitializationMafUnitScale, BatchedAndBroadcastOperandsGetTheirOwnDraws)
+{
+    using namespace TensileLite::Client;
+    auto args = makeMXLaunchArgs({{64, 64, 2, 128}});
+    // TN: both operands keep K along the stored rows (transposed A, non-transposed B).
+    setOption(args, "problem-identifier", std::string("Contraction_l_Alik_Bljk_Cijk_Dijk"));
+    setOption(args, "b-strides", std::vector<std::vector<size_t>>{{1, 128, 0}});
+    for(auto const* name : {"init-a", "init-b", "init-mx-a", "init-mx-b"})
+        setOption(args, name, InitMode::Maf2_0UnitScale);
+    ClientProblemFactory factory(args);
+    CPUInputProbe        dataInit(args, factory);
+    auto const&          gemm = dynamic_cast<ContractionProblemGemm const&>(*factory.problems()[0]);
+    ASSERT_TRUE(gemm.transA());
+    ASSERT_FALSE(gemm.transB());
+    ASSERT_EQ(gemm.b().strides()[2], 0u);
+    dataInit.initializeCPUInputs(gemm);
+
+    struct Side
+    {
+        int  data, scale;
+        bool isMatrixA, transposed;
+    };
+    std::vector<std::vector<uint8_t>> batchesOfA;
+    for(Side s : {Side{ContractionProblemGemm::TENSOR::A,
+                       ContractionProblemGemm::TENSOR::MXSA,
+                       true,
+                       gemm.transA()},
+                  Side{ContractionProblemGemm::TENSOR::B,
+                       ContractionProblemGemm::TENSOR::MXSB,
+                       false,
+                       gemm.transB()}})
+    {
+        auto const&  desc   = gemm.tensors()[s.data];
+        size_t const rows   = desc.sizes()[0];
+        size_t const cols   = desc.sizes()[1];
+        size_t const ld     = desc.strides()[1];
+        size_t const extent = ld * (cols - 1) + rows;
+        size_t const stride = desc.strides()[2];
+        auto const   data = dataInit.cpuBytes(s.data, desc.dataType(), desc.totalAllocatedBytes());
+        for(size_t b = 0; b < desc.sizes()[2]; b++)
+        {
+            std::vector<uint8_t> expected(extent), scale(extent);
+            generateMXInput(HIP_R_8F_E4M3,
+                            HIP_R_8F_UE8M0,
+                            expected.data(),
+                            scale.data(),
+                            rows,
+                            cols,
+                            ld,
+                            s.transposed,
+                            s.isMatrixA ? 32 : 1,
+                            s.isMatrixA ? 1 : 32,
+                            s.isMatrixA,
+                            MXScaleLayout::None,
+                            "maf2_0_unit_scale",
+                            -1.0f,
+                            1.0f,
+                            "maf2_0_unit_scale",
+                            (s.isMatrixA ? 0 : 1) + 3 * (stride == 0 ? 0 : b));
+            std::vector<uint8_t> const got(data.begin() + b * stride,
+                                           data.begin() + b * stride + extent);
+            EXPECT_EQ(got, expected) << (s.isMatrixA ? "A" : "B") << " batch " << b;
+            if(s.isMatrixA)
+                batchesOfA.push_back(got);
+        }
+
+        auto const& scaleDesc = gemm.tensors()[s.scale];
+        auto const  scales
+            = dataInit.cpuBytes(s.scale, scaleDesc.dataType(), scaleDesc.totalAllocatedBytes());
+        size_t unit = 0;
+        for(uint8_t v : scales)
+        {
+            ASSERT_TRUE(v == 0x7F || v == 0x00) << (s.isMatrixA ? "A" : "B") << " scale " << int(v);
+            unit += v == 0x7F;
+        }
+        size_t const perBatch = rows * cols / 32;
+        EXPECT_GT(unit, 0u);
+        EXPECT_EQ(unit % perBatch, 0u) << (s.isMatrixA ? "A" : "B");
+    }
+    ASSERT_EQ(batchesOfA.size(), 2u);
+    EXPECT_NE(batchesOfA[0], batchesOfA[1]) << "the two batches of A must be drawn apart";
+}
+
 // B is K = 32 (one MX block) by N = 2 with a leading dimension of 64, so the client allocates
 // 64 + 32 = 96 bytes. The generated data must stay inside them; a generator buffer of
 // ldb * N = 128 bytes would spill 32 bytes past the end.
