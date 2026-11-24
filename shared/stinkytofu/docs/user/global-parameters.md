@@ -162,7 +162,7 @@ or on the command line, `'StinkyTofuModuleOptions={"VgprMsbUnusedSlotsDontCare":
 The setters then split each block into the longest stretches whose instructions agree on every slot they use, which is as few as that order of instructions allows. So for the same instructions in the same order, it never emits more setters than the default.
 
 - An instruction with an operand whose field selects no slot (the WMMA scale operands) still depends on the whole word.
-- The scheduler's bank tiebreak and the register allocator's `msb[...]` prediction follow the same rule: a rewritten setter costs nothing. The bank planner (`quadrant=plan`) still prices by the whole word.
+- The scheduler's bank tiebreak and the register allocator's `msb[...]` prediction follow the same rule: a rewritten setter costs nothing. The bank planner (`quadrant=plan`) still prices by the whole word, and so does `EpilogueStoreSinkPass` where it stops an epilogue store before a change of bank word. So it can stop a store where no setter is emitted, and let a store cross a setter emitted between two instructions whose whole words agree.
 
 It is off by default. Whether the hardware ignores every slot an instruction does not use is not yet confirmed for every format, so validate a kernel built with it before relying on it.
 
