@@ -1528,6 +1528,18 @@ rocblas-bench timing
 rocblas-bench uses ``hipEvent_t`` recording to time API calls and ignore the overhead of any ``hipStreamSynchronize`` call.
 To switch back to the earlier timing approach that uses ``hipStreamSynchronize`` to ensure work completion, set the environment variable ``ROCBLAS_BENCH_STREAM_SYNC=1``.
 
+rocblas-bench bandwidth
+^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``rocblas-GB/s`` column is the effective bandwidth: the bytes a call is modeled to move between device memory
+and the GPU (``clients/include/bytes.hpp``), multiplied by the batch count and divided by the time per call.
+The model is the same as in BLAS++: each input is read once, each output is written once, and an operand that is
+both read and written, such as ``y`` in ``axpy`` and ``gemv`` or ``A`` in ``ger``, is counted twice, assuming that
+``beta`` is not zero. For matrices, only the elements the function accesses are counted: the full matrix for general
+storage, the stored triangle for symmetric, Hermitian, and triangular matrices (including packed storage), and the
+stored band for banded matrices. The column is reported only for functions with a byte count: most Level 1 and
+Level 2 functions, ``syrk``, and ``herk``.
+
 rocblas-gemm-tune
 -----------------
 

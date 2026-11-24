@@ -27,7 +27,9 @@
 #include <miopen/utility/modified_z.hpp>
 #include <gtest/gtest.h>
 
-TEST(CPU_UnitTestModifiedZ_NONE, TestMean)
+using CPU_UnitTestModifiedZ_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_UnitTestModifiedZ_NONE, TestMean)
 {
     std::vector<double> testSorted     = {1, 2, 3, 4, 5, 6, 7};
     std::vector<double> testDuplicates = {1, 1, 1};
@@ -46,7 +48,7 @@ TEST(CPU_UnitTestModifiedZ_NONE, TestMean)
     EXPECT_THROW(miopen::mean(testEmpty), miopen::Exception);
 }
 
-TEST(CPU_UnitTestModifiedZ_NONE, TestMedian)
+TEST_P(CPU_UnitTestModifiedZ_NONE, TestMedian)
 {
     std::vector<double> testSorted     = {1, 2, 3, 4, 5, 6, 7};
     std::vector<double> testDuplicates = {1, 1, 1};
@@ -65,7 +67,7 @@ TEST(CPU_UnitTestModifiedZ_NONE, TestMedian)
     EXPECT_THROW(miopen::median(testEmpty), miopen::Exception);
 }
 
-TEST(CPU_UnitTestModifiedZ_NONE, TestMedianOfSortedData)
+TEST_P(CPU_UnitTestModifiedZ_NONE, TestMedianOfSortedData)
 {
     std::vector<double> testSorted     = {1, 2, 3, 4, 5, 6, 7};
     std::vector<double> testDuplicates = {1, 1, 1};
@@ -80,7 +82,7 @@ TEST(CPU_UnitTestModifiedZ_NONE, TestMedianOfSortedData)
     EXPECT_THROW(miopen::medianOfSortedData(testEmpty), miopen::Exception);
 }
 
-TEST(CPU_UnitTestModifiedZ_NONE, TestMedianAbsoluteDeviation)
+TEST_P(CPU_UnitTestModifiedZ_NONE, TestMedianAbsoluteDeviation)
 {
     std::vector<double> testNoDeviation      = {1, 1, 1};
     std::vector<double> testZeroMAD          = {7, 7, 7, 1000};
@@ -113,7 +115,7 @@ TEST(CPU_UnitTestModifiedZ_NONE, TestMedianAbsoluteDeviation)
     EXPECT_THROW(miopen::medianAbsoluteDeviation(testEmpty), miopen::Exception);
 }
 
-TEST(CPU_UnitTestModifiedZ_NONE, TestModifiedZScores)
+TEST_P(CPU_UnitTestModifiedZ_NONE, TestModifiedZScores)
 {
     std::vector<double> testNoDeviation      = {1, 1, 1};
     std::vector<double> testZeroMAD          = {7, 7, 7, 1000};
@@ -146,7 +148,7 @@ TEST(CPU_UnitTestModifiedZ_NONE, TestModifiedZScores)
     EXPECT_THROW(miopen::modifiedZScores(testEmpty), miopen::Exception);
 }
 
-TEST(CPU_UnitTestModifiedZ_NONE, TestRemoveHighOutliersAndGetMean)
+TEST_P(CPU_UnitTestModifiedZ_NONE, TestRemoveHighOutliersAndGetMean)
 {
     std::vector<double> testNoDeviation      = {1, 1, 1};
     std::vector<double> testZeroMAD          = {7, 7, 7, 1000};
@@ -183,3 +185,5 @@ TEST(CPU_UnitTestModifiedZ_NONE, TestRemoveHighOutliersAndGetMean)
     EXPECT_THROW(miopen::removeHighOutliersAndGetMean(testDeviationRepeats, -1.0),
                  miopen::Exception);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_UnitTestModifiedZ_NONE, testing::Values(0));

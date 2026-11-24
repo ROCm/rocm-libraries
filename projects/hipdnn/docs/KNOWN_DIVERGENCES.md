@@ -92,7 +92,6 @@ Differences from cuDNN that follow from the shim's filter handling:
 - After plans are recreated, a repeat `build_plans` builds one of the new plans. cuDNN keeps the earlier candidate.
 - A failed note read fails a repeat `build_plans` and `autotune`. cuDNN's repeat `build_plans` returns OK without reading notes.
 - After `deserialize`, `check_support()` and `build_plan_at_index()` on a plan whose engine matches a name kept by `deselect_engines` return `GRAPH_NOT_SUPPORTED`. cuDNN keeps the names across `deserialize` too, and its `check_support()` fails there for lack of engine configs.
-- Copies of a `Graph` share one plan set and active plan, and the copy that pushes its filters last decides the native filter list. In cuDNN each copy owns its plan list. Tracked in [#16330](https://github.com/ROCm/rocm-libraries/issues/16330).
 
 ## Engine indices
 

@@ -621,6 +621,15 @@ RppStatus hip_exec_emboss_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
                                  RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                  rpp::Handle& handle);
 
+// -------------------- bilateral_filter --------------------
+
+template <typename T>
+RppStatus hip_exec_bilateral_filter_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
+                                           RpptDescPtr dstDescPtr, Rpp32f* stdDevSpaceTensor,
+                                           Rpp32f* stdDevRangeTensor, Rpp32u kernelSize,
+                                           RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                           rpp::Handle& handle);
+
 /**************************************** GEOMETRIC AUGMENTATIONS
  * ****************************************/
 

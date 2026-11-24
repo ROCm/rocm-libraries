@@ -1,0 +1,6 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# rocRoller captures are generated assembly. GitHub linguist collapses them
+# in diffs and language stats. The attribute name is linguist-generated.
+projects/hipblaslt/tensilelite/tensilelite/CustomKernels/rocroller/RR_GEMM_*.s linguist-generated=true

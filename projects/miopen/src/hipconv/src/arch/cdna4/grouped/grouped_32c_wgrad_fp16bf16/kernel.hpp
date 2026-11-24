@@ -584,7 +584,7 @@ public:
             return false;
         if(cfg_.wave_n > 1 && par.n < cfg_.wave_n)
             return false;
-        if(get_launch_params(dev, par).grid.z > max_grid_z)
+        if(!grid_fits(get_launch_params(dev, par)))
             return false;
         return true;
     }
@@ -595,7 +595,10 @@ public:
         auto blocks_c = divup(par.groups, cfg_.groups_per_wg);
 
         LaunchParams launch;
-        launch.grid       = dim3(blocks_c, blocks_q, divup(par.n * par.e, cfg_.wave_n) * par.kd);
+        launch.grid =
+            dim3(blocks_c,
+                 blocks_q,
+                 grid_extent((int64_t(par.n) * par.e + cfg_.wave_n - 1) / cfg_.wave_n * par.kd));
         launch.block_size = dim3(cfg_.block_size(), 1, 1);
         return launch;
     }

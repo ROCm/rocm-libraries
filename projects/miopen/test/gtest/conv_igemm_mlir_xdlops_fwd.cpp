@@ -103,10 +103,10 @@ TEST_P(GPU_Conv2dMLIRTestIGemmXDLopsFwd_I8, Int8Test_conv_igemm_mlir_xdlops_fwd)
 };
 
 // Half for FWD, BWD, WRW
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_Conv2dMLIRTestIGemmXDLopsFwd_FP32,
                          testing::Values(GetTestCases()));
 // Int8 for FWD
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_Conv2dMLIRTestIGemmXDLopsFwd_I8,
                          testing::Values(GetTestCases()));
