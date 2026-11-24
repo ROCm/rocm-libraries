@@ -72,7 +72,7 @@ inline ProblemPoint withDefaultCategoricals(const OperationMetadata& metadata, P
 
 /// The facets a narrow `--keep` names on the shipped forward: one value of each of form, layout,
 /// scale, window, dtype and value_head_dim, which leaves is_causal x alignment x generate_stats
-/// (8 combinations, 6 of them able to hold a problem) of the 23040.
+/// (8 combinations, 6 of them able to hold a problem) of the 53760.
 inline std::vector<KeepClause> narrowSdpaFwdKeeps()
 {
     return {{"form", "plain"},

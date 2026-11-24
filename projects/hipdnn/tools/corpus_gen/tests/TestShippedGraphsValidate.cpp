@@ -292,19 +292,24 @@ TEST(TestShippedGraphsValidate, EverySdpaFormLayoutScaleWindowAndSequenceRelatio
 TEST(TestShippedGraphsValidate, EverySdpaFormBuildsAGraphTheFrontendValidates)
 {
     // The sweep above reaches a form only by chance; this builds each declared one over a GQA
-    // shape at every element type, mask and diagonal anchor the declaration admits, with and
-    // without the training forward's statistics, at the default layout, scale and window.
+    // shape at every declared element type (fp8 included: the declaration's own list, so a type
+    // it gains is validated here without an edit), mask and diagonal anchor the declaration
+    // admits, with and without the training forward's statistics, at the default layout, scale
+    // and window.
     for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
     {
         const auto metadata = test::shippedOperation(operation);
         const auto* form = metadata.find("form");
         ASSERT_NE(form, nullptr) << operation;
         ASSERT_FALSE(form->values.empty()) << operation;
+        const auto* dtypes = metadata.find("dtype");
+        ASSERT_NE(dtypes, nullptr) << operation;
+        ASSERT_FALSE(dtypes->values.empty()) << operation;
 
         size_t built = 0;
         for(const auto& value : form->values)
         {
-            for(const auto* dtype : {"fp16", "bf16"})
+            for(const auto& dtype : dtypes->values)
             {
                 for(const bool causal : {true, false})
                 {
@@ -321,7 +326,7 @@ TEST(TestShippedGraphsValidate, EverySdpaFormBuildsAGraphTheFrontendValidates)
                                                {"is_causal", causal},
                                                {"alignment", std::string(alignment)},
                                                {"generate_stats", stats},
-                                               {"dtype", std::string(dtype)},
+                                               {"dtype", dtype},
                                                {"form", value},
                                                {"layout", std::string("bshd")},
                                                {"scale", std::string("inv_sqrt_d")},
@@ -349,7 +354,101 @@ TEST(TestShippedGraphsValidate, EverySdpaFormBuildsAGraphTheFrontendValidates)
                 }
             }
         }
-        // Three admitted mask and anchor pairs, two element types, two statistics settings.
-        EXPECT_EQ(built, form->values.size() * 12U) << operation;
+        // Three admitted mask and anchor pairs, every declared element type, two statistics
+        // settings.
+        EXPECT_EQ(built, form->values.size() * dtypes->values.size() * 6U) << operation;
+    }
+}
+
+TEST(TestShippedGraphsValidate, EverySdpaDtypeValidatesUnderEveryFormLayoutAndValueWidth)
+{
+    // The element type decides which tensors a graph has (fp8's three descales) and what type
+    // several of them take (O, and the bias, in bf16 under fp8), so it is crossed with every
+    // facet that adds or retypes a tensor or moves a stride: the forms, the layouts and the MLA
+    // value width, at a cross attention, a causal prefill and a decode shape. The declared
+    // dtypes are read from the declaration, so a graph of any type it holds that hipDNN's own
+    // validation refuses fails here, and a declared (dtype, form) pair the constraints leave
+    // empty is reported rather than certified by nothing.
+    struct Shape
+    {
+        int64_t seqlenQ;
+        int64_t seqlenK;
+        int64_t headDim;
+        bool causal;
+    };
+    const std::vector<Shape> shapes{
+        {4096, 77, 40, false}, {1024, 1024, 192, true}, {1, 4096, 128, true}};
+
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        const auto metadata = test::shippedOperation(operation);
+        const auto* dtypes = metadata.find("dtype");
+        const auto* forms = metadata.find("form");
+        const auto* layouts = metadata.find("layout");
+        const auto* valueHeads = metadata.find("value_head_dim");
+        ASSERT_NE(dtypes, nullptr) << operation;
+        ASSERT_NE(forms, nullptr) << operation;
+        ASSERT_NE(layouts, nullptr) << operation;
+        ASSERT_NE(valueHeads, nullptr) << operation;
+
+        std::map<std::string, int64_t> validatedFor;
+        for(const auto& shape : shapes)
+        {
+            for(const auto& dtype : dtypes->values)
+            {
+                for(const auto& form : forms->values)
+                {
+                    for(const auto& layout : layouts->values)
+                    {
+                        for(const auto& valueHead : valueHeads->values)
+                        {
+                            ProblemPoint given{{"batch", int64_t{2}},
+                                               {"heads", int64_t{8}},
+                                               {"heads_kv", int64_t{2}},
+                                               {"seqlen_q", shape.seqlenQ},
+                                               {"seqlen_k", shape.seqlenK},
+                                               {"head_dim", shape.headDim},
+                                               {"is_causal", shape.causal},
+                                               {"dtype", dtype},
+                                               {"form", form},
+                                               {"layout", layout},
+                                               {"value_head_dim", valueHead}};
+                            const auto point = test::withDefaultCategoricals(metadata, given);
+                            if(!detail::satisfiesConstraints(metadata, point))
+                            {
+                                continue;
+                            }
+                            const std::string where = operation + " " + detail::describe(point);
+                            ++validatedFor["dtype=" + dtype];
+                            ++validatedFor["dtype=" + dtype + " form=" + form];
+                            ++validatedFor["dtype=" + dtype + " layout=" + layout];
+                            const auto built = buildGraphFor(metadata, point);
+                            ASSERT_TRUE(built.ok()) << where << ": " << built.error;
+                            hipdnn_frontend::graph::Graph graph;
+                            const auto restored = graph.deserialize(built.bytes);
+                            ASSERT_TRUE(restored.is_good())
+                                << where << ": deserialize: " << restored.get_message();
+                            const auto valid = graph.validate();
+                            EXPECT_TRUE(valid.is_good())
+                                << where << ": validate: " << valid.get_message();
+                        }
+                    }
+                }
+            }
+        }
+        for(const auto& dtype : dtypes->values)
+        {
+            EXPECT_GT(validatedFor["dtype=" + dtype], 0) << operation << " certified no " << dtype;
+            for(const auto& form : forms->values)
+            {
+                EXPECT_GT(validatedFor["dtype=" + dtype + " form=" + form], 0)
+                    << operation << " certified no " << dtype << " graph of form " << form;
+            }
+            for(const auto& layout : layouts->values)
+            {
+                EXPECT_GT(validatedFor["dtype=" + dtype + " layout=" + layout], 0)
+                    << operation << " certified no " << dtype << " graph of layout " << layout;
+            }
+        }
     }
 }

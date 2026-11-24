@@ -327,13 +327,14 @@ TEST(TestRegimeFocus, ARegimeTheEngineDoesNotServeIsNotReachedRatherThanSaturate
 TEST(TestRegimeFocus, ARegimeInACorpusWhoseEveryCombinationIsEmptyIsSaturated)
 {
     // The ragged form is declared only with bshd, so every combination of these two keeps is
-    // empty: nothing is left to search, which is a proof.
+    // empty: nothing is left to search, which is a proof. The bound covers every combination
+    // the two keeps leave (seven dtypes since fp8), so the search can enumerate them all.
     const auto metadata = shippedSdpa();
     std::string error;
     const auto focus = compileRegimeFocus(metadata, "decode_long_mha", error);
     ASSERT_TRUE(focus.has_value()) << error;
     auto request = focusRequest();
-    request.maxCombinations = 1024;
+    request.maxCombinations = 4096;
     request.keep = {{"form", "ragged"}, {"layout", "bhsd"}};
 
     const auto found = exploreRegime(metadata, *focus, request, 10, SERVES_EVERYTHING, {}, {});
@@ -437,7 +438,8 @@ class TestShippedValueWeights : public ::testing::TestWithParam<std::string>
 TEST_P(TestShippedValueWeights,
        AFocusedSearchRealisesTheDeclaredValueWeightsAndProbesOnlyTheLanesItNeeds)
 {
-    // layout 2:1:1:1:1, scale 2:1:1, window 3:1:1:1 and value_head_dim 3:1 in both; the form is
+    // layout 2:1:1:1:1, scale 2:1:1, window 3:1:1:1 and value_head_dim 3:1 in both (and, in the
+    // forward only, dtype 8:8:8:1:1:2:1, which the shares below do not test); the form is
     // unweighted. The regime quota and floor path splits its need over categorical lanes, so a
     // lane-even split would make every value even (bshd 1/4 here, window none 1/4) however the
     // main search is weighted.
@@ -522,7 +524,7 @@ INSTANTIATE_TEST_SUITE_P(SdpaDeclarations,
 
 TEST(TestRegimeFocus, AFocusedSearchUnderAKeepSpendsItsLanesOnTheCombinationsTheKeepAdmits)
 {
-    // The forward's 23040 combinations are past the bound of 1024, and a sample drawn before the
+    // The forward's 53760 combinations are past the bound of 1024, and a sample drawn before the
     // keep leaves a few of the 6 combinations the keep admits that can hold a problem, or none.
     const auto metadata = test::shippedOperation("sdpa_fwd");
     std::string error;

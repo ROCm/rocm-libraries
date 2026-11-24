@@ -786,9 +786,10 @@ TEST(TestProblemSpace, EveryShippedSdpaCombinationIsExploredAndNoDeclaredValueIs
         size_t total = 0;
         const auto all = detail::categoricalCombinations(metadata.parameters, 0, total);
         EXPECT_EQ(all.size(), total) << operation;
-        // is_causal 2 x alignment 2 x dtype 3 x value_head_dim 2 x layout 5 x scale 3 x
-        // window 4, then the forward's 8 forms and generate_stats 2, the backward's 7 forms.
-        EXPECT_EQ(total, operation == "sdpa_fwd" ? size_t{23040} : size_t{10080}) << operation;
+        // is_causal 2 x alignment 2 x dtype (the forward's 7, the backward's 3) x value_head_dim
+        // 2 x layout 5 x scale 3 x window 4, then the forward's 8 forms and generate_stats 2,
+        // the backward's 7 forms.
+        EXPECT_EQ(total, operation == "sdpa_fwd" ? size_t{53760} : size_t{10080}) << operation;
 
         size_t sampledTotal = 0;
         const auto sampled = detail::categoricalCombinations(
@@ -880,7 +881,7 @@ TEST(TestProblemSpace, AKeepOnACategoricalAxisNarrowsTheCombinationsBeforeTheBou
     // A clause on a numeric parameter leaves the categorical product alone; the oracle applies it.
     combinations
         = detail::categoricalCombinations(metadata.parameters, 0, total, {}, {{"head_dim", "64"}});
-    EXPECT_EQ(total, 23040U);
+    EXPECT_EQ(total, 53760U);
 
     // A value the declaration does not hold admits nothing, and says so with a total of 0 rather
     // than sampling combinations that every point would then fail.
@@ -892,7 +893,7 @@ TEST(TestProblemSpace, AKeepOnACategoricalAxisNarrowsTheCombinationsBeforeTheBou
 
 TEST(TestProblemSpace, EveryCombinationAShippedSdpaKeepAdmitsProducesProblemsPastTheBound)
 {
-    // The product is 23040, past the bound of 1024, and a sample of it drawn before the keep held
+    // The product is 53760, past the bound of 1024, and a sample of it drawn before the keep held
     // 16 problems from one combination of the 6 that can hold one.
     const auto metadata = test::shippedOperation("sdpa_fwd");
     ExplorationRequest request;
@@ -940,6 +941,52 @@ TEST(TestProblemSpace, EveryCombinationAShippedSdpaKeepAdmitsProducesProblemsPas
     }
 }
 
+TEST(TestProblemSpace, AKeepOnAnFp8DtypeReachesItsProblemsLikeAKeepOnALayout)
+{
+    // dtype is a categorical axis, so `--keep q.dtype=<v>` narrows the combinations before the
+    // bound applies for each of the four fp8 encodings as for fp16, and every problem it finds
+    // is of that encoding. Repeating the parameter widens the axis.
+    const auto metadata = test::shippedOperation("sdpa_fwd");
+    const auto* dtype = metadata.find("dtype");
+    ASSERT_NE(dtype, nullptr);
+    const std::string fp8 = "fp8_e4m3_fnuz";
+    ASSERT_NE(std::find(dtype->values.begin(), dtype->values.end(), fp8), dtype->values.end());
+
+    size_t everything = 0;
+    detail::categoricalCombinations(metadata.parameters, 0, everything);
+    size_t total = 0;
+    detail::categoricalCombinations(metadata.parameters, 0, total, {}, {{"dtype", fp8}});
+    EXPECT_EQ(total, everything / dtype->values.size()) << "one value of the declared dtypes";
+    detail::categoricalCombinations(
+        metadata.parameters, 0, total, {}, {{"dtype", fp8}, {"dtype", "fp8_e5m2"}});
+    EXPECT_EQ(total, 2U * everything / dtype->values.size());
+
+    // The narrow keeps of the other facets with the dtype swapped: 8 combinations, 6 of them
+    // able to hold a problem, all explored.
+    auto keep = test::narrowSdpaFwdKeeps();
+    for(auto& clause : keep)
+    {
+        if(clause.parameter == "dtype")
+        {
+            clause.value = fp8;
+        }
+    }
+    ExplorationRequest request;
+    request.keep = keep;
+    request.pointsPerCombination = 8;
+    request.budgetPerCombination = 2000;
+    const auto corpus
+        = exploreProblemSpace(metadata, request, test::admitsOnlyWhatKeepKeeps(request.keep));
+
+    EXPECT_EQ(corpus.categoricalTotal, 8U);
+    EXPECT_EQ(corpus.categoricalNotExplored, 0U);
+    ASSERT_GE(corpus.problems().size(), 6U * 4U);
+    for(const auto& point : corpus.problems())
+    {
+        EXPECT_EQ(std::get<std::string>(point.at("dtype")), fp8) << detail::describe(point);
+    }
+}
+
 TEST(TestProblemSpace, AKeepEveryDeclaredConstraintEmptiesExploresNothingRatherThanFailing)
 {
     // The ragged form is declared only with the token-major bshd and qkv_packed, so no
@@ -954,8 +1001,8 @@ TEST(TestProblemSpace, AKeepEveryDeclaredConstraintEmptiesExploresNothingRatherT
         = exploreProblemSpace(metadata, request, test::admitsOnlyWhatKeepKeeps(request.keep));
 
     EXPECT_TRUE(corpus.problems().empty());
-    EXPECT_EQ(corpus.categoricalTotal, 576U);
-    EXPECT_EQ(corpus.categoricalConstraintEmpty, 576U);
+    EXPECT_EQ(corpus.categoricalTotal, 1344U);
+    EXPECT_EQ(corpus.categoricalConstraintEmpty, 1344U);
     EXPECT_EQ(corpus.categoricalNotExplored, 0U) << "none was left out: none could hold a problem";
     ASSERT_FALSE(corpus.skippedCombinations.empty());
     EXPECT_NE(corpus.skippedCombinations.front().find("empty under the declared constraints"),
@@ -977,7 +1024,7 @@ TEST(TestProblemSpace, TheCombinationsTheBoundLeavesOutAreCountedAgainstTheKeptP
     const auto corpus
         = exploreProblemSpace(metadata, request, test::admitsOnlyWhatKeepKeeps(request.keep));
 
-    EXPECT_EQ(corpus.categoricalTotal, 8U) << "the keep's product, not the declared 23040";
+    EXPECT_EQ(corpus.categoricalTotal, 8U) << "the keep's product, not the declared 53760";
     EXPECT_EQ(corpus.categoricalConstraintEmpty, 2U);
     EXPECT_EQ(corpus.categoricalNotExplored, 2U)
         << "the combinations the constraints empty were never candidates";
@@ -1421,13 +1468,13 @@ TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
     // every combination leave window none under its declared 50%. The forms empty more: a scale
     // the form does not state (scale_unset, scale_tensor) other than inv_sqrt_d, and a ragged
     // form over a layout that is not token-major (bshd, qkv_packed). The raking has to hold all
-    // four weighted facets (value_head_dim, layout, scale, window) at once over what is left. The
-    // form is not weighted.
+    // five weighted facets (dtype, value_head_dim, layout, scale, window) at once over what is
+    // left. The form is not weighted.
     const auto metadata = test::shippedOperation("sdpa_fwd");
 
     size_t total = 0;
     const auto combinations = detail::categoricalCombinations(metadata.parameters, 0, total);
-    ASSERT_EQ(combinations.size(), 23040U);
+    ASSERT_EQ(combinations.size(), 53760U);
     const auto sizes = detail::combinationSizes(metadata, combinations);
 
     double all = 0.0;
@@ -1435,6 +1482,7 @@ TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
     std::map<std::string, double> layout;
     std::map<std::string, double> scale;
     std::map<std::string, double> valueHeadDim;
+    std::map<std::string, double> dtype;
     std::map<std::string, double> form;
     size_t empty = 0;
     for(size_t i = 0; i < combinations.size(); ++i)
@@ -1462,14 +1510,15 @@ TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
         layout[text("layout")] += sizes[i];
         scale[text("scale")] += sizes[i];
         valueHeadDim[text("value_head_dim")] += sizes[i];
+        dtype[text("dtype")] += sizes[i];
         form[text("form")] += sizes[i];
     }
-    // Per form, 2880 combinations: 180 are the bottom_right, non-causal, no-window sixteenth of
-    // the product. Five forms leave it at that; scale_unset and scale_tensor also lose the 1920
-    // whose scale is not inv_sqrt_d (120 of them already in the 180), and ragged the 1728 whose
-    // layout is not token-major (108 already in the 180):
-    // 5 * 180 + 2 * (1920 + 180 - 120) + (1728 + 180 - 108) = 6660.
-    EXPECT_EQ(empty, 6660U);
+    // Per form, 6720 combinations: 420 are the bottom_right, non-causal, no-window sixteenth of
+    // the product. Five forms leave it at that; scale_unset and scale_tensor also lose the 4480
+    // whose scale is not inv_sqrt_d (280 of them already in the 420), and ragged the 4032 whose
+    // layout is not token-major (252 already in the 420):
+    // 5 * 420 + 2 * (4480 + 420 - 280) + (4032 + 420 - 252) = 15540.
+    EXPECT_EQ(empty, 15540U);
     EXPECT_NEAR(window["none"] / all, 0.5, 1e-6);
     EXPECT_NEAR(window["local_128"] / all, 1.0 / 6.0, 1e-6);
     EXPECT_NEAR(layout["bshd"] / all, 2.0 / 6.0, 1e-6);
@@ -1477,10 +1526,20 @@ TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
     EXPECT_NEAR(layout["qkv_packed"] / all, 1.0 / 6.0, 1e-6);
     EXPECT_NEAR(scale["inv_sqrt_d"] / all, 0.5, 1e-6);
     EXPECT_NEAR(valueHeadDim["same"] / all, 0.75, 1e-6);
+    // The weights of dtype, 8:8:8:1:1:2:1 over fp16, bf16, fp32 and the four fp8 encodings, hold
+    // however the other facets are cut: the three wider types at 8/29 each, fp8 together at 5/29
+    // and the one gfx942 serves, fp8_e4m3_fnuz, at twice any other encoding.
+    EXPECT_NEAR(dtype["fp16"] / all, 8.0 / 29.0, 1e-6);
+    EXPECT_NEAR(dtype["bf16"] / all, 8.0 / 29.0, 1e-6);
+    EXPECT_NEAR(dtype["fp32"] / all, 8.0 / 29.0, 1e-6);
+    EXPECT_NEAR(dtype["fp8_e4m3_fnuz"] / all, 2.0 / 29.0, 1e-6);
+    EXPECT_NEAR(dtype["fp8_e4m3"] / all, 1.0 / 29.0, 1e-6);
+    EXPECT_NEAR(dtype["fp8_e5m2"] / all, 1.0 / 29.0, 1e-6);
+    EXPECT_NEAR(dtype["fp8_e5m2_fnuz"] / all, 1.0 / 29.0, 1e-6);
     // The form carries no weight: a form's share is its share of the combinations that can hold
     // a problem, less for the three that the declaration's constraints leave fewer of than the
-    // other five (those hold 2700 of their 2880 combinations each; scale_unset and scale_tensor
-    // 900, ragged 1080), and no form is left out.
+    // other five (those hold 6300 of their 6720 combinations each; scale_unset and scale_tensor
+    // 2100, ragged 2520), and no form is left out.
     EXPECT_TRUE(metadata.find("form")->weights.empty());
     for(const auto& [name, held] : form)
     {
