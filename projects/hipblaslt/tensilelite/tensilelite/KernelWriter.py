@@ -49,6 +49,7 @@ from .ir import sched_is_ds_load, sched_is_ds_load_b128, sched_is_ds_store, sche
 from .ir import sched_is_nop, sched_is_instruction, sched_is_module, sched_is_register_container
 from .ir import SSchedulingFence
 from .ir import set_active_version as _set_active_ir_version
+from .ir import set_kernel_logical_disabled as _set_kernel_logical_disabled
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType, DataTypeEnum, HighBitSel
 
@@ -6914,6 +6915,19 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           continue
         if not sched_is_instruction(item):
           continue
+        # logical-IR migration: this pass rewrites register operands
+        # (getParams()/mxsa/mxsb/regName) -- rocisa-only surgery a LogicalLeaf
+        # cannot answer. kernelBody disables logical leaves for mxsInterleave
+        # kernels, so we should never see one here; if the gate is ever missed,
+        # fail loud instead of AttributeError. This pass must move into a
+        # LogicalIR lowering pass before MX kernels can emit leaves (doc §10.7).
+        if not hasattr(item, "getParams"):
+          raise RuntimeError(
+            "remapMXScaleInterleave reached a non-rocisa instruction (%s): MX "
+            "scale interleave rewrites register operands and must move into a "
+            "LogicalIR lowering pass before this kernel can emit LogicalLeaves. "
+            "kernelBody should have disabled logical leaves for mxsInterleave "
+            "kernels; see migration doc §10.7." % type(item).__name__)
         # MX WMMAs keep their scale operands in mxsa/mxsb, outside getParams().
         params = list(item.getParams()) + [getattr(item, attr, None) for attr in ("mxsa", "mxsb")]
         seen = set()
@@ -6942,6 +6956,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # recompute) can access both A and B outside their own call context.
     self.tPA = tensorParametersA
     self.tPB = tensorParametersB
+    # logical-IR migration: a kernel that still runs an in-path pass doing
+    # rocisa-specific surgery on emitted instructions (remapMXScaleInterleave's
+    # register rewrite when mxsInterleave is set; the ds_store_b128 split) must
+    # stay pure rocisa until that pass is lowered (Phase 4). Force it off here so
+    # no region produces LogicalLeaves -> byte-identical to pre-facade. _initKernel
+    # has already computed self.states.mxsInterleave by now.
+    _set_kernel_logical_disabled(bool(getattr(self.states, "mxsInterleave", None)))
     expand = kernel["ExpandPointerSwap"]
     self.dontAppendCode = False
     self._mx2dSplatGen = {}

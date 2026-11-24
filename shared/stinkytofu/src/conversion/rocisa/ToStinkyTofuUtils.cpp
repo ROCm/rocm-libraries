@@ -136,9 +136,24 @@ static SchedCategory schedCategoryForOpcode(stinkytofu::logical::Opcode op) {
         case Logical::DSLoadD16HIU8:
         case Logical::DSLoadD16HIU16:
             return SchedCategory::LocalRead;
+        // --- local-write region: every LDS (DS) write -> LocalWrite ---
+        case Logical::DSStoreB8:
+        case Logical::DSStoreB16:
+        case Logical::DSStoreU16:
+        case Logical::DSStoreB32:
+        case Logical::DSStoreB64:
+        case Logical::DSStoreB96:
+        case Logical::DSStoreB128:
+        case Logical::DSStoreB192:
+        case Logical::DSStoreB256:
+        case Logical::DSStore2B32:
+        case Logical::DSStore2B64:
+        case Logical::DSStoreB8HID16:
+        case Logical::DSStoreD16HIB16:
+            return SchedCategory::LocalWrite;
         default:
-            // rocisa Instruction::schedCategory() base answer. LocalWrite /
-            // GlobalRead / MFMA opcodes get explicit cases as their regions flip.
+            // rocisa Instruction::schedCategory() base answer. GlobalRead / MFMA
+            // opcodes get explicit cases as their regions flip.
             return SchedCategory::Other;
     }
 }
@@ -147,9 +162,15 @@ static SchedExactKind schedExactKindForOpcode(stinkytofu::logical::Opcode op) {
     namespace Logical = stinkytofu::logical;
     switch (op) {
         // Metadata v_mov_b32 count (matches rocisa VMovB32::schedExactKind).
-        // DSStoreB128/B192 join here when the local-write region is flipped.
         case Logical::VMovB32:
             return SchedExactKind::VMovB32;
+        // Exact DS-write widths the scheduler counts separately
+        // (countDSStoreB128 / countDSStoreB192), matching rocisa
+        // DSStoreB128/B192::schedExactKind.
+        case Logical::DSStoreB128:
+            return SchedExactKind::DSStoreB128;
+        case Logical::DSStoreB192:
+            return SchedExactKind::DSStoreB192;
         default:
             return SchedExactKind::None;
     }
@@ -158,9 +179,12 @@ static SchedExactKind schedExactKindForOpcode(stinkytofu::logical::Opcode op) {
 static int schedWeightForOpcode(stinkytofu::logical::Opcode op) {
     namespace Logical = stinkytofu::logical;
     switch (op) {
-        // ds_load_b192 lowers to two physical ops -> weighted local-read count 2
-        // (matches rocisa DSLoadB192::schedWeight). DSStoreB192/B256 join later.
+        // b192/b256 ds ops lower to two physical ops -> weighted local-read /
+        // local-write count 2 (matches rocisa DSLoadB192 / DSStoreB192 /
+        // DSStoreB256::schedWeight).
         case Logical::DSLoadB192:
+        case Logical::DSStoreB192:
+        case Logical::DSStoreB256:
             return 2;
         default:
             return 1;

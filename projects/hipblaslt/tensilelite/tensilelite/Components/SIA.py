@@ -23,7 +23,7 @@
 from rocisa import countInstruction, countGlobalRead, countLocalWrite, \
                    countDSStoreB192, countDSStoreB128, countVMovB32
 from rocisa.base import Item
-from rocisa.code import Module, TextBlock
+from rocisa.code import Module, TextBlock, LogicalLeaf
 from rocisa.container import DSModifiers, HolderContainer, replaceHolder
 
 from rocisa.instruction import SWaitCnt, SWaitAlu, DSStoreB128, DSStoreB64, DSStoreB32
@@ -1256,6 +1256,20 @@ def splitDSInstructionIntoSmaller(writer, kernel, item, numLocalWritesPerSched, 
         # no enough cycles before barrier
         return None, 0, 0
 
+    # logical-IR migration: this split rewrites a rocisa ds_store_b128 into
+    # several smaller rocisa stores via getParams()/.ds -- rocisa-only surgery a
+    # LogicalLeaf cannot answer. It is dormant for large-MI configs (bf16_gfx1250:
+    # DSStoreB128.issueLatency()=5 < miLatency-1=7 -> the early "no need to split"
+    # return above fires first), so local-write can be flipped to leaves today.
+    # If a small-MI config ever reaches here with a leaf, fail loud: this
+    # arch-specific split must move into a LogicalIR lowering pass before a leaf
+    # ds_store can be split (see migration doc §10.7).
+    if isinstance(instruction, LogicalLeaf):
+        raise RuntimeError(
+            "splitDSInstructionIntoSmaller reached a LogicalLeaf ds_store_b128 "
+            "(opcode %s): the b128->smaller-store split is arch-specific and must "
+            "move into a LogicalIR lowering pass before local-write leaves can be "
+            "split. See migration doc section 10.7." % getattr(instruction, "name", "?"))
     addr = instruction.getParams()[0]
     srcr = instruction.getParams()[1]
     offs = instruction.getParams()[2]

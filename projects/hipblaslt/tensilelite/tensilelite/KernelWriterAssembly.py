@@ -108,7 +108,7 @@ from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgp
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from .Common.DebugInstrMask import applyDebugDisableInstrMask
 from .ir import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
-from .ir import logical_region
+from .ir import logical_region, maybe_logical_leaf
 from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU, plsinBlockSchedTile, isMxf4SubtilePath, isSubtileSwizzledTensor
 from .Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal, tdmCacheModifiers
 from .Common.DataType import DataType
@@ -16713,6 +16713,11 @@ class KernelWriterAssembly(KernelWriter):
             # Attach LDS memory token to local write instructions so downstream
             # StinkyTofu passes can track local write dependencies.
             writeInst.setMemToken(MemTokenData(localWriteMemToken))
+            # logical-IR migration (Phase 3): inside the localWrite logical_region
+            # on a logical ISA, lower this ds_store to a LogicalLeaf (trial-gated).
+            # Mem token is already set, so the eager lowering captures it. Outside a
+            # region (and on the subtile path) this is a no-op and stays pure rocisa.
+            writeInst = maybe_logical_leaf(writeInst)
             if self.do["LocalWriteCVT"]:
               localWriteCode.add(localWriteCVTCode)
             if self.do["LocalWrite%s"%tc]:
@@ -16748,16 +16753,20 @@ class KernelWriterAssembly(KernelWriter):
         localWriteCode.add(SBarrier(comment="dump LDS"))
         localWriteCode.add(self.getCmpAssert(self.asmAssert.ne, sgpr("WorkGroup0"),1))
 
-    # Enable local write if not DTL or using nonDTL loads in tail loop
-    if (not kernel["DirectToLds%s"%tc]) or \
-       ((tc in ("A","B","MXSA","MXSB") and kernel["NonDTLTailLoop%s"%tc]) and self.states.inTailLoop):
-      # Skip local write if DTVA or DTVB
-      if not ((tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc]):
-        localWriteBody(tP)
-    if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"] and \
-      (not kernel["DirectToLdsMetadata"] or (kernel["NonDTLTailLoopMetadata"] and self.states.inTailLoop)):
-      if tP["is_sparse"]:
-        localWriteBody(tP["tpsMetadata"])
+    # Enable local write if not DTL or using nonDTL loads in tail loop.
+    # logical-IR migration (Phase 3 Slice: local-write): mark the ds_store
+    # emission as a logical region so localWriteBody's ds_store lowers to a
+    # LogicalLeaf on a logical ISA (trial-gated). Same shape as localReadDo.
+    with logical_region("localWrite%s" % tc):
+      if (not kernel["DirectToLds%s"%tc]) or \
+         ((tc in ("A","B","MXSA","MXSB") and kernel["NonDTLTailLoop%s"%tc]) and self.states.inTailLoop):
+        # Skip local write if DTVA or DTVB
+        if not ((tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc]):
+          localWriteBody(tP)
+      if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"] and \
+        (not kernel["DirectToLdsMetadata"] or (kernel["NonDTLTailLoopMetadata"] and self.states.inTailLoop)):
+        if tP["is_sparse"]:
+          localWriteBody(tP["tpsMetadata"])
 
     return imod
 

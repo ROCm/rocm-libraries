@@ -117,6 +117,40 @@ def region_active():
   return _region_active.get()
 
 
+# Some kernels still run *in-path* passes that do rocisa-specific surgery on the
+# already-emitted instructions and cannot yet operate on a LogicalLeaf (that is
+# Phase 4 lowering work):
+#   * KernelWriter.remapMXScaleInterleave -- rewrites register operands
+#     (getParams()/mxsa/mxsb/regName) of every instruction for MX scale
+#     interleave; runs when self.states.mxsInterleave is set.
+#   * Components/SIA.splitDSInstructionIntoSmaller -- rebuilds a ds_store_b128
+#     into smaller rocisa stores via getParams()/.ds (dormant for large-MI, but
+#     guarded fail-loud).
+# A kernel that needs such a pass must stay pure rocisa until the pass is
+# lowered -- exactly like the subtile path. KernelWriter sets this per kernel;
+# when True, no region produces leaves, so the kernel is byte-identical to the
+# pre-facade path. A ContextVar, like the others, so Parallel.py threads stay
+# correct.
+_kernel_logical_disabled: ContextVar = ContextVar(
+    "tensilelite_ir_kernel_logical_disabled", default=False)
+
+
+def set_kernel_logical_disabled(disabled):
+  """Force the current kernel to stay pure rocisa (an un-lowered in-path pass
+  needs real rocisa instructions). Set by KernelWriter per kernel; returns a
+  token usable with reset_kernel_logical_disabled()."""
+  return _kernel_logical_disabled.set(bool(disabled))
+
+
+def reset_kernel_logical_disabled(token):
+  _kernel_logical_disabled.reset(token)
+
+
+def kernel_logical_disabled():
+  """Whether the current kernel is forced to pure rocisa."""
+  return _kernel_logical_disabled.get()
+
+
 # ============================================================================
 # Phase 1 scheduling introspection seam
 # ============================================================================
@@ -292,6 +326,7 @@ def _backend():
   """
   if (_active_version.get() in _LOGICAL_ISAS
       and _region_active.get()
+      and not _kernel_logical_disabled.get()
       and _trial_enabled()):
     return _logical_backend
   return _rocisa_instruction
@@ -317,6 +352,7 @@ def maybe_logical_leaf(inst):
   """
   if (_active_version.get() in _LOGICAL_ISAS
       and _region_active.get()
+      and not _kernel_logical_disabled.get()
       and _trial_enabled()):
     return _rocisa.makeLogicalLeaf(inst, _active_version.get())
   return inst
