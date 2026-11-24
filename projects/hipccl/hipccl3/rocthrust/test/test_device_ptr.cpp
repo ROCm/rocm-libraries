@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -18,10 +18,18 @@
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
 
+#include _THRUST_STD_INCLUDE(iterator)
+
 #include <cstdlib>
+#include <iterator>
 
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
+
+#ifdef __cpp_lib_concepts
+static_assert(std::indirectly_writable<thrust::device_ptr<uint8_t>, uint8_t>);
+#endif // __cpp_lib_concepts
+static_assert(_THRUST_STD::indirectly_writable<thrust::device_ptr<uint8_t>, uint8_t>);
 
 #define HIP_CHECK_HMM(condition)                                                 \
   {                                                                              \

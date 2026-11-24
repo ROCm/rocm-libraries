@@ -126,12 +126,12 @@ def test_fp32(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
                               miInputPerThread, miWaveTile,
                               matrixInstK=_K_B32,
                               usesTDM=_TDM,
-                              xf32EmuPack=False) == perBlock
+                              xf32EmuPack=False, lrvwTile=1) == perBlock
     assert get_fp32_mt_config(mt, "pad", vw, lrvw, miWaveGroup,
                               miInputPerThread, miWaveTile,
                               matrixInstK=_K_B32,
                               usesTDM=_TDM,
-                              xf32EmuPack=False) == pad
+                              xf32EmuPack=False, lrvwTile=1) == pad
 
 
 @pytest.mark.parametrize(
@@ -146,13 +146,13 @@ def test_fp32_wave_separated_tdm_component_phase(
     kwargs = {"tdmComponentBytes": componentBytes, "tdmNumComponents": 4}
     assert get_fp32_mt_config(
         mt, "perBlock", 1, 2, miWaveGroup, 2, miWaveTile, _K_B32, _TDM,
-        False, **kwargs) == perBlock
+        False, **kwargs, lrvwTile=1) == perBlock
     assert get_fp32_mt_config(
         mt, "pad", 1, 2, miWaveGroup, 2, miWaveTile, _K_B32, _TDM,
-        False, **kwargs) == pad
+        False, **kwargs, lrvwTile=1) == pad
     assert oldBlock not in _L.get_fp32_valid_blocks(
         mt, 1, 2, miWaveGroup, 2, miWaveTile, _K_B32, _TDM,
-        False, **kwargs)
+        False, **kwargs, lrvwTile=1)
 
 
 @pytest.mark.parametrize(
@@ -177,19 +177,19 @@ def test_fp32_tile_major_tail_padding_phase(
     }
     assert get_fp32_mt_config(
         mt, "perBlock", 1, 4, miWaveGroup, 2, miWaveTile, _K_B32, _TDM,
-        False, **kwargs) == perBlock
+        False, **kwargs, lrvwTile=1) == perBlock
     assert get_fp32_mt_config(
         mt, "pad", 1, 4, miWaveGroup, 2, miWaveTile, _K_B32, _TDM,
-        False, **kwargs) == pad
+        False, **kwargs, lrvwTile=1) == pad
     assert oldBlock not in _L.get_fp32_valid_blocks(
         mt, 1, 4, miWaveGroup, 2, miWaveTile, _K_B32, _TDM,
-        False, **kwargs)
+        False, **kwargs, lrvwTile=1)
 
 
 def test_fp32_tile_major_main_and_tail_bases_match_codegen():
     """LraTileAssignment uses LRVW in main and MIInputPerThread in tail."""
     main, tail = _L._fp32_shapes(
-        48, 1, 4, 1, 2, 3, _K_B32, _TDM, False)
+        48, 1, 4, 1, 2, 3, _K_B32, _TDM, False, lrvwTile=1)
     assert main.rawAddrs[16] == 48 * 4 * 4
     assert tail.rawAddrs[16] == 48 * 2 * 4
 
@@ -197,8 +197,13 @@ def test_fp32_tile_major_main_and_tail_bases_match_codegen():
 def test_fp32_tile_major_instruction_offsets_match_codegen():
     """Model every rIdx/eIdx/vIdx emitted by the standard FP32 path."""
     assert _L._build_fp32_instOffs(
-        48, 1, 4, 2, 3, 1, False) == (
+        48, 1, 4, 2, 3, 1, False, lrvwTile=1) == (
             0, 64, 128, 192, 256, 320)
+
+
+def test_xf32_tile_major_rejects_incompatible_read_width():
+    with pytest.raises(ValueError, match="VectorWidth 2 is not divisible by lrvwTile 4"):
+        _L._build_fp32_instOffs(128, 2, 4, 16, 4, 2, xf32EmuPack=True, lrvwTile=4)
 
 
 # XF32 (xf32EmuPack=True)
@@ -212,6 +217,7 @@ def test_fp32_tile_major_instruction_offsets_match_codegen():
         ( 32, 1, 4, 2, 16, 1,  512, 16),
         ( 64, 2, 4, 2, 16, 2, 1024, 32),
         (128, 2, 4, 2, 16, 4, 1024, 16),
+        (128, 4, 4, 2, 16, 4,    0,  0),
     ],
 )
 def test_xf32(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
@@ -220,12 +226,171 @@ def test_xf32(mt, vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile,
                               miInputPerThread, miWaveTile,
                               matrixInstK=_K_XF32,
                               usesTDM=_TDM,
-                              xf32EmuPack=True) == perBlock
+                              xf32EmuPack=True, lrvwTile=vw) == perBlock
     assert get_fp32_mt_config(mt, "pad", vw, lrvw, miWaveGroup,
                               miInputPerThread, miWaveTile,
                               matrixInstK=_K_XF32,
                               usesTDM=_TDM,
-                              xf32EmuPack=True) == pad
+                              xf32EmuPack=True, lrvwTile=vw) == pad
+
+
+@pytest.mark.parametrize("lrvwTile", [2, 4])
+@pytest.mark.parametrize("entry", ["config", "valid_blocks"])
+def test_native_fp32_padding_rejects_unvalidated_tile_width(lrvwTile, entry):
+    kwargs = dict(mt=128, vw=4, lrvw=2, miWaveGroup=2,
+                  miInputPerThread=2, miWaveTile=4, matrixInstK=4,
+                  usesTDM=True, xf32EmuPack=False, lrvwTile=lrvwTile)
+    with pytest.raises(RuntimeError, match="native FP32.*lrvwTile=1.*LdsPadding.py"):
+        if entry == "config":
+            get_fp32_mt_config(key="pad", **kwargs)
+        else:
+            _L.get_fp32_valid_blocks(**kwargs)
+
+
+@pytest.fixture
+def fp32_lds_kernel(assembler, gfx1250_iim):
+    import copy
+    from codegen_harness import _init_rocisa_for, _prepare_kernel
+    from config_harness import _isolated_globals_with_isa
+    from tensilelite.Common.GlobalParameters import defaultSolution
+    from tensilelite.Common.Types import DebugConfig, IsaVersion
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.SolutionStructs.Problem import ProblemType
+    from tensilelite.SolutionStructs.Solution import Solution
+    from tensilelite.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
+
+    def make(*, xf32=False, vw=4, waveTile=(4, 4), pad=-1, block=-1):
+        isa = IsaVersion(12, 5, 0)
+        mi = [16, 16, 32 if xf32 else 4, 1, 1, *waveTile, 2, 2]
+        problem = dict(OperationType="GEMM", DataType="S", DestDataType="S",
+                       ComputeDataType="S", F32XdlMathOp="X" if xf32 else "S",
+                       TransposeA=False, TransposeB=True, Batched=True)
+        problem = ProblemType(problem, False).state
+        params = copy.deepcopy(defaultSolution)
+        params.update(ProblemType=problem, ISA=isa, MatrixInstruction=mi,
+                      KernelLanguage="Assembly", WavefrontSize=32, DepthU=64,
+                      TDMInst=3, TransposeLDS=-1, SourceSwap=True,
+                      VectorWidthA=vw, VectorWidthB=vw, LocalReadVectorWidth=-1,
+                      GlobalReadVectorWidthA=1, GlobalReadVectorWidthB=1,
+                      LdsPadA=pad, LdsPadB=pad,
+                      LdsBlockSizePerPadA=block, LdsBlockSizePerPadB=block,
+                      PrefetchGlobalRead=2, PrefetchLocalRead=1,
+                      ScheduleIterAlg=4, StaggerU=0, GlobalSplitU=1)
+        params.update({"1LDSBuffer": 0})
+        params.update(matrixInstructionToMIParameters(
+            mi, isa, 32, problem, params["WorkGroup"], gfx1250_iim, True))
+        solution = Solution(params, False, True, False, assembler, gfx1250_iim)
+        assert solution["Valid"]
+        kernel, = generateKernelObjectsFromSolutions([solution])
+        _init_rocisa_for(kernel)
+        _prepare_kernel(kernel)
+        writer = KernelWriterAssembly(assembler, DebugConfig())
+        tPA, tPB = {}, {}
+        writer._initKernel(kernel, tPA, tPB)
+        return writer, kernel, {"A": tPA, "B": tPB}
+
+    with _isolated_globals_with_isa(gfx1250_iim):
+        yield make
+
+
+@pytest.mark.parametrize(
+    "xf32, waveTile, vw, expectedPadding",
+    [
+        pytest.param(False, (1, 1), 1, ((256, 16), (256, 16)), id="fp32-mt32-vw1"),
+        pytest.param(False, (2, 2), 2, ((512, 32), (512, 32)), id="fp32-mt64-vw2"),
+        pytest.param(False, (4, 4), 1, ((1024, 16), (1024, 16)), id="fp32-mt128-vw1"),
+        pytest.param(False, (4, 4), 2, ((1024, 32), (1024, 32)), id="fp32-mt128-vw2"),
+        pytest.param(False, (4, 4), 4, ((1024, 2), (1024, 2)), id="fp32-mt128-vw4"),
+        pytest.param(False, (8, 4), 4, ((128, 2), (1024, 2)), id="fp32-mt256x128-vw4"),
+        pytest.param(True, (1, 1), 1, ((512, 16), (512, 16)), id="xf32-mt32-vw1"),
+        pytest.param(True, (2, 2), 2, ((1024, 32), (1024, 32)), id="xf32-mt64-vw2"),
+        pytest.param(True, (4, 4), 1, ((1024, 8), (1024, 8)), id="xf32-mt128-vw1"),
+        pytest.param(True, (4, 4), 2, ((1024, 16), (1024, 16)), id="xf32-mt128-vw2"),
+        pytest.param(True, (4, 4), 4, ((0, 0), (0, 0)), id="xf32-mt128-vw4"),
+    ],
+)
+def test_fp32_padding_supported_codegen_widths(
+        fp32_lds_kernel, assembler, xf32, waveTile, vw, expectedPadding):
+    from codegen_harness import emit_one_kernel
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+
+    writer, kernel, tensors = fp32_lds_kernel(xf32=xf32, vw=vw, waveTile=waveTile)
+    expected = vw if xf32 else 1
+    assert kernel["UseF32XEmulation"] == xf32
+    assert (kernel["MacroTile0"], kernel["MacroTile1"]) == tuple(32 * wt for wt in waveTile)
+    for (tc, tensor), padding in zip(tensors.items(), expectedPadding):
+        assert kernel[f"enableTDM{tc}"]
+        assert not kernel[f"UnrollMajorLDS{tc}"]
+        assert kernel[f"VectorWidth{tc}"] == vw
+        assert kernel[f"MIInputPerThread{tc}"] == (16 if xf32 else 2)
+        assert kernel[f"LocalReadVectorWidth{tc}"] == (4 if xf32 else 2)
+        assert (kernel[f"LdsBlockSizePerPad{tc}"], kernel[f"LdsPad{tc}"]) == padding
+        assert getattr(writer.states, f"lrvwTile{tc}") == expected
+        assert tensor["localReadInstruction"].inst.__name__ == f"DSLoadB{32 * expected}"
+
+    kernel.duplicate = False
+    _, source, error = emit_one_kernel(KernelWriterAssembly(assembler, DebugConfig()), kernel)
+    assert error == 0
+    assert f"ds_load_b{32 * expected} " in source
+
+
+@pytest.mark.parametrize("lrvwTile", [2, 4])
+def test_native_fp32_solution_rejects_widened_read_policy(
+        fp32_lds_kernel, monkeypatch, lrvwTile):
+    import importlib
+    solution_module = importlib.import_module("tensilelite.SolutionStructs.Solution")
+    monkeypatch.setattr(solution_module, "effective_lrvw_tile", lambda **kwargs: lrvwTile)
+    with pytest.raises(RuntimeError, match="native FP32.*lrvwTile=1.*LdsPadding.py"):
+        fp32_lds_kernel()
+
+
+@pytest.mark.parametrize("lrvwTile", [2, 4])
+def test_native_fp32_codegen_rejects_matching_wide_instruction(
+        fp32_lds_kernel, lrvwTile):
+    writer, kernel, tensors = fp32_lds_kernel()
+    for tc, tensor in tensors.items():
+        assert kernel[f"LdsPad{tc}"] > 0
+        setattr(writer.states, f"lrvwTile{tc}", lrvwTile)
+        with pytest.raises(RuntimeError, match="native FP32.*lrvwTile=1.*LdsPadding.py"):
+            writer.initLocalReadMemoryInstruction(
+                writer.memoryInstructions, kernel, tensor, writer.states.bpr)
+        actual = tensor["localReadInstruction"]
+        assert actual.inst.__name__ == f"DSLoadB{32 * lrvwTile}", tc
+        assert actual.blockWidth == lrvwTile, tc
+
+
+@pytest.mark.parametrize("lrvwTile", [2, 4])
+@pytest.mark.parametrize("block", [-1, 0])
+def test_native_fp32_zero_padding_allows_matching_wide_instruction(
+        fp32_lds_kernel, monkeypatch, lrvwTile, block):
+    import importlib
+    solution_module = importlib.import_module("tensilelite.SolutionStructs.Solution")
+    monkeypatch.setattr(solution_module, "effective_lrvw_tile", lambda **kwargs: lrvwTile)
+    writer, kernel, tensors = fp32_lds_kernel(pad=0, block=block)
+    for tc, tensor in tensors.items():
+        assert kernel[f"LdsPad{tc}"] == 0
+        assert kernel[f"LdsBlockSizePerPad{tc}"] == 0
+        setattr(writer.states, f"lrvwTile{tc}", lrvwTile)
+        writer.initLocalReadMemoryInstruction(
+            writer.memoryInstructions, kernel, tensor, writer.states.bpr)
+        actual = tensor["localReadInstruction"]
+        assert actual.inst.__name__ == f"DSLoadB{32 * lrvwTile}", tc
+        assert actual.blockWidth == lrvwTile, tc
+
+
+def test_zero_padding_still_rejects_instruction_width_mismatch(
+        fp32_lds_kernel, monkeypatch):
+    writer, kernel, tensors = fp32_lds_kernel(pad=0)
+    b32_index = next(i for i, instruction in enumerate(writer.memoryInstructions["LocalRead"])
+                     if instruction.inst.__name__ == "DSLoadB32")
+    monkeypatch.setattr(writer, "selectMemoryInstruction", lambda *args: b32_index)
+    for tc, tensor in tensors.items():
+        setattr(writer.states, f"lrvwTile{tc}", 4)
+        with pytest.raises(RuntimeError, match=f"FP32 LDS padding/read instruction mismatch for {tc}"):
+            writer.initLocalReadMemoryInstruction(
+                writer.memoryInstructions, kernel, tensor, writer.states.bpr)
 
 
 # MX
@@ -293,7 +458,7 @@ def test_fp32_pad_is_even_dwords():
             for vw in (1, 2, 4):
                 if wt % vw:
                     continue
-                pad = get_fp32_mt_config(mt, "pad", vw, 2, wg, 2, wt, _K_B32, _TDM)
+                pad = get_fp32_mt_config(mt, "pad", vw, 2, wg, 2, wt, _K_B32, _TDM, lrvwTile=1)
                 assert _pad_bytes_x2(pad, 4.0) % 16 == 0, (mt, wt, wg, vw, pad)
 
 
@@ -350,11 +515,22 @@ def test_fp32_config_falls_back_when_search_finds_no_legal_candidate(monkeypatch
     monkeypatch.setattr(_L, "_search_padding", lambda *args: None)
     _L._compute_fp32_config.cache_clear()
     try:
-        config = _L._compute_fp32_config(32, 1, 2, 1, 2, 2, _K_B32, _TDM)
+        config = _L._compute_fp32_config(32, 1, 2, 1, 2, 2, _K_B32, _TDM, lrvwTile=1)
     finally:
         _L._compute_fp32_config.cache_clear()
 
     assert config == {"perBlock": 0, "pad": 0}
+
+
+def test_xf32_config_rejects_misaligned_read_offsets():
+    shape = _L._fp32_shape(
+        33, 2, 4, 1, 16, 2, _K_XF32, _TDM, xf32EmuPack=True, lrvwTile=2)
+    assert shape.instOffs[1] == 132
+    assert _L._fp32_wave_costs(
+        shape.rawAddrs, 0, 0, shape.wOffsets, shape.instOffs, lrvwTile=2) is None
+    assert _L._compute_fp32_config(
+        33, 2, 4, 1, 16, 2, _K_XF32, _TDM, xf32EmuPack=True, lrvwTile=2) == {
+            "perBlock": 0, "pad": 0}
 
 
 def test_no_block_carry_detects_a_carrying_pair():
@@ -434,14 +610,21 @@ def test_fp16_config_is_legal_over_the_reachable_shapes():
 def test_b32_wave_costs_counts_one_bank_per_thread():
     # 32 threads, 4 bytes apart, no padding: banks 0..31, all distinct.
     raw = [4 * i for i in range(32)]
-    assert _L._b32_wave_costs(raw, 0, 0, (0,), (0,)) == [1]
+    assert _L._fp32_wave_costs(raw, 0, 0, (0,), (0,), lrvwTile=1) == [1]
     # Every thread 256 bytes apart lands on bank 0.
     raw = [256 * i for i in range(32)]
-    assert _L._b32_wave_costs(raw, 0, 0, (0,), (0,)) == [32]
+    assert _L._fp32_wave_costs(raw, 0, 0, (0,), (0,), lrvwTile=1) == [32]
 
 
 def test_b32_wave_costs_rejects_addresses_below_dword_alignment():
-    assert _L._b32_wave_costs([1] * 32, 0, 0, (0,), (0,)) is None
+    assert _L._fp32_wave_costs([1] * 32, 0, 0, (0,), (0,), lrvwTile=1) is None
+
+
+def test_ordinary_b128_wave_costs_sum_both_service_groups():
+    lower = [16 * (i % 8) + 256 * (i // 8) for i in range(16)]
+    upper = [128 + 16 * (i % 6) + 256 * (i // 6) for i in range(16)]
+    assert _L._fp32_wave_costs(
+        lower + upper, 0, 0, (0,), (0,), lrvwTile=4) == [5]
 
 
 def test_fp32_config_is_legal_over_the_reachable_shapes():
@@ -451,8 +634,8 @@ def test_fp32_config_is_legal_over_the_reachable_shapes():
             for vw in (1, 2, 4):
                 if wt % vw:
                     continue
-                perBlock = get_fp32_mt_config(mt, "perBlock", vw, 2, wg, 2, wt, _K_B32, _TDM)
-                pad = get_fp32_mt_config(mt, "pad", vw, 2, wg, 2, wt, _K_B32, _TDM)
+                perBlock = get_fp32_mt_config(mt, "perBlock", vw, 2, wg, 2, wt, _K_B32, _TDM, lrvwTile=1)
+                pad = get_fp32_mt_config(mt, "pad", vw, 2, wg, 2, wt, _K_B32, _TDM, lrvwTile=1)
                 if perBlock == 0:
                     assert pad == 0, (mt, wt, wg, vw, pad)
                     continue
@@ -523,7 +706,7 @@ def test_chosen_block_divides_the_tail_loop_step():
             for vw in (1, 2, 4):
                 if wt % vw:
                     continue
-                perBlock = get_fp32_mt_config(mt, "perBlock", vw, 2, wg, 2, wt, _K_B32, _TDM)
+                perBlock = get_fp32_mt_config(mt, "perBlock", vw, 2, wg, 2, wt, _K_B32, _TDM, lrvwTile=1)
                 if perBlock:
                     assert mt * 4 * _K_B32 % perBlock == 0, (mt, wt, wg, vw, perBlock)
 
@@ -551,10 +734,10 @@ def test_chosen_block_is_one_the_validator_accepts():
                 for vw in (1, 2, 4):
                     if wt % vw:
                         continue
-                    perBlock = get_fp32_mt_config(mt, "perBlock", vw, 2, wg, 2, wt, _K_B32, tdm)
+                    perBlock = get_fp32_mt_config(mt, "perBlock", vw, 2, wg, 2, wt, _K_B32, tdm, lrvwTile=1)
                     if perBlock:
                         assert perBlock in _L.get_fp32_valid_blocks(
-                            mt, vw, 2, wg, 2, wt, _K_B32, tdm), (mt, wt, wg, vw, tdm, perBlock)
+                            mt, vw, 2, wg, 2, wt, _K_B32, tdm, lrvwTile=1), (mt, wt, wg, vw, tdm, perBlock)
 
 
 def test_chosen_pad_and_block_are_a_legal_pair():

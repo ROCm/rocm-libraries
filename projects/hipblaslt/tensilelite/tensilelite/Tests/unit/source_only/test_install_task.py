@@ -148,13 +148,9 @@ def test_install_uses_one_selected_rocm_root_and_binds_the_built_client(tmp_path
         "rocisa",
         {
             "build_env": tasks._resolve_rocm_build_environment(),
-            "stinkytofu": "auto",
-            "rebuild_stinkytofu": False,
         },
     )
     assert calls[2][0] == "build-client"
-    assert "stinkytofu" not in calls[2][1]
-    assert "rebuild_stinkytofu" not in calls[2][1]
     assert calls[2][1]["build_env"] is calls[1][1]["build_env"]
     assert calls[2][1]["build_env"].root == rocm_root
     editable_command = shlex.split(calls[3][1])
@@ -176,47 +172,6 @@ def test_install_uses_one_selected_rocm_root_and_binds_the_built_client(tmp_path
         "--client",
         str(client),
     ]
-
-
-@pytest.mark.skipif(sys.platform != "linux", reason="invoke install is Linux-only")
-def test_install_forwards_stinkytofu_options_to_rocisa_only(tmp_path, monkeypatch):
-    rocm_root = (tmp_path / "rocm").resolve()
-    rocm_root.mkdir()
-    (rocm_root / ".info").mkdir()
-    (rocm_root / ".info" / "version").write_text("7.2.4\n", encoding="utf-8")
-    client = tasks._built_client_path(tmp_path / "build")
-    client.parent.mkdir(parents=True)
-    client.write_text("client", encoding="utf-8")
-    client.chmod(0o755)
-    calls = []
-
-    class Context:
-        def run(self, command, **kwargs):
-            pass
-
-    monkeypatch.setenv("ROCM_PATH", str(rocm_root))
-    monkeypatch.setattr(
-        tasks,
-        "_install_rocisa",
-        lambda context, **kwargs: calls.append(("rocisa", kwargs)),
-    )
-    monkeypatch.setattr(
-        tasks,
-        "_build_client",
-        lambda context, **kwargs: calls.append(("build", kwargs)),
-    )
-
-    tasks.install.body(
-        Context(),
-        build_dir=str(tmp_path / "build"),
-        stinkytofu="on",
-        rebuild_stinkytofu=True,
-    )
-
-    assert calls[0][1]["stinkytofu"] == "on"
-    assert calls[0][1]["rebuild_stinkytofu"] is True
-    assert "stinkytofu" not in calls[1][1]
-    assert "rebuild_stinkytofu" not in calls[1][1]
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="invoke install is Linux-only")
@@ -338,20 +293,6 @@ def test_rocisa_install_builds_with_the_selected_rocm_compilers(tmp_path, monkey
     assert kwargs["env"]["ROCM_PATH"] == str(selected)
 
 
-def test_stinkytofu_binding_builds_with_the_selected_rocm(tmp_path, monkeypatch):
-    selected = _fake_rocm_root(tmp_path, "selected")
-    monkeypatch.setenv("ROCM_PATH", str(_fake_rocm_root(tmp_path, "ambient")))
-    context = _RecordingContext()
-
-    tasks._pip_install_stinkytofu(
-        context, build_env=tasks._resolve_rocm_build_environment(str(selected))
-    )
-
-    ((_, kwargs),) = context.commands
-    assert shlex.split(kwargs["env"]["CMAKE_ARGS"]) == _selected_root_args(selected)
-    assert kwargs["env"]["ROCM_PATH"] == str(selected)
-
-
 def test_build_client_overrides_the_preset_with_the_selected_root(tmp_path, monkeypatch):
     selected = _fake_rocm_root(tmp_path, "selected")
     ambient = _fake_rocm_root(tmp_path, "ambient")
@@ -440,8 +381,6 @@ def test_install_explicit_rocm_path_wins_over_ambient_rocm_path(tmp_path, monkey
         "rocisa",
         {
             "build_env": tasks._resolve_rocm_build_environment(str(selected)),
-            "stinkytofu": "auto",
-            "rebuild_stinkytofu": False,
         },
     )
     assert calls[2][1]["build_env"] is calls[1][1]["build_env"]
@@ -585,8 +524,8 @@ def test_native_auto_detection_uses_selected_tools_and_recovers_stepping(
     caller_env = dict(os.environ)
     context = _RecordingContext()
     if workflow == "rocisa":
-        tasks.rocisa.body(context, stinkytofu="auto", **kwargs)
-        assert len(context.commands) == 2  # rocisa and the strict-stepping StinkyTofu binding
+        tasks.rocisa.body(context, **kwargs)
+        assert len(context.commands) == 1  # rocisa
         for _, options in context.commands:
             assert options["env"]["ROCM_PATH"] == str(selected)
     else:
@@ -630,7 +569,7 @@ def test_selected_root_without_gpu_tools_does_not_borrow_ambient_tools(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="executable shell tool fixtures")
-def test_explicit_targets_and_forced_stinkytofu_modes_skip_detection(tmp_path, monkeypatch):
+def test_explicit_targets_skip_gpu_detection(tmp_path, monkeypatch):
     from tensilelite import GpuArch
 
     selected = _executable_rocm_root(tmp_path, "selected", "gfx1250")
@@ -648,19 +587,6 @@ def test_explicit_targets_and_forced_stinkytofu_modes_skip_detection(tmp_path, m
         build=False,
     )
     assert "-DGPU_TARGETS=gfx950" in shlex.split(context.commands[0][0])
-    assert tasks._want_stinkytofu("on", rocm_path=selected) is True
-    assert tasks._want_stinkytofu("off", rocm_path=selected) is False
-
-
-def test_disabled_stinkytofu_task_needs_no_rocm_environment(monkeypatch, capsys):
-    monkeypatch.setenv("ROCM_PATH", "")
-
-    def forbidden(*args, **kwargs):
-        raise AssertionError("a disabled optional build tried to select ROCm")
-
-    monkeypatch.setattr(tasks, "_resolve_rocm_build_environment", forbidden)
-    tasks.install_stinkytofu.body(None, mode="off")
-    assert capsys.readouterr().out == ""
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="invoke install is Linux-only")

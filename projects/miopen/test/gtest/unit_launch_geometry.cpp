@@ -59,14 +59,16 @@ void ExpectRejected(const std::array<std::size_t, 3>& gdims)
 
 // NOLINTBEGIN(google-readability-avoid-underscore-in-googletest-name)
 
+using CPU_LaunchGeometry_NONE = testing::TestWithParam<int>;
+
 // The largest expressible global work size must be accepted: the limit is
 // exclusive, so 2^32 - 1 is still a valid launch.
-TEST(CPU_LaunchGeometry_NONE, AcceptsLargestExpressibleGlobalWorkSize)
+TEST_P(CPU_LaunchGeometry_NONE, AcceptsLargestExpressibleGlobalWorkSize)
 {
     ExpectAccepted({k32BitLimit - 1, 1, 1});
 }
 
-TEST(CPU_LaunchGeometry_NONE, AcceptsTypicalGeometry)
+TEST_P(CPU_LaunchGeometry_NONE, AcceptsTypicalGeometry)
 {
     ExpectAccepted({std::size_t{4096} * 256, 1, 1});
     ExpectAccepted({1024, 512, 64});
@@ -74,7 +76,7 @@ TEST(CPU_LaunchGeometry_NONE, AcceptsTypicalGeometry)
 
 // A global work size that is an exact multiple of 2^32 truncates to zero. HIP
 // rejects this, but only asynchronously and from an unrelated later call.
-TEST(CPU_LaunchGeometry_NONE, RejectsGlobalWorkSizeTruncatingToZero)
+TEST_P(CPU_LaunchGeometry_NONE, RejectsGlobalWorkSizeTruncatingToZero)
 {
     ExpectRejected({k32BitLimit, 1, 1});
     ExpectRejected({2 * k32BitLimit, 1, 1});
@@ -83,13 +85,13 @@ TEST(CPU_LaunchGeometry_NONE, RejectsGlobalWorkSizeTruncatingToZero)
 // The dangerous case: a global work size just over 2^32 truncates to a smaller
 // non-zero grid that HIP accepts without error, so the kernel silently covers
 // only part of the problem. Must be rejected.
-TEST(CPU_LaunchGeometry_NONE, RejectsGlobalWorkSizeTruncatingToNonZeroGrid)
+TEST_P(CPU_LaunchGeometry_NONE, RejectsGlobalWorkSizeTruncatingToNonZeroGrid)
 {
     ExpectRejected({k32BitLimit + 256, 1, 1});
 }
 
 // Every dimension is validated, not just x.
-TEST(CPU_LaunchGeometry_NONE, RejectsOverflowInAnyDimension)
+TEST_P(CPU_LaunchGeometry_NONE, RejectsOverflowInAnyDimension)
 {
     ExpectRejected({k32BitLimit, 1, 1});
     ExpectRejected({1, k32BitLimit, 1});
@@ -100,7 +102,7 @@ TEST(CPU_LaunchGeometry_NONE, RejectsOverflowInAnyDimension)
 // valid launch on this path -- hipExtModuleLaunchKernel takes work-item counts and
 // derives the workgroup count itself -- so geometry whose global work size is not
 // a multiple of the local work size must NOT be rejected here.
-TEST(CPU_LaunchGeometry_NONE, AcceptsGlobalWorkSizeNotMultipleOfLocalWorkSize)
+TEST_P(CPU_LaunchGeometry_NONE, AcceptsGlobalWorkSizeNotMultipleOfLocalWorkSize)
 {
     ExpectAccepted({255, 1, 1});
     ExpectAccepted({1000, 1, 1});
@@ -112,7 +114,7 @@ TEST(CPU_LaunchGeometry_NONE, AcceptsGlobalWorkSizeNotMultipleOfLocalWorkSize)
 // grid_size by MAX_GRID_SIZE, so the largest geometry the solver can emit must
 // remain launchable; if that bound is ever raised to allow grid_size * 256 to
 // reach 2^32, this test fails rather than the launch silently truncating.
-TEST(CPU_LaunchGeometry_NONE, AcceptsMaxNaiveConvSolverGeometry)
+TEST_P(CPU_LaunchGeometry_NONE, AcceptsMaxNaiveConvSolverGeometry)
 {
     constexpr std::size_t block_size = 256;
     constexpr std::size_t max_grid   = k32BitLimit / block_size;
@@ -126,7 +128,7 @@ TEST(CPU_LaunchGeometry_NONE, AcceptsMaxNaiveConvSolverGeometry)
 
 // The exception must name the kernel so a rejected launch is attributable during
 // Find, where many candidates are evaluated in sequence.
-TEST(CPU_LaunchGeometry_NONE, ReportsKernelNameOnRejection)
+TEST_P(CPU_LaunchGeometry_NONE, ReportsKernelNameOnRejection)
 {
     try
     {
@@ -139,5 +141,7 @@ TEST(CPU_LaunchGeometry_NONE, ReportsKernelNameOnRejection)
             << "exception should name the offending kernel: " << e.what();
     }
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_LaunchGeometry_NONE, testing::Values(0));
 
 // NOLINTEND(google-readability-avoid-underscore-in-googletest-name)

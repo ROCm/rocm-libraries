@@ -126,7 +126,7 @@ TEST_P(GPU_BNBWDSmall2D_FP64, DISABLED_BnV1SmallBWDCKfp64_2D) {}
 TEST_P(GPU_BNBWDLarge2D_FP64, DISABLED_BnV2LargeBWDCKfp64_2D) {}
 
 // fp16
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_BNBWDSmall_FP32,
                          testing::Combine(testing::ValuesIn(Network2DSmall<BN2DTestCase>()),
                                           testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
@@ -136,7 +136,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::ValuesIn({miopenActivationPASTHRU})),
                          TestNameGenerator<BN2DTestCase>());
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_BNOCLBWDLarge2D_FP16,
                          testing::Combine(testing::ValuesIn(Network2DLarge<BN2DTestCase>()),
                                           testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
@@ -146,7 +146,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                                           testing::ValuesIn({miopenActivationPASTHRU})),
                          TestNameGenerator<BN2DTestCase>());
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_BNOCLBWDLarge3D_FP16,
                          testing::Combine(testing::ValuesIn(Network3DBN<BN3DTestCase>()),
                                           testing::ValuesIn({miopenTensorNCDHW, miopenTensorNDHWC}),
@@ -177,7 +177,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                                           testing::ValuesIn({miopenActivationPASTHRU})),
                          TestNameGenerator<BN2DTestCase>());
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_BNOCLBWDLarge3D_BFP16,
                          testing::Combine(testing::ValuesIn(Network3DBN<BN3DTestCase>()),
                                           testing::ValuesIn({miopenTensorNCDHW, miopenTensorNDHWC}),
@@ -188,7 +188,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          TestNameGenerator<BN3DTestCase>());
 
 // fp32
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_BNBWDSmall2D_FP32,
                          testing::Combine(testing::ValuesIn(Network2DSmall<BN2DTestCase>()),
                                           testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
@@ -198,7 +198,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::ValuesIn({miopenActivationPASTHRU})),
                          TestNameGenerator<BN2DTestCase>());
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_BNBWDLarge2D_FP32,
                          testing::Combine(testing::ValuesIn(Network2DLarge<BN2DTestCase>()),
                                           testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
@@ -207,7 +207,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                                           testing::ValuesIn({testBNAPIV2}),
                                           testing::ValuesIn({miopenActivationPASTHRU})),
                          TestNameGenerator<BN2DTestCase>());
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_BNBWDLarge3D_FP32,
                          testing::Combine(testing::ValuesIn(Network3DBN<BN3DTestCase>()),
                                           testing::ValuesIn({miopenTensorNCDHW, miopenTensorNDHWC}),
@@ -217,7 +217,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                                           testing::ValuesIn({miopenActivationPASTHRU})),
                          TestNameGenerator<BN3DTestCase>());
 // fp64
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_BNBWDSmall2D_FP64,
                          testing::Combine(testing::ValuesIn(Network2DSmall<BN2DTestCase>()),
                                           testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
