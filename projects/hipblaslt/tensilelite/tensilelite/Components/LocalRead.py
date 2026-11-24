@@ -32,7 +32,11 @@ from rocisa.instruction import SMovB32, SWaitCnt, VOrB32, VPermB32, VLShiftLeftO
                             ECvtPkFP8toF32, ECvtF32toF16, DSLoadU8
 
 from ..Component import LocalRead
-from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxReadVectorWidth
+from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxReadVectorWidth, mxsbRotateSplit
+from ..Common.LdsReadPlan import (
+    gfx1250_lds_offset_bytes,
+    make_local_read_loop_plan,
+)
 
 from math import ceil
 
@@ -169,6 +173,17 @@ class LocalReadMFMA(LocalRead):
         if tileSpanInfo is not None:
             return tileSpanInfo["numGroups"]
         return kernel["MIWaveTile"][tile01] // mxReadVectorWidth(kernel, tc)
+
+    @staticmethod
+    def getMxsbRotateHalfStride(kernel):
+        """Byte distance between the two vIdx halves of a split (non-TileSpan) MXSB read.
+
+        Same per-vIdx step as localReadMX (MIWaveGroupShape[1] * mxUnit) times half the vIdx count.
+        """
+        mxUnit = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlockB"]
+        vStep = kernel["MatrixInstN"] * kernel["MatrixInstBN"] * kernel["MIWaveGroup"][1] * kernel["VectorWidthB"]
+        half = kernel["MIWaveTile"][1] // kernel["VectorWidthB"] // 2
+        return half * vStep * mxUnit
 
     @staticmethod
     def getMxsTileSpanInfo(kernel, tc, tile01, asmCaps):
@@ -685,11 +700,19 @@ class LocalReadMFMA(LocalRead):
                             kernel["MatrixInstN"] * kernel["MatrixInstBN"] * kernel["MIWaveGroup"][1] * kernel["VectorWidthB"]]
         tileSpanInfo = self.getMxsTileSpanInfo(kernel, tc, tile01, writer.states.asmCaps)
         mxsTileSpan = tileSpanInfo is not None
-        if tc == "MXSB" and kernel.get("LDSSegmentBRotate"):
+        rotateSplit = tc == "MXSB" and mxsbRotateSplit(kernel)
+        if tc == "MXSB" and kernel.get("LDSSegmentBRotate") and not rotateSplit:
             # LRA rotates MXSB by flipping the half-wave select, which covers only one group.
             assert mxsTileSpan and tileSpanInfo["numGroups"] == 1 and kernel["MIWaveGroup"][1] > 1, \
                 "LDSSegmentBRotate: MXSB needs the single-group TileSpan wave-split layout"
         numVectorsPerTile = self.getMxNumVectorsPerTile(kernel, tc, tile01, writer.states.asmCaps)
+        if rotateSplit:
+            # Logical half h of the vIdx range reads LocalReadAddrMXSB+h; per pair the two
+            # registers are swapped in LRA, so the immediate carries only the in-half offset.
+            assert not mxsTileSpan and not mx2d and numVectorsPerTile % 2 == 0, \
+                "LDSSegmentBRotate: split MXSB needs a 1D non-TileSpan layout with even vIdx count"
+            rotateHalf = numVectorsPerTile // 2
+            rotateHalfStride = self.getMxsbRotateHalfStride(kernel)
         # 2D phase: each vector reads through its own LocalReadAddr+vIdx, which
         # already holds its scale row (mxPhaseLraFixup); no vIdx immediate.
         mxPhase = mxFreePhase(kernel, tc)
@@ -772,6 +795,13 @@ class LocalReadMFMA(LocalRead):
                 addrIdx = paramList[0] // 65536
                 srcAddr=vgpr("LocalReadAddr%s+%u"%(tc, addrIdx))
                 paramList[0] -= addrIdx * 65536
+                if rotateSplit:
+                    assert addrIdx == 0 and (kernel["LdsBlockSizePerPad%s"%tc] == 0 or kernel["LdsPad%s"%tc] == 0), \
+                        "LDSSegmentBRotate: split MXSB needs unpadded offsets below 64K"
+                    half = vIdx // rotateHalf
+                    paramList[0] -= half * rotateHalfStride
+                    assert paramList[0] >= 0
+                    srcAddr = vgpr("LocalReadAddr%s+%u"%(tc, half))
                 if mxPhase:
                     assert addrIdx == 0, "MXS 2D phase: LocalReadAddr+vIdx needs offsets below 64K"
                     srcAddr = vgpr("LocalReadAddr%s+%u"%(tc, vIdx))
@@ -842,8 +872,6 @@ class LocalReadMFMA(LocalRead):
 
         numOffsets       = instruction.numOffsets
         blockWidth       = instruction.blockWidth
-        unrollBlockWidth = instruction.blockWidth if kernel["UnrollMajorLDS%s"%tc] else tP["bpeDS"]/4
-        tileBlockWidth   = tP["bpeDS"]/4 if kernel["UnrollMajorLDS%s"%tc] else instruction.blockWidth
 
         vectorWidth  = kernel["VectorWidth%s"%tc]
 
@@ -889,14 +917,6 @@ class LocalReadMFMA(LocalRead):
         matrixInstT = kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"]
         matrixInstTO = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
         matrixInstTO = matrixInstT if ("MXS" in tc) else matrixInstTO
-        numTilePerInst = matrixInstT // matrixInstTO
-        MIInputPerThUnroll = kernel["MIInputPerThread%s"%tc] // numTilePerInst
-        numVectorsPerTile = kernel["MIWaveTile"][tile01] // vectorWidth
-        numReadsPerVector = int((vectorWidth * tP["bpeDS"]) / (tileBlockWidth * bpr))
-        # overloading numReadsPerUnroll for DirectToLds x2/x4 case when blockWidth of instruction < LocalReadVectorWidth
-        # fp64 TLU=1 reading 0.5element/lane/read..
-        # for TLU=0 case, blockWidth and LRVW should match
-        numReadsPerUnroll = ceil(tP["bpeDS"] * MIInputPerThUnroll / (unrollBlockWidth * bpr))
         numVgpr  = int(ceil(blockWidth))
         tmpvgprFP32 = []
 
@@ -918,7 +938,25 @@ class LocalReadMFMA(LocalRead):
         else:
             raise Exception(f"unsupport tc %s{tc}")
 
-        numElementPerRead = 1 if kernel["ConvertAfterDS"] and not kernel["UseF32XEmulation"] else int(int(blockWidth * bpr) // tP['bpe'] // lrvwTile)
+        readLoopPlan = make_local_read_loop_plan(
+            vectorWidth=vectorWidth,
+            bpeDS=tP["bpeDS"],
+            bpe=tP["bpe"],
+            blockWidth=blockWidth,
+            unrollMajorLDS=kernel["UnrollMajorLDS%s"%tc],
+            miInputPerThread=kernel["MIInputPerThread%s"%tc],
+            miWaveTile=kernel["MIWaveTile"][tile01],
+            matrixInstT=matrixInstT,
+            matrixInstTO=matrixInstTO,
+            lrvwTile=lrvwTile,
+            convertAfterDS=kernel["ConvertAfterDS"],
+            useF32XEmulation=kernel["UseF32XEmulation"])
+        numTilePerInst = readLoopPlan.numTilePerInst
+        MIInputPerThUnroll = readLoopPlan.miInputPerThUnroll
+        numVectorsPerTile = readLoopPlan.numVectorsPerTile
+        numReadsPerVector = readLoopPlan.numReadsPerVector
+        numReadsPerUnroll = readLoopPlan.numReadsPerUnroll
+        numElementPerRead = readLoopPlan.numElementPerRead
         perpStride = abmatrixinfo.gNLCPerpStride
 
         # pack register
@@ -1779,22 +1817,23 @@ class LocalReadMFMA(LocalRead):
                             # gfx1250 LDS offset formula shared by XF32 and BF16/Half/FP8/etc paths.
                             # The WMMA V3 LDS layout uses a *2 factor on the unroll stride.
                             def calcGfx1250LdsOffset():
-                                if "MXS" in tc:
-                                    # rIdx walks the K-scales packed into one MFMA-K sub-iter.
-                                    # Step is UnrollStride, which equals mxUnit for K-major LDS
-                                    # (UMLDS=1) and MT+LdsPad for M-major LDS (UMLDS=0). For
-                                    # UMLDS=1, numReadsPerUnroll is typically 1 so this loop
-                                    # degenerates to the pre-existing incOffset=0 behavior.
-                                    incOffset = rIdx * numElementPerRead * UnrollStride
-                                elif kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
-                                    incOffset = rIdx * numElementPerRead * UnrollStride * 2
-                                    tileWidth = 1 if kernel.get("WaveTileContiguousA") and tc == "A" else vectorWidth
-                                    incOffset += tiIdx * matrixInstTO * tileWidth * tileStride
-                                else:
-                                    vw = kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"]
-                                    incOffset = (rIdx // vw) * UnrollStride * vw
-                                    incOffset += rIdx * numElementPerRead * UnrollStride
-                                return int((incOffset + offset_val + tP["localReadOffset"]) * tP["bpeDS"])
+                                tileWidth = 1 if kernel.get("WaveTileContiguousA") and tc == "A" else vectorWidth
+                                return gfx1250_lds_offset_bytes(
+                                    rIdx=rIdx,
+                                    tiIdx=tiIdx,
+                                    tileOffsetElements=offset_val,
+                                    localReadOffsetElements=tP["localReadOffset"],
+                                    localReadVectorWidth=kernel[
+                                        f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"],
+                                    numElementPerRead=numElementPerRead,
+                                    unrollStrideElements=UnrollStride,
+                                    tileStrideElements=tileStride,
+                                    matrixInstTO=matrixInstTO,
+                                    vectorWidth=tileWidth,
+                                    bpeDS=tP["bpeDS"],
+                                    unrollMajorLDS=kernel[
+                                        "UnrollMajorLDS%s" % tP["tensorChar"]],
+                                    isMXS=("MXS" in tc))
 
                             for oIdx in range(0, numOffsets):
                                 # segment-interleave: a vIdx group can cross the LDS component

@@ -5,6 +5,10 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ## rocSOLVER 3.39.0 for ROCm 10.3.0
 
+### Optimized
+
+* Improved performance of STEDC's secular equation solver
+
 ### Resolved issues
 
 * Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
