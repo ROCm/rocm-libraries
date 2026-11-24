@@ -70,8 +70,10 @@ protected:
 
     void SetUp() override
     {
-        if(!meta.IsReady())
-            GTEST_SKIP() << "lgbm_pcfg metadata unavailable; picker disabled in this build";
+        // This file only builds with MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK, so a missing
+        // model asset is a packaging fault and must fail, not skip.
+        ASSERT_TRUE(meta.IsReady())
+            << "lgbm_pcfg.bin not found in " << miopen::GetSystemDbPath().string();
     }
 };
 
@@ -393,13 +395,14 @@ using CPU_LgbmPcfgForest_NONE = ::testing::TestWithParam<int>;
 TEST_P(CPU_LgbmPcfgForest_NONE, MatchesGoldenVectors)
 {
     const auto& meta = LgbmPcfgMetadata::Get();
-    if(!meta.IsReady())
-        GTEST_SKIP() << "lgbm_pcfg metadata unavailable; picker disabled in this build";
+    // This file only builds with MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK, so a missing model or
+    // fixture is a packaging fault and must fail, not skip.
+    ASSERT_TRUE(meta.IsReady()) << "lgbm_pcfg.bin not found in "
+                                << miopen::GetSystemDbPath().string();
 
     const auto gpath = miopen::GetSystemDbPath() / "lgbm_pcfg_golden.json";
-    if(!miopen::fs::exists(gpath))
-        GTEST_SKIP() << "pcfg golden fixture not installed in "
-                     << miopen::GetSystemDbPath().string();
+    ASSERT_TRUE(miopen::fs::exists(gpath)) << "golden fixture lgbm_pcfg_golden.json not found in "
+                                           << miopen::GetSystemDbPath().string();
     nlohmann::json golden;
     std::ifstream(gpath.string()) >> golden;
 
