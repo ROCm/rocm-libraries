@@ -3373,8 +3373,8 @@ TEST_CASE("GEMM: gfx1250 ranking prices the WGM the host launches", "[gemm][gfx1
 // A TensileLite kernel launches with its own WorkGroupMapping (ContractionSolution::
 // calculateAutoWGM) unless it is persistent with WGM 0 and WGMXCC -1; only then is the mapping
 // picked per problem.  A spatial-cluster StreamK kernel always launches with WGM 1.
-// The model follows that on gfx1150/51/52/53 (and gfx1250, which has its own path); other
-// architectures opt in separately and keep the predicted mapping until then.
+// The model follows that on gfx1150/51/52/53 only; other architectures keep the predicted
+// mapping for now.
 // ---------------------------------------------------------------------------------------
 namespace {
 // bf16 TN MT128x112x32 as shipped for gfx1151.
