@@ -14,17 +14,18 @@ external manifest.
 
 ## Subdirectories
 
-| Directory     | Origin                                            |
-| ------------- | ------------------------------------------------- |
-| `tensile/`    | Kernels emitted by Tensile's own assembly writer. |
-| `aiter/`      | External: AITER-sourced GEMM kernels.             |
-| `ck/`         | External: Composable Kernel-sourced kernels.     |
-| `rocblas/`    | External: rocBLAS wvSpltK skinny-GEMM kernels.   |
-| `vllm/`       | External: vLLM wvSplitK skinny-GEMM kernels.     |
-| `rocroller/`  | External: rocRoller-sourced kernels.              |
-| `wave/`       | External: Wave (handwritten) kernels.             |
-| `triton/`     | External: Triton-compiled GEMM kernels.           |
-| `rocke/`      | External: rocKE GEMM kernels.                     |
+| Directory       | Origin                                            |
+| --------------- | ------------------------------------------------- |
+| `tensile/`      | Kernels emitted by Tensile's own assembly writer. |
+| `aiter/`        | External: AITER-sourced GEMM kernels.             |
+| `ck/`           | External: Composable Kernel-sourced kernels.      |
+| `rocblas/`      | External: rocBLAS wvSpltK skinny-GEMM kernels.    |
+| `vllm/`         | External: vLLM wvSplitK skinny-GEMM kernels.      |
+| `skinny_mxfp8/` | External: skinny MXFP8 GEMM kernels.              |
+| `rocroller/`    | External: rocRoller-sourced kernels.              |
+| `wave/`         | External: Wave (handwritten) kernels.             |
+| `triton/`       | External: Triton-compiled GEMM kernels.           |
+| `rocke/`        | External: rocKE GEMM kernels.                     |
 
 Loader behavior is the same in every subdirectory; the split is purely
 organizational.
@@ -102,8 +103,29 @@ custom.config:
   WavefrontSize: 64
 ```
 
-`Source`, `Version`, and `Features` are presence-checked but otherwise
-provenance only — they are read by the validator, not by the runtime.
+`Source`, `Version`, and `Features` are presence-checked. `Source` and `Version` are
+provenance only. `Features` `SupportsBias`, `SupportsActivation` and `SupportsScaleAlpha`
+set to false make that solution reject bias, activation and scale-alpha-vector problems
+(see "ProblemType restriction" below).
+
+### Optional `CustomKernel` keys and predicates
+
+- Predicates (each is a `custom.config` key; `custom.config` wins for every key it declares, and a logic file can
+  only add predicates the config does not declare, which narrows what the solution accepts):
+  - `AssertStrideAMultiple`, `AssertStrideBMultiple`: `{index: value}`, stride in elements.
+  - `AssertTensorBytesLessThan`: for every non-empty A, B, C and D, both `totalAllocatedBytes()` and the leading stride in bytes must be below the value, for
+    kernels whose 32-bit buffer sizes or out-of-range offsets would overflow.
+  - `AssertAnySizeLessThan`: `{index: value}`, an `Or` of C++ `SizeLessThan` predicates; at least one listed size is
+    below its value.
+  - `AssertMXScalesPreSwizzled`: `true`, the problem's MX scales are not flagged packed by the caller. For kernels
+    that read only the pre-swizzled layout. hipBLASLt flags every scale format except `Block_32_UE8M0_32_8_EXT` as
+    packed; the TensileLite client leaves the flags false.
+- ProblemType restriction: when `custom.config` `Features` sets `SupportsBias`, `SupportsActivation` or
+  `SupportsScaleAlpha` to false, that solution gets its own `ProblemType` copy with `UseBias` 0, activation
+  off (`ActivationType` none) or `UseScaleAlphaVec` 0 respectively, so it rejects bias, activation and
+  scale-alpha-vector problems while the logic file's shared `ProblemType` and the other solutions are unchanged.
+  A config without a `Features` block, or with the flag absent or true, is never restricted; the config's
+  `ProblemType` flags are not consulted.
 
 Under uniform summation order, which hipBLASLt applies unless the caller turns
 it off, hipBLASLt refuses an external kernel unless its `CustomKernel` block
@@ -154,27 +176,34 @@ its libraries at: either strip its `.amdhsa_code_object_version` directive so th
 assembler's flag applies, or emit it with `-mcode-object-version=4`.
 
 A kernel captured from rocRoller arrives carrying rocRoller's internal view of
-the kernel, in two forms that nothing here reads:
+the kernel, in three forms that nothing here reads:
 
 - a dump of the kernel representation inside `.amdgpu_metadata`, under the keys
   `.kernel_graph`, `.kernel_graph_dot` and `.command`;
+- the launch metadata rocRoller's own host side evaluates: `.workitem_count`,
+  `.dynamic_sharedmemory_bytes`, `.kernel_dimensions` and `.workgroup_size` on
+  the kernel entry, and `.expression` and `.variableType` on each `.args`
+  entry. hipBLASLt launches from `custom.config` instead, and the GPU runtime
+  ignores these keys. That holds only when `custom.config` declares a
+  `CustomKernel` block: without one, the arguments are rebuilt from
+  `.expression` and `.variableType`, so the strip refuses such a kernel;
 - whole-line `//` comments narrating codegen -- register allocation, expression
   lowering, liveness -- which outnumber the instructions by better than ten to
   one.
 
-Both dominate the file, and the graph dump also dominates the assembled object,
+They dominate the file, and the metadata also rides into the assembled object,
 so remove them before committing the kernel:
 
 ```bash
 python -m tensilelite.StripKernelGraphs tensilelite/CustomKernels/rocroller/<kernel>.s
 ```
 
-The comment strip runs only where `custom.config` says `Origin: rocroller`, and
-keeps any comment carrying a licence or an annotation marker (`TODO`, `FIXME`,
-`XXX`, `HACK`, `NOTE`, `WARNING`); the hand-written kernels elsewhere in this
-tree are left alone. Instructions keep their trailing `// (op N)` tags, so the
-assembled `.text` is unchanged -- only the metadata note shrinks, by exactly the
-three deleted keys.
+The launch-metadata and comment strips run only where `custom.config` says
+`Origin: rocroller`, and the comment strip keeps any comment carrying a licence
+or an annotation marker (`TODO`, `FIXME`, `XXX`, `HACK`, `NOTE`, `WARNING`); the
+hand-written kernels elsewhere in this tree are left alone. Instructions keep
+their trailing `// (op N)` tags, so the assembled `.text` is unchanged -- only
+the metadata note shrinks, by exactly the deleted keys.
 
 Pass `--check` instead to report without writing; it exits non-zero when
 provenance is still present, which suits a pre-commit or continuous-integration

@@ -897,6 +897,39 @@ namespace
                              MEMORY_SHORTAGE_STRING "this case needs");
     }
 
+    // A strided grouped GEMM of two problems that the CPU reference checks with unit_check.
+    Arguments grouped_unit_check_case()
+    {
+        Arguments arg    = unit_check_case(256, 144, 32, HIP_R_16F);
+        arg.grouped_gemm = 2;
+        for(int i = 0; i < arg.grouped_gemm; ++i)
+        {
+            arg.M[i]   = 256 >> i;
+            arg.N[i]   = 144;
+            arg.K[i]   = 32;
+            arg.lda[i] = arg.ldc[i] = arg.ldd[i] = arg.M[i];
+            arg.ldb[i]                           = arg.K[i];
+            arg.stride_a[i]                      = arg.M[i] * arg.K[i];
+            arg.stride_b[i]                      = arg.K[i] * arg.N[i];
+            arg.stride_c[i] = arg.stride_d[i] = arg.M[i] * arg.N[i];
+        }
+        arg.use_ext = arg.use_ext_setproblem = true;
+        arg.algo_method                      = 2;
+        return arg;
+    }
+
+    TEST(MatmulMemory_pre_checkin, grouped_case_is_not_stopped_by_a_released_host_buffer)
+    {
+        // hC is released once it has seeded hD_gold. A check that took the released buffer for a
+        // failed allocation would stop the case for memory, which fails here rather than skips.
+        const int arch = hipblaslt_get_arch();
+        if(arch / 100 == 11 || arch / 10 == 120)
+            GTEST_SKIP() << "the grouped GEMM cases do not run on this architecture";
+        ScopedVariable fail("HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP", "1");
+        testing_matmul(grouped_unit_check_case());
+        EXPECT_FALSE(IsSkipped());
+    }
+
     // Runs one case with the estimate check on and returns what it measured.
     MemoryEstimateMeasurement measure_estimate(const Arguments& arg)
     {
@@ -911,19 +944,25 @@ namespace
 #ifndef __linux__
         GTEST_SKIP() << "the estimate check reads the peak resident memory from /proc";
 #endif
-        // In the f32 case six 256 MiB host buffers make up the estimate, each with the pool's 20%
-        // extra. In the f16 case the CPU reference's 1 GiB float copy of A is most of it. The
-        // bound on the overestimate keeps the preflight from skipping cases that would fit.
+        // In the f32 case two 256 MiB host buffers make up the estimate, each with the pool's 20%
+        // extra: hD_gold, and hC, whose memory hD_1 then takes. In the f16 case the CPU
+        // reference's 1 GiB float copy of A is most of it. The bound on the overestimate keeps
+        // the preflight from skipping cases that would fit.
         struct Shape
         {
             const char* name;
             int64_t     m, n, k;
             hipDataType type;
         };
-        // A small case first, since the check leaves out the first case in the process.
-        testing_matmul(unit_check_case(64, 64, 16, HIP_R_32F));
-        for(const Shape& s : {Shape{"f32, 8192 x 8192 x 16", 8192, 8192, 16, HIP_R_32F},
-                              Shape{"f16, 16384 x 16 x 16384", 16384, 16, 16384, HIP_R_16F}})
+        const Shape shapes[] = {{"f32, 8192 x 8192 x 16", 8192, 8192, 16, HIP_R_32F},
+                                {"f16, 16384 x 16 x 16384", 16384, 16, 16384, HIP_R_16F}};
+        // TensileLite loads a problem type's kernel library on the first case of that type, and
+        // the f16 one raised the peak by about 2 GiB on 96-CU gfx1250. A small case of each type
+        // runs first so the measured cases leave that out. It also covers the check skipping
+        // the first case in the process.
+        for(const Shape& s : shapes)
+            testing_matmul(unit_check_case(64, 64, 16, s.type));
+        for(const Shape& s : shapes)
         {
             SCOPED_TRACE(s.name);
             auto m = measure_estimate(unit_check_case(s.m, s.n, s.k, s.type));

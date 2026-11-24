@@ -51,6 +51,7 @@ from rocisa.instruction import (
   Instruction, MacroInstruction,
   MFMAInstruction, MXMFMAInstruction, SMFMAInstruction,
   SAddCU32, SAddU32, SBarrier, SBranch,
+  SBitcmp1B32,
   SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ,
   SCmpEQU32, SCmpLeU32, SCSelectB32, SLShiftLeftB32, SLongBranchPositive,
   SMovB32, SMovB64, SMulI32, SNop,
@@ -201,8 +202,9 @@ class ABGRTile:
   def emitLDSBufferSwap(self, ti, writer, kernel):
     return _emitGRLDSBufferSwap(self.config.tag, self, ti, writer, kernel)
 
-  def emitPtrUpdate(self, ti, writer, kernel, holdOnLastIter=False):
-    return _emitGRPtrUpdate(self.config.tag, self, ti, writer, kernel, holdOnLastIter)
+  def emitPtrUpdate(self, ti, writer, kernel, holdOnLastIter=False, tightenLimit=False):
+    return _emitGRPtrUpdate(self.config.tag, self, ti, writer, kernel, holdOnLastIter,
+                            tightenLimit)
 
 
 class ABLRTile:
@@ -894,9 +896,9 @@ class TileInfo:
       return self.gr.emitLDSBufferSwap(self, writer, kernel)
     return Module()
 
-  def emitGRPtrUpdate(self, writer, kernel, holdOnLastIter=False):
+  def emitGRPtrUpdate(self, writer, kernel, holdOnLastIter=False, tightenLimit=False):
     if self.gr is not None:
-      return self.gr.emitPtrUpdate(self, writer, kernel, holdOnLastIter)
+      return self.gr.emitPtrUpdate(self, writer, kernel, holdOnLastIter, tightenLimit)
     return Module()
 
   def emitStoreD(self, writer, kernel):
@@ -1355,6 +1357,51 @@ def _emitMultiDUTailSrdRewind(writer, kernel, numUnroll, tiA, tiB, scaleTiA, sca
   return module
 
 
+def _emitDualPeriodTailScalePhase(writer, kernel, unrollIdx, scaleTiA, scaleTiB):
+  """Point the tail's scale DTL write at the half the tail reads from.
+
+  A dual-period scale epoch spans two data DepthU iterations, so the scale
+  stream takes one double-buffer step per two data steps while the local
+  reads take one per epoch they consume.  The two stay in phase while the
+  epoch count is whole: each exit path that reads an epoch also swaps both
+  halves.  A residual tail after an odd number of complete data-DUs breaks
+  that -- it re-enters mid-epoch, leaving the GR write half one step behind
+  the half its own local reads will take.  Swap the write half so the tail's
+  scale load lands where the tail reads it.  After an even number of
+  complete data-DUs the two halves already agree.
+
+  The scale SRDs need no correction: with one epoch seeded in the preloop,
+  the increments the kernel has executed by here name exactly the epoch the
+  tail starts in, and num_records has shrunk in lock-step with them.
+
+  The completed-DepthU parity is bit log2(DepthU) of global K.  The tail is
+  the final global K interval under both data-parallel and StreamK execution,
+  so global K is the authoritative phase source.
+  """
+  assert kernel["DepthU"] > 0 and \
+      kernel["DepthU"] & (kernel["DepthU"] - 1) == 0, \
+      "dual-period tail scale phase requires a power-of-two DepthU"
+
+  module = Module("Dual-period tail scale buffer phase")
+  aligned = Label("SubtileTailScalePhased", "")
+  phaseBit = kernel["DepthU"].bit_length() - 1
+  module.add(SBitcmp1B32(
+      src0=sgpr(f"SizesSum+{unrollIdx}"),
+      src1=phaseBit,
+      comment="dual-period tail: test completed-DepthU parity for scale LDS"))
+  module.add(SCBranchSCC0(
+      labelName=aligned.getLabelName(),
+      comment="even completed DepthU count: scale LDS halves already in phase"))
+
+  for ti in (scaleTiA, scaleTiB):
+    if ti is None:
+      continue
+    module.add(emitScaleGRLDSSwap(ti, writer, kernel))
+
+  module.add(aligned)
+  return module
+
+
 def mainLoop(writer, kernel):
   module = Module()
   tensorParametersA = writer.tPA
@@ -1506,6 +1553,7 @@ def mainLoop(writer, kernel):
           plr=schedulerPlr,
           doubleBufferTensors=schedulerDoubleBuffer,
           prefetchNextPartition=schedulerPartitionPrefetch,
+          uniformPgrEpoch=(schedulerPartitionPrefetch and schedulerPgr == 2),
           partitionOrder=schedulerPartitionOrder,
           grPlacement=grPlacement,
           pgl=kernel.get("PrefetchGL2", 0),
@@ -1608,6 +1656,9 @@ def mainLoop(writer, kernel):
         mxScaleTPs.append(tensorParametersB["MX"])
       if mxScaleTPs:
         module.add(writer.computeTailLoopSrdLimit(kernel, mxScaleTPs))
+      if kernel.get("_DualPeriodMXFP8"):
+        module.add(_emitDualPeriodTailScalePhase(
+            writer, kernel, writer.states.unrollIdx, scaleTiA, scaleTiB))
       if needTailSrdRewind:
         module.add(_emitMultiDUTailSrdRewind(
             writer, kernel, scheduler.config.numUnroll, tiA, tiB, scaleTiA, scaleTiB,

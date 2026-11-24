@@ -20,7 +20,8 @@ hipDNN operations are implemented through plugins. Each plugin provides its own 
   - Batchnorm operations (Training, Backward, Inference)
   - Fused operation graphs
   - Standalone pointwise activation
-  - Standalone pointwise binary elementwise (ADD, SUB, MUL, MAX, MIN)
+  - Standalone pointwise binary elementwise (ADD, SUB, MUL, MAX_OP, MIN_OP; the frontend spells the last two MAX and MIN)
+  - Standalone reduction (ADD, MUL, MIN, MAX, AMAX, AVG, NORM1, NORM2)
 
 - **[hipBLASLt Provider Plugin](../../../dnn-providers/hipblaslt-provider/docs/OperationSupport.md)** - Integration with AMD's hipBLASLt library that provides optimized GEMM operations.
   - Stand-alone Matmul (FP32/FP16/BF16 inputs and outputs, with optional fused bias and activation)
@@ -42,6 +43,29 @@ hipDNN operations are implemented through plugins. Each plugin provides its own 
   - Used as the oracle for graph-only integration test bundles
   - Supports a subset of the CPU operations (e.g. Convolution forward, Batchnorm forward, Layernorm, RMSNorm, Reduction, SDPA forward, Matmul, Pointwise)
   - Not intended for performance or production use
+
+> [!NOTE]
+> The CPU and GPU references do not accept the same pointwise graphs:
+>
+> - **Modes.** The CPU reference takes every mode the GPU reference does, and many more: the math modes (`EXP`,
+>   `LOG`, ...), `DIV`, `MAX_OP`, `MIN_OP`, the comparison and logical modes, `GEN_INDEX` and `BINARY_SELECT`.
+>   The GPU document lists them all.
+> - **Datatypes.** Only the CPU reference takes `FP64`, `FP8`, `BOOLEAN` and `INT32` tensors, an FP32 operand
+>   beside a 16-bit one, and FP16, BFP16 or FP64 compute types. Only the GPU reference takes unary conversions
+>   that widen a 16-bit type or go between FP16 and BFP16, and binary ops that mix FP16 with BFP16.
+> - **Compute type.** Both references run the arithmetic in the node's compute type and decline a node whose
+>   compute type no tuple has. The GPU reference registers FP32 compute only.
+> - **Parameters.** Both references ignore a parameter the mode does not use. The CPU reference reads the ReLU
+>   parameters, `swish_beta`, `elu_alpha` and `softplus_beta` for the modes that use them. The GPU reference
+>   reads the ReLU parameters and, for `SWISH_FWD`, `swish_beta`: it has no mode that uses the others.
+> - **Rank.** The GPU reference addresses at most 5 dimensions and declines a deeper pointwise node. The CPU
+>   reference has no rank limit and runs it.
+>
+> The full datatype tuples, parameter behavior and shape rules are in the
+> [CPU](./OperationSupport-ReferenceImpl.md#pointwise-restrictions) and
+> [GPU](../../../dnn-providers/integration-tests/docs/OperationSupport-GpuReferenceImpl.md#pointwise-modes)
+> documents. `TestPointwiseReferenceParity` (integration test project) fails when either reference gains or
+> loses a mode or datatype tuple without the difference being recorded there.
 
 ## Roadmap
 

@@ -323,7 +323,8 @@ MetadataND::LoadOutLayoutEncodings(const std::string& arch)
 // Constructor - loads all data immediately with error handling
 MIOPEN_INTERNALS_EXPORT
 MetadataND::MetadataND(const std::string& device, const int& dim)
-    : is_valid(false),  // Initialize to false, will be set to true if all loads succeed
+    : arch(device),     // normalized device arch, dimension-independent (declared before is_valid)
+      is_valid(false),  // Initialize to false, will be set to true if all loads succeed
       spatial_dim(dim), // Store the dimension this model supports
       features(),
       num_inputs(0),
@@ -338,6 +339,8 @@ MetadataND::MetadataND(const std::string& device, const int& dim)
       fil_layout_encodings(),
       out_layout_encodings()
 {
+    // arch (set in the initialization list above) keeps the NormalizeArch(device) value for
+    // arch-exact feature gates (ExtractTunaNetNDFeatures) instead of substring-matching the prefix.
     if(dim == 2)
     {
         model_prefix = device;
