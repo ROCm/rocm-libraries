@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "c40efc15-aad7-46c6-a393-850e79444a9f",
+  "name": "kernel operation matches the graph's",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.hip_mlops.kernel_match"
+}

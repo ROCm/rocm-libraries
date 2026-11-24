@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "7614b779-c11f-4acc-ab8a-423bf3139df9",
+  "name": "HipMlops resample_bwd dispatch",
+  "dispatch_symbol": "hipkernel.hip_mlops.resample_bwd_dispatch"
+}

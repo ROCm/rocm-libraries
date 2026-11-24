@@ -1,0 +1,45 @@
+{
+  "version": "1.0",
+  "id": "0dbeed6a-a734-44fc-9ccf-95fe8472a87b",
+  "name": "hipkernel:hip_mlops_resample_fwd",
+  "matchers": [
+    "7e33e8f4-87f8-45d0-a976-25dc538969f7",
+    "c40efc15-aad7-46c6-a393-850e79444a9f"
+  ],
+  "engine": "0b6c4367-d91b-471e-be5a-ea77669b8897",
+  "dispatch": "728c8bc2-1365-40b9-944a-ec5e12a49a15",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "0b6c4367-d91b-471e-be5a-ea77669b8897",
+          "kmd_id": "b8616f7b-3831-4ef3-93cb-f0d1a01fb102",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "operation"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "c38a25e0-c8dd-4a33-9175-1baa154da446",
+      "name": "hip_mlops.resample_fwd",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/resample/ResampleFwd.cpp",
+        "entry_point": "ResampleFwd"
+      },
+      "metadata": {
+        "operation": "RESAMPLE_FWD"
+      },
+      "priority": 0
+    }
+  ],
+  "arch": []
+}

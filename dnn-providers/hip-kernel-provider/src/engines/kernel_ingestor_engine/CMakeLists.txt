@@ -2,7 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 # The plugin resolves kpack descriptors, which read their kernel code from an archive on
-# disk, so nothing is embedded there. The unit-test binary resolves both kinds: it reads
+# disk, so nothing is embedded there -- except the HipMlops bundle below. The unit-test binary resolves both kinds: it reads
 # kpack descriptors from a staged archive, and for embedded_source descriptors it links
 # this engine statically and embeds its own copy of the kernel sources.
 
@@ -238,4 +238,26 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/FlydslSdpaBwdSplitNative.cpp
     )
     target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_FLYDSL=1)
+endif()
+
+# ALMIOPEN-3066: the HIP MLOps families on the ingestor, behind the migration option. Unlike
+# every other production pack their descriptors are shipped direct-load bundles, so the
+# plugin compiles their kernels from embedded source: each is registered under the
+# `source_file` its descriptor names, which hkp_verify_embedded_sources() checks. The
+# headers they include resolve by bare name.
+if(HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR)
+    target_sources(hip_kernel_provider_impl PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/HipMlopsNative.cpp
+    )
+    target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_HIP_MLOPS_INGESTOR=1)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/KernelEmbedding.cmake")
+    add_kernels_for_embedding(
+        TARGET hip_kernel_provider_impl
+        FILES "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/resample/ResampleFwd.cpp"
+              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/resample/ResampleBwd.cpp"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../hip_mlops_engine/kernels/types/VectorTypes.hpp"
+        KEYS kernels/resample/ResampleFwd.cpp
+             kernels/resample/ResampleBwd.cpp
+             VectorTypes.hpp
+    )
 endif()

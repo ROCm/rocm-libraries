@@ -1,0 +1,59 @@
+# The HIP MLOps engine on the kernel ingestor (ALMIOPEN-3066). One engine that takes over
+# the hand-written HIP_MLOPS_ENGINE's name and id, so support claims and pinned ids carry
+# over; one pack per op family, each with its own operation matcher and dispatch handler.
+# Every kernel is embedded source compiled at plan build, with the graph baked in as
+# compile options, as the hand-written engine does. The bundle ships under
+# descriptors/HipMlops/ and is packed only with HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR ON.
+
+engine:
+  name: hipkernel:HipMlops
+  builtin_engine: HIP_MLOPS_ENGINE
+  sdk_version: "1.4.0"
+  behavior_notes: [runtime_compilation, supports_graph_capture]
+  heuristic: none
+
+kmd_fields:
+  - name: operation
+    type: string
+
+graph_match:
+  shape: disjoint_attributes
+  discriminator: field_value
+
+kernel_source_kind: embedded_source
+workspace_policy: none
+
+authored_subpath: descriptors/HipMlops
+
+packs:
+  - name: resample_fwd
+    discriminator: resample_fwd
+    dispatch: resample_fwd
+    kernels:
+      - name: hip_mlops.resample_fwd
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/resample/ResampleFwd.cpp
+          entry_point: ResampleFwd
+        metadata:
+          operation: RESAMPLE_FWD
+        priority: 0
+  - name: resample_bwd
+    discriminator: resample_bwd
+    dispatch: resample_bwd
+    kernels:
+      - name: hip_mlops.resample_bwd
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/resample/ResampleBwd.cpp
+          entry_point: ResampleBwd
+        metadata:
+          operation: RESAMPLE_BWD
+        priority: 0
+
+# Embedded source compiled at plan build: every field is matcher-only.
+specialization:
+  metadata_fields: []
+  matcher_only_fields: [operation]
+  bindings: {}
+  vocabulary: {}

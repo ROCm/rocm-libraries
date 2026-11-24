@@ -215,67 +215,64 @@ size_t ResampleFwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) 
     return 0;
 }
 
-uint64_t ResampleFwdPlan::outputElementCount() const
+ResampleKernelBuild buildResampleFwdKernel(const ResampleFwdParams& params,
+                                           const std::string& gcnArchName)
 {
-    const auto* yDims = _params.y()->dims();
-    uint64_t total = 1;
-    for(auto dim : *yDims)
+    const auto rank = params.x()->dims()->size();
+    const auto xDims = tensorDims(*params.x());
+    const auto yDims = tensorDims(*params.y());
+    validateResampleOutputShape(
+        xDims, yDims, params.prePadding(), params.postPadding(), params.stride(), params.window());
+    if(params.index() != nullptr)
     {
-        total *= static_cast<uint64_t>(dim);
-    }
-    return total;
-}
-
-void ResampleFwdPlan::compile(const IKernelCompiler& kernelCompiler,
-                              const hipDeviceProp_t& deviceProperties)
-{
-    const auto rank = _params.x()->dims()->size();
-    const auto xDims = tensorDims(*_params.x());
-    const auto yDims = tensorDims(*_params.y());
-    validateResampleOutputShape(xDims,
-                                yDims,
-                                _params.prePadding(),
-                                _params.postPadding(),
-                                _params.stride(),
-                                _params.window());
-    if(_params.index() != nullptr)
-    {
-        validateResampleIndexShape(*_params.index(), yDims, "ResampleFwd");
+        validateResampleIndexShape(*params.index(), yDims, "ResampleFwd");
     }
 
-    const auto totalElements = outputElementCount();
-    const auto shapes = launchShapes(static_cast<int64_t>(totalElements));
+    uint64_t totalElements = 1;
+    for(auto dim : *params.y()->dims())
+    {
+        totalElements *= static_cast<uint64_t>(dim);
+    }
+    const auto shapes = ResampleFwdPlan::launchShapes(static_cast<int64_t>(totalElements));
     for(const auto& shape : shapes)
     {
         checkLaunchFitsThreadLimit(shape);
     }
 
     const size_t spatialDims = rank - 2;
-    const std::string inputTypeString = getKernelParamTypeString(_params.x()->data_type());
-    const std::string outputTypeString = getKernelParamTypeString(_params.y()->data_type());
-    const std::string computeTypeString = getKernelParamTypeString(_params.computeDataType());
-    const std::string indexTypeString = getIndexTypeString(_params.index());
+    const std::string inputTypeString = getKernelParamTypeString(params.x()->data_type());
+    const std::string outputTypeString = getKernelParamTypeString(params.y()->data_type());
+    const std::string computeTypeString = getKernelParamTypeString(params.computeDataType());
+    const std::string indexTypeString = getIndexTypeString(params.index());
 
-    KernelCompileOptions options(_params.x(), deviceProperties);
+    KernelCompileOptions options(params.x(), gcnArchName);
     options.add("HIP_PLUGIN_RESAMPLE_INPUT_TYPE", inputTypeString);
     options.add("HIP_PLUGIN_RESAMPLE_OUTPUT_TYPE", outputTypeString);
     options.add("HIP_PLUGIN_RESAMPLE_COMPUTE_TYPE", computeTypeString);
     options.add("HIP_PLUGIN_RESAMPLE_INDEX_TYPE", indexTypeString);
     options.add("HIP_PLUGIN_RESAMPLE_SPATIAL_DIMS", static_cast<int64_t>(spatialDims));
-    options.add("HIP_PLUGIN_RESAMPLE_MODE", static_cast<int64_t>(_params.mode()));
-    options.add("HIP_PLUGIN_RESAMPLE_PADDING_MODE", static_cast<int64_t>(_params.paddingMode()));
-    options.add("HIP_PLUGIN_RESAMPLE_HAS_INDEX", _params.index() != nullptr);
-    options.add("HIP_PLUGIN_RESAMPLE_GENERATE_INDEX", _params.generateIndex());
+    options.add("HIP_PLUGIN_RESAMPLE_MODE", static_cast<int64_t>(params.mode()));
+    options.add("HIP_PLUGIN_RESAMPLE_PADDING_MODE", static_cast<int64_t>(params.paddingMode()));
+    options.add("HIP_PLUGIN_RESAMPLE_HAS_INDEX", params.index() != nullptr);
+    options.add("HIP_PLUGIN_RESAMPLE_GENERATE_INDEX", params.generateIndex());
     options.add("HIP_PLUGIN_RESAMPLE_OUTPUT_ELEMENT_COUNT", totalElements);
 
-    addDimOptions(options, _params, spatialDims);
-    addStrideOptions(options, _params, spatialDims);
-    addSpatialOptions(options, _params, spatialDims);
+    addDimOptions(options, params, spatialDims);
+    addStrideOptions(options, params, spatialDims);
+    addSpatialOptions(options, params, spatialDims);
 
-    _compiledProgram = kernelCompiler.compile("ResampleFwd.cpp", options);
+    return {std::move(options), static_cast<unsigned int>(shapes[0].blocks)};
+}
+
+void ResampleFwdPlan::compile(const IKernelCompiler& kernelCompiler,
+                              const hipDeviceProp_t& deviceProperties)
+{
+    const auto build = buildResampleFwdKernel(_params, std::string(deviceProperties.gcnArchName));
+
+    _compiledProgram = kernelCompiler.compile("ResampleFwd.cpp", build.options);
     _runnableKernel = _compiledProgram->getKernel("ResampleFwd");
-    _runnableKernel->setBlockSize(static_cast<unsigned int>(shapes[0].threadsPerBlock), 1, 1);
-    _runnableKernel->setGridSize(static_cast<unsigned int>(shapes[0].blocks), 1, 1);
+    _runnableKernel->setBlockSize(ResampleKernelBuild::BLOCK_SIZE, 1, 1);
+    _runnableKernel->setGridSize(build.gridSize, 1, 1);
 }
 
 void ResampleFwdPlan::execute(const Handle& handle,

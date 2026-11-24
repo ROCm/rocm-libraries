@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "id": "0b6c4367-d91b-471e-be5a-ea77669b8897",
+  "name": "hipkernel:HipMlops",
+  "builtin_engine": "HIP_MLOPS_ENGINE",
+  "sdk_version": "1.4.0",
+  "graph_match": {
+    "native": "hipkernel.hip_mlops.graph_match"
+  },
+  "metadata": "b8616f7b-3831-4ef3-93cb-f0d1a01fb102",
+  "behavior_notes": [
+    "runtime_compilation",
+    "supports_graph_capture"
+  ]
+}

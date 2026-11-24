@@ -1,0 +1,45 @@
+{
+  "version": "1.0",
+  "id": "e2d47af9-0e1d-4ec7-9835-6a213ef4e18d",
+  "name": "hipkernel:hip_mlops_resample_bwd",
+  "matchers": [
+    "2ed04f32-ad40-4e7e-b3a7-6177576a2954",
+    "c40efc15-aad7-46c6-a393-850e79444a9f"
+  ],
+  "engine": "0b6c4367-d91b-471e-be5a-ea77669b8897",
+  "dispatch": "7614b779-c11f-4acc-ab8a-423bf3139df9",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "0b6c4367-d91b-471e-be5a-ea77669b8897",
+          "kmd_id": "b8616f7b-3831-4ef3-93cb-f0d1a01fb102",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "operation"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "eb068172-b33d-4d6e-8638-704b9abfcb3d",
+      "name": "hip_mlops.resample_bwd",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/resample/ResampleBwd.cpp",
+        "entry_point": "ResampleBwd"
+      },
+      "metadata": {
+        "operation": "RESAMPLE_BWD"
+      },
+      "priority": 0
+    }
+  ],
+  "arch": []
+}

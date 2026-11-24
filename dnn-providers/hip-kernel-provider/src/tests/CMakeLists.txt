@@ -57,6 +57,20 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         FILES "${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/test_descriptors/unit/batchnorm_inference_pointwise/kernels/BatchnormInferencePointwise.cpp"
         KEYS kernels/BatchnormInferencePointwise.cpp
     )
+    if(HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR)
+        # This binary discovers the production HipMlops bundle too, and resolves embedded
+        # sources from its own table, so it registers the plugin's HipMlops keys again.
+        set(_hip_mlops_dir "${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/descriptors/HipMlops/kernels")
+        add_kernels_for_embedding(
+            TARGET hip_kernel_provider_tests
+            FILES "${_hip_mlops_dir}/resample/ResampleFwd.cpp"
+                  "${_hip_mlops_dir}/resample/ResampleBwd.cpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/../engines/hip_mlops_engine/kernels/types/VectorTypes.hpp"
+            KEYS kernels/resample/ResampleFwd.cpp
+                 kernels/resample/ResampleBwd.cpp
+                 VectorTypes.hpp
+        )
+    endif()
 endif()
 embed_kernel_sources(
     TARGET hip_kernel_provider_tests
@@ -251,20 +265,21 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         add_dependencies(hip_kernel_provider_tests hkp_packaging_multi_launch)
     endif()
 
-    # FlyDSL's kernels ship in the production shard, which the unit root main()
-    # resolves does not reach, so FlyDSL's device cases would find no descriptor for
-    # their engine. The binary therefore names the production root as an ADDITIVE one,
-    # as the integration binary does, and is built after the pack that fills it.
+    # FlyDSL's kernels, and the HipMlops bundle (HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR),
+    # ship in the production shard, which the unit root main() resolves does not reach,
+    # so their device cases would find no descriptor for their engine. The binary
+    # therefore names the production root as an ADDITIVE one, as the integration binary
+    # does, and is built after the pack that fills it.
     #
     # The ordinary binary only. A census addresses exactly one shard through an explicit
     # HIPDNN_DESCRIPTOR_DIR, and a second root reachable from that process would put
     # kernels in its inventory that the entry running it never named.
-    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE OR HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR)
         if(TARGET hkp_packaging_product)
             add_dependencies(hip_kernel_provider_tests hkp_packaging_product)
         endif()
         target_compile_definitions(hip_kernel_provider_tests PRIVATE
-            HIPKERNELPROVIDER_FLYDSL_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
+            HIPKERNELPROVIDER_ADDITIVE_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
     endif()
 
     # The ASM SDPA engine's L1 models ship loose in the production tree, under asm_sdpa/,

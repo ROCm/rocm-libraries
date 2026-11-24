@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "7e33e8f4-87f8-45d0-a976-25dc538969f7",
+  "name": "graph operation is resample_fwd",
+  "scope": "graph",
+  "match_symbol": "hipkernel.hip_mlops.resample_fwd_match"
+}

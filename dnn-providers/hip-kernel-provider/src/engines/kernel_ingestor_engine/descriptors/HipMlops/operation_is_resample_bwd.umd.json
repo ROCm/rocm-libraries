@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "2ed04f32-ad40-4e7e-b3a7-6177576a2954",
+  "name": "graph operation is resample_bwd",
+  "scope": "graph",
+  "match_symbol": "hipkernel.hip_mlops.resample_bwd_match"
+}

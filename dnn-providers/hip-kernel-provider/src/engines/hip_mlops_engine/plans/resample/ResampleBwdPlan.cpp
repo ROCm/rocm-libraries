@@ -213,54 +213,63 @@ size_t ResampleBwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) 
     return 0;
 }
 
-void ResampleBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelCompiler,
-                              [[maybe_unused]] const hipDeviceProp_t& deviceProperties)
+ResampleKernelBuild buildResampleBwdKernel(const ResampleBwdParams& params,
+                                           const std::string& gcnArchName)
 {
-    const auto spatialDims = _params.dy()->dims()->size() - 2;
-    const auto dyDims = tensorDims(*_params.dy());
-    const auto dxDims = tensorDims(*_params.dx());
+    const auto spatialDims = params.dy()->dims()->size() - 2;
+    const auto dyDims = tensorDims(*params.dy());
+    const auto dxDims = tensorDims(*params.dx());
 
     validateResampleBwdOutputShape(dyDims,
                                    dxDims,
-                                   _params.prePadding(),
-                                   _params.postPadding(),
-                                   _params.stride(),
-                                   _params.window());
-    if(_params.index() != nullptr)
+                                   params.prePadding(),
+                                   params.postPadding(),
+                                   params.stride(),
+                                   params.window());
+    if(params.index() != nullptr)
     {
-        validateResampleIndexShape(*_params.index(), dyDims, "ResampleBwd");
+        validateResampleIndexShape(*params.index(), dyDims, "ResampleBwd");
     }
+
 
     const auto numDxElements
         = std::accumulate(dxDims.begin(), dxDims.end(), 1ULL, std::multiplies<>());
-    const auto shapes = launchShapes(static_cast<int64_t>(numDxElements));
+    const auto shapes = ResampleBwdPlan::launchShapes(static_cast<int64_t>(numDxElements));
     for(const auto& shape : shapes)
     {
         checkLaunchFitsThreadLimit(shape);
     }
 
-    const std::string dyTypeString = getKernelParamTypeString(_params.dy()->data_type());
-    const std::string dxTypeString = getKernelParamTypeString(_params.dx()->data_type());
-    const std::string computeTypeString = getKernelParamTypeString(_params.computeDataType());
-    const std::string indexTypeString = getIndexTypeString(_params.index());
+    const std::string dyTypeString = getKernelParamTypeString(params.dy()->data_type());
+    const std::string dxTypeString = getKernelParamTypeString(params.dx()->data_type());
+    const std::string computeTypeString = getKernelParamTypeString(params.computeDataType());
+    const std::string indexTypeString = getIndexTypeString(params.index());
 
-    KernelCompileOptions options(_params.dy(), deviceProperties);
+    KernelCompileOptions options(params.dy(), gcnArchName);
     options.add("HIP_PLUGIN_RESAMPLE_DY_TYPE", dyTypeString);
     options.add("HIP_PLUGIN_RESAMPLE_DX_TYPE", dxTypeString);
     options.add("HIP_PLUGIN_RESAMPLE_COMPUTE_TYPE", computeTypeString);
     options.add("HIP_PLUGIN_RESAMPLE_INDEX_TYPE", indexTypeString);
     options.add("HIP_PLUGIN_RESAMPLE_SPATIAL_DIMS", spatialDims);
-    options.add("HIP_PLUGIN_RESAMPLE_MODE", static_cast<int64_t>(_params.resampleMode()));
+    options.add("HIP_PLUGIN_RESAMPLE_MODE", static_cast<int64_t>(params.resampleMode()));
     options.add("HIP_PLUGIN_RESAMPLE_DX_ELEMENT_COUNT", numDxElements);
 
-    addDimOptions(options, _params, spatialDims);
-    addStrideOptions(options, _params, spatialDims);
-    addSpatialOptions(options, _params, spatialDims);
+    addDimOptions(options, params, spatialDims);
+    addStrideOptions(options, params, spatialDims);
+    addSpatialOptions(options, params, spatialDims);
 
-    _compiledProgram = kernelCompiler.compile("ResampleBwd.cpp", options);
+    return {std::move(options), static_cast<unsigned int>(shapes[0].blocks)};
+}
+
+void ResampleBwdPlan::compile(const IKernelCompiler& kernelCompiler,
+                              const hipDeviceProp_t& deviceProperties)
+{
+    const auto build = buildResampleBwdKernel(_params, std::string(deviceProperties.gcnArchName));
+
+    _compiledProgram = kernelCompiler.compile("ResampleBwd.cpp", build.options);
     _runnableKernel = _compiledProgram->getKernel("ResampleBwd");
-    _runnableKernel->setBlockSize(static_cast<unsigned int>(shapes[0].threadsPerBlock), 1, 1);
-    _runnableKernel->setGridSize(static_cast<unsigned int>(shapes[0].blocks), 1, 1);
+    _runnableKernel->setBlockSize(ResampleKernelBuild::BLOCK_SIZE, 1, 1);
+    _runnableKernel->setGridSize(build.gridSize, 1, 1);
 }
 
 void ResampleBwdPlan::execute([[maybe_unused]] const Handle& handle,

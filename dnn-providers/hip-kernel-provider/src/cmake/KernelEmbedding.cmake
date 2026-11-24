@@ -58,6 +58,9 @@ function(add_kernels_for_embedding)
     # Add kernel file paths and their keys to the target properties
     set(_kernel_index 0)
     foreach(KERNEL_FILE IN LISTS ADD_KERNELS_FILES)
+        # Normalised, so one file named through two `..` spellings by two targets is one
+        # path to the generators: Ninja rejects a configure dependency listed twice.
+        cmake_path(ABSOLUTE_PATH KERNEL_FILE NORMALIZE)
         if(ADD_KERNELS_KEYS)
             list(GET ADD_KERNELS_KEYS ${_kernel_index} KERNEL_KEY)
         else()
@@ -242,7 +245,14 @@ function(embed_kernel_sources)
         # The drawback is that CMake is going to reconfigure every time a kernel is modified.
         # Yet, that will improve developer experience, because it will lead to shorter build times -- only
         # the build of kernel_sources and kernel_includes will be affected.
-        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${KERNEL_FILE})
+        # Once per build, not per target: a file two targets embed (the plugin's and the
+        # test binary's HipMlops sources) listed by two directories is two Ninja rules for
+        # one output. Any one registration reconfigures.
+        get_property(_embedded_configure_depends GLOBAL PROPERTY KERNELEMBEDDING_CONFIGURE_DEPENDS)
+        if(NOT KERNEL_FILE IN_LIST _embedded_configure_depends)
+            set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${KERNEL_FILE})
+            set_property(GLOBAL APPEND PROPERTY KERNELEMBEDDING_CONFIGURE_DEPENDS ${KERNEL_FILE})
+        endif()
         get_filename_component(KERNEL_NAME ${KERNEL_FILE} NAME_WE)
         get_filename_component(KERNEL_FILENAME ${KERNEL_FILE} NAME)
         get_filename_component(KERNEL_EXT ${KERNEL_FILE} EXT)

@@ -7,6 +7,8 @@
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
+#include "compilation/KernelCompileOptions.hpp"
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -15,6 +17,19 @@ namespace hip_kernel_provider::resample
 {
 
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+
+/// What a resample launch compiles and how wide it runs: the compile options that bake the
+/// graph into the kernel, and the grid of BLOCK_SIZE-thread blocks covering one thread per
+/// output element. Built by buildResampleFwdKernel()/buildResampleBwdKernel(), which the HIP
+/// MLOps engine's plans and the kernel ingestor's HipMlops packs both call, so the two engines
+/// compile the same program for the same graph.
+struct ResampleKernelBuild
+{
+    static constexpr unsigned int BLOCK_SIZE = 256;
+
+    compilation::KernelCompileOptions options;
+    unsigned int gridSize;
+};
 
 inline std::vector<int64_t> toStdVector(const flatbuffers::Vector<int64_t>* values)
 {

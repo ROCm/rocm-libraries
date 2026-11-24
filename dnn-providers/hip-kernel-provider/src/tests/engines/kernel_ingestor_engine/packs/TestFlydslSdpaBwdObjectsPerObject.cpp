@@ -808,7 +808,7 @@ std::vector<std::string> listedMergedObjects(MergedListing listing)
 {
     std::map<std::string, ListedMergedObject> objects;
     const auto root = hip_kernel_provider::testing::descriptorSetRoot(
-        HIPKERNELPROVIDER_FLYDSL_PRODUCT_DESCRIPTOR_RELDIR);
+        HIPKERNELPROVIDER_ADDITIVE_PRODUCT_DESCRIPTOR_RELDIR);
     std::error_code failed;
     for(std::filesystem::recursive_directory_iterator entry(root, failed), end;
         !failed && entry != end;

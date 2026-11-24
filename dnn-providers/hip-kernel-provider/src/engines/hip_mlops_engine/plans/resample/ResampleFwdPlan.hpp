@@ -10,11 +10,13 @@
 #include "compilation/IKernelCompiler.hpp"
 #include "compilation/IRunnableKernel.hpp"
 #include "core/Handle.hpp"
+#include "engines/hip_mlops_engine/plans/resample/ResamplePlanUtils.hpp"
 #include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/resample_fwd_attributes_generated.h>
 
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -66,6 +68,13 @@ private:
     hipdnn_flatbuffers_sdk::data_objects::DataType _computeDataType;
 };
 
+/// The compile options and grid of the ResampleFwd kernel for @p params on @p gcnArchName.
+///
+/// @throws HipdnnPluginException with BAD_PARAM when the shapes disagree with the resample
+///         parameters or the output is too large for one launch.
+ResampleKernelBuild buildResampleFwdKernel(const ResampleFwdParams& params,
+                                           const std::string& gcnArchName);
+
 class ResampleFwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {
 public:
@@ -90,9 +99,7 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
-    static constexpr int64_t BLOCK_SIZE = 256;
-
-    uint64_t outputElementCount() const;
+    static constexpr int64_t BLOCK_SIZE = ResampleKernelBuild::BLOCK_SIZE;
 
     ResampleFwdParams _params;
     std::unique_ptr<ICompiledProgram> _compiledProgram;
