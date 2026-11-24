@@ -402,7 +402,7 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndSca
     sdpaAttrs.set_dbias(dbias);
     sdpaAttrs.set_alibi_mask(true);
     sdpaAttrs.set_padding_mask(true);
-    sdpaAttrs.causal_mask = true;
+    // Only one deprecated causal flag may be set; SdpaBwdNode rejects the pair.
     sdpaAttrs.causal_mask_bottom_right = true;
     sdpaAttrs.set_attn_scale(0.125f);
     sdpaAttrs.set_diagonal_band_left_bound(2); // hipDNN rejects 0 (SEM-005)
@@ -640,10 +640,10 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndSca
     EXPECT_FALSE(sdpa->max_total_seq_len_q.has_value());
     EXPECT_FALSE(sdpa->max_total_seq_len_kv.has_value());
 
-    // ALL boolean attributes set to true
+    // Boolean attributes; causal_mask stays false because the pair is rejected
     EXPECT_TRUE(sdpa->alibi_mask);
     EXPECT_TRUE(sdpa->padding_mask);
-    EXPECT_TRUE(sdpa->causal_mask);
+    EXPECT_FALSE(sdpa->causal_mask);
     EXPECT_TRUE(sdpa->causal_mask_bottom_right);
 
     // Float scalars

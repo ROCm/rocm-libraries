@@ -24,7 +24,9 @@ static Problem MakeSearchProblem(group_conv::GroupConvTestConfig<3u> conv,
     return Problem(y_desc, w_desc, x_desc, conv_desc, miopen::conv::Direction::BackwardData);
 }
 
-TEST(GPU_PerfConfig_HipImplicitGemm3DGroupBwdXdlops_FP16, SearchStartsAtKernelZero)
+using GPU_PerfConfig_HipImplicitGemm3DGroupBwdXdlops_FP16 = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupBwdXdlops_FP16, SearchStartsAtKernelZero)
 {
     const auto device_name = miopen::solver::GetCurrentDeviceName();
     if(device_name.empty())
@@ -46,3 +48,7 @@ TEST(GPU_PerfConfig_HipImplicitGemm3DGroupBwdXdlops_FP16, SearchStartsAtKernelZe
     EXPECT_EQ(cfg.kernel_id, cfg.valid_kernels.front());
     EXPECT_TRUE(cfg.IsValid(problem));
 }
+
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_PerfConfig_HipImplicitGemm3DGroupBwdXdlops_FP16,
+                         ::testing::Values(0));

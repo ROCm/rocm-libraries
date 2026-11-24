@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_descr.hpp"
 #include "hipsparse_local_dnmat.hpp"
 #include "hipsparse_local_handle.hpp"
 #include "hipsparse_local_spmat.hpp"
@@ -76,9 +77,7 @@ void testing_spsm_coo_bad_arg(const Arguments& argus)
     float* dC   = (float*)dC_managed.get();
     void*  dbuf = (void*)dbuf_managed.get();
 
-    hipsparseSpSMDescr_t descr;
-
-    verify_hipsparse_status_success(hipsparseSpSM_createDescr(&descr), "success");
+    hipsparseLocalSpSMDescr descr;
 
     size_t bsize;
 
@@ -165,8 +164,6 @@ void testing_spsm_coo_bad_arg(const Arguments& argus)
         hipsparseSpSM_solve(handle, transA, transB, &alpha, A, B, C, dataType, alg, nullptr, dbuf),
         "Error: descr is nullptr");
 
-    // Destruct
-    verify_hipsparse_status_success(hipsparseSpSM_destroyDescr(descr), "success");
 #endif
 }
 
@@ -297,8 +294,7 @@ void testing_spsm_coo(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(dC_2, hC_2.data(), sizeof(T) * nnz_C, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(d_alpha, &h_alpha, sizeof(T), hipMemcpyHostToDevice));
 
-    hipsparseSpSMDescr_t descr;
-    CHECK_HIPSPARSE_ERROR(hipsparseSpSM_createDescr(&descr));
+    hipsparseLocalSpSMDescr descr;
 
     // Create matrices
     hipsparseLocalCoo A(m, n, nnz, drow, dcol, dval, typeI, idx_base, typeT);
@@ -429,7 +425,6 @@ void testing_spsm_coo(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 
-    CHECK_HIPSPARSE_ERROR(hipsparseSpSM_destroyDescr(descr));
 #endif
 }
 

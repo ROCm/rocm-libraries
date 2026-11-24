@@ -109,6 +109,7 @@ using native::HAS_BIAS_FIELD;
 using native::HEAD_DIM_FIELD;
 using native::INT32_LIMIT;
 using native::LADDER;
+using native::launchAxisFits;
 using native::PADDED_FIELD;
 using native::REDUCE_LAUNCH;
 using native::REDUCE_SYMBOL_FIELD;
@@ -245,7 +246,8 @@ bool servesHeadDims(const Row& row, int64_t headDimQk, int64_t headDimV)
 }
 
 /// The launch grid's x extent, one block per (batch, key tile, key head) and per (batch,
-/// query tile, query head), or nullopt past int32 or for a record without geometry.
+/// query tile, query head), or nullopt past int32 workgroups or 32 bits of work-items, or for a
+/// record without geometry.
 std::optional<int64_t> mergedGridBlocks(int64_t batch,
                                         int64_t numHeads,
                                         int64_t numKvHeads,
@@ -266,7 +268,7 @@ std::optional<int64_t> mergedGridBlocks(int64_t batch,
         return std::nullopt;
     }
     const auto blocks = bwd::detail::checkedProduct({batch, *keyBlocks + *queryBlocks});
-    if(!blocks || *blocks > INT32_LIMIT)
+    if(!blocks || *blocks > INT32_LIMIT || !launchAxisFits(*blocks, row.blockThreads))
     {
         return std::nullopt;
     }
@@ -436,8 +438,9 @@ std::optional<GraphFacts> readFacts(const BoundTokens& bound)
 
 /**
  * @brief Kernel-scoped applicability: the object's class, dtype, dropout, head-dim tile,
- *        dB store and GQA packing against the graph, and a launch grid that fits int32 (the
- *        bias staging contract is graph_match's, BI-8).
+ *        dB store and GQA packing against the graph, and a launch grid within int32
+ *        workgroups and 32-bit work-items on its x axis (the bias staging contract is
+ *        graph_match's, BI-8).
  */
 bool flydslSdpaBwdMergedKernelMatches(const MatchContext& /*context*/,
                                       const BoundTokens& bound,
@@ -542,8 +545,8 @@ MergedPlan planFor(const MatchContext& context, const KernelDefinition& kernel)
                                          *row);
     if(!blocks)
     {
-        native::failBadParam(ERROR_SCOPE,
-                             "launch grid exceeds int32 for kernel '" + kernel.name + "'");
+        native::failBadParam(
+            ERROR_SCOPE, "launch grid exceeds the launch limits for kernel '" + kernel.name + "'");
     }
     plan.blockThreads = static_cast<unsigned int>(row->blockThreads);
     plan.gridBlocks = static_cast<unsigned int>(*blocks);

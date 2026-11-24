@@ -12,6 +12,12 @@
 #include <hipdnn_frontend/detail/SdpaBwdUnpacker.hpp>
 #include <hipdnn_frontend/node/detail/Utilities.hpp>
 
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
 namespace hipdnn_frontend::graph
 {
 
@@ -52,6 +58,10 @@ public:
         // Band domain (SdpaSemanticsRegister SEM-005): left_bound -1 or >= 1, right_bound >= -1.
         HIPDNN_CHECK_ERROR(detail::validateSdpaDiagonalBand(
             attributes.left_bound, attributes.right_bound, "SdpaBwdNode"));
+
+        // The deprecated causal flags name different alignments; both set is invalid (SEM-002).
+        HIPDNN_CHECK_ERROR(detail::validateSdpaDeprecatedCausalFlags(
+            attributes.causal_mask, attributes.causal_mask_bottom_right, "SdpaBwdNode"));
 
         const auto q = attributes.get_q();
         const auto k = attributes.get_k();
@@ -301,14 +311,60 @@ public:
             HIPDNN_CHECK_ERROR(detail::validateScalarParameter(scale, "SCALE tensor"));
         }
 
-        // Rule 11: Philox dropout operands (cuDNN): single-element INT32 or INT64.
+        // Rule 11: a gradient has the shape of the tensor it differentiates. Dims and strides
+        // left empty are inferred, so only caller-supplied ones are checked. As in cuDNN, the
+        // head dimension of dQ, dK and dV must be contiguous.
+        HIPDNN_CHECK_ERROR(validateGradientOutput(dq, qDims, "dQ", "Q", true));
+        HIPDNN_CHECK_ERROR(validateGradientOutput(dk, kDims, "dK", "K", true));
+        HIPDNN_CHECK_ERROR(validateGradientOutput(dv, vDims, "dV", "V", true));
+
+        // Rule 12: dBias has the bias tensor's shape (SdpaSemanticsRegister SEM-014), so it
+        // needs a bias to take that shape from. cuDNN's last-stride-1 check does not list
+        // dBias, so it is not held to that rule.
+        const auto dBias = attributes.get_dbias();
+        if(dBias)
+        {
+            HIPDNN_RETURN_IF_FALSE(
+                attnMask,
+                ErrorCode::ATTRIBUTE_NOT_SET,
+                std::string("SdpaBwdNode: dBias requires a Bias tensor, whose shape it takes"));
+            HIPDNN_CHECK_ERROR(
+                validateGradientOutput(dBias, attnMask->get_dim(), "dBias", "Bias", false));
+            // An unset dtype on either side is inferred, so only two explicit ones can differ.
+            const auto dBiasType = dBias->get_data_type();
+            const auto biasType = attnMask->get_data_type();
+            HIPDNN_RETURN_IF_TRUE(dBiasType != DataType::NOT_SET && biasType != DataType::NOT_SET
+                                      && dBiasType != biasType,
+                                  ErrorCode::INVALID_VALUE,
+                                  std::string("SdpaBwdNode: dBias data type must equal the Bias "
+                                              "data type"));
+        }
+
+        // Rule 13: as in cuDNN, the last dimension of each input is contiguous. Stats is held
+        // to it only at rank 4 ([B, H, Sq, 1]): the rank-3 and ragged forms that hipDNN also
+        // accepts are left unchecked.
+        HIPDNN_CHECK_ERROR(validateLastStrideIsOne(q, "Q"));
+        HIPDNN_CHECK_ERROR(validateLastStrideIsOne(k, "K"));
+        HIPDNN_CHECK_ERROR(validateLastStrideIsOne(v, "V"));
+        HIPDNN_CHECK_ERROR(validateLastStrideIsOne(o, "O"));
+        HIPDNN_CHECK_ERROR(validateLastStrideIsOne(dOut, "dO"));
+        if(attnMask)
+        {
+            HIPDNN_CHECK_ERROR(validateLastStrideIsOne(attnMask, "Bias"));
+        }
+        if(stats->get_dim().size() == reqRank)
+        {
+            HIPDNN_CHECK_ERROR(validateLastStrideIsOne(stats, "Stats"));
+        }
+
+        // Rule 14: Philox dropout operands (cuDNN): single-element INT32 or INT64.
         const auto ioDataType = graph_attributes.get_io_data_type();
         HIPDNN_CHECK_ERROR(detail::validateSdpaPhiloxOperand(
             attributes.get_seed(), "SdpaBwdNode", "seed", ioDataType));
         HIPDNN_CHECK_ERROR(detail::validateSdpaPhiloxOperand(
             attributes.get_offset(), "SdpaBwdNode", "offset", ioDataType));
 
-        // Rule 12: attention sink and its gradient: [1, H_q, 1, 1], FLOAT, or BFLOAT16/HALF equal to
+        // Rule 15: attention sink and its gradient: [1, H_q, 1, 1], FLOAT, or BFLOAT16/HALF equal to
         // Q's data type set on the tensor itself; the gradient has the sink's data type and needs the sink (cuDNN).
         const auto sink = attributes.get_sink_token();
         const auto dSink = attributes.get_dsink_token();
@@ -327,7 +383,7 @@ public:
                               "SdpaBwdNode: dsink_token data type must equal the sink_token "
                               "data type");
 
-        // Rule 13: max_total_seq_len_q/kv are the physical token span of the packed Q (K/V)
+        // Rule 16: max_total_seq_len_q/kv are the physical token span of the packed Q (K/V)
         // buffer; an engine may read them to size buffers. Any ragged Q, K, V or O is required
         // when either is set (cuDNN). Stricter than cuDNN: a value below the largest per-batch
         // sequence length (Q or K dims[2]) cannot span even one sequence.
@@ -363,6 +419,16 @@ public:
         const auto dq = attributes.get_dq();
         const auto dk = attributes.get_dk();
         const auto dv = attributes.get_dv();
+        const auto dBias = attributes.get_dbias();
+        const auto bias = attributes.get_bias();
+
+        // dBias takes the Bias dtype. This runs before fill_from_context(), which would give
+        // an unset dBias dtype the graph IO type instead.
+        if(dBias && bias && dBias->get_data_type() == DataType::NOT_SET
+           && bias->get_data_type() != DataType::NOT_SET)
+        {
+            dBias->set_data_type(bias->get_data_type());
+        }
 
         HIPDNN_CHECK_ERROR(attributes.fill_from_context(graph_attributes));
 
@@ -396,6 +462,20 @@ public:
             dv->set_stride(hipdnn_data_sdk::utilities::generateStrides(dv->get_dim()));
         }
 
+        // dBias has same shape as Bias. It is never inferred from Q, K and V: a bias may
+        // broadcast over batch, heads or queries, and only the bias tensor says which.
+        if(dBias && bias)
+        {
+            if(dBias->get_dim().empty())
+            {
+                dBias->set_dim(bias->get_dim());
+            }
+            if(dBias->get_stride().empty())
+            {
+                dBias->set_stride(hipdnn_data_sdk::utilities::generateStrides(dBias->get_dim()));
+            }
+        }
+
         return {};
     }
 
@@ -413,6 +493,84 @@ public:
         SdpaBackwardAttributes sdpaAttr;
         HIPDNN_CHECK_ERROR(detail::unpackSdpaBwdOperation(opDesc, tensorMap, sdpaAttr));
         attributes = std::move(sdpaAttr);
+        return {};
+    }
+
+private:
+    // Checks the caller-supplied dims and strides of a gradient output against the tensor it
+    // differentiates. Empty dims or strides are skipped: infer_properties_node() fills them.
+    static Error validateGradientOutput(const std::shared_ptr<TensorAttributes>& grad,
+                                        const std::vector<int64_t>& sourceDims,
+                                        const std::string& gradName,
+                                        const std::string& sourceName,
+                                        bool lastDimMustBeContiguous)
+    {
+        const auto& dims = grad->get_dim();
+        if(!dims.empty())
+        {
+            HIPDNN_RETURN_IF_NE(dims.size(),
+                                sourceDims.size(),
+                                ErrorCode::INVALID_VALUE,
+                                "SdpaBwdNode: " + gradName + " rank must equal " + sourceName
+                                    + " rank (" + std::to_string(sourceDims.size()) + "), got "
+                                    + std::to_string(dims.size()));
+            for(size_t i = 0; i < dims.size(); ++i)
+            {
+                if(dims[i] != sourceDims[i])
+                {
+                    const auto index = std::to_string(i);
+                    std::string message = "SdpaBwdNode: ";
+                    message.append(gradName).append(" dim[").append(index);
+                    message.append("] must equal ").append(sourceName);
+                    message.append(" dim[").append(index).append("] (");
+                    message.append(std::to_string(sourceDims[i])).append("), got ");
+                    message.append(std::to_string(dims[i]));
+                    return {ErrorCode::INVALID_VALUE, message};
+                }
+            }
+        }
+
+        const auto& strides = grad->get_stride();
+        if(strides.empty())
+        {
+            return {};
+        }
+        HIPDNN_RETURN_IF_NE(strides.size(),
+                            sourceDims.size(),
+                            ErrorCode::INVALID_VALUE,
+                            "SdpaBwdNode: " + gradName + " needs one stride per dimension ("
+                                + std::to_string(sourceDims.size()) + "), got "
+                                + std::to_string(strides.size()));
+        for(size_t i = 0; i < strides.size(); ++i)
+        {
+            if(strides[i] <= 0)
+            {
+                std::string message = "SdpaBwdNode: ";
+                message.append(gradName).append(" stride[").append(std::to_string(i));
+                message.append("] must be positive, got ").append(std::to_string(strides[i]));
+                return {ErrorCode::INVALID_VALUE, message};
+            }
+        }
+        if(lastDimMustBeContiguous)
+        {
+            HIPDNN_CHECK_ERROR(validateLastStrideIsOne(grad, gradName));
+        }
+        return {};
+    }
+
+    // cuDNN's rule for the SDPA tensors: the last dimension is contiguous. A layout that
+    // breaks it is legal but no kernel addresses it, hence cuDNN's code for the same check.
+    // Empty strides are skipped, and no other stride is checked: a zero stride on another
+    // dimension is a valid broadcast for an input.
+    static Error validateLastStrideIsOne(const std::shared_ptr<TensorAttributes>& tensor,
+                                         const std::string& tensorName)
+    {
+        const auto& strides = tensor->get_stride();
+        HIPDNN_RETURN_IF_TRUE(!strides.empty() && strides.back() != 1,
+                              ErrorCode::GRAPH_NOT_SUPPORTED,
+                              "SdpaBwdNode: " + tensorName
+                                  + " stride for the last dimension must be 1, got "
+                                  + std::to_string(strides.back()));
         return {};
     }
 };

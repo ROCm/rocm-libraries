@@ -133,19 +133,25 @@ inline rocblaslt_status hipblaslt_launch_nan_kernel(int64_t     m,
         const int32_t this_batch = std::min<int32_t>(MAX_GRID_Z, batch - base);
         dim3          blocks(grid_x, grid_y, (unsigned)this_batch);
 
-        hipLaunchKernelGGL((hipblaslt_check_nan_kernel<DIM_X, DIM_X, T>),
-                           blocks, threads, 0, stream,
-                           m, n,
-                           D,
-                           ldd, stride_d,
-                           row_major ? 1 : 0,
-                           ptr_array ? 1 : 0,
-                           offset_d,
-                           base,
-                           d_flag,
-                           call_id);
-
-        if(hipGetLastError() != hipSuccess)
+        // The launch's own status: hipGetLastError would also return an error
+        // the caller left pending, and fail a matmul that ran.
+        if(rocblaslt_launch_kernel(&hipblaslt_check_nan_kernel<DIM_X, DIM_X, T>,
+                                   blocks,
+                                   threads,
+                                   0,
+                                   stream,
+                                   m,
+                                   n,
+                                   D,
+                                   ldd,
+                                   stride_d,
+                                   row_major ? 1 : 0,
+                                   ptr_array ? 1 : 0,
+                                   offset_d,
+                                   base,
+                                   d_flag,
+                                   call_id)
+           != hipSuccess)
             return rocblaslt_status_internal_error;
     }
     return rocblaslt_status_success;

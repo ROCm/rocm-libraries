@@ -3,6 +3,7 @@
 
 #include "TestUtil.hpp"
 #include "hipdnn_backend.h"
+#include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <optional>
@@ -459,5 +460,88 @@ TEST_F(IntegrationEngineHeuristicApi, GetEngineConfigsRequestMoreThanAvailable)
     for(auto& config : configs)
     {
         EXPECT_EQ(hipdnnBackendDestroyDescriptor(config), HIPDNN_STATUS_SUCCESS);
+    }
+}
+
+// With no policy order configured, each heuristic mode runs its own list of the real built-in
+// policies. The test engine has no prediction model, so ModeA and ModeB decline and
+// StaticOrdering returns the same engine FALLBACK does.
+TEST_F(IntegrationEngineHeuristicApi, EachModeRunsItsBuiltInPolicyList)
+{
+    _policyOrderEnv.reset();
+    _policyOrderEnv.emplace("HIPDNN_HEUR_POLICY_ORDER", "");
+    setOperationGraph();
+
+    using hipdnn_data_sdk::utilities::policyNameToId;
+    const int64_t config = policyNameToId("SelectionHeuristic::Config");
+    const int64_t staticOrdering = policyNameToId("SelectionHeuristic::StaticOrdering");
+    const std::vector<std::pair<hipdnnBackendHeurMode_t, std::vector<int64_t>>> cases{
+        {HIPDNN_HEUR_MODE_FALLBACK, {config, staticOrdering}},
+        {HIPDNN_HEUR_MODE_A,
+         {config, policyNameToId(hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME), staticOrdering}},
+        {HIPDNN_HEUR_MODE_B,
+         {config, policyNameToId(hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME), staticOrdering}},
+    };
+    for(const auto& [mode, expectedPolicies] : cases)
+    {
+        SCOPED_TRACE(static_cast<int>(mode));
+        hipdnnBackendDescriptor_t heuristic = nullptr;
+        ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, &heuristic),
+                  HIPDNN_STATUS_SUCCESS);
+        ASSERT_EQ(hipdnnBackendSetAttribute(heuristic,
+                                            HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH,
+                                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                            1,
+                                            static_cast<const void*>(&_graph)),
+                  HIPDNN_STATUS_SUCCESS);
+        ASSERT_EQ(hipdnnBackendSetAttribute(
+                      heuristic, HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_HEUR_MODE, 1, &mode),
+                  HIPDNN_STATUS_SUCCESS);
+        ASSERT_EQ(hipdnnBackendFinalize(heuristic), HIPDNN_STATUS_SUCCESS);
+
+        std::vector<int64_t> policies(expectedPolicies.size() + 1);
+        int64_t policyCount = 0;
+        EXPECT_EQ(hipdnnBackendGetAttribute(heuristic,
+                                            HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT,
+                                            HIPDNN_TYPE_INT64,
+                                            static_cast<int64_t>(policies.size()),
+                                            &policyCount,
+                                            policies.data()),
+                  HIPDNN_STATUS_SUCCESS);
+        policies.resize(static_cast<size_t>(policyCount));
+        EXPECT_EQ(policies, expectedPolicies);
+
+        hipdnnBackendDescriptor_t engineConfig = nullptr;
+        ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, &engineConfig),
+                  HIPDNN_STATUS_SUCCESS);
+        int64_t count = 0;
+        EXPECT_EQ(hipdnnBackendGetAttribute(heuristic,
+                                            HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                            1,
+                                            &count,
+                                            static_cast<void*>(&engineConfig)),
+                  HIPDNN_STATUS_SUCCESS);
+        EXPECT_EQ(count, 1);
+        EXPECT_EQ(hipdnnBackendFinalize(engineConfig), HIPDNN_STATUS_SUCCESS);
+        hipdnnBackendDescriptor_t engine = nullptr;
+        EXPECT_EQ(hipdnnBackendGetAttribute(engineConfig,
+                                            HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                            1,
+                                            nullptr,
+                                            static_cast<void*>(&engine)),
+                  HIPDNN_STATUS_SUCCESS);
+        ASSERT_NE(engine, nullptr);
+        int64_t engineId = 0;
+        EXPECT_EQ(
+            hipdnnBackendGetAttribute(
+                engine, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, nullptr, &engineId),
+            HIPDNN_STATUS_SUCCESS);
+        EXPECT_EQ(engineId, hipdnn_tests::plugin_constants::engineId<GoodPlugin>());
+
+        EXPECT_EQ(hipdnnBackendDestroyDescriptor(engine), HIPDNN_STATUS_SUCCESS);
+        EXPECT_EQ(hipdnnBackendDestroyDescriptor(engineConfig), HIPDNN_STATUS_SUCCESS);
+        EXPECT_EQ(hipdnnBackendDestroyDescriptor(heuristic), HIPDNN_STATUS_SUCCESS);
     }
 }

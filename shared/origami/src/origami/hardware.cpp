@@ -143,12 +143,13 @@ hardware_t hardware_t::get_hardware_for_properties(hipDeviceProp_t properties,
         std::string("Attempting to retrieve hardware constants for unsupported architecture: ") +
         std::string(arch_name));
   }
-  auto constants = get_arch_constants(arch_enum, pci_chip_id);
+  const size_t n_cu = properties.multiProcessorCount * cus_per_multiProcessorCount(arch_enum);
+  auto constants    = get_arch_constants(arch_enum, pci_chip_id, n_cu);
   auto num_xcds   = (num_xcds_override > 0)
                       ? num_xcds_override
                       : get_default_num_xcds(arch_enum);
   return hardware_t(arch_enum,
-                    properties.multiProcessorCount * cus_per_multiProcessorCount(arch_enum),
+                    n_cu,
                     properties.sharedMemPerBlock,
                     properties.regsPerBlock * 4,  // RF capacity from device (regsPerBlock is in 32-bit registers, convert to bytes)
                     constants,
@@ -201,14 +202,18 @@ hardware_t hardware_t::get_hardware_for_arch(architecture_t arch,
     throw std::runtime_error("Attempting to create hardware for unsupported architecture");
   }
 
-  auto constants = get_arch_constants(arch, pci_chip_id);
+  auto constants = get_arch_constants(arch, pci_chip_id, N_CU);
+  // The 6-XCD gfx1250 part has 32 WGPs per XCD in every partition mode.
+  const size_t num_xcds = (arch == architecture_t::gfx1250 && gfx1250_wgps_select_6xcd(N_CU))
+                              ? N_CU / 32
+                              : get_default_num_xcds(arch);
 
   return hardware_t(arch,
                     N_CU,
                     lds_capacity,
                     rf_capacity,
                     constants,
-                    get_default_num_xcds(arch),
+                    num_xcds,
                     L2_capacity,
                     compute_clock_khz / 1.e6,
                     compute_clock_khz / 1.e6 / constants.mem_clock_ratio,

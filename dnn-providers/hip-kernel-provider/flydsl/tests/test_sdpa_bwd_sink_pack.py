@@ -106,7 +106,8 @@ def _entries(
 
 
 def _pack(entries: list[gd.KernelEntry]) -> tuple[gd.OpDescriptors, dict]:
-    op = gd.OpDescriptors(PREP, gd._fields_for_op(entries))
+    # A slot op takes the split engine's UED id; these tests check packs, not that id.
+    op = gd.OpDescriptors(PREP, gd._fields_for_op(entries), ued="split-engine-id")
     return op, gd._arch_documents(entries, op, ARCH)
 
 

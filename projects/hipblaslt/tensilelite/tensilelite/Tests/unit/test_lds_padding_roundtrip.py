@@ -55,9 +55,9 @@ def _solverOutputs(mt, miWaveTile, miWaveGroup, usesTDM):
         if miWaveTile % vw:
             continue
         yield "LdsPadA", get_fp32_mt_config(
-            mt, "pad", vw, 2, miWaveGroup, 2, miWaveTile, _K_B32, usesTDM)
+            mt, "pad", vw, 2, miWaveGroup, 2, miWaveTile, _K_B32, usesTDM, lrvwTile=1)
         yield "LdsBlockSizePerPadA", get_fp32_mt_config(
-            mt, "perBlock", vw, 2, miWaveGroup, 2, miWaveTile, _K_B32, usesTDM)
+            mt, "perBlock", vw, 2, miWaveGroup, 2, miWaveTile, _K_B32, usesTDM, lrvwTile=1)
 
 
 

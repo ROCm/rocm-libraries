@@ -322,8 +322,8 @@ bool flydslSdpaAiwKernelMatches(const MatchContext& context,
         return false;
     }
     const auto queryTiles = (problem.seqLenQ + *blockM - 1) / *blockM;
-    if(queryTiles > GRID_YZ_LIMIT || problem.batch > GRID_YZ_LIMIT
-       || problem.numHeads > INT32_LIMIT)
+    if(queryTiles > GRID_YZ_LIMIT || problem.batch > GRID_YZ_LIMIT || problem.numHeads > INT32_LIMIT
+       || !launchAxisFits(problem.numHeads, *threads))
     {
         return false;
     }
@@ -410,10 +410,12 @@ bool flydslSdpaAiwKernelMatches(const MatchContext& context,
     }
 
     // A padded graph's padded rows are written by the object's fill kernel: an object that
-    // names none, or a fill grid past its y extent, declines the graph.
+    // names none, or a fill grid past its y extent or past its x extent (the same heads at the
+    // fill's own workgroup size), declines the graph.
     if(fillsPaddedRows(binding)
        && (stringMetadata(kernel, FILL_SYMBOL_FIELD).value_or("").empty()
-           || (problem.seqLenQ + FILL_ROWS - 1) / FILL_ROWS > GRID_YZ_LIMIT))
+           || (problem.seqLenQ + FILL_ROWS - 1) / FILL_ROWS > GRID_YZ_LIMIT
+           || !launchAxisFits(problem.numHeads, FILL_THREADS)))
     {
         return false;
     }
@@ -648,7 +650,8 @@ public:
         {
             const auto fillSymbol = stringMetadata(kernel, FILL_SYMBOL_FIELD);
             const auto fillTiles = (problem.seqLenQ + FILL_ROWS - 1) / FILL_ROWS;
-            if(!fillSymbol.has_value() || fillSymbol->empty() || fillTiles > GRID_YZ_LIMIT)
+            if(!fillSymbol.has_value() || fillSymbol->empty() || fillTiles > GRID_YZ_LIMIT
+               || !launchAxisFits(problem.numHeads, FILL_THREADS))
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_BAD_PARAM,

@@ -773,19 +773,18 @@ RppStatus rppt_bilateral_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_
         return RPP_ERROR_INVALID_DST_LAYOUT;
     if (srcDescPtr->n != dstDescPtr->n) return RPP_ERROR_INVALID_ARGUMENTS;
     if (borderType != RpptImageBorderType::REPLICATE) return RPP_ERROR_NOT_IMPLEMENTED;
+    if ((srcDescPtr->c != 1) && (srcDescPtr->c != 3)) return RPP_ERROR_INVALID_SRC_CHANNELS;
+    // Both standard deviations divide in an exponent, so each must be strictly positive. The
+    // tensors are host-readable on both backends: HOST memory for HOST, pinned memory for HIP.
+    for (Rpp32u i = 0; i < srcDescPtr->n; i++)
+        if (!(stdDevSpaceTensor[i] > 0.0f) || !(stdDevRangeTensor[i] > 0.0f))
+            return RPP_ERROR_INVALID_ARGUMENTS;
 
     rpp::Handle& handle = rpp::deref(rppHandle);
     [[maybe_unused]] RppBackend handleBackend = handle.GetBackend();
 
     if (executionBackend == RppBackend::RPP_HOST_BACKEND) {
         RppLayoutParams layoutParams = get_layout_params(srcDescPtr->layout, srcDescPtr->c);
-
-        // Both standard deviations divide in an exponent, so each must be strictly positive. On
-        // HOST the tensors are CPU memory; on HIP they may be device memory, so only HOST reads
-        // them here.
-        for (Rpp32u i = 0; i < srcDescPtr->n; i++)
-            if (!(stdDevSpaceTensor[i] > 0.0f) || !(stdDevRangeTensor[i] > 0.0f))
-                return RPP_ERROR_INVALID_ARGUMENTS;
 
         if ((srcDescPtr->dataType == RpptDataType::U8) &&
             (dstDescPtr->dataType == RpptDataType::U8)) {
@@ -823,10 +822,39 @@ RppStatus rppt_bilateral_filter(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_
 #ifdef GPU_SUPPORT
     else if ((handleBackend == RppBackend::RPP_HIP_BACKEND) &&
              (executionBackend == RppBackend::RPP_HIP_BACKEND)) {
-        return RPP_ERROR_NOT_IMPLEMENTED;  // HIP kernel not yet available
+        if ((srcDescPtr->dataType == RpptDataType::U8) &&
+            (dstDescPtr->dataType == RpptDataType::U8)) {
+            return hip_exec_bilateral_filter_tensor(
+                static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
+                static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
+                stdDevSpaceTensor, stdDevRangeTensor, kernelSize, roiTensorPtrSrc, roiType, handle);
+        } else if ((srcDescPtr->dataType == RpptDataType::F16) &&
+                   (dstDescPtr->dataType == RpptDataType::F16)) {
+            return hip_exec_bilateral_filter_tensor(
+                reinterpret_cast<half*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
+                srcDescPtr,
+                reinterpret_cast<half*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
+                dstDescPtr, stdDevSpaceTensor, stdDevRangeTensor, kernelSize, roiTensorPtrSrc,
+                roiType, handle);
+        } else if ((srcDescPtr->dataType == RpptDataType::F32) &&
+                   (dstDescPtr->dataType == RpptDataType::F32)) {
+            return hip_exec_bilateral_filter_tensor(
+                reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes),
+                srcDescPtr,
+                reinterpret_cast<Rpp32f*>(static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes),
+                dstDescPtr, stdDevSpaceTensor, stdDevRangeTensor, kernelSize, roiTensorPtrSrc,
+                roiType, handle);
+        } else if ((srcDescPtr->dataType == RpptDataType::I8) &&
+                   (dstDescPtr->dataType == RpptDataType::I8)) {
+            return hip_exec_bilateral_filter_tensor(
+                static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
+                static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
+                stdDevSpaceTensor, stdDevRangeTensor, kernelSize, roiTensorPtrSrc, roiType, handle);
+        } else {
+            return RPP_ERROR_NOT_IMPLEMENTED;
+        }
     }
 #endif
-
     return RPP_ERROR_INCOMPATIBLE_BACKEND;
 }
 
