@@ -8,6 +8,7 @@
 #include "ck_tile/ops/fmha.hpp"
 
 #include <cmath>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 
@@ -63,6 +64,11 @@ struct fmha_fwd_decode_pagedkv_args
     ck_tile::index_t batch;
     ck_tile::index_t nhead_q;
     ck_tile::index_t nhead_k;
+    // elements between the query heads and between the sequences of Q and of O
+    ck_tile::index_t nhead_stride_q;
+    ck_tile::index_t batch_stride_q;
+    ck_tile::index_t nhead_stride_o;
+    ck_tile::index_t batch_stride_o;
     ck_tile::index_t window_size; // keys attended, the query's own included; 0 = no window
     ck_tile::index_t num_groups;  // clusters per (batch, kv head)
     float scale_s;
@@ -93,6 +99,14 @@ inline bool fmha_fwd_decode_pagedkv_is_valid(const fmha_fwd_decode_pagedkv_trait
     if(!a.q_ptr || !a.k_ptr || !a.v_ptr || !a.o_ptr || !a.block_table_ptr || !a.seqlen_k_ptr ||
        !a.k_descale_ptr || !a.v_descale_ptr || !a.workspace_ptr || !a.counters_ptr)
         return false;
+    // Q rows may repeat, output rows must not overlap; the heads of a sequence span less than
+    // 2^31 elements (the kernel's offsets within a sequence are 32-bit)
+    const auto span = [&](ck_tile::index_t nhead_stride) {
+        return static_cast<int64_t>(nhead_stride) * (a.nhead_q - 1) + t.hdim_q;
+    };
+    if(a.nhead_stride_q < 0 || a.batch_stride_q < 0 || span(a.nhead_stride_q) > INT32_MAX ||
+       a.nhead_stride_o < t.hdim_q || a.batch_stride_o < span(a.nhead_stride_o))
+        return false;
     // several clusters merge what each cluster merged: a cluster of one split merges nothing
     if(a.num_groups > 1 && t.num_splits < 2)
         return false;
@@ -122,7 +136,11 @@ auto fmha_fwd_decode_pagedkv_create_kargs_and_grids(fmha_fwd_decode_pagedkv_args
                                        args.nhead_k,
                                        args.window_size,
                                        args.num_groups,
-                                       args.scale_s);
+                                       args.scale_s,
+                                       args.nhead_stride_q,
+                                       args.batch_stride_q,
+                                       args.nhead_stride_o,
+                                       args.batch_stride_o);
     // a kv head with more than 16 query heads takes several workgroup rows
     const ck_tile::index_t q_blocks =
         ck_tile::fmha_fwd_decode_pagedkv_q_blocks(args.nhead_q, args.nhead_k);

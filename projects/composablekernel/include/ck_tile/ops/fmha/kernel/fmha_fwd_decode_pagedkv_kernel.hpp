@@ -257,9 +257,13 @@ struct FmhaFwdDecodePagedKVKernel
         uint16_t*
             ws_o_ptr; // per split: O / l as ODataType [batch][nhead_k][groups][splits][kM0][hdim]
         float* ws_ml_ptr; // per split: (m, l) [batch][nhead_k][groups][splits][kM0][2]
-        index_t nhead_q;
         index_t nhead_k;
         index_t nhead_ratio_qk; // nhead_q / nhead_k, so the kernel does not divide
+        // elements between the query heads and between the sequences of Q and of O
+        index_t nhead_stride_q;
+        index_t batch_stride_q;
+        index_t nhead_stride_o;
+        index_t batch_stride_o;
         index_t block_table_stride;
         index_t window_size;
         index_t num_groups; // read with kHasGroups only
@@ -277,16 +281,18 @@ struct FmhaFwdDecodePagedKVKernel
         uint64_t q_blocks_rcp;
     };
 
-    // q_ptr, o_ptr: [batch][nhead_q][hdim]; k_ptr, v_ptr: the caches (see the pipeline);
-    // block_table_ptr: [batch][block_table_stride] cache page ids; seqlen_k_ptr: [batch] context
-    // lengths, read on the device; k_descale_ptr, v_descale_ptr: one float each.
-    // window_size: keys attended, the query's own included; 0 = no window.
+    // q_ptr, o_ptr: [batch][nhead_q][hdim] with nhead_stride / batch_stride elements between
+    // query heads / sequences (hdim and nhead_q * hdim when contiguous); output rows must not
+    // overlap, and the heads of a sequence span less than 2^31 elements. k_ptr, v_ptr: the caches
+    // (see the pipeline); block_table_ptr: [batch][block_table_stride] cache page ids;
+    // seqlen_k_ptr: [batch] context lengths, read on the device; k_descale_ptr, v_descale_ptr: one
+    // float each. window_size: keys attended, the query's own included; 0 = no window.
     // workspace_ptr: fmha_fwd_decode_pagedkv_workspace_bytes, needs no initialization.
     // counters_ptr: fmha_fwd_decode_pagedkv_num_counters int32; zero them once, every launch
     // leaves them zero, so launches of any shape can share them. A launch with several groups
     // that finds them non-zero (a concurrent launch on the same buffers, an aborted one) leaves
-    // output rows unwritten without an error: use one workspace and one set of counters per
-    // stream, and zero the counters again after a failed launch.
+    // output rows unwritten without an error: launches that can run concurrently need their own
+    // workspace and counters, and the counters must be zeroed again after a failed launch.
     // The kernel checks none of this: nhead_q / nhead_k must be a whole number; the workspace and
     // the counters are sized for nhead_k times the query blocks per kv head
     // (fmha_fwd_decode_pagedkv_q_blocks).
@@ -306,7 +312,11 @@ struct FmhaFwdDecodePagedKVKernel
                                         index_t nhead_k,
                                         index_t window_size,
                                         index_t num_groups,
-                                        float scale_s)
+                                        float scale_s,
+                                        index_t nhead_stride_q,
+                                        index_t batch_stride_q,
+                                        index_t nhead_stride_o,
+                                        index_t batch_stride_o)
     {
         const index_t q_blocks = fmha_fwd_decode_pagedkv_q_blocks(nhead_q, nhead_k);
         const size_t heads     = static_cast<size_t>(batch) * nhead_k * q_blocks;
@@ -324,9 +334,12 @@ struct FmhaFwdDecodePagedKVKernel
                 o_ptr,
                 reinterpret_cast<uint16_t*>(ws),
                 ws == nullptr ? nullptr : reinterpret_cast<float*>(ws + rows * kHeadDim * 2),
-                nhead_q,
                 nhead_k,
                 nhead_q / nhead_k,
+                nhead_stride_q,
+                batch_stride_q,
+                nhead_stride_o,
+                batch_stride_o,
                 block_table_stride,
                 window_size,
                 num_groups,
@@ -361,8 +374,8 @@ struct FmhaFwdDecodePagedKVKernel
     // row i_row of kv head g of sequence b in the output
     CK_TILE_DEVICE static uint16_t* ORow(const Kargs& a, index_t b, index_t g, index_t i_row)
     {
-        return static_cast<uint16_t*>(a.o_ptr) +
-               (static_cast<long_index_t>(b) * a.nhead_q + g * a.nhead_ratio_qk + i_row) * kHeadDim;
+        return static_cast<uint16_t*>(a.o_ptr) + static_cast<long_index_t>(b) * a.batch_stride_o +
+               (g * a.nhead_ratio_qk + i_row) * a.nhead_stride_o;
     }
 
     CK_TILE_DEVICE void operator()(const Kargs& a) const
@@ -409,11 +422,10 @@ struct FmhaFwdDecodePagedKVKernel
 
         // this split's result in registers: each thread holds 16 head dims of one row
         const auto res =
-            FmhaPipeline{}(static_cast<const QDataType*>(a.q_ptr),
-                           b,
-                           a.nhead_q,
-                           a.nhead_ratio_qk,
-                           q0,
+            FmhaPipeline{}(static_cast<const QDataType*>(a.q_ptr) +
+                               static_cast<long_index_t>(b) * a.batch_stride_q +
+                               (g * a.nhead_ratio_qk + q0) * a.nhead_stride_q,
+                           a.nhead_stride_q,
                            gqa,
                            static_cast<const KDataType*>(a.k_ptr),
                            static_cast<const VDataType*>(a.v_ptr),
@@ -432,9 +444,11 @@ struct FmhaFwdDecodePagedKVKernel
             // one split: the output, no partials
             if(res.row < gqa)
                 FmhaPipeline::StoreRows(
-                    res, ORow(a, b, g, q0), res.l > 0.f ? vd / res.l : 0.f, [](float x, float y) {
-                        return FmhaPipeline::pack_o(x, y);
-                    });
+                    res,
+                    ORow(a, b, g, q0),
+                    a.nhead_stride_o,
+                    res.l > 0.f ? vd / res.l : 0.f,
+                    [](float x, float y) { return FmhaPipeline::pack_o(x, y); });
             return;
         }
         else
@@ -447,6 +461,7 @@ struct FmhaFwdDecodePagedKVKernel
                 ((head * (kHasGroups ? a.num_groups : 1) + gi) * kNumSplits) * kM0;
             FmhaPipeline::StoreRows(res,
                                     a.ws_o_ptr + (part0 + s * kM0) * kHeadDim,
+                                    kHeadDim,
                                     res.l > 0.f ? 1.f / res.l : 0.f,
                                     [](float x, float y) { return FmhaPipeline::pack_o(x, y); });
             if(FmhaPipeline::IsRowOwner(res))

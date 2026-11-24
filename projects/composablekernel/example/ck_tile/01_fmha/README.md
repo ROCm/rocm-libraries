@@ -493,11 +493,11 @@ block-table width x page_size), not on the context lengths, so one call can be c
 replayed for every decode step.
 
 The wrapper covers a subset of `pa_decode`: `query_length` 1, per-tensor `key_scale` /
-`value_scale` (numbers or one-element float32 tensors, both or neither), contiguous `query` and
-`output`, no sinks.
+`value_scale` (numbers or one-element float32 tensors, both or neither), no sinks. `query` and
+`output` may be strided over sequences and heads.
 
 The kernel merges several clusters of one sequence through a workspace and int32 counters that
 every launch leaves at zero. A launch that finds counters non-zero leaves output rows unwritten
-without an error. So each stream needs its own workspace and counters (the wrapper keeps them per
-stream), and after a failed launch the counters must be zeroed again (`reset_buffers()` in the
-wrapper).
+without an error. So launches that share a workspace and counters must not run concurrently (the
+wrapper keeps one set per device), and after a failed launch the counters must be zeroed again
+(`reset_buffers()` in the wrapper).

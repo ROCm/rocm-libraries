@@ -177,16 +177,17 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
     }
 
     // Stores f * o of the thread's head dims of its row, two elements packed by pack(a, b), to
-    // a block of rows: base_ptr points at row 0, rows are kHeadDim 16-bit elements apart.
+    // a block of rows: base_ptr points at row 0, rows are row_stride 16-bit elements apart.
     template <typename Pack>
-    CK_TILE_DEVICE static void StoreRows(const Result& res, uint16_t* base_ptr, float f, Pack pack)
+    CK_TILE_DEVICE static void
+    StoreRows(const Result& res, uint16_t* base_ptr, index_t row_stride, float f, Pack pack)
     {
         if constexpr(kWaveSplit)
         {
             uint32_t pk[8];
             for(index_t e = 0; e < 8; ++e)
                 pk[e] = pack(res.o[e / 4][2 * (e % 4)] * f, res.o[e / 4][2 * (e % 4) + 1] * f);
-            v4i* dst = ptr_as<v4i>(base_ptr + res.row * kHeadDim + res.d0);
+            v4i* dst = ptr_as<v4i>(base_ptr + res.row * row_stride + res.d0);
             dst[0]   = v4i{int32_t(pk[0]), int32_t(pk[1]), int32_t(pk[2]), int32_t(pk[3])};
             dst[1]   = v4i{int32_t(pk[4]), int32_t(pk[5]), int32_t(pk[6]), int32_t(pk[7])};
         }
@@ -197,22 +198,19 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
                 uint32_t pk[4];
                 for(index_t e = 0; e < 4; ++e)
                     pk[e] = pack(res.o[bk][2 * e] * f, res.o[bk][2 * e + 1] * f);
-                *ptr_as<v4i>(base_ptr + res.row * kHeadDim + (bk * kNumWarps + res.wave) * 16 +
+                *ptr_as<v4i>(base_ptr + res.row * row_stride + (bk * kNumWarps + res.wave) * 16 +
                              res.half * 8) =
                     v4i{int32_t(pk[0]), int32_t(pk[1]), int32_t(pk[2]), int32_t(pk[3])};
             }
         }
     }
 
-    // q_ptr: [batch][nhead_q][kHeadDim]; kv head i_nhead_k of sequence i_batch has rows_per_head =
-    // nhead_q / nhead_k query heads, of which the workgroup takes num_rows from i_row0 on
+    // q_rows: the first of the workgroup's num_rows query heads (rows of kHeadDim), q_row_stride
+    // elements apart
     // k_ptr, v_ptr: the caches; block_table: the sequence's row of the block table
     // scale_s: softmax scale; *k_descale_ptr is folded into it, *v_descale_ptr left to the caller
-    CK_TILE_DEVICE Result operator()(const QDataType* q_ptr,
-                                     index_t i_batch,
-                                     index_t nhead_q,
-                                     index_t rows_per_head,
-                                     index_t i_row0,
+    CK_TILE_DEVICE Result operator()(const QDataType* q_rows,
+                                     index_t q_row_stride,
                                      index_t num_rows,
                                      const KDataType* k_ptr,
                                      const VDataType* v_ptr,
@@ -253,10 +251,7 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
         // Q^T operand of row n: 16-byte d chunks 2i + h, quantized per row (absmax) below
         v4i qraw[8];
         {
-            const QDataType* qrow =
-                q_ptr + (static_cast<long_index_t>(i_batch) * nhead_q + i_nhead_k * rows_per_head +
-                         i_row0 + min(n, num_rows - 1)) *
-                            kHeadDim;
+            const QDataType* qrow = q_rows + min(n, num_rows - 1) * q_row_stride;
             for(index_t i = 0; i < 4; ++i)
             {
                 const index_t c = 2 * i + h;
@@ -371,7 +366,8 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
         // column n of S^T in log2 units
         const float scl = qmax / 448.f * kds * scale_s * 1.4426950408889634f;
 
-        // step t's copies of this wave are in LDS; zero the V bytes of tokens past the context
+        // step t's copies of this wave are in LDS; zero the V bytes of the tokens before the
+        // window and past the context: their P is 0, but their bytes may be NaN codes
         const auto land = [&](index_t t) {
             // two gathers per step
             if(issued > t + 2)
@@ -380,24 +376,30 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
                 __builtin_amdgcn_s_wait_tensorcnt(2);
             else
                 __builtin_amdgcn_s_wait_tensorcnt(0);
-            // the step's pages are consecutive: if the last lies in the range and the context,
-            // every token is valid (the common case, one scalar test instead of one per page)
-            const index_t pg_end = pg0 + page_idx(t, kWavePages - 1) + 1;
-            if(pg_end <= pend && pg_end * kN0 <= ctx)
+            // the step's pages are consecutive: if the first starts inside the window and the
+            // last lies in the range and the context, every token is valid (the common case, one
+            // scalar test instead of one per page)
+            const index_t pg_first = pg0 + page_idx(t, 0);
+            const index_t pg_end   = pg0 + page_idx(t, kWavePages - 1) + 1;
+            if(pg_first * kN0 >= lo && pg_end <= pend && pg_end * kN0 <= ctx)
                 return;
             for(index_t q = 0; q < kWavePages; ++q)
             {
-                const index_t pg    = pg0 + page_idx(t, q);
-                const index_t valid = __builtin_amdgcn_readfirstlane(
+                const index_t pg = pg0 + page_idx(t, q);
+                // the page's valid tokens are [begin, end)
+                const index_t end = __builtin_amdgcn_readfirstlane(
                     pg < pend ? min(max(ctx - pg * kN0, 0), kN0) : 0);
+                const index_t begin =
+                    __builtin_amdgcn_readfirstlane(min(max(lo - pg * kN0, 0), end));
                 uint8_t* vd8 = vbuf(t % kStages, q);
-                if(valid == 0)
+                if(begin == end)
                     for(index_t i = 0; i < 4; ++i)
                         *ptr_as<v4i>(vd8 + (i * 32 + l) * 16) = v4i{0, 0, 0, 0};
-                else if(valid < kN0)
+                else if(begin > 0 || end < kN0)
                     for(index_t i = 0; i < 4; ++i)
-                        for(index_t tok = valid; tok < kN0; ++tok)
-                            vd8[(i * 32 + l) * 16 + tok] = 0;
+                        for(index_t tok = 0; tok < kN0; ++tok)
+                            if(tok < begin || tok >= end)
+                                vd8[(i * 32 + l) * 16 + tok] = 0;
             }
         };
         const auto advance_bt = [&](index_t t) {

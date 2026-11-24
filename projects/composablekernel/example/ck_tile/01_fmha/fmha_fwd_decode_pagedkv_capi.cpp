@@ -36,15 +36,16 @@ size_t ck_fmha_fwd_decode_pagedkv_max_workspace_bytes(int batch, int grid_rows)
         batch, grid_rows, ck_tile::get_max_cluster_size());
 }
 
-// int32 counters for this batch; zero them once, calls of any shape share them. Use one workspace
-// and one set of counters per stream, and zero the counters again after a failed call: a call that
-// finds them non-zero can leave output rows unwritten without an error.
+// int32 counters for this batch; zero them once, calls of any shape share them. Calls that share a
+// workspace and counters must not run concurrently, and the counters must be zeroed again after a
+// failed call: a call that finds them non-zero can leave output rows unwritten without an error.
 size_t ck_fmha_fwd_decode_pagedkv_num_counters(int batch, int grid_rows)
 {
     return ck_tile::fmha_fwd_decode_pagedkv_num_counters(batch, grid_rows);
 }
 
-// q, o: [batch][nhead_q][128] bf16, or fp16 with qo_fp16 != 0; k, v: fp8 e4m3 caches in the
+// q, o: [batch][nhead_q][128] bf16, or fp16 with qo_fp16 != 0, with q_strides / o_strides
+// {batch stride, head stride} in elements (null: contiguous); k, v: fp8 e4m3 caches in the
 // vectorized layout with page_size (16, 64 or 128) tokens per page; block_table: int32 rows of
 // block_table_stride entries; seqlen_k: int32 [batch], each <= max_seqlen_k; k/v descale: one
 // float each. Returns a hipError_t.
@@ -67,6 +68,8 @@ int ck_fmha_fwd_decode_pagedkv(const void* q,
                                int page_size,
                                int qo_fp16,
                                float scale_s,
+                               const int* q_strides,
+                               const int* o_strides,
                                hipStream_t stream)
 {
     if(batch <= 0 || nhead_k <= 0 || nhead_q <= 0 || max_seqlen_k < 0)
@@ -94,6 +97,10 @@ int ck_fmha_fwd_decode_pagedkv(const void* q,
     args.batch              = batch;
     args.nhead_q            = nhead_q;
     args.nhead_k            = nhead_k;
+    args.nhead_stride_q     = q_strides ? q_strides[1] : 128;
+    args.batch_stride_q     = q_strides ? q_strides[0] : nhead_q * 128;
+    args.nhead_stride_o     = o_strides ? o_strides[1] : 128;
+    args.batch_stride_o     = o_strides ? o_strides[0] : nhead_q * 128;
     args.window_size        = window;
     args.num_groups         = c.num_groups;
     args.scale_s            = scale_s;

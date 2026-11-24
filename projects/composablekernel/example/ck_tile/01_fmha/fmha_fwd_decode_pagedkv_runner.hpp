@@ -24,6 +24,8 @@ namespace fmha_fwd_decode_pagedkv_runner {
 using ck_tile::index_t;
 constexpr index_t kHdim = 128;
 constexpr index_t kPage = 16;
+// largest |Q|, and |K|, |V| after the descales, of the random inputs
+constexpr float kQkvMax = 3.f;
 // needle keys (Case::needles): fp8 codes of 1 and 32, dims of K one query row looks at
 constexpr uint8_t kFp8One       = 0x38;
 constexpr uint8_t kFp8ThirtyTwo = 0x60;
@@ -61,6 +63,9 @@ struct Case
     // added to the context lengths the device reads: lengths beyond the block table, which the
     // kernel must not follow (for lengths that fill the table, without a window)
     index_t over_report = 0;
+    // elements left unused after every query head and, three times that, after every sequence
+    // of Q and of O (strided tensors); the kernel must leave the gaps of O alone
+    index_t qo_gap = 0;
 };
 
 struct Result
@@ -74,9 +79,12 @@ struct Result
     std::string error;
 };
 
-// Runs one case: random Q, K/V (finite fp8 in [-1, 1], pages in a random order), NaN codes in the
+// Runs one case: random Q in [-3, 3], K/V over the whole fp8 range with descales that map it to
+// [-3, 3] (the image of quantized tensors), pages in a random order, NaN codes in the
 // unused tail of each last page, the workspace and the output; then validates against a CPU
-// reference and/or times stream and HIP-graph launches.
+// reference and/or times stream and HIP-graph launches. The reference quantizes Q to fp8 per row
+// as the kernel does: against the unquantized Q the 3-bit mantissa of fp8 Q moves the outputs by
+// several percent of the largest one, which would hide everything else.
 //
 // Case::needles shows single keys lost or counted twice, which random keys hide below the fp8
 // rounding of P. The keys on both sides of every 16-token page boundary, one inside every page,
@@ -156,7 +164,7 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     {
         float x = 0.f;
         if(!c.needles)
-            x = 2.f * uni(rng);
+            x = kQkvMax * uni(rng);
         else if((i % kHdim) / kNeedleDims == (i / kHdim) % gqa % needle_classes)
             x = 2.f;
         q[i] = c.fp16 ? ck_tile::bit_cast<uint16_t>(ck_tile::type_convert<ck_tile::fp16_t>(x))
@@ -172,10 +180,17 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     std::uniform_int_distribution<size_t> pick(0, finite.size() - 1);
     std::vector<uint8_t> k(static_cast<size_t>(num_blocks) * c.nhead_k * page_bytes);
     std::vector<uint8_t> v(k.size());
-    for(auto& x : k)
-        x = finite[pick(rng)];
-    for(auto& x : v)
-        x = finite[pick(rng)];
+    // random inputs: K and V fill the fp8 range, the image of tensors with values up to kQkvMax;
+    // needle inputs: small codes around the needles
+    const float fp8_max = ck_tile::type_convert<float>(ck_tile::numeric<ck_tile::fp8_t>::max());
+    const auto fill     = [&](std::vector<uint8_t>& t) {
+        for(auto& x : t)
+            x = c.needles ? finite[pick(rng)]
+                              : ck_tile::bit_cast<uint8_t>(
+                                ck_tile::type_convert<ck_tile::fp8_t>(fp8_max * uni(rng)));
+    };
+    fill(k);
+    fill(v);
     std::vector<int32_t> perm(num_blocks - 1);
     std::iota(perm.begin(), perm.end(), 1);
     std::shuffle(perm.begin(), perm.end(), rng);
@@ -207,6 +222,19 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
                             (static_cast<size_t>(last) * c.nhead_k + hk) * page_bytes;
                         k[base + k_off(tok, d)] = 0x7f;
                         v[base + v_off(tok, d)] = 0x7f;
+                    }
+            // keys before the window as well: a cache may have freed their slots
+            for(index_t hk = 0; hk < c.nhead_k; ++hk)
+                for(index_t tok = 0; tok < window_lo(seqlens[b]); ++tok)
+                    for(index_t d = 0; d < kHdim; ++d)
+                    {
+                        const size_t base =
+                            (static_cast<size_t>(block_table[b * max_blocks + tok / ps]) *
+                                 c.nhead_k +
+                             hk) *
+                            page_bytes;
+                        k[base + k_off(tok % ps, d)] = 0x7f;
+                        v[base + v_off(tok % ps, d)] = 0x7f;
                     }
             if(!c.needles)
                 continue;
@@ -241,19 +269,45 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
                     }
         }
     }
-    const float k_descale = 0.75f, v_descale = 1.25f;
-    const float scale_s = 1.f / std::sqrt(static_cast<float>(kHdim));
+    const float k_descale = c.needles ? 0.75f : kQkvMax / fp8_max;
+    const float v_descale = c.needles ? 1.25f : kQkvMax / fp8_max;
+    const float scale_s   = 1.f / std::sqrt(static_cast<float>(kHdim));
 
-    ck_tile::DeviceMem q_buf(q.size() * 2), k_buf(k.size()), v_buf(v.size());
+    // Q and O on the device: head h of sequence b at b * batch_stride + h * nhead_stride
+    const index_t nhead_stride = kHdim + c.qo_gap;
+    const index_t batch_stride = c.nhead * nhead_stride + 3 * c.qo_gap;
+    const size_t qo_elems      = static_cast<size_t>(batch) * batch_stride;
+    const auto qo_at           = [&](size_t i) {
+        return i / kHdim / c.nhead * batch_stride + i / kHdim % c.nhead * nhead_stride + i % kHdim;
+    };
+    // the contiguous [batch][nhead][hdim] elements of a device image, and whether its gaps
+    // still hold the 0xffff they were filled with
+    const auto qo_read = [&](const ck_tile::DeviceMem& buf, std::vector<uint16_t>& dst) {
+        std::vector<uint16_t> image(qo_elems);
+        buf.FromDevice(image.data());
+        size_t kept = 0;
+        for(size_t i = 0; i < dst.size(); ++i)
+        {
+            dst[i]          = image[qo_at(i)];
+            image[qo_at(i)] = 0xffff;
+        }
+        for(const uint16_t x : image)
+            kept += x == 0xffff ? 1 : 0;
+        return kept == image.size();
+    };
+    std::vector<uint16_t> q_image(qo_elems, 0xffff);
+    for(size_t i = 0; i < q.size(); ++i)
+        q_image[qo_at(i)] = q[i];
+    ck_tile::DeviceMem q_buf(qo_elems * 2), k_buf(k.size()), v_buf(v.size());
     ck_tile::DeviceMem bt_buf(block_table.size() * 4), sl_buf(seqlens32.size() * 4);
-    ck_tile::DeviceMem o_buf(q.size() * 2), scale_buf(8);
+    ck_tile::DeviceMem o_buf(qo_elems * 2), scale_buf(8);
     ck_tile::DeviceMem ws_buf(ck_tile::fmha_fwd_decode_pagedkv_workspace_bytes(
         batch, grid_rows, cfg.num_splits, cfg.num_groups));
     ck_tile::DeviceMem cnt_buf(ck_tile::fmha_fwd_decode_pagedkv_num_counters(batch, grid_rows) * 4);
     HIP_CHECK_ERROR(hipMemset(ws_buf.GetDeviceBuffer(), 0xff, ws_buf.GetBufferSize()));
     HIP_CHECK_ERROR(hipMemset(o_buf.GetDeviceBuffer(), 0xff, o_buf.GetBufferSize()));
     cnt_buf.SetZero();
-    q_buf.ToDevice(q.data());
+    q_buf.ToDevice(q_image.data());
     k_buf.ToDevice(k.data());
     v_buf.ToDevice(v.data());
     bt_buf.ToDevice(block_table.data());
@@ -276,6 +330,10 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     args.batch              = batch;
     args.nhead_q            = c.nhead;
     args.nhead_k            = c.nhead_k;
+    args.nhead_stride_q     = nhead_stride;
+    args.batch_stride_q     = batch_stride;
+    args.nhead_stride_o     = nhead_stride;
+    args.batch_stride_o     = batch_stride;
     args.window_size        = c.window;
     args.num_groups         = cfg.num_groups;
     args.scale_s            = scale_s;
@@ -309,7 +367,12 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     if(validate)
     {
         std::vector<uint16_t> out(q.size());
-        o_buf.FromDevice(out.data());
+        if(!qo_read(o_buf, out))
+        {
+            HIP_CHECK_ERROR(hipStreamDestroy(stream));
+            res.error = "the kernel wrote between the output rows";
+            return res;
+        }
         double dot = 0, nr = 0, ng = 0;
         for(index_t b = 0; b < batch; ++b)
         {
@@ -323,14 +386,25 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
                             hk) *
                            page_bytes;
                 };
+                // Q as the kernel uses it: the row in fp8, its largest magnitude at the fp8 maximum
+                float q_row[kHdim];
+                float q_max = 0.f;
+                for(index_t d = 0; d < kHdim; ++d)
+                {
+                    q_row[d] = qo_to_float(q[(static_cast<size_t>(b) * c.nhead + hq) * kHdim + d]);
+                    q_max    = std::max(q_max, std::fabs(q_row[d]));
+                }
+                for(index_t d = 0; d < kHdim && q_max > 0.f; ++d)
+                    q_row[d] = ck_tile::type_convert<float>(ck_tile::type_convert<ck_tile::fp8_t>(
+                                   q_row[d] / q_max * fp8_max)) *
+                               q_max / fp8_max;
                 std::vector<double> sc(std::max(0, sk - lo));
                 double mx = -1e300;
                 for(index_t t = lo; t < sk; ++t)
                 {
                     double acc = 0;
                     for(index_t d = 0; d < kHdim; ++d)
-                        acc += qo_to_float(q[(static_cast<size_t>(b) * c.nhead + hq) * kHdim + d]) *
-                               fp8_to_float(k[page_base(t) + k_off(t % ps, d)]);
+                        acc += q_row[d] * fp8_to_float(k[page_base(t) + k_off(t % ps, d)]);
                     sc[t - lo] = acc * k_descale * scale_s;
                     mx         = std::max(mx, sc[t - lo]);
                 }
@@ -404,7 +478,7 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
         HIP_CHECK_ERROR(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
         {
             std::vector<uint16_t> ref_out(q.size()), graph_out(q.size());
-            o_buf.FromDevice(ref_out.data());
+            qo_read(o_buf, ref_out);
             // stale partials of the stream launches must not be able to stand in
             HIP_CHECK_ERROR(
                 hipMemsetAsync(o_buf.GetDeviceBuffer(), 0xff, o_buf.GetBufferSize(), stream));
@@ -412,8 +486,7 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
                 hipMemsetAsync(ws_buf.GetDeviceBuffer(), 0xff, ws_buf.GetBufferSize(), stream));
             HIP_CHECK_ERROR(hipGraphLaunch(graph_exec, stream));
             HIP_CHECK_ERROR(hipStreamSynchronize(stream));
-            o_buf.FromDevice(graph_out.data());
-            res.graph_same = ref_out == graph_out;
+            res.graph_same = qo_read(o_buf, graph_out) && ref_out == graph_out;
         }
         float best = 1e30f;
         for(int r = 0; r < 5; ++r)

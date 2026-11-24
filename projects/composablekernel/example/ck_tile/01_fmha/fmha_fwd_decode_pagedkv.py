@@ -5,7 +5,7 @@
 
 pa_decode takes the arguments of aiter's FlyDSL pa_decode for the case it covers: one query
 token, bf16 or fp16 Q/O, head dim 128, fp8 e4m3 K/V with per-tensor scales, pages of 16, 64 or
-128 tokens. Unlike aiter it requires contiguous query and output. Load libck_fmha_fwd_decode_pagedkv.so (target
+128 tokens. Load libck_fmha_fwd_decode_pagedkv.so (target
 ck_fmha_fwd_decode_pagedkv) from CK_FMHA_FWD_DECODE_PAGEDKV_LIB or the library search path.
 """
 
@@ -48,23 +48,27 @@ def _load():
             + [ctypes.c_int]
             + [ctypes.c_void_p] * 6
             + [ctypes.c_int] * 7
-            + [ctypes.c_float, ctypes.c_void_p]
+            + [ctypes.c_float]
+            + [ctypes.POINTER(ctypes.c_int)] * 2
+            + [ctypes.c_void_p]
         )
         _lib = lib
     return _lib
 
 
-def _buffer(kind, nbytes, device, stream):
-    """Scratch workspace or zeroed counters of a stream; grows on demand.
+def _buffer(kind, nbytes, device):
+    """Scratch workspace or zeroed counters, shared by all calls on a device; grows on demand.
 
-    Calls on one stream share them: each call leaves the counters at zero for the next. A call
-    that finds them non-zero leaves output rows unwritten without an error, so streams do not
-    share buffers, and after a failed call (a device fault) use reset_buffers().
+    Each call leaves the counters at zero for the next. A call that finds them non-zero leaves
+    output rows unwritten without an error: calls on one device must not run concurrently (two
+    streams, two graphs replayed at once), and after a failed call (a device fault) use
+    reset_buffers(). The buffers are per device and not per stream because a graph is captured
+    on a stream of its own and replayed on another.
     Both sizes depend only on num_seqs * num_kv_heads: make the first call at the largest batch
     eagerly, since growing is not possible during graph capture. Outgrown buffers are kept since
     captured graphs may still use them.
     """
-    buffers = _buffers.setdefault((kind, device, stream), [])
+    buffers = _buffers.setdefault((kind, device), [])
     if not buffers or buffers[-1].numel() < nbytes:
         if torch.cuda.is_current_stream_capturing():
             raise RuntimeError(
@@ -81,8 +85,8 @@ def _buffer(kind, nbytes, device, stream):
 
 
 def reset_buffers():
-    """Zeroes the counters of every stream again; call after a failed launch, not during capture."""
-    for (kind, _, _), buffers in _buffers.items():
+    """Zeroes the counters of every device again; call after a failed launch, not during capture."""
+    for (kind, _), buffers in _buffers.items():
         if kind == "counters":
             for b in buffers:
                 b.copy_(torch.zeros(b.numel(), dtype=torch.uint8))
@@ -116,7 +120,7 @@ def _scale_ptr(scale, device):
 
 def pa_decode(
     output,  # [num_seqs, num_query_heads, 128], the type of query
-    query,  # [num_seqs, num_query_heads, 128] bf16 or fp16
+    query,  # [num_seqs, num_query_heads, 128] bf16 or fp16; both may be strided over seqs and heads
     key_cache,  # [num_blocks, num_kv_heads, 128 // 16, page_size, 16] fp8 e4m3
     value_cache,  # [num_blocks, num_kv_heads, page_size // 16, 128, 16] fp8 e4m3
     context_lengths,  # [num_seqs] int32
@@ -189,11 +193,14 @@ def pa_decode(
         )
     if nhead_q % nhead_k != 0:
         raise ValueError("num_query_heads must be a multiple of num_kv_heads")
-    for t in (output, query, key_cache, value_cache, context_lengths):
+    for t in (key_cache, value_cache, context_lengths):
         if not t.is_contiguous():
-            raise ValueError(
-                "output, query, the caches and context_lengths must be contiguous"
-            )
+            raise ValueError("the caches and context_lengths must be contiguous")
+    if query.stride(2) != 1 or output.stride(2) != 1:
+        raise ValueError("query and output must have unit stride along the head dim")
+    o_batch, o_head = _strides(output)
+    if o_head < HDIM or o_batch < (nhead_q - 1) * o_head + HDIM:
+        raise ValueError("output rows must not overlap")
     if block_tables.dtype != torch.int32 or context_lengths.dtype != torch.int32:
         raise ValueError("block_tables and context_lengths must be int32")
     if block_tables.stride(1) != 1 or block_tables.shape[0] < batch:
@@ -232,6 +239,14 @@ def pa_decode(
         )
 
 
+def _strides(t):
+    """(batch, head) strides in elements; those of a contiguous tensor for axes of size 1."""
+    _, nhead, hdim = t.shape
+    head = t.stride(1) if nhead > 1 else hdim
+    batch = t.stride(0) if t.shape[0] > 1 else (nhead - 1) * head + hdim
+    return batch, head
+
+
 def _launch(
     lib,
     device,
@@ -258,13 +273,11 @@ def _launch(
         "workspace",
         lib.ck_fmha_fwd_decode_pagedkv_max_workspace_bytes(batch, grid_rows),
         device,
-        stream,
     )
     counters = _buffer(
         "counters",
         lib.ck_fmha_fwd_decode_pagedkv_num_counters(batch, grid_rows) * 4,
         device,
-        stream,
     )
     err = lib.ck_fmha_fwd_decode_pagedkv(
         query.data_ptr(),
@@ -286,6 +299,8 @@ def _launch(
         page,
         1 if query.dtype == torch.float16 else 0,
         float(softmax_scale),
+        (ctypes.c_int * 2)(*_strides(query)),
+        (ctypes.c_int * 2)(*_strides(output)),
         stream,
     )
     if err != 0:

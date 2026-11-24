@@ -102,6 +102,16 @@ std::vector<Param> params()
     add("over_table_coop", over({2, 16, 1, {3008}, 0}), "coop/16");
     add("over_table_groups", over({1, 16, 1, {20000}, 0}), "coop/16x10");
     add("over_table_p64_wave", over({8, 16, 1, {8192}, 0, 0, 0, "auto", 0, 64}), "wave/16");
+    // strided Q and O: gaps after every query head and every sequence, which stay untouched
+    const auto strided = [](Case c) {
+        c.qo_gap = 24;
+        return c;
+    };
+    add("strided_one_split", strided({3, 16, 1, {200, 77, 3}, 0}), "wave/1");
+    add("strided_coop", strided({2, 16, 2, {4000}, 2048}), "coop/11");
+    add("strided_wave", strided({8, 16, 1, {8192}, 0}), "wave/16");
+    add("strided_groups", strided({1, 16, 1, {20000}, 0}), "coop/16x10");
+    add("strided_qblk_fp16", strided({2, 40, 1, {3000}, 0, 0, 0, "auto", 0, 16, true}), "coop/16");
     // forced layouts
     add("full_coop", {2, 16, 1, {5000}, 0, 0, 0, "coop"}, "coop/10");
     add("swa_wave", {2, 16, 1, {5000}, 2048, 0, 0, "wave"}, "wave/11");
