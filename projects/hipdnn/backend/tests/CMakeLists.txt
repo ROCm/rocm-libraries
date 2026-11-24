@@ -116,6 +116,7 @@ add_executable(
     TestHandle.cpp
     TestHelpers.cpp
     IntegrationHeuristicPlugin.cpp
+    IntegrationPluginUnloadCycles.cpp
     TestHeuristicPolicyFramework.cpp
     IntegrationHeuristicPolicyPlugins.cpp
     TestBackendLogger.cpp
