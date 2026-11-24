@@ -93,7 +93,9 @@ using GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16 =
 TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_BFP16, All) { TestConfigs(); }
 TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16, All) { TestConfigs(); }
 
-TEST(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16, SearchStartsAtKernelZero)
+using GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsSearch_FP16 = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsSearch_FP16, SearchStartsAtKernelZero)
 {
     const auto device_name = miopen::solver::GetCurrentDeviceName();
     if(device_name.empty())
@@ -152,7 +154,10 @@ CheckGfx950HasNoHardcodedPick(miopenDataType_t data_type,
     }
 }
 
-TEST(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_BFP16, Gfx950NoHardcodedPick)
+using GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx950_BFP16 = ::testing::TestWithParam<int>;
+using GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx950_FP16  = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx950_BFP16, Gfx950NoHardcodedPick)
 {
     CheckGfx950HasNoHardcodedPick(
         miopenBFloat16,
@@ -164,7 +169,7 @@ TEST(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_BFP16, Gfx950NoHardcodedPick
          {1, 1, 64, 64, {8, 256, 256}, {3, 3, 3}, {0, 0, 0}, {1, 1, 1}, {2, 2, 2}}});
 }
 
-TEST(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16, Gfx950NoHardcodedPick)
+TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx950_FP16, Gfx950NoHardcodedPick)
 {
     // Wan VAE stage 2
     CheckGfx950HasNoHardcodedPick(
@@ -219,7 +224,11 @@ CheckGfx942HardcodedPicks(miopenDataType_t data_type,
     }
 }
 
-TEST(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_BFP16, Gfx942HardcodedPickOnlyForSmallChannels)
+using GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx942_BFP16 = ::testing::TestWithParam<int>;
+using GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx942_FP16  = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx942_BFP16,
+       Gfx942HardcodedPickOnlyForSmallChannels)
 {
     CheckGfx942HardcodedPicks(
         miopenBFloat16,
@@ -231,7 +240,8 @@ TEST(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_BFP16, Gfx942HardcodedPickOn
          {1, 1, 32, 32, {2, 60, 104}, {1, 1, 1}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}}});
 }
 
-TEST(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16, Gfx942HardcodedPickOnlyForSmallChannels)
+TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx942_FP16,
+       Gfx942HardcodedPickOnlyForSmallChannels)
 {
     CheckGfx942HardcodedPicks(
         miopenHalf,
@@ -249,10 +259,30 @@ TEST(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16, Gfx942HardcodedPickOnl
          {1, 8, 8, 32, {32, 56, 56}, {1, 1, 1}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}}});
 }
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsSearch_FP16,
+                         ::testing::Values(0));
+
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx950_BFP16,
+                         ::testing::Values(0));
+
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx950_FP16,
+                         ::testing::Values(0));
+
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx942_BFP16,
+                         ::testing::Values(0));
+
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx942_FP16,
+                         ::testing::Values(0));
+
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_BFP16,
                          testing::ValuesIn(GetPerfConfigTestCases(miopenBFloat16, "gfx942")));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16,
                          testing::ValuesIn(GetPerfConfigTestCases(miopenHalf, "gfx942")));

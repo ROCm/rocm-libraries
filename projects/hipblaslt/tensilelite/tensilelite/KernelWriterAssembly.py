@@ -111,6 +111,7 @@ from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, D
 from .Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal, tdmCacheModifiers
 from .Common.DataType import DataType
 from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar
+from .Common.LdsReadPlan import fp32_lds_read_bytes, validate_gfx1250_fp32_lds_read_width
 from .Common.MatrixInstructionNaming import dataTypeNameAbbrevToInstType, matrixInstructionTypes
 from .Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
 from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk, \
@@ -1057,6 +1058,18 @@ class KernelWriterAssembly(KernelWriter):
     tP["localRead2Perpendicular"]  = localRead2Perpendicular
     tP["localReadStrideCoalesced"] = localReadStrideCoalesced
     tP["localReadInstruction"]     = instructions[lrInstPoolName][localReadInstructionIdx]
+
+    if (tChar in ("A", "B") and self.states.asmCaps["HasWMMA_V3"]
+        and tP["bpeDS"] == 4 and kernel.get("enableTDM%s" % tChar, False)
+        and not kernel["UnrollMajorLDS%s" % tChar]):
+      lrvwTile = getattr(self.states, "lrvwTile%s" % tChar)
+      if kernel["LdsPad%s" % tChar] != 0:
+        validate_gfx1250_fp32_lds_read_width(lrvwTile, kernel["UseF32XEmulation"])
+      readBytes = fp32_lds_read_bytes(lrvwTile)
+      actual = tP["localReadInstruction"]
+      if (actual.inst.__name__ != f"DSLoadB{readBytes * 8}"
+          or actual.blockWidth * bpr != readBytes or actual.numOffsets != 1):
+        raise RuntimeError(f"FP32 LDS padding/read instruction mismatch for {tChar}")
 
   def _reportTmpSgprOverflow(self, num, tag):
     """A temporary allocation past MaxSgpr is an SGPR overflow; say so as the defined-SGPR check does."""

@@ -99,45 +99,45 @@ TEST_P(CPU_UnitTestConvSolverHipDirectFwdDevApplicabilityFwd_NONE, ConvHipDirect
     this->RunTest(miopen::solver::conv::ConvHipDirectFwd{});
 };
 
-// Smoke tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
+// Quick tests
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverHipDirectFwdFwd_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCases(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverHipDirectFwdBwd_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCases(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverHipDirectFwdFwd_BFP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCases(miopenBFloat16))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverHipDirectFwdBwd_BFP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCases(miopenBFloat16))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverHipDirectFwdFwd_FP32,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCases(miopenFloat))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverHipDirectFwdBwd_FP32,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCases(miopenFloat))));
 
 // Device applicability test
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_UnitTestConvSolverHipDirectFwdDevApplicabilityFwd_NONE,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(GetConvTestCases(miopenFloat)[0])));
