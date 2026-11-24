@@ -6029,6 +6029,19 @@ class KernelWriterAssembly(KernelWriter):
                                comment="wg %% %u = intra-group M-tile index"%tilesPerGroup))
             module.add(SAddU32(dst=sgpr(tileStart+0), src0=sgpr(tileStart+0), src1=sgpr(stmp+0),
                                comment="+ intra-group M-tile byte offset (sub-group scale tile)"))
+            # Dual-period only: its Srd+2 limit is (numLine+1)*span -- a full span
+            # of headroom whose sole purpose is to bounds-clamp the trailing phantom
+            # PGR prefetch to 0 at the last M/N-tile.  The +byte base shift above
+            # moves that clamp point one byte, so without this the phantom reads one
+            # byte past the scale allocation and page-faults at deep K.  Shrinking
+            # num_records by the same byte keeps base+num_records at the allocation
+            # end; real scale reads sit below it and are unaffected.  The legacy
+            # (non-dual-period) path has no phantom prefetch and a tighter limit
+            # (numLine*span + one K-step), where this subtraction would clip a real
+            # scale byte -- so it is scoped out.
+            if kernel.get("_DualPeriodMXFP8"):
+              module.add(SSubU32(dst=sgpr("Srd%s+2"%tc), src0=sgpr("Srd%s+2"%tc), src1=sgpr(stmp+0),
+                                 comment="shrink num_records by the M-tile byte (keep window end at the scale allocation)"))
           if isPreShuffledAB:
             module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
                       swizzleSize0, comment="pre-shuffled: scale by %u rows per block"%swizzleSize0))

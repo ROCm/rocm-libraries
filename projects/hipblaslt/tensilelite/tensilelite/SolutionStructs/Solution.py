@@ -4186,6 +4186,27 @@ class Solution(collections.abc.Mapping):
     if "ValidDepthU" in state:
       del state["ValidDepthU"]
 
+    # A 16-wide (MIWaveTile==1) skinny mxfp8 tile is half of a 32-row MX-scale
+    # swizzle group, so its per-workgroup scale SRD base carries an intra-group
+    # M-tile byte offset (KernelWriterAssembly.computeLoadSrd).  That byte shift
+    # is only safe on the dual-period path, where the Srd+2 limit has a full span
+    # of trailing-phantom headroom to absorb it; shrinking that headroom by the
+    # byte keeps every read inside the scale allocation.  The legacy
+    # (non-dual-period) scale limit has no such headroom and page-faults at deep K.
+    # So the 16-wide tile is allowed only when the solution took the dual-period
+    # path (DepthU=128, PGR2, a partitionable other dim).
+    if (state["UseSubtileImpl"]
+        and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"])
+        and (state["MIWaveTile"][0] == 1 or state["MIWaveTile"][1] == 1)
+        and not state.get("_DualPeriodMXFP8")):
+      reject(state, printRejectionReason,
+             "UseSubtileImpl=1 mxfp8 with a 16-wide tile (MIWaveTile==1) requires the "
+             "dual-period path (the legacy scale SRD faults at deep K); got "
+             "MIWaveTile=[%d, %d] DepthU=%d _DualPeriodMXFP8=%s"
+             % (state["MIWaveTile"][0], state["MIWaveTile"][1],
+                state["DepthU"], state.get("_DualPeriodMXFP8")))
+      return
+
     if state["A2ASubRounds"] > 1 \
         and state["DepthU"] * state["ProblemType"]["DataTypeB"].numBytes() % 128 != 0:
       reject(state, printRejectionReason,

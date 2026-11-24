@@ -121,66 +121,57 @@ def _solve(gfx950_iim, assembler, mi, depth_u=128):
 # Verified-correct odd scope (GPU full-element validation): MIWaveTile == 1 AND
 # MIWaveGroup == 1 in the odd dim (MacroTile == 16) -- the 16xN / Mx16 skinny
 # target.  Everything else odd stays rejected.
-_SKINNY_M    = [16, 16, 128, 1, 1, 1, 4, 1, 4]  # MT16x256  (skinny M=1 WG1, partitionable N)
-_SKINNY_N    = [16, 16, 128, 1, 1, 4, 1, 4, 1]  # MT256x16  (skinny N=1 WG1, partitionable M)
-_SKINNY_SQ   = [16, 16, 128, 1, 1, 1, 1, 1, 1]  # MT16x16   (both skinny, not partitionable)
+# Supported: a 16-wide tile (MIWaveTile==1) whose OTHER dim is partitionable, so
+# the solution takes the dual-period path (DU128, PGR2) -- GPU-verified correct at
+# all sizes incl deep K.
+_SKINNY_M    = [16, 16, 128, 1, 1, 1, 4, 1, 4]  # MT16x256  (skinny M=1, partitionable N -> dual-period)
+_SKINNY_N    = [16, 16, 128, 1, 1, 4, 1, 4, 1]  # MT256x16  (skinny N=1, partitionable M -> dual-period)
 _EVEN_SMALL  = [16, 16, 128, 1, 1, 2, 2, 1, 1]  # MT32x32   (even, not partitionable)
-# Rejected: odd MIWaveTile >= 3 mis-computes a tile once the grid tiles across
-# that dim (GPU: MT48x64 fails on (96,128)); MIWaveTile==1 with >1 wave has
-# inexact per-wave scale sizing. These must reject, not emit a wrong kernel.
+# Rejected: a 16-wide tile is only correct on the dual-period path (the legacy
+# scale SRD faults at deep K), so a non-partitionable 16-wide tile is rejected;
+# odd MIWaveTile >= 3 mis-computes a tile once the grid tiles across that dim
+# (GPU: MT48x64 fails on (96,128)); MIWaveTile==1 with >1 wave is inexact.
+_SKINNY_SQ   = [16, 16, 128, 1, 1, 1, 1, 1, 1]  # MT16x16   (both 16-wide, non-dual -> rejected)
 _ODD_M3      = [16, 16, 128, 1, 1, 3, 4, 1, 1]  # MT48x64   (odd M=3)
 _BOTH_ODD    = [16, 16, 128, 1, 1, 3, 3, 1, 1]  # MT48x48   (both odd)
 _SKINNY_MWG  = [16, 16, 128, 1, 1, 1, 4, 2, 2]  # MT32x128  (M=1 but WG0=2 -> inexact)
 
 
 # ---------------------------------------------------------------------------
-# Gate: skinny MIWaveTile==1 mxfp8 now validates (previously rejected by the
-# even-MIWaveTile gate).  Partitionable skinny tiles run at DU128 (dual-period);
-# the non-partitionable 16x16 is served by DU256 (non-dual-period, which requires
-# DepthU a multiple of 2*MI_K).
-@pytest.mark.parametrize("mi, depth_u", [
-    (_SKINNY_M, 128), (_SKINNY_N, 128), (_SKINNY_SQ, 256)])
-def test_skinny_miwavetile_mxfp8_validates(_gp_gfx950, gfx950_iim, assembler, mi, depth_u):
-    sol = _solve(gfx950_iim, assembler, mi, depth_u=depth_u)
-    assert sol.get("Valid") is True, \
-        f"skinny MIWaveTile mxfp8 rejected: mi={mi} DU={depth_u}"
-
-
-# ---------------------------------------------------------------------------
-# A partitionable skinny tile still rides the dual-period path.
-# ---------------------------------------------------------------------------
+# Gate: a 16-wide skinny tile (MIWaveTile==1) with a partitionable other dim
+# validates and takes the dual-period path (previously rejected by the
+# even-MIWaveTile gate).
 @pytest.mark.parametrize("mi", [_SKINNY_M, _SKINNY_N])
-def test_partitionable_skinny_takes_dual_period(_gp_gfx950, gfx950_iim, assembler, mi):
+def test_skinny_miwavetile_mxfp8_validates(_gp_gfx950, gfx950_iim, assembler, mi):
     sol = _solve(gfx950_iim, assembler, mi, depth_u=128)
+    assert sol.get("Valid") is True, f"skinny MIWaveTile mxfp8 rejected: mi={mi}"
     assert sol.get("_DualPeriodMXFP8") is True, f"expected dual-period: mi={mi}"
 
 
 # ---------------------------------------------------------------------------
-# A valid config that cannot form >1 partition (16x16 skinny, or small even) must
-# NOT take dual-period at DU128 -- otherwise the scheduler asserts.  The DU256
-# non-dual-period solution serves the shape instead.
+# A small even non-partitionable tile falls off dual-period to the DU256
+# non-dual-period solution (and must not take dual-period at DU128).
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("mi", [_SKINNY_SQ, _EVEN_SMALL])
-def test_non_partitionable_avoids_dual_period(_gp_gfx950, gfx950_iim, assembler, mi):
-    sol128 = _solve(gfx950_iim, assembler, mi, depth_u=128)
-    assert sol128.get("_DualPeriodMXFP8") is False, \
-        f"non-partitionable tile wrongly took dual-period at DU128: mi={mi}"
-    sol256 = _solve(gfx950_iim, assembler, mi, depth_u=256)
-    assert sol256.get("Valid") is True, f"DU256 fallback rejected: mi={mi}"
-    assert sol256.get("_DualPeriodMXFP8") is False
+def test_even_non_partitionable_avoids_dual_period(_gp_gfx950, gfx950_iim, assembler):
+    sol128 = _solve(gfx950_iim, assembler, _EVEN_SMALL, depth_u=128)
+    assert sol128.get("_DualPeriodMXFP8") is False
+    sol256 = _solve(gfx950_iim, assembler, _EVEN_SMALL, depth_u=256)
+    assert sol256.get("Valid") is True and sol256.get("_DualPeriodMXFP8") is False
 
 
 # ---------------------------------------------------------------------------
-# Unsupported odd configs must be REJECTED (not emitted as a wrong kernel):
+# Unsupported configs must be REJECTED (not emitted as a wrong/faulting kernel):
+#  - a 16-wide tile that is NOT dual-period (e.g. 16x16): the legacy scale SRD
+#    faults at deep K, so it is rejected rather than shipped,
 #  - odd MIWaveTile >= 3 mis-computes a tile across the grid (GPU-confirmed),
 #  - MIWaveTile==1 with >1 wave has inexact per-wave scale sizing.
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("mi", [_ODD_M3, _BOTH_ODD, _SKINNY_MWG])
+@pytest.mark.parametrize("mi", [_SKINNY_SQ, _ODD_M3, _BOTH_ODD, _SKINNY_MWG])
 @pytest.mark.parametrize("depth_u", [128, 256])
 def test_unsupported_odd_rejected(_gp_gfx950, gfx950_iim, assembler, mi, depth_u):
     sol = _solve(gfx950_iim, assembler, mi, depth_u=depth_u)
     assert sol.get("Valid") is False, \
-        f"unsupported odd config must be rejected: mi={mi} DU={depth_u}"
+        f"unsupported config must be rejected: mi={mi} DU={depth_u}"
 
 
 # ---------------------------------------------------------------------------

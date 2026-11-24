@@ -1,12 +1,14 @@
-# MXFP8 subtile skinny macrotile (MIWaveTile==1): 16xN and Mx16 on gfx950.
+# MXFP8 subtile skinny macrotile (16-wide, MIWaveTile==1): 16xN and Mx16 on gfx950.
 #
-# A 16-wide macrotile (MIWaveTile==1, MIWaveGroup==1, MacroTile==16) is half of
-# the 32-row MX-scale swizzle group, so two adjacent workgroups share one group.
-# These shapes deliberately tile the 16-wide dimension across MULTIPLE workgroups
-# (M or N = 32, 48, ... > 16) to exercise the per-workgroup scale SRD base
-# (floor(WG*MT/swizzleSize0) group + intra-group M-tile byte) in
-# KernelWriterAssembly.computeLoadSrd.  Validated on gfx950 MI355X with
-# NumElementsToValidate=-1 (GPU vs CPU, every element), random A/B and scales.
+# A 16-wide macrotile (MIWaveTile==1, with a partitionable other dim so the
+# solution takes the dual-period path) is half of the 32-row MX-scale swizzle
+# group, so two adjacent workgroups share one group.  These shapes deliberately
+# tile the 16-wide dimension across MANY workgroups (M or N up to 8192) AND use
+# deep K (up to 8192) to exercise both the per-workgroup scale SRD base
+# (floor(WG*MT/swizzleSize0) group + intra-group M-tile byte) and the Srd+2
+# num_records shrink that keeps the last-tile trailing phantom prefetch inside the
+# scale allocation.  Validated on gfx950 MI355X with NumElementsToValidate=-1
+# (GPU vs CPU, every element), random A/B and scales.
 
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict]
@@ -36,8 +38,9 @@ GlobalParameters:
 
 BenchmarkProblems:
   ########################################
-  # Skinny M: MT16xN (MIWaveTile[0]=1), dual-period DU128 PGR2. Tile M across
-  # workgroups (M = 16, 48, 64, 112) to exercise per-workgroup scale addressing.
+  # Skinny M: MT16xN (MIWaveTile[0]=1), dual-period DU128 PGR2.  Tile M across
+  # workgroups and sweep K to deep values (the last N/M-tile + deep K is the
+  # illegal-access regression).
   ########################################
   -
     - # ProblemType
@@ -70,9 +73,11 @@ BenchmarkProblems:
           - Exact: [48, 512, 1, 512]
           - Exact: [64, 1024, 1, 1024]
           - Exact: [112, 768, 1, 768]
+          - Exact: [16, 8192, 1, 8192]
+          - Exact: [48, 8192, 1, 8192]
   ########################################
-  # Skinny N: MTMx16 (MIWaveTile[1]=1), dual-period DU128 PGR2. Tile N across
-  # workgroups (N = 16, 48, 112).
+  # Skinny N: MTMx16 (MIWaveTile[1]=1), dual-period DU128 PGR2.  Tile N across
+  # workgroups and sweep K deep.
   ########################################
   -
     - # ProblemType
@@ -103,35 +108,5 @@ BenchmarkProblems:
           - Exact: [512, 16, 1, 512]
           - Exact: [512, 48, 1, 512]
           - Exact: [1024, 112, 1, 1024]
-  ########################################
-  # Skinny 16x16 (both MIWaveTile==1), non-partitionable -> DU256 non-dual-period.
-  # Tile both dims across workgroups.
-  ########################################
-  -
-    - # ProblemType
-      OperationType: GEMM
-      DataType: F8
-      DestDataType: b
-      ComputeDataType: s
-      HighPrecisionAccumulate: True
-      MXBlockA: 32
-      MXBlockB: 32
-      TransposeA: true
-      TransposeB: false
-      UseBeta: True
-      Batched: True
-      ActivationFuncCall: True
-    - InitialSolutionParameters:
-      BenchmarkCommonParameters:
-        - KernelLanguage: ["Assembly"]
-      ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 128, 1, 1, 1, 1, 1, 1]  # MT16x16
-        - PrefetchGlobalRead: [0]
-        - PrefetchLocalRead: [0]
-        - DepthU: [256]
-        - UseSubtileImpl: [true]
-      BenchmarkFinalParameters:
-        - ProblemSizes:
-          - Exact: [48, 48, 1, 512]
-          - Exact: [80, 64, 1, 1024]
+          - Exact: [8192, 16, 1, 8192]
+          - Exact: [8192, 48, 1, 8192]
