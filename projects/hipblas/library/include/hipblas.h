@@ -12900,6 +12900,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtbsvStridedBatched_64(hipblasHandle_t    
 
     @param[in]
     transA     [hipblasOperation_t]
+            - HIPBLAS_OP_N:  op(A) = A.
+            - HIPBLAS_OP_T:  op(A) = A^T.
+            - HIPBLAS_OP_C:  op(A) = A^H.
 
     @param[in]
     diag    [hipblasDiagType_t]
@@ -13033,6 +13036,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtpmv_64(hipblasHandle_t         handle,
 
     @param[in]
     transA     [hipblasOperation_t]
+            - HIPBLAS_OP_N:  op(A) = A.
+            - HIPBLAS_OP_T:  op(A) = A^T.
+            - HIPBLAS_OP_C:  op(A) = A^H.
 
     @param[in]
     diag    [hipblasDiagType_t]
@@ -13170,6 +13176,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtpmvBatched_64(hipblasHandle_t           
 
     @param[in]
     transA     [hipblasOperation_t]
+            - HIPBLAS_OP_N:  op(A) = A.
+            - HIPBLAS_OP_T:  op(A) = A^T.
+            - HIPBLAS_OP_C:  op(A) = A^H.
 
     @param[in]
     diag    [hipblasDiagType_t]
@@ -13758,6 +13767,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtpsvStridedBatched_64(hipblasHandle_t    
 
     @param[in]
     transA     [hipblasOperation_t]
+            - HIPBLAS_OP_N:  op(A) = A.
+            - HIPBLAS_OP_T:  op(A) = A^T.
+            - HIPBLAS_OP_C:  op(A) = A^H.
 
     @param[in]
     diag    [hipblasDiagType_t]
@@ -13894,6 +13906,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmv_64(hipblasHandle_t         handle,
 
     @param[in]
     transA     [hipblasOperation_t]
+            - HIPBLAS_OP_N:  op(A) = A.
+            - HIPBLAS_OP_T:  op(A) = A^T.
+            - HIPBLAS_OP_C:  op(A) = A^H.
 
     @param[in]
     diag    [hipblasDiagType_t]
@@ -14043,6 +14058,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmvBatched_64(hipblasHandle_t           
 
     @param[in]
     transA     [hipblasOperation_t]
+            - HIPBLAS_OP_N:  op(A) = A.
+            - HIPBLAS_OP_T:  op(A) = A^T.
+            - HIPBLAS_OP_C:  op(A) = A^H.
 
     @param[in]
     diag    [hipblasDiagType_t]
@@ -14216,6 +14234,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmvStridedBatched_64(hipblasHandle_t    
 
     @param[in]
     transA     [hipblasOperation_t]
+            - HIPBLAS_OP_N:  op(A) = A.
+            - HIPBLAS_OP_T:  op(A) = A^T.
+            - HIPBLAS_OP_C:  op(A) = A^H.
 
     @param[in]
     diag    [hipblasDiagType_t]
@@ -14353,6 +14374,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrsv_64(hipblasHandle_t         handle,
 
     @param[in]
     transA     [hipblasOperation_t]
+            - HIPBLAS_OP_N:  op(A) = A.
+            - HIPBLAS_OP_T:  op(A) = A^T.
+            - HIPBLAS_OP_C:  op(A) = A^H.
 
     @param[in]
     diag    [hipblasDiagType_t]
@@ -14501,6 +14525,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrsvBatched_64(hipblasHandle_t           
 
     @param[in]
     transA     [hipblasOperation_t]
+            - HIPBLAS_OP_N:  op(A) = A.
+            - HIPBLAS_OP_T:  op(A) = A^T.
+            - HIPBLAS_OP_C:  op(A) = A^H.
 
     @param[in]
     diag    [hipblasDiagType_t]
