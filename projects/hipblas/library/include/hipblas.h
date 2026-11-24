@@ -665,7 +665,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasGetBatchBetaStride(hipblasHandle_t handle,
     x         device pointer storing vector x.
     @param[in]
     incx      [int]
-              specifies the increment for the elements of y.
+              specifies the increment for the elements of x.
     @param[out]
     result
               device pointer or host pointer to store the amax index.
@@ -895,7 +895,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasIzamaxStridedBatched_64(hipblasHandle_t   
     x         device pointer storing vector x.
     @param[in]
     incx      [int]
-              specifies the increment for the elements of y.
+              specifies the increment for the elements of x.
     @param[out]
     result
               device pointer or host pointer to store the amin index.
@@ -2067,7 +2067,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZcopyStridedBatched_64(hipblasHandle_t    
     x         device pointer storing vector x.
     @param[in]
     incx      [int]
-              specifies the increment for the elements of y.
+              specifies the increment for the elements of x.
     @param[in]
     y         device pointer storing vector y.
     @param[in]
@@ -2650,7 +2650,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZdotuStridedBatched_64(hipblasHandle_t    
     x         device pointer storing vector x.
     @param[in]
     incx      [int]
-              specifies the increment for the elements of y.
+              specifies the increment for the elements of x.
     @param[out]
     result
               device pointer or host pointer to store the nrm2 product.
@@ -25453,7 +25453,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasAxpyStridedBatchedEx_64(hipblasHandle_t ha
               specifies the datatype of vector x.
     @param[in]
     incx      [int]
-              specifies the increment for the elements of y.
+              specifies the increment for the elements of x.
     @param[in]
     y         device pointer storing vector y.
     @param[in]
@@ -25795,7 +25795,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDotcStridedBatchedEx_64(hipblasHandle_t ha
               specifies the datatype of the vector x.
     @param[in]
     incx      [int]
-              specifies the increment for the elements of y.
+              specifies the increment for the elements of x.
     @param[out]
     result
               device pointer or host pointer to store the nrm2 product.
