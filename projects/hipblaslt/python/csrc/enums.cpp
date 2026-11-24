@@ -232,6 +232,10 @@ void init_enums(nb::module_& m)
             "hipblasLtMatmulDescAttributes_t",
             "FUSED_EPILOGUE",
             HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE);
+        reg(e,
+            "hipblasLtMatmulDescAttributes_t",
+            "FUSED_PROLOGUE",
+            HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE);
 #endif
         reg(e,
             "hipblasLtMatmulDescAttributes_t",
@@ -483,27 +487,26 @@ void init_enums(nb::module_& m)
 #endif
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     {
-        nb::enum_<hipblasLtFusedEpilogueAttribute_t> e(m, "FusedEpilogueAttr", nb::is_arithmetic());
+        nb::enum_<hipblasLtFuseablePrologue_t> e(m, "FuseablePrologue", nb::is_arithmetic());
+        reg(e, "hipblasLtFuseablePrologue_t", "A2A_PREFIX", HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX);
+    }
+#endif
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+    {
+        nb::enum_<hipblasLtFusionAttribute_t> e(m, "FusionAttr", nb::is_arithmetic());
+        reg(e, "hipblasLtFusionAttribute_t", "A2A_SDMA_QUEUES", HIPBLASLT_FUSION_A2A_SDMA_QUEUES);
+        reg(e, "hipblasLtFusionAttribute_t", "A2A_RECV_PTRS", HIPBLASLT_FUSION_A2A_RECV_PTRS);
+        reg(e, "hipblasLtFusionAttribute_t", "A2A_EXTENT", HIPBLASLT_FUSION_A2A_EXTENT);
         reg(e,
-            "hipblasLtFusedEpilogueAttribute_t",
-            "A2A_PREFIX_SDMA_QUEUES",
-            HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES);
+            "hipblasLtFusionAttribute_t",
+            "A2A_COMPLETION_MODE",
+            HIPBLASLT_FUSION_A2A_COMPLETION_MODE);
+        reg(e, "hipblasLtFusionAttribute_t", "COMM_CHANNEL", HIPBLASLT_FUSION_COMM_CHANNEL);
+        reg(e, "hipblasLtFusionAttribute_t", "A2A_PEER_B_PTRS", HIPBLASLT_FUSION_A2A_PEER_B_PTRS);
         reg(e,
-            "hipblasLtFusedEpilogueAttribute_t",
-            "A2A_PREFIX_RECV_PTRS",
-            HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS);
-        reg(e,
-            "hipblasLtFusedEpilogueAttribute_t",
-            "A2A_PREFIX_EXTENT",
-            HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT);
-        reg(e,
-            "hipblasLtFusedEpilogueAttribute_t",
-            "A2A_PREFIX_COMPLETION_MODE",
-            HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_COMPLETION_MODE);
-        reg(e,
-            "hipblasLtFusedEpilogueAttribute_t",
-            "COMM_CHANNEL",
-            HIPBLASLT_FUSED_EPILOGUE_COMM_CHANNEL);
+            "hipblasLtFusionAttribute_t",
+            "A2A_GATHER_BUFFER",
+            HIPBLASLT_FUSION_A2A_GATHER_BUFFER);
     }
 #endif
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
