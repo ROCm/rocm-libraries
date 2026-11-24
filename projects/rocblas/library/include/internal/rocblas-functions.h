@@ -10801,7 +10801,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpsv_strided_batched_64(rocblas_handle   
               specifies the increment for the elements of x.
     @param[in]
     beta      specifies the scalar beta.
-    @param[out]
+    @param[in, out]
     y         pointer storing vector y on the GPU.
     @param[in]
     incy      [rocblas_int]
@@ -10946,7 +10946,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymv_64(rocblas_handle                han
               specifies the increment for the elements of each vector x_i.
     @param[in]
     beta      device pointer or host pointer to scalar beta.
-    @param[out]
+    @param[in, out]
     y         device array of device pointers storing each vector y_i.
     @param[in]
     incy      [rocblas_int]
@@ -11111,7 +11111,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymv_batched_64(rocblas_handle           
                 This typically means stridex >= n * incx. stridex should be non zero.
     @param[in]
     beta      device pointer or host pointer to scalar beta.
-    @param[out]
+    @param[in, out]
     y         Device pointer to the first vector y_1 on the GPU.
     @param[in]
     incy      [rocblas_int]
@@ -11289,7 +11289,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymv_strided_batched_64(rocblas_handle   
               specifies the increment for the elements of x.
     @param[in]
     beta      specifies the scalar beta.
-    @param[out]
+    @param[in, out]
     y         pointer storing vector y on the GPU.
     @param[in]
     incy      [rocblas_int]
@@ -11378,7 +11378,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspmv_64(rocblas_handle handle,
               specifies the increment for the elements of each vector x_i.
     @param[in]
     beta      device pointer or host pointer to scalar beta.
-    @param[out]
+    @param[in, out]
     y         device array of device pointers storing each vector y_i.
     @param[in]
     incy      [rocblas_int]
@@ -11481,7 +11481,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspmv_batched_64(rocblas_handle      handl
                 This typically means stridex >= n * incx. stridex should be non zero.
     @param[in]
     beta      device pointer or host pointer to scalar beta.
-    @param[out]
+    @param[in, out]
     y         Device pointer to the first vector y_1 on the GPU.
     @param[in]
     incy      [rocblas_int]
@@ -11596,7 +11596,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspmv_strided_batched_64(rocblas_handle ha
               specifies the increment for the elements of x.
     @param[in]
     beta      specifies the scalar beta.
-    @param[out]
+    @param[in, out]
     y         pointer storing vector y on the GPU.
     @param[in]
     incy      [rocblas_int]
@@ -11699,7 +11699,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dsbmv_64(rocblas_handle handle,
               specifies the increment for the elements of each vector x_i.
     @param[in]
     beta      device pointer or host pointer to scalar beta.
-    @param[out]
+    @param[in, out]
     y         device array of device pointers storing each vector y_i.
     @param[in]
     incy      [rocblas_int]
@@ -11818,7 +11818,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dsbmv_batched_64(rocblas_handle      handl
                 This typically means stridex >= n * incx. stridex should be non zero.
     @param[in]
     beta      device pointer or host pointer to scalar beta.
-    @param[out]
+    @param[in, out]
     y         Device pointer to the first vector y_1 on the GPU.
     @param[in]
     incy      [rocblas_int]
