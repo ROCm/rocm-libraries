@@ -1287,6 +1287,22 @@ Tests:
   gpu_arch: '9(42|50)|1250'
   use_e: true
 
+- name: matmul_bias_swish_aux_fp16
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  use_e: 1
+  activation_type: swish
+  bias_vector: [0, 1]
+  unit_check: 0
+  norm_check: 1
+
 - name: matmul_bias_swish_aux_layout
   category: pre_checkin
   function:
