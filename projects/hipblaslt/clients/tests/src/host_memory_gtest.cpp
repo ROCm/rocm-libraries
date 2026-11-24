@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -290,6 +291,44 @@ namespace
                   "[ MEMORY   ] Suite.big: this case needs 48 GiB of host memory and 30 GiB is "
                   "available\n"
                   "[ MEMORY   ] Suite.huge: a device allocation failed: out of memory\n");
+    }
+
+    TEST(HostMemory_pre_checkin, allocation_stop_fails_the_tests_the_pr_tiers_run)
+    {
+        auto fails = [](const char* setting, const char* name) {
+            return hipblaslt_memory_stop_fails(setting, name, false);
+        };
+        EXPECT_TRUE(fails(nullptr, "_/matmul_test.matmul/pre_checkin_gemm"));
+        EXPECT_TRUE(fails(nullptr, "_/matmul_test.matmul/quick_gemm"));
+        EXPECT_TRUE(fails("", "_/matmul_test.matmul/smoke_gemm"));
+        EXPECT_TRUE(fails(nullptr, "MatmulMemory_pre_checkin.case"));
+        EXPECT_FALSE(fails(nullptr, "_/matmul_test.matmul/nightly_gemm"));
+        EXPECT_FALSE(fails(nullptr, "_/matmul_test.matmul/stress_gemm"));
+        EXPECT_FALSE(fails(nullptr, "_/matmul_test.matmul/HMM_gemm"));
+        EXPECT_FALSE(fails(nullptr, ""));
+    }
+
+    TEST(HostMemory_pre_checkin, preflight_stop_skips_by_default)
+    {
+        // A runner with less host memory than a pre_checkin case needs skips the case rather than
+        // failing the job.
+        EXPECT_FALSE(
+            hipblaslt_memory_stop_fails(nullptr, "_/matmul_test.matmul/pre_checkin_gemm", true));
+        EXPECT_FALSE(hipblaslt_memory_stop_fails("", "_/matmul_test.matmul/smoke_gemm", true));
+    }
+
+    TEST(HostMemory_pre_checkin, memory_stop_setting_overrides_the_default)
+    {
+        for(bool preflight : {false, true})
+        {
+            SCOPED_TRACE(preflight);
+            EXPECT_FALSE(hipblaslt_memory_stop_fails(
+                "0", "_/matmul_test.matmul/pre_checkin_gemm", preflight));
+            EXPECT_TRUE(
+                hipblaslt_memory_stop_fails("1", "_/matmul_test.matmul/stress_gemm", preflight));
+            EXPECT_TRUE(
+                hipblaslt_memory_stop_fails("yes", "_/matmul_test.matmul/nightly_gemm", preflight));
+        }
     }
 
 #ifndef _WIN32
