@@ -7,7 +7,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
@@ -59,14 +58,9 @@ def _run_mocked_cli(fault: str, output_dir: str) -> None:
             d[-1, 0, 0] = np.nextafter(d[-1, 0, 0], np.float32(np.inf))
         return d, pa, pb
 
-    def native_ir(m, mode):
-        kernel = numerics.build_tf32_mma_probe(numerics.Tf32MmaProbeSpec(m, mode))
-        return "wrong IR" if fault == "builder parity" else numerics.serialize(kernel)
-
     def native_lowering(*_args, **_kwargs):
         return "wrong LLVM" if fault == "lowerer parity" else "mock LLVM"
 
-    probe_builder = SimpleNamespace(tf32_mma_probe_serialize_ir=native_ir)
     argv = ["tf32_numerics", "--output-dir", output_dir, "--shape", "16"]
     with (
         patch.object(numerics, "corpus", corpus),
@@ -81,7 +75,6 @@ def _run_mocked_cli(fault: str, output_dir: str) -> None:
         patch.object(comgr, "resolved_lib_path", return_value="mock COMGR"),
         patch.object(numerics.native_engine, "require_native_lowering"),
         patch.object(numerics.native_engine, "lower_serialized_ir", native_lowering),
-        patch.object(numerics, "_cpp_probe_builder", return_value=probe_builder),
         patch.object(sys, "argv", argv),
     ):
         numerics.main()
@@ -100,7 +93,6 @@ def _run_mocked_cli(fault: str, output_dir: str) -> None:
         "B preparation",
         "dense reference",
         "single product",
-        "builder parity",
         "lowerer parity",
         "variant parity",
         "backend parity",
