@@ -825,6 +825,30 @@ inline std::vector<Shape>
     return seeds;
 }
 
+/// The shapes of @p sources taking turns: the first of each, then the second of each, and so on,
+/// each source's own order kept. A walk starts from each of the first accepted seeds, so the
+/// turns give every source footholds however many shapes another holds.
+inline std::vector<Shape> takingTurns(const std::vector<std::vector<Shape>>& sources)
+{
+    std::vector<Shape> seeds;
+    size_t longest = 0;
+    for(const auto& source : sources)
+    {
+        longest = std::max(longest, source.size());
+    }
+    for(size_t turn = 0; turn < longest; ++turn)
+    {
+        for(const auto& source : sources)
+        {
+            if(turn < source.size())
+            {
+                seeds.push_back(source[turn]);
+            }
+        }
+    }
+    return seeds;
+}
+
 /// The cross product of declared regime buckets and common values (§4.3.2, §4.3.5), used to
 /// seed the search: these combinations are realistic by construction, unlike independent draws.
 /// Parameters with neither take their floor and are left to the walk. Strided to @p limit;
@@ -1365,10 +1389,6 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         const auto oracle = oracleFor(index);
 
         FeasibleSetRequest search;
-        // Shapes other sources already hold come first: the first accepted seeds start the
-        // walks, and these are where the engine's kernels and real workloads are known to sit.
-        search.seeds = detail::pooledSeeds(pooledShapes, categorical, request.maxSkeleton);
-        search.seeds.insert(search.seeds.end(), skeleton.begin(), skeleton.end());
         search.dimensions = numericWindow;
         search.targetCount = pointsFor(index);
         search.oracleBudget = request.budgetPerCombination;
@@ -1471,16 +1491,43 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         search.targetCount
             = std::max<int64_t>(0, pointsFor(index) - static_cast<int64_t>(result.problems.size()));
 
-        // Admitted points seed the walk inside the served region.
-        for(const auto& point : result.problems)
-        {
+        // The walks start from the first `restarts` accepted seeds, so the sources take turns: a
+        // shape another source holds (a pack's geometry or a recorded workload), an admitted
+        // archetype point, a regime skeleton shape. Each may sit on part of the served region
+        // the others never reach, and a part is explored only from a foothold on it (RFC 0019.13
+        // §5.3 step 4). The skeleton goes in a scattered order under the search's seed: in grid
+        // order its first shapes all hold the leading parameters' smallest values, so every walk
+        // it started would begin in one corner. Neighbourhood points sit beside the archetypes;
+        // they go last, still put to the oracle as points the search reached.
+        const auto shapeOf = [&corpus](const ProblemPoint& point) {
             Shape shape;
             shape.reserve(corpus.numericParameters.size());
             for(const auto& name : corpus.numericParameters)
             {
                 shape.push_back(detail::integerAt(point, name).value_or(1));
             }
-            search.seeds.push_back(std::move(shape));
+            return shape;
+        };
+        std::vector<Shape> archetypeShapes;
+        archetypeShapes.reserve(anchored.size());
+        for(const auto& point : anchored)
+        {
+            archetypeShapes.push_back(shapeOf(point));
+        }
+        std::vector<Shape> scatteredSkeleton;
+        scatteredSkeleton.reserve(skeleton.size());
+        const detail::ScatteredOrder skeletonOrder(skeleton.size(), search.seed);
+        for(size_t step = 0; step < skeleton.size(); ++step)
+        {
+            scatteredSkeleton.push_back(skeleton[skeletonOrder(step)]);
+        }
+        search.seeds = detail::takingTurns(
+            {detail::pooledSeeds(pooledShapes, categorical, request.maxSkeleton),
+             std::move(archetypeShapes),
+             std::move(scatteredSkeleton)});
+        for(size_t i = anchored.size(); i < result.problems.size(); ++i)
+        {
+            search.seeds.push_back(shapeOf(result.problems[i]));
         }
         searches[index] = search;
         anchoredCounts[index] = result.problems.size();

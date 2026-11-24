@@ -169,6 +169,107 @@ TEST(TestProblemSpace, TheWalkStartsFromThePointsOtherSourcesHold)
     }
 }
 
+namespace
+{
+
+/// M and N searched over [1, 4096], the regime skeleton the cross product of the given
+/// `common_values`, and @p archetypes (a JSON array) drawn for a fifth of each combination.
+OperationMetadata twoIslands(const std::string& mValues,
+                             const std::string& nValues,
+                             const std::string& archetypes)
+{
+    return metadataFor(R"({
+      "schema_version": "1.0",
+      "operation": "toy",
+      "parameters": {
+        "M": { "type": "int64", "common_values": )"
+                       + mValues + R"( },
+        "N": { "type": "int64", "common_values": )"
+                       + nValues + R"( }
+      },
+      "stratification_axis": "working_set",
+      "regimes": {},
+      "graph_builder": { "function": "f", "source": "x.hpp", "arguments": [] },
+      "archetypes": )" + archetypes
+                       + R"(,
+      "mixture": { "archetypes": 0.2, "neighbourhood": 0.0, "exploration": 0.8 }
+    })");
+}
+
+/// The distinct N of @p corpus's problems at M = @p m.
+std::set<int64_t> widthsAt(const ProblemCorpus& corpus, int64_t m)
+{
+    std::set<int64_t> widths;
+    for(const auto& point : corpus.problems())
+    {
+        if(std::get<int64_t>(point.at("M")) == m)
+        {
+            widths.insert(std::get<int64_t>(point.at("N")));
+        }
+    }
+    return widths;
+}
+
+/// An engine serving small shapes, M <= @p smallM and N <= @p smallN, and an island at M =
+/// @p islandM only, N >= @p islandN (above @p smallN): no walk step enters the island, since a
+/// point on it needs both M exact and N large, and none leaves, since a step that changes one
+/// alone is refused.
+ProblemOracle smallAndAnIsland(int64_t smallM, int64_t smallN, int64_t islandM, int64_t islandN)
+{
+    return [=](const ProblemPoint& point) {
+        const auto m = std::get<int64_t>(point.at("M"));
+        const auto n = std::get<int64_t>(point.at("N"));
+        return (m <= smallM && n <= smallN) || (m == islandM && n >= islandN);
+    };
+}
+
+} // namespace
+
+TEST(TestProblemSpace, TheWalkAlsoStartsFromAnAdmittedArchetype)
+{
+    // An engine that serves one exact M, as kernels for one recorded shape do, which only the
+    // archetype names. Walks start from at most `restarts` (8) footholds; were the 9 accepted
+    // skeleton shapes taken first, none would start on the island, and it would hold the
+    // archetype's one point. Taking turns, a walk starts there and moves along N.
+    const auto metadata
+        = twoIslands("[1, 2, 4]",
+                     "[1, 2, 4]",
+                     R"([{ "name": "recorded", "values": { "M": [1050], "N": [2000] } }])");
+    ExplorationRequest request;
+    request.pointsPerCombination = 40;
+    request.budgetPerCombination = 8000;
+    request.seed = 3;
+    const auto corpus = exploreProblemSpace(metadata, request, smallAndAnIsland(4, 4, 1050, 8));
+    EXPECT_GE(widthsAt(corpus, 1050).size(), 10U) << "no walk started at the archetype";
+}
+
+TEST(TestProblemSpace, TheWalkStartsFromAcrossTheSkeletonNotItsFirstCorner)
+{
+    // The engine serves small shapes and an island the skeleton reaches at four points, and not
+    // the archetype, so only the skeleton starts walks. In grid order the first eight accepted
+    // shapes hold M = 1 or 2, so every walk would start on the small shapes and the island would
+    // hold only the skeleton's own points; scattered, some walk starts on it.
+    const std::set<int64_t> gridWidths{1, 2, 4, 8, 1024, 1536, 2048, 3072};
+    const auto metadata
+        = twoIslands("[1, 2, 4, 2048]",
+                     "[1, 2, 4, 8, 1024, 1536, 2048, 3072]",
+                     R"([{ "name": "declined", "values": { "M": [3000], "N": [1] } }])");
+    ExplorationRequest request;
+    request.pointsPerCombination = 40;
+    request.budgetPerCombination = 8000;
+    request.seed = 3;
+    const auto corpus = exploreProblemSpace(metadata, request, smallAndAnIsland(4, 8, 2048, 1024));
+    std::set<int64_t> walked;
+    for(const auto width : widthsAt(corpus, 2048))
+    {
+        if(gridWidths.count(width) == 0)
+        {
+            walked.insert(width);
+        }
+    }
+    EXPECT_GE(walked.size(), 3U) << "no walk started on the M = 2048 island";
+}
+
 TEST(TestProblemSpace, AMultipleTheConstraintsRequireIsTheGranularityTheSearchLandsOn)
 {
     // M is a multiple of 8 by the declaration's own constraint: the random starts, the walk and
