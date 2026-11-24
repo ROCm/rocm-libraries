@@ -34,8 +34,8 @@
 #include <thrust/device_ptr.h>
 #include <thrust/device_reference.h>
 
-#include <limits>
-#include <stdexcept>
+#include <new>
+#include _THRUST_STD_INCLUDE(limits)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -155,11 +155,8 @@ public:
    *  \note Memory deallocated by this function must previously have been
    *        allocated with \p allocate.
    */
-  THRUST_HOST inline void deallocate(pointer p, size_type cnt) noexcept
+  THRUST_HOST inline void deallocate(pointer p, [[maybe_unused]] size_type cnt) noexcept
   {
-    // silence unused parameter warning while still leaving the parameter name for Doxygen
-    (void) (cnt);
-
     device_free(p);
   } // end deallocate()
 
@@ -168,7 +165,7 @@ public:
    */
   inline size_type max_size() const
   {
-    return (std::numeric_limits<size_type>::max)() / sizeof(T);
+    return (_THRUST_STD::numeric_limits<size_type>::max)() / sizeof(T);
   } // end max_size()
 
   /*! Compares against another \p device_malloc_allocator for equality.

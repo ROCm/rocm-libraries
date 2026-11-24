@@ -14,8 +14,8 @@ set(SUPPORTED_ARCHITECTURES "")
 # targets, so a full-ASAN configuration could be built with replay protection
 # off. hipBLASLt's validation does not cover this module's list.
 if(HIPSPARSELT_ENABLE_ASAN OR BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
-    # For address sanitizer builds, base and supported are the same
-    list(APPEND BASE_ARCHITECTURES "gfx942:xnack+" "gfx950:xnack+" "gfx1250" "gfx1250-strict")
+    list(APPEND BASE_ARCHITECTURES
+         "gfx942:xnack+" "gfx950:xnack+" "gfx1250:xnack+" "gfx1250-strict:xnack+")
     set(SUPPORTED_ARCHITECTURES ${BASE_ARCHITECTURES})
 else()
     list(APPEND BASE_ARCHITECTURES "gfx942" "gfx950" "gfx1250" "gfx1250-strict")
@@ -188,3 +188,53 @@ function(hipsparselt_normalize_xnack_archs output_var)
     endforeach()
     set(${output_var} "${_normalized}" PARENT_SCOPE)
 endfunction()
+
+# The targets a device ASAN build offloads a requested list to.
+#
+# Device ASAN instruments accesses that only resolve under XNACK replay, so a
+# bare architecture is promoted to ":xnack+" to ask the loader for it; gfx1250
+# and its steppings included, since xnack-any would run under either setting
+# and ASAN needs the one it cannot pick for itself. An entry that already names
+# a qualifier is left as written, so an explicit ":xnack-" still reaches
+# validation and is refused there.
+#
+# The promoted spelling is then put to the compiler, which hands back the bare
+# name on a toolchain that will not take the qualifier.
+#
+# Kept as a list rather than a pattern so it reads as the same statement as
+# tensilelite_offload_target's _xnack_capable in hipBLASLt; the two answer the
+# same question and are meant to be comparable at a glance.
+function(hipsparselt_offload_targets output_var)
+    set(_xnack_capable gfx942 gfx950 gfx1250 gfx1250-strict)
+    set(_promoted "")
+    foreach(_arch IN LISTS ARGN)
+        if(NOT "${_arch}" MATCHES ":" AND "${_arch}" IN_LIST _xnack_capable)
+            list(APPEND _promoted "${_arch}:xnack+")
+        else()
+            list(APPEND _promoted "${_arch}")
+        endif()
+    endforeach()
+    hipsparselt_normalize_xnack_archs(_settled ${_promoted})
+    set(${output_var} "${_settled}" PARENT_SCOPE)
+endfunction()
+
+# Settles the ":xnack+" the ASAN list above was written with, now that there is
+# a function to ask the compiler. A toolchain that does not take the qualifier
+# on an architecture gets the bare name back; one that does keeps it.
+#
+# Deferred to here rather than decided where the list is built, because the
+# list is built at include time and this module is read top to bottom -- the
+# probe is not defined yet up there.
+#
+# BASE only. SUPPORTED says what a target may be called, not what this build
+# will ask for, and narrowing it to the settled spelling refused the other one:
+# an explicit -DGPU_TARGETS=gfx1250 stopped validating the moment a compiler
+# accepted gfx1250:xnack+. Both spellings stay nameable, and CMakeLists.txt
+# promotes an explicitly requested bare target before validating it.
+#
+# Only the ASAN arm names the qualifier, so the else arm is left alone.
+if(HIPSPARSELT_ENABLE_ASAN OR BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
+    hipsparselt_normalize_xnack_archs(BASE_ARCHITECTURES ${BASE_ARCHITECTURES})
+    list(APPEND SUPPORTED_ARCHITECTURES ${BASE_ARCHITECTURES})
+    list(REMOVE_DUPLICATES SUPPORTED_ARCHITECTURES)
+endif()

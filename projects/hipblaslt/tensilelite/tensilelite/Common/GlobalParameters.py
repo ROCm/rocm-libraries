@@ -277,6 +277,9 @@ globalParameters["PrintTensorAmaxD"] = 0  # Print AmaxD after validation
 # Print final matrix-staging LDS addresses and the gfx1250 segment map during kernel generation.
 globalParameters["PrintLDSLayout"] = False
 globalParameters["PrintWinnersOnly"] = False  # Only print the solutions which become the fastest
+globalParameters["PrintRejectedPredicates"] = (
+    False  # client logs the evaluation of every predicate of solutions rejected by their predicates; needs ClientLogLevel >= 2
+)
 globalParameters["PrintCodeCommands"] = (
     False  # print the commands used to generate the code objects (asm,link,hip-clang, etc)
 )
@@ -354,6 +357,10 @@ globalParameters["UseUserArgs"] = False
 # writes its slice into its own full-size D unless SplitPlacementD is Shared.
 globalParameters["SplitDevices"] = 1
 globalParameters["SplitDim"] = "M"
+# A split run joins the devices after every launch, so a launch starts only when the one before it
+# has finished on every device (the time to compare with an unsplit run). True lets the devices
+# run their launches back to back and only waits for them at the end of a group of enqueues.
+globalParameters["SplitFreeRun"] = False
 # Where each tensor lives when split: "Replicated" (a copy on every device, the default) or
 # "Shared" (one copy that the other devices use over peer access). Only the operand the split does
 # not cut (B for SplitDim M, A for SplitDim N) and D can be shared: a shared B or A is read from
@@ -618,6 +625,7 @@ defaultBenchmarkCommonParameters = [
     {"1LDSBuffer": [0]},
     {"LDSSegmentInterleave": [0]},
     {"LDSSegmentBRotate": [0]},
+    {"WaveTileContiguousA": [False]},
     {"DepthU": [-1]},
     {"NonTemporalE": [0]},
     {"NonTemporalGate": [0]},
