@@ -27,7 +27,7 @@
 #include "rocsparse_debug.hpp"
 #include "rocsparse_enum_utils.hpp"
 #include "rocsparse_envariables.hpp"
-#include <map>
+#include <sstream>
 
 void rocsparse::warning_message(const char* msg_,
                                 const char* function_,
@@ -56,4 +56,20 @@ void rocsparse::error_message(
                   << "//                            \"msg\"     : \"" << msg_ << "\" }"
                   << std::endl;
     }
+}
+
+rocsparse_status rocsparse::log_hip_error(
+    hipError_t status, const char* prefix, const char* function, const char* file, int line)
+{
+    const rocsparse_status rocsparse_status_for_hip
+        = rocsparse::get_rocsparse_status_for_hip_status(status);
+    std::stringstream s;
+    if(prefix != nullptr)
+    {
+        s << prefix << ", ";
+    }
+    s << "hip error detected: code '" << status << "', name '" << hipGetErrorName(status)
+      << "', description '" << hipGetErrorString(status) << "'";
+    rocsparse::error_message(rocsparse_status_for_hip, s.str().c_str(), function, file, line);
+    return rocsparse_status_for_hip;
 }

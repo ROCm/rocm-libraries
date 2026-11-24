@@ -26,6 +26,7 @@ SOFTWARE.
 #include <rpp/rpp.h>
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "framework/backend_memory.hpp"
@@ -103,6 +104,29 @@ void run_emboss(const TestConfig& cfg, const EmbossParams& op) {
                                kEmbossTolerance(cfg.dtype)));
 }
 
+// Same-layout cases plus both directions of the fused output-layout conversion, and HOST
+// PKD3-to-PLN3 widths at which the k3, k7 and k9 vector loops used to run past the row end.
+// kTailWidthSize does not reach those loop bounds.
+std::vector<WithParams<EmbossParams>> emboss_configs() {
+    std::vector<WithParams<EmbossParams>> configs = with_params<EmbossParams>(
+        concat_configs({
+            make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv,
+                         {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
+            make_configs(presets::kDefaultDTypes, presets::kLayoutsFull, {Roi::Full, Roi::Partial},
+                         {presets::kDefaultSize, presets::kSubVectorSize}),
+        }),
+        {EmbossParams{1.0f, 3}, EmbossParams{1.0f, 5}, EmbossParams{1.0f, 7}, EmbossParams{1.0f, 9},
+         EmbossParams{2.0f, 3}, EmbossParams{2.0f, 5}, EmbossParams{2.0f, 7},
+         EmbossParams{2.0f, 9}});
+    for (const auto& [width, kernelSize] : {std::pair{13u, 3u}, {17u, 7u}, {22u, 9u}})
+        for (const TestConfig& cfg :
+             make_configs(presets::kDefaultDTypes, {LayoutConv{Layout::PKD3, Layout::PLN3}},
+                          {Roi::Full}, {Size{1, 11, width}}))
+            if (cfg.backend == RPP_HOST_BACKEND)
+                configs.push_back({cfg, EmbossParams{1.0f, kernelSize}});
+    return configs;
+}
+
 }  // namespace
 
 // Full name:
@@ -115,17 +139,5 @@ TEST_P(EmbossTest, Correctness) {
         p.cfg.dtype, [&](auto tag) { run_emboss<Element<decltype(tag)>>(p.cfg, p.op); });
 }
 
-// Same-layout cases plus both directions of the fused output-layout conversion.
-INSTANTIATE_TEST_SUITE_P(Image_Filter, EmbossTest,
-                         ::testing::ValuesIn(with_params<EmbossParams>(
-                             concat_configs({
-                                 make_configs(presets::kDefaultDTypes, presets::kLayoutsFullConv,
-                                              {Roi::Full, Roi::Partial}, {presets::kTailWidthSize}),
-                                 make_configs(presets::kDefaultDTypes, presets::kLayoutsFull,
-                                              {Roi::Full, Roi::Partial},
-                                              {presets::kDefaultSize, presets::kSubVectorSize}),
-                             }),
-                             {EmbossParams{1.0f, 3}, EmbossParams{1.0f, 5}, EmbossParams{1.0f, 7},
-                              EmbossParams{1.0f, 9}, EmbossParams{2.0f, 3}, EmbossParams{2.0f, 5},
-                              EmbossParams{2.0f, 7}, EmbossParams{2.0f, 9}})),
+INSTANTIATE_TEST_SUITE_P(Image_Filter, EmbossTest, ::testing::ValuesIn(emboss_configs()),
                          op_config_name<EmbossParams>);

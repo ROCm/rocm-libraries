@@ -7,6 +7,7 @@
 #include <miopen/logger.hpp>
 #include <miopen/miopen.h>
 #include <miopen/solver/ck_impl_status.h>
+#include <miopen/solver/ck_problem_cache.hpp>
 
 #include <algorithm>
 #include <memory>
@@ -156,6 +157,10 @@ private:
 
     void* lib_handle_ = nullptr;
     bool loaded_      = false;
+
+    // GetSolutionTf32Aware's decision per (problem, kernel_id), one cache per solver; see there.
+    mutable CKProblemCache<std::unordered_map<std::string, bool>>
+        tf32_kernel_ids_[static_cast<int>(CKSolverType::Count)];
 
     // -- Function pointer types -----------------------------------------------
     // CKKernelListHandle is declared at global scope in the interface header.

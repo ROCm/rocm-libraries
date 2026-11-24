@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -287,4 +288,109 @@ TEST(TestModelShapeSource, NoOracleIsAppliedSoAShapeNobodyServesStillArrives)
 
     EXPECT_EQ(entries.size(), 1u);
     EXPECT_EQ(report.unusable, 0);
+}
+
+namespace
+{
+
+/// Each shipped attention declaration (forward and backward), whose defaulted parameters differ.
+class TestShippedModelShapeDefaults : public ::testing::TestWithParam<std::string>
+{
+};
+
+} // namespace
+
+TEST_P(TestShippedModelShapeDefaults,
+       AFileThatPredatesAParameterReadsItAtItsDeclaredDefaultAndSaysSo)
+{
+    const TempTree tree("predates_" + GetParam());
+    const bool forward = GetParam() == "sdpa_fwd";
+    const auto metadata = test::shippedOperation(GetParam());
+    ModelShapeReport report;
+
+    // kHeader has no layout, scale or window column: a file mined before they were declared. The
+    // backward declares no window and no generate_stats, and its file predates the form too.
+    const auto text
+        = forward ? kHeader + std::string(kRow) : csvWithout({"q.form", "q.generate_stats"});
+    const auto entries = readModelShapes(metadata, tree.write("m.csv", text), report);
+
+    ASSERT_EQ(entries.size(), 1u) << report.firstProblem;
+    EXPECT_EQ(report.unusable, 0);
+    EXPECT_EQ(entries.front().point.at("layout"), ParameterValue{std::string("bshd")});
+    EXPECT_EQ(entries.front().point.at("scale"), ParameterValue{std::string("inv_sqrt_d")});
+    EXPECT_EQ(entries.front().point.at("form"), ParameterValue{std::string("plain")});
+    if(forward)
+    {
+        EXPECT_EQ(entries.front().point.at("window"), ParameterValue{std::string("none")});
+    }
+    else
+    {
+        EXPECT_EQ(entries.front().point.count("window"), 0U);
+    }
+    // The manifest can say which columns were filled in, and for how many rows.
+    EXPECT_EQ(report.defaulted,
+              forward ? (std::map<std::string, int64_t>{{"layout", 1}, {"scale", 1}, {"window", 1}})
+                      : (std::map<std::string, int64_t>{{"form", 1}, {"layout", 1}, {"scale", 1}}));
+}
+
+INSTANTIATE_TEST_SUITE_P(SdpaDeclarations,
+                         TestShippedModelShapeDefaults,
+                         ::testing::Values("sdpa_fwd", "sdpa_bwd"));
+
+TEST(TestModelShapeSource, AFileMissingAColumnWithNoDeclaredDefaultIsStillRefused)
+{
+    const TempTree tree("no_default");
+    const auto metadata = shippedSdpa();
+    ModelShapeReport report;
+
+    // No q.alignment, and sdpa_fwd's pack constants answer for alignment (top_left) and
+    // generate_stats (false): a recorded KV-cache decode is bottom_right, so filling the pack's
+    // answer in would pass a different problem off as the recorded one.
+    const std::string noAlignment
+        = "q.batch,q.heads,q.heads_kv,q.seqlen_q,q.seqlen_k,q.head_dim,q.is_causal,q.dtype\n"
+          "4,32,8,1,4096,128,true,bf16\n";
+    const auto entries = readModelShapes(metadata, tree.write("m.csv", noAlignment), report);
+
+    EXPECT_TRUE(entries.empty());
+    EXPECT_EQ(report.unusable, 1);
+    EXPECT_NE(report.firstProblem.find("no value for 'alignment'"), std::string::npos)
+        << report.firstProblem;
+    EXPECT_TRUE(report.defaulted.empty());
+}
+
+TEST(TestModelShapeSource, AColumnThatIsThereIsReadNotReplacedByTheConstant)
+{
+    const TempTree tree("present");
+    const auto metadata = shippedSdpa();
+    ModelShapeReport report;
+
+    const std::string withLayout
+        = "q.batch,q.heads,q.heads_kv,q.seqlen_q,q.seqlen_k,q.head_dim,q.is_causal,q.alignment,"
+          "q.generate_stats,q.dtype,q.layout\n"
+          "1,64,8,4096,4096,128,true,top_left,false,bf16,kv_bhsd\n";
+
+    const auto entries = readModelShapes(metadata, tree.write("m.csv", withLayout), report);
+
+    ASSERT_EQ(entries.size(), 1u);
+    EXPECT_EQ(entries.front().point.at("layout"), ParameterValue{std::string("kv_bhsd")});
+}
+
+TEST(TestModelShapeSource, AnEmptyCellInAColumnThatExistsIsStillRefused)
+{
+    const TempTree tree("empty_cell");
+    const auto metadata = shippedSdpa();
+    ModelShapeReport report;
+
+    // The constant answers for a file with no such column, not for a row that left it blank.
+    const std::string blank
+        = "q.batch,q.heads,q.heads_kv,q.seqlen_q,q.seqlen_k,q.head_dim,q.is_causal,q.alignment,"
+          "q.generate_stats,q.dtype,q.layout\n"
+          "1,64,8,4096,4096,128,true,top_left,false,bf16,\n";
+
+    const auto entries = readModelShapes(metadata, tree.write("m.csv", blank), report);
+
+    EXPECT_TRUE(entries.empty());
+    EXPECT_EQ(report.unusable, 1);
+    EXPECT_NE(report.firstProblem.find("no value for 'layout'"), std::string::npos)
+        << report.firstProblem;
 }

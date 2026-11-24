@@ -2,8 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 // Per-channel ADD and MAX reductions built with the cuDNN v8 (v0.x) builders, run through the
-// compatibility layer on a real provider and checked against the CPU reference. No provider implements
-// reduction yet, so every variant is skipped until one does.
+// compatibility layer on a real provider and checked against the CPU reference. y is always fp32;
+// the MIOpen provider needs x and y in one data type, so it runs the fp32 variants only.
 
 #include <array>
 #include <cstdint>
@@ -39,7 +39,7 @@ struct Reduction
 
 constexpr std::array<Reduction, 2> REDUCTIONS = {{
     {"add", CUDNN_REDUCE_TENSOR_ADD, hipdnn_flatbuffers_sdk::data_objects::ReductionMode::ADD},
-    {"max", CUDNN_REDUCE_TENSOR_MAX, hipdnn_flatbuffers_sdk::data_objects::ReductionMode::MAX},
+    {"max", CUDNN_REDUCE_TENSOR_MAX, hipdnn_flatbuffers_sdk::data_objects::ReductionMode::MAX_OP},
 }};
 
 template <typename T>

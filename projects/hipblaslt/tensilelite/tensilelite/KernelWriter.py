@@ -74,9 +74,11 @@ from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
 from .Common.GlobalParameters import globalParameters
 from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar, scaleAlphaVectorMode
 from .Common.Capabilities import archCapOverrides
-from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, splatFirst
+from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxsbRotateSplit, splatFirst
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
   parseStinkyTofuRegisterAllocation, SW_INSTRUCTION_PREFETCH_AUTO
+from .Common.LdsReadPlan import effective_lrvw_tile, effective_lrvw_unroll, \
+  force_lrvw_tile_one
 from .SolutionStructs.Naming import getKernelFileBase, getKernelNameMin
 from .Toolchain.Component import Assembler
 
@@ -8224,9 +8226,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     #     drains dependent local reads before the pack code, so lrvwTile > 1 is supported
     isCMS = kernel["UseCustomMainLoopSchedule"]
     isMfmaXf32 = kernel["UseMFMAF32XEmulation"]
-    forceLrvwTile1A = kernel["ProblemType"]["MacDataTypeA"].numBytes() >= 4 and \
-      (kernel["EnableMatrixInstruction"] and kernel["MIInputPerThread"] > 1) and \
-      not (kernel["UseF32XEmulation"] and (isMfmaXf32 or isCMS or self.states.asmCaps["HasWMMA_V3"]))
+    miInputPerThreadA = kernel["MIInputPerThread"] if kernel["EnableMatrixInstruction"] else 1
+    miInputPerThreadB = kernel["MIInputPerThreadB"] if kernel["EnableMatrixInstruction"] else 1
+    forceLrvwTile1A = force_lrvw_tile_one(
+      kernel["ProblemType"]["MacDataTypeA"].numBytes(),
+      kernel["EnableMatrixInstruction"], miInputPerThreadA,
+      kernel["UseF32XEmulation"], isMfmaXf32, isCMS,
+      self.states.asmCaps["HasWMMA_V3"])
     # LDSTr: ds_read_tr delivers one tile row per lane per instruction, so the
     # tile-direction width of a single local read is 1 regardless of VectorWidthA
     # (LocalRead issues VectorWidthA separate reads, one per row of a VW-group).
@@ -8236,26 +8242,27 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # allocated when enableLDSTr is set (see vgprAllocationImplClassic).
     if kernel["enableLDSTrA"]:
       self.states.lrvwTileA = 1
-    elif not kernel["UnrollMajorLDSA"] and not forceLrvwTile1A:
-      self.states.lrvwTileA = kernel["VectorWidthA"]
-      if kernel["ProblemType"]["MXBlockA"]:
-        self.states.lrvwTileMXSA = kernel["VectorWidthA"]
     else:
-      self.states.lrvwTileA = 1
-    forceLrvwTile1B = kernel["ProblemType"]["MacDataTypeB"].numBytes() >= 4 and \
-      (kernel["EnableMatrixInstruction"] and kernel["MIInputPerThreadB"] > 1) and \
-      not (kernel["UseF32XEmulation"] and (isMfmaXf32 or isCMS or self.states.asmCaps["HasWMMA_V3"]))
-    # See the enableLDSTrA comment above. Note this branch deliberately does not
-    # touch lrvwTileMXSB: enableLDSTrB implies not UnrollMajorLDSB, so today's
-    # LDSTr kernels already take the first branch and never reach that assignment.
+      self.states.lrvwTileA = effective_lrvw_tile(
+        kernel["VectorWidthA"], kernel["UnrollMajorLDSA"],
+        kernel["ProblemType"]["MacDataTypeA"].numBytes(),
+        kernel["EnableMatrixInstruction"], miInputPerThreadA,
+        kernel["UseF32XEmulation"], isMfmaXf32, isCMS,
+        self.states.asmCaps["HasWMMA_V3"])
+    forceLrvwTile1B = force_lrvw_tile_one(
+      kernel["ProblemType"]["MacDataTypeB"].numBytes(),
+      kernel["EnableMatrixInstruction"], miInputPerThreadB,
+      kernel["UseF32XEmulation"], isMfmaXf32, isCMS,
+      self.states.asmCaps["HasWMMA_V3"])
     if kernel["enableLDSTrB"]:
       self.states.lrvwTileB = 1
-    elif not kernel["UnrollMajorLDSB"] and not forceLrvwTile1B:
-      self.states.lrvwTileB = kernel["VectorWidthB"]
     else:
-      if kernel["ProblemType"]["MXBlockB"]:
-        self.states.lrvwTileMXSB = 1
-      self.states.lrvwTileB = 1
+      self.states.lrvwTileB = effective_lrvw_tile(
+        kernel["VectorWidthB"], kernel["UnrollMajorLDSB"],
+        kernel["ProblemType"]["MacDataTypeB"].numBytes(),
+        kernel["EnableMatrixInstruction"], miInputPerThreadB,
+        kernel["UseF32XEmulation"], isMfmaXf32, isCMS,
+        self.states.asmCaps["HasWMMA_V3"])
 
     if kernel["ProblemType"]["MXBlockA"]:
       if ((self.states.asmCaps["HasWMMA_V3"] and kernel["MXScaleFormat"] == "InMemorySwizzle")
@@ -8305,31 +8312,23 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if kernel["ProblemType"]["MXBlockB"]:
         self.states.numVgprBufferPackMXSB = 1
 
-    if kernel["UnrollMajorLDSA"]:
-      self.states.lrvwUnrollA = kernel["LocalReadVectorWidthA"]
-    else:
-      self.states.lrvwUnrollA = 1
+    self.states.lrvwUnrollA = effective_lrvw_unroll(
+      kernel["LocalReadVectorWidthA"], kernel["UnrollMajorLDSA"])
     if kernel["ProblemType"]["MXBlockA"]:
       self.states.lrvwUnrollMXSA = 1
 
-    if kernel["UnrollMajorLDSB"]:
-      self.states.lrvwUnrollB = kernel["LocalReadVectorWidthB"]
-    else:
-      self.states.lrvwUnrollB = 1
+    self.states.lrvwUnrollB = effective_lrvw_unroll(
+      kernel["LocalReadVectorWidthB"], kernel["UnrollMajorLDSB"])
     if kernel["ProblemType"]["MXBlockB"]:
       self.states.lrvwUnrollMXSB = 1
 
     if kernel["ProblemType"]["MXBlockA"]:
-      if kernel["UnrollMajorLDSMXSA"]:
-        self.states.lrvwUnrollMXSA = kernel["LocalReadVectorWidthMXS"]
-      else:
-        self.states.lrvwUnrollMXSA = 1
+      self.states.lrvwUnrollMXSA = effective_lrvw_unroll(
+        kernel["LocalReadVectorWidthMXS"], kernel["UnrollMajorLDSMXSA"])
 
     if kernel["ProblemType"]["MXBlockB"]:
-      if kernel["UnrollMajorLDSMXSB"]:
-        self.states.lrvwUnrollMXSB = kernel["LocalReadVectorWidthMXS"]
-      else:
-        self.states.lrvwUnrollMXSB = 1
+      self.states.lrvwUnrollMXSB = effective_lrvw_unroll(
+        kernel["LocalReadVectorWidthMXS"], kernel["UnrollMajorLDSMXSB"])
 
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       if kernel["UnrollMajorLDSMetadata"]:
@@ -9354,6 +9353,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           tile01 = 1 if kernel["ProblemType"]["Index01%s" % mxTc] else 0
           mxStates.numVgprLocalReadAddr = Component.LocalRead.find(self).getMxNumVectorsPerTile(
               kernel, mxTc, tile01, self.states.asmCaps)
+
+      # Split MXSB B-rotate: +0/+1 address the two vIdx halves (rebuilt by _lraFanOut), not +64K copies.
+      if mxsbRotateSplit(kernel):
+        assert self.states.mxsb.numVgprLocalReadAddr == 1, \
+          "LDSSegmentBRotate: split MXSB needs local-read offsets below 64K"
+        self.states.mxsb.numVgprLocalReadAddr = 2
 
       # do not allocate local read address register if DirectToVgpr is enabled
       if kernel["DirectToVgprA"]:
@@ -10579,6 +10584,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # B-rotate: per-wave LocalReadAddrB+1 - LocalReadAddrB+0.
       # Defined here (not in defineVariableSgprs) because lraDeclareAddresses is emitted first.
       self.defineSgpr("BRotateLRDelta", 1)
+      if mxsbRotateSplit(kernel):
+        self.defineSgpr("MXSBRotateLRDelta", 1)
     if (kernel.get("LDSSegInterleaveOffsets") or {}).get("pairedBuffers"):
       # A/B descriptors alias on separate waves; each wave keeps its own ping/pong mask.
       self.defineSgpr("PairedTDMSwap", 1)
