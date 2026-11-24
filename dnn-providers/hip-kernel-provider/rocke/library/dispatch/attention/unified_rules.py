@@ -226,8 +226,9 @@ def _sets_dead_end(spec: AttentionTuningSpec) -> bool:
 
 
 # gfx950 2D LDS rules. The tiled 2D validator does not model LDS, so an
-# over-budget spec only fails at codegen, and the KQ pad has cases the kernel
-# silently disables or computes wrongly. These mirror attention_tiled_2d.py.
+# over-budget spec only fails at codegen. These mirror attention_tiled_2d.py;
+# whether the KQ pad is laid out and whether Q is staged in K_lds come from
+# the spec itself.
 _KQ_PAD_KNOBS = ("use_kq_lds_pad", "kq_lds_pad_halves")
 
 
@@ -238,58 +239,21 @@ def _k_schedule_bufs(spec) -> int:
     return depth if depth > 2 else 2
 
 
-def _fp8_mfma_qk(spec) -> bool:
-    return spec.kv_storage_dtype == "fp8e4m3" and bool(spec.use_fp8_mfma_qk)
-
-
-def _kq_pad_slab_rows(spec) -> int:
-    head = int(spec.head_size)
-    return 512 // head if head and 512 % head == 0 else 0
-
-
-def _kq_pad_off_reason(spec) -> Optional[str]:
-    """Why the kernel emits a set KQ pad as no pad at all, or None."""
-    if _fp8_mfma_qk(spec):
-        return "the KQ LDS pad is off under native-FP8 K LDS"
-    slab_rows = _kq_pad_slab_rows(spec)
-    if (
-        not slab_rows
-        or int(spec.tile_size_eff) % slab_rows
-        or int(spec.kq_lds_pad_halves) % 8
-    ):
-        return "the KQ LDS pad needs an aligned slab layout"
-    if _k_schedule_bufs(spec) != 1:
-        return "the KQ LDS pad is only laid out for a single-K schedule"
-    return None
-
-
-def _q_aliases_k(spec) -> bool:
-    """Whether Q is staged in K_lds rather than its own slab."""
-    if spec.use_q_reread or spec.use_q_direct_reg or _fp8_mfma_qk(spec):
-        return False
-    tile, head = int(spec.tile_size_eff), int(spec.head_size)
-    return int(spec.block_m) * head * 2 <= 2 * tile * head * 2
-
-
-def _kq_pad_active(spec) -> bool:
-    return bool(spec.use_kq_lds_pad) and _kq_pad_off_reason(spec) is None
-
-
 def _gfx950_2d_lds_bytes(spec) -> int:
     """The LDS pool the LLVM lowering packs for one gfx950 tiled 2D spec."""
     tile = int(spec.tile_size_eff)
     head = int(spec.head_size)
     block_m = int(spec.block_m)
     kv_fp8 = spec.kv_storage_dtype == "fp8e4m3"
-    fp8_qk = _fp8_mfma_qk(spec)
+    fp8_qk = spec.fp8_k_in_lds
     fp8_pv = kv_fp8 and bool(spec.use_fp8_mfma_pv)
     k_elem_bytes = 1 if fp8_qk else 2
     v_elem_bytes = 1 if fp8_pv else 2
     k_bufs = _k_schedule_bufs(spec)
     v_bufs = 2 if spec.use_v_double_buffer else 1
 
-    if _kq_pad_active(spec):
-        slab_rows = _kq_pad_slab_rows(spec)
+    slab_rows = spec.kq_lds_pad_slab_rows
+    if slab_rows:
         slab_cols = slab_rows * head + int(spec.kq_lds_pad_halves)
         k_bytes = k_bufs * (tile // slab_rows) * slab_cols * k_elem_bytes
     else:
@@ -302,7 +266,9 @@ def _gfx950_2d_lds_bytes(spec) -> int:
         if spec.use_register_pv or transposed
         else block_m * (tile + (16 if fp8_pv else 8)) * v_elem_bytes
     )
-    q_bytes = 0 if spec.use_q_direct_reg or _q_aliases_k(spec) else block_m * head * 2
+    q_bytes = (
+        0 if spec.use_q_direct_reg or spec.q_staged_in_k_lds else block_m * head * 2
+    )
     acc_bytes = block_m * (32 if head <= 64 else head) * 2
     fp8_staging_bytes = 3 * tile * head if fp8_qk else 0
     loop_bytes = k_bytes + v_bytes + p_bytes + q_bytes + fp8_staging_bytes
@@ -314,8 +280,6 @@ def _gfx950_2d_lds_bytes(spec) -> int:
 
 
 def _gfx950_2d_legality(spec) -> Tuple[bool, str]:
-    if _kq_pad_active(spec) and _q_aliases_k(spec):
-        return False, "padded K LDS does not support aliased Q (wrong output)"
     from rocke.core.arch import ArchTarget
 
     capacity = ArchTarget.from_gfx("gfx950").lds_capacity_bytes
@@ -431,7 +395,7 @@ class UnifiedSpace(WavesPerEuSpace):
         spec = kernel.kernel_spec
         if not self._gfx950_2d() or not spec.use_kq_lds_pad:
             return {}
-        why = _kq_pad_off_reason(spec)
+        why = spec.kq_lds_pad_off_reason
         return {} if why is None else dict.fromkeys(_KQ_PAD_KNOBS, why)
 
     def validate(self, base, kernel):

@@ -47,9 +47,9 @@ TEST_P(GPU_RNNSeqApi_FP16, TestFloat16)
     run();
 }
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_RNNSeqApi_FP32, RNNSeqGenCases());
+INSTANTIATE_TEST_SUITE_P(Comprehensive, GPU_RNNSeqApi_FP32, RNNSeqGenCases());
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_RNNSeqApi_FP16, RNNSeqGenCases());
+INSTANTIATE_TEST_SUITE_P(Comprehensive, GPU_RNNSeqApi_FP16, RNNSeqGenCases());
 
 using GPU_LstmMSRnn_FP32 = RNNSeqApiCommon<float>;
 using GPU_LstmMSRnn_FP16 = RNNSeqApiCommon<half_float::half>;
@@ -72,6 +72,6 @@ TEST_P(GPU_LstmMSRnn_FP16, TestFloat16)
     run();
 }
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_LstmMSRnn_FP32, LstmMSGenCases());
+INSTANTIATE_TEST_SUITE_P(Comprehensive, GPU_LstmMSRnn_FP32, LstmMSGenCases());
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_LstmMSRnn_FP16, LstmMSGenCases());
+INSTANTIATE_TEST_SUITE_P(Comprehensive, GPU_LstmMSRnn_FP16, LstmMSGenCases());

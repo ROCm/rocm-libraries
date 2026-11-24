@@ -5,7 +5,7 @@
 # proves the whole group drained. Rewriting the others buys nothing and spends an LDS
 # FIFO entry each.
 #
-# It is rewritten when at least vmVsrcBridge (11) LDS ops separate it from the write that
+# It is rewritten when at least vmVsrcBridge LDS ops separate it from the write that
 # overwrites the address -- the consumer whose wait it has to discharge.
 #
 # The null saddr moves with the opcode: GLOBAL spells it "off", FLAT omits it. Same

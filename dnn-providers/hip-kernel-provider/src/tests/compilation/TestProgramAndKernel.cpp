@@ -5,11 +5,13 @@
 #include <hip/hip_runtime.h>
 
 #include "compilation/Kernel.hpp"
+#include "compilation/LaunchLimits.hpp"
 #include "compilation/Program.hpp"
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include <array>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -284,6 +286,46 @@ TEST_F(TestKernelDeviceBinding, RefusesALaunchItCannotBindTheDeviceFor)
     ASSERT_EQ(hipSuccess, deviceStatus);
     EXPECT_EQ(_moduleDevice, afterLaunch);
     expectOutput(0.0f);
+}
+
+TEST(TestKernelLaunchLimit, RefusesAGridPastOneAxisBeforeAnyHipCall)
+{
+    // 2^22 workgroups x 1024 threads = 2^32 work-items on one axis; the other two stay at 1 x 1.
+    // The refusal comes before the device binding and hipModuleLaunchKernel, so a Kernel with
+    // no function and no device throws it host-only.
+    constexpr unsigned int GRID = 1U << 22;
+    constexpr unsigned int BLOCK = 1024;
+    constexpr std::array<char, 3> AXES = {'x', 'y', 'z'};
+    for(std::size_t axis = 0; axis < AXES.size(); ++axis)
+    {
+        Kernel kernel(nullptr, "k", Kernel::NO_DEVICE);
+        kernel.setBlockSize(axis == 0 ? BLOCK : 1, axis == 1 ? BLOCK : 1, axis == 2 ? BLOCK : 1);
+        kernel.setGridSize(axis == 0 ? GRID : 1, axis == 1 ? GRID : 1, axis == 2 ? GRID : 1);
+        try
+        {
+            kernel.launch(nullptr);
+            FAIL() << "expected axis " << AXES[axis] << " to be refused";
+        }
+        catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+        {
+            const std::string what = error.what();
+            EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM) << what;
+            EXPECT_NE(what.find("kernel 'k'"), std::string::npos) << what;
+            EXPECT_NE(what.find(std::string("axis ") + AXES[axis] + ","), std::string::npos)
+                << what;
+            EXPECT_NE(what.find("grid 4194304 x block 1024"), std::string::npos) << what;
+        }
+    }
+}
+
+TEST(TestLaunchLimits, LaunchAxisFitsPinsTheBoundary)
+{
+    EXPECT_TRUE(launchAxisFits((1 << 22) - 1, 1024));
+    EXPECT_TRUE(launchAxisFits(4294967295LL, 1));
+    EXPECT_FALSE(launchAxisFits(1 << 22, 1024));
+    EXPECT_FALSE(launchAxisFits(4294967296LL, 1));
+    EXPECT_FALSE(launchAxisFits(-1, 1));
+    EXPECT_FALSE(launchAxisFits(1, 0));
 }
 
 } // namespace

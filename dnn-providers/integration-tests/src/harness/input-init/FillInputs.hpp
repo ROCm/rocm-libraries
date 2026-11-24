@@ -14,6 +14,7 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
+#include "harness/IReferenceExecutors.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
 #include "harness/input-init/TensorAliases.hpp"
 
@@ -125,15 +126,17 @@ private:
 /// generated on the device; with nullptr, which is what the unit tests rely on since
 /// they have no device, everything is filled on the host. All device fills have
 /// finished by the time this returns or throws. Throws DeviceInputError when a device
-/// fill fails.
+/// fill, or an SDPA backward forward on the device, fails.
 ///
 /// A VALUES recipe is always filled on the host. A recipe that cannot fill its tensor
 /// as written makes the result invalid, with the uid and the reason.
 ///
 /// After the fill, the O and stats inputs of each SDPA backward node are replaced by
 /// the forward of its Q, K and V (see deriveSdpaBackwardForwardOutputs()), whatever
-/// recipe they were filled with. Likewise the index input of each max-pooling resample
-/// backward node is replaced by the argmax of a forward (see
+/// recipe they were filled with. `referenceExecutors` runs that forward: with a `device`
+/// filler on the GPU executor unless it gives the graph up, else on the CPU one. A graph
+/// without such a node never asks it for an executor. Likewise the index input of each
+/// max-pooling resample backward node is replaced by the argmax of a forward (see
 /// deriveResampleBackwardIndex()). A node whose forward cannot be derived makes the
 /// result unsupported, with the reason.
 ///
@@ -147,6 +150,7 @@ FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
                       InputTensorMap& inputs,
                       const std::vector<int64_t>& ownedUids,
                       InputFillRecipes& recipes,
+                      IReferenceExecutors& referenceExecutors,
                       DeviceInputFiller* device,
                       const std::vector<TensorAlias>& aliases = {});
 

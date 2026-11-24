@@ -5610,8 +5610,23 @@ static constexpr rocke_arch_target_t k_target_gfx1201 = facts_of(k_target_gfx12_
  * rocke_ati_known_arches directly.
  */
 
+/* arch_specs.json "gemm" blocks (Python GemmCapabilities). */
+static const int k_gemm_atoms_rdna[][3] = {{16, 16, 16}};
+static const rocke_ati_gemm_caps_t k_gemm_rdna = {
+    .wmma_atoms = k_gemm_atoms_rdna,
+    .num_wmma_atoms = K_NUM(k_gemm_atoms_rdna),
+};
+static const int k_gemm_atoms_gfx1250[][3] = {{16, 16, 32}, {16, 16, 64}, {16, 16, 128}};
+static const rocke_ati_gemm_caps_t k_gemm_gfx1250 = {
+    .wmma_atoms = k_gemm_atoms_gfx1250,
+    .num_wmma_atoms = K_NUM(k_gemm_atoms_gfx1250),
+    .fp8_ab = true,
+    .wmma_cshuffle = true,
+    .cshuffle_lds_aliased = true,
+};
+
 const rocke_ati_arch_row_t rocke_ati_arch_registry[] = {
-    {"gfx11-generic", &k_target_gfx11_generic},
+    {"gfx11-generic", &k_target_gfx11_generic, NULL, &k_gemm_rdna},
     {"gfx1100", &k_target_gfx1100, "gfx11-generic"},
     {"gfx1101", &k_target_gfx1101, "gfx11-generic"},
     {"gfx1102", &k_target_gfx1102, "gfx11-generic"},
@@ -5621,10 +5636,10 @@ const rocke_ati_arch_row_t rocke_ati_arch_registry[] = {
     {"gfx1152", &k_target_gfx1152, "gfx11-generic"},
     {"gfx1153", &k_target_gfx1153, "gfx11-generic"},
     {"gfx1154", &k_target_gfx1154, "gfx11-generic"},
-    {"gfx12-generic", &k_target_gfx12_generic},
+    {"gfx12-generic", &k_target_gfx12_generic, NULL, &k_gemm_rdna},
     {"gfx1200", &k_target_gfx1200, "gfx12-generic"},
     {"gfx1201", &k_target_gfx1201, "gfx12-generic"},
-    {"gfx1250", &k_target_gfx1250},
+    {"gfx1250", &k_target_gfx1250, NULL, &k_gemm_gfx1250},
     {"gfx908", &k_target_gfx908},
     {"gfx90a", &k_target_gfx90a},
     {"gfx942", &k_target_gfx942},

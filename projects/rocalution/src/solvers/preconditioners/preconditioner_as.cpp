@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,11 +31,22 @@
 
 #include "preconditioner.hpp"
 
+#include <algorithm>
 #include <complex>
 #include <limits>
 
 namespace rocalution
 {
+
+    // Of n rows split into num_blocks blocks of size = n / num_blocks, block i owns
+    // the rows [i size, (i + 1) size), the last one up to n
+    static void owned_rows(int n, int num_blocks, int i, int* begin, int* end)
+    {
+        int size = n / num_blocks;
+
+        *begin = i * size;
+        *end   = (i == num_blocks - 1) ? n : *begin + size;
+    }
 
     template <class OperatorType, class VectorType, typename ValueType>
     AS<OperatorType, VectorType, ValueType>::AS()
@@ -114,45 +125,45 @@ namespace rocalution
         assert(this->num_blocks_ > 0);
         assert(this->overlap_ >= 0);
         assert(this->local_precond_ != NULL);
-        assert(this->op_->GetLocalM() / this->num_blocks_ <= std::numeric_limits<int>::max());
+        assert(this->op_->GetLocalM() <= std::numeric_limits<int>::max());
 
-        int size   = static_cast<int>(this->op_->GetLocalM() / this->num_blocks_);
-        int offset = 0;
+        int n = static_cast<int>(this->op_->GetLocalM());
 
+        assert(this->num_blocks_ <= n);
+
+        // Each block holds the rows it owns, extended by the overlap on both sides
         for(int i = 0; i < this->num_blocks_; ++i)
         {
-            this->pos_[i] = offset - this->overlap_;
-            offset += size;
-            this->sizes_[i] = size + 2 * this->overlap_;
-        }
+            int begin;
+            int end;
+            owned_rows(n, this->num_blocks_, i, &begin, &end);
 
-        // Built for AS and RAS
-        // correct fist and last
-        this->pos_[0]                       = 0;
-        this->sizes_[0]                     = size + this->overlap_;
-        this->sizes_[this->num_blocks_ - 1] = size + this->overlap_;
+            begin = std::max(begin - this->overlap_, 0);
+            end   = std::min(end + this->overlap_, n);
+
+            this->pos_[i]   = begin;
+            this->sizes_[i] = end - begin;
+        }
 
         this->weight_.MoveToHost();
         this->weight_.Allocate("Overlapping weights", this->op_->GetM());
-        this->weight_.Ones();
+        this->weight_.Zeros();
 
         ValueType* ptr_w = NULL;
         this->weight_.LeaveDataPtr(&ptr_w);
 
+        // Each row is weighted by 1 / (number of blocks that hold it)
         for(int i = 0; i < this->num_blocks_; ++i)
         {
-            for(int j = 0; j < this->overlap_; ++j)
+            for(int j = this->pos_[i]; j < this->pos_[i] + this->sizes_[i]; ++j)
             {
-                if(i != 0)
-                {
-                    ptr_w[this->pos_[i] + j] = 0.5;
-                }
-
-                if(i != this->num_blocks_ - 1)
-                {
-                    ptr_w[this->pos_[i] + size + j] = 0.5;
-                }
+                ptr_w[j] += static_cast<ValueType>(1);
             }
+        }
+
+        for(int j = 0; j < n; ++j)
+        {
+            ptr_w[j] = static_cast<ValueType>(1) / ptr_w[j];
         }
 
         this->weight_.SetDataPtr(&ptr_w, "Overlapping weights", this->op_->GetLocalM());
@@ -350,7 +361,7 @@ namespace rocalution
         assert(this->build_ == true);
         assert(x != NULL);
         assert(x != &rhs);
-        assert(this->op_->GetLocalM() / this->num_blocks_ <= std::numeric_limits<int>::max());
+        assert(this->op_->GetLocalM() <= std::numeric_limits<int>::max());
 
         for(int i = 0; i < this->num_blocks_; ++i)
         {
@@ -364,13 +375,15 @@ namespace rocalution
                                                   this->z_[i]); // x
         }
 
-        int size     = static_cast<int>(this->op_->GetLocalM() / this->num_blocks_);
-        int z_offset = 0;
+        // Each block gives the rows it owns
+        int n = static_cast<int>(this->op_->GetLocalM());
         for(int i = 0; i < this->num_blocks_; ++i)
         {
-            x->CopyFrom(*this->z_[i], z_offset, this->pos_[i] + z_offset, size);
+            int begin;
+            int end;
+            owned_rows(n, this->num_blocks_, i, &begin, &end);
 
-            z_offset = this->overlap_;
+            x->CopyFrom(*this->z_[i], begin - this->pos_[i], begin, end - begin);
         }
 
         log_debug(this, "RAS::Solve_()", " #*# end");
