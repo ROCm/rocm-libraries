@@ -107,7 +107,7 @@ public:
         t_rocblas_rng = m_saved;
     }
 
-    rocblas_parallel_fill_seeder(const rocblas_parallel_fill_seeder&)            = delete;
+    rocblas_parallel_fill_seeder(const rocblas_parallel_fill_seeder&) = delete;
     rocblas_parallel_fill_seeder& operator=(const rocblas_parallel_fill_seeder&) = delete;
 
     // Call in the parallel loop, before generating the values of block `block` of batch `batch`:
