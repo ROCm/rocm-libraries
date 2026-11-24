@@ -91,4 +91,27 @@ TEST(MxGemmTdmScheduledLargeCases, WideD)
     check_sampled<K>(33024, 33024, 1024);
 }
 
+// E past 2^31 elements: 46592 x 46592 FP16 (4.04 GiB). The TDM store takes E's tile offset as an
+// element count in an index_t, so a tile whose offset is past 2^31 wraps and the store faults.
+// WideD must keep the offset 64-bit; the 33024 x 33024 case above stays under 2^31 elements.
+// Rows past 2^31 / N = 46092 are sampled: the last tile of rows is.
+TEST(MxGemmTdmScheduledLargeCases, WideDPast2e31Elements)
+{
+    using K = Kernel<pk_fp4_t,
+                     pk_fp4_t,
+                     half_t,
+                     256,
+                     256,
+                     512,
+                     2,
+                     2,
+                     32,
+                     Tu<1, 1>,
+                     ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, true, 0>>;
+    constexpr index_t M = 46592, N = 46592, K_ = 1024;
+    static_assert(static_cast<long_index_t>(M) * N > (long_index_t{1} << 31),
+                  "the case is meant to put E's element offsets past the i32 range");
+    check_sampled<K>(M, N, K_);
+}
+
 } // namespace
