@@ -432,6 +432,14 @@ struct BlockFmhaFwdDecodePagedKVPipelineProblem
     static constexpr auto kKVMemoryLayout   = Traits::kKVMemoryLayout;
     static constexpr auto kKVLookupTable    = Traits::kKVLookupTable;
     static constexpr index_t kBlockPerCu    = Traits::kBlockPerCu;
+
+    // this problem with the cooperative layout
+    using Cooperative = BlockFmhaFwdDecodePagedKVPipelineProblem<QDataType_,
+                                                                 KDataType_,
+                                                                 VDataType_,
+                                                                 ODataType_,
+                                                                 kHeadDim_,
+                                                                 typename Traits::Cooperative>;
 };
 
 } // namespace ck_tile

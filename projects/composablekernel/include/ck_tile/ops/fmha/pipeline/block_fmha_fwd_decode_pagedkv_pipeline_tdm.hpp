@@ -54,6 +54,10 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
 
     static constexpr const char* name = kWaveSplit ? "tdm_wsplit" : "tdm_coop";
 
+    // this pipeline with the cooperative layout
+    using Cooperative =
+        BlockFmhaFwdDecodePagedKVPipelineTdm<typename Problem::Cooperative, Policy_>;
+
     static_assert(kHeadDim == 128 && kM0 == 16 && kN0 == 16 && kNumWarps == 4);
     static_assert(std::is_same_v<KDataType, fp8_t> && std::is_same_v<VDataType, fp8_t>);
     static_assert(std::is_same_v<QDataType, bf16_t> || std::is_same_v<QDataType, fp16_t>);

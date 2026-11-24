@@ -133,6 +133,15 @@ std::vector<Param> params()
     add("bound_coop_groups", {2, 16, 1, {2000}, 0, 0, 0, "auto", 30000}, "coop/16x10");
     add("bound_one_cluster", {2, 16, 1, {300}, 0, 0, 0, "auto", 3840}, "coop/15");
     add("bound_swa_gqa", {4, 16, 2, {100, 7000}, 2048, 0, 0, "auto", 65536}, "coop/11");
+    // ranges far below the bound on a wave-split grid: up to 128 pages run cooperatively, in the
+    // first cluster alone; just above that wave split
+    add("bound_wave_short",
+        {4, 16, 1, {1024, 2048, 2064, 300}, 0, 0, 0, "auto", 73728},
+        "wave/16x6");
+    add("bound_wave_short_p64",
+        {4, 16, 1, {1024, 2048, 2064, 300}, 0, 0, 0, "auto", 73728, 64},
+        "wave/16x6");
+    add("bound_wave_short_one_cluster", {32, 16, 1, {1000}, 0, 0, 0, "auto", 16384}, "wave/16");
     // a window over a context just below the bound covers one page (64-token pages: four) more
     // than the bound's own range, and the splits must cover it
     add("bound_swa_b64_s8191", {64, 16, 1, {8191}, 2048, 0, 0, "auto", 8192}, "coop/9");

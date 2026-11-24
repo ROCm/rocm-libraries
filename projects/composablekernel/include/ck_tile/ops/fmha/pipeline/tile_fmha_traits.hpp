@@ -258,6 +258,14 @@ struct TileFmhaFwdDecodePagedKVTraits
     static constexpr index_t kBlockPerCu    = kBlockPerCu_;
     static constexpr auto kKVMemoryLayout   = kKVMemoryLayout_;
     static constexpr auto kKVLookupTable    = kKVLookupTable_;
+    // these traits with the cooperative layout
+    using Cooperative = TileFmhaFwdDecodePagedKVTraits<false,
+                                                       kNumSplits_,
+                                                       kHasGroups_,
+                                                       kPageBlockSize_,
+                                                       kBlockPerCu_,
+                                                       kKVMemoryLayout_,
+                                                       kKVLookupTable_>;
     static_assert(1 <= kNumSplits && kNumSplits <= kFmhaFwdDecodeMaxClusterSplits);
     // clusters merge what each cluster merged; a single split writes the output directly
     static_assert(!kHasGroups || kNumSplits >= 2);

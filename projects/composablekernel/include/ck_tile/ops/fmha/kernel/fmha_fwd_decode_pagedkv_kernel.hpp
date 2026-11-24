@@ -227,6 +227,10 @@ struct FmhaFwdDecodePagedKVKernel
     static constexpr bool kHasGroups    = Traits::kHasGroups;
     // workgroups along x that form one cluster (make_cluster_kernel)
     static constexpr index_t kClusterSize = kNumSplits;
+    // the cooperative layout of this pipeline, and the longest range (16-token pages) a
+    // wave-split kernel runs with it
+    using CoopPipeline                  = typename FmhaPipeline::Cooperative;
+    static constexpr index_t kCoopPages = 128;
 
     // clang-format off
     template <typename T> struct t2s;
@@ -382,9 +386,64 @@ struct FmhaFwdDecodePagedKVKernel
                (g * a.nhead_ratio_qk + i_row) * a.nhead_stride_o;
     }
 
+    // Runs Pipeline over pages [pg_begin, pg_end) of the sequence and stores this split's result:
+    // the output rows for one split per cluster, else the partials (O / l in the output type and
+    // (m, l)) at row part_row of the workspace. Returns the V descale.
+    template <typename Pipeline>
+    CK_TILE_DEVICE float RunSplit(const Kargs& a,
+                                  index_t b,
+                                  index_t g,
+                                  index_t q0,
+                                  index_t gqa,
+                                  index_t ctx,
+                                  index_t lo,
+                                  index_t pg_begin,
+                                  index_t pg_end,
+                                  long_index_t part_row,
+                                  void* smem_ptr) const
+    {
+        // this split's result in registers: each thread holds 16 head dims of one row
+        const auto res =
+            Pipeline{}(static_cast<const QDataType*>(a.q_ptr) +
+                           static_cast<long_index_t>(b) * a.batch_stride_q +
+                           (g * a.nhead_ratio_qk + q0) * a.nhead_stride_q,
+                       a.nhead_stride_q,
+                       gqa,
+                       static_cast<const KDataType*>(a.k_ptr),
+                       static_cast<const VDataType*>(a.v_ptr),
+                       a.block_table_ptr + static_cast<long_index_t>(b) * a.block_table_stride,
+                       a.nhead_k,
+                       g,
+                       typename Pipeline::KeyRange{ctx, lo, pg_begin, pg_end},
+                       a.k_descale_ptr,
+                       a.v_descale_ptr,
+                       a.scale_s,
+                       smem_ptr);
+        const float vd  = res.v_descale;
+        const auto pack = [](float x, float y) { return Pipeline::pack_o(x, y); };
+        if constexpr(kNumSplits == 1)
+        {
+            if(res.row < gqa)
+                Pipeline::StoreRows(
+                    res, ORow(a, b, g, q0), a.nhead_stride_o, res.l > 0.f ? vd / res.l : 0.f, pack);
+        }
+        else
+        {
+            Pipeline::StoreRows(res,
+                                a.ws_o_ptr + part_row * kHeadDim,
+                                kHeadDim,
+                                res.l > 0.f ? 1.f / res.l : 0.f,
+                                pack);
+            if(Pipeline::IsRowOwner(res))
+                *ptr_as<float2>(a.ws_ml_ptr + (part_row + res.row) * 2) = make_float2(res.m, res.l);
+        }
+        return vd;
+    }
+
     CK_TILE_DEVICE void operator()(const Kargs& a) const
     {
-        alignas(16) __shared__ char smem_ptr[FmhaPipeline::GetSmemSize()];
+        alignas(16)
+            __shared__ char smem_ptr[max(FmhaPipeline::GetSmemSize(), CoopPipeline::GetSmemSize())];
 
         // groups of kNumSplits along x, one cluster each
         const index_t gi = kHasGroups ? blockIdx.x / kNumSplits : 0;
@@ -405,78 +464,56 @@ struct FmhaFwdDecodePagedKVKernel
         // step's four pages of a wave lie in one cache page (positions before lo are masked)
         const index_t pg_lo = kSubPages > 1 ? lo / kN0 / 4 * 4 : lo / kN0;
         const index_t span  = max(pg_hi - pg_lo, 1);
+        // A wave-split kernel runs a short range cooperatively: the launch is sized for the
+        // longest context, and a range of a few steps is faster in small cooperative splits.
+        const bool coop = !kWaveSplit || span <= kCoopPages;
+        // pages per step and at least per split
+        const index_t step = coop ? CoopPipeline::kStepPages : kStepPages;
         // pages per split, in whole steps: the range over the splits of one cluster. With several
         // clusters no more than the splits of the longest range take (bound_pps), so that a
         // shorter range fills its first clusters as a launch sized for it would and leaves the
         // others empty; and no less than spreads the range over the whole grid.
-        constexpr index_t kMinPages = kWaveSplit ? 16 : 4;
-        const auto steps            = [](index_t pages) {
-            return (pages + kStepPages - 1) / kStepPages * kStepPages;
-        };
-        index_t pps = max(steps((span + kNumSplits - 1) / kNumSplits), kMinPages);
+        // the steps are powers of two
+        static_assert((kStepPages & (kStepPages - 1)) == 0 && CoopPipeline::kStepPages == 4);
+        const auto steps = [&](index_t pages) { return (pages + step - 1) & -step; };
+        index_t pps      = max(steps((span + kNumSplits - 1) / kNumSplits), step);
         if constexpr(kHasGroups)
             pps = max(min(pps, a.bound_pps),
                       steps(__umulhi(static_cast<uint32_t>(span + kNumSplits * a.num_groups - 1),
                                      a.splits_rcp)));
-        // clusters with pages; one alone writes the output itself
-        const index_t groups = kHasGroups ? (span - 1) / (kNumSplits * pps) + 1 : 1;
         // groups without pages take no part in the merge
         if(gi > 0 && gi * kNumSplits * pps >= span)
             return;
-        const typename FmhaPipeline::KeyRange range{
-            ctx, lo, pg_lo + sg * pps, min(pg_hi, pg_lo + (sg + 1) * pps)};
 
-        // this split's result in registers: each thread holds 16 head dims of one row
-        const auto res =
-            FmhaPipeline{}(static_cast<const QDataType*>(a.q_ptr) +
-                               static_cast<long_index_t>(b) * a.batch_stride_q +
-                               (g * a.nhead_ratio_qk + q0) * a.nhead_stride_q,
-                           a.nhead_stride_q,
-                           gqa,
-                           static_cast<const KDataType*>(a.k_ptr),
-                           static_cast<const VDataType*>(a.v_ptr),
-                           a.block_table_ptr + static_cast<long_index_t>(b) * a.block_table_stride,
-                           a.nhead_k,
-                           g,
-                           range,
-                           a.k_descale_ptr,
-                           a.v_descale_ptr,
-                           a.scale_s,
-                           smem_ptr);
-        const float vd = res.v_descale;
-
-        if constexpr(kNumSplits == 1)
+        // workgroup row of the grid, over all sequences, and this cluster's partials
+        const long_index_t head =
+            static_cast<long_index_t>(b) * (a.nhead_k * a.q_blocks) + blockIdx.y;
+        const long_index_t part0 =
+            ((head * (kHasGroups ? a.num_groups : 1) + gi) * kNumSplits) * kM0;
+        const index_t pg_begin = pg_lo + sg * pps;
+        const index_t pg_end   = min(pg_hi, pg_lo + (sg + 1) * pps);
+        float vd;
+        if constexpr(kWaveSplit)
         {
-            // one split: the output, no partials
-            if(res.row < gqa)
-                FmhaPipeline::StoreRows(
-                    res,
-                    ORow(a, b, g, q0),
-                    a.nhead_stride_o,
-                    res.l > 0.f ? vd / res.l : 0.f,
-                    [](float x, float y) { return FmhaPipeline::pack_o(x, y); });
-            return;
+            if(coop)
+                vd = RunSplit<CoopPipeline>(
+                    a, b, g, q0, gqa, ctx, lo, pg_begin, pg_end, part0 + s * kM0, smem_ptr);
+            else
+                vd = RunSplit<FmhaPipeline>(
+                    a, b, g, q0, gqa, ctx, lo, pg_begin, pg_end, part0 + s * kM0, smem_ptr);
         }
         else
+            vd = RunSplit<FmhaPipeline>(
+                a, b, g, q0, gqa, ctx, lo, pg_begin, pg_end, part0 + s * kM0, smem_ptr);
+
+        if constexpr(kNumSplits > 1)
         {
-            // partials: O / l in the output type and (m, l)
-            // workgroup row of the grid, over all sequences
-            const long_index_t head =
-                static_cast<long_index_t>(b) * (a.nhead_k * a.q_blocks) + blockIdx.y;
-            const long_index_t part0 =
-                ((head * (kHasGroups ? a.num_groups : 1) + gi) * kNumSplits) * kM0;
-            FmhaPipeline::StoreRows(res,
-                                    a.ws_o_ptr + (part0 + s * kM0) * kHeadDim,
-                                    kHeadDim,
-                                    res.l > 0.f ? 1.f / res.l : 0.f,
-                                    [](float x, float y) { return FmhaPipeline::pack_o(x, y); });
-            if(FmhaPipeline::IsRowOwner(res))
-                *ptr_as<float2>(a.ws_ml_ptr + (part0 + s * kM0 + res.row) * 2) =
-                    make_float2(res.m, res.l);
             // the partials become visible to the cluster: release, barrier, acquire
             __builtin_amdgcn_fence(__ATOMIC_RELEASE, "cluster");
             cluster_barrier();
             __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "cluster");
+            // clusters with pages; one alone writes the output itself
+            const index_t groups = kHasGroups ? (span - 1) / (kNumSplits * pps) + 1 : 1;
 
             // merge the splits: split s takes rows [s*kRowsPer, +kRowsPer); thread -> (row, 2 dims)
             constexpr index_t kRowsPer = (kM0 + kNumSplits - 1) / kNumSplits;
