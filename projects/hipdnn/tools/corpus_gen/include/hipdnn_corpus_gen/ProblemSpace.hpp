@@ -1757,8 +1757,8 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         corpus.skippedCombinations.push_back(
             std::to_string(archetypeQuotaZero)
             + " explored combinations drew no archetype: the mixture's archetype share of their "
-              "points rounds to none (ExplorationRequest::anchorScaling, --anchor-scaling, "
-              "scales it toward the corpus target)");
+              "points rounds to none (ExplorationRequest::anchorScaling, on unless "
+              "--no-anchor-scaling, scales it toward the corpus target)");
     }
 
     // Growth toward corpusTarget: the first pass gave each combination a modest fixed target

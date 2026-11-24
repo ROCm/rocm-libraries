@@ -141,6 +141,48 @@ TEST(TestCorpusRealism, MostOfTheShippedConvolutionCorpusLooksLikeRealLayers)
         << " shapes resemble a layer; the uniform search this replaces managed 0.04%";
 }
 
+TEST(TestCorpusRealism, EveryConvolutionPopulationIsAnchoredAndA3dProblemIsNeverThe2dOne)
+{
+    // A combination's archetype quota is a fifth of its first-pass count, fewer anchors than a
+    // convolution declares archetypes. A round that began at the first declared archetype never
+    // reached the depthwise, grouped and 3-D ones declared last (1 depthwise graph in 2000), and
+    // the 2-D archetypes, whose depth is 1, filled the 3-D half of the corpus with the 2-D
+    // problem in five-dimensional tensors. Every population is now anchored, and a 3-D problem
+    // has a depth or a depth filter above 1.
+    for(const std::string operation :
+        {"conv_fwd", "conv_bwd_data", "conv_bwd_weights", "conv_bias_activation"})
+    {
+        ExplorationRequest request;
+        request.pointsPerCombination = 20;
+        request.seed = 11;
+        const auto corpus
+            = exploreProblemSpace(test::shippedOperation(operation), request, ACCEPT_EVERYTHING);
+
+        size_t depthwise = 0;
+        size_t grouped = 0;
+        size_t volumetric = 0;
+        for(const auto& point : corpus.anchoredPoints())
+        {
+            const auto groups = at(point, "groups");
+            depthwise += groups > 1 && groups == at(point, "C") ? 1 : 0;
+            grouped += groups > 1 && groups < at(point, "C") ? 1 : 0;
+            volumetric
+                += std::get<std::string>(point.at("spatial")) == "3d" && at(point, "D") > 1 ? 1 : 0;
+        }
+        EXPECT_GT(depthwise, 0U) << operation << " anchors no depthwise convolution";
+        EXPECT_GT(grouped, 0U) << operation << " anchors no grouped convolution";
+        EXPECT_GT(volumetric, 0U) << operation << " anchors no 3-D convolution over a depth";
+        for(const auto& point : corpus.problems())
+        {
+            if(std::get<std::string>(point.at("spatial")) == "3d")
+            {
+                EXPECT_TRUE(at(point, "D") > 1 || at(point, "T") > 1)
+                    << operation << " " << detail::describe(point);
+            }
+        }
+    }
+}
+
 TEST(TestCorpusRealism, TheCorpusStillContainsShapesNobodyDeclared)
 {
     // A corpus of only anchors teaches only the anchors; §5.4 keeps an exploration share.

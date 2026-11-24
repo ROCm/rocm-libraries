@@ -164,6 +164,49 @@
       ]
     }
   },
+  "// regime_label": "The population a problem is reported, held out and grown under. rank: the spatial facet. window: global (the window covers the whole plane, a global average or max pool before a classifier head) or local.",
+  "regime_label": [
+    {
+      "name": "rank",
+      "labels": [
+        {
+          "label": "3d",
+          "when": {
+            "==": [
+              "$q.spatial",
+              "3d"
+            ]
+          }
+        }
+      ],
+      "otherwise": "2d"
+    },
+    {
+      "name": "window",
+      "labels": [
+        {
+          "label": "global",
+          "when": {
+            "and": [
+              {
+                "==": [
+                  "$q.R",
+                  "$q.H"
+                ]
+              },
+              {
+                "==": [
+                  "$q.S",
+                  "$q.W"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "otherwise": "local"
+    }
+  ],
   "constraints": [
     {
       "<=": [
@@ -297,6 +340,22 @@
           "==": [
             "$q.index",
             "yes"
+          ]
+        }
+      ]
+    },
+    {
+      "or": [
+        {
+          "==": [
+            "$q.spatial",
+            "2d"
+          ]
+        },
+        {
+          ">": [
+            "$q.D",
+            1
           ]
         }
       ]
@@ -1722,6 +1781,60 @@
           0
         ]
       }
+    },
+    {
+      "name": "global_pool",
+      "note": "a classifier's global pool: one window over the last stage's whole 7x7 plane (ResNet, EfficientNet at 224), within the declared window of 8",
+      "values": {
+        "N": [
+          1,
+          8,
+          32,
+          64,
+          128
+        ],
+        "C": [
+          512,
+          1024,
+          2048
+        ],
+        "H": [
+          7
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "R": [
+          "$q.H"
+        ],
+        "S": [
+          "$q.W"
+        ],
+        "stride_h": [
+          1
+        ],
+        "stride_w": [
+          1
+        ],
+        "pad_h": [
+          0
+        ],
+        "pad_w": [
+          0
+        ],
+        "D": [
+          1
+        ],
+        "Rd": [
+          1
+        ],
+        "stride_d": [
+          1
+        ],
+        "pad_d": [
+          0
+        ]
+      }
     }
   ],
   "neighbourhood": {
@@ -1764,5 +1877,6 @@
     "archetypes": 0.2,
     "neighbourhood": 0.6,
     "exploration": 0.2
-  }
+  },
+  "// bounds": "A 3-D problem has a depth above 1; at depth 1 it is the 2-D problem in five-dimensional tensors, which the 2-D archetype, whose depth is 1, otherwise filled half the 3-D corpus with."
 }

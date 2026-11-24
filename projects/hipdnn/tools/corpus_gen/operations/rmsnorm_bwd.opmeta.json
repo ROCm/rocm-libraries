@@ -10,7 +10,12 @@
       "type": "int64"
     },
     "hidden_dim": {
-      "type": "int64"
+      "type": "int64",
+      "range": [
+        32,
+        65536
+      ],
+      "description": "The normalised width. 32 and up: a narrower row is no model's (a per-head QK-norm is 64 at the least), and unbounded the search spent a third of its draws on widths below 16."
     },
     "dtype": {
       "type": "enum",
@@ -61,6 +66,53 @@
       ]
     }
   },
+  "// regime_label": "The population a problem is reported, held out and grown under. rows: few (64 or fewer normalised rows, a decode step's) or many. width: narrow (512 or less: a per-head QK-norm or an MLA latent's norm), wide (8192 and up: the 70B-class hidden sizes, a row past one workgroup's registers), mid. A kernel's shape choice turns on the row width and its grid on the row count, so these are the axes its accuracy is read on.",
+  "regime_label": [
+    {
+      "name": "rows",
+      "labels": [
+        {
+          "label": "few",
+          "when": {
+            "<=": [
+              {
+                "*": [
+                  "$q.batch",
+                  "$q.seq_len"
+                ]
+              },
+              64
+            ]
+          }
+        }
+      ],
+      "otherwise": "many"
+    },
+    {
+      "name": "width",
+      "labels": [
+        {
+          "label": "narrow",
+          "when": {
+            "<=": [
+              "$q.hidden_dim",
+              512
+            ]
+          }
+        },
+        {
+          "label": "wide",
+          "when": {
+            ">=": [
+              "$q.hidden_dim",
+              8192
+            ]
+          }
+        }
+      ],
+      "otherwise": "mid"
+    }
+  ],
   "graph_builder": {
     "function": "rmsNormBackward",
     "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
@@ -290,6 +342,55 @@
           1024
         ]
       }
+    },
+    {
+      "name": "modern_llm_widths",
+      "note": "the hidden sizes of current decoder LLMs between the anchors above: 2048 and 3072 (Llama 3.2 1B, 3B), 2560 and 5120 (Qwen, Phi), 3584 (Qwen2-7B), 6144 (Llama-34B class), 7168 (DeepSeek-V3)",
+      "values": {
+        "batch": [
+          1,
+          4,
+          8,
+          16
+        ],
+        "seq_len": [
+          1,
+          512,
+          2048,
+          8192
+        ],
+        "hidden_dim": [
+          2048,
+          2560,
+          3072,
+          3584,
+          5120,
+          6144,
+          7168
+        ]
+      }
+    },
+    {
+      "name": "qk_norm",
+      "note": "a per-head norm on Q and K (Qwen3, OLMo 2, Gemma 3; SD3 and ViT-22B as LayerNorm): every head of every token normalised over the head width, so many rows and a narrow one",
+      "values": {
+        "batch": [
+          8,
+          32,
+          64,
+          128
+        ],
+        "seq_len": [
+          512,
+          2048,
+          8192
+        ],
+        "hidden_dim": [
+          64,
+          128,
+          256
+        ]
+      }
     }
   ],
   "neighbourhood": {
@@ -310,6 +411,29 @@
         1.5,
         2
       ]
+    },
+    "hidden_dim": {
+      "kind": "values",
+      "values": [
+        64,
+        128,
+        256,
+        512,
+        768,
+        1024,
+        1536,
+        2048,
+        2560,
+        3072,
+        3584,
+        4096,
+        5120,
+        6144,
+        7168,
+        8192,
+        12288,
+        16384
+      ]
     }
   },
   "mixture": {
@@ -318,6 +442,6 @@
     "exploration": 0.2
   },
   "// archetypes": "Normalization runs once or twice per transformer block, on the same activation tensor the block's matmuls produce -- so its shapes are the model's hidden width against however many tokens are in flight, not arbitrary three-dimensional boxes.",
-  "// neighbourhood": "hidden_dim is absent from the neighbourhood: it is fixed by the model architecture and takes a handful of values, so an interpolated 5000 is a width nobody ships. batch and seq_len are what actually vary between requests.",
+  "// neighbourhood": "hidden_dim is absent from the neighbourhood: it is fixed by the model architecture and takes a handful of values, so an interpolated 5000 is a width nobody ships. batch and seq_len are what actually vary between requests. hidden_dim moves among the widths shipped models use, as SDPA's head_dim does, rather than scaling to a width no model has.",
   "description": "Gradients of RMS normalization over the trailing hidden dimension: dx from dy and the saved inverse RMS, and dscale."
 }

@@ -120,11 +120,12 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
                 # 400 or more but scale_unset (42), 6 above the 9% floor (36); 30 keeps the floor
                 # from resting on one seed's margin.
                 "count_cut_keeps_forms_even|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,30,--count,400|0|400|||||9:plain:scale_unset:scale_tensor:dropout:padded:ragged:bias:sink"
-                # With --anchor-scaling the declared mixture (80% archetypes and neighbourhood)
-                # holds at a count far above the first pass; without it the first pass's fixed
-                # quotas are diluted by exploration. anchored_share reports the delivered corpus.
-                "anchor_scaling_holds_the_mixture|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,2000,--anchor-scaling|0|2000|||reports.anchored_share.matmul.anchor_scaling=ON|>=60"
-                "anchor_scaling_off_dilutes_the_mixture|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,2000|0|2000|||reports.anchored_share.matmul.anchor_scaling=OFF|<=30"
+                # Anchor scaling, the default, holds the declared mixture (80% archetypes and
+                # neighbourhood) at a count far above the first pass; --no-anchor-scaling leaves
+                # the first pass's fixed quotas to be diluted by exploration. anchored_share
+                # reports the delivered corpus.
+                "anchor_scaling_holds_the_mixture|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,2000|0|2000|||reports.anchored_share.matmul.anchor_scaling=ON|>=60"
+                "anchor_scaling_off_dilutes_the_mixture|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,2000,--no-anchor-scaling|0|2000|||reports.anchored_share.matmul.anchor_scaling=OFF|<=30"
                 # A --count far below the first pass cuts it, and anchored_share counts what is
                 # left: the corpus's sweep graphs, not the problems explored before the cut.
                 "anchored_share_counts_the_delivered_corpus|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,100|0|100|||reports.anchored_share.matmul.delivered=100"
@@ -137,16 +138,19 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
                 # in the corpus under them: counted held, not admitted. The
                 # search starts from the recorded shapes as well as its
                 # skeleton: 76 seeds checked without them, 82 with them.
-                # reports.search splits the oracle queries.
-                "archetype_held_by_model_shapes|--without-engine,--operations,${_operations_dir},--operation,matmul,--keep,q.dtype=fp16,--keep,q.a_layout=row,--keep,q.b_layout=row,--model-shapes,${_bert_shapes},--count,100|0|100|||reports.anchored_share.matmul.archetypes.bert_base_projection.admitted=0,reports.anchored_share.matmul.archetypes.bert_base_projection.held>=1,reports.search.matmul.searched=1,reports.search.matmul.seed_checks>=82,reports.search.matmul.seeds_accepted>=82,reports.search.matmul.walk_checks>=1,reports.search.matmul.oracle_queries>=1"
+                # reports.search splits the oracle queries. Anchor scaling is off so the
+                # sweep's search runs: scaled quotas fill this one combination from the
+                # archetypes and their neighbourhoods, and nothing is searched.
+                "archetype_held_by_model_shapes|--without-engine,--operations,${_operations_dir},--operation,matmul,--keep,q.dtype=fp16,--keep,q.a_layout=row,--keep,q.b_layout=row,--model-shapes,${_bert_shapes},--count,100,--no-anchor-scaling|0|100|||reports.anchored_share.matmul.archetypes.bert_base_projection.admitted=0,reports.anchored_share.matmul.archetypes.bert_base_projection.held>=1,reports.search.matmul.searched=1,reports.search.matmul.seed_checks>=82,reports.search.matmul.seeds_accepted>=82,reports.search.matmul.walk_checks>=1,reports.search.matmul.oracle_queries>=1"
                 # A quota and a small --count: the archetypes kept through
                 # the cut fit in the room the quota leaves, so the corpus is
                 # --count and the quota is delivered.
                 "quota_within_a_small_count|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,10,--regime-quota,decode_short_mha=4,--count,5|0|5|||reports.regime_quota.sdpa_fwd.decode_short_mha.delivered=4"
                 # The cut keeps a graph of every admitted archetype: at
-                # --count 8 it would otherwise drop decode_gemv and
-                # llama3_70b_projection.
-                "the_cut_keeps_each_admitted_archetype|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,8|0|8|||reports.anchored_share.matmul.archetypes.decode_gemv.delivered>=1,reports.anchored_share.matmul.archetypes.llama3_70b_projection.delivered>=1"
+                # --count 12 each of the 11 matmul archetypes the size
+                # ceiling admits keeps one, decode_gemv and
+                # llama3_70b_projection among them.
+                "the_cut_keeps_each_admitted_archetype|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,12|0|12|||reports.anchored_share.matmul.archetypes.decode_gemv.delivered>=1,reports.anchored_share.matmul.archetypes.llama3_70b_projection.delivered>=1,reports.anchored_share.matmul.archetypes.weight_gradient.delivered>=1"
                 # A focused search that stops without proof reports the regime not reached, not
                 # saturated, and the short quota exits 3: with the sweep off and 100 oracle calls a
                 # combination, this seed's search finds none of cross_long_gqa, a sliver (more
