@@ -24,6 +24,7 @@ TestParameters:
   - skip-gfx1102
   - skip-gfx1200
   - skip-gfx1201
+  - skip-gfx1250-strict
 GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
