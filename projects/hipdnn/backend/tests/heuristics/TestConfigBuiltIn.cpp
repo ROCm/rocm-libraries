@@ -10,6 +10,7 @@
  * by HIPDNN_HEUR_CONFIG_PATH.
  */
 
+#include "heuristics/FallbackEngineOrder.hpp"
 #include "heuristics/config/AutotuneCacheKey.hpp"
 #include "heuristics/config/AutotuneRankingStore.hpp"
 #include "heuristics/config/ConfigBuiltIn.hpp"
@@ -904,6 +905,28 @@ TEST_F(TestConfigBuiltIn, FinalizeMatchedRuleMovesEngineToFront)
     EXPECT_EQ(sorted[2], CUSTOM_ENGINE_ID);
 }
 
+// HIPDNN_HEUR_FALLBACK_ENGINE_ORDER shortlists StaticOrdering and the prediction policies;
+// a Config rule hit still returns every applicable engine, with the rule's engine first,
+// including an engine the shortlist omits.
+TEST_F(TestConfigBuiltIn, FinalizeMatchedRuleIgnoresFallbackEngineOrderShortlist)
+{
+    const TempJsonOverrideFile json(DETERMINISTIC_RULE_JSON);
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(OVERRIDE_ENV,
+                                                                          json.path());
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter shortlist(
+        hipdnn_backend::heuristics::FALLBACK_ORDERING_ENV, CUSTOM_ENGINE_NAME);
+
+    setEngineIds({MIOPEN_ENGINE_ID, CUSTOM_ENGINE_ID, MIOPEN_DETERMINISTIC_ID});
+    setSerializedGraph(buildConvFwdGraphBuffer(X_DIMS, X_STRIDES, W_DIMS, W_STRIDES));
+
+    ASSERT_TRUE(_plugin->finalize(_desc));
+    const auto sorted = _plugin->getSortedEngineIds(_desc);
+    ASSERT_EQ(sorted.size(), 3u);
+    EXPECT_EQ(sorted[0], MIOPEN_DETERMINISTIC_ID);
+    EXPECT_TRUE(std::find(sorted.begin(), sorted.end(), MIOPEN_ENGINE_ID) != sorted.end());
+    EXPECT_TRUE(std::find(sorted.begin(), sorted.end(), CUSTOM_ENGINE_ID) != sorted.end());
+}
+
 TEST_F(TestConfigBuiltIn, FinalizeLegacyRuleWithoutTensorIdsUsesPositionalFallback)
 {
     constexpr const char* JSON = R"({
@@ -1365,6 +1388,27 @@ TEST_F(TestConfigBuiltInExactCache, ExactMatchReordersWhenCandidatesEqualSample)
     const auto sorted = _plugin->getSortedEngineIds(_desc);
     EXPECT_EQ(sorted,
               (std::vector<int64_t>{MIOPEN_DETERMINISTIC_ID, CUSTOM_ENGINE_ID, MIOPEN_ENGINE_ID}));
+}
+
+// An exact-cache hit returns every applicable engine in the cached order, including engines
+// HIPDNN_HEUR_FALLBACK_ENGINE_ORDER omits.
+TEST_F(TestConfigBuiltInExactCache, ExactMatchIgnoresFallbackEngineOrderShortlist)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter shortlist(
+        hipdnn_backend::heuristics::FALLBACK_ORDERING_ENV, CUSTOM_ENGINE_NAME);
+
+    const auto graph = buildConvFwdGraphBuffer(X_DIMS, X_STRIDES, W_DIMS, W_STRIDES);
+    seedExactCache(graph,
+                   {MIOPEN_ENGINE_ID, CUSTOM_ENGINE_ID, MIOPEN_DETERMINISTIC_ID},
+                   {MIOPEN_DETERMINISTIC_ID, MIOPEN_ENGINE_ID, CUSTOM_ENGINE_ID});
+
+    setEngineIds({MIOPEN_ENGINE_ID, CUSTOM_ENGINE_ID, MIOPEN_DETERMINISTIC_ID});
+    setSerializedGraph(graph);
+
+    ASSERT_TRUE(_plugin->finalize(_desc));
+    const auto sorted = _plugin->getSortedEngineIds(_desc);
+    EXPECT_EQ(sorted,
+              (std::vector<int64_t>{MIOPEN_DETERMINISTIC_ID, MIOPEN_ENGINE_ID, CUSTOM_ENGINE_ID}));
 }
 
 TEST_F(TestConfigBuiltInExactCache, MissingSampledEngineIsToleratedAndDropped)

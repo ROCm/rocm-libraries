@@ -22,8 +22,9 @@
  * unless HIPDNN_HEUR_POLICY_ORDER or HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT
  * overrides that list. When HIPDNN_HEUR_FALLBACK_ENGINE_ORDER is set,
  * StaticOrdering and the prediction policies return only the engines it names,
- * in every mode; an engine chosen by a Config rule or the autotune cache is
- * not restricted.
+ * in every mode. Config is not filtered by it: a Config rule hit returns every
+ * applicable engine with the rule's engine first, and an exact autotune-cache
+ * hit returns every applicable engine in the cached order.
  * @see HIPDNN_ATTR_ENGINEHEUR_MODE
  * @see hipdnnBackendSetAttribute()
  */
