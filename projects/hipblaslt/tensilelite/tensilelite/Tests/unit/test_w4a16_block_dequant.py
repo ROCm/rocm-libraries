@@ -981,6 +981,20 @@ def test_stagger_is_off_with_a_tail_loop(toolchain):
     assert re.search(r"s_cselect_b32 s\[sgprWrapUScaleA\], 0, s\d+", src)
 
 
+def test_stream_k_fixup_batches_ignore_the_store_batch_size(toolchain):
+    """A Stream-K fixup batch waits for its partial's loads before the next one,
+    so a W4A16 kernel loads a partial in as few batches as its free VGPRs allow,
+    whatever NumElementsPerBatchStore caps the global write at. Other kernels
+    keep the cap in the fixup too."""
+    _, src = _emit(toolchain, StreamK=3, NumElementsPerBatchStore=2)
+    assert src.count("Fixup Batch") == 1
+    assert re.search(r"edge=0, allocate \d+ sgpr\.[^\n]*elementsPerBatch=2\b", src), "the global write keeps the cap"
+
+    plain = {"UseScaleAB": "", "ScaleBlockSizesA": [], "DataTypeA": "B", "MacDataTypeA": "B"}
+    _, src = _emit(toolchain, StreamK=3, NumElementsPerBatchStore=2, GlobalReadVectorWidthA=-1, problemType=plain)
+    assert src.count("Fixup Batch") == 8
+
+
 def test_runtime_group_catalog_generates_prefill(toolchain):
     from tensilelite import LibraryIO
 

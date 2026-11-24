@@ -2652,7 +2652,11 @@ class StreamK(TileProcessingStrategy):
 
             # assert(self.numVgprValuC % gwvw == 0) # sanity check
 
-            numElementsPerBatch = numElementsPerBatch if not kernel["NumElementsPerBatchStore"] else min(kernel["NumElementsPerBatchStore"],numElementsPerBatch)
+            # NumElementsPerBatchStore tunes the batches of the global write. A fixup
+            # batch waits for its partial's loads before the next one, so W4A16
+            # block-scaled kernels size it from the free VGPRs alone.
+            if kernel["NumElementsPerBatchStore"] and kernel["ProblemType"]["UseScaleAB"] != "Block":
+                numElementsPerBatch = min(kernel["NumElementsPerBatchStore"], numElementsPerBatch)
 
             if shrinkDb:
                 print("NumElementsPerBatch=", numElementsPerBatch, "LimitedBySgprs=", ss.cfg.numElementsPerBatchLimitedBySgprs, \
