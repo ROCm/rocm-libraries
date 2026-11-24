@@ -933,8 +933,8 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                 for mask in get_mask_map(mask_impl).keys():
                     pipelines.append(Pipeline("qr_tdm_pingpong", "row", "t", "f", "f", "f", "f", "no", "t", squant, "f", "f", mask))  # fmt: skip
                     pipelines.append(Pipeline("qr_tdm_pingpong", "row", "t", "t", "f", "f", "f", "no", "t", squant, "f", "f", mask))  # fmt: skip
-        elif dtype in ["fp8", "bf8"]:
-            squant = "t" if dtype == "fp8" else "f"
+        elif dtype == "fp8":
+            squant = "t"
             for logits, mask, bias in itertools.product(
                 ["t", "f"], get_mask_map(mask_impl).keys(), BIAS_MAP.keys()
             ):
