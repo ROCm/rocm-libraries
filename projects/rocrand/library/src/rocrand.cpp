@@ -525,6 +525,19 @@ rocrand_status ROCRANDAPI
     {
         return ROCRAND_STATUS_OUT_OF_RANGE;
     }
+    double sum = 0.0;
+    for(unsigned int i = 0; i < size; i++)
+    {
+        if(!std::isfinite(probabilities[i]) || probabilities[i] < 0.0)
+        {
+            return ROCRAND_STATUS_OUT_OF_RANGE;
+        }
+        sum += probabilities[i];
+    }
+    if(!std::isfinite(sum) || sum <= 0.0)
+    {
+        return ROCRAND_STATUS_OUT_OF_RANGE;
+    }
 
     rocrand_discrete_distribution_st h_dis;
     rocrand_status status = discrete_distribution_factory<DISCRETE_METHOD_UNIVERSAL>::create(

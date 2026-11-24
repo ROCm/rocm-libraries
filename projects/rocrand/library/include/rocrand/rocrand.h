@@ -763,6 +763,8 @@ rocrand_status ROCRANDAPI rocrand_create_poisson_distribution(
  * - ROCRAND_STATUS_OUT_OF_RANGE if \p discrete_distribution pointer was null \n
  * - ROCRAND_STATUS_OUT_OF_RANGE if \p probabilities pointer was null \n
  * - ROCRAND_STATUS_OUT_OF_RANGE if \p size was zero \n
+ * - ROCRAND_STATUS_OUT_OF_RANGE if any value in \p probabilities was negative, NaN or infinite \n
+ * - ROCRAND_STATUS_OUT_OF_RANGE if the sum of \p probabilities was zero or not finite \n
  * - ROCRAND_STATUS_SUCCESS if the histogram was constructed successfully \n
  */
 rocrand_status ROCRANDAPI
