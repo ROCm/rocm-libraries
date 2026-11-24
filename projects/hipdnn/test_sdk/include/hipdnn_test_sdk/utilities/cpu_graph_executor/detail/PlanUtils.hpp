@@ -609,14 +609,14 @@ bool isSdpaZeroProbabilityDropout(
     return sdpaDropoutSeedOffsetPresent(attrs, tensorMap);
 }
 
-#define CHECK_TENSOR_EXISTS(tensor_map, tensor_uid) \
-    do                                              \
-    {                                               \
+#define CHECK_TENSOR_EXISTS(tensor_map, tensor_uid)      \
+    do                                                   \
+    {                                                    \
         const auto it = (tensor_map).find((tensor_uid)); \
-        if(it == (tensor_map).end())                \
-        {                                           \
-            return false;                           \
-        }                                           \
+        if(it == (tensor_map).end())                     \
+        {                                                \
+            return false;                                \
+        }                                                \
     } while(0)
 
 #define CHECK_TENSOR_TYPE(tensor_map, tensor_uid, datatype_enum) \

@@ -596,6 +596,7 @@ inline Error validateIndexTensor(const std::shared_ptr<graph::TensorAttributes>&
     HIPDNN_RETURN_IF_NE(dims[0],
                         firstDim,
                         ErrorCode::INVALID_VALUE,
+                        // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
                         prefix + " dim[0] must equal " + firstDimLabel + " ("
                             + std::to_string(firstDim) + "), got " + std::to_string(dims[0]));
     for(size_t i = 1; i < RANK; ++i)

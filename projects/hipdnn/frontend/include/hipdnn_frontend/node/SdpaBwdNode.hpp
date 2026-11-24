@@ -460,6 +460,7 @@ private:
             HIPDNN_RETURN_IF_NE(dims.size(),
                                 sourceDims.size(),
                                 ErrorCode::INVALID_VALUE,
+                                // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
                                 "SdpaBwdNode: " + gradName + " rank must equal " + sourceName
                                     + " rank (" + std::to_string(sourceDims.size()) + "), got "
                                     + std::to_string(dims.size()));

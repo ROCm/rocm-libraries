@@ -176,7 +176,7 @@ inline TensorAlias parseEntry(const nlohmann::json& entry, const std::string& ba
         where += uid.has_value() ? "view " + std::to_string(*uid) : std::string();
         where += uid.has_value() && ofUid.has_value() ? ", " : "";
         where += ofUid.has_value() ? "owner " + std::to_string(*ofUid) : std::string();
-        where += ")";
+        where += ')';
     }
 
     rejectUnknownKeys(entry, where, {"uid", "of", "byte_offset"});
