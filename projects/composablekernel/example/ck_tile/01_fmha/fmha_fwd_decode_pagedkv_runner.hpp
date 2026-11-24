@@ -8,6 +8,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <iostream>
 #include <limits>
 #include <numeric>
 #include <random>
@@ -507,6 +509,87 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     }
     HIP_CHECK_ERROR(hipStreamDestroy(stream));
     return res;
+}
+
+// The -decode_paged=1 mode of tile_example_fmha_fwd. Of that example's options it reads b, h, h_k,
+// s_k (one length, or one per sequence), d (128), mask (0, n, 2, b: every key; b:l,0: the l + 1
+// newest keys), page_block_size (16, 64 or 128; 0 = 16), prec (bf16 or fp16, of Q and the output;
+// K and V are fp8), num_splits (above 1: workgroups per (batch, kv head) instead of the
+// heuristic), max_s_k, seed, v, warmup and repeat. One query token per sequence: s is not read.
+inline int run_example(const ck_tile::ArgParser& arg_parser)
+{
+    const auto fail = [](const char* what) {
+        std::cerr << "decode_paged: " << what << std::endl;
+        return -1;
+    };
+    Case c;
+    c.batch   = arg_parser.get_int("b");
+    c.nhead   = arg_parser.get_int("h");
+    c.nhead_k = arg_parser.get_int("h_k") < 0 ? c.nhead : arg_parser.get_int("h_k");
+    c.seqlen_k.clear();
+    for(const auto x : arg_parser.get_int_vec("s_k"))
+    {
+        if(x < 0)
+            return fail("needs -s_k, the context lengths");
+        c.seqlen_k.push_back(x);
+    }
+    if(c.batch <= 0 || c.seqlen_k.empty())
+        return fail("needs -b >= 1 and -s_k");
+    if(arg_parser.get_int("d") != kHdim)
+        return fail("supports -d=128 only");
+
+    const std::string mask = arg_parser.get_str("mask");
+    if(mask == "0" || mask == "n" || mask == "2" || mask == "b")
+        c.window = 0;
+    else
+    {
+        int left = -1, right = -1;
+        if(std::sscanf(mask.c_str(), "b:%d,%d", &left, &right) != 2 || left < 0 || right != 0)
+            return fail("supports -mask=0, b (every key) or b:l,0 (the l + 1 newest keys)");
+        c.window = left + 1;
+    }
+
+    c.page_size =
+        arg_parser.get_int("page_block_size") == 0 ? kPage : arg_parser.get_int("page_block_size");
+    const std::string prec = arg_parser.get_str("prec");
+    if(prec != "bf16" && prec != "fp16")
+        return fail("supports -prec=bf16 or fp16 (Q and the output; K and V are fp8)");
+    c.fp16 = prec == "fp16";
+    if(arg_parser.get_int("num_splits") > 1)
+        c.splits = arg_parser.get_int("num_splits");
+    c.max_seqlen_k      = arg_parser.get_int("max_s_k");
+    c.seed              = arg_parser.get_int("seed") < 0 ? 1 : arg_parser.get_int("seed");
+    const bool validate = arg_parser.get_int("v") != 0;
+
+    const auto r = run(c, validate, arg_parser.get_int("warmup"), arg_parser.get_int("repeat"));
+    if(!r.error.empty())
+        return fail(r.error.c_str());
+    if(validate)
+        std::printf("max abs err %.4g (max |ref| %.4g), cos %.6f, row err/tol %.3f, ",
+                    r.max_err,
+                    r.max_ref,
+                    r.cosine,
+                    r.row_err);
+    std::printf(
+        "%s b:%d h:%d/%d s_k:%d page:%d window:%d layout:%s groups:%d splits:%d pages/split:%d, "
+        "stream %.2f us, graph %.2f us%s\n",
+        c.fp16 ? "fp16" : "bf16",
+        c.batch,
+        c.nhead,
+        c.nhead_k,
+        c.seqlen_k.front(),
+        c.page_size,
+        c.window,
+        r.config.wave_split ? "wave" : "coop",
+        r.config.num_groups,
+        r.config.num_splits,
+        r.config.pages_per_split,
+        r.us_stream,
+        r.us_graph,
+        validate ? (r.valid ? ", valid:y" : ", valid:n") : "");
+    if(!r.graph_same)
+        std::printf("graph replay output differs from a stream launch\n");
+    return (!validate || r.valid) && r.graph_same ? 0 : 1;
 }
 
 } // namespace fmha_fwd_decode_pagedkv_runner

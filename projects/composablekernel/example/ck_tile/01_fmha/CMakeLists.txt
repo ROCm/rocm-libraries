@@ -366,7 +366,7 @@ target_include_directories(${EXAMPLE_FMHA_BWD} PRIVATE ${CMAKE_CURRENT_LIST_DIR}
 set_property(TARGET ${EXAMPLE_FMHA_BWD} PROPERTY HIP_ARCHITECTURES ${INST_TARGETS})
 
 # gfx125 decode over a paged fp8 KV cache (fmha_fwd_decode_pagedkv): its own instances, shared by
-# the example, the C API library and the test
+# ${EXAMPLE_FMHA_FWD} (-decode_paged=1), the C API library and the test
 set(FMHA_FWD_DECODE_PAGEDKV_TARGETS ${INST_TARGETS})
 list(FILTER FMHA_FWD_DECODE_PAGEDKV_TARGETS INCLUDE REGEX "^gfx125")
 if(FMHA_FWD_DECODE_PAGEDKV_TARGETS)
@@ -406,13 +406,8 @@ if(FMHA_FWD_DECODE_PAGEDKV_TARGETS)
   # the instances specialize a function template the API header only declares
   target_compile_options(${FMHA_FWD_DECODE_PAGEDKV_INSTANCES} PRIVATE -Wno-undefined-func-template)
 
-  set(EXAMPLE_FMHA_FWD_DECODE_PAGEDKV "tile_example_fmha_fwd_decode_pagedkv")
-  add_executable(${EXAMPLE_FMHA_FWD_DECODE_PAGEDKV} EXCLUDE_FROM_ALL
-    example_fmha_fwd_decode_pagedkv.cpp)
-  target_link_libraries(${EXAMPLE_FMHA_FWD_DECODE_PAGEDKV} ${FMHA_FWD_DECODE_PAGEDKV_INSTANCES})
-  target_include_directories(${EXAMPLE_FMHA_FWD_DECODE_PAGEDKV} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
-  set_property(TARGET ${EXAMPLE_FMHA_FWD_DECODE_PAGEDKV} PROPERTY HIP_ARCHITECTURES
-    ${FMHA_FWD_DECODE_PAGEDKV_TARGETS})
+  target_link_libraries(${EXAMPLE_FMHA_FWD} ${FMHA_FWD_DECODE_PAGEDKV_INSTANCES})
+  target_compile_definitions(${EXAMPLE_FMHA_FWD} PRIVATE CK_TILE_FMHA_FWD_DECODE_PAGEDKV_API=1)
   # C API loaded by fmha_fwd_decode_pagedkv.py
   add_library(ck_fmha_fwd_decode_pagedkv SHARED EXCLUDE_FROM_ALL fmha_fwd_decode_pagedkv_capi.cpp)
   target_link_libraries(ck_fmha_fwd_decode_pagedkv PRIVATE ${FMHA_FWD_DECODE_PAGEDKV_INSTANCES})
@@ -424,6 +419,8 @@ if(FMHA_FWD_DECODE_PAGEDKV_TARGETS)
     ${CMAKE_CURRENT_LIST_DIR}/fmha_fwd_decode_pagedkv_capi.map)
   set_property(TARGET ck_fmha_fwd_decode_pagedkv PROPERTY HIP_ARCHITECTURES
     ${FMHA_FWD_DECODE_PAGEDKV_TARGETS})
+else()
+  target_compile_definitions(${EXAMPLE_FMHA_FWD} PRIVATE CK_TILE_FMHA_FWD_DECODE_PAGEDKV_API=0)
 endif()
 
 # TODO: we have to turn off this global prop, otherwise the progress bar generated
