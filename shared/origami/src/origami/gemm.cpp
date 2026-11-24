@@ -317,12 +317,7 @@ static bool host_picks_workgroup_mapping(const problem_t& problem,
          tp.workgroup_mapping_xcc == -1;
 }
 
-// OPT-IN LIST: architectures whose kernels are modelled with the workgroup mapping they
-// launch with (see predict_workgroup_mapping).  Every other architecture keeps the predicted
-// mapping, so its rankings are unchanged.  The launch does the same on all architectures; add
-// one here only together with a check of its kernel selection.  gfx1250 has its own path
-// (predict_workgroup_mapping_cdna5) and is not listed.
-static bool models_launch_wgm(const hardware_t& hardware) {
+static bool is_gfx115X(const hardware_t& hardware) {
   switch (hardware.arch) {
     case hardware_t::architecture_t::gfx1150:
     case hardware_t::architecture_t::gfx1151:
@@ -343,7 +338,7 @@ static int32_t default_launch_wgm(const hardware_t& hardware) {
 
 // WGM a gfx1250 launch without clusters walks tiles with, as
 // ContractionSolution::calculateAutoWGM picks it: a fixed config.workgroup_mapping if set; a
-// persistent auto mapping (host_picks_workgroup_mapping) takes
+// StreamK auto mapping (WGM 0, WGMXCC -1) on a nonzero launch grid takes
 // select_workgroup_mapping on the solution's tile and hints; any other WGM 0 takes
 // ceil(sqrt(N_CU / NUM_XCD)) of the whole device, whatever the problem's CU budget.  A config
 // without TensileLite params declares no mapping and takes select_workgroup_mapping.  A
@@ -357,12 +352,16 @@ static workgroup_mapping_t predict_workgroup_mapping_cdna5(const problem_t& prob
                                                            size_t grid_m,
                                                            size_t grid_n,
                                                            size_t splitting_factor) {
-  const tensile_params_t& tp = tparams(config);
-  if (std::max<size_t>(config.cluster_dim.m, 1) * std::max<size_t>(config.cluster_dim.n, 1) > 1 ||
-      tp.stream_k_spatial_cluster)
+  if (std::max<size_t>(config.cluster_dim.m, 1) * std::max<size_t>(config.cluster_dim.n, 1) > 1)
     return {0, 0, 1, 1};
 
-  if (host_picks_workgroup_mapping(problem, config, grid_m, grid_n, splitting_factor)) {
+  const tensile_params_t& tp = tparams(config);
+  // The launch grid is nonzero exactly when the problem has tiles.
+  const bool grid_nonzero = grid_m * grid_n * splitting_factor * problem.batch != 0;
+  const bool selected     = !config.has_tensile_params() ||
+                        (config.workgroup_mapping == 0 && tp.workgroup_mapping_xcc == -1 &&
+                         config.stream_k > 0 && grid_nonzero);
+  if (selected) {
     config_t host;
     host.mt                 = config.mt;
     host.cache_hints_a      = config.cache_hints_a;
@@ -371,7 +370,11 @@ static workgroup_mapping_t predict_workgroup_mapping_cdna5(const problem_t& prob
     return {0, 0, 1, select_workgroup_mapping(problem, hardware, host, 0).wgm};
   }
   if (config.workgroup_mapping != 0) return {0, 0, 1, config.workgroup_mapping};
-  return {0, 0, 1, default_launch_wgm(hardware)};
+  const size_t num_xcd = std::max<size_t>(hardware.NUM_XCD, 1);
+  return {0,
+          0,
+          1,
+          static_cast<int>(std::ceil(std::sqrt(static_cast<double>(hardware.N_CU / num_xcd))))};
 }
 
 // Fast WGM prediction: mirrors select_workgroup_mapping's cheap paths, then
@@ -390,9 +393,9 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
   // Unless the host re-picks the mapping per problem, a TensileLite kernel launches with what
   // ContractionSolution::calculateAutoWGM derives from its own parameters: WGM 1 and WGMXCC 1
   // for a spatial-cluster StreamK kernel, else the fixed WorkGroupMapping (default_launch_wgm
-  // for 0) and the fixed WGMXCC (NUM_XCD for -1).  Modelled for the architectures in
-  // models_launch_wgm() only; the others still get the prediction below.
-  if (models_launch_wgm(hardware) &&
+  // for 0) and the fixed WGMXCC (NUM_XCD for -1).
+  // TODO: Also use for other architectures
+  if (is_gfx115X(hardware) &&
       !host_picks_workgroup_mapping(problem, config, grid_m, grid_n, splitting_factor)) {
     const tensile_params_t& tp = tparams(config);
     if (tp.stream_k_spatial_cluster) return {0, 0, 1, 1};
