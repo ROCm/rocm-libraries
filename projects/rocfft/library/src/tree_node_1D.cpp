@@ -1044,6 +1044,7 @@ void SBCCPPNode::SetupGridParam_internal(GridParam& gp)
 
     gp.b_x = (lens[1] - 1) / bwd + 1;
     gp.b_x *= product(lens.begin() + 2, lens.end()) * view.batch;
+    gp.wgs_x = wgs;
 
     // Grid arrangement is different than regular SBCC
     // for improved global memory access patterns.  A block covers every
