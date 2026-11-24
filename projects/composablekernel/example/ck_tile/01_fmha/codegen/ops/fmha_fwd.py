@@ -927,6 +927,22 @@ class FmhaFwdApiPool:
                         and trait.spad == "f"
                         and trait.skpad == "f"
                     ]
+                    if dtype == "bf16" and (int(hdim), int(hdim_v)) == (64, 64):
+                        preferred_cr.extend(
+                            trait
+                            for trait in traits
+                            if trait.pipeline_tag == "qr_tdm_cr"
+                            and (trait.bm0, trait.bn0) == (128, 64)
+                            and trait.mode == "group"
+                            and trait.dpad == trait.dvpad == "f"
+                            and trait.mask not in ("no", "s_no")
+                            and trait.bias == "no"
+                            and trait.logits
+                            == trait.sink
+                            == trait.skip
+                            == trait.lse
+                            == "f"
+                        )
                     if hdim == "192":
                         preferred_cr.extend(
                             trait
@@ -2347,6 +2363,89 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     ) -> Tuple[FmhaFwdTileSize, ...]:
         tile = cls._get_cr_kernel_tile(problem_ctx, kernel_ctx)
         pipeline = kernel_ctx.pipeline
+        if (
+            pipeline.tag == "qr_tdm_cr"
+            and problem_ctx.dtype == "bf16"
+            and problem_ctx.mode == "group"
+            and (problem_ctx.hdim, problem_ctx.hdim_v) == (64, 64)
+            and pipeline.F_dpad == pipeline.F_dvpad == "f"
+            and pipeline.F_mask not in ("no", "s_no")
+            and pipeline.F_bias == "no"
+            and pipeline.F_logits
+            == pipeline.F_sink
+            == pipeline.F_skip
+            == pipeline.F_lse
+            == "f"
+        ):
+            masked = CppConstraint(
+                "a.sink_ptr == nullptr && a.window_size_right == 0 && "
+                "(a.window_size_left < 0 || a.window_size_left >= 2047)"
+            )
+            if tile.F_bm0 == tile.F_bn0 == 64:
+                # Wider K tiles amortize transfers for sparse prefixed queries.
+                wide = masked & CppConstraint(
+                    "a.max_seqlen_q >= 128 && get_num_blocks(128) <= num_cus && "
+                    "int64_t{a.seqlen_k} >= 2 * int64_t{a.seqlen_q}"
+                )
+                return (
+                    replace(tile, F_bn0=128, F_constraint=tile.F_constraint & wide),
+                    tile,
+                )
+            if tile.F_bm0 == tile.F_bn0 == 128:
+                # Short square prompts have enough Q parallelism, but too
+                # little visible K to amortize the larger score tile.
+                short = masked & CppConstraint(
+                    "a.max_seqlen_q >= 128 && a.max_seqlen_q <= 256 && "
+                    "a.seqlen_q == a.seqlen_k && get_num_blocks(128) > num_cus"
+                )
+                return (
+                    replace(tile, F_bn0=64, F_constraint=tile.F_constraint & short),
+                    tile,
+                )
+        if (
+            pipeline.tag == "qr_tdm_cr"
+            and problem_ctx.dtype == "bf16"
+            and problem_ctx.mode == "group"
+            and (problem_ctx.hdim, problem_ctx.hdim_v) == (192, 128)
+            and tile.F_bm0 == tile.F_bn0 == 64
+            and pipeline.F_dpad == pipeline.F_dvpad == "f"
+            and pipeline.F_mask not in ("no", "s_no")
+            and pipeline.F_bias == "no"
+            and pipeline.F_logits
+            == pipeline.F_sink
+            == pipeline.F_skip
+            == pipeline.F_lse
+            == "f"
+        ):
+            # Once M128 fills the GPU, reuse each K/V tile for twice as many
+            # query rows. Sparse grids retain M64's additional parallelism.
+            wide = CppConstraint(
+                "a.sink_ptr == nullptr && a.window_size_right == 0 && "
+                "(a.window_size_left < 0 || a.window_size_left >= 2047) && "
+                "get_num_blocks(128) > num_cus"
+            )
+            # With fewer blocks, N128 amortizes the long visible prefix;
+            # windowed attention keeps N64 to avoid extra masked score work.
+            prefix = CppConstraint(
+                "a.sink_ptr == nullptr && a.max_seqlen_q >= 128 && "
+                "a.window_size_left < 0 && a.window_size_right == 0 && "
+                "((get_num_blocks(128) <= num_cus && "
+                "int64_t{a.seqlen_k} >= 2 * int64_t{a.seqlen_q} && "
+                "(a.max_seqlen_q >= 2048 || "
+                "int64_t{a.seqlen_k} >= 8192 * int64_t{a.batch})) || "
+                "(get_num_blocks(128) <= 2 * num_cus && "
+                "a.max_seqlen_q >= 4096 && a.seqlen_k == a.seqlen_q))"
+            )
+            return (
+                replace(
+                    tile,
+                    F_bm0=128,
+                    F_bn0=128,
+                    F_constraint=tile.F_constraint & prefix,
+                ),
+                replace(tile, F_bm0=128, F_constraint=tile.F_constraint & wide),
+                tile,
+            )
         if (
             pipeline.tag == "qr_tdm_cr"
             and problem_ctx.dtype == "bf16"

@@ -809,9 +809,11 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                 covered.setdefault((dtype, group, dq), set()).add(kernel.F_tile.F_bm0)
         for key, tiles in covered.items():
             with self.subTest(coverage=key):
-                # Native D32 reuses M64 with N64/N128. D192 M128 is
-                # qualified only for batch mode.
-                expected = {64} if key[2] == 32 or key[1:] == (1, 192) else {64, 128}
+                # Native D32 reuses M64 with N64/N128. Packed D192 M128
+                # is qualified for BF16; FP16 retains its M64 fallback.
+                expected = (
+                    {64} if key[2] == 32 or key == ("fp16", 1, 192) else {64, 128}
+                )
                 self.assertEqual(tiles, expected)
 
     def test_virtual_sink_dense_geometry(self):
@@ -1467,6 +1469,100 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_d192_packed_masked_tile_preserves_small_query_fallback(self):
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"],
+            "*_bf16_group*_nlogits_nbias_mask_nlse_ndropout_nskip_nqscale_ntrload_nsink*",
+            0,
+            [192],
+            "simplified",
+        )
+        dispatch = _CompiledDispatcher(self, pool, kernels)
+        for batch, sq, sk, full, window in (
+            (8, 1024, 33792, (128, 64), (128, 64)),
+            (2, 4096, 4096, (128, 64), (128, 64)),
+            (1, 128, 4224, (64, 64), (64, 64)),
+            (1, 128, 32896, (128, 128), (64, 64)),
+            (1, 512, 33280, (128, 128), (64, 64)),
+            (1, 512, 4608, (64, 64), (64, 64)),
+            (1, 1024, 5120, (64, 64), (64, 64)),
+            (1, 2048, 2048, (64, 64), (64, 64)),
+            (1, 4096, 4096, (128, 128), (128, 64)),
+        ):
+            for left in (-1, 2047):
+                with self.subTest(batch=batch, sq=sq, sk=sk, left=left):
+                    selected = dispatch.run(
+                        dtype="bf16",
+                        hdim_q=192,
+                        hdim_v=128,
+                        group=1,
+                        has_seqstart=1,
+                        bshd=1,
+                        batch=batch,
+                        nhead_q=16,
+                        nhead_k=16,
+                        seqlen_q=batch * sq,
+                        seqlen_k=batch * sk,
+                        max_seqlen_q=sq,
+                        stride_o=16 * 128,
+                        nhead_stride_o=128,
+                        mask=2,
+                        window_size_left=left,
+                        window_size_right=0,
+                    )[0]
+                    kernel = next(k for k, i in dispatch.kernel_ids if i == selected)
+                    expected = full if left == -1 else window
+                    self.assertEqual(kernel.F_pipeline.tag, "qr_tdm_cr")
+                    self.assertEqual(
+                        (kernel.F_tile.F_bm0, kernel.F_tile.F_bn0), expected
+                    )
+
+    def test_d64_packed_tiles_preserve_window_and_grid_fallbacks(self):
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"],
+            "*_bf16_group*_nlogits_nbias_mask_nlse_ndropout_nskip_nqscale_ntrload_nsink*",
+            0,
+            [64],
+            "simplified",
+        )
+        dispatch = _CompiledDispatcher(self, pool, kernels)
+        for batch, sq, sk, left, expected in (
+            (1, 512, 33280, -1, (64, 128)),
+            (1, 512, 33280, 2047, (64, 128)),
+            (1, 512, 33280, 31, (64, 64)),
+            (1, 8192, 40960, -1, (128, 128)),
+            (32, 256, 256, -1, (128, 64)),
+            (64, 128, 128, 2047, (128, 64)),
+            (64, 128, 73728, -1, (128, 64)),
+        ):
+            with self.subTest(batch=batch, sq=sq, sk=sk, left=left):
+                selected = dispatch.run(
+                    num_cus=256,
+                    dtype="bf16",
+                    hdim_q=64,
+                    hdim_v=64,
+                    group=1,
+                    has_seqstart=1,
+                    bshd=1,
+                    batch=batch,
+                    nhead_q=16,
+                    nhead_k=2,
+                    seqlen_q=batch * sq,
+                    seqlen_k=batch * sk,
+                    max_seqlen_q=sq,
+                    stride_o=16 * 64,
+                    nhead_stride_o=64,
+                    mask=2,
+                    window_size_left=left,
+                    window_size_right=0,
+                )[0]
+                kernel = next(k for k, i in dispatch.kernel_ids if i == selected)
+                self.assertEqual(
+                    kernel.F_pipeline.tag,
+                    "qr_tdm_sched" if batch == 64 and sk == 73728 else "qr_tdm_cr",
+                )
+                self.assertEqual((kernel.F_tile.F_bm0, kernel.F_tile.F_bn0), expected)
+
     def test_d128_wide_key_tile_is_limited_to_small_packed_grids(self):
         pool, kernels = get_fwd_blobs(
             ["gfx1250"],
@@ -1479,8 +1575,8 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
         for dim, sq, sk, left, mask, expected in (
             (128, 512, 66048, -1, 2, (64, 256)),
             (128, 512, 66048, 2047, 2, (64, 256)),
-            (64, 512, 66048, -1, 2, (64, 64)),
-            (64, 512, 66048, 2047, 2, (64, 64)),
+            (64, 512, 66048, -1, 2, (64, 128)),
+            (64, 512, 66048, 2047, 2, (64, 128)),
             (128, 2048, 67584, -1, 2, (64, 64)),
             (128, 8192, 73728, -1, 2, (128, 128)),
             (128, 512, 512, -1, 2, (64, 64)),
@@ -1560,6 +1656,8 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                                 and sq + 8192 >= 4 * sq
                                 else expected
                             )
+                            if dim == 64:
+                                expected_n = 128
                             self.assertEqual(kernel.F_tile.F_bn0, expected_n)
 
     def test_extended_dtype_and_head_dimensions(self):
@@ -1576,14 +1674,15 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
             Counter(
                 {
                     (dtype, dim, mode): (
-                        (10 if mode == "batch" else 4)
+                        (10 if mode == "batch" else (6 if dtype == "bf16" else 4))
                         if dim == 192
                         else (
                             22
                             if (dtype, dim, mode) == ("bf16", 128, "batch")
                             else (
                                 10
-                                if mode == "batch" and dim in (64, 128)
+                                if (mode == "batch" and dim in (64, 128))
+                                or (dtype, dim, mode) == ("bf16", 64, "group")
                                 else 9
                                 if (mode == "batch" and dim in (32, 96))
                                 or (dtype, dim, mode) == ("bf16", 128, "group")
@@ -1866,7 +1965,7 @@ class TestGfx125TdmCrCodegen(unittest.TestCase):
                             kernel.F_tile.F_bm0,
                             128
                             if (dim == 192 and not group and min(sq, sk) >= 8192)
-                            or (dtype == "bf16" and dim in (64, 128) and group)
+                            or (dtype == "bf16" and dim in (64, 128, 192) and group)
                             else 64,
                         )
 
