@@ -70,7 +70,6 @@
 #include <hip/hip_runtime.h>
 
 #include <algorithm>
-#include <iterator>
 #include <utility>
 
 namespace rocrand_impl::host
@@ -868,14 +867,16 @@ public:
         m_engines.track_capture(m_stream);
 
         unsigned int* d_engines{};
-        status = system_type::alloc(&d_engines, m_generator_count * mt19937_constants::n);
+        status
+            = system_type::alloc(&d_engines,
+                                 m_generator_count * mt19937_constants::n * sizeof(unsigned int));
         if(status != ROCRAND_STATUS_SUCCESS)
         {
             return status;
         }
 
         unsigned int* d_mt19937_jump{};
-        status = system_type::alloc(&d_mt19937_jump, std::size(rocrand_h_mt19937_jump));
+        status = system_type::alloc(&d_mt19937_jump, sizeof(rocrand_h_mt19937_jump));
         if(status != ROCRAND_STATUS_SUCCESS)
         {
             system_type::free(d_engines);
