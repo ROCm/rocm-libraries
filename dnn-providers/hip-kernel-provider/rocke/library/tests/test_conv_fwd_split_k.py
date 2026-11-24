@@ -444,6 +444,36 @@ class TestSplitKDegrees(unittest.TestCase):
         self.assertEqual(_runtime_split_ks(small, ident, 0, (5, 3)), (32, 5, 3))
         self.assertEqual(_runtime_split_ks(small, ident, 6, (3,)), (6,))
 
+    def test_fast_rank_ranks_every_degree_the_serial_path_times(self):
+        # --fast-rank offered a split-K forward binary once, without a degree;
+        # its launch was refused ("launched without a degree") and the binary
+        # skipped. It must rank at the degrees the serial path times.
+        from types import SimpleNamespace
+
+        from benchmarks.common.benchmark_implicit_gemm_conv import (
+            _fast_rank_degrees,
+            _runtime_split_ks,
+        )
+        from kernels.conv.kernel_identity import KernelIdentity
+
+        ident = KernelIdentity.from_label(self._IDENT)
+        sweep = SimpleNamespace(split_k=0, split_k_degrees=(3,))
+        self.assertEqual(
+            _fast_rank_degrees("fwd", self._SMALL, ident, sweep),
+            _runtime_split_ks(self._SMALL, ident, 0, (3,)),
+        )
+        self.assertEqual(_fast_rank_degrees("fwd", self._SMALL, ident, sweep), (32, 3))
+        # Auto on a problem the policy does not split: no degree, so the
+        # caller skips the binary (the plain one serves the problem).
+        auto = SimpleNamespace(split_k=-1, split_k_degrees=(3,))
+        self.assertEqual(_fast_rank_degrees("fwd", self._FULL, ident, auto), ())
+        # A binary without the split-K kernarg ranks once.
+        plain = SimpleNamespace(split_k=1, streamk="off")
+        self.assertEqual(_fast_rank_degrees("fwd", self._SMALL, plain, sweep), (None,))
+        self.assertEqual(
+            _fast_rank_degrees("dgrad", self._SMALL, plain, sweep), (None,)
+        )
+
     def test_auto_launches_the_resolved_degree(self):
         from benchmarks.common.benchmark_implicit_gemm_conv import _runtime_split_ks
         from kernels.common.conv_split_k import resolve_conv_split_k

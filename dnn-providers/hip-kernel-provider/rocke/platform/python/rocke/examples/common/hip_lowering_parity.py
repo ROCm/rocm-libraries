@@ -451,7 +451,14 @@ def make_cases(*, arch: str = "gfx950") -> List[Case]:
             "mx_gemm",
             "gemm",
             lambda: build_mx_gemm(
-                MxGemmSpec(M=16, N=16, K=32, mantissa_dtype="fp8e4m3")
+                MxGemmSpec(
+                    M=16,
+                    N=16,
+                    K=32,
+                    block_tile_m=32,
+                    block_tile_n=128,
+                    mantissa_dtype="fp8e4m3",
+                )
             ),
         ),
         Case(
@@ -760,7 +767,14 @@ def make_cases(*, arch: str = "gfx950") -> List[Case]:
                 "mx_gemm.bf8",
                 "gemm",
                 lambda: build_mx_gemm(
-                    MxGemmSpec(M=16, N=16, K=32, mantissa_dtype="bf8e5m2")
+                    MxGemmSpec(
+                        M=16,
+                        N=16,
+                        K=32,
+                        block_tile_m=32,
+                        block_tile_n=128,
+                        mantissa_dtype="bf8e5m2",
+                    )
                 ),
             ),
         ]

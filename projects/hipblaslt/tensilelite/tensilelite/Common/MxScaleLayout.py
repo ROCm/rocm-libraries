@@ -22,6 +22,13 @@ from rocisa.instruction import SAddU32, SLShiftRightB32, SMulI32
 MXS_LDS_ALIGN_2D = 64
 
 
+def mxReadVectorWidth(kernel: Mapping, tc: str) -> int:
+    """Scale tiles per LDS read group, without changing the configured width."""
+    if tc == "MXSA" and kernel.get("WaveTileContiguousA"):
+        return 1
+    return kernel["VectorWidth" + tc]
+
+
 def mxSegmentSplit(kernel: Mapping, tc: str) -> bool:
     """MXSA's two TDM pieces contain M halves in separate LDS segments."""
     return (tc == "MXSA" and kernel.get("LDSSegmentInterleave") == 1
@@ -71,6 +78,13 @@ def mxFreePhase(kernel: Mapping, tc: str) -> bool:
         return False
     mt = int(kernel["MacroTile%s" % tc])
     return mt % mxTile != 0 and mxTile % mt != 0
+
+
+def mxsbRotateSplit(kernel: Mapping) -> bool:
+    """LDSSegmentBRotate on a full-wave MXSB tile (no TileSpan): one ds_load per vIdx,
+    and two MXSB read addresses that each SIMD pair orders by its rotation."""
+    return (bool(kernel.get("LDSSegmentBRotate")) and bool(kernel["ProblemType"].get("MXBlockB"))
+            and kernel["MatrixInstN"] == kernel["WavefrontSize"])
 
 
 def mxTdmMSplitStride(mt: int, mxTile: int, numComp: int) -> int:

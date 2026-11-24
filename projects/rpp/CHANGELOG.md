@@ -14,6 +14,10 @@ Full documentation for RPP is available at [https://rocm.docs.amd.com/projects/r
 - Audio augmentations are now always enabled. The `RPP_AUDIO_SUPPORT` CMake option has been removed.
 - `rppt_spectrogram` returns `RPP_ERROR_INVALID_ARGUMENTS` when `power` is not 1 or 2, when `windowLength` or `windowStep` is not positive, or when `nfft` is nonzero and smaller than `windowLength`.
 
+### Removed
+
+- The standalone handle and backend-macro tests under `test/` have been merged into the GoogleTest suite in `utilities/test/`, and the `test/` directory has been removed. The HIP allocation-failure fault-injection cases were not carried over.
+
 ## RPP 3.2.0 for ROCm 10.2.0
 
 ### Added

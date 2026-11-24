@@ -116,6 +116,8 @@ These engines report ``SUPPORTS_GRAPH_CAPTURE``. They were verified on gfx950, u
   gfx1152 on Windows: ``hipkernel:flydsl_sdpa_rdna``, ``hipkernel:flydsl_sdpa_rdna_decode``,
   ``hipkernel:flydsl_sdpa_aiw``, ``hipkernel:Gfx1151WmmaAttention``, and
   ``hipkernel:Gfx1151WmmaAttentionDecode``.
+- SDPA backward kernel ingestor engines: ``hipkernel:flydsl_sdpa_bwd_merged`` (gfx950) and
+  ``hipkernel:flydsl_sdpa_bwd_split`` (gfx950 and gfx1101).
 - ``HIP_MLOPS_ENGINE``.
 - ``ASM_SDPA_ENGINE``. The forward pass was verified on gfx950 and the backward pass on gfx942.
 - ``HIPBLASLT_ENGINE``.
@@ -152,7 +154,10 @@ Runtime pass-by-value scalars
 hipDNN reads a runtime pass-by-value scalar from host memory when the plan executes. A captured
 graph keeps the value that the scalar had at capture time. If you change the host value later, the
 replays do not change. This applies, for example, to a runtime attention scale or a runtime
-epsilon.
+epsilon. The SDPA backward engines (``hipkernel:flydsl_sdpa_bwd_merged`` and
+``hipkernel:flydsl_sdpa_bwd_split``) apply this to a by-value dropout seed and offset: hipDNN reads
+them at execute and freezes them into the captured graph, while a seed and offset passed as device
+tensors are read by the kernel at replay, so updating the tensors changes the mask.
 
 To avoid a frozen value, use a compile-time constant, or capture the graph again after you change
 the value. See :ref:`pass-by-value-tensors`.
