@@ -476,6 +476,9 @@ K `[num_blocks][nhead_k][d / 16][page_size][16 B]` and V `[num_blocks][nhead_k][
 page_size 16, 64 or 128, d 128, fp8 e4m3 K/V with per-tensor descales, bf16 or fp16 Q and output
 (`-prec`), any whole number of query heads per kv head, an optional sliding window.
 
+It is the `fwd_decode_pagedkv` entry of `FMHA_FWD_ENABLE_APIS` (built with tests, or with
+`-DFMHA_FWD_ENABLE_APIS="fwd;fwd_decode_pagedkv"`), for gfx125 targets.
+
 ```
 ninja tile_example_fmha_fwd
 ./bin/tile_example_fmha_fwd -decode_paged=1 -prec=bf16 -b=8 -h=16 -h_k=1 -d=128 -s_k=8192 \

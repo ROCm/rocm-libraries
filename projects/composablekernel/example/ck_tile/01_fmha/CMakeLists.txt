@@ -17,7 +17,7 @@ if(NOT WIN32 AND COMMAND check_cxx_compiler_flag)
 endif()
 
 # validate user-specified fmha_fwd API list
-set(FMHA_FWD_KNOWN_APIS "fwd;fwd_splitkv;fwd_appendkv;pagedkv_prefill")
+set(FMHA_FWD_KNOWN_APIS "fwd;fwd_splitkv;fwd_appendkv;pagedkv_prefill;fwd_decode_pagedkv")
 set(FMHA_FWD_ENABLE_APIS "fwd" CACHE STRING
   "semicolon-separated list of APIs to generate (${FMHA_FWD_KNOWN_APIS}) & link, or \"all\".")
 if(BUILD_TESTING)
@@ -38,6 +38,15 @@ endforeach()
 # "fwd" is a must-have api for the fmha_fwd example, add it if not specified
 if(NOT "fwd" IN_LIST FMHA_FWD_ENABLE_APIS)
   list(PREPEND FMHA_FWD_ENABLE_APIS "fwd")
+endif()
+
+# fwd_decode_pagedkv has instances of its own (generated and linked at the end of this file) and
+# only for gfx125 targets: the targets it is built for, none if it is not enabled
+set(FMHA_FWD_DECODE_PAGEDKV_TARGETS "")
+if("fwd_decode_pagedkv" IN_LIST FMHA_FWD_ENABLE_APIS)
+  list(REMOVE_ITEM FMHA_FWD_ENABLE_APIS "fwd_decode_pagedkv")
+  set(FMHA_FWD_DECODE_PAGEDKV_TARGETS ${INST_TARGETS})
+  list(FILTER FMHA_FWD_DECODE_PAGEDKV_TARGETS INCLUDE REGEX "^gfx125")
 endif()
 
 file(GLOB_RECURSE CODE_GEN_SCRIPTS CONFIGURE_DEPENDS
@@ -294,6 +303,13 @@ else()
   list(APPEND FMHA_FWD_INTERFACE_COMPILE_OPTIONS -DCK_TILE_FMHA_FWD_PAGEDKV_API=0)
 endif()
 
+# conditionally enable call to the fwd_decode_pagedkv API in fmha_fwd example
+if(FMHA_FWD_DECODE_PAGEDKV_TARGETS)
+  list(APPEND FMHA_FWD_INTERFACE_COMPILE_OPTIONS -DCK_TILE_FMHA_FWD_DECODE_PAGEDKV_API=1)
+else()
+  list(APPEND FMHA_FWD_INTERFACE_COMPILE_OPTIONS -DCK_TILE_FMHA_FWD_DECODE_PAGEDKV_API=0)
+endif()
+
 # conditionally enable call to the batch_prefill API in fmha_fwd example and tests
 if("batch_prefill" IN_LIST FMHA_FWD_ENABLE_APIS)
   list(APPEND FMHA_FWD_INTERFACE_COMPILE_OPTIONS -DCK_TILE_FMHA_FWD_BATCH_PREFILL_API=1)
@@ -367,8 +383,6 @@ set_property(TARGET ${EXAMPLE_FMHA_BWD} PROPERTY HIP_ARCHITECTURES ${INST_TARGET
 
 # gfx125 decode over a paged fp8 KV cache (fmha_fwd_decode_pagedkv): its own instances, shared by
 # ${EXAMPLE_FMHA_FWD} (-decode_paged=1), the C API library and the test
-set(FMHA_FWD_DECODE_PAGEDKV_TARGETS ${INST_TARGETS})
-list(FILTER FMHA_FWD_DECODE_PAGEDKV_TARGETS INCLUDE REGEX "^gfx125")
 if(FMHA_FWD_DECODE_PAGEDKV_TARGETS)
   list(JOIN FMHA_FWD_DECODE_PAGEDKV_TARGETS , FMHA_FWD_DECODE_PAGEDKV_TARGETS_ARG)
   set(FMHA_FWD_DECODE_PAGEDKV_CODE_GEN_ARGS
@@ -407,7 +421,6 @@ if(FMHA_FWD_DECODE_PAGEDKV_TARGETS)
   target_compile_options(${FMHA_FWD_DECODE_PAGEDKV_INSTANCES} PRIVATE -Wno-undefined-func-template)
 
   target_link_libraries(${EXAMPLE_FMHA_FWD} ${FMHA_FWD_DECODE_PAGEDKV_INSTANCES})
-  target_compile_definitions(${EXAMPLE_FMHA_FWD} PRIVATE CK_TILE_FMHA_FWD_DECODE_PAGEDKV_API=1)
   # C API loaded by fmha_fwd_decode_pagedkv.py
   add_library(ck_fmha_fwd_decode_pagedkv SHARED EXCLUDE_FROM_ALL fmha_fwd_decode_pagedkv_capi.cpp)
   target_link_libraries(ck_fmha_fwd_decode_pagedkv PRIVATE ${FMHA_FWD_DECODE_PAGEDKV_INSTANCES})
@@ -419,8 +432,6 @@ if(FMHA_FWD_DECODE_PAGEDKV_TARGETS)
     ${CMAKE_CURRENT_LIST_DIR}/fmha_fwd_decode_pagedkv_capi.map)
   set_property(TARGET ck_fmha_fwd_decode_pagedkv PROPERTY HIP_ARCHITECTURES
     ${FMHA_FWD_DECODE_PAGEDKV_TARGETS})
-else()
-  target_compile_definitions(${EXAMPLE_FMHA_FWD} PRIVATE CK_TILE_FMHA_FWD_DECODE_PAGEDKV_API=0)
 endif()
 
 # TODO: we have to turn off this global prop, otherwise the progress bar generated
