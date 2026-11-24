@@ -593,6 +593,11 @@ class ToStinkyAsmPassImpl : public Pass {
                     // Insert assembly instruction before the logical instruction
                     bb.insertIR(it, asmInst);
 
+                    // removeIR/safeErase bypass the erase observer, so a group endpoint
+                    // on the logical node would dangle; hand it to its replacement.
+                    if (Function* parent = bb.getParent(); parent && parent->eraseObserver())
+                        parent->eraseObserver()(logicalInst, asmInst, asmInst);
+
                     // Remove the logical instruction from IRList
                     auto toRemove = it;
                     ++it;  // Move to next before removing

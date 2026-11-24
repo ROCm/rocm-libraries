@@ -850,6 +850,35 @@ inline bool hasLdsPseudoRegs(const StinkyInstruction& inst) {
     return false;
 }
 
+/// Returns true if GIR models this memory operation's storage hazards, so the operation may
+/// enter the scheduler DAG and GirFrameHazardAnalysis can add only the ordering edges it needs.
+/// GIR does not choose the schedule.  Untagged memory operations remain conservative region cuts.
+/// The CONTRACT is what makes the model real: without one the frame analysis is empty, so no
+/// edge would replace the region cut this drops and a tagged pair would be left unordered.
+inline bool hasGirMemoryHazardModel(const StinkyInstruction& inst) {
+    if (!isTensorAccess(inst) && !isDSAccess(inst)) return false;
+    const GirActionData* action = inst.getModifier<GirActionData>();
+    if (action == nullptr || action->accesses.empty()) return false;
+    const BasicBlock* block = inst.getParent();
+    const Function* function = block != nullptr ? block->getParentFunc() : nullptr;
+    if (function == nullptr) return false;
+    // Either form counts: the import pass hands over the built contract, a `.stir` fixture
+    // carries its text. One of them has to be there for the frame analysis to say anything.
+    return function->hasStructMetaData(kGirFrameContractKey) ||
+           function->getStringMetaData(kGirFrameContractKey).has_value();
+}
+
+/// Returns true for a GIR-owned memory fence -- the order-only FENCE and both halves of the
+/// barrier it precedes.  addGirFrameHazardEdges pins each one between the ends of every
+/// cross-agent hazard it owns, which is the job the region cut used to do less precisely.
+/// Returns true if the GIR frame model names this instruction's storage, so the frame counter
+/// flow states its waits.  The proof of disjointness that `MemTokenData` used to carry lives in
+/// `GirActionData` here, so a fallback keyed on the token's absence must ask this too.
+inline bool girNamesStorage(const StinkyInstruction& inst) {
+    const GirActionData* action = inst.getModifier<GirActionData>();
+    return action != nullptr && !action->accesses.empty();
+}
+
 /// Returns true if the instruction forces the DAG scheduler to cut a new
 /// region.  This covers true side effects (stores, branches, waits) and
 /// memory ops that lack MemTokenData (LDS pseudo-registers), where the
@@ -861,7 +890,7 @@ inline bool hasSideEffect(const StinkyInstruction& inst) {
         return true;
     if ((isBarrier(inst) || isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst) ||
          isGlobalStoreAsyncFromLds(inst)) &&
-        !hasLdsPseudoRegs(inst))
+        !hasLdsPseudoRegs(inst) && !hasGirMemoryHazardModel(inst))
         return true;
     if (isExecMaskGroup(inst)) {
         if (const auto* groupData = inst.getModifier<ExecGroupData>()) {
