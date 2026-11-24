@@ -38,7 +38,11 @@ miopenStatus_t ThrownStatus(F&& f)
 
 } // namespace
 
-TEST(CPU_hipoc_workgroup_limit_NONE, arch_limits)
+// NOLINTBEGIN(google-readability-avoid-underscore-in-googletest-name)
+
+using CPU_hipoc_workgroup_limit_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_hipoc_workgroup_limit_NONE, arch_limits)
 {
     EXPECT_EQ(GetMaxWorkgroupsYZ("gfx1201"), 65536u);
     EXPECT_EQ(GetMaxWorkgroupsYZ("gfx1200"), 65536u);
@@ -50,7 +54,7 @@ TEST(CPU_hipoc_workgroup_limit_NONE, arch_limits)
         EXPECT_EQ(GetMaxWorkgroupsYZ(arch), std::numeric_limits<size_t>::max()) << arch;
 }
 
-TEST(CPU_hipoc_workgroup_limit_NONE, boundaries)
+TEST_P(CPU_hipoc_workgroup_limit_NONE, boundaries)
 {
     struct Case
     {
@@ -95,7 +99,7 @@ TEST(CPU_hipoc_workgroup_limit_NONE, boundaries)
     }
 }
 
-TEST(CPU_hipoc_workgroup_limit_NONE, validate_launch_skips_device_query_below_smallest_limit)
+TEST_P(CPU_hipoc_workgroup_limit_NONE, validate_launch_skips_device_query_below_smallest_limit)
 {
     int queries     = 0;
     const auto find = [&] {
@@ -111,7 +115,7 @@ TEST(CPU_hipoc_workgroup_limit_NONE, validate_launch_skips_device_query_below_sm
     EXPECT_EQ(queries, 1);
 }
 
-TEST(CPU_hipoc_workgroup_limit_NONE, validate_launch_checks_global_work_size)
+TEST_P(CPU_hipoc_workgroup_limit_NONE, validate_launch_checks_global_work_size)
 {
     constexpr size_t k32BitLimit = size_t{1} << 32;
     EXPECT_EQ(ThrownStatus([&] {
@@ -121,3 +125,7 @@ TEST(CPU_hipoc_workgroup_limit_NONE, validate_launch_checks_global_work_size)
               }),
               miopenStatusInternalError);
 }
+
+// NOLINTEND(google-readability-avoid-underscore-in-googletest-name)
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_hipoc_workgroup_limit_NONE, testing::Values(0));
