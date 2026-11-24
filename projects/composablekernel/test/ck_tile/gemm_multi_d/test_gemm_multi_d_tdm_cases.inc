@@ -137,3 +137,11 @@ TYPED_TEST(TestCkTileGemmMultiD, TestCkTileGemmMultiDTdm_D0StrideSupported)
     EXPECT_TRUE(this->IsTdmSupported(256, 256, 256, 1, 0));
     EXPECT_EQ(this->IsTdmSupported(256, 256, 256, 1, 256), !TestFixture::kD0RowBroadcast);
 }
+
+// Same for D1: the mask is generic over the D index, so a row-broadcast D1 must be passed with
+// stride 0 and a full D1 is accepted with either stride.
+TYPED_TEST(TestCkTileGemmMultiD, TestCkTileGemmMultiDTdm_D1StrideSupported)
+{
+    EXPECT_TRUE(this->IsTdmSupported(256, 256, 256, 1, -1, 0));
+    EXPECT_EQ(this->IsTdmSupported(256, 256, 256, 1, -1, 256), !TestFixture::kD1RowBroadcast);
+}

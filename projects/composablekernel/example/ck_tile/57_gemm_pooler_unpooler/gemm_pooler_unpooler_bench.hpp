@@ -218,7 +218,8 @@ struct Shape
 {
     ck_tile::index_t M, N, K;
     bool bias;
-    ck_tile::index_t split_n; // > 0: the main kernel computes C's first split_n columns, Tail the rest
+    ck_tile::index_t
+        split_n; // > 0: the main kernel computes C's first split_n columns, Tail the rest
 };
 
 // The tail kernel of -split_n: 192x256 tiles with 2x2 waves, whose 88 tiles fill one round on 96
@@ -249,8 +250,8 @@ struct Buffers
 template <typename Inst, typename Tail = void>
 int run(const ck_tile::ArgParser& arg, const Shape& shape, const std::string& name)
 {
-    using Kernel             = typename Inst::Kernel;
-    constexpr bool kSplit    = !std::is_void_v<Tail>;
+    using Kernel          = typename Inst::Kernel;
+    constexpr bool kSplit = !std::is_void_v<Tail>;
     static_assert(!kSplit || (!Inst::kBias && !Inst::kStreamK), "-split_n: plain GEMM only");
     constexpr bool a_row     = std::is_same_v<typename Inst::ALayout, RowMajor>;
     constexpr bool b_col     = std::is_same_v<typename Inst::BLayout, ColumnMajor>;
@@ -277,12 +278,12 @@ int run(const ck_tile::ArgParser& arg, const Shape& shape, const std::string& na
 
     // A is M x K (row-major, stride K) or K x M (column-major, stride M); B is N x K
     // (column-major, stride K) or K x N (row-major, stride N); C is M x N row-major.
-    const size_t a_elems  = static_cast<size_t>(M) * K;
-    const size_t b_elems  = static_cast<size_t>(N) * K;
-    const size_t c_elems  = static_cast<size_t>(M) * N;
-    const size_t stride_a = a_row ? K : M;
-    const size_t stride_b = b_col ? K : N;
-    const bool ints       = mode == "verify-int";
+    const size_t a_elems      = static_cast<size_t>(M) * K;
+    const size_t b_elems      = static_cast<size_t>(N) * K;
+    const size_t c_elems      = static_cast<size_t>(M) * N;
+    const size_t stride_a     = a_row ? K : M;
+    const size_t stride_b     = b_col ? K : N;
+    const bool ints           = mode == "verify-int";
     const ck_tile::index_t N0 = kSplit ? shape.split_n : N;
     std::vector<uint16_t> a(a_elems), b(b_elems), bias(Inst::kBias ? N : 0);
     fill(a, ints, seed, 0);
@@ -422,13 +423,12 @@ int run(const ck_tile::ArgParser& arg, const Shape& shape, const std::string& na
         if constexpr(kSplit)
         {
             using TailKernel = typename Tail::Kernel;
-            ck_tile::launch_kernel(
-                ck_tile::stream_config{nullptr, false},
-                ck_tile::make_kernel<1>(TailKernel{},
-                                        TailKernel::GridSize(M, N - N0, 1),
-                                        TailKernel::BlockSize(),
-                                        0,
-                                        tail_kargs[r]));
+            ck_tile::launch_kernel(ck_tile::stream_config{nullptr, false},
+                                   ck_tile::make_kernel<1>(TailKernel{},
+                                                           TailKernel::GridSize(M, N - N0, 1),
+                                                           TailKernel::BlockSize(),
+                                                           0,
+                                                           tail_kargs[r]));
         }
     };
 
@@ -510,6 +510,11 @@ int run(const ck_tile::ArgParser& arg, const Shape& shape, const std::string& na
 
     const int warmup = arg.get_int("warmup"), repeat = arg.get_int("repeat");
     const int rounds = arg.get_int("rounds");
+    if(rounds <= 0 || repeat <= 0)
+    {
+        std::printf("-rounds and -repeat must be positive\n");
+        return 2;
+    }
     hipEvent_t start, stop;
     BENCH_HIP_CHECK(hipEventCreate(&start));
     BENCH_HIP_CHECK(hipEventCreate(&stop));
@@ -584,8 +589,13 @@ int dispatch_layout(const ck_tile::ArgParser& arg, const Shape& shape, const std
     const std::string tile = arg.get_str("tile");
     const bool bias_row    = arg.get_str("bias_load") == "row";
     const std::string sk   = arg.get_str("streamk");
-    const bool persistent  = arg.get_int("persistent") != 0;
-    auto go                = [&](auto inst_bias_row, auto inst_bias_tile, auto inst_plain) {
+    if(sk != "none" && sk != "linear" && sk != "tree")
+    {
+        std::printf("unknown -streamk=%s (none, linear, tree)\n", sk.c_str());
+        return 2;
+    }
+    const bool persistent = arg.get_int("persistent") != 0;
+    auto go               = [&](auto inst_bias_row, auto inst_bias_tile, auto inst_plain) {
         using Plain = decltype(inst_plain);
         if(sk != "none")
         {
@@ -609,7 +619,7 @@ int dispatch_layout(const ck_tile::ArgParser& arg, const Shape& shape, const std
             return run<Plain>(arg, shape, name);
         }
         return bias_row ? run<decltype(inst_bias_row)>(arg, shape, name)
-                                       : run<decltype(inst_bias_tile)>(arg, shape, name);
+                                      : run<decltype(inst_bias_tile)>(arg, shape, name);
     };
 #define POOLER_BENCH_TILE(TNAME, TM, TN, TK, WM, WN, S, R)                                     \
     if(tile == TNAME)                                                                          \

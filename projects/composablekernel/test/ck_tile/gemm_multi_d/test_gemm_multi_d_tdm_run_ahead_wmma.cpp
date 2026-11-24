@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 // Multi-D GEMM with the run-ahead TDM pipeline (CompTDMRunAhead) and TdmMultiDEpilogue, full tile
-// and staged, and the row-broadcast D0 path of TdmMultiDEpilogue (DsRowBroadcastMask) with the
-// run-ahead and CompTDMV1 pipelines (gfx1250).
+// and staged, and the row-broadcast D path of TdmMultiDEpilogue (DsRowBroadcastMask: D0, D1 and
+// both) with the run-ahead and CompTDMV1 pipelines (gfx1250).
 
 #include <tuple>
 
@@ -25,8 +25,13 @@ using Tile64  = ck_tile::sequence<64, 64, 32>;
 using Tile128 = ck_tile::sequence<128, 128, 64>;
 using Tile256 = ck_tile::sequence<256, 256, 32>;
 
-using D0Full = std::false_type;
-using D0Row  = std::true_type;
+// DsRowBroadcastMask of the epilogue: bit i set = D_i is a row-broadcast N-vector (stride 0).
+template <ck_tile::index_t Mask>
+using DsRowBcast = std::integral_constant<ck_tile::index_t, Mask>;
+using D0Full     = DsRowBcast<0>;
+using D0Row      = DsRowBcast<1>;
+using D1Row      = DsRowBcast<2>;
+using D01Row     = DsRowBcast<3>;
 
 // clang-format off
 using KernelTypes = ::testing::Types<
@@ -52,7 +57,15 @@ using KernelTypes = ::testing::Types<
     std::tuple<    Row,     Row,     Row,      Row,      Row,      BF16,      BF16,      BF16,       BF16,       F32,        BF16, ElementWiseAddAdd, MultiDTdmRAStaged, NoTransC,   Tile256, D0Row>,
     std::tuple<    Row,     Col,     Row,      Row,      Row,      F16,       F16,       BF16,       BF16,       F32,        F16,  ElementWiseAddAdd, MultiDTdmV1,       NoTransC,   Tile128, D0Row>,
     std::tuple<    Row,     Col,     Row,      Row,      Row,      F16,       F16,       BF16,       BF16,       F32,        F16,  ElementWiseAddAdd, MultiDTdmV1,       std::true_type, Tile64, D0Row>,
-    std::tuple<    Row,     Col,     Row,      Row,      Row,      F16,       F16,       F32,        F32,        F32,        F32,  MultiplyMultiply,  MultiDTdmV1Staged, NoTransC,   Tile128, D0Row>
+    std::tuple<    Row,     Col,     Row,      Row,      Row,      F16,       F16,       F32,        F32,        F32,        F32,  MultiplyMultiply,  MultiDTdmV1Staged, NoTransC,   Tile128, D0Row>,
+
+    // Row-broadcast D1 with a full D0, and both Ds row-broadcast (the mask is generic over D_i).
+    std::tuple<    Row,     Col,     Row,      Row,      Row,      F16,       F16,       BF16,       BF16,       F32,        F16,  ElementWiseAddAdd, MultiDTdmRA,       NoTransC,   Tile128, D1Row>,
+    std::tuple<    Row,     Col,     Row,      Row,      Row,      F16,       F16,       F16,        F16,        F32,        F16,  MultiplyMultiply,  MultiDTdmRAStaged, NoTransC,   Tile128, D1Row>,
+    std::tuple<    Row,     Col,     Row,      Row,      Row,      F16,       F16,       BF16,       BF16,       F32,        F16,  ElementWiseAddAdd, MultiDTdmV1,       std::true_type, Tile64, D1Row>,
+    std::tuple<    Col,     Row,     Row,      Row,      Row,      BF16,      BF16,      BF16,       BF16,       F32,        BF16, ElementWiseAddAdd, MultiDTdmRA,       NoTransC,   Tile64,  D01Row>,
+    std::tuple<    Row,     Row,     Row,      Row,      Row,      F16,       F16,       BF16,       BF16,       F32,        F16,  ElementWiseAddAdd, MultiDTdmRAStaged, NoTransC,   Tile256, D01Row>,
+    std::tuple<    Row,     Col,     Row,      Row,      Row,      F16,       F16,       F32,        F32,        F32,        F32,  MultiplyMultiply,  MultiDTdmV1Staged, NoTransC,   Tile128, D01Row>
     >;
 // clang-format on
 

@@ -48,9 +48,9 @@ struct MultiplyMultiply
 //   MultiDTdmRAStaged -> CompTDMRunAhead pipeline + TdmMultiDEpilogueStagedForPipeline, one M
 //                        iteration per slab (gfx1250 only)
 // For the TDM selectors, tuple element 13 is TransposeC (default std::false_type), element 14
-// is the block tile as ck_tile::sequence<M, N, K> (default 128x128x64) and element 15 is
-// std::true_type for a row-broadcast D0 (default std::false_type): D0 is an N-vector passed with
-// row stride 0 and the epilogue's DsRowBroadcastMask has bit 0 set.
+// is the block tile as ck_tile::sequence<M, N, K> (default 128x128x64) and element 15 is the
+// epilogue's DsRowBroadcastMask as std::integral_constant<ck_tile::index_t, Mask> (default 0;
+// std::true_type means bit 0): every D_i whose bit is set is an N-vector passed with row stride 0.
 struct MultiDTdmV1
 {
 };
@@ -81,7 +81,8 @@ enum class MultiDFill
 {
     Uniform,          // D0, D1 uniform in [-1, 1]
     RampD0IdentityD1, // D0(m, n) = small ramp in (m, n) (in n alone for a stride-0 D0),
-                      // D1 = identity of CDElementWiseFn
+                      // D1 = identity of CDElementWiseFn, or for a row-broadcast D1 a
+                      // small ramp in n around that identity
 };
 
 template <typename ADataType,
@@ -141,8 +142,10 @@ class TestCkTileGemmMultiD : public ::testing::Test
         ck_tile::tuple_element_or_default_t<Tuple, 13, std::false_type>::value;
     using TdmBlockTile =
         ck_tile::tuple_element_or_default_t<Tuple, 14, ck_tile::sequence<128, 128, 64>>;
-    static constexpr bool kD0RowBroadcast =
-        ck_tile::tuple_element_or_default_t<Tuple, 15, std::false_type>::value;
+    static constexpr ck_tile::index_t kDsRowBroadcastMask = static_cast<ck_tile::index_t>(
+        ck_tile::tuple_element_or_default_t<Tuple, 15, std::false_type>::value);
+    static constexpr bool kD0RowBroadcast = (kDsRowBroadcastMask & 1) != 0;
+    static constexpr bool kD1RowBroadcast = (kDsRowBroadcastMask & 2) != 0;
 
 #if CK_TILE_USE_WMMA
     struct GemmWarpConfig_Wmma
@@ -383,7 +386,6 @@ class TestCkTileGemmMultiD : public ::testing::Test
                                                                  1,     /*BlockedXDLN_PerWarp_*/
                                                                  DoubleSmemBuffer>;
 
-        static constexpr ck_tile::index_t kDsRowBroadcastMask = kD0RowBroadcast ? 1 : 0;
         using GemmEpilogue =
             std::conditional_t<kStaged,
                                ck_tile::TdmMultiDEpilogueStagedForPipeline<EpilogueProblem,
@@ -439,16 +441,22 @@ class TestCkTileGemmMultiD : public ::testing::Test
         }
     }
 
-    // Host-only check of Kernel::IsSupportedArgument for the TDM kernel (no launch). stride_d0 < 0
-    // passes the stride the kernel expects: 0 for a row-broadcast D0, N otherwise.
-    bool IsTdmSupported(
-        const int M, const int N, const int K, const int k_batch, const int stride_d0 = -1)
+    // Host-only check of Kernel::IsSupportedArgument for the TDM kernel (no launch). A negative
+    // stride_d0 / stride_d1 passes the stride the kernel expects: 0 for a row-broadcast D, N
+    // otherwise.
+    bool IsTdmSupported(const int M,
+                        const int N,
+                        const int K,
+                        const int k_batch,
+                        const int stride_d0 = -1,
+                        const int stride_d1 = -1)
     {
         static_assert(kIsTdm, "IsTdmSupported is only meaningful for TDM kernels");
         using Kernel                                                = TdmKernel<>;
         std::array<const void*, DsDataType::size()> ds_ptr          = {nullptr, nullptr};
         std::array<ck_tile::index_t, DsDataType::size()> strides_ds = {
-            stride_d0 >= 0 ? stride_d0 : (kD0RowBroadcast ? 0 : N), N};
+            stride_d0 >= 0 ? stride_d0 : (kD0RowBroadcast ? 0 : N),
+            stride_d1 >= 0 ? stride_d1 : (kD1RowBroadcast ? 0 : N)};
         ck_tile::GemmMultiDHostArgs<DsDataType::size()> args(
             nullptr, nullptr, ds_ptr, nullptr, k_batch, M, N, K, K, K, strides_ds, N);
         return Kernel::IsSupportedArgument(Kernel::MakeKernelArgs(args));
@@ -507,7 +515,7 @@ class TestCkTileGemmMultiD : public ::testing::Test
         // A stride-0 D0 is one N-vector repeated over the rows (a bias); a row-broadcast D0
         // requires it.
         StrideD0 = d0_stride0 ? 0 : f_get_default_stride(M, N, StrideD0, D0Layout{});
-        StrideD1 = f_get_default_stride(M, N, StrideD1, D1Layout{});
+        StrideD1 = kD1RowBroadcast ? 0 : f_get_default_stride(M, N, StrideD1, D1Layout{});
         StrideE  = f_get_default_stride(M, N, StrideE, ELayout{});
 
         ck_tile::HostTensor<ADataType> a_m_k_tesnor(
@@ -535,22 +543,21 @@ class TestCkTileGemmMultiD : public ::testing::Test
         else
         {
             // Distinct D0 value per (m, n) so a wrong D row/column is visible. D1 is the identity
-            // of the elementwise op (1 for multiply, 0 for add), so E depends on D0 only.
+            // of the elementwise op (1 for multiply, 0 for add), so E depends on D0 only, except
+            // that a row-broadcast D1 is a small ramp in n around that identity, so a misplaced
+            // D1 column is visible too.
             d0_m_n_tensors.ForEach([&](auto& self, const auto& idx) {
                 const auto m  = d0_stride0 ? 0 : idx[0];
                 const float v = 0.125f * static_cast<float>((m * 7 + idx[1] * 3) % 17) + 0.5f;
                 self(idx)     = ck_tile::type_convert<D0DataType>(v);
             });
-            if constexpr(std::is_same_v<CDElementWiseFn, MultiplyMultiply>)
-            {
-                d1_m_n_tensors.ForEach([](auto& self, const auto& idx) {
-                    self(idx) = ck_tile::type_convert<D1DataType>(1.f);
-                });
-            }
-            else
-            {
-                d1_m_n_tensors.SetZero();
-            }
+            constexpr float d1_identity =
+                std::is_same_v<CDElementWiseFn, MultiplyMultiply> ? 1.f : 0.f;
+            d1_m_n_tensors.ForEach([&](auto& self, const auto& idx) {
+                const float ramp =
+                    kD1RowBroadcast ? 0.0625f * static_cast<float>((idx[1] * 5) % 11) : 0.f;
+                self(idx) = ck_tile::type_convert<D1DataType>(d1_identity + ramp);
+            });
         }
 
         ck_tile::DeviceMem a_m_k_dev_buf(a_m_k_tesnor.get_element_space_size_in_bytes());
