@@ -7,6 +7,8 @@
 manifest's request class; ``graphs`` writes one hipDNN graph per row from the
 manifest's ``ground_truth`` template; ``compare`` joins those graphs to a
 ``tools/sweep.py`` output by name and reports hipDNN / owner against a margin.
+``layouts`` needs no owner rows: it writes one graph per dtype, head size, mask, shape
+and Q/K/V/O layout, and the map ``tools/catalog_sweep_report.py`` reads.
 
 Exit 0 on success (``compare`` whatever the comparison finds), 2 on unusable input
 (including a ground-truth row or graph that no longer matches what ``graphs``
@@ -402,13 +404,22 @@ def instantiate(template: dict, value_map: dict, row: dict) -> dict:
     for pointer, value in patches.items():
         container, key = _pointer_parent(graph, pointer)
         container[key] = value
-    roles = {t.pop("layout_role", None): t for t in graph.get("tensors", [])}
+    tagged = [(t.pop("layout_role", None), t) for t in graph.get("tensors", [])]
     layout = row.get("layout")
     if layout is not None:
         if layout not in LAYOUTS:
             raise GroundTruthError(
                 f"{where}: layout {layout!r} is not in {sorted(LAYOUTS)}"
             )
+        roles = {}
+        for role, tensor in tagged:
+            if role is None:
+                continue
+            if role in roles:
+                raise GroundTruthError(
+                    f"{where}: the template tags layout_role {role!r} on two tensors"
+                )
+            roles[role] = tensor
         if not set("qkvo") <= set(roles):
             raise GroundTruthError(f"{where}: the template tags no q/k/v/o layout_role")
         for role, tensor in roles.items():
@@ -497,6 +508,25 @@ def layout_rows(spec: dict) -> list:
     return rows
 
 
+def _check_shape_sizes(path: str | Path, shape: dict) -> None:
+    """A shape's sizes are positive integers and the query heads a multiple of the
+    key/value heads (grouped-query attention), so a bad shape fails by name here."""
+    for key in ("batch", "nhead_q", "nhead_k", "seqlen_q", "seqlen_k"):
+        if key not in shape:  # only seqlen_k is optional; the others were required
+            continue
+        value = shape[key]
+        if type(value) is not int or value <= 0:
+            raise GroundTruthError(
+                f"{path}: shape {shape['id']!r}: {key} {value!r} is not a positive "
+                "integer"
+            )
+    if shape["nhead_q"] % shape["nhead_k"]:
+        raise GroundTruthError(
+            f"{path}: shape {shape['id']!r}: nhead_q {shape['nhead_q']} is not a "
+            f"multiple of nhead_k {shape['nhead_k']}"
+        )
+
+
 def read_layout_spec(path) -> dict:
     """The YAML cell/shape/layout lists `layouts` crosses: ``dtypes``, ``head_dims``,
     ``mask_types``, ``layouts`` (names of `LAYOUTS`) and ``shapes`` (``id``,
@@ -520,13 +550,14 @@ def read_layout_spec(path) -> dict:
     if len(set(ids)) != len(ids):
         raise GroundTruthError(f"{path}: shape ids {ids} are not unique")
     for shape in spec["shapes"]:
-        bad = sorted(set(shape) - _SHAPE_KEYS) + [
+        bad = sorted(set(shape) - _SHAPE_KEYS) + sorted(
             k for k in _SHAPE_KEYS - {"seqlen_k"} if k not in shape
-        ]
+        )
         if bad:
             raise GroundTruthError(
                 f"{path}: shape {shape.get('id')!r}: bad or missing {bad}"
             )
+        _check_shape_sizes(path, shape)
     return spec
 
 

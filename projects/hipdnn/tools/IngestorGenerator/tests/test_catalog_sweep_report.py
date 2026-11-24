@@ -5,7 +5,8 @@
 
 Nothing here times a kernel: the winners are written by hand so that every verdict
 has a number a reader can recompute. The real catalogs are used only to pin the
-kernel-identity join (52 shipped gfx950 binaries, 72 gfx942 in scope).
+kernel-identity join (the shipped binaries of each arch, split by the additive-bias
+feature; see ``_SHIPPED`` and ``_ARM``).
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import json
 import struct
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -26,6 +28,7 @@ sys.path.insert(0, str(_ROOT / "tools"))
 import catalog_sweep_report as rep  # noqa: E402
 import ground_truth as gt  # noqa: E402
 import ranker_check as rk  # noqa: E402
+import registry_enumerator  # noqa: E402
 import variant_reduce  # noqa: E402
 
 _DESCRIPTORS = (
@@ -59,7 +62,7 @@ def graph_content(name, graph_id=bytes(16)):
     return base64.b64encode(raw).decode()
 
 
-# --- a synthetic catalog: 6 binaries fanned out over two head-count cells ----------------
+# --- a synthetic catalog: 6 binaries fanned out over two head-count cells -------------
 
 _BINARIES = {  # label -> (block_m, block_n, persistent)
     "A": (256, 64, False),
@@ -123,7 +126,8 @@ class Sweep:
         (attempt / "phase.json").write_text(json.dumps(doc))
 
     def timing(self, arm, round_, times: dict, cell="gqa", served=None):
-        """``times``: {graph: {label: ms}} (entries best first); ``served``: ledger means."""
+        """``times``: {graph: {label: ms}} (entries best first); ``served``: ledger
+        means."""
         graphs = {
             g: [
                 _winner(lab, cell, t)
@@ -164,7 +168,7 @@ def _rounds(world, mapping, rounds):
     return rep.winner_rounds(world["sweep"].root, "full", catalog, names)
 
 
-# --- kernel identity ---------------------------------------------------------------------
+# --- kernel identity ------------------------------------------------------------------
 
 
 def test_identity_ignores_shape_fields_names_and_ids():
@@ -199,7 +203,7 @@ def test_identity_is_the_binary_not_the_selection_metadata_or_priority():
 
 
 def test_omitted_spec_fields_are_completed_with_their_defaults():
-    """A shipped entry omits a knob it holds at default; a full-space entry carries it."""
+    """A shipped entry omits a knob it holds at default; a full-space one carries it."""
     defaults = dict(wpe=2, lazy=True, num_query_heads=99, num_kv_heads=99, batch=9)
     shipped = _entry("A", "gqa")
     full = _entry("A", "mha")
@@ -261,40 +265,119 @@ def test_ids_are_matched_case_insensitively(tmp_path):
     assert rep.Catalog([path]).of(upper) is not None
 
 
+# Distinct binaries (``kernel_identity``) of the shipped dense-attention catalogs, in
+# the slice the sweep recipe measures (no LSE twin, no sliding window), split by the
+# additive-bias feature. "plain" is the design count: the 52 gfx950 kernels the catalog
+# collapse left, and the 72 gfx942 ones once the LSE twins and the four window sizes
+# are set aside. "bias" is what the additive-bias kernels add: one cell per head size x
+# dtype x mask, at one tile on gfx950 (128/64) and at three on gfx942 (256/64, 64/64,
+# 256/32).
+_BIAS_CELLS = 2 * 2 * 2
+_SHIPPED = {
+    "gfx950": dict(plain=52, bias=_BIAS_CELLS * 1),
+    "gfx942": dict(plain=72, bias=_BIAS_CELLS * 3),
+}
+# Distinct binaries of the full-space arm the F recipe builds (see ``_scratch_arm``).
+# Only a run of the registry yields them: the plain part is every bias-off production
+# spec of the cut cells, the bias part the tile sweep of the bias cells.
+_ARM = {
+    "gfx950": dict(plain=1304, bias=616),
+    "gfx942": dict(plain=256, bias=44),
+}
+
+
+def _shipped_kdp(arch: str) -> Path:
+    """The DVC-pulled dense-attention KDP of ``arch``; skips when it was not pulled."""
+    folder = _DESCRIPTORS / f"{arch}_attention_dense"
+    path = folder / "artifacts" / f"{arch}_attention_dense.kdp.json"
+    if not path.is_file():
+        pytest.skip(f"{path} not pulled (dvc pull in {path.parents[1]})")
+    return path
+
+
+def _in_recipe_slice(entry: dict) -> bool:
+    """Whether the sweep recipe measures the entry: no LSE twin, no sliding window."""
+    spec = entry["kernel_source"]["spec"]
+    return not spec.get("emit_lse") and not spec["sliding_window"]
+
+
+def _binaries(entries, defaults: dict | None = None) -> dict:
+    """The distinct binaries of ``entries`` as ``plain`` and ``bias`` kernel sets."""
+    out = dict(plain=set(), bias=set())
+    for entry in entries:
+        biased = entry["kernel_source"]["spec"].get("use_additive_bias")
+        out["bias" if biased else "plain"].add(rep.kernel_identity(entry, defaults))
+    return out
+
+
+def _sizes(binaries: dict) -> dict:
+    """The number of binaries in each kernel set of ``_binaries``."""
+    return {kind: len(kernels) for kind, kernels in binaries.items()}
+
+
+@pytest.mark.parametrize("arch", ["gfx950", "gfx942"])
+def test_the_real_shipped_catalogs_collapse_to_the_binaries_the_design_counted(arch):
+    """Needs the DVC-pulled KDP. The shipped binaries are the bias-off kernels the
+    design counted plus the additive-bias kernels, two disjoint sets. A regenerated
+    catalog (a new ``artifacts.dvc`` pointer) must update ``_SHIPPED``."""
+    entries = json.loads(_shipped_kdp(arch).read_text())["kernelDescriptors"]
+    shipped = _binaries(e for e in entries if _in_recipe_slice(e))
+    assert _sizes(shipped) == _SHIPPED[arch]
+    assert not shipped["plain"] & shipped["bias"]
+
+
+def _registry_unavailable(text: str) -> bool:
+    """Whether ``text`` (an enumerator error) says rocKE could not be imported."""
+    words = ("ImportError", "ModuleNotFoundError", "not importable", "cannot import")
+    return any(word in text for word in words)
+
+
 @pytest.mark.parametrize(
-    "arch, expected, scope",
+    "text, unavailable",
     [
-        ("gfx950", 52, lambda spec: True),
+        ("ModuleNotFoundError: No module named 'numpy'", True),
+        ("FAIL: rocKE dispatch is not importable (is the provider root bound?)", True),
+        ("FAIL: cannot import the rocKE dispatcher registry module 'x'", True),
+        ("FAIL: enumerate.cells: a cell field is unknown", False),
+        ("KeyError: 'use_attn_bias'", False),
+        ("", False),
+    ],
+)
+def test_only_an_import_failure_counts_as_rocke_being_unavailable(text, unavailable):
+    assert _registry_unavailable(text) is unavailable
+
+
+@pytest.mark.parametrize(
+    "stderr, outcome, message",
+    [
         (
-            "gfx942",
-            72,
-            lambda spec: not spec.get("emit_lse") and not spec["sliding_window"],
+            "ModuleNotFoundError: No module named 'numpy'",
+            pytest.skip.Exception,
+            "rocKE registry not importable",
+        ),
+        (
+            "FAIL: enumerate.cells: a cell field is unknown",
+            pytest.fail.Exception,
+            "enumerator exit 2: FAIL: enumerate.cells",
         ),
     ],
 )
-def test_the_real_shipped_catalogs_collapse_to_the_binaries_the_design_counted(
-    arch, expected, scope
+def test_the_scratch_arm_skips_for_a_missing_rocke_and_fails_for_anything_else(
+    tmp_path, monkeypatch, stderr, outcome, message
 ):
-    path = (
-        _DESCRIPTORS
-        / f"{arch}_attention_dense"
-        / "artifacts"
-        / f"{arch}_attention_dense.kdp.json"
-    )
-    if not path.is_file():
-        pytest.skip(f"{path} not pulled (dvc pull in {path.parents[1]})")
-    kdp = json.loads(path.read_text())
-    identities = {
-        rep.kernel_identity(e)
-        for e in kdp["kernelDescriptors"]
-        if scope(e["kernel_source"]["spec"])
-    }
-    assert len(identities) == expected
+    def refused(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 2, "", stderr)
+
+    monkeypatch.setattr(subprocess, "run", refused)
+    with pytest.raises(outcome, match=message):
+        _scratch_arm(tmp_path, "gfx950")
 
 
 def _scratch_arm(tmp_path, arch):
-    """Kernels and spec defaults of the full-space arm the F recipe builds (cells cut to two head
-    pairs, or lse off and window 0 on gfx942), with the spec defaults of its manifest.
+    """Kernels and spec defaults of the full-space arm the F recipe builds, with the
+    spec defaults of its manifest. The recipe cuts the head cells to two head pairs,
+    keeps only the window-free mask cells (a window is a baked field, so each size is a
+    binary of its own) and drops the LSE twins; the additive-bias cells stay.
     """
     manifest = yaml.safe_load(
         (_CONFIGS / f"{arch}_attention_dense.engine.yaml").read_text()
@@ -308,8 +391,9 @@ def _scratch_arm(tmp_path, arch):
         fields = group["fields"]
         if "nhead_q" in fields:
             group["values"] = [[64, 64, 32, 8], [128, 128, 32, 8]]
-        if fields == ["mask_type", "sliding_window"]:
-            group["values"] = [v for v in group["values"] if v[1] == 0]
+        if "sliding_window" in fields:
+            at = fields.index("sliding_window")
+            group["values"] = [v for v in group["values"] if v[at] == 0]
         if fields == ["emit_lse"]:
             group["values"] = [False]
     path = tmp_path / f"{arch}.engine.yaml"
@@ -320,48 +404,41 @@ def _scratch_arm(tmp_path, arch):
         + f"--manifest {path} --out {out}".split(),
         capture_output=True,
         text=True,
+        timeout=600,
     )
     if run.returncode:
-        pytest.skip(f"rocKE registry not importable: {run.stderr[-200:]}")
+        if _registry_unavailable(run.stderr):
+            pytest.skip(f"rocKE registry not importable: {run.stderr[-200:]}")
+        pytest.fail(f"enumerator exit {run.returncode}: {run.stderr[-400:]}")
     kernels = [
         k for p in yaml.safe_load(out.read_text())["packs"] for k in p["kernels"]
     ]
     return kernels, rep.spec_defaults(path)
 
 
-@pytest.mark.parametrize("arch, expected", [("gfx950", 1304), ("gfx942", 256)])
+@pytest.mark.parametrize("arch", ["gfx950", "gfx942"])
 def test_the_full_space_arm_holds_every_shipped_binary_once_defaults_are_completed(
-    tmp_path, arch, expected
+    tmp_path, arch
 ):
-    path = (
-        _DESCRIPTORS
-        / f"{arch}_attention_dense"
-        / "artifacts"
-        / f"{arch}_attention_dense.kdp.json"
-    )
-    if not path.is_file():
-        pytest.skip(f"{path} not pulled (dvc pull in {path.parents[1]})")
+    """Needs the DVC-pulled KDP and rocKE. A change of the rocKE enumerated space or of
+    the manifest's cells must update ``_ARM``; a regenerated catalog ``_SHIPPED``."""
+    entries = json.loads(_shipped_kdp(arch).read_text())["kernelDescriptors"]
+    in_slice = [e for e in entries if _in_recipe_slice(e)]
     kernels, defaults = _scratch_arm(tmp_path, arch)
-    entries = json.loads(path.read_text())["kernelDescriptors"]
-    in_scope = [
-        e
-        for e in entries
-        if not e["kernel_source"]["spec"].get("emit_lse")
-        and not e["kernel_source"]["spec"]["sliding_window"]
-    ]
-    arm = {rep.kernel_identity(k, defaults) for k in kernels}
-    shipped = {rep.kernel_identity(e, defaults) for e in in_scope}
-    assert len(arm) == expected and len(shipped) == (52 if arch == "gfx950" else 72)
-    assert shipped <= arm
+    arm = _binaries(kernels, defaults)
+    shipped = _binaries(in_slice, defaults)
+    assert _sizes(arm) == _ARM[arch]
+    assert _sizes(shipped) == _SHIPPED[arch]
+    assert shipped["plain"] <= arm["plain"] and shipped["bias"] <= arm["bias"]
     # the shipped slice omits knobs the full space carries: without the defaults the
     # two catalogs share no binary on gfx950
-    bare = {rep.kernel_identity(e) for e in in_scope} & {
+    bare = {rep.kernel_identity(e) for e in in_slice} & {
         rep.kernel_identity(k) for k in kernels
     }
     assert bool(bare) == (arch == "gfx942")
 
 
-# --- winners back to graphs --------------------------------------------------------------
+# --- winners back to graphs -----------------------------------------------------------
 
 
 def test_graph_name_is_read_from_the_flatbuffer_whatever_its_id():
@@ -389,7 +466,7 @@ def test_winner_rounds_reads_rounds_graphs_and_identities(world):
     mapping = [_entry_map()]
     world["sweep"].timing("full", 1, {"g_bhsd_gqa": {"A": 2.0, "B": 1.0}})
     world["sweep"].timing("full", 2, {"g_bhsd_gqa": {"A": 2.2, "B": 1.1}})
-    rounds, problems = _rounds(world, mapping, None)
+    rounds, problems, _ = _rounds(world, mapping, None)
     catalog = rep.Catalog([world["arm"]])
     a, b = (catalog.of(_winner(x, "gqa", 0)) for x in "AB")
     assert rounds == {
@@ -405,8 +482,9 @@ def test_winner_rounds_counts_what_it_cannot_join(world):
     world["sweep"].phase(
         "full", "timing", 2, graphs={"g_bhsd_gqa": [bogus, _winner("A", "gqa", 3.0)]}
     )
-    rounds, problems = _rounds(world, [_entry_map()], None)
+    rounds, problems, lost = _rounds(world, [_entry_map()], None)
     assert problems == {"unmapped_records": 1, "unknown_kernel_entries": 1}
+    assert lost == {"g_bhsd_gqa": 1}, "a dropped entry is charged to its graph"
     assert list(rounds) == [1, 2] and len(rounds[2]["g_bhsd_gqa"]) == 1
 
 
@@ -424,18 +502,18 @@ def test_winner_rounds_skips_failed_phases_other_arms_and_correctness(world):
     world["sweep"].phase(
         "full", "correctness", 1, graphs={"g_bhsd_gqa": [_winner("A", "gqa", 1.0)]}
     )
-    rounds, problems = _rounds(world, [_entry_map()], None)
+    rounds, problems, _ = _rounds(world, [_entry_map()], None)
     assert rounds == {} and not problems
 
 
 def test_one_identity_shipped_in_two_cells_keeps_its_fastest_time(world):
     both = [_winner("A", "gqa", 3.0), _winner("A", "mha", 2.0)]
     world["sweep"].phase("full", "timing", 1, graphs={"g_bhsd_gqa": both})
-    rounds, _ = _rounds(world, [_entry_map()], None)
+    rounds, _, _ = _rounds(world, [_entry_map()], None)
     assert list(rounds[1]["g_bhsd_gqa"].values()) == [2.0]
 
 
-# --- the A/A' band and the drift ---------------------------------------------------------
+# --- the A/A' band and the drift ------------------------------------------------------
 
 
 def _served(world, arm, round_, values):
@@ -469,12 +547,13 @@ def test_control_band_takes_the_median_over_rounds_and_ignores_unshared_graphs(w
 def test_cell_drift_needs_two_rounds_and_is_the_median_spread(world):
     rounds = {1: {"g": {"x": 1.0, "y": 2.0}}, 2: {"g": {"x": 1.0, "y": 2.4}}}
     assert rep.cell_drift({1: rounds[1]}, {"g"}) is None
-    # y/best: 2.0 then 2.4/1.0 -> (2.4 - 2.0) / 2.2; x/best: 1, 1 -> 0; median of {0, 0.1818}
+    # y/best: 2.0 then 2.4/1.0 -> (2.4 - 2.0) / 2.2; x/best: 1, 1 -> 0;
+    # median of {0, 0.1818}
     assert rep.cell_drift(rounds, {"g"}) == pytest.approx(0.4 / 2.2 / 2)
     assert rep.cell_drift(rounds, {"other"}) is None
 
 
-# --- verdicts ----------------------------------------------------------------------------
+# --- verdicts -------------------------------------------------------------------------
 
 
 def _catalog_and_shipped(world):
@@ -486,9 +565,9 @@ def _report(world, mapping, per_round, band=None, checks=None):
     """per_round: [{graph: {label: ms}}] -> build_report on shipped = {A, B}."""
     for r, times in enumerate(per_round, start=1):
         world["sweep"].timing("full", r, times)
-    rounds, _ = _rounds(world, mapping, None)
+    rounds, _, lost = _rounds(world, mapping, None)
     catalog, shipped = _catalog_and_shipped(world)
-    return rep.build_report(mapping, rounds, shipped, catalog, band, checks)
+    return rep.build_report(mapping, rounds, shipped, catalog, band, checks, lost)
 
 
 def _two_shapes():
@@ -513,7 +592,7 @@ def test_a_graph_ratio_is_best_shipped_over_best_enumerated(world):
 
 
 def test_the_shipped_set_is_matched_by_binary_not_by_cell(world):
-    """The shipped KDP holds A and B in the gqa cell only; the mha graph still sees them."""
+    """The shipped KDP holds A and B in the gqa cell only; the mha graph sees them."""
     report = _report(
         world, [_entry_map(shape="mha")], [{"g_bhsd_mha": dict(A=1.0, C=0.5)}]
     )
@@ -604,6 +683,23 @@ def test_a_graph_nobody_timed_makes_its_cell_incomplete(world):
     assert report["cells"][0]["verdict"] == "INCOMPLETE"
 
 
+def test_a_graph_that_lost_winner_entries_makes_its_cell_incomplete(world):
+    """A winner entry no --arm-kdp kernel matches is dropped; if it was the fastest one
+    the best enumerated time looks slower and the cell would pass on partial data."""
+    bogus = dict(pack_id="PACK", dispatch_id="DISP", kernel_id="nope", time_ms=0.1)
+    entries = [bogus, _winner("A", "gqa", 1.0), _winner("C", "gqa", 1.0)]
+    world["sweep"].phase("full", "timing", 1, graphs={"g_bhsd_gqa": entries})
+    mapping = [_entry_map()]
+    rounds, _, lost = _rounds(world, mapping, None)
+    catalog, shipped = _catalog_and_shipped(world)
+    report = rep.build_report(mapping, rounds, shipped, catalog, None, None, lost)
+    (cell,) = report["cells"]
+    assert cell["verdict"] == "INCOMPLETE" and cell["lost_graphs"] == ["g_bhsd_gqa"]
+    assert report["graphs"][0]["lost_entries"] == 1
+    clean = rep.build_report([_entry_map()], rounds, shipped, catalog)
+    assert clean["cells"][0]["verdict"] == "PASS", "without `lost` the ratio is 1.0"
+
+
 def test_a_layout_that_repeats_the_twin_is_flagged_and_left_out_of_the_cell(world):
     mapping = [
         _entry_map(layout="batch_slice", same_as_bshd=True),
@@ -665,6 +761,44 @@ def test_each_best_kernel_reports_whether_it_was_numerically_checked(world):
         world["sweep"] = Sweep(world["tmp"] / f"s{n}")
 
 
+def test_a_best_shipped_kernel_that_fails_its_numeric_check_fails_the_cell(world):
+    """A fast, wrong shipped kernel has the best time and ratio 1.0."""
+    catalog = rep.Catalog([world["arm"]])
+    a, c = (catalog.of(_winner(x, "gqa", 0)) for x in "AC")
+    times = [{"g_bhsd_gqa": dict(A=1.0, C=1.0)}]
+    report = _report(world, [_entry_map()], times, checks={"g_bhsd_gqa": {a: False}})
+    (cell,) = report["cells"]
+    assert cell["geomean_ratio"] == pytest.approx(1.0)
+    assert cell["verdict"] == "FAIL" and cell["numeric_failed"] == ["g_bhsd_gqa"]
+    # a failing best *enumerated* kernel is not a shipped kernel's fault
+    world["sweep"] = Sweep(world["tmp"] / "other")
+    report = _report(world, [_entry_map()], times, checks={"g_bhsd_gqa": {c: False}})
+    assert report["cells"][0]["verdict"] == "PASS"
+    assert report["cells"][0]["numeric_failed"] == []
+
+
+def test_a_best_shipped_kernel_nobody_checked_is_listed_not_failed(world):
+    catalog = rep.Catalog([world["arm"]])
+    a = catalog.of(_winner("A", "gqa", 0))
+    mapping = _two_shapes()
+    times = [_times(dict(A=1.0, C=1.0), dict(A=1.0, C=1.0))]
+    report = _report(world, mapping, times, checks={"g_bhsd_gqa": {a: True}})
+    (cell,) = report["cells"]
+    assert cell["verdict"] == "PASS" and cell["not_checked"] == ["g_bhsd_mha"]
+
+
+@pytest.mark.parametrize("order", [["one", "two"], ["two", "one"]])
+def test_a_failing_numeric_check_is_not_overwritten_by_a_passing_one(world, order):
+    catalog = rep.Catalog([world["arm"]])
+    graphs = {"g": [_winner("A", "gqa", 1.0)]}
+    for arm, ok in (("one", False), ("two", True)):
+        correctness = dict(passed=ok, execution_success=True, tolerance_match=ok)
+        ledger = [dict(graph_name="g", outcome="served", correctness=correctness)]
+        world["sweep"].phase(arm, "correctness", 1, graphs=graphs, ledger=ledger)
+    got = rep.numeric_checks(world["sweep"].root, order, catalog, {"g"})
+    assert got == {"g": {catalog.of(_winner("A", "gqa", 0)): False}}
+
+
 def test_numeric_checks_pair_the_served_kernel_with_its_verdict(world):
     catalog = rep.Catalog([world["arm"]])
     ledger = [
@@ -699,7 +833,7 @@ def test_numeric_checks_pair_the_served_kernel_with_its_verdict(world):
     assert got == {"g_bhsd_gqa": {c: True}, "g_bhsd_mha": {a: False}}
 
 
-# --- kernels the engine cannot launch, and the screening stage ---------------------------
+# --- kernels the engine cannot launch, and the screening stage ------------------------
 
 
 def test_persistent_kernels_of_the_full_enumeration_are_listed_apart(tmp_path):
@@ -723,7 +857,8 @@ def _screen_rounds(world):
         },
     )
     catalog = rep.Catalog([world["arm"]])
-    rounds, _ = rep.winner_rounds(world["sweep"].root, "screen", catalog, {"g1", "g2"})
+    names = {"g1", "g2"}
+    rounds, _, _ = rep.winner_rounds(world["sweep"].root, "screen", catalog, names)
     return catalog, rounds
 
 
@@ -757,7 +892,7 @@ def test_screen_keeps_the_top_k_the_near_ties_and_the_shipped(world):
     )
 
 
-# --- the command line, end to end on the real `layouts` map ------------------------------
+# --- the command line, end to end on the real `layouts` map ---------------------------
 
 
 def _layout_map(tmp_path):
@@ -790,7 +925,8 @@ def _cli_world(world, ratio_bhsd=1.0):
 
 
 def _argv(command, world, path, out, *extra):
-    base = f"{command} --sweep-output {world['sweep'].root} --arm full --arm-kdp {world['arm']}"
+    base = f"{command} --sweep-output {world['sweep'].root} --arm full"
+    base += f" --arm-kdp {world['arm']}"
     return (
         base
         + f" --shipped-kdp {world['shipped']} --map {path} --out {out} "
@@ -808,7 +944,7 @@ def test_report_cli_writes_cells_and_graphs_for_the_layouts_map(world, capsys):
                 world,
                 path,
                 out,
-                f"--control-arm full2",
+                "--control-arm full2",
                 f"--full-kdp {world['arm']}",
             )
         )
@@ -823,11 +959,13 @@ def test_report_cli_writes_cells_and_graphs_for_the_layouts_map(world, capsys):
 
 
 def test_report_cli_completes_both_catalogs_with_the_manifests_defaults(world):
-    """--manifest fills omitted spec fields on the arm, shipped and full catalogs alike."""
+    """--manifest fills omitted spec fields of the arm, shipped and full catalogs."""
     manifest = _CONFIGS / "gfx950_attention_dense.engine.yaml"
     try:
         rep.spec_defaults(manifest)
-    except Exception as exc:  # rocKE not importable in this environment
+    except (ImportError, registry_enumerator.EnumerationError) as exc:
+        if not _registry_unavailable(f"{type(exc).__name__}: {exc}"):
+            raise
         pytest.skip(f"rocKE registry not importable: {exc}")
     path, _ = _cli_world(world)
     out = world["tmp"] / "report.yaml"
@@ -858,6 +996,179 @@ def test_report_cli_strict_refuses_an_incomplete_cell(world):
     assert rep.main(_argv("report", world, path, out, "--strict")) == 1
 
 
+def _correctness_phase(world, names, passed=True):
+    """The arm's correctness phase served kernel A, each graph's best shipped one."""
+    result = dict(passed=passed, execution_success=True, tolerance_match=passed)
+    ledger = [dict(graph_name=n, outcome="served", correctness=result) for n in names]
+    graphs = {n: [_winner("A", "gqa", 1.0)] for n in names}
+    world["sweep"].phase("full", "correctness", 1, graphs=graphs, ledger=ledger)
+
+
+def test_report_cli_strict_exits_0_only_when_every_best_shipped_kernel_passed(
+    world, capsys
+):
+    path, names = _cli_world(world)
+    out = world["tmp"] / "report.yaml"
+    strict = _argv("report", world, path, out, "--strict")
+    assert rep.main(strict) == 1, "nothing checked the best shipped kernels"
+    assert "no passing numeric check" in capsys.readouterr().err
+    _correctness_phase(world, names)
+    assert rep.main(strict) == 0
+    cells = yaml.safe_load(out.read_text())["cells"]
+    assert all(c["not_checked"] == [] for c in cells)
+
+
+def test_report_cli_fails_a_cell_whose_best_shipped_kernel_is_wrong(world):
+    path, names = _cli_world(world)
+    _correctness_phase(world, names, passed=False)
+    out = world["tmp"] / "report.yaml"
+    assert rep.main(_argv("report", world, path, out)) == 0
+    cells = yaml.safe_load(out.read_text())["cells"]
+    assert [c["verdict"] for c in cells] == ["FAIL", "FAIL"]
+    assert all(c["numeric_failed"] for c in cells)
+    assert rep.main(_argv("report", world, path, out, "--strict")) == 1
+
+
+def test_report_cli_strict_refuses_winner_entries_no_arm_kernel_matches(world, capsys):
+    """Winners the KDPs do not list drop out, which can only flatter the shipped set."""
+    path, names = _cli_world(world)
+    _correctness_phase(world, names)
+    bogus = dict(pack_id="PACK", dispatch_id="DISP", kernel_id="nope", time_ms=0.1)
+    graphs = {names[0]: [bogus, _winner("A", "gqa", 1.0), _winner("C", "gqa", 0.99)]}
+    world["sweep"].phase("full", "timing", 3, graphs=graphs)
+    out = world["tmp"] / "report.yaml"
+    assert rep.main(_argv("report", world, path, out)) == 0
+    result = yaml.safe_load(out.read_text())
+    assert result["problems"] == {"unknown_kernel_entries": 1}
+    assert result["cells"][0]["verdict"] == "INCOMPLETE"
+    assert rep.main(_argv("report", world, path, out, "--strict")) == 1
+    assert "1 winner entries match no --arm-kdp kernel" in capsys.readouterr().err
+
+
+def test_strict_refuses_unmatched_winner_entries_on_their_own():
+    """Not through a cell: a graph that repeats its BSHD twin is in no cell."""
+    result = dict(cells=[dict(not_checked=[])])
+    clean = rep._strict_refusals(result, Counter(PASS=1), Counter())
+    assert clean == []
+    (reason,) = rep._strict_refusals(
+        result, Counter(PASS=1), Counter(unknown_kernel_entries=2)
+    )
+    assert "2 winner entries match no --arm-kdp kernel" in reason
+
+
+@pytest.mark.parametrize("tool", ["report", "ranker"])
+def test_a_malformed_map_is_unusable_input_not_a_crash(world, capsys, tool):
+    bad = world["tmp"] / "bad.yaml"
+    bad.write_text("graph_name: [unclosed\n")
+    out = world["tmp"] / "out.yaml"
+    if tool == "report":
+        argv = _argv("report", world, bad, out)
+        code = rep.main(argv)
+    else:
+        argv = f"--sweep-output x --ranker-arm a --best-arm b --map {bad} --out {out}"
+        code = rk.main(argv.split())
+    assert code == 2 and "not a readable YAML file" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "text, message",
+    [
+        ("graph_name: g\n", "not a `layouts` map"),
+        ("- a string\n", "not a `layouts` map"),
+        ("- {graph_name: g, layout: l, shape: s}\n", "entry 1 (g) lacks ['family']"),
+        ("- {layout: l, shape: s, family: {}}\n", "entry 1 (?) lacks ['graph_name', "),
+        (
+            "- {graph_name: g, layout: l, shape: s, family: {dtype: bf16}}\n",
+            "lacks ['family.head_size', 'family.mask_type']",
+        ),
+        (
+            "- {graph_name: g, layout: l, shape: s, family: bf16}\n",
+            "lacks ['family.dtype/head_size/mask_type']",
+        ),
+    ],
+)
+def test_a_map_entry_without_a_key_the_tools_read_is_named(
+    world, capsys, text, message
+):
+    bad = world["tmp"] / "bad.yaml"
+    bad.write_text(text)
+    out = world["tmp"] / "out.yaml"
+    assert rep.main(_argv("report", world, bad, out)) == 2
+    assert message in capsys.readouterr().err
+    argv = f"--sweep-output x --ranker-arm a --best-arm b --map {bad} --out {out}"
+    assert rk.main(argv.split()) == 2
+    assert message in capsys.readouterr().err
+
+
+def test_a_bug_inside_the_report_is_a_traceback_not_unusable_input(world, monkeypatch):
+    """main reports only input problems (exit 2); a TypeError is the tool's own bug."""
+    path, _ = _cli_world(world)
+
+    def broken(*args, **kwargs):
+        raise TypeError("a bug")
+
+    monkeypatch.setattr(rep, "build_report", broken)
+    with pytest.raises(TypeError, match="a bug"):
+        rep.main(_argv("report", world, path, world["tmp"] / "report.yaml"))
+
+
+@pytest.mark.parametrize(
+    ("descriptors", "message"),
+    [
+        ([dict(id="k")], "entry 1 (?) lacks ['name', 'kernel_source or sources']"),
+        ([dict(id="k", sources=dict(a=dict(spec={})))], "entry 1 (?) lacks ['name']"),
+        ([dict(name="n", kernel_source=dict(spec={}))], "entry 1 (n) lacks ['id']"),
+        ([dict(id="k", name="n", sources={})], "lacks ['kernel_source or sources']"),
+        (
+            [dict(id="k", name="n", kernel_source=dict(spec=[1]))],
+            "entry 1 (n): a kernel source is not an object with an object spec",
+        ),
+        (["k"], "entry 1 (?) is not an object"),
+        (dict(k=1), "kernelDescriptors is not a list"),
+    ],
+)
+def test_a_malformed_kdp_entry_is_unusable_input_naming_the_entry(
+    world, capsys, descriptors, message
+):
+    """A KDP is input: an entry the kernel identity cannot read exits 2 naming the KDP
+    and the entry, as a malformed map entry does. A traceback would exit 1, the code
+    ``--strict`` gives a failing cell."""
+    path, _ = _cli_world(world)
+    bad = world["tmp"] / "bad.kdp.json"
+    doc = dict(id="PACK", dispatch="DISP", kernelDescriptors=descriptors)
+    bad.write_text(json.dumps(doc))
+    argv = _argv("report", world, path, world["tmp"] / "out.yaml", "--strict")
+    argv[argv.index("--arm-kdp") + 1] = str(bad)
+    assert rep.main(argv) == 2
+    err = capsys.readouterr().err
+    assert err.startswith(f"FAIL: {bad}: ") and message in err, err
+
+
+@pytest.mark.parametrize(
+    ("ledger", "message"),
+    [
+        (["g"], "'ledger' is not a list of objects"),
+        ([dict(outcome="served", mean_ms=1.0)], "graph_name=None, mean_ms=1.0"),
+        ([dict(graph_name="g", outcome="served", mean_ms="1")], "mean_ms='1'"),
+        ([dict(graph_name="g", outcome="served", mean_ms=-1.0)], "mean_ms=-1.0"),
+    ],
+)
+def test_a_malformed_ledger_is_unusable_input_naming_the_phase(
+    world, capsys, ledger, message
+):
+    """A served entry is joined to its graph by ``graph_name`` and timed by
+    ``mean_ms``; a ledger that lacks them is input to refuse (exit 2, naming the
+    phase record), not a KeyError traceback."""
+    path = world["tmp"] / "map.yaml"
+    path.write_text(yaml.safe_dump(_ranker_map()))
+    world["sweep"].phase("ranked", "timing", 1, ledger=ledger)
+    out = world["tmp"] / "ranker.yaml"
+    argv = f"--sweep-output {world['sweep'].root} --ranker-arm ranked --best-arm best"
+    assert rk.main(f"{argv} --map {path} --out {out}".split()) == 2
+    err = capsys.readouterr().err
+    assert err.startswith("FAIL: ") and "phase.json: " in err and message in err, err
+
+
 def test_screen_cli_writes_every_descriptor_name_of_every_kept_binary(world):
     path, _ = _cli_world(world)
     out, names = world["tmp"] / "screen.yaml", world["tmp"] / "keep.txt"
@@ -873,7 +1184,7 @@ def test_screen_cli_writes_every_descriptor_name_of_every_kept_binary(world):
     ), "a screen gives candidates, never a verdict"
 
 
-# --- the ranker check --------------------------------------------------------------------
+# --- the ranker check -----------------------------------------------------------------
 
 
 def _ranker_map():
@@ -944,7 +1255,62 @@ def test_a_layout_that_repeats_the_twin_is_not_a_ranker_cell():
     cells = rk.check(
         _ratios((1.0, 1.0), (1.0, 1.0)) | {"g_batch_slice_one": 9.0}, mapping
     )
-    assert [c["cell"][-1] for c in cells if c["verdict"] != "INCOMPLETE"] == ["bhsd"]
+    assert [c["cell"][-1] for c in cells] == ["bhsd"]
+    assert rk.repeats_twin(mapping) == ["g_batch_slice_one"]
+
+
+def _paired_map():
+    """BSHD on shapes a and b; batch_slice on both, repeating the twin on b."""
+    return [
+        _entry_map(shape="a", layout="bshd"),
+        _entry_map(shape="b", layout="bshd"),
+        _entry_map(shape="a", layout="batch_slice"),
+        _entry_map(shape="b", layout="batch_slice", same_as_bshd=True),
+    ]
+
+
+def test_the_twin_is_the_bshd_graphs_of_the_same_shapes_only():
+    """Shape b repeats its twin, so it is in neither side of the comparison; a twin
+    regret averaged over b would hide the 5 points shape a loses to its strides."""
+    ratios = {"g_bshd_a": 1.0, "g_bshd_b": 1.2, "g_batch_slice_a": 1.05}
+    (cell,) = rk.check(ratios, _paired_map())
+    assert cell["verdict"] == "MIS-RANKED" and cell["delta"] == pytest.approx(0.05)
+    assert cell["twin_regret"] == pytest.approx(0.0)
+    assert cell["graphs"] == 1 and cell["measured"] == 1
+
+
+def test_a_cell_whose_paired_twin_was_not_measured_is_incomplete():
+    mapping = [
+        _entry_map(shape="a", layout="bshd"),
+        _entry_map(shape="b", layout="bshd"),
+        _entry_map(shape="a", layout="bhsd"),
+        _entry_map(shape="b", layout="bhsd"),
+    ]
+    ratios = {"g_bshd_a": 1.0, "g_bhsd_a": 1.0, "g_bhsd_b": 1.0}
+    (cell,) = rk.check(ratios, mapping)
+    assert cell["verdict"] == "INCOMPLETE" and cell["measured"] == 2
+    (cell,) = rk.check(ratios | {"g_bshd_b": 1.0}, mapping)
+    assert cell["verdict"] == "OK"
+
+
+def test_ranker_cli_does_not_count_a_repeating_layout_against_strict(world):
+    mapping = _ranker_map() + [
+        _entry_map(shape="one", layout="batch_slice", same_as_bshd=True)
+    ]
+    path = world["tmp"] / "map.yaml"
+    path.write_text(yaml.safe_dump(mapping))
+    ledger = [
+        dict(graph_name=m["graph_name"], outcome="served", mean_ms=1.0) for m in mapping
+    ]
+    for arm in ("ranked", "best"):
+        world["sweep"].phase(arm, "timing", 1, ledger=ledger)
+    out = world["tmp"] / "ranker.yaml"
+    argv = f"--sweep-output {world['sweep'].root} --ranker-arm ranked --best-arm best"
+    argv += f" --map {path} --out {out} --strict"
+    assert rk.main(argv.split()) == 0
+    result = yaml.safe_load(out.read_text())
+    assert [c["verdict"] for c in result["cells"]] == ["OK"]
+    assert result["repeats_twin"] == ["g_batch_slice_one"]
 
 
 def test_ranker_cli_reads_the_ledgers_of_both_arms(world, capsys):
@@ -971,7 +1337,8 @@ def test_ranker_cli_reads_the_ledgers_of_both_arms(world, capsys):
         ]
         world["sweep"].phase("ranked", "timing", r, ledger=ranker)
     out = world["tmp"] / "ranker.yaml"
-    argv = f"--sweep-output {world['sweep'].root} --ranker-arm ranked --best-arm best --map {path} --out {out}"
+    argv = f"--sweep-output {world['sweep'].root} --ranker-arm ranked --best-arm best"
+    argv += f" --map {path} --out {out}"
     assert rk.main(argv.split()) == 0
     result = yaml.safe_load(out.read_text())
     assert result["cells"][0]["verdict"] == "MIS-RANKED"

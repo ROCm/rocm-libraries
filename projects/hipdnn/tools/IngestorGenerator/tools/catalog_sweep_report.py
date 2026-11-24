@@ -1,19 +1,24 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Catalog check of a strided sweep: per cell, best shipped kernel against best enumerated.
+"""Catalog check of a strided sweep: per cell, best shipped kernel vs best enumerated.
 
-``report`` joins the winner rankings of a ``tools/sweep.py`` output (the arm that timed the
-enumeration) to the graph map ``ground_truth.py layouts`` wrote and to the catalogs: a kernel
-is its catalog entry without the shape fields, so one binary shipped for several head-count
-cells is one kernel, and "shipped" is a set recomputed from any KDP. Per graph: best shipped
-time / best enumerated time. Per cell (dtype, head size, mask, layout): the geomean of those
-ratios against the pre-registered band; shapes above the band are listed as WATCH. A kernel
+``report`` joins the winner rankings of a ``tools/sweep.py`` output (the arm that timed
+the enumeration) to the graph map ``ground_truth.py layouts`` wrote and to the
+catalogs: a kernel is its catalog entry without the shape fields, so one binary shipped
+for several head-count cells is one kernel, and "shipped" is a set recomputed from any
+KDP. Per graph: best shipped time / best enumerated time. Per cell (dtype, head size,
+mask, layout): the geomean of those ratios against the pre-registered band; shapes
+above the band are listed as WATCH. A cell whose best shipped kernel failed its numeric
+check is FAIL, and one with a graph that lost winner entries is INCOMPLETE. A kernel
 the engine cannot launch is never in the arm; ``--full-kdp`` lists them apart.
-``screen`` picks the candidates of a one-round screening sweep worth a stage-2 measurement:
-the minimum of many noisy timings is biased fast, so a screen never gives a verdict.
+``screen`` picks the candidates of a one-round screening sweep worth a stage-2
+measurement: the minimum of many noisy timings is biased fast, so a screen never gives
+a verdict.
 
-Exit 0 (``report --strict``: 1 unless every cell passes), 2 on unusable input.
+Exit 0 (``report --strict``: 1 unless every cell passes, every best shipped kernel has
+a passing numeric check and every winner entry joined a catalog kernel), 2 on unusable
+input.
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ import statistics
 import struct
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Iterable
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -41,9 +47,10 @@ from variant_reduce import (  # noqa: E402
     read_lines,
 )
 
-# Pre-registered before any data: a cell passes when geomean(best shipped / best enumerated)
-# <= 1 + B, B = max(BAND_FLOOR, p95 |A'/A - 1| of the same run's A/A' control, DRIFT_MULTIPLIER
-# x the cell's round-to-round drift). Do not tune these after seeing results.
+# Pre-registered before any data: a cell passes when geomean(best shipped / best
+# enumerated) <= 1 + B, B = max(BAND_FLOOR, p95 |A'/A - 1| of the same run's A/A'
+# control, DRIFT_MULTIPLIER x the cell's round-to-round drift). Do not tune these after
+# seeing results.
 BAND_FLOOR = 0.03
 DRIFT_MULTIPLIER = 2
 SCREEN_TOP_K = 12
@@ -80,7 +87,7 @@ def kernel_identity(entry: dict, defaults: dict | None = None) -> str:
     return json.dumps(binary_identity(done, keep), sort_keys=True)
 
 
-def spec_defaults(manifest_path) -> dict:
+def spec_defaults(manifest_path: str | Path) -> dict:
     """The spec dataclass defaults of the manifest's registry (rocKE must import)."""
     import dataclasses
 
@@ -96,15 +103,46 @@ def spec_defaults(manifest_path) -> dict:
     }
 
 
+def _check_descriptor(path: str | Path, number: int, entry: object) -> None:
+    """Refuse a KDP entry that lacks what a kernel identity reads: ``id``, ``name``,
+    and a ``kernel_source`` or a non-empty ``sources`` mapping, every source an object
+    whose ``spec`` (when present) is an object. A KDP is input, so the ReduceError
+    names the KDP and the entry, as ``load_map`` does for a map entry."""
+    name = entry.get("name", "?") if isinstance(entry, dict) else "?"
+    where = f"{path}: kernelDescriptors entry {number} ({name})"
+    if not isinstance(entry, dict):
+        raise ReduceError(f"{where} is not an object")
+    missing = [k for k in ("id", "name") if k not in entry]
+    if "kernel_source" in entry:
+        sources = [entry["kernel_source"]]
+    elif isinstance(entry.get("sources"), dict) and entry["sources"]:
+        sources = list(entry["sources"].values())
+    else:
+        sources = []
+        missing.append("kernel_source or sources")
+    if missing:
+        raise ReduceError(f"{where} lacks {missing}")
+    if not all(
+        isinstance(s, dict) and isinstance(s.get("spec") or {}, dict) for s in sources
+    ):
+        raise ReduceError(
+            f"{where}: a kernel source is not an object with an object spec"
+        )
+
+
 class Catalog:
     """Kernel identities of one or more KDPs, and the ids winner lines use for them."""
 
-    def __init__(self, kdp_paths, defaults: dict | None = None):
+    def __init__(self, kdp_paths: Iterable[str | Path], defaults: dict | None = None):
         self.by_id, self.names, self.persistent = {}, defaultdict(list), set()
         for path in kdp_paths:
             kdp = load_kdp(path)
-            for entry in kdp["kernelDescriptors"]:
-                key = (str(kdp["id"]).lower(), str(kdp["dispatch"]).lower())
+            entries = kdp["kernelDescriptors"]
+            if not isinstance(entries, list):
+                raise ReduceError(f"{path}: kernelDescriptors is not a list")
+            key = (str(kdp["id"]).lower(), str(kdp["dispatch"]).lower())
+            for number, entry in enumerate(entries, start=1):
+                _check_descriptor(path, number, entry)
                 ident = kernel_identity(entry, defaults)
                 self.by_id[(*key, str(entry["id"]).lower())] = ident
                 self.names[ident].append(entry["name"])
@@ -115,11 +153,12 @@ class Catalog:
     def identities(self) -> set:
         return set(self.names)
 
-    def of(self, winner_entry: dict):
+    def of(self, winner_entry: dict) -> str | None:
+        """The identity of the catalog kernel a winner entry names, or None."""
         return self.by_id.get(tuple(str(winner_entry[f]).lower() for f in _ID_FIELDS))
 
 
-def graph_name_of(graph_identity: str):
+def graph_name_of(graph_identity: str) -> str | None:
     """The ``name`` of a winner line's Graph flatbuffer (graph.fbs field 0), or None.
     The winner cache keys on graph content, so this is the only way back to the graph.
     """
@@ -145,11 +184,15 @@ def _timing(sweep_dir, arm):
             yield attempt, record
 
 
-def winner_rounds(sweep_dir, arm, catalog, graph_names) -> tuple:
-    """``({round: {graph: {identity: time_ms}}}, problems)`` of the arm's successful
-    timing phases. ``problems`` counts winner records of no mapped graph and winner
-    entries of no catalog kernel (a different install than the KDPs given)."""
-    rounds, problems = defaultdict(dict), Counter()
+def winner_rounds(
+    sweep_dir: str | Path, arm: str, catalog: Catalog, graph_names: set
+) -> tuple:
+    """``({round: {graph: {identity: time_ms}}}, problems, lost)`` of the arm's
+    successful timing phases. ``problems`` counts winner records of no mapped graph and
+    winner entries of no catalog kernel (a different install than the KDPs given);
+    ``lost`` counts the latter per graph, for a dropped entry can only make the best
+    enumerated time look slower."""
+    rounds, problems, lost = defaultdict(dict), Counter(), Counter()
     for attempt, record in _timing(sweep_dir, arm):
         for shard in _shards(attempt):
             lines = {x.key: x for x in read_lines(shard) if x.key is not None}
@@ -162,19 +205,44 @@ def winner_rounds(sweep_dir, arm, catalog, graph_names) -> tuple:
                     ident = catalog.of(entry)
                     if ident is None:
                         problems["unknown_kernel_entries"] += 1
+                        lost[name] += 1
                     else:
                         times[ident] = min(entry["time_ms"], times.get(ident, math.inf))
                 rounds[record["phase"]["round"]][name] = times
-    return dict(rounds), problems
+    return dict(rounds), problems, lost
 
 
-def served_times(sweep_dir, arm) -> dict:
+def _ledger(attempt: Path, record: dict) -> list:
+    """The ledger of a phase record; a ReduceError names the record when it is not a
+    list of objects."""
+    ledger = record.get("ledger") or []
+    if not isinstance(ledger, list) or not all(isinstance(e, dict) for e in ledger):
+        raise ReduceError(
+            f"{attempt / 'phase.json'}: 'ledger' is not a list of objects"
+        )
+    return ledger
+
+
+def _check_served(attempt: Path, entry: dict) -> None:
+    """Refuse a served ledger entry whose time cannot be joined to a graph: it needs a
+    ``graph_name`` string and a positive, finite ``mean_ms``."""
+    name, mean = entry.get("graph_name"), entry.get("mean_ms")
+    usable = type(mean) in (int, float) and math.isfinite(mean) and mean > 0
+    if not isinstance(name, str) or not usable:
+        raise ReduceError(
+            f"{attempt / 'phase.json'}: a served ledger entry needs a graph_name and "
+            f"a positive mean_ms, got graph_name={name!r}, mean_ms={mean!r}"
+        )
+
+
+def served_times(sweep_dir: str | Path, arm: str) -> dict:
     """``{round: {graph: mean_ms}}``: the benchmark's own mean for the kernel the engine
     served, from the ledgers of the arm's successful timing phases."""
     out = defaultdict(dict)
-    for _, record in _timing(sweep_dir, arm):
-        for e in record.get("ledger") or []:
+    for attempt, record in _timing(sweep_dir, arm):
+        for e in _ledger(attempt, record):
             if e.get("outcome") == "served" and e.get("mean_ms"):
+                _check_served(attempt, e)
                 out[record["phase"]["round"]][e["graph_name"]] = e["mean_ms"]
     return dict(out)
 
@@ -188,16 +256,18 @@ def median_over_rounds(by_round: dict) -> dict:
     return {g: statistics.median(v) for g, v in values.items()}
 
 
-def geomean(values) -> float:
+def geomean(values: Iterable[float]) -> float:
+    """The geometric mean of positive ``values``."""
     return math.exp(statistics.fmean(math.log(v) for v in values))
 
 
-def p95(values) -> float:
+def p95(values: Iterable[float]) -> float:
+    """The nearest-rank 95th percentile of ``values``."""
     ordered = sorted(values)
     return ordered[max(0, math.ceil(0.95 * len(ordered)) - 1)]
 
 
-def control_band(sweep_dir, arm, control):
+def control_band(sweep_dir: str | Path, arm: str, control: str) -> float | None:
     """p95 of ``|A'/A - 1|`` over the graphs both arms served (medians over rounds), or
     None when they share none. A and A' are one install tree listed under two names."""
     a = median_over_rounds(served_times(sweep_dir, arm))
@@ -206,7 +276,7 @@ def control_band(sweep_dir, arm, control):
     return p95(shared) if shared else None
 
 
-def cell_drift(rounds: dict, graphs: set):
+def cell_drift(rounds: dict, graphs: set) -> float | None:
     """Median over graphs and kernels of (max - min) / median of ``t / t_best`` across
     rounds (``variant_reduce.noise_floor``'s drift) for ``graphs``, or None with fewer
     than two rounds."""
@@ -231,7 +301,9 @@ def _passed(entry: dict) -> bool:
     return isinstance(c, dict) and all(c.get(k) is True for k in keys)
 
 
-def numeric_checks(sweep_dir, arms, catalog, graph_names) -> dict:
+def numeric_checks(
+    sweep_dir: str | Path, arms: list, catalog: Catalog, graph_names: set
+) -> dict:
     """``{graph: {identity: passed}}``: the kernel each correctness phase of ``arms``
     served for a graph (the best of its forced ranking) and whether it passed."""
     out = defaultdict(dict)
@@ -241,7 +313,7 @@ def numeric_checks(sweep_dir, arms, catalog, graph_names) -> dict:
                 continue
             ledger = {
                 e.get("graph_name"): _passed(e)
-                for e in record.get("ledger") or []
+                for e in _ledger(attempt, record)
                 if e.get("outcome") == "served"
                 and e.get("correctness") is not None
                 and (e.get("reference") or {}).get("usable") is not False
@@ -251,9 +323,10 @@ def numeric_checks(sweep_dir, arms, catalog, graph_names) -> dict:
                     name = graph_name_of(line.graph) if line.key else None
                     served = [(e["time_ms"], catalog.of(e)) for e in line.entries]
                     if name in graph_names and name in ledger and served:
-                        out[name][min(served, key=lambda s: (s[0], str(s[1])))[1]] = (
-                            ledger[name]
-                        )
+                        kernel = min(served, key=lambda s: (s[0], str(s[1])))[1]
+                        # a failure sticks: a later passing run of the same kernel on
+                        # the same graph (another arm) must not hide it
+                        out[name][kernel] = out[name].get(kernel, True) and ledger[name]
     return out
 
 
@@ -262,11 +335,22 @@ def _numeric(checks: dict, ident) -> str:
     return "not checked" if verdict is None else "pass" if verdict else "FAIL"
 
 
-def build_report(mapping, rounds, shipped, catalog, band=None, checks=None) -> dict:
+def build_report(
+    mapping: list,
+    rounds: dict,
+    shipped: set,
+    catalog: Catalog,
+    band: float | None = None,
+    checks: dict | None = None,
+    lost: dict | None = None,
+) -> dict:
     """The per-graph and per-cell verdicts. ``mapping``: the `layouts` map entries;
     ``rounds``: `winner_rounds`; ``shipped``: kernel identities; ``band``: the A/A'
-    control's p95 (None: no control, the floor and the cell drift only)."""
-    checks = checks or {}
+    control's p95 (None: no control, the floor and the cell drift only); ``checks``:
+    `numeric_checks`; ``lost``: the per-graph winner entries `winner_rounds` could not
+    join. A cell is FAIL when a best shipped kernel failed its numeric check, whatever
+    its time, and INCOMPLETE when a graph has no ratio or lost winner entries."""
+    checks, lost = checks or {}, lost or {}
     times = defaultdict(lambda: defaultdict(list))
     for by_graph in rounds.values():
         for graph, kernels in by_graph.items():
@@ -286,7 +370,7 @@ def build_report(mapping, rounds, shipped, catalog, band=None, checks=None) -> d
         got = {"best_shipped": ship, "best_enumerated": best}
         row = dict(graph=m["graph_name"], cell=list(cell), shape=m["shape"])
         row |= dict(candidates=len(med), shipped_candidates=len(mine))
-        row |= dict(repeats_twin=repeats)
+        row |= dict(repeats_twin=repeats, lost_entries=lost.get(m["graph_name"], 0))
         for key, found in got.items():
             checked = checks.get(m["graph_name"], {})
             row[key] = (
@@ -308,11 +392,20 @@ def build_report(mapping, rounds, shipped, catalog, band=None, checks=None) -> d
         bound = max(BAND_FLOOR, band or 0.0, DRIFT_MULTIPLIER * (drift or 0.0))
         ratios = [r["ratio"] for r in members if r["ratio"]]
         gm = geomean(ratios) if ratios else None
-        verdict = (
-            "INCOMPLETE"
-            if len(ratios) < len(members) or not ratios
-            else ("PASS" if gm <= 1 + bound else "FAIL")
-        )
+        shipped_numeric = {
+            r["graph"]: r["best_shipped"]["numeric"]
+            for r in members
+            if r["best_shipped"]
+        }
+        wrong = sorted(g for g, n in shipped_numeric.items() if n == "FAIL")
+        unchecked = sorted(g for g, n in shipped_numeric.items() if n == "not checked")
+        lost_graphs = [r["graph"] for r in members if r["lost_entries"]]
+        if wrong:
+            verdict = "FAIL"
+        elif lost_graphs or len(ratios) < len(members) or not ratios:
+            verdict = "INCOMPLETE"
+        else:
+            verdict = "PASS" if gm <= 1 + bound else "FAIL"
         out_cells.append(
             dict(
                 cell=list(cell),
@@ -325,6 +418,9 @@ def build_report(mapping, rounds, shipped, catalog, band=None, checks=None) -> d
                     r["shape"] for r in members if r["ratio"] and r["ratio"] > 1 + bound
                 ],
                 missing=[r["graph"] for r in members if not r["ratio"]],
+                lost_graphs=lost_graphs,
+                numeric_failed=wrong,
+                not_checked=unchecked,
             )
         )
     return dict(
@@ -347,9 +443,15 @@ def not_launchable(arm: Catalog, full: Catalog) -> dict:
     )
 
 
-def screen_candidates(rounds, shipped, top_k=SCREEN_TOP_K, margin=SCREEN_MARGIN) -> set:
-    """Kernel identities to re-measure: the shipped ones, and per graph the top ``top_k``
-    and every kernel within ``margin`` of its best (median over the screen's rounds)."""
+def screen_candidates(
+    rounds: dict,
+    shipped: set,
+    top_k: int = SCREEN_TOP_K,
+    margin: float = SCREEN_MARGIN,
+) -> set:
+    """Kernel identities to re-measure: the shipped ones, and per graph the top
+    ``top_k`` and every kernel within ``margin`` of its best (median over the screen's
+    rounds)."""
     times = defaultdict(lambda: defaultdict(list))
     for by_graph in rounds.values():
         for graph, kernels in by_graph.items():
@@ -369,11 +471,56 @@ def _load_yaml(path):
 
     try:
         return yaml.safe_load(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, yaml.YAMLError) as exc:
         raise ReduceError(f"{path}: not a readable YAML file ({exc})") from exc
 
 
-def main(argv=None) -> int:
+_MAP_KEYS = ("graph_name", "family", "shape", "layout")
+_FAMILY_KEYS = ("dtype", "head_size", "mask_type")
+
+
+def load_map(path: str | Path) -> list:
+    """The ``ground_truth.py layouts`` map at ``path``; a ReduceError names the first
+    entry that lacks a key either tool reads."""
+    mapping = _load_yaml(path)
+    if not isinstance(mapping, list) or not all(isinstance(m, dict) for m in mapping):
+        raise ReduceError(f"{path}: not a `layouts` map (a list of graph entries)")
+    for number, entry in enumerate(mapping, start=1):
+        family = entry.get("family")
+        missing = [k for k in _MAP_KEYS if k not in entry]
+        if isinstance(family, dict):
+            missing += [f"family.{k}" for k in _FAMILY_KEYS if k not in family]
+        elif "family" in entry:
+            missing.append("family.dtype/head_size/mask_type")
+        if missing:
+            name = entry.get("graph_name", "?")
+            raise ReduceError(f"{path}: entry {number} ({name}) lacks {missing}")
+    return mapping
+
+
+def _strict_refusals(result: dict, verdicts: Counter, problems: Counter) -> list:
+    """Why ``report --strict`` exits 1: a cell that is not PASS, a best shipped kernel
+    with no passing numeric check, or winner entries that matched no catalog kernel."""
+    out = []
+    if set(verdicts) != {"PASS"}:
+        out.append(f"cells are not all PASS: {dict(verdicts)}")
+    unchecked = [g for c in result["cells"] for g in c["not_checked"]]
+    if unchecked:
+        out.append(
+            f"{len(unchecked)} graphs' best shipped kernel has no passing numeric "
+            f"check (--check-arm names the arms whose correctness phases count): "
+            f"{unchecked[:3]}"
+        )
+    if problems["unknown_kernel_entries"]:
+        out.append(
+            f"{problems['unknown_kernel_entries']} winner entries match no --arm-kdp "
+            "kernel: the KDPs are not the catalogs of the swept install"
+        )
+    return out
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run ``report`` or ``screen``; the exit code is in the module docstring."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("report", "screen"):
@@ -402,7 +549,7 @@ def main(argv=None) -> int:
     )
     args = parser.parse_args(argv)
     try:
-        mapping = _load_yaml(args.map)
+        mapping = load_map(args.map)
         names = {m["graph_name"] for m in mapping}
         defaults = spec_defaults(args.manifest) if args.manifest else None
         arm_catalog = Catalog(args.arm_kdp, defaults)
@@ -412,7 +559,7 @@ def main(argv=None) -> int:
                 "no shipped kernel is in the arm: the catalogs may spell the same "
                 "binary with different spec fields; pass --manifest to complete them"
             )
-        rounds, problems = winner_rounds(
+        rounds, problems, lost = winner_rounds(
             args.sweep_output, args.arm, arm_catalog, names
         )
         if not rounds:
@@ -434,7 +581,9 @@ def main(argv=None) -> int:
             checks = numeric_checks(
                 args.sweep_output, args.check_arm or [args.arm], arm_catalog, names
             )
-            result = build_report(mapping, rounds, shipped, arm_catalog, band, checks)
+            result = build_report(
+                mapping, rounds, shipped, arm_catalog, band, checks, lost
+            )
             result["problems"] = dict(problems)
             if args.full_kdp:
                 result["not_launchable"] = not_launchable(
@@ -442,8 +591,13 @@ def main(argv=None) -> int:
                 )
             verdicts = Counter(c["verdict"] for c in result["cells"])
             print(f"cells: {dict(verdicts)}; problems: {dict(problems)}")
-            code = 1 if args.strict and set(verdicts) != {"PASS"} else 0
-    except (ReduceError, KeyError, TypeError, OSError) as exc:
+            refused = (
+                _strict_refusals(result, verdicts, problems) if args.strict else []
+            )
+            for reason in refused:
+                print(f"FAIL: --strict: {reason}", file=sys.stderr)
+            code = 1 if refused else 0
+    except (ReduceError, OSError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 2
     import yaml

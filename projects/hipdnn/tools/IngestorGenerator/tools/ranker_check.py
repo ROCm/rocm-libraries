@@ -1,17 +1,20 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Ranker check of a strided sweep: does a shipped ranker pick the catalog's best kernel
-on strided graphs as well as it does on the BSHD twin?
+"""Ranker check of a strided sweep: does a shipped ranker pick the catalog's best
+kernel on strided graphs as well as it does on the BSHD twin?
 
 One ``tools/sweep.py`` run holds two arms over the same catalog: ``--ranker-arm`` with
 benchmarking off (the engine serves the ranker's top-1) and ``--best-arm`` with forced
 benchmarking (it serves the catalog's best). Per graph, regret = mean_ms(ranker) /
 mean_ms(best) - 1, each the benchmark's own mean for the kernel it served, medians over
 rounds. A cell (dtype, head size, mask, strided layout) is MIS-RANKED when its geomean
-regret exceeds its BSHD twin's by more than REGRET_DELTA_LIMIT, or when any of its graphs
-has regret above REGRET_GRAPH_LIMIT. The twin's own regret is what the ranker already
-costs; only the difference is blamed on strides.
+regret exceeds its BSHD twin's by more than REGRET_DELTA_LIMIT, or when any of its
+graphs has regret above REGRET_GRAPH_LIMIT. The twin is the BSHD graphs of the same
+shapes as the cell's own graphs, so a shape the layout repeats (``same_as_bshd``) is in
+neither side. The twin's own regret is what the ranker already costs; only the
+difference is blamed on strides. A layout whose every graph repeats its twin is no
+cell: it is listed under ``repeats_twin``.
 
 Exit 0 (``--strict``: 1 when a cell is MIS-RANKED or incomplete), 2 on unusable input.
 """
@@ -26,8 +29,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from catalog_sweep_report import (  # noqa: E402
-    _load_yaml,
     geomean,
+    load_map,
     median_over_rounds,
     served_times,
 )
@@ -39,13 +42,14 @@ REGRET_GRAPH_LIMIT = 0.10
 
 
 def regrets(ranker: dict, best: dict, mapping: list) -> dict:
-    """``{graph: ratio}`` of ranker time to best time for the graphs both arms served."""
+    """``{graph: ratio}`` of ranker time to best time for graphs both arms served."""
     shared = {m["graph_name"] for m in mapping} & ranker.keys() & best.keys()
     return {g: ranker[g] / best[g] for g in shared}
 
 
 def check(ratios: dict, mapping: list) -> list:
-    """One verdict per strided cell, against the BSHD twin of the same family."""
+    """One verdict per strided cell, against the BSHD twin of the same family and
+    shapes. A cell whose graphs all repeat the twin is left out (see `repeats_twin`)."""
     cells = defaultdict(list)
     for m in mapping:
         f = m["family"]
@@ -56,27 +60,30 @@ def check(ratios: dict, mapping: list) -> list:
         if layout == "bshd":
             continue
         members = [m for m in members if not m.get("same_as_bshd")]
-        have = [ratios[m["graph_name"]] for m in members if m["graph_name"] in ratios]
-        twin = [
-            ratios[m["graph_name"]]
-            for m in cells.get((family, "bshd"), [])
-            if m["graph_name"] in ratios
-        ]
+        if not members:
+            continue
+        twins = {m["shape"]: m for m in cells.get((family, "bshd"), [])}
+        pairs = [(m, twins.get(m["shape"])) for m in members]
+        have = [(m, t) for m, t in pairs if m["graph_name"] in ratios]
         row = dict(cell=[*family, layout], graphs=len(members), measured=len(have))
-        if not have or not twin or len(have) < len(members):
+        if len(have) < len(members) or any(
+            t is None or t["graph_name"] not in ratios for _, t in pairs
+        ):
             out.append(row | dict(verdict="INCOMPLETE"))
             continue
-        delta = geomean(have) - geomean(twin)
+        mine = [ratios[m["graph_name"]] for m, _ in have]
+        twin = [ratios[t["graph_name"]] for _, t in have]
+        delta = geomean(mine) - geomean(twin)
         worst = [
             m["graph_name"]
             for m in members
-            if ratios.get(m["graph_name"], 1) > 1 + REGRET_GRAPH_LIMIT
+            if ratios[m["graph_name"]] > 1 + REGRET_GRAPH_LIMIT
         ]
         bad = delta > REGRET_DELTA_LIMIT or bool(worst)
         out.append(
             row
             | dict(
-                regret=geomean(have) - 1,
+                regret=geomean(mine) - 1,
                 twin_regret=geomean(twin) - 1,
                 delta=delta,
                 graphs_over_limit=worst,
@@ -86,7 +93,17 @@ def check(ratios: dict, mapping: list) -> list:
     return out
 
 
-def main(argv=None) -> int:
+def repeats_twin(mapping: list) -> list:
+    """The graphs of a strided layout that repeat their BSHD twin's measurement."""
+    return sorted(
+        m["graph_name"]
+        for m in mapping
+        if m["layout"] != "bshd" and m.get("same_as_bshd", False)
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Compare the two arms of a sweep; the exit code is in the module docstring."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--sweep-output", required=True)
     parser.add_argument("--ranker-arm", required=True)
@@ -96,7 +113,7 @@ def main(argv=None) -> int:
     parser.add_argument("--strict", action="store_true")
     args = parser.parse_args(argv)
     try:
-        mapping = _load_yaml(args.map)
+        mapping = load_map(args.map)
         arms = (args.ranker_arm, args.best_arm)
         ranker, best = (
             median_over_rounds(served_times(args.sweep_output, a)) for a in arms
@@ -105,7 +122,7 @@ def main(argv=None) -> int:
         if not ratios:
             raise ReduceError("the two arms served no mapped graph in common")
         cells = check(ratios, mapping)
-    except (ReduceError, KeyError, TypeError, OSError) as exc:
+    except (ReduceError, OSError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 2
     import yaml
@@ -113,6 +130,7 @@ def main(argv=None) -> int:
     result = dict(
         limits=dict(delta=REGRET_DELTA_LIMIT, graph=REGRET_GRAPH_LIMIT),
         cells=cells,
+        repeats_twin=repeats_twin(mapping),
         graph_ratios=dict(sorted(ratios.items())),
     )
     Path(args.out).write_text(yaml.safe_dump(result, sort_keys=False), encoding="utf-8")

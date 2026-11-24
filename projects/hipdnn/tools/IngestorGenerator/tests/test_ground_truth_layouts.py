@@ -63,7 +63,7 @@ def _strides(template, layout, **overrides) -> dict:
     return {t["name"]: t["strides"] for t in graph["tensors"]}
 
 
-# --- the template is unchanged for BSHD ------------------------------------------------
+# --- the template is unchanged for BSHD -----------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -131,7 +131,7 @@ def test_no_graph_carries_the_template_only_layout_role(template, layout):
     assert all(isinstance(t["strides"], list) for t in graph["tensors"])
 
 
-# --- hand-computed strides: B2 Hq8 Hkv2 S64 D128 ----------------------------------------
+# --- hand-computed strides: B2 Hq8 Hkv2 S64 D128 --------------------------------------
 
 _BSHD_Q, _BSHD_K = [65536, 128, 1024, 1], [16384, 128, 256, 1]
 _HAND = {
@@ -193,7 +193,7 @@ def test_batch_slice_doubles_only_the_batch_stride_of_q_k_v(template):
     assert sliced["output"] == base["output"]
 
 
-# --- the rocKE vectors file: strides the C++ twin is pinned to -------------------------
+# --- the rocKE vectors file: strides the C++ twin is pinned to ------------------------
 
 _VECTOR_CASES = {
     "admit_packed_bshd_gqa_d128_batch2": "bshd",
@@ -229,7 +229,7 @@ def test_layouts_reproduce_the_vectors_files_admitted_strides(
     assert got == {name: case[role]["strides"] for role, name in _TENSORS.items()}
 
 
-# --- the rocKE host admission predicate ------------------------------------------------
+# --- the rocKE host admission predicate -----------------------------------------------
 
 _SHAPES = {
     "gqa_d128": dict(batch=2, nhead_q=32, nhead_k=8, seqlen_q=2048, seqlen_k=2048),
@@ -295,7 +295,7 @@ def test_every_layout_is_admitted_by_the_rocke_predicate(
         assert dict(verdict.strides) != twin
 
 
-# --- refusals --------------------------------------------------------------------------
+# --- refusals -------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -322,7 +322,7 @@ def test_a_template_without_roles_cannot_take_a_layout(template):
     assert gt.instantiate(bare, value_map, _row())["tensors"][0]["strides"] == _BSHD_Q
 
 
-# --- the `layouts` subcommand -----------------------------------------------------------
+# --- the `layouts` subcommand ---------------------------------------------------------
 
 
 def _spec(**overrides) -> dict:
@@ -447,6 +447,36 @@ def test_layouts_refuse_a_directory_that_already_holds_files(tmp_path, capsys):
             ),
             "bad or missing ['extra']",
         ),
+        # several bad keys are listed in sorted order, whatever the hash seed
+        (
+            dict(shapes=[dict(id="a", seqlen_q=64, zzz=1, aaa=1)]),
+            "bad or missing ['aaa', 'zzz', 'batch', 'nhead_k', 'nhead_q']",
+        ),
+        (
+            dict(shapes=[dict(id="a", batch=0, nhead_q=8, nhead_k=8, seqlen_q=64)]),
+            "batch 0 is not a positive integer",
+        ),
+        (
+            dict(shapes=[dict(id="a", batch=True, nhead_q=8, nhead_k=8, seqlen_q=64)]),
+            "batch True is not a positive integer",
+        ),
+        (
+            dict(shapes=[dict(id="a", batch=1, nhead_q=8, nhead_k=8, seqlen_q="64")]),
+            "seqlen_q '64' is not a positive integer",
+        ),
+        (
+            dict(
+                shapes=[
+                    dict(id="a", batch=1, nhead_q=8, nhead_k=8, seqlen_q=64)
+                    | dict(seqlen_k=-1)
+                ]
+            ),
+            "seqlen_k -1 is not a positive integer",
+        ),
+        (
+            dict(shapes=[dict(id="a", batch=1, nhead_q=9, nhead_k=4, seqlen_q=64)]),
+            "nhead_q 9 is not a multiple of nhead_k 4",
+        ),
     ],
 )
 def test_a_malformed_shapes_file_is_refused(tmp_path, capsys, overrides, message):
@@ -455,12 +485,27 @@ def test_a_malformed_shapes_file_is_refused(tmp_path, capsys, overrides, message
     assert not out.exists()
 
 
+def test_a_template_tagging_one_layout_role_twice_is_refused(template):
+    """Two tensors tagged `q` would leave the first with its template strides, in a
+    graph the map calls packed_qkv."""
+    graph, value_map = template
+    graph = json.loads(json.dumps(graph))
+    tagged = [t for t in graph["tensors"] if "layout_role" in t]
+    tagged[1]["layout_role"] = tagged[0]["layout_role"]
+    role = tagged[0]["layout_role"]
+    with pytest.raises(gt.GroundTruthError, match=f"layout_role {role!r} on two"):
+        gt.instantiate(graph, value_map, _row(layout="packed_qkv"))
+    # a row without a layout never reads the roles
+    gt.instantiate(graph, value_map, _row())
+
+
 def test_a_shapes_file_with_a_missing_or_extra_key_is_refused(tmp_path, capsys):
     spec = _spec()
     del spec["layouts"]
     shapes = tmp_path / "shapes.yaml"
     shapes.write_text(yaml.safe_dump(spec))
-    argv = f"layouts --manifest {_MANIFESTS['gfx950']} --shapes {shapes} --out {tmp_path / 'g'}"
+    argv = f"layouts --manifest {_MANIFESTS['gfx950']} --shapes {shapes}"
+    argv += f" --out {tmp_path / 'g'}"
     assert gt.main(argv.split()) == 2
     assert "exactly" in capsys.readouterr().err
 
