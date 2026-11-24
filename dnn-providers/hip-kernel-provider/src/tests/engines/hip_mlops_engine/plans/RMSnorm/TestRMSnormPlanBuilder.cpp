@@ -243,7 +243,7 @@ TEST_F(TestRMSnormPlanBuilder, IsApplicableReturnsTrueForValidInferenceActivatio
 
 TEST_F(TestRMSnormPlanBuilder, IdentityActivationIsApplicable)
 {
-    auto builder = createRMSnormActivationTestGraph(
+    auto const builder = createRMSnormActivationTestGraph(
         false,
         false,
         false,
@@ -258,7 +258,7 @@ TEST_F(TestRMSnormPlanBuilder, IdentityActivationIsApplicable)
 
 TEST_F(TestRMSnormPlanBuilder, BackwardReluIsNotApplicable)
 {
-    auto builder = createRMSnormActivationTestGraph(
+    auto const builder = createRMSnormActivationTestGraph(
         false,
         false,
         false,
@@ -536,7 +536,7 @@ TEST_F(TestRMSnormPlanBuilder, ElementCountAtTheKernelIndexLimit)
                                               std::pair{(int64_t{1} << 32) + 1, false}})
         {
             SCOPED_TRACE(columns);
-            auto builder = rmsNormRow(columns, fused);
+            auto const builder = rmsNormRow(columns, fused);
             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
                 builder.GetBufferPointer(), builder.GetSize());
             EXPECT_EQ(_planBuilder.isApplicable(_dummyHandle, graph), expected);
@@ -556,7 +556,7 @@ TEST_F(TestRMSnormPlanBuilder, DeclinesAnEpsilonTheGraphDoesNotResolve)
                          : hipdnn_test_sdk::utilities::createValidRMSNormGraph();
         };
         {
-            auto builder = base();
+            auto const builder = base();
             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
                 builder.GetBufferPointer(), builder.GetSize());
             ASSERT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
@@ -565,12 +565,13 @@ TEST_F(TestRMSnormPlanBuilder, DeclinesAnEpsilonTheGraphDoesNotResolve)
         for(const char* replacement : {"unknown uid", "device tensor"})
         {
             SCOPED_TRACE(replacement);
-            auto builder = hipdnn_test_sdk::utilities::mutateGraph(base(), [&](GraphT& graph) {
-                auto* attributes = graph.nodes.at(0)->attributes.AsRMSNormAttributes();
-                attributes->epsilon_tensor_uid = std::string(replacement) == "unknown uid"
-                                                     ? int64_t{9999}
-                                                     : attributes->scale_tensor_uid;
-            });
+            auto const builder
+                = hipdnn_test_sdk::utilities::mutateGraph(base(), [&](GraphT& graph) {
+                      auto* attributes = graph.nodes.at(0)->attributes.AsRMSNormAttributes();
+                      attributes->epsilon_tensor_uid = std::string(replacement) == "unknown uid"
+                                                           ? int64_t{9999}
+                                                           : attributes->scale_tensor_uid;
+                  });
             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
                 builder.GetBufferPointer(), builder.GetSize());
             EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
@@ -584,7 +585,7 @@ TEST_F(TestRMSnormPlanBuilder, AcceptsABakedOrRuntimeEpsilon)
     for(const bool fused : {false, true})
     {
         SCOPED_TRACE(fused ? "fused activation" : "one node");
-        auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+        auto const builder = hipdnn_test_sdk::utilities::mutateGraph(
             fused ? hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph()
                   : hipdnn_test_sdk::utilities::createValidRMSNormGraph(),
             [](GraphT& graph) {
@@ -603,7 +604,7 @@ TEST_F(TestRMSnormPlanBuilder, DeclinesAVirtualKernelBuffer)
     for(const char* name : {"x", "y", "scale"})
     {
         SCOPED_TRACE(name);
-        auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+        auto const builder = hipdnn_test_sdk::utilities::mutateGraph(
             hipdnn_test_sdk::utilities::createValidRMSNormGraph(),
             [name](GraphT& graph) { tensorNamed(graph, name).virtual_ = true; });
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(

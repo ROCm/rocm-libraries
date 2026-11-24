@@ -143,9 +143,9 @@ TEST(TestBatchnormFwdTrainingParams, HandlesMeanVarianceMissing)
 
 TEST(TestBatchnormFwdTrainingParams, LeavesSavedStatisticsUnsetWhenBothVirtual)
 {
-    auto base = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+    auto const base = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
         {1, 3, 14, 14}, {1, 3, 14, 14}, true);
-    auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+    auto const builder = hipdnn_test_sdk::utilities::mutateGraph(
         base, [](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
             auto* attrs = graph.nodes.at(0)->attributes.AsBatchnormAttributes();
             for(auto& tensor : graph.tensors)
@@ -432,7 +432,7 @@ TEST(TestBatchnormFwdTrainingPlan, CompileLdsGcnSizeScalesWithWaveSize)
 
     plan.compile(mockCompiler, deviceProps);
 
-    auto hasOption = [&](const std::string& opt) {
+    auto const hasOption = [&](const std::string& opt) {
         return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
                != capturedOptions.end();
     };
@@ -473,7 +473,7 @@ TEST(TestBatchnormFwdTrainingPlan, CompileNhwcLdsGcnSizeScalesWithWaveSize)
 
         plan.compile(mockCompiler, deviceProps);
 
-        auto hasOption = [&](const std::string& opt) {
+        auto const hasOption = [&](const std::string& opt) {
             return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
                    != capturedOptions.end();
         };

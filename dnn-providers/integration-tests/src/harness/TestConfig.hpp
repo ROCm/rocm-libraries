@@ -486,7 +486,7 @@ private:
 
         // Golden bundle configuration — default is ON; env var can override.
         _allowBundles = opts.allowBundles;
-        auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_ALLOW_BUNDLES");
+        const auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_ALLOW_BUNDLES");
         if(envVal == "0" || envVal == "false")
         {
             _allowBundles = false;

@@ -262,9 +262,9 @@ TEST(TestRaggedSdpaDensify, PhiloxDropoutThroughTheRewriteAppliesTheDenseDump)
         std::memcpy(t.memory().hostData(), values.data(), values.size() * sizeof(float));
         return t;
     };
-    auto qd = toTensor(unpack(q, Q_TOKENS, SQ, D), SQ, D);
-    auto kd = toTensor(unpack(k, KV_TOKENS, SKV, D), SKV, D);
-    auto vd = toTensor(unpack(v, KV_TOKENS, SKV, D), SKV, D);
+    const auto qd = toTensor(unpack(q, Q_TOKENS, SQ, D), SQ, D);
+    const auto kd = toTensor(unpack(k, KV_TOKENS, SKV, D), SKV, D);
+    const auto vd = toTensor(unpack(v, KV_TOKENS, SKV, D), SKV, D);
     Tensor<float> mask({B, H, SQ, SKV});
     std::memcpy(mask.memory().hostData(), dump.data(), dump.size() * sizeof(float));
     Tensor<int32_t> seqQ({B, 1, 1, 1});

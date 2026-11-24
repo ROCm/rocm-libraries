@@ -86,7 +86,7 @@ flatbuffers::FlatBufferBuilder makeGraphWithDenseQ()
 template <DataType QType, DataType KType, DataType VType, DataType OType>
 void expectRoutedToNativeRaggedPlan(const void* graphBuffer, size_t graphSize)
 {
-    auto graphWrap
+    const auto graphWrap
         = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(graphBuffer, graphSize);
     const auto& node = graphWrap.getNode(0);
     const auto& tensorMap = graphWrap.getTensorMap();

@@ -1918,9 +1918,10 @@ private:
             {
                 const auto& spec = filteredSpecs[specIdx];
                 CompiledPlan plan = std::move(evaluatedSpecPlans[specIdx]);
-                auto compileErr = plan.engineConfigDesc != nullptr
-                                      ? Error{ErrorCode::OK, ""}
-                                      : compilePlanFromSpec(spec.engineId, spec.knobSettings, plan);
+                const auto compileErr
+                    = plan.engineConfigDesc != nullptr
+                          ? Error{ErrorCode::OK, ""}
+                          : compilePlanFromSpec(spec.engineId, spec.knobSettings, plan);
                 if(compileErr.is_bad())
                 {
                     HIPDNN_FE_LOG_WARN("autotune: failed to compile plan for engine "
@@ -3128,7 +3129,7 @@ public:
         }
 
         notes.reserve(backendNotes.size());
-        for(auto note : backendNotes)
+        for(const auto note : backendNotes)
         {
             // A note this frontend does not recognize is dropped rather than
             // surfaced: a newer backend may define notes past this frontend's
@@ -3960,7 +3961,7 @@ public:
 
             for(const size_t i : candidates)
             {
-                auto& plan = _compiledPlans[i];
+                const auto& plan = _compiledPlans[i];
 
                 // The active plan, and any plan an earlier ALL or build_plan_at_index()
                 // finalized, is already built: finalizing it again fails in the backend.
@@ -4026,7 +4027,7 @@ public:
             return {ErrorCode::OK, ""};
         }
 
-        auto& activePlan = _compiledPlans[_activePlanIndex];
+        const auto& activePlan = _compiledPlans[_activePlanIndex];
         if(!activePlan.engineConfigDesc || !activePlan.executionPlanDesc)
         {
             return {ErrorCode::INVALID_VALUE, "No active execution plan / engine config"};

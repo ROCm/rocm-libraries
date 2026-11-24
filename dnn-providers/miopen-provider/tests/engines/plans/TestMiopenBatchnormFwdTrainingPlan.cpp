@@ -80,7 +80,7 @@ TEST(TestBatchnormFwdTrainingParams, HandlesMeanVarianceMissing)
 // A virtual saved pair that nothing consumes is "saved statistics not requested".
 TEST(TestBatchnormFwdTrainingParams, LeavesSavedStatisticsUnsetWhenBothVirtual)
 {
-    auto savedBuilder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    const auto savedBuilder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper savedGraph(
         savedBuilder.GetBufferPointer(), savedBuilder.GetSize());
     const auto* savedAttrs = savedGraph.getNode(0).attributes_as_BatchnormAttributes();
@@ -88,7 +88,7 @@ TEST(TestBatchnormFwdTrainingParams, LeavesSavedStatisticsUnsetWhenBothVirtual)
     const BatchnormFwdTrainingParams savedParams(*savedAttrs, savedGraph.getTensorMap());
     EXPECT_TRUE(savedParams.hasSaveMeanVariance());
 
-    auto virtualBuilder = hipdnn_test_sdk::utilities::mutateGraph(
+    const auto virtualBuilder = hipdnn_test_sdk::utilities::mutateGraph(
         hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(),
         [](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
             for(auto& tensor : graph.tensors)

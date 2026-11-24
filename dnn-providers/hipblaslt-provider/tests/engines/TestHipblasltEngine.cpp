@@ -272,7 +272,7 @@ TEST(TestHipblasltEngine, InitializeExecutionContextThrowsInternalErrorForUnserv
     HipblasltEngine engine(1);
     engine.addPlanBuilder(std::make_unique<HipblasltMatmulPlanBuilder>());
 
-    auto builder = createValidBatchnormFwdTrainingGraph();
+    auto const builder = createValidBatchnormFwdTrainingGraph();
     GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
     HipdnnEnginePluginHandle const dummyHandle;
     MockHipdnnEnginePluginExecutionContext ctx;

@@ -137,7 +137,7 @@ TEST_P(TestBatchnormActivationValidator, DirectionIdentityAndLeakyRelu)
     for(const auto variant : {0, 1, 2, 3})
     {
         SCOPED_TRACE(variant);
-        auto original = [&]() {
+        auto const original = [&]() {
             switch(variant)
             {
             case 0:

@@ -448,7 +448,7 @@ TEST(TestSdpaBwdPlan, BothDeprecatedCausalMasksThrow)
                                         /*runtimeScaleHostPtr=*/nullptr,
                                         /*causalMask=*/true,
                                         /*causalMaskBottomRight=*/false);
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [bin, err] = graph->to_binary();
     ASSERT_TRUE(err.is_good()) << err.get_message();
 
@@ -1058,7 +1058,7 @@ TEST(TestSdpaBwdPlanZeroDropout, MatchesTheGraphWithoutDropoutFields)
             attrs.offset_tensor_uid = OFFSET_UID;
             extras.push_back({OFFSET_UID, DataType::INT64, {1, 1, 1, 1}});
         }
-        auto graph = makeRawSdpaBwdGraph(
+        const auto graph = makeRawSdpaBwdGraph(
             attrs, std::nullopt, std::nullopt, {1, 2, 4, 1}, DataType::FLOAT, extras);
         CpuReferenceGraphExecutor executor;
         EXPECT_TRUE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
@@ -1104,7 +1104,7 @@ TEST(TestSdpaBwdPlanZeroDropout, KeepsTheOtherFieldRules)
               attrs.dropout_probability = 0.0F;
               std::vector<RawBwdExtraTensor> extras;
               edit(attrs, extras);
-              auto graph = makeRawSdpaBwdGraph(
+              const auto graph = makeRawSdpaBwdGraph(
                   attrs, std::nullopt, std::nullopt, {1, 2, 4, 1}, DataType::FLOAT, extras);
               CpuReferenceGraphExecutor executor;
               return executor.isApplicable(graph.GetBufferPointer(), graph.GetSize());

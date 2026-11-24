@@ -3171,7 +3171,7 @@ TEST_F(TestSdpaFwdPlanBuilder, BuildPlanThrowsForKernelBelowLaunchBlock)
     }
 
     // hd128 kernels are launched with 512 threads.
-    auto builder = createSdpaFwdGraph({4, 8, 256, 128});
+    auto const builder = createSdpaFwdGraph({4, 8, 256, 128});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(builder.GetBufferPointer(),
                                                                         builder.GetSize());
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper dummyCfg(nullptr, 0);
@@ -3233,7 +3233,7 @@ TEST_F(TestSdpaFwdUnservedAttributes, UnmutatedGraphIsApplicable)
     {
         GTEST_SKIP();
     }
-    auto builder = createSdpaFwdGraph();
+    auto const builder = createSdpaFwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -3251,7 +3251,7 @@ TEST_P(TestSdpaFwdInertAttributes, IsApplicable)
     {
         GTEST_SKIP();
     }
-    auto builder = applyUnservedAttribute(createSdpaFwdGraph(), GetParam());
+    auto const builder = applyUnservedAttribute(createSdpaFwdGraph(), GetParam());
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -3265,7 +3265,7 @@ TEST_P(TestSdpaFwdUnservedAttributes, IsNotApplicable)
     {
         GTEST_SKIP();
     }
-    auto builder = applyUnservedAttribute(createSdpaFwdGraph(), GetParam());
+    auto const builder = applyUnservedAttribute(createSdpaFwdGraph(), GetParam());
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -3299,10 +3299,10 @@ TEST(TestSdpaFwdShapeConsistency, DeclinesOperandsThatDisagreeOnShape)
                                       std::vector<int64_t> & k,
                                       std::vector<int64_t> & v,
                                       std::vector<int64_t> & o)>& mutateDims) {
-              auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+              auto const builder = hipdnn_test_sdk::utilities::mutateGraph(
                   createSdpaFwdGraph({4, 8, 256, 128}, {4, 4, 256, 128}),
                   [&mutateDims](GraphT& graph) {
-                      auto& attrs = sdpa::detail::getSdpaAttributes(graph);
+                      auto const& attrs = sdpa::detail::getSdpaAttributes(graph);
                       mutateDims(findTensorByUid(graph, attrs.q_tensor_uid).dims,
                                  findTensorByUid(graph, attrs.k_tensor_uid).dims,
                                  findTensorByUid(graph, attrs.v_tensor_uid).dims,
@@ -3421,9 +3421,9 @@ TEST_F(TestSdpaFwdGraphContract, DeclinesOperandsThatDisagreeOnShape)
     {
         const auto& mutateDims = testCase.second;
         SCOPED_TRACE(testCase.first);
-        auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+        auto const builder = hipdnn_test_sdk::utilities::mutateGraph(
             base(), [&mutateDims](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
-                auto& attrs = sdpa::detail::getSdpaAttributes(graph);
+                auto const& attrs = sdpa::detail::getSdpaAttributes(graph);
                 auto& q = findTensorByUid(graph, attrs.q_tensor_uid).dims;
                 auto& k = findTensorByUid(graph, attrs.k_tensor_uid).dims;
                 auto& v = findTensorByUid(graph, attrs.v_tensor_uid).dims;
@@ -3446,7 +3446,7 @@ TEST_F(TestSdpaFwdGraphContract, DeclinesARaggedOffsetMultiplierOnATensorWithout
     for(const char* name : {"q", "k", "v", "o"})
     {
         SCOPED_TRACE(name);
-        auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+        auto const builder = hipdnn_test_sdk::utilities::mutateGraph(
             createSdpaFwdGraph(), [name](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
                 findTensor(graph, name).ragged_offset_multiplier = 2;
             });

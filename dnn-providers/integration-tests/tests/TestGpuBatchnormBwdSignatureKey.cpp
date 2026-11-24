@@ -36,7 +36,7 @@ TEST(TestGpuBatchnormBwdSignatureKey, EqualityAndHash)
 
 TEST(TestGpuBatchnormBwdSignatureKey, CreateFromNodeWithSavedStatistics)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 

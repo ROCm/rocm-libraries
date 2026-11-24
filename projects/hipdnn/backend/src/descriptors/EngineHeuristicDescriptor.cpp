@@ -532,7 +532,7 @@ void EngineHeuristicDescriptor::setHeuristicMode(hipdnnBackendAttributeType_t at
         HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
         "EngineHeuristicDescriptor failed to set heuristic mode: Heuristic mode is null.");
 
-    auto heurModeValue = *heurMode;
+    const auto heurModeValue = *heurMode;
     if(heurModeValue != HIPDNN_HEUR_MODE_FALLBACK && heurModeValue != HIPDNN_HEUR_MODE_A
        && heurModeValue != HIPDNN_HEUR_MODE_B)
     {

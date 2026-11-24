@@ -90,20 +90,20 @@ TEST(TestFlatbufferGraphMutators, MatmulBiasActivGraphPlacesBiasInRequestedOpera
     for(const bool biasInFirstOperand : {false, true})
     {
         SCOPED_TRACE(biasInFirstOperand ? "bias in in_0" : "bias in in_1");
-        auto builder = createValidMatmulBiasActivGraph({4, 8},
-                                                       {8, 1},
-                                                       {8, 5},
-                                                       {5, 1},
-                                                       {4, 5},
-                                                       {5, 1},
-                                                       true,
-                                                       PointwiseMode::RELU_FWD,
-                                                       std::nullopt,
-                                                       std::nullopt,
-                                                       std::nullopt,
-                                                       DataType::FLOAT,
-                                                       std::nullopt,
-                                                       biasInFirstOperand);
+        const auto builder = createValidMatmulBiasActivGraph({4, 8},
+                                                             {8, 1},
+                                                             {8, 5},
+                                                             {5, 1},
+                                                             {4, 5},
+                                                             {5, 1},
+                                                             true,
+                                                             PointwiseMode::RELU_FWD,
+                                                             std::nullopt,
+                                                             std::nullopt,
+                                                             std::nullopt,
+                                                             DataType::FLOAT,
+                                                             std::nullopt,
+                                                             biasInFirstOperand);
         const auto graph = UnPackGraph(builder.GetBufferPointer());
 
         ASSERT_GE(graph->nodes.size(), 2u);

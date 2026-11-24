@@ -51,7 +51,7 @@ public:
         validateStrides(scale.dims(), scale.strides(), "scale");
         validateQuantize(x.dims(), y.dims(), scale.dims(), blockSize, axis);
         const auto targetAxis = axis.value_or(static_cast<int64_t>(x.dims().size()) - 1);
-        auto defines = buildDefines<XDataType, YDataType, ScaleDataType, ComputeDataType>();
+        const auto defines = buildDefines<XDataType, YDataType, ScaleDataType, ComputeDataType>();
         launchQuantize(x.memory().deviceData(),
                        x.dims(),
                        x.strides(),
@@ -85,7 +85,7 @@ public:
         validateStrides(scale.dims(), scale.strides(), "scale");
         const auto effectiveBlockSize
             = validateDequantize(x.dims(), y.dims(), scale.dims(), blockSize);
-        auto defines = buildDefines<XDataType, YDataType, ScaleDataType, ComputeDataType>();
+        const auto defines = buildDefines<XDataType, YDataType, ScaleDataType, ComputeDataType>();
         launchDequantize(x.memory().deviceData(),
                          x.dims(),
                          x.strides(),

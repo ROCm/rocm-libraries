@@ -315,7 +315,7 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapBinaryDivide)
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwiseSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
@@ -346,7 +346,7 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapComparison)
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwiseSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
@@ -377,7 +377,7 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapBoolean)
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwiseSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
@@ -585,7 +585,7 @@ TEST(TestPointwiseSignatureKey, CreateFromNodeAndTensorMapUnaryExp)
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         serializedGraph.data(), serializedGraph.size());
 
     const PointwiseSignatureKey keyFromNode(graphWrap.getNode(0), graphWrap.getTensorMap());
@@ -686,7 +686,7 @@ TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForGenIndexInt32Output)
 {
     const auto planBuilders = PointwiseSignatureKey::getPlanBuilders();
 
-    for(auto input : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
+    for(const auto input : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
     {
         const PointwiseSignatureKey key{
             PointwiseMode::GEN_INDEX, input, DataType::FLOAT, DataType::INT32};
@@ -715,7 +715,7 @@ TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForLogicalOperations)
         PointwiseMode::LOGICAL_NOT, DataType::BOOLEAN, DataType::FLOAT, DataType::BOOLEAN};
     EXPECT_EQ(planBuilders.count(notKey), 1u) << notKey;
 
-    for(auto mode : {PointwiseMode::LOGICAL_AND, PointwiseMode::LOGICAL_OR})
+    for(const auto mode : {PointwiseMode::LOGICAL_AND, PointwiseMode::LOGICAL_OR})
     {
         const PointwiseSignatureKey key{
             mode, DataType::BOOLEAN, DataType::FLOAT, DataType::BOOLEAN, DataType::BOOLEAN};

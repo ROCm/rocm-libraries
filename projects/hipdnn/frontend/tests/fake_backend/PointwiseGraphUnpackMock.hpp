@@ -33,7 +33,7 @@ inline void
                                                     int64_t* elementCount,
                                                     void* arrayOfElements) {
             const bool isCountQuery = (arrayOfElements == nullptr);
-            auto setCount = [&](int64_t value) {
+            const auto setCount = [&](int64_t value) {
                 if(elementCount != nullptr)
                 {
                     *elementCount = value;

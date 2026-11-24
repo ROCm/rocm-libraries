@@ -765,13 +765,13 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdMmaCoreModeSetRoundTrip)
 TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdCuSeqLenRoundTrip)
 {
     // Batch is 2, so each cumulative tensor holds B+1 = 3 prefix sums as a 1-D tensor.
-    auto cuSeqLenQ = std::make_shared<TensorAttributes>();
+    const auto cuSeqLenQ = std::make_shared<TensorAttributes>();
     cuSeqLenQ->set_uid(K_SDPA_TENSOR_CU_SEQ_LEN_Q_UID)
         .set_name("cu_seq_len_q")
         .set_data_type(DataType::INT32);
     cuSeqLenQ->set_dim({K_SDPA_TENSOR_Q_DIMS[0] + 1}).set_stride({1});
 
-    auto cuSeqLenKv = std::make_shared<TensorAttributes>();
+    const auto cuSeqLenKv = std::make_shared<TensorAttributes>();
     cuSeqLenKv->set_uid(K_SDPA_TENSOR_CU_SEQ_LEN_KV_UID)
         .set_name("cu_seq_len_kv")
         .set_data_type(DataType::INT32);
@@ -779,7 +779,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdCuSeqLenRoundTrip)
 
     auto attrs = defaultAttributes();
     attrs.set_padding_mask(true).set_cu_seq_len_q(cuSeqLenQ).set_cu_seq_len_kv(cuSeqLenKv);
-    auto graph = buildGraph(attrs);
+    const auto graph = buildGraph(attrs);
 
     auto result = graph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -790,11 +790,11 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdCuSeqLenRoundTrip)
     auto rawDesc = graph->get_raw_graph_descriptor();
     ASSERT_NE(rawDesc, nullptr);
 
-    auto liftedGraph = std::make_shared<TestableGraph>();
+    const auto liftedGraph = std::make_shared<TestableGraph>();
     result = liftedGraph->fromBackendDescriptor(rawDesc);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    auto tensorMap = liftedGraph->getTensorsByUid();
+    const auto tensorMap = liftedGraph->getTensorsByUid();
     ASSERT_EQ(tensorMap.size(), 6u);
 
     const auto expectedDims = toVec(K_SDPA_TENSOR_CU_SEQ_LEN_DIMS);

@@ -766,7 +766,7 @@ public:
         if(hasOperationGraphState())
         {
             auto nativeTensors = _graph.getTensorsByUid();
-            auto it = nativeTensors.find(uid);
+            const auto it = nativeTensors.find(uid);
             if(it != nativeTensors.end() && it->second)
             {
                 tensorAttributes = *it->second;

@@ -83,9 +83,9 @@ class TestRMSnormActivationValidator : public ::testing::TestWithParam<Activatio
 TEST_P(TestRMSnormActivationValidator, DirectionIdentityAndLeakyRelu)
 {
     const auto& testCase = GetParam();
-    auto original = testCase.isBwd
-                        ? hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph()
-                        : hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph();
+    auto const original = testCase.isBwd
+                              ? hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph()
+                              : hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph();
     auto nativeGraph
         = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(original.GetBufferPointer());
     auto* activation

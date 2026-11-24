@@ -140,7 +140,7 @@ public:
             throw std::runtime_error("GEN_INDEX axis is out of range for the output tensor");
         }
 
-        auto func = [&](const std::vector<int64_t>& indices) {
+        const auto func = [&](const std::vector<int64_t>& indices) {
             output.setHostValue(hipdnn_test_sdk::detail::safeConvert<OutputType>(
                                     indices[static_cast<size_t>(axis)]),
                                 indices);

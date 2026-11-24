@@ -184,7 +184,7 @@ TEST_F(TestSdpaFwdOperationFromNode, RestoresCuSeqLenTensorsAndRoundTrips)
     node.compute_data_type = DataType::FLOAT;
     node.attributes.Set(attrs);
 
-    auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
+    const auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
     ASSERT_NE(desc, nullptr);
     ASSERT_NE(desc->getCuSeqLenQDesc(), nullptr);
     ASSERT_NE(desc->getCuSeqLenKVDesc(), nullptr);

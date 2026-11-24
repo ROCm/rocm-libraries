@@ -3238,9 +3238,9 @@ namespace
 {
 void expectCuSeqLenGraphExcludesPluginAt(std::string_view pluginApiVersion)
 {
-    auto plugin = std::make_shared<MockEnginePlugin>();
+    const auto plugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{plugin};
-    auto pluginManager = std::make_shared<MockEnginePluginManager>();
+    const auto pluginManager = std::make_shared<MockEnginePluginManager>();
 
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
     EXPECT_CALL(*plugin, createHandle())
@@ -3260,7 +3260,7 @@ void expectCuSeqLenGraphExcludesPluginAt(std::string_view pluginApiVersion)
     EXPECT_CALL(mockGraphDesc, hasCuSeqLen()).WillRepeatedly(::testing::Return(true));
 
     const EnginePluginResourceManager resourceManager(pluginManager);
-    auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
+    const auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
     EXPECT_TRUE(engineIds.empty());
 }
 } // namespace
@@ -3277,9 +3277,9 @@ TEST(TestEnginePluginResourceManager, CuSeqLenGraphExcludesUhdApiVersionPlugin)
 
 TEST(TestEnginePluginResourceManager, CuSeqLenGraphIncludesCuSeqLenCapablePlugin)
 {
-    auto plugin = std::make_shared<MockEnginePlugin>();
+    const auto plugin = std::make_shared<MockEnginePlugin>();
     std::vector<std::shared_ptr<EnginePlugin>> plugins{plugin};
-    auto pluginManager = std::make_shared<MockEnginePluginManager>();
+    const auto pluginManager = std::make_shared<MockEnginePluginManager>();
 
     EXPECT_CALL(*pluginManager, getPlugins()).WillOnce(::testing::ReturnRef(plugins));
     EXPECT_CALL(*plugin, createHandle())

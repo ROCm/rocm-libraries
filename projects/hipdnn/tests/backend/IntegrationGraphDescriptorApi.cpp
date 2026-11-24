@@ -402,7 +402,7 @@ namespace
 flatbuffers::DetachedBuffer
     serializeReductionGraphWithVersion(uint32_t major, uint32_t minor, uint32_t patch)
 {
-    auto builder = hipdnn_test_sdk::utilities::createReductionGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createReductionGraph();
     const auto* graphFb
         = hipdnn_flatbuffers_sdk::data_objects::GetGraph(builder.GetBufferPointer());
     hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
@@ -420,7 +420,7 @@ flatbuffers::DetachedBuffer
 // left unstamped (null), simulating a writer that never populated the field.
 flatbuffers::DetachedBuffer serializeReductionGraphWithUnstampedVersion()
 {
-    auto builder = hipdnn_test_sdk::utilities::createReductionGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createReductionGraph();
     const auto* graphFb
         = hipdnn_flatbuffers_sdk::data_objects::GetGraph(builder.GetBufferPointer());
     hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;

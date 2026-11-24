@@ -452,7 +452,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph> makeVllmGraph(const VllmPr
         .set_io_data_type(p.dataType)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
-    auto q = make(Q_UID, "Q", p.dataType, qDims, qStrides);
+    const auto q = make(Q_UID, "Q", p.dataType, qDims, qStrides);
     std::shared_ptr<TensorAttributes> offsets;
     if(p.raggedQuery)
     {
@@ -463,11 +463,11 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph> makeVllmGraph(const VllmPr
     const auto kvCount = p.paged ? p.numBlocks : p.batch;
     const auto kvSeq = p.paged ? p.blockSize : p.maxKv;
     const std::vector<int64_t> kvDims = {kvCount, p.kvHeads, kvSeq, p.headDim};
-    auto k = make(K_UID, "K", p.dataType, kvDims, kvStrides(p));
-    auto v = make(V_UID, "V", p.dataType, kvDims, kvStrides(p));
+    const auto k = make(K_UID, "K", p.dataType, kvDims, kvStrides(p));
+    const auto v = make(V_UID, "V", p.dataType, kvDims, kvStrides(p));
     if(p.raggedKv)
     {
-        auto keyOffsets = make(
+        const auto keyOffsets = make(
             KV_OFFSETS_UID, "KeyStartLoc", DataType::INT32, {p.batch + 1, 1, 1, 1}, {1, 1, 1, 1});
         k->set_ragged_offset(keyOffsets).set_ragged_offset_multiplier(p.kvHeads * p.headDim);
         v->set_ragged_offset(keyOffsets).set_ragged_offset_multiplier(p.kvHeads * p.headDim);
@@ -536,7 +536,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph> makeVllmGraph(const VllmPr
             stats->set_ragged_offset(offsets).set_ragged_offset_multiplier(p.qHeads);
         }
     }
-    auto error = graph->validate();
+    const auto error = graph->validate();
     if(!error.is_good())
     {
         throw std::runtime_error("frontend rejects the vLLM-form graph: " + error.get_message());

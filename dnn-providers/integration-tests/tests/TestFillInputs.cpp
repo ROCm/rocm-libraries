@@ -917,7 +917,7 @@ GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
         attrs.add_dropout_mask_tensor_uid(14);
         attrs.add_dropout_scale_tensor_uid(15);
     }
-    auto bwd = attrs.Finish();
+    const auto bwd = attrs.Finish();
 
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(
@@ -1890,7 +1890,7 @@ GraphResult buildValuesGraph(DataType xType,
         CreateTensorAttributesDirect(b, 2, "y", DataType::FLOAT, &outStrides, &outDims));
 
     const std::vector<flatbuffers::Offset<Node>> nodes;
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         b, "values", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
     b.Finish(graph);
 
@@ -1962,7 +1962,7 @@ GraphResult buildUnsupportedOpGraph()
     nodes.push_back(CreateNodeDirect(
         b, "gdn", DataType::FLOAT, NodeAttributes::GdnAttributes, flatbuffers::Offset<void>()));
 
-    auto graph = CreateGraphDirect(
+    const auto graph = CreateGraphDirect(
         b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
     b.Finish(graph);
 
@@ -2070,7 +2070,7 @@ TEST(TestFillInputs, ValuesFillRejectsAListLongerThanTheTensor)
     expectInvalid(fillX(buildValuesGraph(DataType::INT32), ints({1, 2, 3, 4, 5})),
                   "5 values for 4 elements");
 
-    auto exact = fillX(buildValuesGraph(DataType::INT32), ints({1, 2, 3, 4}));
+    const auto exact = fillX(buildValuesGraph(DataType::INT32), ints({1, 2, 3, 4}));
     ASSERT_TRUE(exact.result.filled) << exact.result.reason;
 }
 
@@ -2107,7 +2107,7 @@ TEST(TestFillInputs, ValuesFillFollowsLogicalOrderOnPermutedStrides)
                       ints({0, 1, 2, 3, 4, 5}, false));
     ASSERT_TRUE(fill.result.filled) << fill.result.reason;
 
-    auto& x = typedTensor<int32_t>(fill.inputs, 1);
+    const auto& x = typedTensor<int32_t>(fill.inputs, 1);
     for(int64_t row = 0; row < kDims[0]; ++row)
     {
         for(int64_t col = 0; col < kDims[1]; ++col)
@@ -2826,7 +2826,7 @@ TEST(TestFillInputs, ResampleBwdZeroPadIndexIsMinusOneWhenPaddingOutranksSoleVal
     auto inputs = fillResampleBwdInputs(gr);
     expectIndexIsForwardArgmax(inputs, opts);
 
-    auto& index = typedTensor<int32_t>(inputs, 2);
+    const auto& index = typedTensor<int32_t>(inputs, 2);
     EXPECT_EQ(index.getHostValue(std::vector<int64_t>{0, 0, 0, 0}), -1);
 }
 
@@ -2847,7 +2847,7 @@ TEST(TestFillInputs, ResampleBwdNegInfPadPicksSoleValidElementOverPadding)
     auto inputs = fillResampleBwdInputs(gr);
     expectIndexIsForwardArgmax(inputs, opts);
 
-    auto& index = typedTensor<int32_t>(inputs, 2);
+    const auto& index = typedTensor<int32_t>(inputs, 2);
     EXPECT_EQ(index.getHostValue(std::vector<int64_t>{0, 0, 0, 0}), 0);
 }
 

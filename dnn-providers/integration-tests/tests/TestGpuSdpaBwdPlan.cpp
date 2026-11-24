@@ -581,7 +581,7 @@ TEST(TestGpuSdpaBwdPlanZeroDropout, EqualsNoDropoutBitForBitAndTheCpuExecutor)
             pack[18] = ptr(seedTensor);
             pack[19] = ptr(offsetTensor);
         }
-        auto graph = makeRawSdpaBwdGraph(s);
+        const auto graph = makeRawSdpaBwdGraph(s);
         if(gpu)
         {
             hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor executor;

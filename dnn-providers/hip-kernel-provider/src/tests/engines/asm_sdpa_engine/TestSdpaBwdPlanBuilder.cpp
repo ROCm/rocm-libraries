@@ -1510,7 +1510,7 @@ bwd_dispatch::KernelRequest gfx942GraphRequest(const BhsdLayout& qo,
                                                bwd_dispatch::AccumulatorMode accMode)
 {
     using hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes;
-    auto builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+    auto const builder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
         qo.dims,
         qo.strides,
         kv.dims,
@@ -1981,7 +1981,8 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableServesTheHeadDimsAiterSendsToAsm)
     for(const auto& c : K_HEAD_DIM_CASES)
     {
         SCOPED_TRACE(std::to_string(c.headDimQk) + "x" + std::to_string(c.headDimV));
-        auto builder = createPackedSdpaBwdGraph({2, 4, 256, c.headDimQk}, {2, 4, 256, c.headDimV});
+        auto const builder
+            = createPackedSdpaBwdGraph({2, 4, 256, c.headDimQk}, {2, 4, 256, c.headDimV});
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
             builder.GetBufferPointer(), builder.GetSize());
         EXPECT_EQ(_planBuilder.isApplicable(_handle, graphWrapper),
@@ -2008,17 +2009,17 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsFractionalGqaRatio)
     const std::vector<int64_t> vDims = {2, 4, 256, 128};
     const std::vector<int64_t> oDims = {2, 6, 256, 128};
 
-    auto builder = withNodeComputeType(hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
-                                           qDims,
-                                           hipdnn_data_sdk::utilities::generateStrides(qDims),
-                                           kDims,
-                                           hipdnn_data_sdk::utilities::generateStrides(kDims),
-                                           vDims,
-                                           hipdnn_data_sdk::utilities::generateStrides(vDims),
-                                           oDims,
-                                           hipdnn_data_sdk::utilities::generateStrides(oDims),
-                                           DataType::BFLOAT16),
-                                       DataType::FLOAT);
+    auto const builder = withNodeComputeType(hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+                                                 qDims,
+                                                 hipdnn_data_sdk::utilities::generateStrides(qDims),
+                                                 kDims,
+                                                 hipdnn_data_sdk::utilities::generateStrides(kDims),
+                                                 vDims,
+                                                 hipdnn_data_sdk::utilities::generateStrides(vDims),
+                                                 oDims,
+                                                 hipdnn_data_sdk::utilities::generateStrides(oDims),
+                                                 DataType::BFLOAT16),
+                                             DataType::FLOAT);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
@@ -2047,17 +2048,17 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableRejectsIntegralGqaRatio)
     const std::vector<int64_t> vDims = {1, 8, 256, 128};
     const std::vector<int64_t> oDims = {1, 32, 256, 128};
 
-    auto builder = withNodeComputeType(hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
-                                           qDims,
-                                           hipdnn_data_sdk::utilities::generateStrides(qDims),
-                                           kDims,
-                                           hipdnn_data_sdk::utilities::generateStrides(kDims),
-                                           vDims,
-                                           hipdnn_data_sdk::utilities::generateStrides(vDims),
-                                           oDims,
-                                           hipdnn_data_sdk::utilities::generateStrides(oDims),
-                                           DataType::BFLOAT16),
-                                       DataType::FLOAT);
+    auto const builder = withNodeComputeType(hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+                                                 qDims,
+                                                 hipdnn_data_sdk::utilities::generateStrides(qDims),
+                                                 kDims,
+                                                 hipdnn_data_sdk::utilities::generateStrides(kDims),
+                                                 vDims,
+                                                 hipdnn_data_sdk::utilities::generateStrides(vDims),
+                                                 oDims,
+                                                 hipdnn_data_sdk::utilities::generateStrides(oDims),
+                                                 DataType::BFLOAT16),
+                                             DataType::FLOAT);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
@@ -3076,7 +3077,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAcceptsWindowMask)
     for(const auto alignment : {DiagonalAlignment::TOP_LEFT, DiagonalAlignment::BOTTOM_RIGHT})
     {
         SCOPED_TRACE(EnumNameDiagonalAlignment(alignment));
-        auto builder = createSdpaBwdGraphWithMask(
+        auto const builder = createSdpaBwdGraphWithMask(
             /*causalMask=*/false,
             /*causalMaskBottomRight=*/false,
             flatbuffers::Optional<int64_t>(64),
@@ -3182,7 +3183,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableAppliesTheAiterWindowRules)
     for(const auto& c : cases)
     {
         SCOPED_TRACE(c.label);
-        auto builder = createWindowGraph(c);
+        auto const builder = createWindowGraph(c);
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
             builder.GetBufferPointer(), builder.GetSize());
         EXPECT_EQ(_planBuilder.isApplicable(_handle, graphWrapper),
@@ -3404,12 +3405,12 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableBoundsTheTsProductByTheResolvedTileSi
                                    hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
     };
 
-    auto builderAtLimit = buildWithKSeqStride(atLimit);
+    auto const builderAtLimit = buildWithKSeqStride(atLimit);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwAtLimit(
         builderAtLimit.GetBufferPointer(), builderAtLimit.GetSize());
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, gwAtLimit));
 
-    auto builderPastLimit = buildWithKSeqStride(pastLimit);
+    auto const builderPastLimit = buildWithKSeqStride(pastLimit);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwPastLimit(
         builderPastLimit.GetBufferPointer(), builderPastLimit.GetSize());
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, gwPastLimit));
@@ -3767,7 +3768,7 @@ TEST_F(TestSdpaBwdPlanBuilder, A16WorkspaceSizeFollowsTheArch)
         GTEST_SKIP();
     }
 
-    auto graphBuilder = createSdpaBwdGraph({2, 8, 200, 128});
+    auto const graphBuilder = createSdpaBwdGraph({2, 8, 200, 128});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     Settings a16Settings;
@@ -3872,7 +3873,7 @@ TEST_F(TestSdpaBwdPlanBuilder, DeclinesAnOutputWhoseDtypeDiffersFromTheInputs)
     }
 
     {
-        auto builder = createSdpaBwdGraph();
+        auto const builder = createSdpaBwdGraph();
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
             builder.GetBufferPointer(), builder.GetSize());
         ASSERT_TRUE(_planBuilder.isApplicable(_handle, graph));
@@ -3880,15 +3881,16 @@ TEST_F(TestSdpaBwdPlanBuilder, DeclinesAnOutputWhoseDtypeDiffersFromTheInputs)
 
     // O keeps its shape, strides and the Q/K/V/dO/dQ/dK/dV dtype checks still pass; only its
     // element type, hence its byte size, changes.
-    auto builder = hipdnn_test_sdk::utilities::mutateGraph(createSdpaBwdGraph(), [](GraphT& graph) {
-        for(auto& tensor : graph.tensors)
-        {
-            if(tensor->name == "o")
-            {
-                tensor->data_type = DataType::HALF;
-            }
-        }
-    });
+    auto const builder
+        = hipdnn_test_sdk::utilities::mutateGraph(createSdpaBwdGraph(), [](GraphT& graph) {
+              for(auto& tensor : graph.tensors)
+              {
+                  if(tensor->name == "o")
+                  {
+                      tensor->data_type = DataType::HALF;
+                  }
+              }
+          });
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
@@ -3907,7 +3909,7 @@ TEST_F(TestSdpaBwdPlanBuilder, DeclinesARaggedOffsetMultiplierOnATensorWithoutRa
     for(const char* name : {"q", "k", "v", "o"})
     {
         SCOPED_TRACE(name);
-        auto builder
+        auto const builder
             = hipdnn_test_sdk::utilities::mutateGraph(createSdpaBwdGraph(), [name](GraphT& graph) {
                   for(auto& tensor : graph.tensors)
                   {

@@ -193,7 +193,7 @@ TEST_F(TestBundleReferenceValidationHarness, SetUpFailsForABundleRegisteredWithN
 // test above reaches the neighboring no-tensor-data guard.
 TEST_F(TestBundleReferenceValidationHarness, BodyFailsForABundleWithAnAliasAndGoldenData)
 {
-    auto bundle = std::make_shared<IntegrationTestBundle>();
+    const auto bundle = std::make_shared<IntegrationTestBundle>();
     bundle->hasGoldenOutputs = true; // clears SetUp()'s first guard
     bundle->blobs.emplace(); // clears SetUp()'s second guard
     bundle->metadata.aliases.push_back(TensorAlias{1, 0, 0});

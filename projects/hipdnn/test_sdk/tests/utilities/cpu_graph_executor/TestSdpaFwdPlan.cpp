@@ -126,15 +126,16 @@ std::shared_ptr<hipdnn_frontend::graph::Graph>
     using hipdnn_frontend::graph::SdpaAttributes;
     using hipdnn_frontend::graph::TensorAttributes;
 
-    auto makeAttr = [](const std::string& name, const std::vector<int64_t>& dims, int64_t uid) {
-        auto attr = std::make_shared<TensorAttributes>();
-        attr->set_name(name)
-            .set_data_type(DataType::FLOAT)
-            .set_dim(dims)
-            .set_stride(generateStrides(dims))
-            .set_uid(uid);
-        return attr;
-    };
+    const auto makeAttr
+        = [](const std::string& name, const std::vector<int64_t>& dims, int64_t uid) {
+              auto attr = std::make_shared<TensorAttributes>();
+              attr->set_name(name)
+                  .set_data_type(DataType::FLOAT)
+                  .set_dim(dims)
+                  .set_stride(generateStrides(dims))
+                  .set_uid(uid);
+              return attr;
+          };
 
     auto graph = std::make_shared<Graph>();
     graph->set_name("SdpaFwdSinkTest");
@@ -1252,7 +1253,7 @@ TEST(TestSdpaFwdPlanSink, DanglingSinkUidIsNotApplicable)
 {
     SdpaAttributesT attrs;
     attrs.sink_token_tensor_uid = 60;
-    auto graphBuilder = makeRawSdpaFwdGraph(attrs);
+    const auto graphBuilder = makeRawSdpaFwdGraph(attrs);
     const GraphWrapper graphWrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         planBuilder;
@@ -1270,7 +1271,7 @@ TEST(TestSdpaFwdPlanSink, FrontendGraphExecutesLikeTheDirectReference)
     const std::vector<int64_t> lseDims = {1, 4, 8, 1};
     const float attnScale = 0.25F;
 
-    auto graph = buildSinkSdpaFwdGraph(qDims, kDims, vDims, attnScale);
+    const auto graph = buildSinkSdpaFwdGraph(qDims, kDims, vDims, attnScale);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
@@ -1707,7 +1708,7 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsCuSeqLen)
 
     // Control: the same graph without cu_seq_len is accepted, so the reject below declines it.
     {
-        auto baseline = makeRawSdpaFwdGraph(SdpaAttributesT{});
+        const auto baseline = makeRawSdpaFwdGraph(SdpaAttributesT{});
         const GraphWrapper baselineWrapper(baseline.GetBufferPointer(), baseline.GetSize());
         ASSERT_TRUE(
             planBuilder.isApplicable(baselineWrapper.getNode(0), baselineWrapper.getTensorMap()));
@@ -1724,7 +1725,7 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableRejectsCuSeqLen)
         {
             attrs.cu_seq_len_q_tensor_uid = 52;
         }
-        auto graphBuilder = makeRawSdpaFwdGraph(attrs);
+        const auto graphBuilder = makeRawSdpaFwdGraph(attrs);
         const GraphWrapper graphWrapper(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
 
         EXPECT_FALSE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()))
@@ -2055,7 +2056,7 @@ TEST(TestSdpaFwdPlanBuilder, BothDeprecatedCausalMasksThrow)
                                         DataType::FLOAT,
                                         /*causalMask=*/true,
                                         /*causalMaskBottomRight=*/false);
-    auto& graph = std::get<0>(graphTuple);
+    const auto& graph = std::get<0>(graphTuple);
     auto [bin, err] = graph->to_binary();
     ASSERT_TRUE(err.is_good()) << err.get_message();
 

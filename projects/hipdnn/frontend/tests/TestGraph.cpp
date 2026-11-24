@@ -1141,7 +1141,7 @@ TEST_F(TestGraph, GetNumericalNotesForEngineFailsBeforeGraphFinalized)
     const Graph graph;
     std::vector<NumericalNote> notes = {NumericalNote::NONDETERMINISTIC};
 
-    auto result = graph.get_numerical_notes_for_engine(0, notes);
+    const auto result = graph.get_numerical_notes_for_engine(0, notes);
 
     EXPECT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
@@ -1186,7 +1186,7 @@ TEST_F(TestGraph, GetNumericalNotesForEngineReturnsNotes)
         });
 
     std::vector<NumericalNote> notes = {NumericalNote::TENSOR_CORE};
-    auto result = graph.get_numerical_notes_for_engine(7, notes);
+    const auto result = graph.get_numerical_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     ASSERT_EQ(notes.size(), 2u);
@@ -1234,7 +1234,7 @@ TEST_F(TestGraph, GetNumericalNotesForEngineDropsUnknownNotes)
         });
 
     std::vector<NumericalNote> notes;
-    auto result = graph.get_numerical_notes_for_engine(7, notes);
+    const auto result = graph.get_numerical_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     // The note this frontend does not recognize is dropped rather than
@@ -1258,7 +1258,7 @@ TEST_F(TestGraph, GetNumericalNotesForEnginePropagatesCountQueryFailure)
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
     std::vector<NumericalNote> notes = {NumericalNote::TENSOR_CORE};
-    auto result = graph.get_numerical_notes_for_engine(7, notes);
+    const auto result = graph.get_numerical_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_bad());
     EXPECT_TRUE(notes.empty());
@@ -1291,7 +1291,7 @@ TEST_F(TestGraph, GetNumericalNotesForEnginePropagatesNoteQueryFailure)
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
 
     std::vector<NumericalNote> notes = {NumericalNote::TENSOR_CORE};
-    auto result = graph.get_numerical_notes_for_engine(7, notes);
+    const auto result = graph.get_numerical_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_bad());
     EXPECT_TRUE(notes.empty());
@@ -1335,7 +1335,7 @@ TEST_F(TestGraph, GetNumericalNotesForEngineRejectsMismatchedReturnedNoteCount)
         });
 
     std::vector<NumericalNote> notes = {NumericalNote::TENSOR_CORE};
-    auto result = graph.get_numerical_notes_for_engine(7, notes);
+    const auto result = graph.get_numerical_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_bad());
     EXPECT_TRUE(notes.empty());
@@ -1363,7 +1363,7 @@ TEST_F(TestGraph, GetNumericalNotesForEngineClearsOutputWhenNoNotes)
         });
 
     std::vector<NumericalNote> notes = {NumericalNote::TENSOR_CORE};
-    auto result = graph.get_numerical_notes_for_engine(7, notes);
+    const auto result = graph.get_numerical_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_TRUE(notes.empty());
@@ -1386,7 +1386,7 @@ TEST_F(TestGraph, GetNumericalNotesForEngineMapsNotSupportedCountQueryToNondeter
         .WillOnce(Return(HIPDNN_STATUS_NOT_SUPPORTED));
 
     std::vector<NumericalNote> notes = {NumericalNote::TENSOR_CORE};
-    auto result = graph.get_numerical_notes_for_engine(7, notes);
+    const auto result = graph.get_numerical_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(notes, std::vector<NumericalNote>{NumericalNote::NONDETERMINISTIC});
@@ -1422,7 +1422,7 @@ TEST_F(TestGraph, GetNumericalNotesForEngineMapsNotSupportedNoteQueryToNondeterm
         .WillOnce(Return(HIPDNN_STATUS_NOT_SUPPORTED));
 
     std::vector<NumericalNote> notes;
-    auto result = graph.get_numerical_notes_for_engine(7, notes);
+    const auto result = graph.get_numerical_notes_for_engine(7, notes);
 
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(notes, std::vector<NumericalNote>{NumericalNote::NONDETERMINISTIC});
@@ -1442,7 +1442,7 @@ TEST_F(TestGraph, GetNumericalNotesForEngineOtherCountQueryStatusIsBackendError)
         .WillOnce(Return(HIPDNN_STATUS_BAD_PARAM));
 
     std::vector<NumericalNote> notes;
-    auto result = graph.get_numerical_notes_for_engine(7, notes);
+    const auto result = graph.get_numerical_notes_for_engine(7, notes);
 
     EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_TRUE(notes.empty());
@@ -1475,7 +1475,7 @@ TEST_F(TestGraph, GetNumericalNotesForEngineOtherNoteQueryStatusIsBackendError)
         .WillOnce(Return(HIPDNN_STATUS_BAD_PARAM));
 
     std::vector<NumericalNote> notes;
-    auto result = graph.get_numerical_notes_for_engine(7, notes);
+    const auto result = graph.get_numerical_notes_for_engine(7, notes);
 
     EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_TRUE(notes.empty());
@@ -1503,7 +1503,7 @@ TEST_F(TestGraph, GetNumericalNotesForEngineRejectsNegativeNoteCount)
         });
 
     std::vector<NumericalNote> notes = {NumericalNote::TENSOR_CORE};
-    auto result = graph.get_numerical_notes_for_engine(7, notes);
+    const auto result = graph.get_numerical_notes_for_engine(7, notes);
 
     EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_TRUE(notes.empty());
@@ -7130,13 +7130,13 @@ TEST_F(TestGraph, SdpaFwdValidateFailsNegativeStrideOnK)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto q = std::make_shared<TensorAttributes>();
+    const auto q = std::make_shared<TensorAttributes>();
     q->set_dim({2, 8, 16, 64}).set_stride({8192, 1024, 64, 1}).set_data_type(DataType::FLOAT);
 
-    auto k = std::make_shared<TensorAttributes>();
+    const auto k = std::make_shared<TensorAttributes>();
     k->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, -64, 1}).set_data_type(DataType::FLOAT);
 
-    auto v = std::make_shared<TensorAttributes>();
+    const auto v = std::make_shared<TensorAttributes>();
     v->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, 64, 1}).set_data_type(DataType::FLOAT);
 
     SdpaAttributes attributes;
@@ -7157,16 +7157,16 @@ TEST_F(TestGraph, SdpaFwdValidateSucceedsWithZeroStrideBias)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto q = std::make_shared<TensorAttributes>();
+    const auto q = std::make_shared<TensorAttributes>();
     q->set_dim({2, 8, 16, 64}).set_stride({8192, 1024, 64, 1}).set_data_type(DataType::FLOAT);
 
-    auto k = std::make_shared<TensorAttributes>();
+    const auto k = std::make_shared<TensorAttributes>();
     k->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, 64, 1}).set_data_type(DataType::FLOAT);
 
-    auto v = std::make_shared<TensorAttributes>();
+    const auto v = std::make_shared<TensorAttributes>();
     v->set_dim({2, 8, 32, 64}).set_stride({16384, 2048, 64, 1}).set_data_type(DataType::FLOAT);
 
-    auto bias = std::make_shared<TensorAttributes>();
+    const auto bias = std::make_shared<TensorAttributes>();
     bias->set_name("Bias")
         .set_dim({2, 8, 16, 32})
         .set_stride({0, 0, 32, 1})
@@ -7244,8 +7244,8 @@ TEST_F(TestGraph, ValidateFailsNegativeStrideOnGraphInput)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
-    auto in1 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
+    const auto in1 = std::make_shared<TensorAttributes>();
 
     in0->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
     in1->set_name("in1")
@@ -7272,15 +7272,15 @@ TEST_F(TestGraph, ValidateFailsNegativeStrideOnIntermediateTensor)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto a = std::make_shared<TensorAttributes>();
+    const auto a = std::make_shared<TensorAttributes>();
     a->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
 
-    auto b = std::make_shared<TensorAttributes>();
+    const auto b = std::make_shared<TensorAttributes>();
     b->set_dim({8, 5}).set_stride({5, 1}).set_data_type(DataType::FLOAT);
 
     MatmulAttributes matmulAttributes;
     matmulAttributes.set_name("MatmulNode");
-    auto c = graph.matmul(a, b, matmulAttributes);
+    const auto c = graph.matmul(a, b, matmulAttributes);
 
     PointwiseAttributes reluAttributes;
     reluAttributes.set_name("ReluNode");
@@ -7302,8 +7302,8 @@ TEST_F(TestGraph, ValidateFailsNegativeStrideOnGraphOutput)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto in0 = std::make_shared<TensorAttributes>();
-    auto in1 = std::make_shared<TensorAttributes>();
+    const auto in0 = std::make_shared<TensorAttributes>();
+    const auto in1 = std::make_shared<TensorAttributes>();
 
     in0->set_dim({1, 2, 3, 4}).set_stride({24, 12, 4, 1}).set_data_type(DataType::FLOAT);
     in1->set_dim({1, 2, 3, 4}).set_stride({24, 12, 4, 1}).set_data_type(DataType::FLOAT);
@@ -7312,7 +7312,7 @@ TEST_F(TestGraph, ValidateFailsNegativeStrideOnGraphOutput)
     attributes.set_name("PointwiseNode");
     attributes.set_mode(PointwiseMode::ADD);
 
-    auto out0 = graph.pointwise(in0, in1, attributes);
+    const auto out0 = graph.pointwise(in0, in1, attributes);
     out0->set_is_virtual(false);
     out0->set_stride({24, 12, 4, -1});
 
@@ -7329,10 +7329,10 @@ TEST_F(TestGraph, CustomOpValidateFailsNegativeStrideOnOutput)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto inputA = std::make_shared<TensorAttributes>();
+    const auto inputA = std::make_shared<TensorAttributes>();
     inputA->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
 
-    auto inputB = std::make_shared<TensorAttributes>();
+    const auto inputB = std::make_shared<TensorAttributes>();
     inputB->set_dim({4, 8}).set_stride({8, 1}).set_data_type(DataType::FLOAT);
 
     CustomOpAttributes attributes;
@@ -7357,8 +7357,8 @@ TEST_F(TestGraph, ValidateSucceedsWithZeroStrideBroadcastInput)
             .set_compute_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT);
 
-        auto in0 = std::make_shared<TensorAttributes>();
-        auto in1 = std::make_shared<TensorAttributes>();
+        const auto in0 = std::make_shared<TensorAttributes>();
+        const auto in1 = std::make_shared<TensorAttributes>();
 
         in0->set_dim({1, 2, 3, 4}).set_stride({24, 12, 4, 1}).set_data_type(DataType::FLOAT);
         in1->set_dim({1, 2, 3, 4}).set_stride({0, 0, 0, 1}).set_data_type(DataType::FLOAT);
@@ -7379,10 +7379,10 @@ TEST_F(TestGraph, ValidateSucceedsWithZeroStrideBroadcastInput)
             .set_compute_data_type(DataType::FLOAT)
             .set_intermediate_data_type(DataType::FLOAT);
 
-        auto a = std::make_shared<TensorAttributes>();
+        const auto a = std::make_shared<TensorAttributes>();
         a->set_dim({2, 4, 8}).set_stride({32, 8, 1}).set_data_type(DataType::FLOAT);
 
-        auto b = std::make_shared<TensorAttributes>();
+        const auto b = std::make_shared<TensorAttributes>();
         b->set_dim({2, 8, 5}).set_stride({0, 5, 1}).set_data_type(DataType::FLOAT);
 
         MatmulAttributes attributes;
@@ -7402,13 +7402,13 @@ TEST_F(TestGraph, ValidateFailsNegativeStrideOnRaggedOffset)
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto raggedOffset = std::make_shared<TensorAttributes>();
+    const auto raggedOffset = std::make_shared<TensorAttributes>();
     raggedOffset->set_name("RaggedOffset")
         .set_dim({2, 1, 1, 1})
         .set_stride({-1, 1, 1, 1})
         .set_data_type(DataType::INT64);
 
-    auto x = std::make_shared<TensorAttributes>();
+    const auto x = std::make_shared<TensorAttributes>();
     x->set_name("X")
         .set_dim({2, 3, 4, 5})
         .set_stride({60, 20, 5, 1})
@@ -11616,7 +11616,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceRepeatedCallOnFinalizedPlanReturnsOk
     mockPlanFinalize(10, HIPDNN_STATUS_BAD_PARAM, Exactly(0), "already finalized");
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     EXPECT_TRUE(result.is_good()) << result.get_message();
 
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
@@ -11784,7 +11784,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceTopPlanOverEngineConfigWorkspaceBuil
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/40);
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -11993,7 +11993,7 @@ TEST_F(TestGraph, BuildPlansAllFinalizesAPlanWithACachedWorkspaceThatWasNeverFin
 
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -12008,7 +12008,7 @@ TEST_F(TestGraph, BuildPlanAtIndexFinalizesAPlanWithACachedWorkspaceThatWasNever
 
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
 
-    auto result = graph.build_plan_at_index(0);
+    const auto result = graph.build_plan_at_index(0);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -12035,7 +12035,7 @@ TEST_F(TestGraph, BuildPlansAllDeselectNondeterministicBarsReportingEngine)
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false}));
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
@@ -12058,7 +12058,7 @@ TEST_F(TestGraph, BuildPlansAllSelectKeepsOnlyEnginesReportingEverySelectedNote)
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
     mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false, true}));
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
@@ -12081,7 +12081,7 @@ TEST_F(TestGraph, BuildPlansAllNoteFiltersOfBothFamiliesBarEngineFailingEither)
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true, true}));
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
@@ -12097,7 +12097,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceDeselectedTopPlanBuildsNextSurvivor)
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -12117,7 +12117,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceNoteFilteredTopPlanBuildsNextSurvivo
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
     ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
@@ -12135,7 +12135,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceAlreadyBarredTopPlanBuildsNextSurviv
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
     ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
@@ -12154,7 +12154,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceWalkSkipsFilteredCandidateAfterFinal
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 2u);
     ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
@@ -12176,9 +12176,9 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceSafetyNetRejectsPlanFinalizedOverLim
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/40);
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     // The call succeeds, so the WARN is the only sign of the plugin contract breach.
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "engine 10"));
     ASSERT_TRUE(result.is_good()) << result.get_message();
@@ -12197,9 +12197,9 @@ TEST_F(TestGraph, BuildPlansWarnsWhenPlanWorkspaceExceedsEngineConfigWithoutLimi
     _engineConfigWorkspace[10] = 50;
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
 
     // With no limit the plan is never rejected; the WARN is the only sign of the breach.
     ASSERT_TRUE(result.is_good()) << result.get_message();
@@ -12219,9 +12219,9 @@ TEST_F(TestGraph, BuildPlansReadsNoEngineConfigWorkspaceWhenWarnLoggingIsOff)
     _engineConfigWorkspace[10] = 50;
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_OFF);
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
 
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_TRUE(_engineConfigWorkspaceReads.empty());
@@ -12237,9 +12237,9 @@ TEST_F(TestGraph, BuildPlansPlanOverEngineConfigWithinLimitLogsExactlyOneWarn)
     _engineConfigWorkspace[10] = 50;
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/80);
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
 
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -12257,9 +12257,9 @@ TEST_F(TestGraph, BuildPlansPlanOverLimitLogsOnlyTheRejectionWarn)
     _engineConfigWorkspace[10] = 50;
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
 
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_WARN), 1u) << recorder.getRecordedLogsAsString();
@@ -12274,9 +12274,9 @@ TEST_F(TestGraph, BuildPlansCompliantPlanLogsNoWorkspaceWarn)
     _engineConfigWorkspace[10] = 50;
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/50);
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
 
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(_engineConfigWorkspaceReads.size(), 1u);
@@ -12291,9 +12291,9 @@ TEST_F(TestGraph, BuildPlansReadsNoEngineConfigWorkspaceWhenLogLevelIsError)
     _engineConfigWorkspace[10] = 50;
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
 
     // WARN is below the ERROR level, so the comparison neither queries the plugin nor logs.
     ASSERT_TRUE(result.is_good()) << result.get_message();
@@ -12309,9 +12309,9 @@ TEST_F(TestGraph, BuildPlansWithUnreadableEngineConfigWorkspaceAndNoLimitBuildsW
     _unreadableWorkspaceEngines.insert(10);
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
 
     // The read is attempted, fails, and skips the comparison; the plan still builds.
     ASSERT_TRUE(result.is_good()) << result.get_message();
@@ -12344,12 +12344,12 @@ TEST_F(TestGraph, AutotunePlanSpecWarnsWhenBenchmarkedPlanWorkspaceExceedsEngine
         });
     mockSuccessfulBenchmarkExecution();
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
-    auto result = graph.autotune(
+    const auto result = graph.autotune(
         _handle, variantPack, workspace, int64_t{100000}, AutotuneConfig{}, {}, &results);
 
     ASSERT_TRUE(result.is_good()) << result.err_msg;
@@ -12384,14 +12384,14 @@ TEST_F(TestGraph, AutotunePlanSpecWarnsWhenPrimingPlanWorkspaceExceedsEngineConf
         });
     mockSuccessfulBenchmarkExecution();
 
-    auto recorder
+    const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
     AutotuneConfig config;
     config.mode = TuneMode::EXHAUSTIVE;
-    auto result
+    const auto result
         = graph.autotune(_handle, variantPack, workspace, int64_t{100000}, config, {}, &results);
 
     ASSERT_TRUE(result.is_good()) << result.err_msg;
@@ -12415,7 +12415,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceSafetyNetRejectingEveryPlanReturnsNo
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_NE(result.err_msg.find("engine 10: finalized workspace 500 exceeds limit 100 "
@@ -12443,7 +12443,7 @@ TEST_F(TestGraph, BuildPlansAllSafetyNetRejectsPlanFinalizedOverLimit)
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/40);
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false}));
@@ -12461,7 +12461,7 @@ TEST_F(TestGraph, BuildPlansAllSafetyNetRejectingEveryPlanReturnsNoSurvivorCode)
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_NE(result.err_msg.find("finalized workspace 500 exceeds limit 100"), std::string::npos)
@@ -12481,7 +12481,7 @@ TEST_F(TestGraph, BuildPlanAtIndexSafetyNetRejectsPlanFinalizedOverLimit)
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plan_at_index(0);
+    const auto result = graph.build_plan_at_index(0);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_NE(result.err_msg.find("finalized workspace 500 exceeds limit 100"), std::string::npos)
@@ -12502,7 +12502,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceAfterBuildReturnsOkAndIgnoresNewFilt
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 16);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -12518,7 +12518,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceOnDeserializedPlanReturnsOk)
 
     // The deserialized plan was finalized at load and has no engine config; a build call
     // succeeds and leaves it active.
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_NE(graph.getActiveExecutionPlanPtr(), nullptr);
 }
@@ -12543,7 +12543,7 @@ TEST_F(TestGraph, CheckSupportAfterBuildMarksNothingAndKeepsActivePlanExecutable
     expectActivePlanExecutable(graph, 16);
 
     graph.deselect_engines(std::vector<int64_t>{10, 20});
-    auto result = graph.check_support();
+    const auto result = graph.check_support();
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
@@ -12561,7 +12561,7 @@ TEST_F(TestGraph, DeselectEnginesNameThenIdBarsOnlyTheIdEngine)
     graph.deselect_engines({hipdnn_data_sdk::utilities::formatEngineIdHex(10)});
     graph.deselect_engines(std::vector<int64_t>{20});
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true}));
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
@@ -12578,7 +12578,7 @@ TEST_F(TestGraph, DeselectEnginesIdThenNameBarsOnlyTheNamedEngine)
     graph.deselect_engines(std::vector<int64_t>{10});
     graph.deselect_engines({hipdnn_data_sdk::utilities::formatEngineIdHex(20)});
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true}));
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
@@ -12595,7 +12595,7 @@ TEST_F(TestGraph, DeselectEnginesEmptyNameListClearsTheFilterBeforeAnyEvaluation
     graph.deselect_engines({hipdnn_data_sdk::utilities::formatEngineIdHex(10)});
     graph.deselect_engines(std::vector<std::string>{});
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
@@ -12612,7 +12612,7 @@ TEST_F(TestGraph, DeselectEnginesEmptyListClearsTheFilterBeforeAnyEvaluation)
     graph.deselect_engines(std::vector<int64_t>{10});
     graph.deselect_engines(std::vector<int64_t>{});
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
@@ -12652,7 +12652,7 @@ TEST_F(TestGraph, BuildPlansAllAfterHeuristicsChoiceBuildsOnlyTheOtherPlans)
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 16);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", 8);
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
@@ -12673,7 +12673,7 @@ TEST_F(TestGraph, BuildPlansAllAfterAllFinalizesNoPlanAgain)
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 16);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 8);
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
@@ -12689,9 +12689,10 @@ TEST_F(TestGraph, AutotuneAfterBuildReportsFilteredActivePlanBarredWithoutMarkin
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 8);
     graph.deselect_engines(std::vector<int64_t>{10, 20});
 
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, variantPack, nullptr, AutotuneConfig{}, {}, &results);
+    const auto result
+        = graph.autotune(_handle, variantPack, nullptr, AutotuneConfig{}, {}, &results);
 
     // Nothing is benchmarkable. The finalized active plan is reported barred but not marked;
     // the other plan is marked.
@@ -12720,7 +12721,7 @@ TEST_F(TestGraph, BuildPlansAllAfterBuildLeavesFilteredActivePlanActiveAndUnbarr
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 16);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", 8);
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
@@ -12737,7 +12738,7 @@ TEST_F(TestGraph, BuildPlansAllAfterBuildWithEveryPlanFilteredSucceedsAndKeepsTh
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 16);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     // A built plan exists after the call, so it succeeds; the filtered active plan is logged
     // as skipped, not marked, and stays executable.
     EXPECT_TRUE(result.is_good()) << result.get_message();
@@ -12755,7 +12756,7 @@ TEST_F(TestGraph, BuildPlanAtIndexOnFilteredActivePlanReturnsNoSurvivorCodeAndKe
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 16);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plan_at_index(0);
+    const auto result = graph.build_plan_at_index(0);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
@@ -12775,7 +12776,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceWithoutFilterTouchesOnlyTopPlanAndRe
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
     EXPECT_TRUE(_numericalNoteReads.empty());
@@ -12789,7 +12790,7 @@ TEST_F(TestGraph, CheckSupportNoSurvivorListsEverySkipReason)
     hipdnn_frontend::GraphTestUtils graph;
     prepareNoSurvivorGraph(graph);
 
-    auto result = graph.check_support();
+    const auto result = graph.check_support();
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     expectNoSurvivorMessage(result.err_msg);
@@ -12802,7 +12803,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceNoSurvivorListsEverySkipReason)
     hipdnn_frontend::GraphTestUtils graph;
     prepareNoSurvivorGraph(graph);
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     expectNoSurvivorMessage(result.err_msg);
@@ -12817,7 +12818,7 @@ TEST_F(TestGraph, BuildPlansAllNoSurvivorListsEverySkipReason)
     hipdnn_frontend::GraphTestUtils graph;
     prepareNoSurvivorGraph(graph);
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     expectNoSurvivorMessage(result.err_msg);
@@ -12837,7 +12838,7 @@ TEST_F(TestGraph, BuildPlanAtIndexNoSurvivorNamesTheSkipReasonOfItsIndex)
                                               "workspace 500 exceeds limit 100"};
     for(size_t index = 0; index < reasons.size(); ++index)
     {
-        auto result = graph.build_plan_at_index(static_cast<int64_t>(index));
+        const auto result = graph.build_plan_at_index(static_cast<int64_t>(index));
         ASSERT_TRUE(result.is_bad());
         EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
         EXPECT_NE(result.err_msg.find(reasons[index]), std::string::npos) << result.err_msg;
@@ -12850,9 +12851,10 @@ TEST_F(TestGraph, AutotuneNoSurvivorReturnsInvalidValueWithEveryPlanReportedBarr
     hipdnn_frontend::GraphTestUtils graph;
     prepareNoSurvivorGraph(graph);
 
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, variantPack, nullptr, AutotuneConfig{}, {}, &results);
+    const auto result
+        = graph.autotune(_handle, variantPack, nullptr, AutotuneConfig{}, {}, &results);
 
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     ASSERT_EQ(results.size(), 4u);
@@ -12873,7 +12875,7 @@ TEST_F(TestGraph, BuildPlansAllWithoutFilterAndEveryFinalizeFailingKeepsBackendE
     mockPlanFinalize(10, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "execution context lost");
     mockPlanFinalize(20, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "execution context lost");
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
@@ -12889,13 +12891,13 @@ TEST_F(TestGraph, BuildPlanAtIndexDeselectedEngineReturnsNoSurvivorCode)
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/8);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto removed = graph.build_plan_at_index(1);
+    const auto removed = graph.build_plan_at_index(1);
     ASSERT_TRUE(removed.is_bad());
     EXPECT_EQ(removed.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true}));
     EXPECT_FALSE(graph.isExecutionPlanFinalized());
 
-    auto kept = graph.build_plan_at_index(0);
+    const auto kept = graph.build_plan_at_index(0);
     EXPECT_TRUE(kept.is_good()) << kept.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
 }
@@ -12913,7 +12915,7 @@ TEST_F(TestGraph, BuildPlanAtIndexNoteFilteredEngineReadsNotesOfTheIndexedEngine
         mockPlanFinalize(engineId, HIPDNN_STATUS_SUCCESS, Exactly(0));
     }
 
-    auto result = graph.build_plan_at_index(1);
+    const auto result = graph.build_plan_at_index(1);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_EQ(_numericalNoteReads, (std::vector<int64_t>{20}));
@@ -12931,7 +12933,7 @@ TEST_F(TestGraph, BuildPlanAtIndexOverEngineConfigWorkspaceLimitReturnsNoSurvivo
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plan_at_index(1);
+    const auto result = graph.build_plan_at_index(1);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_EQ(_engineConfigWorkspaceReads, (std::vector<int64_t>{20}));
@@ -12947,7 +12949,7 @@ TEST_F(TestGraph, BuildPlanAtIndexAfterBuildPlansAllReturnsNoSurvivorCodeForNewF
     ASSERT_TRUE(graph.build_plans(BuildPlanPolicy::ALL).is_good());
 
     graph.deselect_engines(std::vector<int64_t>{20});
-    auto result = graph.build_plan_at_index(1);
+    const auto result = graph.build_plan_at_index(1);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true}));
@@ -12963,7 +12965,7 @@ TEST_F(TestGraph, CheckSupportWithLowerSurvivingPlanReturnsOk)
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.check_support();
+    const auto result = graph.check_support();
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
 }
@@ -12975,7 +12977,7 @@ TEST_F(TestGraph, CheckSupportFailsWhenDeselectEnginesBarsEveryPlan)
     prepareFilterGraph(graph, {10, 20});
     graph.deselect_engines(std::vector<int64_t>{10, 20});
 
-    auto result = graph.check_support();
+    const auto result = graph.check_support();
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
 }
@@ -12989,7 +12991,7 @@ TEST_F(TestGraph, CheckSupportFailsWhenEveryEngineConfigWorkspaceExceedsLimit)
     _engineConfigWorkspace[10] = 500;
     _engineConfigWorkspace[20] = 600;
 
-    auto result = graph.check_support();
+    const auto result = graph.check_support();
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_NE(result.err_msg.find("engine 10: workspace 500 exceeds limit 100"), std::string::npos)
@@ -13007,7 +13009,7 @@ TEST_F(TestGraph, CheckSupportFailsWhenDeselectEnginesBarsTheOnlyNoteSurvivor)
     graph.select_numeric_notes({NumericalNote::TENSOR_CORE});
     graph.deselect_engines(std::vector<int64_t>{20});
 
-    auto result = graph.check_support();
+    const auto result = graph.check_support();
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_NE(result.err_msg.find("engine 10: numerical note filter"), std::string::npos)
@@ -13025,7 +13027,7 @@ TEST_F(TestGraph, CheckSupportSkipsPlanWithUnreadableWorkspaceAndPassesOnNextPla
     _unreadableWorkspaceEngines.insert(10);
     _engineConfigWorkspace[20] = 50;
 
-    auto result = graph.check_support();
+    const auto result = graph.check_support();
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -13037,7 +13039,7 @@ TEST_F(TestGraph, CheckSupportWithOnlyCandidateUnreadableWorkspaceReturnsNoSurvi
     graph.deselect_workspace_greater_than(100);
     _unreadableWorkspaceEngines.insert(10);
 
-    auto result = graph.check_support();
+    const auto result = graph.check_support();
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_NE(result.err_msg.find("workspace unknown"), std::string::npos) << result.err_msg;
@@ -13055,7 +13057,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceWalksPastPlanWithUnreadableWorkspace
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/40);
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false}));
@@ -13070,7 +13072,7 @@ TEST_F(TestGraph, BuildPlanAtIndexOnPlanWithUnreadableWorkspaceReturnsNoSurvivor
     _unreadableWorkspaceEngines.insert(10);
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plan_at_index(0);
+    const auto result = graph.build_plan_at_index(0);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_NE(result.err_msg.find("workspace unknown"), std::string::npos) << result.err_msg;
@@ -13084,7 +13086,7 @@ TEST_F(TestGraph, CheckSupportWithOnlyStickyBarredPlanSetEvaluatesInsteadOfRetur
     graph.setPlanBarredForTest(0);
 
     // The active plan is barred, yet plan 20 passes, so the graph is supported.
-    auto result = graph.check_support();
+    const auto result = graph.check_support();
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -13095,7 +13097,7 @@ TEST_F(TestGraph, CheckSupportWithNoFilterIsUnchangedAndReadsNothing)
     prepareFilterGraph(graph, {10, 20});
     _numericalNotes[10] = {HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
 
-    auto result = graph.check_support();
+    const auto result = graph.check_support();
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_TRUE(_numericalNoteReads.empty());
     EXPECT_TRUE(_behaviorNoteReads.empty());
@@ -13118,7 +13120,7 @@ TEST_F(TestGraph, CheckSupportPassImpliesBuildPlansHeuristicsChoiceSucceeds)
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/40);
 
     ASSERT_TRUE(graph.check_support().is_good());
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
 }
@@ -13138,7 +13140,7 @@ TEST_F(TestGraph, FiltersSetBeforeCreateExecutionPlansApplyToTheCreatedPlans)
 
     ASSERT_TRUE(graph.create_execution_plans().is_good());
     EXPECT_TRUE(graph.check_support().is_good());
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
     EXPECT_EQ(*graph.selectedEngineIdForTest(), 40);
@@ -13159,7 +13161,7 @@ TEST_F(TestGraph, FiltersSetBeforeBuildApplyToThePlansItCreates)
     graph.deselect_numeric_notes({NumericalNote::NONDETERMINISTIC});
     graph.deselect_workspace_greater_than(100);
 
-    auto result = graph.build(_handle);
+    const auto result = graph.build(_handle);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
     EXPECT_EQ(*graph.selectedEngineIdForTest(), 40);
@@ -13174,7 +13176,7 @@ TEST_F(TestGraph, FiltersSurviveASecondCreateExecutionPlans)
 
     ASSERT_TRUE(graph.create_execution_plans().is_good());
     ASSERT_TRUE(graph.create_execution_plans().is_good());
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
     EXPECT_EQ(*graph.selectedEngineIdForTest(), 20);
@@ -13407,11 +13409,11 @@ TEST_F(TestGraph, CreateExecutionPlanExtOnEngineRemovedByFilterFailsCheckSupport
 
     ASSERT_TRUE(graph.create_execution_plan_ext(10, {}).is_good());
 
-    auto supported = graph.check_support();
+    const auto supported = graph.check_support();
     ASSERT_TRUE(supported.is_bad());
     EXPECT_EQ(supported.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
 
-    auto built = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto built = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(built.is_bad());
     EXPECT_EQ(built.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_FALSE(graph.isExecutionPlanFinalized());
@@ -13425,10 +13427,10 @@ TEST_F(TestGraph, AutotuneWithNoteFilterSetAfterPlansCreatedReportsNoteFilteredP
     _numericalNotes[20] = {HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
     graph.deselect_numeric_notes({NumericalNote::NONDETERMINISTIC});
 
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     void* workspace = reinterpret_cast<void*>(0x1000);
-    auto result = graph.autotune(
+    const auto result = graph.autotune(
         _handle, variantPack, workspace, int64_t{1024}, AutotuneConfig{}, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.err_msg;
 
@@ -13448,10 +13450,10 @@ TEST_F(TestGraph, AutotuneWithDeselectedEngineSetAfterPlansCreatedReportsPlanBar
     prepareFilterGraph(graph, {10, 20}, /*workspaceSize=*/512);
     graph.deselect_engines(std::vector<int64_t>{20});
 
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     void* workspace = reinterpret_cast<void*>(0x1000);
-    auto result = graph.autotune(
+    const auto result = graph.autotune(
         _handle, variantPack, workspace, int64_t{1024}, AutotuneConfig{}, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.err_msg;
 
@@ -13479,12 +13481,12 @@ TEST_F(TestGraph, AutotunePlanSpecNoteFilteredSpecIsReportedBarredBeforeFinalize
 
     mockSuccessfulBenchmarkExecution();
 
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
     AutotuneConfig config;
     config.mode = TuneMode::EXHAUSTIVE;
-    auto result
+    const auto result
         = graph.autotune(_handle, variantPack, workspace, int64_t{100000}, config, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.err_msg;
 
@@ -13517,10 +13519,10 @@ TEST_F(TestGraph, AutotunePlanSpecJudgesTheLimitByTheCompiledEngineConfigNotTheE
 
     mockSuccessfulBenchmarkExecution();
 
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
-    auto result = graph.autotune(
+    const auto result = graph.autotune(
         _handle, variantPack, workspace, int64_t{100000}, AutotuneConfig{}, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.err_msg;
 
@@ -13565,10 +13567,10 @@ TEST_F(TestGraph, AutotunePlanSpecSafetyNetBarsPlanFinalizedOverLimitDespiteItsC
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
-    auto result = graph.autotune(
+    const auto result = graph.autotune(
         _handle, variantPack, workspace, int64_t{100000}, AutotuneConfig{}, {}, &results);
 
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
@@ -13593,10 +13595,10 @@ TEST_F(TestGraph, AutotunePlanSpecAtZeroLimitBarsSpecWithConfigWorkspaceAndBench
     graph.deselect_workspace_greater_than(0);
 
     mockSuccessfulBenchmarkExecution();
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
-    auto result = graph.autotune(
+    const auto result = graph.autotune(
         _handle, variantPack, workspace, int64_t{100000}, AutotuneConfig{}, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.err_msg;
 
@@ -13639,10 +13641,10 @@ TEST_F(TestGraph, AutotunePlanSpecSafetyNetBarsPlanFinalizedOverAZeroLimitDespit
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
-    auto result = graph.autotune(
+    const auto result = graph.autotune(
         _handle, variantPack, workspace, int64_t{100000}, AutotuneConfig{}, {}, &results);
 
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
@@ -13664,10 +13666,10 @@ TEST_F(TestGraph, AutotunePlanSpecWithFailedNoteReadReturnsTheErrorAndBenchmarks
     _failingNoteEngines.insert(61);
 
     EXPECT_CALL(*_mockBackend, backendExecute(_, _, _)).Times(0);
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
-    auto result = graph.autotune(
+    const auto result = graph.autotune(
         _handle, variantPack, workspace, int64_t{100000}, AutotuneConfig{}, {}, &results);
 
     ASSERT_TRUE(result.is_bad());
@@ -13687,7 +13689,7 @@ TEST_F(TestGraph, BuildPlanAtIndexSafetyNetRejectsPlanFinalizedOverAZeroLimit)
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plan_at_index(0);
+    const auto result = graph.build_plan_at_index(0);
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_NE(result.err_msg.find("finalized workspace 500 exceeds limit 0"), std::string::npos)
@@ -13705,7 +13707,7 @@ TEST_F(TestGraph, AutotunePlanSpecWithUnreadableEngineConfigWorkspaceReportsSpec
     graph.deselect_workspace_greater_than(1000);
 
     mockSuccessfulBenchmarkExecution();
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
     graph.autotune(
@@ -13726,10 +13728,10 @@ TEST_F(TestGraph, AutotuneWithFailedNoteReadReturnsTheErrorAndBenchmarksNothing)
     _failingNoteEngines.insert(10);
 
     EXPECT_CALL(*_mockBackend, backendExecute(_, _, _)).Times(0);
-    auto variantPack = testVariantPack();
+    const auto variantPack = testVariantPack();
     std::vector<AutotuneResult> results;
     void* workspace = reinterpret_cast<void*>(0x1000);
-    auto result = graph.autotune(
+    const auto result = graph.autotune(
         _handle, variantPack, workspace, int64_t{1024}, AutotuneConfig{}, {}, &results);
 
     ASSERT_TRUE(result.is_bad());
@@ -13767,7 +13769,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceFailedNoteReadReturnsErrorAndReadsAg
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto failed = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto failed = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(failed.is_bad());
     EXPECT_EQ(failed.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_NE(failed.err_msg.find("numerical note"), std::string::npos) << failed.err_msg;
@@ -13777,7 +13779,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceFailedNoteReadReturnsErrorAndReadsAg
     // The failed read was not cached: a retry reads again, and now succeeds.
     _failingNoteEngines.clear();
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
-    auto retried = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto retried = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(retried.is_good()) << retried.get_message();
     EXPECT_EQ(_numericalNoteReads, (std::vector<int64_t>{10, 10}));
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
@@ -13795,7 +13797,7 @@ TEST_F(TestGraph, BuildPlansAllFailedNoteReadOnSecondEngineFinalizesNoPlanAndRet
 
     // Every note is read before any plan is finalized, so the failing read leaves nothing
     // half-built.
-    auto failed = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto failed = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(failed.is_bad());
     EXPECT_EQ(failed.code, ErrorCode::HIPDNN_BACKEND_ERROR);
     EXPECT_FALSE(graph.isExecutionPlanFinalized());
@@ -13804,7 +13806,7 @@ TEST_F(TestGraph, BuildPlansAllFailedNoteReadOnSecondEngineFinalizesNoPlanAndRet
     _failingNoteEngines.clear();
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
-    auto retried = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto retried = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(retried.is_good()) << retried.get_message();
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
 }
@@ -13860,7 +13862,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoicePreferredEngineFailingNoteFilterIsRe
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
-    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    const auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
     ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
@@ -13884,7 +13886,7 @@ TEST_F(TestGraph, DeserializedPlanIsNeverFilteredByCheckSupportOrExecute)
     EXPECT_TRUE(graph.check_support().is_good());
     EXPECT_NE(graph.getActiveExecutionPlanPtr(), nullptr);
     auto variantPack = testVariantPack();
-    auto result = graph.execute(_handle, variantPack, nullptr);
+    const auto result = graph.execute(_handle, variantPack, nullptr);
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
@@ -13901,7 +13903,7 @@ TEST_F(TestGraph, BuildPlansAllOnDeserializedPlanSucceedsWithoutFinalizingIt)
                 backendSetAttribute(_, HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG, _, _, _))
         .Times(0);
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_NE(graph.getActiveExecutionPlanPtr(), nullptr);
 }
@@ -13921,7 +13923,7 @@ TEST_F(TestGraph, DeselectBehaviorNotesAppendsEveryCallAndEmptyCallIsNoOp)
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
 
-    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    const auto result = graph.build_plans(BuildPlanPolicy::ALL);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, true, false}));
     EXPECT_EQ(graph.getActivePlanIndex(), 2u);
@@ -13938,13 +13940,13 @@ TEST_F(TestGraph, WorkspaceLimitZeroKeepsOnlyEnginesWithNoWorkspace)
     mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/0);
 
-    auto removed = graph.build_plan_at_index(0);
+    const auto removed = graph.build_plan_at_index(0);
     ASSERT_TRUE(removed.is_bad());
     EXPECT_EQ(removed.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_NE(removed.err_msg.find("workspace 1 exceeds limit 0"), std::string::npos)
         << removed.err_msg;
 
-    auto kept = graph.build_plan_at_index(1);
+    const auto kept = graph.build_plan_at_index(1);
     EXPECT_TRUE(kept.is_good()) << kept.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
 }
@@ -13958,7 +13960,7 @@ TEST_F(TestGraph, CheckSupportWithWorkspaceLimitZeroFiltersOnlyPlansWithWorkspac
     hipdnn_frontend::GraphTestUtils withWorkspace;
     prepareFilterGraph(withWorkspace, {10});
     withWorkspace.deselect_workspace_greater_than(0);
-    auto filtered = withWorkspace.check_support();
+    const auto filtered = withWorkspace.check_support();
     ASSERT_TRUE(filtered.is_bad());
     EXPECT_EQ(filtered.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
     EXPECT_NE(filtered.err_msg.find("workspace 1 exceeds limit 0"), std::string::npos)
@@ -13967,7 +13969,7 @@ TEST_F(TestGraph, CheckSupportWithWorkspaceLimitZeroFiltersOnlyPlansWithWorkspac
     hipdnn_frontend::GraphTestUtils withoutWorkspace;
     prepareFilterGraph(withoutWorkspace, {20});
     withoutWorkspace.deselect_workspace_greater_than(0);
-    auto kept = withoutWorkspace.check_support();
+    const auto kept = withoutWorkspace.check_support();
     EXPECT_TRUE(kept.is_good()) << kept.get_message();
 }
 
@@ -14520,7 +14522,8 @@ TEST_F(TestGraph, AutotunePlanSpecDeselectBarredResultsRecordBothWorkspaceSizes)
     // barred (not workspace-skipped).
     const int64_t runtimeCeiling = 100000;
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, pack, workspace, runtimeCeiling, config, {}, &results);
+    const auto result
+        = graph.autotune(_handle, pack, workspace, runtimeCeiling, config, {}, &results);
 
     // The fitting plan succeeded, so autotune returns OK.
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -16359,7 +16362,7 @@ TEST_F(TestGraph, AutotuneExecutesTheWinnerLastWhenTheWinnerIsNotTheLastTimedPla
     config.warmupIterations = 0;
 
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, testVariantPack(), nullptr, config, {}, &results);
+    const auto result = graph.autotune(_handle, testVariantPack(), nullptr, config, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
@@ -16408,7 +16411,7 @@ TEST_F(TestGraph, AutotuneExecutesTheWinnerChosenByACustomRankingFunction)
     };
 
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, testVariantPack(), nullptr, config, {}, &results);
+    const auto result = graph.autotune(_handle, testVariantPack(), nullptr, config, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
@@ -16454,7 +16457,7 @@ TEST_F(TestGraph, AutotuneReturnsTheErrorOfAFailedFinalWinnerExecuteAndKeepsTheW
     storageConfig.filePath = storagePath;
 
     std::vector<AutotuneResult> results;
-    auto result
+    const auto result
         = graph.autotune(_handle, testVariantPack(), nullptr, config, storageConfig, &results);
     const bool storageWritten = std::filesystem::exists(storagePath);
     std::filesystem::remove(storagePath);
@@ -16497,7 +16500,7 @@ TEST_F(TestGraph, AutotuneReturnsTheErrorOfAFailedSyncAfterTheFinalWinnerExecute
     config.warmupIterations = 0;
 
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, testVariantPack(), nullptr, config, {}, &results);
+    const auto result = graph.autotune(_handle, testVariantPack(), nullptr, config, {}, &results);
 
     ASSERT_EQ(recorder.executedPlans.size(), 3u);
     EXPECT_TRUE(result.is_bad());
@@ -16684,7 +16687,7 @@ TEST_F(TestGraph, AutotuneExecutesTheWinnerAfterAStalledRestartPass)
     config.warmupIterations = 0;
 
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, testVariantPack(), nullptr, config, {}, &results);
+    const auto result = graph.autotune(_handle, testVariantPack(), nullptr, config, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     ASSERT_EQ(stallArmCount, 1);
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
@@ -16763,7 +16766,7 @@ TEST_F(TestGraph, ExhaustiveSweepExecutesTheWinnerLast)
 
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
-    auto result = graph.autotuneExhaustiveSweep(
+    const auto result = graph.autotuneExhaustiveSweep(
         _handle, testVariantPack(), workspace, int64_t{1024}, config, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
@@ -16861,7 +16864,7 @@ TEST_F(TestGraph, ExhaustiveSweepReturnsTheErrorOfAFailedFinalWinnerExecuteAndCa
 
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
-    auto result = graph.autotuneExhaustiveSweep(
+    const auto result = graph.autotuneExhaustiveSweep(
         _handle, testVariantPack(), workspace, int64_t{1024}, config, storageConfig, &results);
     const bool storageWritten = std::filesystem::exists(storagePath);
     std::filesystem::remove(storagePath);

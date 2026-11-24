@@ -470,7 +470,7 @@ TEST(TestContainer, PinsEveryEnginesDeclaredGraphSchema)
         {"hipkernel:flydsl_sdpa_bwd_merged", "1.4.0"},
         {"hipkernel:flydsl_sdpa_bwd_split", "1.4.0"}};
     Container container;
-    auto& manager = container.getEngineManager();
+    auto const& manager = container.getEngineManager();
     const auto baseline = providerBaselineGraphSchema();
     for(const auto engineId : manager.getAllEngineIds())
     {
@@ -664,7 +664,7 @@ TEST(TestContainer, RoutesARaggedSdpaGraphToTheAsmEngine)
     }
     const std::vector<int64_t> dims{4, 8, 256, 128};
     const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims, {3, 1, 2, 0});
-    auto ragged = hipdnn_test_sdk::utilities::sdpa::withRaggedTensors(
+    auto const ragged = hipdnn_test_sdk::utilities::sdpa::withRaggedTensors(
         hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
             dims,
             strides,
@@ -808,7 +808,7 @@ TEST(TestContainer, RanksTheAsmEngineFirstForTheSdpaForwardGraphsItServes)
     Container container;
     auto& manager = container.getEngineManager();
     const auto asmId = asm_sdpa_engine::AsmSdpaEngine::staticId();
-    for(auto& testCase : cases)
+    for(auto const& testCase : cases)
     {
         SCOPED_TRACE(testCase.name);
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(

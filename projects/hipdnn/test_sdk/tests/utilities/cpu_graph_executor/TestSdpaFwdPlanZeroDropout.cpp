@@ -86,7 +86,7 @@ flatbuffers::FlatBufferBuilder makeGraph(SdpaAttributesT attrs,
         add(extra.uid, extra.dataType, extra.dims);
     }
 
-    auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
+    const auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
     std::vector<flatbuffers::Offset<Node>> nodes;
     nodes.push_back(CreateNodeDirect(builder,
                                      "sdpa_fwd_node",
@@ -105,7 +105,7 @@ flatbuffers::FlatBufferBuilder makeGraph(SdpaAttributesT attrs,
 
 bool applicable(const SdpaAttributesT& attrs, const std::vector<ExtraTensor>& extras)
 {
-    auto graph = makeGraph(attrs, extras);
+    const auto graph = makeGraph(attrs, extras);
     return CpuReferenceGraphExecutor().isApplicable(graph.GetBufferPointer(), graph.GetSize());
 }
 
@@ -127,7 +127,7 @@ struct Outputs
 
 Outputs run(const SdpaAttributesT& attrs, const std::vector<ExtraTensor>& extras)
 {
-    auto graph = makeGraph(attrs, extras);
+    const auto graph = makeGraph(attrs, extras);
     Tensor<float> q(DIMS);
     Tensor<float> k(DIMS);
     Tensor<float> v(DIMS);
@@ -287,7 +287,7 @@ namespace fp8 = hipdnn_test_sdk::utilities::sdpa_graph_test;
 
 bool fp8Applicable(const fp8::SdpaGraphSpec& spec)
 {
-    auto graph = fp8::makeSdpaGraph(spec);
+    const auto graph = fp8::makeSdpaGraph(spec);
     return CpuReferenceGraphExecutor().isApplicable(graph.GetBufferPointer(), graph.GetSize());
 }
 
@@ -304,7 +304,7 @@ Fp8Outputs runFp8(const fp8::SdpaGraphSpec& spec)
 {
     using hipdnn_data_sdk::types::bfloat16;
     using hipdnn_data_sdk::types::fp8_e4m3;
-    auto graph = fp8::makeSdpaGraph(spec);
+    const auto graph = fp8::makeSdpaGraph(spec);
     const std::vector<int64_t> dims = {1, 2, 4, 8};
     Tensor<fp8_e4m3> q(dims);
     Tensor<fp8_e4m3> k(dims);

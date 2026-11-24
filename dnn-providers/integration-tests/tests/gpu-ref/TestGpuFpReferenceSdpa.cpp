@@ -2703,8 +2703,8 @@ TEST(TestGpuSdpaFwdFp8, ScalarDescaleOnPagedKvMatchesCpu)
     lenQ.memory().hostData();
     lenKv.memory().hostData();
 
-    auto kDense = CpuFpReferenceSdpa::gatherPagedKv(kCache, table, lenKv, MAX_KV);
-    auto vDense = CpuFpReferenceSdpa::gatherPagedKv(vCache, table, lenKv, MAX_KV);
+    const auto kDense = CpuFpReferenceSdpa::gatherPagedKv(kCache, table, lenKv, MAX_KV);
+    const auto vDense = CpuFpReferenceSdpa::gatherPagedKv(vCache, table, lenKv, MAX_KV);
     Tensor<float> oCpu({1, H, SQ, D});
     Tensor<float> oGpu({1, H, SQ, D});
     Tensor<float> lseCpu({1, H, SQ, 1});

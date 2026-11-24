@@ -629,7 +629,7 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesRestoresAlignment)
         .Times(0);
 
     std::shared_ptr<TensorAttributes> tensor;
-    auto err = unpackTensorAttributes(_fakeDesc, tensor);
+    const auto err = unpackTensorAttributes(_fakeDesc, tensor);
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     ASSERT_NE(tensor, nullptr);
@@ -647,7 +647,7 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesToleratesABackendWithou
         .WillOnce(Return(HIPDNN_STATUS_NOT_SUPPORTED));
 
     std::shared_ptr<TensorAttributes> tensor;
-    auto err = unpackTensorAttributes(_fakeDesc, tensor);
+    const auto err = unpackTensorAttributes(_fakeDesc, tensor);
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     ASSERT_NE(tensor, nullptr);
@@ -665,7 +665,7 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesToleratesABackendThatRe
         .WillOnce(Return(HIPDNN_STATUS_BAD_PARAM));
 
     std::shared_ptr<TensorAttributes> tensor;
-    auto err = unpackTensorAttributes(_fakeDesc, tensor);
+    const auto err = unpackTensorAttributes(_fakeDesc, tensor);
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     ASSERT_NE(tensor, nullptr);
@@ -1053,7 +1053,7 @@ TEST_F(TestUnpackAndRegisterTensor, UnpackAndRegisterTensorLinksRaggedOffset)
     std::shared_ptr<TensorAttributes> outTensor;
     hipdnnBackendDescriptor_t opDesc = nullptr;
 
-    auto err = unpackAndRegisterTensor(
+    const auto err = unpackAndRegisterTensor(
         opDesc, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensorMap, outTensor, "conv X");
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
@@ -1080,7 +1080,7 @@ TEST_F(TestUnpackAndRegisterTensor, UnpackAndRegisterTensorNeverAsksADenseTensor
     std::shared_ptr<TensorAttributes> outTensor;
     hipdnnBackendDescriptor_t opDesc = nullptr;
 
-    auto err = unpackAndRegisterTensor(
+    const auto err = unpackAndRegisterTensor(
         opDesc, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensorMap, outTensor, "conv X");
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
@@ -1117,7 +1117,7 @@ protected:
         std::shared_ptr<TensorAttributes> outTensor;
         hipdnnBackendDescriptor_t opDesc = nullptr;
 
-        auto err = unpackAndRegisterTensor(
+        const auto err = unpackAndRegisterTensor(
             opDesc, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensorMap, outTensor, "conv X");
 
         EXPECT_TRUE(err.is_good()) << err.get_message();
@@ -1189,7 +1189,7 @@ TEST_F(TestUnpackAndRegisterTensor, UnpackAndRegisterTensorLiftsARaggedTensorWit
     std::shared_ptr<TensorAttributes> outTensor;
     hipdnnBackendDescriptor_t opDesc = nullptr;
 
-    auto err = unpackAndRegisterTensor(
+    const auto err = unpackAndRegisterTensor(
         opDesc, HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X, tensorMap, outTensor, "conv X");
 
     EXPECT_TRUE(err.is_good()) << err.get_message();

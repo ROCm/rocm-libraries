@@ -146,9 +146,9 @@ void MiopenEngine::getDetails(HipdnnMiopenHandle& handle,
         = _id == hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID
               ? std::vector<int32_t>{}
               : std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
-    auto numericalNotes = builder.CreateVector(numericalNotesList);
+    const auto numericalNotes = builder.CreateVector(numericalNotesList);
 
-    auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+    const auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
         builder, _id, knobs, 0, 0, 0, numericalNotes);
     builder.Finish(engineDetails);
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());

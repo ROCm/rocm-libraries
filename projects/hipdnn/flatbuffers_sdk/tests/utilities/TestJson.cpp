@@ -267,25 +267,26 @@ TEST(TestJson, SdpaCuSeqLenRoundTripsPerSide)
     {
         const bool qSide = sides == CuSeqLenSides::Q;
         SCOPED_TRACE(qSide ? "cu_seq_len_q" : "cu_seq_len_kv");
-        auto graphBuilder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(dims,
-                                                                                strides,
-                                                                                dims,
-                                                                                strides,
-                                                                                dims,
-                                                                                strides,
-                                                                                dims,
-                                                                                strides,
-                                                                                DataType::HALF,
-                                                                                DataType::FLOAT,
-                                                                                false,
-                                                                                false,
-                                                                                false,
-                                                                                false,
-                                                                                true,
-                                                                                false,
-                                                                                false,
-                                                                                DataType::UNSET,
-                                                                                sides);
+        const auto graphBuilder
+            = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(dims,
+                                                                  strides,
+                                                                  dims,
+                                                                  strides,
+                                                                  dims,
+                                                                  strides,
+                                                                  dims,
+                                                                  strides,
+                                                                  DataType::HALF,
+                                                                  DataType::FLOAT,
+                                                                  false,
+                                                                  false,
+                                                                  false,
+                                                                  false,
+                                                                  true,
+                                                                  false,
+                                                                  false,
+                                                                  DataType::UNSET,
+                                                                  sides);
         const auto* graph = GetGraph(graphBuilder.GetBufferPointer());
         const auto* sdpa = graph->nodes()->Get(0)->attributes_as_SdpaAttributes();
         ASSERT_NE(sdpa, nullptr);
@@ -299,7 +300,7 @@ TEST(TestJson, SdpaCuSeqLenRoundTripsPerSide)
 // Graphs serialized before cu_seq_len existed omit both keys; the reader must treat them as absent.
 TEST(TestJson, SdpaGraphWithoutCuSeqLenKeysStillLoads)
 {
-    auto sourceBuilder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph();
+    const auto sourceBuilder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph();
     const auto* source = GetGraph(sourceBuilder.GetBufferPointer());
     nlohmann::json graphJson = *source;
 

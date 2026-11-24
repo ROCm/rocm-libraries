@@ -247,7 +247,7 @@ protected:
                 hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes,
                 pointwiseAttributes.Union());
             nodes.push_back(nodePointwise);
-            auto nodeBwd = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
+            auto const nodeBwd = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
                 builder,
                 "rmsnorm_bwd",
                 hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -408,7 +408,7 @@ TEST_F(TestRMSnormBwdPlanBuilder, IsNotApplicableForLeakyReluActivationGraph)
 
 TEST_F(TestRMSnormBwdPlanBuilder, IdentityActivationIsApplicable)
 {
-    auto original = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph();
+    auto const original = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph();
     auto nativeGraph
         = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(original.GetBufferPointer());
     auto* activation = nativeGraph->nodes[0]->attributes.AsPointwiseAttributes();
@@ -428,7 +428,7 @@ TEST_F(TestRMSnormBwdPlanBuilder, IdentityActivationIsApplicable)
 
 TEST_F(TestRMSnormBwdPlanBuilder, ForwardReluIsNotApplicable)
 {
-    auto validBuilder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph();
+    auto const validBuilder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper validGraph(
         validBuilder.GetBufferPointer(), validBuilder.GetSize());
     ASSERT_TRUE(_planBuilder.isApplicable(_dummyHandle, validGraph));
@@ -579,7 +579,7 @@ TEST_F(TestRMSnormBwdPlanBuilder, ElementCountAtTheKernelIndexLimit)
                                           std::pair{(int64_t{1} << 32) + 1, false}})
     {
         SCOPED_TRACE(columns);
-        auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
+        auto const builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(
             {columns, columns, columns, 1}, {1, 1, 1, columns});
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
             builder.GetBufferPointer(), builder.GetSize());
@@ -592,7 +592,7 @@ TEST_F(TestRMSnormBwdPlanBuilder, DeclinesAVirtualKernelBuffer)
     for(const char* name : {"x", "dy", "dx", "scale", "dscale", "inv_rms"})
     {
         SCOPED_TRACE(name);
-        auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+        auto const builder = hipdnn_test_sdk::utilities::mutateGraph(
             hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(),
             [name](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
                 for(auto& tensor : graph.tensors)

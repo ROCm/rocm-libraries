@@ -183,7 +183,7 @@ void executePlanAtIndex(PyGraph& g,
                         const nb::object& workspace,
                         int64_t index)
 {
-    auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
+    const auto cppVariantPack = hipdnn_python::toVariantPack(variantPack);
     throwIfBad(g.execute_plan_at_index(
         g.resolveHandle(handle), cppVariantPack, workspacePointer(workspace), index));
 }
@@ -469,7 +469,7 @@ void pygraphBindings(nb::module_& m)
                const OverrideDims& overrideShapes,
                const OverrideDims& overrideStrides) {
                 rejectOverrides(overrideUids, overrideShapes, overrideStrides);
-                auto variantPack = cudnnVariantPack(tensorToDeviceBuffer);
+                const auto variantPack = cudnnVariantPack(tensorToDeviceBuffer);
                 throwIfBad(g.execute_plan_at_index(
                     g.resolveHandle(handle), variantPack, workspacePointer(workspace), index));
             },

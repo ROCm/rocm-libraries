@@ -1232,7 +1232,8 @@ TEST_F(TestGoldenHarnessFixture, AliasInASubByteGraphHasNoTensorInEitherInputSet
     testing_support::HarnessMocks mocks;
     IntegrationBundleVerificationHarness harness(
         mocks.dependencies(testing_support::hostPolicy(VerificationMode::CPU)));
-    auto bundle = makeMxMatmulBundle(hipdnn_flatbuffers_sdk::data_objects::DataType::FP4_E2M1);
+    const auto bundle
+        = makeMxMatmulBundle(hipdnn_flatbuffers_sdk::data_objects::DataType::FP4_E2M1);
     bundle->metadata.formatVersion = 2;
     bundle->metadata.aliases = K_SCALE_B_VIEW_OF_SCALE_A;
     fillOnHost(harness, bundle);
@@ -1249,7 +1250,8 @@ TEST_F(TestGoldenHarnessFixture, AliasInASubByteGraphPointsTheDeviceViewIntoTheP
     testing_support::HarnessMocks mocks;
     IntegrationBundleVerificationHarness harness(
         mocks.dependencies(testing_support::hostPolicy(VerificationMode::CPU)));
-    auto bundle = makeMxMatmulBundle(hipdnn_flatbuffers_sdk::data_objects::DataType::FP4_E2M1);
+    const auto bundle
+        = makeMxMatmulBundle(hipdnn_flatbuffers_sdk::data_objects::DataType::FP4_E2M1);
     bundle->metadata.formatVersion = 2;
     bundle->metadata.aliases = K_SCALE_B_VIEW_OF_SCALE_A;
     fillOnHost(harness, bundle);
@@ -1343,7 +1345,7 @@ TEST_F(TestGoldenHarnessFixture, AliasWithGoldenBlobsFailsTheHarness)
     testing_support::HarnessMocks mocks;
     EXPECT_CALL(mocks.engineRunner, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
 
-    auto bundle = loadRunnableBundle("aliased_golden");
+    const auto bundle = loadRunnableBundle("aliased_golden");
     ASSERT_TRUE(bundle->blobs.has_value());
     bundle->metadata.aliases = {{2, 1, 0}};
 
@@ -1535,7 +1537,7 @@ TEST_F(TestGoldenHarnessFixture, StartOffsetOutputThatMatchesTheGoldenDataPasses
     testing_support::HarnessMocks mocks;
     std::vector<int64_t> engineOffsets;
     engineWritesThroughAnyPointer(mocks, fixtures::K_OUTPUT_VALUE, engineOffsets);
-    auto bundle = loadRunnableBundle("shifted_match");
+    const auto bundle = loadRunnableBundle("shifted_match");
     shiftGoldenBundle(*bundle);
 
     ::testing::TestPartResultArray results;
@@ -1552,7 +1554,7 @@ TEST_F(TestGoldenHarnessFixture, StartOffsetOutputThatDiffersFromTheGoldenDataFa
     testing_support::HarnessMocks mocks;
     std::vector<int64_t> engineOffsets;
     engineWritesThroughAnyPointer(mocks, fixtures::K_OUTPUT_VALUE + 100.0f, engineOffsets);
-    auto bundle = loadRunnableBundle("shifted_mismatch");
+    const auto bundle = loadRunnableBundle("shifted_mismatch");
     shiftGoldenBundle(*bundle);
 
     ::testing::TestPartResultArray results;
@@ -1582,7 +1584,7 @@ TEST_F(TestGoldenHarnessFixture, StartOffsetBenchmarkGetsTheEnginePointers)
     auto policy = testing_support::hostPolicy(VerificationMode::AUTO);
     policy.benchmark = BenchmarkSettings{};
     IntegrationBundleVerificationHarness harness(mocks.dependencies(policy));
-    auto bundle = loadRunnableBundle("shifted_benchmark");
+    const auto bundle = loadRunnableBundle("shifted_benchmark");
     shiftGoldenBundle(*bundle);
     harness.setBundle(bundle, "unit-test-bundle");
 
@@ -1651,7 +1653,7 @@ TEST_F(TestGoldenHarnessFixture, BenchmarkFailureDoesNotCrashOrLeaveTheDeviceErr
     policy.placement = TensorPlacement::DEVICE;
     policy.benchmark = BenchmarkSettings{};
     IntegrationBundleVerificationHarness harness(mocks.dependencies(policy));
-    auto bundle = loadRunnableBundle("shifted_benchmark_forced_fail");
+    const auto bundle = loadRunnableBundle("shifted_benchmark_forced_fail");
     shiftGoldenBundle(*bundle);
     harness.setBundle(bundle, "unit-test-bundle");
 
@@ -1703,7 +1705,7 @@ TEST_F(TestGoldenHarnessFixture, StartOffsetStagingErrorFailsTheHarnessNotTheEng
     locator.sidecarPath = sidecar;
     locator.diagnosticPath = "shifted-bundle";
 
-    auto bundle = makeAliasedConvBundle(viewOfOwnersSecondRow());
+    const auto bundle = makeAliasedConvBundle(viewOfOwnersSecondRow());
     bundle->metadata.startOffsets = {{K_ALIAS_VIEW_UID, K_SHIFTED_INPUT_OFFSET}};
     IntegrationBundleVerificationHarness harness(
         mocks.dependencies(testing_support::hostPolicy(VerificationMode::CPU)),
@@ -1895,7 +1897,7 @@ TEST_F(TestGoldenHarnessFixture, StartOffsetEngineRunOnTheDeviceReachesTheCompar
     auto policy = testing_support::hostPolicy(VerificationMode::AUTO);
     policy.placement = TensorPlacement::DEVICE;
     IntegrationBundleVerificationHarness harness(mocks.dependencies(policy));
-    auto bundle = loadRunnableBundle("shifted_device");
+    const auto bundle = loadRunnableBundle("shifted_device");
     shiftGoldenBundle(*bundle);
     harness.setBundle(bundle, "unit-test-bundle");
 

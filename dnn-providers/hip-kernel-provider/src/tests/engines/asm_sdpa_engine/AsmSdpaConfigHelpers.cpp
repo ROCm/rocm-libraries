@@ -216,21 +216,21 @@ SdpaFwdGraph buildGraph(const GraphTestCase& testCase, LengthInputs lengthInputs
         .set_compute_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT);
 
-    auto q = std::make_shared<TensorAttributes>();
+    auto const q = std::make_shared<TensorAttributes>();
     q->set_uid(K_Q_UID)
         .set_name("q")
         .set_dim(qDims)
         .set_stride(generateStrides(qDims, layout))
         .set_data_type(inDataType);
 
-    auto k = std::make_shared<TensorAttributes>();
+    auto const k = std::make_shared<TensorAttributes>();
     k->set_uid(K_K_UID)
         .set_name("k")
         .set_dim(kDims)
         .set_stride(generateStrides(kDims, layout))
         .set_data_type(inDataType);
 
-    auto v = std::make_shared<TensorAttributes>();
+    auto const v = std::make_shared<TensorAttributes>();
     v->set_uid(K_V_UID)
         .set_name("v")
         .set_dim(vDims)

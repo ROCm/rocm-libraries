@@ -150,7 +150,7 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
 
 TEST(TestGpuBatchnormBwdPlanBuilder, PlanConstructionAndApplicability)
 {
-    auto builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph({12, 4, 2, 1}, {2, 3, 2, 2});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -164,7 +164,7 @@ TEST(TestGpuBatchnormBwdPlanBuilder, PlanConstructionAndApplicability)
         planBuilder;
 
     EXPECT_TRUE(planBuilder.isApplicable(graph.getNode(0), graph.getTensorMap()));
-    auto plan = planBuilder.buildNodePlan(graph, graph.getNode(0));
+    const auto plan = planBuilder.buildNodePlan(graph, graph.getNode(0));
     const bool hasExpectedType
         = dynamic_cast<GpuBatchnormBwdPlan<float, float, float, float, float, float>*>(plan.get())
           != nullptr;
@@ -181,7 +181,7 @@ class TestGpuBatchnormBwdPlanRequiredTensor : public testing::TestWithParam<int6
 
 TEST_P(TestGpuBatchnormBwdPlanRequiredTensor, MissingTensorIsNotApplicable)
 {
-    auto builder = createValidBatchnormBwdGraph({48, 16, 4, 1}, {2, 3, 4, 4});
+    const auto builder = createValidBatchnormBwdGraph({48, 16, 4, 1}, {2, 3, 4, 4});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     auto tensorMap = graph.getTensorMap();
@@ -247,14 +247,14 @@ TEST_P(TestGpuBatchnormBwdPlanRequiredTensor, RuntimePassByValueTensorIsNotAppli
 
 TEST_P(TestGpuBatchnormBwdPlanRequiredTensor, MissingTensorThrowsOnBuild)
 {
-    auto builder = createValidBatchnormBwdGraph({48, 16, 4, 1},
-                                                {2, 3, 4, 4},
-                                                true,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                {},
-                                                GetParam());
+    const auto builder = createValidBatchnormBwdGraph({48, 16, 4, 1},
+                                                      {2, 3, 4, 4},
+                                                      true,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      {},
+                                                      GetParam());
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -267,7 +267,7 @@ class TestGpuBatchnormBwdPlanRequiredTensorType : public testing::TestWithParam<
 
 TEST_P(TestGpuBatchnormBwdPlanRequiredTensorType, MismatchedTypeIsNotApplicable)
 {
-    auto builder = createValidBatchnormBwdGraph(
+    const auto builder = createValidBatchnormBwdGraph(
         {48, 16, 4, 1}, {2, 3, 4, 4}, true, DataType::FLOAT, DataType::FLOAT, DataType::HALF);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -295,7 +295,7 @@ INSTANTIATE_TEST_SUITE_P(AllRequiredOperands,
 
 TEST(TestGpuBatchnormBwdPlanBuilder, OptionalStatisticsTypeMismatchIsNotApplicable)
 {
-    auto builder = createValidBatchnormBwdGraph(
+    const auto builder = createValidBatchnormBwdGraph(
         {48, 16, 4, 1}, {2, 3, 4, 4}, true, DataType::FLOAT, DataType::FLOAT, DataType::HALF);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -340,7 +340,7 @@ INSTANTIATE_TEST_SUITE_P(BothStatistics,
 
 TEST(TestGpuBatchnormBwdPlanBuilder, ComputeTypeMismatchIsNotApplicable)
 {
-    auto builder = createValidBatchnormBwdGraph({48, 16, 4, 1}, {2, 3, 4, 4});
+    const auto builder = createValidBatchnormBwdGraph({48, 16, 4, 1}, {2, 3, 4, 4});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const GpuBatchnormBwdPlanBuilder<DataType::FLOAT,
@@ -355,7 +355,7 @@ TEST(TestGpuBatchnormBwdPlanBuilder, ComputeTypeMismatchIsNotApplicable)
 
 TEST(TestGpuBatchnormBwdPlanBuilder, WrongAttributesTypeIsRejectedAndThrowsOnBuild)
 {
-    auto builder = createValidRMSNormGraph();
+    const auto builder = createValidRMSNormGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const FloatPlanBuilder planBuilder;
@@ -366,13 +366,13 @@ TEST(TestGpuBatchnormBwdPlanBuilder, WrongAttributesTypeIsRejectedAndThrowsOnBui
 
 TEST(TestGpuBatchnormBwdPlanBuilder, PeerStatisticsAreNotApplicable)
 {
-    auto builder = createValidBatchnormBwdGraph({48, 16, 4, 1},
-                                                {2, 3, 4, 4},
-                                                true,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                DataType::FLOAT,
-                                                {MEAN_UID});
+    const auto builder = createValidBatchnormBwdGraph({48, 16, 4, 1},
+                                                      {2, 3, 4, 4},
+                                                      true,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      DataType::FLOAT,
+                                                      {MEAN_UID});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     EXPECT_FALSE(FloatPlanBuilder().isApplicable(graph.getNode(0), graph.getTensorMap()));
@@ -382,17 +382,17 @@ TEST(TestGpuBatchnormBwdPlanBuilder, UnsupportedMetadataValidationIsDeferredToOp
 {
     const FloatPlanBuilder planBuilder;
 
-    auto rankBuilder = createValidBatchnormBwdGraph({3, 1}, {2, 3});
+    const auto rankBuilder = createValidBatchnormBwdGraph({3, 1}, {2, 3});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper rankGraph(
         rankBuilder.GetBufferPointer(), rankBuilder.GetSize());
     EXPECT_TRUE(planBuilder.isApplicable(rankGraph.getNode(0), rankGraph.getTensorMap()));
 
-    auto unpackedBuilder = createValidBatchnormBwdGraph({24, 8, 1}, {2, 3, 4});
+    const auto unpackedBuilder = createValidBatchnormBwdGraph({24, 8, 1}, {2, 3, 4});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper unpackedGraph(
         unpackedBuilder.GetBufferPointer(), unpackedBuilder.GetSize());
     EXPECT_TRUE(planBuilder.isApplicable(unpackedGraph.getNode(0), unpackedGraph.getTensorMap()));
 
-    auto layoutBuilder = createValidBatchnormBwdGraph({60, 5, 15, 1}, {2, 3, 4, 5});
+    const auto layoutBuilder = createValidBatchnormBwdGraph({60, 5, 15, 1}, {2, 3, 4, 5});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper layoutGraph(
         layoutBuilder.GetBufferPointer(), layoutBuilder.GetSize());
     EXPECT_TRUE(planBuilder.isApplicable(layoutGraph.getNode(0), layoutGraph.getTensorMap()));
@@ -400,7 +400,7 @@ TEST(TestGpuBatchnormBwdPlanBuilder, UnsupportedMetadataValidationIsDeferredToOp
 
 TEST(TestGpuBatchnormBwdPlanBuilder, MismatchedShapeValidationIsDeferredToOperation)
 {
-    auto builder = createValidBatchnormBwdGraph({48, 16, 4, 1}, {2, 3, 4, 4});
+    const auto builder = createValidBatchnormBwdGraph({48, 16, 4, 1}, {2, 3, 4, 4});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const FloatPlanBuilder planBuilder;
@@ -421,8 +421,8 @@ TEST(TestGpuBatchnormBwdPlanBuilder, MismatchedShapeValidationIsDeferredToOperat
 TEST(TestGpuBatchnormBwdPlanBuilder, InconsistentOperandLayoutValidationIsDeferredToOperation)
 {
     const std::vector<int64_t> dims{2, 3, 4, 5};
-    auto nchwBuilder = createValidBatchnormBwdGraph({60, 20, 5, 1}, dims);
-    auto nhwcBuilder = createValidBatchnormBwdGraph({60, 1, 15, 3}, dims);
+    const auto nchwBuilder = createValidBatchnormBwdGraph({60, 20, 5, 1}, dims);
+    const auto nhwcBuilder = createValidBatchnormBwdGraph({60, 1, 15, 3}, dims);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper nchwGraph(
         nchwBuilder.GetBufferPointer(), nchwBuilder.GetSize());
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper nhwcGraph(
@@ -435,7 +435,7 @@ TEST(TestGpuBatchnormBwdPlanBuilder, InconsistentOperandLayoutValidationIsDeferr
 
 TEST(TestGpuBatchnormBwdPlan, MissingVariantPackTensorsThrow)
 {
-    auto builder = createValidBatchnormBwdGraph({48, 16, 4, 1}, {2, 3, 4, 4});
+    const auto builder = createValidBatchnormBwdGraph({48, 16, 4, 1}, {2, 3, 4, 4});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     auto plan = FloatPlanBuilder().buildNodePlan(graph, graph.getNode(0));
@@ -455,7 +455,7 @@ TEST(TestGpuBatchnormBwdPlan, MissingVariantPackTensorsThrow)
 
 TEST(TestGpuBatchnormBwdPlan, ExecutorIsApplicable)
 {
-    auto builder
+    const auto builder
         = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph({12, 4, 2, 1}, {2, 3, 2, 2});
     hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor executor;
 

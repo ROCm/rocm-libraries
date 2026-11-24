@@ -662,7 +662,7 @@ void runResampleFwdExecutorVsCpu()
     const std::vector<int64_t> xStrides{16, 16, 4, 1};
     const std::vector<int64_t> yStrides{4, 4, 2, 1};
 
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
+    const auto builder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
     hipdnn_data_sdk::utilities::Tensor<float> xTensor(xDims, xStrides);
     hipdnn_data_sdk::utilities::Tensor<float> gpuYTensor(yDims, yStrides);
     hipdnn_data_sdk::utilities::Tensor<float> cpuYTensor(yDims, yStrides);
@@ -710,7 +710,7 @@ void runResampleBwdExecutorVsCpu()
     const std::vector<int64_t> dyStrides{4, 4, 2, 1};
     const std::vector<int64_t> dxStrides{16, 16, 4, 1};
 
-    auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
     hipdnn_data_sdk::utilities::Tensor<float> dyTensor(dyDims, dyStrides);
     hipdnn_data_sdk::utilities::Tensor<float> gpuDxTensor(dxDims, dxStrides);
     hipdnn_data_sdk::utilities::Tensor<float> cpuDxTensor(dxDims, dxStrides);
@@ -903,7 +903,7 @@ TEST(TestGpuReferenceGraphExecutor, UnsupportedNodeTypeThrows)
     SKIP_IF_NO_DEVICES();
 
     // MoE grouped matmul has no GPU plan yet.
-    auto builder = hipdnn_test_sdk::utilities::createValidMoeGroupedMatmulGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createValidMoeGroupedMatmulGraph();
 
     const std::unordered_map<int64_t, void*> variantPack;
 
@@ -917,14 +917,14 @@ TEST(TestGpuReferenceGraphExecutor, ResampleFwdIsApplicable)
     SKIP_IF_NO_DEVICES();
 
     GpuReferenceGraphExecutor executor;
-    auto maxPoolBuilder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
+    const auto maxPoolBuilder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
     EXPECT_TRUE(executor.isApplicable(maxPoolBuilder.GetBufferPointer(), maxPoolBuilder.GetSize()));
 
-    auto avgPoolBuilder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(
+    const auto avgPoolBuilder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(
         false, ResampleMode::AVGPOOL_EXCLUDE_PADDING);
     EXPECT_TRUE(executor.isApplicable(avgPoolBuilder.GetBufferPointer(), avgPoolBuilder.GetSize()));
 
-    auto avgPoolWithIndexBuilder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(
+    const auto avgPoolWithIndexBuilder = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(
         true, ResampleMode::AVGPOOL_EXCLUDE_PADDING);
     EXPECT_FALSE(executor.isApplicable(avgPoolWithIndexBuilder.GetBufferPointer(),
                                        avgPoolWithIndexBuilder.GetSize()));
@@ -935,14 +935,14 @@ TEST(TestGpuReferenceGraphExecutor, ResampleBwdIsApplicable)
     SKIP_IF_NO_DEVICES();
 
     GpuReferenceGraphExecutor executor;
-    auto maxPoolBuilder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
+    const auto maxPoolBuilder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
     EXPECT_TRUE(executor.isApplicable(maxPoolBuilder.GetBufferPointer(), maxPoolBuilder.GetSize()));
 
-    auto avgPoolBuilder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(
+    const auto avgPoolBuilder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(
         false, ResampleMode::AVGPOOL_EXCLUDE_PADDING);
     EXPECT_TRUE(executor.isApplicable(avgPoolBuilder.GetBufferPointer(), avgPoolBuilder.GetSize()));
 
-    auto avgPoolWithIndexBuilder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(
+    const auto avgPoolWithIndexBuilder = hipdnn_test_sdk::utilities::createValidResampleBwdGraph(
         true, ResampleMode::AVGPOOL_EXCLUDE_PADDING);
     EXPECT_FALSE(executor.isApplicable(avgPoolWithIndexBuilder.GetBufferPointer(),
                                        avgPoolWithIndexBuilder.GetSize()));
@@ -1971,7 +1971,7 @@ TEST(TestGpuReferenceGraphExecutor, ReductionIsApplicable)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto builder = hipdnn_test_sdk::utilities::createReductionGraph();
+    const auto builder = hipdnn_test_sdk::utilities::createReductionGraph();
 
     GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));

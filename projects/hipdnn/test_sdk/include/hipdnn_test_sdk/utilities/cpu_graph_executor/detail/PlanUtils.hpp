@@ -612,7 +612,7 @@ bool isSdpaZeroProbabilityDropout(
 #define CHECK_TENSOR_EXISTS(tensor_map, tensor_uid) \
     do                                              \
     {                                               \
-        auto it = (tensor_map).find((tensor_uid));  \
+        const auto it = (tensor_map).find((tensor_uid)); \
         if(it == (tensor_map).end())                \
         {                                           \
             return false;                           \

@@ -150,7 +150,7 @@ TEST_P(TestHipblasltMatmulPlanBuilderDeclineRoles, IsApplicableDeclinesFlippedVi
     const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const auto& param = GetParam();
-    auto builder = createFusedGraph(param.doBias, param.activMode, {param.tensorName});
+    auto const builder = createFusedGraph(param.doBias, param.activMode, {param.tensorName});
     GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
@@ -197,7 +197,7 @@ TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableDoesNotDeclineFrontend
     {
         const auto recorder
             = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-        auto builder = createFusedGraph(doBias, activMode);
+        auto const builder = createFusedGraph(doBias, activMode);
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
         (void)_planBuilder.isApplicable(_handle, graph);
@@ -211,7 +211,7 @@ TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableDeclinesVirtualBiasInF
 {
     const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-    auto builder = createFusedGraph(true, PointwiseMode::RELU_FWD, {"bias"}, true);
+    auto const builder = createFusedGraph(true, PointwiseMode::RELU_FWD, {"bias"}, true);
     GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
@@ -224,7 +224,7 @@ TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableDoesNotDeclineFrontend
 {
     const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-    auto builder = createFusedGraph(true, PointwiseMode::RELU_FWD, {}, true);
+    auto const builder = createFusedGraph(true, PointwiseMode::RELU_FWD, {}, true);
     GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     (void)_planBuilder.isApplicable(_handle, graph);
@@ -237,7 +237,7 @@ TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableDeclinesActivationComp
 {
     const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-    auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+    auto const builder = hipdnn_test_sdk::utilities::mutateGraph(
         createFusedGraph(true, PointwiseMode::GELU_APPROX_TANH_FWD), [](auto& graph) {
             graph.nodes.at(2)->compute_data_type
                 = hipdnn_flatbuffers_sdk::data_objects::DataType::HALF;
@@ -254,7 +254,7 @@ TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableDeclinesLeakyRelu)
 {
     const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-    auto builder = frontendVirtualLayout(
+    auto const builder = frontendVirtualLayout(
         createValidMatmulBiasActivGraph({4, 8},
                                         {8, 1},
                                         {8, 5},
@@ -297,7 +297,7 @@ TEST_P(TestHipblasltMatmulPlanBuilderBiasStridesCases, IsApplicableDeclinesNonPa
         {
             const auto recorder
                 = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-            auto builder = withTensorStrides(
+            auto const builder = withTensorStrides(
                 createMatmulBiasGraph(true, activMode, biasFirst), "bias", GetParam().strides);
             GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
@@ -341,7 +341,7 @@ TEST_P(TestHipblasltMatmulPlanBuilderBiasTypeCases, IsApplicableDeclinesUnserved
     {
         const auto recorder
             = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-        auto builder = withTensorDataType(
+        auto const builder = withTensorDataType(
             createMatmulBiasGraph(true, PointwiseMode::UNSET, biasFirst), "bias", GetParam().type);
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
@@ -419,15 +419,15 @@ TEST_P(TestHipblasltMatmulPlanBuilderBatchStrideCases, IsApplicableDeclinesNonUn
     const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     // Dense [2, 3, M, K] x [2, 3, K, N] with a two-axis batch.
-    auto builder = withTensorStrides(createBatchedGraph({2, 3, 4, 8},
-                                                        {96, 32, 8, 1},
-                                                        {2, 3, 8, 5},
-                                                        {120, 40, 5, 1},
-                                                        {2, 3, 4, 5},
-                                                        {60, 20, 5, 1},
-                                                        GetParam().activMode),
-                                     GetParam().tensorName,
-                                     GetParam().strides);
+    auto const builder = withTensorStrides(createBatchedGraph({2, 3, 4, 8},
+                                                              {96, 32, 8, 1},
+                                                              {2, 3, 8, 5},
+                                                              {120, 40, 5, 1},
+                                                              {2, 3, 4, 5},
+                                                              {60, 20, 5, 1},
+                                                              GetParam().activMode),
+                                           GetParam().tensorName,
+                                           GetParam().strides);
     GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     (void)_planBuilder.isApplicable(_handle, graph);
@@ -455,15 +455,15 @@ TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableAcceptsSingletonBatchA
 {
     const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-    auto builder = withTensorStrides(createBatchedGraph({4, 1, 4, 8},
-                                                        {32, 32, 8, 1},
-                                                        {4, 1, 8, 5},
-                                                        {40, 40, 5, 1},
-                                                        {4, 1, 4, 5},
-                                                        {20, 20, 5, 1},
-                                                        PointwiseMode::UNSET),
-                                     "A",
-                                     {32, 7, 8, 1});
+    auto const builder = withTensorStrides(createBatchedGraph({4, 1, 4, 8},
+                                                              {32, 32, 8, 1},
+                                                              {4, 1, 8, 5},
+                                                              {40, 40, 5, 1},
+                                                              {4, 1, 4, 5},
+                                                              {20, 20, 5, 1},
+                                                              PointwiseMode::UNSET),
+                                           "A",
+                                           {32, 7, 8, 1});
     GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     (void)_planBuilder.isApplicable(_handle, graph);
@@ -480,15 +480,15 @@ TEST_F(TestHipblasltMatmulPlanBuilderDecline,
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     // The virtual matmul output is packed; the final output keeps a stride of 5 on the
     // singleton axis.
-    auto builder = withTensorStrides(createBatchedGraph({2, 1, 4, 8},
-                                                        {32, 32, 8, 1},
-                                                        {2, 1, 8, 5},
-                                                        {40, 40, 5, 1},
-                                                        {2, 1, 4, 5},
-                                                        {20, 5, 5, 1},
-                                                        PointwiseMode::RELU_FWD),
-                                     "C_matmul",
-                                     {20, 20, 5, 1});
+    auto const builder = withTensorStrides(createBatchedGraph({2, 1, 4, 8},
+                                                              {32, 32, 8, 1},
+                                                              {2, 1, 8, 5},
+                                                              {40, 40, 5, 1},
+                                                              {2, 1, 4, 5},
+                                                              {20, 5, 5, 1},
+                                                              PointwiseMode::RELU_FWD),
+                                           "C_matmul",
+                                           {20, 20, 5, 1});
     GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     (void)_planBuilder.isApplicable(_handle, graph);
@@ -504,15 +504,15 @@ TEST_F(TestHipblasltMatmulPlanBuilderDecline,
 {
     const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-    auto builder = withTensorStrides(createBatchedGraph({1, 3, 4, 8},
-                                                        {96, 32, 8, 1},
-                                                        {1, 3, 8, 5},
-                                                        {120, 40, 5, 1},
-                                                        {1, 3, 4, 5},
-                                                        {60, 20, 5, 1},
-                                                        PointwiseMode::UNSET),
-                                     "A",
-                                     {999, 32, 8, 1});
+    auto const builder = withTensorStrides(createBatchedGraph({1, 3, 4, 8},
+                                                              {96, 32, 8, 1},
+                                                              {1, 3, 8, 5},
+                                                              {120, 40, 5, 1},
+                                                              {1, 3, 4, 5},
+                                                              {60, 20, 5, 1},
+                                                              PointwiseMode::UNSET),
+                                           "A",
+                                           {999, 32, 8, 1});
     GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     (void)_planBuilder.isApplicable(_handle, graph);
@@ -525,13 +525,13 @@ TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableAcceptsUnusedBroadcast
 {
     const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-    auto builder = createBatchedGraph({2, 3, 4, 8},
-                                      {96, 32, 8, 1},
-                                      {1, 1, 8, 5},
-                                      {777, 99, 5, 1},
-                                      {2, 3, 4, 5},
-                                      {60, 20, 5, 1},
-                                      PointwiseMode::UNSET);
+    auto const builder = createBatchedGraph({2, 3, 4, 8},
+                                            {96, 32, 8, 1},
+                                            {1, 1, 8, 5},
+                                            {777, 99, 5, 1},
+                                            {2, 3, 4, 5},
+                                            {60, 20, 5, 1},
+                                            PointwiseMode::UNSET);
     GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     (void)_planBuilder.isApplicable(_handle, graph);
@@ -561,7 +561,7 @@ TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableDeclinesFinalBatchStri
 
     const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-    auto builder = withTensorStrides(base, "C", {27, 5, 1});
+    auto const builder = withTensorStrides(base, "C", {27, 5, 1});
     GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
@@ -574,15 +574,15 @@ TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableDeclinesFinalBatchDims
 {
     const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-    auto builder = withTensorDims(createBatchedGraph({2, 4, 8},
-                                                     {32, 8, 1},
-                                                     {2, 8, 5},
-                                                     {40, 5, 1},
-                                                     {2, 4, 5},
-                                                     {20, 5, 1},
-                                                     PointwiseMode::RELU_FWD),
-                                  "C",
-                                  {3, 4, 5});
+    auto const builder = withTensorDims(createBatchedGraph({2, 4, 8},
+                                                           {32, 8, 1},
+                                                           {2, 8, 5},
+                                                           {40, 5, 1},
+                                                           {2, 4, 5},
+                                                           {20, 5, 1},
+                                                           PointwiseMode::RELU_FWD),
+                                        "C",
+                                        {3, 4, 5});
     GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graph));
@@ -597,7 +597,7 @@ TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableDeclinesMixedABTypes)
     using DataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
     const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-    auto builder
+    auto const builder
         = withTensorDataType(createFusedGraph(false, PointwiseMode::UNSET), "B", DataType::HALF);
     GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
@@ -611,7 +611,7 @@ TEST_F(TestHipblasltMatmulPlanBuilderDecline, IsApplicableAcceptsEqualHalfABType
     using DataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
     const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-    auto builder = withTensorDataType(
+    auto const builder = withTensorDataType(
         withTensorDataType(createFusedGraph(false, PointwiseMode::UNSET), "A", DataType::HALF),
         "B",
         DataType::HALF);
@@ -663,7 +663,7 @@ TEST_P(TestHipblasltMatmulPlanBuilderActivOutputTypeCases,
     {
         const auto recorder
             = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-        auto builder = withTensorDataType(
+        auto const builder = withTensorDataType(
             createFusedGraph(doBias, PointwiseMode::RELU_FWD), "C", GetParam().type);
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
@@ -718,7 +718,7 @@ TEST_P(TestHipblasltMatmulPlanBuilderScalarCases, IsApplicableDeclinesPassByValu
 
     const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-    auto builder = hipdnn_test_sdk::utilities::mutateGraph(base, [&](auto& graph) {
+    auto const builder = hipdnn_test_sdk::utilities::mutateGraph(base, [&](auto& graph) {
         for(auto& tensor : graph.tensors)
         {
             if(tensor->name == param.tensorName)
@@ -784,28 +784,28 @@ protected:
 TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicableAcceptsSingletonBatchAxisGraphs)
 {
     {
-        auto builder = withTensorStrides(createBatchedGraph({2, 1, 4, 8},
-                                                            {32, 32, 8, 1},
-                                                            {2, 1, 8, 5},
-                                                            {40, 40, 5, 1},
-                                                            {2, 1, 4, 5},
-                                                            {20, 5, 5, 1},
-                                                            PointwiseMode::RELU_FWD),
-                                         "C_matmul",
-                                         {20, 20, 5, 1});
+        auto const builder = withTensorStrides(createBatchedGraph({2, 1, 4, 8},
+                                                                  {32, 32, 8, 1},
+                                                                  {2, 1, 8, 5},
+                                                                  {40, 40, 5, 1},
+                                                                  {2, 1, 4, 5},
+                                                                  {20, 5, 5, 1},
+                                                                  PointwiseMode::RELU_FWD),
+                                               "C_matmul",
+                                               {20, 20, 5, 1});
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
         EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
     }
     {
-        auto builder = withTensorStrides(createBatchedGraph({4, 1, 4, 8},
-                                                            {32, 32, 8, 1},
-                                                            {4, 1, 8, 5},
-                                                            {40, 40, 5, 1},
-                                                            {4, 1, 4, 5},
-                                                            {20, 20, 5, 1},
-                                                            PointwiseMode::UNSET),
-                                         "A",
-                                         {32, 7, 8, 1});
+        auto const builder = withTensorStrides(createBatchedGraph({4, 1, 4, 8},
+                                                                  {32, 32, 8, 1},
+                                                                  {4, 1, 8, 5},
+                                                                  {40, 40, 5, 1},
+                                                                  {4, 1, 4, 5},
+                                                                  {20, 20, 5, 1},
+                                                                  PointwiseMode::UNSET),
+                                               "A",
+                                               {32, 7, 8, 1});
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
         EXPECT_TRUE(_planBuilder.isApplicable(_handle, graph));
     }
@@ -922,7 +922,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Supported graph with matmul + bias only (no activation)
     {
-        auto builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
+        auto const builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -938,7 +938,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Supported graph with matmul + bias + activation (GELU)
     {
-        auto builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
+        auto const builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -954,7 +954,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Supported graph with matmul + activation only (no bias, standard ReLU)
     {
-        auto builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
+        auto const builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -971,7 +971,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Supported graph with matmul + bias + activation (Swish)
     {
-        auto builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
+        auto const builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -990,7 +990,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Supported graph with matmul + bias + activation (clamp)
     {
-        auto builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
+        auto const builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -1008,7 +1008,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Supported graph with matmul + activation (ReLU with no clip or slope set)
     {
-        auto builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
+        auto const builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -1024,7 +1024,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Supported graph with matmul + bias + activation (ReLU6: upper clip only)
     {
-        auto builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
+        auto const builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -1042,7 +1042,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Unsupported leaky ReLU (no hipBLASLt epilogue), even with an explicit zero lower clip
     {
-        auto builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
+        auto const builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -1063,7 +1063,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, IsApplicable)
 
     // Unsupported compute data type on activation node
     {
-        auto builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
+        auto const builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -1127,7 +1127,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, GetWorkspaceSize)
 
     // Supported Graph with matmul + bias + activation
     {
-        auto builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
+        auto const builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},
@@ -1211,7 +1211,7 @@ TEST_F(TestHipblasltMatmulPlanBuilder, BuildPlan)
 
     // Supported Graph with matmul + bias + activation
     {
-        auto builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
+        auto const builder = frontendVirtualLayout(createValidMatmulBiasActivGraph(
             {4, 8},
             {8, 1},
             {8, 5},

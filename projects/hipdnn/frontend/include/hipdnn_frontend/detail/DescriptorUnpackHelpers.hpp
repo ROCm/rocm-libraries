@@ -123,7 +123,7 @@ template <typename T>
                                                            const std::string& errorContext)
 {
     int64_t count = 0;
-    auto status
+    const auto status
         = hipdnnBackend()->backendGetAttribute(desc, attrName, attrType, 0, &count, nullptr);
     if(status == HIPDNN_STATUS_NOT_SUPPORTED || count <= 0)
     {
@@ -604,12 +604,12 @@ template <typename T>
     const std::string context = "ragged offset of tensor " + std::to_string(tensor.get_uid());
 
     int64_t count = 0;
-    auto status = hipdnnBackend()->backendGetAttribute(tensorDesc,
-                                                       HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC,
-                                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                       0,
-                                                       &count,
-                                                       nullptr);
+    const auto status = hipdnnBackend()->backendGetAttribute(tensorDesc,
+                                                             HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC,
+                                                             HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                             0,
+                                                             &count,
+                                                             nullptr);
     if(isUnservedTensorExtension(status) || (status == HIPDNN_STATUS_SUCCESS && count <= 0))
     {
         return {};
@@ -638,7 +638,7 @@ template <typename T>
         auxDesc.get(), HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, auxUid, context + " UID"));
 
     std::shared_ptr<graph::TensorAttributes> aux;
-    auto it = tensorMap.find(auxUid);
+    const auto it = tensorMap.find(auxUid);
     if(it != tensorMap.end())
     {
         aux = it->second;

@@ -606,7 +606,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithOptionalTensorsAndScalar
 TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithSinkTokenRoundTrip)
 {
     const auto numHeads = K_SDPA_TENSOR_Q_DIMS[1];
-    auto sinkToken = std::make_shared<TensorAttributes>();
+    const auto sinkToken = std::make_shared<TensorAttributes>();
     sinkToken->set_uid(K_SDPA_TENSOR_SINK_TOKEN_UID).set_name("SINK_TOKEN");
     sinkToken->set_data_type(DataType::FLOAT);
     sinkToken->set_dim({1, numHeads, 1, 1}).set_stride({numHeads, 1, 1, 1});

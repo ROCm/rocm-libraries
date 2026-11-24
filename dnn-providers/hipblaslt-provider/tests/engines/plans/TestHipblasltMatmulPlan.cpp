@@ -422,7 +422,7 @@ TEST(TestMatmulParams, CLayoutBatchOffsetIgnoresSingletonBatchAxis)
 {
     // The virtual matmul output is packed; the final output keeps a stride of 5 on the
     // singleton axis.
-    auto fused = createValidMatmulBiasActivGraph(
+    auto const fused = createValidMatmulBiasActivGraph(
         {2, 1, 4, 8},
         {32, 32, 8, 1},
         {2, 1, 8, 5},
@@ -431,7 +431,7 @@ TEST(TestMatmulParams, CLayoutBatchOffsetIgnoresSingletonBatchAxis)
         {20, 5, 5, 1},
         false,
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD);
-    auto builder = mutateGraph(fused, [](auto& g) {
+    auto const builder = mutateGraph(fused, [](auto& g) {
         for(auto& tensor : g.tensors)
         {
             if(tensor->name == "C_matmul")
@@ -454,7 +454,7 @@ TEST(TestMatmulParams, CLayoutBatchOffsetIgnoresSingletonBatchAxis)
 
 TEST(TestMatmulParams, ALayoutBatchOffsetIgnoresSingletonBatchAxis)
 {
-    auto builder = createValidMatmulGraph(
+    auto const builder = createValidMatmulGraph(
         {4, 1, 4, 8}, {32, 7, 8, 1}, {4, 1, 8, 5}, {40, 40, 5, 1}, {4, 1, 4, 5}, {20, 20, 5, 1});
     GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
@@ -479,7 +479,7 @@ TEST(TestMatmulParams, ALayoutBatchOffsetNestsThreeBatchAxes)
     };
 
     {
-        auto builder = makeGraph({192, 96, 32, 8, 1});
+        auto const builder = makeGraph({192, 96, 32, 8, 1});
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
         auto* attrs = graph.getNode(0).attributes_as_MatmulAttributes();
         ASSERT_NE(attrs, nullptr);
@@ -489,7 +489,7 @@ TEST(TestMatmulParams, ALayoutBatchOffsetNestsThreeBatchAxes)
         EXPECT_EQ(stridedBatchOffset(params->a()), 32);
     }
     {
-        auto builder = makeGraph({200, 96, 32, 8, 1});
+        auto const builder = makeGraph({200, 96, 32, 8, 1});
         GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
         auto* attrs = graph.getNode(0).attributes_as_MatmulAttributes();
         ASSERT_NE(attrs, nullptr);

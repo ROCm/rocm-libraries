@@ -436,13 +436,13 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, PackedSdpaSurvivesJsonLiftAndR
     constexpr int64_t K_OFFSETS_KV_UID = 21;
     constexpr int64_t K_LSE_ALIGNMENT = 4;
 
-    auto graph = std::make_shared<TestableGraphLowering>();
+    const auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("PackedSdpaLiftGraph")
         .set_io_data_type(DataType::HALF)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
-    auto offsets = [](int64_t uid, const std::string& name) {
+    const auto offsets = [](int64_t uid, const std::string& name) {
         auto t = std::make_shared<TensorAttributes>();
         t->set_uid(uid)
             .set_name(name)
@@ -456,7 +456,7 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, PackedSdpaSurvivesJsonLiftAndR
     const auto offsetsKv = offsets(K_OFFSETS_KV_UID, "OffsetsKv");
     const std::vector<int64_t> dims{K_BATCH, K_HEADS, K_SEQ, K_HEAD_DIM};
     const std::vector<int64_t> strides{K_SEQ * K_TOKEN_STRIDE, K_HEAD_DIM, K_TOKEN_STRIDE, 1};
-    auto packed = [&](int64_t uid, const std::string& name, const auto& table) {
+    const auto packed = [&](int64_t uid, const std::string& name, const auto& table) {
         auto t = std::make_shared<TensorAttributes>();
         t->set_uid(uid)
             .set_name(name)
@@ -466,9 +466,9 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, PackedSdpaSurvivesJsonLiftAndR
         t->set_ragged_offset(table).set_ragged_offset_multiplier(K_TOKEN_STRIDE);
         return t;
     };
-    auto q = packed(1, "Q", offsetsQ);
-    auto k = packed(2, "K", offsetsKv);
-    auto v = packed(3, "V", offsetsKv);
+    const auto q = packed(1, "Q", offsetsQ);
+    const auto k = packed(2, "K", offsetsKv);
+    const auto v = packed(3, "V", offsetsKv);
 
     SdpaAttributes attributes;
     attributes.set_name("sdpa").set_attn_scale(0.125F).set_generate_stats(true);
@@ -490,7 +490,7 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, PackedSdpaSurvivesJsonLiftAndR
 
     // The dnn-benchmarking / Python from_json(json) path: structure-only deserialize, then
     // build_operation_graph(handle), which re-lowers from the lifted nodes.
-    auto lifted = std::make_shared<TestableGraphLowering>();
+    const auto lifted = std::make_shared<TestableGraphLowering>();
     result = lifted->deserialize(originalJson);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     ASSERT_EQ(lifted->validate().code, ErrorCode::OK);
@@ -500,7 +500,7 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, PackedSdpaSurvivesJsonLiftAndR
     result = lifted->serialize(reloweredJson);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    auto byUid = [](const std::string& json) {
+    const auto byUid = [](const std::string& json) {
         std::map<int64_t, nlohmann::json> tensors;
         const auto parsed = nlohmann::json::parse(json);
         for(const auto& t : parsed.at("tensors"))

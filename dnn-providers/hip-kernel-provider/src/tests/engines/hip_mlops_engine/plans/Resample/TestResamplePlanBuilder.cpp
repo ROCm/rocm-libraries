@@ -128,7 +128,7 @@ std::ostream& operator<<(std::ostream& os, const ResampleFwdMutation& value)
 
 flatbuffers::FlatBufferBuilder mutatedResampleFwdGraph(const std::function<void(GraphT&)>& mutate)
 {
-    auto base = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
+    auto const base = hipdnn_test_sdk::utilities::createValidResampleFwdGraph(true);
     return hipdnn_test_sdk::utilities::mutateGraph(base, mutate);
 }
 
@@ -151,7 +151,7 @@ class TestResampleFwdDecline : public TestResamplePlanBuilder,
 
 TEST_F(TestResamplePlanBuilder, IsApplicableReturnsTrueForMaxpoolWithGeneratedIndex)
 {
-    auto builder = mutatedResampleFwdGraph([](GraphT&) {});
+    auto const builder = mutatedResampleFwdGraph([](GraphT&) {});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -160,7 +160,7 @@ TEST_F(TestResamplePlanBuilder, IsApplicableReturnsTrueForMaxpoolWithGeneratedIn
 
 TEST_P(TestResampleFwdDecline, IsApplicableReturnsFalse)
 {
-    auto builder = mutatedResampleFwdGraph(GetParam().mutate);
+    auto const builder = mutatedResampleFwdGraph(GetParam().mutate);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 

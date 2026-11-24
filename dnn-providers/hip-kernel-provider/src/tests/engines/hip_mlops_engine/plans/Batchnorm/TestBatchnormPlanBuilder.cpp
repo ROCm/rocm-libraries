@@ -920,7 +920,7 @@ void makeScalarRuntime(GraphT& graph, int64_t scalarUid)
 flatbuffers::FlatBufferBuilder mutatedTrainingGraph(const std::function<void(GraphT&)>& mutate
                                                     = nullptr)
 {
-    auto base = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+    auto const base = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
         {588, 196, 14, 1},
         {1, 3, 14, 14},
         /*withMeanVariance=*/true,
@@ -954,7 +954,7 @@ flatbuffers::FlatBufferBuilder mutatedTrainingGraph(const std::function<void(Gra
 flatbuffers::FlatBufferBuilder
     noRunningStatsTrainingGraph(const std::function<void(GraphT&)>& mutate)
 {
-    auto base = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+    auto const base = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
         {588, 196, 14, 1}, {1, 3, 14, 14}, /*withMeanVariance=*/true);
     return hipdnn_test_sdk::utilities::mutateGraph(base, mutate);
 }
@@ -1018,7 +1018,7 @@ protected:
 
 TEST_F(TestBatchnormTrainingGraphDecline, CompleteRunningStatsGraphIsAcceptedByBothBuilders)
 {
-    auto builder = mutatedTrainingGraph();
+    auto const builder = mutatedTrainingGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -1028,7 +1028,7 @@ TEST_F(TestBatchnormTrainingGraphDecline, CompleteRunningStatsGraphIsAcceptedByB
 
 TEST_F(TestBatchnormTrainingGraphDecline, GraphWithoutSavedStatisticsIsAcceptedByBothBuilders)
 {
-    auto builder = mutatedTrainingGraph([](GraphT& g) {
+    auto const builder = mutatedTrainingGraph([](GraphT& g) {
         batchnormAttrs(g).mean_tensor_uid.reset();
         batchnormAttrs(g).inv_variance_tensor_uid.reset();
     });
@@ -1041,7 +1041,7 @@ TEST_F(TestBatchnormTrainingGraphDecline, GraphWithoutSavedStatisticsIsAcceptedB
 
 TEST_F(TestBatchnormTrainingGraphDecline, BothSavedStatisticsVirtualIsAcceptedByBothBuilders)
 {
-    auto builder = noRunningStatsTrainingGraph([](GraphT& g) {
+    auto const builder = noRunningStatsTrainingGraph([](GraphT& g) {
         tensorByUid(g, 6).virtual_ = true;
         tensorByUid(g, 7).virtual_ = true;
     });
@@ -1054,7 +1054,7 @@ TEST_F(TestBatchnormTrainingGraphDecline, BothSavedStatisticsVirtualIsAcceptedBy
 
 TEST_F(TestBatchnormTrainingGraphDecline, OnlySavedMeanVirtualIsDeclinedByBothBuilders)
 {
-    auto builder
+    auto const builder
         = noRunningStatsTrainingGraph([](GraphT& g) { tensorByUid(g, 6).virtual_ = true; });
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -1065,7 +1065,7 @@ TEST_F(TestBatchnormTrainingGraphDecline, OnlySavedMeanVirtualIsDeclinedByBothBu
 
 TEST_F(TestBatchnormTrainingGraphDecline, OnlySavedInvVarianceVirtualIsDeclinedByBothBuilders)
 {
-    auto builder
+    auto const builder
         = noRunningStatsTrainingGraph([](GraphT& g) { tensorByUid(g, 7).virtual_ = true; });
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -1076,7 +1076,7 @@ TEST_F(TestBatchnormTrainingGraphDecline, OnlySavedInvVarianceVirtualIsDeclinedB
 
 TEST_F(TestBatchnormTrainingGraphDecline, RuntimeEpsilonGraphIsAcceptedByBothBuilders)
 {
-    auto builder = mutatedTrainingGraph(
+    auto const builder = mutatedTrainingGraph(
         [](GraphT& g) { makeScalarRuntime(g, batchnormAttrs(g).epsilon_tensor_uid); });
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -1087,7 +1087,7 @@ TEST_F(TestBatchnormTrainingGraphDecline, RuntimeEpsilonGraphIsAcceptedByBothBui
 
 TEST_F(TestBatchnormTrainingGraphDecline, RuntimeMomentumGraphIsAcceptedByBothBuilders)
 {
-    auto builder = mutatedTrainingGraph(
+    auto const builder = mutatedTrainingGraph(
         [](GraphT& g) { makeScalarRuntime(g, *batchnormAttrs(g).momentum_tensor_uid); });
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -1098,7 +1098,7 @@ TEST_F(TestBatchnormTrainingGraphDecline, RuntimeMomentumGraphIsAcceptedByBothBu
 
 TEST_P(TestBatchnormTrainingGraphDecline, BothBuildersDecline)
 {
-    auto builder = mutatedTrainingGraph(GetParam().mutate);
+    auto const builder = mutatedTrainingGraph(GetParam().mutate);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -1161,7 +1161,8 @@ protected:
 
     bool isApplicable(const std::function<void(GraphT&)>& mutate)
     {
-        auto builder = hipdnn_test_sdk::utilities::mutateGraph(GetParam().makeGraph(), mutate);
+        auto const builder
+            = hipdnn_test_sdk::utilities::mutateGraph(GetParam().makeGraph(), mutate);
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
             builder.GetBufferPointer(), builder.GetSize());
         return _batchnormBuilder.isApplicable(_dummyHandle, graph);
@@ -1301,7 +1302,7 @@ protected:
 
 TEST_P(TestBatchnormOneNodeVirtualOperand, UnmutatedGraphIsApplicable)
 {
-    auto builder = GetParam().makeGraph();
+    auto const builder = GetParam().makeGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 
@@ -1310,8 +1311,8 @@ TEST_P(TestBatchnormOneNodeVirtualOperand, UnmutatedGraphIsApplicable)
 
 TEST_P(TestBatchnormOneNodeVirtualOperand, VirtualOperandIsNotApplicable)
 {
-    auto base = GetParam().makeGraph();
-    auto mutated = hipdnn_test_sdk::utilities::mutateGraph(base, [&](GraphT& graph) {
+    auto const base = GetParam().makeGraph();
+    auto const mutated = hipdnn_test_sdk::utilities::mutateGraph(base, [&](GraphT& graph) {
         const int64_t uid = GetParam().operandUid(graph);
         for(auto& tensor : graph.tensors)
         {
@@ -1415,7 +1416,7 @@ TEST_F(TestBatchnormPlanBuilder, ElementCountAtTheKernelIndexLimit)
 TEST_F(TestBatchnormPlanBuilder, DeclinesRunningStatisticsThatAreNotSavedStatisticShaped)
 {
     {
-        auto builder = createTrainingGraphWithRunningStats();
+        auto const builder = createTrainingGraphWithRunningStats();
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
             builder.GetBufferPointer(), builder.GetSize());
         ASSERT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
@@ -1436,7 +1437,7 @@ TEST_F(TestBatchnormPlanBuilder, DeclinesRunningStatisticsThatAreNotSavedStatist
         {
             const auto& mutate = mutation.second;
             SCOPED_TRACE(std::string(name) + " " + mutation.first);
-            auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+            auto const builder = hipdnn_test_sdk::utilities::mutateGraph(
                 createTrainingGraphWithRunningStats(),
                 [&](GraphT& graph) { mutate(tensorNamed(graph, name)); });
             const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
@@ -1445,7 +1446,7 @@ TEST_F(TestBatchnormPlanBuilder, DeclinesRunningStatisticsThatAreNotSavedStatist
         }
     }
 
-    auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+    auto const builder = hipdnn_test_sdk::utilities::mutateGraph(
         createTrainingGraphWithRunningStats(), [](GraphT& graph) {
             graph.nodes.at(0)->attributes.AsBatchnormAttributes()->momentum_tensor_uid = 9999;
         });

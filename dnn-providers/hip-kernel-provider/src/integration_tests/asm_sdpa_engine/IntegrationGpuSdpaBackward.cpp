@@ -397,7 +397,7 @@ protected:
         // S_q == S_kv and D_qk == D_v), which collapses the softmax to the identity and
         // leaves dQ and dK near zero. UIDs match between the GPU and CPU bundles, so both
         // still hold identical inputs.
-        for(auto& tensorPair : bundle.tensors)
+        for(auto const& tensorPair : bundle.tensors)
         {
             bundle.randomizeTensor(tensorPair.first,
                                    _minVal,
@@ -468,7 +468,8 @@ protected:
 
         // O has Q's batch, heads and sequence with V's head dim
         const auto oDims = testCase.oDims();
-        auto oStrides = testCase.oStrides.empty() ? generateStrides(oDims) : testCase.oStrides;
+        auto const oStrides
+            = testCase.oStrides.empty() ? generateStrides(oDims) : testCase.oStrides;
 
         // dO has same dims as O, and O's strides unless the test case sets its own
         const auto& doDims = oDims;

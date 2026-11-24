@@ -402,7 +402,7 @@ TEST(TestGpuHipblasltEnginePluginApi, CreateExecutionContextReturnsInternalError
         = hipdnn_plugin_sdk::createValidConstDataEngineConfig(serializedEngineConfig);
 
     hipdnnEnginePluginExecutionContext_t executionContext = nullptr;
-    auto status = hipdnnEnginePluginCreateExecutionContextImpl(
+    auto const status = hipdnnEnginePluginCreateExecutionContextImpl(
         handle, &engineConfig, &opGraph, &executionContext);
 
     EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);

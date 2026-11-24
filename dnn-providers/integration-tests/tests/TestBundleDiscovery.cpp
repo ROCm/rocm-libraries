@@ -2702,7 +2702,7 @@ TEST_F(TestBundleDiscoveryFixture, RegistrationDoesNotCountAnExpectedRejectionCa
 // a failing test that names the input and the kind.
 TEST_F(TestBundleDiscoveryFixture, ClassifyBundleReturnsFailedLoadForUnknownFillKind)
 {
-    auto dir = _tempDir / "op" / "unknownkind";
+    const auto dir = _tempDir / "op" / "unknownkind";
     createMinimalBundle(dir, "unknownkind");
     std::ofstream(dir / "unknownkind.meta.json")
         << R"({"format_version": 1, "inputs": {"3": {"kind": "vaules", "values": [1]}}})";

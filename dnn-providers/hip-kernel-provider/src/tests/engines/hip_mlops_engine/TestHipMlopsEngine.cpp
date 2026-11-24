@@ -216,7 +216,7 @@ TEST(TestHipMlopsEngine, RaggedOffsetMultiplierWithoutRaggedOffsetFlipsApplicabl
 {
     // A multiplier other than 1 means something only beside a ragged offset; on a dense tensor
     // the engine declines before any plan builder is consulted.
-    auto baseBuilder = createValidMatmulGraph();
+    auto const baseBuilder = createValidMatmulGraph();
     const GraphWrapper baseGraph(baseBuilder.GetBufferPointer(), baseBuilder.GetSize());
 
     {
@@ -230,7 +230,7 @@ TEST(TestHipMlopsEngine, RaggedOffsetMultiplierWithoutRaggedOffsetFlipsApplicabl
         EXPECT_TRUE(engine.isApplicable(dummyHandle, baseGraph));
     }
 
-    auto strayBuilder = mutateGraph(createValidMatmulGraph(), [](auto& graph) {
+    auto const strayBuilder = mutateGraph(createValidMatmulGraph(), [](auto& graph) {
         graph.tensors.front()->ragged_offset_multiplier = 2;
     });
     const GraphWrapper strayGraph(strayBuilder.GetBufferPointer(), strayBuilder.GetSize());

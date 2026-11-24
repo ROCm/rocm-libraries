@@ -790,7 +790,7 @@ protected:
         const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envGuard(
             "HIPDNN_HEUR_POLICY_ORDER", "");
 
-        auto heur = getEngineHeuristicDescriptor();
+        const auto heur = getEngineHeuristicDescriptor();
         setGraph();
         setHeuristicMode(mode);
         EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
@@ -1293,7 +1293,7 @@ TEST_F(TestGpuEngineHeuristicDescriptor, EnvironmentVariablePolicyOrderIsRespect
     {
         SCOPED_TRACE(static_cast<int>(mode));
         _engineHeuristicWrapper = createDescriptor<EngineHeuristicDescriptor>();
-        auto heur = getEngineHeuristicDescriptor();
+        const auto heur = getEngineHeuristicDescriptor();
         setGraph();
         setHeuristicMode(mode);
 

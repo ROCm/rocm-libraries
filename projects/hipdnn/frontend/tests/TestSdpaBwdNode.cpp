@@ -1210,7 +1210,7 @@ TEST(TestSdpaBwdNode, PreValidateChecksDBiasAgainstBias)
         = [](const std::vector<int64_t>& dims, const std::vector<int64_t>& strides) {
               auto attrs = makeGqaAttrs();
               attrs.set_bias(makeBroadcastBias());
-              auto dBias = std::make_shared<TensorAttributes>();
+              const auto dBias = std::make_shared<TensorAttributes>();
               dBias->set_dim(dims).set_stride(strides);
               attrs.set_dbias(dBias);
               return preValidate(std::move(attrs)).code;
@@ -1232,7 +1232,7 @@ TEST(TestSdpaBwdNode, InferPropertiesSetsDBiasFromBias)
 {
     auto attrs = makeGqaAttrs();
     attrs.set_bias(makeBroadcastBias());
-    auto dBias = std::make_shared<TensorAttributes>();
+    const auto dBias = std::make_shared<TensorAttributes>();
     attrs.set_dbias(dBias);
 
     const GraphAttributes graphAttrs;
@@ -1249,7 +1249,7 @@ TEST(TestSdpaBwdNode, InferPropertiesKeepsExplicitDBiasStrides)
 {
     auto attrs = makeGqaAttrs();
     attrs.set_bias(makeBroadcastBias());
-    auto dBias = std::make_shared<TensorAttributes>();
+    const auto dBias = std::make_shared<TensorAttributes>();
     dBias->set_stride({4096, 32, 256, 1});
     attrs.set_dbias(dBias);
 
@@ -1266,10 +1266,10 @@ TEST(TestSdpaBwdNode, PreValidateRejectsDBiasDataTypeUnlikeBias)
 {
     const auto validate = [](DataType biasType, DataType dBiasType) {
         auto attrs = makeGqaAttrs();
-        auto bias = makeBroadcastBias();
+        const auto bias = makeBroadcastBias();
         bias->set_data_type(biasType);
         attrs.set_bias(bias);
-        auto dBias = std::make_shared<TensorAttributes>();
+        const auto dBias = std::make_shared<TensorAttributes>();
         dBias->set_data_type(dBiasType);
         attrs.set_dbias(dBias);
         return preValidate(std::move(attrs));
@@ -1289,10 +1289,10 @@ TEST(TestSdpaBwdNode, InferPropertiesSetsDBiasDataTypeFromBias)
 {
     // The graph IO type is HALF, the bias FLOAT: dBias follows the bias.
     auto attrs = makeGqaAttrs();
-    auto bias = makeBroadcastBias();
+    const auto bias = makeBroadcastBias();
     bias->set_data_type(DataType::FLOAT);
     attrs.set_bias(bias);
-    auto dBias = std::make_shared<TensorAttributes>();
+    const auto dBias = std::make_shared<TensorAttributes>();
     attrs.set_dbias(dBias);
     const auto dq = attrs.get_dq();
 
@@ -1310,7 +1310,7 @@ TEST(TestSdpaBwdNode, InferPropertiesKeepsExplicitDBiasDataType)
 {
     auto attrs = makeGqaAttrs();
     attrs.set_bias(makeBroadcastBias());
-    auto dBias = std::make_shared<TensorAttributes>();
+    const auto dBias = std::make_shared<TensorAttributes>();
     dBias->set_data_type(DataType::FLOAT);
     attrs.set_dbias(dBias);
 

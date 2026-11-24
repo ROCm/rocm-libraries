@@ -457,7 +457,7 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder, IsApplicableReturnsTrueForReluWithL
 TEST_F(TestMiopenUnaryActivationPlanBuilder, IsApplicableReturnsTrueForReluWithNonZeroLowerClipOnly)
 {
     // Runs as CLAMP with the float maximum as the upper bound.
-    auto builder
+    const auto builder
         = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::RELU_FWD,
                                                          {1, 3, 4, 4},
                                                          std::vector<int64_t>{48, 16, 4, 1},
@@ -608,7 +608,7 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder,
        IsApplicableReturnsTrueForReluWithNonZeroLowerClipAndZeroSlope)
 {
     // A zero slope is no slope, so this is a lower clip alone, which runs as CLAMP.
-    auto builder
+    const auto builder
         = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::RELU_FWD,
                                                          {1, 3, 4, 4},
                                                          std::vector<int64_t>{48, 16, 4, 1},

@@ -316,7 +316,7 @@ TEST(TestMiopenUtils, MapPointwiseModeReluBwdNegativeLowerClipOnly)
 {
     const float lowerClip = -0.5f;
     flatbuffers::FlatBufferBuilder builder;
-    auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
+    const auto attrOffset = hipdnn_flatbuffers_sdk::data_objects::CreatePointwiseAttributes(
         builder, hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD, lowerClip);
     builder.Finish(attrOffset);
     const auto* attr

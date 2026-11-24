@@ -203,7 +203,7 @@ protected:
         int64_t engineId, const std::optional<std::vector<int32_t>>& numericalNotes)
     {
         flatbuffers::FlatBufferBuilder builder;
-        auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
+        const auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
             builder,
             engineId,
             nullptr,
@@ -515,7 +515,7 @@ TEST_F(TestEngineDescriptor, PreservesUnknownBehaviorNote)
 TEST_F(TestEngineDescriptor, GetNumericalNotesAbsentFieldReportsNondeterministic)
 {
     // Default fixture buffer carries no numerical_notes field.
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     hipdnnBackendNumericalNote_t note = HIPDNN_NUMERICAL_NOTE_TENSOR_CORE;
@@ -529,7 +529,7 @@ TEST_F(TestEngineDescriptor, GetNumericalNotesAbsentFieldReportsNondeterministic
 TEST_F(TestEngineDescriptor, GetNumericalNotesExplicitEmptyListReportsNoNotes)
 {
     serializeEngineDetailsWithNumericalNotes(0, std::vector<int32_t>{});
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     int64_t noteCount = -1;
@@ -545,7 +545,7 @@ TEST_F(TestEngineDescriptor, GetNumericalNotesReturnsNotes)
         std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_WINOGRAD,
                              HIPDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS,
                              HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC});
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     int64_t noteCount = 0;
@@ -570,7 +570,7 @@ TEST_F(TestEngineDescriptor, GetNumericalNotesWithoutElementCount)
 {
     serializeEngineDetailsWithNumericalNotes(
         0, std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_WINOGRAD, HIPDNN_NUMERICAL_NOTE_FFT});
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     std::vector<hipdnnBackendNumericalNote_t> notes(2);
@@ -587,7 +587,7 @@ TEST_F(TestEngineDescriptor, GetNumericalNotesZeroRequestedWithOutputReturnsCoun
 {
     serializeEngineDetailsWithNumericalNotes(
         0, std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_WINOGRAD, HIPDNN_NUMERICAL_NOTE_FFT});
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     hipdnnBackendNumericalNote_t note = HIPDNN_NUMERICAL_NOTE_TYPE_COUNT;
@@ -602,7 +602,7 @@ TEST_F(TestEngineDescriptor, GetNumericalNotesNullOutputWithRequestedCountReturn
 {
     serializeEngineDetailsWithNumericalNotes(
         0, std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_WINOGRAD, HIPDNN_NUMERICAL_NOTE_FFT});
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     int64_t noteCount = -1;
@@ -617,7 +617,7 @@ TEST_F(TestEngineDescriptor, GetNumericalNotesAcceptsZeroValuedNote)
     static_assert(HIPDNN_NUMERICAL_NOTE_TENSOR_CORE == 0);
     serializeEngineDetailsWithNumericalNotes(
         0, std::vector<int32_t>{static_cast<int32_t>(HIPDNN_NUMERICAL_NOTE_TENSOR_CORE)});
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     hipdnnBackendNumericalNote_t note = HIPDNN_NUMERICAL_NOTE_FFT;
@@ -630,7 +630,7 @@ TEST_F(TestEngineDescriptor, GetNumericalNotesAcceptsZeroValuedNote)
 
 TEST_F(TestEngineDescriptor, GetNumericalNotesCountQueryRequiresElementCount)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     ASSERT_THROW_HIPDNN_STATUS(
@@ -641,7 +641,7 @@ TEST_F(TestEngineDescriptor, GetNumericalNotesCountQueryRequiresElementCount)
 
 TEST_F(TestEngineDescriptor, GetNumericalNotesInvalidType)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalized();
 
     int64_t noteCount = 0;
@@ -655,7 +655,7 @@ TEST_F(TestEngineDescriptor, GetNumericalNotesInsufficientOutputCount)
 {
     serializeEngineDetailsWithNumericalNotes(
         0, std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_WINOGRAD, HIPDNN_NUMERICAL_NOTE_FFT});
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     hipdnnBackendNumericalNote_t note = HIPDNN_NUMERICAL_NOTE_TYPE_COUNT;
@@ -673,7 +673,7 @@ TEST_F(TestEngineDescriptor, PreservesUnknownNumericalNote)
     constexpr hipdnnBackendNumericalNote_t UNKNOWN_NOTE = HIPDNN_NUMERICAL_NOTE_TYPE_COUNT + 1;
     serializeEngineDetailsWithNumericalNotes(0, std::vector<int32_t>{UNKNOWN_NOTE});
 
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     makeEngineFinalizedExpectingDetails();
 
     hipdnnBackendNumericalNote_t note = HIPDNN_NUMERICAL_NOTE_WINOGRAD;
@@ -686,7 +686,7 @@ TEST_F(TestEngineDescriptor, PreservesUnknownNumericalNote)
 
 TEST_F(TestEngineDescriptor, SetNumericalNotesIsNotSupported)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     hipdnnBackendNumericalNote_t note = HIPDNN_NUMERICAL_NOTE_WINOGRAD;
     ASSERT_THROW_HIPDNN_STATUS(
         engine->setAttribute(
@@ -821,7 +821,7 @@ TEST_F(TestEngineDescriptor, DeferredMetadataFailureRetriesWithoutPublishingPart
 
 TEST_F(TestEngineDescriptor, DeferredMetadataFailureRetriesWithoutPublishingPartialNumericalNotes)
 {
-    auto engine = getEngineDescriptor();
+    const auto engine = getEngineDescriptor();
     EXPECT_CALL(*getMockGraph(), isFinalized()).WillOnce(Return(true));
     engine->initializeHeuristicResult(getMockGraph(), ENGINE_ID);
     serializeEngineDetailsWithNumericalNotes(

@@ -37,8 +37,8 @@ flatbuffers::FlatBufferBuilder
 {
     flatbuffers::FlatBufferBuilder builder;
     // Built through the table API: an empty vector offset is written, unlike the object API.
-    auto notesVector = builder.CreateVector(notes);
-    auto details = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+    const auto notesVector = builder.CreateVector(notes);
+    const auto details = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
         builder, engineId, 0, 0, 0, 0, notesVector);
     builder.Finish(details);
     return builder;
@@ -200,14 +200,14 @@ TEST(TestEngineDetailsWrapper, BehaviorNotesPopulated)
 
 TEST(TestEngineDetailsWrapper, NumericalNotesMissingFieldIsNullopt)
 {
-    auto builder = buildValidEngineDetailsBuffer(42);
+    const auto builder = buildValidEngineDetailsBuffer(42);
     const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
     EXPECT_FALSE(wrapper.numericalNotes().has_value());
 }
 
 TEST(TestEngineDetailsWrapper, NumericalNotesExplicitEmptyIsEmptyVector)
 {
-    auto builder = buildEngineDetailsWithNumericalNotes(42, {});
+    const auto builder = buildEngineDetailsWithNumericalNotes(42, {});
     const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
 
     const auto notes = wrapper.numericalNotes();
@@ -217,7 +217,7 @@ TEST(TestEngineDetailsWrapper, NumericalNotesExplicitEmptyIsEmptyVector)
 
 TEST(TestEngineDetailsWrapper, NumericalNotesPopulated)
 {
-    auto builder = buildEngineDetailsWithNumericalNotes(42, {4, 0, 77});
+    const auto builder = buildEngineDetailsWithNumericalNotes(42, {4, 0, 77});
     const EngineDetailsWrapper wrapper(builder.GetBufferPointer(), builder.GetSize());
 
     const auto notes = wrapper.numericalNotes();

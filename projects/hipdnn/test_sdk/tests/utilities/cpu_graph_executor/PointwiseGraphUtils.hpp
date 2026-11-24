@@ -316,7 +316,7 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     {
         pointwiseAttrs.set_softplus_beta(softplusBeta.value());
     }
-    auto outputTensorAttr
+    const auto outputTensorAttr
         = graph->pointwise(input0TensorAttr, input1TensorAttr, input2TensorAttr, pointwiseAttrs);
 
     if(!outputTensorAttr->has_uid())

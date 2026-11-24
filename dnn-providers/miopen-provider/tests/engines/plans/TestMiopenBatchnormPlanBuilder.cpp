@@ -79,14 +79,14 @@ protected:
 
 TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableMatchesIsGraphApplicable)
 {
-    auto servedBuilder
+    const auto servedBuilder
         = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph();
     const GraphWrapper served(servedBuilder.GetBufferPointer(), servedBuilder.GetSize());
     EXPECT_EQ(_planBuilder.isApplicable(*_dummyHandle, served),
               MiopenBatchnormPlanBuilder::isGraphApplicable(served));
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, served));
 
-    auto declinedBuilder
+    const auto declinedBuilder
         = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph(
             {150528, 50176, 224, 1},
             {1, 3, 224, 224},
@@ -2550,7 +2550,7 @@ class TestMiopenBatchnormPlanBuilderTrainingStats
 TEST_P(TestMiopenBatchnormPlanBuilderTrainingStats, ServesOnlyGraphsWhoseStatsThePlanHonours)
 {
     const auto& p = GetParam();
-    auto builder
+    const auto builder
         = createBatchnormTrainingGraphWithStats(p.runningStatsMask, p.saveMean, p.saveInvVariance);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
@@ -2566,7 +2566,7 @@ TEST_P(TestMiopenBatchnormPlanBuilderTrainingStats,
        TrainingBuilderServesOnlyCompleteOrNoRunningStats)
 {
     const auto& p = GetParam();
-    auto builder
+    const auto builder
         = createBatchnormTrainingGraphWithStats(p.runningStatsMask, p.saveMean, p.saveInvVariance);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
@@ -2593,11 +2593,11 @@ TEST_P(TestMiopenBatchnormPlanBuilderVirtualRole, DeclinesVirtualTensor)
 {
     const auto& p = GetParam();
 
-    auto servedBuilder = createSingleNodeGraphWithVirtualTensor(p.mode, -1);
+    const auto servedBuilder = createSingleNodeGraphWithVirtualTensor(p.mode, -1);
     const GraphWrapper served(servedBuilder.GetBufferPointer(), servedBuilder.GetSize());
     ASSERT_TRUE(MiopenBatchnormPlanBuilder::isGraphApplicable(served));
 
-    auto virtualBuilder = createSingleNodeGraphWithVirtualTensor(p.mode, p.uid);
+    const auto virtualBuilder = createSingleNodeGraphWithVirtualTensor(p.mode, p.uid);
     const GraphWrapper graph(virtualBuilder.GetBufferPointer(), virtualBuilder.GetSize());
     EXPECT_FALSE(MiopenBatchnormPlanBuilder::isGraphApplicable(graph));
 }
@@ -2645,7 +2645,7 @@ class TestMiopenBatchnormSavedPairVirtual : public ::testing::Test
 
 TEST_F(TestMiopenBatchnormSavedPairVirtual, SingleNodeBuilderServesBothVirtual)
 {
-    auto builder = createSavedPairGraph(0U, true, true);
+    const auto builder = createSavedPairGraph(0U, true, true);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(MiopenBatchnormPlanBuilder::isGraphApplicable(graph));
@@ -2653,7 +2653,7 @@ TEST_F(TestMiopenBatchnormSavedPairVirtual, SingleNodeBuilderServesBothVirtual)
 
 TEST_F(TestMiopenBatchnormSavedPairVirtual, TrainingBuilderServesBothVirtual)
 {
-    auto builder = createSavedPairGraph(0U, true, true);
+    const auto builder = createSavedPairGraph(0U, true, true);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(MiopenBatchnormFwdTrainingPlanBuilder::isGraphApplicable(graph));
@@ -2661,7 +2661,7 @@ TEST_F(TestMiopenBatchnormSavedPairVirtual, TrainingBuilderServesBothVirtual)
 
 TEST_F(TestMiopenBatchnormSavedPairVirtual, SingleNodeBuilderDeclinesOnlyMeanVirtual)
 {
-    auto builder = createSavedPairGraph(0U, true, false);
+    const auto builder = createSavedPairGraph(0U, true, false);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(MiopenBatchnormPlanBuilder::isGraphApplicable(graph));
@@ -2669,7 +2669,7 @@ TEST_F(TestMiopenBatchnormSavedPairVirtual, SingleNodeBuilderDeclinesOnlyMeanVir
 
 TEST_F(TestMiopenBatchnormSavedPairVirtual, SingleNodeBuilderDeclinesOnlyInvVarianceVirtual)
 {
-    auto builder = createSavedPairGraph(0U, false, true);
+    const auto builder = createSavedPairGraph(0U, false, true);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(MiopenBatchnormPlanBuilder::isGraphApplicable(graph));
@@ -2677,7 +2677,7 @@ TEST_F(TestMiopenBatchnormSavedPairVirtual, SingleNodeBuilderDeclinesOnlyInvVari
 
 TEST_F(TestMiopenBatchnormSavedPairVirtual, TrainingBuilderDeclinesOnlyMeanVirtual)
 {
-    auto builder = createSavedPairGraph(0U, true, false);
+    const auto builder = createSavedPairGraph(0U, true, false);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(MiopenBatchnormFwdTrainingPlanBuilder::isGraphApplicable(graph));
@@ -2685,7 +2685,7 @@ TEST_F(TestMiopenBatchnormSavedPairVirtual, TrainingBuilderDeclinesOnlyMeanVirtu
 
 TEST_F(TestMiopenBatchnormSavedPairVirtual, TrainingBuilderDeclinesOnlyInvVarianceVirtual)
 {
-    auto builder = createSavedPairGraph(0U, false, true);
+    const auto builder = createSavedPairGraph(0U, false, true);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(MiopenBatchnormFwdTrainingPlanBuilder::isGraphApplicable(graph));
@@ -2693,7 +2693,7 @@ TEST_F(TestMiopenBatchnormSavedPairVirtual, TrainingBuilderDeclinesOnlyInvVarian
 
 TEST_F(TestMiopenBatchnormSavedPairVirtual, TrainingBuilderDeclinesBothVirtualWithRunningStats)
 {
-    auto builder = createSavedPairGraph(ALL_RUNNING_STATS, true, true);
+    const auto builder = createSavedPairGraph(ALL_RUNNING_STATS, true, true);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(MiopenBatchnormFwdTrainingPlanBuilder::isGraphApplicable(graph));
@@ -2701,7 +2701,7 @@ TEST_F(TestMiopenBatchnormSavedPairVirtual, TrainingBuilderDeclinesBothVirtualWi
 
 TEST_F(TestMiopenBatchnormSavedPairVirtual, TrainingBuilderDeclinesBothVirtualWithFusedActivation)
 {
-    auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+    const auto builder = hipdnn_test_sdk::utilities::mutateGraph(
         hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(),
         [](fb::GraphT& graph) {
             for(auto& tensor : graph.tensors)

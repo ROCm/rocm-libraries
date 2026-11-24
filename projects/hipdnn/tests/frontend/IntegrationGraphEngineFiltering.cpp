@@ -433,7 +433,7 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectByUnmatchedEngineNameBarsNot
 TEST_F(IntegrationGraphEngineNameFiltering, NameFilterSetBeforeCreateExecutionPlansPersists)
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
-    auto graph = buildGraph("NameFilterSetBeforeCreateExecutionPlansPersists", dims);
+    const auto graph = buildGraph("NameFilterSetBeforeCreateExecutionPlansPersists", dims);
 
     graph->deselect_engines(std::vector<std::string>{pluginEngineName()});
 

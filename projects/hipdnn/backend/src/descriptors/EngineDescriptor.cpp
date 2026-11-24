@@ -107,7 +107,7 @@ void EngineDescriptor::ensureDetailsLoaded() const
             {
                 numericalNotes.clear();
                 numericalNotes.reserve(rawNumericalNotes->size());
-                for(auto note : *rawNumericalNotes)
+                for(const auto note : *rawNumericalNotes)
                 {
                     THROW_IF_TRUE(note < 0,
                                   HIPDNN_STATUS_BAD_PARAM,
@@ -507,7 +507,7 @@ void EngineDescriptor::getNumericalNotes(hipdnnBackendAttributeType_t attributeT
                 "EngineDescriptor failed to get numerical notes: Invalid attribute type.");
     ensureDetailsLoaded();
 
-    auto count = static_cast<int64_t>(_numericalNotes.size());
+    const auto count = static_cast<int64_t>(_numericalNotes.size());
     if(arrayOfElements == nullptr || requestedElementCount == 0)
     {
         THROW_IF_NULL(elementCount,

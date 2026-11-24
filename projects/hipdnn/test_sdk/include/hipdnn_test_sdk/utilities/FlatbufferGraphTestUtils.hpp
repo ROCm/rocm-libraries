@@ -529,20 +529,21 @@ inline flatbuffers::FlatBufferBuilder
     const auto peerStatsOffset = peerStatsTensorUids.empty()
                                      ? flatbuffers::Offset<flatbuffers::Vector<int64_t>>()
                                      : builder.CreateVector(peerStatsTensorUids);
-    auto bnormAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateBatchnormBackwardAttributes(
-        builder,
-        2, // dy_tensor_uid
-        1, // x_tensor_uid
-        hasOptionalAttributes ? flatbuffers::Optional<int64_t>(7)
-                              : flatbuffers::nullopt, // mean_tensor_uid
-        hasOptionalAttributes ? flatbuffers::Optional<int64_t>(8)
-                              : flatbuffers::nullopt, // inv_variance_tensor_uid
-        4, // scale_tensor_uid
-        peerStatsOffset, // peer_stats_tensor_uid
-        3, // dx_tensor_uid
-        5, // dscale_tensor_uid
-        6 // dbias_tensor_uid
-    );
+    const auto bnormAttributes
+        = hipdnn_flatbuffers_sdk::data_objects::CreateBatchnormBackwardAttributes(
+            builder,
+            2, // dy_tensor_uid
+            1, // x_tensor_uid
+            hasOptionalAttributes ? flatbuffers::Optional<int64_t>(7)
+                                  : flatbuffers::nullopt, // mean_tensor_uid
+            hasOptionalAttributes ? flatbuffers::Optional<int64_t>(8)
+                                  : flatbuffers::nullopt, // inv_variance_tensor_uid
+            4, // scale_tensor_uid
+            peerStatsOffset, // peer_stats_tensor_uid
+            3, // dx_tensor_uid
+            5, // dscale_tensor_uid
+            6 // dbias_tensor_uid
+        );
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
     const auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
@@ -2998,7 +2999,7 @@ inline flatbuffers::FlatBufferBuilder
     addCuSeqLen(withCuSeqLenQ, "cu_seq_len_q", cuSeqLenQUid);
     addCuSeqLen(withCuSeqLenKv, "cu_seq_len_kv", cuSeqLenKvUid);
 
-    auto sdpaAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateSdpaAttributes(
+    const auto sdpaAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateSdpaAttributes(
         builder,
         qUid,
         kUid,

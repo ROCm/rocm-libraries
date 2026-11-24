@@ -163,7 +163,7 @@ TEST_P(TestLayernormFusionPlanBuilder, DeclinesIdentityReluAndLeakyReluFusion)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
     const auto& testCase = GetParam();
-    auto original
+    auto const original
         = testCase.isBwd ? createValidLayernormBwdGraph() : createValidLayernormFpropGraph();
     auto nativeGraph = UnPackGraph(original.GetBufferPointer());
     auto& normNode = *nativeGraph->nodes[0];
@@ -391,8 +391,8 @@ TEST_F(TestLayernormPlanBuilder, ElementCountAtTheKernelIndexLimit)
             SCOPED_TRACE(columns);
             const std::vector<int64_t> dims{1, 1, 1, columns};
             const std::vector<int64_t> strides{columns, columns, columns, 1};
-            auto builder = backward ? createValidLayernormBwdGraph(strides, dims)
-                                    : createValidLayernormFpropGraph(strides, dims);
+            auto const builder = backward ? createValidLayernormBwdGraph(strides, dims)
+                                          : createValidLayernormFpropGraph(strides, dims);
             const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
             EXPECT_EQ(_planBuilder.isApplicable(_dummyHandle, graph), expected);
         }
@@ -411,7 +411,7 @@ TEST_F(TestLayernormPlanBuilder, DeclinesAVirtualKernelBuffer)
         {
             SCOPED_TRACE(direction);
             SCOPED_TRACE(name);
-            auto builder
+            auto const builder
                 = mutateGraph(direction == "forward" ? createValidLayernormFpropGraph()
                                                      : createValidLayernormBwdGraph(),
                               [&name](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
@@ -447,12 +447,12 @@ TEST_F(TestLayernormPlanBuilder, DeclinesAnEpsilonTheGraphDoesNotResolve)
         };
 
         {
-            auto builder = base();
+            auto const builder = base();
             const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
             ASSERT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
         }
         {
-            auto builder
+            auto const builder
                 = mutateGraph(base(), [&](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
                       const auto uid = epsilonUid(graph);
                       for(auto& tensor : graph.tensors)
@@ -467,7 +467,7 @@ TEST_F(TestLayernormPlanBuilder, DeclinesAnEpsilonTheGraphDoesNotResolve)
             EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph)) << "valueless epsilon";
         }
         {
-            auto builder
+            auto const builder
                 = mutateGraph(base(), [&](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
                       auto* node = graph.nodes.at(0).get();
                       if(backward)
@@ -491,18 +491,18 @@ TEST_F(TestLayernormPlanBuilder, AcceptsABakedOrRuntimeEpsilon)
     for(const bool backward : {false, true})
     {
         SCOPED_TRACE(backward ? "backward" : "forward");
-        auto builder = mutateGraph(backward ? createValidLayernormBwdGraph()
-                                            : createValidLayernormFpropGraph(),
-                                   [](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
-                                       for(auto& tensor : graph.tensors)
-                                       {
-                                           if(tensor->name == "epsilon")
-                                           {
-                                               tensor->value.Reset();
-                                               tensor->is_runtime_pass_by_value = true;
-                                           }
-                                       }
-                                   });
+        auto const builder = mutateGraph(backward ? createValidLayernormBwdGraph()
+                                                  : createValidLayernormFpropGraph(),
+                                         [](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
+                                             for(auto& tensor : graph.tensors)
+                                             {
+                                                 if(tensor->name == "epsilon")
+                                                 {
+                                                     tensor->value.Reset();
+                                                     tensor->is_runtime_pass_by_value = true;
+                                                 }
+                                             }
+                                         });
         const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
         EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
     }

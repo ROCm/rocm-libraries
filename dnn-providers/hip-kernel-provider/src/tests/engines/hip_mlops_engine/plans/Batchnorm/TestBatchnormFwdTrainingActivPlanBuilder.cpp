@@ -107,7 +107,7 @@ TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsTrueForValid
 
 TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, IdentityIsApplicableAndBuildsPlan)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
+    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
         true, false, hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -121,7 +121,7 @@ TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, IdentityIsApplicableAndBuildsPl
 
 TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, BackwardReluIsNotApplicable)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
+    auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
         true, false, hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -137,7 +137,7 @@ TEST_F(TestBatchnormFwdTrainingActivPlanBuilder, LeakyReluIsNotApplicable)
     for(const auto slope : {0.0f, 0.1f})
     {
         SCOPED_TRACE(slope);
-        auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
+        auto const builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
             true,
             false,
             hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
@@ -983,7 +983,7 @@ std::ostream& operator<<(std::ostream& os, const FusedStatsMutation& value)
 flatbuffers::FlatBufferBuilder
     mutatedFusedTrainingGraph(const std::function<void(BatchnormAttributesT&)>& mutate)
 {
-    auto base = createValidBatchnormFwdTrainingActivGraph(true, true);
+    auto const base = createValidBatchnormFwdTrainingActivGraph(true, true);
     return hipdnn_test_sdk::utilities::mutateGraph(
         base, [&mutate](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
             mutate(*graph.nodes.at(0)->attributes.AsBatchnormAttributes());
@@ -1016,7 +1016,7 @@ protected:
 
 TEST_P(TestBatchnormFusedTrainingStatsDecline, IsNotApplicable)
 {
-    auto builder = mutatedFusedTrainingGraph(GetParam().mutate);
+    auto const builder = mutatedFusedTrainingGraph(GetParam().mutate);
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
@@ -1031,8 +1031,8 @@ INSTANTIATE_TEST_SUITE_P(Mutations,
 
 TEST_F(TestBatchnormFusedTrainingStatsDecline, RuntimeEpsilonIsApplicable)
 {
-    auto base = createValidBatchnormFwdTrainingActivGraph(true, true);
-    auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+    auto const base = createValidBatchnormFwdTrainingActivGraph(true, true);
+    auto const builder = hipdnn_test_sdk::utilities::mutateGraph(
         base, [](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
             const auto epsilonUid
                 = graph.nodes.at(0)->attributes.AsBatchnormAttributes()->epsilon_tensor_uid;
@@ -1052,7 +1052,7 @@ TEST_F(TestBatchnormFusedTrainingStatsDecline, RuntimeEpsilonIsApplicable)
 
 TEST_F(TestBatchnormFusedTrainingStatsDecline, GraphWithoutSavedStatisticsIsApplicable)
 {
-    auto builder = mutatedFusedTrainingGraph([](BatchnormAttributesT& a) {
+    auto const builder = mutatedFusedTrainingGraph([](BatchnormAttributesT& a) {
         a.mean_tensor_uid.reset();
         a.inv_variance_tensor_uid.reset();
     });
@@ -1089,21 +1089,21 @@ TEST_F(TestBatchnormFwdTrainingActivPlanBuilder,
         {
             const auto& mutate = mutation.second;
             SCOPED_TRACE(std::string(name) + " " + mutation.first);
-            auto builder = mutateGraph(createValidBatchnormFwdTrainingActivGraph(true, true),
-                                       [&](GraphT& graph) {
-                                           for(auto& tensor : graph.tensors)
-                                           {
-                                               if(tensor->name == name)
-                                               {
-                                                   mutate(*tensor);
-                                               }
-                                           }
-                                       });
+            auto const builder = mutateGraph(createValidBatchnormFwdTrainingActivGraph(true, true),
+                                             [&](GraphT& graph) {
+                                                 for(auto& tensor : graph.tensors)
+                                                 {
+                                                     if(tensor->name == name)
+                                                     {
+                                                         mutate(*tensor);
+                                                     }
+                                                 }
+                                             });
             EXPECT_FALSE(isApplicable(builder));
         }
     }
 
-    auto builder
+    auto const builder
         = mutateGraph(createValidBatchnormFwdTrainingActivGraph(true, true), [](GraphT& graph) {
               graph.nodes.at(0)->attributes.AsBatchnormAttributes()->momentum_tensor_uid = 9999;
           });

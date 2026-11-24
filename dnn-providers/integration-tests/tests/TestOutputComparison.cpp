@@ -859,8 +859,8 @@ TEST(TestGpuOutputComparison, DeviceSiteMatchesSameSignedInfinities)
     {
         for(const float inf : {-K_INF, K_INF})
         {
-            auto expected = floatTensor3(attrs, inf, 1.0f, inf);
-            auto actual = floatTensor3(attrs, inf, 1.0f, inf);
+            const auto expected = floatTensor3(attrs, inf, 1.0f, inf);
+            const auto actual = floatTensor3(attrs, inf, 1.0f, inf);
             EXPECT_FALSE(
                 compareTensor(
                     K_UID_B, attrs, *expected, *actual, tolerance, ValidationSite::DEVICE, "b")
@@ -873,8 +873,8 @@ TEST(TestGpuOutputComparison, DeviceSiteMatchesSameSignedInfinities)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper halfWrapper{halfBuffer.data(),
                                                                                  halfBuffer.size()};
     const auto& halfAttrs = *halfWrapper.getTensorMap().at(K_UID_STATS);
-    auto expected = floatTensor(halfAttrs, -K_INF);
-    auto actual = floatTensor(halfAttrs, -K_INF);
+    const auto expected = floatTensor(halfAttrs, -K_INF);
+    const auto actual = floatTensor(halfAttrs, -K_INF);
     EXPECT_FALSE(
         compareTensor(
             K_UID_STATS, halfAttrs, *expected, *actual, exact(), ValidationSite::DEVICE, "b")
@@ -909,8 +909,8 @@ TEST(TestGpuOutputComparison, DeviceSiteStillRejectsWhatTheHostRejects)
     {
         for(const auto& tolerance : {exact(), exactMatchingInfinities()})
         {
-            auto expected = floatTensor3(attrs, c.expected0, 1.0f, 2.0f);
-            auto actual = floatTensor3(attrs, c.actual0, c.actual1, 2.0f);
+            const auto expected = floatTensor3(attrs, c.expected0, 1.0f, 2.0f);
+            const auto actual = floatTensor3(attrs, c.actual0, c.actual1, 2.0f);
             EXPECT_TRUE(
                 compareTensor(
                     K_UID_B, attrs, *expected, *actual, tolerance, ValidationSite::DEVICE, "b")
@@ -919,8 +919,8 @@ TEST(TestGpuOutputComparison, DeviceSiteStillRejectsWhatTheHostRejects)
         }
     }
 
-    auto expected = floatTensor3(attrs, -K_INF, 1.0f, 2.0f);
-    auto actual = floatTensor3(attrs, -K_INF, 1.1f, 2.0f);
+    const auto expected = floatTensor3(attrs, -K_INF, 1.0f, 2.0f);
+    const auto actual = floatTensor3(attrs, -K_INF, 1.1f, 2.0f);
     EXPECT_FALSE(compareTensor(K_UID_B,
                                attrs,
                                *expected,
@@ -943,8 +943,8 @@ TEST(TestGpuOutputComparison, DeviceSiteInfinityMatchReadsTheDeviceValues)
                                                                              buffer.size()};
     const auto& attrs = *wrapper.getTensorMap().at(K_UID_A);
 
-    auto differingOnDevice = floatTensor(attrs, -K_INF);
-    auto differingOnDeviceToo = floatTensor(attrs, -K_INF);
+    const auto differingOnDevice = floatTensor(attrs, -K_INF);
+    const auto differingOnDeviceToo = floatTensor(attrs, -K_INF);
     ASSERT_NO_FATAL_FAILURE(overwriteOnDevice(*differingOnDevice, 1.0f));
     ASSERT_NO_FATAL_FAILURE(overwriteOnDevice(*differingOnDeviceToo, 9.25f));
     EXPECT_TRUE(compareTensor(K_UID_A,
@@ -957,8 +957,8 @@ TEST(TestGpuOutputComparison, DeviceSiteInfinityMatchReadsTheDeviceValues)
                     .has_value())
         << "the device values differ; only the stale host fill holds matching infinities";
 
-    auto expected = floatTensor(attrs, 3.5f);
-    auto actual = floatTensor(attrs, 9.25f);
+    const auto expected = floatTensor(attrs, 3.5f);
+    const auto actual = floatTensor(attrs, 9.25f);
     ASSERT_NO_FATAL_FAILURE(overwriteOnDevice(*expected, -K_INF));
     ASSERT_NO_FATAL_FAILURE(overwriteOnDevice(*actual, -K_INF));
     EXPECT_FALSE(
@@ -1309,8 +1309,8 @@ TEST(TestOutputComparison, LiveRowsSkipPositionsPastEachBatchLength)
                                                                              buffer.size()};
     const std::vector<int64_t> lengths = {1, 0};
 
-    auto expected = liveRowStats(K_STATS_STRIDES, lengths);
-    auto actual = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto actual = liveRowStats(K_STATS_STRIDES, lengths);
 
     EXPECT_TRUE(compareStats(wrapper, expected, actual, statsLiveRows(lengths)).empty());
     EXPECT_EQ(compareStats(wrapper, expected, actual, {}).size(), 1u)
@@ -1328,8 +1328,8 @@ TEST(TestOutputComparison, LiveRowsSkipPositionsPastEachBatchLengthHalf)
                                                                              buffer.size()};
     const std::vector<int64_t> lengths = {1, 0};
 
-    auto expected = liveRowStatsT<half>(K_STATS_STRIDES, lengths);
-    auto actual = liveRowStatsT<half>(K_STATS_STRIDES, lengths);
+    const auto expected = liveRowStatsT<half>(K_STATS_STRIDES, lengths);
+    const auto actual = liveRowStatsT<half>(K_STATS_STRIDES, lengths);
 
     EXPECT_TRUE(compareStats(wrapper, expected, actual, statsLiveRows(lengths)).empty());
     EXPECT_EQ(compareStats(wrapper, expected, actual, {}).size(), 1u)
@@ -1343,8 +1343,8 @@ TEST(TestOutputComparison, LiveRowMismatchStillFails)
                                                                              buffer.size()};
     const std::vector<int64_t> lengths = {1, 0};
 
-    auto expected = liveRowStats(K_STATS_STRIDES, lengths);
-    auto actual = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto actual = liveRowStats(K_STATS_STRIDES, lengths);
     hipdnn_data_sdk::utilities::TensorView<float>(*actual).getHostValue({0, 1, 0, 0}) = 99.0f;
 
     const auto mismatches = compareStats(wrapper, expected, actual, statsLiveRows(lengths));
@@ -1361,8 +1361,8 @@ TEST(TestOutputComparison, LiveRowPositionPastTheLengthIsNotCompared)
                                                                              buffer.size()};
     const std::vector<int64_t> lengths = {1, 0};
 
-    auto expected = liveRowStats(K_STATS_STRIDES, lengths);
-    auto actual = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto actual = liveRowStats(K_STATS_STRIDES, lengths);
     hipdnn_data_sdk::utilities::TensorView<float>(*actual).getHostValue({0, 1, 2, 0}) = 99.0f;
     hipdnn_data_sdk::utilities::TensorView<float>(*actual).getHostValue({1, 0, 0, 0}) = -K_INF;
 
@@ -1378,8 +1378,8 @@ TEST(TestOutputComparison, LiveRowAllZeroLengthsFailsBecauseNoElementIsCompared)
                                                                              buffer.size()};
     const std::vector<int64_t> lengths = {0, 0};
 
-    auto expected = liveRowStats(K_STATS_STRIDES, lengths);
-    auto actual = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto actual = liveRowStats(K_STATS_STRIDES, lengths);
 
     EXPECT_EQ(compareStats(wrapper, expected, actual, statsLiveRows(lengths)).size(), 1u);
 }
@@ -1391,9 +1391,9 @@ TEST(TestOutputComparison, LiveRowTokenMajorStridesCompare)
                                                                              buffer.size()};
     const std::vector<int64_t> lengths = {3, 2};
 
-    auto expected = liveRowStats(K_STATS_TOKEN_MAJOR_STRIDES, lengths);
-    auto same = liveRowStats(K_STATS_TOKEN_MAJOR_STRIDES, lengths);
-    auto different = liveRowStats(K_STATS_TOKEN_MAJOR_STRIDES, lengths);
+    const auto expected = liveRowStats(K_STATS_TOKEN_MAJOR_STRIDES, lengths);
+    const auto same = liveRowStats(K_STATS_TOKEN_MAJOR_STRIDES, lengths);
+    const auto different = liveRowStats(K_STATS_TOKEN_MAJOR_STRIDES, lengths);
     hipdnn_data_sdk::utilities::TensorView<float>(*different).getHostValue({1, 2, 1, 0}) = 99.0f;
 
     EXPECT_TRUE(compareStats(wrapper, expected, same, statsLiveRows(lengths)).empty());
@@ -1408,8 +1408,8 @@ TEST(TestOutputComparison, LiveRowOutputOnDeviceIsReportedNotThrown)
                                                                              buffer.size()};
     const std::vector<int64_t> lengths = {1, 0};
 
-    auto expected = liveRowStats(K_STATS_STRIDES, lengths);
-    auto actual = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto actual = liveRowStats(K_STATS_STRIDES, lengths);
 
     std::vector<hipdnn_integration_tests::bundle::TensorMismatch> mismatches;
     ASSERT_NO_THROW(mismatches = compareStats(
@@ -1426,8 +1426,8 @@ TEST(TestOutputComparison, LiveRowEntryThatDoesNotFitTheOutputThrows)
     const auto buffer = makeGraphBuffer();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper wrapper{buffer.data(),
                                                                              buffer.size()};
-    auto expected = liveRowStats(K_STATS_STRIDES, {1, 0});
-    auto actual = liveRowStats(K_STATS_STRIDES, {1, 0});
+    const auto expected = liveRowStats(K_STATS_STRIDES, {1, 0});
+    const auto actual = liveRowStats(K_STATS_STRIDES, {1, 0});
 
     EXPECT_THROW(compareStats(wrapper, expected, actual, statsLiveRows({1})),
                  std::invalid_argument);
@@ -1840,16 +1840,16 @@ TEST(TestOutputComparison, HostAllcloseMatchesOnlySameSignedInfinities)
     for(const auto& pair : K_INFINITY_PAIRS)
     {
         SCOPED_TRACE(pair.name);
-        auto expected = floatTensor3(attrs, pair.expected, 1.0f, 2.0f);
-        auto actual = floatTensor3(attrs, pair.actual, 1.0f, 2.0f);
+        const auto expected = floatTensor3(attrs, pair.expected, 1.0f, 2.0f);
+        const auto actual = floatTensor3(attrs, pair.actual, 1.0f, 2.0f);
         EXPECT_EQ(
             compareTensor(K_UID_B, attrs, *expected, *actual, exact(), ValidationSite::HOST, "b")
                 .has_value(),
             !pair.matches);
     }
 
-    auto nanExpected = floatTensor3(attrs, K_NAN, 1.0f, 2.0f);
-    auto nanActual = floatTensor3(attrs, K_NAN, 1.0f, 2.0f);
+    const auto nanExpected = floatTensor3(attrs, K_NAN, 1.0f, 2.0f);
+    const auto nanActual = floatTensor3(attrs, K_NAN, 1.0f, 2.0f);
     EXPECT_TRUE(
         compareTensor(K_UID_B, attrs, *nanExpected, *nanActual, exact(), ValidationSite::HOST, "b")
             .has_value())
@@ -1868,8 +1868,8 @@ TEST(TestOutputComparison, LiveRowHostAllcloseMatchesOnlySameSignedInfinities)
     for(const auto& pair : K_INFINITY_PAIRS)
     {
         SCOPED_TRACE(pair.name);
-        auto expected = liveRowStats(K_STATS_STRIDES, lengths);
-        auto actual = liveRowStats(K_STATS_STRIDES, lengths);
+        const auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+        const auto actual = liveRowStats(K_STATS_STRIDES, lengths);
         hipdnn_data_sdk::utilities::TensorView<float>(*expected).getHostValue({0, 1, 1, 0})
             = pair.expected;
         hipdnn_data_sdk::utilities::TensorView<float>(*actual).getHostValue({0, 1, 1, 0})
@@ -1878,8 +1878,8 @@ TEST(TestOutputComparison, LiveRowHostAllcloseMatchesOnlySameSignedInfinities)
                   pair.matches);
     }
 
-    auto expected = liveRowStats(K_STATS_STRIDES, lengths);
-    auto actual = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto expected = liveRowStats(K_STATS_STRIDES, lengths);
+    const auto actual = liveRowStats(K_STATS_STRIDES, lengths);
     hipdnn_data_sdk::utilities::TensorView<float>(*actual).getHostValue({0, 1, 1, 0}) = K_NAN;
     EXPECT_EQ(compareStats(wrapper, expected, actual, statsLiveRows(lengths)).size(), 1u)
         << "a NaN in a live position of the actual output fails";

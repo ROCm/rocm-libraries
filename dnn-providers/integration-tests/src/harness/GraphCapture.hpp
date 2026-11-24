@@ -131,14 +131,14 @@ inline CaptureResult captureGraph(hipdnn_frontend::graph::Graph& graph,
                                   const ReplayHooks& hooks)
 {
     int64_t engineId = -1;
-    if(auto status = graph.get_execution_plan_engine_id(engineId); !status.is_good())
+    if(const auto status = graph.get_execution_plan_engine_id(engineId); !status.is_good())
     {
         return CaptureResult::failed("get_execution_plan_engine_id failed: "
                                      + status.get_message());
     }
 
     std::vector<hipdnn_frontend::BehaviorNote> notes;
-    if(auto status = graph.get_behavior_notes_for_engine(engineId, notes); !status.is_good())
+    if(const auto status = graph.get_behavior_notes_for_engine(engineId, notes); !status.is_good())
     {
         return CaptureResult::failed("get_behavior_notes_for_engine failed: "
                                      + status.get_message());
@@ -177,7 +177,8 @@ inline CaptureResult captureGraph(hipdnn_frontend::graph::Graph& graph,
     std::string executeError;
     try
     {
-        if(auto status = graph.execute(handle, variantPack, workspace->get()); !status.is_good())
+        if(const auto status = graph.execute(handle, variantPack, workspace->get());
+           !status.is_good())
         {
             executeError = status.get_message();
         }

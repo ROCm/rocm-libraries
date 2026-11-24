@@ -1132,8 +1132,8 @@ static Rejection
     // Reject GQA/MQA here rather than letting buildPlan succeed and execute a kernel
     // that corrupts memory.  Restore the weaker "nhead_q % nhead_k == 0" check once
     // the expansion and reduction are implemented.
-    auto numHeadsQ = qTensor->dims()->Get(1);
-    auto numHeadsKv = kTensor->dims()->Get(1);
+    auto const numHeadsQ = qTensor->dims()->Get(1);
+    auto const numHeadsKv = kTensor->dims()->Get(1);
     HIP_KERNEL_REJECT_IF(numHeadsKv == 0 || numHeadsQ != numHeadsKv,
                          "GQA/MQA backward requires dK/dV head expansion, which is not "
                          "implemented (Actual: nhead_q="
@@ -1611,7 +1611,7 @@ void SdpaBwdPlanBuilder::buildPlan(
 
     // isApplicable resolved every A32 stage and a16DeclineReason every A16 one,
     // so a miss here is an internal error.
-    auto resolveStage = [&](bwd_dispatch::PipelineStage stage) {
+    auto const resolveStage = [&](bwd_dispatch::PipelineStage stage) {
         auto cfgOpt = resolveStageConfig(stage, deviceString, request);
         if(!cfgOpt)
         {
@@ -1624,7 +1624,7 @@ void SdpaBwdPlanBuilder::buildPlan(
         }
         return *cfgOpt;
     };
-    auto toResolvedKernel = [](const fmha_v3_bwdConfig& cfg) {
+    auto const toResolvedKernel = [](const fmha_v3_bwdConfig& cfg) {
         return ResolvedKernel{getKernelTocKey(cfg.co_name),
                               cfg.knl_name,
                               SdpaBwdParams::KernelTiles{static_cast<unsigned int>(cfg.ts)}};

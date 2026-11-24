@@ -329,7 +329,7 @@ public:
                           : nlohmann::json::array();
                 j["repeat"] = fill.repeat;
             }
-            if(auto it = _seeds.find(uid); it != _seeds.end())
+            if(const auto it = _seeds.find(uid); it != _seeds.end())
             {
                 j["seed"] = it->second;
             }

@@ -639,7 +639,7 @@ public:
                                ErrorCode::INVALID_VALUE,
                                "Tensor " + _name + " must have only positive dimensions");
 
-        auto checkNonNegativeStrides
+        const auto checkNonNegativeStrides
             = [](const std::vector<int64_t>& strides, const std::string& label) -> Error {
             for(size_t axis = 0; axis < strides.size(); ++axis)
             {

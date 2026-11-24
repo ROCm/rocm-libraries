@@ -302,7 +302,7 @@ TEST(TestSdpaFwdPlanGridMath, GroupHd256Bf16Gfx950CausalUsesTgDivOneAnd256BlockD
     p.group = SdpaFwdGroupModeParams{100, 101};
     p.maskType = MaskType::TOP_LEFT_CAUSAL;
     // qTiles = ceil(1024/128) = 8; tgDiv = 1; gdz = 8.
-    auto lp = computeFwdLaunchParams(p);
+    auto const lp = computeFwdLaunchParams(p);
     EXPECT_EQ(lp.gridDimX, 16U); // nhead
     EXPECT_EQ(lp.gridDimY, 2U); // batch
     EXPECT_EQ(lp.gridDimZ, 8U);
@@ -315,7 +315,7 @@ TEST(TestSdpaFwdPlanGridMath, BatchHd256Bf16Gfx950CausalUsesTgDivOneAnd512BlockD
     auto p = makeHd256Bf16Gfx950Params();
     p.maskType = MaskType::TOP_LEFT_CAUSAL;
     // qTiles = ceil(1024/128) = 8; tgDiv = 1; gdx = 8.
-    auto lp = computeFwdLaunchParams(p);
+    auto const lp = computeFwdLaunchParams(p);
     EXPECT_EQ(lp.gridDimX, 8U);
     EXPECT_EQ(lp.gridDimY, 16U); // nhead
     EXPECT_EQ(lp.gridDimZ, 2U); // batch
@@ -330,7 +330,7 @@ TEST(TestSdpaFwdPlanGridMath, GroupHd256Fp8Gfx950CausalKeepsTgDivTwoAnd512BlockD
     p.group = SdpaFwdGroupModeParams{100, 101};
     p.maskType = MaskType::TOP_LEFT_CAUSAL;
     // qTiles = 8; tgDiv = 2; gdz = 4.
-    auto lp = computeFwdLaunchParams(p);
+    auto const lp = computeFwdLaunchParams(p);
     EXPECT_EQ(lp.gridDimZ, 4U);
     EXPECT_EQ(lp.blockDimX, 512U);
 }

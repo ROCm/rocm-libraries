@@ -164,7 +164,7 @@ TEST(TestMiopenActivationDescriptor, CreatesClamp)
 TEST(TestMiopenActivationDescriptor, CreatesClampFromLowerClipOnly)
 {
     const float lowerClip = 0.5f;
-    auto builder = createPointwiseAttributesBuilder(
+    const auto builder = createPointwiseAttributesBuilder(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD, lowerClip);
     const auto* attr
         = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(

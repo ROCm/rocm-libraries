@@ -543,7 +543,7 @@ TEST_F(TestSdpaFwdOperationDescriptor, SetTensorDescriptorAmaxO)
 
 TEST_F(TestSdpaFwdOperationDescriptor, SetTensorDescriptorCuSeqLenQ)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_QDESC,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
@@ -558,7 +558,7 @@ TEST_F(TestSdpaFwdOperationDescriptor, SetTensorDescriptorCuSeqLenQ)
 
 TEST_F(TestSdpaFwdOperationDescriptor, SetTensorDescriptorCuSeqLenKv)
 {
-    auto desc = getDescriptor();
+    const auto desc = getDescriptor();
     ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_KVDESC,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,

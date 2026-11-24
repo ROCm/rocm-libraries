@@ -172,7 +172,7 @@ std::ostream& operator<<(std::ostream& os, const ResampleBwdMutation& value)
 
 flatbuffers::FlatBufferBuilder mutatedResampleBwdGraph(int64_t virtualUid)
 {
-    auto base = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
+    auto const base = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
     return hipdnn_test_sdk::utilities::mutateGraph(base, [virtualUid](GraphT& graph) {
         for(auto& tensor : graph.tensors)
         {
@@ -192,7 +192,7 @@ class TestResampleBwdDecline : public TestResampleBwdPlanBuilder,
 
 TEST_P(TestResampleBwdDecline, VirtualOperandIsNotApplicable)
 {
-    auto builder = mutatedResampleBwdGraph(GetParam().virtualUid);
+    auto const builder = mutatedResampleBwdGraph(GetParam().virtualUid);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 

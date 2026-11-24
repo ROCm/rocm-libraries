@@ -172,7 +172,7 @@ protected:
         });
 
         const GroupLengthSet& lengths = groupLengthSet(this->GetParam().groupLengths);
-        for(auto& tensorPair : bundle.tensors)
+        for(auto const& tensorPair : bundle.tensors)
         {
             const auto nameIt = uidToName.find(tensorPair.first);
             const bool hasName = (nameIt != uidToName.end());

@@ -434,7 +434,7 @@ bool fwdKvRowExtentsFitU32(const hipdnn_flatbuffers_sdk::data_objects::TensorAtt
     constexpr auto K_U32_MAX_AS_I64 = static_cast<int64_t>(UINT32_MAX);
     const int64_t seqLenKv = k.dims()->Get(SDPA_SEQ_AXIS);
 
-    auto extentFits
+    auto const extentFits
         = [&](const char* name, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& t) {
               const int64_t seqStride = t.strides()->Get(SDPA_SEQ_AXIS);
               // seqLenKv * seqStride * inputBytes <= UINT32_MAX, evaluated by division so
@@ -1021,13 +1021,13 @@ Rejection SdpaFwdPlanBuilder::checkFwdApplicability(
         attrs, qTensor->dims()->Get(2), kTensor->dims()->Get(2), maskType));
     maskType = fwdKernelMaskType(maskType, hasEqualPerBatchLengths(*qTensor, *kTensor, group));
 
-    auto key = fwdKernelNameKey(deviceString,
-                                dataTypeId,
-                                static_cast<int>(qTensor->dims()->Get(3)),
-                                static_cast<int>(vTensor->dims()->Get(3)),
-                                maskType,
-                                getBf16ConvertMode(attrs, dataTypeId),
-                                batchMode);
+    auto const key = fwdKernelNameKey(deviceString,
+                                      dataTypeId,
+                                      static_cast<int>(qTensor->dims()->Get(3)),
+                                      static_cast<int>(vTensor->dims()->Get(3)),
+                                      maskType,
+                                      getBf16ConvertMode(attrs, dataTypeId),
+                                      batchMode);
 
     HIP_KERNEL_REJECT_IF(
         key.empty(),
@@ -1274,13 +1274,13 @@ void SdpaFwdPlanBuilder::buildPlan(
 
     // Find matching kernel to graph
     fmha_v3_fwdConfig config;
-    auto kernelKey = fwdKernelNameKey(deviceString,
-                                      dataTypeId,
-                                      static_cast<int>(headDimQk),
-                                      static_cast<int>(headDimV),
-                                      params.maskType,
-                                      getBf16ConvertMode(sdpaAttrs, dataTypeId),
-                                      batchMode);
+    auto const kernelKey = fwdKernelNameKey(deviceString,
+                                            dataTypeId,
+                                            static_cast<int>(headDimQk),
+                                            static_cast<int>(headDimV),
+                                            params.maskType,
+                                            getBf16ConvertMode(sdpaAttrs, dataTypeId),
+                                            batchMode);
 
     if(kernelKey.empty())
     {
@@ -1306,7 +1306,7 @@ void SdpaFwdPlanBuilder::buildPlan(
     params.tileSizeQo = static_cast<unsigned int>(config.ts_qo);
 
     // Load kernel module from kpack archive
-    auto tocKey = asm_kernels::getFwdKernelTocKey(config.co_name, deviceString, isMi308);
+    auto const tocKey = asm_kernels::getFwdKernelTocKey(config.co_name, deviceString, isMi308);
 
     HIPDNN_PLUGIN_LOG_INFO("Using kernel with tocKey: " << tocKey << " arch: " << deviceString);
 

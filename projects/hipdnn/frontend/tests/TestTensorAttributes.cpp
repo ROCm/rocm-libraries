@@ -412,7 +412,7 @@ TEST(TestTensorAttributes, ValidateFailsOnNegativeRaggedOffsetStride)
     tensor.set_dim({4, 1, 1, 1});
     tensor.set_stride({1, 1, 1, 1});
     tensor.set_data_type(DataType::FLOAT);
-    auto offset = std::make_shared<TensorAttributes>();
+    const auto offset = std::make_shared<TensorAttributes>();
     offset->set_name("offs");
     offset->set_stride({-1, 1, 1, 1});
     tensor.set_ragged_offset(offset);
@@ -430,7 +430,7 @@ TEST(TestTensorAttributes, ValidateSucceedsWithZeroStrideRaggedOffset)
     tensor.set_dim({4, 1, 1, 1});
     tensor.set_stride({1, 1, 1, 1});
     tensor.set_data_type(DataType::FLOAT);
-    auto offset = std::make_shared<TensorAttributes>();
+    const auto offset = std::make_shared<TensorAttributes>();
     offset->set_name("offs");
     offset->set_stride({0, 1, 1, 1});
     tensor.set_ragged_offset(offset);

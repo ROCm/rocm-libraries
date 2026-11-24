@@ -268,7 +268,7 @@ TYPED_TEST(TestToleranceResolverFp8, ResolvesToOneStepOfTheFormat)
             {NodeAttributes::NONE},
             {}})
     {
-        auto w = buildGraph(b, nodes);
+        const auto w = buildGraph(b, nodes);
         for(const auto policy :
             {tol::TolerancePolicy::MAX_ACROSS_NODES, tol::TolerancePolicy::OUTPUT_OP_TOLERANCE})
         {
@@ -291,7 +291,7 @@ TYPED_TEST(TestToleranceResolverFp8, OneStepPassesAndTwoStepsFail)
     using Format = typename TestFixture::Format;
 
     flatbuffers::FlatBufferBuilder b;
-    auto w = buildGraph(b, {NodeAttributes::SdpaAttributes});
+    const auto w = buildGraph(b, {NodeAttributes::SdpaAttributes});
     const auto tolerance = tol::defaultTolerance(w, Format::DATA_TYPE);
 
     const T one(1.0f);
@@ -330,7 +330,7 @@ TYPED_TEST(TestToleranceResolverFp8, OneStepPassesAndTwoStepsFail)
 TEST(TestToleranceResolver, NonFp8OutputsUsePerOpValueForAtolAndRtol)
 {
     flatbuffers::FlatBufferBuilder b;
-    auto sdpa = buildGraph(b, {NodeAttributes::SdpaAttributes});
+    const auto sdpa = buildGraph(b, {NodeAttributes::SdpaAttributes});
     for(const auto& [dataType, expected] :
         std::vector<std::pair<DataType, float>>{{DataType::FLOAT, 1e-5f},
                                                 {DataType::HALF, 1e-2f},
@@ -346,7 +346,7 @@ TEST(TestToleranceResolver, NonFp8OutputsUsePerOpValueForAtolAndRtol)
     }
 
     flatbuffers::FlatBufferBuilder bnConvBuilder;
-    auto bnConv = buildGraph(
+    const auto bnConv = buildGraph(
         bnConvBuilder,
         {NodeAttributes::BatchnormInferenceAttributes, NodeAttributes::ConvolutionFwdAttributes});
     const auto maxValue

@@ -595,7 +595,7 @@ TEST(TestSdpaAttributes, NativeSetUnfuseFmaSetsHintNotUnsupported)
 TEST(TestSdpaAttributes, CuSeqLenSettersStoreTheTensorUntouched)
 {
     SdpaAttributes attrs;
-    auto cuQ = std::make_shared<TensorAttributes>();
+    const auto cuQ = std::make_shared<TensorAttributes>();
     cuQ->set_dim({5});
     auto cuKv = std::make_shared<TensorAttributes>();
     attrs.set_cu_seq_len_q(cuQ);

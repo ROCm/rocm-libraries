@@ -517,7 +517,8 @@ TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForUniformPackedForw
                              + (channelsLastLayout ? "channels-last " : "channels-first ")
                              + hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType));
 
-                auto builder = createGraph(kind, uniformPackedSpec(channelsLastLayout, dataType));
+                const auto builder
+                    = createGraph(kind, uniformPackedSpec(channelsLastLayout, dataType));
                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
                     builder.GetBufferPointer(), builder.GetSize());
 
@@ -599,8 +600,8 @@ TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForStrictlyOneLayout
 // and then fails at execution or returns garbage.
 TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForMixedDataTypeForward)
 {
-    auto builder = createGraph(ConvKind::FORWARD,
-                               uniformPackedSpec(/*channelsLastLayout=*/false, ConvDataType::HALF));
+    const auto builder = createGraph(
+        ConvKind::FORWARD, uniformPackedSpec(/*channelsLastLayout=*/false, ConvDataType::HALF));
     setConvTensorTypes(builder, ConvDataType::HALF, ConvDataType::HALF, ConvDataType::FLOAT);
 
     expectDeclined(_planBuilder, *_handle, ConvKind::FORWARD, builder);
@@ -654,7 +655,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForMixedDataTypeBac
     for(const auto kind : BACKWARD_KINDS)
     {
         SCOPED_TRACE(convKindName(kind));
-        auto builder = createGraph(
+        const auto builder = createGraph(
             kind, uniformPackedSpec(/*channelsLastLayout=*/false, ConvDataType::HALF));
         setConvTensorTypes(builder, ConvDataType::HALF, ConvDataType::HALF, ConvDataType::FLOAT);
 
