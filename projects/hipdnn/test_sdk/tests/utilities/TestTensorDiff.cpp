@@ -150,6 +150,72 @@ TEST(TestComputeTensorDiff, ZeroMaxMismatchesSuppressesEntries)
     EXPECT_GT(summary.maxAbsDiff, 0.0f);
 }
 
+TEST(TestComputeTensorDiff, DoubleCountsMismatchesAboveFloatRange)
+{
+    const double aboveFloatMax = 1e39;
+    Tensor<double> ref({5});
+    Tensor<double> impl({5});
+
+    ref.setHostValue(1e300, 0);
+    impl.setHostValue(1e301, 0);
+    ref.setHostValue(1e300, 1);
+    impl.setHostValue(-1e300, 1);
+    ref.setHostValue(aboveFloatMax, 2);
+    impl.setHostValue(2.0 * aboveFloatMax, 2);
+    ref.setHostValue(aboveFloatMax, 3);
+    impl.setHostValue(1.0, 3);
+    ref.setHostValue(1e300, 4);
+    impl.setHostValue(1e300 * (1.0 + 5e-7), 4);
+
+    const float atol = 0.0f;
+    const float rtol = 1e-6f;
+    auto summary = computeTensorDiff<double>(ref, impl, atol, rtol);
+
+    EXPECT_EQ(summary.totalElements, 5u);
+    EXPECT_EQ(summary.mismatchCount, 4u);
+
+    const CpuFpReferenceValidation<double> validator(atol, rtol);
+    EXPECT_FALSE(validator.allClose(ref, impl));
+}
+
+TEST(TestComputeTensorDiff, DoubleCountsTheSameMismatchesAsTheValidator)
+{
+    Tensor<double> ref({2});
+    Tensor<double> impl({2});
+    ref.setHostValue(1.0, 0);
+    impl.setHostValue(1.0 + 1e-13, 0);
+    ref.setHostValue(1.0, 1);
+    impl.setHostValue(1.0 + 1e-9, 1);
+
+    const float atol = 1e-12f;
+    const float rtol = 0.0f;
+    auto summary = computeTensorDiff<double>(ref, impl, atol, rtol);
+
+    EXPECT_EQ(summary.mismatchCount, 1u);
+    EXPECT_EQ(summary.maxDiffIndices, (std::vector<int64_t>{1}));
+
+    const CpuFpReferenceValidation<double> validator(atol, rtol);
+    EXPECT_FALSE(validator.allClose(ref, impl));
+
+    impl.setHostValue(1.0 + 1e-13, 1);
+    EXPECT_EQ(computeTensorDiff<double>(ref, impl, atol, rtol).mismatchCount, 0u);
+    EXPECT_TRUE(validator.allClose(ref, impl));
+}
+
+TEST(TestComputeTensorDiff, RelativeToleranceScalesWithTheReference)
+{
+    Tensor<float> ref({1});
+    Tensor<float> impl({1});
+
+    ref.setHostValue(1.0f, 0);
+    impl.setHostValue(2.0f, 0);
+    EXPECT_EQ(computeTensorDiff<float>(ref, impl, 0.0f, 0.6f).mismatchCount, 1u);
+
+    ref.setHostValue(2.0f, 0);
+    impl.setHostValue(1.0f, 0);
+    EXPECT_EQ(computeTensorDiff<float>(ref, impl, 0.0f, 0.6f).mismatchCount, 0u);
+}
+
 // =================================================================================================
 // printTensorDiffSummary
 // =================================================================================================

@@ -48,8 +48,6 @@ TensorDiffSummary computeTensorDiff(hipdnn_data_sdk::utilities::ITensor& referen
                                     float relativeTolerance,
                                     size_t maxMismatches = 5)
 {
-    using hipdnn_data_sdk::types::fabs;
-
     TensorDiffSummary summary{};
     summary.totalElements = 0;
     summary.mismatchCount = 0;
@@ -91,14 +89,18 @@ TensorDiffSummary computeTensorDiff(hipdnn_data_sdk::utilities::ITensor& referen
             comparedCount.fetch_add(1, std::memory_order_relaxed);
         }
 
-        auto absDiff = static_cast<float>(fabs(implValue - refValue));
-        auto threshold = absoluteTolerance + relativeTolerance * fabs(static_cast<float>(refValue));
+        const auto refDouble = static_cast<double>(refValue);
+        const auto implDouble = static_cast<double>(implValue);
+        const double exactAbsDiff = std::fabs(implDouble - refDouble);
+        const double threshold = static_cast<double>(absoluteTolerance)
+                                 + static_cast<double>(relativeTolerance) * std::fabs(refDouble);
 
-        if(absDiff > threshold)
+        if(exactAbsDiff > threshold)
         {
+            const auto absDiff = static_cast<float>(exactAbsDiff);
             const std::lock_guard<std::mutex> lock(mtx);
             ++summary.mismatchCount;
-            sumAbsDiff += static_cast<double>(absDiff);
+            sumAbsDiff += exactAbsDiff;
 
             if(absDiff > summary.maxAbsDiff)
             {
