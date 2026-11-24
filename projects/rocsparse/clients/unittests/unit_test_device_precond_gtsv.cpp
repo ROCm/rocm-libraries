@@ -846,9 +846,9 @@ namespace
         const std::vector<T> d
             = {make_value<T>(1.0), make_value<T>(1.0), make_value<T>(1.0), make_value<T>(0.6, 0.6)};
         const std::vector<T> rhs  = {make_value<T>(1.0),
-                                     make_value<T>(1.0),
-                                     make_value<T>(1.0),
-                                     make_value<T>(half_max, half_max)};
+                                    make_value<T>(1.0),
+                                    make_value<T>(1.0),
+                                    make_value<T>(half_max, half_max)};
         const std::vector<T> want = {make_value<T>(1.0),
                                      make_value<T>(1.0),
                                      make_value<T>(1.0),

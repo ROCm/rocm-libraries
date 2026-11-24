@@ -571,8 +571,8 @@ namespace
         s.dw = std::vector<T>(4, make_value<T>(0.0));
         s.d = {make_value<T>(1.0), make_value<T>(1.0), make_value<T>(1.0), make_value<T>(0.6, 0.6)};
         s.rhs  = {make_value<T>(1.0),
-                make_value<T>(1.0),
-                make_value<T>(1.0),
+                 make_value<T>(1.0),
+                 make_value<T>(1.0),
                 make_value<T>(half_max, half_max)};
         s.want = {make_value<T>(1.0),
                   make_value<T>(1.0),
