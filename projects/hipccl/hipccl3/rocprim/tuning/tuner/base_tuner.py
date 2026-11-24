@@ -139,6 +139,12 @@ class TunerArgs:
     "skip".
     """
 
+    noise_retries: int = 1
+    """How many times to re-run a config whose benchmark hit primbench's noise timeout.
+    Configs that still time out are recorded in the cache and dropped by the config
+    generator.
+    """
+
     save_metadata: bool = False
     """Whether to save additional tuning metadata.
     """
@@ -191,6 +197,7 @@ class BaseTuner(ABC):
             ), "Simulation mode requires --arch-name to be specified"
             self.arch_name = args.arch_name
         self.tune_baseline = args.tune_baseline
+        self.noise_retries = args.noise_retries
         self.max_fevals = args.max_fevals
         self.save_metadata = args.save_metadata
         self.strategy = args.strategy
@@ -226,6 +233,7 @@ class BaseTuner(ABC):
                 default_output_dir=defaults.output_dir,
                 default_strategy=defaults.strategy,
                 default_tune_baseline=defaults.tune_baseline,
+                default_noise_retries=defaults.noise_retries,
             )
             .parse_args()
             ._get_kwargs()
@@ -495,6 +503,7 @@ class BaseTuner(ABC):
             "algo_name": self.algo_name,
             "config": config,
             "sizes": self.sizes,
+            "noise_retries": self.noise_retries,
             "case_results_dir": str(self._get_case_results_dir(types).resolve()),
             **types,
         }
@@ -553,6 +562,39 @@ class BaseTuner(ABC):
         """Return the path of the cache file"""
         return self.output_dir / self._get_cache_file_name(types)
 
+    @staticmethod
+    def _write_cache_annotation(cache_file: str | pathlib.Path, name: str, value: Any):
+        """Adds a top-level entry for the config generator to a cache file. It's inserted
+        as a single line (replacing the one from an earlier run), so the rest of kernel
+        tuner's cache file stays as it wrote it."""
+        with open(cache_file, "r") as f:
+            content = f.read()
+        content = re.sub(rf'^"{name}": .*,\n', "", content, flags=re.M)
+        new_content = "{\n" + f'"{name}": {json.dumps(value)},'
+        new_content += content.lstrip()[1:]
+        with open(cache_file, "w") as f:
+            f.write(new_content)
+
+    def _find_noise_timeouts(
+        self, cache_file: str | pathlib.Path, types: Dict[str, Any]
+    ) -> List[str]:
+        """Returns the cache keys of the configs whose per-case results (written by the
+        wrapper, see _get_case_results_dir) still show primbench's noise timeout."""
+        with open(cache_file, "r") as f:
+            cache = json.load(f)["cache"]
+        keys = list(self._get_tune_params(types).keys())
+        case_results_dir = self._get_case_results_dir(types)
+        noise_timeouts = []
+        for cache_key, entry in cache.items():
+            # Same file names as the wrapper: <name>=<value>_..._size<bytes>.json
+            prefix = "_".join(f"{k}={entry.get(k)}" for k in keys)
+            for size in self.sizes:
+                path = case_results_dir / f"{prefix}_size{size}.json"
+                if path.exists() and '"noise_timeout":true' in path.read_text():
+                    noise_timeouts.append(cache_key)
+                    break
+        return noise_timeouts
+
     def _get_case_results_dir(self, types: Dict[str, Any]) -> Path:
         """Return the directory for the per-case primbench JSON of each candidate.
         The cache only stores the combined score, so selection rules that need each
@@ -595,17 +637,20 @@ class BaseTuner(ABC):
             with open(cache_file, "w") as f:
                 f.write(new_content)
 
-        if not self.simulation_mode and baselines is not None:
+        if not self.simulation_mode:
             # Record which cache entries are the baselines, for the config generator.
-            # Inserted as a single line (replacing the one from an earlier run), so the
-            # rest of kernel tuner's cache file stays as it wrote it.
-            with open(cache_file, "r") as f:
-                content = f.read()
-            content = re.sub(r'^"baselines": .*,\n', "", content, flags=re.M)
-            new_content = "{\n" + f'"baselines": {json.dumps(baselines)},'
-            new_content += content.lstrip()[1:]
-            with open(cache_file, "w") as f:
-                f.write(new_content)
+            if baselines is not None:
+                self._write_cache_annotation(cache_file, "baselines", baselines)
+
+            # Record the configs that still hit the noise timeout after the retries in
+            # the wrapper, so the config generator drops them.
+            noise_timeouts = self._find_noise_timeouts(cache_file, types)
+            if noise_timeouts:
+                print(
+                    f"Dropping {len(noise_timeouts)} config(s) that still hit the noise "
+                    f"timeout after {self.noise_retries} retries: {noise_timeouts}"
+                )
+            self._write_cache_annotation(cache_file, "noise_timeouts", noise_timeouts)
 
         if self.save_metadata:
             store_metadata_file(str(cache_file).replace("cache", "metadata"))

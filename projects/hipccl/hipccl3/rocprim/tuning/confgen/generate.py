@@ -344,6 +344,18 @@ def main():
             if filter_dif > 0:
                 log.warning(f"Skipping failed compilations: {filter_dif}")
 
+            # Skip configs that still hit the noise timeout after the tuner's retries
+            noise_timeouts = set(data.get("noise_timeouts", []))
+            if noise_timeouts:
+                data_filter = [
+                    c
+                    for k, c in data["cache"].items()
+                    if "time" in c and k not in noise_timeouts
+                ]
+                log.warning(
+                    f"Skipping configs that hit the noise timeout: {len(noise_timeouts)}"
+                )
+
             if data["algo_name"] == "device_merge_sort_block_merge":
                 temp = [
                     c
