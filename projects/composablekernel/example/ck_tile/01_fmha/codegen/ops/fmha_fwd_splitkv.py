@@ -5,7 +5,7 @@ import copy
 import fnmatch
 import itertools
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import List, Optional, Union
 
@@ -317,7 +317,9 @@ float fmha_fwd_splitkv(fmha_fwd_splitkv_traits t, fmha_fwd_splitkv_args a, const
     // lengths from seqlen_k_ptr, and one page / head offset for K and V
     if(t.kv_memory_layout != ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT &&
        !(t.data_type == "fp8bf16" && t.hdim_q == 128 && t.hdim_v == 128 && !t.is_group_mode &&
-         !t.has_sink && t.qscale_type == quant_scale_enum::pertensor &&
+         !t.has_sink &&
+         (t.qscale_type == quant_scale_enum::pertensor ||
+          t.qscale_type == quant_scale_enum::dynamic_q) &&
          a.block_table_ptr != nullptr && !a.is_gappy && a.seqlen_k_ptr != nullptr &&
          a.page_block_size == 64 && a.batch_stride_k == a.batch_stride_v &&
          a.nhead_stride_k == a.nhead_stride_v))
@@ -325,6 +327,11 @@ float fmha_fwd_splitkv(fmha_fwd_splitkv_traits t, fmha_fwd_splitkv_args a, const
     // the kernels read the descales unchecked
     if(t.qscale_type == quant_scale_enum::pertensor &&
        (a.q_descale_ptr == nullptr || a.k_descale_ptr == nullptr || a.v_descale_ptr == nullptr))
+        return r;
+    // dynamic Q quantizes Q itself and takes no Q descale; it has no sink instance
+    if(t.qscale_type == quant_scale_enum::dynamic_q &&
+       (a.q_descale_ptr != nullptr || a.k_descale_ptr == nullptr || a.v_descale_ptr == nullptr ||
+        t.has_sink))
         return r;
 
     [[maybe_unused]] const std::string device_name = ck_tile::get_device_name();
@@ -502,7 +509,7 @@ class FmhaFwdSplitKVPipeline:
     F_pagedkv: str  # t/f
     F_sink: str  # t/f
     F_mask: str  # value from MASK_MAP
-    F_qscale: str = "no"  # no/pertensor
+    F_qscale: str = "no"  # no/pertensor/dynq
     F_kvlayout: str = "linear"  # linear/vec5d
 
     @property
@@ -1053,6 +1060,8 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                     else ["no", "generic"]
                 ):
                     pipelines.append(Pipeline("qr_tdm_pingpong", "row", "t", "t", "f", "f", "f", "no", "t", "f", "t", "f", mask, "pertensor", "vec5d"))  # fmt: skip
+                # dynamic Q: the same pipelines on bf16 Q, quantized per row in the kernel
+                pipelines += [replace(p, F_qscale="dynq") for p in pipelines]
         elif dtype in ["fp8fp16"]:
             # TODO
             None
@@ -1150,6 +1159,9 @@ def get_fwd_splitkv_blobs(
                         continue
                     # one 64-token page per tile
                     if pipeline.kv5d and tile.F_bn0 != 64:
+                        continue
+                    # dynamic Q: the 64-key tile only
+                    if pipeline.F_qscale == "dynq" and tile.F_bn0 != 64:
                         continue
                 # Use qr_nwarp_sshuffle with multiple N warps and qr otherwise
                 elif (tile.F_rn0 != 1) != (pipeline.tag == "qr_nwarp_sshuffle"):

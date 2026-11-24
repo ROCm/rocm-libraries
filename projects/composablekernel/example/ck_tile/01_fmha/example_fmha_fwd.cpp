@@ -55,7 +55,9 @@ auto create_args(int argc, char* argv[])
                 "  kvbs or 3, Q per-tensor, K/V per-page block scale\n"
                 "  mx or 4, microscaling (mxfp8, mxfp8bf16 and mxfp4;\n"
                 "           fp8 and fp8bf16 run as mxfp8 and mxfp8bf16)\n"
-                "  ph or 5, per-head scale")
+                "  ph or 5, per-head scale\n"
+                "  dynq or 6, bf16 Q quantized per row in the kernel, K/V per-tensor\n"
+                "           (fp8bf16 split-kv)")
         .insert("logits_soft_cap", "0", "attention logits soft capping value.")
         .insert("iperm",
                 "1",
@@ -151,7 +153,17 @@ auto create_args(int argc, char* argv[])
         .insert("rerun",
                 "0",
                 "v=1: rerun this many times on NaN outputs and split-kv workspace, each run "
-                "bitwise equal to the validated one");
+                "bitwise equal to the validated one")
+        .insert("q_fill",
+                "init",
+                "qscale=dynq: the bf16 Q rows,\n"
+                "  init|spike|range|zero|tiny|round|overshoot|ftz|const (see dynq_fill_q_row)")
+        .insert("q_zero_heads", "", "qscale=dynq: Q heads filled with 0, comma-separated")
+        .insert("k_descale", "0", "qscale=pt|dynq: the K descale, 0 = the runner's")
+        .insert("dynq_diff",
+                "0",
+                "qscale=dynq, v=1: rerun per-tensor on the host-quantized Q, O and LSE must be "
+                "bitwise equal (q_fill=spike)");
 
     bool result = arg_parser.parse(argc, argv);
     return std::make_tuple(result, arg_parser);
@@ -207,6 +219,11 @@ auto run(const ck_tile::ArgParser& arg_parser)
     kv.diff_linear   = arg_parser.get_bool("vec5d_diff");
     fmha_fwd_splitkv_options splitkv;
     splitkv.rerun = arg_parser.get_int("rerun");
+    fmha_fwd_dynq_options dynq;
+    dynq.q_fill     = arg_parser.get_str("q_fill");
+    dynq.zero_heads = arg_parser.get_int_vec("q_zero_heads");
+    dynq.k_descale  = arg_parser.get_float("k_descale");
+    dynq.diff_pt    = arg_parser.get_bool("dynq_diff");
 
     ck_tile::stream_config stream_config{nullptr,
                                          true,
@@ -259,7 +276,8 @@ auto run(const ck_tile::ArgParser& arg_parser)
                                         json,
                                         nullptr,
                                         kv,
-                                        splitkv);
+                                        splitkv,
+                                        dynq);
 }
 
 int main(int argc, char* argv[])

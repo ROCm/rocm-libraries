@@ -26,6 +26,8 @@ namespace ck_tile {
 namespace detail {
 template <typename T>
 using has_max_waves_per_eu = decltype(T::kMaxWavesPerEu);
+template <typename T>
+using has_dynamic_q = decltype(T::kDynamicQ);
 } // namespace detail
 
 template <typename FmhaPipeline_, typename EpiloguePipeline_>
@@ -125,6 +127,15 @@ struct FmhaFwdSplitKVKernel
                       (kHasQKVDescale && !kDoFp8StaticQuant),
                   "split-kv supports only the per-tensor descale and dynamic Q, without fp8 static "
                   "quant");
+    // any other pipeline would read the bf16 Q as fp8
+    static constexpr bool kPipelineQuantizesQ = []() {
+        if constexpr(is_detected<detail::has_dynamic_q, FmhaPipeline>::value)
+            return FmhaPipeline::kDynamicQ;
+        else
+            return false;
+    }();
+    static_assert(QScaleEnum != BlockAttentionQuantScaleEnum::DYNAMIC_Q || kPipelineQuantizesQ,
+                  "split-kv dynamic Q needs a pipeline that quantizes Q (kDynamicQ)");
 
     // clang-format off
     template <typename T> struct t2s;

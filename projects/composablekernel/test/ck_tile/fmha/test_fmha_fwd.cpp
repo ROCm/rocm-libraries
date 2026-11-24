@@ -3818,6 +3818,7 @@ struct Paged5DCase
     fmha_fwd_kv_options kv{"vec5d", "", kSglangBlockTableWidth};
     int pack_gqa = 1;
     bool lse     = true;
+    int rerun    = 0; // reruns on NaN outputs and workspace, each bitwise equal to the first
 };
 
 static Paged5DCase Paged5D(std::string name,
@@ -3831,8 +3832,8 @@ static Paged5DCase Paged5D(std::string name,
         std::move(name), batch, nhead_k, std::move(seqlen_k), num_splits, std::move(mask)};
 }
 
-template <typename Edit>
-static Paged5DCase With(Paged5DCase c, Edit&& edit)
+template <typename Case, typename Edit>
+static Case With(Case c, Edit&& edit)
 {
     edit(c);
     return c;
@@ -3884,6 +3885,7 @@ static std::vector<Paged5DCase> Paged5DCases()
              [](auto& c) {
                  c.kv.warm_seqlen_k = {4000, 9000};
                  c.kv.tail_fill     = "finite";
+                 c.rerun            = 2;
              }),
         // spare entries name a page outside the pool
         With(Paged5D("fault_ctx0_mixed", 3, 1, {70, 0, 1}, 4, no_mask), fault),
@@ -3961,7 +3963,8 @@ TEST_P(SplitKVPaged5D, DataTypeConfig)
         stream_config,
         std::nullopt,
         nullptr,
-        c.kv);
+        c.kv,
+        fmha_fwd_splitkv_options{c.rerun});
     const std::string out = testing::internal::GetCapturedStdout();
     ASSERT_EQ(result, fwd_result::success) << out;
     // the 5D instance ran, through the split-kv api even with one split
@@ -4197,6 +4200,257 @@ TEST_P(Paged5DReject, DataTypeConfig)
         EXPECT_EQ(out.find("_kv5d"), std::string::npos) << out;
     else
         EXPECT_LT(rc, 0) << out;
+}
+
+// qscale=dynq on the gfx1250 split-kv pingpong tile: bf16 Q, quantized per row in the kernel, on
+// linear and 5D K/V. A representative part of the matrix the runner runs with -qscale=dynq.
+struct DynQCase
+{
+    std::string name;
+    int batch;
+    int nhead_k;
+    std::vector<int> seqlen_k; // 5D: one per sequence
+    int num_splits;
+    std::string mask;
+    bool vec5d;
+    fmha_fwd_dynq_options dynq{};
+    bool lse     = true;
+    float p_drop = 0.0f;
+};
+
+static DynQCase DynQ(std::string name,
+                     int batch,
+                     int nhead_k,
+                     std::vector<int> seqlen_k,
+                     int num_splits,
+                     std::string mask,
+                     bool vec5d)
+{
+    return DynQCase{
+        std::move(name), batch, nhead_k, std::move(seqlen_k), num_splits, std::move(mask), vec5d};
+}
+
+static std::vector<DynQCase> DynQCases()
+{
+    const std::string no_mask = "0";
+    const std::string swa     = "b:2047,0"; // gpt-oss sliding window
+    const auto q_fill = [](std::string fill) { return [fill](auto& c) { c.dynq.q_fill = fill; }; };
+    // one Q scale on every row, so that the per-tensor kernel can take it for its Q descale; a K
+    // descale of a power of 2, which both kernels fold into scale_s exactly
+    const auto spike_diff = [](auto& c) {
+        c.dynq.q_fill    = "spike";
+        c.dynq.k_descale = 0.25f;
+        c.dynq.diff_pt   = true;
+    };
+    return {
+        // linear K/V: one split (still on the split-kv kernel), a partial last tile, an unpadded
+        // seqlen_k (2048), 32 splits
+        DynQ("lin_ctx1_ns1", 1, 1, {1}, 1, no_mask, false),
+        DynQ("lin_ctx65_ns3_swa", 1, 1, {65}, 3, swa, false),
+        DynQ("lin_ctx2048_ns8", 2, 1, {2048}, 8, no_mask, false),
+        DynQ("lin_ctx2049_ns8_swa", 2, 1, {2049}, 8, swa, false),
+        DynQ("lin_ctx8192_ns32", 1, 1, {8192}, 32, no_mask, false),
+        DynQ("lin_hk2_ctx129_ns3", 1, 2, {129}, 3, no_mask, false),
+        With(DynQ("lin_ctx1000_ns3_swa_nolse", 1, 1, {1000}, 3, swa, false),
+             [](auto& c) { c.lse = false; }),
+        // 5D pages; ctx 0 among the batch
+        DynQ("v5_ctx1_ns1", 1, 1, {1}, 1, no_mask, true),
+        DynQ("v5_ctx65_ns3_swa", 1, 1, {65}, 3, swa, true),
+        DynQ("v5_ctx2049_ns8_swa", 1, 1, {2049}, 8, swa, true),
+        DynQ("v5_ctx8191_ns32", 1, 1, {8191}, 32, no_mask, true),
+        DynQ("v5_hk2_ns3", 2, 2, {65, 129}, 3, no_mask, true),
+        DynQ("v5_b8_mixed_ns8", 8, 1, {0, 1, 17, 33, 65, 129, 2049, 8192}, 8, swa, true),
+        // the Q fills of dynq_fill_q_row
+        With(DynQ("lin_range_ns3", 2, 1, {1000}, 3, no_mask, false), q_fill("range")),
+        With(DynQ("v5_tiny_zero_heads_ns3", 1, 1, {65}, 3, no_mask, true),
+             [](auto& c) {
+                 c.dynq.q_fill     = "tiny";
+                 c.dynq.zero_heads = {0, 5};
+             }),
+        With(DynQ("lin_round_ns3", 1, 1, {129}, 3, no_mask, false), q_fill("round")),
+        With(DynQ("lin_overshoot_ns3", 1, 1, {129}, 3, no_mask, false), q_fill("overshoot")),
+        With(DynQ("v5_ftz_ns3_swa", 1, 1, {129}, 3, swa, true), q_fill("ftz")),
+        // bitwise equal to the per-tensor kernel on the host-quantized Q
+        With(DynQ("lin_spike_diff_ns3_swa", 2, 1, {1000}, 3, swa, false), spike_diff),
+        With(DynQ("v5_spike_diff_ns8_swa", 4, 1, {1, 65, 2048, 9000}, 8, swa, true), spike_diff),
+        // num_splits 0: the runner's split heuristic, also with the dropout it ignores
+        DynQ("lin_ctx1000_nsauto", 1, 1, {1000}, 0, no_mask, false),
+        With(DynQ("lin_ctx1000_nsauto_dropout", 1, 1, {1000}, 0, no_mask, false),
+             [](auto& c) { c.p_drop = 0.1f; }),
+        DynQ("v5_ctx1000_nsauto", 1, 1, {1000}, 0, no_mask, true),
+    };
+}
+
+class SplitKVDynQ : public TestWithParam<DynQCase>
+{
+};
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SplitKVDynQ);
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         SplitKVDynQ,
+                         ValuesIn(std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16>
+                                      ? DynQCases()
+                                      : std::vector<DynQCase>{}),
+                         [](const auto& test_info) { return test_info.param.name; });
+
+TEST_P(SplitKVDynQ, DataTypeConfig)
+{
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "the dynamic Q split-kv instances exist only on gfx1250";
+    const DynQCase& c = GetParam();
+    fmha_fwd_kv_options kv;
+    if(c.vec5d)
+        kv = fmha_fwd_kv_options{"vec5d", "", kSglangBlockTableWidth};
+    const ck_tile::index_t page_block_size = c.vec5d ? 64 : 0;
+
+    // stream_config.log_level_ 1 has the api print the kernel names
+    testing::internal::CaptureStdout();
+    const auto result = fmha_fwd_run<DataTypeConfig>(
+        mode_enum::batch,
+        c.batch,
+        16, // nhead
+        c.nhead_k,
+        {1},
+        c.seqlen_k,
+        128,
+        128,
+        0,     // seqlen_knew
+        {-1},  // seqlen_qpads
+        {-1},  // seqlen_kpads
+        {},    // q_eff_lens_per_batch
+        {},    // kv_eff_lens_per_batch
+        0,     // rotary_dim
+        true,  // i_perm
+        true,  // o_perm
+        0,     // scale_s
+        0,     // logits_soft_cap
+        true,  // is_v_rowmajor
+        c.lse, // lse
+        page_block_size,
+        false,    // use_cache_batch_idx
+        "n",      // bias_str
+        c.p_drop, // p_drop
+        0,        // drop_seed
+        0,        // drop_offset
+        false,    // drop_prefs
+        c.mask,
+        "dynq",
+        true, // is_rotary_interleaved
+        c.num_splits,
+        "3",
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1, // do_validation
+        0, // init_sink
+        1, // pack_gqa
+        stream_config,
+        std::nullopt,
+        nullptr,
+        kv,
+        {},
+        c.dynq);
+    const std::string out = testing::internal::GetCapturedStdout();
+    ASSERT_EQ(result, fwd_result::success) << out;
+    // the dynamic Q instance ran, through the split-kv api even with one split
+    EXPECT_NE(out.find("_b16x64x128x128x64x128_"), std::string::npos) << out;
+    const std::string kernel_tail = c.vec5d ? "_nsink_dynq_kv5d, " : "_nsink_dynq, ";
+    EXPECT_NE(out.find(kernel_tail), std::string::npos) << out;
+    if(c.dynq.diff_pt)
+    {
+        EXPECT_NE(out.find("_nsink_pertensor"), std::string::npos) << out;
+        EXPECT_NE(out.find("dynq_diff:same"), std::string::npos) << out;
+    }
+}
+
+// MakePaged5DApi's decode as dynamic Q: bf16 Q, the K and V descales only; on linear K/V the
+// 64-key page is one sequence. DynQReject changes one field the api must refuse; DynQApiAccepts
+// shows the refusals are not an api that refuses everything.
+static Paged5DApi MakeDynQApi(bool vec5d)
+{
+    auto api = MakePaged5DApi();
+    const std::size_t q_bytes =
+        static_cast<std::size_t>(api.args.nhead_q) * api.args.hdim_q * sizeof(ck_tile::bf16_t);
+    api.buffers.push_back(std::make_unique<ck_tile::DeviceMem>(q_bytes));
+    api.buffers.back()->SetZero();
+    api.args.q_ptr         = api.buffers.back()->GetDeviceBuffer();
+    api.args.q_descale_ptr = nullptr;
+    api.traits.qscale_type = quant_scale_enum::dynamic_q;
+    if(!vec5d)
+    {
+        api.traits.kv_memory_layout = ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT;
+        api.args.block_table_ptr    = nullptr;
+        api.args.batch_stride_block_table = 0;
+        api.args.page_block_size          = 0;
+    }
+    return api;
+}
+
+TEST(TestCkTileFmhaFwd, DynQApiAccepts)
+{
+    if(!std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16> || !ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "the dynamic Q split-kv instances exist only for fp8bf16 on gfx1250";
+    for(const bool vec5d : {false, true})
+    {
+        auto api = MakeDynQApi(vec5d);
+        testing::internal::CaptureStdout();
+        const float rc =
+            fmha_fwd_splitkv(api.traits, api.args, ck_tile::stream_config{nullptr, false, 1});
+        const std::string out = testing::internal::GetCapturedStdout();
+        HIP_CHECK_ERROR(hipDeviceSynchronize());
+        ASSERT_GE(rc, 0) << out;
+        const std::string kernel_tail = vec5d ? "_nsink_dynq_kv5d, " : "_nsink_dynq, ";
+        EXPECT_NE(out.find(kernel_tail), std::string::npos) << out;
+    }
+}
+
+struct DynQRejectCase
+{
+    const char* name;
+    void (*edit)(fmha_fwd_splitkv_traits&, fmha_fwd_splitkv_args&);
+};
+
+static std::vector<DynQRejectCase> DynQRejectCases()
+{
+    return {
+        {"sink", [](auto& traits, auto&) { traits.has_sink = true; }},
+        {"q_descale", [](auto&, auto& args) { args.q_descale_ptr = args.k_descale_ptr; }},
+        {"no_k_descale", [](auto&, auto& args) { args.k_descale_ptr = nullptr; }},
+        {"no_v_descale", [](auto&, auto& args) { args.v_descale_ptr = nullptr; }},
+        {"fp16", [](auto& traits, auto&) { traits.data_type = "fp16"; }},
+    };
+}
+
+class DynQReject : public TestWithParam<std::tuple<DynQRejectCase, bool>>
+{
+};
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(DynQReject);
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         DynQReject,
+                         Combine(ValuesIn(std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16>
+                                              ? DynQRejectCases()
+                                              : std::vector<DynQRejectCase>{}),
+                                 Bool()), // vec5d
+                         [](const auto& test_info) {
+                             const std::string layout =
+                                 std::get<1>(test_info.param) ? "_vec5d" : "_linear";
+                             return std::get<0>(test_info.param).name + layout;
+                         });
+
+TEST_P(DynQReject, DataTypeConfig)
+{
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "the dynamic Q split-kv instances exist only on gfx1250";
+    const auto& [reject, vec5d] = GetParam();
+    auto api                    = MakeDynQApi(vec5d);
+    reject.edit(api.traits, api.args);
+    testing::internal::CaptureStdout();
+    const float rc =
+        fmha_fwd_splitkv(api.traits, api.args, ck_tile::stream_config{nullptr, false, 1});
+    const std::string out = testing::internal::GetCapturedStdout();
+    HIP_CHECK_ERROR(hipDeviceSynchronize());
+    EXPECT_LT(rc, 0) << out;
 }
 
 // fmha_fwd_splitkv() on an fp8 decode given on the host: Q (16 heads x 128), K and V (one head,

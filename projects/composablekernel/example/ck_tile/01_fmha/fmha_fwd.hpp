@@ -531,7 +531,9 @@ struct fmha_fwd_splitkv_args
     ck_tile::index_t sink_size;
     ck_tile::index_t mask_type;
 
-    // device pointers to one float each, required with qscale_type == pertensor and read only then
+    // device pointers to one float each, read with qscale_type == pertensor, which requires all
+    // three, and dynamic_q, which requires k and v and a null q_descale_ptr: Q is bf16 then and
+    // the kernel quantizes each row
     const void* q_descale_ptr = nullptr;
     const void* k_descale_ptr = nullptr;
     const void* v_descale_ptr = nullptr;

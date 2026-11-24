@@ -278,7 +278,7 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
     // Dynamic Q: each row's dequant scale amax * (1 / kQFp8Max), and q * rcp(max(scale,
     // kQScaleFloor)) converted to fp8 unclamped, eight values at a time, in the row layout of q_in.
     // A zero row gets scale 0 and q 0. The reciprocal constant and the hardware rcp, not IEEE
-    // divisions, are the steps the reference quantizer takes.
+    // divisions, are the steps the reference quantizer takes. Returns (q, scale, rcp).
     template <typename QInputTile>
     CK_TILE_DEVICE static auto QuantizeQRows(const QInputTile& q_in)
     {
@@ -321,7 +321,34 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                 q_scaled.get_thread_buffer().template get_as<fp32x8_t>(i), 1.f);
             q.get_thread_buffer().template set_as<QPack>(i, bit_cast<QPack>(packed));
         });
-        return make_tuple(q, q_scale);
+        return make_tuple(q, q_scale, q_inv);
+    }
+
+    // The Y dimensions of two row encodings, those of length 1 aside, name the same R/H
+    // dimensions in the same order: a thread's buffer holds the same rows in the same order.
+    template <typename QRow, typename SRow>
+    CK_TILE_HOST_DEVICE static constexpr void AssertSameRowOrder()
+    {
+        static_assert(
+            [] {
+                index_t q_y = 0;
+                index_t s_y = 0;
+                for(;;)
+                {
+                    while(q_y < QRow::NDimY && QRow::detail::ys_lengths_[q_y] == 1)
+                        ++q_y;
+                    while(s_y < SRow::NDimY && SRow::detail::ys_lengths_[s_y] == 1)
+                        ++s_y;
+                    if(q_y == QRow::NDimY || s_y == SRow::NDimY)
+                        return q_y == QRow::NDimY && s_y == SRow::NDimY;
+                    if(QRow::ys_to_rhs_major_.at(q_y) != SRow::ys_to_rhs_major_.at(s_y) ||
+                       QRow::ys_to_rhs_minor_.at(q_y) != SRow::ys_to_rhs_minor_.at(s_y))
+                        return false;
+                    ++q_y;
+                    ++s_y;
+                }
+            }(),
+            "qr_tdm_pingpong dynamic Q: the Q and S row orders differ");
     }
 
     // gemm_0's Q operand from LDS. Dynamic Q quantizes it and sets row_scale to scale_s times
@@ -332,7 +359,8 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
     {
         if constexpr(kDynamicQ)
         {
-            auto [q, q_scale] = QuantizeQRows(load_tile(q_lds_read_window));
+            auto [q, q_scale, q_inv] = QuantizeQRows(load_tile(q_lds_read_window));
+            ignore                   = q_inv;
             // A thread holds the same rows of Q and of the scores. The encodings themselves differ:
             // Q's (the A operand's) has one more Y dimension, of length 1.
             using QRow = typename decltype(q_scale)::StaticTileDistribution::DstrEncode;
@@ -345,6 +373,7 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                     decltype(q_scale)::get_thread_buffer_size() ==
                         RowScaleTile::get_thread_buffer_size(),
                 "qr_tdm_pingpong dynamic Q: the Q and S row layouts differ");
+            AssertSameRowOrder<QRow, SRow>();
             static_for<0, RowScaleTile::get_thread_buffer_size(), 1>{}([&](auto i) {
                 row_scale.get_thread_buffer()(i) = scale_s * q_scale.get_thread_buffer()[i];
             });

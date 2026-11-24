@@ -222,6 +222,12 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         test_qr_tdm_sched_fragments.cpp)
     target_compile_options(test_ck_tile_fmha_qr_tdm_sched_fragments PRIVATE -Wno-float-equal)
 
+    # the split-kv pingpong pipeline's dynamic Q quantization, under the instances' denormal flush
+    add_qr_tdm_sched_gtest(test_ck_tile_fmha_fwd_dynq_quant test_fmha_fwd_dynq_quant.cpp)
+    target_compile_options(test_ck_tile_fmha_fwd_dynq_quant PRIVATE -Wno-float-equal
+        -fgpu-flush-denormals-to-zero)
+    add_dependencies(${TEST_NAME} test_ck_tile_fmha_fwd_dynq_quant)
+
     foreach(geometry IN ITEMS d128_n128 d192_n64 d192_n128)
         if(geometry MATCHES "d128")
             set(head_dim 128)
