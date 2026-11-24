@@ -24,6 +24,7 @@
 #include <fstream>
 #include <iostream>
 #include <numeric>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -175,8 +176,8 @@ bool GetTuningKernelInfo(ExecPlan& execPlan)
         {
             KernelConfig* sol_kernel_config = execPlan.sol_kernel_configs[i];
             sol_kernel_config->static_dim   = curNode->getLeafNode().GetStaticDim();
-            sol_kernel_config->iAryType     = curNode->inArrayType;
-            sol_kernel_config->oAryType     = curNode->outArrayType;
+            sol_kernel_config->iAryType     = curNode->input_array_type();
+            sol_kernel_config->oAryType     = curNode->output_array_type();
             sol_kernel_config->placement
                 = (curNode->placement == rocfft_placement_inplace) ? PC_IP : PC_OP;
         }
@@ -447,7 +448,8 @@ void SetDefaultCallback(const TreeNode* node, const SetCallbackType& type, void*
 {
     auto result = hipSuccess;
 
-    auto array_type = (type == SetCallbackType::LOAD) ? node->inArrayType : node->outArrayType;
+    auto array_type
+        = (type == SetCallbackType::LOAD) ? node->input_array_type() : node->output_array_type();
     auto node_callback_type = node->GetCallbackType();
 
     bool is_complex = array_type_is_complex(array_type);
@@ -459,7 +461,7 @@ void SetDefaultCallback(const TreeNode* node, const SetCallbackType& type, void*
 
     if(is_complex && type == SetCallbackType::LOAD)
     {
-        switch(node->precision)
+        switch(node->get_precision())
         {
         case rocfft_precision_half:
             result
@@ -477,7 +479,7 @@ void SetDefaultCallback(const TreeNode* node, const SetCallbackType& type, void*
     }
     else if(is_complex && type == SetCallbackType::STORE)
     {
-        switch(node->precision)
+        switch(node->get_precision())
         {
         case rocfft_precision_half:
             result
@@ -495,7 +497,7 @@ void SetDefaultCallback(const TreeNode* node, const SetCallbackType& type, void*
     }
     else if(!is_complex && type == SetCallbackType::LOAD)
     {
-        switch(node->precision)
+        switch(node->get_precision())
         {
         case rocfft_precision_half:
             result = hipMemcpyFromSymbol(cb, HIP_SYMBOL(load_cb_default_half), sizeof(void*));
@@ -510,7 +512,7 @@ void SetDefaultCallback(const TreeNode* node, const SetCallbackType& type, void*
     }
     else if(!is_complex && type == SetCallbackType::STORE)
     {
-        switch(node->precision)
+        switch(node->get_precision())
         {
         case rocfft_precision_half:
             result = hipMemcpyFromSymbol(cb, HIP_SYMBOL(store_cb_default_half), sizeof(void*));
@@ -526,6 +528,29 @@ void SetDefaultCallback(const TreeNode* node, const SetCallbackType& type, void*
 
     if(result != hipSuccess)
         throw std::runtime_error("hipMemcpyFromSymbol failure");
+}
+
+static void apply_buffer_offsets(void* buffers[], const data_set_t& layout, bool planar)
+{
+    const auto offset0
+        = buffers[0] ? layout.get_offset(planar ? data_part::REAL : data_part::ALL) : 0;
+    const auto offset1 = planar && buffers[1] ? layout.get_offset(data_part::IMAGINARY) : 0;
+    if(offset0 || offset1)
+    {
+        const auto bytes = layout.element_byte_size();
+        if(offset0)
+            buffers[0] = static_cast<char*>(buffers[0]) + offset0 * bytes;
+        if(offset1)
+            buffers[1] = static_cast<char*>(buffers[1]) + offset1 * bytes;
+    }
+}
+
+// Logs use the uncompressed planned shape, including a late CC1D batch reorder.
+static std::optional<data_set_t> debug_input_projection(const LeafNode& node)
+{
+    if(node.inner_batch_layout || node.input_preprocessed)
+        return node.execution_layout_for(io_data_label::INPUT);
+    return std::nullopt;
 }
 
 // Internal plan executor.
@@ -626,31 +651,32 @@ void TransformPowX(const rocfft_plan_t&                  plan,
         //
         data.deviceProp = execPlan.deviceProp;
 
-        // Size of complex type
-        const size_t complexTSize = complex_type_size(data.node->precision);
+        const auto& input_layout  = data.node->input_layout();
+        const auto& output_layout = data.node->output_layout();
+        const bool  planar_input  = input_layout.num_planes() == 2;
+        const bool  planar_output = output_layout.num_planes() == 2;
+        const auto  precision     = data.node->get_precision();
+        const auto  complexTSize  = complex_type_size(precision);
 
         switch(data.node->obIn)
         {
         case OB_USER_IN:
             data.bufIn[0] = in_buffer[0];
-            if(data.node->inArrayType == rocfft_array_type_complex_planar
-               || data.node->inArrayType == rocfft_array_type_hermitian_planar)
+            if(planar_input)
             {
                 data.bufIn[1] = in_buffer[1];
             }
             break;
         case OB_USER_OUT:
             data.bufIn[0] = out_buffer[0];
-            if(data.node->inArrayType == rocfft_array_type_complex_planar
-               || data.node->inArrayType == rocfft_array_type_hermitian_planar)
+            if(planar_input)
             {
                 data.bufIn[1] = out_buffer[1];
             }
             break;
         case OB_TEMP:
             data.bufIn[0] = work;
-            if(data.node->inArrayType == rocfft_array_type_complex_planar
-               || data.node->inArrayType == rocfft_array_type_hermitian_planar)
+            if(planar_input)
             {
                 // Assume planar using the same extra size of memory as
                 // interleaved format, and we just need to split it for
@@ -660,14 +686,7 @@ void TransformPowX(const rocfft_plan_t&                  plan,
             break;
         case OB_TEMP_CMPLX_FOR_REAL:
             data.bufIn[0] = work + execPlan.tmpWorkBufSize * complexTSize;
-            // TODO: Can we use this in planar as well ??
-            // if(data.node->inArrayType == rocfft_array_type_complex_planar
-            //    || data.node->inArrayType == rocfft_array_type_hermitian_planar)
-            // {
-            //     data.bufIn[1] = (void*)((char*)info->workBuffer
-            //                             + (execPlan.tmpWorkBufSize + execPlan.copyWorkBufSize / 2)
-            //                                   * complexTSize);
-            // }
+            // Planar input is not supported for this buffer.
             break;
         case OB_TEMP_BLUESTEIN:
             data.bufIn[0]
@@ -688,24 +707,21 @@ void TransformPowX(const rocfft_plan_t&                  plan,
         {
         case OB_USER_IN:
             data.bufOut[0] = in_buffer[0];
-            if(data.node->outArrayType == rocfft_array_type_complex_planar
-               || data.node->outArrayType == rocfft_array_type_hermitian_planar)
+            if(planar_output)
             {
                 data.bufOut[1] = in_buffer[1];
             }
             break;
         case OB_USER_OUT:
             data.bufOut[0] = out_buffer[0];
-            if(data.node->outArrayType == rocfft_array_type_complex_planar
-               || data.node->outArrayType == rocfft_array_type_hermitian_planar)
+            if(planar_output)
             {
                 data.bufOut[1] = out_buffer[1];
             }
             break;
         case OB_TEMP:
             data.bufOut[0] = work;
-            if(data.node->outArrayType == rocfft_array_type_complex_planar
-               || data.node->outArrayType == rocfft_array_type_hermitian_planar)
+            if(planar_output)
             {
                 // assume planar using the same extra size of memory as
                 // interleaved format, and we just need to split it for
@@ -715,14 +731,7 @@ void TransformPowX(const rocfft_plan_t&                  plan,
             break;
         case OB_TEMP_CMPLX_FOR_REAL:
             data.bufOut[0] = work + execPlan.tmpWorkBufSize * complexTSize;
-            // TODO: Can we use this in planar as well ??
-            // if(data.node->outArrayType == rocfft_array_type_complex_planar
-            //    || data.node->outArrayType == rocfft_array_type_hermitian_planar)
-            // {
-            //     data.bufOut[1] = (void*)((char*)info->workBuffer
-            //                              + (execPlan.tmpWorkBufSize + execPlan.copyWorkBufSize / 2)
-            //                                    * complexTSize);
-            // }
+            // Planar output is not supported for this buffer.
             break;
         case OB_TEMP_BLUESTEIN:
             data.bufOut[0]
@@ -735,32 +744,8 @@ void TransformPowX(const rocfft_plan_t&                  plan,
         }
 
         // apply offsets to pointers
-        if(data.node->iOffset)
-        {
-            if(data.bufIn[0])
-                data.bufIn[0] = ptr_offset(data.bufIn[0],
-                                           data.node->iOffset,
-                                           data.node->precision,
-                                           data.node->inArrayType);
-            if(data.bufIn[1])
-                data.bufIn[1] = ptr_offset(data.bufIn[1],
-                                           data.node->iOffset,
-                                           data.node->precision,
-                                           data.node->inArrayType);
-        }
-        if(data.node->oOffset)
-        {
-            if(data.bufOut[0])
-                data.bufOut[0] = ptr_offset(data.bufOut[0],
-                                            data.node->oOffset,
-                                            data.node->precision,
-                                            data.node->outArrayType);
-            if(data.bufOut[1])
-                data.bufOut[1] = ptr_offset(data.bufOut[1],
-                                            data.node->oOffset,
-                                            data.node->precision,
-                                            data.node->outArrayType);
-        }
+        apply_buffer_offsets(data.bufIn, input_layout, planar_input);
+        apply_buffer_offsets(data.bufOut, output_layout, planar_output);
 
         // single-kernel bluestein requires a bluestein temp buffer separate from input and output
         if(data.node->scheme == CS_KERNEL_BLUESTEIN_SINGLE)
@@ -780,63 +765,56 @@ void TransformPowX(const rocfft_plan_t&                  plan,
             if(hipDeviceSynchronize() != hipSuccess)
                 throw std::runtime_error("hipDeviceSynchronize failure");
 
-            std::vector<hostbuf> bufInHost;
-            CopyDeviceBufferToHost(data.node->inArrayType,
-                                   data.node->precision,
-                                   data.bufIn,
-                                   data.node->length,
-                                   data.node->inStride,
-                                   data.node->iDist,
-                                   data.node->batch,
-                                   bufInHost);
+            const auto  projected = debug_input_projection(*data.node);
+            const auto& layout    = projected ? *projected : input_layout;
+            const auto  type      = data.node->input_array_type();
+            auto        lengths   = layout.lengths_and_batches();
+            auto        strides   = layout.strides_and_distances();
+            const auto  batch     = lengths.back();
+            const auto  distance  = strides.back();
+            lengths.pop_back();
+            strides.pop_back();
 
-            DebugPrintBuffer(*kernelio_stream,
-                             data.node->inArrayType,
-                             data.node->precision,
-                             bufInHost,
-                             data.node->length,
-                             data.node->inStride,
-                             data.node->iDist,
-                             data.node->batch);
+            std::vector<hostbuf> bufInHost;
+            CopyDeviceBufferToHost(
+                type, precision, data.bufIn, lengths, strides, distance, batch, bufInHost);
+            DebugPrintBuffer(
+                *kernelio_stream, type, precision, bufInHost, lengths, strides, distance, batch);
             *kernelio_stream << "--- --- multiPlanIdx " << multiPlanIdx << " kernel " << i << " ("
                              << PrintScheme(data.node->scheme) << ") input hash: " << std::endl;
-            DebugPrintHash(*kernelio_stream,
-                           data.node->inArrayType,
-                           data.node->precision,
-                           bufInHost,
-                           data.node->length,
-                           data.node->inStride,
-                           data.node->iDist,
-                           data.node->batch);
+            DebugPrintHash(
+                *kernelio_stream, type, precision, bufInHost, lengths, strides, distance, batch);
             *kernelio_stream << std::endl;
         }
 
 #ifdef REF_DEBUG
+        const auto  projected_input = debug_input_projection(*data.node);
+        const auto& input           = projected_input ? *projected_input : input_layout;
+        const auto  rank            = input.get_full_rank() - 1;
         rocfft_cout << "\n---------------------------------------------\n";
         rocfft_cout << "\n\nkernel: " << i << std::endl;
         rocfft_cout << "\tscheme: " << PrintScheme(execPlan.execSeq[i]->scheme) << std::endl;
-        rocfft_cout << "\titype: " << execPlan.execSeq[i]->inArrayType << std::endl;
-        rocfft_cout << "\totype: " << execPlan.execSeq[i]->outArrayType << std::endl;
+        rocfft_cout << "\titype: " << data.node->input_array_type() << std::endl;
+        rocfft_cout << "\totype: " << data.node->output_array_type() << std::endl;
         rocfft_cout << "\tlength: ";
-        for(const auto& i : execPlan.execSeq[i]->length)
-        {
-            rocfft_cout << i << " ";
-        }
+        for(size_t axis = 0; axis < rank; ++axis)
+            rocfft_cout << input.axis_span(axis) << " ";
         rocfft_cout << std::endl;
-        rocfft_cout << "\tbatch:   " << execPlan.execSeq[i]->batch << std::endl;
-        rocfft_cout << "\tidist:   " << execPlan.execSeq[i]->iDist << std::endl;
-        rocfft_cout << "\todist:   " << execPlan.execSeq[i]->oDist << std::endl;
+        const auto projected_output
+            = data.node->inner_batch_layout
+                  ? std::optional{data.node->execution_layout_for(io_data_label::OUTPUT)}
+                  : std::nullopt;
+        const auto& output = projected_output ? *projected_output : output_layout;
+        rocfft_cout << "\tbatch:   " << input.axis_span(rank) << std::endl;
+        rocfft_cout << "\tidist:   " << input.axis_stride(rank) << std::endl;
+        rocfft_cout << "\todist:   " << output.axis_stride(rank) << std::endl;
         rocfft_cout << "\tistride:";
-        for(const auto& i : execPlan.execSeq[i]->inStride)
-        {
-            rocfft_cout << " " << i;
-        }
+        for(size_t axis = 0; axis < rank; ++axis)
+            rocfft_cout << " " << input.axis_stride(axis);
         rocfft_cout << std::endl;
         rocfft_cout << "\tostride:";
-        for(const auto& i : execPlan.execSeq[i]->outStride)
-        {
-            rocfft_cout << " " << i;
-        }
+        for(size_t axis = 0; axis < rank; ++axis)
+            rocfft_cout << " " << output.axis_stride(axis);
         rocfft_cout << std::endl;
 
         RefLibOp refLibOp(&data);
@@ -896,11 +874,16 @@ void TransformPowX(const rocfft_plan_t&                  plan,
         {
             if(hipEventSynchronize(stop) != hipSuccess)
                 throw std::runtime_error("hipEventSynchronize failure");
-            size_t in_size_bytes
-                = data_size_bytes(data.node->length, data.node->precision, data.node->inArrayType);
-            size_t out_size_bytes
-                = data_size_bytes(data.node->length, data.node->precision, data.node->outArrayType);
-            size_t total_size_bytes = (in_size_bytes + out_size_bytes) * data.node->batch;
+            const auto  projected = debug_input_projection(*data.node);
+            const auto& layout    = projected ? *projected : input_layout;
+            auto        lengths   = layout.lengths_and_batches();
+            const auto  batch     = lengths.back();
+            lengths.pop_back();
+            const auto in_size_bytes
+                = data_size_bytes(lengths, precision, data.node->input_array_type());
+            const auto out_size_bytes
+                = data_size_bytes(lengths, precision, data.node->output_array_type());
+            const auto total_size_bytes = (in_size_bytes + out_size_bytes) * batch;
 
             float duration_ms = 0.0f;
             if(hipEventElapsedTime(&duration_ms, start, stop) != hipSuccess)
@@ -918,8 +901,7 @@ void TransformPowX(const rocfft_plan_t&                  plan,
                         "duration_ms",
                         duration_ms,
                         "in_size",
-                        std::make_pair(static_cast<const size_t*>(data.node->length.data()),
-                                       data.node->length.size()),
+                        std::make_pair(static_cast<const size_t*>(lengths.data()), lengths.size()),
                         "total_size_bytes",
                         total_size_bytes,
                         "exec_GB_s",
@@ -954,56 +936,30 @@ void TransformPowX(const rocfft_plan_t&                  plan,
 
     if(emit_kernelio_log)
     {
-        // offsets have only been applied to pointers given to kernels,
-        // so apply them here for printing too
-        void* out_buffer_offset[2] = {out_buffer[0], nullptr};
-        if(execPlan.rootPlan->oOffset)
-        {
-            out_buffer_offset[0] = ptr_offset(out_buffer_offset[0],
-                                              execPlan.rootPlan->oOffset,
-                                              execPlan.rootPlan->precision,
-                                              execPlan.rootPlan->outArrayType);
-        }
+        const auto& layout               = execPlan.rootPlan->output_layout();
+        const auto  type                 = execPlan.rootPlan->output_array_type();
+        const auto  precision            = execPlan.rootPlan->get_precision();
+        const bool  planar               = layout.num_planes() == 2;
+        void*       out_buffer_offset[2] = {out_buffer[0], planar ? out_buffer[1] : nullptr};
+        apply_buffer_offsets(out_buffer_offset, layout, planar);
 
-        if(array_type_is_planar(execPlan.rootPlan->outArrayType))
-        {
-            out_buffer_offset[1] = out_buffer[1];
-
-            if(execPlan.rootPlan->oOffset)
-                out_buffer_offset[1] = ptr_offset(out_buffer_offset[1],
-                                                  execPlan.rootPlan->oOffset,
-                                                  execPlan.rootPlan->precision,
-                                                  execPlan.rootPlan->outArrayType);
-        }
+        auto       lengths  = layout.lengths_and_batches();
+        auto       strides  = layout.strides_and_distances();
+        const auto batch    = lengths.back();
+        const auto distance = strides.back();
+        lengths.pop_back();
+        strides.pop_back();
 
         std::vector<hostbuf> bufOutHost;
-        CopyDeviceBufferToHost(execPlan.rootPlan->outArrayType,
-                               execPlan.rootPlan->precision,
-                               out_buffer_offset,
-                               execPlan.rootPlan->outputLength,
-                               execPlan.rootPlan->outStride,
-                               execPlan.rootPlan->oDist,
-                               execPlan.rootPlan->batch,
-                               bufOutHost);
+        CopyDeviceBufferToHost(
+            type, precision, out_buffer_offset, lengths, strides, distance, batch, bufOutHost);
 
         *kernelio_stream << "multiPlanIdx " << multiPlanIdx << " final output: " << std::endl;
-        DebugPrintBuffer(*kernelio_stream,
-                         execPlan.rootPlan->outArrayType,
-                         execPlan.rootPlan->precision,
-                         bufOutHost,
-                         execPlan.rootPlan->outputLength,
-                         execPlan.rootPlan->outStride,
-                         execPlan.rootPlan->oDist,
-                         execPlan.rootPlan->batch);
+        DebugPrintBuffer(
+            *kernelio_stream, type, precision, bufOutHost, lengths, strides, distance, batch);
         *kernelio_stream << "multiPlanIdx " << multiPlanIdx << " final output hash: " << std::endl;
-        DebugPrintHash(*kernelio_stream,
-                       execPlan.rootPlan->outArrayType,
-                       execPlan.rootPlan->precision,
-                       bufOutHost,
-                       execPlan.rootPlan->outputLength,
-                       execPlan.rootPlan->outStride,
-                       execPlan.rootPlan->oDist,
-                       execPlan.rootPlan->batch);
+        DebugPrintHash(
+            *kernelio_stream, type, precision, bufOutHost, lengths, strides, distance, batch);
         *kernelio_stream << std::endl;
     }
 }

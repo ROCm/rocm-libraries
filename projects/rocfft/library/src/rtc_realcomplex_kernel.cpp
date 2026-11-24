@@ -58,11 +58,11 @@ RTCKernel::RTCGenerator RTCKernelRealComplex::generate_from_node(const LeafNode&
 
     RealComplexSpecs specs{itype,
                            node.scheme,
-                           node.dimension,
+                           node.length_rank(),
                            lengths.size(),
-                           node.precision,
-                           node.inArrayType,
-                           node.outArrayType,
+                           node.get_precision(),
+                           node.input_array_type(),
+                           node.output_array_type(),
                            cbtype,
                            node.loadOps,
                            node.storeOps};
@@ -120,10 +120,10 @@ RTCKernelArgs RTCKernelRealComplex::get_launch_args(DeviceCallIn& data)
     kargs.append_kint(kern_stride_out[3]);
 
     kargs.append_ptr(data.bufIn[0]);
-    if(array_type_is_planar(data.node->inArrayType))
+    if(array_type_is_planar(data.node->input_array_type()))
         kargs.append_ptr(data.bufIn[1]);
     kargs.append_ptr(data.bufOut[0]);
-    if(array_type_is_planar(data.node->outArrayType))
+    if(array_type_is_planar(data.node->output_array_type()))
         kargs.append_ptr(data.bufOut[1]);
 
     // callback params
@@ -178,11 +178,11 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEven::generate_from_node(const LeafN
 
     RealComplexEvenSpecs specs{{itype,
                                 node.scheme,
-                                node.dimension,
+                                node.length_rank(),
                                 lengths.size(),
-                                node.precision,
-                                node.inArrayType,
-                                node.outArrayType,
+                                node.get_precision(),
+                                node.input_array_type(),
+                                node.output_array_type(),
                                 cbtype,
                                 node.loadOps,
                                 node.storeOps},
@@ -218,11 +218,11 @@ RTCKernelArgs RTCKernelRealComplexEven::get_launch_args(DeviceCallIn& data)
     }
     kargs.append_kint(view.batch);
     kargs.append_ptr(data.bufIn[0]);
-    if(array_type_is_planar(data.node->inArrayType))
+    if(array_type_is_planar(data.node->input_array_type()))
         kargs.append_ptr(data.bufIn[1]);
     kargs.append_kint(view.iDist);
     kargs.append_ptr(data.bufOut[0]);
-    if(array_type_is_planar(data.node->outArrayType))
+    if(array_type_is_planar(data.node->output_array_type()))
         kargs.append_ptr(data.bufOut[1]);
     kargs.append_kint(view.oDist);
     kargs.append_ptr(data.node->twiddles);
@@ -252,12 +252,12 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEvenTranspose::generate_from_node(
 
     unsigned int m   = lengths[1];
     unsigned int n   = lengths[0];
-    unsigned int dim = node.dimension;
+    size_t       dim = node.length_rank();
 
     unsigned int gridX;
     unsigned int gridX_1d;
     unsigned int gridY;
-    unsigned int gridZ = view.batch * product(lengths.begin() + node.dimension, lengths.end());
+    unsigned int gridZ = view.batch * product(lengths.begin() + dim, lengths.end());
 
     if(node.scheme == CS_KERNEL_R_TO_CMPLX_TRANSPOSE)
     {
@@ -308,11 +308,11 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEvenTranspose::generate_from_node(
 
     RealComplexEvenTransposeSpecs specs{{itype,
                                          node.scheme,
-                                         node.dimension,
+                                         dim,
                                          lengths.size(),
-                                         node.precision,
-                                         node.inArrayType,
-                                         node.outArrayType,
+                                         node.get_precision(),
+                                         node.input_array_type(),
+                                         node.output_array_type(),
                                          cbtype,
                                          node.loadOps,
                                          node.storeOps,
@@ -337,16 +337,18 @@ RTCKernel::RTCGenerator RTCKernelRealComplexEvenTranspose::generate_from_node(
 
 RTCKernelArgs RTCKernelRealComplexEvenTranspose::get_launch_args(DeviceCallIn& data)
 {
-    RTCKernelArgs kargs = make_launch_args();
-    const auto&   view  = data.node->GetKernelView();
+    RTCKernelArgs kargs   = make_launch_args();
+    const auto&   view    = data.node->GetKernelView();
+    const auto    dim     = data.node->length_rank();
+    const auto    lengths = view.lengths();
 
-    kargs.append_kint(data.node->dimension, KIntType::U32);
+    kargs.append_kint(dim, KIntType::U32);
     kargs.append_ptr(data.bufIn[0]);
-    if(array_type_is_planar(data.node->inArrayType))
+    if(array_type_is_planar(data.node->input_array_type()))
         kargs.append_ptr(data.bufIn[1]);
     kargs.append_kint(view.iDist);
     kargs.append_ptr(data.bufOut[0]);
-    if(array_type_is_planar(data.node->outArrayType))
+    if(array_type_is_planar(data.node->output_array_type()))
         kargs.append_ptr(data.bufOut[1]);
     kargs.append_kint(view.oDist);
     kargs.append_ptr(data.node->twiddles);
@@ -362,23 +364,21 @@ RTCKernelArgs RTCKernelRealComplexEvenTranspose::get_launch_args(DeviceCallIn& d
 
     // pass gridY and gridZ to restore a 3-D GPU grid, if needed for large grids
     unsigned int gridY;
-    unsigned int gridZ
-        = view.batch * product(view.lengths().begin() + data.node->dimension, view.lengths().end());
+    unsigned int gridZ = view.batch * product(lengths.begin() + dim, lengths.end());
 
     if(data.node->scheme == CS_KERNEL_R_TO_CMPLX_TRANSPOSE)
     {
         const unsigned int tileY = RealComplexEvenTransposeSpecs::TileY();
         unsigned int       m     = view.lengths()[1];
 
-        gridY = ((m - 1) / tileY + 1)
-                * (data.node->dimension > 2 ? static_cast<unsigned int>(view.lengths()[2]) : 1);
+        gridY = ((m - 1) / tileY + 1) * (dim > 2 ? static_cast<unsigned int>(lengths[2]) : 1);
     }
     else
     {
         unsigned int       m     = view.lengths()[1];
         const unsigned int tileY = RealComplexEvenTransposeSpecs::TileY();
 
-        if(data.node->dimension > 2)
+        if(dim > 2)
         {
             m = view.lengths()[2];
         }

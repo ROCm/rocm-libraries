@@ -593,7 +593,8 @@ void ExecPlan::ExecuteAsync(const rocfft_plan                     plan,
     auto out_transform_ptrs = mgpuPlan ? &mgpu_item_output : out_buffer;
 
     // Callbacks do not currently support planar format
-    if((array_type_is_planar(rootPlan->inArrayType) || array_type_is_planar(rootPlan->outArrayType))
+    if((array_type_is_planar(rootPlan->input_array_type())
+        || array_type_is_planar(rootPlan->output_array_type()))
        && (exec_info.get_load_cb_fns() || exec_info.get_store_cb_fns()))
         throw std::runtime_error("callbacks not supported with planar format");
 

@@ -39,7 +39,7 @@ RTCKernel::RTCGenerator RTCKernelBluesteinSingle::generate_from_node(const LeafN
         return generator;
 
     // find kernel config from function pool
-    auto config = node.pool.get_kernel(FMKey(node.blue->get_padded_length(), node.precision));
+    auto config = node.pool.get_kernel(FMKey(node.blue->get_padded_length(), node.get_precision()));
 
     // get factors from the leaf node, which might have overridden what's in the pool
     auto&                     leafNode = static_cast<const LeafNode&>(node);
@@ -64,10 +64,10 @@ RTCKernel::RTCGenerator RTCKernelBluesteinSingle::generate_from_node(const LeafN
                                    * config.transforms_per_block,
                                static_cast<unsigned int>(config.threads_per_transform[0]),
                                node.direction,
-                               node.precision,
+                               node.get_precision(),
                                node.placement,
-                               node.inArrayType,
-                               node.outArrayType,
+                               node.input_array_type(),
+                               node.output_array_type(),
                                cbtype,
                                node.loadOps,
                                node.storeOps};
@@ -102,13 +102,13 @@ RTCKernelArgs RTCKernelBluesteinSingle::get_launch_args(DeviceCallIn& data)
     }
     kargs.append_kint(view.batch);
     kargs.append_ptr(data.bufIn[0]);
-    if(array_type_is_planar(data.node->inArrayType))
+    if(array_type_is_planar(data.node->input_array_type()))
         kargs.append_ptr(data.bufIn[1]);
 
     if(data.node->placement == rocfft_placement_notinplace)
     {
         kargs.append_ptr(data.bufOut[0]);
-        if(array_type_is_planar(data.node->outArrayType))
+        if(array_type_is_planar(data.node->output_array_type()))
             kargs.append_ptr(data.bufOut[1]);
     }
 
@@ -206,9 +206,9 @@ RTCKernel::RTCGenerator RTCKernelBluesteinMulti::generate_from_node(const LeafNo
 
     BluesteinMultiSpecs specs{itype,
                               scheme,
-                              node.precision,
-                              node.inArrayType,
-                              node.outArrayType,
+                              node.get_precision(),
+                              node.input_array_type(),
+                              node.output_array_type(),
                               cbtype,
                               node.loadOps,
                               node.storeOps,
@@ -262,7 +262,7 @@ RTCKernelArgs RTCKernelBluesteinMulti::get_launch_args(DeviceCallIn& data)
     }
     else
     {
-        const size_t cBytes = complex_type_size(data.node->precision);
+        const size_t cBytes = complex_type_size(data.node->get_precision());
 
         void* bufIn0  = data.bufIn[0];
         void* bufOut0 = data.bufOut[0];
@@ -284,10 +284,10 @@ RTCKernelArgs RTCKernelBluesteinMulti::get_launch_args(DeviceCallIn& data)
         kargs.append_size_t(N);
         kargs.append_size_t(M);
         kargs.append_ptr(bufIn0);
-        if(array_type_is_planar(data.node->inArrayType))
+        if(array_type_is_planar(data.node->input_array_type()))
             kargs.append_ptr(bufIn1);
         kargs.append_ptr(bufOut0);
-        if(array_type_is_planar(data.node->outArrayType))
+        if(array_type_is_planar(data.node->output_array_type()))
             kargs.append_ptr(bufOut1);
         kargs.append_size_t(view.lengths().size());
         kargs.append_ptr(data.node->devKernArg.lengths());

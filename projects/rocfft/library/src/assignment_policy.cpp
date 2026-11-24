@@ -104,12 +104,12 @@ void PlacementTrace::Backtracking(ExecPlan& execPlan, int execSeqID)
     if((execSeqID < 0) || (curNode != execSeq[execSeqID]))
         throw std::runtime_error("Backtracking error: accessing invalid resource");
 
-    auto node          = execSeq[execSeqID];
-    node->placement    = this->isInplace ? rocfft_placement_inplace : rocfft_placement_notinplace;
-    node->obIn         = this->inBuf;
-    node->obOut        = this->outBuf;
-    node->inArrayType  = this->iType;
-    node->outArrayType = this->oType;
+    auto node       = execSeq[execSeqID];
+    node->placement = this->isInplace ? rocfft_placement_inplace : rocfft_placement_notinplace;
+    node->obIn      = this->inBuf;
+    node->obOut     = this->outBuf;
+    auto inputType  = this->iType;
+    auto outputType = this->oType;
 
     // Even-length internal nodes have real data for input or output but
     // child nodes treat it as complex interleaved
@@ -118,10 +118,10 @@ void PlacementTrace::Backtracking(ExecPlan& execPlan, int execSeqID)
     {
         // forward transform, first node (if it's a leaf) needs to treat real input as complex
         if(node->direction == -1 && node == realEvenAncestor->GetFirstLeaf())
-            node->inArrayType = rocfft_array_type_complex_interleaved;
+            inputType = rocfft_array_type_complex_interleaved;
         // inverse transform, last node (if it's a leaf) needs to treat real output as complex
         if(node->direction == 1 && node == realEvenAncestor->GetLastLeaf())
-            node->outArrayType = rocfft_array_type_complex_interleaved;
+            outputType = rocfft_array_type_complex_interleaved;
     }
 
     // Ensure that all nodes that take real input are declared as
@@ -129,32 +129,34 @@ void PlacementTrace::Backtracking(ExecPlan& execPlan, int execSeqID)
     // kernelio debugging depends on knowing the correct type of the
     // array to print.
     if(node->scheme == CS_KERNEL_COPY_R_TO_CMPLX)
-        node->inArrayType = rocfft_array_type_real;
+        inputType = rocfft_array_type_real;
 
-    // for nodes that uses bluestein buffer
-    auto setBluesteinOffset = [node](size_t& offset) {
+    // Look at each ancestor's input before its output. Offsets in the
+    // interleaved Bluestein buffer use the first plane of the stage layout.
+    auto firstPlaneOffset = [](const data_set_t& layout) {
+        return layout.get_offset(layout.num_planes() == 2 ? data_part::REAL : data_part::ALL);
+    };
+    size_t bluesteinOffset = 0;
+    if(node->obIn == OB_TEMP_BLUESTEIN || node->obOut == OB_TEMP_BLUESTEIN)
+    {
         for(auto p = node->parent; p != nullptr; p = p->parent)
         {
-            if(p->iOffset)
-            {
-                offset = p->iOffset;
+            bluesteinOffset = firstPlaneOffset(p->input_layout());
+            if(bluesteinOffset == 0)
+                bluesteinOffset = firstPlaneOffset(p->output_layout());
+            if(bluesteinOffset != 0)
                 break;
-            }
-            else if(p->oOffset)
-            {
-                offset = p->oOffset;
-                break;
-            }
         }
+    }
+    auto offsetFor = [&](io_data_label io, OperatingBuffer buffer) {
+        if(buffer != OB_TEMP_BLUESTEIN)
+            return size_t{0};
+        return bluesteinOffset != 0 ? bluesteinOffset : firstPlaneOffset(node->layout_for(io));
     };
-    if(node->obIn == OB_TEMP_BLUESTEIN)
-        setBluesteinOffset(node->iOffset);
-    else
-        node->iOffset = 0;
-    if(node->obOut == OB_TEMP_BLUESTEIN)
-        setBluesteinOffset(node->oOffset);
-    else
-        node->oOffset = 0;
+    node->set_array_type_and_offsets(
+        io_data_label::INPUT, inputType, {offsetFor(io_data_label::INPUT, node->obIn), 0});
+    node->set_array_type_and_offsets(
+        io_data_label::OUTPUT, outputType, {offsetFor(io_data_label::OUTPUT, node->obOut), 0});
 
     // keep going backward to next node, skipping over chirp setup nodes
     int nextExecSeqID = execSeqID;
@@ -245,9 +247,9 @@ static bool ValidOutBufferBluestein(TreeNode& node)
 // Decide if two length+stride sets match, even if one of the
 // lengths/strides is out of order with respect to the other.
 static bool MatchingLengthStride(const std::vector<size_t>& lengthA,
-                                 const std::vector<size_t>& strideA,
+                                 const auto&                strideA,
                                  const std::vector<size_t>& lengthB,
-                                 const std::vector<size_t>& strideB)
+                                 const auto&                strideB)
 {
     // attach a length to a stride and make them sortable and
     // comparable
@@ -274,18 +276,16 @@ static bool MatchingLengthStride(const std::vector<size_t>& lengthA,
     };
 
     // check that A and B are equal when sorted
-    auto make_sorted_iodim_vec
-        = [](const std::vector<size_t>& length, const std::vector<size_t>& stride) {
-              std::vector<iodim> ret;
-              for(size_t i = 0; i < length.size(); ++i)
-                  ret.emplace_back(length[i], stride[i]);
-              std::sort(ret.begin(), ret.end());
-              return ret;
-          };
+    auto make_sorted_iodim_vec = [](const std::vector<size_t>& length, const auto& stride) {
+        std::vector<iodim> ret;
+        ret.reserve(length.size());
+        for(size_t i = 0; i < length.size(); ++i)
+            ret.emplace_back(length[i], stride(i));
+        std::sort(ret.begin(), ret.end());
+        return ret;
+    };
 
-    // avoid UB (TODO: remove once ruled out by design)
-    if(strideA.size() < lengthA.size() || strideB.size() < lengthB.size()
-       || lengthB.size() < lengthA.size())
+    if(lengthB.size() < lengthA.size())
         return false;
 
     std::vector<iodim> iodimA = make_sorted_iodim_vec(lengthA, strideA);
@@ -293,21 +293,20 @@ static bool MatchingLengthStride(const std::vector<size_t>& lengthA,
     return std::equal(iodimA.begin(), iodimA.end(), iodimB.begin());
 }
 
-// Output lengths, and the matching strides, that a node actually writes.
-static std::pair<std::vector<size_t>, std::vector<size_t>> OutputFootprint(const TreeNode& node)
+// Assignment and padding see the legacy physical order only for these projections.
+static const data_set_t&
+    AssignmentLayout(const TreeNode& node, io_data_label io, std::optional<data_set_t>& projected)
 {
-    auto len    = node.outputLength;
-    auto stride = node.outStride;
-    // the last fused Bluestein stage only stores the first transform_length of its padded dims 0-1
-    if(node.GetBluesteinFuseType() == BFT_INV_CHIRP_MUL
-       && node.scheme == CS_KERNEL_STOCKHAM_BLOCK_RC)
-    {
-        len.erase(len.begin(), len.begin() + 2);
-        len.insert(len.begin(), node.blue->get_transform_length());
-        // The flattened transform uses the stride of the old fastest output axis.
-        stride.erase(stride.begin());
-    }
-    return {std::move(len), std::move(stride)};
+    if(node.inner_batch_layout || (io == io_data_label::INPUT && node.input_preprocessed))
+        return projected.emplace(node.execution_layout_for(io));
+    return node.layout_for(io);
+}
+
+// The last fused Bluestein stage stores only the original transform length.
+static bool FlattensBluesteinOutput(const TreeNode& node)
+{
+    return node.GetBluesteinFuseType() == BFT_INV_CHIRP_MUL
+           && node.scheme == CS_KERNEL_STOCKHAM_BLOCK_RC;
 }
 
 bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
@@ -326,9 +325,21 @@ bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
     // the input side of an in-place R2C transform (which the plan
     // would normally call OB_USER_OUT).
     auto dataFits = [&execPlan](TreeNode& node, OperatingBuffer buffer) {
-        auto [nodeLen, nodeStride] = OutputFootprint(node);
-        auto bufLen
-            = buffer == OB_USER_OUT ? execPlan.rootPlan->outputLength : execPlan.rootPlan->length;
+        std::optional<data_set_t> projected;
+        const auto& outLayout = AssignmentLayout(node, io_data_label::OUTPUT, projected);
+        const auto  bufSide = buffer == OB_USER_OUT ? io_data_label::OUTPUT : io_data_label::INPUT;
+        const auto& bufLayout = execPlan.rootPlan->layout_for(bufSide);
+        auto        nodeLen   = outLayout.lengths_and_batches();
+        auto        bufLen    = bufLayout.lengths_and_batches();
+        nodeLen.pop_back();
+        bufLen.pop_back();
+
+        const bool flatten = FlattensBluesteinOutput(node);
+        if(flatten)
+        {
+            nodeLen.erase(nodeLen.begin());
+            nodeLen.front() = node.blue->get_transform_length();
+        }
 
         // The shape check below consumes the legacy output order. Keep that
         // view for SBRC, including which axis is doubled for a real buffer.
@@ -338,18 +349,15 @@ bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
         if(legacySBRCOrder)
         {
             for(size_t i = 0; i < nodeLen.size(); ++i)
-                nodeLen[i] = node.outputLength[node.LegacySBRCOutputAxis(i)];
-            for(size_t i = 0; i < nodeStride.size(); ++i)
-                nodeStride[i] = node.outStride[node.LegacySBRCOutputAxis(i)];
+                nodeLen[i] = outLayout.axis_span(node.LegacySBRCOutputAxis(i));
         }
 
         // if node's output is complex and buffer's format is real,
         // adjust output length to be 2x to make the units of
         // comparison match
-        bool kernelOutputIsReal = node.scheme == CS_KERNEL_COPY_CMPLX_TO_R;
-        bool outBufferIsReal
-            = (buffer == OB_USER_OUT && execPlan.rootPlan->outArrayType == rocfft_array_type_real)
-              || (buffer == OB_USER_IN && execPlan.rootPlan->inArrayType == rocfft_array_type_real);
+        const bool kernelOutputIsReal = node.scheme == CS_KERNEL_COPY_CMPLX_TO_R;
+        const bool outBufferIsReal
+            = bufLayout.has_array_type() && bufLayout.get_array_type() == rocfft_array_type_real;
         const bool doubleFront = outBufferIsReal && !kernelOutputIsReal;
         if(doubleFront)
             nodeLen.front() *= 2;
@@ -365,11 +373,13 @@ bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
         // a higher dimension of the buffer, the order of the node's
         // length+stride might not match what's declared on the
         // buffer.
-        if(MatchingLengthStride(nodeLen,
-                                nodeStride,
-                                bufLen,
-                                buffer == OB_USER_OUT ? execPlan.rootPlan->outStride
-                                                      : execPlan.rootPlan->inStride))
+        // The flattened transform uses the stride of the old fastest output axis.
+        auto nodeStride = [&](size_t i) {
+            const auto axis = legacySBRCOrder ? node.LegacySBRCOutputAxis(i) : i + flatten;
+            return outLayout.axis_stride(axis);
+        };
+        auto bufStride = [&](size_t i) { return bufLayout.axis_stride(i); };
+        if(MatchingLengthStride(nodeLen, nodeStride, bufLen, bufStride))
             return true;
 
         // Enumerate tests candidate buffers before assigning their strides.
@@ -440,8 +450,8 @@ bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
     // have to fit into whatever the user gave us
     else if(buffer == OB_USER_IN || buffer == OB_USER_OUT)
     {
-        auto fitArrayType = buffer == OB_USER_IN ? execPlan.rootPlan->inArrayType
-                                                 : execPlan.rootPlan->outArrayType;
+        auto fitArrayType = buffer == OB_USER_IN ? execPlan.rootPlan->input_array_type()
+                                                 : execPlan.rootPlan->output_array_type();
         test_result       = dataFits(node, buffer) && EquivalentArrayType(fitArrayType, arrayType);
         if(!test_result)
         {
@@ -449,10 +459,11 @@ bool AssignmentPolicy::ValidOutBuffer(ExecPlan&           execPlan,
             // this is an in-place R2C/C2R transform, then we could also
             // try fitting into the shape of the input.
             if(buffer == OB_USER_OUT && execPlan.rootPlan->placement == rocfft_placement_inplace
-               && (execPlan.rootPlan->inArrayType == rocfft_array_type_real
-                   || execPlan.rootPlan->outArrayType == rocfft_array_type_real))
-                test_result = dataFits(node, OB_USER_IN)
-                              && EquivalentArrayType(execPlan.rootPlan->inArrayType, arrayType);
+               && (execPlan.rootPlan->input_array_type() == rocfft_array_type_real
+                   || execPlan.rootPlan->output_array_type() == rocfft_array_type_real))
+                test_result
+                    = dataFits(node, OB_USER_IN)
+                      && EquivalentArrayType(execPlan.rootPlan->input_array_type(), arrayType);
         }
     }
 
@@ -469,28 +480,39 @@ static void RecursiveTraverse(TreeNode* node, const std::function<void(TreeNode*
 
 bool AssignmentPolicy::CheckAssignmentValid(ExecPlan& execPlan)
 {
-    auto getBufSize = [](TreeNode* node, bool input) {
-        if(input)
-            return compute_ptrdiff(node->length, node->inStride, node->batch, node->iDist);
-
-        const auto [outLen, outStride] = OutputFootprint(*node);
-        return compute_ptrdiff(outLen, outStride, node->batch, node->oDist);
+    auto getBufSize = [](const TreeNode& node, const data_set_t& layout, io_data_label io) {
+        const bool flatten = io == io_data_label::OUTPUT && FlattensBluesteinOutput(node);
+        // Same element footprint as compute_ptrdiff, excluding plane offsets.
+        size_t size = 1;
+        for(size_t axis = flatten ? 1 : 0; axis < layout.get_full_rank(); ++axis)
+        {
+            const size_t len
+                = flatten && axis == 1 ? node.blue->get_transform_length() : layout.axis_span(axis);
+            if(len == 0)
+                return size_t{0};
+            size += (len - 1) * layout.axis_stride(axis);
+        }
+        return size;
     };
+
+    const auto& root = *execPlan.rootPlan;
 
     size_t sizeBufIn  = 0;
     size_t sizeBufOut = 0;
-    if(execPlan.rootPlan->placement == rocfft_placement_notinplace)
+    if(root.placement == rocfft_placement_notinplace)
     {
-        sizeBufIn  = getBufSize(execPlan.rootPlan.get(), true);
-        sizeBufOut = getBufSize(execPlan.rootPlan.get(), false);
+        sizeBufIn  = getBufSize(root, root.input_layout(), io_data_label::INPUT);
+        sizeBufOut = getBufSize(root, root.output_layout(), io_data_label::OUTPUT);
     }
     else
-        sizeBufOut = std::max(getBufSize(execPlan.rootPlan.get(), true),
-                              getBufSize(execPlan.rootPlan.get(), false));
+        sizeBufOut = std::max(getBufSize(root, root.input_layout(), io_data_label::INPUT),
+                              getBufSize(root, root.output_layout(), io_data_label::OUTPUT));
 
     for(auto& curr : execPlan.execSeq)
     {
-        auto currSizeBufOut = getBufSize(curr, false);
+        std::optional<data_set_t> projectedOutput;
+        const auto& outLayout = AssignmentLayout(*curr, io_data_label::OUTPUT, projectedOutput);
+        const auto  currSizeBufOut = getBufSize(*curr, outLayout, io_data_label::OUTPUT);
         if((curr->obOut == OB_USER_IN && currSizeBufOut > sizeBufIn)
            || (curr->obOut == OB_USER_OUT && currSizeBufOut > sizeBufOut))
         {
@@ -500,11 +522,13 @@ bool AssignmentPolicy::CheckAssignmentValid(ExecPlan& execPlan)
 
         if(curr->placement == rocfft_placement_inplace)
         {
-            const int infact  = curr->inArrayType == rocfft_array_type_real ? 1 : 2;
-            const int outfact = curr->outArrayType == rocfft_array_type_real ? 1 : 2;
-            for(size_t i = 0; i < curr->inStride.size(); i++)
+            const int infact  = curr->input_array_type() == rocfft_array_type_real ? 1 : 2;
+            const int outfact = curr->output_array_type() == rocfft_array_type_real ? 1 : 2;
+            std::optional<data_set_t> projectedInput;
+            const auto& inLayout = AssignmentLayout(*curr, io_data_label::INPUT, projectedInput);
+            for(size_t i = 0; i < curr->data_rank(); ++i)
             {
-                if(outfact * curr->inStride[i] != infact * curr->outStride[i])
+                if(outfact * inLayout.axis_stride(i) != infact * outLayout.axis_stride(i))
                 {
                     return false;
                 }
@@ -625,21 +649,20 @@ void AssignmentPolicy::AssignChirpBuffers(ExecPlan& execPlan)
     {
         auto& chirpFwdNode            = node->childNodes[0];
         chirpFwdNode->obIn            = OB_TEMP_BLUESTEIN;
-        chirpFwdNode->inArrayType     = rocfft_array_type_complex_interleaved;
         chirpFwdNode->obOut           = OB_TEMP_BLUESTEIN;
-        chirpFwdNode->outArrayType    = rocfft_array_type_complex_interleaved;
         chirpFwdNode->placement       = rocfft_placement_inplace;
         chirpFwdNode->allowInplace    = true;
         chirpFwdNode->allowOutofplace = false;
+        chirpFwdNode->set_array_type(io_data_label::INPUT, rocfft_array_type_complex_interleaved);
+        chirpFwdNode->set_array_type(io_data_label::OUTPUT, rocfft_array_type_complex_interleaved);
 
         auto& chirpFwdMulNode            = node->childNodes[1];
         chirpFwdMulNode->placement       = rocfft_placement_notinplace;
         chirpFwdMulNode->allowInplace    = true;
         chirpFwdMulNode->allowOutofplace = true;
 
-        NodeMetaData chirpFwdNodePlan(chirpFwdNode.get());
-        chirpFwdNodePlan.length    = chirpFwdNode->length;
-        chirpFwdNodePlan.dimension = chirpFwdNode->dimension;
+        NodeMetaData chirpFwdNodePlan(
+            chirpFwdNode->input_layout(), chirpFwdNode->output_layout(), chirpFwdNode.get());
 
         // create a temporary plan that just does chirp - the plan nodes
         // get copied into our actual plan so the comm_rank, mgpuPlan,
@@ -693,14 +716,14 @@ void AssignmentPolicy::AssignBuffers_internal(ExecPlan& execPlan)
 
     // real-inverse transforms are allowed to modify input
     if(execPlan.rootPlan->direction == 1
-       && execPlan.rootPlan->outArrayType == rocfft_array_type_real)
+       && execPlan.rootPlan->output_array_type() == rocfft_array_type_real)
     {
         availableBuffers.insert(execPlan.rootPlan->obIn);
     }
 
     // Insert the valid ArrayTypes to use internally
-    rocfft_array_type aliasInType  = execPlan.rootPlan->inArrayType;
-    rocfft_array_type aliasOutType = execPlan.rootPlan->outArrayType;
+    rocfft_array_type aliasInType  = execPlan.rootPlan->input_array_type();
+    rocfft_array_type aliasOutType = execPlan.rootPlan->output_array_type();
 
     // if HP/CP -> treated as CP INTERNALLY, else (CI,HI,real) -> treated as CI INTERNALLY
     // if no interleaved in in/out, no need to try, if no planar in in/out, no need to try
@@ -794,7 +817,7 @@ void AssignmentPolicy::Enumerate(PlacementTrace*   parent,
     if(curSeqID >= execSeq.size())
     {
         auto endBuf       = execPlan.rootPlan->obOut;
-        auto endArrayType = execPlan.rootPlan->outArrayType;
+        auto endArrayType = execPlan.rootPlan->output_array_type();
 
         // the out buf and array type must match
         if(parent->outBuf == endBuf && EquivalentArrayType(endArrayType, parent->oType))
@@ -842,11 +865,13 @@ void AssignmentPolicy::Enumerate(PlacementTrace*   parent,
                 // chirp setup nodes must use bluestein buffer, not
                 // connected to other nodes, so just set their buffers
                 // directly and don't enumerate them with PlacementTraces
-                blueNode->obIn         = OB_TEMP_BLUESTEIN;
-                blueNode->inArrayType  = rocfft_array_type_complex_interleaved;
-                blueNode->obOut        = OB_TEMP_BLUESTEIN;
-                blueNode->outArrayType = rocfft_array_type_complex_interleaved;
-                blueNode->placement    = rocfft_placement_inplace;
+                blueNode->obIn      = OB_TEMP_BLUESTEIN;
+                blueNode->obOut     = OB_TEMP_BLUESTEIN;
+                blueNode->placement = rocfft_placement_inplace;
+                blueNode->set_array_type(io_data_label::INPUT,
+                                         rocfft_array_type_complex_interleaved);
+                blueNode->set_array_type(io_data_label::OUTPUT,
+                                         rocfft_array_type_complex_interleaved);
             }
 
             ++curSeqID;
@@ -1151,31 +1176,35 @@ struct TempBufOp
         BufRead,
         BufWrite,
     };
-    TempBufOp(const std::vector<size_t>& _length,
-              std::vector<size_t>&       _stride,
-              size_t&                    _dist,
-              Operation                  _op,
-              TreeNode&                  _node)
-        : length(_length)
-        , stride(_stride)
-        , dist(_dist)
-        , op(_op)
-        , node(_node)
+    TempBufOp(Operation op, TreeNode& node)
+        : op(op)
+        , node(node)
     {
-        // HACK: 1D stockham with fused C2R pre-processing will read
-        // one extra element.  Padding needs to see this because
-        // previous operations would count that extra element.
+        std::optional<data_set_t> projected;
+        const auto&               layout = AssignmentLayout(node, io(), projected);
+        length                           = layout.lengths_and_batches();
+        stride                           = layout.strides_and_distances();
+        dist                             = stride.back();
+        length.pop_back();
+        stride.pop_back();
+
+        // 1D Stockham with fused C2R pre-processing reads an extra bin.
         if(node.scheme == CS_KERNEL_STOCKHAM && node.ebtype == EmbeddedType::C2Real_PRE
            && op == BufRead)
-            const_cast<std::vector<size_t>&>(length).front()++;
+            ++length.front();
     }
 
-    const std::vector<size_t> length;
-    std::vector<size_t>&      stride;
-    size_t&                   dist;
+    std::vector<size_t> length;
+    std::vector<size_t> stride;
+    size_t              dist;
 
     Operation op;
     TreeNode& node;
+
+    io_data_label io() const
+    {
+        return op == BufRead ? io_data_label::INPUT : io_data_label::OUTPUT;
+    }
 
     // Return the forced dimension for padding for this kernel and
     // operation - if the kernel does not support padding on all
@@ -1222,21 +1251,21 @@ void CollectTempBufOps(TreeNode&               node,
 {
     // helper to insert an op into the vector - checks to make sure
     // we're not duplicating anything
-    auto insertOp = [&users](TempBufOp&& newOp) {
+    auto insertOp = [&users, &node](TempBufOp::Operation op) {
         // ensure we're not adding a duplicate
         for(auto& u : users)
         {
-            if(u.op == newOp.op && &u.node == &newOp.node)
+            if(u.op == op && &u.node == &node)
                 return;
         }
-        users.emplace_back(newOp);
+        users.emplace_back(op, node);
     };
 
     // If input is the buffer we're looking at
     if(!startNode && node.obIn == buf)
     {
         // Store this read
-        insertOp({node.length, node.inStride, node.iDist, TempBufOp::BufRead, node});
+        insertOp(TempBufOp::BufRead);
 
         // If this is a parent node, its children can also continue
         // using the buffer
@@ -1283,7 +1312,7 @@ void CollectTempBufOps(TreeNode&               node,
             CollectTempBufOps(**child, buf, users);
 
         // Store this write with the lengths paired to the assigned strides.
-        insertOp({node.outputLength, node.outStride, node.oDist, TempBufOp::BufWrite, node});
+        insertOp(TempBufOp::BufWrite);
 
         // If we have a parent node, tail-recurse into our following sibling node.
         //
@@ -1323,7 +1352,7 @@ void AssignmentPolicy::PadPlan(ExecPlan& execPlan)
 {
     // for strided FFTs with dist 1, we mess around with dimensions
     // in ways that confuse padding.  don't try.
-    if(execPlan.rootPlan->iDist == 1 || execPlan.rootPlan->oDist == 1)
+    if(execPlan.rootPlan->input_distance() == 1 || execPlan.rootPlan->output_distance() == 1)
         return;
 
     RecursiveTraverse(execPlan.rootPlan.get(), [&execPlan](TreeNode* n) {
@@ -1368,7 +1397,7 @@ void AssignmentPolicy::PadPlan(ExecPlan& execPlan)
             for(const auto& u : users)
             {
                 if(u.op == TempBufOp::BufWrite && u.node.parent
-                   && u.length.size() > u.node.parent->length.size())
+                   && u.length.size() > u.node.parent->data_rank())
                     return;
             }
 
@@ -1434,14 +1463,16 @@ void AssignmentPolicy::PadPlan(ExecPlan& execPlan)
 
             // pass previous write's strides to padding logic so it
             // can know how the data was shaped
-            TempBufOp* previousWrite = nullptr;
+            TempBufOp*   previousWrite = nullptr;
+            const size_t batch
+                = n->inner_batch_layout ? n->input_length(n->data_rank() - 1) : n->batch_count();
             for(auto& u : users)
             {
                 if(previousWrite)
                     PadStride(u.stride,
                               u.dist,
                               u.length,
-                              n->batch,
+                              batch,
                               previousWrite->stride,
                               previousWrite->dist,
                               previousWrite->length,
@@ -1450,13 +1481,23 @@ void AssignmentPolicy::PadPlan(ExecPlan& execPlan)
                     PadStride(u.stride,
                               u.dist,
                               u.length,
-                              n->batch,
+                              batch,
                               {},
                               0,
                               {},
                               u.GetForcedPaddingDim().value_or(PaddingDim::HIGHEST));
                 if(u.op == TempBufOp::BufWrite)
                     previousWrite = &u;
+            }
+
+            // Apply only strides, after later operations have consumed the padded writes.
+            for(auto& u : users)
+            {
+                u.stride.push_back(u.dist);
+                // The CC execution view swaps the final two source axes.
+                if(u.node.inner_batch_layout)
+                    std::swap(u.stride[u.stride.size() - 2], u.stride.back());
+                u.node.set_strides(u.io(), u.stride);
             }
         }
     });
