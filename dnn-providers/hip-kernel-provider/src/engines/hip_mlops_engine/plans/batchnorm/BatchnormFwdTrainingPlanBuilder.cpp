@@ -18,29 +18,6 @@ namespace hip_kernel_provider::batchnorm
 namespace
 {
 
-bool isNodeActivFwd(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attr)
-{
-    using PointwiseMode = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
-
-    // Check if operation is supported for batchnorm fusion
-    switch(attr.operation())
-    {
-    case PointwiseMode::IDENTITY:
-        return true;
-    case PointwiseMode::RELU_FWD:
-        break; // Continue to parameter validation
-    default:
-        return false;
-    }
-
-    // Batchnorm training fusion supports:
-    // - Standard ReLU (no parameters)
-    // - Clipped ReLU (relu_upper_clip only)
-    // - CLAMP (relu_lower_clip + relu_upper_clip)
-    // But does NOT support Leaky ReLU (relu_lower_clip_slope)
-    return !attr.relu_lower_clip_slope();
-}
-
 const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes&
     checkBatchnormNode(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper& node)
 {
@@ -70,12 +47,6 @@ const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes&
 
     const auto& activAttr
         = node.attributesAs<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>();
-
-    if(!isNodeActivFwd(activAttr))
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Unsupported activation mode for batchnorm fusion");
-    }
 
     if(activAttr.in_0_tensor_uid() != bnAttr.y_tensor_uid())
     {

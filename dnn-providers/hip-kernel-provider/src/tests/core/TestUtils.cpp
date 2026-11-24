@@ -260,6 +260,43 @@ TEST(TestParseActivation, ReluDefault)
     EXPECT_DOUBLE_EQ(params.alpha, 0.0);
 }
 
+TEST(TestParseActivation, ReluSignedZeroSlopeBehavesAsUnset)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes;
+    using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
+
+    for(const auto mode : {PointwiseMode::RELU_FWD, PointwiseMode::RELU_BWD})
+    {
+        SCOPED_TRACE(EnumNamePointwiseMode(mode));
+        for(const auto slope : {+0.0f, -0.0f})
+        {
+            SCOPED_TRACE(slope);
+            const auto parseRelu
+                = [&](flatbuffers::Optional<float> lower, flatbuffers::Optional<float> upper) {
+                      auto builder = createPointwiseAttributes(mode, lower, upper, slope);
+                      return parseActivation(
+                          *flatbuffers::GetRoot<PointwiseAttributes>(builder.GetBufferPointer()));
+                  };
+
+            const auto relu = parseRelu(flatbuffers::nullopt, flatbuffers::nullopt);
+            EXPECT_EQ(relu.mode, ActivationMode::RELU);
+            EXPECT_DOUBLE_EQ(relu.alpha, 0.0);
+
+            const auto clipped = parseRelu(flatbuffers::nullopt, 5.0f);
+            EXPECT_EQ(clipped.mode, ActivationMode::CLIPPED_RELU);
+            EXPECT_DOUBLE_EQ(clipped.alpha, 5.0);
+
+            const auto clamp = parseRelu(0.5f, 10.0f);
+            EXPECT_EQ(clamp.mode, ActivationMode::CLAMP);
+            EXPECT_DOUBLE_EQ(clamp.alpha, 0.5);
+            EXPECT_DOUBLE_EQ(clamp.beta, 10.0);
+
+            EXPECT_THROW(parseRelu(0.5f, flatbuffers::nullopt),
+                         hipdnn_plugin_sdk::HipdnnPluginException);
+        }
+    }
+}
+
 TEST(TestParseActivation, ReluClippedUpperOnly)
 {
     auto builder = createPointwiseAttributes(
@@ -291,19 +328,22 @@ TEST(TestParseActivation, ReluClampLowerAndUpper)
 
 TEST(TestParseActivation, ReluLeaky)
 {
-    auto builder
-        = createPointwiseAttributes(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD,
-                                    flatbuffers::nullopt,
-                                    flatbuffers::nullopt,
-                                    0.01f);
-    const auto* attrs
-        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
-            builder.GetBufferPointer());
+    for(const auto slope : {0.01f, -0.01f})
+    {
+        SCOPED_TRACE(slope);
+        auto builder = createPointwiseAttributes(
+            hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD,
+            flatbuffers::nullopt,
+            flatbuffers::nullopt,
+            slope);
+        const auto* attrs
+            = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+                builder.GetBufferPointer());
 
-    auto params = parseActivation(*attrs);
-
-    EXPECT_EQ(params.mode, ActivationMode::LEAKY_RELU);
-    EXPECT_NEAR(params.alpha, 0.01f, 1e-10);
+        const auto params = parseActivation(*attrs);
+        EXPECT_EQ(params.mode, ActivationMode::LEAKY_RELU);
+        EXPECT_DOUBLE_EQ(params.alpha, static_cast<double>(slope));
+    }
 }
 
 TEST(TestParseActivation, ThrowsOnReluUnsupportedLowerClipOnly)

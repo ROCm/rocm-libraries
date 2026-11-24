@@ -1,12 +1,14 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <functional>
 #include <gtest/gtest.h>
 #include <ostream>
 #include <string>
+#include <vector>
 
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
@@ -38,7 +40,8 @@ protected:
     Handle _dummyHandle;
     MockEngineConfig _mockEngineConfig;
 
-    void setupMockCompileChain()
+    void setupMockCompileChain(
+        const ::testing::Matcher<const std::vector<std::string>&>& optionsMatcher = ::testing::_)
     {
         hipDeviceProp_t deviceProps = {};
         deviceProps.multiProcessorCount = 60;
@@ -57,7 +60,11 @@ protected:
             .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernel))));
 
         EXPECT_CALL(_mockKernelCompiler, compile(::testing::_, ::testing::_))
-            .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
+            .WillOnce([optionsMatcher,
+                       program = std::move(mockProgram)](const auto&, const auto& options) mutable {
+                EXPECT_THAT(options, optionsMatcher);
+                return std::move(program);
+            });
     }
 };
 
@@ -112,6 +119,49 @@ TEST_F(TestBatchnormPlanBuilder, IsApplicableReturnsTrueForValidThreeNodeGraph)
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestBatchnormPlanBuilder, FusedReluSlopeApplicabilityAndPlanBuild)
+{
+    using namespace hipdnn_test_sdk::utilities;
+    const auto checkSlopeCases = [&](const char* variant,
+                                     const flatbuffers::FlatBufferBuilder& original) {
+        SCOPED_TRACE(variant);
+        struct SlopeCase
+        {
+            float slope;
+            bool supported;
+        };
+        const std::array<SlopeCase, 4> cases{
+            {{+0.0f, true}, {-0.0f, true}, {0.1f, false}, {-0.1f, false}}};
+        for(const auto& testCase : cases)
+        {
+            SCOPED_TRACE(testCase.slope);
+            auto builder = mutateGraph(original, [slope = testCase.slope](auto& nativeGraph) {
+                nativeGraph.nodes[1]->attributes.AsPointwiseAttributes()->relu_lower_clip_slope
+                    = slope;
+            });
+            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+                builder.GetBufferPointer(), builder.GetSize());
+
+            EXPECT_EQ(_planBuilder.isApplicable(_dummyHandle, graph), testCase.supported);
+            if(testCase.supported)
+            {
+                setupMockCompileChain(::testing::Contains("-DHIP_PLUGIN_BN_NRN_OP_ID=3"));
+                Context ctx;
+                EXPECT_NO_THROW(
+                    _planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+                EXPECT_TRUE(ctx.hasValidPlan());
+                ::testing::Mock::VerifyAndClearExpectations(&_mockKernelCompiler);
+                ::testing::Mock::VerifyAndClearExpectations(&_mockDevicePropertyProvider);
+            }
+        }
+    };
+
+    checkSlopeCases("Inference", createValidBatchnormFwdInferActGraph());
+    checkSlopeCases("Inference with variance",
+                    createValidBatchnormWithVarianceInferenceActivGraph());
+    checkSlopeCases("Backward", createValidBatchnormInferActBwdGraph());
 }
 
 // ============================================================================

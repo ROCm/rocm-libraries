@@ -17,7 +17,8 @@ namespace hip_kernel_provider
 void checkNormalizationActivationModeSupported(
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attributes,
     bool isBwd,
-    const std::string& normalizationName);
+    const std::string& normalizationName,
+    bool allowExplicitZeroSlope = false);
 
 // --- Tensor Descriptor Value Object ---
 

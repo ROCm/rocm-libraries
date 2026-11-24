@@ -19,7 +19,8 @@ namespace hip_kernel_provider
 void checkNormalizationActivationModeSupported(
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attributes,
     bool isBwd,
-    const std::string& normalizationName)
+    const std::string& normalizationName,
+    bool allowExplicitZeroSlope)
 {
     using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
     if(attributes.operation() == PointwiseMode::IDENTITY)
@@ -40,7 +41,8 @@ void checkNormalizationActivationModeSupported(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             normalizationName + " fused activation mode must match the normalization direction.");
     }
-    if(attributes.relu_lower_clip_slope().has_value())
+    const auto slope = attributes.relu_lower_clip_slope();
+    if(slope.has_value() && (!allowExplicitZeroSlope || slope.value() != 0.0f))
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,

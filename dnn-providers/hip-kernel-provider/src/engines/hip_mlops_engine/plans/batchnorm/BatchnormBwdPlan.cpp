@@ -282,6 +282,11 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
         options.update("HIP_PLUGIN_BN_GRP1", ylocalsize);
         options.update("HIP_PLUGIN_BN_GRP2", zlocalsize);
         options.update("HIP_PLUGIN_BN_LDS_SIZE", ldsSize);
+        if(!_usesSavedStats)
+        {
+            options.update("HIP_PLUGIN_BN_LDSGCN_SIZE",
+                           xlocalsize / static_cast<size_t>(deviceProperties.warpSize));
+        }
         options.update("HIP_PLUGIN_BN_VEC_SIZE", config.vectorsize);
 
         _compiledProgram = kernelCompiler.compile("BatchNormBwdSpatial.cpp", options);
