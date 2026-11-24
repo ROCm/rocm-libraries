@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 //
 // Template for rocm_libraries_add_version_resource in rocm_libraries_version_resource.cmake.
-// String values arrive already escaped for RC.
+// String values arrive already escaped for RC. The result is written with
+// file(GENERATE), which expands @filename@ to the target's file name.
 
 #include <winver.h>
 VS_VERSION_INFO VERSIONINFO

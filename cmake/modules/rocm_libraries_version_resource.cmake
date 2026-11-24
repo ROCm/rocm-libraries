@@ -12,13 +12,15 @@
 #
 # VERSION sets FILEVERSION and PRODUCTVERSION and is checked on every platform.
 # <name> sets InternalName and <description> sets
-# FileDescription. OriginalFilename is derived from the target's OUTPUT_NAME,
-# PREFIX and SUFFIX. PRODUCT_NAME overrides ProductName (default
-# "<name> <filename>"); COMMENTS adds a Comments value, for example the git
-# commit the binary was built from.
+# FileDescription. OriginalFilename is $<TARGET_FILE_NAME:<target>>, so CMake
+# resolves it with OUTPUT_NAME, postfixes and per-config names applied, even
+# when they are set after this call. PRODUCT_NAME overrides ProductName
+# (default "<name> <filename>"); COMMENTS adds a Comments value, for example
+# the git commit the binary was built from.
 #
-# The .rc file is only rewritten when its content changes, so reconfiguring
-# does not relink the target. When no resource compiler is available
+# The .rc file is written with file(GENERATE), one per configuration, and is
+# only rewritten when its content changes, so reconfiguring does not relink
+# the target. When no resource compiler is available
 # (CMAKE_RC_COMPILER unset, NOTFOUND or NOTREQUIRED, or RC not enabled),
 # configuration fails, so a Windows build cannot ship a binary without the
 # resource. Set ROCM_LIBRARIES_REQUIRE_VERSION_RESOURCE=OFF to warn instead
@@ -40,45 +42,25 @@ include_guard(GLOBAL)
 option(ROCM_LIBRARIES_REQUIRE_VERSION_RESOURCE
        "Fail configuration on Windows when a DLL or EXE version resource cannot be compiled" ON)
 
-# Escape VAR in place for an RC string literal: backslash is an escape there, and a doubled quote embeds a quote.
+# Escape VAR in place for an RC string literal (backslash is an escape there, and a doubled quote embeds a quote)
+# that file(GENERATE) then writes, so a literal "$<" must not start a generator expression.
 macro(_rocm_libraries_version_resource_escape VAR)
     string(REPLACE "\\" "\\\\" ${VAR} "${${VAR}}")
     string(REPLACE "\"" "\"\"" ${VAR} "${${VAR}}")
+    string(REPLACE "$<" "$<1:$><" ${VAR} "${${VAR}}")
 endmacro()
 
-# Set OUT_FILENAME to the file TARGET builds and OUT_FILETYPE to VFT_APP or VFT_DLL.
-function(_rocm_libraries_version_resource_file TARGET OUT_FILENAME OUT_FILETYPE)
+# Set OUT_FILETYPE to VFT_APP or VFT_DLL for TARGET.
+function(_rocm_libraries_version_resource_filetype TARGET OUT_FILETYPE)
     get_target_property(type ${TARGET} TYPE)
     if(type STREQUAL "EXECUTABLE")
-        set(filetype VFT_APP)
-        set(prefix "")
-        set(suffix "${CMAKE_EXECUTABLE_SUFFIX}")
-    elseif(type STREQUAL "SHARED_LIBRARY")
-        set(filetype VFT_DLL)
-        set(prefix "${CMAKE_SHARED_LIBRARY_PREFIX}")
-        set(suffix "${CMAKE_SHARED_LIBRARY_SUFFIX}")
-    elseif(type STREQUAL "MODULE_LIBRARY")
-        set(filetype VFT_DLL)
-        set(prefix "${CMAKE_SHARED_MODULE_PREFIX}")
-        set(suffix "${CMAKE_SHARED_MODULE_SUFFIX}")
+        set(${OUT_FILETYPE} VFT_APP PARENT_SCOPE)
+    elseif(type MATCHES "^(SHARED|MODULE)_LIBRARY$")
+        set(${OUT_FILETYPE} VFT_DLL PARENT_SCOPE)
     else()
         message(FATAL_ERROR "rocm_libraries_add_version_resource: ${TARGET} is a ${type}; "
                             "only EXECUTABLE, SHARED_LIBRARY and MODULE_LIBRARY targets are supported")
     endif()
-    get_target_property(basename ${TARGET} OUTPUT_NAME)
-    if(NOT basename)
-        set(basename ${TARGET})
-    endif()
-    get_target_property(target_prefix ${TARGET} PREFIX)
-    if(NOT target_prefix MATCHES "-NOTFOUND$")
-        set(prefix "${target_prefix}")
-    endif()
-    get_target_property(target_suffix ${TARGET} SUFFIX)
-    if(NOT target_suffix MATCHES "-NOTFOUND$")
-        set(suffix "${target_suffix}")
-    endif()
-    set(${OUT_FILENAME} "${prefix}${basename}${suffix}" PARENT_SCOPE)
-    set(${OUT_FILETYPE} ${filetype} PARENT_SCOPE)
 endfunction()
 
 # Embed VERSIONINFO in TARGET; see the top of this file for the arguments.
@@ -100,7 +82,7 @@ function(rocm_libraries_add_version_resource TARGET NAME DESCRIPTION)
     if(NOT WIN32)
         return()
     endif()
-    _rocm_libraries_version_resource_file(${TARGET} filename filetype)
+    _rocm_libraries_version_resource_filetype(${TARGET} filetype)
 
     get_property(languages GLOBAL PROPERTY ENABLED_LANGUAGES)
     list(FIND languages RC rc_index)
@@ -118,13 +100,15 @@ function(rocm_libraries_add_version_resource TARGET NAME DESCRIPTION)
         return()
     endif()
 
-    set(product_name "${NAME} ${filename}")
-    if(DEFINED ARG_PRODUCT_NAME)
-        set(product_name "${ARG_PRODUCT_NAME}")
-    endif()
+    set(filename "$<TARGET_FILE_NAME:${TARGET}>")
     _rocm_libraries_version_resource_escape(NAME)
     _rocm_libraries_version_resource_escape(DESCRIPTION)
-    _rocm_libraries_version_resource_escape(product_name)
+    if(DEFINED ARG_PRODUCT_NAME)
+        set(product_name "${ARG_PRODUCT_NAME}")
+        _rocm_libraries_version_resource_escape(product_name)
+    else()
+        set(product_name "${NAME} ${filename}")
+    endif()
     set(comments_value "")
     if(DEFINED ARG_COMMENTS)
         set(comments "${ARG_COMMENTS}")
@@ -133,8 +117,12 @@ function(rocm_libraries_add_version_resource TARGET NAME DESCRIPTION)
     endif()
 
     string(TIMESTAMP year "%Y")
-    set(rc_path "${CMAKE_CURRENT_BINARY_DIR}/${TARGET}_version.rc")
-    configure_file("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/rocm_libraries_version_resource.rc.in" "${rc_path}" @ONLY)
+    set(template "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/rocm_libraries_version_resource.rc.in")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${template}")
+    file(READ "${template}" rc_content)
+    string(CONFIGURE "${rc_content}" rc_content @ONLY)
+    set(rc_path "${CMAKE_CURRENT_BINARY_DIR}/${TARGET}_version_$<CONFIG>.rc")
+    file(GENERATE OUTPUT "${rc_path}" CONTENT "${rc_content}")
     target_sources(${TARGET} PRIVATE "${rc_path}")
 endfunction()
 
