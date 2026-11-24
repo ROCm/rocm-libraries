@@ -107,9 +107,11 @@ struct LockProbe
 
 } // namespace
 
+using CPU_HipdnnEraseOutsideLock_NONE = ::testing::TestWithParam<int>;
+
 // The destructor of a hipDNN handle's state can end in a call that takes the same lock, so
 // it must run after the lock is released.
-TEST(CPU_HipdnnEraseOutsideLock_NONE, DestroysTheValueAfterReleasingTheMutex)
+TEST_P(CPU_HipdnnEraseOutsideLock_NONE, DestroysTheValueAfterReleasingTheMutex)
 {
     TrackingMutex mutex;
     Observation observation;
@@ -123,7 +125,7 @@ TEST(CPU_HipdnnEraseOutsideLock_NONE, DestroysTheValueAfterReleasingTheMutex)
     EXPECT_FALSE(mutex.held);
 }
 
-TEST(CPU_HipdnnEraseOutsideLock_NONE, TheEntryIsGoneBeforeTheValueIsDestroyed)
+TEST_P(CPU_HipdnnEraseOutsideLock_NONE, TheEntryIsGoneBeforeTheValueIsDestroyed)
 {
     TrackingMutex mutex;
     Observation observation;
@@ -141,7 +143,7 @@ TEST(CPU_HipdnnEraseOutsideLock_NONE, TheEntryIsGoneBeforeTheValueIsDestroyed)
     EXPECT_FALSE(other.destroyed);
 }
 
-TEST(CPU_HipdnnEraseOutsideLock_NONE, AMissingKeyChangesNothing)
+TEST_P(CPU_HipdnnEraseOutsideLock_NONE, AMissingKeyChangesNothing)
 {
     TrackingMutex mutex;
     Observation observation;
@@ -157,7 +159,7 @@ TEST(CPU_HipdnnEraseOutsideLock_NONE, AMissingKeyChangesNothing)
 
 // A state that lost the race to be the handle's state is destroyed by the same plugin code, so
 // it too must be destroyed after the lock is released.
-TEST(CPU_HipdnnEraseOutsideLock_NONE, DestroysALosingCandidateAfterReleasingTheMutex)
+TEST_P(CPU_HipdnnEraseOutsideLock_NONE, DestroysALosingCandidateAfterReleasingTheMutex)
 {
     TrackingMutex mutex;
     Observation winner;
@@ -176,7 +178,7 @@ TEST(CPU_HipdnnEraseOutsideLock_NONE, DestroysALosingCandidateAfterReleasingTheM
     EXPECT_EQ(map.size(), 1u);
 }
 
-TEST(CPU_HipdnnEraseOutsideLock_NONE, StoresACandidateWhenTheKeyIsFree)
+TEST_P(CPU_HipdnnEraseOutsideLock_NONE, StoresACandidateWhenTheKeyIsFree)
 {
     TrackingMutex mutex;
     Observation observation;
@@ -197,7 +199,7 @@ TEST(CPU_HipdnnEraseOutsideLock_NONE, StoresACandidateWhenTheKeyIsFree)
 // A throwing allocation must not make the insert destroy the candidate under the lock. The
 // failing allocation is walked across every allocation the insert makes, so the test does not
 // depend on how the map grows.
-TEST(CPU_HipdnnEraseOutsideLock_NONE, AnInsertThatThrowsNeverDestroysTheCandidateUnderTheLock)
+TEST_P(CPU_HipdnnEraseOutsideLock_NONE, AnInsertThatThrowsNeverDestroysTheCandidateUnderTheLock)
 {
     using FailingMap =
         std::unordered_map<int,
@@ -229,3 +231,5 @@ TEST(CPU_HipdnnEraseOutsideLock_NONE, AnInsertThatThrowsNeverDestroysTheCandidat
     }
     EXPECT_GT(threw, 0);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_HipdnnEraseOutsideLock_NONE, ::testing::Values(0));

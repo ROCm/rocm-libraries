@@ -36,7 +36,7 @@ st.func @gfx1250_xdl_hidden_12_wmma_no_wait() {
 # CHECK: v_wmma_f32_16x16x32_bf16
 # CHECK: s_wait_alu
 # CHECK-SAME: va_vdst = 11
-# CHECK: ds_load_b32
+# CHECK-NEXT: ds_load_b32
 
 st.func @gfx1250_xdl_not_hidden_11_wmma_wait() {
 ^entry:
@@ -63,7 +63,7 @@ st.func @gfx1250_xdl_not_hidden_11_wmma_wait() {
 # CHECK: v_wmma_scale_f32_16x16x128_f8f6f4
 # CHECK: s_wait_alu
 # CHECK-SAME: va_vdst = 12
-# CHECK: ds_load_b32
+# CHECK-NEXT: ds_load_b32
 
 st.func @gfx1250_xdl_scale_pair_6_wmma_waits() {
 ^entry:
@@ -104,16 +104,14 @@ st.func @gfx1250_xdl_scale_pair_12_wmma_no_wait() {
 }
 
 #===----------------------------------------------------------------------===#
-# A CSMACC producer is hidden by matrix ops instead, and needs one more of them.
-# 12 is one short.
+# The wmma count meets it.
 #===----------------------------------------------------------------------===#
-# CHECK-LABEL: @gfx1250_csmacc_hidden_12_wmma_waits
+# CHECK-LABEL: @gfx1250_csmacc_wmma_count_hides
 # CHECK: v_add_f32
-# CHECK: s_wait_alu
-# CHECK-SAME: va_vdst
+# CHECK-NOT: s_wait_alu{{.*}}va_vdst
 # CHECK: ds_load_b32
 
-st.func @gfx1250_csmacc_hidden_12_wmma_waits() {
+st.func @gfx1250_csmacc_wmma_count_hides() {
 ^entry:
   v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
   v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
@@ -159,19 +157,46 @@ st.func @gfx1250_csmacc_hidden_13_wmma_no_wait() {
 }
 
 #===----------------------------------------------------------------------===#
-# The CSMACC rule reads across pipes, so a live TRANS op (v_rcp_f32) declines it
-# despite 13 intervening matrix ops.
+# A TRANS op in flight (v_rcp_f32) neither counts as a matrix op nor blocks the CSMACC
+# producer's hide: the matrix ops after it hide the wait.
 #===----------------------------------------------------------------------===#
-# CHECK-LABEL: @gfx1250_csmacc_not_hidden_when_trans_inflight
+# CHECK-LABEL: @gfx1250_csmacc_hidden_with_trans_inflight
 # CHECK: v_add_f32
-# CHECK: s_wait_alu
-# CHECK-SAME: va_vdst
+# CHECK-NOT: s_wait_alu{{.*}}va_vdst
 # CHECK: ds_load_b32
 
-st.func @gfx1250_csmacc_not_hidden_when_trans_inflight() {
+st.func @gfx1250_csmacc_hidden_with_trans_inflight() {
 ^entry:
   v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
   v191 = "st.v_rcp_f32"(v192) { issueCycles = 1, latencyCycles = 10 }
+  v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[24:31] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[24:31]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[32:39] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[32:39]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[40:47] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[40:47]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[48:55] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[48:55]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[56:63] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[56:63]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[64:71] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[64:71]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[72:79] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[72:79]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[80:87] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[80:87]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[88:95] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[88:95]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[96:103] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[96:103]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[104:111] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[104:111]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v190 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+
+#===----------------------------------------------------------------------===#
+# A TRANS producer's writeback has no rule: a consumer of its result waits whatever follows it.
+#===----------------------------------------------------------------------===#
+# CHECK-LABEL: @gfx1250_trans_producer_never_hidden
+# CHECK: v_rcp_f32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK-NEXT: ds_load_b32
+
+st.func @gfx1250_trans_producer_never_hidden() {
+^entry:
+  v0 = "st.v_rcp_f32"(v192) { issueCycles = 1, latencyCycles = 10 }
   v[8:15] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
   v[16:23] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[16:23]) { mod.mfma = { reuseA = false, reuseB = false } }
   v[24:31] = "st.v_wmma_f32_16x16x32_bf16"(v[200:207], v[208:215], v[24:31]) { mod.mfma = { reuseA = false, reuseB = false } }
@@ -196,7 +221,7 @@ st.func @gfx1250_csmacc_not_hidden_when_trans_inflight() {
 # CHECK: v_add_f32
 # CHECK: s_wait_alu
 # CHECK-SAME: va_vdst
-# CHECK: ds_load_b32
+# CHECK-NEXT: ds_load_b32
 
 st.func @gfx1250_unlisted_form_never_hides() {
 ^entry:
