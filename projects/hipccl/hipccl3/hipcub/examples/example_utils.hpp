@@ -29,13 +29,16 @@
 
 #ifndef EXAMPLES_EXAMPLE_UTILS_HPP
 #define EXAMPLES_EXAMPLE_UTILS_HPP
-#include "mersenne.h"
-#include <vector>
-#include <sstream>
-#include <iostream>
 
+#include "mersenne.h"
+
+#include <hipcub/config.hpp>
 #include <hipcub/util_allocator.hpp>
 #include <hipcub/util_type.hpp>
+
+#include <iostream>
+#include <sstream>
+#include <vector>
 
 #include _HIPCUB_STD_INCLUDE(functional)
 
@@ -275,23 +278,38 @@ struct CommandLineArgs
                 exit(1);
             }
 
-            device_giga_bandwidth = float(deviceProp.memoryBusWidth) * deviceProp.memoryClockRate * 2 / 8 / 1000 / 1000;
+            int memoryClockRate{};
+            error = HipcubDebug(
+                hipDeviceGetAttribute(&memoryClockRate, hipDeviceAttributeClockRate, dev));
+            if(error)
+            {
+                break;
+            }
+
+            int memoryBusWidth{};
+            error = HipcubDebug(
+                hipDeviceGetAttribute(&memoryBusWidth, hipDeviceAttributeMemoryBusWidth, dev));
+            if(error)
+            {
+                break;
+            }
+
+            device_giga_bandwidth = float(memoryBusWidth) * memoryClockRate * 2 / 8 / 1000 / 1000;
 
             if (!CheckCmdLineFlag("quiet"))
             {
-                printf(
-                        "Using device %d: %s ( SM%d, %d SMs, "
-                        "%lld free / %lld total MB physmem, "
-                        "%.3f GB/s @ %d kHz mem clock, ECC %s)\n",
-                    dev,
-                    deviceProp.name,
-                    deviceProp.major * 100 + deviceProp.minor * 10,
-                    deviceProp.multiProcessorCount,
-                    (unsigned long long) device_free_physmem / 1024 / 1024,
-                    (unsigned long long) device_total_physmem / 1024 / 1024,
-                    device_giga_bandwidth,
-                    deviceProp.memoryClockRate,
-                    (deviceProp.ECCEnabled) ? "on" : "off");
+                printf("Using device %d: %s ( SM%d, %d SMs, "
+                       "%lld free / %lld total MB physmem, "
+                       "%.3f GB/s @ %d kHz mem clock, ECC %s)\n",
+                       dev,
+                       deviceProp.name,
+                       deviceProp.major * 100 + deviceProp.minor * 10,
+                       deviceProp.multiProcessorCount,
+                       (unsigned long long)device_free_physmem / 1024 / 1024,
+                       (unsigned long long)device_total_physmem / 1024 / 1024,
+                       device_giga_bandwidth,
+                       memoryClockRate,
+                       (deviceProp.ECCEnabled) ? "on" : "off");
                 fflush(stdout);
             }
 

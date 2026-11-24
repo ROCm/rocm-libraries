@@ -96,6 +96,19 @@ target_include_directories(hip_kernel_provider_impl PRIVATE
 target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_ASM_SDPA=1)
 
 # ============================================================================
+# Selector revision
+# ============================================================================
+# The `selector_revision` a deployed L1 model for this engine must record; inputs are
+# documented in AsmSdpaSelectorRevision.cmake. The selector dump beside it is what the L1
+# model gate in TestAsmSdpaEngine.cpp points to when a shipped model no longer binds.
+include("${CMAKE_CURRENT_SOURCE_DIR}/AsmSdpaSelectorRevision.cmake")
+hkp_asm_sdpa_revision(_asm_sdpa_revision "${CMAKE_CURRENT_SOURCE_DIR}" CONFIGURE_DEPENDS
+    MANIFEST "${CMAKE_BINARY_DIR}/selector_revisions/ASM_SDPA_ENGINE.selector.json")
+target_compile_definitions(hip_kernel_provider_impl PRIVATE
+    HKP_ASM_SDPA_REVISION="${_asm_sdpa_revision}")
+message(STATUS "hip-kernel-provider: asm_sdpa selector revision ${_asm_sdpa_revision}")
+
+# ============================================================================
 # Kpack Packing (build-time .co → .kpack)
 # ============================================================================
 #
