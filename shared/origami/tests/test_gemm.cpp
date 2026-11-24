@@ -363,6 +363,29 @@ TEST_CASE("GEMM: W4A16 Stream-K charges the partials of a split tile", "[gemm][w
   // A config that names no reduction has it selected, here a separate launch (few tiles, many
   // K iterations), which is not the in-kernel fixup.
   REQUIRE(latency(8, origami::reduction_t::none) != latency(8));
+
+  // With every CU busy the partials of all the tiles go through the device's memory, stored
+  // and loaded, which bounds the fixup: 40 workgroups of 96x256x64 with the same K each, as 40
+  // whole tiles and as 20 tiles split in 2 (measured: 15.6 us more), 10 in 4 (25.8), 5 in 8 (30).
+  auto dense = [&](size_t tiles) {
+    auto problem    = make_problem(96 * tiles, 256, 896 * 40 / tiles);
+    problem.a_dtype = origami::data_type_t::Int4;
+    problem.a_stride_bytes = ((problem.size.k / 2) + 255) / 256 * 256 + 128;
+    auto config     = make_config(96, 256, 64, 16, 16, 16, false, 1, 2, 0, 0, 3);
+    config.workspace_size            = std::numeric_limits<size_t>::max() / 2;
+    config.workspace_size_per_elem_c = 4;
+    config.launch_grid               = 40;
+    config.reduction_strategy        = origami::reduction_t::tree;
+    return origami::gemm::compute_total_latency(problem, hardware, config);
+  };
+  const double us = hardware.compute_clock_ghz * 1e3;
+  CAPTURE((dense(20) - dense(40)) / us, (dense(10) - dense(40)) / us, (dense(5) - dense(40)) / us);
+  REQUIRE(dense(20) - dense(40) > 10.0 * us);
+  REQUIRE(dense(20) - dense(40) < 22.0 * us);
+  REQUIRE(dense(5) - dense(40) > 22.0 * us);
+  REQUIRE(dense(5) - dense(40) < 40.0 * us);
+  // It is far more than the owners' own loads of those partials.
+  REQUIRE(dense(20) - dense(40) > 5.0 * partial * 96.0 * 256.0 / (128.0 * 128.0));
 }
 
 TEST_CASE("GEMM: compute_timestep_latency", "[gemm]") {

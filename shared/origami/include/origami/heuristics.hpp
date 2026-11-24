@@ -340,6 +340,11 @@ struct w4a16_params_t {
   // epilogue has registers for 2 accumulators at a time (128x128x64 and 160x128x64, 32 and 40
   // load batches a partial where the others have 1 or 2) take 0.08 us more per batch; the
   // batches are not known to the model and are not charged.
+  // That is the owner's rate with the device idle.  With every CU busy the fixup is bound by
+  // the device's memory instead, through which all the partials are stored and loaded (40
+  // workgroups of 96x256x64, same K each: 20 tiles split in 2 take 15.6 us more than 40 whole
+  // tiles, 10 split in 4 25.8, 5 split in 8 30: 2 to 3.4 MB of partials at 115 to 125 GB/s,
+  // half the DRAM rate); that bound is computed from the hardware's bandwidth.
   static constexpr double SK_FIXUP_GB_PER_S       = 69.0;  // [MEASURED]
   static constexpr double SK_FIXUP_HANDSHAKE_US   = 0.2;   // [MEASURED]
 };
