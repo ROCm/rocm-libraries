@@ -10,12 +10,25 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added fixed-size-segments variant for `rocprim::device_segmented_reduce`.
 * Added support for large number of segments to `rocprim::device_segmented_reduce`.
 * Added support for large sizes to `rocprim::device_run_length_encode` and `rocprim::device_run_length_encode_non_trivial_runs`.
+* Added the following options to the kernel tuner (`tuning/`):
+  * `--tune-baseline {skip,current,fallback,both}` (default `current`) benchmarks the config rocPRIM currently picks for the tuned GPU, the config of the generic target, or both. The config generator keeps the faster of these unless the tuned config beats it by more than `--baseline-margin` (default 0.05).
+  * `--noise-retries` (default 1) re-runs a config whose benchmark hit the noise timeout. Configs that still time out are dropped by the config generator.
+  * `TunerArgs.sizes` benchmarks each config at several input sizes. `merge_sort_block_merge` is tuned at 256 KiB, 8 MiB, and 128 MiB, so the odd-even kernel is also measured.
+  * The results of each benchmark case are saved to `<output_dir>/cases/`.
+  * `--default-tuning keep` in the config generator (the new default) keeps the config the existing header uses for unknown targets.
 
 ### Changed
 
 * Renamed the CMake option `BUILD_CODE_COVERAGE` to `ROCPRIM_ENABLE_COVERAGE`. The test-only preprocessor define `CODE_COVERAGE` is now `ROCPRIM_ENABLE_COVERAGE`.
 * The configuration summary now prints the coverage setting when `BUILD_TEST` is enabled.
 * Tests no longer set `LLVM_PROFILE_FILE` through CTest. A value set in the environment when running `ctest` is now used. The `coverage_analysis` target still writes profiles to `coverage-report/profraw`.
+* Changed the following in the kernel tuner (`tuning/`):
+  * It uses brute force by default. `radix_sort_onesweep`, `segmented_radix_sort`, and `radix_sort_block_sort` keep using dual annealing, with 300 evaluations for `radix_sort_onesweep` and `segmented_radix_sort`.
+  * It compiles with `-O3 -DNDEBUG` like the benchmarks, and with `-O1` for `adjacent_difference`, whose benchmark is built at `-O1` to work around an LLVM issue.
+  * It detects the GPU from the device name like rocPRIM does and records it in the results, so the config generator no longer needs `--map-gfx` for new results.
+  * `histogram` is also tuned on the range and multi-range benchmarks.
+  * `merge_sort_block_merge` configs are limited to the block sort tile rocPRIM uses for each type instead of 1024 items.
+  * `adjacent_difference` configs are limited by their actual shared memory use.
 
 ### Optimizations
 
@@ -25,6 +38,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Removed
 
 * Deprecated `BUILD_CODE_COVERAGE`, use `ROCPRIM_ENABLE_COVERAGE` instead.
+* Removed `--exclude-default-config` from the kernel tuner. Use `--tune-baseline skip` instead.
 
 ### Known issues
 
@@ -36,7 +50,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
   * `binary_search` (`device_binary_search.hpp`).
   * `lower_bound` (`device_lower_bound.hpp`).
   * `upper_bound` (`device_upper_bound.hpp`).
-* TODO: Retune the gfx950 configs for the following algorithms. Their autotuned configs were invalid, so they are kept at the previous configs for now. Retune them after the tuner and benchmark fixes in #15571 are merged:
+* TODO: Retune the gfx950 configs for the following algorithms. Their autotuned configs were invalid, so they are kept at the previous configs for now:
   * `histogram` (`device_histogram.hpp`). The benchmark did not pass the tuned config to rocPRIM, so every candidate ran the default config.
   * `segmented_topk` (`device_segmented_topk_air.hpp`). The benchmark used `k = 0`, so rocPRIM returned without launching a kernel.
   * `topk` (`device_topk_air.hpp`). Tuned before the fix to `choose_pivot_bin`.
