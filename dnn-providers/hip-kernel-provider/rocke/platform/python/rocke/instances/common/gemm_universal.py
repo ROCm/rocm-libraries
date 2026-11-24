@@ -3831,6 +3831,71 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 a, sa, sb, b0, b1 = na, nsa, nsb, nb0, nb1
             return acc, (a, sa, sb, b0, b1)
 
+        # EXPERIMENT: ROCKE_EXP_MX_RA_ILV=1 (plain fp8, RA=2 with cluster
+        # barriers): the next K-atom's LDS reads are spread among the current
+        # half's WMMAs (one fragment every few WMMAs, a fence after each read),
+        # inside the first ROCKE_EXP_MX_RA_ILVF percent (default 75) of the
+        # half, instead of issued as a block between halves. The reads of the
+        # buffer being freed then land before the tile barrier's drain.
+        ilv = _os_ra.environ.get("ROCKE_EXP_MX_RA_ILV") == "1"
+        if ilv and (_mx or not _mx_ra_one or not cb or rowmap):
+            raise ValueError("ROCKE_EXP_MX_RA_ILV needs plain fp8, ROCKE_EXP_MX_RA=2 and ROCKE_EXP_MX_RA_CB=1")
+        ilv_frac = int(_os_ra.environ.get("ROCKE_EXP_MX_RA_ILVF", "75")) / 100.0
+
+        def wmmas_ilv(acc, a, bh, which, reads):
+            order = [(j, mi) for j in range(half) for mi in range(mfmas_m)]
+            w, r = len(order), len(reads)
+            span = max(1, int(w * ilv_frac))
+            out, k = [], 0
+            for idx, (j, mi) in enumerate(order):
+                ni = which * half + j
+                f = mi * mfmas_n + ni
+                acc[f] = _emit_mma(b, op, a[mi], bh[j], acc[f])
+                due = min(r, ((idx + 1) * r + span - 1) // span)
+                while k < due:
+                    out.append(reads[k]())
+                    k += 1
+                    fence()
+            while k < r:
+                out.append(reads[k]())
+                k += 1
+            return out
+
+        def _tile_ilv(p, k_cur, acc, head):
+            acc = list(acc)
+            a, _sa, _sb, b0, b1 = head
+            _gl2_prefetch(k_cur)
+            for s in range(k_atoms):
+                last = s + 1 == k_atoms
+                sp, sk = (1 - p, 0) if last else (p, s + 1)
+                a_reads = [lambda mi=mi: rd_a(sp, sk, mi) for mi in range(mfmas_m)]
+                b_reads = [lambda ni=ni: rd_b(sp, sk, ni) for ni in range(mfmas_n)]
+                if last:
+                    # Own reads of this buffer and own fill of the next tile
+                    # done; the barrier publishes the next tile and frees this
+                    # buffer; the cluster wait, then the refill.
+                    fence()
+                    b.inline_asm("s_wait_dscnt 0", "~{memory}")
+                    b.s_wait_tensorcnt(0)
+                    b.s_barrier_bare()
+                    if cs < 0:
+                        b.inline_asm(_CL_SIGNAL0, "s,~{scc},~{memory}", [_tdm_wave_id])
+                    b.inline_asm("s_barrier_wait -3", "~{memory}")
+                    _refill(p, k_cur)
+                    fence()
+                na = wmmas_ilv(acc, a, b0, 0, a_reads)
+                fence()
+                if s + 2 == k_atoms and cs >= 0:
+                    b.inline_asm(_CL_SIGNAL0, "s,~{scc},~{memory}", [_tdm_wave_id])
+                    fence()
+                nb = wmmas_ilv(acc, a, b1, 1, b_reads)
+                fence()
+                a, b0, b1 = na, nb[:half], nb[half:]
+            return acc, (a, [], [], b0, b1)
+
+        if ilv:
+            _tile = _tile_ilv  # noqa: F811
+
         # Prologue: tiles 0 and 1 into buffers 0 and 1; tile 0 published; its
         # first K-atom read. With cluster barriers the cluster meets first.
         if cb:

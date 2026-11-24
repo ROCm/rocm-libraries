@@ -1,0 +1,107 @@
+{
+  "_comment": "mx_env_sweep.py config, B0 plain fp8: the best (nb0pf6: next reads issued in blocks between half K-atoms) against the reads interleaved among the WMMAs (ROCKE_EXP_MX_RA_ILV=1) inside the first 50 / 75 / 100 percent of each half. Cluster 4x4.",
+  "base_env": {
+    "ROCKE_EXP_MX": "1",
+    "ROCKE_EXP_MX_SWZ": "1",
+    "ROCKE_EXP_MX_SCALE_MC": "0",
+    "ROCKE_EXP_MX_KFENCE": "1",
+    "ROCKE_EXP_MX_SCALE_NOCLIP": "1",
+    "ROCKE_EXP_MC_SOLO0": "1"
+  },
+  "variants": [
+    {
+      "name": "nb0pf6",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "6",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_RA_NB1": "0",
+        "ROCKE_EXP_EPI_BATCH": "64",
+        "ROCKE_EXP_MX_RA_PRO": "1",
+        "ROCKE_EXP_MX": ""
+      }
+    },
+    {
+      "name": "ilv50",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "6",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_RA_NB1": "0",
+        "ROCKE_EXP_EPI_BATCH": "64",
+        "ROCKE_EXP_MX_RA_PRO": "1",
+        "ROCKE_EXP_MX": "",
+        "ROCKE_EXP_MX_RA_ILV": "1",
+        "ROCKE_EXP_MX_RA_ILVF": "50"
+      }
+    },
+    {
+      "name": "ilv75",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "6",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_RA_NB1": "0",
+        "ROCKE_EXP_EPI_BATCH": "64",
+        "ROCKE_EXP_MX_RA_PRO": "1",
+        "ROCKE_EXP_MX": "",
+        "ROCKE_EXP_MX_RA_ILV": "1",
+        "ROCKE_EXP_MX_RA_ILVF": "75"
+      }
+    },
+    {
+      "name": "ilv100",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "6",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_RA_NB1": "0",
+        "ROCKE_EXP_EPI_BATCH": "64",
+        "ROCKE_EXP_MX_RA_PRO": "1",
+        "ROCKE_EXP_MX": "",
+        "ROCKE_EXP_MX_RA_ILV": "1",
+        "ROCKE_EXP_MX_RA_ILVF": "100"
+      }
+    }
+  ],
+  "arms": [
+    {
+      "name": "c4x4",
+      "cluster": "4,4"
+    }
+  ],
+  "shapes": [
+    [
+      4096,
+      4096,
+      65536
+    ]
+  ],
+  "rounds": 5,
+  "warmup": 50,
+  "repeat": 100
+}
