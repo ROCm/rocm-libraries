@@ -555,8 +555,11 @@ CITED_PATH = re.compile(r"`([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+)(?::[0-9]+)?`")
 def cmd_orient_gate(args) -> None:
     """Orient Gate: every repository path CONTEXT.md and orient/*.md cite in backticks
     (`dir/file` or `dir/file:<line>`) exists at PIN.md's BASE, or is a files.txt path absent
-    at BASE (a file the change adds). Prints `not at base: <path>` for any other; exit 0
-    only when it prints nothing."""
+    at BASE (a file the change adds). A citation starting `orient/` that names a file under
+    this round's own orient/ directory is this round's self-reference (CONTEXT.md's Areas
+    table), not a repository path, and is checked there instead. Prints `not at base: <path>
+    (cited at <file>:<line>[, +<n> more])` for any other citation; exit 0 only when it prints
+    nothing."""
     rd = Path(args.round_dir)
     if not (rd / "PIN.md").is_file():
         fail(f"PIN.md not found: {rd / 'PIN.md'}")
@@ -566,13 +569,16 @@ def cmd_orient_gate(args) -> None:
     if not (rd / "CONTEXT.md").is_file():
         fail(f"CONTEXT.md not found: {rd / 'CONTEXT.md'}")
     docs = [rd / "CONTEXT.md", *sorted((rd / "orient").glob("*.md"))]
-    cited = sorted(
-        {
-            m.group(1).removeprefix("./")
-            for d in docs
-            for m in CITED_PATH.finditer(d.read_text("utf-8"))
-        }
-    )
+    sites: dict[str, list[str]] = {}
+    for d in docs:
+        text = d.read_text("utf-8")
+        rel = d.relative_to(rd)
+        for m in CITED_PATH.finditer(text):
+            path = m.group(1).removeprefix("./")
+            line = text.count("\n", 0, m.start()) + 1
+            sites.setdefault(path, []).append(f"{rel}:{line}")
+    cited = sorted(sites)
+    orient_self = {p for p in cited if p.startswith("orient/") and (rd / p).is_file()}
     # The tree listing needs no blobs, so a blobless clone fetches nothing.
     code, out, err = rl.git(clone, "ls-tree", "-r", "--name-only", "--full-tree", base)
     if code:
@@ -586,9 +592,13 @@ def cmd_orient_gate(args) -> None:
                 break
             at_base.add(path)
     added = set(read_lines(rd / "files.txt", "files.txt"))
-    missing = [p for p in cited if p not in at_base and p not in added]
+    missing = [
+        p for p in cited if p not in at_base and p not in added and p not in orient_self
+    ]
     for path in missing:
-        print(f"not at base: {path}")
+        where = sites[path]
+        extra = f", +{len(where) - 1} more" if len(where) > 1 else ""
+        print(f"not at base: {path} (cited at {where[0]}{extra})")
     if missing:
         sys.exit(1)
 
