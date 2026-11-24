@@ -79,7 +79,6 @@ platform/pyproject.toml: config
 platform/python/rocke/examples/common/ck_tile_parity.py: import torch_api torch_object
 platform/python/rocke/examples/common/distribution_2d_add_demo.py: import torch_api torch_object
 platform/python/rocke/examples/common/distribution_reduce_demo.py: import torch_api torch_object
-platform/python/rocke/examples/common/elementwise_verify_hip.py: import torch_object
 platform/python/rocke/examples/common/parity_extended_kernels.py: import torch_api torch_object
 platform/python/rocke/examples/gfx1250/qwen3_30b_a3b/qwen3_30b_a3b_integration.py: import torch_object
 platform/python/rocke/examples/gfx950/fused_mega_moe/reproduce_levels.py: import torch_api torch_object
