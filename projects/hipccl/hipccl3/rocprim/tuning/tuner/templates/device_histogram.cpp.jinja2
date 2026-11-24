@@ -41,4 +41,15 @@
             executor.queue<benchmark_type>(bins, scale, entropy_reduction);
         }
     }
+
+    // The range and multi_range modes share this config, so tune on them too
+    // (bins matching benchmark_device_histogram.cpp).
+    using range_benchmark_type = std::conditional_t<
+        channels == 1 && active_channels == 1,
+        device_histogram_range_benchmark<value_type, config>,
+        device_multi_histogram_range_benchmark<value_type, channels, active_channels, config>>;
+    for(const auto& [bins, scale] : m_cases)
+    {
+        executor.queue<range_benchmark_type>(bins);
+    }
 {% endblock %}
