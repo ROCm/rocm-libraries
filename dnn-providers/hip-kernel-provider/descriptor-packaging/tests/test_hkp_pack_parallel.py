@@ -10,6 +10,7 @@ copies it verbatim into a tree that has never seen this file.
 
 import concurrent.futures
 import itertools
+import multiprocessing
 import os
 import re
 import sys
@@ -25,7 +26,6 @@ from hkp_pack.hip_compile import hip_source_relpath, hip_variant_key
 from pack_helpers import (
     GENERIC_TARGETS,
     _child_sys_path,
-    _conftest_only_paths,
     _kdp,
     _silent,
     _ukd,
@@ -647,8 +647,9 @@ _HSACO_SOURCE = "hsaco_kernel.cpp"
 def hsaco_corpus(tmp_path):
     """A KDP carrying an hsaco UKD ahead of a compilable hip one.
 
-    Kept out of the selection corpus deliberately: its hsaco entry has no
-    compile, so it yields no prewarm job, and only the hip sibling does.
+    Kept out of the selection corpus deliberately: the hsaco entry exercises the
+    prewarm skip path (`_variant_key_for` returns None for hsaco), which is a
+    different code path from the compilation tests in the golden-sequence corpus.
     """
     dest = tmp_path / "hsaco-corpus"
     dest.mkdir()
@@ -707,7 +708,7 @@ def _synthetic_job(corpus, block):
         rel_dir=".",
         source_root=str(corpus),
         out_dir="",
-        hipcc="",
+        hip_compiler="",
         arch=TARGET_ARCH,
     )
 
@@ -742,7 +743,9 @@ def test_prewarm_pool_stops_at_first_failure(tmp_path, monkeypatch):
     tally = tmp_path / "tally"
     tally.mkdir()
     failing = jobs[3]
-    hipcc = _stub_hipcc(tmp_path, fail_out=f"{failing.vk}.co", delay=1.0, tally=tally)
+    hip_compiler = _stub_hip_compiler(
+        tmp_path, fail_out=f"{failing.vk}.co", delay=1.0, tally=tally
+    )
 
     variant_co = {}
     variant_symbol = {}
@@ -752,7 +755,7 @@ def test_prewarm_pool_stops_at_first_failure(tmp_path, monkeypatch):
             flat,
             corpus,
             TARGET_ARCH,
-            hipcc,
+            hip_compiler,
             tmp_path / "inter",
             variant_co,
             variant_symbol,
@@ -803,8 +806,8 @@ def test_variant_key_for_uses_module_globals(monkeypatch):
 
 
 @pytest.mark.quick
-def test_worker_inherits_parent_sys_path():
-    """A pool worker starts with the parent's `sys.path`, conftest inserts and all.
+def test_worker_inherits_parent_sys_path(tmp_path, monkeypatch):
+    """A spawned pool worker starts with the parent's `sys.path`, conftest inserts and all.
 
     CPython propagates `sys.path` to children under both `spawn` and
     `forkserver`, so a worker can import `hkp_pack`, and any producer module a
@@ -817,24 +820,22 @@ def test_worker_inherits_parent_sys_path():
     pool must be built after parent-side path setup, is documented at the
     construction site.
 
-    The path watched is the rocm_kpack directory conftest inserts from
-    HIPKERNELPROVIDER_ROCM_KPACK_DIR, which no `PYTHONPATH` carries. The hkp_pack
-    package root conftest also inserts is exported by the ctest environment, so a
-    child that re-read `PYTHONPATH` would have it too.
+    The pool is pinned to `spawn`: under `fork`, the Linux default up to Python 3.13,
+    the child inherits `sys.path` with the rest of the parent's memory and the check
+    would prove nothing.
+    The path watched is one the test prepends itself, in a directory no `PYTHONPATH`
+    carries, so it reaches the child only if the interpreter propagates it.
     """
-    kpack_dir = os.environ.get("HIPKERNELPROVIDER_ROCM_KPACK_DIR")
-    if not kpack_dir:
-        pytest.skip(
-            "HIPKERNELPROVIDER_ROCM_KPACK_DIR is unset, so conftest inserts no "
-            "path that PYTHONPATH does not already carry"
-        )
-    expected = _conftest_only_paths([kpack_dir])
-    assert expected, "the premise: conftest inserted it and PYTHONPATH lacks it"
+    probe = tmp_path / "parent-only-path"
+    probe.mkdir()
+    monkeypatch.syspath_prepend(str(probe))
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers=1) as pool:
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=1, mp_context=multiprocessing.get_context("spawn")
+    ) as pool:
         child_path = list(pool.map(_child_sys_path, [None], chunksize=1))[0]
 
-    assert set(expected) <= set(child_path)
+    assert str(probe) in child_path
 
 
 @pytest.mark.quick
@@ -866,7 +867,7 @@ def test_compile_one_variant_returns_errors_and_computes_no_keys(tmp_path, monke
         rel_dir=".",
         source_root=str(tmp_path),
         out_dir=str(tmp_path / "inter"),
-        hipcc="hipcc",
+        hip_compiler="compiler-not-invoked",
         arch=TARGET_ARCH,
     )
 
@@ -884,7 +885,7 @@ def test_compile_one_variant_returns_errors_and_computes_no_keys(tmp_path, monke
     assert origins == {}
 
 
-_STUB_HIPCC_BODY = r"""
+_STUB_HIP_COMPILER_BODY = r"""
 import hashlib
 import os
 import sys
@@ -908,7 +909,7 @@ if TALLY:
 if name == SLOW_FAIL_OUT:
     time.sleep(DELAY)
 if name in (FAIL_OUT, SLOW_FAIL_OUT):
-    sys.stderr.write("stub hipcc: refusing " + name + chr(10))
+    sys.stderr.write("stub compiler: refusing " + name + chr(10))
     sys.exit(2)
 
 if DELAY:
@@ -920,8 +921,10 @@ with open(out, "wb") as fh:
 """
 
 
-def _stub_hipcc(tmp_path, *, fail_out=None, slow_fail_out=None, delay=0.0, tally=None):
-    """Path to a hipcc stand-in that writes a .co and exits 0.
+def _stub_hip_compiler(
+    tmp_path, *, fail_out=None, slow_fail_out=None, delay=0.0, tally=None
+):
+    """Path to a HIP compiler stand-in that writes a .co and exits 0.
 
     Lets the pool run to success on a box with no toolchain, which is what makes
     the success path testable at all. The bytes are derived from every argument
@@ -937,11 +940,11 @@ def _stub_hipcc(tmp_path, *, fail_out=None, slow_fail_out=None, delay=0.0, tally
     can be made to finish later.
 
     A launcher script rather than the interpreter directly, because the producer
-    invokes `hipcc` as argv[0] of a subprocess.
+    invokes the compiler as argv[0] of a subprocess.
     """
-    stub = tmp_path / "stub_hipcc.py"
+    stub = tmp_path / "stub_hip_compiler.py"
     stub.write_text(
-        _STUB_HIPCC_BODY.format(
+        _STUB_HIP_COMPILER_BODY.format(
             fail_out=fail_out,
             slow_fail_out=slow_fail_out,
             delay=delay,
@@ -950,12 +953,12 @@ def _stub_hipcc(tmp_path, *, fail_out=None, slow_fail_out=None, delay=0.0, tally
         encoding="utf-8",
     )
     if sys.platform == "win32":
-        launcher = tmp_path / "stub_hipcc.bat"
+        launcher = tmp_path / "stub_hip_compiler.bat"
         launcher.write_text(
             f'@echo off\r\n"{sys.executable}" "{stub}" %*\r\n', encoding="utf-8"
         )
     else:
-        launcher = tmp_path / "stub_hipcc.sh"
+        launcher = tmp_path / "stub_hip_compiler.sh"
         launcher.write_text(
             f'#!/bin/sh\nexec "{sys.executable}" "{stub}" "$@"\n', encoding="utf-8"
         )
@@ -979,7 +982,7 @@ def test_the_pool_names_the_first_failure_in_walk_order(tmp_path, monkeypatch):
     flat = load_flat_input(corpus, GENERIC_TARGETS, log=_silent)
 
     first, second = pipeline._prewarm_jobs(flat, corpus, TARGET_ARCH)[:2]
-    hipcc = _stub_hipcc(
+    hip_compiler = _stub_hip_compiler(
         tmp_path,
         fail_out=f"{second.vk}.co",
         slow_fail_out=f"{first.vk}.co",
@@ -991,7 +994,7 @@ def test_the_pool_names_the_first_failure_in_walk_order(tmp_path, monkeypatch):
             flat,
             corpus,
             TARGET_ARCH,
-            hipcc,
+            hip_compiler,
             tmp_path / "inter",
             log=_silent,
         )
@@ -1028,7 +1031,7 @@ def test_prewarm_pool_populates_both_caches(tmp_path, monkeypatch):
         load_flat_input(corpus, GENERIC_TARGETS, log=_silent),
         corpus,
         TARGET_ARCH,
-        _stub_hipcc(tmp_path),
+        _stub_hip_compiler(tmp_path),
         tmp_path / "inter",
         variant_co,
         variant_symbol,
@@ -1064,7 +1067,7 @@ def _staged_tree(corpus, out_dir):
         load_flat_input(corpus, GENERIC_TARGETS, log=_silent),
         corpus,
         TARGET_ARCH,
-        _stub_hipcc(out_dir.parent),
+        _stub_hip_compiler(out_dir.parent),
         out_dir,
         log=_silent,
     )
@@ -1159,7 +1162,7 @@ def test_pack_jobs_one_starts_no_pool(tmp_path, monkeypatch):
         load_flat_input(corpus, GENERIC_TARGETS, log=_silent),
         corpus,
         TARGET_ARCH,
-        _stub_hipcc(tmp_path),
+        _stub_hip_compiler(tmp_path),
         tmp_path / "inter",
         variant_co,
         {},

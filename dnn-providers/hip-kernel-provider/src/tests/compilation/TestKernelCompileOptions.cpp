@@ -92,7 +92,7 @@ TEST_F(TestKernelCompileOptionsNchwFp32, VerifiesOptions)
 
     const KernelCompileOptions options(_inputTensorAttrs, _deviceProps);
 
-    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_LAYOUT_NHWC=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_LAYOUT_CHANNEL_LAST=0"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP32=1"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP16=0"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_BFP16=0"));
@@ -117,7 +117,7 @@ TEST_F(TestKernelCompileOptionsNhwcBfp16, VerifiesOptions)
 
     const KernelCompileOptions options(_inputTensorAttrs, _deviceProps);
 
-    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_LAYOUT_NHWC=1"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_LAYOUT_CHANNEL_LAST=1"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP32=0"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP16=0"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_BFP16=1"));
@@ -143,7 +143,7 @@ TEST_F(TestKernelCompileOptions, VerifyAddCustomOptions)
     options.add("HIP_PLUGIN_TEST_BOOL", true);
 
     // Verify expected options
-    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_LAYOUT_NHWC=0"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_LAYOUT_CHANNEL_LAST=0"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP32=1"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP16=0"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_BFP16=0"));
@@ -169,7 +169,7 @@ TEST_F(TestKernelCompileOptions, VerifiesArchOptions)
 
     const KernelCompileOptions options(_inputTensorAttrs, _deviceProps);
 
-    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_LAYOUT_NHWC=1"));
+    EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_LAYOUT_CHANNEL_LAST=1"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP32=0"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_FP16=1"));
     EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_BFP16=0"));

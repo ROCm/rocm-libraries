@@ -302,7 +302,7 @@ GetFind2ConvTestCaseName(const testing::TestParamInfo<GPU_Find2Conv_FP32::ParamT
     return name;
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_Find2Conv_FP32,
                          testing::Combine(testing::Values(miopenProblemDirectionForward,
                                                           miopenProblemDirectionBackward,

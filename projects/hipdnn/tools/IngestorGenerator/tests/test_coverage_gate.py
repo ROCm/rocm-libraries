@@ -373,6 +373,13 @@ class TestRungsStaySeparable:
             "reports another engine's work as this engine's"
         )
 
+    @pytest.mark.skipif(
+        os.name != "posix",
+        reason="the stand-in validator is a shebang script, which Windows cannot execute",
+    )
+    @pytest.mark.allow_skip(
+        reason="the stand-in validator is a shebang script, which Windows cannot execute"
+    )
     def test_a_serving_threshold_this_tool_cannot_check_fails_the_gate(self, tmp_path):
         """Rungs 1 and 2 green, rung 3 not run: asking for served graphs must not
         pass on that evidence."""

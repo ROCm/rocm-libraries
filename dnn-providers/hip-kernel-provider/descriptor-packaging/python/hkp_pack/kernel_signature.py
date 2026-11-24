@@ -6,7 +6,7 @@ same assumption that drifted -- the author edits the kernel and updates the
 descriptor, or does neither -- so it catches typos and nothing else.
 
 What the producer stores differs by kind, and both shapes appear in this tree:
-hipcc `--genco` emits a clang offload bundle wrapping the device ELF, while the
+clang++ `--offload-device-only` emits a clang offload bundle wrapping the device ELF, while the
 ASM producers store a bare ELF. Sniff, do not assume.
 
 Argument NAMES are producer-dependent: clang emits `.args[].name` for OpenCL,
@@ -154,6 +154,19 @@ def _metadata_document(elf, where):
         f"{where}: code object carries no AMDGPU metadata note, so its kernel "
         "signatures cannot be read"
     )
+
+
+def exported_kernels(code_object, where):
+    """Every kernel symbol `code_object` exports, sorted.
+
+    Read from the object's own AMDGPU metadata, so it answers what the bytes
+    contain and not what any descriptor says they do.
+    """
+    document = _metadata_document(amdgcn_object(code_object, where), where)
+    kernels = document.get("amdhsa.kernels")
+    if not kernels:
+        raise HkpPackError(f"{where}: AMDGPU metadata note lists no kernels")
+    return sorted(str(kernel.get(".name")) for kernel in kernels)
 
 
 def kernel_signature(code_object, symbol, where):

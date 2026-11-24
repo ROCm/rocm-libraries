@@ -885,6 +885,27 @@ TEST(TestCpuFpReferenceValidationMatchingInf, FactorySelectsTheRelaxedComparison
     EXPECT_TRUE(matchingInfValidation->allClose(tensor1, tensor2));
 }
 
+TEST(TestCpuIntReferenceValidationBoolean, FactoryComparesBooleanOutputsExactly)
+{
+    const auto validation = createAllCloseValidator(
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN, 1.0f, 1.0f);
+    Tensor<bool> expected({4}, {2});
+    Tensor<bool> actual({4}, {2});
+    expected.fillTensorWithValue(0.0f);
+    actual.fillTensorWithValue(0.0f);
+    expected.setHostValue(true, 1);
+    actual.setHostValue(true, 1);
+    EXPECT_TRUE(validation->allClose(expected, actual));
+    actual.setHostValue(false, 1);
+    EXPECT_FALSE(validation->allClose(expected, actual));
+    actual.setHostValue(true, 1);
+    actual.setHostValue(true, 3);
+    EXPECT_FALSE(validation->allClose(expected, actual));
+    EXPECT_THROW(createAllCloseMatchingInfinitiesValidator(
+                     hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN, 0.0f, 0.0f),
+                 std::runtime_error);
+}
+
 TEST(TestCpuFpReferenceValidationMatchingInf, FactoryRejectsIntegerDataTypes)
 {
     EXPECT_THROW(createAllCloseMatchingInfinitiesValidator(
@@ -1060,3 +1081,26 @@ TEST(TestCpuIntReferenceValidationRagged, FailsForMismatchedRaggedLayouts)
 }
 
 /* ================================================= */
+
+// fp8 outputs (cuDNN sdpa_fp8 O) get a validator from the data-type factory, which compares
+// decoded values: one fp8 step apart fails a tight tolerance and passes a loose one.
+TEST(TestCpuFpReferenceValidationFp8, FactoryComparesDecodedValues)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    const auto check = [](DataType dataType, auto tag) {
+        using Fp8 = decltype(tag);
+        Tensor<Fp8> a({4});
+        Tensor<Fp8> b({4});
+        for(int64_t i = 0; i < 4; ++i)
+        {
+            a.setHostValue(Fp8(1.0f + static_cast<float>(i)), i);
+            b.setHostValue(Fp8(1.0f + static_cast<float>(i)), i);
+        }
+        EXPECT_TRUE(createAllCloseValidator(dataType, 1e-3f, 1e-3f)->allClose(a, b));
+        b.setHostValue(Fp8(4.5f), 3); // the next E4M3 value after 4
+        EXPECT_FALSE(createAllCloseValidator(dataType, 1e-3f, 1e-3f)->allClose(a, b));
+        EXPECT_TRUE(createAllCloseValidator(dataType, 0.0f, 0.13f)->allClose(a, b));
+    };
+    check(DataType::FP8_E4M3, fp8_e4m3{});
+    check(DataType::FP8_E4M3_FNUZ, fp8_e4m3_fnuz{});
+}

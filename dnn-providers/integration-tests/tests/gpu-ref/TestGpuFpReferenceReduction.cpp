@@ -357,43 +357,25 @@ INSTANTIATE_TEST_SUITE_P(Quick,
                          ::testing::ValuesIn(makeReductionTestCases(getReductionSmall4DShapes(),
                                                                     getReduction4DLayouts(),
                                                                     getReductionModes())));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuReductionRef4DFp16,
                          ::testing::ValuesIn(makeReductionTestCases(getReductionSmall4DShapes(),
                                                                     getReduction4DLayouts(),
                                                                     getReductionModes())));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuReductionRef4DBfp16,
                          ::testing::ValuesIn(makeReductionTestCases(getReductionSmall4DShapes(),
                                                                     getReduction4DLayouts(),
                                                                     getReductionModes())));
+// Medium shapes are fp32-only: dtype enters only via per-element load/store conversion (P1);
+// Fp16/Bfp16 are covered by the standard tier's small-shape run.
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuReductionRef4DFp32,
                          ::testing::ValuesIn(makeReductionTestCases(getReductionMedium4DShapes(),
                                                                     getReduction4DLayouts(),
                                                                     getReductionModes())));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuReductionRef4DFp16,
-                         ::testing::ValuesIn(makeReductionTestCases(getReductionMedium4DShapes(),
-                                                                    getReduction4DLayouts(),
-                                                                    getReductionModes())));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuReductionRef4DBfp16,
-                         ::testing::ValuesIn(makeReductionTestCases(getReductionMedium4DShapes(),
-                                                                    getReduction4DLayouts(),
-                                                                    getReductionModes())));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuReductionRef4DFp32,
-                         ::testing::ValuesIn(makeReductionTestCases(getReductionLarge4DShapes(),
-                                                                    getReduction4DLayouts(),
-                                                                    getReductionModes())));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuReductionRef4DFp16,
-                         ::testing::ValuesIn(makeReductionTestCases(getReductionLarge4DShapes(),
-                                                                    getReduction4DLayouts(),
-                                                                    getReductionModes())));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuReductionRef4DBfp16,
                          ::testing::ValuesIn(makeReductionTestCases(getReductionLarge4DShapes(),
                                                                     getReduction4DLayouts(),
                                                                     getReductionModes())));
@@ -407,43 +389,25 @@ INSTANTIATE_TEST_SUITE_P(Quick,
                          ::testing::ValuesIn(makeReductionTestCases(getReductionSmall5DShapes(),
                                                                     getReduction5DLayouts(),
                                                                     getReductionModes())));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuReductionRef5DFp16,
                          ::testing::ValuesIn(makeReductionTestCases(getReductionSmall5DShapes(),
                                                                     getReduction5DLayouts(),
                                                                     getReductionModes())));
-INSTANTIATE_TEST_SUITE_P(Quick,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuReductionRef5DBfp16,
                          ::testing::ValuesIn(makeReductionTestCases(getReductionSmall5DShapes(),
                                                                     getReduction5DLayouts(),
                                                                     getReductionModes())));
+// Medium shapes are fp32-only: dtype enters only via per-element load/store conversion (P1);
+// Fp16/Bfp16 are covered by the standard tier's small-shape run.
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuReductionRef5DFp32,
                          ::testing::ValuesIn(makeReductionTestCases(getReductionMedium5DShapes(),
                                                                     getReduction5DLayouts(),
                                                                     getReductionModes())));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuReductionRef5DFp16,
-                         ::testing::ValuesIn(makeReductionTestCases(getReductionMedium5DShapes(),
-                                                                    getReduction5DLayouts(),
-                                                                    getReductionModes())));
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuReductionRef5DBfp16,
-                         ::testing::ValuesIn(makeReductionTestCases(getReductionMedium5DShapes(),
-                                                                    getReduction5DLayouts(),
-                                                                    getReductionModes())));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuReductionRef5DFp32,
-                         ::testing::ValuesIn(makeReductionTestCases(getReductionLarge5DShapes(),
-                                                                    getReduction5DLayouts(),
-                                                                    getReductionModes())));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuReductionRef5DFp16,
-                         ::testing::ValuesIn(makeReductionTestCases(getReductionLarge5DShapes(),
-                                                                    getReduction5DLayouts(),
-                                                                    getReductionModes())));
-INSTANTIATE_TEST_SUITE_P(Comprehensive,
-                         TestGpuReductionRef5DBfp16,
                          ::testing::ValuesIn(makeReductionTestCases(getReductionLarge5DShapes(),
                                                                     getReduction5DLayouts(),
                                                                     getReductionModes())));

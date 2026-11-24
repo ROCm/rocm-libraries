@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pandas as pd
 import pytest
 
+import geko.optim.optim as optim_mod
 from geko import pipeline
 from geko.schemas import RunState
 
@@ -38,7 +39,13 @@ def test_run_bench_happy_path_invokes_standard_benchmark(monkeypatch: pytest.Mon
     out_dir = tmp_path / "out"
 
     monkeypatch.setattr(pipeline.bench.log, "parse", lambda *_args, **_kwargs: [{"M": 16}])
-    monkeypatch.setattr(pipeline.bench.log, "update", lambda rows: (rows, None))
+    updated = {}
+
+    def _fake_update(rows, **kwargs):
+        updated.update(kwargs)
+        return rows, None
+
+    monkeypatch.setattr(pipeline.bench.log, "update", _fake_update)
 
     dumped = {}
 
@@ -63,6 +70,8 @@ def test_run_bench_happy_path_invokes_standard_benchmark(monkeypatch: pytest.Mon
     assert (out_dir / "wkld.csv").is_file()
     assert called["kwargs"]["devices"] == [0]
     assert called["kwargs"]["duration"] == 0.1
+    assert called["kwargs"]["adaptive"] is True
+    assert updated == {"duration": 0.1, "adaptive": True}
     assert called["kwargs"]["custom_lib_dir"] is None
 
 
@@ -72,7 +81,7 @@ def test_run_bench_device_alias_overrides_devices(monkeypatch: pytest.MonkeyPatc
     workload = _make_workload(tmp_path / "wkld.yaml")
 
     monkeypatch.setattr(pipeline.bench.log, "parse", lambda *_args, **_kwargs: [{"M": 16}])
-    monkeypatch.setattr(pipeline.bench.log, "update", lambda rows: (rows, None))
+    monkeypatch.setattr(pipeline.bench.log, "update", lambda rows, **_k: (rows, None))
     monkeypatch.setattr(pipeline.bench.log, "dump", lambda _data, out_file: Path(out_file).write_text("[]\n"))
 
     called = {}
@@ -101,7 +110,7 @@ def test_run_bench_uses_custom_lib_dir_over_custom_lib_src(monkeypatch: pytest.M
     custom_dir.mkdir()
 
     monkeypatch.setattr(pipeline.bench.log, "parse", lambda *_args, **_kwargs: [{"M": 16}])
-    monkeypatch.setattr(pipeline.bench.log, "update", lambda rows: (rows, None))
+    monkeypatch.setattr(pipeline.bench.log, "update", lambda rows, **_k: (rows, None))
     monkeypatch.setattr(pipeline.bench.log, "dump", lambda _data, out_file: Path(out_file).write_text("[]\n"))
 
     create_called = {"n": 0}
@@ -143,7 +152,7 @@ def test_run_bench_builds_custom_lib_from_src(monkeypatch: pytest.MonkeyPatch, t
     custom_src.mkdir()
 
     monkeypatch.setattr(pipeline.bench.log, "parse", lambda *_args, **_kwargs: [{"M": 16}])
-    monkeypatch.setattr(pipeline.bench.log, "update", lambda rows: (rows, None))
+    monkeypatch.setattr(pipeline.bench.log, "update", lambda rows, **_k: (rows, None))
     monkeypatch.setattr(pipeline.bench.log, "dump", lambda _data, out_file: Path(out_file).write_text("[]\n"))
 
     created = {}
@@ -208,6 +217,7 @@ def test_run_configure_device_alias_overrides_devices(monkeypatch: pytest.Monkey
 
     def _fake_summarize(*_args, **kwargs):
         called["devices"] = kwargs["devices"]
+        called["adaptive"] = kwargs.get("adaptive")
         return pd.DataFrame(), pd.DataFrame([{"M": 16}])
 
     monkeypatch.setattr(pipeline.bench.log, "summarize", _fake_summarize)
@@ -216,6 +226,7 @@ def test_run_configure_device_alias_overrides_devices(monkeypatch: pytest.Monkey
 
     pipeline.run_configure(str(hip), str(workload), devices=[0, 1], device=2, workdir=str(tmp_path / "w"))
     assert called["devices"] == [2]
+    assert called["adaptive"] is False
 
 
 def test_run_configure_rejects_mx_on_unsupported_arch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -250,6 +261,28 @@ def test_run_search_returns_when_filtered_empty(monkeypatch: pytest.MonkeyPatch,
     )
 
     pipeline.run_search(str(hip), str(workload), devices=[0], workdir=str(tmp_path / "w"))
+
+
+def test_run_search_forces_benchmark_on_summarize(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    hip = tmp_path / "hip"
+    hip.mkdir()
+    workload = _make_workload(tmp_path / "wkld.yaml")
+
+    called = {}
+
+    def _fake_summarize(*_args, **kwargs):
+        called["force_benchmark"] = kwargs.get("force_benchmark")
+        called["keep_thr"] = kwargs.get("keep_thr")
+        called["adaptive"] = kwargs.get("adaptive")
+        return pd.DataFrame(), pd.DataFrame()
+
+    monkeypatch.setattr(pipeline.bench.log, "summarize", _fake_summarize)
+
+    pipeline.run_search(str(hip), str(workload), devices=[0], keep_thr=0.0, workdir=str(tmp_path / "w"))
+
+    assert called["force_benchmark"] is True
+    assert called["adaptive"] is False
+    assert called["keep_thr"] == 0.0
 
 
 def test_run_search_raises_when_no_winners(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -322,7 +355,7 @@ def test_run_search_success_writes_final_libs(monkeypatch: pytest.MonkeyPatch, t
 
     extracted = {}
 
-    def _fake_extract(_winners, match_table):
+    def _fake_extract(_winners, match_table, **_kwargs):
         extracted["match_table"] = Path(match_table)
         return _FakeLibs()
 
@@ -405,7 +438,7 @@ def test_run_search_with_custom_lib_src_builds_ref_lib_and_uses_ref_matchtable(
 
     extracted = {}
 
-    def _fake_extract(_winners, match_table):
+    def _fake_extract(_winners, match_table, **_kwargs):
         extracted["match_table"] = Path(match_table)
         return _FakeLibs()
 
@@ -547,6 +580,86 @@ def test_run_search_keeps_existing_artifacts_when_winners_unchanged(monkeypatch:
     assert (lib_dir / "keep.txt").is_file()
     assert (build_dir / "keep.txt").is_file()
     assert (bench_dir / "keep.txt").is_file()
+
+
+def _logic_payload(sizes: list) -> dict:
+    return {
+        "ArchitectureName": "gfx950",
+        "ScheduleName": "gfx950",
+        "ProblemType": {
+            "DataType": 7,
+            "DestDataType": 7,
+            "ComputeDataType": 0,
+            "TransposeA": True,
+            "TransposeB": False,
+            "HighPrecisionAccumulate": True,
+        },
+        "DefaultSolution": 0,
+        "Solutions": [{"SolutionIndex": 0, "SolutionNameMin": "kernel"}],
+        "ExactLogic": sizes,
+        "LibraryType": "Equality",
+    }
+
+
+def _write_completed_config(optim_dir: Path, name: str, sizes: list, library_name: str | None = None) -> Path:
+    (optim_dir / f"{name}.yaml").write_text("MatrixInstruction: [16, 16, 16, 1]\n")
+    logic = optim_dir / f"build_{name}" / "3_LibraryLogic"
+    logic.mkdir(parents=True)
+    filename = library_name or f"{name}.yaml"
+    path = logic / filename
+    from geko.library import Library
+
+    Library(_logic_payload(sizes), filename).dump(logic, name=filename)
+    return path
+
+
+def test_process_duplicates_updates_shared_size_performance(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    optim_dir = tmp_path / "optimizations"
+    optim_dir.mkdir()
+    shared = [1024, 1024, 1, 1024]
+    unique = [8, 8, 1, 8]
+    bbs = "gfx950_Cijk_Alik_Bljk_BBS_BH.yaml"
+    hhs = "gfx950_Cijk_Alik_Bljk_HHS_BH.yaml"
+    path_a = _write_completed_config(
+        optim_dir,
+        "BBS_TN_0",
+        [[shared, [3, 100.0]], [unique, [3, 10.0]]],
+        bbs,
+    )
+    path_b = _write_completed_config(optim_dir, "BBS_TN_1", [[shared, [5, 200.0]]], bbs)
+    path_c = _write_completed_config(optim_dir, "HHS_TN_0", [[shared, [1, 50.0]]], hhs)
+
+    created = []
+
+    def _create(_hip, logic_dir, output_dir):
+        created.append((Path(logic_dir), Path(output_dir)))
+
+    def _bench(_hip, bench_file, _output, custom_lib_dir=None, devices=None, cache=False):
+        text = Path(bench_file).read_text()
+        rows = []
+        if "M: 1024" in text:
+            rows.append({"m": 1024, "n": 1024, "batch_count": 1, "k": 1024, "hipblaslt-Gflops": 999.0})
+        if "M: 8" in text:
+            rows.append({"m": 8, "n": 8, "batch_count": 1, "k": 8, "hipblaslt-Gflops": 1.0})
+        return pd.DataFrame(rows)
+
+    monkeypatch.setattr(optim_mod.library, "create", _create)
+    monkeypatch.setattr(optim_mod.bench, "run", _bench)
+
+    optim_mod.process_duplicates(str(tmp_path / "hip"), optim_dir, devices=[0])
+
+    built = {logic.parent.name for logic, _out in created}
+    assert built == {"build_BBS_TN_0", "build_BBS_TN_1"}
+
+    from geko.library import load_library
+
+    lib_a = load_library(path_a)
+    lib_b = load_library(path_b)
+    lib_c = load_library(path_c)
+    assert lib_a.sizes[0] == [shared, [3, 999.0]]
+    assert lib_a.sizes[1] == [unique, [3, 10.0]]
+    assert lib_b.sizes[0] == [shared, [5, 999.0]]
+    assert lib_c.sizes[0] == [shared, [1, 50.0]]
 
 
 def test_run_optimize_requires_existing_workdir(tmp_path: Path) -> None:

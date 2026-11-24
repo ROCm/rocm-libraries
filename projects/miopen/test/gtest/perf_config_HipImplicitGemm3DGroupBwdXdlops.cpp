@@ -24,20 +24,22 @@ static Problem MakeSearchProblem(group_conv::GroupConvTestConfig<3u> conv,
     return Problem(y_desc, w_desc, x_desc, conv_desc, miopen::conv::Direction::BackwardData);
 }
 
-TEST(GPU_PerfConfig_HipImplicitGemm3DGroupBwdXdlops_FP16, SearchStartsAtKernelZero)
+using GPU_PerfConfig_HipImplicitGemm3DGroupBwdXdlops_FP16 = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupBwdXdlops_FP16, SearchStartsAtKernelZero)
 {
     const auto device_name = miopen::solver::GetCurrentDeviceName();
     if(device_name.empty())
         GTEST_SKIP() << "No ROCm-capable device is detected";
 
-    const auto& loader = miopen::solver::CkImplLibLoader::Get(device_name);
-    if(!loader.IsLoaded())
-        GTEST_SKIP() << "CK grouped conv library not installed for " << device_name;
-
     const auto problem =
         MakeSearchProblem({1, 1, 4, 4, {8, 28, 28}, {3, 3, 3}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}},
                           miopenHalf,
                           miopenTensorNDHWC);
+
+    using Solver = miopen::solver::conv::ConvHipImplicitGemm3DGroupBwdXdlops;
+    if(!group_conv::SolverApplicable<Solver>(problem))
+        GTEST_SKIP() << Solver{}.SolverDbId() << " not applicable for " << device_name;
 
     Config cfg(false);
     ASSERT_TRUE(cfg.SetNextValue(problem));
@@ -46,3 +48,7 @@ TEST(GPU_PerfConfig_HipImplicitGemm3DGroupBwdXdlops_FP16, SearchStartsAtKernelZe
     EXPECT_EQ(cfg.kernel_id, cfg.valid_kernels.front());
     EXPECT_TRUE(cfg.IsValid(problem));
 }
+
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_PerfConfig_HipImplicitGemm3DGroupBwdXdlops_FP16,
+                         ::testing::Values(0));

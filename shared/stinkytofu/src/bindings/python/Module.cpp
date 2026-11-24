@@ -22,10 +22,12 @@
  * ************************************************************************ */
 #include "stinkytofu/bindings/python/Module.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -33,6 +35,7 @@
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
+#include "stinkytofu/transforms/asm/ra/RegisterAllocationConfig.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -76,6 +79,7 @@ struct StinkyAsmModule::Impl {
     // Plugin data: opaque key-value stores for pass plugins.
     std::unordered_map<std::string, int64_t> pluginDataI64;
     std::unordered_map<std::string, std::string> pluginDataStr;
+    std::shared_ptr<const GirFrameContract> girFrameContract;
 
     // Per-module pass builder for plugin pass registration.
     PassBuilder passBuilder;
@@ -118,6 +122,10 @@ void StinkyAsmModule::setOutputDir(const std::string& dir) {
 
 std::string StinkyAsmModule::getOutputDir() const {
     return pImpl->outputDir;
+}
+
+bool StinkyAsmModule::ModuleOptions::sgprsCompacted() const {
+    return kernelRewritesRegisters(RegisterAllocation, RegisterAllocationConfig, RegType::S);
 }
 
 std::array<int, 3> StinkyAsmModule::getArch() const {
@@ -209,6 +217,10 @@ std::optional<uint64_t> StinkyAsmModule::getMetaDataU64(const std::string& key) 
     return getFunction().getMetaData(key);
 }
 
+void StinkyAsmModule::setMetaDataU64(const std::string& key, uint64_t value) {
+    getFunction().setMetaData(key, value);
+}
+
 void StinkyAsmModule::addGroup(const std::string& name) {
     if (pImpl->instructionGroups.find(name) != pImpl->instructionGroups.end()) {
         return;
@@ -218,6 +230,37 @@ void StinkyAsmModule::addGroup(const std::string& name) {
 
 bool StinkyAsmModule::hasGroup(const std::string& name) const {
     return pImpl->instructionGroups.find(name) != pImpl->instructionGroups.end();
+}
+
+std::vector<std::string> StinkyAsmModule::invalidateGroupsInBlocks(
+    const std::vector<BasicBlock*>& blocks) {
+    if (blocks.empty()) return {};
+
+    const std::unordered_set<const BasicBlock*> dying(blocks.begin(), blocks.end());
+    std::vector<std::string> cleared;
+
+    for (auto& [groupName, range] : pImpl->instructionGroups) {
+        if (range.first == IntrusiveListIterator<IRBase>()) continue;
+
+        // A boundary listed in no block at all is already unusable, so it counts
+        // as dying too.
+        const IRBase* first = range.first.getNodePtr();
+        const IRBase* last = range.last.getNodePtr();
+        const BasicBlock* firstBB = first != nullptr ? first->getParent() : nullptr;
+        const BasicBlock* lastBB = last != nullptr ? last->getParent() : nullptr;
+        const bool firstSurvives = firstBB != nullptr && !dying.contains(firstBB);
+        const bool lastSurvives = lastBB != nullptr && !dying.contains(lastBB);
+        if (firstSurvives && lastSurvives) continue;
+
+        range.first = IntrusiveListIterator<IRBase>();
+        range.last = IntrusiveListIterator<IRBase>();
+        cleared.push_back(groupName);
+    }
+
+    // instructionGroups is unordered, so sort what little comes out of it rather
+    // than the whole name list: callers report these and want a stable order.
+    std::sort(cleared.begin(), cleared.end());
+    return cleared;
 }
 
 std::optional<std::pair<IntrusiveListIterator<IRBase>, IntrusiveListIterator<IRBase>>>
@@ -264,6 +307,29 @@ void StinkyAsmModule::setGroupRange(const std::string& groupName,
     groupRange.last = last;
 }
 
+void StinkyAsmModule::retargetGroupEndpoint(IRBase* from, IRBase* ifFirst, IRBase* ifLast) {
+    if (!from) return;
+    for (auto& entry : pImpl->instructionGroups) {
+        auto& range = entry.second;
+        const bool firstMatch = range.first.getNodePtr() == from;
+        const bool lastMatch = range.last.getNodePtr() == from;
+        if (!firstMatch && !lastMatch) continue;
+        if (firstMatch && lastMatch) {
+            IRBase* repl = ifFirst ? ifFirst : ifLast;
+            if (!repl) continue;
+            range.first = IntrusiveListIterator<IRBase>(repl);
+            range.last = IntrusiveListIterator<IRBase>(repl);
+            continue;
+        }
+        if (firstMatch && ifFirst) {
+            range.first = IntrusiveListIterator<IRBase>(ifFirst);
+        }
+        if (lastMatch && ifLast) {
+            range.last = IntrusiveListIterator<IRBase>(ifLast);
+        }
+    }
+}
+
 const StinkyAsmModule::ModuleOptions& StinkyAsmModule::getModuleOptions() const {
     return this->moduleOptions;
 }
@@ -287,6 +353,14 @@ void StinkyAsmModule::setPluginDataI64(const std::string& key, int64_t value) {
 int64_t StinkyAsmModule::getPluginDataI64(const std::string& key, int64_t defaultVal) const {
     auto it = pImpl->pluginDataI64.find(key);
     return it != pImpl->pluginDataI64.end() ? it->second : defaultVal;
+}
+
+void StinkyAsmModule::setGirFrameContract(std::shared_ptr<const GirFrameContract> contract) {
+    pImpl->girFrameContract = std::move(contract);
+}
+
+std::shared_ptr<const GirFrameContract> StinkyAsmModule::getGirFrameContract() const {
+    return pImpl->girFrameContract;
 }
 
 void StinkyAsmModule::setPluginDataStr(const std::string& key, const std::string& value) {

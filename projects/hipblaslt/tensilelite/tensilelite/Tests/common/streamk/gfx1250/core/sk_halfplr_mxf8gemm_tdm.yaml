@@ -30,6 +30,7 @@ GlobalParameters:
   PrintLevel: 2
   PrintSolutionRejectionReason: True
   ForceGenerateKernel: True
+  UniformSummationOrder: 0
 
 BenchmarkProblems:
   #######################################

@@ -57,13 +57,17 @@ def _embedded(uid, arch=None):
     return ukd
 
 
+# The empty_arch fixture's engine and metadata descriptors (solo.ued.json, solo.kmd.json).
+_UED_ID = "7dfa7b97-7409-5013-8bc5-a644a26ab88d"
+_KMD_ID = "17fd20dc-1faf-5e2b-ac45-b610aa4ce4c4"
+
 _CONTRACT = {
     "specialization_contract": {
         "schema_version": 1,
         "consumers": [
             {
-                "engine_id": "ued-solo",
-                "kmd_id": "kmd-solo",
+                "engine_id": _UED_ID,
+                "kmd_id": _KMD_ID,
                 "metadata_fields": [],
                 "matcher_only_fields": ["block_size", "dtype"],
                 "bindings": {},
@@ -81,7 +85,7 @@ def _kdp(kid, arch, ukds):
         "name": kid,
         "arch": arch,
         "matchers": ["umd-solo"],
-        "engine": "ued-solo",
+        "engine": _UED_ID,
         "dispatch": "udd-solo",
         "kernelDescriptors": ukds,
     }
@@ -107,13 +111,17 @@ def _pack(
     arches,
     rocm_kpack_dir,
     table=GENERIC_TARGETS_JSON,
-    hipcc="hipcc-not-invoked",
+    hip_compiler="compiler-not-invoked",
+    hip_path=None,
+    device_lib_path=None,
 ):
     return run_pipeline(
         source_root=root,
         arches=list(arches),
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
         generic_targets_json=table,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
@@ -478,13 +486,26 @@ def _hip_generic_root(dest, empty_arch_fixture):
 
 
 def test_compiled_agreement_holds_on_a_generic_copy(
-    tmp_path, empty_arch_fixture, hipcc, rocm_kpack_dir
+    tmp_path,
+    empty_arch_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
 ):
     """A generic copy's literal arch names no device; `consumer_records` must still count it."""
     from hkp_pack.desk_check import compiled_agreement
 
     root = _hip_generic_root(tmp_path / "src", empty_arch_fixture)
-    _pack(root, tmp_path, [MEMBER_A], rocm_kpack_dir, hipcc=hipcc)
+    _pack(
+        root,
+        tmp_path,
+        [MEMBER_A],
+        rocm_kpack_dir,
+        hip_compiler=hip_compiler,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     failures, _unclaimed, _verified = compiled_agreement(
         tmp_path / "out" / MEMBER_A / "solo.kdp.json", GENERIC_TARGETS, rocm_kpack_dir
     )
@@ -492,7 +513,13 @@ def test_compiled_agreement_holds_on_a_generic_copy(
 
 
 def test_generic_hip_archive_is_keyed_by_the_generic_spelling_and_byte_identical_across_builds(
-    tmp_path, empty_arch_fixture, hipcc, rocm_kpack_dir, monkeypatch
+    tmp_path,
+    empty_arch_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    monkeypatch,
 ):
     """Separate per-arch builds (own roots, cwd, source copy) yield identical generic files."""
     builds = {}
@@ -506,7 +533,15 @@ def test_generic_hip_archive_is_keyed_by_the_generic_spelling_and_byte_identical
         root = _hip_generic_root(base / "deeper" / label / "src", empty_arch_fixture)
         (base / "cwd").mkdir()
         monkeypatch.chdir(base / "cwd")
-        results = _pack(root, base, arches, rocm_kpack_dir, hipcc=hipcc)
+        results = _pack(
+            root,
+            base,
+            arches,
+            rocm_kpack_dir,
+            hip_compiler=hip_compiler,
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
+        )
         if label == "only_a":
             shipped = _read(base / "out" / MEMBER_A / "solo.kdp.json")
             ks = shipped["kernelDescriptors"][0]["kernel_source"]

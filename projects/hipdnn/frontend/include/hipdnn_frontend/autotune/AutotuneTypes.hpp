@@ -97,7 +97,7 @@ enum class AutotuneCacheWriteOutcome
     /// The cache already held this exact ranking, so nothing was written. Not a failure:
     /// a re-tune that measured the same order has nothing to add.
     UNCHANGED,
-    /// A caller choice -- config.engineIdFilter, deselect_engines(),
+    /// A caller choice -- config.engineIdFilter, deselect_engines(), a note filter,
     /// deselect_workspace_greater_than(), or a workspaceSize too small for a compiled
     /// plan -- kept at least one applicable candidate out of the timing loop, so the
     /// sweep did not cover the engine set a later lookup will see.
@@ -254,8 +254,9 @@ struct AutotuneResult
     bool benchmarked = false;
 
     /// true if a caller choice kept this candidate out of the timing loop:
-    /// config.engineIdFilter, deselect_engines(), deselect_workspace_greater_than(), or a
-    /// compiled workspace over the workspaceSize passed to this call.
+    /// config.engineIdFilter, deselect_engines(), a note filter,
+    /// deselect_workspace_greater_than(), or a compiled workspace over the workspaceSize
+    /// passed to this call.
     ///
     /// Decides whether a sweep may be persisted. A miss intrinsic to the engine and graph
     /// (failed to compile or finalize) recurs on every run, so the record can name it.
@@ -268,7 +269,9 @@ struct AutotuneResult
     std::string errorMessage; ///< Empty if no error; describes the benchmarking failure otherwise
 
     int64_t workspaceSize = 0; ///< Workspace bytes used by this engine
-    int64_t estimatedWorkspaceSize = 0; ///< Pre-compile workspace estimate from engine config
+    int64_t estimatedWorkspaceSize
+        = 0; ///< Pre-compile workspace estimate from engine config; covers the priming configuration
+    ///< for engines that expose the benchmarking knob
     int compiledPlanIndex = -1; ///< Index into compiled plans vector; used for winner selection
 
     TuneMode modeUsed = TuneMode::STANDARD; ///< Which mode was used for this engine

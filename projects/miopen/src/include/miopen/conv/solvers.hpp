@@ -17,6 +17,7 @@
 
 #include <initializer_list>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
@@ -3350,14 +3351,13 @@ struct PerformanceConfigAsmImplicitGemmGTCWrwXdlopsNHWC : PerformanceConfigAsmIm
     void HeuristicInit(const ExecutionContext&, const miopen::conv::ProblemDescription&);
     bool SetNextValue(const miopen::conv::ProblemDescription&);
     bool IsValidValue() const;
-    bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
-    {
-        return IsValid(problem);
-    }
+    bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const;
     bool IsValid(const miopen::conv::ProblemDescription&) const;
     size_t ComputeKernelOccupancy() const;
 
 private:
+    void HeuristicInitIgnoringBatchPadding(const ExecutionContext&,
+                                           const miopen::conv::ProblemDescription&);
     void SetParamsForKSplit(const miopen::conv::ProblemDescription& problem,
                             const size_t& occupancy);
 };
@@ -3945,6 +3945,17 @@ struct PerformanceConfigHipImplicitGemm3DGroupWrwXdlops
 private:
     void InitValidKernels(const miopen::conv::ProblemDescription& problem);
     mutable bool use_tf32 = false;
+
+    template <class Config, class State, class RunAI>
+    friend void InitHeuristicConfigFromCache(Config&,
+                                             State&,
+                                             const ExecutionContext&,
+                                             const miopen::conv::ProblemDescription&,
+                                             std::string_view,
+                                             bool,
+                                             bool,
+                                             bool,
+                                             RunAI&&);
 };
 
 struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemm3DGroupWrwXdlops final
@@ -3982,6 +3993,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemm3DGroupWrwXdlops final
     size_t GetWorkspaceSize(const ExecutionContext&,
                             const miopen::conv::ProblemDescription&) const override;
     bool MayNeedWorkspace() const override { return true; }
+    bool WorkspaceDependsOnConfig() const override { return true; }
 
 private:
     size_t GetCKMaxWorkspaceSize(const miopen::conv::ProblemDescription& problem) const;
@@ -4160,9 +4172,6 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmGroupBwdXdlops final
     size_t GetWorkspaceSize(const ExecutionContext&,
                             const miopen::conv::ProblemDescription&) const override;
     bool MayNeedWorkspace() const override { return true; }
-
-private:
-    size_t GetCKMaxWorkspaceSize(const miopen::conv::ProblemDescription& problem) const;
 };
 
 struct PerformanceConfigHipImplicitGemmGroupWrwXdlops
@@ -4228,6 +4237,17 @@ private:
     template <typename DataType>
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
     mutable bool use_tf32 = false;
+
+    template <class Config, class State, class RunAI>
+    friend void InitHeuristicConfigFromCache(Config&,
+                                             State&,
+                                             const ExecutionContext&,
+                                             const miopen::conv::ProblemDescription&,
+                                             std::string_view,
+                                             bool,
+                                             bool,
+                                             bool,
+                                             RunAI&&);
 };
 
 struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmGroupWrwXdlops final
@@ -4264,6 +4284,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmGroupWrwXdlops final
     size_t GetWorkspaceSize(const ExecutionContext&,
                             const miopen::conv::ProblemDescription&) const override;
     bool MayNeedWorkspace() const override { return true; }
+    bool WorkspaceDependsOnConfig() const override { return true; }
 
 private:
     size_t GetCKMaxWorkspaceSize(const miopen::conv::ProblemDescription& problem) const;
@@ -4618,6 +4639,21 @@ extern template struct TransposedConvMPBidirectWinograd_xdlops<6, 3>;
 #pragma clang diagnostic pop
 #endif
 
+/// Forward 2D depthwise convolution (channels-per-group == 1) for RDNA.
+struct MIOPEN_INTERNALS_EXPORT ConvDirectDepthwiseFwd2D final : ConvSolver
+{
+    const std::string& SolverDbId() const override
+    {
+        return GetSolverDbId<ConvDirectDepthwiseFwd2D>();
+    }
+
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
+    bool IsDynamic() const override { return true; }
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&) const override;
+};
+
 /// Placeholder forward 3D depthwise convolution (FP16/BF16, default/NCDHW layout); stub kernel.
 struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd3D final : ConvSolver
 {
@@ -4639,7 +4675,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd3D final : ConvSolver
                              const miopen::conv::ProblemDescription&) const override;
 };
 
-// ConvHipConv tuning state: a hipconv config record, resolved to a config index at runtime.
+// ConvHipConv tuning state: a hipconv config record, resolved to a kernel at runtime.
 // Serialized whole because PerfConfigBase's field-wise format splits on the record's commas.
 struct PerformanceConfigConvHipConv : PerfConfig
 {
@@ -4647,12 +4683,17 @@ struct PerformanceConfigConvHipConv : PerfConfig
     // mutable because IsValid() sets it from `index` on a const config after a search.
     mutable std::string descriptor;
 
-    // Index into this build's get_valid_configs list; not serialized.
-    // mutable because IsValid() resolves it from `descriptor` on a const config.
+    // Position in the config list during a tuning search; -1 for a record loaded from the perf
+    // db. Not serialized.
     mutable int index = -1;
 
+    // Kernel resolved by IsValid() or HeuristicInit(), a hipconv::ConvKernelHandle held as void*
+    // to keep hipconv types out of this header. Not serialized.
+    mutable void* kernel = nullptr;
+
     PerformanceConfigConvHipConv() = default;
-    PerformanceConfigConvHipConv(bool) {}
+    // GenericSearch's config iterator starts here; index 0 makes IsValid() enumerate the configs.
+    PerformanceConfigConvHipConv(bool) : index(0) {}
 
     void Serialize(std::ostream& stream) const override { stream << descriptor; }
     bool Deserialize(const std::string& s) override
@@ -4668,10 +4709,11 @@ struct PerformanceConfigConvHipConv : PerfConfig
     bool operator==(const PerformanceConfigConvHipConv& other) const;
 
 private:
-    // The arch is a const void* to keep hipconv types out of this header.
-    void InitFromArch(const void* arch, const miopen::conv::ProblemDescription&);
+    // `device` points to a hipconv::Device, passed as const void* to keep hipconv types out of
+    // this header.
+    void InitFromDevice(const void* device, const miopen::conv::ProblemDescription&);
 
-    // Config list length, set by IsValid() for SetNextValue(), which has no arch to query.
+    // Config list length, set by IsValid() for SetNextValue(), which has no device to query.
     //
     // ComputedIterator (generic_search.hpp) calls IsValid() before every SetNextValue().
     // maybe_unused because the !MIOPEN_USE_HIPCONV stubs read nothing.
@@ -4689,6 +4731,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipConv final : ConvTunableSolver<Performance
     size_t GetWorkspaceSize(const ExecutionContext&,
                             const miopen::conv::ProblemDescription&) const override;
     bool MayNeedWorkspace() const override { return true; }
+    bool WorkspaceDependsOnConfig() const override { return true; }
     PerformanceConfigConvHipConv
     GetDefaultPerformanceConfig(const ExecutionContext&,
                                 const miopen::conv::ProblemDescription&) const override;

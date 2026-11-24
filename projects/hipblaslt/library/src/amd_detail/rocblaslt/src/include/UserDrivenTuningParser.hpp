@@ -118,6 +118,10 @@ namespace TensileLite
         {
             return m_config.reads();
         }
+        bool writes() const
+        {
+            return m_config.writes();
+        }
 
         /** Re-read the environment. Tests only, like OverrideSingleton::reloadForTest. */
         void reloadForTest()
@@ -149,12 +153,21 @@ namespace TensileLite
         std::atomic<uint64_t> hits{0};
         std::atomic<uint64_t> misses{0};
         std::atomic<uint64_t> invalidated{0};
+        std::atomic<uint64_t> tuned{0};
+        std::atomic<uint64_t> skipped{0};
+
+        // Searches that got as far as tuning-start, whatever their outcome.
+        std::atomic<uint64_t> attempts{0};
+
+        // Online winners not recorded because recording threw.
+        std::atomic<uint64_t> unrecorded{0};
 
         std::string summary() const
         {
             return "loaded=" + std::to_string(entriesLoaded.load()) + " hits="
                    + std::to_string(hits.load()) + " misses=" + std::to_string(misses.load())
-                   + " invalidated=" + std::to_string(invalidated.load());
+                   + " invalidated=" + std::to_string(invalidated.load()) + " tuned="
+                   + std::to_string(tuned.load()) + " skipped=" + std::to_string(skipped.load());
         }
     };
 
@@ -176,6 +189,48 @@ namespace TensileLite
 
     /** The build rows are trusted against: the running library's own. */
     const std::string& currentBuildStamp();
+
+    /**
+     * Append one tuned winner to the tuning file.
+     *
+     * Takes the problem rather than the key so the type columns can be written
+     * in the spelling the parser reads back. See appendTuningRow for what
+     * concurrent writers can rely on.
+     */
+    bool appendTunedEntry(const std::string&                 path,
+                          const RocblasltContractionProblem& problem,
+                          const TunedEntry&                  entry);
+
+    /**
+     * What one tuning attempt did.
+     *
+     * Skips are policy: the tuner understood the problem and chose not to
+     * measure it, which is expected on some shapes forever. Fallbacks are
+     * everything else and usually mean something is wrong. Scratch splits
+     * across that line: a request over the configured cap is the cap doing its
+     * job, while a device that refuses the allocation is a failure.
+     */
+    enum class TuningAttempt : uint32_t
+    {
+        Tuned = 0,
+        /** Budget stopped the search, but a winner was measured and recorded. */
+        TunedPartial,
+        SkippedInPlaceBeta,
+        SkippedExtentUnknown,
+        SkippedScratchCap,
+        SkippedBudget,
+        FallbackScratchAlloc,
+        FallbackSetup,
+        FallbackEnumeration,
+        FallbackNoWinner,
+        FallbackException,
+    };
+
+    /** True for a policy decline, false for a failure. */
+    bool tuningAttemptIsSkip(TuningAttempt result);
+
+    /** Human-readable cause, without the tuning-cache prefix or event token. */
+    const char* tuningAttemptReason(TuningAttempt result);
 
     /**
      * Load a tuning file into OverrideMap::getMap(). Each path is read at most
@@ -216,16 +271,49 @@ namespace TensileLite
      * Counted by distinct key rather than by call, because the summary is read
      * against loaded=N and a hot loop over one uncached shape would otherwise
      * report thousands of fallbacks for one missing row. A key that matches
-     * once counts as matched. Does nothing in off mode.
+     * once counts as matched. Does nothing in off mode. Returns whether this
+     * is the key's first lookup.
      */
-    void recordTuningLookup(const ProblemOverride& key, bool matched);
+    bool recordTuningLookup(const ProblemOverride& key, bool matched);
 
     /**
-     * True only the first time this key's entry at this index is rejected. The
-     * heuristic lookup and the execution path can both meet one stale row, and
-     * it is still one rejected entry.
+     * True only the first time this key's entry identity is rejected. The
+     * heuristic lookup, the execution path and the recheck under the tuning lock
+     * can all meet one stale row, and it is still one rejected entry.
      */
-    bool recordTuningInvalidation(const ProblemOverride& key, int solutionIndex);
+    bool recordTuningInvalidation(const ProblemOverride& key, const TunedEntry& entry);
+
+    /**
+     * Note that this process will not search this problem again, and ask
+     * whether it has.
+     *
+     * Set once a search has been spent on the shape, whatever its outcome, and
+     * when the shape's cached search turns out final for this run, so a later
+     * matmul neither starts the same search again nor asks again. Per process,
+     * not per file: a later run with a higher HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE
+     * is what lets a shape the ceiling stopped finish.
+     */
+    void recordTuningAttempt(const ProblemOverride& key);
+    bool tuningAlreadyAttempted(const ProblemOverride& key);
+
+    /**
+     * Note that this problem was tuned in this process, whether or not the
+     * winner reached the file: it is in the in-memory cache either way.
+     */
+    void recordTuningWinner(const ProblemOverride& key);
+
+    /**
+     * Whether a tuning-start or terminal line should be written.
+     *
+     * With the info bit set, always. Otherwise success and failure are bounded
+     * separately, so a key whose first attempt failed can still report the tune
+     * that succeeds later. A failure is bounded per key once that key announced
+     * a start, since a start with no ending would look like a hang, and per
+     * reason before that, since those declines repeat across thousands of
+     * shapes.
+     */
+    bool shouldLogTuningStart(const ProblemOverride& key);
+    bool shouldLogTuningTerminal(const ProblemOverride& key, TuningAttempt result);
 
     /** Cache events logged at most once per key. */
     enum class TuningKeyEvent : uint32_t
@@ -241,9 +329,27 @@ namespace TensileLite
      */
     bool shouldLogTuningKeyEvent(TuningKeyEvent kind, const ProblemOverride& key);
 
+    /// Calls online mode does not tune; see rocblaslt::OnlineTuner.
+    enum class OnlineScopeEvent : uint32_t
+    {
+        HeuristicQuery = 0,
+        CallerSuppliedAlgo,
+        AdaptiveSmCount,
+        Count,
+    };
+
+    /// Info-level, once per kind per process. Takes no tuning lock.
+    void noteOnlineScopeEvent(OnlineScopeEvent kind);
+
+    /// Info-level: a launch on device ran untimed with every pair in flight.
+    void noteOnlineEventPairCap(int device, int cap);
+
     /** Drop the announcement latch and every per-key set. Tests only. */
     void resetTuningDiagnosticsForTest();
 
     /** The distinct-key tally behind the summary line, for tests. */
-    void tuningLookupTallyForTest(uint64_t* shapes, uint64_t* matched, uint64_t* fellback);
+    void tuningLookupTallyForTest(uint64_t* shapes,
+                                  uint64_t* matched,
+                                  uint64_t* fellback,
+                                  uint64_t* tuned);
 } // namespace TensileLite

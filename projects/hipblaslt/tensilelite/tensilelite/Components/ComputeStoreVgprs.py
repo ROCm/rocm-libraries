@@ -24,7 +24,7 @@
 
 from rocisa.code import Module
 from rocisa.container import ContinuousRegister, vgpr, sgpr
-from rocisa.instruction import SMulI32, VAddLShiftLeftU32, VAddU32, VMovB32, VMulLOU32
+from rocisa.instruction import SMulI32, VAddLShiftLeftU32, VAddU32, VAndB32, VMovB32, VMulLOU32
 from rocisa.functions import vectorStaticRemainder, vectorStaticDivideAndRemainder, vectorStaticDivide, vectorStaticMultiply
 
 from ..Component import ComputeStoreVgprs
@@ -140,27 +140,38 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
         # writer.vgprs.cinRowPtr  : C buffer coulmn offset
         # writer.vgprs.coutRowPtrD : D buffer coulmn offset
 
+        # PLSIN numIter<PGR recompute: the persistent coord/rowPtr VGPRs were already
+        # checked out by the NGLL init-hoist and are still live; reuse them as the
+        # recompute targets (zero extra registers) instead of allocating a fresh set.
+        # The downstream fused store body reads these same fixed VGPRs regardless of
+        # which runtime arm (hoist vs recompute) produced them.
+        reuse = writer.states.subtileRecomputeCoords
         # alloc resources
-        tid0 = writer.vgprPool.checkOut(1, "coord0")
-        tid1 = writer.vgprPool.checkOut(1, "coord1")
-        if kernel["BufferStore"]:
-            writer.vgprs.cinRowPtr   = writer.vgprPool.checkOut(1, "cinRowPtr")
-            writer.vgprs.coutRowPtrD = writer.vgprPool.checkOut(1, "coutRowPtrD")
-            if kernel["ProblemType"]["UseE"]:
-                writer.vgprs.coutRowPtrE = writer.vgprPool.checkOut(1, "coutRowPtrE")
-            if writer.states.useBias == DataDirection.WRITE and (not kernel["WorkGroupReduction"]) and kernel["ProblemType"]["BiasSrc"] == "D":
-                writer.vgprs.coutRowPtrBias = writer.vgprPool.checkOut(1, "coutRowPtrBias")
-            if writer.states.useGateResidual:
-                writer.vgprs.coutRowPtrGate = writer.vgprPool.checkOut(1, "coutRowPtrGate")
-        if kernel["LocalSplitU"] > 1:
-            writer.vgprs.coord0InMT = writer.vgprPool.checkOut(1, "coord0InMT")
-            writer.vgprs.coord1InMT = writer.vgprPool.checkOut(1, "coord1InMT")
+        if reuse:
+            tid0 = writer.vgprs.coord0
+            tid1 = writer.vgprs.coord1
         else:
-            writer.vgprs.coord0InMT = tid0
-            writer.vgprs.coord1InMT = tid1
+            tid0 = writer.vgprPool.checkOut(1, "coord0")
+            tid1 = writer.vgprPool.checkOut(1, "coord1")
+            if kernel["BufferStore"]:
+                writer.vgprs.cinRowPtr   = writer.vgprPool.checkOut(1, "cinRowPtr")
+                writer.vgprs.coutRowPtrD = writer.vgprPool.checkOut(1, "coutRowPtrD")
+                if kernel["ProblemType"]["UseE"]:
+                    writer.vgprs.coutRowPtrE = writer.vgprPool.checkOut(1, "coutRowPtrE")
+                if writer.states.useBias == DataDirection.WRITE and (not kernel["WorkGroupReduction"]) and kernel["ProblemType"]["BiasSrc"] == "D":
+                    writer.vgprs.coutRowPtrBias = writer.vgprPool.checkOut(1, "coutRowPtrBias")
+                if writer.states.useGateResidual:
+                    writer.vgprs.coutRowPtrGate = writer.vgprPool.checkOut(1, "coutRowPtrGate")
+            if kernel["LocalSplitU"] > 1:
+                writer.vgprs.coord0InMT = writer.vgprPool.checkOut(1, "coord0InMT")
+                writer.vgprs.coord1InMT = writer.vgprPool.checkOut(1, "coord1InMT")
+            else:
+                writer.vgprs.coord0InMT = tid0
+                writer.vgprs.coord1InMT = tid1
         lsuTid0 = writer.vgprs.coord0InMT
         lsuTid1 = writer.vgprs.coord1InMT
 
+        storeVWA = 1 if kernel.get("WaveTileContiguousA") else kernel["VectorWidthA"]
         wave_id = writer.vgprPool.checkOut(1, "tmpWaveID")
 
         tmpVgpr0 = writer.vgprPool.checkOut(1,"tmpVgpr0")
@@ -216,13 +227,15 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
             # Subtile kernels: each wave owns a contiguous block of MIWaveTile[0]*MIBShape0 rows.
             # wave_id0 * MIWaveTile[0] * MIBShape0 gives the start row of wave's block.
             waveBlockRows = MIBShape0 * kernel["MIWaveTile"][0] if kernel.get("UseSubtileImpl") else MIBShape0
+            if kernel.get("WaveTileContiguousA"):
+                waveBlockRows = MIBShape0 * kernel["MIWaveTile"][0]
             module.add(vectorStaticMultiply(vgpr(tmpVgpr0), vgpr(tmpVgpr0), waveBlockRows, tmpSgprInfo, "wave coordination offset 0"))
 
             # coord 0 : thread part
             module.add(vectorStaticRemainder(dummy, tid0, "Serial", writer.states.kernel["WavefrontSize"], tmpVgpr1Res, tmpSgprInfo))
             module.add(vectorStaticDivide(tid0, tid0, matrixInstN, tmpVgpr1Res))
             module.add(vectorStaticMultiply(vgpr(tid0), vgpr(tid0), kernel["MIOutputVectorWidth"], tmpSgprInfo, "thread0 * continuous_output"))
-            module.add(VAddLShiftLeftU32(dst=vgpr(lsuTid0), src0=vgpr(tmpVgpr0), src1=vgpr(tid0), shiftHex=log2(kernel["VectorWidthA"]), comment="coordination 0 = vwA *(wave_id0 + tid0)"))
+            module.add(VAddLShiftLeftU32(dst=vgpr(lsuTid0), src0=vgpr(tmpVgpr0), src1=vgpr(tid0), shiftHex=log2(storeVWA), comment="coordination 0 = vwA *(wave_id0 + tid0)"))
 
             wg0="WorkGroup0"
             wg1="WorkGroup1"
@@ -248,6 +261,9 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
         if kernel["StoreRemapVectorWidth"]:
             module.add(writer.storeRemapComputeStoreVgprs(kernel))
 
+        # On reuse, tid0/tid1 already ARE writer.vgprs.coord0/coord1 (recompute wrote
+        # into the hoisted VGPRs in place), so this is a no-op; keep it unconditional
+        # for the normal alloc path.
         writer.vgprs.coord0 = tid0
         writer.vgprs.coord1 = tid1
 
@@ -271,24 +287,31 @@ class ComputeStoreVgprsMFMASwap(ComputeStoreVgprs):
         # writer.vgprs.cinRowPtr  : C buffer coulmn offset
         # writer.vgprs.coutRowPtrD : D buffer coulmn offset
 
+        # PLSIN numIter<PGR recompute: reuse the already-live hoisted coord/rowPtr VGPRs
+        # as recompute targets (zero extra registers) -- see the MFMA variant note.
+        reuse = writer.states.subtileRecomputeCoords
         # alloc resources
-        tid0 = writer.vgprPool.checkOut(1, "coord0")
-        tid1 = writer.vgprPool.checkOut(1, "coord1")
-        if kernel["BufferStore"]:
-            writer.vgprs.cinRowPtr  = writer.vgprPool.checkOut(1, "cinRowPtr")
-            writer.vgprs.coutRowPtrD = writer.vgprPool.checkOut(1, "coutRowPtrD")
-            if kernel["ProblemType"]["UseE"]:
-                writer.vgprs.coutRowPtrE = writer.vgprPool.checkOut(1, "coutRowPtrE")
-            if writer.states.useBias == DataDirection.WRITE and (not kernel["WorkGroupReduction"]) and kernel["ProblemType"]["BiasSrc"] == "D":
-                writer.vgprs.coutRowPtrBias = writer.vgprPool.checkOut(1, "coutRowPtrBias")
-            if writer.states.useGateResidual:
-                writer.vgprs.coutRowPtrGate = writer.vgprPool.checkOut(1, "coutRowPtrGate")
-        if kernel["LocalSplitU"] > 1:
-            writer.vgprs.coord0InMT = writer.vgprPool.checkOut(1, "coord0InMT")
-            writer.vgprs.coord1InMT = writer.vgprPool.checkOut(1, "coord1InMT")
+        if reuse:
+            tid0 = writer.vgprs.coord0
+            tid1 = writer.vgprs.coord1
         else:
-            writer.vgprs.coord0InMT = tid0
-            writer.vgprs.coord1InMT = tid1
+            tid0 = writer.vgprPool.checkOut(1, "coord0")
+            tid1 = writer.vgprPool.checkOut(1, "coord1")
+            if kernel["BufferStore"]:
+                writer.vgprs.cinRowPtr  = writer.vgprPool.checkOut(1, "cinRowPtr")
+                writer.vgprs.coutRowPtrD = writer.vgprPool.checkOut(1, "coutRowPtrD")
+                if kernel["ProblemType"]["UseE"]:
+                    writer.vgprs.coutRowPtrE = writer.vgprPool.checkOut(1, "coutRowPtrE")
+                if writer.states.useBias == DataDirection.WRITE and (not kernel["WorkGroupReduction"]) and kernel["ProblemType"]["BiasSrc"] == "D":
+                    writer.vgprs.coutRowPtrBias = writer.vgprPool.checkOut(1, "coutRowPtrBias")
+                if writer.states.useGateResidual:
+                    writer.vgprs.coutRowPtrGate = writer.vgprPool.checkOut(1, "coutRowPtrGate")
+            if kernel["LocalSplitU"] > 1:
+                writer.vgprs.coord0InMT = writer.vgprPool.checkOut(1, "coord0InMT")
+                writer.vgprs.coord1InMT = writer.vgprPool.checkOut(1, "coord1InMT")
+            else:
+                writer.vgprs.coord0InMT = tid0
+                writer.vgprs.coord1InMT = tid1
         lsuTid0 = writer.vgprs.coord0InMT
         lsuTid1 = writer.vgprs.coord1InMT
 
@@ -344,11 +367,16 @@ class ComputeStoreVgprsMFMASwap(ComputeStoreVgprs):
 
             # coord 0 : wave part
             module.add(vectorStaticRemainder(dummy, tid0, wave_id, kernel["MIWaveGroup"][0], tmpVgpr1Res, tmpSgprInfo))
-            module.add(VMulLOU32(dst=vgpr(tid0), src0=hex(MIBShape0), src1=vgpr(tid0), comment="wave coordination offset 0"))
+            waveRows = MIBShape0 * kernel["MIWaveTile"][0] if kernel.get("WaveTileContiguousA") else MIBShape0
+            module.add(VMulLOU32(dst=vgpr(tid0), src0=hex(waveRows), src1=vgpr(tid0), comment="wave coordination offset 0"))
 
             # coord 0 : thread part
             module.add(vectorStaticRemainder(dummy, tmpVgpr0, "Serial", matrixInstM, tmpVgpr1Res, tmpSgprInfo))
-            module.add(VAddLShiftLeftU32(dst=vgpr(lsuTid0), src0=vgpr(tmpVgpr0), src1=vgpr(tid0), shiftHex=log2(kernel["VectorWidthA"]), comment="coordination 0 = vwA * (wave_id0 + tid0)"))
+            if kernel.get("WaveTileContiguousA"):
+                module.add(VAndB32(dst=vgpr(tmpVgpr0), src0=15, src1=vgpr(tmpVgpr0)))
+                module.add(VAddU32(dst=vgpr(lsuTid0), src0=vgpr(tmpVgpr0), src1=vgpr(tid0)))
+            else:
+                module.add(VAddLShiftLeftU32(dst=vgpr(lsuTid0), src0=vgpr(tmpVgpr0), src1=vgpr(tid0), shiftHex=log2(kernel["VectorWidthA"]), comment="coordination 0 = vwA * (wave_id0 + tid0)"))
 
             wg0="WorkGroup0"
             wg1="WorkGroup1"

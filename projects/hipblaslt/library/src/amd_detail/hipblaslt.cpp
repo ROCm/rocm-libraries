@@ -31,6 +31,7 @@
 #include "handle.h"
 #include "hipblaslt/hipblaslt-ext-op.h"
 #include "hipblaslt_internal.hpp"
+#include "rocblaslt_mat_utils.hpp"
 
 #include <hip/hip_runtime_api.h>
 #include <iostream>
@@ -78,16 +79,187 @@ hipblasStatus_t RocBlasLtStatusToHIPStatus(rocblaslt_status_ status)
     }
 }
 
+hipblasStatus_t refuse_unsupported_order(const char*      caller,
+                                         hipblasLtOrder_t orderA,
+                                         hipblasLtOrder_t orderB,
+                                         hipblasLtOrder_t orderC,
+                                         hipblasLtOrder_t orderD)
+{
+    const hipblasLtOrder_t orders[] = {orderA, orderB, orderC, orderD};
+    const char* const      names[]  = {"A", "B", "C", "D"};
+    for(int i = 0; i < 4; ++i)
+    {
+        if(orders[i] == HIPBLASLT_ORDER_ROW)
+        {
+            log_error(caller,
+                      "HIPBLASLT_ORDER_ROW is not supported for a matmul; only "
+                      "hipblasLtMatrixTransform accepts it",
+                      "matrix",
+                      names[i]);
+            return HIPBLAS_STATUS_NOT_SUPPORTED;
+        }
+    }
+    // The kernels write D, and read C, column-major only. Swizzled orders exist for A and B.
+    for(int i = 2; i < 4; ++i)
+    {
+        if(orders[i] != HIPBLASLT_ORDER_COL)
+        {
+            log_error(caller,
+                      "C and D must be HIPBLASLT_ORDER_COL",
+                      "matrix",
+                      names[i],
+                      "order",
+                      int(orders[i]));
+            return HIPBLAS_STATUS_NOT_SUPPORTED;
+        }
+    }
+    return HIPBLAS_STATUS_SUCCESS;
+}
+
+hipblasStatus_t refuse_unsupported_order(const char*             caller,
+                                         rocblaslt_matrix_layout matA,
+                                         rocblaslt_matrix_layout matB,
+                                         rocblaslt_matrix_layout matC,
+                                         rocblaslt_matrix_layout matD)
+{
+    // A null layout is reported by the caller's own validation.
+    for(auto mat : {matA, matB, matC, matD})
+        if(!mat)
+            return HIPBLAS_STATUS_SUCCESS;
+
+    return refuse_unsupported_order(caller, matA->order, matB->order, matC->order, matD->order);
+}
+
+bool gemm_pointers_missing(int64_t                m,
+                           int64_t                n,
+                           int64_t                k,
+                           int64_t                batchCount,
+                           bool                   grouped,
+                           rocblaslt_compute_type computeType,
+                           hipDataType            scaleType,
+                           hipDataType            typeA,
+                           rocblaslt_pointer_mode pointerMode,
+                           const void*            alpha,
+                           const void*            beta,
+                           const void*            A,
+                           const void*            B,
+                           const void*            C,
+                           const void*            D)
+{
+    // validateMatmulArgs returns early for an empty problem, before it checks pointers.
+    if(!m || !batchCount)
+        return false;
+    if(!beta)
+        return true;
+    // After validateMatmulArgs, groupedGemmCreate requires every pointer of a GEMM with n > 0,
+    // and gemmCreate requires alpha, C, and D whatever n and k are, and A and B unless a host
+    // alpha of 0 makes them unused.
+    if(grouped)
+        return n && (!alpha || !A || !B || !C || !D);
+    return !alpha || !C || !D
+           || alphaForbidsNullAB(
+               alphaBetaScalarType(scaleType, computeType, typeA), pointerMode, alpha, A, B);
+}
+
+bool gemm_pointers_missing(bool                    grouped,
+                           rocblaslt_matmul_desc   desc,
+                           rocblaslt_matrix_layout matA,
+                           rocblaslt_matrix_layout matB,
+                           rocblaslt_matrix_layout matC,
+                           rocblaslt_matrix_layout matD,
+                           const void*             alpha,
+                           const void*             beta,
+                           const void*             A,
+                           const void*             B,
+                           const void*             C,
+                           const void*             D)
+{
+    if(!desc || !matA || !matB || !matC || !matD)
+        return true;
+    return gemm_pointers_missing(matD->m,
+                                 matD->n,
+                                 desc->op_A == HIPBLAS_OP_N ? matA->n : matA->m,
+                                 matA->batch_count,
+                                 grouped,
+                                 desc->compute_type,
+                                 desc->scale_type,
+                                 matA->type,
+                                 desc->pointermode,
+                                 alpha,
+                                 beta,
+                                 A,
+                                 B,
+                                 C,
+                                 D);
+}
+
+namespace
+{
+    // The arguments rocblaslt_matmul checks before anything else. A missing one keeps its
+    // usual status rather than being reported as an unsupported order.
+    bool matmul_arguments_present(hipblasLtHandle_t       handle,
+                                  hipblasLtMatmulDesc_t   matmulDesc,
+                                  const void*             alpha,
+                                  const void*             A,
+                                  hipblasLtMatrixLayout_t matA,
+                                  const void*             B,
+                                  hipblasLtMatrixLayout_t matB,
+                                  const void*             beta,
+                                  const void*             C,
+                                  hipblasLtMatrixLayout_t matC,
+                                  void*                   D,
+                                  hipblasLtMatrixLayout_t matD,
+                                  void*                   workspace,
+                                  size_t                  workspaceSizeInBytes)
+    {
+        if(!handle || !matmulDesc || !matA || !matB || !matC || !matD || !alpha || !beta || !C || !D
+           || (!workspace && workspaceSizeInBytes > 0))
+            return false;
+        auto desc = (rocblaslt_matmul_desc)matmulDesc;
+        return !alphaForbidsNullAB(alphaBetaScalarType(desc->scale_type,
+                                                       desc->compute_type,
+                                                       ((rocblaslt_matrix_layout)matA)->type),
+                                   desc->pointermode,
+                                   alpha,
+                                   A,
+                                   B);
+    }
+
+    // rocblaslt_matmul and rocblaslt_matmul_algo_get_heuristic send a call with any grouped
+    // layout to the grouped path, which refuses every order but COL itself.
+    bool any_grouped(hipblasLtMatrixLayout_t matA,
+                     hipblasLtMatrixLayout_t matB,
+                     hipblasLtMatrixLayout_t matC,
+                     hipblasLtMatrixLayout_t matD)
+    {
+        for(auto mat : {matA, matB, matC, matD})
+            if(mat && ((rocblaslt_matrix_layout)mat)->batch_mode == HIPBLASLT_BATCH_MODE_GROUPED)
+                return true;
+        return false;
+    }
+
+    // The arguments rocblaslt_matmul_algo_get_heuristic checks before anything else.
+    bool heuristic_arguments_present(hipblasLtHandle_t           handle,
+                                     hipblasLtMatmulDesc_t       matmulDesc,
+                                     hipblasLtMatmulPreference_t pref,
+                                     int                         requestedAlgoCount,
+                                     int*                        returnAlgoCount)
+    {
+        return handle && matmulDesc && pref && returnAlgoCount && requestedAlgoCount >= 1;
+    }
+} // namespace
+
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
 /********************************************************************************
- * Fused epilogue descriptor.
+ * Fusion descriptor.
  *
  * Opaque to the caller. Its contents are read only here, in the C-API layer that
  * knows what the stages mean; rocBLASLt carries it as a forward-declared pointer.
  *******************************************************************************/
-struct hipblasLtFusedEpilogueDescriptor
+struct hipblasLtFusionDescriptor
 {
     std::vector<hipblasLtFuseableEpilogue_t> stages;
+    std::vector<hipblasLtFuseablePrologue_t> prologue_stages;
 
     // HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX parameters. The per-rank arrays are
     // sized by the caller's SetAttribute call; that their length is the
@@ -98,15 +270,26 @@ struct hipblasLtFusedEpilogueDescriptor
     uint32_t                          comm_channel   = 0;
     std::vector<void*>                a2a_recv_ptrs;
     std::vector<hipblasLtSdmaQueue_t> a2a_queues;
+
+    // HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX parameters.
+    std::vector<void*> a2a_peer_b_ptrs;
+    void*              a2a_gather_buffer = nullptr;
 };
 
 namespace
 {
-    bool fused_epilogue_has_stage(const hipblasLtFusedEpilogueDescriptor* d,
-                                  hipblasLtFuseableEpilogue_t             e)
+    bool fused_epilogue_has_stage(const hipblasLtFusionDescriptor* d, hipblasLtFuseableEpilogue_t e)
     {
         for(auto s : d->stages)
             if(s == e)
+                return true;
+        return false;
+    }
+
+    bool fused_prologue_has_stage(const hipblasLtFusionDescriptor* d, hipblasLtFuseablePrologue_t p)
+    {
+        for(auto s : d->prologue_stages)
+            if(s == p)
                 return true;
         return false;
     }
@@ -121,13 +304,23 @@ namespace
         return false;
     }
 
+    bool fused_prologue_stage_recognized(hipblasLtFuseablePrologue_t stage)
+    {
+        switch(stage)
+        {
+        case HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX:
+            return true;
+        }
+        return false;
+    }
+
     // The collective family holds one stage and composes with nothing. Rejecting a
     // companion here rather than at launch is deliberate: the caller is asking for
     // something the API does not define, so it should learn that at the call that
     // expresses the mistake. Legalizing a combination later turns this into
     // success, which is the compatible direction.
-    bool fused_epilogue_stage_composes(const hipblasLtFusedEpilogueDescriptor* desc,
-                                       hipblasLtFuseableEpilogue_t             stage)
+    bool fused_epilogue_stage_composes(const hipblasLtFusionDescriptor* desc,
+                                       hipblasLtFuseableEpilogue_t      stage)
     {
         if(desc->stages.empty())
             return true;
@@ -139,7 +332,7 @@ namespace
     // Every stage present must have the parameters it cannot run without. World
     // size is not known here, so the per-rank arrays are checked for content but
     // not length; validate_fused_a2a_launch compares both against it.
-    hipblasStatus_t validate_fused_epilogue_contents(const hipblasLtFusedEpilogueDescriptor* desc)
+    hipblasStatus_t validate_fused_epilogue_contents(const hipblasLtFusionDescriptor* desc)
     {
         if(!fused_epilogue_has_stage(desc, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX))
             return HIPBLAS_STATUS_SUCCESS;
@@ -180,9 +373,9 @@ namespace
     // n_shard % MT0 == 0, MT1 < 2^14, MT0/MT1 in {128, 256}, data-parallel only,
     // and no split-K - are enforced by the kernel generator as solution
     // rejections, so they become "no usable algo" rather than a return code here.
-    hipblasStatus_t validate_fused_a2a_launch(rocblaslt_handle                        handle,
-                                              const hipblasLtFusedEpilogueDescriptor* desc,
-                                              rocblaslt_matrix_layout                 matD)
+    hipblasStatus_t validate_fused_a2a_launch(rocblaslt_handle                 handle,
+                                              const hipblasLtFusionDescriptor* desc,
+                                              rocblaslt_matrix_layout          matD)
     {
         if(handle == nullptr || matD == nullptr)
             return HIPBLAS_STATUS_INVALID_VALUE;
@@ -261,27 +454,124 @@ namespace
         return HIPBLAS_STATUS_SUCCESS;
     }
 
-    // Runs the checks a matmul carrying a fused epilogue owes before it is
-    // dispatched. A descriptor with no communicating stage passes through.
+    hipblasStatus_t validate_fused_prologue_launch(rocblaslt_handle                 handle,
+                                                   const hipblasLtFusionDescriptor* desc,
+                                                   rocblaslt_matrix_layout          matB,
+                                                   rocblaslt_matrix_layout          matD)
+    {
+        if(handle == nullptr || matB == nullptr || matD == nullptr)
+            return HIPBLAS_STATUS_INVALID_VALUE;
+
+        const uint32_t world = handle->device_comm_world;
+        if(world == 0)
+        {
+            log_error(__func__, "all-to-all stage requires hipblasLtSetDeviceComm on this handle");
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        }
+
+        if(desc->comm_channel >= handle->device_comm_channels)
+        {
+            log_error(__func__, "comm channel out of range", (int)desc->comm_channel);
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        }
+
+        if(desc->a2a_peer_b_ptrs.size() != world)
+        {
+            log_error(__func__, "all-to-all peer-B array does not have world entries");
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        }
+        for(size_t j = 0; j < desc->a2a_peer_b_ptrs.size(); ++j)
+        {
+            if(j != handle->device_comm_rank && desc->a2a_peer_b_ptrs[j] == nullptr)
+            {
+                log_error(__func__, "null all-to-all peer-B pointer for rank", (int)j);
+                return HIPBLAS_STATUS_INVALID_VALUE;
+            }
+        }
+
+        if(desc->a2a_gather_buffer == nullptr)
+        {
+            log_error(__func__, "all-to-all prologue is missing its gather buffer");
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        }
+
+        if(!desc->a2a_queues.empty())
+        {
+            if(desc->a2a_queues.size() != world)
+            {
+                log_error(__func__, "all-to-all SDMA queue array does not have world entries");
+                return HIPBLAS_STATUS_INVALID_VALUE;
+            }
+            for(size_t j = 0; j < desc->a2a_queues.size(); ++j)
+            {
+                const hipblasLtSdmaQueue_t& q = desc->a2a_queues[j];
+                if(j != handle->device_comm_rank
+                   && (q.queueBuf == nullptr || q.rptr == nullptr || q.wptr == nullptr
+                       || q.doorbell == nullptr))
+                {
+                    log_error(__func__, "incomplete all-to-all SDMA queue for rank", (int)j);
+                    return HIPBLAS_STATUS_INVALID_VALUE;
+                }
+            }
+        }
+
+        if(matB->batch_count > 1 || matD->batch_count > 1)
+        {
+            log_error(__func__, "all-to-all does not support batched GEMM");
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        }
+
+        if(matB->type != HIP_R_16BF)
+        {
+            log_error(__func__, "all-to-all prologue supports a BF16 B only", (int)matB->type);
+            return HIPBLAS_STATUS_NOT_SUPPORTED;
+        }
+
+        return HIPBLAS_STATUS_SUCCESS;
+    }
+
+    // Runs the checks a matmul carrying a fused epilogue or prologue owes before
+    // it is dispatched. A descriptor with no communicating stage passes through.
     hipblasStatus_t validate_fused_epilogue_dispatch(hipblasLtHandle_t       handle,
                                                      hipblasLtMatmulDesc_t   matmulDesc,
+                                                     hipblasLtMatrixLayout_t Bdesc,
                                                      hipblasLtMatrixLayout_t Ddesc)
     {
         if(matmulDesc == nullptr)
             return HIPBLAS_STATUS_SUCCESS;
 
-        const hipblasLtFusedEpilogueDescriptor* desc
-            = ((rocblaslt_matmul_desc)matmulDesc)->fused_epilogue;
-        if(desc == nullptr
-           || !fused_epilogue_has_stage(desc, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX))
+        const rocblaslt_matmul_desc desc = (rocblaslt_matmul_desc)matmulDesc;
+        RocblasltFusedEpilogueInfo  info;
+        if(!rocblaslt_resolve_fused_epilogue(desc->fused_epilogue, desc->fused_prologue, info))
             return HIPBLAS_STATUS_SUCCESS;
 
-        const hipblasStatus_t contents = validate_fused_epilogue_contents(desc);
-        if(contents != HIPBLAS_STATUS_SUCCESS)
-            return contents;
+        if(info.misattached)
+        {
+            log_error(__func__,
+                      "fused stages attached through the wrong attribute, or an all-to-all on "
+                      "both sides");
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        }
 
-        return validate_fused_a2a_launch(
-            (rocblaslt_handle)handle, desc, (rocblaslt_matrix_layout)Ddesc);
+        switch(info.mode)
+        {
+        case RocblasltFusedEpilogueInfo::Mode::GemmA2A:
+        {
+            const hipblasStatus_t contents = validate_fused_epilogue_contents(desc->fused_epilogue);
+            if(contents != HIPBLAS_STATUS_SUCCESS)
+                return contents;
+            return validate_fused_a2a_launch(
+                (rocblaslt_handle)handle, desc->fused_epilogue, (rocblaslt_matrix_layout)Ddesc);
+        }
+        case RocblasltFusedEpilogueInfo::Mode::A2AGemm:
+            return validate_fused_prologue_launch((rocblaslt_handle)handle,
+                                                  desc->fused_prologue,
+                                                  (rocblaslt_matrix_layout)Bdesc,
+                                                  (rocblaslt_matrix_layout)Ddesc);
+        case RocblasltFusedEpilogueInfo::Mode::Disabled:
+            break;
+        }
+        return HIPBLAS_STATUS_SUCCESS;
     }
 
     /****************************************************************************
@@ -334,21 +624,50 @@ namespace
     }
 }
 
-// The two pointers alias the descriptor's own storage; they stay valid only as long as
+// The pointers alias the descriptor's own storage; they stay valid only as long as
 // the descriptor does.
-bool rocblaslt_resolve_fused_epilogue(const hipblasLtFusedEpilogueDescriptor* desc,
-                                      RocblasltFusedEpilogueInfo&             out)
+bool rocblaslt_resolve_fused_epilogue(const hipblasLtFusionDescriptor* epilogue,
+                                      const hipblasLtFusionDescriptor* prologue,
+                                      RocblasltFusedEpilogueInfo&      out)
 {
-    if(desc == nullptr)
+    if(epilogue == nullptr && prologue == nullptr)
         return false;
 
-    out.hasA2APrefix = fused_epilogue_has_stage(desc, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX);
-    out.a2aSdmaQueues = desc->a2a_queues.empty() ? nullptr : desc->a2a_queues.data();
-    out.a2aRecvPtrs = desc->a2a_recv_ptrs.empty() ? nullptr : desc->a2a_recv_ptrs.data();
+    const bool gemmA2A
+        = epilogue && fused_epilogue_has_stage(epilogue, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX);
+    const bool a2aGemm
+        = prologue && fused_prologue_has_stage(prologue, HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX);
+
+    out.misattached = (epilogue && !epilogue->prologue_stages.empty())
+                      || (prologue && !prologue->stages.empty()) || (gemmA2A && a2aGemm);
+    out.mode = a2aGemm   ? RocblasltFusedEpilogueInfo::Mode::A2AGemm
+               : gemmA2A ? RocblasltFusedEpilogueInfo::Mode::GemmA2A
+                         : RocblasltFusedEpilogueInfo::Mode::Disabled;
+
+    const hipblasLtFusionDescriptor* desc = a2aGemm || epilogue == nullptr ? prologue : epilogue;
+    out.a2aSdmaQueues     = desc->a2a_queues.empty() ? nullptr : desc->a2a_queues.data();
+    out.a2aRecvPtrs       = desc->a2a_recv_ptrs.empty() ? nullptr : desc->a2a_recv_ptrs.data();
+    out.a2aPeerBPtrs      = desc->a2a_peer_b_ptrs.empty() ? nullptr : desc->a2a_peer_b_ptrs.data();
+    out.a2aPeerBCount     = desc->a2a_peer_b_ptrs.size();
+    out.a2aGatherBuffer   = desc->a2a_gather_buffer;
     out.a2aExtent         = desc->a2a_extent;
     out.a2aCompletionMode = desc->a2a_completion;
     out.commChannel       = desc->comm_channel;
     return true;
+}
+
+rocblaslt_status rocblaslt_validate_fused_epilogue_dispatch(rocblaslt_handle        handle,
+                                                            rocblaslt_matmul_desc   matmulDesc,
+                                                            rocblaslt_matrix_layout matB,
+                                                            rocblaslt_matrix_layout matD)
+{
+    return validate_fused_epilogue_dispatch((hipblasLtHandle_t)handle,
+                                            (hipblasLtMatmulDesc_t)matmulDesc,
+                                            (hipblasLtMatrixLayout_t)matB,
+                                            (hipblasLtMatrixLayout_t)matD)
+                   == HIPBLAS_STATUS_SUCCESS
+               ? rocblaslt_status_success
+               : rocblaslt_status_invalid_value;
 }
 #endif
 
@@ -559,6 +878,30 @@ catch(...)
     return exception_to_hipblas_status();
 }
 
+hipblasStatus_t hipblasLtGroupedMatrixLayoutCreate(hipblasLtMatrixLayout_t* matLayout,
+                                                   hipDataType              type,
+                                                   int                      groupCount,
+                                                   const void*              rowsArray,
+                                                   const void*              colsArray,
+                                                   const void*              ldArray)
+try
+{
+    rocblaslt::Debug::Instance().markerStart("hipblasLtGroupedMatrixLayoutCreate");
+    auto status = RocBlasLtStatusToHIPStatus(
+        rocblaslt_grouped_matrix_layout_create((rocblaslt_matrix_layout*)matLayout,
+                                               type,
+                                               groupCount,
+                                               rowsArray,
+                                               colsArray,
+                                               ldArray));
+    rocblaslt::Debug::Instance().markerStop();
+    return status;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
 hipblasStatus_t hipblasLtMatrixLayoutDestroy(const hipblasLtMatrixLayout_t descr)
 try
 {
@@ -726,17 +1069,17 @@ catch(...)
 }
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-hipblasStatus_t hipblasLtFusedEpilogueCreate(hipblasLtFusedEpilogueDescriptor_t* desc)
+hipblasStatus_t hipblasLtFusionCreate(hipblasLtFusionDescriptor_t* desc)
 try
 {
-    rocblaslt::Debug::Instance().markerStart("hipblasLtFusedEpilogueCreate");
+    rocblaslt::Debug::Instance().markerStart("hipblasLtFusionCreate");
     if(desc == nullptr)
     {
         rocblaslt::Debug::Instance().markerStop();
         return HIPBLAS_STATUS_INVALID_VALUE;
     }
 
-    *desc = new hipblasLtFusedEpilogueDescriptor();
+    *desc = new hipblasLtFusionDescriptor();
     rocblaslt::Debug::Instance().markerStop();
     return HIPBLAS_STATUS_SUCCESS;
 }
@@ -745,11 +1088,11 @@ catch(...)
     return exception_to_hipblas_status();
 }
 
-hipblasStatus_t hipblasLtFusedEpilogueAdd(hipblasLtFusedEpilogueDescriptor_t desc,
-                                          hipblasLtFuseableEpilogue_t        epilogue)
+hipblasStatus_t hipblasLtFusionAddEpilogue(hipblasLtFusionDescriptor_t desc,
+                                           hipblasLtFuseableEpilogue_t epilogue)
 try
 {
-    rocblaslt::Debug::Instance().markerStart("hipblasLtFusedEpilogueAdd");
+    rocblaslt::Debug::Instance().markerStart("hipblasLtFusionAddEpilogue");
     hipblasStatus_t status = HIPBLAS_STATUS_SUCCESS;
 
     if(desc == nullptr || !fused_epilogue_stage_recognized(epilogue))
@@ -757,7 +1100,7 @@ try
         status = HIPBLAS_STATUS_INVALID_VALUE;
     }
     else if(fused_epilogue_has_stage(desc, epilogue)
-            || !fused_epilogue_stage_composes(desc, epilogue))
+            || !fused_epilogue_stage_composes(desc, epilogue) || !desc->prologue_stages.empty())
     {
         log_error(__func__, "epilogue stage does not compose with the stages already added");
         status = HIPBLAS_STATUS_INVALID_VALUE;
@@ -775,13 +1118,42 @@ catch(...)
     return exception_to_hipblas_status();
 }
 
-hipblasStatus_t hipblasLtFusedEpilogueSetAttribute(hipblasLtFusedEpilogueDescriptor_t desc,
-                                                   hipblasLtFusedEpilogueAttribute_t  attr,
-                                                   const void*                        buf,
-                                                   size_t                             sizeInBytes)
+hipblasStatus_t hipblasLtFusionAddPrologue(hipblasLtFusionDescriptor_t desc,
+                                           hipblasLtFuseablePrologue_t prologue)
 try
 {
-    rocblaslt::Debug::Instance().markerStart("hipblasLtFusedEpilogueSetAttribute");
+    rocblaslt::Debug::Instance().markerStart("hipblasLtFusionAddPrologue");
+    hipblasStatus_t status = HIPBLAS_STATUS_SUCCESS;
+
+    if(desc == nullptr || !fused_prologue_stage_recognized(prologue))
+    {
+        status = HIPBLAS_STATUS_INVALID_VALUE;
+    }
+    else if(!desc->prologue_stages.empty() || !desc->stages.empty())
+    {
+        log_error(__func__, "prologue stage does not compose with the stages already added");
+        status = HIPBLAS_STATUS_INVALID_VALUE;
+    }
+    else
+    {
+        desc->prologue_stages.push_back(prologue);
+    }
+
+    rocblaslt::Debug::Instance().markerStop();
+    return status;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
+hipblasStatus_t hipblasLtFusionSetAttribute(hipblasLtFusionDescriptor_t desc,
+                                            hipblasLtFusionAttribute_t  attr,
+                                            const void*                 buf,
+                                            size_t                      sizeInBytes)
+try
+{
+    rocblaslt::Debug::Instance().markerStart("hipblasLtFusionSetAttribute");
     hipblasStatus_t status = HIPBLAS_STATUS_SUCCESS;
 
     if(desc == nullptr || buf == nullptr)
@@ -792,7 +1164,7 @@ try
 
     switch(attr)
     {
-    case HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT:
+    case HIPBLASLT_FUSION_A2A_EXTENT:
     {
         if(sizeInBytes < sizeof(int64_t))
         {
@@ -812,7 +1184,7 @@ try
         desc->a2a_extent_set = true;
         break;
     }
-    case HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_COMPLETION_MODE:
+    case HIPBLASLT_FUSION_A2A_COMPLETION_MODE:
     {
         if(sizeInBytes < sizeof(hipblasLtA2ACompletionMode_t))
         {
@@ -831,7 +1203,7 @@ try
         desc->a2a_completion = mode;
         break;
     }
-    case HIPBLASLT_FUSED_EPILOGUE_COMM_CHANNEL:
+    case HIPBLASLT_FUSION_COMM_CHANNEL:
     {
         if(sizeInBytes < sizeof(uint32_t))
         {
@@ -845,7 +1217,7 @@ try
         memcpy(&desc->comm_channel, buf, sizeof(desc->comm_channel));
         break;
     }
-    case HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS:
+    case HIPBLASLT_FUSION_A2A_RECV_PTRS:
     {
         if(sizeInBytes == 0 || sizeInBytes % sizeof(void*) != 0
            || sizeInBytes / sizeof(void*) > HIPBLASLT_DEVICE_COMM_MAX_WORLD)
@@ -859,7 +1231,7 @@ try
         memcpy(desc->a2a_recv_ptrs.data(), buf, sizeInBytes);
         break;
     }
-    case HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES:
+    case HIPBLASLT_FUSION_A2A_SDMA_QUEUES:
     {
         if(sizeInBytes == 0 || sizeInBytes % sizeof(hipblasLtSdmaQueue_t) != 0
            || sizeInBytes / sizeof(hipblasLtSdmaQueue_t) > HIPBLASLT_DEVICE_COMM_MAX_WORLD)
@@ -873,8 +1245,41 @@ try
         memcpy(desc->a2a_queues.data(), buf, sizeInBytes);
         break;
     }
+    case HIPBLASLT_FUSION_A2A_PEER_B_PTRS:
+    {
+        if(sizeInBytes == 0 || sizeInBytes % sizeof(void*) != 0
+           || sizeInBytes / sizeof(void*) > HIPBLASLT_DEVICE_COMM_MAX_WORLD)
+        {
+            log_error(__func__, "invalid all-to-all peer-B array size", sizeInBytes);
+            status = HIPBLAS_STATUS_INVALID_VALUE;
+            break;
+        }
+        const size_t count = sizeInBytes / sizeof(void*);
+        desc->a2a_peer_b_ptrs.assign(count, nullptr);
+        memcpy(desc->a2a_peer_b_ptrs.data(), buf, sizeInBytes);
+        break;
+    }
+    case HIPBLASLT_FUSION_A2A_GATHER_BUFFER:
+    {
+        if(sizeInBytes < sizeof(void*))
+        {
+            log_error(__func__, "invalid all-to-all gather buffer buf size", sizeInBytes);
+            status = HIPBLAS_STATUS_INVALID_VALUE;
+            break;
+        }
+        void* buffer = nullptr;
+        memcpy(&buffer, buf, sizeof(buffer));
+        if(reinterpret_cast<uintptr_t>(buffer) % 128 != 0)
+        {
+            log_error(__func__, "all-to-all gather buffer must be 128-byte aligned");
+            status = HIPBLAS_STATUS_INVALID_VALUE;
+            break;
+        }
+        desc->a2a_gather_buffer = buffer;
+        break;
+    }
     default:
-        log_error(__func__, "invalid fused epilogue attribute", (int)attr);
+        log_error(__func__, "invalid fusion attribute", (int)attr);
         status = HIPBLAS_STATUS_INVALID_VALUE;
         break;
     }
@@ -887,10 +1292,10 @@ catch(...)
     return exception_to_hipblas_status();
 }
 
-hipblasStatus_t hipblasLtFusedEpilogueDestroy(hipblasLtFusedEpilogueDescriptor_t desc)
+hipblasStatus_t hipblasLtFusionDestroy(hipblasLtFusionDescriptor_t desc)
 try
 {
-    rocblaslt::Debug::Instance().markerStart("hipblasLtFusedEpilogueDestroy");
+    rocblaslt::Debug::Instance().markerStart("hipblasLtFusionDestroy");
     delete desc;
     rocblaslt::Debug::Instance().markerStop();
     return HIPBLAS_STATUS_SUCCESS;
@@ -1145,13 +1550,29 @@ try
     // is judged here: an all-to-all's extent participates in tile selection, so a
     // request that cannot be served must not come back as a usable algo.
     hipblasStatus_t fused_status
-        = validate_fused_epilogue_dispatch(handle, matmulDesc, Ddesc);
+        = validate_fused_epilogue_dispatch(handle, matmulDesc, Bdesc, Ddesc);
     if(fused_status != HIPBLAS_STATUS_SUCCESS)
     {
         rocblaslt::Debug::Instance().markerStop();
         return fused_status;
     }
 #endif
+
+    if(auto order_status
+       = heuristic_arguments_present(handle, matmulDesc, pref, requestedAlgoCount, returnAlgoCount)
+                 && !any_grouped(Adesc, Bdesc, Cdesc, Ddesc)
+             ? refuse_unsupported_order(__func__,
+                                        (rocblaslt_matrix_layout)Adesc,
+                                        (rocblaslt_matrix_layout)Bdesc,
+                                        (rocblaslt_matrix_layout)Cdesc,
+                                        (rocblaslt_matrix_layout)Ddesc)
+             : HIPBLAS_STATUS_SUCCESS;
+       order_status != HIPBLAS_STATUS_SUCCESS)
+    {
+        *returnAlgoCount = 0;
+        rocblaslt::Debug::Instance().markerStop();
+        return order_status;
+    }
 
     auto status = RocBlasLtStatusToHIPStatus(rocblaslt_matmul_algo_get_heuristic(
         (rocblaslt_handle)handle,
@@ -1194,13 +1615,39 @@ try
     hipblasStatus_t return_status = HIPBLAS_STATUS_SUCCESS;
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-    return_status = validate_fused_epilogue_dispatch(handle, matmul_descr, matD);
+    return_status = validate_fused_epilogue_dispatch(handle, matmul_descr, matB, matD);
     if(return_status != HIPBLAS_STATUS_SUCCESS)
     {
         rocblaslt::Debug::Instance().markerStop();
         return return_status;
     }
 #endif
+
+    if(matmul_arguments_present(handle,
+                                matmul_descr,
+                                alpha,
+                                A,
+                                matA,
+                                B,
+                                matB,
+                                beta,
+                                C,
+                                matC,
+                                D,
+                                matD,
+                                workspace,
+                                workspaceSizeInBytes)
+       && !any_grouped(matA, matB, matC, matD))
+        return_status = refuse_unsupported_order(__func__,
+                                                 (rocblaslt_matrix_layout)matA,
+                                                 (rocblaslt_matrix_layout)matB,
+                                                 (rocblaslt_matrix_layout)matC,
+                                                 (rocblaslt_matrix_layout)matD);
+    if(return_status != HIPBLAS_STATUS_SUCCESS)
+    {
+        rocblaslt::Debug::Instance().markerStop();
+        return return_status;
+    }
 
     return_status = RocBlasLtStatusToHIPStatus(rocblaslt_matmul((rocblaslt_handle)handle,
                                                                 (rocblaslt_matmul_desc)matmul_descr,

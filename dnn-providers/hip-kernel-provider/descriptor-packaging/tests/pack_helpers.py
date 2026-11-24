@@ -12,11 +12,12 @@ import os
 import shutil
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
 
-from hkp_pack import pipeline, provenance_sidecar
+from hkp_pack import agreement, pipeline, provenance_sidecar
 from hkp_pack.generic_targets import DEFAULT_TABLE_PATH, GenericTargets
 
 PACKAGING = Path(__file__).resolve().parent.parent
@@ -48,6 +49,14 @@ def _silent(*_args, **_kwargs):
     pass
 
 
+def _restamp(doc):
+    """Re-publish every launch's descriptor digest over an edited shipped document,
+    so only the check under test can refuse it."""
+    binding = agreement.descriptor_binding(doc)
+    for evidence in doc["provenance"]["effective_spec"].values():
+        evidence["descriptor_digest"] = binding
+
+
 # --- Packing ------------------------------------------------------------------
 def _load_kpack(rocm_kpack_dir):
     from hkp_pack.kpack_resolver import load_kpack
@@ -56,13 +65,24 @@ def _load_kpack(rocm_kpack_dir):
     return kpack
 
 
-def _run(source_root, tmp_path, hipcc, rocm_kpack_dir, arches, source_label=None):
+def _run(
+    source_root,
+    tmp_path,
+    hip_compiler,
+    rocm_kpack_dir,
+    arches,
+    source_label=None,
+    hip_path=None,
+    device_lib_path=None,
+):
     """Pack one root. A root holding an `embedded_source` descriptor needs a label."""
     return run_pipeline(
         source_root=source_root,
         arches=list(arches),
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
         source_label=source_label,
@@ -225,3 +245,26 @@ def _conftest_only_paths(candidates):
         for p in candidates
         if p and str(p) in sys.path and os.path.abspath(p) not in env_paths
     ]
+
+
+def _restem_uuid_ids(folder, token):
+    """Give every UUID id under `folder` a distinct, deterministic value.
+
+    Stem substitution cannot reach UUID ids, so copied fixtures would collide.
+    uuid5 keeps repeat packs byte-identical.
+    """
+    ids = set()
+    for path in sorted(folder.rglob("*.json")):
+        did = json.loads(path.read_text(encoding="utf-8")).get("id")
+        try:
+            uuid.UUID(str(did))
+        except (ValueError, AttributeError, TypeError):
+            continue
+        ids.add(did)
+    for path in sorted(folder.rglob("*.json")):
+        text = path.read_text(encoding="utf-8")
+        for did in sorted(ids):
+            text = text.replace(
+                did, str(uuid.uuid5(uuid.NAMESPACE_URL, f"hkp-test/{token}/{did}"))
+            )
+        path.write_text(text, encoding="utf-8")

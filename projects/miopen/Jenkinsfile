@@ -50,7 +50,8 @@ def get_branch_name(){
 ///                            NOCK | NOMLIR | Tensile | Tensile-Latest | Package | ... }
 /// TestSet := { All | Smoke* | <Performance Dataset> | Build-only }
 ///   * "All" corresponds to "cmake -DMIOPEN_TEST_ALL=On".
-///   * "Smoke" (-DMIOPEN_TEST_ALL=Off) is the default and usually not specified.
+///   * "Smoke" (-DMIOPEN_TEST_ALL=Off) is the default and usually not specified. It runs the
+///     Quick* gtest instantiations.
 ///   * "Performance Dataset" is a performance test with a specified dataset.
 /// Target := { gfx908 | gfx90a | gfx942 } [ Xnack+ ]
 
