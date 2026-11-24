@@ -203,7 +203,7 @@ void RC2DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         colPlan->length.push_back(length[index]);
     }
-    colPlan->outputLength = colPlan->length;
+    colPlan->outputLength      = colPlan->length;
     colPlan->legacyOutputOrder = OutputAxisOrder::SWAP_01;
 
     // RC

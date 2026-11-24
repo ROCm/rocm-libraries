@@ -61,7 +61,7 @@ void RTRT3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     trans1Plan->length = length;
     std::swap(trans1Plan->length[1], trans1Plan->length[2]);
     trans1Plan->outputLength = trans1Plan->length;
-    trans1Plan->dimension = 2;
+    trans1Plan->dimension    = 2;
 
     // z fft
     NodeMetaData zPlanData(this);
@@ -74,10 +74,10 @@ void RTRT3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     zPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[2].get());
 
     // second transpose
-    auto trans2Plan    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_Z_XY, this);
-    trans2Plan->length = zPlan->length;
+    auto trans2Plan          = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_Z_XY, this);
+    trans2Plan->length       = zPlan->length;
     trans2Plan->outputLength = trans2Plan->length;
-    trans2Plan->dimension = 2;
+    trans2Plan->dimension    = 2;
 
     // --------------------------------
     // Fuse Shims
@@ -187,7 +187,7 @@ void TRTRTR3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         auto trans_plan    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_Z_XY, this);
         trans_plan->length = cur_length;
         trans_plan->outputLength = trans_plan->length;
-        trans_plan->dimension = 2;
+        trans_plan->dimension    = 2;
 
         std::swap(cur_length[0], cur_length[1]);
         std::swap(cur_length[1], cur_length[2]);
@@ -417,7 +417,7 @@ void BLOCKRC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
             if(!use_ZXY_sbrc)
                 std::swap(trans_plan->length[1], trans_plan->length[2]);
             trans_plan->outputLength = trans_plan->length;
-            trans_plan->dimension = 2;
+            trans_plan->dimension    = 2;
 
             // RT
             childNodes.emplace_back(std::move(row_plan));
@@ -644,14 +644,14 @@ void RC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         if(pool.has_SBCC_kernel(length[2], precision))
         {
-            zPlan            = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CC, this);
-            zPlan->length    = zPlanData.length;
+            zPlan         = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CC, this);
+            zPlan->length = zPlanData.length;
             zPlan->outputLength = zPlan->length;
-            zPlan->dimension = 1;
+            zPlan->dimension    = 1;
         }
         else
         {
-            zPlan = NodeFactory::CreateExplicitNode(zPlanData, this);
+            zPlan                    = NodeFactory::CreateExplicitNode(zPlanData, this);
             zPlan->legacyOutputOrder = OutputAxisOrder::ROTATE_LEFT_3;
             zPlan->RecursiveBuildTree(nullptr);
         }

@@ -252,7 +252,7 @@ void BluesteinNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         {
             fftmulPlan->length.push_back(length[index]);
         }
-        fftmulPlan->blue = blue;
+        fftmulPlan->blue         = blue;
         fftmulPlan->outputLength = fftmulPlan->length;
 
         NodeMetaData fftrPlanData(this);
@@ -271,10 +271,10 @@ void BluesteinNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         fftrPlan->allowOutofplace = false;
         fftrPlan->RecursiveBuildTree();
 
-        auto resmulPlan       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_RES_MUL, this);
-        resmulPlan->dimension = 1;
-        resmulPlan->length    = length;
-        resmulPlan->blue      = blue;
+        auto resmulPlan          = NodeFactory::CreateNodeFromScheme(CS_KERNEL_RES_MUL, this);
+        resmulPlan->dimension    = 1;
+        resmulPlan->length       = length;
+        resmulPlan->blue         = blue;
         resmulPlan->outputLength = resmulPlan->length;
 
         childNodes.emplace_back(std::move(chirpPlan));

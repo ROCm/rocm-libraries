@@ -485,9 +485,9 @@ void TreeNode::CollapseContiguousDims()
             const auto del_idx  = std::min(*first_axis_it, *second_axis_it);
             // note: del_idx < length.size() by construction
 
-            auto& keep_ilength      = keep_idx < length.size() ? length[keep_idx] : batch;
-            auto& keep_istride      = keep_idx < length.size() ? inStride[keep_idx] : iDist;
-            auto& keep_ostride      = keep_idx < length.size() ? outStride[keep_idx] : oDist;
+            auto& keep_ilength = keep_idx < length.size() ? length[keep_idx] : batch;
+            auto& keep_istride = keep_idx < length.size() ? inStride[keep_idx] : iDist;
+            auto& keep_ostride = keep_idx < length.size() ? outStride[keep_idx] : oDist;
             auto& keep_olength = keep_idx < length.size() ? collapseOutputLength[keep_idx] : batch;
             const auto& del_ilength = del_idx < length.size() ? length[del_idx] : batch;
             const auto& del_istride = del_idx < length.size() ? inStride[del_idx] : iDist;

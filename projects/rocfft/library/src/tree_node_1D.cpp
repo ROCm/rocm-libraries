@@ -355,7 +355,7 @@ void CC1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         col2colPlan->length.push_back(length[index]);
     }
-    col2colPlan->outputLength = col2colPlan->length;
+    col2colPlan->outputLength      = col2colPlan->length;
     col2colPlan->legacyOutputOrder = OutputAxisOrder::SWAP_01;
 
     // second plan, row-to-column
@@ -621,7 +621,7 @@ void CRT1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         col2colPlan->length.push_back(length[index]);
     }
-    col2colPlan->outputLength = col2colPlan->length;
+    col2colPlan->outputLength      = col2colPlan->length;
     col2colPlan->legacyOutputOrder = OutputAxisOrder::SWAP_01;
 
     // second plan, row-to-row

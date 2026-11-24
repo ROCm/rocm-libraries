@@ -1326,7 +1326,7 @@ protected:
     TransposeNode(TreeNode* p, ComputeScheme s)
         : LeafNode(p, s)
     {
-        allowInplace = false;
+        allowInplace      = false;
         legacyOutputOrder = PackedOutputOrder(s);
     }
 

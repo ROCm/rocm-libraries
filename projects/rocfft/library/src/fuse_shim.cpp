@@ -253,7 +253,7 @@ std::unique_ptr<TreeNode> RTFuseShim::FuseKernels()
         fused->outStride[1] = transpose->outStride[2];
         fused->outStride[2] = transpose->outStride[0];
     }
-    fused->outputLength = transpose->outputLength;
+    fused->outputLength      = transpose->outputLength;
     fused->legacyOutputOrder = transpose->legacyOutputOrder;
 
     return fused;
@@ -542,8 +542,8 @@ std::unique_ptr<TreeNode> TransC2R_FuseShim::FuseKernels()
     fused->placement    = rocfft_placement_notinplace;
     fused->outArrayType = c2r->outArrayType;
     // fused->obOut            = c2r->obOut; // move to later with comment
-    fused->oDist     = c2r->oDist;
-    fused->outStride = c2r->outStride;
+    fused->oDist        = c2r->oDist;
+    fused->outStride    = c2r->outStride;
     fused->outputLength = c2r->outputLength;
     fused->dimension    = transpose->dimension;
     // Move the standalone C2R's leading real-transform axis to the end.

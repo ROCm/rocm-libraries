@@ -2393,15 +2393,15 @@ size_t rocfft_plan_t::C2CBrickOneDimension(size_t                         dimIdx
     transformLengths.pop_back();
     transformStride.pop_back();
 
-    rootPlanData.dimension = 1;
-    rootPlanData.length    = transformLengths;
+    rootPlanData.dimension    = 1;
+    rootPlanData.length       = transformLengths;
     rootPlanData.outputLength = transformLengths;
-    rootPlanData.inStride  = transformStride;
-    rootPlanData.outStride = transformStride;
-    rootPlanData.direction = transformType == rocfft_transform_type_complex_forward
+    rootPlanData.inStride     = transformStride;
+    rootPlanData.outStride    = transformStride;
+    rootPlanData.direction    = transformType == rocfft_transform_type_complex_forward
                                      || transformType == rocfft_transform_type_real_forward
-                                 ? -1
-                                 : 1;
+                                    ? -1
+                                    : 1;
     rootPlanData.placement
         = input == output ? rocfft_placement_inplace : rocfft_placement_notinplace;
     rootPlanData.precision         = precision;
