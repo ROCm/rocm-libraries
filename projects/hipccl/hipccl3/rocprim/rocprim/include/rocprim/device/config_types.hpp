@@ -644,15 +644,26 @@ private:
 
     static constexpr int best_score = std::max({match_target(Ts{}, cur_gen, cur_arch)...});
 
+    // An amdgcn device pass for an arch that get_target_arch_from_name does not know.
+    // host_target_arch reports the same arch as unknown at run time, and an unknown arch
+    // always selects the fallback config, so the best_score == 0 branch below builds
+    // only that one instead of every config.
+    static constexpr bool is_amdgcn_device_pass =
+#if defined(__amdgcn_processor__) && (!defined(ROCPRIM_TARGET_SPIRV) || ROCPRIM_TARGET_SPIRV == 0)
+        true;
+#else
+        false;
+#endif
+
     template<typename T, typename F>
     static constexpr void call_if_selected(F& f)
     {
         constexpr T t{};
 
-        if constexpr(cur_arch == target_arch::unknown)
+        if constexpr(cur_arch == target_arch::unknown && !is_amdgcn_device_pass)
         {
-            // Compile time unrecognized arch: nothing to filter against.
-            // It will build all the kernels.
+            // Host pass or SPIR-V: the device is only known at run time, so any kernel
+            // may be launched and all of them are built.
             f(t);
         }
         else if constexpr(best_score == 0)
