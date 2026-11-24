@@ -26,6 +26,8 @@ else this install tree),
 AMDGPU_TARGETS / AMDGPU_FAMILIES, optional ROCJITSU_REPORT_DIR,
 ROCJITSU_SUITE_TIMEOUT / ROCJITSU_SUITE_GRACE (seconds), PYTEST_TEST_TIMEOUT,
 PYTEST_NUM_WORKERS, SHARD_INDEX / TOTAL_SHARDS, GITHUB_STEP_SUMMARY.
+ROCJITSU_GTEST=1 runs a gtest binary instead of pytest: one process with every
+core, gtest sharding from SHARD_INDEX / TOTAL_SHARDS, and a summary from its XML.
 """
 
 import contextlib
@@ -38,6 +40,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import xml.etree.ElementTree as ET
 
 HERE = Path(__file__).resolve().parent
 
@@ -158,7 +161,9 @@ def emulation_setup(env, cores, report_dir, memory=None):
         if not required.exists():
             raise SystemExit(f"missing from the ROCm install: {required}")
 
-    workers, budget = split_cpus(cores, memory)
+    gtest = env.get("ROCJITSU_GTEST") == "1"
+    # A gtest binary is one process: give it every core.
+    workers, budget = (1, cores) if gtest else split_cpus(cores, memory)
     report_dir.mkdir(parents=True, exist_ok=True)
     run_config = report_dir / "rocjitsu-config.json"
     compute_units = write_config(config, run_config, budget)
@@ -180,6 +185,11 @@ def emulation_setup(env, cores, report_dir, memory=None):
         # Private dir for rocjitsu's per-process files (it reaps stale ones).
         ROCJITSU_RUNTIME_DIR=tempfile.mkdtemp(prefix="rocjitsu-"),
     )
+    if gtest:
+        # The CI job's shard picks this process's share of the binary's tests.
+        env.setdefault("GTEST_TOTAL_SHARDS", env.get("TOTAL_SHARDS", "1"))
+        env.setdefault("GTEST_SHARD_INDEX", str(int(env.get("SHARD_INDEX", "1")) - 1))
+        env["GTEST_OUTPUT"] = f"xml:{report_dir / 'gtest'}/"
     prepend(env, "PYTHONPATH", str(HERE))
     prepend(env, "PATH", str(rocm / "bin"), str(rocm / "lib" / "llvm" / "bin"))
     prepend(
@@ -342,6 +352,69 @@ def summarize(report_dir, result, title="rocjitsu", summary_path=None):
     return result["exit_code"]
 
 
+def gtest_results(report_dir):
+    """Per-test (name, seconds, outcome) from the gtest XML files in report_dir/gtest.
+
+    Raises xml.etree.ElementTree.ParseError for a file gtest did not finish writing.
+    """
+    tests = []
+    for path in sorted((report_dir / "gtest").glob("*.xml")):
+        for case in ET.parse(path).getroot().iter("testcase"):
+            if case.find("failure") is not None or case.find("error") is not None:
+                outcome = "failed"
+            elif case.find("skipped") is not None or case.get("result") == "skipped":
+                outcome = "skipped"
+            else:
+                outcome = "passed"
+            name = f"{case.get('classname')}.{case.get('name')}"
+            tests.append((name, float(case.get("time") or 0), outcome))
+    return tests
+
+
+def summarize_gtest(report_dir, result, title="rocjitsu", summary_path=None):
+    """Summary for a gtest binary: counts, failures and the slowest tests."""
+    try:
+        tests = gtest_results(report_dir)
+    except ET.ParseError as error:
+        tests = []
+        result["error"] = f"unreadable gtest XML: {error}"
+    counts = {k: sum(t[2] == k for t in tests) for k in ("passed", "failed", "skipped")}
+    result["complete"] = bool(tests) and not result["timed_out"]
+    if result["exit_code"] == 0 and not counts["passed"]:
+        result["exit_code"] = 1
+        result.setdefault("error", "the gtest run reported no passing tests")
+    (report_dir / "execution.json").write_text(json.dumps(result, indent=2) + "\n")
+    seconds = sum(t[1] for t in tests)
+    print(f"rocjitsu gtest results: {dict(tests=len(tests), **counts)} test_seconds={seconds:.0f}", flush=True)
+    failed = [t[0] for t in tests if t[2] == "failed"]
+    for name in failed:
+        print(f"  failed: {name}", flush=True)
+    print("rocjitsu gtest slowest:", flush=True)
+    for name, secs, _ in sorted(tests, key=lambda t: -t[1])[:20]:
+        print(f"  {secs:8.1f} s  {name}", flush=True)
+    print(f"rocjitsu gtest execution: {result}", flush=True)
+    if summary_path:
+        status = "passed" if result["exit_code"] == 0 else "failed"
+        lines = [
+            f"### {title}: {status}",
+            "",
+            "| tests | passed | failed | skipped | test minutes | wall minutes |",
+            "|---|---|---|---|---|---|",
+            f"| {len(tests)} | {counts['passed']} | {counts['failed']} | {counts['skipped']} "
+            f"| {seconds / 60:.0f} | {result.get('wall_seconds', 0) / 60:.0f} |",
+        ]
+        if result.get("error"):
+            lines += ["", f"Error: {result['error']}"]
+        if failed:
+            lines += ["", "Failed:", *(f"- `{name}`" for name in failed)]
+        try:
+            with open(summary_path, "a") as summary:
+                summary.write("\n".join(lines) + "\n")
+        except OSError as error:
+            print(f"rocjitsu: could not write the job summary: {error}", flush=True)
+    return result["exit_code"]
+
+
 def main(argv=None, env=None):
     argv = sys.argv[1:] if argv is None else argv
     env = dict(os.environ if env is None else env)
@@ -353,6 +426,8 @@ def main(argv=None, env=None):
     # A reused report directory must never turn an interrupted run into a pass.
     for name in ("progress.json", "execution.json"):
         (report_dir / name).unlink(missing_ok=True)
+    for stale in (report_dir / "gtest").glob("*.xml"):
+        stale.unlink()
     cores = len(os.sched_getaffinity(0))
     quota_cpus, memory = cgroup_limits()
     if quota_cpus:
@@ -369,6 +444,8 @@ def main(argv=None, env=None):
     title = "rocjitsu {} shard {}/{}".format(
         emulated_target(env), env.get("SHARD_INDEX", 1), env.get("TOTAL_SHARDS", 1)
     )
+    if env.get("ROCJITSU_GTEST") == "1":
+        return summarize_gtest(report_dir, result, title, env.get("GITHUB_STEP_SUMMARY"))
     return summarize(report_dir, result, title, env.get("GITHUB_STEP_SUMMARY"))
 
 
