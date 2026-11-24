@@ -1,20 +1,22 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""GPU correctness for the native-NCHW dgrad prototype (experimental spike).
+"""GPU correctness for the native-NCHW backward-data (dgrad) direct convolution
+family.
 
-:mod:`kernels.common.conv_dgrad_nchw_proto` is not a production kernel family
-(see its module docstring). This test checks that it compiles, launches and
-matches ``torch.nn.grad.conv2d_input`` computed directly in NCHW (dY NKHW,
+:mod:`kernels.common.conv_direct_nchw_dgrad` is AOT-buildable and C++-mirrored
+(see its module docstring) but not yet wired into runtime dispatch. This test
+checks that it compiles, launches and matches
+``torch.nn.grad.conv2d_input`` computed directly in NCHW (dY NKHW,
 W KCYX, dX NCHW -- no host transpose of the activations; the weights are
 repacked once on the host, as a plan-time step would).
 
 Tolerance: max |dX - ref| / max(|ref|, 1) below 5e-3 (fp16) / 1.5e-2 (bf16),
-the forward NCHW prototype's bound and stricter than the 2e-2
+the forward NCHW family's bound and stricter than the 2e-2
 relative-to-peak bound ``test_conv_dgrad_correctness.py`` applies to dgrad.
 
 Run as a script if pytest reports "No HIP GPUs are available"::
 
-    python library/tests/test_conv_dgrad_nchw_proto.py
+    python library/tests/test_conv_direct_nchw_dgrad.py
 """
 
 from __future__ import annotations
@@ -33,10 +35,10 @@ if _HAS_TORCH:
     torch.cuda.is_available()
 
 from kernels.common.conv_direct_grouped import DirectConvProblem  # noqa: E402
-from kernels.common.conv_dgrad_nchw_proto import (  # noqa: E402
-    DgradNchwProtoSpec,
-    build_conv_dgrad_nchw_proto,
-    is_valid_dgrad_nchw_proto_spec,
+from kernels.common.conv_direct_nchw_dgrad import (  # noqa: E402
+    DirectNchwDgradSpec,
+    build_direct_conv_nchw_dgrad,
+    is_valid_direct_nchw_dgrad_spec,
     phase_taps,
     repack_weights_cyxk,
 )
@@ -76,7 +78,7 @@ def dgrad_reference(dY, W, p: DirectConvProblem):
         )
 
 
-def run_dgrad_nchw_spec(arch: str, spec: DgradNchwProtoSpec, artifact=None):
+def run_dgrad_nchw_spec(arch: str, spec: DirectNchwDgradSpec, artifact=None):
     """Compile, launch and check one spec; returns ``(ok, rel_err)``."""
     from rocke import compile_kernel
     from kernels.common.conv_abi import conv_direct_args_signature
@@ -86,12 +88,12 @@ def run_dgrad_nchw_spec(arch: str, spec: DgradNchwProtoSpec, artifact=None):
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     p = spec.problem
-    ok, why = is_valid_dgrad_nchw_proto_spec(spec, arch=arch)
+    ok, why = is_valid_direct_nchw_dgrad_spec(spec, arch=arch)
     if not ok:
         raise AssertionError(f"invalid spec {spec.kernel_name()}: {why}")
     if artifact is None:
         artifact = compile_kernel(
-            build_conv_dgrad_nchw_proto(spec, arch=arch), arch=arch
+            build_direct_conv_nchw_dgrad(spec, arch=arch), arch=arch
         )
 
     td = torch.bfloat16 if p.dtype == "bf16" else torch.float16
@@ -160,7 +162,7 @@ def _spec(p, **kw):
     if p.stride == 2:
         base.update(tile_i=4, waves_n=2, tile_c=64)
     base.update(kw)
-    return DgradNchwProtoSpec(problem=p, **base)
+    return DirectNchwDgradSpec(problem=p, **base)
 
 
 class TestDgradNchwProtoHost(unittest.TestCase):
@@ -172,16 +174,16 @@ class TestDgradNchwProtoHost(unittest.TestCase):
         self.assertEqual(sum(len(t) for t in phase_taps(5, 2, 2)), 5)
 
     def test_validation(self):
-        ok, _ = is_valid_dgrad_nchw_proto_spec(
+        ok, _ = is_valid_direct_nchw_dgrad_spec(
             _spec(_problem(1, 16, 16, 64, 64)), "gfx950"
         )
         self.assertTrue(ok)
-        ok, why = is_valid_dgrad_nchw_proto_spec(
+        ok, why = is_valid_direct_nchw_dgrad_spec(
             _spec(_problem(1, 16, 12, 64, 64)), "gfx950"
         )
         self.assertFalse(ok)
         self.assertIn("Wo", why)
-        ok, why = is_valid_dgrad_nchw_proto_spec(
+        ok, why = is_valid_direct_nchw_dgrad_spec(
             _spec(_problem(1, 16, 16, 64, 64, dtype="fp32")), "gfx950"
         )
         self.assertFalse(ok)
@@ -192,7 +194,7 @@ class TestDgradNchwProtoHost(unittest.TestCase):
         for stride in (1, 2):
             spec = _spec(_problem(1, 32, 32, 64, 64, stride=stride))
             ll = lower_kernel_to_llvm(
-                build_conv_dgrad_nchw_proto(spec, "gfx950"), arch="gfx950"
+                build_direct_conv_nchw_dgrad(spec, "gfx950"), arch="gfx950"
             )
             self.assertIn("llvm.amdgcn.mfma", ll)
 
@@ -258,7 +260,7 @@ class TestDgradNchwProtoGpu(unittest.TestCase):
         for stride in (1, 2):
             spec0 = _spec(_problem(1, 16, 32, 64, 64, stride=stride))
             art = compile_kernel(
-                build_conv_dgrad_nchw_proto(spec0, GPU_ARCH), arch=GPU_ARCH
+                build_direct_conv_nchw_dgrad(spec0, GPU_ARCH), arch=GPU_ARCH
             )
             for N, H, W, C, K in [(2, 32, 32, 128, 64), (1, 17, 48, 64, 128)]:
                 case = replace(spec0, problem=_problem(N, H, W, C, K, stride=stride))

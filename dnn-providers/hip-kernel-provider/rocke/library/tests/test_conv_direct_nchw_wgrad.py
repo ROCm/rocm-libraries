@@ -1,13 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""GPU correctness for the direct-style native-NCHW wgrad prototype (spike).
+"""GPU correctness for the direct-style native-NCHW wgrad convolution.
 
-:mod:`kernels.common.conv_wgrad_direct_nchw_proto` is not a production kernel
-family -- see its module docstring -- so this test checks what a spike needs:
-the knob space compiles, launches, and matches ``torch.nn.grad.conv2d_weight``
-computed directly in NCHW / NKHW / KCYX (torch's native layouts, no permute on
-either side), including image-edge tiles, partial spatial tiles and split
-degrees past the tile count.
+:mod:`kernels.common.conv_direct_nchw_wgrad` is a productionized,
+C++-mirrored, byte-identity-gated kernel family -- see its module docstring --
+so this test checks GPU correctness: the knob space compiles, launches, and
+matches ``torch.nn.grad.conv2d_weight`` computed directly in NCHW / NKHW / KCYX
+(torch's native layouts, no permute on either side), including image-edge
+tiles, partial spatial tiles and split degrees past the tile count.
 
 Tolerance: max |dW - ref| / max(max |ref|, 1) below ``_TOL``, the metric and
 fp16 / bf16 bound of ``test_conv_wgrad_correctness.py`` (each split rounds its
@@ -19,7 +19,7 @@ shapes here do exercise the padding path.
 
 Run as a script if pytest reports "No HIP GPUs are available"::
 
-    python library/tests/test_conv_wgrad_direct_nchw_proto.py
+    python library/tests/test_conv_direct_nchw_wgrad.py
 """
 
 from __future__ import annotations
@@ -35,14 +35,14 @@ _HAS_TORCH = importlib.util.find_spec("torch") is not None
 if _HAS_TORCH:
     import torch
 
-from kernels.common import conv_wgrad_direct_nchw_proto as proto  # noqa: E402
+from kernels.common import conv_direct_nchw_wgrad as wgrad_mod  # noqa: E402
 from kernels.common.conv_direct_grouped import DirectConvProblem  # noqa: E402
-from kernels.common.conv_wgrad_direct_nchw_proto import (  # noqa: E402
-    WgradDirectNchwSpec,
-    build_conv_wgrad_direct_nchw,
-    is_valid_wgrad_direct_nchw_spec,
-    wgrad_direct_nchw_launch_values,
-    wgrad_direct_nchw_signature,
+from kernels.common.conv_direct_nchw_wgrad import (  # noqa: E402
+    DirectNchwWgradSpec,
+    build_direct_conv_nchw_wgrad,
+    is_valid_direct_nchw_wgrad_spec,
+    direct_nchw_wgrad_launch_values,
+    direct_nchw_wgrad_signature,
 )
 
 _TOL = {"fp16": 5e-2, "bf16": 5e-2}  # test_conv_wgrad_correctness.py's _TOL
@@ -56,7 +56,7 @@ def _gpu_skip_reason() -> str:
     if not _HAS_TORCH:
         return "torch not importable"
     if GPU_ARCH != "gfx950":
-        return f"prototype targets gfx950 (got {GPU_ARCH!r})"
+        return f"this family targets gfx950 (got {GPU_ARCH!r})"
     return ""
 
 
@@ -83,8 +83,8 @@ def _problem(N, C, K, H, W, stride=1, k=3, dtype="fp16"):
     )
 
 
-def run_wgrad_direct_nchw(
-    arch: str, spec: WgradDirectNchwSpec, split: int = 1, poison: bool = False
+def run_direct_nchw_wgrad(
+    arch: str, spec: DirectNchwWgradSpec, split: int = 1, poison: bool = False
 ):
     """Compile, launch and check one spec; returns ``(ok, rel_err)``.
 
@@ -97,10 +97,10 @@ def run_wgrad_direct_nchw(
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     p = spec.problem
-    ok, why = is_valid_wgrad_direct_nchw_spec(spec, arch=arch)
+    ok, why = is_valid_direct_nchw_wgrad_spec(spec, arch=arch)
     if not ok:
         raise AssertionError(f"invalid spec {spec.kernel_name()}: {why}")
-    art = compile_kernel(build_conv_wgrad_direct_nchw(spec, arch=arch), arch=arch)
+    art = compile_kernel(build_direct_conv_nchw_wgrad(spec, arch=arch), arch=arch)
 
     td = torch.bfloat16 if p.dtype == "bf16" else torch.float16
     torch.manual_seed(0)
@@ -125,10 +125,10 @@ def run_wgrad_direct_nchw(
         launcher = KernelLauncher(
             hsaco=art.hsaco,
             kernel_name=art.kernel_name,
-            signature=wgrad_direct_nchw_signature(spec),
+            signature=direct_nchw_wgrad_signature(spec),
         )
         launcher(
-            wgrad_direct_nchw_launch_values(
+            direct_nchw_wgrad_launch_values(
                 bufs[0], bufs[1], bufs[2], dY_t.nbytes, X_t.nbytes, split
             ),
             config=LaunchConfig(
@@ -150,10 +150,10 @@ def run_wgrad_direct_nchw(
 
 
 @unittest.skipIf(bool(_GPU_SKIP), _GPU_SKIP or "gpu ok")
-class TestWgradDirectNchwProto(unittest.TestCase):
+class TestDirectNchwWgrad(unittest.TestCase):
     def _check(self, spec, split=1, poison=False):
         with self.subTest(spec=spec.kernel_name(), split=split):
-            ok, rel = run_wgrad_direct_nchw(GPU_ARCH, spec, split, poison=poison)
+            ok, rel = run_direct_nchw_wgrad(GPU_ARCH, spec, split, poison=poison)
             self.assertTrue(ok, f"{spec.kernel_name()} split{split}: rel_err={rel:.3e}")
 
     def test_fp16_3x3_shapes(self):
@@ -163,7 +163,7 @@ class TestWgradDirectNchwProto(unittest.TestCase):
                 for C, K in ((32, 64), (64, 64)):
                     for HW in (16, 32):
                         p = _problem(N, C, K, HW, HW, stride=stride)
-                        spec = WgradDirectNchwSpec(
+                        spec = DirectNchwWgradSpec(
                             problem=p, tile_m=64, tile_c=32, waves_m=2, waves_c=1
                         )
                         self._check(spec, split=1)
@@ -230,7 +230,7 @@ class TestWgradDirectNchwProto(unittest.TestCase):
                 ),
             ]
             for kw in variants:
-                spec = WgradDirectNchwSpec(problem=p, **kw)
+                spec = DirectNchwWgradSpec(problem=p, **kw)
                 for sk in (1, 3, 8):
                     self._check(spec, split=sk)
 
@@ -251,7 +251,7 @@ class TestWgradDirectNchwProto(unittest.TestCase):
                     ),
                     dict(atomic=False, kmap="2row", tile_h=2, waves_t=3, waves_c=1),
                 ):
-                    spec = WgradDirectNchwSpec(
+                    spec = DirectNchwWgradSpec(
                         problem=p, **{"tile_m": 32, "waves_m": 1, **kw}
                     )
                     self._check(spec, split=1, poison=True)
@@ -261,7 +261,7 @@ class TestWgradDirectNchwProto(unittest.TestCase):
         for stride in (1, 2):
             # Ho = 12 / 6 rows over 8-row tiles, Wo = 24 / 16 over 32-wide tiles.
             p = _problem(1, 32, 64, 12 * stride, 24 * stride, stride=stride)
-            spec = WgradDirectNchwSpec(
+            spec = DirectNchwWgradSpec(
                 problem=p,
                 tile_m=64,
                 tile_c=32,
@@ -276,7 +276,7 @@ class TestWgradDirectNchwProto(unittest.TestCase):
         p = DirectConvProblem(
             N=2, H=33, W=48, groups=1, cpg=32, kpg=32, KH=3, KW=3, PAD=1, stride=2
         )
-        spec = WgradDirectNchwSpec(
+        spec = DirectNchwWgradSpec(
             problem=p, tile_m=32, tile_c=32, tile_h=4, tile_w=16, waves_m=1, waves_c=2
         )
         self._check(spec, split=5)
@@ -285,7 +285,7 @@ class TestWgradDirectNchwProto(unittest.TestCase):
         """``W = 48`` at stride 2 (Wo 24): the right edge of a 32-wide tile."""
         for stride in (1, 2):
             p = _problem(2, 32, 32, 20, 24 * stride, stride=stride)
-            spec = WgradDirectNchwSpec(
+            spec = DirectNchwWgradSpec(
                 problem=p,
                 tile_m=32,
                 tile_c=32,
@@ -311,13 +311,13 @@ class TestWgradDirectNchwProto(unittest.TestCase):
                     epilogue="direct",
                 ),
             ):
-                spec = WgradDirectNchwSpec(problem=p, **kw)
+                spec = DirectNchwWgradSpec(problem=p, **kw)
                 self._check(spec, split=4)
 
     def test_bf16(self):
         for stride in (1, 2):
             p = _problem(2, 64, 64, 32, 32, stride=stride, dtype="bf16")
-            spec = WgradDirectNchwSpec(problem=p)
+            spec = DirectNchwWgradSpec(problem=p)
             self._check(spec, split=4)
             self._check(
                 replace(
@@ -332,7 +332,7 @@ class TestWgradDirectNchwProto(unittest.TestCase):
         for stride in (1, 2):
             p = _problem(2, 32, 32, 16, 32, stride=stride)
             cases.append(
-                WgradDirectNchwSpec(
+                DirectNchwWgradSpec(
                     problem=p,
                     tile_m=32,
                     tile_c=32,
@@ -342,13 +342,13 @@ class TestWgradDirectNchwProto(unittest.TestCase):
                     waves_c=2,
                 )
             )
-        saved = proto._MUTATIONS
+        saved = wgrad_mod._MUTATIONS
         try:
             for mut in ("halo_unmasked", "rows_unmasked"):
-                proto._MUTATIONS = frozenset({mut})
+                wgrad_mod._MUTATIONS = frozenset({mut})
                 fails = 0
                 for spec in cases:
-                    ok, _rel = run_wgrad_direct_nchw(
+                    ok, _rel = run_direct_nchw_wgrad(
                         GPU_ARCH,
                         replace(spec, name=f"wgrad_direct_nchw_mut_{mut}"),
                         split=2,
@@ -357,7 +357,7 @@ class TestWgradDirectNchwProto(unittest.TestCase):
                 with self.subTest(mutation=mut):
                     self.assertGreater(fails, 0, f"mutation {mut} went undetected")
         finally:
-            proto._MUTATIONS = saved
+            wgrad_mod._MUTATIONS = saved
         for spec in cases:  # and the unmutated build still passes
             self._check(spec, split=2)
 

@@ -1,16 +1,24 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Experimental native-NCHW backward-data (dgrad) convolution prototype.
+"""Native-NCHW backward-data (dgrad) direct convolution (gfx950, stride 1/2).
 
-This is a **spike**, not a production kernel family. It measures whether a
-dgrad kernel that consumes the output gradient ``dY`` in NKHW and produces the
-input gradient ``dX`` in NCHW natively beats the pipeline an NCHW caller has
-today (transpose ``dY`` NKHW -> NHWK, production NHWC implicit-GEMM dgrad,
-transpose ``dX`` NHWC -> NCHW). Out of scope, like the forward prototype
-(:mod:`kernels.common.conv_direct_nongrouped_nchw_proto`): no C++ mirror, no
-byte-identity gate, no dispatch / AOT-cache wiring, ``groups == 1`` only,
-fp16 / bf16 storage only, dilation 1, stride 1 or 2.
+A productionized AOT-buildable kernel family: a C++ mirror lives at
+``library/cpp/instances/common/conv_direct_nchw_dgrad.cpp`` and is gated by
+``tools/check_byte_identity.py`` like every other family, with a ``.py``/``.c``
+parity pair under ``library/tests/parity/``. Runtime dispatch selection is
+**deliberately not yet wired**: this family is not registered in
+``library/dispatch/grouped_convolution.py`` or its instance JSONs, so
+``algorithm="auto"`` never reaches it. Callers build and launch it explicitly
+(directly via :func:`build_direct_conv_nchw_dgrad`, or through the AOT sweep
+in ``kernels/conv/direct_variants.py`` / ``kernels/conv/direct_aot_jobs.py``
+with variant ``"direct_nchw_dgrad"``), not via the request-level dispatcher.
+
+It consumes the output gradient ``dY`` in NKHW and produces the input
+gradient ``dX`` in NCHW directly -- no host transpose of the activations
+(transpose ``dY`` NKHW -> NHWK, production NHWC implicit-GEMM dgrad,
+transpose ``dX`` NHWC -> NCHW is the pipeline an NCHW caller has without this
+family). ``groups == 1``, fp16 / bf16 storage, dilation 1, stride 1 or 2.
 
 Algorithm: stride-phase direct dgrad
 ------------------------------------
@@ -56,7 +64,7 @@ per ``ck``-deep chunk of the reduction channels ``k``:
   along ``w`` (NCHW's vector axis) never reaches memory. Masked per-element
   stores only on tiles that cross the image edge.
 
-Runtime precondition (checked by :func:`is_valid_dgrad_nchw_proto_spec` on the
+Runtime precondition (checked by :func:`is_valid_direct_nchw_dgrad_spec` on the
 spec's problem, *not* by the binary): ``Wo % 8 == 0`` so every 8-wide ``dY``
 run is entirely inside or outside a row.
 """
@@ -116,7 +124,7 @@ def repack_weights_cyxk(W_kcyx):
 
 
 @dataclass(frozen=True)
-class DgradNchwProtoSpec:
+class DirectNchwDgradSpec:
     """One native-NCHW dgrad prototype configuration.
 
     ``problem`` is the *forward* problem (``H``/``W`` are ``dX``'s extents,
@@ -126,7 +134,7 @@ class DgradNchwProtoSpec:
     """
 
     problem: DirectConvProblem
-    name: str = "conv_dgrad_nchw_proto"
+    name: str = "conv_direct_nchw_dgrad"
 
     tile_i: int = 8
     tile_j: int = 32
@@ -351,7 +359,7 @@ class DgradNchwProtoSpec:
             raise ValueError("tensors must fit below the masked-access offset")
 
 
-def is_valid_dgrad_nchw_proto_spec(spec: DgradNchwProtoSpec, arch: str = "gfx950"):
+def is_valid_direct_nchw_dgrad_spec(spec: DirectNchwDgradSpec, arch: str = "gfx950"):
     from rocke.core.arch import ArchTarget
 
     try:
@@ -378,8 +386,8 @@ def is_valid_dgrad_nchw_proto_spec(spec: DgradNchwProtoSpec, arch: str = "gfx950
     return True, "ok"
 
 
-def build_conv_dgrad_nchw_proto(
-    spec: DgradNchwProtoSpec, arch: str = "gfx950"
+def build_direct_conv_nchw_dgrad(
+    spec: DirectNchwDgradSpec, arch: str = "gfx950"
 ) -> KernelDef:
     """Build the IR of one native-NCHW dgrad prototype kernel.
 
@@ -387,9 +395,9 @@ def build_conv_dgrad_nchw_proto(
     ``A`` = dY (NKHW), ``B`` = W repacked to ``[C][KH][KW][K]``, ``D`` = dX
     (NCHW); launch values from ``ConvArgs.from_problem(forward_problem)``.
     """
-    ok, why = is_valid_dgrad_nchw_proto_spec(spec, arch)
+    ok, why = is_valid_direct_nchw_dgrad_spec(spec, arch)
     if not ok:
-        raise ValueError(f"invalid DgradNchwProtoSpec for {arch}: {why}")
+        raise ValueError(f"invalid DirectNchwDgradSpec for {arch}: {why}")
 
     p = spec.problem
     dtype = p.dtype

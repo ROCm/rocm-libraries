@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Research spike: native-NCHW dgrad vs. transpose + NHWC dgrad + transpose.
 
-:mod:`kernels.common.conv_dgrad_nchw_proto` is an experimental dgrad kernel
+:mod:`kernels.common.conv_direct_nchw_dgrad` is an experimental dgrad kernel
 that reads ``dY`` in NKHW and writes ``dX`` in NCHW. An NCHW caller's only
 alternative today is the pipeline
 
@@ -70,15 +70,15 @@ from benchmarks.common.benchmark_nchw_proto_vs_transpose import (
     _u8,
 )
 from kernels.common.conv_direct_grouped import DirectConvProblem
-from kernels.common.conv_dgrad_nchw_proto import (
-    DgradNchwProtoSpec,
-    build_conv_dgrad_nchw_proto,
-    is_valid_dgrad_nchw_proto_spec,
+from kernels.common.conv_direct_nchw_dgrad import (
+    DirectNchwDgradSpec,
+    build_direct_conv_nchw_dgrad,
+    is_valid_direct_nchw_dgrad_spec,
 )
 
 _ARCH = "gfx950"
 _DTYPE = "fp16"
-_TOL = 5e-3  # fp16, relative to max(|ref|, 1); matches test_conv_dgrad_nchw_proto.py
+_TOL = 5e-3  # fp16, relative to max(|ref|, 1); matches test_conv_direct_nchw_dgrad.py
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +188,7 @@ _NATIVE_GRID = dict(
 )
 
 
-def _native_specs(stride: int) -> List[DgradNchwProtoSpec]:
+def _native_specs(stride: int) -> List[DirectNchwDgradSpec]:
     p = _direct_problem(Shape(N=1, H=64, W=64, C=64, K=64, stride=stride))
     out = []
     g = _NATIVE_GRID
@@ -201,7 +201,7 @@ def _native_specs(stride: int) -> List[DgradNchwProtoSpec]:
         g["waves"],
         g["stage_group"],
     ):
-        spec = DgradNchwProtoSpec(
+        spec = DirectNchwDgradSpec(
             problem=p,
             tile_i=ti,
             tile_j=tj,
@@ -212,12 +212,12 @@ def _native_specs(stride: int) -> List[DgradNchwProtoSpec]:
             atom=atom,
             stage_group=sg,
         )
-        if is_valid_dgrad_nchw_proto_spec(spec, _ARCH)[0]:
+        if is_valid_direct_nchw_dgrad_spec(spec, _ARCH)[0]:
             out.append(spec)
     return out
 
 
-def _spec_key(spec: DgradNchwProtoSpec) -> str:
+def _spec_key(spec: DirectNchwDgradSpec) -> str:
     return spec.kernel_name()
 
 
@@ -296,7 +296,7 @@ def _compile_native(spec):
     try:
         from rocke import compile_kernel
 
-        art = compile_kernel(build_conv_dgrad_nchw_proto(spec, arch=_ARCH), arch=_ARCH)
+        art = compile_kernel(build_direct_conv_nchw_dgrad(spec, arch=_ARCH), arch=_ARCH)
         return _spec_key(spec), (
             bytes(art.hsaco),
             art.kernel_name,
@@ -604,7 +604,7 @@ def _run_case(
             key = _spec_key(spec)
             if (
                 key not in native_bins
-                or not is_valid_dgrad_nchw_proto_spec(s, _ARCH)[0]
+                or not is_valid_direct_nchw_dgrad_spec(s, _ARCH)[0]
             ):
                 continue
             hsaco, name, block = native_bins[key]

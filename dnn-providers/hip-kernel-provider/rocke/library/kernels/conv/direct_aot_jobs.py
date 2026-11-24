@@ -41,6 +41,10 @@ from kernels.conv.direct_variants import (
     DIRECT_GROUPED_HALO as _GROUPED_HALO,
     DIRECT_HALO_VARIANTS as _HALO_VARIANTS,
     DIRECT_MFMA_DGRAD as _MFMA_DGRAD,
+    DIRECT_NCHW_FWD,
+    DIRECT_NCHW_DGRAD,
+    DIRECT_NCHW_WGRAD,
+    variant_layout,
     DIRECT_SPLIT_REDUCE as _SPLIT_REDUCE,
     direct_spec_takes_target_wave,
     DIRECT_WGRAD_FOLD as _WGRAD_FOLD,
@@ -1522,6 +1526,39 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for k, s in itertools.product(_NONGROUPED_FILTERS, _STRIDES)
         ),
     ),
+    # Native-NCHW forward (groups == 1, C/K runtime): X NCHW straight in, Y
+    # NKHW straight out, no host transpose. Same restriction as every other
+    # row-streaming forward kernel here: "same" padding only, dilation 1,
+    # stride 1 or 2 (DirectNchwFwdSpec.validate / forward_padding_reason).
+    DIRECT_NCHW_FWD: (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=0, kpg=0)
+            for k, s in itertools.product((3, 5), _STRIDES)
+        ),
+    ),
+    # Native-NCHW dgrad (groups == 1, C/K runtime): dY NKHW straight in, dX
+    # NCHW straight out, no host transpose. Same restriction as the forward
+    # family: "same" padding only, dilation 1, stride 1 or 2
+    # (DirectNchwDgradSpec.validate).
+    DIRECT_NCHW_DGRAD: (
+        "dgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=0, kpg=0)
+            for k, s in itertools.product((3, 5), _STRIDES)
+        ),
+    ),
+    # Native-NCHW wgrad (groups == 1, C/K runtime): X NCHW + dY NKHW straight
+    # in, dW KCYX straight out, no host transpose. Same restriction as the
+    # other two native-NCHW families: "same" padding only, dilation 1, stride
+    # 1 or 2 (DirectNchwWgradSpec.validate).
+    DIRECT_NCHW_WGRAD: (
+        "wgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=s, cpg=0, kpg=0)
+            for k, s in itertools.product((3, 5), _STRIDES)
+        ),
+    ),
     # Depthwise forward: square odd filters 3..11, stride 1 and 2, plus the
     # large stride-1 filters.
     # The weight-preloading kernel holds KH*KW taps per lane, so 31x31 does
@@ -2740,6 +2777,59 @@ def _knob_grid(
                 prefetch=pf,
                 carry=cy,
             )
+    elif variant == DIRECT_NCHW_FWD:
+        # A small lever grid (as direct_wgrad's wave64 row): the LDS pads and
+        # the two scheduling knobs, crossed; col_split only applies at stride
+        # 2 (DirectNchwFwdSpec.validate rejects it otherwise). lds_wpad gets
+        # one extra row at the default of every other knob so it is touched
+        # without doubling the whole grid.
+        for lds_pad, waves_per_eu, pin_prefetch in itertools.product(
+            (0, 8), (0, 2), (False, True)
+        ):
+            knobs = dict(
+                lds_pad=lds_pad, waves_per_eu=waves_per_eu, pin_prefetch=pin_prefetch
+            )
+            if caps is not None and caps.stride == 2:
+                for col_split in (False, True):
+                    yield dict(knobs, col_split=col_split)
+            else:
+                yield knobs
+        yield dict(lds_pad=0, lds_wpad=8, waves_per_eu=0, pin_prefetch=False)
+    elif variant == DIRECT_NCHW_DGRAD:
+        # A small lever grid (as the native-NCHW forward's row, minus the
+        # knobs this spec does not expose -- no waves_per_eu, pin_prefetch,
+        # col_split or lds_wpad): the LDS pad crossed with every stage_group
+        # value (DirectNchwDgradSpec.validate: 1/2/4/8, must divide ck).
+        for lds_pad, stage_group in itertools.product((0, 8), (1, 2, 4, 8)):
+            yield dict(lds_pad=lds_pad, stage_group=stage_group)
+    elif variant == DIRECT_NCHW_WGRAD:
+        # This family has by far the most knobs of the three native-NCHW
+        # kernels (DirectNchwWgradSpec); a full cross product is not cached --
+        # the LDS pad crossed with stage_group (DirectNchwWgradSpec.validate:
+        # 4 or 8, must divide tile_c), plus the rest of the knob space varied
+        # one lever (or a small tied group) at a time off the defaults, as the
+        # NHWC ``direct_wgrad`` / ``direct_wgrad_tiled`` rows in this module do
+        # for their own, larger knob spaces. Invalid combinations (e.g. kmap
+        # "2row" with an odd tile_h) are dropped by the validator downstream.
+        for lds_pad, stage_group in itertools.product((0, 8), (4, 8)):
+            yield dict(lds_pad=lds_pad, stage_group=stage_group)
+        yield dict(mfma_order="ks")
+        yield dict(prefetch=False)
+        yield dict(xcd_remap=False)
+        yield dict(waves_per_eu=2)
+        yield dict(epilogue="direct", y_groups=3)
+        yield dict(atomic=False)
+        yield dict(lds_buffers=2, tile_h=2)
+        yield dict(kmap="2row", tile_h=2, tile_w=16, lds_pad=8, lds_wpad=2)
+        yield dict(
+            tile_m=32,
+            tile_c=32,
+            waves_m=1,
+            waves_c=1,
+            waves_t=3,
+            tile_h=8,
+            tile_w=16,
+        )
     else:
         raise ValueError(f"unknown direct conv variant {variant!r}")
 
@@ -3518,14 +3608,22 @@ def _caps_jobs(
 
 
 def count_direct_jobs(
-    directions: Sequence[str], arch: str, dtype: str = DIRECT_DTYPE
+    directions: Sequence[str],
+    arch: str,
+    dtype: str = DIRECT_DTYPE,
+    layout: Optional[str] = None,
 ) -> int:
     """Raw candidate count ``direct_kernel_sweep.enumerate_direct_jobs`` walks
-    (the progress denominator): capabilities times tuning knobs, before validation."""
+    (the progress denominator): capabilities times tuning knobs, before validation.
+
+    ``layout`` is ``None`` (no filtering, today's behavior) or ``"NCHW"`` /
+    ``"NHWC"`` to count only the variants :func:`variant_layout` names that way.
+    """
     return sum(
         sum(1 for _ in _knob_grid(variant, arch, dtype, caps))
         for variant, (direction, caps_list) in DIRECT_CAPABILITIES.items()
         if direction in directions
+        and (layout is None or variant_layout(variant) == layout)
         for caps in caps_list
     )
 

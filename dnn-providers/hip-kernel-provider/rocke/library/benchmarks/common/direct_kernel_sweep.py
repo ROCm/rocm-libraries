@@ -134,6 +134,7 @@ from kernels.conv.direct_variants import (  # noqa: F401 (make_spec, validate_sp
     direct_wgrad_workspaces,
     make_direct_spec as make_spec,
     validate_direct_spec as validate_spec,
+    variant_layout,
 )
 
 # --verify bound on the peak-normalised error max|out-ref| / max(max|ref|, 1)
@@ -172,11 +173,16 @@ def enumerate_direct_jobs(
     jobs: int = 1,
     log=None,
     log_every_s: float = 5.0,
+    layout: Optional[str] = None,
 ) -> List[BuildJob]:
     """Every direct kernel worth caching for ``arch``, pre-validated.
 
     ``directions`` takes the benchmark's names, ``fwd``, ``dgrad`` and
     ``wgrad``. The MFMA dgrad entries pull in their weight-transform helpers.
+    ``layout`` is ``None`` (no filtering -- today's whole table, unchanged) or
+    ``"NCHW"`` / ``"NHWC"`` to enumerate only the variants
+    :func:`kernels.conv.direct_variants.variant_layout` names that way (e.g.
+    the native-NCHW families alongside the default NHWC ones).
 
     The grid is walked one (variant, capability) cell at a time; with
     ``jobs > 1`` the cells run in a process pool. Cells are merged in order,
@@ -191,18 +197,21 @@ def enumerate_direct_jobs(
             )
     if dtype not in DIRECT_DTYPES:
         raise ValueError(f"direct conv builds {DIRECT_DTYPES}, not {dtype!r}")
+    if layout is not None and layout not in ("NCHW", "NHWC"):
+        raise ValueError(f"layout must be None, 'NCHW' or 'NHWC' (got {layout!r})")
     wave_size = target.wave_size
     jobs = max(1, int(jobs))
     payloads = [
         (arch, wave_size, variant, direction, caps, dtype)
         for variant, (direction, caps_list) in DIRECT_CAPABILITIES.items()
         if direction in directions
+        and (layout is None or variant_layout(variant) == layout)
         for caps in caps_list
     ]
 
     total = 0
     if log is not None:
-        total = count_direct_jobs(directions, arch, dtype)
+        total = count_direct_jobs(directions, arch, dtype, layout=layout)
         log(f"  {total} candidates to check with {jobs} process(es)")
 
     n_raw = n_valid = 0

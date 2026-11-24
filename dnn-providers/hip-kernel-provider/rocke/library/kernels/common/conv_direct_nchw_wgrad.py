@@ -1,14 +1,21 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Experimental direct-style native-NCHW backward-weight (wgrad) prototype.
+"""Native-NCHW direct-style backward-weight (wgrad) convolution (gfx950).
 
-This is a **research spike**, not a production kernel family, and a sibling of
-:mod:`kernels.common.conv_wgrad_nchw_proto` (the implicit-GEMM-style NCHW
-wgrad spike). Same scope limits: no C++ mirror, not byte-identical with
-anything, not gated by ``tools/check_byte_identity.py``, not wired into
-dispatch or the AOT cache; every problem extent is compiled in,
-``groups == 1``, no dilation, fp16 / bf16, ``gfx950``.
+A productionized AOT-buildable kernel family: a C++ mirror lives at
+``library/cpp/instances/common/conv_direct_nchw_wgrad.cpp`` and is gated by
+``tools/check_byte_identity.py`` like every other family, with a ``.py``/``.c``
+parity pair under ``library/tests/parity/``. Runtime dispatch selection is
+**deliberately not yet wired**: this family is not registered in
+``library/dispatch/grouped_convolution.py`` or its instance JSONs, so
+``algorithm="auto"`` never reaches it. Callers build and launch it explicitly
+(directly via :func:`build_direct_conv_nchw_wgrad`, or through the AOT sweep
+in ``kernels/conv/direct_variants.py`` / ``kernels/conv/direct_aot_jobs.py``
+with variant ``"direct_nchw_wgrad"``), not via the request-level dispatcher.
+Sibling of :mod:`kernels.common.conv_wgrad_nchw_proto` (the implicit-GEMM-style
+NCHW wgrad spike, still a research spike). Every problem extent is compiled
+in, ``groups == 1``, no dilation, fp16 / bf16, ``gfx950``.
 
 Algorithm
 ---------
@@ -56,7 +63,7 @@ caller-zeroed KCYX ``dW`` through packed 16-bit atomics, the numerics of the
 implicit-GEMM NCHW spike. ``waves_t`` splits a workgroup's taps over waves
 that share the staged window. With ``xcd_remap`` (default) the grid is 1-D
 and renumbered so the workgroups of one spatial slice share an XCD's L2
-(:meth:`WgradDirectNchwSpec.launch_grid`).
+(:meth:`DirectNchwWgradSpec.launch_grid`).
 
 Levers (see the spec fields): pinning the register
 prefetch ahead of the MFMAs (the scheduler otherwise sinks it), an LDS-staged
@@ -65,7 +72,7 @@ epilogue whose atomics cover contiguous KCYX runs (the per-lane one strides
 transpose reads bank-conflict free, ``waves_per_eu`` / ``prefetch`` for two
 waves per SIMD, double-buffered LDS and a plain-store split-1 epilogue.
 
-Preconditions (checked by :func:`is_valid_wgrad_direct_nchw_spec`): ``W`` and
+Preconditions (checked by :func:`is_valid_direct_nchw_wgrad_spec`): ``W`` and
 ``Wo`` multiples of 8, ``tile_w`` a power of two >= 8, ``tile_h * tile_w`` a
 multiple of 32, halo widths <= 8.
 """
@@ -101,7 +108,7 @@ _MUTATIONS: frozenset = frozenset()
 
 
 @dataclass(frozen=True)
-class WgradDirectNchwSpec:
+class DirectNchwWgradSpec:
     """One direct-style native-NCHW wgrad configuration.
 
     ``tile_m`` output channels x ``tile_c`` input channels x (``KH/y_groups *
@@ -111,7 +118,7 @@ class WgradDirectNchwSpec:
     """
 
     problem: DirectConvProblem
-    name: str = "conv_wgrad_direct_nchw_proto"
+    name: str = "conv_direct_nchw_wgrad"
     tile_m: int = 64
     tile_c: int = 64
     tile_h: int = 4
@@ -394,7 +401,7 @@ class WgradDirectNchwSpec:
             raise ValueError("tensors must fit below the masked-load offset")
 
 
-def kstep_origin(spec: WgradDirectNchwSpec, ks: int) -> Tuple[int, int]:
+def kstep_origin(spec: DirectNchwWgradSpec, ks: int) -> Tuple[int, int]:
     """Build-time (row, col) of k step ``ks`` (lane group 0's first position)."""
     tw = spec.tile_w
     if spec.kmap == "2row":
@@ -405,7 +412,7 @@ def kstep_origin(spec: WgradDirectNchwSpec, ks: int) -> Tuple[int, int]:
     return ks * (_AK // tw), 0
 
 
-def kstep_group_pos(spec: WgradDirectNchwSpec, ks: int, g: int) -> Tuple[int, int]:
+def kstep_group_pos(spec: DirectNchwWgradSpec, ks: int, g: int) -> Tuple[int, int]:
     """Tile (row, col) of the first of lane group ``g``'s 8 positions."""
     rk, ck = kstep_origin(spec, ks)
     if spec.kmap == "2row":
@@ -415,7 +422,7 @@ def kstep_group_pos(spec: WgradDirectNchwSpec, ks: int, g: int) -> Tuple[int, in
     return rk + (8 * g) // spec.tile_w, (8 * g) % spec.tile_w
 
 
-def x_read_conflict_ways(spec: WgradDirectNchwSpec, banks: int = 64) -> int:
+def x_read_conflict_ways(spec: DirectNchwWgradSpec, banks: int = 64) -> int:
     """Worst LDS bank-conflict degree of the X transpose reads (model).
 
     ``ds_read_b64_tr_b16`` is serviced a 32-lane half-wave per pass over
@@ -444,7 +451,7 @@ def x_read_conflict_ways(spec: WgradDirectNchwSpec, banks: int = 64) -> int:
 
 
 def conflict_free_pads(
-    spec: WgradDirectNchwSpec, pads=range(0, 65, 4), wpads=range(0, 16)
+    spec: DirectNchwWgradSpec, pads=range(0, 65, 4), wpads=range(0, 16)
 ) -> Tuple[int, int, int]:
     """``(ways, lds_pad, lds_wpad)`` minimising the modelled X-read conflicts,
     then the X window's LDS footprint."""
@@ -464,8 +471,8 @@ def conflict_free_pads(
     return best[0], best[2], best[3]
 
 
-def is_valid_wgrad_direct_nchw_spec(
-    spec: WgradDirectNchwSpec, arch: str = "gfx950"
+def is_valid_direct_nchw_wgrad_spec(
+    spec: DirectNchwWgradSpec, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
     """``(ok, reason)`` for ``spec`` on ``arch`` without raising."""
     from rocke.core.arch import ArchTarget
@@ -492,7 +499,7 @@ def is_valid_wgrad_direct_nchw_spec(
     return True, "ok"
 
 
-def wgrad_direct_nchw_signature(spec: WgradDirectNchwSpec) -> list:
+def direct_nchw_wgrad_signature(spec: DirectNchwWgradSpec) -> list:
     dt = "bf16" if spec.problem.dtype == "bf16" else "f16"
     return (
         SignatureBuilder()
@@ -506,7 +513,7 @@ def wgrad_direct_nchw_signature(spec: WgradDirectNchwSpec) -> list:
     )
 
 
-def wgrad_direct_nchw_launch_values(
+def direct_nchw_wgrad_launch_values(
     dY_ptr: int, X_ptr: int, dW_ptr: int, dY_bytes: int, X_bytes: int, split: int
 ) -> dict:
     return {
@@ -519,13 +526,13 @@ def wgrad_direct_nchw_launch_values(
     }
 
 
-def build_conv_wgrad_direct_nchw(
-    spec: WgradDirectNchwSpec, arch: str = "gfx950"
+def build_direct_conv_nchw_wgrad(
+    spec: DirectNchwWgradSpec, arch: str = "gfx950"
 ) -> KernelDef:
     """Build the IR of one direct-style native-NCHW wgrad prototype kernel."""
-    ok, why = is_valid_wgrad_direct_nchw_spec(spec, arch=arch)
+    ok, why = is_valid_direct_nchw_wgrad_spec(spec, arch=arch)
     if not ok:
-        raise ValueError(f"invalid WgradDirectNchwSpec for {arch}: {why}")
+        raise ValueError(f"invalid DirectNchwWgradSpec for {arch}: {why}")
 
     p = spec.problem
     dtype = p.dtype
@@ -1082,13 +1089,13 @@ def build_conv_wgrad_direct_nchw(
 
 
 __all__ = [
-    "WgradDirectNchwSpec",
+    "DirectNchwWgradSpec",
     "conflict_free_pads",
     "kstep_group_pos",
     "kstep_origin",
     "x_read_conflict_ways",
-    "build_conv_wgrad_direct_nchw",
-    "is_valid_wgrad_direct_nchw_spec",
-    "wgrad_direct_nchw_launch_values",
-    "wgrad_direct_nchw_signature",
+    "build_direct_conv_nchw_wgrad",
+    "is_valid_direct_nchw_wgrad_spec",
+    "direct_nchw_wgrad_launch_values",
+    "direct_nchw_wgrad_signature",
 ]

@@ -6,8 +6,8 @@ Sibling of :mod:`benchmarks.common.benchmark_wgrad_nchw_proto_vs_transpose`
 (whose shape grid, transposes, repack, NHWC sweep and tuning helpers it
 reuses). Arms, all re-measured in the same process:
 
-* ``dnat`` -- :mod:`kernels.common.conv_wgrad_direct_nchw_proto` (the
-  direct-style NCHW prototype: one X window per spatial tile in LDS, shared by
+* ``dnat`` -- :mod:`kernels.common.conv_direct_nchw_wgrad` (the
+  direct-style NCHW family: one X window per spatial tile in LDS, shared by
   every tap), reading NCHW ``X`` / NKHW ``dY`` and writing KCYX ``dW``;
 * ``inat`` -- :mod:`kernels.common.conv_wgrad_nchw_proto` (the
   implicit-GEMM-style NCHW prototype);
@@ -76,12 +76,12 @@ _TILED = "direct_wgrad_tiled"
 
 @functools.lru_cache(maxsize=None)
 def _auto_pads_key(problem, tile_c, tile_h, tile_w, stage_group, y_groups):
-    from kernels.common.conv_wgrad_direct_nchw_proto import (
-        WgradDirectNchwSpec,
+    from kernels.common.conv_direct_nchw_wgrad import (
+        DirectNchwWgradSpec,
         conflict_free_pads,
     )
 
-    spec = WgradDirectNchwSpec(
+    spec = DirectNchwWgradSpec(
         problem=problem,
         tile_m=16,
         tile_c=tile_c,
@@ -131,16 +131,16 @@ _LAYOUTS = (("row", 0), ("row", 8), ("2row", None))
 
 
 def dnat_specs(shape: Shape, arch: str, sample: float, seed: int) -> list:
-    from kernels.common.conv_wgrad_direct_nchw_proto import (
-        WgradDirectNchwSpec,
-        is_valid_wgrad_direct_nchw_spec,
+    from kernels.common.conv_direct_nchw_wgrad import (
+        DirectNchwWgradSpec,
+        is_valid_direct_nchw_wgrad_spec,
     )
 
     p = shape.nchw_problem()
 
     def make(layout, **kw):
         kw.setdefault("epilogue", "lds" if kw.get("y_groups", 1) == 1 else "direct")
-        spec = WgradDirectNchwSpec(problem=p, **kw)
+        spec = DirectNchwWgradSpec(problem=p, **kw)
         if spec.acc_vgprs > 192 or spec.taps_per_wave > spec.wg_taps:
             return None
         try:
@@ -148,7 +148,7 @@ def dnat_specs(shape: Shape, arch: str, sample: float, seed: int) -> list:
         except ValueError:
             return None
         spec = _with_layout(spec, layout)
-        if spec is None or not is_valid_wgrad_direct_nchw_spec(spec, arch)[0]:
+        if spec is None or not is_valid_direct_nchw_wgrad_spec(spec, arch)[0]:
             return None
         return spec
 
@@ -352,10 +352,10 @@ def tiled_knobs() -> List[dict]:
 def _build_dnat_one(args_tuple):
     spec, arch = args_tuple
     from rocke import compile_kernel
-    from kernels.common.conv_wgrad_direct_nchw_proto import build_conv_wgrad_direct_nchw
+    from kernels.common.conv_direct_nchw_wgrad import build_direct_conv_nchw_wgrad
 
     try:
-        art = compile_kernel(build_conv_wgrad_direct_nchw(spec, arch=arch), arch=arch)
+        art = compile_kernel(build_direct_conv_nchw_wgrad(spec, arch=arch), arch=arch)
     except Exception:
         return None
     return spec, _Art(art.kernel_name, art.hsaco)
@@ -558,9 +558,9 @@ def run_phase(shape: Shape, data: dict, tiled: list, arch: str, args) -> Optiona
     from benchmarks.common.benchmark_implicit_gemm_conv import _stage2_launch
     from kernels.common.conv_abi import conv_direct_args_signature
     from kernels.common.conv_args import ConvArgs
-    from kernels.common.conv_wgrad_direct_nchw_proto import (
-        wgrad_direct_nchw_launch_values,
-        wgrad_direct_nchw_signature,
+    from kernels.common.conv_direct_nchw_wgrad import (
+        direct_nchw_wgrad_launch_values,
+        direct_nchw_wgrad_signature,
     )
     from kernels.common.conv_wgrad_workspace_reduce import (
         WgradReduceSpec,
@@ -612,11 +612,11 @@ def run_phase(shape: Shape, data: dict, tiled: list, arch: str, args) -> Optiona
         # ---- arm: direct NCHW prototype --------------------------------
         dn: List[Cand] = []
         for spec, art in data["dnat"]:
-            la = base._try_launcher(art, wgrad_direct_nchw_signature(spec))
+            la = base._try_launcher(art, direct_nchw_wgrad_signature(spec))
             if la is None:
                 continue
             for sk in dnat_splits(spec):
-                vals = wgrad_direct_nchw_launch_values(
+                vals = direct_nchw_wgrad_launch_values(
                     dev["dY"], dev["X"], dev["dWd"], dY.nbytes, X.nbytes, sk
                 )
                 run = la.bind(
