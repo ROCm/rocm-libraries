@@ -330,7 +330,6 @@ inline bool isTensorPacked(const std::vector<int64_t>& dims, const std::vector<i
 
     // Calculate memory span: the offset from first to last element
     // For each dimension i, the maximum offset is (dims[i] - 1) * strides[i]
-    // This works correctly with negative strides (for reversed tensor dimensions)
     const auto space
         = std::inner_product(dims.begin(),
                              dims.end(),

@@ -124,17 +124,22 @@ inline AutotuneResult makeSkippedResult(int64_t engineId,
     return result;
 }
 
-// Non-benchmarked result for a plan barred by a persistent user filter (deselect_engines()
-// engine ID or deselect_workspace_greater_than()). compiledWorkspaceSize is -1
+// Non-benchmarked result for a plan barred by an engine filter (deselect_engines(), the note
+// filters, deselect_workspace_greater_than()) or by an earlier evaluation. `reason` is the
+// skip reason; the message is "Plan barred: <reason>". compiledWorkspaceSize is -1
 // when the plan was never compiled.
 //
-// Sets excludedByCaller: both deselect filters are caller-applied, so clearing them
-// admits this engine.
+// Sets excludedByCaller: every barring filter is caller-applied. On the compiled-plan path
+// a barred plan stays barred when a filter is relaxed or cleared,
+// until the plans are recreated (create_execution_plans(), create_execution_plan_ext(),
+// rebuilding the operation graph, deserialization or plan-spec autotune()); the plan-spec
+// path marks nothing.
 inline AutotuneResult makeBarredResult(int64_t engineId,
                                        const std::vector<KnobSetting>& knobSettings,
                                        int64_t estimatedWorkspaceSize,
                                        int64_t compiledWorkspaceSize,
                                        const AutotuneConfig& config,
+                                       const std::string& reason,
                                        bool supportsExhaustive,
                                        bool ranExhaustive,
                                        const std::string& exhaustiveNotRunReason,
@@ -145,7 +150,7 @@ inline AutotuneResult makeBarredResult(int64_t engineId,
                                            estimatedWorkspaceSize,
                                            compiledWorkspaceSize,
                                            config,
-                                           "Plan barred (engine ID or workspace deselect filter).",
+                                           "Plan barred: " + reason,
                                            supportsExhaustive,
                                            ranExhaustive,
                                            exhaustiveNotRunReason,

@@ -2,8 +2,9 @@
 // SPDX-License-Identifier:  MIT
 
 // Real kpack archive loading tests. These open the build-tree .kpack archives
-// and extract known TOC keys to verify end-to-end packing + loading for each
-// supported architecture and kernel variant.
+// and extract known TOC keys, and every TOC key the kernel registries name, to
+// verify end-to-end packing + loading for each supported architecture and
+// kernel variant.
 //
 // The tests use the kpack C API directly (not AsmKpackArchive singleton) so
 // they are independent of the plugin directory resolution and can run as unit
@@ -11,12 +12,26 @@
 
 #include <rocm_kpack/kpack.h>
 
+#include <algorithm>
 #include <filesystem>
+#include <limits>
+#include <memory>
 #include <string>
+#include <string_view>
+#include <type_traits>
+#include <vector>
 
 #include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+
+#include "AsmSdpaTestSupport.hpp"
+#include "asm_fmha_v3_bwd_configs.hpp"
+#include "engines/asm_sdpa_engine/asm/AsmKernelPath.hpp"
+#include "engines/asm_sdpa_engine/plans/SdpaKernelUtils.hpp"
+#include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 
 #ifndef ASM_KPACK_TEST_DIR
 #error "ASM_KPACK_TEST_DIR must be defined (set via CMake compile definition)"
@@ -154,6 +169,86 @@ TEST(TestAsmKpackLoading, Gfx950BwdHd64Odo)
     verifyKernelExtraction(kpackPath("gfx950"), "fmha_v3_bwd/bwd_hd64_odo_bf16.co", "gfx950");
 }
 
+// The A16 post stage (cfg_fmha_bwd_dq_shuffle), gfx950 only.
+TEST(TestAsmKpackLoading, Gfx950BwdDqShuffle)
+{
+    for(const char* tocKey :
+        {"fmha_v3_bwd/bwd_hd128_dq_shuffle.co", "fmha_v3_bwd/bwd_hd192_dq_shuffle.co"})
+    {
+        verifyKernelExtraction(kpackPath("gfx950"), tocKey, "gfx950");
+    }
+}
+
+// =============================================================================
+// Every registry row, both architectures
+// =============================================================================
+
+// Each row of every kernel registry names a code object that its architecture's
+// archive carries, and that object defines the row's kernel symbol. The plan
+// builders derive TOC keys the same way, so a stale co_name or knl_name would
+// otherwise surface only when a graph first selects the row on a device.
+TEST(TestAsmKpackLoading, EveryRegistryRowResolvesInItsArchive)
+{
+    size_t archivesChecked = 0;
+    for(const std::string arch : {"gfx942", "gfx950"})
+    {
+        SCOPED_TRACE("arch=" + arch);
+        const auto path = kpackPath(arch);
+        if(!std::filesystem::exists(path))
+        {
+            continue;
+        }
+
+        std::vector<AsmKernelTocEntry> entries = getFwdKernelTocEntries(arch);
+        for(const CFG* registry : {&cfg_fmha_bwd_odo,
+                                   &cfg_fmha_bwd_dqdkdv,
+                                   &cfg_fmha_bwd_dq_convert,
+                                   &cfg_fmha_bwd_dq_shuffle})
+        {
+            for(const auto& [key, config] : *registry)
+            {
+                if(config.arch == arch)
+                {
+                    entries.push_back({getAsmKernelTocKey(config.co_name), config.knl_name});
+                }
+            }
+        }
+        ASSERT_FALSE(entries.empty()) << "No registry row names " << arch;
+
+        kpack_archive_t archive = nullptr;
+        ASSERT_EQ(kpack_open(path.c_str(), &archive), KPACK_SUCCESS)
+            << "kpack_open failed for " << path;
+        for(const auto& entry : entries)
+        {
+            void* data = nullptr;
+            size_t size = 0;
+            const kpack_error_t err
+                = kpack_get_kernel(archive, entry.tocKey.c_str(), arch.c_str(), &data, &size);
+            if(err != KPACK_SUCCESS || data == nullptr)
+            {
+                ADD_FAILURE() << "The " << arch << " archive has no object '" << entry.tocKey
+                              << "'";
+            }
+            else if(std::string_view(static_cast<const char*>(data), size).find(entry.knlName)
+                    == std::string_view::npos)
+            {
+                ADD_FAILURE() << "'" << entry.tocKey << "' does not define " << entry.knlName;
+            }
+            if(data != nullptr)
+            {
+                kpack_free_kernel(data);
+            }
+        }
+        kpack_close(archive);
+        ++archivesChecked;
+    }
+
+    if(archivesChecked == 0)
+    {
+        GTEST_SKIP() << "No archive found under " << kpackDir();
+    }
+}
+
 // =============================================================================
 // Negative: valid archive, missing TOC key
 // =============================================================================
@@ -177,6 +272,72 @@ TEST(TestAsmKpackLoading, MissingTocKeyReturnsError)
     EXPECT_EQ(data, nullptr);
 
     kpack_close(archive);
+}
+
+// =============================================================================
+// Forward launch limits: the generated table against HIP, for the current device
+// =============================================================================
+//
+// isApplicable declines a kernel whose max_flat_workgroup_size in the generated
+// table is below the block the plan launches with. This loads every forward
+// kernel the table offers for this device (both gfx942 builds) and checks the
+// recorded limit against the one HIP enforces, and that the row can launch.
+
+TEST(TestGpuSdpaFwdLaunchLimits, TableMatchesKernelMaxThreadsPerBlock)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const auto arch = hip_kernel_provider_common::getDeviceString(nullptr);
+    const auto path = kpackPath(arch);
+    if(!std::filesystem::exists(path))
+    {
+        GTEST_SKIP() << "No kpack archive for " << arch << " at " << path;
+    }
+
+    kpack_archive_t rawArchive = nullptr;
+    ASSERT_EQ(kpack_open(path.c_str(), &rawArchive), KPACK_SUCCESS) << path;
+    const auto archive
+        = std::unique_ptr<std::remove_pointer_t<kpack_archive_t>, decltype(&kpack_close)>(
+            rawArchive, &kpack_close);
+
+    const auto rows = getFwdLaunchLimitRows(arch);
+    for(const auto& row : rows)
+    {
+        SCOPED_TRACE("kernel=" + row.knlName);
+
+        // The table records the smallest limit among the builds a row resolves to.
+        int smallestLimit = std::numeric_limits<int>::max();
+        for(const auto& tocKey : row.tocKeys)
+        {
+            SCOPED_TRACE("tocKey=" + tocKey);
+
+            void* rawData = nullptr;
+            size_t size = 0;
+            ASSERT_EQ(
+                kpack_get_kernel(archive.get(), tocKey.c_str(), arch.c_str(), &rawData, &size),
+                KPACK_SUCCESS);
+            const auto data
+                = std::unique_ptr<void, decltype(&kpack_free_kernel)>(rawData, &kpack_free_kernel);
+
+            const auto kernel = loadKernelModuleFromMemory(data.get(), size, row.knlName.c_str());
+            ASSERT_TRUE(kernel.has_value());
+
+            int maxThreads = 0;
+            ASSERT_EQ(hipFuncGetAttribute(&maxThreads,
+                                          HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK,
+                                          kernel->function()),
+                      hipSuccess);
+            smallestLimit = std::min(smallestLimit, maxThreads);
+        }
+
+        EXPECT_EQ(row.maxFlatWorkgroupSize, smallestLimit);
+        EXPECT_LE(row.blockDimX, static_cast<unsigned int>(row.maxFlatWorkgroupSize));
+    }
+
+    if(rows.empty())
+    {
+        GTEST_SKIP() << "No forward config rows for " << arch;
+    }
 }
 
 } // namespace

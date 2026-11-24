@@ -68,8 +68,8 @@ TEST(TestGpuReductionSignatureKey, Copy)
 
 TEST(TestGpuReductionSignatureKey, CreateFromNodeAndTensorMap)
 {
-    const auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
-    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    auto builder = hipdnn_test_sdk::utilities::createReductionGraph();
+    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuReductionSignatureKey keyFromNode(

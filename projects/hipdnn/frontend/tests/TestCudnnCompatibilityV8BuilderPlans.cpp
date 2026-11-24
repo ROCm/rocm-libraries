@@ -188,6 +188,8 @@ TEST_F(TestCudnnCompatibilityV8BuilderPlans, JsonCarriesEngineAndPayload)
 
     EXPECT_EQ(text.rfind(expectedJsonPrefix(), 0), 0U) << text;
     EXPECT_NE(text.find(R"("behaviorNotes":[)"), std::string::npos) << text;
+    // An engine that declares no numerical notes is reported NONDETERMINISTIC (the layer's value 2).
+    EXPECT_NE(text.find(R"("numericalNotes":[2]},"knobs")"), std::string::npos) << text;
     EXPECT_NE(text.find(R"(},"knobs":[],"payload":")"), std::string::npos) << text;
     const std::string tail = std::string(R"("payload":")") + PAYLOAD_BASE64 + "\"}";
     ASSERT_GE(text.size(), tail.size());
@@ -234,6 +236,8 @@ TEST_F(TestCudnnCompatibilityV8BuilderPlans, LoadedPlanKeepsNotesKnobsAndName)
     installEngineKnobs(ENGINE_ID,
                        {{"prov.tile_size", 8, 0, 64, 8, {}}, {"prov.split_k_slc", 1, 1, 8, 1, {}}});
     installBehaviorNotes(ENGINE_ID, {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION});
+    installNumericalNotes(ENGINE_ID,
+                          {HIPDNN_NUMERICAL_NOTE_TENSOR_CORE, HIPDNN_NUMERICAL_NOTE_FFT});
     installEngineName(ENGINE_ID, "restored");
     const fe::OperationGraph_v8 graph = convGraph();
     fe::Engine_v8 built = engine(graph, ENGINE_INDEX);
@@ -260,7 +264,8 @@ TEST_F(TestCudnnCompatibilityV8BuilderPlans, LoadedPlanKeepsNotesKnobsAndName)
     EXPECT_EQ(restored.getAllBehaviorNotes(),
               std::vector<cudnnBackendBehaviorNote_t>{CUDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION});
     EXPECT_EQ(restored.getAllNumericNotes(),
-              std::vector<cudnnBackendNumericalNote_t>{CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC});
+              (std::vector<cudnnBackendNumericalNote_t>{CUDNN_NUMERICAL_NOTE_TENSOR_CORE,
+                                                        CUDNN_NUMERICAL_NOTE_FFT}));
     EXPECT_NE(restored.getJsonRepresentation().find(R"("name":"restored")"), std::string::npos);
     EXPECT_EQ(restored.getJsonRepresentation(), text);
 }
@@ -269,13 +274,28 @@ TEST_F(TestCudnnCompatibilityV8BuilderPlans, JsonReaderAcceptsWhitespaceAndKeyOr
 {
     const std::string text = " {\n \"payload\" : \"AP8QgH8=\" , \"knobs\" : [ { \"value\" : 16 , "
                              "\"type\" : 3 } ] ,\t\"engine\" : { \"id\" : \"7\" , "
-                             "\"behaviorNotes\" : [ 3 ] , \"name\" : \"a\\\"b\\\\c\\u0041\" , "
+                             "\"behaviorNotes\" : [ 3 ] , \"numericalNotes\" : [ 5 ] , "
+                             "\"name\" : \"a\\\"b\\\\c\\u0041\" , "
                              "\"globalIndex\" : 1 } , \"version\" : 1 }\r\n";
     const fe::ExecutionPlan_v8 plan = loaded(text);
     ASSERT_EQ(plan.get_status(), CUDNN_STATUS_SUCCESS) << plan.get_error();
     EXPECT_EQ(withoutNul(plan.getJsonRepresentation()),
               R"({"version":1,"engine":{"globalIndex":1,"id":"7","name":"a\"b\\cA",)"
-              R"("behaviorNotes":[3]},"knobs":[{"type":3,"value":16}],"payload":"AP8QgH8="})");
+              R"("behaviorNotes":[3],"numericalNotes":[5]},)"
+              R"("knobs":[{"type":3,"value":16}],"payload":"AP8QgH8="})");
+}
+
+// The first and last cuDNN note values are the edges of the accepted range.
+TEST_F(TestCudnnCompatibilityV8BuilderPlans, JsonReaderAcceptsFirstAndLastNumericalNote)
+{
+    const std::string text = R"({"version":1,"engine":{"globalIndex":1,"id":"7",)"
+                             R"("numericalNotes":[0,9]},"knobs":[{"type":3,"value":16}],)"
+                             R"("payload":"AP8QgH8="})";
+    const fe::ExecutionPlan_v8 plan = loaded(text);
+    ASSERT_EQ(plan.get_status(), CUDNN_STATUS_SUCCESS) << plan.get_error();
+    EXPECT_EQ(plan.getAllNumericNotes(),
+              (std::vector<cudnnBackendNumericalNote_t>{CUDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS,
+                                                        CUDNN_NUMERICAL_NOTE_WINOGRAD_TILE_6x6}));
 }
 
 TEST_F(TestCudnnCompatibilityV8BuilderPlans, JsonMalformedRejected)
@@ -304,6 +324,10 @@ TEST_F(TestCudnnCompatibilityV8BuilderPlans, JsonMalformedRejected)
         version + R"("engine":{"globalIndex":1,"id":"7x"},)" + payload + "}",
         version + R"("engine":{"globalIndex":1,"id":"7","behaviorNotes":[99]},)" + payload + "}",
         version + R"("engine":{"globalIndex":1,"id":"7","behaviorNotes":[-1]},)" + payload + "}",
+        version + R"("engine":{"globalIndex":1,"id":"7","numericalNotes":[10]},)" + payload + "}",
+        version + R"("engine":{"globalIndex":1,"id":"7","numericalNotes":[-1]},)" + payload + "}",
+        version + R"("engine":{"globalIndex":1,"id":"7","numericalNotes":[],"numericalNotes":[]},)"
+            + payload + "}",
         version + engine + R"(,"knobs":[{"type":3,"type":4,"value":1}],)" + payload + "}",
         version + engine + R"(,"knobs":[{"type":3,"value":1,"value":2}],)" + payload + "}",
         version + engine + R"(,"requestedKnobs":[{"type":999,"value":1}],)" + payload + "}",

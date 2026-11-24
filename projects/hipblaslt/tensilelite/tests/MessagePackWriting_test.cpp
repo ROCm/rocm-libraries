@@ -382,13 +382,16 @@ namespace
     {
         using namespace Predicates::Contraction;
 
-        BufferLoadCheckPacket packet{0, 8, 64, 128};
+        BufferLoadCheckPacket       packet{0, 8, 64, 128};
+        GL2PrefetchSAddrCheckPacket gl2Packet{
+            true, false, 64, 128, 256, 512, 256, 128, 32, 32, 1, 128, true, true, 64, 512};
 
         auto operation   = std::make_shared<OperationIdentifierEqual>();
         operation->value = gemmOperation();
 
         return std::make_shared<Predicates::And<Gemm>>(std::initializer_list<ProblemPredicatePtr>{
             std::make_shared<BufferLoadOffsetLimitCheck>(packet),
+            std::make_shared<GL2PrefetchSAddrOffsetLimitCheck>(gl2Packet),
             std::make_shared<Free0SizeMultiple>(0, 8),
             std::make_shared<Predicates::Not<Gemm>>(
                 std::make_shared<Predicates::Or<Gemm>>(std::initializer_list<ProblemPredicatePtr>{
@@ -1127,6 +1130,31 @@ TEST_F(MessagePackWritingLazyTest, PlaceholderMasterWithMapping)
     EXPECT_EQ(selectedIndex(*loaded, gemm(512, 2048, 64), hardware), 11);
     EXPECT_EQ(selectedIndex(*loaded, gemm(16000, 64, 64), hardware), 15);
     EXPECT_EQ(selectedIndex(*loaded, gemm(2048, 4000, 64), hardware), 14);
+}
+
+TEST(MessagePackWritingTest, BufferAddressingLimitCheckRoundTrips)
+{
+    // No committed library contains this predicate, so a load of one that
+    // does has never been exercised. The library codec under test is msgpack.
+    // YAML of the same predicate is round-tripped from Python.
+    auto master   = std::make_shared<Master>();
+    auto solution = makeSolution(7);
+    solution->problemPredicate
+        = std::make_shared<Predicates::Contraction::BufferAddressingLimitCheck>();
+    master->solutions[solution->index] = solution;
+    master->library                    = std::make_shared<SingleContractionLibrary>(solution);
+    master->version                    = "test";
+
+    auto reloaded = roundTrip(*master);
+    ASSERT_NE(reloaded, nullptr);
+
+    auto loaded = reloaded->solutions.at(7)->problemPredicate;
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(loaded->type(), "BufferAddressingLimitCheck");
+    EXPECT_NE(
+        std::dynamic_pointer_cast<Predicates::Contraction::BufferAddressingLimitCheck>(loaded),
+        nullptr)
+        << describe(loaded);
 }
 
 TEST(MessagePackWritingTest, SolutionsRoundTripOnTheirOwn)

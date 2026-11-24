@@ -399,9 +399,10 @@ Enforcing read-only input
 -------------------------
 
 rocFFT may currently overwrite user input buffers for out-of-place
-real-transforms (not C2C-transform).  Although we have documented this
-behavior, and it is common practice in other libraries, it might still
-be unintuitive for some users.
+C2R-transforms.  R2C- and C2C-transforms leave their input alone, so
+for those the guarantee already holds.  Although we have documented
+the C2R behavior, and it is common practice in other libraries, it
+might still be unintuitive for some users.
 
 If we ever wanted to start guaranteeing that user input is left
 unmodified, this buffer assignment implementation would make that work

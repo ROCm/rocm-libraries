@@ -50,6 +50,8 @@ set(DEFAULT_COMPONENTS
 
 set(AVAILABLE_COMPONENTS
     ${DEFAULT_COMPONENTS}
+    # shared, opt-in
+    mosaic
     # dnn
     hipdnn
     hipdnn-integration-tests
@@ -181,6 +183,14 @@ if("origami" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
         COMPONENT origami
         PREFIX_PATH shared
         EXPECT_TARGET roc::origami
+    )
+endif()
+
+if("mosaic" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT mosaic
+        PREFIX_PATH shared
+        EXPECT_TARGET roc::mosaic
     )
 endif()
 

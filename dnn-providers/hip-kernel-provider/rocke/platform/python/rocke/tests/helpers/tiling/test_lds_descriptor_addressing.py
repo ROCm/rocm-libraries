@@ -3,8 +3,8 @@
 
 """LDS is addressed through the tensor descriptor's strides.
 
-An LDS buffer is a flat allocation sized from its tensor descriptor,
-``b.smem_alloc(td.dtype, [td.element_span])``, and ``load_fragment`` / ``store_fragment`` give every
+An LDS buffer is a flat allocation sized from its tensor descriptor (``lds_allocation``), and
+``load_fragment`` / ``store_fragment`` give every
 LDS access one element index, ``sum(position * stride)``, exactly as for global memory. These tests
 check:
 
@@ -12,11 +12,14 @@ check:
   N-contiguous ``(N, K)`` buffer and a stage of a rank-3 buffer positioned by its origin;
 - each refusal: a buffer that is not flat, holds another element type or is smaller than the
   descriptor's span; the built-in swizzle on a buffer whose stride-1 axis is not last;
+- under the built-in swizzle, every vector access of an 8-bit buffer stays inside one 8-element
+  swizzle block, so it touches exactly the elements the per-element swizzle names;
   ``TensorDesc.element_span`` on a negative stride;
 - ``lds_tile_desc``: the convention-order ``(free, K)`` descriptor of a cooperative LDS tile puts every
   element at the same address the buffer-order ``(K, free)`` layout did;
 - the in-tree LDS-staged demos keep their vector LDS accesses;
-- on a gfx90a GPU: LDS round trips whose bytes land where the strides say, and a GEMM whose B tile is
+- on a gfx90a GPU: LDS round trips whose bytes land where the strides say (and, for i8 data stored
+  with 16-element runs, where the built-in swizzle says), and a GEMM whose B tile is
   staged ``[K][N]`` and described ``(N, K)`` with strides ``(1, N)``, bit-exact; and the interleaved
   accumulator fragment, whose innermost register bucket is an outer level of M, stored to an
   M-contiguous LDS buffer lands where its layout says and reads back equal to the input.
@@ -33,7 +36,19 @@ import pytest
 
 pytest.importorskip("rocke.core.ir", reason="rocke IR substrate required")
 
-from rocke.core.ir import F16, F32, IRBuilder, PtrType
+from rocke.core.ir import (
+    E8M0,
+    F16,
+    F32,
+    FP4E2M1,
+    FP6E2M3,
+    FP8E4M3,
+    I8,
+    I32,
+    TF32,
+    IRBuilder,
+    PtrType,
+)
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.helpers.tiling import (
     InterleavedStyle,
@@ -42,6 +57,7 @@ from rocke.helpers.tiling import (
     cooperative_load_desc,
     cooperative_load_width,
     fill_fragment,
+    lds_allocation,
     lds_element_span,
     lds_read,
     lds_store,
@@ -215,28 +231,30 @@ def _refusal(buffer_shape, buffer_dtype=F16, *, verb="load"):
 def test_a_rank_2_buffer_is_refused() -> None:
     assert _refusal([16, 16]) == (
         "load_fragment: the LDS buffer smem<f16, [16x16]> has rank 2 -- an LDS buffer is flat; its "
-        "layout lives in the tensor descriptor. Allocate smem_alloc(f16, [256])"
+        "layout lives in the tensor descriptor. Allocate it with lds_allocation: "
+        "smem_alloc(f16, [256])"
     )
 
 
 def test_a_buffer_of_another_element_type_is_refused() -> None:
     assert (
         _refusal([256], F32)
-        == "load_fragment: LDS buffer element f32 != tensor dtype f16"
+        == "load_fragment: LDS buffer element f32, expected f16 (the storage element of f16 "
+        "data) -- allocate the buffer with lds_allocation"
     )
 
 
 def test_a_buffer_smaller_than_the_descriptor_span_is_refused() -> None:
     assert _refusal([200]) == (
-        "load_fragment: the LDS tensor spans 256 elements but the buffer holds 200 -- size the "
-        "allocation with lds_element_span"
+        "load_fragment: the LDS tensor spans 256 f16 elements, but the buffer holds 200 -- size "
+        "the allocation with lds_allocation"
     )
 
 
 def test_the_store_verb_runs_the_same_checks() -> None:
     assert _refusal([200], verb="store") == (
-        "store_fragment: the LDS tensor spans 256 elements but the buffer holds 200 -- size the "
-        "allocation with lds_element_span"
+        "store_fragment: the LDS tensor spans 256 f16 elements, but the buffer holds 200 -- size "
+        "the allocation with lds_allocation"
     )
 
 
@@ -286,9 +304,29 @@ def test_lds_element_span_counts_the_builtin_swizzle_reach() -> None:
     assert _PADDED_ROWS.element_span == 496
     assert lds_element_span(_PADDED_ROWS) == 496
     assert lds_element_span(_PADDED_ROWS, True) == 512
+    assert lds_allocation(_PADDED_ROWS, True) == (F16, 512)
     # A row that already fills its 64-element groups reaches no further.
     full_rows = make_tensor_desc((8, 128), (128, 1), F16)
     assert lds_element_span(full_rows, True) == full_rows.element_span == 1024
+
+
+@pytest.mark.parametrize(
+    "dtype,allocation",
+    [
+        (F16, (F16, 1024)),
+        (FP8E4M3, (FP8E4M3, 1024)),
+        (
+            TF32,
+            (I32, 1024),
+        ),  # tf32 has no arithmetic: held as i32 in registers and in LDS
+        (FP4E2M1, (I32, 128)),  # 1024 4-bit elements fill 128 words
+        (FP6E2M3, (I32, 192)),
+        (E8M0, (I8, 1024)),  # a scale encoding has no arithmetic: held as its bytes
+    ],
+)
+def test_lds_allocation_is_the_storage_that_holds_the_span(dtype, allocation) -> None:
+    td = make_tensor_desc((8, 128), (128, 1), dtype)
+    assert lds_allocation(td) == allocation
 
 
 @pytest.mark.parametrize("verb", ["load", "store"])
@@ -305,8 +343,8 @@ def test_a_swizzled_buffer_sized_by_element_span_is_refused(verb) -> None:
             fill_fragment(b, fragment, 0)
             store_fragment(b, lds, window, fragment, tid, lds_swizzle=True)
     assert str(info.value) == (
-        f"{verb}_fragment: the LDS tensor spans 512 elements but the buffer holds 496 -- size the "
-        "allocation with lds_element_span"
+        f"{verb}_fragment: the LDS tensor spans 512 f16 elements, but the buffer holds 496 -- "
+        "size the allocation with lds_allocation"
     )
 
 
@@ -333,6 +371,40 @@ def test_builtin_swizzle_refuses_rows_that_would_overlap() -> None:
         "reaches 64 elements, but axis 0 steps by 48 -- rows would overlap; pad that stride to at "
         "least 64 or pass a swizzle callable"
     )
+
+
+@pytest.mark.parametrize("dtype", [I8, FP8E4M3])
+def test_builtin_swizzle_keeps_each_8bit_access_inside_one_block(dtype) -> None:
+    # Each lane holds a 16-element row run. The swizzle keeps only 8-element blocks together, so
+    # every access is 8 bytes wide and covers the 8 elements the per-element swizzle
+    # m -> m ^ ((row & 7) << 3) puts there; a 16-byte access would reach into a block the swizzle
+    # moved elsewhere.
+    rows, cols, run = 16, 64, 16
+    td = make_tensor_desc((rows, cols), (cols, 1), dtype)
+    tile = make_tile_desc(
+        shape=[rows, cols],
+        thread_tile=[1, run],
+        thread_dist=[rows, cols // run],
+        wave_size=_WAVE,
+    )
+    kernel = _load_then_store(make_window(td, (0, 0)), tile, swizzle=True)
+    widths = {
+        op.attrs["vec"]
+        for op in kernel.body.ops
+        if op.name.startswith("tile.smem_") and "vec" in op.attrs
+    }
+    assert widths == {8}
+    for lane in range(_WAVE):
+        accesses = _lds_indices(kernel, lane)
+        assert (
+            len(accesses) == 4
+        )  # two 8-element loads and two stores per 16-element run
+        for (_, (index,)), register in zip(accesses, [0, 8, 0, 8], strict=True):
+            row, col = emit_tensor_coordinates(
+                NumBuilder(lane), tile.layout, lane, register
+            )
+            swizzled = [row * cols + ((col + i) ^ ((row & 7) << 3)) for i in range(8)]
+            assert swizzled == list(range(index, index + 8)), (lane, register)
 
 
 def test_swizzled_demo_buffers_hold_every_access() -> None:
@@ -537,20 +609,8 @@ def test_migrated_demos_keep_their_lds_access_widths(label: str) -> None:
 # ---- GPU (gfx90a) ------------------------------------------------------------------------------------
 
 
-def _gfx90a_present() -> bool:
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        return get_device_arch(0) == "gfx90a"
-    except Exception:  # noqa: BLE001
-        # Any HIP or driver failure means there is no usable GPU here.
-        return False
-
-
-_needs_gfx90a = pytest.mark.skipif(not _gfx90a_present(), reason="needs a gfx90a GPU")
-
-_NP = {"f16": np.float16, "f32": np.float32}
-_IR = {"f16": F16, "f32": F32}
+_NP = {"f16": np.float16, "f32": np.float32, "i8": np.int8}
+_IR = {"f16": F16, "f32": F32, "i8": I8}
 
 
 def _run(
@@ -582,11 +642,14 @@ def _run(
         rt.memcpy_d2h(as_u8_buffer(a), dev[name].ptr(), a.nbytes)
 
 
-def _round_trip_kernel(dtype, make_windows, store_tile, read_tile, dump_elements):
+def _round_trip_kernel(
+    dtype, make_windows, store_tile, read_tile, dump_elements, *, lds_swizzle=False
+):
     """For each (global window, LDS window) pair ``make_windows(b)`` returns: load the global tile
     from IN with `store_tile` and store it into LDS. After a barrier, read every LDS window back with
     `read_tile` and store it to OUT through its global window, then dump the whole flat buffer into
-    RAW."""
+    RAW. `lds_swizzle` is passed to the LDS store and the LDS read; the dump reads LDS unswizzled.
+    """
     from rocke.helpers.spec import SignatureBuilder
 
     ir = _IR[dtype]
@@ -600,10 +663,12 @@ def _round_trip_kernel(dtype, make_windows, store_tile, read_tile, dump_elements
     lds_windows = make_windows(b)
     for global_window, lds_window in lds_windows:
         fragment = load_fragment(b, src, global_window, store_tile, tid)
-        store_fragment(b, lds, lds_window, fragment, tid)
+        store_fragment(b, lds, lds_window, fragment, tid, lds_swizzle=lds_swizzle)
     b.sync()
     for global_window, lds_window in lds_windows:
-        fragment = load_fragment(b, lds, lds_window, read_tile, tid)
+        fragment = load_fragment(
+            b, lds, lds_window, read_tile, tid, lds_swizzle=lds_swizzle
+        )
         store_fragment(b, out, global_window, fragment, tid)
     flat = make_tensor_desc((dump_elements,), (1,), ir)
     dump_tile = make_tile_desc(
@@ -625,7 +690,7 @@ def _round_up(n: int, m: int) -> int:
     return -(-n // m) * m
 
 
-@_needs_gfx90a
+@pytest.mark.usefixtures("gfx90a_gpu")
 @pytest.mark.parametrize("dtype", ["f16", "f32"])
 @pytest.mark.parametrize(
     "case",
@@ -666,7 +731,38 @@ def test_lds_round_trip_places_elements_by_strides(dtype: str, case: str) -> Non
     np.testing.assert_array_equal(raw[r * lds_strides[0] + c * lds_strides[1]], data)
 
 
-@_needs_gfx90a
+@pytest.mark.usefixtures("gfx90a_gpu")
+def test_swizzled_i8_round_trip_with_16_element_runs() -> None:
+    # i8 rows of 64, stored with 16-element runs and read back one element per register down the
+    # columns, both through the built-in swizzle: the read side agrees with the store side only if
+    # each wide access keeps to the swizzle's 8-element blocks.
+    rows, cols = 16, 64
+    td = make_tensor_desc((rows, cols), (cols, 1), I8)
+    store_tile = make_tile_desc(
+        shape=[rows, cols], thread_tile=[1, 16], thread_dist=[16, 4], wave_size=_WAVE
+    )
+    read_tile = make_tile_desc(
+        shape=[rows, cols], thread_tile=[rows, 1], thread_dist=[1, 64], wave_size=_WAVE
+    )
+    dump = rows * cols
+    kernel, signature = _round_trip_kernel(
+        "i8",
+        lambda b: [(make_window(td, (0, 0)), make_window(td, (0, 0)))],
+        store_tile,
+        read_tile,
+        dump,
+        lds_swizzle=True,
+    )
+    data = (np.arange(rows * cols) % 127).astype(np.int8).reshape(rows, cols)
+    out = np.zeros_like(data)
+    raw = np.zeros(dump, np.int8)
+    _run(kernel, signature, {"IN": data}, {"OUT": out, "RAW": raw})
+    np.testing.assert_array_equal(out, data)
+    r, c = np.meshgrid(np.arange(rows), np.arange(cols), indexing="ij")
+    np.testing.assert_array_equal(raw[r * cols + (c ^ ((r & 7) << 3))], data)
+
+
+@pytest.mark.usefixtures("gfx90a_gpu")
 @pytest.mark.parametrize("dtype", ["f16", "f32"])
 def test_lds_round_trip_rank_3_stages(dtype: str) -> None:
     # Two stages of a (free, K) = (32, 16) tile, staged [stage][K][free]: the LDS descriptor is
@@ -711,7 +807,7 @@ def test_lds_round_trip_rank_3_stages(dtype: str) -> None:
     np.testing.assert_array_equal(raw_h[s * k * free + f + kk * free], data)
 
 
-@_needs_gfx90a
+@pytest.mark.usefixtures("gfx90a_gpu")
 def test_interleaved_accumulator_lds_round_trip() -> None:
     # The interleaved accumulator of a 64 x 64 x 32 f16 tile holds M positions 0, 4, 8 and 12 in
     # four consecutive registers. It is loaded from a row-major global tensor, stored into an
@@ -720,9 +816,9 @@ def test_interleaved_accumulator_lds_round_trip() -> None:
     # would undo it.
     c_desc = TileMma(
         (64, 64, 32),
-        a="f16",
-        b="f16",
-        c="f32",
+        a=F16,
+        b=F16,
+        c=F32,
         target="gfx90a",
         tiling=Tiling(atom_shape=(16, 16, 16)),
         style=InterleavedStyle(),
@@ -756,9 +852,9 @@ def _convention_gemm(wave):
     m_len = n_len = k_len = 64
     mma = TileMma(
         wave,
-        a="f16",
-        b="f16",
-        c="f32",
+        a=F16,
+        b=F16,
+        c=F32,
         target="gfx90a",
         tiling=Tiling(atom_shape=(16, 16, 16)),
     )
@@ -796,7 +892,7 @@ def _convention_gemm(wave):
     return b.kernel, signature, grid, (mma.wave_size, 1, 1), (m_len, n_len, k_len)
 
 
-@_needs_gfx90a
+@pytest.mark.usefixtures("gfx90a_gpu")
 @pytest.mark.parametrize("wave", [(16, 16, 16), (32, 32, 16), (16, 32, 32)])
 def test_gemm_with_b_staged_n_contiguous_is_bit_exact(wave) -> None:
     kernel, signature, grid, block, (m_len, n_len, k_len) = _convention_gemm(wave)

@@ -485,17 +485,8 @@ std::vector<int64_t> EnginePluginResourceManager::queryApplicableEngineIds(
     // and graphs that opt in to overridable tensor shapes require the extended
     // override-execute SDK surface. Older explicit API versions are skipped.
     const bool isOverrideShapeEnabled = readIsOverrideShapeEnabled(*graphDesc);
-    const bool isRuntimePBV = graphDesc->isRuntimePassByValueEnabled();
-    const bool isRaggedTensorEnabled = graphDesc->hasRaggedTensors();
-    const bool hasNonDefaultTensorAlignment = graphDesc->hasNonDefaultTensorAlignment();
-    const bool isRaggedOffsetMultiplier = graphDesc->hasRaggedOffsetMultiplier();
-
-    const auto& requiredVersion
-        = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(isOverrideShapeEnabled,
-                                                                  isRuntimePBV,
-                                                                  isRaggedTensorEnabled,
-                                                                  hasNonDefaultTensorAlignment,
-                                                                  isRaggedOffsetMultiplier);
+    const auto& requiredVersion = graphDesc->requiredEngineApiVersion(
+        isOverrideShapeEnabled, graphDesc->isRuntimePassByValueEnabled());
 
     std::vector<int64_t> engineIds;
 
@@ -1191,7 +1182,8 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
                                       /*isRuntimePassByValue=*/false,
                                       /*isRaggedTensorEnabled=*/false,
                                       /*hasNonDefaultTensorAlignment=*/false,
-                                      /*isRaggedOffsetMultiplier=*/false),
+                                      /*isRaggedOffsetMultiplier=*/false,
+                                      /*hasCuSeqLen=*/false),
                        HIPDNN_STATUS_NOT_SUPPORTED,
                        "Selected plugin API version does not support "
                        "hipdnnEnginePluginExecuteOpGraphWithOverrides.");

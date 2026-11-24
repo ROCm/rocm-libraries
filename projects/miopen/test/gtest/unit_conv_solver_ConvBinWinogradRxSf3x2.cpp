@@ -156,50 +156,50 @@ TEST_P(CPU_UnitTestConvSolverBinWinogradRxSf3x2DevApplicabilityFwd_FP32, ConvBin
     this->RunTest(miopen::solver::conv::ConvBinWinoRxS<3, 2>{});
 };
 
-// Smoke tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
+// Quick tests
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverBinWinogradRxSf3x2Fwd_FP16,
                          testing::Combine(testing::Values(GetTestParamsHalf()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCasesHalfFwd())));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverBinWinogradRxSf3x2Bwd_FP16,
                          testing::Combine(testing::Values(GetTestParamsHalf()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCasesHalfBwd())));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverBinWinogradRxSf3x2Wrw_FP16,
                          testing::Combine(testing::Values(GetTestParamsHalf()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCasesHalfWrw())));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverBinWinogradRxSf3x2Fwd_FP32,
                          testing::Combine(testing::Values(GetTestParamsFloat()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCasesFloat())));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverBinWinogradRxSf3x2Bwd_FP32,
                          testing::Combine(testing::Values(GetTestParamsFloat()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCasesFloat())));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverBinWinogradRxSf3x2Wrw_FP32,
                          testing::Combine(testing::Values(GetTestParamsFloat()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCasesFloat())));
 
 // Device applicability test
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_UnitTestConvSolverBinWinogradRxSf3x2DevApplicabilityFwd_FP16,
                          testing::Combine(testing::Values(GetTestParamsHalf()),
                                           testing::Values(GetConvTestCasesHalfFwd()[0])));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_UnitTestConvSolverBinWinogradRxSf3x2DevApplicabilityFwd_FP32,
                          testing::Combine(testing::Values(GetTestParamsFloat()),
                                           testing::Values(GetConvTestCasesFloat()[0])));
@@ -319,50 +319,50 @@ TEST_P(CPU_UnitTestConvSolverTransposedBinWinogradRxSf3x2DevApplicabilityFwd_FP3
     this->RunTest(miopen::solver::conv::TransposedConvBinWinoRxS<3, 2>{});
 };
 
-// Smoke tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
+// Quick tests
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverTransposedBinWinogradRxSf3x2Fwd_FP16,
                          testing::Combine(testing::Values(GetTestParamsHalf()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCasesNHWC(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverTransposedBinWinogradRxSf3x2Bwd_FP16,
                          testing::Combine(testing::Values(GetTestParamsHalf()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCasesNHWC(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverTransposedBinWinogradRxSf3x2Wrw_FP16,
                          testing::Combine(testing::Values(GetTestParamsHalf()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCasesNHWCWrw(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverTransposedBinWinogradRxSf3x2Fwd_FP32,
                          testing::Combine(testing::Values(GetTestParamsFloat()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCasesNHWC(miopenFloat))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverTransposedBinWinogradRxSf3x2Bwd_FP32,
                          testing::Combine(testing::Values(GetTestParamsFloat()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCasesNHWC(miopenFloat))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverTransposedBinWinogradRxSf3x2Wrw_FP32,
                          testing::Combine(testing::Values(GetTestParamsFloat()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCasesNHWCWrw(miopenFloat))));
 
 // Device applicability test
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_UnitTestConvSolverTransposedBinWinogradRxSf3x2DevApplicabilityFwd_FP16,
                          testing::Combine(testing::Values(GetTestParamsHalf()),
                                           testing::Values(GetConvTestCasesNHWC(miopenHalf)[0])));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_UnitTestConvSolverTransposedBinWinogradRxSf3x2DevApplicabilityFwd_FP32,
                          testing::Combine(testing::Values(GetTestParamsFloat()),
                                           testing::Values(GetConvTestCasesNHWC(miopenFloat)[0])));

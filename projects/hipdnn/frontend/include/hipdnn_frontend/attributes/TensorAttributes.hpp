@@ -609,6 +609,7 @@ public:
      * - Virtual tensors are not pass-by-value
      * - Dimensions and strides have matching sizes
      * - Dimensions are non-empty and positive
+     * - Strides are non-negative, on this tensor and on its ragged-offset tensor
      */
     Error validate() const
     {
@@ -637,6 +638,28 @@ public:
         HIPDNN_RETURN_IF_FALSE(std::all_of(_dim.begin(), _dim.end(), isPositive),
                                ErrorCode::INVALID_VALUE,
                                "Tensor " + _name + " must have only positive dimensions");
+
+        auto checkNonNegativeStrides
+            = [](const std::vector<int64_t>& strides, const std::string& label) -> Error {
+            for(size_t axis = 0; axis < strides.size(); ++axis)
+            {
+                if(strides[axis] < 0)
+                {
+                    return {ErrorCode::INVALID_VALUE,
+                            label + " strides must be non-negative, got "
+                                + std::to_string(strides[axis]) + " on axis "
+                                + std::to_string(axis)};
+                }
+            }
+            return {ErrorCode::OK, ""};
+        };
+        HIPDNN_CHECK_ERROR(checkNonNegativeStrides(_stride, "Tensor " + _name));
+        if(_raggedOffset)
+        {
+            HIPDNN_CHECK_ERROR(checkNonNegativeStrides(_raggedOffset->_stride,
+                                                       "Tensor " + _name + " ragged offset "
+                                                           + _raggedOffset->_name));
+        }
 
         HIPDNN_RETURN_IF_TRUE(_alignment < 1,
                               ErrorCode::INVALID_VALUE,

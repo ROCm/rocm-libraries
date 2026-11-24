@@ -32,6 +32,7 @@
 #define CHECK_HIP_ALLOC(status)               \
     if(status != hipSuccess)                  \
     {                                         \
+        hiptensor::clearHipError();           \
         return HIPTENSOR_STATUS_ALLOC_FAILED; \
     }
 #endif
@@ -135,12 +136,14 @@ namespace hiptensor
         std::vector<float> sol_times(candidates.size(), std::numeric_limits<float>::max());
         std::vector<int>   indices(candidates.size());
         std::iota(indices.begin(), indices.end(), 0);
-        int idx = 0;
+        int  idx         = 0;
+        bool allocFailed = false;
         for(auto* solution : candidates)
         {
             using hiptensor::HiptensorOptions;
             auto& options = HiptensorOptions::instance();
 
+            ContractionMetrics problemMetrics;
             auto [errorCode, time] = (*solution)(&alpha,
                                                  A_d,
                                                  B_d,
@@ -168,14 +171,14 @@ namespace hiptensor
                                                      0, // log_level
                                                      options->coldRuns(), // cold_niters
                                                      options->hotRuns(), // nrepeat
-                                                 });
+                                                 },
+                                                 &problemMetrics);
             if(errorCode == HIPTENSOR_STATUS_SUCCESS && time > 0)
             {
                 // Make sure to time the kernels
-                int32_t m, n, k;
-                std::tie(m, n, k) = solution->problemDims();
-                auto flops        = std::size_t(2) * m * n * k;
-                auto bytes        = solution->problemBytes();
+                auto flops
+                    = std::size_t(2) * problemMetrics.mM * problemMetrics.mN * problemMetrics.mK;
+                auto bytes = problemMetrics.mBytes;
 
                 PerfMetrics metrics = {
                     solution->uid(), // id
@@ -211,6 +214,10 @@ namespace hiptensor
 
                 sol_times[idx] = time;
             }
+            else if(errorCode == HIPTENSOR_STATUS_ALLOC_FAILED)
+            {
+                allocFailed = true;
+            }
 
             idx++;
         }
@@ -234,7 +241,7 @@ namespace hiptensor
 
         if(bestSolution == nullptr)
         {
-            return HIPTENSOR_STATUS_EXECUTION_FAILED;
+            return allocFailed ? HIPTENSOR_STATUS_ALLOC_FAILED : HIPTENSOR_STATUS_EXECUTION_FAILED;
         }
         else
         {

@@ -22,7 +22,7 @@
 
 from rocisa.code import Label, Module
 from rocisa.container import vgpr, sgpr, accvgpr, Holder, MemTokenData
-from rocisa.instruction import SBarrier, SBranch, SMovB32, SMovB64, SWaitCnt, SWaitTensorcnt,\
+from .ir import SBarrier, SBranch, SMovB32, SMovB64, SWaitCnt, SWaitTensorcnt,\
   VAccvgprReadB32, VAccvgprWriteB32, VFmaF32, VFmaF64, VLShiftLeftB64, VMovB32, \
   VMovRelsD2B32, VMulF32, VMulF64, VMulLOU32, VMulPKF16
 from rocisa.functions import BranchIfNotZero
@@ -185,6 +185,17 @@ def getAccToArchLen(kernel):
 def accToArchMapper(kernel):
   acc2arch = dict()
   arch2acc = dict()
+
+  if kernel.get("WaveTileContiguousA"):
+    wt, nt = kernel["MIWaveTile"]
+    outputs = kernel["MatrixInstM"] * kernel["MatrixInstN"] // kernel["WavefrontSize"]
+    for j in range(nt):
+      for i in range(wt):
+        for t in range(outputs):
+          src = t + outputs * (i + wt * j)
+          dst = i + wt * (t + outputs * j) if kernel["SourceSwap"] else src
+          acc2arch[src], arch2acc[dst] = dst, src
+    return acc2arch, arch2acc
 
   matrixInstBM, matrixInstBN, OutputsPerMFMA1B, VectorWidth0, VectorWidth1, outerTT0, outerTT1 = _getAccToArchInfo(kernel)
 

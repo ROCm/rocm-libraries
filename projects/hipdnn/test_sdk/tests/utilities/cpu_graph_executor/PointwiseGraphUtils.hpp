@@ -35,7 +35,8 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                              std::optional<float> reluLowerClipSlope = std::nullopt,
                              std::optional<float> swishBeta = std::nullopt,
                              std::optional<float> eluAlpha = std::nullopt,
-                             std::optional<float> softplusBeta = std::nullopt)
+                             std::optional<float> softplusBeta = std::nullopt,
+                             std::optional<int64_t> axis = std::nullopt)
 {
     const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("PointwiseUnaryTest");
@@ -86,6 +87,10 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     if(softplusBeta.has_value())
     {
         pointwiseAttrs.set_softplus_beta(softplusBeta.value());
+    }
+    if(axis.has_value())
+    {
+        pointwiseAttrs.set_axis(axis.value());
     }
 
     const auto outputTensorAttr = graph->pointwise(inputTensorAttr, pointwiseAttrs);
@@ -262,7 +267,10 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                                hipdnn_frontend::PointwiseMode operation,
                                const hipdnn_data_sdk::utilities::TensorLayout& layout
                                = hipdnn_data_sdk::utilities::TensorLayout::NCHW,
-                               std::optional<float> reluLowerClip = std::nullopt)
+                               std::optional<float> reluLowerClip = std::nullopt,
+                               std::optional<float> swishBeta = std::nullopt,
+                               std::optional<float> eluAlpha = std::nullopt,
+                               std::optional<float> softplusBeta = std::nullopt)
 {
     const auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("PointwiseTernaryTest");
@@ -296,7 +304,19 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     {
         pointwiseAttrs.set_relu_lower_clip(reluLowerClip.value());
     }
-    const auto outputTensorAttr
+    if(swishBeta.has_value())
+    {
+        pointwiseAttrs.set_swish_beta(swishBeta.value());
+    }
+    if(eluAlpha.has_value())
+    {
+        pointwiseAttrs.set_elu_alpha(eluAlpha.value());
+    }
+    if(softplusBeta.has_value())
+    {
+        pointwiseAttrs.set_softplus_beta(softplusBeta.value());
+    }
+    auto outputTensorAttr
         = graph->pointwise(input0TensorAttr, input1TensorAttr, input2TensorAttr, pointwiseAttrs);
 
     if(!outputTensorAttr->has_uid())

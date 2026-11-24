@@ -4,7 +4,7 @@
     class value_type
 {% endblock %}
 
-{% block config_guard scoped %}({% if not type.value_type.is_floating %}!{% endif %}rocprim::is_floating_point<value_type>::value){% if type.value_type.size_min > 0 %} && (sizeof(value_type) > {{ type.value_type.size_min }}){% endif %} && (sizeof(value_type) <= {{ type.value_type.size }}){% endblock %}
+{% block config_guard scoped %}{{ mk_type_trait_guard(type.value_type) }}{{ mk_type_sz_check(type.value_type) }}{% endblock %}
 
 {% block config_constructor -%}
 adjacent_difference_config_params{ { {{ config.block_size_x }}, {{ config.ipt }} } }

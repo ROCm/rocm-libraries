@@ -19,8 +19,8 @@ using namespace hipdnn_integration_tests::gpu_graph_executor::detail;
 
 TEST(TestGpuReductionPlanBuilder, PlanConstruction)
 {
-    const auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
-    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    auto builder = hipdnn_test_sdk::utilities::createReductionGraph();
+    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuReductionPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
@@ -34,8 +34,8 @@ TEST(TestGpuReductionPlanBuilder, PlanConstruction)
 
 TEST(TestGpuReductionPlanBuilder, IsApplicable)
 {
-    const auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
-    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    auto builder = hipdnn_test_sdk::utilities::createReductionGraph();
+    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuReductionPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
@@ -56,7 +56,7 @@ TEST(TestGpuReductionPlanBuilder, IsApplicable)
 
 TEST(TestGpuReductionPlanBuilder, IsNotApplicableForRaggedTensors)
 {
-    const auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto builder = hipdnn_test_sdk::utilities::createReductionGraph();
 
     const GpuReductionPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
 
@@ -84,8 +84,8 @@ TEST(TestGpuReductionPlanBuilder, IsApplicableReturnsFalseForWrongAttributesType
 
 TEST(TestGpuReductionPlanBuilder, IsApplicableReturnsFalseForWrongOutputDataType)
 {
-    const auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
-    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    auto builder = hipdnn_test_sdk::utilities::createReductionGraph();
+    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuReductionPlanBuilder<DataType::FLOAT, DataType::BFLOAT16, DataType::FLOAT> patient;
@@ -95,8 +95,8 @@ TEST(TestGpuReductionPlanBuilder, IsApplicableReturnsFalseForWrongOutputDataType
 
 TEST(TestGpuReductionPlanBuilder, IsApplicableReturnsFalseForWrongComputeDataType)
 {
-    const auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
-    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    auto builder = hipdnn_test_sdk::utilities::createReductionGraph();
+    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuReductionPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::HALF> patient;
@@ -106,8 +106,8 @@ TEST(TestGpuReductionPlanBuilder, IsApplicableReturnsFalseForWrongComputeDataTyp
 
 TEST(TestGpuReductionPlanBuilder, IsApplicableReturnsFalseForIncorrectReductionMode)
 {
-    const auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
-    const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+    auto builder = hipdnn_test_sdk::utilities::createReductionGraph();
+    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuReductionPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
