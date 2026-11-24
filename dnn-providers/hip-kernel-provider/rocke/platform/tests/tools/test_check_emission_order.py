@@ -277,8 +277,56 @@ def test_a_fixed_known_site_must_leave_the_allowlist(monkeypatch):
     ]
 
 
-def test_known_sites_are_keyed_by_path_under_platform():
+def test_known_sites_are_keyed_by_the_path_scan_reports():
     found = ceo.scan(ceo.DEFAULT_ROOTS)
     for rel, _ in ceo.KNOWN_SITES:
         assert rel in found, rel
-        assert (ceo.PLATFORM / rel).is_file(), rel
+        assert (ceo.PLATFORM / rel).is_file() or (ceo.ROCKE / rel).is_file(), rel
+
+
+def test_the_library_cpp_tree_is_scanned_by_default():
+    library_cpp = ceo.ROCKE / "library" / "cpp"
+    assert library_cpp.is_dir() and library_cpp in ceo.DEFAULT_ROOTS
+
+
+def test_a_site_outside_platform_is_reported_relative_to_rocke(tmp_path, monkeypatch):
+    monkeypatch.setattr(ceo, "KNOWN_SITES", {})
+    monkeypatch.setattr(ceo, "ROCKE", tmp_path)
+    lib = tmp_path / "library" / "cpp" / "instances"
+    lib.mkdir(parents=True)
+    (lib / "new.cpp").write_text(
+        "v = rocke_b_add(b, rocke_b_mul(b, p, q), rocke_b_const_i32(b, 1));\n"
+    )
+    errors = ceo.problems(ceo.scan([tmp_path / "library" / "cpp"]))
+    assert [e.split(":")[0] for e in errors] == ["library/cpp/instances/new.cpp"]
+
+
+def test_a_local_lambda_shadows_a_like_named_function_in_another_file(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(ceo, "KNOWN_SITES", {})
+    (tmp_path / "global.cpp").write_text(
+        "V param(E& e, int n) { return rocke_b_const_i32(e.b, n); }\n"
+    )
+    (tmp_path / "local.cpp").write_text(
+        "void f(B* b, V head) {\n"
+        "    auto param = [&](const char* n) { return rocke_b_get_param(b, n); };\n"
+        '    x = scaled(b, param("p"), head, param("s"));\n'
+        "}\n"
+    )
+    assert ceo.scan([tmp_path]) == {}
+    (tmp_path / "local.cpp").write_text(
+        'void f(B* b, V head) { x = scaled(b, param("p"), head, param("s")); }\n'
+    )
+    found = ceo.scan([tmp_path])
+    assert [[s.callee for s in sites] for sites in found.values()] == [["scaled"]]
+
+
+def test_a_local_lambda_that_emits_still_counts():
+    src = (
+        "void f(B* b) {\n"
+        "    auto param = [&](int n) { return rocke_b_const_i32(b, n); };\n"
+        "    x = g(b, param(1), param(2));\n"
+        "}\n"
+    )
+    assert _callees(src) == ["g"]

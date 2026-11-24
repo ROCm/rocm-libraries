@@ -486,7 +486,8 @@ if(ROCKE_INSTALL_TESTS)
     # LDS analyzer and dsl_probes tests (load tools from the adjacent dsl_doc
     # source tree), the arch-table parity test (reads cpp/core/arch/data.cpp),
     # the MMA catalog cross-check unit tests (load tools/ from the source tree),
-    # the emission-order checker test (scans cpp/ with a script from tools/),
+    # the emission-order checker test (scans cpp/ and library/cpp/ with a script
+    # from tools/),
     # and the arch-domain artifact/probe unit tests. The host-only support-policy
     # units are installed with the rest of tests/tools; the full regeneration
     # sweep has its own CTest timeout and resource policy.

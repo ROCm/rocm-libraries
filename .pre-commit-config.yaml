@@ -385,8 +385,9 @@ repos:
 
       # A call with two op-emitting arguments emits them in a compiler-dependent
       # order, which breaks the C++/Python byte identity. Scans the whole C++
-      # engine and both parity emitter trees, and fails on an allowlist entry
-      # that no longer occurs, so it runs on any change to them or to the tool.
+      # engine, the library C++ instances and both parity emitter trees, and
+      # fails on an allowlist entry that no longer occurs, so it runs on any
+      # change to them or to the tool.
       - id: rocke-emission-order
         name: rocKE C++ builder calls emit in a fixed order
         entry: >-
@@ -397,6 +398,7 @@ repos:
           (?x)^dnn-providers/hip-kernel-provider/rocke/(
             platform/cpp/.*\.(c|cpp|h|hpp)|
             platform/tests/instances/parity/.*\.(c|cpp|h|hpp)|
+            library/cpp/.*\.(c|cpp|h|hpp)|
             library/tests/parity/.*\.(c|cpp|h|hpp)|
             platform/tools/check_emission_order\.py|
             platform/tests/tools/test_check_emission_order\.py

@@ -21,7 +21,9 @@
 # set is derived from every function and member function defined in the scanned
 # trees, to a fixed point: a body that calls an emitting function emits too.
 # A lambda bound to a name (auto f = [&](...) { ... };) emits the same way, but
-# only within its own file, since its name is local. A lambda body inside an
+# only within its own file, since its name is local: there it also shadows a
+# function of the same name defined elsewhere, so a lambda that emits nothing
+# is not mistaken for a like-named emitter in another file. A lambda body inside an
 # argument does not count, since it runs when the callee calls it, not while
 # the arguments are evaluated, unless the argument calls it on the spot
 # ([&] { ... }()).
@@ -30,9 +32,9 @@
 # preprocessor lines are ignored, functions are matched by name across files,
 # and an emitting call hidden behind a macro is not seen.
 #
-# It scans cpp/ and tests/instances/parity/ (plus any --also directories) and
-# fails on any site not in KNOWN_SITES, and on any KNOWN_SITES entry that no
-# longer occurs.
+# It scans platform/cpp/, platform/tests/instances/parity/ and library/cpp/
+# (plus any --also directories) and fails on any site not in KNOWN_SITES, and
+# on any KNOWN_SITES entry that no longer occurs.
 
 from __future__ import annotations
 
@@ -45,8 +47,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 PLATFORM = Path(__file__).resolve().parents[1]
+ROCKE = PLATFORM.parent
 CPP_ROOT = PLATFORM / "cpp"
-DEFAULT_ROOTS = (CPP_ROOT, PLATFORM / "tests" / "instances" / "parity")
+DEFAULT_ROOTS = (
+    CPP_ROOT,
+    PLATFORM / "tests" / "instances" / "parity",
+    ROCKE / "library" / "cpp",
+)
 SUFFIXES = {".c", ".cpp", ".h", ".hpp"}
 
 # rocke_b_* functions that return a type, a name or an existing value and emit
@@ -62,7 +69,8 @@ NON_OP = frozenset(
     }
 )
 
-# (path relative to platform/, callee) -> occurrences allowed. Burn down only.
+# (path as scan() reports it, callee) -> occurrences allowed. Burn down only.
+# Paths are relative to platform/, or to rocke/ for files outside it.
 KNOWN_SITES: dict[tuple[str, str], int] = {}
 
 _CALL = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
@@ -258,13 +266,15 @@ def emitting_functions(texts: Iterable[str]) -> frozenset[str]:
 
 
 def _with_local_lambdas(text: str, emitters: frozenset[str]) -> frozenset[str]:
-    """emitters plus the lambdas named in text whose bodies emit."""
+    """emitters as text sees them: its named lambdas replace any function of the
+    same name, and count when their bodies emit."""
     callees = {
         name: set(_CALL.findall(body)) for name, body in named_lambdas(text).items()
     }
     if not callees:
         return emitters
-    return emitters | _derive(callees, set(emitters))
+    outer = set(emitters) - callees.keys()
+    return frozenset(_derive(callees, outer))
 
 
 def _arguments(src: str, open_paren: int) -> list[str]:
@@ -312,14 +322,14 @@ def find_sites(src: str, emitters: frozenset[str] = frozenset()) -> list[Site]:
 
 
 def _display(path: Path) -> str:
-    for base in (PLATFORM, Path.cwd()):
+    for base in (PLATFORM, ROCKE, Path.cwd()):
         if path.is_relative_to(base):
             return path.relative_to(base).as_posix()
     return path.as_posix()
 
 
 def scan(roots: Iterable[Path]) -> dict[str, list[Site]]:
-    """{path relative to platform/: sites} for every C/C++ file under roots."""
+    """{path (see _display): sites} for every C/C++ file under roots."""
     paths = sorted(
         {
             p.resolve()
