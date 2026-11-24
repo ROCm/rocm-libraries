@@ -50,7 +50,7 @@ std::mutex gEngineMutex;
 PluginLoadingConfig gEngineConfig;
 std::weak_ptr<EnginePluginManager> gEngineWeakPtr;
 std::shared_ptr<EnginePluginManager> gEnginePersistentPtr;
-// Set at process exit by the handler PluginResourceManagerBase registers on first use
+// Set at process exit by the handlers PluginResourceManagerBase registers after each plugin load
 std::atomic<bool> gEngineShutdownFlag{false};
 
 /// Missing override flag means false; other descriptor errors propagate.

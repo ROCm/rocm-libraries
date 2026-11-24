@@ -1,7 +1,6 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <cstdlib>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -22,39 +21,12 @@ using hipdnn_tests::IntegrationGlobalObjectDestroyedAtExit;
 namespace
 {
 
-// Destroys a backend handle from its destructor, as an application object would.
-class LateBackendHandle
-{
-public:
-    LateBackendHandle() = default;
-    LateBackendHandle(const LateBackendHandle&) = delete;
-    LateBackendHandle& operator=(const LateBackendHandle&) = delete;
-    LateBackendHandle(LateBackendHandle&&) = delete;
-    LateBackendHandle& operator=(LateBackendHandle&&) = delete;
-
-    ~LateBackendHandle()
-    {
-        if(_handle != nullptr && hipdnnDestroy(_handle) != HIPDNN_STATUS_SUCCESS)
-        {
-            std::_Exit(hipdnn_tests::DESTROY_FAILED_AT_EXIT);
-        }
-    }
-
-    void adopt(hipdnnHandle_t handle)
-    {
-        _handle = handle;
-    }
-
-private:
-    hipdnnHandle_t _handle = nullptr;
-};
-
 hipdnn_tests::BackendReachedProbe gBackendReachedProbe;
 hipdnn_tests::PluginUnloadProbe gPluginUnloadProbe;
 std::shared_ptr<hipdnn_tests::ExitObservingBackend> gObservingBackend;
 HipdnnHandlePtr gHandle;
 std::shared_ptr<Graph> gGraph;
-LateBackendHandle gBackendHandle;
+hipdnn_tests::LateBackendHandle gBackendHandle;
 ScopedHipdnnBackendDescriptor gScopedDescriptor;
 
 // Move-assigns an empty descriptor over gScopedDescriptor from its destructor, which runs during

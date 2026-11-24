@@ -134,6 +134,33 @@ private:
     std::string _pluginPath;
 };
 
+/// Destroys a backend handle from its destructor, as an application object would.
+class LateBackendHandle
+{
+public:
+    LateBackendHandle() = default;
+    LateBackendHandle(const LateBackendHandle&) = delete;
+    LateBackendHandle& operator=(const LateBackendHandle&) = delete;
+    LateBackendHandle(LateBackendHandle&&) = delete;
+    LateBackendHandle& operator=(LateBackendHandle&&) = delete;
+
+    ~LateBackendHandle()
+    {
+        if(_handle != nullptr && hipdnnDestroy(_handle) != HIPDNN_STATUS_SUCCESS)
+        {
+            std::_Exit(DESTROY_FAILED_AT_EXIT);
+        }
+    }
+
+    void adopt(hipdnnHandle_t handle)
+    {
+        _handle = handle;
+    }
+
+private:
+    hipdnnHandle_t _handle = nullptr;
+};
+
 class IntegrationGlobalObjectDestroyedAtExit : public ::testing::Test
 {
 protected:

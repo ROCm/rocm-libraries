@@ -207,13 +207,16 @@ public:
     /**
      * @brief True once process exit has begun (static, MT-safe).
      *
-     * Set by an exit handler that getOrCreatePluginManager() registers when it first creates
-     * a plugin manager, during main. On Linux the handler therefore runs before the destructors
-     * of the program's namespace-scope objects, so a handle or descriptor released by such a
-     * destructor finds it set and is left to the operating system instead of calling into
-     * plugin state that may already be torn down. On Windows the handler belongs to the backend
-     * DLL and runs when that DLL detaches, after the executable's static destructors, so those
-     * destructors find it unset and release normally while the plugins are still loaded.
+     * Set by an exit handler that getOrCreatePluginManager() registers after each plugin load,
+     * during main. Exit handlers run in reverse registration order, and a plugin registers its
+     * static destructors when it is loaded, so on Linux the handler registered after the
+     * latest load runs before those destructors and before the destructors of every object
+     * created earlier, including the program's namespace-scope objects. A handle or descriptor
+     * released by such a destructor finds it set and is left to the operating system instead
+     * of calling into plugin state that may already be torn down. On Windows the handler
+     * belongs to the backend DLL and runs when that DLL detaches, after the executable's static
+     * destructors, so those destructors find it unset and release normally while the plugins
+     * are still loaded.
      */
     static bool isShuttingDown()
     {
@@ -279,12 +282,10 @@ std::shared_ptr<PluginManagerType>
         pm->loadPlugins(config.paths, config.mode);
         Derived::getWeakPtr() = pm;
 
-        static bool s_shutdownHandlerRegistered = false;
-        if(!s_shutdownHandlerRegistered)
-        {
-            std::atexit([] { Derived::getShutdownFlag().store(true, std::memory_order_release); });
-            s_shutdownHandlerRegistered = true;
-        }
+        // Registered after every load, because a plugin reloaded under HIPDNN_PLUGIN_UNLOAD_EAGER
+        // registers its static destructors again, after every earlier handler. Setting the flag
+        // is idempotent; each reload adds one exit handler.
+        std::atexit([] { Derived::getShutdownFlag().store(true, std::memory_order_release); });
 
         // In lazy mode, keep the plugin manager alive by storing in persistent pointer
         if(config.unloadingMode == HIPDNN_PLUGIN_UNLOAD_LAZY)

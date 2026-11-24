@@ -22,7 +22,7 @@ std::mutex gHeuristicMutex;
 PluginLoadingConfig gHeuristicConfig;
 std::weak_ptr<HeuristicPluginManager> gHeuristicWeakPtr;
 std::shared_ptr<HeuristicPluginManager> gHeuristicPersistentPtr;
-// Set at process exit by the handler PluginResourceManagerBase registers on first use
+// Set at process exit by the handlers PluginResourceManagerBase registers after each plugin load
 std::atomic<bool> gHeuristicShutdownFlag{false};
 
 // Best-effort handle destruction used by both the constructor (rollback) and
