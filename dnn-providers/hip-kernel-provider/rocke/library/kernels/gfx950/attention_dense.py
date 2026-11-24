@@ -1535,7 +1535,7 @@ def build_attention_dense(
             row_base = b.smem_ptr_add(lds_base, _lds_group_off(buf_off, group_bytes, i))
             voff = b.add(lane_part, row_u)
             b.async_buffer_load_lds_addr(
-                rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
+                rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, _DMA_DWORDS
             )
             if i + 1 < n_issue:
                 row_u = b.to_sgpr_u32(b.add(row_u, step_elems))
@@ -3032,7 +3032,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                     )
                 voff = b.add(lane_part, row_u)
                 b.async_buffer_load_lds_addr(
-                    rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
+                    rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, _DMA_DWORDS
                 )
                 if not last:
                     row_u = b.to_sgpr_u32(b.add(row_u, step_elems))
@@ -3075,7 +3075,11 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                     )
                     voff = b.add(src, b.const_i32(d_rpt * 64))
                     b.async_buffer_load_lds_addr(
-                        rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 4
+                        rsrc,
+                        row_base,
+                        b.mul(voff, b.const_i32(2)),
+                        zero_soff,
+                        _WIDE_DMA_DWORDS,
                     )
 
         def async_load_k(lds_base, buf_val, tile_key0):

@@ -522,6 +522,8 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     iglp_mode: int = field(default=_DEFAULT_IGLP_MODE, kw_only=True)
     # pv_loop_order: PV MFMA traversal. "d_major" keeps the output tile outer,
     #   "k_major" the key step outer; each tile accumulates in the same order.
+    #   "k_major" is not a default: on held-out shapes it was slower on the causal
+    #   D128 persistent kernels and spilled in places (case study section 7.1).
     pv_loop_order: str = field(default=_DEFAULT_PV_LOOP_ORDER, kw_only=True)
     # o_store_width: output elements per global store (1, 2 or 4). bf16 only below
     #   4: narrower fp16 stores change which f32->f16 conversion the backend selects
@@ -1941,16 +1943,22 @@ def _build_attention_dense_single_buffer(
     # (so its numbers are post-selection), with no sweep of the existing spec
     # knobs; re-time it when the body or the compiler changes. Numbers: the gfx942
     # results and "What the kernels showed" in the launch-time strides case study
-    # (builders/gfx950/attention/prefill/).
+    # (builders/gfx950/attention/prefill/), whose section 7.1 holds the held-out run
+    # that tested the choices below.
     # * LDS_ROW_VGPR, the non-causal BF16 D128 grid and KV-segment bodies: the
     #   per-row form of the packed bodies (a VGPR wave index, one readfirstlane per
-    #   DMA row). The scalar base timed slower on those shapes; why was not
-    #   isolated. The causal bodies of the same head size and dtype keep the
-    #   scalar base: with the per-row form they spill VGPRs to scratch (offline
-    #   resource check, LLVM 22 and 23).
+    #   DMA row). The scalar base timed slower on the selection shapes; why was not
+    #   isolated. On held-out shapes the exception has no measured effect (its two
+    #   grid rows go opposite ways). The causal bodies of the same head size and
+    #   dtype keep the scalar base: with the per-row form the causal grid body
+    #   spills VGPRs to scratch (offline resource check, LLVM 22 and 23, and a
+    #   held-out shape); the causal KV-segment body did not spill on its held-out
+    #   shape.
     # * LDS_BASE_PER_KERNEL, every other strided body without a sliding window: the
     #   scalar base formed once per kernel, so each row's M0 is a loop-invariant
-    #   SGPR. Formed once per KV tile instead, the readfirstlane and the row sums
+    #   SGPR. On held-out shapes it is a small gain on the rows where the body
+    #   differs from the per-row form, and the opposite on the causal KV-segment
+    #   body. Formed once per KV tile instead, the readfirstlane and the row sums
     #   run again in every tile, which timed slower on the D64 grid.
     # * The sliding-window bodies form the scalar base once per KV tile: hoisted
     #   per kernel, the per-row SGPRs (one per DMA row) next to the window state
@@ -2029,7 +2037,7 @@ def _build_attention_dense_single_buffer(
                     row_u = b.to_sgpr_u32(b.add(row_u, s_tok))
                 voff = b.add(lane_off, row_u)
                 b.async_buffer_load_lds_addr(
-                    rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
+                    rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, _DMA_DWORDS
                 )
             return
         # D64: ROWS_PER_INSTR rows per instruction; a lane owns row ``sub_row``.
@@ -2056,7 +2064,7 @@ def _build_attention_dense_single_buffer(
                 )
             voff = b.add(lane_off, row_u)
             b.async_buffer_load_lds_addr(
-                rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
+                rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, _DMA_DWORDS
             )
 
     # ---- conflict-free V (P1): perm_b32 store-path transpose into V_lds[dim, token] ----
@@ -2764,13 +2772,16 @@ def _build_attention_dense_single_buffer(
             # this order gives part of that overlap back. The schedule differs
             # between compiler versions: offline, at LLVM 23 and 24 this kernel stays
             # serialized with the default order, and only "k_major" interleaves at
-            # all four pinned versions. Timed only at LLVM 22 on one part, on the
-            # shapes the case study reports (post-selection), with no sweep of
-            # pv_loop_order, pv_priority, pv_sched_fence_mask or waves_per_eu; the
-            # large gains at 1K-2K sequence length come with the strides alone (a
-            # compiler schedule effect), not from this order. Setting the PV fence
-            # or priority knob turns this order off: those knobs are defined against
-            # the block order.
+            # all four pinned versions. Timed only at LLVM 22 on one part, with no
+            # sweep of pv_loop_order, pv_priority, pv_sched_fence_mask or
+            # waves_per_eu. On held-out shapes (case study section 7.1) this order
+            # helps the causal D128 persistent kernels and costs on the non-causal
+            # bf16 persistent ones (no effect measured on the fp16 ones); the
+            # persistent gain at short sequence lengths is also there with the
+            # strides alone (a compiler schedule effect). "k_major"
+            # was slower on the causal D128 persistent kernels and spills in places,
+            # so it is not a default. Setting the PV fence or priority knob turns
+            # this order off: those knobs are defined against the block order.
             pv_in_issue_order = (
                 STRIDED and USE_CFVST and PV_FENCE_MASK is None and not PV_PRIORITY
             )
