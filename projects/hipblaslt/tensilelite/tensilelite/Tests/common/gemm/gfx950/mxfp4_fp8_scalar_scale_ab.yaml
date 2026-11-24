@@ -1,3 +1,5 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 ########################################
 # Scalar A and B scales in mixed MXFP4 x MXFP8 kernels (gfx950).
 #
