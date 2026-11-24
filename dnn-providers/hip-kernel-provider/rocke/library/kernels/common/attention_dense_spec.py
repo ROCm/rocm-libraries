@@ -607,7 +607,11 @@ class AttentionDenseSpec:
         if self.varlen:
             parts.append("varlen")
         if self.paged:
-            parts.extend((f"pgd{self.block_size}", f"nb{self.num_kv_blocks}"))
+            parts.append(f"pgd{self.block_size}")
+            # The cache size is baked exactly when the shape is: the arch bodies
+            # read num_kv_blocks from a kernarg together with the shape.
+            if self._shape_name_parts():
+                parts.append(f"nb{self.num_kv_blocks}")
             if self.use_i64_kv_addr:
                 parts.append("i64kv")
         parts.extend(self._algorithm_name_parts())

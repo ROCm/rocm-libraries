@@ -886,7 +886,9 @@ rocke_status_t rocke_attention_dense_kernel_name(const rocke_attention_dense_spe
     if(s->paged)
     {
         add("pgd%d", s->block_size);
-        add("nb%d", s->num_kv_blocks);
+        /* The cache size is baked exactly when the shape is. */
+        if(np->shape_parts)
+            add("nb%d", s->num_kv_blocks);
         if(s->use_i64_kv_addr)
             add("i64kv");
     }

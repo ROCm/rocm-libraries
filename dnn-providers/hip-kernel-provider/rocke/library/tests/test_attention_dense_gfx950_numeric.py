@@ -33,6 +33,7 @@ from ._dense_paged_varlen_inputs import (
     PAGED_VARLEN_RAGGED,
     check_bad_block_id_reads_the_last_block,
     check_i64_matches_i32,
+    check_one_kernel_serves_two_caches,
     check_paged_varlen,
     check_whole_tile_sequences,
     paged_varlen_lengths,
@@ -2650,6 +2651,24 @@ class TestDensePagedVarlenNumeric:
             d,
             dtype,
             window,
+        )
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    def test_one_kernel_serves_two_cache_sizes_and_batches(self):
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+        from kernels.gfx950.attention_dense import _DENSE_LAUNCHER_CACHE
+
+        def reference(q, k, v, scale, window):
+            return _standard_reference(q, k, v, scale, sliding_window=window)
+
+        check_one_kernel_serves_two_caches(
+            run_attention_dense_torch,
+            _paged_varlen_spec,
+            reference,
+            _tolerance,
+            _DENSE_LAUNCHER_CACHE,
+            lambda spec: attention_dense_cache_key(spec, arch="gfx950"),
         )
 
     @requires_gfx950_gpu

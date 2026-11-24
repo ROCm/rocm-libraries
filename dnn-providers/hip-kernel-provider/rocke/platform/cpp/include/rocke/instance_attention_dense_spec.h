@@ -212,7 +212,8 @@ typedef struct rocke_attention_dense_name_parts
 {
     /* _head_name_parts(): hq{num_query_heads}, kv{num_kv_heads} when true. */
     bool head_parts;
-    /* _shape_name_parts(): sq{seqlen_q}, sk{seqlen_kv} when true. */
+    /* _shape_name_parts(): sq{seqlen_q}, sk{seqlen_kv} when true; also gates the
+     * paged nb{num_kv_blocks} token. */
     bool shape_parts;
     /* _layout_name_parts(), _band_name_parts(), _algorithm_name_parts(). */
     char layout[ROCKE_ATTENTION_DENSE_MAX_NAME_PARTS][ROCKE_ATTENTION_DENSE_NAME_PART_CAP];

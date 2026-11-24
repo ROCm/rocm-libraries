@@ -120,6 +120,24 @@ def _counts(spec, arch):
     )
 
 
+def _page_bytes_terms(defs, value):
+    """``(block_size, head_size)`` of a page-size value built as
+    ``num_kv_heads * head_size * elem_bytes * block_size`` (fp16, 2 bytes)."""
+    rows, block_size = re.fullmatch(
+        r"mul nsw i32 (%[\w.]+), (\d+)", defs[value]
+    ).groups()
+    row_bytes, elem = re.fullmatch(r"mul nsw i32 (%[\w.]+), (\d+)", defs[rows]).groups()
+    if row_bytes == "%num_kv_heads":
+        # One mul by head_size * elem_bytes.
+        return int(block_size), int(elem) // 2
+    assert int(elem) == 2
+    heads, head_size = re.fullmatch(
+        r"mul nsw i32 (%[\w.]+), (\d+)", defs[row_bytes]
+    ).groups()
+    assert heads == "%num_kv_heads"
+    return int(block_size), int(head_size)
+
+
 @pytest.mark.parametrize("arch", _ARCHS)
 @pytest.mark.parametrize(
     "body,variant",
@@ -165,26 +183,29 @@ def test_one_resource_per_wave_per_kv_tile_load(arch, body, variant):
 )
 def test_page_base_clamps_the_block_id_to_the_last_block(arch, body, variant):
     """A corrupt id must not become an arbitrary 64-bit page base: every K/V page
-    base is ``zext(ult(id, nb) ? id : nb - 1) * page_bytes`` of the wave-uniform id.
-    The unsigned compare also clamps negative ids."""
+    base is ``zext(ult(id, nb) ? id : nb - 1) * zext(page_bytes)`` of the
+    wave-uniform id, with ``nb`` the ``num_kv_blocks`` kernarg and ``page_bytes``
+    ``block_size`` rows of the ``num_kv_heads`` kernarg. The unsigned compare also
+    clamps negative ids."""
     spec = _BODIES[body](arch, use_i64_kv_addr=True, **variant)
     ir = _lower(spec, arch)
     defs = dict(re.findall(r"^\s*(%[\w.]+) = (.*)$", ir, flags=re.M))
     bases = re.findall(
         r"getelementptr inbounds i8, ptr addrspace\(1\) %[kv]_ptr, i64 (%[\w.]+)", ir
     )
-    nb = spec.num_kv_blocks
-    page_bytes = paged_page_bytes(spec)
     assert len(bases) == _counts(spec, arch)["page_loads"]
     for base in bases:
-        ext, scale = re.fullmatch(
-            r"mul (?:nsw )?i64 (%[\w.]+), (\d+)", defs[base]
+        ext, ext_bytes = re.fullmatch(
+            r"mul (?:nsw )?i64 (%[\w.]+), (%[\w.]+)", defs[base]
         ).groups()
-        assert int(scale) == page_bytes
+        (page_bytes,) = re.fullmatch(
+            r"zext i32 (%[\w.]+) to i64", defs[ext_bytes]
+        ).groups()
+        assert _page_bytes_terms(defs, page_bytes) == (spec.block_size, spec.head_size)
         (sel,) = re.fullmatch(r"zext i32 (%[\w.]+) to i64", defs[ext]).groups()
         cond, block_id, last = re.fullmatch(
-            r"select i1 (%[\w.]+), i32 (%[\w.]+), i32 (\d+)", defs[sel]
+            r"select i1 (%[\w.]+), i32 (%[\w.]+), i32 (%[\w.]+)", defs[sel]
         ).groups()
-        assert int(last) == nb - 1
-        assert defs[cond] == f"icmp ult i32 {block_id}, {nb}"
+        assert defs[last] == "sub nsw i32 %num_kv_blocks, 1"
+        assert defs[cond] == f"icmp ult i32 {block_id}, %num_kv_blocks"
         assert defs[block_id].startswith("call i32 @llvm.amdgcn.readfirstlane.i32(")

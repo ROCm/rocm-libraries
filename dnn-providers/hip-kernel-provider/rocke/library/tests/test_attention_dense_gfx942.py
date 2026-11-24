@@ -363,9 +363,10 @@ _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
 # lds_num_buffers no longer implicitly enables V prefetch. Every other knob is
 # also perturbed inside the combined pipeline body,
 # including iglp_mode (iglp base) and the persistent-grid fields (persistent base).
-# The paged bases are the baked-shape arms, and the only ones paged/block_size/
-# num_kv_blocks/varlen/use_i64_kv_addr can be perturbed at; the paged varlen one
-# runs every field, use_i64_kv_addr included, on the multi-sequence body.
+# The paged bases are the only ones paged/block_size/num_kv_blocks/varlen/
+# use_i64_kv_addr can be perturbed at, and the only ones where num_kv_blocks is a
+# runtime field; the paged varlen one runs every field, use_i64_kv_addr included, on
+# the multi-sequence body.
 _INJECTIVITY_BASES = {
     "d128_fp16_cfvst": dict(head_size=128, dtype="fp16"),
     "d128_fp16_cfvst_iglp": dict(head_size=128, dtype="fp16", iglp=True),
@@ -475,6 +476,10 @@ _INJECTIVITY_BASES = {
 # The shape fields the gfx942 body reads only from kernel params. Reflected off the
 # spec rather than restated, so the injectivity test follows the kernel's own ABI.
 _RUNTIME_PARAM_FIELDS = frozenset(_spec().runtime_param_fields)
+# Paged adds the cache size.
+_PAGED_RUNTIME_PARAM_FIELDS = frozenset(
+    _spec(**_INJECTIVITY_BASES["paged_d128_fp16"]).runtime_param_fields
+)
 
 
 # Every persistent decode order the gfx942 body emits.
@@ -575,7 +580,7 @@ def test_kernel_name_covers_every_baked_parameter(field):
     (:func:`test_ir_body_probe_detects_a_baked_shape_on_the_gfx950_control`).
     """
     candidates = _PERTURBATIONS[field]
-    runtime_field = field in _RUNTIME_PARAM_FIELDS
+    runtime_field = field in _PAGED_RUNTIME_PARAM_FIELDS
     tried = 0
     ir_moved = 0
     violations = []
@@ -586,7 +591,9 @@ def test_kernel_name_covers_every_baked_parameter(field):
         base_spec = _spec(**base_kw)
         ok, why = supports_attention_dense(base_spec, arch="gfx942")
         assert ok, f"base {base_id} must be in scope: {why}"
-        expected_runtime = _RUNTIME_PARAM_FIELDS if not base_spec.paged else set()
+        expected_runtime = (
+            _PAGED_RUNTIME_PARAM_FIELDS if base_spec.paged else _RUNTIME_PARAM_FIELDS
+        )
         assert set(base_spec.runtime_param_fields) == expected_runtime, (
             f"base {base_id} declares runtime fields "
             f"{base_spec.runtime_param_fields}, expected {sorted(expected_runtime)}"
@@ -616,7 +623,7 @@ def test_kernel_name_covers_every_baked_parameter(field):
             decode_flipped = alt_spec.persistent and (
                 alt_spec.resolved_persist_decode != base_spec.resolved_persist_decode
             )
-            if runtime_field and base_spec.runtime_shape and not decode_flipped:
+            if field in base_spec.runtime_param_fields and not decode_flipped:
                 runtime_tried += 1
                 runtime_tried_persistent += int(alt_spec.persistent)
                 moved = [
@@ -666,8 +673,10 @@ def test_kernel_name_covers_every_baked_parameter(field):
             f"{runtime_violations} -- the body is baking it again (one binary no "
             f"longer serves every shape) or the kernarg no longer carries it"
         )
-        # Anti-vacuity: the two-way property must have run, and on BOTH grids.
-        assert runtime_tried and runtime_tried_persistent, (
+        # Anti-vacuity: the two-way property must have run, and on BOTH grids for
+        # the fields the persistent grid takes (paged is grid-only).
+        on_persistent = field in _RUNTIME_PARAM_FIELDS
+        assert runtime_tried and (runtime_tried_persistent or not on_persistent), (
             f"{field}: the runtime-param property was exercised {runtime_tried} "
             f"time(s), {runtime_tried_persistent} on the persistent base -- "
             f"strengthen the candidates"

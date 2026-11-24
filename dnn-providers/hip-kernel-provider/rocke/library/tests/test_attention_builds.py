@@ -154,19 +154,19 @@ _KERNEL_RESOURCE_BUDGETS = {
     # conflict-free V, where the ROCm 7.1 comgr caps VGPR at 256 and spills 56-72 B,
     # as on contiguous bf16 D128 with conflict-free V. ROCm 7.2 and later fit with no
     # scratch.
-    "rocke_attention_dense_d128_hq32_kv8_bn64_bf16_sq8192_sk8192_causal_swa4096_pgd16_nb512_lazyrs_gfx942_b1_wpe2": {
+    "rocke_attention_dense_d128_bn64_bf16_causal_swa4096_pgd16_lazyrs_gfx942_wpe2": {
         "max_scratch_bytes": 80,
         "min_waves_per_simd": 2,
     },
-    "rocke_attention_dense_d128_hq32_kv8_bn64_bf16_sq8192_sk8192_causal_swa4096_pgd16_nb512_i64kv_lazyrs_gfx942_b1_wpe2": {
+    "rocke_attention_dense_d128_bn64_bf16_causal_swa4096_pgd16_i64kv_lazyrs_gfx942_wpe2": {
         "max_scratch_bytes": 80,
         "min_waves_per_simd": 2,
     },
-    "rocke_attention_dense_d128_hq16_kv4_bn64_bf16_sq1000_sk1000_causal_varlen_pgd16_nb256_lazyrs_nphqminswz_gfx942_b3_wpe2": {
+    "rocke_attention_dense_d128_bn64_bf16_causal_varlen_pgd16_lazyrs_nphqminswz_gfx942_wpe2": {
         "max_scratch_bytes": 80,
         "min_waves_per_simd": 2,
     },
-    "rocke_attention_dense_d128_hq16_kv4_bn64_bf16_sq1000_sk1000_causal_varlen_pgd16_nb256_i64kv_lazyrs_nphqminswz_gfx942_b3_wpe2": {
+    "rocke_attention_dense_d128_bn64_bf16_causal_varlen_pgd16_i64kv_lazyrs_nphqminswz_gfx942_wpe2": {
         "max_scratch_bytes": 80,
         "min_waves_per_simd": 2,
     },
@@ -1521,18 +1521,17 @@ class TestAttentionHelpers(unittest.TestCase):
                 paged=True, block_size=16, num_kv_blocks=512, **base
             ).kernel_name(),
         )
-        # num_kv_blocks is IR-live (sets the paged buffer-rsrc bound) so it MUST be part
-        # of the kernel identity -- else two cache sizes collide in the launcher cache and
-        # the larger reads later blocks as 0. Assert distinctness.
+        # num_kv_blocks is a kernarg (the paged buffer bound), so one binary serves
+        # every cache size: no nb token (test_attention_dense_paged_launch.py checks
+        # the IR).
         n512 = AttentionDenseSpec(
             paged=True, block_size=16, num_kv_blocks=512, **base
         ).kernel_name()
         n1024 = AttentionDenseSpec(
             paged=True, block_size=16, num_kv_blocks=1024, **base
         ).kernel_name()
-        self.assertNotEqual(n512, n1024)
-        self.assertIn("nb512", n512)
-        self.assertIn("nb1024", n1024)
+        self.assertEqual(n512, n1024)
+        self.assertNotRegex(n512, r"_nb\d+")
         # Accept: bf16 too -- the paged mechanism is dtype-generic (both 2-byte).
         ok_bf, why_bf = supports_attention_dense(
             AttentionDenseSpec(
@@ -1741,14 +1740,16 @@ class TestAttentionHelpers(unittest.TestCase):
             build_attention_dense,
         )
 
-        # The i32 shape/head scalars; every other kernarg is a pointer, scale, or
-        # the paged block-table stride, none of which the launcher reads off the spec.
+        # The i32 shape/head scalars and the paged cache size; every other kernarg
+        # is a pointer, scale, or the paged block-table stride, none of which the
+        # launcher reads off the spec.
         shape_scalars = (
             "batch",
             "seqlen_q",
             "seqlen_kv",
             "num_query_heads",
             "num_kv_heads",
+            "num_kv_blocks",
         )
 
         def type_str(param):
@@ -5121,11 +5122,14 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
                     "decode's magic/shift pairs",
                 )
 
+        # Paged is runtime-shape too: the shape args, then the cache size.
+        paged_names = [a["name"] for a in attention_dense_signature(paged)]
+        self.assertEqual(paged_names[: len(rt_names) + 1], rt_names + ["num_kv_blocks"])
         self.assertEqual(
             [a["name"] for a in attention_dense_signature(paged_varlen)],
-            [a["name"] for a in attention_dense_signature(paged)][:5]
+            paged_names[: len(rt_names) + 1]
             + ["cu_seqlens_q"]
-            + [a["name"] for a in attention_dense_signature(paged)][5:],
+            + paged_names[len(rt_names) + 1 :],
         )
 
         # Sinks append exactly one kernarg, last, after any fast-division pairs.

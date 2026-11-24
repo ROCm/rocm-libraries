@@ -575,6 +575,19 @@ _HOOK_CASES: dict[type, tuple[dict, ...]] = {
         # Auto-decode boundaries (review, 10-29).
         dict(seqlen_q=512, seqlen_kv=512, sliding_window=512, persistent=True),
         dict(causal_bottom_right=True, seqlen_q=256, seqlen_kv=1024),
+        # Runtime-shape paged: shape parts off, so no nb token.
+        dict(paged=True, block_size=16, num_kv_blocks=64, sliding_window=256),
+        # Paged varlen bottom-right shifts per sequence: shape parts off.
+        dict(
+            paged=True,
+            varlen=True,
+            batch=3,
+            block_size=16,
+            num_kv_blocks=64,
+            causal_bottom_right=True,
+            seqlen_q=256,
+            seqlen_kv=1024,
+        ),
     ),
     _G942: (
         {},  # runtime shape: head and shape parts off
@@ -587,6 +600,8 @@ _HOOK_CASES: dict[type, tuple[dict, ...]] = {
         dict(nonpersist_decode="bt_hkv_minor"),
         dict(causal=False, sliding_window=128),  # no noncausal window on gfx942
         dict(batch=0),  # preflight-only reject, with gfx942's validator
+        # Runtime-shape paged: shape parts off, so no nb token.
+        dict(paged=True, block_size=16, num_kv_blocks=64, sliding_window=256),
     ),
 }
 

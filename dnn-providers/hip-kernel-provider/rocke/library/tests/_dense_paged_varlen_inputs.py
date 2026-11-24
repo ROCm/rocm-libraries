@@ -132,6 +132,28 @@ def check_paged_varlen(
     return q, ks, vs, out, cu, scale
 
 
+def check_one_kernel_serves_two_caches(
+    run, make_spec, reference, tolerance, launcher_cache, cache_key
+):
+    """Two packed launches whose batch, lengths and cache size all differ run on
+    one compiled kernel: the same cache slot holds the same launcher after both,
+    and both match the reference. ``cache_key(spec)`` is the arch's
+    ``attention_dense_cache_key``."""
+    runs = ([256, 17, 65], [1000, 48])  # batch 3, then 2 with a larger cache
+    launchers = []
+    sizes = []
+    for lens in runs:
+        # The cache size paged_varlen_inputs allocates.
+        sizes.append(2 * sum(-(-n // 16) for n in lens) + 1)
+        spec = make_spec(lens, 16, 128, "fp16", sizes[-1], window=0)
+        check_paged_varlen(
+            run, make_spec, reference, tolerance, lens, 16, 128, "fp16", 0
+        )
+        launchers.append(launcher_cache[cache_key(spec)])
+    assert sizes[0] != sizes[1]
+    assert launchers[0] is launchers[1], "a second compile for another cache size"
+
+
 def check_whole_tile_sequences(run, make_spec, single_spec, lens, block_size, d):
     """Each sequence of one packed fp16 launch must equal, bit for bit, its own
     single-sequence launch with ``single_spec(n, num_kv_blocks)``."""

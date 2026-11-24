@@ -232,7 +232,8 @@ from kernels.common.attention_dense_spec import (
 from kernels.gfx942.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_col
 from kernels.common._attention_dense_paged import (
     declare_paged_params,
-    paged_cache_bytes,
+    paged_cache_bytes_ir,
+    paged_page_bytes_ir,
     paged_kv_row,
     paged_in_page_row,
     paged_launch_args,
@@ -677,11 +678,13 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         block, the window and the runtime trip count, and the epilogue zeroes the rows
         that see no key from the runtime ``seqlen_kv``, so a window needs no
         window-specific per-shape guard ahead of the cache lookup.
-        ``paged`` takes the baked path, as on the gfx950 twin: the K/V buffer bound
-        is the whole page cache, baked from ``num_kv_blocks``. ``ragged`` never
-        reaches the builder (:func:`supports_attention_dense` rejects it) and
-        ``varlen`` only with ``paged``, but both stay in the predicate, identical to
-        the gfx950 twin, so a later admit lands already excluded.
+        ``paged`` is on it too, single- and multi-sequence: the K/V bound (the whole
+        page cache, or the i64 page clamp) reads the ``num_kv_blocks`` kernarg, and
+        packed varlen reads each sequence's lengths from ``cu_seqlens_q`` and
+        ``kv_lens`` (the spec's seqlens are maxima that size only the grid).
+        ``ragged`` never reaches the builder (:func:`supports_attention_dense` rejects
+        it) and ``varlen`` only with ``paged``, but both stay in the predicate,
+        identical to the gfx950 twin, so a later admit lands already excluded.
 
         Every other knob that forks the body -- :func:`default_use_exp2_fast`
         included -- is a function of compile-time config only, never of the problem
@@ -689,7 +692,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         that way: a policy that reads a shape field would make two shapes share a
         cache key AND a kernel name while lowering to different IR, which neither the
         name assert nor this predicate can catch."""
-        return not (self.ragged or self.varlen or self.paged)
+        return not (self.ragged or (self.varlen and not self.paged))
 
     @property
     def runtime_param_fields(self) -> tuple[str, ...]:
@@ -704,10 +707,12 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         which drops ``sq``/``sk`` (via :meth:`_shape_name_parts`), ``hq``/``kv`` (via
         :meth:`_head_name_parts`) and ``b{batch}`` for exactly this tuple. A field
         declared here but still baked anywhere would be a cache collision serving one
-        shape's binary to another."""
+        shape's binary to another. Paged adds ``num_kv_blocks``, the cache size, whose
+        ``nb`` name token the shared name drops with the shape tokens."""
         if not self.runtime_shape:
             return ()
-        return ("batch", "seqlen_q", "seqlen_kv", "num_query_heads", "num_kv_heads")
+        fields = ("batch", "seqlen_q", "seqlen_kv", "num_query_heads", "num_kv_heads")
+        return fields + ("num_kv_blocks",) if self.paged else fields
 
     def _shape_name_parts(self) -> tuple[str, ...]:
         return () if self.runtime_shape else super()._shape_name_parts()
@@ -1699,6 +1704,7 @@ def _build_attention_dense_single_buffer(
         rt = {f: b.param(f, I32) for f in spec.runtime_kernarg_fields}
         batch_p, seqlen_q_p, seqlen_kv_p = rt["batch"], rt["seqlen_q"], rt["seqlen_kv"]
         hq_p, hkv_p = rt["num_query_heads"], rt["num_kv_heads"]
+        num_kv_blocks_p = rt.get("num_kv_blocks")
         # Uniform (SGPR) values, computed once: the token strides feed per-lane
         # address math inside the KV loop, the GQA ratio one divide per CTA.
         gqa_p = b.div(hq_p, hkv_p)
@@ -1888,18 +1894,27 @@ def _build_attention_dense_single_buffer(
     # fault). The baked branch keeps const_i32(B*Skv*...) verbatim.
     _kv_elem_bytes = Hkv * D * 2
     PAGED_I64 = spec.paged and spec.use_i64_kv_addr
-    if spec.runtime_shape:
-        kv_bytes = b.mul(b.mul(b.mul(batch_p, seqlen_kv_p), hkv_p), b.const_i32(D * 2))
-        k_rsrc = b.buffer_rsrc(k, kv_bytes)
-        v_rsrc = b.buffer_rsrc(v, kv_bytes)
-    elif PAGED_I64:
+    if spec.paged:
+        # Paged is runtime-shape only: the cache size is the num_kv_blocks kernarg.
+        if not spec.runtime_shape:
+            raise ValueError("paged K/V needs the runtime-shape body")
+        page_bytes = paged_page_bytes_ir(
+            b, spec.block_size, b.mul(hkv_p, b.const_i32(D * 2))
+        )
+    if PAGED_I64:
         # One resource per page, built per wave and tile in _async_load: the whole
         # cache is past what an i32 num_records and voffset can address.
         k_rsrc = v_rsrc = None
+        page_bounds = (num_kv_blocks_p, page_bytes)
     elif spec.paged:
-        # One num_records node per rsrc, as in the baked branch below.
-        k_rsrc = b.buffer_rsrc(k, b.const_i32(paged_cache_bytes(spec)))
-        v_rsrc = b.buffer_rsrc(v, b.const_i32(paged_cache_bytes(spec)))
+        # The whole cache: any page id the table can name is in range.
+        cache_bytes = paged_cache_bytes_ir(b, num_kv_blocks_p, page_bytes)
+        k_rsrc = b.buffer_rsrc(k, cache_bytes)
+        v_rsrc = b.buffer_rsrc(v, cache_bytes)
+    elif spec.runtime_shape:
+        kv_bytes = b.mul(b.mul(b.mul(batch_p, seqlen_kv_p), hkv_p), b.const_i32(D * 2))
+        k_rsrc = b.buffer_rsrc(k, kv_bytes)
+        v_rsrc = b.buffer_rsrc(v, kv_bytes)
     else:
         k_rsrc = b.buffer_rsrc(k, b.const_i32(B * Skv * _kv_elem_bytes))
         v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * _kv_elem_bytes))
@@ -2042,9 +2057,7 @@ def _build_attention_dense_single_buffer(
             seqlen_q_b = b.sub(q_seq1, q_seq0)
             with b.scf_if(b.cmp_ge(b.mul(qb, b.const_i32(BLOCK_M)), seqlen_q_b)):
                 b.ret()
-            q_base = b.add(
-                b.mul(q_seq0, b.const_i32(stride_q_tok)), b.mul(hq, b.const_i32(D))
-            )
+            q_base = b.add(b.mul(q_seq0, _stride_q()), b.mul(hq, b.const_i32(D)))
         else:
             # NOT hoisted into a local shared with o_base below: the IR builder is
             # side-effecting, so `b.const_i32(Sq)` EMITS a node at the point it is
@@ -2126,7 +2139,8 @@ def _build_attention_dense_single_buffer(
                     _pg_seq_base,
                     _pg_n_pages,
                     b.add(tile_key0, b.mul(wave, b.const_i32(ROWS_PER_WAVE))),
-                    spec,
+                    spec.block_size,
+                    page_bounds,
                 )
             elif spec.paged:
                 # A wave's rows of the tile sit in one page (spec paged
@@ -2276,7 +2290,14 @@ def _build_attention_dense_single_buffer(
             rsrc = v_rsrc
             if PAGED_I64:
                 rsrc = paged_wave_page_rsrc(
-                    b, v, block_tables, _pg_seq_base, _pg_n_pages, wave_key0, spec
+                    b,
+                    v,
+                    block_tables,
+                    _pg_seq_base,
+                    _pg_n_pages,
+                    wave_key0,
+                    spec.block_size,
+                    page_bounds,
                 )
             else:
                 row_base = paged_wave_row_base(
@@ -3071,9 +3092,7 @@ def _build_attention_dense_single_buffer(
                 rcp_zero = b.const_f32(0.0)
                 rcp_l = b.select(bias_row_live, rcp_l, rcp_zero)
         if varlen:
-            o_base = b.add(
-                b.mul(q_seq0, b.const_i32(stride_q_tok)), b.mul(hq, b.const_i32(D))
-            )
+            o_base = b.add(b.mul(q_seq0, _stride_q()), b.mul(hq, b.const_i32(D)))
         else:
             o_base = b.add(
                 b.mul(

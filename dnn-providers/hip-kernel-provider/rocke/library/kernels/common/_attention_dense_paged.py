@@ -108,10 +108,26 @@ def paged_wave_row_base(b, block_tables, seq_base, n_pages, wave_key0, block_siz
     return b.mul(block_id, b.const_i32(block_size))
 
 
-def paged_page_rsrc(b, base_ptr, block_id, spec):
+def paged_page_bytes_ir(b, block_size: int, kv_row_bytes):
+    """:func:`paged_page_bytes` as an IR value: ``kv_row_bytes`` is the byte stride of
+    one cache row (all kv heads), a kernarg-derived value on the runtime-shape path."""
+    return b.mul(kv_row_bytes, b.const_i32(block_size))
+
+
+def paged_cache_bytes_ir(b, num_kv_blocks, page_bytes):
+    """:func:`paged_cache_bytes` as an IR value, from the ``num_kv_blocks`` kernarg.
+
+    Only for the i32 form: the spec admits it only while the whole cache fits the i32
+    buffer range, so the product cannot wrap.
+    """
+    return b.mul(num_kv_blocks, page_bytes)
+
+
+def paged_page_rsrc(b, base_ptr, block_id, num_kv_blocks, page_bytes):
     """Buffer resource over the one page ``block_id`` of the cache at ``base_ptr``
     (``use_i64_kv_addr``): the 64-bit page base goes into the resource, so the
-    voffset stays within a page (:func:`paged_in_page_row`).
+    voffset stays within a page (:func:`paged_in_page_row`). ``num_kv_blocks`` and
+    ``page_bytes`` are i32 IR values (:func:`paged_page_bytes_ir`).
 
     ``block_id`` must be wave-uniform (one page per wave and tile). Unlike the i32
     form, nothing bounds a bad id here: it would be an arbitrary 64-bit address. So
@@ -120,25 +136,27 @@ def paged_page_rsrc(b, base_ptr, block_id, spec):
     reports it on the host. ``num_records`` is one page, never the whole cache: a
     range past the page's allocation could fault.
     """
-    page_bytes = paged_page_bytes(spec)
     block_id = b.readfirstlane(block_id)
     block_id = b.select(
-        b.cmp_ult(block_id, b.const_i32(spec.num_kv_blocks)),
+        b.cmp_ult(block_id, num_kv_blocks),
         block_id,
-        b.const_i32(spec.num_kv_blocks - 1),
+        b.sub(num_kv_blocks, b.const_i32(1)),
     )
-    page_base = b.mul(b.zext(block_id, I64), b.const_i64(page_bytes))
-    return b.buffer_rsrc(b.global_ptr_add(base_ptr, page_base), b.const_i32(page_bytes))
+    page_base = b.mul(b.zext(block_id, I64), b.zext(page_bytes, I64))
+    return b.buffer_rsrc(b.global_ptr_add(base_ptr, page_base), page_bytes)
 
 
-def paged_wave_page_rsrc(b, base_ptr, block_tables, seq_base, n_pages, wave_key0, spec):
+def paged_wave_page_rsrc(
+    b, base_ptr, block_tables, seq_base, n_pages, wave_key0, block_size: int, bounds
+):
     """Resource over the page holding key ``wave_key0`` (``use_i64_kv_addr``): one
     per wave and tile, shared by all of the wave's copies of the tile, rows then
-    addressed within the page."""
+    addressed within the page. ``bounds`` is ``(num_kv_blocks, page_bytes)`` as
+    :func:`paged_page_rsrc` takes them."""
     block_id = paged_wave_block_id(
-        b, block_tables, seq_base, n_pages, wave_key0, spec.block_size
+        b, block_tables, seq_base, n_pages, wave_key0, block_size
     )
-    return paged_page_rsrc(b, base_ptr, block_id, spec)
+    return paged_page_rsrc(b, base_ptr, block_id, *bounds)
 
 
 def paged_in_page_row(b, key, block_size: int):
