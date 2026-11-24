@@ -57,7 +57,7 @@ public:
 };
 
 // Test fixture for db_path tests with filesystem mocking
-class CPU_DbPaths_NONE : public ::testing::Test
+class CPU_DbPaths_NONE : public testing::TestWithParam<int>
 {
 protected:
     MockFilesystemChecker mock_checker;
@@ -83,7 +83,7 @@ protected:
 // Tests for GetUserDbPath() - 4 scenarios
 // ============================================================================
 
-TEST_F(CPU_DbPaths_NONE, UserDbPath_LocalFS_NoEnvVar)
+TEST_P(CPU_DbPaths_NONE, UserDbPath_LocalFS_NoEnvVar)
 {
     // Ensure environment variable is NOT set for this test
     ScopedEnvironment<std::string> unset_user_db(MIOPEN_USER_DB_PATH, "");
@@ -103,7 +103,7 @@ TEST_F(CPU_DbPaths_NONE, UserDbPath_LocalFS_NoEnvVar)
         << "User DB path '" << user_db_path.string() << "' should contain 'miopen' folder";
 }
 
-TEST_F(CPU_DbPaths_NONE, UserDbPath_LocalFS_EnvVarSet)
+TEST_P(CPU_DbPaths_NONE, UserDbPath_LocalFS_EnvVarSet)
 {
     // Scenario 2: Local filesystem, environment variable set
     const std::string custom_path = "/custom/user/db/path";
@@ -124,7 +124,7 @@ TEST_F(CPU_DbPaths_NONE, UserDbPath_LocalFS_EnvVarSet)
         << custom_path << "'";
 }
 
-TEST_F(CPU_DbPaths_NONE, UserDbPath_NetworkFS_NoEnvVar)
+TEST_P(CPU_DbPaths_NONE, UserDbPath_NetworkFS_NoEnvVar)
 {
 #if MIOPEN_BUILD_DEV
     GTEST_SKIP() << "Network filesystem detection is disabled in MIOPEN_BUILD_DEV mode";
@@ -156,7 +156,7 @@ TEST_F(CPU_DbPaths_NONE, UserDbPath_NetworkFS_NoEnvVar)
 #endif
 }
 
-TEST_F(CPU_DbPaths_NONE, UserDbPath_NetworkFS_EnvVarSet)
+TEST_P(CPU_DbPaths_NONE, UserDbPath_NetworkFS_EnvVarSet)
 {
     // Scenario 4: Network filesystem, environment variable set
     // Environment variable should take precedence over network detection
@@ -182,7 +182,7 @@ TEST_F(CPU_DbPaths_NONE, UserDbPath_NetworkFS_EnvVarSet)
 // Tests for GetCachePath() - 4 scenarios
 // ============================================================================
 
-TEST_F(CPU_DbPaths_NONE, CachePath_LocalFS_NoEnvVar)
+TEST_P(CPU_DbPaths_NONE, CachePath_LocalFS_NoEnvVar)
 {
     // Ensure environment variable is NOT set for this test
     ScopedEnvironment<std::string> unset_cache(MIOPEN_CUSTOM_CACHE_DIR, "");
@@ -207,7 +207,7 @@ TEST_F(CPU_DbPaths_NONE, CachePath_LocalFS_NoEnvVar)
     EXPECT_TRUE(PathContains(cache_path, "miopen")) << "Cache path should contain 'miopen' folder";
 }
 
-TEST_F(CPU_DbPaths_NONE, CachePath_LocalFS_EnvVarSet)
+TEST_P(CPU_DbPaths_NONE, CachePath_LocalFS_EnvVarSet)
 {
     // Scenario 2: Local filesystem, environment variable set
     const std::string custom_cache = (fs::temp_directory_path() / "custom/cache/dir").string();
@@ -228,7 +228,7 @@ TEST_F(CPU_DbPaths_NONE, CachePath_LocalFS_EnvVarSet)
         << custom_cache << "'";
 }
 
-TEST_F(CPU_DbPaths_NONE, CachePath_NetworkFS_NoEnvVar)
+TEST_P(CPU_DbPaths_NONE, CachePath_NetworkFS_NoEnvVar)
 {
 #if MIOPEN_BUILD_DEV
     GTEST_SKIP() << "Network filesystem detection is disabled in MIOPEN_BUILD_DEV mode";
@@ -262,7 +262,7 @@ TEST_F(CPU_DbPaths_NONE, CachePath_NetworkFS_NoEnvVar)
 #endif
 }
 
-TEST_F(CPU_DbPaths_NONE, CachePath_NetworkFS_EnvVarSet)
+TEST_P(CPU_DbPaths_NONE, CachePath_NetworkFS_EnvVarSet)
 {
     // Scenario 4: Network filesystem, environment variable set
     // Environment variable should take precedence over network detection
@@ -288,7 +288,7 @@ TEST_F(CPU_DbPaths_NONE, CachePath_NetworkFS_EnvVarSet)
 // Additional tests
 // ============================================================================
 
-TEST_F(CPU_DbPaths_NONE, UserDbSuffix_ContainsVersionInfo)
+TEST_P(CPU_DbPaths_NONE, UserDbSuffix_ContainsVersionInfo)
 {
     const std::string suffix = miopen::GetUserDbSuffix();
     EXPECT_FALSE(suffix.empty()) << "User DB suffix should not be empty";
@@ -303,7 +303,7 @@ TEST_F(CPU_DbPaths_NONE, UserDbSuffix_ContainsVersionInfo)
         << "'";
 }
 
-TEST_F(CPU_DbPaths_NONE, UserAndSystemCachePaths_AreDifferent)
+TEST_P(CPU_DbPaths_NONE, UserAndSystemCachePaths_AreDifferent)
 {
     EXPECT_CALL(mock_checker, IsNetworkedFilesystem(_)).WillRepeatedly(Return(false));
 
@@ -316,7 +316,7 @@ TEST_F(CPU_DbPaths_NONE, UserAndSystemCachePaths_AreDifferent)
     }
 }
 
-TEST_F(CPU_DbPaths_NONE, Paths_AreValid)
+TEST_P(CPU_DbPaths_NONE, Paths_AreValid)
 {
     EXPECT_CALL(mock_checker, IsNetworkedFilesystem(_)).WillRepeatedly(Return(false));
 
@@ -341,7 +341,7 @@ TEST_F(CPU_DbPaths_NONE, Paths_AreValid)
     }
 }
 
-TEST_F(CPU_DbPaths_NONE, CacheDisabled_ReturnsCorrectly)
+TEST_P(CPU_DbPaths_NONE, CacheDisabled_ReturnsCorrectly)
 {
     EXPECT_CALL(mock_checker, IsNetworkedFilesystem(_)).WillRepeatedly(Return(false));
 
@@ -356,7 +356,7 @@ TEST_F(CPU_DbPaths_NONE, CacheDisabled_ReturnsCorrectly)
 // Tests for GetSystemDbPath()
 // ============================================================================
 
-TEST_F(CPU_DbPaths_NONE, SystemDbPath_EnvVarSet)
+TEST_P(CPU_DbPaths_NONE, SystemDbPath_EnvVarSet)
 {
     const std::string custom_path = (fs::temp_directory_path() / "custom/system/db").string();
     ScopedEnvironment<std::string> scoped_env(MIOPEN_SYSTEM_DB_PATH, custom_path);
@@ -365,7 +365,7 @@ TEST_F(CPU_DbPaths_NONE, SystemDbPath_EnvVarSet)
         << "MIOPEN_SYSTEM_DB_PATH must take precedence over the built-in default";
 }
 
-TEST_F(CPU_DbPaths_NONE, SystemDbPath_NoEnvVar_IsAbsolute)
+TEST_P(CPU_DbPaths_NONE, SystemDbPath_NoEnvVar_IsAbsolute)
 {
     ScopedEnvironment<std::string> unset_system_db(MIOPEN_SYSTEM_DB_PATH, "");
 
@@ -380,7 +380,7 @@ TEST_F(CPU_DbPaths_NONE, SystemDbPath_NoEnvVar_IsAbsolute)
 }
 
 #ifdef _WIN32
-TEST_F(CPU_DbPaths_NONE, SystemDbPath_NoEnvVar_FollowsMIOpenModule)
+TEST_P(CPU_DbPaths_NONE, SystemDbPath_NoEnvVar_FollowsMIOpenModule)
 {
 #if MIOPEN_BUILD_DEV
     GTEST_SKIP() << "Development builds read databases from the build tree, not the install layout";
@@ -423,7 +423,7 @@ TEST_F(CPU_DbPaths_NONE, SystemDbPath_NoEnvVar_FollowsMIOpenModule)
 // Tests for IsSystemDbDisabled()
 // ============================================================================
 
-TEST_F(CPU_DbPaths_NONE, SystemDbDisabled_UnsetEnvVar)
+TEST_P(CPU_DbPaths_NONE, SystemDbDisabled_UnsetEnvVar)
 {
     ScopedEnvironment<bool> unset_sysdb(MIOPEN_DEBUG_DISABLE_SYSTEM_DB);
 
@@ -431,21 +431,21 @@ TEST_F(CPU_DbPaths_NONE, SystemDbDisabled_UnsetEnvVar)
     EXPECT_EQ(miopen::IsSystemDbDisabled(), static_cast<bool>(MIOPEN_DISABLE_SYSDB));
 }
 
-TEST_F(CPU_DbPaths_NONE, SystemDbDisabled_EnvVarSet)
+TEST_P(CPU_DbPaths_NONE, SystemDbDisabled_EnvVarSet)
 {
     ScopedEnvironment<bool> disable_sysdb(MIOPEN_DEBUG_DISABLE_SYSTEM_DB, true);
 
     EXPECT_TRUE(miopen::IsSystemDbDisabled());
 }
 
-TEST_F(CPU_DbPaths_NONE, SystemDbDisabled_EnvVarCleared)
+TEST_P(CPU_DbPaths_NONE, SystemDbDisabled_EnvVarCleared)
 {
     ScopedEnvironment<bool> enable_sysdb(MIOPEN_DEBUG_DISABLE_SYSTEM_DB, false);
 
     EXPECT_EQ(miopen::IsSystemDbDisabled(), static_cast<bool>(MIOPEN_DISABLE_SYSDB));
 }
 
-TEST_F(CPU_DbPaths_NONE, SystemDbDisabled_DoesNotAffectUserDbOrSystemDbPath)
+TEST_P(CPU_DbPaths_NONE, SystemDbDisabled_DoesNotAffectUserDbOrSystemDbPath)
 {
     EXPECT_CALL(mock_checker, IsNetworkedFilesystem(_)).WillRepeatedly(Return(false));
 
@@ -474,7 +474,7 @@ TEST_F(CPU_DbPaths_NONE, SystemDbDisabled_DoesNotAffectUserDbOrSystemDbPath)
 // Tests for IsUserDbDisabled()
 // ============================================================================
 
-TEST_F(CPU_DbPaths_NONE, UserDbDisabled_UnsetEnvVar)
+TEST_P(CPU_DbPaths_NONE, UserDbDisabled_UnsetEnvVar)
 {
     ScopedEnvironment<bool> unset_userdb(MIOPEN_DEBUG_DISABLE_USER_DB);
 
@@ -482,21 +482,21 @@ TEST_F(CPU_DbPaths_NONE, UserDbDisabled_UnsetEnvVar)
     EXPECT_EQ(miopen::IsUserDbDisabled(), static_cast<bool>(MIOPEN_DISABLE_USERDB));
 }
 
-TEST_F(CPU_DbPaths_NONE, UserDbDisabled_EnvVarSet)
+TEST_P(CPU_DbPaths_NONE, UserDbDisabled_EnvVarSet)
 {
     ScopedEnvironment<bool> disable_userdb(MIOPEN_DEBUG_DISABLE_USER_DB, true);
 
     EXPECT_TRUE(miopen::IsUserDbDisabled());
 }
 
-TEST_F(CPU_DbPaths_NONE, UserDbDisabled_EnvVarCleared)
+TEST_P(CPU_DbPaths_NONE, UserDbDisabled_EnvVarCleared)
 {
     ScopedEnvironment<bool> enable_userdb(MIOPEN_DEBUG_DISABLE_USER_DB, false);
 
     EXPECT_EQ(miopen::IsUserDbDisabled(), static_cast<bool>(MIOPEN_DISABLE_USERDB));
 }
 
-TEST_F(CPU_DbPaths_NONE, UserAndSystemDbSwitches_AreIndependent)
+TEST_P(CPU_DbPaths_NONE, UserAndSystemDbSwitches_AreIndependent)
 {
     {
         ScopedEnvironment<bool> disable_userdb(MIOPEN_DEBUG_DISABLE_USER_DB, true);
@@ -514,7 +514,7 @@ TEST_F(CPU_DbPaths_NONE, UserAndSystemDbSwitches_AreIndependent)
     }
 }
 
-TEST_F(CPU_DbPaths_NONE, UserDbDisabled_SuppressesWrites)
+TEST_P(CPU_DbPaths_NONE, UserDbDisabled_SuppressesWrites)
 {
     ScopedEnvironment<bool> disable_userdb(MIOPEN_DEBUG_DISABLE_USER_DB, true);
 
@@ -532,7 +532,7 @@ TEST_F(CPU_DbPaths_NONE, UserDbDisabled_SuppressesWrites)
         << "Lookup should miss when user db I/O is disabled";
 }
 
-TEST_F(CPU_DbPaths_NONE, UserDbDisabled_LatchedAtConstruction)
+TEST_P(CPU_DbPaths_NONE, UserDbDisabled_LatchedAtConstruction)
 {
     if(static_cast<bool>(MIOPEN_DISABLE_USERDB))
         GTEST_SKIP() << "User db file I/O is disabled at build time";
@@ -557,3 +557,5 @@ TEST_F(CPU_DbPaths_NONE, UserDbDisabled_LatchedAtConstruction)
 
     fs::remove(db_file);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_DbPaths_NONE, testing::Values(0));

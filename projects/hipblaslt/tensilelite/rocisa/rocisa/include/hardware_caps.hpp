@@ -523,6 +523,9 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["HasWavefrontSize32Directive"]
         = rv["HasWave32"] && !(isaVersion[0] == 12 && isaVersion[1] == 5);
     rv["HasSchedMode"]       = checkInList(isaVersion[0], {12});
+    // Once a VALU has read an SGPR pair, later SALU/VALU writes to it are not interlocked
+    // against later reads (LLVM's hasVALUReadSGPRHazard); see tensilelite/SgprHazards.py.
+    rv["HasVALUReadSGPRHazard"] = isaVersion[0] == 12 && isaVersion[1] == 0;
     rv["HasAccCD"]           = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["ArchAccUnifiedRegs"] = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     // Max concurrent waves per SIMD: 8 for ArchAccUnifiedRegs (gfx90a/gfx942/gfx950), 10 otherwise.
