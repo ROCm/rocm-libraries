@@ -47,9 +47,10 @@ namespace
         char            rev[128] = {};
         hipblasStatus_t s1       = hipblasLtGetVersion(handle, &version);
         hipblasStatus_t s2       = hipblasLtGetGitRevision(handle, rev);
-        hipblasLtDestroy(handle);
-        HIPBLASLT_CHECK(s1);
-        HIPBLASLT_CHECK(s2);
+        hipblasStatus_t s3       = hipblasLtDestroy(handle);
+        hipblaslt_py::check_status(s1, "hipblasLtGetVersion");
+        hipblaslt_py::check_status(s2, "hipblasLtGetGitRevision");
+        hipblaslt_py::check_status(s3, "hipblasLtDestroy");
         return std::make_pair(version, std::string(rev));
     }
 } // namespace
@@ -72,8 +73,7 @@ NB_MODULE(_core, m)
           "device. Creates and destroys a handle, so import never calls it.");
     m.def(
         "_raise_test_status",
-        [](int code) {
-            hipblaslt_py::check_status(static_cast<hipblasStatus_t>(code), "_raise_test_status");
-        },
-        "Test hook: raise HipblasLtError for a nonzero hipblasStatus_t value.");
+        [](int code) { hipblaslt_py::check_status_code(code, "_raise_test_status"); },
+        "Test hook: raise HipblasLtError for a nonzero status value, which needn't be one the "
+        "installed header has.");
 }

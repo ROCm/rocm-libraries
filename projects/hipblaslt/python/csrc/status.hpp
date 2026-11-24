@@ -22,8 +22,9 @@ namespace hipblaslt_py
 
     // By number, not by enumerator, so a PR that adds a status to hipblas-common.h can name it
     // here before the installed ROCm the bindings compile against has it. test_errors.py checks
-    // every name and number against the checkout's header.
-    inline const char* status_name(hipblasStatus_t s)
+    // every name and number against the checkout's header. It takes an int, so a value outside
+    // the installed header's enumerators is never stored in a hipblasStatus_t.
+    inline const char* status_name(int code)
     {
         struct Name
         {
@@ -45,16 +46,21 @@ namespace hipblaslt_py
             {11, "HIPBLAS_STATUS_UNKNOWN"},
         };
         for(const Name& n : names)
-            if(n.value == static_cast<int>(s))
+            if(n.value == code)
                 return n.name;
         return "HIPBLAS_STATUS_<unmapped>";
     }
 
+    inline void check_status_code(int code, const char* call)
+    {
+        if(code != HIPBLAS_STATUS_SUCCESS)
+            throw HipblasLtError(std::string(call) + " failed: " + status_name(code) + " ("
+                                 + std::to_string(code) + ")");
+    }
+
     inline void check_status(hipblasStatus_t s, const char* call)
     {
-        if(s != HIPBLAS_STATUS_SUCCESS)
-            throw HipblasLtError(std::string(call) + " failed: " + status_name(s) + " ("
-                                 + std::to_string(static_cast<int>(s)) + ")");
+        check_status_code(static_cast<int>(s), call);
     }
 
 } // namespace hipblaslt_py
