@@ -194,18 +194,14 @@ TEST_CASE("GEMM: compute_tile_latency", "[gemm]") {
 // gfx1151 (Strix Halo, 40 CUs) as Origami derives it from the device: the W4A16
 // Stream-K terms are priced with its MALL bandwidth.
 static origami::hardware_t make_w4a16_gfx1151_hardware() {
-  return origami::hardware_t(origami::hardware_t::architecture_t::gfx1151,
-                             40,
-                             65536,
-                             786432,
-                             1,
-                             851.72,
-                             755.63,
-                             215.0,
-                             2097152,
-                             2.9,
-                             2,
-                             std::make_tuple(0.0, 0.22, 0.0));
+  return origami::hardware_t::get_hardware_for_arch(
+      origami::hardware_t::architecture_t::gfx1151, 40, 65536, 786432, 2097152, 2900000);
+}
+
+// gfx1150 (Strix Point, 16 CUs, no MALL).
+static origami::hardware_t make_w4a16_gfx1150_hardware() {
+  return origami::hardware_t::get_hardware_for_arch(
+      origami::hardware_t::architecture_t::gfx1150, 16, 65536, 524288, 2097152, 2900000);
 }
 
 TEST_CASE("GEMM: W4A16 tiles pay the in-kernel dequantize", "[gemm][w4a16]") {
@@ -239,9 +235,20 @@ TEST_CASE("GEMM: W4A16 tiles pay the in-kernel dequantize", "[gemm][w4a16]") {
 }
 
 // A W4A16 decode kernel as hipBLASLt describes it: dot2 (MI 1x1x64), MT_M weight rows x
-// MT_N tokens x DepthU, one wave per workgroup, non-temporal A.
+// MT_N tokens x DepthU, one wave per workgroup, no prefetch and no Stream-K.
 static origami::config_t make_w4a16_decode_config(size_t mt_m, size_t mt_n, size_t depth_u, int occupancy) {
-  return make_config(mt_m, mt_n, depth_u, 1, 1, 64, false, 1, occupancy, 6, 0, 0);
+  auto config = make_config(mt_m, mt_n, depth_u, 1, 1, 64, false, 1, occupancy, 0, 0, 0);
+  origami::tensile_params_t t;
+  t.wavefront_size       = 32;
+  t.wave_group_m         = 0;
+  t.wave_group_n         = 1;
+  t.local_split_u        = 1;
+  t.prefetch_global_read = 0;
+  t.prefetch_local_read  = 1;
+  t.unroll_major_lds_a   = 1;
+  t.unroll_major_lds_b   = 1;
+  config.backend         = t;
+  return config;
 }
 
 static origami::problem_t make_w4a16_decode_problem(size_t rows, size_t tokens, size_t k,
@@ -252,59 +259,60 @@ static origami::problem_t make_w4a16_decode_problem(size_t rows, size_t tokens, 
   return problem;
 }
 
-TEST_CASE("GEMM: W4A16 decode kernels are ranked, not rejected", "[gemm][w4a16][decode]") {
-  const auto hardware = make_w4a16_gfx1151_hardware();
-  const auto problem  = make_w4a16_decode_problem(4096, 2, 4096, origami::data_type_t::Half);
-  const double latency
-      = origami::gemm::compute_total_latency(problem, hardware, make_w4a16_decode_config(2, 2, 512, 32));
-  REQUIRE(latency < std::numeric_limits<double>::max());
-  // Streaming 8.4 MB of weights at about 230 GB/s, plus the fixed time: 30-60 us
-  // (2200 cycles per us).
-  REQUIRE(latency > 30.0 * 2200.0);
-  REQUIRE(latency < 60.0 * 2200.0);
-  // Only gfx1150 and gfx1151 have the model: elsewhere the tile model rejects a dot2 W4A16 config.
-  const double other = origami::gemm::compute_total_latency(problem, make_hardware(950),
-                                                            make_w4a16_decode_config(2, 2, 512, 32));
-  REQUIRE(other == std::numeric_limits<double>::max());
-}
-
-TEST_CASE("GEMM: W4A16 decode kernels are ranked on gfx1150", "[gemm][w4a16][decode]") {
-  auto hardware = make_w4a16_gfx1151_hardware();
-  hardware.arch = origami::hardware_t::architecture_t::gfx1150;
-  hardware.N_CU = 16;
-  // fp16 too: the decode model does not depend on the tile model's fp16 switch.
+// The dot2 kernels go through the tile model.  Its cycles are the device's (2900 per us on both
+// devices) wherever the terms are measured ones, which they are for these kernels.
+TEST_CASE("GEMM: W4A16 dot2 kernels are ranked by the tile model", "[gemm][w4a16][decode]") {
+  constexpr double cycles_per_us = 2900.0;
   for (auto mi_dtype : {origami::data_type_t::Half, origami::data_type_t::BFloat16}) {
     const auto problem = make_w4a16_decode_problem(4096, 2, 4096, mi_dtype);
-    const double latency
-        = origami::gemm::compute_total_latency(problem, hardware, make_w4a16_decode_config(2, 2, 512, 32));
-    // 8.4 MB of weights at gfx1150's DRAM bandwidth (about 80 GB/s): 100-160 us.
-    REQUIRE(latency > 100.0 * 2200.0);
-    REQUIRE(latency < 160.0 * 2200.0);
+    const auto config  = make_w4a16_decode_config(2, 2, 512, 32);
+    // 8.4 MB of weights streamed from DRAM: about 215 GB/s on gfx1151 and 70 GB/s on gfx1150.
+    const double gfx1151 = origami::gemm::compute_total_latency(problem, make_w4a16_gfx1151_hardware(), config);
+    REQUIRE(gfx1151 > 35.0 * cycles_per_us);
+    REQUIRE(gfx1151 < 55.0 * cycles_per_us);
+    const double gfx1150 = origami::gemm::compute_total_latency(problem, make_w4a16_gfx1150_hardware(), config);
+    REQUIRE(gfx1150 > 110.0 * cycles_per_us);
+    REQUIRE(gfx1150 < 150.0 * cycles_per_us);
+    // Elsewhere the rule for dot2 kernels (few rows along M) still rejects the config.
+    REQUIRE(origami::gemm::compute_total_latency(problem, make_hardware(950), config)
+            == std::numeric_limits<double>::max());
   }
 }
 
-TEST_CASE("GEMM: W4A16 decode model terms", "[gemm][w4a16][decode]") {
+TEST_CASE("GEMM: W4A16 dot2 kernels in the tile model's terms", "[gemm][w4a16][decode]") {
   const auto hardware = make_w4a16_gfx1151_hardware();
   auto latency        = [&](size_t rows, size_t tokens, size_t k, size_t mt_m, size_t mt_n, size_t du,
-                     int occupancy = 6, origami::data_type_t t = origami::data_type_t::Half) {
+                     int occupancy = 32, origami::data_type_t t = origami::data_type_t::Half) {
     return origami::gemm::compute_total_latency(make_w4a16_decode_problem(rows, tokens, k, t), hardware,
                                                 make_w4a16_decode_config(mt_m, mt_n, du, occupancy));
   };
   // A token tile narrower than the tokens re-reads the weights once per token tile.
   REQUIRE(latency(16384, 4, 8192, 2, 2, 512) > 1.5 * latency(16384, 4, 8192, 2, 4, 512));
-  // DepthU that does not divide K pays a whole last iteration: at low occupancy, a
-  // DepthU of 1024 costs more per K at K = 2560 (2.5 iterations) than at K = 3072 (3).
-  REQUIRE(latency(4096, 1, 2560, 2, 1, 1024, 1) / 2560.0 > latency(4096, 1, 3072, 2, 1, 1024, 1) / 3072.0);
-  // More resident waves finish the rounds sooner when the grid is latency bound.
-  REQUIRE(latency(1024, 1, 16384, 2, 1, 512, 2) > latency(1024, 1, 16384, 2, 1, 512, 8));
-  // The occupancy counts workgroups per WGP (two CUs): 20 WGPs x 32 workgroups hold the 512
-  // waves of 1024 rows in one round, and 16 per WGP need two.
-  const double launch = origami::heuristic_defaults_t::KERNEL_LAUNCH_OVERHEAD;
-  REQUIRE(latency(1024, 1, 512, 2, 1, 512, 16) - launch == Catch::Approx(2.0 * (latency(1024, 1, 512, 2, 1, 512, 32) - launch)));
+  // DepthU that does not divide K runs a whole (masked) last iteration, with its load round
+  // trip: where the round trips bound the time, a DepthU of 1024 costs more per K at K = 2560
+  // (2.5 iterations) than at K = 3072 (3).  It is charged no unused depth: K = 2560 costs less
+  // than K = 3072.
+  REQUIRE(latency(512, 1, 2560, 2, 1, 1024) / 2560.0 > latency(512, 1, 3072, 2, 1, 1024) / 3072.0);
+  REQUIRE(latency(512, 1, 2560, 2, 1, 1024) < latency(512, 1, 3072, 2, 1, 1024));
+  // The round trips and the set-up of the workgroups resident on a CU overlap: fewer resident
+  // workgroups take longer when the stream does not bound the kernel.
+  REQUIRE(latency(1024, 1, 16384, 2, 1, 512, 4) > 1.5 * latency(1024, 1, 16384, 2, 1, 512, 16));
+  // The occupancy counts workgroups per WGP (two CUs): the 512 workgroups of 1024 rows put 13
+  // on each of the 40 CUs, which an occupancy of 26 holds as well as one of 32, and one of 16
+  // does not.
   REQUIRE(latency(1024, 1, 512, 2, 1, 512, 32) == latency(1024, 1, 512, 2, 1, 512, 26));
-  // The decode model has no term of the activation type: the same kernel shape costs the same.
-  REQUIRE(latency(4096, 1, 16384, 2, 1, 2048, 1, origami::data_type_t::BFloat16)
-          == latency(4096, 1, 16384, 2, 1, 2048, 1, origami::data_type_t::Half));
+  REQUIRE(latency(1024, 1, 512, 2, 1, 512, 16) > latency(1024, 1, 512, 2, 1, 512, 26));
+  // A kernel that DRAM bounds takes the time of its stream, whatever its tile: 134 MB of
+  // weights at about 215 GB/s.
+  const double launch = origami::heuristic_defaults_t::KERNEL_LAUNCH_OVERHEAD;
+  const double stream = 16384.0 * 16384.0 * 0.5 / 215.0e3 * 2900.0;
+  for (size_t du : {512, 1024, 2048}) {
+    REQUIRE(latency(16384, 1, 16384, 1, 1, du) - launch > stream);
+    REQUIRE(latency(16384, 1, 16384, 1, 1, du) - launch < 1.1 * stream);
+  }
+  // The bf16 kernels spend more instructions dequantizing than the fp16 ones.
+  REQUIRE(latency(256, 1, 16384, 2, 1, 512, 32, origami::data_type_t::BFloat16)
+          > latency(256, 1, 16384, 2, 1, 512, 32, origami::data_type_t::Half));
 }
 
 TEST_CASE("GEMM: W4A16 Stream-K sharing tiles is not charged whole waves", "[gemm][w4a16]") {

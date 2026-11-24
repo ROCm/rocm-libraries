@@ -741,6 +741,9 @@ class ORIGAMI_EXPORT hardware_t {
              {matrix_instruction(16, 16, 16, data_type_t::Int8), 32},  // v_wmma_i32_16x16x16_iu8
              // I4
              {matrix_instruction(16, 16, 16, data_type_t::Int4), 16},  // v_wmma_i32_16x16x16_iu4
+             // DOT2: one vector-ALU instruction of a wave
+             {matrix_instruction(1, 1, 64, data_type_t::Half), 1}, // v_dot2_f32_f16
+             {matrix_instruction(1, 1, 64, data_type_t::BFloat16), 1}, // v_dot2_f32_bf16
          }},
         {architecture_t::gfx1151,
          {
@@ -752,6 +755,9 @@ class ORIGAMI_EXPORT hardware_t {
              {matrix_instruction(16, 16, 16, data_type_t::Int8), 32},  // v_wmma_i32_16x16x16_iu8
              // I4
              {matrix_instruction(16, 16, 16, data_type_t::Int4), 16},  // v_wmma_i32_16x16x16_iu4
+             // DOT2: one vector-ALU instruction of a wave
+             {matrix_instruction(1, 1, 64, data_type_t::Half), 1}, // v_dot2_f32_f16
+             {matrix_instruction(1, 1, 64, data_type_t::BFloat16), 1}, // v_dot2_f32_bf16
          }},
         {architecture_t::gfx1152,
          {
@@ -1141,9 +1147,11 @@ class ORIGAMI_EXPORT hardware_t {
    * @param MI_N Matrix instruction N dimension
    * @param MI_K Matrix instruction K dimension
    * @param mi_input_type Input data type for the matrix instruction
-   * @return size_t Instruction latency in cycles, or 0 if not found
+   * @return double Instruction latency in cycles of the CU (the instruction's cycles on one SIMD
+   *         over the instructions a CU issues in parallel, so it can be a fraction), or the
+   *         default latency if not found
    */
-  size_t get_mi_latency(size_t MI_M, size_t MI_N, size_t MI_K, data_type_t mi_input_type) const;
+  double get_mi_latency(size_t MI_M, size_t MI_N, size_t MI_K, data_type_t mi_input_type) const;
 
   /**
    * @brief Get valid matrix instruction dimensions for a given datatype.

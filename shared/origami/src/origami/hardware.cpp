@@ -295,7 +295,7 @@ void hardware_t::print() const {
   std::cout << "===========================================================\n";
 }
 
-size_t hardware_t::get_mi_latency(size_t MI_M,
+double hardware_t::get_mi_latency(size_t MI_M,
                                   size_t MI_N,
                                   size_t MI_K,
                                   data_type_t mi_input_type) const {
@@ -304,13 +304,13 @@ size_t hardware_t::get_mi_latency(size_t MI_M,
 
   auto it = instruction_map.find(key);
   if (it != instruction_map.end()) {
-    return it->second / parallel_mi_cu;
+    return static_cast<double>(it->second) / static_cast<double>(parallel_mi_cu);
   } else {
     if (origami::runtime_options::get().debug_enabled)
       std::cerr << "Warning: Latency not found for MI_M=" << MI_M << ", MI_N=" << MI_N
                 << ", MI_K=" << MI_K << ", mi_input_type=" << datatype_to_string(mi_input_type)
                 << ". Returning latency value of 32 (really slow).\n";
-    return 32 / parallel_mi_cu;  // Default latency if instruction is not found
+    return 32.0 / static_cast<double>(parallel_mi_cu);  // Default latency if instruction is not found
   }
 }
 

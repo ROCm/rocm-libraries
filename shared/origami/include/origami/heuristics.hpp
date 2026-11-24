@@ -251,6 +251,41 @@ struct heuristic_defaults_t {
   /// cycles (it tracks the shader clock).  Fitted to memory-only kernel timings
   /// (tests/test_gemm.cpp, gfx1151 L_mem reference).
   static constexpr double GFX1151_LOAD_LATENCY_CYCLES = 1050.0;
+  /// gfx1150: the same round trip, fitted to the W4A16 dot2 kernels (one wave per workgroup, 8 to
+  /// 16 workgroups per CU) on 1 to 5 token shapes that DRAM does not bound; 850 to 1250 fit
+  /// alike, and so does the gfx1151 value on the gfx1151 timings of those kernels.
+  static constexpr double GFX1150_LOAD_LATENCY_CYCLES = 1050.0;
+
+  /// Round trip of one K-iteration's global loads of a workgroup, in compute cycles; 0 where it
+  /// has not been measured.
+  static constexpr double load_latency_cycles(hardware_t::architecture_t arch) noexcept {
+    switch (arch) {
+      case hardware_t::architecture_t::gfx1151: return GFX1151_LOAD_LATENCY_CYCLES;
+      case hardware_t::architecture_t::gfx1150: return GFX1150_LOAD_LATENCY_CYCLES;
+      default: return 0.0;
+    }
+  }
+
+  /// Time a workgroup spends on a tile outside its K loop (argument and address set-up,
+  /// reduction and store), in compute cycles; 0 where it has not been measured.  Fitted to the
+  /// same dot2 kernel timings as the round trip above: the time left at zero K iterations.
+  static constexpr double GFX1151_TILE_SETUP_CYCLES = 3500.0;
+  static constexpr double GFX1150_TILE_SETUP_CYCLES = 5000.0;
+  static constexpr double tile_setup_cycles(hardware_t::architecture_t arch) noexcept {
+    switch (arch) {
+      case hardware_t::architecture_t::gfx1150: return GFX1150_TILE_SETUP_CYCLES;
+      case hardware_t::architecture_t::gfx1151: return GFX1151_TILE_SETUP_CYCLES;
+      default: return 0.0;
+    }
+  }
+
+  /// Whether the per-K-iteration costs above (load round trip, loop skeleton) were measured on
+  /// the architecture as what one workgroup waits or spends.  The tile model then shares them
+  /// among the workgroups resident on a CU, whose waits overlap.  Elsewhere they are charges
+  /// fitted per tile and stay as they are.
+  static constexpr bool has_workgroup_costs(hardware_t::architecture_t arch) noexcept {
+    return load_latency_cycles(arch) > 0.0;
+  }
 };
 
 /**
@@ -259,21 +294,25 @@ struct heuristic_defaults_t {
  *
  * The two architectures run the same kernels on the same ISA, so every constant that describes
  * the kernels is the same on both.  What differs is read from hardware_t (CUs, SIMDs per CU,
- * MALL) and from the kernel's CUOccupancy, except the DRAM bandwidth of the decode model.
+ * MALL, memory rates, per-workgroup costs) and from the kernel's CUOccupancy.
  */
 struct w4a16_params_t {
   // Legend: the tag at the end of each constant says how its value was obtained.
   //   [EMPIRICAL] chosen by sweeping it against measured hipBLASLt kernel times;
   //   [KERNEL]    a property of the kernels of the set, not fitted;
   //   [DEFAULT]   a fallback for a config that does not carry the value, not fitted.
-  //   [MEASURED]  measured on the device (the DRAM bandwidths of the decode model, in
-  //               w4a16_decode_dram_bytes_per_us below).
 
   // --- Tile latency model ---
   // Dequantize VALU per element, with its dependency stalls (bf16 rounds f32 products, fp16
   // uses packed halves).
   static constexpr double BF16_DEQUANT_VALU_PER_ELEM = 10.0;  // [EMPIRICAL]
   static constexpr double F16_DEQUANT_VALU_PER_ELEM  = 5.0;  // [EMPIRICAL]
+  // The same in the dot2 kernels, which dequantize into registers: VALU instructions of a K
+  // iteration other than the dot2, per weight of a lane, counted in the kernels' loops (2.05 and
+  // 3.10 without and with zero point for bf16, 2.19 and 2.34 for fp16; the model does not see the
+  // zero point and takes the mean).
+  static constexpr double BF16_DOT2_DEQUANT_VALU_PER_ELEM = 2.6;  // [KERNEL]
+  static constexpr double F16_DOT2_DEQUANT_VALU_PER_ELEM  = 2.3;  // [KERNEL]
   // Cycles per C element of a Stream-K partial tile on the critical path: the workgroup that
   // finishes a tile waits for, reads and adds the f32 partial of each other workgroup.
   // This one depends on the memory system, not only on the kernels: it was fitted on gfx1151,
@@ -303,13 +342,6 @@ struct w4a16_params_t {
   static constexpr double DP_MAX_WAVE_ROUNDING         = 1.06;  // [EMPIRICAL]
   // Rule 5: token tiles (MT_N at most this) get one workgroup per SIMD of the CU.
   static constexpr size_t TOKEN_TILE_MAX_N = 48;  // [EMPIRICAL]
-
-  // --- Decode kernels (dot2 WaveSplitK: one wave per workgroup, MT_M weight rows x MT_N
-  // tokens, K split over the wave's lanes; see compute_w4a16_decode_latency) ---
-  // Cycles of a wave: fixed (start, prologue, reduction, store), and per K iteration (the
-  // load-to-use latency of its global reads and the work on them).
-  static constexpr double DECODE_WAVE_CYCLES = 5000.0;  // [EMPIRICAL]
-  static constexpr double DECODE_ITER_CYCLES = 1500.0;  // [EMPIRICAL]
 };
 
 /// Whether the W4A16 model applies to @p problem on @p hardware. The latency model and the
@@ -323,25 +355,6 @@ inline bool is_w4a16(const problem_t& problem, const hardware_t& hardware) {
       return true;
     default:
       return false;
-  }
-}
-
-/// Peak DRAM read bandwidth of the device for the W4A16 decode model, in bytes/us (measured), or
-/// nullopt where the device has no decode model.
-// TODO(AIESW-51613): these values should come from hardware_t (mem3_perf_ratio is the DRAM
-// bandwidth), not from here.  The values hardware_t holds today are wrong: about 623 GB/s on
-// gfx1151 and 31 GB/s on gfx1150, against the 247 and 84.1 GB/s measured.  The tile model is
-// calibrated with them (it underestimates the memory latency and gfx1150's value compensates
-// for that), so the Origami model has to be fixed before they can change.  Until then the
-// decode model keeps the measured bandwidths here.
-inline std::optional<double> w4a16_decode_dram_bytes_per_us(const hardware_t& hardware) {
-  switch (hardware.arch) {
-    case hardware_t::architecture_t::gfx1150:
-      return 84.1e3;  // [MEASURED] Strix Point: 78.3 GiB/s
-    case hardware_t::architecture_t::gfx1151:
-      return 247.0e3;  // [MEASURED] Strix Halo: 230 GiB/s
-    default:
-      return std::nullopt;
   }
 }
 
