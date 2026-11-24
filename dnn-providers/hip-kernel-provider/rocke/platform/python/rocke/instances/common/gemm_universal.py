@@ -3842,10 +3842,30 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             raise ValueError("ROCKE_EXP_MX_RA_ILV needs plain fp8, ROCKE_EXP_MX_RA=2 and ROCKE_EXP_MX_RA_CB=1")
         ilv_frac = int(_os_ra.environ.get("ROCKE_EXP_MX_RA_ILVF", "75")) / 100.0
 
+        # ROCKE_EXP_MX_RA_ILVG=g: the reads go as g blocks instead of one
+        # fragment at a time: block 0 before the half's first WMMA, the others
+        # evenly within the first ILVF percent (g=1 is the block layout).
+        ilv_groups = int(_os_ra.environ.get("ROCKE_EXP_MX_RA_ILVG", "0"))
+
         def wmmas_ilv(acc, a, bh, which, reads):
             order = [(j, mi) for j in range(half) for mi in range(mfmas_m)]
             w, r = len(order), len(reads)
             span = max(1, int(w * ilv_frac))
+            if ilv_groups > 0:
+                g = min(ilv_groups, r)
+                bounds = [(i * r) // g for i in range(g + 1)]
+                starts = {(i * span) // g: i for i in range(g)}  # WMMA index -> block
+                out = []
+                for idx, (j, mi) in enumerate(order):
+                    if idx in starts:
+                        i = starts[idx]
+                        fence()
+                        out += [reads[k]() for k in range(bounds[i], bounds[i + 1])]
+                        fence()
+                    ni = which * half + j
+                    f = mi * mfmas_n + ni
+                    acc[f] = _emit_mma(b, op, a[mi], bh[j], acc[f])
+                return out
             out, k = [], 0
             for idx, (j, mi) in enumerate(order):
                 ni = which * half + j
