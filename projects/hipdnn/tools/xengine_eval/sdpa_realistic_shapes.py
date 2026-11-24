@@ -7,7 +7,14 @@ Attention geometry (query heads, KV heads, head dim) comes from the published co
 the models below; batch and sequence lengths are the serving and training settings those models
 are typically run at. Each row is one problem, named <model>/<phase>/.../<layout>, so a result can
 be split by model, phase and layout. Each shape appears in every memory layout a caller would hand
-hipDNN for it (`layouts()`); the layouts need the declarations add_sdpa_layouts.py writes.
+hipDNN for it (`layouts()`), and with V as wide as Q and K except under MLA (`q.value_head_dim`);
+corpus_gen's shipped SDPA declarations declare both.
+
+DeepSeek's multi-head latent attention (kind "mla") runs as two geometries. Prefill, append and
+training decompress the latent into per-head K and V: as many KV heads as query heads, Q and K
+192 wide (128 + a 64-wide rotary part), V 128. Decode absorbs the up-projections into Q and the
+output, as vLLM and SGLang serve it: one shared latent KV head (MQA), Q and K 576 wide (the
+512-wide latent + the rotary part), V the 512-wide latent.
 
 Phases:
   prefill   inference forward over the prompt (causal, square)
@@ -23,7 +30,8 @@ each file carries only the parameters its operation declares, `q.layout` include
 import csv
 import sys
 
-# name: (heads, kv_heads, head_dim, kind, dtype); kind decoder|encoder|diffusion
+# name: (heads, kv_heads, head_dim, kind, dtype); kind decoder|mla|encoder|diffusion. An mla
+# model's entry is its decompressed geometry; MLA_DECODE gives its absorbed decode one.
 MODELS = {
     "llama3.1-8b": (32, 8, 128, "decoder", "bf16"),
     "llama3.1-70b": (64, 8, 128, "decoder", "bf16"),
@@ -46,7 +54,11 @@ MODELS = {
     "sdxl-unet": (20, 20, 64, "diffusion", "fp16"),
     "sd3-mmdit": (24, 24, 64, "diffusion", "bf16"),
     "flux-dit": (24, 24, 128, "diffusion", "bf16"),
+    "deepseek-v3": (128, 128, 192, "mla", "bf16"),
+    "deepseek-v2-lite": (16, 16, 192, "mla", "bf16"),
 }
+# (kv_heads, head_dim) of absorbed decode: one latent head, 512 + 64 wide, V the 512 latent.
+MLA_DECODE = (1, 576)
 ENCODER_SEQ = {
     "bert-base": [128, 512],
     "bert-large": [128, 512],
@@ -56,11 +68,12 @@ ENCODER_SEQ = {
 DIFFUSION_SEQ = {"sdxl-unet": [1024, 4096], "sd3-mmdit": [4250], "flux-dit": [4608]}
 # Training: every decoder at the usual pre-training/fine-tuning lengths (the largest models at
 # smaller micro-batches), the encoders at theirs, and the diffusion backbones at their latents.
-LARGE = {"llama3.1-70b", "llama3.1-405b", "qwen2.5-72b", "gpt-oss-120b", "qwen2.5-32b", "gemma2-27b"}
+LARGE = {"llama3.1-70b", "llama3.1-405b", "qwen2.5-72b", "gpt-oss-120b", "qwen2.5-32b", "gemma2-27b",
+         "deepseek-v3"}
 TRAIN = {
     m: ([2048, 4096, 8192], [1, 2] if m in LARGE else [1, 2, 4])
     for m, spec in MODELS.items()
-    if spec[3] == "decoder"
+    if spec[3] in ("decoder", "mla")
 }
 TRAIN_ENCODER = {
     "bert-base": ([128, 512], [32, 64]),
@@ -73,21 +86,23 @@ TRAIN_ENCODER = {
 COMMON = ["q.batch", "q.heads", "q.heads_kv", "q.seqlen_q", "q.seqlen_k", "q.head_dim",
           "q.is_causal", "q.alignment"]
 COLUMNS = {
-    "sdpa_fwd": ["name", "op", *COMMON, "q.generate_stats", "q.dtype", "q.form", "q.layout"],
-    "sdpa_bwd": ["name", "op", *COMMON, "q.dtype", "q.form", "q.layout"],
+    "sdpa_fwd": ["name", "op", *COMMON, "q.generate_stats", "q.dtype", "q.form", "q.value_head_dim",
+                 "q.layout"],
+    "sdpa_bwd": ["name", "op", *COMMON, "q.dtype", "q.form", "q.value_head_dim", "q.layout"],
 }
 
 
-def layouts(phase, self_attention):
-    """The memory layouts a caller hands hipDNN for one shape (add_sdpa_layouts.py names them).
+def layouts(phase, self_attention, mla):
+    """The memory layouts a caller hands hipDNN for one shape.
 
     Every shape comes token-major (bshd: FlashAttention, AITER, vLLM) and head-major (bhsd:
     PyTorch eager, Hugging Face after .contiguous()); training also sequence-major (sbhd:
-    Megatron); self-attention also as views of a fused QKV projection (qkv_packed)."""
+    Megatron); self-attention also as views of a fused QKV projection (qkv_packed), except under
+    MLA, whose K and V come from the latent rather than from one projection with Q."""
     out = ["bshd", "bhsd"]
     if phase == "train":
         out.append("sbhd")
-    if self_attention:
+    if self_attention and not mla:
         out.append("qkv_packed")
     return out
 
@@ -97,33 +112,36 @@ def rows():
         name = out[0]
         phase = name.split("/")[1]
         self_attention = out[5] == out[6]  # seqlen_q == seqlen_k
-        for layout in layouts(phase, self_attention):
+        mla = out[-1] == "mla"
+        for layout in layouts(phase, self_attention, mla):
             yield op, [f"{name}/{layout}", *out[1:], layout]
 
 
 def _shapes():
-    def row(name, op, b, h, hk, sq, sk, d, causal, align, stats, dtype):
+    def row(name, op, b, h, hk, sq, sk, d, causal, align, stats, dtype, value="same"):
         out = [name, op, b, h, hk, sq, sk, d, str(causal).lower(), align]
         if op == "sdpa_fwd":
             out.append(str(stats).lower())
-        return op, out + [dtype, "plain"]
+        return op, out + [dtype, "plain", value]
 
     for model, (h, hk, d, kind, dtype) in MODELS.items():
-        if kind == "decoder":
+        if kind in ("decoder", "mla"):
+            value = "mla" if kind == "mla" else "same"
+            dk, dd = MLA_DECODE if kind == "mla" else (hk, d)
             for b in (1, 4, 8):
                 for s in (512, 2048, 8192) + ((32768,) if b == 1 else ()):
                     yield row(f"{model}/prefill/b{b}s{s}", "sdpa_fwd", b, h, hk, s, s, d, True,
-                              "top_left", False, dtype)
+                              "top_left", False, dtype, value)
             for b in (1, 8, 32, 64, 128):
                 for k in (1024, 4096, 16384):
                     if b * k > 128 * 16384:
                         continue
-                    yield row(f"{model}/decode/b{b}k{k}", "sdpa_fwd", b, h, hk, 1, k, d, True,
-                              "bottom_right", False, dtype)
+                    yield row(f"{model}/decode/b{b}k{k}", "sdpa_fwd", b, h, dk, 1, k, dd, True,
+                              "bottom_right", False, dtype, value)
             for b in (1, 4):
                 for q, k in ((128, 4096), (512, 8192), (2048, 16384), (4, 2048)):
                     yield row(f"{model}/append/b{b}q{q}k{k}", "sdpa_fwd", b, h, hk, q, k, d, True,
-                              "bottom_right", False, dtype)
+                              "bottom_right", False, dtype, value)
         elif kind == "encoder":
             for b in (8, 32, 64):
                 for s in ENCODER_SEQ[model]:
@@ -135,12 +153,13 @@ def _shapes():
                     yield row(f"{model}/diffusion/b{b}s{s}", "sdpa_fwd", b, h, hk, s, s, d, False,
                               "top_left", False, dtype)
     for model, (seqs, batches) in TRAIN.items():
-        h, hk, d, _, dtype = MODELS[model]
+        h, hk, d, kind, dtype = MODELS[model]
+        value = "mla" if kind == "mla" else "same"
         for b in batches:
             for s in seqs:
                 for op, stats in (("sdpa_fwd", True), ("sdpa_bwd", None)):
                     yield row(f"{model}/train/b{b}s{s}", op, b, h, hk, s, s, d, True, "top_left",
-                              stats, dtype)
+                              stats, dtype, value)
     for model, (seqs, batches) in TRAIN_ENCODER.items():
         h, hk, d, _, dtype = MODELS[model]
         for b in batches:
