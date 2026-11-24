@@ -103,6 +103,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   unchanged.
 
 ### Added
+* [Conv] Added a gfx1250 system find-db and perf-db (`gfx1250100`), generated from exhaustive
+  tuning results and checked with DBSync on gfx1250 hardware. The databases are installed with the
+  other system databases, and `StaticFDBSync` checks them on gfx1250. A device that reports a
+  target variant, such as `gfx1250-strict`, now loads its base architecture's system find-db and
+  perf-db; user databases and kernel caches keep the full device name.
 * [Conv] Added gfx1250 (`gfx1250`/`gfx1250-strict`) conv AI heuristic support on the precomputed
   config-tower runtime: TunaNet solver-selection and KTN candidate-selection model assets plus the
   precomputed config-embedding tables for the grouped xdlops forward, backward-data, and
