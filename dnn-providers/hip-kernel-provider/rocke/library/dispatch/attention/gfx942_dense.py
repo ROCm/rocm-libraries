@@ -26,7 +26,7 @@ kernel's own ``supports_attention_dense``.
 
 from __future__ import annotations
 
-from typing import Mapping
+from typing import Mapping, Tuple
 
 from rocke.dispatch.core import CandidateRegistry, KernelCandidate
 
@@ -287,15 +287,21 @@ def tuned_base_spec(req: AttentionRequest):
         return _bias_geometry_spec(req)
     head_size = int(req.hdim_q)
     # The persistent grid measured ahead at D128 for every batch and mask; at
-    # D64 the non-persistent grid did. Paged K/V starts on the default grid; the
-    # persistent knob pins it onto the persistent one.
-    paged = bool(dense_paged_fields(req, _DENSE_BLOCK_N))
-    spec = _make_spec(
-        req,
-        _default_block_m(req),
-        _DENSE_BLOCK_N,
-        persistent=head_size == 128 and not paged,
-    )
+    # D64 the non-persistent grid did. Paged K/V: see _paged_persistent.
+    paged = dense_paged_fields(req, _DENSE_BLOCK_N)
+    block_m = _default_block_m(req)
+    spec = None
+    if paged and _paged_persistent(req):
+        try:
+            spec = _make_spec(req, block_m, _DENSE_BLOCK_N, persistent=True)
+        except ValueError:
+            # No varlen path on the persistent body (several sequences, a
+            # partial query tile): the grid serves those.
+            pass
+    if spec is None:
+        spec = _make_spec(
+            req, block_m, _DENSE_BLOCK_N, persistent=head_size == 128 and not paged
+        )
     # Not with a bias: the segment store returns before the bias epilogue.
     if spec.causal_bottom_right and not spec.use_additive_bias:
         from kernels.common.attention_dense_kv_split import (
@@ -481,6 +487,35 @@ def _make_spec(
         use_additive_bias=req.use_attn_bias,
         **paged,
     )
+
+
+def _paged_persistent(req: AttentionRequest) -> bool:
+    """Whether a D128 paged request defaults to the persistent grid.
+
+    Paged K/V moves the D128 trade-off: the persistent grid stays ahead for
+    bf16 and under sliding windows, while plain causal fp16 runs faster on the
+    one-CTA-per-block grid. Only the top-left diagonal was measured there, and
+    narrow windows keep their own grid geometry. Varlen problems fall back to
+    the grid in :func:`tuned_base_spec`.
+    """
+    if int(req.hdim_q) != 128 or int(req.mask_type) != 1:
+        return False
+    window = int(req.sliding_window)
+    if window:
+        return window > _NARROW_WINDOW
+    return req.dtype.lower() == "bf16"
+
+
+def dense_paged_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
+    """Candidate names for an unpinned paged request; empty leaves it to unified.
+
+    One candidate, as for contiguous requests: its default spec picks the body
+    (grid or persistent). Unified stays ahead on several sequences under a
+    sliding window at D128.
+    """
+    if int(req.batch) > 1 and int(req.sliding_window) > 0 and int(req.hdim_q) == 128:
+        return ()
+    return (CANDIDATE_NAME,)
 
 
 def _supports(spec, *, arch):

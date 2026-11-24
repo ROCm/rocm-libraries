@@ -63,7 +63,9 @@ def test_paged_request_builds_a_paged_spec(arch, spec_id, overrides):
     spec = dispatch_attention(pinned(req, spec_id)).spec.kernel_spec
     assert spec.paged and spec.block_size == _BS
     assert spec.num_kv_blocks == _SQ // _BS  # the smallest cache, until binding
-    assert not spec.persistent
+    # gfx942 defaults windowed D128 paged requests to the persistent grid.
+    windowed_d128 = req.sliding_window > 256 and req.hdim_q == 128
+    assert spec.persistent == (arch == "gfx942" and windowed_d128)
     assert not spec.varlen  # whole KV tiles keep the single-sequence kernel
 
 

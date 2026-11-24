@@ -392,6 +392,28 @@ class TestFp8DenseGuards(unittest.TestCase):
         self.assertEqual(captured.get("k_scale"), 0.5)
         self.assertEqual(captured.get("v_scale"), 0.25)
 
+    def test_binding_refuses_kv_scales_on_a_non_fp8_spec(self):
+        # Only the fp8 KV dequant reads the scales: on any other spec they would
+        # be dropped silently, so bind and launch refuse them.
+        req = self._fp8_req(use_fp8=False)
+        spec = attention_tuning_spec(req, "gfx950_dense_grid")
+        self.assertIsNone(spec.kernel_spec.kv_storage_dtype)
+        tensors = {"q": None, "k": None, "v": None, "out": None}
+        with mock.patch(
+            "dispatch.attention.bindings._dense_runner",
+            return_value=lambda **_call: None,
+        ):
+            for name in ("k_scale", "v_scale"):
+                with self.subTest(where="bind", name=name):
+                    with self.assertRaisesRegex(TypeError, f"keyword.*{name}"):
+                        bind_dense_attention_torch(req, spec, tensors, **{name: 0.5})
+            binding = bind_dense_attention_torch(req, spec, tensors)
+            for name in ("k_scale", "v_scale"):
+                with self.subTest(where="launch", name=name):
+                    with self.assertRaisesRegex(TypeError, f"keyword.*{name}"):
+                        binding.launch(**{name: 0.5})
+            binding.launch()
+
     def test_binding_rejects_bf16_kv_for_an_fp8_spec(self):
         # Scales are supplied and the match names the OCP dtype: without both,
         # deleting the dtype check still raises the missing-scale error, which

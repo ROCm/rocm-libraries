@@ -151,6 +151,8 @@ EXPECTED_FEATURES = {
         "sinks",
         "sliding_window",
         "lse",
+        # Unified reads paged K/V: the fallback for explicit paged requests.
+        "layout_paged",
     },
     "attention_unified_3d": {
         "attn_bias",
@@ -163,6 +165,7 @@ EXPECTED_FEATURES = {
         "sliding_window",
         # Both unified paths write LSE (tiled 2D and split-KV).
         "lse",
+        "layout_paged",
     },
 }
 

@@ -383,7 +383,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
 
 
 def dense_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
-    """Candidate names, best first, for an unpinned contiguous-layout request.
+    """Candidate names, best first, for an unpinned contiguous or paged request.
 
     The persistent body pays off once the default tile yields at least one
     work item per persistent CTA and the causal diagonal is fixed (the moving
