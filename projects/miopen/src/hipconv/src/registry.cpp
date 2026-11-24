@@ -10,6 +10,8 @@
 
 #include <array>
 #include <atomic>
+#include <cstdint>
+#include <initializer_list>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -48,8 +50,38 @@ void check_device(const Device& device)
 {
     if(!device.arch)
         throw std::invalid_argument("null arch handle");
-    if(device.cu_count <= 0)
-        throw std::invalid_argument("device.cu_count must be positive");
+    if(device.cu_count <= 0 || device.cu_count > MAX_CU_COUNT)
+        throw std::invalid_argument("device.cu_count must be in [1, MAX_CU_COUNT]");
+}
+
+// Whether every tensor of the layer has at most MAX_TENSOR_ELEMENTS elements.
+bool within_size_limit(const ConvParams& par)
+{
+    // Reject groups <= 0; channels_per_group() would divide by zero.
+    if(par.groups <= 0)
+        return false;
+    const auto fits = [](std::initializer_list<int> extents) {
+        std::int64_t count = 1;
+        for(const int x : extents)
+            if(x > 0 && (__builtin_mul_overflow(count, x, &count) || count > MAX_TENSOR_ELEMENTS))
+                return false;
+        return true;
+    };
+    return fits({par.n, par.d, par.h, par.w, par.c}) &&
+           fits({par.k, par.kd, par.kh, par.kw, par.channels_per_group()}) &&
+           fits({par.n, par.e, par.p, par.q, par.k});
+}
+
+bool is_valid_layer(const ConvParams& par)
+{
+    return par.is_valid() && par.output_size_matches();
+}
+
+// Throws for a layer get_valid_configs rejects as invalid.
+void check_layer(const ConvParams& par)
+{
+    if(!is_valid_layer(par))
+        throw std::invalid_argument("invalid ConvParams");
 }
 
 } // anonymous namespace
@@ -116,6 +148,8 @@ std::vector<ConvKernelHandle> get_valid_configs(const Device& device,
                                                 std::size_t max_ranked)
 {
     check_device(device);
+    if(!is_valid_layer(par) || !within_size_limit(par))
+        return {};
     for(const auto& entry : device.arch->algorithms)
     {
         if(entry.algorithm == algo)
@@ -128,6 +162,8 @@ std::vector<ConvKernelHandle>
 get_valid_configs(const Device& device, const ConvParams& par, std::size_t max_ranked)
 {
     check_device(device);
+    if(!is_valid_layer(par) || !within_size_limit(par))
+        return {};
     std::vector<ScoredKernel> scored;
     for(const auto& entry : device.arch->algorithms)
     {
@@ -157,8 +193,9 @@ bool kernel_supports(const ConvKernel* kernel, const Device& device, const ConvP
                 return entry.impl->is_applicable(par);
         return false;
     };
-    return algorithm_supports() && kernel->supports_dims(par.dims) &&
-           kernel->is_applicable(device, par) && kernel->is_valid_config(device, par);
+    return is_valid_layer(par) && within_size_limit(par) && algorithm_supports() &&
+           kernel->supports_dims(par.dims) && kernel->is_applicable(device, par) &&
+           kernel->is_valid_config(device, par);
 }
 
 void check_kernel(ConvKernelHandle kernel, const Device& device)
@@ -265,12 +302,14 @@ bool matches_descriptor(ConvKernelHandle kernel, std::string_view spec, std::str
 size_t get_workspace_size(ConvKernelHandle kernel, const Device& device, const ConvParams& par)
 {
     check_kernel(kernel, device);
+    check_layer(par);
     return kernel->get_workspace_size(device, par);
 }
 
 bool is_deterministic(ConvKernelHandle kernel, const Device& device, const ConvParams& par)
 {
     check_kernel(kernel, device);
+    check_layer(par);
     return kernel->is_deterministic(device, par);
 }
 
@@ -279,6 +318,7 @@ float get_weighted_throughput_index(ConvKernelHandle kernel,
                                     const ConvParams& par)
 {
     check_kernel(kernel, device);
+    check_layer(par);
     return kernel->get_weighted_throughput_index(device, par);
 }
 
@@ -291,7 +331,8 @@ hipconvError_t launch(ConvKernelHandle kernel,
                       void* workspace,
                       hipStream_t stream)
 {
-    if(!kernel || !device.arch || device.cu_count <= 0)
+    if(!kernel || !device.arch || device.cu_count <= 0 || device.cu_count > MAX_CU_COUNT ||
+       !is_valid_layer(par))
         return hipErrorInvalidValue;
     // Internally hipconv throws on error; the public API translates that into
     // a return code. Execution faults are asynchronous and surface at a later
@@ -315,11 +356,13 @@ void get_tolerance(ConvKernelHandle kernel,
                    float& rtol)
 {
     check_kernel(kernel, device);
+    check_layer(par);
     kernel->get_tolerance(device, par, atol, rtol);
 }
 
 void get_recursive_summation_tolerance(const ConvParams& par, float& atol, float& rtol)
 {
+    check_layer(par);
     get_mixed_precision_tolerance(par, atol, rtol);
 }
 

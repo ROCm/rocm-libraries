@@ -27,7 +27,9 @@
 #include <miopen/kernel_build_params.hpp>
 #include <gtest/gtest.h>
 
-TEST(CPU_kernel_build_params_NONE, check_kernel_build_params)
+using CPU_kernel_build_params_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_kernel_build_params_NONE, check_kernel_build_params)
 {
     auto kbp = miopen::KernelBuildParameters{{"TrivialDefine"},
                                              {"DefineWithValue", 0},
@@ -47,3 +49,5 @@ TEST(CPU_kernel_build_params_NONE, check_kernel_build_params)
               "-Wa,-defsym,DefineDefine "
               "-Wa,-defsym,DefineDefineWithValue=1");
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_kernel_build_params_NONE, testing::Values(0));

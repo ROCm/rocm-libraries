@@ -84,7 +84,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          TestNameGenerator<BN2DTestCase>());
 
 // fp32
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_BNOCLBWDLargeFusedActivation2D_FP32,
                          testing::Combine(testing::ValuesIn(Network2DLarge<BN2DTestCase>()),
                                           testing::ValuesIn({miopenTensorNCHW}),

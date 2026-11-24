@@ -36,7 +36,9 @@ static std::string CstdintKernelSource()
            "}\n";
 }
 
-TEST(CPU_MiopenCstdintLP64_NONE, JitCompileWithMiopenCstdint)
+using CPU_MiopenCstdintLP64_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_MiopenCstdintLP64_NONE, JitCompileWithMiopenCstdint)
 {
     auto&& h = get_handle();
 
@@ -56,3 +58,5 @@ TEST(CPU_MiopenCstdintLP64_NONE, JitCompileWithMiopenCstdint)
     auto data_out = h.Read<uint64_t>(data_dev, 1);
     EXPECT_EQ(data_out[0], 42u);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_MiopenCstdintLP64_NONE, testing::Values(0));

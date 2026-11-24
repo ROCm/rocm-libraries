@@ -99,4 +99,4 @@ TEST_P(GPU_BnDerive_FP32, Test)
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BnDerive_FP32, testing::ValuesIn(GetBNDeriveTestCases()));
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_BnDerive_FP32, testing::ValuesIn(GetBNDeriveTestCases()));

@@ -1,8 +1,8 @@
 """derive -> real pack -> assert, for hip-only and mixed rocke+hip roots.
 
-The roots are built from the packer's own fixtures. Real hipcc and rocke compiles:
-this is the proof the probe tools work for producers other than rocke and that the
-KDP paths derive records are the ones the packed output carries.
+The roots are built from the packer's own fixtures. Real HIP compiler and rocke
+compiles: this is the proof the probe tools work for producers other than rocke and
+that the KDP paths derive records are the ones the packed output carries.
 """
 
 import json
@@ -17,8 +17,10 @@ from probe_support import (  # noqa: F401 (pytest fixtures)
     ROCKE_FIXTURE,
     comgr_lib,
     derive_and_pack,
+    device_lib_path,
+    hip_compiler,
+    hip_path,
     hip_source,
-    hipcc,
     read_packed,
     rocm_kpack_dir,
     run_assert,
@@ -62,10 +64,18 @@ def _hsaco_source(dst, arch=ARCH):
 
 
 @pytest.fixture(scope="module")
-def hip_probe(tmp_path_factory, rocm_kpack_dir, hipcc, comgr_lib):
+def hip_probe(
+    tmp_path_factory, rocm_kpack_dir, hip_compiler, hip_path, device_lib_path, comgr_lib
+):
     work = tmp_path_factory.mktemp("hip_probe")
     return derive_and_pack(
-        hip_source(work / "src"), work, rocm_kpack_dir, hipcc, comgr_lib
+        hip_source(work / "src"),
+        work,
+        rocm_kpack_dir,
+        hip_compiler,
+        comgr_lib,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
     )
 
 
@@ -77,7 +87,7 @@ def test_hip_root_passes(hip_probe, rocm_kpack_dir):
 
 
 def test_rocke_off_probe_expects_and_packs_only_the_other_kinds(
-    tmp_path, rocm_kpack_dir, hipcc, comgr_lib
+    tmp_path, rocm_kpack_dir, hip_compiler, hip_path, device_lib_path, comgr_lib
 ):
     # A root holding hip UKDs beside a rocke KDP, probed as a build with rocKE OFF
     # does: the rocKE/ family folder excluded and the rocke kind disabled, with no
@@ -89,7 +99,14 @@ def test_rocke_off_probe_expects_and_packs_only_the_other_kinds(
     shutil.copytree(ROCKE_FIXTURE, src / "other_rocke")
     filters = (("rocKE",), ("rocke",))
     out, expect = derive_and_pack(
-        src, tmp_path, rocm_kpack_dir, hipcc, comgr_lib, filters=filters
+        src,
+        tmp_path,
+        rocm_kpack_dir,
+        hip_compiler,
+        comgr_lib,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+        filters=filters,
     )
     assert {(e["kdp"], e["kind"]) for e in json.loads(expect.read_text())} == {
         ("hip/pointwise.kdp.json", "hip"),
@@ -99,20 +116,40 @@ def test_rocke_off_probe_expects_and_packs_only_the_other_kinds(
     assert result.returncode == 0, result.stderr
 
 
-def test_hsaco_root_passes(tmp_path, rocm_kpack_dir, hipcc, comgr_lib):
+def test_hsaco_root_passes(
+    tmp_path, rocm_kpack_dir, hip_compiler, hip_path, device_lib_path, comgr_lib
+):
     src = _hsaco_source(tmp_path / "src")
-    out, expect = derive_and_pack(src, tmp_path, rocm_kpack_dir, hipcc, comgr_lib)
+    out, expect = derive_and_pack(
+        src,
+        tmp_path,
+        rocm_kpack_dir,
+        hip_compiler,
+        comgr_lib,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     entries = json.loads(expect.read_text())
     assert [(e["kdp"], e["kind"]) for e in entries] == [("solo.kdp.json", "hsaco")]
     result = run_assert(out, expect, rocm_kpack_dir)
     assert result.returncode == 0, result.stderr
 
 
-def test_hip_and_hsaco_mixed_root_passes(tmp_path, rocm_kpack_dir, hipcc, comgr_lib):
+def test_hip_and_hsaco_mixed_root_passes(
+    tmp_path, rocm_kpack_dir, hip_compiler, hip_path, device_lib_path, comgr_lib
+):
     src = tmp_path / "src"
     hip_source(src / "hip")
     _hsaco_source(src / "hsaco")
-    out, expect = derive_and_pack(src, tmp_path, rocm_kpack_dir, hipcc, comgr_lib)
+    out, expect = derive_and_pack(
+        src,
+        tmp_path,
+        rocm_kpack_dir,
+        hip_compiler,
+        comgr_lib,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     kinds = {e["kdp"]: e["kind"] for e in json.loads(expect.read_text())}
     assert kinds == {
         "hip/pointwise.kdp.json": "hip",
@@ -124,14 +161,22 @@ def test_hip_and_hsaco_mixed_root_passes(tmp_path, rocm_kpack_dir, hipcc, comgr_
 
 
 def test_hsaco_ukd_for_other_arch_is_not_packed_or_expected(
-    tmp_path, rocm_kpack_dir, hipcc, comgr_lib
+    tmp_path, rocm_kpack_dir, hip_compiler, hip_path, device_lib_path, comgr_lib
 ):
     # gfx942-only hsaco beside a gfx950 hip root: derive ignores it, the pack ships
     # nothing for it, and the assertion still passes on the hip UKDs alone.
     src = tmp_path / "src"
     hip_source(src / "hip")
     _hsaco_source(src / "hsaco", arch="gfx942")
-    out, expect = derive_and_pack(src, tmp_path, rocm_kpack_dir, hipcc, comgr_lib)
+    out, expect = derive_and_pack(
+        src,
+        tmp_path,
+        rocm_kpack_dir,
+        hip_compiler,
+        comgr_lib,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     assert {e["kind"] for e in json.loads(expect.read_text())} == {"hip"}
     result = run_assert(out, expect, rocm_kpack_dir)
     assert result.returncode == 0, result.stderr
@@ -143,10 +188,19 @@ def test_hsaco_ukd_for_other_arch_is_not_packed_or_expected(
 _LISTED = ["PointwiseMul f32 block64", "PointwiseAdd f32 block64"]
 
 
-def test_listed_ukds_pack_and_pass(tmp_path, rocm_kpack_dir, hipcc, comgr_lib):
+def test_listed_ukds_pack_and_pass(
+    tmp_path, rocm_kpack_dir, hip_compiler, hip_path, device_lib_path, comgr_lib
+):
     src = hip_source(tmp_path / "src")
     out, expect = derive_and_pack(
-        src, tmp_path, rocm_kpack_dir, hipcc, comgr_lib, ukds=_LISTED
+        src,
+        tmp_path,
+        rocm_kpack_dir,
+        hip_compiler,
+        comgr_lib,
+        ukds=_LISTED,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
     )
     entries = json.loads(expect.read_text())
     assert sorted((e["kdp"], e["name"]) for e in entries) == sorted(
@@ -181,14 +235,18 @@ def _generic_source(dst):
 
 
 @pytest.fixture(scope="module")
-def generic_probe(tmp_path_factory, rocm_kpack_dir, hipcc, comgr_lib):
+def generic_probe(
+    tmp_path_factory, rocm_kpack_dir, hip_compiler, hip_path, device_lib_path, comgr_lib
+):
     work = tmp_path_factory.mktemp("generic_probe")
     return derive_and_pack(
         _generic_source(work / "src"),
         work,
         rocm_kpack_dir,
-        hipcc,
+        hip_compiler,
         comgr_lib,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
         arch=_MEMBER,
     )
 

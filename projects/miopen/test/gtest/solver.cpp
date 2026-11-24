@@ -231,7 +231,7 @@ protected:
 
 TEST_P(CPU_SolverTest_NONE, TestSolver) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_SolverTest_NONE,
                          ::testing::ValuesIn(GetCases()),
                          [](auto const&) { return "SearchesDoneTest"; });

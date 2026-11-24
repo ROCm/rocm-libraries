@@ -70,6 +70,15 @@ ScorePickForTest(const std::string& solver_name,
                  const std::vector<std::string>& cand_descs,
                  const std::vector<std::vector<double>>& cand_args);
 
+// Test hook: the ranking (descriptors and scores) PickConfig would use for `solver_name`'s bucket
+// `bucket_key` (arch|direction|dtype) and the feature prefix `prob_feature_prefix`, through the
+// per-process memo (`cached`) or computed directly. Empty when the solver or the bucket is unknown.
+MIOPEN_INTERNALS_EXPORT RankedConfigs
+RankBucketForTest(const std::string& solver_name,
+                  const std::string& bucket_key,
+                  const std::vector<double>& prob_feature_prefix,
+                  bool cached);
+
 // Bucket key "<gfx_id>|<direction code>|<dtype>" that PickConfig looks up in a solver's
 // buckets. `device_name` is the name Handle::GetDeviceName() returns; it is normalized
 // (NormalizeArchName in lgbm_common.hpp), so "gfx1250-strict" gives the "gfx1250|..." key.

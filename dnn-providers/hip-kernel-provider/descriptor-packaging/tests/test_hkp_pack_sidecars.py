@@ -1,6 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """Tests that the packer resolves and carries the model file a trained UHD names."""
+
 from __future__ import annotations
 
 import copy
@@ -165,7 +166,9 @@ class TestResolution:
             flat,
             root,
             "gfx942",
-            hipcc=None,
+            hip_compiler=None,
+            hip_path=None,
+            device_lib_path=None,
             inter_arch_dir=inter_dir,
             log=lambda *_: None,
         )
@@ -376,7 +379,9 @@ class TestIntermediateStaging:
             flat,
             root,
             "gfx942",
-            hipcc=None,
+            hip_compiler=None,
+            hip_path=None,
+            device_lib_path=None,
             inter_arch_dir=inter_dir,
             log=lambda *_: None,
         )
@@ -402,7 +407,9 @@ class TestIntermediateStaging:
             flat,
             root,
             "gfx942",
-            hipcc=None,
+            hip_compiler=None,
+            hip_path=None,
+            device_lib_path=None,
             inter_arch_dir=inter_dir,
             log=lambda *_: None,
         )

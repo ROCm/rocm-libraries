@@ -281,10 +281,10 @@ std::vector<miopenActivationMode_t> ActivationConfigs(miopenBatchNormMode_t mode
 }
 
 // Activation subsets for the tiered instantiations. The full list stays in
-// ActivationConfigs() (used by the Full instantiations).
+// ActivationConfigs() (used by the Comprehensive instantiations).
 std::vector<miopenActivationMode_t> ActivationConfigsSmoke(miopenBatchNormMode_t /*mode*/)
 {
-    // Quick/Smoke runs a single activation; PASTHRU is the only mode supported
+    // Quick runs a single activation; PASTHRU is the only mode supported
     // by both the spatial and per-activation kernels.
     return {miopenActivationPASTHRU};
 }
@@ -361,11 +361,11 @@ TEST_P(GPU_bn_fwd_infer_per_act_BFP16, PortTest)
     Verify();
 };
 
-// Tiered instantiation: Smoke (pre-commit) and Standard (per-CI) run small
-// representative subsets; Full (comprehensive/nightly) runs the complete
+// Tiered instantiation: Quick (pre-commit) and Standard (per-PR) run small
+// representative subsets; Comprehensive (nightly) runs the complete
 // activation x shape x layout cross product so no coverage is lost.
 #define BN_FWD_INFER_TIERS(SUITE, T, MODE)                                                         \
-    INSTANTIATE_TEST_SUITE_P(Smoke,                                                                \
+    INSTANTIATE_TEST_SUITE_P(Quick,                                                                \
                              SUITE,                                                                \
                              testing::Combine(testing::ValuesIn(ActivationConfigsSmoke(MODE)),     \
                                               testing::ValuesIn(BNInferTestConfigsSmoke<T>(MODE)), \
@@ -379,7 +379,7 @@ TEST_P(GPU_bn_fwd_infer_per_act_BFP16, PortTest)
                          testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),                 \
         TestNameGenerator());                                                                      \
     INSTANTIATE_TEST_SUITE_P(                                                                      \
-        Full,                                                                                      \
+        Comprehensive,                                                                             \
         SUITE,                                                                                     \
         testing::Combine(testing::ValuesIn(ActivationConfigs(MODE)),                               \
                          testing::ValuesIn(BNInferTestConfigsFull<T>(MODE)),                       \

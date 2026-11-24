@@ -35,6 +35,7 @@ from ..Common import roundUp, log2, ceilDivide
 from ..Common.DataType import DataType
 from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxLraFreeShift, mxSegmentSplit
 from ..SolutionStructs.segment_interleave import wave_tile_span
+from ..Common.LdsReadPlan import local_read_input_per_thread
 from dataclasses import dataclass
 
 
@@ -848,7 +849,8 @@ class LraTileAssignmentMFMA(LraTileAssignment):
             noUnrollOffset = False
 
         lrvw             = kernel["LocalReadVectorWidthMXS"] if ("MXS" in tc) else kernel[f"LocalReadVectorWidth{tc}"]
-        inputPerThread   = lrvw if not writer.states.inTailLoop else kernel["MIInputPerThread%s"%tc]
+        inputPerThread   = local_read_input_per_thread(
+            lrvw, kernel["MIInputPerThread%s"%tc], writer.states.inTailLoop)
         # workaround for gfx950 + fp4
         # use MIInputPerThread if lrvw < MIInputPerThread
         if isgfx950 and tP["bpeDS"] == 0.5 and lrvw < kernel["MIInputPerThread%s"%tc]:
@@ -925,11 +927,11 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                 strideK = 16
             else:
                 strideK = (mt + LdsPad) * 16
-        elif kernel["UseF32XEmulation"] and not (kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16):
-            if umlds:
-                strideK = 4
-            else:
-                strideK = (mt + LdsPad) * 4
+        elif kernel["UseF32XEmulation"]:
+            inputPerThread = local_read_input_per_thread(
+                lrvw, kernel["MIInputPerThread%s"%tc], writer.states.inTailLoop,
+                True, kernel["MatrixInstM"], kernel["MatrixInstK"])
+            strideK = inputPerThread if umlds else (mt + LdsPad) * inputPerThread
         # sparse
         if writer.states.asmCaps["HasSWMMAC"] and writer.states.asmCaps["HasSWMMAC_gfx1250"]:
             if (kernel["ProblemType"]["Sparse"] == 1 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 2 and tP["isA"]) or tP["isM"]:

@@ -40,4 +40,4 @@ TEST_P(GPU_GroupNorm_FP32, GroupNormTestFw)
     Verify();
 };
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GroupNorm_FP32, testing::ValuesIn(GroupNormTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_GroupNorm_FP32, testing::ValuesIn(GroupNormTestConfigs()));
