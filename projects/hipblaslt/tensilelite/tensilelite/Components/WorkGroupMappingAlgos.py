@@ -33,7 +33,8 @@ from rocisa.instruction import SAbsI32, SAddCU32, SAddI32, SAddU32, SAndB32, SBa
     SMaxU32, SMinU32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SSExtI16toI32, SSleep, SStoreB32, SSubU32, SXorB32, \
     SWaitCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, VMovB64, VMulF32, VMulF64, \
     VReadfirstlaneB32, VReadlaneB32, VWritelaneB32, VCvtBF16toFP32, VCvtU32toF32, VCvtU32toF64, VRcpIFlagF32, \
-    VRcpF64, VCvtF32toU32, VCvtF64toU32, VMulU32U24, VMulLOU32, VSubU32, VCmpXGeU32, VCmpXGtU32, VCmpXEqU32
+    VRcpF64, VCvtF32toU32, VCvtF64toU32, VMulU32U24, VMulLOU32, VSubU32, VCmpXGeU32, VCmpXGtU32, VCmpXEqU32, \
+    SMulHIU32, VRcpF32, VCvtI32toF32, VCvtF32toI32, VAdd3U32
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
     vectorStaticMultiply, BranchIfNotZero, scalarUInt24DivideAndRemainder, \
     vectorUInt32CeilDivideAndRemainder
@@ -315,12 +316,189 @@ def decodeWGM(kernel, dst, sgprWGM):
         module.add(SSExtI16toI32(dst=sgpr(dst), src=sgpr(dst), comment="Restore WGM"))
     return module
 
+################################################################################
+# gfx115X DefaultWGM with magic-number divides (wgmRemapMagic).
+#
+# For a divisor 1 <= d <= 2^16 let fl = floor(log2 d), T = 31 + fl and
+# m in [2^T/d, 2^T/d + 4]. Then floor(n*m / 2^T) == n // d for every n < 2^24
+# (the dividend bound DefaultWGM's fp64 divides already need): with n = q*d + r,
+# n*m/2^T = q + (r + n*e/2^T)/d where 0 <= e = m*d - 2^T <= 4d < 8*2^fl, so
+# n*e/2^T < 2^24*8*2^fl/2^(31+fl) < 1 and r + n*e/2^T < d. m <= 2^31 + 4. Evaluated as
+#   d >= 2: s_mul_hi_u32(n, m) >> (fl - 1)
+#   d >= 1: s_mul_hi_u32(n << 8, m) >> (fl + 7)
+# Tests/unit/test_wgm_remap_magic.py checks both exhaustively.
+################################################################################
+
+# Persistent SGPRs holding the per-launch state, written once before the tile loop.
+WGM_MAGIC_SGPRS = ("WGMMagicW", "WGMMagicMW", "WGMMagicMR", "WGMMagicFullRows", "WGMMagicPack")
+
+def wgmRemapMagic(kernel):
+    """gfx115X (ISA 11.5.x) uses the magic remap; other targets keep the fp64 divides.
+
+    SpaceFillingCurveWalk and the cluster remap replace DefaultWGM and keep their own path.
+    """
+    if "ISA" not in kernel or tuple(kernel["ISA"][:2]) != (11, 5):
+        return False
+    return not clusterEnabled(kernel["ClusterDim"]) and not len(kernel["SpaceFillingAlgo"])
+
+def wgmRemapMagicPersistent(kernel):
+    return wgmRemapMagic(kernel) and isPersistent(kernel)
+
+def wgmMagicNumber(writer, dstM, dstFl, srcD):
+    """dstM = m(d) in [2^T/d, 2^T/d + 4], dstFl = floor(log2 d), for 1 <= d <= 2^16.
+
+    For any r = v_rcp_f32(d) within 2^-20 of 1/d, m0 = trunc(2^T * r) is within 2^12 of 2^T/d.
+    The residual 2^T - m0*d is exact in int32 (|.| < 2^29), and residual * r is
+    within 2^-7 of 2^T/d - m0, so
+    m = m0 + trunc(residual * r) + 2 lands in [2^T/d, 2^T/d + 4].
+    """
+    module = Module("wgmMagicNumber")
+    tmpVgpr = writer.vgprPool.checkOut(3, "wgmMagicNumber")
+    vM, vR, vT = tmpVgpr, tmpVgpr + 1, tmpVgpr + 2
+    with writer.allocTmpSgpr(2, tag="wgmMagicScale") as scale:
+        sScale, sLow = scale.idx, scale.idx + 1
+        module.add(SFlbitI32B32(dst=sgpr(dstFl), src=sgpr(srcD), comment="clz(d)"))
+        module.add(SSubU32(dst=sgpr(dstFl), src0=31, src1=sgpr(dstFl), comment="fl = floor(log2(d))"))
+        module.add(SLShiftLeftB32(dst=sgpr(sScale), shiftHex=23, src=sgpr(dstFl)))
+        module.add(SAddU32(dst=sgpr(sScale), src0=sgpr(sScale), src1=hex((127 + 31) << 23), comment="2^T as fp32, T = 31+fl"))
+        module.add(SCmpEQU32(src0=sgpr(dstFl), src1=0))
+        module.add(SCSelectB32(dst=sgpr(sLow), src0=hex(0x80000000), src1=0, comment="2^T mod 2^32"))
+        module.add(VCvtU32toF32(dst=vgpr(vT), src=sgpr(srcD)))
+        module.add(VRcpF32(dst=vgpr(vR), src=vgpr(vT), comment="r ~ 1/d"))
+        module.add(VMulF32(dst=vgpr(vM), src0=sgpr(sScale), src1=vgpr(vR)))
+        module.add(VCvtF32toU32(dst=vgpr(vM), src=vgpr(vM), comment="m0 ~ 2^T/d"))
+        module.add(VMulLOU32(dst=vgpr(vT), src0=vgpr(vM), src1=sgpr(srcD)))
+        module.add(VSubU32(dst=vgpr(vT), src0=sgpr(sLow), src1=vgpr(vT), comment="2^T - m0*d"))
+        module.add(VCvtI32toF32(dst=vgpr(vT), src=vgpr(vT)))
+        module.add(VMulF32(dst=vgpr(vT), src0=vgpr(vT), src1=vgpr(vR)))
+        module.add(VCvtF32toI32(dst=vgpr(vT), src=vgpr(vT), comment="~ 2^T/d - m0"))
+        module.add(VAdd3U32(dst=vgpr(vM), src0=vgpr(vM), src1=vgpr(vT), src2=2))
+        module.add(VReadfirstlaneB32(dst=sgpr(dstM), src=vgpr(vM), comment="m"))
+    writer.vgprPool.checkIn(tmpVgpr)
+    return module
+
+def WGMMagicSetup(writer, kernel, sgprWGM, sW, sMW, sFullRows, sPack, sMR, labelSkip=None):
+    """Per-launch state of the magic remap.
+
+    sW = signed WGM; for |WGM| > 1 also, with d = |WGM|, A = the banded grid dim and
+    h = A % d or d if that is 0 (height of the last band):
+      sMW = m(d), sFullRows = A - A % d, sPack = (fl(d)-1) | (fl(h)+7) << 5 | h << 10,
+      sMR = m(h). sMR None leaves m(h) and fl(h) to the remap (non-persistent).
+    s_lshr_b32 only reads shift[4:0], so sPack is the shift for d as is.
+    """
+    module = Module("WGMMagicSetup")
+    labelEnd = Label(writer.labels.getNameInc("WGMMagicSetupEnd"), "")
+    module.add(decodeWGM(kernel, sW, sgprWGM))
+    with writer.allocTmpSgpr(4, tag="WGMMagicSetup") as tmp:
+        sD, sA, sFl, sT = range(tmp.idx, tmp.idx + 4)
+        module.add(SAbsI32(dst=sgpr(sD), src=sgpr(sW), comment="d = |WGM|"))
+        module.add(SCmpLeU32(src0=sgpr(sD), src1=1, comment="|WGM| <= 1: no remap"))
+        module.add(SCBranchSCC1(labelName=(labelSkip or labelEnd).getLabelName()))
+        module.add(SCmpGtI32(src0=sgpr(sW), src1=0, comment="WGM > 0 bands along dim 1"))
+        module.add(SCSelectB32(dst=sgpr(sA), src0=sgpr("NumWorkGroups1"), src1=sgpr("NumWorkGroups0"), comment="A"))
+        module.add(wgmMagicNumber(writer, sMW, sFl, sD))
+        module.add(SSubU32(dst=sgpr(sPack), src0=sgpr(sFl), src1=1, comment="shift for d"))
+        module.add(SMulHIU32(dst=sgpr(sT), src0=sgpr(sA), src1=sgpr(sMW)))
+        module.add(SLShiftRightB32(dst=sgpr(sT), shiftHex=sgpr(sPack), src=sgpr(sT), comment="A / d"))
+        module.add(SMulI32(dst=sgpr(sFullRows), src0=sgpr(sT), src1=sgpr(sD), comment="rows in full bands"))
+        module.add(SSubU32(dst=sgpr(sT), src0=sgpr(sA), src1=sgpr(sFullRows), comment="A % d"))
+        module.add(SCmpEQU32(src0=sgpr(sT), src1=0))
+        module.add(SCSelectB32(dst=sgpr(sT), src0=sgpr(sD), src1=sgpr(sT), comment="h"))
+        if sMR is not None:
+            module.add(wgmMagicNumber(writer, sMR, sFl, sT))
+            module.add(SAddU32(dst=sgpr(sFl), src0=sgpr(sFl), src1=7, comment="shift for h, dividend << 8"))
+            module.add(SLShiftLeftB32(dst=sgpr(sFl), shiftHex=5, src=sgpr(sFl)))
+            module.add(SOrB32(dst=sgpr(sPack), src0=sgpr(sPack), src1=sgpr(sFl)))
+        module.add(SLShiftLeftB32(dst=sgpr(sT), shiftHex=10, src=sgpr(sT)))
+        module.add(SOrB32(dst=sgpr(sPack), src0=sgpr(sPack), src1=sgpr(sT), comment="pack"))
+    module.add(labelEnd)
+    return module
+
+def WGMMagicPersistentSetup(writer, kernel):
+    """Hoisted WGMMagicSetup for persistent kernels, run once before the tile loop."""
+    if not wgmRemapMagicPersistent(kernel):
+        return Module("WGMMagicSetup off")
+    sW, sMW, sMR, sFullRows, sPack = WGM_MAGIC_SGPRS
+    return WGMMagicSetup(writer, kernel, "WGM", sW, sMW, sFullRows, sPack, sMR)
+
+def _wgmMagicBand(writer, module, sW, sMW, sFullRows, sPack, sMR, first, second, nFirst, positive, labelEnd):
+    """One sign of DefaultWGM with magic divides; SALU only unless sMR is None."""
+    # sBW holds blockId * WGM, which is -blockId*d for WGM < 0.
+    addBW = SAddU32 if positive else SSubU32
+    subBW = SSubU32 if positive else SAddU32
+    labelLast = Label(writer.labels.getNameInc("WGMMagicLastBand"), "")
+    with writer.allocTmpSgpr(4, tag="WGMMagicRemap") as tmp:
+        sBW, sSer, sT, sX = range(tmp.idx, tmp.idx + 4)
+        module.add(SMulHIU32(dst=sgpr(sBW), src0=sgpr(second), src1=sgpr(sMW)))
+        module.add(SLShiftRightB32(dst=sgpr(sBW), shiftHex=sgpr(sPack), src=sgpr(sBW), comment="blockId = %s / d" % second))
+        module.add(SMulI32(dst=sgpr(sBW), src0=sgpr(sBW), src1=sgpr(sW), comment="blockId * WGM"))
+        module.add(subBW(dst=sgpr(sSer), src0=sgpr(second), src1=sgpr(sBW), comment="%s %% d" % second))
+        module.add(SMulI32(dst=sgpr(sSer), src0=sgpr(sSer), src1=sgpr(nFirst)))
+        module.add(SAddU32(dst=sgpr(sSer), src0=sgpr(sSer), src1=sgpr(first), comment="wgSerial"))
+        module.add(SCmpGeU32(src0=sgpr(second), src1=sgpr(sFullRows), comment="last band?"))
+        module.add(SCBranchSCC1(labelName=labelLast.getLabelName()))
+        module.add(SMulHIU32(dst=sgpr(first), src0=sgpr(sSer), src1=sgpr(sMW)))
+        module.add(SLShiftRightB32(dst=sgpr(first), shiftHex=sgpr(sPack), src=sgpr(first), comment="wgSerial / d"))
+        module.add(SMulI32(dst=sgpr(sT), src0=sgpr(first), src1=sgpr(sW)))
+        module.add(subBW(dst=sgpr(second), src0=sgpr(sSer), src1=sgpr(sT), comment="wgSerial % d"))
+        module.add(addBW(dst=sgpr(second), src0=sgpr(second), src1=sgpr(sBW), comment="+ blockId * d"))
+        module.add(SBranch(labelName=labelEnd.getLabelName()))
+        module.add(labelLast)
+        module.add(SLShiftRightB32(dst=sgpr(sX), shiftHex=10, src=sgpr(sPack), comment="h"))
+        if sMR is None:
+            with writer.allocTmpSgpr(2, tag="WGMMagicLast") as tmpLast:
+                sM, sS = tmpLast.idx, tmpLast.idx + 1
+                module.add(wgmMagicNumber(writer, sM, sS, sX))
+                module.add(SAddU32(dst=sgpr(sS), src0=sgpr(sS), src1=7, comment="shift for h, dividend << 8"))
+                module.add(SLShiftLeftB32(dst=sgpr(sT), shiftHex=8, src=sgpr(sSer)))
+                module.add(SMulHIU32(dst=sgpr(sT), src0=sgpr(sT), src1=sgpr(sM)))
+                module.add(SLShiftRightB32(dst=sgpr(first), shiftHex=sgpr(sS), src=sgpr(sT), comment="wgSerial / h"))
+        else:
+            module.add(SLShiftLeftB32(dst=sgpr(sT), shiftHex=8, src=sgpr(sSer)))
+            module.add(SMulHIU32(dst=sgpr(sT), src0=sgpr(sT), src1=sgpr(sMR)))
+            module.add(SLShiftRightB32(dst=sgpr(first), shiftHex=5, src=sgpr(sPack), comment="shift for h in [4:0]"))
+            module.add(SLShiftRightB32(dst=sgpr(first), shiftHex=sgpr(first), src=sgpr(sT), comment="wgSerial / h"))
+        module.add(SMulI32(dst=sgpr(sT), src0=sgpr(first), src1=sgpr(sX)))
+        module.add(SSubU32(dst=sgpr(second), src0=sgpr(sSer), src1=sgpr(sT), comment="wgSerial % h"))
+        module.add(addBW(dst=sgpr(second), src0=sgpr(second), src1=sgpr(sBW), comment="+ blockId * d"))
+
+def _defaultWGMMagic(writer, kernel, sgprWGM, wg0, wg1):
+    module = Module("graWGMCalcMagic")
+    module.addComment0("WGM Calculation (magic divides)")
+    labelEnd = Label(writer.labels.getNameInc("WGMMagicEnd"), "")
+    labelPos = Label(writer.labels.getNameInc("WGMMagicPositive"), "")
+
+    def bands(sW, sMW, sFullRows, sPack, sMR):
+        module.add(SCmpGtI32(src0=sgpr(sW), src1=1, comment="WGM > 1 ?"))
+        module.add(SCBranchSCC1(labelName=labelPos.getLabelName()))
+        if sMR is not None:
+            # Non-persistent setup has already skipped |WGM| <= 1.
+            module.add(SCmpGeI32(src0=sgpr(sW), src1=-1, comment="|WGM| <= 1 ?"))
+            module.add(SCBranchSCC1(labelName=labelEnd.getLabelName()))
+        _wgmMagicBand(writer, module, sW, sMW, sFullRows, sPack, sMR, wg1, wg0, "NumWorkGroups1", False, labelEnd)
+        module.add(SBranch(labelName=labelEnd.getLabelName()))
+        module.add(labelPos)
+        _wgmMagicBand(writer, module, sW, sMW, sFullRows, sPack, sMR, wg0, wg1, "NumWorkGroups0", True, labelEnd)
+
+    if isPersistent(kernel):
+        sW, sMW, sMR, sFullRows, sPack = WGM_MAGIC_SGPRS
+        bands(sW, sMW, sFullRows, sPack, sMR)
+    else:
+        with writer.allocTmpSgpr(4, tag="WGMMagicState") as st:
+            sW, sMW, sFullRows, sPack = range(st.idx, st.idx + 4)
+            module.add(WGMMagicSetup(writer, kernel, sgprWGM, sW, sMW, sFullRows, sPack, None, labelSkip=labelEnd))
+            bands(sW, sMW, sFullRows, sPack, None)
+    module.add(labelEnd)
+    return module
+
 def DefaultWGM(writer, kernel, sgprWGM, wg0="WorkGroup0", wg1="WorkGroup1"):
     """Remap the tile coordinates in wg0/wg1 in place.
 
     ReuseAcrossPersistent passes scratch registers to learn which M-tile a tile
     it has not claimed yet will read; everyone else remaps WorkGroup0/1.
     """
+    if wgmRemapMagic(kernel):
+        return _defaultWGMMagic(writer, kernel, sgprWGM, wg0, wg1)
     module = Module("graWGMCalc")
     module.addComment0("WGM Calculation")
 
