@@ -19,11 +19,38 @@
 // THE SOFTWARE.
 
 #include "tree_node_bluestein.h"
-#include "../../shared/arithmetic.h"
+#include "data_set.h"
 #include "function_pool.h"
 #include "kernel_launch.h"
 #include "node_factory.h"
-#include <numeric>
+
+namespace
+{
+    data_set_t bluestein_1d_layout(
+        size_t length, size_t batch, size_t distance, rocfft_precision precision, size_t offset = 0)
+    {
+        return data_set_t::full_range({length}, {1}, batch, distance)
+            .with_element_type(rocfft_array_type_unset, precision, {offset, 0});
+    }
+
+    std::vector<size_t> packed_bluestein_strides(const data_set_t& layout, size_t padded_length)
+    {
+        std::vector<size_t> strides(layout.get_full_rank());
+        strides[0] = 1;
+        strides[1] = padded_length;
+        for(size_t axis = 2; axis < strides.size(); ++axis)
+            strides[axis] = strides[axis - 1] * layout.axis_span(axis - 1);
+        return strides;
+    }
+
+    void set_stage_strides(TreeNode&               stage,
+                           std::span<const size_t> input,
+                           std::span<const size_t> output)
+    {
+        stage.set_strides(io_data_label::INPUT, input);
+        stage.set_strides(io_data_label::OUTPUT, output);
+    }
+}
 
 size_t BluesteinNode::FindBlue(const function_pool& pool,
                                size_t               len,
@@ -68,16 +95,17 @@ void BluesteinNode::ConstructBlueParams()
 {
     // single kernel sticks to a pow2 padded length.  the kernel does many other
     // things besides FFTs, so keep radices simple to reduce VGPR usage.
-    const bool   useSingleKernel = BluesteinSingleNode::SizeFits(pool, length[0], precision);
-    const size_t paddedLength    = FindBlue(pool, length[0], precision, useSingleKernel);
+    const auto   precision       = get_precision();
+    const auto   length          = input_length(0);
+    const bool   useSingleKernel = BluesteinSingleNode::SizeFits(pool, length, precision);
+    const size_t paddedLength    = FindBlue(pool, length, precision, useSingleKernel);
 
     BluesteinType type = BluesteinType::BT_SINGLE_KERNEL;
     if(!useSingleKernel)
     {
-        NodeMetaData bluePlanData(this);
-        bluePlanData.length.push_back(paddedLength);
-        bluePlanData.direction = direction;
-        bluePlanData.batch     = batch;
+        const auto probe
+            = bluestein_1d_layout(paddedLength, batch_count(), paddedLength, precision);
+        NodeMetaData bluePlanData(probe, probe, this);
 
         auto scheme = NodeFactory::DecideNodeScheme(pool, bluePlanData, this);
 
@@ -92,7 +120,7 @@ void BluesteinNode::ConstructBlueParams()
             type = BluesteinType::BT_NONE;
     }
 
-    blue.emplace(length[0], paddedLength, type);
+    blue.emplace(length, paddedLength, type);
 }
 
 /*****************************************************
@@ -104,6 +132,13 @@ void BluesteinNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     // general transform lengths.
     ConstructBlueParams();
 
+    const auto n         = blue->get_transform_length();
+    const auto p         = blue->get_padded_length();
+    const auto precision = get_precision();
+    // Keep array types provisional until buffer assignment, without inheriting user offsets.
+    const auto input  = input_layout().with_element_type(rocfft_array_type_unset, precision);
+    const auto output = output_layout().with_element_type(rocfft_array_type_unset, precision);
+
     switch(GetBluesteinType())
     {
     case BT_SINGLE_KERNEL:
@@ -112,32 +147,20 @@ void BluesteinNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         // half of chirp buffer before we do the rest of the Bluestein
         // steps that kernel
 
-        auto chirpPlan       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_CHIRP, this);
-        chirpPlan->dimension = 1;
-        chirpPlan->length.push_back(length[0]);
-        chirpPlan->blue      = blue;
-        chirpPlan->direction = direction;
-        chirpPlan->batch     = 1;
-        chirpPlan->large1D   = 2 * length[0];
         // Keep the transform-length shape; the chirp kernel writes two padded spans.
-        chirpPlan->outputLength = chirpPlan->length;
+        const auto chirp   = bluestein_1d_layout(n, 1, p, precision);
+        auto chirpPlan     = NodeFactory::CreateNodeFromScheme(CS_KERNEL_CHIRP, this, chirp, chirp);
+        chirpPlan->blue    = blue;
+        chirpPlan->large1D = 2 * n;
 
-        NodeMetaData chirpFFTPlanData(this);
-        chirpFFTPlanData.dimension = 1;
-        chirpFFTPlanData.length.push_back(blue->get_padded_length());
-        chirpFFTPlanData.outputLength = chirpFFTPlanData.length;
-
-        chirpFFTPlanData.batch   = 1;
-        chirpFFTPlanData.iOffset = blue->get_padded_length();
-        chirpFFTPlanData.oOffset = blue->get_padded_length();
-        auto chirpFFTPlan        = NodeFactory::CreateExplicitNode(chirpFFTPlanData, this);
+        const auto   chirpFFT = bluestein_1d_layout(p, 1, p, precision, p);
+        NodeMetaData chirpFFTPlanData(chirpFFT, chirpFFT, this);
+        auto         chirpFFTPlan = NodeFactory::CreateExplicitNode(chirpFFTPlanData, this);
         chirpFFTPlan->RecursiveBuildTree();
 
-        auto singlePlan       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_BLUESTEIN_SINGLE, this);
-        singlePlan->dimension = 1;
-        singlePlan->length    = length;
-        singlePlan->blue      = blue;
-        singlePlan->outputLength = singlePlan->length;
+        auto singlePlan
+            = NodeFactory::CreateNodeFromScheme(CS_KERNEL_BLUESTEIN_SINGLE, this, input, output);
+        singlePlan->blue = blue;
 
         childNodes.emplace_back(std::move(chirpPlan));
         childNodes.emplace_back(std::move(chirpFFTPlan));
@@ -148,15 +171,10 @@ void BluesteinNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     case BT_MULTI_KERNEL_FUSED:
     {
         // first node: fused chirp + padding + forward fft
-        NodeMetaData fftFwdChirpPadPlanData(this);
-        fftFwdChirpPadPlanData.dimension = 1;
-        fftFwdChirpPadPlanData.length.push_back(blue->get_padded_length());
-        fftFwdChirpPadPlanData.outputLength = fftFwdChirpPadPlanData.length;
-
-        fftFwdChirpPadPlanData.batch = 1;
-        auto fftFwdChirpPadPlan = NodeFactory::CreateExplicitNode(fftFwdChirpPadPlanData, this);
-        fftFwdChirpPadPlan->direction = direction;
-        fftFwdChirpPadPlan->blue      = blue;
+        const auto   chirp = bluestein_1d_layout(p, 1, n, precision);
+        NodeMetaData fftFwdChirpPadPlanData(chirp, chirp, this);
+        auto fftFwdChirpPadPlan  = NodeFactory::CreateExplicitNode(fftFwdChirpPadPlanData, this);
+        fftFwdChirpPadPlan->blue = blue;
         fftFwdChirpPadPlan->blue->set_fuse_type(BluesteinFuseType::BFT_FWD_CHIRP);
         fftFwdChirpPadPlan->comments.push_back("Fused chirp + padding w/ fwd FFT");
         fftFwdChirpPadPlan->RecursiveBuildTree();
@@ -164,18 +182,12 @@ void BluesteinNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
             child->comments.push_back("Stockham kernel fused with Bluestein ops");
 
         // second node: fused chirp / input Hadamard product + padding + forward fft
-        NodeMetaData fftFwdChirpMulPadPlanData(this);
-        fftFwdChirpMulPadPlanData.dimension = 1;
-        fftFwdChirpMulPadPlanData.length.push_back(blue->get_padded_length());
-        for(size_t index = 1; index < length.size(); index++)
-        {
-            fftFwdChirpMulPadPlanData.length.push_back(length[index]);
-        }
-        fftFwdChirpMulPadPlanData.outputLength = fftFwdChirpMulPadPlanData.length;
-        auto fftFwdChirpMulPadPlan
+        const auto   paddedInput  = input.with_axis_span(0, p);
+        const auto   paddedOutput = output.with_axis_span(0, p);
+        NodeMetaData fftFwdChirpMulPadPlanData(paddedInput, paddedOutput, this);
+        auto         fftFwdChirpMulPadPlan
             = NodeFactory::CreateExplicitNode(fftFwdChirpMulPadPlanData, this);
-        fftFwdChirpMulPadPlan->direction = direction;
-        fftFwdChirpMulPadPlan->blue      = blue;
+        fftFwdChirpMulPadPlan->blue = blue;
         fftFwdChirpMulPadPlan->blue->set_fuse_type(BluesteinFuseType::BFT_FWD_CHIRP_MUL);
         fftFwdChirpMulPadPlan->comments.push_back(
             "Fused chirp/input Hadamard prod + padding w/ fwd FFT");
@@ -184,16 +196,9 @@ void BluesteinNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
             child->comments.push_back("Stockham kernel fused with Bluestein ops");
 
         // third node: fused convolution Hadamard product + inverse fft + chirp Hadamard product
-        NodeMetaData fftInvMulChirpMulPlanData(this);
-        fftInvMulChirpMulPlanData.dimension = 1;
-        fftInvMulChirpMulPlanData.direction = -direction;
-        fftInvMulChirpMulPlanData.length.push_back(blue->get_padded_length());
-        for(size_t index = 1; index < length.size(); index++)
-        {
-            fftInvMulChirpMulPlanData.length.push_back(length[index]);
-        }
         // Keep the padded FFT shape; the final fused kernel stores only the transform length.
-        fftInvMulChirpMulPlanData.outputLength = fftInvMulChirpMulPlanData.length;
+        NodeMetaData fftInvMulChirpMulPlanData(paddedInput, paddedOutput, this);
+        fftInvMulChirpMulPlanData.direction = -direction;
         auto fftInvMulChirpMulPlan
             = NodeFactory::CreateExplicitNode(fftInvMulChirpMulPlanData, this);
         fftInvMulChirpMulPlan->blue = blue;
@@ -211,33 +216,30 @@ void BluesteinNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     }
     case BT_MULTI_KERNEL:
     {
-        auto chirpPlan       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_CHIRP, this);
-        chirpPlan->dimension = 1;
-        chirpPlan->length.push_back(length[0]);
-        chirpPlan->blue      = blue;
-        chirpPlan->direction = direction;
-        chirpPlan->batch     = 1;
-        chirpPlan->large1D   = 2 * length[0];
-        // As in the single-kernel path, the padded chirp storage is not the node shape.
-        chirpPlan->outputLength = chirpPlan->length;
+        // The chirp kernel writes padded storage but has an unpadded logical span.
+        const auto chirp   = bluestein_1d_layout(n, 1, p, precision);
+        auto chirpPlan     = NodeFactory::CreateNodeFromScheme(CS_KERNEL_CHIRP, this, chirp, chirp);
+        chirpPlan->blue    = blue;
+        chirpPlan->large1D = 2 * n;
 
-        auto padmulPlan       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_PAD_MUL, this);
-        padmulPlan->dimension = 1;
-        padmulPlan->length    = length;
-        padmulPlan->blue      = blue;
-        // Keep the unpadded shape even though PadMul writes padded output.
-        padmulPlan->outputLength = padmulPlan->length;
+        auto       convolution    = input.with_axis_span(0, p);
+        const auto packed_strides = packed_bluestein_strides(convolution, p);
+        convolution.set_strides_and_distances(packed_strides);
 
-        NodeMetaData ffticPlanData(this);
-        ffticPlanData.dimension = 1;
-        ffticPlanData.length.push_back(blue->get_padded_length());
-        ffticPlanData.outputLength = ffticPlanData.length;
+        // PadMul writes padded output but keeps an unpadded shape for its kernel ABI.
+        auto padmulOutput = output;
+        padmulOutput.set_strides_and_distances(packed_strides);
+        auto padmulPlan
+            = NodeFactory::CreateNodeFromScheme(CS_KERNEL_PAD_MUL, this, input, padmulOutput);
+        padmulPlan->blue = blue;
 
-        ffticPlanData.batch *= product(length.begin() + 1, length.end());
-        ffticPlanData.batch++;
-        ffticPlanData.iOffset = blue->get_padded_length();
-        ffticPlanData.oOffset = blue->get_padded_length();
-        auto ffticPlan        = NodeFactory::CreateExplicitNode(ffticPlanData, this);
+        // Fold all the batch axes, then add the FFT of the chirp itself.
+        size_t convolution_batch = 1;
+        for(size_t axis = 1; axis < convolution.get_full_rank(); ++axis)
+            convolution_batch *= convolution.axis_span(axis);
+        const auto   fftic = bluestein_1d_layout(p, 1 + convolution_batch, p, precision, p);
+        NodeMetaData ffticPlanData(fftic, fftic, this);
+        auto         ffticPlan = NodeFactory::CreateExplicitNode(ffticPlanData, this);
         // FFT nodes must be in-place - were FFTing the second half
         // of chirp as well as the padded user data (via iOffset,
         // oOffset), so if the result goes to a different temp buffer
@@ -245,37 +247,23 @@ void BluesteinNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         ffticPlan->allowOutofplace = false;
         ffticPlan->RecursiveBuildTree();
 
-        auto fftmulPlan       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_FFT_MUL, this);
-        fftmulPlan->dimension = 1;
-        fftmulPlan->length.push_back(blue->get_padded_length());
-        for(size_t index = 1; index < length.size(); index++)
-        {
-            fftmulPlan->length.push_back(length[index]);
-        }
-        fftmulPlan->blue         = blue;
-        fftmulPlan->outputLength = fftmulPlan->length;
+        auto fftmulPlan
+            = NodeFactory::CreateNodeFromScheme(CS_KERNEL_FFT_MUL, this, convolution, convolution);
+        fftmulPlan->blue = blue;
 
-        NodeMetaData fftrPlanData(this);
-        fftrPlanData.dimension = 1;
-        fftrPlanData.length.push_back(blue->get_padded_length());
-        for(size_t index = 1; index < length.size(); index++)
-        {
-            fftrPlanData.length.push_back(length[index]);
-        }
-        fftrPlanData.outputLength = fftrPlanData.length;
-
+        const auto fftr
+            = convolution.with_element_type(rocfft_array_type_unset, precision, {2 * p, 0});
+        NodeMetaData fftrPlanData(fftr, fftr, this);
         fftrPlanData.direction    = -direction;
-        fftrPlanData.iOffset      = 2 * blue->get_padded_length();
-        fftrPlanData.oOffset      = 2 * blue->get_padded_length();
         auto fftrPlan             = NodeFactory::CreateExplicitNode(fftrPlanData, this);
         fftrPlan->allowOutofplace = false;
         fftrPlan->RecursiveBuildTree();
 
-        auto resmulPlan          = NodeFactory::CreateNodeFromScheme(CS_KERNEL_RES_MUL, this);
-        resmulPlan->dimension    = 1;
-        resmulPlan->length       = length;
-        resmulPlan->blue         = blue;
-        resmulPlan->outputLength = resmulPlan->length;
+        auto resmulInput = input;
+        resmulInput.set_strides_and_distances(packed_strides);
+        auto resmulPlan
+            = NodeFactory::CreateNodeFromScheme(CS_KERNEL_RES_MUL, this, resmulInput, output);
+        resmulPlan->blue = blue;
 
         childNodes.emplace_back(std::move(chirpPlan));
         childNodes.emplace_back(std::move(padmulPlan));
@@ -293,6 +281,7 @@ void BluesteinNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 
 void BluesteinNode::AssignParams_internal()
 {
+    const auto p = blue->get_padded_length();
     switch(GetBluesteinType())
     {
     case BT_SINGLE_KERNEL:
@@ -301,21 +290,14 @@ void BluesteinNode::AssignParams_internal()
         auto& chirpFFTPlan = childNodes[1];
         auto& singlePlan   = childNodes[2];
 
-        chirpPlan->inStride.push_back(1);
-        chirpPlan->iDist = chirpPlan->blue->get_padded_length();
-        chirpPlan->outStride.push_back(1);
-        chirpPlan->oDist = chirpPlan->blue->get_padded_length();
-
-        chirpFFTPlan->inStride  = chirpPlan->outStride;
-        chirpFFTPlan->iDist     = chirpPlan->oDist;
-        chirpFFTPlan->outStride = chirpFFTPlan->inStride;
-        chirpFFTPlan->oDist     = chirpFFTPlan->iDist;
+        const std::array<size_t, 2> chirp_strides{1, p};
+        set_stage_strides(*chirpPlan, chirp_strides, chirp_strides);
+        set_stage_strides(*chirpFFTPlan, chirp_strides, chirp_strides);
         chirpFFTPlan->AssignParams();
 
-        singlePlan->inStride  = inStride;
-        singlePlan->iDist     = iDist;
-        singlePlan->outStride = outStride;
-        singlePlan->oDist     = oDist;
+        set_stage_strides(*singlePlan,
+                          input_layout().strides_and_distances(),
+                          output_layout().strides_and_distances());
         singlePlan->AssignParams();
 
         break;
@@ -326,22 +308,16 @@ void BluesteinNode::AssignParams_internal()
         auto& fftFwdChirpMulPadPlan = childNodes[1];
         auto& fftInvMulChirpMulPlan = childNodes[2];
 
-        fftFwdChirpPadPlan->inStride.push_back(1);
-        fftFwdChirpPadPlan->iDist = fftFwdChirpPadPlan->blue->get_transform_length();
-        fftFwdChirpPadPlan->outStride.push_back(1);
-        fftFwdChirpPadPlan->oDist = fftFwdChirpPadPlan->blue->get_transform_length();
+        const std::array<size_t, 2> chirp_strides{1, blue->get_transform_length()};
+        set_stage_strides(*fftFwdChirpPadPlan, chirp_strides, chirp_strides);
         fftFwdChirpPadPlan->AssignParams();
 
-        fftFwdChirpMulPadPlan->inStride  = inStride;
-        fftFwdChirpMulPadPlan->iDist     = iDist;
-        fftFwdChirpMulPadPlan->outStride = outStride;
-        fftFwdChirpMulPadPlan->oDist     = oDist;
+        const auto input_strides  = input_layout().strides_and_distances();
+        const auto output_strides = output_layout().strides_and_distances();
+        set_stage_strides(*fftFwdChirpMulPadPlan, input_strides, output_strides);
         fftFwdChirpMulPadPlan->AssignParams();
 
-        fftInvMulChirpMulPlan->inStride  = inStride;
-        fftInvMulChirpMulPlan->iDist     = iDist;
-        fftInvMulChirpMulPlan->outStride = outStride;
-        fftInvMulChirpMulPlan->oDist     = oDist;
+        set_stage_strides(*fftInvMulChirpMulPlan, input_strides, output_strides);
         fftInvMulChirpMulPlan->AssignParams();
 
         break;
@@ -355,45 +331,22 @@ void BluesteinNode::AssignParams_internal()
         auto& fftrPlan   = childNodes[4];
         auto& resmulPlan = childNodes[5];
 
-        chirpPlan->inStride.push_back(1);
-        chirpPlan->iDist = chirpPlan->blue->get_padded_length();
-        chirpPlan->outStride.push_back(1);
-        chirpPlan->oDist = chirpPlan->blue->get_padded_length();
+        const std::array<size_t, 2> chirp_strides{1, p};
+        set_stage_strides(*chirpPlan, chirp_strides, chirp_strides);
 
-        padmulPlan->inStride = inStride;
-        padmulPlan->iDist    = iDist;
+        const auto packed_strides = packed_bluestein_strides(input_layout(), p);
+        set_stage_strides(*padmulPlan, input_layout().strides_and_distances(), packed_strides);
 
-        padmulPlan->outStride.push_back(1);
-        padmulPlan->oDist = padmulPlan->blue->get_padded_length();
-        for(size_t index = 1; index < length.size(); index++)
-        {
-            padmulPlan->outStride.push_back(padmulPlan->oDist);
-            padmulPlan->oDist *= length[index];
-        }
-
-        ffticPlan->inStride  = chirpPlan->outStride;
-        ffticPlan->iDist     = chirpPlan->oDist;
-        ffticPlan->outStride = ffticPlan->inStride;
-        ffticPlan->oDist     = ffticPlan->iDist;
-
+        set_stage_strides(*ffticPlan, chirp_strides, chirp_strides);
         ffticPlan->AssignParams();
 
-        fftmulPlan->inStride  = padmulPlan->outStride;
-        fftmulPlan->iDist     = padmulPlan->oDist;
-        fftmulPlan->outStride = fftmulPlan->inStride;
-        fftmulPlan->oDist     = fftmulPlan->iDist;
-
-        fftrPlan->inStride  = fftmulPlan->outStride;
-        fftrPlan->iDist     = fftmulPlan->oDist;
-        fftrPlan->outStride = fftrPlan->inStride;
-        fftrPlan->oDist     = fftrPlan->iDist;
-
+        set_stage_strides(*fftmulPlan, packed_strides, packed_strides);
+        set_stage_strides(*fftrPlan, packed_strides, packed_strides);
         fftrPlan->AssignParams();
 
-        resmulPlan->inStride  = fftrPlan->outStride;
-        resmulPlan->iDist     = fftrPlan->oDist;
-        resmulPlan->outStride = outStride;
-        resmulPlan->oDist     = oDist;
+        set_stage_strides(*resmulPlan,
+                          fftrPlan->output_layout().strides_and_distances(),
+                          output_layout().strides_and_distances());
 
         break;
     }
@@ -402,8 +355,8 @@ void BluesteinNode::AssignParams_internal()
     }
 }
 
-BluesteinSingleNode::BluesteinSingleNode(TreeNode* p, ComputeScheme s)
-    : LeafNode(p, s)
+BluesteinSingleNode::BluesteinSingleNode(TreeNode* p, ComputeScheme s, NodeLayouts&& layouts)
+    : LeafNode(p, s, std::move(layouts))
 {
     need_twd_table = true;
 }
@@ -437,6 +390,6 @@ void BluesteinSingleNode::GetKernelFactors()
         kernelFactors = {8, 8, 8, 8};
     else
         kernelFactors
-            = pool.get_kernel(FMKey(blue->get_padded_length(), precision, CS_KERNEL_STOCKHAM))
+            = pool.get_kernel(FMKey(blue->get_padded_length(), get_precision(), CS_KERNEL_STOCKHAM))
                   .factors;
 }

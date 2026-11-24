@@ -31,8 +31,8 @@ class BluesteinNode : public InternalNode
     friend class NodeFactory;
 
 protected:
-    explicit BluesteinNode(TreeNode* p)
-        : InternalNode(p)
+    BluesteinNode(TreeNode* p, NodeLayouts&& layouts)
+        : InternalNode(p, std::move(layouts))
     {
         scheme = CS_BLUESTEIN;
     }
@@ -56,7 +56,7 @@ class BluesteinSingleNode : public LeafNode
     friend class NodeFactory;
 
 protected:
-    BluesteinSingleNode(TreeNode* p, ComputeScheme s);
+    BluesteinSingleNode(TreeNode* p, ComputeScheme s, NodeLayouts&& layouts);
 
     void   SetupGridParam_internal(GridParam& gp) override{};
     size_t GetTwiddleTableLength() override;
@@ -82,8 +82,8 @@ class BluesteinComponentNode : public LeafNode
     friend class NodeFactory;
 
 protected:
-    BluesteinComponentNode(TreeNode* p, ComputeScheme s)
-        : LeafNode(p, s)
+    BluesteinComponentNode(TreeNode* p, ComputeScheme s, NodeLayouts&& layouts)
+        : LeafNode(p, s, std::move(layouts))
     {
         // first PAD MUL: in=parent_in, out=bluestein, must be out-of-place
         // last  RES MUL: in=bluestein, out=parent_out, must be out-of-place
