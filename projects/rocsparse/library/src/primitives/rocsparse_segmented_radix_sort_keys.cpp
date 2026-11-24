@@ -52,8 +52,8 @@ rocsparse_status
                                                                    rocprim_keys,
                                                                    length,
                                                                    segments,
-                                                                   (I*)nullptr,
-                                                                   (I*)nullptr,
+                                                                   (const I*)nullptr,
+                                                                   (const I*)nullptr,
                                                                    startbit,
                                                                    endbit,
                                                                    handle->stream));
@@ -66,8 +66,8 @@ rocsparse_status rocsparse::primitives::segmented_radix_sort_keys(rocsparse_hand
                                                                   double_buffer<K>& keys,
                                                                   size_t            length,
                                                                   size_t            segments,
-                                                                  I*                begin_offsets,
-                                                                  I*                end_offsets,
+                                                                  const I*          begin_offsets,
+                                                                  const I*          end_offsets,
                                                                   uint32_t          startbit,
                                                                   uint32_t          endbit,
                                                                   size_t            buffer_size,
@@ -223,8 +223,8 @@ rocsparse_status rocsparse::primitives::sort_csr_column_indices(rocsparse_handle
         double_buffer<KTYPE>& keys,                                                 \
         size_t                length,                                               \
         size_t                segments,                                             \
-        ITYPE*                begin_offsets,                                        \
-        ITYPE*                end_offsets,                                          \
+        const ITYPE*          begin_offsets,                                        \
+        const ITYPE*          end_offsets,                                          \
         uint32_t              startbit,                                             \
         uint32_t              endbit,                                               \
         size_t                buffer_size,                                          \
@@ -234,7 +234,6 @@ INSTANTIATE(int32_t, int32_t);
 INSTANTIATE(int64_t, int64_t);
 INSTANTIATE(int32_t, int64_t);
 INSTANTIATE(int64_t, int32_t);
-INSTANTIATE(int64_t, const int32_t);
 #undef INSTANTIATE
 
 #define INSTANTIATE(ITYPE, JTYPE)                                                         \

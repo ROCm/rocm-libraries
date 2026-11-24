@@ -816,7 +816,7 @@ private:
                                            const std::vector<size_t>& antecedents);
 
 #ifdef ROCFFT_RCCL_ENABLE
-    // RCCL-based global transpose. Dispatches to ncclAllToAll for
+    // RCCL-based global transpose. Dispatches to ncclAlltoAll for
     // uniform NxN patterns and to grouped ncclSend/ncclRecv otherwise.
     std::vector<size_t> GlobalTransposeRCCL(const field_view_t&        input,
                                             const field_view_t&        output,

@@ -3254,31 +3254,37 @@ TEST_P(GPU_GRU_Base_FP32, TestFloat32) { Run(); }
 TEST_P(GPU_GRU_Base_FP16, TestFloat16) { Run(); }
 
 // Base tests
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Base_FP32, GetFullBaseTests(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_GRU_Base_FP32, GetSmokeTests(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Comprehensive, GPU_GRU_Base_FP32, GetFullBaseTests(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_GRU_Base_FP32, GetSmokeTests(), TestNameGenerator{});
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Base_FP16, GetFullBaseTests(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_GRU_Base_FP16, GetSmokeTests(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Comprehensive, GPU_GRU_Base_FP16, GetFullBaseTests(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_GRU_Base_FP16, GetSmokeTests(), TestNameGenerator{});
 
 // Dropout tests
 TEST_P(GPU_GRU_Dropout_FP32, TestFloat32) { Run(); }
 TEST_P(GPU_GRU_Dropout_FP16, TestFloat16) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Dropout_FP32, GetDropoutTests(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_GRU_Dropout_FP32, GetDropoutSmokeTests(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         GPU_GRU_Dropout_FP32,
+                         GetDropoutTests(),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_GRU_Dropout_FP32, GetDropoutSmokeTests(), TestNameGenerator{});
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GRU_Dropout_FP16, GetDropoutTests(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_GRU_Dropout_FP16, GetDropoutSmokeTests(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         GPU_GRU_Dropout_FP16,
+                         GetDropoutTests(),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_GRU_Dropout_FP16, GetDropoutSmokeTests(), TestNameGenerator{});
 
 // // Deepbench tests
 TEST_P(GPU_GRU_Deepbench_FP32, TestFloat32) { Run(); }
 TEST_P(GPU_GRU_Deepbench_FP16, TestFloat16) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_GRU_Deepbench_FP32,
                          ::testing::ValuesIn(GetDeepbenchTests()),
                          TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_GRU_Deepbench_FP16,
                          ::testing::ValuesIn(GetDeepbenchTests()),
                          TestNameGenerator{});
@@ -3287,11 +3293,11 @@ INSTANTIATE_TEST_SUITE_P(Full,
 TEST_P(GPU_GRU_Extra_FP32, TestFloat32) { Run(); }
 TEST_P(GPU_GRU_Extra_FP16, TestFloat16) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_GRU_Extra_FP32,
                          ::testing::ValuesIn(GetExtraTests()),
                          TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_GRU_Extra_FP16,
                          ::testing::ValuesIn(GetExtraTests()),
                          TestNameGenerator{});

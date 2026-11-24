@@ -43,7 +43,6 @@
 #include <miopen/filesystem.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
-#include <fdeep/fdeep.hpp>
 #include <map>
 #include <set>
 #include <sstream>
@@ -51,6 +50,8 @@
 #include <vector>
 
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
+
+#include <fdeep/fdeep.hpp>
 
 namespace {
 
@@ -894,17 +895,19 @@ std::string ConvNDParamName(const ::testing::TestParamInfo<ConvNDParams>& info)
 }
 
 // Instantiate tests for both 2D and 3D
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_ConvNDAIHeuristics_FP32,
                          ::testing::ValuesIn(GenerateConvNDParams()),
                          ConvNDParamName);
+
+using CPU_ConvAiEngineeredConvFeatures_NONE = ::testing::TestWithParam<int>;
 
 // Golden vectors for the derived-feature block shared by the TunaNet (ExtractTunaNetNDFeatures)
 // and candidate-selection input encoders via common::EngineeredConvFeatures. Pins the shared math
 // so a hasty change on either path is caught. Uses C_in != C_out and all three directions so the
 // direction-dependent GEMM (M, N, K) assignment is fully exercised (C_in == C_out would hide it).
 // Pure CPU math -- no model files or device required.
-TEST(CPU_ConvAiEngineeredConvFeatures_NONE, Golden)
+TEST_P(CPU_ConvAiEngineeredConvFeatures_NONE, Golden)
 {
     // N=2, C_in=64, C_out=128, 56x56, 3x3, g=1, num_cu=304. Only the GEMM-dimension features
     // (indices 1..6) differ between directions; the rest are direction-independent.
@@ -996,12 +999,16 @@ TEST(CPU_ConvAiEngineeredConvFeatures_NONE, Golden)
     }
 }
 
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_ConvAiEngineeredConvFeatures_NONE, ::testing::Values(0));
+
+using CPU_ConvAiEngineeredConv3dFeatures_NONE = ::testing::TestWithParam<int>;
+
 // 3D counterpart of CPU_ConvAiEngineeredConvFeatures_NONE.Golden. Pins the full 19-element derived
 // vector (18 shared features + the appended log1p(D_in)) for all three directions, so the 3D
 // depth folding (D into the volume terms) and the direction-dependent GEMM (M, N, K) assignment
 // are both exercised -- not just Forward. Uses C_in != C_out and D_in != D_out != H so a swapped
 // or dropped dimension is caught. Pure CPU math -- no model files or device required.
-TEST(CPU_ConvAiEngineeredConv3dFeatures_NONE, Golden)
+TEST_P(CPU_ConvAiEngineeredConv3dFeatures_NONE, Golden)
 {
     // N=2, C_in=64, C_out=128, 16x16 -> 14x14, D 8 -> 6, K 3x3x3, g=1, num_cu=304. Only the
     // GEMM-dimension features (indices 1..6) differ between directions; the rest, including the
@@ -1104,6 +1111,10 @@ TEST(CPU_ConvAiEngineeredConv3dFeatures_NONE, Golden)
     }
 }
 
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_ConvAiEngineeredConv3dFeatures_NONE, ::testing::Values(0));
+
+using GPU_ConvAIModelLoad_FP32 = ::testing::TestWithParam<int>;
+
 // Every bundled fdeep model file must be loadable by the deployed frugally-deep. This fails
 // loudly and directly if a model is exported in a format the linked fdeep cannot parse (e.g. a
 // Keras 3 export against a Keras 2-era fdeep). Without this, such a breakage only surfaces
@@ -1114,7 +1125,7 @@ TEST(CPU_ConvAiEngineeredConv3dFeatures_NONE, Golden)
 // identify the device. An arch that ships no bundled models (e.g. gfx1250) is skipped only when
 // the system db holds no models at all; models present for other archs (a multi-arch install, a
 // dev build tree) are still loaded.
-TEST(GPU_ConvAIModelLoad_FP32, BundledFdeepModelsLoad)
+TEST_P(GPU_ConvAIModelLoad_FP32, BundledFdeepModelsLoad)
 {
     const auto db = GetSystemDbPath();
 
@@ -1156,6 +1167,98 @@ TEST(GPU_ConvAIModelLoad_FP32, BundledFdeepModelsLoad)
     EXPECT_TRUE(failures.empty()) << "frugally-deep failed to load " << failures.size() << " of "
                                   << models.size() << " bundled model(s):" << oss.str();
 }
+
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_ConvAIModelLoad_FP32, ::testing::Values(0));
+
+using CPU_ConvNDTunaNet_NONE = ::testing::TestWithParam<int>;
+
+// CPU (no-Handle) run of the gfx1250 TunaNet ND solver-selection models (2D and 3D). The
+// GPU_ConvNDAIHeuristics_FP32 suite skips unless the device is gfx942/gfx950, and gfx125X CI is
+// build-only, so the gfx1250 num_cu/arch feature path is otherwise only loaded
+// (BundledFdeepModelsLoad) and never run. GetNDModel builds the model and Forward() runs fdeep,
+// which throws if the engineered input width disagrees with the model's trained input -- the exact
+// failure this guards against.
+TEST_P(CPU_ConvNDTunaNet_NONE, Gfx1250ModelRunsAndWidthMatches)
+{
+    // Gate on the actual shipped files at GetSystemDbPath(), not HasBundledTunaNetModels (an
+    // arch-support predicate that is true for gfx1250 even on a runner that deploys only the host
+    // arch's models, where GetNDModel would then return a model whose metadata failed to load).
+    // Mirrors the candidate-selection CPU suite: run a dim only if its assets ship here, skip the
+    // whole test if neither does.
+    const auto db          = miopen::GetSystemDbPath();
+    const auto dim_present = [&](int dim) {
+        const std::string sfx = (dim == 3) ? "_3d" : "";
+        return miopen::fs::exists(db / ("gfx1250" + sfx + ".tn.model")) &&
+               miopen::fs::exists(db / ("gfx1250" + sfx + "_metadata.tn.model"));
+    };
+
+    // dtype/direction/dilation vary so the metadata's precision and direction one-hots and the
+    // dilation feature are all exercised (TunaNet picks across all directions, so cover all three).
+    // pad == dilation on a 3-tap filter keeps the output spatial size equal to the input.
+    const auto make_problem =
+        [](int dim, miopenDataType_t dtype, miopen::conv::Direction dir, int dilation) {
+            const int p = dilation;
+            if(dim == 3)
+            {
+                miopen::TensorDescriptor in(dtype, std::vector<int>{1, 64, 8, 56, 56});
+                miopen::TensorDescriptor wei(dtype, std::vector<int>{64, 64, 3, 3, 3});
+                miopen::TensorDescriptor out(dtype, std::vector<int>{1, 64, 8, 56, 56});
+                miopen::ConvolutionDescriptor conv(3,
+                                                   miopenConvolution,
+                                                   miopenPaddingDefault,
+                                                   {p, p, p},
+                                                   {1, 1, 1},
+                                                   {dilation, dilation, dilation},
+                                                   {0, 0, 0});
+                return miopen::conv::ProblemDescription(in, wei, out, conv, dir);
+            }
+            miopen::TensorDescriptor in(dtype, std::vector<int>{1, 64, 56, 56});
+            miopen::TensorDescriptor wei(dtype, std::vector<int>{64, 64, 3, 3});
+            miopen::TensorDescriptor out(dtype, std::vector<int>{1, 64, 56, 56});
+            miopen::ConvolutionDescriptor conv(2,
+                                               miopenConvolution,
+                                               miopenPaddingDefault,
+                                               {p, p},
+                                               {1, 1},
+                                               {dilation, dilation},
+                                               {0, 0});
+            return miopen::conv::ProblemDescription(in, wei, out, conv, dir);
+        };
+
+    int ran = 0;
+    for(int dim : {2, 3})
+    {
+        if(!dim_present(dim))
+            continue;
+        ++ran;
+        auto model = immed_mode::GetNDModel("gfx1250", dim);
+        ASSERT_NE(model, nullptr) << "GetNDModel returned null for gfx1250 " << dim << "D";
+        for(const auto dtype : {miopenFloat, miopenHalf, miopenBFloat16})
+        {
+            for(const auto dir : {miopen::conv::Direction::Forward,
+                                  miopen::conv::Direction::BackwardData,
+                                  miopen::conv::Direction::BackwardWeights})
+            {
+                for(const int dilation : {1, 2})
+                {
+                    const auto problem = make_problem(dim, dtype, dir, dilation);
+                    std::vector<float> probs;
+                    ASSERT_NO_THROW({ probs = model->Forward(problem); })
+                        << "gfx1250 " << dim << "D TunaNet Forward threw for dtype " << dtype
+                        << " dilation " << dilation
+                        << ": engineered input width disagrees with the model input.";
+                    EXPECT_EQ(probs.size(), model->GetSolverMap().size())
+                        << "gfx1250 " << dim << "D: expected one probability per solver";
+                    EXPECT_FALSE(probs.empty());
+                }
+            }
+        }
+    }
+    if(ran == 0)
+        GTEST_SKIP() << "gfx1250 TunaNet model assets not installed at " << db;
+}
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_ConvNDTunaNet_NONE, ::testing::Values(0));
 
 } // namespace
 

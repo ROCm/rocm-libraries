@@ -477,7 +477,7 @@ TEST_P(GPU_GroupConv2D_Forward_TF32Reuse_FP32, RestoreTf32OnlyIdValidates)
     RunRestoreTf32OnlyId<miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops>();
 }
 TEST_P(GPU_GroupConv2D_Forward_TF32Reuse_FP32, TF32AndFp32GetDistinctDbKeys) { RunKeyDistinct(); }
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_GroupConv2D_Forward_TF32Reuse_FP32,
                          testing::Combine(testing::ValuesIn(Tf32ReuseConfigs<2u>()),
                                           testing::Values(1.0f),
@@ -496,7 +496,7 @@ TEST_P(GPU_GroupConv2D_BackwardData_TF32Reuse_FP32, RestoreTf32OnlyIdValidates)
 {
     RunRestoreTf32OnlyId<miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops>();
 }
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_GroupConv2D_BackwardData_TF32Reuse_FP32,
                          testing::Combine(testing::ValuesIn(Tf32ReuseConfigs<2u>()),
                                           testing::Values(1.0f),
@@ -519,7 +519,7 @@ TEST_P(GPU_GroupConv2D_BackwardWeights_TF32Reuse_FP32, RestoreTf32OnlyIdValidate
 {
     RunRestoreTf32OnlyId<miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops>();
 }
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_GroupConv2D_BackwardWeights_TF32Reuse_FP32,
                          testing::Combine(testing::ValuesIn(Tf32ReuseConfigs<2u>()),
                                           testing::Values(1.0f),
@@ -538,7 +538,7 @@ TEST_P(GPU_GroupConv3D_Forward_TF32Reuse_FP32, RestoreTf32OnlyIdValidates)
 {
     RunRestoreTf32OnlyId<miopen::solver::conv::ConvHipImplicitGemm3DGroupFwdXdlops>();
 }
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_GroupConv3D_Forward_TF32Reuse_FP32,
                          testing::Combine(testing::ValuesIn(Tf32ReuseConfigs<3u>()),
                                           testing::Values(1.0f),
@@ -557,7 +557,7 @@ TEST_P(GPU_GroupConv3D_BackwardData_TF32Reuse_FP32, RestoreTf32OnlyIdValidates)
 {
     RunRestoreTf32OnlyId<miopen::solver::conv::ConvHipImplicitGemm3DGroupBwdXdlops>();
 }
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_GroupConv3D_BackwardData_TF32Reuse_FP32,
                          testing::Combine(testing::ValuesIn(Tf32ReuseConfigs<3u>()),
                                           testing::Values(1.0f),
@@ -580,7 +580,7 @@ TEST_P(GPU_GroupConv3D_BackwardWeights_TF32Reuse_FP32, RestoreTf32OnlyIdValidate
 {
     RunRestoreTf32OnlyId<miopen::solver::conv::ConvHipImplicitGemm3DGroupWrwXdlops>();
 }
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_GroupConv3D_BackwardWeights_TF32Reuse_FP32,
                          testing::Combine(testing::ValuesIn(Tf32ReuseConfigs<3u>()),
                                           testing::Values(1.0f),

@@ -23,11 +23,16 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LGBM_PCFG)
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <limits>
+#include <map>
+#include <mutex>
+#include <shared_mutex>
 #include <numeric>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -55,16 +60,6 @@ int DataTypeCode(miopenDataType_t t)
     return -1;
 }
 
-// gfx_code for solvers trained with a gfx_code feature (SolverModel::has_gfx_code):
-// the gfx_id's index in the model's own trained vocab, shipped in lgbm_pcfg.bin.
-// Unknown arch -> -1 (the missing-category sentinel).
-int GfxCode(const SolverModel& model, const std::string& gfx_id)
-{
-    const auto& vocab = model.gfx_vocab;
-    const auto it     = std::find(vocab.begin(), vocab.end(), gfx_id);
-    return it == vocab.end() ? -1 : static_cast<int>(it - vocab.begin());
-}
-
 inline double Log1pAbs(double v) { return std::log1p(std::fabs(v)); }
 
 // Build the problem+GPU prefix, matching model_fields.build_X exactly: 14
@@ -74,7 +69,7 @@ inline double Log1pAbs(double v) { return std::log1p(std::fabs(v)); }
 void FillProblemPrefix(std::vector<double>& prefix,
                        const conv::ProblemDescription& p,
                        const Handle& handle,
-                       const std::string& gfx_id,
+                       const std::string& device_name,
                        const SolverModel& model)
 {
     const double channels = static_cast<double>(p.GetInChannels());
@@ -136,22 +131,24 @@ void FillProblemPrefix(std::vector<double>& prefix,
     prefix.push_back(static_cast<double>(DataTypeCode(p.GetInDataType())));
     // optional trailing gfx_code categorical (PCFG_GFXID solvers)
     if(model.has_gfx_code)
-        prefix.push_back(static_cast<double>(GfxCode(model, gfx_id)));
+        prefix.push_back(static_cast<double>(GfxCode(model, device_name)));
 }
 
-// Score every candidate in the bucket and return their descriptors and scores ordered
-// best->worst by predicted speed (lambdarank: higher score = faster). The sort
-// is stable, so equal scores keep catalog order. A "" element denotes the solver
-// default config. The caller walks this order and takes the first descriptor
-// that passes IsValidPerformanceConfig.
-RankedConfigs RankBucket(const LgbmForest& forest,
-                         const SolverModel& model,
-                         const std::vector<double>& prefix,
-                         const std::vector<Candidate>& cands)
+/// Candidate indices ordered best->worst by predicted speed, with their scores in the same order.
+struct RankedOrder
 {
-    if(cands.empty())
-        return {};
+    std::vector<std::uint32_t> order;
+    std::vector<double> scores;
+};
 
+// Score every candidate in the bucket and return their indices and scores ordered
+// best->worst by predicted speed (lambdarank: higher score = faster). The sort
+// is stable, so equal scores keep catalog order.
+RankedOrder RankOrder(const LgbmForest& forest,
+                      const SolverModel& model,
+                      const std::vector<double>& prefix,
+                      const std::vector<Candidate>& cands)
+{
     std::vector<LgbmEntry> row(static_cast<std::size_t>(model.feat_count));
     // Fill the constant problem+GPU prefix once.
     for(int i = 0; i < model.prob_feat_count; ++i)
@@ -168,29 +165,101 @@ RankedConfigs RankBucket(const LgbmForest& forest,
         scores[c] = forest.Score(row.data(), row.size());
     }
 
-    std::vector<std::size_t> order(cands.size());
-    std::iota(order.begin(), order.end(), std::size_t{0});
+    std::vector<std::uint32_t> order(cands.size());
+    std::iota(order.begin(), order.end(), std::uint32_t{0});
     // Stable descending sort: ties preserve catalog order so order[0] matches the
     // Python model's argmax (which uses np.argmax = first max on ties).
-    std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
+    std::stable_sort(order.begin(), order.end(), [&](std::uint32_t a, std::uint32_t b) {
         return scores[a] > scores[b];
     });
-
-    RankedConfigs ranked;
-    ranked.descs.reserve(order.size());
+    RankedOrder ranked;
     ranked.scores.reserve(order.size());
     for(const auto idx : order)
-    {
-        ranked.descs.push_back(cands[idx].desc);
         ranked.scores.push_back(scores[idx]);
-    }
+    ranked.order = std::move(order);
     return ranked;
+}
+
+RankedConfigs Descriptors(const std::vector<Candidate>& cands, const RankedOrder& ranked)
+{
+    RankedConfigs configs;
+    configs.descs.reserve(ranked.order.size());
+    for(const auto idx : ranked.order)
+        configs.descs.push_back(cands[idx].desc);
+    configs.scores = ranked.scores;
+    return configs;
+}
+
+// Score every candidate in the bucket and return their descriptors and scores ordered
+// best->worst by predicted speed. A "" element denotes the solver default
+// config. The caller walks this order and takes the first descriptor that
+// passes IsValidPerformanceConfig.
+RankedConfigs RankBucket(const LgbmForest& forest,
+                         const SolverModel& model,
+                         const std::vector<double>& prefix,
+                         const std::vector<Candidate>& cands)
+{
+    if(cands.empty())
+        return {};
+    return Descriptors(cands, RankOrder(forest, model, prefix, cands));
+}
+
+/// Process-wide memo of RankBucket's order and scores. They depend only on the solver's model and
+/// the bucket's candidates (both fixed once the metadata is loaded) and on the feature prefix,
+/// which holds every problem and GPU input the model reads; the key is the solver, the bucket key
+/// (arch, direction, data type) and the prefix itself. Scoring a bucket runs the forest once per
+/// candidate (about 1.6 ms for 200 candidates on gfx1100) on every perf-db miss, so a problem
+/// queried again reuses its ranking. Bounded: an entry is about 3 KB for a 200-candidate bucket,
+/// and the memo starts over at 100k entries.
+class RankOrderCache
+{
+public:
+    using Key = std::tuple<std::string, std::string, std::vector<double>>;
+
+    template <class Compute>
+    RankedOrder GetOrCompute(const Key& key, Compute&& compute)
+    {
+        {
+            std::shared_lock lock{mutex};
+            if(const auto it = entries.find(key); it != entries.end())
+                return it->second;
+        }
+        auto ranked = compute();
+        std::unique_lock lock{mutex};
+        if(entries.size() >= Capacity && entries.find(key) == entries.end())
+            entries.clear();
+        entries.try_emplace(key, ranked);
+        return ranked;
+    }
+
+private:
+    static constexpr std::size_t Capacity = 100000;
+    std::shared_mutex mutex;
+    std::map<Key, RankedOrder> entries;
+};
+
+RankedConfigs RankBucketCached(const std::string& solver_name,
+                               const std::string& bucket_key,
+                               const SolverModel& model,
+                               const std::vector<double>& prefix,
+                               const std::vector<Candidate>& cands)
+{
+    if(cands.empty())
+        return {};
+    // A NaN cannot be ordered in the key; the features are finite today, but never risk the map.
+    if(std::any_of(prefix.begin(), prefix.end(), [](double v) { return std::isnan(v); }))
+        return Descriptors(cands, RankOrder(*model.forest, model, prefix, cands));
+    static RankOrderCache cache;
+    const auto ranked = cache.GetOrCompute({solver_name, bucket_key, prefix}, [&] {
+        return RankOrder(*model.forest, model, prefix, cands);
+    });
+    return Descriptors(cands, ranked);
 }
 
 // The grouped-conv XDLOPS solvers ship a two-tower kernel-tuning-net (KTN)
 // perf-config predictor (the *_input_encoder model plus a precomputed config-embedding
 // table that replaces the former *_kernel_config_encoder),
-// run inside the solver's own GetDefaultPerformanceConfig on gfx90a/gfx942/gfx950
+// run inside the solver's own GetDefaultPerformanceConfig on gfx90a/gfx942/gfx950/gfx1250
 // (see PerformanceConfig...::IsModelApplicable). The two-tower takes precedence
 // there; the LGBM perf-config picker is the fallback for solvers/architectures
 // the two-tower does not cover. This predicate mirrors that model's coverage so
@@ -201,7 +270,7 @@ bool TwoTowerCoversSolver(const std::string& solver_name, const std::string& gfx
     if(common::LgbmOnly())
         return false;
     const bool arch_covered = gfx_id.starts_with("gfx90a") || gfx_id.starts_with("gfx942") ||
-                              gfx_id.starts_with("gfx950");
+                              gfx_id.starts_with("gfx950") || gfx_id.starts_with("gfx1250");
     if(!arch_covered)
         return false;
     static const std::array<const char*, 6> kTwoTowerSolvers = {
@@ -216,6 +285,21 @@ bool TwoTowerCoversSolver(const std::string& solver_name, const std::string& gfx
 }
 
 } // namespace
+
+int GfxCode(const SolverModel& model, const std::string& device_name)
+{
+    const auto& vocab    = model.gfx_vocab;
+    const std::string id = NormalizeArchName(device_name);
+    const auto it        = std::find(vocab.begin(), vocab.end(), id);
+    return it == vocab.end() ? -1 : static_cast<int>(it - vocab.begin());
+}
+
+std::string
+BucketKey(const std::string& device_name, conv::Direction direction, miopenDataType_t data_type)
+{
+    return NormalizeArchName(device_name) + "|" + std::to_string(DirectionPerfDbCode(direction)) +
+           "|" + DataTypeName(data_type);
+}
 
 // ConvHipConv on gfx1250, every direction: the model retrained on hipconv v0.5 configs was trained
 // on gfx950 data only and has no gfx1250 buckets, and no model has been checked on gfx1250
@@ -265,11 +349,17 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
 {
     // Hold-out first: it needs only the device name, so a held-out combination never loads the
     // solver's model (Find parses and caches it under the metadata mutex).
-    std::string gfx_id;
+    //
+    // GetDeviceName() strips the :sramecc+:xnack- feature suffix but not a target-variant suffix
+    // (gfx1250 parts report "gfx1250-strict"). The bucket keys and the gfx_code vocab use the
+    // base name: gfx_id is the normalized name for the arch predicates below, device_name the raw
+    // one handed to BucketKey/GfxCode (which normalize it) and kept for the logs.
+    std::string device_name;
     {
         ScopedTimeLogger t("lgbm_pcfg.PickConfig.GetDeviceName");
-        gfx_id = handle.GetDeviceName();
+        device_name = handle.GetDeviceName();
     }
+    const std::string gfx_id = NormalizeArchName(device_name);
 
     if(HeldOutOfPicker(solver_name, gfx_id, problem.GetDirection()))
     {
@@ -295,36 +385,35 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
     // default-config path (which runs it) rather than preempting it here.
     if(TwoTowerCoversSolver(solver_name, gfx_id))
     {
-        MIOPEN_LOG_I2("lgbm_pcfg: deferring " << solver_name << " on " << gfx_id
-                                              << " to the two-tower KTN model");
+        MIOPEN_LOG_I2("lgbm_pcfg: deferring " << solver_name << " on " << gfx_id << " (device \""
+                                              << device_name << "\") to the two-tower KTN model");
         return {};
     }
 
     // Otherwise the perf-config picker runs on every architecture its per-solver
     // models cover; a bucket lookup below naturally abstains (empty result) for any
     // gfx_id/direction/dtype the models were not trained on.
-    const std::string key = gfx_id + "|" +
-                            std::to_string(DirectionPerfDbCode(problem.GetDirection())) + "|" +
-                            DataTypeName(problem.GetInDataType());
+    const std::string key = BucketKey(device_name, problem.GetDirection(), problem.GetInDataType());
 
     const auto bit = model->buckets.find(key);
     if(bit == model->buckets.end())
     {
-        MIOPEN_LOG_I2("lgbm_pcfg: no bucket " << key << " for " << solver_name << "; abstain");
+        MIOPEN_LOG_I2("lgbm_pcfg: no bucket " << key << " (device \"" << device_name << "\") for "
+                                              << solver_name << "; abstain");
         return {};
     }
 
     std::vector<double> prefix;
     {
         ScopedTimeLogger t("lgbm_pcfg.PickConfig.FillProblemPrefix");
-        FillProblemPrefix(prefix, problem, handle, gfx_id, *model);
+        FillProblemPrefix(prefix, problem, handle, device_name, *model);
     }
 
     RankedConfigs ranked;
     {
         ScopedTimeLogger t("lgbm_pcfg.PickConfig.RankBucket(" + std::to_string(bit->second.size()) +
                            " cands)");
-        ranked = RankBucket(*model->forest, *model, prefix, bit->second);
+        ranked = RankBucketCached(solver_name, key, *model, prefix, bit->second);
     }
     if(ranked.descs.empty())
         return {};
@@ -368,6 +457,26 @@ std::vector<std::string> ScorePickForTest(const std::string& solver_name,
         cands.push_back(Candidate{cand_descs[i], cand_args[i]});
     }
     return RankBucket(*model->forest, *model, prob_feature_prefix, cands).descs;
+}
+
+RankedConfigs RankBucketForTest(const std::string& solver_name,
+                                const std::string& bucket_key,
+                                const std::vector<double>& prob_feature_prefix,
+                                bool cached)
+{
+    const auto& meta = LgbmPcfgMetadata::Get();
+    if(!meta.IsReady())
+        return {};
+    const SolverModel* model = meta.Find(solver_name);
+    if(model == nullptr || !model->forest ||
+       prob_feature_prefix.size() != static_cast<std::size_t>(model->prob_feat_count))
+        return {};
+    const auto bit = model->buckets.find(bucket_key);
+    if(bit == model->buckets.end())
+        return {};
+    return cached
+               ? RankBucketCached(solver_name, bucket_key, *model, prob_feature_prefix, bit->second)
+               : RankBucket(*model->forest, *model, prob_feature_prefix, bit->second);
 }
 
 std::vector<std::string> MaybePickConfig(const std::string& solver_db_id,

@@ -194,6 +194,7 @@ SdpaFwdGraph buildGraph(const GraphTestCase& testCase, LengthInputs lengthInputs
 
     const int64_t batch = testCase.batch;
     const int64_t numHeads = testCase.numHeads;
+    const int64_t numHeadsKv = testCase.numHeadsKv.value_or(numHeads);
     const int64_t seqQ = testCase.seqQ;
     const int64_t seqKv = testCase.seqKv;
 
@@ -205,8 +206,8 @@ SdpaFwdGraph buildGraph(const GraphTestCase& testCase, LengthInputs lengthInputs
 
     // Create tensor dimensions
     const std::vector<int64_t> qDims = {batch, numHeads, seqQ, config.hdim_q};
-    const std::vector<int64_t> kDims = {batch, numHeads, seqKv, config.hdim_q};
-    const std::vector<int64_t> vDims = {batch, numHeads, seqKv, config.hdim_v};
+    const std::vector<int64_t> kDims = {batch, numHeadsKv, seqKv, config.hdim_q};
+    const std::vector<int64_t> vDims = {batch, numHeadsKv, seqKv, config.hdim_v};
     // Use physical memory layout: B, Seq, H, D for compatibility with group mode
     const std::vector<int64_t> layout = {3, 1, 2, 0};
 
