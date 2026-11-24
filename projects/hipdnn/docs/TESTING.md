@@ -127,7 +127,7 @@ Labels on a PR change what CI runs. Required GitHub checks are configured outsid
 | `ci:asan`, `ci:host-asan` | Enables the PR ASAN workflow, which builds ASAN (`ci:asan`) or host-ASAN (`ci:host-asan`) binaries and does not run tests |
 | `ci:gfx*`, `ci:build:gfx*`, `ci:test:gfx*`, `ci:run-all-archs`, `ci:platform:linux`, `ci:platform:windows` | Selects GPU families and platforms |
 | `ci:cpu-test-only` | Disables the GPU test runner for all families |
-| `test_filter:<tier>` | Sets the run's tier outright: this is the highest-priority rule in TheRock's tier decision, overriding the release/schedule/diff-based defaults in the tier table above |
+| `test_filter:<tier>` | Sets the run's tier outright; the tier each family ran is in its `Configure test matrix (<family>)` job log |
 
 ### What gates a pull request
 
@@ -145,7 +145,7 @@ Climb only as far as you need.
 
 1. **Run the label locally.** Build the preset for the affected component and run `ctest -L '^standard$'` as in [Building and running tests](#building-and-running-tests). This matches what a PR runs, minus the GPU architecture.
 2. **Run the installed tree.** Install the build and run the `ctest --test-dir <install>/bin/<dir> ...` command above. This catches missing install rules and files that only exist in the build tree.
-3. **Dispatch the workflow.** Run `therock-multi-arch-ci.yml` through `workflow_dispatch` with `linux_amdgpu_families` or `windows_amdgpu_families` (for example `gfx950`) and `pr_labels: test:hipdnn`. Without a `test_filter:<tier>` label in `pr_labels`, dispatch has no diff to classify and falls through to the same priority chain as a PR, defaulting to `standard`; add `test_filter:quick` to `pr_labels` for the `quick` tier instead.
+3. **Dispatch the workflow.** Run `therock-multi-arch-ci.yml` through `workflow_dispatch` with `linux_amdgpu_families` or `windows_amdgpu_families` (for example `gfx950`) and `pr_labels: test:hipdnn`. Add `test_filter:quick` to `pr_labels` for the `quick` tier; otherwise the run defaults to `standard`. The tier each family ran is in its `Configure test matrix (<family>)` job log.
 
 Local and CI runs differ in:
 

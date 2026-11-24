@@ -61,7 +61,7 @@ Before dispatching for a PR, or when the user asks why its CI did not run, check
 
 ## Effective test tier
 
-TheRock's setup job computes one tier for the whole run (`_determine_test_type` in `configure_multi_arch_ci.py`): a `test_filter:<tier>` PR label wins outright, then a release build, then `schedule`, then an external-repo diff confined to CI plumbing (`quick`), then a changed submodule (`standard`), else `quick` by default. Each family's **"Configure test matrix (<family>)"** job receives that tier and can still override it per family (`test_type_for_family` in `amdgpu_family_matrix.py`, e.g. gfx125X forced to `quick`; on a `pull_request` event rocm-libraries also forces gfx950 to `quick` when any changed file matches `projects/hipblaslt/`). Read the job's own log lines to see the result: `INFO:root:Requesting job <component> with test_type <tier>`, and `Overriding test_type from ... to ...` when a family override applied. `status` (for the newest multi-arch run on the branch) and `watch` (after the run ends) print that tier per family; quote it from there.
+The tier each family ran is in that family's own **"Configure test matrix (<family>)"** job log: the `INFO:root:Requesting job <component> with test_type <tier>` line, and an `Overriding test_type from ... to ...` line when a family override applied — these are the two lines the script parses. A family can override the run's tier. A `test_filter:<tier>` PR label sets the run's tier. `status` (for the newest multi-arch run on the branch) and `watch` (after the run ends) print that tier per family; quote it from there.
 
 Behaviour checked against rocm-libraries `69f00b9e5422` and TheRock `4a6dabfc096b` (2026-11-23).
 
