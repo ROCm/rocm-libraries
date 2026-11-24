@@ -44,8 +44,13 @@ struct MultiplyMultiply
 //   MultiDTdmPC     -> CompTDMProducerConsumer pipeline + TdmMultiDEpilogue (gfx1250 only)
 //   MultiDTdmV1Staged -> CompTDMV1 pipeline + TdmMultiDEpilogueStagedForPipeline, one M iteration
 //                        per slab (gfx1250 only)
-// For the TDM selectors, tuple element 13 is TransposeC (default std::false_type) and element 14
-// is the block tile as ck_tile::sequence<M, N, K> (default 128x128x64).
+//   MultiDTdmRA       -> CompTDMRunAhead pipeline (default ring) + TdmMultiDEpilogue (gfx1250 only)
+//   MultiDTdmRAStaged -> CompTDMRunAhead pipeline + TdmMultiDEpilogueStagedForPipeline, one M
+//                        iteration per slab (gfx1250 only)
+// For the TDM selectors, tuple element 13 is TransposeC (default std::false_type), element 14
+// is the block tile as ck_tile::sequence<M, N, K> (default 128x128x64) and element 15 is
+// std::true_type for a row-broadcast D0 (default std::false_type): D0 is an N-vector passed with
+// row stride 0 and the epilogue's DsRowBroadcastMask has bit 0 set.
 struct MultiDTdmV1
 {
 };
@@ -58,17 +63,25 @@ struct MultiDTdmPC
 struct MultiDTdmV1Staged
 {
 };
+struct MultiDTdmRA
+{
+};
+struct MultiDTdmRAStaged
+{
+};
 
 template <typename T>
 inline constexpr bool is_multi_d_tdm_v =
     std::is_same_v<T, MultiDTdmV1> || std::is_same_v<T, MultiDTdmV2> ||
-    std::is_same_v<T, MultiDTdmPC> || std::is_same_v<T, MultiDTdmV1Staged>;
+    std::is_same_v<T, MultiDTdmPC> || std::is_same_v<T, MultiDTdmV1Staged> ||
+    std::is_same_v<T, MultiDTdmRA> || std::is_same_v<T, MultiDTdmRAStaged>;
 
 // How the D tensors are filled by TestCkTileGemmMultiD::Run.
 enum class MultiDFill
 {
     Uniform,          // D0, D1 uniform in [-1, 1]
-    RampD0IdentityD1, // D0(m, n) = small ramp in (m, n), D1 = identity of CDElementWiseFn
+    RampD0IdentityD1, // D0(m, n) = small ramp in (m, n) (in n alone for a stride-0 D0),
+                      // D1 = identity of CDElementWiseFn
 };
 
 template <typename ADataType,
@@ -128,6 +141,8 @@ class TestCkTileGemmMultiD : public ::testing::Test
         ck_tile::tuple_element_or_default_t<Tuple, 13, std::false_type>::value;
     using TdmBlockTile =
         ck_tile::tuple_element_or_default_t<Tuple, 14, ck_tile::sequence<128, 128, 64>>;
+    static constexpr bool kD0RowBroadcast =
+        ck_tile::tuple_element_or_default_t<Tuple, 15, std::false_type>::value;
 
 #if CK_TILE_USE_WMMA
     struct GemmWarpConfig_Wmma
@@ -331,12 +346,20 @@ class TestCkTileGemmMultiD : public ::testing::Test
                                                   GemmUniversalTraits,
                                                   ck_tile::GemmPipelineScheduler::Intrawave>;
 
+        static constexpr bool kRunAhead = std::is_same_v<TdmSelector, MultiDTdmRA> ||
+                                          std::is_same_v<TdmSelector, MultiDTdmRAStaged>;
+        static constexpr bool kStaged = std::is_same_v<TdmSelector, MultiDTdmV1Staged> ||
+                                        std::is_same_v<TdmSelector, MultiDTdmRAStaged>;
+
         using GemmPipeline = std::conditional_t<
-            std::is_same_v<TdmSelector, MultiDTdmPC>,
-            ck_tile::GemmPipelineAgBgCrCompTDMProducerConsumer<UniversalGemmProblem>,
-            std::conditional_t<std::is_same_v<TdmSelector, MultiDTdmV2>,
-                               ck_tile::GemmPipelineAgBgCrCompTDMV2<UniversalGemmProblem>,
-                               ck_tile::GemmPipelineAgBgCrCompTDMV1<UniversalGemmProblem>>>;
+            kRunAhead,
+            ck_tile::GemmPipelineAgBgCrCompTDMRunAhead<UniversalGemmProblem>,
+            std::conditional_t<
+                std::is_same_v<TdmSelector, MultiDTdmPC>,
+                ck_tile::GemmPipelineAgBgCrCompTDMProducerConsumer<UniversalGemmProblem>,
+                std::conditional_t<std::is_same_v<TdmSelector, MultiDTdmV2>,
+                                   ck_tile::GemmPipelineAgBgCrCompTDMV2<UniversalGemmProblem>,
+                                   ck_tile::GemmPipelineAgBgCrCompTDMV1<UniversalGemmProblem>>>>;
 
         using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<ADataType,
                                                                  BDataType,
@@ -360,10 +383,14 @@ class TestCkTileGemmMultiD : public ::testing::Test
                                                                  1,     /*BlockedXDLN_PerWarp_*/
                                                                  DoubleSmemBuffer>;
 
-        using GemmEpilogue = std::conditional_t<
-            std::is_same_v<TdmSelector, MultiDTdmV1Staged>,
-            ck_tile::TdmMultiDEpilogueStagedForPipeline<EpilogueProblem, 1, GemmPipeline>,
-            ck_tile::TdmMultiDEpilogue<EpilogueProblem>>;
+        static constexpr ck_tile::index_t kDsRowBroadcastMask = kD0RowBroadcast ? 1 : 0;
+        using GemmEpilogue =
+            std::conditional_t<kStaged,
+                               ck_tile::TdmMultiDEpilogueStagedForPipeline<EpilogueProblem,
+                                                                           1,
+                                                                           GemmPipeline,
+                                                                           kDsRowBroadcastMask>,
+                               ck_tile::TdmMultiDEpilogue<EpilogueProblem, kDsRowBroadcastMask>>;
         static_assert(ck_tile::is_tdm_epilogue_v<GemmEpilogue>);
 
         using Kernel = ck_tile::GemmKernelMultiD<TilePartitioner, GemmPipeline, GemmEpilogue>;
@@ -412,13 +439,16 @@ class TestCkTileGemmMultiD : public ::testing::Test
         }
     }
 
-    // Host-only check of Kernel::IsSupportedArgument for the TDM kernel (no launch).
-    bool IsTdmSupported(const int M, const int N, const int K, const int k_batch)
+    // Host-only check of Kernel::IsSupportedArgument for the TDM kernel (no launch). stride_d0 < 0
+    // passes the stride the kernel expects: 0 for a row-broadcast D0, N otherwise.
+    bool IsTdmSupported(
+        const int M, const int N, const int K, const int k_batch, const int stride_d0 = -1)
     {
         static_assert(kIsTdm, "IsTdmSupported is only meaningful for TDM kernels");
         using Kernel                                                = TdmKernel<>;
         std::array<const void*, DsDataType::size()> ds_ptr          = {nullptr, nullptr};
-        std::array<ck_tile::index_t, DsDataType::size()> strides_ds = {N, N};
+        std::array<ck_tile::index_t, DsDataType::size()> strides_ds = {
+            stride_d0 >= 0 ? stride_d0 : (kD0RowBroadcast ? 0 : N), N};
         ck_tile::GemmMultiDHostArgs<DsDataType::size()> args(
             nullptr, nullptr, ds_ptr, nullptr, k_batch, M, N, K, K, K, strides_ds, N);
         return Kernel::IsSupportedArgument(Kernel::MakeKernelArgs(args));
@@ -434,7 +464,9 @@ class TestCkTileGemmMultiD : public ::testing::Test
              int StrideD1                        = 0,
              int StrideE                         = 0,
              MultiDFill d_fill                   = MultiDFill::Uniform,
-             bool expect_differs_from_plain_gemm = false)
+             bool expect_differs_from_plain_gemm = false,
+             bool d0_stride0                     = kD0RowBroadcast,
+             bool zero_a                         = false)
     {
         using namespace ck_tile::literals;
 
@@ -470,9 +502,11 @@ class TestCkTileGemmMultiD : public ::testing::Test
                     return stride;
             };
 
-        StrideA  = f_get_default_stride(M, K, StrideA, ALayout{});
-        StrideB  = f_get_default_stride(K, N, StrideB, BLayout{});
-        StrideD0 = f_get_default_stride(M, N, StrideD0, D0Layout{});
+        StrideA = f_get_default_stride(M, K, StrideA, ALayout{});
+        StrideB = f_get_default_stride(K, N, StrideB, BLayout{});
+        // A stride-0 D0 is one N-vector repeated over the rows (a bias); a row-broadcast D0
+        // requires it.
+        StrideD0 = d0_stride0 ? 0 : f_get_default_stride(M, N, StrideD0, D0Layout{});
         StrideD1 = f_get_default_stride(M, N, StrideD1, D1Layout{});
         StrideE  = f_get_default_stride(M, N, StrideE, ELayout{});
 
@@ -487,7 +521,11 @@ class TestCkTileGemmMultiD : public ::testing::Test
         ck_tile::HostTensor<EDataType> e_m_n_device_result(
             f_host_tensor_descriptor(M, N, StrideE, ELayout{}));
 
-        ck_tile::FillUniformDistribution<ADataType>{-5.f, 5.f}(a_m_k_tesnor);
+        // zero_a: E is the D fusion alone, so the reference is small and so is the tolerance.
+        if(zero_a)
+            a_m_k_tesnor.SetZero();
+        else
+            ck_tile::FillUniformDistribution<ADataType>{-5.f, 5.f}(a_m_k_tesnor);
         ck_tile::FillUniformDistribution<BDataType>{-5.f, 5.f}(b_k_n_tensors);
         if(d_fill == MultiDFill::Uniform)
         {
@@ -498,8 +536,9 @@ class TestCkTileGemmMultiD : public ::testing::Test
         {
             // Distinct D0 value per (m, n) so a wrong D row/column is visible. D1 is the identity
             // of the elementwise op (1 for multiply, 0 for add), so E depends on D0 only.
-            d0_m_n_tensors.ForEach([](auto& self, const auto& idx) {
-                const float v = 0.125f * static_cast<float>((idx[0] * 7 + idx[1] * 3) % 17) + 0.5f;
+            d0_m_n_tensors.ForEach([&](auto& self, const auto& idx) {
+                const auto m  = d0_stride0 ? 0 : idx[0];
+                const float v = 0.125f * static_cast<float>((m * 7 + idx[1] * 3) % 17) + 0.5f;
                 self(idx)     = ck_tile::type_convert<D0DataType>(v);
             });
             if constexpr(std::is_same_v<CDElementWiseFn, MultiplyMultiply>)
@@ -629,7 +668,8 @@ class TestCkTileGemmMultiD : public ::testing::Test
             e_m_n_plain.SetZero();
             ck_tile::reference_gemm<ADataType, BDataType, AccDataType, EDataType>(
                 a_m_k_tesnor, b_k_n_tensors, e_m_n_plain);
-            const double atol       = rtol_atol.at(ck_tile::number<1>{});
+            // The smallest ramp value of D0 is 0.5; atol alone can exceed it (bf16 E).
+            const double atol       = std::min<double>(rtol_atol.at(ck_tile::number<1>{}), 0.25);
             std::size_t num_diff    = 0;
             std::size_t num_nonzero = 0;
             for(int m = 0; m < M; ++m)

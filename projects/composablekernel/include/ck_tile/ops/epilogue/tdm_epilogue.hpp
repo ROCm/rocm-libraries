@@ -326,7 +326,7 @@ struct TdmEpilogueStaged
         }
     }
 
-    private:
+    protected:
     // Tile distribution of one slab: the accumulator's, with kMIterPerStage M iterations per wave.
     template <typename AccEncode>
     CK_TILE_HOST_DEVICE static constexpr auto MakeStageDistribution()

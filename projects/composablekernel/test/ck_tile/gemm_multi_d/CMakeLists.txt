@@ -22,4 +22,12 @@ if(GPU_TARGETS MATCHES "gfx125")
         ck_tile_restrict_archs(test_gemm_multi_d_tdm "^gfx125")
         target_compile_definitions(test_gemm_multi_d_tdm PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
     endif()
+    # The run-ahead pipeline and the row-broadcast D path, in their own executable so the two
+    # type lists compile in parallel.
+    add_gtest_executable(test_gemm_multi_d_tdm_run_ahead test_gemm_multi_d_tdm_run_ahead_wmma.cpp)
+    if(TARGET test_gemm_multi_d_tdm_run_ahead)
+        ck_tile_restrict_archs(test_gemm_multi_d_tdm_run_ahead "^gfx125")
+        target_compile_definitions(test_gemm_multi_d_tdm_run_ahead
+            PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
+    endif()
 endif()

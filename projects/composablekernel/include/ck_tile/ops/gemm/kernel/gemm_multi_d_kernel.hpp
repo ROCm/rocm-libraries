@@ -139,7 +139,8 @@ struct GemmKernelMultiD
     /// @brief True for the gfx125 TDM pipelines (see UniversalGemmKernel::kIsTdmPipeline).
     static constexpr bool kIsTdmPipeline = UniversalGemmKernel::kIsTdmPipeline;
 
-    static_assert(!UniversalGemmKernel::kIsPlainGemmOnlyPipeline,
+    static_assert(!UniversalGemmKernel::kIsPlainGemmOnlyPipeline ||
+                      UniversalGemmKernel::kPipelineSupportsMultiD,
                   "MultiD GEMM does not support this pipeline (plain GEMM only)");
 
     template <typename T>
@@ -150,6 +151,17 @@ struct GemmKernelMultiD
                   "MultiD GEMM with a TDM pipeline requires TdmMultiDEpilogue");
     static_assert(!kIsTdmPipeline || std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>,
                   "MultiD GEMM with a TDM pipeline supports only row-major E");
+    template <typename T>
+    using has_ds_row_broadcast_mask = decltype(T::kDsRowBroadcastMask);
+    /// @brief Bit i set: the epilogue reads D_i as an N-vector broadcast over M
+    /// (TdmMultiDEpilogue's DsRowBroadcastMask), so D_i must be passed with row stride 0.
+    static constexpr index_t kDsRowBroadcastMask = []() {
+        if constexpr(is_detected<has_ds_row_broadcast_mask, EpiloguePipeline>{})
+            return static_cast<index_t>(EpiloguePipeline::kDsRowBroadcastMask);
+        else
+            return index_t{0};
+    }();
+
     static_assert(!kIsTdmPipeline || !UniversalGemmKernel::ClusterLaunch,
                   "MultiD GEMM with a TDM pipeline does not support cluster launch");
     // TDM clips A/B/E against the tensor-view extents, so padded views would move the clip
@@ -204,6 +216,31 @@ struct GemmKernelMultiD
     {
         // Currently MultiD kernel doesn't support k_batch > 1
         if(kargs.k_batch > 1)
+        {
+            return false;
+        }
+
+        // The epilogue reads a row-broadcast D as one N-vector: any other stride would silently
+        // drop all rows but the first.
+        bool row_broadcast_ok = true;
+        static_for<0, NumDTensor, 1>{}([&](auto i) {
+            if constexpr(((kDsRowBroadcastMask >> i.value) & 1) != 0)
+            {
+                if(kargs.stride_Ds[i] != 0)
+                {
+                    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                    {
+                        CK_TILE_ERROR("MultiD GEMM: D",
+                                      i.value,
+                                      " is row-broadcast in the epilogue, so its stride must be 0,"
+                                      " got ",
+                                      kargs.stride_Ds[i]);
+                    }
+                    row_broadcast_ok = false;
+                }
+            }
+        });
+        if(!row_broadcast_ok)
         {
             return false;
         }
