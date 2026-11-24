@@ -551,6 +551,18 @@ struct UniversalGemmKernel
     }();
 
     template <typename T>
+    using has_supports_multi_d = decltype(T::kSupportsMultiD);
+    /// True for a kIsPlainGemmOnlyPipeline that is also validated in the multi-D kernel
+    /// (comp_tdm_ra with TdmMultiDEpilogue). GemmMultiDKernel accepts it; every other kernel that
+    /// rejects kIsPlainGemmOnlyPipeline still does.
+    static constexpr bool kPipelineSupportsMultiD = []() {
+        if constexpr(is_detected<has_supports_multi_d, GemmPipeline>{})
+            return static_cast<bool>(GemmPipeline::kSupportsMultiD);
+        else
+            return false;
+    }();
+
+    template <typename T>
     using has_supports_stream_k = decltype(T::kSupportsStreamK);
     /// True for a kIsGemmKernelOnlyPipeline that is also validated in the Stream-K kernel
     /// (comp_tdm_ra). StreamKKernel accepts it; the batched and MX kernels still reject it.
