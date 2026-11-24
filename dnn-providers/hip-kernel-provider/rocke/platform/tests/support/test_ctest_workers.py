@@ -559,6 +559,69 @@ def test_run_alone_tests_run_when_worker_0_reports_nothing(tmp_path):
     assert {"test_alone[2gib]", "test_alone[4gib]", "test_alone_too"} <= ran.keys()
 
 
+@needs_two_cpus
+def test_a_test_past_its_time_limit_is_named_and_fails_the_run(tmp_path):
+    """pytest-timeout's thread method, as the GPU entries run it, ends a
+    worker whose test stalls: the worker's output names that test, the run
+    names the worker that ended before its session finished and fails, the
+    other workers finish their share, and the run records keep what the
+    stalled worker ran before it and record the rest as unfinished."""
+    pytest.importorskip("pytest_timeout", reason="the per-test limit needs it")
+    tree = _write_tree(
+        tmp_path,
+        """
+        import time
+        import pytest
+
+        @pytest.mark.parametrize("index", range(8))
+        def test_quick(index):
+            pass
+
+        def test_stalls():
+            time.sleep(60)
+        """,
+    )
+    records = tmp_path / "records"
+    started = time.monotonic()
+    result = _run(
+        tree,
+        records,
+        "-v",
+        "--timeout=2",
+        "--timeout-method=thread",
+        WORKERS_OPTION,
+        str(_WORKERS),
+    )
+    assert time.monotonic() - started < _CHILD_TIMEOUT_SECONDS
+    assert result.returncode == pytest.ExitCode.TESTS_FAILED, result.stdout[-3000:]
+    lines = result.stdout.splitlines()
+    named = [
+        line
+        for line in lines
+        if "test_cases.py::test_stalls" in line and "Timeout" in line
+    ]
+    assert named and named[0].startswith("[w"), result.stdout[-3000:]
+    stalled = named[0][: named[0].index("]") + 1]  # "[w<index>]"
+    assert "time.sleep(60)" in result.stdout  # the stalled test's stack
+    assert (
+        f"rocke-ctest-workers: worker {stalled[2:-1]} ended before its session "
+        "finished; its remaining tests did not run"
+    ) in lines
+    # What the stalled worker ran before the stall kept its records.
+    ran_before = {
+        line.split("::", 1)[1].split()[0]
+        for line in lines
+        if line.startswith(stalled) and " PASSED" in line
+    }
+    events = {(node, event) for node, event, _ in _records(records)}
+    assert ran_before
+    assert {(node, "ran") for node in ran_before} <= events
+    assert ("test_stalls", "unfinished") in events
+    assert not {node for node, event in events if event == "collected"} - {
+        node for node, event in events if event in ("ran", "unfinished")
+    }
+
+
 # --------------------------------------------------------------------- the rules
 
 

@@ -33,6 +33,10 @@ run may use. While it runs, no other process of this entry exists, so none
 holds device memory. Its output lines are prefixed with ``[alone]``; the run
 exits with the combined status of the workers and that process.
 
+Each of these processes marks the end of its session. One that ends without
+it (a per-test time limit that ends the process, a crash) is named in the
+run's output, its remaining tests not run, and fails the run.
+
 The worker count is at most the CPUs the process may use
 (:func:`~rocke.tests.host_cpus.available_cpus`); with one, or for a run that
 needs one process (:data:`_SINGLE_PROCESS_OPTIONS`: ``--collect-only``,
@@ -93,9 +97,12 @@ RUN_ALONE_MARKER = "rocke_run_alone"
 #: The pid of the process that started a worker.
 _PARENT_ENV = "ROCKE_TEST_WORKER_PARENT"
 #: The directory of one run's bookkeeping: worker 0 writes the number of
-#: run-alone tests of the selection to :data:`_RUN_ALONE_REPORT` there.
+#: run-alone tests of the selection to :data:`_RUN_ALONE_REPORT` there, and
+#: each process a ``<_FINISHED_PREFIX><index>`` marker when its session
+#: finishes, so the run names a process that ended first.
 _RUN_DIR_ENV = "ROCKE_TEST_WORKER_RUN_DIR"
 _RUN_ALONE_REPORT = "run_alone_tests"
+_FINISHED_PREFIX = "finished-"
 _RUN_ALONE_PREFIX = b"[alone] "
 _SHARD_PLUGIN = "rocke.tests.ctest_shard"
 #: How long the run waits for a worker's output to end once the worker has
@@ -321,13 +328,30 @@ def _run_workers(config, count: int, usable: int) -> int:
             alone_status = _run_alone_after_workers(
                 config, count, usable, statuses, run_dir, workers, lock
             )
+            unfinished = {
+                worker.index
+                for worker in workers
+                if not _session_finished(run_dir, worker.index)
+            }
         finally:
             for worker in workers:
                 if worker.process.poll() is None:
                     worker.process.kill()
                     worker.process.wait()
     alone_statuses = [] if alone_status is None else [alone_status]
-    status = combined_exit_status(statuses + alone_statuses)
+    for index in sorted(unfinished):
+        who = "the run-alone process" if index == count else f"worker {index}"
+        out.write(
+            f"rocke-ctest-workers: {who} ended before its session finished; its "
+            "remaining tests did not run\n"
+        )
+    # A process that ended early fails the run even if it exited 0.
+    status = combined_exit_status(
+        [
+            _status_of(code, index in unfinished)
+            for index, code in enumerate(statuses + alone_statuses)
+        ]
+    )
     alone_text = (
         "" if alone_status is None else f", the run-alone process {alone_status}"
     )
@@ -336,6 +360,14 @@ def _run_workers(config, count: int, usable: int) -> int:
         f"{time.monotonic() - started:.1f}s; the run exits {status}\n"
     )
     out.flush()
+    return status
+
+
+def _status_of(status: int, unfinished: bool) -> int:
+    """A process's exit status as the run counts it: an internal error for one
+    that ended before its session finished but exited OK."""
+    if unfinished and status == pytest.ExitCode.OK:
+        return int(pytest.ExitCode.INTERNAL_ERROR)
     return status
 
 
@@ -430,6 +462,11 @@ def _run_alone_count(run_dir: Path) -> int | None:
         return int((run_dir / _RUN_ALONE_REPORT).read_text(encoding="ascii"))
     except (OSError, ValueError):
         return None
+
+
+def _session_finished(run_dir: Path, index: int) -> bool:
+    """Whether the process ``index`` wrote its session-finished marker."""
+    return (run_dir / f"{_FINISHED_PREFIX}{index}").is_file()
 
 
 def _relay_lines(
@@ -608,6 +645,9 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
 
 
 def pytest_sessionfinish(session, exitstatus):
+    worker = _worker_of_run()
+    if worker is not None and _run_dir is not None:
+        (_run_dir / f"{_FINISHED_PREFIX}{worker[0]}").write_text("", encoding="ascii")
     state = session.config.stash.get(_STATE, None)
     if (
         state is not None

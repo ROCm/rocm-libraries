@@ -30,6 +30,11 @@ set(ROCKE_TEST_TIMEOUT_GPU 1800)
 # counted-sync matrix and runs only in the comprehensive and full tiers.
 set(ROCKE_TEST_TIMEOUT_COUNTED_COMPILER_GATE 7200)
 
+# The per-test limit of the GPU pytest entries (platform/CMakeLists.txt,
+# _ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT, says why): more than twice the slowest
+# GPU test measured with a cold compiler cache, and half the gpu CTest limit.
+set(ROCKE_TEST_ITEM_TIMEOUT_GPU 900)
+
 # Give every test the calling directory registered without a TIMEOUT the cpu
 # limit. Call it after the directory's registrations. It covers the native C++
 # test binaries, which are all cpu entries, so their many registrations need

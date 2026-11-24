@@ -71,8 +71,9 @@ _GFX = re.compile(r"\bgfx[0-9a-f]+\b")
 # pytest's skip reason for the placeholder case of a test whose parameter set is
 # empty in that run (a parameter set that depends on the GPU, for one).
 _EMPTY_PARAMETER_SET = "got empty parameter set"
-# How far a test got in a lane, lowest first; a lane keeps the furthest.
-_PROGRESS = ("collected", "deselected", "skipped", "ran")
+# How far a test got in a lane, lowest first; a lane keeps the furthest. An
+# unfinished test was to run, but its process ended first (run_records).
+_PROGRESS = ("collected", "deselected", "unfinished", "skipped", "ran")
 
 
 class SourcePaths:

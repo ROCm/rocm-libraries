@@ -27,12 +27,20 @@ after the file (``[Class::]test[params]``). Its ``event`` is one of:
 - ``skipped``: it was skipped; ``reason`` is pytest's skip reason;
 - ``module_skipped``: its whole file was skipped while collecting (no node
   name); ``reason`` is pytest's skip reason;
-- ``collect_error``: its file failed to collect (no node name).
+- ``collect_error``: its file failed to collect (no node name);
+- ``unfinished``: the process that was to run it ended before its session
+  finished (a per-test time limit that ends the process, a crash), before the
+  test ended; ``reason`` is :data:`UNFINISHED`.
 
 A test a CI shard leaves to another shard of its entry is ``deselected`` with
 the reason :data:`OTHER_SHARD` (``rocke.tests.ctest_shard``): the run of that
 other shard has its verdict. A test with a ``collected`` record and no other
 was dropped by another filter.
+
+Besides those, each process writes the tests it is to run once every filter
+has run, and a last line when its session finishes; each line is written as
+it happens. :func:`read_run_records` reads these to give the ``unfinished``
+records and does not yield them.
 
 A run in worker processes (``rocke.tests.ctest_workers``) records each test as
 the same run in one process does: worker 0 alone records what collection finds
@@ -61,6 +69,7 @@ __all__ = [
     "OTHER_SHARD",
     "RAN_OUTCOMES",
     "RECORDS_DIR_ENV",
+    "UNFINISHED",
     "RunRecord",
     "note_deselection",
     "read_run_records",
@@ -70,8 +79,22 @@ __all__ = [
 # does nothing.
 RECORDS_DIR_ENV = "ROCKE_RUN_RECORDS_DIR"
 EVENTS = frozenset(
-    {"collected", "deselected", "ran", "skipped", "module_skipped", "collect_error"}
+    {
+        "collected",
+        "deselected",
+        "ran",
+        "skipped",
+        "module_skipped",
+        "collect_error",
+        "unfinished",
+    }
 )
+# The reason of an ``unfinished`` record.
+UNFINISHED = "not run: its pytest process ended before its session finished"
+# The lines a process writes that are not records: a test it is to run, and
+# the end of its session (no file, no node name).
+_SELECTED = "selected"
+_SESSION_FINISHED = "session_finished"
 # The deselection reason of a test a CI shard leaves to another shard.
 OTHER_SHARD = "deselected: another shard of this entry runs it"
 # How a ``ran`` test ended: its body passed or failed, an expected failure
@@ -111,17 +134,43 @@ class RunRecord:
 
 
 def read_run_records(directory: Path) -> Iterator[RunRecord]:
-    """Every record the processes of one run wrote into ``directory``."""
+    """Every record the processes of one run wrote into ``directory``, and an
+    ``unfinished`` record for each test a process was to run but did not
+    end, when that process ended before its session finished."""
     if not directory.is_dir():
         raise ValueError(
             f"read_run_records failed - directory={str(directory)!r}, expected the "
             f"directory {RECORDS_DIR_ENV} named for the run"
         )
     for path in sorted(directory.glob("*.jsonl")):
-        with path.open(encoding="utf-8") as lines:
-            for line in lines:
-                if line.strip():
-                    yield RunRecord(**json.loads(line))
+        yield from _process_records(path)
+
+
+def _process_records(path: Path) -> Iterator[RunRecord]:
+    """The records of the one process that wrote ``path``."""
+    selected: dict[tuple[str, str], None] = {}
+    ended: set[tuple[str, str]] = set()
+    finished = False
+    with path.open(encoding="utf-8") as lines:
+        for line in lines:
+            if not line.strip():
+                continue
+            fields = json.loads(line)
+            event = fields["event"]
+            if event == _SESSION_FINISHED:
+                finished = True
+                continue
+            test = (fields["file"], fields["node"])
+            if event == _SELECTED:
+                selected[test] = None
+                continue
+            if event in ("ran", "skipped"):
+                ended.add(test)
+            yield RunRecord(**fields)
+    if not finished:
+        for file, node in selected:
+            if (file, node) not in ended:
+                yield RunRecord(file, node, "unfinished", UNFINISHED)
 
 
 class _Recorder:
@@ -133,21 +182,38 @@ class _Recorder:
         # Every worker of a run collects the same tests; one records them.
         self._records_collection = worker is None or worker[0] == 0
         directory.mkdir(parents=True, exist_ok=True)
+        # Line-buffered: a process that a per-test time limit ends with
+        # os._exit keeps every line written before it.
         self._out = (directory / f"{os.getpid()}-{uuid.uuid4().hex}.jsonl").open(
-            "a", encoding="utf-8"
+            "a", encoding="utf-8", buffering=1
         )
 
     def _write(self, file: Path, node: str, event: str, reason: str = "") -> None:
         record = RunRecord(str(file.resolve()), node, event, reason)
-        self._out.write(json.dumps(asdict(record)) + "\n")
+        self._write_line(asdict(record))
+
+    def _write_line(self, fields: dict[str, str]) -> None:
+        self._out.write(json.dumps(fields) + "\n")
 
     @pytest.hookimpl(hookwrapper=True, tryfirst=True)
     def pytest_collection_modifyitems(self, items: list[pytest.Item]):
-        # Before every other filter, so a test a filter removes is still recorded.
+        # Before every other filter, so a test a filter removes is still
+        # recorded; after them all, the tests this process is to run.
         if self._records_collection:
             for item in items:
                 self._write(item.path, _node_name(item), "collected")
         yield
+        for item in items:
+            self._write_line(
+                {
+                    "file": str(item.path.resolve()),
+                    "node": _node_name(item),
+                    "event": _SELECTED,
+                }
+            )
+
+    def pytest_sessionfinish(self) -> None:
+        self._write_line({"file": "", "node": "", "event": _SESSION_FINISHED})
 
     def pytest_deselected(self, items: list[pytest.Item]) -> None:
         if not self._records_collection:

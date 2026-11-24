@@ -360,6 +360,80 @@ def test_every_entry_sets_a_resource_class_timeout(tmp_path, provider_subdir):
         assert not off_limit, (tree.name, off_limit)
 
 
+def gpu_test_limit() -> float:
+    """The per-test limit of the GPU pytest entries that
+    tests/cmake/TestTimeouts.cmake sets (ROCKE_TEST_ITEM_TIMEOUT_GPU), in
+    seconds."""
+    text = (PLATFORM / "tests" / "cmake" / "TestTimeouts.cmake").read_text()
+    [seconds] = re.findall(
+        r"^set\(ROCKE_TEST_ITEM_TIMEOUT_GPU (\d+)\)$", text, re.MULTILINE
+    )
+    return float(seconds)
+
+
+def entry_property(test: dict, name: str):
+    """The value of the CTest property ``name`` of the listed entry ``test``,
+    or None."""
+    return next(
+        (prop["value"] for prop in test.get("properties", []) if prop["name"] == name),
+        None,
+    )
+
+
+@requires_cmake
+@pytest.mark.parametrize(
+    ("provider_subdir", "gpu_references"),
+    [
+        ("", False),
+        ("hip_kernel_provider", False),
+        pytest.param(
+            "hip_kernel_provider",
+            True,
+            marks=pytest.mark.skipif(
+                reference_archives_missing(),
+                reason="GPU reference archives need dvc pull",
+            ),
+        ),
+    ],
+    ids=["standalone", "provider", "provider-gpu-references"],
+)
+def test_every_gpu_pytest_entry_limits_each_test(
+    tmp_path, provider_subdir, gpu_references
+):
+    """A GPU pytest entry without a per-test limit runs a stalled test into its
+    CTest limit, and the CI log never names the test. Each one passes a
+    --timeout (pytest keeps the last) of at most ROCKE_TEST_ITEM_TIMEOUT_GPU,
+    itself at most half the entry's CTest TIMEOUT, and pytest-timeout's thread
+    method, the one that interrupts a stall inside a HIP or COMGR call. Each
+    takes the rocke_gpu resource lock, so a parallel ctest never runs two of
+    them on the one GPU at once."""
+    _, ctest_dir = configure_installed_ctest(
+        tmp_path,
+        f"-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR={provider_subdir}",
+        f"-DROCKE_INSTALL_TEST_GPU_REFERENCES={'ON' if gpu_references else 'OFF'}",
+    )
+    limit = gpu_test_limit()
+    gpu_entries = {
+        test["name"]: test
+        for test in list_ctest_entries(ctest_dir)
+        if runs_pytest(test) and "gpu" in (entry_property(test, "LABELS") or [])
+    }
+    assert "rocke_tiling_gpu_pytest" in gpu_entries, sorted(gpu_entries)
+    if (PLATFORM.parent / "library" / "tests" / "ctest_lists.cmake").is_file():
+        assert "rocke_library_gpu_pytest" in gpu_entries, sorted(gpu_entries)
+    for name, test in gpu_entries.items():
+        command = test["command"]
+        timeouts = [
+            float(argument.removeprefix("--timeout="))
+            for argument in command
+            if argument.startswith("--timeout=")
+        ]
+        assert timeouts and timeouts[-1] <= limit, (name, timeouts)
+        assert "--timeout-method=thread" in command, name
+        assert limit <= float(entry_property(test, "TIMEOUT")) / 2, name
+        assert entry_property(test, "RESOURCE_LOCK") == ["rocke_gpu"], name
+
+
 _NO_SHARED_ENGINE = "the build had ROCKE_BUILD_SHARED_ENGINE off"
 _PROVIDER = "-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR=hip_kernel_provider"
 _SHARED_ENGINE = "-DROCKE_BUILD_SHARED_ENGINE=ON"

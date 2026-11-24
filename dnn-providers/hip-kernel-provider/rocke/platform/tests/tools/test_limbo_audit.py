@@ -26,7 +26,7 @@ import pytest
 from rocke.assets import platform_root
 from rocke.tests.lanes import BINDING_LANE, GFX950_RUNNER, skip_until_reason
 from rocke.tests.pending_lanes import PENDING
-from rocke.tests.run_records import RECORDS_DIR_ENV, read_run_records
+from rocke.tests.run_records import RECORDS_DIR_ENV, UNFINISHED, read_run_records
 from rocke.tests.subprocess_launcher import rocke_subprocess_env
 
 ROCKE = platform_root().parent
@@ -82,10 +82,12 @@ def _run_lane(
     lane: str,
     *arguments: str,
     environment: dict[str, str] | None = None,
+    statuses: tuple[int, ...] = (0, 5),
 ) -> Path:
     """Run pytest over ``tree`` as the CI lane ``lane`` (the tests read it
     from ``FAKE_LANE``), writing run records into ``records``, with
-    ``environment`` added to the child's."""
+    ``environment`` added to the child's; the run exits with one of
+    ``statuses``."""
     child_environment = rocke_subprocess_env()
     child_environment.update(
         PYTEST_PLUGINS="rocke.tests.run_records",
@@ -102,7 +104,7 @@ def _run_lane(
         check=False,
         timeout=_CHILD_TIMEOUT_SECONDS,
     )
-    assert result.returncode in (0, 5), result.stdout[-3000:] + result.stderr[-3000:]
+    assert result.returncode in statuses, result.stdout[-3000:] + result.stderr[-3000:]
     return records
 
 
@@ -261,6 +263,26 @@ def test_left_out():
     )
     assert _audit(tree, {"gfx942": selected_only}, universe) == {
         (UNREGISTERED_FILE, "test_left_out"): {}
+    }
+
+
+def test_a_test_whose_process_ended_first_is_in_limbo_as_not_run(tmp_path):
+    """A test the lane's process was to run but ended before (a per-test time
+    limit's os._exit) is not run, with the reason that says so."""
+    tree = _tree_with(
+        tmp_path,
+        {
+            UNREGISTERED_FILE: """
+import os
+
+def test_ends_the_process():
+    os._exit(1)
+""",
+        },
+    )
+    records = _run_lane(tree, tmp_path / "gfx942", "gfx942", statuses=(1,))
+    assert _audit(tree, {"gfx942": records}) == {
+        (UNREGISTERED_FILE, "test_ends_the_process"): {"gfx942": UNFINISHED}
     }
 
 

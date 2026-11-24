@@ -22,6 +22,7 @@ from rocke.tests.run_records import (
     OTHER_SHARD,
     RAN_OUTCOMES,
     RECORDS_DIR_ENV,
+    UNFINISHED,
     RunRecord,
     read_run_records,
 )
@@ -353,6 +354,47 @@ def test_a_test_that_ran_is_recorded_with_how_it_ended(tmp_path):
         ("test_setup_raises", "error"),
     ]
     assert {reason for _, reason in ran} == RAN_OUTCOMES
+
+
+def test_a_process_that_ends_before_its_session_finishes_leaves_its_tests_unfinished(
+    tmp_path,
+):
+    """A process that a per-test time limit ends with os._exit keeps the
+    records it wrote; the test it was in and the tests after it are
+    ``unfinished``, not taken for tests a filter dropped."""
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    _write(
+        tree,
+        "test_ends.py",
+        """
+        import os
+
+        def test_before():
+            pass
+
+        def test_ends_the_process():
+            os._exit(1)
+
+        def test_after():
+            pass
+        """,
+    )
+    _run_pytest(tree, tmp_path / "records")
+    assert _events(tmp_path / "records") >= {
+        ("test_ends.py", "test_before", "ran", "passed"),
+        ("test_ends.py", "test_ends_the_process", "unfinished", UNFINISHED),
+        ("test_ends.py", "test_after", "unfinished", UNFINISHED),
+    }
+    assert ("test_ends.py", "test_before", "unfinished", UNFINISHED) not in (
+        _events(tmp_path / "records")
+    )
+
+    _write(tree, "test_ends.py", "def test_before():\n    pass\n")
+    _run_pytest(tree, tmp_path / "finished")
+    assert "unfinished" not in {
+        event for _, _, event, _ in _events(tmp_path / "finished")
+    }
 
 
 def test_nothing_is_written_without_the_records_directory(tmp_path):

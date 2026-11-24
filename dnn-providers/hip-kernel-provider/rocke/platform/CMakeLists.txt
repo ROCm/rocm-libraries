@@ -400,6 +400,23 @@ include(CTest)
 # BUILD_TESTING: the installed test text below uses the limits too.
 include("${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/TestTimeouts.cmake")
 
+# Every installed GPU pytest entry limits each test, so a test that stalls
+# fails under its own name instead of running the entry into its CTest limit
+# unnamed. It uses pytest-timeout's thread method: a stall there is mostly
+# inside a HIP or COMGR call, which the signal method cannot interrupt. On a
+# stall the method prints the test's stack under its name (the -v line) and
+# ends the pytest process; rocke.tests.ctest_workers names a worker that ended
+# so, and rocke.tests.run_records records the tests it did not run as
+# unfinished. An entry with no per-test limit of its own puts
+# _ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT at the end of its command; one with a
+# lower limit adds only the method. Every GPU entry also takes the CTest
+# resource lock _ROCKE_INSTALLED_GPU_RESOURCE_LOCK, so a parallel ctest -j
+# never runs two of them at once on the one GPU.
+set(_ROCKE_INSTALLED_PYTEST_GPU_TIMEOUT_METHOD "--timeout-method=thread")
+set(_ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT
+    "--timeout=${ROCKE_TEST_ITEM_TIMEOUT_GPU} ${_ROCKE_INSTALLED_PYTEST_GPU_TIMEOUT_METHOD}")
+set(_ROCKE_INSTALLED_GPU_RESOURCE_LOCK "rocke_gpu")
+
 # C++ test targets are orchestrated from tests/CMakeLists.txt and registered in
 # concern-owned tests/cmake/*.cmake fragments.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
@@ -1083,10 +1100,11 @@ if(ROCKE_INSTALL_TESTS)
              "  LABELS \"ckc;python\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
              "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n"
-             "add_test(rocke_tiling_gpu_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_TESTS}\" ${_rocke_tiling_pytest_options} -m gpu)\n"
+             "add_test(rocke_tiling_gpu_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_TESTS}\" ${_rocke_tiling_pytest_options} ${_ROCKE_INSTALLED_PYTEST_GPU_TIMEOUT_METHOD} -m gpu)\n"
              "set_tests_properties(rocke_tiling_gpu_pytest PROPERTIES\n"
              "  LABELS \"ckc;python;gpu\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
+             "  RESOURCE_LOCK ${_ROCKE_INSTALLED_GPU_RESOURCE_LOCK}\n"
              "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")
       # check_backend_access_width.py compiles a few copy kernels through COMGR
       # and reads their disassembly. A host module that does that is kept out of
@@ -1133,12 +1151,13 @@ if(ROCKE_INSTALL_TESTS)
       # this trade-off and when to register one CTest per variant instead.
       foreach(_arch IN LISTS _ROCKE_${_operation_upper}_INSTALLED_ARCHITECTURES)
         string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-               "add_test(rocke_${_operation}_gpu_${_arch}_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_pinned_reference.py\" --rocke-reference-operation ${_operation} --rocke-reference-arch ${_arch} -v -rs)\n")
+               "add_test(rocke_${_operation}_gpu_${_arch}_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_pinned_reference.py\" --rocke-reference-operation ${_operation} --rocke-reference-arch ${_arch} -v -rs ${_ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT})\n")
         string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
                "set_tests_properties(rocke_${_operation}_gpu_${_arch}_pytest PROPERTIES\n"
                "  LABELS \"ckc;python;${_operation};gpu;quick\"\n"
                "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
                "  SKIP_RETURN_CODE 77\n"
+               "  RESOURCE_LOCK ${_ROCKE_INSTALLED_GPU_RESOURCE_LOCK}\n"
                "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")
       endforeach()
     endforeach()

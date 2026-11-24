@@ -1065,7 +1065,9 @@ most Q3 to quick.
    Parameterize per case, so a sweep is many small keys, not one large one. A
    module fixture is paid on every CI shard that gets an item of the module.
 4. Set pytest `--timeout` and CTest `TIMEOUT` from measured time with the
-   headroom of S2; make a slow test cheaper rather than raise a limit.
+   headroom of S2; make a slow test cheaper rather than raise a limit. A GPU
+   pytest entry takes `_ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT`
+   (`platform/CMakeLists.txt` says why).
 
 **Measure before you choose.** In `platform/`, the setup, call and teardown
 times of a file's items (`-q` hides those under 5 ms), and its split over 4 CI
