@@ -1154,6 +1154,16 @@ class ORIGAMI_EXPORT hardware_t {
   double get_mi_latency(size_t MI_M, size_t MI_N, size_t MI_K, data_type_t mi_input_type) const;
 
   /**
+   * @brief The same device at another compute clock.
+   *
+   * The memory rates are bytes per compute cycle, so they are rescaled to keep the bandwidths.
+   *
+   * @param ghz Compute clock in GHz
+   * @return hardware_t Copy of this hardware with compute_clock_ghz = @p ghz
+   */
+  hardware_t at_compute_clock(double ghz) const;
+
+  /**
    * @brief Get valid matrix instruction dimensions for a given datatype.
    *
    * Returns a list of valid matrix instruction dimensions (M, N, K) for

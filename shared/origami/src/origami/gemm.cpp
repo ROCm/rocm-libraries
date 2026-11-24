@@ -20,6 +20,8 @@
 #include "origami/types.hpp"
 
 #include "origami/gemm.hpp"
+
+#include <optional>
 #include "origami/origami.hpp"
 #include "origami/simulator/tensilelite/formocast_simulator.hpp"
 #include "origami/streamk.hpp"
@@ -124,6 +126,13 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
   num_timesteps      = timesteps;
   splitting_factor   = split;
   k_per_split        = math::safe_ceil_div(problem.size.k, splitting_factor);
+  // A Stream-K grid of more workgroups than tiles shares out the K of the tiles evenly, also
+  // when the workgroups are not a multiple of the tiles: each gets K x tiles / workgroups
+  // (counted so where the tile terms are measured; the split count above rounds up, which
+  // drops work when it does not divide).
+  if (heuristic_defaults_t::has_measured_tile_terms(hardware.arch) && config.stream_k > 0 &&
+      num_wgs > num_output_tiles)
+    k_per_split = std::max<size_t>(math::safe_ceil_div(problem.size.k * num_output_tiles, num_wgs), 1);
   k_iters            = math::safe_ceil_div(k_per_split, config.mt.k);
 
   // Per-operand DRAM traffic: pure function of the values set above; computed
@@ -1216,27 +1225,25 @@ data_type_t lds_dtype_a(const problem_t& problem, const hardware_t& hardware) {
   return is_w4a16(problem, hardware) ? problem.mi_dtype : problem.a_dtype;
 }
 
-// W4A16 dequantize cost per MT_MxMT_NxMT_K iteration, in the same serial-MI cycle
-// units as compute_mt_compute_latency. Every workgroup expands its MT_M x MT_K int4 A
-// tile into the MI type after the global read, with VALU instructions that issue on the
-// SIMDs that run the MIs (RDNA has no separate matrix pipe), so the cost adds to the MI
-// time rather than hiding under it. Relative to the MI time it is 4 * I / MT_N, I being
-// VALU instructions per dequantized element: the A tile is expanded once per output
-// tile, so a wider N tile spreads it over more MI work. Only for W4A16 problems: the
-// caller checks is_w4a16.
+// W4A16 dequantize cost per MT_MxMT_NxMT_K iteration, in the cycles of
+// compute_mt_compute_latency. Every workgroup expands its MT_M x MT_K int4 A tile into the MI
+// type after the global read, with VALU instructions that issue on the SIMDs that run the MIs
+// (RDNA has no separate matrix pipe), so the cost adds to the MI time rather than hiding under
+// it. The A tile is expanded once per output tile, so a wider N tile spreads it over more MI
+// work. The instructions are counted in the kernels and, like the MIs, issue on any of the
+// CU's SIMDs. Only for W4A16 problems: the caller checks is_w4a16.
 static double compute_w4a16_dequant_latency(const problem_t& problem,
                                             const hardware_t& hardware,
                                             const config_t& config) {
   assert(is_w4a16(problem, hardware));
+  using D                = w4a16_params_t;
   const bool bf16        = problem.mi_dtype == data_type_t::BFloat16;
-  const double elems     = static_cast<double>(config.mt.m) * static_cast<double>(config.mt.k);
+  const bool dot2        = config.mi.m == 1 && config.mi.n == 1 && config.mi.k == 64;
+  const double per_elem  = dot2 ? (bf16 ? D::BF16_DOT2_DEQUANT_VALU_PER_ELEM : D::F16_DOT2_DEQUANT_VALU_PER_ELEM)
+                                : (bf16 ? D::BF16_DEQUANT_VALU_PER_ELEM : D::F16_DEQUANT_VALU_PER_ELEM);
   constexpr double lanes = 32.0;  // wave32: one VALU instruction covers 32 elements
-  // The dot2 kernels dequantize into registers: the instructions are counted in the kernels
-  // and, like the dot2 itself, issue on any of the CU's SIMDs.
-  if (config.mi.m == 1 && config.mi.n == 1 && config.mi.k == 64)
-    return elems * (bf16 ? w4a16_params_t::BF16_DOT2_DEQUANT_VALU_PER_ELEM : w4a16_params_t::F16_DOT2_DEQUANT_VALU_PER_ELEM) /
-           lanes / static_cast<double>(hardware.parallel_mi_cu);
-  return elems * (bf16 ? w4a16_params_t::BF16_DEQUANT_VALU_PER_ELEM : w4a16_params_t::F16_DEQUANT_VALU_PER_ELEM) / lanes;
+  return static_cast<double>(config.mt.m) * static_cast<double>(config.mt.k) * per_elem / lanes /
+         static_cast<double>(hardware.parallel_mi_cu);
 }
 
 // Compute cvt overhead in tf32 emulation
@@ -2250,7 +2257,12 @@ double compute_epilogue_latency(const problem_t& problem,
   // store ceiling in a soft minimum.  The rates scale with mem3 as fractions of the measured
   // DRAM peak.  The K-split reduction reads its partials at the read bandwidth and writes D at
   // the store one.
-  double store_bw           = hardware.mem3_perf_ratio * context.mem_bw_limited;
+  // Where the tile terms are measured, the stores land in the MALL when the device has one
+  // (gfx1151 stores a tile at about twice its DRAM rate) and in DRAM when it has none.
+  const bool measured_terms = heuristic_defaults_t::has_measured_tile_terms(hardware.arch);
+  double store_bw           = ((measured_terms && hardware.has_MALL()) ? hardware.mem2_perf_ratio
+                                                                        : hardware.mem3_perf_ratio) *
+                              context.mem_bw_limited;
   const double reduce_bw    = hardware.mem3_perf_ratio * context.write_mem_bw_limited;
   double reduce_write_bw    = reduce_bw;
 
@@ -2408,7 +2420,12 @@ double compute_epilogue_latency(const problem_t& problem,
                                             : 0.0;
     const double store_issue_parallel = critical_path(tile.max_wave_issue, tile.store.issue_insts);
     tile.store_issue                  = store_issue_parallel;
-    const double store_memory_bytes = critical_path(max_wave_sector_bytes, tile.store.sector_bytes);
+    // The traffic of the stores is all their sectors: the SIMDs issuing in parallel shorten
+    // the issue, not the bytes (charged as such where the tile terms are measured; gfx1150
+    // stores a tile at half its DRAM rate, its stores filling half of each sector).
+    const double store_memory_bytes = measured_terms
+                                          ? tile.store.sector_bytes
+                                          : critical_path(max_wave_sector_bytes, tile.store.sector_bytes);
     tile.store_memory = (per_cu_store_bw > 0.0)
         ? store_memory_bytes / per_cu_store_bw
         : 0.0;
@@ -2698,7 +2715,15 @@ double compute_tile_latency(const problem_t& problem,
   // split-K shards the full iters across WGs.  The tail iter is charged to
   // every WG (a uniform charge that models better than StreamK's per-tile tail).
   const long total_full_iters = static_cast<long>(K / MT_K);
-  const long k_iters          = (splitting_factor > 1)
+  // (Where the tile terms are measured, a Stream-K grid of more workgroups than tiles gives
+  // each workgroup its even share of the iterations, as context_t::k_per_split.)
+  const bool even_k_share = heuristic_defaults_t::has_measured_tile_terms(hardware.arch) &&
+                            config.stream_k > 0 && context.num_wgs > context.num_output_tiles;
+  const long k_iters          = even_k_share
+                                    ? std::max<long>(static_cast<long>(math::safe_ceil_div(
+                                          static_cast<size_t>(total_full_iters) * context.num_output_tiles,
+                                          context.num_wgs)), total_full_iters > 0 ? 1 : 0)
+                                    : (splitting_factor > 1)
                                     ? static_cast<long>(math::safe_ceil_div(
                                  static_cast<size_t>(total_full_iters), splitting_factor))
                                     : total_full_iters;
@@ -2718,11 +2743,15 @@ double compute_tile_latency(const problem_t& problem,
   // Edge / spatial waste penalty.  utilization is the ratio
   // of useful problem volume to launched volume; the kernel still pays for
   // the launched volume, so per-iter latency scales by 1/utilization.
-  const double utilization = calculate_work_utilization(problem, config);
+  // Where the tile terms are measured there is no penalty: a tile that the problem does not
+  // fill runs every instruction of a full one, which L_compute already charges, and no more
+  // (measured: the time of a partly used tile is that of a full one, not 1/utilization of it).
+  const bool   wg_costs    = heuristic_defaults_t::has_measured_tile_terms(hardware.arch);
+  const double utilization = wg_costs ? 1.0 : calculate_work_utilization(problem, config);
   const double effective_tile_penalty =
       (utilization > 1e-9) ? (1.0 / utilization) : 1.0;
   // The compute terms' penalty leaves out sub-MFMA waste, which L_compute already pays.
-  const double compute_utilization = calculate_compute_utilization(problem, config);
+  const double compute_utilization = wg_costs ? 1.0 : calculate_compute_utilization(problem, config);
   const double compute_tile_penalty =
       (compute_utilization > 1e-9) ? (1.0 / compute_utilization) : 1.0;
 
@@ -2775,7 +2804,6 @@ double compute_tile_latency(const problem_t& problem,
   // its own tile and computes it, so there is neither a prologue load nor a terminal iteration
   // on a tile loaded earlier.  (Charged as such where the per-workgroup costs are measured; the
   // other architectures keep the terms their constants were fitted with.)
-  const bool   wg_costs     = heuristic_defaults_t::has_workgroup_costs(hardware.arch);
   const double resident     = context.resident_wgs;
   const bool   no_prefetch  = wg_costs && pgr == 0;
   // The dot2 kernels have no tail loop: they run K % DepthU as one more iteration of the main
@@ -2986,7 +3014,9 @@ double compute_tile_latency(const problem_t& problem,
                                static_cast<double>(config.mt.n) * context.b_bytes) *
                               static_cast<double>(MT_K) /
                               static_cast<double>(heuristic_defaults_t::LDS_XFER_BYTES);
-    if (tile_write > kstep_mfma && wgs_per_cu <= 1.0)
+    // (Not where the tile terms are measured: the time per K iteration of the gfx1151 kernels
+    // with one LDS buffer and one workgroup per CU is that of their instructions.)
+    if (tile_write > kstep_mfma && wgs_per_cu <= 1.0 && !wg_costs)
       L_single_lds_buffer = (tile_write + 2.0 * heuristic_defaults_t::L_BARRIER) *
                             static_cast<double>(num_main_iters + num_ngll_iters);
   }
@@ -3053,7 +3083,9 @@ double compute_tile_latency(const problem_t& problem,
   // 3. Epilogue (per-tile store; compute is already covered by NLL)
   // ---------------------------------------------------------------------------
   // Below the occupancy that saturates the store/return pipeline, un-overlapped
-  // epilogue store latency is exposed and scales ~1/(resident WGs per CU).
+  // epilogue store latency is exposed and scales ~1/(resident WGs per CU).  (Not where the
+  // tile terms are measured: the time per tile left at zero K iterations is that of the
+  // stores at the DRAM rate, at one workgroup per WGP as at four.)
   // Multiplies only the epilogue term, so it bites store-bound shapes but not
   // mainloop-bound ones.
   const double cu_occ_epi = wgs_per_cu;
@@ -3064,7 +3096,7 @@ double compute_tile_latency(const problem_t& problem,
                  ? std::max(1.0, heuristic_defaults_t::GFX1250_FIT_EPILOGUE_OCC_SATURATION / cu_occ_epi) /
                        std::max(1.0, heuristic_defaults_t::GFX1250_FIT_EPILOGUE_OCC_SATURATION_DEV / cu_occ_epi)
                  : 1.0)
-          : std::max(1.0, heuristic_defaults_t::EPILOGUE_OCC_SATURATION / cu_occ_epi);
+          : (wg_costs ? 1.0 : std::max(1.0, heuristic_defaults_t::EPILOGUE_OCC_SATURATION / cu_occ_epi));
   double scalar_store_fraction = 0.0;
   double L_epilogue =
       compute_epilogue_latency(problem, hardware, config, context, &scalar_store_fraction) *
@@ -3096,16 +3128,20 @@ double compute_tile_latency(const problem_t& problem,
   const double L_lsu_reduce = compute_lsu_reduction_latency(problem, hardware, config, context);
   double L_tile_total = (L_prologue + L_mainloop + L_epilogue + L_lsu_reduce) * weight_tile_total;
   // A workgroup that does not overlap its own loads with the rest of its work (no prefetch)
-  // still leaves the CU's memory path free while it computes, sets up or stores, and its SIMDs
-  // free while it waits for memory, and the other resident workgroups use them.  Of the shorter
-  // of the two phases, what stays exposed is one workgroup's share, and the whole first round:
-  // the workgroups launched together run their phases in step, and only the later ones, which
-  // start as slots free up, interleave.  With one workgroup on the CU the phases add up, as above.
-  if (wg_costs && additive_iter && resident > 1.0) {
-    const double mem_phase = (L_mem_stream * eff_scale + L_tail_mem_part + L_prologue) * weight_tile_total;
-    const double own_phase = L_tile_total - mem_phase;
-    const double exposed   = std::max(1.0 / resident, 1.0 / resident_rounds);
-    L_tile_total = std::max(mem_phase, own_phase) + std::min(mem_phase, own_phase) * exposed;
+  // waits for memory and then works.  Alone on its SIMDs the two phases add up, as above.  The
+  // workgroups that share its SIMDs (those of the hardware_t::OCCUPANCY_SIMDS SIMDs the
+  // occupancy counts: a WGP on RDNA, which is two CUs) work while it waits, so the SIMDs stay
+  // busy unless the wait outlasts the others' work: a tile takes the longer of the work and of
+  // the wait plus one workgroup's share of the work.  The exception is the first round: the
+  // workgroups launched together run their phases in step, and only the later ones, which
+  // start as slots free up, interleave.
+  const double sharing = resident * static_cast<double>(hardware_t::OCCUPANCY_SIMDS) /
+                         static_cast<double>(hardware.simds_per_cu());
+  if (wg_costs && additive_iter && sharing > 1.0) {
+    const double mem_phase   = (L_mem_stream * eff_scale + L_tail_mem_part + L_prologue) * weight_tile_total;
+    const double own_phase   = L_tile_total - mem_phase;
+    const double interleaved = std::max(own_phase, mem_phase + own_phase / sharing);
+    L_tile_total = interleaved + (mem_phase + own_phase - interleaved) / resident_rounds;
   }
   // gfx1250: work outside the tile model that every tile round repeats, growing with the output tile and one
   // K-iteration of A and B (time vs tile rounds of real kernels).
@@ -3292,14 +3328,14 @@ double compute_parallel_reduction_latency(const problem_t& problem,
 }
 
 double compute_total_latency(const problem_t& problem,
-                             const hardware_t& hardware,
+                             const hardware_t& device,
                              const config_t& config) {
   if (!config.is_valid()) return std::numeric_limits<double>::max();
 
   // Heuristic-driven kernel rejection (e.g. subtile kernels with small K).
   // When a matching heuristic marks the config as rejected, report the maximum
   // latency so rank_configs() drops the kernel from selection entirely.
-  if (get_heuristic_params(problem, hardware, config).reject) {
+  if (get_heuristic_params(problem, device, config).reject) {
     return std::numeric_limits<double>::max();
   }
 
@@ -3314,7 +3350,7 @@ double compute_total_latency(const problem_t& problem,
 
   // Use Formocast simulation model if prediction_mode is set to simulation
   if (config.prediction_mode == prediction_modes_t::simulation) {
-    return compute_formocast_latency(problem, hardware, config);
+    return compute_formocast_latency(problem, device, config);
   }
 
   // Extract parameters from structured types
@@ -3341,11 +3377,11 @@ double compute_total_latency(const problem_t& problem,
   if (shortCircuit) {
     // Use Dot2 only for M < 3.  The rule is for kernels whose few rows are along M; the W4A16
     // dot2 kernels are TN with the tokens along N and any number of weight rows along M.
-    if (MI_M == 1 && MI_N == 1 && MI_K == 64 && M > 2 && !is_w4a16(problem, hardware))
+    if (MI_M == 1 && MI_N == 1 && MI_K == 64 && M > 2 && !is_w4a16(problem, device))
       return std::numeric_limits<double>::max();
 
     // gfx1250 loads carry TemporalHints, not the glc/slc/nt bits these rules were fit on.
-    const bool nt_rules              = !hardware.is_cdna5();
+    const bool nt_rules              = !device.is_cdna5();
     constexpr size_t cache_line_bits = heuristic_defaults_t::CACHE_LINE_BYTES * 8;  // 128 B in bits
     size_t K_mod_128bytes    = K * a_bits % cache_line_bits;
     size_t MT_K_mod_128bytes = MT_K * a_bits % cache_line_bits;
@@ -3371,6 +3407,18 @@ double compute_total_latency(const problem_t& problem,
       return std::numeric_limits<double>::max();
     }
   }
+
+  // The kernel runs at its own clock where the architecture slows kernels of matrix
+  // instructions down: the model runs in that clock's cycles (the memory rates keep their
+  // bandwidths) and the kernel's time is converted to cycles of the device's clock at the end,
+  // so that kernels at different clocks compare.
+  const double kernel_clock_ghz = heuristic_defaults_t::matrix_kernel_clock_ghz(device.arch);
+  const bool   matrix_kernel    = !(MI_M == 1 && MI_N == 1 && MI_K == 64);
+  const bool   slowed           = matrix_kernel && kernel_clock_ghz > 0.0 && kernel_clock_ghz < device.compute_clock_ghz;
+  std::optional<hardware_t> at_kernel_clock;
+  if (slowed) at_kernel_clock.emplace(device.at_compute_clock(kernel_clock_ghz));
+  const hardware_t& hardware = slowed ? *at_kernel_clock : device;
+  const double clock_ratio   = slowed ? device.compute_clock_ghz / kernel_clock_ghz : 1.0;
 
   // 1) Setup context (computes grid dims, launch params, WGM, etc.)
   context_t context(problem, hardware, config);
@@ -3404,12 +3452,15 @@ double compute_total_latency(const problem_t& problem,
   if (w4 && config.stream_k > 0 && context.num_wgs != context.num_output_tiles) {
     const double tiles    = static_cast<double>(context.num_output_tiles);
     const double wgs      = static_cast<double>(context.num_wgs);
-    const double partials = wgs > tiles ? std::ceil(wgs / tiles) - 1.0
+    // (A tile cannot be split over more workgroups than it has K iterations.)
+    const double tile_iters = static_cast<double>(std::max<size_t>(math::safe_ceil_div(K, MT_K), 1));
+    const double partials = wgs > tiles ? std::min(std::ceil(wgs / tiles), tile_iters) - 1.0
                                         : (context.num_output_tiles % context.num_wgs ? 1.0 : 0.0);
     total_latency += partials * w4a16_params_t::SK_FIXUP_CYCLES_PER_ELEM
                      * static_cast<double>(config.mt.m * config.mt.n);
   }
 
+  total_latency *= clock_ratio;
 
   //  4) Kernel launch overhead
   total_latency += hardware.is_cdna5() ? heuristic_defaults_t::GFX1250_KERNEL_LAUNCH_CLK

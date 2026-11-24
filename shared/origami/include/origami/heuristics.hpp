@@ -279,11 +279,29 @@ struct heuristic_defaults_t {
     }
   }
 
-  /// Whether the per-K-iteration costs above (load round trip, loop skeleton) were measured on
-  /// the architecture as what one workgroup waits or spends.  The tile model then shares them
-  /// among the workgroups resident on a CU, whose waits overlap.  Elsewhere they are charges
-  /// fitted per tile and stay as they are.
-  static constexpr bool has_workgroup_costs(hardware_t::architecture_t arch) noexcept {
+  /// Compute clock at which the architecture runs a kernel of matrix instructions, in GHz; 0
+  /// where it runs it at the clock the device reports.  gfx1150 and gfx1151 report their
+  /// maximum (2.9 GHz) and run WMMA kernels at 2.1: the time per K iteration of 44 W4A16 WMMA
+  /// kernels in the compute-bound regime gives 16 x 2.9 / 22 cycles per WMMA on both, the
+  /// gfx1151 WMMA roofline (43 TFLOP/s) gives the same, and the shader clock read on a gfx1151
+  /// stays near 2.3 GHz under a WMMA kernel and reaches 2.9 under a dot2 one.  The cycle
+  /// constants of these architectures (MI table, loop skeleton, load round trip) are cycles of
+  /// the clock the kernel runs at.
+  static constexpr double GFX115X_MATRIX_CLOCK_GHZ = 2.1;
+  static constexpr double matrix_kernel_clock_ghz(hardware_t::architecture_t arch) noexcept {
+    switch (arch) {
+      case hardware_t::architecture_t::gfx1150:
+      case hardware_t::architecture_t::gfx1151: return GFX115X_MATRIX_CLOCK_GHZ;
+      default: return 0.0;
+    }
+  }
+
+  /// Whether the terms of the tile model were checked on the architecture against kernels
+  /// timed one by one, with the per-workgroup costs above measured as what one workgroup waits
+  /// or spends.  The tile model then shares those costs among the workgroups resident on a CU,
+  /// whose waits overlap, and charges a launched tile what it runs.  Elsewhere the costs are
+  /// charges fitted per tile, with the corrections fitted along with them, and stay as they are.
+  static constexpr bool has_measured_tile_terms(hardware_t::architecture_t arch) noexcept {
     return load_latency_cycles(arch) > 0.0;
   }
 };
@@ -303,14 +321,14 @@ struct w4a16_params_t {
   //   [DEFAULT]   a fallback for a config that does not carry the value, not fitted.
 
   // --- Tile latency model ---
-  // Dequantize VALU per element, with its dependency stalls (bf16 rounds f32 products, fp16
-  // uses packed halves).
-  static constexpr double BF16_DEQUANT_VALU_PER_ELEM = 10.0;  // [EMPIRICAL]
-  static constexpr double F16_DEQUANT_VALU_PER_ELEM  = 5.0;  // [EMPIRICAL]
-  // The same in the dot2 kernels, which dequantize into registers: VALU instructions of a K
-  // iteration other than the dot2, per weight of a lane, counted in the kernels' loops (2.05 and
-  // 3.10 without and with zero point for bf16, 2.19 and 2.34 for fp16; the model does not see the
-  // zero point and takes the mean).
+  // Instructions a K iteration issues on the SIMDs other than the matrix instruction, per
+  // weight of a lane, counted in the kernels' K loops (the model does not see the zero point
+  // and takes the middle of the kernels with and without it).  The WMMA kernels dequantize
+  // into LDS: VALU (bf16 3.50 and 3.94, fp16 2.25 and 2.48), LDS reads and writes (0.6 to 1.0)
+  // and global loads (0.2 to 0.3).  The dot2 kernels dequantize into registers: VALU other
+  // than the dot2 (bf16 2.05 and 3.10, fp16 2.19 and 2.34).
+  static constexpr double BF16_DEQUANT_VALU_PER_ELEM      = 4.7;  // [KERNEL]
+  static constexpr double F16_DEQUANT_VALU_PER_ELEM       = 3.4;  // [KERNEL]
   static constexpr double BF16_DOT2_DEQUANT_VALU_PER_ELEM = 2.6;  // [KERNEL]
   static constexpr double F16_DOT2_DEQUANT_VALU_PER_ELEM  = 2.3;  // [KERNEL]
   // Cycles per C element of a Stream-K partial tile on the critical path: the workgroup that

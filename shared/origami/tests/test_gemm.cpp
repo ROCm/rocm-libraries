@@ -3527,3 +3527,37 @@ TEST_CASE("GEMM: gfx1151 L_mem follows measured memory-only kernels", "[gemm][gf
     REQUIRE(L_mem == Approx(r.memory_only).epsilon(0.20));
   }
 }
+
+TEST_CASE("GEMM: gfx115x runs kernels of matrix instructions at their own clock", "[gemm][gfx1151]") {
+  using origami::hardware_t;
+  const auto arch   = hardware_t::architecture_t::gfx1151;
+  const auto device = hardware_t::get_hardware_for_arch(arch, 40, 65536, 786432, 2 << 20, 2900000);
+  // The same device at another clock keeps its bandwidths.
+  const auto slow = device.at_compute_clock(2.1);
+  REQUIRE(slow.compute_clock_ghz == Approx(2.1));
+  REQUIRE(slow.mem1_perf_ratio * slow.compute_clock_ghz == Approx(device.mem1_perf_ratio * device.compute_clock_ghz));
+  REQUIRE(slow.mem3_perf_ratio * slow.compute_clock_ghz == Approx(device.mem3_perf_ratio * device.compute_clock_ghz));
+
+  // A WMMA kernel runs at 2.1 GHz whatever the device reports above it: its time is the same
+  // at a reported 2.9 and 2.1 GHz, so its latency in device cycles scales with the clock.
+  const double launch = origami::heuristic_defaults_t::KERNEL_LAUNCH_OVERHEAD;
+  const auto pinned   = hardware_t::get_hardware_for_arch(arch, 40, 65536, 786432, 2 << 20, 2100000);
+  auto problem        = make_problem(4096, 4096, 4096);
+  auto wmma           = make_config(128, 128, 64, 16, 16, 16, false, 1, 2, 0, 0, 0);
+  wmma.backend        = origami::tensile_params_t{};
+  const double at_29  = origami::gemm::compute_total_latency(problem, device, wmma) - launch;
+  const double at_21  = origami::gemm::compute_total_latency(problem, pinned, wmma) - launch;
+  REQUIRE(at_29 / 2.9 == Approx(at_21 / 2.1));
+  // A kernel without matrix instructions runs at the device's clock: it takes less time at
+  // the higher one.
+  problem.a_dtype = origami::data_type_t::Int4;
+  problem.size    = {1024, 1, 16384};
+  auto dot2       = make_config(2, 1, 512, 1, 1, 64, false, 1, 32, 0, 0, 0);
+  origami::tensile_params_t t;
+  t.prefetch_global_read = 0;
+  t.wave_group_m         = 0;
+  dot2.backend           = t;
+  const double dot2_29 = origami::gemm::compute_total_latency(problem, device, dot2) - launch;
+  const double dot2_21 = origami::gemm::compute_total_latency(problem, pinned, dot2) - launch;
+  REQUIRE(dot2_29 / 2.9 < dot2_21 / 2.1);
+}

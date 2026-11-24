@@ -295,6 +295,18 @@ void hardware_t::print() const {
   std::cout << "===========================================================\n";
 }
 
+hardware_t hardware_t::at_compute_clock(double ghz) const {
+  hardware_t other = *this;
+  if (ghz > 0.0 && compute_clock_ghz > 0.0) {
+    const double scale = compute_clock_ghz / ghz;
+    other.mem1_perf_ratio *= scale;
+    other.mem2_perf_ratio *= scale;
+    other.mem3_perf_ratio *= scale;
+    other.compute_clock_ghz = ghz;
+  }
+  return other;
+}
+
 double hardware_t::get_mi_latency(size_t MI_M,
                                   size_t MI_N,
                                   size_t MI_K,
