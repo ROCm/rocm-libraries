@@ -116,19 +116,51 @@ struct HWModel {
     /// emitted. A non-zero entry is how many ops are needed; 0 is a sentinel for off,
     /// so that wait is always sent.
     struct WaitHide {
-        /// Matrix ops that satisfy a pending va_vdst, for one form. Keyed by the
-        /// instruction's own resolved cost latency and destination width.
+        /// One hide rule: `lead` matrix ops first, then `tail` slots that matrix ops or VALUs fill.
+        struct Hide {
+            int lead = 0;
+            int tail = 0;
+            constexpr bool on() const {
+                return lead > 0 || tail > 0;
+            }
+            bool operator==(const Hide&) const = default;
+        };
+        /// One producer class's rules for one hazard role; any rule met hides the wait.
+        struct RoleHide {
+            Hide wmma;
+            Hide mix;
+            Hide valu;
+            constexpr bool any() const {
+                return wmma.on() || mix.on() || valu.on();
+            }
+            bool operator==(const RoleHide&) const = default;
+        };
+        /// One producer class's rules: `dst` for RAW / WAW hazards, `src` for WAR hazards.
+        struct RuleSet {
+            RoleHide dst;
+            RoleHide src;
+            /// Tail slots one matrix op fills in `mix` (a VALU fills one): more for a scaled form.
+            int wmmaSlots = 1;
+            bool operator==(const RuleSet&) const = default;
+        };
+        /// One WMMA form, keyed by cost latency, dst VGPRs and scaled; a form with no row always
+        /// waits.
         struct Form {
             int costLatency;
             int dstVgprs;
-            /// Matrix ops after an XDL producer that satisfy its va_vdst wait.
-            int xdlVaVdst;
-            /// Matrix ops after a CSMACC producer that satisfy its va_vdst wait.
-            int csmaccVaVdst;
+            bool scaled = false;
+            /// Rules for XDL producers once this form is the kernel's.
+            RuleSet xdl;
+            /// Rules for CSMACC producers once this form is the kernel's.
+            RuleSet csmacc;
+            bool operator==(const Form&) const = default;
         };
-        /// One row per form the arch issues. A form with no row never satisfies a
-        /// va_vdst wait, so its producers are always waited on.
         std::span<const Form> forms;
+        /// CSMACC producers while no form is latched (no matrix op issued yet, a form without a
+        /// row, or two forms in one kernel), and TRANS producers at any time.
+        RuleSet noLatchCsmacc;
+        /// DPMACC (f64) producers, independent of the form.
+        RuleSet dpmacc;
         /// Same-class reads after a read that satisfy its vm_vsrc wait; a class at 0 always waits.
         int vmVsrcLds;
         int vmVsrcTex;

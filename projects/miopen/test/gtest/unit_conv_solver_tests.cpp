@@ -65,7 +65,9 @@ float GetValue(Gpu gpu, miopenDataType_t type)
 }
 } // namespace
 
-TEST(CPU_UnitConvSolverToleranceTests_NONE, testThrows)
+using CPU_UnitConvSolverToleranceTests_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_UnitConvSolverToleranceTests_NONE, testThrows)
 {
     Tol tol;
 
@@ -74,7 +76,7 @@ TEST(CPU_UnitConvSolverToleranceTests_NONE, testThrows)
     EXPECT_ANY_THROW(tol.Get(static_cast<Gpu>(static_cast<int>(Gpu::gfxLast) << 1), miopenHalf));
 }
 
-TEST(CPU_UnitConvSolverToleranceTests_NONE, testSetAllUnique)
+TEST_P(CPU_UnitConvSolverToleranceTests_NONE, testSetAllUnique)
 {
     Tol tol;
 
@@ -111,7 +113,7 @@ TEST(CPU_UnitConvSolverToleranceTests_NONE, testSetAllUnique)
     }
 }
 
-TEST(CPU_UnitConvSolverToleranceTests_NONE, testSetMulti)
+TEST_P(CPU_UnitConvSolverToleranceTests_NONE, testSetMulti)
 {
     Tol tol;
 
@@ -161,3 +163,5 @@ TEST(CPU_UnitConvSolverToleranceTests_NONE, testSetMulti)
     EXPECT_EQ(all, tol.Get(Gpu::gfx115X, miopenFloat));
     EXPECT_EQ(all, tol.Get(Gpu::gfx120X, miopenFloat));
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_UnitConvSolverToleranceTests_NONE, testing::Values(0));

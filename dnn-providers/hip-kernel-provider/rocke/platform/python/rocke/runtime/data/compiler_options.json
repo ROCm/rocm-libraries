@@ -1,0 +1,27 @@
+{
+  "schema": "rocke.compiler_options/v1",
+  "options": {
+    "-amdgpu-mfma-vgpr-form": {
+      "20": {
+        "accepted": false,
+        "evidence": "Unknown command line argument '-amdgpu-mfma-vgpr-form'.",
+        "verified_on": "LLVM 20.0.0"
+      },
+      "22": {
+        "accepted": true,
+        "evidence": "",
+        "verified_on": "LLVM 22.0.0"
+      },
+      "23": {
+        "accepted": true,
+        "evidence": "",
+        "verified_on": "LLVM 23.0.0"
+      },
+      "24": {
+        "accepted": true,
+        "evidence": "",
+        "verified_on": "LLVM 24.0.0"
+      }
+    }
+  }
+}

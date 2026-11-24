@@ -100,9 +100,21 @@ def _parse_args(argv):
         "internally over the full list in one run. Empty installs nothing.",
     )
     p.add_argument(
-        "--hipcc",
+        "--hip-compiler",
         required=True,
-        help="Path to the hipcc driver used for --genco compilation.",
+        help="Path to the HIP compiler (clang++ or amdclang++) used for "
+        "--offload-device-only compilation.",
+    )
+    p.add_argument(
+        "--hip-path",
+        default=None,
+        help="HIP runtime root passed as --hip-path to the compiler.",
+    )
+    p.add_argument(
+        "--hip-device-lib-path",
+        default=None,
+        help="Device bitcode library directory passed as "
+        "--hip-device-lib-path to the compiler.",
     )
     p.add_argument(
         "--inter-root",
@@ -151,10 +163,11 @@ def _parse_args(argv):
         action="append",
         default=[],
         metavar="NAME",
-        help="A top-level child folder of the source root that this build does "
-        "not pack (a descriptor family whose build flag is off), matched "
-        "case-insensitively. A name that matches no folder is ignored. "
-        "Repeatable.",
+        help="A folder of the source root that this build does not pack: a "
+        "top-level child (a descriptor family whose build flag is off) or a "
+        "'/'-separated path under the root (a bundle whose DVC files were not "
+        "pulled), matched case-insensitively. A name that matches no folder is "
+        "ignored. Repeatable.",
     )
     p.add_argument(
         "--disable-kind",
@@ -164,6 +177,13 @@ def _parse_args(argv):
         help="A kernel_source kind this build has no producer for. Its UKDs are "
         "pruned like arch-pruned ones, and a KDP left with none is dropped. "
         "Repeatable; an unknown kind is an error.",
+    )
+    p.add_argument(
+        "--require-dvc",
+        action="store_true",
+        help="A model file that is absent while its `<model>.dvc` pointer exists "
+        "(a `dvc pull` that was not run) is an error. Without it the model's UHD "
+        "is left out of the shipped tree with a warning.",
     )
     return p.parse_args(argv)
 
@@ -175,7 +195,7 @@ def main(argv=None):
         source_root=Path(args.source_root),
         arches=arches,
         out_root=Path(args.out_root),
-        hipcc=args.hipcc,
+        hip_compiler=args.hip_compiler,
         generic_targets_json=Path(args.generic_targets_json),
         rocm_kpack_dir=args.kpack_python_dir,
         inter_root=Path(args.inter_root),
@@ -184,6 +204,9 @@ def main(argv=None):
         source_label=args.source_label,
         exclude_folders=tuple(args.exclude_folder),
         disabled_kinds=tuple(args.disable_kind),
+        require_dvc=args.require_dvc,
+        hip_path=args.hip_path,
+        device_lib_path=args.hip_device_lib_path,
     )
     return 0
 

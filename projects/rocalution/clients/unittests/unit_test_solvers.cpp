@@ -38,6 +38,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -920,13 +921,6 @@ namespace
         return m.name.rfind("BiCGStab(", 0) == 0;
     }
 
-    // Solvers whose ReBuildNumeric of a built solver is broken
-    template <typename T>
-    bool rebuild_breaks(const Method<T>& m)
-    {
-        return m.name.rfind("IDR", 0) == 0 || m.name == "Chebyshev";
-    }
-
     template <typename T>
     void set_up(Iterative<T>&            solver,
                 const Method<T>&         m,
@@ -1342,7 +1336,6 @@ TYPED_TEST(solvers, qmrcgstab_iterates_follow_the_qmrcgstab_recurrence)
         }
     }
 
-    KNOWN_BUG("the residual check after the last iteration is counted as an iteration");
     EXPECT_EQ(iterations, std::vector<int>({1, 2, 3, 4, 1, 2, 3, 4}));
 }
 
@@ -1365,8 +1358,6 @@ TYPED_TEST(solvers, qmrcgstab_starts_every_solve_afresh)
     const double tolerance = std::is_same_v<T, float> ? 1e-6 : 1e-10;
     const Vec<T> expected  = qmrcgstab_iterate(D, b, x0, 3, identity<T>);
     expect_near(solve(*solver, *A, b, x0).x, expected, tolerance);
-
-    KNOWN_BUG("the first step adds r to the search direction of the previous solve");
     expect_near(solve(*solver, *A, b, x0).x, expected, tolerance);
 }
 
@@ -1384,9 +1375,8 @@ TYPED_TEST(solvers, qmrcgstab_solves_a_system_that_its_first_half_step_solves)
     solver->Init(0.0, 1e-10, 1e8, 10);
     set_up(*solver, m, *A, nullptr);
     const Outcome<T> out = quietly([&] { return solve(*solver, *A, b, Vec<T>(8, 0)); });
-
-    KNOWN_BUG("the first step, before the loop, has no breakdown check and returns NaN");
     expect_near(out.x, scaled(0.5, b), scaled_tol<T>(1e-14));
+    EXPECT_EQ(out.iterations, 1);
 }
 
 // The orthogonal and bidiagonal similarity transformations keep the matrices exact
@@ -1539,8 +1529,6 @@ TYPED_TEST(solvers, bicgstab_solves_a_system_that_its_preconditioned_first_half_
     EXPECT_NE(testing::internal::GetCapturedStdout().find("only in p-direction"),
               std::string::npos);
     EXPECT_EQ(out.iterations, 1);
-
-    KNOWN_BUG("the breakdown branch updates x along p instead of the preconditioned M^-1 p");
     expect_near(out.x, solution, scaled_tol<T>(1e-14));
 }
 
@@ -1763,7 +1751,6 @@ TYPED_TEST(solvers, minimum_iteration_count_delays_convergence)
                     loose_tol<T>(1e-10));
     }
 
-    KNOWN_BUG("the checks at a restart and in the BiCG part ignore the minimum iteration count");
     for(const Case& c : {Case{with_basis<GMRES<T>>("GMRES", 2), restarted_gmres(2)},
                          Case{with_basis<FGMRES<T>>("FGMRES", 2), restarted_gmres(2)},
                          Case{bicgstabl<T>(2), Vec<T>()}})
@@ -1777,6 +1764,106 @@ TYPED_TEST(solvers, minimum_iteration_count_delays_convergence)
         if(!c.x.empty())
         {
             expect_near(out.x, c.x, loose_tol<T>(1e-10));
+        }
+    }
+}
+
+// The first step solves 2 I x = (1, 1, 1, 1) exactly, so below the minimum iteration
+// count the next step would divide by zero: GMRES and FGMRES in normalizing the next
+// Arnoldi vector or the restart residual, BiCGStab(1) in its Gram-Schmidt step,
+// BiCGStab(2) in a rho == 0 breakdown of its next BiCG step, IDR(1) in an omega == NaN
+// breakdown of its dimension reduction and IDR(2) in an M(k,k) == 0 breakdown of its
+// next inner step
+TYPED_TEST(solvers, an_exact_step_below_the_minimum_iteration_count_stops_the_solve)
+{
+    using T = typename TypeParam::value_type;
+    auto A  = this->make(diagonal(Vec<T>(4, 2)));
+
+    for(const Method<T>& m : {with_basis<GMRES<T>>("GMRES", 1),
+                              with_basis<GMRES<T>>("GMRES", 2),
+                              with_basis<FGMRES<T>>("FGMRES", 1),
+                              with_basis<FGMRES<T>>("FGMRES", 2),
+                              bicgstabl<T>(1),
+                              bicgstabl<T>(2),
+                              idr<T>(1),
+                              idr<T>(2)})
+    {
+        for(bool precond : {false, true})
+        {
+            SCOPED_TRACE(trace(m, precond));
+            Jacobi<T> jacobi;
+            auto      solver = m.make();
+            solver->Init(0.0, 0.0, 1e8, 3, 10);
+            set_up(*solver, m, *A, precond ? &jacobi : nullptr);
+
+            Outcome<T>        out;
+            const std::string log
+                = logged([&] { out = solve(*solver, *A, Vec<T>(4, 1), Vec<T>(4, 0)); });
+            EXPECT_EQ(log.find("rho == 0"), std::string::npos) << log;
+            EXPECT_EQ(log.find("break down"), std::string::npos) << log;
+            EXPECT_EQ(out.x, Vec<T>(4, 0.5));
+            // BiCGStab(l) counts completed cycles
+            EXPECT_EQ(out.iterations, is_bicgstabl(m) ? 0 : 1);
+            // Below the minimum iteration count the residual checks reach no tolerance,
+            // so the exact solution stops with status 0
+            EXPECT_EQ(out.status, 0);
+            EXPECT_EQ(out.residual, 0);
+        }
+    }
+}
+
+// Far past convergence, below the minimum iteration count or with zero tolerances, the
+// residuals shrink until sigma_j = (r_j+1, r_j+1) in the Gram-Schmidt step underflows, or
+// until (r_0, r_l) does, so that omega = 0 breaks the next cycle down. Which one a case
+// reaches depends on rounding. The residual is measured in the 1-norm: the squares in the
+// euclidean norm of r_0 underflow as early and stop such small solves as an exact step.
+TYPED_TEST(solvers, bicgstabl_stops_when_its_residuals_underflow_far_past_convergence)
+{
+    using T = typename TypeParam::value_type;
+    struct System
+    {
+        std::string name;
+        Csr<T>      A;
+    };
+    struct Stop
+    {
+        std::string name;
+        double      rel;
+        int         min_iter;
+    };
+    for(const System& s : {System{"nonsymmetric 8", nonsymmetric<T>(8)},
+                           System{"nonsymmetric 16", nonsymmetric<T>(16)},
+                           System{"spd 16", spd<T>(16)}})
+    {
+        const Vec<T> b  = rhs<T>(s.A.n);
+        const Vec<T> x0 = start<T>(s.A.n);
+        auto         A  = this->make(s.A);
+        for(const Stop& stop : {Stop{"minimum iteration count", solver_tol<T>(1e-12), 1000},
+                                Stop{"zero tolerances", 0.0, 0}})
+        {
+            for(int l : {1, 2, 4})
+            {
+                const Method<T> m = bicgstabl<T>(l);
+                for(bool precond : {false, true})
+                {
+                    SCOPED_TRACE(trace(m, precond, s.name + ", " + stop.name));
+                    Jacobi<T> jacobi;
+                    auto      solver = m.make();
+                    solver->Init(0.0, stop.rel, 1e8, stop.min_iter, 1000);
+                    solver->SetResidualNorm(1);
+                    set_up(*solver, m, *A, precond ? &jacobi : nullptr);
+
+                    const Outcome<T> out = quietly([&] { return solve(*solver, *A, b, x0); });
+                    // Neither the minimum iteration count nor zero tolerances let the
+                    // residual checks reach a tolerance
+                    EXPECT_EQ(out.status, 0);
+                    EXPECT_LT(out.iterations, 1000);
+                    EXPECT_TRUE(std::isfinite(out.residual)) << out.residual;
+                    expect_near(out.x,
+                                dense_solve(dense(s.A), b),
+                                solution_tol(dense(s.A), b, x0, solver_tol<T>(1e-12), 1, precond));
+                }
+            }
         }
     }
 }
@@ -1850,6 +1937,132 @@ TYPED_TEST(solvers, gmres_and_fgmres_switch_to_the_euclidean_norm)
     }
 }
 
+#ifdef SUPPORT_COMPLEX
+namespace
+{
+    // nonsymmetric with an imaginary part on every entry, so that the residuals are complex
+    template <typename T>
+    Csr<T> complex_nonsymmetric(int n)
+    {
+        using R              = real_t<T>;
+        const Csr<double> re = nonsymmetric<double>(n);
+        Csr<T>            A(n);
+        for(int i = 0; i < n; ++i)
+        {
+            for(auto k = re.row_offset[i]; k < re.row_offset[i + 1]; ++k)
+            {
+                const int j = re.col[k];
+                A.add(j,
+                      T(static_cast<R>(re.val[k]), static_cast<R>(0.5 * ((i + 2 * j) % 4) - 0.75)));
+            }
+            A.end_row();
+        }
+        return A;
+    }
+
+    template <typename T>
+    Vec<T> complex_rhs(int n)
+    {
+        Vec<T> b(n);
+        for(int i = 0; i < n; ++i)
+        {
+            b[i] = from_int<T>(i % 7 - 3);
+        }
+        return b;
+    }
+
+    // The solvers on complex systems. The real-only references above, such as dot and
+    // norm_of_type, are not used: the checks compute the residual b - A x directly.
+    template <typename P>
+    class complex_solvers : public solvers<P>
+    {
+    };
+}
+
+TYPED_TEST_SUITE(complex_solvers, WithBackends<ComplexTypes>, TypedName);
+
+// The L1 and Linf residual norms of a complex solve are the sum and the largest of the moduli
+// |r_i|, which the solvers compute with Asum and Amax
+TYPED_TEST(complex_solvers, current_residual_is_measured_in_the_chosen_norm)
+{
+    using T          = typename TypeParam::value_type;
+    const int    n   = 12;
+    const Csr<T> ref = complex_nonsymmetric<T>(n);
+    const Vec<T> b   = complex_rhs<T>(n);
+    auto         A   = this->make(ref);
+
+    for(int type : {1, 3})
+    {
+        SCOPED_TRACE("norm " + std::to_string(type));
+        BiCGStab<T> solver;
+        solver.Init(0.0, 0.0, 1e8, 2);
+        solver.SetResidualNorm(type);
+        set_up(solver, method<BiCGStab<T>>("BiCGStab"), *A, nullptr);
+
+        const Outcome<T> out = solve(solver, *A, b, Vec<T>(n, 0));
+        EXPECT_EQ(out.iterations, 2);
+        EXPECT_EQ(out.status, 4);
+
+        std::vector<double> moduli(n);
+        for(int i = 0; i < n; ++i)
+        {
+            std::complex<double> r(b[i]);
+            for(auto k = ref.row_offset[i]; k < ref.row_offset[i + 1]; ++k)
+            {
+                r -= std::complex<double>(ref.val[k]) * std::complex<double>(out.x[ref.col[k]]);
+            }
+            moduli[i] = std::abs(r);
+        }
+        const auto    largest = std::max_element(moduli.begin(), moduli.end());
+        const int64_t index   = largest - moduli.begin();
+        const double  expected
+            = type == 1 ? std::accumulate(moduli.begin(), moduli.end(), 0.0) : *largest;
+        // The solver updates its residual by a recurrence, which drifts from b - A x by a few
+        // roundings in T of |A| |x|: about 1e-15 of the residual in double, 4e-6 in float
+        EXPECT_NEAR(out.residual, expected, scaled_tol<T>(1e-12) * expected);
+
+        if(type == 3)
+        {
+            // The largest modulus is unique, so that rounding does not move its index
+            ASSERT_IN_LOOP(std::count_if(moduli.begin(),
+                                         moduli.end(),
+                                         [&](double m) { return m >= 0.99 * *largest; })
+                           == 1);
+            EXPECT_EQ(solver.GetAmaxResidualIndex(), index);
+        }
+    }
+}
+
+// QMRCGStab also uses the norm in its iteration, not only in the stopping test
+TYPED_TEST(complex_solvers, converge_with_the_l1_and_linf_residual_norms)
+{
+    using T          = typename TypeParam::value_type;
+    const int    n   = 12;
+    const Csr<T> ref = complex_nonsymmetric<T>(n);
+    const Vec<T> b   = complex_rhs<T>(n);
+    const double rel = loose_tol<T>(1e-10);
+    auto         A   = this->make(ref);
+
+    for(const Method<T>& m : {method<BiCGStab<T>>("BiCGStab"), method<QMRCGStab<T>>("QMRCGStab")})
+    {
+        for(int type : {1, 3})
+        {
+            SCOPED_TRACE(m.name + ", norm " + std::to_string(type));
+            auto solver = m.make();
+            solver->Init(0.0, rel, 1e8, 100);
+            solver->SetResidualNorm(type);
+            set_up(*solver, m, *A, nullptr);
+
+            const Outcome<T> out = solve(*solver, *A, b, Vec<T>(n, 0));
+            EXPECT_EQ(out.status, 2);
+            // In both norms |b - A x|_i <= rel |b|_1 = 28.5 rel, up to the drift of the
+            // updated residual
+            expect_all_near(ref.apply(out.x), b, 100 * rel);
+        }
+    }
+}
+#endif
+
 TYPED_TEST(solvers, residual_history_file_holds_the_residuals_of_the_last_solve)
 {
     using T                     = typename TypeParam::value_type;
@@ -1903,8 +2116,6 @@ TYPED_TEST(solvers, residual_history_file_holds_the_residuals_of_the_last_solve)
     std::remove(file.c_str());
     ASSERT_GE(second.size(), 1u);
 
-    KNOWN_BUG("the file gets the first iteration-count entries of every recorded residual: the "
-              "last residual is missing, and a second solve writes the residuals of the first");
     EXPECT_EQ(written.size(), 4u);
     EXPECT_NEAR(second[0], s.res[2], tolerance * s.res[2]);
     EXPECT_EQ(second.size(), 2u);
@@ -1939,8 +2150,7 @@ TYPED_TEST(solvers, solvers_return_at_once_when_the_initial_guess_solves_the_sys
                 solver->Init(0.0, 1e-10, 1e8, 100);
                 set_up(*solver, p.method, *A, precond ? &jacobi : nullptr);
 
-                const Vec<T> x0 = zero ? Vec<T>(n, 0) : exact;
-                // BiCGStab(l) goes on to a breakdown it reports
+                const Vec<T>     x0 = zero ? Vec<T>(n, 0) : exact;
                 const Outcome<T> out
                     = quietly([&] { return solve(*solver, *A, zero ? Vec<T>(n, 0) : b, x0); });
                 EXPECT_EQ(out.x, x0);
@@ -1965,7 +2175,6 @@ TYPED_TEST(solvers, solvers_return_at_once_when_the_initial_residual_is_nan_or_w
     Vec<T> nan = exact;
     nan[3]     = std::numeric_limits<T>::quiet_NaN();
 
-    std::vector<Problem<T>> later;
     for(const Problem<T>& p : problems<T>(n))
     {
         auto         A = this->make(p.A);
@@ -1985,33 +2194,23 @@ TYPED_TEST(solvers, solvers_return_at_once_when_the_initial_residual_is_nan_or_w
             EXPECT_EQ(out.iterations, 0);
             EXPECT_EQ(out.status, 0);
         }
-        if(is_bicgstabl(p.method))
+        for(bool precond : {false, true})
         {
-            later.push_back(p);
-            continue;
+            if(p.method.needs_preconditioner && !precond)
+            {
+                continue;
+            }
+            SCOPED_TRACE(trace(p.method, precond, "within the tolerance"));
+            Jacobi<T> jacobi;
+            auto      solver = p.method.make();
+            solver->Init(1.0, 1e-10, 1e8, 100);
+            set_up(*solver, p.method, *A, precond ? &jacobi : nullptr);
+
+            const Outcome<T> out = solve(*solver, *A, b, close);
+            EXPECT_EQ(out.x, close);
+            EXPECT_EQ(out.iterations, 0);
+            EXPECT_EQ(out.status, 1);
         }
-        SCOPED_TRACE(trace(p.method, p.method.needs_preconditioner, "within the tolerance"));
-        Jacobi<T> jacobi;
-        auto      solver = p.method.make();
-        solver->Init(1.0, 1e-10, 1e8, 100);
-        set_up(*solver, p.method, *A, p.method.needs_preconditioner ? &jacobi : nullptr);
-
-        const Outcome<T> out = solve(*solver, *A, b, close);
-        EXPECT_EQ(out.x, close);
-        EXPECT_EQ(out.iterations, 0);
-        EXPECT_EQ(out.status, 1);
-    }
-
-    KNOWN_BUG("BiCGStab(l) ignores that the initial residual already meets the tolerance");
-    for(const Problem<T>& p : later)
-    {
-        SCOPED_TRACE(trace(p.method, false, "within the tolerance"));
-        auto A      = this->make(p.A);
-        auto solver = p.method.make();
-        solver->Init(1.0, 1e-10, 1e8, 100);
-        set_up(*solver, p.method, *A, nullptr);
-        const Outcome<T> out = solve(*solver, *A, multiply(dense(p.A), exact), close);
-        EXPECT_EQ(out.x, close);
     }
 }
 
@@ -2148,8 +2347,7 @@ TYPED_TEST(solvers, bicgstab_stops_when_the_residual_is_orthogonal_to_the_shadow
     }
 }
 
-// Jacobi is the identity on these unit diagonals. A known bug counts a residual check as
-// an iteration, which makes the iteration counts unreliable.
+// Jacobi is the identity on these unit diagonals
 TYPED_TEST(solvers, qmrcgstab_stops_at_a_breakdown_of_its_second_iteration)
 {
     using T = typename TypeParam::value_type;
@@ -2164,16 +2362,20 @@ TYPED_TEST(solvers, qmrcgstab_stops_at_a_breakdown_of_its_second_iteration)
         Vec<T>      D;
         Vec<T>      b;
         Vec<T>      x;
+        int         iterations;
     };
+    // At omega == 0 the first half step has moved x and counts as an iteration
     const Case cases[]
         = {{"rho_old == 0",
             shadow_breakdown,
             {-1, 0, -1},
-            qmrcgstab_iterate(shadow_breakdown, {-1, 0, -1}, Vec<T>(3, 0), 1, identity<T>)},
+            qmrcgstab_iterate(shadow_breakdown, {-1, 0, -1}, Vec<T>(3, 0), 1, identity<T>),
+            1},
            {"omega == 0",
             step_breakdown,
             {2, 0, -2},
-            qmrcgstab_iterate(step_breakdown, {2, 0, -2}, Vec<T>(3, 0), 2, identity<T>, true)}};
+            qmrcgstab_iterate(step_breakdown, {2, 0, -2}, Vec<T>(3, 0), 2, identity<T>, true),
+            2}};
 
     for(const Case& c : cases)
     {
@@ -2189,6 +2391,7 @@ TYPED_TEST(solvers, qmrcgstab_stops_at_a_breakdown_of_its_second_iteration)
 
             const Outcome<T> out = solve_reporting(*solver, *A, c.b, c.name);
             expect_near(out.x, c.x, loose_tol<T>(1e-12));
+            EXPECT_EQ(out.iterations, c.iterations);
             EXPECT_EQ(out.status, 0);
         }
     }
@@ -2220,22 +2423,26 @@ TYPED_TEST(solvers, divergence_tolerance_below_one_stops_at_the_first_check)
 TYPED_TEST(solvers, idr_stops_when_the_shadow_space_breaks_down)
 {
     using T = typename TypeParam::value_type;
-    KNOWN_BUG("IDR ends the program on a breakdown instead of stopping");
-    expect_in_child([&] {
-        // A P^T A U block of zero
-        const Csr<T> ref = diagonal(Vec<T>(4, 0));
-        auto         A   = this->make(ref);
-        IDR<T>       solver;
-        solver.Init(0.0, 1e-10, 1e8, 10);
-        set_up(solver, idr<T>(2), *A, nullptr);
-        solve_reporting(solver, *A, rhs<T>(4), "M(k,k) == 0");
-    });
+    // A P^T A U block of zero
+    const Csr<T> ref = diagonal(Vec<T>(4, 0));
+    auto         A   = this->make(ref);
+    IDR<T>       solver;
+    solver.Init(0.0, 1e-10, 1e8, 10);
+    set_up(solver, idr<T>(2), *A, nullptr);
+    const Outcome<T> out = solve_reporting(solver, *A, rhs<T>(4), "M(k,k) == 0");
+    EXPECT_EQ(out.x, Vec<T>(4, 0));
+    EXPECT_EQ(out.iterations, 0);
+    EXPECT_EQ(out.status, 0);
+    // The breakdown comes before the first residual check and still reports the residual
+    EXPECT_NEAR(out.residual, norm(rhs<T>(4)), loose_tol<T>(1e-12) * norm(rhs<T>(4)));
 }
 
 // The first step of IDR(1) takes U = r = b and M = (P, A b). On the zero matrix M is
 // zero. On the matrix with off-diagonal entries max / 2, the signs of b against those
-// of P make M = |P_0| inf or |P_0| inf - |P_1| inf. On the rotation, (A r, r) = 0
-// makes omega = 0 * (kappa / 0) in the dimension reduction step.
+// of P make M = |P_0| inf, -|P_0| inf or |P_0| inf - |P_1| inf. On the rotation, b = (1, 0)
+// gives M = -P_1, x = (beta, 0) and r = (1, beta) with beta = -P_0 / P_1, so that
+// (A r, r) = beta - beta = 0 exactly makes omega = 0 * (kappa / 0) in the dimension
+// reduction step.
 TYPED_TEST(solvers, idr_reports_the_breakdown_and_stops)
 {
     using T = typename TypeParam::value_type;
@@ -2260,31 +2467,46 @@ TYPED_TEST(solvers, idr_reports_the_breakdown_and_stops)
     const T      sign0 = p[0] < 0 ? -1 : 1;
     const T      sign1 = p[1] < 0 ? -1 : 1;
 
+    // The breakdowns of M stop before the first update, the one of omega after the
+    // first iteration
+    const T beta = -p[0] / p[1];
     struct Case
     {
         const Csr<T>* A;
         Vec<T>        b;
         const char*   message;
+        Vec<T>        x;
+        int           iterations;
+        Vec<T>        r;
     };
-    const Case cases[] = {{&zero, {1, 2}, "M(k,k) == 0"},
-                          {&huge, {0, 10 * sign0}, "M(k,k) == inf"},
-                          {&huge, {-10 * sign1, 10 * sign0}, "M(k,k) == NaN"},
-                          {&rotation, {1, 2}, "w == NaN"}};
+    const Case cases[]
+        = {{&zero, {1, 2}, "M(k,k) == 0", Vec<T>(2, 0), 0, {1, 2}},
+           {&huge, {0, 10 * sign0}, "M(k,k) == inf", Vec<T>(2, 0), 0, {0, 10 * sign0}},
+           {&huge, {0, -10 * sign0}, "M(k,k) == inf", Vec<T>(2, 0), 0, {0, -10 * sign0}},
+           {&huge,
+            {-10 * sign1, 10 * sign0},
+            "M(k,k) == NaN",
+            Vec<T>(2, 0),
+            0,
+            {-10 * sign1, 10 * sign0}},
+           {&rotation, {1, 0}, "w == NaN", {beta, 0}, 1, {1, beta}}};
 
-    KNOWN_BUG("IDR ends the program on a breakdown instead of stopping");
     for(const Case& c : cases)
     {
         for(bool precond : {false, true})
         {
-            SCOPED_TRACE(std::string(c.message) + (precond ? " with Jacobi" : ""));
-            expect_in_child([&] {
-                auto      A = this->make(*c.A);
-                Jacobi<T> jacobi;
-                IDR<T>    solver;
-                solver.Init(0.0, 0.0, 1e8, 10);
-                quietly([&] { set_up(solver, idr<T>(1), *A, precond ? &jacobi : nullptr); });
-                solve_reporting(solver, *A, c.b, c.message);
-            });
+            SCOPED_TRACE(std::string(c.message) + " for b = (" + std::to_string(c.b[0]) + ", "
+                         + std::to_string(c.b[1]) + ")" + (precond ? " with Jacobi" : ""));
+            auto      A = this->make(*c.A);
+            Jacobi<T> jacobi;
+            IDR<T>    solver;
+            solver.Init(0.0, 0.0, 1e8, 10);
+            quietly([&] { set_up(solver, idr<T>(1), *A, precond ? &jacobi : nullptr); });
+            const Outcome<T> out = solve_reporting(solver, *A, c.b, c.message);
+            expect_near(out.x, c.x, loose_tol<T>(1e-12));
+            EXPECT_EQ(out.iterations, c.iterations);
+            EXPECT_EQ(out.status, 0);
+            EXPECT_NEAR(out.residual, norm(c.r), loose_tol<T>(1e-12) * norm(c.r));
         }
     }
 }
@@ -2450,10 +2672,6 @@ TYPED_TEST(solvers, rebuild_numeric_takes_new_matrix_values)
     const int n = 16;
     for(const Problem<T>& p : problems<T>(n))
     {
-        if(rebuild_breaks(p.method))
-        {
-            continue;
-        }
         const Csr<T> changed = transformed(
             p.A, [](int i, int j, T v) { return i == j ? v + static_cast<T>(1 + i % 4) : v; });
         for(bool precond : {false, true})
@@ -2533,47 +2751,28 @@ TYPED_TEST(solvers, rebuild_numeric_keeps_idr_and_chebyshev_able_to_solve)
     const Vec<T> b = rhs<T>(n);
     const Vec<T> x = dense_solve(dense(shifted), b);
 
-    struct Case
-    {
-        std::string                   name;
-        std::unique_ptr<Matrix<T>>    A;
-        std::unique_ptr<Jacobi<T>>    jacobi;
-        std::unique_ptr<Iterative<T>> solver;
-        double                        tolerance;
-    };
-    std::vector<Case> cases;
     for(const Method<T>& m : {idr<T>(2), chebyshev<T>(n)})
     {
         for(bool precond : {false, true})
         {
             SCOPED_TRACE(trace(m, precond));
-            Case c{trace(m, precond),
-                   this->make(ref),
-                   std::make_unique<Jacobi<T>>(),
-                   m.make(),
-                   solution_tol(dense(shifted), b, Vec<T>(n, 0), solver_tol<T>(1e-12), 2, precond)};
-            c.solver->Init(0.0, solver_tol<T>(1e-12), 1e8, 1000);
-            set_up(*c.solver, m, *c.A, precond ? c.jacobi.get() : nullptr);
+            auto      A = this->make(ref);
+            Jacobi<T> jacobi;
+            auto      solver = m.make();
+            solver->Init(0.0, solver_tol<T>(1e-12), 1e8, 1000);
+            set_up(*solver, m, *A, precond ? &jacobi : nullptr);
             expect_near(
-                solve(*c.solver, *c.A, b, Vec<T>(n, 0)).x,
+                solve(*solver, *A, b, Vec<T>(n, 0)).x,
                 dense_solve(dense(ref), b),
                 solution_tol(dense(ref), b, Vec<T>(n, 0), solver_tol<T>(1e-12), 2, precond));
 
-            c.A->AddScalarDiagonal(1.0);
-            c.solver->ReBuildNumeric();
-            cases.push_back(std::move(c));
+            A->AddScalarDiagonal(1.0);
+            solver->ReBuildNumeric();
+            expect_near(
+                solve(*solver, *A, b, Vec<T>(n, 0)).x,
+                x,
+                solution_tol(dense(shifted), b, Vec<T>(n, 0), solver_tol<T>(1e-12), 2, precond));
         }
-    }
-
-    KNOWN_BUG("IDR zeros its shadow space, which ends the next solve, and Chebyshev marks itself "
-              "as not built, which fails an assert in the next solve");
-    for(Case& c : cases)
-    {
-        SCOPED_TRACE(c.name);
-        expect_completes([&] {
-            const Outcome<T> out = solve(*c.solver, *c.A, b, Vec<T>(n, 0));
-            return near(out.x, x, c.tolerance);
-        });
     }
 }
 
@@ -2976,7 +3175,6 @@ TYPED_TEST(solvers, fixed_point_solve_zero_sol_returns_zero_when_it_does_not_ite
         int         max_iter;
         Vec<T>      b;
     };
-    std::vector<Vec<T>> results;
     for(const Case& c : {Case{"zero right-hand side", false, 10, Vec<T>(8, 0)},
                          Case{"no iterations", false, 0, rhs<T>(8)},
                          Case{"smoother without sweeps", true, 0, rhs<T>(8)}})
@@ -2994,14 +3192,7 @@ TYPED_TEST(solvers, fixed_point_solve_zero_sol_returns_zero_when_it_does_not_ite
         auto rhs_vector = make_local_vector(*A, c.b);
         auto x          = make_local_vector(*A, Vec<T>(8, 1000));
         solver.SolveZeroSol(*rhs_vector, x.get());
-        results.push_back(values_of(*x));
-    }
-
-    KNOWN_BUG("FixedPoint::SolveZeroSol returns before it sets x to zero when the initial residual "
-              "meets the tolerance or there are no iterations");
-    for(const Vec<T>& x : results)
-    {
-        EXPECT_EQ(x, Vec<T>(8, 0));
+        EXPECT_EQ(values_of(*x), Vec<T>(8, 0));
     }
 }
 
@@ -3016,26 +3207,99 @@ TYPED_TEST(solvers, fixed_point_needs_a_preconditioner)
 
 TYPED_TEST(solvers, chebyshev_converges_with_bounds_of_the_spectrum)
 {
+    using T        = typename TypeParam::value_type;
+    const Vec<T> b = rhs<T>(8);
+
+    // Gershgorin bounds of A and of D^-1 A, for A scaled by s. The iteration does not
+    // depend on the scale of the operator.
+    for(double s : {1e-2, 1.0, 1e2})
+    {
+        const Csr<T> ref = transformed(spd<T>(8), [s](int, int, T v) { return T(s) * v; });
+        auto         A   = this->make(ref);
+        for(bool precond : {false, true})
+        {
+            SCOPED_TRACE(std::string(precond ? "with Jacobi" : "without preconditioner")
+                         + ", scale " + std::to_string(s));
+            Jacobi<T>    jacobi;
+            Chebyshev<T> solver;
+            solver.Set(precond ? 1.0 / 3.0 : s, precond ? 5.0 / 3.0 : 10.0 * s);
+            solver.Init(0.0, solver_tol<T>(1e-12), 1e8, 1000);
+            set_up(solver, method<Chebyshev<T>>("Chebyshev"), *A, precond ? &jacobi : nullptr);
+
+            const Outcome<T> out = solve(solver, *A, b, Vec<T>(8, 0));
+            EXPECT_EQ(out.status, 2);
+            expect_near(
+                out.x,
+                dense_solve(dense(ref), b),
+                solution_tol(dense(ref), b, Vec<T>(8, 0), solver_tol<T>(1e-12), 2, precond));
+        }
+    }
+}
+
+TYPED_TEST(solvers, chebyshev_replaces_a_lower_bound_that_is_not_positive)
+{
     using T          = typename TypeParam::value_type;
     const Csr<T> ref = spd<T>(8);
+    const Vec<T> D   = dense(ref);
     const Vec<T> b   = rhs<T>(8);
+    const Vec<T> x0  = start<T>(8);
     auto         A   = this->make(ref);
 
-    // Gershgorin bounds of A and of D^-1 A
-    for(bool precond : {false, true})
+    // Also with the bounds swapped
+    for(const auto& [lambda_min, lambda_max] : {std::make_pair(0.0, 10.0),
+                                                std::make_pair(-1.0, 10.0),
+                                                std::make_pair(10.0, 0.0),
+                                                std::make_pair(10.0, -1.0)})
     {
-        SCOPED_TRACE(precond ? "with Jacobi" : "without preconditioner");
-        Jacobi<T>    jacobi;
+        SCOPED_TRACE("Set(" + std::to_string(lambda_min) + ", " + std::to_string(lambda_max) + ")");
         Chebyshev<T> solver;
-        solver.Set(precond ? 1.0 / 3.0 : 1.0, precond ? 5.0 / 3.0 : 10.0);
-        solver.Init(0.0, solver_tol<T>(1e-12), 1e8, 1000);
-        set_up(solver, method<Chebyshev<T>>("Chebyshev"), *A, precond ? &jacobi : nullptr);
+        solver.Set(lambda_min, lambda_max);
+        solver.Init(0.0, 0.0, 1e8, 4);
+        set_up(solver, method<Chebyshev<T>>("Chebyshev"), *A, nullptr);
 
-        const Outcome<T> out = solve(solver, *A, b, Vec<T>(8, 0));
-        EXPECT_EQ(out.status, 2);
+        const Outcome<T> out = solve(solver, *A, b, x0);
+        EXPECT_EQ(out.iterations, 4);
         expect_near(out.x,
-                    dense_solve(dense(ref), b),
-                    solution_tol(dense(ref), b, Vec<T>(8, 0), solver_tol<T>(1e-12), 2, precond));
+                    chebyshev_iterate(D, b, x0, 4, identity<T>, 10.0 / 30.0, 10.0),
+                    loose_tol<T>(1e-10));
+    }
+
+    // The bounds of LocalMatrix::Gershgorin() for a negative definite matrix
+    const Csr<T> neg = transformed(ref, [](int, int, T v) { return -v; });
+    auto         N   = this->make(neg);
+    for(const auto& [lambda_min, lambda_max] :
+        {std::make_pair(-10.0, 0.0), std::make_pair(0.0, -10.0)})
+    {
+        SCOPED_TRACE("Set(" + std::to_string(lambda_min) + ", " + std::to_string(lambda_max) + ")");
+        Chebyshev<T> solver;
+        solver.Set(lambda_min, lambda_max);
+        solver.Init(0.0, 0.0, 1e8, 4);
+        set_up(solver, method<Chebyshev<T>>("Chebyshev"), *N, nullptr);
+
+        const Outcome<T> out = solve(solver, *N, b, x0);
+        EXPECT_EQ(out.iterations, 4);
+        expect_near(out.x,
+                    chebyshev_iterate(dense(neg), b, x0, 4, identity<T>, -10.0, -10.0 / 30.0),
+                    loose_tol<T>(1e-10));
+    }
+}
+
+TYPED_TEST(solvers, chebyshev_rejects_bounds_that_are_not_finite_or_whose_segment_contains_0)
+{
+    using T          = typename TypeParam::value_type;
+    const double inf = std::numeric_limits<double>::infinity();
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+
+    // (0, 0) are the bounds of LocalMatrix::Gershgorin() for a matrix of zeros
+    for(const auto& [lambda_min, lambda_max] : {std::make_pair(0.0, 0.0),
+                                                std::make_pair(nan, 10.0),
+                                                std::make_pair(1.0, nan),
+                                                std::make_pair(1.0, inf),
+                                                std::make_pair(-inf, inf)})
+    {
+        SCOPED_TRACE("Set(" + std::to_string(lambda_min) + ", " + std::to_string(lambda_max) + ")");
+        Chebyshev<T> solver;
+        EXPECT_FATAL_ERROR(solver.Set(lambda_min, lambda_max), "chebyshev\\.cpp");
     }
 }
 
@@ -3080,8 +3344,6 @@ TYPED_TEST(solvers, chebyshev_iterates_follow_the_chebyshev_recurrence)
         }
     }
 
-    KNOWN_BUG("the recurrence starts with alpha = 2 / d instead of 1 / d and continues with "
-              "alpha = 1 / (d - beta) instead of 1 / (d - beta / alpha)");
     for(const Case& c : cases)
     {
         SCOPED_TRACE(c.name);
@@ -3128,6 +3390,7 @@ TYPED_TEST(solvers, direct_solvers_solve_exactly)
     const Vec<T> x   = dense_solve(dense(ref), b);
 
     for(const DirectCase<T>& c : {direct<LU<T>>("LU", rocalution::CSR),
+                                  direct<LU<T>>("LU", rocalution::DENSE),
                                   direct<QR<T>>("QR", rocalution::CSR),
                                   direct<QR<T>>("QR", rocalution::DENSE),
                                   direct<Inversion<T>>("Inversion", rocalution::CSR),
@@ -3141,17 +3404,6 @@ TYPED_TEST(solvers, direct_solvers_solve_exactly)
         quietly([&] { solver->Build(); });
         expect_near(direct_solve(*solver, *A, b), x, tol<T>());
     }
-
-    KNOWN_BUG("LU::Build calls LUAnalyse, which ends the program for a DENSE matrix");
-    SCOPED_TRACE("LU DENSE");
-    expect_completes([&] {
-        auto  A = make_local_matrix(this->backend(), ref, Format{rocalution::DENSE, 1});
-        LU<T> solver;
-        solver.Verbose(0);
-        solver.SetOperator(*A);
-        solver.Build();
-        return near(direct_solve(solver, *A, b), x, tol<T>());
-    });
 }
 
 TYPED_TEST(solvers, lu_solves_with_the_iterative_triangular_solves)
@@ -3401,14 +3653,86 @@ TEST(solvers_mixed_precision, rebuild_numeric_takes_new_matrix_values)
     A->ScaleDiagonal(2.0);
     quietly([&] { solver.ReBuildNumeric(); });
     const Outcome<double> out = quiet_solve(solver, *A, b, Vec<double>(16, 0.0));
-
-    KNOWN_BUG("MixedPrecisionDC::ReBuildNumeric keeps the float copy of the old matrix");
     EXPECT_EQ(out.status, 2);
     expect_near(out.x,
                 dense_solve(dense(transformed(
                                 ref, [](int i, int j, double v) { return i == j ? 2.0 * v : v; })),
                             b),
                 1e-11);
+}
+
+TEST(solvers_mixed_precision, rebuild_numeric_takes_the_values_of_a_reset_operator)
+{
+    const Csr<double> ref = nonsymmetric<double>(16);
+    const Csr<double> changed
+        = transformed(ref, [](int i, int j, double v) { return i == j ? 2.0 * v : v; });
+    const Vec<double> b = rhs(16);
+    auto              A = make_local_matrix(Backend::Host, ref);
+    auto              B = make_local_matrix(Backend::Host, changed);
+
+    rocalution::LU<LocalMatrix<float>, LocalVector<float>, float> inner;
+    inner.Verbose(0);
+
+    MixedPrecision solver;
+    solver.Verbose(0);
+    solver.Init(0.0, 1e-13, 1e8, 20);
+    solver.SetOperator(*A);
+    solver.Set(inner);
+    quietly([&] { solver.Build(); });
+
+    solver.ResetOperator(*B);
+    quietly([&] { solver.ReBuildNumeric(); });
+    const Outcome<double> out = quiet_solve(solver, *B, b, Vec<double>(16, 0.0));
+    EXPECT_EQ(out.status, 2);
+    expect_near(out.x, dense_solve(dense(changed), b), 1e-11);
+}
+
+// The low precision matrix keeps its structure, so ReBuildNumeric() takes only the
+// values of an operator of the same sizes and sparsity pattern
+TEST(solvers_mixed_precision_DeathTest,
+     rebuild_numeric_of_an_operator_with_another_number_of_entries_ends_the_program)
+{
+    auto A = make_local_matrix(Backend::Host, nonsymmetric<double>(16));
+    auto B = make_local_matrix(Backend::Host, diagonal(Vec<double>(16, 1.0)));
+
+    rocalution::LU<LocalMatrix<float>, LocalVector<float>, float> inner;
+    inner.Verbose(0);
+
+    MixedPrecision solver;
+    solver.Verbose(0);
+    solver.SetOperator(*A);
+    solver.Set(inner);
+    quietly([&] { solver.Build(); });
+
+    solver.ResetOperator(*B);
+    EXPECT_ASSERT_DEATH(solver.ReBuildNumeric(), "GetLocalNnz");
+}
+
+// The identity and the reversal have the same row offsets but other columns
+TEST(solvers_mixed_precision_DeathTest,
+     rebuild_numeric_of_an_operator_with_another_pattern_ends_the_program)
+{
+    Csr<double> reversal(16);
+    for(int i = 0; i < 16; ++i)
+    {
+        reversal.add(15 - i, 1.0);
+        reversal.end_row();
+    }
+
+    auto A = make_local_matrix(Backend::Host, diagonal(Vec<double>(16, 1.0)));
+    auto B = make_local_matrix(Backend::Host, reversal);
+
+    rocalution::LU<LocalMatrix<float>, LocalVector<float>, float> inner;
+    inner.Verbose(0);
+
+    MixedPrecision solver;
+    solver.Verbose(0);
+    solver.SetOperator(*A);
+    solver.Set(inner);
+    quietly([&] { solver.Build(); });
+
+    solver.ResetOperator(*B);
+    EXPECT_ASSERT_DEATH(solver.ReBuildNumeric(), "col_l");
 }
 
 TEST(solvers_mixed_precision, one_iteration_is_one_defect_correction)
@@ -3434,8 +3758,6 @@ TEST(solvers_mixed_precision, one_iteration_is_one_defect_correction)
     EXPECT_NE(output.find("MixedPrecisionDC [64bit-32bit] solver starts"), std::string::npos);
     EXPECT_NE(output.find("LU solver"), std::string::npos);
     EXPECT_EQ(out.status, 4);
-
-    KNOWN_BUG("the residual check before the first correction is counted as an iteration");
     EXPECT_EQ(out.iterations, 1);
     expect_near(out.x, x, 1e-5);
 }
@@ -3638,3 +3960,109 @@ TYPED_TEST(solvers_stencil, clear_and_set_grid_resize_the_laplace_stencil)
     L.Apply(*x, y.get());
     EXPECT_EQ(values_of(*y), (Vec<T>{4 - 2 - 3, 8 - 1 - 4, 12 - 1 - 4, 16 - 2 - 3}));
 }
+
+// The library instantiates the complex solvers only with SUPPORT_COMPLEX
+#ifdef SUPPORT_COMPLEX
+namespace
+{
+    template <typename P>
+    class solvers_complex : public TypedBackendTest<P>
+    {
+    };
+
+    using ComplexTypes = testing::Types<cfloat, cdouble>;
+
+    // Chebyshev with the bounds lambda_min and lambda_max reaches a relative residual of
+    // 1e-5 on the diagonal system with the eigenvalues lambda. The error is then at most
+    // 1e-5 |b| / min |lambda|, below 1e-4 for the systems of the tests.
+    template <typename T>
+    void expect_chebyshev_solves_diagonal(Backend       backend,
+                                          const Vec<T>& lambda,
+                                          T             lambda_min,
+                                          T             lambda_max)
+    {
+        using R     = real_t<T>;
+        const int n = static_cast<int>(lambda.size());
+        Csr<T>    ref(n);
+        Vec<T>    b(n), x(n);
+        for(int i = 0; i < n; ++i)
+        {
+            ref.add(i, lambda[i]);
+            ref.end_row();
+            b[i] = T(1, static_cast<R>(i % 3));
+            x[i] = b[i] / lambda[i];
+        }
+        auto A = make_local_matrix(backend, ref);
+
+        Chebyshev<T> solver;
+        solver.Set(lambda_min, lambda_max);
+        solver.Init(0.0, 1e-5, 1e8, 100);
+        set_up(solver, method<Chebyshev<T>>("Chebyshev"), *A, nullptr);
+
+        const Outcome<T> out = solve(solver, *A, b, Vec<T>(n, 0));
+        EXPECT_EQ(out.status, 2);
+        for(int i = 0; i < n; ++i)
+        {
+            EXPECT_LT(std::abs(out.x[i] - x[i]), 1e-4) << "i = " << i;
+        }
+    }
+}
+
+TYPED_TEST_SUITE(solvers_complex, HostOnly<ComplexTypes>, TypedName);
+
+TYPED_TEST(solvers_complex, chebyshev_replaces_real_bounds_of_complex_type)
+{
+    using T = typename TypeParam::value_type;
+    using R = real_t<T>;
+
+    // Bounds such as those of LocalMatrix::Gershgorin() for a Hermitian matrix, also
+    // swapped. Without the replacement, the iteration does not converge.
+    Vec<T> lambda;
+    for(int i = 1; i <= 10; ++i)
+    {
+        lambda.push_back(static_cast<R>(i));
+    }
+    for(const auto& [lambda_min, lambda_max] :
+        {std::make_pair(0.0, 10.0), std::make_pair(10.0, -1.0)})
+    {
+        SCOPED_TRACE("Set(" + std::to_string(lambda_min) + ", " + std::to_string(lambda_max) + ")");
+        expect_chebyshev_solves_diagonal(TypeParam::backend,
+                                         lambda,
+                                         T(static_cast<R>(lambda_min)),
+                                         T(static_cast<R>(lambda_max)));
+    }
+}
+
+TYPED_TEST(solvers_complex, chebyshev_keeps_complex_bounds_whose_segment_does_not_contain_0)
+{
+    using T = typename TypeParam::value_type;
+    using R = real_t<T>;
+
+    // Eigenvalues on the segment from -0.1+2i to 4+2i, whose real parts have both signs.
+    // With lambda_min replaced by lambda_max / 30, the iteration diverges.
+    const T   lambda_min(static_cast<R>(-0.1), static_cast<R>(2));
+    const T   lambda_max(static_cast<R>(4), static_cast<R>(2));
+    const int n = 16;
+    Vec<T>    lambda;
+    for(int i = 0; i < n; ++i)
+    {
+        lambda.push_back(lambda_min
+                         + (lambda_max - lambda_min) * static_cast<R>(i) / static_cast<R>(n - 1));
+    }
+    expect_chebyshev_solves_diagonal(TypeParam::backend, lambda, lambda_min, lambda_max);
+}
+
+TYPED_TEST(solvers_complex, chebyshev_rejects_complex_bounds_whose_segment_contains_0)
+{
+    using T = typename TypeParam::value_type;
+    using R = real_t<T>;
+
+    // The segment from -1+i to 2-2i passes through 0, the one from 0 to 1+i ends there
+    const T      a(static_cast<R>(-1), static_cast<R>(1));
+    const T      b(static_cast<R>(2), static_cast<R>(-2));
+    const T      c(static_cast<R>(1), static_cast<R>(1));
+    Chebyshev<T> solver;
+    EXPECT_FATAL_ERROR(solver.Set(a, b), "chebyshev\\.cpp");
+    EXPECT_FATAL_ERROR(solver.Set(T(0), c), "chebyshev\\.cpp");
+}
+#endif

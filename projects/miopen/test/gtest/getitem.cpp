@@ -61,6 +61,6 @@ TEST_P(GPU_GetitemBwd_BFP16, GetitemBwdTest)
     Verify();
 };
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GetitemBwd_FP32, testing::ValuesIn(GetitemTestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GetitemBwd_FP16, testing::ValuesIn(GetitemTestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Full, GPU_GetitemBwd_BFP16, testing::ValuesIn(GetitemTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_GetitemBwd_FP32, testing::ValuesIn(GetitemTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_GetitemBwd_FP16, testing::ValuesIn(GetitemTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_GetitemBwd_BFP16, testing::ValuesIn(GetitemTestConfigs()));

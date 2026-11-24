@@ -138,6 +138,11 @@ def loadData(filename):
         sys.stdout.flush()
         sys.exit(-1)
     data = yaml.load(stream, yaml.SafeLoader)
+    if isinstance(data, list) and len(data) > 11 and data[11] == "MeshBased":
+        sys.exit(
+            f"[Error] {filename}: MeshBased library type is not yet supported "
+            f"by TensileMergeLibrary."
+        )
     return data
 
 def compareDestFolderToYaml(originalDir, incFile, incData):
@@ -532,6 +537,6 @@ if __name__ == "__main__":
     elif forceMerge in ["false", "0"]: forceMerge=False
 
     msg("***************************************************************")
-    msg("Warning: merge.py is deprecated, please use TensileMergeLibrary")
+    msg("Warning: merge.py is deprecated, please use tensilelite merge-library")
     msg("***************************************************************")
     avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, trimSize, add_solution_tags, no_eff)

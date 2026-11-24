@@ -4,6 +4,7 @@
 #include "origami/hardware.hpp"
 #include "origami/types.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -79,7 +80,14 @@ hardware_t::hardware_t(architecture_t arch,
           compute_clock_ghz,
           constants.parallel_mi_cu,
           constants.mem_bw_per_wg_coefficients,
-          pci_chip_id) {}
+          pci_chip_id) {
+  // L2_capacity is one L2's capacity.  CDNA reports one XCD's L2.  On gfx1250 the XCDs of an
+  // AID share an L2 and HIP reports a 4 MiB placeholder, so the reported size is split over
+  // the L2 domains but at least the measured 96 MiB of one AID's L2 is used.
+  if (is_cdna5()) {
+    this->L2_capacity = std::max<size_t>(L2_capacity / num_l2_domains(), 96ull << 20);
+  }
+}
 
 hardware_t::hardware_t(hipDeviceProp_t properties, std::optional<int> pci_chip_id)
     : hardware_t(get_hardware_for_properties(properties, 0, pci_chip_id)) {}
@@ -135,12 +143,13 @@ hardware_t hardware_t::get_hardware_for_properties(hipDeviceProp_t properties,
         std::string("Attempting to retrieve hardware constants for unsupported architecture: ") +
         std::string(arch_name));
   }
-  auto constants = get_arch_constants(arch_enum, pci_chip_id);
+  const size_t n_cu = properties.multiProcessorCount * cus_per_multiProcessorCount(arch_enum);
+  auto constants    = get_arch_constants(arch_enum, pci_chip_id, n_cu);
   auto num_xcds   = (num_xcds_override > 0)
                       ? num_xcds_override
                       : get_default_num_xcds(arch_enum);
   return hardware_t(arch_enum,
-                    properties.multiProcessorCount * cus_per_multiProcessorCount(arch_enum),
+                    n_cu,
                     properties.sharedMemPerBlock,
                     properties.regsPerBlock * 4,  // RF capacity from device (regsPerBlock is in 32-bit registers, convert to bytes)
                     constants,
@@ -193,14 +202,18 @@ hardware_t hardware_t::get_hardware_for_arch(architecture_t arch,
     throw std::runtime_error("Attempting to create hardware for unsupported architecture");
   }
 
-  auto constants = get_arch_constants(arch, pci_chip_id);
+  auto constants = get_arch_constants(arch, pci_chip_id, N_CU);
+  // The 6-XCD gfx1250 part has 32 WGPs per XCD in every partition mode.
+  const size_t num_xcds = (arch == architecture_t::gfx1250 && gfx1250_wgps_select_6xcd(N_CU))
+                              ? N_CU / 32
+                              : get_default_num_xcds(arch);
 
   return hardware_t(arch,
                     N_CU,
                     lds_capacity,
                     rf_capacity,
                     constants,
-                    get_default_num_xcds(arch),
+                    num_xcds,
                     L2_capacity,
                     compute_clock_khz / 1.e6,
                     compute_clock_khz / 1.e6 / constants.mem_clock_ratio,

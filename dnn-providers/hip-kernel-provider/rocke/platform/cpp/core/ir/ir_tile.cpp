@@ -13,13 +13,13 @@
  * rocke_i_attrs / type helpers) lives in bucket 0 (ir_core.c) and is declared
  * in rocke/ir_internal.h.
  */
-#include "rocke/mfma_scale_internal.h"
-#include "rocke/tf32_internal.h"
 #include <stdio.h>
 #include <string.h>
 
 #include "rocke/arch_target.h"
 #include "rocke/ir_internal.h"
+#include "rocke/mfma_scale_internal.h"
+#include "rocke/tf32_internal.h"
 
 /* ===================================================================== */
 /*  target-neutral MMA metadata                                          */
@@ -27,10 +27,10 @@
 /*
  * rocke_b_mma emits a single tile.mma op keyed by op_id; the ISA backend lowers
  * that op_id to the matching MFMA/WMMA call. To size the result vector it needs
- * the accumulator fragment length and the result dtype for the atom. Both come
- * from the arch SSOT (core/arch/target): frag lengths from
- * rocke_arch_mma_c_frag_len (the _MMA_FRAGMENT_INFO projection) and the result
- * dtype from rocke_arch_mma_op_id_dst_dtype (the JSON catalog aggregation). This bucket keeps
+ * the dst fragment length and dtype for the atom. Both come from the
+ * arch SSOT (core/arch/target): frag lengths from rocke_arch_mma_dst_frag_len
+ * (the _MMA_FRAGMENT_INFO projection) and the dst dtype from
+ * rocke_arch_mma_op_id_dst_dtype (the JSON catalog aggregation). This bucket keeps
  * NO private copy of that data, mirroring ir.py after it dropped _MMA_C_FRAG_LEN
  * / _MMA_C_INT_OP_IDS.
  *
@@ -52,12 +52,12 @@ static const rocke_mma_hint_row_t ROCKE_MMA_RESULT_HINT[] = {
     {"mfma_scale_f32_16x16x128_f8f6f4", "mxacc"},
 };
 
-/* Accumulator fragment length for op_id, from the arch SSOT
- * (target._frag_info(op_id).c_frag_len). Returns <= 0 for an unknown atom (the
+/* dst fragment length for op_id, from the arch SSOT
+ * (target._frag_info(op_id).dst.frag_len). Returns <= 0 for an unknown atom (the
  * zero-length _frag_info fallback), which rocke_b_mma reports as an error. */
-static int rocke_mma_c_frag_len(const char* op_id)
+static int rocke_mma_dst_frag_len(const char* op_id)
 {
-    return rocke_arch_mma_c_frag_len(op_id);
+    return rocke_arch_mma_dst_frag_len(op_id);
 }
 
 /* The result dtype of op_id, from the arch catalog SSOT
@@ -87,30 +87,6 @@ static const char* rocke_mma_result_hint(const char* op_id)
         }
     }
     return "acc";
-}
-
-/* element-byte width helper (mirrors smem_store_vN's elem_bytes). */
-static int rocke_elem_bytes_name(const char* elem_name)
-{
-    if(!elem_name)
-    {
-        return 2;
-    }
-    if(strcmp(elem_name, "i8") == 0 || strcmp(elem_name, "fp8e4m3") == 0
-       || strcmp(elem_name, "bf8e5m2") == 0)
-    {
-        return 1;
-    }
-    if(strcmp(elem_name, "f64") == 0)
-    {
-        return 8;
-    }
-    if(strcmp(elem_name, "f32") == 0 || strcmp(elem_name, "i32") == 0
-       || strcmp(elem_name, "tf32") == 0)
-    {
-        return 4;
-    }
-    return 2;
 }
 
 /* Element types an LDS vector access (smem_load_vN and smem_store_vN) admits,
@@ -282,7 +258,6 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
     static const int allowed_8bit[] = {2, 4, 8, 16};
     static const int allowed_other[] = {2, 4, 8};
     static const int allowed_64bit[] = {2};
-    int elem_bytes;
     if(!rocke_i_live(b))
     {
         return;
@@ -337,7 +312,6 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
             return;
         }
     }
-    elem_bytes = rocke_elem_bytes_name(elem_name);
     ops = rocke_build_mem_operands(b, smem, indices, num_indices, value, true, &nops);
     if(!ops)
     {
@@ -347,7 +321,12 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
     rocke_attr_set_int(b, &attrs, "rank", (int64_t)num_indices);
     rocke_attr_set_str(b, &attrs, "elem_type", elem_name);
     rocke_attr_set_int(b, &attrs, "vec", (int64_t)n);
-    rocke_attr_set_int(b, &attrs, "align", (int64_t)(n * elem_bytes));
+    /* Bounded by what every row start of a padded tile guarantees. */
+    rocke_attr_set_int(
+        b,
+        &attrs,
+        "align",
+        rocke_i_smem_vector_access_align(smem ? smem->type : NULL, n, value->type->elem));
     rocke_i_op0(b, ROCKE_OP_TILE_SMEM_STORE_VN, ops, nops, &attrs);
 }
 
@@ -659,7 +638,7 @@ static rocke_value_t* rocke_b_mma_fmt(rocke_ir_builder_t* b,
      * and accumulator element are resolved from the arch SSOT (the Python
      * bare-string code path). A <= 0 frag length means the op_id is unknown to
      * the SSOT (the zero-length _frag_info fallback). */
-    c_frag_len = rocke_mma_c_frag_len(op_id);
+    c_frag_len = rocke_mma_dst_frag_len(op_id);
     if(c_frag_len <= 0)
     {
         return (rocke_value_t*)rocke_i_set_err(
