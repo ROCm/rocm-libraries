@@ -4182,13 +4182,15 @@ class Solution(collections.abc.Mapping):
         state["AssertFree1ElementMultiple"] = 2
 
         # Currently we only support fp4 tail-loop with AssertSummationElementMultiple = 8.
+        # Raise, never lower: a larger power-of-two assertion is still a multiple of 8
+        # and can remove the tail loop (NoTailLoop).
         # TODO: Enalbe tail-loop with arbitrary number
-        state["AssertSummationElementMultiple"] = 8
+        state["AssertSummationElementMultiple"] = max(state["AssertSummationElementMultiple"], 8)
 
       if state["ProblemType"]["MacDataTypeA"].is6bitFloat() or state["ProblemType"]["MacDataTypeB"].is6bitFloat():
         state["AssertFree0ElementMultiple"] = 1
         state["AssertFree1ElementMultiple"] = 1
-        state["AssertSummationElementMultiple"] = 16
+        state["AssertSummationElementMultiple"] = max(state["AssertSummationElementMultiple"], 16)
         if not state["ProblemType"]["TransposeA"]:
           state["AssertFree0ElementMultiple"] = 16
         if state["ProblemType"]["TransposeB"]:
