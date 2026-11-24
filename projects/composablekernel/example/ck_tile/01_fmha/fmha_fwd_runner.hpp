@@ -103,10 +103,13 @@ auto get_elimit<FmhaFwdMxFp4>(std::string /*init_method*/)
     return ck_tile::make_tuple(rtol, atol);
 }
 
-int num_splits_heuristic(int batch_nhead_mblocks, int num_SMs, int max_splits)
+int num_splits_heuristic(int batch_nhead_mblocks,
+                         int num_SMs,
+                         int max_splits,
+                         float fill_threshold = 0.8f)
 {
     // If we have enough to almost fill the SMs, then just use 1 split
-    if(batch_nhead_mblocks >= 0.8f * num_SMs)
+    if(batch_nhead_mblocks >= fill_threshold * num_SMs)
     {
         return 1;
     }
@@ -136,10 +139,15 @@ int num_splits_heuristic(int batch_nhead_mblocks, int num_SMs, int max_splits)
     return 1;
 }
 
-int override_num_splits_if_necessary(
-    int batch, int nhead, int max_seqlen_q, int hdim_v, float p_drop, int num_splits)
+int override_num_splits_if_necessary(int batch,
+                                     int nhead,
+                                     int max_seqlen_q,
+                                     int max_seqlen_k,
+                                     int hdim_q,
+                                     int hdim_v,
+                                     float p_drop,
+                                     int num_splits)
 {
-    (void)hdim_v;
     int device;
     auto status = hipGetDevice(&device);
     if(status != hipSuccess)
@@ -163,8 +171,35 @@ int override_num_splits_if_necessary(
     {
         // props.multiProcessorCount for >=gfx10 is the number of WGPs (each has 2 CUs)
         const int num_blocks_per_SM = props.warpSize == 32 ? 4 : 2;
-        return num_splits_heuristic(
-            batch * nhead * num_m_blocks, props.multiProcessorCount * num_blocks_per_SM, 128);
+
+        // The split cap and fill threshold below are tuned for gfx125 only; the
+        // cap also assumes its bn0 64 split-kv tile (gfx9/gfx12 also emit bn0 128).
+        const bool is_gfx125 = std::string{props.gcnArchName}.compare(0, 6, "gfx125") == 0;
+
+        int max_splits       = 128;
+        float fill_threshold = 0.8f;
+        if(is_gfx125)
+        {
+            // Every gfx125 split-kv instance needs hdim % 8 == 0, so other head
+            // dims must not be split or no instance would match.
+            if(hdim_q % 8 != 0 || hdim_v % 8 != 0)
+                return 1;
+
+            // Cap the split count so every split keeps enough KV tiles to
+            // amortise its prologue and the combine pass.
+            constexpr int kN0               = 64;
+            constexpr int kMinTilesPerSplit = 8;
+            const int num_kv_tiles          = ck_tile::integer_divide_ceil(max_seqlen_k, kN0);
+            max_splits = std::max(1, std::min(128, num_kv_tiles / kMinTilesPerSplit));
+            // num_blocks_per_SM is 4 per WGP, i.e. 2 per CU, so this stops
+            // splitting at 1 workgroup per CU instead of 1.6.
+            fill_threshold = 0.5f;
+        }
+
+        return num_splits_heuristic(batch * nhead * num_m_blocks,
+                                    props.multiProcessorCount * num_blocks_per_SM,
+                                    max_splits,
+                                    fill_threshold);
     }
 
     return num_splits;
@@ -674,15 +709,48 @@ fwd_result fmha_fwd_run(mode_enum mode,
         int nhead_merged        = nhead;
         int max_seqlen_q_merged = max_seqlen_q;
         // When max_seqlen_q == 1 and multiple head groups are merged (kMergeNumHeadGroupsSeqLenQ)
-        // then more splits are required
-        if(bias.type == bias_enum::no_bias && mask.type == mask_enum::no_mask &&
-           max_seqlen_q == 1 && nhead_k < nhead)
+        // then more splits are required. With a mask or a sink, only the gfx125 fp16/bf16 (TDM)
+        // instances merge, and not with both.
+        const bool tdm =
+            ck_tile::is_gfx125_supported() && (data_type == "fp16" || data_type == "bf16");
+        const bool has_sink = mask.sink > 0 || init_sink_value != 0;
+        const bool merges_heads =
+            mask.type == mask_enum::no_mask ? (!has_sink || tdm) : (tdm && !has_sink);
+        if(bias.type == bias_enum::no_bias && merges_heads && max_seqlen_q == 1 && nhead_k < nhead)
         {
             nhead_merged        = nhead_k;
             max_seqlen_q_merged = max_seqlen_q * (nhead / nhead_k);
         }
-        num_splits = override_num_splits_if_necessary(
-            batch, nhead_merged, max_seqlen_q_merged, hdim_v, p_drop, num_splits);
+        // the TDM pipelines split only the tiles inside the mask range, and decide on whole
+        // tiles of 64 keys whether the sink reaches the window
+        const int seqlen_k_in_mask = [&]() {
+            if(mask.type == mask_enum::no_mask || !tdm)
+                return max_seqlen_k;
+            const ck_tile::SimplifiedGenericAttentionMask<true> range_mask{
+                ck_tile::make_generic_attention_mask_coordinates_from_lr_window(
+                    mask.left,
+                    mask.right,
+                    mask.sink,
+                    max_seqlen_q,
+                    max_seqlen_k,
+                    mask.type == mask_enum::mask_top_left)};
+            const int start =
+                range_mask.GetSinkTileRangeAlongX(0, ck_tile::number<1>{}, ck_tile::number<64>{})
+                    .at(ck_tile::number<1>{});
+            const int end = range_mask
+                                .GetSinkTileRangeAlongX(
+                                    max_seqlen_q - 1, ck_tile::number<1>{}, ck_tile::number<64>{})
+                                .at(ck_tile::number<2>{});
+            return std::max(end - start, 0);
+        }();
+        num_splits = override_num_splits_if_necessary(batch,
+                                                      nhead_merged,
+                                                      max_seqlen_q_merged,
+                                                      seqlen_k_in_mask,
+                                                      hdim_q,
+                                                      hdim_v,
+                                                      p_drop,
+                                                      num_splits);
     }
     if(128 < num_splits)
     {
@@ -1480,7 +1548,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
                 // Fix group-mode tile selection: use the longest sequence length instead of
                 // the total Q length, which incorrectly selected large tiles for short sequences.
                 if(mode == mode_enum::group &&
-                   (ck_tile::is_gfx11_supported() || ck_tile::is_gfx120_supported()))
+                   (ck_tile::is_gfx11_supported() || ck_tile::is_gfx117_supported() ||
+                    ck_tile::is_gfx120_supported()))
                     args.max_seqlen_q = max_seqlen_q;
 
                 if(qscale.type == quant_scale_enum::pertensor)
@@ -1644,6 +1713,12 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     (use_cache_batch_idx ? cache_batch_idx_buf.GetDeviceBuffer() : nullptr);
 
                 args.num_splits = num_splits;
+                // the kernel reads each group's seqlen_q, so the grid and the head merging
+                // choice need the longest one rather than the total
+                if(mode == mode_enum::group)
+                {
+                    args.max_seqlen_q = max_seqlen_q;
+                }
 
                 args.stride_o_acc         = stride_o_acc;
                 args.nhead_stride_lse_acc = nhead_stride_lse_acc;

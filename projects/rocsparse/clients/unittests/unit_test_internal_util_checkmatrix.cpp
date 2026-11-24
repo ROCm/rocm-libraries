@@ -196,6 +196,163 @@ TEST_F(CheckMatrixCsc, empty_dimensions)
 }
 
 // ===========================================================================
+// check_matrix_csr  (host quick return when m == 0)
+// ===========================================================================
+class CheckMatrixCsr : public HandleTest
+{
+};
+
+// A CSR matrix with m = 0 has one row-pointer entry and no rows to validate.
+// (0, n) and (0, 0) with nnz = 0 are valid. nnz != 0 cannot match that entry.
+TEST_F(CheckMatrixCsr, empty_dimensions)
+{
+    device_vector<rocsparse_int> row_ptr{std::vector<rocsparse_int>{0}};
+    ASSERT_TRUE(row_ptr.ptr);
+
+    const rocsparse_int          shapes[][2] = {{0, 4}, {0, 0}};
+    const rocsparse_storage_mode storages[]  = {SORTED, rocsparse_storage_mode_unsorted};
+
+    for(rocsparse_storage_mode storage : storages)
+    {
+        for(const auto& shape : shapes)
+        {
+            const rocsparse_int m = shape[0];
+            const rocsparse_int n = shape[1];
+            SCOPED_TRACE("m " + std::to_string(m) + " n " + std::to_string(n) + " storage "
+                         + std::to_string(static_cast<int>(storage)));
+
+            size_t buffer_size = 0;
+            ASSERT_EQ(rocsparse_dcheck_matrix_csr_buffer_size(handle,
+                                                              m,
+                                                              n,
+                                                              0,
+                                                              nullptr,
+                                                              row_ptr,
+                                                              nullptr,
+                                                              BASE,
+                                                              GENERAL,
+                                                              LOWER,
+                                                              storage,
+                                                              &buffer_size),
+                      rocsparse_status_success);
+
+            device_vector<char> tmp{buffer_size ? buffer_size : size_t(1)};
+            ASSERT_TRUE(tmp.ptr);
+
+            rocsparse_data_status data_status = rocsparse_data_status_invalid_fill;
+            EXPECT_EQ(rocsparse_dcheck_matrix_csr(handle,
+                                                  m,
+                                                  n,
+                                                  0,
+                                                  nullptr,
+                                                  row_ptr,
+                                                  nullptr,
+                                                  BASE,
+                                                  GENERAL,
+                                                  LOWER,
+                                                  storage,
+                                                  &data_status,
+                                                  tmp.ptr),
+                      rocsparse_status_success);
+            EXPECT_EQ(data_status, rocsparse_data_status_success);
+        }
+    }
+
+    // nnz != 0 does not match the single row-pointer entry.
+    device_vector<double>        val{std::vector<double>{1.0}};
+    device_vector<rocsparse_int> col{std::vector<rocsparse_int>{0}};
+    ASSERT_TRUE(val.ptr && col.ptr);
+    size_t buffer_size = 0;
+    ASSERT_EQ(rocsparse_dcheck_matrix_csr_buffer_size(
+                  handle, 0, 4, 1, val, row_ptr, col, BASE, GENERAL, LOWER, SORTED, &buffer_size),
+              rocsparse_status_success);
+    device_vector<char> tmp{buffer_size ? buffer_size : size_t(1)};
+    ASSERT_TRUE(tmp.ptr);
+    rocsparse_data_status data_status = rocsparse_data_status_success;
+    EXPECT_EQ(rocsparse_dcheck_matrix_csr(handle,
+                                          0,
+                                          4,
+                                          1,
+                                          val,
+                                          row_ptr,
+                                          col,
+                                          BASE,
+                                          GENERAL,
+                                          LOWER,
+                                          SORTED,
+                                          &data_status,
+                                          tmp.ptr),
+              rocsparse_status_invalid_value);
+}
+
+// rocsparse_check_spmat on CSR uses the same path.
+TEST_F(CheckMatrixCsr, empty_check_spmat)
+{
+    device_vector<int32_t> row_ptr{std::vector<int32_t>{0}};
+    ASSERT_TRUE(row_ptr.ptr);
+
+    const int64_t                cols[]     = {4, 0};
+    const rocsparse_storage_mode storages[] = {SORTED, rocsparse_storage_mode_unsorted};
+
+    for(rocsparse_storage_mode storage : storages)
+    {
+        for(int64_t n : cols)
+        {
+            SCOPED_TRACE("n " + std::to_string(n) + " storage "
+                         + std::to_string(static_cast<int>(storage)));
+
+            rocsparse_spmat_descr mat = nullptr;
+            ASSERT_EQ(rocsparse_create_csr_descr(&mat,
+                                                 0,
+                                                 n,
+                                                 0,
+                                                 row_ptr.ptr,
+                                                 nullptr,
+                                                 nullptr,
+                                                 rocsparse_indextype_i32,
+                                                 rocsparse_indextype_i32,
+                                                 BASE,
+                                                 rocsparse_datatype_f64_r),
+                      rocsparse_status_success);
+
+            rocsparse_matrix_type matrix_type = GENERAL;
+            rocsparse_fill_mode   uplo        = LOWER;
+            ASSERT_EQ(rocsparse_spmat_set_attribute(
+                          mat, rocsparse_spmat_matrix_type, &matrix_type, sizeof(matrix_type)),
+                      rocsparse_status_success);
+            ASSERT_EQ(
+                rocsparse_spmat_set_attribute(mat, rocsparse_spmat_fill_mode, &uplo, sizeof(uplo)),
+                rocsparse_status_success);
+            ASSERT_EQ(rocsparse_spmat_set_attribute(
+                          mat, rocsparse_spmat_storage_mode, &storage, sizeof(storage)),
+                      rocsparse_status_success);
+
+            rocsparse_data_status data_status = rocsparse_data_status_invalid_fill;
+            size_t                buffer_size = 0;
+            ASSERT_EQ(rocsparse_check_spmat(handle,
+                                            mat,
+                                            &data_status,
+                                            rocsparse_check_spmat_stage_buffer_size,
+                                            &buffer_size,
+                                            nullptr),
+                      rocsparse_status_success);
+
+            device_vector<char> tmp{buffer_size ? buffer_size : size_t(1)};
+            ASSERT_TRUE(tmp.ptr);
+            ASSERT_EQ(rocsparse_check_spmat(handle,
+                                            mat,
+                                            &data_status,
+                                            rocsparse_check_spmat_stage_compute,
+                                            &buffer_size,
+                                            tmp.ptr),
+                      rocsparse_status_success);
+            EXPECT_EQ(data_status, rocsparse_data_status_success);
+            EXPECT_EQ(rocsparse_destroy_spmat_descr(mat), rocsparse_status_success);
+        }
+    }
+}
+
+// ===========================================================================
 // check_matrix_ell  (own device validation kernel)
 // ===========================================================================
 class CheckMatrixEll : public HandleTest

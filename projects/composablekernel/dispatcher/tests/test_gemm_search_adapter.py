@@ -49,6 +49,8 @@ import gemm_search as GS  # noqa: E402
 import host_cache as HC  # noqa: E402
 import gemm_utils  # noqa: E402
 import run_one_gemm_kernel as worker  # noqa: E402
+import streamk_gemm_full_benchmark as legacy_streamk  # noqa: E402
+from _gemm_driver_stubs import run_stub_driver  # noqa: E402
 from gemm_utils import GemmKernelConfig  # noqa: E402
 
 BASE = GemmKernelConfig(gfx_arch="gfx950")
@@ -153,9 +155,9 @@ class Toolchain:
         self.lat, self.wrong = dict(lat or {}), set(wrong)
         self.killed, self.oom = set(killed), set(oom)
         self.builds, self.payloads, self.outputs, self.loaded = [], [], [], []
-        self.prepares = []
+        self.prepares, self.arches = [], []
         monkeypatch.setattr(worker, "GpuGemmRunner", self.runner)
-        monkeypatch.setattr(worker, "_HostCodec", lambda name: _Runner(name, 1.0))
+        monkeypatch.setattr(worker, "_HostCodec", lambda name, arch=None: _Runner(name, 1.0))
         monkeypatch.setattr(AS, "prepare_host_data", self.prepare)
         monkeypatch.setattr(drv, "subprocess", SimpleNamespace(
             Popen=lambda *a, **kw: _InProcess(self), PIPE=subprocess.PIPE,
@@ -198,8 +200,9 @@ class Toolchain:
         """Whether ``which`` (names, or (name, M) pairs) names this pair."""
         return bool({name, (name, m)} & which)
 
-    def runner(self, lib_path):
+    def runner(self, lib_path, arch=None):
         self.loaded.append(Path(lib_path))
+        self.arches.append(arch)
         name = Path(lib_path).read_text()
         return _Runner(name, self.lat.get(name, 1.0),
                        lambda prob: self.hit(self.wrong, name, prob.M),
@@ -538,8 +541,10 @@ def test_failed_build_compacts_indices_and_stale_files_are_never_loaded(
     assert call["built"] == [(A, art / f"{A}.so"), (C, art / f"{C}.so")]
     assert call["pairs"] == [[0], [1]] and call["problems"] == [P1, P1]
     assert (call["verify"], call["batch_size"]) == (True, 1)
-    assert call["extra"] == {"check_identity": True, "search_host_data": True}
+    assert call["extra"] == {"check_identity": True, "search_host_data": True,
+                             "arch": "gfx950"}
     assert tc.loaded == [art / f"{A}.so", art / f"{C}.so"]
+    assert tc.arches == ["gfx950", "gfx950"]  # the run's --arch pins the fp8 format
     assert all(B not in it["so_path"] for p in tc.payloads for it in p["items"])
     # The round's CSV holds both rows; its JSON maps problem_idx to the request.
     rounds = tmp_path / "out" / "rounds"
@@ -677,7 +682,8 @@ def test_first_calls_find_their_problem_prepared(tmp_path, monkeypatch):
     assert [(list(p["payloads"]), p["limits"], p["width"]) for p in tc.prepares] == [
         ([K1], {K1: 70}, 2), ([K2], {K2: 70}, 2)]
     assert tc.prepares[0]["payloads"][K1] == {
-        "prepare": True, "host_cache": cache.spec, "problem": P1, "kernel_name": A}
+        "prepare": True, "host_cache": cache.spec, "problem": P1, "kernel_name": A,
+        "arch": "gfx950"}
     rounds = tmp_path / "out" / "rounds"
     sides = [json.loads((rounds / n).read_text())["prepared"] for n in (
         "0002-measure.json", "0003-measure.json", "0004-confirm.json")]
@@ -1149,13 +1155,168 @@ def test_misleading_rows_never_become_winners(tmp_path, monkeypatch, confirm_ok)
         assert "no finalist passed confirmation" in summary["unresolved"][K1]
 
 
+# Stream-K launch variants: two kernels (atomic, linear) x budgets 100 and 50.
+SK = gemm_utils.with_streamk_budgets(
+    [replace(BASE, variant="stream_k", reduction_strategy=r) for r in ("atomic", "linear")],
+    [100, 50])
+SK_NAMES = [c.name for c in SK]
+SK_KERNELS = [c.kernel_config.name for c in SK]
+ENV = gemm_utils.STREAMK_BUDGET_ENV
+
+
+def test_streamk_budgets_share_one_build_and_reach_the_launch(tmp_path, monkeypatch):
+    # The budgets of a Stream-K kernel are candidates of their own with its
+    # build key: one build and one artifact serve them all. The worker gets
+    # the kernel's name (its identity check passes) and each item's budget in
+    # the environment its library reads at the launch, restored after it.
+    monkeypatch.delenv(ENV, raising=False)
+    tc = Toolchain(tmp_path, monkeypatch)
+    seen = []
+
+    def runner(lib_path, arch=None):
+        r = tc.runner(lib_path, arch)
+        run = r.run
+
+        def launch(A, B, problem):
+            pct = int(os.environ.get(ENV, "100"))
+            seen.append((r.kernel_name, pct))
+            return SimpleNamespace(**{**vars(run(A, B, problem)), "time_ms": 100.0 / pct})
+
+        r.run = launch
+        return r
+
+    monkeypatch.setattr(worker, "GpuGemmRunner", runner)
+    k1, _, k2, _ = SK_KERNELS
+    assert SK_NAMES == [k1, f"{k1}@budget50", k2, f"{k2}@budget50"]
+    ad = _adapter(tmp_path, tc.build, configs=SK, eligible=[SK_NAMES, SK_NAMES])
+    cands = ad.enumerate_eligible()[K1]
+    assert [c.artifact_key for c in cands] == SK_KERNELS
+    assert [(c.record["reduction_strategy"], c.record["budget_pct"]) for c in cands] == [
+        ("atomic", 100), ("atomic", 50), ("linear", 100), ("linear", 50)]
+    got = ad.build_missing([cands[1], cands[2]])  # one candidate per build
+    assert set(got) == {k1, k2} and [b["names"] for b in tc.builds] == [[k1, k2]]
+    art = tmp_path / "out" / "artifacts"
+    assert sorted(p.name for p in art.iterdir()) == sorted([f"{k1}.so", f"{k2}.so"])
+    requests = [_req(K1, n, i) for i, n in enumerate(SK_NAMES)]
+    out = ad.measure_pairs(requests)
+    confirmed = ad.confirm(requests)
+    assert [(o.request.kernel_name, o.status, o.latency_ms) for o in out] == [
+        (n, "ok", 100.0 / c.budget_pct) for n, c in zip(SK_NAMES, SK)]
+    assert [(o.request.kernel_name, o.status, o.latency_ms) for o in confirmed] == [
+        (n, "ok", 100.0 / c.budget_pct) for n, c in zip(SK_NAMES, SK)]
+    assert seen == [(k1, 100), (k1, 50), (k2, 100), (k2, 50)] * 2
+    items = [it for p in tc.payloads for it in p["items"]]
+    assert [(it["kernel_name"], it["env"]) for it in items] == [
+        (k, {ENV: str(c.budget_pct)}) for k, c in zip(SK_KERNELS, SK)] * 2
+    assert all(p["check_identity"] for p in tc.payloads) and ENV not in os.environ
+    assert tc.loaded == [art / f"{k}.so" for k in SK_KERNELS] * 2
+    # Partial failure while setting env keys still rolls back earlier mutations.
+    monkeypatch.setenv("TEST_LAUNCH_ENV_ROLLBACK", "orig")
+    with pytest.raises(ValueError):
+        with worker._launch_env({"TEST_LAUNCH_ENV_ROLLBACK": "new", "BAD\x00KEY": "1"}):
+            pass
+    assert os.environ["TEST_LAUNCH_ENV_ROLLBACK"] == "orig"
+
+
+@pytest.mark.parametrize("mislabel,exit_code", [(False, 0), (True, 0), (False, -11)])
+def test_legacy_streamk_launch_pins_arch_and_checks_identity(
+    tmp_path, monkeypatch, mislabel, exit_code
+):
+    cfg = SK[0].kernel_config
+    tc = Toolchain(tmp_path, monkeypatch, mislabel={cfg.name: B} if mislabel else None)
+    (lib,) = tc.build([cfg])
+    launches = []
+
+    def popen(argv, **kwargs):
+        launches.append((argv, kwargs["env"]))
+        proc = _InProcess(tc)
+        proc.returncode = exit_code
+        return proc
+
+    monkeypatch.setattr(
+        legacy_streamk,
+        "subprocess",
+        SimpleNamespace(**{**vars(drv.subprocess), "Popen": popen}),
+    )
+    path = GEMM_TE_DIR / "run_one_streamk_gemm_kernel.py"
+    rows, _, failed = legacy_streamk._run_batch_on_device(
+        "2",
+        (0, P1, [(0, cfg, lib)], 50),
+        _args(verify=True, arch="gfx1250"),
+        path,
+        {"GEMM_PYPATH": "modules"},
+    )
+    assert tc.payloads[0]["arch"] == "gfx1250"
+    assert tc.payloads[0]["check_identity"] is True
+    assert tc.arches == ["gfx1250"]
+    assert launches == [
+        (
+            [sys.executable, str(path)],
+            {"GEMM_PYPATH": "modules", "HIP_VISIBLE_DEVICES": "2", ENV: "50"},
+        )
+    ]
+    if mislabel:
+        assert failed == 1 and not rows
+        assert "identity mismatch" in tc.outputs[0]["error"]
+    elif exit_code != 0:
+        assert failed == 1 and len(rows) == 1
+    else:
+        assert failed == 0
+        assert rows[0]["kernel"] == cfg.name and rows[0]["budget_pct"] == 50
+        assert rows[0]["verified"] is True
+
+
+def test_streamk_plain_repeat_top_keeps_each_budget(tmp_path, monkeypatch, capsys):
+    tc = Toolchain(tmp_path, monkeypatch)
+    rc, cap = run_stub_driver(
+        drv,
+        monkeypatch,
+        capsys,
+        tmp_path,
+        [P1],
+        "--variant",
+        "gemm_streamk",
+        "--budget-pct",
+        "100,50",
+        "--max-kernels",
+        "1",
+        "--no-vector-fallback",
+        "--repeat-top",
+        "2",
+        "--repeat-count",
+        "2",
+        "--verify",
+        build=tc.build,
+        run_batch=drv._run_batch_on_device,
+    )
+    assert rc == 0, cap.out
+    (kernel,) = tc.builds[0]["names"]
+    discovery, *repeats = tc.payloads
+    assert discovery["arch"] == "gfx950" and discovery["verify"] is True
+    assert len(repeats) == 4 and all(p["verify"] is False for p in repeats)
+    assert all(p["arch"] == "gfx950" for p in repeats)
+    assert tc.arches == ["gfx950"] * 6
+    for payloads in ([discovery], repeats[:2], repeats[2:]):
+        assert sorted(
+            (it["kernel_name"], it["env"][ENV]) for p in payloads for it in p["items"]
+        ) == [(kernel, "100"), (kernel, "50")]
+    with open(tmp_path / "out.repeats.csv", newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert sorted((r["kernel"], r["rep"], r["ok"]) for r in rows) == sorted(
+        (name, str(rep), "1")
+        for name in (kernel, f"{kernel}@budget50")
+        for rep in range(2)
+    )
+
+
 def test_worker_checks_the_library_identity_only_when_asked(monkeypatch, capsys):
     monkeypatch.setattr(gemm_utils, "_SWEEP_CACHE", {})
-    monkeypatch.setattr(worker, "GpuGemmRunner", lambda lib_path: _Runner(C, 1.0))
+    monkeypatch.setattr(worker, "GpuGemmRunner",
+                        lambda lib_path, arch=None: _Runner(C, 1.0))
     worker._run_one(0, "a.so", P1, A, verify=True)
     worker._run_one(1, "a.so", P1, A, verify=True, check_identity=True)
     monkeypatch.setattr(worker, "GpuGemmRunner",
-                        lambda lib_path: _Runner(A, 1.0, status=-3))
+                        lambda lib_path, arch=None: _Runner(A, 1.0, status=-3))
     worker._run_one(2, "a.so", P1, A, check_identity=True)
     legacy, checked, status = (
         json.loads(ln) for ln in capsys.readouterr().out.splitlines())

@@ -9,7 +9,10 @@ driver's own build and measure functions, which the driver passes in as
 
 - candidates: per problem, the kernels a full run would measure with it, one
   per kernel name (with ``--pairs``: only its problems, and the listed kernels
-  among those);
+  among those); the launch variants of one kernel (``gemm_streamk``: its
+  workgroup budgets, ``gemm_utils.StreamKBudgetConfig``) are candidates of
+  their own that share its build (``Candidate.build_key``), so trying another
+  budget of a built kernel costs a measurement only;
 - builds: ``setup_multiple_gemm_dispatchers`` on the round's missing kernels,
   verbose like a full run's, with the search's limit per build step
   (``build_timeout_s``; else ``SEARCH_BUILD_TIMEOUT_S`` when they are all
@@ -22,11 +25,13 @@ driver's own build and measure functions, which the driver passes in as
   exactly one request; the worker also checks that the library reports the
   requested kernel (``check_identity``) and reads the problem's inputs and
   reference from the run's host cache (``host_cache.py``) instead of computing
-  them on every call. A problem's first call is preceded by its preparation:
-  a worker that only stores them in the cache, outside the call's timeout,
-  and by the host memory guard: a problem whose host data does not fit in
-  the host's memory (``host_compute_bytes``, ``host_read_bytes``) gets
-  ``host_memory`` instead of a worker that the out-of-memory killer ends.
+  them on every call; the fp8/bf8 host format follows the run's --arch
+  (``arch``), not the local GPU. A problem's first call is preceded by its
+  preparation: a worker that only stores them in the cache, outside the
+  call's timeout, and by the host memory guard: a problem whose host data
+  does not fit in the host's memory (``host_compute_bytes``,
+  ``host_read_bytes``) gets ``host_memory`` instead of a worker that the
+  out-of-memory killer ends.
   Each call writes its own CSV under ``<out>/rounds/``, next to a JSON file
   mapping its ``problem_idx`` to the request (call id, trial) and holding its
   failure records and the preparations run before it;
@@ -84,7 +89,7 @@ CONFLICTS = (
     ("--failures-csv", "failures_csv"),
     ("--build-timeout", "build_timeout", "set build_timeout_s in the search settings"),
 )
-REQUIRED = (("--variant", "variant", "gemm_universal"),)  # the one searched
+REQUIRED = (("--variant", "variant", ("gemm_universal", "gemm_streamk")),)  # searched
 # Driver failure kind (--failures-csv) -> outcome status. The first kind in
 # this order that a request has decides its outcome, unless its worker ran out
 # of host memory (``adaptive_search.memory_failure``): ended by SIGKILL, which
@@ -301,7 +306,8 @@ def read_ranked_csv(path) -> Dict[str, Dict[str, float]]:
 
 
 class GemmSearchAdapter:
-    """``OperationAdapter`` for gemm_universal (see the module docstring).
+    """``OperationAdapter`` for gemm_universal and gemm_streamk (see the
+    module docstring).
 
     ``eligible[i]`` lists the kernel names ``problems[i]`` may run, in order;
     ``worker`` is the driver's ``(worker_path, base_env)``; ``context`` adds
@@ -336,6 +342,11 @@ class GemmSearchAdapter:
         self.extra = {"check_identity": True, "search_host_data": True}
         if self.host_cache:
             self.extra["host_cache"] = self.host_cache
+        # The workers' fp8/bf8 host format follows the run's --arch, not the
+        # local GPU's detection (rocminfo / amd-smi), which can fail.
+        arch = self._context.get("arch") or getattr(args, "arch", None)
+        self.arch = {"arch": arch} if arch else {}
+        self.extra.update(self.arch)
         by_name = {}
         for cfg in configs:
             by_name.setdefault(cfg.name, cfg)
@@ -356,9 +367,14 @@ class GemmSearchAdapter:
     def _cand(self, cfg) -> Candidate:
         c = self.cands.get(cfg.name)
         if c is None:
-            c = Candidate(cfg.name, cfg.name, self.hooks.record(cfg), cfg)
+            c = Candidate(cfg.name, cfg.name, self.hooks.record(cfg), cfg,
+                          build_key=cfg.kernel_config.name)
             self.cands[cfg.name] = c
         return c
+
+    def _artifact(self, req: PairRequest) -> str:
+        """The build (artifact key) a request runs."""
+        return self.cands[req.candidate_key].artifact_key
 
     # -------------------------------------------------- OperationAdapter
 
@@ -371,6 +387,11 @@ class GemmSearchAdapter:
             notes.append("fixed-vector-width kernels are candidates where a full run "
                          "pairs them; one a full run measures only because its native "
                          "kernel failed to build is not")
+        pipes = self._context.get("pipelines") or getattr(a, "pipelines", None)
+        if pipes:
+            notes.append(
+                f"--pipelines {','.join(pipes)} restricts the expanded configs"
+            )
         if a.pairs:
             notes.append(f"--pairs {a.pairs} restricts the problems to its keys and "
                          "the candidates to its pairs")
@@ -459,34 +480,37 @@ class GemmSearchAdapter:
         limit = self._build_timeout_for(cands)
         with adaptive_search.host_lock(False, _log,
                                        "another search run's host data preparation"):
-            paths = self.hooks.build(
-                [c.original_config for c in cands], verbose=True,
+            paths = self.hooks.build(  # a launch variant builds its kernel
+                [c.original_config.kernel_config for c in cands], verbose=True,
                 max_workers=self.args.workers, errors=errors, build_timeout=limit,
             )
         if len(paths) != len(cands):
             raise RuntimeError(f"build returned {len(paths)} paths for {len(cands)} kernels")
+        # One candidate per build: keyed, named and failed by its build's kernel.
         log = self.calls.new("build", ".json")
         self.calls.write_json(log, {
-            "kernels": [c.kernel_name for c in cands],
+            "kernels": [c.artifact_key for c in cands],
             "build_timeout": limit,
-            "errors": {c.kernel_name: str(errors.get(c.kernel_name, ""))[:BUILD_ERROR_CHARS]
+            "errors": {c.artifact_key: str(errors.get(c.artifact_key, ""))[:BUILD_ERROR_CHARS]
                        for c, lib in zip(cands, paths) if lib is None},
         })
         out = {}
         for c, lib in zip(cands, paths):
+            key = c.artifact_key
             if lib is None:
-                why = self.hooks.build_reason(errors.get(c.kernel_name))
-                out[c.canonical_key] = BuildResult(None, why or "build failed")
+                why = self.hooks.build_reason(errors.get(key))
+                out[key] = BuildResult(None, why or "build failed")
             else:
-                out[c.canonical_key] = self.store.add(c.canonical_key, lib,
-                                                      f"{c.kernel_name}.so")
+                out[key] = self.store.add(key, lib, f"{key}.so")
         return out
 
     def measure_pairs(self, requests: Sequence[PairRequest]) -> List[PairOutcome]:
-        return measure_built(self.store, requests, lambda rs: self._run(rs, "measure"))
+        return measure_built(self.store, requests, lambda rs: self._run(rs, "measure"),
+                             self._artifact)
 
     def confirm(self, requests: Sequence[PairRequest]) -> List[PairOutcome]:
-        return measure_built(self.store, requests, lambda rs: self._run(rs, "confirm"))
+        return measure_built(self.store, requests, lambda rs: self._run(rs, "confirm"),
+                             self._artifact)
 
     # ----------------------------------------------------------- measure
 
@@ -510,7 +534,7 @@ class GemmSearchAdapter:
         first: Dict[str, str] = {}
         for r in reqs:  # one dtype and layout per run: any kernel of it will do
             if r.problem_key not in self.checked:
-                first.setdefault(r.problem_key, r.kernel_name)
+                first.setdefault(r.problem_key, self._artifact(r))
         if not first:
             return []
         self.checked.update(first)
@@ -532,7 +556,8 @@ class GemmSearchAdapter:
                 got = adaptive_search.prepare_host_data(
                     [sys.executable, str(self.worker_path)], self.base_env,
                     {k: json.dumps({"prepare": True, "host_cache": self.host_cache,
-                                    "problem": self.problems[k], "kernel_name": n})
+                                    "problem": self.problems[k], "kernel_name": n,
+                                    **self.arch})
                      for k, n in first.items()}, limits, len(self.devices),
                     needs=needs, memory=self.memory, keeps=keeps)
             self.prepared.update(got)
@@ -574,7 +599,7 @@ class GemmSearchAdapter:
             if r.candidate_key not in index:
                 index[r.candidate_key] = len(built)
                 cfg = self.cands[r.candidate_key].original_config
-                built.append((cfg, self.store.path(r.candidate_key)))
+                built.append((cfg, self.store.path(self._artifact(r))))
         csv_path = self.calls.new(kind, ".csv")
         rows, fails, pin = [], [], {}
         prepared = self._prepare(reqs, csv_path.stem)

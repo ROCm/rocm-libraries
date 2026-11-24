@@ -171,6 +171,12 @@ struct AnySolver
         return ptr_value->MayNeedWorkspace();
     }
 
+    bool WorkspaceDependsOnConfig() const
+    {
+        assert(ptr_value != nullptr);
+        return ptr_value->WorkspaceDependsOnConfig();
+    }
+
     // virtual base class
     struct AnySolver_base
     {
@@ -223,6 +229,7 @@ struct AnySolver
         virtual size_t GetWorkspaceSize(const ExecutionContext& ctx,
                                         const miopen::conv::ProblemDescription& problem) const = 0;
         virtual bool MayNeedWorkspace() const                                                  = 0;
+        virtual bool WorkspaceDependsOnConfig() const                                          = 0;
     };
 
     // templated derived class
@@ -564,6 +571,7 @@ struct AnySolver
             return value.GetWorkspaceSize(ctx, problem);
         }
         bool MayNeedWorkspace() const override { return value.MayNeedWorkspace(); }
+        bool WorkspaceDependsOnConfig() const override { return value.WorkspaceDependsOnConfig(); }
         const std::type_info& Type() const override { return typeid(T); };
         std::string GetSolverDbId() const override { return value.SolverDbId(); }
 

@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "stinkytofu/Export.hpp"
+#include "stinkytofu/analysis/asm/GirFrameAnalysis.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/IRBase.hpp"
 #include "stinkytofu/pipeline/CloneSpec.hpp"
@@ -120,14 +121,14 @@
     X(CloneList, std::vector<CloneSpec>)          \
     X(DsReadQueueDepth, int)                      \
     X(DsReadDrainLatency, int)                    \
-    X(TensorLoadWmmaSpace, int)                   \
     X(WmmaRefillMode, int)                        \
     X(WmmaBatchSize, int)                         \
     X(WmmaRefillToCycles, int)                    \
     X(GlobalReadQueueDepth, int)                  \
     X(GlobalReadDrainLatency, int)                \
     X(DsReadOrder, int)                           \
-    X(ArchName, std::string)
+    X(ArchName, std::string)                      \
+    X(LowerViaLogicalIR, bool)
 
 // Scheduling knobs below default to -1 (= unset), except LockDsReadOrder, EvenSpreadFillers,
 // WaitAluHoldStrictCount, PrefetchLeadWmmas and PrefetchLeadMinStageWmmas, which
@@ -152,7 +153,8 @@
     X(DsReadCyclesPerLoad, int, 6)        /* LDS return rate (cycles per ds_load); 0 = off */      \
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                                \
     X(ReduceClusterBarrierPerLoop, int, -1)                                                        \
-    X(TensorLoadDsLoadGapCycles, int, 64)
+    X(TensorLoadWmmaSpace, int, -1) /* <0 unset; 0 = off; >0 = WMMA windows of exclusive space */  \
+    X(TensorLoadDsLoadGapCycles, int, -1) /* <0 unset; 0 = off; >0 = extra gap cycles */
 
 namespace stinkytofu {
 /**
@@ -426,6 +428,11 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
 
     void setPluginDataI64(const std::string& key, int64_t value);
     int64_t getPluginDataI64(const std::string& key, int64_t defaultVal = 0) const;
+
+    /// The GIR frame contract as the object Python already built -- no text, so no pair of
+    /// hand-written parsers to keep in step.
+    void setGirFrameContract(std::shared_ptr<const GirFrameContract> contract);
+    std::shared_ptr<const GirFrameContract> getGirFrameContract() const;
 
     void setPluginDataStr(const std::string& key, const std::string& value);
     std::string getPluginDataStr(const std::string& key, const std::string& defaultVal = "") const;

@@ -8,6 +8,7 @@
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
 #include "ck_tile/ops/fmha/block/variants.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_fwd_kernel_path_markers.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_output.hpp"
 #include "ck_tile/ops/fmha/pipeline/tile_fmha_traits.hpp"
 #include "ck_tile/ops/fmha/kernel/fmha_fwd_workgroup_mapping.hpp"
@@ -37,30 +38,6 @@
 namespace ck_tile {
 
 namespace detail {
-
-template <typename Pipeline, typename = void>
-struct uses_qr_tdm_lds_arena : std::false_type
-{
-};
-
-template <typename Pipeline>
-struct uses_qr_tdm_lds_arena<Pipeline, std::void_t<decltype(Pipeline::kUsesLdsArena)>>
-    : std::bool_constant<Pipeline::kUsesLdsArena>
-{
-};
-
-template <typename Pipeline>
-inline constexpr bool uses_qr_tdm_lds_arena_v = uses_qr_tdm_lds_arena<Pipeline>::value;
-
-// Whether the K/V views take the NT_HT cache hint on gfx1250 (see
-// FmhaFwdKernel::kKVCoherence): TDM pipelines that stage K/V in their LDS arena,
-// fp16/bf16, head dims below 256, tiles of at most 64 rows.
-template <typename Pipeline>
-inline constexpr bool uses_kv_nt_ht_hint_v =
-    uses_qr_tdm_lds_arena_v<Pipeline> && Pipeline::kM0 <= 64 &&
-    Pipeline::BlockFmhaShape::kQKHeaddim < 256 &&
-    (std::is_same_v<typename Pipeline::KDataType, half_t> ||
-     std::is_same_v<typename Pipeline::KDataType, bf16_t>);
 
 // A helper struct for detecting n0loop
 template <typename T, typename = void>
@@ -136,30 +113,14 @@ template <typename T>
 static inline constexpr bool is_using_trload_v = has_use_trload_flag<T>::value;
 
 template <typename T>
-using has_untransposed_v_kernel_path = decltype(T::kUsesUntransposedVKernelPath);
-
-template <typename T>
-using has_tdm_affine_dram_path = decltype(T::kUsesTdmAffineDramPath);
-
-template <typename T>
 using has_fixed_segmented_lds_arena = decltype(T::kUsesFixedSegmentedLdsArena);
 
-// qr_tdm used these kernel paths before opt-in markers were introduced.
+// Kernel-path marker fallback: qr_tdm used these paths before opt-in markers
+// were introduced.
 template <typename T>
-static inline constexpr bool uses_untransposed_v_kernel_path_v = []() {
-    if constexpr(is_detected<has_untransposed_v_kernel_path, T>::value)
-        return static_cast<bool>(T::kUsesUntransposedVKernelPath);
-    else
-        return std::string_view{T::name} == "qr_tdm";
-}();
-
-template <typename T>
-static inline constexpr bool uses_tdm_affine_dram_path_v = []() {
-    if constexpr(is_detected<has_tdm_affine_dram_path, T>::value)
-        return static_cast<bool>(T::kUsesTdmAffineDramPath);
-    else
-        return std::string_view{T::name} == "qr_tdm";
-}();
+struct is_named_qr_tdm : std::bool_constant<std::string_view{T::name} == "qr_tdm">
+{
+};
 
 template <typename T>
 using has_tdm_output_store = decltype(T::kStoresOutputViaTdm);
@@ -254,9 +215,9 @@ struct FmhaFwdKernel
     static constexpr bool kSkipMinSeqlenQ   = FmhaPipeline::Problem::kSkipMinSeqlenQ;
     static constexpr bool kHasSink          = FmhaPipeline::kHasSink;
     static constexpr bool kUsesUntransposedVKernelPath =
-        detail::uses_untransposed_v_kernel_path_v<FmhaPipeline>;
+        detail::uses_untransposed_v_kernel_path_v<FmhaPipeline, detail::is_named_qr_tdm>;
     static constexpr bool kUsesTdmAffineDramPath =
-        detail::uses_tdm_affine_dram_path_v<FmhaPipeline>;
+        detail::uses_tdm_affine_dram_path_v<FmhaPipeline, detail::is_named_qr_tdm>;
     static constexpr bool kUsesFixedSegmentedLdsArena =
         detail::uses_fixed_segmented_lds_arena_v<FmhaPipeline>;
 

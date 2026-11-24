@@ -254,6 +254,101 @@ suites are in `GRAPH_CAPTURE_test_categories_integration.yaml`
 (hipblaslt-provider). To add one, see
 [Add a graph-capture lane](adding-tests.md#add-a-graph-capture-lane).
 
+### 6. Time the reference (`--benchmark-reference`)
+
+`--benchmark-reference` measures one normal reference invocation per bundle test,
+without adding engine executions. The engine still runs once and its output is
+still compared, so a mismatch fails the test as usual; only their cost is left
+out of the reference timing. It works independently of `--benchmark`, which times
+the engine. Both flags may be enabled together; engine warmup and timed
+iterations do not contribute to reference timings.
+
+The flag applies to bundle tests only. Tests built on the C++ graph harness are
+not measured: the `BUILD_CPP_GRAPH_TESTS` suites, which are being retired in
+favour of bundles, and the default-built `ConvForwardSerializeRoundTrip` and
+`ResampleBackward` tests. They run their reference as normal and print no
+`[ REFERENCE BENCHMARK ]` line. A bundle test whose engine declines or fails, or
+whose support claim stops it, never reaches a reference and records nothing. With
+bundle tests off (`--no-bundles` or `HIPDNN_TEST_ALLOW_BUNDLES=0`) there is
+nothing to measure, so the binary refuses the flag.
+
+The metric is the incremental wall-clock cost of obtaining comparison-ready
+expected outputs:
+
+| Field | Includes |
+|---|---|
+| `prepare_ms` | Executor creation and applicability checking, reference output allocation, variant-pack setup, and any input transfer the reference needs. Inputs are shared with the engine, so filling or loading them is not included. Zero for golden outputs. |
+| `execute_ms` | CPU/GPU reference computation, or loading and constructing golden expected-output tensors from their blobs. |
+| `materialize_ms` | Making expected outputs available on the selected validator's host/device, including any required transfers. |
+| `total_ms` | Sum of the three phases. |
+
+Engine discovery, plan construction, engine execution, shared input generation
+and loading, engine-output transfers, and numerical comparison are excluded.
+Outstanding engine work is synchronized before starting reference timing;
+reference device work is synchronized before stopping each phase. Synchronization
+errors fail the test rather than triggering reference fallback.
+
+Timings retain the harness's normal input reuse: an input already resident where
+the reference needs it incurs no additional transfer. They include first-use
+reference initialization or compilation where it occurs, but are not a
+cold-cache or repeated-kernel microbenchmark. Golden output files are loaded
+separately from shared inputs when this flag is enabled; filesystem cache state
+affects their loading time. With the flag, golden blobs are read only when the
+golden outputs are the reference that verifies the test; there an unreadable
+blob fails the test with the same `tensor data failed to load` message as without
+the flag. Without the flag every golden blob is read with the inputs, so a
+corrupt blob fails a `gpu` or `cpu` run that would not compare against it, and
+the same run passes with the flag.
+
+For example, compare batchnorm inference CPU and GPU references on MLOps with
+the same CPU validator, including the GPU reference's output download:
+
+```bash
+for reference in cpu gpu; do
+  ./bin/hipdnn_integration_tests \
+    --test-article /path/to/libhip_kernel_provider.so \
+    --test-engine HIP_MLOPS_ENGINE \
+    --test-config /path/to/HIP_MLOPS_ENGINE.toml \
+    --gtest_filter='*BatchnormForwardInference*:*BatchnormFwdInference*:*BatchnormInference*' \
+    --verification-mode "$reference" \
+    --validator cpu \
+    --benchmark-reference \
+    --gtest_output="json:reference-${reference}.json"
+done
+```
+
+`--verification-mode` selects the reference. Use `--verification-mode golden`
+for bundles with golden outputs. `auto` reports whichever oracle actually ran,
+including declined or errored fallback attempts.
+
+Each attempted reference prints `[ REFERENCE BENCHMARK ]` with `reference`,
+`status`, and `validator`. Completed measurements include `samples=1` and the
+four timing fields. GoogleTest XML/JSON stores the same values as
+`reference_benchmark_<cpu|gpu|golden>_<field>` properties. Status is `verified`,
+`mismatch`, `declined`, or `error`; declined/error attempts have no timing samples
+and must not be interpreted as zero-cost references.
+
+`[ REFERENCE BENCHMARK SUMMARY ]` reports verified-test counts and summed
+milliseconds per reference, resetting for each GoogleTest iteration. A run with
+no verified measurements explicitly reports `measured=0`. Compare matching,
+verified test names only; skipped or failed tests do not establish a speedup.
+Repeat separate CPU/GPU invocations with distinct output files to estimate
+variance, and keep validator placement and input-fill settings identical.
+
+Two CTest checks cover the flag. `hipdnn_integration_tests_benchmark_reference_refusal`
+needs no plugin and checks a refused combination; it is in the build tree and in
+the installed CTest file. A provider lane that passes
+`BENCHMARK_REFERENCE_SMOKE_FILTER` to `add_external_integration_test_target()`
+gets `<lane>-benchmark-reference-smoke`, which runs that filter with the flag on
+and fails unless at least one reference is verified and measured and the output
+has no `[  FAILED  ]`, `FATAL:`, `Fatal error:` or `Error: zero tests ran` line.
+CTest ignores the exit code of a check with a pass pattern, so a non-zero exit
+after the summary that prints none of these still passes; a crash on a signal
+still fails. The MIOpen lane runs
+`quick_BatchnormFwdInference_Inference.*` this way in the quick tier. On a runner
+with no HIP device both checks pass without running anything, as the binary
+skips itself.
+
 ### The build reads a copy of the bundles
 
 CMake copies `integration-test-bundles/` into `build/lib/integration-test-bundles/`
@@ -285,6 +380,7 @@ Otherwise, you test the old tree.
 | `--benchmark-iterations` | | 20 | Timed executions per test. Requires `--benchmark`. |
 | `--benchmark-warmup` | | 30 | Untimed executions before timing. Requires `--benchmark`. |
 | `--graph-capture` | | off | Capture each verified bundle test into a HIP graph and replay it. See [Check stream capture](#5-check-stream-capture---graph-capture). |
+| `--benchmark-reference` | | off | Time reference preparation, compute or golden-output loading, and expected-output transfers. See [Time the reference](#6-time-the-reference---benchmark-reference). |
 | `--gtest_*` | | | Passed through to GTest. |
 
 The binary refuses these flag combinations (exit 1):
@@ -296,11 +392,14 @@ The binary refuses these flag combinations (exit 1):
   (`--golden-data-dir` or `HIPDNN_TEST_GOLDEN_DATA_DIR`).
 - `--benchmark-iterations` or `--benchmark-warmup` without `--benchmark`, or
   `--benchmark-iterations` less than 1, or `--benchmark-warmup` less than 0.
-- `--benchmark` together with `--skip-graph-validation`, `--capture-bundles`
-  or `--write-support-claims`. These modes do not execute the graph.
+- `--benchmark` or `--benchmark-reference` together with
+  `--skip-graph-validation`, `--capture-bundles` or `--write-support-claims`.
+  These modes do not execute the graph or the reference.
 - `--graph-capture` together with `--benchmark`, `--skip-graph-validation`,
   `--capture-bundles`, `--write-support-claims`, `--no-bundles` or
   `HIPDNN_TEST_ALLOW_BUNDLES=0`.
+- `--benchmark-reference` with bundle tests off (`--no-bundles` or
+  `HIPDNN_TEST_ALLOW_BUNDLES=0`). The flag measures bundle tests only.
 
 `--enforce-support-claims=false` is accepted in every combination. If
 enforcement is only inherited and there is no `--test-engine`, the run
@@ -368,8 +467,11 @@ bundle patterns to `*Sdpa*`, uses `Smoke/*Sdpa*` as its only tier-prefixed C++
 pattern, and its `full` tier is `*Sdpa*`. The hip-kernel-provider gfx950
 attention lanes and gfx942 unified 3D lane (see
 [Tier YAML files](file-formats.md#tier-yaml-files--test_categoriesyaml)) select
-only `*_SdpaFwd_Default.*` bundles in every tier, `full` included. The gfx942
-dense lane also selects the BSHD stats bundles `*_SdpaFwd_bshd_*_stats_*`:
+only the `*_SdpaFwd_Default.*` and `*_SdpaFwdPlan_*` bundles in every tier,
+`full` included. The gfx942 dense lane also selects the BSHD stats bundles
+`*_SdpaFwd_bshd_*_stats_*`. The FlyDSL SDPA lanes select the `*_SdpaFwd_*` and
+`*_SdpaFwdPlan_*` bundles. The miopen, hipblaslt and HIP_MLOPS files exclude
+`*_SdpaFwdPlan_*` from every tier:
 
 | CTest label | Bundle suites | C++ tests | Other labels on the suite |
 |---|---|---|---|
@@ -390,6 +492,10 @@ It differs for each lane:
 
 Because `-L` is a regex, `-L quick` also selects these suites
 ([above](#1-ctest-by-tier-what-ci-does)).
+
+The hip-kernel-provider FlyDSL lanes (`hipkernel_flydsl_*_test_categories_integration.yaml`)
+define neither `quick` nor `ffm-quick`: no FlyDSL device test runs in those tiers, so
+each lane registers `standard`, `comprehensive` and `full` only.
 
 The timeouts come from `execution_settings.category_timeouts` in each YAML file.
 They are different in each file.
@@ -437,7 +543,7 @@ it passes all of them.
 | 1 | Build options (`-DBUILD_CPP_GRAPH_TESTS`, op enables) | configure | A test not compiled cannot be selected. C++ graph tests are **off by default**. |
 | 2 | `exclude_gpu` in the tier YAML | configure (suites) and `ctest` (selection) | Adds per-arch variant suites (`…_<category>_<arch>_suite`, label `ex_gpu_<arch>`) carrying that arch's negative patterns, or `DISABLED` for `"*"`. To pick the variant, use `-L ex_gpu_<arch>`. A plain `-L quick` also runs the unfiltered suite. See `shared/ctest/README.md`. |
 | 3 | `ctest -L` / `-LE` / `-R` | ctest invocation | Selects suites by label or name. |
-| 4 | `--gtest_filter` (from the YAML, or yours) | binary start | Selects cases by GTest name. Bundles that the filter excludes are dropped **before** they are parsed or read, which keeps startup fast. |
+| 4 | `--gtest_filter` (from the YAML, or yours) | binary start | Selects cases by GTest name. Bundles that the filter excludes are dropped **before** they are loaded, which keeps startup fast. The harness applies the filter to each sweep folder by its suite name before it parses the `sweep.json`. It does not parse the `sweep.json` of a folder that the filter cannot select: it reads the file only to count its cases. With `--write-support-claims`, the harness parses every folder. The harness also parses a `sweep.json` when the case count cannot read its structure. |
 | 5 | Metadata guards and TOML `test_skips` | each test's `SetUp()` | Skip on VRAM, arch-locked golden data, or a recorded engine limitation. |
 | 6 | The engine's ranked list | each test body | The engine declines the graph → the case is skipped (or fails if a claim promised support). |
 

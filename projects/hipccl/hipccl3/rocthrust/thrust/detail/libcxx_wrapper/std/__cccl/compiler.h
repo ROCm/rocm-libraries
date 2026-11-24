@@ -32,7 +32,6 @@
 #  define THRUST_COMPILER(...) _CCCL_COMPILER(__VA_ARGS__)
 
 #  define THRUST_CUDA_COMPILER(...)  _CCCL_CUDA_COMPILER(__VA_ARGS__)
-#  define THRUST_HAS_CUDA_COMPILER() _CCCL_HAS_CUDA_COMPILER()
 #  define THRUST_CUDA_COMPILATION()  _CCCL_CUDA_COMPILATION()
 
 #  define THRUST_PRAGMA(ARG)          _CCCL_PRAGMA(ARG)
@@ -153,9 +152,9 @@
 
 #  if THRUST_CUDA_COMPILER(NVCC) || THRUST_CUDA_COMPILER(CLANG) || THRUST_CUDA_COMPILER(NVHPC) \
     || THRUST_CUDA_COMPILER(NVRTC)
-#    define THRUST_HAS_CUDA_COMPILER() 1
+#    define THRUST_CUDA_COMPILATION() 1
 #  else // ^^^ has cuda compiler ^^^ / vvv no cuda compiler vvv
-#    define THRUST_HAS_CUDA_COMPILER() 0
+#    define THRUST_CUDA_COMPILATION() 0
 #  endif // ^^^ no cuda compiler ^^^
 
 #  if defined(__CUDACC__) || THRUST_CUDA_COMPILER(NVHPC)

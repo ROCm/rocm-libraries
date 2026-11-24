@@ -613,6 +613,23 @@ SolutionIndexParameters indexToParameters(int index)
     return result;
 }
 
+/**
+ * Whether an index could have come from parametersToIndex: the top bit is set and no bit
+ * between the last field and the top bit is. Tensile indices are non-negative, so they fail.
+ */
+bool isRocRollerSolutionIndex(int index)
+{
+    // workgroupMapping, streamK, tailLoops, nonTemporalA, nonTemporalB
+    constexpr unsigned int flagBits = 5;
+    constexpr unsigned int fieldBits
+        = MAX_BITS_WORKGROUPTILE_K + MAX_BITS_WORKGROUPTILE_N + MAX_BITS_WORKGROUPTILE_M + flagBits;
+    constexpr unsigned int marker   = 1u << 31;
+    constexpr unsigned int reserved = ~((1u << fieldBits) - 1) & ~marker;
+
+    auto bits = static_cast<unsigned int>(index);
+    return (bits & marker) != 0 && (bits & reserved) == 0;
+}
+
 std::string shortRocRollerKernelNameFromSolutionIndex(const SolutionIndexParameters& p)
 {
     std::ostringstream o;

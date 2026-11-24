@@ -61,6 +61,30 @@ def by_name(entries):
     return {e.name: e for e in entries}
 
 
+def internal_header(*body: str) -> str:
+    """A miopen_internal.h-shaped file: its own guard and ``MIOPEN_EXPORT extern "C"``."""
+    return (
+        "#ifndef GUARD_MIOPEN_INTERNAL_H_\n"
+        "#define GUARD_MIOPEN_INTERNAL_H_\n"
+        "#include <miopen/miopen.h>\n"
+        "#ifdef __cplusplus\n"
+        'extern "C" {\n'
+        "#endif\n"
+        + "\n".join(body)
+        + "\n#ifdef __cplusplus\n}\n#endif\n#endif // GUARD_MIOPEN_INTERNAL_H_\n"
+    )
+
+
+def internal_entry(
+    name: str, params: str = "miopenHandle_t handle", ret: str = "miopenStatus_t"
+):
+    return f'MIOPEN_EXPORT extern "C" {ret} {name}({params});'
+
+
+def parse_internal(*body: str):
+    return gen.parse_public_header(internal_header(*body), "miopen_internal.h")
+
+
 # --------------------------------------------------------------------------
 # Reading declarations
 # --------------------------------------------------------------------------
@@ -507,7 +531,9 @@ def test_a_forwarding_header_may_declare_nothing():
 def test_a_name_declared_in_both_headers_is_rejected():
     entries = parse(entry("miopenCreate"))
     source = header(entry("miopenCreate"))
-    with pytest.raises(abi.AbiError, match="both miopen.h and hipdnn_forwarding.h"):
+    with pytest.raises(
+        abi.AbiError, match="both an entry-point header.*hipdnn_forwarding"
+    ):
         gen.wrapper_only_names(source, entries)
 
 
@@ -529,8 +555,77 @@ def test_a_wrapper_only_stub_is_accepted_and_never_generated():
 
 def test_a_stub_that_neither_header_declares_is_rejected_naming_both():
     entries = parse(entry("miopenCreate"))
-    with pytest.raises(abi.AbiError, match="neither miopen.h nor hipdnn_forwarding.h"):
+    with pytest.raises(
+        abi.AbiError,
+        match="none of miopen.h, miopen_internal.h and hipdnn_forwarding.h",
+    ):
         gen.hand_written_stubs(ACCESSOR_STUB, entries)
+
+
+# --------------------------------------------------------------------------
+# The second entry-point header, miopen_internal.h
+# --------------------------------------------------------------------------
+
+HIDDEN = internal_entry("miopenHiddenSetMode", "miopenHandle_t handle, int mode")
+
+
+def test_an_internal_declaration_is_read_through_its_extern_c_spelling():
+    entries = by_name(parse_internal(HIDDEN, internal_entry("miopenHiddenGetMode")))
+    assert entries["miopenHiddenSetMode"].ret == "miopenStatus_t"
+    assert [p.name for p in entries["miopenHiddenSetMode"].params] == ["handle", "mode"]
+    assert entries["miopenHiddenSetMode"].source == "miopen_internal.h"
+    assert parse(entry("miopenCreate"))[0].source == "miopen.h"
+
+
+def test_the_entry_points_of_both_headers_are_merged_in_that_order():
+    merged = gen.merge_entry_points(
+        parse(entry("miopenCreate"), entry("miopenDestroy")), parse_internal(HIDDEN)
+    )
+    assert [e.name for e in merged] == [
+        "miopenCreate",
+        "miopenDestroy",
+        "miopenHiddenSetMode",
+    ]
+
+
+def test_a_name_declared_in_both_entry_point_headers_is_rejected():
+    with pytest.raises(
+        abi.AbiError, match="both miopen.h and miopen_internal.h.*miopenCreate"
+    ):
+        gen.merge_entry_points(
+            parse(entry("miopenCreate")), parse_internal(internal_entry("miopenCreate"))
+        )
+
+
+def test_an_internal_entry_point_is_renamed_declared_and_stubbed_like_a_public_one():
+    entries = gen.merge_entry_points(
+        parse(entry("miopenCreate")), parse_internal(HIDDEN)
+    )
+    assert "#define miopenHiddenSetMode miopenHiddenSetMode_impl\n" in (
+        gen.render_rename_header(entries)
+    )
+    assert (
+        'extern "C" miopenStatus_t miopenHiddenSetMode_impl(miopenHandle_t handle, int mode);'
+        in gen.render_impl_header(entries)
+    )
+    passthrough = gen.render_passthrough(entries, set())
+    assert "MIOPEN_WRAPPER_DISPATCH(miopenHiddenSetMode);" in passthrough
+    assert "return miopenHiddenSetMode_impl(handle, mode);" in passthrough
+
+
+def test_an_error_about_an_internal_entry_point_names_miopen_internal_h():
+    entries = parse_internal(internal_entry("miopenHiddenGetMode", ret="int"))
+    with pytest.raises(
+        abi.AbiError, match=r"miopen_internal\.h:\d+: miopenHiddenGetMode returns"
+    ):
+        gen.check_dispatchable(entries, set())
+
+
+def test_a_hand_written_stub_is_checked_against_an_internal_declaration():
+    wrapper = 'extern "C" miopenStatus_t miopenHiddenSetMode(miopenHandle_t handle)\n{\n    return 0;\n}\n'
+    with pytest.raises(abi.AbiError) as error:
+        gen.hand_written_stubs(wrapper, parse_internal(HIDDEN))
+    assert "miopen_internal.h:" in str(error.value)
 
 
 def test_an_entry_point_that_is_not_status_returning_needs_a_hand_written_stub():
@@ -565,6 +660,7 @@ def test_every_file_names_its_source_and_the_command_that_regenerates_it():
     for key, text in texts().items():
         assert "GENERATED FILE. Do not edit." in text, key
         assert "Source: projects/miopen/include/miopen/miopen.h" in text, key
+        assert "projects/miopen/src/include/miopen/miopen_internal.h" in text, key
         assert f"Regenerate: {gen.GENERATOR_COMMAND}" in text, key
 
 
@@ -603,6 +699,7 @@ def test_the_impl_header_declares_every_entry_point_and_refuses_the_private_libr
     text = texts()["impl"]
     assert "#ifdef MIOPEN_BUILDING_PRIVATE\n#error" in text
     assert "#include <miopen/miopen.h>" in text
+    assert "#include <miopen/miopen_internal.h>" in text
     assert (
         'extern "C" miopenStatus_t miopenCreate_impl(miopenHandle_t* handle);' in text
     )
@@ -766,6 +863,8 @@ def test_the_note_names_both_releases_or_the_unreadable_pin():
 # The command line, against a small tree and the fake clang-format
 # --------------------------------------------------------------------------
 
+INTERNAL = internal_header(HIDDEN)
+
 PUBLIC = header(
     entry("miopenCreate", "miopenHandle_t* handle"),
     entry("miopenDestroy"),
@@ -783,6 +882,7 @@ class Tree:
         self.miopen = self.repo / "projects" / "miopen"
         self.provider = self.repo / "dnn-providers" / "miopen-provider"
         self.write(self.miopen / "include/miopen/miopen.h", PUBLIC)
+        self.write(self.miopen / "src/include/miopen/miopen_internal.h", INTERNAL)
         self.write(self.miopen / "src/private/wrapper.cpp", WRAPPER_WITH_ONE_STUB)
         self.write(self.miopen / ".clang-format", "# miopen style\n")
         self.write(self.repo / ".pre-commit-config.yaml", PRE_COMMIT)
@@ -1130,6 +1230,9 @@ def test_a_provider_only_change_is_compared_against_miopen_as_committed(
         "projects/miopen/include/miopen/miopen.h": (
             tree.miopen / "include/miopen/miopen.h"
         ),
+        "projects/miopen/src/include/miopen/miopen_internal.h": (
+            tree.miopen / "src/include/miopen/miopen_internal.h"
+        ),
         "projects/miopen/src/private/wrapper.cpp": (
             tree.miopen / "src/private/wrapper.cpp"
         ),
@@ -1157,7 +1260,11 @@ def test_a_tree_without_miopen_has_nothing_to_generate_from(
     tmp_path, monkeypatch, capsys
 ):
     tree = Tree(tmp_path)
-    for rel in ("include/miopen/miopen.h", "src/private/wrapper.cpp"):
+    for rel in (
+        "include/miopen/miopen.h",
+        "src/include/miopen/miopen_internal.h",
+        "src/private/wrapper.cpp",
+    ):
         (tree.miopen / rel).unlink()
     sparse(monkeypatch, {})
     assert tree.run("--check") == 0
@@ -1215,7 +1322,7 @@ def test_a_name_in_both_headers_exits_2(tmp_path, capsys):
     tree = Tree(tmp_path)
     tree.write(tree.miopen / FORWARDING_HEADER_PATH, header(entry("miopenCreate")))
     assert tree.run() == 2
-    assert "both miopen.h and hipdnn_forwarding.h" in capsys.readouterr().err
+    assert "both an entry-point header" in capsys.readouterr().err
 
 
 def test_check_passes_when_the_forwarding_header_is_not_tracked(
@@ -1227,3 +1334,36 @@ def test_check_passes_when_the_forwarding_header_is_not_tracked(
     capsys.readouterr()
     assert tree.run("--check", "--require-provider") == 0
     assert "wrapper source generation check: PASS" in capsys.readouterr().out
+
+
+def test_an_entry_point_of_the_internal_header_reaches_every_generated_file(tree):
+    assert tree.run() == 0
+    name = "miopenHiddenSetMode"
+    for rel in GENERATED:
+        assert name in tree.path(rel).read_text(encoding="utf-8"), rel
+    impl = tree.path(GENERATED[1]).read_text(encoding="utf-8")
+    assert f"{name}_impl" in impl
+
+
+def test_a_changed_internal_signature_fails_the_check_in_the_declaration_and_stub(
+    tree, capsys
+):
+    assert tree.run() == 0
+    internal = tree.miopen / "src/include/miopen/miopen_internal.h"
+    internal.write_text(
+        internal.read_text(encoding="utf-8").replace("int mode", "long mode"),
+        encoding="utf-8",
+    )
+    capsys.readouterr()
+
+    assert tree.run("--check") == 1
+    out = capsys.readouterr().out
+    assert "miopenHiddenSetMode_impl(miopenHandle_t handle, long mode)" in out
+    assert "miopenHiddenSetMode(miopenHandle_t handle, long mode)" in out
+
+
+def test_a_name_in_both_entry_point_headers_exits_2(tree, capsys):
+    internal = tree.miopen / "src/include/miopen/miopen_internal.h"
+    tree.write(internal, internal_header(internal_entry("miopenCreate")))
+    assert tree.run() == 2
+    assert "both miopen.h and miopen_internal.h" in capsys.readouterr().err

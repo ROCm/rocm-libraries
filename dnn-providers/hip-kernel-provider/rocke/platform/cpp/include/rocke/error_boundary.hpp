@@ -10,11 +10,11 @@
  * the status code / message their existing callers expect. These helpers keep
  * that translation in one place so the boundary stays uniform:
  *
- *   - rocke_guard_builder(b, fn): for entries that return a pointer (kernel def,
+ *   - ckc::guard_builder(b, fn): for entries that return a pointer (kernel def,
  *     value, ...) and own/borrow a builder `b`. Runs fn(); on a thrown
  *     ckc::Error it records the status+message on `b` and returns nullptr.
  *
- *   - rocke_guard_status(b, fn): for entries that return a rocke_status_t and have a
+ *   - ckc::guard_status(b, fn): for entries that return a rocke_status_t and have a
  *     builder `b`. Runs fn(); on a thrown ckc::Error it records the message on
  *     `b` and returns the exception's code.
  *

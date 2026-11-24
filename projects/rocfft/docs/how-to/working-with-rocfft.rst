@@ -420,6 +420,8 @@ The workflow for using fields is as follows:
    The offsets, strides, and distances specified by
    :cpp:func:`rocfft_plan_description_set_data_layout` for input or output are
    ignored when a field is set for the corresponding input or output.
+   Planar array types are not supported when a field is set for either input
+   or output.
 
    If the same field layout is used for both input and output, the same
    :cpp:type:`rocfft_field` struct can be passed to both
@@ -446,8 +448,8 @@ The workflow for using fields is as follows:
 
 .. important::
 
-   For in-place transforms, pass a non-empty array of input pointers and
-   an empty array of output pointers.
+   For in-place transforms, pass a non-empty array of input pointers. The
+   array of output pointers is ignored and may be null.
 
 Transforms of real data
 =======================

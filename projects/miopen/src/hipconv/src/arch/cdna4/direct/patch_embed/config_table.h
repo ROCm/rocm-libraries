@@ -52,6 +52,46 @@ constexpr Config configs[] = {
     {.m_tile16 = 4, .n_tile16 = 8, .k_chunk = 64, .waves_m = 1, .waves_n = 8, .row_pad = true},
     {.m_tile16 = 8, .n_tile16 = 8, .k_chunk = 32, .waves_m = 1, .waves_n = 4, .row_pad = true},
     {.m_tile16 = 16, .n_tile16 = 16, .k_chunk = 32, .waves_m = 1, .waves_n = 8, .row_pad = true},
+
+    // tf32: the same ladders at half the chunk, which keeps each tile's LDS -- two bf16 planes a
+    // tile -- and so its occupancy where the 16-bit one has it. A chunk already at one MFMA step
+    // cannot halve, so its LDS doubles instead. The narrow alternate and the padded mid tile would
+    // leave threads without a whole granule at 32, so they stage on fewer waves.
+    {.m_tile16 = 2, .n_tile16 = 8, .k_chunk = 64, .waves_m = 1, .waves_n = 4, .elem_bytes = 4},
+    {.m_tile16 = 4, .n_tile16 = 4, .k_chunk = 32, .waves_m = 2, .waves_n = 2, .elem_bytes = 4},
+    {.m_tile16 = 6, .n_tile16 = 12, .k_chunk = 64, .waves_m = 2, .waves_n = 6, .elem_bytes = 4},
+    {.m_tile16 = 16, .n_tile16 = 16, .k_chunk = 32, .waves_m = 2, .waves_n = 4, .elem_bytes = 4},
+    {.m_tile16 = 2, .n_tile16 = 8, .k_chunk = 32, .waves_m = 1, .waves_n = 2, .elem_bytes = 4},
+    {.m_tile16 = 8, .n_tile16 = 16, .k_chunk = 32, .waves_m = 1, .waves_n = 8, .elem_bytes = 4},
+    {.m_tile16 = 8, .n_tile16 = 8, .k_chunk = 32, .waves_m = 1, .waves_n = 4, .elem_bytes = 4},
+    {.m_tile16   = 2,
+     .n_tile16   = 8,
+     .k_chunk    = 64,
+     .waves_m    = 1,
+     .waves_n    = 4,
+     .row_pad    = true,
+     .elem_bytes = 4},
+    {.m_tile16   = 4,
+     .n_tile16   = 8,
+     .k_chunk    = 32,
+     .waves_m    = 1,
+     .waves_n    = 4,
+     .row_pad    = true,
+     .elem_bytes = 4},
+    {.m_tile16   = 8,
+     .n_tile16   = 8,
+     .k_chunk    = 32,
+     .waves_m    = 1,
+     .waves_n    = 4,
+     .row_pad    = true,
+     .elem_bytes = 4},
+    {.m_tile16   = 16,
+     .n_tile16   = 16,
+     .k_chunk    = 32,
+     .waves_m    = 1,
+     .waves_n    = 8,
+     .row_pad    = true,
+     .elem_bytes = 4},
 };
 
 constexpr int num_configs = std::size(configs);
@@ -61,6 +101,9 @@ constexpr bool table_is_well_formed()
 {
     for(const Config& cfg : configs)
     {
+        // An element is 2 bytes, or 4 for tf32.
+        if(cfg.elem_bytes != 2 && cfg.elem_bytes != 4)
+            return false;
         // The wave grid has to divide the workgroup tile, or a wave would own a
         // fractional MFMA tile.
         if(cfg.m_tile16 % cfg.waves_m != 0 || cfg.n_tile16 % cfg.waves_n != 0)
@@ -87,9 +130,10 @@ constexpr bool table_is_well_formed()
 }
 
 static_assert(table_is_well_formed(),
-              "a patch_embed config is malformed: the wave grid must divide the workgroup "
-              "tile; k_chunk must be a whole number of MFMA K steps and hold a power-of-two "
-              "number of 16-byte granules for the XOR swizzle; both tiles must stage in whole "
-              "passes over the workgroup; and the two tiles together must fit LDS");
+              "a patch_embed config is malformed: elem_bytes must be 2 or 4; the wave grid must "
+              "divide the workgroup tile; k_chunk must be a whole number of MFMA K steps and "
+              "hold a power-of-two number of 16-byte granules for the XOR swizzle; both tiles "
+              "must stage in whole passes over the workgroup; and the two tiles together must "
+              "fit LDS");
 
 } // namespace hipconv::cdna4::patch_embed

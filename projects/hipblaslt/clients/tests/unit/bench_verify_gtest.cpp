@@ -18,12 +18,14 @@ namespace
         {
             saved_strict   = hipblaslt_bench_options::verify_strict();
             saved_failures = hipblaslt_bench_options::verification_failures();
+            saved_extra    = hipblaslt_bench_options::extra_check_failures();
         }
 
         void TearDown() override
         {
             hipblaslt_bench_options::verify_strict()         = saved_strict;
             hipblaslt_bench_options::verification_failures() = saved_failures;
+            hipblaslt_bench_options::extra_check_failures()  = saved_extra;
         }
 
         static int exit_code(bool strict, int64_t failures, int ret)
@@ -35,6 +37,7 @@ namespace
 
         bool    saved_strict   = false;
         int64_t saved_failures = 0;
+        int64_t saved_extra    = 0;
     };
 
     TEST_F(HostUnitBenchVerify, smoke_StrictWithFailureExitsTwo)
@@ -53,6 +56,14 @@ namespace
         EXPECT_EQ(exit_code(true, 0, 0), 0);
     }
 
+    // Failed checks of E, the bias gradient or amaxD do not change the --verify_strict exit code.
+    TEST_F(HostUnitBenchVerify, smoke_StrictIgnoresFailedChecksOfOtherOutputs)
+    {
+        hipblaslt_bench_options::extra_check_failures() = 4;
+        EXPECT_EQ(exit_code(true, 0, 0), 0);
+        EXPECT_EQ(exit_code(true, 1, 0), 2);
+    }
+
     // A run that already failed for another reason keeps its own exit code.
     TEST_F(HostUnitBenchVerify, smoke_EarlierErrorKeepsItsCode)
     {
@@ -69,7 +80,7 @@ namespace
         arg.allclose_check                       = 0;
         hipblaslt_bench_options::verify_strict() = true;
 
-        hipblaslt_bench_options::apply_strict_verification(arg);
+        hipblaslt_bench_options::apply_to(arg);
 
         EXPECT_EQ(arg.norm_check, 1);
         EXPECT_EQ(arg.allclose_check, 1);
@@ -84,7 +95,7 @@ namespace
         arg.norm_check_assert                    = true;
         hipblaslt_bench_options::verify_strict() = true;
 
-        hipblaslt_bench_options::apply_strict_verification(arg);
+        hipblaslt_bench_options::apply_to(arg);
 
         EXPECT_EQ(arg.norm_check, 1);
         EXPECT_EQ(arg.allclose_check, 1);
@@ -100,7 +111,7 @@ namespace
         arg.norm_check_assert                    = true;
         hipblaslt_bench_options::verify_strict() = false;
 
-        hipblaslt_bench_options::apply_strict_verification(arg);
+        hipblaslt_bench_options::apply_to(arg);
 
         EXPECT_EQ(arg.norm_check, 1);
         EXPECT_EQ(arg.allclose_check, 0);

@@ -1,0 +1,30 @@
+# Fortran binding of rocfft: see fortran-bindings.yml.
+name: Fortran bindings (rocfft)
+
+on:
+  pull_request:
+    paths:
+      - 'projects/rocfft/library/include/**.h'
+      - 'bindings/fortran/rocfft/metadata/**'
+      - '.github/workflows/fortran-bindings-rocfft.yml'
+      - '.github/workflows/fortran-bindings.yml'
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bindings:
+    uses: ./.github/workflows/fortran-bindings.yml
+    with:
+      project: rocfft
+      libs: rocfft
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}

@@ -8,6 +8,7 @@ packaging
 msgpack>=1.0.0
 joblib>=1.4.0
 numpy>=1.26.0
+pandas
 filelock>=3.0.0
 syrupy
 hip-python; sys_platform != "win32"

@@ -27,7 +27,12 @@ instead of once per call. With ``prepare`` (the search, before a problem's
 first measure call) the worker loads no library: it stores the host data of
 ``problem`` for the dtype and layout of ``kernel_name`` in ``host_cache`` and
 prints ``{"ok": true, "stored": <whether the cache holds it now>}``. With
-``prepare`` or ``search_host_data`` the worker asks to be the first process
+``arch`` (the run's --arch) the fp8/bf8 host format (OCP or FNUZ) follows that
+arch instead of the local GPU's detection, which can fail. An item's (or the
+single form's) ``env`` is set while that kernel runs, then restored: launch
+settings its library reads at each launch, such as the Stream-K workgroup
+budget (``GemmKernelConfig.launch_env``). With ``prepare`` or
+``search_host_data`` the worker asks to be the first process
 the out-of-memory killer ends (``_first_to_go``), and an error starts with its
 exception's type (the search tells a MemoryError from a kernel's failure).
 
@@ -42,6 +47,7 @@ codegen ``KERNEL_NAME`` that ``GemmKernelConfig.name`` reproduces); a mismatch
 is an error naming both.
 """
 
+import contextlib
 import json
 import os
 import sys
@@ -58,6 +64,7 @@ from gemm_utils import (  # noqa: E402
     GpuGemmRunner,
     GpuMultiABDRunner,
     _dtype_from_kernel_name,
+    _fp8_uses_ocp,
     _input_codec,
     _layout_from_kernel_name,
     _resolve_use_ocp,
@@ -157,10 +164,12 @@ def _search_host_data(runner, problem):
 class _HostCodec(GpuGemmRunner):
     """A ``GpuGemmRunner`` for ``kernel_name`` without its library or a GPU:
     what preparing a problem needs. The fp8/bf8 format is resolved as for the
-    measure worker's runner (no arch given)."""
+    measure worker's runner: from ``arch`` (the run's --arch), else from the
+    local GPU."""
 
-    def __init__(self, kernel_name):  # the base __init__ loads the library
-        self._kernel_name, self._use_ocp = kernel_name, None
+    def __init__(self, kernel_name, arch=None):  # the base __init__ loads the library
+        self._kernel_name = kernel_name
+        self._use_ocp = _fp8_uses_ocp(arch) if arch else None
 
 
 def _host_data(runner, problem, spec, prepare=False):
@@ -188,13 +197,13 @@ def _host_data(runner, problem, spec, prepare=False):
         spec, fields, lambda: _search_host_data(runner, problem))
 
 
-def _prepare(prob_dict, kernel_name, spec):
+def _prepare(prob_dict, kernel_name, spec, arch=None):
     """Store a problem's host data for ``kernel_name``'s dtype and layout in
     the host cache ``spec`` and print whether the cache holds it."""
     try:
         problem = GemmProblem.from_dict(prob_dict)
-        out = {"ok": True, "stored": _host_data(_HostCodec(kernel_name), problem, spec,
-                                                prepare=True)}
+        out = {"ok": True, "stored": _host_data(_HostCodec(kernel_name, arch), problem,
+                                                spec, prepare=True)}
     except Exception as e:  # the type too: str(MemoryError()) is empty
         out = {"ok": False, "error": f"{type(e).__name__}: {e}"}
     print(json.dumps(out), flush=True)
@@ -210,6 +219,22 @@ def _first_to_go():
             f.write("1000")
     except OSError:
         pass
+
+
+@contextlib.contextmanager
+def _launch_env(env):
+    """``env`` (an item's launch settings) set in this process's environment,
+    which the kernel library reads at each launch, then restored."""
+    old = {k: os.environ.get(k) for k in env or {}}
+    try:
+        os.environ.update({k: str(v) for k, v in (env or {}).items()})
+        yield
+    finally:
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 
 def _check(out, output, ref, denom, verify_tol, rows=None):
@@ -238,6 +263,7 @@ def _run_one(
     check_identity=False,
     host_cache=None,
     search_host_data=False,
+    arch=None,
 ):
     """Run a single kernel and emit its result as one JSON line.
 
@@ -282,8 +308,10 @@ def _run_one(
                 # and verify reference (gemm_utils._sweep_inputs).
                 A, B = _sweep_inputs((problem.M, problem.K), (problem.K, problem.N))
 
-            # CRITICAL: load the library ONLY inside this subprocess.
-            runner = GpuGemmRunner(lib_path=so_path)
+            # CRITICAL: load the library ONLY inside this subprocess. ``arch``
+            # (the run's --arch) pins the fp8/bf8 format; without it the
+            # runner detects the local GPU's.
+            runner = GpuGemmRunner(lib_path=so_path, arch=arch)
             if check_identity:
                 _check_identity(runner, kernel_name)
             if not search:
@@ -365,7 +393,7 @@ def main():
     if d.get("prepare") or d.get("search_host_data"):
         _first_to_go()
     if d.get("prepare"):
-        _prepare(d.get("problem"), d.get("kernel_name"), d.get("host_cache"))
+        _prepare(d.get("problem"), d.get("kernel_name"), d.get("host_cache"), d.get("arch"))
         return
 
     verify = bool(d.get("verify", False))
@@ -374,8 +402,9 @@ def main():
     host_cache = d.get("host_cache")
     search_host_data = bool(d.get("search_host_data", False))
 
-    if "items" in d:
-        for i, item in enumerate(d["items"]):
+    # The single form is one item: the payload itself.
+    for i, item in enumerate(d["items"] if "items" in d else [d]):
+        with _launch_env(item.get("env")):
             _run_one(
                 i,
                 item["so_path"],
@@ -390,23 +419,8 @@ def main():
                 check_identity=check_identity,
                 host_cache=host_cache,
                 search_host_data=search_host_data,
+                arch=item.get("arch", d.get("arch")),
             )
-    else:
-        _run_one(
-            0,
-            d["so_path"],
-            d["problem"],
-            d.get("kernel_name", "unknown"),
-            verify=verify,
-            verify_tol=verify_tol,
-            layout4=d.get("layout4"),
-            a_op=d.get("a_elementwise_op"),
-            b_op=d.get("b_elementwise_op"),
-            cde_op=d.get("cde_elementwise_op"),
-            check_identity=check_identity,
-            host_cache=host_cache,
-            search_host_data=search_host_data,
-        )
 
 
 if __name__ == "__main__":

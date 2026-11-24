@@ -3,6 +3,7 @@
 
 add_subdirectory(src)
 add_subdirectory(unit)
+add_subdirectory(c_headers)
 
 set(HIPBLASLT_TEST_DATA "${CMAKE_CURRENT_BINARY_DIR}/../hipblaslt_gtest.data")
 
