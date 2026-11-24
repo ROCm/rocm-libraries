@@ -45,6 +45,7 @@ from kernels.gfx942.attention_dense import (
     Gfx942AttentionDenseSpec,
     _use_bias_x4,
     attention_dense_signature,
+    body_serves_strides,
     build_attention_dense,
     run_attention_dense_torch,
     supports_attention_dense,
@@ -180,8 +181,8 @@ def test_every_mode_is_served_with_and_without_bias(mode):
 def test_kernel_params_match_the_launcher_signature(mode):
     """KernelLauncher packs kernargs by position, so the builder's params and
     attention_dense_signature must name the same list, the four bias params before the
-    twelve strides (after the fast-division pairs, the sink pointer and the LSE pointer).
-    """
+    twelve strides (after the fast-division pairs, the sink pointer and the LSE
+    pointer)."""
     spec = _bias(_MODES[mode])
     params = [p.name for p in build_attention_dense(spec).params]
     assert params == [a["name"] for a in attention_dense_signature(spec)]
@@ -192,6 +193,16 @@ def test_kernel_params_match_the_launcher_signature(mode):
     plain_params = [p.name for p in build_attention_dense(plain).params]
     assert plain_params == params[:-16] + params[-12:]
     assert plain_params == [a["name"] for a in attention_dense_signature(plain)]
+
+
+@pytest.mark.parametrize("mode", list(_MODES))
+def test_a_bias_body_takes_packed_tensors_only(mode):
+    """The bias reads are written against packed Q/K/V/O, so a bias body ignores its
+    12 stride kernargs and the runner admits packed tensors only. The same mode
+    without the bias reads them: the bias alone turns the strides off."""
+    spec = _bias(_MODES[mode])
+    assert body_serves_strides(spec) is False
+    assert body_serves_strides(_without_bias(spec)) is True
 
 
 # --------------------------------------------------------------------------- #

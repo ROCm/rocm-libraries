@@ -4576,21 +4576,33 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         IR that did not split per shape; with no baked gfx942 body left, the check
         is that each declared ``runtime_kernarg_fields`` param is actually used.
         The define-line match proves the probe can see the param names at all.
-        The exceptions are ``batch`` and ``seqlen_q`` on the one-item grid: it takes
-        its batch and query-block indices from the workgroup id and reads every
-        tensor through its own (batch, head) slab (the stride parameters), so
-        neither sizes anything there unless a feature needs it (bottom-right
-        diagonal, LSE index). The persistent grid reads both for its work count.
+
+        The exceptions are per arm, and an exempt param must stay unread, so a body
+        that starts reading one forces this map to follow. The one-item grid takes
+        its batch index from the workgroup id and reads every tensor through its own
+        (batch, head) slab (the stride parameters), so it never reads ``batch``. It
+        reads ``seqlen_q`` only where something is sized by it: the query-block
+        count of the ``bt_hkv_minor`` block order (``auto`` picks it for the causal
+        default), the bottom-right diagonal offset, the LSE row index and the
+        KV-segment store. The ``qb_minor`` arms pin the order that reads no
+        query-block count, so the feature is the only reader there. The persistent
+        grid reads both for its work count.
         """
         from rocke.core.lower_llvm import lower_kernel_to_llvm
         from kernels.gfx942.attention_dense import build_attention_dense
 
+        qb_minor = dict(nonpersist_decode="qb_minor")
+        # arm -> (spec fields, the runtime kernargs its body does not read)
         arms = {
-            "default": {},
-            "sliding_window": dict(sliding_window=128),
-            **{v: kw for v, (kw, _) in self._PERSIST_VARIANTS.items()},
+            "default": ({}, ("batch",)),
+            "qb_minor": (qb_minor, ("batch", "seqlen_q")),
+            "sliding_window": (dict(sliding_window=128), ("batch", "seqlen_q")),
+            "bottom_right": (dict(qb_minor, causal_bottom_right=True), ("batch",)),
+            "lse": (dict(qb_minor, emit_lse=True), ("batch",)),
+            "kv_segments": (dict(qb_minor, kv_segments=2), ("batch",)),
+            **{v: (kw, ()) for v, (kw, _) in self._PERSIST_VARIANTS.items()},
         }
-        for arm, kw in arms.items():
+        for arm, (kw, unread) in arms.items():
             with self.subTest(arm=arm):
                 spec = self._spec(**self._BASE_KWARGS, **kw)
                 self.assertTrue(spec.runtime_shape)
@@ -4600,7 +4612,7 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
                 lines = ir.splitlines()
                 (define,) = [ln for ln in lines if ln.startswith("define ")]
                 body = "\n".join(ln for ln in lines if not ln.startswith("define "))
-                unread = () if spec.persistent else ("batch", "seqlen_q")
+                self.assertLessEqual(set(unread), set(spec.runtime_kernarg_fields))
                 for field in spec.runtime_kernarg_fields:
                     self.assertRegex(
                         define,
@@ -4609,6 +4621,12 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
                         "the use probe below cannot see it",
                     )
                     if field in unread:
+                        self.assertNotRegex(
+                            body,
+                            rf"%{field}\b",
+                            f"{arm}: kernarg {field!r} is now read; take it out of "
+                            "this arm's exemptions",
+                        )
                         continue
                     self.assertRegex(
                         body,
