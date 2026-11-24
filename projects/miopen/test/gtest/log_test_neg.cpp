@@ -28,23 +28,27 @@
 #if MIOPEN_BACKEND_HIP
 #include "log.hpp"
 
-TEST(CPU_LOG_TEST_NEG_NONE, AssertLogCmdOutput_Neg)
+using CPU_LOG_TEST_NEG_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_LOG_TEST_NEG_NONE, AssertLogCmdOutput_Neg)
 {
     TestLogFun(miopen::debug::LogCmdConvolution, logConv, false);
 }
 
-TEST(CPU_LOG_TEST_NEG_NONE, AssertLogFindCmdOutput_Neg)
+TEST_P(CPU_LOG_TEST_NEG_NONE, AssertLogFindCmdOutput_Neg)
 {
     TestLogFun(miopen::debug::LogCmdFindConvolution, logFindConv, false);
 }
 
-TEST(CPU_LOG_TEST_NEG_NONE, AssertTestLogCmdCBAFusionOutput_Neg)
+TEST_P(CPU_LOG_TEST_NEG_NONE, AssertTestLogCmdCBAFusionOutput_Neg)
 {
     TestLogCmdCBAFusion(miopen::debug::LogCmdFusion, logFusionConvBiasActiv, false);
 }
 
-TEST(CPU_LOG_TEST_NEG_NONE, AssertTestLogCmdBNormFusionOutput_Neg)
+TEST_P(CPU_LOG_TEST_NEG_NONE, AssertTestLogCmdBNormFusionOutput_Neg)
 {
     TestLogCmdBNormFusion(miopen::debug::LogCmdFusion, logBnormActiv, false);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_LOG_TEST_NEG_NONE, testing::Values(0));
 #endif
