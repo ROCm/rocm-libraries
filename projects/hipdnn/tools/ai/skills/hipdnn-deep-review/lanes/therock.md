@@ -41,19 +41,32 @@ Each line the final `grep -v` leaves must check out another repository; a TheRoc
 Classify every changed file with TheRock's skip-ci patterns: the base patterns plus the repo's `.github/skip-ci-config.toml` at
 `$HEAD`. The loop prints every file (`is_ci_run_required` stops listing at ten). An external repository passes an empty
 workflow allowlist, so `.github/workflows/` files are classified by the patterns alone. Checked against TheRock `4a6dabfc096b`
-(2026-11-24); if the pin has no `_is_path_unrelated_to_ci`, the block stops.
+(2026-11-24). If the pin lacks `_is_path_unrelated_to_ci`, the block searches the module for a replacement function that
+classifies `projects/hipdnn/docs/TESTING.md` as skip and `projects/hipdnn/backend/src/HipdnnBackend.cpp` as CI-relevant. A passing
+replacement makes the block print `HELPER-DRIFT:` naming it and classify with it; the lane then reports a finding (kind
+`process`, tier `IMPORTANT`) that this file names `_is_path_unrelated_to_ci`, that the pin lacks it, naming the replacement
+used, and that the skill needs updating. If no candidate passes, the block prints `STOP:` and the lane ends on the same
+finding, stating that no replacement passed the check.
 
 ```bash
-. ./env.sh; T=$(cat "$SCRATCH/ROCK/T"); export PYTHONPATH=$T/build_tools/github_actions
+. ./env.sh; T=$(cat "$SCRATCH/ROCK/T"); ROCK_REF=$(cat "$SCRATCH/ROCK/ref"); export PYTHONPATH=$T/build_tools/github_actions
 C="$SCRATCH/ROCK/skip-ci-config.toml"
 git -C "$CLONE" show "$HEAD:.github/skip-ci-config.toml" > "$C" || { echo "no skip-ci-config at HEAD" >&2; : > "$C"; }
 git -C "$CLONE" diff --name-only "$BASE" "$HEAD" | python3 -c '
-import sys; from pathlib import Path; import configure_ci_path_filters as f
-if not hasattr(f, "_is_path_unrelated_to_ci"):
-    sys.exit("STOP: TheRock pin has no _is_path_unrelated_to_ci")
+import sys, inspect; from pathlib import Path; import configure_ci_path_filters as f
 p, _ = f.load_skip_ci_config(extension_config_path=Path(sys.argv[1]))
-skip = lambda x: f._is_path_unrelated_to_ci(x, p, set())
-for x in sys.stdin.read().splitlines(): print("[skip]" if skip(x) else "[ci]  ", x)' "$C"
+DOC, COD = "projects/hipdnn/docs/TESTING.md", "projects/hipdnn/backend/src/HipdnnBackend.cpp"
+def try_fn(fn, path):
+    try: n = len(inspect.signature(fn).parameters); return fn(path, p) if n == 2 else fn(path, p, set()) if n == 3 else None
+    except Exception: return None
+skip = (lambda x: f._is_path_unrelated_to_ci(x, p, set())) if hasattr(f, "_is_path_unrelated_to_ci") else None
+if skip is None:
+    for name, fn in inspect.getmembers(f, inspect.isfunction):
+        if try_fn(fn, DOC) is True and try_fn(fn, COD) is False:
+            print(f"HELPER-DRIFT: _is_path_unrelated_to_ci missing from TheRock {sys.argv[2]}; using {name}", file=sys.stderr)
+            skip = lambda x, fn=fn: try_fn(fn, x); break
+if skip is None: sys.exit("STOP: TheRock pin has no _is_path_unrelated_to_ci and no replacement passed the docs/.cpp check")
+for x in sys.stdin.read().splitlines(): print("[skip]" if skip(x) else "[ci]  ", x)' "$C" "$ROCK_REF"
 ```
 
 - **Any `[ci]`:** TheRock CI runs; continue with section 2.
