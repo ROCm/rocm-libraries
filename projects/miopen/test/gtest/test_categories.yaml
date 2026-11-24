@@ -1,149 +1,23 @@
 # MIOpen Test Categories Configuration
 # Time-based test organization for CI/CD pipeline efficiency
 # This file defines test categories by execution time and criticality
-
-# Common comprehensive patterns - used by both standard and comprehensive
-# Standard applies exclude list to filter out slower tests
-# Comprehensive runs all patterns without exclusion
-positive_patterns: &positive_patterns
-  - "*Fusion*"
-  - "*/GPU_BNBWD*_*"
-  - "*/GPU_BNOCLBWD*_*"
-  - "*/GPU_BNFWD*_*"
-  - "*/GPU_BNOCLFWD*_*"
-  - "*/GPU_BNInfer*_*"
-  - "*/GPU_BNActivInfer_*"
-  - "*/GPU_BNOCLInfer*_*"
-  - "*/GPU_bn_infer*_*"
-  - "*/GPU_bn_activ_infer_*"
-  - "*/GPU_bn_fwd_infer_*"
-  - "CPU_*"
-  - "*/CPU_*"
-  - "*/GPU_Cat_*"
-  - "*/GPU_CTC*"
-  - "*/GPU_ConvBiasActiv*"
-  - "*/GPU_Conv*"
-  - "*/GPU_conv*"
-  - "*/GPU_UnitTestConv*"
-  - "*/GPU_GetitemBwd*"
-  - "*/GPU_GLU_*"
-  - "*/GPU_GroupConv*"
-  - "*/GPU_GroupNorm_*"
-  - "*/GPU_TestActivation*"
-  - "*/GPU_HipBLASLtGEMMTest*"
-  - "*/GPU_KernelTuningNetTestConv*"
-  - "*/GPU_Kthvalue_*"
-  - "*/GPU_LayerNormTest*"
-  - "*/GPU_LayoutTransposeTest_*"
-  - "*/GPU_Lrn*"
-  - "*/GPU_MultiMarginLoss_*"
-  - "*/GPU_ConvNonpack*"
-  - "*/GPU_PerfConfig_HipImplicitGemm*"
-  - "*/GPU_AsymPooling2d_*"
-  - "*/GPU_WidePooling2d_*"
-  - "*/GPU_PReLU_*"
-  - "*/GPU_Reduce*"
-  - "*/GPU_reduce_custom_*"
-  - "*/GPU_regression_issue_*"
-  - "*/GPU_RNNExtra_*"
-  - "*/GPU_RoPE*"
-  - "*/GPU_SoftMarginLoss*"
-  - "*/GPU_T5LayerNormTest_*"
-  - "*/GPU_Op4dTensorGenericTest_*"
-  - "*/GPU_TernaryTensorOps_*"
-  - "*/GPU_unaryTensorOps_*"
-  - "*/GPU_TensorTrans_*"
-  - "*/GPU_Transformers*"
-  - "*/GPU_TunaNetTest_*"
-  - "*/GPU_UnitTestActivationDescriptor_*"
-  - "*/GPU_FinInterfaceTest*"
-  - "*/GPU_KernelTuningNetTest*"
-  - "*/GPU_Softmax*"
-  - "*/GPU_Dropout*"
-  - "*/GPU_MIOpenDriver*"
-  - "*/GPU_HipGraphExist*"
-  # Optimizers
-  - "*/GPU_Adam_*"
-  - "*/GPU_AmpAdam_*"
-  # Normalization
-  - "*/GPU_AddLayerNorm_*"
-  - "*/GPU_LayerNormBwdTest_*"
-  - "*/GPU_T5LayerNormBwdTest_*"
-  # Batch norm (incl. fusion / find2 variants)
-  - "*/GPU_BNInputValidation*"
-  - "*/GPU_BN_Fwd_Spatial_Welford_*"
-  - "*/GPU_BN_Spatial_*"
-  - "*/GPU_Bn3DPeract_*"
-  - "*/GPU_Bn3DSpatial_*"
-  - "*/GPU_BnDerive_*"
-  - "*/GPU_BnPeract_*"
-  - "*/GPU_CbnaInference_*"
-  - "*/GPU_na_*"
-  # Find / tuning / allocator
-  - "*/GPU_Allocator_*"
-  - "*/GPU_CandidateSelection_*"
-  - "*/GPU_Find2Conv_*"
-  - "*/GPU_FindDb_*"
-  - "*/GPU_FindDbWorkspace*"
-  - "*/GPU_FindModeTrustVerify_*"
-  # RNN family (replaces the *GRUExtra* / *lstm_extra* patterns, which matched nothing)
-  - "*/GPU_GRU_*"
-  - "*/GPU_LSTM_*"
-  - "*/GPU_LstmMSRnn_*"
-  - "*/GPU_RNNSeqApi_*"
-  - "*/GPU_RNNVanilla*"
-  # Pooling, tensor ops, reference kernels
-  - "*/GPU_Pooling2d_*"
-  - "*/GPU_Pooling3d_*"
-  - "*/GPU_TensorReorder_*"
-  - "*/GPU_TensorTransform_*"
-  - "*/GPU_binaryTensorOps_*"
-  - "*/GPU_reference_kernel_*"
-  # Unprefixed: these are plain TEST/TEST_F with no INSTANTIATE_TEST_SUITE_P,
-  # so they carry no "Prefix/" and the leading "*/" above would not match them.
-  - "GPU_StreamTracker_FP32*"
-  - "GPU_NaiveTimeout_FP32*"
-  - "GPU_ConvDilatedGemmWorkspace_FP32*"
-  - "GPU_ConvHipConv*"
-  - "GPU_PerfConfig_ConvHipConv*"
-  # Added for Jenkins parity. Single-instantiation TEST/TEST_F suites, each <= ~10 s.
-  # Only the dtypes Jenkins validates for HipBLASLt GEMM (FP8/BFP8/FP64/I* are left out).
-  - "GPU_BN_Spatial_FP32*"
-  - "GPU_CKValidatorIntegration_FP32*"
-  - "GPU_CkImplLoader_FP16*"
-  - "GPU_Conv2DKernelTuningAI_FP32*"
-  - "GPU_Conv2DKernelTuningSolver_FP32*"
-  - "GPU_Conv3DKernelTuningAI_FP32*"
-  - "GPU_Conv3DKernelTuningSolver_FP32*"
-  - "GPU_ConvAIModelLoad_FP32*"
-  - "GPU_ConvNDKernelTuningUtils_FP32*"
-  - "GPU_ConvStridedTensors_FP32*"
-  - "GPU_HipBLASLtGEMMTest_FP32*"
-  - "GPU_HipBLASLtGEMMTest_FP16*"
-  - "GPU_HipBLASLtGEMMTest_BFP16*"
-  - "GPU_PerfConfig_HipImplicitGemm3DGroup*"
-  - "GPU_RunAIHeuristics_Integration_FP32*"
-  - "GPU_SoftmaxFind20_*"
-  - "Standard/*" # include all standard tests by default
-
-
+#
+# Tiers select tests by gtest prefix. Every parameterized instantiation carries
+# the tier that first runs it: Quick/ (quick), Standard/ (standard),
+# Comprehensive/ (comprehensive), Full/ (full). Variant instantiations keep a
+# suffix after the tier word (e.g. StandardNhwc/), hence the "<Tier>*/*"
+# patterns. Tiers are cumulative: each runs its own prefix and every lower one.
+# To add a test, pick its prefix; to move it, rename the prefix. Plain TEST/TEST_F
+# suites have no prefix and run in no tier (test/utils/gtest_formating_checks.py
+# allows them only for the hipDNN shim surface). The exclude lists below hold only
+# operational exclusions (quarantines, OOM/timeout cases, option-gated families,
+# suites kept out of every tier).
 
 test_categories:
   quick:
     description: "Fast sanity checks - Run pre-commit (target: < 5 min)"
     test_patterns:
-      # Run the entire Smoke instantiation tier. Suites are kept fast at the
-      # source level (each heavy suite is split Smoke/Standard/Full).
-      - "Smoke/*"
-      # Also run the unprefixed CPU tests (framework / DB / solver-logic checks
-      # that carry no size-tier prefix). They need no GPU and are fast.
-      - "CPU_*"
-
-    exclude:
-      - "*/GPU_MIOpenDriver*"
-      # Each fans out to 32 worker processes loading MIOpen, OOM-killing
-      # small shared-RAM runners (e.g. gfx1151). Still run in standard/full.
-      - "CPU_PerfDb_NONE.*"
+      - "Quick*/*"
 
     exclude_windows: [] # Placeholder to show per-platform exclude support
     exclude_linux: [] # Placeholder to show per-platform exclude support
@@ -155,97 +29,16 @@ test_categories:
 
   standard:
     description: "Core functionality - Run on every PR (target: < 30 min)"
-    test_patterns: *positive_patterns
+    test_patterns:
+      - "Quick*/*"
+      - "Standard*/*"
 
     exclude:
-      # Excluding slower tests for faster PR validation
-      - "*DeepBench*"
-      - "*MIOpenTestConv*"
-      - "Full/GPU_Reduce_FP64*"
-      # Tiered suites: the complete (Full) cross product runs only in
-      # comprehensive/full. The Smoke + Standard instantiations still run here.
-      - "Full/GPU_Reduce_FP32*"
-      - "Full/GPU_Reduce_FP16*"
-      - "Full/GPU_bn_activ_infer_*"
-      - "Full/GPU_bn_fwd_infer_*"
-      - "Full/GPU_TensorTrans_*"
-      - "Full/GPU_ConvBiasActivInfer_*"
-      - "Full/CPU_WSuperTensor_*"
-      - "Full/GPU_CTC_*"
-      # Only FP32 is tiered (Smoke+Standard); FP16/FP64 are Full-only and stay
-      # in standard for dtype coverage.
-      - "Full/GPU_TernaryTensorOps_FP32*"
-      - "Full/GPU_UnitTestConvSolverFFTFwd_*"
-      - "Full/GPU_UnitTestConvSolverFFTBwd_*"
-      - "Full/GPU_BNOCLFWDTrainSerialRun3D_BFP16*"
-      - "Full/GPU_Lrn_FP32*"
-      - "Full/GPU_Lrn_FP16*"
-      - "Full/GPU_BNOCLInferSerialRun3D_BFP16*"
-      - "Full/GPU_BNOCLBWDSerialRun3D_BFP16*"
-      - "Full/GPU_UnitTestActivationDescriptor_FP32*"
-      - "Full/GPU_UnitTestActivationDescriptor_FP16*"
-      - "Full/GPU_ConvGrpBiasActivInfer_BFP16*"
-      - "Full/GPU_ConvGrpBiasActivInfer_FP32*"
-      - "Full/GPU_ConvGrpBiasActivInfer_FP16*"
-      - "Full/GPU_ConvGrpActivInfer_BFP16*"
-      - "Full/GPU_ConvGrpActivInfer_FP32*"
-      - "Full/GPU_ConvGrpActivInfer_FP16*"
-      - "Full/GPU_ConvGrpBiasActivInfer3D_BFP16*"
-      - "Full/GPU_ConvGrpBiasActivInfer3D_FP32*"
-      - "Full/GPU_ConvGrpBiasActivInfer3D_FP16*"
-      - "Full/GPU_ConvGrpActivInfer3D_BFP16*"
-      - "Full/GPU_ConvGrpActivInfer3D_FP32*"
-      - "Full/GPU_ConvGrpActivInfer3D_FP16*"
-      - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16.ConvHipImplicitGemmV4R1Fwd/0"
-      - "Full/GPU_MIOpenDriverConv2dTransTest*"
-      - "Full/GPU_MIOpenDriverRegressionBigTensorTest_FP32"
-      - "Full/GPU_UnitTestConvSolverImplicitGemmGroupFwdXdlops_LargeStride_*"
-      - "Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_LargeStride_*"
-      - "Full/GPU_UnitTestConvSolverImplicitGemmGroupBwdXdlops_LargeStride_*"
-      - "Full/GPU_UnitTestConvSolverImplicitGemm3DGroupBwdXdlops_LargeStride_*"
-      - "Full/GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_LargeStride_*"
-      - "Full/GPU_UnitTestConvSolverImplicitGemm3DGroupWrwXdlops_LargeStride_*"
-      - "Full/GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_ElementCountOverflow_*"
-      - "Full/GPU_UnitTestConvSolverGemmFwdRestIntMaxOverflowFwd_I8*"
-      # Large BN tests - full suite only
-      - "Full/GPU_BNCKFWDTrainLarge2D_*"
-      - "Full/GPU_BNOCLFWDTrainLarge2D_*"
-      - "Full/GPU_BNOCLFWDTrainLarge3D_*"
-      - "Full/GPU_BNFWDTrainLarge2D_*"
-      - "Full/GPU_BNCKBWDLarge2D_*"
-      - "Full/GPU_BNOCLBWDLarge2D_*"
-      - "Full/GPU_BNOCLBWDLarge3D_*"
-      - "Full/GPU_BNBWDLarge2D_*"
-      - "Full/GPU_BNBWDLarge3D_*"
-      - "Full/GPU_BNCKInferLarge2D_*"
-      - "Full/GPU_BNOCLInferLarge2D_*"
-      - "Full/GPU_BNOCLInferLarge3D_*"
-      - "Full/GPU_BNInferLarge2D_*"
-      - "Full/GPU_BNOCLFWDTrainLargeFusedActivation2D_*"
-      - "Full/GPU_BNFWDTrainLargeFusedActivation2D_*"
-      - "Full/GPU_BNOCLBWDLargeFusedActivation2D_*"
-      - "Full/GPU_BNOCLInferLargeFusedActivation2D_*"
-      - "Full/GPU_Adam_*"
-      - "Full/GPU_AmpAdam_*"
-      - "Full/GPU_AddLayerNorm_*"
-      - "Full/GPU_LayerNormBwdTest_*"
-      - "Full/GPU_T5LayerNormBwdTest_*"
-      - "Full/GPU_BN_Fwd_Spatial_Welford_*"
-      - "Full/GPU_BN_Spatial_*"
-      - "Full/GPU_Bn3DPeract_*"
-      - "Full/GPU_Bn3DSpatial_*"
-      - "Full/GPU_BnPeract_*"
-      - "Full/GPU_CandidateSelection_*"
-      - "Full/GPU_GRU_*"
-      - "Full/GPU_LSTM_*"
-      - "Full/GPU_LstmMSRnn_*"
-      - "Full/GPU_RNNSeqApi_*"
-      - "Full/GPU_RNNVanilla*"
-      - "Full/GPU_Pooling2d_*"
-      - "Full/GPU_Pooling3d_*"
-      - "Full/GPU_TensorTransform_*"
-      - "Full/GPU_binaryTensorOps_*"
-      - "Full/GPU_na_*"
+      # Quick-only cases. The same two lines are in comprehensive and full.
+      # hipDNN shim surface: replayed by the forwarding_parity entries, kept out of
+      # the tiers above quick on purpose (see test/gtest/README.md).
+      - "*HipdnnShim*"
+      - "Quick/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16.ConvHipImplicitGemmV4R1Fwd/0"
 
     test_files:
       # Quick tests
@@ -287,62 +80,15 @@ test_categories:
 
   comprehensive:
     description: "Extended testing - Run nightly (target: < 2 hours)"
-    test_patterns: *positive_patterns
+    test_patterns:
+      - "Quick*/*"
+      - "Standard*/*"
+      - "Comprehensive*/*"
 
     exclude:
-    # Excluding slower tests for faster PR validation
-      - "*DeepBench*"
-      - "*MIOpenTestConv*"
-      - "Full/GPU_Reduce_FP64*"
-      - "Full/GPU_BNOCLFWDTrainSerialRun3D_BFP16*"
-      - "Full/GPU_Lrn_FP32*"
-      - "Full/GPU_Lrn_FP16*"
-      - "Full/GPU_BNOCLInferSerialRun3D_BFP16*"
-      - "Full/GPU_BNOCLFWDTrainLarge2D_BFP16*"
-      - "Full/GPU_BNOCLInferLarge2D_BFP16*"
-      - "Full/GPU_BNOCLBWDSerialRun3D_BFP16*"
-      - "Full/GPU_BNOCLBWDLarge2D_BFP16*"
-      - "Full/GPU_UnitTestActivationDescriptor_FP32*"
-      - "Full/GPU_UnitTestActivationDescriptor_FP16*"
-      - "Full/GPU_BNOCLBWDLargeFusedActivation2D_BFP16*"
-      - "Full/GPU_BNOCLBWDLargeFusedActivation2D_FP16*"
-      - "Full/GPU_ConvGrpBiasActivInfer_BFP16*"
-      - "Full/GPU_ConvGrpBiasActivInfer_FP32*"
-      - "Full/GPU_ConvGrpBiasActivInfer_FP16*"
-      - "Full/GPU_ConvGrpActivInfer_BFP16*"
-      - "Full/GPU_ConvGrpActivInfer_FP32*"
-      - "Full/GPU_ConvGrpActivInfer_FP16*"
-      - "Full/GPU_ConvGrpBiasActivInfer3D_BFP16*"
-      - "Full/GPU_ConvGrpBiasActivInfer3D_FP32*"
-      - "Full/GPU_ConvGrpBiasActivInfer3D_FP16*"
-      - "Full/GPU_ConvGrpActivInfer3D_BFP16*"
-      - "Full/GPU_ConvGrpActivInfer3D_FP32*"
-      - "Full/GPU_ConvGrpActivInfer3D_FP16*"
-      - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16.ConvHipImplicitGemmV4R1Fwd/0"
-      - "Full/GPU_MIOpenDriverConv2dTransTest*"
-      - "Full/GPU_MIOpenDriverRegressionBigTensorTest_FP32"
-      # Exclude FP16 and FP32 (the _FP* glob matches both but not BFP16) — they
-      # share the same dispatch code path and stay in full. Keep BFP16 in
-      # comprehensive (nightly) for coverage.
-      - "Full/GPU_UnitTestConvSolverImplicitGemm*Xdlops_LargeStride_FP*"
-      # Heavyweight (~60s) large-tensor wrw test; full-only like _LargeStride.
-      # FP16-only (no BFP16 variant to keep in nightly), so exclude the family.
-      - "Full/GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_ElementCountOverflow_*"
-      # Full-only: slow cases (BN find2/fusion tuning, 2-34 s per test, >200 s serial
-      # per suite) or no CI timing yet (I8/I32 variants and new suites never ran in
-      # GitHub CI). Promote to comprehensive once measured and <= 200 s serial.
-      - "Full/GPU_na_train_find2_spatial_FP32*"
-      - "Full/GPU_na_train_find2_spatial_FP16*"
-      - "Full/GPU_na_train_find2_peract_FP32*"
-      - "Full/GPU_na_fusion_test_bn_spatial_FP32*"
-      - "Full/GPU_na_fusion_test_bn_spatial_FP16*"
-      - "Full/GPU_na_fusion_test_bn_peract_FP32*"
-      - "Full/GPU_BN_Spatial_FP32*"
-      - "Full/GPU_BN_Fwd_Spatial_Welford_*"
-      - "Full/GPU_LSTM_fused_infer_*"
-      - "Full/GPU_TensorTransform_I8*"
-      - "Full/GPU_binaryTensorOps_cast_*_I8*"
-      - "Full/GPU_binaryTensorOps_cast_*_I32*"
+      # Quick-only cases (as in standard).
+      - "*HipdnnShim*"
+      - "Quick/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16.ConvHipImplicitGemmV4R1Fwd/0"
       # Only exclude explicitly disabled tests
       - "*DISABLED*"
 
@@ -385,7 +131,11 @@ test_categories:
 
   full:
     description: "Complete test suite - (target: hours+)"
-    test_patterns: *positive_patterns
+    test_patterns:
+      - "Quick*/*"
+      - "Standard*/*"
+      - "Comprehensive*/*"
+      - "Full*/*"
 
     test_files:
       # All test files in the suite
@@ -393,9 +143,29 @@ test_categories:
       - "gtest/*.cpp"
 
     exclude:
-      # Excluding slower tests for faster PR validation
+      # Quick-only cases (as in standard).
+      - "*HipdnnShim*"
+      - "Quick/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16.ConvHipImplicitGemmV4R1Fwd/0"
+      # Option-gated families (MIOPEN_TEST_DEEPBENCH / MIOPEN_TEST_CONV in CMake).
       - "*DeepBench*"
       - "*MIOpenTestConv*"
+      # Full/ suites that no tier runs (slow, unmaintained or untested dtypes; inherited from #5766).
+      - "Full/GPU_Bfp8Conversion_BFP8*"
+      - "Full/GPU_Fp8Conversion_FP8*"
+      - "Full/GPU_HipBLASLtGEMMTestException_BFP8*"
+      - "Full/GPU_HipBLASLtGEMMTestException_FP8*"
+      - "Full/GPU_HipdnnReentry_FP32*"
+      - "Full/GPU_LgbmPcfgPickerStrictArch_FP16*"
+      - "Full/GPU_LgbmPickerStrictArch_FP16*"
+      - "Full/GPU_LgbmPickerStrictArch_FP32*"
+      - "Full/GPU_HipBLASLtGEMMTest_FP64*"
+      - "Full/GPU_HipBLASLtGEMMTest_I32*"
+      - "Full/GPU_HipBLASLtGEMMTest_I64*"
+      - "Full/GPU_HipBLASLtGEMMTest_I8*"
+      - "Full/GPU_PerfConfig_HipImplicitGemmGroupBwdXdlops_FP16*"
+      - "Full/GPU_PerfConfig_HipImplicitGemmGroupFwdXdlops_FP16*"
+      - "Full/GPU_PerfConfig_HipImplicitGemmGroupWrwXdlops_FP32*"
+      - "Full/GPU_Softmax_Offset_FP32*"
       - "Full/GPU_Reduce_FP64*"
       - "Full/GPU_BNOCLFWDTrainSerialRun3D_BFP16*"
       - "Full/GPU_Lrn_FP32*"
@@ -421,9 +191,7 @@ test_categories:
       - "Full/GPU_ConvGrpActivInfer3D_BFP16*"
       - "Full/GPU_ConvGrpActivInfer3D_FP32*"
       - "Full/GPU_ConvGrpActivInfer3D_FP16*"
-      - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16.ConvHipImplicitGemmV4R1Fwd/0"
       - "Full/GPU_MIOpenDriverConv2dTransTest*"
-      - "Full/GPU_MIOpenDriverRegressionBigTensorTest_FP32"
       # Only exclude explicitly disabled tests
       - "*DISABLED*"
 
@@ -436,146 +204,143 @@ test_categories:
     description: "FFM Quick Tests - Quick tests for NPI PRs"
     test_patterns:
         # --- Batch normalization (fwd train / infer / bwd, 2D + 3D, per-act + spatial) ---
-      - "Smoke/GPU_BnPeract_FP32*"
-      - "Smoke/GPU_BnPeract_FP16*"
-      - "Smoke/GPU_BnPeract_BFP16*"
-      - "Smoke/GPU_BN_Spatial_FP32*"
-      - "Smoke/GPU_Bn3DSpatial_FP32*"
-      - "Smoke/GPU_Bn3DPeract_FP32*"
-      - "Smoke/GPU_Bn3DPeract_FP16*"
-      - "Smoke/GPU_Bn3DPeract_BFP16*"
-      - "Smoke/GPU_bn_fwd_infer_spatial_FP32*"
-      - "Smoke/GPU_bn_fwd_infer_spatial_FP16*"
-      - "Smoke/GPU_bn_fwd_infer_spatial_BFP16*"
-      - "Smoke/GPU_bn_fwd_infer_per_act_FP32*"
-      - "Smoke/GPU_bn_activ_infer_spatial_FP32*"
-      - "Smoke/GPU_bn_activ_infer_spatial_FP16*"
-      - "Smoke/GPU_bn_activ_infer_spatial_BFP16*"
-      - "Smoke/GPU_BNBWDSmall2D_FP32*"
+      - "Quick/GPU_BnPeract_FP32*"
+      - "Quick/GPU_BnPeract_FP16*"
+      - "Quick/GPU_BnPeract_BFP16*"
+      - "Quick/GPU_BN_Spatial_FP32*"
+      - "Quick/GPU_Bn3DSpatial_FP32*"
+      - "Quick/GPU_Bn3DPeract_FP32*"
+      - "Quick/GPU_Bn3DPeract_FP16*"
+      - "Quick/GPU_Bn3DPeract_BFP16*"
+      - "Quick/GPU_bn_fwd_infer_spatial_FP32*"
+      - "Quick/GPU_bn_fwd_infer_spatial_FP16*"
+      - "Quick/GPU_bn_fwd_infer_spatial_BFP16*"
+      - "Quick/GPU_bn_fwd_infer_per_act_FP32*"
+      - "Quick/GPU_bn_activ_infer_spatial_FP32*"
+      - "Quick/GPU_bn_activ_infer_spatial_FP16*"
+      - "Quick/GPU_bn_activ_infer_spatial_BFP16*"
+      - "Quick/GPU_BNBWDSmall2D_FP32*"
       # --- Activation ---
-      - "Smoke/GPU_UnitTestActivationDescriptor_FP32*"
-      - "Smoke/GPU_UnitTestActivationDescriptor_FP16*"
+      - "Quick/GPU_UnitTestActivationDescriptor_FP32*"
+      - "Quick/GPU_UnitTestActivationDescriptor_FP16*"
       # --- Softmax ---
-      - "Smoke/GPU_Softmax_BetaZeroNaN_FP32*"
+      - "Quick/GPU_Softmax_BetaZeroNaN_FP32*"
       # --- Dropout ---
-      - "Smoke/GPU_Dropout_FP32*"
-      - "Smoke/GPU_Dropout_FP16*"
+      - "Quick/GPU_Dropout_FP32*"
+      - "Quick/GPU_Dropout_FP16*"
       # --- LRN ---
-      - "Smoke/GPU_Lrn_FP32*"
-      - "Smoke/GPU_Lrn_FP16*"
+      - "Quick/GPU_Lrn_FP32*"
+      - "Quick/GPU_Lrn_FP16*"
       # --- Reduce (extra coverage) ---
-      - "Smoke/GPU_Reduce_FP32*"
-      - "Smoke/GPU_Reduce_FP16*"
+      - "Quick/GPU_Reduce_FP32*"
+      - "Quick/GPU_Reduce_FP16*"
       # --- Tensor ops (unary / binary cast+copy / transform) ---
-      - "Smoke/GPU_unaryTensorOps_FP32*"
-      - "Smoke/GPU_unaryTensorOps_FP16*"
-      - "Smoke/GPU_unaryTensorOps_BFP16*"
-      - "Smoke/GPU_unaryTensorOps_I32*"
-      - "Smoke/GPU_unaryTensorOps_I8*"
-      - "Smoke/GPU_binaryTensorOps_copy_FP32*"
-      - "Smoke/GPU_binaryTensorOps_copy_FP16*"
-      - "Smoke/GPU_binaryTensorOps_copy_BFP16*"
-      - "Smoke/GPU_TensorTrans_FP32*"
+      - "Quick/GPU_unaryTensorOps_FP32*"
+      - "Quick/GPU_unaryTensorOps_FP16*"
+      - "Quick/GPU_unaryTensorOps_BFP16*"
+      - "Quick/GPU_unaryTensorOps_I32*"
+      - "Quick/GPU_unaryTensorOps_I8*"
+      - "Quick/GPU_binaryTensorOps_copy_FP32*"
+      - "Quick/GPU_binaryTensorOps_copy_FP16*"
+      - "Quick/GPU_binaryTensorOps_copy_BFP16*"
+      - "Quick/GPU_TensorTrans_FP32*"
       # --- CTC ---
-      - "Smoke/GPU_CTC_FP32*"
+      - "Quick/GPU_CTC_FP32*"
       # --- RNN / GRU ---
-      - "Smoke/GPU_RNNVanilla_FP32*"
-      - "Smoke/GPU_RNNVanilla_FP16*"
-      - "Smoke/GPU_GRU_Base_FP32*"
-      - "Smoke/GPU_GRU_Base_FP16*"
+      - "Quick/GPU_RNNVanilla_FP32*"
+      - "Quick/GPU_RNNVanilla_FP16*"
+      - "Quick/GPU_GRU_Base_FP32*"
+      - "Quick/GPU_GRU_Base_FP16*"
       # --- PReLU (extra coverage) ---
-      - "Smoke/GPU_PReLU_bwd_FP32*"
+      - "Quick/GPU_PReLU_bwd_FP32*"
       # --- Convolution: naive/reference (fwd/bwd/wrw, all dtypes) ---
-      - "Smoke/GPU_UnitTestConvSolverDirectNaiveFwd_FP32*"
-      - "Smoke/GPU_UnitTestConvSolverDirectNaiveFwd_FP16*"
-      - "Smoke/GPU_UnitTestConvSolverDirectNaiveFwd_BFP16*"
-      - "Smoke/GPU_UnitTestConvSolverDirectNaiveFwd_I8*"
-      - "Smoke/GPU_UnitTestConvSolverDirectNaiveBwd_FP32*"
-      - "Smoke/GPU_UnitTestConvSolverDirectNaiveBwd_FP16*"
-      - "Smoke/GPU_UnitTestConvSolverDirectNaiveBwd_BFP16*"
-      - "Smoke/GPU_UnitTestConvSolverDirectNaiveWrw_FP32*"
-      - "Smoke/GPU_UnitTestConvSolverDirectNaiveWrw_FP16*"
-      - "Smoke/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16*"
+      - "Quick/GPU_UnitTestConvSolverDirectNaiveFwd_FP32*"
+      - "Quick/GPU_UnitTestConvSolverDirectNaiveFwd_FP16*"
+      - "Quick/GPU_UnitTestConvSolverDirectNaiveFwd_BFP16*"
+      - "Quick/GPU_UnitTestConvSolverDirectNaiveFwd_I8*"
+      - "Quick/GPU_UnitTestConvSolverDirectNaiveBwd_FP32*"
+      - "Quick/GPU_UnitTestConvSolverDirectNaiveBwd_FP16*"
+      - "Quick/GPU_UnitTestConvSolverDirectNaiveBwd_BFP16*"
+      - "Quick/GPU_UnitTestConvSolverDirectNaiveWrw_FP32*"
+      - "Quick/GPU_UnitTestConvSolverDirectNaiveWrw_FP16*"
+      - "Quick/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16*"
       # --- Convolution: direct (Hip) ---
-      - "Smoke/GPU_UnitTestConvSolverHipDirectFwdFwd_FP32*"
-      - "Smoke/GPU_UnitTestConvSolverHipDirectFwdFwd_FP16*"
-      - "Smoke/GPU_UnitTestConvSolverHipDirectFwdFwd_BFP16*"
-      - "Smoke/GPU_UnitTestConvSolverHipDirectFwdBwd_FP32*"
-      - "Smoke/GPU_UnitTestConvSolverHipDirectFwdBwd_FP16*"
-      - "Smoke/GPU_UnitTestConvSolverHipDirectFwdBwd_BFP16*"
+      - "Quick/GPU_UnitTestConvSolverHipDirectFwdFwd_FP32*"
+      - "Quick/GPU_UnitTestConvSolverHipDirectFwdFwd_FP16*"
+      - "Quick/GPU_UnitTestConvSolverHipDirectFwdFwd_BFP16*"
+      - "Quick/GPU_UnitTestConvSolverHipDirectFwdBwd_FP32*"
+      - "Quick/GPU_UnitTestConvSolverHipDirectFwdBwd_FP16*"
+      - "Quick/GPU_UnitTestConvSolverHipDirectFwdBwd_BFP16*"
       # --- Convolution: implicit GEMM (IGEMM) ---
-      - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_FP32*"
-      - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_FP16*"
-      - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16*"
-      - "Smoke/GPU_UnitTestConvSolverImplicitGemmGroupFwdXdlops_FP16*"
-      - "Smoke/GPU_UnitTestConvSolverImplicitGemmGroupBwdXdlops_FP16*"
-      - "Smoke/GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_FP16*"
+      - "Quick/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_FP32*"
+      - "Quick/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_FP16*"
+      - "Quick/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16*"
+      - "Quick/GPU_UnitTestConvSolverImplicitGemmGroupFwdXdlops_FP16*"
+      - "Quick/GPU_UnitTestConvSolverImplicitGemmGroupBwdXdlops_FP16*"
+      - "Quick/GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_FP16*"
       # --- Convolution: Winograd (extra coverage) ---
-      - "Smoke/GPU_UnitTestConvSolverBinWinogradRxSFwd_FP32*"
-      - "Smoke/GPU_UnitTestConvSolverBinWinogradRxSFwd_FP16*"
-      - "Smoke/GPU_UnitTestConvSolverBinWinogradRxSBwd_FP32*"
-      - "Smoke/GPU_UnitTestConvSolverBinWinogradRxSBwd_FP16*"
+      - "Quick/GPU_UnitTestConvSolverBinWinogradRxSFwd_FP32*"
+      - "Quick/GPU_UnitTestConvSolverBinWinogradRxSFwd_FP16*"
+      - "Quick/GPU_UnitTestConvSolverBinWinogradRxSBwd_FP32*"
+      - "Quick/GPU_UnitTestConvSolverBinWinogradRxSBwd_FP16*"
       # --- Convolution: GEMM ---
-      - "Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_FP32*"
-      - "Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_FP16*"
-      - "Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_BFP16*"
-      - "Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_I8*"
-      - "Smoke/GPU_UnitTestConvSolverGemmBwdRestBwd_FP32*"
-      - "Smoke/GPU_UnitTestConvSolverGemmBwdRestBwd_FP16*"
-      - "Smoke/GPU_UnitTestConvSolverGemmBwdRestBwd_BFP16*"
-      - "Smoke/GPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_FP32*"
-      - "Smoke/GPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_FP16*"
-      - "Smoke/GPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_BFP16*"
+      - "Quick/GPU_UnitTestConvSolverGemmFwdRestFwd_FP32*"
+      - "Quick/GPU_UnitTestConvSolverGemmFwdRestFwd_FP16*"
+      - "Quick/GPU_UnitTestConvSolverGemmFwdRestFwd_BFP16*"
+      - "Quick/GPU_UnitTestConvSolverGemmFwdRestFwd_I8*"
+      - "Quick/GPU_UnitTestConvSolverGemmBwdRestBwd_FP32*"
+      - "Quick/GPU_UnitTestConvSolverGemmBwdRestBwd_FP16*"
+      - "Quick/GPU_UnitTestConvSolverGemmBwdRestBwd_BFP16*"
+      - "Quick/GPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_FP32*"
+      - "Quick/GPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_FP16*"
+      - "Quick/GPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_BFP16*"
       # --- Convolution: assembly kernels (extra coverage) ---
-      - "Smoke/GPU_UnitTestConvSolverAsm1x1UFwd_FP32*"
-      - "Smoke/GPU_UnitTestConvSolverAsm1x1UFwd_FP16*"
-      - "Smoke/GPU_UnitTestConvSolverAsm3x3UFwd_FP32*"
+      - "Quick/GPU_UnitTestConvSolverAsm1x1UFwd_FP32*"
+      - "Quick/GPU_UnitTestConvSolverAsm1x1UFwd_FP16*"
+      - "Quick/GPU_UnitTestConvSolverAsm3x3UFwd_FP32*"
       # --- Convolution: FFT (extra coverage) ---
-      - "Smoke/GPU_UnitTestConvSolverFFTFwd_FP32*"
-      - "Smoke/GPU_UnitTestConvSolverFFTBwd_FP32*"
+      - "Quick/GPU_UnitTestConvSolverFFTFwd_FP32*"
+      - "Quick/GPU_UnitTestConvSolverFFTBwd_FP32*"
       # --- Group convolution (extra coverage) ---
-      - "Smoke/GPU_GroupConv2D_Deterministic_BWD_FP32*"
-      - "Smoke/GPU_GroupConv2D_Deterministic_BWD_FP16*"
-      - "Smoke/GPU_GroupConv2D_Deterministic_BWD_BFP16*"
-      - "Smoke/GPU_GroupConv2D_Deterministic_WRW_FP32*"
-      - "Smoke/GPU_GroupConv3D_Deterministic_WRW_FP32*"
+      - "Quick/GPU_GroupConv2D_Deterministic_BWD_FP32*"
+      - "Quick/GPU_GroupConv2D_Deterministic_BWD_FP16*"
+      - "Quick/GPU_GroupConv2D_Deterministic_BWD_BFP16*"
+      - "Quick/GPU_GroupConv2D_Deterministic_WRW_FP32*"
+      - "Quick/GPU_GroupConv3D_Deterministic_WRW_FP32*"
       # --- Convolution + bias + activation fusion (extra coverage) ---
-      - "Smoke/GPU_ConvBiasActivInfer_FP32*"
-      - "Smoke/GPU_ConvBiasActivInfer_FP16*"
-      - "Smoke/GPU_na_fusion_test_bn_spatial_FP32*"
-      - "Smoke/GPU_na_fusion_test_bn_spatial_FP16*"
-      - "Smoke/GPU_na_fusion_inference_test_FP32*"
-      - "Smoke/GPU_FusionAux_FP32*"
+      - "Quick/GPU_ConvBiasActivInfer_FP32*"
+      - "Quick/GPU_ConvBiasActivInfer_FP16*"
+      - "Quick/GPU_na_fusion_test_bn_spatial_FP32*"
+      - "Quick/GPU_na_fusion_test_bn_spatial_FP16*"
+      - "Quick/GPU_na_fusion_inference_test_FP32*"
+      - "Quick/GPU_FusionAux_FP32*"
       # --- FP8 convolution (extra coverage) ---
-      - "Smoke/GPU_ConvFwd_FP8*"
+      - "Quick/GPU_ConvFwd_FP8*"
       # --- Reference kernel 3D conv (extra coverage) ---
-      - "Smoke/GPU_reference_kernel_fwd_3d_NCDHW_FP32_FP32*"
-      - "Smoke/GPU_reference_kernel_fwd_3d_NCDHW_FP16_FP16*"
-      - "Smoke/GPU_reference_kernel_fwd_3d_NCDHW_BFP16_BFP16*"
+      - "Quick/GPU_reference_kernel_fwd_3d_NCDHW_FP32_FP32*"
+      - "Quick/GPU_reference_kernel_fwd_3d_NCDHW_FP16_FP16*"
+      - "Quick/GPU_reference_kernel_fwd_3d_NCDHW_BFP16_BFP16*"
 
     exclude:
-      - "*/GPU_MIOpenDriver*"
-      # OOM-killing on small shared-RAM runners (e.g. gfx1151).
-      - "CPU_PerfDb_NONE.*"
-      # Long-running Smoke suites excluded to keep ffm-quick under ~30s.
+      # Long-running Quick suites excluded to keep ffm-quick under ~30s.
       # Observed timings from on a real GPU (gfx942):
-      - "Smoke/GPU_BNBWDSmall2D_FP32*"         # ~7.6 s (28 tests)
-      - "Smoke/GPU_Reduce_FP32*"               # ~5.7 s
-      - "Smoke/GPU_Reduce_FP16*"               # ~5.2 s
-      - "Smoke/GPU_ConvBiasActivInfer_FP32*"   # ~4.7 s
-      - "Smoke/GPU_ConvBiasActivInfer_FP16*"   # ~3.9 s
-      - "Smoke/GPU_UnitTestActivationDescriptor_FP32*"  # ~3.9 s
-      - "Smoke/GPU_UnitTestActivationDescriptor_FP16*"  # ~3.5 s
-      - "Smoke/GPU_RNNVanilla_FP32*"           # ~3.5 s
-      - "Smoke/GPU_RNNVanilla_FP16*"           # ~3.2 s
-      - "Smoke/GPU_Softmax_BetaZeroNaN_FP32*"  # ~3.0 s
-      - "Smoke/GPU_GRU_Base_FP32*"             # ~2.9 s
-      - "Smoke/GPU_GRU_Base_FP16*"             # ~2.8 s
-      - "Smoke/GPU_Lrn_FP32*"                  # ~2.4 s
-      - "Smoke/GPU_Lrn_FP16*"                  # ~2.4 s
-      - "Smoke/GPU_Dropout_FP32*"              # ~2.1 s
-      - "Smoke/GPU_Dropout_FP16*"              # ~1.7 s
-      - "Smoke/GPU_reference_kernel_fwd_3d_NCDHW_BFP16_BFP16*"  # ~4.0 s (FP32/FP16 variants are fast)
+      - "Quick/GPU_BNBWDSmall2D_FP32*"         # ~7.6 s (28 tests)
+      - "Quick/GPU_Reduce_FP32*"               # ~5.7 s
+      - "Quick/GPU_Reduce_FP16*"               # ~5.2 s
+      - "Quick/GPU_ConvBiasActivInfer_FP32*"   # ~4.7 s
+      - "Quick/GPU_ConvBiasActivInfer_FP16*"   # ~3.9 s
+      - "Quick/GPU_UnitTestActivationDescriptor_FP32*"  # ~3.9 s
+      - "Quick/GPU_UnitTestActivationDescriptor_FP16*"  # ~3.5 s
+      - "Quick/GPU_RNNVanilla_FP32*"           # ~3.5 s
+      - "Quick/GPU_RNNVanilla_FP16*"           # ~3.2 s
+      - "Quick/GPU_Softmax_BetaZeroNaN_FP32*"  # ~3.0 s
+      - "Quick/GPU_GRU_Base_FP32*"             # ~2.9 s
+      - "Quick/GPU_GRU_Base_FP16*"             # ~2.8 s
+      - "Quick/GPU_Lrn_FP32*"                  # ~2.4 s
+      - "Quick/GPU_Lrn_FP16*"                  # ~2.4 s
+      - "Quick/GPU_Dropout_FP32*"              # ~2.1 s
+      - "Quick/GPU_Dropout_FP16*"              # ~1.7 s
+      - "Quick/GPU_reference_kernel_fwd_3d_NCDHW_BFP16_BFP16*"  # ~4.0 s (FP32/FP16 variants are fast)
 
     exclude_windows: [] # Placeholder to show per-platform exclude support
     exclude_linux: [] # Placeholder to show per-platform exclude support
@@ -586,8 +351,8 @@ test_categories:
 
 # Common GPU exclusion patterns - used by multiple GPU architectures
 gfx11_common_patterns: &gfx11_common_patterns
-  - "Full/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32"
-  - "Full/GPU_BNFWDTrainLarge2D_FP32.BnV2LargeFWD_TrainCKfp32/NCHW_BNSpatial_testBNAPIV2_Dim_2_test_id_64"
+  - "Comprehensive/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32"
+  - "Comprehensive/GPU_BNFWDTrainLarge2D_FP32.BnV2LargeFWD_TrainCKfp32/NCHW_BNSpatial_testBNAPIV2_Dim_2_test_id_64"
   - "*SerialRun3D*"
   - "*gfx942*"
   - "*GPU_UnitTestConvSolverFFTFwd_FP32*"
@@ -603,13 +368,12 @@ gfx11_common_patterns: &gfx11_common_patterns
   - "*GPU_Dropout_FP16*"
   - "*GPU_GroupConv3D_BackwardData_FP16.GroupConv3D_BackwardData_half_Test*"
   - "*GPU_GroupConv3D_BackwardData_BFP16.GroupConv3D_BackwardData_bfloat16_Test*"
-  - "*GPU_UnitTestConvSolverImplicitGemmGroup*" # issue: ALMIOPEN-1841
-  - "Smoke/GPU_MultiMarginLoss*"
+  - "Quick/GPU_MultiMarginLoss*"
   - "*CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDevApplicability_FP16.ConvHipImplicitGemmGroupWrwXdlops*"
   # Slow tests to exclude (from #3362)
-  - "Full/GPU_Softmax_FP32*"  # 24 min
-  - "Full/GPU_Softmax_BFP16*"  # 13 min
-  - "Full/GPU_Softmax_FP16*" # 11.5 min
+  - "Standard/GPU_Softmax_FP32*"  # 24 min
+  - "Standard/GPU_Softmax_BFP16*"  # 13 min
+  - "Standard/GPU_Softmax_FP16*" # 11.5 min
   - "*GPU_GemmWrwUniversal_LargeMemory_*"  # aborts the test process on gfx1151
 
 exclude_gpu:
@@ -619,11 +383,11 @@ exclude_gpu:
       # Fails on every arch without bundled AI models (ALMIOPEN-2966): "no fdeep .tn.model files found" in the system db.
       # Linux and Windows gfx120X, 10 of 10 executions on 8 hosts: TheRock bump PR #9651 run 41113572856 (shard 3, attempts
       # 1-4) and PR #9680 run 41405101044 (issue #14874). Remove when ALMIOPEN-2966 makes the test skip archs without models.
-      - "GPU_ConvAIModelLoad_FP32*"
+      - "Standard/GPU_ConvAIModelLoad_FP32*"
       # Fails on gfx1201 hosts whose CU count has no shipped system db (#13416): "Db file does not exist ...
       # gfx120138.HIP.fdb.txt" on CS-RORDMZ-DT84 (TheRock PR #9651 run 41113572856 attempt 1); only gfx120140 ships, which
-      # passes on the other gfx1201 hosts. Same cause as StaticFDBSync/9 on gfx115X. Remove with the gfx115X entry (#13416).
-      - "Smoke/CPU_DBSync_NONE.StaticFDBSync/11"
+      # passes on the other gfx1201 hosts. Same cause as the gfx1151 entry on gfx115X. Remove with the gfx115X entry (#13416).
+      - "Quick/CPU_DBSync_NONE.StaticFDBSync/gfx1201_32"
     labels:
       - "quick"
       - "standard"
@@ -638,7 +402,7 @@ exclude_gpu:
       # (TheRock PR #9651 run 41113572856 attempts 1-2, PR #9680 run 41405101044). instance_mode: hung on DT87 and took 27 s
       # on DT81 (normally < 1.3 s) in PR #14882 run 41516836287. BFP16/FP32 cases pass in ~0.3 s on Linux gfx1201; both FP16
       # cases pass in < 1.3 s on Linux gfx1200 and Windows gfx1201. Remove when ALMIOPEN-3130 closes.
-      - "GPU_SoftmaxFind20_FP16.*"
+      - "Standard/GPU_SoftmaxFind20_FP16.*"
     labels:
       - "quick"
       - "standard"
@@ -650,20 +414,20 @@ exclude_gpu:
     test_patterns:
       - *gfx11_common_patterns
       - "*/GPU_MIOpenDriver*"
-      - "Smoke/CPU_Handle_NONE*"
-      - "Full/GPU_reduce_custom_fp32*"
+      - "Quick/CPU_Handle_NONE*"
+      - "Standard/GPU_reduce_custom_fp32*"
       # Fails on every arch without bundled AI models (ALMIOPEN-2966): "no fdeep .tn.model files found" in the system db.
       # Models ship only for gfx908/gfx90a/gfx942/gfx950, and since #13680 Windows installs per-target db files like Linux
       # (PR #13107 run 40983714656, Windows gfx110X, 2 of 2 attempts). Remove when ALMIOPEN-2966 makes the test skip archs
       # without models.
-      - "GPU_ConvAIModelLoad_FP32*"
+      - "Standard/GPU_ConvAIModelLoad_FP32*"
       # Temporary quarantine (ROCm/rocm-libraries#15056): "layernorm.hpp(524) Error dw beyond tolerance
       # Error:0.01156, Threshold x 2: 0.001953" on Linux+Windows gfx110X and gfx1151. Suspected compiler
       # regression, gfx120X not affected. Indices are positional into LayerNormTestConfigs() in layernorm.hpp
       # (N:1 C:2048 D:0 H:4 W:32 dim:3 eps:1e-5 NHWC; /124 ELEMENTWISE_AFFINE, /127 WEIGHT_BIAS); update if configs are reordered.
       # FP32/BFP16 variants stay enabled. Remove when #15056 is fixed.
-      - "Full/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/124"
-      - "Full/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/127"
+      - "Comprehensive/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/124"
+      - "Comprehensive/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/127"
     labels:
       - "quick"
       - "standard"
@@ -676,23 +440,26 @@ exclude_gpu:
   #Add exclude_gpu_gfx1150/gfx1151 separately only if they have unique patterns.
     test_patterns:
       - *gfx11_common_patterns
+      # The gfx1151 system db check, named by arch and CU count so adding a param can't move it to another arch (#16420).
       # Fails on every gfx1151 host whose CU count has no shipped system db (#13416): "Db file does not exist ...
       # gfx115128.HIP.fdb.txt" / "gfx115120.HIP.fdb.txt". Windows: 5 of 5 executions on 5 hosts (PR #13107 runs 39358709264,
-      # 39480689944, develop nightly 38527180317). Linux: 12 of 12 on the 20-CU strixhalo hosts in run 39740910967 (passes on
-      # CS-RORDMZ hosts). Only gfx115128 dbs ship; #13680 fixed the Windows install of those, but 20-CU hosts still have no
-      # gfx115120 db. Remove once the test skips missing dbs or a gfx115120 db ships (#13416).
-      - "Smoke/CPU_DBSync_NONE.StaticFDBSync/9"
+      # 39480689944, develop nightly 38527180317). Linux: 12 of 12 on the 32-CU strixhalo hosts in run 39740910967. Only
+      # gfx115128 dbs ship, and #13680 fixed the Windows install of those, but 32-CU hosts still have no gfx115120 db.
+      # Also fails on the 40-CU hosts that load gfx115128: 658 of its find-db entries hold a workspace size the solver no
+      # longer reports (524 GemmWrwUniversal, 134 ConvWinoFuryRxS<2-3>), TheRock PR #10132 run 44595703412 (#16420).
+      # Remove once gfx115128 passes this check and the test skips missing dbs or a gfx115120 db ships (#13416).
+      - "Quick/CPU_DBSync_NONE.StaticFDBSync/gfx1151_0"
       # Fails on every arch without bundled AI models (ALMIOPEN-2966): "no fdeep .tn.model files found" in the system db.
       # Models ship only for gfx908/gfx90a/gfx942/gfx950, and since #13680 Windows installs per-target db files like Linux.
       # Linux gfx1151: PR #13107 run 39358709264. Remove when ALMIOPEN-2966 makes the test skip archs without models.
-      - "GPU_ConvAIModelLoad_FP32*"
+      - "Standard/GPU_ConvAIModelLoad_FP32*"
       # Temporary quarantine (ROCm/rocm-libraries#15056): "layernorm.hpp(524) Error dw beyond tolerance
       # Error:0.01156, Threshold x 2: 0.001953" on Linux+Windows gfx110X and gfx1151. Suspected compiler
       # regression, gfx120X not affected. Indices are positional into LayerNormTestConfigs() in layernorm.hpp
       # (N:1 C:2048 D:0 H:4 W:32 dim:3 eps:1e-5 NHWC; /124 ELEMENTWISE_AFFINE, /127 WEIGHT_BIAS); update if configs are reordered.
       # FP32/BFP16 variants stay enabled. Remove when #15056 is fixed.
-      - "Full/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/124"
-      - "Full/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/127"
+      - "Comprehensive/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/124"
+      - "Comprehensive/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/127"
     labels:
       - "quick"
       - "standard"
@@ -706,8 +473,8 @@ exclude_gpu:
       # PR #13107 runs 39358709264 and 39529845480; both pass on the 31-125 GB gfx1151 hosts. Only standard-tier cases are
       # excluded (the tier TheRock release tests run on these hosts); comprehensive/full OOM kills are not chased per case.
       # Remove when ALMIOPEN-2964 closes.
-      - "CPU_PerfDb_NONE.*"
-      - "GPU_BN_Spatial_FP32.MIOpen3900Regression" # 1x2048x512x512 FP32, ~2.1 GB per tensor
+      - "Standard/CPU_PerfDb_NONE.*"
+      - "Standard/GPU_BN_SpatialRegression_FP32.MIOpen3900Regression/0" # 1x2048x512x512 FP32, ~2.1 GB per tensor
     labels:
       - "quick"
       - "standard"
@@ -720,20 +487,46 @@ exclude_gpu:
       # Flaky on Windows gfx1151 (same bias-only RNN CPU/GPU mismatch as ALMIOPEN-1926): Backward Data / Forward Train /
       # Forward Inference GRU verification failed at gru_test.cpp:1985/2224/2473 for 3 of these 8 bias-enabled cases in
       # PR #13107 run 39358709264 (attempt 2); the same cases passed on the other attempt and in run 39480689944.
-      - "Full/GPU_GRU_Base_FP16.TestFloat16/batchSize_17_seqLength_23_inVecLen_13_hiddenSize_67_*biasMode_1_*"
+      - "Comprehensive/GPU_GRU_Base_FP16.TestFloat16/batchSize_17_seqLength_23_inVecLen_13_hiddenSize_67_*biasMode_1_*"
       # Hang in a multiprocess phase ("Waiting for test processes...") until the ctest/step timeout on Windows gfx1151
       # (ALMIOPEN-3129, issue #14874): 6 hangs on 5 hosts since 10-31 - develop nightlies 41179300934 (RamDb) and 41283494663
       # (RamDb, and PlainTextDb on 3 attempts), TheRock PR #9680 run 41405101044 (PlainTextDb). MultiFileDb_AllTests spawns
-      # no processes and keeps running. Linux gfx115X already excludes CPU_PerfDb_NONE.* (ALMIOPEN-2964). Remove when
-      # ALMIOPEN-3129 closes.
-      - "CPU_PerfDb_NONE.RamDb_AllTests"
-      - "CPU_PerfDb_NONE.PlainTextDb_AllTests"
+      # no processes and keeps running. Linux gfx115X already excludes Standard/CPU_PerfDb_NONE.* (ALMIOPEN-2964). Remove
+      # when ALMIOPEN-3129 closes.
+      - "Standard/CPU_PerfDb_NONE.RamDb_AllTests/0"
+      - "Standard/CPU_PerfDb_NONE.PlainTextDb_AllTests/0"
     labels:
       - "quick"
       - "standard"
       - "comprehensive"
       - "full"
       - "ex_gpu_gfx115X"
+
+  exclude_gpu_gfx117X:
+    test_patterns:
+      # gfx1170 reproduces the FP16 backward dw tolerance failures tracked in
+      # ROCm/rocm-libraries#15056. Remove when that issue is fixed.
+      - "Comprehensive/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/124"
+      - "Comprehensive/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/127"
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx117X"
+
+  exclude_gpu_gfx117X_windows:
+    test_patterns:
+      # gfx1170: the large untiled GPU reference can hit the Windows watchdog.
+      # Quarantine only the reproduced FP32 and FP16 large-memory cases.
+      - "Standard/GPU_GemmWrwUniversal_LargeMemory_FP32.GemmWrwUniversal/0"
+      - "Standard/GPU_GemmWrwUniversal_LargeMemory_FP16.GemmWrwUniversal/0"
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx117X"
 
   exclude_gpu_gfx950:
     test_patterns:

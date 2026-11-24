@@ -30,16 +30,6 @@ using namespace hipdnn_corpus_gen;
 namespace
 {
 
-std::vector<RegimeAxis> shippedSdpaAxes()
-{
-    const std::string path = hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json";
-    std::ifstream file(path);
-    EXPECT_TRUE(file.is_open()) << path;
-    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
-    EXPECT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
-    return parsed.ok() ? parsed.metadata->regimeLabel : std::vector<RegimeAxis>{};
-}
-
 ProblemPoint sdpaPoint(int64_t seqlenQ, int64_t seqlenK)
 {
     return ProblemPoint{{"batch", int64_t{1}},
@@ -69,7 +59,7 @@ ManifestEntry sdpaEntry(const std::string& name,
     entry.file = "graphs/" + name + ".fb";
     entry.bytes = 4096;
     entry.operation = "sdpa_fwd";
-    entry.regimeAxes = shippedSdpaAxes();
+    entry.regimeAxes = test::shippedOperation("sdpa_fwd").regimeLabel;
     return entry;
 }
 
@@ -135,6 +125,12 @@ std::vector<std::vector<std::string>> parseCsv(const std::string& text)
         rows.push_back(splitCsvLine(line));
     }
     return rows;
+}
+
+/// The index of column @p name in @p header, or header.size() when it is not there.
+size_t columnOf(const std::vector<std::string>& header, const std::string& name)
+{
+    return static_cast<size_t>(std::find(header.begin(), header.end(), name) - header.begin());
 }
 
 } // namespace
@@ -210,15 +206,12 @@ TEST(TestCorpusManifest, TheCsvHeaderAndItsRowsAgreeColumnForColumn)
     }
 
     const auto& header = rows.front();
-    const auto column = [&header](const std::string& name) {
-        return static_cast<size_t>(std::find(header.begin(), header.end(), name) - header.begin());
-    };
-    ASSERT_LT(column("q.seqlen_k"), header.size());
-    EXPECT_EQ(rows[1][column("q.seqlen_k")], "4096");
-    EXPECT_EQ(rows[2][column("q.seqlen_k")], "2048");
-    EXPECT_EQ(rows[1][column("phase")], "decode");
-    EXPECT_EQ(rows[2][column("phase")], "prefill");
-    EXPECT_EQ(rows[1][column("op")], "sdpa_fwd");
+    ASSERT_LT(columnOf(header, "q.seqlen_k"), header.size());
+    EXPECT_EQ(rows[1][columnOf(header, "q.seqlen_k")], "4096");
+    EXPECT_EQ(rows[2][columnOf(header, "q.seqlen_k")], "2048");
+    EXPECT_EQ(rows[1][columnOf(header, "phase")], "decode");
+    EXPECT_EQ(rows[2][columnOf(header, "phase")], "prefill");
+    EXPECT_EQ(rows[1][columnOf(header, "op")], "sdpa_fwd");
 }
 
 TEST(TestCorpusManifest, TheCsvAndTheJsonCarryTheSameValuesForEveryRow)
@@ -251,6 +244,62 @@ TEST(TestCorpusManifest, TheCsvAndTheJsonCarryTheSameValuesForEveryRow)
     }
 }
 
+/// Each shipped attention declaration, whose manifest carries one row per form it declares.
+class TestCorpusManifestForms : public ::testing::TestWithParam<std::string>
+{
+};
+
+TEST_P(TestCorpusManifestForms, AFormIsAFacetColumnAfterTheRegimeFacetsAndNotPartOfTheRegime)
+{
+    const auto metadata = test::shippedOperation(GetParam());
+    const auto* declared = metadata.find("form");
+    ASSERT_NE(declared, nullptr);
+    const auto& forms = declared->values;
+    ASSERT_FALSE(forms.empty());
+
+    std::vector<ManifestEntry> entries;
+    for(const auto& form : forms)
+    {
+        auto entry = sdpaEntry(form, 2048, 2048, "sweep", "draw " + form, "prefill_short");
+        entry.operation = GetParam();
+        entry.regimeAxes = metadata.regimeLabel;
+        entry.formAxes = metadata.formLabel;
+        entry.entry.point["form"] = form;
+        entries.push_back(std::move(entry));
+    }
+
+    const auto manifest = corpusManifest(entries, sdpaContext());
+    ASSERT_EQ(manifest["graphs"].size(), forms.size());
+    for(size_t i = 0; i < forms.size(); ++i)
+    {
+        EXPECT_EQ(manifest["graphs"][i]["form"], forms[i]);
+        // The regime is what it was: a form is a column of its own, not a fourth facet of the
+        // label.
+        EXPECT_EQ(manifest["graphs"][i]["regime"], "prefill_short") << forms[i];
+        EXPECT_EQ(manifest["graphs"][i]["grouping"], "mha") << forms[i];
+    }
+
+    const auto rows = parseCsv(corpusManifestCsv(entries));
+    ASSERT_EQ(rows.size(), forms.size() + 1);
+    const auto& header = rows.front();
+    ASSERT_LT(columnOf(header, "form"), header.size());
+    EXPECT_EQ(columnOf(header, "form"), columnOf(header, "grouping") + 1)
+        << "form follows the last regime facet";
+    for(size_t i = 0; i < forms.size(); ++i)
+    {
+        EXPECT_EQ(rows[i + 1][columnOf(header, "form")], forms[i]);
+        EXPECT_EQ(rows[i + 1][columnOf(header, "regime")], "prefill_short") << forms[i];
+    }
+    for(const auto& row : rows)
+    {
+        EXPECT_EQ(row.size(), header.size());
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(SdpaDeclarations,
+                         TestCorpusManifestForms,
+                         ::testing::Values("sdpa_fwd", "sdpa_bwd"));
+
 TEST(TestCorpusManifest, AnOriginCarryingACommaDoesNotShiftTheRow)
 {
     // `origin` is free text, so it is the column an unquoted writer would break.
@@ -260,9 +309,7 @@ TEST(TestCorpusManifest, AnOriginCarryingACommaDoesNotShiftTheRow)
     ASSERT_EQ(rows.size(), 2u);
     EXPECT_EQ(rows[1].size(), rows[0].size());
     const auto& header = rows.front();
-    const auto column
-        = static_cast<size_t>(std::find(header.begin(), header.end(), "origin") - header.begin());
-    EXPECT_EQ(rows[1][column], "pack.kdp.json, 6 kernels");
+    EXPECT_EQ(rows[1][columnOf(header, "origin")], "pack.kdp.json, 6 kernels");
 }
 
 TEST(TestCorpusManifest, TheTotalsReportWhatWasEmittedAndWhatWasAskedForSeparately)
@@ -301,23 +348,20 @@ TEST(TestCorpusManifest, TwoOperationsShareOneHeaderAndLeaveEachOthersColumnsEmp
 
     ASSERT_EQ(rows.size(), 3u);
     const auto& header = rows.front();
-    const auto column = [&header](const std::string& name) {
-        return static_cast<size_t>(std::find(header.begin(), header.end(), name) - header.begin());
-    };
-    ASSERT_LT(column("q.seqlen_k"), header.size());
-    ASSERT_LT(column("q.channels"), header.size());
+    ASSERT_LT(columnOf(header, "q.seqlen_k"), header.size());
+    ASSERT_LT(columnOf(header, "q.channels"), header.size());
 
-    EXPECT_EQ(rows[1][column("op")], "sdpa_fwd");
-    EXPECT_EQ(rows[1][column("q.seqlen_k")], "4096");
-    EXPECT_EQ(rows[1][column("q.channels")], "");
-    EXPECT_EQ(rows[2][column("op")], "conv_fwd");
-    EXPECT_EQ(rows[2][column("q.seqlen_k")], "");
-    EXPECT_EQ(rows[2][column("q.channels")], "64");
+    EXPECT_EQ(rows[1][columnOf(header, "op")], "sdpa_fwd");
+    EXPECT_EQ(rows[1][columnOf(header, "q.seqlen_k")], "4096");
+    EXPECT_EQ(rows[1][columnOf(header, "q.channels")], "");
+    EXPECT_EQ(rows[2][columnOf(header, "op")], "conv_fwd");
+    EXPECT_EQ(rows[2][columnOf(header, "q.seqlen_k")], "");
+    EXPECT_EQ(rows[2][columnOf(header, "q.channels")], "64");
 
     // Facet columns are not borrowed by an operation that never declared them.
-    ASSERT_LT(column("phase"), header.size());
-    EXPECT_EQ(rows[1][column("phase")], "decode");
-    EXPECT_EQ(rows[2][column("phase")], "");
+    ASSERT_LT(columnOf(header, "phase"), header.size());
+    EXPECT_EQ(rows[1][columnOf(header, "phase")], "decode");
+    EXPECT_EQ(rows[2][columnOf(header, "phase")], "");
 }
 
 namespace
@@ -338,14 +382,9 @@ struct ScratchDirectory
 
 std::vector<uint8_t> builtSdpaGraph(int64_t seqlenQ)
 {
-    const std::string path = hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json";
-    std::ifstream file(path);
-    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
-    EXPECT_TRUE(parsed.ok());
-    auto point = sdpaPoint(seqlenQ, 4096);
-    point["alignment"] = std::string("top_left");
-    point["generate_stats"] = false;
-    const auto built = buildGraphFor(*parsed.metadata, point);
+    const auto metadata = test::shippedOperation("sdpa_fwd");
+    const auto point = test::withDefaultCategoricals(metadata, sdpaPoint(seqlenQ, 4096));
+    const auto built = buildGraphFor(metadata, point);
     EXPECT_TRUE(built.ok()) << built.error;
     return built.bytes;
 }

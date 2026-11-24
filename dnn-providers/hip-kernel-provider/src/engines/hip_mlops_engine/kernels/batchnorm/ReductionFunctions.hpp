@@ -65,6 +65,16 @@ __forceinline__ __device__ void lds_reduce2(FloatAccumC& x,
     y = lcl_data_y[0] * scale;
 }
 
+// NOTE: unlike MIOpen's fixed version (MIOpen PR #4411), the reduction loop below does not bound
+// `red` against `size`, only against `SizeLclData`. This is safe only because every current
+// variant-2 call site (BatchNormFwdTrainSpatial.cpp, BatchNormBwdSpatial.cpp) launches with
+// blockDim.x * blockDim.y * blockDim.z == SizeLclData / (2 * xstride) exactly, i.e. `size` is
+// always forced equal to the LDS array's full logical capacity, and the host-side plan builder
+// (BatchnormCommon.hpp: getSpatialMultipleConfig/getLocalConfigChannelLast) always rounds
+// ylocalsize/xlocalsize up to a power of two. So `size < SizeLclData/(2*xstride)` and
+// non-power-of-two `size` are both unreachable today; if a future tuning path ever launches this
+// kernel with a `size` smaller than the LDS capacity, this loop would sum in stale/uninitialized
+// rows and this guard would need MIOpen's `ylid + red < size` bound added back.
 template <typename FloatAccumC, typename FloatAccum, unsigned int SizeLclData>
 __forceinline__ __device__ void lds_reduce2_2d(FloatAccumC& x,
                                                FloatAccumC& y,
@@ -260,6 +270,119 @@ __forceinline__ __device__ void
         x = s_x[0];
         y = s_y[0];
     }
+}
+
+// Portable (shuffle-only) counterpart of the per-wave step inside reduce2_welford. MIOpen also
+// has a GFX9 DPP-asm variant of this step (restricted to GFX9 by MIOpen PR #12889), which is not
+// ported here: this provider always builds with HIP_PLUGIN_USE_AMDGCN=0, so the DPP path would be
+// dead code.
+template <typename FloatAccum>
+__forceinline__ __device__ void shfl_interleaved_reduction_welford(FloatAccum& temp_mean,
+                                                                   FloatAccum& temp_var,
+                                                                   FloatAccum& temp_count)
+{
+#pragma unroll
+    for(unsigned int offset = warpSize >> 1; offset >= 1; offset >>= 1)
+    {
+        FloatAccum otherMean = __shfl_down_sync(detail::FULL_MASK, temp_mean, offset);
+        FloatAccum delta = otherMean - temp_mean;
+        FloatAccum n_a = temp_count;
+        FloatAccum n_b = __shfl_down_sync(detail::FULL_MASK, temp_count, offset);
+        FloatAccum n_new = n_a + n_b;
+        FloatAccum n_rcp = n_new != 0.0f ? __builtin_amdgcn_rcpf(n_new) : 0.0f;
+        temp_mean = (temp_mean * n_a + otherMean * n_b) * n_rcp;
+        temp_var = temp_var + __shfl_down_sync(detail::FULL_MASK, temp_var, offset)
+                   + (delta * delta * (n_a * n_b)) * n_rcp;
+        temp_count = n_new;
+    }
+}
+
+// Welford's online algorithm for mean/variance, reducing per-thread (mean, variance, count)
+// triples across a workgroup. Replaces the naive E[x^2] - mean^2 accumulation (reduce2/gcn_reduce2)
+// for cases where catastrophic cancellation is a problem, e.g. inputs with a large mean
+// (MIOpen PR #5013). Unlike reduce2/gcn_reduce2, this only has the portable shuffle-based wave
+// reduction: see the comment on shfl_interleaved_reduction_welford above for why.
+template <typename FloatAccum, unsigned int SizeLclData>
+__forceinline__ __device__ void reduce2_welford(FloatAccum& mean,
+                                                FloatAccum& variance,
+                                                FloatAccum& count,
+                                                FloatAccum scale,
+                                                FloatAccum (&lcl_data_mean)[SizeLclData],
+                                                FloatAccum (&lcl_data_variance)[SizeLclData],
+                                                FloatAccum (&lcl_data_count)[SizeLclData],
+                                                unsigned int lid)
+{
+    const unsigned int ldsidx
+        = lid >> (warpSize == 32 ? 5 : 6); // warpSize is either 32 or 64 on AMD hardware.
+
+    shfl_interleaved_reduction_welford<FloatAccum>(mean, variance, count);
+
+    // The shuffle reduction produces the wave's result in lane 0.
+    if((lid % static_cast<unsigned int>(warpSize)) == 0)
+    {
+        lcl_data_mean[ldsidx] = mean;
+        lcl_data_variance[ldsidx] = variance;
+        lcl_data_count[ldsidx] = count;
+    }
+
+    __syncthreads();
+
+    // The reduction here merges partitions together in a tree-like fashion. Otherwise,
+    // precision is lost in both the mean and variance.
+    for(unsigned int red = (1 << detail::log2_ceil_v<SizeLclData>) >> 1; red > 0; red >>= 1)
+    {
+        if(lid < red && lid + red < SizeLclData)
+        {
+            FloatAccum delta = lcl_data_mean[lid + red] - lcl_data_mean[lid];
+            FloatAccum n_a = lcl_data_count[lid];
+            FloatAccum n_b = lcl_data_count[lid + red];
+            FloatAccum n_new = n_a + n_b;
+            FloatAccum n_new_rcp = n_new != 0.0f ? __builtin_amdgcn_rcpf(n_new) : 0.f;
+            lcl_data_mean[lid]
+                = (lcl_data_mean[lid] * n_a + lcl_data_mean[lid + red] * n_b) * n_new_rcp;
+            lcl_data_variance[lid] = lcl_data_variance[lid] + lcl_data_variance[lid + red]
+                                     + delta * delta * (n_a * n_b * n_new_rcp);
+            lcl_data_count[lid] = n_new;
+        }
+        __syncthreads();
+    }
+
+    mean = lcl_data_mean[0];
+    variance = lcl_data_variance[0] * scale;
+}
+
+// Manually unrolled Welford update for 4 elements read as a vector, plus a merge step into the
+// running (mean, variance, curN). Ported from MIOpen PR #5013.
+template <typename FpPrecType>
+__forceinline__ __device__ void
+    welford_step_unroll4(typename mapped_vector_type<FpPrecType, 4>::type& read4Prec,
+                         FpPrecType& mean,
+                         FpPrecType& variance,
+                         FpPrecType& curN)
+{
+    FpPrecType mean4 = read4Prec.x;
+    FpPrecType oldMean4 = mean4;
+    FpPrecType variance4 = hip_kernel_provider::cast<FpPrecType>(0.);
+
+    mean4 += read4Prec.y;
+    mean4 *= 0.5f;
+    variance4 = fma(read4Prec.y - mean4, read4Prec.y - oldMean4, variance4);
+
+    oldMean4 = mean4;
+    mean4 = mean4 * 2.0f + read4Prec.z;
+    mean4 *= 0.333333333f;
+    variance4 = fma(read4Prec.z - mean4, read4Prec.z - oldMean4, variance4);
+
+    oldMean4 = mean4;
+    mean4 = mean4 * 3.0f + read4Prec.w;
+    mean4 *= 0.25f;
+    variance4 = fma(read4Prec.w - mean4, read4Prec.w - oldMean4, variance4);
+
+    // Merge the local mean and variance with the currently computed ones.
+    FpPrecType delta = mean4 - mean;
+    mean = (mean4 * 4.0f + mean * curN) / (curN + 4.f);
+    variance += variance4 + delta * delta * 4.f * curN / (curN + 4.f);
+    curN += 4.f;
 }
 
 } // namespace reduction

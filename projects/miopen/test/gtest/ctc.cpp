@@ -673,8 +673,8 @@ inline auto GetCasesFull()
     return cases;
 }
 
-// Smoke (pre-commit) and Standard (per-CI) subsets. The full cross product
-// stays in GenCasesFull (used by the Full instantiation), so no coverage is lost.
+// Quick (pre-commit) and Standard (per-PR) subsets. The full cross product
+// stays in GenCasesFull (used by the Comprehensive instantiation), so no coverage is lost.
 inline auto GenCasesSmoke()
 {
     return testing::Combine(MakeNamedParameterValues<int>("batchSize", 1, 32),
@@ -874,8 +874,8 @@ using GPU_CTC_FP32 = ctc_test<float>;
 
 TEST_P(GPU_CTC_FP32, TestFloat) { this->Run(); }
 
-// Tiered: Smoke (pre-commit) and Standard (per-CI) run subsets; Full
-// (comprehensive/nightly) runs the complete cross product so no coverage is lost.
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_CTC_FP32, GetCasesSmoke(), TestNameGenerator{});
+// Tiered: Quick (pre-commit) and Standard (per-PR) run subsets; Comprehensive
+// (nightly) runs the complete cross product so no coverage is lost.
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_CTC_FP32, GetCasesSmoke(), TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Standard, GPU_CTC_FP32, GetCasesStandard(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_CTC_FP32, GetCasesFull(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Comprehensive, GPU_CTC_FP32, GetCasesFull(), TestNameGenerator{});

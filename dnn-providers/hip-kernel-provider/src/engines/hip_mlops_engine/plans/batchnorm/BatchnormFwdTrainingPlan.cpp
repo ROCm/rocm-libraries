@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "BatchnormFwdTrainingPlan.hpp"
+#include "BatchnormApplicabilityChecks.hpp"
 #include "BatchnormCommon.hpp"
 #include "BatchnormKernelCompileOptions.hpp"
 
@@ -33,16 +34,20 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     _epsilon = hipdnn_plugin_sdk::makeScalarOperand(
         tensorMap, attributes.epsilon_tensor_uid(), "Epsilon");
 
-    // Save mean and inv_variance are optional
-    if(attributes.mean_tensor_uid().has_value())
+    // Save mean and inv_variance are optional; a pair that is virtual in both tensors is not
+    // requested and stays unset.
+    if(!hasUnrequestedSavedPair(attributes, tensorMap))
     {
-        _mean = &(findTensorAttributes(tensorMap, attributes.mean_tensor_uid().value()));
-    }
+        if(attributes.mean_tensor_uid().has_value())
+        {
+            _mean = &(findTensorAttributes(tensorMap, attributes.mean_tensor_uid().value()));
+        }
 
-    if(attributes.inv_variance_tensor_uid().has_value())
-    {
-        _invVariance
-            = &(findTensorAttributes(tensorMap, attributes.inv_variance_tensor_uid().value()));
+        if(attributes.inv_variance_tensor_uid().has_value())
+        {
+            _invVariance
+                = &(findTensorAttributes(tensorMap, attributes.inv_variance_tensor_uid().value()));
+        }
     }
 
     if(attributes.prev_running_mean_tensor_uid().has_value()
@@ -298,6 +303,7 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     hip_kernel_provider::batchnorm::KernelConfig config;
     const size_t minWorkgroups = std::max(
         size_t(1), size_t(0.6f * static_cast<float>(deviceProperties.multiProcessorCount)));
+    const auto waveSize = static_cast<size_t>(deviceProperties.warpSize);
     const hip_kernel_provider::batchnorm::ProblemDescription problem(
         batches,
         channels,
@@ -345,7 +351,7 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
             xlocalsize = 256;
         }
         xgridsize = channels * xlocalsize;
-        ldsgcn = static_cast<unsigned int>(xlocalsize / 64);
+        ldsgcn = static_cast<unsigned int>(xlocalsize / waveSize);
         ldsnogcn = static_cast<unsigned int>(xlocalsize);
     }
     else
@@ -380,7 +386,7 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
                 = (xlocalsize * ylocalsize * zlocalsize) / xlocalsizeFinal / zlocalsizeFinal;
         }
         ldsnogcn = static_cast<unsigned int>(xlocalsize * ylocalsize * zlocalsize);
-        ldsgcn = static_cast<unsigned int>(xlocalsize * ylocalsize * zlocalsize / 64);
+        ldsgcn = static_cast<unsigned int>(xlocalsize * ylocalsize * zlocalsize / waveSize);
     }
 
     // Get activation mode
