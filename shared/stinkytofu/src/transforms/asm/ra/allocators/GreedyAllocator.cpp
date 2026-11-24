@@ -911,6 +911,15 @@ class Greedy {
         return occupants;
     }
 
+    /// Placed in the phase ahead of the queue: what the policy places early,
+    /// and under a bank plan every capped block. The plan counted a capped
+    /// block in the bank its ceiling allows before it gave the others theirs,
+    /// and planned blocks go ahead of the queue, so under an order with no
+    /// phase of its own they would reach that bank first.
+    bool inEarlyPhase(const Block& block) const {
+        return policy_.placesEarly(block) || (plannedBlocks_ > 0 && block.maxIndex.has_value());
+    }
+
     bool place() {
         matrix_ = PhysRegMatrix(context_.target);
 
@@ -940,7 +949,7 @@ class Greedy {
         std::vector<size_t> capped;
         for (size_t index = 0; index < blocks_.size(); ++index) {
             Block& block = blocks_[index];
-            if (block.pinReason != nullptr || !policy_.placesEarly(block)) continue;
+            if (block.pinReason != nullptr || !inEarlyPhase(block)) continue;
             capped.push_back(index);
         }
         std::sort(capped.begin(), capped.end(), [this](size_t a, size_t b) {
@@ -971,7 +980,7 @@ class Greedy {
             for (size_t index = 0; index < blocks_.size(); ++index) {
                 const Block& block = blocks_[index];
                 if (block.plannedBank.has_value() && block.pinReason == nullptr &&
-                    !policy_.placesEarly(block))
+                    !inEarlyPhase(block))
                     planned.push_back(index);
             }
             std::sort(planned.begin(), planned.end(), [this](size_t a, size_t b) {
@@ -990,7 +999,7 @@ class Greedy {
         std::vector<size_t> queue;
         for (size_t index = 0; index < blocks_.size(); ++index) {
             const Block& block = blocks_[index];
-            if (block.pinReason != nullptr || policy_.placesEarly(block)) continue;
+            if (block.pinReason != nullptr || inEarlyPhase(block)) continue;
             if (plannedBlocks_ > 0 && block.plannedBank.has_value()) continue;
             queue.push_back(index);
         }

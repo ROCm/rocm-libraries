@@ -1311,3 +1311,70 @@ TEST_F(GreedyAllocatorTest, APlanThatPlacementRefusesGivesWay) {
     EXPECT_FALSE(outcome.dropped.empty());
     EXPECT_EQ(coloured->assignmentOf(singleId).idx / kVgprBankSize, 0u) << coloured->toString();
 }
+
+TEST_F(GreedyAllocatorTest, UnderAPlanEveryOrderPlacesCappedBlocksBeforePlannedOnes) {
+    // The plan counts a capped block in the bank its ceiling allows before it
+    // gives the other blocks theirs, so no planned block may reach that bank
+    // first. The weight, program and largest-first orders have a phase for
+    // capped blocks. The freedom order folds it into its comparator, which the
+    // planned blocks skip by going ahead of the queue. Read off the placement
+    // table's rank column, since a scale operand and the planned value never
+    // compete for a register here: the colouring cannot show the order.
+    BasicBlock* entry = block("entry");
+    defineVgprs(entry, /*base=*/130, /*count=*/2);
+    defineVgprs(entry, /*base=*/140, /*count=*/2);
+    const StinkyInstruction* single = vMovZero(entry, 300);
+    dsStoreB32(entry, 300, 300);
+    createWmmaScale16(entry, /*dst=*/100, /*a=*/400, /*b=*/420, /*scaleA=*/130, /*scaleB=*/140);
+    ASSERT_TRUE(liftForAllocation(*func));
+    AllocationSetup setup(*func);
+    const WantsBankOne model(idOf(ssaDefinedValue(*single)));
+
+    CompactingGreedyAllocator byWeight;
+    FreedomOrderedGreedyAllocator byFreedom;
+    ProgramOrderedGreedyAllocator byProgram;
+    LargestFirstGreedyAllocator byLargest;
+    for (RegisterAllocator* allocator :
+         {static_cast<RegisterAllocator*>(&byWeight), static_cast<RegisterAllocator*>(&byFreedom),
+          static_cast<RegisterAllocator*>(&byProgram),
+          static_cast<RegisterAllocator*>(&byLargest)}) {
+        SCOPED_TRACE(allocator->name());
+        const std::string path = ::testing::TempDir() + "greedy_capped_before_planned.tsv";
+        AllocationContext planning = setup.context();
+        PlanOutcome outcome;
+        planning.bankCost = &model;
+        planning.planOutcome = &outcome;
+        planning.blockDumpPath = path;
+        ASSERT_TRUE(allocator->allocate(planning).hasValue());
+        ASSERT_EQ(outcome.planned, 1u);
+        ASSERT_TRUE(outcome.dropped.empty()) << outcome.dropped;
+
+        std::ifstream in(path);
+        std::vector<std::vector<std::string>> rows;
+        for (std::string line; std::getline(in, line);) {
+            std::vector<std::string>& row = rows.emplace_back();
+            std::istringstream fields(line);
+            for (std::string field; std::getline(fields, field, '\t');) row.push_back(field);
+        }
+        ASSERT_FALSE(rows.empty());
+        const auto columnOf = [&](const std::string& name) {
+            return static_cast<size_t>(std::find(rows[0].begin(), rows[0].end(), name) -
+                                       rows[0].begin());
+        };
+        const size_t cappedColumn = columnOf("capped");
+        const size_t plannedColumn = columnOf("plannedBank");
+        const size_t rankColumn = columnOf("rank");
+        ASSERT_LT(rankColumn, rows[0].size());
+
+        std::vector<int> cappedRanks;
+        std::vector<int> plannedRanks;
+        for (size_t row = 1; row < rows.size(); ++row) {
+            const int rank = std::stoi(rows[row][rankColumn]);
+            if (rows[row][cappedColumn] == "1") cappedRanks.push_back(rank);
+            if (rows[row][plannedColumn] != "-1") plannedRanks.push_back(rank);
+        }
+        ASSERT_EQ(cappedRanks.size(), 2u) << "the two scale pairs";
+        ASSERT_EQ(plannedRanks.size(), 1u);
+        EXPECT_LT(*std::max_element(cappedRanks.begin(), cappedRanks.end()), plannedRanks[0]);
+    }
+}

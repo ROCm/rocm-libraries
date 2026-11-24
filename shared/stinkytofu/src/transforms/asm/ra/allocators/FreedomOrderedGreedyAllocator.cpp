@@ -38,7 +38,9 @@ namespace {
 /// Weight ordering needs a phase for capped blocks, since a ceiling makes a
 /// block compete for one bank against the whole file and weight cannot express
 /// that. Here a ceiling is simply a small placementFreedom, so the phase would
-/// be a second way of saying what the comparator already says.
+/// be a second way of saying what the comparator already says. Under a bank
+/// plan the engine places capped blocks early anyway: the planned blocks it
+/// places ahead of the queue are outside this order.
 bool freedomPlacesEarly(const Block&) {
     return false;
 }

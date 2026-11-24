@@ -188,7 +188,7 @@ Depth enters as a *multiplier*, not a factor. Written literally as `useCount × 
 
 The difference is a special case versus a principle. A capped block is confined to one bank that every low-packing block competes for, and weight order reaches it far too late — so the weight policy needs a phase ahead of the queue, and has to refuse to evict a capped occupant as well, since evicting one returns it to the worklist where the same ordering failure happens again one block at a time.
 
-The freedom policy needs neither. A ceiling is simply a small `placementFreedom`, so ordering by freedom says what the phase was saying. Weight still decides between blocks that are equally free, which is most of them: an unconstrained single register has the whole file, so singles tie and sort exactly as before.
+The freedom policy needs neither. A ceiling is simply a small `placementFreedom`, so ordering by freedom says what the phase was saying. Weight still decides between blocks that are equally free, which is most of them: an unconstrained single register has the whole file, so singles tie and sort exactly as before. A bank plan is the exception (section 6.1): its blocks go ahead of the queue, where no freedom order can put a capped block in front of them, so under a plan the engine places capped blocks in the phase ahead of them whatever the policy.
 
 The program and largest-first policies reuse those decisions and change only the queue order (`OrderedGreedyAllocators.cpp`). Each block records `start`, the first slot any member is live, and `span`, the slots from there to where the last member's range ends; a block that is never live starts after everything.
 
