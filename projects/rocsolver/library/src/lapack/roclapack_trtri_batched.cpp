@@ -30,30 +30,36 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-template <typename T, typename U>
+template <typename T, typename I, typename U>
 rocblas_status rocsolver_trtri_batched_impl(rocblas_handle handle,
                                             const rocblas_fill uplo,
                                             const rocblas_diagonal diag,
-                                            const rocblas_int n,
-                                            U A,
-                                            const rocblas_int lda,
-                                            rocblas_int* info,
-                                            const rocblas_int batch_count)
+                                            const I n,
+                                            U A_arg,
+                                            const I lda,
+                                            I* info_arg,
+                                            const I batch_count_arg)
 try
 {
     ROCSOLVER_ENTER_TOP("trtri_batched", "--uplo", uplo, "--diag", diag, "-n", n, "--lda", lda,
-                        "--batch_count", batch_count);
+                        "--batch_count", batch_count_arg);
 
     if(!handle)
         return rocblas_status_invalid_handle;
+    {
+        auto const A = A_arg;
+        auto const info = info_arg;
+        auto const batch_count = batch_count_arg;
 
-    // argument checking
-    rocblas_status st = rocsolver_trtri_argCheck(handle, uplo, diag, n, lda, A, info, batch_count);
-    if(st != rocblas_status_continue)
-        return st;
+        // argument checking
+        rocblas_status st
+            = rocsolver_trtri_argCheck(handle, uplo, diag, n, lda, A, info, batch_count);
+        if(st != rocblas_status_continue)
+            return st;
+    }
 
     // working with unshifted arrays
-    rocblas_int shiftA = 0;
+    rocblas_stride shiftA = 0;
 
     // batched execution
     rocblas_stride strideA = 0;
@@ -66,9 +72,15 @@ try
     size_t size_tmpcopy;
     // size of arrays of pointers (for batched cases)
     size_t size_workArr;
-    rocsolver_trtri_getMemorySize<true, false, T>(handle, diag, n, batch_count, &size_work1,
-                                                  &size_work2, &size_work3, &size_work4,
-                                                  &size_tmpcopy, &size_workArr, &optim_mem);
+
+    I const nsweep = ceildiv(batch_count_arg, MAX_BATCH_COUNT);
+    I const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
+    {
+        auto const batch_count = bid_inc;
+        rocsolver_trtri_getMemorySize<true, false, T>(handle, diag, n, batch_count, &size_work1,
+                                                      &size_work2, &size_work3, &size_work4,
+                                                      &size_tmpcopy, &size_workArr, &optim_mem);
+    }
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, size_work1, size_work2, size_work3,
@@ -89,10 +101,20 @@ try
     tmpcopy = mem[4];
     workArr = mem[5];
 
-    // execution
-    return rocsolver_trtri_template<true, false, T>(handle, uplo, diag, n, A, shiftA, lda, strideA,
-                                                    info, batch_count, work1, work2, work3, work4,
-                                                    (T*)tmpcopy, (T**)workArr, optim_mem);
+    for(I isweep = 0; isweep < nsweep; isweep++)
+    {
+        I const bid = isweep * bid_inc;
+        I const batch_count = std::min(batch_count_arg - bid, bid_inc);
+
+        auto const A = (A_arg == nullptr) ? nullptr : A_arg + bid;
+        auto const info = (info_arg == nullptr) ? nullptr : info_arg + bid;
+
+        // execution
+        ROCBLAS_CHECK(rocsolver_trtri_template<true, false, T>(
+            handle, uplo, diag, n, A, shiftA, lda, strideA, info, batch_count, work1, work2, work3,
+            work4, (T*)tmpcopy, (T**)workArr, optim_mem));
+    }
+    return (rocblas_status_success);
 }
 catch(...)
 {
