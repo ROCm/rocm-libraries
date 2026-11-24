@@ -271,9 +271,21 @@ struct MoeFlatmmKernel
 #else
         false;
 #endif
-    static constexpr int MXFP4M_Pack = 2;
-    static constexpr int MXFP4N_Pack = 2;
-    static constexpr int MXFP4K_Pack = 2;
+    // gfx1250 MX path: MXFlatmmPipelineAGmemBGmemCRegV1 with scaled WMMA. A rows are gathered
+    // by token; A scales are read in sorted-row order like the gfx950 path. Both scale tensors
+    // use the gfx1250 MX layout [MN / 32, K / 128, 32, 4 x e8m0] (B scales per expert).
+    static constexpr bool MXF8F6F4WMMA =
+#ifdef __gfx125__
+        AQUANT_Pipeline && BMXFP4_Pipeline;
+#else
+        false;
+#endif
+    static constexpr int MXScaleBlockK = 32; // e8m0 scale granularity along K
+    static constexpr int MXScalePack   = 4;  // scales packed per int32
+    static constexpr int MXScaleRows   = 32; // rows per scale block, gfx1250 layout
+    static constexpr int MXFP4M_Pack   = 2;
+    static constexpr int MXFP4N_Pack   = 2;
+    static constexpr int MXFP4K_Pack   = 2;
 
     static constexpr int M_Pack = AQUANT_Pipeline ? MXFP4M_Pack : 1;
     static constexpr int N_Pack = BMXFP4_Pipeline ? MXFP4N_Pack : 1;
@@ -468,6 +480,26 @@ struct MoeFlatmmKernel
             {
                 std::cerr << "Persistent mode doesn't support Kbatch >1 !" << std::endl;
                 return false;
+            }
+        }
+        if constexpr(AQUANT_Pipeline && BMXFP4_Pipeline)
+        {
+            // gfx1250 (wave32) MX path; see MXF8F6F4WMMA.
+            if(ck_tile::is_wave32())
+            {
+                if(kargs.k_batch != 1)
+                {
+                    std::cerr << "The gfx1250 MX MoE path doesn't support Kbatch > 1!" << std::endl;
+                    return false;
+                }
+                if(kargs.K % (MXScaleBlockK * MXScalePack) != 0 || kargs.M % MXScaleRows != 0 ||
+                   kargs.N % MXScaleRows != 0)
+                {
+                    std::cerr << "The gfx1250 MX MoE path needs K % 128 == 0, M % 32 == 0 and "
+                                 "N % 32 == 0!"
+                              << std::endl;
+                    return false;
+                }
             }
         }
 
@@ -697,9 +729,32 @@ struct MoeFlatmmKernel
             }
         }();
 
+        // gfx1250 MX scale view: int32 at [mn / 32][k_pack][mn % 32] holds the four e8m0 scales
+        // of row mn for K columns [k_pack * 128, k_pack * 128 + 128). Rows are merged back so
+        // the view is (MN, K / 128).
+        [[maybe_unused]] auto make_mx_wmma_scale_view = [&](const void* ptr, index_t mn) {
+            const index_t mn_blocks = integer_divide_ceil(mn, MXScaleRows);
+            const index_t k_packs   = kargs.K / (MXScaleBlockK * MXScalePack);
+            const auto naive_desc   = make_naive_tensor_descriptor_packed(
+                make_tuple(mn_blocks, k_packs, number<MXScaleRows>{}));
+            const auto desc = transform_tensor_descriptor(
+                naive_desc,
+                make_tuple(make_merge_transform(make_tuple(mn_blocks, number<MXScaleRows>{})),
+                           make_pass_through_transform(k_packs)),
+                make_tuple(sequence<0, 2>{}, sequence<1>{}),
+                make_tuple(sequence<0>{}, sequence<1>{}));
+            return make_tensor_view<address_space_enum::global>(static_cast<const int32_t*>(ptr),
+                                                                desc);
+        };
+
         const auto& scale_a_tensor_view = [&]() {
             auto scale_m_desc = kargs.scale_m;
-            if constexpr(AQUANT_Pipeline)
+            if constexpr(MXF8F6F4WMMA)
+            {
+                // A scales in sorted-row order, one row per entry of the sorted token list.
+                return make_mx_wmma_scale_view(scale_m_desc.ptr, kargs.M);
+            }
+            else if constexpr(AQUANT_Pipeline)
             {
                 constexpr int AGranularityK = decltype(scale_m_desc)::GranularityK == 0
                                                   ? 1
@@ -741,7 +796,15 @@ struct MoeFlatmmKernel
             auto scale_n = kargs.scale_n;
             constexpr int BGranularityK =
                 decltype(scale_n)::GranularityK == 0 ? 1 : decltype(scale_n)::GranularityK;
-            if constexpr(AQUANT_Pipeline)
+            if constexpr(MXF8F6F4WMMA)
+            {
+                // Each expert holds N x K / 32 e8m0 scales.
+                return make_mx_wmma_scale_view(reinterpret_cast<const uint8_t*>(scale_n.ptr) +
+                                                   static_cast<long_index_t>(expert_id) * kargs.N *
+                                                       (kargs.K / MXScaleBlockK),
+                                               kargs.N);
+            }
+            else if constexpr(AQUANT_Pipeline)
             {
                 index_t scale_k =
                     BGranularityK == 0 ? 1 : (kargs.K + BGranularityK - 1) / BGranularityK;
@@ -876,17 +939,41 @@ struct MoeFlatmmKernel
              output_N_offset});
 
         constexpr int GranularityK = 32; // fixed config for MXF4_Pipeline
-        auto a_scale_block_window  = make_tile_window(
-            views.at(I3),
-            make_tuple(number<TilePartitioner::MPerBlock / M_Pack>{},
-                       number<TilePartitioner::KPerBlock / (GranularityK * K_Pack)>{}),
-            {coord_m / M_Pack, 0});
+        auto a_scale_block_window  = [&]() {
+            if constexpr(MXF8F6F4WMMA)
+            {
+                // The pipeline only takes the view and the origin from this window.
+                return make_tile_window(
+                    views.at(I3),
+                    make_tuple(
+                        number<TilePartitioner::MPerBlock>{},
+                        number<TilePartitioner::KPerBlock / (MXScaleBlockK * MXScalePack)>{}),
+                    {coord_m, 0});
+            }
+            else
+            {
+                return make_tile_window(
+                    views.at(I3),
+                    make_tuple(number<TilePartitioner::MPerBlock / M_Pack>{},
+                               number<TilePartitioner::KPerBlock / (GranularityK * K_Pack)>{}),
+                    {coord_m / M_Pack, 0});
+            }
+        }();
 
         constexpr int XDLPerLoadScaleB =
             BMXFP4_Pipeline ? 4 : 1; // GranularityK32 / XDL16x16x32_K8 = 4
 
         auto b_scale_block_window = [&]() {
-            if constexpr(MXF8F6F4MFMA)
+            if constexpr(MXF8F6F4WMMA)
+            {
+                return make_tile_window(
+                    views.at(I4),
+                    make_tuple(
+                        number<TilePartitioner::NPerBlock>{},
+                        number<TilePartitioner::KPerBlock / (MXScaleBlockK * MXScalePack)>{}),
+                    {coord_n, 0});
+            }
+            else if constexpr(MXF8F6F4MFMA)
             {
                 return make_tile_window(
                     views.at(I4),
@@ -1047,6 +1134,14 @@ struct MoeFlatmmKernel
         }();
 
         auto& c_block_window = gemm_tile_windows.at(number<2>{});
+
+        if constexpr(MXF8F6F4WMMA)
+        {
+            // The MX pipeline fills LDS with async global->LDS loads. On gfx1250 those are
+            // counted by asynccnt, which block_sync_lds() does not wait on, so an A load still
+            // in flight could land on the epilogue's LDS staging. Drain them first.
+            block_sync_lds_direct_load<0>();
+        }
 
         // Run EpiloguePipeline
         {
