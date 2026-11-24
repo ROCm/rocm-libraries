@@ -75,6 +75,14 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   held by a skipped evaluation is now released by a background thread as soon as its kernel
   finishes, rather than from a later kernel launch, so it is also released in workloads that only
   replay a captured graph.
+* [Conv] Fixed the 2D grouped CK xdlops convolution solvers (forward/backward-data/backward-weights)
+  skipping `valid_kernels[0]` during exhaustive tuning: `SetNextValue` returned the first config
+  unseeded, so GenericSearch began enumeration at `valid_kernels[1]` and the first applicable CK
+  instance was never tuned.
+* [Conv] Fixed incorrect gfx1200 backward-weights results from Composable Kernel
+  `DeviceGroupedConvBwdWeight_Xdl_CShuffleV3` wave32 instances by removing the gfx1200 system
+  database entries that the CK host-side support check now rejects. Affected problems use the
+  next recorded solver instead.
 * [Conv] Fixed `miopenConvolutionForwardGetWorkSpaceSize` and its backward variants reporting no
   GEMM workspace for dilated convolutions. Find, given the reported size, dropped `GemmFwdRest`,
   so a dilated fp32 Conv1d on RDNA ran on the naive solver and failed with "No suitable algorithm
@@ -113,6 +121,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
   RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
   filters up to 7x7 and is selected through Find mode.
+* [Conv] Enabled the CK depthwise backward-data solver `ConvDepthwiseBwdData2D` (fp16/bf16,
+  stride-1 3x3/5x5/7x7) on RDNA wave32 GPUs (gfx11, gfx12) with a wave32 instance set,
+  including a 3x3 112x112 tile.
 * [DB] Added validated gfx1101 (Navi 32) find-db and perf-db files, so gfx1101 uses tuned
   solver selection and performance configs instead of untuned defaults.
 * [Conv] Updated the bundled hipconv from v0.4.0 to v0.5.0. This adds `ConvHipConv` kernels for
@@ -188,14 +199,13 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   the device's fp32 FMA peak. While the bound is on, Find also leaves a naive solver out of its
   parallel precompile when another solver is available, and builds it only if it is evaluated. Set
   ``MIOPEN_NAIVE_BOUND_SKIP=0`` to disable the shortcut and precompile naive solvers as before.
+* [Conv] Creating a convolution or GEMM descriptor no longer draws from `std::random_device`. On
+  CPUs where `RDSEED` often reports no entropy available, each draw cost tens of microseconds, so
+  applications that create a convolution descriptor per call paid it on every convolution.
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
 ### Resolved Issues
-* [Conv] Fixed the 2D grouped CK xdlops convolution solvers (forward/backward-data/backward-weights)
-  skipping `valid_kernels[0]` during exhaustive tuning: `SetNextValue` returned the first config
-  unseeded, so GenericSearch began enumeration at `valid_kernels[1]` and the first applicable CK
-  instance was never tuned.
 * [Reduce] Fixed `miopenReduceTensor` silently truncating tensor lengths, strides, element counts
   and byte spans above INT32_MAX, and single reductions of about 2^30 or more fp16, bf16 or int8
   elements, which produced incorrect results. Such tensors are now rejected with
@@ -217,10 +227,6 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   batch size below 4.
 * [Conv] Fixed invalid Composable Kernel (CK) perf-config entries in the gfx1201 and gfx1100
   system databases that MIOpen could not resolve, which caused a fallback to untuned defaults.
-* [Conv] Fixed incorrect gfx1200 backward-weights results from Composable Kernel
-  `DeviceGroupedConvBwdWeight_Xdl_CShuffleV3` wave32 instances by removing the gfx1200 system
-  database entries that the CK host-side support check now rejects. Affected problems use the
-  next recorded solver instead.
 * [BatchNorm] Fixed just-in-time compilation failures for the batch normalization kernels on
   non-GFX9 targets by restricting the Welford reduction's DPP inline assembly to GFX9 instead
   of a per-architecture denylist.
@@ -244,9 +250,6 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   LightGBM ranker selects the solver and a per-solver model selects its performance config,
   extending data-driven selection to the Navi architectures.
 * [Conv] Added the missing 3x3 stride-1 pad-1 tile-28 CK depthwise backward-data instance.
-* [Conv] Enabled the CK depthwise backward-data solver `ConvDepthwiseBwdData2D` (fp16/bf16,
-  stride-1 3x3/5x5/7x7) on RDNA wave32 GPUs (gfx11, gfx12) with a wave32 instance set,
-  including a 3x3 112x112 tile.
 
 ### Changed
 * [Reduce] `miopenGetReductionWorkspaceSize` and `miopenGetReductionIndicesSize` now reject tensors

@@ -73,11 +73,28 @@ APPL_PREFIXES = (
     "projects/hipdnn/flatbuffers_sdk/schemas/",
 )
 
+# Path segments that mark test code and data (lanes/test-tiers.md): a changed file under one of
+# them, a test source or a tier YAML is in the TIER lane's scope. Documentation never is. The
+# providers keep their GTest integration suites under `integration_tests/` and name them
+# `Integration<Feature>.cpp`; unit tests are `Test<Feature>.cpp` or `test_<x>.py`.
+TIER_DIRS = (
+    "test",
+    "tests",
+    "integration-test-bundles",
+    "integration-tests",
+    "integration_tests",
+)
+TIER_NAME = re.compile(
+    r"(?:.*test_categories.*\.yaml|test_.*\.py|.*_tests?\.(?:py|cpp|cc|cxx)|.*Tests?\.(?:cpp|cc|cxx)"
+    r"|(?:Test|Integration)[A-Z0-9][^/]*\.(?:cpp|cc|cxx|hpp|h))"
+)
+
 PROJECT_ROOTS = ("projects", "dnn-providers", "shared")
 LICENSE_STEMS = {"LICENSE", "CONTRIBUTING", "SECURITY", "README"}
 CONCERN_LANES = {
     "TESTQ",
     "TESTB",
+    "TIER",
     "AUTH",
     "BUILD",
     "DEPS",
@@ -371,6 +388,16 @@ def concern_scope(lane: str, rows):
         return [r for r in rows if r[0].startswith(IMPACT_PREFIXES)]
     if lane == "APPL":
         return [r for r in rows if r[0].startswith(APPL_PREFIXES)]
+    if lane == "TIER":
+        return [
+            r
+            for r in rows
+            if not is_docs(r[0])
+            and (
+                any(seg in TIER_DIRS for seg in r[0].split("/")[:-1])
+                or TIER_NAME.fullmatch(name(r[0]))
+            )
+        ]
     if lane == "DESIGN":
         return [r for r in rows if not is_docs(r[0])]
     return rows
@@ -451,7 +478,7 @@ def write_packet(rd: Path, lane: str, kind: str, rows, areas, sampled, parent) -
 def cmd_packets(args) -> None:
     """Write packets/<LANE>.md for each lane of owners.tsv (files with numstat rows, areas,
     Orient paths, `Sampled:`) and each concern lane named by --lanes (changed files in
-    scope). BUILD, DEPS, IMPACT and APPL scope to their trigger files, DESIGN to the
+    scope). BUILD, DEPS, IMPACT, APPL and TIER scope to their trigger files, DESIGN to the
     non-documentation files, other concern lanes take every changed file; DRIFT also lists
     drift.txt and is N/A when its Trigger is `no`. The diff is not read."""
     rd = Path(args.round_dir)
@@ -528,8 +555,11 @@ CITED_PATH = re.compile(r"`([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+)(?::[0-9]+)?`")
 def cmd_orient_gate(args) -> None:
     """Orient Gate: every repository path CONTEXT.md and orient/*.md cite in backticks
     (`dir/file` or `dir/file:<line>`) exists at PIN.md's BASE, or is a files.txt path absent
-    at BASE (a file the change adds). Prints `not at base: <path>` for any other; exit 0
-    only when it prints nothing."""
+    at BASE (a file the change adds). A citation starting `orient/` that names a file under
+    this round's own orient/ directory is this round's self-reference (CONTEXT.md's Areas
+    table), not a repository path, and is checked there instead. Prints `not at base: <path>
+    (cited at <file>:<line>[, +<n> more])` for any other citation; exit 0 only when it prints
+    nothing."""
     rd = Path(args.round_dir)
     if not (rd / "PIN.md").is_file():
         fail(f"PIN.md not found: {rd / 'PIN.md'}")
@@ -539,13 +569,16 @@ def cmd_orient_gate(args) -> None:
     if not (rd / "CONTEXT.md").is_file():
         fail(f"CONTEXT.md not found: {rd / 'CONTEXT.md'}")
     docs = [rd / "CONTEXT.md", *sorted((rd / "orient").glob("*.md"))]
-    cited = sorted(
-        {
-            m.group(1).removeprefix("./")
-            for d in docs
-            for m in CITED_PATH.finditer(d.read_text("utf-8"))
-        }
-    )
+    sites: dict[str, list[str]] = {}
+    for d in docs:
+        text = d.read_text("utf-8")
+        rel = d.relative_to(rd)
+        for m in CITED_PATH.finditer(text):
+            path = m.group(1).removeprefix("./")
+            line = text.count("\n", 0, m.start()) + 1
+            sites.setdefault(path, []).append(f"{rel}:{line}")
+    cited = sorted(sites)
+    orient_self = {p for p in cited if p.startswith("orient/") and (rd / p).is_file()}
     # The tree listing needs no blobs, so a blobless clone fetches nothing.
     code, out, err = rl.git(clone, "ls-tree", "-r", "--name-only", "--full-tree", base)
     if code:
@@ -559,9 +592,13 @@ def cmd_orient_gate(args) -> None:
                 break
             at_base.add(path)
     added = set(read_lines(rd / "files.txt", "files.txt"))
-    missing = [p for p in cited if p not in at_base and p not in added]
+    missing = [
+        p for p in cited if p not in at_base and p not in added and p not in orient_self
+    ]
     for path in missing:
-        print(f"not at base: {path}")
+        where = sites[path]
+        extra = f", +{len(where) - 1} more" if len(where) > 1 else ""
+        print(f"not at base: {path} (cited at {where[0]}{extra})")
     if missing:
         sys.exit(1)
 
