@@ -84,8 +84,19 @@ struct hipsolverSpHandle
     {
     }
 
+    hipsolverStatus_t get_stream(hipStream_t* streamId)
+    {
+        if(!this->handle || !this->sphandle)
+        {
+            // handle should be inititalized before calling this method.
+            return HIPSOLVER_STATUS_INTERNAL_ERROR;
+        }
+
+        return hipsolver::rocblas2hip_status(rocblas_get_stream(handle, streamId));
+    }
+
     // Allocate device memory
-    hipsolverStatus_t malloc_device(int n, int nnzA, int nnzT)
+    hipsolverStatus_t malloc_device(int n, int nnzA, int nnzT, hipStream_t stream = NULL)
     {
         if(n < 0 || nnzA < 0 || nnzT < 0)
             return HIPSOLVER_STATUS_INVALID_VALUE;
@@ -94,7 +105,7 @@ struct hipsolverSpHandle
         {
             if(this->d_buffer)
             {
-                auto const istat = hipFree(this->d_buffer);
+                auto const istat = hipFreeAsync(this->d_buffer, stream);
                 this->d_buffer   = nullptr;
                 if(istat != hipSuccess)
                     return HIPSOLVER_STATUS_INTERNAL_ERROR;
@@ -120,7 +131,7 @@ struct hipsolverSpHandle
             size_t size_buffer
                 = size_dPtrA + size_dIndA + size_dPtrT + size_dIndT + size_dValT + size_dQ;
 
-            if(hipMalloc(&this->d_buffer, size_buffer) != hipSuccess)
+            if(hipMallocAsync(&this->d_buffer, size_buffer, stream) != hipSuccess)
                 return HIPSOLVER_STATUS_ALLOC_FAILED;
 
             char* temp_buf;
@@ -533,6 +544,9 @@ try
     hipsolverSpHandle* sp = (hipsolverSpHandle*)handle;
     *singularity          = -1;
 
+    hipStream_t stream;
+    CHECK_HIPSOLVER_ERROR(sp->get_stream(&stream));
+
     sp->c_handle.nmethods  = 1; // use 1 reordering method
     sp->c_handle.postorder = false; // no postordering
     sp->c_handle.final_ll  = true; // factorize as LL' not LDL'
@@ -554,10 +568,11 @@ try
     // set up A
     cholmod_sparse* c_A
         = cholmod_allocate_sparse(n, n, nnzA, true, true, 1, CHOLMOD_PATTERN, &sp->c_handle);
-    CHECK_HIP_ERROR(
-        hipMemcpy(c_A->p, csrRowPtr, sizeof(rocblas_int) * (n + 1), hipMemcpyDeviceToHost));
-    CHECK_HIP_ERROR(
-        hipMemcpy(c_A->i, csrColInd, sizeof(rocblas_int) * nnzA, hipMemcpyDeviceToHost));
+    CHECK_HIP_ERROR(hipMemcpyAsync(
+        c_A->p, csrRowPtr, sizeof(rocblas_int) * (n + 1), hipMemcpyDeviceToHost, stream));
+    CHECK_HIP_ERROR(hipMemcpyAsync(
+        c_A->i, csrColInd, sizeof(rocblas_int) * nnzA, hipMemcpyDeviceToHost, stream));
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
     sp->prep_input(indbase, n, nnzA, (int*)c_A->p, (int*)c_A->i, nullptr, nullptr);
 
     if(tolerance > 0)
@@ -595,34 +610,41 @@ try
     if(indbase == rocsparse_index_base_zero)
     {
         // if indices are base zero, can use input arrays
-        CHECK_HIPSOLVER_ERROR(sp->malloc_device(n, 0, hIndA.size()));
+        CHECK_HIPSOLVER_ERROR(sp->malloc_device(n, 0, hIndA.size(), stream));
         dPtrA = (int*)csrRowPtr;
         dIndA = (int*)csrColInd;
     }
     else
     {
         // if indices are base one, need to use temp arrays and load base zero indices
-        CHECK_HIPSOLVER_ERROR(sp->malloc_device(n, nnzA, hIndA.size()));
+        CHECK_HIPSOLVER_ERROR(sp->malloc_device(n, nnzA, hIndA.size(), stream));
         dPtrA = sp->dPtrA;
         dIndA = sp->dIndA;
-        CHECK_HIP_ERROR(hipMemcpy(
-            (void*)sp->dPtrA, c_A->p, sizeof(rocblas_int) * (n + 1), hipMemcpyHostToDevice));
-        CHECK_HIP_ERROR(
-            hipMemcpy((void*)sp->dIndA, c_A->i, sizeof(rocblas_int) * nnzA, hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(hipMemcpyAsync((void*)sp->dPtrA,
+                                       c_A->p,
+                                       sizeof(rocblas_int) * (n + 1),
+                                       hipMemcpyHostToDevice,
+                                       stream));
+        CHECK_HIP_ERROR(hipMemcpyAsync(
+            (void*)sp->dIndA, c_A->i, sizeof(rocblas_int) * nnzA, hipMemcpyHostToDevice, stream));
     }
 
     // set up T
-    CHECK_HIP_ERROR(hipMemcpy(
-        (void*)sp->dPtrT, sp->hPtrT, sizeof(rocblas_int) * (n + 1), hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(
-        (void*)sp->dIndT, hIndA.data(), sizeof(rocblas_int) * hIndA.size(), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpyAsync(
+        (void*)sp->dPtrT, sp->hPtrT, sizeof(rocblas_int) * (n + 1), hipMemcpyHostToDevice, stream));
+    CHECK_HIP_ERROR(hipMemcpyAsync((void*)sp->dIndT,
+                                   hIndA.data(),
+                                   sizeof(rocblas_int) * hIndA.size(),
+                                   hipMemcpyHostToDevice,
+                                   stream));
 
     // set up Q
-    CHECK_HIP_ERROR(
-        hipMemcpy((void*)sp->dQ, c_L->Perm, sizeof(rocblas_int) * n, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpyAsync(
+        (void*)sp->dQ, c_L->Perm, sizeof(rocblas_int) * n, hipMemcpyHostToDevice, stream));
 
     // set up B
-    CHECK_HIP_ERROR(hipMemcpy((void*)x, b, sizeof(float) * n, hipMemcpyDeviceToDevice));
+    CHECK_HIP_ERROR(
+        hipMemcpyAsync((void*)x, b, sizeof(float) * n, hipMemcpyDeviceToDevice, stream));
 
     // factorize A (numeric)
     CHECK_ROCBLAS_ERROR(rocsolver_set_rfinfo_mode(sp->rfinfo, rocsolver_rfinfo_mode_cholesky));
@@ -719,6 +741,9 @@ try
     hipsolverSpHandle* sp = (hipsolverSpHandle*)handle;
     *singularity          = -1;
 
+    hipStream_t stream;
+    CHECK_HIPSOLVER_ERROR(sp->get_stream(&stream));
+
     sp->c_handle.nmethods  = 1; // use 1 reordering method
     sp->c_handle.postorder = false; // no postordering
     sp->c_handle.final_ll  = true; // factorize as LL' not LDL'
@@ -740,10 +765,11 @@ try
     // set up A
     cholmod_sparse* c_A
         = cholmod_allocate_sparse(n, n, nnzA, true, true, 1, CHOLMOD_PATTERN, &sp->c_handle);
-    CHECK_HIP_ERROR(
-        hipMemcpy(c_A->p, csrRowPtr, sizeof(rocblas_int) * (n + 1), hipMemcpyDeviceToHost));
-    CHECK_HIP_ERROR(
-        hipMemcpy(c_A->i, csrColInd, sizeof(rocblas_int) * nnzA, hipMemcpyDeviceToHost));
+    CHECK_HIP_ERROR(hipMemcpyAsync(
+        c_A->p, csrRowPtr, sizeof(rocblas_int) * (n + 1), hipMemcpyDeviceToHost, stream));
+    CHECK_HIP_ERROR(hipMemcpyAsync(
+        c_A->i, csrColInd, sizeof(rocblas_int) * nnzA, hipMemcpyDeviceToHost, stream));
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
     sp->prep_input(indbase, n, nnzA, (int*)c_A->p, (int*)c_A->i, nullptr, nullptr);
 
     if(tolerance > 0)
@@ -781,34 +807,41 @@ try
     if(indbase == rocsparse_index_base_zero)
     {
         // if indices are base zero, can use input arrays
-        CHECK_HIPSOLVER_ERROR(sp->malloc_device(n, 0, hIndA.size()));
+        CHECK_HIPSOLVER_ERROR(sp->malloc_device(n, 0, hIndA.size(), stream));
         dPtrA = (int*)csrRowPtr;
         dIndA = (int*)csrColInd;
     }
     else
     {
         // if indices are base one, need to use temp arrays and load base zero indices
-        CHECK_HIPSOLVER_ERROR(sp->malloc_device(n, nnzA, hIndA.size()));
+        CHECK_HIPSOLVER_ERROR(sp->malloc_device(n, nnzA, hIndA.size(), stream));
         dPtrA = sp->dPtrA;
         dIndA = sp->dIndA;
-        CHECK_HIP_ERROR(hipMemcpy(
-            (void*)sp->dPtrA, c_A->p, sizeof(rocblas_int) * (n + 1), hipMemcpyHostToDevice));
-        CHECK_HIP_ERROR(
-            hipMemcpy((void*)sp->dIndA, c_A->i, sizeof(rocblas_int) * nnzA, hipMemcpyHostToDevice));
+        CHECK_HIP_ERROR(hipMemcpyAsync((void*)sp->dPtrA,
+                                       c_A->p,
+                                       sizeof(rocblas_int) * (n + 1),
+                                       hipMemcpyHostToDevice,
+                                       stream));
+        CHECK_HIP_ERROR(hipMemcpyAsync(
+            (void*)sp->dIndA, c_A->i, sizeof(rocblas_int) * nnzA, hipMemcpyHostToDevice, stream));
     }
 
     // set up T
-    CHECK_HIP_ERROR(hipMemcpy(
-        (void*)sp->dPtrT, sp->hPtrT, sizeof(rocblas_int) * (n + 1), hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(
-        (void*)sp->dIndT, hIndA.data(), sizeof(rocblas_int) * hIndA.size(), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpyAsync(
+        (void*)sp->dPtrT, sp->hPtrT, sizeof(rocblas_int) * (n + 1), hipMemcpyHostToDevice, stream));
+    CHECK_HIP_ERROR(hipMemcpyAsync((void*)sp->dIndT,
+                                   hIndA.data(),
+                                   sizeof(rocblas_int) * hIndA.size(),
+                                   hipMemcpyHostToDevice,
+                                   stream));
 
     // set up Q
-    CHECK_HIP_ERROR(
-        hipMemcpy((void*)sp->dQ, c_L->Perm, sizeof(rocblas_int) * n, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpyAsync(
+        (void*)sp->dQ, c_L->Perm, sizeof(rocblas_int) * n, hipMemcpyHostToDevice, stream));
 
     // set up B
-    CHECK_HIP_ERROR(hipMemcpy((void*)x, b, sizeof(double) * n, hipMemcpyDeviceToDevice));
+    CHECK_HIP_ERROR(
+        hipMemcpyAsync((void*)x, b, sizeof(double) * n, hipMemcpyDeviceToDevice, stream));
 
     // factorize A (numeric)
     CHECK_ROCBLAS_ERROR(rocsolver_set_rfinfo_mode(sp->rfinfo, rocsolver_rfinfo_mode_cholesky));
@@ -1201,27 +1234,33 @@ try
     hipsolverSpHandle* sp = (hipsolverSpHandle*)handle;
     *singularity          = -1;
 
+    hipStream_t stream;
+    CHECK_HIPSOLVER_ERROR(sp->get_stream(&stream));
+
     // set up B
-    CHECK_HIP_ERROR(hipMemcpy((void*)x, b, sizeof(float) * n, hipMemcpyDeviceToDevice));
+    CHECK_HIP_ERROR(
+        hipMemcpyAsync((void*)x, b, sizeof(float) * n, hipMemcpyDeviceToDevice, stream));
 
     // convert A to dense matrix
     float* denseA;
-    CHECK_HIP_ERROR(hipMalloc(&denseA, sizeof(float) * n * n));
+    CHECK_HIP_ERROR(hipMallocAsync(&denseA, sizeof(float) * n * n, stream));
     rocsparse_scsr2dense(
         sp->sphandle, n, n, (rocsparse_mat_descr)descrA, csrVal, csrRowPtr, csrColInd, denseA, n);
 
     int* info;
-    CHECK_HIP_ERROR(hipMalloc(&info, sizeof(int)));
+    CHECK_HIP_ERROR(hipMallocAsync(&info, sizeof(int), stream));
 
     rocblas_status st
         = rocsolver_sgels(sp->handle, rocblas_operation_none, n, n, 1, denseA, n, x, n, info);
 
     // finalize singularity
-    CHECK_HIP_ERROR(hipMemcpy((void*)singularity, info, sizeof(int), hipMemcpyDeviceToHost));
+    CHECK_HIP_ERROR(
+        hipMemcpyAsync((void*)singularity, info, sizeof(int), hipMemcpyDeviceToHost, stream));
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
     *singularity = *singularity - 1;
 
-    CHECK_HIP_ERROR(hipFree(denseA));
-    CHECK_HIP_ERROR(hipFree(info));
+    CHECK_HIP_ERROR(hipFreeAsync(denseA, stream));
+    CHECK_HIP_ERROR(hipFreeAsync(info, stream));
 
     return hipsolver::rocblas2hip_status(st);
 }
@@ -1267,27 +1306,33 @@ try
     hipsolverSpHandle* sp = (hipsolverSpHandle*)handle;
     *singularity          = -1;
 
+    hipStream_t stream;
+    CHECK_HIPSOLVER_ERROR(sp->get_stream(&stream));
+
     // set up B
-    CHECK_HIP_ERROR(hipMemcpy((void*)x, b, sizeof(double) * n, hipMemcpyDeviceToDevice));
+    CHECK_HIP_ERROR(
+        hipMemcpyAsync((void*)x, b, sizeof(double) * n, hipMemcpyDeviceToDevice, stream));
 
     // convert A to dense matrix
     double* denseA;
-    CHECK_HIP_ERROR(hipMalloc(&denseA, sizeof(double) * n * n));
+    CHECK_HIP_ERROR(hipMallocAsync(&denseA, sizeof(double) * n * n, stream));
     rocsparse_dcsr2dense(
         sp->sphandle, n, n, (rocsparse_mat_descr)descrA, csrVal, csrRowPtr, csrColInd, denseA, n);
 
     int* info;
-    CHECK_HIP_ERROR(hipMalloc(&info, sizeof(int)));
+    CHECK_HIP_ERROR(hipMallocAsync(&info, sizeof(int), stream));
 
     rocblas_status st
         = rocsolver_dgels(sp->handle, rocblas_operation_none, n, n, 1, denseA, n, x, n, info);
 
     // finalize singularity
-    CHECK_HIP_ERROR(hipMemcpy((void*)singularity, info, sizeof(int), hipMemcpyDeviceToHost));
+    CHECK_HIP_ERROR(
+        hipMemcpyAsync((void*)singularity, info, sizeof(int), hipMemcpyDeviceToHost, stream));
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
     *singularity = *singularity - 1;
 
-    CHECK_HIP_ERROR(hipFree(denseA));
-    CHECK_HIP_ERROR(hipFree(info));
+    CHECK_HIP_ERROR(hipFreeAsync(denseA, stream));
+    CHECK_HIP_ERROR(hipFreeAsync(info, stream));
 
     return hipsolver::rocblas2hip_status(st);
 }
@@ -1333,12 +1378,16 @@ try
     hipsolverSpHandle* sp = (hipsolverSpHandle*)handle;
     *singularity          = -1;
 
+    hipStream_t stream;
+    CHECK_HIPSOLVER_ERROR(sp->get_stream(&stream));
+
     // set up B
-    CHECK_HIP_ERROR(hipMemcpy((void*)x, b, sizeof(hipFloatComplex) * n, hipMemcpyDeviceToDevice));
+    CHECK_HIP_ERROR(
+        hipMemcpyAsync((void*)x, b, sizeof(hipFloatComplex) * n, hipMemcpyDeviceToDevice, stream));
 
     // convert A to dense matrix
     hipFloatComplex* denseA;
-    CHECK_HIP_ERROR(hipMalloc(&denseA, sizeof(hipFloatComplex) * n * n));
+    CHECK_HIP_ERROR(hipMallocAsync(&denseA, sizeof(hipFloatComplex) * n * n, stream));
     rocsparse_ccsr2dense(sp->sphandle,
                          n,
                          n,
@@ -1350,7 +1399,7 @@ try
                          n);
 
     int* info;
-    CHECK_HIP_ERROR(hipMalloc(&info, sizeof(int)));
+    CHECK_HIP_ERROR(hipMallocAsync(&info, sizeof(int), stream));
 
     rocblas_status st = rocsolver_cgels(sp->handle,
                                         rocblas_operation_none,
@@ -1364,11 +1413,13 @@ try
                                         info);
 
     // finalize singularity
-    CHECK_HIP_ERROR(hipMemcpy((void*)singularity, info, sizeof(int), hipMemcpyDeviceToHost));
+    CHECK_HIP_ERROR(
+        hipMemcpyAsync((void*)singularity, info, sizeof(int), hipMemcpyDeviceToHost, stream));
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
     *singularity = *singularity - 1;
 
-    CHECK_HIP_ERROR(hipFree(denseA));
-    CHECK_HIP_ERROR(hipFree(info));
+    CHECK_HIP_ERROR(hipFreeAsync(denseA, stream));
+    CHECK_HIP_ERROR(hipFreeAsync(info, stream));
 
     return hipsolver::rocblas2hip_status(st);
 }
@@ -1414,12 +1465,16 @@ try
     hipsolverSpHandle* sp = (hipsolverSpHandle*)handle;
     *singularity          = -1;
 
+    hipStream_t stream;
+    CHECK_HIPSOLVER_ERROR(sp->get_stream(&stream));
+
     // set up B
-    CHECK_HIP_ERROR(hipMemcpy((void*)x, b, sizeof(hipDoubleComplex) * n, hipMemcpyDeviceToDevice));
+    CHECK_HIP_ERROR(
+        hipMemcpyAsync((void*)x, b, sizeof(hipDoubleComplex) * n, hipMemcpyDeviceToDevice, stream));
 
     // convert A to dense matrix
     hipDoubleComplex* denseA;
-    CHECK_HIP_ERROR(hipMalloc(&denseA, sizeof(hipDoubleComplex) * n * n));
+    CHECK_HIP_ERROR(hipMallocAsync(&denseA, sizeof(hipDoubleComplex) * n * n, stream));
     rocsparse_zcsr2dense(sp->sphandle,
                          n,
                          n,
@@ -1431,7 +1486,7 @@ try
                          n);
 
     int* info;
-    CHECK_HIP_ERROR(hipMalloc(&info, sizeof(int)));
+    CHECK_HIP_ERROR(hipMallocAsync(&info, sizeof(int), stream));
 
     rocblas_status st = rocsolver_zgels(sp->handle,
                                         rocblas_operation_none,
@@ -1445,11 +1500,13 @@ try
                                         info);
 
     // finalize singularity
-    CHECK_HIP_ERROR(hipMemcpy((void*)singularity, info, sizeof(int), hipMemcpyDeviceToHost));
+    CHECK_HIP_ERROR(
+        hipMemcpyAsync((void*)singularity, info, sizeof(int), hipMemcpyDeviceToHost, stream));
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
     *singularity = *singularity - 1;
 
-    CHECK_HIP_ERROR(hipFree(denseA));
-    CHECK_HIP_ERROR(hipFree(info));
+    CHECK_HIP_ERROR(hipFreeAsync(denseA, stream));
+    CHECK_HIP_ERROR(hipFreeAsync(info, stream));
 
     return hipsolver::rocblas2hip_status(st);
 }
