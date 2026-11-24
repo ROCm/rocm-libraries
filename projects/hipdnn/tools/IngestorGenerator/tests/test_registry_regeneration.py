@@ -862,6 +862,34 @@ def test_g6_catches_a_renamed_field_and_a_declined_spec(manifest, registry_confi
     assert all("spec rejected by" in f for f in by_kernel["declined"]), failures
 
 
+def _pinned_resolved_knobs(manifest: dict) -> dict:
+    """Field -> resolving method for each knob a section pins in spec_overrides that the
+    kernel would otherwise resolve itself (a binding with a method)."""
+    sections = [manifest["enumerate"], *manifest["enumerate"].get("also", [])]
+    bindings = manifest["specialization"]["bindings"]
+    return {
+        field: bindings[field]["method"]
+        for section in sections
+        for field in section.get("spec_overrides") or {}
+        if "method" in (bindings.get(field) or {})
+    }
+
+
+# Collected only for the manifests that pin such a knob: a skip for the others would
+# fail a strict run (hipdnn_strict_skips).
+_PINNING_MANIFESTS = [
+    p for p in _MANIFESTS if _pinned_resolved_knobs(enumerator.load_manifest(str(p)))
+]
+
+
+def test_g6_some_manifest_pins_a_resolved_knob():
+    """Keeps the pinned-knob check below from collecting nothing."""
+    assert _PINNING_MANIFESTS
+
+
+@pytest.mark.parametrize(
+    "manifest_path", _PINNING_MANIFESTS, ids=lambda p: p.name, scope="module"
+)
 def test_g6_a_pinned_resolved_knob_is_what_the_kernel_resolves(
     manifest, selection, registry
 ):
@@ -870,16 +898,7 @@ def test_g6_a_pinned_resolved_knob_is_what_the_kernel_resolves(
     needs its metadata pins the value in spec_overrides. Each shipped kernel's pinned value
     must be what the kernel resolves with the knob unset: a later change of the kernel's
     policy shows here instead of leaving the catalog on the old value."""
-    sections = [manifest["enumerate"], *manifest["enumerate"].get("also", [])]
-    bindings = manifest["specialization"]["bindings"]
-    pinned = {
-        field: bindings[field]["method"]
-        for section in sections
-        for field in section.get("spec_overrides") or {}
-        if "method" in (bindings.get(field) or {})
-    }
-    if not pinned:
-        pytest.skip("no section pins a knob the kernel resolves")
+    pinned = _pinned_resolved_knobs(manifest)
     module = importlib.import_module(
         rocke_compile._module_from_source(manifest["source"])
     )
