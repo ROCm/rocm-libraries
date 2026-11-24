@@ -24,8 +24,8 @@
 ################################################################################
 
 """Characterization tests for ``tensilelite.SolutionStructs.LdsPadding`` -- the pure
-numeric LDS-padding solvers (``get_fp4/fp8/fp16/fp32/mxs_mt_config`` and their
-``_compute_*`` / bank-conflict-check helpers). Each public selector is exercised
+numeric LDS-padding solvers (``get_fp4/fp8/fp16/mxs_mt_config`` and their
+``_compute_*`` / bank-conflict-check helpers). These public selectors are exercised
 over a grid of (macro-tile, wave, vector-width) inputs and the full result
 config (``perBlock`` / ``pad``) is snapshotted, so the padding
 tables are pinned and the candidate ranking is walked.
@@ -37,7 +37,6 @@ import pytest
 # hardware writes LDS and no per-thread ds_write bounds the block from below.
 _K_B64  = 128
 _K_B128 = 32
-_K_B32  = 4
 _TDM    = True
 
 
@@ -92,29 +91,6 @@ def test_get_fp16_mt_config(params, snapshot):
     wg, ipt, lrvw, wt, vw = params
     result = {
         mt: {k: L.get_fp16_mt_config(mt, k, wg, ipt, lrvw, wt, vw, _K_B128, _TDM) for k in _B128_KEYS}
-        for mt in _MTS
-    }
-    assert result == snapshot
-
-
-# ===========================================================================
-# FP32 / XF32 (ds_load_b32)
-# ===========================================================================
-
-# (vw, lrvw, miWaveGroup, miInputPerThread, miWaveTile, xf32EmuPack)
-_FP32_PARAMS = [
-    (1, 1, 1, 1, 1, False),
-    (2, 1, 2, 2, 2, False),
-    (1, 1, 1, 2, 1, True),
-    (4, 1, 2, 4, 4, False),
-]
-
-
-@pytest.mark.parametrize("params", _FP32_PARAMS, ids=[str(p) for p in _FP32_PARAMS])
-def test_get_fp32_mt_config(params, snapshot):
-    vw, lrvw, wg, ipt, wt, emu = params
-    result = {
-        mt: {k: L.get_fp32_mt_config(mt, k, vw, lrvw, wg, ipt, wt, _K_B32, _TDM, emu) for k in _B128_KEYS}
         for mt in _MTS
     }
     assert result == snapshot

@@ -12,6 +12,7 @@
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/CustomLibraryAdapter.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/IUhdAdapter.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/LinearDataAdapter.hpp>
+#include <hipdnn_plugin_sdk/heuristics/uhd/adapters/MlpDataAdapter.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/NativeAdapter.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/TableAdapter.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/adapters/TreeDataAdapter.hpp>
@@ -56,6 +57,15 @@ inline std::shared_ptr<IUhdAdapter> makeUhdAdapter(const UhdConfig& cfg)
             // A within-catalog ranker: objective and score are fixed by the model (the
             // parser refuses a descriptor declaring otherwise), so only identity is passed.
             return LinearDataAdapter::load(cfg.modelArtifactPath, cfg.featuresHash, cfg.modelHash);
+        }
+    }
+    else if(cfg.adapterType == "mlp_data")
+    {
+        if(!cfg.modelArtifactPath.empty())
+        {
+            // The artifact names the metric whose log it predicts, which must be the UHD's.
+            return MlpDataAdapter::load(
+                cfg.modelArtifactPath, cfg.featuresHash, cfg.scoreMetric, cfg.modelHash);
         }
     }
     else if(cfg.adapterType == "native")

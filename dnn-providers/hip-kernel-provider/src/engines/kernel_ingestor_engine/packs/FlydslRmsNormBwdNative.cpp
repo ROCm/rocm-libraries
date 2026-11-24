@@ -259,6 +259,11 @@ std::optional<BoundTokens> flydslRmsNormBwdGraphMatches(const MatchContext& cont
     {
         return std::nullopt;
     }
+    // inv_rms is its own buffer view of one f32 per row.
+    if(rows > MAX_OPERAND_BYTES / elementBytes(invRms->data_type()))
+    {
+        return std::nullopt;
+    }
 
     BoundTokens bound;
     bound[std::string(DY_TOKEN)] = attributes.dy_tensor_uid();

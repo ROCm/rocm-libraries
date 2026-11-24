@@ -45,6 +45,7 @@ from ..Common.DataType import DataType
 from ..Common.GlobalParameters import restoreDefaultGlobalParameters, assignGlobalParameters
 from ..Common.RegisterPool import allocTmpGpr
 from ..Common.Types import IsaVersion
+from ..SgprHazards import withSgprHazardWaits
 from ..Toolchain.Validators import ToolchainDefaults, validateToolchain
 
 def record_num_calls(f):
@@ -760,7 +761,7 @@ if __name__ == '__main__':
     meta = KernelMeta(func_name, softmax.vgpr_pool.size(), softmax.sgpr_pool.size(), 0, softmax.lds_usage_byte, waveFrontSize, 256, 8, args)
     meta.update_args_offsets()
     k_str = '\n'.join([kernel_header(func_name, arch, xnack),
-                       str(kernel_body),
+                       withSgprHazardWaits(str(kernel_body), _global_ti.getArchCaps()),
                        kernel_rodata(func_name, isa),
                        meta_str((meta,))])
 

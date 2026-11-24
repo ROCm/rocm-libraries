@@ -86,7 +86,8 @@ namespace TensileLite
  */
     inline bool isRankingMatchingLibrary(std::string const& predicateType)
     {
-        return predicateType == "GridBasedMatching" || predicateType == "PredictionMatching";
+        return predicateType == "GridBasedMatching" || predicateType == "MeshBasedMatching"
+               || predicateType == "PredictionMatching";
     }
 
     template <typename MySolution, typename MyProblem>
@@ -103,7 +104,8 @@ namespace TensileLite
            && solutions.problemType.mxBlockA == problem.mxBlockA()
            && solutions.problemType.mxBlockB == problem.mxBlockB()
            && solutions.problemType.mxBlockFreeA == problem.mxBlockFreeA()
-           && solutions.problemType.mxBlockFreeB == problem.mxBlockFreeB())
+           && solutions.problemType.mxBlockFreeB == problem.mxBlockFreeB()
+           && solutions.problemType.fusedA2A == problem.fusedA2A())
             return true;
         return false;
     }

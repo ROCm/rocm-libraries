@@ -63,7 +63,6 @@ from the standard library plus the packages above.
 │   │
 │   ├── # Repo maintenance
 │   ├── get_changed_projects.py         ← git-diff → validated changed project list
-│   ├── merge-submodules.py             ← merge per-project .gitmodules into one file
 │   │
 │   └── tests/
 │       ├── fixtures/                   ← .patch files for commit-message tests
@@ -88,7 +87,6 @@ from the standard library plus the packages above.
 | `hipdnn-superbuild-ci.yml` | `check_wheel_freshness.py` |
 | `labeler.yml` / `pr-org-label.yml` | `apply-labels.py`, `collect-labels.py`, `pr_category_label.py` |
 | `pr-import.yml` / `multiple_pr_import.yml` | `import_subrepo_prs.py` |
-| `merge-submodules.yml` | `merge-submodules.py` |
 
 ---
 
@@ -310,16 +308,3 @@ python .github/scripts/notify_teams.py \
 ```
 
 Sample logs for local runs live in `test/team_notification_fixtures/`.
-
----
-
-### Repo Maintenance — `merge-submodules.py`
-
-This script has no external dependencies beyond the standard library and
-operates only on the local filesystem. It is safe to run locally at any time:
-
-```bash
-python .github/scripts/merge-submodules.py   # rewrites .gitmodules
-```
-
-Inspect the diff before committing. This script has no unit tests yet.
