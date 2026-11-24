@@ -55,6 +55,7 @@ set(TEST_LINK_LIBS
 # Assembly IR Tests
 set(UNIT_ASM_TEST_FILES
     unit/asm/WaitCntInsertionTest.cpp
+    unit/asm/GirFrameAnalysisTest.cpp
     unit/asm/DAGSchedulerPassTest.cpp
     unit/asm/CDNA5ReadyQueueTest.cpp
     unit/asm/InFlightQueueTest.cpp
@@ -123,7 +124,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/RemoveInstructionPassTest.cpp
     unit/asm/RemoveDscntPassTest.cpp
     unit/asm/FlattenCalleesPassTest.cpp
-    unit/asm/Gfx1250HazardPassTest.cpp
+    unit/asm/Gfx1250XnackHazardPassTest.cpp
     unit/asm/Gfx1250HazardProfileTest.cpp
     unit/asm/WaitAluTrackerTest.cpp
     unit/asm/BasicBlockTest.cpp

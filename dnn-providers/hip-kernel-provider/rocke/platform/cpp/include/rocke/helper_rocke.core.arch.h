@@ -63,14 +63,16 @@ typedef rocke_mma_role_t rocke_arch_mma_role_t;
 /* MmaOp.shape -> (m, n, k). Forwards to rocke_mma_op_shape. */
 void rocke_mmaop_shape(const rocke_mmaop_t* op, int* m, int* n, int* k);
 
-/* MmaOp.a_layout() / b_layout() / c_layout() / acc_layout(). Each returns the
- * verified lane/slot -> coord map for the role, or NULL when none is registered
- * for the op_id (Python raises NotImplementedError; here, when `b` is non-NULL,
- * the builder's sticky error is set -- pass b=NULL for a pure lookup). Forwards
- * to the canonical rocke_mma_op_*_layout accessors. */
+/* Historical MmaOp.a_layout() / b_layout() / c_layout() projections describe
+ * src0 / src1 / src2. C is the accumulator-input map; result consumers use
+ * rocke_mma_op_dst_layout(). Missing maps raise ckc::Error with
+ * ROCKE_ERR_NOTIMPL, even with b=NULL.
+ * An enclosing public builder/lowering boundary translates the exception to
+ * status + message; direct C++ callers must catch it. A NULL op returns NULL. */
 const rocke_arch_layout_map_t* rocke_mmaop_a_layout(const rocke_mmaop_t* op, rocke_ir_builder_t* b);
 const rocke_arch_layout_map_t* rocke_mmaop_b_layout(const rocke_mmaop_t* op, rocke_ir_builder_t* b);
 const rocke_arch_layout_map_t* rocke_mmaop_c_layout(const rocke_mmaop_t* op, rocke_ir_builder_t* b);
+/* MmaOp.acc_layout(): compatibility alias for the accumulator-input/src2 map. */
 const rocke_arch_layout_map_t* rocke_mmaop_acc_layout(const rocke_mmaop_t* op,
                                                       rocke_ir_builder_t* b);
 
@@ -134,6 +136,12 @@ int rocke_archtarget_max_vector_load_dwords(const rocke_archtarget_t* t, const c
  * this arch can do, in dwords (0 = no buffer_load_lds at all). NOT the same as
  * max_vector_load_dwords, which is the register vector buffer-load width. */
 int rocke_archtarget_async_lds_max_dwords(const rocke_archtarget_t* t);
+
+/* ArchTarget.async_lds_dwords property: the DRAM->LDS DMA widths this arch can
+ * issue, in dwords, ascending (gfx942 {1}, gfx950 {1, 3, 4}, none elsewhere).
+ * Writes them to out and returns how many. */
+int rocke_archtarget_async_lds_dwords(const rocke_archtarget_t* t,
+                                      int out[ROCKE_LDS_DMA_ENCODED_DWORDS_N]);
 
 /* ArchTarget.max_threads_per_block property. */
 int rocke_archtarget_max_threads_per_block(const rocke_archtarget_t* t);

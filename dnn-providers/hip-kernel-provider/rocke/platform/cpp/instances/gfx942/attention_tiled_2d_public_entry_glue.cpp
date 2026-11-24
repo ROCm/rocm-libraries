@@ -40,7 +40,10 @@
 
 #include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h" /* rocke_unified_attn_tiled_2d_lds_bytes */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
+#include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
+#include "rocke/helper_rocke.instances.common.attention_arch.h" /* rocke_require_tiled_attention_arch */
 
+#include "rocke/arena.h" /* rocke_arena_strdup */
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include <stdio.h>
 #include <string.h>
@@ -68,84 +71,6 @@ static void rocke__set_err(char* err, size_t err_cap, const char* m)
 static void rocke__reason(char* reason, size_t reason_cap, const char* m)
 {
     rocke__set_err(reason, reason_cap, m);
-}
-
-/* ===================================================================== *
- *  attention_arch.py predicates (validate_tiled_attention_arch port).
- *
- *  These mirror instances/common/attention_arch.py: _wide_k_mfma_available,
- *  _narrow_k_mfma_available, the _NARROW_TILED_2D_ARCHES set ({"gfx942"}), and
- *  validate_tiled_attention_arch itself. Catalog-driven via rocke_arch_target.
- * ===================================================================== */
-
-/* _wide_k_mfma_available(target): 16x16x32 f16 atom OR has_ds_read_tr. */
-static bool rocke__wide_k_mfma_available(const rocke_arch_target_t* target)
-{
-    if(rocke_mma_catalog_has_shape(&target->mma, "mma", "f16", "f16", "fp32", 16, 16, 32))
-        return true;
-    return target->memory.has_ds_read_tr;
-}
-
-/* _narrow_k_mfma_available(target): 16x16x16 f16 AND bf16 atoms. */
-static bool rocke__narrow_k_mfma_available(const rocke_arch_target_t* target)
-{
-    return rocke_mma_catalog_has_shape(&target->mma, "mma", "f16", "f16", "fp32", 16, 16, 16)
-           && rocke_mma_catalog_has_shape(&target->mma, "mma", "bf16", "bf16", "fp32", 16, 16, 16);
-}
-
-/* arch in _NARROW_TILED_2D_ARCHES == frozenset({"gfx942"}). */
-static bool rocke__arch_in_narrow_set(const char* arch)
-{
-    return arch != NULL && strcmp(arch, "gfx942") == 0;
-}
-
-/* validate_tiled_attention_arch(arch) -> (ok, reason). Returns true/false and
- * writes the reason (cap reason_cap) on every path. */
-static bool rocke__validate_tiled_attention_arch(const char* arch, char* reason, size_t reason_cap)
-{
-    const rocke_arch_target_t* target = rocke_arch_target_from_gfx(arch);
-    if(target == NULL)
-    {
-        /* Python: except KeyError as e: return False, str(e). The KeyError
-         * carries the missing gfx key. */
-        char buf[128];
-        snprintf(buf, sizeof(buf), "%s", arch ? arch : "None");
-        rocke__reason(reason, reason_cap, buf);
-        return false;
-    }
-    if(rocke__wide_k_mfma_available(target) && target->memory.has_ds_read_tr)
-    {
-        rocke__reason(reason, reason_cap, "ok");
-        return true;
-    }
-    if(rocke__arch_in_narrow_set(arch) && rocke__narrow_k_mfma_available(target))
-    {
-        rocke__reason(reason, reason_cap, "ok");
-        return true;
-    }
-    if(!rocke__wide_k_mfma_available(target))
-    {
-        char buf[320];
-        snprintf(buf,
-                 sizeof(buf),
-                 "tiled attention requires either the wide-K MFMA atoms "
-                 "(mfma_f32_16x16x32 / mfma_f32_32x32x16, gfx950) or, on a "
-                 "narrow variant arch (gfx942), the 16x16x16 f16/bf16 atom; "
-                 "neither path is available on %s",
-                 arch);
-        rocke__reason(reason, reason_cap, buf);
-        return false;
-    }
-    {
-        char buf[256];
-        snprintf(buf,
-                 sizeof(buf),
-                 "tiled attention requires LDS transpose reads "
-                 "(ds_read_b64_tr_b16) for the wide-K path, absent on %s",
-                 arch);
-        rocke__reason(reason, reason_cap, buf);
-        return false;
-    }
 }
 
 /* ===================================================================== *
@@ -181,7 +106,7 @@ bool rocke_gfx942_attention_tiled_2d_supports(
     arch = args->arch ? args->arch : "gfx942";
 
     /* arch_ok, arch_reason = validate_tiled_attention_arch(arch) */
-    if(!rocke__validate_tiled_attention_arch(arch, reason, reason_cap))
+    if(!rocke_validate_tiled_attention_arch(arch, reason, reason_cap))
         return false;
 
     /* The fp8 K/V cache path needs ds_read_tr_b8 (gfx950-only). */
@@ -241,6 +166,25 @@ bool rocke_gfx942_attention_tiled_2d_supports(
                  sizeof(buf),
                  "tiled 2D kernel needs 1<=num_queries_per_kv<=16 (got %d)",
                  args->num_queries_per_kv);
+        rocke__reason(reason, reason_cap, buf);
+        return false;
+    }
+    if(!(args->num_warps == 1 || args->num_warps == 2 || args->num_warps == 4
+         || args->num_warps == 8))
+    {
+        snprintf(buf,
+                 sizeof(buf),
+                 "tiled 2D kernel requires num_warps in {1,2,4,8} (got %d)",
+                 args->num_warps);
+        rocke__reason(reason, reason_cap, buf);
+        return false;
+    }
+    if(!(args->block_m_per_warp == 16 || args->block_m_per_warp == 32))
+    {
+        snprintf(buf,
+                 sizeof(buf),
+                 "tiled 2D kernel requires block_m_per_warp in {16,32} (got %d)",
+                 args->block_m_per_warp);
         rocke__reason(reason, reason_cap, buf);
         return false;
     }
@@ -314,6 +258,23 @@ bool rocke_gfx942_attention_tiled_2d_supports(
             rocke__reason(reason, reason_cap, buf);
             return false;
         }
+    }
+
+    /* The 4-warp GQA builder keeps K in registers and has its own LDS layout,
+     * so the staged-tile LDS model below does not apply to it. The caller sets
+     * use_d256_fast only for a cohort _gfx942_4warp_fast already validated. */
+    if(args->use_d256_fast)
+    {
+        if((args->head_size == 256 && strcmp(args->dtype, "bf16") == 0) || args->head_size == 128)
+        {
+            rocke__reason(reason, reason_cap, "supported");
+            return true;
+        }
+        rocke__reason(reason,
+                      reason_cap,
+                      "tiled 2D kernel: gfx942 4-warp fast path requires bf16 head_size=256 "
+                      "or head_size=128 (bf16/fp16)");
+        return false;
     }
 
     /* LDS-budget gate (gate only the validated fp16/bf16 path). */
@@ -514,7 +475,7 @@ static rocke_status_t
     /* Value-carrying optionals become conditional strings; value-less flags
      * are passed as positional parts (kernel_name_join drops empties), exactly
      * as the Python kernel_name does. */
-    char d_buf[32], b_buf[32], t_buf[32], hkv_buf[64], kv_buf[64];
+    char d_buf[32], b_buf[32], t_buf[32], hkv_buf[64], fhkv_buf[64], kv_buf[64];
     char sw_buf[32], w_buf[32], wpe_buf[32], mw_buf[32], kvcp_buf[64];
     char rd_buf[32], ks_buf[32];
     int nqh, nkv;
@@ -524,6 +485,9 @@ static rocke_status_t
 
     nqh = s->num_query_heads;
     nkv = s->num_kv_heads;
+    /* The name carries the GQA ratio; reject a spec it cannot be formed for. */
+    if(nkv <= 0)
+        return ROCKE_ERR_VALUE;
 
     snprintf(d_buf, sizeof(d_buf), "d%d", s->head_size);
     snprintf(b_buf, sizeof(b_buf), "b%d", s->block_size);
@@ -531,13 +495,20 @@ static rocke_status_t
         snprintf(t_buf, sizeof(t_buf), "t%d", rocke_attention_tiled_2d_spec_tile_size_eff(s));
     else
         t_buf[0] = '\0';
-    snprintf(hkv_buf, sizeof(hkv_buf), "h%dkv%d", nqh, nkv);
+    /* Head counts are kernargs; only the GQA ratio is baked. */
+    snprintf(hkv_buf, sizeof(hkv_buf), "g%d", nqh / nkv);
+    /* Except on the fast paged-KV descriptor path, whose shifts bake them. */
+    if(s->use_fast_paged_kv_desc)
+        snprintf(fhkv_buf, sizeof(fhkv_buf), "h%dkv%d", nqh, nkv);
+    else
+        fhkv_buf[0] = '\0';
     if(s->kv_storage_dtype)
         snprintf(kv_buf, sizeof(kv_buf), "kv%s", s->kv_storage_dtype);
     else
         kv_buf[0] = '\0';
+    /* The window size is a kernarg; only whether the body masks one is baked. */
     if(s->sliding_window > 0)
-        snprintf(sw_buf, sizeof(sw_buf), "sw%d", s->sliding_window);
+        snprintf(sw_buf, sizeof(sw_buf), "sw");
     else
         sw_buf[0] = '\0';
     if(s->num_warps != 1)
@@ -579,11 +550,14 @@ static rocke_status_t
             b_buf,
             t_buf,
             hkv_buf,
+            fhkv_buf,
             s->dtype ? s->dtype : "",
             kv_buf,
             /* Python emits "fnuz" under the *same* condition as the kv part,
              * not under a format test, so it keys off kv_buf being non-empty. */
             kv_buf[0] ? "fnuz" : "",
+            /* i64 K/V addressing changes the loaders, so it is a distinct kernel. */
+            s->use_i64_kv_addr ? "i64" : "",
             s->use_sinks ? "sinks" : "",
             sw_buf,
             s->has_softcap ? "softcap" : "",
@@ -605,6 +579,8 @@ static rocke_status_t
             s->use_fast_paged_kv_desc ? "fastkvdesc" : "",
             s->use_early_v_schedule ? "earlyv" : "",
             s->use_q_direct_global ? "qdir" : "",
+            s->use_v_hbm_direct ? "vhbm" : "",
+            s->use_k_hbm_direct ? "khbm" : "",
             s->use_qk_pv_sched_group_barrier ? "qsgb" : "",
             kvcp_buf,
             s->use_global_load_lds_k ? "gldlds" : "",
@@ -622,6 +598,7 @@ static rocke_status_t
             ks_buf,
             s->use_k_sliced_ldsseq ? "ldsseq" : "",
             s->use_iglp_opt ? "iglp1" : "",
+            s->use_causal_mask_phase_split ? "cmps" : "",
             s->use_k_single_buffer ? "k1buf" : "",
             s->emit_lse ? "lse" : "",
         };
@@ -639,11 +616,25 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_tiled_scalar_new(
 {
     return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         char kname[1024];
+        char why[160];
         if(b == NULL || spec == NULL)
             return NULL;
-        if(rocke__attn2d_kernel_name(spec, kname, sizeof(kname)) != ROCKE_OK)
+        /* Init before anything can fail: the lower convenience reads and frees
+         * `b` whatever this returns. */
+        if(rocke_ir_builder_init(b, "") != ROCKE_OK)
             return NULL;
-        if(rocke_ir_builder_init(b, kname) != ROCKE_OK)
+        if(!rocke_attention_check_head_counts(
+               spec->num_query_heads, spec->num_kv_heads, why, sizeof(why)))
+            ckc::raise_status(ROCKE_ERR_VALUE, why);
+        if(rocke__attn2d_kernel_name(spec, kname, sizeof(kname)) != ROCKE_OK)
+            ckc::raise_status(ROCKE_ERR_VALUE, "tiled 2D kernel_name encode failed");
+        b->kernel->name = rocke_arena_strdup(&b->arena, kname);
+        if(b->kernel->name == NULL)
+            ckc::raise_status(ROCKE_ERR_OOM, "tiled 2D kernel name OOM");
+        /* Python validates the spec in __post_init__, so every build is checked.
+         * Validate here rather than in the shared builder, which the gfx950
+         * fastKV register-P path also drives with a gfx950 spec. */
+        if(!rocke_attention_tiled_2d_spec_validate(b, spec))
             return NULL;
         return rocke_build_unified_attention_2d_tiled_scalar(b, spec, arch);
     });

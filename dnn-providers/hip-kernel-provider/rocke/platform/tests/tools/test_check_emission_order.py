@@ -228,7 +228,7 @@ def test_tree_derivation_finds_the_lane_and_member_wrappers(tree_emitters):
         "lane_rg_of",
         "rocke__lane_half_base",
         "rocke_g950a2d_lane_rg",
-        "rocke_gfx1151_dfcp_splat_i32",
+        "rocke_rdna_attention_scaled_ptr",
         "ci",
         "mul",
     ):
@@ -241,7 +241,7 @@ def test_tree_derivation_finds_the_lane_and_member_wrappers(tree_emitters):
     [
         "V m = e.add(e.mul(x, y), e.ci(1));",
         "V m = rocke_b_mul(b, fh_lane_rg(ctx), rocke_b_const_i32(b, 4));",
-        "V m = rocke_b_add(b, rocke_gfx1151_dfcp_splat_i32(b, 1, n), lane_rg_of(ctx));",
+        "V m = rocke_b_add(b, rocke_rdna_attention_scaled_ptr(b, p, i, s, 2), lane_rg_of(ctx));",
     ],
 )
 def test_a_new_site_through_a_tree_function_is_reported(mutant, tree_emitters):

@@ -51,6 +51,7 @@ from rocisa.instruction import (
   Instruction, MacroInstruction,
   MFMAInstruction, MXMFMAInstruction, SMFMAInstruction,
   SAddCU32, SAddU32, SBarrier, SBranch,
+  SBitcmp1B32,
   SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ,
   SCmpEQU32, SCmpLeU32, SCSelectB32, SLShiftLeftB32, SLongBranchPositive,
   SMovB32, SMovB64, SMulI32, SNop,
@@ -201,8 +202,9 @@ class ABGRTile:
   def emitLDSBufferSwap(self, ti, writer, kernel):
     return _emitGRLDSBufferSwap(self.config.tag, self, ti, writer, kernel)
 
-  def emitPtrUpdate(self, ti, writer, kernel, holdOnLastIter=False):
-    return _emitGRPtrUpdate(self.config.tag, self, ti, writer, kernel, holdOnLastIter)
+  def emitPtrUpdate(self, ti, writer, kernel, holdOnLastIter=False, tightenLimit=False):
+    return _emitGRPtrUpdate(self.config.tag, self, ti, writer, kernel, holdOnLastIter,
+                            tightenLimit)
 
 
 class ABLRTile:
@@ -469,7 +471,13 @@ class TileInfo:
     if isinstance(geometry, (ABTilePair, MXScaleTilePair)):
       self.macroTile = kernel["MacroTileA"] if isA else kernel["MacroTileB"]
       if isinstance(geometry, MXScaleTilePair):
-        self.depthU = kernel["DepthU"]
+        # The MX scale tile spans one scale epoch in K, which the solution
+        # records as _ScalePeriodU*: the loop DepthU on the single-period paths,
+        # the fixed 256-K swizzle tile on dual-period MXFP8, where the data loop
+        # is finer (DepthU=128) than the scale epoch.  Solution assignment sets
+        # it for every real solution; a kernel dict built by hand falls back to
+        # the loop DepthU, which is what the single-period paths resolve to.
+        self.depthU = kernel.get("_ScalePeriodU%s" % _tc, kernel["DepthU"])
         self.scaleDepthU = kernel["_DepthU%s" % tc]  # scale DepthU (e.g. _DepthUMXSA = 8)
       else:
         self.depthU = kernel["_DepthU%s" % tc]
@@ -888,9 +896,9 @@ class TileInfo:
       return self.gr.emitLDSBufferSwap(self, writer, kernel)
     return Module()
 
-  def emitGRPtrUpdate(self, writer, kernel, holdOnLastIter=False):
+  def emitGRPtrUpdate(self, writer, kernel, holdOnLastIter=False, tightenLimit=False):
     if self.gr is not None:
-      return self.gr.emitPtrUpdate(self, writer, kernel, holdOnLastIter)
+      return self.gr.emitPtrUpdate(self, writer, kernel, holdOnLastIter, tightenLimit)
     return Module()
 
   def emitStoreD(self, writer, kernel):
@@ -1349,6 +1357,51 @@ def _emitMultiDUTailSrdRewind(writer, kernel, numUnroll, tiA, tiB, scaleTiA, sca
   return module
 
 
+def _emitDualPeriodTailScalePhase(writer, kernel, unrollIdx, scaleTiA, scaleTiB):
+  """Point the tail's scale DTL write at the half the tail reads from.
+
+  A dual-period scale epoch spans two data DepthU iterations, so the scale
+  stream takes one double-buffer step per two data steps while the local
+  reads take one per epoch they consume.  The two stay in phase while the
+  epoch count is whole: each exit path that reads an epoch also swaps both
+  halves.  A residual tail after an odd number of complete data-DUs breaks
+  that -- it re-enters mid-epoch, leaving the GR write half one step behind
+  the half its own local reads will take.  Swap the write half so the tail's
+  scale load lands where the tail reads it.  After an even number of
+  complete data-DUs the two halves already agree.
+
+  The scale SRDs need no correction: with one epoch seeded in the preloop,
+  the increments the kernel has executed by here name exactly the epoch the
+  tail starts in, and num_records has shrunk in lock-step with them.
+
+  The completed-DepthU parity is bit log2(DepthU) of global K.  The tail is
+  the final global K interval under both data-parallel and StreamK execution,
+  so global K is the authoritative phase source.
+  """
+  assert kernel["DepthU"] > 0 and \
+      kernel["DepthU"] & (kernel["DepthU"] - 1) == 0, \
+      "dual-period tail scale phase requires a power-of-two DepthU"
+
+  module = Module("Dual-period tail scale buffer phase")
+  aligned = Label("SubtileTailScalePhased", "")
+  phaseBit = kernel["DepthU"].bit_length() - 1
+  module.add(SBitcmp1B32(
+      src0=sgpr(f"SizesSum+{unrollIdx}"),
+      src1=phaseBit,
+      comment="dual-period tail: test completed-DepthU parity for scale LDS"))
+  module.add(SCBranchSCC0(
+      labelName=aligned.getLabelName(),
+      comment="even completed DepthU count: scale LDS halves already in phase"))
+
+  for ti in (scaleTiA, scaleTiB):
+    if ti is None:
+      continue
+    module.add(emitScaleGRLDSSwap(ti, writer, kernel))
+
+  module.add(aligned)
+  return module
+
+
 def mainLoop(writer, kernel):
   module = Module()
   tensorParametersA = writer.tPA
@@ -1384,12 +1437,62 @@ def mainLoop(writer, kernel):
   grSBGran = ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]) if scaleTiB else None
 
   schedulerPgr = pgr
+  # PrefetchLocalRead selects operand VGPR double-buffering (plr=1) vs a single
+  # operand set (plr=0). plr=0 uses the single-partition LR placement, so it
+  # pins a single partition (like pgr=0). This enables PGR2+PLR0 (prefetch
+  # global reads two DUs deep into LDS with one operand set), matching the
+  # non-subtile F8 MT256x256 register profile so large MTs fit in 256 VGPRs.
+  #
+  # The dual-period path pins a plr=0 base and overlays its own partition-directed
+  # prefetch, so it never consults the solution's PrefetchLocalRead -- exactly as
+  # ForceUnrollSubIter pins numItersPLR/numVgprBuffer in the non-subtile path.
+  # Every other subtile kernel keeps the legacy derivation
+  # (plr = 0 if pgr == 0 else 1, selected by plr=-1): honouring an explicit
+  # PrefetchLocalRead=1 on a pgr=0 kernel would double-buffer operands that used
+  # to share one set, which overflows the VGPR budget on wide tiles
+  # (e.g. BBS MT496x64 MIWaveTile [31,1] needs 256).
+  schedulerPlr = 0 if kernel.get("_DualPeriodMXFP8") else -1
+
+  M = tiA.localMMATileGrid[0]
+  N = tiB.localMMATileGrid[0]
+
+  # Partition-directed PLR for the MT256x256 DU128 dual-period MXFP8 subtile
+  # kernel.  Each compute partition local-reads the operands needed by the NEXT
+  # partition (rather than the next K slot), with the A/B operand VGPRs
+  # double-buffered and an n-major (c00,c01,c10,c11) partition traversal.
+  #
+  # This is selected purely from the solution parameters: the dual-period MXFP8
+  # path (gfx950, MXFP8, PGR2, HostPreSwizzle scales, DepthU=128 -> ScaleReuse>=2)
+  # on a plr=0 base.  No other subtile configuration enables it, so the behavior
+  # of every non-MXFP8 / non-dual-period subtile kernel is unchanged.
+  schedulerDoubleBuffer = ()
+  schedulerPartitionPrefetch = bool(kernel.get("_DualPeriodMXFP8"))
+  schedulerPartitionOrder = "m-major"
+  forcedPartition = None
+  if schedulerPartitionPrefetch:
+      schedulerPartitionOrder = "n-major"
+      schedulerDoubleBuffer = ('A', 'B')
+      # Split the wave's MFMA-tile grid in half along each dim -> a 2x2 partition
+      # grid (8x4 -> 4x2 for the 8-wave MI, 8x8 -> 4x4 for the 4-wave MI).
+      #
+      # The half is rounded UP to the local-read granularity mn so that the
+      # split is always into an EVEN number of partitions -- the prefetch cycle
+      # is 2-coloured by partition-index parity and an odd cycle would make the
+      # last partition prefetch into the set it is still reading.  See
+      # MFMASchedulerConfig._even_split_size.
+      mnM = max(1, int(lrSAGran.mn) if lrSAGran else 1)
+      mnN = max(1, int(lrSBGran.mn) if lrSBGran else 1)
+      forcedPartition = (MFMASchedulerConfig._even_split_size(M, mnM),
+                         MFMASchedulerConfig._even_split_size(N, mnN))
 
   vgprBudget = writer.states.regCaps["MaxVgpr"]
   vgprUsed = writer.vgprPool.size() - writer.vgprPool.available()
-  M = tiA.localMMATileGrid[0]
-  N = tiB.localMMATileGrid[0]
-  candidates = [(M, N)] if pgr == 0 else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
+  singlePartition = ((pgr == 0) or (schedulerPlr == 0)) \
+      and not schedulerPartitionPrefetch
+  if forcedPartition is not None:
+      candidates = [forcedPartition]
+  else:
+      candidates = [(M, N)] if singlePartition else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
   # Block scheduling cuts the tile into blocks that each run a whole K reduction
   # and then store while the next block's MFMAs are still issuing. Partitioning
   # is otherwise a VGPR-pressure escape valve whose full-size candidate always
@@ -1447,8 +1550,15 @@ def mainLoop(writer, kernel):
           partitionSizeM=partSizeM,
           partitionSizeN=partSizeN,
           pgr=schedulerPgr,
+          plr=schedulerPlr,
+          doubleBufferTensors=schedulerDoubleBuffer,
+          prefetchNextPartition=schedulerPartitionPrefetch,
+          uniformPgrEpoch=(schedulerPartitionPrefetch and schedulerPgr == 2),
+          partitionOrder=schedulerPartitionOrder,
           grPlacement=grPlacement,
           pgl=kernel.get("PrefetchGL2", 0),
+          scaleReuse=(kernel.get("_ScaleReuseA", 1)
+                      if kernel.get("_DualPeriodMXFP8") else 1),
           blockSched=blockSched,
           isMxf4Subtile=isMxf4SubtilePath(kernel),
           tailOwnTiles=tailOwnTiles,
@@ -1546,6 +1656,9 @@ def mainLoop(writer, kernel):
         mxScaleTPs.append(tensorParametersB["MX"])
       if mxScaleTPs:
         module.add(writer.computeTailLoopSrdLimit(kernel, mxScaleTPs))
+      if kernel.get("_DualPeriodMXFP8"):
+        module.add(_emitDualPeriodTailScalePhase(
+            writer, kernel, writer.states.unrollIdx, scaleTiA, scaleTiB))
       if needTailSrdRewind:
         module.add(_emitMultiDUTailSrdRewind(
             writer, kernel, scheduler.config.numUnroll, tiA, tiB, scaleTiA, scaleTiB,

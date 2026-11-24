@@ -86,6 +86,7 @@ def _identities() -> list:
         _identity(direction="wgrad", group_merge=4, grouped=True),
         _identity(direction="fwd", group_merge=4, grouped=True),
         _identity(direction="dgrad", grouped=True),
+        _identity(direction="dgrad", grouped=True, split_k=2),
         _identity(direction="dgrad", patch=True),
         _identity(direction="dgrad", max_sub_gemms=4),
         _identity(direction="dgrad", tap_outer_k=True),
@@ -178,6 +179,8 @@ def _direct_problems() -> list:
         DirectConvProblem(
             N=2, H=32, W=32, groups=8, cpg=8, kpg=8, dil_h=2, dil_w=2, PAD=2
         ),
+        # Small groups at stride 2 (the packed direct WMMA dgrad rows).
+        DirectConvProblem(N=2, H=28, W=28, groups=32, cpg=8, kpg=8, stride=2),
     ]
 
 

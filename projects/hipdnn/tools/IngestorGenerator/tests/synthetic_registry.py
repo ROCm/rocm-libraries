@@ -5,7 +5,7 @@
 
 `registry_enumerator` reaches a registry through the manifest's ``enumerate`` block:
 a candidate-list callable, a request dataclass, and ``rocke.dispatch.tuning.walk``'s
-``sweep_level``. This module supplies those three for two invented families, so a
+``sweep_level``. This module supplies those three for several invented families, so a
 test states exactly the registry behaviour it depends on and does not move when
 rocKE's catalog, tiles, names or admission rules do:
 
@@ -13,9 +13,18 @@ rocKE's catalog, tiles, names or admission rules do:
   (``order``, ``None`` when unset), a free tile knob (``tile_n``) and a candidate that
   declines a head size it does not support;
 - the *conv probe* family: a second, unrelated request/spec pair whose request-only
-  fields (``C``, ``K``, ``G``) the spec does not carry.
+  fields (``C``, ``K``, ``G``) the spec does not carry;
+- the *split probe* family: a rule-driven candidate, as a split-KV decode is, whose
+  one spec per request takes ``num_segments`` from ``batch`` and ``seqlen`` and
+  copies ``batch`` into an IR-neutral ``num_seqs``;
+- the *GQA probe* family: a rule-driven candidate whose head counts are runtime
+  values and whose GQA ratio, a spec property, is baked: ``num_segments`` comes from
+  ``batch`` and the KV head count, so head pairs sharing a ratio pick different
+  segments;
+- the *feature probe* family: the probe family plus a ``bias`` request and spec field,
+  for ``enumerate.feature_fields``, in a slice and in a full space.
 
-``provider(tmp_path, monkeypatch)`` binds both to a throw-away provider root.
+``provider(tmp_path, monkeypatch)`` binds all of them to a throw-away provider root.
 """
 
 from __future__ import annotations
@@ -105,12 +114,78 @@ class ProbeCandidate:
         ]
 
 
+@dataclasses.dataclass(frozen=True)
+class FeatureProbeRequest(ProbeRequest):
+    """The probe request with a feature a cell can turn on."""
+
+    bias: bool = False
+
+
+@dataclasses.dataclass(frozen=True)
+class FeatureProbeSpec(ProbeSpec):
+    bias: bool = False
+
+
+class FeatureProbeCandidate(ProbeCandidate):
+    """The probe candidate, carrying the request's ``bias`` into its spec."""
+
+    def select_spec(self, request: FeatureProbeRequest):
+        base = super().select_spec(request)
+        return FeatureProbeSpec(**dataclasses.asdict(base), bias=request.bias)
+
+    def sweep_space(self, request: FeatureProbeRequest):
+        """Last tile first, so the sweep's first spec is not the default spec."""
+        return list(reversed(super().sweep_space(request)))
+
+
+def feature_probe_candidates():
+    """``persist``/``a`` is the second candidate an ``enumerate.also`` section pins."""
+    return [
+        FeatureProbeCandidate("feature_probe", "probe", "grid"),
+        FeatureProbeCandidate("feature_probe_persist_a", "persist", "a"),
+    ]
+
+
+@dataclasses.dataclass(frozen=True)
+class ProbeReduceSpec:
+    dtype: str
+    tile_m: int
+
+
+@dataclasses.dataclass(frozen=True)
+class ProbeTuning:
+    """A dispatcher-owned wrapper pairing a kernel with the reduce kernel launched
+    after it, as the attention split-KV tuning spec does."""
+
+    kernel_spec: ProbeSpec
+    reduce_spec: ProbeReduceSpec
+
+
+class SplitProbeCandidate(ProbeCandidate):
+    """Hands back each spec wrapped with its paired reduce."""
+
+    def select_spec(self, request: ProbeRequest):
+        return self._wrap(super().select_spec(request))
+
+    def sweep_space(self, request: ProbeRequest):
+        base = ProbeCandidate.select_spec(self, request)
+        return [
+            self._wrap(dataclasses.replace(base, tile_n=tile_n))
+            for tile_n in (64, 32, 128)
+        ]
+
+    @staticmethod
+    def _wrap(spec: ProbeSpec) -> ProbeTuning:
+        return ProbeTuning(spec, ProbeReduceSpec(spec.dtype, spec.tile_m))
+
+
 def probe_candidates():
     """``persist`` is shared by two candidates, so pinning it alone is ambiguous."""
     return [
         ProbeCandidate("probe_grid", "probe", "grid"),
         ProbeCandidate("probe_persist_a", "persist", "a"),
         ProbeCandidate("probe_persist_b", "persist", "b"),
+        SplitProbeCandidate("probe_split", "split", "s"),
     ]
 
 
@@ -152,6 +227,56 @@ class ConvProbeCandidate:
 
 def conv_probe_candidates():
     return [ConvProbeCandidate()]
+
+
+@dataclasses.dataclass(frozen=True)
+class SplitProbeRequest:
+    algorithm: str = "split"
+    spec_id: str = "rule"
+    arch: str = ARCH
+    hdim: int = 64
+    dtype: str = "fp16"
+    batch: int = 1
+    seqlen: int = 64
+
+
+@dataclasses.dataclass(frozen=True)
+class SplitProbeSpec:
+    dtype: str
+    hdim: int
+    num_segments: int
+    num_seqs: int
+
+    def __post_init__(self):
+        if self.num_seqs < 1:
+            raise ValueError(f"num_seqs must be >= 1, got {self.num_seqs}")
+
+
+def split_rule(batch: int, seqlen: int) -> int:
+    """Long keys split, fewer the more sequences already fill the device."""
+    return max(1, 8 // batch) if seqlen >= 256 else 1
+
+
+class SplitRuleProbeCandidate:
+    name, algorithm, spec_id = "split_probe", "split", "rule"
+
+    def admits(self, request: SplitProbeRequest):
+        return True, ""
+
+    def select_spec(self, request: SplitProbeRequest):
+        return SplitProbeSpec(
+            dtype=request.dtype,
+            hdim=request.hdim,
+            num_segments=split_rule(request.batch, request.seqlen),
+            num_seqs=request.batch,
+        )
+
+    def sweep_space(self, request: SplitProbeRequest):
+        return [self.select_spec(request)]
+
+
+def split_probe_candidates():
+    return [SplitRuleProbeCandidate()]
 
 
 def probe_manifest(provider_root, **enumerate_overrides) -> dict:
@@ -199,6 +324,48 @@ def probe_manifest(provider_root, **enumerate_overrides) -> dict:
         "kernel_name_template": "probe.{dtype}_d{hdim}_h{heads}_c{causal}_tn{tile_n}",
         "enumerate": enumerate_block,
     }
+
+
+def feature_probe_manifest(provider_root) -> dict:
+    """The probe manifest over the feature probe family: a ``bias`` cell group and
+    ``bias`` as a feature field that narrows its kernels to the default tile."""
+    manifest = probe_manifest(
+        provider_root,
+        candidates=f"{_MODULE}:feature_probe_candidates",
+        request=f"{_MODULE}:FeatureProbeRequest",
+    )
+    manifest["enumerate"]["cells"].append({"fields": ["bias"], "values": [False, True]})
+    manifest["enumerate"]["feature_fields"] = {
+        "bias": {"name_token": "_bias", "free_fields": []}
+    }
+    manifest["kmd_fields"].append({"name": "bias", "type": "int", "default_value": 0})
+    manifest["specialization"]["metadata_fields"].append("bias")
+    manifest["specialization"]["bindings"]["bias"] = {"field": "bias"}
+    return manifest
+
+
+def full_feature_probe_manifest(provider_root) -> dict:
+    """The feature probe manifest at ``space: full``, ``bias`` a feature field with no
+    narrowing: ``tile_n`` and ``order`` are the performance knobs (an unset ``order``
+    resolves to the same binary as ``"row"``), so a cell sweeps 3 tiles x 2 resolved
+    orders = 6 kernels, and the 8 cells (two head sizes x two masks x ``bias`` off or
+    on) make 48."""
+    manifest = feature_probe_manifest(provider_root)
+    section = manifest["enumerate"]
+    section["space"] = "full"
+    del section["free_fields"]
+    section["feature_fields"] = {"bias": {"name_token": "_bias"}}
+    manifest["reduction"] = {
+        "fields": {
+            "feature": ["dtype", "causal", "tile_m", "bias"],
+            "performance": [
+                {"name": "tile_n"},
+                {"name": "order", "unset_resolves_by": "resolved_order"},
+            ],
+            "ignored": [],
+        }
+    }
+    return manifest
 
 
 def conv_probe_manifest(provider_root) -> dict:
@@ -250,6 +417,170 @@ def conv_probe_manifest(provider_root) -> dict:
                 "feature": ["direction", "dtype", "arch"],
                 "performance": [],
                 "ignored": ["tile_m", "tile_n", "tile_k"],
+            }
+        },
+    }
+
+
+def split_probe_manifest(provider_root) -> dict:
+    """A full-space manifest over the split probe family. ``batch`` x ``seqlen``
+    combos (0..5 in catalog order) select segments 1, 8, 1, 4, 1, 1 for each
+    ``hdim``; without ``selector_fields`` every combo is its own cell and the names
+    repeat."""
+    names = ["dtype", "hdim"]
+    return {
+        "dialect": "packaged",
+        "authored_subpath": "synthetic/split_probe",
+        "engine": {
+            "name": "hipkernel:SplitProbe",
+            "sdk_version": "1.0.0",
+            "knobs": ["num_segments"],
+            "heuristic": "native",
+        },
+        "kmd_fields": [
+            {"name": n, "type": "string" if n == "dtype" else "int"} for n in names
+        ],
+        "specialization": {
+            "metadata_fields": names,
+            "matcher_only_fields": [],
+            "vocabulary": {"dtype": {"fp16": "FP16", "bf16": "BF16"}},
+            "bindings": {n: {"field": n} for n in names},
+        },
+        "kernel_source_kind": "rocke",
+        "workspace_policy": "none",
+        "pack": "split_probe",
+        "arch": ARCH,
+        "provider_root": str(provider_root),
+        "source": "kernels/split_probe.py",
+        "builder": "build_split_probe",
+        "kernel_name_template": "split_probe.{dtype}_d{hdim}",
+        "enumerate": {
+            "candidates": f"{_MODULE}:split_probe_candidates",
+            "request": f"{_MODULE}:SplitProbeRequest",
+            "pin": {"algorithm": "split", "spec_id": "rule"},
+            "fixed": {"arch": ARCH, "dtype": "fp16"},
+            "cells": [
+                {"fields": ["hdim"], "values": [64, 128]},
+                {"fields": ["batch"], "values": [1, 2, 8]},
+                {"fields": ["seqlen"], "values": [64, 1024]},
+            ],
+            "sweep_level": "production",
+            "space": "full",
+        },
+        "reduction": {
+            "fields": {
+                "feature": ["dtype", "hdim"],
+                "performance": [{"name": "num_segments"}],
+                "ignored": ["num_seqs"],
+            }
+        },
+    }
+
+
+@dataclasses.dataclass(frozen=True)
+class GqaProbeRequest:
+    algorithm: str = "gqa"
+    spec_id: str = "rule"
+    arch: str = ARCH
+    hdim: int = 64
+    dtype: str = "fp16"
+    nhead_q: int = 1
+    nhead_k: int = 1
+    batch: int = 1
+
+
+@dataclasses.dataclass(frozen=True)
+class GqaProbeSpec:
+    dtype: str
+    hdim: int
+    num_query_heads: int
+    num_kv_heads: int
+    num_segments: int
+
+    @property
+    def num_queries_per_kv(self) -> int:
+        return self.num_query_heads // self.num_kv_heads
+
+
+class GqaProbeCandidate:
+    name, algorithm, spec_id = "gqa_probe", "gqa", "rule"
+
+    def admits(self, request: GqaProbeRequest):
+        ok = request.nhead_q % request.nhead_k == 0
+        return ok, "" if ok else "heads must divide"
+
+    def select_spec(self, request: GqaProbeRequest):
+        return GqaProbeSpec(
+            dtype=request.dtype,
+            hdim=request.hdim,
+            num_query_heads=request.nhead_q,
+            num_kv_heads=request.nhead_k,
+            num_segments=max(1, 8 // (request.batch * request.nhead_k)),
+        )
+
+    def sweep_space(self, request: GqaProbeRequest):
+        return [self.select_spec(request)]
+
+
+def gqa_probe_candidates():
+    return [GqaProbeCandidate()]
+
+
+def gqa_probe_manifest(provider_root) -> dict:
+    """A full-space manifest over the GQA probe family, one cell per GQA ratio.
+    Head pairs (4, 1) and (8, 2) share ratio 4; (2, 1) is ratio 2; (2, 2) ratio 1.
+    With batch 1 and 2 they pick segments: (4, 1) 8 and 4, (8, 2) 4 and 2, (2, 1) 8
+    and 4, (2, 2) 4 and 2."""
+    names = ["dtype", "hdim", "num_queries_per_kv"]
+    return {
+        "dialect": "packaged",
+        "authored_subpath": "synthetic/gqa_probe",
+        "engine": {
+            "name": "hipkernel:GqaProbe",
+            "sdk_version": "1.0.0",
+            "knobs": ["num_segments"],
+            "heuristic": "native",
+        },
+        "kmd_fields": [
+            {"name": n, "type": "string" if n == "dtype" else "int"} for n in names
+        ],
+        "specialization": {
+            "metadata_fields": names,
+            "matcher_only_fields": [],
+            "vocabulary": {"dtype": {"fp16": "FP16", "bf16": "BF16"}},
+            "bindings": {n: {"field": n} for n in names},
+        },
+        "kernel_source_kind": "rocke",
+        "workspace_policy": "none",
+        "pack": "gqa_probe",
+        "arch": ARCH,
+        "provider_root": str(provider_root),
+        "source": "kernels/gqa_probe.py",
+        "builder": "build_gqa_probe",
+        "kernel_name_template": "gqa_probe.{dtype}_d{hdim}_g{num_queries_per_kv}",
+        "enumerate": {
+            "candidates": f"{_MODULE}:gqa_probe_candidates",
+            "request": f"{_MODULE}:GqaProbeRequest",
+            "pin": {"algorithm": "gqa", "spec_id": "rule"},
+            "fixed": {"arch": ARCH, "dtype": "fp16", "hdim": 64},
+            "cells": [
+                {
+                    "fields": ["nhead_q", "nhead_k"],
+                    "values": [[4, 1], [2, 1], [8, 2], [2, 2]],
+                },
+                {"fields": ["batch"], "values": [1, 2]},
+            ],
+            "sweep_level": "production",
+            "space": "full",
+            "selector_fields": ["nhead_q", "nhead_k", "batch"],
+            "neutral_fields": ["num_query_heads", "num_kv_heads"],
+            "cell_keyed_by": ["num_queries_per_kv"],
+        },
+        "reduction": {
+            "fields": {
+                "feature": ["dtype", "hdim", "num_queries_per_kv"],
+                "performance": [{"name": "num_segments"}],
+                "ignored": [],
             }
         },
     }

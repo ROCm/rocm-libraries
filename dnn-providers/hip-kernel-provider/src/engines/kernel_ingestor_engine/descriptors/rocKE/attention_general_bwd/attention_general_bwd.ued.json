@@ -1,0 +1,20 @@
+{
+  "version": "1.1",
+  "id": "0bd5a4d5-70c4-4e48-9da8-6edc0f174b06",
+  "name": "hipkernel:AttentionGeneralBwd",
+  "sdk_version": "1.4.0",
+  "graph_match": {
+    "native": "hipkernel.attention_general_bwd.graph_match"
+  },
+  "shared_workspace": "ws.bytes",
+  "slots": [
+    {
+      "name": "prep",
+      "metadata": "2b03da32-a4e6-4d2a-a071-451bda1bc465"
+    },
+    {
+      "name": "main",
+      "metadata": "b0b95d84-8486-40a6-81d4-c03d0283e809"
+    }
+  ]
+}

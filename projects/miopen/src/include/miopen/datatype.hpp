@@ -28,6 +28,7 @@
 
 #include <miopen/errors.hpp>
 #include <miopen/kernel_build_params.hpp>
+#include <miopen/target_properties.hpp>
 #include <miopen/visit_float.hpp>
 
 #include <sstream>
@@ -131,7 +132,7 @@ inline std::size_t get_index_max(miopenIndexType_t index_type)
     MIOPEN_THROW("not belong to any case");
 }
 
-inline KernelBuildParameters GetDataTypeKBP(miopenDataType_t type)
+inline KernelBuildParameters GetDataTypeKBP(miopenDataType_t type, const std::string& device_name)
 {
     // values for MIOPEN_USE_ macros
     int use_fp16               = 0;
@@ -170,7 +171,7 @@ inline KernelBuildParameters GetDataTypeKBP(miopenDataType_t type)
         {"MIOPEN_USE_BFP16", use_bfp16},
         {"MIOPEN_USE_INT32", use_int32},
         {"MIOPEN_USE_RNE_BFLOAT16", use_rne_bfloat16},
-        {"MIOPEN_FP8_IEEE_EXPONENT_BIAS", MIOPEN_FP8_IEEE_EXPONENT_BIAS},
+        {"MIOPEN_FP8_IEEE_EXPONENT_BIAS", UsesIeeeExponentBias(device_name) ? 1 : 0},
         {"MIOPEN_FP8_CLIPPING", MIOPEN_FP8_CLIPPING},
     };
     if(use_fp64 != 0)
@@ -182,9 +183,9 @@ inline KernelBuildParameters GetDataTypeKBP(miopenDataType_t type)
     return kbp;
 }
 
-inline std::string GetDataTypeKernelParams(miopenDataType_t type)
+inline std::string GetDataTypeKernelParams(miopenDataType_t type, const std::string& device_name)
 {
-    return " " + GetDataTypeKBP(type).GenerateFor(kbp::HIP{});
+    return " " + GetDataTypeKBP(type, device_name).GenerateFor(kbp::HIP{});
 }
 
 } // namespace miopen

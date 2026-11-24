@@ -10,11 +10,18 @@ has no 32x32x16 fp16/bf16 atom, so it doubles the K loop), unlike the unified
 why the dense kernel is a per-gfx module rather than an arch branch in the
 gfx950 body.
 
-One candidate, identified like every other tuned candidate: ``spec_id``
-(``gfx942_dense``) names it and ``tuning_id`` names one configuration
-from its knob space, geometry included (``auto`` is the default spec). It is
-opt-in: only an explicit ``spec_id`` selects it. Admission is the kernel's own
-``supports_attention_dense``.
+Five candidates, identified like every other tuned candidate: ``spec_id``
+names one and ``tuning_id`` names one configuration from its knob space,
+geometry included (``auto`` is the default spec). ``gfx942_dense`` is the
+tuned default; ``gfx942_dense_qbminor`` is the one-CTA-per-block grid at the
+qb_minor block order, the grid the hipDNN kernel ingestor launches (the twin
+of gfx950's ``qbminor`` variant). The three ``*_aot`` candidates are the other
+grids that ingestor launches, each with its grid fixed by its default spec:
+``gfx942_dense_persist_aot`` is the D128 persistent grid at 304 CTAs with its
+work decode pinned, and ``gfx942_dense_btminor_aot`` / ``gfx942_dense_hqswz_aot``
+are the one-CTA-per-block grid at the bt_hkv_minor / hq_minor_swz block order.
+All are opt-in: only an explicit ``spec_id`` selects them. Admission is the
+kernel's own ``supports_attention_dense``.
 """
 
 from __future__ import annotations
@@ -22,6 +29,7 @@ from __future__ import annotations
 from rocke.dispatch.core import CandidateRegistry, KernelCandidate
 
 from .candidate import make_dense_candidate
+from .dense_rules import dense_paged_fields, dense_paged_tile_fits
 from .common import (
     AttentionMaskType,
     AttentionRequest,
@@ -31,6 +39,40 @@ from .common import (
 CANDIDATE_NAME = "attention_gfx942_dense"
 SPEC_ID = "gfx942_dense"
 _VARIANT_ID = "dense"
+QBMINOR_CANDIDATE_NAME = "attention_gfx942_dense_qbminor"
+QBMINOR_SPEC_ID = "gfx942_dense_qbminor"
+_QBMINOR_VARIANT_ID = "qbminor"
+# The ingestor's other grids: (candidate name, spec_id, variant_id, persistent,
+# nonpersist_decode). None of the names starts with QBMINOR_CANDIDATE_NAME.
+PERSIST_AOT_SPEC_ID = "gfx942_dense_persist_aot"
+BTMINOR_AOT_SPEC_ID = "gfx942_dense_btminor_aot"
+HQSWZ_AOT_SPEC_ID = "gfx942_dense_hqswz_aot"
+# What a candidate that pins the block order fixes with it: the grid kind and the
+# KV split (see ``DenseSpace.pinned_axes``).
+_PINNED_GRID_AXES = frozenset({"persistent", "nonpersist_decode", "kv_segments"})
+_AOT_GRIDS = (
+    (
+        "attention_gfx942_dense_persist_aot",
+        PERSIST_AOT_SPEC_ID,
+        "persist_aot",
+        True,
+        "qb_minor",
+    ),
+    (
+        "attention_gfx942_dense_btminor_aot",
+        BTMINOR_AOT_SPEC_ID,
+        "btminor_aot",
+        False,
+        "bt_hkv_minor",
+    ),
+    (
+        "attention_gfx942_dense_hqswz_aot",
+        HQSWZ_AOT_SPEC_ID,
+        "hqswz_aot",
+        False,
+        "hq_minor_swz",
+    ),
+)
 
 # block_n (KV tile) the default spec ships; 64 is the resource-efficient peak
 # (see AttentionDenseSpec.block_n). The knob space sweeps block_m / block_n.
@@ -54,7 +96,8 @@ def _default_block_m(req: AttentionRequest) -> int:
     diagonal no item gets shorter, and the doubled work only adds a second
     persistent round. Window requests keep the shared tile (narrow windows have
     their own geometry below), and so do bottom-right (chunked) requests, whose
-    KV split below is sized for it.
+    KV split below is sized for it, and paged requests whose pages do not fit the
+    128-row tile.
     """
     from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
 
@@ -66,7 +109,7 @@ def _default_block_m(req: AttentionRequest) -> int:
         return bm
     num_cus = int(req.num_cus) or _GFX942_NUM_PERSISTENT
     work = -(-int(req.seqlen_q) // bm) * int(req.nhead_q) * int(req.batch)
-    if work < num_cus:
+    if work < num_cus and dense_paged_tile_fits(req, bm // 2, _DENSE_BLOCK_N):
         return bm // 2
     return bm
 
@@ -94,18 +137,107 @@ def _narrow_window_geometry(head_size, dtype):
     return 128, _DENSE_BLOCK_N, False
 
 
-def _base_spec(req: AttentionRequest):
+# Additive-bias geometry (see :func:`_bias_geometry_spec`).
+_BIAS_BLOCK_M = 128
+_BIAS_BLOCK_N_D128 = 32
+# bf16 D64 measured ahead at the waves-per-eu of the other configs, not at the kernel's
+# own per-config 4 (``_tuned_waves_per_eu``): 2 waves/EU is a 256-register budget
+# (512 VGPRs per SIMD lane // 2, the rule of ``test_attention_builds.py`` and of
+# ``estimate_occupancy_detail``). The paired A/B is in the PR's Performance section.
+_BIAS_D64_BF16_WAVES_PER_EU = 2
+# The mask kinds whose band is a plain one over equal lengths: a bottom-right band
+# over equal lengths is the top-left one, and ``_make_spec`` builds the same spec.
+_BIAS_GEOMETRY_MASKS = frozenset(
+    {
+        AttentionMaskType.NO_MASK,
+        AttentionMaskType.TOP_LEFT_CAUSAL,
+        AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+    }
+)
+
+
+def _serves_bias_geometry(req: AttentionRequest) -> bool:
+    """Whether ``req`` takes the additive-bias geometry of :func:`_bias_geometry_spec`.
+
+    A bias request over equal query and key lengths with a full or causal band, no
+    sliding window and no sinks; LSE does not matter. Every other bias request (a
+    window, sinks, a chunked bottom-right band, unequal lengths) keeps the default
+    geometry, which was not measured against the bias for them. Reads request fields
+    only, so the choice is as host-independent as the rest of the factory.
+
+    One measured cell keeps the default geometry as well: fp16 at D64 under a causal
+    band, with or without the LSE output. There this geometry gained little over the
+    default and one compiler generation measured it clearly slower, so the cell stays
+    on the default rather than trade a loss on one compiler for a small gain on the
+    others. A band over equal lengths is the same mask for a top-left and a
+    bottom-right request, so both are out. D64 fp16 without a mask stays in.
+    """
+    if (
+        int(req.hdim_q) == 64
+        and req.dtype.lower() == "fp16"
+        and _parse_attention_mask_type(req.mask_type) != AttentionMaskType.NO_MASK
+    ):
+        return False
+    return (
+        bool(req.use_attn_bias)
+        and not req.use_sinks
+        and not int(req.sliding_window)
+        and int(req.seqlen_q) == int(req.seqlen_k)
+        and _parse_attention_mask_type(req.mask_type) in _BIAS_GEOMETRY_MASKS
+    )
+
+
+def _bias_geometry_spec(req: AttentionRequest):
+    """The spec of a request :func:`_serves_bias_geometry` accepts.
+
+    128-row query blocks on the one-CTA-per-block grid, with a 32-key tile at D128
+    and a 64-key tile at D64, and the work-decode order that measured best for the
+    mask: batch and KV head fastest, longest query blocks first, under a causal
+    band; query block fastest without one. Compile-time fields only, so one binary
+    still serves every runtime shape.
+
+    Why not the default geometry (256-row blocks, persistent at D128): a sweep of
+    the knobs the dense kernel already has, run with the bias on, found this geometry
+    ahead of it, or level within noise, in every cell it serves (head size, dtype and
+    mask kind) with each of the four compiler generations checked. The persistent grid
+    was never ahead with a bias. The bias-off default is unchanged.
+    """
+    head_size = int(req.hdim_q)
+    dtype = req.dtype.lower()
+    causal = _parse_attention_mask_type(req.mask_type) != AttentionMaskType.NO_MASK
+    return _make_spec(
+        req,
+        _BIAS_BLOCK_M,
+        _BIAS_BLOCK_N_D128 if head_size == 128 else _DENSE_BLOCK_N,
+        persistent=False,
+        nonpersist_decode="bt_hkv_minor" if causal else "qb_minor",
+        waves_per_eu=(
+            _BIAS_D64_BF16_WAVES_PER_EU if head_size == 64 and dtype == "bf16" else None
+        ),
+    )
+
+
+def tuned_base_spec(req: AttentionRequest):
     """The default ``Gfx942AttentionDenseSpec`` for ``req``.
 
     The gfx942 twin of ``gfx950_dense._base_spec``. The persistent grid turns on
     at D128, and non-tile-multiple self-attention lengths take the on-chip
-    ragged path.
+    ragged path. ``req.use_attn_bias`` turns on the kernel's additive bias (fp32
+    only); the bias requests :func:`_serves_bias_geometry` accepts take the
+    geometry of :func:`_bias_geometry_spec`, and every other one the default
+    geometry, on the grid it selects (the persistent grid serves the bias too). A
+    chunked bottom-right request whose work items fill their last wave poorly splits
+    each item's KV range across CTAs, where the kernel admits the split (never with a
+    bias: the segment store returns before the bias epilogue).
     ``waves_per_eu`` comes from the kernel's own per-config policy
-    (``_tuned_waves_per_eu``): any value the kernel bakes into its
-    ``kernel_name`` must be resolved by the kernel's policy, or the name tag and
-    the compiled binary can disagree. Every gfx942-private codegen knob stays at
-    the concrete spec's default; the knob space varies them.
+    (``_tuned_waves_per_eu``) except in that bias geometry. Either way the factory
+    sets the spec's field once, and the ``kernel_name`` tag and the emitted
+    attribute both read it, so a name can never promise another occupancy than the
+    binary has. Every gfx942-private codegen knob stays at the concrete spec's
+    default; the knob space varies them.
     """
+    from dataclasses import replace
+
     # Exact compare, deliberately: ``AttentionRequest.__post_init__`` has already
     # canonicalized ``arch``, so a case- or suffix-insensitive compare here would
     # be defending against an input shape that cannot reach this function.
@@ -113,21 +245,93 @@ def _base_spec(req: AttentionRequest):
         raise ValueError(
             f"gfx942 dense spec factory requires arch='gfx942', got {req.arch!r}"
         )
+    if _serves_bias_geometry(req):
+        return _bias_geometry_spec(req)
     head_size = int(req.hdim_q)
     # The persistent grid measured ahead at D128 for every batch and mask; at
-    # D64 the non-persistent grid did.
+    # D64 the non-persistent grid did. Paged K/V runs on the default grid.
+    paged = bool(dense_paged_fields(req))
     spec = _make_spec(
         req,
         _default_block_m(req),
         _DENSE_BLOCK_N,
-        persistent=head_size == 128,
+        persistent=head_size == 128 and not paged,
     )
+    # Not with a bias: the segment store returns before the bias epilogue.
+    if spec.causal_bottom_right and not spec.use_additive_bias:
+        from kernels.common.attention_dense_kv_split import (
+            max_kv_segments_for_extent,
+        )
+
+        from .dense_rules import dense_wave_segments
+
+        cus = int(req.num_cus) if int(req.num_cus) > 0 else _GFX942_NUM_PERSISTENT
+        work = -(-spec.seqlen_q // spec.block_m) * int(req.nhead_q) * int(req.batch)
+        segments = dense_wave_segments(
+            work,
+            cus,
+            max_segments=max_kv_segments_for_extent(
+                req.batch, spec.seqlen_q, req.nhead_q, head_size, max_segments=8
+            ),
+        )
+        # The split runs on the one-CTA-per-block grid. Keep it only where the
+        # kernel admits it (check_kv_segments).
+        split = replace(spec, persistent=False, kv_segments=segments)
+        if segments > 1 and _supports(split, arch="gfx942")[0]:
+            spec = split
     if 0 < int(req.sliding_window) <= _NARROW_WINDOW:
         bm, bn, skip = _narrow_window_geometry(head_size, req.dtype.lower())
-        narrow = _make_spec(req, bm, bn, persistent=False, window_wave_skip=skip)
         # Keep the default geometry for any request the narrow one cannot serve.
-        if _supports(narrow, arch="gfx942")[0]:
-            spec = narrow
+        if dense_paged_tile_fits(req, bm, bn):
+            narrow = _make_spec(req, bm, bn, persistent=False, window_wave_skip=skip)
+            if _supports(narrow, arch="gfx942")[0]:
+                spec = narrow
+    return spec
+
+
+def _qbminor_base_spec(req: AttentionRequest):
+    """The default spec on the grid the hipDNN kernel ingestor launches.
+
+    One CTA per (query block, query head, batch) at the qb_minor block order
+    and one KV segment, whatever the problem: the ingestor's native dispatch
+    sizes that grid at run time, so no field may resolve a different grid
+    or decode from the build-time shape. The tile is the shared default rather
+    than :func:`_default_block_m`, whose work count is the build-time shape's;
+    the knob space varies it.
+    """
+    return ingestor_base_spec(req, persistent=False, nonpersist_decode="qb_minor")
+
+
+def ingestor_base_spec(
+    req: AttentionRequest, *, persistent: bool, nonpersist_decode: str
+):
+    """The default spec of one grid the hipDNN kernel ingestor launches.
+
+    The shared default tile and one KV segment, with the grid fixed: the
+    non-persistent grid at ``nonpersist_decode``, or (``persistent``) the
+    persistent grid at the 304-CTA count with ``persist_decode`` pinned to what
+    ``auto`` resolves to at the build shape. Pinning names the same binary and
+    symbol as ``auto`` there, but the ingestor reads the decode to pass its
+    fast-division kernargs, and every runtime shape must keep that decode. The
+    persistent grid is D128 only: at D64 the grid measured ahead.
+    """
+    from dataclasses import replace
+
+    from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
+
+    if req.arch != "gfx942":
+        raise ValueError(
+            f"gfx942 dense spec factory requires arch='gfx942', got {req.arch!r}"
+        )
+    if persistent and int(req.hdim_q) != 128:
+        raise ValueError(
+            f"the ingestor's gfx942 persistent grid is D128 only, got D{req.hdim_q}"
+        )
+    bm = int(DENSE_TILE_GEOMETRIES["default"]["block_m"])
+    spec = _make_spec(req, bm, _DENSE_BLOCK_N, persistent=persistent)
+    spec = replace(spec, nonpersist_decode=nonpersist_decode)
+    if persistent:
+        spec = replace(spec, persist_decode=spec.resolved_persist_decode)
     return spec
 
 
@@ -138,13 +342,26 @@ def _make_spec(
     *,
     persistent: bool,
     window_wave_skip: bool = False,
+    nonpersist_decode: str = "auto",
+    waves_per_eu: int | None = None,
 ):
-    """The ``Gfx942AttentionDenseSpec`` for ``req`` at one tile geometry."""
+    """The ``Gfx942AttentionDenseSpec`` for ``req`` at one tile geometry and
+    grid, with one KV segment.
+
+    ``nonpersist_decode`` is the grid body's work-decode order (``"auto"`` lets the
+    spec resolve it); ``waves_per_eu=None`` takes the kernel's per-config policy.
+    """
     from kernels.gfx942.attention_dense import (
         Gfx942AttentionDenseSpec,
         _tuned_waves_per_eu,
     )
 
+    # ``use_attn_bias`` is a bool: AttentionRequest refuses anything else.
+    if req.use_attn_bias and req.attn_bias_dtype.strip().lower() != "f32":
+        raise ValueError(
+            "gfx942 dense: the additive bias must be fp32, got "
+            f"attn_bias_dtype={req.attn_bias_dtype!r}"
+        )
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
     head_size = int(req.hdim_q)
     dtype = req.dtype.lower()
@@ -166,37 +383,9 @@ def _make_spec(
             "gfx942 dense: cross-length NO_MASK requests are not served by the "
             "dense kernel"
         )
-    diag_split = False
-    kv_segments = 1
-    if bottom_right and not ragged:
-        # Chunked prefill: the unmasked body loop skips the mask on every tile
-        # below the shifted diagonal. When the work items fill their last wave
-        # poorly (short chunks, or a head count just past the CU count), the
-        # non-persistent grid splits each work item's KV range across CTAs.
-        from kernels.common.attention_dense_kv_split import (
-            max_kv_segments_for_extent,
-        )
-
-        from .dense_rules import dense_wave_segments
-
-        diag_split = True
-        cus = int(req.num_cus) if int(req.num_cus) > 0 else _GFX942_NUM_PERSISTENT
-        work = -(-sq // bm) * int(req.nhead_q) * int(req.batch)
-        if (
-            sq % bm == 0
-            and not req.use_sinks
-            and not req.emit_lse
-            and not int(req.sliding_window)
-        ):
-            kv_segments = dense_wave_segments(
-                work,
-                cus,
-                max_segments=max_kv_segments_for_extent(
-                    req.batch, sq, req.nhead_q, head_size, max_segments=8
-                ),
-            )
-            if kv_segments > 1:
-                persistent = False
+    # Chunked prefill: the unmasked body loop skips the mask on every tile below
+    # the shifted diagonal.
+    diag_split = bottom_right and not ragged
     return Gfx942AttentionDenseSpec(
         batch=int(req.batch),
         seqlen_q=sq,
@@ -211,15 +400,21 @@ def _make_spec(
         persistent=persistent,
         num_persistent=_GFX942_NUM_PERSISTENT,
         persist_decode="auto",
+        nonpersist_decode=nonpersist_decode,
         ragged=ragged,
         sliding_window=int(req.sliding_window),
         use_sinks=bool(req.use_sinks),
-        waves_per_eu=_tuned_waves_per_eu(head_size, dtype),
+        waves_per_eu=(
+            _tuned_waves_per_eu(head_size, dtype)
+            if waves_per_eu is None
+            else waves_per_eu
+        ),
         emit_lse=bool(req.emit_lse),
         causal_bottom_right=bottom_right,
         causal_diag_split=diag_split,
-        kv_segments=kv_segments,
         window_wave_skip=window_wave_skip,
+        use_additive_bias=req.use_attn_bias,
+        **dense_paged_fields(req),
     )
 
 
@@ -253,22 +448,94 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         name=CANDIDATE_NAME,
         spec_id=SPEC_ID,
         variant_id=_VARIANT_ID,
-        base_spec=_base_spec,
+        base_spec=tuned_base_spec,
         supports=_supports,
         # Dense: causal (top-left or bottom-right), sliding-window and sinks (alone
-        # or combined), optional LSE output. Head size stays out: D64/D128 coverage
-        # is ``supports_attention_dense``'s call.
+        # or combined), optional LSE output, fp32 additive bias (both grids; see
+        # ``tuned_base_spec``) and paged K/V. The spec refuses a bias with paged K/V,
+        # so a request for both is reported as a refused pin. Head size stays out:
+        # D64/D128 coverage is ``supports_attention_dense``'s call.
         features=frozenset(
-            {"causal", "causal_bottom_right", "sliding_window", "sinks", "lse"}
+            {
+                "causal",
+                "causal_bottom_right",
+                "sliding_window",
+                "sinks",
+                "lse",
+                "attn_bias",
+                "layout_paged",
+            }
         ),
-        # _base_spec picks these from the dtype, head size, work count and window.
+        # tuned_base_spec picks these from the dtype, head size, work count and window.
         recorded=frozenset(
             {"persistent", "waves_per_eu", "block_m", "block_n", "window_wave_skip"}
         ),
     )
 
 
+def _make_gfx942_attention_dense_qbminor_candidate() -> KernelCandidate:
+    """The dense candidate pinned to the ingestor's grid (see
+    :func:`_qbminor_base_spec`)."""
+
+    return make_dense_candidate(
+        arch="gfx942",
+        name=QBMINOR_CANDIDATE_NAME,
+        spec_id=QBMINOR_SPEC_ID,
+        variant_id=_QBMINOR_VARIANT_ID,
+        base_spec=_qbminor_base_spec,
+        supports=_supports,
+        features=frozenset(
+            {
+                "causal",
+                "causal_bottom_right",
+                "sliding_window",
+                "sinks",
+                "lse",
+                "attn_bias",
+            }
+        ),
+        recorded=frozenset({"waves_per_eu"}),
+        pinned_axes=_PINNED_GRID_AXES,
+    )
+
+
+def _make_gfx942_attention_dense_aot_candidate(
+    name: str, spec_id: str, variant_id: str, persistent: bool, nonpersist_decode: str
+) -> KernelCandidate:
+    """One more grid the ingestor launches (see :func:`ingestor_base_spec`).
+
+    The persistent grid walks the whole dense knob space bar the CTA count,
+    which the dense rules scope out of a base whose decode is pinned. A grid
+    at another block order offers its default spec only: the qb_minor
+    candidate walks the tile and the other knobs on the default grid.
+    """
+    from functools import partial
+
+    return make_dense_candidate(
+        arch="gfx942",
+        name=name,
+        spec_id=spec_id,
+        variant_id=variant_id,
+        base_spec=partial(
+            ingestor_base_spec,
+            persistent=persistent,
+            nonpersist_decode=nonpersist_decode,
+        ),
+        supports=_supports,
+        features=frozenset(
+            {"causal", "causal_bottom_right", "sliding_window", "sinks", "lse"}
+        ),
+        recorded=frozenset({"waves_per_eu"}),
+        axis_names=None if persistent else frozenset(),
+        pinned_axes=_PINNED_GRID_AXES,
+    )
+
+
 def register(route: CandidateRegistry, execution: CandidateRegistry) -> None:
-    candidate = _make_gfx942_attention_dense_candidate()
-    route.register(candidate)
-    execution.register(candidate)
+    for candidate in (
+        _make_gfx942_attention_dense_candidate(),
+        _make_gfx942_attention_dense_qbminor_candidate(),
+        *(_make_gfx942_attention_dense_aot_candidate(*grid) for grid in _AOT_GRIDS),
+    ):
+        route.register(candidate)
+        execution.register(candidate)

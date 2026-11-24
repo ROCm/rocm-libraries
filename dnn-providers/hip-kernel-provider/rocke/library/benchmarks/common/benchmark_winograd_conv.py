@@ -46,6 +46,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+from benchmarks.common import conv_fill
+
 os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
 # (tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile_mn, pipeline, epilogue).
@@ -70,11 +72,56 @@ K3_CONFIGS_SHORT: Tuple[tuple, ...] = (
     (256, 256, 64, 2, 4, 16, "mem", "default"),
     (128, 128, 64, 2, 2, 16, "mem", "default"),
 )
+# The K3 grid of the MFMA targets in K3_MFMA_ARCHS (gfx950), from the same
+# implicit-GEMM AOT axes: the 32x32 warp tile next to the 16x16 one, and the
+# compv3 / compv4 pipelines, which the gfx1250 list leaves out (its WMMA K3
+# builds mem / wavelet only); wavelet is WMMA-only.
+K3_CONFIGS_MFMA: Tuple[tuple, ...] = tuple(
+    (tm, tn, tk, wm, wn, wt, pipe, "cshuffle")
+    for tm, tn, wm, wn in (
+        (256, 256, 2, 4),
+        (256, 256, 4, 4),
+        (256, 128, 4, 2),
+        (128, 256, 2, 4),
+        (128, 128, 2, 2),
+        (64, 128, 2, 2),
+    )
+    for tk in (64,)
+    for wt in (16, 32)
+    for pipe in ("mem", "compv3", "compv4")
+)
+# The targets whose AOT K3 grid adds K3_CONFIGS_MFMA to K3_CONFIGS_SHORT.
+K3_MFMA_ARCHS: Tuple[str, ...] = ("gfx950",)
 # Small configs for tiny problems (tests): always valid, quick to compile.
 K3_CONFIGS_TINY: Tuple[tuple, ...] = (
     (32, 32, 32, 1, 1, 16, "mem", "cshuffle"),
     (64, 64, 64, 2, 2, 16, "mem", "default"),
 )
+
+
+def k3_configs(arch: str) -> Tuple[tuple, ...]:
+    """The implicit-GEMM K3 configs of the AOT grid: :data:`K3_CONFIGS_SHORT`
+    for every arch outside :data:`K3_MFMA_ARCHS`, plus the 32x32 warp tile and
+    the ``compv3`` / ``compv4`` pipelines on the MFMA targets."""
+    if arch not in K3_MFMA_ARCHS:
+        return K3_CONFIGS_SHORT
+    return K3_CONFIGS_SHORT + tuple(
+        c for c in K3_CONFIGS_MFMA if c not in K3_CONFIGS_SHORT
+    )
+
+
+def k3_sweep_configs(sweep: str, arch: str) -> Tuple[tuple, ...]:
+    """The implicit-GEMM K3 candidate list for a given *sweep* mode and *arch*.
+
+    ``"short"`` and ``"first"`` delegate to :func:`k3_configs` so that the
+    arch-specific grid (MFMA extras on gfx950) flows through automatically.
+    ``"tiny"`` is arch-independent.
+    """
+    return {
+        "short": k3_configs(arch),
+        "tiny": K3_CONFIGS_TINY,
+        "first": k3_configs(arch)[:1],
+    }[sweep]
 
 
 def _u8(t):
@@ -596,7 +643,7 @@ def verify_error(out, ref) -> Tuple[float, float]:
     o = out.float().cpu()
     r = ref.float().cpu()
     d = (o - r).abs()
-    err = float(d.max() / r.abs().max().clamp(min=1.0))
+    err = float(d.max() / r.abs().max().clamp(min=conv_fill.ref_floor()))
     if err != err:  # NaN
         err = float("inf")
     l2 = float((o - r).norm() / r.norm().clamp(min=1e-30))
@@ -608,11 +655,11 @@ def make_inputs(problem, io_dtype: str, seed: int = 42):
 
     tdt = {"fp16": torch.float16, "bf16": torch.bfloat16}[io_dtype]
     g = torch.Generator().manual_seed(seed)
-    x = torch.empty(problem.N, problem.Hi, problem.Wi, problem.C).uniform_(
-        -1.0, 1.0, generator=g
+    x = conv_fill.fill_x(
+        torch.empty(problem.N, problem.Hi, problem.Wi, problem.C), generator=g
     )
-    w = torch.empty(problem.K, problem.Y, problem.X, problem.cpg).uniform_(
-        -1.0, 1.0, generator=g
+    w = conv_fill.fill_w(
+        torch.empty(problem.K, problem.Y, problem.X, problem.cpg), io_dtype, generator=g
     )
     y = torch.empty(problem.N, problem.Ho, problem.Wo, problem.K, dtype=tdt)
     return x.to(tdt), w.to(tdt), y
@@ -807,11 +854,7 @@ def run_case(problem, io_dtype: str, m, args, arch: str, ref_cache: dict):
     impls = ("wmma", "implicit") if args.k3 == "both" else (args.k3,)
     built = {}
     if "implicit" in impls:
-        configs = {
-            "short": K3_CONFIGS_SHORT,
-            "tiny": K3_CONFIGS_TINY,
-            "first": K3_CONFIGS_SHORT[:1],
-        }[args.k3_sweep]
+        configs = k3_sweep_configs(args.k3_sweep, arch)
         cands = build_k3_candidates(
             configs, pipe.gemm_problem, operand, arch, jobs=args.jobs
         )
@@ -1037,7 +1080,9 @@ def main(argv=None) -> int:
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--arch", default=None)
+    conv_fill.add_argument(ap)
     args = ap.parse_args(argv)
+    conv_fill.set_mode(args.fill)
 
     import torch  # noqa: F401 -- claim the HIP context first
 

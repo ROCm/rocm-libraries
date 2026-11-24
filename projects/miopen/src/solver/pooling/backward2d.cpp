@@ -141,7 +141,7 @@ bool PoolingBackward2d::IsApplicable(const ExecutionContext&,
            problem.GetYDesc().IsPossibleLayout4D5D("NCHW", strict);
 }
 
-ConvSolution PoolingBackward2d::GetSolution(const ExecutionContext&,
+ConvSolution PoolingBackward2d::GetSolution(const ExecutionContext& context,
                                             const miopen::pooling::ProblemDescription& problem,
                                             const PerformanceConfigPooling2dBackward& config) const
 {
@@ -200,7 +200,7 @@ ConvSolution PoolingBackward2d::GetSolution(const ExecutionContext&,
                      ? 1
                      : 0},
             }
-            << GetDataTypeKBP(problem.GetXDesc().GetType());
+            << GetDataTypeKBP(problem.GetXDesc().GetType(), context.GetStream().GetDeviceName());
 
         kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 

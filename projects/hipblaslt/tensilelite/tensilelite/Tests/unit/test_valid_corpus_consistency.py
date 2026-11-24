@@ -1,12 +1,12 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Hermetic unit tests for ``tensilelite.TensileLogic.ValidCorpusConsistency``.
+"""Hermetic unit tests for ``tensilelite.logic.valid_corpus_consistency``.
 
 Everything here builds its own tiny corpus under ``tmp_path`` -- no dependency
-on the real ``Logic/asm_full`` checkout, unlike ``test_PlaceholderMerge.py`` /
-``test_GpuRevisionTarget.py``, whose corpus-backed copies of these same checks
-are skipped when that directory is absent. This is new logic being pinned,
+on the real ``Logic/asm_full`` checkout. ``TensileLogic --check-all`` runs
+``check_corpus_invariants`` against that checkout in every kernel-generating
+build; these tests pin what it checks. This is new logic being pinned,
 not existing behavior being characterized, so plain asserts are used rather
 than snapshots.
 """
@@ -48,9 +48,9 @@ def _install_rocisa_stub(monkeypatch):
 @pytest.fixture
 def vcc(monkeypatch):
     _install_rocisa_stub(monkeypatch)
-    from tensilelite.TensileLogic import ValidCorpusConsistency
+    from tensilelite.logic import valid_corpus_consistency
 
-    return ValidCorpusConsistency
+    return valid_corpus_consistency
 
 
 def _all_yaml(root: Path):
@@ -397,7 +397,7 @@ def test_sibling_device_names_does_not_merge_chip_id_directory_variants(tmp_path
     # The real, checked-in gfx950 corpus: a chip-ID-specific directory
     # (gfx950_id75a3) sits alongside the default gfx950 tree, and both
     # declare *identical* ScheduleName/ArchitectureName headers (the header
-    # carries no chip-ID information at all -- ValidChipId.py's placement
+    # carries no chip-ID information at all -- valid_chip_id.py's placement
     # rules are what distinguish them). These must not be compared against
     # each other even though (schedule, arch, CUCount) alone would collide.
     _write_header_yaml(
@@ -485,7 +485,7 @@ def test_sibling_device_names_skips_a_file_that_is_entirely_unparseable(tmp_path
 
 
 def test_sibling_device_names_respects_a_caller_supplied_file_subset(tmp_path, vcc):
-    # This is how Run.py scopes the check to a requested --architecture: the
+    # This is how logic/run.py scopes the check to a requested --architecture: the
     # caller passes only the files it already selected, not a fresh
     # unfiltered walk of logic_root. A divergent pair that both live outside
     # that subset must not be reported.
@@ -507,8 +507,8 @@ def test_sibling_device_names_respects_a_caller_supplied_file_subset(tmp_path, v
 # find_chip_id_arch_lock_violations
 #
 # Not wired into check_corpus_invariants() / TensileLogic --check-all -- see
-# that function's docstring. Exercised directly here (and against the real
-# corpus in test_PlaceholderMerge.py) as a source-policy assertion.
+# that function's docstring. Exercised directly here, and over the whole
+# architecture registry in test_PlaceholderMerge.py, as a source-policy assertion.
 # ===========================================================================
 
 def test_chip_id_arch_lock_clean_for_real_predicate(tmp_path, vcc):
@@ -556,6 +556,169 @@ def test_chip_id_arch_lock_dedupes_repeated_archs(tmp_path, vcc):
 
 
 # ===========================================================================
+# find_range_sibling_violations
+# ===========================================================================
+
+_PLAIN_BF16_TN = {
+    "OperationType": "GEMM",
+    "DataType": "b",
+    "DestDataType": "b",
+    "ComputeDataType": "s",
+    "HighPrecisionAccumulate": True,
+    "TransposeA": True,
+    "TransposeB": False,
+    "UseBeta": True,
+    "Batched": True,
+}
+
+# Defaults a logic regeneration may write out explicitly without changing any value.
+_EXPLICIT_DEFAULTS = {
+    "UseGateResidual": False,
+    "FusedGemmA2A": False,
+    "isMixMode": False,
+    "MetadataLayout": 0,
+    "GateResidualDataTypeList": [],
+    "SetConstStrideGate": [],
+}
+
+
+@pytest.fixture
+def problem_type_vcc(vcc):
+    # The Range check fills ProblemType defaults through TensileLite itself,
+    # which needs the real rocisa rather than the stub `vcc` may install.
+    pytest.importorskip("rocisa.enum")
+    return vcc
+
+
+def _write_logic_yaml(
+    path, *, problemType, libraryType, cuCount=256, devices=("Device 75a0",), perfMetric=None
+):
+    import yaml
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    doc = {
+        "MinimumRequiredVersion": "5.0.0",
+        "ScheduleName": "gfx950",
+        "ArchitectureName": "gfx950",
+        "CUCount": cuCount,
+        "DeviceNames": list(devices),
+        "ProblemType": problemType,
+        "Solutions": [],
+    }
+    # Shipped mapping-form files write PerfMetric after Solutions.
+    if perfMetric is not None:
+        doc["PerfMetric"] = perfMetric
+    doc["LibraryType"] = libraryType
+    path.write_text(yaml.safe_dump(doc, sort_keys=False))
+    return path
+
+
+def _range_pair(root, *, rangeType=None, equalityType=None, **equalityHeader):
+    tree = root / "gfx950" / "gfx950"
+    name = "gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml"
+    rangeFile = _write_logic_yaml(
+        tree / "Range" / name, problemType=rangeType or _PLAIN_BF16_TN, libraryType="Range"
+    )
+    equalityFile = _write_logic_yaml(
+        tree / "Equality" / name,
+        problemType=equalityType or _PLAIN_BF16_TN,
+        libraryType="Equality",
+        **equalityHeader,
+    )
+    return rangeFile, equalityFile
+
+
+def test_range_sibling_with_matching_placeholder_is_clean(tmp_path, problem_type_vcc):
+    files = list(_range_pair(tmp_path))
+    assert problem_type_vcc.find_range_sibling_violations(files, tmp_path) == []
+
+
+def test_range_sibling_ignores_a_default_perf_metric_written_out(tmp_path, problem_type_vcc):
+    files = list(_range_pair(tmp_path, perfMetric="DeviceEfficiency"))
+    assert problem_type_vcc.find_range_sibling_violations(files, tmp_path) == []
+
+
+def test_range_sibling_ignores_defaults_written_out_explicitly(tmp_path, problem_type_vcc):
+    # The Equality file spells out defaults the Range file leaves implicit;
+    # nothing either file means is different.
+    files = list(_range_pair(tmp_path, equalityType={**_PLAIN_BF16_TN, **_EXPLICIT_DEFAULTS}))
+    assert problem_type_vcc.find_range_sibling_violations(files, tmp_path) == []
+
+
+def test_range_sibling_flags_a_different_problem_type(tmp_path, problem_type_vcc):
+    files = list(_range_pair(tmp_path, rangeType={**_PLAIN_BF16_TN, "UseBias": 1}))
+    violations = problem_type_vcc.find_range_sibling_violations(files, tmp_path)
+    assert len(violations) == 1
+    assert "Range logic diverges from its Equality sibling" in violations[0]
+    assert "ProblemType.UseBias" in violations[0]
+
+
+@pytest.mark.parametrize(
+    "header,field",
+    [
+        ({"cuCount": None}, "CUCount"),
+        ({"devices": ("Device 75a0", "Device 75a3")}, "DeviceNames"),
+        # A PerfMetric other than DeviceEfficiency is part of the placeholder name.
+        ({"perfMetric": "CUEfficiency"}, "PerfMetric"),
+    ],
+)
+def test_range_sibling_flags_a_different_header(tmp_path, problem_type_vcc, header, field):
+    files = list(_range_pair(tmp_path, **header))
+    violations = problem_type_vcc.find_range_sibling_violations(files, tmp_path)
+    assert len(violations) == 1
+    assert f"{field}:" in violations[0]
+
+
+def test_range_sibling_flags_the_same_devices_in_another_order(tmp_path, problem_type_vcc):
+    # MasterSolutionLibrary.hardware joins DeviceNames in file order into the
+    # _ID placeholder suffix, so reordering them names a different placeholder.
+    tree = tmp_path / "gfx950" / "gfx950"
+    name = "gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml"
+    files = [
+        _write_logic_yaml(
+            tree / "Range" / name,
+            problemType=_PLAIN_BF16_TN,
+            libraryType="Range",
+            devices=("Device 75a0", "Device 75a3"),
+        ),
+        _write_logic_yaml(
+            tree / "Equality" / name,
+            problemType=_PLAIN_BF16_TN,
+            libraryType="Equality",
+            devices=("Device 75a3", "Device 75a0"),
+        ),
+    ]
+    violations = problem_type_vcc.find_range_sibling_violations(files, tmp_path)
+    assert len(violations) == 1
+    assert "DeviceNames:" in violations[0]
+
+
+def test_range_file_without_an_equality_sibling_is_not_compared(tmp_path, problem_type_vcc):
+    rangeFile, _ = _range_pair(tmp_path, rangeType={**_PLAIN_BF16_TN, "UseBias": 1})
+    assert problem_type_vcc.find_range_sibling_violations([rangeFile], tmp_path) == []
+
+
+def test_non_range_siblings_are_not_held_to_the_placeholder_rule(tmp_path, problem_type_vcc):
+    # Same-basename Equality / GridBased / Origami files diverge in the shipped
+    # corpus; only Range files are held to their Equality sibling.
+    tree = tmp_path / "gfx950" / "gfx950"
+    name = "gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml"
+    files = [
+        _write_logic_yaml(tree / "Equality" / name, problemType=_PLAIN_BF16_TN, libraryType="Equality"),
+        _write_logic_yaml(
+            tree / "Origami" / name, problemType=_PLAIN_BF16_TN, libraryType="Origami", cuCount=None
+        ),
+    ]
+    assert problem_type_vcc.find_range_sibling_violations(files, tmp_path) == []
+
+
+def test_check_corpus_invariants_includes_the_range_sibling_check(tmp_path, problem_type_vcc):
+    _range_pair(tmp_path, rangeType={**_PLAIN_BF16_TN, "UseBias": 1})
+    violations = problem_type_vcc.check_corpus_invariants(tmp_path)
+    assert any("Range logic diverges from its Equality sibling" in v for v in violations)
+
+
+# ===========================================================================
 # check_corpus_invariants
 # ===========================================================================
 
@@ -577,7 +740,7 @@ def test_check_corpus_invariants_reports_the_sibling_finders_violations(tmp_path
 
 
 def test_check_corpus_invariants_respects_a_caller_supplied_file_subset(tmp_path, vcc):
-    # Mirrors Run.py's usage: only the already --architecture-filtered files
+    # Mirrors logic/run.py's usage: only the already --architecture-filtered files
     # are compared, not a fresh unfiltered walk of logic_root.
     _write_header_yaml(
         tmp_path / "aldebaran" / "gfx950" / "Equality" / "logic.yaml",

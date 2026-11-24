@@ -6,12 +6,13 @@ tiled GEMM/MMA kernel -- or any custom thread/register distribution -- without h
 bound target so authorship stays target-agnostic.
 
 ```python
+from rocke.core.ir import F16, F32
 from rocke.helpers.tiling import (
     TileMma, make_tensor_desc, make_window, make_fragment,
     fill_fragment, load_fragment, store_fragment,
 )
 
-mma = TileMma((16, 16, 16), a="f16", b="f16", c="f32", target="gfx90a")  # IR-free resolve
+mma = TileMma((16, 16, 16), a=F16, b=F16, c=F32, target="gfx90a")  # IR-free resolve
 acc = make_fragment(mma.c_desc, F32)
 fill_fragment(b, acc, 0)
 for k0 in range(0, K_LEN, 16):

@@ -1,4 +1,4 @@
-﻿// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
 #include "HipMlopsEngine.hpp"
@@ -6,9 +6,11 @@
 #include "hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp"
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
-#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 namespace hip_kernel_provider
@@ -41,6 +43,9 @@ bool HipMlopsEngine::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(tensorMap),
                                "Ragged tensors are not supported");
     HIP_KERNEL_RETURN_FALSE_IF(
+        !hip_kernel_provider::core::utils::hasNoStrayRaggedOffsetMultiplier(tensorMap),
+        "ragged_offset_multiplier is set on a tensor without a ragged offset");
+    HIP_KERNEL_RETURN_FALSE_IF(
         !hip_kernel_provider::core::utils::hasOnly16ByteAlignedTensors(tensorMap),
         "All tensors must be aligned to a multiple of 16 bytes");
 
@@ -60,41 +65,21 @@ void HipMlopsEngine::getDetails(Handle& handle,
                                 const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                                 hipdnnPluginConstData_t& detailsOut) const
 {
-    flatbuffers::FlatBufferBuilder builder;
-
-    std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>> knobsVector;
-
-    // Collect custom knobs from plan builders
+    // Only one plan builder should be applicable for a given graph and return custom knobs.
+    // Take the first one's to avoid duplicates.
+    std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> knobs;
     for(const auto& planBuilder : _planBuilders)
     {
-        auto customKnobs = planBuilder->getCustomKnobs(handle, opGraph);
-
-        if(customKnobs.empty())
+        knobs = planBuilder->getCustomKnobs(handle, opGraph);
+        if(!knobs.empty())
         {
-            continue;
+            break;
         }
-
-        for(const auto& knobT : customKnobs)
-        {
-            auto knobOffset = hipdnn_flatbuffers_sdk::data_objects::Knob::Pack(builder, &knobT);
-            knobsVector.push_back(knobOffset);
-        }
-
-        // Only one plan builder should be applicable for a given graph and return custom knobs.
-        // Stop after finding the first one to avoid duplicates.
-        break;
     }
 
-    auto knobs = builder.CreateVector(knobsVector);
-
-    auto engineDetails
-        = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, _id, knobs);
-    builder.Finish(engineDetails);
-    auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
-    detailsOut.ptr = detachedBuffer->data();
-    detailsOut.size = detachedBuffer->size();
-
-    handle.storeEngineDetailsDetachedBuffer(detailsOut.ptr, std::move(detachedBuffer));
+    const std::vector<int32_t> behaviorNotes{
+        static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)};
+    core::utils::storeEngineDetails(handle, _id, knobs, behaviorNotes, detailsOut);
 }
 
 size_t HipMlopsEngine::getMaxWorkspaceSize(
@@ -105,10 +90,12 @@ size_t HipMlopsEngine::getMaxWorkspaceSize(
     Settings baseExecutionSettings;
     initializeHipKernelSettings(engineConfig, baseExecutionSettings);
     size_t workspaceSize = 0;
+    bool anyApplied = false;
     for(const auto& planBuilder : _planBuilders)
     {
         if(planBuilder->isApplicable(handle, opGraph))
         {
+            anyApplied = true;
             Settings executionSettings = baseExecutionSettings;
             planBuilder->initializeExecutionSettings(
                 handle, opGraph, engineConfig, executionSettings);
@@ -116,6 +103,13 @@ size_t HipMlopsEngine::getMaxWorkspaceSize(
                 = std::max(workspaceSize,
                            planBuilder->getMaxWorkspaceSize(handle, opGraph, executionSettings));
         }
+    }
+
+    if(!anyApplied)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "HipMlopsEngine::getMaxWorkspaceSize: no plan builder applies to the graph");
     }
     return workspaceSize;
 }
@@ -146,9 +140,13 @@ void HipMlopsEngine::initializeExecutionContext(
         if(planBuilder->isApplicable(handle, opGraph))
         {
             planBuilder->buildPlan(handle, opGraph, engineConfig, executionContext);
-            break;
+            return;
         }
     }
+
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+        "HipMlopsEngine::initializeExecutionContext: no plan builder applies to the graph");
 }
 
 void HipMlopsEngine::addPlanBuilder(

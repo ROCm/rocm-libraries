@@ -25,12 +25,13 @@ from .common import (
     AttentionRequest,
     AttentionSpec,
     FAMILY,
-    _problem,
+    attention_problem,
     _request_errors,
     _selector_matches,
 )
+from .axes import _CODEPATH_KNOBS
 from .candidate import make_tuning_candidate
-from .tuning_specs import NUM_SEGMENTS
+from .tuning_specs import NUM_SEGMENTS, additive_bias_geometry_ok
 from .unified_rules import AttentionGeometryVariant
 
 
@@ -90,6 +91,20 @@ def _variants():
 
 GFX950_TUNING_VARIANTS = tuple(_variants())
 
+# The gfx950 D256 candidate's algorithm (see _make_gfx950_d256_candidate),
+# named so a caller outside this package (the SDPA gate) does not have to
+# reconstruct the literal.
+D256_GFX950_ALGORITHM = "d256_gfx950"
+
+
+def _variant_features(variant: AttentionGeometryVariant) -> frozenset:
+    """Additive bias is declared exactly where the spec build accepts it
+    (``additive_bias_geometry_ok``, the same rule ``_bias_fields`` enforces)."""
+    knobs = _CODEPATH_KNOBS.get((variant.arch, variant.codepath), {})
+    if additive_bias_geometry_ok(variant.arch, knobs):
+        return frozenset({"attn_bias"})
+    return frozenset()
+
 
 def _make_gfx950_d256_candidate() -> KernelCandidate:
     """Fast gfx950 bf16 head_size-256 prefill kernel — 32x32 transposed stack
@@ -119,7 +134,7 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
-        problem = _problem(req)
+        problem = attention_problem(req)
         ok, why = supports_native_unified_attention(problem, arch=req.arch)
         if not ok:
             return False, why
@@ -136,7 +151,7 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, AttentionRequest)
-        problem = _problem(req)
+        problem = attention_problem(req)
         from kernels.common.attention_unified import _d256_gfx950_spec_overrides
 
         return AttentionSpec(
@@ -156,7 +171,7 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
     candidate = KernelCandidate(
         name=name,
         family=FAMILY,
-        algorithm="d256_gfx950",
+        algorithm=D256_GFX950_ALGORITHM,
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=5,
@@ -183,6 +198,6 @@ def register(route: CandidateRegistry, execution: CandidateRegistry) -> None:
     """The D256 fast path routes only; each tuning geometry goes on both."""
     route.register(_make_gfx950_d256_candidate())
     for variant in GFX950_TUNING_VARIANTS:
-        candidate = make_tuning_candidate(variant)
+        candidate = make_tuning_candidate(variant, _variant_features(variant))
         route.register(candidate)
         execution.register(candidate)

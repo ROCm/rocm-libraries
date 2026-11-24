@@ -16,7 +16,7 @@ Judge whether each added or changed test, and each change to test configuration,
   greening CI). In hipDNN most weakening happens outside test source, so diff these too:
   - Provider `--test-config` TOMLs (`dnn-providers/**/config/*.toml`): raised `[[tolerance_overrides]]`, new
     `[[validator_overrides]]` (allclose is the default; an `rms` override that buys slack is a loosening), new or wider
-    `[[test_skips]]` (`filters`, `archs`, `platforms`). See `dnn-providers/integration-tests/docs/file-formats.md` § "Per-engine test config".
+    `[[test_skips]]` (`filters`, `archs`, `platforms`). See `dnn-providers/integration-tests/docs/file-formats.md` § "Engine test config".
   - Support-claim sidecars removed or narrowed (`<bundle>.support.json` beside a single-graph bundle, `support.json` beside a
     sweep, under `dnn-providers/integration-tests/integration-test-bundles/`), and any `--enforce-support-claims=false`. `dnn-providers/integration-tests/docs/file-formats.md` § "Support-claim sidecars", `dnn-providers/integration-tests/docs/adding-tests.md` § "Updating support claims",
     `dnn-providers/integration-tests/docs/support-claim-enforcement.md`; the `verify-support-claims` pre-commit hook checks the sidecars.

@@ -10,6 +10,7 @@ a node with ``inputs`` / ``outputs`` / ``attributes`` and a ``tensors`` list.
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
@@ -31,6 +32,8 @@ _INPUT_UIDS = (
     "page_table_v_tensor_uid",
     "block_mask_tensor_uid",
     "sink_token_tensor_uid",
+    "cu_seq_len_q_tensor_uid",
+    "cu_seq_len_kv_tensor_uid",
     "descale_q_tensor_uid",
     "descale_k_tensor_uid",
     "descale_v_tensor_uid",
@@ -451,6 +454,7 @@ def test_invalid_ragged_offsets_are_rejected(graph_edit, match):
     "graph_edit, match",
     [
         (lambda g: g["nodes"][0].update(type="MatmulAttributes"), "SdpaAttributes"),
+        (lambda g: g["nodes"][0].pop("type"), "missing its 'type'"),
         (lambda g: g["nodes"][0]["inputs"].update(q_tensor_uid=None), "missing"),
         (lambda g: g["nodes"][0]["inputs"].update(seed_tensor_uid=99), "uid 99"),
         (lambda g: g["tensors"][0].update(data_type="fp12"), "data_type"),
@@ -502,6 +506,19 @@ def test_hipdnn_assets_are_present_when_required(request):
         pytest.skip("--rocke-require-hipdnn-assets not given")
     assert _SDPA_GRAPH_TEMPLATE is not None, hipdnn_assets.SKIP_REASON
     assert hipdnn_assets.sdpa_fwd_golden_graphs(), hipdnn_assets.SKIP_REASON
+
+
+def test_installed_hipdnn_assets_imply_require_flag(request):
+    """The converse: an installed tree that carries the hipDNN copy must run with
+    ``--rocke-require-hipdnn-assets``, or a later broken copy would skip the tests
+    below instead of failing. ``platform/tests/test_engine_linkage.py`` checks the
+    CMake wiring both ways, but no CI lane runs that file; this is the in-lane half.
+    A source checkout has no copy, so it skips."""
+    if not hipdnn_assets.installed_copy_present():
+        pytest.skip("not an installed tree: no hipdnn/ copy")
+    assert request.config.getoption(
+        "--rocke-require-hipdnn-assets"
+    ), "the hipDNN copy is installed but --rocke-require-hipdnn-assets was not given"
 
 
 @pytest.mark.skipif(_SDPA_GRAPH_TEMPLATE is None, reason=hipdnn_assets.SKIP_REASON)
@@ -632,6 +649,21 @@ def test_frontend_operand_rules_match_sdpa_fwd_node(inputs, attributes, tensors,
     if "page_table_k_tensor_uid" in inputs:
         graph["tensors"][1] = _tensor(1, (9, H, S // 2, D))
     with pytest.raises(ValueError, match=match):
+        from_hipdnn_graph(graph, "gfx950")
+
+
+@pytest.mark.parametrize("key", ["cu_seq_len_q_tensor_uid", "cu_seq_len_kv_tensor_uid"])
+@pytest.mark.parametrize("uid", [0, 10])
+def test_cumulative_sequence_lengths_are_declined_not_dropped(key, uid):
+    """hipDNN's writer emits both cu_seq_len keys on every node: null is a plain
+    request, a set uid must fail because SdpaRequest cannot honor it. Uid 0 is a
+    valid uid, so the check is on null, not on truthiness."""
+    assert _request().q.dims == (B, H, S, D)
+    graph = _graph(
+        inputs={key: uid},
+        tensors=[_tensor(10, (B, 1, 1, 1), "int32")],
+    )
+    with pytest.raises(NotImplementedError, match=re.escape(key)):
         from_hipdnn_graph(graph, "gfx950")
 
 

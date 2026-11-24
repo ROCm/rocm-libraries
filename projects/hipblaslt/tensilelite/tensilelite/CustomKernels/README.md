@@ -14,16 +14,18 @@ external manifest.
 
 ## Subdirectories
 
-| Directory     | Origin                                            |
-| ------------- | ------------------------------------------------- |
-| `tensile/`    | Kernels emitted by Tensile's own assembly writer. |
-| `aiter/`      | External: AITER-sourced GEMM kernels.             |
-| `ck/`         | External: Composable Kernel-sourced kernels.     |
-| `rocblas/`    | External: rocBLAS wvSpltK skinny-GEMM kernels.   |
-| `vllm/`       | External: vLLM wvSplitK skinny-GEMM kernels.     |
-| `rocroller/`  | External: rocRoller-sourced kernels.              |
-| `wave/`       | External: Wave (handwritten) kernels.             |
-| `triton/`     | External: Triton-compiled GEMM kernels.           |
+| Directory       | Origin                                            |
+| --------------- | ------------------------------------------------- |
+| `tensile/`      | Kernels emitted by Tensile's own assembly writer. |
+| `aiter/`        | External: AITER-sourced GEMM kernels.             |
+| `ck/`           | External: Composable Kernel-sourced kernels.      |
+| `rocblas/`      | External: rocBLAS wvSpltK skinny-GEMM kernels.    |
+| `vllm/`         | External: vLLM wvSplitK skinny-GEMM kernels.      |
+| `skinny_mxfp8/` | External: skinny MXFP8 GEMM kernels.              |
+| `rocroller/`    | External: rocRoller-sourced kernels.              |
+| `wave/`         | External: Wave (handwritten) kernels.             |
+| `triton/`       | External: Triton-compiled GEMM kernels.           |
+| `rocke/`        | External: rocKE GEMM kernels.                     |
 
 Loader behavior is the same in every subdirectory; the split is purely
 organizational.
@@ -101,8 +103,43 @@ custom.config:
   WavefrontSize: 64
 ```
 
-`Source`, `Version`, and `Features` are presence-checked but otherwise
-provenance only — they are read by the validator, not by the runtime.
+`Source`, `Version`, and `Features` are presence-checked. `Source` and `Version` are
+provenance only. `Features` `SupportsBias`, `SupportsActivation` and `SupportsScaleAlpha`
+set to false make that solution reject bias, activation and scale-alpha-vector problems
+(see "ProblemType restriction" below).
+
+### Optional `CustomKernel` keys and predicates
+
+- Predicates (each is a `custom.config` key; `custom.config` wins for every key it declares, and a logic file can
+  only add predicates the config does not declare, which narrows what the solution accepts):
+  - `AssertStrideAMultiple`, `AssertStrideBMultiple`: `{index: value}`, stride in elements.
+  - `AssertTensorBytesLessThan`: for every non-empty A, B, C and D, both `totalAllocatedBytes()` and the leading stride in bytes must be below the value, for
+    kernels whose 32-bit buffer sizes or out-of-range offsets would overflow.
+  - `AssertAnySizeLessThan`: `{index: value}`, an `Or` of C++ `SizeLessThan` predicates; at least one listed size is
+    below its value.
+  - `AssertMXScalesPreSwizzled`: `true`, the problem's MX scales are not flagged packed by the caller. For kernels
+    that read only the pre-swizzled layout. hipBLASLt flags every scale format except `Block_32_UE8M0_32_8_EXT` as
+    packed; the TensileLite client leaves the flags false.
+- ProblemType restriction: when `custom.config` `Features` sets `SupportsBias`, `SupportsActivation` or
+  `SupportsScaleAlpha` to false, that solution gets its own `ProblemType` copy with `UseBias` 0, activation
+  off (`ActivationType` none) or `UseScaleAlphaVec` 0 respectively, so it rejects bias, activation and
+  scale-alpha-vector problems while the logic file's shared `ProblemType` and the other solutions are unchanged.
+  A config without a `Features` block, or with the flag absent or true, is never restricted; the config's
+  `ProblemType` flags are not consulted.
+
+Under uniform summation order, which hipBLASLt applies unless the caller turns
+it off, hipBLASLt refuses an external kernel unless its `CustomKernel` block
+sets `uniformSummationOrder: true` (default `false`). Set it only for a kernel
+that reduces every row of D in the same order, so that identical rows of A give
+bitwise-identical rows of D, and that has no compiled-in StaggerU, which
+hipBLASLt still refuses. The declaration has to hold for every problem the
+kernel's predicates admit, including partial tiles, any K, and padded leading
+dimensions; hipBLASLt has no way to check it. A kernel that declares it also
+needs a case in `clients/tests/src/row_uniformity_gtest.cpp` (see the
+`SkinnyTn` cases): a shape library logic routes to it, checked row-uniform on
+the device, with the kernel asserted as the default pick on its architecture.
+`AddCustomConfig` copies the key from the kernel's `CustomKernel` entry in the
+test YAML.
 
 ## Adding a new external kernel
 

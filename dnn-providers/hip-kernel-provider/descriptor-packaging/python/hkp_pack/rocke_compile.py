@@ -121,6 +121,47 @@ def _assert_no_backend_fallback(source, builder, arch):
     )
 
 
+def _arm_accepts(arm, value):
+    """Whether a union arm is the one a JSON value of this type builds."""
+    origin = typing.get_origin(arm)
+    if arm is type(None):
+        return value is None
+    if origin is typing.Literal:
+        return any(type(v) is type(value) and v == value for v in typing.get_args(arm))
+    if arm is tuple or origin is tuple:
+        return isinstance(value, list)
+    if dataclasses.is_dataclass(arm):
+        return isinstance(value, dict)
+    if arm is bool:
+        return isinstance(value, bool)
+    if arm is int:
+        return isinstance(value, int) and not isinstance(value, bool)
+    if arm is float:
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if arm is str:
+        return isinstance(value, str)
+    return False
+
+
+def _build_tuple(field_type, value):
+    if not isinstance(value, list):
+        raise HkpPackError(
+            f"spec field type {field_type!r} needs a JSON list, got {value!r}"
+        )
+    args = typing.get_args(field_type)
+    if not args:
+        raise HkpPackError(
+            f"unsupported spec field type {field_type!r} (untyped tuple)"
+        )
+    if len(args) == 2 and args[1] is Ellipsis:
+        return tuple(_build_field(args[0], v) for v in value)
+    if len(args) != len(value):
+        raise HkpPackError(
+            f"spec field type {field_type!r} needs {len(args)} items, got {value!r}"
+        )
+    return tuple(_build_field(a, v) for a, v in zip(args, value))
+
+
 def _build_field(field_type, value):
     origin = typing.get_origin(field_type)
     if _is_union(origin):
@@ -129,9 +170,17 @@ def _build_field(field_type, value):
         non_none = [a for a in typing.get_args(field_type) if a is not type(None)]
         if len(non_none) == 1:
             return _build_field(non_none[0], value)
-        raise HkpPackError(
-            f"unsupported spec field type {field_type!r} (multi-arm union)"
-        )
+        # A JSON value picks the arm by its type; a value two arms accept (or
+        # none does) has no single reading.
+        arms = [a for a in non_none if _arm_accepts(a, value)]
+        if len(arms) != 1:
+            raise HkpPackError(
+                f"spec value {value!r} matches {len(arms)} arms of the union "
+                f"{field_type!r}; it needs exactly one"
+            )
+        return _build_field(arms[0], value)
+    if origin is tuple:
+        return _build_tuple(field_type, value)
     if origin is typing.Literal:
         # Validate membership. The allowed set is already one call away -- the
         # union arm above uses get_args on the same field -- and without this a
@@ -161,10 +210,15 @@ def build_spec(cls, data):
     typing.get_type_hints (not field.type, which is a string under
     `from __future__ import annotations`) and dispatching: scalar -> passthrough;
     nested dataclass -> recurse into a real instance; Optional[X] -> None or a
-    built X; Literal / other plain -> passthrough. A list/tuple field type and an
-    input key that is not a field are hard-rejected. Missing/mis-typed fields and
-    a spec __post_init__ rejection propagate from cls(**kwargs) for the caller to
-    wrap. No rocke import: directly unit-testable with local stub dataclasses.
+    built X; a typed tuple (`tuple[int, int]`, `tuple[X, ...]`) -> a tuple built
+    from a JSON list, item by item; a multi-arm union -> the one arm the JSON
+    value's type selects (None, bool, int, float, str or a Literal member, a list
+    for a tuple arm, a mapping for a dataclass arm), refused when no arm or more
+    than one fits; Literal / other plain -> passthrough. A list or untyped tuple
+    field type and an input key that is not a field are hard-rejected.
+    Missing/mis-typed fields and a spec __post_init__ rejection propagate from
+    cls(**kwargs) for the caller to wrap. No rocke import: directly
+    unit-testable with local stub dataclasses.
     """
     field_names = {f.name for f in dataclasses.fields(cls)}
     extra = set(data) - field_names
@@ -323,14 +377,17 @@ def _module_from_source(source):
 
 
 # Builders whose validation predicate is not derivable from the builder name.
-# The tiled ``supports_tiled_2d``/``3d`` are keyword-only, so these builders use the
-# spec-first ``supports_tiled_*_spec`` wrappers in the gfx942/gfx950 modules. The
-# reduce and fastkv-register-P tiled builders and all gfx1250 tiled builders have no
-# spec-first predicate, so ``_check_support_predicate`` refuses to pack them.
+# The tiled ``supports_tiled_2d``/``3d`` and ``supports_fastkv_register_p_2d`` are
+# keyword-only, so these builders use the spec-first ``supports_*_spec`` wrappers in
+# the gfx942/gfx950 modules; both arches' reduce builders use
+# ``supports_tiled_reduce_spec``. All gfx1250 tiled builders have no spec-first
+# predicate, so ``_check_support_predicate`` refuses to pack them.
 _PREDICATE_ALIASES = {
     "build_unified_attention_2d_tiled": "supports_tiled_2d_spec",
     "build_gfx942_4warp_gqa": "supports_gfx942_4warp_gqa_spec",
     "build_unified_attention_3d_tiled": "supports_tiled_3d_spec",
+    "build_unified_attention_2d_fastkv_register_p": "supports_fastkv_register_p_2d_spec",
+    "build_unified_attention_reduce_tiled": "supports_tiled_reduce_spec",
 }
 
 
@@ -454,6 +511,36 @@ def _check_support_predicate(module, builder, spec_obj, arch):
         )
 
 
+def _refuse_unchecked_launch_contract(kernel, builder, arch):
+    """Refuse a kernel whose launch contract a packed code object would drop.
+
+    The ingestor launches a packed code object with its own geometry and
+    reads no GPU-check word, so a kernel whose contract the bytes alone would
+    drop (`ParameterContract.code_object_refusal`: parameter facts, an exact
+    workgroup size, a `gpu_checked_value`) is refused, as rocke's
+    `write_artifact` refuses it, with the same reason. A `KernelModule` is
+    refused when any of its kernels is. Anything else the builder returned is
+    left to the compile step, which reports what it cannot lower.
+    """
+    from rocke.core.ir import LAUNCH_THROUGH_FROM_ARTIFACT, KernelDef
+    from rocke.helpers import KernelModule
+    from rocke.runtime import parameter_contract
+
+    if isinstance(kernel, KernelModule):
+        kernels = kernel.kernels
+    elif isinstance(kernel, KernelDef):
+        kernels = [kernel]
+    else:
+        return
+    for each in kernels:
+        refusal = parameter_contract(each).code_object_refusal()
+        if refusal is not None:
+            raise HkpPackError(
+                f"builder '{builder}' @ {arch} returned kernel '{each.name}': "
+                f"{refusal} -- {LAUNCH_THROUGH_FROM_ARTIFACT} instead of packing it"
+            )
+
+
 def compile_rocke_variant(
     source,
     builder,
@@ -479,6 +566,9 @@ def compile_rocke_variant(
     rocke's comgr `compile_kernel`. Writes the HSACO to <rocke_variant_key>.co and
     returns that path plus the captured launch symbol (`artifact.kernel_name`).
     Every deviation is a hard HkpPackError.
+    A kernel that states parameter facts or an exact workgroup size, or checks a
+    gpu_checked_value, is refused before it is compiled: the packed object
+    would launch without their checks.
 
     A builder may instead return a `rocke.helpers.KernelModule` (a primary kernel
     plus role-keyed companions), lowered via `compile_module` into one code
@@ -538,6 +628,8 @@ def compile_rocke_variant(
         raise HkpPackError(
             f"builder call failed ({type(exc).__name__}): {exc}"
         ) from exc
+
+    _refuse_unchecked_launch_contract(kernel, builder, compile_arch)
 
     compile_kernel, ComgrError = _load_compiler()
     KernelModule, compile_module = _load_module_compiler()

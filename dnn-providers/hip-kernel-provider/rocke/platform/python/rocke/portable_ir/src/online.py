@@ -95,7 +95,8 @@ def source_build_id(platform_root: str | Path | None = None) -> str | None:
     """Return the CMake-compatible ID for the portable-IR native bundle.
 
     The ID covers repository-owned inputs that determine the shared engine and
-    replay CLI: engine sources/headers, the CLI source, their CMake recipes, and
+    replay CLI: engine sources/headers, the library-owned C++ mirrors in
+    ``../library/cpp`` when present, the CLI source, their CMake recipes, and
     the inputs of the generated arch-domain table.
     It is a source/build-recipe ID, not a compiler or binary identity. Installed
     Python packages carry no engine source surface; ``None`` means freshness
@@ -109,6 +110,18 @@ def source_build_id(platform_root: str | Path | None = None) -> str | None:
     files = [path for path in files if bindings not in path.parents]
     if not files:
         return None
+    # Library-owned C++ mirrors beside the platform tree (rocke_build_id.cmake
+    # hashes them whenever present; keep the two mirrored).
+    library_cpp = root.parent / "library" / "cpp"
+    if (library_cpp / "CMakeLists.txt").is_file():
+        skipped = (library_cpp / "bindings", library_cpp / "tests")
+        for pattern in ("*.cpp", "*.h", "*.hpp"):
+            files += [
+                path
+                for path in library_cpp.rglob(pattern)
+                if not any(part in path.parents for part in skipped)
+            ]
+        files.append(library_cpp / "CMakeLists.txt")
     data = root / "python" / "rocke" / "core" / "arch" / "data"
     files += list(data.glob("intrinsic_arch_domain.*.json"))
     for relative in (
@@ -128,7 +141,8 @@ def source_build_id(platform_root: str | Path | None = None) -> str | None:
     lines = []
     for path in files:
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        lines.append(f"{path.relative_to(root).as_posix()}:{digest}")
+        relative = Path(os.path.relpath(path, root)).as_posix()
+        lines.append(f"{relative}:{digest}")
     blob = "\n".join(sorted(lines)).encode()
     return hashlib.sha256(blob).hexdigest()[:16]
 

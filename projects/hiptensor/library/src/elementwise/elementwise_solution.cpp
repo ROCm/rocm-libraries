@@ -31,16 +31,14 @@ namespace hiptensor
 
     ElementwiseSolution::ElementwiseSolution(
         std::unique_ptr<ck::tensor_operation::device::BaseOperator>&& deviceOp)
-        : mDim(0)
-        , mSize(0)
-        , mValid(false)
-        , mDeviceOp(std::move(deviceOp))
+        : mDeviceOp(std::move(deviceOp))
     {
     }
 
-    float ElementwiseSolution::operator()(StreamConfig const& streamConfig /*= StreamConfig{}*/)
+    float ElementwiseSolution::run(ElementwiseArgs const& args,
+                                   StreamConfig const&    streamConfig /*= StreamConfig{}*/) const
     {
-        if(!mInvokerArgPtr || !mInvokerPtr)
+        if(!args.mInvokerArgPtr || !args.mInvokerPtr)
         {
 #if !NDEBUG
             std::cout << mDeviceOp->GetTypeString() << " is not initialized" << std::endl;
@@ -48,7 +46,7 @@ namespace hiptensor
             return -1.0f;
         }
 
-        if(!mValid)
+        if(!args.mValid)
         {
 #if !NDEBUG
             std::cout << kernelName() << " does not support this problem" << std::endl;
@@ -56,7 +54,7 @@ namespace hiptensor
             return -1.0f;
         }
 
-        return mInvokerPtr->Run(mInvokerArgPtr.get(), streamConfig);
+        return args.mInvokerPtr->Run(args.mInvokerArgPtr.get(), streamConfig);
     }
 
     size_t ElementwiseSolution::uid() const
@@ -68,25 +66,9 @@ namespace hiptensor
         return value;
     }
 
-    ck::index_t ElementwiseSolution::problemSize() const
-    {
-        return mSize;
-    }
-
     std::string ElementwiseSolution::kernelName() const
     {
         return mDeviceOp->GetTypeString();
-    }
-
-    void ElementwiseSolution::resetArgs()
-    {
-        mDim  = 0;
-        mSize = 0;
-
-        mInvokerArgPtr.reset(nullptr);
-        mInvokerPtr.reset(nullptr);
-
-        mValid = false;
     }
 
 } // namespace hiptensor

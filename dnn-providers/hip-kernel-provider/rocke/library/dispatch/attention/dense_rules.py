@@ -15,8 +15,10 @@ import math
 from dataclasses import dataclass, fields as _dataclass_fields, replace
 from functools import lru_cache
 from itertools import product
+from operator import index
 from typing import Callable, Iterable, Mapping, Optional, Tuple
 
+from kernels.common.attention_dense_kv_split import kv_split_admits
 from rocke.dispatch.tuning import WavesPerEuSpace
 from rocke.dispatch.tuning.walk import one_knob_at_a_time
 
@@ -71,6 +73,15 @@ def _gfx942_dense_inert_knobs(spec) -> dict:
     }
 
 
+def _gfx942_order_per_problem(spec) -> bool:
+    """Whether the base sets its grid's decode order from the problem (the bias
+    geometry follows the mask), not from the spec's own policy: the order is then a
+    recorded field, and stays an axis with the grid kind and the KV split. A candidate
+    that pins its order for every problem (``DenseSpace.pinned_axes``) never records it.
+    """
+    return bool(spec.use_additive_bias) and spec.nonpersist_decode != "auto"
+
+
 @dataclass(frozen=True)
 class _DenseTuningArch:
     """What the shared dense walk needs to know about one arch's dense body.
@@ -113,7 +124,7 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
             "causal_diag_split": lambda s: (
                 bool(s.causal) and int(s.sliding_window) == 0
             ),
-            "kv_segments": lambda s: _kv_segments_in_scope(s),
+            "kv_segments": kv_split_admits,
         },
         policy_knobs=(
             "exp_per_pv_step",
@@ -130,7 +141,15 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
     "gfx942": _DenseTuningArch(
         # persistent is itself an axis here, so the persistent-only knobs stay
         # and the per-spec duplicate check drops them on non-persistent specs.
+        # A candidate that pins the block order (qbminor, the AOT grids) pins the
+        # grid kind with it, through ``DenseSpace.pinned_axes``, not through the
+        # base spec: a spec whose order is set (the bias geometry's) does not say
+        # whether the order is pinned for every problem or picked for this one.
         scope={
+            # A base that pins its persistent decode (the ingestor's persistent
+            # grid) pins the CTA count with it: the decode's legality was checked
+            # at that count, and the launch passes exactly that many CTAs.
+            "num_persistent": lambda s: s.persist_decode == "auto",
             "interleave": lambda s: bool(s.causal),
             "lds_row_pad": lambda s: int(s.head_size) == 128,
             "lds_k_group_pad": lambda s: int(s.head_size) < 128,
@@ -142,26 +161,13 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
             "causal_diag_split": lambda s: (
                 bool(s.causal) and int(s.sliding_window) == 0
             ),
-            "kv_segments": lambda s: _kv_segments_in_scope(s),
+            "kv_segments": kv_split_admits,
             "window_wave_skip": lambda s: bool(s.causal) and int(s.sliding_window) > 0,
         },
         policy_knobs=("use_cfvst", "use_exp2_fast", "v_row_pad", "use_v_swizzle"),
         inert=_gfx942_dense_inert_knobs,
     ),
 }
-
-
-def _kv_segments_in_scope(spec) -> bool:
-    """The KV-segment split exists only on the plain default grid."""
-    return not (
-        spec.persistent
-        or int(spec.sliding_window)
-        or spec.use_sinks
-        or spec.emit_lse
-        or spec.ragged
-        or spec.varlen
-        or spec.paged
-    )
 
 
 def dense_kv_segments(work_items: int, num_cus: int, max_segments: int = 8) -> int:
@@ -243,8 +249,42 @@ def resolve_dense_num_persistent(
         ) from None
 
 
+def dense_paged_fields(req) -> dict:
+    """Paged-KV spec fields of a ``layout="paged"`` request; empty for any other.
+
+    The block count is known only from the cache tensor, so this is the smallest
+    cache that holds the request; binding retargets it from ``k.shape[0]``
+    (:meth:`AttentionTuningSpec.with_num_kv_blocks`).
+    """
+    if req.layout.strip().lower() != "paged":
+        return {}
+    try:
+        block_size = index(req.kv_block_size)
+    except TypeError:
+        raise ValueError(
+            f"kv_block_size must be an integer, got {req.kv_block_size!r}"
+        ) from None
+    if block_size <= 0:
+        raise ValueError(f"kv_block_size must be positive, got {block_size}")
+    pages_per_seq = -(-int(req.seqlen_k) // block_size)
+    return {
+        "paged": True,
+        "block_size": block_size,
+        "num_kv_blocks": int(req.batch) * pages_per_seq,
+    }
+
+
+def dense_paged_tile_fits(req, block_m: int, block_n: int) -> bool:
+    """Whether the request's pages fit a ``block_m`` x ``block_n`` tile; True when the
+    request is not paged. A smaller tile that fails this keeps the default tile."""
+    from kernels.common._attention_dense_paged import paged_tile_check
+
+    paged = dense_paged_fields(req)
+    return not paged or paged_tile_check(paged["block_size"], block_m, block_n)[0]
+
+
 @lru_cache(maxsize=256)
-def _dense_axes_for(base, arch: str) -> Tuple[KnobAxis, ...]:
+def dense_axes_for(base, arch: str) -> Tuple[KnobAxis, ...]:
     """The declared dense axes that apply to ``base``, with concrete values."""
     rules = _dense_arch(arch)
     declared = tuning_axes(arch, "dense")
@@ -367,11 +407,20 @@ class DenseSpace(WavesPerEuSpace):
     derived: Optional[
         Callable[[object, Mapping[str, object]], Mapping[str, object]]
     ] = None
+    # The axes this candidate walks, or None for every declared dense axis in
+    # scope. An empty set leaves the default spec alone.
+    axis_names: Optional[frozenset] = None
+    # Axes the candidate's grid fixes for every problem (a variant that pins the
+    # block order pins the grid kind and the KV split with it, so every spec it
+    # offers launches the kind of grid its default does): dropped from its space
+    # whatever the base spec says, and the decode order is never recorded for it.
+    pinned_axes: frozenset = frozenset()
 
     def recorded(self, base):
         # A moving bottom-right diagonal on the default grid resolves its query
         # tile and KV-segment count per problem (the short-chunk rule), so both
-        # are recorded there. Every other base keeps its key unchanged.
+        # are recorded there, and the gfx942 bias geometry records its decode order
+        # (below). Every other base keeps its key unchanged.
         moving = getattr(base, "causal_bottom_right", False) and int(
             base.seqlen_q
         ) != int(base.seqlen_kv)
@@ -381,10 +430,26 @@ class DenseSpace(WavesPerEuSpace):
             fields = fields | {"causal_diag_split"}
         if moving and not base.persistent:
             fields = fields | {"block_m", "kv_segments"}
+        if (
+            self.arch == "gfx942"
+            and "nonpersist_decode" not in self.pinned_axes
+            and _gfx942_order_per_problem(base)
+        ):
+            # The bias geometry picks the grid's decode order from the mask, so the
+            # order is resolved per problem like the tile it goes with. A base that
+            # leaves it to the spec's own policy resolves nothing here, and neither
+            # does a candidate that pins it: the ingestor's grids keep their key as
+            # it was, with a bias too.
+            fields = fields | {"nonpersist_decode"}
         return fields
 
     def axes(self, base):
-        return _dense_axes_for(base, self.arch)
+        axes = tuple(
+            a for a in dense_axes_for(base, self.arch) if a.name not in self.pinned_axes
+        )
+        if self.axis_names is None:
+            return axes
+        return tuple(a for a in axes if a.name in self.axis_names)
 
     def production(self, base, axes, is_valid) -> Iterable[dict]:
         crossed_names = _dense_arch(self.arch).production_crossed
@@ -400,7 +465,10 @@ class DenseSpace(WavesPerEuSpace):
                 yield {**point, **knobs}
 
     def known_knobs(self, base):
-        return axis_knob_names(tuning_axes(self.arch, "dense"))
+        declared = tuning_axes(self.arch, "dense")
+        if self.axis_names is not None:
+            declared = tuple(a for a in declared if a.name in self.axis_names)
+        return axis_knob_names(declared)
 
     def defaults(self, base, kernel):
         # The fields recorded per problem carry their value in the knobs, so the

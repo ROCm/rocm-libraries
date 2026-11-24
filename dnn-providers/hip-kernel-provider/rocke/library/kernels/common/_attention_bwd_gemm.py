@@ -32,6 +32,7 @@ from functools import cached_property
 
 from rocke.core.arch.target import MmaOp
 from rocke.core.ir import IRBuilder, Value
+from rocke.helpers.attention_arch_caps import ASM_TAIL_NOP_MAX
 
 from ._attention_bwd_caps import (
     ASM_MFMA_VALU_LEAD_WAIT_STATES,
@@ -154,7 +155,7 @@ def mma_agpr_asm_steps(
     with a zero first (no ``v_accvgpr_write`` per call).
 
     ``agpr_base`` pins output ``i`` to the physical AGPR tuple starting at
-    ``agpr_base + i * c_frag_len`` (``={a[lo:hi]}``) instead of letting the
+    ``agpr_base + i * dst_frag_len`` (``={a[lo:hi]}``) instead of letting the
     allocator choose. Without it the production register allocator was seen
     to make room for short-lived asm outputs (S / dP) by moving part of the
     long-lived dK / dV accumulators to arch VGPRs and back every step, though
@@ -172,8 +173,8 @@ def mma_agpr_asm_steps(
         raise ValueError("an asm MFMA cluster needs at least one K step")
     mnem = mfma_asm_mnemonic(g.arch, g.dtype, g.atom_k)
     nop = AGPR_ASM_TAIL_NOP[g.atom_k] if tail_nop is None else int(tail_nop)
-    if not 0 <= nop <= 15:
-        raise ValueError(f"s_nop count {nop} outside [0, 15]")
+    if not 0 <= nop <= ASM_TAIL_NOP_MAX:
+        raise ValueError(f"s_nop count {nop} outside [0, {ASM_TAIL_NOP_MAX}]")
     if (
         isinstance(lead_wait, bool)
         or not isinstance(lead_wait, int)
@@ -218,7 +219,7 @@ def mma_agpr_asm_steps(
         outs_c = ["=a"] * n
     else:
         _check_agpr_base(g, agpr_base)
-        w = g.op.c_frag_len
+        w = g.op.dst.frag_len
         outs_c = [
             "={a[%d:%d]}" % (agpr_base + i * w, agpr_base + (i + 1) * w - 1)
             for i in range(n)
@@ -226,7 +227,7 @@ def mma_agpr_asm_steps(
     constraints = ",".join(outs_c + [str(i) for i in range(tied)] + ["v"] * len(srcs))
     if zero:
         accs = []
-        result_types = [VectorType(F32, g.op.c_frag_len)] * n
+        result_types = [VectorType(F32, g.op.dst.frag_len)] * n
     else:
         accs = [acc[fm][fn] for fm, fn in outs]
         result_types = [x.type for x in accs]
@@ -253,7 +254,7 @@ def _check_agpr_base(g: "BlockGemm", agpr_base: int) -> None:
     """Raise unless the wave's accumulators fit a0..a255 from ``agpr_base``."""
     if isinstance(agpr_base, bool) or not isinstance(agpr_base, int):
         raise ValueError(f"agpr_base must be an int, got {agpr_base!r}")
-    last = agpr_base + g.frags_m * g.frags_n * g.op.c_frag_len - 1
+    last = agpr_base + g.frags_m * g.frags_n * g.op.dst.frag_len - 1
     if agpr_base < 0 or last > 255:
         raise ValueError(f"pinned AGPRs a[{agpr_base}:{last}] outside a0..a255")
 
@@ -356,7 +357,7 @@ class BlockGemm:
 
     def zero_acc(self, b: IRBuilder) -> list[list[Value]]:
         return [
-            [b.zero_vec_f32(self.op.c_frag_len) for _ in range(self.frags_n)]
+            [b.zero_vec_f32(self.op.srcs[2].frag_len) for _ in range(self.frags_n)]
             for _ in range(self.frags_m)
         ]
 
@@ -689,7 +690,7 @@ class BlockGemm:
         self, b: IRBuilder, lane: Value, origin: tuple[Value, Value], fm: int, fn: int
     ) -> list[tuple[Value, Value]]:
         """Block coordinates ``(row, col)`` of every slot of accumulator ``[fm][fn]``."""
-        layout = self.op.c_layout()
+        layout = self.op.dst_layout()
         out = []
         for s in range(layout.frag_len):
             r, c = layout.coord(b, lane, s)

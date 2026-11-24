@@ -11,9 +11,10 @@ until every required primitive and correctness/perf path is present.
 from __future__ import annotations
 
 from collections import OrderedDict
+from functools import lru_cache
 from dataclasses import dataclass, replace
 from threading import Lock, RLock
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple
 
 from rocke.core.arch import validate_arch
 from rocke.core.ir import (
@@ -43,6 +44,8 @@ from rocke.runtime.launcher import (
     wait_stream_and_release,
 )
 
+from kernels.common.attention_dense_kv_split import max_segments_for_extent
+
 from rocke.helpers.attention import (
     BINARY_SEARCH_FALLBACK_ITERS,
     Attention2DConfig,
@@ -55,13 +58,20 @@ from rocke.helpers.attention import (
     use_2d_kernel,
 )
 
+from rocke.helpers.attention_arch_caps import attn_arch_caps
 from rocke.helpers.magic_division import calculate_magic_numbers, do_magic_division
 from rocke.helpers.transforms import (
     TensorDescriptor,
 )
 
-from ._attention_additive_bias import append_additive_bias_signature
+from ._attention_additive_bias import (
+    ADDITIVE_BIAS_INDEX_LIMIT,
+    append_additive_bias_signature,
+    check_additive_bias_reach,
+    check_additive_bias_tensor,
+)
 from ._lse_store import validate_unified_lse
+from ._spec_checks import require_bool
 
 # Alias the promoted log2-domain softcap helper under the local name used by
 # the scalar reference kernels (matches the gfx950 tiled modules' convention).
@@ -154,10 +164,7 @@ class UnifiedAttentionProblem:
     emit_lse: bool = False
 
     def __post_init__(self):
-        if type(self.emit_lse) is not bool:
-            raise ValueError(
-                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
-            )
+        require_bool("emit_lse", self.emit_lse)
         if self.right_bound < -1:
             raise ValueError(
                 f"right_bound must be >= -1 (-1 = unbounded), got {self.right_bound}"
@@ -594,6 +601,12 @@ _GFX942_4WARP_LSE_REFUSAL = (
 )
 
 
+def _scalar_additive_bias_refusal(kind: str) -> str:
+    """Why the scalar ``kind`` ("2D" or "3D") kernel refuses an additive-bias
+    problem: it has no bias score site, so it would drop the bias silently."""
+    return f"scalar {kind} kernel: additive bias runs on the gfx950 tiled kernels only"
+
+
 def supports_native_unified_attention(
     problem: UnifiedAttentionProblem,
     arch: str,
@@ -642,7 +655,7 @@ def supports_native_unified_attention(
     if problem.use_qq_bias:
         return False, "QQ bias is not enabled in CK DSL attention yet"
     if problem.use_additive_bias:
-        return False, "Additive bias is not enabled in CK DSL attention yet"
+        return False, _scalar_additive_bias_refusal("2D")
     rejected = _reject_mask_semantics(problem)
     if rejected is not None:
         return rejected
@@ -664,6 +677,9 @@ def supports_native_unified_attention_tiled(
         or _reject_mask_semantics(problem)
         or _reject_mask_on_arch(problem, arch)
     )
+    if rejected is not None:
+        return rejected
+    rejected = _reject_fp8_format_arch_mismatch(problem, arch)
     if rejected is not None:
         return rejected
     if arch == "gfx1250" and problem.softcap > 0:
@@ -778,6 +794,12 @@ def supports_native_unified_attention_3d_tiled(
         return rejected
     if problem.use_additive_bias and arch != "gfx950":
         return False, "additive bias is only implemented on gfx950"
+    # Rejected here rather than by the spec, so auto dispatch falls back to 2D.
+    if arch == "gfx942" and _enable_i64_kv_addr_3d(problem, arch):
+        return False, (
+            "gfx942 tiled 3D does not support i64 KV addressing "
+            "(paged KV cache past what its K/V loader reads) yet"
+        )
     *_, supports_tiled_3d = _tiled_3d_impl(arch)
     return supports_tiled_3d(
         head_size=problem.head_size,
@@ -1692,10 +1714,11 @@ def _kv_storage_dtype(problem: UnifiedAttentionProblem) -> Optional[str]:
 def _binary_search_iters(problem: UnifiedAttentionProblem, *, floor: int = 1) -> int:
     """Trip count of the seq_idx binary search the tiled kernels bake into IR.
 
-    Every tiled spec class derives ``binary_search_iters`` from ``spec.num_seqs``
-    through the same ``binary_search_seq_idx_iters`` (gfx1250 3D with a floor of
-    32). It is the only way ``num_seqs`` reaches emitted IR, so the tiled cache
-    keys carry this bucket instead of the raw batch count.
+    Every tiled spec class that bakes the search derives ``binary_search_iters``
+    from ``spec.num_seqs`` through the same ``binary_search_seq_idx_iters``
+    (gfx1250 3D with a floor of 32). It is the only way ``num_seqs`` reaches
+    emitted IR, so the tiled cache keys carry this bucket instead of the raw batch
+    count. A body that searches at runtime (``_searches_at_runtime``) bakes neither.
     """
     return binary_search_seq_idx_iters(problem.num_seqs, floor=floor)
 
@@ -1738,7 +1761,8 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
     ``max_seqlen_k``). A raw field compiles one binary per value; a selector
     missing from the key lets two shapes that build different kernels share
     one cache slot. ``num_seqs`` reaches IR only through
-    ``_binary_search_iters``. Launch values that scale with the shape (the
+    ``_binary_search_iters``, and not at all in a body that searches at runtime
+    (``_searches_at_runtime``). Launch values that scale with the shape (the
     grid) are keyed separately through ``_shape_key``. When adding a
     selector to ``_tiled_spec_from_problem``, add its resolved output here;
     ``test_attention_tiled_cache_key.py`` sweeps the selector thresholds and
@@ -1751,16 +1775,32 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
     num_warps_2d = None if fp16_flash else _select_2d_num_warps(problem, arch)
     tile_size = _select_2d_tile_size(problem, arch)
     block_m_per_warp = _select_2d_block_m_per_warp(problem, arch)
+    # gfx950 schedule tail of `_spec_gfx950_generic`. Both flags are false
+    # outside the single-batch cohort (num_seqs == 1), so skip them there. Keyed
+    # as None when both are off, because the cohort itself does not change the
+    # kernel and a runtime batch search must not split ns=1 from ns>1 on it.
+    single_batch_sched = None
+    if _enable_single_batch_combo(problem, arch):
+        flags = (
+            _enable_softmax_mfma_interleave(problem, arch),
+            _enable_k_single_buffer(
+                problem,
+                arch,
+                num_warps=num_warps_2d,
+                block_m_per_warp=block_m_per_warp,
+                tile_size=tile_size,
+            ),
+        )
+        single_batch_sched = flags if any(flags) else None
     key = (
         "tiled",
         arch,
-        _binary_search_iters(problem),
-        problem.num_query_heads,
-        problem.num_kv_heads,
+        None if _searches_at_runtime(arch, "2d") else _binary_search_iters(problem),
+        _heads_key(problem, arch, "2d"),
         problem.head_size,
         problem.block_size,
         problem.dtype,
-        problem.sliding_window,
+        _window_key(problem, arch, "2d"),
         bool(problem.use_sinks),
         bool(problem.softcap > 0),
         bool(problem.use_alibi),
@@ -1796,24 +1836,12 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
         # The builder derives the scalar-state / mask / skip-qreg / fast-paged-KV
         # spec fields from the combo predicate, which reads max_seqlen_q.
         _enable_combo_2d(problem, arch),
-        # gfx950 schedule tail of `_spec_gfx950_generic`. Both are false
-        # outside the single-batch cohort (num_seqs == 1), so gate on it and
-        # spare every other launch the selector walks. sched_barrier is implied
-        # by _enable_v_double_buffer, which is already in the key above.
-        (
-            (
-                _enable_softmax_mfma_interleave(problem, arch),
-                _enable_k_single_buffer(
-                    problem,
-                    arch,
-                    num_warps=num_warps_2d,
-                    block_m_per_warp=block_m_per_warp,
-                    tile_size=tile_size,
-                ),
-            )
-            if _enable_single_batch_combo(problem, arch)
-            else None
-        ),
+        # Bakes the 64/8 head geometry, which the heads entry above does not
+        # carry when the counts are kernargs.
+        _enable_fast_paged_kv_desc(problem, arch),
+        # sched_barrier is implied by _enable_v_double_buffer, which is already
+        # in the key above.
+        single_batch_sched,
         # Reads max_seqlen_q and max_seqlen_k (the 16 * T threshold). The
         # gfx1250 builder never sets this field, so keying it there would only
         # split identical kernels.
@@ -1964,8 +1992,9 @@ def _fp8_qk_loader_fits(
 ) -> bool:
     """True iff the async-fp8 K loader can tile the per-iter K bytes.
 
-    ``raw.ptr.buffer.load.lds`` accepts dwords ∈ {1, 3, 4} = {4, 12, 16}
-    bytes per lane (a hardware quirk -- dwords=2 is rejected). We need
+    The loader exists only in the gfx950 tiled-2D kernel, so the per-lane
+    payloads are gfx950's LDS-DMA widths from the attention capability table
+    (dwords {1, 3, 4} = {4, 12, 16} bytes; there is no 2-dword form). We need
     one of those per-call payloads to evenly tile ``T*HD`` bytes given
     ``num_warps * 64`` lanes per CTA. ``tile_size`` / ``num_warps`` take the
     already-resolved selector outputs when the caller has them.
@@ -1976,8 +2005,8 @@ def _fp8_qk_loader_fits(
         num_warps = _select_2d_num_warps(problem, arch)
     tile_bytes = tile_size * problem.head_size
     threads = num_warps * 64
-    for bpl in (16, 12, 4):
-        payload = threads * bpl
+    for dwords in sorted(attn_arch_caps("gfx950").lds_dma_dwords, reverse=True):
+        payload = threads * dwords * 4
         if tile_bytes >= payload and tile_bytes % payload == 0:
             return True
     return False
@@ -2586,9 +2615,9 @@ def _select_gfx942_flash_num_warps(problem: UnifiedAttentionProblem, arch: str) 
     Mirrors attention_spec_builder._tiled_spec_from_problem so the launch-meta
     grid/block matches the geometry the launcher actually builds:
       * ring active (fp16, or bf16 D64/D128 prefill): the wide sliced-K ring
-        geometry -> _gfx942_flash_wide_setting() (nw=4 by default; 2 or 0 via
-        HIPDNN_GFX942_FLASH_WIDE). A 0/disabled setting means the L4 (WG=64)
-        fallback, i.e. num_warps=1.
+        geometry -> _gfx942_flash_wide_setting() (nw=4 by default; 2 via
+        HIPDNN_GFX942_FLASH_WIDE). A 0/disabled setting turns the ring off and
+        selects the L4 (WG=64) fallback, i.e. num_warps=1 for fp16.
       * bf16 without the ring: the legacy bf16-wide geometry (nw=2, or the
         smalltile double-K nw).
     D64 and D128 prefill share the wide (num_warps=4) sliced-K ring path (the ring
@@ -2712,6 +2741,10 @@ def _enable_gfx942_flash_k_sliced_ring(
         )
         and problem.head_size in (64, 128)
     ):
+        return False
+    # The ring needs the wide cfvst geometry; HIPDNN_GFX942_FLASH_WIDE=0 selects
+    # the non-ring L4 fallback, so the ring is off even when forced on.
+    if _gfx942_flash_wide_setting() == 0:
         return False
     env = (
         __import__("os").environ.get("HIPDNN_GFX942_K_SLICED_RING", "").strip().lower()
@@ -2949,6 +2982,25 @@ def _enable_transposed_subflags(problem: UnifiedAttentionProblem, arch: str) -> 
     return _enable_transposed_qk_32x32(problem, arch)
 
 
+def _enable_fast_paged_kv_desc(problem: UnifiedAttentionProblem, arch: str) -> bool:
+    """The fast multi-block paged-KV descriptor of the no-window bf16 2D combo.
+
+    Its loader bakes the h64kv8 bf16 T=64 geometry (the spec validator pins it),
+    so it is on only for exactly that head pair. The head counts are kernargs
+    and the cache key carries only their ratio, so the key carries this flag
+    too: a 32/4 problem at the same ratio must not reuse a 64/8 fast binary.
+    """
+    return (
+        _enable_combo_2d(problem, arch)
+        and problem.sliding_window == 0
+        and problem.dtype == "bf16"
+        and not problem.use_fp8
+        and problem.num_query_heads == 64
+        and problem.num_kv_heads == 8
+        and _select_2d_tile_size(problem, arch) == 64
+    )
+
+
 # Largest paged KV cache, in bytes, that i32 addressing reads correctly on the
 # tiled builders. They bound K/V buffer loads at num_records=0x7FFF0000, so a
 # load at or past that offset returns zero.
@@ -3104,7 +3156,6 @@ def _kv_addr_limit(
 _I32_KV_FLAT_BYTES = 0x8000_0000
 _I32_ONLY_KV_LOADERS = {
     "use_conflict_free_v": _I32_KV_FLAT_BYTES,  # gfx942 _issue_v_transposed
-    "use_conflict_free_v_store": _I32_KV_FLAT_BYTES,  # gfx942 _cfvst_load_v_regs
     "use_v_hbm_direct": _I32_KV_FLAT_BYTES,  # gfx942 _v_hbm_elem
     "use_k_hbm_direct": _I32_KV_BUFFER_BYTES,  # gfx942 _read_k8_mfma_operand
     # _issue_v_fp8_mfma_async is a buffer load, _issue_v_fp8_mfma_stripe a flat
@@ -3559,6 +3610,40 @@ def _pre_bump_segments(
 
 
 def _num_segments(problem: UnifiedAttentionProblem, arch: str) -> int:
+    """Segments for ``problem``: the AITER-mirrored count, capped to what the
+    kernels can address.
+
+    The count below is a performance choice made without reference to the
+    segment workspace it implies, and the workspace grows with it, so on a long
+    prefill the preferred count can put ``segm_output``'s last index past i32
+    (gfx942 ``backend="auto"`` LSE at 65536 tokens x 32 heads x D256 prefers 8,
+    whose index is twice the limit). Nobody picked that count, so refusing the
+    launch would refuse a shape that runs perfectly well at 4: cap instead, and
+    leave the refusal to ``_check_3d_workspace_addr_width`` for a count the
+    caller pinned through a tuning spec.
+
+    Shares the dense bodies' search (``max_segments_for_extent``). The two
+    workspaces have the same layout, but the extent each route allows differs
+    for now: this one takes the measured fault boundary, the dense route stays
+    one element stricter until its own kernel pair is measured there.
+
+    A count that already fits is returned untouched, including a non-power-of-two
+    one. Only when the preferred count overruns does the shared rule pick the
+    largest power of two below it, so the cap never lowers a working choice.
+    """
+    want = _num_segments_unbounded(problem, arch)
+    if _3d_workspace_max_index(problem, want) < _WORKSPACE_I32_INDEX_LIMIT:
+        return want
+    return max_segments_for_extent(
+        problem.total_q,
+        problem.num_query_heads,
+        problem.head_size,
+        max_segments=want,
+        max_extent=_WORKSPACE_I32_INDEX_LIMIT,
+    )
+
+
+def _num_segments_unbounded(problem: UnifiedAttentionProblem, arch: str) -> int:
     """Mirror AITER ``select_3d_config`` num_segments derivation exactly."""
     attn_cfg, _ = problem.select_3d()
     segments = attn_cfg.NUM_SEGMENTS_PER_SEQ
@@ -4087,13 +4172,13 @@ def _tiled_3d_segment_lds_bytes(spec) -> int:
 
 def _tiled_3d_reduce_lds_bytes(spec) -> int:
     """The reducer stores one F32 softmax factor per segment in LDS."""
-    from rocke.core.dtypes import dtype_info
+    from .attention_split_kv_reduce import split_kv_reduce_lds_bytes
 
-    size = spec.num_segments * (dtype_info(F32.name).encoded_bits // 8)
-    return (size + 15) & ~15
+    return split_kv_reduce_lds_bytes(spec.num_segments)
 
 
-def _validate_strided_3d_lds(segment, reduce, *, arch: str) -> None:
+def _strided_3d_lds_reason(segment, reduce, *, arch: str) -> Optional[str]:
+    """Why the segment/reducer pair overflows ``arch`` LDS, or None if it fits."""
     from rocke.core.arch import ArchTarget
 
     target = ArchTarget.from_gfx(arch)
@@ -4102,11 +4187,18 @@ def _validate_strided_3d_lds(segment, reduce, *, arch: str) -> None:
         ("reducer", _tiled_3d_reduce_lds_bytes(reduce)),
     ):
         if not target.fits_lds(used):
-            raise ValueError(
+            return (
                 f"strided 3D {kind} requires {used} B LDS, exceeding "
                 f"{arch} capacity {target.lds_capacity_bytes} B "
                 f"(head_size={segment.head_size}, tile_size={segment.tile_size})"
             )
+    return None
+
+
+def _validate_strided_3d_lds(segment, reduce, *, arch: str) -> None:
+    reason = _strided_3d_lds_reason(segment, reduce, arch=arch)
+    if reason is not None:
+        raise ValueError(reason)
 
 
 def _strided_3d_specs_from_problem(problem: UnifiedAttentionProblem, *, arch: str):
@@ -4204,9 +4296,10 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
     with the shape are keyed separately through ``_shape_key``.
     """
     decode_grid = _use_decode_grid(problem, arch)
-    if decode_grid:
-        # One CTA per sequence: the segment kernel indexes sequences directly
-        # and emits no search, so batch sizes in different buckets share it.
+    if decode_grid or _searches_at_runtime(arch, "3d"):
+        # The decode grid indexes sequences directly and emits no search; a
+        # runtime search reads the batch from num_seqs. Either way batch sizes
+        # in different buckets share the kernel.
         search_iters = None
     elif arch == "gfx1250":
         search_iters = _binary_search_iters(problem, floor=BINARY_SEARCH_FALLBACK_ITERS)
@@ -4220,12 +4313,11 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
         # no way to check the key against the arch it compiles for.
         arch,
         search_iters,
-        problem.num_query_heads,
-        problem.num_kv_heads,
+        _heads_key(problem, arch, "3d"),
         problem.head_size,
         problem.block_size,
         problem.dtype,
-        problem.sliding_window,
+        _window_key(problem, arch, "3d"),
         bool(problem.use_sinks),
         bool(problem.softcap > 0),
         bool(problem.use_alibi),
@@ -4263,12 +4355,115 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem, arch: str) -> Tuple:
     return base
 
 
+def _runtime_kernarg_fields(spec_cls) -> Tuple[str, ...]:
+    """The problem fields a tiled spec class reads as i32 kernargs, in ABI order.
+
+    The spec class declares them (``RUNTIME_KERNARG_FIELDS``) so its body's
+    params, the launch signature and the cache key read one tuple. A class
+    declaring none bakes those fields into its IR.
+    """
+    return tuple(getattr(spec_cls, "RUNTIME_KERNARG_FIELDS", ()))
+
+
+_TILED_SPEC_CLS: Dict[Tuple[str, str], type] = {}
+
+
+def _tiled_spec_cls(arch: str, path: str) -> type:
+    """The tiled ``path`` ("2d" or "3d" segment) spec class for ``arch``. Memoized:
+    the cache keys read its class attributes on every launch."""
+    key = (arch, path)
+    if key not in _TILED_SPEC_CLS:
+        impl = _tiled_2d_impl(arch) if path == "2d" else _tiled_3d_impl(arch)
+        _TILED_SPEC_CLS[key] = impl[0]
+    return _TILED_SPEC_CLS[key]
+
+
+def _searches_at_runtime(arch: str, path: str) -> bool:
+    """True when the tiled ``path`` body for ``arch`` derives its cu_q search trip
+    count from the num_seqs kernarg (``RUNTIME_SEARCH_ITERS``), so num_seqs never
+    reaches its IR."""
+    return bool(getattr(_tiled_spec_cls(arch, path), "RUNTIME_SEARCH_ITERS", False))
+
+
+def _heads_key(problem: UnifiedAttentionProblem, arch: str, path: str) -> Tuple:
+    """The head counts as the tiled ``path`` body for ``arch`` bakes them: both
+    counts, or only the GQA ratio when the counts are kernargs."""
+    fields = _runtime_kernarg_fields(_tiled_spec_cls(arch, path))
+    if "num_query_heads" in fields and "num_kv_heads" in fields:
+        return ("gqa", problem.num_queries_per_kv)
+    return (problem.num_query_heads, problem.num_kv_heads)
+
+
+def _window_key(problem: UnifiedAttentionProblem, arch: str, path: str):
+    """The sliding window as the tiled ``path`` body for ``arch`` bakes it: the size
+    itself, or only whether there is one when the size is a kernarg."""
+    if "sliding_window" in _runtime_kernarg_fields(_tiled_spec_cls(arch, path)):
+        return problem.sliding_window > 0
+    return problem.sliding_window
+
+
+def _runtime_kernarg_values(problem: UnifiedAttentionProblem) -> dict:
+    """Every runtime shape kernarg a tiled body can declare. The launcher packs
+    only the ones its signature names."""
+    return {
+        "num_query_heads": int(problem.num_query_heads),
+        "num_kv_heads": int(problem.num_kv_heads),
+        "sliding_window": int(problem.sliding_window),
+    }
+
+
+def _tiled_2d_signature(
+    arch: str,
+    dtype: str,
+    *,
+    kv_dtype: Optional[str] = None,
+    include_additive_bias: bool = False,
+    emit_lse: bool = False,
+):
+    """Launch signature of the tiled 2D kernels built for ``arch``."""
+    spec_cls, _, _ = _tiled_2d_impl(arch)
+    return _attn_signature(
+        dtype,
+        include_bt_stride=True,
+        include_qq_bias_stride=True,
+        include_additive_bias=include_additive_bias,
+        kv_dtype=kv_dtype,
+        runtime_fields=_runtime_kernarg_fields(spec_cls),
+        emit_lse=emit_lse,
+    )
+
+
+def _tiled_3d_signatures(
+    arch: str,
+    dtype: str,
+    *,
+    kv_dtype: Optional[str] = None,
+    strided_kv: bool = False,
+    include_additive_bias: bool = False,
+    emit_lse: bool = False,
+):
+    """Launch signatures of the tiled 3D segment and reduce kernels for ``arch``."""
+    segment_cls, reduce_cls, _, _, _ = _tiled_3d_impl(arch)
+    segment = _3d_signature(
+        dtype,
+        kv_dtype=kv_dtype,
+        strided_kv=strided_kv,
+        include_additive_bias=include_additive_bias,
+        runtime_fields=_runtime_kernarg_fields(segment_cls),
+    )
+    reduce = _reduce_signature(
+        dtype, emit_lse=emit_lse, runtime_fields=_runtime_kernarg_fields(reduce_cls)
+    )
+    return segment, reduce
+
+
 def _3d_signature(
     dtype: str,
     *,
     kv_dtype: Optional[str] = None,
     strided_kv: bool = False,
     include_additive_bias: bool = False,
+    runtime_fields: Sequence[str] = (),
 ):
     from rocke.helpers.spec import SignatureBuilder
 
@@ -4296,6 +4491,8 @@ def _3d_signature(
         .scalar("block_table_stride", "i32")
         .scalar("qq_bias_stride_0", "i32")
     )
+    for name in runtime_fields:
+        sb.scalar(name, "i32")
     # Conditional params, in the kernel's declaration order (bias, then strided KV).
     if include_additive_bias:
         append_additive_bias_signature(sb)
@@ -4308,7 +4505,9 @@ def _3d_signature(
     return sb.build()
 
 
-def _reduce_signature(dtype: str, *, emit_lse: bool = False):
+def _reduce_signature(
+    dtype: str, *, emit_lse: bool = False, runtime_fields: Sequence[str] = ()
+):
     from rocke.helpers.spec import SignatureBuilder
 
     io_dtype = "f16" if dtype == "fp16" else "bf16"
@@ -4320,6 +4519,8 @@ def _reduce_signature(dtype: str, *, emit_lse: bool = False):
         .ptr("segm_expsum_ptr", "f32")
         .ptr("seq_lens_ptr", "i32")
     )
+    for name in runtime_fields:
+        sig = sig.scalar(name, "i32")
     if emit_lse:
         sig = sig.ptr("lse_ptr", "f32")
     return sig.build()
@@ -4332,6 +4533,7 @@ def _attn_signature(
     include_qq_bias_stride: bool = False,
     include_additive_bias: bool = False,
     kv_dtype: Optional[str] = None,
+    runtime_fields: Sequence[str] = (),
     emit_lse: bool = False,
 ):
     from rocke.helpers.spec import SignatureBuilder
@@ -4364,6 +4566,8 @@ def _attn_signature(
         sb.scalar("block_table_stride", "i32")
     if include_qq_bias_stride:
         sb.scalar("qq_bias_stride_0", "i32")
+    for name in runtime_fields:
+        sb.scalar(name, "i32")
     # Appended last, matching the kernel's conditional param declarations:
     # additive bias, then the LSE output (the tiled 2D builders declare
     # lse_ptr after declare_additive_bias_params).
@@ -4429,6 +4633,7 @@ def _attn_values(
         "out_scale": float(out_scale),
         "softcap": float(softcap),
         "num_seqs": int(problem.num_seqs),
+        **_runtime_kernarg_values(problem),
     }
     if include_bt_stride:
         vals["block_table_stride"] = int(bt_stride)
@@ -4635,6 +4840,12 @@ def _run_3d_tiled_on_stream(
     else:
         num_segments = _num_segments(problem, _launch_arch)
         cache_key = _tiled_3d_cache_key(problem, _launch_arch)
+    # Both branches: a pinned count is refused outright, and a capped one is
+    # refused only when no split fits, since ``_num_segments`` floors at one
+    # segment and a single segment can still overrun on a long enough prefill.
+    # Lowering the count is the only lever either branch has, so there is
+    # nothing left to try at that point.
+    _check_3d_workspace_addr_width(problem, num_segments)
     # The spec saw problem.num_kv_blocks, which a caller can leave stale, so
     # check the real paged cache. gfx1250's 3D spec makes no i64 decision.
     if kv_cache_layout is None and _launch_arch in ("gfx942", "gfx950"):
@@ -4777,6 +4988,7 @@ def _run_3d_tiled_on_stream(
         "additive_bias_batch_stride": int(additive_bias_batch_stride),
         "additive_bias_head_stride": int(additive_bias_head_stride),
         "additive_bias_sq_stride": int(additive_bias_sq_stride),
+        **_runtime_kernarg_values(problem),
     }
     if kv_cache_layout is not None:
         seg_vals.update(kv_cache_layout.arguments())
@@ -4786,6 +4998,7 @@ def _run_3d_tiled_on_stream(
         "segm_max_ptr": segm_max,
         "segm_expsum_ptr": segm_expsum,
         "seq_lens_ptr": seqused_k,
+        **_runtime_kernarg_values(problem),
     }
     if problem.emit_lse:
         red_vals["lse_ptr"] = lse
@@ -5400,6 +5613,26 @@ def _torch_stream_capturing() -> bool:
         return False
 
 
+@lru_cache(maxsize=1)
+def _workspace_f32():
+    """The fp32 dtype the workspace specs carry, resolved once per process.
+
+    A CPU-only or static caller has no torch, and a failed import is not cached
+    by Python: it re-walks every ``sys.path`` entry on each attempt, which is
+    much more expensive than a cached one, and more so where the path is
+    longer. Resolving it per call therefore put a filesystem walk
+    on the split rule and the dispatcher's ``validate``, which run on every
+    candidate. ``WorkspacePool.required_nbytes`` understands the string
+    fallback through ``_dtype_element_size``.
+    """
+    try:
+        import torch
+
+        return torch.float32
+    except Exception:
+        return "float32"
+
+
 def _attention_3d_workspace_specs(
     problem: UnifiedAttentionProblem,
     num_segments: int,
@@ -5414,15 +5647,7 @@ def _attention_3d_workspace_specs(
     kernels by pointer. The launcher allocates them per invocation; captured
     allocations use Torch's graph-private pool.
     """
-    try:
-        import torch
-
-        f32 = torch.float32
-    except Exception:
-        # CPU-only/static tests can still ask for byte accounting without
-        # importing torch. WorkspacePool.required_nbytes understands this
-        # string fallback via `_dtype_element_size`.
-        f32 = "float32"
+    f32 = _workspace_f32()
 
     return (
         WorkspaceSpec(
@@ -5444,6 +5669,78 @@ def _attention_3d_workspace_specs(
             device,
         ),
     )
+
+
+# One past the largest element offset a signed 32-bit index reaches. The
+# additive-bias check carries its own copy of this value: same number, different
+# contract (that one bounds a caller's bias layout, this one the workspace the
+# launcher allocates), and sharing a name would couple two unrelated limits.
+_WORKSPACE_I32_INDEX_LIMIT = 2**31
+
+
+def _3d_workspace_max_index(problem: UnifiedAttentionProblem, num_segments: int) -> int:
+    """Largest element index the 3D pipeline forms into the segment workspace.
+
+    ``segm_output`` is ``[total_q, num_query_heads, num_segments, head_size]``
+    and dominates ``segm_{max,expsum}``, which share its three outer axes and
+    drop ``head_size``. Both kernels address it with the i32 strides built in
+    their ``segm_output`` / ``segm_ml`` descriptors, so the reach of the
+    contiguous layout is ``numel - 1``.
+
+    The product is written out rather than read off
+    ``_attention_3d_workspace_specs``, which would keep the two in step by
+    construction but is much more expensive per call: it builds three
+    ``WorkspaceSpec`` objects, and both the split rule and the dispatcher's
+    ``validate`` call this on every candidate. ``test_max_index_matches_the_workspace_specs`` pins the two
+    forms together instead.
+    """
+    return (
+        problem.total_q * problem.num_query_heads * num_segments * problem.head_size
+    ) - 1
+
+
+def _check_3d_workspace_addr_width(
+    problem: UnifiedAttentionProblem, num_segments: int
+) -> None:
+    """Refuse a split-KV launch whose segment workspace overruns i32 addressing.
+
+    The segment kernel stores ``segm_output`` (and the reduce reads it back)
+    through i32 element offsets, so an index at or past ``2**31`` wraps
+    negative and the store lands outside the allocation: an illegal access,
+    not a wrong number. Measured on gfx942: a workspace of exactly ``2**31``
+    elements reaches index ``2**31 - 1`` and runs clean, one query token more
+    faults with ``hipErrorIllegalAddress``. The bound is therefore on the
+    index, not the element count, and it is the same rule
+    ``_validate_additive_bias`` applies to the bias tensor.
+
+    This is the last gate and it runs on both branches of the launch, but it
+    should rarely fire on the heuristic one. A count nobody chose is capped
+    first: the split rule caps its own result (``_num_segments``) and the
+    dispatcher's ``validate`` skips a fixed-segment variant whose workspace
+    overruns, so the default route normally runs at a smaller split instead of
+    refusing. ``select_auto_path`` sends an LSE request the tiled 2D gate
+    declines to split-KV, so ``backend="auto"`` on gfx942 D256 block-size 32
+    reaches these sizes: a 65536-token, 32-head prefill prefers 8 segments,
+    twice the bound, and now runs at 4.
+
+    Two cases still reach the raise. A count pinned through a tuning spec is
+    refused outright, because silently running a different one would make the
+    measurement meaningless. And a capped count is refused when even a single
+    segment overruns, which a long enough prefill does (32 seqs of 8193 tokens
+    at Hq 32, D256 is past the bound at one segment): the cap floors at one, so
+    there is no smaller split left to fall back to.
+    """
+    max_idx = _3d_workspace_max_index(problem, num_segments)
+    if max_idx >= _WORKSPACE_I32_INDEX_LIMIT:
+        nbytes = (max_idx + 1) * 4
+        raise NotImplementedError(
+            f"split-KV 3D segment workspace max element index {max_idx} "
+            f"exceeds the kernels' i32 addressing (< 2**31): "
+            f"total_q={problem.total_q} x num_query_heads="
+            f"{problem.num_query_heads} x num_segments={num_segments} x "
+            f"head_size={problem.head_size} is {nbytes / 2**30:.2f} GiB of f32. "
+            "Lower num_segments or split the launch"
+        )
 
 
 def attention_3d_workspace_nbytes(
@@ -5471,15 +5768,54 @@ def attention_3d_workspace_nbytes(
 def _shape_key(cache_key: tuple, problem: UnifiedAttentionProblem) -> tuple:
     """Extend a binary cache key with the shape values the launch derives from.
 
-    The tiled binaries are shared across batch counts and token counts, but the
-    grids (``total_q // block_q + num_seqs``), the 3D reduce grid and the 3D
-    workspace are not. Everything cached per launch geometry keys on this.
+    The tiled binaries are shared across batch counts, token counts and, where
+    the body reads them as kernargs, head counts, but the grids (``total_q //
+    block_q + num_seqs`` by the kv or query heads), the 3D reduce grid and the
+    3D workspace are not. Everything cached per launch geometry keys on this.
     """
     return cache_key + (
         "total_q",
         int(problem.total_q),
         "num_seqs",
         int(problem.num_seqs),
+        "heads",
+        int(problem.num_query_heads),
+        int(problem.num_kv_heads),
+    )
+
+
+def _tiled_3d_kernels(
+    problem: UnifiedAttentionProblem,
+    arch: str,
+    num_segments: int,
+    *,
+    strided_kv: bool = False,
+):
+    """The tiled 3D segment and reduce ``KernelDef``s the production path builds."""
+    (
+        _,
+        UnifiedAttentionReduceTiledSpec,
+        build_unified_attention_3d_tiled,
+        build_unified_attention_reduce_tiled,
+        _,
+    ) = _tiled_3d_impl(arch)
+    if strided_kv:
+        segment_spec, reduce_spec = _strided_3d_specs_from_problem(problem, arch=arch)
+    else:
+        segment_spec = _tiled_3d_spec_from_problem(problem, arch)
+        reduce_spec = UnifiedAttentionReduceTiledSpec(
+            head_size=problem.head_size,
+            num_query_heads=problem.num_query_heads,
+            num_kv_heads=problem.num_kv_heads,
+            dtype=problem.dtype,
+            num_segments=num_segments,
+            waves_per_eu=_select_3d_waves_per_eu(problem, arch),
+            # Only when on: gfx1250's reduce spec has no such field.
+            **({"emit_lse": True} if problem.emit_lse else {}),
+        )
+    return (
+        build_unified_attention_3d_tiled(segment_spec, arch=arch),
+        build_unified_attention_reduce_tiled(reduce_spec, arch=arch),
     )
 
 
@@ -5507,31 +5843,9 @@ def _get_3d_pipeline(
         if tuning_spec is not None:
             seg_kernel, red_kernel = tuning_spec.build(arch)
         else:
-            (
-                _,
-                UnifiedAttentionReduceTiledSpec,
-                build_unified_attention_3d_tiled,
-                build_unified_attention_reduce_tiled,
-                _,
-            ) = _tiled_3d_impl(arch)
-            if strided_kv:
-                segment_spec, reduce_spec = _strided_3d_specs_from_problem(
-                    problem, arch=arch
-                )
-            else:
-                segment_spec = _tiled_3d_spec_from_problem(problem, arch)
-                reduce_spec = UnifiedAttentionReduceTiledSpec(
-                    head_size=problem.head_size,
-                    num_query_heads=problem.num_query_heads,
-                    num_kv_heads=problem.num_kv_heads,
-                    dtype=problem.dtype,
-                    num_segments=num_segments,
-                    waves_per_eu=_select_3d_waves_per_eu(problem, arch),
-                    # Only when on: gfx1250's reduce spec has no such field.
-                    **({"emit_lse": True} if problem.emit_lse else {}),
-                )
-            seg_kernel = build_unified_attention_3d_tiled(segment_spec, arch=arch)
-            red_kernel = build_unified_attention_reduce_tiled(reduce_spec, arch=arch)
+            seg_kernel, red_kernel = _tiled_3d_kernels(
+                problem, arch, num_segments, strided_kv=strided_kv
+            )
         seg_art = compile_kernel(seg_kernel, arch=arch, capture_ir_text=False)
         red_art = compile_kernel(red_kernel, arch=arch, capture_ir_text=False)
         _ATTN_3D_TILED_CACHE[cache_key] = (
@@ -5541,28 +5855,31 @@ def _get_3d_pipeline(
             red_art.kernel_name,
         )
     seg_hsaco, seg_kname, red_hsaco, red_kname = _ATTN_3D_TILED_CACHE[cache_key]
+    # problem.emit_lse matches the built reduce: an explicit tuning spec must
+    # agree with it (paged: run_unified_attention_torch; strided:
+    # _validate_strided_3d_spec refuses an LSE reduce).
+    seg_signature, red_signature = _tiled_3d_signatures(
+        arch,
+        problem.dtype,
+        strided_kv=strided_kv,
+        kv_dtype=(
+            tuning_spec.kernel_spec.kv_storage_dtype
+            if tuning_spec is not None
+            else _kv_storage_dtype(problem)
+        ),
+        include_additive_bias=problem.use_additive_bias,
+        emit_lse=problem.emit_lse,
+    )
     seg_launcher = KernelLauncher(
         hsaco=seg_hsaco,
         kernel_name=seg_kname,
-        signature=_3d_signature(
-            problem.dtype,
-            strided_kv=strided_kv,
-            kv_dtype=(
-                tuning_spec.kernel_spec.kv_storage_dtype
-                if tuning_spec is not None
-                else _kv_storage_dtype(problem)
-            ),
-            include_additive_bias=problem.use_additive_bias,
-        ),
+        signature=seg_signature,
         cache_key=("3d_seg",) + cache_key,
     )
     red_launcher = KernelLauncher(
         hsaco=red_hsaco,
         kernel_name=red_kname,
-        # problem.emit_lse matches the built reduce: an explicit tuning spec
-        # must agree with it (paged: run_unified_attention_torch; strided:
-        # _validate_strided_3d_spec refuses an LSE reduce).
-        signature=_reduce_signature(problem.dtype, emit_lse=problem.emit_lse),
+        signature=red_signature,
         cache_key=("3d_red",) + cache_key,
     )
     pipeline = PipelineLauncher([seg_launcher, red_launcher])
@@ -5688,6 +6005,20 @@ def _select_2d_compile_backend(problem: UnifiedAttentionProblem, arch: str) -> s
     return "llvm"
 
 
+def _tiled_2d_kernel(problem: UnifiedAttentionProblem, arch: str):
+    """The tiled 2D ``KernelDef`` the production path builds for ``problem``."""
+    _, build_unified_attention_2d_tiled, _ = _tiled_2d_impl(arch)
+    spec = _tiled_spec_from_problem(problem, arch)
+    route = _gfx942_4warp_route(problem, arch)
+    if route is not None:
+        # Distinct 4-warp GQA paged builder (keyed separately in
+        # `_tiled_cache_key`; grid in `_get_2d_launch_meta`). Same paged
+        # ABI as the default builder. Parity+ with AITER @Sq4096/8192
+        # (vs the 1-warp std-QK's 0.55x).
+        return route.builder(spec, arch=arch)
+    return build_unified_attention_2d_tiled(spec, arch=arch)
+
+
 def _get_2d_launcher(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
@@ -5710,17 +6041,7 @@ def _get_2d_launcher(
             kernel = tuning_spec.build(arch)
             backend = tuning_spec.compile_backend
         else:
-            _, build_unified_attention_2d_tiled, _ = _tiled_2d_impl(arch)
-            spec = _tiled_spec_from_problem(problem, arch)
-            route = _gfx942_4warp_route(problem, arch)
-            if route is not None:
-                # Distinct 4-warp GQA paged builder (keyed separately in
-                # `_tiled_cache_key`; grid in `_get_2d_launch_meta`). Same paged
-                # ABI as the default builder. Parity+ with AITER @Sq4096/8192
-                # (vs the 1-warp std-QK's 0.55x).
-                kernel = route.builder(spec, arch=arch)
-            else:
-                kernel = build_unified_attention_2d_tiled(spec, arch=arch)
+            kernel = _tiled_2d_kernel(problem, arch)
             backend = _select_2d_compile_backend(problem, arch)
         if backend == "hipcc":
             from rocke.helpers.compile import compile_kernel_via_hipcc
@@ -5733,10 +6054,9 @@ def _get_2d_launcher(
     launcher = KernelLauncher(
         hsaco=hsaco,
         kernel_name=kname,
-        signature=_attn_signature(
+        signature=_tiled_2d_signature(
+            arch,
             problem.dtype,
-            include_bt_stride=True,
-            include_qq_bias_stride=True,
             include_additive_bias=problem.use_additive_bias,
             kv_dtype=(
                 tuning_spec.kernel_spec.kv_storage_dtype
@@ -5938,9 +6258,6 @@ def _require_additive_bias(problem: UnifiedAttentionProblem, additive_bias) -> N
         )
 
 
-_I32_LIMIT = 2**31
-
-
 def _validate_additive_bias(
     problem: UnifiedAttentionProblem,
     additive_bias,
@@ -5974,13 +6291,7 @@ def _validate_additive_bias(
             )
         return 0
     _require_additive_bias(problem, additive_bias)
-    if str(additive_bias.dtype) != "torch.float32":
-        raise ValueError(f"additive_bias must be float32, got {additive_bias.dtype}")
-    if q_device is not None and additive_bias.device != q_device:
-        raise ValueError(
-            f"additive_bias must be on the same device as q, got "
-            f"{additive_bias.device} vs {q_device}"
-        )
+    check_additive_bias_tensor(additive_bias, q_device)
     if additive_bias.stride(-1) != 1:
         raise ValueError(
             "additive_bias must be contiguous along Sk (stride(-1) == 1), "
@@ -6003,7 +6314,7 @@ def _validate_additive_bias(
         ("additive_bias_head_stride", head_stride),
         ("additive_bias_sq_stride", sq_stride),
     ):
-        if not 0 <= stride < _I32_LIMIT:
+        if not 0 <= stride < ADDITIVE_BIAS_INDEX_LIMIT:
             raise ValueError(f"{name}={stride} must be in [0, 2**31)")
     max_idx = (
         (problem.num_seqs - 1) * batch_stride
@@ -6011,23 +6322,9 @@ def _validate_additive_bias(
         + (problem.max_seqlen_q - 1) * sq_stride
         + (problem.max_seqlen_k - 1)
     )
-    if max_idx >= _I32_LIMIT:
-        raise NotImplementedError(
-            f"additive_bias max element index {max_idx} exceeds the kernels' "
-            "i32 bias addressing (< 2**31, i.e. 8 GiB of f32); broadcast a "
-            "dimension (stride 0) or split the launch"
-        )
     # Strides are passed separately from the tensor, so a mismatch would read
-    # past its storage; check the reach against the elements actually backed.
-    avail = (
-        additive_bias.untyped_storage().nbytes() // additive_bias.element_size()
-        - additive_bias.storage_offset()
-    )
-    if max_idx >= avail:
-        raise ValueError(
-            f"additive_bias strides reach element {max_idx} but the tensor "
-            f"only backs {avail} elements from its storage offset"
-        )
+    # past its storage; the reach check catches that too.
+    check_additive_bias_reach(additive_bias, max_idx)
     return sq_stride
 
 
@@ -6109,6 +6406,8 @@ def run_unified_attention_torch(
     ``NotImplementedError`` rather than returning without it. Rows with no
     visible key get ``-inf`` (and O = 0).
     """
+    if kv_layout == "strided" and problem.emit_lse:
+        raise NotImplementedError("LSE output is not implemented for strided-KV decode")
     # Caller-owned LSE output ([total_q, Hq, 1] FP32, ``problem.emit_lse``):
     # validated before any compile so a bad buffer never reaches a launch.
     validate_unified_lse(
@@ -6163,23 +6462,22 @@ def run_unified_attention_torch(
             )
         backend = implied
     # After the spec-contract checks, so a spec/problem bias mismatch is reported
-    # as such rather than as a bias-argument error.
+    # as such rather than as a bias-argument error. Bias-free paths do not need
+    # tensor metadata here; when bias is enabled, keep strict device access so a
+    # malformed non-None Q cannot bypass the same-device launch check.
+    q_device = q.device if problem.use_additive_bias and q is not None else None
     additive_bias_sq_stride = _validate_additive_bias(
         problem,
         additive_bias,
         additive_bias_batch_stride,
         additive_bias_head_stride,
         additive_bias_sq_stride,
-        None if q is None else q.device,
+        q_device,
     )
 
     if kv_layout not in ("paged", "strided"):
         raise ValueError("kv_layout must be 'paged' or 'strided'")
     if kv_layout == "strided":
-        if problem.emit_lse:
-            raise NotImplementedError(
-                "LSE output is not implemented for strided-KV decode"
-            )
         from .attention_kv_cache import StridedKvCacheLayout
 
         if _launch_arch not in ("gfx942", "gfx950"):
@@ -6670,6 +6968,8 @@ def build_unified_attention_2d(
     p = spec.problem
     if p.dtype not in ("fp16", "bf16"):
         raise ValueError("scalar 2D kernel currently supports fp16/bf16")
+    if p.use_additive_bias:
+        raise ValueError(_scalar_additive_bias_refusal("2D"))
     dtype = spec.dtype_ir
     kv_dtype = FP8E4M3 if p.use_fp8 else dtype
     kv_vec_align = 8 if p.use_fp8 else 16
@@ -6892,6 +7192,8 @@ def build_unified_attention_3d(
     """
     validate_arch(arch)
     p = spec.problem
+    if p.use_additive_bias:
+        raise ValueError(_scalar_additive_bias_refusal("3D"))
     dtype = spec.dtype_ir
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = 64

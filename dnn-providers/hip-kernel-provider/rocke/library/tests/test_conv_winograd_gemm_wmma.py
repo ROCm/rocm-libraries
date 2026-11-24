@@ -83,6 +83,28 @@ class TestSpec(unittest.TestCase):
         self.assertIsNone(winograd_gemm_reason(_spec(tile_k=96, lds_pad="clip")))
         self.assertIsNotNone(winograd_gemm_reason(_spec(), "gfx950"))
 
+    def test_engines_agree_on_scheduler_reason(self):
+        """The C++ validator refuses an unknown scheduler with Python's
+        ValueError text, word for word (it wrote only the first clause)."""
+        try:
+            import rocke_library_engine as eng
+        except ImportError:
+            self.skipTest("rocke_library_engine not built")
+        from kernels.conv.engine_bridge import conv_winograd_gemm_wmma_spec_to_dict
+
+        spec = _spec(sched="bogus")
+        why = winograd_gemm_reason(spec)
+        self.assertTrue(
+            why.startswith("unsupported scheduler_strategy 'bogus'; expected")
+        )
+        with self.assertRaises(Exception) as cm:
+            eng.conv_winograd_gemm_wmma_serialize_ir(
+                conv_winograd_gemm_wmma_spec_to_dict(spec), "gfx1250"
+            )
+        self.assertIn(
+            f"invalid WinogradGemmWmmaSpec for gfx1250: {why}", str(cm.exception)
+        )
+
     def test_problem_reason(self):
         spec = _spec()
         ok = WinogradGemmProblem(T=77, G=3, Cg=72, Kg=40)

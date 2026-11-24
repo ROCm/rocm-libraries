@@ -163,6 +163,13 @@ Defaults in `rocblas_common.yaml` are `threads: 0`, `streams: 0`, `devices: 0`. 
 
 `testing_*.hpp` still must pass `arg.HMM` into `device_vector` / `device_matrix` constructors if the YAML sets `HMM: true`; the dispatch macro only skips unsupported GPUs.
 
+### Graph-capture tests (`graph_test`)
+
+With `graph_test: true`, `rocblas_local_handle::pre_test()` / `post_test()` capture the rocBLAS calls between them into a HIP graph on a new stream, then instantiate, launch and synchronize it, so the regular result checks validate the graph replay. The `testing_*.hpp` harness must wrap its calls with `handle.pre_test(arg)` / `handle.post_test(arg)`.
+
+- By default `graph_test` sets `ROCBLAS_STREAM_ORDER_ALLOC=1` for the handle, so rocBLAS-managed workspace is allocated with `hipMallocAsync` and captured as graph memory nodes.
+- Combined with `user_allocated_workspace: <bytes>` (workspace set with `rocblas_set_workspace`), stream-ordered allocation is not enabled and `post_test()` fails the test if the captured graph contains any `mem_alloc` / `mem_free` node: with a user-owned workspace, rocBLAS must take all device memory from it. Memory nodes make every `hipGraphLaunch` synchronize on the host side for the stream-ordered allocations. See `gemm_ex_graph_user_workspace` in `gemm_gtest.yaml`.
+
 ### YAML categories
 
 Each test entry includes a `category`:
@@ -406,7 +413,10 @@ APIs, logging, and bad-argument cases. Results are compared to host reference BL
 **What requires GPU hardware.** Essentially all client integration tests.
 
 **What runs on PRs.** PR pipelines run standard pre-checkin-class sets (via Math CI, or
-TheRock using `rocblas_rtest.py` / CTest `standard`). HMM and stress suites are outside that
+TheRock using `rocblas_rtest.py` / CTest). TheRock invokes the generic
+[`test/therock/test_runner.py`](../../test/therock/test_runner.py), which runs `ctest -L $TEST_TYPE`
+from the install tree; `TEST_TYPE` defaults to `quick` (smoke), and the value each TheRock lane
+uses is configured in TheRock, not in this repository. HMM and stress suites are outside that
 default set — apply the GitHub labels in [CI Label Suggestions](#ci-label-suggestions).
 Math CI currently exceeds most capabilities and flexibility of that offered by TheRock CI runners.
 

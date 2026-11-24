@@ -43,7 +43,7 @@ python3 rmake.py -dc         # also build client dependencies the first time
 
 **4. Open a PR** targeting `develop`, following the repository [CONTRIBUTING.md](../../CONTRIBUTING.md). hipBLAS-specific notes are in [`docs/contribute.rst`](docs/contribute.rst).
 
-**5. Watch CI.** TheRock runs `test/therock/test_hipblas.py` (see [Pre-submit / CI Gates](#pre-submit--ci-gates)). Math CI / Jenkins jobs are not defined in this tree.
+**5. Watch CI.** TheRock runs `test/therock/test_runner.py` with `TEST_COMPONENT=hipblas` (see [Pre-submit / CI Gates](#pre-submit--ci-gates)). Math CI / Jenkins jobs are not defined in this tree.
 
 ---
 
@@ -111,7 +111,7 @@ testing_*.hpp  (per-routine harness: setup, API call, verify)
 | `clients/gtest/test_categories.yaml` | CTest category definitions (labels, timeouts, gtest filters) |
 | `../../shared/ctest/` | Shared monorepo CTest framework. Used when this directory is present at configure time |
 | `scripts/performance/` | `hipblas-bench` sweep drivers and multiplot YAML/CSV under `scripts/performance/multiplot/` |
-| `test/therock/test_hipblas.py` | TheRock PR/nightly invocation of the installed `hipblas-test` |
+| `../../test/therock/test_runner.py` | Generic TheRock runner. Runs `ctest -L $TEST_TYPE` against the installed hipBLAS CTest tree |
 
 Harness headers follow the BLAS level and the calling convention: non-batched, `_batched`, and `_strided_batched`. C versus Fortran and 32-bit versus ILP64 are selected inside those templates from `Arguments::api` (`C`, `C_64`, `FORTRAN`, `FORTRAN_64`). `DAPI_CHECK` / `DAPI_EXPECT` in `testing_macros.hpp` call the `_64` entry point when `arg.api` has the 64-bit bit set. The harness picks the Fortran wrapper when `arg.api` is `FORTRAN` or `FORTRAN_64`.
 
@@ -315,13 +315,12 @@ Sweep YAML and plotting scripts live under `scripts/performance/multiplot/`. `sc
 | `OMP_NUM_THREADS` | Host reference thread count |
 | `ROCBLAS_LAYER` | On the AMD backend, rocBLAS logging. `ROCBLAS_LAYER=2` prints a bench-style command |
 | `ROCBLAS_TENSILE_LIBPATH` | Directory of rocBLAS Tensile code objects when a static hipBLAS build cannot find them |
-| `HSA_XNACK` | Set to `1` by `test/therock/test_hipblas.py` when `ARTIFACT_GROUP` contains `asan` |
-| `TEST_TYPE` | Read by the TheRock runner: `quick` selects the smoke YAML; any other value selects `*pre_checkin*` |
-| `SHARD_INDEX`, `TOTAL_SHARDS` | TheRock gtest sharding (`GTEST_SHARD_INDEX` is `SHARD_INDEX - 1`) |
+| `TEST_TYPE` | Read by the TheRock runner: the CTest label to run (`quick`, `standard`, `comprehensive`, or `full`). Defaults to `quick`; other values fall back to `quick` |
+| `SHARD_INDEX`, `TOTAL_SHARDS` | TheRock sharding, passed to `ctest --tests-information` and as `GTEST_SHARD_INDEX` (`SHARD_INDEX - 1`) / `GTEST_TOTAL_SHARDS` |
 
 ## CI integration
 
-- **TheRock** invokes the installed binary through [`test/therock/test_hipblas.py`](../../test/therock/test_hipblas.py). `TEST_TYPE=quick` runs `hipblas-test --yaml $THEROCK_BIN_DIR/hipblas_smoke.yaml` with `-*known_bug*`. The default `TEST_TYPE=full` runs `--gtest_filter=*pre_checkin*-*known_bug*`. A comment in that file (`TODO(#2616)`) records that the broader suite stays off until machine issues are resolved. The script sets `HSA_XNACK=1` for ASAN artifacts and honors gtest sharding.
+- **TheRock** runs the generic [`test/therock/test_runner.py`](../../test/therock/test_runner.py) with `TEST_COMPONENT=hipblas`. It runs `ctest -L $TEST_TYPE` in `$THEROCK_BIN_DIR/hipblas` (the install-tree `CTestTestfile.cmake`), so TheRock selects tests through the CTest labels in `test_categories.yaml`. `TEST_TYPE` defaults to `quick`, which is the `*pre_checkin*-*known_bug*` filter. The runner also adds `-L ex_gpu_<arch>` when a matching GPU-exclusion label exists, otherwise `-LE ex_gpu`, and honors sharding. Which `TEST_TYPE` each TheRock lane uses is configured in TheRock, not in this repository. Because the runner needs the install-tree CTest file, a build without `shared/ctest` gives TheRock nothing to run.
 - **CTest labels** in `test_categories.yaml` line up with Jenkins job names (smoke, precheckin, extended, weekly) by label text. `comprehensive` and `full` use the same gtest patterns as `standard`.
 - **`rtest.py -t psdb` and `-t osdb`** run every non-`known_bug` test. Math CI job definitions that call `rtest.py` are not in this repository.
 - **Monorepo checkout:** include `shared/ctest` (or use a full clone) when you want `ctest -L` and the install-tree `CTestTestfile.cmake`.
@@ -372,7 +371,7 @@ These cases still create a hipBLAS handle and, for pointer checks, device alloca
 | YAML `quick` | Small numerical cases in `*_gtest.yaml` | Minutes for one family; longer for `*quick*` across the binary |
 | YAML `pre_checkin` | Bad-argument cases and extra numerical cases | Same order as `quick` for a single family |
 | `--yaml hipblas_smoke.yaml` | One modest problem per function, all levels | Minutes |
-| CTest `quick` / TheRock default `TEST_TYPE` | `*pre_checkin*` | CTest timeout 15 minutes. TheRock runs this filter as its default "full" job |
+| CTest `quick` / TheRock default `TEST_TYPE` | `*pre_checkin*` | CTest timeout 15 minutes |
 | CTest `standard` | `*quick*` and `*pre_checkin*` | CTest timeout 1 hour |
 | CTest `comprehensive`, CTest `full` | Same gtest patterns as `standard` | Timeouts 1 hour and 2 hours |
 | `rtest.py -t psdb` or `-t osdb` | Every instantiated test except `*known_bug*` | The full generated suite |
@@ -380,7 +379,7 @@ These cases still create a hipBLAS handle and, for pointer checks, device alloca
 
 **What requires GPU hardware.** The whole client suite. Startup fails when no device is visible.
 
-**What runs on PRs.** TheRock's default invocation is the `*pre_checkin*` filter (see `test/therock/test_hipblas.py`). `TEST_TYPE=quick` switches that job to `hipblas_smoke.yaml`. The YAML `quick` numerical tier is what `ctest -L standard` and `rtest.py -t psdb` run locally. HMM and multi-GPU are not parameters of this suite.
+**What runs on PRs.** TheRock runs `ctest -L $TEST_TYPE` through `test/therock/test_runner.py`. The default `TEST_TYPE=quick` is the `*pre_checkin*` filter. The YAML `quick` numerical tier runs only when the lane sets `TEST_TYPE` to `standard` or higher, and is what `ctest -L standard` and `rtest.py -t psdb` run locally. `hipblas_smoke.yaml` is not run by TheRock. HMM and multi-GPU are not parameters of this suite.
 
 ### Performance and Benchmarking Testing
 
@@ -414,11 +413,11 @@ hipBLAS is exercised by TheRock (via `test/therock/test_runner.py`) and by Math 
 | Validation area | Required before merge | Owner | Notes |
 | --- | --- | --- | --- |
 | Library build (Linux, AMD backend) | Yes | CI / component team | rocBLAS, and rocSOLVER when solvers are on |
-| `hipblas-test` on GPU | Yes, in the TheRock lane | Component team | Default lane is `*pre_checkin*`. Smoke YAML when `TEST_TYPE=quick` |
+| `hipblas-test` on GPU | Yes, in the TheRock lane | Component team | Runs `ctest -L $TEST_TYPE`. The default (`quick`) is `*pre_checkin*` |
 | CTest categories | When `shared/ctest` is in the checkout | Component team | `ctest -L standard` is the local match for numerical plus bad-argument coverage |
 | Formatting / pre-commit | Yes | CI | Repo-root [`.pre-commit-config.yaml`](../../.pre-commit-config.yaml) |
 | Code coverage floor | No | — | `BUILD_CODE_COVERAGE` is optional |
-| Address sanitizer | Lane-dependent | Component team | `BUILD_ADDRESS_SANITIZER`. TheRock sets `HSA_XNACK=1` when the artifact group name contains `asan` |
+| Address sanitizer | Lane-dependent | Component team | `BUILD_ADDRESS_SANITIZER`. Any ASAN lane is configured in TheRock |
 | CUDA backend (`USE_CUDA`) | Separate packaging (`hipblas-alt`) | Component team | `backend_flags: NVIDIA` cases. ILP64 entry points require cuBLAS 12 or newer |
 | Performance benchmarks | No | Component team | `hipblas-bench` is manual |
 | Solver routines | When the PR touches them | Component team | Need `BUILD_WITH_SOLVER=ON` and rocSOLVER. Several solver YAML entries set `backend_flags: AMD` |
@@ -427,8 +426,8 @@ hipBLAS is exercised by TheRock (via `test/therock/test_runner.py`) and by Math 
 
 | Status | Applies to |
 | --- | --- |
-| **Trusted gate** | AMD library build; TheRock `*pre_checkin*` (or smoke YAML when `TEST_TYPE=quick`); formatting |
-| **Local / broader gate** | `ctest -L standard` and `rtest.py -t psdb` (YAML `quick` and `pre_checkin` together). Run these before pushing a numerical change, because the default TheRock filter does not include YAML `quick` |
+| **Trusted gate** | AMD library build; TheRock `ctest -L $TEST_TYPE` (`*pre_checkin*` at the default `quick`); formatting |
+| **Local / broader gate** | `ctest -L standard` and `rtest.py -t psdb` (YAML `quick` and `pre_checkin` together). Run these before pushing a numerical change, because the default TheRock label (`quick`) does not include YAML `quick` |
 | **Unstable** | Quarantine by giving the case `category: known_bug`, or by a `Known bugs` list that `hipblas_gentest.py` rewrites to that category, with a tracking ticket and a plan to remove it |
 
 ### TheRock `TEST_TYPE` and CTest labels
@@ -437,12 +436,12 @@ These are the in-tree controls. This repository does not define GitHub labels th
 
 | Goal | Control |
 | --- | --- |
-| Smoke matrix on TheRock | `TEST_TYPE=quick` in the environment of `test/therock/test_hipblas.py` |
-| Bad-argument tier on TheRock | Default `TEST_TYPE` (the script treats every value other than `quick` as `*pre_checkin*`) |
+| Bad-argument tier on TheRock | Default `TEST_TYPE=quick` for `test/therock/test_runner.py` (CTest label `quick`) |
+| Numerical `quick` plus `pre_checkin` on TheRock | `TEST_TYPE=standard`, `comprehensive`, or `full` (all share one filter today) |
 | Numerical `quick` plus `pre_checkin` locally | `ctest -L standard` or `python3 rtest.py -t psdb` |
 | Install-tree check | `ctest -L <label>` from `bin/hipblas/` |
 
-Widening the default TheRock job to the numerical tier means changing `test/therock/test_hipblas.py` (the `#2616` TODO) or `test_categories.yaml`. A PR that only adds YAML `category: quick` cases does not make that job run them.
+Widening the default TheRock job to the numerical tier means changing the CTest label `quick` in `test_categories.yaml`, or the `TEST_TYPE` that TheRock passes. A PR that only adds YAML `category: quick` cases does not make that job run them.
 
 ### Flaky Test Policy
 
@@ -452,13 +451,13 @@ A flaky test is not a permanent gate. Quarantine it as `category: known_bug` (di
 
 `hipblas_gentest.py` supports a `Known bugs` list at the top of a YAML document. A case whose listed fields all match is rewritten to `category: known_bug` unless it is already `known_bug` or `disabled`. `function` matches as a glob. `known_bug_platforms` can record a platform set instead of rewriting the category; that string is stored on the test and the current runners key off the category name.
 
-No suite currently ships a `Known bugs` list, and `known_bugs.yaml` is not in the tree. The exclude patterns are already in `rtest.xml`, `test_categories.yaml`, and `test/therock/test_hipblas.py`, so adding the file and including it from the suite YAML is enough to make those runners skip the new quarantines.
+No suite currently ships a `Known bugs` list, and `known_bugs.yaml` is not in the tree. The exclude patterns are already in `rtest.xml` and `test_categories.yaml` (which TheRock uses through CTest), so adding the file and including it from the suite YAML is enough to make those runners skip the new quarantines.
 
 ## Sanitizer Coverage
 
 | Sanitizer | Build flag / notes | CI |
 | --- | --- | --- |
-| ASAN | `BUILD_ADDRESS_SANITIZER` in the top-level `CMakeLists.txt` (`-fsanitize=address -shared-libasan`). `hipblas-test` adds `-mllvm -asan-globals=0` so gtest string literals in the test TUs do not emit misaligned `asan_globals` metadata. `libhipblas` keeps global instrumentation | TheRock ASAN artifacts set `HSA_XNACK=1` from `test_hipblas.py`. Not documented here as a universal PR gate |
+| ASAN | `BUILD_ADDRESS_SANITIZER` in the top-level `CMakeLists.txt` (`-fsanitize=address -shared-libasan`). `hipblas-test` adds `-mllvm -asan-globals=0` so gtest string literals in the test TUs do not emit misaligned `asan_globals` metadata. `libhipblas` keeps global instrumentation | Any ASAN lane is configured in TheRock. Not documented here as a universal PR gate |
 | TSAN / UBSAN | No hipBLAS CI lane in this tree | — |
 
 GPU-side sanitizer behavior is limited by the ROCm stack. Host marshalling and the client benefit most from an ASAN build of `libhipblas`.
@@ -499,7 +498,7 @@ Before release sign-off, expect at least:
 | cuBLAS | NVIDIA | CUDA backend (`USE_CUDA`, package name `hipblas-alt`) | ILP64 filtered out when cuBLAS major version is below 12. Bad-argument strictness differs (`bad_arg_all: false`) |
 | Host reference (AOCL ILP64 or OpenBLAS64) plus LAPACK | External / TheRock | Linked into `hipblas-test` and `hipblas-bench` | `LINK_BLIS=OFF` can hit 32-bit overflow in the host reference on large sizes. The install guides say to exclude `*stress*`; those YAML entries are commented out today. Set `OMP_NUM_THREADS` |
 | hipBLAS-common | hipBLAS-common | Public headers and types | Version floor is in the top-level `CMakeLists.txt` |
-| TheRock / `shared/ctest` | TheRock | `test_hipblas.py`, install-tree CTest | Default TheRock filter is `*pre_checkin*`. `shared/ctest` is absent from a hipBLAS-only sparse checkout |
+| TheRock / `shared/ctest` | TheRock | `test/therock/test_runner.py`, install-tree CTest | Default TheRock label is `quick` (`*pre_checkin*`). `shared/ctest` is absent from a hipBLAS-only sparse checkout |
 | Math CI (Jenkins) | DevOps | Historical precheckin / extended / weekly names, mirrored as CTest labels | Job definitions are not in this tree. `rtest.py` is the in-repo driver those jobs have used |
 
 ## Supported Configurations
@@ -522,7 +521,7 @@ State unsupported combinations in the PR (solver routines on CUDA, ILP64 on old 
 | Fortran or ILP64 entry point | YAML `api` values covering the forms you changed, with `BUILD_FORTRAN_CLIENTS=ON` |
 | Backend-specific behavior | `backend_flags: AMD` or `NVIDIA`, and a build of that backend |
 | Solver routine | `BUILD_WITH_SOLVER=ON`, solver YAML, rocSOLVER available |
-| CTest tier or TheRock filter | `test_categories.yaml` and/or `test/therock/test_hipblas.py`. Check `ctest -N -L <label>` |
+| CTest tier or TheRock filter | `test_categories.yaml` (TheRock runs its labels). Check `ctest -N -L <label>` |
 | Packaging / install layout | Install, then `ctest -N` from `bin/hipblas/`, and confirm `hipblas_gtest.data` and `hipblas_smoke.yaml` sit next to `hipblas-test` |
 | Performance-only | `hipblas-bench` numbers in the PR. No client change is required when the backend is the thing that changed |
 
@@ -530,7 +529,7 @@ State unsupported combinations in the PR (solver routines on CUDA, ILP64 on old 
 
 | Gap | Regression risk | What exists today |
 | --- | --- | --- |
-| TheRock default runs `*pre_checkin*` and leaves YAML `quick` unrun (`TODO(#2616)` in `test/therock/test_hipblas.py`) | High for numerical marshalling bugs that bad-argument tests do not catch | Local `ctest -L standard` and `rtest.py -t psdb` |
+| TheRock default `TEST_TYPE=quick` runs `*pre_checkin*` and leaves YAML `quick` unrun | High for numerical marshalling bugs that bad-argument tests do not catch | Local `ctest -L standard` and `rtest.py -t psdb` |
 | CTest `comprehensive` and `full` use the same patterns as `standard` | Medium. The label names suggest a wider suite | Timeouts differ. Stress YAML is commented out |
 | CTest label `quick` selects YAML `pre_checkin` | Medium for someone who assumes the label matches the YAML category | This document. `ctest -L standard` is the tier that includes both |
 | `ffm-quick` is Level-2 `pre_checkin` without `*batched*`; `ffm-full` is Level-1 `pre_checkin` without `*strided*` | Medium. The names do not describe a superset relationship | The patterns in `test_categories.yaml` |
@@ -539,20 +538,20 @@ State unsupported combinations in the PR (solver routines on CUDA, ILP64 on old 
 | `HMM` and `multi_gpu` category names | Low. Nothing in the live YAML sets them, and `Arguments` has no fields that would fan a case out across devices or managed memory | Single-device `CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES` |
 | No automated performance threshold | High for performance work that is actually in hipBLAS | Manual `hipblas-bench`. Backend regressions belong to rocBLAS CI |
 | Jenkins job list is not in this repo | Medium | `rtest.xml` is the in-repo definition of `psdb` and `osdb` |
-| Sparse checkout without `shared/ctest` | Low | Clients still build. `ctest -L` and install-tree CTest are skipped |
+| Sparse checkout without `shared/ctest` | Low | Clients still build. `ctest -L` and install-tree CTest are skipped, so `test_runner.py` finds no tests and fails |
 
 ## Improvement Roadmap
 
 Near term:
 
-1. Extend `test/therock/test_hipblas.py` so the default lane includes the YAML `quick` numerical tier (`TODO(#2616)`), and keep `TEST_TYPE=quick` as the smoke YAML.
+1. Have the default TheRock lane include the YAML `quick` numerical tier, either by running hipBLAS at `TEST_TYPE=standard` or by widening the CTest label `quick` in `test_categories.yaml`.
 2. Make CTest `comprehensive` and `full` select something wider than `standard`, or rename the labels so they describe the shared filter.
 3. Decide whether the commented Level-1 stress / large-ILP64 entries should be regenerated under a category the runners actually select.
 
 Medium term:
 
 1. Add a `known_bugs.yaml` only together with tickets, and include it from the suites that need it.
-2. Keep `test_categories.yaml`, `rtest.xml`, and `test/therock/test_hipblas.py` in one place when timeouts or filters change, so the three descriptions cannot drift.
+2. Keep `test_categories.yaml` and `rtest.xml` in one place when timeouts or filters change, so the two descriptions cannot drift.
 3. Record the required GitHub checks next to this file once branch protection for hipBLAS is stable.
 4. If managed-memory or multi-GPU coverage becomes a product requirement, add the `Arguments` fields and a `TEST_P` wrapper first, then the YAML.
 
@@ -567,7 +566,7 @@ When changing hipBLAS:
 1. Read [Key Quality Concerns](#key-quality-concerns) for the area you are touching.
 2. Extend the YAML and the harness using [Adding tests](#adding-tests).
 3. Run `hipblas-test --gtest_filter=*quick*<your-function>*` and the matching `*pre_checkin*` filter before pushing. For a numerical change, also run `ctest -L standard` or `python3 rtest.py -t psdb` locally, because the default TheRock job does not include YAML `quick`.
-4. Update this document if you change tiers, CTest patterns, or what `test/therock/test_hipblas.py` runs.
+4. Update this document if you change tiers, CTest patterns, or the `TEST_TYPE` TheRock uses for hipBLAS.
 
 ### Choosing the Right Test Type
 
@@ -578,7 +577,7 @@ When changing hipBLAS:
 - **One backend only** — `backend_flags: AMD` or `NVIDIA`.
 - **Handle mode, atomics mode, set/get matrix and vector** — the auxiliary suites under `clients/gtest/auxil/`.
 - **Performance** — `hipblas-bench` on sizes that represent the path you care about. Put the numbers in the PR.
-- **CTest or TheRock tier** — `test_categories.yaml`, `test/therock/test_hipblas.py`, and `ctest -N -L <label>`.
+- **CTest or TheRock tier** — `test_categories.yaml`, `test/therock/test_runner.py`, and `ctest -N -L <label>`.
 
 ## How This Document Is Used
 
@@ -593,5 +592,5 @@ Living description of how hipBLAS clients are built, filtered, and gated. Prefer
 - [Client staging readme](clients/hipblas_clients_readme.txt)
 - [rocBLAS testing — numerical backend on AMD](../rocblas/TESTING.md)
 - [shared/ctest README](../../shared/ctest/README.md)
-- [TheRock hipBLAS test script](../../test/therock/test_hipblas.py)
+- [TheRock generic test runner](../../test/therock/test_runner.py)
 - [Contributing to the ROCm libraries](../../CONTRIBUTING.md)

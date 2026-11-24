@@ -28,8 +28,7 @@ depthURange['B8F8'] = depthURange['F8']
 # fp4 MI16x16x128: DepthU must be a multiple of 2*MI_K = 256.
 depthURange['F4'] = [[256,512,768,1024], [256,512,768], [256,512], [256]]
 
-computeDataTypeSize = {'H': 4, 'B': 4, 'S': 4, 'D': 8, 'C': 8, 'Z': 16, 'I8': 4, 'X': 4, 'F8': 4, 'F8N': 4, 'F8B8': 4, 'B8F8': 4, 'X1': 4, 'F4': 4}
-
+computeDataTypeSize = {'H': 4, 'B': 4, 'S': 4, 'D': 8, 'C': 8, 'Z': 16, 'I8': 4, 'I': 4, 'X': 4, 'F8': 4, 'F8N': 4, 'F8B8': 4, 'B8F8': 4, 'X1': 4, 'F4': 4}
 
 # TODO update for every new arch, or import from tensilelite commons
 validMFMA = {}
@@ -48,9 +47,17 @@ validMFMA["B8"] = validMFMA["F8"]
 validMFMA["F8N"] = validMFMA["F8"]
 validMFMA["F8B8"] = validMFMA["F8"]
 validMFMA["B8F8"] = validMFMA["F8"]
+# Int8 MFMAs per generation (not looked up by ARCH; documentation of what each
+# generation provides, as TensileLite's validMFMA["I8I8"] is their union):
+#   I8_908: gfx908/gfx90a legacy set.
+#   I8_940: gfx94x. TensileLite rejects [32,32,8,1] and [16,16,16,1] there
+#           ("deprecated in gfx94x") and adds the K=16/32 instructions.
+#   gfx950 adds the native [32,32,32,1] and [16,16,64,1] (listed below).
 validMFMA["I8_908"] = [[32,32,4,2], [32,32,8,1], [16,16,4,4], [16,16,16,1], [4,4,4,16]]
 validMFMA["I8_940"] = [[32,32,4,2], [32,32,16,1], [16,16,4,4], [16,16,32,1], [4,4,4,16]]
-validMFMA["I8"] = validMFMA["H"] + validMFMA["F8"]
+validMFMA["I8_950"] = [[32,32,16,1], [16,16,32,1], [32,32,32,1], [16,16,64,1]]
+# Same set as TensileLite's validMFMA["I8I8"] (ValidParameters.makeValidMFMA).
+validMFMA["I8"] = validMFMA["I8_908"] + [[32,32,16,1], [16,16,32,1], [32,32,32,1], [16,16,64,1]]
 
 MAX_GSU_WORKSPACE_SIZE = 128 * 1024 * 1024
 
@@ -140,6 +147,9 @@ ONLY_INCLUDE_MIs_GFX950 = {
     [
         [32, 32, 16, 1],
         [16, 16, 32, 1],
+        # gfx950 native int8 MFMAs (the only ones in the shipped gfx950 I8II logic)
+        [32, 32, 32, 1],
+        [16, 16, 64, 1],
         [4, 4, 4, 16],
     ],
     'F8':  # similar to I8
@@ -524,6 +534,14 @@ _CONFIG_OPTIONAL_COMMON = {
     "ONE_SIZE_PER_CONFIG": True,
     "MI_FILTER": 2,
     "EPILOGUES": True,
+    # Give each MI group the GlobalSplitU that MIDesign picks for it (the smallest GSU that
+    # fills the CUs at this size), with or without StreamK. False leaves the gfx1250 generic
+    # profile on its single GlobalSplitU -1, which Tensile resolves at run time.
+    "GSU_PER_MI": False,
+    # Overrides for the DataInit* entries of the emitted GlobalParameters, e.g.
+    # {"DataInitTypeD": 2} to initialise buffers like a hand-written Tensile config.
+    # Keys must be Tensile DataInitType* names or DataInitSeed; values are integers.
+    "DATA_INIT": None,
     "CLUSTER": 0,
     "DUCTILE_VALIDATION_PROFILE": 1,
 }
@@ -543,12 +561,14 @@ ENV_UPDATABLE_KEYS = {
 # again when the rows are grouped into GemmConfigs, as for a workload log.
 LIST_FORWARDED_KEYS = (
     "StreamK",
-    "LIBRARY_TYPE", 
+    "LIBRARY_TYPE",
     "MACROTILE_OPT",
     "MT_DU",
     "ONE_SIZE_PER_CONFIG",
     "MI_FILTER",
-    "EPILOGUES", 
+    "EPILOGUES",
+    "GSU_PER_MI",
+    "DATA_INIT",
     "CLUSTER",
     "DUCTILE_VALIDATION_PROFILE",
 )
@@ -565,12 +585,12 @@ CONFIG_DEFAULTS_BY_ARCH = {
     "gfx942_38cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX942_FAMILY},
     "gfx942_20cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX942_FAMILY},
     "gfx942_228cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX942_FAMILY},
-    "gfx1250": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250, "StreamK": False},
-    "gfx1250_96cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250, "StreamK": False},
-    "gfx1250_192cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250, "StreamK": False},
-    "gfx1250-strict": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250, "StreamK": False},
-    "gfx1250-strict_96cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250, "StreamK": False},
-    "gfx1250-strict_192cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250, "StreamK": False},
+    "gfx1250": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250},
+    "gfx1250_96cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250},
+    "gfx1250_192cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250},
+    "gfx1250-strict": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250},
+    "gfx1250-strict_96cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250},
+    "gfx1250-strict_192cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250},
 }
 
 assert set(CONFIG_DEFAULTS_BY_ARCH) == set(SUPPORTED_ARCH), (

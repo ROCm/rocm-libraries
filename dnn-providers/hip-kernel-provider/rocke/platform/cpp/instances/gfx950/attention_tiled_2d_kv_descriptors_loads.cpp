@@ -22,7 +22,7 @@
  *   rocke_gfx950_attn2d_issue_v_load_runtime  -- _issue_v_load_runtime (1691-1739).
  *   rocke_gfx950_attn2d_issue_k / _issue_v    -- the loader dispatch wrappers
  *     (2184-2227).
- *   rocke_gfx950_attn2d_read_k8_mfma_operand  -- _read_k8_mfma_operand (2229-2248).
+ *   rocke_gfx950_attn2d_read_k8_mfma_operand  -- _read_k8_mfma_operand.
  *
  * The builder-call sequence is byte-identical to the Python body: same ops, same
  * order, same operands. Because C has no closure capture, the per-call byte/
@@ -47,6 +47,11 @@
  * Lifetime: every emitted node is arena-owned (rocke_ir_builder_t.arena). Nothing
  * is freed individually; the arena bulk-frees the whole graph.
  */
+#include <stdio.h> /* snprintf */
+#include <string.h> /* memset */
+
+#include "rocke/arena.h" /* rocke_arena_calloc */
+#include "rocke/helper_rocke.helpers.attention_arch_caps.h"
 #include "rocke/instance_gfx950_attention_tiled_2d_internal.h"
 
 /* ==========================================================================
@@ -54,14 +59,21 @@
  *
  * The Python build prologue computes these once and the loader closures capture
  * them. In C they are pure functions of ctx geometry, recomputed where used. The
- * gfx950 bf16 path pins dwords=4 (16 bytes/lane) and KV_HALVES_PER_CALL=THREADS*8
- * (8 halves/lane) as literals -- mirror that, not the ASYNC_LDS_MAX_* fields.
+ * gfx950 bf16 path uses KV_DMA_DWORDS, the widest gfx950 LDS-DMA width from the
+ * attention capability table (4 dwords = 16 bytes/lane, 8 halves/lane), as
+ * Python does -- not the ASYNC_LDS_MAX_* fields.
  * ========================================================================== */
 
-/* KV_HALVES_PER_CALL = THREADS * 8 (Python 1413). */
+/* KV_DMA_DWORDS = attn_arch_caps("gfx950").max_lds_dma_dwords. */
+static int rocke__kv_dma_dwords(void)
+{
+    return rocke_attn_max_lds_dma_dwords("gfx950");
+}
+
+/* KV_HALVES_PER_CALL = THREADS * KV_DMA_DWORDS * 2 (Python 1413). */
 static int rocke__kv_halves_per_call(const rocke_gfx950_attn2d_build_ctx_t* ctx)
 {
-    return ctx->THREADS * 8;
+    return ctx->THREADS * rocke__kv_dma_dwords() * 2;
 }
 
 /* kv_calls_per_tile = (T * HD) // KV_HALVES_PER_CALL (Python 1415). */
@@ -82,22 +94,26 @@ static int rocke__bytes_per_buf(const rocke_gfx950_attn2d_build_ctx_t* ctx)
     return ctx->T * ctx->HD * 2;
 }
 
-/* WAVE_BYTES = WAVE * 16 (dwords=4 -> 16 bytes/lane) (Python 1473). */
+/* WAVE_BYTES = WAVE * KV_DMA_DWORDS * 4 (16 bytes/lane) (Python 1473). */
 static int rocke__wave_bytes(const rocke_gfx950_attn2d_build_ctx_t* ctx)
 {
-    return ctx->WAVE * 16;
+    return ctx->WAVE * rocke__kv_dma_dwords() * 4;
 }
 
-/* kv_block_bytes_c value = BS * NUM_KV * HD * KV_BYTES (one-block buffer bound,
- * Python 1458). Python creates this const ONCE and reuses it in every loader;
- * cache it on ctx so we do not allocate a duplicate const per loader (which would
- * shift downstream %values). */
+/* kv_block_bytes_c = kv_stride_blk_b (one-block buffer bound). Python derives
+ * the token and block strides ONCE and reuses them in every loader; cache them
+ * on ctx so we do not emit a duplicate multiply per loader (which would shift
+ * downstream %values). */
 static rocke_value_t* rocke__kv_block_bytes_c(rocke_gfx950_attn2d_build_ctx_t* ctx)
 {
     if(ctx->kv_block_bytes_c_v == NULL)
     {
-        int kv_stride_blk_b = ctx->BS * ctx->NUM_KV * ctx->HD * ctx->KV_BYTES;
-        ctx->kv_block_bytes_c_v = rocke_b_const_i32(ctx->b, kv_stride_blk_b);
+        /* The token and block strides scale with the runtime kv head count. */
+        ctx->kv_stride_tok_b_v = rocke_b_mul(
+            ctx->b, ctx->num_kv_p, rocke_b_const_i32(ctx->b, ctx->HD * ctx->KV_BYTES));
+        ctx->kv_stride_blk_b_v
+            = rocke_b_mul(ctx->b, ctx->kv_stride_tok_b_v, rocke_b_const_i32(ctx->b, ctx->BS));
+        ctx->kv_block_bytes_c_v = ctx->kv_stride_blk_b_v;
     }
     return ctx->kv_block_bytes_c_v;
 }
@@ -175,6 +191,205 @@ static rocke_value_t* rocke__wave_lds_offset_i64(rocke_gfx950_attn2d_build_ctx_t
     return ctx->wave_lds_off_i64_v;
 }
 
+/* Slab-padded K strides: one wave-slab is WAVE_BYTES contiguous bytes, and
+ * KQ_LDS_PAD*2 bytes go between slabs (Python WAVE_BYTES_K / bytes_per_call_K /
+ * bytes_per_buf_K). Without the pad these equal the shared K/V strides. */
+static int rocke__wave_bytes_K(const rocke_gfx950_attn2d_build_ctx_t* ctx)
+{
+    return rocke__wave_bytes(ctx) + ctx->KQ_LDS_PAD * 2;
+}
+
+static int rocke__bytes_per_call_K(const rocke_gfx950_attn2d_build_ctx_t* ctx)
+{
+    return ctx->KQ_LDS_PAD ? ctx->NUM_WARPS * rocke__wave_bytes_K(ctx) : rocke__bytes_per_call(ctx);
+}
+
+static int rocke__bytes_per_buf_K(const rocke_gfx950_attn2d_build_ctx_t* ctx)
+{
+    return ctx->KQ_LDS_PAD ? (ctx->T / ctx->KQ_SLAB_ROWS) * rocke__wave_bytes_K(ctx)
+                           : rocke__bytes_per_buf(ctx);
+}
+
+/* wave_lds_offset_K_i64: its own SSA value under the slab pad (emitted right
+ * after wave_lds_offset_i64), else the shared wave offset. */
+static rocke_value_t* rocke__wave_lds_offset_K_i64(rocke_gfx950_attn2d_build_ctx_t* ctx)
+{
+    if(!ctx->KQ_LDS_PAD)
+        return rocke__wave_lds_offset_i64(ctx);
+    if(ctx->wave_lds_off_K_i64_v != NULL)
+        return ctx->wave_lds_off_K_i64_v;
+    if(ctx->NUM_WARPS == 1)
+    {
+        ctx->wave_lds_off_K_i64_v = rocke_b_const_i64(ctx->b, 0);
+        return ctx->wave_lds_off_K_i64_v;
+    }
+    rocke_value_t* off_i32 = rocke_b_to_sgpr_u32(
+        ctx->b,
+        rocke_b_mul(ctx->b, ctx->wave_id, rocke_b_const_i32(ctx->b, rocke__wave_bytes_K(ctx))));
+    ctx->wave_lds_off_K_i64_v = rocke_b_zext(ctx->b, off_i32, rocke_i64());
+    return ctx->wave_lds_off_K_i64_v;
+}
+
+/* When a copy covers copy_tokens whole tokens and they fit in one page, the
+ * bf16/fp16 loaders address a copy as its page's base, its first token's
+ * offset in the page and the lane's own part. A copy that ends mid-row
+ * (head_size 192 with one warp: 512 halves are 2 2/3 rows) or spans pages
+ * keeps the paged-KV descriptor, which addresses each lane's own row. The token stride is a kernarg, so the lane part and the
+ * per-copy token offsets are built once, after the paged-KV descriptor, rather
+ * than multiplying the token index in every copy. */
+static int rocke__copy_tokens(const rocke_gfx950_attn2d_build_ctx_t* ctx)
+{
+    return rocke__kv_halves_per_call(ctx) / ctx->HD;
+}
+
+static bool rocke__page_copies(const rocke_gfx950_attn2d_build_ctx_t* ctx)
+{
+    return !ctx->FAST_PAGED_KV_DESC && !ctx->KV_FP8 && rocke__kv_halves_per_call(ctx) % ctx->HD == 0
+           && ctx->BS % rocke__copy_tokens(ctx) == 0;
+}
+
+/* A zeroed table of `n` IR values on the builder arena, sized from the spec
+ * (the Python twins are dicts, so no fixed bound applies). NULL with the
+ * builder's error set on OOM. */
+static rocke_value_t** rocke__value_table(rocke_gfx950_attn2d_build_ctx_t* ctx, int n)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t** t = (rocke_value_t**)rocke_arena_calloc(
+        &b->arena, (size_t)(n > 0 ? n : 1) * sizeof(rocke_value_t*));
+    if(t == NULL)
+    {
+        b->status = ROCKE_ERR_OOM;
+        snprintf(b->err, ROCKE_ERR_MSG_CAP, "out of memory for a %d-entry K/V table", n);
+    }
+    return t;
+}
+
+static void rocke__emit_paged_copy_offsets(rocke_gfx950_attn2d_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const int copy_tokens = rocke__copy_tokens(ctx);
+    const int kv_calls_per_tile = rocke__kv_calls_per_tile(ctx);
+    rocke_value_t* lane_half_base = rocke__lane_half_base(ctx);
+
+    const int copies_per_page = ctx->BS / copy_tokens;
+
+    ctx->kv_stride_blk_i64_v = NULL;
+    ctx->copy_tok_b = rocke__value_table(ctx, copies_per_page);
+    if(ctx->copy_tok_b == NULL)
+        return;
+    rocke_value_t* c_hd0 = rocke_b_const_i32(b, ctx->HD);
+    rocke_value_t* lane_tok = rocke_b_div(b, lane_half_base, c_hd0);
+    rocke_value_t* c_hd1 = rocke_b_const_i32(b, ctx->HD);
+    rocke_value_t* lane_dim = rocke_b_mod(b, lane_half_base, c_hd1);
+    rocke_value_t* tok_b = rocke_b_mul(b, lane_tok, ctx->kv_stride_tok_b_v);
+    rocke_value_t* c_h = rocke_b_const_i32(b, ctx->HD * ctx->KV_BYTES);
+    rocke_value_t* head_b = rocke_b_mul(b, ctx->kv_head_idx, c_h);
+    rocke_value_t* tok_head = rocke_b_add(b, tok_b, head_b);
+    rocke_value_t* c_bytes = rocke_b_const_i32(b, ctx->KV_BYTES);
+    rocke_value_t* dim_b = rocke_b_mul(b, lane_dim, c_bytes);
+    ctx->lane_within_b_v = rocke_b_add(b, tok_head, dim_b);
+    for(int call = 0; call < kv_calls_per_tile; ++call)
+    {
+        const int tok_i = call % copies_per_page;
+        if(tok_i == 0 || ctx->copy_tok_b[tok_i] != NULL)
+            continue;
+        rocke_value_t* c_tok = rocke_b_const_i32(b, tok_i * copy_tokens);
+        ctx->copy_tok_b[tok_i] = rocke_b_mul(b, ctx->kv_stride_tok_b_v, c_tok);
+    }
+    if(ctx->I64_KV_ADDR)
+        ctx->kv_stride_blk_i64_v = rocke_b_zext(b, ctx->kv_stride_blk_b_v, rocke_i64());
+}
+
+/* The paged-KV descriptor's indirect lookup for page `blk` of a tile: one
+ * guarded block-table read, wave-uniform. */
+static rocke_value_t*
+    rocke__tile_page_id(rocke_gfx950_attn2d_build_ctx_t* ctx, rocke_value_t* kv_tile_idx, int blk)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* tile_blk = kv_tile_idx;
+    if(ctx->N_BLOCKS_PER_TILE != 1)
+    {
+        rocke_value_t* c_nb = rocke_b_const_i32(b, ctx->N_BLOCKS_PER_TILE);
+        rocke_value_t* first = rocke_b_mul(b, kv_tile_idx, c_nb);
+        rocke_value_t* c_blk = rocke_b_const_i32(b, blk);
+        tile_blk = rocke_b_add(b, first, c_blk);
+    }
+    rocke_value_t* idx = rocke_b_add(b, rocke__seq_base(ctx), tile_blk);
+    rocke_value_t* mask = rocke_b_cmp_lt(b, idx, rocke__block_table_max_idx(ctx));
+    rocke_value_t* zero = rocke_b_const_i32(b, 0);
+    rocke_value_t* page
+        = rocke_b_masked_global_load(b, ctx->block_tables, idx, mask, zero, rocke_i32(), 4);
+    return rocke_b_to_sgpr_u32(b, page);
+}
+
+bool rocke_gfx950_attn2d_page_prefetch(const rocke_gfx950_attn2d_build_ctx_t* ctx)
+{
+    return rocke__page_copies(ctx) && !ctx->RING3 && !ctx->GROUPED_KV2
+           && ctx->N_BLOCKS_PER_TILE <= ROCKE_GFX950_ATTN2D_MAX_PREFETCH_PAGES;
+}
+
+void rocke_gfx950_attn2d_tile_page_ids(rocke_gfx950_attn2d_build_ctx_t* ctx,
+                                       rocke_value_t* kv_tile_idx,
+                                       rocke_value_t** out)
+{
+    for(int j = 0; j < ctx->N_BLOCKS_PER_TILE; ++j)
+        out[j] = rocke__tile_page_id(ctx, kv_tile_idx, j);
+}
+
+/* The page ids the loop carries for `kv_tile_idx`, or NULL when it reads them
+ * in place. */
+static rocke_value_t* const* rocke__carried_pages(const rocke_gfx950_attn2d_build_ctx_t* ctx,
+                                                  const rocke_value_t* kv_tile_idx)
+{
+    if(!rocke_gfx950_attn2d_page_prefetch(ctx))
+        return NULL;
+    if(kv_tile_idx == ctx->page_cur_tile)
+        return ctx->page_cur;
+    if(kv_tile_idx == ctx->page_next_tile)
+        return ctx->page_next;
+    if(kv_tile_idx == ctx->page_start_tile)
+        return ctx->page_start;
+    return NULL;
+}
+
+/* (rsrc, voffset, soffset) of one bf16/fp16 K/V copy. `pages` caches this
+ * tile's wave-uniform page ids by block within the tile. */
+static void rocke__paged_copy(rocke_gfx950_attn2d_build_ctx_t* ctx,
+                              rocke_value_t* src,
+                              rocke_value_t* src_rsrc,
+                              rocke_value_t* kv_tile_idx,
+                              int call,
+                              rocke_value_t** pages,
+                              rocke_value_t** out_rsrc,
+                              rocke_value_t** out_voff,
+                              rocke_value_t** out_soff)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    const int copy_tokens = rocke__copy_tokens(ctx);
+    const int blk = (call * copy_tokens) / ctx->BS;
+    const int tok_i = call % (ctx->BS / copy_tokens);
+    rocke_value_t* const* carried = rocke__carried_pages(ctx, kv_tile_idx);
+    if(carried != NULL)
+        pages = (rocke_value_t**)carried;
+    else if(pages[blk] == NULL)
+        pages[blk] = rocke__tile_page_id(ctx, kv_tile_idx, blk);
+    rocke_value_t* voff = ctx->lane_within_b_v;
+    if(tok_i != 0)
+        voff = rocke_b_add(b, voff, ctx->copy_tok_b[tok_i]);
+    *out_voff = voff;
+    if(ctx->I64_KV_ADDR)
+    {
+        rocke_value_t* page_i64 = rocke_b_zext(b, pages[blk], rocke_i64());
+        rocke_value_t* base_i64 = rocke_b_mul(b, page_i64, ctx->kv_stride_blk_i64_v);
+        rocke_value_t* ptr = rocke_b_global_ptr_add(b, src, base_i64);
+        *out_rsrc = rocke_b_buffer_rsrc(b, ptr, rocke__kv_block_bytes_c(ctx));
+        *out_soff = rocke__zero_soff(ctx);
+        return;
+    }
+    *out_rsrc = src_rsrc;
+    *out_soff = rocke_b_mul(b, pages[blk], ctx->kv_stride_blk_b_v);
+}
+
 /* ==========================================================================
  * Pre-loop: K/V buffer resources, byte derivation, paged-KV descriptor
  * (Python lines 1163-1630, the K/V-descriptor parts).
@@ -198,9 +413,9 @@ void rocke_gfx950_attn2d_emit_preloop(rocke_gfx950_attn2d_build_ctx_t* ctx)
         (void)((ctx->T * ctx->HD) % kv_halves_per_call);
     }
 
-    /* kv_block_bytes_c (1458): Python creates this one-block-bound const here,
-     * after the byte-stride derivation and BEFORE lane_half_base, and reuses it
-     * in every loader. Emit it now so its SSA value lands in source order. */
+    /* kv_block_bytes_c (1458): Python derives the byte strides and this
+     * one-block bound here, BEFORE lane_half_base, and reuses them in every
+     * loader. Emit them now so their SSA values land in source order. */
     (void)rocke__kv_block_bytes_c(ctx);
 
     /* Per-lane starting half index (1460), then K/V LDS base ptrtoints (1462-
@@ -218,6 +433,7 @@ void rocke_gfx950_attn2d_emit_preloop(rocke_gfx950_attn2d_build_ctx_t* ctx)
      * otherwise their value numbers land later and shift the downstream stream. */
     (void)rocke__zero_soff(ctx);
     (void)rocke__wave_lds_offset_i64(ctx);
+    (void)rocke__wave_lds_offset_K_i64(ctx);
 
     /* seq_base (1525) + block_table_max_idx (1538): the per-sequence base index
      * into block_tables and the global footprint bound; both wave-uniform SGPRs.
@@ -243,18 +459,15 @@ void rocke_gfx950_attn2d_emit_preloop(rocke_gfx950_attn2d_build_ctx_t* ctx)
     }
 
     /* ---- Paged KV byte descriptor (full transform DAG, 1591-1629) ----
-     * _kv_base = naive("paged_kv_bytes",
-     *     lengths=[1<<24, BS, NUM_KV, HD],
-     *     strides=[kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, KV_BYTES],
-     *     coord_names=("physical_block","token","kv_head","dim")). */
-    int blk_b = ctx->BS * ctx->NUM_KV * ctx->HD * ctx->KV_BYTES;
-    int tok_b = ctx->NUM_KV * ctx->HD * ctx->KV_BYTES;
-    int h_b = ctx->HD * ctx->KV_BYTES;
-    int kv_lengths[4] = {1 << 24, ctx->BS, ctx->NUM_KV, ctx->HD};
-    int kv_strides[4] = {blk_b, tok_b, h_b, ctx->KV_BYTES};
+     * _kv_base = DynamicTensorDescriptor.create("paged_kv_bytes",
+     *     coord_names=("physical_block","token","kv_head","dim"),
+     *     strides=(kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, KV_BYTES)),
+     * the first two the runtime strides derived above. */
+    int kv_strides[4] = {1, 1, ctx->HD * ctx->KV_BYTES, ctx->KV_BYTES};
+    rocke_value_t* kv_dyn[4] = {ctx->kv_stride_blk_b_v, ctx->kv_stride_tok_b_v, NULL, NULL};
     static const char* const kv_coords[4] = {"physical_block", "token", "kv_head", "dim"};
-    rocke_tensor_descriptor_t* kv_base = rocke_tensor_descriptor_naive(
-        b, "paged_kv_bytes", kv_lengths, 4, kv_strides, kv_coords, 4);
+    rocke_tensor_descriptor_t* kv_base = rocke_tensor_descriptor_naive_dynamic_mixed(
+        b, "paged_kv_bytes", kv_coords, 4, kv_dyn, kv_strides);
 
     /* Single-block tile (N_BLOCKS_PER_TILE == 1, T == BS):
      *   indirect(tile_idx -> physical_block) ; unmerge(linear_half -> token,dim).
@@ -285,6 +498,8 @@ void rocke_gfx950_attn2d_emit_preloop(rocke_gfx950_attn2d_build_ctx_t* ctx)
             b, "linear_block_idx", "physical_block", ctx->block_tables, seq_base, max_idx, 0);
         ctx->kv_desc = rocke_tensor_descriptor_transform(b, kv_base, chain, 3);
     }
+    if(rocke__page_copies(ctx))
+        rocke__emit_paged_copy_offsets(ctx);
 
     /* fp8 async-loader setup (Python 1785-1796), after the paged-KV
      * descriptor DAG. */
@@ -350,6 +565,7 @@ static void rocke__fast_paged_kv_voff_split(rocke_gfx950_attn2d_build_ctx_t* ctx
     if(ctx->I64_KV_ADDR)
     {
         /* base_i64 = zext(physical, i64) << 15 ; return (base_i64, within). */
+        /* zext before the shift constant, as Python evaluates them. */
         rocke_value_t* physical_i64 = rocke_b_zext(b, physical, rocke_i64());
         rocke_value_t* base_i64 = rocke_b_shl(b, physical_i64, rocke_b_const_i64(b, 15));
         if(out_base_i64)
@@ -387,13 +603,13 @@ void rocke_gfx950_attn2d_issue_k_load_runtime(rocke_gfx950_attn2d_build_ctx_t* c
                                               rocke_value_t* buf_idx)
 {
     rocke_ir_builder_t* b = ctx->b;
-    int bytes_per_buf = rocke__bytes_per_buf(ctx);
-    int bytes_per_call = rocke__bytes_per_call(ctx);
+    int bytes_per_buf = rocke__bytes_per_buf_K(ctx);
+    int bytes_per_call = rocke__bytes_per_call_K(ctx);
     int kv_calls_per_tile = rocke__kv_calls_per_tile(ctx);
     int kv_halves_per_call = rocke__kv_halves_per_call(ctx);
 
     rocke_value_t* K_lds_addr = rocke__K_lds_addr(ctx);
-    rocke_value_t* wave_off = rocke__wave_lds_offset_i64(ctx);
+    rocke_value_t* wave_off = rocke__wave_lds_offset_K_i64(ctx);
     rocke_value_t* zero_soff = rocke__zero_soff(ctx);
     rocke_value_t* kv_block_bytes_c = rocke__kv_block_bytes_c(ctx);
     rocke_value_t* lane_half_base = rocke__lane_half_base(ctx);
@@ -410,10 +626,15 @@ void rocke_gfx950_attn2d_issue_k_load_runtime(rocke_gfx950_attn2d_build_ctx_t* c
     if(ctx->FAST_PAGED_KV_DESC)
         rocke_gfx950_attn2d_fast_paged_kv_blocks(ctx, kv_tile_idx, &fast_block0, &fast_block1);
 
+    /* This tile's page ids by block, read on first use. */
+    rocke_value_t** pages = rocke__value_table(ctx, ctx->N_BLOCKS_PER_TILE);
+    if(pages == NULL)
+        return;
     for(int call = 0; call < kv_calls_per_tile; ++call)
     {
         rocke_value_t* k_rsrc = ctx->k_rsrc;
         rocke_value_t* voff = NULL;
+        rocke_value_t* soff = zero_soff;
         if(ctx->FAST_PAGED_KV_DESC)
         {
             rocke_value_t* base_i64 = NULL;
@@ -423,6 +644,11 @@ void rocke_gfx950_attn2d_issue_k_load_runtime(rocke_gfx950_attn2d_build_ctx_t* c
                 k_rsrc = rocke_b_buffer_rsrc(
                     b, rocke_b_global_ptr_add(b, ctx->key, base_i64), kv_block_bytes_c);
             }
+        }
+        else if(rocke__page_copies(ctx))
+        {
+            rocke__paged_copy(
+                ctx, ctx->key, ctx->k_rsrc, kv_tile_idx, call, pages, &k_rsrc, &voff, &soff);
         }
         else
         {
@@ -459,9 +685,9 @@ void rocke_gfx950_attn2d_issue_k_load_runtime(rocke_gfx950_attn2d_build_ctx_t* c
         /* k_dst = K_wave_base + call*bytes_per_call (1682). */
         rocke_value_t* k_dst = rocke_b_smem_ptr_add(
             b, K_wave_base, rocke_b_const_i64(b, (int64_t)call * bytes_per_call));
-        /* CACHE_STREAM (SLC): one-shot streaming load; dwords=4 (1687-1689). */
+        /* CACHE_STREAM (SLC): one-shot streaming load; KV_DMA_DWORDS (1687-1689). */
         rocke_b_async_buffer_load_lds_addr(
-            b, k_rsrc, k_dst, voff, zero_soff, 4, ROCKE_CACHE_STREAM);
+            b, k_rsrc, k_dst, voff, soff, rocke__kv_dma_dwords(), ROCKE_CACHE_STREAM);
     }
 }
 
@@ -474,25 +700,43 @@ void rocke_gfx950_attn2d_issue_v_load_runtime(rocke_gfx950_attn2d_build_ctx_t* c
     int kv_calls_per_tile = rocke__kv_calls_per_tile(ctx);
     int kv_halves_per_call = rocke__kv_halves_per_call(ctx);
 
-    (void)buf_idx; /* V is single-buffered; always slot 0 (Python 1699). */
     rocke_value_t* V_lds_addr = rocke__V_lds_addr(ctx);
     rocke_value_t* wave_off = rocke__wave_lds_offset_i64(ctx);
     rocke_value_t* zero_soff = rocke__zero_soff(ctx);
     rocke_value_t* kv_block_bytes_c = rocke__kv_block_bytes_c(ctx);
     rocke_value_t* lane_half_base = rocke__lane_half_base(ctx);
 
-    /* V_wave_base = V_lds_addr + wave_lds_offset (1700). */
-    rocke_value_t* V_wave_base = rocke_b_smem_ptr_add(b, V_lds_addr, wave_off);
+    /* V double-buffer: buf_idx picks the V_lds slot (T*HD*2 bytes apart);
+     * single-buffered V ignores it and always writes slot 0. */
+    rocke_value_t* V_wave_base;
+    if(ctx->V_DOUBLE_BUF)
+    {
+        rocke_value_t* v_buf_off_i64
+            = rocke_b_zext(b,
+                           rocke_b_mul(b, buf_idx, rocke_b_const_i32(b, rocke__bytes_per_buf(ctx))),
+                           rocke_i64());
+        V_wave_base
+            = rocke_b_smem_ptr_add(b, rocke_b_smem_ptr_add(b, V_lds_addr, v_buf_off_i64), wave_off);
+    }
+    else
+    {
+        V_wave_base = rocke_b_smem_ptr_add(b, V_lds_addr, wave_off);
+    }
 
     rocke_value_t* fast_block0 = NULL;
     rocke_value_t* fast_block1 = NULL;
     if(ctx->FAST_PAGED_KV_DESC)
         rocke_gfx950_attn2d_fast_paged_kv_blocks(ctx, kv_tile_idx, &fast_block0, &fast_block1);
 
+    /* This tile's page ids by block, read on first use. */
+    rocke_value_t** pages = rocke__value_table(ctx, ctx->N_BLOCKS_PER_TILE);
+    if(pages == NULL)
+        return;
     for(int call = 0; call < kv_calls_per_tile; ++call)
     {
         rocke_value_t* v_rsrc = ctx->v_rsrc;
         rocke_value_t* voff = NULL;
+        rocke_value_t* soff = zero_soff;
         if(ctx->FAST_PAGED_KV_DESC)
         {
             rocke_value_t* base_i64 = NULL;
@@ -502,6 +746,11 @@ void rocke_gfx950_attn2d_issue_v_load_runtime(rocke_gfx950_attn2d_build_ctx_t* c
                 v_rsrc = rocke_b_buffer_rsrc(
                     b, rocke_b_global_ptr_add(b, ctx->value, base_i64), kv_block_bytes_c);
             }
+        }
+        else if(rocke__page_copies(ctx))
+        {
+            rocke__paged_copy(
+                ctx, ctx->value, ctx->v_rsrc, kv_tile_idx, call, pages, &v_rsrc, &voff, &soff);
         }
         else
         {
@@ -537,9 +786,9 @@ void rocke_gfx950_attn2d_issue_v_load_runtime(rocke_gfx950_attn2d_build_ctx_t* c
         /* v_dst = V_wave_base + call*bytes_per_call (1733). */
         rocke_value_t* v_dst = rocke_b_smem_ptr_add(
             b, V_wave_base, rocke_b_const_i64(b, (int64_t)call * bytes_per_call));
-        /* CACHE_STREAM (SLC): V consumed once per iter; dwords=4 (1737-1739). */
+        /* CACHE_STREAM (SLC): V consumed once per iter; KV_DMA_DWORDS (1737-1739). */
         rocke_b_async_buffer_load_lds_addr(
-            b, v_rsrc, v_dst, voff, zero_soff, 4, ROCKE_CACHE_STREAM);
+            b, v_rsrc, v_dst, voff, soff, rocke__kv_dma_dwords(), ROCKE_CACHE_STREAM);
     }
 }
 
@@ -579,7 +828,7 @@ void rocke_gfx950_attn2d_issue_v(rocke_gfx950_attn2d_build_ctx_t* ctx,
 }
 
 /* ==========================================================================
- * _read_k8_mfma_operand (Python lines 2229-2248).
+ * _read_k8_mfma_operand (Python builder, attention_tiled_2d.py).
  *
  * Read 8 K elements from K_lds as the bf16 MFMA operand. For the fp8-in-LDS path
  * (K_FP8_MFMA == FP8_MFMA_QK) K_lds holds raw fp8 bytes; dequant in register via
@@ -587,6 +836,10 @@ void rocke_gfx950_attn2d_issue_v(rocke_gfx950_attn2d_build_ctx_t* ctx,
  * a compile-time False on gfx950, so its branch is dead; keep it for parity.
  * Otherwise read bf16 directly. The buf_idx / k_row / k_off are passed by the
  * caller's QK loop (the gfx950 internal-header form takes them as SSA values).
+ *
+ * The Python reader's KQ XOR-swizzle branch is Python-only: the C spec has no
+ * such knob, and the rocke_engine binding refuses use_kq_xor_swizzle rather
+ * than lower it unswizzled. The KQ slab-pad remap is ported below.
  * ========================================================================== */
 rocke_value_t* rocke_gfx950_attn2d_read_k8_mfma_operand(rocke_gfx950_attn2d_build_ctx_t* ctx,
                                                         rocke_value_t* buf_idx,
@@ -599,15 +852,26 @@ rocke_value_t* rocke_gfx950_attn2d_read_k8_mfma_operand(rocke_gfx950_attn2d_buil
     idx[1] = k_row;
     idx[2] = k_off;
 
-    /* not K_FP8_MFMA: plain bf16 read (Python 2241-2242). */
+    /* Slab-padded K_lds: map (row, col) to (slab, row_in_slab*HD + col) so the
+     * read hits the slot the DMA wrote. */
+    if(ctx->KQ_LDS_PAD && !ctx->FP8_MFMA_QK)
+    {
+        rocke_value_t* slab = rocke_b_div(b, k_row, rocke_b_const_i32(b, ctx->KQ_SLAB_ROWS));
+        rocke_value_t* row_in_slab = rocke_b_mod(b, k_row, rocke_b_const_i32(b, ctx->KQ_SLAB_ROWS));
+        rocke_value_t* row_off = rocke_b_mul(b, row_in_slab, rocke_b_const_i32(b, ctx->HD));
+        idx[1] = slab;
+        idx[2] = rocke_b_add(b, row_off, k_off);
+        return rocke_b_smem_load_vN(b, ctx->K_lds, idx, 3, ctx->dtype, 8);
+    }
+    /* not K_FP8_MFMA: plain bf16 read. */
     if(!ctx->FP8_MFMA_QK)
         return rocke_b_smem_load_vN(b, ctx->K_lds, idx, 3, ctx->dtype, 8);
 
-    /* FP8_NATIVE_QK is always False on gfx950 (Python 793 / 2243-2246): the
-     * native-fp8 raw read is dead, but emit it to mirror the source structure. */
+    /* FP8_NATIVE_QK is always False on gfx950: the native-fp8 raw read is
+     * dead, but emit it to mirror the source structure. */
     /* (FP8_NATIVE_QK == False -> fall through to the register dequant path.) */
 
-    /* fp8 register dequant: read 8 raw fp8 then cvt + *k_scale + cast (2247-2248). */
+    /* fp8 register dequant: read 8 raw fp8 then cvt + *k_scale + cast. */
     rocke_value_t* k_fp8 = rocke_b_smem_load_vN(b, ctx->K_lds, idx, 3, rocke_fp8e4m3(), 8);
     return rocke_dequant_fp8x8_to_dtype(b, k_fp8, ctx->k_scale_p, ctx->dtype);
 }

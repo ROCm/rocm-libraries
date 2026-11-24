@@ -56,7 +56,7 @@ knob value, a refused value, or a recorded design; no shipped kernel emits it.
 | `library/kernels/common/_attention_bwd_tiles.py` | legality of the small-tile warp grids (replicated and transposed G0 / G2 grids, 3.1) |
 | `library/kernels/common/attention_bwd_dq.py`, `_attention_bwd_dqbody.py` | the split dQ kernel (`AttnBwdDqSpec`, `build_attn_bwd_dq`) and its body (`BwdDqGeometry`, `BwdDqStep`, the key-tile range of a block of query rows; 2.4) |
 | `library/kernels/common/attention_bwd_unified.py`, `attention_bwd_unified_plan.py` | the unified family (paged KV; 8.3) |
-| `library/kernels/common/_attention_bwd_caps.py` | per-arch capability checks, atom selection, the asm MFMA mnemonics and hazard wait states |
+| `library/kernels/common/_attention_bwd_caps.py` | the backward's capability policy (target arches, legal waves, `agpr_alloc`, no 128-bit transpose read) over the shared attention capability table `rocke.helpers.attention_arch_caps`, which holds the per-arch facts: LDS-DMA and transpose-read widths, atom selection, the asm MFMA mnemonics and hazard wait states |
 | `library/kernels/common/_attention_bwd_band.py` | inverse band (`q_tile_range`), tile classifier, interior q range, mask policies, dK / dV store rule, `HostInt` (the integer builder on Python ints that evaluates the band and the DMA lane map on the host) |
 | `library/kernels/common/_attention_bwd_addr.py` | sequence decode (batched, THD), strided tensor and workspace address generators, packed rows, paged cache addressing; the family's shared emitters `as_i32` / `as_i64` (an int as a constant, a value unchanged) and `deal_chunks` / `chunk_coords` (the chunks of a tile dealt round-robin to the threads, and a chunk's row and column) |
 | `library/kernels/common/_attention_bwd_sinks.py` | dQ sinks (atomic, packed atomic; null, register and split-slice sinks recorded) |
@@ -624,7 +624,7 @@ Main grid `(gx, units * g_split, B)` with `gx = n_kv_tiles = ceil(S_kv_max / kN0
 * **Why kv tile fastest:** consecutive CTAs of one (unit, batch) share Q, dO,
   the statistics and the dQ workspace rows of that head group, so they reuse
   them through L2.
-* **XCD remap** (`XcdRemap`, `xcd_remap_id`): consecutive block ids are
+* **XCD remap** (`XcdRemap`, `rocke.helpers.grid.xcd_remap_plane`): consecutive block ids are
   dispatched round-robin over the chiplets; the chunked transform gives each
   chiplet `xcd_chunk` consecutive logical ids, so with a chunk that is a
   multiple of `gx` all kv tiles of one (unit, batch) land on one chiplet and
@@ -1769,7 +1769,7 @@ it only serves cells the general family already declares.
   at build time is not emitted), `ws_layout`, `dkv_mode` (`atomic` exactly when
   the runtime `g_split > 1`), `persistent` / `persist_decode` (`kv_tile_major`,
   `hkv_major`; runtime `num_persistent`), `xcd_remap` (whole-grid chiplet remap
-  through `xcd_remap_id`, set by the plan when `num_xcds` and a non-zero
+  through the gated `rocke.helpers.grid.xcd_remap`, set by the plan when `num_xcds` and a non-zero
   `xcd_chunk` give `xcd_n > 0`), `dq_mode` (`split` registered, not built), the
   per-arch `body_variant` (`general`; the gfx942 XT and gfx950 trload bodies are
   registered, not built) and `body_knobs` (any tuning knob of `AttnBwdSpec`

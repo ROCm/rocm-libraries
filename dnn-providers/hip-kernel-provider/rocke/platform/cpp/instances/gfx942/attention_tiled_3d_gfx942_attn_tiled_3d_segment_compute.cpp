@@ -101,7 +101,7 @@ void rocke_gfx942_attention_tiled_3d_emit_loop_init(
         rocke_value_t* qh_mul = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, cfg->NQK));
         rocke_value_t* qh_mod = rocke_b_mod(b, ctx->lane_col, rocke_b_const_i32(b, cfg->NQK));
         rocke_value_t* qh = rocke_b_add(b, qh_mul, qh_mod);
-        rocke_value_t* qh_in = rocke_b_cmp_lt(b, qh, rocke_b_const_i32(b, cfg->NUM_QH));
+        rocke_value_t* qh_in = rocke_b_cmp_lt(b, qh, ctx->num_qh_p);
         rocke_value_t* sink_h = rocke_b_global_load(b, ctx->sinks, qh, dtype, 2);
         rocke_value_t* sink_f = rocke_b_fmul(b, rocke_b_cast_to_f32(b, sink_h), ctx->rcp_ln2);
         rocke_value_t* sink_with_mask = rocke_b_select(b, qh_in, sink_f, ctx->neg_inf);
@@ -223,7 +223,7 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
         qh_mod = rocke_b_mod(b, ctx->lane_col, rocke_b_const_i32(b, cfg->NQK));
         ctx->row_qh = rocke_b_add(b, qh_mul, qh_mod);
         ok_a = rocke_b_cmp_lt(b, ctx->row_qp, ctx->cur_batch_q_len);
-        ok_b = rocke_b_cmp_lt(b, ctx->row_qh, rocke_b_const_i32(b, cfg->NUM_QH));
+        ok_b = rocke_b_cmp_lt(b, ctx->row_qh, ctx->num_qh_p);
         ctx->row_ok = rocke_b_land(b, ok_a, ok_b);
         /* Padding rows past BLOCK_Q*NQK alias the next q-block: no store. */
         if(cfg->BLOCK_Q * cfg->NQK < cfg->BLOCK_M)
@@ -236,8 +236,7 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
         ctx->row_alibi = NULL;
         if(cfg->USE_ALIBI)
         {
-            rocke_value_t* qh_ok
-                = rocke_b_cmp_lt(b, ctx->row_qh, rocke_b_const_i32(b, cfg->NUM_QH));
+            rocke_value_t* qh_ok = rocke_b_cmp_lt(b, ctx->row_qh, ctx->num_qh_p);
             ctx->row_alibi = rocke_b_masked_global_load(
                 b, ctx->alibi_slopes_ptr, ctx->row_qh, qh_ok, rocke_b_const_f32(b, 0.0), f32, 4);
         }
@@ -430,10 +429,11 @@ void rocke_gfx942_attention_tiled_3d_emit_softmax_loop(
                 if(cfg->USE_QQ_BIAS)
                 {
                     rocke_value_t* krp = rocke_b_sub(b, col_abs, ctx->context_len);
-                    rocke_value_t* krp_ok
-                        = rocke_b_land(b,
-                                       rocke_b_cmp_ge(b, krp, rocke_b_const_i32(b, 0)),
-                                       rocke_b_cmp_lt(b, krp, ctx->qq_bias_stride0_p));
+                    /* Python emits cmp_ge before cmp_lt; bind in order so C's
+                     * argument evaluation order cannot swap the two. */
+                    rocke_value_t* krp_ge = rocke_b_cmp_ge(b, krp, rocke_b_const_i32(b, 0));
+                    rocke_value_t* krp_lt = rocke_b_cmp_lt(b, krp, ctx->qq_bias_stride0_p);
+                    rocke_value_t* krp_ok = rocke_b_land(b, krp_ge, krp_lt);
                     rocke_value_t* qq_ok = rocke_b_land(b, ctx->row_ok, krp_ok);
                     rocke_value_t* qp_safe
                         = rocke_b_select(b, ctx->row_ok, ctx->row_qp, rocke_b_const_i32(b, 0));

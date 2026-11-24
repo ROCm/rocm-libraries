@@ -36,6 +36,8 @@
 #include <string.h>
 
 #include "rocke/helper_helper_rocke.helpers.attention.h" /* rocke_binary_search_seq_idx */
+#include "rocke/helper_rocke.helpers.attention_arch_caps.h"
+#include "rocke/helper_rocke.instances.common.attention_arch.h" /* rocke_require_tiled_attention_arch */
 #include "rocke/instance_gfx942_attention_tiled_2d_internal.h"
 
 /* ---------------------------------------------------------------- helpers */
@@ -47,56 +49,6 @@ static bool rocke_a2d_streq(const char* a, const char* c)
     if(!a || !c)
         return false;
     return strcmp(a, c) == 0;
-}
-
-/* The narrow-atom arch gate. Faithful inline port of
- * instances/common/attention_arch.validate_tiled_attention_arch +
- * require_tiled_attention_arch for the gfx942 narrow path: a target is admitted
- * when it has the wide-K + ds_read_tr path (gfx950) OR, restricted to the
- * narrow-tiled-2d arch set ({"gfx942"}), the narrow 16x16x16 f16 AND bf16 atom.
- * Returns true on accept; on reject latches a NotImplementedError on b. */
-static bool rocke_a2d_require_tiled_attention_arch(rocke_ir_builder_t* b, const char* arch)
-{
-    const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
-    if(target == NULL)
-    {
-        /* Python: KeyError from ArchTarget.from_gfx -> str(e) reason. */
-        if(b)
-        {
-            b->status = ROCKE_ERR_NOTIMPL;
-            snprintf(b->err, ROCKE_ERR_MSG_CAP, "unknown gfx target: %s", arch ? arch : "(null)");
-        }
-        return false;
-    }
-    const rocke_arch_mma_catalog_t* mma = rocke_archtarget_mma(target);
-    bool wide_k = rocke_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", 16, 16, 32)
-                  || target->memory.has_ds_read_tr;
-    if(wide_k && target->memory.has_ds_read_tr)
-        return true;
-    bool narrow_arch = rocke_a2d_streq(arch, "gfx942");
-    bool narrow_k = rocke_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", 16, 16, 16)
-                    && rocke_mma_catalog_has_shape(mma, "mma", "bf16", "bf16", "fp32", 16, 16, 16);
-    if(narrow_arch && narrow_k)
-        return true;
-    if(b)
-    {
-        b->status = ROCKE_ERR_NOTIMPL;
-        if(!wide_k)
-            snprintf(b->err,
-                     ROCKE_ERR_MSG_CAP,
-                     "tiled attention requires either the wide-K MFMA atoms "
-                     "(mfma_f32_16x16x32 / mfma_f32_32x32x16, gfx950) or, on a narrow "
-                     "variant arch (gfx942), the 16x16x16 f16/bf16 atom; neither path is "
-                     "available on %s",
-                     arch ? arch : "(null)");
-        else
-            snprintf(b->err,
-                     ROCKE_ERR_MSG_CAP,
-                     "tiled attention requires LDS transpose reads (ds_read_b64_tr_b16) "
-                     "for the wide-K path, absent on %s",
-                     arch ? arch : "(null)");
-    }
-    return false;
 }
 
 /* ===================================================================== *
@@ -119,7 +71,7 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->arch = arch;
 
     /* ---- require_tiled_attention_arch(arch) (lines 1139-1141) ---- */
-    if(!rocke_a2d_require_tiled_attention_arch(b, arch))
+    if(!rocke_require_tiled_attention_arch(b, arch))
         return false;
 
     /* ---- dtype gate (lines 1143-1145) ---- */
@@ -131,6 +83,14 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     }
     const rocke_type_t* dtype = rocke_attention_tiled_2d_spec_dtype_ir(spec);
     ctx->dtype = dtype;
+
+    /* The gfx942 spec has no lse_layout: refuse rather than write token-major. */
+    if(spec->lse_head_major)
+    {
+        b->status = ROCKE_ERR_NOTIMPL;
+        snprintf(b->err, ROCKE_ERR_MSG_CAP, "lse_layout='head_major' is gfx950-only");
+        return false;
+    }
 
     /* ---- narrow 16x16x16 atom select (lines 1147-1159) ---- */
     const rocke_archtarget_t* target = rocke_archtarget_from_gfx(arch);
@@ -189,6 +149,8 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->SKIP_LEGACY_QREG = spec->use_mfma32_skip_legacy_qreg;
     ctx->TRANSPOSED_MASK_LIMIT = spec->use_transposed_mask_limit;
     ctx->GROUPED_KV2 = spec->use_grouped_kv2_softmax;
+    ctx->CAUSAL_MASK_PHASE_SPLIT = spec->use_causal_mask_phase_split;
+    ctx->V_HBM_DIRECT = spec->use_v_hbm_direct;
     ctx->FAST_PAGED_KV_DESC = spec->use_fast_paged_kv_desc;
     ctx->I64_KV_ADDR = spec->use_i64_kv_addr;
     ctx->EARLY_V_SCHEDULE = spec->use_early_v_schedule;
@@ -210,22 +172,18 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->CONFLICT_FREE_V_STORE = CONFLICT_FREE_V_STORE;
     ctx->K_SINGLE_BUF = spec->use_k_single_buffer;
     const bool K_SLICED_RING = spec->use_k_sliced_ring;
-    /* The sliced-K ring is carried in the spec but not emitted by this engine.
-     * Python's __post_init__ accepts it and the Python builder emits it; this
-     * twin has the ring's shape and none of its schedule -- K_lds is sized as
-     * [ring_depth, T, k_slice_hd] below, but no slice DMA is ever issued and the
-     * QK body still reads K_lds through the double-buffer index, so a ring spec
-     * would lower to a kernel reading slices nothing staged. Reject rather than
-     * emit that, the same contract the gfx950 twin applies to its unported
-     * V-double-buffer family. Replace this with the real emit when the schedule
-     * is ported; the geometry fields it needs are already carried. */
-    if(K_SLICED_RING)
+    /* This shared narrow/default-geometry driver has no additive-bias score
+     * site (that lives only in the gfx950-specific ctx-init/driver). Reject
+     * rather than silently build an ordinary kernel under a biased name --
+     * the real check this mirrors (`rocke_attention_tiled_2d_spec_validate`,
+     * gfx942/attention_tiled_2d.cpp) is unreachable from this build path. */
+    if(spec->use_additive_bias)
     {
-        b->status = ROCKE_ERR_NOTIMPL;
+        b->status = ROCKE_ERR_VALUE;
         snprintf(b->err,
                  ROCKE_ERR_MSG_CAP,
-                 "use_k_sliced_ring: the gfx942 C twin does not emit the sliced-K "
-                 "ring schedule (not yet ported)");
+                 "use_additive_bias: the narrow/default tiled-2D driver does not "
+                 "emit additive bias");
         return false;
     }
     ctx->K_SLICED_RING = K_SLICED_RING;
@@ -299,19 +257,21 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->WAVE = WAVE;
     ctx->THREADS = THREADS;
 
-    const int ASYNC_LDS_MAX_DWORDS = 1;
+    /* The widest gfx942 LDS-DMA width, from the attention capability table. */
+    const int ASYNC_LDS_MAX_DWORDS = rocke_attn_max_lds_dma_dwords("gfx942");
     const int ASYNC_LDS_MAX_BYTES_PER_LANE = ASYNC_LDS_MAX_DWORDS * 4;
     ctx->ASYNC_LDS_MAX_DWORDS = ASYNC_LDS_MAX_DWORDS;
     ctx->ASYNC_LDS_MAX_BYTES_PER_LANE = ASYNC_LDS_MAX_BYTES_PER_LANE;
 
-    /* K/V async-DMA payload width. The gfx950 tiled-2D builder uses dwords=4
-     * (16 bytes/lane = 8 bf16 halves: KV_HALVES_PER_CALL = THREADS*8,
-     * lane_half_base = tid*8, WAVE_BYTES = WAVE*16); gfx942 uses dwords=1 (4
-     * bytes/lane = 2 halves). Keyed off the wide ds_read_tr path (gfx950). */
+    /* K/V async-DMA payload width. The gfx950 tiled-2D builder uses the
+     * target's widest LDS-DMA width (4 dwords = 16 bytes/lane = 8 bf16 halves:
+     * KV_HALVES_PER_CALL = THREADS*8, lane_half_base = tid*8, WAVE_BYTES =
+     * WAVE*16); gfx942 uses its widest, 1 dword (4 bytes/lane = 2 halves).
+     * Keyed off the wide ds_read_tr path (gfx950). */
     if(target->memory.has_ds_read_tr)
     {
-        ctx->KV_DMA_HALVES_PER_LANE = 8;
-        ctx->KV_DMA_DWORDS = 4;
+        ctx->KV_DMA_DWORDS = rocke_arch_async_lds_max_dwords(target);
+        ctx->KV_DMA_HALVES_PER_LANE = ctx->KV_DMA_DWORDS * 2;
     }
     else
     {
@@ -398,6 +358,9 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
         ctx->num_seqs_p = rocke_b_param(b, "num_seqs", rocke_i32(), NULL);
         ctx->bt_stride_p = rocke_b_param(b, "block_table_stride", rocke_i32(), NULL);
         ctx->qq_bias_stride0_p = rocke_b_param(b, "qq_bias_stride_0", rocke_i32(), NULL);
+        ctx->num_qh_p = rocke_b_param(b, "num_query_heads", rocke_i32(), NULL);
+        ctx->num_kv_p = rocke_b_param(b, "num_kv_heads", rocke_i32(), NULL);
+        ctx->sliding_window_p = rocke_b_param(b, "sliding_window", rocke_i32(), NULL);
         /* Appended LAST and only when requested, so the LSE-off ABI is unchanged. */
         if(spec->emit_lse)
         {
@@ -439,14 +402,11 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     }
 
     /* ---- seq lookup + Q-block geometry (lines 1390-1409) ---- */
-    ctx->seq_idx
-        = rocke_binary_search_seq_idx(b,
-                                      ctx->cu_q,
-                                      ctx->q_block_global_idx,
-                                      ctx->num_seqs_p,
-                                      BLOCK_Q,
-                                      rocke_attention_tiled_2d_spec_binary_search_iters(spec),
-                                      false);
+    {
+        rocke_value_t* trip = rocke_binary_search_seq_idx_trip_count(b, ctx->num_seqs_p);
+        ctx->seq_idx = rocke_binary_search_seq_idx_dyn(
+            b, ctx->cu_q, ctx->q_block_global_idx, ctx->num_seqs_p, BLOCK_Q, trip, false);
+    }
     ctx->cu_q_start = rocke_b_global_load_i32(b, ctx->cu_q, ctx->seq_idx, 0);
     ctx->cu_q_stop = rocke_b_global_load_i32(
         b, ctx->cu_q, rocke_b_add(b, ctx->seq_idx, rocke_b_const_i32(b, 1)), 0);
@@ -496,6 +456,38 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->K_SLICE_HD = K_SLICE_HD;
     ctx->K_SLICE_SLOTS = K_SLICE_SLOTS;
     ctx->K_SLICED_ACTIVE = K_SLICED_ACTIVE;
+    if(K_SLICED_ACTIVE)
+    {
+        /* The ring's partial vmcnt fence counts one slice's DMA calls: the slice
+         * must split into whole calls, and the count must fit the 6-bit vmcnt
+         * field. */
+        const int kv_halves_per_call = ctx->THREADS * ctx->KV_DMA_HALVES_PER_LANE;
+        if((T * K_SLICE_HD) % kv_halves_per_call != 0)
+        {
+            b->status = ROCKE_ERR_VALUE;
+            snprintf(b->err,
+                     ROCKE_ERR_MSG_CAP,
+                     "T=%d * k_slice_hd=%d must be a multiple of KV_HALVES_PER_CALL=%d so the "
+                     "ring's partial vmcnt fence counts whole slice prefetches",
+                     T,
+                     K_SLICE_HD,
+                     kv_halves_per_call);
+            return false;
+        }
+        if((T * K_SLICE_HD) / kv_halves_per_call > 63)
+        {
+            b->status = ROCKE_ERR_VALUE;
+            snprintf(b->err,
+                     ROCKE_ERR_MSG_CAP,
+                     "ring partial-vmcnt count %d exceeds the 6-bit vmcnt field (T=%d, "
+                     "k_slice_hd=%d, KV_HALVES_PER_CALL=%d)",
+                     (T * K_SLICE_HD) / kv_halves_per_call,
+                     T,
+                     K_SLICE_HD,
+                     kv_halves_per_call);
+            return false;
+        }
+    }
     ctx->K_LDS_ELEM_BYTES = K_LDS_ELEM_BYTES;
     ctx->K_BUF_BYTES = K_BUF_BYTES;
     ctx->K_BUFS = K_BUFS;
@@ -742,13 +734,9 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
             qk_scale = rocke_b_fmul(b, qk_scale, ctx->k_scale_p);
         ctx->qk_scale_v = qk_scale;
     }
-    /* sw_const = b.const_i32(int(SLIDING_WINDOW)) (line 1910). Python creates
-     * this once here in the constants block and REUSES it in the tile-bound
-     * (line 1994) and mask (lines 4111/4328/4403) regions. The previous port
-     * created an unused i32 0 here and a FRESH const in the loop scaffold,
-     * allocating an extra SSA value that shifted every later %N. Cache it. */
-    ctx->sw_const_v = rocke_b_const_i32(b, ctx->SLIDING_WINDOW);
-    ctx->c0 = ctx->sw_const_v;
+    /* sw_const = rt["sliding_window"]. Python binds it once here in the
+     * constants block and REUSES it in the tile-bound and mask regions. */
+    ctx->sw_const_v = ctx->sliding_window_p;
 
     /* ---- acc geometry the epilogue aliases (lines 2142-2143) ---- */
     ctx->ACC_N_TILES = USE_MFMA_32X32 ? (HD / 32) : PV_N_TILES;
@@ -1007,7 +995,7 @@ void rocke_gfx942_attn2d_emit_licm_hoist(rocke_gfx942_attn2d_build_ctx_t* ctx)
         /* row_ok = (qp_r < q_len) && (qh_r < NUM_QH) [&& (row < VALID_ROWS)].
          * Skip the VALID_ROWS guard when VALID_ROWS == BLOCK_M (NQK divides BLOCK_M). */
         rocke_value_t* row_ok_pos = rocke_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
-        rocke_value_t* row_ok_qh = rocke_b_cmp_lt(b, qh_r, rocke_b_const_i32(b, ctx->NUM_QH));
+        rocke_value_t* row_ok_qh = rocke_b_cmp_lt(b, qh_r, ctx->num_qh_p);
         rocke_value_t* row_ok_inner = rocke_b_land(b, row_ok_pos, row_ok_qh);
         rocke_value_t* row_ok;
         if(ctx->VALID_ROWS < ctx->BLOCK_M)
@@ -1035,11 +1023,53 @@ void rocke_gfx942_attn2d_emit_licm_hoist(rocke_gfx942_attn2d_build_ctx_t* ctx)
         for(reg = 0; reg < ctx->REGS_PER_LANE; ++reg)
         {
             rocke_value_t* qh_r = ctx->hoist_q_head[reg];
-            rocke_value_t* qh_ok = rocke_b_cmp_lt(b, qh_r, rocke_b_const_i32(b, ctx->NUM_QH));
+            rocke_value_t* qh_ok = rocke_b_cmp_lt(b, qh_r, ctx->num_qh_p);
             rocke_value_t* slope = rocke_b_masked_global_load(
                 b, ctx->alibi_slopes_ptr, qh_r, qh_ok, rocke_b_const_f32(b, 0.0), f32, 4);
             /* The softmax bucket reads the per-reg slope from hoist_q_head. */
             ctx->hoist_q_head[reg] = slope;
+        }
+    }
+
+    /* Transposed-32x32 per-lane invariants, once before the KV loop. */
+    ctx->st_qp_hoist = NULL;
+    ctx->st_row_ok_hoist = NULL;
+    ctx->st_causal_lim_hoist = NULL;
+    ctx->st_alibi_slope_hoist = NULL;
+    if(ctx->USE_MFMA_32X32 && ctx->TRANSPOSED_QK_32X32 && ctx->TRANSPOSED_INVARIANT_HOIST)
+    {
+        rocke_value_t* st_q_row
+            = rocke_b_add(b, ctx->wave_row_base, rocke__mfma_32x32_c_col(b, ctx->lane, 0));
+        rocke_value_t* st_qp = rocke_b_add(
+            b, ctx->qb_start_pos, rocke_b_div(b, st_q_row, rocke_b_const_i32(b, ctx->NQK)));
+        rocke_value_t* st_qh_mul = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, ctx->NQK));
+        rocke_value_t* st_qh_mod = rocke_b_mod(b, st_q_row, rocke_b_const_i32(b, ctx->NQK));
+        rocke_value_t* st_qh = rocke_b_add(b, st_qh_mul, st_qh_mod);
+        rocke_value_t* st_ok_qp = rocke_b_cmp_lt(b, st_qp, ctx->cur_batch_q_len);
+        rocke_value_t* st_ok_qh = rocke_b_cmp_lt(b, st_qh, ctx->num_qh_p);
+        rocke_value_t* st_ok_inner = rocke_b_land(b, st_ok_qp, st_ok_qh);
+        if(ctx->VALID_ROWS < ctx->BLOCK_M)
+        {
+            rocke_value_t* st_ok_vr
+                = rocke_b_cmp_lt(b, st_q_row, rocke_b_const_i32(b, ctx->VALID_ROWS));
+            ctx->st_row_ok_hoist = rocke_b_land(b, st_ok_inner, st_ok_vr);
+        }
+        else
+        {
+            ctx->st_row_ok_hoist = st_ok_inner;
+        }
+        ctx->st_qp_hoist = st_qp;
+        ctx->st_causal_lim_hoist = rocke_b_add(b, ctx->context_len, st_qp);
+        if(ctx->USE_ALIBI)
+        {
+            rocke_value_t* st_qh_ok = rocke_b_cmp_lt(b, st_qh, ctx->num_qh_p);
+            ctx->st_alibi_slope_hoist = rocke_b_masked_global_load(b,
+                                                                   ctx->alibi_slopes_ptr,
+                                                                   st_qh,
+                                                                   st_qh_ok,
+                                                                   rocke_b_const_f32(b, 0.0),
+                                                                   rocke_f32(),
+                                                                   4);
         }
     }
 }

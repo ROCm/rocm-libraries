@@ -19,18 +19,16 @@
  * global_atomic_add into Y.
  *
  * Peers (gate/up loads, the cadence/MFMA dispatchers) are reached through the
- * internal-header prototypes; this file does not redefine them. The two MfmaAtom
- * methods used here (zero_acc, lane_to_output) are reproduced inline as tiny
- * static helpers -- byte-for-byte with rocke/helpers/atoms.py -- because the
- * atoms.h port does not expose them.
+ * internal-header prototypes; this file does not redefine them. MfmaAtom.zero_acc
+ * is reproduced inline as a tiny static helper -- byte-for-byte with
+ * rocke/helpers/atoms.py -- because the atoms.h port does not expose it;
+ * lane_to_output is rocke_mfma_atom_lane_to_output (atoms.h).
  *
  * Byte-faithful builder-call order against rocke/ir.h + the sibling helper headers.
  */
 #include "rocke/instance_moe_fused_mega_fp8_internal.h"
 
 #include <stdio.h>
-
-#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* ====================================================================== *
  *  Inline MfmaAtom method reproductions (atoms.py).
@@ -41,67 +39,6 @@ static rocke_value_t* rocke_moe_fp8_atom_zero_acc(rocke_ir_builder_t* b,
                                                   const rocke_mfma_atom_t* atom)
 {
     return rocke_b_zero_vec_f32(b, atom->c_per_lane);
-}
-
-/* MfmaAtom.lane_to_output(b, lane, i): per-lane (row_in_atom, col_in_atom) of
- * accumulator slot i. Reproduces atoms.py:536-591 (16x16 / 32x32 / 4x4). On an
- * unsupported atom shape sets the sticky error and leaves the out-params NULL
- * (the Python NotImplementedError path). */
-static void rocke_moe_fp8_atom_lane_to_output(rocke_ir_builder_t* b,
-                                              const rocke_mfma_atom_t* atom,
-                                              rocke_value_t* lane,
-                                              int i,
-                                              rocke_value_t** out_row,
-                                              rocke_value_t** out_col)
-{
-    *out_row = NULL;
-    *out_col = NULL;
-    if(atom->m == 16 && atom->n == 16)
-    {
-        rocke_value_t* c_atom_n = rocke_b_const_i32(b, atom->n);
-        rocke_value_t* n_in_atom = rocke_b_mod(b, lane, c_atom_n);
-        rocke_value_t* m_blk = rocke_b_div(b, lane, c_atom_n);
-        /* Python: row = b.add(b.mul(m_blk, c_per_lane), b.const_i32(i)) -- the
-         * mul is emitted FIRST, then the const_i32(i). Force C arg-eval order. */
-        rocke_value_t* mul_v = rocke_b_mul(b, m_blk, rocke_b_const_i32(b, atom->c_per_lane));
-        rocke_value_t* row = rocke_b_add(b, mul_v, rocke_b_const_i32(b, i));
-        *out_row = row;
-        *out_col = n_in_atom;
-        return;
-    }
-    if(atom->m == 32 && atom->n == 32)
-    {
-        rocke_value_t* c_atom_n = rocke_b_const_i32(b, atom->n);
-        rocke_value_t* n_in_atom = rocke_b_mod(b, lane, c_atom_n);
-        rocke_value_t* m_blk = rocke_b_div(b, lane, c_atom_n);
-        int rb = i / 4;
-        int ri = i % 4;
-        /* Python: row = b.add(b.add(b.const_i32(rb*8), b.mul(m_blk, b.const_i32(4))),
-         *                     b.const_i32(ri)) -- const_i32(rb*8) first, then the
-         * mul, then the inner add, then const_i32(ri), then the outer add. */
-        rocke_value_t* c_rb = rocke_b_const_i32(b, rb * 8);
-        rocke_value_t* mul_v = rocke_b_mul(b, m_blk, rocke_b_const_i32(b, 4));
-        rocke_value_t* inner = rocke_b_add(b, c_rb, mul_v);
-        rocke_value_t* row = rocke_b_add(b, inner, rocke_b_const_i32(b, ri));
-        *out_row = row;
-        *out_col = n_in_atom;
-        return;
-    }
-    if(atom->m == 4 && atom->n == 4)
-    {
-        rocke_value_t* c4 = rocke_b_const_i32(b, 4);
-        rocke_value_t* lane_in_batch = rocke_b_mod(b, lane, c4);
-        *out_row = rocke_b_const_i32(b, i);
-        *out_col = lane_in_batch;
-        return;
-    }
-    /* Faithful mirror of atoms.py:AtomLayout.lane_to_output, which raises
-     * NotImplementedError("no lane_to_output dispatch for atom {m}x{n}") for any
-     * MFMA shape other than the three dispatched above (16x16, 32x32, 4x4). This
-     * is byte-faithful reject behaviour (not unported C work): only atom shapes
-     * Python also rejects reach here, and the message text matches verbatim. */
-    rocke_i_set_err(
-        b, ROCKE_ERR_NOTIMPL, "no lane_to_output dispatch for atom %dx%d", atom->m, atom->n);
 }
 
 /* ====================================================================== *
@@ -295,7 +232,7 @@ void rocke_moe_fp8_emit_down_atomic_reduce(rocke_moe_fp8_build_ctx_t* ctx,
         {
             rocke_value_t* row_in = NULL;
             rocke_value_t* col_in = NULL;
-            rocke_moe_fp8_atom_lane_to_output(b, atom, lane, i, &row_in, &col_in);
+            rocke_mfma_atom_lane_to_output(b, atom, lane, i, &row_in, &col_in);
             rocke_value_t* row = rocke_b_add(
                 b,
                 block_m_off,

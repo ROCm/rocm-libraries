@@ -84,16 +84,16 @@ void rocke_gfx942_attn2d_emit_q_load(rocke_gfx942_attn2d_build_ctx_t* ctx)
      * recompute here for the staged-store fallback path. */
     z8 = rocke_b_zero_vec(b, dtype, 8);
 
-    /* q_desc = TensorDescriptor.naive("Q", lengths=[1<<30, NUM_QH, HD],
-     *          coord_names=("token","head","dim")). Stored on ctx for the
-     *          downstream Q gather (32x32 direct-global) + the epilogue store. */
+    /* q_desc over (token, head, dim), stored on ctx for the downstream Q gather
+     * (32x32 direct-global) + the epilogue store. The head count is a kernarg,
+     * so the token stride is too. */
     {
-        int lengths[3];
         static const char* const coord_names[3] = {"token", "head", "dim"};
-        lengths[0] = 1 << 30;
-        lengths[1] = ctx->NUM_QH;
-        lengths[2] = ctx->HD;
-        ctx->q_desc = rocke_tensor_descriptor_naive(b, "Q", lengths, 3, NULL, coord_names, 3);
+        rocke_value_t* strides[3]
+            = {rocke_b_mul(b, ctx->num_qh_p, rocke_b_const_i32(b, ctx->HD)), NULL, NULL};
+        const int static_strides[3] = {1, ctx->HD, 1};
+        ctx->q_desc = rocke_tensor_descriptor_naive_dynamic_mixed(
+            b, "Q", coord_names, 3, strides, static_strides);
     }
 
     if(ctx->Q_DIRECT_GLOBAL)
@@ -151,8 +151,7 @@ void rocke_gfx942_attn2d_emit_q_load(rocke_gfx942_attn2d_build_ctx_t* ctx)
          * guard is always true — omitting it avoids a redundant cmp+and on the hot path. */
         {
             rocke_value_t* lt_pos = rocke_b_cmp_lt(b, q_pos_t, ctx->cur_batch_q_len);
-            rocke_value_t* lt_qh
-                = rocke_b_cmp_lt(b, qh_t, rocke_b_const_i32(b, (int64_t)ctx->NUM_QH));
+            rocke_value_t* lt_qh = rocke_b_cmp_lt(b, qh_t, ctx->num_qh_p);
             rocke_value_t* and_pos_qh = rocke_b_land(b, lt_pos, lt_qh);
             if(ctx->VALID_ROWS < ctx->BLOCK_M)
             {
@@ -418,21 +417,21 @@ void rocke_gfx942_attn2d_emit_q_gather(rocke_gfx942_attn2d_build_ctx_t* ctx)
                     = rocke_b_add(b,
                                   ctx->qb_start_pos,
                                   rocke_b_div(b, q32_row, rocke_b_const_i32(b, (int64_t)ctx->NQK)));
-                /* q32_h = kv_head_idx*NQK + q32_row % NQK */
-                /* Bound in Python's left-to-right order. */
+                /* q32_h = kv_head_idx*NQK + q32_row % NQK. Sub-expressions are
+                 * bound to temps in Python's left-to-right order (C leaves
+                 * argument evaluation order unspecified). */
                 {
-                    rocke_value_t* head_base
+                    rocke_value_t* q32_h_mul
                         = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, (int64_t)ctx->NQK));
-                    rocke_value_t* head_in_kv
+                    rocke_value_t* q32_h_mod
                         = rocke_b_mod(b, q32_row, rocke_b_const_i32(b, (int64_t)ctx->NQK));
-                    q32_h = rocke_b_add(b, head_base, head_in_kv);
+                    q32_h = rocke_b_add(b, q32_h_mul, q32_h_mod);
                 }
                 /* q32_mask = (q32_pos<cur_batch_q_len) && (q32_h<NUM_QH) */
                 {
-                    rocke_value_t* pos_ok = rocke_b_cmp_lt(b, q32_pos, ctx->cur_batch_q_len);
-                    rocke_value_t* head_ok
-                        = rocke_b_cmp_lt(b, q32_h, rocke_b_const_i32(b, (int64_t)ctx->NUM_QH));
-                    q32_mask = rocke_b_land(b, pos_ok, head_ok);
+                    rocke_value_t* q32_pos_ok = rocke_b_cmp_lt(b, q32_pos, ctx->cur_batch_q_len);
+                    rocke_value_t* q32_h_ok = rocke_b_cmp_lt(b, q32_h, ctx->num_qh_p);
+                    q32_mask = rocke_b_land(b, q32_pos_ok, q32_h_ok);
                 }
                 q32_pos_safe = rocke_b_select(b, q32_mask, q32_pos, rocke_b_const_i32(b, 0));
                 q32_h_safe = rocke_b_select(b, q32_mask, q32_h, rocke_b_const_i32(b, 0));
@@ -455,10 +454,9 @@ void rocke_gfx942_attn2d_emit_q_gather(rocke_gfx942_attn2d_build_ctx_t* ctx)
                 /* q32 = vector_select(splat(q32_mask, Q32_FRAG), q32_raw,
                  *                     zero_vec(dtype, Q32_FRAG)) */
                 {
-                    /* Bound in Python's left-to-right order. */
-                    rocke_value_t* mask_vec = rocke_b_vector_splat(b, q32_mask, Q32_FRAG);
-                    rocke_value_t* zero = rocke_b_zero_vec(b, dtype, Q32_FRAG);
-                    q32 = rocke_b_vector_select(b, mask_vec, q32_raw, zero);
+                    rocke_value_t* q32_mask_v = rocke_b_vector_splat(b, q32_mask, Q32_FRAG);
+                    rocke_value_t* q32_zero = rocke_b_zero_vec(b, dtype, Q32_FRAG);
+                    q32 = rocke_b_vector_select(b, q32_mask_v, q32_raw, q32_zero);
                 }
             }
             else

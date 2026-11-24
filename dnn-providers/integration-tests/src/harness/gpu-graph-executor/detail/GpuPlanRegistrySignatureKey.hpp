@@ -7,10 +7,14 @@
 #include <type_traits>
 #include <variant>
 
+#include "GpuBatchnormBwdSignatureKey.hpp"
 #include "GpuBatchnormFwdInfSignatureKey.hpp"
 #include "GpuBatchnormFwdInfVarianceSignatureKey.hpp"
 #include "GpuBatchnormFwdTrainSignatureKey.hpp"
+#include "GpuBlockScaleSignatureKey.hpp"
+#include "GpuConvolutionBwdSignatureKey.hpp"
 #include "GpuConvolutionFwdSignatureKey.hpp"
+#include "GpuConvolutionWrwSignatureKey.hpp"
 #include "GpuLayernormBwdSignatureKey.hpp"
 #include "GpuLayernormFwdSignatureKey.hpp"
 #include "GpuMatmulSignatureKey.hpp"
@@ -27,8 +31,13 @@ namespace hipdnn_integration_tests::gpu_graph_executor::detail
 
 // Variant of all GPU plan signature key types.
 // Add new signature key types here as GPU plans are implemented.
-using GpuPlanRegistrySignatureKey = std::variant<GpuBatchnormFwdTrainSignatureKey,
+using GpuPlanRegistrySignatureKey = std::variant<GpuBatchnormBwdSignatureKey,
+                                                 GpuBatchnormFwdTrainSignatureKey,
+                                                 GpuBlockScaleQuantizeSignatureKey,
+                                                 GpuBlockScaleDequantizeSignatureKey,
+                                                 GpuConvolutionBwdSignatureKey,
                                                  GpuConvolutionFwdSignatureKey,
+                                                 GpuConvolutionWrwSignatureKey,
                                                  GpuLayernormFwdSignatureKey,
                                                  GpuLayernormBwdSignatureKey,
                                                  GpuMatmulSignatureKey,

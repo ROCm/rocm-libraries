@@ -5,13 +5,15 @@ add_executable(hipblaslt-bench)
 add_library(hipblaslt-clients-common STATIC)
 
 target_include_directories(hipblaslt-clients-common
+    PRIVATE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/client>
+)
+
+target_include_directories(hipblaslt-clients-common
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/include>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite>
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/include>
-    PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite"
 )
 
 if(HIPBLASLT_ENABLE_COVERAGE)
@@ -255,7 +257,7 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         if(HIPBLASLT_ENABLE_ROCROLLER)
             target_link_libraries(hipblaslt-test PRIVATE
                 $<TARGET_OBJECTS:hipblaslt-rocroller>
-                rocroller
+                roc::rocroller
             )
         endif()
     endif()

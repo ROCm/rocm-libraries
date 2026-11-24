@@ -15,8 +15,11 @@ from dispatch.attention import (
     attention_execution_candidates,
 )
 from dispatch.attention import bindings as attention_bindings
-from dispatch.attention.common import AttentionTuningSpec, _problem
+from dispatch.attention.common import AttentionTuningSpec, attention_problem
 from kernels.common.attention_dense_spec import AttentionDenseSpec
+
+from ._fake_paged_tensors import FakeTensor as _Tensor
+from ._fake_paged_tensors import paged_tensors as _paged_tensors
 
 
 def _req(arch="gfx950", **kw) -> AttentionRequest:
@@ -34,61 +37,6 @@ def _req(arch="gfx950", **kw) -> AttentionRequest:
     )
     base.update(kw)
     return AttentionRequest(**base)
-
-
-class _Tensor:
-    def __init__(
-        self,
-        shape,
-        dtype,
-        values=None,
-        *,
-        device="cuda:0",
-        contiguous=True,
-        strides=None,
-    ):
-        self.shape = tuple(shape)
-        self.dtype = dtype
-        self.device = device
-        self._values = values
-        self._contiguous = contiguous
-        self._strides = strides
-
-    def is_contiguous(self):
-        return self._contiguous
-
-    def detach(self):
-        return self
-
-    def stride(self, dim):
-        if self._strides is not None:
-            return self._strides[dim]
-        stride = 1
-        values = [0] * len(self.shape)
-        for index in range(len(self.shape) - 1, -1, -1):
-            values[index] = stride
-            stride *= self.shape[index]
-        return values[dim]
-
-    def cpu(self):
-        return self
-
-    def tolist(self):
-        if self._values is None:
-            raise AssertionError("no host values")
-        return self._values
-
-
-def _paged_tensors(*, num_blocks=64):
-    return {
-        "q": _Tensor((1024, 32, 128), "torch.bfloat16"),
-        "out": _Tensor((1024, 32, 128), "torch.bfloat16"),
-        "k": _Tensor((num_blocks, 16, 8, 128), "torch.bfloat16"),
-        "v": _Tensor((num_blocks, 16, 8, 128), "torch.bfloat16"),
-        "cu_seqlens_q": _Tensor((2,), "torch.int32", [0, 1024]),
-        "seqused_k": _Tensor((1,), "torch.int32", [1024]),
-        "block_table": _Tensor((1, 64), "torch.int32", [list(range(64))]),
-    }
 
 
 class TestRegistrySplit(unittest.TestCase):
@@ -246,7 +194,7 @@ class TestRegistrySplit(unittest.TestCase):
         self.assertNotIn("sinks", captured)
 
     def test_explicit_binding_validates_every_paged_input_class(self):
-        problem = _problem(_req())
+        problem = attention_problem(_req())
         valid = _paged_tensors()
         self.assertEqual(
             attention_bindings.validate_tuning_attention_tensors(problem, valid),
@@ -309,7 +257,7 @@ class TestRegistrySplit(unittest.TestCase):
             attention_bindings.validate_tuning_attention_tensors(problem, tensors)
 
     def test_explicit_binding_can_skip_only_metadata_content_sync(self):
-        problem = _problem(_req())
+        problem = attention_problem(_req())
         tensors = _paged_tensors()
         tensors["block_table"] = _Tensor(
             (1, 64), "torch.int32", [[999] + list(range(1, 64))]
@@ -322,7 +270,7 @@ class TestRegistrySplit(unittest.TestCase):
         )
 
     def test_explicit_binding_ignores_invalid_unused_table_columns(self):
-        problem = _problem(_req())
+        problem = attention_problem(_req())
         tensors = _paged_tensors()
         tensors["seqused_k"] = _Tensor((1,), "torch.int32", [16])
         tensors["block_table"] = _Tensor(
@@ -337,7 +285,7 @@ class TestRegistrySplit(unittest.TestCase):
 
     def test_explicit_binding_rejects_cpu_and_semantic_mismatches(self):
         request = _req()
-        problem = _problem(request)
+        problem = attention_problem(request)
         tensors = _paged_tensors()
         for tensor in tensors.values():
             tensor.device = "cpu"
@@ -384,9 +332,11 @@ class TestRegistrySplit(unittest.TestCase):
         self.assertTrue(runtime_spec.kernel_spec.use_i64_kv_addr)
         self.assertEqual(runtime_spec.num_kv_blocks, 65537)
         self.assertEqual(runtime_spec.tuning_id, spec.tuning_id)
-        self.assertEqual(binding.grid, runtime_spec.launch_grid(_problem(req)))
+        self.assertEqual(binding.grid, runtime_spec.launch_grid(attention_problem(req)))
 
-    def test_explicit_binding_rejects_additive_bias(self):
+    def test_explicit_binding_rejects_raw_additive_bias_inputs(self):
+        """The binding derives the bias kernargs from tensors["attn_bias"], so
+        the raw runner names are refused in tensors and launch kwargs."""
         candidate = next(
             c
             for c in attention_execution_candidates()
@@ -404,11 +354,6 @@ class TestRegistrySplit(unittest.TestCase):
             "kernels.common.attention_unified.run_unified_attention_torch",
             side_effect=fake_run,
         ):
-            tensors = _paged_tensors()
-            tensors["problem"] = replace(_problem(req), use_additive_bias=True)
-            with self.assertRaisesRegex(ValueError, "do not support additive bias"):
-                candidate.bound_torch(req, spec, tensors)
-
             for name in (
                 "additive_bias",
                 "additive_bias_batch_stride",
@@ -429,6 +374,31 @@ class TestRegistrySplit(unittest.TestCase):
             binding.launch()
         self.assertFalse(any(k.startswith("additive_bias") for k in captured))
 
+    def test_explicit_binding_refuses_a_non_bool_skip_option(self):
+        """``bool("False")`` is True, so a coerced string would skip the checks."""
+        candidate = next(
+            c
+            for c in attention_execution_candidates()
+            if c.name.startswith("attention_gfx950_u2d_narrow_nw2_mw16_t4xb_llvm")
+        )
+        req = _req(algorithm=candidate.algorithm, spec_id=candidate.spec_id)
+        spec = candidate.select_spec(req)
+        tensors = _paged_tensors()
+        tensors["block_table"] = _Tensor(
+            (1, 64), "torch.int32", [[999] + list(range(1, 64))]
+        )
+        for value in ("False", 0, None):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "must be a bool"):
+                    candidate.bound_torch(
+                        req, spec, tensors, unsafe_skip_paged_value_validation=value
+                    )
+        with self.assertRaisesRegex(ValueError, "block"):
+            candidate.bound_torch(req, spec, tensors)
+        candidate.bound_torch(
+            req, spec, tensors, unsafe_skip_paged_value_validation=True
+        )
+
     def test_runner_rejects_tuning_spec_bias_mismatch(self):
         """``run_unified_attention_torch(tuning_spec=...)`` is a public entry too.
         A spec and problem that disagree on ``use_additive_bias`` would misalign
@@ -447,7 +417,7 @@ class TestRegistrySplit(unittest.TestCase):
             bias_spec = replace(
                 spec, kernel_spec=replace(spec.kernel_spec, use_additive_bias=True)
             )
-            problem = _problem(req)
+            problem = attention_problem(req)
             for case, prob, tspec in (
                 (
                     "bias_problem_plain_spec",

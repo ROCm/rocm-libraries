@@ -3,7 +3,7 @@
  *
  * rocke/instance_gfx942_attention_tiled_3d.h -- PUBLIC C99 port surface for the
  * gfx942 (CDNA3) narrow-atom tiled split-KV 3D attention kernels
- * (rocke/instances/gfx942/attention_tiled_3d.py, 1133 LOC).
+ * (library/kernels/gfx942/attention_tiled_3d.py).
  *
  * SCOPE. This header is the PUBLIC entry/glue surface for the TWO kernel
  * builders the Python module exposes:
@@ -34,9 +34,9 @@
  * with a 4-reg-per-lane accumulator decoded via _mfma_16x16_c_row.
  *
  * REDUCE KERNEL (build_unified_attention_reduce_tiled, lines 1002-1133). Arch-
- * neutral, pure f32 load / exp2 / store (byte-for-byte port of the gfx950
- * reduce): 64 threads, single active per (q_token, q_head), three passes (max,
- * combine, normalize).
+ * neutral, pure f32 load / exp2 / store (the gfx950 reduce with a runtime
+ * query head count): 64 threads, single active per (q_token, q_head), three
+ * passes (max, combine, normalize).
  *
  * REUSED HELPER PORTS (no IR re-emitted here):
  *   rocke/helper_helper_rocke.helpers.attention.h   -- apply_softcap_log2,
@@ -174,6 +174,20 @@ typedef struct rocke_unified_attention_3d_tiled_spec
      * read theirs with v_readlane. Paged K/V; implemented for fp16/bf16, which
      * can be extended. */
     bool use_wave_page_id_load; /* False */
+    /* gfx950 emit_lse (False, kw_only): the packaged module's reduce writes LSE.
+     * The segment IR is unchanged; its kernel name gains a trailing "lse". */
+    bool emit_lse;
+    /* K/V addressing: "paged" (block table) or "strided" (direct [B,H,S,D]
+     * with runtime byte strides; fp16/bf16 async loads only). NULL == "paged". */
+    const char* kv_layout; /* "paged" */
+    /* gfx950-only mask band (gfx942 rejects a non-default band). causal_top_left
+     * pins context_len = 0; right_bound is the lookahead past the diagonal
+     * (0 = causal, R > 0 = R keys ahead, -1 = unbounded). */
+    bool causal_top_left; /* False */
+    int right_bound; /* 0 */
+    /* gfx950 only (the gfx942 spec validator rejects it). Appends four kernel
+     * params. Kept last: inserting a field moves every later one (abi.h). */
+    bool use_additive_bias; /* False */
 } rocke_unified_attention_3d_tiled_spec_t;
 
 /* Materialise every defaulted field. Required fields are zero/NULL-init; the
@@ -202,7 +216,8 @@ int rocke_unified_attention_3d_tiled_spec_tile_size(
 /* dtype_ir: F16 for "fp16", BF16 otherwise (returns a rocke_type_t*). */
 const rocke_type_t* rocke_unified_attention_3d_tiled_spec_dtype_ir(
     const rocke_unified_attention_3d_tiled_spec_t* s);
-/* binary_search_iters: 32 if num_seqs<=0, else max(1, ceil(log2(num_seqs+1))) */
+/* binary_search_iters: 32 if num_seqs<=0, else max(1, ceil(log2(num_seqs+1))).
+ * Exported for existing callers; the kernels derive the search at runtime. */
 int rocke_unified_attention_3d_tiled_spec_binary_search_iters(
     const rocke_unified_attention_3d_tiled_spec_t* s);
 /* kernel_name(): kernel_name_join(...) into caller's buf (NUL-terminated, up to
@@ -250,11 +265,6 @@ int rocke_unified_attention_reduce_tiled_spec_kernel_name(
 
 /* Segment kernel (narrow 16x16x16 MFMA). Call with a spec validated by
  * rocke_unified_attention_3d_tiled_spec_validate. */
-/* Direct [B,H,S,D] KV input with runtime byte strides. Keeps the existing
- * caller-owned spec layout and paged entry point ABI unchanged. */
-rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_strided_gfx942(
-    rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch);
-
 rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx942(
     rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch);
 

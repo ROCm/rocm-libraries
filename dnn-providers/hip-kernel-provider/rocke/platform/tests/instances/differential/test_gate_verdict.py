@@ -784,6 +784,39 @@ class TestMainReturnsTheGateVerdict(unittest.TestCase):
             self.assertEqual(recorded, {"kept": {"0": "new"}, "left_out": {"0": "x"}})
 
 
+class TestLibraryArchiveGuard(unittest.TestCase):
+    """A library emitter needs librocke_library.a; without it every library
+    family would fail to link and read as COMPILE_FAIL."""
+
+    def drive_main(self, tmp, *extra):
+        archive = tmp / "librocke_core.a"
+        archive.touch()
+        argv = ["run_diff.py", "--archive", str(archive), *extra]
+        families = [("libfam", run_diff.LIB_PARITY)]
+        with mock.patch.object(run_diff, "find_families", return_value=families):
+            with mock.patch.object(
+                run_diff, "library_sources_present", return_value=True
+            ):
+                with mock.patch.object(run_diff, "LIBRARY_ARCHIVE", None):
+                    with mock.patch.object(run_diff, "run_family") as run_family:
+                        with mock.patch.object(sys, "argv", argv):
+                            with self.assertRaises(SystemExit) as raised:
+                                run_diff.main()
+        run_family.assert_not_called()
+        return str(raised.exception.code)
+
+    def test_library_sources_without_an_archive_exit_naming_it(self):
+        with TemporaryDirectory() as d:
+            message = self.drive_main(Path(d))
+        self.assertIn("no librocke_library.a was found", message)
+
+    def test_a_named_library_archive_that_is_missing_exits(self):
+        with TemporaryDirectory() as d:
+            missing = Path(d) / "nope" / "librocke_library.a"
+            message = self.drive_main(Path(d), "--library-archive", str(missing))
+        self.assertIn(f"library archive not found: {missing}", message)
+
+
 class TestConfigEnumeration(unittest.TestCase):
     """Both differential paths must visit the expanded catalog and its end."""
 
@@ -886,7 +919,7 @@ class TestConfigEnumeration(unittest.TestCase):
     def test_supported_catalog_census(self):
         # This is a coverage contract, not a traversal requirement: a deliberate
         # catalog change updates the census separately from the driver behavior.
-        self.assertEqual(self.config_count, 113)
+        self.assertEqual(self.config_count, 116)
 
     def test_both_drivers_visit_all_configs_and_stop_at_end(self):
         for driver, status in (("builders", "GREEN"), ("artifacts", "IDENTICAL")):
@@ -897,8 +930,11 @@ class TestConfigEnumeration(unittest.TestCase):
                 self.assertEqual(actual_status, status)
 
     def test_new_feature_probes_follow_the_existing_scale_configs(self):
+        # The feature probes, then the three TDM descriptor configs appended
+        # after them (the builder, and its lowering with a fixed and a runtime
+        # row pitch), so no earlier index moved.
         self.assertEqual(
-            [build.__name__ for build, arch in self.emitter.CONFIGS[-7:]],
+            [build.__name__ for build, arch in self.emitter.CONFIGS[-10:-2]],
             [
                 "build_data_prefetch",
                 "build_cluster",
@@ -907,9 +943,12 @@ class TestConfigEnumeration(unittest.TestCase):
                 "build_tdm",
                 "build_buffer_store_cachepolicy",
                 "build_buffer_load_scalar",
+                "build_tdm_descriptor",
             ],
         )
-        self.assertTrue(all(arch == "gfx1250" for _, arch in self.emitter.CONFIGS[-7:]))
+        self.assertTrue(
+            all(arch == "gfx1250" for _, arch in self.emitter.CONFIGS[-10:])
+        )
 
     def test_both_drivers_detect_drift_beyond_default_cap(self):
         late = run_diff.MAX_CFG
@@ -952,6 +991,96 @@ class TestConfigEnumeration(unittest.TestCase):
                 )
                 self.assertEqual(len(rows), run_diff.MAX_CFG)
                 self.assertEqual(actual_status, status)
+
+
+class ExpectedRejectionTest(unittest.TestCase):
+    """A config with a pinned rejection passes only for that reason, on both sides."""
+
+    PATTERN = r"fastKV register-P experiment does not support additive bias"
+    RIGHT = "ValueError: fastKV register-P experiment does not support additive bias"
+    OTHER = "ValueError: use_additive_bias does not support use_transposed_mask_once"
+    TYPO = "TypeError: got an unexpected keyword argument 'use_additve_bias'"
+
+    @staticmethod
+    def rejected(error):
+        return run_diff.Emission(1, False, None, error)
+
+    def check(self, verdict, c_error, p_error):
+        return run_diff.check_expected_rejection(
+            verdict, self.rejected(c_error), self.rejected(p_error), self.PATTERN
+        )
+
+    def test_both_engines_must_give_the_pinned_reason(self):
+        self.assertEqual(
+            self.check("BOTH_REJECTED", self.RIGHT, self.RIGHT), "BOTH_REJECTED"
+        )
+        for c_error, p_error in (
+            (self.RIGHT, self.OTHER),
+            (self.OTHER, self.RIGHT),
+            (self.RIGHT, self.TYPO),
+        ):
+            with self.subTest(c=c_error, p=p_error):
+                self.assertEqual(
+                    self.check("BOTH_REJECTED", c_error, p_error),
+                    "REJECTION_MISMATCH",
+                )
+
+    def test_a_pinned_config_that_builds_is_drift(self):
+        built = run_diff.Emission(0, True, "abc", "")
+        self.assertEqual(
+            run_diff.check_expected_rejection("IDENTICAL", built, built, self.PATTERN),
+            "REJECTION_MISMATCH",
+        )
+        self.assertIn("REJECTION_MISMATCH", DRIFT_VERDICTS)
+
+    def test_drift_verdicts_are_kept(self):
+        for verdict in ("ASYMMETRIC", "CRASH", "MISMATCH"):
+            with self.subTest(verdict=verdict):
+                self.assertEqual(self.check(verdict, self.RIGHT, self.RIGHT), verdict)
+
+    def test_a_pinned_config_that_builds_stays_drift_in_canonical_triage(self):
+        c_built = run_diff.Emission(
+            0, True, run_diff.sh(b"C++ text"), "", canonical_sha="same"
+        )
+        p_built = run_diff.Emission(
+            0, True, run_diff.sh(b"Python text"), "", canonical_sha="same"
+        )
+        ended = run_diff.Emission(2, False, None, "unknown config")
+
+        def verdict(rejections):
+            with (
+                mock.patch.object(
+                    run_diff, "compile_c", return_value=(Path("emit_c"), "")
+                ),
+                mock.patch.object(
+                    run_diff, "expected_rejections", return_value=rejections
+                ),
+                mock.patch.object(
+                    run_diff, "_run_native_configs", return_value=batch(c_built, ended)
+                ),
+                mock.patch.object(
+                    run_diff, "_run_python_batch", return_value=batch(p_built, ended)
+                ),
+            ):
+                result = run_diff.run_family(
+                    "gemm", Path("archive.a"), "ir", canonical=True
+                )
+            return result["status"], result["configs"][0]["verdict"]
+
+        # Unpinned: the raw hashes differ but the canonical ones match.
+        self.assertEqual(verdict({}), ("CANON_ONLY", "CANON_EQUAL"))
+        # Pinned: building a config that must be rejected fails the family.
+        self.assertEqual(verdict({0: self.PATTERN}), ("DRIFT", "MISMATCH"))
+
+    def test_table_is_read_without_importing_the_emitter(self):
+        with TemporaryDirectory() as tmp:
+            emitter = Path(tmp) / "fam_emit.py"
+            emitter.write_text(
+                "import does_not_exist\n_EXPECTED_REJECTIONS = {3: r'boom'}\n"
+            )
+            self.assertEqual(run_diff.expected_rejections(emitter), {3: "boom"})
+            emitter.write_text("_CONFIGS = {}\n")
+            self.assertEqual(run_diff.expected_rejections(emitter), {})
 
 
 if __name__ == "__main__":

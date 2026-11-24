@@ -63,18 +63,7 @@ NON_OP = frozenset(
 )
 
 # (path relative to platform/, callee) -> occurrences allowed. Burn down only.
-KNOWN_SITES: dict[tuple[str, str], int] = {
-    # The 3D QQ-bias mask compares; fixed together with their parity configs
-    # in a separate change. Delete both entries when it lands.
-    (
-        "cpp/instances/gfx942/attention_tiled_3d_gfx942_attn_tiled_3d_segment_compute.cpp",
-        "rocke_b_land",
-    ): 1,
-    (
-        "cpp/instances/gfx950/attention_tiled_3d_segment_loop_epilogue.cpp",
-        "rocke_b_land",
-    ): 1,
-}
+KNOWN_SITES: dict[tuple[str, str], int] = {}
 
 _CALL = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
 _NOT_CALLS = frozenset({"if", "for", "while", "switch", "return", "sizeof", "defined"})

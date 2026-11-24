@@ -52,6 +52,14 @@ def pytest_addoption(parser):
     parser.addoption("--rocke-reference-bundle", type=Path, default=None)
     parser.addoption("--rocke-reference-lock", type=Path, default=None)
     parser.addoption("--rocke-reference-operation", choices=OPERATIONS, default=None)
+    parser.addoption("--rocke-reference-variant", default=None)
+    parser.addoption(
+        "--rocke-exit-77-if-gpu-skipped",
+        action="store_true",
+        default=False,
+        help="exit 77 (CTest SKIP_RETURN_CODE) when every gpu-marked test was "
+        "skipped and nothing failed, so a GPU lane without its GPU shows as skipped",
+    )
     parser.addoption(
         "--gdn-batch",
         action="store",
@@ -81,6 +89,15 @@ def pytest_addoption(parser):
         help=(
             "fail, instead of skip, the SDPA tests that read hipDNN's graph "
             "template and golden bundles when those are missing"
+        ),
+    )
+    parser.addoption(
+        "--rocke-require-hkp-pack-headers",
+        action="store_true",
+        default=False,
+        help=(
+            "fail, instead of skip, the tests that read hip-kernel-provider pack "
+            "headers when neither an installed copy nor a checkout has them"
         ),
     )
 
@@ -275,16 +292,31 @@ def pytest_sessionstart(session):
     start_reference_session(session.config)
 
 
+def pytest_sessionfinish(session, exitstatus):
+    if not session.config.getoption("--rocke-exit-77-if-gpu-skipped"):
+        return
+    from reference_common.pytest_support import gpu_skipped_exit_status
+
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    stats = reporter.stats if reporter is not None else {}
+    session.exitstatus = gpu_skipped_exit_status(stats, exitstatus)
+
+
+@pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config, items):
     """``--rocke-reference-arch``: keep that arch's reference cases; then
     ``ROCKE_TEST_SHARD=i[,j...]/n``: keep the items of those shards (see
-    ``tests/run_device_shards.py``; unset: every item); then group the tests
-    of one kernel (:func:`_group_by_parameter_set`)."""
+    ``rocke.tests.ctest_shard``; unset: every item); then group the tests
+    of one kernel (:func:`_group_by_parameter_set`). When the run loads the
+    ``rocke.tests.ctest_shard`` plugin, the plugin selects the shard after
+    this hook."""
     from reference_common.pytest_support import select_reference_items
+    from rocke.tests import ctest_shard
+    from tests._affordable_lane import mark_exhaustive_items
 
+    mark_exhaustive_items(items)
     select_reference_items(config, items)
-    if os.environ.get("ROCKE_TEST_SHARD", "").strip():
-        from tests.run_device_shards import select_items
-
-        select_items(config, items)
+    shard = os.environ.get(ctest_shard.SHARD_ENV, "").strip()
+    if shard and not ctest_shard.owns_selection(config):
+        ctest_shard.select_items(config, items)
     _group_by_parameter_set(items)
