@@ -698,7 +698,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zcopy_strided_batched_64(rocblas_handle   
     @param[in]
     incy      [rocblas_int]
               specifies the increment for the elements of y.
-    @param[in, out]
+    @param[out]
     result
               device pointer or host pointer to store the dot product.
               Return value is 0.0 if n <= 0.
@@ -868,7 +868,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zdotc_64(rocblas_handle                han
     @param[in]
     batch_count [rocblas_int]
                 number of instances in the batch.
-    @param[in, out]
+    @param[out]
     result
               device array or host array of batch_count size to store the dot products of each batch.
               Return 0.0 for each element if n <= 0.
@@ -1059,7 +1059,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zdotc_batched_64(rocblas_handle           
     @param[in]
     batch_count [rocblas_int]
                 number of instances in the batch.
-    @param[in, out]
+    @param[out]
     result
               device array or host array of batch_count size to store the dot products of each batch.
               Return 0.0 for each element if n <= 0.
@@ -1922,7 +1922,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zaxpy_strided_batched_64(rocblas_handle   
     @param[in]
     incx      [rocblas_int]
               specifies the increment for the elements of x. incx must be > 0.
-    @param[in, out]
+    @param[out]
     result
               device pointer or host pointer to store the asum product.
               Return value is 0.0 if n <= 0.
@@ -2167,7 +2167,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dzasum_strided_batched_64(rocblas_handle h
     @param[in]
     incx      [rocblas_int]
               specifies the increment for the elements of y.
-    @param[in, out]
+    @param[out]
     result
               device pointer or host pointer to store the nrm2 product.
               Return value is 0.0 if n, incx<=0.
@@ -2410,7 +2410,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dznrm2_strided_batched_64(rocblas_handle h
     @param[in]
     incx      [rocblas_int]
               specifies the increment for the elements of y.
-    @param[in, out]
+    @param[out]
     result
               device pointer or host pointer to store the amax index.
               Return value is 0.0 if n, incx<=0.
@@ -2641,7 +2641,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_izamax_strided_batched_64(rocblas_handle h
     @param[in]
     incx      [rocblas_int]
               specifies the increment for the elements of y.
-    @param[in, out]
+    @param[out]
     result
               device pointer or host pointer to store the amin index.
               Return value is 0.0 if n, incx<=0.
@@ -24343,7 +24343,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_axpy_strided_batched_ex_64(rocblas_handle 
     @param[in]
     incy      [rocblas_int]
               specifies the increment for the elements of y.
-    @param[in, out]
+    @param[out]
     result
               device pointer or host pointer to store the dot product.
               Return value is 0.0 if n <= 0.
@@ -24460,7 +24460,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dotc_ex_64(rocblas_handle   handle,
     @param[in]
     batch_count [rocblas_int]
                 number of instances in the batch.
-    @param[in, out]
+    @param[out]
     result
               device array or host array of batch_count size to store the dot products of each batch.
               Return value is 0.0 for each element if n <= 0.
@@ -24582,7 +24582,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dotc_batched_ex_64(rocblas_handle   handle
     @param[in]
     batch_count [rocblas_int]
                 number of instances in the batch.
-    @param[in, out]
+    @param[out]
     result
               device array or host array of batch_count size to store the dot products of each batch.
               Returns 0.0 for each element if n <= 0.
@@ -24682,7 +24682,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dot_strided_batched_ex_64(rocblas_handle  
     @param[in]
     batch_count [rocblas_int]
                 number of instances in the batch.
-    @param[in, out]
+    @param[out]
     result
               device array or host array of batch_count size to store the dot products of each batch.
               Returns 0.0 for each element if n <= 0.
@@ -24761,7 +24761,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dotc_strided_batched_ex_64(rocblas_handle 
     @param[in]
     incx      [rocblas_int]
               specifies the increment for the elements of y.
-    @param[in, out]
+    @param[out]
     results
               device pointer or host pointer to store the nrm2 product.
               Return value is 0.0 if n, incx<=0.
