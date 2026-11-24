@@ -248,9 +248,11 @@ void RunLegacyFindWithoutWorkspace(miopenHandle_t handle, LegacyFind& found)
 
 } // namespace
 
+using GPU_NaiveTimeout_FP32 = ::testing::TestWithParam<int>;
+
 // With MIOPEN_NAIVE_TIMEOUT=0 (opt-out), a naive solver must appear somewhere in the
 // results, confirming that the timeout logic did not fire.
-TEST(GPU_NaiveTimeout_FP32, NaivePresentWhenTimeoutDisabled)
+TEST_P(GPU_NaiveTimeout_FP32, NaivePresentWhenTimeoutDisabled)
 {
     auto& handle_ref      = get_handle();
     miopenHandle_t handle = &handle_ref;
@@ -276,7 +278,7 @@ TEST(GPU_NaiveTimeout_FP32, NaivePresentWhenTimeoutDisabled)
 // With MIOPEN_NAIVE_TIMEOUT=1 and MIOPEN_DEBUG_FIND_ONLY_SOLVER restricting the candidate
 // set to ConvDirectNaiveConvFwd, there are no non-naive solutions so defer_naive=false and
 // the timeout cannot fire (path B). Find must return a naive result rather than nothing.
-TEST(GPU_NaiveTimeout_FP32, NaiveNotSuppressedWhenOnlySolver)
+TEST_P(GPU_NaiveTimeout_FP32, NaiveNotSuppressedWhenOnlySolver)
 {
     auto& handle_ref      = get_handle();
     miopenHandle_t handle = &handle_ref;
@@ -298,7 +300,7 @@ TEST(GPU_NaiveTimeout_FP32, NaiveNotSuppressedWhenOnlySolver)
 // With MIOPEN_NAIVE_TIMEOUT=1 (default), find must return results. The naive solver may or
 // may not appear depending on whether it finished within the 3x budget — both outcomes are
 // valid. This test only verifies that the timeout mechanism does not break the find path.
-TEST(GPU_NaiveTimeout_FP32, FindSucceedsWithTimeoutEnabled)
+TEST_P(GPU_NaiveTimeout_FP32, FindSucceedsWithTimeoutEnabled)
 {
     auto& handle_ref      = get_handle();
     miopenHandle_t handle = &handle_ref;
@@ -314,7 +316,7 @@ TEST(GPU_NaiveTimeout_FP32, FindSucceedsWithTimeoutEnabled)
 // is far above its budget, so Find skips it before building or launching it. Naive must be absent
 // from the results, and the log must show that the bound made the decision: no naive solver was
 // evaluated and the skip is reported as a bound skip, not as a timeout.
-TEST(GPU_NaiveTimeout_FP32, NaiveSkippedWithTinyBudget)
+TEST_P(GPU_NaiveTimeout_FP32, NaiveSkippedWithTinyBudget)
 {
     auto& handle_ref      = get_handle();
     miopenHandle_t handle = &handle_ref;
@@ -341,7 +343,7 @@ TEST(GPU_NaiveTimeout_FP32, NaiveSkippedWithTinyBudget)
 // With a budget of 1000x the best non-naive time the bound is far below it. Find must not skip the
 // naive solver: it is evaluated and returned. This fails if the skip fires whenever a non-naive
 // solver succeeded, or if the comparison of bound and budget is the wrong way round.
-TEST(GPU_NaiveTimeout_FP32, NaiveEvaluatedWhenBoundIsBelowBudget)
+TEST_P(GPU_NaiveTimeout_FP32, NaiveEvaluatedWhenBoundIsBelowBudget)
 {
     auto& handle_ref      = get_handle();
     miopenHandle_t handle = &handle_ref;
@@ -367,7 +369,7 @@ TEST(GPU_NaiveTimeout_FP32, NaiveEvaluatedWhenBoundIsBelowBudget)
 
 // MIOPEN_NAIVE_BOUND_SKIP=0 restores the behavior without the bound: with a 1% budget the naive
 // solver is built and launched, and the timeout abandons it.
-TEST(GPU_NaiveTimeout_FP32, NaiveTimedOutWhenBoundSkipDisabled)
+TEST_P(GPU_NaiveTimeout_FP32, NaiveTimedOutWhenBoundSkipDisabled)
 {
     auto& handle_ref      = get_handle();
     miopenHandle_t handle = &handle_ref;
@@ -395,7 +397,7 @@ TEST(GPU_NaiveTimeout_FP32, NaiveTimedOutWhenBoundSkipDisabled)
 // evaluation starts. Naive stays out of it while the bound can still skip it. These two tests read
 // the precompiled kernels in the Info2 log. A new handle keeps earlier tests from hiding them
 // through the handle's program cache, even when tests run in a different order.
-TEST(GPU_NaiveTimeout_FP32, NaiveNotPrecompiledWhenBoundCanSkipIt)
+TEST_P(GPU_NaiveTimeout_FP32, NaiveNotPrecompiledWhenBoundCanSkipIt)
 {
     miopen::Handle handle_ref;
     miopenHandle_t handle = &handle_ref;
@@ -419,7 +421,7 @@ TEST(GPU_NaiveTimeout_FP32, NaiveNotPrecompiledWhenBoundCanSkipIt)
 }
 
 // MIOPEN_NAIVE_BOUND_SKIP=0 puts naive back into the precompile.
-TEST(GPU_NaiveTimeout_FP32, NaivePrecompiledWhenBoundSkipDisabled)
+TEST_P(GPU_NaiveTimeout_FP32, NaivePrecompiledWhenBoundSkipDisabled)
 {
     miopen::Handle handle_ref;
     miopenHandle_t handle = &handle_ref;
@@ -447,7 +449,7 @@ TEST(GPU_NaiveTimeout_FP32, NaivePrecompiledWhenBoundSkipDisabled)
 // without a workspace, so GemmFwdRest is rejected for lack of one and no non-naive solver
 // succeeds. Naive is then evaluated even though its bound is above its 1% budget: the bound and
 // the timeout only apply once a non-naive solver has succeeded.
-TEST(GPU_NaiveTimeout_FP32, NaiveEvaluatedWhenOtherAlgorithmsNeedWorkspace)
+TEST_P(GPU_NaiveTimeout_FP32, NaiveEvaluatedWhenOtherAlgorithmsNeedWorkspace)
 {
     auto& handle_ref      = get_handle();
     miopenHandle_t handle = &handle_ref;
@@ -485,7 +487,7 @@ TEST(GPU_NaiveTimeout_FP32, NaiveEvaluatedWhenOtherAlgorithmsNeedWorkspace)
 // The test skips where ConvHipConv is not a candidate for the problem (not gfx950 for example).
 // A zero timeout budget makes an accidental cutoff when no non-naive solver succeeded
 // deterministically drop naive, instead of relying on overflow from FLT_MAX.
-TEST(GPU_NaiveTimeout_FP32, NaiveEvaluatedWhenEveryNonNaiveSolverOfItsAlgorithmFails)
+TEST_P(GPU_NaiveTimeout_FP32, NaiveEvaluatedWhenEveryNonNaiveSolverOfItsAlgorithmFails)
 {
     auto& handle_ref      = get_handle();
     miopenHandle_t handle = &handle_ref;
@@ -530,7 +532,7 @@ TEST(GPU_NaiveTimeout_FP32, NaiveEvaluatedWhenEveryNonNaiveSolverOfItsAlgorithmF
 // abandoned evaluation left behind. There is deliberately no uncaptured run in
 // between: one would have reclaimed a finished evaluation before the capture
 // and hidden a regression. Find has already loaded the solution's kernels.
-TEST(GPU_NaiveTimeout_FP32, CaptureAfterATimedOutNaiveEvaluationSucceeds)
+TEST_P(GPU_NaiveTimeout_FP32, CaptureAfterATimedOutNaiveEvaluationSucceeds)
 {
     if(IsWinogradOnlyArch(get_handle()))
         GTEST_SKIP() << "Direct finder is disabled by use_winograd_only on "
@@ -697,7 +699,7 @@ int OutSize(int in, int filter, int pad, int stride, int dilation)
 
 // The bound EvaluateInvokers() uses to skip a naive solver before launching it must be positive
 // and must grow with the amount of work in the problem.
-TEST(GPU_NaiveTimeout_FP32, NaiveTimeFloorScalesWithWork)
+TEST_P(GPU_NaiveTimeout_FP32, NaiveTimeFloorScalesWithWork)
 {
     auto& handle = get_handle();
 
@@ -722,7 +724,7 @@ TEST(GPU_NaiveTimeout_FP32, NaiveTimeFloorScalesWithWork)
 // taps could exceed the kernel's run time and drop a naive solver that would have won. The floor
 // is the floor of the same problem with a 1x1 filter times the number of taps that read inside
 // the input, which the test counts one by one.
-TEST(GPU_NaiveTimeout_FP32, NaiveTimeFloorCountsOnlyTapsInInput)
+TEST_P(GPU_NaiveTimeout_FP32, NaiveTimeFloorCountsOnlyTapsInInput)
 {
     ScopedEnvironment<bool> guard_naive(MIOPEN_NAIVE_TIMEOUT, true);
 
@@ -752,7 +754,7 @@ TEST(GPU_NaiveTimeout_FP32, NaiveTimeFloorCountsOnlyTapsInInput)
 // Each output channel of a grouped convolution sums over C/G input channels, so the floor is the
 // floor of the same problem with one group divided by the group count. Without the divisor the
 // floor of a depthwise convolution would be G times too large and exceed the kernel's run time.
-TEST(GPU_NaiveTimeout_FP32, NaiveTimeFloorDividesByTheGroupCount)
+TEST_P(GPU_NaiveTimeout_FP32, NaiveTimeFloorDividesByTheGroupCount)
 {
     ScopedEnvironment<bool> guard_naive(MIOPEN_NAIVE_TIMEOUT, true);
 
@@ -778,7 +780,7 @@ TEST(GPU_NaiveTimeout_FP32, NaiveTimeFloorDividesByTheGroupCount)
 
 // Forward, backward data and backward weights of one convolution do the same work in the naive
 // kernels, so they get the same floor.
-TEST(GPU_NaiveTimeout_FP32, NaiveTimeFloorIsTheSameInEveryDirection)
+TEST_P(GPU_NaiveTimeout_FP32, NaiveTimeFloorIsTheSameInEveryDirection)
 {
     ScopedEnvironment<bool> guard_naive(MIOPEN_NAIVE_TIMEOUT, true);
 
@@ -794,9 +796,13 @@ TEST(GPU_NaiveTimeout_FP32, NaiveTimeFloorIsTheSameInEveryDirection)
     }
 }
 
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_NaiveTimeout_FP32, ::testing::Values(0));
+
+using CPU_NaiveTimeout_NONE = testing::TestWithParam<int>;
+
 // CPU-only: verify that MIOPEN_NAIVE_TIMEOUT can be set and read back via the debug
 // registry (the same path ScopedEnvironment uses in the GPU tests).
-TEST(CPU_NaiveTimeout_NONE, EnvVarRoundTrips)
+TEST_P(CPU_NaiveTimeout_NONE, EnvVarRoundTrips)
 {
     {
         ScopedEnvironment<bool> guard(MIOPEN_NAIVE_TIMEOUT, true);
@@ -807,3 +813,5 @@ TEST(CPU_NaiveTimeout_NONE, EnvVarRoundTrips)
         EXPECT_FALSE(lib_env::value<bool>(MIOPEN_NAIVE_TIMEOUT));
     }
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_NaiveTimeout_NONE, testing::Values(0));

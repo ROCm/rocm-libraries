@@ -88,7 +88,9 @@ miopen::conv::ProblemDescription MakeGroupedConvProblem()
 
 #if MIOPEN_BACKEND_HIP
 
-TEST(GPU_CkImplLoader_FP16, LoaderLoadsForCurrentDevice)
+using GPU_CkImplLoader_FP16 = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_CkImplLoader_FP16, LoaderLoadsForCurrentDevice)
 {
     const auto device_name = GetCurrentDeviceName();
     ASSERT_FALSE(device_name.empty()) << "Failed to query HIP device";
@@ -108,7 +110,7 @@ TEST(GPU_CkImplLoader_FP16, LoaderLoadsForCurrentDevice)
     }
 }
 
-TEST(GPU_CkImplLoader_FP16, LoaderFillsValidKernels)
+TEST_P(GPU_CkImplLoader_FP16, LoaderFillsValidKernels)
 {
     const auto device_name = GetCurrentDeviceName();
     ASSERT_FALSE(device_name.empty());
@@ -125,7 +127,7 @@ TEST(GPU_CkImplLoader_FP16, LoaderFillsValidKernels)
                                   << device_name;
 }
 
-TEST(GPU_CkImplLoader_FP16, LoaderFillsValidKernelsWithTf32Fallback)
+TEST_P(GPU_CkImplLoader_FP16, LoaderFillsValidKernelsWithTf32Fallback)
 {
     const auto device_name = GetCurrentDeviceName();
     ASSERT_FALSE(device_name.empty());
@@ -143,7 +145,7 @@ TEST(GPU_CkImplLoader_FP16, LoaderFillsValidKernelsWithTf32Fallback)
     EXPECT_FALSE(use_tf32) << "use_tf32 should remain false when called with false";
 }
 
-TEST(GPU_CkImplLoader_FP16, LoaderCachesPerDevice)
+TEST_P(GPU_CkImplLoader_FP16, LoaderCachesPerDevice)
 {
     const auto device_name = GetCurrentDeviceName();
     ASSERT_FALSE(device_name.empty());
@@ -154,7 +156,7 @@ TEST(GPU_CkImplLoader_FP16, LoaderCachesPerDevice)
     EXPECT_EQ(&loader1, &loader2) << "Get() should return the same cached instance";
 }
 
-TEST(GPU_CkImplLoader_FP16, LoaderStripsDeviceSuffix)
+TEST_P(GPU_CkImplLoader_FP16, LoaderStripsDeviceSuffix)
 {
     const auto device_name = GetCurrentDeviceName();
     ASSERT_FALSE(device_name.empty());
@@ -174,17 +176,21 @@ TEST(GPU_CkImplLoader_FP16, LoaderStripsDeviceSuffix)
         << "Suffixed and bare device names should resolve to the same cached loader";
 }
 
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_CkImplLoader_FP16, ::testing::Values(0));
+
 #endif // MIOPEN_BACKEND_HIP
 
 // -- CPU tests (no GPU required) ----------------------------------------------
 
-TEST(CPU_CkImplLoader_NONE, LoaderFailsGracefullyForUnknownDevice)
+using CPU_CkImplLoader_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_CkImplLoader_NONE, LoaderFailsGracefullyForUnknownDevice)
 {
     const auto& loader = miopen::solver::CkImplLibLoader::Get("gfx_nonexistent");
     EXPECT_FALSE(loader.IsLoaded());
 }
 
-TEST(CPU_CkImplLoader_NONE, LoaderStripsDeviceSuffixWithoutGpu)
+TEST_P(CPU_CkImplLoader_NONE, LoaderStripsDeviceSuffixWithoutGpu)
 {
     const auto base_arch = std::string{"gfx_ck_loader_suffix_unit_test"};
     const auto suffixed  = base_arch + ":sramecc+:xnack-";
@@ -197,7 +203,7 @@ TEST(CPU_CkImplLoader_NONE, LoaderStripsDeviceSuffixWithoutGpu)
     EXPECT_FALSE(loader1.IsLoaded());
 }
 
-TEST(CPU_CkImplLoader_NONE, LoaderFailsGracefullyWithInvalidEnvPath)
+TEST_P(CPU_CkImplLoader_NONE, LoaderFailsGracefullyWithInvalidEnvPath)
 {
     const auto missing_dir = MakeMissingDirectory("invalid_env_path");
     ASSERT_FALSE(miopen::fs::exists(missing_dir));
@@ -212,7 +218,7 @@ TEST(CPU_CkImplLoader_NONE, LoaderFailsGracefullyWithInvalidEnvPath)
             .empty());
 }
 
-TEST(CPU_CkImplLoader_NONE, LoaderReturnsEmptyOnFailure)
+TEST_P(CPU_CkImplLoader_NONE, LoaderReturnsEmptyOnFailure)
 {
     const auto& loader = miopen::solver::CkImplLibLoader::Get("gfx_bogus");
     ASSERT_FALSE(loader.IsLoaded());
@@ -416,7 +422,7 @@ TEST(CPU_CkImplLoader_NONE, LoaderReturnsEmptyOnFailure)
         miopenStatusInternalError);
 }
 
-TEST(CPU_CkImplLoader_NONE, IsDeterministicSplitKValid)
+TEST_P(CPU_CkImplLoader_NONE, IsDeterministicSplitKValid)
 {
     // Non-deterministic mode: always valid regardless of split_k
     EXPECT_TRUE(IsDeterministicSplitKValid("Kernel+4", false));
@@ -436,9 +442,13 @@ TEST(CPU_CkImplLoader_NONE, IsDeterministicSplitKValid)
     EXPECT_FALSE(IsDeterministicSplitKValid("Kernel+", true));
 }
 
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_CkImplLoader_NONE, testing::Values(0));
+
 // -- Error infrastructure tests (CPU, no GPU required) ------------------------
 
-TEST(CPU_CkImplError_NONE, LastErrorSetAndGet)
+using CPU_CkImplError_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_CkImplError_NONE, LastErrorSetAndGet)
 {
     // Setting a non-success status stores the message
     CkImplLastError::setLastError(CK_IMPL_STATUS_BAD_PARAM, "test error message");
@@ -457,7 +467,7 @@ TEST(CPU_CkImplError_NONE, LastErrorSetAndGet)
     EXPECT_STREQ(CkImplLastError::getLastError(), "");
 }
 
-TEST(CPU_CkImplError_NONE, LastErrorThreadIsolation)
+TEST_P(CPU_CkImplError_NONE, LastErrorThreadIsolation)
 {
     // Set an error on the main thread
     CkImplLastError::setLastError(CK_IMPL_STATUS_BAD_PARAM, "main thread error");
@@ -474,7 +484,7 @@ TEST(CPU_CkImplError_NONE, LastErrorThreadIsolation)
         << "Main thread error should be unaffected";
 }
 
-TEST(CPU_CkImplError_NONE, TryCatchSuccess)
+TEST_P(CPU_CkImplError_NONE, TryCatchSuccess)
 {
     auto status = ck_impl_try_catch([]() {
         // no-op, no throw
@@ -482,7 +492,7 @@ TEST(CPU_CkImplError_NONE, TryCatchSuccess)
     EXPECT_EQ(status, CK_IMPL_STATUS_SUCCESS);
 }
 
-TEST(CPU_CkImplError_NONE, TryCatchCkImplException)
+TEST_P(CPU_CkImplError_NONE, TryCatchCkImplException)
 {
     auto status = ck_impl_try_catch(
         []() { throw CkImplException(CK_IMPL_STATUS_BAD_PARAM, "bad parameter test"); });
@@ -490,14 +500,14 @@ TEST(CPU_CkImplError_NONE, TryCatchCkImplException)
     EXPECT_STREQ(CkImplLastError::getLastError(), "bad parameter test");
 }
 
-TEST(CPU_CkImplError_NONE, TryCatchStdException)
+TEST_P(CPU_CkImplError_NONE, TryCatchStdException)
 {
     auto status = ck_impl_try_catch([]() { throw std::runtime_error("std runtime error test"); });
     EXPECT_EQ(status, CK_IMPL_STATUS_INTERNAL_ERROR);
     EXPECT_STREQ(CkImplLastError::getLastError(), "std runtime error test");
 }
 
-TEST(CPU_CkImplError_NONE, TryCatchUnknownException)
+TEST_P(CPU_CkImplError_NONE, TryCatchUnknownException)
 {
     auto status = ck_impl_try_catch([]() {
         throw 42; // NOLINT(hicpp-exception-baseclass)
@@ -506,7 +516,7 @@ TEST(CPU_CkImplError_NONE, TryCatchUnknownException)
     EXPECT_STREQ(CkImplLastError::getLastError(), "Unknown exception occurred");
 }
 
-TEST(CPU_CkImplError_NONE, StatusToString)
+TEST_P(CPU_CkImplError_NONE, StatusToString)
 {
     EXPECT_STREQ(toString(CK_IMPL_STATUS_SUCCESS), "CK_IMPL_STATUS_SUCCESS");
     EXPECT_STREQ(toString(CK_IMPL_STATUS_BAD_PARAM), "CK_IMPL_STATUS_BAD_PARAM");
@@ -518,21 +528,21 @@ TEST(CPU_CkImplError_NONE, StatusToString)
 
 // -- CkImplException direct tests -----------------------------------------
 
-TEST(CPU_CkImplError_NONE, ExceptionStoresStatusAndMessage)
+TEST_P(CPU_CkImplError_NONE, ExceptionStoresStatusAndMessage)
 {
     CkImplException ex(CK_IMPL_STATUS_INVALID_VALUE, "invalid value message");
     EXPECT_EQ(ex.getStatus(), CK_IMPL_STATUS_INVALID_VALUE);
     EXPECT_STREQ(ex.what(), "invalid value message");
 }
 
-TEST(CPU_CkImplError_NONE, ExceptionIsStdException)
+TEST_P(CPU_CkImplError_NONE, ExceptionIsStdException)
 {
     CkImplException ex(CK_IMPL_STATUS_ALLOC_FAILED, "alloc failed");
     const std::exception& base = ex;
     EXPECT_STREQ(base.what(), "alloc failed");
 }
 
-TEST(CPU_CkImplError_NONE, ExceptionCopyPreservesFields)
+TEST_P(CPU_CkImplError_NONE, ExceptionCopyPreservesFields)
 {
     CkImplException original(CK_IMPL_STATUS_BAD_PARAM, "original message");
     CkImplException copy(original); // NOLINT(performance-unnecessary-copy-initialization)
@@ -542,7 +552,7 @@ TEST(CPU_CkImplError_NONE, ExceptionCopyPreservesFields)
 
 // -- THROW_IF macro tests ----------------------------------------------------
 
-TEST(CPU_CkImplError_NONE, ThrowIfNullThrowsOnNull)
+TEST_P(CPU_CkImplError_NONE, ThrowIfNullThrowsOnNull)
 {
     int* ptr = nullptr;
     EXPECT_THROW(
@@ -560,14 +570,14 @@ TEST(CPU_CkImplError_NONE, ThrowIfNullThrowsOnNull)
     }
 }
 
-TEST(CPU_CkImplError_NONE, ThrowIfNullPassesOnNonNull)
+TEST_P(CPU_CkImplError_NONE, ThrowIfNullPassesOnNonNull)
 {
     int value = 42;
     int* ptr  = &value;
     EXPECT_NO_THROW({ CK_IMPL_THROW_IF_NULL(ptr, CK_IMPL_STATUS_BAD_PARAM, "should not throw"); });
 }
 
-TEST(CPU_CkImplError_NONE, ThrowIfFalseThrowsOnFalse)
+TEST_P(CPU_CkImplError_NONE, ThrowIfFalseThrowsOnFalse)
 {
     try
     {
@@ -581,13 +591,13 @@ TEST(CPU_CkImplError_NONE, ThrowIfFalseThrowsOnFalse)
     }
 }
 
-TEST(CPU_CkImplError_NONE, ThrowIfFalsePassesOnTrue)
+TEST_P(CPU_CkImplError_NONE, ThrowIfFalsePassesOnTrue)
 {
     EXPECT_NO_THROW(
         { CK_IMPL_THROW_IF_FALSE(true, CK_IMPL_STATUS_INVALID_VALUE, "should not throw"); });
 }
 
-TEST(CPU_CkImplError_NONE, ThrowIfTrueThrowsOnTrue)
+TEST_P(CPU_CkImplError_NONE, ThrowIfTrueThrowsOnTrue)
 {
     try
     {
@@ -601,13 +611,13 @@ TEST(CPU_CkImplError_NONE, ThrowIfTrueThrowsOnTrue)
     }
 }
 
-TEST(CPU_CkImplError_NONE, ThrowIfTruePassesOnFalse)
+TEST_P(CPU_CkImplError_NONE, ThrowIfTruePassesOnFalse)
 {
     EXPECT_NO_THROW(
         { CK_IMPL_THROW_IF_TRUE(false, CK_IMPL_STATUS_INTERNAL_ERROR, "should not throw"); });
 }
 
-TEST(CPU_CkImplError_NONE, ThrowIfNeThrowsOnNotEqual)
+TEST_P(CPU_CkImplError_NONE, ThrowIfNeThrowsOnNotEqual)
 {
     try
     {
@@ -621,14 +631,14 @@ TEST(CPU_CkImplError_NONE, ThrowIfNeThrowsOnNotEqual)
     }
 }
 
-TEST(CPU_CkImplError_NONE, ThrowIfNePassesOnEqual)
+TEST_P(CPU_CkImplError_NONE, ThrowIfNePassesOnEqual)
 {
     EXPECT_NO_THROW(
         // cppcheck-suppress duplicateExpression
         { CK_IMPL_THROW_IF_NE(7, 7, CK_IMPL_STATUS_INVALID_VALUE, "should not throw"); });
 }
 
-TEST(CPU_CkImplError_NONE, ThrowIfEqThrowsOnEqual)
+TEST_P(CPU_CkImplError_NONE, ThrowIfEqThrowsOnEqual)
 {
     try
     {
@@ -643,14 +653,14 @@ TEST(CPU_CkImplError_NONE, ThrowIfEqThrowsOnEqual)
     }
 }
 
-TEST(CPU_CkImplError_NONE, ThrowIfEqPassesOnNotEqual)
+TEST_P(CPU_CkImplError_NONE, ThrowIfEqPassesOnNotEqual)
 {
     EXPECT_NO_THROW({ CK_IMPL_THROW_IF_EQ(1, 2, CK_IMPL_STATUS_BAD_PARAM, "should not throw"); });
 }
 
 // -- LastError additional coverage -------------------------------------------
 
-TEST(CPU_CkImplError_NONE, LastErrorSetReturnsStatus)
+TEST_P(CPU_CkImplError_NONE, LastErrorSetReturnsStatus)
 {
     auto result = CkImplLastError::setLastError(CK_IMPL_STATUS_BAD_PARAM, "msg");
     EXPECT_EQ(result, CK_IMPL_STATUS_BAD_PARAM);
@@ -662,14 +672,14 @@ TEST(CPU_CkImplError_NONE, LastErrorSetReturnsStatus)
     EXPECT_EQ(result, CK_IMPL_STATUS_SUCCESS);
 }
 
-TEST(CPU_CkImplError_NONE, LastErrorStdStringOverload)
+TEST_P(CPU_CkImplError_NONE, LastErrorStdStringOverload)
 {
     std::string msg = "std::string overload test";
     CkImplLastError::setLastError(CK_IMPL_STATUS_INTERNAL_ERROR, msg);
     EXPECT_STREQ(CkImplLastError::getLastError(), "std::string overload test");
 }
 
-TEST(CPU_CkImplError_NONE, LastErrorTruncatesLongMessage)
+TEST_P(CPU_CkImplError_NONE, LastErrorTruncatesLongMessage)
 {
     // Create a message longer than CK_IMPL_ERROR_STRING_MAX_LENGTH
     std::string long_msg(CK_IMPL_ERROR_STRING_MAX_LENGTH + 100, 'X');
@@ -684,7 +694,7 @@ TEST(CPU_CkImplError_NONE, LastErrorTruncatesLongMessage)
 
 // -- tryCatch status preservation for each status code -----------------------
 
-TEST(CPU_CkImplError_NONE, TryCatchPreservesAllStatusCodes)
+TEST_P(CPU_CkImplError_NONE, TryCatchPreservesAllStatusCodes)
 {
     const ck_impl_status_t codes[] = {
         CK_IMPL_STATUS_BAD_PARAM,
@@ -703,7 +713,7 @@ TEST(CPU_CkImplError_NONE, TryCatchPreservesAllStatusCodes)
 
 // -- Throw macros through tryCatch (end-to-end error propagation) ------------
 
-TEST(CPU_CkImplError_NONE, ThrowIfNullPropagatesThroughTryCatch)
+TEST_P(CPU_CkImplError_NONE, ThrowIfNullPropagatesThroughTryCatch)
 {
     int* ptr    = nullptr;
     auto status = ck_impl_try_catch(
@@ -712,7 +722,7 @@ TEST(CPU_CkImplError_NONE, ThrowIfNullPropagatesThroughTryCatch)
     EXPECT_STREQ(CkImplLastError::getLastError(), "null ptr in tryCatch");
 }
 
-TEST(CPU_CkImplError_NONE, ThrowIfFalsePropagatesThroughTryCatch)
+TEST_P(CPU_CkImplError_NONE, ThrowIfFalsePropagatesThroughTryCatch)
 {
     auto status = ck_impl_try_catch([]() {
         size_t idx  = 10;
@@ -723,7 +733,7 @@ TEST(CPU_CkImplError_NONE, ThrowIfFalsePropagatesThroughTryCatch)
     EXPECT_STREQ(CkImplLastError::getLastError(), "Index out of range");
 }
 
-TEST(CPU_CkImplError_NONE, NoThrowOnValidInputsThroughTryCatch)
+TEST_P(CPU_CkImplError_NONE, NoThrowOnValidInputsThroughTryCatch)
 {
     int value   = 42;
     int* ptr    = &value;
@@ -737,3 +747,5 @@ TEST(CPU_CkImplError_NONE, NoThrowOnValidInputsThroughTryCatch)
     });
     EXPECT_EQ(status, CK_IMPL_STATUS_SUCCESS);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_CkImplError_NONE, testing::Values(0));
