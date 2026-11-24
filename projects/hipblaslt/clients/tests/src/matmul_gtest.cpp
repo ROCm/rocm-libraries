@@ -954,10 +954,15 @@ namespace
             int64_t     m, n, k;
             hipDataType type;
         };
-        // A small case first, since the check leaves out the first case in the process.
-        testing_matmul(unit_check_case(64, 64, 16, HIP_R_32F));
-        for(const Shape& s : {Shape{"f32, 8192 x 8192 x 16", 8192, 8192, 16, HIP_R_32F},
-                              Shape{"f16, 16384 x 16 x 16384", 16384, 16, 16384, HIP_R_16F}})
+        const Shape shapes[] = {{"f32, 8192 x 8192 x 16", 8192, 8192, 16, HIP_R_32F},
+                                {"f16, 16384 x 16 x 16384", 16384, 16, 16384, HIP_R_16F}};
+        // TensileLite loads a problem type's kernel library on the first case of that type, and
+        // the f16 one raised the peak by about 2 GiB on 96-CU gfx1250. A small case of each type
+        // runs first so the measured cases leave that out. It also covers the check skipping
+        // the first case in the process.
+        for(const Shape& s : shapes)
+            testing_matmul(unit_check_case(64, 64, 16, s.type));
+        for(const Shape& s : shapes)
         {
             SCOPED_TRACE(s.name);
             auto m = measure_estimate(unit_check_case(s.m, s.n, s.k, s.type));

@@ -2424,7 +2424,8 @@ def sparseKernel(gfx1250_iim, tmp_path_factory):
 
 
 def _mainLoopMetadata(source):
-    """Main-loop (metadata address advances, metadata issues, odd-wave skips)."""
+    """(metadata address advances, metadata issues, odd-wave skip branches) in the main loop, and
+    the odd-wave NULL-descriptor clears before it."""
     k = _AsmKernel(source)
     begin, end = k.mainLoop()
     # The increment reaches the add through the StaggerU wrap select, so match the self-add.
@@ -2433,7 +2434,10 @@ def _mainLoopMetadata(source):
     issues = k.tdmIssues(begin, end).count(k.setIndex("tdmMetadataGroup0"))
     skips = [name for name, pos in k.labels.items()
              if "TdmMetadataSkipOddWave" in name and begin <= pos < end]
-    return len(advances), issues, len(skips)
+    # Odd waves get count = 0 (a NULL tensor) in Group 0 dword 0 once, before the loop.
+    nullInits = [ops for mnemonic, ops in k.instructions[:begin]
+                 if mnemonic == "s_cmov_b32" and tuple(ops) == ("s[sgprtdmMetadataGroup0+0]", "0")]
+    return len(advances), issues, len(skips), len(nullInits)
 
 
 # With MX scales the TDMFuse=0 reference itself overflows SGPRs (err -2, develop included), so the
@@ -2444,10 +2448,14 @@ def _mainLoopMetadata(source):
 @pytest.mark.parametrize("fuse", [1, 2, 3])
 def test_sparse_rows_load_and_advance_the_metadata_as_tdmfuse0_does(
         gfx1250_iim, sparseKernel, fuse, mx, numWaves, sparse):
-    """Each main-loop iteration advances tdmMetadataGroup0 once and loads it on even waves only."""
+    """Each main-loop iteration advances tdmMetadataGroup0 and issues its load on every wave,
+    without a branch; odd waves hold a NULL descriptor (count = 0), so only even waves move data."""
     mxA, mxB = _MX_STATES[mx]
     reference = _mainLoopMetadata(sparseKernel(0, numWaves, mxA, mxB, sparse))
-    assert min(reference) >= 1, reference
+    advances, issues, skips, nullInits = reference
+    assert advances >= 1 and issues >= 1, reference
+    assert skips == 0, reference
+    assert nullInits >= 1, reference
     assert _mainLoopMetadata(sparseKernel(fuse, numWaves, mxA, mxB, sparse)) == reference
 
 

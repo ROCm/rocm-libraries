@@ -94,15 +94,15 @@ struct TestNameGenerator
 
 /////////////////////////////////////////////////////////
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_TransformersAdamWTest_FP32,
                          testing::ValuesIn(TransformersAdamWTestConfigs()),
                          TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_TransformersAdamWTest_FP16,
                          testing::ValuesIn(TransformersAdamWTestConfigs()),
                          TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_TransformersAmpAdamWTest_FP32,
                          testing::ValuesIn(TransformersAdamWTestConfigs()),
                          TestNameGenerator{});

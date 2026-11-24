@@ -1205,7 +1205,8 @@ void applyLogicalPayload(LogicalInstruction* logical, const rocisa::Instruction*
                                               smfma->mfma1k, smfma->neg));
     } else if (const auto* barrier = dynamic_cast<const rocisa::SBarrier*>(inst)) {
         logical->setSpecialData(new SBarrierLogicalData(barrier->getSeparate(), barrier->getWait(),
-                                                        barrier->getClusterBarrier()));
+                                                        barrier->getClusterBarrier(),
+                                                        barrier->getTensorcnt()));
     } else if (const auto* waitAlu = dynamic_cast<const rocisa::SWaitAlu*>(inst)) {
         logical->setSpecialData(new SWaitAluLogicalData(
             waitAlu->getVaVdst(), waitAlu->getVaSdst(), waitAlu->getVaSsrc(), waitAlu->getHoldCnt(),

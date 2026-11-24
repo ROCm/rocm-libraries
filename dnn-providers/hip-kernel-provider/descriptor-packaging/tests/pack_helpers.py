@@ -65,13 +65,24 @@ def _load_kpack(rocm_kpack_dir):
     return kpack
 
 
-def _run(source_root, tmp_path, hipcc, rocm_kpack_dir, arches, source_label=None):
+def _run(
+    source_root,
+    tmp_path,
+    hip_compiler,
+    rocm_kpack_dir,
+    arches,
+    source_label=None,
+    hip_path=None,
+    device_lib_path=None,
+):
     """Pack one root. A root holding an `embedded_source` descriptor needs a label."""
     return run_pipeline(
         source_root=source_root,
         arches=list(arches),
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
         source_label=source_label,

@@ -1347,5 +1347,8 @@ using GPU_Bn3DSpatial_FP32 = Bn3DSpatialTest<float>;
 
 TEST_P(GPU_Bn3DSpatial_FP32, TestFloat32) { this->Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Bn3DSpatial_FP32, GetSmokeTestCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Bn3DSpatial_FP32, GetFullTestCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_Bn3DSpatial_FP32, GetSmokeTestCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         GPU_Bn3DSpatial_FP32,
+                         GetFullTestCases(),
+                         TestNameGenerator{});

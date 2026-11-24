@@ -1208,7 +1208,7 @@ TEST(rocfft_UnitTest, rtc_test_harness)
                 static const char* SUFFIX        = "";
 #endif
                 command << PREFIX << std::quoted(compiler.string()) << EXTRA_DEFINES
-                        << " -x hip -c -std=c++20 -o " << OUTPUT_NULL << " "
+                        << " --no-offloadlib -x hip -c -std=c++20 -o " << OUTPUT_NULL << " "
                         << std::quoted(files[i].first) << SUFFIX;
                 // NOTE: using system() for launching subprocesses for simplicity
                 // and portability

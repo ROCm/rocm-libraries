@@ -154,4 +154,6 @@ TEST_P(GPU_ConvHipIgemmXdlops_I8, Int8Test)
 #endif
 };
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_ConvHipIgemmXdlops_I8, testing::Values(GetTestCases("--int8")));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_ConvHipIgemmXdlops_I8,
+                         testing::Values(GetTestCases("--int8")));

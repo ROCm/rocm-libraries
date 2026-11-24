@@ -4,8 +4,10 @@
 // The workspace size stored in a find-db record must not reach the caller or the
 // IsEnoughWorkspace() check. Shipped find-dbs have been found with wrong values, so
 // GetSolutions() uses the solver's own requirement: IsEnoughWorkspace() checks the workspace of
-// the configuration that would run (for tunable solvers, the perf-db or default configuration),
-// immediate mode reports that size, and Find reports the solver's maximum (GWSS).
+// the configuration that would run (for a tunable solver whose workspace depends on the
+// configuration, the perf-db or default configuration; for every other solver,
+// GetWorkspaceSize()), immediate mode reports that size, and Find reports the solver's maximum
+// (GWSS).
 
 #include <gtest/gtest.h>
 #include "get_handle.hpp"
@@ -14,6 +16,7 @@
 
 #include <miopen/any_solver.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
+#include <miopen/conv/solvers.hpp>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/conv_solution.hpp>
@@ -29,7 +32,10 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
+
+MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_CK_PROBLEM_CACHE)
 
 namespace miopen {
 // Resolves each solution's configuration the way Immediate does (src/hip/convolutionocl.cpp).
@@ -77,6 +83,18 @@ std::size_t RunWorkspace(const miopen::ExecutionContext& ctx,
                                          : solver.GetWorkspaceSize(ctx, problem);
 }
 
+/// The layout name GetForwardOutputTensorWithLayout() takes; the tests use only these four.
+const char* LayoutName(miopenTensorLayout_t layout)
+{
+    if(layout == miopenTensorNHWC)
+        return "NHWC";
+    if(layout == miopenTensorNDHWC)
+        return "NDHWC";
+    if(layout == miopenTensorNCDHW)
+        return "NCDHW";
+    return "NCHW";
+}
+
 class FindDbWorkspaceTest
 {
 protected:
@@ -87,15 +105,22 @@ protected:
                       const std::vector<std::size_t>& x_lens,
                       const std::vector<std::size_t>& w_lens)
     {
-        conv = miopen::ConvolutionDescriptor{
-            2, miopenConvolution, miopenPaddingDefault, {1, 1}, {1, 1}, {1, 1}};
+        // 2D or 3D, from the lengths; padding, strides and dilations are 1 in every dimension.
+        const auto spatial = x_lens.size() - 2;
+        const std::vector<int> ones(spatial, 1);
+        conv             = miopen::ConvolutionDescriptor{spatial,
+                                             miopenConvolution,
+                                             miopenPaddingDefault,
+                                             ones,
+                                             ones,
+                                             ones,
+                                             std::vector<int>(spatial, 0)};
         conv.group_count = group_count;
         conv.findMode.Set(miopen::FindMode::Values::Hybrid);
 
         x_desc = miopen::TensorDescriptor{type, layout, x_lens};
         w_desc = miopen::TensorDescriptor{type, layout, w_lens};
-        y_desc = conv.GetForwardOutputTensorWithLayout(
-            x_desc, w_desc, layout == miopenTensorNHWC ? "NHWC" : "NCHW", type);
+        y_desc = conv.GetForwardOutputTensorWithLayout(x_desc, w_desc, LayoutName(layout), type);
 
         problem = direction == miopen::conv::Direction::Forward
                       ? miopen::conv::ProblemDescription{x_desc, w_desc, y_desc, conv, direction}
@@ -211,23 +236,25 @@ protected:
     }
 };
 
-struct CkWrwProblem
+/// A grouped convolution's shape; the lengths are in NCHW or NCDHW order, whatever the layout.
+struct ConvShape
 {
-    std::vector<std::size_t> x_lens; // NCHW order; the tensors are NHWC
-    std::vector<std::size_t> w_lens;
     int group_count;
+    std::vector<std::size_t> x_lens;
+    std::vector<std::size_t> w_lens;
 };
 
-std::ostream& operator<<(std::ostream& os, const CkWrwProblem& p)
+std::ostream& operator<<(std::ostream& os, const ConvShape& p)
 {
+    os << 'g' << p.group_count;
     const auto lens = [&](const char* name, const std::vector<std::size_t>& v) {
         os << name;
         for(const auto n : v)
             os << '_' << n;
     };
-    lens("x", p.x_lens);
+    lens(" x", p.x_lens);
     lens(" w", p.w_lens);
-    return os << " g" << p.group_count;
+    return os;
 }
 
 /// NHWC bf16 backward-weights problems for the CK grouped solver, whose workspace depends on the
@@ -235,7 +262,7 @@ std::ostream& operator<<(std::ostream& os, const CkWrwProblem& p)
 /// system perf-db) needs less than the maximum over configurations; it skips elsewhere. The list
 /// covers gfx942 and gfx950.
 class GPU_FindDbWorkspaceCkWrw_BFP16 : public FindDbWorkspaceTest,
-                                       public ::testing::TestWithParam<CkWrwProblem>
+                                       public ::testing::TestWithParam<ConvShape>
 {
 protected:
     void SetUp() override
@@ -279,6 +306,167 @@ protected:
     std::string skip_reason;
 };
 
+struct FlagProblem
+{
+    miopen::conv::Direction direction;
+    miopenTensorLayout_t layout;
+    ConvShape shape;
+};
+
+std::ostream& operator<<(std::ostream& os, const FlagProblem& p)
+{
+    return os << static_cast<int>(p.direction) << ' ' << LayoutName(p.layout) << ' ' << p.shape;
+}
+
+/// GetSolutions() resolves the configuration only for solvers whose WorkspaceDependsOnConfig()
+/// is true and uses GetWorkspaceSize() for every other one. That is correct only if every other
+/// tunable solver's configuration needs exactly GetWorkspaceSize(): a solver that needs more
+/// would be run with too little workspace, one that needs less would be over-reported, and
+/// Find would drop it for a buffer that fits. Every configuration must fit GetWorkspaceSize().
+class FindDbWorkspaceFlagTest : public FindDbWorkspaceTest,
+                                public ::testing::TestWithParam<FlagProblem>
+{
+protected:
+    void Check(miopenDataType_t type)
+    {
+        const auto& p = GetParam();
+        SetUpProblem(
+            p.direction, type, p.layout, p.shape.group_count, p.shape.x_lens, p.shape.w_lens);
+        auto n_checked = 0;
+        for(const auto& id :
+            miopen::solver::GetSolversByPrimitive(miopen::solver::Primitive::Convolution))
+        {
+            const auto& solver = id.GetSolver();
+            if(solver.IsEmpty() || !solver.IsTunable() || !solver.MayNeedWorkspace() ||
+               !solver.IsApplicable(ctx, problem))
+                continue;
+            ++n_checked;
+            const auto max_ws = MaxWorkspace(ctx, problem, id);
+            const auto run_ws = RunWorkspace(ctx, problem, id);
+            if(solver.WorkspaceDependsOnConfig())
+                EXPECT_LE(run_ws, max_ws) << id.ToString();
+            else
+                EXPECT_EQ(run_ws, max_ws)
+                    << id.ToString()
+                    << ": its configuration's workspace is not GetWorkspaceSize(); "
+                       "override WorkspaceDependsOnConfig() to return true";
+        }
+        if(n_checked == 0)
+            GTEST_SKIP() << "No applicable tunable solver needs workspace";
+    }
+};
+
+class GPU_FindDbWorkspaceFlag_FP32 : public FindDbWorkspaceFlagTest
+{
+};
+class GPU_FindDbWorkspaceFlag_FP16 : public FindDbWorkspaceFlagTest
+{
+};
+class GPU_FindDbWorkspaceFlag_BFP16 : public FindDbWorkspaceFlagTest
+{
+};
+
+std::vector<FlagProblem> FlagProblems()
+{
+    std::vector<FlagProblem> problems;
+    for(const auto direction : {miopen::conv::Direction::Forward,
+                                miopen::conv::Direction::BackwardData,
+                                miopen::conv::Direction::BackwardWeights})
+    {
+        problems.push_back({direction, miopenTensorNCHW, {1, {2, 32, 28, 28}, {64, 32, 3, 3}}});
+        problems.push_back({direction, miopenTensorNCHW, {1, {2, 64, 14, 14}, {128, 64, 1, 1}}});
+        problems.push_back({direction, miopenTensorNHWC, {1, {2, 32, 28, 28}, {64, 32, 3, 3}}});
+        problems.push_back({direction, miopenTensorNHWC, {4, {2, 64, 28, 28}, {64, 16, 3, 3}}});
+        // 3D, so the flags of the 3D solvers (the CK grouped backward-weights one sets it) are
+        // checked too; FP16 and BF16 reach the CK 3D solvers on gfx11 as well as on CDNA.
+        problems.push_back(
+            {direction, miopenTensorNDHWC, {1, {2, 32, 8, 14, 14}, {64, 32, 3, 3, 3}}});
+        problems.push_back(
+            {direction, miopenTensorNDHWC, {4, {2, 64, 8, 14, 14}, {64, 16, 3, 3, 3}}});
+        problems.push_back(
+            {direction, miopenTensorNCDHW, {1, {2, 32, 8, 14, 14}, {64, 32, 3, 3, 3}}});
+        // ConvHipConv's smoke shape (4 channels per group), in both layouts it serves, so its flag
+        // is checked where it applies (gfx950, gfx1250; FP16 and BF16).
+        problems.push_back({direction, miopenTensorNHWC, {16, {4, 64, 8, 1}, {64, 4, 3, 3}}});
+        problems.push_back({direction, miopenTensorNCHW, {16, {4, 64, 8, 1}, {64, 4, 3, 3}}});
+    }
+    return problems;
+}
+
+/// The CK backward-weights solvers take their untuned configuration (AI heuristics or default)
+/// from DefaultConfigCache, and their maximum workspace from a per-problem memo, on every query
+/// after the first for a problem. What a cache hit returns must be what is computed without the
+/// caches, and the configuration must run with the same workspace.
+class FindDbWorkspaceDefaultCacheTest : public FindDbWorkspaceTest,
+                                        public ::testing::TestWithParam<ConvShape>
+{
+protected:
+    void Check(miopenDataType_t type)
+    {
+        const auto& p   = GetParam();
+        const auto is3d = p.x_lens.size() == 5;
+        SetUpProblem(miopen::conv::Direction::BackwardWeights,
+                     type,
+                     is3d ? miopenTensorNDHWC : miopenTensorNHWC,
+                     p.group_count,
+                     p.x_lens,
+                     p.w_lens);
+        if(is3d)
+            CheckSolver(miopen::solver::conv::ConvHipImplicitGemm3DGroupWrwXdlops{});
+        else
+            CheckSolver(miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops{});
+    }
+
+private:
+    template <class Solver>
+    void CheckSolver(const Solver& solver)
+    {
+        if(!solver.IsApplicable(ctx, problem))
+            GTEST_SKIP() << solver.SolverDbId() << " is not applicable";
+
+        std::optional<decltype(solver.GetDefaultPerformanceConfig(ctx, problem))> uncached;
+        std::size_t uncached_max_ws = 0;
+        {
+            ScopedEnvironment<bool> no_cache(MIOPEN_DEBUG_CK_PROBLEM_CACHE, false);
+            uncached        = solver.GetDefaultPerformanceConfig(ctx, problem);
+            uncached_max_ws = solver.GetWorkspaceSize(ctx, problem);
+        }
+        // Two queries with the cache on: the second is a hit whatever earlier tests cached.
+        std::ignore       = solver.GetDefaultPerformanceConfig(ctx, problem);
+        const auto hit    = solver.GetDefaultPerformanceConfig(ctx, problem);
+        std::ignore       = solver.GetWorkspaceSize(ctx, problem);
+        const auto max_ws = solver.GetWorkspaceSize(ctx, problem);
+        const auto name   = solver.SolverDbId();
+
+        ASSERT_FALSE(uncached->kernel_id.empty()) << name;
+        EXPECT_EQ(hit.kernel_id, uncached->kernel_id) << name;
+        EXPECT_EQ(hit.split_k, uncached->split_k) << name;
+        EXPECT_EQ(hit.UseTF32(), uncached->UseTF32()) << name;
+        EXPECT_TRUE(solver.IsValidPerformanceConfig(ctx, problem, hit)) << name;
+        EXPECT_EQ(max_ws, uncached_max_ws) << name;
+
+        const auto from_hit      = solver.GetSolution(ctx, problem, hit);
+        const auto from_uncached = solver.GetSolution(ctx, problem, *uncached);
+        ASSERT_TRUE(from_uncached.Succeeded()) << name;
+        ASSERT_TRUE(from_hit.Succeeded()) << name;
+        EXPECT_EQ(from_hit.workspace_sz, from_uncached.workspace_sz) << name;
+    }
+};
+
+class GPU_FindDbWorkspaceDefaultCache_FP32 : public FindDbWorkspaceDefaultCacheTest
+{
+};
+class GPU_FindDbWorkspaceDefaultCache_FP16 : public FindDbWorkspaceDefaultCacheTest
+{
+};
+
+std::vector<ConvShape> DefaultCacheProblems()
+{
+    return {{1, {2, 64, 28, 28}, {64, 64, 3, 3}},
+            {4, {2, 64, 28, 28}, {64, 16, 3, 3}},
+            {4, {2, 64, 8, 14, 14}, {64, 16, 3, 3, 3}}};
+}
+
 } // namespace
 
 TEST_P(GPU_FindDbWorkspace_FP32, ImmediateReportsRunWorkspace)
@@ -311,6 +499,21 @@ TEST_P(GPU_FindDbWorkspace_FP32, ImmediateReportsRunWorkspace)
             ++n_wrong_records;
     }
     EXPECT_GT(n_wrong_records, 0) << "No returned solution had a wrong find-db workspace";
+}
+
+TEST_P(GPU_FindDbWorkspaceFlag_FP32, ConfigIndependentWorkspaceIsGetWorkspaceSize)
+{
+    Check(miopenFloat);
+}
+
+TEST_P(GPU_FindDbWorkspaceFlag_FP16, ConfigIndependentWorkspaceIsGetWorkspaceSize)
+{
+    Check(miopenHalf);
+}
+
+TEST_P(GPU_FindDbWorkspaceFlag_BFP16, ConfigIndependentWorkspaceIsGetWorkspaceSize)
+{
+    Check(miopenBFloat16);
 }
 
 TEST_P(GPU_FindDbWorkspace_FP32, FindKeepsSolverWhenStoredWorkspaceIsTooLarge)
@@ -402,13 +605,28 @@ TEST_P(GPU_FindDbWorkspaceCkWrw_BFP16, WorkSpaceSizeReportsMaximumOnFindDbHit)
     EXPECT_EQ(conv.GetWorkSpaceSize(ctx, problem), recorded.front().max_ws);
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_FindDbWorkspaceCkWrw_BFP16,
-                         testing::Values(CkWrwProblem{{2, 64, 56, 56}, {64, 64, 3, 3}, 1},
-                                         CkWrwProblem{{2, 128, 28, 28}, {128, 128, 3, 3}, 1}));
+                         testing::Values(ConvShape{1, {2, 64, 56, 56}, {64, 64, 3, 3}},
+                                         ConvShape{1, {2, 128, 28, 28}, {128, 128, 3, 3}}));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_FindDbWorkspace_FP32,
                          testing::Values(miopen::conv::Direction::Forward,
                                          miopen::conv::Direction::BackwardData,
                                          miopen::conv::Direction::BackwardWeights));
+
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_FindDbWorkspaceFlag_FP32, testing::ValuesIn(FlagProblems()));
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_FindDbWorkspaceFlag_FP16, testing::ValuesIn(FlagProblems()));
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_FindDbWorkspaceFlag_BFP16, testing::ValuesIn(FlagProblems()));
+
+TEST_P(GPU_FindDbWorkspaceDefaultCache_FP32, CacheHitIsUncachedDefault) { Check(miopenFloat); }
+
+TEST_P(GPU_FindDbWorkspaceDefaultCache_FP16, CacheHitIsUncachedDefault) { Check(miopenHalf); }
+
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         GPU_FindDbWorkspaceDefaultCache_FP32,
+                         testing::ValuesIn(DefaultCacheProblems()));
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         GPU_FindDbWorkspaceDefaultCache_FP16,
+                         testing::ValuesIn(DefaultCacheProblems()));

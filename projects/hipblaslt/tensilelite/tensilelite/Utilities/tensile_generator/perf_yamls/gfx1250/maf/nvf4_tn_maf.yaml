@@ -101,6 +101,9 @@ BenchmarkProblems:
         - ExpandPointerSwap: [False]
         - CompactLoopStore: [False]
         - PreloadKernArgs: [True]
+        - NumElementsPerBatchStore: [16]
+        - GroupLoadStore: [True]
+        - InterleaveAlpha: [2]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
