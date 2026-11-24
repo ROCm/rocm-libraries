@@ -365,15 +365,14 @@ const std::vector<Gap>& knownGaps()
         {Reference::GPU, {PointwiseMode::SOFTPLUS_BWD}},
         {Reference::GPU, {PointwiseMode::BINARY_SELECT}},
 
-        // CPU only: FP16 or BFP16 compute, and an FP32 operand beside a 16-bit one. The last two
-        // read like compute and output swapped against the tuples before them; pinned as
+        // CPU only: FP16 or BFP16 compute, and a 16-bit first input beside an FP32 second one. The
+        // last two read like compute and output swapped against the FP32-compute tuple both
+        // references register for an FP32 first input and a 16-bit second one; pinned as
         // registered.
         {Reference::GPU, binarySignature(K_FP16, K_FP16, K_FP16, K_FP16)},
         {Reference::GPU, binarySignature(K_BFP16, K_BFP16, K_BFP16, K_BFP16)},
         {Reference::GPU, binarySignature(K_FP16, K_FP32, K_FP32, K_FP32)},
         {Reference::GPU, binarySignature(K_BFP16, K_FP32, K_FP32, K_FP32)},
-        {Reference::GPU, binarySignature(K_FP32, K_FP16, K_FP32, K_FP32)},
-        {Reference::GPU, binarySignature(K_FP32, K_BFP16, K_FP32, K_FP32)},
         {Reference::GPU, binarySignature(K_FP32, K_FP16, K_FP32, K_FP16)},
         {Reference::GPU, binarySignature(K_FP32, K_BFP16, K_FP32, K_BFP16)},
 

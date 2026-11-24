@@ -211,14 +211,19 @@ Binary modes:
 | FP16 | BFP16 | BFP16 |
 | BFP16 | FP16 | BFP16 |
 | FP16 | BFP16 | FP16 |
+| FP32 | FP16 | FP16 |
+| FP32 | BFP16 | BFP16 |
+| FP32 | FP16 | FP32 |
+| FP32 | BFP16 | FP32 |
 
 There are no `FP64`, `FP8`, `BOOLEAN` or `INT32` tensors (so no comparison, logical or select modes, and no
-`GEN_INDEX`), no tuple with a compute type other than FP32, and no tuple with an FP32 operand beside a 16-bit
-one. The CPU reference registers those.
+`GEN_INDEX`), no tuple with a compute type other than FP32, and no tuple with a 16-bit first input beside an FP32
+second one. The CPU reference registers those.
 
-**Mixed-datatype tuples.** The GPU reference registers the mixes the CPU reference does not: unary conversions
-that widen a 16-bit input to FP32 or go between FP16 and BFP16, and binary nodes that mix FP16 with BFP16 (the
-CPU reference mixes them only in `CMP_GT`, a mode the GPU lacks). See the
+**Mixed-datatype tuples.** The GPU reference registers mixes the CPU reference does not: unary conversions that
+widen a 16-bit input to FP32 or go between FP16 and BFP16, and binary nodes that mix FP16 with BFP16 (the CPU
+reference mixes them only in `CMP_GT`, a mode the GPU lacks). Both references take an FP32 first input with a
+16-bit second input, producing that 16-bit type or FP32. See the
 [CPU document](../../../projects/hipdnn/docs/OperationSupport-ReferenceImpl.md#pointwise-restrictions) for the
 other direction.
 
