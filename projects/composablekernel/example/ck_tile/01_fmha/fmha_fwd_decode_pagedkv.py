@@ -5,11 +5,12 @@
 
 pa_decode takes the arguments of aiter's FlyDSL pa_decode for the case it covers: one query
 token, bf16 or fp16 Q/O, head dim 128, fp8 e4m3 K/V with per-tensor scales, pages of 16, 64 or
-128 tokens. Load libck_fmha_fwd_decode_pagedkv.so (target
+128 tokens. Unlike aiter it requires contiguous query and output. Load libck_fmha_fwd_decode_pagedkv.so (target
 ck_fmha_fwd_decode_pagedkv) from CK_FMHA_FWD_DECODE_PAGEDKV_LIB or the library search path.
 """
 
 import ctypes
+import math
 import os
 
 import torch
@@ -19,7 +20,7 @@ PAGE_SIZES = (16, 64, 128)
 
 _lib = None
 _buffers = {}
-_ones = {}
+_scales = {}
 
 # aiter pa_decode arguments this kernel has no use for (its own scratch and tuning)
 _IGNORED = ("context_partition_size", "exp_sums", "max_logits", "temporary_output")
@@ -51,15 +52,17 @@ def _load():
     return _lib
 
 
-def _buffer(kind, nbytes, device):
-    """Scratch workspace or zeroed counters, shared by all calls on a device; grows on demand.
+def _buffer(kind, nbytes, device, stream):
+    """Scratch workspace or zeroed counters of a stream; grows on demand.
 
-    Calls must not run concurrently (the kernel leaves the counters at zero for the next call).
+    Calls on one stream share them: each call leaves the counters at zero for the next. A call
+    that finds them non-zero leaves output rows unwritten without an error, so streams do not
+    share buffers, and after a failed call (a device fault) use reset_buffers().
     Both sizes depend only on num_seqs * num_kv_heads: make the first call at the largest batch
     eagerly, since growing is not possible during graph capture. Outgrown buffers are kept since
     captured graphs may still use them.
     """
-    buffers = _buffers.setdefault((kind, device), [])
+    buffers = _buffers.setdefault((kind, device, stream), [])
     if not buffers or buffers[-1].numel() < nbytes:
         if torch.cuda.is_current_stream_capturing():
             raise RuntimeError(
@@ -75,18 +78,32 @@ def _buffer(kind, nbytes, device):
     return buffers[-1]
 
 
+def reset_buffers():
+    """Zeroes the counters of every stream again; call after a failed launch, not during capture."""
+    for (kind, _, _), buffers in _buffers.items():
+        if kind == "counters":
+            for b in buffers:
+                b.copy_(torch.zeros(b.numel(), dtype=torch.uint8))
+
+
 def _scale_ptr(scale, device):
     if scale is None:
-        if device not in _ones:
-            _ones[device] = torch.ones(1, dtype=torch.float32).to(device)
-        scale = _ones[device]
+        scale = 1.0
+    if isinstance(scale, (int, float)):
+        # a host number: kept on the device, one tensor per value
+        value = float(scale)
+        if (device, value) not in _scales:
+            _scales[(device, value)] = torch.tensor([value], dtype=torch.float32).to(
+                device
+            )
+        scale = _scales[(device, value)]
     if (
         not isinstance(scale, torch.Tensor)
         or scale.numel() != 1
         or scale.dtype != torch.float32
     ):
         raise ValueError(
-            "key_scale / value_scale must be one float32 element (per-tensor)"
+            "key_scale / value_scale must be a number or one float32 element (per-tensor)"
         )
     return scale.data_ptr()
 
@@ -101,8 +118,8 @@ def pa_decode(
     softmax_scale,
     query_length=1,
     *,
-    key_scale=None,  # [1] float32 on the device
-    value_scale=None,  # [1] float32 on the device
+    key_scale=None,  # a number or [1] float32 on the device; both or neither
+    value_scale=None,
     sliding_window=0,  # keys attended, the query's own included; 0 = no window
     max_context_length=None,
     work_plan=None,  # accepted for call compatibility; this kernel needs no plan
@@ -128,6 +145,14 @@ def pa_decode(
             raise NotImplementedError(f"CK pa_decode does not support {name}")
     if compute_type is not None and compute_type != key_cache.dtype:
         raise NotImplementedError("CK pa_decode computes in the fp8 type of the caches")
+    if (key_scale is None) != (value_scale is None):
+        raise ValueError(
+            "key_scale and value_scale must either both be provided or both be None"
+        )
+    if not (math.isfinite(softmax_scale) and softmax_scale > 0):
+        raise ValueError(
+            f"softmax_scale must be finite and positive, got {softmax_scale}"
+        )
     if query_length != 1:
         raise NotImplementedError("CK pa_decode supports query_length 1 only")
     batch, nhead_q, hdim = query.shape
@@ -227,11 +252,13 @@ def _launch(
         "workspace",
         lib.ck_fmha_fwd_decode_pagedkv_max_workspace_bytes(batch, grid_rows),
         device,
+        stream,
     )
     counters = _buffer(
         "counters",
         lib.ck_fmha_fwd_decode_pagedkv_num_counters(batch, grid_rows) * 4,
         device,
+        stream,
     )
     err = lib.ck_fmha_fwd_decode_pagedkv(
         query.data_ptr(),

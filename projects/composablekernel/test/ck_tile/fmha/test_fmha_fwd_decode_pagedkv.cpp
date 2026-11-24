@@ -94,6 +94,14 @@ std::vector<Param> params()
     add("cap4_full_b1_s20000", capped({1, 16, 1, {20000}, 0}, 4), "coop/4x40");
     add("cap2_full_b2_s3000", capped({2, 16, 1, {3000}, 0}, 2), "coop/2");
     add("cap1_swa_b2_s8192", capped({2, 16, 1, {8192}, 2048}, 1), "wave/1");
+    // context lengths beyond the block table: the kernel stops at the table's last page
+    const auto over = [](Case c) {
+        c.over_report = 50000;
+        return c;
+    };
+    add("over_table_coop", over({2, 16, 1, {3008}, 0}), "coop/16");
+    add("over_table_groups", over({1, 16, 1, {20000}, 0}), "coop/16x10");
+    add("over_table_p64_wave", over({8, 16, 1, {8192}, 0, 0, 0, "auto", 0, 64}), "wave/16");
     // forced layouts
     add("full_coop", {2, 16, 1, {5000}, 0, 0, 0, "coop"}, "coop/10");
     add("swa_wave", {2, 16, 1, {5000}, 2048, 0, 0, "wave"}, "wave/11");
@@ -116,7 +124,7 @@ std::vector<Param> params()
     add("bound_one_cluster", {2, 16, 1, {300}, 0, 0, 0, "auto", 3840}, "coop/15");
     add("bound_swa_gqa", {4, 16, 2, {100, 7000}, 2048, 0, 0, "auto", 65536}, "coop/11");
     // a window over a context just below the bound covers one page (64-token pages: four) more
-    // than the bound's own range; splits sized for the bound alone would drop the newest keys
+    // than the bound's own range, and the splits must cover it
     add("bound_swa_b64_s8191", {64, 16, 1, {8191}, 2048, 0, 0, "auto", 8192}, "coop/9");
     add("bound_groups_s29999", {1, 16, 1, {29999}, 23040, 0, 0, "auto", 30000}, "coop/16x12");
     for(const ck_tile::index_t ps : {16, 64, 128})
@@ -172,7 +180,9 @@ TEST_P(FwdDecodePagedKV, MatchesReference)
     // one timed launch: also replays a captured graph and compares its output
     const auto r = fmha_fwd_decode_pagedkv_runner::run(GetParam().c, true, 0, 1);
     ASSERT_TRUE(r.error.empty()) << r.error;
-    EXPECT_EQ(layout_of(r.config), GetParam().layout);
+    // the expected layouts are those of a device whose clusters hold 16 workgroups
+    if(ck_tile::get_max_cluster_size() == ck_tile::kFmhaFwdDecodeMaxClusterSplits)
+        EXPECT_EQ(layout_of(r.config), GetParam().layout);
     EXPECT_TRUE(r.graph_same) << "graph replay output differs from a stream launch";
     EXPECT_TRUE(r.valid) << describe(r);
 }

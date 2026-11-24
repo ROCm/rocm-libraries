@@ -2860,7 +2860,10 @@ class SplitKVQrTdmTiles(unittest.TestCase):
 
 
 class TestFwdDecodePagedKVCodegen(unittest.TestCase):
-    """fmha_fwd_decode_pagedkv: one instance per split count of every variant, gfx125 only."""
+    """fmha_fwd_decode_pagedkv: one instance per split count of every variant, gfx125 only.
+
+    Variants of several clusters start at two splits: one split merges nothing.
+    """
 
     def test_gfx125_emits_every_split_count_of_every_variant(self):
         api_pool, kernels = get_fwd_decode_pagedkv_blobs(["gfx1250"], "", 0, [-1])
@@ -2889,7 +2892,8 @@ class TestFwdDecodePagedKVCodegen(unittest.TestCase):
                 )
                 == variant
             )
-            self.assertEqual(splits, list(range(1, 17)), variant)
+            first = 2 if variant[3] == "t" else 1
+            self.assertEqual(splits, list(range(first, 17)), variant)
         for name in names:
             self.assertRegex(
                 name,
@@ -2907,7 +2911,8 @@ class TestFwdDecodePagedKVCodegen(unittest.TestCase):
         _, kernels = get_fwd_decode_pagedkv_blobs(
             ["gfx1250"], "*_bf16_*_ps64_tdm_coop_*", 0, [-1]
         )
-        self.assertEqual(len(kernels), 2 * 16)
+        # one and several clusters
+        self.assertEqual(len(kernels), 16 + 15)
         self.assertTrue(
             all(
                 k.F_dtype == "bf16"

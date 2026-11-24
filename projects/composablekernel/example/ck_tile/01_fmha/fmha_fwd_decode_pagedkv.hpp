@@ -7,6 +7,8 @@
 #include "ck_tile/host/kernel_launch.hpp"
 #include "ck_tile/ops/fmha.hpp"
 
+#include <cmath>
+#include <stdexcept>
 #include <string>
 
 // Q and O in bf16 or fp16, K and V in fp8
@@ -94,6 +96,9 @@ inline bool fmha_fwd_decode_pagedkv_is_valid(const fmha_fwd_decode_pagedkv_trait
     // several clusters merge what each cluster merged: a cluster of one split merges nothing
     if(a.num_groups > 1 && t.num_splits < 2)
         return false;
+    // the fp8 conversion of Q does not saturate: a scale that is not positive and finite gives NaN
+    if(!(a.scale_s > 0.f) || !std::isfinite(a.scale_s))
+        return false;
     return 1 <= t.num_splits && t.num_splits <= ck_tile::kFmhaFwdDecodeMaxClusterSplits;
 }
 
@@ -144,7 +149,33 @@ struct fmha_fwd_decode_pagedkv_traits_
 template <typename Traits_, typename Arch_ = void>
 float fmha_fwd_decode_pagedkv_(const ck_tile::stream_config&, fmha_fwd_decode_pagedkv_args);
 
-// Returns the kernel time (0 unless timed by the stream config), or -1 if no instance matches.
+// A failed launch, with the error the launch returned.
+struct fmha_fwd_decode_pagedkv_launch_error : std::runtime_error
+{
+    explicit fmha_fwd_decode_pagedkv_launch_error(hipError_t e)
+        : std::runtime_error(std::string("fmha_fwd_decode_pagedkv launch failed: ") +
+                             hipGetErrorString(e)),
+          code(e)
+    {
+    }
+    hipError_t code;
+};
+
+// Untimed launches take the error from the launch itself: the HIP last-error state that
+// ck_tile::launch_kernel checks also holds earlier failures of the process.
+template <typename Launch>
+float fmha_fwd_decode_pagedkv_launch(const ck_tile::stream_config& s, Launch&& launch)
+{
+    if(s.time_kernel_)
+        return ck_tile::launch_kernel(s, launch);
+    if(const hipError_t e = launch(s); e != hipSuccess)
+        throw fmha_fwd_decode_pagedkv_launch_error(e);
+    return 0;
+}
+
+// Returns the kernel time (0 unless timed by the stream config), or -1 if no instance matches or
+// fmha_fwd_decode_pagedkv_is_valid rejects the arguments. Throws
+// fmha_fwd_decode_pagedkv_launch_error if the launch fails.
 float fmha_fwd_decode_pagedkv(fmha_fwd_decode_pagedkv_traits,
                               fmha_fwd_decode_pagedkv_args,
                               const ck_tile::stream_config&);

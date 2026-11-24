@@ -137,6 +137,10 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
     {
         return kQoFp16 ? pack_fp16(a, b) : pack_bf16(a, b);
     }
+    CK_TILE_DEVICE static float o_to_f32(uint32_t x)
+    {
+        return kQoFp16 ? fp16_to_f32(x) : bf16_to_f32(x);
+    }
     CK_TILE_DEVICE static float exp2(float x) { return __builtin_amdgcn_exp2f(x); }
     // x of the lane 16 away, with a VALU permute: a bpermute would queue behind the LDS reads
     CK_TILE_DEVICE static float other_half(float x)

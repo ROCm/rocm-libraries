@@ -36,7 +36,9 @@ size_t ck_fmha_fwd_decode_pagedkv_max_workspace_bytes(int batch, int grid_rows)
         batch, grid_rows, ck_tile::get_max_cluster_size());
 }
 
-// int32 counters for this batch; zero them once, calls of any shape share them (not concurrently).
+// int32 counters for this batch; zero them once, calls of any shape share them. Use one workspace
+// and one set of counters per stream, and zero the counters again after a failed call: a call that
+// finds them non-zero can leave output rows unwritten without an error.
 size_t ck_fmha_fwd_decode_pagedkv_num_counters(int batch, int grid_rows)
 {
     return ck_tile::fmha_fwd_decode_pagedkv_num_counters(batch, grid_rows);
@@ -102,19 +104,19 @@ int ck_fmha_fwd_decode_pagedkv(const void* q,
     traits.page_block_size = page_size;
     traits.wave_split      = c.wave_split;
     traits.num_splits      = c.num_splits;
-    if(!fmha_fwd_decode_pagedkv_is_valid(traits, args))
-        return hipErrorInvalidValue;
     try
     {
-        // no instance for this page size or device
+        // invalid arguments, or no instance for this page size or device
         if(fmha_fwd_decode_pagedkv(traits, args, ck_tile::stream_config{stream}) < 0)
             return hipErrorInvalidValue;
     }
+    catch(const fmha_fwd_decode_pagedkv_launch_error& e)
+    {
+        return e.code;
+    }
     catch(const std::exception&)
     {
-        // launch_kernel reports a failed launch by throwing
-        const hipError_t e = hipGetLastError();
-        return e != hipSuccess ? e : hipErrorUnknown;
+        return hipErrorUnknown;
     }
     return hipSuccess;
 }

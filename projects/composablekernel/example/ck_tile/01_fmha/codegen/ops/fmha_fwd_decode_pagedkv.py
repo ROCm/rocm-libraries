@@ -64,7 +64,7 @@ float fmha_fwd_decode_pagedkv_<trait_{F_idx}, {F_arch.tag}>(const ck_tile::strea
     auto [kargs, grids] = fmha_fwd_decode_pagedkv_create_kargs_and_grids<k_>(a);
     const dim3 blocks                      = k_::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
-    return ck_tile::launch_kernel(s, ck_tile::make_cluster_kernel<k_::kClusterSize, kBlockPerCu>(k_{{}}, grids, blocks, 0, kargs));
+    return fmha_fwd_decode_pagedkv_launch(s, ck_tile::make_cluster_kernel<k_::kClusterSize, kBlockPerCu>(k_{{}}, grids, blocks, 0, kargs));
 }}
 
 #endif // !defined(__HIP_DEVICE_COMPILE__) || ({F_arch.preprocessor_check})
@@ -78,6 +78,8 @@ float fmha_fwd_decode_pagedkv(fmha_fwd_decode_pagedkv_traits t, fmha_fwd_decode_
     [[maybe_unused]] const std::string device_name = ck_tile::get_device_name();
     if(t.kv_memory_layout != ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT ||
        t.kv_lookup_table != ck_tile::BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D)
+        return r;
+    if(!fmha_fwd_decode_pagedkv_is_valid(t, a))
         return r;
 
 {F_dispatch}
@@ -266,7 +268,9 @@ def get_fwd_decode_pagedkv_blobs(
             if optdim_list != [-1] and hdim not in optdim_list:
                 continue
             for pipeline in factory.get_pipelines(dtype, hdim):
-                for num_splits in range(1, MAX_CLUSTER_SPLITS + 1):
+                # several clusters need clusters of at least two splits
+                first = 2 if pipeline.F_groups == "t" else 1
+                for num_splits in range(first, MAX_CLUSTER_SPLITS + 1):
                     k = FmhaFwdDecodePagedKVKernel(
                         F_arch=factory.arch,
                         F_idx=num_splits,

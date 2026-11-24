@@ -198,18 +198,20 @@ CK_TILE_HOST auto make_kernel(KernelImpl /*f*/,
 // launches that must keep their clusters when the stream is captured into a HIP graph: capture
 // drops a cluster size that hipLaunchKernelEx gets as a launch attribute only (the overload
 // above), and the graph then replays without clusters.
+// - One workgroup is no cluster: a plain entry and launch, also for devices without clusters.
 // - Up to 15 workgroups the size is the cluster_dims attribute of the entry (kentry_cluster).
-// - clang checks cluster_dims against 4 bits while a gfx1250 cluster holds 16 workgroups, so 16
-//   goes through hipDrvLaunchKernelEx, whose capture keeps the launch attribute.
+// - clang takes at most 15 per cluster_dims dimension (4 bits) while a gfx1250 cluster holds 16
+//   workgroups, so 16 goes through hipDrvLaunchKernelEx, whose capture keeps the launch attribute.
 //
 #if CK_TILE_ENABLE_CLUSTER_LAUNCH
 namespace detail {
-// hipGetFuncBySymbol returns a handle for the current device, so one is kept per device
-template <typename Entry>
-CK_TILE_HOST hipError_t get_device_function(Entry* entry, hipFunction_t& fn)
+// The handle of kentry<MinBlockPerCu, KernelImpl, Args...>. hipGetFuncBySymbol returns one for
+// the current device, so one is kept per device (and per entry: the template arguments).
+template <int MinBlockPerCu, typename KernelImpl, typename... Args>
+CK_TILE_HOST hipError_t get_device_function(hipFunction_t& fn)
 {
     static std::array<std::atomic<hipFunction_t>, 64> per_device{};
-    const void* sym = reinterpret_cast<const void*>(entry);
+    const void* sym = reinterpret_cast<const void*>(&kentry<MinBlockPerCu, KernelImpl, Args...>);
     int dev         = 0;
     if(const hipError_t e = hipGetDevice(&dev); e != hipSuccess)
         return e;
@@ -239,7 +241,16 @@ CK_TILE_HOST auto make_cluster_kernel(
         attrs[0].val.clusterDim.x = ClusterX;
         attrs[0].val.clusterDim.y = 1;
         attrs[0].val.clusterDim.z = 1;
-        if constexpr(ClusterX <= 15)
+        if constexpr(ClusterX == 1)
+        {
+            hipLaunchConfig_t config{};
+            config.gridDim          = grid_dim;
+            config.blockDim         = block_dim;
+            config.dynamicSmemBytes = lds_byte;
+            config.stream           = s.stream_id_;
+            return hipLaunchKernelEx(&config, kentry<MinBlockPerCu, KernelImpl, Args...>, args...);
+        }
+        else if constexpr(ClusterX <= 15)
         {
             hipLaunchConfig_t config{};
             config.gridDim          = grid_dim;
@@ -256,7 +267,7 @@ CK_TILE_HOST auto make_cluster_kernel(
         {
             hipFunction_t fn = nullptr;
             if(const hipError_t e =
-                   detail::get_device_function(&kentry<MinBlockPerCu, KernelImpl, Args...>, fn);
+                   detail::get_device_function<MinBlockPerCu, KernelImpl, Args...>(fn);
                e != hipSuccess)
                 return e;
             HIP_LAUNCH_CONFIG config{};

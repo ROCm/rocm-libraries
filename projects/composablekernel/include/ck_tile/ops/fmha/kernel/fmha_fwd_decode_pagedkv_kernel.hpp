@@ -11,19 +11,16 @@
 #include <algorithm>
 #include <string>
 
-// gfx125 decode attention (one query token per sequence) over a paged fp8 KV cache; the pipeline
-// (BlockFmhaFwdDecodePagedKVPipelineTdm) describes the cache layout and what one workgroup
-// computes.
+// gfx125 decode attention (one query token per sequence) over a paged fp8 KV cache; see
+// BlockFmhaFwdDecodePagedKVPipelineTdm for the cache layout and what one workgroup computes.
 //
-// Grid (kNumSplits * groups, nhead_k, batch). The splits of one (batch, kv head) divide its key
-// range among them. Each kNumSplits consecutive splits are one workgroup cluster: each stores its
-// O / l in bf16 and (m, l) to the workspace, and after a cluster barrier every split merges its
-// share of the rows. With several clusters per (batch, kv head) (groups), each cluster stores its
-// merged rows and the last one to finish a row block merges the clusters (MergeGroups).
+// Grid (kNumSplits * groups, nhead_k * query blocks, batch). The splits of a row divide its key
+// range; kNumSplits consecutive splits are one workgroup cluster, which merges their partials
+// after a cluster barrier. Several clusters per row (groups) are merged by the last one to
+// finish (MergeGroups).
 //
-// The grid is sized for an upper bound of the context lengths; each (batch, kv head) spreads its
-// own key range over it, and clusters left without pages exit at once. So a launch depends only
-// on the bound and can be captured in a HIP graph.
+// The grid is sized for an upper bound of the context lengths: each sequence spreads its own
+// range over it and clusters left without pages exit, so a launch can be captured in a HIP graph.
 
 namespace ck_tile {
 
@@ -83,9 +80,9 @@ CK_TILE_HOST index_t fmha_fwd_decode_pagedkv_split_pages(index_t span,
 // - Otherwise several clusters (groups) of the shortest 8-, 12- or 16-page cooperative splits
 //   within 192 splits and 512 workgroups, else wave-split splits for about 384 workgroups, at
 //   most 480.
-// The workgroup limits keep the grid resident at once: the workgroups of a cluster take one
-// workgroup processor each, a processor's LDS holds two wave-split workgroups, and a shader
-// engine runs at most 15 clusters.
+// The limits on wave-split and multi-cluster grids keep them resident at once (a workgroup
+// processor's LDS holds two wave-split workgroups, a shader engine runs at most 15 clusters);
+// one cluster of cooperative splits has no such limit.
 // max_cluster_splits: workgroups a cluster holds on the device (ck_tile::get_max_cluster_size);
 // a cluster takes no more splits than that, and below 2 every (batch, kv head) is one split.
 CK_TILE_HOST FmhaFwdDecodePagedKVConfig
@@ -154,8 +151,8 @@ CK_TILE_HOST size_t fmha_fwd_decode_pagedkv_workspace_bytes(index_t batch,
                                                             index_t num_splits,
                                                             index_t num_groups = 1)
 {
-    // per split: bf16 O / l [batch][nhead_k][groups][splits][16][128] and fp32 (m, l) [..][16][2];
-    // per group the same with one split
+    // per split: 16-bit O / l [batch][nhead_k][groups][splits][16][128] and fp32 (m, l)
+    // [..][16][2]; per group the same with one split
     if(batch <= 0 || nhead_k <= 0 || num_splits <= 0 || num_groups <= 0)
         return 0;
     const size_t heads = static_cast<size_t>(batch) * nhead_k;
@@ -257,8 +254,9 @@ struct FmhaFwdDecodePagedKVKernel
         const float* k_descale_ptr;
         const float* v_descale_ptr;
         void* o_ptr;
-        uint16_t* ws_o_ptr; // per split: O / l, bf16 [batch][nhead_k][groups][splits][kM0][hdim]
-        float* ws_ml_ptr;   // per split: (m, l) [batch][nhead_k][groups][splits][kM0][2]
+        uint16_t*
+            ws_o_ptr; // per split: O / l as ODataType [batch][nhead_k][groups][splits][kM0][hdim]
+        float* ws_ml_ptr; // per split: (m, l) [batch][nhead_k][groups][splits][kM0][2]
         index_t nhead_q;
         index_t nhead_k;
         index_t nhead_ratio_qk; // nhead_q / nhead_k, so the kernel does not divide
@@ -285,7 +283,10 @@ struct FmhaFwdDecodePagedKVKernel
     // window_size: keys attended, the query's own included; 0 = no window.
     // workspace_ptr: fmha_fwd_decode_pagedkv_workspace_bytes, needs no initialization.
     // counters_ptr: fmha_fwd_decode_pagedkv_num_counters int32; zero them once, every launch
-    // leaves them zero, so launches of any shape can share them unless they run concurrently.
+    // leaves them zero, so launches of any shape can share them. A launch with several groups
+    // that finds them non-zero (a concurrent launch on the same buffers, an aborted one) leaves
+    // output rows unwritten without an error: use one workspace and one set of counters per
+    // stream, and zero the counters again after a failed launch.
     // The kernel checks none of this: nhead_q / nhead_k must be a whole number; the workspace and
     // the counters are sized for nhead_k times the query blocks per kv head
     // (fmha_fwd_decode_pagedkv_q_blocks).
@@ -379,9 +380,10 @@ struct FmhaFwdDecodePagedKVKernel
         const index_t q0  = (blockIdx.y - g * a.q_blocks) * kM0;
         const index_t gqa = min(kM0, a.nhead_ratio_qk - q0);
 
-        const index_t ctx   = a.seqlen_k_ptr[b];
-        const index_t lo    = a.window_size > 0 ? max(0, ctx - a.window_size) : 0;
-        const index_t pg_hi = (ctx + kN0 - 1) / kN0;
+        const index_t ctx = a.seqlen_k_ptr[b];
+        const index_t lo  = a.window_size > 0 ? max(0, ctx - a.window_size) : 0;
+        // no further than the block table reaches, whatever the context length says
+        const index_t pg_hi = min((ctx + kN0 - 1) / kN0, a.block_table_stride * kSubPages);
         // with larger cache pages the range starts on a 4-page boundary, so that a wave-split
         // step's four pages of a wave lie in one cache page (positions before lo are masked)
         const index_t pg_lo = kSubPages > 1 ? lo / kN0 / 4 * 4 : lo / kN0;
@@ -437,7 +439,7 @@ struct FmhaFwdDecodePagedKVKernel
         }
         else
         {
-            // partials: O / l in bf16 and (m, l)
+            // partials: O / l in the output type and (m, l)
             // workgroup row of the grid, over all sequences
             const long_index_t head =
                 static_cast<long_index_t>(b) * (a.nhead_k * a.q_blocks) + blockIdx.y;
@@ -446,13 +448,14 @@ struct FmhaFwdDecodePagedKVKernel
             FmhaPipeline::StoreRows(res,
                                     a.ws_o_ptr + (part0 + s * kM0) * kHeadDim,
                                     res.l > 0.f ? 1.f / res.l : 0.f,
-                                    [](float x, float y) { return FmhaPipeline::pack_bf16(x, y); });
+                                    [](float x, float y) { return FmhaPipeline::pack_o(x, y); });
             if(FmhaPipeline::IsRowOwner(res))
                 *ptr_as<float2>(a.ws_ml_ptr + (part0 + s * kM0 + res.row) * 2) =
                     make_float2(res.m, res.l);
-            asm volatile("s_wait_storecnt 0x0" ::: "memory");
+            // the partials become visible to the cluster: release, barrier, acquire
+            __builtin_amdgcn_fence(__ATOMIC_RELEASE, "cluster");
             cluster_barrier();
-            asm volatile("global_inv scope:SCOPE_SE" ::: "memory");
+            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "cluster");
 
             // merge the splits: split s takes rows [s*kRowsPer, +kRowsPer); thread -> (row, 2 dims)
             constexpr index_t kRowsPer = (kM0 + kNumSplits - 1) / kNumSplits;
@@ -479,8 +482,8 @@ struct FmhaFwdDecodePagedKVKernel
                     const float wgt =
                         mlv[i].y > 0.f ? mlv[i].y * FmhaPipeline::exp2(mlv[i].x - mm) : 0.f;
                     ll += wgt;
-                    o0 += wgt * FmhaPipeline::bf16_to_f32(oi[i] & 0xffff);
-                    o1 += wgt * FmhaPipeline::bf16_to_f32(oi[i] >> 16);
+                    o0 += wgt * FmhaPipeline::o_to_f32(oi[i] & 0xffff);
+                    o1 += wgt * FmhaPipeline::o_to_f32(oi[i] >> 16);
                 }
                 if constexpr(!kHasGroups)
                 {
@@ -494,7 +497,7 @@ struct FmhaFwdDecodePagedKVKernel
                     const long_index_t grow = (head * a.num_groups + gi) * kM0 + mrow;
                     const float f           = ll > 0.f ? 1.f / ll : 0.f;
                     __scoped_atomic_store_n(ptr_as<uint32_t>(a.gws_o_ptr + grow * kHeadDim + d2),
-                                            FmhaPipeline::pack_bf16(o0 * f, o1 * f),
+                                            FmhaPipeline::pack_o(o0 * f, o1 * f),
                                             __ATOMIC_RELAXED,
                                             __MEMORY_SCOPE_DEVICE);
                     if(d2 == 0)
@@ -584,8 +587,8 @@ struct FmhaFwdDecodePagedKVKernel
                     const float mn = fmaxf(mm, mi);
                     const float c0 = FmhaPipeline::exp2(mm - mn), c1 = FmhaPipeline::exp2(mi - mn);
                     ll = ll * c0 + li * c1;
-                    o0 = o0 * c0 + li * c1 * FmhaPipeline::bf16_to_f32(oi[j] & 0xffff);
-                    o1 = o1 * c0 + li * c1 * FmhaPipeline::bf16_to_f32(oi[j] >> 16);
+                    o0 = o0 * c0 + li * c1 * FmhaPipeline::o_to_f32(oi[j] & 0xffff);
+                    o1 = o1 * c0 + li * c1 * FmhaPipeline::o_to_f32(oi[j] >> 16);
                     mm = mn;
                 }
             }

@@ -259,6 +259,8 @@ struct TileFmhaFwdDecodePagedKVTraits
     static constexpr auto kKVMemoryLayout   = kKVMemoryLayout_;
     static constexpr auto kKVLookupTable    = kKVLookupTable_;
     static_assert(1 <= kNumSplits && kNumSplits <= kFmhaFwdDecodeMaxClusterSplits);
+    // clusters merge what each cluster merged; a single split writes the output directly
+    static_assert(!kHasGroups || kNumSplits >= 2);
 };
 
 } // namespace ck_tile

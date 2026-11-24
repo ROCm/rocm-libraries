@@ -474,7 +474,7 @@ sequence over a paged cache in the vectorized layout
 (`BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT` with a 2D block table),
 K `[num_blocks][nhead_k][d / 16][page_size][16 B]` and V `[num_blocks][nhead_k][page_size / 16][d][16]`,
 page_size 16, 64 or 128, d 128, fp8 e4m3 K/V with per-tensor descales, bf16 or fp16 Q and output
-(`-prec`), at most 16 query heads per kv head, an optional sliding window.
+(`-prec`), any whole number of query heads per kv head, an optional sliding window.
 
 ```
 ninja tile_example_fmha_fwd_decode_pagedkv
@@ -491,3 +491,13 @@ HIP-graph times.
 The launch depends on the batch, the kv heads, the window and `max_context_length` (default:
 block-table width x page_size), not on the context lengths, so one call can be captured in a graph and
 replayed for every decode step.
+
+The wrapper covers a subset of `pa_decode`: `query_length` 1, per-tensor `key_scale` /
+`value_scale` (numbers or one-element float32 tensors, both or neither), contiguous `query` and
+`output`, no sinks.
+
+The kernel merges several clusters of one sequence through a workspace and int32 counters that
+every launch leaves at zero. A launch that finds counters non-zero leaves output rows unwritten
+without an error. So each stream needs its own workspace and counters (the wrapper keeps them per
+stream), and after a failed launch the counters must be zeroed again (`reset_buffers()` in the
+wrapper).

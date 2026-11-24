@@ -417,6 +417,11 @@ if(FMHA_FWD_DECODE_PAGEDKV_TARGETS)
   add_library(ck_fmha_fwd_decode_pagedkv SHARED EXCLUDE_FROM_ALL fmha_fwd_decode_pagedkv_capi.cpp)
   target_link_libraries(ck_fmha_fwd_decode_pagedkv PRIVATE ${FMHA_FWD_DECODE_PAGEDKV_INSTANCES})
   target_include_directories(ck_fmha_fwd_decode_pagedkv PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  # export the C functions only: other libraries of the process may carry ck_tile symbols too
+  target_link_options(ck_fmha_fwd_decode_pagedkv PRIVATE
+    "LINKER:--version-script=${CMAKE_CURRENT_LIST_DIR}/fmha_fwd_decode_pagedkv_capi.map")
+  set_property(TARGET ck_fmha_fwd_decode_pagedkv PROPERTY LINK_DEPENDS
+    ${CMAKE_CURRENT_LIST_DIR}/fmha_fwd_decode_pagedkv_capi.map)
   set_property(TARGET ck_fmha_fwd_decode_pagedkv PROPERTY HIP_ARCHITECTURES
     ${FMHA_FWD_DECODE_PAGEDKV_TARGETS})
 endif()

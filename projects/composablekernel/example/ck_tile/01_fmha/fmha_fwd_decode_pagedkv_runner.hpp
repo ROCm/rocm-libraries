@@ -58,6 +58,9 @@ struct Case
     unsigned seed           = 1;
     bool needles            = false; // needle keys instead of random inputs, see run()
     index_t max_cluster     = 0;     // cap on the splits per cluster; 0 = what the device takes
+    // added to the context lengths the device reads: lengths beyond the block table, which the
+    // kernel must not follow (for lengths that fill the table, without a window)
+    index_t over_report = 0;
 };
 
 struct Result
@@ -71,17 +74,16 @@ struct Result
     std::string error;
 };
 
-// Runs one case: random Q (bf16 or fp16), K/V (finite fp8 in [-1, 1], pages in a random order, the
-// unused tail of each sequence's last page filled with NaN codes), a workspace filled with NaN
-// codes, then validates against a CPU reference and/or times stream and HIP-graph launches.
+// Runs one case: random Q, K/V (finite fp8 in [-1, 1], pages in a random order), NaN codes in the
+// unused tail of each last page, the workspace and the output; then validates against a CPU
+// reference and/or times stream and HIP-graph launches.
 //
-// Random keys cannot show one key lost or counted twice: among thousands it moves the output less
-// than the fp8 rounding of P does. Case::needles makes single keys visible. The keys on both
-// sides of every 16-token page boundary, the window's first key, the key before it and the newest
-// key become needles, handed to the query rows of a kv head in turn: Q of a row is nonzero in 8
-// dims of its own, K of its needles is large in those dims and zero elsewhere, V of a needle is
-// one-hot. The output of a row is then the mean of the V of its needles inside the window, and
-// each of them accounts for 1 / count of one output element.
+// Case::needles shows single keys lost or counted twice, which random keys hide below the fp8
+// rounding of P. The keys on both sides of every 16-token page boundary, one inside every page,
+// the window's first key, the key before it and the newest key become needles, handed to the
+// query rows of a kv head in turn: Q of a row is nonzero in 8 dims of its own, K of its needles
+// is large in those dims and zero elsewhere, V of a needle is one-hot. A row's output is the mean
+// of the V of its needles inside the window.
 inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
 {
     Result res;
@@ -179,6 +181,8 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     std::shuffle(perm.begin(), perm.end(), rng);
     std::vector<int32_t> block_table(static_cast<size_t>(batch) * max_blocks, 0);
     std::vector<int32_t> seqlens32(seqlens.begin(), seqlens.end());
+    for(auto& s : seqlens32)
+        s += c.over_report;
     const auto window_lo = [&](index_t sk) {
         return c.window > 0 ? std::max(0, sk - c.window) : 0;
     };
@@ -213,6 +217,10 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
                 n.push_back(t - 1);
                 n.push_back(t);
             }
+            // inside each page, at an offset that goes through all of 1 .. 14
+            for(index_t t = 0; t < seqlens[b]; t += kPage)
+                if(const index_t mid = t + 1 + t / kPage * 5 % 14; mid < seqlens[b])
+                    n.push_back(mid);
             std::sort(n.begin(), n.end());
             n.erase(std::unique(n.begin(), n.end()), n.end());
             n.erase(n.begin(), std::lower_bound(n.begin(), n.end(), 0));
@@ -243,6 +251,7 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
         batch, grid_rows, cfg.num_splits, cfg.num_groups));
     ck_tile::DeviceMem cnt_buf(ck_tile::fmha_fwd_decode_pagedkv_num_counters(batch, grid_rows) * 4);
     HIP_CHECK_ERROR(hipMemset(ws_buf.GetDeviceBuffer(), 0xff, ws_buf.GetBufferSize()));
+    HIP_CHECK_ERROR(hipMemset(o_buf.GetDeviceBuffer(), 0xff, o_buf.GetBufferSize()));
     cnt_buf.SetZero();
     q_buf.ToDevice(q.data());
     k_buf.ToDevice(k.data());
