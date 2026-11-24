@@ -78,6 +78,7 @@ using GPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDilated_FP32  = GPU_UnitTest
 
 using CPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDilatedDevApplicabilityFwd_NONE =
     CPU_UnitTestConvSolverDevApplicabilityFwd_NONE;
+using CPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDilatedBounds_NONE = testing::TestWithParam<int>;
 
 TEST_P(GPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDilated_FP16, ConvDirectDepthwiseFwd2DDilated)
 {
@@ -102,7 +103,7 @@ TEST_P(CPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDilatedDevApplicabilityFwd_
 
 // Both sides of each bound, on a mocked gfx1151 so the result does not depend on
 // the host GPU.
-TEST(CPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDilatedBounds_NONE,
+TEST_P(CPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDilatedBounds_NONE,
      ConvDirectDepthwiseFwd2DDilated)
 {
     auto gfx1151   = MockHandle{DevDescription{"gfx1151", 20, 32}, true};
@@ -133,26 +134,30 @@ TEST(CPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDilatedBounds_NONE,
     EXPECT_FALSE(IsApplicableFor(ctx, f16, {1, 64, 48, 48}, {64, 1, 7, 7}, {6, 6}, {1, 3}, {2, 2}));
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDilated_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCases(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDilated_BFP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCases(miopenBFloat16))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDilated_FP32,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCases(miopenFloat))));
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     CPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDilatedDevApplicabilityFwd_NONE,
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(GetConvTestCases(miopenHalf)[0])));
+
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         CPU_UnitTestConvSolverConvDirectDepthwiseFwd2DDilatedBounds_NONE,
+                         testing::Values(0));
