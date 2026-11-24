@@ -33,6 +33,11 @@ struct data_set_test_access
     {
         data_set.reorder_length_axes(order);
     }
+    static std::vector<data_set_t> compress_kernel_batches(std::vector<data_set_t> layouts)
+    {
+        data_set_t::compress_batch_axes_consistently_in(layouts, true);
+        return layouts;
+    }
     static void set_embedding(data_set_t& data_set, const std::vector<size_t>& embedding)
     {
         data_set.embedding = embedding;

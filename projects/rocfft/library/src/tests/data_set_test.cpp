@@ -1653,7 +1653,7 @@ namespace
     }
 }
 
-// TreeNode::CollapseContiguousDims cases, with the node's high lengths and batch
+// Legacy leaf axis collapse cases, with the node's high lengths and batch
 // as batch axes, inStride/iDist (resp. outStride/oDist) as input (resp. output) strides.
 TEST_F(data_set_test, compress_batch_axes_mirrors_collapse_contiguous_dims)
 {
@@ -1682,6 +1682,24 @@ TEST_F(data_set_test, compress_batch_axes_mirrors_collapse_contiguous_dims)
     expect_same(compress({unit}), {data_set_t({0, 0}, {64, 5}, {1, 64})});
     const data_set_t shifted_unit({0, 3, 0}, {64, 4, 5}, {1, 999, 64}, 2);
     expect_same(compress({shifted_unit}), {shifted_unit});
+}
+
+TEST_F(data_set_test, compress_batch_axes_preserves_kernel_order)
+{
+    // Several directions are valid. Keep the stride in the lowest slot,
+    // even when it is not the smallest and the batch span is only one.
+    const data_set_t units({0, 0, 0, 0}, {64, 1, 1, 1}, {1, 123, 64, 1024}, 3);
+    const auto       merged = data_set_test_access::compress_kernel_batches({units, units});
+    ASSERT_EQ(merged.front().get_batch_rank(), 1u);
+    EXPECT_EQ(merged.front().distance(), 123u);
+
+    // Packed output spans can differ for a fused leaf. Both higher axes
+    // merge, but the final batch cannot use a different multiplier per side.
+    const data_set_t in({0, 0, 0, 0}, {64, 8, 4, 2}, {1, 64, 512, 2048}, 3);
+    const data_set_t out({0, 0, 0, 0}, {64, 3, 4, 2}, {1, 66, 198, 792}, 3);
+    expect_same(data_set_test_access::compress_kernel_batches({in, out}),
+                {data_set_t({0, 0, 0}, {64, 32, 2}, {1, 64, 2048}, 2),
+                 data_set_t({0, 0, 0}, {64, 12, 2}, {1, 66, 792}, 2)});
 }
 
 TEST_F(data_set_test, compress_batch_axes_nominal)

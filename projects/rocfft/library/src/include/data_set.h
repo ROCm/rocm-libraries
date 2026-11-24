@@ -28,6 +28,7 @@
 #include <limits>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -135,6 +136,8 @@ struct data_set_t
      * @param[in] strides in-buffer strides associated with all length axes.
      * @param[in] batch span of the logical index range along its batch axis.
      * @param[in] distance in-buffer stride associated with the batch axis.
+     * @param[in] batch_rank total batch rank, including any trailing axes in
+     * `lengths`/`strides` and the final `batch`/`distance` axis.
      * 
      * @throw An `std::invalid_argument` is thrown if `lengths` or `strides`
      * are empty or have different sizes.
@@ -142,7 +145,8 @@ struct data_set_t
     static data_set_t full_range(const std::vector<size_t>& lengths,
                                  const std::vector<size_t>& strides,
                                  size_t                     batch,
-                                 size_t                     distance);
+                                 size_t                     distance,
+                                 size_t                     batch_rank = 1);
 
     /**
      * @brief Constructs a new `data_set_t` object capturing a full range of logical
@@ -730,9 +734,13 @@ private:
     void set_array_type_and_offsets(rocfft_array_type            new_array_type,
                                     const std::array<size_t, 2>& new_offsets);
 
-    // Shared implementation of compress_{length,batch}_axes_consistently_in.
-    static std::vector<data_set_t> compress_axes_consistently_in(std::vector<data_set_t> data_sets,
-                                                                 bool length_axes);
+    // The legacy kernel ABI used packed output spans to test collapse, permitting
+    // unequal spans only when the merge did not change the shared final batch count.
+    static void compress_batch_axes_consistently_in(std::span<data_set_t> data_sets,
+                                                    bool                  legacy_packed_spans);
+    static void compress_axes_consistently_in(std::span<data_set_t> data_sets,
+                                              bool                  length_axes,
+                                              bool                  legacy_packed_spans = false);
 
     /**
      * @brief Implementation-simplifying helper accessor for the length and batch
@@ -828,6 +836,8 @@ private:
     // Fields need access to private members to erase or reorder length axes in their bricks'
     // layouts and to compare individual axes for undistributed-dimension detection.
     friend struct rocfft_field_t;
+    // LeafNode builds its kernel-only layouts from legacy length/stride members.
+    friend class LeafNode;
     // rocfft-internal-test drives private members directly (see tests/data_set_test_access.h),
     // e.g., reorder_length_axes, or setting array types and precisions as friends do.
     friend struct data_set_test_access;

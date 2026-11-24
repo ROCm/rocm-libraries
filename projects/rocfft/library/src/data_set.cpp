@@ -32,21 +32,6 @@
 
 namespace
 {
-    template <typename T>
-    std::vector<T> concatenate(const std::vector<T>& a, const std::vector<T>& b)
-    {
-        auto ret = a;
-        std::copy(b.begin(), b.end(), std::back_inserter(ret));
-        return ret;
-    }
-    template <typename T>
-    std::vector<T> concatenate(const std::vector<T>& a, const T& b)
-    {
-        auto ret = a;
-        ret.push_back(b);
-        return ret;
-    }
-
     // true iff a and b are identical or are the hermitian and complex variants
     // of the same format (interleaved or planar)
     bool same_format_up_to_hermitian(rocfft_array_type a, rocfft_array_type b)
@@ -153,12 +138,20 @@ data_set_t::data_set_t(const std::vector<size_t>& lower,
 data_set_t data_set_t::full_range(const std::vector<size_t>& lengths,
                                   const std::vector<size_t>& strides,
                                   size_t                     batch,
-                                  size_t                     distance)
+                                  size_t                     distance,
+                                  size_t                     batch_rank)
 {
-    return data_set_t{std::vector<size_t>(lengths.size() + 1, 0),
-                      concatenate(lengths, batch),
-                      concatenate(strides, distance),
-                      1};
+    if(lengths.size() != strides.size() || batch_rank == 0 || batch_rank > lengths.size())
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
+                                    + " requires matching length/stride "
+                                      "sizes and nonzero ranks.");
+    data_set_t ret;
+    ret.len_axes.resize(lengths.size() + 1 - batch_rank);
+    ret.batch_axes.resize(batch_rank);
+    for(size_t dim = 0; dim < lengths.size(); ++dim)
+        ret[dim] = {0, lengths[dim], strides[dim]};
+    ret.batch_axes.back() = {0, batch, distance};
+    return ret;
 }
 
 data_set_t data_set_t::default_full_range(const std::vector<size_t>& lengths,
@@ -417,8 +410,13 @@ size_t data_set_t::max_offset() const
     if(is_empty())
         throw std::logic_error(ROCFFT_CURRENT_FUNCTION
                                + " is undefined for an empty logical index range.");
-    return *std::max_element(offsets.begin(), offsets.begin() + num_planes())
-           + compute_ptrdiff(lengths_and_batches(), strides_and_distances()) - 1;
+    size_t ret = *std::max_element(offsets.begin(), offsets.begin() + num_planes());
+    for(size_t dim = 0; dim < get_full_rank(); ++dim)
+    {
+        const auto& axis = (*this)[dim];
+        ret += (axis.logical_span() - 1) * axis.inbuffer_stride;
+    }
+    return ret;
 }
 
 size_t data_set_t::max_stride() const
@@ -535,17 +533,26 @@ data_set_t data_set_t::make_contiguous_intersection_of(const data_set_t& first,
 std::vector<data_set_t>
     data_set_t::compress_batch_axes_consistently_in(std::vector<data_set_t> data_sets)
 {
-    return compress_axes_consistently_in(std::move(data_sets), false);
+    compress_batch_axes_consistently_in(data_sets, false);
+    return data_sets;
+}
+
+void data_set_t::compress_batch_axes_consistently_in(std::span<data_set_t> data_sets,
+                                                     bool                  legacy_packed_spans)
+{
+    compress_axes_consistently_in(data_sets, false, legacy_packed_spans);
 }
 
 std::vector<data_set_t>
     data_set_t::compress_length_axes_consistently_in(std::vector<data_set_t> data_sets)
 {
-    return compress_axes_consistently_in(std::move(data_sets), true);
+    compress_axes_consistently_in(data_sets, true);
+    return data_sets;
 }
 
-std::vector<data_set_t> data_set_t::compress_axes_consistently_in(std::vector<data_set_t> data_sets,
-                                                                  bool length_axes)
+void data_set_t::compress_axes_consistently_in(std::span<data_set_t> data_sets,
+                                               bool                  length_axes,
+                                               bool                  legacy_packed_spans)
 {
     const auto axes = length_axes ? &data_set_t::len_axes : &data_set_t::batch_axes;
     // flattened index of the first axis of the group being compressed
@@ -558,7 +565,7 @@ std::vector<data_set_t> data_set_t::compress_axes_consistently_in(std::vector<da
                                         + ROCFFT_CURRENT_FUNCTION);
         // length axes may differ in span (e.g., real vs. complex data); such axes are
         // simply not merged (see `mergeable` below)
-        for(size_t i = 0; !length_axes && i < d.get_batch_rank(); i++)
+        for(size_t i = 0; !length_axes && !legacy_packed_spans && i < d.get_batch_rank(); i++)
             if(d.batch_axes[i].logical_span() != data_sets.front().batch_axes[i].logical_span())
                 throw std::invalid_argument("Different batch spans for arguments of "
                                             + ROCFFT_CURRENT_FUNCTION);
@@ -569,8 +576,17 @@ std::vector<data_set_t> data_set_t::compress_axes_consistently_in(std::vector<da
     auto mergeable = [&](const data_set_t& d, size_t outer, size_t inner) {
         const auto& o = (d.*axes)[outer];
         const auto& i = (d.*axes)[inner];
-        if(o.logical_span() != (data_sets.front().*axes)[outer].logical_span()
-           || i.logical_span() != (data_sets.front().*axes)[inner].logical_span())
+        const auto& reference = data_sets.front().*axes;
+        if(legacy_packed_spans)
+        {
+            const auto keep = std::max(outer, inner);
+            const auto del  = std::min(outer, inner);
+            if(keep == reference.size() - 1
+               && (d.*axes)[del].logical_span() != reference[del].logical_span())
+                return false;
+        }
+        else if(o.logical_span() != reference[outer].logical_span()
+                || i.logical_span() != reference[inner].logical_span())
             return false;
         if(d.embedding)
         {
@@ -583,27 +599,30 @@ std::vector<data_set_t> data_set_t::compress_axes_consistently_in(std::vector<da
                || (o.logical_span() == 1 && o.lower == 0);
     };
 
+    auto can_merge = [&](size_t outer, size_t inner) {
+        return std::all_of(data_sets.begin(), data_sets.end(), [&](const auto& d) {
+            return mergeable(d, outer, inner);
+        });
+    };
     bool merged = true;
     while(merged && !data_sets.empty())
     {
         merged         = false;
         const auto num = (data_sets.front().*axes).size();
-        for(size_t outer = 0; !merged && outer < num; outer++)
+        // Keep original axis order. Try lower-indexed pairs first, preferring
+        // their lower axis as inner when both directions are valid (unit spans).
+        for(size_t del = 0; !merged && del < num; ++del)
         {
-            for(size_t inner = 0; !merged && inner < num; inner++)
+            for(size_t keep = del + 1; !merged && keep < num; ++keep)
             {
-                if(inner == outer
-                   || !std::all_of(data_sets.begin(), data_sets.end(), [&](const auto& d) {
-                          return mergeable(d, outer, inner);
-                      }))
+                const bool lower_is_inner = can_merge(keep, del);
+                if(!lower_is_inner && !can_merge(del, keep))
                     continue;
-                const auto keep = std::max(outer, inner);
-                const auto del  = std::min(outer, inner);
                 for(auto& d : data_sets)
                 {
                     auto&      group  = d.*axes;
-                    const auto o      = group[outer];
-                    const auto i      = group[inner];
+                    const auto o      = group[lower_is_inner ? keep : del];
+                    const auto i      = group[lower_is_inner ? del : keep];
                     auto&      k      = group[keep];
                     k.lower           = i.lower + i.logical_span() * o.lower;
                     k.upper           = k.lower + i.logical_span() * o.logical_span();
@@ -619,7 +638,6 @@ std::vector<data_set_t> data_set_t::compress_axes_consistently_in(std::vector<da
             }
         }
     }
-    return data_sets;
 }
 
 std::vector<size_t> data_set_t::length_axes_by_increasing_strides(bool pin_innermost_axis) const
