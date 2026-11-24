@@ -1577,7 +1577,12 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
                                            const context_t& context) {
   // Extract parameters
   const size_t num_xcd     = hardware.NUM_XCD;
-  const size_t N_CU        = context.n_cu;
+  // The tiles in flight at a time are those of the resident workgroups: where the tile terms
+  // are measured, a CU that holds several workgroups has that many tiles sharing A and B.
+  const size_t N_CU = heuristic_defaults_t::has_measured_tile_terms(hardware.arch)
+                          ? std::max<size_t>(static_cast<size_t>(std::llround(
+                                                 static_cast<double>(context.n_cu) * context.resident_wgs)), 1)
+                          : context.n_cu;
   const double l2_cap      = static_cast<double>(hardware.L2_capacity);
   const auto& wgm          = context.wgm;
   const bool debug         = context.debug;
