@@ -189,11 +189,11 @@ protected:
     }
     // Full-range data set of random ranks/spans whose axes are laid out in random order,
     // with random padding between consecutive axes (non-aliasing, not necessarily packed).
-    data_set_t random_full_range()
+    data_set_t random_full_range(size_t min_span = 1)
     {
         const auto          len_rank   = uniform(1, 4);
         const auto          batch_rank = uniform(1, 2);
-        const auto          spans      = random_vec(len_rank + batch_rank, 1, 7);
+        const auto          spans      = random_vec(len_rank + batch_rank, min_span, 7);
         std::vector<size_t> strides(spans.size());
         size_t              next = uniform(1, 2);
         for(auto axis : random_permutation(spans.size()))
