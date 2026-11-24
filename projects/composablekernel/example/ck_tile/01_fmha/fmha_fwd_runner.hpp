@@ -2826,9 +2826,11 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     ck_tile::identity{},
                     ck_tile::identity{},
                     oacc_element_func);
+                // MX fp8: the device quantizes P to fp8 (per 32 keys, or at a fixed 2^7
+                // offset): the same P|V| bound and floor as the fp8 scales' (see the OUT check).
+                // MX fp4's P rounds far coarser than that floor: it keeps the stock check.
+                if constexpr(!std::is_same_v<QDataType, ck_tile::pk_fp4_t>)
                 {
-                    // the device quantizes P to fp8 (per 32 keys, or at a fixed 2^7 offset):
-                    // the same P|V| bound and floor as the fp8 scales' (see the OUT check)
                     auto v_abs = v_host_ref2;
                     v_abs.ForEach([](auto& self, auto i) { self(i) = std::abs(self(i)); });
                     ck_tile::
@@ -3033,7 +3035,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
                                           atol);
             };
             bool cur_pass = true;
-            // the quantized P's bound (MX's too, see its reference above)
+            // the quantized P's bound (MX fp8's too, see its reference above)
             if constexpr(supports_qscale || is_mx)
             {
                 if(!have_absmag)
