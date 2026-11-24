@@ -79,6 +79,7 @@ from kernels.common._attention_bwd_addr import (
     WorkspaceAddr,
 )
 from kernels.common._attention_bwd_band import NoMaskKTail, RuntimeBand
+from kernels.common._attention_bwd_caps import atom_knob_for, atom_knob_k, atom_knobs
 from kernels.common._attention_bwd_body import StatsView
 from kernels.common._attention_bwd_dqbody import (
     DQ_TRANSPOSE_READERS,
@@ -341,10 +342,6 @@ def _check_in(name, value, allowed):
         raise ValueError(f"{name}={value!r} not in {tuple(allowed)}")
 
 
-def _atom_k(atom: str) -> int:
-    return int(atom.rsplit("x", 1)[1])
-
-
 def dq_static_scale(main_static_scale: str) -> str:
     """The dQ kernel's ``static_scale`` for a main kernel's scale placement.
 
@@ -439,8 +436,8 @@ class AttnBwdDqSpec:
             "waves": (1, 2, 4, 8),
             "block_m": DQ_BLOCK_M_VALUES,
             "block_n": DQ_BLOCK_N_VALUES,
-            "atom_g02": ("16x16x16", "16x16x32"),
-            "atom_g4": ("16x16x16", "16x16x32"),
+            "atom_g02": atom_knobs(mfma_only=True),
+            "atom_g4": atom_knobs(mfma_only=True),
             "transpose_source": DQ_TRANSPOSE_SOURCES,
             "waves_per_eu": _DQ_WAVES_PER_EU,
         }
@@ -552,8 +549,8 @@ def attn_bwd_dq_default_geometry(
         "waves": w,
         "block_m": km,
         "block_n": kn,
-        "atom_g02": "16x16x32" if wide else "16x16x16",
-        "atom_g4": "16x16x16",
+        "atom_g02": atom_knob_for(32 if wide else 16),
+        "atom_g4": atom_knob_for(16),
         "transpose_source": "tr_read" if facts.has_tr_read else "lds_plain",
     }
 
@@ -641,7 +638,7 @@ def _raw_estimates(
     wave = attn_bwd_arch_facts(arch).wave_size
     w, d, km, kn = spec.waves, spec.head_size, spec.block_m, spec.block_n
     cols = km // w
-    k02, k4 = _atom_k(spec.atom_g02), _atom_k(spec.atom_g4)
+    k02, k4 = atom_knob_k(spec.atom_g02), atom_knob_k(spec.atom_g4)
     vgpr = _REG_ALLOWANCE_FIXED
     vgpr += 2 * cols * d // (2 * wave)  # resident Q^T, dO^T
     vgpr += kn * cols // (2 * wave)  # dS^T as the G4' A operand
@@ -696,9 +693,9 @@ def validate_attn_bwd_dq_spec(spec: AttnBwdDqSpec, arch: str) -> AttnBwdDqSpec:
     )
     if km % (16 * w):
         raise ValueError(f"block_m={km} must be a multiple of 16*waves={16 * w}")
-    if kn % _atom_k(s.atom_g4):
+    if kn % atom_knob_k(s.atom_g4):
         raise ValueError(f"block_n={kn} must be a multiple of the G4' atom K")
-    if d % _atom_k(s.atom_g02):
+    if d % atom_knob_k(s.atom_g02):
         raise ValueError(f"head_size={d} must be a multiple of the G0' atom K")
     BwdDqGeometry.from_spec(s, arch)  # relabel / transpose-read proofs
     plan = dq_lds_plan(s, arch)

@@ -143,7 +143,7 @@ from ._attention_bwd_addr import (
     deal_chunks,
 )
 from ._attention_bwd_band import MaskPolicy
-from ._attention_bwd_caps import bwd_arch_caps, check_transpose_read
+from ._attention_bwd_caps import atom_knob_k, bwd_arch_caps, check_transpose_read
 from ._attention_bwd_counted import (
     COUNTED_ISSUES,
     CountedWaits,
@@ -249,10 +249,6 @@ def stage_units(order: str) -> tuple[str, str, str]:
     if order not in STAGE_ORDERS:
         raise ValueError(f"stage_order={order!r} not in {STAGE_ORDERS}")
     return order[0:2], order[2:4], order[4:6]
-
-
-def _atom_k(atom: str) -> int:
-    return int(str(atom).rsplit("x", 1)[1])
 
 
 def _rounding_point(b: IRBuilder, v: Value) -> Value:
@@ -373,9 +369,9 @@ class BwdTileGeometry:
             grid_g1=tuple(spec.warp_grid_g13),
             grid_g4=tuple(spec.warp_grid_g4),
             atoms=BwdAtomTable(
-                g02=_atom_k(spec.atom_g02),
-                g13=_atom_k(spec.atom_g13),
-                g4=_atom_k(spec.atom_g4),
+                g02=atom_knob_k(spec.atom_g02),
+                g13=atom_knob_k(spec.atom_g13),
+                g4=atom_knob_k(spec.atom_g4),
             ),
             pt_route=spec.pt_route,
             kv_residency=spec.kv_residency,

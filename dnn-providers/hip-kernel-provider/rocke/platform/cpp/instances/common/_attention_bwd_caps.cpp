@@ -319,13 +319,77 @@ const rocke_mma_op_t* select_atom(const std::string& arch, const std::string& dt
                           + " (available K: " + py_list(ks) + ")");
 }
 
+/* A knob and its catalog shape, owning its spelling. */
+struct KnobShape
+{
+    std::string spelling;
+    bool wmma;
+    int m, n, k;
+};
+
+/* atom_knob(op): "<m>x<n>x<k>", prefixed "wmma" for a WMMA atom. */
+static KnobShape knob_of(const rocke_mma_op_t* op)
+{
+    bool wmma = strcmp(op->family, "wmma") == 0;
+    std::string s = std::string(wmma ? "wmma" : "") + std::to_string(op->m) + "x"
+                    + std::to_string(op->n) + "x" + std::to_string(op->k);
+    return KnobShape{s, wmma, op->m, op->n, op->k};
+}
+
+static void add_knob(std::vector<KnobShape>& out, const KnobShape& k)
+{
+    for(const KnobShape& have : out)
+        if(have.spelling == k.spelling)
+            return;
+    out.push_back(k);
+}
+
+/* _knob_ks(arch): the knobs of arch's backward atoms (fp16 and bf16
+ * operands), by increasing K. */
+static std::vector<KnobShape> arch_knobs(const std::string& arch)
+{
+    std::vector<KnobShape> out;
+    for(const char* dtype : {"fp16", "bf16"})
+        for(const rocke_mma_op_t* op : atoms(arch, dtype))
+            add_knob(out, knob_of(op));
+    std::stable_sort(
+        out.begin(), out.end(), [](const KnobShape& a, const KnobShape& b) { return a.k < b.k; });
+    return out;
+}
+
+std::vector<std::string> bwd_atom_knobs(const std::string& arch)
+{
+    std::vector<std::string> out;
+    for(const KnobShape& k : arch_knobs(arch))
+        out.push_back(k.spelling);
+    return out;
+}
+
+/* _all_knob_ks(): the union over the backward arches, MFMA by K, then WMMA.
+ * Built once; atom_knobs() points into these strings, which never move. */
+static const std::vector<KnobShape>& all_knobs()
+{
+    static const std::vector<KnobShape> all = [] {
+        std::vector<KnobShape> out;
+        for(int i = 0; i < ROCKE_ATTN_BWD_N_ARCHES; ++i)
+            for(const KnobShape& k : arch_knobs(rocke_attn_bwd_arches[i]))
+                add_knob(out, k);
+        std::stable_sort(out.begin(), out.end(), [](const KnobShape& a, const KnobShape& b) {
+            return a.wmma != b.wmma ? !a.wmma : a.k < b.k;
+        });
+        return out;
+    }();
+    return all;
+}
+
 const std::vector<AtomKnob>& atom_knobs()
 {
-    static const std::vector<AtomKnob> knobs = {
-        {"16x16x16", false, 16, 16, 16},
-        {"16x16x32", false, 16, 16, 32},
-        {"wmma16x16x16", true, 16, 16, 16},
-    };
+    static const std::vector<AtomKnob> knobs = [] {
+        std::vector<AtomKnob> out;
+        for(const KnobShape& k : all_knobs())
+            out.push_back(AtomKnob{k.spelling.c_str(), k.wmma, k.m, k.n, k.k});
+        return out;
+    }();
     return knobs;
 }
 

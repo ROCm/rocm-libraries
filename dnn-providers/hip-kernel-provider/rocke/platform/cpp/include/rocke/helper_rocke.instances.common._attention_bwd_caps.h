@@ -264,18 +264,21 @@ int elem_bytes(const char* dtype);
 std::vector<const rocke_mma_op_t*> atoms(const std::string& arch, const std::string& dtype);
 const rocke_mma_op_t* select_atom(const std::string& arch, const std::string& dtype, int k);
 /* The atom knob of the backward specs (atom_g02 / atom_g13 / atom_g4): a
- * spelling and the 16x16xK shape it names. A knob names a shape only. The MMA
- * op comes from the arch catalog (select_atom with the knob's K), and the
- * lowering reads that catalog op's fields. One table for every backward twin,
- * so no twin spells or parses an atom name. */
+ * spelling and the 16x16xK shape it names, built from the MMA catalog (the
+ * twin of _attention_bwd_caps.atom_knob: "<m>x<n>x<k>", prefixed "wmma" for a
+ * WMMA atom). A knob names a shape only: the MMA op comes from the catalog
+ * (select_atom with the knob's K), and the lowering reads that op's fields. */
 struct AtomKnob
 {
     const char* spelling;
     bool wmma; /* the RDNA WMMA spelling; the others are the MFMA atoms */
     int m, n, k;
 };
-/* Every knob, in the order of the Python ATOMS tuple. */
+/* Every knob of the backward arches' atoms: MFMA by K, then WMMA (Python's
+ * atom_knobs(), the ATOMS tuple). */
 const std::vector<AtomKnob>& atom_knobs();
+/* bwd_atom_knobs(arch): the knobs legal on arch, by increasing K. */
+std::vector<std::string> bwd_atom_knobs(const std::string& arch);
 /* The knob for a spelling, or NULL. */
 const AtomKnob* find_atom_knob(const char* spelling);
 /* The K of a knob spelling; ValueError for a spelling not in the table. */
