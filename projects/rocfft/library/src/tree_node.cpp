@@ -439,6 +439,7 @@ void TreeNode::PermuteOutputAxes(OutputAxisOrder order, std::vector<size_t>& axe
 
 void TreeNode::CollapseContiguousDims()
 {
+    assert(outputLength.size() == length.size());
     // collapse children
     for(auto& child : childNodes)
         child->CollapseContiguousDims();
@@ -460,9 +461,7 @@ void TreeNode::CollapseContiguousDims()
     // into axis of larger index (so that batch dimension is never removed), iff collapsing
     // is valid for both the input and output node's data layouts for the considered couple
     // of axes
-    auto outputLengthTemp = GetOutputLength();
-    PermuteOutputAxes(legacyOutputOrder, outputLengthTemp);
-    auto first_axis_it    = collapsible_axes.begin();
+    auto first_axis_it = collapsible_axes.begin();
     while(first_axis_it != collapsible_axes.end())
     {
         auto second_axis_it = collapsible_axes.begin();
@@ -484,11 +483,11 @@ void TreeNode::CollapseContiguousDims()
 
             auto& keep_ilength      = keep_idx < length.size() ? length[keep_idx] : batch;
             auto& keep_istride      = keep_idx < length.size() ? inStride[keep_idx] : iDist;
-            auto& keep_olength      = keep_idx < length.size() ? outputLengthTemp[keep_idx] : batch;
+            auto&       keep_olength = keep_idx < length.size() ? outputLength[keep_idx] : batch;
             auto& keep_ostride      = keep_idx < length.size() ? outStride[keep_idx] : oDist;
             const auto& del_ilength = del_idx < length.size() ? length[del_idx] : batch;
             const auto& del_istride = del_idx < length.size() ? inStride[del_idx] : iDist;
-            const auto& del_olength = del_idx < length.size() ? outputLengthTemp[del_idx] : batch;
+            const auto& del_olength       = outputLength[del_idx];
             const auto& del_ostride = del_idx < length.size() ? outStride[del_idx] : oDist;
             const bool  keep_is_multiple_of_del
                 = (keep_ilength == 1 || keep_istride == del_istride * del_ilength)
@@ -525,7 +524,7 @@ void TreeNode::CollapseContiguousDims()
             // effectively erase the axis of index del_idx
             length.erase(length.begin() + del_idx);
             inStride.erase(inStride.begin() + del_idx);
-            outputLengthTemp.erase(outputLengthTemp.begin() + del_idx);
+            outputLength.erase(outputLength.begin() + del_idx);
             outStride.erase(outStride.begin() + del_idx);
             if(del_idx == *first_axis_it)
                 collapsible_axes.erase(first_axis_it);
@@ -552,9 +551,6 @@ void TreeNode::CollapseContiguousDims()
         else
             first_axis_it++;
     }
-
-    if(!outputLength.empty())
-        outputLength = legacyOutputOrder == OutputAxisOrder::IDENTITY ? outputLengthTemp : length;
 }
 
 bool TreeNode::IsBluesteinChirpSetup()

@@ -1645,8 +1645,7 @@ std::unique_ptr<ExecPlan>
         }
 
         execPlan.iLength = rootPlanData.length;
-        execPlan.oLength
-            = rootPlanData.outputLength.empty() ? rootPlanData.length : rootPlanData.outputLength;
+        execPlan.oLength = rootPlanData.outputLength;
 
         // setup isUnitStride values
         execPlan.rootPlan->inStrideUnit  = BufferIsUnitStride(execPlan, OB_USER_IN);
@@ -5409,11 +5408,10 @@ bool BufferIsUnitStride(ExecPlan& execPlan, OperatingBuffer buf)
 
 void TreeNode::CopyNodeData(const TreeNode& srcNode)
 {
-    dimension = srcNode.dimension;
-    batch     = srcNode.batch;
-    length    = srcNode.length;
-    if(!srcNode.outputLength.empty())
-        outputLength = srcNode.outputLength;
+    dimension       = srcNode.dimension;
+    batch           = srcNode.batch;
+    length          = srcNode.length;
+    outputLength    = srcNode.outputLength;
     inStride        = srcNode.inStride;
     outStride       = srcNode.outStride;
     iDist           = srcNode.iDist;
@@ -5449,11 +5447,10 @@ void TreeNode::CopyNodeData(const TreeNode& srcNode)
 
 void TreeNode::CopyNodeData(const NodeMetaData& data)
 {
-    dimension = data.dimension;
-    batch     = data.batch;
-    length    = data.length;
-    if(!data.outputLength.empty())
-        outputLength = data.outputLength;
+    dimension    = data.dimension;
+    batch        = data.batch;
+    length       = data.length;
+    outputLength = data.outputLength;
     inStride     = data.inStride;
     outStride    = data.outStride;
     iDist        = data.iDist;
@@ -5798,7 +5795,7 @@ void TreeNode::DetermineBufferMemory(size_t& tmpBufSize,
             = blue && blue->get_conv_buf_layout(io_data_label::OUTPUT)
                   ? blue->get_conv_buf_layout(io_data_label::OUTPUT)->buffer_element_count()
                         + (obOut == OB_TEMP_BLUESTEIN ? blue->get_padded_length() : 0)
-                  : compute_ptrdiff(LengthForOutStride(), outStride, batch, oDist);
+                  : compute_ptrdiff(outputLength, outStride, batch, oDist);
 
         if(scheme == CS_KERNEL_CHIRP && blue)
             chirpSize = std::max(blue->get_padded_length(), chirpSize);
@@ -5833,10 +5830,10 @@ void TreeNode::Print(rocfft_ostream& os, const int indent, bool detailed) const
     {
         os << " " << val;
     }
-    if(detailed || (!outputLength.empty() && outputLength != length))
+    if(detailed || outputLength != length)
     {
         os << "\n" << indentStr << "outputLength:";
-        for(const auto val : (outputLength.empty() ? length : outputLength))
+        for(const auto val : outputLength)
         {
             os << " " << val;
         }
@@ -6233,11 +6230,9 @@ void GetNodeToken(const TreeNode& probNode, std::string& min_token, std::string&
                             ? ("")
                             : (PrintKernelSchemeAbbr(probNode.scheme) + "_");
 
-    // C2R tokens use the output lengths when present. Tuning can serialize
-    // nodes before all output metadata is assigned.
+    // C2R uses the output length as the solution key.
     const bool useOutputLength = array_type_is_complex(probNode.inArrayType)
-                                 && probNode.outArrayType == rocfft_array_type_real
-                                 && !probNode.outputLength.empty();
+                                 && probNode.outArrayType == rocfft_array_type_real;
     const auto& probLength = useOutputLength ? probNode.outputLength : probNode.length;
     for(size_t i = 0; i < probNode.dimension; ++i)
     {

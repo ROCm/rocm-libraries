@@ -579,16 +579,14 @@ public:
     // provided
     size_t dimension = 1;
 
-    // Length of the FFT in each dimension, internal value
-    std::vector<size_t> length;
+    // Input and output have the same rank and axis order: length[i] and inStride[i]
+    // describe the same axis as outputLength[i] and outStride[i]. Both spans are
+    // always set once the node is built, but can differ in value (e.g. N vs N/2+1).
+    // Transpose changes only strides: an A x B transpose has [A, B] on both sides,
+    // with input strides [1, A] and output strides [B, 1].
+    std::vector<size_t> length, outputLength;
 
-    // Plain transposes and SBRC use the same axis order on both sides.
-    // Other legacy nodes may still use output order or leave this empty
-    // to mean "same as length"; use LengthForOutStride() to pair with outStride.
-    std::vector<size_t> outputLength;
-
-    // Some decompositions previously used a packed-output view in fit and
-    // collapse heuristics. Keep its order, not a second set of lengths.
+    // Packed output order for buffer-fit checks performed before assigning strides.
     enum class OutputAxisOrder : uint8_t
     {
         IDENTITY,
@@ -984,26 +982,6 @@ public:
     // nullptr if there is no such ancestor
     TreeNode* GetPartialPassAncestor() const;
 
-    // Get row-major output length of this node.
-    std::vector<size_t> GetOutputLength() const
-    {
-        return outputLength.empty() ? length : outputLength;
-    }
-    // Legacy opt-in for nodes that must pair outStride with the output lengths.
-    virtual bool OutputLengthMatchesOutStride() const
-    {
-        return false;
-    }
-    // The length vector that pairs with outStride.
-    std::vector<size_t> LengthForOutStride() const
-    {
-        // The fused R2C SBRC kernel writes an additional Hermitian bin.
-        return (scheme == CS_KERNEL_STOCKHAM_R_TO_CMPLX_TRANSPOSE_Z_XY
-                || OutputLengthMatchesOutStride())
-                   ? GetOutputLength()
-                   : length;
-    }
-
     // Map a legacy SBRC output axis to its input-axis index.
     size_t LegacySBRCOutputAxis(size_t axis) const
     {
@@ -1264,8 +1242,7 @@ public:
         // launch (see powX.cpp) and don't affect kernel index arithmetic.
         const auto& io_stride = io == io_data_label::INPUT ? inStride : outStride;
         const auto& io_dist   = io == io_data_label::INPUT ? iDist : oDist;
-        // inStride always pairs with length, outStride does not on every node.
-        const auto io_length = io == io_data_label::INPUT ? length : LengthForOutStride();
+        const auto& io_length = io == io_data_label::INPUT ? length : outputLength;
 
         // compute_ptrdiff returns the buffer size (one-past-the-end).
         auto ptrdiff = compute_ptrdiff(io_length, io_stride, batch, io_dist) - 1;
@@ -1359,7 +1336,6 @@ protected:
     static OutputAxisOrder PackedOutputOrder(ComputeScheme scheme);
 
 public:
-
     // Transpose tiles read more row-ish and write more column-ish.  So
     // assume output benefits more from padding than input.
     bool PaddingBenefitsOutput() override

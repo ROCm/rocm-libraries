@@ -77,10 +77,6 @@ protected:
 
 public:
     bool CreateDeviceResources() override;
-    bool OutputLengthMatchesOutStride() const override
-    {
-        return ebtype != EmbeddedType::NONE;
-    }
 };
 
 #endif // TREE_NODE_2D_H

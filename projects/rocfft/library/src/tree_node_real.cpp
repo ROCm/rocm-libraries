@@ -28,25 +28,11 @@
 #include <algorithm>
 #include <cstdint>
 
-// work out the real and complex lengths on a real-complex plan, and
-// return pointers to those lengths
-static void set_complex_length(TreeNode&                   node,
-                               const std::vector<size_t>*& realLength,
-                               const std::vector<size_t>*& complexLength)
+// View the same axis spans in real/complex order regardless of transform direction.
+static void get_real_complex_lengths(const TreeNode&             node,
+                                     const std::vector<size_t>*& realLength,
+                                     const std::vector<size_t>*& complexLength)
 {
-    // if output is not set yet, then node.length counts in real
-    // units.  compute number of complex units and make both input
-    // and output lengths correct
-    if(node.outputLength.empty())
-    {
-        node.outputLength = node.length;
-        node.outputLength.front() /= 2;
-        node.outputLength.front() += 1;
-
-        if(node.direction == 1)
-            std::swap(node.length, node.outputLength);
-    }
-
     if(node.direction == -1)
     {
         // forward transform
@@ -149,7 +135,7 @@ void RealTransCmplxNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 
     const std::vector<size_t>* realLength    = nullptr;
     const std::vector<size_t>* complexLength = nullptr;
-    set_complex_length(*this, realLength, complexLength);
+    get_real_complex_lengths(*this, realLength, complexLength);
 
     // check schemes from solution map
     ComputeScheme determined_scheme = CS_NONE;
@@ -237,7 +223,7 @@ void RealTransEvenNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 
     const std::vector<size_t>* realLength    = nullptr;
     const std::vector<size_t>* complexLength = nullptr;
-    set_complex_length(*this, realLength, complexLength);
+    get_real_complex_lengths(*this, realLength, complexLength);
 
     // Fastest moving dimension must be even:
     if(realLength->at(0) % 2 != 0)
@@ -292,8 +278,7 @@ void RealTransEvenNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 
         // fuse 1D pre/post when the fused Stockham kernel fits in LDS.
         // Use cfftPlan->length[0] (always = realLength/2) rather than length[0]/2:
-        // for C2R, set_complex_length swaps node.length to the Hermitian side,
-        // making length[0]/2 wrong.
+        // For C2R, length[0] counts the Hermitian bins, not the real samples.
         if((cfftPlan->scheme == CS_KERNEL_STOCKHAM) && // simple decomposition
            (length.size() == 1) && // 1D
            fused_real_stockham_fits_lds(pool, cfftPlan->length[0], precision, deviceProp)
@@ -481,7 +466,7 @@ void Real2DEvenNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 {
     const std::vector<size_t>* realLength    = nullptr;
     const std::vector<size_t>* complexLength = nullptr;
-    set_complex_length(*this, realLength, complexLength);
+    get_real_complex_lengths(*this, realLength, complexLength);
 
     // Fastest moving dimension must be even:
     if(realLength->at(0) % 2 != 0)
@@ -587,6 +572,7 @@ void Real2DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
             = fused_real_stockham_fits_lds(pool, length[0] / 2, precision, deviceProp);
 
         rcplan->length    = length;
+        rcplan->outputLength = outputLength;
         rcplan->dimension = 1;
         rcplan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[0].get());
         childNodes.emplace_back(std::move(rcplan));
@@ -626,7 +612,8 @@ void Real2DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
         static_cast<RealTransEvenNode*>(crplan.get())->try_fuse_pre_post_processing
             = fused_real_stockham_fits_lds(pool, outputLength[0] / 2, precision, deviceProp);
 
-        crplan->length    = outputLength;
+        crplan->length       = length;
+        crplan->outputLength = outputLength;
         crplan->dimension = 1;
         crplan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[1].get());
         childNodes.emplace_back(std::move(crplan));
@@ -657,6 +644,7 @@ void Real2DEvenNode::BuildTree_internal_TR_pair(SchemeTreeVec& child_scheme_tree
         // first row fft
         auto row1Plan       = NodeFactory::CreateNodeFromScheme(CS_REAL_TRANSFORM_EVEN, this);
         row1Plan->length    = length;
+        row1Plan->outputLength = outputLength;
         row1Plan->dimension = 1;
         row1Plan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[0].get());
 
@@ -760,7 +748,8 @@ void Real2DEvenNode::BuildTree_internal_TR_pair(SchemeTreeVec& child_scheme_tree
         if(!noSolution && (child_scheme_trees[3]->curScheme != CS_REAL_TRANSFORM_EVEN))
             throw std::runtime_error("Real2DEvenNode: Unexpected child scheme from solution map");
         auto c2rPlan    = NodeFactory::CreateNodeFromScheme(CS_REAL_TRANSFORM_EVEN, this);
-        c2rPlan->length = outputLength;
+        c2rPlan->length       = length;
+        c2rPlan->outputLength = outputLength;
         c2rPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[3].get());
 
         // --------------------------------
@@ -1067,7 +1056,7 @@ void Real3DEvenNode::Build_solution()
 {
     const std::vector<size_t>* realLength    = nullptr;
     const std::vector<size_t>* complexLength = nullptr;
-    set_complex_length(*this, realLength, complexLength);
+    get_real_complex_lengths(*this, realLength, complexLength);
 
     // Fastest moving dimension must be even:
     if(realLength->at(0) % 2 != 0)
@@ -1275,6 +1264,7 @@ void Real3DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
             = fused_real_stockham_fits_lds(pool, length[0] / 2, precision, deviceProp);
 
         rcplan->length    = length;
+        rcplan->outputLength = outputLength;
         rcplan->dimension = 1;
         rcplan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[0].get());
 
@@ -1305,7 +1295,8 @@ void Real3DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
         static_cast<RealTransEvenNode*>(crplan.get())->try_fuse_pre_post_processing
             = fused_real_stockham_fits_lds(pool, outputLength[0] / 2, precision, deviceProp);
 
-        crplan->length    = outputLength;
+        crplan->length       = length;
+        crplan->outputLength = outputLength;
         crplan->dimension = 1;
         crplan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[2].get());
         childNodes.emplace_back(std::move(crplan));
@@ -1384,6 +1375,7 @@ void Real3DEvenNode::BuildTree_internal_TR_pairs(SchemeTreeVec& child_scheme_tre
         auto rcplan = NodeFactory::CreateNodeFromScheme(CS_REAL_TRANSFORM_EVEN, this);
 
         rcplan->length    = length;
+        rcplan->outputLength = outputLength;
         rcplan->dimension = 1;
         rcplan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[0].get());
 
@@ -1573,7 +1565,8 @@ void Real3DEvenNode::BuildTree_internal_TR_pairs(SchemeTreeVec& child_scheme_tre
         // c2r
         auto crplan = NodeFactory::CreateNodeFromScheme(CS_REAL_TRANSFORM_EVEN, this);
 
-        crplan->length    = outputLength;
+        crplan->length       = length;
+        crplan->outputLength = outputLength;
         crplan->dimension = 1;
         crplan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[5].get());
         childNodes.emplace_back(std::move(crplan));
@@ -1951,7 +1944,7 @@ void Real3DPPNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 
     const std::vector<size_t>* realLength    = nullptr;
     const std::vector<size_t>* complexLength = nullptr;
-    set_complex_length(*this, realLength, complexLength);
+    get_real_complex_lengths(*this, realLength, complexLength);
 
     switch(ppOffDim)
     {

@@ -172,8 +172,7 @@ std::unique_ptr<TreeNode> TRFuseShim::FuseKernels()
 
         std::swap(fused->outStride[1], fused->outStride[2]);
         std::swap(fused->length[1], fused->length[2]);
-        if(!fused->outputLength.empty())
-            std::swap(fused->outputLength[1], fused->outputLength[2]);
+        std::swap(fused->outputLength[1], fused->outputLength[2]);
     }
     else
     {
@@ -255,7 +254,6 @@ std::unique_ptr<TreeNode> RTFuseShim::FuseKernels()
         fused->outStride[2] = transpose->outStride[0];
     }
     fused->outputLength = transpose->outputLength;
-    fused->legacyOutputOrder = transpose->legacyOutputOrder;
 
     return fused;
 }
@@ -469,9 +467,8 @@ std::unique_ptr<TreeNode> R2CTrans_FuseShim::FuseKernels()
 
     // The fusion crosses subtrees. The real-even parent and the fused
     // kernel share the same axis order, but write with the transpose strides.
-    r2c->parent->outputLength = fused->outputLength;
-    r2c->parent->outStride    = fused->outStride;
-    r2c->parent->oDist        = fused->oDist;
+    r2c->parent->outStride = fused->outStride;
+    r2c->parent->oDist     = fused->oDist;
 
     return fused;
 }
@@ -652,18 +649,13 @@ std::unique_ptr<TreeNode> STK_R2CTrans_FuseShim::FuseKernels()
 
     fused->outputLength = r2c->outputLength;
 
-    // Only the fused SBRC leaf is normalized here; its real-even parent still
-    // exposes this stage in the transpose's legacy output order.
-    auto* realEven         = r2c->parent;
-    realEven->outputLength = transpose->outputLength;
-    TreeNode::PermuteOutputAxes(transpose->legacyOutputOrder, realEven->outputLength);
-    realEven->outStride    = fused->outStride;
-    realEven->oDist        = fused->oDist;
-    std::swap(realEven->outStride[0], realEven->outStride[1]);
-    if(transpose->parent->length.size() > 2)
-        std::swap(realEven->outStride[1], realEven->outStride[2]);
+    // The fusion crosses subtrees; the real-even parent keeps the same axes
+    // but now writes with the transpose strides.
+    auto* realEven      = r2c->parent;
+    realEven->outStride = fused->outStride;
+    realEven->oDist     = fused->oDist;
+    // Adjust strides in case this uses a 3D kernel for a 2D plan.
     realEven->outStride.resize(realEven->length.size());
-    realEven->outputLength.resize(realEven->length.size());
 
     return fused;
 }
