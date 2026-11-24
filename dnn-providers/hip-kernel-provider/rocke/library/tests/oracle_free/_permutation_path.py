@@ -8,6 +8,27 @@ the LLVM IR a kernel is compiled from and the code object it is compiled to, and
 report every way they leave that path. They are host-only text and byte
 analysis: the CPU contracts apply them to the lowered quick specs, and the GPU
 lane applies them, before any launch, to the artifact of the kernel under test.
+
+Pointer origin. An operand traced to global memory must come from the tensor's
+own pointer argument ``%<t>_ptr`` (``t`` is ``q``, ``k`` or ``v``). The kernel
+takes Q/K/V/O strides at launch, so the address reaches that argument in steps:
+a ``getelementptr`` of ``%<t>_ptr`` by a 64-bit byte offset to one (batch, head)
+slab, then a ``getelementptr`` to a row of the slab, or a buffer resource over
+the slab and the buffer offset of a load. Each step keeps the origin
+``%<t>_ptr`` when every stride argument its offset reads is one of the tensor's
+own, ``%stride_<t>_*``. Any other step (a ``select``, ``phi`` or ``inttoptr`` of
+pointers) has no origin, and an offset that reads another tensor's stride gives
+an origin that names that stride. Which element of the slab an offset selects
+is index arithmetic and is not traced; the relation tests it on the device.
+
+Which (batch, head) slab the first step picks is index arithmetic too, and the
+relation cannot always see it: at batch 1 the launch passes a batch stride of
+0, so a K slab found with its batch and head strides swapped reads the first KV
+head for every head while V stays right, and each key still pairs with its own
+value. That
+choice is checked on the kernel IR instead, for every work item of every
+strided body: ``test_each_work_item_reads_its_own_slabs`` in
+``test_attention_dense_gfx950_varlen_kv_bound.py``.
 """
 
 from __future__ import annotations
@@ -48,6 +69,15 @@ _VALUE = re.compile(r"%[-\w.]+")
 _CALLEE = re.compile(r"@([-\w.]+)\(")
 _DECLARE = re.compile(r"^declare (.+?) @([-\w.]+)\((.*)\)")
 _NO_OP_BITCAST = re.compile(r"bitcast (\S+(?: x \S+>)?) %[-\w.]+ to (\S+(?: x \S+>)?)$")
+# The condition of every conditional branch, an SSA value or a constant.
+_CONDITIONAL_BRANCH = re.compile(r"^\s*br i1 ([^,]+), ", re.MULTILINE)
+# The intrinsic's suffix names its pointer types and differs between LLVM
+# versions (``.p1``, ``.p8.p1``).
+_BUFFER = "llvm.amdgcn.make.buffer.rsrc."
+# Tensor pointer arguments and the tensor each stride argument belongs to; see
+# "Pointer origin" in the module docstring.
+_TENSOR_POINTER = re.compile(r"%([a-z]+)_ptr")
+_STRIDE_ARGUMENT = re.compile(r"%stride_([a-z]+)_\w+")
 
 
 @dataclass(frozen=True)
@@ -80,6 +110,45 @@ def _parse(ir: str) -> dict[str, _Instruction]:
     return instructions
 
 
+def _stride_arguments(
+    instructions: dict[str, _Instruction], names: list[str]
+) -> set[str]:
+    """The stride arguments the values ``names`` are computed from."""
+    seen: set[str] = set()
+    pending = list(names)
+    while pending:
+        name = pending.pop()
+        if name not in seen:
+            seen.add(name)
+            item = instructions.get(name)
+            pending.extend(item.operands if item else ())
+    return {name for name in seen if _STRIDE_ARGUMENT.fullmatch(name)}
+
+
+def _tensor_origin(
+    instructions: dict[str, _Instruction], pointer: str, offsets: list[str]
+) -> str:
+    """The pointer argument a global address derives from, by the rule of the
+    module docstring, after ``offsets`` (the buffer offsets of a load through a
+    resource over ``pointer``). Returns the argument, ``%q_ptr`` say, or a
+    description of why there is none."""
+    offsets = list(offsets)
+    while pointer in instructions:
+        item = instructions[pointer]
+        if item.opcode not in ("bitcast", "getelementptr") or not item.operands:
+            return f"{pointer} = {item.text}"
+        pointer, *steps = item.operands
+        offsets.extend(steps)
+    tensor = _TENSOR_POINTER.fullmatch(pointer)
+    foreign = sorted(
+        stride
+        for stride in _stride_arguments(instructions, offsets)
+        if tensor is None
+        or _STRIDE_ARGUMENT.fullmatch(stride).group(1) != tensor.group(1)
+    )
+    return f"{pointer} offset by {', '.join(foreign)}" if foreign else pointer
+
+
 def classify_unmasked_path(ir: str, dtype: str, block_n: int) -> tuple[list, Counter]:
     """Classify every floating-point instruction of one lowered unmasked kernel
     against the path the bound is derived for, and return the violations and
@@ -89,9 +158,11 @@ def classify_unmasked_path(ir: str, dtype: str, block_n: int) -> tuple[list, Cou
     mask; ``exp2(fsub(x, m_new))``; each probability feeds the normalizer chain
     uncast and the PV operand through one ``fptrunc``; one ``alpha`` rescales
     the normalizer and every accumulator element; the key-tile loop runs
-    ``seqlen_kv / block_n`` times; the epilogue is one ``fdiv 1.0, l`` and
-    ``fptrunc(fmul(o, rcp))``. No fast-math flag, ``!fpmath`` or floating-point
-    mode attribute may appear."""
+    ``seqlen_kv / block_n`` times and is the only conditional branch, and any
+    other compare is the empty-slab guard ``seqlen_kv > 0 ? records : 0`` of a
+    buffer resource's record count; the epilogue is one
+    ``fdiv 1.0, l`` and ``fptrunc(fmul(o, rcp))``. No fast-math flag,
+    ``!fpmath`` or floating-point mode attribute may appear."""
     violations: list[str] = []
     counts: Counter = Counter()
     instructions = _parse(ir)
@@ -160,24 +231,75 @@ def classify_unmasked_path(ir: str, dtype: str, block_n: int) -> tuple[list, Cou
     if running_max is None or normalizer is None:
         violations.append("no loop-carried running maximum or normalizer")
 
-    # The key-tile loop visits every tile: kt in [0, seqlen_kv / block_n).
-    compares = [item for item in instructions.values() if item.opcode == "icmp"]
+    # The key-tile loop visits every tile: kt in [0, seqlen_kv / block_n). Its
+    # compare is the only conditional branch, so no tile is skipped or cut short.
+    branches = _CONDITIONAL_BRANCH.findall(ir)
+    loop = instructions.get(branches[0]) if len(branches) == 1 else None
     bound = None
-    if len(compares) == 1:
-        match = re.fullmatch(r"icmp slt i32 (%[-\w.]+), (%[-\w.]+)", compares[0].text)
+    if loop is not None:
+        match = re.fullmatch(r"icmp slt i32 (%[-\w.]+), (%[-\w.]+)", loop.text)
         if match:
-            counter, bound = instructions.get(match.group(1)), match.group(2)
+            counter, bound = match.group(1), instructions.get(match.group(2))
             start = re.match(
-                r"phi i32 \[ 0, %[-\w.]+ \], \[ (%[-\w.]+), ", counter.text
+                r"phi i32 \[ 0, %[-\w.]+ \], \[ (%[-\w.]+), ",
+                instructions[counter].text if counter in instructions else "",
             )
             step = instructions.get(start.group(1)) if start else None
-            if step is None or step.text != f"add nsw i32 {counter.name}, 1":
-                violations.append(f"key-tile counter is not 0, 1, ...: {counter.text}")
-    if bound is None or instructions[bound].text != f"sdiv i32 %seqlen_kv, {block_n}":
+            if step is None or step.text != f"add nsw i32 {counter}, 1":
+                violations.append(f"key-tile counter is not 0, 1, ...: {counter}")
+    conditions = [
+        instructions[name].text if name in instructions else name for name in branches
+    ]
+    if len(branches) != 1:
         violations.append(
-            f"key-tile loop bound is not seqlen_kv / {block_n}: "
-            f"{[item.text for item in compares]}"
+            f"{len(branches)} conditional branches, not the key-tile loop alone: "
+            f"{conditions}"
         )
+    elif bound is None or bound.text != f"sdiv i32 %seqlen_kv, {block_n}":
+        violations.append(
+            f"key-tile loop bound is not seqlen_kv / {block_n}: {conditions}"
+        )
+
+    def record_count(name: str) -> bool:
+        """``name`` only sizes buffer resources: through integer selects, and the
+        widening to ``i64`` some compiler lanes add, it reaches nothing but the
+        record count of ``make.buffer.rsrc``."""
+        found = users(name)
+        return bool(found) and all(
+            (user.opcode.startswith(_BUFFER) and user.operands[0] != name)
+            or (
+                user.opcode in ("select", "zext")
+                and not _FP_TYPE.search(user.text)
+                and record_count(user.name)
+            )
+            for user in found
+        )
+
+    def empty_slab_guard(item: _Instruction) -> bool:
+        """``item`` is ``seqlen_kv > 0``, and only picks a record count or 0
+        records for a buffer resource: ``select i1 item, i32 %records, i32 0``."""
+        guard = re.compile(rf"select i1 {re.escape(item.name)}, i32 %[-\w.]+, i32 0")
+        found = users(item.name)
+        return (
+            item.text == "icmp sgt i32 %seqlen_kv, 0"
+            and bool(found)
+            and all(
+                guard.fullmatch(user.text) and record_count(user.name) for user in found
+            )
+        )
+
+    # Every other compare is the guard of a K or V slab resource: no records when
+    # there are no keys. It changes nothing on the path, which runs only for whole
+    # tiles of keys (verified_key_tiles); a compare of another value, or another
+    # choice, could cut the slab short with keys present. The record count itself
+    # is not traced here: test_strided_kv_bound_is_the_slab_extent in
+    # test_attention_dense_gfx950_varlen_kv_bound.py evaluates it on the kernel IR.
+    for item in instructions.values():
+        if item.opcode == "icmp" and item is not loop and not empty_slab_guard(item):
+            violations.append(
+                "compare that neither ends the key-tile loop nor sizes a buffer as "
+                f"the empty-slab guard seqlen_kv > 0 ? records : 0: {item.text}"
+            )
 
     scale = [
         item.name
@@ -307,7 +429,7 @@ _INSERT = re.compile(
 _EXTRACT = re.compile(r"extractelement <\d+ x \w+> (%[-\w.]+), i32 (\d+)$")
 _LDS_FILL = re.compile(
     r"call void @llvm\.amdgcn\.raw\.ptr\.buffer\.load\.lds\("
-    r"ptr addrspace\(8\) (%[-\w.]+), ptr addrspace\(3\) (%[-\w.]+),"
+    r"ptr addrspace\(8\) (%[-\w.]+), ptr addrspace\(3\) (%[-\w.]+),([^\n]*)\)"
 )
 _LDS_ARRAY = re.compile(
     r"getelementptr inbounds \[1 x \[(\d+) x \[(\d+) x \w+\]\]\], "
@@ -317,9 +439,6 @@ _LDS_OFFSET = re.compile(
     r"getelementptr inbounds i8, ptr addrspace\(3\) @[-\w.]+, i32 (\d+)$"
 )
 _LDS_BASE = re.compile(r"ptrtoint ptr addrspace\(3\) (@[-\w.]+|%[-\w.]+) to i64$")
-# The intrinsic's suffix names its pointer types and differs between LLVM
-# versions (``.p1``, ``.p8.p1``).
-_BUFFER = "llvm.amdgcn.make.buffer.rsrc."
 
 
 def trace_mfma_operands(ir: str, dtype: str) -> tuple[list, Counter]:
@@ -332,8 +451,9 @@ def trace_mfma_operands(ir: str, dtype: str) -> tuple[list, Counter]:
     multiply V read from the V region of the LDS by the cast probabilities,
     each of which enters every chain once, and end in the accumulator the loop
     carries. The K region is filled from ``k_ptr`` only and the V region from
-    ``v_ptr`` only. Which token lands in which LDS row is index arithmetic and
-    is not traced; the relation itself tests it on the device."""
+    ``v_ptr`` only, each by the pointer-origin rule of the module docstring.
+    Which token lands in which LDS row is index arithmetic and is not traced;
+    the relation itself tests it on the device."""
     violations: list[str] = []
     counts: Counter = Counter()
     instructions = _parse(ir)
@@ -396,7 +516,7 @@ def trace_mfma_operands(ir: str, dtype: str) -> tuple[list, Counter]:
         return int(match.group(1)) if match else None
 
     def loaded_from(name: str) -> tuple[str, object]:
-        """``("lds", (offset, bytes of the array))`` or ``("global", pointer)``
+        """``("lds", (offset, bytes of the array))`` or ``("global", origin)``
         for a ``load``; ``("other", text)`` otherwise."""
         item = instructions.get(through(name))
         if item is None or item.opcode != "load" or not item.operands:
@@ -410,8 +530,9 @@ def trace_mfma_operands(ir: str, dtype: str) -> tuple[list, Counter]:
             if offset is None:
                 return ("other", address.text)
             return ("lds", (offset, 2 * int(array.group(1)) * int(array.group(2))))
-        match = re.search(r"ptr addrspace\(1\) (%[-\w.]+),", address.text)
-        return ("global", match.group(1)) if match else ("other", address.text)
+        if "ptr addrspace(1)" not in address.text:
+            return ("other", address.text)
+        return ("global", _tensor_origin(instructions, address.name, []))
 
     # Chains: an MFMA call continues the chain of its accumulator operand.
     atom = _MFMA_ATOM[dtype]
@@ -465,9 +586,11 @@ def trace_mfma_operands(ir: str, dtype: str) -> tuple[list, Counter]:
                     violations.append(
                         f"score MFMA does not read K from the LDS: {where}"
                     )
-                if loaded_from(call.operands[1]) != ("global", "%q_ptr"):
+                query = loaded_from(call.operands[1])
+                if query != ("global", "%q_ptr"):
                     violations.append(
-                        f"score MFMA does not read Q from q_ptr: {call.text}"
+                        f"score MFMA does not read Q from q_ptr but {query[1]}: "
+                        f"{call.text}"
                     )
             ends = users(chain[-1].name)
             indices = sorted(
@@ -581,7 +704,9 @@ def trace_mfma_operands(ir: str, dtype: str) -> tuple[list, Counter]:
         buffer = instructions.get(match.group(1))
         source = None
         if buffer is not None and buffer.opcode.startswith(_BUFFER):
-            source = buffer.operands[0]
+            source = _tensor_origin(
+                instructions, buffer.operands[0], _VALUE.findall(match.group(3))
+            )
         offset = fill_offset(match.group(2))
         if source == "%k_ptr" and offset in k_offsets:
             counts["k_fills"] += 1

@@ -1172,6 +1172,17 @@ def _substitute_once(pattern: str, replacement: str) -> Callable[[str], str]:
     return edit
 
 
+def _leaves_the_loop_after_one_tile(ir: str) -> str:
+    """The key-tile loop body branches to the loop exit after its first tile."""
+    loop = re.search(r"br i1 %[-\w.]+, label %[-\w.]+, label (%[-\w.]+)\n", ir)
+    assert loop, "no conditional branch in the lowered IR"
+    return _substitute_once(
+        r"br label (%for\.latch\.\d+)\n",
+        r"%early = icmp eq i32 %kt, 0\n"
+        rf"  br i1 %early, label {loop.group(1)}, label \1\n",
+    )(ir)
+
+
 @pytest.mark.parametrize(
     "edit,match",
     [
@@ -1183,6 +1194,42 @@ def _substitute_once(pattern: str, replacement: str) -> Callable[[str], str]:
         (
             _replace_once("sdiv i32 %seqlen_kv, 64", "sdiv i32 %seqlen_kv, 128"),
             "key-tile loop bound",
+        ),
+        (_leaves_the_loop_after_one_tile, "not the key-tile loop alone"),
+        (
+            # Every tile after the first reads the first tile's keys and values:
+            # a compare that chooses an index, not a buffer extent.
+            _substitute_once(
+                r"(%mul\d+) = mul nsw i32 %kt, 64\n",
+                r"%later = icmp sgt i32 %kt, 0\n"
+                r"  %tile = select i1 %later, i32 0, i32 %kt\n"
+                r"  \1 = mul nsw i32 %tile, 64\n",
+            ),
+            "compare that neither ends the key-tile loop nor sizes a buffer",
+        ),
+        (
+            # Below a million keys the slab has no records: every key tile reads
+            # zeros.
+            _replace_once(
+                "icmp sgt i32 %seqlen_kv, 0", "icmp sgt i32 %seqlen_kv, 1000000"
+            ),
+            "compare that neither ends the key-tile loop nor sizes a buffer",
+        ),
+        (
+            # The guard picks 0 records when there are keys.
+            _substitute_once(
+                r"select i1 (%[-\w.]+), i32 (%[-\w.]+), i32 0\n",
+                r"select i1 \1, i32 0, i32 \2\n",
+            ),
+            "compare that neither ends the key-tile loop nor sizes a buffer",
+        ),
+        (
+            # The guard itself is the record count: one byte when there are keys.
+            _substitute_once(
+                r"select i1 (%[-\w.]+), i32 %[-\w.]+, i32 0\n",
+                r"zext i1 \1 to i32\n",
+            ),
+            "compare that neither ends the key-tile loop nor sizes a buffer",
         ),
         (
             _replace_once(f"fdiv float {_F32_ONE},", "fdiv float 0x4000000000000000,"),
@@ -1214,6 +1261,11 @@ def _substitute_once(pattern: str, replacement: str) -> Callable[[str], str]:
         "fast-math",
         "fpmath",
         "half-the-key-tiles",
+        "early-loop-exit",
+        "compare-chooses-a-tile",
+        "empty-slab-guard-at-a-million-keys",
+        "empty-slab-guard-picks-no-records",
+        "empty-slab-guard-is-the-record-count",
         "reciprocal-of-two",
         "probability-cast-type",
         "normalizer-sums-cast-weights",
@@ -1255,6 +1307,42 @@ def _value_atom_takes_a_loaded_vector(ir: str) -> str:
     )(ir)
 
 
+def _slab_pointer(ir: str, tensor: str) -> str:
+    """The pointer to the (batch, head) slab of ``tensor`` in the lowered IR."""
+    found = re.findall(
+        rf"(%[-\w.]+) = getelementptr inbounds i8, ptr addrspace\(1\) %{tensor}_ptr,",
+        ir,
+    )
+    assert len(found) == 1, f"{len(found)} slab pointers of {tensor} in the lowered IR"
+    return found[0]
+
+
+def _buffers_over_slabs(**slabs: str) -> Callable[[str], str]:
+    """Build the buffer resource of each tensor named as a keyword over the slab
+    of the tensor it names instead: ``v="k"`` reads V from K's slab."""
+
+    def edit(ir: str) -> str:
+        moved = {_slab_pointer(ir, t): _slab_pointer(ir, s) for t, s in slabs.items()}
+        replaced: list[str] = []
+
+        def replace(match: re.Match) -> str:
+            pointer = match.group(2)
+            if pointer not in moved:
+                return match.group(0)
+            replaced.append(pointer)
+            return match.group(1) + moved[pointer]
+
+        edited = re.sub(
+            r"(make\.buffer\.rsrc\.[\w.]+\(ptr addrspace\(1\) )(%[-\w.]+)", replace, ir
+        )
+        assert sorted(replaced) == sorted(
+            moved
+        ), f"buffer resources over {replaced}, expected one over each of {moved}"
+        return edited
+
+    return edit
+
+
 @pytest.mark.parametrize(
     "edit,match",
     [
@@ -1269,11 +1357,27 @@ def _value_atom_takes_a_loaded_vector(ir: str) -> str:
         ),
         (
             # The V region is filled from K.
-            _substitute_once(
-                r"(make\.buffer\.rsrc\.[\w.]+\(ptr addrspace\(1\) )%v_ptr",
-                r"\1%k_ptr",
-            ),
+            _buffers_over_slabs(v="k"),
             "LDS fill from %k_ptr",
+        ),
+        (
+            # The K region is filled from V and the V region from K.
+            _buffers_over_slabs(k="v", v="k"),
+            "LDS fill from %v_ptr",
+        ),
+        (
+            # K's slab is found with V's head stride.
+            _replace_once(
+                "zext i32 %stride_k_head to i64", "zext i32 %stride_v_head to i64"
+            ),
+            "LDS fill from %k_ptr offset by %stride_v_head",
+        ),
+        (
+            # A V tile steps from row to row by K's token stride.
+            _replace_once(
+                "mul nsw i32 %stride_v_token, 2", "mul nsw i32 %stride_k_token, 2"
+            ),
+            "LDS fill from %v_ptr offset by %stride_k_token",
         ),
         (
             # One probability enters an atom twice and its neighbour never.
@@ -1298,9 +1402,14 @@ def _value_atom_takes_a_loaded_vector(ir: str) -> str:
         (
             # A score atom multiplies K by K.
             _substitute_once(
-                r"(getelementptr inbounds half, ptr addrspace\(1\) )%q_ptr", r"\1%k_ptr"
+                r"(getelementptr inbounds i8, ptr addrspace\(1\) )%q_ptr", r"\1%k_ptr"
             ),
             "does not read Q from q_ptr",
+        ),
+        (
+            # A Q row is found with O's token stride.
+            _replace_once(", %stride_q_token\n", ", %stride_o_token\n"),
+            "does not read Q from q_ptr but %q_ptr offset by %stride_o_token",
         ),
         (
             # A value atom multiplies V by a Q vector: its second operand is a
@@ -1334,9 +1443,13 @@ def _value_atom_takes_a_loaded_vector(ir: str) -> str:
     ids=[
         "value-region-aliases-keys",
         "values-filled-from-keys",
+        "keys-and-values-swapped",
+        "key-slab-at-a-value-stride",
+        "value-rows-at-the-key-stride",
         "probability-used-twice",
         "value-chain-skips-an-atom",
         "score-reads-keys-twice",
+        "query-row-at-the-output-stride",
         "pack-is-not-an-insert-chain",
         "pack-slot-written-twice",
         "pack-slot-never-written",
