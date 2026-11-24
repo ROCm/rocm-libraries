@@ -1494,6 +1494,20 @@ bool itemContainsPrefetchLoad(const rocisa::Item* item) {
         dynamic_cast<const rocisa::TensorLoadToLds*>(item)) {
         return true;
     }
+    // logical-IR migration: a prefetch load emitted as a LogicalLeaf (e.g. the
+    // gfx1250 TDM tensor_load_to_lds) is not any rocisa load type, so the
+    // dynamic_casts above miss it. This introspection decides pgrStart -> the
+    // loopWithPrefetch group boundary that drives software-pipeline/prefetch
+    // placement; missing the leaf shifts that boundary and diverges the asm.
+    // Recognize the leaf by its logical opcode, mirroring the Python seam's
+    // sched_is_tensor_load_to_lds. Extend this opcode set as the other prefetch
+    // loads (MUBUF / GLOBAL / FLAT reads) are flipped to leaves. Using the exact
+    // load opcodes (not schedCategory()==GlobalRead) avoids over-matching
+    // SMemLoad, which is GlobalRead but is not a prefetch load.
+    if (const auto* leaf = dynamic_cast<const rocisa::LogicalLeaf*>(item)) {
+        namespace Logical = stinkytofu::logical;
+        return leaf->logical() && leaf->logical()->getOpcode() == Logical::TensorLoadToLds;
+    }
     if (const auto* mod = dynamic_cast<const rocisa::Module*>(item)) {
         for (const auto& child : mod->itemList) {
             if (itemContainsPrefetchLoad(child.get())) return true;
@@ -1920,6 +1934,12 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
         [&](const rocisa::Item* item) -> bool {
         if (const auto* inst = dynamic_cast<const rocisa::Instruction*>(item))
             return isPrefetchLoadInst(inst);
+        // logical-IR migration: a prefetch load emitted as a LogicalLeaf is not a
+        // rocisa Instruction; recognize it by logical opcode so the auto-detected
+        // loopWithPrefetch region is unchanged. Mirror of itemContainsPrefetchLoad
+        // in the sibling lowerer -- keep both opcode sets in sync.
+        if (const auto* leaf = dynamic_cast<const rocisa::LogicalLeaf*>(item))
+            return leaf->logical() && leaf->logical()->getOpcode() == logical::TensorLoadToLds;
         if (const auto* mod = dynamic_cast<const rocisa::Module*>(item)) {
             for (const auto& child : mod->itemList)
                 if (containsPrefetchLoad(child.get())) return true;
