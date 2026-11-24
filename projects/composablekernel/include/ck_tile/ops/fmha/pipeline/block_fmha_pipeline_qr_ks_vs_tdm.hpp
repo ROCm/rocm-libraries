@@ -30,6 +30,7 @@ struct BlockFmhaPipelineQRKSVSTdm
 
     static constexpr auto I0 = number<0>{};
     static constexpr auto I1 = number<1>{};
+    static constexpr auto I2 = number<2>{};
 
     using Problem               = remove_cvref_t<Problem_>;
     using Policy                = remove_cvref_t<Policy_>;
@@ -92,7 +93,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                                        kBlockScale || kMx;
     static constexpr bool kVScaleOnOacc = kQuantized && !kBlockScale && !kMx;
     // Static P scale: exp2(s - m + kPShift) puts P in (0, 256], the fp8 grid a full block's
-    // dynamic scale picks. l and o_acc both carry it (cancels in O); LSE and the sink undo it.
+    // dynamic scale picks. o_acc, l_quant (the O normalizer) and l (LSE) all carry it; it cancels
+    // in O, and LSE undoes it.
     static constexpr index_t kPShift     = kQuantized ? 8 : 0;
     static constexpr float kPScaleFactor = kQuantized ? 256.0f : 1.0f;
     // fp8 (or bf8) K/V run run_double_kv_lds_buffer_fp8; fp16/bf16 keep develop's two paths.
@@ -846,10 +848,15 @@ struct BlockFmhaPipelineQRKSVSTdm
     // m with it lets it own the max frame, which pushes every real P down the fp8 grid and
     // biases the whole row. Merging it here instead -- one extra max-frame step on the final
     // (m,l,O), algebraically the same as appending a score whose value vector is zero -- keeps
-    // the frame set by the real scores.
-    template <typename RowTile, typename OutputTile>
-    CK_TILE_DEVICE static void
-    MergeSink(RowTile& m, RowTile& l, OutputTile& o_acc, float sink_v, float scale_s)
+    // the frame set by the real scores. The sink joins l_norm (the O normalizer) and every
+    // l_extra (the LSE sum) unquantized, since it is never cast to fp8.
+    template <typename RowTile, typename OutputTile, typename... ExtraRowTiles>
+    CK_TILE_DEVICE static void MergeSink(RowTile& m,
+                                         RowTile& l_norm,
+                                         OutputTile& o_acc,
+                                         float sink_v,
+                                         float scale_s,
+                                         ExtraRowTiles&... l_extra)
     {
         if constexpr(kDeferSink)
         {
@@ -868,11 +875,13 @@ struct BlockFmhaPipelineQRKSVSTdm
                     constexpr auto i      = make_tuple(idx0);
                     const auto merged_m   = max(m[i], sink_m);
                     const auto correction = exp2((m[i] - merged_m) * exponent_scale);
-                    // l carries 2^kPShift (see kPShift); the sink term must join it there. A sink
-                    // setting the max adds exp2(kPShift) exactly (no inf - inf for a +inf sink).
+                    // The sums carry 2^kPShift (see kPShift); the sink term must join them there.
+                    // A sink setting the max adds exp2(kPShift) exactly (no inf - inf for +inf).
                     const auto sink_delta =
                         sink_m == merged_m ? 0.f : (sink_m - merged_m) * exponent_scale;
-                    l(i) = l[i] * correction + exp2(sink_delta + kPShift);
+                    const auto sink_term = exp2(sink_delta + kPShift);
+                    l_norm(i)            = l_norm[i] * correction + sink_term;
+                    ((l_extra(i) = l_extra[i] * correction + sink_term), ...);
                     m(i) = merged_m;
                     sweep_tile_span(
                         spans[I1], [&](auto idx1) { o_acc(make_tuple(idx0, idx1)) *= correction; });
@@ -925,32 +934,65 @@ struct BlockFmhaPipelineQRKSVSTdm
         return p_tile;
     }
 
-    // MakePForGemm1 plus the local row sum, one M band (MIter) at a time: band mi is cast and
+    using PPack = std::conditional_t<std::is_same_v<PDataType, fp8_t>, fp8x8_t, bf8x8_t>;
+
+    // Unscaled fp8x8 as fp32. The float-scale overloads branch on the lane half; a literal e8m0
+    // scale (every byte 0x7f is 1.0) is uniform, so one convert serves every lane.
+    CK_TILE_DEVICE static fp32x8_t DequantizeP8(const PPack& p_pack)
+    {
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
+        constexpr uint32_t kUnitScale = 0x7f7f7f7fu;
+        if constexpr(std::is_same_v<PDataType, fp8_t>)
+            return __builtin_amdgcn_cvt_scale_pk8_f32_fp8(
+                bit_cast<uint32x2_t>(p_pack), kUnitScale, 0);
+        else
+            return __builtin_amdgcn_cvt_scale_pk8_f32_bf8(
+                bit_cast<uint32x2_t>(p_pack), kUnitScale, 0);
+#else
+        if constexpr(std::is_same_v<PDataType, fp8_t>)
+            return fp8x8_to_fp32x8(p_pack, 1.0f);
+        else
+            return bf8x8_to_fp32x8(p_pack, 1.0f);
+#endif
+    }
+
+    // MakePForGemm1 plus the local row sums, one M band (MIter) at a time: band mi is cast and
     // summed before band mi + 1, so only one band of fp32 P has to outlive the exp2 pass.
     // Both thread buffers are M-outer, so band mi is chunk mi of P and of the row sums.
+    // Returns (P, sum of q(P), sum of P): gemm_1 consumes q(P), so it normalizes O; the fp32 sum
+    // of P is only formed when LSE needs it.
     template <typename Gemm1, typename PComputeTensor>
-    CK_TILE_DEVICE static auto MakePForGemm1AndRowSum(const PComputeTensor& p_compute,
-                                                      int32_t& p_scale)
+    CK_TILE_DEVICE static auto MakePForGemm1AndRowSums(const PComputeTensor& p_compute,
+                                                       int32_t& p_scale)
     {
         constexpr index_t kPMI      = Gemm1::MIterPerWarp;
         constexpr index_t kPKI      = kN0 / Gemm1::WarpGemm::kK;
         constexpr index_t kBandRows = kM0 / kPMI;
+        constexpr index_t kPack     = 8;
 
         auto p_tile = make_static_distributed_tensor<PDataType>(
             Policy::template MakePRegTileDistribution<Problem>());
         using RowSum = remove_cvref_t<decltype(ReduceRowSumLocal(p_compute))>;
-        auto rowsum =
+        auto rowsum_p_quant =
+            make_static_distributed_tensor<SMPLComputeDataType>(RowSum::get_tile_distribution());
+        auto rowsum_p =
             make_static_distributed_tensor<SMPLComputeDataType>(RowSum::get_tile_distribution());
         constexpr index_t kBandSums = RowSum::get_thread_buffer_size() / kPMI;
+        using sum_bulk_t            = array<SMPLComputeDataType, kBandSums>;
+        const auto store_band_sum   = [&](auto& rowsum, const auto& band_sum, auto mi) {
+            static_assert(std::decay_t<decltype(band_sum)>::get_thread_buffer_size() == kBandSums);
+            rowsum.get_thread_buffer().template set_as<sum_bulk_t>(
+                mi, band_sum.get_thread_buffer().template get_as<sum_bulk_t>(I0));
+        };
 
         static_for<0, kPMI, 1>{}([&](auto mi) {
             constexpr index_t m0 = decltype(mi)::value * kBandRows;
-            const auto band =
+            const auto p_band =
                 get_slice_tile(p_compute, sequence<m0, 0>{}, sequence<m0 + kBandRows, kN0>{});
-            static_assert(decltype(band)::get_thread_buffer_size() * kPMI ==
+            static_assert(decltype(p_band)::get_thread_buffer_size() * kPMI ==
                           PComputeTensor::get_thread_buffer_size());
 
-            const auto p_src        = cast_tile<PDataType>(band);
+            const auto p_src        = cast_tile<PDataType>(p_band);
             constexpr index_t kPSub = decltype(p_src)::get_thread_buffer_size() / kPKI;
             using p_bulk_t          = array<PDataType, kPSub>;
             static_for<0, kPKI, 1>{}([&](auto ki) {
@@ -959,14 +1001,25 @@ struct BlockFmhaPipelineQRKSVSTdm
                     p_src.get_thread_buffer().template get_as<p_bulk_t>(ki));
             });
 
-            const auto band_sum = ReduceRowSumLocal(band);
-            static_assert(decltype(band_sum)::get_thread_buffer_size() == kBandSums);
-            using sum_bulk_t = array<SMPLComputeDataType, kBandSums>;
-            rowsum.get_thread_buffer().template set_as<sum_bulk_t>(
-                mi, band_sum.get_thread_buffer().template get_as<sum_bulk_t>(number<0>{}));
+            // q(P) back to fp32, one packed convert per 8 values, in the cast's buffer order.
+            constexpr index_t kBandBuf = decltype(p_src)::get_thread_buffer_size();
+            static_assert(kBandBuf % kPack == 0);
+            auto p_quant_band = make_static_distributed_tensor<SMPLComputeDataType>(
+                decltype(p_src)::get_tile_distribution());
+            static_for<0, kBandBuf / kPack, 1>{}([&](auto i) {
+                const auto p_pack = p_src.get_thread_buffer().template get_as<PPack>(i);
+                const fp32x8_t v  = DequantizeP8(p_pack);
+                static_for<0, kPack, 1>{}([&](auto e) {
+                    p_quant_band.get_thread_buffer()(number<decltype(i)::value * kPack + e>{}) =
+                        v[e()];
+                });
+            });
+            store_band_sum(rowsum_p_quant, ReduceRowSumLocal(p_quant_band), mi);
+            if constexpr(kStoreLSE)
+                store_band_sum(rowsum_p, ReduceRowSumLocal(p_band), mi);
         });
         p_scale = e8m0_one();
-        return make_tuple(p_tile, rowsum);
+        return make_tuple(p_tile, rowsum_p_quant, rowsum_p);
     }
 
     // gemm1 one 16-column V fragment at a time (the policy's RunPVFragment): fragment n +
@@ -3085,8 +3138,10 @@ struct BlockFmhaPipelineQRKSVSTdm
             SBlockTileType{}, sequence<1>{}, f_max, SMPLComputeDataType{0}));
 
         // init M, L (sink-aware)
-        auto m = MLBlockTileType{};
-        auto l = MLBlockTileType{};
+        // l_quant sums q(P), the fp8 P gemm_1 consumes, and normalizes O; l sums fp32 P for LSE.
+        auto m                  = MLBlockTileType{};
+        [[maybe_unused]] auto l = MLBlockTileType{};
+        auto l_quant            = MLBlockTileType{};
         clear_tile(o_acc);
         // One runtime if: kDeferSink is compile-time, the else branch must stay reachable.
         if(!kDeferSink && __builtin_isinf_sign(sink_v) >= 0)
@@ -3100,13 +3155,17 @@ struct BlockFmhaPipelineQRKSVSTdm
 #else
             set_tile(m, sink_v);
 #endif
-            // The seed stands for exp2(sink_m - m) == 1, so it carries 2^kPShift like l.
-            set_tile(l, SMPLComputeDataType{kPScaleFactor});
+            // The seed stands for exp2(sink_m - m) == 1, so it carries 2^kPShift like the sums.
+            set_tile(l_quant, SMPLComputeDataType{kPScaleFactor});
+            if constexpr(kStoreLSE)
+                set_tile(l, SMPLComputeDataType{kPScaleFactor});
         }
         else
         {
             set_tile(m, -numeric<SMPLComputeDataType>::infinity());
-            clear_tile(l);
+            clear_tile(l_quant);
+            if constexpr(kStoreLSE)
+                clear_tile(l);
         }
 
         const auto q_origin = q_dram_block_window_tmp.get_window_origin();
@@ -3689,11 +3748,14 @@ struct BlockFmhaPipelineQRKSVSTdm
             // P is cast one M band at a time before its row sum, so the sum's tree overwrites
             // fp32 P registers the cast has consumed.
             int32_t p_scale = 0;
-            auto p_and_sum  = MakePForGemm1AndRowSum<decltype(gemm_1)>(p_compute, p_scale);
-            ReduceRowSync(p_and_sum.at(I1), f_sum);
-            const auto& p_tile   = p_and_sum.at(I0);
-            const auto& rowsum_p = p_and_sum.at(I1);
-            auto l_correction    = m;
+            auto p_and_sums = MakePForGemm1AndRowSums<decltype(gemm_1)>(p_compute, p_scale);
+            ReduceRowSync(p_and_sums.at(I1), f_sum);
+            if constexpr(kStoreLSE)
+                ReduceRowSync(p_and_sums.at(I2), f_sum);
+            const auto& p_tile                    = p_and_sums.at(I0);
+            const auto& rowsum_p_quant            = p_and_sums.at(I1);
+            [[maybe_unused]] const auto& rowsum_p = p_and_sums.at(I2);
+            auto l_correction                     = m;
 
             // l{j}, Oacc{j}
             constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
@@ -3711,7 +3773,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                         return exp2(scale_s * m_old[i_idx] - row_max);
                     }
                 }();
-                l(i_idx) = tmp * l[i_idx] + rowsum_p[i_idx];
+                l_quant(i_idx) = tmp * l_quant[i_idx] + rowsum_p_quant[i_idx];
+                if constexpr(kStoreLSE)
+                    l(i_idx) = tmp * l[i_idx] + rowsum_p[i_idx];
                 if constexpr(kVFragments)
                 {
                     l_correction(i_idx) = tmp; // o_acc is scaled per fragment in gemm1
@@ -3888,7 +3952,10 @@ struct BlockFmhaPipelineQRKSVSTdm
         } while(i_total_loops < num_total_loop);
 
         s_wait_tensorcnt_barrier<0>();
-        MergeSink(m, l, o_acc, sink_v, scale_s);
+        if constexpr(kStoreLSE)
+            MergeSink(m, l_quant, o_acc, sink_v, scale_s, l);
+        else
+            MergeSink(m, l_quant, o_acc, sink_v, scale_s);
 
         if constexpr(kStoreLSE)
         {
@@ -3905,7 +3972,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                 }
                 else
                 {
-                    // l carries 2^kPShift; LSE reports the mathematical row sum.
+                    // l carries 2^kPShift; LSE reports the mathematical row sum of P.
                     lse_acc(i_idx) =
                         m_[i_idx] * scale_s / C_LOG2E + log(l_[i_idx]) - kPShift / C_LOG2E;
                 }
@@ -3923,10 +3990,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                              FmhaMask::IsMasking)
                 {
-                    return l[i_idx] == 0.f ? 0.f : 1 / l[i_idx];
+                    return l_quant[i_idx] == 0.f ? 0.f : 1 / l_quant[i_idx];
                 }
                 else
-                    return 1 / l[i_idx];
+                    return 1 / l_quant[i_idx];
             }();
             if constexpr(kVScaleOnOacc)
             {
