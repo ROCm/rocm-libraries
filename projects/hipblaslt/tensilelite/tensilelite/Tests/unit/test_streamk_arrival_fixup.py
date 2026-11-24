@@ -46,7 +46,7 @@ from tensilelite.Common import DataDirection, IsaVersion
 from tensilelite.Common.Capabilities import makeIsaInfoMap
 from tensilelite.Components import StreamK as StreamKModule
 from tensilelite.Components.StreamK import StreamKDynamic, StreamKHybrid, StreamKTwoTileDPFirst
-from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from rocisa_test_state import preserve_rocisa_kernel_state
 
 pytestmark = pytest.mark.unit
 
@@ -108,6 +108,7 @@ def _writer(hasSAtomic=True, pap=False, useBias=DataDirection.NONE):
                       "HasInvWbDevFences": False, "RequiresXCntForVolatileVMEM": False,
                       "EnableXnackReplay": False},
             version=(9, 5, 0),
+            laneSGPRCount=_KERNEL["WavefrontSize"] // 32,
             useBias=useBias,
             memTokenLdsBuffer0=0,
         ),

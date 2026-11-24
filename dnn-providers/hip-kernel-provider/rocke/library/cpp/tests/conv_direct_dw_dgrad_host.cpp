@@ -38,6 +38,10 @@
  *     as Python's repr (rocke_py_str_repr, the engine's one port);
  *   - the direct wgrad validators' refusal of a dilated problem, which must
  *     carry conv_direct_grouped.dilation_reason's text;
+ *   - the tiled direct wgrad host geometry (channel tiles, segments, splits)
+ *     the grid is sized with, which no kernel IR carries, against Python's
+ *     counts, auto launch (rows_per_seg 0) included, and its refusal of a
+ *     rows_per_seg that is not a multiple of the row unroll;
  *   - a zero or negative extent (N, H, W, groups, cpg, kpg, KH, KW) given to
  *     the dw fwd and forward WMMA validators, which must refuse it first with
  *     conv_direct_grouped.problem_dims_reason's text.
@@ -939,6 +943,84 @@ static void test_wgrad_dilation_reason(void)
                          rocke_grouped_wgrad_mfma_is_valid_spec);
 }
 
+/* The tiled wgrad host geometry the launcher sizes the grid with: auto launch
+ * (rows_per_seg 0) takes one segment per strip and
+ * min(ceil(segments / q_groups), max(1, floor(target_blocks / tiles))) splits;
+ * an explicit rows_per_seg keeps the ceil. The values are Python's
+ * (test_direct_wgrad_specs.py pins the same counts). */
+struct TiledGeom
+{
+    int N, H, W, cpg, kpg;
+    int wave_k16, wave_c16, waves_k, prefetch, row_unroll, unfold_n, q_groups;
+    int rows_per_seg, target_blocks;
+    int tiles, segments, splits;
+};
+
+static void test_wgrad_tiled_geometry(void)
+{
+    const TiledGeom cases[] = {
+        {1, 30, 32, 64, 64, 2, 1, 2, 3, 4, 1, 1, 0, 512, 2, 1, 1},
+        {4, 15, 40, 64, 64, 2, 2, 2, 2, 0, 4, 1, 0, 3, 1, 5, 3},
+        {16, 64, 64, 256, 512, 2, 1, 2, 2, 0, 1, 1, 0, 512, 64, 32, 8},
+        {8, 7, 7, 64, 64, 1, 2, 2, 2, 0, 1, 2, 0, 512, 2, 8, 4},
+        /* 8 channel tiles, 16 segments: the budget decides. floor(12 / 8)
+         * is 1 split (ceil would give 2), floor(1 / 8) is clamped to 1. */
+        {8, 7, 40, 128, 128, 2, 1, 2, 2, 0, 1, 1, 0, 12, 8, 16, 1},
+        {8, 7, 40, 128, 128, 2, 1, 2, 2, 0, 1, 1, 0, 1, 8, 16, 1},
+        /* Explicit rows_per_seg: ceil(12 / 8) = 2 splits. */
+        {8, 7, 40, 128, 128, 2, 1, 2, 2, 0, 1, 1, 30, 12, 8, 16, 2},
+    };
+    for(const TiledGeom& g : cases)
+    {
+        rocke_direct_wgrad_tiled_spec_t s = rocke_direct_wgrad_tiled_spec_default();
+        s.problem = dense_problem(g.H, g.W, g.cpg, g.kpg);
+        s.problem.N = g.N;
+        s.wave_k16 = g.wave_k16;
+        s.wave_c16 = g.wave_c16;
+        s.waves_k = g.waves_k;
+        s.prefetch = g.prefetch;
+        s.row_unroll = g.row_unroll;
+        s.unfold_n = g.unfold_n;
+        s.q_groups = g.q_groups;
+        s.pingpong = g.q_groups > 1;
+        s.rows_per_seg = g.rows_per_seg;
+        s.target_blocks = g.target_blocks;
+        char reason[ERR_CAP];
+        reason[0] = '\0';
+        CHECK(rocke_direct_wgrad_tiled_is_valid_spec(&s, "gfx950", reason, sizeof(reason)),
+              "wgrad_tiled N=%d tb=%d refused: %s",
+              g.N,
+              g.target_blocks,
+              reason);
+        int tiles = rocke_direct_wgrad_tiled_n_channel_tiles(&s);
+        int segs = rocke_direct_wgrad_tiled_n_segments(&s);
+        int splits = rocke_direct_wgrad_tiled_n_splits(&s);
+        CHECK(tiles == g.tiles && segs == g.segments && splits == g.splits,
+              "wgrad_tiled N=%d rps=%d tb=%d: tiles/segments/splits %d/%d/%d, want %d/%d/%d",
+              g.N,
+              g.rows_per_seg,
+              g.target_blocks,
+              tiles,
+              segs,
+              splits,
+              g.tiles,
+              g.segments,
+              g.splits);
+    }
+    /* A rows_per_seg that is not a multiple of the unroll (3) would skip each
+     * segment's last row: refused with Python's text. */
+    rocke_direct_wgrad_tiled_spec_t s = rocke_direct_wgrad_tiled_spec_default();
+    s.problem = dense_problem(16, 32, 64, 64);
+    s.rows_per_seg = 31;
+    char reason[ERR_CAP];
+    reason[0] = '\0';
+    CHECK(!rocke_direct_wgrad_tiled_is_valid_spec(&s, "gfx950", reason, sizeof(reason)),
+          "wgrad_tiled accepted rows_per_seg=31");
+    CHECK(strcmp(reason, "rows_per_seg must be 0 or a positive multiple of 3") == 0,
+          "wgrad_tiled rows_per_seg=31 reason: %s",
+          reason);
+}
+
 /* Every validator whose builder keeps a channel total in an int refuses
  * groups * cpg or groups * kpg past INT32_MAX first, with Python's
  * channel_totals_reason text (test_conv_direct_grouped_backend_parity.py pins
@@ -1088,6 +1170,7 @@ int main(void)
     test_problem_dims_refused();
     test_channel_totals_refused();
     test_wgrad_dilation_reason();
+    test_wgrad_tiled_geometry();
     test_total_channels_past_i32();
     test_ceil_floor_div();
     test_problem_output_extents();

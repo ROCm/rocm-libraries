@@ -9,6 +9,7 @@
 
 #include "MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "Workarounds.hpp"
+#include "engines/plans/MiopenConvApplicabilityChecks.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlan.hpp"
 
 namespace miopen_plugin
@@ -187,6 +188,13 @@ void nodeAttrsCheckTensors(
 {
     using DataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
 
+    if(conv_applicability::hasPassByValueTensor(tensorMap))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "ConvFwdBiasActiv plan builder does not support pass-by-value tensors");
+    }
+
     // Check the connections between the convolution and bias/activation nodes
     if(biasAttr != nullptr)
     {
@@ -323,6 +331,8 @@ void nodeAttrsCheckTensors(
                                                            "Convolution node output must be float");
         }
     }
+
+    conv_applicability::checkConvFwdBiasActivLayouts(convAttr, biasAttr, activAttr, tensorMap);
 }
 
 bool nodeAttrsCheckTensorsLogErrors(
@@ -414,9 +424,8 @@ bool checkComputeTypesLogErrors(
 
 } // namespace
 
-bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(
-    const HipdnnMiopenHandle& handle,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+bool MiopenConvFwdBiasActivPlanBuilder::isGraphApplicable(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     // Execute-time override shapes can diverge from the compile-time dims this
     // builder matched exactly; the plan bakes those dims into the MIOpen
@@ -426,8 +435,6 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(
         HIPDNN_PLUGIN_LOG_INFO("ConvFwdBiasActiv plan builder does not support override shapes");
         return false;
     }
-
-    REJECT_IF_WORKAROUND_ISSUE_5409(handle);
 
     auto nodeAttrs = getNodeAttrsLogErrors(opGraph);
     if(!nodeAttrs.has_value())
@@ -443,19 +450,30 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(
         return false;
     }
 
-    if(!checkComputeTypesLogErrors(opGraph,
-                                   std::get<0>(nodeAttrs.value()),
-                                   std::get<1>(nodeAttrs.value()),
-                                   opGraph.getTensorMap()))
+    return checkComputeTypesLogErrors(opGraph,
+                                      std::get<0>(nodeAttrs.value()),
+                                      std::get<1>(nodeAttrs.value()),
+                                      opGraph.getTensorMap());
+}
+
+bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(
+    const HipdnnMiopenHandle& handle,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+{
+    if(!isGraphApplicable(opGraph))
     {
         return false;
     }
 
+    REJECT_IF_WORKAROUND_ISSUE_5409(handle);
+
+    const auto nodeAttrs = getNodeAttrs(opGraph);
+
     try
     {
-        ConvFwdBiasActivParams params(std::get<0>(nodeAttrs.value()),
-                                      std::get<1>(nodeAttrs.value()),
-                                      std::get<2>(nodeAttrs.value()),
+        ConvFwdBiasActivParams params(std::get<0>(nodeAttrs),
+                                      std::get<1>(nodeAttrs),
+                                      std::get<2>(nodeAttrs),
                                       opGraph.getTensorMap(),
                                       _deterministic);
         const HipdnnMiopenSettings executionSettings;

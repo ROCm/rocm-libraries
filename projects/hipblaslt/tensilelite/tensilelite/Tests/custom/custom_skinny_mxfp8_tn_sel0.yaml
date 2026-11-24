@@ -1,0 +1,102 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict]
+
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  SleepPercent: 50
+  NumElementsToValidate: -1
+  DataInitTypeBeta: 2
+  DataInitTypeAlpha: 2
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
+  Device: 0
+  PrintSolutionRejectionReason: True
+  ValidateMetadata: True
+  MXScaleFormat: 1
+
+BenchmarkProblems:
+  -
+    - OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      UseBias: 0
+      Activation: False
+      UseScaleAlphaVec: 0
+      MXBlockA: 32
+      MXBlockB: 32
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - CustomKernel:
+          - name: "gemm_BM16_TN1_LANES_K64_WAVES2_UP_ITERS0_PF4_GROUP1_NUM_XCDS8_GRID_3D0_USE_BETA1_MFMA1_LDS1"
+            args: [
+            { type: address, semantic: AddressD },
+            { type: address, semantic: AddressA },
+            { type: address, semantic: AddressB },
+            { type: address, semantic: AddressMXScaleA },
+            { type: address, semantic: AddressMXScaleB },
+            { type: uint64, semantic: ConstantZero },
+            { type: address, semantic: AddressC },
+            { type: int32, semantic: StrideD0Bytes },
+            { type: int32, semantic: StrideA0Bytes },
+            { type: int32, semantic: StrideB0Bytes },
+            { type: int32, semantic: SizeFree0 },
+            { type: int32, semantic: SizeFree1 },
+            { type: int32, semantic: SizeSum },
+            { type: int32, semantic: StrideC0Bytes },
+            { type: float32, semantic: Alpha },
+            { type: float32, semantic: Beta },
+            { type: int32, semantic: NumWorkGroups } ]
+            macrotile: [16, 16, 4096]
+            threads: [128, 1, 1]
+            grid: [TilesXYBatch, One, One]
+            uniformSummationOrder: true
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 1, 1]
+        - StaggerU: [0]
+        - MXScaleFormat: [HostPreSwizzle]
+        - AssertSizeEqual: [{2: 1}]
+        - AssertStrideAEqual: [{0: 1}]
+        - AssertStrideBEqual: [{0: 1}]
+        - AssertStrideCEqual: [{0: 1}]
+        - AssertStrideDEqual: [{0: 1}]
+        - AssertStrideAMultiple: [{1: 4}]
+        - AssertStrideBMultiple: [{1: 4}]
+        - AssertTensorBytesLessThan: [2147483648]
+        - AssertMXScalesPreSwizzled: [True]
+        - AssertSizeGreaterThan: [{0: 0, 1: 0, 3: 0}]
+        - AssertSizeLessThan: [{0: 1048577, 1: 1048577, 3: 1048577}]
+        - AssertAnySizeLessThan: [{0: 5, 1: 5}]
+        - AssertSummationElementMultiple: [32]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1, 10240, 1, 5120]
+          - Exact: [10240, 1, 1, 5120]
+          - Exact: [4096, 2, 1, 4128]
+          - Exact: [2, 4096, 1, 4128]
+          - Exact: [1000, 3, 1, 1312]
+          - Exact: [3, 1000, 1, 1312]
+          - Exact: [5120, 4, 1, 32]
+          - Exact: [4, 5120, 1, 96]
+          - Exact: [2049, 1, 1, 2080]
+          - Exact: [2049, 3, 1, 2080, 2056, 2064, 2096, 2112]
+
+LibraryLogic:
+    ScheduleName: "gfx950"
+    DeviceNames: ["Device 75a0"]
+    ArchitectureName: "gfx950"
+    LibraryType: "GridBased"

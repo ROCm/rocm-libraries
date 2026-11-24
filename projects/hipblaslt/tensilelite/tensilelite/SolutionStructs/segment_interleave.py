@@ -15,10 +15,13 @@ Without TDMSplit: component order
 The ordinary order in one buffer is [A0][A1][B0][B1]. Interleaving uses:
 
   MIWaveGroup  Required vector width  Component order
-  [2,2]        VWA == WaveTileA        [A0][B0][A1][B1], if B reads fit each component
+  [2,2]        VWA == WaveTileA*       [A0][B0][A1][B1], if B reads fit each component
                                       [A0][B whole][A1], if B reads cross components
   [4,1]        VWA == WaveTileA        [A0][B whole][A1]
   [1,4]        VWB == WaveTileB        [B0][A whole][B1]
+
+* WaveTileContiguousA assigns one M half per wave, with consecutive A rows
+  across lanes. VWA only needs to divide WaveTileA.
 
 For [2,2], B stays whole when splitting it would make a read cross a component
 boundary; an odd WaveTileB can cause this. For [4,1]/[1,4], only the operand
@@ -29,8 +32,8 @@ Without TDMSplit: spacing and buffer copies
 The component sizes and LDS base determine which of two layouts applies:
 
   Needs a gap to reach another segment ("aligned"):
-    Insert a gap before component 1 to reach a 64 KiB boundary. Keep complete
-    ping and pong blocks separate, each with the same internal order and gap.
+    Insert a gap before component 1 to reach a 64 KiB boundary. Buffers are
+    paired with WaveTileContiguousA; otherwise ping/pong remain separate.
 
   Packed order already reaches another segment ("tight"):
     Place each group's ping/pong copies together:
@@ -53,18 +56,17 @@ tiles. Persistent MX kernels with shadow init keep separate blocks to avoid extr
 SGPRs (see persistent_keeps_unpaired()).
 
 Without MXSA M splitting, buffer placement for both MX scales is:
-  Non-TDMSplit tight, with supported pairing:
+  With supported pairing:
     [all paired A/B data][MXSA ping][MXSA pong][MXSB ping][MXSB pong]
-  Aligned, TDMSplit, or persistent without pairing:
+  Without pairing:
     ping: [interleaved A/B data][MXSA][MXSB]
     pong: [interleaved A/B data][MXSA][MXSB]
 
-On coarse [2,2] InMemorySwizzle layouts, MXSA can instead be loaded as two M
-halves, one per SIMD pair, when TDM uses exactly two components. The halves
-occupy separate segments and each contains all K scale groups. The builders
-size the halves before assigning final A/B
-bases and strides. With split B, each MXSA half follows its component's B
-data; with whole B, it follows A instead and B keeps its baseline addressing.
+MXSA M splitting is optional for [2,2] InMemorySwizzle layouts. It requires two
+TDM components and an M-half TDM row size divisible by 128 bytes. The halves
+occupy separate segments, each with all K scale groups, after their B component
+(or A when B stays whole). Keeping MXSA whole does not disable A/B interleave.
+
 Paired layouts preserve 256-byte alignment for every group. Auto compares the complete
 split candidate with the ordinary layout's LDS reservation and falls back to
 ordinary placement if the candidate needs more LDS.
@@ -107,9 +109,7 @@ the operand being separated, omitting the other operand and any spacing gaps.
 
 For [1,4], use the last two diagrams with A replaced by B, VWA by VWB, and
 WaveTileA by WaveTileB; portSplitA becomes portSplitB. W0-W3 are the four waves.
-Only the full and half WaveTile widths above are supported. The half-width case
-requires TDMSplit; without it, [2,2]/[4,1] need VWA == WaveTileA and [1,4] needs
-VWB == WaveTileB.
+With TDMSplit, only the full and half WaveTile widths above are supported.
 """
 
 from ..Components.TDMFuse import tdmWaveComponents
@@ -169,10 +169,16 @@ def _mxsa_half_layout(state, paired=False):
             or not pt.get("MXBlockA") or pt.get("MXBlockFreeA", 1) != 1
             or state.get("MXScaleFormat") != "InMemorySwizzle"
             or state.get("TDMFuse") or state.get("TDMSplit")
-            or state.get("DirectToVgprMXSA") or not _coarse(state, "A")):
+            or state.get("DirectToVgprMXSA")
+            or not (state.get("WaveTileContiguousA") or _coarse(state, "A"))):
         return None
     # The TDM component IDs must map directly to the two reserved M-half slots.
     if tdmWaveComponents(state, "MXSA")[0] != 2:
+        return None
+    mxUnit = state["MatrixInstK"] // pt["MXBlockA"]
+    halfRowBytes = (state["MacroTile0"] // 2) * mxUnit
+    # Keep the ordinary scale layout if the M cut breaks 128-byte alignment.
+    if halfRowBytes % 128:
         return None
     rawHalf = state["MacroTile0"] * (state["DepthU"] // pt["MXBlockA"]) // 2
     pad, block = state.get("LdsPadMXSA", 0), state.get("LdsBlockSizePerPadMXSA", 0)
@@ -190,10 +196,11 @@ def _mxsa_half_layout(state, paired=False):
 def _component_offsets(state, bWhole, portSplit):
     """Build final one-buffer A/B and scale positions together.
 
-    Split B: [A0 B0 MXSA0] [A1 B1 MXSA1] [MXSB].
-    Whole B: [A0 MXSA0 B]  [A1 MXSA1]    [MXSB].
-    Aligned placement inserts a segment gap before A1. Each component reserves
-    one independently aligned MXSA slot.
+    With MXSA M splitting:
+      Split B: [A0 B0 MXSA0] [A1 B1 MXSA1] [MXSB].
+      Whole B: [A0 MXSA0 B]  [A1 MXSA1]    [MXSB].
+    Otherwise, omit the MXSA0/1 slots and append the whole MXSA after A/B.
+    Aligned placement inserts a segment gap before A1 in either case.
     """
     base = state["LdsOffsetA"]
     fA = _footprint(state, "A")
@@ -219,8 +226,10 @@ def _component_offsets(state, bWhole, portSplit):
                        mxsaStrideBytes=stride)
         end += half
         if state.get("LDSSegmentBRotate"):
-            # B's DS half selection uses its original logical component stride.
-            offsets["readStrideBytesB"] = stride if aligned else fA + fB
+            # MXSA can change tight/aligned placement without changing B's DS halves.
+            abStride = fA + fB
+            abAligned = (base + abStride) // SEG == base // SEG
+            offsets["readStrideBytesB"] = _ceil_seg(base + abStride) - base if abAligned else abStride
     elif pt.get("MXBlockA") and not state.get("DirectToVgprMXSA"):
         offsets["ldsBaseMXSA"] = end
         end += int(state.get("LdsNumElementsAlignedMXSA", 0))
@@ -415,7 +424,7 @@ def evaluate(state):
     # (Solution.py resolves it later, then re-evaluates).
     if state.get("1LDSBuffer", 0) != 0:                         return _no("needs 1LDSBuffer==0")
     _dt = pt["DataType"]
-    # fp8/fp4 cover mxf8/mxf4; MX scales are relocated as a trailing block (see _mx_scale_bases).
+    # fp8/fp4 cover mxf8/mxf4; scale placement is chosen separately from A/B.
     if not (_dt.isBFloat16() or _dt.isHalf() or _dt.is8bitFloat() or _dt.isFloat4()):
         return _no("bf16/fp16/fp8/fp4 only")
 
@@ -426,9 +435,9 @@ def evaluate(state):
     if [wgM, wgN] != [2, 2]:
         return _no("MIWaveGroup unsupported")
 
-    # [2,2]: A must be coarse (VWA==WaveTileA) or port-split (VWA==WaveTileA/2, needs TDMSplit).
+    # [2,2]: A uses adjacent rows, coarse tiles, or TDMSplit port-split tiles.
     _portSplit = _port_split_a(state)
-    if not (_coarse(state, "A") or _portSplit):               return _no("A: VWA must be WaveTileA, or WaveTileA/2 with TDMSplit")
+    if not (_coarse(state, "A") or _portSplit or state.get("WaveTileContiguousA")):               return _no("A: VWA must be WaveTileA, or WaveTileA/2 with TDMSplit")
 
     bWhole = not _b_readable(state)
     offsets, end, aligned = _component_offsets(state, bWhole, _portSplit)
@@ -455,7 +464,8 @@ def b_rotate_reason(state, persistent=False):
     B's logical component stride stays in [64K, 128K), so LocalReadAddrB+h still selects
     half h. The physical component stride comes from the selected layout; a per-wave
     register delta bridges that distance and rotates odd waves' B reads. The accumulator halves are
-    swapped back before the epilogue. Aligned kernels retain separate ping/pong blocks.
+    swapped back before the epilogue. Aligned kernels keep separate ping/pong
+    blocks unless contiguous A selects paired placement.
     """
     pt = state["ProblemType"]
     if tuple(state.get("ISA", ()))[:2] != (12, 5):            return "not gfx1250"
@@ -488,16 +498,21 @@ def b_rotate_reason(state, persistent=False):
     if vwb <= 0 or wtb % vwb != 0 or (wtb // vwb) % 2 != 0:
         return "MIWaveTile[1]/VectorWidthB must be even"
     if pt.get("MXBlockB"):
-        # MXSB must follow the rotation. Supported only for the TileSpan wave-split layout with
-        # one group (nV == 2): vIdx 0/1 scales sit in the lower/upper half-wave of one ds_load,
-        # so pair 1 flips the half-wave select in LRA. MXSA needs nothing (A is not rotated).
+        # MXSB must follow the rotation. MXSA needs nothing (A is not rotated).
+        # - TileSpan (MatrixInstN == wave/2, one group, nV == 2): vIdx 0/1 scales sit in the
+        #   lower/upper half-wave of one ds_load, so pair 1 flips the half-wave select in LRA.
+        # - Full-wave tile (MatrixInstN == wave, e.g. 32x16 MI with SourceSwap): one ds_load per
+        #   vIdx; two MXSB read addresses swap the vIdx halves per pair, like B data.
         # TileSpan (LocalRead.getMxsTileSpanInfo) is gated on exactly gfx1250.
         if tuple(state.get("ISA", ())) != (12, 5, 0):         return "MX: needs ISA (12, 5, 0)"
         if state.get("DirectToVgprMXSB"):                     return "MX: DirectToVgprMXSB not supported"
         if state.get("MXScaleFormat") != "InMemorySwizzle":   return "MX: needs MXScaleFormat InMemorySwizzle"
-        if state["MatrixInstN"] != state["WavefrontSize"] // 2:
-            return "MX: needs MatrixInstN == WavefrontSize/2"
-        if wtb // vwb != 2:                                   return "MX: needs MIWaveTile[1]/VectorWidthB == 2"
+        if state["MatrixInstN"] == state["WavefrontSize"] // 2:
+            if wtb // vwb != 2:                               return "MX: needs MIWaveTile[1]/VectorWidthB == 2"
+        elif state["MatrixInstN"] == state["WavefrontSize"]:
+            if (pt.get("MXBlockFreeB") or 1) > 1:             return "MX: 2D MXSB scales not supported"
+        else:
+            return "MX: needs MatrixInstN == WavefrontSize/2 or WavefrontSize"
     if pt.get("Sparse"):                                      return "sparse not supported"
     for key in ("TDMSplit", "UseSubtileImpl", "DirectToVgprA", "DirectToVgprB", "DirectToLdsB",
                 "enableLDSTrA", "enableLDSTrB", "UseDotInstruction", "UseCustomMainLoopSchedule",

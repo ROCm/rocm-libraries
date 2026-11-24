@@ -114,6 +114,17 @@ def make_config(
     return (type_hash, {"type": type_details, "config": type_info | config_data})
 
 
+def copyright_year(existing_file: pathlib.Path | None) -> str:
+    """Keeps the first year of an existing header's copyright notice."""
+    year = datetime.datetime.now().year
+    if existing_file is not None and existing_file.exists():
+        with open(existing_file, "r") as file:
+            match = re.search(r"Copyright \(c\) (\d{4})", file.readline())
+        if match and int(match.group(1)) < year:
+            return f"{match.group(1)}-{year}"
+    return str(year)
+
+
 def annotate_fp_check(targets):
     """Marks types that need a floating-point guard.
 
@@ -404,7 +415,9 @@ def main():
         template = env.get_template(template_name)
         rendered = template.render(
             {
-                "year": datetime.datetime.now().year,
+                "year": copyright_year(
+                    existing_dir / f"{alg_name}.hpp" if existing_dir else None
+                ),
                 "targets": targets,
                 "alg_name": alg_name,
                 "alg_short_name": re.sub(r"^device_", "", alg_name),
