@@ -235,7 +235,9 @@ auto CallExecutePrimitive(const miopen::ExecutionContext& ctx) -> TestResults
     return test_results;
 }
 
-TEST(CPU_ExecutePrimitive_NONE, NoParams)
+using CPU_ExecutePrimitive_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_ExecutePrimitive_NONE, NoParams)
 {
     auto ctx = miopen::ExecutionContext{&get_handle()};
 
@@ -249,7 +251,11 @@ TEST(CPU_ExecutePrimitive_NONE, NoParams)
     ASSERT_EQ(results.perf_cfg_value, TestPerfConfig::default_value);
 }
 
-TEST(CPU_ExecutePrimitiveSearchUpdate_NONE, SearchUpdate)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_ExecutePrimitive_NONE, testing::Values(0));
+
+using CPU_ExecutePrimitiveSearchUpdate_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_ExecutePrimitiveSearchUpdate_NONE, SearchUpdate)
 {
     auto ctx      = miopen::ExecutionContext{&get_handle()};
     ctx.do_search = true;
@@ -264,3 +270,5 @@ TEST(CPU_ExecutePrimitiveSearchUpdate_NONE, SearchUpdate)
     ASSERT_TRUE(results.search_invoked);
     ASSERT_EQ(results.perf_cfg_value, TestPerfConfig::searched_value);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_ExecutePrimitiveSearchUpdate_NONE, testing::Values(0));

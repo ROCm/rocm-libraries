@@ -960,13 +960,13 @@ struct gpu_reference_conv_3d : public ::testing::TestWithParam<TestCase3D>
 } // namespace
 
 // Generates: using SUITE_NAME = gpu_reference_conv_2d/3d<...>; TEST_P(SUITE_NAME, Test){Run();}
-// INSTANTIATE_TEST_SUITE_P(Smoke, SUITE_NAME, ...); -- one line per
+// INSTANTIATE_TEST_SUITE_P(Quick, SUITE_NAME, ...); -- one line per
 // (direction, dtype, layout, policy) combination instead of the previous
 // hand-written triplet.
 #define DEFINE_REFERENCE_KERNEL_TEST_2D(SUITE_NAME, DIRECTION, TREF, TOUT, LAYOUT, POLICY) \
     using SUITE_NAME = gpu_reference_conv_2d<DIRECTION, TREF, TOUT, LAYOUT, POLICY>;       \
     TEST_P(SUITE_NAME, Test) { Run(); }                                                    \
-    INSTANTIATE_TEST_SUITE_P(Smoke,                                                        \
+    INSTANTIATE_TEST_SUITE_P(Quick,                                                        \
                              SUITE_NAME,                                                   \
                              ::testing::ValuesIn(GenCases2D()),                            \
                              [](const auto& _info) { return NameGenerator(_info); })
@@ -974,7 +974,7 @@ struct gpu_reference_conv_3d : public ::testing::TestWithParam<TestCase3D>
 #define DEFINE_REFERENCE_KERNEL_TEST_3D(SUITE_NAME, DIRECTION, TREF, TOUT, LAYOUT, POLICY) \
     using SUITE_NAME = gpu_reference_conv_3d<DIRECTION, TREF, TOUT, LAYOUT, POLICY>;       \
     TEST_P(SUITE_NAME, Test) { Run(); }                                                    \
-    INSTANTIATE_TEST_SUITE_P(Smoke,                                                        \
+    INSTANTIATE_TEST_SUITE_P(Quick,                                                        \
                              SUITE_NAME,                                                   \
                              ::testing::ValuesIn(GenCases3D()),                            \
                              [](const auto& _info) { return NameGenerator(_info); })

@@ -258,6 +258,9 @@ jobs:
       ARTIFACT_GROUP: ${{ matrix.family }}-host-asan
       THEROCK_RUN_ID: ${{ github.run_id }}-host-asan-${{ matrix.family }}
       HSA_XNACK: "0"
+      # Work around intermittent correctness failures with device-memory signals.
+      # Remove after ROCM-34728 is fixed and default-signal repros pass HOST_ASAN.
+      DEBUG_CLR_DEV_SIGNALS: "0"
       TEST_COMPONENT: ${{ matrix.component }}
     steps:
       - name: Checkout TheRock repository
