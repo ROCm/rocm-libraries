@@ -3,6 +3,7 @@
 
 target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/ConfigHelpers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../TestShippedL1ModelGate.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestAsmSdpaEngine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestSdpaBwdPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestSdpaBwdPlanGridMath.cpp
@@ -46,10 +47,12 @@ endif()
 # ============================================================================
 # The selector revision is a configure-time digest, so its recipe can only be run against
 # other trees here. TestAsmSdpaSelectorRevision asserts that LF and CRLF copies of the
-# engine tree agree with the built revision, and that each forward or backward input moves
-# it while doc and engine-class changes do not. The fixtures copy the tree and run the
-# recipe once per probe, so they are a build step that reruns only when an engine file, the
-# recipe or the script changes, not work every configure repeats.
+# engine tree agree with the built revision, that each input the recipe lists (sources, and
+# the content and path of a kernel or CSV) moves it while the files it lists as not inputs
+# do not, and that every file of the engine tree is one or the other. The probes come from
+# the recipe's own lists, so they cannot cover less than it hashes. The fixtures copy the
+# tree and run the recipe once per probe, so they are a build step that reruns only when an
+# engine file, the recipe or the script changes, not work every configure repeats.
 set(_hkp_asm_engine_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../engines/asm_sdpa_engine")
 cmake_path(NORMAL_PATH _hkp_asm_engine_dir)
 set(_hkp_asm_fixtures_script "${CMAKE_CURRENT_SOURCE_DIR}/AsmSdpaSelectorRevisionFixtures.cmake")

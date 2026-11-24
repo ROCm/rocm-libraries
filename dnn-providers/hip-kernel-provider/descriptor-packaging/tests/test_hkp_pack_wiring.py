@@ -269,8 +269,24 @@ def test_a_dropped_stage_pair_repacks_and_leaves_its_file_out(consumer):
             'STAGE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/m.bin" /rooted/m.bin',
             "which is not a path inside OUT_ROOT",
         ),
+        (
+            'STAGE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/m.bin" a/../..',
+            "which is not a path inside OUT_ROOT",
+        ),
+        # CMake drops an empty list element, so an empty destination arrives as a missing
+        # one: the empty-path check in the resolver never sees it.
+        (
+            'STAGE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/m.bin" ""',
+            "has an odd STAGE_FILES list",
+        ),
     ],
-    ids=["odd-list", "climbs-out", "rooted"],
+    ids=[
+        "odd-list",
+        "climbs-out",
+        "rooted",
+        "climbs-out-to-the-parent",
+        "empty-destination",
+    ],
 )
 def test_a_stage_pair_that_cannot_land_inside_the_tree_fails_configure(
     consumer, stage_files, diagnostic

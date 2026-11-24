@@ -539,6 +539,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     set(HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HIP_MLOPS_ENGINE_test_categories_external.yaml")
     set(HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/HIP_MLOPS_ENGINE_test_categories_integration.yaml")
     set(HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/ASM_SDPA_ENGINE_test_categories_integration.yaml")
+    set(HIPKERNELPROVIDER_ASM_SDPA_GPU_REF_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/ASM_SDPA_ENGINE_gpu_ref_test_categories_integration.yaml")
     set(HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/hipkernel_Gfx950Attention_test_categories_integration.yaml")
     set(HIPKERNELPROVIDER_FLYDSL_SDPA_BWD_SPLIT_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/hipkernel_flydsl_sdpa_bwd_split_test_categories_integration.yaml")
     set(HIPKERNELPROVIDER_FLYDSL_SDPA_BWD_MERGED_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/hipkernel_flydsl_sdpa_bwd_merged_test_categories_integration.yaml")
@@ -555,6 +556,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
        AND EXISTS "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
        AND EXISTS "${HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML}"
        AND EXISTS "${HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML}"
+       AND EXISTS "${HIPKERNELPROVIDER_ASM_SDPA_GPU_REF_INTEGRATION_CATEGORIES_YAML}"
        AND EXISTS "${HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML}"
        AND EXISTS "${HIPKERNELPROVIDER_FLYDSL_SDPA_BWD_SPLIT_INTEGRATION_CATEGORIES_YAML}"
        AND EXISTS "${HIPKERNELPROVIDER_FLYDSL_SDPA_BWD_MERGED_INTEGRATION_CATEGORIES_YAML}"
@@ -571,6 +573,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
             "${HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML}"
             "${HIPKERNELPROVIDER_ASM_SDPA_INTEGRATION_CATEGORIES_YAML}"
+            "${HIPKERNELPROVIDER_ASM_SDPA_GPU_REF_INTEGRATION_CATEGORIES_YAML}"
             "${HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML}"
             "${HIPKERNELPROVIDER_FLYDSL_SDPA_BWD_SPLIT_INTEGRATION_CATEGORIES_YAML}"
             "${HIPKERNELPROVIDER_FLYDSL_SDPA_BWD_MERGED_INTEGRATION_CATEGORIES_YAML}"
@@ -690,8 +693,15 @@ endif()
 #
 # HIPKERNELPROVIDER_DECLARED_MODEL_ENGINES names each such engine's folder; for each,
 # HIPKERNELPROVIDER_<folder>_DESCRIPTOR_SOURCE_DIR is its source tree and
-# HIPKERNELPROVIDER_<folder>_DESCRIPTOR_FILES the files it ships. One list feeds staging
-# and install, so the two cannot disagree about what ships.
+# HIPKERNELPROVIDER_<folder>_DESCRIPTOR_FILES the files it ships, and
+# HIPKERNELPROVIDER_<folder>_STAGE_FILES those files as (source, destination under the
+# production tree) pairs, the destination computed once. One list feeds staging and
+# install, so the two cannot disagree about what ships.
+#
+# The models live in git beside the engine, not in DVC: an engine that binds by declared id
+# ships a few small files that must change in the same commit as the selector revision they
+# record (see src/engines/asm_sdpa_engine/CMakeLists.txt and
+# src/engines/kernel_ingestor_engine/descriptors/README.md).
 set(HIPKERNELPROVIDER_DECLARED_MODEL_ENGINES)
 if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_KERNEL_INGESTOR)
     list(APPEND HIPKERNELPROVIDER_DECLARED_MODEL_ENGINES asm_sdpa)
@@ -706,11 +716,14 @@ if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_KERNEL_INGESTOR)
 endif()
 set(HIPKERNELPROVIDER_PRODUCT_STAGE_FILES)
 foreach(_engine IN LISTS HIPKERNELPROVIDER_DECLARED_MODEL_ENGINES)
+    set(HIPKERNELPROVIDER_${_engine}_STAGE_FILES)
     foreach(_descriptor IN LISTS HIPKERNELPROVIDER_${_engine}_DESCRIPTOR_FILES)
-        list(APPEND HIPKERNELPROVIDER_PRODUCT_STAGE_FILES
+        list(APPEND HIPKERNELPROVIDER_${_engine}_STAGE_FILES
              "${HIPKERNELPROVIDER_${_engine}_DESCRIPTOR_SOURCE_DIR}/${_descriptor}"
              "${_engine}/${_descriptor}")
     endforeach()
+    list(APPEND HIPKERNELPROVIDER_PRODUCT_STAGE_FILES
+         ${HIPKERNELPROVIDER_${_engine}_STAGE_FILES})
 endforeach()
 
 # The kpack reader and the descriptor packer both ride the ingestor gate. (The ASM SDPA
@@ -840,7 +853,10 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL
 # .kpack archives are installed by src/engines/asm_sdpa_engine/CMakeLists.txt.
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    # The two descriptor trees are installed here and nowhere else. Every producer --
+    # The two descriptor trees are installed here, or by the dormant-pack block at the end
+    # of this file, and nowhere else. With the production pack dormant, the declared-id
+    # engines' models are staged and installed by that block (same destination, from the
+    # source tree). Every producer --
     # the packer, or a step added later -- delivers content into one of these two
     # build-tree folders, and these rules ship them wholesale. Each installed descriptor
     # tree is then a copy of its build-tree folder, so a test that passes against one is
@@ -913,25 +929,26 @@ endif()
 if(HIPKERNELPROVIDER_DECLARED_MODEL_ENGINES AND NOT TARGET hkp_packaging_product)
     foreach(_engine IN LISTS HIPKERNELPROVIDER_DECLARED_MODEL_ENGINES)
         set(_staged)
-        foreach(_descriptor IN LISTS HIPKERNELPROVIDER_${_engine}_DESCRIPTOR_FILES)
-            set(_source "${HIPKERNELPROVIDER_${_engine}_DESCRIPTOR_SOURCE_DIR}/${_descriptor}")
-            set(_target "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}/${_engine}/${_descriptor}")
+        set(_pairs ${HIPKERNELPROVIDER_${_engine}_STAGE_FILES})
+        while(_pairs)
+            list(POP_FRONT _pairs _source _destination)
+            set(_target "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}/${_destination}")
             add_custom_command(
                 OUTPUT "${_target}"
                 COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${_source}" "${_target}"
                 DEPENDS "${_source}"
-                COMMENT "Staging ${_engine} heuristic ${_descriptor}"
+                COMMENT "Staging ${_engine} heuristic ${_destination}"
                 VERBATIM
             )
             list(APPEND _staged "${_target}")
 
-            get_filename_component(_descriptor_subdir "${_descriptor}" DIRECTORY)
+            get_filename_component(_destination_dir "${_destination}" DIRECTORY)
             install(
                 FILES "${_source}"
                 DESTINATION
-                    "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}/${_engine}/${_descriptor_subdir}"
+                    "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}/${_destination_dir}"
             )
-        endforeach()
+        endwhile()
         add_custom_target(${_engine}_engine_descriptors ALL DEPENDS ${_staged}
                           COMMENT "Staging ${_engine} engine heuristics")
     endforeach()

@@ -10,7 +10,6 @@
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
-#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
@@ -19,8 +18,6 @@
 #include <hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp>
 #include <hipdnn_plugin_sdk/heuristics/HipEngineFeatures.hpp>
 #include <hipdnn_plugin_sdk/heuristics/RankingMetric.hpp>
-
-#include "version.h"
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
@@ -35,21 +32,22 @@ namespace asm_sdpa_engine
 namespace
 {
 
-/// `<provider>/asm-sdpa/<digest>`: a configure-time digest of everything that decides
-/// which forward or backward kernel runs and how (see AsmSdpaSelectorRevision.cmake). A
-/// deployed L1 model must record this exact string as `trained_against.selector_revision`
-/// (RFC 0019 §4.1) or the loader refuses it.
+/// The full revision, prefix and digest, as AsmSdpaSelectorRevision.cmake computes it at
+/// configure time over everything that decides which forward or backward kernel runs and
+/// how. A deployed L1 model must record this exact string as
+/// `trained_against.selector_revision` (RFC 0019 §4.1) or the loader refuses it.
 #ifndef HKP_ASM_SDPA_REVISION
-// Without a digest, report a revision no shipped model can match.
+// Without a revision, report one no shipped model can match.
 #define HKP_ASM_SDPA_REVISION "undetermined"
 #endif
-constexpr const char* SELECTOR_REVISION = "hip-kernel-provider/asm-sdpa/" HKP_ASM_SDPA_REVISION;
+constexpr const char* SELECTOR_REVISION = HKP_ASM_SDPA_REVISION;
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 /// Resolves AsmSdpaEngine::L1_MODEL_IDS through the provider's descriptor catalog. Never
 /// throws: with no descriptor tree nothing resolves and the engine reports UNAVAILABLE.
 /// Each model binds under the metric its own `score.metric` declares.
-void bindDeclaredL1Models(hipdnn_plugin_sdk::uhd::EngineModelBinding& binding)
+void bindDeclaredL1Models(hipdnn_plugin_sdk::uhd::EngineModelBinding& binding,
+                          const hipdnn_plugin_sdk::ingestor::DescriptorCatalog& catalog)
 {
     namespace ingestor = hipdnn_plugin_sdk::ingestor;
     std::map<std::string, std::vector<ingestor::DescriptorId>> declared;
@@ -70,10 +68,7 @@ void bindDeclaredL1Models(hipdnn_plugin_sdk::uhd::EngineModelBinding& binding)
     }
 
     const auto resolved = ingestor::resolveDeclaredEnginePredictions(
-        hip_kernel_provider::kernel_ingestor_engine::descriptorCatalog(),
-        AsmSdpaEngine::engineName(),
-        SELECTOR_REVISION,
-        declared);
+        catalog, AsmSdpaEngine::engineName(), SELECTOR_REVISION, declared);
     for(const auto& [metric, byArch] : resolved.byMetric)
     {
         for(const auto& [arch, model] : byArch)
@@ -91,14 +86,42 @@ void bindDeclaredL1Models(hipdnn_plugin_sdk::uhd::EngineModelBinding& binding)
 }
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
 
+/// Refuses a plan that needs @p bytes of workspace when the configuration sets
+/// `global.workspace_size_limit` below it. The limit is a property of the engine
+/// configuration, not of the graph, so it cannot be an applicability decline: the plan is
+/// refused with the status the SDK's ingestor engines use for the same condition, and is
+/// never built.
+/// @throws HipdnnPluginException INVALID_VALUE when the plan needs more than the limit, or
+///         when the limit itself is not a nonnegative integer.
+void declineOverWorkspaceLimit(
+    uint64_t bytes, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config)
+{
+    const auto limit = hipdnn_plugin_sdk::heuristics::workspaceLimit(config);
+    if(limit && bytes > static_cast<uint64_t>(*limit))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+            "ASM SDPA plan needs " + std::to_string(bytes)
+                + " bytes of workspace, over the workspace limit of " + std::to_string(*limit)
+                + " bytes");
+    }
+}
+
 } // namespace
 
-AsmSdpaEngine::AsmSdpaEngine()
-{
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-    bindDeclaredL1Models(_l1Models);
-#endif
+AsmSdpaEngine::AsmSdpaEngine()
+    : AsmSdpaEngine(hip_kernel_provider::kernel_ingestor_engine::descriptorCatalog())
+{
 }
+
+AsmSdpaEngine::AsmSdpaEngine(const hipdnn_plugin_sdk::ingestor::DescriptorCatalog& catalog)
+{
+    bindDeclaredL1Models(_l1Models, catalog);
+}
+#else
+AsmSdpaEngine::AsmSdpaEngine() = default;
+#endif
 
 void AsmSdpaEngine::addPlanBuilder(std::unique_ptr<IPlanBuilder>&& planBuilder)
 {
@@ -156,31 +179,19 @@ void AsmSdpaEngine::getDetails(Handle& handle,
         handle, id(), knobs, behaviorNotes, detailsOut);
 }
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+const hipDeviceProp_t& AsmSdpaEngine::predictionDevice(Handle& handle) const
+{
+    return hipdnn_plugin_sdk::heuristics::predictionDevice(handle.getStream());
+}
+#endif
+
 hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPrediction(
     Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config,
     hipdnnEnginePredictionKind_t kind,
     bool evaluate) const
-{
-#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-    const DeviceQuery device = [&handle]() -> const hipDeviceProp_t& {
-        return hipdnn_plugin_sdk::heuristics::predictionDevice(handle.getStream());
-    };
-#else
-    // Without the ingestor getPredictionOn answers UNAVAILABLE before it asks for a device.
-    const DeviceQuery device;
-#endif
-    return getPredictionOn(handle, graph, config, kind, evaluate, device);
-}
-
-hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPredictionOn(
-    Handle& handle,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config,
-    hipdnnEnginePredictionKind_t kind,
-    bool evaluate,
-    const DeviceQuery& deviceOf) const
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
     EnginePredictionT result;
@@ -201,14 +212,27 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPredic
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
     try
     {
-        // The models were trained on graphs the builders serve; any other graph is outside
-        // what they describe, so it gets no estimate rather than an extrapolated one.
+        // The models describe graphs the builders serve in the three dense layouts the
+        // corpus covers (bshd, bhsd and kv_bhsd), so a graph no builder serves gets no
+        // estimate rather than an extrapolated one. A graph a builder serves in any other
+        // stride pattern (a padded view, a fused-QKV slice) is still estimated, by
+        // extrapolation: the models never saw it.
         if(findApplicablePlanBuilder(handle, graph) == nullptr)
         {
             result.reason = "ASM SDPA serves no plan for this graph";
             return result;
         }
-        const auto& device = deviceOf();
+        const auto& device = predictionDevice(handle);
+        // The gfx950 model reads the device's memory clock and bandwidth. A device that
+        // reports no clock feeds it a value far outside anything it trained on and gets a
+        // number that is not a rank, so it gets no estimate.
+        if(device.memoryClockRate <= 0)
+        {
+            result.reason = "ASM SDPA needs the device's memory clock, which this device "
+                            "reports as "
+                            + std::to_string(device.memoryClockRate) + " kHz";
+            return result;
+        }
         const auto features = hipdnn_plugin_sdk::heuristics::engineFeatures(graph, config, device);
         return _l1Models.predict(id(),
                                  engineName(),
@@ -217,6 +241,17 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPredic
                                  device.gcnArchName,
                                  features,
                                  evaluate);
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        // A malformed request is a fault, not a missing estimate: a bad
+        // `global.workspace_size_limit` is rejected here as it is where the plan is sized.
+        if(error.getStatus() == HIPDNN_PLUGIN_STATUS_INVALID_VALUE)
+        {
+            throw;
+        }
+        result.reason = error.what();
+        return result;
     }
     catch(const std::exception& error)
     {
@@ -229,7 +264,6 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPredic
     static_cast<void>(handle);
     static_cast<void>(graph);
     static_cast<void>(evaluate);
-    static_cast<void>(deviceOf);
     result.reason = "UHD engine prediction requires a build with HIPDNN_ENABLE_KERNEL_INGESTOR";
     return result;
 #endif
@@ -253,12 +287,7 @@ size_t AsmSdpaEngine::getMaxWorkspaceSize(
     Settings executionSettings;
     pb->initializeExecutionSettings(handle, opGraph, engineConfig, executionSettings);
     const auto bytes = pb->getMaxWorkspaceSize(handle, opGraph, executionSettings);
-    if(const auto limit = hipdnn_plugin_sdk::heuristics::workspaceLimit(engineConfig);
-       limit && bytes > static_cast<uint64_t>(*limit))
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
-                                                       "ASM SDPA exceeds the workspace limit");
-    }
+    declineOverWorkspaceLimit(bytes, engineConfig);
     return bytes;
 }
 
@@ -279,14 +308,8 @@ void AsmSdpaEngine::initializeExecutionContext(
     // buildPlan reads the knob settings from the context, so they are stored first.
     Settings executionSettings;
     pb->initializeExecutionSettings(handle, opGraph, engineConfig, executionSettings);
-    if(const auto limit = hipdnn_plugin_sdk::heuristics::workspaceLimit(engineConfig);
-       limit
-       && pb->getMaxWorkspaceSize(handle, opGraph, executionSettings)
-              > static_cast<uint64_t>(*limit))
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
-                                                       "ASM SDPA exceeds the workspace limit");
-    }
+    declineOverWorkspaceLimit(pb->getMaxWorkspaceSize(handle, opGraph, executionSettings),
+                              engineConfig);
     executionContext.setExecutionSettings(executionSettings);
     pb->buildPlan(handle, opGraph, engineConfig, executionContext);
 }

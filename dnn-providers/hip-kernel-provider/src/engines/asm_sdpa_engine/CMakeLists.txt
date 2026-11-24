@@ -98,14 +98,26 @@ target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_ASM_SDP
 # ============================================================================
 # Selector revision
 # ============================================================================
-# The `selector_revision` a deployed L1 model for this engine must record; inputs are
-# documented in AsmSdpaSelectorRevision.cmake. The selector dump beside it is what the L1
-# model gate in TestAsmSdpaEngine.cpp points to when a shipped model no longer binds.
+# The `selector_revision` a deployed L1 model for this engine must record, in full
+# (provider prefix and digest, both written by the recipe); inputs are documented in
+# AsmSdpaSelectorRevision.cmake. The selector dump beside it is what the L1 model gate in
+# TestAsmSdpaEngine.cpp points to when a shipped model no longer binds. The digest is
+# computed at configure time, and only AsmSdpaEngine.cpp reads it, so only that file carries
+# the definition: an edit of an input changes that file's compile command, not every
+# object's of the target.
+#
+# The two models this revision gates are checked into git beside the engine
+# (descriptors/predict_engine/<arch>/*.uhd.json and .bin, about 200 KB each), not tracked
+# through DVC like the models of the engines that resolve theirs by catalog: an engine that
+# binds its models by a declared id (AsmSdpaEngine::L1_MODEL_IDS) ships a handful of small
+# files that the revision, the id and the loader must agree on, and the change that moves
+# the revision retrains them in the same commit, so they travel with it.
 include("${CMAKE_CURRENT_SOURCE_DIR}/AsmSdpaSelectorRevision.cmake")
 hkp_asm_sdpa_revision(_asm_sdpa_revision "${CMAKE_CURRENT_SOURCE_DIR}" CONFIGURE_DEPENDS
     MANIFEST "${CMAKE_BINARY_DIR}/selector_revisions/ASM_SDPA_ENGINE.selector.json")
-target_compile_definitions(hip_kernel_provider_impl PRIVATE
-    HKP_ASM_SDPA_REVISION="${_asm_sdpa_revision}")
+set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/AsmSdpaEngine.cpp"
+    TARGET_DIRECTORY hip_kernel_provider_impl
+    PROPERTIES COMPILE_DEFINITIONS HKP_ASM_SDPA_REVISION="${_asm_sdpa_revision}")
 message(STATUS "hip-kernel-provider: asm_sdpa selector revision ${_asm_sdpa_revision}")
 
 # ============================================================================

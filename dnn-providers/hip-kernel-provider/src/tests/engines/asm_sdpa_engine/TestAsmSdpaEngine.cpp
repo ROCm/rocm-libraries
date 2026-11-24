@@ -4,11 +4,11 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -44,7 +44,6 @@
 #include "mocks/MockPlanBuilder.hpp"
 #include "tests/engines/ShippedL1ModelGate.hpp"
 #include "tests/engines/asm_sdpa_engine/AsmSdpaTestSupport.hpp"
-#include "version.h"
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 #include "AsmSdpaShippedModels.hpp"
@@ -54,6 +53,7 @@
 #include <hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp>
+#include <nlohmann/json.hpp>
 #endif
 
 namespace asm_sdpa_engine
@@ -92,14 +92,14 @@ flatbuffers::FlatBufferBuilder createAccumulatorKnobConfig(const std::string& va
     return builder;
 }
 
-// The accumulator knob set to an integer instead of a string.
-flatbuffers::FlatBufferBuilder createIntAccumulatorKnobConfig()
+// An engine config for this engine carrying one integer knob setting.
+flatbuffers::FlatBufferBuilder createIntKnobConfig(const char* knobName, int64_t value)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
     flatbuffers::FlatBufferBuilder builder;
-    const auto knobValue = CreateIntValue(builder, 16);
+    const auto knobValue = CreateIntValue(builder, value);
     const std::vector<flatbuffers::Offset<KnobSetting>> knobSettings{
-        CreateKnobSettingDirect(builder, K_ACC_KNOB, KnobValue::IntValue, knobValue.Union())};
+        CreateKnobSettingDirect(builder, knobName, KnobValue::IntValue, knobValue.Union())};
     builder.Finish(CreateEngineConfigDirect(builder, AsmSdpaEngine::staticId(), &knobSettings));
     return builder;
 }
@@ -109,21 +109,6 @@ flatbuffers::FlatBufferBuilder createEngineConfigWithoutKnobs()
     flatbuffers::FlatBufferBuilder builder;
     builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(
         builder, AsmSdpaEngine::staticId()));
-    return builder;
-}
-
-// An engine config for this engine carrying the global workspace limit, in bytes.
-flatbuffers::FlatBufferBuilder createWorkspaceLimitConfig(int64_t limit)
-{
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-    flatbuffers::FlatBufferBuilder builder;
-    const auto knobValue = CreateIntValue(builder, limit);
-    const std::vector<flatbuffers::Offset<KnobSetting>> knobSettings{
-        CreateKnobSettingDirect(builder,
-                                hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME,
-                                KnobValue::IntValue,
-                                knobValue.Union())};
-    builder.Finish(CreateEngineConfigDirect(builder, AsmSdpaEngine::staticId(), &knobSettings));
     return builder;
 }
 
@@ -166,6 +151,14 @@ hipdnn_flatbuffers_sdk::data_objects::KnobT makeStringKnob(const std::string& id
     defaultValue.value = "default";
     knob.default_value.Set(defaultValue);
     return knob;
+}
+
+// A plan builder that serves every graph.
+std::unique_ptr<IPlanBuilder> servingPlanBuilder()
+{
+    auto builder = std::make_unique<::testing::NiceMock<MockPlanBuilder>>();
+    ON_CALL(*builder, isApplicable).WillByDefault(::testing::Return(true));
+    return builder;
 }
 
 class TestAsmSdpaEngine : public ::testing::Test
@@ -299,30 +292,12 @@ TEST(TestAsmSdpaEngineDeclaration, DeclaredModelIdsAreDistinctWellFormedUuids)
     }
 }
 
-/// A model whose recorded revision mismatches is refused, so the revision must track the
-/// forward and backward kernels and selection sources, not the provider release.
-TEST(TestAsmSdpaEngineDeclaration, TheSelectorRevisionNamesTheKernelSurfaceAndNotTheRelease)
-{
-    const std::string revision = AsmSdpaEngine::selectorRevision();
-    const std::string prefix = "hip-kernel-provider/asm-sdpa/";
-    ASSERT_EQ(revision.rfind(prefix, 0), 0u) << revision;
-
-    // "undetermined" here means the CMake wiring that computes the digest was dropped.
-    const std::string digest = revision.substr(prefix.size());
-    EXPECT_EQ(digest.size(), 16u) << revision;
-    EXPECT_TRUE(std::all_of(digest.begin(), digest.end(), [](unsigned char character) {
-        return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f');
-    })) << revision;
-
-    // No provider version component, in any form.
-    EXPECT_EQ(revision.find(HIP_KERNEL_PROVIDER_VERSION_STRING), std::string::npos) << revision;
-    EXPECT_EQ(revision.find("0.2."), std::string::npos) << revision;
-}
-
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 /// A shipped model that records another revision is refused at load and the engine reports
 /// no estimate, silently; one declared for an architecture other than the one it ships for
-/// answers devices it was never measured on. This is where either fails the build.
+/// is bound there and its estimate refused, leaving that architecture unranked; and a
+/// declared architecture missing from the staged model list ships no model. This is where
+/// any of them fails the build.
 TEST(TestAsmSdpaEngineDeclaration, ShippedL1ModelsRecordTheRevisionThisBuildComputes)
 {
     EXPECT_TRUE(hip_kernel_provider::shipped_model_gate::shippedL1ModelsBindThisBuild(
@@ -330,6 +305,7 @@ TEST(TestAsmSdpaEngineDeclaration, ShippedL1ModelsRecordTheRevisionThisBuildComp
         "dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/"
         "AsmSdpaSelectorRevision.cmake",
         shipped_models::MODELS,
+        shipped_models::FILES,
         HKP_SELECTOR_DUMP_DIR,
         AsmSdpaEngine::L1_MODEL_IDS,
         AsmSdpaEngine::selectorRevision()));
@@ -357,6 +333,25 @@ TEST_F(TestAsmSdpaEngine, ConfigurationDeclineCarriesTheRequestedMetric)
         _engine.getPrediction(_handle, graph, unnamed, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, true)
             .metric,
         "tflops");
+}
+
+/// A configuration request for a graph a builder serves is answered by the CONFIGURATION
+/// branch, not by a model: this engine selects its own kernel and has no exact configuration
+/// to name. The builder serves the graph, so the answer cannot be the "no plan" decline.
+TEST_F(TestAsmSdpaEngine, ConfigurationRequestForAServedGraphDeclinesWithTheExactReason)
+{
+    AsmSdpaEngine engine;
+    engine.addPlanBuilder(servingPlanBuilder());
+    const hipdnn_test_sdk::utilities::MockGraph graph;
+    const EngineConfigWrapper config(nullptr, 0);
+
+    const auto prediction = engine.getPrediction(
+        _handle, graph, config, HIPDNN_ENGINE_PREDICTION_CONFIGURATION, true);
+    EXPECT_EQ(prediction.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(prediction.kind, PredictionKind::CONFIGURATION);
+    EXPECT_EQ(prediction.metric, "tflops");
+    EXPECT_EQ(prediction.reason,
+              "ASM SDPA selects its own kernel and predicts no exact configuration");
 }
 
 /// RFC 0019 §4.4: no metric substitution. Only `tflops` models ship, so `time` stays
@@ -392,24 +387,15 @@ TEST_F(TestAsmSdpaEngine, UnregisteredMetricIsABadRequest)
 
 namespace fixtures = selector_revision_fixtures;
 
-constexpr std::string_view SELECTOR_REVISION_PREFIX = "hip-kernel-provider/asm-sdpa/";
-
-/// The digest part of the revision this build reports.
-std::string_view builtDigest()
-{
-    std::string_view revision = AsmSdpaEngine::selectorRevision();
-    if(revision.substr(0, SELECTOR_REVISION_PREFIX.size()) != SELECTOR_REVISION_PREFIX)
-    {
-        return {};
-    }
-    revision.remove_prefix(SELECTOR_REVISION_PREFIX.size());
-    return revision;
-}
-
-/// Shipped models record the revision verbatim, so its form is a contract.
+/// Shipped models record the revision verbatim, so its form is a contract: the recipe's
+/// prefix and sixteen lowercase hex digits. A revision of "undetermined" means the wiring
+/// that hands the recipe's revision to the engine was dropped.
 TEST(TestAsmSdpaSelectorRevision, IsTheProviderPrefixAndSixteenLowercaseHexDigits)
 {
-    const std::string_view digest = builtDigest();
+    std::string_view digest = AsmSdpaEngine::selectorRevision();
+    const std::string_view prefix(fixtures::REVISION_PREFIX);
+    ASSERT_EQ(digest.substr(0, prefix.size()), prefix) << AsmSdpaEngine::selectorRevision();
+    digest.remove_prefix(prefix.size());
     ASSERT_EQ(digest.size(), 16u) << AsmSdpaEngine::selectorRevision();
     for(const char c : digest)
     {
@@ -423,10 +409,12 @@ TEST(TestAsmSdpaSelectorRevision, IsTheProviderPrefixAndSixteenLowercaseHexDigit
 TEST(TestAsmSdpaSelectorRevision, CrlfAndLfCheckoutsReportTheBuiltRevision)
 {
     EXPECT_EQ(std::string_view(fixtures::REVISION_CRLF), std::string_view(fixtures::REVISION_LF));
-    EXPECT_EQ(builtDigest(), std::string_view(fixtures::REVISION_LF));
+    EXPECT_EQ(std::string_view(AsmSdpaEngine::selectorRevision()),
+              std::string_view(fixtures::REVISION_LF));
 }
 
-/// Each forward or backward selection input must move the revision; everything else must not.
+/// Each selection input, of either direction, must move the revision, in content and in the
+/// path it is keyed by (a kernel moved to another arch directory); everything else must not.
 TEST(TestAsmSdpaSelectorRevision, MovesForEverySelectionInputAndNothingElse)
 {
     const std::string_view base(fixtures::REVISION_LF);
@@ -436,6 +424,15 @@ TEST(TestAsmSdpaSelectorRevision, MovesForEverySelectionInputAndNothingElse)
             << probe.change << (probe.mustExpire ? " must" : " must not")
             << " change the selector revision";
     }
+}
+
+/// A file added to the engine tree is neither hashed nor probed until someone decides it
+/// is an input; the probes above only cover the files the recipe lists.
+TEST(TestAsmSdpaSelectorRevision, EveryEngineFileIsAnInputOrDeclaredNotToBe)
+{
+    EXPECT_EQ(std::string_view(fixtures::UNCLASSIFIED_FILES), "")
+        << "Add each to hkp_asm_sdpa_sources() (it decides a kernel or its launch) or to "
+           "hkp_asm_sdpa_not_inputs() (it does not) in AsmSdpaSelectorRevision.cmake";
 }
 
 TEST_F(TestAsmSdpaEngine, GetDetailsReportsKnobsOfApplicableBuilderOnly)
@@ -466,24 +463,6 @@ TEST_F(TestAsmSdpaEngine, GetDetailsReportsKnobsOfApplicableBuilderOnly)
 }
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-/// The models describe graphs the builders serve; a graph no builder serves gets no estimate
-/// instead of an extrapolated one, before any device or model is consulted.
-TEST_F(TestAsmSdpaEngine, GetPredictionDeclinesAGraphNoBuilderServes)
-{
-    auto declining = std::make_unique<::testing::NiceMock<MockPlanBuilder>>();
-    ON_CALL(*declining, isApplicable).WillByDefault(::testing::Return(false));
-    AsmSdpaEngine engine;
-    engine.addPlanBuilder(std::move(declining));
-
-    const hipdnn_test_sdk::utilities::MockGraph graph;
-    const EngineConfigWrapper config(nullptr, 0);
-    const auto prediction
-        = engine.getPrediction(_handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true);
-    EXPECT_EQ(prediction.status, PredictionStatus::UNAVAILABLE);
-    EXPECT_EQ(prediction.reason, "ASM SDPA serves no plan for this graph");
-}
-
-#ifdef HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_RELDIR
 /// A device as the shipped models' training rows recorded it: an MI300X for gfx942, an
 /// MI355X for gfx950, in the properties UHD device features read.
 hipDeviceProp_t trainingDevice(const std::string& arch)
@@ -500,6 +479,92 @@ hipDeviceProp_t trainingDevice(const std::string& arch)
     return device;
 }
 
+/// An engine that estimates for a synthesized device instead of the handle stream's, to see
+/// what each architecture's model answers on a host of any architecture.
+class SynthesizedDeviceEngine : public AsmSdpaEngine
+{
+public:
+    explicit SynthesizedDeviceEngine(const hipDeviceProp_t& device)
+        : _device(device)
+    {
+    }
+
+    SynthesizedDeviceEngine(const hipDeviceProp_t& device,
+                            const hipdnn_plugin_sdk::ingestor::DescriptorCatalog& catalog)
+        : AsmSdpaEngine(catalog)
+        , _device(device)
+    {
+    }
+
+protected:
+    const hipDeviceProp_t& predictionDevice(Handle& /*handle*/) const override
+    {
+        return _device;
+    }
+
+private:
+    hipDeviceProp_t _device;
+};
+
+/// The models describe the graphs the builders serve in the three dense layouts the corpus
+/// covers; a graph no builder serves gets no estimate instead of an extrapolated one, before
+/// any device or model is consulted. A stride pattern a builder serves outside those layouts
+/// is estimated by extrapolation, which this test does not cover.
+TEST_F(TestAsmSdpaEngine, GetPredictionDeclinesAGraphNoBuilderServes)
+{
+    auto declining = std::make_unique<::testing::NiceMock<MockPlanBuilder>>();
+    ON_CALL(*declining, isApplicable).WillByDefault(::testing::Return(false));
+    AsmSdpaEngine engine;
+    engine.addPlanBuilder(std::move(declining));
+
+    const hipdnn_test_sdk::utilities::MockGraph graph;
+    const EngineConfigWrapper config(nullptr, 0);
+    const auto prediction
+        = engine.getPrediction(_handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true);
+    EXPECT_EQ(prediction.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(prediction.reason, "ASM SDPA serves no plan for this graph");
+}
+
+/// A negative `global.workspace_size_limit` is a malformed request on the prediction path
+/// too: it throws INVALID_VALUE, as getMaxWorkspaceSize and initializeExecutionContext do,
+/// instead of reading as a missing estimate.
+TEST_F(TestAsmSdpaEngine, ANegativeWorkspaceLimitIsAnInvalidValueOnThePredictionPath)
+{
+    SynthesizedDeviceEngine engine(trainingDevice("gfx942"));
+    engine.addPlanBuilder(servingPlanBuilder());
+    auto graphBuilder = createSdpaFwdGraph();
+    const GraphWrapper graph(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+
+    const auto negative
+        = createIntKnobConfig(hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME, -1);
+    EXPECT_EQ(statusOf([&] {
+                  static_cast<void>(engine.getPrediction(
+                      _handle, graph, wrapConfig(negative), HIPDNN_ENGINE_PREDICTION_ENGINE, true));
+              }),
+              HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
+}
+
+/// The gfx950 model reads the device's memory clock and bandwidth, so a device that reports
+/// no clock gets no estimate instead of a number the model produces from a value it never
+/// trained on.
+TEST_F(TestAsmSdpaEngine, ADeviceThatReportsNoMemoryClockHasNoEstimate)
+{
+    auto device = trainingDevice("gfx950");
+    device.memoryClockRate = 0;
+    SynthesizedDeviceEngine engine(device);
+    engine.addPlanBuilder(servingPlanBuilder());
+    auto graphBuilder = createSdpaFwdGraph();
+    const GraphWrapper graph(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    const EngineConfigWrapper config(nullptr, 0);
+
+    const auto prediction
+        = engine.getPrediction(_handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true);
+    EXPECT_EQ(prediction.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(prediction.metric, "tflops");
+    EXPECT_THAT(prediction.reason, ::testing::HasSubstr("memory clock"));
+}
+
+#ifdef HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_RELDIR
 /// Dense bf16 peak in TFLOPS, AMD's published MI300X and MI355X figures. No estimate of an
 /// attention graph can exceed it.
 double denseBf16PeakTflops(const std::string& arch)
@@ -540,51 +605,81 @@ bool runsFromItsBuildTree()
                                        error);
 }
 
-/// Every declared model must ship for its architecture, survive the loader and answer:
-/// the engine itself gives an AVAILABLE `tflops` estimate for forward and backward graphs in
-/// both the token-major (BSHD) and head-major (BHSD) layouts, equal to that architecture's
-/// own model's and below the device's peak. Nothing else asks the engine for an estimate on
-/// a host, so a model that never binds (an id typo, an unstaged file, a binding or
-/// architecture lookup that drifted) would otherwise leave the engine unranked while every
-/// test passed. The plan builder is mocked to serve each graph: which graphs the real
-/// builders serve depends on the device, and is theirs to test. Outside the build tree a
-/// model may be absent only where the install carries no shard for its architecture.
-TEST_F(TestAsmSdpaEngine, EachDeclaredModelEstimatesOnItsArchitecture)
+/// Whether the model declared for @p arch may be missing from this install without that being
+/// a failure: outside the build tree, only where the install carries no shard for the
+/// architecture and no model folder either.
+bool modelMayBeAbsent(const std::string& arch)
 {
-    namespace ingestor = hipdnn_plugin_sdk::ingestor;
+    const auto modelsRoot = hip_kernel_provider::testing::descriptorSetRoot(
+        HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_RELDIR);
+    const bool carried
+        = runsFromItsBuildTree() || installedShardArches(modelsRoot.parent_path()).count(arch) != 0;
+    return !carried && !std::filesystem::exists(modelsRoot / "predict_engine" / arch);
+}
+
+/// Forward and backward graphs of [batch, heads, sequence, head_dim] = [4, 8, 1024, 128] in
+/// bf16 with FLOAT compute, in the three dense layouts the models describe: token-major
+/// (bshd), head-major (bhsd) and kv_bhsd, the decode KV cache (query and output token-major,
+/// key and value head-major).
+std::vector<std::pair<std::string, flatbuffers::FlatBufferBuilder>> sdpaLayoutGraphs()
+{
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
     using hipdnn_test_sdk::utilities::createValidSdpaBwdGraph;
     using hipdnn_test_sdk::utilities::createValidSdpaFwdGraph;
 
-    // [batch, heads, sequence, head_dim] = [4, 8, 1024, 128]; the layout is in the strides.
+    struct Layout
+    {
+        std::string name;
+        std::vector<int64_t> queryAndOutput;
+        std::vector<int64_t> keyAndValue;
+    };
     const std::vector<int64_t> dims{4, 8, 1024, 128};
     const std::vector<int64_t> bshd{1048576, 128, 1024, 1};
     const std::vector<int64_t> bhsd{1048576, 131072, 128, 1};
+
     std::vector<std::pair<std::string, flatbuffers::FlatBufferBuilder>> graphs;
-    for(const auto& [layout, strides] : {std::pair{"bshd", bshd}, std::pair{"bhsd", bhsd}})
+    for(const auto& [name, qo, kv] :
+        {Layout{"bshd", bshd, bshd}, Layout{"bhsd", bhsd, bhsd}, Layout{"kv_bhsd", bshd, bhsd}})
     {
         graphs.emplace_back(
-            std::string("forward ") + layout,
+            "forward " + name,
             createValidSdpaFwdGraph(
-                dims, strides, dims, strides, dims, strides, dims, strides, DataType::BFLOAT16));
+                dims, qo, dims, kv, dims, kv, dims, qo, DataType::BFLOAT16, DataType::FLOAT));
         graphs.emplace_back(
-            std::string("backward ") + layout,
-            createValidSdpaBwdGraph(
-                dims, strides, dims, strides, dims, strides, dims, strides, DataType::BFLOAT16));
+            "backward " + name,
+            mutateGraph(
+                createValidSdpaBwdGraph(dims, qo, dims, kv, dims, kv, dims, qo, DataType::BFLOAT16),
+                [](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
+                    graph.nodes.front()->compute_data_type = DataType::FLOAT;
+                }));
     }
+    return graphs;
+}
+
+/// Every declared model must ship for its architecture, survive the loader and answer:
+/// the engine itself gives an AVAILABLE `tflops` estimate for forward and backward graphs in
+/// the token-major (bshd), head-major (bhsd) and kv_bhsd layouts, equal to that
+/// architecture's own model's and below the device's peak, and describes the binding a model
+/// must be trained against. Nothing else asks the engine for an estimate on a host, so a
+/// model that never binds (an id typo, an unstaged file, a binding or architecture lookup
+/// that drifted) would otherwise leave the engine unranked while every test passed. The plan
+/// builder is mocked to serve each graph: which graphs the real builders serve depends on the
+/// device, and is theirs to test (GetPredictionEstimatesEachLayoutOnTheDevice runs the real
+/// ones). Outside the build tree a model may be absent only where the install carries no
+/// shard for its architecture.
+TEST_F(TestAsmSdpaEngine, EachDeclaredModelEstimatesOnItsArchitecture)
+{
+    namespace ingestor = hipdnn_plugin_sdk::ingestor;
+
+    const auto graphs = sdpaLayoutGraphs();
     const EngineConfigWrapper config(nullptr, 0);
-    const auto modelsRoot = hip_kernel_provider::testing::descriptorSetRoot(
-        HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_RELDIR);
-    const auto shards = installedShardArches(modelsRoot.parent_path());
-    const bool buildTree = runsFromItsBuildTree();
     size_t checked = 0;
 
     for(const auto& [arch, id] : AsmSdpaEngine::L1_MODEL_IDS)
     {
         const std::string archName(arch);
         SCOPED_TRACE(archName);
-        const bool required = buildTree || shards.count(archName) != 0;
-        if(!required && !std::filesystem::exists(modelsRoot / "predict_engine" / archName))
+        if(modelMayBeAbsent(archName))
         {
             std::cout << "[ NOTE     ] this install carries no " << archName
                       << " content (its GPU family is packaged separately or has none), so the "
@@ -615,25 +710,20 @@ TEST_F(TestAsmSdpaEngine, EachDeclaredModelEstimatesOnItsArchitecture)
                  archName,
                  ingestor::UhdKernelHeuristic::configFrom(tflops->second.at(archName)));
 
-        auto serving = std::make_unique<::testing::NiceMock<MockPlanBuilder>>();
-        ON_CALL(*serving, isApplicable).WillByDefault(::testing::Return(true));
-        AsmSdpaEngine engine;
-        engine.addPlanBuilder(std::move(serving));
         const auto device = trainingDevice(archName);
+        SynthesizedDeviceEngine engine(device);
+        engine.addPlanBuilder(servingPlanBuilder());
 
         for(const auto& [name, builder] : graphs)
         {
             SCOPED_TRACE(name);
             const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-            const auto estimate
-                = engine.getPredictionOn(_handle,
-                                         graph,
-                                         config,
-                                         HIPDNN_ENGINE_PREDICTION_ENGINE,
-                                         true,
-                                         [&device]() -> const hipDeviceProp_t& { return device; });
+            const auto estimate = engine.getPrediction(
+                _handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true);
             ASSERT_EQ(estimate.status, PredictionStatus::AVAILABLE) << estimate.reason;
             EXPECT_EQ(estimate.metric, "tflops");
+            EXPECT_EQ(estimate.engine_id, AsmSdpaEngine::staticId());
+            EXPECT_EQ(estimate.kind, PredictionKind::ENGINE);
 
             const auto expected
                 = own.predict(AsmSdpaEngine::staticId(),
@@ -650,11 +740,102 @@ TEST_F(TestAsmSdpaEngine, EachDeclaredModelEstimatesOnItsArchitecture)
             EXPECT_LT(estimate.value, denseBf16PeakTflops(archName))
                 << "an estimate above the device's dense bf16 peak";
         }
+
+        const GraphWrapper firstGraph(graphs.front().second.GetBufferPointer(),
+                                      graphs.front().second.GetSize());
+
+        // Described rather than evaluated: the binding a model must be trained against.
+        const auto description = engine.getPrediction(
+            _handle, firstGraph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, false);
+        ASSERT_FALSE(description.binding_json.empty()) << description.reason;
+        const auto binding = nlohmann::json::parse(description.binding_json);
+        EXPECT_EQ(binding.at("trained_against").at("selector_revision").get<std::string>(),
+                  AsmSdpaEngine::selectorRevision());
+        EXPECT_EQ(binding.at("uhd_id").get<std::string>(), std::string(id));
+        EXPECT_EQ(description.uhd_id, std::string(id));
+
+        // Only `tflops` models ship: another metric is unanswered, not substituted.
+        const auto timeConfigBuilder = engineConfigNaming("time");
+        const auto inTime = engine.getPrediction(_handle,
+                                                 firstGraph,
+                                                 wrapConfig(timeConfigBuilder),
+                                                 HIPDNN_ENGINE_PREDICTION_ENGINE,
+                                                 true);
+        EXPECT_EQ(inTime.status, PredictionStatus::UNAVAILABLE) << inTime.reason;
+        EXPECT_EQ(inTime.metric, "time");
     }
     if(checked == 0)
     {
         GTEST_SKIP() << "this install carries content for neither architecture the ASM SDPA "
                         "models are declared for";
+    }
+}
+
+/// A model that records another selector revision is refused at load, and the engine says so
+/// by name instead of estimating from it. The engine binds from a catalog whose gfx942 model
+/// carries a stale revision.
+TEST_F(TestAsmSdpaEngine, AModelRecordingAnotherSelectorRevisionIsRefusedNamingBoth)
+{
+    namespace ingestor = hipdnn_plugin_sdk::ingestor;
+    const auto& [arch, id] = AsmSdpaEngine::L1_MODEL_IDS.front();
+    const std::string archName(arch);
+    if(modelMayBeAbsent(archName))
+    {
+        GTEST_SKIP() << "this install carries no " << archName << " content";
+    }
+
+    ingestor::DescriptorCatalog stale;
+    stale.heuristics = hip_kernel_provider::kernel_ingestor_engine::descriptorCatalog().heuristics;
+    const auto model = stale.heuristics.find(hipdnn_flatbuffers_sdk::utilities::parseUuid(id));
+    ASSERT_TRUE(model != stale.heuristics.end()) << "no model " << id << " in the catalog";
+    const std::string staleRevision = "hip-kernel-provider/asm-sdpa/0000000000000000";
+    ASSERT_NE(staleRevision, AsmSdpaEngine::selectorRevision());
+    model->second.descriptor.trainedAgainstSelectorRevision = staleRevision;
+
+    SynthesizedDeviceEngine engine(trainingDevice(archName), stale);
+    engine.addPlanBuilder(servingPlanBuilder());
+    auto graphBuilder = createSdpaFwdGraph();
+    const GraphWrapper graph(graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+    const EngineConfigWrapper config(nullptr, 0);
+
+    const auto estimate
+        = engine.getPrediction(_handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true);
+    EXPECT_EQ(estimate.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_THAT(estimate.reason, ::testing::HasSubstr(staleRevision));
+    EXPECT_THAT(estimate.reason, ::testing::HasSubstr(AsmSdpaEngine::selectorRevision()));
+}
+
+/// What the handle's own device gets: the real handle, the real device lookup and the real
+/// plan builders, on the architectures the models are declared for, in each layout they
+/// describe. Every other test reaches an estimate through a synthesized device and a mocked
+/// builder, so this is the one that runs the production path end to end.
+TEST_F(TestAsmSdpaEngine, GetPredictionEstimatesEachLayoutOnTheDevice)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const auto arch = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(arch != "gfx942" && arch != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+    if(modelMayBeAbsent(arch))
+    {
+        GTEST_SKIP() << "this install carries no " << arch << " content";
+    }
+
+    const EngineConfigWrapper config(nullptr, 0);
+    for(const auto& [name, builder] : sdpaLayoutGraphs())
+    {
+        SCOPED_TRACE(name);
+        const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+        const auto estimate
+            = _engine.getPrediction(_handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true);
+        ASSERT_EQ(estimate.status, PredictionStatus::AVAILABLE) << estimate.reason;
+        EXPECT_EQ(estimate.metric, "tflops");
+        EXPECT_EQ(estimate.engine_id, AsmSdpaEngine::staticId());
+        EXPECT_TRUE(std::isfinite(estimate.value) && estimate.value > 0.0) << estimate.value;
+        EXPECT_LT(estimate.value, denseBf16PeakTflops(arch))
+            << "an estimate above the device's dense bf16 peak";
     }
 }
 #endif // HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_RELDIR
@@ -689,10 +870,12 @@ TEST_F(TestAsmSdpaEngine, InitializeExecutionContextBuildsPlanWithConfiguredSett
     EXPECT_EQ(accumulatorSeenByBuildPlan, AccumulatorType::A16);
 }
 
-/// A plan that needs more workspace than global.workspace_size_limit allows is declined as
-/// NOT_APPLICABLE by both entry points, and is never built; a plan at the limit, or with no
-/// limit set, is not.
-TEST_F(TestAsmSdpaEngine, APlanOverTheWorkspaceLimitIsDeclinedAndNeverBuilt)
+/// A plan that needs more workspace than global.workspace_size_limit allows is refused with
+/// INVALID_VALUE by both entry points and is never built; a plan at the limit, or with no
+/// limit set, is not. The status is the one the SDK's ingestor engines raise for the same
+/// condition. It is a refused plan, not an applicability decline: the limit belongs to the
+/// engine configuration, which applicability never sees.
+TEST_F(TestAsmSdpaEngine, APlanOverTheWorkspaceLimitIsRefusedAndNeverBuilt)
 {
     constexpr size_t PLAN_BYTES = 1024;
     auto builder = std::make_unique<::testing::NiceMock<MockPlanBuilder>>();
@@ -704,19 +887,21 @@ TEST_F(TestAsmSdpaEngine, APlanOverTheWorkspaceLimitIsDeclinedAndNeverBuilt)
     engine.addPlanBuilder(std::move(builder));
     const hipdnn_test_sdk::utilities::MockGraph graph;
 
-    const auto under = createWorkspaceLimitConfig(PLAN_BYTES - 1);
-    Context declined;
+    const auto under
+        = createIntKnobConfig(hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME, PLAN_BYTES - 1);
+    Context refused;
     EXPECT_EQ(statusOf([&] {
                   static_cast<void>(engine.getMaxWorkspaceSize(_handle, graph, wrapConfig(under)));
               }),
-              HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE);
+              HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
     EXPECT_EQ(statusOf([&] {
-                  engine.initializeExecutionContext(_handle, graph, wrapConfig(under), declined);
+                  engine.initializeExecutionContext(_handle, graph, wrapConfig(under), refused);
               }),
-              HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE);
+              HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
     EXPECT_EQ(plansBuilt, 0);
 
-    const auto exact = createWorkspaceLimitConfig(PLAN_BYTES);
+    const auto exact
+        = createIntKnobConfig(hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME, PLAN_BYTES);
     EXPECT_EQ(engine.getMaxWorkspaceSize(_handle, graph, wrapConfig(exact)), PLAN_BYTES);
     Context atLimit;
     engine.initializeExecutionContext(_handle, graph, wrapConfig(exact), atLimit);
@@ -726,7 +911,7 @@ TEST_F(TestAsmSdpaEngine, APlanOverTheWorkspaceLimitIsDeclinedAndNeverBuilt)
     EXPECT_EQ(engine.getMaxWorkspaceSize(_handle, graph, wrapConfig(unlimited)), PLAN_BYTES);
 }
 
-/// A negative limit is a bad value, not a decline.
+/// A negative limit is rejected whatever the plan needs: it is a bad value, not a limit.
 TEST_F(TestAsmSdpaEngine, ANegativeWorkspaceLimitIsAnInvalidValue)
 {
     auto builder = std::make_unique<::testing::NiceMock<MockPlanBuilder>>();
@@ -735,7 +920,8 @@ TEST_F(TestAsmSdpaEngine, ANegativeWorkspaceLimitIsAnInvalidValue)
     engine.addPlanBuilder(std::move(builder));
     const hipdnn_test_sdk::utilities::MockGraph graph;
 
-    const auto negative = createWorkspaceLimitConfig(-1);
+    const auto negative
+        = createIntKnobConfig(hipdnn_plugin_sdk::WORKSPACE_SIZE_LIMIT_KNOB_NAME, -1);
     EXPECT_EQ(statusOf([&] {
                   static_cast<void>(
                       engine.getMaxWorkspaceSize(_handle, graph, wrapConfig(negative)));
@@ -814,7 +1000,7 @@ TEST_F(TestAsmSdpaEngine, InvalidAccumulatorKnobIsRejected)
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     for(const auto& configBuilder :
-        {createAccumulatorKnobConfig("a64"), createIntAccumulatorKnobConfig()})
+        {createAccumulatorKnobConfig("a64"), createIntKnobConfig(K_ACC_KNOB, 16)})
     {
         const auto config = wrapConfig(configBuilder);
         EXPECT_THROW(_engine.getMaxWorkspaceSize(_handle, graph, config),
