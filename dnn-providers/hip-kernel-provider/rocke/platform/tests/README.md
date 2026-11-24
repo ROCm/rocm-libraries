@@ -329,6 +329,49 @@ plain `GREEN`.
 See [TESTING.md §5.0.1](../../TESTING.md#501-unit-discovery-versus-explicit-resource-gates)
 for the reusable placement contract.
 
+## Dense-attention host contracts
+
+The shared dense spec and the concrete gfx950 host spec have native tests because
+validation reasons, kernel identity, LDS admission and launch arguments are not
+all visible in emitted IR:
+
+- `rocke_attention_dense_spec` checks the architecture-neutral spec. Its subclass
+  hook fixtures supply recorded answers; they do not implement a gfx950 spec.
+- `rocke_attention_dense_gfx950_spec` calculates the concrete gfx950 answers from
+  raw spec fields: validation/support reasons, resolved knobs, runtime fields,
+  names, LDS, grids, thread blocks, signatures and runtime scalar values.
+- `rocke_sha256` checks the digest used in tuned kernel names. For float values
+  in those names, the spec uses the same formatter as the IR printer, serializer
+  and HIP lowerer; `rocke_float_format` tests that formatter.
+
+The Python drift guard and native tests consume
+`golden/attention_dense_spec_vectors.json` and
+`golden/attention_dense_gfx950_spec_vectors.json`. After an intended Python change,
+regenerate the vectors and update the native implementation in the same change.
+From `platform/`:
+
+```bash
+PYTHONPATH=python:../library python ../library/tests/test_attention_dense_spec_vectors.py --regenerate
+python -m pytest -q ../library/tests/test_attention_dense_spec_vectors.py
+cmake --build <build> --target rocke_attention_dense_spec rocke_attention_dense_gfx950_spec rocke_sha256 rocke_float_format
+ctest --test-dir <build> -R '^(rocke_attention_dense_spec|rocke_attention_dense_gfx950_spec|rocke_sha256|rocke_float_format)$' --output-on-failure
+```
+
+The native tests embed their vectors and run after relocation without source-tree
+data paths. They are installed in quick and ffm-quick, independently of pybind.
+The native gfx950 test also accepts `--vectors FILE` for live host comparisons.
+
+The C spec uses the annotations' integer, boolean, double and optional-string
+types, not arbitrary Python numeric coercions. In particular, preserve raw
+optional presence: `None` and an explicit value can resolve identically but have
+different codegen-name hashes. The host runtime-argument preparation separately
+checks the persistent fast-division dividend limit; passing `supports` does not
+imply that those values can be prepared.
+
+This port is host metadata only. The gfx950 dense C++ GPU builders and their
+paired IR emitters are separate work; these tests do not establish builder
+byte identity or GPU numerical correctness.
+
 ## Multi-arch coverage (don't be blindsided by gfx950)
 
 Byte-identity is a property of a single `(spec, arch)`: for the same spec and

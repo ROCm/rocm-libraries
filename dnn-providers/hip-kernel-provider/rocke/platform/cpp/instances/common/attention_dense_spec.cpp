@@ -12,6 +12,7 @@
  */
 #include "rocke/instance_attention_dense_spec.h"
 
+#include <limits.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -24,12 +25,16 @@
 #include <vector>
 
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, ROCKE_SPEC_FAIL */
+#include "rocke/helper_rocke.helpers.transforms.h" /* host magic division */
 #include "rocke/ir.h" /* rocke_py_str_repr */
 
 const rocke_dense_tile_geometry_t ROCKE_DENSE_TILE_GEOMETRIES[ROCKE_DENSE_TILE_GEOMETRY_COUNT] = {
     {"default", ROCKE_DENSE_DEFAULT_BLOCK_M, ROCKE_DENSE_DEFAULT_BLOCK_N},
     {"bm128", 128, 64},
 };
+
+const char* const ROCKE_DENSE_SEGMENT_PARAMS[3]
+    = {"segm_output_ptr", "segm_max_ptr", "segm_expsum_ptr"};
 
 namespace
 {
@@ -233,14 +238,44 @@ typedef bool (*decode_check_fn)(const rocke_attention_dense_spec_t* s,
                                 char* reason,
                                 size_t cap);
 
-/* One registry entry of kernels/common/attention_dense_decode.py: the name, the
- * kernel-name tag ("" for the default order), and the check. */
+/* Grid and fastdiv metadata share the registry used by checks and names. */
+typedef void (*decode_grid_fn)(const rocke_attention_dense_spec_t*, int64_t out[3]);
 struct DecodeInfo
 {
     const char* name;
     const char* tag;
     decode_check_fn check;
+    decode_grid_fn grid;
+    const rocke_attention_dense_divisor_t* divisors[ROCKE_DENSE_MAX_FASTDIVISORS];
+    bool gqa_head_bound;
 };
+
+const rocke_attention_dense_divisor_t k_batch = {"batch", "batch_magic", "batch_shift"};
+const rocke_attention_dense_divisor_t k_heads
+    = {"num_query_heads", "num_query_heads_magic", "num_query_heads_shift"};
+const rocke_attention_dense_divisor_t k_gqa = {"gqa", "gqa_magic", "gqa_shift"};
+const rocke_attention_dense_divisor_t k_nqb = {"nqb", "nqb_magic", "nqb_shift"};
+
+void grid_qb_minor(const rocke_attention_dense_spec_t* s, int64_t out[3])
+{
+    out[0] = dense_nqb(s);
+    out[1] = s->num_query_heads;
+    out[2] = s->batch;
+}
+
+void grid_bt_hkv_minor(const rocke_attention_dense_spec_t* s, int64_t out[3])
+{
+    out[0] = s->batch;
+    out[1] = s->num_query_heads;
+    out[2] = dense_nqb(s);
+}
+
+void grid_hq_minor_swz(const rocke_attention_dense_spec_t* s, int64_t out[3])
+{
+    out[0] = (int64_t)s->chiplet_num_xcds * dense_nqb(s);
+    out[1] = rocke_floor_div(s->num_query_heads, s->chiplet_num_xcds);
+    out[2] = s->batch;
+}
 
 bool check_np_hq_minor_swz(const rocke_attention_dense_spec_t* s, bool, char* reason, size_t cap)
 {
@@ -333,17 +368,22 @@ bool check_gqa_pair_2phase(const rocke_attention_dense_spec_t* s,
 
 /* PERSIST_DECODES and NONPERSIST_DECODES. The only place a decode is named. */
 const DecodeInfo k_persist_decodes[] = {
-    {"qb_major", "", NULL},
-    {"hkv_major", "hkvmaj", NULL},
-    {"bt_hkv_minor", "bthkvmin", NULL},
-    {"hq_minor_swz", "hqminswz", check_hq_minor_swz},
-    {"gqa_pair", "gqapair", check_gqa_pair},
-    {"gqa_pair_2phase", "gqapair2", check_gqa_pair_2phase},
+    {"qb_major", "", NULL, NULL, {&k_batch, &k_heads, &k_gqa}, false},
+    {"hkv_major", "hkvmaj", NULL, NULL, {&k_batch, &k_gqa, &k_nqb}, false},
+    {"bt_hkv_minor", "bthkvmin", NULL, NULL, {&k_batch, &k_heads, NULL}, true},
+    {"hq_minor_swz", "hqminswz", check_hq_minor_swz, NULL, {&k_nqb, &k_heads, &k_gqa}, false},
+    {"gqa_pair", "gqapair", check_gqa_pair, NULL, {NULL, NULL, NULL}, false},
+    {"gqa_pair_2phase", "gqapair2", check_gqa_pair_2phase, NULL, {NULL, NULL, NULL}, false},
 };
 const DecodeInfo k_nonpersist_decodes[] = {
-    {"qb_minor", "", NULL},
-    {"bt_hkv_minor", "npbthkvmin", NULL},
-    {"hq_minor_swz", "nphqminswz", check_np_hq_minor_swz},
+    {"qb_minor", "", NULL, grid_qb_minor, {NULL, NULL, NULL}, false},
+    {"bt_hkv_minor", "npbthkvmin", NULL, grid_bt_hkv_minor, {NULL, NULL, NULL}, false},
+    {"hq_minor_swz",
+     "nphqminswz",
+     check_np_hq_minor_swz,
+     grid_hq_minor_swz,
+     {NULL, NULL, NULL},
+     false},
 };
 
 template <size_t N>
@@ -956,6 +996,138 @@ bool rocke_attention_dense_spec_preflight(const rocke_attention_dense_spec_t* s,
                 "Q/O extent is %s elements, at or past the 32-bit addressing limit (%lld)",
                 num,
                 ROCKE_ATTENTION_DENSE_INT32_LIMIT);
+        }
+    }
+    if(reason != NULL && cap > 0)
+        reason[0] = '\0';
+    return true;
+}
+
+rocke_status_t rocke_attention_dense_nonpersist_grid(const rocke_attention_dense_spec_t* s,
+                                                     bool lookahead,
+                                                     int out[3])
+{
+    if(out == NULL || !divisors_ok(s))
+        return ROCKE_ERR_VALUE;
+    const DecodeInfo* d = find_decode(
+        k_nonpersist_decodes, rocke_attention_dense_spec_resolved_nonpersist_decode(s, lookahead));
+    if(d == NULL || d->grid == NULL)
+        return ROCKE_ERR_VALUE;
+    int64_t grid[3];
+    d->grid(s, grid);
+    for(int i = 0; i < 3; ++i)
+        if(grid[i] < 1 || grid[i] > INT_MAX)
+            return ROCKE_ERR_VALUE;
+    for(int i = 0; i < 3; ++i)
+        out[i] = (int)grid[i];
+    return ROCKE_OK;
+}
+
+rocke_status_t
+    rocke_attention_dense_persist_divisors(const rocke_attention_dense_spec_t* s,
+                                           bool lookahead,
+                                           const rocke_attention_dense_divisor_t* const** out,
+                                           size_t* count)
+{
+    if(out == NULL || count == NULL || !divisors_ok(s))
+        return ROCKE_ERR_VALUE;
+    const DecodeInfo* d = find_decode(
+        k_persist_decodes, rocke_attention_dense_spec_resolved_persist_decode(s, lookahead));
+    if(d == NULL)
+        return ROCKE_ERR_VALUE;
+    *out = d->divisors;
+    *count = 0;
+    while(*count < ROCKE_DENSE_MAX_FASTDIVISORS && d->divisors[*count] != NULL)
+        ++*count;
+    return ROCKE_OK;
+}
+
+bool rocke_attention_dense_fastdiv_values(const rocke_attention_dense_spec_t* s,
+                                          bool lookahead,
+                                          const char* arch,
+                                          rocke_attention_dense_fastdiv_values_t* out,
+                                          char* reason,
+                                          size_t cap)
+{
+    if(out == NULL || arch == NULL || !divisors_ok(s))
+        ROCKE_SPEC_FAIL(reason, cap, "attention dense fast division arguments are NULL or invalid");
+    *out = {};
+    const DecodeInfo* d = find_decode(
+        k_persist_decodes, rocke_attention_dense_spec_resolved_persist_decode(s, lookahead));
+    if(d == NULL)
+        ROCKE_SPEC_FAIL(reason, cap, "attention dense persistent decode is unknown");
+    const ExactProduct work({dense_nqb(s), s->num_query_heads, s->batch});
+    const ExactProduct heads({dense_gqa(s), s->num_query_heads});
+    const ExactProduct& bound = d->gqa_head_bound && heads.compare(work) > 0 ? heads : work;
+    if(bound.at_least(ROCKE_DENSE_FASTDIV_DIVIDEND_LIMIT))
+    {
+        char num[64];
+        bound.str(num, sizeof(num));
+        ROCKE_SPEC_FAIL(reason,
+                        cap,
+                        "%s attention_dense: persistent decode dividend bound %s "
+                        "(the work-item count nqb*Hq*B, or the decode's own) must be below "
+                        "2**30 for the work decode's fast division",
+                        arch,
+                        num);
+    }
+    for(size_t i = 0; i < ROCKE_DENSE_MAX_FASTDIVISORS && d->divisors[i] != NULL; ++i)
+    {
+        const rocke_attention_dense_divisor_t* field = d->divisors[i];
+        /* fastdiv_kernargs currently serves aligned runtime shapes: its nqb
+         * divisor uses floor, independently of the ceil work-count bound. */
+        const int64_t value = field == &k_batch   ? s->batch
+                              : field == &k_heads ? s->num_query_heads
+                              : field == &k_gqa   ? dense_gqa(s)
+                                                  : rocke_floor_div(s->seqlen_q, s->block_m);
+        uint64_t magic;
+        int shift;
+        if(value < 1 || value > INT_MAX
+           || !rocke_calculate_magic_numbers(NULL, (int)value, &magic, &shift))
+            ROCKE_SPEC_FAIL(reason, cap, "attention dense fast division needs positive divisors");
+        out->magic[i]
+            = (int32_t)(magic >= 2147483648ULL ? (int64_t)magic - 4294967296LL : (int64_t)magic);
+        out->shift[i] = shift;
+        ++out->count;
+    }
+    if(reason != NULL && cap > 0)
+        reason[0] = '\0';
+    return true;
+}
+
+bool rocke_attention_dense_check_kv_segments(
+    const rocke_attention_dense_spec_t* s, int segments, bool emit_lse, char* reason, size_t cap)
+{
+    if(s == NULL)
+        ROCKE_SPEC_FAIL(reason, cap, "attention dense spec is NULL");
+    if(segments < 1 || segments > ROCKE_DENSE_MAX_KV_SEGMENTS)
+        ROCKE_SPEC_FAIL(reason,
+                        cap,
+                        "kv_segments must be an int in [1, %d], got %d",
+                        ROCKE_DENSE_MAX_KV_SEGMENTS,
+                        segments);
+    if(segments > 1
+       && (s->persistent || s->sliding_window || s->use_sinks || emit_lse || s->ragged || s->varlen
+           || s->paged))
+        ROCKE_SPEC_FAIL(reason,
+                        cap,
+                        "kv_segments > 1 runs on the default grid only, without sliding window, "
+                        "sinks, LSE output, ragged, varlen or paged");
+    if(segments > 1)
+    {
+        const ExactProduct extent(
+            {s->batch, s->seqlen_q, s->num_query_heads, s->head_size, segments});
+        if(extent.at_least(ROCKE_ATTENTION_DENSE_INT32_LIMIT))
+        {
+            char num[64];
+            extent.str(num, sizeof(num));
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "kv_segments=%d workspace extent is %s elements, at or past the "
+                            "32-bit addressing limit (%lld)",
+                            segments,
+                            num,
+                            ROCKE_ATTENTION_DENSE_INT32_LIMIT);
         }
     }
     if(reason != NULL && cap > 0)

@@ -265,6 +265,49 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/test_attention_dense_spec.cpp")
                rocke_attention_dense_spec)
 endif()
 
+# Concrete gfx950 host spec: the same raw-input oracle as the Python drift guard.
+set(_rocke_gfx950_spec_vectors "${CMAKE_CURRENT_SOURCE_DIR}/golden/attention_dense_gfx950_spec_vectors.json")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/test_attention_dense_gfx950_spec.cpp")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_rocke_gfx950_spec_vectors}")
+  file(READ "${_rocke_gfx950_spec_vectors}" _rocke_gfx950_spec_hex HEX)
+  string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _rocke_gfx950_spec_bytes
+                       "${_rocke_gfx950_spec_hex}")
+  string(REGEX REPLACE "(0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,)"
+                       "\\1\n" _rocke_gfx950_spec_bytes "${_rocke_gfx950_spec_bytes}")
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/attention_dense_gfx950_spec_vectors.inc.tmp"
+       "${_rocke_gfx950_spec_bytes}\n")
+  configure_file("${CMAKE_CURRENT_BINARY_DIR}/generated/attention_dense_gfx950_spec_vectors.inc.tmp"
+                 "${CMAKE_CURRENT_BINARY_DIR}/generated/attention_dense_gfx950_spec_vectors.inc"
+                 COPYONLY)
+  add_executable(rocke_attention_dense_gfx950_spec instances/test_attention_dense_gfx950_spec.cpp)
+  target_include_directories(rocke_attention_dense_gfx950_spec
+                             PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+  target_link_libraries(rocke_attention_dense_gfx950_spec PRIVATE rocke_core)
+  if(UNIX)
+    target_link_libraries(rocke_attention_dense_gfx950_spec PRIVATE m)
+  endif()
+  add_test(NAME rocke_attention_dense_gfx950_spec COMMAND rocke_attention_dense_gfx950_spec)
+  set_tests_properties(rocke_attention_dense_gfx950_spec PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_attention_dense_gfx950_spec)
+  set_target_properties(rocke_attention_dense_gfx950_spec
+                        PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_attention_dense_gfx950_spec
+          RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+               rocke_attention_dense_gfx950_spec)
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/instances/test_sha256.cpp")
+  add_executable(rocke_sha256 instances/test_sha256.cpp)
+  target_link_libraries(rocke_sha256 PRIVATE rocke_core)
+  add_test(NAME rocke_sha256 COMMAND rocke_sha256)
+  set_tests_properties(rocke_sha256 PROPERTIES LABELS "ckc;unit;host")
+  rocke_cxx_test_installed_name(_rocke_installed_name rocke_sha256)
+  set_target_properties(rocke_sha256 PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+  install(TARGETS rocke_sha256 RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS rocke_sha256)
+endif()
+
 # RDNA split-KV WMMA decode host helpers (split count, pack groups, row
 # tiles, grids, workspace layout, spec resolution, kernel names, LDS budget):
 # the C API mirrors the Python launch plan for C callers, and the
