@@ -50,10 +50,10 @@ Insert a gap before A1 only if that complete span leaves A1 in A0's segment
 (aligned). Otherwise the one-buffer order needs no gap (tight).
 Pairing can still add gaps; "tight" describes the one-buffer order, not the final
 ping/pong allocation. See paired_buffer_reason() for supported buffering settings.
-StreamK and Persistent DataParallel use paired placement when supported and keep
-separate ping/pong blocks otherwise, including when prefetching across persistent
-tiles. Persistent MX kernels with shadow init keep separate blocks to avoid extra
-SGPRs (see persistent_keeps_unpaired()).
+StreamK and Persistent DataParallel use paired placement when supported, including
+when prefetching across persistent tiles, and keep separate ping/pong blocks
+otherwise. Some persistent MX kernels keep separate blocks to avoid extra SGPRs
+(see persistent_unpaired_reason()).
 
 Without MXSA M splitting, buffer placement for both MX scales is:
   With supported pairing:
@@ -113,6 +113,7 @@ With TDMSplit, only the full and half WaveTile widths above are supported.
 """
 
 from ..Components.TDMFuse import tdmWaveComponents
+from ..ExecutionPolicy import isStreamK
 
 # gfx1250 LDS segment size (5 x 64 KiB segments).
 SEG = 65536
@@ -558,10 +559,12 @@ def paired_buffer_reason(state):
         return "needs wave32"
     if state.get("PrefetchGlobalReadA", -1) != -1 or state.get("PrefetchGlobalReadB", -1) != -1:
         return "decoupled prefetch is not supported"
+    # PrefetchAcrossPersistent is supported: its LDS-bank save/restore and tail
+    # bank selection use the per-set paired swap masks and buffer strides.
     for key in ("ExpandPointerSwap", "TDMSplit", "UseSubtileImpl", "DirectToVgprA",
                 "DirectToVgprB", "DirectToLdsA", "DirectToLdsB", "enableLDSTrA",
                 "enableLDSTrB", "UseDotInstruction", "UseCustomMainLoopSchedule",
-                "PrefetchAcrossPersistent", "TDMFuse"):
+                "TDMFuse"):
         v = state.get(key)
         if v is True or (isinstance(v, int) and v > 0):
             return "%s is not supported" % key
@@ -570,15 +573,22 @@ def paired_buffer_reason(state):
     return None
 
 
-def persistent_keeps_unpaired(state):
-    """Whether a persistent kernel keeps the interleave's separate ping/pong blocks.
+def persistent_unpaired_reason(state):
+    """Why a persistent kernel keeps the interleave's separate ping/pong blocks, or None.
 
     Pairing reserves a per-wave swap-mask SGPR for each descriptor set (A/B, and
-    the MX scales). Persistent MX kernels with shadow init can already sit at the
-    SGPR limit, so they keep the unpaired layout instead of failing code generation.
+    the MX scales). Persistent MX kernels with shadow init, and StreamK MX kernels
+    that prefetch across persistent tiles, can already sit at the SGPR limit, so
+    they keep the unpaired layout instead of failing code generation.
     """
     pt = state["ProblemType"]
-    return bool(pt["MXBlockA"] or pt["MXBlockB"]) and not state["ForceDisableShadowInit"]
+    if not (pt["MXBlockA"] or pt["MXBlockB"]):
+        return None
+    if not state["ForceDisableShadowInit"]:
+        return "persistent MX kernels with shadow init cannot afford the paired swap-mask SGPRs"
+    if state["PrefetchAcrossPersistent"] and isStreamK(state):
+        return "StreamK MX kernels with PrefetchAcrossPersistent cannot afford the paired swap-mask SGPRs"
+    return None
 
 
 def paired_buffer_offsets(state, isolate_operands=False):

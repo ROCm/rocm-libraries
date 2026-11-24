@@ -13,7 +13,7 @@ from math import ceil, log2
 from ..Component import Component
 from ..Common import persistentSpatialCluster
 import abc
-from rocisa.instruction import SAddU32, SAndB32, SCBranchSCC0, SCSelectB32, SLShiftLeftB32, SMinU32, SMulI32, SOrB32, SSubU32, SCmpGeU32, SSchedulingFence, SAddCU32
+from rocisa.instruction import SAddU32, SAndB32, SCBranchSCC0, SCSelectB32, SLShiftLeftB32, SMinU32, SMulI32, SOrB32, SSubU32, SCmpGeU32, SSchedulingFence, SAddCU32, SXorB32
 from rocisa.functions import scalarUInt32DivideAndRemainder
 
 class PersistentKernelState:
@@ -155,7 +155,7 @@ class PersistentKernelState:
     def papPrefetchLocalRead(self, kernel, tPA, tPB):
         """Read next group0 after the final current WMMA releases X0 operands."""
         from rocisa.container import MemTokenData
-        from rocisa.instruction import DSLoadInstruction, SSchedulingFence, VAddU32
+        from rocisa.instruction import DSLoadInstruction, SSchedulingFence
         module = Module("PAP next tile first local reads")
         reads = getattr(self.states, "papFirstPlrReads", None)
         # A multicast producer must publish group0 to its peers even when the
@@ -193,17 +193,16 @@ class PersistentKernelState:
         with self.allocTmpSgpr(1, tag="PAP first PLR bank") as bank:
             module.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=1,
                                   comment="PAP group0 physical bank"))
-            module.add(SCSelectB32(dst=sgpr(bank.idx), src0=kernel["LdsOffsetA_Blk"], src1=0))
-            tensors = [tPA, tPB]
-            if kernel["ProblemType"]["MXBlockA"]:
-                tensors += [tPA["MX"], tPB["MX"]]
-            for tp in tensors:
+            selected = None
+            for tp in self.papLocalReadTensors(kernel, tPA, tPB):
                 tc = tp["tensorChar"]
-                info = getattr(self.states, tc.lower())
-                for i in range(info.numVgprLocalReadAddr):
-                    addr = vgpr("LocalReadAddr%s+%d" % (tc, i))
-                    module.add(VAddU32(dst=addr, src0=addr, src1=sgpr(bank.idx),
-                                       comment="PAP select group0 bank for " + tc))
+                # Paired tensors have their own buffer strides; SCC survives the VALU adds.
+                stride = self.papBankStride(kernel, tc)
+                if stride != selected:
+                    module.add(SCSelectB32(dst=sgpr(bank.idx), src0=stride, src1=0))
+                    selected = stride
+                module.add(self.papShiftLocalReadAddrs(tc, sgpr(bank.idx),
+                                                       "PAP select group0 bank for " + tc))
         module.add(self.papPgr2GroupReady(kernel, tPA, tPB, 0))
         token = self.states.memTokenLdsBuffer0
         retainedReads = deepcopy(reads)
@@ -876,7 +875,12 @@ class PersistentKernelState:
         with self.allocTmpSgpr(1, tag="PAP normalize snapshot LDS bank") as tmp:
             for lane, name in enumerate(words, 5 if isStreamK(kernel) else 4):
                 value = sgpr(name)
-                if name in ("tdmAGroup0+1", "tdmMXSAGroup0+1"):
+                if name in ("tdmAGroup0+1", "tdmMXSAGroup0+1") and self.papPairedBuffers(kernel):
+                    module.add(SXorB32(dst=sgpr(tmp.idx), src0=value, src1=sgpr(self.papPairedSwapMask(name))))
+                    module.add(SMinU32(dst=sgpr(tmp.idx), src0=sgpr(tmp.idx), src1=value,
+                                       comment="PAP snapshot descriptor LDS address in paired ping"))
+                    value = sgpr(tmp.idx)
+                elif name in ("tdmAGroup0+1", "tdmMXSAGroup0+1"):
                     module.add(SSubU32(dst=sgpr(tmp.idx), src0=value, src1=kernel["LdsOffsetA_Blk"]))
                     module.add(SCmpGeU32(src0=value, src1=kernel["LdsOffsetA_Blk"]))
                     module.add(SCSelectB32(dst=sgpr(tmp.idx), src0=sgpr(tmp.idx), src1=value,
