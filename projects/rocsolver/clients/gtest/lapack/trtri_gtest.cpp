@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -66,6 +66,14 @@ const vector<vector<int>> matrix_size_range = {
 const vector<vector<int>> large_matrix_size_range
     = {{192, 192, 1}, {500, 600, 2}, {640, 640, 0}, {1000, 1024, 1}, {1200, 1230, 2}};
 
+// for weekly_lapack tests
+// each matrix_size_range vector is a {n, lda, singular/diag}
+const vector<vector<int>> large_batch_matrix_size_range = {
+    {33, 33, 0},
+    {33, 33, 1},
+    {33, 33, 2},
+};
+
 Arguments trtri_setup_arguments(trtri_tuple tup)
 {
     vector<int> matrix_size = std::get<0>(tup);
@@ -95,7 +103,8 @@ Arguments trtri_setup_arguments(trtri_tuple tup)
     return arg;
 }
 
-class TRTRI : public ::TestWithParam<trtri_tuple>
+template <int BATCH_COUNT = 3>
+class TRTRI_BASE : public ::TestWithParam<trtri_tuple>
 {
 protected:
     void TearDown() override
@@ -111,13 +120,22 @@ protected:
         if(arg.peek<rocblas_int>("n") == 0 && arg.peek<char>("uplo") == 'L')
             testing_trtri_bad_arg<BATCHED, STRIDED, T>();
 
-        arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
+        arg.batch_count = (BATCHED || STRIDED ? BATCH_COUNT : 1);
         if(arg.singular == 1)
             testing_trtri<BATCHED, STRIDED, T>(arg);
 
         arg.singular = 0;
         testing_trtri<BATCHED, STRIDED, T>(arg);
     }
+};
+
+class TRTRI : public TRTRI_BASE<>
+{
+};
+
+int constexpr BCOUNT = (64 * 1024 + 1);
+class TRTRI_LARGE_BATCH : public TRTRI_BASE<BCOUNT>
+{
 };
 
 // non-batch tests
@@ -164,6 +182,28 @@ TEST_P(TRTRI, batched__double_complex)
     run_tests<true, true, rocblas_double_complex>();
 }
 
+// large batch
+
+TEST_P(TRTRI_LARGE_BATCH, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(TRTRI_LARGE_BATCH, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(TRTRI_LARGE_BATCH, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(TRTRI_LARGE_BATCH, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
 // strided_batched tests
 
 TEST_P(TRTRI, strided_batched__float)
@@ -186,6 +226,28 @@ TEST_P(TRTRI, strided_batched__double_complex)
     run_tests<false, true, rocblas_double_complex>();
 }
 
+// large batch
+
+TEST_P(TRTRI_LARGE_BATCH, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(TRTRI_LARGE_BATCH, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(TRTRI_LARGE_BATCH, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(TRTRI_LARGE_BATCH, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          TRTRI,
                          Combine(ValuesIn(large_matrix_size_range), ValuesIn(uplo_range)));
@@ -193,3 +255,7 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          TRTRI,
                          Combine(ValuesIn(matrix_size_range), ValuesIn(uplo_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         TRTRI_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_matrix_size_range), ValuesIn(uplo_range)));
