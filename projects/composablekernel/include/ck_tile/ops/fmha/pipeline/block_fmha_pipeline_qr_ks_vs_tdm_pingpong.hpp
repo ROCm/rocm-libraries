@@ -54,9 +54,12 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
 
     static constexpr const char* name = "qr_tdm_pingpong";
 
-    // the kernel paths qr_tdm takes by name
-    static constexpr bool kUsesUntransposedVKernelPath = true;
-    static constexpr bool kUsesTdmAffineDramPath       = true;
+    // FmhaFwdKernel markers: qr_tdm's K/V paths only, none of its other capabilities.
+    static constexpr bool kUsesUntransposedVKernelPath    = true;
+    static constexpr bool kUsesTdmAffineDramPath          = true;
+    static constexpr bool kTakesQuantDescales             = false;
+    static constexpr bool kTakesLogitsAndDropoutCallbacks = false;
+    static constexpr bool kSplitsOutputStoreByAlignment   = false;
 
     static constexpr bool kKLoadOnce = true;
 

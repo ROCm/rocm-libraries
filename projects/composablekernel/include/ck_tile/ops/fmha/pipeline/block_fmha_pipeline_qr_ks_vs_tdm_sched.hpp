@@ -7,6 +7,7 @@
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_masking.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_fwd_kernel_path_markers.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_sched_policy.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_output.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_executor.hpp"
@@ -112,7 +113,21 @@ struct BlockFmhaPipelineQRKSVSTdmSched
     static constexpr bool kUsesUntransposedVKernelPath = true;
     static constexpr bool kUsesTdmAffineDramPath       = true;
     static constexpr bool kUsesFixedSegmentedLdsArena  = true;
-    static constexpr index_t kBlockPerCu               = Policy::kBlockPerCu;
+    // D128 has the kernel store O asynchronously from the K0 LDS slot.
+    static constexpr bool kUsesAsyncLdsOutputStore = kQKHeaddim == 128;
+    static constexpr auto kCausalTileOrder =
+        kQKHeaddim == 128  ? detail::FmhaFwdCausalTileOrder::kBatchLocalXcd
+        : kQKHeaddim == 64 ? detail::FmhaFwdCausalTileOrder::kBatchLocal
+                           : detail::FmhaFwdCausalTileOrder::kDefault;
+    static constexpr index_t kBlockPerCu = Policy::kBlockPerCu;
+
+    // The no-virtual-sink specialization omits the finite sink normalization.
+    template <typename Kargs>
+    CK_TILE_HOST static bool IsSupportedKargs(const Kargs& kargs)
+    {
+        return kEnableVirtualSink || kargs.sink_ptr == nullptr;
+    }
+
     // Q is staged in the K1 slot so Q, K0 and V0 load together.
     static constexpr bool kOverlapQKVPrologue =
         Geometry::kHeadDimQK == 128 && Geometry::kN == 128 &&

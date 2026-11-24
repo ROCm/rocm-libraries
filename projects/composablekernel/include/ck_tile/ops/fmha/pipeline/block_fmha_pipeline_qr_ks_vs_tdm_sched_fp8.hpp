@@ -7,6 +7,7 @@
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_masking.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_fwd_kernel_path_markers.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_sched_fp8_policy.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_output.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_executor.hpp"
@@ -152,8 +153,12 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     static constexpr bool kUsesUntransposedVKernelPath = true;
     static constexpr bool kUsesTdmAffineDramPath       = true;
     static constexpr bool kUsesFixedSegmentedLdsArena  = true;
-    static constexpr bool kUsesGlobalCausalOrder       = true;
-    static constexpr index_t kBlockPerCu               = Policy::kBlockPerCu;
+    static constexpr bool kTakesQuantDescales          = true;
+    static constexpr bool kTakesMxDescales = QScaleEnum == BlockAttentionQuantScaleEnum::MX;
+    static constexpr bool kSupportsMergedQueryHeads = true;
+    static constexpr bool kRequiresExactHeadDims    = true;
+    static constexpr auto kCausalTileOrder = detail::FmhaFwdCausalTileOrder::kGlobalLongestFirst;
+    static constexpr index_t kBlockPerCu   = Policy::kBlockPerCu;
 
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
     using QKBlockGemm = remove_cvref_t<decltype(Policy::template GetQKBlockGemm<Problem>())>;
@@ -217,6 +222,81 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     using MxCopyOffsets                      = typename QuantScale::MxCopyOffsets;
     using MxDescales                         = FmhaTdmSchedFp8MxDescales;
     using MergedHeads                        = FmhaTdmSchedFp8MergedHeads;
+
+    // Host-side argument checks beyond the kernel's generic ones.
+    template <typename Kargs>
+    CK_TILE_HOST static bool IsSupportedKargs(const Kargs& kargs)
+    {
+        const bool log    = ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING));
+        const auto reject = [&](const char* reason) {
+            if(log)
+                CK_TILE_ERROR("FMHA fwd qr_tdm_fp8_sched: ", reason);
+            return false;
+        };
+        if constexpr(!kEnableVirtualSink)
+        {
+            if(kargs.sink_ptr != nullptr)
+                return reject("sink_ptr is not supported.");
+        }
+        if constexpr(kMergeHeads)
+        {
+            // Merged heads must form one row stride: a single query, or seqlen_q-row heads.
+            const auto s  = kargs.seqlen_q;
+            bool foldable = s == 1 || (kargs.nhead_stride_q == s * kargs.stride_q &&
+                                       kargs.nhead_stride_o == s * kargs.stride_o);
+            if constexpr(kStoreLSE)
+                foldable = foldable && (s == 1 || kargs.nhead_stride_lse == s);
+            if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
+                foldable = foldable &&
+                           (s == 1 || kargs.nhead_stride_q_descale == s * kargs.stride_q_descale);
+            if(!foldable)
+                return reject("merged query heads need foldable Q/O/LSE/scale strides.");
+            if(s * kargs.nhead_ratio_qk > kM0)
+                return reject("merged query heads must fit one tile of query rows.");
+            if(kargs.cu_seqlen_q_ptr != nullptr || kargs.cu_seqlen_k_ptr != nullptr)
+                return reject("merged query heads do not support cu_seqlen_q/k_ptr.");
+        }
+        if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
+        {
+            // Q/K E8M0 rows are read per lane as int32s (D128/D256) or an int16 (D64).
+            const auto bits  = [](auto v) { return static_cast<uint64_t>(v); };
+            uint64_t offsets = bits(reinterpret_cast<uintptr_t>(kargs.q_descale_ptr)) |
+                               bits(reinterpret_cast<uintptr_t>(kargs.k_descale_ptr)) |
+                               bits(kargs.stride_q_descale) | bits(kargs.stride_k_descale) |
+                               bits(kargs.nhead_stride_q_descale) |
+                               bits(kargs.nhead_stride_k_descale);
+            if constexpr(!kIsGroupMode)
+                offsets |= bits(kargs.batch_stride_q_descale) | bits(kargs.batch_stride_k_descale);
+            if(offsets % kMxQkScaleAlign != 0)
+                return reject("MX Q/K descale pointers and strides must align to a scale row.");
+            if constexpr(kIsGroupMode)
+            {
+                if(kargs.seqstart_v_scale_ptr == nullptr)
+                    return reject("group mode MX needs seqstart_v_scale_ptr.");
+            }
+        }
+        return true;
+    }
+
+    // MX descales of one workgroup; offsets are the kernel's per-head/batch scale offsets.
+    template <typename Kargs>
+    CK_TILE_DEVICE static MxDescales MakeMxDescales(const Kargs& kargs,
+                                                    long_index_t offset_q,
+                                                    long_index_t offset_k,
+                                                    long_index_t offset_v,
+                                                    bool rows_by_head,
+                                                    index_t seqlen_q)
+    {
+        MxDescales mx;
+        mx.q_ptr    = reinterpret_cast<const e8m0_t*>(kargs.q_descale_ptr) + offset_q;
+        mx.k_ptr    = reinterpret_cast<const e8m0_t*>(kargs.k_descale_ptr) + offset_k;
+        mx.v_ptr    = reinterpret_cast<const e8m0_t*>(kargs.v_descale_ptr) + offset_v;
+        mx.stride_q = rows_by_head ? kargs.nhead_stride_q_descale : kargs.stride_q_descale;
+        mx.stride_k = kargs.stride_k_descale;
+        mx.stride_v = kargs.stride_v_descale;
+        mx.seqlen_q = seqlen_q;
+        return mx;
+    }
 
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
     // Static LDS of one workgroup: arena, O staging, and MX or row scales.
