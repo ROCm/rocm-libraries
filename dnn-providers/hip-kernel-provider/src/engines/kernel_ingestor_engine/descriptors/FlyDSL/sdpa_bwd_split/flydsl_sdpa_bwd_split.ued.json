@@ -1,12 +1,36 @@
 {
   "version": "1.1",
-  "id": "946099b9-2715-5e76-9b8b-703c331f95e0",
+  "id": "cbb5415b-5d0d-5ee0-997c-f7b13ab7898f",
   "name": "hipkernel:flydsl_sdpa_bwd_split",
   "sdk_version": "1.4.0",
   "graph_match": {
     "native": "hipkernel.flydsl_sdpa_bwd_split.graph_match"
   },
   "shared_workspace": "ws.bytes",
+  "predict_engine": {
+    "default": "cce91ef0-6b53-5888-ab97-18aa6f8cec29",
+    "gfx1100": [
+      "3d227fd8-8dd5-43e6-8599-1f0d9208a38e"
+    ],
+    "gfx1101": [
+      "d3c055d7-77da-4e0d-8c4e-4e1da27b59b0"
+    ],
+    "gfx1150": [
+      "037147ec-b28e-49cc-86b6-8131f39e6371"
+    ],
+    "gfx1151": [
+      "664345cc-eb3e-45eb-a5d2-16b553dd17f1"
+    ],
+    "gfx90a": [
+      "3d2fff33-068e-4497-92e7-50a5b9430dbc"
+    ],
+    "gfx942": [
+      "d40a114e-bd38-4b28-8333-82b7e684881b"
+    ],
+    "gfx950": [
+      "310724e9-1e28-430f-a15e-bd06e6b31c0a"
+    ]
+  },
   "slots": [
     {
       "name": "prep",

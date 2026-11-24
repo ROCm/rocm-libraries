@@ -102,8 +102,9 @@ struct ArgsHelper
     static constexpr const char* db_class_arg  = "mp-test-child-db-class";
 
     // Exact gtest filter for spawning child worker processes.
-    // Must match the CPU_PerfDb_ChildWorker_NONE.ProcessWork test case
-    static constexpr const char* child_worker_filter = "CPU_PerfDb_ChildWorker_NONE.ProcessWork";
+    // Must match the Quick/CPU_PerfDb_ChildWorker_NONE.ProcessWork/0 test case
+    static constexpr const char* child_worker_filter =
+        "Quick/CPU_PerfDb_ChildWorker_NONE.ProcessWork/0";
 
     struct db_class
     {
@@ -1466,7 +1467,7 @@ bool HasFlag(const std::string& name)
 
 bool IsChildProcessMode() { return !GetArg(ArgsHelper::id_arg).empty(); }
 
-class CPU_PerfDb_ChildWorker_NONE : public ::testing::Test
+class CPU_PerfDb_ChildWorker_NONE : public testing::TestWithParam<int>
 {
 protected:
     void SetUp() override
@@ -1482,7 +1483,7 @@ protected:
 // Known issue: https://trac.cppcheck.net/ticket/9160 (wontfix).
 // Same workaround used in conv_ai_3d_heuristics.cpp.
 // cppcheck-suppress syntaxError
-TEST_F(CPU_PerfDb_ChildWorker_NONE, ProcessWork)
+TEST_P(CPU_PerfDb_ChildWorker_NONE, ProcessWork)
 {
     std::string logs_root = GetArg(ArgsHelper::logs_path_arg);
     if(!logs_root.empty())
@@ -1511,7 +1512,9 @@ TEST_F(CPU_PerfDb_ChildWorker_NONE, ProcessWork)
     }
 }
 
-class CPU_PerfDb_NONE : public ::testing::Test
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_PerfDb_ChildWorker_NONE, testing::Values(0));
+
+class CPU_PerfDb_NONE : public testing::TestWithParam<int>
 {
 protected:
     TempFile temp_file{"miopen.tests.perfdb"};
@@ -1564,10 +1567,12 @@ protected:
     }
 };
 
-TEST_F(CPU_PerfDb_NONE, RamDb_AllTests) { DbTests<RamDb>(); }
+TEST_P(CPU_PerfDb_NONE, RamDb_AllTests) { DbTests<RamDb>(); }
 
-TEST_F(CPU_PerfDb_NONE, PlainTextDb_AllTests) { DbTests<PlainTextDb>(); }
+TEST_P(CPU_PerfDb_NONE, PlainTextDb_AllTests) { DbTests<PlainTextDb>(); }
 
-TEST_F(CPU_PerfDb_NONE, MultiFileDb_AllTests) { MultiFileDbTests(); }
+TEST_P(CPU_PerfDb_NONE, MultiFileDb_AllTests) { MultiFileDbTests(); }
+
+INSTANTIATE_TEST_SUITE_P(Standard, CPU_PerfDb_NONE, testing::Values(0));
 
 } // anonymous namespace

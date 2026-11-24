@@ -176,7 +176,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/rocm-systems
-          ref: b2099a6b8703c089134ad526253752d26bbbf43a # 2026-09-10
+          ref: 26a2330c02ea5f1191e67d877fe5761c040040fd # 2026-10-08
           path: rocm-systems
           sparse-checkout: |
             emulation/rocjitsu
@@ -184,9 +184,9 @@ jobs:
       - name: Build rocjitsu
         if: matrix.job_id == 'hip-package-build'
         run: |
-          apt-get update && apt-get install -y libdrm-dev
+          apt-get update && apt-get install -y libdrm-dev ninja-build
           cmake -S rocm-systems/emulation/rocjitsu -B rocjitsu-build \
-            -DCMAKE_BUILD_TYPE=Release
+            -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build rocjitsu-build --target rocjitsu_bin rocjitsu_shared -j$(nproc)
       - name: Install clang-tidy deps
         if: matrix.job_id == 'clang-tidy'

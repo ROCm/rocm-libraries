@@ -194,7 +194,7 @@ TEST_P(CPU_tensor_nxd_NONE, TestGetTensorBytes)
 };
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     CPU_tensor_nxd_NONE,
     ::testing::Values(
         // clang-format off
@@ -283,7 +283,7 @@ TEST_P(CPU_tensor_n4d_NONE, TestGetTensorIndex)
 };
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     CPU_tensor_n4d_NONE,
     ::testing::Values(
         // clang-format off

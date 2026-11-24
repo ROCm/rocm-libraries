@@ -367,7 +367,7 @@ struct PrintToStringParamName
     }
 };
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_TestActivation_FP32,
                          ::testing::Combine(::testing::Values(miopenActivationPASTHRU,
                                                               miopenActivationLOGISTIC,
@@ -389,7 +389,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                                                               ActivationConfig{2, 2, 2, 2})),
                          PrintToStringParamName());
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_TestActivation_FP16,
                          ::testing::Combine(::testing::Values(miopenActivationPASTHRU,
                                                               miopenActivationLOGISTIC,

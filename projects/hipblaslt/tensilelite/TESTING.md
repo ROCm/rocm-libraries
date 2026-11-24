@@ -260,8 +260,9 @@ The hermetic suite
 changes only logic YAML triggers no TensileLite lane, and the build-wired `--check-all` is scoped to
 the architectures that pull-request builds target. `Component CI: hipBLASLt Logic Corpus`
 ([`component-ci-logic-corpus.yml`](../../../.github/workflows/component-ci-logic-corpus.yml)) closes
-both gaps. It runs on any change under `Tensile/Logic/`, the `TensileLogic` validators, or the corpus
-test plumbing, and runs `tox -e logic-corpus`: `TensileLogic --check-all --strict-known-bugs`, then
+both gaps. It runs on any change under `Tensile/Logic/`, the `TensileLogic` validators, the corpus
+test plumbing, or the SolutionUID codec (`tensilelite/SolutionIdGen.py`), and runs
+`tox -e logic-corpus`: `TensileLogic --check-all --strict-known-bugs`, then
 every `@needs_logic_corpus` test with `HIPBLASLT_REQUIRE_LOGIC_CORPUS=1`. The check covers the
 architectures whose logic the change touched, whether or not a pull-request build targets them, and
 the whole corpus when a validator or `known_bugs.yaml` changed or on a manual run. (The whole corpus
@@ -646,6 +647,11 @@ and `_Threads1` and `_Threads3` select limits 1 and 3. CTest sets both
 for the requested processors when scheduling tests. Limits constrain the
 reference's explicit request for 64 threads; they are numerical test settings,
 not measurements of the team used by every reference call.
+
+The Int8 option-rejection cases require exit code 1 and their expected diagnostic
+through [`CheckCpuGemmFailure.cmake`](tests/cmake/CheckCpuGemmFailure.cmake).
+The checker installs alongside the suite, so unrelated argument or runtime errors
+fail these cases in both the build tree and installed package.
 
 Math CI's `coverage-cpp` environment continues running the build-tree cases
 with coverage instrumentation. That overlap already exists for the gtests:

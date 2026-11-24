@@ -39,6 +39,7 @@
 
 #include "compilation/KpackKernelLoader.hpp"
 #include "compilation/KpackModuleCache.hpp"
+#include "compilation/LaunchLimits.hpp"
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
@@ -1789,7 +1790,8 @@ struct DecodePlan
 
 /// The decode launch of @p problem on @p device, or nullopt when the decode kernel cannot
 /// take it: head counts that do not pack (one of Hkv / Hv must divide the other) or a
-/// grid / workspace past the kernels' I32 arithmetic.
+/// grid / workspace past the kernels' I32 arithmetic, or a grid past one launch axis's
+/// work-item limit.
 std::optional<DecodePlan> decodePlanFor(const Problem& problem,
                                         const MaskParameters& mask,
                                         const ObjectTraits& traits,
@@ -1826,7 +1828,9 @@ std::optional<DecodePlan> decodePlanFor(const Problem& problem,
     // wmma_fmha_decode_grid / _merge_grid
     plan.grid = problem.batch * plan.numSplits * groups * traits.dvSplit * rowTiles;
     plan.mergeGrid = problem.batch * hq * problem.seqLenQ;
-    if(plan.grid <= 0 || plan.grid > I32_MAX || plan.mergeGrid <= 0 || plan.mergeGrid > I32_MAX)
+    if(plan.grid <= 0 || plan.grid > I32_MAX || plan.mergeGrid <= 0 || plan.mergeGrid > I32_MAX
+       || !compilation::launchAxisFits(plan.grid, traits.blockSize)
+       || !compilation::launchAxisFits(plan.mergeGrid, MERGE_THREADS))
     {
         return std::nullopt;
     }
@@ -1884,6 +1888,16 @@ std::optional<DecodePlan> catalogDecodePlan(const Problem& problem,
     return decodePlanFor(problem, mask, traits, device);
 }
 
+/// The prefill kernel's x extent, one workgroup per (batch, query tile, query head)
+/// (wmma_fmha_fwd_v2_grid: heads fastest, then query tile and batch). A plain product: a
+/// dense or non-ragged Q keeps batch * heads * seqLenQ under 2^27, and a ragged slice keeps
+/// heads * seqLenQ under 2^27 with batch at most 2^31 - 1, so it stays under 2^58.
+int64_t prefillGrid(const Problem& problem, const ObjectTraits& traits)
+{
+    const int64_t queryTiles = (problem.seqLenQ + traits.blockM - 1) / traits.blockM;
+    return problem.batch * queryTiles * problem.queryHeads;
+}
+
 /// The kernel matcher of one engine: @p decodeEngine selects which of the two kernels
 /// it admits.
 bool kernelMatchesFor(bool decodeEngine,
@@ -1939,9 +1953,9 @@ bool kernelMatchesFor(bool decodeEngine,
         return false;
     }
     // A prefill object serves any widths up to its buckets.
-    const int64_t queryTiles = (problem->seqLenQ + traits->blockM - 1) / traits->blockM;
+    const int64_t grid = prefillGrid(*problem, *traits);
     return problem->headDimQ <= traits->headSize && problem->headDimV <= traits->headSizeV
-           && problem->batch * queryTiles * problem->queryHeads <= I32_MAX;
+           && grid <= I32_MAX && compilation::launchAxisFits(grid, traits->blockSize);
 }
 
 bool prefillKernelMatches(const MatchContext& context,
@@ -2369,10 +2383,16 @@ public:
         {
             auto code
                 = buildIngestorKernelCode(_kpackLoader, context, kernel, prefillSignature(traits));
-            // wmma_fmha_fwd_v2_grid: heads fastest, then query tile and batch.
-            const int64_t queryTiles = (problem.seqLenQ + traits.blockM - 1) / traits.blockM;
-            const int64_t grid = problem.batch * queryTiles * problem.queryHeads;
+            const int64_t grid = prefillGrid(problem, traits);
             requireLaunchRange(grid, I32_MAX, "prefill grid");
+            if(!compilation::launchAxisFits(grid, traits.blockSize))
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    "gfx1151 WMMA attention prefill grid of " + std::to_string(grid)
+                        + " workgroups x " + std::to_string(traits.blockSize) + " threads exceeds "
+                        + std::to_string(compilation::LAUNCH_AXIS_ITEM_LIMIT) + " work-items");
+            }
             code.setBlockSize(static_cast<uint32_t>(traits.blockSize), 1, 1);
             code.setGridSize(static_cast<uint32_t>(grid), 1, 1);
             return std::make_unique<PreparedGfx1151WmmaAttention>(

@@ -11,6 +11,7 @@
 #include "delta_issuer.h"
 #include "depthwise_conv_kernel.h"
 #include "detail.h"
+#include "grid_limits.h"
 #include "reduction.hpp"
 #include "hip_util.h"
 #include "input_issuer.h"
@@ -515,10 +516,23 @@ public:
         return par.kh == 3 || par.kh == 5 || par.kh == 7 || par.kh == 9 || par.kh == 11;
     }
 
-    bool is_valid_config(const Device& /*dev*/, const ConvParams& par) const override
+    bool is_valid_config(const Device& dev, const ConvParams& par) const override
     {
-        return par.direction == cfg_.direction && par.kh == cfg_.kh && par.kw == cfg_.kw &&
-               par.stride_h == cfg_.stride && par.stride_w == cfg_.stride;
+        if(par.direction != cfg_.direction || par.kh != cfg_.kh || par.kw != cfg_.kw ||
+           par.stride_h != cfg_.stride || par.stride_w != cfg_.stride)
+            return false;
+        const LaunchParams launch = get_launch_params(dev, par);
+        if(!grid_fits(launch))
+            return false;
+        // With more than one partition, the kernel that sums them launches REDUCE_COLS ×
+        // REDUCE_WAVES work items in x per REDUCE_COLS dW elements; HIP rejects 2^32 or more.
+        using ::hipconv::cdna5::REDUCE_COLS;
+        using ::hipconv::cdna5::REDUCE_WAVES;
+        const uint64_t dw_elems = uint64_t(par.k) * par.kh * par.kw;
+        const bool reduces      = uint64_t(launch.grid.y) * launch.grid.z > 1;
+        return !reduces ||
+               (dw_elems + REDUCE_COLS - 1) / REDUCE_COLS * REDUCE_COLS * REDUCE_WAVES <=
+                   UINT32_MAX;
     }
 
     LaunchParams get_launch_params(const Device& dev, const ConvParams& par) const override
