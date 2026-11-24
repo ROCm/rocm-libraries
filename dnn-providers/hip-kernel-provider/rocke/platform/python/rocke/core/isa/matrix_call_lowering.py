@@ -66,6 +66,14 @@ def emit_matrix_call(lowerer, op: Op, call: MatrixCall) -> None:
         form = call.form(arg)
         value = form.operand(lowerer, op, arg.value)
         arguments.append(f"{_llvm_type(form.register_type_at(flavor))} {value}")
+    # EXPERIMENT (uncommitted): gfx1250 WMMA operand reuse. A call whose last
+    # two arguments are i1 immediates (reuse A, reuse B) takes them from the
+    # op's ``reuse_a`` / ``reuse_b`` attributes; absent attributes keep 0.
+    reuse = (op.attrs.get("reuse_a"), op.attrs.get("reuse_b"))
+    if any(reuse) and len(call.args) >= 2 and all(
+        isinstance(x, Imm) and x.argument().startswith("i1 ") for x in call.args[-2:]
+    ):
+        arguments[-2:] = [f"i1 {1 if flag else 0}" for flag in reuse]
     returned = _llvm_type(call.result.register_type_at(flavor))
     call.result.emit_result(
         lowerer, op, f"call {returned} @{call.intrinsic}({', '.join(arguments)})"

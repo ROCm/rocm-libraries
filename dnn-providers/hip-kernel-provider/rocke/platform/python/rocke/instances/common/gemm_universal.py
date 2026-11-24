@@ -3671,13 +3671,23 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         if cs >= 0 and k_atoms < 2:
             raise ValueError("ROCKE_EXP_MX_RA_CS needs two K-atoms per tile")
 
+        # ROCKE_EXP_WMMA_REUSE=b (plain fp8): the WMMAs run B-outer, so each one
+        # whose successor in the same group takes the same B fragment carries
+        # the reuse-B hint (the hardware keeps B instead of reading it again).
+        reuse_b = (not _mx) and _os_ra.environ.get("ROCKE_EXP_WMMA_REUSE") == "b"
+
         def wmmas(acc, a, bh, sa, sb, which, lo=0, hi=None):
             order = [(j, mi) for j in range(half) for mi in range(mfmas_m)]
-            for j, mi in order[lo:hi]:
+            sel = order[lo:hi]
+            for idx, (j, mi) in enumerate(sel):
                 ni = which * half + j
                 f = mi * mfmas_n + ni
                 if _mx:
                     acc[f] = b.mma(_mx_op.op_id, a[mi], bh[j], acc[f], sa[mi], sb[ni])
+                elif reuse_b:
+                    nxt = sel[idx + 1] if idx + 1 < len(sel) else None
+                    attrs = {"reuse_b": True} if nxt is not None and nxt[0] == j else None
+                    acc[f] = b.mma(op, a[mi], bh[j], acc[f], attrs=attrs)
                 else:
                     acc[f] = _emit_mma(b, op, a[mi], bh[j], acc[f])
 
