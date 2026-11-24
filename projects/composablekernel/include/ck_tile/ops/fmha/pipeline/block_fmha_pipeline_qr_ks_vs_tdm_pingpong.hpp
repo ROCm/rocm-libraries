@@ -95,6 +95,21 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
     static_assert(kFp8P == (kRebaseThreshold == 0), "fp8 P overflows unless p <= 1");
     static_assert(!kFp8P || !kRowSumOnMatrixUnit, "the matrix-unit row sum would sum kPScale * p");
 
+    // Dynamic Q (see detail::problem_dynamic_q_v): bf16 Q is quantized per row to fp8 before the
+    // loop, and the row's dequant scale joins scale_s on the scores (see ApplyScaleAndBias).
+    static constexpr bool kDynamicQ     = detail::problem_dynamic_q_v<Problem>;
+    using QInputDataType                = detail::q_input_data_t<Problem>;
+    static constexpr float kQFp8Max     = 448.f;  // the e4m3 maximum
+    static constexpr float kQScaleFloor = 1e-20f; // keeps rcp(scale) finite on a zero row
+    static_assert(!kDynamicQ ||
+                      (std::is_same_v<QInputDataType, bf16_t> && std::is_same_v<QDataType, fp8_t> &&
+                       std::is_same_v<KDataType, fp8_t> && std::is_same_v<VDataType, fp8_t> &&
+                       kFp8P),
+                  "qr_tdm_pingpong dynamic Q: bf16 Q input, fp8 Q/K/V and fp8 P");
+    static_assert(!kDynamicQ || !kHasSink, "qr_tdm_pingpong dynamic Q: no sink");
+    static_assert(!kDynamicQ || BiasEnum == BlockAttentionBiasEnum::NO_BIAS,
+                  "qr_tdm_pingpong dynamic Q: no bias");
+
     // gemm_1's P operand; fp8 P is kPScale * p, rounded once
     template <typename Gemm1, typename PComputeTensor>
     CK_TILE_DEVICE static auto MakePForGemm1(PComputeTensor& p_compute, int32_t& p_scale)
@@ -260,19 +275,105 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
         store_tile(lse_acc_dram_window, lse_acc);
     }
 
+    // Dynamic Q: each row's dequant scale amax * (1 / kQFp8Max), and q * rcp(max(scale,
+    // kQScaleFloor)) converted to fp8 unclamped, eight values at a time, in the row layout of q_in.
+    // A zero row gets scale 0 and q 0. The reciprocal constant and the hardware rcp, not IEEE
+    // divisions, are the steps the reference quantizer takes.
+    template <typename QInputTile>
+    CK_TILE_DEVICE static auto QuantizeQRows(const QInputTile& q_in)
+    {
+        auto amax = block_tile_reduce<SMPLComputeDataType>(
+            q_in,
+            sequence<1>{},
+            [](auto acc, auto x) { return max(acc, abs(type_convert<SMPLComputeDataType>(x))); },
+            type_convert<QInputDataType>(0.f));
+        ReduceRowSync(amax, [](auto e0, auto e1) { return max(e0, e1); });
+
+        auto q_scale =
+            make_static_distributed_tensor<SMPLComputeDataType>(amax.get_tile_distribution());
+        auto q_inv =
+            make_static_distributed_tensor<SMPLComputeDataType>(amax.get_tile_distribution());
+        constexpr auto row_spans = decltype(amax)::get_distributed_spans();
+        sweep_tile_span(row_spans[I0], [&](auto idx0) {
+            constexpr auto i_idx = make_tuple(idx0);
+            q_scale(i_idx)       = amax[i_idx] * (1.f / kQFp8Max);
+            q_inv(i_idx)         = __builtin_amdgcn_rcpf(max(q_scale[i_idx], kQScaleFloor));
+        });
+
+        auto q_scaled =
+            make_static_distributed_tensor<SMPLComputeDataType>(q_in.get_tile_distribution());
+        constexpr auto q_spans = QInputTile::get_distributed_spans();
+        sweep_tile_span(q_spans[I0], [&](auto idx0) {
+            const auto inv = q_inv[make_tuple(idx0)];
+            sweep_tile_span(q_spans[I1], [&](auto idx1) {
+                constexpr auto i_j_idx = make_tuple(idx0, idx1);
+                q_scaled(i_j_idx)      = type_convert<SMPLComputeDataType>(q_in[i_j_idx]) * inv;
+            });
+        });
+
+        constexpr index_t kPack = 8;
+        static_assert(QInputTile::get_thread_buffer_size() % kPack == 0);
+        using QPack = array<QDataType, kPack>;
+        auto q      = make_static_distributed_tensor<QDataType>(q_in.get_tile_distribution());
+        static_for<0, QInputTile::get_thread_buffer_size() / kPack, 1>{}([&](auto i) {
+            // a scale operand of 1.0 is exponent 0, no scaling
+            const auto packed = __builtin_amdgcn_cvt_scalef32_pk8_fp8_f32(
+                q_scaled.get_thread_buffer().template get_as<fp32x8_t>(i), 1.f);
+            q.get_thread_buffer().template set_as<QPack>(i, bit_cast<QPack>(packed));
+        });
+        return make_tuple(q, q_scale);
+    }
+
+    // gemm_0's Q operand from LDS. Dynamic Q quantizes it and sets row_scale to scale_s times
+    // each row's dequant scale. (A lambda here instead changes the code of the other kernels.)
+    template <typename QLdsWindow, typename RowScaleTile>
+    CK_TILE_DEVICE static auto
+    LoadQTile(const QLdsWindow& q_lds_read_window, float scale_s, RowScaleTile& row_scale)
+    {
+        if constexpr(kDynamicQ)
+        {
+            auto [q, q_scale] = QuantizeQRows(load_tile(q_lds_read_window));
+            // A thread holds the same rows of Q and of the scores. The encodings themselves differ:
+            // Q's (the A operand's) has one more Y dimension, of length 1.
+            using QRow = typename decltype(q_scale)::StaticTileDistribution::DstrEncode;
+            using SRow = typename RowScaleTile::StaticTileDistribution::DstrEncode;
+            static_assert(
+                std::is_same_v<typename QRow::RsLengths, typename SRow::RsLengths> &&
+                    std::is_same_v<typename QRow::HsLengthss, typename SRow::HsLengthss> &&
+                    std::is_same_v<typename QRow::Ps2RHssMajor, typename SRow::Ps2RHssMajor> &&
+                    std::is_same_v<typename QRow::Ps2RHssMinor, typename SRow::Ps2RHssMinor> &&
+                    decltype(q_scale)::get_thread_buffer_size() ==
+                        RowScaleTile::get_thread_buffer_size(),
+                "qr_tdm_pingpong dynamic Q: the Q and S row layouts differ");
+            static_for<0, RowScaleTile::get_thread_buffer_size(), 1>{}([&](auto i) {
+                row_scale.get_thread_buffer()(i) = scale_s * q_scale.get_thread_buffer()[i];
+            });
+            return q;
+        }
+        else
+        {
+            ignore = scale_s;
+            ignore = row_scale;
+            return load_tile(q_lds_read_window);
+        }
+    }
+
     // STAGE 2 of the QK result: scale_s and the bias (elementwise or ALiBi) for the
     // K tile starting at k_start. Without bias, scale_s is applied in the exponent, but for
     // fp8 P (see kFp8P). position_encoding is taken by value; Alibi::update does not change it.
+    // Dynamic Q scales each row by row_scale, scale_s times the row's Q dequant scale.
     template <typename SaccTile,
               typename BiasDramWindow,
               typename QOrigin,
-              typename PositionEncoding>
+              typename PositionEncoding,
+              typename RowScaleTile>
     CK_TILE_DEVICE static void ApplyScaleAndBias(SaccTile& s_acc,
                                                  const BiasDramWindow& bias_dram_window,
                                                  const QOrigin& q_origin,
                                                  index_t k_start,
                                                  float scale_s,
-                                                 PositionEncoding position_encoding)
+                                                 PositionEncoding position_encoding,
+                                                 const RowScaleTile& row_scale)
     {
         if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
         {
@@ -307,8 +408,18 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
         }
         else
         {
-            if constexpr(kFp8P)
+            if constexpr(kDynamicQ)
+            {
+                constexpr auto s_spans = SaccTile::get_distributed_spans();
+                sweep_tile_span(s_spans[I0], [&](auto idx0) {
+                    const auto row_s = row_scale[make_tuple(idx0)];
+                    sweep_tile_span(s_spans[I1],
+                                    [&](auto idx1) { s_acc(make_tuple(idx0, idx1)) *= row_s; });
+                });
+            }
+            else if constexpr(kFp8P)
                 tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
+            ignore = row_scale;
             ignore = bias_dram_window;
             ignore = q_origin;
             ignore = k_start;
@@ -428,9 +539,12 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                                         const Paged5DNavigator& paged5d_nav = {}) const
     {
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
+        static_assert(!kDynamicQ || Layout::kQBytes <= Layout::kVBytes,
+                      "qr_tdm_pingpong dynamic Q: the bf16 Q tile must fit in V's region");
 
         static_assert(
-            std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
+            std::is_same_v<QInputDataType,
+                           remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
                 std::is_same_v<KDataType, remove_cvref_t<typename KDramBlockWindowTmp::DataType>> &&
                 std::is_same_v<VDataType, remove_cvref_t<typename VDramBlockWindowTmp::DataType>>,
             "wrong!");
@@ -548,8 +662,8 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
         // Q sits on V's region, so K's transfer can be issued right behind Q's.
         // Q is read once, before the loop; the loop-head barrier drains those
         // reads before the first V transfer overwrites the region.
-        QDataType* const q_smem_ptr =
-            reinterpret_cast<QDataType*>(static_cast<char*>(smem_arena) + Layout::kQOffset);
+        QInputDataType* const q_smem_ptr =
+            reinterpret_cast<QInputDataType*>(static_cast<char*>(smem_arena) + Layout::kQOffset);
 
         auto q_lds_view = make_tensor_view<address_space_enum::lds>(
             q_smem_ptr, Policy::template MakeQLdsBlockDescriptor<Problem>());
@@ -670,9 +784,14 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
             {0, 0},
             Policy::template MakeVRegTileDistribution<Problem>());
 
+        // dynamic Q: scale_s times the Q dequant scale of each row, in s_acc's row layout
+        using SaccRowTileType           = decltype(block_tile_reduce<SMPLComputeDataType>(
+            SaccBlockTileType{}, sequence<1>{}, f_max, SaccDataType{0}));
+        [[maybe_unused]] auto row_scale = SaccRowTileType{};
+
         // retire Q only; K, issued after it, stays in flight
         s_wait_tensorcnt_barrier<1>();
-        auto q_tile = load_tile(q_lds_read_window);
+        auto q_tile = LoadQTile(q_lds_read_window, scale_s, row_scale);
 
         const index_t num_total_loop =
             integer_divide_ceil(physical_seqlen_k_end - physical_seqlen_k_start, kN0) +
@@ -788,8 +907,13 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                     : physical_seqlen_k_start + (i_total_loops - num_sink_loop) * kN0;
 
             // STAGE 2: scale_s, add bias, mask
-            ApplyScaleAndBias(
-                s_acc, bias_dram_window, q_origin, kv_tile_start, scale_s, position_encoding);
+            ApplyScaleAndBias(s_acc,
+                              bias_dram_window,
+                              q_origin,
+                              kv_tile_start,
+                              scale_s,
+                              position_encoding,
+                              row_scale);
             MaskScores(s_acc,
                        mask,
                        q_origin,

@@ -21,6 +21,7 @@ enum class quant_scale_enum
     kv_blockscale = 3, // Q per-tensor, K/V per-page block scale
     mx            = 4, // Microscaling (MX)
     perhead       = 5, // one descale per (batch, head)
+    dynamic_q     = 6, // bf16 Q quantized per row in the kernel, K/V per-tensor
 };
 
 struct quant_scale_info
@@ -41,6 +42,8 @@ struct quant_scale_info
             os << "mx";
         else if(type == quant_scale_enum::perhead)
             os << "ph";
+        else if(type == quant_scale_enum::dynamic_q)
+            os << "dynq";
     }
 
     static quant_scale_info decode(std::string str)
@@ -69,6 +72,10 @@ struct quant_scale_info
         else if(str == "ph" || str == "5")
         {
             info.type = quant_scale_enum::perhead;
+        }
+        else if(str == "dynq" || str == "6")
+        {
+            info.type = quant_scale_enum::dynamic_q;
         }
         else
         {

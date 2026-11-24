@@ -23,6 +23,30 @@ inline constexpr bool is_qr_tdm_pingpong_qkv_v =
      std::is_same_v<typename Problem::KDataType, fp8_t> &&
      std::is_same_v<typename Problem::VDataType, fp8_t>);
 
+// A split-KV problem with kDynamicQ reads Q as QInputDataType and quantizes it to QDataType in
+// the pipeline (see BlockFmhaFwdSplitKVPipelineProblem); every other problem reads QDataType.
+template <typename Problem, typename = void>
+inline constexpr bool problem_dynamic_q_v = false;
+
+template <typename Problem>
+inline constexpr bool problem_dynamic_q_v<Problem, std::void_t<decltype(Problem::kDynamicQ)>> =
+    Problem::kDynamicQ;
+
+template <typename Problem, bool = problem_dynamic_q_v<Problem>>
+struct q_input_data
+{
+    using type = typename Problem::QDataType;
+};
+
+template <typename Problem>
+struct q_input_data<Problem, true>
+{
+    using type = typename Problem::QInputDataType;
+};
+
+template <typename Problem>
+using q_input_data_t = typename q_input_data<Problem>::type;
+
 // One pad per row, expressed as a row stride: the layout the TDM writer produces with a
 // padding interval of one row, with affine reader address math (no merge/unmerge div/mod).
 template <typename DataType, index_t Rows, index_t Cols, typename PaddingConfig>
@@ -69,7 +93,7 @@ struct QrTdmPingPongPadding<Problem, true>
     using Shape = typename Problem::BlockFmhaShape;
 
     using Q = LdsPaddingConfig<true,
-                               Shape::kSubQKHeaddim * sizeof(typename Problem::QDataType),
+                               Shape::kSubQKHeaddim * sizeof(q_input_data_t<Problem>),
                                kQrTdmLdsAccessBytes>;
     using K = LdsPaddingConfig<true,
                                Shape::kSubQKHeaddim * sizeof(typename Problem::KDataType),
@@ -92,13 +116,12 @@ struct QrTdmPingPongLdsArenaLayout
     static constexpr index_t kArenaAlignment  = 256;
     static constexpr index_t kRegionAlignment = 256;
 
-    static constexpr index_t kQBytes =
-        make_qr_tdm_pingpong_lds_descriptor<typename Problem::QDataType,
-                                            Shape::kM0,
-                                            Shape::kSubQKHeaddim,
-                                            QPadding>()
-            .get_element_space_size() *
-        sizeof(typename Problem::QDataType);
+    static constexpr index_t kQBytes = make_qr_tdm_pingpong_lds_descriptor<q_input_data_t<Problem>,
+                                                                           Shape::kM0,
+                                                                           Shape::kSubQKHeaddim,
+                                                                           QPadding>()
+                                           .get_element_space_size() *
+                                       sizeof(q_input_data_t<Problem>);
     static constexpr index_t kKBytes =
         make_qr_tdm_pingpong_lds_descriptor<typename Problem::KDataType,
                                             Shape::kN0,
@@ -156,10 +179,22 @@ struct BlockFmhaPipelineQRKSVSTdmPingPongPolicy : BlockFmhaPipelineQRKSVSTdmDefa
     using LdsArenaLayout =
         detail::QrTdmPingPongLdsArenaLayout<Problem, QPadding, KPadding, VPadding>;
 
+    // the qr_tdm alignment, of the Q that is read (see detail::q_input_data_t)
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto GetAlignmentQ()
+    {
+        constexpr index_t kElemPerThread = Problem::BlockFmhaShape::kM0 *
+                                           Problem::BlockFmhaShape::kSubQKHeaddim /
+                                           Problem::kBlockSize;
+        static_assert(0 < kElemPerThread);
+        return min(kElemPerThread,
+                   static_cast<index_t>(16 / sizeof(detail::q_input_data_t<Problem>)));
+    }
+
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeQLdsBlockDescriptor()
     {
-        return detail::make_qr_tdm_pingpong_lds_descriptor<typename Problem::QDataType,
+        return detail::make_qr_tdm_pingpong_lds_descriptor<detail::q_input_data_t<Problem>,
                                                            Problem::BlockFmhaShape::kM0,
                                                            Problem::BlockFmhaShape::kSubQKHeaddim,
                                                            LdsPaddingConfigQ<Problem>>();

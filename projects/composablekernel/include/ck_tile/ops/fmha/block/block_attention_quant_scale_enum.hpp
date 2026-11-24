@@ -16,6 +16,7 @@ enum class BlockAttentionQuantScaleEnum
     KV_BLOCKSCALE = 3, // Q per-tensor, K/V per-page block scale
     MX            = 4, // Microscaling
     PERHEAD       = 5, // one descale per (batch, head)
+    DYNAMIC_Q     = 6, // bf16 Q quantized per row in the kernel, K/V per-tensor
 };
 
 template <BlockAttentionQuantScaleEnum>
@@ -50,6 +51,11 @@ template <>
 struct BlockAttentionQuantScaleEnumToStr<BlockAttentionQuantScaleEnum::PERHEAD>
 {
     static constexpr const char* name = "perhead";
+};
+template <>
+struct BlockAttentionQuantScaleEnumToStr<BlockAttentionQuantScaleEnum::DYNAMIC_Q>
+{
+    static constexpr const char* name = "dynq";
 };
 
 } // namespace ck_tile

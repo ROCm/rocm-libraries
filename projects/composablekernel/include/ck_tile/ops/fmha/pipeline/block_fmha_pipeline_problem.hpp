@@ -301,7 +301,10 @@ struct BlockFmhaFwdSplitKVPipelineProblem
     static constexpr index_t kBlockPerCu             = Traits::kBlockPerCu;
     static constexpr bool kHasSink                   = Traits::kHasSink;
     static constexpr auto QScaleEnum                 = Traits::QScaleEnum;
-    static constexpr auto kKVMemoryLayout            = kTraitsKVMemoryLayout<Traits>;
+    // Q is read as QInputDataType and quantized per row to QDataType in the pipeline
+    static constexpr bool kDynamicQ       = QScaleEnum == BlockAttentionQuantScaleEnum::DYNAMIC_Q;
+    using QInputDataType                  = std::conditional_t<kDynamicQ, bf16_t, QDataType>;
+    static constexpr auto kKVMemoryLayout = kTraitsKVMemoryLayout<Traits>;
     // sglang's 5D paged KV, read by the pingpong pipeline (detail::is_kv_layout_5d_v)
     static constexpr bool kKVLayout5D =
         kKVMemoryLayout == BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT;

@@ -68,6 +68,10 @@ struct FmhaFwdSplitKVKernel
     static constexpr bool kIsPagedKV        = FmhaPipeline::Problem::kIsPagedKV;
     static constexpr bool kHasSink          = FmhaPipeline::Problem::kHasSink;
     static constexpr auto QScaleEnum        = FmhaPipeline::Problem::QScaleEnum;
+    // dynamic Q reads K and V through the per-tensor descales, and Q as QInputDataType
+    static constexpr bool kHasQKVDescale = QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
+                                           QScaleEnum == BlockAttentionQuantScaleEnum::DYNAMIC_Q;
+    using QInputDataType = remove_cvref_t<typename FmhaPipeline::Problem::QInputDataType>;
     static constexpr bool kMergeNumHeadGroupsSeqLenQ =
         FmhaPipeline::Problem::kMergeNumHeadGroupsSeqLenQ;
     using AttentionVariant = ck_tile::remove_cvref_t<typename FmhaPipeline::AttentionVariant>;
@@ -118,8 +122,9 @@ struct FmhaFwdSplitKVKernel
                    ((!kHasMask && !kHasSink) || kUsesTdmAffineDramPath)));
 
     static_assert(QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ||
-                      (QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR && !kDoFp8StaticQuant),
-                  "split-kv supports only the per-tensor descale, without fp8 static quant");
+                      (kHasQKVDescale && !kDoFp8StaticQuant),
+                  "split-kv supports only the per-tensor descale and dynamic Q, without fp8 static "
+                  "quant");
 
     // clang-format off
     template <typename T> struct t2s;
@@ -305,9 +310,7 @@ struct FmhaFwdSplitKVKernel
           std::conditional_t<kDoFp8StaticQuant, Fp8StaticQuantKargs, EmptyKargs<2>>,
           std::conditional_t<kIsPagedKV, CommonPageBlockTableKargs, CacheBatchIdxKargs>,
           std::conditional_t<kHasLogitsSoftCap, LogitsSoftCapKargs, EmptyKargs<3>>,
-          std::conditional_t<QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR,
-                             QScaleKargs,
-                             EmptyKargs<5>>
+          std::conditional_t<kHasQKVDescale, QScaleKargs, EmptyKargs<5>>
     {
         const int32_t* seqlen_k_ptr;
 
@@ -331,9 +334,7 @@ struct FmhaFwdSplitKVKernel
           std::conditional_t<kDoFp8StaticQuant, Fp8StaticQuantKargs, EmptyKargs<2>>,
           std::conditional_t<kIsPagedKV, GroupModePageBlockTableKargs, EmptyKargs<3>>,
           std::conditional_t<kHasLogitsSoftCap, LogitsSoftCapKargs, EmptyKargs<4>>,
-          std::conditional_t<QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR,
-                             QScaleKargs,
-                             EmptyKargs<5>>
+          std::conditional_t<kHasQKVDescale, QScaleKargs, EmptyKargs<5>>
     {
         const int32_t* seqstart_q_ptr;
         const int32_t* seqstart_k_ptr;
@@ -488,7 +489,7 @@ struct FmhaFwdSplitKVKernel
         {
             kargs.init_logits_soft_cap(logits_soft_cap);
         }
-        if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR)
+        if constexpr(kHasQKVDescale)
         {
             kargs.q_descale_ptr = q_descale_ptr;
             kargs.k_descale_ptr = k_descale_ptr;
@@ -623,7 +624,7 @@ struct FmhaFwdSplitKVKernel
         {
             kargs.init_logits_soft_cap(logits_soft_cap);
         }
-        if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR)
+        if constexpr(kHasQKVDescale)
         {
             kargs.q_descale_ptr = q_descale_ptr;
             kargs.k_descale_ptr = k_descale_ptr;
@@ -726,6 +727,12 @@ struct FmhaFwdSplitKVKernel
                              *static_cast<const float*>(kargs.k_descale_ptr);
             v_descale = *static_cast<const float*>(kargs.v_descale_ptr);
         }
+        else if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::DYNAMIC_Q)
+        {
+            // the pipeline scales each row by its own Q descale
+            kargs.scale_s *= *static_cast<const float*>(kargs.k_descale_ptr);
+            v_descale = *static_cast<const float*>(kargs.v_descale_ptr);
+        }
 
         const float sink_value =
             kargs.sink_ptr != nullptr
@@ -818,11 +825,11 @@ struct FmhaFwdSplitKVKernel
         const index_t i_nhead_k =
             (kMergeNumHeadGroupsSeqLenQ ? i_nhead : i_nhead / kargs.nhead_ratio_qk);
 
-        const QDataType* q_ptr = reinterpret_cast<const QDataType*>(kargs.q_ptr) +
-                                 static_cast<long_index_t>(i_nhead) *
-                                     (kMergeNumHeadGroupsSeqLenQ ? kargs.nhead_ratio_qk : 1) *
-                                     kargs.nhead_stride_q +
-                                 batch_offset_q;
+        const QInputDataType* q_ptr = reinterpret_cast<const QInputDataType*>(kargs.q_ptr) +
+                                      static_cast<long_index_t>(i_nhead) *
+                                          (kMergeNumHeadGroupsSeqLenQ ? kargs.nhead_ratio_qk : 1) *
+                                          kargs.nhead_stride_q +
+                                      batch_offset_q;
         const KDataType* k_ptr = reinterpret_cast<const KDataType*>(kargs.k_ptr) +
                                  static_cast<long_index_t>(i_nhead_k) * kargs.nhead_stride_k +
                                  batch_offset_k;
@@ -1286,7 +1293,7 @@ struct FmhaFwdSplitKVKernel
             }
         }();
 
-        if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR)
+        if constexpr(kHasQKVDescale)
         {
             tile_elementwise_inout([v_descale](auto& x) { x *= v_descale; }, o_acc_tile);
         }
