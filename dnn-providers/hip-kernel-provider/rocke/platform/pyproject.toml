@@ -32,7 +32,7 @@ dev = [
     "pytest>=9.0",
     "pytest-timeout>=2.4",
     # Independent low-bit numerical reference types:
-    "ml_dtypes>=0.6.0",
+    "ml_dtypes>=0.5.0",
     "pybind11>=3.0",
     # The heuristics tests' own packages are not rocKE dependencies: see
     # rocke/heuristics/tests/requirements.txt.

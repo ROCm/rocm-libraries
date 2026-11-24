@@ -8,7 +8,7 @@ derived relative to each file, so this tree is copy-able verbatim.
 
 Install test dependencies from the platform directory with
 `python -m pip install -r requirements.txt` or `python -m pip install -e '.[dev]'`.
-Both include `ml_dtypes>=0.6.0`, which supplies independent FP4/FP6/FP8 reference
+Both include `ml_dtypes>=0.5.0`, which supplies independent FP4/FP6/FP8 reference
 types. Host tests that need this optional runtime dependency use
 `pytest.importorskip`; a minimal authoring installation can run the remaining
 tests. Required gfx1250 numerical validation needs `ml_dtypes` installed and
