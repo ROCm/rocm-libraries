@@ -217,39 +217,67 @@ struct tensor
 
     size_t GetSize() const { return desc.GetElementSpace(); }
 
+    // On the note of random number generation:
+    // Up until November 2026, the seed of the random number generator was being regenerated
+    // at every call of the method generate(). A consequence of that was found in, for instance,
+    // the backward batchnorm tests where the dy and x tensors were the same, thus leading
+    // to big cancellations, theoretically zeros. Note also, importantly, that as of the time of
+    // writing, the method prng::reset_seed(seed) adds the value passed as a parameter to the
+    // function to the global default seed of the PRNG.
+    //
+    // This refactor preserved partially the old behavior. The idea is that the user would have to
+    // provide manually an offset for the global RNG seed when generating multiple tensors. That way
+    // the user can get different tensors by providing a different value for the seed offset. And
+    // unrefactored code can continue using the old behavior until a better solution is more
+    // thoroughly propagated in the library codebase.
+    //
+    // A more resilient solution would be to refactor random number generation thoroughly and to
+    // properly seed the RNG once wherever it is needed. But given the techincal debt in the
+    // codebase, that could turn out a big effort.
+
     template <class G>
-    tensor& generate(G g) &
+    tensor& generate(G g, unsigned long long seedOffset = 0) &
     {
-        if(this->desc.GetVectorLength() > 1)
-            this->generate_vect_impl(g);
-        else
-            this->generate_impl(g);
+        generate_helper(g, seedOffset);
         return *this;
     }
 
     template <class G>
-    tensor&& generate(G g) &&
+    tensor&& generate(G g, unsigned long long seedOffset = 0) &&
     {
-        if(this->desc.GetVectorLength() > 1)
-            this->generate_vect_impl(g);
-        else
-            this->generate_impl(g);
+        generate_helper(g, seedOffset);
         return std::move(*this);
     }
 
     template <class G>
-    void generate_impl(G g)
+    void generate_helper(G g, unsigned long long seedOffset)
     {
-        auto seed = std::accumulate(desc.GetLengths().begin(),
-                                    desc.GetLengths().end(),
-                                    std::size_t{521288629},
-                                    [](auto x, auto y) {
-                                        x ^= x << 1U;
-                                        return x ^ y;
-                                    });
-        seed ^= data.size();
-        seed ^= desc.GetLengths().size();
-        prng::reset_seed(seed);
+        unsigned long long seed = seedOffset;
+        if(seedOffset == 0)
+        // If a seed offset is not specified, preserve the old behavior of the method
+        {
+            seed = std::accumulate(desc.GetLengths().begin(),
+                                   desc.GetLengths().end(),
+                                   std::size_t{521288629},
+                                   [](auto x, auto y) {
+                                       x ^= x << 1U;
+                                       return x ^ y;
+                                   });
+
+            seed ^= data.size();
+            seed ^= desc.GetLengths().size();
+        }
+
+        if(this->desc.GetVectorLength() > 1)
+            this->generate_vect_impl(g, seedOffset);
+        else
+            this->generate_impl(g, seedOffset);
+    }
+
+    template <class G>
+    void generate_impl(G g, unsigned long long seedOffset)
+    {
+        prng::reset_seed(seedOffset);
         auto iterator = data.begin();
         auto assign   = [&](T x) {
             *iterator = x;
@@ -260,18 +288,9 @@ struct tensor
     }
 
     template <class G>
-    void generate_vect_impl(G g)
+    void generate_vect_impl(G g, unsigned long long seedOffset)
     {
-        auto seed = std::accumulate(desc.GetLengths().begin(),
-                                    desc.GetLengths().end(),
-                                    std::size_t{521288629},
-                                    [](auto x, auto y) {
-                                        x ^= x << 1U;
-                                        return x ^ y;
-                                    });
-        seed ^= data.size();
-        seed ^= desc.GetLengths().size();
-        prng::reset_seed(seed);
+        prng::reset_seed(seedOffset);
         auto iterator     = data.begin();
         auto vectorLength = desc.GetVectorLength();
         auto assign       = [&](T x) {
