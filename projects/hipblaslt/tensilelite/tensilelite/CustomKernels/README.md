@@ -142,6 +142,13 @@ the device, with the kernel asserted as the default pick on its architecture.
 `AddCustomConfig` copies the key from the kernel's `CustomKernel` entry in the
 test YAML.
 
+A non-persistent custom kernel with `ClusterDim` other than `[1, 1]` is
+launched on its grid rounded up to `ClusterDim` in each dimension. A work-group
+whose `blockIdx` is at or past the size its `grid` entry implies (tiles,
+`ComputeUnits`, `One`, ...) must exit before any cluster barrier, and its
+peers' multicast masks must exclude it. `NumWorkGroups` counts the padded
+grid, so take tile bounds from the size arguments.
+
 ### Stream-K reductions and post kernels
 
 An external Stream-K kernel lists the reduction modes it supports in
