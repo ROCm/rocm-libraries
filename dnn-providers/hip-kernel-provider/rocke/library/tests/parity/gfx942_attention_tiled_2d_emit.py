@@ -331,9 +331,27 @@ _CONFIGS = {
         use_conflict_free_v_store=True,
         use_i64_kv_addr=True,
     ),
+    # idx20: additive bias on gfx942; both engines reject it (BOTH_REJECTED).
+    # The gfx942 Python spec has no use_additive_bias field at all, so this
+    # raises TypeError at construction. The C twin's spec_validate() rejects
+    # it too, but nothing in the provider tree calls that function on the
+    # real build path (rocke_build_unified_attention_2d_tiled_scalar ->
+    # rocke_gfx942_attn2d_build_ctx_init); the reject this config pins lives
+    # in the ctx-init itself.
+    20: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=32,
+        dtype="bf16",
+        use_sinks=True,
+        sliding_window=2048,
+        has_softcap=False,
+        use_additive_bias=True,
+    ),
     # ALiBi: per-row hoist (GQA, 24 heads so the built-in slope formula's
     # tail heads appear), then the transposed x8 per-iter slope (mask-once).
-    20: dict(
+    21: dict(
         head_size=64,
         block_size=32,
         num_query_heads=24,
@@ -344,7 +362,7 @@ _CONFIGS = {
         has_softcap=False,
         use_alibi=True,
     ),
-    21: dict(
+    22: dict(
         head_size=64,
         block_size=32,
         num_query_heads=32,
@@ -363,11 +381,19 @@ _CONFIGS = {
     ),
 }
 
-# cfg22-34: the ALiBi arms (alibi_design) on the corpus specs of each family:
-# 22-25 each arm on the x8 k1buf mask-limit softmax (bf16 D128); default arms
-# 26 x8 cfvst fp16 D128 (mask-limit) and 27 register-P D128; 28 register-P D256
-# mw32 with seed_tile; 29-32 each arm on the 16x16 path (fp16 D128); 33 LSE on
-# the x8 k1buf default; 34 seed_split on the x8 mask-once softmax (no mask limit).
+# Configs both engines must reject, with the reason each one pins: run_diff
+# requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
+# reason, a typo included).
+_EXPECTED_REJECTIONS = {
+    # The Python gfx942 spec has no bias field, so Python fails on the keyword.
+    20: r"unexpected keyword argument 'use_additive_bias'|does not emit additive bias",
+}
+
+# cfg23-35: the ALiBi arms (alibi_design) on the corpus specs of each family:
+# 23-26 each arm on the x8 k1buf mask-limit softmax (bf16 D128); default arms
+# 27 x8 cfvst fp16 D128 (mask-limit) and 28 register-P D128; 29 register-P D256
+# mw32 with seed_tile; 30-33 each arm on the 16x16 path (fp16 D128); 34 LSE on
+# the x8 k1buf default; 35 seed_split on the x8 mask-once softmax (no mask limit).
 _X8_MLIM_ALIBI = dict(
     head_size=128,
     block_size=64,
@@ -407,18 +433,18 @@ _ALIBI_16X16 = dict(
     waves_per_eu=2,
     tile_size=64,
 )
-_CONFIGS[22] = dict(_X8_MLIM_ALIBI, alibi_design="seed_tile")
-_CONFIGS[23] = dict(_X8_MLIM_ALIBI, alibi_design="fma_tile")
-_CONFIGS[24] = dict(_X8_MLIM_ALIBI, alibi_design="seed_split")
-_CONFIGS[25] = dict(_X8_MLIM_ALIBI, alibi_design="fma_split")
-_CONFIGS[26] = {
+_CONFIGS[23] = dict(_X8_MLIM_ALIBI, alibi_design="seed_tile")
+_CONFIGS[24] = dict(_X8_MLIM_ALIBI, alibi_design="fma_tile")
+_CONFIGS[25] = dict(_X8_MLIM_ALIBI, alibi_design="seed_split")
+_CONFIGS[26] = dict(_X8_MLIM_ALIBI, alibi_design="fma_split")
+_CONFIGS[27] = {
     **{k: v for k, v in _X8_MLIM_ALIBI.items() if k != "use_k_single_buffer"},
     "dtype": "fp16",
     "num_warps": 4,
     "use_conflict_free_v_store": True,
 }
-_CONFIGS[27] = dict(_ALIBI_16X16, dtype="bf16", use_register_pv=True)
-_CONFIGS[28] = dict(
+_CONFIGS[28] = dict(_ALIBI_16X16, dtype="bf16", use_register_pv=True)
+_CONFIGS[29] = dict(
     head_size=256,
     block_size=16,
     num_query_heads=16,
@@ -435,15 +461,15 @@ _CONFIGS[28] = dict(
     block_m_per_warp=32,
     alibi_design="seed_tile",
 )
-_CONFIGS[29] = dict(_ALIBI_16X16, alibi_design="seed_tile")
-_CONFIGS[30] = dict(_ALIBI_16X16, alibi_design="fma_tile")
-_CONFIGS[31] = dict(_ALIBI_16X16, alibi_design="seed_split")
-_CONFIGS[32] = dict(_ALIBI_16X16, alibi_design="fma_split")
-_CONFIGS[33] = dict(_X8_MLIM_ALIBI, emit_lse=True)
-_CONFIGS[34] = dict(_CONFIGS[21], alibi_design="seed_split")
-# cfg35-36: the x8 k1buf spec dispatch picks for bf16 D192 at block_size 64, whose
-# transposed softmax has no sub-flags (full mask, inline per-lane slope): 35 the
-# per-score add (no design), 36 fma_tile on the same full-mask softmax.
+_CONFIGS[30] = dict(_ALIBI_16X16, alibi_design="seed_tile")
+_CONFIGS[31] = dict(_ALIBI_16X16, alibi_design="fma_tile")
+_CONFIGS[32] = dict(_ALIBI_16X16, alibi_design="seed_split")
+_CONFIGS[33] = dict(_ALIBI_16X16, alibi_design="fma_split")
+_CONFIGS[34] = dict(_X8_MLIM_ALIBI, emit_lse=True)
+_CONFIGS[35] = dict(_CONFIGS[22], alibi_design="seed_split")
+# cfg36-37: the x8 k1buf spec dispatch picks for bf16 D192 at block_size 64, whose
+# transposed softmax has no sub-flags (full mask, inline per-lane slope): 36 the
+# per-score add (no design), 37 fma_tile on the same full-mask softmax.
 _D192_X8_FULL_MASK_ALIBI = dict(
     head_size=192,
     block_size=64,
@@ -464,8 +490,8 @@ _D192_X8_FULL_MASK_ALIBI = dict(
     use_k_single_buffer=True,
     kv_cache_policy="all",
 )
-_CONFIGS[35] = dict(_D192_X8_FULL_MASK_ALIBI)
-_CONFIGS[36] = dict(_D192_X8_FULL_MASK_ALIBI, alibi_design="fma_tile")
+_CONFIGS[36] = dict(_D192_X8_FULL_MASK_ALIBI)
+_CONFIGS[37] = dict(_D192_X8_FULL_MASK_ALIBI, alibi_design="fma_tile")
 
 
 def _kernel(idx: int):

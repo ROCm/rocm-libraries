@@ -85,8 +85,16 @@ constexpr const char* SAVE_LOAD_CASE = "D64_Bm128Bn64";
 // on load, because its code object takes the slopes pointer v2 does not pass.
 constexpr const char* ALIBI_SAVE_LOAD_CASE = "Alibi_D128_Bf16Hq40Kv8_Sq256Skv384";
 
+// The bias knob cases the save and load cases build, both with B = 2: a full
+// [B, Hq, Sq, Skv] bias, and a [B, 1, Sq, Skv] bias whose head axis broadcasts through
+// stride 0 between two nonzero strides. A key-row bias saves only zero strides, so its
+// round trip could not show a stride read from another axis.
+constexpr const char* BIAS_SAVE_LOAD_CASE = "Bias_D64_Bf16Causal_Full";
+constexpr const char* BROADCAST_BIAS_SAVE_LOAD_CASE = "Bias_D128_Fp16Causal_PerBatch";
+
 using Mask = SdpaMask;
 using GraphShape = IngestorSdpaGraphSpec;
+using BiasLayout = IngestorSdpaBias;
 
 struct Tile
 {
@@ -157,14 +165,20 @@ GraphShape withAlibi(GraphShape shape)
     return shape;
 }
 
+GraphShape withBias(GraphShape shape, BiasLayout bias)
+{
+    shape.bias = bias;
+    return shape;
+}
+
 /// Forced (tile, head size) pairs and cold cases first; then one case for each remaining
 /// catalog head configuration, in ascending (head size, Hq, Hkv) order at B=1, Sq=Skv=256;
 /// then further cases until every (head size, dtype, causal, tile) class the catalog compiles
 /// runs at least once; then cold cases of an fp16 graph with an explicit mma_core_mode; then
 /// two forced cases with no attn_scale_value and one with a non-default attn_scale_value;
-/// then one ALiBi case per ALiBi class. Within them: bounds on both corners and both
-/// deprecated flags, fp16 and bf16, MHA, GQA and MQA, and forced cases with B > 1 and
-/// Sq != Skv.
+/// then one ALiBi case per ALiBi class, then one case per additive-bias class, each bias
+/// layout twice. Within them: bounds on both corners and both deprecated flags, fp16 and bf16,
+/// MHA, GQA and MQA, and forced cases with B > 1 and Sq != Skv.
 std::vector<KnobCase> knobCases()
 {
     constexpr auto FP16 = DataType::HALF;
@@ -244,8 +258,10 @@ std::vector<KnobCase> knobCases()
         // The trained gfx950 ranker takes this one and Cold_D128Hq8Kv8_Bf16NoMask below
         // somewhere the native rule does not (it wants 128/128 here). Both shapes are
         // D128 non-causal, the cohort §6 of the case study calls the weak one, and
-        // neither was in the sweep, so which tile is faster is unmeasured. What is
-        // checked is that the pick is correct: the CPU reference compare runs either way.
+        // neither was in the case study's sweep. The ranker's own corpus does measure that
+        // cohort at short sequence lengths, and 128/64 is the faster of 128/64 and 128/128
+        // there, so these two pins follow the retrained model. What is checked is that
+        // the pick is correct: the CPU reference compare runs either way.
         {"Cold_MmaBfloat16",
          makeShape(BF16, 128, 8, 1, Mask::NO_MASK, BF16, 3, 384, 256),
          COLD,
@@ -448,7 +464,7 @@ std::vector<KnobCase> knobCases()
         {"Cold_D128Hq8Kv8_Bf16NoMask",
          makeShape(BF16, 128, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
          COLD,
-         Tile{128, 128}},
+         Tile{128, 64}},
         // An fp16 graph with each explicit mma_core_mode.
         {"Cold_Fp16MmaHalf",
          makeShape(FP16, 128, 16, 16, Mask::BOUNDS_TOP_LEFT, FP16, 2, 256, 512),
@@ -595,6 +611,54 @@ std::vector<KnobCase> knobCases()
          withAlibi(makeShape(FP16, 128, 9, 9, Mask::BOUNDS_TOP_LEFT, MMA_UNSET, 1, 128, 128)),
          COLD,
          Tile{128, 128}},
+        // Additive bias: the catalog compiles it at 128/64 for every head size, dtype and
+        // mask, so one case per class, each bias layout twice, forced and cold, with B > 1
+        // and Sq != Skv among them, plus an Sq (384) that no 256 tile divides.
+        {"Bias_D64_Bf16Causal_Full",
+         withBias(makeShape(BF16, 64, 8, 8, Mask::BOUNDS_TOP_LEFT, MMA_UNSET, 2, 256, 256),
+                  BiasLayout::FULL),
+         FORCED,
+         Tile{128, 64}},
+        {"Bias_D64_Bf16NoMask_PerBatch",
+         withBias(makeShape(BF16, 64, 16, 2, Mask::NO_MASK, MMA_UNSET, 2, 256, 512),
+                  BiasLayout::PER_BATCH),
+         COLD,
+         Tile{128, 64}},
+        {"Bias_D64_Fp16Causal_PerHead",
+         withBias(makeShape(FP16, 64, 8, 1, Mask::CAUSAL_MASK_FLAG, MMA_UNSET, 1, 256, 256),
+                  BiasLayout::PER_HEAD),
+         COLD,
+         Tile{128, 64}},
+        {"Bias_D64_Fp16NoMask_KeyRow",
+         withBias(makeShape(FP16, 64, 32, 8, Mask::NO_MASK, MMA_UNSET, 1, 512, 256),
+                  BiasLayout::KEY_ROW),
+         FORCED,
+         Tile{128, 64}},
+        {"Bias_D128_Bf16Causal_KeyRow",
+         withBias(makeShape(BF16, 128, 16, 2, Mask::BOUNDS_BOTTOM_RIGHT, MMA_UNSET, 1, 256, 256),
+                  BiasLayout::KEY_ROW),
+         COLD,
+         Tile{128, 64}},
+        {"Bias_D128_Bf16NoMask_Full",
+         withBias(makeShape(BF16, 128, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
+                  BiasLayout::FULL),
+         FORCED,
+         Tile{128, 64}},
+        {"Bias_D128_Fp16Causal_PerBatch",
+         withBias(makeShape(FP16, 128, 32, 4, Mask::BOUNDS_TOP_LEFT, MMA_UNSET, 2, 256, 512),
+                  BiasLayout::PER_BATCH),
+         FORCED,
+         Tile{128, 64}},
+        {"Bias_D128_Fp16NoMask_PerHead",
+         withBias(makeShape(FP16, 128, 4, 4, Mask::NO_MASK, MMA_UNSET, 1, 256, 768),
+                  BiasLayout::PER_HEAD),
+         COLD,
+         Tile{128, 64}},
+        {"Bias_D128_Bf16Causal_Sq384_Full",
+         withBias(makeShape(BF16, 128, 8, 2, Mask::BOUNDS_TOP_LEFT, MMA_UNSET, 1, 384, 640),
+                  BiasLayout::FULL),
+         COLD,
+         Tile{128, 64}},
     };
 }
 
@@ -633,6 +697,7 @@ std::optional<std::string> expectedKernelId(const GraphShape& shape, const Tile&
         {"sliding_window", int64_t{0}},
         {"block_m", tile.blockM},
         {"block_n", tile.blockN},
+        {"use_additive_bias", int64_t{shape.bias == BiasLayout::NONE ? 0 : 1}},
         {"use_alibi", int64_t{shape.alibi ? 1 : 0}},
     };
     return detail::onlyServedKernelCarrying(ENGINE, key);
@@ -712,15 +777,16 @@ TEST_F(IntegrationGpuGfx950AttentionDenseKnobCoverage, ServesEveryHeadConfigurat
 }
 
 /// Every row runs one compiled kernel, and what the compiler specializes on is the head size,
-/// dtype, causal flag, tile and ALiBi. The table must run every such class the catalog
-/// carries, so a row edited or removed cannot silently leave a code path unexecuted.
+/// dtype, causal flag, tile, additive bias and ALiBi. The table must run every such class the
+/// catalog carries, so a row edited or removed cannot silently leave a code path unexecuted.
 TEST_F(IntegrationGpuGfx950AttentionDenseKnobCoverage, CoversEveryCatalogKernelClass)
 {
     ASSERT_FALSE(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR").empty())
         << "HIPDNN_DESCRIPTOR_RUNTIME_DIR is not set, so there are no production descriptors to "
            "read the catalog's kernel classes from";
 
-    using KernelClass = std::tuple<int64_t, std::string, int64_t, int64_t, int64_t, int64_t>;
+    using KernelClass
+        = std::tuple<int64_t, std::string, int64_t, int64_t, int64_t, int64_t, int64_t>;
 
     std::set<KernelClass> tableClasses;
     for(const auto& knobCase : knobCases())
@@ -730,6 +796,7 @@ TEST_F(IntegrationGpuGfx950AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
                              detail::catalogCausal(knobCase.shape.mask),
                              knobCase.tile.blockM,
                              knobCase.tile.blockN,
+                             knobCase.shape.bias == BiasLayout::NONE ? 0 : 1,
                              knobCase.shape.alibi ? 1 : 0);
     }
 
@@ -749,7 +816,10 @@ TEST_F(IntegrationGpuGfx950AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
             const auto* causal = intField("causal");
             const auto* blockM = intField("block_m");
             const auto* blockN = intField("block_n");
-            // A record without use_alibi is a plain kernel (the KMD default 0).
+            // A record without use_additive_bias (the ALiBi satellite's) or use_alibi (the
+            // home's) carries 0, the KMD default.
+            const auto* biasField = intField("use_additive_bias");
+            const int64_t bias = biasField == nullptr ? 0 : *biasField;
             const auto* alibiField = intField("use_alibi");
             const int64_t alibi = alibiField == nullptr ? 0 : *alibiField;
             if(dtypeName == nullptr || headSize == nullptr || causal == nullptr || blockM == nullptr
@@ -760,7 +830,7 @@ TEST_F(IntegrationGpuGfx950AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
                                  "block_m and block_n";
                 return;
             }
-            catalogClasses.emplace(*headSize, *dtypeName, *causal, *blockM, *blockN, alibi);
+            catalogClasses.emplace(*headSize, *dtypeName, *causal, *blockM, *blockN, bias, alibi);
         });
 
     const auto onlyIn = [](const std::set<KernelClass>& from, const std::set<KernelClass>& other) {
@@ -769,10 +839,11 @@ TEST_F(IntegrationGpuGfx950AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
         {
             if(other.count(kernelClass) == 0)
             {
-                const auto& [headSize, dtype, causal, blockM, blockN, alibi] = kernelClass;
+                const auto& [headSize, dtype, causal, blockM, blockN, bias, alibi] = kernelClass;
                 text += " (D" + std::to_string(headSize) + ", " + dtype + ", causal "
                         + std::to_string(causal) + ", " + std::to_string(blockM) + "/"
-                        + std::to_string(blockN) + ", alibi " + std::to_string(alibi) + ")";
+                        + std::to_string(blockN) + ", bias " + std::to_string(bias) + ", alibi "
+                        + std::to_string(alibi) + ")";
             }
         }
         return text.empty() ? std::string(" none") : text;
@@ -1025,6 +1096,29 @@ TEST_F(IntegrationGpuGfx950AttentionDenseSaveLoad, RestoresAnAlibiGraphAndPlanIn
 TEST_F(IntegrationGpuGfx950AttentionDenseSaveLoad, RestoresAnAlibiPlanOnlyInAFreshHandle)
 {
     roundTripInAFreshHandle(ALIBI_SAVE_LOAD_CASE, SaveForm::PLAN_ONLY);
+}
+
+/// A bias plan saves under dispatch v3, which adds the bias uid and its strides. A loaded
+/// plan that dropped the bias, or read a stride of another axis, fails the comparison.
+TEST_F(IntegrationGpuGfx950AttentionDenseSaveLoad, RestoresABiasGraphAndPlanInAFreshHandle)
+{
+    roundTripInAFreshHandle(BIAS_SAVE_LOAD_CASE, SaveForm::GRAPH_AND_PLAN);
+}
+
+TEST_F(IntegrationGpuGfx950AttentionDenseSaveLoad, RestoresABiasPlanOnlyInAFreshHandle)
+{
+    roundTripInAFreshHandle(BIAS_SAVE_LOAD_CASE, SaveForm::PLAN_ONLY);
+}
+
+/// A broadcast bias saves a stride of 0 on each extent-1 axis.
+TEST_F(IntegrationGpuGfx950AttentionDenseSaveLoad, RestoresABroadcastBiasGraphAndPlanInAFreshHandle)
+{
+    roundTripInAFreshHandle(BROADCAST_BIAS_SAVE_LOAD_CASE, SaveForm::GRAPH_AND_PLAN);
+}
+
+TEST_F(IntegrationGpuGfx950AttentionDenseSaveLoad, RestoresABroadcastBiasPlanOnlyInAFreshHandle)
+{
+    roundTripInAFreshHandle(BROADCAST_BIAS_SAVE_LOAD_CASE, SaveForm::PLAN_ONLY);
 }
 
 INSTANTIATE_TEST_SUITE_P(Quick,

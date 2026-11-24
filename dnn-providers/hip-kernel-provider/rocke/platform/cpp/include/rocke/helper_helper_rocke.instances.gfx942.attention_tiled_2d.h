@@ -187,6 +187,10 @@ typedef struct rocke_attention_tiled_2d_spec
      * each sequence's LSE is a [num_query_heads, q_len] block; the kernel name's
      * "lse" token becomes "lsehm". Needs emit_lse. */
     bool lse_head_major; /* False */
+    /* gfx950 only (on gfx942, rocke_gfx942_attn2d_build_ctx_init rejects it).
+     * Adds four kernel params, before lse_ptr. New fields go at the end:
+     * inserting a field moves every later one (abi.h). */
+    bool use_additive_bias; /* False */
     /* alibi_design (Python Optional[str], NULL == None = the path's default
      * design). */
     const char* alibi_design; /* NULL */

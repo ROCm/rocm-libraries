@@ -68,6 +68,10 @@ def _lowered(arch, spec):
             },
             "emit_lse",
         ),
+        (
+            {"use_alibi": True, "use_additive_bias": True},
+            "use_alibi is not supported with use_additive_bias",
+        ),
     ],
 )
 def test_spec_refusals(arch, over, match):

@@ -42,6 +42,7 @@
 extern "C" {
 #include "rocke/arch_domain.h"
 #include "rocke/arena.h"
+#include "rocke/helper_rocke.helpers.attention_arch_caps.h"
 #include "rocke/instance_batched_gemm.h"
 #include "rocke/instance_block_scale_gemm.h"
 #include "rocke/instance_f64_mma_probe.h"
@@ -3242,6 +3243,95 @@ PYBIND11_MODULE(rocke_engine, m)
         "Every negative (key, arch, status, evidence, waived) cell compiled into this "
         "engine for one LLVM flavor, sorted by (key, arch); empty for a flavor "
         "with no committed column.");
+    /* rocke.helpers.attention_arch_caps twin, for the Python == C++ test
+     * (platform/tests/helpers/test_attention_arch_caps.py). Every check
+     * returns (ok, value, message) so a refusal compares by text. */
+    m.def(
+        "attention_arch_caps",
+        [](const std::string& arch) -> py::object {
+            rocke_attn_arch_caps_t c;
+            char err[256] = {0};
+            if(!rocke_attn_arch_caps(arch.c_str(), &c, err, sizeof(err)))
+                throw py::value_error(err);
+            py::dict d;
+            d["arch"] = std::string(c.arch);
+            d["wave_size"] = c.wave_size;
+            d["matrix_path"] = std::string(c.matrix_path);
+            d["lds_capacity_bytes"] = c.lds_capacity_bytes;
+            py::tuple dma(c.n_lds_dma_dwords);
+            for(int i = 0; i < c.n_lds_dma_dwords; ++i)
+                dma[i] = c.lds_dma_dwords[i];
+            d["lds_dma_dwords"] = dma;
+            py::tuple tr(c.n_tr_read_bits);
+            for(int i = 0; i < c.n_tr_read_bits; ++i)
+                tr[i] = c.tr_read_bits[i];
+            d["tr_read_bits"] = tr;
+            d["has_agprs"] = c.has_agprs;
+            d["arch_vgprs"] = c.arch_vgprs;
+            d["agprs"] = c.agprs;
+            d["native_fp32_atomic_add"] = c.native_fp32_atomic_add;
+            return d;
+        },
+        py::arg("arch"),
+        "The attention capability record of arch as a dict of AttnArchCaps fields; "
+        "raises ValueError with the Python message for an arch with no row.");
+    m.def(
+        "attention_arch_caps_check",
+        [](const std::string& fn,
+           const std::string& arch,
+           const std::string& dtype,
+           long a,
+           long k) {
+            char err[256] = {0};
+            bool ok = false;
+            py::object value = py::none();
+            const char* s = arch.c_str();
+            const char* dt = dtype.c_str();
+            if(fn == "check_lds_bytes")
+                ok = rocke_attn_check_lds_bytes(s, a, err, sizeof(err));
+            else if(fn == "check_lds_dma_width")
+                ok = rocke_attn_check_lds_dma_width(s, (int)a, err, sizeof(err));
+            else if(fn == "check_transpose_read")
+                ok = rocke_attn_check_transpose_read(s, (int)a, err, sizeof(err));
+            else if(fn == "wide_k_atom_available")
+            {
+                ok = true;
+                value = py::bool_(rocke_attn_wide_k_atom_available(s, dt));
+            }
+            else if(fn == "mfma_asm_mnemonic")
+            {
+                const char* mn = NULL;
+                ok = rocke_attn_mfma_asm_mnemonic(s, dt, (int)k, &mn, err, sizeof(err));
+                if(ok)
+                    value = py::str(mn);
+            }
+            else if(fn == "mfma_result_wait_states")
+            {
+                int v = 0;
+                ok = rocke_attn_mfma_result_wait_states(s, (int)k, &v, err, sizeof(err));
+                if(ok)
+                    value = py::int_(v);
+            }
+            else if(fn == "asm_tail_nop_min")
+            {
+                int v = 0;
+                ok = rocke_attn_asm_tail_nop_min(s, dt, (int)k, &v, err, sizeof(err));
+                if(ok)
+                    value = py::int_(v);
+            }
+            else if(fn == "check_asm_tail_nop")
+                ok = rocke_attn_check_asm_tail_nop(s, dt, (int)k, (int)a, err, sizeof(err));
+            else
+                throw py::value_error("unknown attention_arch_caps check: " + fn);
+            return py::make_tuple(ok, value, ok ? std::string() : std::string(err));
+        },
+        py::arg("fn"),
+        py::arg("arch"),
+        py::arg("dtype") = "",
+        py::arg("a") = 0,
+        py::arg("k") = 0,
+        "Run one rocke.helpers.attention_arch_caps check in the C++ engine; returns "
+        "(ok, value, message).");
     m.def(
         "arch_domain_default_mode",
         []() { return std::string(rocke_arch_domain_default_mode()); },

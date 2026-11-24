@@ -146,6 +146,15 @@ independently uses two K LDS slots and ``v_reg_prefetch=True`` loads next-tile V
 registers before current PV. V LDS stays single-buffered for all combinations. All
 shipped defaults use ``lds_num_buffers=1`` and ``v_reg_prefetch=False``.
 
+Additive bias (``use_additive_bias``): an fp32 ``[B|1, Hq|1, Sq|1, Skv]`` tensor added
+to the scaled scores before the mask, ``softmax(QK * scale + bias)``, on both grids.
+The builder's ``do_qk`` already puts every score in the log2 domain, so the bias,
+raised to a floor if finite and scaled by log2 e, is added to it as is, once per tile
+ahead of the mask; the max and exp2 are unchanged. A row left with no live key (see
+``_BIAS_LIVE_ROW_MIN``) stores O = 0 and, with LSE, LSE = -inf (the sink logit with
+``use_sinks``); a NaN bias makes its row NaN. Not combinable with ``kv_segments > 1``,
+paged K/V or the KDB/VPF pipeline. The bias-off body and its IR are unchanged.
+
 :func:`supports_attention_dense` is the SINGLE gate: it rejects every spec
 :func:`build_attention_dense` cannot emit -- including the modes deferred to later
 phases -- so ``supports_attention_dense(spec)[0] is True`` implies the build
@@ -194,6 +203,7 @@ from rocke.core.ir import (
     I64,
 )
 from rocke.helpers.attention import mfma_32x32x8_for_dtype
+from rocke.helpers.attention_arch_caps import attn_arch_caps
 
 # Shared problem/geometry fields live in an architecture-neutral module.
 from kernels.common.attention_dense_decode import (
@@ -236,6 +246,20 @@ from kernels.common.attention_dense_kv_split import (
     emit_segment_store,
     launch_segment_combine,
     segment_tile_range,
+)
+from kernels.common._attention_additive_bias import (
+    BIAS_FLOOR,
+    BIAS_LIVE_ROW_MIN,
+    add_additive_bias_at,
+    add_additive_bias_x4_at,
+    additive_bias_elem_ptr,
+    additive_bias_launch_values,
+    additive_bias_row,
+    append_additive_bias_signature,
+    check_bias_constants,
+    declare_additive_bias_params,
+    make_bias_floor,
+    validate_dense_additive_bias,
 )
 from kernels.common._attention_alibi import (
     alibi_lse_shift,
@@ -292,6 +316,17 @@ _O_STORE_WIDTHS = (1, 2, 4)
 # sched_barrier mask: 11 instruction-class bits (__builtin_amdgcn_sched_barrier).
 _SCHED_BARRIER_MASK_MAX = 0x7FF
 
+# Finite stand-in for -inf: masked scores, and the running max's seed, in log2 (score)
+# units. The builder reads it from here, so the bias constants below are checked
+# against the value the kernel really uses.
+_MASK_SENTINEL = -1e30
+# The bias floor and the live-row threshold are shared with the gfx950 dense kernel
+# (see _attention_additive_bias); here they sit between -1e30 and about -2.3e29 in log2
+# units. The order is checked against the sentinel this kernel really uses.
+_BIAS_FLOOR = BIAS_FLOOR
+_BIAS_LIVE_ROW_MIN = BIAS_LIVE_ROW_MIN
+check_bias_constants(_MASK_SENTINEL, LOG2E)
+
 
 @dataclass(frozen=True)
 class Gfx942AttentionDenseSpec(AttentionDenseSpec):
@@ -316,14 +351,14 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
 
     Tri-state fields: ``None`` means "use the measured policy"
     ---------------------------------------------------------
-    ``use_cfvst`` / ``use_exp2_fast`` / ``v_row_pad`` / ``use_v_swizzle`` default to
-    ``None``, which resolves through the shipping policy (:func:`default_use_cfvst`,
-    :func:`default_use_exp2_fast`, :func:`_v_row_pad`, :func:`_use_v_swizzle`). That
-    tri-state is load-bearing: a harness that omits a VALUED field freezes the config
-    at whatever the default happened to be the day it was written and then silently
-    reports a stale verdict (that is exactly how a real regression got mis-reported
-    in this tree). A harness that omits a ``None`` field auto-tracks whatever ships.
-    Omission becomes safe.
+    ``use_cfvst`` / ``use_exp2_fast`` / ``v_row_pad`` / ``use_v_swizzle`` /
+    ``use_bias_x4`` default to ``None``, which resolves through the shipping policy
+    (:func:`default_use_cfvst`, :func:`default_use_exp2_fast`, :func:`_v_row_pad`,
+    :func:`_use_v_swizzle`, :func:`_use_bias_x4`). That tri-state is load-bearing: a
+    harness that omits a VALUED field freezes the config at whatever the default
+    happened to be the day it was written and then silently reports a stale verdict
+    (that is exactly how a real regression got mis-reported in this tree). A harness
+    that omits a ``None`` field auto-tracks whatever ships. Omission becomes safe.
 
     The policy functions stay the SINGLE resolution point -- their docstrings are the
     evidence ledger, and their verdicts are deliberately NOT copied into the defaults
@@ -519,6 +554,19 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     #   count for short query lengths over long KV (chunked prefill), where one CTA
     #   per (query block, head) leaves most CUs idle. 1 (default) emits nothing new.
     kv_segments: int = field(default=1, kw_only=True)
+    # use_additive_bias: add an fp32 bias ``[B|1, Hq|1, Sq|1, Skv]`` (a size-1 axis
+    #   broadcasts) to the scaled scores, ``QK * scale + bias``, indexed by query
+    #   head, before the mask. Appends four kernel params after all others (see
+    #   ``_attention_additive_bias``). Both grids. Off by default; off emits no new
+    #   IR, so the shipped kernel and its goldens are unchanged. Not combinable with
+    #   kv_segments > 1, paged K/V or the KDB/VPF pipeline (supports_attention_dense).
+    use_additive_bias: bool = field(default=False, kw_only=True)
+    # use_bias_x4: read the bias four keys per load (one 16-byte load per group of four
+    #   C rows, its address folded into the load offset) instead of one key per load.
+    #   None (default) -> :func:`_use_bias_x4`, which owns the policy. Applies only with
+    #   ``use_additive_bias``; a value other than None with the bias off is rejected,
+    #   and with it off the field never reaches the name or the IR.
+    use_bias_x4: bool | None = field(default=None, kw_only=True)
 
     @classmethod
     def supported_persist_decodes(cls) -> frozenset[str]:
@@ -553,6 +601,22 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
                 "v_reg_prefetch must be a bool, got "
                 f"{type(self.v_reg_prefetch).__name__}"
             )
+        if type(self.use_additive_bias) is not bool:
+            raise ValueError(
+                "use_additive_bias must be a bool, got "
+                f"{type(self.use_additive_bias).__name__}"
+            )
+        if self.use_bias_x4 is not None and type(self.use_bias_x4) is not bool:
+            raise ValueError(
+                "use_bias_x4 must be None or a bool, got "
+                f"{type(self.use_bias_x4).__name__}"
+            )
+        if self.use_bias_x4 is not None and not self.use_additive_bias:
+            raise ValueError("use_bias_x4 applies only with use_additive_bias=True")
+        # No body emits ALiBi together with an additive bias (hipDNN sends one or
+        # the other), so the pair is refused rather than left untested.
+        if self.use_alibi and self.use_additive_bias:
+            raise ValueError("use_alibi is not supported with use_additive_bias")
 
     def resolved_use_cfvst(self) -> bool:
         """Resolved conflict-free-V decision (``None`` -> :func:`default_use_cfvst`)."""
@@ -585,6 +649,15 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         if self.use_exp2_fast is None:
             return default_use_exp2_fast(self.head_size, self.dtype, self.persistent)
         return bool(self.use_exp2_fast)
+
+    def resolved_use_bias_x4(self) -> bool:
+        """Resolved 4-wide bias loads (``None`` -> :func:`_use_bias_x4`). Always False
+        with the bias off, where the field has nothing to select."""
+        if not self.use_additive_bias:
+            return False
+        if self.use_bias_x4 is None:
+            return _use_bias_x4(self)
+        return bool(self.use_bias_x4)
 
     def resolved_waves_per_eu(self) -> int:
         """Emitted ``amdgpu-waves-per-eu``.
@@ -800,6 +873,13 @@ def _tuning_name_tags(spec: "Gfx942AttentionDenseSpec") -> str:
         parts.append("lse")
     if spec.kv_segments != 1:
         parts.append(f"kvs{spec.kv_segments}")
+    if spec.use_additive_bias:
+        parts.append("addb")
+        # Tagged against what the policy would have produced, as for cfvst. Only
+        # under addb: with the bias off the field is inert and must stay None.
+        x4 = spec.resolved_use_bias_x4()
+        if x4 != _use_bias_x4(spec):
+            parts.append("bx41" if x4 else "bx40")
     return "".join(f"_{p}" for p in parts)
 
 
@@ -823,11 +903,21 @@ def gfx942_kernel_name(spec: AttentionDenseSpec) -> str:
 _SUPPORTED_DTYPES = ("bf16", "fp16")
 _SUPPORTED_HEAD_SIZES = (64, 128)
 
-# Elements moved into LDS by ONE async-DMA instruction: 64 lanes x dwords=1 (4 B)
-# / 2 B per element. wave64 and a 2-byte dtype are the only cases this kernel emits
-# (supports_attention_dense gates dtype to bf16/fp16); an fp8 extension must
+# Per-lane width of every K/V async-DMA instruction: the widest gfx942 has
+# (1 dword), from the attention capability table.
+_DMA_DWORDS = attn_arch_caps("gfx942").max_lds_dma_dwords
+# The per-lane LDS addresses (lane * 2 halves) are written for 1-dword lanes.
+if _DMA_DWORDS != 1:
+    raise RuntimeError(
+        "gfx942 dense attention lane addressing assumes a 1-dword LDS-DMA width; "
+        f"the capability table gives {_DMA_DWORDS}"
+    )
+
+# Elements moved into LDS by ONE async-DMA instruction: 64 lanes x _DMA_DWORDS
+# (4 B) / 2 B per element. wave64 and a 2-byte dtype are the only cases this kernel
+# emits (supports_attention_dense gates dtype to bf16/fp16); an fp8 extension must
 # re-derive this or the row stride and the LDS budget go wrong together.
-_DMA_ELEMS_PER_INSTR = 64 * 4 // 2  # = 128
+_DMA_ELEMS_PER_INSTR = 64 * _DMA_DWORDS * 4 // 2  # = 128
 
 
 def _rows_per_instr(head_size: int) -> int:
@@ -901,6 +991,40 @@ def default_use_cfvst(head_size: int, dtype: str, paged: bool = False) -> bool:
     """
     del dtype  # both 2-byte dtypes take the same transposed-V path
     return _rows_per_instr(head_size) == 1 and not paged
+
+
+def _use_bias_x4(spec: "Gfx942AttentionDenseSpec") -> bool:
+    """Whether the additive bias is read four keys per load (one 16-byte load per group
+    of four C rows, at a constant offset from a per-tile pointer) rather than one key
+    per load.
+
+    On for every bias body. Timed against the scalar form on every compiler generation
+    checked (four), over both dtypes and head sizes, with and without a mask, the
+    LSE output, a sliding window and a chunked bottom-right band, the 4-wide form won
+    or tied in every measured cell. No D128 body spills to scratch in either form
+    since the floored bias term (design (c)), so the spill premise that once carved
+    out groups is gone. Two small losses are accepted for a single rule: narrow-window
+    D64 bf16 on one compiler generation, and D64 causal with the LSE output on one
+    other. The part with 304 compute units is unmeasured. LLVM 22 and later merge the
+    scalar loads into 16-byte ones themselves; the 4-wide form folds the per-load
+    64-bit address arithmetic into one tile pointer. Both forms are legal on every
+    body -- no ragged body, so every query row and key the kernel visits is inside the
+    bias -- and add bitwise the same biased scores.
+
+    Takes the spec rather than (head_size, dtype) so a later carve-out can read the
+    compile-time fields the kernel name carries (tile, mask, LSE, dtype, head size)
+    and has one place to live. It must NOT read a ``runtime_param_fields`` entry or the
+    environment: the name and ``attention_dense_cache_key`` drop those, so two bodies
+    would share one symbol and one launcher slot
+    (``test_bias_x4_policy_ignores_runtime_shape_fields``).
+
+    Changing a verdict changes the IR under the unchanged ``_addb`` symbol: re-bless
+    both gfx942 goldens and regenerate any AOT pack in the same change. Explicit
+    specs rename with it (``bx41`` drops, ``bx40`` appears), so keep the
+    ``use_bias_x4=False`` golden rows, or the scalar body loses its pin.
+    """
+    del spec  # every bias body takes the 4-wide form; see the docstring
+    return True
 
 
 def _pack_p_bf16(b: IRBuilder, elems):
@@ -1232,6 +1356,27 @@ def supports_attention_dense(
     # __post_init__ re-run above enforces its constraints (W % block_n, causal).
     # use_sinks is supported here (m/l seed per work item). The shared __post_init__
     # still rejects it combined with paged or varlen.
+    # use_additive_bias runs on both grids. It is refused where the body cannot honour
+    # it: the KV-segment store returns before the epilogue that zeroes a row with no
+    # live key, paged K/V has no bias-indexing rule, and the opt-in KDB/VPF pipeline
+    # puts the bias load behind the next tile's K and V loads in the in-order vmcnt
+    # queue (and VPF keeps V in registers across it).
+    if spec.use_additive_bias:
+        if spec.kv_segments != 1:
+            return False, (
+                "gfx942 attention_dense: use_additive_bias is not supported with "
+                "kv_segments > 1 (the segment store skips the bias epilogue)"
+            )
+        if spec.paged:
+            return False, (
+                "gfx942 attention_dense: use_additive_bias is not supported with "
+                "paged K/V"
+            )
+        if _use_kdb(spec) or _use_vpf(spec):
+            return False, (
+                "gfx942 attention_dense: use_additive_bias is not supported with the "
+                "lds_num_buffers=2 / v_reg_prefetch=True pipeline"
+            )
 
     # --- gfx942-private sweep knobs. Validated here rather than only in the builder
     # because the module contract is support() => build(): a knob that only the
@@ -1638,6 +1783,10 @@ def _build_attention_dense_single_buffer(
     KVS = spec.kv_segments
     if KVS > 1:
         segment_params = declare_segment_params(b)
+    USE_BIAS = spec.use_additive_bias
+    if USE_BIAS:
+        # After every other param; attention_dense_signature appends the same four.
+        additive_bias = declare_additive_bias_params(b)
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
 
     tid = b.thread_id_x()
@@ -1652,7 +1801,7 @@ def _build_attention_dense_single_buffer(
     lane_m = b.mod(lane, b.const_i32(32))
     lane_h = b.div(lane, b.const_i32(32))
     d_base = b.mul(lane_h, b.const_i32(4))  # K=8 half-split: lane_h in {0,1} -> col 0/4
-    neg_inf = b.const_f32(-1e30)
+    neg_inf = b.const_f32(_MASK_SENTINEL)
 
     # ---- CTA-invariant LDS + buffer setup (allocated ONCE per CTA; for the
     # persistent grid it is REUSED across every work item the CTA strides over, and
@@ -2005,7 +2154,11 @@ def _build_attention_dense_single_buffer(
                         kv_row = gkey
                     voff = b.add(b.add(k_base, b.mul(kv_row, _stride_k())), gcol)
                     b.async_buffer_load_lds_addr(
-                        rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
+                        rsrc,
+                        row_base,
+                        b.mul(voff, b.const_i32(2)),
+                        zero_soff,
+                        _DMA_DWORDS,
                     )
             else:
                 lanes_per_row = D // 2
@@ -2042,7 +2195,11 @@ def _build_attention_dense_single_buffer(
                         gkey = paged_kv_row(b, _wphys_base, gkey, spec.block_size)
                     voff = b.add(b.add(k_base, b.mul(gkey, _stride_k())), col)
                     b.async_buffer_load_lds_addr(
-                        rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
+                        rsrc,
+                        row_base,
+                        b.mul(voff, b.const_i32(2)),
+                        zero_soff,
+                        _DMA_DWORDS,
                     )
 
         def load_tile(tile_idx):
@@ -2318,11 +2475,92 @@ def _build_attention_dense_single_buffer(
             (f"o{dt}", o0[dt]) for dt in range(D_TILES)
         ]
 
+        if USE_BIAS:
+            # This lane's bias row base: the element index of key 0 for its query,
+            # which is the lane's column of the QK output (the S tile is held
+            # transposed: keys along the C rows, queries along the C columns), in
+            # batch bt and head hq. A fresh column, not do_mask's query_tok (that one
+            # is shifted by the bottom-right diagonal; the bias is indexed by the
+            # query's own row) and not the epilogue's qtok (defined after the loop).
+            # Per work item, so the persistent grid-stride loop recomputes it for
+            # every item it decodes. Every query row and key the loops visit is in
+            # range (no ragged body; the loops stop at n_up <= Skv / BN), so the
+            # bias loads below need no mask.
+            c_col = _mfma_32x32_c_col(b, lane, 0)
+            bias_q_row = b.add(q_tok0, c_col)
+            bias_row = additive_bias_row(
+                b, additive_bias, seq_idx=bt, q_head=hq, q_row=bias_q_row
+            )
+            bias_log2e = b.const_f32(LOG2E)
+            bias_floor = make_bias_floor(b, _BIAS_FLOOR, LOG2E)
+        BIAS_X4 = spec.resolved_use_bias_x4()
+
+        def add_bias(s_reg, tile_idx):
+            """Bias on: add each key's bias, in log2 units, to its score in place,
+            before any mask. Same lane -> key map as do_mask.
+
+            ``do_qk`` has already scaled every score into the log2 domain, so the bias
+            (a finite one raised to the floor, times log2 e) is added to it as is: do
+            NOT scale the score again. The max and exp2 downstream are unchanged; -inf
+            scores -inf (P = 0) and a NaN makes its row NaN, while every finite biased
+            score stays above the mask sentinel (see _BIAS_FLOOR)."""
+            bn_c = b.const_i32(BN)
+            tile_key0 = b.mul(tile_idx, bn_c)
+            if BIAS_X4:
+                # One bias pointer per KV tile, at the lane's first key; the 16-byte
+                # loads below read at constant element offsets from it, which the
+                # backend folds into their immediates instead of extending and scaling
+                # an i32 index per load. No mask: every key is in range (see bias_row).
+                c_row_lane = _mfma_32x32_c_row(b, lane, 0)
+                key0 = b.add(tile_key0, c_row_lane)
+                tile_ptr = additive_bias_elem_ptr(
+                    b, additive_bias, row=bias_row, col=key0
+                )
+            for nsub in range(N_SUB):
+                if BIAS_X4:
+                    # C elements i0..i0+3 are keys c_row(i0)..c_row(i0)+3 of the
+                    # lane's bias row (_mfma_32x32_c_row: c_row(i) = (i//4)*8 +
+                    # (lane//32)*4 + i%4), so one 16-byte load per group replaces four
+                    # scalar ones, at nsub*32 + c_row(i0) - c_row(0) = nsub*32 +
+                    # (i0//4)*8 keys past the tile pointer.
+                    for i0 in range(0, 16, 4):
+                        s_reg[nsub][i0 : i0 + 4] = add_additive_bias_x4_at(
+                            b,
+                            s_reg[nsub][i0 : i0 + 4],
+                            tile_ptr,
+                            offset=nsub * 32 + (i0 // 4) * 8,
+                            rcp_ln2=bias_log2e,
+                            floor=bias_floor,
+                        )
+                else:
+                    nsub_off = b.const_i32(nsub * 32)
+                    sub_base = b.add(tile_key0, nsub_off)
+                    for i in range(16):
+                        c_row = _mfma_32x32_c_row(b, lane, i)
+                        ktok = b.add(sub_base, c_row)
+                        s_reg[nsub][i] = add_additive_bias_at(
+                            b,
+                            s_reg[nsub][i],
+                            additive_bias,
+                            row=bias_row,
+                            col=ktok,
+                            mask=None,
+                            rcp_ln2=bias_log2e,
+                            floor=bias_floor,
+                        )
+
         def softmax_pv(s, offs, j, m_i, l_i, o_acc, masked):
             """One KV tile's mask -> online softmax -> PV update, shared by the
             single-buffer ``tile_compute`` and the KDB/VPF pipeline so both
             honour the same exp2, fused-rescale and PV scheduling knobs. Returns
             the updated ``(m, l, o_acc)``; the caller owns loads and barriers."""
+            if USE_BIAS:
+                # Once per tile, ahead of the mask so that tiles masked=False (the
+                # below-diagonal tiles of the diagonal split) get the bias too; a
+                # masked entry then overwrites the biased score as it would the raw
+                # one. The one place every body (plain loop, split loops, wave skip,
+                # window phases) reaches the softmax through.
+                add_bias(s, j)
             # Every visited tile gets the causal upper bound; W > 0 additionally
             # applies the window lower bound (redundant no-op compares on tiles
             # fully inside the window). W == 0 -> lower=False, byte-identical.
@@ -2796,6 +3034,27 @@ def _build_attention_dense_single_buffer(
             rcp_l = b.rcp(b.select(positive_l, l_i, b.const_f32(1.0)))
         else:
             rcp_l = b.rcp(l_i)
+        if USE_BIAS:
+            # Bias on, a row with no live key (see _BIAS_LIVE_ROW_MIN) stores zeros,
+            # and with LSE its LSE is -inf. That covers every way a row loses all its
+            # keys: a -inf bias or a mask (a finite bias is a live key, finfo.min
+            # included). The zeros come from rcp_l here when no row_has_key exists, and
+            # from row_has_key, which gains bias_row_live below, whenever one does
+            # (with LSE, or with a window and no sinks); it zeroes O in _emit_o_store.
+            # A sink seeds m above the threshold, so with sinks the row keeps m = sink:
+            # O = 0 from P = 0, LSE = the sink logit.
+            live_row_min = b.const_f32(_BIAS_LIVE_ROW_MIN)
+            bias_row_live = b.fcmp("ogt", m_i, live_row_min)
+            # A NaN bias on a visible key makes P and so l NaN, but the max ignores a
+            # NaN score (maxnum), so a row of NaN keys alone keeps the sentinel as its
+            # max and would read as dead: O = 0 and LSE = -inf with LSE on (without it
+            # O = NaN * 0 is NaN anyway). A NaN l keeps such a row live, and its
+            # output and LSE NaN. A NaN on a key the mask removes never gets here: the
+            # mask's select overwrites the biased score.
+            bias_row_live = b.lor(bias_row_live, b.fcmp("uno", l_i, l_i))
+            if not spec.emit_lse:
+                rcp_zero = b.const_f32(0.0)
+                rcp_l = b.select(bias_row_live, rcp_l, rcp_zero)
         o_base = b.add(
             b.mul(
                 b.mul(bt, seqlen_q_p if spec.runtime_shape else b.const_i32(Sq)),
@@ -2822,6 +3081,8 @@ def _build_attention_dense_single_buffer(
                 diagonal=0,
                 window=SW,
             )
+            if USE_BIAS:
+                row_has_key = b.land(row_has_key, bias_row_live)
         if spec.emit_lse:
             lse_index = b.add(
                 b.mul(
@@ -2973,7 +3234,9 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     ``spec.use_sinks``, an f32 ``alibi_slopes_ptr`` ([Hq], null for the
     built-in slopes) when ``spec.use_alibi``, ``block_tables``/``kv_lens`` (i32
     pointers) and ``block_table_stride`` (i32) when ``spec.paged``, and an f32
-    ``lse_ptr`` when ``spec.emit_lse``, in that order.
+    ``lse_ptr`` when ``spec.emit_lse``, in that order, then the KV-segment workspace
+    pointers when ``spec.kv_segments > 1``, and last the additive-bias pointer and
+    its three i32 strides when ``spec.use_additive_bias``.
 
     THE single definition of this kernel's ABI -- the builder and the benchmark both
     call it rather than re-deriving the parameter list, so a reordering cannot drift
@@ -3014,6 +3277,9 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     if _as_gfx942_spec(spec).kv_segments > 1:
         for name in SEGMENT_PARAMS:
             sig = sig.ptr(name, "f32")
+    if _as_gfx942_spec(spec).use_additive_bias:
+        # Mirrors the four params declared after every other one.
+        append_additive_bias_signature(sig)
     return sig.build()
 
 
@@ -3046,6 +3312,7 @@ def run_attention_dense_torch(
     cu_seqlens_kv=None,
     sinks=None,
     lse=None,
+    additive_bias=None,
     alibi_slopes=None,
     block_tables=None,
     kv_lens=None,
@@ -3058,7 +3325,7 @@ def run_attention_dense_torch(
     ``sinks`` is the per-query-head sink logit ``[Hq]`` in q's dtype, required iff
     ``spec.use_sinks``. ``alibi_slopes`` is the optional fp32 per-query-head ALiBi
     slope ``[Hq]`` (``spec.use_alibi`` only); ``None`` selects hipDNN's built-in slopes.
-    ``spec.use_sinks``. With ``spec.paged``, ``k``/``v`` are the page caches
+    With ``spec.paged``, ``k``/``v`` are the page caches
     ``[num_kv_blocks, block_size, Hkv, D]`` and ``block_tables`` ([B, max_pages] i32)
     / ``kv_lens`` ([B] i32) are required; ``validate_paged=False`` skips the host check
     of their contents (a device->host sync), see
@@ -3084,7 +3351,25 @@ def run_attention_dense_torch(
     writes the natural-log softmax normalizer while still returning ``out``. Rows
     with no allowed key (a sliding window past the end of the keys) write O=0 and
     LSE=-inf; with an attention sink, those rows instead write the sink logit as
-    LSE. Supplying ``lse`` with ``emit_lse=False`` is an error."""
+    LSE. Supplying ``lse`` with ``emit_lse=False`` is an error.
+
+    Additive bias (``spec.use_additive_bias``): pass ``additive_bias``, an fp32
+    ``[B|1, Hq|1, Sq|1, Skv]`` tensor (``Sq``/``Skv`` the spec's) on q's device,
+    contiguous along ``Skv``. It is added to the scaled scores before the mask,
+    ``softmax(QK * scale + bias)``; a size-1 axis broadcasts. ``-inf`` masks a key.
+    A row left with no unmasked key stores O = 0 and LSE = -inf (the sink logit with
+    ``use_sinks``): the hipDNN reference's answer for a row whose every score is
+    -inf. A finite bias is an ordinary score, with one exception: one below -2**97
+    (about -1.6e29) is raised to that, which keeps it above the kernel's mask
+    sentinel. A row whose every visible key is below it (e.g. ``finfo(float32).min``
+    padding) therefore gets the uniform softmax over them, as in the reference and
+    PyTorch, with an LSE of about -2**97 where the reference's is about the bias
+    itself; keys whose biases differ below it are not told apart. A NaN bias on a
+    visible key makes its row NaN (O and LSE), as in the reference; a NaN on a key
+    the mask removes is ignored. With LSE on, the LSE buffer may not overlap the
+    bias. ``ValueError`` for a missing, unexpected or malformed bias,
+    ``NotImplementedError`` when its largest element index reaches 2**31 (the kernel
+    indexes it in i32)."""
     spec = _as_gfx942_spec(spec)
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
@@ -3112,8 +3397,23 @@ def run_attention_dense_torch(
         if not sinks.is_cuda:
             raise ValueError("sinks must be a CUDA tensor")
     check_alibi_slopes(spec, alibi_slopes)
+    # q is read only for a bias launch: plain launches may pass placeholder operands.
+    bias_strides = validate_dense_additive_bias(
+        spec,
+        additive_bias,
+        device=q.device if spec.use_additive_bias else None,
+    )
     validate_dense_lse(
-        spec, q, k, v, out, lse, block_tables=block_tables, kv_lens=kv_lens, sinks=sinks
+        spec,
+        q,
+        k,
+        v,
+        out,
+        lse,
+        block_tables=block_tables,
+        kv_lens=kv_lens,
+        sinks=sinks,
+        additive_bias=additive_bias,
     )
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
@@ -3150,6 +3450,8 @@ def run_attention_dense_torch(
     if spec.kv_segments > 1:
         workspace = allocate_segment_workspace(spec, q.device)
         vals.update(workspace)
+    if spec.use_additive_bias:
+        vals.update(additive_bias_launch_values(additive_bias, bias_strides))
     launcher(
         vals,
         config=LaunchConfig(

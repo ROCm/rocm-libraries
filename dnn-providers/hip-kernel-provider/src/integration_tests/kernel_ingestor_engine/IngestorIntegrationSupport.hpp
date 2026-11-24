@@ -337,8 +337,9 @@ inline std::string describeKey(const MetadataKey& key)
 }
 
 // Whether kernel carries every field of key at the key's value. A home bundle's descriptors omit
-// use_alibi (builder_default: only its ALiBi satellite builds the field), and the engine completes
-// an omitted use_alibi to the KMD default 0, so a kernel without it carries use_alibi 0.
+// use_alibi (builder_default: only its ALiBi satellite builds the field) and an ALiBi satellite's
+// omit use_additive_bias (matcher-only there: no ALiBi kernel adds a bias); the engine completes
+// either omitted field to the KMD default 0, so a kernel without it carries 0.
 inline bool carriesKey(const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel,
                        const MetadataKey& key)
 {
@@ -347,7 +348,8 @@ inline bool carriesKey(const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kern
         if(value == kernel.metadata.end())
         {
             const auto* wanted = std::get_if<int64_t>(&field.second);
-            return field.first == "use_alibi" && wanted != nullptr && *wanted == 0;
+            return (field.first == "use_alibi" || field.first == "use_additive_bias")
+                   && wanted != nullptr && *wanted == 0;
         }
         return value->second == field.second;
     });
@@ -607,6 +609,18 @@ enum class SdpaMask
     WINDOW_BOTTOM_RIGHT
 };
 
+// The additive bias (attn_mask) a graph carries: none, or fp32 at one of the extents the
+// engine serves, each axis but the key one either full or broadcast. Packed, key axis
+// innermost.
+enum class IngestorSdpaBias
+{
+    NONE,
+    FULL, // [B, Hq, Sq, Skv]
+    PER_BATCH, // [B, 1, Sq, Skv]
+    PER_HEAD, // [1, Hq, Sq, Skv]
+    KEY_ROW // [1, 1, 1, Skv]
+};
+
 // The memory layout of a [B, H, S, D] SDPA tensor, shared with the unit suites.
 using kernel_ingestor_engine::testing::SdpaLayout;
 
@@ -641,6 +655,8 @@ struct IngestorSdpaGraphSpec
     // K and V are one tensor (one descriptor, one buffer), so the graph has three unique
     // inputs instead of four. vLayout is ignored.
     bool sharedKv = false;
+    // The additive bias the node names as its attn_mask.
+    IngestorSdpaBias bias = IngestorSdpaBias::NONE;
 };
 
 struct SdpaGraph
@@ -701,7 +717,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>
 // softmax scale 1/sqrt(D), set explicitly unless the shape omits it. O is laid out
 // explicitly: the frontend's default for an unset output is packed BHSD, which the engines
 // decline. A shape with stats binds the stats output as the frontend does,
-// FLOAT [B, Hq, Sq, 1], packed.
+// FLOAT [B, Hq, Sq, 1], packed. A shape with a bias carries it as an fp32 tensor (BIAS_UID).
 inline SdpaGraph buildSdpaGraph(const std::string& name, const IngestorSdpaGraphSpec& shape)
 {
     constexpr int64_t Q_UID = 1;
@@ -709,6 +725,7 @@ inline SdpaGraph buildSdpaGraph(const std::string& name, const IngestorSdpaGraph
     constexpr int64_t V_UID = 3;
     constexpr int64_t O_UID = 4;
     constexpr int64_t STATS_UID = 5;
+    constexpr int64_t BIAS_UID = 6;
 
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name(name)
@@ -791,6 +808,24 @@ inline SdpaGraph buildSdpaGraph(const std::string& name, const IngestorSdpaGraph
     if(shape.alibi)
     {
         attributes.set_alibi_mask(true);
+    }
+    if(shape.bias != IngestorSdpaBias::NONE)
+    {
+        const bool fullBatch
+            = shape.bias == IngestorSdpaBias::FULL || shape.bias == IngestorSdpaBias::PER_BATCH;
+        const bool fullHeads
+            = shape.bias == IngestorSdpaBias::FULL || shape.bias == IngestorSdpaBias::PER_HEAD;
+        const std::vector<int64_t> dims{fullBatch ? shape.batch : 1,
+                                        fullHeads ? shape.queryHeads : 1,
+                                        shape.bias == IngestorSdpaBias::KEY_ROW ? 1 : shape.seqQ,
+                                        shape.seqKv};
+        // Packed, key axis innermost.
+        const std::vector<int64_t> strides{
+            dims[1] * dims[2] * dims[3], dims[2] * dims[3], dims[3], 1};
+        auto bias = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+        bias->set_uid(BIAS_UID).set_name("Bias").set_dim(dims).set_stride(strides).set_data_type(
+            hipdnn_frontend::DataType::FLOAT);
+        attributes.set_bias(bias);
     }
 
     auto outputs = graph->sdpa(q, k, v, attributes);

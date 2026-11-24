@@ -41,12 +41,14 @@
  * causal sliding window baked per candidate, the stats
  * (LSE) output an emit_lse candidate writes, the launch grid each candidate is built for
  * (the qb_minor, bt_hkv_minor or hq_minor_swz block order, or the D128 persistent grid),
- * the use_alibi variants that serve ALiBi, and the v1 and alibi.v1 launch contracts.
+ * the use_alibi variants that serve ALiBi, and the launch contracts: v1 for a plan without
+ * an additive bias or ALiBi, v2 (v1's arguments, then the bias's) for one with a bias, and
+ * alibi.v1 for one with ALiBi. The bias itself (fp32 attn_mask) is matched and launched by
+ * the shared code, as on gfx950.
  *
  * The body reads both head counts at runtime as well as batch and the sequence lengths
- * (`Gfx942AttentionDenseSpec.runtime_param_fields`). Unlike the gfx950 twin, whose
- * catalog lists each head configuration and whose kernelMatches compares them, a
- * candidate here is never compared against the graph's head counts.
+ * (`Gfx942AttentionDenseSpec.runtime_param_fields`). Like the gfx950 twin, a candidate
+ * here is never compared against the graph's head counts.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -225,6 +227,11 @@ constexpr attention_dense::AttentionDenseArch gfx942Arch()
     arch.tokens.slidingWindow = "gfx942_attention_dense.sliding_window";
     arch.tokens.scaleBits = "gfx942_attention_dense.scale_bits";
     arch.tokens.stats = "gfx942_attention_dense.stats.uid";
+    arch.tokens.bias = "gfx942_attention_dense.bias";
+    arch.tokens.biasUid = "gfx942_attention_dense.bias.uid";
+    arch.tokens.biasStrideBatch = "gfx942_attention_dense.bias.stride_batch";
+    arch.tokens.biasStrideHead = "gfx942_attention_dense.bias.stride_head";
+    arch.tokens.biasStrideQuery = "gfx942_attention_dense.bias.stride_query";
     arch.tokens.alibi = "gfx942_attention_dense.alibi";
     // The head fields of the KMD are canonical build inputs, never compared.
     arch.isSupportedTile = &isSupportedGfx942AttentionDenseTile;
@@ -235,6 +242,10 @@ constexpr attention_dense::AttentionDenseArch gfx942Arch()
     // Each candidate's grid: a block order of the one-CTA-per-block grid, or (D128) the
     // persistent grid with its fast-division kernargs.
     arch.candidateGrid = &candidateGrid;
+    // A use_additive_bias candidate adds the bias, which appends four kernel arguments; the
+    // catalog pairs each kernel with a graph that has one or has none. The shared hook reads
+    // the field as gfx950 does: absent is the KMD default 0, not a malformed record.
+    arch.candidateAddsBias = &attention_dense::candidateAdditiveBias;
     // ALiBi with hipDNN's slopes on the top-left causal band: the use_alibi variants serve
     // it, on every grid, with or without LSE, and (qb_minor grid) with every shipped window.
     arch.candidateUsesAlibi = &candidateUsesAlibi;
@@ -242,12 +253,20 @@ constexpr attention_dense::AttentionDenseArch gfx942Arch()
                             attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
     // No gfx942 kernel ever baked the head counts, so there is no superseded contract.
     arch.legacyContract = {};
+    // A bias kernel takes v1's arguments and then the bias's, so its plans are v2. v1 stays
+    // the plain contract and its plans are unchanged.
+    arch.biasContract = {GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V2,
+                         attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS};
     arch.alibiContract = {GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1,
                           attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
     return arch;
 }
 
 constexpr attention_dense::AttentionDenseArch GFX942_ARCH = gfx942Arch();
+static_assert(GFX942_ARCH.isConsistent(),
+              "gfx942Arch(): a served feature's token is unspelled, or the bias or ALiBi hook "
+              "and its contract do not come together (their tokens, name and kernel-argument "
+              "form)");
 
 std::optional<BoundTokens> gfx942AttentionDenseGraphMatches(const MatchContext& context)
 {
@@ -496,10 +515,13 @@ void registerGfx942AttentionDenseSymbols(SymbolScope<Handle>& scope)
     scope.add(std::string(GRAPH_MATCHER_SYMBOL), &gfx942AttentionDenseGraphMatches);
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &kernelMatches);
     scope.add(std::string(SCORE_SYMBOL), &scoreKernel);
-    // One handler under both names: the UDD's unversioned name dispatches the catalog, and
-    // a save stores the versioned name, which must resolve to the handler that saved it.
+    // One handler under every name: the UDD's unversioned name dispatches the catalog, and a
+    // save stores the versioned name, which must resolve to the handler that saved it. A
+    // plain plan saves under v1 and a plan with an additive bias under v2.
     scope.add(std::string(DISPATCH_SYMBOL), &gfx942AttentionDenseDispatchHandler());
     scope.add(std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1),
+              &gfx942AttentionDenseDispatchHandler());
+    scope.add(std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V2),
               &gfx942AttentionDenseDispatchHandler());
     // ALiBi plans: saved by the v1 handler, so their name must resolve to it.
     scope.add(std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1),

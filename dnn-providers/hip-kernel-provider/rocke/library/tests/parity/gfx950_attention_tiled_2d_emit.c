@@ -1242,10 +1242,205 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         make_spec(75, s);
         s->use_transposed_qk_32x32 = true;
         break;
-    /* --- idx77-80: ALiBi at the slope sites idx16/17 miss (lockstep with the
-     *     Python _CONFIGS[77..80]): 77 per-row hoist (GQA, 24 heads); 78-80 the
-     *     transposed 32x32 per-iter (mask-once), hoisted and inline slopes. */
+
     case 77:
+        /* Additive bias on the 16x16 path with two M atoms per warp (GQA). */
+        s->head_size = 128;
+        s->block_size = 16;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 4;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->num_seqs = 3;
+        s->num_warps = 2;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 32;
+        break;
+    case 78:
+        /* Additive bias on the 16x16 path composed with ALiBi, QQ bias, softcap,
+         * sinks and a sliding window (the ALiBi slope replaces the hoisted
+         * query head). */
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->use_sinks = true;
+        s->sliding_window = 512;
+        s->has_softcap = true;
+        s->use_alibi = true;
+        s->use_qq_bias = true;
+        s->use_additive_bias = true;
+        break;
+    case 79:
+        /* Additive bias on the transposed 32x32 combo the selector builds for a
+         * biased d64/b32/GQA-8 problem (mask-once and mask-limit off). */
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->num_seqs = 2;
+        s->num_warps = 4;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_mfma32_skip_legacy_qreg = true;
+        s->use_fast_paged_kv_desc = true;
+        break;
+    case 80:
+        /* Additive bias on the bare transposed 32x32 path with QQ bias. */
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 4;
+        s->dtype = "fp16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_qq_bias = true;
+        s->use_additive_bias = true;
+        s->num_warps = 2;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        break;
+
+    /* idx81, 82: additive bias with paths that do not emit it; both engines
+     * reject these (BOTH_REJECTED). */
+    case 81:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->num_warps = 4;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        break;
+    case 82:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->use_register_pv = true;
+        break;
+    /* idx83-86: more additive-bias paths that do not emit it (BOTH_REJECTED).
+     * 81/82 cover mask-once and register-PV; these four cover the remaining
+     * rejections, see the Python emitter for why each one matters. */
+    case 83:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->num_warps = 4;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_invariant_hoist = true;
+        break;
+    case 84:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->num_warps = 4;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = false;
+        break;
+    case 85:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->num_warps = 4;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_grouped_kv2_softmax = true;
+        break;
+    case 86:
+        s->head_size = 128;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 32;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->num_warps = 4;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_mask_limit = true;
+        s->use_mfma32_skip_legacy_qreg = true;
+        s->use_transposed_half_local_pv = true;
+        break;
+
+    case 87: /* idx77 + emit_lse: bias params precede lse_ptr. */
+        make_spec(77, s);
+        s->emit_lse = true;
+        break;
+    /* --- idx88-91: ALiBi at the slope sites idx16/17 miss (lockstep with the
+     *     Python _CONFIGS[88..91]): 88 per-row hoist (GQA, 24 heads); 89-91 the
+     *     transposed 32x32 per-iter (mask-once), hoisted and inline slopes. */
+    case 88:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 24;
@@ -1256,9 +1451,9 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->has_softcap = false;
         s->use_alibi = true;
         break;
-    case 78:
-    case 79:
-    case 80:
+    case 89:
+    case 90:
+    case 91:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 32;
@@ -1273,24 +1468,24 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->block_m_per_warp = 32;
         s->has_tile_size = true;
         s->tile_size = 64;
-        s->use_transposed_mask_once = (idx == 78);
-        s->use_transposed_invariant_hoist = (idx == 79);
+        s->use_transposed_mask_once = (idx == 89);
+        s->use_transposed_invariant_hoist = (idx == 90);
         break;
-    /* --- idx81-95: the ALiBi arms (lockstep with the Python _CONFIGS[81..95]):
-     *     81-84 each arm on the transposed mask-limit softmax; default arms 85
-     *     D256 and 86 D192 mask-limit, 87 grouped_kv2, 88 register-P; 89-92 each
-     *     arm on the 16x16 path; 93-95 the other arms on grouped_kv2. */
-    case 81:
-    case 82:
-    case 83:
-    case 84:
-    case 85:
-    case 86:
-    case 87:
+    /* --- idx92-106: the ALiBi arms (lockstep with the Python _CONFIGS[92..106]):
+     *     92-95 each arm on the transposed mask-limit softmax; default arms 96
+     *     D256 and 97 D192 mask-limit, 98 grouped_kv2, 99 register-P; 100-103 each
+     *     arm on the 16x16 path; 104-106 the other arms on grouped_kv2. */
+    case 92:
     case 93:
     case 94:
     case 95:
-        s->head_size = (idx == 85) ? 256 : (idx == 86) ? 192 : 64;
+    case 96:
+    case 97:
+    case 98:
+    case 104:
+    case 105:
+    case 106:
+        s->head_size = (idx == 96) ? 256 : (idx == 97) ? 192 : 64;
         s->block_size = 32;
         s->num_query_heads = 32;
         s->num_kv_heads = 32;
@@ -1304,7 +1499,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->block_m_per_warp = 32;
         s->has_tile_size = true;
         s->tile_size = 64;
-        if(idx <= 86)
+        if(idx <= 97)
         {
             s->use_transposed_scalar_state = true;
             s->use_transposed_mask_once = true;
@@ -1316,16 +1511,16 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         {
             s->use_grouped_kv2_softmax = true;
         }
-        if(idx <= 84)
-            s->alibi_design = alibi_designs[idx - 81];
-        else if(idx == 93)
+        if(idx <= 95)
+            s->alibi_design = alibi_designs[idx - 92];
+        else if(idx == 104)
             s->alibi_design = "fma_split";
-        else if(idx == 94)
+        else if(idx == 105)
             s->alibi_design = "seed_tile";
-        else if(idx == 95)
+        else if(idx == 106)
             s->alibi_design = "seed_split";
         break;
-    case 88:
+    case 99:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 32;
@@ -1342,10 +1537,10 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->has_tile_size = true;
         s->tile_size = 64;
         break;
-    case 89:
-    case 90:
-    case 91:
-    case 92:
+    case 100:
+    case 101:
+    case 102:
+    case 103:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 24;
@@ -1358,7 +1553,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->block_m_per_warp = 32;
         s->has_tile_size = true;
         s->tile_size = 64;
-        s->alibi_design = alibi_designs[idx - 89];
+        s->alibi_design = alibi_designs[idx - 100];
         break;
     default:
         return -1;

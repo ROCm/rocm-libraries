@@ -306,7 +306,10 @@ typedef enum {
    * the batch is specified in terms of number of elements.
    * 2. General Batched: This uses pointer array with each pointer storing the base address
    * of the matrices in the batch.
-   * See hipblasLtBatchMode_t
+   * See hipblasLtBatchMode_t. Other values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``.
+   * ``HIPBLASLT_BATCH_MODE_GROUPED`` is set only by ``hipblasLtGroupedMatrixLayoutCreate``:
+   * setting it on another layout, or another mode on a grouped layout, also returns
+   * ``HIPBLAS_STATUS_INVALID_VALUE``.
    */
   HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE = 7,
 

@@ -1,7 +1,7 @@
 {
   "version": "1.0",
-  "id": "6f606e00-09cf-4e43-968b-77eb71de64db",
-  "name": "Generated UHD",
+  "id": "83088640-725f-4fd2-8e3b-1259b7ebb898",
+  "name": "Generated UHD (time)",
   "adapter": "tree_data",
   "features_signature": [
     "$kernel.block_m",
@@ -109,6 +109,6 @@
   },
   "tree_data": {
     "artifact": "model.bin",
-    "hash": "dab8961d730f163d927a15800c1579a4f2692e90e952382695d8bf34b1c5af2b"
+    "hash": "aa2c1243519aa9b86161b4350c31290702a32b641f8063625e4cf5577d7d4cbb"
   }
 }

@@ -1145,6 +1145,191 @@ _CONFIGS = {
         use_register_pv=True,
         tile_size=32,
     ),
+    # idx77-80: additive bias. idx77: the 16x16 path with two M atoms per warp
+    # (GQA).
+    77: dict(
+        head_size=128,
+        block_size=16,
+        num_query_heads=16,
+        num_kv_heads=4,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        num_seqs=3,
+        num_warps=2,
+        block_m_per_warp=32,
+        tile_size=32,
+    ),
+    # idx78: the 16x16 path composed with ALiBi, QQ bias, softcap, sinks and a
+    # sliding window (the ALiBi slope replaces the hoisted query head).
+    78: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="fp16",
+        use_sinks=True,
+        sliding_window=512,
+        has_softcap=True,
+        use_alibi=True,
+        use_qq_bias=True,
+        use_additive_bias=True,
+    ),
+    # idx79: the transposed 32x32 combo the selector builds for a biased
+    # d64/b32/GQA-8 problem (mask-once and mask-limit off).
+    79: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        num_seqs=2,
+        num_warps=4,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_scalar_state=True,
+        use_transposed_half_local_pv=True,
+        use_mfma32_skip_legacy_qreg=True,
+        use_fast_paged_kv_desc=True,
+    ),
+    # idx80: the bare transposed 32x32 path with QQ bias.
+    80: dict(
+        head_size=128,
+        block_size=32,
+        num_query_heads=16,
+        num_kv_heads=4,
+        dtype="fp16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_qq_bias=True,
+        use_additive_bias=True,
+        num_warps=2,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+    ),
+    # idx81, 82: additive bias with paths that do not emit it; both engines
+    # reject these (BOTH_REJECTED).
+    81: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        num_warps=4,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_scalar_state=True,
+        use_transposed_mask_once=True,
+    ),
+    82: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        use_register_pv=True,
+    ),
+    # idx83-86: more additive-bias paths that do not emit it; both engines
+    # reject these too (BOTH_REJECTED). 81/82 cover mask-once and
+    # register-PV; these four cover the remaining rejections so losing any
+    # one of them would go unnoticed (the non-transposed 32x32 path has no
+    # bias site in either engine, so C++ would otherwise silently emit a
+    # kernel that takes the bias params and never adds them; an
+    # invariant-hoist spec would pass a NULL query head into
+    # rocke_add_additive_bias).
+    83: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        num_warps=4,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_invariant_hoist=True,
+    ),
+    84: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        num_warps=4,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=False,
+    ),
+    85: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=64,
+        num_kv_heads=8,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        num_warps=4,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_scalar_state=True,
+        use_grouped_kv2_softmax=True,
+    ),
+    86: dict(
+        head_size=128,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=32,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        use_additive_bias=True,
+        num_warps=4,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+        use_transposed_scalar_state=True,
+        use_transposed_mask_once=True,
+        use_transposed_mask_limit=True,
+        use_mfma32_skip_legacy_qreg=True,
+        use_transposed_half_local_pv=True,
+    ),
 }
 
 # --- idx64-67: emit_lse (trailing lse_ptr + FP32 LSE store), one per epilogue
@@ -1163,6 +1348,21 @@ _CONFIGS[67] = {**_CONFIGS[5], "use_alibi": True, "emit_lse": True}
 _CONFIGS[72] = {**_CONFIGS[64], "lse_layout": "head_major"}
 _CONFIGS[73] = {**_CONFIGS[65], "lse_layout": "head_major"}
 _CONFIGS[74] = {**_CONFIGS[66], "lse_layout": "head_major"}
+# idx87: additive bias + emit_lse on the idx77 path; the four bias
+# params precede lse_ptr in both engines.
+_CONFIGS[87] = {**_CONFIGS[77], "emit_lse": True}
+
+# Configs both engines must reject, with the reason each one pins: run_diff
+# requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
+# reason, a typo included).
+_EXPECTED_REJECTIONS = {
+    81: r"use_additive_bias does not support use_transposed_mask_once",
+    82: r"use_register_pv v1 does not support QQ bias or additive bias",
+    83: r"use_additive_bias does not support use_transposed_invariant_hoist",
+    84: r"use_additive_bias does not support the non-transposed 32x32 path",
+    85: r"use_grouped_kv2_softmax v1 does not support .*additive bias",
+    86: r"transposed softmax VALU opts do not support .*additive bias",
+}
 
 # --- idx75-76: fp8 K in LDS on each 32x32 QK path.
 # fp8 KV cache kept as raw fp8 in K_lds (use_fp8_mfma_qk) on the
@@ -1187,10 +1387,10 @@ _CONFIGS[75] = dict(
 # the same shared reader.
 _CONFIGS[76] = {**_CONFIGS[75], "use_transposed_qk_32x32": True}
 
-# --- idx77-80: ALiBi at the slope sites idx16/17 miss: per-row hoist (77, GQA with 24 heads so the slope formula's
-#     tail heads appear), and the transposed 32x32 per-iter (78, mask-once),
-#     hoisted (79) and inline (80) per-lane slopes.
-_CONFIGS[77] = dict(
+# --- idx88-91: ALiBi at the slope sites idx16/17 miss: per-row hoist (88, GQA with 24 heads so the slope formula's
+#     tail heads appear), and the transposed 32x32 per-iter (89, mask-once),
+#     hoisted (90) and inline (91) per-lane slopes.
+_CONFIGS[88] = dict(
     head_size=64,
     block_size=32,
     num_query_heads=24,
@@ -1216,14 +1416,14 @@ _TRANSPOSED_ALIBI = dict(
     block_m_per_warp=32,
     tile_size=64,
 )
-_CONFIGS[78] = {**_TRANSPOSED_ALIBI, "use_transposed_mask_once": True}
-_CONFIGS[79] = {**_TRANSPOSED_ALIBI, "use_transposed_invariant_hoist": True}
-_CONFIGS[80] = dict(_TRANSPOSED_ALIBI)
+_CONFIGS[89] = {**_TRANSPOSED_ALIBI, "use_transposed_mask_once": True}
+_CONFIGS[90] = {**_TRANSPOSED_ALIBI, "use_transposed_invariant_hoist": True}
+_CONFIGS[91] = dict(_TRANSPOSED_ALIBI)
 
-# --- idx81-95: the ALiBi arms (alibi_design). 81-84 each arm on the transposed
-#     mask-limit softmax; default arms: 85 D256 mask-limit (fma_split), 86 D192
-#     mask-limit (seed_tile), 87 grouped_kv2 and 88 register-P (fma_tile); 89-92
-#     each arm on the 16x16 path (two atoms, four N-tiles); 93-95 the other arms
+# --- idx92-106: the ALiBi arms (alibi_design). 92-95 each arm on the transposed
+#     mask-limit softmax; default arms: 96 D256 mask-limit (fma_split), 97 D192
+#     mask-limit (seed_tile), 98 grouped_kv2 and 99 register-P (fma_tile); 100-103
+#     each arm on the 16x16 path (two atoms, four N-tiles); 104-106 the other arms
 #     on grouped_kv2 (second-tile seed, two split groups).
 _MLIM_ALIBI = {
     **_TRANSPOSED_ALIBI,
@@ -1246,14 +1446,14 @@ _ALIBI_16X16 = dict(
     block_m_per_warp=32,
     tile_size=64,
 )
-_CONFIGS[81] = {**_MLIM_ALIBI, "alibi_design": "seed_tile"}
-_CONFIGS[82] = {**_MLIM_ALIBI, "alibi_design": "fma_tile"}
-_CONFIGS[83] = {**_MLIM_ALIBI, "alibi_design": "seed_split"}
-_CONFIGS[84] = {**_MLIM_ALIBI, "alibi_design": "fma_split"}
-_CONFIGS[85] = {**_MLIM_ALIBI, "head_size": 256}
-_CONFIGS[86] = {**_MLIM_ALIBI, "head_size": 192}
-_CONFIGS[87] = {**_TRANSPOSED_ALIBI, "use_grouped_kv2_softmax": True}
-_CONFIGS[88] = dict(
+_CONFIGS[92] = {**_MLIM_ALIBI, "alibi_design": "seed_tile"}
+_CONFIGS[93] = {**_MLIM_ALIBI, "alibi_design": "fma_tile"}
+_CONFIGS[94] = {**_MLIM_ALIBI, "alibi_design": "seed_split"}
+_CONFIGS[95] = {**_MLIM_ALIBI, "alibi_design": "fma_split"}
+_CONFIGS[96] = {**_MLIM_ALIBI, "head_size": 256}
+_CONFIGS[97] = {**_MLIM_ALIBI, "head_size": 192}
+_CONFIGS[98] = {**_TRANSPOSED_ALIBI, "use_grouped_kv2_softmax": True}
+_CONFIGS[99] = dict(
     head_size=64,
     block_size=32,
     num_query_heads=32,
@@ -1268,13 +1468,13 @@ _CONFIGS[88] = dict(
     use_register_pv=True,
     tile_size=64,
 )
-_CONFIGS[89] = {**_ALIBI_16X16, "alibi_design": "seed_tile"}
-_CONFIGS[90] = {**_ALIBI_16X16, "alibi_design": "fma_tile"}
-_CONFIGS[91] = {**_ALIBI_16X16, "alibi_design": "seed_split"}
-_CONFIGS[92] = {**_ALIBI_16X16, "alibi_design": "fma_split"}
-_CONFIGS[93] = {**_CONFIGS[87], "alibi_design": "fma_split"}
-_CONFIGS[94] = {**_CONFIGS[87], "alibi_design": "seed_tile"}
-_CONFIGS[95] = {**_CONFIGS[87], "alibi_design": "seed_split"}
+_CONFIGS[100] = {**_ALIBI_16X16, "alibi_design": "seed_tile"}
+_CONFIGS[101] = {**_ALIBI_16X16, "alibi_design": "fma_tile"}
+_CONFIGS[102] = {**_ALIBI_16X16, "alibi_design": "seed_split"}
+_CONFIGS[103] = {**_ALIBI_16X16, "alibi_design": "fma_split"}
+_CONFIGS[104] = {**_CONFIGS[98], "alibi_design": "fma_split"}
+_CONFIGS[105] = {**_CONFIGS[98], "alibi_design": "seed_tile"}
+_CONFIGS[106] = {**_CONFIGS[98], "alibi_design": "seed_split"}
 
 
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:

@@ -36,6 +36,7 @@
 #include <string.h>
 
 #include "rocke/helper_helper_rocke.helpers.attention.h" /* rocke_binary_search_seq_idx */
+#include "rocke/helper_rocke.helpers.attention_arch_caps.h"
 #include "rocke/helper_rocke.instances.common._attention_alibi.h"
 #include "rocke/instance_gfx942_attention_tiled_2d_internal.h"
 
@@ -322,6 +323,20 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
                  "ring schedule (not yet ported)");
         return false;
     }
+    /* This shared narrow/default-geometry driver has no additive-bias score
+     * site (that lives only in the gfx950-specific ctx-init/driver). Reject
+     * rather than silently build an ordinary kernel under a biased name --
+     * the real check this mirrors (`rocke_attention_tiled_2d_spec_validate`,
+     * gfx942/attention_tiled_2d.cpp) is unreachable from this build path. */
+    if(spec->use_additive_bias)
+    {
+        b->status = ROCKE_ERR_VALUE;
+        snprintf(b->err,
+                 ROCKE_ERR_MSG_CAP,
+                 "use_additive_bias: the narrow/default tiled-2D driver does not "
+                 "emit additive bias");
+        return false;
+    }
     ctx->K_SLICED_RING = K_SLICED_RING;
     ctx->K_SLICED_LDSSEQ = spec->use_k_sliced_ldsseq;
     ctx->USE_IGLP_OPT = spec->use_iglp_opt;
@@ -393,19 +408,21 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->WAVE = WAVE;
     ctx->THREADS = THREADS;
 
-    const int ASYNC_LDS_MAX_DWORDS = 1;
+    /* The widest gfx942 LDS-DMA width, from the attention capability table. */
+    const int ASYNC_LDS_MAX_DWORDS = rocke_attn_max_lds_dma_dwords("gfx942");
     const int ASYNC_LDS_MAX_BYTES_PER_LANE = ASYNC_LDS_MAX_DWORDS * 4;
     ctx->ASYNC_LDS_MAX_DWORDS = ASYNC_LDS_MAX_DWORDS;
     ctx->ASYNC_LDS_MAX_BYTES_PER_LANE = ASYNC_LDS_MAX_BYTES_PER_LANE;
 
-    /* K/V async-DMA payload width. The gfx950 tiled-2D builder uses dwords=4
-     * (16 bytes/lane = 8 bf16 halves: KV_HALVES_PER_CALL = THREADS*8,
-     * lane_half_base = tid*8, WAVE_BYTES = WAVE*16); gfx942 uses dwords=1 (4
-     * bytes/lane = 2 halves). Keyed off the wide ds_read_tr path (gfx950). */
+    /* K/V async-DMA payload width. The gfx950 tiled-2D builder uses the
+     * target's widest LDS-DMA width (4 dwords = 16 bytes/lane = 8 bf16 halves:
+     * KV_HALVES_PER_CALL = THREADS*8, lane_half_base = tid*8, WAVE_BYTES =
+     * WAVE*16); gfx942 uses its widest, 1 dword (4 bytes/lane = 2 halves).
+     * Keyed off the wide ds_read_tr path (gfx950). */
     if(target->memory.has_ds_read_tr)
     {
-        ctx->KV_DMA_HALVES_PER_LANE = 8;
-        ctx->KV_DMA_DWORDS = 4;
+        ctx->KV_DMA_DWORDS = rocke_arch_async_lds_max_dwords(target);
+        ctx->KV_DMA_HALVES_PER_LANE = ctx->KV_DMA_DWORDS * 2;
     }
     else
     {

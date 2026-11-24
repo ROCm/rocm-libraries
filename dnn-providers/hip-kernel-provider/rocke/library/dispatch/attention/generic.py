@@ -21,8 +21,6 @@ from typing import Tuple
 from kernels.common.attention_unified import (
     select_auto_path,
     supports_native_unified_attention,
-    supports_native_unified_attention_coverage,
-    unified_lse_path_gate,
 )
 from rocke.core.arch import arches_with_own_facts
 from rocke.dispatch.core import (
@@ -45,7 +43,7 @@ from .common import (
     attention_problem,
     _request_errors,
     _selector_matches,
-    UNIFIED_ALIBI_ARCHES,
+    _unified_path_coverage,
 )
 
 # The unified paths are portable, so they declare every known target rather than
@@ -70,11 +68,15 @@ _UNIFIED_CAPABILITY = Capability(
     # Unified kernels shift the causal diagonal by the runtime difference
     # between each sequence's KV and query lengths (bottom-right); top-left
     # cross-length selects the ``causal_top_left`` kernel variant on gfx950 and
-    # the scalar kernel elsewhere (tiled gates reject it off gfx950).
-    supports_features=ATTENTION_FEATURES | {"alibi", "alibi_external_slopes"},
+    # the scalar kernel elsewhere (tiled gates reject it off gfx950). Additive
+    # bias and ALiBi run on the tiled kernels only; the tiled gates limit the bias
+    # to gfx950 and ALiBi to gfx942 / gfx950.
+    supports_features=ATTENTION_FEATURES
+    | {"attn_bias", "alibi", "alibi_external_slopes"},
 )
-# Both unified paths write the optional LSE output; each path's own gate (in
-# ``support`` below) still refuses it on arches/features that cannot.
+# Both unified paths write the optional LSE output; each path's own gate (run
+# by ``_unified_path_coverage`` in ``support`` below) still refuses it on
+# arches/features that cannot.
 _UNIFIED_LSE_CAPABILITY = dataclasses.replace(
     _UNIFIED_CAPABILITY,
     supports_features=_UNIFIED_CAPABILITY.supports_features | {"lse"},
@@ -104,11 +106,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         if not ok:
             return False, why
         problem = attention_problem(req)
-        if problem.use_alibi and req.arch not in UNIFIED_ALIBI_ARCHES:
-            return False, f"unified ALiBi runs on {UNIFIED_ALIBI_ARCHES} only"
-        # The scalar gate refuses LSE and ALiBi (the scalar kernel has neither), so
-        # coverage is asked with both off; the path's own gate rules on them below.
-        ok, why = supports_native_unified_attention_coverage(problem, arch=req.arch)
+        ok, why = _unified_path_coverage(req, problem, path, req.arch)
         if not ok:
             return False, why
         # Split-KV also takes the LSE requests that ``select_path(arch)`` sends
@@ -120,12 +118,6 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
             return False, (
                 f"problem routes to {problem.select_path(req.arch)!r} path, not {path!r}"
             )
-        if problem.emit_lse or problem.use_alibi:
-            # The path's own gate owns which arches and features can write LSE
-            # or apply ALiBi.
-            ok, why = unified_lse_path_gate(path)(problem, arch=req.arch)
-            if not ok:
-                return False, why
         return True, "ok"
 
     def select(req: OperatorRequest) -> AttentionSpec:
@@ -147,6 +139,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
             right_bound=problem.right_bound,
             sliding_window=problem.sliding_window,
             emit_lse=problem.emit_lse,
+            use_additive_bias=problem.use_additive_bias,
         )
 
     candidate = KernelCandidate(

@@ -123,6 +123,8 @@ struct KernelSpec
     int64_t useCfvst = 1;
     int64_t useExp2Fast = 0;
     int64_t ldsKGroupPad = 8;
+    /// The additive bias (an fp32 attn_mask) the candidate adds; its grid is qb_minor.
+    int64_t useAdditiveBias = 0;
     /// Absent: a record written before the field.
     std::optional<int64_t> useAlibi;
 };
@@ -160,6 +162,7 @@ KernelDefinition makeKernel(const KernelSpec& spec)
         {std::string("use_cfvst"), spec.useCfvst},
         {std::string("use_exp2_fast"), spec.useExp2Fast},
         {std::string("lds_k_group_pad"), spec.ldsKGroupPad},
+        {std::string("use_additive_bias"), spec.useAdditiveBias},
     };
     if(spec.useAlibi.has_value())
     {
@@ -245,6 +248,7 @@ struct ScoreGolden
     int64_t useCfvst;
     int64_t useExp2Fast;
     int64_t ldsKGroupPad;
+    int64_t useAdditiveBias;
     bool gridPolicy;
     bool persistentPolicy;
 };
@@ -275,6 +279,7 @@ KernelSpec kernelSpecOf(const ScoreGolden& golden)
     spec.useCfvst = golden.useCfvst;
     spec.useExp2Fast = golden.useExp2Fast;
     spec.ldsKGroupPad = golden.ldsKGroupPad;
+    spec.useAdditiveBias = golden.useAdditiveBias;
     return spec;
 }
 
@@ -448,9 +453,14 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesSinksADanglingStatsUidMaskTenso
     stats.statsUid = EXTRA_UID;
     EXPECT_FALSE(matchGraph(stats).has_value());
 
+    // This arch serves a bias, so the mask uid is declined for naming no tensor of the graph
+    // (the bias reader's own decline), not for an unserved mask ("is not supported").
     auto attnMask = baseGraph();
     attnMask.attnMaskUid = EXTRA_UID;
-    EXPECT_FALSE(matchGraph(attnMask).has_value());
+    const auto danglingMask = loggedDecline(attnMask);
+    EXPECT_EQ(danglingMask.cause, "attn_mask");
+    EXPECT_NE(danglingMask.detail.find("tensor in the graph"), std::string::npos)
+        << danglingMask.detail;
 
     auto varlen = baseGraph();
     varlen.seqLenQUid = EXTRA_UID;
@@ -1358,7 +1368,8 @@ TEST(TestGfx942AttentionDenseScore, AMalformedBodyLeverScoresZero)
 // E2 over the manifest's full enumeration (SCORE_GOLDENS): in every cell each kernel scores
 // distinctly and positively, and the cell's policy arm scores strictly highest -- the
 // persistent base arm where persistent leads (D128 with no window or one wider than 256 keys,
-// 304 % CUs == 0), the cell default elsewhere.
+// 304 % CUs == 0), the cell default elsewhere. A bias cell ships no persistent kernel (the
+// persistent grid has no bias form), so its cell default leads at every CU count.
 TEST(TestGfx942AttentionDenseScore, ThePolicyArmLeadsEveryCellOfTheFullEnumeration)
 {
     const auto score
@@ -1372,8 +1383,9 @@ TEST(TestGfx942AttentionDenseScore, ThePolicyArmLeadsEveryCellOfTheFullEnumerati
             cells[golden.cell].emplace_back(
                 score(graph.context(), BoundTokens{}, makeKernel(kernelSpecOf(golden))), &golden);
         }
-        // The 48 swept cells, then the 40 ALiBi cells of the manifest's also sections.
-        EXPECT_EQ(cells.size(), 88U);
+        // The 48 swept cells, the 16 bias cells, then the 40 ALiBi cells of the manifest's also
+        // sections.
+        EXPECT_EQ(cells.size(), 104U);
         for(const auto& [cell, scored] : cells)
         {
             std::set<double> distinct;
@@ -1396,6 +1408,7 @@ TEST(TestGfx942AttentionDenseScore, ThePolicyArmLeadsEveryCellOfTheFullEnumerati
                       return entry.second->persistent != 0;
                   });
             const bool persistentLeads = cus == 304 && hasPersistent && best->headSize == 128
+                                         && best->useAdditiveBias == 0
                                          && (best->slidingWindow == 0 || best->slidingWindow > 256);
             EXPECT_TRUE(persistentLeads ? best->persistentPolicy : best->gridPolicy)
                 << "cell " << cell << " CUs " << cus << ": the best arm is block " << best->blockM

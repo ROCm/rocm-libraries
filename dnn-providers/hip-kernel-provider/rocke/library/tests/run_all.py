@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 if __package__:
+    from . import hkp_pack_headers
     from ._explicit_gate_policy import (
         preflight_is_disabled as _preflight_is_disabled,
     )
@@ -46,6 +47,7 @@ else:
     _RUNNER_DIR = Path(__file__).resolve().parent
     if str(_RUNNER_DIR) not in sys.path:
         sys.path.insert(0, str(_RUNNER_DIR))
+    import hkp_pack_headers
     from _explicit_gate_policy import preflight_is_disabled as _preflight_is_disabled
     from _explicit_gate_policy import selection_is_partial as _selection_is_partial
     from _worker_process import available_cpus, run_bounded_to_stream, stop_all
@@ -63,6 +65,13 @@ from rocke.tests.subprocess_launcher import (  # noqa: E402 - source bootstrap a
     rocke_python_command,
     rocke_subprocess_env,
 )
+
+# hipdnn_assets imports rocke.assets, so it waits for the platform/python
+# bootstrap above (script execution does not have it importable before that).
+if __package__:
+    from .sdpa import hipdnn_assets  # noqa: E402 - source bootstrap above
+else:
+    from sdpa import hipdnn_assets  # noqa: E402 - source bootstrap above
 
 EXPLICIT_GATES = {
     "counted-structural": TESTS / "gates" / "attention_bwd_counted_structural_gate.py",
@@ -198,6 +207,30 @@ def _pytest_environment() -> dict[str, str]:
     environment = dict(os.environ)
     environment.pop("PYTEST_ADDOPTS", None)
     return rocke_subprocess_env(environment, python_paths=(_LIBRARY_ROOT,))
+
+
+def _forwarded_asset_require_flags(worker_arguments: list[str]) -> list[str]:
+    """``--rocke-require-*`` flags this run should add, so an installed tree run
+    through this entrypoint matches what the installed CTest entries already do:
+    the flag whenever the matching asset copy (hipDNN's SDPA assets, or
+    hip-kernel-provider's pack headers) is actually staged (TESTING.md section
+    5.1.4). Without this, ``test_installed_hipdnn_assets_imply_require_flag`` and
+    ``test_installed_pack_headers_imply_require_flag`` fail an ordinary run of
+    this entrypoint's own documented usage against an installed tree, even
+    though nothing is missing there. A flag already in ``worker_arguments``
+    (the caller forwarded it explicitly) is not repeated."""
+    flags = []
+    if (
+        hipdnn_assets.installed_copy_present()
+        and "--rocke-require-hipdnn-assets" not in worker_arguments
+    ):
+        flags.append("--rocke-require-hipdnn-assets")
+    if (
+        hkp_pack_headers.installed_copy_present()
+        and "--rocke-require-hkp-pack-headers" not in worker_arguments
+    ):
+        flags.append("--rocke-require-hkp-pack-headers")
+    return flags
 
 
 def _collect_pytest_files(
@@ -536,6 +569,10 @@ def main() -> int:
     # Explicit gates clear inherited addopts before launch. Unit subprocesses do
     # inherit them, so resource and shared-output policy must inspect both.
     worker_arguments = ([] if args.gate else inherited) + extra
+    if run_discovered_pytest:
+        worker_arguments = worker_arguments + _forwarded_asset_require_flags(
+            worker_arguments
+        )
     inherited_shard = os.environ.get("ROCKE_TEST_SHARD", "").strip()
     gpu_selected = args.gpu or args.gpu_only
     jobs = (

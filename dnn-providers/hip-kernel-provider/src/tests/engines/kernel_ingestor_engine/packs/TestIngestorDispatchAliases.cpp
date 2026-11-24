@@ -84,18 +84,31 @@ TEST(TestIngestorDispatchAliases, TheAlibiContractResolvesToTheCurrentHandler)
     EXPECT_NE(alibi, v1);
 }
 
-// gfx942 has one plain contract and the ALiBi one. Both versioned names resolve to the
-// handler of the unversioned one, which saves plain and ALiBi plans alike, so a saved plan
-// names that same handler; and it has no version it never defined.
-TEST(TestIngestorDispatchAliases, Gfx942AttentionDenseHasItsContractsOnItsCatalogHandler)
+// The catalog's handler saves a bias plan under v3, and a plan may be saved only under a
+// name registered to the handler that saves it, so v3 resolves to the current handler.
+TEST(TestIngestorDispatchAliases, TheBiasContractIsServedByTheCurrentHandler)
+{
+    registerNativeIngestorSymbols();
+
+    expectOneHandler("hipkernel.gfx950_attention_dense.dispatch",
+                     GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3);
+}
+
+// gfx942's plain contract is v1, its bias contract v2 and its ALiBi contract alibi.v1, all
+// served by the one handler of the unversioned name, so a plan saved through the catalog's
+// handler names that same handler; v1 is not superseded (no gfx942 kernel ever baked the
+// head counts), and it has no version it never defined.
+TEST(TestIngestorDispatchAliases, Gfx942AttentionDenseServesItsContractsOnItsCatalogHandler)
 {
     registerNativeIngestorSymbols();
 
     expectOneHandler("hipkernel.gfx942_attention_dense.dispatch",
                      GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1);
     expectOneHandler("hipkernel.gfx942_attention_dense.dispatch",
+                     GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V2);
+    expectOneHandler("hipkernel.gfx942_attention_dense.dispatch",
                      GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1);
-    EXPECT_EQ(DispatchRegistry<Handle>::tryResolve("hipkernel.gfx942_attention_dense.dispatch.v2"),
+    EXPECT_EQ(DispatchRegistry<Handle>::tryResolve("hipkernel.gfx942_attention_dense.dispatch.v3"),
               nullptr);
 }
 

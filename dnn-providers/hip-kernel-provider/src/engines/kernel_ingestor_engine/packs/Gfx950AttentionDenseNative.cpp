@@ -35,7 +35,10 @@
  * dispatch, the [2^-64, 2^4] scale range included, are shared with the gfx942 twin
  * (AttentionDenseNative.cpp); what is gfx950's own is bound here: the block_m {128, 256}
  * tiles with their LDS budget, no sliding window, the use_alibi variants that serve ALiBi,
- * and the v1 (8-argument), v2 (10-argument) and alibi.v1 (11-argument) launch contracts.
+ * and the v1 (8-argument), v2 (10-argument) and alibi.v1 (11-argument) launch contracts. A
+ * kernel built with an additive bias (the use_additive_bias KMD field) takes the v3
+ * contract, which adds the bias pointer and its strides: 14 arguments. No head count is
+ * compared: the kernel reads both as kernargs taken from the graph.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -98,6 +101,11 @@ constexpr attention_dense::AttentionDenseArch gfx950Arch()
     // asks for one. Bound anyway, so a variant built with a window is never matched.
     arch.tokens.slidingWindow = "gfx950_attention_dense.sliding_window";
     arch.tokens.scaleBits = "gfx950_attention_dense.scale_bits";
+    arch.tokens.bias = "gfx950_attention_dense.bias";
+    arch.tokens.biasUid = "gfx950_attention_dense.bias.uid";
+    arch.tokens.biasStrideBatch = "gfx950_attention_dense.bias.stride_batch";
+    arch.tokens.biasStrideHead = "gfx950_attention_dense.bias.stride_head";
+    arch.tokens.biasStrideQuery = "gfx950_attention_dense.bias.stride_query";
     arch.tokens.alibi = "gfx950_attention_dense.alibi";
     arch.isSupportedTile = &isSupportedGfx950AttentionDenseTile;
     arch.geometry = &gfx950Geometry;
@@ -106,6 +114,7 @@ constexpr attention_dense::AttentionDenseArch gfx950Arch()
     arch.servesWindows = false;
     // No catalog variant writes LSE, so every stats output declines under 'stats'.
     arch.candidateWritesLse = nullptr;
+    arch.candidateAddsBias = &attention_dense::candidateAdditiveBias;
     // ALiBi with hipDNN's slopes on the top-left causal band: the use_alibi variants serve
     // it without a window (no variant carries one, so maskFor declines windowed ALiBi).
     arch.candidateUsesAlibi = &candidateUsesAlibi;
@@ -113,12 +122,18 @@ constexpr attention_dense::AttentionDenseArch gfx950Arch()
                             attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
     arch.legacyContract = {GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1,
                            attention_dense::AttentionDenseAbi::BAKED_HEAD_COUNTS};
+    arch.biasContract = {GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3,
+                         attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS};
     arch.alibiContract = {GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1,
                           attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
     return arch;
 }
 
 constexpr attention_dense::AttentionDenseArch GFX950_ARCH = gfx950Arch();
+static_assert(GFX950_ARCH.isConsistent(),
+              "gfx950Arch(): a served feature's token is unspelled, or the bias or ALiBi hook "
+              "and its contract do not come together (their tokens, name and kernel-argument "
+              "form)");
 
 std::optional<BoundTokens> gfx950AttentionDenseGraphMatches(const MatchContext& context)
 {
@@ -297,8 +312,8 @@ void resetGfx950AttentionDenseModuleCache()
 namespace
 {
 
-/// This engine's dispatch handler for the current (v2) or the legacy (v1) contract,
-/// process-lifetime (alibi.v1 plans go through the v2 handler). Both share one module cache and loader.
+/// This engine's dispatch handler for the current (v2, which also serves v3 and alibi.v1)
+/// or the legacy (v1) contract, process-lifetime. Both share one module cache and loader.
 const IKernelDispatchHandler<Handle>& gfx950AttentionDenseDispatchHandler(bool legacy)
 {
     static const compilation::KpackKernelLoader s_kpackLoader(
@@ -317,9 +332,12 @@ void registerGfx950AttentionDenseSymbols(SymbolScope<Handle>& scope)
     scope.add(std::string(GRAPH_MATCHER_SYMBOL), &gfx950AttentionDenseGraphMatches);
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &kernelMatches);
     scope.add(std::string(SCORE_SYMBOL), &scoreKernel);
-    // The UDD's unversioned name dispatches the catalog: v2, and alibi.v1 for ALiBi graphs.
+    // The UDD's unversioned name dispatches the catalog: plain kernels take v2, bias kernels
+    // v3 and ALiBi kernels alibi.v1, all served (and saved under) by the current handler.
     scope.add(std::string(DISPATCH_SYMBOL), &gfx950AttentionDenseDispatchHandler(/*legacy=*/false));
     scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2),
+              &gfx950AttentionDenseDispatchHandler(/*legacy=*/false));
+    scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3),
               &gfx950AttentionDenseDispatchHandler(/*legacy=*/false));
     // Kept so plans saved under v1 still load and launch their 8-argument code object.
     scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1),

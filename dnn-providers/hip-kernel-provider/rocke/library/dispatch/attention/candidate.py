@@ -12,10 +12,6 @@ from __future__ import annotations
 
 from typing import Callable, Mapping, Optional
 
-from kernels.common.attention_unified import (
-    supports_native_unified_attention_coverage,
-    unified_lse_path_gate,
-)
 from rocke.dispatch.core import Capability, KernelCandidate, ShapeRange
 from rocke.dispatch.tuning import make_tuned_candidate
 
@@ -30,6 +26,7 @@ from .common import (
     _dense_kernel_module,
     _request_errors,
     _tuning_problem,
+    _unified_path_coverage,
     UNIFIED_ALIBI_ARCHES,
 )
 from .dense_rules import DenseSpace, DenseSupports
@@ -53,26 +50,25 @@ DENSE_ALGORITHMS = frozenset(
 
 
 def _tuning_precheck(variant: AttentionGeometryVariant):
-    """Coverage for one geometry variant. The scalar coverage check refuses LSE
-    and ALiBi (the scalar kernel has neither), so it is asked about the problem
-    without them, and an LSE or ALiBi request must also pass the gate of the
-    variant's own path: the split-KV or tiled 2D gate owns which arches and
-    features can write LSE or apply ALiBi."""
-    path_gate = unified_lse_path_gate(variant.path)
+    """Coverage for one geometry variant, judged by ``_unified_path_coverage``
+    on the variant's own path: the scalar check with the tiled-only features
+    (additive bias, LSE, ALiBi) stripped, then that path's gate for those
+    features."""
 
     def precheck(req):
         problem = _tuning_problem(req)
-        if problem.use_alibi and variant.arch not in UNIFIED_ALIBI_ARCHES:
-            return False, f"unified ALiBi runs on {UNIFIED_ALIBI_ARCHES} only"
-        ok, why = supports_native_unified_attention_coverage(problem, arch=variant.arch)
-        if ok and (problem.emit_lse or problem.use_alibi):
-            return path_gate(problem, arch=variant.arch)
-        return ok, why
+        return _unified_path_coverage(req, problem, variant.path, variant.arch)
 
     return precheck
 
 
-def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
+def make_tuning_candidate(
+    variant: AttentionGeometryVariant, extra_features: frozenset = frozenset()
+) -> KernelCandidate:
+    """One unified tuning candidate. ``extra_features`` are request features the
+    arch module declares for this variant's geometry on top of the common ones
+    (e.g. ``attn_bias``)."""
+
     def build(spec, arch):
         from .tuning_specs import validate_explicit_fp8_encoding
 
@@ -89,16 +85,20 @@ def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
             _tiled_3d_signatures,
         )
 
+        # Only the gfx950 specs declare the field.
+        bias = bool(getattr(spec.kernel_spec, "use_additive_bias", False))
         if spec.path == "3d":
             segment, _ = _tiled_3d_signatures(
                 spec.arch,
                 spec.kernel_spec.dtype,
                 kv_dtype=spec.kernel_spec.kv_storage_dtype,
+                include_additive_bias=bias,
             )
             return segment
         return _tiled_2d_signature(
             spec.arch,
             spec.kernel_spec.dtype,
+            include_additive_bias=bias,
             kv_dtype=spec.kernel_spec.kv_storage_dtype,
             emit_lse=bool(getattr(spec.kernel_spec, "emit_lse", False)),
         )
@@ -132,6 +132,7 @@ def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
                 if variant.builder_kind == "gfx942_4warp_gqa"
                 else ATTENTION_FEATURES | {"lse"}
             )
+            | frozenset(extra_features)
             | (
                 {"alibi", "alibi_external_slopes"}
                 if variant.arch in UNIFIED_ALIBI_ARCHES
@@ -164,6 +165,7 @@ def make_dense_candidate(
         Callable[[object, Mapping[str, object]], Mapping[str, object]]
     ] = None,
     axis_names: Optional[frozenset] = None,
+    pinned_axes: frozenset = frozenset(),
 ) -> KernelCandidate:
     """One dense candidate. ``base_spec(req)`` is its default kernel spec (raise
     ``ValueError`` when the request cannot have one); ``supports`` is the
@@ -174,7 +176,8 @@ def make_dense_candidate(
     :meth:`rocke.dispatch.tuning.KnobSpace.recorded`); ``derived`` recomputes
     problem fields that depend on the knobs (see :class:`.DenseSpace`);
     ``axis_names`` limits the knobs the candidate takes (``None``: every
-    declared dense axis; empty: its default spec only)."""
+    declared dense axis; empty: its default spec only); ``pinned_axes`` names the
+    axes its grid fixes for every problem (see :class:`.DenseSpace`)."""
 
     def bind_torch(request, spec, tensors, **kwargs):
         from .bindings import bind_dense_attention_torch
@@ -203,6 +206,7 @@ def make_dense_candidate(
             recorded_fields=frozenset(recorded),
             derived=derived,
             axis_names=axis_names,
+            pinned_axes=frozenset(pinned_axes),
         ),
         base=base_spec,
         request_errors=_request_errors,

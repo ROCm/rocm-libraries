@@ -40,9 +40,9 @@ engine:
   # block equals the home's; see configs/gfx942_attention_dense.engine.yaml).
   heuristics:
     sort_kernel_catalog:
-      gfx942: [18bb432e-d871-4290-9ae8-f5111aaf2ffe]
+      gfx942: [948543e3-03a7-4ff1-b8bc-50424275b002]
   trained_catalog_sha256:
-    gfx942: 380a508ad8566e3be17143aae7cec238e5f796bce2538a11c409a1075b5539e4
+    gfx942: 60c6e2fac82bc93cc3979d2d5de44a48ffca3d6febf604fbc1f46cf81cde3ea9
 kmd_fields:
 - name: dtype
   type: string
@@ -147,6 +147,10 @@ kmd_fields:
   type: int
 - name: use_exp2_fast
   type: int
+# Additive bias (an fp32 attn_mask tensor); 0 on every kernel built before it.
+- name: use_additive_bias
+  type: int
+  default_value: 0
 # 1: the kernel adds ALiBi with hipDNN's slopes, computed in the kernel from the query head
 # count (SdpaSemanticsRegister SEM-021), and serves only alibi_mask graphs; 0: neither.
 # Every kernel of this satellite bundle has 1.
@@ -184,6 +188,7 @@ specialization:
   - lds_k_group_pad
   - use_cfvst
   - use_exp2_fast
+  - use_additive_bias
   - use_alibi
   matcher_only_fields: []
   vocabulary:
@@ -247,6 +252,8 @@ specialization:
       method: resolved_use_cfvst
     use_exp2_fast:
       method: resolved_use_exp2_fast
+    use_additive_bias:
+      field: use_additive_bias
     use_alibi:
       field: use_alibi
 kernel_source_kind: rocke

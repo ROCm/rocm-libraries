@@ -13,7 +13,8 @@ TestGfx942AttentionDenseMatchers.cpp checks the C++ against:
     satellite), with its cell, the KMD fields the score reads, and whether it is its
     cell's policy arm on the one-CTA-per-block grid (the gfx942_dense_qbminor base spec,
     the cell default) or on the persistent grid (the gfx942_dense_persist_aot base spec,
-    D128 cells only).
+    D128 cells without an additive bias: the persistent pin does not serve a bias, so a
+    bias cell has no persistent arm). A kernel's use_additive_bias is part of its row.
 
     cd projects/hipdnn/tools/IngestorGenerator
     .venv/bin/python ../../../../dnn-providers/hip-kernel-provider/src/tests/engines/\\
@@ -91,7 +92,14 @@ def score_rows():
             for cell in section.cells():
                 if cell not in cells:
                     cells.append(cell)
-                if persist and cell["hdim_q"] == 128 and not section.spec_overrides:
+                # The persistent pin declines a bias cell (the persistent grid has no bias
+                # form), so only the cells without one have a persistent arm.
+                if (
+                    persist
+                    and cell["hdim_q"] == 128
+                    and not cell.get("use_attn_bias")
+                    and not section.spec_overrides
+                ):
                     base = section.base_spec(cell, persist[0])
                     persist_base.setdefault(cells.index(cell), base)
         # A section with spec_overrides (the ALiBi tile) has no raw base spec: its
@@ -160,9 +168,11 @@ def render() -> str:
         "// lds_row_pad, pv_priority, persistent, num_persistent, persist_decode,",
         "// nonpersist_decode, lds_num_buffers, v_reg_prefetch, causal_diag_split,",
         "// o_store_width, pv_loop_order, use_cfvst, use_exp2_fast, lds_k_group_pad,",
-        "// grid policy arm, persistent policy arm",
+        "// use_additive_bias, grid policy arm, persistent policy arm",
         f"inline constexpr std::array<ScoreGolden, {len(scores)}> SCORE_GOLDENS{{{{",
     ]
+    # The ALiBi satellite's records omit use_additive_bias, which the KMD default completes
+    # to 0.
     for index, md, grid_policy, persistent_policy in scores:
         lines.append(
             f'    {{{index}, "{md["dtype"]}", {md["head_size"]}, {md["causal"]}, '
@@ -172,7 +182,8 @@ def render() -> str:
             f'"{md["nonpersist_decode"]}", {md["lds_num_buffers"]}, '
             f'{md["v_reg_prefetch"]}, {md["causal_diag_split"]}, {md["o_store_width"]}, '
             f'"{md["pv_loop_order"]}", {md["use_cfvst"]}, {md["use_exp2_fast"]}, '
-            f'{md["lds_k_group_pad"]}, {b(grid_policy)}, {b(persistent_policy)}}},'
+            f'{md["lds_k_group_pad"]}, {md.get("use_additive_bias", 0)}, {b(grid_policy)}, '
+            f"{b(persistent_policy)}}},"
         )
     lines += ["}};", "", "// clang-format on", ""]
     return "\n".join(lines)

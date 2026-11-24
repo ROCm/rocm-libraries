@@ -301,6 +301,17 @@ GFX942_ATTENTION_TILED_2D = [
     {
         "head_size": 64,
         "block_size": 32,
+        "num_query_heads": 32,
+        "num_kv_heads": 32,
+        "dtype": "bf16",
+        "use_sinks": True,
+        "sliding_window": 2048,
+        "has_softcap": False,
+        "use_additive_bias": True,
+    },
+    {
+        "head_size": 64,
+        "block_size": 32,
         "num_query_heads": 24,
         "num_kv_heads": 6,
         "dtype": "fp16",
@@ -328,11 +339,11 @@ GFX942_ATTENTION_TILED_2D = [
     },
 ]
 
-# idx22-34: the ALiBi arms (alibi_design) on the corpus specs of each family:
-# 22-25 each arm on the x8 k1buf mask-limit softmax (bf16 D128); default arms
-# 26 x8 cfvst fp16 D128 (mask-limit) and 27 register-P D128; 28 register-P D256
-# mw32 with seed_tile; 29-32 each arm on the 16x16 path (fp16 D128); 33 LSE on
-# the x8 k1buf default; 34 seed_split on the x8 mask-once softmax (no mask limit).
+# idx23-35: the ALiBi arms (alibi_design) on the corpus specs of each family:
+# 23-26 each arm on the x8 k1buf mask-limit softmax (bf16 D128); default arms
+# 27 x8 cfvst fp16 D128 (mask-limit) and 28 register-P D128; 29 register-P D256
+# mw32 with seed_tile; 30-33 each arm on the 16x16 path (fp16 D128); 34 LSE on
+# the x8 k1buf default; 35 seed_split on the x8 mask-once softmax (no mask limit).
 _GFX942_X8_MLIM = {
     "head_size": 128,
     "block_size": 64,
@@ -411,11 +422,11 @@ GFX942_ATTENTION_TILED_2D += [
 ]
 GFX942_ATTENTION_TILED_2D += [
     {**_GFX942_X8_MLIM, "emit_lse": True},
-    {**GFX942_ATTENTION_TILED_2D[21], "alibi_design": "seed_split"},
+    {**GFX942_ATTENTION_TILED_2D[22], "alibi_design": "seed_split"},
 ]
-# idx35-36: the x8 k1buf spec dispatch picks for bf16 D192 at block_size 64,
+# idx36-37: the x8 k1buf spec dispatch picks for bf16 D192 at block_size 64,
 # whose transposed softmax has no sub-flags (full mask, inline per-lane slope):
-# 35 the per-score add (no design), 36 fma_tile on the same full-mask softmax.
+# 36 the per-score add (no design), 37 fma_tile on the same full-mask softmax.
 _GFX942_D192_X8_FULL_MASK_ALIBI = {
     "head_size": 192,
     "block_size": 64,
@@ -1522,6 +1533,7 @@ GFX950_ATTENTION_TILED_2D = [
         "tile_size": 32,
     },
 ]
+
 # idx72-74: lse_layout="head_major" at each store site (idx64-66 + head-major).
 GFX950_ATTENTION_TILED_2D += [
     {**GFX950_ATTENTION_TILED_2D[i], "lse_layout": "head_major"} for i in (64, 65, 66)
@@ -1562,7 +1574,195 @@ GFX950_ATTENTION_TILED_2D += [
         "tile_size": 64,
     },
 ]
-# idx77-80: ALiBi at the slope sites idx16/17 miss (per-row hoist, transposed 32x32 slopes).
+# idx77 onward: additive bias.
+GFX950_ATTENTION_TILED_2D += [
+    {
+        "head_size": 128,
+        "block_size": 16,
+        "num_query_heads": 16,
+        "num_kv_heads": 4,
+        "dtype": "bf16",
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "use_additive_bias": True,
+        "num_seqs": 3,
+        "num_warps": 2,
+        "block_m_per_warp": 32,
+        "tile_size": 32,
+    },
+    {
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 32,
+        "num_kv_heads": 8,
+        "dtype": "fp16",
+        "use_sinks": True,
+        "sliding_window": 512,
+        "has_softcap": True,
+        "use_alibi": True,
+        "use_qq_bias": True,
+        "use_additive_bias": True,
+    },
+    {
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 64,
+        "num_kv_heads": 8,
+        "dtype": "bf16",
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "use_additive_bias": True,
+        "num_seqs": 2,
+        "num_warps": 4,
+        "block_m_per_warp": 32,
+        "tile_size": 64,
+        "use_mfma_32x32": True,
+        "use_transposed_qk_32x32": True,
+        "use_transposed_scalar_state": True,
+        "use_transposed_half_local_pv": True,
+        "use_mfma32_skip_legacy_qreg": True,
+        "use_fast_paged_kv_desc": True,
+    },
+    {
+        "head_size": 128,
+        "block_size": 32,
+        "num_query_heads": 16,
+        "num_kv_heads": 4,
+        "dtype": "fp16",
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "use_qq_bias": True,
+        "use_additive_bias": True,
+        "num_warps": 2,
+        "block_m_per_warp": 32,
+        "tile_size": 64,
+        "use_mfma_32x32": True,
+        "use_transposed_qk_32x32": True,
+    },
+    {
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 64,
+        "num_kv_heads": 8,
+        "dtype": "bf16",
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "use_additive_bias": True,
+        "num_warps": 4,
+        "block_m_per_warp": 32,
+        "tile_size": 64,
+        "use_mfma_32x32": True,
+        "use_transposed_qk_32x32": True,
+        "use_transposed_scalar_state": True,
+        "use_transposed_mask_once": True,
+    },
+    {
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 32,
+        "num_kv_heads": 8,
+        "dtype": "bf16",
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "use_additive_bias": True,
+        "use_register_pv": True,
+    },
+    {
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 64,
+        "num_kv_heads": 8,
+        "dtype": "bf16",
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "use_additive_bias": True,
+        "num_warps": 4,
+        "block_m_per_warp": 32,
+        "tile_size": 64,
+        "use_mfma_32x32": True,
+        "use_transposed_qk_32x32": True,
+        "use_transposed_invariant_hoist": True,
+    },
+    {
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 64,
+        "num_kv_heads": 8,
+        "dtype": "bf16",
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "use_additive_bias": True,
+        "num_warps": 4,
+        "block_m_per_warp": 32,
+        "tile_size": 64,
+        "use_mfma_32x32": True,
+        "use_transposed_qk_32x32": False,
+    },
+    {
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 64,
+        "num_kv_heads": 8,
+        "dtype": "bf16",
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "use_additive_bias": True,
+        "num_warps": 4,
+        "block_m_per_warp": 32,
+        "tile_size": 64,
+        "use_mfma_32x32": True,
+        "use_transposed_qk_32x32": True,
+        "use_transposed_scalar_state": True,
+        "use_grouped_kv2_softmax": True,
+    },
+    {
+        "head_size": 128,
+        "block_size": 32,
+        "num_query_heads": 32,
+        "num_kv_heads": 32,
+        "dtype": "bf16",
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "use_additive_bias": True,
+        "num_warps": 4,
+        "block_m_per_warp": 32,
+        "tile_size": 64,
+        "use_mfma_32x32": True,
+        "use_transposed_qk_32x32": True,
+        "use_transposed_scalar_state": True,
+        "use_transposed_mask_once": True,
+        "use_transposed_mask_limit": True,
+        "use_mfma32_skip_legacy_qreg": True,
+        "use_transposed_half_local_pv": True,
+    },
+    {
+        "head_size": 128,
+        "block_size": 16,
+        "num_query_heads": 16,
+        "num_kv_heads": 4,
+        "dtype": "bf16",
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "use_additive_bias": True,
+        "num_seqs": 3,
+        "num_warps": 2,
+        "block_m_per_warp": 32,
+        "tile_size": 32,
+        "emit_lse": True,
+    },
+]
+
+# idx88-91: ALiBi at the slope sites idx16/17 miss (per-row hoist, transposed 32x32 slopes).
 GFX950_ATTENTION_TILED_2D += [
     {
         "head_size": 64,
@@ -1624,11 +1824,11 @@ GFX950_ATTENTION_TILED_2D += [
     },
 ]
 
-# idx81-95: the ALiBi arms (alibi_design): 81-84 each arm on the transposed
-# mask-limit softmax; default arms 85 D256 and 86 D192 mask-limit, 87
-# grouped_kv2, 88 register-P; 89-92 each arm on the 16x16 path; 93-95 the
+# idx92-106: the ALiBi arms (alibi_design): 92-95 each arm on the transposed
+# mask-limit softmax; default arms 96 D256 and 97 D192 mask-limit, 98
+# grouped_kv2, 99 register-P; 100-103 each arm on the 16x16 path; 104-106 the
 # other arms on grouped_kv2.
-_TRANSPOSED_ALIBI = dict(GFX950_ATTENTION_TILED_2D[80])
+_TRANSPOSED_ALIBI = dict(GFX950_ATTENTION_TILED_2D[91])
 _MLIM_ALIBI = {
     **_TRANSPOSED_ALIBI,
     "use_transposed_scalar_state": True,
@@ -2168,6 +2368,32 @@ GFX942_ATTENTION_TILED_3D = [
         "kv_cache_policy": "stream",
         "waves_per_eu": 2,
     },
+    {
+        "head_size": 64,
+        "block_size": 16,
+        "num_query_heads": 16,
+        "num_kv_heads": 4,
+        "dtype": "fp16",
+        "num_segments": 8,
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "use_qq_bias": True,
+        "kv_storage_dtype": None,
+    },
+    {
+        "head_size": 64,
+        "block_size": 16,
+        "num_query_heads": 16,
+        "num_kv_heads": 4,
+        "dtype": "fp16",
+        "num_segments": 8,
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "use_additive_bias": True,
+        "kv_storage_dtype": None,
+    },
 ]
 
 GFX950_ATTENTION_TILED_3D = [
@@ -2460,5 +2686,62 @@ GFX950_ATTENTION_TILED_3D = [
         "has_softcap": False,
         "kv_storage_dtype": None,
         "emit_lse": True,
+    },
+    {
+        "head_size": 128,
+        "block_size": 16,
+        "num_query_heads": 32,
+        "num_kv_heads": 8,
+        "dtype": "bf16",
+        "num_segments": 8,
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": True,
+        "use_alibi": True,
+        "use_qq_bias": True,
+        "use_additive_bias": True,
+        "kv_storage_dtype": None,
+    },
+    {
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 16,
+        "num_kv_heads": 2,
+        "dtype": "fp16",
+        "num_segments": 16,
+        "use_sinks": True,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "use_additive_bias": True,
+        "kv_storage_dtype": None,
+        "tile_size_override": 64,
+        "use_decode_grid": True,
+        "kv_cache_policy": "stream",
+    },
+    {
+        "head_size": 128,
+        "block_size": 16,
+        "num_query_heads": 8,
+        "num_kv_heads": 8,
+        "dtype": "bf16",
+        "num_segments": 4,
+        "use_sinks": False,
+        "sliding_window": 256,
+        "has_softcap": False,
+        "use_additive_bias": True,
+        "kv_storage_dtype": "fp8e4m3",
+    },
+    {
+        "head_size": 64,
+        "block_size": 16,
+        "num_query_heads": 16,
+        "num_kv_heads": 4,
+        "dtype": "fp16",
+        "num_segments": 8,
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "use_qq_bias": True,
+        "kv_storage_dtype": None,
     },
 ]
