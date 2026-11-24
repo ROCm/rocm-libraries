@@ -3889,14 +3889,17 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         # half, instead of issued as a block between halves. The reads of the
         # buffer being freed then land before the tile barrier's drain.
         ilv = _os_ra.environ.get("ROCKE_EXP_MX_RA_ILV") == "1"
-        if ilv and (_mx or not _mx_ra_one or not cb or rowmap):
-            raise ValueError("ROCKE_EXP_MX_RA_ILV needs plain fp8, ROCKE_EXP_MX_RA=2 and ROCKE_EXP_MX_RA_CB=1")
         ilv_frac = int(_os_ra.environ.get("ROCKE_EXP_MX_RA_ILVF", "75")) / 100.0
 
         # ROCKE_EXP_MX_RA_ILVG=g: the reads go as g blocks instead of one
         # fragment at a time: block 0 before the half's first WMMA, the others
-        # evenly within the first ILVF percent (g=1 is the block layout).
+        # evenly within the first ILVF percent (g=1 is the block layout: the
+        # next K-atom's A (and MX scales) before the first half, all of its B
+        # before the second; MX supports only this layout).
         ilv_groups = int(_os_ra.environ.get("ROCKE_EXP_MX_RA_ILVG", "0"))
+        if ilv and ((_mx and ilv_groups != 1) or not _mx_ra_one or not cb or rowmap):
+            raise ValueError("ROCKE_EXP_MX_RA_ILV needs ROCKE_EXP_MX_RA=2 and ROCKE_EXP_MX_RA_CB=1 "
+                             "(and ROCKE_EXP_MX_RA_ILVG=1 with MX)")
 
         def wmmas_ilv(acc, a, bh, which, reads):
             order = [(j, mi) for j in range(half) for mi in range(mfmas_m)]
@@ -3934,7 +3937,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
 
         def _tile_ilv(p, k_cur, acc, head):
             acc = list(acc)
-            a, _sa, _sb, b0, b1 = head
+            a, sa, sb, b0, b1 = head
             _gl2_prefetch(k_cur)
             for s in range(k_atoms):
                 last = s + 1 == k_atoms
@@ -3954,6 +3957,23 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     b.inline_asm("s_barrier_wait -3", "~{memory}")
                     _refill(p, k_cur)
                     fence()
+                if _mx:
+                    # Block layout (ILVG=1), the same order as below.
+                    fence()
+                    na, nsa, nsb = rd_head(sp, sk)
+                    fence()
+                    wmmas(acc, a, b0, sa, sb, 0)
+                    fence()
+                    if s + 2 == k_atoms and cs >= 0:
+                        b.inline_asm(_CL_SIGNAL0, "s,~{scc},~{memory}", [_tdm_wave_id])
+                        fence()
+                    fence()
+                    nb = [r() for r in b_reads]
+                    fence()
+                    wmmas(acc, a, b1, sa, sb, 1)
+                    fence()
+                    a, sa, sb, b0, b1 = na, nsa, nsb, nb[:half], nb[half:]
+                    continue
                 na = wmmas_ilv(acc, a, b0, 0, a_reads)
                 fence()
                 if s + 2 == k_atoms and cs >= 0:
@@ -3962,7 +3982,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 nb = wmmas_ilv(acc, a, b1, 1, b_reads)
                 fence()
                 a, b0, b1 = na, nb[:half], nb[half:]
-            return acc, (a, [], [], b0, b1)
+            return acc, (a, sa, sb, b0, b1)
 
         if ilv:
             _tile = _tile_ilv  # noqa: F811
