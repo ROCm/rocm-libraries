@@ -23,6 +23,11 @@
 # same knobs never share a catalog key, and every non-LSE kernel keeps its spec and code
 # object (emit_lse=False emits no new IR).
 #
+# use_additive_bias is a compile-time variant too: the kernel adds an fp32 attn_mask,
+# read through one more pointer and three runtime strides (dispatch.v2). It is a cell
+# axis (use_attn_bias), a KMD field and a name token (_addb, set by enumerate.feature_fields
+# so no plain kernel's name, spec or code object changes), and its cells sweep the tile only.
+#
 # The launch grid is a tuning arm inside a cell: the one-CTA-per-block grid at the
 # qb_minor, bt_hkv_minor or hq_minor_swz block order, or (D128) the persistent grid of
 # num_persistent = 304 CTAs at a pinned persist_decode, whose launch adds a fast-division
@@ -60,6 +65,14 @@ engine:
   - use_exp2_fast
   - lds_k_group_pad
   heuristic: native
+  # The trained gfx942 kernel ranker (L2), installed by `uhd_gen promote` (other arches keep
+  # native; the L1 is held). What it reads, when to retrain it and how: the bundle README
+  # (descriptors/rocKE/gfx942_attention_dense/README.md, "Models").
+  heuristics:
+    sort_kernel_catalog:
+      gfx942: [948543e3-03a7-4ff1-b8bc-50424275b002]
+  trained_catalog_sha256:
+    gfx942: 60c6e2fac82bc93cc3979d2d5de44a48ffca3d6febf604fbc1f46cf81cde3ea9
 kmd_fields:
 - name: dtype
   type: string
@@ -164,6 +177,10 @@ kmd_fields:
   type: int
 - name: use_exp2_fast
   type: int
+# Additive bias (an fp32 attn_mask tensor); 0 on every kernel built before it.
+- name: use_additive_bias
+  type: int
+  default_value: 0
 specialization:
   metadata_fields:
   - dtype
@@ -194,6 +211,7 @@ specialization:
   - lds_k_group_pad
   - use_cfvst
   - use_exp2_fast
+  - use_additive_bias
   matcher_only_fields: []
   vocabulary:
     dtype:
@@ -256,6 +274,8 @@ specialization:
       method: resolved_use_cfvst
     use_exp2_fast:
       method: resolved_use_exp2_fast
+    use_additive_bias:
+      field: use_additive_bias
 kernel_source_kind: rocke
 workspace_policy: none
 
@@ -301,25 +321,47 @@ enumerate:
     # sinks land), 512 Phi-4-mini-flash-reasoning (D64), 1024 Gemma 3 27B (D128), 2048
     # Arcee Trinity and Phi-3-medium-4k (D128; its config says 2047). 4096 (Mistral-7B
     # v0.1, StarCoder2, Command R7B, OLMo 3, EXAONE 4.0) is a follow-up.
-    - fields: [mask_type, sliding_window]
+    #
+    # use_attn_bias turns on the additive bias (an fp32 attn_mask tensor): only the
+    # two window-free masks carry it, so a bias cell is D64/D128 x dtype x
+    # {causal, none} x LSE on/off (16). A bias graph with a window, or with no
+    # matching bias kernel, misses like any other graph the catalog does not cover.
+    - fields: [mask_type, sliding_window, use_attn_bias]
       values:
-        - [TOP_LEFT_CAUSAL, 0]
-        - [NO_MASK, 0]
-        - [TOP_LEFT_CAUSAL, 128]
-        - [TOP_LEFT_CAUSAL, 512]
-        - [TOP_LEFT_CAUSAL, 1024]
-        - [TOP_LEFT_CAUSAL, 2048]
+        - [TOP_LEFT_CAUSAL, 0, false]
+        - [NO_MASK, 0, false]
+        - [TOP_LEFT_CAUSAL, 128, false]
+        - [TOP_LEFT_CAUSAL, 512, false]
+        - [TOP_LEFT_CAUSAL, 1024, false]
+        - [TOP_LEFT_CAUSAL, 2048, false]
+        - [TOP_LEFT_CAUSAL, 0, true]
+        - [NO_MASK, 0, true]
     # Innermost: each kernel's LSE twin follows it. The twin differs only in the trailing
     # lse_ptr store, so it shares the cell's knob space.
     - fields: [emit_lse]
       values: [false, true]
+  # The bias cells sweep the tile only (block_m, block_n): every other performance knob
+  # is held at the cell's registry default, which keeps the full-space catalog within
+  # reduction.aot_budget_per_arch (the plain cells sweep every knob). The tile decides
+  # which sequence lengths a kernel serves (Sq % block_m, Skv % block_n), so it is the
+  # knob a bias cell needs. Every bias kernel stays on the qb_minor grid:
+  # gfx942_dense_qbminor is the only pinned candidate that declares the
+  # "attn_bias" feature (dispatch/attention/gfx942_dense.py). The persistent, bt_hkv_minor
+  # and hq_minor_swz candidates do not, so the enumeration declines a bias cell for them
+  # (the shared pack could launch a bias on those grids, but the catalog ships none, and
+  # a candidate that declared the feature would admit them).
+  feature_fields:
+    use_additive_bias: {name_token: _addb, free_fields: [block_m, block_n]}
   sweep_level: production
   # Every production-sweep spec sharing a cell's feature fields; the knobs it keeps
   # are reduction.fields.performance, every other varying field is held at default.
   space: full
   # Fields of the registry spec every generated kernel carries: the whole
   # Gfx942AttentionDenseSpec, so hkp_pack hydrates nothing from a changed default.
-  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lazy_rescale, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, causal_bottom_right, lds_row_pad, v_row_pad, use_cfvst, use_v_swizzle, use_exp2_fast, iglp, lds_num_buffers, iglp_mode, pv_loop_order, o_store_width, pv_priority, pv_sched_fence_mask, causal_diag_split, emit_lse, nonpersist_decode, kv_segments, window_wave_skip, v_reg_prefetch, chiplet_num_xcds]
+  # use_bias_x4 is carried as null like the other policy fields (the kernel's policy
+  # resolves it); an explicit value would rename the symbol (`_bx41`), and the
+  # enumerated registry never sets one.
+  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lazy_rescale, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, causal_bottom_right, lds_row_pad, v_row_pad, use_cfvst, use_v_swizzle, use_exp2_fast, iglp, lds_num_buffers, iglp_mode, pv_loop_order, o_store_width, pv_priority, pv_sched_fence_mask, causal_diag_split, emit_lse, nonpersist_decode, kv_segments, window_wave_skip, v_reg_prefetch, chiplet_num_xcds, use_additive_bias, use_bias_x4]
   # Frozen build cost of a `space: slice` enumeration (unused under `space: full`, whose
   # bound is reduction.aot_budget_per_arch).
   max_kernels: 1600
@@ -328,7 +370,7 @@ enumerate:
 # Feature fields define a cell; performance knobs are the tuning arms, in priority order.
 reduction:
   fields:
-    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, emit_lse, ragged, batch, seqlen_q, seqlen_kv]
+    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, emit_lse, use_additive_bias, ragged, batch, seqlen_q, seqlen_kv]
     performance:
       - {name: block_m, divides: seqlen_q}
       - {name: block_n, divides: seqlen_kv}
@@ -352,6 +394,7 @@ reduction:
     # pv_sched_fence_mask).
     ignored: [waves_per_eu, num_persistent, interleave, iglp, iglp_mode, pv_sched_fence_mask, v_row_pad, use_v_swizzle, kv_segments, window_wave_skip, chiplet_num_xcds]
   # Bounds the enumerated (swept) catalog; the shipped catalog is a reduced subset.
+  # 1500 bias-off kernels plus the bias cells' tile sweep (88 at the current dispatch).
   aot_budget_per_arch: 1600
 
 # How owner benchmark rows become hipDNN graphs (tools/ground_truth.py graphs).
@@ -387,40 +430,47 @@ launch_surface:
       block_m / GFX942_ROWS_PER_WAVE(32) * GFX942_WAVE_LANES(64) threads.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDenseGeometry.cpp
 
-  # The tile rules, the window translation, the sliding-window zero-trip guard and the
-  # empty-row rule are restated by hand from the rocKE Python. The LDS budget is not
-  # restated. Matching and dispatch are shared with gfx950 (AttentionDenseNative.cpp);
-  # Gfx942AttentionDenseNative.cpp binds them to the gfx942 tile, geometry, window, stats
-  # (LSE) and launch-grid hooks.
+  # The tile rules and the window translation are restated by hand from the rocKE Python.
+  # The empty-row rule (a window that leaves the last query rows no key, for a graph that
+  # binds stats) is this engine's own policy, not restated Python
+  # (windowLeavesRowsWithoutKeys in AttentionDenseNative.cpp says why).
+  # The LDS budget is not restated. Matching and dispatch are shared with gfx950
+  # (AttentionDenseNative.cpp); Gfx942AttentionDenseNative.cpp binds them to the gfx942
+  # tile, geometry, stats (LSE) and launch-grid hooks, and the servesWindows flag.
   - name: matcher
     python_source: kernels/gfx942/attention_dense.py:supports_attention_dense
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDenseNative.cpp
-    kmd_fields: [dtype, head_size, causal, sliding_window, ragged, block_m, block_n]
+    kmd_fields: [dtype, head_size, causal, sliding_window, ragged, block_m, block_n, use_additive_bias]
     guard: >
-      kernelMatches() returns false (no panic) if dtype, head_size, causal or
-      sliding_window disagrees with the graph, the candidate's tile is not one
+      kernelMatches() returns false (no panic) if dtype, head_size, causal,
+      sliding_window or use_additive_bias disagrees with the graph (an attn_mask
+      tensor asks for use_additive_bias=1), the candidate's tile is not one
       isSupportedGfx942AttentionDenseTile() admits, the candidate is ragged,
-      Sq % block_m or Skv % block_n is non-zero, or the window leaves the last
-      query block no key tile (gfx942AttentionDenseWindowReachesKeys()). Head
-      counts, batch and sequence lengths are runtime kernel arguments and are never
-      compared (matchesHeadCounts is false for gfx942). graph_match maps a causal
-      band of left_bound L to sliding_window L, declines every non-causal band, and
-      declines a window that leaves query rows no key (seqlen_q - seqlen_kv >= W),
-      with or without stats. It binds the stats output when stats_tensor_uid is
+      Sq % block_m or Skv % block_n is non-zero. Head counts, batch and sequence
+      lengths are runtime kernel arguments and are never compared. graph_match maps
+      a causal band of left_bound L to sliding_window L, declines every non-causal
+      band, and declines a window that leaves query rows no key (seqlen_q - seqlen_kv
+      >= W) only for a graph that binds stats. It binds the stats output when
+      stats_tensor_uid is
       set and generate_stats is not false (stats_flag declines the uid with false
       and true without a uid), and declines Max, Sum_exp and the RNG dump
       (stats_rowstats), a stats tensor that is not FLOAT (stats_dtype), and one
       that is not rank-4 [B,Hq,Sq,1] with packed strides [Hq*Sq,Sq,1,*],
       non-virtual, non-ragged, not pass-by-value, with a non-negative uid
       (stats_layout). gfx950 binds no stats and declines them all as 'stats'.
+      graph_match binds an attn_mask as the additive bias only when it is a real FP32
+      [B|1, Hq|1, Sq|1, Skv] tensor (extent 1 or full on each leading axis, unit-stride key
+      axis, largest element index below 2^31, not ragged, not pass-by-value) and declines
+      any other with the cause in the INFO log. The catalog has no bias kernel for a
+      window, so a bias graph with a window passes graph_match and then matches no kernel.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp
 
   - name: kernargs
     python_source: kernels/gfx942/attention_dense.py:attention_dense_signature
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDenseNative.cpp
-    kmd_fields: [seqlen_q, seqlen_kv, num_query_heads, num_kv_heads, batch, persistent, persist_decode]
+    kmd_fields: [seqlen_q, seqlen_kv, num_query_heads, num_kv_heads, batch, persistent, persist_decode, use_additive_bias]
     guard: >
-      kernelSignature(RUNTIME_HEAD_COUNTS, grid, writesLse), the ABI of gfx942's one
+      kernelSignature(RUNTIME_HEAD_COUNTS, grid, writesLse), the ABI of gfx942's plain
       launch contract (hipkernel.gfx942_attention_dense.dispatch.v1), is the 10-arg
       form (q,k,v,o,scale,batch,seqlen_q,seqlen_kv,num_query_heads,num_kv_heads) on
       every non-persistent grid; on the persistent grid a <d>_magic, <d>_shift i32 pair
@@ -431,8 +481,26 @@ launch_surface:
       and at restore by restoreIngestorLaunch() before any saved value is read; the
       restore selects the form from the saved stats.uid, grid_order and persist_decode
       first. launch() packs its argument addresses in the same order and throws if their
-      count is not the signature's.
+      count is not the signature's. A use_additive_bias=1 candidate takes the
+      RUNTIME_HEAD_COUNTS_WITH_BIAS form of the dispatch.v2 contract: the same list with
+      additive_bias_ptr and its batch/head/sq strides appended last, after lse_ptr, so the
+      bias candidate has 14 arguments on the grid (15 with lse_ptr) and the catalog ships
+      no persistent bias kernel.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDenseSignature.cpp
+
+  # The gfx942 arch descriptor's additive-bias hook: the shared pack reads use_additive_bias
+  # through it, never by name.
+  - name: bias
+    python_source: kernels/gfx942/attention_dense.py:build_attention_dense
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseNative.cpp
+    kmd_fields: [use_additive_bias]
+    guard: >
+      The descriptor's candidateAddsBias reads use_additive_bias as the KMD default 0 when the
+      record omits it, 1 for a bias kernel, and nullopt (kernelMatches declines, prepare()
+      throws) for any other type or value, so a malformed record never reads as a plain kernel.
+      kernelMatches() pairs a bias graph with a bias candidate only, and a plain graph
+      with a plain candidate only.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDenseMatchers.cpp
 
   # emit_lse is baked into the kernel (one trailing lse_ptr store of the natural-log LSE
   # at element (b*Hq + h)*Sq + s, no stride arguments), so it selects candidates rather

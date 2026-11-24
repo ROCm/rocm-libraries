@@ -17,8 +17,9 @@
 # Each kernel is lowered with _native_lower(kernel, arch="gfx950") and
 # the two .ll texts are concatenated (segment first, then reduce) to stdout so
 # they can be byte-compared with the C emitter gfx950_attention_tiled_3d_emit.c.
-# prove_parity_binding keeps a copy of _CONFIGS (with emit_lse set for the
-# _REDUCE_LSE configs) in platform/cpp/bindings/attention_tiled_parity_configs.py;
+# prove_parity_binding keeps a copy of _CONFIGS (reduce_emit_lse for the
+# reduce-only _REDUCE_LSE configs, emit_lse where the segment writes LSE too) in
+# platform/cpp/bindings/attention_tiled_parity_configs.py;
 # update it in step.
 import sys
 
@@ -327,6 +328,22 @@ _CONFIGS = {
         kv_storage_dtype=None,
     ),
     20: dict(
+        # Segment AND reduce with emit_lse (see _REDUCE_LSE): the real catalog
+        # pairing, where the segment's own kernel name also gains the trailing
+        # "lse". Same fields as config 1.
+        head_size=128,
+        block_size=32,
+        num_query_heads=16,
+        num_kv_heads=16,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        emit_lse=True,
+    ),
+    29: dict(
         # Additive bias composed with ALiBi, QQ bias and softcap (all on the
         # score before the mask select).
         head_size=128,
@@ -343,7 +360,7 @@ _CONFIGS = {
         use_additive_bias=True,
         kv_storage_dtype=None,
     ),
-    21: dict(
+    30: dict(
         # Additive bias on the decode grid with multi-page tiles and sinks.
         head_size=64,
         block_size=32,
@@ -360,7 +377,7 @@ _CONFIGS = {
         use_decode_grid=True,
         kv_cache_policy="stream",
     ),
-    22: dict(
+    31: dict(
         # Additive bias with an fp8 K/V cache and a sliding window.
         head_size=128,
         block_size=16,
@@ -374,9 +391,9 @@ _CONFIGS = {
         use_additive_bias=True,
         kv_storage_dtype="fp8e4m3",
     ),
-    # idx23: QQ bias alone, so the bound cmp_ge/cmp_lt order of the QQ mask is
+    # idx32: QQ bias alone, so the bound cmp_ge/cmp_lt order of the QQ mask is
     # pinned without additive bias, ALiBi or softcap riding along.
-    23: dict(
+    32: dict(
         head_size=64,
         block_size=16,
         num_query_heads=16,
@@ -391,8 +408,139 @@ _CONFIGS = {
     ),
 }
 
-# Configs whose REDUCE kernel is built with emit_lse=True (segment unchanged).
-_REDUCE_LSE = frozenset({18, 19})
+_CONFIGS[21] = dict(
+    # Two-page tiles from strided (non-paged) K/V into swizzled LDS, with
+    # softcap.
+    head_size=128,
+    block_size=16,
+    num_query_heads=32,
+    num_kv_heads=4,
+    dtype="fp16",
+    num_segments=32,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=True,
+    kv_storage_dtype=None,
+    num_seqs=4,
+    tile_size_override=32,
+    use_decode_grid=True,
+    kv_cache_policy="stream",
+    use_kv_lds_swizzle=True,
+    kv_layout="strided",
+)
+
+_CONFIGS[22] = dict(
+    # Decode grid with SC0 + NT K/V copies.
+    head_size=128,
+    block_size=16,
+    num_query_heads=64,
+    num_kv_heads=8,
+    dtype="bf16",
+    num_segments=16,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype=None,
+    use_decode_grid=True,
+    kv_cache_policy="nt",
+)
+
+_CONFIGS[23] = dict(
+    # Decode grid with globally cached K/V copies.
+    head_size=128,
+    block_size=16,
+    num_query_heads=64,
+    num_kv_heads=8,
+    dtype="bf16",
+    num_segments=16,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype=None,
+    use_decode_grid=True,
+    kv_cache_policy="global",
+)
+
+_CONFIGS[24] = dict(
+    # Reduce with the LSE output, decode grid.
+    head_size=128,
+    block_size=16,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="bf16",
+    num_segments=16,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype=None,
+    use_decode_grid=True,
+)
+
+_CONFIGS[25] = dict(
+    # Reduce with the LSE output.
+    head_size=64,
+    block_size=16,
+    num_query_heads=8,
+    num_kv_heads=8,
+    dtype="fp16",
+    num_segments=8,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype=None,
+)
+
+_CONFIGS[26] = dict(
+    # Top-left causal mask (context_len pinned to 0).
+    head_size=128,
+    block_size=16,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="bf16",
+    num_segments=16,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype=None,
+    causal_top_left=True,
+)
+
+_CONFIGS[27] = dict(
+    # Right bound of 8 keys with a sliding window and sinks.
+    head_size=64,
+    block_size=16,
+    num_query_heads=8,
+    num_kv_heads=8,
+    dtype="fp16",
+    num_segments=8,
+    use_sinks=True,
+    sliding_window=128,
+    has_softcap=False,
+    kv_storage_dtype=None,
+    right_bound=8,
+)
+
+_CONFIGS[28] = dict(
+    # Top-left unbounded band, fp8 K/V, decode grid.
+    head_size=128,
+    block_size=16,
+    num_query_heads=64,
+    num_kv_heads=8,
+    dtype="bf16",
+    num_segments=16,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype="fp8e4m3",
+    use_decode_grid=True,
+    causal_top_left=True,
+    right_bound=-1,
+)
+
+# Configs whose REDUCE kernel is built with emit_lse=True. 18 and 19 leave the
+# segment unchanged (reduce-only emit_lse); 20's cfg dict also carries
+# emit_lse=True into the segment spec, pairing both kernels as production does.
+_REDUCE_LSE = frozenset({18, 19, 20, 24, 25})
 
 
 def _emit(idx: int) -> str:

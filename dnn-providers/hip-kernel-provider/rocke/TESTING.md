@@ -41,17 +41,17 @@ conflating them is what produces false confidence and bad coverage decisions.
 
 - **Question A — are the kernels good?** The *artifacts rocKE emits*: are they
   **correct** (right numerics on real hardware) and are they **fast**? This is the
-  quality of the product. → [§3](#3-kernel-quality-are-the-kernels-correct-and-fast)
+  quality of the product. → [§3](#3-kernel-quality--are-the-kernels-correct-and-fast)
 - **Question B — is the authoring platform good?** *rocKE itself* — the DSL,
   engine, IR, dispatch, optimization passes: is it a correct, trustworthy platform
   for authoring kernels (increasingly by agents)? This is the quality of the tool.
-  → [§4](#4-platform-quality-is-rocke-a-sound-authoring-platform)
+  → [§4](#4-platform-quality--is-rocke-a-sound-authoring-platform)
 
 **Why this is hard (the oracle problem).** rocKE's output is LLVM IR / assembly,
 not a number you can eyeball. So the first question of any test isn't "did it
 pass?" — it's *"how do we even know the right answer?"* In the testing literature
 that is the *oracle problem*, and a **test oracle** is whatever mechanism decides
-pass/fail. rocKE stacks oracles of differing strength ([§2](#2-how-we-answer-them-the-oracle-types)).
+pass/fail. rocKE stacks oracles of differing strength ([§2](#2-how-we-answer-them--the-oracle-types)).
 
 **One structural fact spans both questions:** rocKE ships **two independent
 implementations of the same engine** — a **Python engine** and a **C++ engine**
@@ -71,13 +71,14 @@ all its own ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)).
 
 ## 2. How we answer them — the oracle types
 
-Four kinds of test oracle, in decreasing order of strength. The names are the
+Five kinds of test oracle, in decreasing order of strength. The names are the
 standard ones from the testing literature; naming them matters because each proves
 something *different*, and conflating them is how false confidence creeps in.
 
 | Oracle type | Question it answers | Mechanism in rocKE | Serves |
 |---|---|---|---|
 | **Reference oracle** | Is the math correct? | Run on GPU, compare to an independent reference (numpy / torch) | Kernel correctness (A) |
+| **Oracle-free (closed-form / property)** | Is the math correct, without a reference implementation? | Run on GPU on inputs whose exact output follows from first principles (e.g. zero-Q attention: uniform probabilities over the legal keys); check the stored bits exactly or against a modeled error bound, and re-run the check under deliberately wrong rules that must be rejected | Kernel correctness (A), on the constructed inputs |
 | **Regression / characterization** | Did the output change? | sha256 of canonical IR vs. a pinned baseline | Platform output stability (B) |
 | **Differential / pseudo-oracle** | Do the two implementations agree? | **Byte-identity** of emitted IR, Python engine vs C++ engine | Platform equivalence (B) |
 | **Implicit oracle** | Did it crash / NaN / hang? | Signal death, non-finite output, timeout | Both A and B |
@@ -92,8 +93,11 @@ Two notes that matter:
   special case of it.
 - **Agreement is not correctness.** The differential oracle is a *pseudo-oracle*
   (two implementations checking each other because no cheap true oracle exists).
-  Two implementations can agree on a wrong answer. Only the reference oracle
-  establishes ground truth — and only on real hardware.
+  Two implementations can agree on a wrong answer. Only the reference oracle and
+  the oracle-free checks establish ground truth — and only on real hardware. The
+  oracle-free checks trade input generality for independence: they cover only
+  the inputs they construct, but there is no reference implementation to share
+  a bug with the kernel.
 
 ---
 
@@ -204,6 +208,20 @@ the strategy's biggest holes live (see
   `library/tests/conv_reference/gradient_cases.py` on gfx942 and gfx950
   against live NumPy oracles. The [coverage guide](docs/conv-coverage-roadmap.md)
   distinguishes production-selected instances from explicit kernel configurations.
+
+- The [oracle-free attention lane](library/tests/oracle_free/README.md)
+  (`rocke_oracle_free_pytest`, quick tier) launches the shipped gfx942 dense
+  kernel, at whatever configuration dispatch resolves, on zero-Q inputs whose
+  outputs are uniform probabilities over the legal keys. It requires every
+  stored bit to equal the correctly rounded closed form (a proven zero-ULP
+  result for single-pass dense attention), on GQA causal and sliding-window
+  cases, and fails if any one-key or denominator mutation of the mask rule, or a
+  head-0 broadcast, goes unrejected. The same entry runs the key-permutation
+  relation on unmasked GQA cases: the outputs for K and V permuted together
+  must agree with the unpermuted ones within a bound derived from the kernel's
+  arithmetic path, and each mutation that breaks the key-value pairing must
+  leave that bound in every head. The lane needs NumPy and HIP only; its CPU
+  contracts run in `rocke_library_attention_cpu_pytest`.
 
 - **Nothing else in this document proves the math is right.** Byte-identity
   ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) and golden IR
@@ -343,7 +361,11 @@ and by both engines is green in both. The **emitted-IR validity gate**,
 question: it lowers every case in the representative corpus
 ([`rocke_ir_parity_harness.cases()`](platform/tests/instances/rocke_ir_parity_harness.py),
 the same corpus §4.2 hashes) and pushes each module through `clang` to a linked
-hsaco.
+hsaco. Library families keep their representative cases beside their own golden
+(convolution: [`library/tests/test_conv_ir_golden.py`](library/tests/test_conv_ir_golden.py));
+`--cases <file>` points this gate, and the arch-domain gate below, at such a
+corpus, and [`library/tests/run_all.py`](library/tests/run_all.py) runs both over
+every library corpus.
 
 Three design points, each of them load-bearing:
 
@@ -434,19 +456,78 @@ This gate and §4.4 overlap on purpose and neither subsumes the other:
   often an unnamed fatal error. This reports `(key, arch, flavor)` plus the
   diagnostic the probe recorded.
 
-### 4.6 Does the measured arch-domain artifact reproduce?
+### 4.6 Does the toolchain retain the baseline's support?
 
 The warning gate consumes committed measurements; it does not prove that this
-host's toolchain reproduces them. When the host compiler identity matches the
-provenance recorded in the committed column, the
+host's toolchain retains the recorded support. The existing
 `rocke_arch_domain_reproducibility` CTest runs
 `tools/gen_arch_domain.py --check` over the full intrinsic/architecture matrix
-and compares the result with that column. LLVM development builds with the same
-major can disagree about intrinsic availability and ABI, so a different compiler
-identity is explicitly unvalidated rather than compared as though it asked the
-same question. This is an artifact-reproduction gate backed by the host
-toolchain, not a Python unit test: it owns external compiler processes, a
-dedicated timeout and resource policy, and an explicit CTest skip result.
+for the host's LLVM flavor and checks a **monotonic support floor**, not exact
+snapshot equality. A formerly `ok` cell must still be `ok`; becoming unavailable,
+crashing, timing out, or losing a measurement fails. Previously accepted processor
+names must remain accepted too. Both `ok` and `arch_absent` records require an
+accepted processor; flavor-axis negatives and no-data can precede rejection.
+
+Every retained positive must also use the same **effective probe contract**:
+return/operand types, operand sources, and actual immediate/literal witnesses.
+The generator derives `probe_contracts` from the same operand plan used by single
+probes, positive batches, splits, and retries. A new `immarg` cannot turn the
+baseline's variable operand into constant zero and still claim an unchanged
+question. Canonical names, stripped attributes, and IR formatting are not this
+contract; there is no IR, assembly, or HSACO hash comparison here.
+
+A shared canonical column serializer keeps one named contract per line while
+leaving ordinary measurement sections pretty-printed. Both generation and
+pruning use it; a later tool run must not expand the metadata again. Every new
+positive key requires its own evidence-backed contract before comparison, not
+just keys present when the metadata was first introduced.
+
+Support gains and unknown-to-unavailable transitions pass and are reported.
+Unavailable-to-unknown transitions are reported as degraded measurement, not
+support loss; remaining no-data cells are explicitly not qualified. Diagnostic
+wording, canonical intrinsic names, and compiler identity do not define support.
+Compiler identity is retained and printed as provenance. Invalid probes,
+malformed data, missing coverage, and incompatible scope or probe methodology
+still fail. This is a real-toolchain gate, not a Python unit test: it owns
+external compiler processes, a dedicated timeout and resource policy, and an
+explicit environmental CTest skip result.
+
+`--check` never re-blesses the baseline. Reviewed gains must be recorded separately
+to protect them from future loss and update the runtime availability table. That
+table also controls lowering warnings/refusals, so a baseline update is a product
+policy change, not merely a way to make this test pass.
+
+#### Historical positive-probe contract recovery
+
+Comparison-only contracts extend the v1 envelope without changing runtime `Cell`
+lookup or the generated C++ availability table. Missing historical positive
+contracts fail comparison: recover the original question from the recorded
+compiler or auditable matching-source evidence, never infer it from a newer host
+or silently fill it with default witnesses.
+
+For a metadata-only recovery:
+
+1. Verify the recorded compiler or matching LLVM source identity and executable
+   provenance. Resolve the canonical declaration with that compiler's `opt`.
+2. Recover the historical probe builder from version history. Render the resolved
+   declaration with both the historical and contract-aware builders, using the
+   column's datalayout and original explicit witnesses. Compare complete module
+   bytes and check that the derived contract describes that same question,
+   including default immediates absent from optional `probe_imm`.
+3. Preserve every measurement field, compiler identity and unrelated contract.
+   Independently check the recovered record, positive-cell inventory and generated
+   runtime-table bytes. Support updates require their own review; metadata
+   recovery must not re-bless a loss or invent a measurement.
+4. Record the exact source/generator revisions, executable receipts, counts,
+   validation results and limitations in the PR description. Attribute compiler
+   and CI results to their tested snapshots, not a later untested head.
+
+This establishes a historical probe question, not a replay of the original
+compiler installation, a new support measurement or GPU numerical qualification.
+Newly measured positives must record their effective contracts from the live
+probe plan; they do not authorize guessing missing historical contracts.
+
+#### Execution and test coverage
 
 The gate is registered in both execution environments. A developer build runs
 the source tool against the source package data. Provider CI runs a packaged,
@@ -456,13 +537,16 @@ stages every input, CTest supplies artifact-relative paths, and the test never
 configures or reaches back into a source checkout.
 
 The result mapping distinguishes applicability from failure: no clang, no
-committed host-flavor column, a clang/resolved-flavor mismatch, or a compiler
-identity different from the column's provenance skips with a named reason. A
-partial or internally inconsistent LLVM installation fails. Flavor
-auto-detection errors, including unavailable COMGR evidence, also remain
+committed host-flavor column, or a clang/resolved-flavor mismatch skips with a
+named reason. A partial or internally inconsistent LLVM installation fails.
+Blank or `(unknown)` live clang/opt identities fail before probing, while a
+nonblank vendor-reworded banner is not automatically a flavor mismatch. The
+complete generated column is validated before either writing or comparing it,
+so invalid produced records cannot overwrite an existing reference.
+Flavor auto-detection errors, including unavailable COMGR evidence, also remain
 failures during this migration.
 
-The reproduction scheduler preserves exhaustive coverage while avoiding
+The probe scheduler preserves exhaustive coverage while avoiding
 redundant compiler startup. It batches declaration discovery, preflights each
 target once, and combines expected-positive calls per architecture. The
 committed artifact schedules those batches but cannot make them pass: every call
@@ -474,17 +558,31 @@ Expected crashes and timeouts whose normalized evidence still matches are not
 retried; changed evidence, unexpected verdicts, and unclassified outcomes still
 receive a contention-free retry.
 
-The fast structure and generator units remain source-only in
-`platform/tests/tools/test_arch_domain_artifact.py`. Normal pytest and the
+Generator and compiler-probe units remain source-only in
+`platform/tests/tools/test_arch_domain_artifact.py`. Column-structure and
+support-policy checks live together in
+`platform/tests/tools/test_arch_domain_support.py`, which runs in both source
+pytest and the installed `rocke_pytest_runtime_tools` entry in the provider's quick
+PR CI tier, using the staged generator in installed artifacts. They read every
+column from the imported package, validate its records and filename/flavor
+agreement, match its architecture list to the wired architectures, and require
+canonical serialization with one contract per line. They also pin recorded
+immediate witnesses and the measured `global.load.lds` support boundary. These
+checks need no compiler or active-flavor filter. Declaration coverage rejects
+stale keys in every column; missing measurements fail for the host flavor and
+are reported as skips for other flavors. The synthetic controls check loss-fail,
+gain-pass, invalid records, method/metadata guards, effective-probe contracts,
+and processor consistency for both gfx942 and gfx950 without a real compiler.
+Source-only CLI controls additionally check early live-provenance and
+final-document admission in write/check modes. Normal pytest and the
 `ROCKE_BACKEND=both` pytest pass do not re-run the compiler sweep. The dedicated
 CTest is categorized as standard in both build-tree and installed manifests, so
 installed-artifact CI can schedule the reproduction result without adding the
 external process sweep to the quick or FFM pytest pools. A named skip is not
-reproduction coverage: check the CTest result and reason, especially when the
-compiler identity differs from the committed provenance, its major differs from
-rocKE's resolved flavor, or no committed column exists. Keeping one generator
-implementation behind two thin registrations preserves local coverage while
-avoiding duplicated test logic.
+support-validation coverage: check the CTest result and reason, especially when the
+compiler's major differs from rocKE's resolved flavor or no committed column
+exists. Keeping one generator implementation behind two thin registrations
+preserves local coverage while avoiding duplicated test logic.
 
 **Kernel-author routing.** Ordinary kernel work does not need a separate focused
 run beyond the full pre-merge `tests/run_all.py`; once that runner has configured
@@ -520,11 +618,85 @@ and selected library host/GPU suites. Build-tree C++ test registration is
 orchestrated by
 [`platform/tests/CMakeLists.txt`](platform/tests/CMakeLists.txt) and owned by its
 [concern-specific fragments](platform/tests/README.md#cmake-registration-ownership)
-under `platform/tests/cmake/`. Installed Python and library CTest registration
-remains in [`platform/CMakeLists.txt`](platform/CMakeLists.txt). The provider's
+under `platform/tests/cmake/`. Installed Python CTest registration remains in
+[`platform/CMakeLists.txt`](platform/CMakeLists.txt), which includes the library
+suites' own list, [`library/tests/ctest_lists.cmake`](library/tests/ctest_lists.cmake). The provider's
 external test-category YAML and TheRock's tier selection determine which
 registered tests actually execute. Check the selected list in the job log or
 with CTest's verbose listing. Registration alone does not establish CI coverage.
+
+### 5.0.1 Unit discovery versus explicit resource gates
+
+For every new or migrated host cohort, a `test_*.py` module is a promise that
+ordinary pytest discovery is fast. GPU-marked reference-oracle suites are owned
+separately by their GPU lane. A host unit module must not hide an exhaustive
+product, invoke comgr or an object disassembler, or require a large resource
+budget. A marker alone is insufficient because pytest imports modules and
+materializes parameters before marker deselection. Existing violations remain
+migration debt in G9.
+
+Resource-bound validation lives outside the `test_*.py` pattern. Its target
+ownership model has three parts: an explicit component `run_all.py` stage, a
+separately named installed CTest with timeout/resource policy, and a provider
+category at its cumulative tier. Such a gate pins its case manifest, fails on
+zero selected work, checks external prerequisites once, and rejects selection
+filters unless the caller explicitly requests a partial diagnostic run. The
+developer runner stops before resource-bound stages after a fast-stage failure
+by default; `--keep-going` is an explicit request to gather additional failures.
+
+The counted backward synchronization split is the reference implementation:
+fast validator/model/mutation contracts remain in source discovery; the
+exhaustive IR/LDS matrix and pinned representative compile/final-ISA/resource
+subset are explicit source-runner stages and registered installed CTests. The
+new CTests start at comprehensive/full, the scheduled tiers, so they add no
+work to quick/standard pre-merge and post-merge runs;
+[§5.0.2](#502-ci-shards-and-rocke-item-sharding) says which CI jobs run
+comprehensive and full today. Fast
+counted/resource files remain source-runner coverage rather than expanding the
+existing quick attention CTest. The compiler gate preserves the
+existing resource-table qualification:
+LLVM 22 with the reference ROCm 7.2 comgr. Its register thresholds and final-ISA
+expectations are calibrated to that toolchain; LLVM 23 and LLVM 24 remain valid
+emission/parity profiles but are not qualified by this code-object resource gate.
+An unavailable or mismatched reference compiler produces one gate-level outcome
+before any rows compile. Exact installed
+CTest names and scopes live in the
+[rocKE test inventory](platform/tests/README.md#library-unit-and-explicit-host-gates).
+
+[`library/tests/run_all.py`](library/tests/run_all.py) keeps the default local
+lane affordable by collecting once, selecting files that own non-GPU,
+non-`exhaustive`, non-`worker_integration`, non-`compiler_integration` items,
+and running each selected file
+in a fresh process. Real process-lifecycle contracts have their own
+comprehensive/full CTest (and remain available in explicit `--exhaustive` source
+runs). Host
+runs use at most eight workers, further capped by process affinity and cgroup
+quota; GPU-inclusive runs default to one. Fresh-process exit releases
+module-local kernel/IR caches. The affordable lane has a five-minute default
+whole-stage budget covering collection and all file workers; each file also has
+an independently reported budget (60 seconds by default, 600 seconds for GPU or
+`--exhaustive`). A timeout or outer termination kills the owned POSIX process
+group or Windows Job Object so ordinary compiler children cannot outlive the
+slot. A POSIX child that deliberately creates a new session leaves that ownership
+boundary and is not part of this contract. `--jobs 0` retains one
+traditional pytest process for focused debugging and suite-wide outputs. These
+local defaults bound pathological work; they are not a general timeout policy
+for pytest items, CTest, or outer CI.
+
+The transitional `exhaustive` markers preserve the matrices under
+`--exhaustive` while removing them from the affordable execution lane. Pytest
+still imports and parameterizes those modules during the manifest collection,
+so markers do not close G9; each cohort should eventually move behind a named
+non-discovered gate. Pass `--require-compiler-gate` for a complete required host
+verdict. An unavailable optional compiler gate reports `INCOMPLETE` with a zero
+exit status for local iteration, not plain `GREEN`.
+[`tools/run_checks.py`](tools/run_checks.py) coordinates its existing platform,
+parity, pytest, and numeric checks, but does not enroll these new explicit
+library gates. Run the library runner directly for their combined source verdict.
+The separately registered CTests also support exact-name installed replay and
+are enrolled only in comprehensive/full
+([§5.0.2](#502-ci-shards-and-rocke-item-sharding) says which CI job runs those
+tiers).
 
 **The tree/gating reality (a second axis, orthogonal to the two questions).**
 The developer pytest step collects `platform/tests`. The installed platform
@@ -542,11 +714,337 @@ The published convolution lane uses the same workflow for its forward cohort.
 Inspect collection and GPU comparison counts separately from host-test passes;
 directory coverage alone does not establish GPU correctness.
 
+**Embedded host-test assets.** The rocKE umbrella CMake project, not the
+standalone `platform/` project, stages external assets used by installed library
+tests. The hipDNN SDPA assets and provider geometry headers are optional and
+independent. Missing content preserves the tests' skip behavior; staged SDPA
+assets make the installed test require them. The umbrella resolves the asset
+repository from `ROCM_LIBRARIES_ROOT`, with a source-relative fallback for an
+in-repository build. Standalone platform builds have no external-asset dependency.
+
 **Harness lane bridge.** The differential harness numbers its lanes `L1…L6` (L1
 `verify`, L3 `ll` = the byte-identity gate, L5 the golden anchor, L6 numeric). Read
 L3 ↔ [§4.3](#43-do-the-two-implementations-agree-the-migration-gate), L5 ↔
 [§4.2](#42-does-the-platforms-output-stay-stable), L6 ↔
 [§3.1](#31-are-the-kernels-correct).
+
+### 5.0.2 CI shards and rocKE item sharding
+
+Each term below has one meaning in this document:
+
+| Term | Meaning | Who controls it |
+|---|---|---|
+| **CI shard** | One TheRock test job. It runs one `ctest -L ^<tier>$` invocation in one Test step. | TheRock, through the pinned TheRock revision |
+| **Tier** | The CTest label that a CI run selects: quick, standard, comprehensive or full. An entry that `ROCKE_ENGINE_test_categories_external.yaml` matches gets the label of its tier and of all later tiers (`tier_labels` in `shared/ctest/parse_ctest_categories.py`). An entry the YAML does not match keeps only the labels registered for it in CMake. | The labels in `ROCKE_ENGINE_test_categories_external.yaml`; TheRock selects the tier for each run |
+| **gtest sharding** | A gtest binary runs only its share of its cases. `GTEST_SHARD_INDEX` (0-based) and `GTEST_TOTAL_SHARDS` select the share. TheRock exports these two variables to every CTest entry. | gtest |
+| **ctest striding** | Each CI shard runs every n-th CTest entry (`ctest -I`). TheRock does not use it for hipkernelprovider. | TheRock |
+| **rocKE item sharding** | A rocKE pytest entry runs only its share of its pytest items. A stable hash of each item's shard key selects the share. In installed CI, the `rocke.tests.ctest_shard` plugin does this. In developer runs, `ROCKE_TEST_SHARD=i/n` does this in the library tests and in any run that loads the plugin with `-p rocke.tests.ctest_shard`. | rocKE |
+
+**What is split.** TheRock shards hipkernelprovider with gtest sharding only.
+Thus each CI shard starts every CTest entry of its tier. In each installed rocKE
+pytest entry that uses `_ROCKE_INSTALLED_PYTEST`, the `rocke.tests.ctest_shard`
+plugin keeps only the items of this CI shard. Each CI shard collects the whole
+entry and runs only its share.
+
+**How items are assigned.** The shard key of an item is its module path plus
+its parameter id. An item without parameters uses its node id. A SHA-256 hash
+of the key selects the shard. Thus all tests of one parameter set run on the
+same CI shard. `ROCKE_TEST_SHARD`,
+`library/tests/run_device_shards.py` and the library conftest use the same
+rule. The plugin splits the items that remain after `-k`, `-m`, `--deselect`
+and the conftest filters. Thus every CI shard divides the same set of items,
+and each item runs on exactly one CI shard. On a large entry, the hash spreads
+the items about evenly by count. The split does not use the run time.
+
+**How an entry turns on sharding.** `platform/CMakeLists.txt` defines
+`_ROCKE_INSTALLED_PYTEST` as
+`python -m pytest -p rocke.tests.ctest_shard --rocke-shard-from-gtest-env`.
+Every installed rocKE pytest entry starts its command with this variable,
+except the explicit gates. Use it for each new installed pytest entry. The
+configure stops with an error when an installed entry that runs pytest (its
+command runs `-m pytest`, or its program is `pytest`) does not start with the
+variable, or when an explicit gate loads the plugin. Without the variable, the
+entry would run all its items on every CI shard. The explicit gates are listed
+in `_ROCKE_EXPLICIT_PYTEST_GATES` in `library/tests/ctest_lists.cmake`; a new
+gate goes there too.
+The plugin takes the shard from the first source that applies:
+
+1. A non-blank `ROCKE_TEST_SHARD` (`i/n` or `i,j,.../n`, 0-based).
+2. `GTEST_SHARD_INDEX` and `GTEST_TOTAL_SHARDS` (0-based), only when the
+   command line has `--rocke-shard-from-gtest-env`.
+3. No source: every item runs.
+
+The plugin does not read TheRock's 1-based `SHARD_INDEX` and `TOTAL_SHARDS`.
+Without the flag, the plugin ignores the gtest variables. Thus exported gtest
+variables do not split a developer's pytest run. A child pytest process that a
+test starts without the flag is also not split by the gtest variables. When
+`ROCKE_TEST_SHARD` is non-blank, the plugin does not read the gtest variables.
+Then the header line names only `ROCKE_TEST_SHARD` as the source. A malformed
+`ROCKE_TEST_SHARD` is a usage error. With the flag and a blank
+`ROCKE_TEST_SHARD`, the gtest pair gives the shard. Then a malformed gtest
+value is a usage error. A gtest pair with only one variable set is also a
+usage error. On a usage error, pytest stops with exit code 4 before
+collection.
+
+**What the log shows.** The plugin prints one header line, for example:
+
+```text
+rocke-ctest-shard: 1/4 (GTEST_SHARD_INDEX=1, GTEST_TOTAL_SHARDS=4)
+```
+
+When no source applies, the line is `rocke-ctest-shard: off`. The plugin adds
+this line to the pytest header. It also prints the line again at the end of
+the run, so the line shows with `-q` and `--no-header`. TheRock runs CTest with
+`-V`, so the CI log shows these lines also for a passing entry. When a shard
+applies, the plugin prints the whole split after the header line at the end of
+the run, for example:
+
+```text
+rocke-ctest-shard 1/4: split 3/2/4/3 of 12; kept 2
+```
+
+The total after `of` is the number of selected items before the split. The
+counts before `of` give the items of each shard, and they add up to the total.
+`kept` is the count of this shard. The `split ... of ...` part is the same on
+every CI shard of one entry. The shard before the colon and `kept` are
+different on each CI shard. To prove that no item is lost, compare the
+`split ... of ...` part of one entry in the logs of all CI shards. The quick
+tier uses one CI shard. There, the header line shows
+`0/1 (GTEST_SHARD_INDEX=0, GTEST_TOTAL_SHARDS=1)` and the split line shows
+`split N of N; kept N`. An entry that does not load the plugin prints none of
+these lines. It runs all its items on every CI shard.
+
+**Exit codes.**
+
+- The selection has items, but none of them falls in this CI shard: the entry
+  passes (exit 0). After the split line, the plugin prints
+  `rocke-ctest-shard <shard>: no test of this entry falls in this shard; the entry passes`.
+- The selection is empty before the split, for example a `-k` or `-m`
+  expression that matches no item: pytest exits with 5 on every CI shard. The
+  split line shows `of 0; kept 0`.
+- A collection or import error: pytest exits with 2 on every CI shard, also on
+  a CI shard that gets no items.
+- A malformed shard value: exit 4, as above.
+- A test path that does not exist: pytest exits with 4 on every CI shard.
+
+The plugin never sets exit code 77. Some entries use 77 as their CTest skip
+code when they cannot run on this machine.
+
+**The explicit gates are never sharded.** `rocke_library_counted_structural_gate`
+and `rocke_library_counted_compiler_gate` do not use `_ROCKE_INSTALLED_PYTEST`.
+Their command does not load the plugin. The gate conftest stops the session
+on a partial run: a non-blank `ROCKE_TEST_SHARD`, a selection filter or a
+deselected item. The gate entries set `ROCKE_EXPLICIT_GATE_PARTIAL=0`, so a
+partial run is not permitted. A split would stop the gate on every CI shard.
+Thus each gate runs whole on every CI shard of its tier.
+
+**Which CI job runs which tier.** TheRock picks the tier of each of its jobs.
+Its rows below follow the TheRock commit that `therock-multi-arch-ci.yml` and
+`therock-multi-arch-ci-nightly.yml` pin (their `@<ref>` workflow refs and `ref:`
+inputs); re-check them when that pin moves.
+
+| CI job | Runs on | Tier | CI shards | Builds rocKE |
+|---|---|---|---|---|
+| `therock-multi-arch-ci.yml` | a pull request or push whose changed paths all belong to projects in the repo config or to a directory the configure script also classifies (here `dnn-providers/cmake`), when one of them is hip-kernel-provider or a project TheRock's consumer graph links to it (such as hipDNN), or that changes a TheRock CI workflow (every configured project is tested) | standard | 4 | yes |
+| `therock-multi-arch-ci.yml` | a manual dispatch, or a pull request or push that touches shared CI files or an unclassified path: the configure step then tests every project | quick | 1 | yes |
+| `therock-multi-arch-ci-nightly.yml` | the nightly schedule | comprehensive | 4 | no |
+| `hipdnn-superbuild-ci.yml` | a pull request that changes hipDNN or provider files other than docs, and its own nightly schedule | `full`, then entries without a tier label | n/a (one job per OS) | yes; tests the build tree only |
+
+TheRock jobs run the installed entries. The scheduled TheRock job does not
+build rocKE: TheRock's flag `THEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE` is off
+by default, and only `therock-multi-arch-ci.yml` turns it on, through
+`extra_cmake_options`. Thus an installed entry that starts at comprehensive or
+full runs in no CI job (⚠ [G11](#72-platform-quality-gaps-question-b)). The hipDNN
+superbuild runs every build-tree entry (the test binaries and Python checks
+that `platform/tests/cmake/` and `library/cpp/tests/` register) and no
+installed entry.
+
+**Dependency on TheRock.** Item sharding needs two TheRock behaviours.
+TheRock exports `GTEST_SHARD_INDEX` and `GTEST_TOTAL_SHARDS` to every CTest
+entry. TheRock also shards hipkernelprovider with gtest sharding only
+(`hipkernelprovider` is in `GTEST_ONLY_SHARDING_COMPONENTS` in TheRock's
+`test_runner.py`). If TheRock also applies ctest striding to hipkernelprovider,
+each entry runs on one CI shard only. That CI shard keeps only its own share of
+the items. With n CI shards, only about 1/n of the items then run, and no test
+fails. The logs show this problem: the split line of an entry is on one CI
+shard only, not on all of them.
+
+**Run one CI shard locally.** From a provider install, with the rocKE wheels
+installed in the `python` on `PATH`:
+
+```bash
+GTEST_SHARD_INDEX=1 GTEST_TOTAL_SHARDS=4 \
+  ctest --test-dir <install>/bin/hip_kernel_provider -V -R '^rocke_library_sdpa_pytest$'
+```
+
+From a source checkout, in `platform/`:
+
+```bash
+PYTHONPATH=python ROCKE_TEST_SHARD=1/4 \
+  python -m pytest -p rocke.tests.ctest_shard tests/core -m "not integration" -v
+```
+
+Run each shard index of the same total, and compare the split lines.
+An installed tree and a source checkout collect slightly different tests. Only
+the installed tree has the hipDNN golden-bundle cases, and some source tests do
+not install. Thus the split total of an entry can differ between the two trees.
+A test in both trees has the same id and lands on the same shard.
+The tests of the plugin, `platform/tests/test_ctest_shard.py`, run in their own
+installed entry, `rocke_ctest_shard_pytest`, in the standard tier.
+
+**The `rocke` package must be importable.** Each installed pytest entry,
+except the gates, loads `rocke.tests.ctest_shard` before it collects. If the
+`python` on `PATH` cannot import `rocke`, the entry fails before it runs a
+test. A provider install puts the `rocke` package in the CTest directory.
+CTest starts each entry in that directory, and `python -m` puts that directory
+first on `sys.path`. A standalone install puts the package in `site-packages`,
+outside the CTest directory. There, entries that put only `tests/library` on
+`PYTHONPATH` need `rocke` installed in the `python` on `PATH`. Examples are
+`rocke_library_attention_pytest` and the
+`rocke_<operation>_reference_unit_pytest` entries.
+
+### 5.0.3 Choosing a tier and an entry for a test
+
+A test that no CTest entry runs does not run in CI, so choosing its place is
+part of writing it. [§5.0.1](#501-unit-discovery-versus-explicit-resource-gates)
+and [§5.0.2](#502-ci-shards-and-rocke-item-sharding) say how tests are
+discovered, gated and split; this section says where a new or moved test goes.
+The owners of the hip-kernel-provider test tiers set this policy; change this
+section with it.
+
+**Test at the cheapest level that proves the claim.** Go up a level only for
+what the level below cannot see.
+
+| Level | Proves | Default tier |
+|---|---|---|
+| 1. Host unit and contract | A spec rule, a pure function, a typed refusal | standard |
+| 2. IR structure | The emitted IR has the claimed shape | standard |
+| 3. Golden | The Python engine's output bytes are stable | quick, as a case in the existing golden corpus |
+| 4. Installed artifact | The installed tree imports and packages | quick for the import smoke; otherwise standard |
+| 5. GPU numeric | A kernel computes the right result | quick for a published operation's pinned reference lane; otherwise standard |
+| 6. Explicit resource gate | An exhaustive matrix, a compiler or resource qualification | comprehensive or full (see below) |
+
+The quick golden entries lower with the Python engine only. The byte-identity
+gate over the kernel families runs in `tests/run_all.py`, through
+`tools/check_byte_identity.py`
+([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)), and in no CTest
+entry (⚠ [G10](#72-platform-quality-gaps-question-b)).
+
+**quick is a smoke tier.** It runs unsplit on one CI shard, and a failure there
+must mean that rocKE cannot be used or that a shipped kernel is wrong. It admits
+only:
+
+- the import smoke, `rocke_python_import_smoke`;
+- golden byte stability (`rocke_golden_static`, `rocke_differential_golden_*`):
+  add cases to their corpus, not new golden entries;
+- the core refusal and parity contracts of shipped kernel families, including
+  their small non-pytest contract binaries within S3;
+- the pinned GPU reference lane of each published operation.
+
+Sweeps, matrices, tuning-space walks, doc examples, tool and runner tests, and
+tests of an unshipped family belong in standard. Which contracts count as core
+for each family is part of the domain test strategy, which refines this list.
+State the reason for a quick addition in the pull request.
+
+**standard is the default home of every new test.** Only entries whose command
+starts with `_ROCKE_INSTALLED_PYTEST` are split over the CI shards item by item;
+every other entry runs whole on every CI shard
+([§5.0.2](#502-ci-shards-and-rocke-item-sharding)).
+
+**comprehensive and full** are for explicit resource gates and other
+scheduled-only entries. [§5.0.2](#502-ci-shards-and-rocke-item-sharding) says
+which CI jobs run these tiers today; say in the pull request where an installed
+entry placed there runs.
+Do not move a test there to make room.
+
+**Until existing entries are re-tiered.** Most installed entries are listed
+under quick today: every `rocke_pytest_<part>`, `rocke_tiling_pytest`,
+`rocke_tiling_gpu_pytest` and most library entries. A new file under
+`platform/tests`, under the tiling tests, or under
+`library/tests/dispatch/attention/` or `library/tests/sdpa/` joins one of them
+with no edit if it is installed and its entry's filters select it, so it runs in
+quick. The `rocke_pytest_<part>` entries deselect `integration`-marked tests,
+which run only in `tests/run_all.py`; tiling `visualization/` tests that use no
+GPU fixture run in the comprehensive `rocke_tiling_visualization_pytest`, which
+no CI job runs today; and only the golden check of
+`platform/tests/instances/differential/` is installed, so a new test file there
+runs only in `tests/run_all.py`.
+`rocke_library_attention_pytest` and `rocke_library_sdpa_pytest` collect the two
+library directories whole. Another library file runs once it is added to an
+entry's file list.
+Such a test may stay in a quick entry only if each item is within Q2 and the
+change adds at most Q3 to quick. Otherwise register a standard entry, modeled on
+`rocke_ctest_shard_pytest` in `platform/CMakeLists.txt`:
+
+- start its command as [§5.0.2](#502-ci-shards-and-rocke-item-sharding) requires;
+- list it under `python-standard` in `ROCKE_ENGINE_test_categories_external.yaml`,
+  which gives it the labels of standard and every later tier; choose a name
+  that no quick pattern matches (`rocke_pytest_*`, `*_reference_unit_pytest`,
+  `*_gpu_gfx<target>_pytest`), or quick runs it too;
+- keep its files out of the quick entries: for `platform/tests`, `list(APPEND)`
+  the file to `_ROCKE_PLATFORM_PYTEST_IGNORE_<part>`; for the two library
+  directories, add an `--ignore` for the file to its entry in
+  `library/tests/ctest_lists.cmake`. The tiling entries split only by directory
+  and the `gpu` marker, so moving a tiling file out of quick needs a CMake change.
+
+**Place a test so that sharding can split it.**
+
+1. Prefer an existing sharded entry of the right tier: each new entry adds its
+   start-up and collection time to every CI shard.
+2. Avoid non-pytest entries (binaries, scripts): they run whole on every CI
+   shard. Keep a new one within S3.
+3. Keep each shard key within S1. A key gets heavy when one item loops over
+   every case, or when many tests of a module share one slow parameter id.
+   Parameterize per case, so a sweep is many small keys, not one large one. A
+   module fixture is paid on every CI shard that gets an item of the module.
+4. Set pytest `--timeout` and CTest `TIMEOUT` from measured time with the
+   headroom of S2; make a slow test cheaper rather than raise a limit.
+
+**Measure before you choose.** In `platform/`, the setup, call and teardown
+times of a file's items (`-q` hides those under 5 ms), and its split over 4 CI
+shards:
+
+```bash
+PYTHONPATH=python python -m pytest tests/dispatch/dispatch_tests/core/test_example_parity.py \
+  --durations=0 -q
+PYTHONPATH=python ROCKE_TEST_SHARD=1/4 python -m pytest -p rocke.tests.ctest_shard \
+  tests/dispatch/dispatch_tests/core/test_example_parity.py --collect-only -q
+```
+
+Run each shard index from 0 to 3; in `library/`, use
+`PYTHONPATH=../platform/python`. Sum an item's setup, call and teardown, and
+sum the items that share a shard key, as they run on the same shard. For Q3 and
+S2, time each affected entry whole, before and after the change, from a provider
+install: `ctest --test-dir <install>/bin/hip_kernel_provider -R '^<entry>$'`.
+For G1, time the new golden case alone, at every LLVM flavor the golden entries
+check. After the first CI run, check the entry's time and split lines in the CI
+log.
+
+**Examples.**
+
+| Test | Placement |
+|---|---|
+| A typed refusal of an invalid spec of a shipped family, well under a second | The family's existing entry; a core contract within Q2, so quick is right. |
+| An IR check of every tile of a family, tens of seconds in total | One case per tile, in a standard entry; never quick. |
+| A test that starts child pytest or CTest processes | Its own standard entry, as `rocke_ctest_shard_pytest`. |
+| Anti-example: an AOT packaging entry registered as plain `python -m pytest`, listed in quick, with items of up to a minute or more | It runs whole on every CI shard and in every quick run. Start it with `_ROCKE_INSTALLED_PYTEST`, split the heavy items, tier it standard. |
+| Anti-example: one item that compiles every tile of a family | One key that one shard carries whole. Parameterize per tile. |
+
+#### Budgets
+
+> **Proposed, pending agreement with the owners of the hip-kernel-provider test
+> tiers.** Change them here only. Times are wall time on a CI runner, as the CI
+> log shows it; the Test step of a CI shard has a 30-minute limit.
+
+| Id | Budget | Value | Why |
+|---|---|---|---|
+| Q1 | rocKE's share of the quick shard | 5 min | TheRock targets under 5 min for a whole quick shard; rocKE takes several times that today. |
+| Q2 | One item in a quick entry | 2 s | Almost every quick item is far below it; the few above it take a large share of quick time. |
+| Q3 | A new quick entry, or what one change adds to quick | 15 s | A small fraction of Q1; every entry also pays start-up and collection. |
+| G1 | One new golden case, over all golden entries and LLVM flavors | 0.25 s | Golden entries run unsplit on every CI shard of every tier. |
+| S1 | One shard key in a sharded entry | 30 s | A key runs whole on one shard; this is half of the 60 s per-item `--timeout` of the `rocke_pytest_<part>` and tiling entries. |
+| S2 | Limit headroom | pytest `--timeout` at least 2× the slowest item; CTest `TIMEOUT` at least 2× the entry's longest run, which is its unsplit run if the entry is in quick | The worst case stays under half of each limit. |
+| S3 | A new non-pytest entry in quick or standard | 1 s | It runs whole on every CI shard. The golden entries and `rocke_optimization_barrier_hip_pair` are existing exceptions. |
 
 ### 5.1 Before merging: source backends and installed CI
 
@@ -614,7 +1112,10 @@ backend. `resolve_backend() == "cpp"` does not establish which engine produced
 the exception. Preserve the exact exception type and diagnostic for each mode;
 accepting a tuple of unrelated exceptions would hide a broken dispatch contract.
 The missing-binding regression tests deliberately block the import even when a
-native extension is available.
+native extension is available. To pin one refusal in every row from a single
+test run, use `rocke.tests.engines.assert_backend_lane_rejects`, parametrized
+over `BACKEND_LANES`: it holds this table's rows and the exception each row's
+caller sees.
 
 Changes to emitted IR still require the byte-identity and golden checks, and
 kernel changes require the relevant GPU numerical tests. This matrix adds
@@ -658,6 +1159,8 @@ They run the platform pytest suite in parts, each a group of directories under
 `_ROCKE_PLATFORM_PYTEST_GROUPS` in [`platform/CMakeLists.txt`](platform/CMakeLists.txt)
 names the groups. `rocke_pytest_other` runs the rest of `tests/` without
 `tests/library`: the files at its top level and every directory no group names.
+It does not run `tests/test_ctest_shard.py`, which `rocke_ctest_shard_pytest`
+runs in the standard tier.
 To print each part's command and environment:
 
 ```text
@@ -667,6 +1170,30 @@ ctest --test-dir build/bin/hip_kernel_provider -N -V -R '^rocke_pytest_'
 `platform/tests/test_engine_linkage.py::test_installed_platform_pytest_parts_partition_the_suite`
 checks that the parts split `tests/` by directory with no directory in two
 parts.
+
+The tiling package's tests (`rocke/tests/helpers/tiling`) live outside `tests/`
+and run in three entries of their own:
+
+| Entry | Runs | Tier | CI jobs that run it |
+|---|---|---|---|
+| `rocke_tiling_pytest` | every test without the `gpu` marker, except `visualization/` | quick | every TheRock job that builds rocKE |
+| `rocke_tiling_gpu_pytest` | every test with the `gpu` marker | quick | every TheRock job that builds rocKE |
+| `rocke_tiling_visualization_pytest` | `visualization/`, without the `gpu` marker | comprehensive | none today |
+
+The tree's `conftest.py` says which tests carry the `gpu` marker.
+`ROCKE_ENGINE_test_categories_external.yaml` lists both quick tiling entries
+under quick and the visualization entry under comprehensive;
+[§5.0.2](#502-ci-shards-and-rocke-item-sharding) says which labels that gives
+each entry and which CI jobs run each tier. A quick entry that the YAML matches,
+as both quick tiling entries are, carries every tier's label, so every TheRock
+job that builds rocKE runs it. No CI job runs the comprehensive visualization
+entry today, and `tests/run_all.py` does not run the visualization tests (it
+collects `platform/tests`). Run them before merging a change to the
+visualization package, from `platform/`:
+
+```bash
+PYTHONPATH=$(pwd)/python python -m pytest python/rocke/tests/helpers/tiling/visualization -q
+```
 
 Use a clean runtime environment with no editable source installs, no binding
 build directory on `PYTHONPATH`, and no inherited native fixture paths. Verify
@@ -752,11 +1279,20 @@ it changes skip/fail semantics.
 
 The current installed compiler-tool contract is:
 
-| Runtime environment | Compiler paths injected | MLA compiler checks required |
+| Runtime environment | Compiler paths injected | Compiler checks required |
 |---|---:|---:|
 | Linux with `ROCM_PATH` | yes | yes |
 | Linux without `ROCM_PATH` | no | no |
 | Windows | no Unix-derived paths | no inferred requirement |
+
+Every `rocke_pytest_*` part, the three tiling entries, `rocke_library_mla_pytest`
+and `rocke_library_attention_cpu_pytest` take the compiler paths;
+`rocke_library_mla_pytest` and
+`rocke_library_attention_cpu_pytest` also take the requirement. The attention CPU
+entry needs the paths and the requirement for the reduce-LDS comgr cases in
+`test_attention_tiled_3d_reduce_lds.py`, which otherwise skip silently on a missing
+`llvm-objdump` instead of failing. Both entries' tests apply the requirement through
+one helper, `require_tools_or_skip` in `library/tests/_compiler_test_utils.py`.
 
 The table describes values added by the generated manifest. CTest still passes
 through its parent process environment, so a caller that explicitly exports
@@ -781,10 +1317,12 @@ python -m pytest \
 
 The test reads the standalone and provider-layout generated manifests through
 CTest, rejects duplicate variable names, and compares the complete environments
-of every `rocke_pytest_*` part and `rocke_library_mla_pytest` with and without a
-synthetic `ROCM_PATH`. Keep the expectations independently constructed rather
-than reusing the production CMake lists; otherwise production and test can
-repeat the same mistake.
+of every `rocke_pytest_*` part, the three tiling entries (`rocke_tiling_pytest`,
+`rocke_tiling_visualization_pytest` and `rocke_tiling_gpu_pytest`),
+`rocke_library_mla_pytest` and `rocke_library_attention_cpu_pytest` with and
+without a synthetic `ROCM_PATH`. Keep the expectations independently constructed
+rather than reusing the production CMake lists; otherwise production and test
+can repeat the same mistake.
 
 ### 5.2 Single-arch tests: `arch_specific`
 
@@ -853,8 +1391,11 @@ Read coverage from the emitter configs ([`platform/tests/README.md`](platform/te
 
 | # | Gap | Impact | Target |
 |---|---|---|---|
-| G6 | **Partially enrolled `library/` behavioral pytest** | Installed CTest registers explicit attention, convolution, DSA, MLA, GDN, reference-contract, and GPU cohorts, but external tier selection does not currently enroll DSA and source tests outside the explicit CMake selections remain ungated; registration or adding a file under `library/tests/` does not establish CI coverage; the GDN/KDA host entry `rocke_library_gdn_pytest` is not registered on Windows (a slow case in `test_gdn_decode_fused.py`), so Windows runs no GDN/KDA decode host pytest (the KDA chunkwise IR hashes stay covered by `rocke_golden_static`); the GDN/KDA GPU numeric files skip on the Windows GPU lanes, which lack gfx950/gfx942 devices | Audit registered-but-unselected entries and unregistered files; enroll each in an owned CTest tier or document why it remains manual |
+| G6 | **Partially enrolled `library/` behavioral pytest** | Installed CTest registers explicit attention, convolution, DSA, MLA, GDN, reference-contract, and GPU cohorts, but external tier selection does not currently enroll DSA and source tests outside the explicit CMake selections remain ungated; registration or adding a file under `library/tests/` does not establish CI coverage; the GDN/KDA host entry `rocke_library_gdn_pytest` is not registered on Windows (a slow case in `test_gdn_decode_fused.py`), so Windows runs no GDN/KDA decode host pytest (the KDA chunkwise IR hashes stay covered by `rocke_golden_static`); the TF32 conv build-and-lower matrices and comgr ISA checks (`rocke_library_conv_tf32_lowering_pytest`) are not registered on Windows either, to fit the Windows shard time, so Windows runs only the representative TF32 builds in `rocke_library_conv_tf32_pytest`; on Windows, `rocke_library_attention_cpu_pytest` leaves out the gfx942 dense prefill host tests and their IR golden; the GDN/KDA GPU numeric files skip on the Windows GPU lanes, which lack gfx950/gfx942 devices | Audit registered-but-unselected entries and unregistered files; enroll each in an owned CTest tier or document why it remains manual |
 | G7 | **Orphaned `platform/python` pytest** (heuristics, benchmark) | `platform/tests/in_tree` runs the `benchmark/perf/tests` files in the `rocke_pytest_*` parts. `heuristics/tests` runs in no lane: it needs `pandas`, `sklearn` and `lightgbm`, which the CI images do not install. `test_wavescope_pmc.py` runs in no lane: its 30 s subprocess limit is unreliable on a loaded host, and the CI install lacks the `dsl_docs` script that it needs. Other `platform/python` test directories also run in no lane | Install the heuristics packages in CI, then list `rocke.heuristics.tests` in `test_in_tree_suites.py`; enroll the remaining directories |
+| G9 | **Legacy discovered pytest contains resource-bound work** | The affordable runner now excludes the largest marked matrices from execution and isolates selected files, but collection still imports and parameterizes every discovered module; additional unmarked structural/compiler cohorts remain in the default lane | Move each remaining resource-bound cohort behind a named structural/compiler CTest, then remove its transitional `exhaustive` marker |
+| G10 | **No CI job runs the byte-identity gate** ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) | Only `tests/run_all.py` runs `tools/check_byte_identity.py`; no CTest entry or workflow does. The installed tree has no `rocke_engine` binding, so the C++-engine cases of the installed IR tests skip. A pull request whose author skipped the developer gate can merge with the two engines emitting different IR | Run the gate in pull-request CI (tracked in AICK-2301) and on each merge to develop (tracked in AICK-2929) |
+| G11 | **No CI job runs the installed comprehensive and full entries** ([§5.0.2](#502-ci-shards-and-rocke-item-sharding)) | The scheduled TheRock job selects comprehensive but does not build rocKE; the hipDNN superbuild selects full but tests the build tree only. The installed entries that start at comprehensive (such as the library gates and contracts that [`platform/tests/README.md`](platform/tests/README.md) lists as comprehensive and full) run nowhere in CI | Build rocKE in the scheduled TheRock job (tracked in AICK-2925) |
 
 ### 7.3 What "green" does and does not mean today
 
@@ -874,6 +1415,10 @@ enrolled operation/architecture cases matched their independent qualified
 reference under that lane's numerical contract. A green installed host lane or a
 GPU lane that selected no matching test, skipped, or performed zero comparisons
 does not make that claim. The remaining numerical holes are G1–G5.
+
+A green **CI run** does not prove that the two engines emit the same IR: no CI
+job runs the byte-identity gate (G10). No CI run, pull-request or scheduled,
+covers the installed comprehensive and full entries (G11).
 
 ---
 

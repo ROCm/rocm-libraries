@@ -221,6 +221,19 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/test_zstd.kpack"
             DESTINATION "${CMAKE_INSTALL_BINDIR}/fixtures")
 
+    # The hipkernel:AttentionGeneralBwd replay corpus: graphs with the verdict and plan
+    # rocKE's Python reaches on them. Staged in the test descriptor tree beside the kpack
+    # fixture, outside every discovery root, and named binary-relative for the same reason.
+    set(_hkp_general_bwd_corpus_subdir "attention_general_bwd_corpus")
+    foreach(_corpus_arch gfx942 gfx950)
+        configure_file(
+            "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/attention_general_bwd/corpus_${_corpus_arch}.jsonl"
+            "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${_hkp_general_bwd_corpus_subdir}/corpus_${_corpus_arch}.jsonl"
+            COPYONLY)
+    endforeach()
+    target_compile_definitions(hip_kernel_provider_tests PRIVATE
+        HIPKERNELPROVIDER_GENERAL_BWD_CORPUS_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${_hkp_general_bwd_corpus_subdir}")
+
     # This binary reads the per-arch descriptors and archives the packing roots stage under
     # test_arch_content/, and each packing target is reachable only through ALL.
     # Building this binary by name -- what `ninja check` does -- otherwise runs the cases
@@ -362,7 +375,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             EXPECTED_CASES
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsUniqueObjectsAndOneTopServeAllPerClass
+                ShipsTheF32Objects
                 RanksTheNarrowerBucketFirst
+                ShipsTheWideAndPairBuckets
+                StagesTheHeadDim256KeysInChunksOn64KiBParts
                 EveryKernelDeclaresItsFamilysSignature
         )
     endif()
@@ -376,6 +392,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsUniqueObjectsAndOneTopServeAllPerClass
                 EveryKernelDeclaresItsFamilysSignature
+                ServesHeadDim256OnFourWaves
         )
     endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna_decode)
@@ -401,7 +418,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsEverySpecializedAndGenericVariantOnce
                 RanksTheNarrowestServingObjectFirst
-                EveryKernelDeclaresTheThirtyEightSlotSignature
+                EveryKernelDeclaresTheFortySevenSlotSignature
         )
     endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_aiw)
@@ -416,6 +433,135 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 EveryKernelDeclaresTheFiftySlotSignature
         )
     endif()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_merged)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_merged}
+            SUITES TestFlydslSdpaBwdPacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsEveryMergedRowOnce
+                EveryKernelDeclaresTheMergedSignature
+                DeclaresASchemaAtLeastTheRaggedOffsetMultiplierFloor
+                ServesStampedRaggedGraphsAndDeclinesTheFieldsTheMatcherRejects
+                RefusesPlanSerialization
+        )
+    endif()
+    # The split engine's slots are ops of their own (prep, dkdv, dq); its descriptor-only
+    # engine folder has none. The census reads a shard only for an arch where all three slots
+    # ship, and the suite keys its inventory on the arch the entry names: its own content for
+    # gfx950, gfx942 and gfx90a, gfx11-generic content for every gfx11 member. The merged engine's census above
+    # is registered only where merged content ships (gfx950).
+    set(_hkp_split_arches)
+    foreach(_arch IN LISTS HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dq)
+        if(_arch IN_LIST HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_prep
+           AND _arch IN_LIST HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dkdv)
+            list(APPEND _hkp_split_arches ${_arch})
+        endif()
+    endforeach()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND _hkp_split_arches)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${_hkp_split_arches}
+            SUITES TestFlydslSdpaBwdSplitPacks
+            EXPECTED_CASES
+                IsOneSlottedEngineWithANativeGraphMatchAndAKernelMatcherPerSlot
+                ShipsEverySplitRowOnceAndNoKernelInTwoSlots
+                EveryKernelDeclaresItsSlotsSignature
+                EveryVerdictRowIsServedOrDeclinedAsTheTableSays
+                EveryServedRowsSlotCatalogsHaveUniqueEnrolledKnobTuples
+                DeclaresASchemaAtLeastTheRaggedOffsetMultiplierFloor
+                ServesStampedRaggedGraphsAndDeclinesTheFieldsTheMatcherRejects
+                RefusesPlanSerialization
+                TheChunkContractKeepsAnAlignedBiasOffDirectRowsWithAStagedAlternative
+                PrepVecTailIsOneOnTheCdna9RowsAndTheKmdDefaultElsewhere
+                EveryProbeGraphIsServedByTheRowsTheModelNames
+                TheCoverageConstantsAreTheHeadDimsTheShippedParityRowsServe
+        )
+    endif()
+    # The host half of the split engine's parity cases checks the gfx11, gfx90a and gfx942
+    # shards against the matcher contract. The suite is compiled into the census binary whatever GPU_TARGETS
+    # holds: TheRock installs one copy of that binary for every family's test job, so a
+    # copy built without gfx11 targets must still contain the suite a gfx11 entry runs. The
+    # suite skips, which a census entry reports as a failure, when the shard it is handed
+    # holds no pack of the entry's family. Only the registration is per arch: an entry for each
+    # gfx11, gfx90a and gfx942 arch the three slot ops ship for, and none in a configuration
+    # without one.
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
+        target_sources(hip_kernel_provider_census_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestFlydslSdpaBwdParityGraphs.cpp
+        )
+    endif()
+    set(_hkp_parity_split_arches)
+    foreach(_arch IN LISTS _hkp_split_arches)
+        if(_arch MATCHES "^gfx11" OR _arch STREQUAL "gfx90a" OR _arch STREQUAL "gfx942")
+            list(APPEND _hkp_parity_split_arches ${_arch})
+        endif()
+    endforeach()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND _hkp_parity_split_arches)
+        # The pin names the parameterised cases of FlydslSdpaBwdParityCases.hpp, one per
+        # case of the shared list the device half also launches.
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${_hkp_parity_split_arches}
+            SUITES TestFlydslSdpaBwdParityGraphs
+            EXPECTED_CASES
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesBottomRightCausalCrossAttentionWithFewerQueriesThanKeys
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesBottomRightCausalCrossAttentionWithMoreQueriesThanKeys
+                IsServedOrDeclinedAsTheMatcherContractStates/AppliesASlidingWindowNarrowerThanATile
+                IsServedOrDeclinedAsTheMatcherContractStates/AppliesALeftOnlyWindow
+                IsServedOrDeclinedAsTheMatcherContractStates/AppliesABandToTheRightOfTheDiagonal
+                IsServedOrDeclinedAsTheMatcherContractStates/AppliesAWideBandWithMoreQueriesThanKeys
+                IsServedOrDeclinedAsTheMatcherContractStates/ServesAValueHeadDimNarrowerThanTheQueryOne
+                IsServedOrDeclinedAsTheMatcherContractStates/ServesANarrowerValueHeadDimOverGroupedCrossAttention
+                IsServedOrDeclinedAsTheMatcherContractStates/ServesAValueHeadDimWiderThanTheQueryOne
+                IsServedOrDeclinedAsTheMatcherContractStates/ServesAWiderValueHeadDimWithABias
+                IsServedOrDeclinedAsTheMatcherContractStates/ZeroesRowsNoKeyReaches
+                IsServedOrDeclinedAsTheMatcherContractStates/ZeroesRowsATopLeftCausalWindowStartsPastTheKeys
+                IsServedOrDeclinedAsTheMatcherContractStates/ZeroesRowsALeftOnlyWindowStartsPastTheKeys
+                IsServedOrDeclinedAsTheMatcherContractStates/AddsABiasThatMasksWholeRowsAtTheLowestFiniteValueInBf16
+                IsServedOrDeclinedAsTheMatcherContractStates/AddsABiasThatMasksWholeRowsAtTheLowestFiniteValueInF16
+                IsServedOrDeclinedAsTheMatcherContractStates/AddsABiasThatMasksWholeRowsAtTheLowestFiniteValueInFp32
+                IsServedOrDeclinedAsTheMatcherContractStates/AddsABiasThatMasksWholeRowsWithMinusInfinityInBf16
+                IsServedOrDeclinedAsTheMatcherContractStates/AddsABiasThatMasksWholeRowsWithMinusInfinityInF16
+                IsServedOrDeclinedAsTheMatcherContractStates/AddsABiasThatMasksWholeRowsWithMinusInfinityInFp32
+                IsServedOrDeclinedAsTheMatcherContractStates/AddsABiasThatMasksLeadingKeysWithMinusInfinityInBf16
+                IsServedOrDeclinedAsTheMatcherContractStates/AddsABiasThatMasksLeadingKeysWithMinusInfinityInFp32
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesHeadDim256CausalGroupedQueryAttention
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesHeadDim256NonCausal
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesAGenericHeadDim40
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesAGenericHeadDim80
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesAGenericHeadDim152
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesAGenericHeadDim192
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesAGenericHeadDim240
+                IsServedOrDeclinedAsTheMatcherContractStates/AddsAPerHeadBiasAtHeadDim128
+                IsServedOrDeclinedAsTheMatcherContractStates/AddsABiasInTheQueryDtype
+                IsServedOrDeclinedAsTheMatcherContractStates/AddsAnFp32BiasToAnFp32Query
+                IsServedOrDeclinedAsTheMatcherContractStates/ServesAnFp32BiasBesideAHalfQuery
+                IsServedOrDeclinedAsTheMatcherContractStates/ServesAnFp32BiasBesideABf16Query
+                IsServedOrDeclinedAsTheMatcherContractStates/ServesAnFp32BiasAndDbiasBesideAHalfQuery
+                IsServedOrDeclinedAsTheMatcherContractStates/DeclinesADbiasWhoseRowsAreNotAWholeVectorApart
+                IsServedOrDeclinedAsTheMatcherContractStates/DeclinesABiasPitchThatLeavesTheDbiasUnaligned
+                IsServedOrDeclinedAsTheMatcherContractStates/ReadsKAndVThroughTheirHeadGroups
+                IsServedOrDeclinedAsTheMatcherContractStates/ReadsKAndVThroughOneHeadForAMultiQueryGroup
+                IsServedOrDeclinedAsTheMatcherContractStates/ServesAVWithHeadsOfItsOwn
+                IsServedOrDeclinedAsTheMatcherContractStates/ServesAVWithMoreHeadsThanKUnderGroupedQueries
+                IsServedOrDeclinedAsTheMatcherContractStates/ServesAVWithFewerHeadsThanKUnderCausalGroupedQueries
+                IsServedOrDeclinedAsTheMatcherContractStates/DeclinesVHeadsOfItsOwnWithABias
+                IsServedOrDeclinedAsTheMatcherContractStates/DeclinesVHeadsOfItsOwnUnderFp32
+                IsServedOrDeclinedAsTheMatcherContractStates/DeclinesVHeadsOfItsOwnWithRaggedKeys
+                IsServedOrDeclinedAsTheMatcherContractStates/DeclinesQueryHeadsThatAreNotAMultipleOfTheValueHeads
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesHeadMajorStrides
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesSequenceMajorStrides
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesPackedQkvViews
+                IsServedOrDeclinedAsTheMatcherContractStates/ReadsVAndDoAndTheLseThroughTheirOwnLayouts
+                IsServedOrDeclinedAsTheMatcherContractStates/ReadsARuntimeScaleAtExecute
+                IsServedOrDeclinedAsTheMatcherContractStates/AppliesTheDefaultScaleWhenTheGraphGivesNone
+        )
+    endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_rdna_decode)
         hkp_register_census_tests(
             TARGET hip_kernel_provider_census_tests
@@ -426,8 +572,30 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsEveryDecodeVariantOnce
                 RanksTheNarrowestServingObjectFirst
-                EveryKernelDeclaresTheFortySlotSignature
+                EveryKernelDeclaresTheFortyFourSlotSignature
         )
+    endif()
+    # The trained models of every FlyDSL engine, over every architecture a FlyDSL op ships
+    # for: one suite, because each case checks whichever FlyDSL engines the shard holds.
+    # HKP_REQUIRE_DVC_DESCRIPTORS is set on the file with the rocKE ModelBinding files below.
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
+        set(_hkp_flydsl_model_arches "")
+        foreach(_hkp_op rmsnorm rmsnorm_bwd sdpa_aiw sdpa_cdna sdpa_cdna_decode sdpa_cdna_dualwave
+                        sdpa_rdna sdpa_rdna_decode sdpa_bwd_merged sdpa_bwd_split)
+            list(APPEND _hkp_flydsl_model_arches ${HIPKERNELPROVIDER_FLYDSL_ARCHS_${_hkp_op}})
+        endforeach()
+        list(REMOVE_DUPLICATES _hkp_flydsl_model_arches)
+        if(_hkp_flydsl_model_arches)
+            hkp_register_census_tests(
+                TARGET hip_kernel_provider_census_tests
+                PACK_NAME product
+                ARCHES ${_hkp_flydsl_model_arches}
+                SUITES TestFlydslModelBinding
+                EXPECTED_CASES
+                    EveryBoundL2KernelRankerLoads
+                    EveryBoundL1EnginePredictorLoadsAndMatchesThisBuild
+            )
+        endif()
     endif()
 
     # The cases every generated Test<Engine>Packs suite below registers, shared by the
@@ -443,6 +611,22 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         CarriesNoGraphScopedMatcher
         CarriesExactlyOneSharedKernelScopedMatcher
     )
+
+    # A suite whose engine config declares behavior_notes renders one more case. The list
+    # names those suites; keep it in step with the configs' engine.behavior_notes.
+    set(_hkp_behavior_notes_suites
+        TestGfx950AttentionDensePacks
+        TestGfx1151WmmaAttentionPacks
+        TestGfx1151WmmaAttentionDecodePacks
+    )
+    # _hkp_generated_packs_cases_for(<out> <suite>): the cases <suite> registers.
+    function(_hkp_generated_packs_cases_for out_var suite)
+        set(_cases ${_hkp_generated_packs_cases})
+        if(suite IN_LIST _hkp_behavior_notes_suites)
+            list(APPEND _cases DeclaresItsConfiguredBehaviorNotes)
+        endif()
+        set(${out_var} ${_cases} PARENT_SCOPE)
+    endfunction()
 
     # Census for each HKP_PINNED_ATTENTION_ENGINES engine's production pack (the table is in
     # ../CMakeLists.txt). Each reads only the product shard, so it is eligible for census
@@ -470,6 +654,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(_hkp_companion_suites CatalogTiles catalog_tiles ModelBinding model_binding)
     set_source_files_properties(
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dModelBinding.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseModelBinding.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx1250ConvDgradAotModelBinding.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestFlydslModelBinding.cpp"
         PROPERTIES COMPILE_DEFINITIONS
             "HKP_REQUIRE_DVC_DESCRIPTORS=$<BOOL:${HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS}>")
     set(_hkp_catalog_tiles_cases_gfx950_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
@@ -479,7 +666,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         EveryShippedKernelsGeometryIsOneTheEngineLaunches
         EveryEntryLaunchesItsSegmentAndReduceKernels)
     set(_hkp_catalog_tiles_cases_gfx942_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
+    set(_hkp_catalog_tiles_cases_gfx942_unified_2d
+        EveryShippedKernelsGeometryIsOneTheEngineLaunches
+        EveryCellShipsItsHeadSizesDefaultGeometry
+        EveryCellRockeServesWithItsProductionStackShipsIt
+        EveryShippedKernelIsBottomRightCausalWithoutAWindow
+        TheShippedGqaRatioListIsTheCatalogsRatios)
     set(_hkp_model_binding_cases_gfx942_unified_3d
+        TheBoundL2KernelRankerLoads
+        TheBoundL1EnginePredictorLoadsAndMatchesThisBuild)
+    set(_hkp_model_binding_cases_gfx942_dense
         TheBoundL2KernelRankerLoads
         TheBoundL1EnginePredictorLoadsAndMatchesThisBuild)
 
@@ -489,12 +685,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         hkp_product_ships_engine_for_arch(_hkp_${_arch}_attention_${_snake}
                                           "hipkernel:${_local}" ${_arch})
         if(_hkp_${_arch}_attention_${_snake})
+            _hkp_generated_packs_cases_for(_hkp_cases Test${_local}Packs)
             hkp_register_census_tests(
                 TARGET hip_kernel_provider_census_tests
                 PACK_NAME product
                 ARCHES ${_arch}
                 SUITES Test${_local}Packs
-                EXPECTED_CASES ${_hkp_generated_packs_cases}
+                EXPECTED_CASES ${_hkp_cases}
             )
         else()
             message(STATUS
@@ -534,6 +731,59 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "<snake slug>, so its companion census would never register.")
     endif()
 
+    # Census for the shape-generic AOT-instance pack, hipkernel:Gfx950ConvFwdAot.
+    hkp_gfx950_conv_fwd_aot_available(_hkp_gfx950_conv_fwd_aot)
+    if(_hkp_gfx950_conv_fwd_aot)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx950
+            SUITES TestGfx950ConvFwdAotPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx950ConvFwdAot for "
+            "gfx950, so its census is not registered.")
+    endif()
+
+    # Census for hipkernel:Gfx950ConvFwdAotSeed, the test-only seed catalog the
+    # integration root carries. It reads that root's own shard, which this binary
+    # otherwise never loads, so it also needs that pack built.
+    hkp_gfx950_conv_fwd_aot_seed_available(_hkp_gfx950_conv_fwd_aot_seed)
+    if(_hkp_gfx950_conv_fwd_aot_seed)
+        add_dependencies(hip_kernel_provider_census_tests hkp_packaging_integration)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME integration
+            ARCHES gfx950
+            SUITES TestGfx950ConvFwdAotSeedPacks
+            EXPECTED_CASES
+                LoadsExactlyTheEmittedPacks
+                LoadsExactlyTheEmittedKernels
+                EveryLoadedDescriptorCoversTheRequestedArch
+                EveryKernelDeclaresTheEmittedRuntimeSourceKind
+                DeclaresTheConfiguredSdkVersion
+                ExposesTheConfiguredKnobs
+                RanksThroughItsRegisteredScoreSymbol
+                CarriesNoGraphScopedMatcher
+                CarriesExactlyOneSharedKernelScopedMatcher
+        )
+    else()
+        message(STATUS
+            "hkp: the integration root does not ship hipkernel:Gfx950ConvFwdAotSeed "
+            "for gfx950, so its census is not registered.")
+    endif()
+
     # Unified2D hands decode to Unified3D by a static rule, so with both engines shipped,
     # every 2D cell that rule hands off must have a 3D kernel.
     if(_hkp_gfx950_attention_unified_2d AND _hkp_gfx950_attention_unified_3d)
@@ -545,6 +795,49 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             EXPECTED_CASES
                 EveryDecodeCellHandedToUnified3DHasAUnified3DKernel
         )
+    endif()
+
+    # The same boundary on gfx942: Unified2D hands decode at every GQA group Unified3d ships to
+    # Unified3d, so with both engines shipped each such 2D cell must have a 3D kernel.
+    if(_hkp_gfx942_attention_unified_2d AND _hkp_gfx942_attention_unified_3d)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx942
+            SUITES TestGfx942AttentionUnified2DDecodeHandoff
+            EXPECTED_CASES
+                EveryDecodeCellHandedToUnified3dHasAUnified3dKernel
+        )
+    endif()
+
+    # The general SDPA backward engine ships one prep and one or two main packs per
+    # architecture into the product shard; each wired architecture's census checks its own.
+    set(_hkp_general_bwd_arches "")
+    foreach(_arch IN ITEMS gfx942 gfx950)
+        hkp_product_ships_engine_for_arch(_hkp_ships "hipkernel:AttentionGeneralBwd" ${_arch})
+        if(_hkp_ships)
+            list(APPEND _hkp_general_bwd_arches ${_arch})
+        endif()
+    endforeach()
+    if(_hkp_general_bwd_arches)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${_hkp_general_bwd_arches}
+            SUITES TestAttentionGeneralBwdPacks
+            EXPECTED_CASES
+                DeclaresThePrepAndMainSlotsAndTheSharedWorkspace
+                LoadsExactlyThePacksOfTheRequestedArch
+                EveryMainKernelDeclaresTheFourMainLaunches
+                EveryKernelIsOneCatalogRowAndEveryRowShips
+                EveryLaunchIsTheSymbolThePlanNames
+                EveryLaunchRecordsTheAbiTheHandlerMarshals
+                AsmSdpaRanksAheadOfThisEngine
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:AttentionGeneralBwd, so its "
+            "census is not registered.")
     endif()
 
     # One generic kernel set per RDNA family ships in every RDNA3/3.5 and RDNA4 shard,
@@ -566,13 +859,42 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             endif()
         endforeach()
         if(_hkp_rdna_wmma_attention_arches)
+            _hkp_generated_packs_cases_for(_hkp_cases ${_hkp_suite})
             hkp_register_census_tests(
                 TARGET hip_kernel_provider_census_tests
                 PACK_NAME product
                 ARCHES ${_hkp_rdna_wmma_attention_arches}
                 SUITES ${_hkp_suite}
-                EXPECTED_CASES ${_hkp_generated_packs_cases}
+                EXPECTED_CASES ${_hkp_cases}
             )
+            # The prefill engine's page sizes and architectures, stated once in
+            # Gfx1151WmmaAttentionCatalog.hpp for the matcher and the GPU suites, are
+            # checked against the loaded objects. The suite is registered at every wired
+            # arch the header lists, read from the header itself, not only where the
+            # engine ships: a listed arch the catalog drops then loads no set and fails, as
+            # an object shipped outside the list does.
+            if(_hkp_engine STREQUAL "hipkernel:Gfx1151WmmaAttention")
+                set(_hkp_catalog_hpp
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/packs/Gfx1151WmmaAttentionCatalog.hpp")
+                set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_hkp_catalog_hpp}")
+                file(READ "${_hkp_catalog_hpp}" _hkp_stated_arches)
+                string(REGEX MATCH "GFX1151_WMMA_ATTENTION_ARCHS\\{[^}]*\\}" _hkp_stated_arches
+                       "${_hkp_stated_arches}")
+                string(REGEX MATCHALL "gfx[0-9a-f]+" _hkp_stated_arches "${_hkp_stated_arches}")
+                if(NOT _hkp_stated_arches)
+                    message(FATAL_ERROR
+                        "hkp: no GFX1151_WMMA_ATTENTION_ARCHS list found in ${_hkp_catalog_hpp}")
+                endif()
+                hkp_register_census_tests(
+                    TARGET hip_kernel_provider_census_tests
+                    PACK_NAME product
+                    ARCHES ${_hkp_stated_arches}
+                    SUITES TestGfx1151WmmaAttentionCatalog
+                    EXPECTED_CASES
+                        ShipsPagedObjectsForExactlyTheMatchersPageSizes
+                        ShipsForNoArchitectureOutsideTheStatedList
+                )
+            endif()
         else()
             message(STATUS
                 "hkp: this configuration does not ship ${_hkp_engine} for any RDNA arch, "
@@ -598,6 +920,34 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "gfx950, so its census is not registered.")
     endif()
 
+    # ... and its gfx1250 sibling, hipkernel:Gfx1250ConvDgradAot.
+    hkp_product_ships_engine_for_arch(_hkp_gfx1250_conv_dgrad_aot
+                                      "hipkernel:Gfx1250ConvDgradAot" gfx1250)
+    if(_hkp_gfx1250_conv_dgrad_aot)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx1250
+            SUITES TestGfx1250ConvDgradAotPacks
+            EXPECTED_CASES ${_hkp_generated_packs_cases}
+        )
+        # Its trained ranker, as the ModelBinding companion above checks the attention
+        # engine's: the bound model loads and scores every shipped kernel.
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx1250
+            SUITES TestGfx1250ConvDgradAotModelBinding
+            EXPECTED_CASES
+                TheBoundL2KernelRankerLoads
+                TheBoundL2KernelRankerScoresEveryShippedKernel
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx1250ConvDgradAot for "
+            "gfx1250, so its census is not registered.")
+    endif()
+
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)
@@ -607,6 +957,23 @@ clang_tidy_check(hip_kernel_provider_tests)
 # install-time file is written from this same list, where a build-tree path would name a
 # directory that does not exist on the machine running the installed suite.
 add_unit_test_target(hip_kernel_provider_tests ${CMAKE_CURRENT_BINARY_DIR})
+
+# The FlyDSL backward suites that build graphs and match rows in-process, with no device
+# (the device cases are the TestGpuFlydslSdpaBwd* suites, which the host label excludes).
+# The tier suites above run them too, but only the host label reaches a runner without a
+# GPU, so they get an entry of their own. Registered beside the drift-guard entry
+# (flydsl/CMakeLists.txt), with the same labels and the same YAML tier entry.
+if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
+    add_test(NAME hip-kernel-provider-flydsl-sdpa-bwd-host
+             COMMAND hip_kernel_provider_tests "--gtest_filter=TestFlydslSdpaBwd*")
+    set_tests_properties(hip-kernel-provider-flydsl-sdpa-bwd-host PROPERTIES
+        LABELS "unit_test;hip-kernel-provider;host"
+        ENVIRONMENT "${TEST_ENVIRONMENT}"
+        TIMEOUT 600)
+    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED AND COMMAND apply_ctest_category_labels)
+        apply_ctest_category_labels("${HKP_PACK_CTEST_CATEGORIES_YAML}")
+    endif()
+endif()
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     clang_tidy_check(hip_kernel_provider_census_tests)

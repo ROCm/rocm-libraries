@@ -51,6 +51,11 @@ Beta remains host-resident. The device value is read during execution,
 so the allocation must remain valid until the operation completes.
 Algorithm selection requires a kernel with device scalar alpha support.
 
+These kernels reserve bit 11 of ``internalArg0`` for the runtime alpha selector,
+so their maximum GSU (``GemmTuning::setSplitK``) value is 2047. This limit also
+applies when the same kernel executes with host or vector alpha. Other kernels
+retain their existing GSU limits.
+
 .. code-block:: c++
 
     inputs.setScaleAlphaScalar(deviceAlpha);  // One FP32 element in device memory.
@@ -98,6 +103,47 @@ GroupedGemm
     :members:
     :protected-members:
     :private-members:
+
+PartitionedGemm
+-------------------------------------
+
+.. warning::
+
+   ``PartitionedGemm`` is a beta API. It may change in a future release.
+
+``PartitionedGemm`` is supported on gfx1250 devices only. On any other architecture
+``setProblem`` returns ``HIPBLAS_STATUS_NOT_SUPPORTED``.
+
+``PartitionedGemm`` runs one GEMM as slices on the devices of a partitioned GPU, for example the
+two partitions of a DPX card, where each partition is a separate HIP device. The caller passes
+one hipBLASLt handle per partition (created with that partition's device current), and one
+stream, workspace, and event per partition when it initializes and runs. ``SplitDim`` picks the
+dimension to split (M, N, or the batch). The first ``N - 1`` partitions take ``size / N`` rounded up to a
+256-byte boundary of every matrix they cut when that changes the balance by at most 1%, and the last takes the
+rest; otherwise they take ``size / N`` and a hint is logged (``HIPBLASLT_LOG_MASK=4``). A slice that starts
+off a 256-byte boundary runs much slower, so pad the leading dimensions (and batch strides) to multiples of
+256 bytes, which is enough for N and Batch splits; for an M split also make M a multiple of
+``parts * 256 / element size``. hipBLASLt does not allocate or copy any matrix, and does not enable
+peer access: every partition's slices must be accessible from its device (local memory, or peer or VMM access
+that the caller has set up), otherwise the run faults like any GEMM given an inaccessible pointer.
+Run in DPX mode for speed; SPX (every partition on one device) gives correct results but is only meant for
+checking them without a DPX GPU. ``setProblem`` queries where the memory is, so call it when a pointer or the
+shape changes, not on every launch. The caller passes one pointer per
+partition for each matrix: the same pointer shares a matrix between the partitions, different
+pointers give each partition its own copy. Where the memory lives (``hipMalloc`` on one
+device, or a VMM range with pages on several devices) is up to the caller: the library gives
+each partition the slice whose pages are on that partition's device, and ``getSlice`` reports it. See
+``clients/samples/31_hipblaslt_gemm_partitioned_ext`` for an example and
+``hipblaslt-bench --partitions`` to benchmark it. This current implementation supports plain GEMM; the device
+user arguments overloads are declared and return ``HIPBLAS_STATUS_NOT_SUPPORTED``.
+The API is in the ``hipblaslt_ext::experimental`` namespace because it is a beta API that can still change.
+
+.. doxygenclass:: hipblaslt_ext::experimental::PartitionedGemm
+    :members:
+    :protected-members:
+    :private-members:
+
+.. doxygenenum:: hipblaslt_ext::experimental::SplitDim
 
 hipBLASLtExt API reference
 ================================
@@ -244,7 +290,7 @@ you can call the run API to launch the kernel directly.
     gemm.setProblem(1, 1, 1, 1, epilogue, inputs); // m, n, k, batch
     gemm.algoGetHeuristic(gemm, pref, heuristic);
     gemm.setMaxWorkspaceBytes(1000000);
-    gemm.initialize(heuristic[0].algo, d_workspace, stream);
+    gemm.initialize(heuristic[0].algo, d_workspace, false, stream);
     for(int i = 0; i < 10; i++)
     {
         gemm.run(stream);
@@ -479,10 +525,10 @@ Here is a simple example that shows how this API works.
     if(validIdx.size() > 1)
     {
         groupedGemm.setMaxWorkspaceBytes(1000000);
-        groupedGemm.initialize(heuristicResult[validIdx[0]].algo, d_workspace, stream);
+        groupedGemm.initialize(heuristicResult[validIdx[0]].algo, d_workspace, true, stream);
         for(int i = 0; i < 10; i++)
         {
-            groupedGemm.run(userArgs, stream);
+            groupedGemm.run(d_dUAFloat, stream);
         }
     }
 
@@ -664,7 +710,7 @@ GEMM
     if(validIdx.size() > 1)
     {
         gemm.setMaxWorkspaceBytes(1000000);
-        gemm.initialize(heuristicResult[validIdx[0]].algo, d_workspace, stream);
+        gemm.initialize(heuristicResult[validIdx[0]].algo, d_workspace, false, stream);
         for(int i = 0; i < 10; i++)
         {
             gemm.run(stream);
@@ -740,7 +786,7 @@ Grouped GEMM
     if(validIdx.size() > 1)
     {
         groupedGemm.setMaxWorkspaceBytes(1000000);
-        groupedGemm.initialize(heuristicResult[validIdx[0]].algo, d_workspace, stream);
+        groupedGemm.initialize(heuristicResult[validIdx[0]].algo, d_workspace, false, stream);
         for(int i = 0; i < 10; i++)
         {
             groupedGemm.run(stream);
@@ -894,7 +940,7 @@ In this mode, the first element is the "sum of N" in the array of Ns.
                                 gemm_count,
                                 d_dUAFloat,
                                 d_n_vec);  // d_n_vec is a device pointer with Ns
-            groupedGemm.run(userArgs, stream);
+            groupedGemm.run(d_dUAFloat, stream);
         }
     }
 

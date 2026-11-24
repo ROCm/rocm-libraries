@@ -10,6 +10,9 @@ Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](h
 ### Removed
 ### Optimized
 ### Resolved issues
+
+* Fixed hipsolverDnXpotrs not setting info, which kept the value it had before the call.
+
 ### Known issues
 ### Upcoming changes
 

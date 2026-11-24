@@ -283,8 +283,8 @@ TEST(TestGfx942AttentionUnified3dMatchers, DeclinesUnsupportedHeadSizesAndGqaRat
         spec.headSize = headSize;
         EXPECT_FALSE(graphMatches(spec)) << "D" << headSize;
     }
-    for(const auto& [hq, hkv] :
-        std::vector<std::pair<int64_t, int64_t>>{{12, 4}, {32, 1}, {64, 2}, {6, 4}, {8, 16}})
+    for(const auto& [hq, hkv] : std::vector<std::pair<int64_t, int64_t>>{
+            {12, 4}, {32, 1}, {64, 2}, {6, 4}, {8, 16}, {12, 8}})
     {
         auto spec = base();
         spec.numQueryHeads = hq;
@@ -365,6 +365,8 @@ TEST(TestGfx942AttentionUnified3dMatchers, DeclinesEveryUnsupportedOptionalFeatu
         {"max_seq_len_kv", [](Builder& b) { b.add_max_seq_len_kv(512); }},
         {"ragged seq_len_q", [](Builder& b) { b.add_seq_len_q_tensor_uid(EXTRA_UID); }},
         {"ragged seq_len_kv", [](Builder& b) { b.add_seq_len_kv_tensor_uid(EXTRA_UID); }},
+        {"cumulative cu_seq_len_q", [](Builder& b) { b.add_cu_seq_len_q_tensor_uid(EXTRA_UID); }},
+        {"cumulative cu_seq_len_kv", [](Builder& b) { b.add_cu_seq_len_kv_tensor_uid(EXTRA_UID); }},
         {"block mask", [](Builder& b) { b.add_block_mask_tensor_uid(EXTRA_UID); }},
         {"fp8 descale q", [](Builder& b) { b.add_descale_q_tensor_uid(EXTRA_UID); }},
         {"fp8 descale k", [](Builder& b) { b.add_descale_k_tensor_uid(EXTRA_UID); }},
@@ -504,10 +506,12 @@ TEST(TestGfx942AttentionUnified3dMatchers, KernelMatchDeclinesMalformedRecords)
 }
 
 // The base cell (Hq 32, D128) puts 32 * 16 * 128 = 2^16 segm_output elements in each batch
-// row of a 16-segment kernel, so batch 2^15 reaches 2^31 elements: the kernels' i32 offsets
-// would wrap. graph_match still accepts the graph, and a kernel with fewer segments still
-// serves it.
-constexpr int64_t I32_WRAP_BATCH = int64_t{1} << 15;
+// row of a 16-segment kernel. Batch 2^15 is exactly 2^31 elements: its last offset is
+// INT32_MAX, so it still addresses. One more batch row goes past it and the kernels' i32
+// offsets would wrap. graph_match still accepts the graph, and a kernel with fewer segments
+// still serves it.
+constexpr int64_t I32_AT_LIMIT_BATCH = int64_t{1} << 15;
+constexpr int64_t I32_WRAP_BATCH = I32_AT_LIMIT_BATCH + 1;
 
 TEST(TestGfx942AttentionUnified3dMatchers, KernelMatchDeclinesACandidateWhoseIndicesWrapInt32)
 {
@@ -515,13 +519,13 @@ TEST(TestGfx942AttentionUnified3dMatchers, KernelMatchDeclinesACandidateWhoseInd
     spec.batch = I32_WRAP_BATCH;
     EXPECT_TRUE(graphMatches(spec));
     KernelSpec kernel;
-    kernel.numSegments = 8; // 2^30 elements
+    kernel.numSegments = 8; // 2^30 + 2^15 elements
     EXPECT_TRUE(kernelMatchesGraph(spec, kernel)) << "8 segments fit";
-    kernel.numSegments = 16; // exactly 2^31 elements
-    EXPECT_FALSE(kernelMatchesGraph(spec, kernel)) << "16 segments reach 2^31";
+    kernel.numSegments = 16; // 2^31 + 2^16 elements
+    EXPECT_FALSE(kernelMatchesGraph(spec, kernel)) << "16 segments go past 2^31";
 
-    spec.batch = I32_WRAP_BATCH - 1; // 2^31 - 2^16 elements
-    EXPECT_TRUE(kernelMatchesGraph(spec, kernel)) << "one batch row fewer fits";
+    spec.batch = I32_AT_LIMIT_BATCH; // exactly 2^31 elements
+    EXPECT_TRUE(kernelMatchesGraph(spec, kernel)) << "exactly 2^31 elements still addresses";
 }
 
 /// The message prepare() throws for @p kernel against @p spec; empty if it returned.
@@ -547,8 +551,8 @@ std::string prepareFailure(const GraphSpec& spec, const KernelSpec& kernel)
 }
 
 /// Defence in depth: prepare() refuses the same candidate kernelMatches declines, for a
-/// caller that reaches the handler without matching. The 8-segment control fails later
-/// (no archive), never on the index limit.
+/// caller that reaches the handler without matching. The controls (8 segments, and 16
+/// segments at exactly 2^31 elements) fail later (no archive), never on the index limit.
 TEST(TestGfx942AttentionUnified3dMatchers, PrepareRefusesACandidateWhoseIndicesWrapInt32)
 {
     constexpr const char* MARKER = "past 2^31 elements";
@@ -563,6 +567,12 @@ TEST(TestGfx942AttentionUnified3dMatchers, PrepareRefusesACandidateWhoseIndicesW
     const std::string control = prepareFailure(spec, kernel);
     ASSERT_FALSE(control.empty()) << "prepare() cannot succeed without an archive";
     EXPECT_EQ(control.find(MARKER), std::string::npos) << control;
+
+    spec.batch = I32_AT_LIMIT_BATCH;
+    kernel.numSegments = 16;
+    const std::string atLimit = prepareFailure(spec, kernel);
+    ASSERT_FALSE(atLimit.empty()) << "prepare() cannot succeed without an archive";
+    EXPECT_EQ(atLimit.find(MARKER), std::string::npos) << atLimit;
 }
 
 // =============================================================================
@@ -591,6 +601,30 @@ TEST(TestGfx942AttentionUnified3dMatchers, WorkspaceIsTheGeometryHeadersLayoutFo
                   gfx942AttentionUnified3dWorkspace(3, spec.numQueryHeads, segments, spec.headSize)
                       .totalBytes)
             << segments;
+    }
+}
+
+TEST(TestGfx942AttentionUnified3dMatchers, ComputeDataTypeMustBeServedByFloatAccumulation)
+{
+    // The kernels accumulate and keep the softmax statistics in FLOAT, which meets an unset,
+    // FLOAT, HALF or BFLOAT16 compute type; a wider or non-floating one asks for a computation
+    // they do not perform.
+    for(const auto computeType : {data_objects::DataType::UNSET,
+                                  data_objects::DataType::FLOAT,
+                                  data_objects::DataType::HALF,
+                                  data_objects::DataType::BFLOAT16})
+    {
+        auto spec = base();
+        spec.computeDataType = computeType;
+        EXPECT_TRUE(graphMatches(spec)) << data_objects::EnumNameDataType(computeType);
+    }
+    for(const auto computeType : {data_objects::DataType::DOUBLE,
+                                  data_objects::DataType::INT32,
+                                  data_objects::DataType::FP8_E4M3})
+    {
+        auto spec = base();
+        spec.computeDataType = computeType;
+        EXPECT_FALSE(graphMatches(spec)) << data_objects::EnumNameDataType(computeType);
     }
 }
 

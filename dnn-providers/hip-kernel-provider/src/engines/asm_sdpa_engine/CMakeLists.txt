@@ -9,6 +9,10 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 # Define paths for code generation
 set(ASM_CODEGEN_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/codegen.py")
+set(ASM_CODEGEN_SOURCES
+    ${ASM_CODEGEN_SCRIPT}
+    "${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/co_metadata.py"
+)
 set(ASM_CODEGEN_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(ASM_FMHA_FWD_CONFIG_HEADER "${ASM_CODEGEN_OUTPUT_DIR}/asm_fmha_v3_fwd_configs.hpp")
 set(ASM_FMHA_BWD_CONFIG_HEADER "${ASM_CODEGEN_OUTPUT_DIR}/asm_fmha_v3_bwd_configs.hpp")
@@ -16,13 +20,19 @@ set(ASM_FMHA_BWD_CONFIG_HEADER "${ASM_CODEGEN_OUTPUT_DIR}/asm_fmha_v3_bwd_config
 # Define supported GPU architectures (used for both glob patterns and AITER_GPU_ARCHS)
 set(ASM_SDPA_GPU_ARCHS gfx942 gfx950)
 
-# CSV files that the codegen script depends on (iterate over all architectures)
+# CSV files and code objects that the codegen script reads (iterate over all
+# architectures). It records each kernel's .max_flat_workgroup_size from its .co.
 set(ASM_KERNEL_CSV_FILES "")
+set(ASM_KERNEL_CO_FILES "")
 foreach(ARCH ${ASM_SDPA_GPU_ARCHS})
     file(GLOB_RECURSE ARCH_CSV_FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/${ARCH}/**/*.csv"
     )
     list(APPEND ASM_KERNEL_CSV_FILES ${ARCH_CSV_FILES})
+    file(GLOB_RECURSE ARCH_CO_FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/${ARCH}/**/*.co"
+    )
+    list(APPEND ASM_KERNEL_CO_FILES ${ARCH_CO_FILES})
 endforeach()
 
 # Create the output directory
@@ -31,11 +41,12 @@ file(MAKE_DIRECTORY ${ASM_CODEGEN_OUTPUT_DIR})
 # Custom command to generate ASM kernel config headers (forward path)
 add_custom_command(
     OUTPUT ${ASM_FMHA_FWD_CONFIG_HEADER}
-    COMMAND ${CMAKE_COMMAND} -E env "AITER_GPU_ARCHS=${ASM_SDPA_GPU_ARCHS}" --
+    COMMAND ${CMAKE_COMMAND} -E env "AITER_GPU_ARCHS=${ASM_SDPA_GPU_ARCHS}"
+            "PYTHONDONTWRITEBYTECODE=1" --
             ${Python3_EXECUTABLE} ${ASM_CODEGEN_SCRIPT}
             -m fmha_v3_fwd
             -o ${ASM_CODEGEN_OUTPUT_DIR}
-    DEPENDS ${ASM_CODEGEN_SCRIPT} ${ASM_KERNEL_CSV_FILES}
+    DEPENDS ${ASM_CODEGEN_SOURCES} ${ASM_KERNEL_CSV_FILES} ${ASM_KERNEL_CO_FILES}
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels
     COMMENT "Generating ASM fwd kernel configuration header for ${ASM_SDPA_GPU_ARCHS}"
     VERBATIM
@@ -44,11 +55,12 @@ add_custom_command(
 # Custom command to generate ASM kernel config headers (backward path)
 add_custom_command(
     OUTPUT ${ASM_FMHA_BWD_CONFIG_HEADER}
-    COMMAND ${CMAKE_COMMAND} -E env "AITER_GPU_ARCHS=${ASM_SDPA_GPU_ARCHS}" --
+    COMMAND ${CMAKE_COMMAND} -E env "AITER_GPU_ARCHS=${ASM_SDPA_GPU_ARCHS}"
+            "PYTHONDONTWRITEBYTECODE=1" --
             ${Python3_EXECUTABLE} ${ASM_CODEGEN_SCRIPT}
             -m fmha_v3_bwd
             -o ${ASM_CODEGEN_OUTPUT_DIR}
-    DEPENDS ${ASM_CODEGEN_SCRIPT} ${ASM_KERNEL_CSV_FILES}
+    DEPENDS ${ASM_CODEGEN_SOURCES} ${ASM_KERNEL_CSV_FILES} ${ASM_KERNEL_CO_FILES}
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels
     COMMENT "Generating ASM bwd kernel configuration header for ${ASM_SDPA_GPU_ARCHS}"
     VERBATIM
@@ -113,14 +125,6 @@ if(ASM_KPACK_ENABLED)
     # --- Per-arch kpack packing custom commands ---
     set(ASM_KPACK_PACK_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/pack.py")
     set(ASM_KPACK_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/.kpack")
-
-    # Collect all .co files as dependencies for the packing step
-    set(ASM_KERNEL_CO_FILES "")
-    foreach(ARCH ${ASM_SDPA_GPU_ARCHS})
-        file(GLOB_RECURSE ARCH_CO_FILES
-            "${CMAKE_CURRENT_SOURCE_DIR}/asm/asm_kernels/${ARCH}/**/*.co")
-        list(APPEND ASM_KERNEL_CO_FILES ${ARCH_CO_FILES})
-    endforeach()
 
     set(ASM_KPACK_OUTPUTS "")
     foreach(ARCH ${ASM_SDPA_GPU_ARCHS})

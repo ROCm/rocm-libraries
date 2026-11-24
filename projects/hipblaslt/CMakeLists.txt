@@ -81,6 +81,15 @@ option(HIPBLASLT_ENABLE_LOCAL_KERNELS "Build experimental runtime local kernel r
 if(HIPBLASLT_ENABLE_LOCAL_KERNELS AND NOT HIPBLASLT_ENABLE_HOST)
     message(FATAL_ERROR "HIPBLASLT_ENABLE_LOCAL_KERNELS requires HIPBLASLT_ENABLE_HOST=ON")
 endif()
+# Testing only: the library then honors HIPBLASLT_LOCAL_KERNEL_TEST_SCOPE and
+# HIPBLASLT_LOCAL_KERNEL_TEST_CU, which give one device its own local kernel
+# journal or compute unit count for tests on machines whose devices are all
+# alike, and HIPBLASLT_LOCAL_KERNEL_TEST_PAUSE_MS, which pauses between saving a
+# mapping and reading it back.
+option(HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST "Testing only: honor the HIPBLASLT_LOCAL_KERNEL_TEST_* hooks." OFF)
+if(HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST AND NOT HIPBLASLT_ENABLE_LOCAL_KERNELS)
+    message(FATAL_ERROR "HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST requires HIPBLASLT_ENABLE_LOCAL_KERNELS=ON")
+endif()
 
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
 option(TENSILELITE_BUILD_TESTING "Build client when building tests" OFF)
@@ -88,8 +97,6 @@ option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${TENSILELITE_BUILD_
 option(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS
        "Install TensileLite Python packages and test tools into the test artifact tree."
        OFF)
-option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile python scripts" OFF)
-
 if(HIPBLASLT_ENABLE_CLIENT)
     option(HIPBLASLT_BUILD_TESTING "Build hipblaslt client tests." ON)
     option(HIPBLASLT_ENABLE_SAMPLES "Build client samples." ON)
@@ -136,7 +143,6 @@ mark_as_advanced(HIPBLASLT_ENABLE_THEROCK)
 mark_as_advanced(HIPBLASLT_VALIDATE_INSTALL)
 mark_as_advanced(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS)
 mark_as_advanced(HIPBLASLT_ENABLE_COVERAGE)
-mark_as_advanced(TENSILELITE_ENABLE_AUTOBUILD)
 
 set(GPU_TARGETS "" CACHE STRING "AMD GFX targets to cross-compile")
 
@@ -285,6 +291,23 @@ set(HIPBLASLT_PYTHON_DEPS "_rocisa")
 set(hipblaslt_python_dev Development.Module)
 hipblaslt_find_python("${hipblaslt_python_dev}")
 hipblaslt_configure_bundled_python_command("${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa;${CMAKE_CURRENT_BINARY_DIR}/tensilelite" "${san_opts}")
+
+if(TENSILELITE_ENABLE_CLIENT)
+    set(_tensilelite_source_root "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
+    set(TENSILELITE_SOURCE_REVISION "" CACHE STRING
+        "rocm-libraries commit to record when building from a tree without git")
+    hipblaslt_resolve_build_rocm_root(HIPBLASLT_BUILD_ROCM_ROOT)
+    include(cmake/TensileLiteMetadata.cmake)
+    hipblaslt_configure_tensilelite_metadata("${_tensilelite_source_root}"
+        "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-client-generated")
+    if(TENSILELITE_CLIENT_SOURCE_REVISION STREQUAL "none")
+        message(WARNING "No source revision found; client pairing disabled. Build from a git "
+            "checkout or pass -DTENSILELITE_SOURCE_REVISION=<sha>.")
+    endif()
+    message(STATUS "TensileLite client: version ${TENSILELITE_DISTRIBUTION_VERSION}, "
+        "source revision ${TENSILELITE_CLIENT_SOURCE_REVISION}, "
+        "build ROCm ${TENSILELITE_CLIENT_BUILD_ROCM}")
+endif()
 
 if(HIPBLASLT_ENABLE_ROCROLLER)
     if(NOT ROCM_LIBS_SUPERBUILD)
@@ -889,26 +912,27 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         PATTERN "source_only" EXCLUDE
     )
 
+    install(
+        FILES
+            "${_tensilelite_src}/_tensilelite_client_binding.py"
+            "${_tensilelite_src}/tensilelite_configure_client.py"
+        DESTINATION "${_tensilelite_install_dest}"
+        COMPONENT tests
+    )
+
     # Scripts used by unit tests
     install(
         FILES
+            "${_tensilelite_src}/scripts/aggregate_timing.py"
             "${_tensilelite_src}/scripts/analyze_timing.py"
             "${_tensilelite_src}/scripts/check_no_absolute_imports.py"
+            "${_tensilelite_src}/scripts/lcov_dir_summary.py"
+            "${_tensilelite_src}/scripts/memwatch.py"
             "${_tensilelite_src}/scripts/precommit_affected_tests.py"
         DESTINATION "${_tensilelite_install_dest}/scripts"
         COMPONENT tests
     )
 
-    # Imported or executed directly by unit tests, so these must ship at the
-    # tensilelite root, not under scripts/.
-    install(
-        FILES
-            "${_tensilelite_src}/AMaxGenerator.py"
-            "${_tensilelite_src}/SoftmaxGenerator.py"
-            "${_tensilelite_src}/LayerNormGenerator.py"
-        DESTINATION "${_tensilelite_install_dest}"
-        COMPONENT tests
-    )
     # Preserve executable permissions on entry points
     install(
         PROGRAMS

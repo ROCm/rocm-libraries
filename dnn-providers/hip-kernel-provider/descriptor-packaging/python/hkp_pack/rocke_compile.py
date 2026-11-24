@@ -121,6 +121,47 @@ def _assert_no_backend_fallback(source, builder, arch):
     )
 
 
+def _arm_accepts(arm, value):
+    """Whether a union arm is the one a JSON value of this type builds."""
+    origin = typing.get_origin(arm)
+    if arm is type(None):
+        return value is None
+    if origin is typing.Literal:
+        return any(type(v) is type(value) and v == value for v in typing.get_args(arm))
+    if arm is tuple or origin is tuple:
+        return isinstance(value, list)
+    if dataclasses.is_dataclass(arm):
+        return isinstance(value, dict)
+    if arm is bool:
+        return isinstance(value, bool)
+    if arm is int:
+        return isinstance(value, int) and not isinstance(value, bool)
+    if arm is float:
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if arm is str:
+        return isinstance(value, str)
+    return False
+
+
+def _build_tuple(field_type, value):
+    if not isinstance(value, list):
+        raise HkpPackError(
+            f"spec field type {field_type!r} needs a JSON list, got {value!r}"
+        )
+    args = typing.get_args(field_type)
+    if not args:
+        raise HkpPackError(
+            f"unsupported spec field type {field_type!r} (untyped tuple)"
+        )
+    if len(args) == 2 and args[1] is Ellipsis:
+        return tuple(_build_field(args[0], v) for v in value)
+    if len(args) != len(value):
+        raise HkpPackError(
+            f"spec field type {field_type!r} needs {len(args)} items, got {value!r}"
+        )
+    return tuple(_build_field(a, v) for a, v in zip(args, value))
+
+
 def _build_field(field_type, value):
     origin = typing.get_origin(field_type)
     if _is_union(origin):
@@ -129,9 +170,17 @@ def _build_field(field_type, value):
         non_none = [a for a in typing.get_args(field_type) if a is not type(None)]
         if len(non_none) == 1:
             return _build_field(non_none[0], value)
-        raise HkpPackError(
-            f"unsupported spec field type {field_type!r} (multi-arm union)"
-        )
+        # A JSON value picks the arm by its type; a value two arms accept (or
+        # none does) has no single reading.
+        arms = [a for a in non_none if _arm_accepts(a, value)]
+        if len(arms) != 1:
+            raise HkpPackError(
+                f"spec value {value!r} matches {len(arms)} arms of the union "
+                f"{field_type!r}; it needs exactly one"
+            )
+        return _build_field(arms[0], value)
+    if origin is tuple:
+        return _build_tuple(field_type, value)
     if origin is typing.Literal:
         # Validate membership. The allowed set is already one call away -- the
         # union arm above uses get_args on the same field -- and without this a
@@ -161,10 +210,15 @@ def build_spec(cls, data):
     typing.get_type_hints (not field.type, which is a string under
     `from __future__ import annotations`) and dispatching: scalar -> passthrough;
     nested dataclass -> recurse into a real instance; Optional[X] -> None or a
-    built X; Literal / other plain -> passthrough. A list/tuple field type and an
-    input key that is not a field are hard-rejected. Missing/mis-typed fields and
-    a spec __post_init__ rejection propagate from cls(**kwargs) for the caller to
-    wrap. No rocke import: directly unit-testable with local stub dataclasses.
+    built X; a typed tuple (`tuple[int, int]`, `tuple[X, ...]`) -> a tuple built
+    from a JSON list, item by item; a multi-arm union -> the one arm the JSON
+    value's type selects (None, bool, int, float, str or a Literal member, a list
+    for a tuple arm, a mapping for a dataclass arm), refused when no arm or more
+    than one fits; Literal / other plain -> passthrough. A list or untyped tuple
+    field type and an input key that is not a field are hard-rejected.
+    Missing/mis-typed fields and a spec __post_init__ rejection propagate from
+    cls(**kwargs) for the caller to wrap. No rocke import: directly
+    unit-testable with local stub dataclasses.
     """
     field_names = {f.name for f in dataclasses.fields(cls)}
     extra = set(data) - field_names

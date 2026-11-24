@@ -8,7 +8,15 @@
  *     and the gfx950 fastKV register-P lower (the kernel names carry the GQA
  *     ratio, and the shared 2D scaffold divides by num_kv_heads);
  *   - fastKV register-P on gfx942, on its lower and its support predicate (the
- *     body is gfx950-only).
+ *     body is gfx950-only);
+ *   - the gfx950 2D spec pairing use_staggered_iter_wait with
+ *     use_early_v_schedule (the two schedules overlap);
+ *   - the gfx950 2D spec laying out the KQ LDS pad while Q is staged in the
+ *     single K slot (Q is written and read unpadded there);
+ *   - the gfx950 2D spec setting use_fp8_mfma_qk over a bf16 KV cache, with the
+ *     KQ pad otherwise laid out (the fp8 refusal comes first, as in Python);
+ *   - the gfx942 3D spec with use_i64_kv_addr (its loaders have no i64 path, so a
+ *     spec built that way would address a cache past 2 GiB with 32 bits).
  *
  * The expected texts are the Python ones: kernels.common._fmha_common
  * check_head_counts and the fastKV module's _NOT_GFX950. The pytest twin,
@@ -31,6 +39,16 @@ static const char* const NOT_DIVIDING
     = "num_query_heads (32) must be divisible by num_kv_heads (6) for GQA / MQA";
 static const char* const NOT_GFX950
     = "fastKV register-P is a gfx950 kernel; gfx942 is not supported";
+static const char* const STAGGERED_EARLY_V
+    = "use_staggered_iter_wait does not support use_early_v_schedule";
+static const char* const GFX942_3D_I64
+    = "gfx942 tiled 3D kernel does not support use_i64_kv_addr (paged KV cache > 2 GiB) yet";
+static const char* const FP8_QK_NEEDS_FP8_KV
+    = "use_fp8_mfma_qk requires kv_storage_dtype='fp8e4m3'";
+static const char* const KQ_PAD_STAGED_Q
+    = "KQ LDS pad failed - use_q_reread=False, use_q_direct_reg=False, expected one of them "
+      "True (transposed 32x32 path) or use_kq_lds_pad=False (Q staged in the padded single K "
+      "slot is read unpadded)";
 
 typedef struct head_pair
 {
@@ -192,9 +210,94 @@ static int check_fastkv_arch(void)
     return failures;
 }
 
+/* The pytest twin's spec: bf16 transposed-32x32 with the V double buffer. */
+static int check_gfx950_staggered_early_v(void)
+{
+    char err[512];
+    char* ll = NULL;
+    rocke_attention_tiled_2d_spec_t s = spec_2d(32, 32);
+    s.head_size = 64;
+    s.block_size = 32;
+    s.use_mfma_32x32 = true;
+    s.use_transposed_qk_32x32 = true;
+    s.block_m_per_warp = 32;
+    s.has_tile_size = true;
+    s.tile_size = 64;
+    s.use_v_double_buffer = true;
+    s.use_staggered_iter_wait = true;
+    s.use_early_v_schedule = true;
+
+    err[0] = '\0';
+    const rocke_status_t st = rocke_gfx950_attention_tiled_2d_lower_to_llvm(
+        &s, "gfx950", ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof(err));
+    return expect_refused("gfx950 2D staggered wait + early-V", st, ll, err, STAGGERED_EARLY_V);
+}
+
+static int check_gfx950_kq_pad_staged_q(void)
+{
+    char err[512];
+    char* ll = NULL;
+    rocke_attention_tiled_2d_spec_t s = spec_2d(32, 32);
+    s.head_size = 64;
+    s.block_size = 32;
+    s.use_mfma_32x32 = true;
+    s.use_transposed_qk_32x32 = true;
+    s.num_warps = 2;
+    s.block_m_per_warp = 32;
+    s.has_tile_size = true;
+    s.tile_size = 64;
+    s.use_k_single_buffer = true;
+    s.use_kq_lds_pad = true;
+    s.kq_lds_pad_halves = 8;
+
+    err[0] = '\0';
+    const rocke_status_t st = rocke_gfx950_attention_tiled_2d_lower_to_llvm(
+        &s, "gfx950", ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof(err));
+    return expect_refused("gfx950 2D KQ pad + staged Q", st, ll, err, KQ_PAD_STAGED_Q);
+}
+
+static int check_gfx950_fp8_qk_without_fp8_kv(void)
+{
+    char err[512];
+    char* ll = NULL;
+    rocke_attention_tiled_2d_spec_t s = spec_2d(32, 32);
+    s.head_size = 64;
+    s.block_size = 32;
+    s.use_mfma_32x32 = true;
+    s.use_transposed_qk_32x32 = true;
+    s.num_warps = 2;
+    s.block_m_per_warp = 32;
+    s.has_tile_size = true;
+    s.tile_size = 64;
+    s.use_k_single_buffer = true;
+    s.use_kq_lds_pad = true;
+    s.kq_lds_pad_halves = 8;
+    s.use_fp8_mfma_qk = true;
+
+    err[0] = '\0';
+    const rocke_status_t st = rocke_gfx950_attention_tiled_2d_lower_to_llvm(
+        &s, "gfx950", ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof(err));
+    return expect_refused("gfx950 2D fp8 QK over bf16 KV", st, ll, err, FP8_QK_NEEDS_FP8_KV);
+}
+
+static int check_gfx942_3d_i64_kv_addr(void)
+{
+    char err[512];
+    char* ll = NULL;
+    rocke_unified_attention_3d_tiled_spec_t s = spec_3d(32, 8);
+    s.use_i64_kv_addr = true;
+
+    err[0] = '\0';
+    const rocke_status_t st = rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm(
+        &s, "gfx942", ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof(err));
+    return expect_refused("gfx942 3D use_i64_kv_addr", st, ll, err, GFX942_3D_I64);
+}
+
 int main(void)
 {
-    const int failures = check_head_counts() + check_fastkv_arch();
+    const int failures = check_head_counts() + check_fastkv_arch()
+                         + check_gfx950_staggered_early_v() + check_gfx950_kq_pad_staged_q()
+                         + check_gfx950_fp8_qk_without_fp8_kv() + check_gfx942_3d_i64_kv_addr();
     if(failures != 0)
     {
         fprintf(stderr, "%d TILED ATTENTION ENTRY GUARD CHECK(S) FAILED\n", failures);

@@ -164,10 +164,18 @@ DENSE_PROBLEM_FIELDS = frozenset(
         "chiplet_num_xcds",
     }
 )
-# Problem fields only some arches' dense specs declare (the band's right bound).
+# Problem fields only some arches' dense specs declare (the band's right bound,
+# the additive bias, and the KV storage format, whose loader only gfx950 has).
+# gfx942's ``use_bias_x4`` (the bias load width) is not a
+# request fact but is classed here on purpose: no axis sweeps it, no pin can name
+# it, the kernel's policy resolves it, and it must stay None with the bias off, so
+# it is inert on every stored (bias-off) id. Listing it here keeps it out of the
+# defaults fingerprint, so every gfx942 dense tuning id stays what it was before the
+# field existed. Sweeping it later means moving it to an axis, which re-keys every
+# gfx942 dense id: document that like the ``v_reg_prefetch`` migration in AGENTS.md.
 DENSE_ARCH_PROBLEM_FIELDS: Mapping[str, frozenset] = {
-    "gfx950": frozenset({"right_bound"}),
-    "gfx942": frozenset(),
+    "gfx950": frozenset({"right_bound", "use_additive_bias", "kv_storage_dtype"}),
+    "gfx942": frozenset({"use_additive_bias", "use_bias_x4"}),
 }
 DENSE_VARIANT_FIELDS: Mapping[str, frozenset] = {
     "gfx950": frozenset({"persistent", "wide_lds_dma"}),
@@ -329,7 +337,8 @@ _GFX942_DENSE_AXES: Tuple[KnobAxis, ...] = (
 
 # RDNA WMMA (gfx11/gfx12) prefill (``WmmaFmhaFwdV2Spec``) fields the space never
 # varies: the head-width buckets, mask class, bias kind, score features, layout
-# and K/V storage all come from the request.
+# (with hipDNN's ``dense_q`` / ``seqused_q`` query-side options) and K/V storage
+# all come from the request.
 WMMA_PROBLEM_FIELDS = frozenset(
     {
         "dtype",
@@ -343,6 +352,8 @@ WMMA_PROBLEM_FIELDS = frozenset(
         "use_qq_bias",
         "layout",
         "page_block_size",
+        "dense_q",
+        "seqused_q",
         "kv_dtype",
         "name",
     }

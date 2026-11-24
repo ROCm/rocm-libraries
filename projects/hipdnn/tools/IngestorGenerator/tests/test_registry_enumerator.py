@@ -14,6 +14,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 import enum
+import io
 import json
 import os
 import re
@@ -504,6 +505,844 @@ def test_a_manifest_key_declared_twice_is_exit_2_naming_the_key(tmp_path, capsys
     assert "pack" in capsys.readouterr().err
 
 
+@pytest.fixture
+def feature_probe(tmp_path, monkeypatch):
+    root = synth.provider(tmp_path, monkeypatch)
+    return types.SimpleNamespace(
+        manifest=synth.feature_probe_manifest(root),
+        plain=synth.probe_manifest(root),
+        tmp=tmp_path,
+        out=tmp_path / "c.yaml",
+    )
+
+
+def _probe_kernels(probe):
+    return yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+
+
+def test_a_feature_field_names_its_kernels_and_narrows_their_slice(feature_probe):
+    """Kernels holding the feature off are the plain probe catalog (every free tile,
+    no token, the field at its default); kernels turning it on carry the token, the
+    field in spec and metadata, and only the default tile its free_fields leave."""
+    assert _run_probe(feature_probe) == 0
+    kernels = yaml.safe_load(feature_probe.out.read_text())["packs"][0]["kernels"]
+    on = [k for k in kernels if k["kernel_source"]["spec"]["bias"]]
+    off = [k for k in kernels if not k["kernel_source"]["spec"]["bias"]]
+    cells = 4  # two head sizes x two masks
+    assert len(off) == 3 * cells and len(on) == cells
+    assert all(k["name"].endswith("_bias") and k["metadata"]["bias"] == 1 for k in on)
+    assert all("_bias" not in k["name"] and k["metadata"]["bias"] == 0 for k in off)
+    assert {k["kernel_source"]["spec"]["tile_n"] for k in on} == {64}
+    assert all(k.get("default") for k in on)
+    assert len({k["name"] for k in kernels}) == len(kernels)
+
+
+def test_a_feature_group_leaves_the_plain_kernels_as_they_were(feature_probe):
+    """Adding a feature cell group keeps every existing kernel's name, order, spec and
+    metadata; the feature-off kernels only gain the field at its default."""
+    assert _run_probe(feature_probe, feature_probe.plain) == 0
+    plain = _probe_kernels(feature_probe)
+    assert _run_probe(feature_probe) == 0
+    off = [
+        k
+        for k in _probe_kernels(feature_probe)
+        if not k["kernel_source"]["spec"]["bias"]
+    ]
+    assert [k["name"] for k in off] == [k["name"] for k in plain]
+    for got, want in zip(off, plain):
+        spec = dict(got["kernel_source"]["spec"])
+        assert spec.pop("bias") is False
+        assert spec == want["kernel_source"]["spec"], got["name"]
+        meta = dict(got["metadata"])
+        assert meta.pop("bias") == 0
+        assert meta == want["metadata"], got["name"]
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [{"name_token": "_bias"}, {"name_token": "_bias", "free_fields": ["tile_n"]}],
+    ids=["no-free-fields", "same-free-fields"],
+)
+def test_a_feature_field_without_narrowing_sweeps_every_free_tile(feature_probe, entry):
+    feature_probe.manifest["enumerate"]["feature_fields"]["bias"] = entry
+    assert _run_probe(feature_probe) == 0
+    kernels = _probe_kernels(feature_probe)
+    on = [k for k in kernels if k["kernel_source"]["spec"]["bias"]]
+    off = [k for k in kernels if not k["kernel_source"]["spec"]["bias"]]
+    cells = 4  # two head sizes x two masks
+    assert len(on) == len(off) == 3 * cells
+    assert {k["kernel_source"]["spec"]["tile_n"] for k in on} == {
+        k["kernel_source"]["spec"]["tile_n"] for k in off
+    }
+    assert sum(bool(k.get("default")) for k in on) == cells
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"name_token": "_bias", "select": {"tile_n": 32}},
+        {"name_token": "_bias", "free_fields": ["tile_n"], "select": {"tile_n": 32}},
+    ],
+    ids=["swept-free-fields", "narrowed-free-fields"],
+)
+def test_a_feature_select_moves_its_cells_off_the_default_tile(feature_probe, entry):
+    """``select`` keeps only the specs with its values; the one left per cell is
+    the cell's default, though it is not the candidate's default spec."""
+    feature_probe.manifest["enumerate"]["feature_fields"]["bias"] = entry
+    assert _run_probe(feature_probe) == 0
+    kernels = _probe_kernels(feature_probe)
+    on = [k for k in kernels if k["kernel_source"]["spec"]["bias"]]
+    cells = 4  # two head sizes x two masks
+    assert len(on) == cells
+    assert {k["kernel_source"]["spec"]["tile_n"] for k in on} == {32}
+    assert all(k.get("default") for k in on)
+    assert all(k["name"].endswith("_bias") for k in on)
+    # select narrows only the cells that turn the feature on.
+    off = [k for k in kernels if not k["kernel_source"]["spec"]["bias"]]
+    assert len(off) == 3 * cells
+    assert {k["kernel_source"]["spec"]["tile_n"] for k in off} == {32, 64, 128}
+    assert sum(bool(k.get("default")) for k in off) == cells
+
+
+def test_a_feature_select_of_the_default_tile_keeps_one_default(feature_probe):
+    feature_probe.manifest["enumerate"]["feature_fields"]["bias"] = {
+        "name_token": "_bias",
+        "select": {"tile_n": 64},
+    }
+    assert _run_probe(feature_probe) == 0
+    on = [
+        k for k in _probe_kernels(feature_probe) if k["kernel_source"]["spec"]["bias"]
+    ]
+    assert len(on) == 4  # two head sizes x two masks
+    assert {k["kernel_source"]["spec"]["tile_n"] for k in on} == {64}
+    assert all(k.get("default") for k in on)
+
+
+def test_a_partial_select_keeps_the_registry_default_elsewhere(feature_probe):
+    """A select pinning one of two swept fields: the cell's default is the kept
+    spec that holds the registry default (order unset) in the other."""
+    feature_probe.manifest["enumerate"]["free_fields"] = ["tile_n", "order"]
+    # order joins the name so its kernels stay distinct.
+    feature_probe.manifest["kernel_name_template"] += "_o{order}"
+    feature_probe.manifest["enumerate"]["feature_fields"]["bias"] = {
+        "name_token": "_bias",
+        "select": {"tile_n": 32},
+    }
+    assert _run_probe(feature_probe) == 0
+    on = [
+        k for k in _probe_kernels(feature_probe) if k["kernel_source"]["spec"]["bias"]
+    ]
+    defaults = [k for k in on if k.get("default")]
+    assert {k["kernel_source"]["spec"]["tile_n"] for k in on} == {32}
+    assert len(defaults) == 4  # one per cell
+    assert all(k["kernel_source"]["spec"].get("order") is None for k in defaults)
+
+
+def test_a_select_that_matches_no_spec_is_exit_2(feature_probe, capsys):
+    feature_probe.manifest["enumerate"]["feature_fields"]["bias"] = {
+        "name_token": "_bias",
+        "select": {"tile_n": 48},
+    }
+    assert _run_probe(feature_probe) == 2
+    assert "no spec for cell" in capsys.readouterr().err
+    assert not feature_probe.out.exists()
+
+
+def test_a_slice_whose_names_collide_is_exit_2(feature_probe, capsys):
+    """A cell group that varies a field no name token, template slot or projected
+    knob reaches renders one name twice; ``space: slice`` refuses it too."""
+    del feature_probe.manifest["enumerate"]["feature_fields"]
+    assert _run_probe(feature_probe) == 2
+    err = capsys.readouterr().err
+    assert "space: slice renders" in err and "duplicated kernel name" in err, err
+    assert not feature_probe.out.exists()
+
+
+def _feature(entry):
+    return lambda m: m["enumerate"]["feature_fields"].update(bias=entry)
+
+
+def _feature_not_metadata(m):
+    m["specialization"]["metadata_fields"].remove("bias")
+    del m["specialization"]["bindings"]["bias"]
+
+
+def _feature_not_in_spec_fields(m):
+    m["enumerate"]["spec_fields"] = ["dtype", "tile_m", "tile_n"]
+
+
+def _feature_not_a_reduction_feature(m):
+    m["reduction"] = {"fields": {"feature": ["dtype"], "performance": []}}
+
+
+def _feature_with_an_empty_reduction_feature(m):
+    m["reduction"] = {"fields": {"feature": [], "performance": []}}
+
+
+def _feature_with_no_reduction_feature(m):
+    m["reduction"] = {"fields": {"performance": []}}
+
+
+def _feature_with_no_reduction_fields(m):
+    m["reduction"] = {"aot_budget_per_arch": 1000}
+
+
+def _free_field_only_a_performance_knob(m):
+    """A slice reads a feature's free_fields against enumerate.free_fields, not against
+    the reduction block's performance knobs."""
+    m["reduction"] = {
+        "fields": {"feature": ["bias"], "performance": [{"name": "tile_m"}]}
+    }
+    m["enumerate"]["feature_fields"]["bias"] = {
+        "name_token": "_b",
+        "free_fields": ["tile_m"],
+    }
+
+
+@pytest.mark.parametrize(
+    "mutate, offender",
+    [
+        (_feature({"free_fields": []}), "name_token"),
+        (_feature({"name_token": ""}), "name_token"),
+        (_feature({"name_token": "_b", "stride": 2}), "feature_fields.bias"),
+        (_feature({"name_token": "_b", "free_fields": "tile_n"}), "free_fields"),
+        (_feature({"name_token": "_b", "free_fields": ["tile_x"]}), "subset"),
+        (_feature_not_metadata, "metadata_fields"),
+        (_feature_not_in_spec_fields, "spec_fields"),
+        (_feature_not_a_reduction_feature, "reduction.fields.feature"),
+        (_feature_with_an_empty_reduction_feature, "reduction.fields.feature"),
+        (_feature_with_no_reduction_feature, "reduction.fields.feature"),
+        (_feature_with_no_reduction_fields, "reduction.fields.feature"),
+        (_feature({"name_token": "_b", "free_fields": ["tile_m"]}), "subset"),
+        (_free_field_only_a_performance_knob, "subset"),
+        (
+            lambda m: m["enumerate"].update(free_fields=["tile_n", "bias"]),
+            "feature_fields.bias",
+        ),
+        (
+            lambda m: m["enumerate"]["feature_fields"].update(
+                no_such={"name_token": "_x"}
+            ),
+            "no_such",
+        ),
+        (_feature({"name_token": "_b", "select": {"tile_m": 128}}), "select"),
+        (_feature({"name_token": "_b", "select": {}}), "select"),
+        (_feature({"name_token": "_b", "select": [32]}), "select"),
+        (
+            _feature({"name_token": "_b", "free_fields": [], "select": {"tile_n": 32}}),
+            "select",
+        ),
+        (_feature({"name_token": "_b", "select": {"tile_n": [32]}}), "select"),
+        (
+            lambda m: (
+                m["enumerate"].update(space="full"),
+                m["enumerate"]["feature_fields"].update(
+                    bias={"name_token": "_b", "select": {"tile_n": 32}}
+                ),
+            ),
+            "select",
+        ),
+    ],
+    ids=[
+        "no-token",
+        "empty-token",
+        "unknown-key",
+        "free-fields-not-a-list",
+        "unknown-free-field",
+        "not-a-metadata-field",
+        "not-a-spec-field",
+        "not-a-reduction-feature",
+        "empty-reduction-feature",
+        "no-reduction-feature",
+        "no-reduction-fields",
+        "free-fields-not-a-subset",
+        "free-field-a-performance-knob-but-not-a-slice-free-field",
+        "feature-is-a-free-field",
+        "not-on-the-spec",
+        "select-not-a-swept-field",
+        "select-empty",
+        "select-not-a-mapping",
+        "select-outside-narrowed-free-fields",
+        "select-value-not-a-scalar",
+        "select-under-full-space-without-performance-knobs",
+    ],
+)
+def test_a_malformed_feature_field_is_exit_2(feature_probe, capsys, mutate, offender):
+    if offender == "no_such":
+        # Must also be a metadata field to pass the manifest check and reach the
+        # registry, which is what refuses it.
+        feature_probe.manifest["specialization"]["metadata_fields"].append("no_such")
+    mutate(feature_probe.manifest)
+    rc = _run_probe(feature_probe)
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert offender in err, err
+    assert not feature_probe.out.exists()
+
+
+def test_a_feature_in_the_reduction_features_or_with_no_reduction_is_accepted(
+    feature_probe,
+):
+    """Only a manifest with no ``reduction`` block is exempt from naming the feature
+    there; with a block, listing it is what passes."""
+    assert _run_probe(feature_probe) == 0
+    feature_probe.manifest["reduction"] = {
+        "fields": {"feature": ["dtype", "bias"], "performance": []}
+    }
+    assert _run_probe(feature_probe) == 0
+
+
+def _feature_also(feature_probe, **overrides) -> dict:
+    """The feature probe plus a section over ``persist``/``a`` on a cell the primary
+    does not list; both sections cross the same cell fields, ``bias`` included."""
+    section = {
+        "cells": [
+            {"fields": ["hdim", "heads"], "values": [[128, 16]]},
+            {"fields": ["mask"], "values": ["CAUSAL"]},
+            {"fields": ["bias"], "values": [False, True]},
+        ],
+        "free_fields": ["tile_n"],
+        "spec_fields": ["dtype", "tile_m", "tile_n", "causal", "order", "bias"],
+        **overrides,
+    }
+    manifest = copy.deepcopy(feature_probe.manifest)
+    manifest["enumerate"]["also"] = [_also(**section)]
+    return manifest
+
+
+def _also_kernels(feature_probe, manifest) -> tuple:
+    """``(feature on, feature off)`` kernels of the ``also`` section (spec ``a``)."""
+    assert _run_probe(feature_probe, manifest) == 0
+    extra = [
+        k
+        for k in _probe_kernels(feature_probe)
+        if k["provenance"]["rocke_spec_id"] == "a"
+    ]
+    return (
+        [k for k in extra if k["kernel_source"]["spec"]["bias"]],
+        [k for k in extra if not k["kernel_source"]["spec"]["bias"]],
+    )
+
+
+@pytest.mark.parametrize(
+    "entry, tiles",
+    [
+        ({"name_token": "_bias", "select": {"tile_n": 32}}, {32}),
+        ({"name_token": "_bias", "free_fields": []}, {64}),
+    ],
+    ids=["select", "free-fields"],
+)
+def test_an_also_section_narrows_its_feature_kernels_like_the_primary(
+    feature_probe, entry, tiles
+):
+    """The feature is declared once, on the primary, and every section's kernels that
+    turn it on take its token and its narrowing; the also section's feature-off kernels
+    keep every free tile."""
+    manifest = _feature_also(feature_probe)
+    manifest["enumerate"]["feature_fields"]["bias"] = entry
+    on, off = _also_kernels(feature_probe, manifest)
+    assert [k["kernel_source"]["spec"]["tile_n"] for k in on] == sorted(tiles)
+    assert all(k["name"].endswith("_bias") and k.get("default") for k in on)
+    assert {k["kernel_source"]["spec"]["tile_n"] for k in off} == {32, 64, 128}
+    assert sum(bool(k.get("default")) for k in off) == 1
+
+
+def test_an_also_section_cannot_declare_feature_fields_of_its_own(
+    feature_probe, capsys
+):
+    manifest = _feature_also(
+        feature_probe, feature_fields={"bias": {"name_token": "_bias"}}
+    )
+    assert _run_probe(feature_probe, manifest) == 2
+    assert "enumerate.also[0].feature_fields" in capsys.readouterr().err
+
+
+def test_a_feature_missing_from_an_also_sections_spec_fields_is_exit_2(
+    feature_probe, capsys
+):
+    """Metadata would read ``bias`` from the request while the spec the kernel builds
+    from omits it: the catalog would advertise a bias kernel that builds without."""
+    manifest = _feature_also(
+        feature_probe, spec_fields=["dtype", "tile_m", "tile_n", "causal", "order"]
+    )
+    assert _run_probe(feature_probe, manifest) == 2
+    err = capsys.readouterr().err
+    assert "enumerate.feature_fields.bias" in err, err
+    assert "enumerate.also[0].spec_fields" in err, err
+    assert not feature_probe.out.exists()
+
+
+def test_an_also_section_that_holds_a_selected_field_is_exit_2(feature_probe, capsys):
+    """A select value on a field the section does not sweep has nothing to choose
+    among: exit 2, naming the field."""
+    manifest = _feature_also(feature_probe, free_fields=[])
+    manifest["enumerate"]["feature_fields"]["bias"] = {
+        "name_token": "_bias",
+        "select": {"tile_n": 32},
+    }
+    assert _run_probe(feature_probe, manifest) == 2
+    err = capsys.readouterr().err
+    assert "tile_n" in err and "free_fields" in err, err
+
+
+#: Cells of the full feature probe per value of ``bias``: two head sizes x two masks.
+_CELLS_PER_BIAS_VALUE = 4
+#: The kernels one cell of the full feature probe sweeps unnarrowed: 3 tiles x 2 orders.
+_KERNELS_PER_CELL = 6
+
+
+@pytest.fixture
+def full_feature_probe(tmp_path, monkeypatch):
+    root = synth.provider(tmp_path, monkeypatch)
+    return types.SimpleNamespace(
+        manifest=synth.full_feature_probe_manifest(root),
+        tmp=tmp_path,
+        out=tmp_path / "c.yaml",
+    )
+
+
+def _full_feature_kernels(probe, entry) -> tuple:
+    """``(bias-on kernels, bias-off kernels)`` of the full feature probe with
+    ``bias``'s feature entry ``entry`` (``name_token`` is filled in)."""
+    probe.manifest["enumerate"]["feature_fields"]["bias"] = {
+        "name_token": "_bias",
+        **entry,
+    }
+    assert _run_probe(probe) == 0
+    kernels = _probe_kernels(probe)
+    assert len({k["name"] for k in kernels}) == len(kernels)
+    on = [k for k in kernels if k["kernel_source"]["spec"]["bias"]]
+    off = [k for k in kernels if not k["kernel_source"]["spec"]["bias"]]
+    assert all(k["name"].endswith("_bias") for k in on)
+    assert not any("_bias" in k["name"] for k in off)
+    return on, off
+
+
+def _knob_values(kernels, name) -> set:
+    return {k["metadata"][name] for k in kernels}
+
+
+def _defaults(kernels) -> list:
+    return [k for k in kernels if k.get("default")]
+
+
+def test_a_full_space_feature_without_narrowing_sweeps_every_knob(full_feature_probe):
+    on, off = _full_feature_kernels(full_feature_probe, {})
+    assert len(on) == len(off) == _KERNELS_PER_CELL * _CELLS_PER_BIAS_VALUE
+    assert _knob_values(on, "tile_n") == _knob_values(off, "tile_n") == {32, 64, 128}
+    assert _knob_values(on, "order") == _knob_values(off, "order") == {"row", "col"}
+    assert len(_defaults(on)) == len(_defaults(off)) == _CELLS_PER_BIAS_VALUE
+
+
+@pytest.mark.parametrize(
+    "free, tiles, orders",
+    [
+        (["tile_n"], {32, 64, 128}, {"row"}),
+        (["order"], {64}, {"row", "col"}),
+        ([], {64}, {"row"}),
+    ],
+    ids=["tile-only", "order-only", "none"],
+)
+def test_a_full_space_feature_sweeps_only_its_free_fields(
+    full_feature_probe, capsys, free, tiles, orders
+):
+    """A cell turning the feature on varies only the performance knobs its free_fields
+    name; the rest stay at the cell default (tile 64, order unset, which resolves to
+    "row"). Held by narrowing, they are not a WARN. The feature-off cells keep the
+    full sweep."""
+    on, off = _full_feature_kernels(full_feature_probe, {"free_fields": free})
+    assert len(on) == len(tiles) * len(orders) * _CELLS_PER_BIAS_VALUE
+    assert _knob_values(on, "tile_n") == tiles and _knob_values(on, "order") == orders
+    assert len(off) == _KERNELS_PER_CELL * _CELLS_PER_BIAS_VALUE
+    assert _knob_values(off, "tile_n") == {32, 64, 128}
+    assert _knob_values(off, "order") == {"row", "col"}
+    defaults = _defaults(on)
+    assert len(defaults) == _CELLS_PER_BIAS_VALUE
+    assert all(k["metadata"]["tile_n"] == 64 for k in defaults)
+    assert all("order" not in k["kernel_source"]["spec"] for k in defaults)
+    assert "WARN" not in capsys.readouterr().err
+
+
+def test_a_full_space_select_keeps_its_specs_and_moves_the_cell_default(
+    full_feature_probe,
+):
+    """``select`` keeps only the specs with its values, the knobs it does not name
+    still sweep, and the kept spec equal to the registry default elsewhere (order
+    unset) is the cell's default though it is not the candidate's default spec."""
+    on, off = _full_feature_kernels(full_feature_probe, {"select": {"tile_n": 32}})
+    assert _knob_values(on, "tile_n") == {32}
+    assert len(on) == 2 * _CELLS_PER_BIAS_VALUE  # 2 resolved orders
+    defaults = _defaults(on)
+    assert len(defaults) == _CELLS_PER_BIAS_VALUE
+    assert all("order" not in k["kernel_source"]["spec"] for k in defaults)
+    # select narrows only the cells that turn the feature on.
+    assert len(off) == _KERNELS_PER_CELL * _CELLS_PER_BIAS_VALUE
+    assert _knob_values(off, "tile_n") == {32, 64, 128}
+    assert [k["metadata"]["tile_n"] for k in _defaults(off)] == [
+        64
+    ] * _CELLS_PER_BIAS_VALUE
+
+
+def test_a_full_space_select_with_free_fields_keeps_one_kernel_per_cell(
+    full_feature_probe,
+):
+    on, _ = _full_feature_kernels(
+        full_feature_probe, {"free_fields": ["tile_n"], "select": {"tile_n": 128}}
+    )
+    assert (
+        len(on) == _CELLS_PER_BIAS_VALUE and len(_defaults(on)) == _CELLS_PER_BIAS_VALUE
+    )
+    assert _knob_values(on, "tile_n") == {128}
+    assert all("order" not in k["kernel_source"]["spec"] for k in on)
+
+
+def test_a_full_space_select_of_an_explicit_value_keeps_the_default_where_it_is(
+    full_feature_probe,
+):
+    """A select of a value the unset default does not carry (``order=col``) keeps the
+    default tile and moves only that knob."""
+    on, _ = _full_feature_kernels(full_feature_probe, {"select": {"order": "col"}})
+    assert _knob_values(on, "order") == {"col"} and _knob_values(on, "tile_n") == {
+        32,
+        64,
+        128,
+    }
+    assert [k["metadata"]["tile_n"] for k in _defaults(on)] == [
+        64
+    ] * _CELLS_PER_BIAS_VALUE
+
+
+def test_a_full_space_select_that_matches_no_spec_is_exit_2(full_feature_probe, capsys):
+    full_feature_probe.manifest["enumerate"]["feature_fields"]["bias"] = {
+        "name_token": "_bias",
+        "select": {"tile_n": 48},
+    }
+    assert _run_probe(full_feature_probe) == 2
+    assert "no spec for cell" in capsys.readouterr().err
+    assert not full_feature_probe.out.exists()
+    # --plan-space never reaches the build's check, so the narrowing itself refuses.
+    with pytest.raises(re_.EnumerationError, match="no spec for cell"):
+        re_.plan_space(full_feature_probe.manifest, out=io.StringIO())
+
+
+def test_a_knob_held_in_every_cell_by_narrowing_is_not_projected(full_feature_probe):
+    """Narrowing runs before projection: with only bias cells and ``order`` held in
+    all of them, no cell varies ``order``, so it is neither metadata nor a KMD field,
+    where unnarrowed it is both."""
+    cells = full_feature_probe.manifest["enumerate"]["cells"]
+    cells[-1]["values"] = [True]
+
+    def config(entry):
+        full_feature_probe.manifest["enumerate"]["feature_fields"]["bias"] = entry
+        assert _run_probe(full_feature_probe) == 0
+        return yaml.safe_load(full_feature_probe.out.read_text())
+
+    wide = config({"name_token": "_bias"})
+    assert "order" in wide["specialization"]["metadata_fields"]
+    assert "order" in {f["name"] for f in wide["kmd_fields"]}
+    narrow = config({"name_token": "_bias", "free_fields": ["tile_n"]})
+    assert "order" not in narrow["specialization"]["metadata_fields"]
+    assert "order" not in {f["name"] for f in narrow["kmd_fields"]}
+    kernels = narrow["packs"][0]["kernels"]
+    assert len(kernels) == 3 * _CELLS_PER_BIAS_VALUE
+    assert all("order" not in k["metadata"] for k in kernels)
+    assert not any("order" in k["name"] for k in kernels)
+    # --plan-space sees the narrowed cells too: no cell varies it.
+    shown = io.StringIO()
+    assert re_.plan_space(full_feature_probe.manifest, out=shown) == 0
+    assert re.search(r"^    tile_n: ", shown.getvalue(), re.M), shown.getvalue()
+    assert not re.search(r"^    order: ", shown.getvalue(), re.M), shown.getvalue()
+
+
+def test_the_budget_is_counted_after_a_full_space_feature_narrows(
+    full_feature_probe, capsys
+):
+    """48 kernels unnarrowed, 36 with the feature's cells sweeping only the tile: over
+    and within a budget of 40, for the build and for --plan-space."""
+    manifest = full_feature_probe.manifest
+    manifest["reduction"]["aot_budget_per_arch"] = 40
+    features = manifest["enumerate"]["feature_fields"]
+    features["bias"] = {"name_token": "_bias"}
+    assert _run_probe(full_feature_probe, None, "--strict") == 1
+    assert "48 instances" in capsys.readouterr().err
+    assert re_.plan_space(manifest, out=io.StringIO(), strict=True) == 1
+    features["bias"]["free_fields"] = ["tile_n"]
+    assert _run_probe(full_feature_probe, None, "--strict") == 0
+    assert len(_probe_kernels(full_feature_probe)) == 36
+    shown = io.StringIO()
+    assert re_.plan_space(manifest, out=shown, strict=True) == 0
+    assert (
+        "instances (current classification): 36 (within budget 40)" in shown.getvalue()
+    )
+
+
+@pytest.mark.parametrize("knob", ["tile_n", "order"])
+def test_plan_space_counts_a_dropped_knob_through_the_narrowing(
+    full_feature_probe, knob
+):
+    """``if dropped <knob>`` is the count of a manifest that no longer lists the knob,
+    narrowing included."""
+    manifest = full_feature_probe.manifest
+    manifest["enumerate"]["feature_fields"]["bias"] = {
+        "name_token": "_bias",
+        "free_fields": ["tile_n"],
+    }
+    shown = io.StringIO()
+    assert re_.plan_space(manifest, out=shown) == 0
+    assert "instances (current classification): 36 " in shown.getvalue()
+    dropped = int(
+        re.search(rf"^  if dropped {knob}: (\d+) ", shown.getvalue(), re.M)[1]
+    )
+    performance = manifest["reduction"]["fields"]["performance"]
+    performance[:] = [k for k in performance if k["name"] != knob]
+    config = re_.build_config(manifest, warn=lambda message: None)
+    assert dropped == len(config["packs"][0]["kernels"])
+
+
+def _with_causal_feature(manifest: dict, **entry) -> None:
+    """Add ``causal`` as a second feature: a cell with the ``CAUSAL`` mask turns it on."""
+    manifest["kmd_fields"].append({"name": "causal", "type": "int", "default_value": 0})
+    manifest["specialization"]["metadata_fields"].append("causal")
+    manifest["specialization"]["bindings"]["causal"] = {"field": "causal"}
+    manifest["enumerate"]["feature_fields"]["causal"] = {
+        "name_token": "_causal",
+        **entry,
+    }
+
+
+def test_a_full_space_cell_with_two_features_sweeps_the_intersection(
+    full_feature_probe,
+):
+    """A cell turning on both features frees only what both free, and keeps the specs
+    the selects of both name; a cell with one feature is narrowed by that one alone."""
+    manifest = full_feature_probe.manifest
+    manifest["enumerate"]["feature_fields"]["bias"] = {
+        "name_token": "_bias",
+        "free_fields": ["tile_n", "order"],
+    }
+    _with_causal_feature(manifest, free_fields=["order"], select={"order": "col"})
+    assert _run_probe(full_feature_probe) == 0
+    kernels = _probe_kernels(full_feature_probe)
+
+    def cell(bias, causal) -> list:
+        return [
+            k
+            for k in kernels
+            if bool(k["kernel_source"]["spec"]["bias"]) is bias
+            and bool(k["kernel_source"]["spec"]["causal"]) is causal
+        ]
+
+    both = cell(True, True)
+    assert len(both) == 2  # two head sizes, the CAUSAL mask, bias on
+    assert _knob_values(both, "tile_n") == {64} and _knob_values(both, "order") == {
+        "col"
+    }
+    assert len(_defaults(both)) == 2
+    assert all(k["name"].endswith("_bias_causal") for k in both)
+    bias_only = cell(True, False)
+    assert len(bias_only) == 2 * _KERNELS_PER_CELL
+    assert _knob_values(bias_only, "tile_n") == {32, 64, 128}
+    causal_only = cell(False, True)
+    assert len(causal_only) == 2 and _knob_values(causal_only, "order") == {"col"}
+    assert len(cell(False, False)) == 2 * _KERNELS_PER_CELL
+    assert len(kernels) == 28
+
+
+@pytest.mark.parametrize(
+    "bias, causal, offender",
+    [
+        (
+            {"select": {"tile_n": 32}},
+            {"select": {"tile_n": 64}},
+            "another feature this cell turns on",
+        ),
+        (
+            {"select": {"tile_n": 32}},
+            {"free_fields": ["order"]},
+            "another feature's free_fields holds",
+        ),
+    ],
+    ids=["selects-disagree", "select-held-by-the-other-features-free-fields"],
+)
+def test_a_full_space_cell_whose_two_features_conflict_is_exit_2(
+    full_feature_probe, capsys, bias, causal, offender
+):
+    manifest = full_feature_probe.manifest
+    manifest["enumerate"]["feature_fields"]["bias"] = {"name_token": "_bias", **bias}
+    _with_causal_feature(manifest, **causal)
+    assert _run_probe(full_feature_probe) == 2
+    assert offender in capsys.readouterr().err
+    assert not full_feature_probe.out.exists()
+
+
+def _fp16_also(manifest: dict, **overrides) -> None:
+    """Add an ``also`` section over the primary's own pin and cells, at ``fp16`` so its
+    kernel names differ from the primary's; ``overrides`` set the section's keys."""
+    primary = manifest["enumerate"]
+    manifest["enumerate"]["also"] = [
+        {
+            "pin": copy.deepcopy(primary["pin"]),
+            "fixed": {**primary["fixed"], "dtype": "fp16"},
+            "cells": copy.deepcopy(primary["cells"]),
+            **overrides,
+        }
+    ]
+
+
+def _fp16_bias_on(probe) -> list:
+    return [
+        k
+        for k in _probe_kernels(probe)
+        if k["kernel_source"]["spec"]["dtype"] == "fp16"
+        and k["kernel_source"]["spec"]["bias"]
+    ]
+
+
+def test_a_full_also_section_is_narrowed_by_the_primarys_feature_entry(
+    full_feature_probe,
+):
+    """``feature_fields`` is declared on the primary and applies to every section: a full
+    ``also`` section's cells that turn the feature on vary only the knobs ``free_fields``
+    names, as the primary's do, and --plan-space counts the same kernels."""
+    manifest = full_feature_probe.manifest
+    manifest["enumerate"]["feature_fields"]["bias"] = {
+        "name_token": "_bias",
+        "free_fields": ["tile_n"],
+    }
+    _fp16_also(manifest)
+    assert _run_probe(full_feature_probe) == 0
+    extra = _fp16_bias_on(full_feature_probe)
+    assert len(extra) == 3 * _CELLS_PER_BIAS_VALUE
+    assert _knob_values(extra, "tile_n") == {32, 64, 128}
+    assert all("order" not in k["kernel_source"]["spec"] for k in extra)
+    assert all(k["name"].endswith("_bias") for k in extra)
+    # The cells are the primary's too, so the primary keeps their one default.
+    assert not _defaults(extra)
+    # The section's bias-off cells keep the full sweep.
+    off = [
+        k
+        for k in _probe_kernels(full_feature_probe)
+        if k["kernel_source"]["spec"]["dtype"] == "fp16"
+        and not k["kernel_source"]["spec"]["bias"]
+    ]
+    assert len(off) == _KERNELS_PER_CELL * _CELLS_PER_BIAS_VALUE
+    shown = io.StringIO()
+    assert re_.plan_space(manifest, out=shown) == 0
+    total = len(_probe_kernels(full_feature_probe))
+    assert f"instances (current classification): {total} " in shown.getvalue()
+
+
+def test_a_full_also_cell_a_feature_would_empty_is_exit_2(full_feature_probe, capsys):
+    """A select no spec of the also section's cell satisfies fails the build and
+    --plan-space, as the primary's does."""
+    manifest = full_feature_probe.manifest
+    manifest["enumerate"]["feature_fields"]["bias"] = {
+        "name_token": "_bias",
+        "select": {"tile_n": 48},
+    }
+    manifest["enumerate"]["cells"][-1]["values"] = [False]
+    also_cells = copy.deepcopy(manifest["enumerate"]["cells"])
+    also_cells[-1]["values"] = [True]
+    _fp16_also(manifest, cells=also_cells)
+    assert _run_probe(full_feature_probe) == 2
+    assert "no spec for cell" in capsys.readouterr().err
+    with pytest.raises(re_.EnumerationError, match="no spec for cell"):
+        re_.plan_space(manifest, out=io.StringIO())
+
+
+def test_a_slice_also_section_under_a_full_primary_keeps_what_both_free(
+    full_feature_probe,
+):
+    """A slice ``also`` section sweeps the intersection of its own ``free_fields`` and the
+    feature entry's: ``tile_n`` in both keeps every tile, none in the section keeps the
+    default tile."""
+    manifest = full_feature_probe.manifest
+    manifest["enumerate"]["feature_fields"]["bias"] = {
+        "name_token": "_bias",
+        "free_fields": ["tile_n"],
+    }
+    _fp16_also(manifest, space="slice", free_fields=["tile_n", "order"])
+    assert _run_probe(full_feature_probe) == 0
+    extra = _fp16_bias_on(full_feature_probe)
+    assert _knob_values(extra, "tile_n") == {32, 64, 128}
+    assert len(extra) == 3 * _CELLS_PER_BIAS_VALUE
+    _fp16_also(manifest, space="slice", free_fields=[])
+    assert _run_probe(full_feature_probe) == 0
+    extra = _fp16_bias_on(full_feature_probe)
+    assert _knob_values(extra, "tile_n") == {64}
+    assert len(extra) == _CELLS_PER_BIAS_VALUE
+
+
+def test_a_full_also_section_under_a_slice_primary_is_narrowed_too(
+    full_feature_probe,
+):
+    """The mirror image: a slice primary whose feature entry names ``tile_n`` (in its
+    ``free_fields``) narrows a full ``also`` section's feature cells to that knob."""
+    manifest = full_feature_probe.manifest
+    reduction = manifest["reduction"]
+    primary = manifest["enumerate"]
+    primary["space"] = "slice"
+    primary["free_fields"] = ["tile_n", "order"]
+    primary["feature_fields"]["bias"] = {
+        "name_token": "_bias",
+        "free_fields": ["tile_n"],
+    }
+    _fp16_also(manifest, space="full")
+    manifest["reduction"] = reduction
+    assert _run_probe(full_feature_probe) == 0
+    extra = _fp16_bias_on(full_feature_probe)
+    assert len(extra) == 3 * _CELLS_PER_BIAS_VALUE
+    assert _knob_values(extra, "tile_n") == {32, 64, 128}
+    assert all("order" not in k["kernel_source"]["spec"] for k in extra)
+
+
+_PERFORMANCE = "reduction.fields.performance"
+
+
+@pytest.mark.parametrize(
+    "entry, field, shape",
+    [
+        ({"free_fields": ["tile_m"]}, "bias.free_fields", _PERFORMANCE),
+        ({"free_fields": ["no_such"]}, "bias.free_fields", _PERFORMANCE),
+        ({"free_fields": "tile_n"}, "bias.free_fields", "a list of field names"),
+        ({"select": {"tile_m": 128}}, "bias.select", _PERFORMANCE),
+        (
+            {"free_fields": ["order"], "select": {"tile_n": 32}},
+            "bias.select",
+            "free_fields",
+        ),
+        ({"free_fields": [], "select": {"tile_n": 32}}, "bias.select", "free_fields"),
+        ({"select": {}}, "bias.select", "non-empty mapping"),
+        ({"select": ["tile_n"]}, "bias.select", "non-empty mapping"),
+        ({"select": {"tile_n": [32]}}, "bias.select", "scalar values"),
+    ],
+    ids=[
+        "free-field-a-spec-field-but-not-a-performance-knob",
+        "free-field-unknown",
+        "free-fields-not-a-list",
+        "select-a-spec-field-but-not-a-performance-knob",
+        "select-outside-narrowed-free-fields",
+        "select-with-no-free-fields",
+        "select-empty",
+        "select-not-a-mapping",
+        "select-value-not-a-scalar",
+    ],
+)
+def test_a_malformed_full_space_feature_field_is_exit_2(
+    full_feature_probe, capsys, entry, field, shape
+):
+    """Each refusal names the field and what a full space allows there."""
+    full_feature_probe.manifest["enumerate"]["feature_fields"]["bias"] = {
+        "name_token": "_bias",
+        **entry,
+    }
+    assert _run_probe(full_feature_probe) == 2
+    err = capsys.readouterr().err
+    assert f"enumerate.feature_fields.{field}" in err, err
+    assert shape in err, err
+    assert not full_feature_probe.out.exists()
+
+
 def test_a_builder_value_outside_the_vocabulary_is_refused(probe):
     probe.manifest["specialization"]["vocabulary"]["dtype"] = {"fp16": "FP16"}
     with pytest.raises(re_.EnumerationError, match=r"dtype.*bf16|bf16.*dtype"):
@@ -811,8 +1650,8 @@ def _also_performance(m):
             ["spec_overrides", "no_such"],
         ),
         (
-            lambda m: m["enumerate"].update(spec_overrides={"num_segments": 2}),
-            ["spec_overrides", "num_segments", "performance"],
+            lambda m: m["enumerate"].update(spec_overrides={"hdim": 128}),
+            ["spec_overrides", "hdim", "feature"],
         ),
         (_override_and_neutral, ["spec_overrides", "neutral_fields", "num_seqs"]),
     ],
@@ -826,7 +1665,7 @@ def _also_performance(m):
         "neutral-is-performance",
         "overrides-not-a-mapping",
         "overrides-unknown",
-        "overrides-is-performance",
+        "overrides-is-feature",
         "overrides-is-neutral",
     ],
 )
@@ -1008,6 +1847,32 @@ def test_the_dense_registry_names_a_tuning_id_for_every_kernel(manifest, registr
         assert kernel["provenance"]["rocke_tuning_id"]
 
 
+def test_a_mined_dense_shape_row_without_use_attn_bias_is_covered(registry):
+    """`mine_shapes.py` rows predate the ``use_attn_bias`` cell axis: such a row is a
+    bias-off request, and a row that sets the axis lands in the bias-on cell. The row uses
+    the canonical 8 / 8 heads, the only head configuration the dense cells list: the
+    kernel reads its head counts at runtime."""
+    row = {
+        "batch": 1,
+        "nhead_q": 8,
+        "nhead_k": 8,
+        "seqlen_q": 512,
+        "seqlen_k": 512,
+        "hdim_q": 64,
+        "hdim_v": 64,
+        "dtype": "bf16",
+        "mask_type": 1,
+        "sliding_window": 0,
+        "use_sinks": False,
+    }
+    lines, gaps, covered = re_.shapes_report(
+        registry, [row, {**row, "use_attn_bias": True}]
+    )
+    assert (gaps, covered) == (0, 2)
+    # Two cells, not one: the omitted axis is bias-off and the set one is bias-on.
+    assert "  covered: 2 shapes, 2 cells" in lines
+
+
 # ---------------------------------------------------------------------------
 # enumerate.also: one pack drawn from more than one registry candidate
 # ---------------------------------------------------------------------------
@@ -1084,6 +1949,106 @@ def test_an_also_section_must_cross_the_same_cell_fields(probe):
     assert _run_probe(probe, manifest) == 2
 
 
+# ---------------------------------------------------------------------------
+# enumerate.also spec_overrides: twins of the primary's kernels with one spec field
+# the registry never selects (e.g. an LSE output) set on
+# ---------------------------------------------------------------------------
+
+
+def _twin_section(**overrides) -> dict:
+    """The primary's own pin and cells, one kernel per cell (no free fields), with
+    ``order`` overridden and a template of its own."""
+    section = {
+        "pin": {"algorithm": "probe", "spec_id": "grid"},
+        "fixed": {"arch": synth.ARCH, "dtype": "bf16"},
+        "cells": copy.deepcopy(synth.probe_manifest("unused")["enumerate"]["cells"]),
+        "free_fields": [],
+        "spec_overrides": {"order": "col"},
+        "kernel_name_template": "probe.{dtype}_d{hdim}_h{heads}_c{causal}_tn{tile_n}_col",
+    }
+    section.update(overrides)
+    return section
+
+
+def _with_twins(probe, **overrides) -> dict:
+    manifest = copy.deepcopy(probe.manifest)
+    manifest["enumerate"]["also"] = [_twin_section(**overrides)]
+    return manifest
+
+
+def test_spec_overrides_add_twins_and_leave_the_primary_unchanged(probe):
+    """One twin per cell, named by the section's template and built with the
+    override; every primary kernel keeps its name, spec and default marker."""
+    assert _run_probe(probe) == 0
+    primary = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert _run_probe(probe, _with_twins(probe)) == 0
+    both = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert both[: len(primary)] == primary
+    twins = both[len(primary) :]
+    assert len(twins) == 4
+    assert all(k["name"].endswith("_col") for k in twins)
+    assert all(k["kernel_source"]["spec"]["order"] == "col" for k in twins)
+
+
+def test_a_twin_section_keeps_its_own_default_floor(probe):
+    """The twins are their own (cell, overrides) group, so each cell's twin is a
+    default that variant reduction keeps, beside the primary's default."""
+    assert _run_probe(probe, _with_twins(probe)) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    twins = [k for k in kernels if k["name"].endswith("_col")]
+    assert all(k.get("default") for k in twins)
+    assert sum(1 for k in kernels if k.get("default")) == 2 * len(twins)
+
+
+def test_an_override_ships_even_when_spec_fields_omit_it(probe):
+    """The override is what sets the twin apart, so its spec always carries it."""
+    manifest = _with_twins(probe, spec_fields=["dtype", "tile_m", "tile_n", "causal"])
+    assert _run_probe(probe, manifest) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert kernels[-1]["kernel_source"]["spec"]["order"] == "col"
+
+
+def test_twins_without_their_own_template_collide(probe):
+    """The primary's template renders no override slot here, so twin names repeat
+    primary names: refused rather than shipped as duplicates."""
+    manifest = _with_twins(probe)
+    del manifest["enumerate"]["also"][0]["kernel_name_template"]
+    assert _run_probe(probe, manifest) == 2
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [{"no_such_field": 1}, {}, ["order"], {"order": ["col"]}],
+    ids=["unknown-field", "empty", "not-a-mapping", "non-scalar"],
+)
+def test_bad_spec_overrides_are_refused(probe, overrides):
+    assert _run_probe(probe, _with_twins(probe, spec_overrides=overrides)) == 2
+
+
+def _feature_order(manifest: dict) -> dict:
+    """``manifest`` with ``order`` a feature field, as an LSE flag the twins set is."""
+    manifest["reduction"] = {
+        "fields": {"feature": ["order"], "performance": [], "ignored": []}
+    }
+    return manifest
+
+
+def test_a_twin_override_may_be_a_feature_axis_across_sections(probe):
+    """The primary keeps the registry's ``order`` and the twins pin ``col``, so the
+    engine's kernels take both values: a feature axis, not a pinned field."""
+    assert _run_probe(probe, _feature_order(_with_twins(probe))) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert len([k for k in kernels if k["name"].endswith("_col")]) == 4
+
+
+def test_an_override_every_section_pins_alike_is_no_feature_axis(probe, capsys):
+    """Pinned to ``col`` in every section, ``order`` takes one value engine-wide."""
+    manifest = _feature_order(_with_twins(probe))
+    manifest["enumerate"]["spec_overrides"] = {"order": "col"}
+    assert _run_probe(probe, manifest) == 2
+    assert "a pinned field takes one value" in capsys.readouterr().err
+
+
 def _split_also(split, **overrides) -> dict:
     """``split`` merged on its selector fields, plus a section over hdim 256."""
     manifest = _dedup(split)
@@ -1117,6 +2082,42 @@ def test_an_also_section_inherits_selector_fields_and_cell_keyed_by(split):
 def test_an_also_section_with_different_keying_is_refused(split, key, value):
     with pytest.raises(re_.EnumerationError, match=rf"enumerate.also\[0\] sets {key}"):
         _kernels(_split_also(split, **{key: value}))
+
+
+def _gqa_also(gqa, **overrides) -> dict:
+    """``gqa`` plus a section over head pairs (6, 2) and (3, 1), both ratio 3."""
+    manifest = copy.deepcopy(gqa)
+    primary = manifest["enumerate"]
+    primary["also"] = [
+        {
+            "pin": primary["pin"],
+            "fixed": primary["fixed"],
+            "cells": [
+                {"fields": ["nhead_q", "nhead_k"], "values": [[6, 2], [3, 1]]},
+                {"fields": ["batch"], "values": [1, 2]},
+            ],
+            "neutral_fields": primary["neutral_fields"],
+            **overrides,
+        }
+    ]
+    return manifest
+
+
+def test_an_also_section_inherits_cell_keyed_by_when_the_primary_sets_it(gqa):
+    """The ``gqa`` primary keys cells by ratio, so an omitted ``cell_keyed_by`` must
+    be copied down: stating it by hand gives the same kernels, and the section's
+    head pairs merge into one ratio-3 cell."""
+    kernels = _kernels(_gqa_also(gqa))
+    ratio3 = [k for k in kernels if k["metadata"]["num_queries_per_kv"] == 3]
+    # (6, 2) picks segments 4 and 2, (3, 1) picks 8 and 4; the shared 4 merges.
+    segments = [k["kernel_source"]["spec"]["num_segments"] for k in ratio3]
+    assert sorted(segments) == [2, 4, 8]
+    restated = _gqa_also(
+        gqa,
+        selector_fields=["nhead_q", "nhead_k", "batch"],
+        cell_keyed_by=["num_queries_per_kv"],
+    )
+    assert _kernels(restated) == kernels
 
 
 def _full(manifest: dict) -> dict:
@@ -1239,6 +2240,37 @@ def test_a_shape_only_an_also_section_lists_is_covered(probe, capsys):
     assert "covered: 1 shapes" in capsys.readouterr().out
 
 
+def test_a_shape_row_omitting_a_cell_axis_takes_the_requests_default(
+    feature_probe, capsys
+):
+    """A row from before the ``bias`` axis (``mine_shapes`` emits none) builds a
+    bias-off request, so it is the bias-off cell's shape, not a GAP; an explicit
+    bias-on row lands in the bias-on cell."""
+    row = {"hdim": 64, "heads": 8, "dtype": "bf16", "mask": 0}
+    for shapes, cells in (([row], 1), ([row, {**row, "bias": True}], 2)):
+        data = feature_probe.tmp / "shapes.json"
+        data.write_text(json.dumps(shapes))
+        capsys.readouterr()
+        assert _run_probe(feature_probe, None, "--shapes", str(data), "--strict") == 0
+        out = capsys.readouterr().out
+        assert f"  covered: {len(shapes)} shapes, {cells} cells\n" in out, out
+        assert "  GAP: 0 shapes, 0 cells\n" in out, out
+
+
+def test_a_shape_row_omitting_a_cell_axis_is_not_a_wildcard(feature_probe, capsys):
+    """Only the default is assumed: with just the bias-on cells listed, the same
+    legacy row is a GAP in the bias-off cell, named as such."""
+    group = feature_probe.manifest["enumerate"]["cells"][-1]
+    assert group["fields"] == ["bias"]
+    group["values"] = [True]
+    data = feature_probe.tmp / "shapes.json"
+    data.write_text(json.dumps([{"hdim": 64, "heads": 8, "dtype": "bf16", "mask": 0}]))
+    assert _run_probe(feature_probe, None, "--shapes", str(data), "--strict") == 1
+    out = capsys.readouterr().out
+    assert "  GAP: 1 shapes, 1 cells\n" in out, out
+    assert "bias: False" in out, out
+
+
 def test_manifest_heuristics_reach_the_generated_engine_and_its_ued(probe):
     """A promoted model's per-arch binding lives in the manifest's `engine` block: the
     enumerator copies that block into the config it writes (so regeneration gate g4's
@@ -1255,3 +2287,141 @@ def test_manifest_heuristics_reach_the_generated_engine_and_its_ued(probe):
     catalog = build_ued(config, mint_ids(config))["sort_kernel_catalog"]
     assert list(catalog) == ["default", "gfx942"]
     assert catalog["gfx942"] == [model]
+
+
+# hold_fields / performance overrides: a section pins a performance field to one value (a
+# production stack the registry's sweep never combines) and the others hold it.
+
+
+def _conv_hold(tmp_path, monkeypatch, **enumerate_keys):
+    manifest = synth.conv_probe_manifest(synth.provider(tmp_path, monkeypatch))
+    manifest["reduction"]["fields"] = {
+        "feature": ["direction", "dtype", "arch"],
+        "performance": [{"name": "tile_m"}],
+        "ignored": ["tile_n", "tile_k"],
+    }
+    manifest["enumerate"].update(enumerate_keys)
+    return manifest
+
+
+def _tile_ms(manifest) -> list:
+    return [k["kernel_source"]["spec"]["tile_m"] for k in _kernels(manifest)]
+
+
+def test_a_performance_field_varies_unless_the_section_holds_it(tmp_path, monkeypatch):
+    manifest = _conv_hold(tmp_path, monkeypatch)
+    assert _tile_ms(manifest) == [64, 128, 64, 128, 64, 128, 64, 128]
+    manifest["enumerate"]["hold_fields"] = ["tile_m"]
+    assert _tile_ms(manifest) == [64, 64, 64, 64]
+
+
+def test_a_section_may_override_a_performance_field_it_also_holds(
+    tmp_path, monkeypatch
+):
+    """The override moves the section's default spec; holding then keeps every spec of the
+    section there, so the performance field is one value per section."""
+    manifest = _conv_hold(
+        tmp_path, monkeypatch, hold_fields=["tile_m"], spec_overrides={"tile_m": 128}
+    )
+    assert _tile_ms(manifest) == [128, 128, 128, 128]
+
+
+def test_an_also_section_inherits_hold_fields_and_pins_its_own_value(
+    tmp_path, monkeypatch
+):
+    """The production-stack pattern: the primary holds the performance field at its
+    default and an `also` section, inheriting the hold, overrides it to another value, so
+    every cell ships one kernel per value."""
+    manifest = _conv_hold(tmp_path, monkeypatch, hold_fields=["tile_m"])
+    section = copy.deepcopy(manifest["enumerate"])
+    section["spec_overrides"] = {"tile_m": 128}
+    del section["hold_fields"]
+    manifest["enumerate"]["also"] = [section]
+    assert _tile_ms(manifest) == [64] * 4 + [128] * 4
+
+
+def test_one_rule_admits_a_pinned_performance_field_and_a_feature_axis(
+    tmp_path, monkeypatch
+):
+    """The two things a section may pin in one manifest: `tile_m` (performance) in one
+    `also` section, and `tile_n` (feature) in another that no other section pins alike. A
+    feature field every section leaves alone, or pins alike, is still refused (see
+    test_an_override_every_section_pins_alike_is_no_feature_axis)."""
+    manifest = _conv_hold(tmp_path, monkeypatch, hold_fields=["tile_m"])
+    manifest["reduction"]["fields"] = {
+        "feature": ["direction", "dtype", "arch", "tile_n"],
+        "performance": [{"name": "tile_m"}],
+        "ignored": ["tile_k"],
+    }
+    pinned_performance = copy.deepcopy(manifest["enumerate"])
+    pinned_performance["spec_overrides"] = {"tile_m": 128}
+    pinned_feature = copy.deepcopy(manifest["enumerate"])
+    pinned_feature["spec_overrides"] = {"tile_n": 128}
+    manifest["enumerate"]["also"] = [pinned_performance, pinned_feature]
+    kernels = _kernels(manifest)
+    tiles = [
+        (k["kernel_source"]["spec"]["tile_m"], k["kernel_source"]["spec"]["tile_n"])
+        for k in kernels
+    ]
+    assert tiles == [(64, 64)] * 4 + [(128, 64)] * 4 + [(64, 128)] * 4
+    # The pinned performance field changes how a kernel runs, not what it serves, so the
+    # cell's one floor covers it; the feature override serves other graphs, so it has its own.
+    assert [bool(k.get("default")) for k in kernels] == (
+        [True] * 4 + [False] * 4 + [True] * 4
+    )
+
+
+def test_hold_fields_naming_a_field_the_spec_lacks_is_exit_2(
+    tmp_path, monkeypatch, capsys
+):
+    manifest = _conv_hold(tmp_path, monkeypatch, hold_fields=["no_such"])
+    path = synth.write_manifest(tmp_path / "m.engine.yaml", manifest)
+    assert re_.main(["--manifest", str(path), "--plan-space"]) == 2
+    err = capsys.readouterr().err
+    assert "hold_fields" in err and "no_such" in err, err
+
+
+def test_registry_refuses_hold_fields_the_spec_lacks_when_it_reads_them(
+    tmp_path, monkeypatch
+):
+    """The names are checked as the section is read, not only once a full-space
+    enumeration reaches `select_full`, and in every `also` section."""
+    manifest = _conv_hold(tmp_path, monkeypatch, hold_fields=["no_such"])
+    with pytest.raises(re_.EnumerationError, match=r"hold_fields.*no_such"):
+        re_.Registry(manifest)
+
+    manifest = _conv_hold(tmp_path / "also", monkeypatch, hold_fields=["tile_m"])
+    section = copy.deepcopy(manifest["enumerate"])
+    section["hold_fields"] = ["no_such"]
+    manifest["enumerate"]["also"] = [section]
+    with pytest.raises(re_.EnumerationError, match=r"hold_fields.*no_such"):
+        re_.Registry(manifest)
+
+
+def test_hold_fields_on_a_slice_section_is_refused(probe, capsys):
+    """A slice section projects no performance field, so `hold_fields` there could hold
+    nothing: refused by name rather than ignored, as only `select_full` read it."""
+    probe.manifest["enumerate"]["hold_fields"] = ["tile_n"]
+    with pytest.raises(re_.EnumerationError, match=r"hold_fields.*'slice'"):
+        re_.Registry(probe.manifest)
+
+    assert _run_probe(probe) == 2
+    err = capsys.readouterr().err
+    assert "hold_fields" in err and "slice" in err, err
+
+
+def test_an_also_slice_section_must_not_inherit_hold_fields(tmp_path, monkeypatch):
+    """`hold_fields` is inherited by an `also` section; a slice one that inherits it is
+    refused too, and `hold_fields: []` opts that section out."""
+    manifest = _conv_hold(tmp_path, monkeypatch, hold_fields=["tile_m"])
+    section = copy.deepcopy(manifest["enumerate"])
+    section["space"] = "slice"
+    del section["hold_fields"]
+    manifest["enumerate"]["also"] = [section]
+    with pytest.raises(
+        re_.EnumerationError, match=r"an enumerate.also section sets hold_fields"
+    ):
+        re_.Registry(manifest)
+
+    section["hold_fields"] = []
+    re_.Registry(manifest)

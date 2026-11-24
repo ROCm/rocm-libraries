@@ -138,7 +138,7 @@ def test_parameter_groups_keep_explicit_selector_provenance_separate(tmp_path):
     ("StreamK", "Hybrid", 5, 0),
 ))
 def test_logic_extraction_regenerates_legacy_and_canonical_identity(tmp_path, strategy, assignment, mode, force):
-    from tensilelite.TensileLibLogicToYaml import formForkParams
+    from tensilelite.lib_logic_to_yaml import formForkParams
 
     canonical = _derive(tmp_path, "source", _config({
         "TileProcessingStrategy": [strategy], "WorkAssignment": [assignment],

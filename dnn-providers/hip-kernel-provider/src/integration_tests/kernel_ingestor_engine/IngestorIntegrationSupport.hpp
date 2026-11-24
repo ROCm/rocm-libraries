@@ -23,15 +23,20 @@
 #include <hip/hip_runtime.h>
 
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
+#include <hipdnn_data_sdk/utilities/CacheRoot.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/PathSanitizer.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/knob/Knob.hpp>
 #include <hipdnn_frontend/knob/KnobConstraint.hpp>
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/WinnerCacheFile.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
@@ -44,9 +49,23 @@
 #include "../IntegrationGraphVerificationHarness.hpp"
 #include "ScopedPluginLogCapture.hpp"
 #include "engines/kernel_ingestor_engine/packs/SdpaLayoutTestSupport.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/RankingTraceSupport.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/UnpulledModelsRecord.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
+
+// A test name's dtype token: "Fp16" for HALF, "Bf16" otherwise (the 16-bit conv engines).
+inline std::string dtypeSuffix(hipdnn_frontend::DataType dtype)
+{
+    return dtype == hipdnn_frontend::DataType::HALF ? "Fp16" : "Bf16";
+}
+
+// The engine log's count of the candidates a plan build ranked.
+inline std::string candidateCount(size_t candidates)
+{
+    return std::to_string(candidates) + " candidate(s)";
+}
 
 // The two forms in which the frontend saves a built plan.
 enum class SaveForm
@@ -61,6 +80,33 @@ struct ServedEngine
     const char* name;
     const char* arch;
 };
+
+// The one winner shard an engine's cache holds for @p arch, or an empty path if none is
+// there yet: <engine>/<uhd id>/<revision>-<model hash>/<arch>/winners.jsonl. The engine
+// keys its shard by its full identity (revision, UHD id, model hash), which only the
+// loaded descriptor set knows, so each test's fresh cache is searched for its one shard
+// instead of the path being derived directly.
+inline std::filesystem::path winnerShardPath(const std::string& engineName, const std::string& arch)
+{
+    const auto engineDir = hipdnn_data_sdk::utilities::cacheRoot() / "ingestor-winners"
+                           / std::string(hipdnn_plugin_sdk::ingestor::winnerCacheVersion())
+                           / hipdnn_data_sdk::utilities::sanitizeForPath(engineName);
+    const std::string strippedArch(hipdnn_plugin_sdk::stripArchFeatures(arch));
+    std::vector<std::filesystem::path> shards;
+    std::error_code error;
+    for(auto it = std::filesystem::recursive_directory_iterator(engineDir, error);
+        !error && it != std::filesystem::recursive_directory_iterator();
+        it.increment(error))
+    {
+        const auto& path = it->path();
+        if(path.filename() == "winners.jsonl" && path.parent_path().filename() == strippedArch)
+        {
+            shards.push_back(path);
+        }
+    }
+    EXPECT_LE(shards.size(), 1U) << "more than one winner shard under " << engineDir;
+    return shards.empty() ? std::filesystem::path{} : shards.front();
+}
 
 namespace detail
 {
@@ -126,12 +172,12 @@ inline std::string resetProviderModuleCaches()
     return {};
 }
 
-// Sets the loaded provider's own per-image byte limit for hipkernel:Gfx950ConvDgradAot's
-// batch chunker (Gfx950ConvDgradGeometry.hpp::batchChunkByteLimitForTesting()), so a
+// Sets the loaded provider's own per-image byte limit for the dgrad AOT engines' shared
+// batch chunker (ConvDgradAotGeometry.hpp::batchChunkByteLimitForTesting()), so a
 // small batch exercises the chunked-launch device path without a multi-GiB image. The
 // limit lives in a function-local static: a test in another TU that includes the header
 // and mutates it directly holds its own copy, never the plugin's, which is why this goes
-// through the plugin's exported hipdnnEnginePluginSetGfx950ConvDgradAotBatchChunkByteLimit
+// through the plugin's exported hipdnnEnginePluginSetConvDgradAotBatchChunkByteLimit
 // ForTesting symbol instead. Returns a description of the failure, or an empty string.
 inline std::string setProviderDgradBatchChunkByteLimit(int64_t limit)
 {
@@ -146,13 +192,13 @@ inline std::string setProviderDgradBatchChunkByteLimit(int64_t limit)
 
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     auto* setLimit = reinterpret_cast<void (*)(int64_t)>(hipdnn_data_sdk::utilities::getSymbol(
-        library, "hipdnnEnginePluginSetGfx950ConvDgradAotBatchChunkByteLimitForTesting"));
+        library, "hipdnnEnginePluginSetConvDgradAotBatchChunkByteLimitForTesting"));
     if(setLimit == nullptr)
     {
         hipdnn_data_sdk::utilities::closeLibrary(library);
         return "the provider at " + pluginPath.string()
                + " exports no "
-                 "hipdnnEnginePluginSetGfx950ConvDgradAotBatchChunkByteLimitForTesting; it was "
+                 "hipdnnEnginePluginSetConvDgradAotBatchChunkByteLimitForTesting; it was "
                  "built without HIPDNN_ENABLE_KERNEL_INGESTOR, or the test-only hook was removed";
     }
 
@@ -160,6 +206,32 @@ inline std::string setProviderDgradBatchChunkByteLimit(int64_t limit)
 
     hipdnn_data_sdk::utilities::closeLibrary(library);
     return {};
+}
+
+// The loaded provider's count of hipkernel:Gfx950ConvDgradAot and hipkernel:Gfx1250ConvDgradAot
+// implicit-GEMM launches, one per batch slice (exported as
+// hipdnnEnginePluginConvDgradAotImplicitLaunchCountForTesting). Writes a description of
+// the failure to error and returns -1 if the hook is not there.
+inline int64_t providerDgradImplicitLaunchCount(std::string& error)
+{
+    const auto pluginPath = loadedProviderPluginPath();
+    auto* library = hipdnn_data_sdk::utilities::openLoadedLibrary(pluginPath);
+    if(library == nullptr)
+    {
+        error = "the provider at " + pluginPath.string() + " is not loaded";
+        return -1;
+    }
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    auto* count = reinterpret_cast<int64_t (*)()>(hipdnn_data_sdk::utilities::getSymbol(
+        library, "hipdnnEnginePluginConvDgradAotImplicitLaunchCountForTesting"));
+    const auto value = count == nullptr ? -1 : count();
+    if(count == nullptr)
+    {
+        error = "the provider at " + pluginPath.string()
+                + " exports no hipdnnEnginePluginConvDgradAotImplicitLaunchCountForTesting";
+    }
+    hipdnn_data_sdk::utilities::closeLibrary(library);
+    return value;
 }
 
 // Replaces handle with a new hipDNN handle that uses stream.
@@ -342,6 +414,50 @@ inline std::optional<std::string>
     return std::nullopt;
 }
 
+// Who ordered that engine's catalog (RankingTraceSupport.hpp), read from @p recorder.
+inline std::optional<std::string>
+    rankingDecidedBy(const ServedEngine& engine,
+                     const hipdnn_test_sdk::utilities::IsolatedLogRecorder& recorder)
+{
+    return testing::rankingDecidedBy(engine.name, recorder.getRecordedLogs());
+}
+
+// Whether every trained ranker that engine's UED binds for its arch was left out of the
+// production pack because its model.bin was never pulled, as the pack's skip record says.
+inline bool boundRankerLeftOutAsUnpulled(const ServedEngine& engine)
+{
+    const std::filesystem::path root
+        = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR");
+    if(root.empty())
+    {
+        return false;
+    }
+    for(const auto& entry : runtimeCatalog().engines)
+    {
+        const auto& ued = entry.second.descriptor;
+        if(ued.name != engine.name)
+        {
+            continue;
+        }
+        const auto bound = ued.sortKernelCatalog.find(engine.arch);
+        if(bound == ued.sortKernelCatalog.end() || bound->second.empty())
+        {
+            return false;
+        }
+        for(const auto& id : bound->second)
+        {
+            const auto uhd = hipdnn_flatbuffers_sdk::utilities::formatUuid(id);
+            if(!testing::unpulledRecordNames(root / engine.arch, uhd)
+               && !testing::unpulledRecordNames(root, uhd))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
 // Prints `KNOB_SELECTED <case> <kernelId>` when the case ends, however it ends, so a run's
 // log carries the selected kernel of every case, including a failing one.
 class SelectedKernelReport
@@ -428,6 +544,20 @@ protected:
         return hipdnn_data_sdk::utilities::engineNameToId(_engine.name);
     }
 
+    // Whether the engine is in graph's ranked engine list, for a case that expects it to be
+    // left out.
+    bool offersToServe(hipdnn_frontend::graph::Graph& graph)
+    {
+        auto result = graph.build_operation_graph(this->_handle);
+        EXPECT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        std::vector<int64_t> rankedEngineIds;
+        result = graph.get_ranked_engine_ids(rankedEngineIds);
+        return result.code == hipdnn_frontend::ErrorCode::OK
+               && std::find(rankedEngineIds.begin(), rankedEngineIds.end(), engineId())
+                      != rankedEngineIds.end();
+    }
+
     // On engine.arch the engine's absence from the ranked list is a missing engine or pack,
     // not a skip.
     void buildOperationGraphTheEngineOffersToServe(hipdnn_frontend::graph::Graph& graph)
@@ -470,6 +600,18 @@ enum class SdpaMask
     WINDOW_BOTTOM_RIGHT
 };
 
+// The additive bias (attn_mask) a graph carries: none, or fp32 at one of the extents the
+// engine serves, each axis but the key one either full or broadcast. Packed, key axis
+// innermost.
+enum class IngestorSdpaBias
+{
+    NONE,
+    FULL, // [B, Hq, Sq, Skv]
+    PER_BATCH, // [B, 1, Sq, Skv]
+    PER_HEAD, // [1, Hq, Sq, Skv]
+    KEY_ROW // [1, 1, 1, Skv]
+};
+
 // The memory layout of a [B, H, S, D] SDPA tensor, shared with the unit suites.
 using kernel_ingestor_engine::testing::SdpaLayout;
 
@@ -498,6 +640,11 @@ struct IngestorSdpaGraphSpec
     // The layouts of K and V. Q and O are BSHD.
     SdpaLayout kLayout = SdpaLayout::BSHD;
     SdpaLayout vLayout = SdpaLayout::BSHD;
+    // K and V are one tensor (one descriptor, one buffer), so the graph has three unique
+    // inputs instead of four. vLayout is ignored.
+    bool sharedKv = false;
+    // The additive bias the node names as its attn_mask.
+    IngestorSdpaBias bias = IngestorSdpaBias::NONE;
 };
 
 struct SdpaGraph
@@ -558,7 +705,7 @@ inline std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>
 // softmax scale 1/sqrt(D), set explicitly unless the shape omits it. O is laid out
 // explicitly: the frontend's default for an unset output is packed BHSD, which the engines
 // decline. A shape with stats binds the stats output as the frontend does,
-// FLOAT [B, Hq, Sq, 1], packed.
+// FLOAT [B, Hq, Sq, 1], packed. A shape with a bias carries it as an fp32 tensor (BIAS_UID).
 inline SdpaGraph buildSdpaGraph(const std::string& name, const IngestorSdpaGraphSpec& shape)
 {
     constexpr int64_t Q_UID = 1;
@@ -566,6 +713,7 @@ inline SdpaGraph buildSdpaGraph(const std::string& name, const IngestorSdpaGraph
     constexpr int64_t V_UID = 3;
     constexpr int64_t O_UID = 4;
     constexpr int64_t STATS_UID = 5;
+    constexpr int64_t BIAS_UID = 6;
 
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name(name)
@@ -589,14 +737,15 @@ inline SdpaGraph buildSdpaGraph(const std::string& name, const IngestorSdpaGraph
                             shape.seqKv,
                             shape.headSize,
                             shape.kLayout);
-    auto v = makeSdpaTensor(V_UID,
-                            "V",
-                            shape.dataType,
-                            shape.batch,
-                            shape.kvHeads,
-                            shape.seqKv,
-                            shape.headSize,
-                            shape.vLayout);
+    auto v = shape.sharedKv ? k
+                            : makeSdpaTensor(V_UID,
+                                             "V",
+                                             shape.dataType,
+                                             shape.batch,
+                                             shape.kvHeads,
+                                             shape.seqKv,
+                                             shape.headSize,
+                                             shape.vLayout);
 
     hipdnn_frontend::graph::SdpaAttributes attributes;
     attributes.set_name(name);
@@ -643,6 +792,24 @@ inline SdpaGraph buildSdpaGraph(const std::string& name, const IngestorSdpaGraph
     if(shape.withStats)
     {
         attributes.set_generate_stats(true);
+    }
+    if(shape.bias != IngestorSdpaBias::NONE)
+    {
+        const bool fullBatch
+            = shape.bias == IngestorSdpaBias::FULL || shape.bias == IngestorSdpaBias::PER_BATCH;
+        const bool fullHeads
+            = shape.bias == IngestorSdpaBias::FULL || shape.bias == IngestorSdpaBias::PER_HEAD;
+        const std::vector<int64_t> dims{fullBatch ? shape.batch : 1,
+                                        fullHeads ? shape.queryHeads : 1,
+                                        shape.bias == IngestorSdpaBias::KEY_ROW ? 1 : shape.seqQ,
+                                        shape.seqKv};
+        // Packed, key axis innermost.
+        const std::vector<int64_t> strides{
+            dims[1] * dims[2] * dims[3], dims[2] * dims[3], dims[3], 1};
+        auto bias = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+        bias->set_uid(BIAS_UID).set_name("Bias").set_dim(dims).set_stride(strides).set_data_type(
+            hipdnn_frontend::DataType::FLOAT);
+        attributes.set_bias(bias);
     }
 
     auto outputs = graph->sdpa(q, k, v, attributes);

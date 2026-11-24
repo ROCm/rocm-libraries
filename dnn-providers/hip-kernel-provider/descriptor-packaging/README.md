@@ -49,7 +49,7 @@ selection is per-UKD on `kernel_source.kind`, never per-folder, so one root feed
 producer into one kpack per arch. Nothing is registered in CMake: adding a descriptor is
 dropping files in a folder.
 
-Two filters decide what a build packs, and both prune exactly as arch pruning does:
+Three filters decide what a build packs, and all prune exactly as arch pruning does:
 
 - **Family folders.** A descriptor family lives in a top-level child folder of a root
   (`rocKE/` and `FlyDSL/` today; `hip/` has no switch). `HKP_DESCRIPTOR_FAMILIES` in
@@ -60,6 +60,12 @@ Two filters decide what a build packs, and both prune exactly as arch pruning do
   name deeper in the tree is not a family. A root that is itself placed inside a family
   folder (for example `descriptors/rocKE/...`) is not filtered by that family's switch:
   pointing a root there is the user's responsibility.
+- **Incomplete bundles.** `--exclude-folder` also takes a `/`-separated path under the
+  root, which excludes that one folder (case-insensitively, like a family). The provider
+  passes `rocKE/<bundle>` to the production root, and to the probes that read it, for
+  every rocKE bundle whose DVC outputs were not pulled (`HKP_PRODUCT_EXCLUDED_BUNDLES`,
+  set by the provider's DVC check): its git-tracked descriptors may name one that lives
+  in the missing output, which the packer would refuse as a dangling reference.
 - **Producer kinds.** A `kernel_source.kind` this build has no producer for is passed
   as `--disable-kind <kind>`. Its UKDs are dropped from their KDPs, and a KDP left with
   none does not ship. The rocKE producer, and the private rocKE wheels and comgr it
@@ -537,11 +543,11 @@ export AMD_COMGR_CACHE_DIR=/tmp/comgr-cache   # RAM disk or local disk
 
 `HKP_PACK_JOBS` is read by a **direct child run** of `hkp_pack`. Inside the build it comes
 from the `PACK_JOBS <n>` argument of each `hkp_wire_pack_target()` call: the test roots
-pass `1`, or `2` for `integration`, the packaging probes pass none, and the production root
-passes `HIPKERNELPROVIDER_PRODUCT_PACK_JOBS`. That cache variable is empty by default, which
-passes none, so the packer uses its default; set it to size the production pool for a large
-catalog on a wide host. The reason is in the `hkp_wire_pack_target()` header in
-`cmake/HkpPackaging.cmake`.
+pass `1`, or `2` for `integration`, and the production root passes
+`HIPKERNELPROVIDER_PRODUCT_PACK_JOBS`. That cache variable is empty by default, which
+passes none, so the packer uses its default; set it to size the production pool for a
+large catalog on a wide host. The packaging probes pass none. The reason is in the
+`hkp_wire_pack_target()` header in `cmake/HkpPackaging.cmake`.
 
 ## rocKE toolchain pins
 
@@ -551,7 +557,7 @@ Two `CACHE` variables, resolved once in `_hkp_resolve_rocke_args()` under
 | Variable | Forwarded as | Reaches | Effect |
 |---|---|---|---|
 | `HIPKERNELPROVIDER_ROCKE_COMGR_LIB` | `ROCKE_COMGR_LIB` | the pack step and the ctest entries | Explicit `libamd_comgr` for the rocKE producer to load. Empty by default (derived from the `amd_comgr` package); set it to override, e.g. on Windows where a System32 `amd_comgr.dll` can shadow the ROCm one. |
-| `HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR` | `ROCKE_LLVM_FLAVOR` | the pack step only | LLVM IR flavor rocKE lowers to (`llvm20`, `llvm22`, `llvm23`, `llvm24`). Empty by default (derived from the loaded COMGR's LLVM); set it to lower exactly as a catalog was swept -- the gfx950 conv AOT catalogs were measured as `llvm22`. An unrecognized value is only rejected when the pack step runs, not at configure. |
+| `HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR` | `ROCKE_LLVM_FLAVOR` | the pack step only | LLVM IR flavor rocKE lowers to (`llvm20`, `llvm22`, `llvm23`, `llvm24`). Empty by default (derived from the loaded COMGR's LLVM); set it to lower exactly as a catalog was swept -- the gfx950 conv AOT catalogs were measured as `llvm22`, the gfx1250 dgrad catalog as `llvm24`. The value applies to every catalog the pack step builds, and a catalog refuses an older flavor than its own, so a build that packs both architectures pins `llvm24` (or leaves it derived from an LLVM 24 COMGR). An unrecognized value is only rejected when the pack step runs, not at configure. |
 
 Changing either repacks every rocKE-sourced catalog with a different lowering, so a silent
 loss of the forwarding would repack with whatever rocke derives instead, unnoticed.
@@ -688,8 +694,8 @@ does not guarantee, or a variant with its own known risk.
 ```cmake
 # One integration, a chosen representative set.
 hkp_add_packaging_probe(ARCH gfx950 NAME attention_dense
-    UKDS attention_dense.fp16_d64_hq8_kv1_c1_bm128_bn64.gfx950
-         attention_dense.bf16_d64_hq8_kv1_c1_bm256_bn32.gfx950)
+    UKDS attention_dense.fp16_d64_c1_bm128_bn64.gfx950
+         attention_dense.bf16_d64_c1_bm256_bn32.gfx950)
 ```
 
 - **With `UKDS`**, the probe packs exactly the listed UKDs, selected by UKD `name`. Pick a
@@ -762,7 +768,7 @@ Greedily, the UKD covering the most uncovered pairs is kept, ties broken by sort
 until every pair is covered; the result is deterministic. A group in which no field varies,
 and every group of a kind without a sweep field (`hip`, `hsaco`, `embedded_source`), keeps
 one UKD, the first by sorted `name`. Kept UKDs keep their authored order. The gfx950 dense
-attention KDP (840 UKDs in one group, 7 varying spec fields) keeps 17.
+attention KDP (60 UKDs in one group, 6 varying spec fields) keeps 4.
 
 - **Each value is packed; combinations are not.** The sweep guarantees, say, that some fp16
   UKD and some causal UKD are packed, not that an fp16 causal one is. Breakage specific to

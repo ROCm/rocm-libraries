@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import tensilelite.TensileCreateLibrary.Run as Run
+import tensilelite.create_library.run as Run
 
 pytestmark = pytest.mark.unit
 

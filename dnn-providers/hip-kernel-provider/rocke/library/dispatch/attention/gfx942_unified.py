@@ -27,7 +27,7 @@ from .common import (
     AttentionRequest,
     AttentionSpec,
     FAMILY,
-    _problem,
+    attention_problem,
     _request_errors,
     _selector_matches,
 )
@@ -96,13 +96,10 @@ def _variants():
 
 GFX942_TUNING_VARIANTS = tuple(_variants())
 
-
-def _variant_features(variant: AttentionGeometryVariant) -> frozenset:
-    """Additive bias is emitted on the narrow 16x16 and split-KV score paths;
-    the 32x32x8 specs and the 4-warp GQA builder reject it."""
-    if variant.codepath in ("narrow", "splitkv"):
-        return frozenset({"attn_bias"})
-    return frozenset()
+# The gfx942 dense_pipe candidate's algorithm (see
+# _make_gfx942_dense_pipe_candidate), named so a caller outside this package
+# (the SDPA gate) does not have to reconstruct the literal.
+GFX942_DENSE_PIPE_ALGORITHM = "dense_pipe"
 
 
 def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
@@ -132,7 +129,7 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
-        problem = _problem(req)
+        problem = attention_problem(req)
         ok, why = supports_native_unified_attention(problem, arch=req.arch)
         if not ok:
             return False, why
@@ -151,7 +148,7 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, AttentionRequest)
-        problem = _problem(req)
+        problem = attention_problem(req)
         return AttentionSpec(
             path="2d",
             head_size=problem.head_size,
@@ -165,7 +162,7 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
     candidate = KernelCandidate(
         name=name,
         family=FAMILY,
-        algorithm="dense_pipe",
+        algorithm=GFX942_DENSE_PIPE_ALGORITHM,
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=5,
@@ -194,6 +191,6 @@ def register(route: CandidateRegistry, execution: CandidateRegistry) -> None:
     """The dense_pipe path routes only; each tuning geometry goes on both."""
     route.register(_make_gfx942_dense_pipe_candidate())
     for variant in GFX942_TUNING_VARIANTS:
-        candidate = make_tuning_candidate(variant, _variant_features(variant))
+        candidate = make_tuning_candidate(variant)
         route.register(candidate)
         execution.register(candidate)

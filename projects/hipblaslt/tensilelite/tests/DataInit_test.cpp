@@ -1,6 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "ClientArgsTestUtils.hpp"
 #include "ClientProblemFactory.hpp"
 #include "DataInitialization.hpp"
 #include "DataInitializationHelpers.hpp"
@@ -48,6 +49,8 @@ using TensileLite::PerformanceMetric;
 using TensileLite::TensorDescriptor;
 using TensileLite::Client::isMXProblem;
 using TensileLite::Client::isMXTensor;
+using TensileLite::TestUtils::makeMinimalClientArgs;
+using TensileLite::TestUtils::setOption;
 
 // Shorthand for the production helper namespace under test (MX builds only).
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
@@ -55,12 +58,6 @@ namespace dt = TensileLite::Client::detail;
 #endif
 namespace
 {
-    template <typename T>
-    void setOption(TensileLite::Client::po::variables_map& args, std::string const& name, T value)
-    {
-        args[name].value() = std::move(value);
-    }
-
     // -----------------------------------------------------------------------
     // Helper: build a ContractionProblemGemm with the requested A/B dtypes.
     // Mirrors tests/MXScalePadding_test.cpp::makeMXProblem so the geometry
@@ -103,74 +100,6 @@ namespace
                                 /*padScaleTensorFreeDim=*/true, mxBlockFreeB);
         return problem;
     }
-
-    TensileLite::Client::po::variables_map makeMinimalClientArgs(int mxScaleFormat)
-    {
-        using namespace TensileLite::Client;
-
-        po::variables_map args;
-        setOption(args, "problem-identifier", std::string("Contraction_l_Ailk_Bljk_Cijk_Dijk"));
-        setOption(args, "problem-size", std::vector<std::vector<size_t>>{{128, 128, 1, 512}});
-        setOption(args, "strided-batched", true);
-        setOption(args, "batch-mode", 0);
-        setOption(args, "grouped-gemm", false);
-        setOption(args, "sparse", 0);
-        setOption(args, "high-precision-accumulate", false);
-        setOption(args, "kernel-language", KernelLanguage::Any);
-        setOption(args, "performance-metric", PerformanceMetric::DeviceEfficiency);
-        setOption(args, "deterministic-mode", false);
-        setOption(args, "c-equal-d", false);
-        setOption(args, "type", rocisa::DataType::Float8);
-        setOption(args, "a-type", rocisa::DataType::Float8);
-        setOption(args, "b-type", rocisa::DataType::Float8);
-        setOption(args, "c-type", rocisa::DataType::Float);
-        setOption(args, "d-type", rocisa::DataType::Float);
-        setOption(args, "alpha-type", rocisa::DataType::Float);
-        setOption(args, "beta-type", rocisa::DataType::Float);
-        setOption(args, "compute-input-type-A", rocisa::DataType::Float8);
-        setOption(args, "compute-input-type-B", rocisa::DataType::Float8);
-        setOption(args, "f32-xdl-math-op", rocisa::DataType::Float);
-        setOption(args, "activation-compute-type", rocisa::DataType::Float);
-        // Deliberately 0 here (not 32): these only control whether
-        // ClientProblemFactory calls setMXScaleA/B on the *internal dummy*
-        // problem it builds for sizing purposes (see ClientProblemFactory.cpp),
-        // which is unrelated to the `problem` object this test passes directly
-        // into referenceNeedsPerSolutionRecompute(). When non-zero here, the
-        // DataInitialization ctor's storage-geometry computation for the
-        // swizzled MX-scale tensor indexes problem.freeIndicesA()[0] /
-        // freeIndicesB()[0] on that dummy problem without a bounds check; for
-        // the minimal synthetic problem-size/identifier used here those
-        // indices can be empty, which segfaults (only reachable on real
-        // hardware, so it stays hidden behind GTEST_SKIP() on any other arch).
-        // m_mxScaleFormat (checked by referenceNeedsPerSolutionRecompute) is
-        // read directly from "mx-scale-format" below, independent of these.
-        setOption(args, "mx-a-block", 0);
-        setOption(args, "mx-b-block", 0);
-        setOption(args, "mx-a-type", rocisa::DataType::E8);
-        setOption(args, "mx-b-type", rocisa::DataType::E8);
-        setOption(args, "mx-scale-format", mxScaleFormat);
-        setOption(args, "fused-gemm-a2a", false);
-        setOption(args, "metadata-layout", 0);
-        setOption(args, "a-ops", TensileLite::TensorOps{});
-        setOption(args, "b-ops", TensileLite::TensorOps{});
-        setOption(args, "c-ops", TensileLite::TensorOps{});
-        setOption(args, "d-ops", TensileLite::TensorOps{});
-        setOption(args, "use-gradient", false);
-        setOption(args, "output-amaxD", false);
-        setOption(args, "use-scaleAB", std::string());
-        setOption(args, "use-scaleCD", false);
-        setOption(args, "use-bias", 0);
-        setOption(args, "bias-source", static_cast<int>(ContractionProblemGemm::TENSOR::D));
-        setOption(args, "use-scaleAlphaVec", 0);
-        setOption(args, "device-idx", 0);
-        setOption(args, "num-elements-to-validate", 0);
-        setOption(args, "pristine-on-gpu", true);
-        setOption(args, "prune-mode", TensileLite::Client::PruneSparseMode::PruneRandom);
-        setOption(args, "rotating-buffer-size", 0);
-        setOption(args, "rotating-buffer-mode", 0);
-        setOption(args, "bounds-check", TensileLite::Client::BoundsCheckMode::Disable);
-        return args;
-    }
 } // namespace
 
 TEST(ClientAlphaMode, ScalarSupportDefaultsToScalarAndAllowsRuntimeOverride)
@@ -204,6 +133,37 @@ TEST(ClientAlphaMode, RejectsReservedScalarOnlyAndUnknownSupportModes)
         setOption(args, "use-scaleAlphaVec", modes);
         EXPECT_THROW(TensileLite::Client::ClientProblemFactory factory(args), std::invalid_argument);
     }
+}
+
+// A random alpha or beta is drawn once for the problem and again for the launch, so a
+// draw of +-1 here must not restrict the problem to a value-specialized solution: the
+// launch would then throw "Alpha value X doesn't match that set in problem".
+TEST(ClientScalarRestriction, RandomAlphaAndBetaAreUnrestricted)
+{
+    auto args = makeMinimalClientArgs(0);
+    setOption(args, "init-alpha", TensileLite::Client::InitMode::Random);
+    setOption(args, "init-beta", TensileLite::Client::InitMode::Random);
+    // Each draw is in [-1000, 1000]; 4000 problems draw +-1 with probability 1 - e^-8.
+    for(int i = 0; i < 4000; ++i)
+    {
+        TensileLite::Client::ClientProblemFactory factory(args);
+        auto problem = std::dynamic_pointer_cast<ContractionProblemGemm>(factory.problems()[0]);
+        ASSERT_NE(problem, nullptr);
+        ASSERT_EQ(problem->alphaRestriction(), TensileLite::ScalarValue::Any) << "problem " << i;
+        ASSERT_EQ(problem->betaRestriction(), TensileLite::ScalarValue::Any) << "problem " << i;
+    }
+}
+
+TEST(ClientScalarRestriction, FixedAlphaAndBetaKeepTheirRestriction)
+{
+    auto args = makeMinimalClientArgs(0);
+    setOption(args, "init-alpha", TensileLite::Client::InitMode::One);
+    setOption(args, "init-beta", TensileLite::Client::InitMode::One);
+    TensileLite::Client::ClientProblemFactory factory(args);
+    auto problem = std::dynamic_pointer_cast<ContractionProblemGemm>(factory.problems()[0]);
+    ASSERT_NE(problem, nullptr);
+    EXPECT_EQ(problem->alphaRestriction(), TensileLite::ScalarValue::One);
+    EXPECT_EQ(problem->betaRestriction(), TensileLite::ScalarValue::One);
 }
 
 TEST(ClientProblemFactoryDefaults, DisablesOmittedOptionalOutputsAndScales)
@@ -1119,4 +1079,69 @@ TEST(CopyTensorVoid, CopiesSource)
     ASSERT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
 
     EXPECT_EQ(dst, src);
+}
+
+// =============================================================================
+//   Section 8 — DataInitialization::initArrayTrig over a broadcast dimension
+// =============================================================================
+// A zero-stride batch dimension shares one matrix across batches, so the 3 x 4 x 2 tensor below
+// has 12 allocated elements. Trig must fill them once, from batch 0 (sin of the logical index
+// 0..11); otherwise batch 1 races to overwrite them with sin(12..23).
+TEST(TrigInit, BroadcastDimensionHoldsFirstBatch)
+{
+    using TensileLite::Client::DataInitialization;
+    TensorDescriptor desc("a", rocisa::DataType::Float, {3, 4, 2}, {1, 3, 0});
+    ASSERT_EQ(desc.totalAllocatedElements(), 12u);
+    for(int rep = 0; rep < 20; rep++)
+    {
+        std::vector<float> array(12, 42.0f);
+        DataInitialization::initArrayTrig<float, false, false>(array.data(), desc);
+        for(size_t k = 0; k < array.size(); k++)
+            ASSERT_EQ(array[k], static_cast<float>(std::sin(double(k))))
+                << "rep " << rep << ", element " << k;
+    }
+}
+
+// =============================================================================
+//   Section 9 — DataInitialization::getValue<T, InitMode::RandomNarrow>
+// =============================================================================
+// RandomNarrow assembles random sign/significand bits with an exponent in [-100, 0], so every
+// value must be finite with magnitude below 2 and a biased exponent in [bias - 100, bias].
+// BFloat16 used to pass the assembled bit pattern to BFloat16's value constructor, which treats
+// it as a number (0x3f80 became 16256.0f instead of 1.0f).
+namespace
+{
+    template <typename T>
+    void expectRandomNarrowRange(int expBits, int sigBits, uint32_t (*bitsOf)(T))
+    {
+        using TensileLite::Client::DataInitialization;
+        using TensileLite::Client::InitMode;
+        const int bias = (1 << (expBits - 1)) - 1;
+        for(int i = 0; i < 10000; i++)
+        {
+            T        v    = DataInitialization::getValue<T, InitMode::RandomNarrow>();
+            float    f    = static_cast<float>(v);
+            uint32_t bits = bitsOf(v);
+            int      exp  = (bits >> sigBits) & ((1 << expBits) - 1);
+            ASSERT_TRUE(std::isfinite(f)) << "bits=0x" << std::hex << bits;
+            ASSERT_LT(std::fabs(f), 2.0f) << "bits=0x" << std::hex << bits;
+            ASSERT_GE(exp, bias - 100) << "bits=0x" << std::hex << bits;
+            ASSERT_LE(exp, bias) << "bits=0x" << std::hex << bits;
+        }
+    }
+} // namespace
+
+TEST(RandomNarrowInit, FloatStaysInNarrowRange)
+{
+    expectRandomNarrowRange<float>(8, 23, [](float v) {
+        uint32_t u;
+        std::memcpy(&u, &v, sizeof(u));
+        return u;
+    });
+}
+
+TEST(RandomNarrowInit, BFloat16StaysInNarrowRange)
+{
+    expectRandomNarrowRange<TensileLite::BFloat16>(
+        8, 7, [](TensileLite::BFloat16 v) { return uint32_t(v.data); });
 }

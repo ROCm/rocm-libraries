@@ -31,7 +31,7 @@ See the gfx950 module docstring for the split-KV grid / workspace layout.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import ClassVar, Optional, Tuple
 
 from kernels.common._attention_additive_bias import (
@@ -44,10 +44,11 @@ from kernels.common._attention_strided_kv import (
     strided_kv_offset,
     strided_kv_resource,
 )
-from kernels.common._lse_store import lse_row_has_mass, lse_store
+from kernels.common._lse_store import emit_lse_field, reduce_lse_store
+from kernels.common._spec_checks import require_bool
 from kernels.common.attention_split_kv_reduce import (
     split_kv_reduce_spec,
-    tiled_reduce_unsupported_reason,
+    supports_split_kv_reduce,
 )
 
 from rocke.core.ir import (
@@ -76,6 +77,7 @@ from rocke.helpers.attention import (
     wave64_reduce_max as _wave64_reduce_max,
     wave64_reduce_sum as _wave64_reduce_sum,
 )
+from rocke.helpers.attention_arch_caps import attn_arch_caps
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
@@ -118,10 +120,6 @@ class UnifiedAttention3DTiledSpec:
     dispatcher and harnesses can construct it identically.
     """
 
-    # Fields added after tuning ids and kernel cache keys were first stored for
-    # this spec: identity payloads leave them out while off, so stored entries
-    # keep resolving (see dispatch.attention.common._identity_omitted).
-    _IDENTITY_OMIT_WHEN_OFF: ClassVar[Tuple[str, ...]] = ("use_additive_bias",)
     # Problem fields this body reads as trailing i32 kernargs instead of baking
     # them, in ABI order. The launch signature, the argument pack and the cache
     # key read the same tuple (``_runtime_kernarg_fields``).
@@ -133,6 +131,10 @@ class UnifiedAttention3DTiledSpec:
     # The cu_q search derives its trip count from the num_seqs kernarg, so
     # num_seqs never reaches the IR and one binary serves every batch.
     RUNTIME_SEARCH_ITERS: ClassVar[bool] = True
+    # Fields added after tuning ids and kernel cache keys were first stored for
+    # this spec: identity payloads leave them out while off, so stored entries
+    # keep resolving (see dispatch.attention.common.identity_omit_names).
+    _IDENTITY_OMIT_WHEN_OFF: ClassVar[Tuple[str, ...]] = ("use_additive_bias",)
 
     head_size: int
     block_size: int
@@ -200,11 +202,7 @@ class UnifiedAttention3DTiledSpec:
     use_wave_page_id_load: bool = False
 
     def __post_init__(self):
-        if type(self.use_additive_bias) is not bool:
-            raise ValueError(
-                "use_additive_bias must be a bool, got "
-                f"{type(self.use_additive_bias).__name__}"
-            )
+        require_bool("use_additive_bias", self.use_additive_bias)
         if self.num_segments < 1:
             raise ValueError("num_segments must be >= 1")
         if self.kv_layout not in ("paged", "strided"):
@@ -729,8 +727,9 @@ def build_unified_attention_3d_tiled(
     # to 2 halves/lane (1 dword) and issue 4x as many calls to move the same
     # bytes. The LDS deposit stays lane-contiguous, so the [2, T, HD] K/V_lds
     # layout and the strided-V B-operand math are unchanged. See
-    # attention_tiled_2d.py ASYNC_LDS_MAX_DWORDS for the same clamp.
-    ASYNC_LDS_DWORDS = 1
+    # attention_tiled_2d.py ASYNC_LDS_MAX_DWORDS for the same clamp. The width
+    # comes from the attention capability table.
+    ASYNC_LDS_DWORDS = attn_arch_caps("gfx942").max_lds_dma_dwords
     HALVES_PER_LANE = ASYNC_LDS_DWORDS * 2  # 4 bytes / 2 bytes-per-half
     big_bytes = b.const_i32(0x7FFF0000)
     if spec.kv_layout == "strided":
@@ -1380,18 +1379,10 @@ class UnifiedAttentionReduceTiledSpec:
     dtype: str
     num_segments: int
     waves_per_eu: Optional[int] = None
-    # emit_lse: also write the natural-log softmax normalizer (LSE) as FP32
-    #   [total_q, num_query_heads, 1] through a trailing ``lse_ptr`` argument.
-    #   Off by default; off adds no LSE parameter and no LSE store. (The reduce IR
-    #   still differs from before LSE existed: the masked-segment merge fix below
-    #   applies with LSE on or off.)
-    emit_lse: bool = field(default=False, kw_only=True)
+    emit_lse: bool = emit_lse_field()
 
     def __post_init__(self) -> None:
-        if type(self.emit_lse) is not bool:
-            raise ValueError(
-                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
-            )
+        require_bool("emit_lse", self.emit_lse)
         if self.num_segments < 1:
             raise ValueError("num_segments must be >= 1")
 
@@ -1562,22 +1553,16 @@ def build_unified_attention_reduce_tiled(
         b.global_store(out, out_idx, scalar_out, align=2)
 
     if spec.emit_lse:
-        # Every lane holds the same butterfly-reduced overall_max/expsum, so one
-        # lane writes. overall_max is in log2 units (segm_max carries
-        # scale*log2e); lse_store converts to natural log and writes -inf for a
-        # row with no mass (every segment empty, sum 0), whose O is already 0.
-        # A NaN sum (NaN query row) keeps NaN, as O does: the same !(l == 0)
-        # test the tiled 2D epilogues use, never l > 0.
-        with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
-            lse_index = b.add(b.mul(q_token, num_qh_p), q_head)
-            lse_store(
-                b,
-                lse,
-                lse_index,
-                overall_max,
-                overall_expsum,
-                row_has_mass=lse_row_has_mass(b, overall_expsum),
-            )
+        reduce_lse_store(
+            b,
+            lse,
+            tid=tid,
+            q_token=q_token,
+            q_head=q_head,
+            num_heads=num_qh_p,
+            overall_max=overall_max,
+            overall_expsum=overall_expsum,
+        )
 
     return b.kernel
 
@@ -1585,17 +1570,16 @@ def build_unified_attention_reduce_tiled(
 def supports_tiled_reduce_spec(
     spec: UnifiedAttentionReduceTiledSpec, *, arch: str = "gfx942"
 ) -> Tuple[bool, str]:
-    """Spec-first predicate for the split-KV reduce kernel (functional limits only).
+    """Spec-first predicate for the split-KV reduce kernel.
 
-    Applies the one copy of the reduce rules in
-    ``kernels.common.attention_split_kv_reduce.tiled_reduce_unsupported_reason``
-    (wave64 arch, fp16/bf16, ``head_size`` a positive multiple of 64, segment-factor
-    cache fits LDS); the gfx950 module adds a head-grouping check on top, this one
-    has none. Typed with this module's reduce spec class, which ``hkp_pack`` matches
+    The name ``hkp_pack``'s predicate alias for the reduce builder expects; the rules
+    are :func:`kernels.common.attention_split_kv_reduce.supports_split_kv_reduce`,
+    shared with every arch's reduce (wave64 arch, fp16/bf16, ``head_size`` a positive
+    multiple of 64, the head-grouping check, and the segment-factor cache fitting
+    LDS). Typed with this module's reduce spec class, which ``hkp_pack`` matches
     predicates by.
     """
-    reason = tiled_reduce_unsupported_reason(spec, arch=arch)
-    return (False, reason) if reason is not None else (True, "supported")
+    return supports_split_kv_reduce(spec, arch=arch)
 
 
 def supports_tiled_3d_spec(

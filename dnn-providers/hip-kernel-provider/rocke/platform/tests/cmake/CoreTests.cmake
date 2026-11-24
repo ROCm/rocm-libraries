@@ -32,6 +32,20 @@ if(BUILD_TESTING)
         TIMEOUT 1800
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
+    # The committed column of compiler_options.json for the loaded compiler,
+    # re-measured. The installed manifest registers the same gate.
+    add_test(
+      NAME rocke_compiler_options_reproducibility
+      COMMAND "${Python3_EXECUTABLE}" -u
+              "${CMAKE_CURRENT_SOURCE_DIR}/../tools/gen_compiler_options.py"
+              --check)
+    set_tests_properties(
+      rocke_compiler_options_reproducibility
+      PROPERTIES
+        LABELS "ckc;python;host;toolchain;generated-artifact;standard"
+        TIMEOUT 600
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
     # The arch-table parity test reads cpp/core/arch/data.cpp, which the
     # installed test tree does not carry, so CMakeLists.txt keeps it out of the
     # installed pytest cohort; run it here, from the source tree, instead.
@@ -60,8 +74,9 @@ if(BUILD_TESTING)
         ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
   else()
     message(WARNING
-            "rocKE: Python3 interpreter not found; arch-domain reproducibility "
-            "CTest is not registered")
+            "rocKE: Python3 interpreter not found; the Python-driven build-tree "
+            "CTests (reproducibility gates and engine-parity checks) are not "
+            "registered")
   endif()
 
   # The binding consumes Python-built IR; this binary exercises the independent
@@ -302,6 +317,24 @@ if(BUILD_TESTING)
                  rocke_qk_scale_spec_validate)
   endif()
 
+  # The attention capability table in the C++ engine: the values and Python
+  # messages tests/helpers/test_attention_arch_caps.py pins.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_attention_arch_caps.cpp")
+    add_executable(rocke_attention_arch_caps core/test_attention_arch_caps.cpp)
+    target_link_libraries(rocke_attention_arch_caps PRIVATE rocke_core)
+    add_test(NAME rocke_attention_arch_caps
+             COMMAND rocke_attention_arch_caps)
+    set_tests_properties(rocke_attention_arch_caps
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_attention_arch_caps)
+    set_target_properties(rocke_attention_arch_caps
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_attention_arch_caps
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_attention_arch_caps)
+  endif()
+
   # The buffer address space of the C++ tensor view: the Python error kind and
   # message for each refused call (tests/core/test_tensor_view_buffer_errors.py
   # pins the Python side).
@@ -338,9 +371,12 @@ if(BUILD_TESTING)
   endif()
 
   # The buffer descriptor word (DWORD3) the HIP lowerer emits per target, and
-  # its agreement with the LLVM lowerer's word.
+  # its agreement with the LLVM lowerer's word; plus tile.buffer_atomic_fadd_f32:
+  # its LLVM lowering with the cache policy, and the refusal of a policy
+  # outside 0..31 by the builder and of a bad cachepolicy attr by the lowerer.
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_buffer_rsrc_hip.cpp")
-    add_executable(rocke_buffer_rsrc_hip core/test_buffer_rsrc_hip.cpp)
+    add_executable(rocke_buffer_rsrc_hip core/test_buffer_rsrc_hip.cpp
+                                         core/test_buffer_atomic_fadd.cpp)
     target_link_libraries(rocke_buffer_rsrc_hip PRIVATE rocke_core)
     add_test(NAME rocke_buffer_rsrc_hip COMMAND rocke_buffer_rsrc_hip)
     set_tests_properties(rocke_buffer_rsrc_hip PROPERTIES LABELS "ckc;unit;host")
@@ -452,6 +488,23 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_global_load_index_width)
+  endif()
+
+  # The C++ verifier, if/else and loop rules and both lowerings refuse a
+  # misplaced scf.yield, a malformed if/else and a malformed loop body, and
+  # check an if/else result's type packed-only first.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_yield_rules.cpp")
+    add_executable(rocke_yield_rules core/test_yield_rules.cpp)
+    target_link_libraries(rocke_yield_rules PRIVATE rocke_core)
+    add_test(NAME rocke_yield_rules COMMAND rocke_yield_rules)
+    set_tests_properties(rocke_yield_rules PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_yield_rules)
+    set_target_properties(rocke_yield_rules
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_yield_rules
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_yield_rules)
   endif()
 
   # Fenced barriers (fence attr of tile.sync / sync_lds_only / s_barrier_bare).
@@ -592,6 +645,41 @@ if(BUILD_TESTING)
             RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_f64_lowering)
+  endif()
+
+  # The C++ engine's LDS alignment claims and segment offsets
+  # (tests/core/test_smem_access_alignment.py through the C API).
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_smem_access_alignment.cpp")
+    add_executable(rocke_smem_access_alignment core/test_smem_access_alignment.cpp)
+    target_link_libraries(rocke_smem_access_alignment PRIVATE rocke_core)
+    add_test(NAME rocke_smem_access_alignment COMMAND rocke_smem_access_alignment)
+    set_tests_properties(rocke_smem_access_alignment
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_smem_access_alignment)
+    set_target_properties(rocke_smem_access_alignment
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_smem_access_alignment
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_smem_access_alignment)
+  endif()
+
+  # The alignment a global vector load or store claims in the C++ engine's
+  # LLVM and HIP lowerings (tests/core/test_global_access_alignment.py through
+  # the C API).
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/test_global_access_alignment.cpp")
+    add_executable(rocke_global_access_alignment core/test_global_access_alignment.cpp)
+    target_link_libraries(rocke_global_access_alignment PRIVATE rocke_core)
+    add_test(NAME rocke_global_access_alignment COMMAND rocke_global_access_alignment)
+    set_tests_properties(rocke_global_access_alignment
+                         PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_global_access_alignment)
+    set_target_properties(rocke_global_access_alignment
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
+    install(TARGETS rocke_global_access_alignment
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+    set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
+                 rocke_global_access_alignment)
   endif()
 
   # Pins every opcode's value, name and purity: rocke_opcode_t is C ABI.

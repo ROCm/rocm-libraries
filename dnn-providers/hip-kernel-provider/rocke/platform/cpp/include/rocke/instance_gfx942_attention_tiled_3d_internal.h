@@ -3,7 +3,7 @@
  *
  * rocke/instance_gfx942_attention_tiled_3d_internal.h -- PRIVATE shared state +
  * phase-function contract for the C99 port of the gfx942 narrow-atom tiled
- * split-KV 3D attention kernels (rocke/instances/gfx942/attention_tiled_3d.py):
+ * split-KV 3D attention kernels (library/kernels/gfx942/attention_tiled_3d.py):
  *
  *   build_unified_attention_3d_tiled       lines 234-969  (segment kernel)
  *   build_unified_attention_reduce_tiled   lines 1002-1133 (reduce kernel)

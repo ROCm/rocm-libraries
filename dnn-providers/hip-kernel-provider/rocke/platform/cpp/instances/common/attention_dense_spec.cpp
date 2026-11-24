@@ -224,8 +224,7 @@ bool balance_causal(const rocke_attention_dense_spec_t* s)
 bool aligned_causal(const rocke_attention_dense_spec_t* s, bool lookahead)
 {
     const bool moving_diagonal = s->causal_bottom_right && s->seqlen_q != s->seqlen_kv;
-    return balance_causal(s) && !moving_diagonal && !s->ragged && !s->varlen && !s->paged
-           && !lookahead;
+    return balance_causal(s) && !moving_diagonal && !s->ragged && !s->varlen && !lookahead;
 }
 
 /* A decode's extra constraint (Python Decode.check); NULL when it has none. */
@@ -593,6 +592,8 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
         if((s->block_size & (s->block_size - 1)) != 0)
             ROCKE_SPEC_FAIL(
                 reason, cap, "paged block_size (%d) must be a power of two", s->block_size);
+        if(s->block_size < 16)
+            ROCKE_SPEC_FAIL(reason, cap, "paged block_size (%d) must be >= 16", s->block_size);
         if(s->block_n % s->block_size != 0)
             ROCKE_SPEC_FAIL(reason,
                             cap,
@@ -640,13 +641,22 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
                             cap,
                             "paged + persistent not yet implemented (persistent builder is "
                             "contiguous-only)");
-        if(s->head_size != 128)
-            ROCKE_SPEC_FAIL(reason, cap, "paged not yet implemented for head_size != 128");
         if(!streq(s->dtype, "fp16") && !streq(s->dtype, "bf16"))
             ROCKE_SPEC_FAIL(reason, cap, "paged not yet implemented for dtype=%s", s->dtype);
-        if(s->sliding_window <= 0)
-            ROCKE_SPEC_FAIL(
-                reason, cap, "paged not yet implemented for plain-causal (sliding_window>0 only)");
+        /* The padded keys of a partial KV tile would read stale page rows (or block 0)
+         * instead of the zeros the contiguous bound gives. */
+        if(s->seqlen_kv % s->block_n != 0)
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "paged needs whole KV tiles: seqlen_kv (%d) must be a multiple of "
+                            "block_n (%d)",
+                            s->seqlen_kv,
+                            s->block_n);
+        if(!s->causal)
+            ROCKE_SPEC_FAIL(reason, cap, "paged attention is causal-only");
+        /* The shifted diagonal is untested with paged K/V on both arches. */
+        if(s->causal_bottom_right)
+            ROCKE_SPEC_FAIL(reason, cap, "causal_bottom_right is not yet supported with paged KV");
     }
     if(s->use_sinks && s->paged)
         ROCKE_SPEC_FAIL(reason, cap, "use_sinks is not yet supported with paged KV");
@@ -712,8 +722,8 @@ const char*
         return "qb_minor";
 
     const int64_t nqb = dense_nqb(s);
-    if(s->num_query_heads == s->num_kv_heads && s->num_query_heads % s->chiplet_num_xcds == 0
-       && nqb >= 16)
+    if(!s->paged && s->num_query_heads == s->num_kv_heads
+       && s->num_query_heads % s->chiplet_num_xcds == 0 && nqb >= 16)
     {
         const ExactProduct work({s->batch, s->num_query_heads, nqb});
         if(work.at_least(8192))
@@ -915,16 +925,38 @@ bool rocke_attention_dense_spec_preflight(const rocke_attention_dense_spec_t* s,
                         num,
                         ROCKE_ATTENTION_DENSE_INT32_LIMIT);
     }
-    const ExactProduct qo_elems({s->batch, s->seqlen_q, s->num_query_heads, s->head_size});
-    if(qo_elems.at_least((uint64_t)ROCKE_ATTENTION_DENSE_INT32_LIMIT))
+    /* A ragged Q goes through a buffer resource whose num_records AND voffset are both
+     * i32 BYTES, so the ceiling is half the element count the element-offset paths get.
+     * O stays element-addressed even here. */
+    if(s->ragged)
     {
-        char num[64];
-        qo_elems.str(num, sizeof(num));
-        ROCKE_SPEC_FAIL(reason,
-                        cap,
-                        "Q/O extent is %s elements, at or past the 32-bit addressing limit (%lld)",
-                        num,
-                        ROCKE_ATTENTION_DENSE_INT32_LIMIT);
+        const ExactProduct qo_bytes({s->batch, s->seqlen_q, s->num_query_heads, s->head_size, 2});
+        if(qo_bytes.at_least((uint64_t)ROCKE_ATTENTION_DENSE_INT32_LIMIT))
+        {
+            char num[64];
+            qo_bytes.str(num, sizeof(num));
+            ROCKE_SPEC_FAIL(
+                reason,
+                cap,
+                "Q/O extent is %s B, at or past the 32-bit buffer-resource limit (%lld B)",
+                num,
+                ROCKE_ATTENTION_DENSE_INT32_LIMIT);
+        }
+    }
+    else
+    {
+        const ExactProduct qo_elems({s->batch, s->seqlen_q, s->num_query_heads, s->head_size});
+        if(qo_elems.at_least((uint64_t)ROCKE_ATTENTION_DENSE_INT32_LIMIT))
+        {
+            char num[64];
+            qo_elems.str(num, sizeof(num));
+            ROCKE_SPEC_FAIL(
+                reason,
+                cap,
+                "Q/O extent is %s elements, at or past the 32-bit addressing limit (%lld)",
+                num,
+                ROCKE_ATTENTION_DENSE_INT32_LIMIT);
+        }
     }
     if(reason != NULL && cap > 0)
         reason[0] = '\0';

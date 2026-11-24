@@ -44,6 +44,8 @@ from kernels.common._attention_additive_bias import (
 )
 from kernels.common._fmha_common import check_head_counts, gqa_ratio
 from kernels.common._lse_store import lse_row_has_mass, lse_store
+from kernels.common.attention_mask_type import band_mask_type
+from kernels.common._spec_checks import require_bool
 
 from rocke.core.ir import (
     BF16,
@@ -77,6 +79,7 @@ from rocke.helpers.attention import (
     warp_xor_reduce_sum,
     warp_xor_reduce_sum_32lane,
 )
+from rocke.helpers.attention_arch_caps import attn_arch_caps
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
 from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
@@ -174,10 +177,6 @@ def _sched_group_pin_mfma_step(b, ds_reads: int, mfma_count: int, sgid: int) -> 
 
 @dataclass(frozen=True)
 class UnifiedAttention2DTiledSpec:
-    # Fields added after tuning ids and kernel cache keys were first stored for
-    # this spec: identity payloads leave them out while off, so stored entries
-    # keep resolving (see dispatch.attention.common._identity_omitted).
-    _IDENTITY_OMIT_WHEN_OFF: ClassVar[Tuple[str, ...]] = ("use_additive_bias",)
     # Problem fields this body reads as trailing i32 kernargs instead of baking
     # them, in ABI order. The launch signature, the argument pack and the cache
     # key read the same tuple (``_runtime_kernarg_fields``).
@@ -189,6 +188,10 @@ class UnifiedAttention2DTiledSpec:
     # The cu_q search derives its trip count from the num_seqs kernarg, so
     # num_seqs never reaches the IR and one binary serves every batch.
     RUNTIME_SEARCH_ITERS: ClassVar[bool] = True
+    # Fields added after tuning ids and kernel cache keys were first stored for
+    # this spec: identity payloads leave them out while off, so stored entries
+    # keep resolving (see dispatch.attention.common.identity_omit_names).
+    _IDENTITY_OMIT_WHEN_OFF: ClassVar[Tuple[str, ...]] = ("use_additive_bias",)
 
     head_size: int
     block_size: int
@@ -514,17 +517,12 @@ class UnifiedAttention2DTiledSpec:
     emit_lse: bool = field(default=False, kw_only=True)
 
     def __post_init__(self):
-        if type(self.emit_lse) is not bool:
-            raise ValueError(
-                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
-            )
+        require_bool("emit_lse", self.emit_lse)
         # Changes the kernel ABI (4 appended params), so a truthy non-bool such as
         # "false" must not silently enable it.
-        if type(self.use_additive_bias) is not bool:
-            raise ValueError(
-                "use_additive_bias must be a bool, got "
-                f"{type(self.use_additive_bias).__name__}"
-            )
+        require_bool("use_additive_bias", self.use_additive_bias)
+        if self.block_size <= 0:
+            raise ValueError(f"block_size must be positive, got {self.block_size}")
         # gfx942 (CDNA3) variant: the narrow ``16x16x16`` default path only.
         # The wide-K (32x32x16 migration) and transpose-read / native-fp8
         # experimental knobs all depend on gfx950-only ISA (wide-K MFMA atoms,
@@ -599,7 +597,7 @@ class UnifiedAttention2DTiledSpec:
                 f"Other counts would need new MFMA distribution logic. "
                 f"num_warps=8 (BLOCK_M=128, THREADS=512) matches the BLOCK_M "
                 f"the production Triton 2D kernel uses for high-q prefill "
-                f"shapes; both are well within MI355X's 1024-thread CTA cap."
+                f"shapes; both are well within the 1024-thread CTA cap."
             )
         if self.block_m_per_warp not in (16, 32):
             raise ValueError(
@@ -834,6 +832,12 @@ class UnifiedAttention2DTiledSpec:
                 f"kv_cache_policy must be one of {', '.join(CACHE_POLICY_NAMES)} "
                 f"(got {self.kv_cache_policy!r})"
             )
+        for flag in ("use_k_hbm_direct", "use_v_hbm_direct"):
+            if getattr(self, flag) and self.use_i64_kv_addr:
+                raise ValueError(
+                    f"{flag} reads K/V with i32 offsets; it cannot be combined "
+                    "with use_i64_kv_addr"
+                )
         if self.use_k_hbm_direct:
             if not (self.use_mfma_32x32x8 and self.use_transposed_qk_32x32):
                 raise ValueError(
@@ -971,6 +975,24 @@ class UnifiedAttention2DTiledSpec:
     @property
     def num_queries_per_kv(self) -> int:
         return gqa_ratio(self.num_query_heads, self.num_kv_heads)
+
+    def resolved_num_queries_per_kv(self) -> int:
+        """The GQA ratio the kernel bakes (the head counts are kernargs), as a bound
+        method so ``hkp_pack`` can observe it as catalog metadata."""
+        return self.num_queries_per_kv
+
+    def mask_type(self) -> int:
+        """The band as one ``AttentionMaskType`` value
+        (``kernels.common.attention_mask_type.band_mask_type``): 2 bottom-right causal,
+        3 a sliding window.
+
+        This body computes only the bottom-right causal band (right bound 0,
+        bottom-right alignment); ``sliding_window`` is its left bound. A bound method,
+        like the gfx950 spec's, so ``hkp_pack`` observes it as catalog metadata.
+        """
+        return band_mask_type(
+            sliding_window=self.sliding_window, right_bound=0, causal_top_left=False
+        )
 
     @property
     def block_m(self) -> int:
@@ -1564,11 +1586,10 @@ def build_unified_attention_2d_tiled(
     # deposit stays lane-contiguous, so the [T, HD] K_lds / V_lds layout
     # (and the strided-V B-operand math that depends on it) is unchanged.
     #
-    # There is no catalog field for this today: ``memory.buffer_load_max_dwords``
-    # describes the *register* vector buffer-load width (4 on both gfx942 and
-    # gfx950) and does NOT capture the narrower load-*to-LDS* limit, so we
-    # encode the gfx942-specific value here rather than touching core/arch/.
-    ASYNC_LDS_MAX_DWORDS = 1
+    # The width comes from the attention capability table (the catalog's
+    # ``async_lds_max_dwords``), not ``memory.buffer_load_max_dwords``: that is
+    # the *register* vector buffer-load width (4 on both gfx942 and gfx950).
+    ASYNC_LDS_MAX_DWORDS = attn_arch_caps("gfx942").max_lds_dma_dwords
     ASYNC_LDS_MAX_BYTES_PER_LANE = ASYNC_LDS_MAX_DWORDS * 4
     BLOCK_M_PER_WARP = spec.block_m_per_warp
     # Number of stacked MFMA-M=16 atoms per warp's M dimension. For
@@ -2513,12 +2534,8 @@ def build_unified_attention_2d_tiled(
         # dwords in {1, 3, 4}; on CDNA3 only 1 (4 bytes/lane) legalises for
         # the load-*to-LDS* form, so the candidate list is clamped here.
         tile_bytes = T * HD  # 1 byte per fp8 element
-        fp8_dword_candidates = [
-            (d, by)
-            for (d, by) in [(4, 16), (3, 12), (1, 4)]
-            if d <= ASYNC_LDS_MAX_DWORDS
-        ]
-        for dwords_try, bytes_per_lane in fp8_dword_candidates:
+        for dwords_try in sorted(attn_arch_caps("gfx942").lds_dma_dwords, reverse=True):
+            bytes_per_lane = dwords_try * 4
             payload = THREADS * bytes_per_lane
             if tile_bytes >= payload and tile_bytes % payload == 0:
                 K_FP8_DWORDS = dwords_try
@@ -6308,7 +6325,11 @@ def _build_gfx942_4warp_gqa_lean(
             dim = b.add(b.mul(b.const_i32(nt), b.const_i32(32)), r)
             q_inseq = b.add(qbase, b.add(wq, c))
             oi = b.add(b.mul(b.add(qstart, b.add(wq, c)), hq_p), qhead)
-            val = b.cast_f32_to(b.fmul(b.vec_extract(accs_f[nt], i), recip), dtype)
+            # A row whose diagonal is left of key 0 (qlen > klen) sees no key:
+            # every score was masked, so m/l/acc hold no softmax. Its O is 0.
+            no_key = b.cmp_lt(b.add(context_off, q_inseq), b.const_i32(0))
+            o = b.select(no_key, zf, b.fmul(b.vec_extract(accs_f[nt], i), recip))
+            val = b.cast_f32_to(o, dtype)
             with b.scf_if(b.cmp_lt(q_inseq, qlen)):
                 b.global_store(C, b.add(b.mul(oi, b.const_i32(HD)), dim), val, align=2)
     b.ret()
@@ -6906,7 +6927,11 @@ def build_gfx942_4warp_gqa(
             else:
                 q_inseq = b.add(qbase, b.add(wq, c))
                 oi = b.add(b.mul(b.add(qstart, b.add(wq, c)), hq_p), qhead)
-            val = b.cast_f32_to(b.fmul(b.vec_extract(accs_f[nt], i), recip), dtype)
+            # A row whose diagonal is left of key 0 (qlen > klen) sees no key:
+            # every score was masked, so m/l/acc hold no softmax. Its O is 0.
+            no_key = b.cmp_lt(b.add(context_off, q_inseq), b.const_i32(0))
+            o = b.select(no_key, zf, b.fmul(b.vec_extract(accs_f[nt], i), recip))
+            val = b.cast_f32_to(o, dtype)
             with b.scf_if(b.cmp_lt(q_inseq, qlen)):
                 b.global_store(C, b.add(b.mul(oi, b.const_i32(HD)), dim), val, align=2)
     b.ret()

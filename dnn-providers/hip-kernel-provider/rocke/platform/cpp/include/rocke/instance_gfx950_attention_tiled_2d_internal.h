@@ -3,7 +3,7 @@
  *
  * rocke/instance_gfx950_attention_tiled_2d_internal.h -- PRIVATE shared state +
  * phase-function contract for the C99 port of build_unified_attention_2d_tiled
- * (rocke/instances/gfx950/attention_tiled_2d.py, build body lines 711-3818).
+ * (library/kernels/gfx950/attention_tiled_2d.py).
  *
  * WHY THIS HEADER EXISTS.
  *   build_unified_attention_2d_tiled() in Python is a single ~3100-line function
@@ -24,7 +24,7 @@
  *     acc index:       _acc_idx (1386), _acc_get (2505), _acc_final_get (3605)
  *     fast paged-KV:   _fast_paged_kv_blocks (1550), _fast_paged_kv_voff (1573)
  *     K/V loaders:     _issue_k_load_runtime (1631), _issue_v_load_runtime (1691),
- *                      _issue_k (2184), _issue_v (2204), _read_k8_mfma_operand (2229)
+ *                      _issue_k (2184), _issue_v (2204), _read_k8_mfma_operand
  *     fp8 K/V cache:   _issue_kv_fp8_async_load (1798), _dequant_fp8_lds_to_bf16 (1870),
  *                      _issue_fp8_dequant_loads (1928), _issue_k_fp8_mfma_async (2050),
  *                      _issue_v_fp8_mfma_async (2106), _issue_v_fp8_mfma_stripe (2143)
@@ -134,6 +134,10 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     /* K single-buffer (1 K slot) so T=64 fits the 2-WG/CU LDS budget at
      * HD=128. The next-K prefetch is deferred to after the PV-wait barrier. */
     bool K_SINGLE_BUFFER;
+    /* V double-buffer: V[i+1] is prefetched into the alternate V_lds slot
+     * during iter i. STAGGER_ITER_WAIT (V_DOUBLE_BUF only) issues K before V
+     * and partial-waits the iter-start drain so V[i] stays in flight. */
+    bool V_DOUBLE_BUF, STAGGER_ITER_WAIT;
     /* Lever-3 (CK-Tile-derived) sched_barrier fence after the QK MFMA cluster. */
     bool USE_SCHED_BARRIER;
     int SCHED_BARRIER_MASK;
@@ -141,6 +145,18 @@ typedef struct rocke_gfx950_attn2d_build_ctx
      * modes 0/1 emit iglp_opt(mode); mutually exclusive with USE_SCHED_BARRIER. */
     bool USE_SOFTMAX_INTERLEAVE;
     int SOFTMAX_INTERLEAVE_MODE;
+    int SOFTMAX_INTERLEAVE_GROUPS; /* mode 2: (MFMA, VALU) group-barrier pairs */
+    /* Q gathered straight from global into VGPRs: no Q_lds, no Q aliasing. */
+    bool Q_DIRECT_REG;
+    /* Q re-read: the QK loop reads its Q operand from a dedicated Q_lds each
+     * iteration instead of holding it in q32_regs. */
+    bool Q_REREAD;
+    /* Depth-3 K prefetch ring: K_lds has 3 slots and each iteration prefetches
+     * K[i+2]; cur_buf advances (mod 3) through the slots. */
+    bool RING3;
+    /* K_lds slab pad in halves (0 = off) and the rows one wave's async-DMA
+     * slab fills; K_lds is then [K_BUFS, T/KQ_SLAB_ROWS, KQ_SLAB_ROWS*HD+pad]. */
+    int KQ_LDS_PAD, KQ_SLAB_ROWS;
     /* fp8 K/V cache predicates */
     bool KV_FP8, FP8_MFMA_QK, FP8_MFMA_PV;
     bool REGISTER_PV, USE_MFMA_32X32, TRANSPOSED_QK_32X32;
@@ -263,6 +279,7 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* qk_scale_v; /* derived from scale_p            */
     rocke_value_t* pv_fp8_scale_v; /* fdiv(v_scale, 240) when FP8_MFMA_PV (line 1149) */
     rocke_value_t* sw_const_v; /* the sliding_window kernarg      */
+    rocke_value_t* z8_v; /* b.zero_vec(dtype, 8), the masked-Q fill */
 
     /* ---- paged-KV byte descriptor (full transform DAG, lines 1163-1630) ---- */
     rocke_tensor_descriptor_t* q_desc; /* output/query [token,head,dim]   */
@@ -294,6 +311,7 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* lane_half_base_v; /* tid * KV_HALVES_PER_LANE        */
     rocke_value_t* zero_soff_v; /* const_i32(0) soffset            */
     rocke_value_t* wave_lds_off_i64_v; /* wave_lds_offset_i64             */
+    rocke_value_t* wave_lds_off_K_i64_v; /* slab-padded K wave offset (KQ_LDS_PAD) */
     rocke_value_t* v_wave_lds_off_i64_v; /* v_wave_lds_offset_i64           */
     rocke_value_t* K_lds_addr_v; /* ptrtoint K_lds                  */
     rocke_value_t* V_lds_addr_v; /* ptrtoint V_lds                  */
@@ -323,6 +341,7 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     int q_regs_count;
     rocke_value_t* q32_regs[ROCKE_GFX950_ATTN2D_MAX_K_ITERS];
     int q32_regs_count;
+    rocke_value_t* q32_row_v; /* Q_lds row of this lane's 32x32 Q operand */
 
     /* ---- KV-loop bounds + step (lines 1981-2006 analogue) ---- */
     rocke_value_t* tile_start;
@@ -377,6 +396,9 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* kv_tile_iv;
     rocke_value_t* cur_buf;
     rocke_value_t* nxt_buf_v; /* 1 - cur_buf (or cur_buf single-buffered) */
+    /* RING3 only: K[i+2] prefetch tile/slot and the next iteration's slot. */
+    rocke_value_t* ring_pf_tile_v;
+    rocke_value_t* ring_next_cur_v;
     bool skip_mask;
     rocke_value_t* m_cur[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* l_cur[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
@@ -465,7 +487,7 @@ void rocke_gfx950_attn2d_issue_k(rocke_gfx950_attn2d_build_ctx_t* ctx,
 void rocke_gfx950_attn2d_issue_v(rocke_gfx950_attn2d_build_ctx_t* ctx,
                                  rocke_value_t* tile_idx,
                                  rocke_value_t* buf_idx);
-/* _read_k8_mfma_operand: per-lane K8 MFMA B operand (line 2229). */
+/* _read_k8_mfma_operand: per-lane K8 MFMA B operand; no KQ pad or swizzle (Python-only). */
 rocke_value_t* rocke_gfx950_attn2d_read_k8_mfma_operand(rocke_gfx950_attn2d_build_ctx_t* ctx,
                                                         rocke_value_t* buf_idx,
                                                         rocke_value_t* k_row,

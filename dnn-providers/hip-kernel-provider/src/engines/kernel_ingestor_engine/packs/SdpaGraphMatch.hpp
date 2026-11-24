@@ -3,12 +3,17 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
+#include <initializer_list>
+#include <limits>
 #include <optional>
 #include <ostream>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
@@ -18,13 +23,16 @@
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
+#include "engines/kernel_ingestor_engine/packs/PackGraph.hpp"
 
 /**
  * @file SdpaGraphMatch.hpp
  * @brief The graph-reading helpers every ingestor pack that serves a single dense BSHD
- *        SDPA-forward node shares: finding the node and its operands, the operand checks
- *        made before anything indexes an axis, the problem read from Q and K, the f32
- *        compute-type rule for the packs that apply it, and the decline-line head.
+ *        SDPA node shares: finding the node and its operands, the operand checks made before
+ *        anything indexes an axis, the problem shape read from Q and K, the f32 compute-type
+ *        rule for the packs that apply it, the declared-alignment, checked-product and
+ *        overlap checks and the limits the FlyDSL SDPA families bound by, and the
+ *        decline-line head.
  *
  * Pack-family rules (mask kinds, dtypes, the decode rule) stay with the family, e.g.
  * UnifiedAttentionGraphMatch.hpp.
@@ -42,11 +50,80 @@ inline constexpr uint32_t SEQ_AXIS = 2;
 inline constexpr uint32_t HEAD_SIZE_AXIS = 3;
 inline constexpr uint32_t SDPA_RANK = 4;
 
-inline const data_objects::TensorAttributes* findTensor(const MatchContext& context, int64_t uid)
+/// The largest value a 32-bit offset or extent holds.
+inline constexpr int64_t INT32_LIMIT = 2147483647LL;
+
+/// The largest softmax scale magnitude every FlyDSL SDPA kernel serves. Real graphs use
+/// 1/sqrt(d) or a temperature near 1; far above this each family overflows f32 at a different
+/// point (the CDNA causal objects' running-max floor times scale * log2(e) passes FLT_MAX near
+/// 2.4e8), so one bound here makes all of them decline alike rather than diverge.
+inline constexpr double MAX_SOFTMAX_SCALE = 1048576.0; // 2^20
+
+using pack_graph::findTensor;
+
+/// Whether @p tensor promises a base pointer aligned to @p bytes. The backend enforces the
+/// alignment a graph declares and no more, so a kernel that assumes a wider one must read the
+/// declaration: a smaller one would hand it a pointer its vector accesses cannot take.
+inline bool declaresAlignment(const data_objects::TensorAttributes& tensor, int64_t bytes)
 {
-    const auto& tensors = context.graph.getTensorMap();
-    auto it = tensors.find(uid);
-    return it == tensors.end() ? nullptr : it->second;
+    return tensor.alignment() >= bytes && tensor.alignment() % bytes == 0;
+}
+
+/// The product of @p factors, or nullopt when it does not fit in int64_t. Every product of
+/// graph-controlled extents goes through this: an unchecked one is signed overflow, and a
+/// wrapped value can pass a bound it should fail. A factor of 0 or below is a factor like any
+/// other (pack_features::checkedProduct rejects it).
+inline std::optional<int64_t> checkedProduct(std::initializer_list<int64_t> factors)
+{
+    int64_t product = 1;
+    for(const int64_t factor : factors)
+    {
+        if(__builtin_mul_overflow(product, factor, &product))
+        {
+            return std::nullopt;
+        }
+    }
+    return product;
+}
+
+/// Whether no two elements of @p tensor share an address, which an output needs: concurrent
+/// workgroups writing one location race. Its axes of more than one element, ordered by
+/// stride, must each step past everything the axes inside it span. With @p ignoreBatch the
+/// batch axis is left out (a ragged tensor's batches are placed by its offsets). Conservative:
+/// a layout interleaving two axes inside one another's gaps declines too.
+inline bool elementsDoNotOverlap(const data_objects::TensorAttributes& tensor,
+                                 bool ignoreBatch = false)
+{
+    const auto* dims = tensor.dims();
+    const auto* strides = tensor.strides();
+    if(dims == nullptr || strides == nullptr || dims->size() != strides->size())
+    {
+        return false;
+    }
+    std::vector<std::pair<int64_t, int64_t>> axes; // (stride, extent)
+    for(flatbuffers::uoffset_t axis = 0; axis < dims->size(); ++axis)
+    {
+        if(dims->Get(axis) > 1 && (!ignoreBatch || axis != 0))
+        {
+            axes.emplace_back(strides->Get(axis), dims->Get(axis));
+        }
+    }
+    std::sort(axes.begin(), axes.end());
+    int64_t span = 1; // elements the inner axes reach, from the first
+    for(const auto& [stride, extent] : axes)
+    {
+        if(stride < span)
+        {
+            return false;
+        }
+        const auto reach = checkedProduct({extent - 1, stride});
+        if(!reach.has_value() || *reach > std::numeric_limits<int64_t>::max() - span)
+        {
+            return false;
+        }
+        span += *reach;
+    }
+    return true;
 }
 
 /// The node an SDPA pack's matchers read, or nullptr if the graph is not a single
@@ -119,7 +196,7 @@ inline bool hasBshdStrides(const data_objects::TensorAttributes& tensor)
            && axisOk(HEAD_SIZE_AXIS, 1);
 }
 
-/// The graph facts a pack's matchers and prepare() need, derived once from the tensors.
+/// The graph facts an SDPA pack's matchers, scorer and prepare() read, from Q and K.
 struct SdpaShape
 {
     int64_t batch = 0;
@@ -131,11 +208,8 @@ struct SdpaShape
     data_objects::DataType dataType = data_objects::DataType::UNSET;
 };
 
-/// The unified attention packs' name for it.
-using UnifiedAttentionProblem = SdpaShape;
-
-/// The graph's shape, read from Q and K. Callers must have checked both with
-/// isWellFormedOperand().
+/// The graph's shape, read from Q and K. Callers must have checked both operands with
+/// isWellFormedOperand(); readProblem() is the checked form.
 inline SdpaShape problemFor(const data_objects::TensorAttributes& q,
                             const data_objects::TensorAttributes& k)
 {
@@ -148,6 +222,20 @@ inline SdpaShape problemFor(const data_objects::TensorAttributes& q,
     problem.seqLenKv = k.dims()->Get(SEQ_AXIS);
     problem.dataType = q.data_type();
     return problem;
+}
+
+/// The shape of the graph whose Q and K are the tensors @p qUid and @p kUid, or nullopt when
+/// either uid names no tensor or a malformed one. Total over an UNVALIDATED graph, so a
+/// matcher or prepare() reached without graph_match never indexes a missing axis.
+inline std::optional<SdpaShape> readProblem(const MatchContext& context, int64_t qUid, int64_t kUid)
+{
+    const auto* q = findTensor(context, qUid);
+    const auto* k = findTensor(context, kUid);
+    if(q == nullptr || k == nullptr || !isWellFormedOperand(*q) || !isWellFormedOperand(*k))
+    {
+        return std::nullopt;
+    }
+    return problemFor(*q, *k);
 }
 
 /**

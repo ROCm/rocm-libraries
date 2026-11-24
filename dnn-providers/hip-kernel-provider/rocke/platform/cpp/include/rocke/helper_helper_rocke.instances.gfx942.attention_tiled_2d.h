@@ -3,7 +3,7 @@
  *
  * rocke/helper_helper_rocke.instances.gfx942.attention_tiled_2d.h -- C99 port of
  * the symbols named by the porting task from
- * rocke/instances/gfx942/attention_tiled_2d.py (the gfx942/CDNA3 narrow-atom
+ * library/kernels/gfx942/attention_tiled_2d.py (the gfx942/CDNA3 narrow-atom
  * tiled-2D unified-attention kernel).
  *
  * Ported symbols (task list):
@@ -36,12 +36,9 @@
  * the "config constants derived from spec" block at the head of
  * build_unified_attention_2d_tiled.
  *
- * ``rocke_build_unified_attention_2d_tiled_scalar`` is the kernel emitter. Its
- * Python body is ~4000 lines of IR emission; per the porting task it is a
- * stub-to-link entry point here (it validates the spec + arch and computes the
- * config, then records ROCKE_ERR_UNIMPLEMENTED on the builder and returns NULL).
- * The faithful kernel-body port is a follow-on; this surface lets a C driver
- * link, construct/validate the spec, and read the derived config today.
+ * ``rocke_build_unified_attention_2d_tiled_scalar`` is the kernel emitter. It
+ * is declared and documented in rocke/instance_gfx942_attention_tiled_2d.h; its
+ * full IR-emitting body lives in instances/gfx942/attention_tiled_2d_*.cpp.
  *
  * Error model mirrors the rest of the C port: pure helpers return a sentinel
  * (NULL / false); the rocke_b_* / builder variants route the same failure through
@@ -106,35 +103,24 @@ typedef struct rocke_attention_tiled_2d_spec
     bool use_fp8_mfma_pv; /* False */
     bool use_register_pv; /* False */
 
-    /* Deep K+V prefetch / V-double-buffer schedule controls (Python mirror).
-     * The gfx950 C emitter currently builds only the depth-2 single/early-V
-     * schedule; these fields are carried so the spec is byte-identical with the
-     * Python dataclass and the provider/dispatcher can pass them through. A
-     * builder that sees use_v_double_buffer / use_staggered_iter_wait / kv_ring
-     * _depth!=2 / use_q_reread it does not yet emit must reject in validate(),
-     * NOT silently ignore (mirrors the Python __post_init__). */
+    /* Deep K prefetch ring / V-double-buffer / Q re-read schedule controls
+     * (Python mirror; gfx950 only). */
     bool use_v_double_buffer; /* False */
     int kv_ring_depth; /* 2 */
     bool use_staggered_iter_wait; /* False */
     bool use_q_reread; /* False */
-    /* VGPR-frugal BLOCK_M=128 body -- gather the per-lane Q32 MFMA operand
-     * straight from global into VGPRs (no Q_lds), freeing 32 KB LDS so
-     * BLOCK_M=128/T=64 fits the 32 KB / 2-WG/CU budget with K+V single-buffer.
-     * Carried for spec byte-identity with the Python dataclass; the gfx950 C
-     * twin does not yet emit this body and rejects it in validate() (mirrors
-     * Python __post_init__ -- reject, do not silently ignore). Default False. */
+    /* gfx950: gather the per-lane Q32 MFMA operand straight from global into
+     * VGPRs (no Q_lds), freeing the Q LDS slab. Transposed-32x32 path only. */
     bool use_q_direct_reg; /* False */
     /* Lever-3 sched_barrier fence after the QK MFMA cluster (CK-Tile-derived).
      * Emitted by the gfx950 C twin (independent of the V schedule). */
     bool use_sched_barrier; /* False */
     int sched_barrier_mask; /* 0 */
 
-    /* softmax-window MFMA interleave (Python gfx950 lever). The default
-     * (off) is byte-identical; when on it emits a single iglp_opt at the loop
-     * top (mode 0/1) or sched_group_barrier groups (mode 2) to schedule the
-     * QK/PV MFMAs into the softmax VALU window. Carried for spec parity with the
-     * Python dataclass; the gfx950 C twin rejects it (the body it rides on,
-     * use_q_direct_reg, is itself unported). */
+    /* gfx950 softmax-window MFMA interleave. When on it emits a single
+     * iglp_opt at the loop top (mode 0/1) or softmax_interleave_groups
+     * sched_group_barrier pairs after the QK cluster (mode 2) to schedule the
+     * QK/PV MFMAs into the softmax VALU window. */
     bool use_softmax_mfma_interleave; /* False */
     int softmax_interleave_mode; /* 1 */
     int softmax_interleave_groups; /* 4 */
@@ -183,7 +169,32 @@ typedef struct rocke_attention_tiled_2d_spec
      * [total_q, num_query_heads] through a trailing lse_ptr param. Off emits
      * no new IR; on appends the "lse" kernel-name token. */
     bool emit_lse; /* False (Python kw_only) */
-    /* Adds four kernel params, before lse_ptr. gfx942: narrow 16x16 path only.
+    /* gfx950 lse_layout == "head_major" (Python kw_only, default "token_major"):
+     * each sequence's LSE is a [num_query_heads, q_len] block; the kernel name's
+     * "lse" token becomes "lsehm". Needs emit_lse. */
+    bool lse_head_major; /* False */
+    /* gfx950-only (gfx942 never reads them). K_lds pad of kq_lds_pad_halves
+     * halves per async-DMA slab, breaking the row-aliased bank conflict on the
+     * QK K read; wired for the K single-buffer path only. */
+    bool use_kq_lds_pad; /* False */
+    int kq_lds_pad_halves; /* 8 */
+    /* gfx950-only: split the KV loop into a mask-free full-tile phase and a
+     * masked boundary phase (transposed-32x32 mask-limit path, no SW). */
+    bool use_mask_phase_split; /* False */
+    /* gfx942 only (the gfx950 builder ignores them, as it does the ring and
+     * cfvst fields): read V / K straight from HBM in the PV / QK MFMA loops
+     * instead of staging them through LDS, and split the causal KV loop into an
+     * unmasked full-tile phase plus a masked boundary phase. */
+    bool use_v_hbm_direct; /* False */
+    bool use_k_hbm_direct; /* False */
+    bool use_causal_mask_phase_split; /* False */
+    /* gfx950-only mask band (gfx942 rejects a non-default band). causal_top_left
+     * pins context_len = 0; right_bound is the lookahead past the diagonal
+     * (0 = causal, R > 0 = R keys ahead, -1 = unbounded). */
+    bool causal_top_left; /* False */
+    int right_bound; /* 0 */
+    /* Adds four kernel params, before lse_ptr. gfx942: narrow 16x16 path only
+     * (rocke_attention_tiled_2d_spec_validate rejects 32x32x8 and register-PV).
      * Kept last: inserting a field moves every later one (abi.h). */
     bool use_additive_bias; /* False */
 } rocke_attention_tiled_2d_spec_t;
@@ -208,6 +219,18 @@ int rocke_attention_tiled_2d_spec_block_q(const rocke_attention_tiled_2d_spec_t*
 int rocke_attention_tiled_2d_spec_tile_size_eff(const rocke_attention_tiled_2d_spec_t* s);
 /* n_blocks_per_tile = tile_size_eff // block_size */
 int rocke_attention_tiled_2d_spec_n_blocks_per_tile(const rocke_attention_tiled_2d_spec_t* s);
+/* One wave's async-DMA slab, in halves: the unit the gfx950 KQ LDS pad lays out. */
+#define ROCKE_ATTENTION_KQ_PAD_SLAB_HALVES 512
+/* kq_lds_pad_slab_rows: K rows per padded K_lds slab when use_kq_lds_pad is laid out
+ * (bf16 K, single K slot, whole slabs tiling the KV tile, a 16-byte-aligned pad
+ * width), else 0. Python: spec.kq_lds_pad_slab_rows. */
+int rocke_attention_tiled_2d_spec_kq_lds_pad_slab_rows(const rocke_attention_tiled_2d_spec_t* s);
+/* q_staged_in_k_lds: Q shares K_lds (not raw-fp8 K, no Q re-read, no direct-register
+ * Q, and Q fits the two K slots). Python: spec.q_staged_in_k_lds. */
+bool rocke_attention_tiled_2d_spec_q_staged_in_k_lds(const rocke_attention_tiled_2d_spec_t* s);
+/* The refusal text when a laid-out KQ pad meets Q staged in the K slot, else NULL.
+ * Python: the single-K __post_init__ check. */
+const char* rocke_attention_tiled_2d_spec_kq_pad_refusal(const rocke_attention_tiled_2d_spec_t* s);
 /* dtype_ir: F16 for "fp16", BF16 otherwise (returns a rocke_type_t*). */
 const rocke_type_t*
     rocke_attention_tiled_2d_spec_dtype_ir(const rocke_attention_tiled_2d_spec_t* s);
@@ -278,15 +301,11 @@ bool rocke_unified_attention_2d_tiled_config_from_spec(
     const rocke_attention_tiled_2d_spec_t* spec,
     rocke_unified_attention_2d_tiled_config_t* out);
 
-/* ---------------------------------------------------- kernel build (stub) *
+/* --------------------------------------------------------- kernel build *
  *
- * build_unified_attention_2d_tiled(spec, arch="gfx942") analogue.
- *
- * STUB-TO-LINK: the Python kernel body is ~4000 lines of IR emission and is not
- * yet ported. This entry validates the arch and spec, derives the config, then
- * records ROCKE_ERR_UNIMPLEMENTED on ``b`` and returns NULL. ``arch`` NULL == the
- * Python default "gfx942". Defined so a C driver can link against the gfx942
- * tiled-2D surface today; the faithful body port is a follow-on. */
+ * build_unified_attention_2d_tiled(spec, arch="gfx942") analogue: the full
+ * kernel emitter (see rocke/instance_gfx942_attention_tiled_2d.h). ``arch``
+ * NULL == the Python default "gfx942". */
 rocke_kernel_def_t* rocke_build_unified_attention_2d_tiled_scalar(
     rocke_ir_builder_t* b, const rocke_attention_tiled_2d_spec_t* spec, const char* arch);
 

@@ -158,7 +158,11 @@ class TestCshuffleWmma(unittest.TestCase):
                 shuf = replace(base, trait=replace(base.trait, epilogue="cshuffle"))
                 ok, why = is_valid_spec(shuf, arch=arch)
                 self.assertFalse(ok, f"cshuffle must stay gated on {arch}")
-                self.assertIn("epilogue", why)
+                self.assertEqual(
+                    why,
+                    f"WMMA path does not support the 'cshuffle' epilogue on {arch} "
+                    "(supported on: gfx1250)",
+                )
 
     def test_cshuffle_widens_the_global_c_stores(self):
         """The point of the LDS round-trip: scalar global stores become vectors.
@@ -222,6 +226,52 @@ class TestCshuffleWmma(unittest.TestCase):
                 f"typed by dtype_c (bf16), not by dtype_a",
             )
 
+    def test_result_scatter_does_not_require_source_layout(self):
+        """Already-computed results need only the destination coordinate map.
+
+        Remove the source map without changing the physical instruction's
+        types, widths or destination map; this is not an asymmetric MMA ABI.
+        The default epilogue is a control for the cshuffle-specific regression.
+        """
+        from dataclasses import replace
+        from unittest import mock
+
+        from rocke.core.ir_serialize import serialize
+        from rocke.instances.common import gemm_universal as gemm
+
+        for dtype in ("fp16", "bf16"):
+            for epilogue in ("default", "cshuffle"):
+                with self.subTest(dtype=dtype, epilogue=epilogue):
+                    spec = _spec(dtype=dtype, epilogue=epilogue)
+                    baseline = serialize(gemm.build_universal_gemm(spec, arch=ARCH))
+                    op = gemm._resolve_mma_op(spec, ARCH)
+                    custom = replace(
+                        op, srcs=(*op.srcs[:2], replace(op.srcs[2], layout=None))
+                    )
+                    with mock.patch.object(
+                        gemm, "_resolve_mma_op", return_value=custom
+                    ):
+                        actual = gemm.build_universal_gemm(spec, arch=ARCH)
+                    self.assertEqual(serialize(actual), baseline)
+
+    def test_cshuffle_requires_destination_layout(self):
+        """The result-map dependency must not disappear with the source one."""
+        from dataclasses import replace
+        from unittest import mock
+
+        from rocke.instances.common import gemm_universal as gemm
+
+        for dtype in ("fp16", "bf16"):
+            with self.subTest(dtype=dtype):
+                spec = _spec(dtype=dtype, epilogue="cshuffle")
+                op = gemm._resolve_mma_op(spec, ARCH)
+                custom = replace(op, dst=replace(op.dst, layout=None))
+                with mock.patch.object(gemm, "_resolve_mma_op", return_value=custom):
+                    with self.assertRaisesRegex(
+                        NotImplementedError, f"no verified 'dst' layout map.*{op.op_id}"
+                    ):
+                        gemm.build_universal_gemm(spec, arch=ARCH)
+
     def test_scatter_dispatch_on_op_family_is_load_bearing(self):
         """Guards the ``op.family`` branch in the staging scatter.
 
@@ -243,7 +293,7 @@ class TestCshuffleWmma(unittest.TestCase):
             b, spec_, _op, lane, accs, m_off, n_off, c_per_lane, dtype, per_cell
         ):
             # Same arguments minus ``op``, which the MFMA scatter derives from
-            # the tile instead of the atom's c_layout().
+            # the tile instead of the atom's dst_layout().
             return _emit_mfma_acc_scatter(
                 b,
                 spec_,
@@ -273,6 +323,33 @@ class TestCshuffleWmma(unittest.TestCase):
             "the op.family dispatch in the cshuffle staging step is not "
             "load-bearing and could regress undetected",
         )
+
+    def test_default_and_cshuffle_share_the_wmma_scatter(self):
+        """Both epilogues walk the accumulator through one helper.
+
+        The default epilogue used to carry its own copy of the walk. A wrapper
+        that forwards to the real helper leaves the kernel unchanged, so the
+        call count is the only thing this asserts: one walk per build, for
+        either epilogue, with or without the padded store guard.
+        """
+        from unittest import mock
+
+        from rocke.instances.common import gemm_universal as gemm
+
+        for epilogue, pad in (
+            ("default", False),
+            ("default", True),
+            ("cshuffle", False),
+        ):
+            with self.subTest(epilogue=epilogue, pad=pad):
+                spec = _spec(epilogue=epilogue, pad=pad)
+                with mock.patch.object(
+                    gemm,
+                    "_emit_wmma_acc_scatter",
+                    wraps=gemm._emit_wmma_acc_scatter,
+                ) as scatter:
+                    gemm.build_universal_gemm(spec, arch=ARCH)
+                self.assertEqual(scatter.call_count, 1)
 
     def test_pad_n_forfeits_the_wide_store(self):
         """``pad_n`` decomposes the wide store back into guarded scalars.

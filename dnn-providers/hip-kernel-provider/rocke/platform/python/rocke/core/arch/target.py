@@ -1788,6 +1788,12 @@ def _frag_info(op_id: str) -> _FragInfo:
     return info
 
 
+# Per-lane widths, in dwords, that the ``buffer_load ... lds`` encoding has
+# (4, 12 and 16 bytes; there is no 2-dword form). An arch can issue the widths
+# up to its ``async_lds_max_dwords``: see :attr:`ArchTarget.async_lds_dwords`.
+LDS_DMA_ENCODED_DWORDS: tuple[int, ...] = (1, 3, 4)
+
+
 @dataclass(frozen=True)
 class MemoryCapabilities:
     has_async_lds: bool
@@ -1820,6 +1826,26 @@ class ResourceLimits:
     vgprs: int
     agprs: int
     sgprs: int
+
+
+@dataclass(frozen=True)
+class GemmCapabilities:
+    """What the universal GEMM admits on an arch (``arch_specs.json`` "gemm").
+
+    Unlike the hardware facts beside it, a flag here records that the GEMM
+    path has been built and verified on the arch, so an arch whose hardware
+    could run a feature still leaves it off until that has happened.
+    """
+
+    # WMMA warp-tile atoms (m, n, k) of the WMMA path; empty on MFMA targets.
+    wmma_atoms: Tuple[Tuple[int, int, int], ...] = ()
+    # fp8/bf8 A and B with a 16-bit C.
+    fp8_ab: bool = False
+    # The cshuffle epilogue on the WMMA path.
+    wmma_cshuffle: bool = False
+    # The cshuffle C tile reuses the A/B LDS, so the budget is max(AB, C)
+    # rather than AB + C.
+    cshuffle_lds_aliased: bool = False
 
 
 def _prefer_native(ops: List[MmaOp]) -> List[MmaOp]:
@@ -2049,6 +2075,7 @@ class ArchTarget:
     requires_shader_end_padding: bool = False
     virtual_address_bits: int = 48
     wgp_cache_lds_shared: bool = False
+    gemm: GemmCapabilities = GemmCapabilities()
 
     # --- identity ---------------------------------------------------------
     @property
@@ -2078,6 +2105,19 @@ class ArchTarget:
         not diagnose an over-wide one -- it aborts the whole process.
         """
         return self.memory.async_lds_max_dwords
+
+    @property
+    def async_lds_dwords(self) -> tuple[int, ...]:
+        """The per-lane DRAM->LDS DMA widths this arch can issue, in dwords.
+
+        The encoded widths (:data:`LDS_DMA_ENCODED_DWORDS`) up to
+        :attr:`async_lds_max_dwords`; ``()`` where the arch has no
+        ``buffer_load ... lds``. gfx942 -> ``(1,)``, gfx950 -> ``(1, 3, 4)``.
+        """
+        if not self.memory.has_async_lds:
+            return ()
+        cap = self.memory.async_lds_max_dwords
+        return tuple(w for w in LDS_DMA_ENCODED_DWORDS if w <= cap)
 
     @property
     def max_threads_per_block(self) -> int:
@@ -2510,6 +2550,16 @@ def _build_target(gfx: str) -> ArchTarget:
         requires_shader_end_padding=row.get("requires_shader_end_padding", False),
         virtual_address_bits=row.get("virtual_address_bits", 48),
         wgp_cache_lds_shared=row.get("wgp_cache_lds_shared", False),
+        gemm=_gemm_capabilities(row.get("gemm", {})),
+    )
+
+
+def _gemm_capabilities(row: dict) -> GemmCapabilities:
+    return GemmCapabilities(
+        wmma_atoms=tuple(tuple(atom) for atom in row.get("wmma_atoms", ())),
+        fp8_ab=row.get("fp8_ab", False),
+        wmma_cshuffle=row.get("wmma_cshuffle", False),
+        cshuffle_lds_aliased=row.get("cshuffle_lds_aliased", False),
     )
 
 
@@ -2545,15 +2595,74 @@ def target_id_from_isa(isa: str) -> str:
     It also accepts a target ID without the ISA prefix.
 
     The result starts at the last ``gfx`` in the input. If there is no
-    ``gfx``, the input is returned unchanged. This does not validate the name.
+    ``gfx``, the input is returned unchanged. This does not validate the name;
+    :func:`parse_target_id` does.
     """
 
     start = isa.rfind("gfx")
     return isa[start:] if start >= 0 else isa
 
 
-def _processor_from_target_id(target_id: str) -> str:
-    """Extract the processor token before any profile or feature suffix."""
+# The whole of a value parse_target_id accepts: an optional AMDHSA triple with an
+# empty or "unknown" environment field, a processor, then feature suffixes.
+_TARGET_ID = re.compile(
+    r"(?:amdgcn-amd-amdhsa-(?:unknown)?-)?"
+    r"(gfx[0-9a-z]+(?:-[0-9a-z]+)*(?::[0-9a-z_]+[+-])*)"
+)
+
+
+def parse_target_id(value: str) -> str:
+    """Return the target ID that ``value`` names, refusing any other form.
+
+    ``value`` is either an AMDHSA ISA name, as a code object's ``amdhsa.target``
+    note records it, or a bare target ID. All of it must be, in order:
+
+    - optionally the triple ``amdgcn-amd-amdhsa-`` with an empty or ``unknown``
+      environment field and its closing ``-`` (``amdgcn-amd-amdhsa--`` or
+      ``amdgcn-amd-amdhsa-unknown-``; compilers write either);
+    - a processor: ``gfx`` then lower-case letters and digits, with ``-``
+      separated parts for names such as ``gfx11-generic`` or ``gfx9-4-generic``;
+    - zero or more feature suffixes, each ``:`` then a name then ``+`` or ``-``
+      (``:sramecc+:xnack-``).
+
+    Returns the target ID with its feature suffixes, without the triple:
+    ``amdgcn-amd-amdhsa-unknown-gfx942:xnack-`` gives ``gfx942:xnack-``.
+    :func:`processor_from_target_id` then gives the processor.
+
+    Raises ``ValueError`` naming the value for anything else: an empty value, an
+    other environment field (``amdgcn-amd-amdhsa-linux-gfx950``), a processor
+    name in the wrong place (``notgfx950``, ``amdgcn-amd-amdhsa-unknown-:gfx950``)
+    or a feature without its sign (``gfx950:xnack``). Unlike
+    :func:`target_id_from_isa`, it never guesses a processor out of a malformed
+    value. It does not check that rocKE, the compiler or a device supports the
+    target.
+    """
+
+    match = _TARGET_ID.fullmatch(value)
+    if match is None:
+        # The value is quoted by hand, not with !r, so rocke_parse_target_id in
+        # the C++ engine writes the same text byte for byte.
+        raise ValueError(
+            f"'{value}' is not a target ID: expected an optional "
+            "amdgcn-amd-amdhsa-- or amdgcn-amd-amdhsa-unknown- prefix, a processor "
+            "such as gfx942 or gfx11-generic, then any :feature+ or :feature- "
+            "suffixes"
+        )
+    return match.group(1)
+
+
+def processor_from_target_id(target_id: str) -> str:
+    """Return the processor of a target ID, without profile or feature suffixes.
+
+    ``gfx942:sramecc+:xnack-`` gives ``gfx942`` and ``gfx1250-strict`` gives
+    ``gfx1250``; catalog names such as ``gfx11-generic`` stay whole, and a
+    member of a generic target stays itself (``gfx1100`` stays ``gfx1100``;
+    :func:`generic_arch_from_target_id` gives its generic). Any other name is
+    cut to its leading ``gfx`` token of lower-case letters and digits; a name
+    that does not start with ``gfx`` is returned up to its first ``:``. This
+    does not validate the name; validate it first with :func:`parse_target_id`
+    when it comes from outside rocKE.
+    """
 
     target_without_features = target_id.split(":", 1)[0]
     arches = known_arches()
@@ -2590,7 +2699,7 @@ def base_arch_from_target_id(target_id: str) -> str:
     """
 
     target_without_features = target_id.split(":", 1)[0]
-    processor = _processor_from_target_id(target_id)
+    processor = processor_from_target_id(target_id)
     if processor in known_arches():
         return processor
     for generic, members in _load_generic_targets().items():
@@ -2616,7 +2725,7 @@ def compiler_target_from_target_id(target_id: str) -> str:
     """
 
     target_without_features, separator, features = target_id.partition(":")
-    processor = _processor_from_target_id(target_id)
+    processor = processor_from_target_id(target_id)
     if target_without_features.startswith(f"{processor}-"):
         target_without_features = processor
     if separator:

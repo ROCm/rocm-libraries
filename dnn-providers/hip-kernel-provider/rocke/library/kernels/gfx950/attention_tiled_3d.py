@@ -40,12 +40,12 @@ from kernels.common._attention_strided_kv import (
     strided_kv_offset,
     strided_kv_resource,
 )
-from kernels.common._lse_store import lse_row_has_mass, lse_store
+from kernels.common._lse_store import emit_lse_field, reduce_lse_store
+from kernels.common._spec_checks import require_bool
 from kernels.common.attention_mask_type import band_mask_type
 from kernels.common.attention_split_kv_reduce import (
-    split_kv_reduce_max_segments,
     split_kv_reduce_spec,
-    tiled_reduce_unsupported_reason,
+    supports_split_kv_reduce,
 )
 
 from rocke.core.ir import (
@@ -74,6 +74,7 @@ from rocke.helpers.attention import (
     wave64_reduce_max as _wave64_reduce_max,
     wave64_reduce_sum as _wave64_reduce_sum,
 )
+from rocke.helpers.attention_arch_caps import attn_arch_caps
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
 from rocke.helpers.transforms import DynamicTensorDescriptor, indirect, unmerge
@@ -81,11 +82,20 @@ from rocke.helpers.transforms import DynamicTensorDescriptor, indirect, unmerge
 MFMA_M = 16
 MFMA_N = 16
 # Async K/V feed: the segment kernel is one wave64 CTA, and each lane's
-# buffer_load ... lds moves 4 DWORDs (8 halves), so one async call stages
-# 64 * 8 halves. Every call is one outstanding vmcnt event; the gfx950
-# s_waitcnt vmcnt field is 6 bits.
+# buffer_load ... lds moves the widest gfx950 LDS-DMA width (from the attention
+# capability table: 4 DWORDs, 8 halves), so one async call stages 64 * 8
+# halves. Every call is one outstanding vmcnt event; the gfx950 s_waitcnt
+# vmcnt field is 6 bits.
 SEGMENT_THREADS = 64
-KV_HALVES_PER_LANE = 8
+KV_DMA_DWORDS = attn_arch_caps("gfx950").max_lds_dma_dwords
+# The KV swizzle (one lane payload = one 16-byte chunk, tid * 8 halves) is
+# written for 4-dword lanes.
+if KV_DMA_DWORDS != 4:
+    raise RuntimeError(
+        "gfx950 tiled 3D attention lane addressing assumes a 4-dword LDS-DMA "
+        f"width; the capability table gives {KV_DMA_DWORDS}"
+    )
+KV_HALVES_PER_LANE = KV_DMA_DWORDS * 2
 KV_HALVES_PER_CALL = SEGMENT_THREADS * KV_HALVES_PER_LANE
 MAX_VMCNT = (1 << 6) - 1
 
@@ -225,13 +235,16 @@ class UnifiedAttention3DTiledSpec:
     # Right bound of the attention band; see ``UnifiedAttention2DTiledSpec.right_bound``
     # (0 = causal, R > 0 = R keys of lookahead, -1 = unbounded).
     right_bound: int = 0
+    # emit_lse: the module's reduce also writes the LSE (see
+    # ``UnifiedAttentionReduceTiledSpec.emit_lse``). The segment kernel never reads
+    # it, so its IR is the LSE-off IR; the field is here because a packaged module
+    # is built from this spec alone (``reduce_spec_for``). The runtime dispatcher
+    # leaves it off and passes the problem's value to the reduce directly.
+    emit_lse: bool = field(default=False, kw_only=True)
 
     def __post_init__(self):
-        if type(self.use_additive_bias) is not bool:
-            raise ValueError(
-                "use_additive_bias must be a bool, got "
-                f"{type(self.use_additive_bias).__name__}"
-            )
+        require_bool("emit_lse", self.emit_lse)
+        require_bool("use_additive_bias", self.use_additive_bias)
         if self.num_segments < 1:
             raise ValueError("num_segments must be >= 1")
         if self.kv_layout not in ("paged", "strided"):
@@ -389,6 +402,7 @@ class UnifiedAttention3DTiledSpec:
                 if self.right_bound != 0
                 else ""
             ),
+            "lse" if self.emit_lse else "",
         )
 
 
@@ -1003,7 +1017,7 @@ def build_unified_attention_3d_tiled(
                 soff = b.mul(page_ids[blk], kv_stride_blk_b)
             dst = b.smem_ptr_add(buf_base, b.const_i64(call * bytes_per_call))
             b.async_buffer_load_lds_addr(
-                call_rsrc, dst, voff, soff, 4, coherency=KV_CACHE_BITS
+                call_rsrc, dst, voff, soff, KV_DMA_DWORDS, coherency=KV_CACHE_BITS
             )
 
     def _issue_strided_tile(
@@ -1019,7 +1033,7 @@ def build_unified_attention_3d_tiled(
             )
             dst = b.smem_ptr_add(buf_base, b.const_i64(call * bytes_per_call))
             b.async_buffer_load_lds_addr(
-                src_rsrc, dst, voff, zero_soff, 4, coherency=KV_CACHE_BITS
+                src_rsrc, dst, voff, zero_soff, KV_DMA_DWORDS, coherency=KV_CACHE_BITS
             )
 
     # FP8 K/V cache: sync dequant loader. See attention_tiled_2d.py for the
@@ -1465,18 +1479,10 @@ class UnifiedAttentionReduceTiledSpec:
     # AMDGPU occupancy hint (``"amdgpu-waves-per-eu"``). ``None`` keeps
     # the LLVM backend's heuristic.
     waves_per_eu: Optional[int] = None
-    # emit_lse: also write the natural-log softmax normalizer (LSE) as FP32
-    #   [total_q, num_query_heads, 1] through a trailing ``lse_ptr`` argument.
-    #   Off by default; off adds no LSE parameter and no LSE store. (The reduce IR
-    #   still differs from before LSE existed: the masked-segment merge fix below
-    #   applies with LSE on or off.)
-    emit_lse: bool = field(default=False, kw_only=True)
+    emit_lse: bool = emit_lse_field()
 
     def __post_init__(self) -> None:
-        if type(self.emit_lse) is not bool:
-            raise ValueError(
-                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
-            )
+        require_bool("emit_lse", self.emit_lse)
         if self.num_segments < 1:
             raise ValueError("num_segments must be >= 1")
 
@@ -1696,22 +1702,16 @@ def build_unified_attention_reduce_tiled(
         b.global_store(out, out_idx, scalar_out, align=2)
 
     if spec.emit_lse:
-        # Every lane holds the same butterfly-reduced overall_max/expsum, so one
-        # lane writes. overall_max is in log2 units (segm_max carries
-        # scale*log2e); lse_store converts to natural log and writes -inf for a
-        # row with no mass (every segment empty, sum 0), whose O is already 0.
-        # A NaN sum (NaN query row) keeps NaN, as O does: the same !(l == 0)
-        # test the tiled 2D epilogues use, never l > 0.
-        with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
-            lse_index = b.add(b.mul(q_token, num_qh_p), q_head)
-            lse_store(
-                b,
-                lse,
-                lse_index,
-                overall_max,
-                overall_expsum,
-                row_has_mass=lse_row_has_mass(b, overall_expsum),
-            )
+        reduce_lse_store(
+            b,
+            lse,
+            tid=tid,
+            q_token=q_token,
+            q_head=q_head,
+            num_heads=num_qh_p,
+            overall_max=overall_max,
+            overall_expsum=overall_expsum,
+        )
 
     return b.kernel
 
@@ -1744,51 +1744,36 @@ def supports_tiled_3d_spec(
     )
 
 
-def reduce_max_segments(arch: str) -> int:
-    """The most segments whose factor cache fits ``arch``'s LDS
-    (``ArchTarget.lds_capacity_bytes``). The C++ host mirrors gfx950's as
-    ``GFX950_UNIFIED_3D_MAX_SEGMENTS``."""
-    from rocke.core.arch.target import ArchTarget
-
-    return split_kv_reduce_max_segments(ArchTarget.from_gfx(arch).lds_capacity_bytes)
-
-
 def supports_tiled_reduce_spec(
     spec: UnifiedAttentionReduceTiledSpec, *, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
     """Spec-first predicate for ``build_unified_attention_reduce_tiled``.
 
-    The reduce kernel has no dispatcher gate of its own: it is only ever built beside the
-    3D segment kernel, whose ``supports_tiled_3d`` decides routing. This predicate lets
-    ``hkp_pack`` validate it as a companion at pack time, and states what the builder
-    otherwise assumes: ``head_size`` splits evenly across the 64 lanes, the heads group
-    evenly, and the segment-factor cache fits in LDS. The kernel is one 64-thread CTA
-    whose ``wave64_reduce_max/sum`` butterfly assumes a single wave64, so ``arch`` is
-    gated like the segment kernel's: ``validate_tiled_attention_arch`` admits only the
-    wave64 gfx950 and gfx942 targets and refuses wave32 RDNA.
+    The name ``hkp_pack``'s predicate alias for the reduce builder expects; the rules are
+    :func:`kernels.common.attention_split_kv_reduce.supports_split_kv_reduce`, shared with
+    every arch's reduce.
     """
-    reason = tiled_reduce_unsupported_reason(spec, arch=arch)
-    if reason is not None:
-        return False, reason
-    ok, reason = check_head_counts(spec.num_query_heads, spec.num_kv_heads)
-    if not ok:
-        return False, f"tiled reduce kernel: {reason}"
-    return True, "supported"
+    return supports_split_kv_reduce(spec, arch=arch)
 
 
 def reduce_spec_for(
-    spec: UnifiedAttention3DTiledSpec, *, emit_lse: bool = False
+    spec: UnifiedAttention3DTiledSpec, *, emit_lse: Optional[bool] = None
 ) -> UnifiedAttentionReduceTiledSpec:
     """The reduce kernel that pairs with segment kernel ``spec``.
 
     Every reduce field but ``emit_lse`` is a segment field, and the dispatcher builds its
     pair (``make_explicit_attention_3d_specs``) through the same derivation,
     ``kernels.common.attention_split_kv_reduce.split_kv_reduce_spec``, so this is the
-    reduce it launches. ``emit_lse`` comes from the problem, not the segment spec: it
-    defaults off, so the module packs a reduce with ``emit_lse=False`` and no ``lse_ptr``.
+    reduce it launches. ``emit_lse`` defaults to ``spec.emit_lse``, which is how a
+    packaged module (built from the spec alone) gets an LSE reduce; the dispatcher,
+    whose segment specs leave it off, passes the problem's value explicitly. At decode
+    (``seqlen_q == 1``) the reduce's token-major [total_q, Hq, 1] LSE is also the
+    head-major [B, Hq, 1, 1] layout, so no layout field is needed.
     """
     return split_kv_reduce_spec(
-        UnifiedAttentionReduceTiledSpec, spec, emit_lse=emit_lse
+        UnifiedAttentionReduceTiledSpec,
+        spec,
+        emit_lse=spec.emit_lse if emit_lse is None else emit_lse,
     )
 
 
@@ -1800,7 +1785,7 @@ def build_unified_attention_3d_tiled_module(
     Returns ``rocke.helpers.KernelModule(primary=<segment>, companions={"reduce":
     <reduce>})`` for :func:`rocke.helpers.compile_module` / hkp_pack, so a host that loaded
     the segment kernel finds the reduce in the same module by name. The reduce is
-    :func:`reduce_spec_for` ``(spec)``.
+    :func:`reduce_spec_for` ``(spec)``, so ``spec.emit_lse`` adds its trailing ``lse_ptr``.
     """
     from rocke.helpers import KernelModule
 

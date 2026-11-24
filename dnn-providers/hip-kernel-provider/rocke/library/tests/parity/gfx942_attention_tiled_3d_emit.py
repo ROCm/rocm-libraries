@@ -18,8 +18,9 @@
 # Each kernel is lowered with _native_lower(kernel, arch="gfx942") and the two
 # .ll texts are concatenated (segment first, then reduce) to stdout so they can
 # be byte-compared with the C emitter gfx942_attention_tiled_3d_emit.c.
-# prove_parity_binding keeps a copy of _CONFIGS (with emit_lse set for the
-# _REDUCE_LSE configs) in platform/cpp/bindings/attention_tiled_parity_configs.py;
+# prove_parity_binding keeps a copy of _CONFIGS (reduce_emit_lse for the
+# reduce-only _REDUCE_LSE configs, emit_lse where the segment writes LSE too) in
+# platform/cpp/bindings/attention_tiled_parity_configs.py;
 # update it in step.
 import dataclasses
 import sys
@@ -377,11 +378,11 @@ _CONFIGS = {
         use_decode_grid=True,
         waves_per_eu=2,
     ),
-    # idx33: QQ bias alone (no config here enabled it before). The gfx950
+    # idx37: QQ bias alone (no config here enabled it before). The gfx950
     # twin's mask build order fix (bind cmp_ge/cmp_lt before land, since C's
     # argument evaluation order is unspecified) was mirrored into this file's
     # 3D compute without a parity config to pin it -- this is that config.
-    33: dict(
+    37: dict(
         head_size=64,
         block_size=16,
         num_query_heads=16,
@@ -394,8 +395,8 @@ _CONFIGS = {
         use_qq_bias=True,
         kv_storage_dtype=None,
     ),
-    # idx34-38: additive bias. idx34: on cfg33's shape (fp16 D64 GQA).
-    34: dict(
+    # idx38-42: additive bias. idx38: on idx37's shape (fp16 D64 GQA).
+    38: dict(
         head_size=64,
         block_size=16,
         num_query_heads=16,
@@ -408,8 +409,8 @@ _CONFIGS = {
         use_additive_bias=True,
         kv_storage_dtype=None,
     ),
-    # idx35: composed with ALiBi, QQ bias and softcap on the wide K/V loader.
-    35: dict(
+    # idx39: composed with ALiBi, QQ bias and softcap on the wide K/V loader.
+    39: dict(
         head_size=128,
         block_size=16,
         num_query_heads=32,
@@ -425,9 +426,9 @@ _CONFIGS = {
         kv_storage_dtype=None,
         use_wide_kv_load=True,
     ),
-    # idx36: the spec the selector builds for gfx942 decode (wide loader,
+    # idx40: the spec the selector builds for gfx942 decode (wide loader,
     # decode grid, swizzled K/V LDS, page-id window).
-    36: dict(
+    40: dict(
         head_size=128,
         block_size=16,
         num_query_heads=32,
@@ -445,8 +446,8 @@ _CONFIGS = {
         use_kv_lds_swizzle=True,
         use_wave_page_id_load=True,
     ),
-    # idx37: half-page tiles, sinks and a sliding window.
-    37: dict(
+    # idx41: half-page tiles, sinks and a sliding window.
+    41: dict(
         head_size=64,
         block_size=32,
         num_query_heads=16,
@@ -461,8 +462,8 @@ _CONFIGS = {
         tile_size_override=16,
         use_decode_grid=True,
     ),
-    # idx38: an fp8 K/V cache.
-    38: dict(
+    # idx42: an fp8 K/V cache.
+    42: dict(
         head_size=128,
         block_size=16,
         num_query_heads=8,
@@ -478,7 +479,7 @@ _CONFIGS = {
 }
 
 # Configs whose REDUCE kernel is built with emit_lse=True (segment unchanged).
-_REDUCE_LSE = frozenset({20, 21})
+_REDUCE_LSE = frozenset({20, 21, 35, 36})
 
 
 def _strided_decode(head_size, block_size, tile, dtype, num_segments, heads=(32, 8)):
@@ -519,6 +520,69 @@ _CONFIGS.update(
         31: _strided_decode(256, 64, 32, "fp16", 8),
         32: dict(_strided_decode(128, 32, 16, "fp16", 16), waves_per_eu=2),
     }
+)
+
+_CONFIGS[33] = dict(
+    # Decode K/V streamed by the async copies from strided (non-paged) K/V.
+    head_size=128,
+    block_size=16,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="bf16",
+    num_segments=16,
+    use_sinks=True,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype=None,
+    num_seqs=4,
+    use_decode_grid=True,
+    kv_cache_policy="stream",
+    kv_layout="strided",
+)
+
+_CONFIGS[34] = dict(
+    # Decode K/V with globally cached copies through the 1-DWORD async loader.
+    head_size=128,
+    block_size=32,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="fp16",
+    num_segments=16,
+    use_sinks=True,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype=None,
+    use_decode_grid=True,
+    kv_cache_policy="global",
+)
+
+_CONFIGS[35] = dict(
+    # Reduce with the LSE output, decode grid.
+    head_size=128,
+    block_size=16,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="bf16",
+    num_segments=16,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype=None,
+    use_decode_grid=True,
+)
+
+_CONFIGS[36] = dict(
+    # Reduce with the LSE output.
+    head_size=64,
+    block_size=16,
+    num_query_heads=8,
+    num_kv_heads=8,
+    dtype="fp16",
+    num_segments=8,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype=None,
 )
 
 

@@ -42,6 +42,8 @@ inline void to_json(nlohmann::json& sdpaJson, const SdpaAttributes& sdpa)
     inputs["page_table_v_tensor_uid"] = sdpa.page_table_v_tensor_uid();
     inputs["block_mask_tensor_uid"] = sdpa.block_mask_tensor_uid();
     inputs["sink_token_tensor_uid"] = sdpa.sink_token_tensor_uid();
+    inputs["cu_seq_len_q_tensor_uid"] = sdpa.cu_seq_len_q_tensor_uid();
+    inputs["cu_seq_len_kv_tensor_uid"] = sdpa.cu_seq_len_kv_tensor_uid();
 
     // FP8-specific input tensor UIDs
     inputs["descale_q_tensor_uid"] = sdpa.descale_q_tensor_uid();
@@ -95,6 +97,12 @@ inline auto to<data_objects::SdpaAttributes>(flatbuffers::FlatBufferBuilder& bui
     auto& outputs = entry.at("outputs");
     auto& attributes = entry.at("attributes");
 
+    // Lenient read: serialized graphs written before cu_seq_len existed omit these keys.
+    auto optionalInput = [&inputs](const char* key) -> std::optional<int64_t> {
+        return inputs.contains(key) ? inputs.at(key).get<std::optional<int64_t>>()
+                                    : std::optional<int64_t>{};
+    };
+
     return data_objects::CreateSdpaAttributes(
         builder,
         // Required input tensor UIDs
@@ -146,7 +154,10 @@ inline auto to<data_objects::SdpaAttributes>(flatbuffers::FlatBufferBuilder& bui
         // Enum attributes
         attributes.at("diagonal_alignment").get<data_objects::DiagonalAlignment>(),
         attributes.at("mma_core_mode").get<data_objects::DataType>(),
-        attributes.at("implementation").get<data_objects::AttentionImplementation>());
+        attributes.at("implementation").get<data_objects::AttentionImplementation>(),
+        // Cumulative sequence length tensor UIDs (appended last in the schema)
+        optionalInput("cu_seq_len_q_tensor_uid"),
+        optionalInput("cu_seq_len_kv_tensor_uid"));
 }
 
 }

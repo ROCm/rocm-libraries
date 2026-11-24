@@ -3,14 +3,13 @@
 
 """Where a biased gfx942 / gfx950 problem routes, pinned without a GPU.
 
-The numeric lane (``test_attention_additive_bias_numeric.py``) is GPU only, so
-a selector change that moved one of its cases onto another score path or
-compile backend would go unnoticed in CI. The route is a pure function of the
-problem, so this file pins it for every 2D case of that lane on both arches,
-and the knobs the bias must set on the two gfx950 transposed 32x32 cohorts. It
-also pins that the builders with no bias score site (fastKV register-P, the
-scalar 2D and 3D kernels) refuse a biased spec, since nothing routes a biased
-problem to them.
+The numeric lane (``test_attention_additive_bias_numeric.py``) is GPU only, so a
+selector change that moved one of its cases onto another score path or compile
+backend would go unnoticed in CI. The route is a pure function of the problem, so
+this file pins it for every 2D case of that lane on both arches, and the knobs
+the bias must set on the two gfx950 transposed 32x32 cohorts. It also pins that
+the builders with no bias score site (fastKV register-P, the scalar 2D and 3D
+kernels) refuse a biased spec, since nothing routes a biased problem to them.
 """
 
 from dataclasses import replace
@@ -270,7 +269,10 @@ def test_scalar_builders_refuse_additive_bias(kind):
         )
 
     assert build(False).name
-    reason = f"scalar {kind} kernel: additive bias runs on the gfx942/gfx950 tiled kernels only"
+    reason = (
+        f"scalar {kind} kernel: additive bias runs on the gfx942/gfx950 tiled "
+        "kernels only"
+    )
     with pytest.raises(ValueError, match=reason):
         build(True)
     if kind == "2D":

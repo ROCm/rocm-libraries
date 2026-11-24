@@ -11,6 +11,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -29,11 +30,15 @@
 #include "core/ApplicabilityManager.hpp"
 #include "core/ApplicabilityPool.hpp"
 #include "core/Container.hpp"
+#include "core/GraphSchema.hpp"
 #include "core/Handle.hpp"
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
@@ -41,7 +46,10 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/ingestor/StagedApplicability.hpp>
+
+#include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #endif
 
 using namespace hip_kernel_provider::core;
@@ -1475,6 +1483,500 @@ TEST_F(TestApplicabilityManager, TwoCallersShareOnePoolAndEachGetTheSequentialAn
         EXPECT_LE(pool.threadCount(), 4u);
     }
     EXPECT_EQ(ApplicabilityPool::liveThreads(), baseline);
+}
+
+// ---------------------------------------------------------------------------
+// The provider's schema guard (GraphSchema.hpp)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+/// Which cumulative-length tensors a test graph's SDPA node names.
+enum class CuSides
+{
+    NONE,
+    Q,
+    KV,
+    BOTH
+};
+
+/// The graph-schema fields a test graph uses: one FLOAT tensor carrying them.
+struct SchemaFields
+{
+    int64_t alignment = 16;
+    bool ragged = false;
+    int64_t multiplier = 1;
+    bool overrideShape = false;
+    bool runtimePassByValue = false;
+    /// The cumulative-length tensors an SDPA node carries.
+    CuSides cuSeqLen = CuSides::NONE;
+    /// A floor the writer stamped, when set.
+    std::optional<hipdnn_data_sdk::utilities::Version> stamp;
+};
+
+flatbuffers::FlatBufferBuilder schemaGraph(const SchemaFields& fields)
+{
+    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+    flatbuffers::FlatBufferBuilder builder;
+    const std::vector<int64_t> dims{1, 1, 1, 1};
+    const std::vector<int64_t> strides{1, 1, 1, 1};
+    std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
+    tensors.push_back(data_objects::CreateTensorAttributesDirect(
+        builder,
+        1,
+        "x",
+        data_objects::DataType::FLOAT,
+        &strides,
+        &dims,
+        false,
+        data_objects::TensorValue::NONE,
+        0,
+        fields.runtimePassByValue,
+        fields.ragged ? flatbuffers::Optional<int64_t>(2) : flatbuffers::nullopt,
+        fields.alignment,
+        fields.multiplier));
+    const auto tensorsVector = builder.CreateVector(tensors);
+    std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
+    if(fields.cuSeqLen != CuSides::NONE)
+    {
+        data_objects::SdpaAttributesBuilder sdpa(builder);
+        if(fields.cuSeqLen == CuSides::Q || fields.cuSeqLen == CuSides::BOTH)
+        {
+            sdpa.add_cu_seq_len_q_tensor_uid(1);
+        }
+        if(fields.cuSeqLen == CuSides::KV || fields.cuSeqLen == CuSides::BOTH)
+        {
+            sdpa.add_cu_seq_len_kv_tensor_uid(1);
+        }
+        const auto attributes = sdpa.Finish();
+        nodes.push_back(data_objects::CreateNodeDirect(builder,
+                                                       "sdpa_fwd",
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::NodeAttributes::SdpaAttributes,
+                                                       attributes.Union()));
+    }
+    const auto nodesVector = builder.CreateVector(nodes);
+    data_objects::GraphBuilder graph(builder);
+    graph.add_tensors(tensorsVector);
+    graph.add_nodes(nodesVector);
+    graph.add_is_override_shape_enabled(fields.overrideShape);
+    std::optional<data_objects::EngineApiVersion> stamp;
+    if(fields.stamp.has_value())
+    {
+        stamp = hipdnn_plugin_sdk::toEngineApiVersion(*fields.stamp);
+        graph.add_min_required_engine_api_version(&*stamp);
+    }
+    builder.Finish(graph.Finish());
+    return builder;
+}
+
+SchemaFields withAlignment(int64_t alignment)
+{
+    SchemaFields fields;
+    fields.alignment = alignment;
+    return fields;
+}
+
+SchemaFields withRagged(int64_t multiplier = 1)
+{
+    SchemaFields fields;
+    fields.ragged = true;
+    fields.multiplier = multiplier;
+    return fields;
+}
+
+SchemaFields withCuSeqLen(CuSides sides)
+{
+    SchemaFields fields;
+    fields.cuSeqLen = sides;
+    return fields;
+}
+
+SchemaFields withOverrideShape()
+{
+    SchemaFields fields;
+    fields.overrideShape = true;
+    return fields;
+}
+
+SchemaFields withPassByValue()
+{
+    SchemaFields fields;
+    fields.runtimePassByValue = true;
+    return fields;
+}
+
+SchemaFields stamped(const char* version, SchemaFields fields = {})
+{
+    fields.stamp = hipdnn_data_sdk::utilities::Version{std::string(version)};
+    return fields;
+}
+
+constexpr int64_t BASELINE_HAND = 0x4001;
+constexpr int64_t BASELINE_STAGED = 0x4002;
+constexpr int64_t OPTED_IN_1_3 = 0x4003;
+constexpr int64_t OPTED_IN_1_4 = 0x4004;
+
+} // namespace
+
+TEST(TestGraphSchemaGuard, TheProviderBaselineIsTheSchemaItDeclaredBeforeTheBump)
+{
+    EXPECT_EQ(hip_kernel_provider::core::providerBaselineGraphSchema().str(), "1.2.0");
+}
+
+TEST(TestGraphSchemaGuard, AGraphsFloorIsItsFieldsOrItsStampWhicheverIsNewer)
+{
+    const auto floorOf = [](const SchemaFields& fields) {
+        const auto buffer = schemaGraph(fields);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            buffer.GetBufferPointer(), buffer.GetSize());
+        return hip_kernel_provider::core::graphSchemaFloor(graph).str();
+    };
+    EXPECT_EQ(floorOf({}), "1.0.0");
+    EXPECT_EQ(floorOf(withOverrideShape()), "1.1.0");
+    EXPECT_EQ(floorOf(withPassByValue()), "1.2.0");
+    EXPECT_EQ(floorOf(withAlignment(8)), "1.3.0");
+    EXPECT_EQ(floorOf(withRagged()), "1.3.0");
+    EXPECT_EQ(floorOf(withRagged(4)), "1.4.0");
+    EXPECT_EQ(floorOf(withCuSeqLen(CuSides::Q)), "1.6.0");
+    EXPECT_EQ(floorOf(withCuSeqLen(CuSides::KV)), "1.6.0");
+    EXPECT_EQ(floorOf(withCuSeqLen(CuSides::BOTH)), "1.6.0");
+    EXPECT_EQ(floorOf(withCuSeqLen(CuSides::NONE)), "1.0.0");
+    EXPECT_EQ(floorOf(stamped("1.4.0")), "1.4.0");
+    EXPECT_EQ(floorOf(stamped("1.2.0", withRagged())), "1.3.0");
+}
+
+// Every engine applies to every graph here; the guard alone decides, and an engine it holds back
+// is never asked.
+TEST_F(TestApplicabilityManager, EnginesBelowAGraphsSchemaDeclineItWithoutRunning)
+{
+    WorkerBudget budget{8};
+    ApplicabilityPool pool{budget};
+    ApplicabilityManager manager{pool};
+    using hipdnn_data_sdk::utilities::Version;
+    addHandWritten(manager, BASELINE_HAND, true);
+    addStaged(manager, decided(BASELINE_STAGED, true));
+    manager.addEngine(std::make_unique<FakeHandWrittenEngine>(OPTED_IN_1_3, true, _journal),
+                      "opted in at 1.3.0",
+                      Version{std::string("1.3.0")});
+    manager.addEngine(std::make_unique<FakeHandWrittenEngine>(OPTED_IN_1_4, true, _journal),
+                      "opted in at 1.4.0",
+                      Version{std::string("1.4.0")});
+    EXPECT_EQ(manager.maxGraphSchema(BASELINE_HAND).str(), "1.2.0");
+    EXPECT_EQ(manager.maxGraphSchema(OPTED_IN_1_4).str(), "1.4.0");
+
+    struct Case
+    {
+        const char* name;
+        SchemaFields fields;
+        std::vector<int64_t> applicable;
+    };
+    const std::vector<int64_t> every{BASELINE_HAND, BASELINE_STAGED, OPTED_IN_1_3, OPTED_IN_1_4};
+    for(const auto& c : std::vector<Case>{
+            {"plain", {}, every},
+            {"override shapes (1.1.0)", withOverrideShape(), every},
+            {"pass-by-value (1.2.0)", withPassByValue(), every},
+            {"declared alignment (1.3.0)", withAlignment(8), {OPTED_IN_1_3, OPTED_IN_1_4}},
+            {"ragged (1.3.0)", withRagged(), {OPTED_IN_1_3, OPTED_IN_1_4}},
+            {"ragged multiplier (1.4.0)", withRagged(4), {OPTED_IN_1_4}},
+            {"stamped 1.4.0", stamped("1.4.0"), {OPTED_IN_1_4}}})
+    {
+        SCOPED_TRACE(c.name);
+        const auto buffer = schemaGraph(c.fields);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+            buffer.GetBufferPointer(), buffer.GetSize());
+        _journal.clear();
+        EXPECT_EQ(manager.getApplicableEngineIds(_handle, graph),
+                  inIterationOrder(manager, c.applicable));
+        for(const auto& [engineId, thread] : _journal.handWritten())
+        {
+            static_cast<void>(thread);
+            EXPECT_TRUE(std::find(c.applicable.begin(), c.applicable.end(), engineId)
+                        != c.applicable.end())
+                << "engine " << engineId << " was asked about a graph past its schema";
+        }
+    }
+}
+
+// The guard's loop skips an admitted engine that throws, as the base class's loop does, and
+// still reports the others.
+TEST_F(TestApplicabilityManager, TheGuardsLoopSkipsAnAdmittedEngineThatThrows)
+{
+    WorkerBudget budget{8};
+    ApplicabilityPool pool{budget};
+    ApplicabilityManager manager{pool};
+    using hipdnn_data_sdk::utilities::Version;
+    addHandWritten(manager, BASELINE_HAND, true);
+    auto throwing = std::make_shared<StagedSpec>(decided(OPTED_IN_1_3, true));
+    throwing->failure = Failure::IN_BEGIN;
+    throwing->failureStatus = HIPDNN_PLUGIN_STATUS_BAD_PARAM;
+    throwing->failureMessage = "graph stage failed";
+    manager.addEngine(std::make_unique<FakeStagedEngine>(throwing, _journal),
+                      "opted in at 1.3.0, throws",
+                      Version{std::string("1.3.0")});
+    manager.addEngine(std::make_unique<FakeHandWrittenEngine>(OPTED_IN_1_4, true, _journal),
+                      "opted in at 1.4.0",
+                      Version{std::string("1.4.0")});
+
+    // Declared alignment needs 1.3.0, so the baseline engine is held back and the guard's loop
+    // runs.
+    const auto buffer = schemaGraph(withAlignment(8));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        buffer.GetBufferPointer(), buffer.GetSize());
+    const auto outcome = capture([&] { return manager.getApplicableEngineIds(_handle, graph); });
+    ASSERT_FALSE(outcome.threw) << outcome.thrown.message;
+    EXPECT_EQ(outcome.ids, inIterationOrder(manager, {OPTED_IN_1_4}));
+}
+
+// A graph past some engines' schema still takes the staged path: the guard holds those engines
+// back one by one, and the engines it admits finish on pool threads as for any other graph.
+TEST_F(TestApplicabilityManager, TheGuardKeepsTheThreadedPathForTheEnginesItAdmits)
+{
+    if(lacksASecondCpu())
+    {
+        GTEST_SKIP() << "offloading needs a second CPU";
+    }
+
+    WorkerBudget budget{8};
+    ApplicabilityPool pool{budget};
+    ApplicabilityManager manager{pool};
+    using hipdnn_data_sdk::utilities::Version;
+    // Held back from a 1.4.0 graph: a staged engine at the baseline and a hand-written one.
+    addStaged(manager, pending(BASELINE_STAGED, true, 500));
+    addHandWritten(manager, BASELINE_HAND, true);
+    // Admitted: three pending staged engines at 1.4.0, the largest held until a sibling has
+    // finished on another thread, so the threaded finish is what this call takes.
+    for(const auto engineId : {PENDING_A, PENDING_B, PENDING_C})
+    {
+        auto spec = std::make_shared<StagedSpec>(pending(engineId, engineId != PENDING_C, 100));
+        spec->predictedVariants = engineId == PENDING_A ? 300 : 100;
+        spec->awaitSibling = engineId == PENDING_A;
+        manager.addEngine(std::make_unique<FakeStagedEngine>(spec, _journal),
+                          "opted in at 1.4.0",
+                          Version{std::string("1.4.0")});
+    }
+
+    const auto buffer = schemaGraph(withRagged(4));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        buffer.GetBufferPointer(), buffer.GetSize());
+    _journal.clear();
+    const ScopedEnvironmentVariableSetter offloadKnob(APPLICABILITY_MIN_OFFLOAD_VARIANTS_ENV_NAME);
+    hipdnn_data_sdk::utilities::setEnv(APPLICABILITY_MIN_OFFLOAD_VARIANTS_ENV_NAME, "0");
+    const auto outcome = call(manager, _handle, graph);
+
+    ASSERT_FALSE(outcome.threw) << outcome.thrown.message;
+    EXPECT_EQ(outcome.ids, inIterationOrder(manager, {PENDING_A, PENDING_B}));
+    EXPECT_TRUE(_journal.anyFinishOffCaller());
+    for(const auto engineId : {PENDING_A, PENDING_B, PENDING_C})
+    {
+        EXPECT_EQ(_journal.finishCount(engineId), 1u) << engineId;
+        EXPECT_EQ(_journal.plainCallCount(engineId), 0u) << engineId;
+    }
+    // The held-back engines were never asked.
+    EXPECT_EQ(_journal.finishCount(BASELINE_STAGED), 0u);
+    EXPECT_EQ(_journal.plainCallCount(BASELINE_STAGED), 0u);
+    EXPECT_TRUE(_journal.handWritten().empty());
+}
+
+// ---------------------------------------------------------------------------
+// Engine order rules
+//
+// The two engines of each ENGINE_ORDER_RULES pair serve the same graphs, and hipDNN keeps a
+// provider's order between engines it has no rule for, so the provider states which comes
+// first.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+using hip_kernel_provider::kernel_ingestor_engine::ENGINE_ORDER_RULES;
+using hip_kernel_provider::kernel_ingestor_engine::EngineOrderRule;
+
+int64_t preferredId(const EngineOrderRule& rule)
+{
+    return hipdnn_data_sdk::utilities::engineNameToId(rule.preferred);
+}
+
+int64_t otherId(const EngineOrderRule& rule)
+{
+    return hipdnn_data_sdk::utilities::engineNameToId(rule.other);
+}
+
+std::string describe(const EngineOrderRule& rule)
+{
+    return std::string(rule.preferred) + " before " + std::string(rule.other);
+}
+
+std::ptrdiff_t position(const std::vector<int64_t>& ids, int64_t id)
+{
+    return std::find(ids.begin(), ids.end(), id) - ids.begin();
+}
+
+} // namespace
+
+TEST(TestDenseAttentionOrder, PreferredEngineComesBeforeTheOtherInEveryArrangement)
+{
+    for(const auto& rule : ENGINE_ORDER_RULES)
+    {
+        SCOPED_TRACE(describe(rule));
+        constexpr int64_t BEFORE = 0x41;
+        constexpr int64_t BETWEEN = 0x42;
+        constexpr int64_t AFTER = 0x43;
+        std::vector<int64_t> arrangement{BEFORE, BETWEEN, AFTER, preferredId(rule), otherId(rule)};
+        std::sort(arrangement.begin(), arrangement.end());
+        do
+        {
+            auto ids = arrangement;
+            applyEngineOrderRules(ids);
+
+            EXPECT_LT(position(ids, preferredId(rule)), position(ids, otherId(rule)));
+            // Nothing else moves relative to anything else.
+            const auto others = [&rule](std::vector<int64_t> list) {
+                list.erase(std::remove_if(list.begin(),
+                                          list.end(),
+                                          [&rule](int64_t id) {
+                                              return id == preferredId(rule) || id == otherId(rule);
+                                          }),
+                           list.end());
+                return list;
+            };
+            EXPECT_EQ(others(ids), others(arrangement));
+        } while(std::next_permutation(arrangement.begin(), arrangement.end()));
+    }
+}
+
+TEST(TestDenseAttentionOrder, LeavesAnOrderThatNeedsNoChangeAlone)
+{
+    for(const auto& rule : ENGINE_ORDER_RULES)
+    {
+        SCOPED_TRACE(describe(rule));
+        for(const std::vector<int64_t>& original :
+            std::vector<std::vector<int64_t>>{{},
+                                              {0x41, 0x42},
+                                              {0x41, otherId(rule), 0x42},
+                                              {preferredId(rule), 0x41},
+                                              {preferredId(rule), 0x41, otherId(rule)}})
+        {
+            auto ids = original;
+            applyEngineOrderRules(ids);
+            EXPECT_EQ(ids, original);
+        }
+    }
+}
+
+// Names the gfx942 engines directly, not through the table, so emptying or editing the table
+// cannot pass: the gfx942 Dense engine must be listed ahead of Unified2D.
+TEST(TestDenseAttentionOrder, Gfx942DenseComesBeforeUnified2D)
+{
+    namespace engines = hip_kernel_provider::kernel_ingestor_engine;
+    const auto dense
+        = hipdnn_data_sdk::utilities::engineNameToId(engines::GFX942_ATTENTION_DENSE_ENGINE_NAME);
+    const auto unified = hipdnn_data_sdk::utilities::engineNameToId(
+        engines::GFX942_ATTENTION_UNIFIED_2D_ENGINE_NAME);
+    std::vector<int64_t> ids{0x41, unified, 0x42, dense};
+    applyEngineOrderRules(ids);
+    EXPECT_LT(position(ids, dense), position(ids, unified));
+}
+
+TEST(TestDenseAttentionOrder, AppliesEveryRuleToOneList)
+{
+    // Every pair listed the wrong way round, a bystander between the pairs.
+    std::vector<int64_t> ids;
+    for(const auto& rule : ENGINE_ORDER_RULES)
+    {
+        ids.push_back(otherId(rule));
+        ids.push_back(preferredId(rule));
+    }
+    ids.push_back(0x41);
+    applyEngineOrderRules(ids);
+    for(const auto& rule : ENGINE_ORDER_RULES)
+    {
+        EXPECT_LT(position(ids, preferredId(rule)), position(ids, otherId(rule))) << describe(rule);
+    }
+}
+
+// Every path getApplicableEngineIds takes lists the pair in order: the base class's loop, the
+// staged walk, and each of those behind the schema guard (a graph past a registered engine's
+// schema), whichever order the pair was registered in.
+TEST_F(TestApplicabilityManager, ListsThePreferredEngineAheadOfTheOtherOnEveryPath)
+{
+    using hipdnn_data_sdk::utilities::Version;
+    for(const auto& rule : ENGINE_ORDER_RULES)
+    {
+        for(const bool preferredRegisteredFirst : {true, false})
+        {
+            for(const bool staged : {false, true})
+            {
+                for(const bool guarded : {false, true})
+                {
+                    SCOPED_TRACE(describe(rule)
+                                 + (preferredRegisteredFirst ? ", preferred registered first"
+                                                             : ", other registered first")
+                                 + (staged ? ", staged path" : ", sequential path")
+                                 + (guarded ? ", behind the schema guard" : ""));
+                    WorkerBudget budget{8};
+                    ApplicabilityPool pool{budget};
+                    ApplicabilityManager manager{pool};
+
+                    // Behind the guard the graph is 1.4.0: the engines under test opt in to
+                    // it, and a baseline engine is what makes the guard hold anything back.
+                    const Version schema
+                        = guarded ? Version{std::string("1.4.0")} : providerBaselineGraphSchema();
+                    const auto add = [&](int64_t id, bool asStaged) {
+                        if(asStaged)
+                        {
+                            manager.addEngine(
+                                std::make_unique<FakeStagedEngine>(
+                                    std::make_shared<StagedSpec>(decided(id, true)), _journal),
+                                "under test",
+                                schema);
+                        }
+                        else
+                        {
+                            manager.addEngine(
+                                std::make_unique<FakeHandWrittenEngine>(id, true, _journal),
+                                "under test",
+                                schema);
+                        }
+                    };
+                    addHandWritten(manager, guarded ? BASELINE_HAND : HAND_YES, true);
+                    const std::array<int64_t, 2> order
+                        = preferredRegisteredFirst
+                              ? std::array<int64_t, 2>{preferredId(rule), otherId(rule)}
+                              : std::array<int64_t, 2>{otherId(rule), preferredId(rule)};
+                    for(const auto id : order)
+                    {
+                        add(id, staged);
+                    }
+                    if(staged)
+                    {
+                        // The staged walk needs a second staged engine to be taken.
+                        add(DECIDED_YES, true);
+                    }
+                    ASSERT_EQ(manager.stagedEngineCount(), staged ? 3u : 0u);
+
+                    Outcome outcome;
+                    if(guarded)
+                    {
+                        const auto buffer = schemaGraph(withRagged(4));
+                        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+                            buffer.GetBufferPointer(), buffer.GetSize());
+                        outcome = call(manager, _handle, graph);
+                    }
+                    else
+                    {
+                        outcome = run(manager, "");
+                    }
+                    ASSERT_FALSE(outcome.threw) << outcome.thrown.message;
+                    // The guard holds the baseline hand-written engine back; nothing else.
+                    ASSERT_EQ(outcome.ids.size(), (staged ? 3u : 2u) + (guarded ? 0u : 1u));
+                    EXPECT_LT(position(outcome.ids, preferredId(rule)),
+                              position(outcome.ids, otherId(rule)));
+                }
+            }
+        }
+    }
 }
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

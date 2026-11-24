@@ -24,8 +24,8 @@
  * lengths from `seq_lens` and ragged Q offsets from `query_start_len`, and a contiguous BSHD
  * K/V tensor IS that cache with an identity block table. What differs per architecture is
  * the wave width, whether the grid is kv-major or q-major, and the geometry the builder
- * accepts. Those are the traits; a pack for another architecture (e.g. a future gfx942
- * pack) supplies its own traits and its own builder-legality check and reuses everything here.
+ * accepts. Those are the traits; each architecture's pack supplies its own traits and its
+ * own builder-legality check and reuses everything here.
  *
  * Pure functions of KMD fields and graph dimensions: testable with no HIP context.
  */
@@ -54,10 +54,25 @@ struct UnifiedAttentionArchTraits
     /// `num_warps` and `block_m_per_warp` values the 2D builder takes.
     std::array<int64_t, 4> numWarps = {1, 2, 4, 8};
     std::array<int64_t, 2> blockMPerWarp = {16, 32};
+    /// Whether the architecture ships LSE-on kernels, so a graph asking for the stats output
+    /// can be served. When false, the graph match declines every softmax statistics output.
+    bool servesStats = true;
 };
 
-/// gfx950 (CDNA4): wave64, kv-major grid.
+/// gfx950 (CDNA4): wave64, kv-major grid. Ships LSE-on kernels.
 inline constexpr UnifiedAttentionArchTraits GFX950_UNIFIED_ATTENTION_TRAITS{"gfx950"};
+
+/// gfx942 (CDNA3): wave64, kv-major grid. The 2D builder takes the same block sizes, warp
+/// counts and rows per warp as gfx950; the q-major grid (`use_q_major_grid`) is a codegen
+/// stack no shipped kernel enables. No LSE-on kernel ships, so a stats output is declined.
+constexpr UnifiedAttentionArchTraits gfx942UnifiedAttentionTraits()
+{
+    UnifiedAttentionArchTraits traits{"gfx942"};
+    traits.servesStats = false;
+    return traits;
+}
+inline constexpr UnifiedAttentionArchTraits GFX942_UNIFIED_ATTENTION_TRAITS
+    = gfx942UnifiedAttentionTraits();
 
 /// Each workspace section starts on this boundary.
 inline constexpr std::size_t UNIFIED_ATTENTION_WORKSPACE_ALIGNMENT = 256;
@@ -92,7 +107,24 @@ inline std::size_t alignWorkspaceSection(std::size_t bytes)
 inline bool isSupportedUnifiedAttentionBlockSize(const UnifiedAttentionArchTraits& traits,
                                                  int64_t blockSize)
 {
-    return detail::isOneOf(traits.blockSizes, blockSize);
+    // `blockSizes` is fixed-size, so an architecture listing fewer sizes leaves zero slots.
+    // A slot is not a block size, and a caller must never divide by one.
+    return blockSize > 0 && detail::isOneOf(traits.blockSizes, blockSize);
+}
+
+/// The smallest `block_size` any candidate of the architecture is built with. `blockSizes` is
+/// fixed-size, so an architecture listing fewer sizes leaves zero slots; those are skipped.
+constexpr int64_t unifiedAttentionSmallestBlockSize(const UnifiedAttentionArchTraits& traits)
+{
+    int64_t smallest = 0;
+    for(const auto blockSize : traits.blockSizes)
+    {
+        if(blockSize > 0 && (smallest == 0 || blockSize < smallest))
+        {
+            smallest = blockSize;
+        }
+    }
+    return smallest;
 }
 
 /// The grid and block a candidate must launch with.
@@ -318,9 +350,12 @@ struct UnifiedAttentionSegmentScratchLayout
     std::size_t endOffset = 0;
 };
 
+/// One past the largest element offset a signed 32-bit index reaches (2^31).
+inline constexpr int64_t UNIFIED_ATTENTION_I32_INDEX_LIMIT = int64_t{1} << 31;
+
 /**
  * @brief The split-KV segment scratch every unified 3D (segment + reduce) pack lays out,
- *        starting at @p base.
+ *        starting at @p base, or nullopt when the kernels cannot address it.
  *
  * Restates `kernels/common/attention_unified.py::_attention_3d_workspace_specs`:
  *
@@ -328,22 +363,63 @@ struct UnifiedAttentionSegmentScratchLayout
  *     segm_max     f32 [total_q, Hq, num_segments]
  *     segm_expsum  f32 [total_q, Hq, num_segments]
  *
- * with @p rows = `total_q * Hq * num_segments`. Each section starts on a 256-byte boundary,
- * so @p base must be one. The caller validates the dimensions (positive, and `rows * D`
- * representable); this only places the sections.
+ * Each section starts on a 256-byte boundary, so @p base must be one.
+ *
+ * This is the one place the 32-bit bound lives. The kernels index these arrays with signed
+ * 32-bit element offsets, and a tensor of N elements reaches offset N - 1: exactly 2^31
+ * elements still addresses, one more wraps negative and the stores land before the buffer
+ * (the Python launch guard, `_check_3d_workspace_addr_width`, records the gfx942 check: 2^31
+ * elements completes, one more faults). The limit comes from the kernels' 32-bit indexing,
+ * not from the hardware, so wider offsets would lift it.
+ * The bound is on `segm_output`: it is the largest of the three, and Q and O
+ * `[total_q, Hq, D]` are no larger (equal when `num_segments` is 1), so bounding it bounds all of
+ * them. The dimensions come in raw, not as a row count, so a product that wraps is seen here.
+ *
+ * Blind spot: this assumes Q and O are dense `[total_q, Hq, D]` tensors, and it does not look
+ * at K and V, which the packs bound where they match (they use 64-bit bases).
+ *
+ * nullopt for a non-positive dimension, a product that overflows int64, or a `segm_output`
+ * past the bound. Total: never throws.
  */
-inline UnifiedAttentionSegmentScratchLayout
-    unifiedAttentionSegmentScratchLayout(std::size_t base, std::size_t rows, std::size_t headSize)
+inline std::optional<UnifiedAttentionSegmentScratchLayout> unifiedAttentionSegmentScratchLayout(
+    std::size_t base, int64_t totalQ, int64_t numQueryHeads, int64_t numSegments, int64_t headSize)
 {
+    if(totalQ <= 0 || numQueryHeads <= 0 || numSegments <= 0 || headSize <= 0)
+    {
+        return std::nullopt;
+    }
+    int64_t rows = 0;
+    int64_t outputElements = 0;
+    if(__builtin_mul_overflow(totalQ, numQueryHeads, &rows)
+       || __builtin_mul_overflow(rows, numSegments, &rows)
+       || __builtin_mul_overflow(rows, headSize, &outputElements)
+       || outputElements > UNIFIED_ATTENTION_I32_INDEX_LIMIT)
+    {
+        return std::nullopt;
+    }
+
+    const auto rowCount = static_cast<std::size_t>(rows);
     UnifiedAttentionSegmentScratchLayout s;
     s.segmOutputOffset = base;
-    s.segmOutputBytes = rows * headSize * UNIFIED_ATTENTION_SCRATCH_ELEMENT;
+    s.segmOutputBytes
+        = rowCount * static_cast<std::size_t>(headSize) * UNIFIED_ATTENTION_SCRATCH_ELEMENT;
     s.segmMaxOffset = s.segmOutputOffset + detail::alignWorkspaceSection(s.segmOutputBytes);
-    s.segmMaxBytes = rows * UNIFIED_ATTENTION_SCRATCH_ELEMENT;
+    s.segmMaxBytes = rowCount * UNIFIED_ATTENTION_SCRATCH_ELEMENT;
     s.segmExpsumOffset = s.segmMaxOffset + detail::alignWorkspaceSection(s.segmMaxBytes);
     s.segmExpsumBytes = s.segmMaxBytes;
     s.endOffset = s.segmExpsumOffset + detail::alignWorkspaceSection(s.segmExpsumBytes);
     return s;
+}
+
+/// Whether unifiedAttentionSegmentScratchLayout() can lay the scratch out: the same rule, for
+/// a matcher that has nothing to place.
+inline bool unifiedAttentionSegmentScratchFitsI32(int64_t totalQ,
+                                                  int64_t numQueryHeads,
+                                                  int64_t numSegments,
+                                                  int64_t headSize)
+{
+    return unifiedAttentionSegmentScratchLayout(0, totalQ, numQueryHeads, numSegments, headSize)
+        .has_value();
 }
 
 /// Where each workspace section sits, in bytes: the identity paged-KV metadata (exactly
@@ -399,33 +475,27 @@ inline std::optional<UnifiedAttention3DWorkspaceLayout>
                                       int64_t numSegments)
 {
     const auto identity = unifiedAttentionWorkspaceLayout(batch, seqLenKv, blockSize);
-    if(!identity.has_value() || seqLenQ <= 0 || numQueryHeads <= 0 || headSize <= 0
-       || numSegments <= 0)
-    {
-        return std::nullopt;
-    }
-
-    int64_t rows = 0;
-    int64_t outputElements = 0;
-    if(__builtin_mul_overflow(batch, seqLenQ, &rows)
-       || __builtin_mul_overflow(rows, numQueryHeads, &rows)
-       || __builtin_mul_overflow(rows, numSegments, &rows)
-       || __builtin_mul_overflow(rows, headSize, &outputElements) || outputElements > INT32_MAX)
+    int64_t totalQ = 0;
+    if(!identity.has_value() || seqLenQ <= 0 || __builtin_mul_overflow(batch, seqLenQ, &totalQ))
     {
         return std::nullopt;
     }
 
     const auto scratch = unifiedAttentionSegmentScratchLayout(
-        identity->totalBytes, static_cast<std::size_t>(rows), static_cast<std::size_t>(headSize));
+        identity->totalBytes, totalQ, numQueryHeads, numSegments, headSize);
+    if(!scratch.has_value())
+    {
+        return std::nullopt;
+    }
     UnifiedAttention3DWorkspaceLayout layout;
     layout.identity = *identity;
-    layout.segmOutputOffset = scratch.segmOutputOffset;
-    layout.segmOutputBytes = scratch.segmOutputBytes;
-    layout.segmMaxOffset = scratch.segmMaxOffset;
-    layout.segmMaxBytes = scratch.segmMaxBytes;
-    layout.segmExpsumOffset = scratch.segmExpsumOffset;
-    layout.segmExpsumBytes = scratch.segmExpsumBytes;
-    layout.totalBytes = scratch.endOffset;
+    layout.segmOutputOffset = scratch->segmOutputOffset;
+    layout.segmOutputBytes = scratch->segmOutputBytes;
+    layout.segmMaxOffset = scratch->segmMaxOffset;
+    layout.segmMaxBytes = scratch->segmMaxBytes;
+    layout.segmExpsumOffset = scratch->segmExpsumOffset;
+    layout.segmExpsumBytes = scratch->segmExpsumBytes;
+    layout.totalBytes = scratch->endOffset;
     return layout;
 }
 
