@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 // The fields of hipblaslt_ext::GemmInputs, for the library's own code. `dPeer` (the second D of
-// a PartitionedGemm storePeerD slice) is set only by PartitionedGemm and has no public setter.
+// a PartitionedGemm storePeerD slice) is set only by PartitionedGemm, through GemmInputsAccess,
+// and has no public setter.
 
 #pragma once
 
@@ -33,4 +34,15 @@ namespace hipblaslt_ext
         // Keep this layout in sync with rocblaslt::RocGemmInputsV2.
         bool deviceScalarAlpha = false;
     };
+
+    namespace detail
+    {
+        struct GemmInputsAccess
+        {
+            static void setPeerD(GemmInputs& inputs, void* dPeer)
+            {
+                inputs.pimpl->dPeer = dPeer;
+            }
+        };
+    } // namespace detail
 } // namespace hipblaslt_ext

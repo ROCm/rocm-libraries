@@ -530,7 +530,9 @@ lands.
 exist, map every mode (`A`, `B`, `FALLBACK`, `OPENSOURCE`) to hipDNN's
 fallback/default selection and **log a WARN on first use per process** so a
 user debugging a perf regression sees that their heuristic choice was not
-honored. As hipDNN heuristics arrive, remap the modes properly. The
+honored. As hipDNN heuristics arrive, remap the modes properly: `A` and `B`
+to the backend's `HIPDNN_HEUR_MODE_A` / `HIPDNN_HEUR_MODE_B`, `FALLBACK` to
+`HIPDNN_HEUR_MODE_FALLBACK`, and `OPENSOURCE` to fallback with the WARN. The
 benchmarking and auto-tuning paths are explicit user choices and are handled
 separately.
 
