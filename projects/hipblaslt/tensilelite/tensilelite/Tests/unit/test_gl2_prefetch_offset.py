@@ -121,6 +121,7 @@ from gpu_test_helpers import (  # noqa: E402
     run_on_gpu,
     init_rocisa,
     assemble_kernel,
+    _assembler_target,
     _scan_register_indices,
 )
 
@@ -770,11 +771,15 @@ def _make_writer(kernel):
 # Kernel assembly generation
 # ---------------------------------------------------------------------------
 
-def build_kernel(cfg, with_prefetch=False):
+def build_kernel(cfg, with_prefetch=False, target=TARGET):
     """Build a kernel computing GL2 addresses for all of cfg.tensors at once.
 
     with_prefetch also emits each stage's issueLoad and a final clearIncrement,
     for assembling only: the dummy base buffer does not back the whole footprint.
+
+    ``target`` names the assembler target (``gfx1250`` or ``gfx1250-strict``);
+    the ``.amdgcn_target`` directive must match the ``-mcpu`` the kernel is
+    assembled with.
 
     The kernel emits cfg.n_inc+1 "stages": stage 0 is the start address after
     the loop-counter-guarded skipPGR, and each later stage calls incrementAddr
@@ -790,7 +795,7 @@ def build_kernel(cfg, with_prefetch=False):
     from rocisa.instruction import SMovB32, SCmpLeU32, SCBranchSCC1
     from tensilelite.KernelWriterAssembly import GL2PrefetchLoad
 
-    init_rocisa(target=TARGET, wavesize=WAVESIZE)
+    init_rocisa(target=target, wavesize=WAVESIZE)
     kernel = _make_kernel(cfg)
     w = _make_writer(kernel)
     comp = GL2PrefetchLoad()
@@ -1102,7 +1107,7 @@ def build_kernel(cfg, with_prefetch=False):
     args_md = "\n".join(args)
 
     asm = f"""\
-.amdgcn_target "amdgcn-amd-amdhsa--{TARGET}"
+.amdgcn_target "amdgcn-amd-amdhsa--{target}"
 {set_dir}
 .text
 .protected test_kernel
@@ -1331,7 +1336,9 @@ def verify_tensor(offsets, spec, cfg, stage, batch=0, group=0, debug=False):
 
 
 def run_config(cfg, tmp_dir, debug=False):
-    asm, layout, n_out = build_kernel(cfg)
+    # The device's own target: on a gfx1250-strict device assemble_kernel passes
+    # -mcpu=gfx1250-strict, which rejects a gfx1250 directive.
+    asm, layout, n_out = build_kernel(cfg, target=_assembler_target())
     co_path = os.path.join(tmp_dir, f"gl2_{cfg.name}.co")
     if debug:
         with open(os.path.join(tmp_dir, f"gl2_{cfg.name}.s"), "w") as f:
