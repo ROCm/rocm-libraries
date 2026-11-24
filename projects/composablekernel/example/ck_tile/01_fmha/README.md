@@ -48,11 +48,13 @@ To speed up compile time, we instantiate the kernels into separate file. In this
 `qr_tdm_cr` uses conditional rescaling (CR) to avoid unnecessary softmax
 rescaling and maximum reductions. It uses the shared `FmhaFwdKernel` for
 FP16/BF16 forward attention on gfx1250. Generated dispatch selects CR only
-without LSE output; LSE-enabled calls retain the existing pipelines pending
-forward/backward numerical qualification.
+without LSE output or dropout; LSE-enabled and dropout calls retain the existing
+pipelines pending forward/backward numerical qualification.
 See [codegen](codegen/ops/fmha_fwd.py) for supported configurations and dispatch selection, and
 [argument validation](../../../include/ck_tile/ops/fmha/detail/fmha_fwd_cr_args.hpp)
 for tensor layout requirements.
+See the [performance report](docs/qr_tdm_cr_performance.md) for mask-aware
+TFLOPS comparisons, measurement provenance, and numerical validation limits.
 
 ### Basic TDM forward feature coverage
 
