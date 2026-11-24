@@ -37,10 +37,28 @@ class TestWmmaFmhaFwdV2Spec(unittest.TestCase):
             dict(layout="ragged", page_block_size=16),
             dict(page_block_size=16),
             dict(kv_dtype="fp8e5m2"),
+            dict(dense_q=True),
+            dict(layout="ragged", dense_q=True),
+            dict(seqused_q=True),
         )
         for fields in bad:
             with self.subTest(**fields), self.assertRaises(ValueError):
                 WmmaFmhaFwdV2Spec(**fields)
+
+    def test_post_init_rejects_non_bool_layout_flags(self):
+        # The flags change the argument layout, so a truthy non-bool such as
+        # "false" must not switch one on.
+        paged = dict(layout="paged", page_block_size=16)
+        for fields in (
+            dict(dense_q="false"),
+            dict(dense_q=1),
+            dict(seqused_q="false"),
+            dict(seqused_q=0),
+        ):
+            with self.subTest(**fields), self.assertRaisesRegex(
+                TypeError, "must be a bool"
+            ):
+                WmmaFmhaFwdV2Spec(**paged, **fields)
 
     def test_derived_geometry(self):
         spec = WmmaFmhaFwdV2Spec(head_dim=128)
@@ -83,6 +101,12 @@ class TestWmmaFmhaFwdV2Spec(unittest.TestCase):
             replace(base, layout="ragged"),
             replace(base, layout="paged", page_block_size=16),
             replace(base, layout="paged", page_block_size=32),
+            replace(base, layout="paged", page_block_size=16, dense_q=True),
+            replace(base, layout="paged", page_block_size=16, seqused_q=True),
+            replace(
+                base, layout="paged", page_block_size=16, dense_q=True, seqused_q=True
+            ),
+            replace(base, layout="ragged", seqused_q=True),
             replace(base, kv_dtype="fp8e4m3"),
         ]
         names = [v.kernel_name() for v in variants]
@@ -191,10 +215,10 @@ class TestWmmaFmhaFwdV2Spec(unittest.TestCase):
             [p["name"] for p in sig],
             base
             + [
-                "softcap", "sink_ptr", "alibi_slopes_ptr", "qq_bias_ptr",
+                "softcap", "sink_ptr", "sink_is_f32", "alibi_slopes_ptr", "qq_bias_ptr",
                 "qq_bias_rows", "qq_bias_cols", "qq_bias_stride", "cu_seqlens_q",
-                "seqused_k", "block_table", "block_table_stride", "stride_k_block",
-                "stride_v_block", "num_blocks", "k_scale", "v_scale",
+                "seqused_k", "block_table", "block_table_v", "block_table_stride",
+                "stride_k_block", "stride_v_block", "num_blocks", "k_scale", "v_scale",
                 "attn_bias_ptr",
                 "bias_stride_b", "bias_stride_h", "bias_stride_q",
             ],
@@ -204,11 +228,45 @@ class TestWmmaFmhaFwdV2Spec(unittest.TestCase):
         self.assertIn("fp8e4m3", types["V"])
         self.assertIn("bf16", types["sink_ptr"])
         self.assertEqual(types["softcap"], "f32")
+        self.assertEqual(types["sink_is_f32"], "i32")
         ragged = WmmaFmhaFwdV2Spec(layout="ragged")
         self.assertEqual(
             [p["name"] for p in wmma_fmha_fwd_v2_signature(ragged)],
             base + ["cu_seqlens_q", "cu_seqlens_k"],
         )
+        paged = dict(layout="paged", page_block_size=16)
+        tail = ["seqused_k", "block_table", "block_table_v", "block_table_stride"]
+        tail += ["stride_k_block", "stride_v_block", "num_blocks"]
+        for fields, head in (
+            (dict(dense_q=True), []),
+            (dict(dense_q=True, seqused_q=True), ["seqused_q"]),
+            (dict(seqused_q=True), ["cu_seqlens_q", "seqused_q"]),
+        ):
+            spec = WmmaFmhaFwdV2Spec(**paged, **fields)
+            with self.subTest(**fields):
+                self.assertEqual(
+                    [p["name"] for p in wmma_fmha_fwd_v2_signature(spec)],
+                    base + head + tail,
+                )
+        self.assertEqual(
+            [
+                p["name"]
+                for p in wmma_fmha_fwd_v2_signature(
+                    WmmaFmhaFwdV2Spec(layout="ragged", seqused_q=True)
+                )
+            ],
+            base + ["cu_seqlens_q", "seqused_q", "cu_seqlens_k"],
+        )
+
+    def test_dispatch_abi_names_the_v_table_layout(self):
+        # Adding block_table_v moved every later paged argument; persisted ids
+        # and compile keys keyed on the dispatch ABI must see the new layout.
+        from dispatch.attention.gfx1151 import ATTENTION_GFX1151_ABI
+
+        paged = WmmaFmhaFwdV2Spec(layout="paged", page_block_size=16)
+        names = [p["name"] for p in wmma_fmha_fwd_v2_signature(paged)]
+        self.assertEqual(names[names.index("block_table") + 1], "block_table_v")
+        self.assertEqual(ATTENTION_GFX1151_ABI, "rocke-attention-gfx1151/v8")
 
     def test_features_build_on_both_families(self):
         from rocke.core.ir_serialize import serialize
@@ -220,6 +278,13 @@ class TestWmmaFmhaFwdV2Spec(unittest.TestCase):
             WmmaFmhaFwdV2Spec(layout="ragged", kv_dtype="fp8e4m3", mask="causal"),
             WmmaFmhaFwdV2Spec(layout="paged", page_block_size=16, head_dim=256),
             WmmaFmhaFwdV2Spec(layout="paged", page_block_size=64, use_sinks=True),
+            WmmaFmhaFwdV2Spec(
+                layout="paged", page_block_size=16, dense_q=True, mask="causal"
+            ),
+            WmmaFmhaFwdV2Spec(
+                layout="paged", page_block_size=32, seqused_q=True, mask="causal"
+            ),
+            WmmaFmhaFwdV2Spec(layout="ragged", seqused_q=True, head_dim=64),
         )
         for arch in _ARCHS:
             for spec in specs:

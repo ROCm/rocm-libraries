@@ -338,6 +338,7 @@ def test_bundle_ids_are_unique_across_the_conv_aot_bundles():
         assert any((folder / "artifacts").glob("*.kdp.json")), folder
     ids = {}
     for folder in (*_FWD_DIRS, *dgrad):
+        # A bundle's KDPs are in its DVC artifacts/ folder.
         for path in (*folder.glob("*.json"), *folder.glob("artifacts/*.json")):
             found = json.loads(path.read_text())
             values = [found["id"]] + [

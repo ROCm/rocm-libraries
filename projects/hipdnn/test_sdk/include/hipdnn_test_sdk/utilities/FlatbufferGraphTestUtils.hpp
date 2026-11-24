@@ -38,6 +38,18 @@ inline flatbuffers::FlatBufferBuilder createEmptyValidGraph()
     return builder;
 }
 
+/// Unpacks a serialized graph, applies `mutate(GraphT&)`, and re-serializes the result.
+template <typename Mutate>
+flatbuffers::FlatBufferBuilder mutateGraph(const flatbuffers::FlatBufferBuilder& source,
+                                           Mutate&& mutate)
+{
+    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(source.GetBufferPointer());
+    mutate(*graph);
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(builder, graph.get()));
+    return builder;
+}
+
 /// Re-serializes a graph with its first non-virtual tensor marked ragged. The
 /// applicability check keys on ragged_offset_tensor_uid being set, so we point it
 /// at another existing tensor uid to keep the value plausible. Throws if the graph
@@ -2730,7 +2742,8 @@ inline flatbuffers::FlatBufferBuilder
                                     std::optional<float> swishBeta = std::nullopt,
                                     hipdnn_flatbuffers_sdk::data_objects::DataType dataType
                                     = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-                                    std::optional<float> reluLowerClipSlope = std::nullopt)
+                                    std::optional<float> reluLowerClipSlope = std::nullopt,
+                                    bool biasInFirstOperand = false)
 {
     flatbuffers::FlatBufferBuilder builder;
 
@@ -2794,8 +2807,8 @@ inline flatbuffers::FlatBufferBuilder
             flatbuffers::nullopt,
             flatbuffers::nullopt,
             flatbuffers::nullopt,
-            cMatmulTensorUid,
-            biasTensorUid,
+            biasInFirstOperand ? biasTensorUid : cMatmulTensorUid,
+            biasInFirstOperand ? cMatmulTensorUid : biasTensorUid,
             flatbuffers::nullopt,
             cBiasTensorUid);
         nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
@@ -2841,6 +2854,15 @@ inline flatbuffers::FlatBufferBuilder
     return builder;
 }
 
+/// Which sides of an SDPA forward graph carry a cumulative sequence length tensor.
+enum class CuSeqLenSides
+{
+    NONE,
+    Q,
+    KV,
+    BOTH,
+};
+
 inline flatbuffers::FlatBufferBuilder
     createValidSdpaFwdGraph(const std::vector<int64_t>& qDims,
                             const std::vector<int64_t>& qStrides,
@@ -2860,7 +2882,8 @@ inline flatbuffers::FlatBufferBuilder
                             bool causalMask = false,
                             bool overrideShapeEnabled = false,
                             hipdnn_flatbuffers_sdk::data_objects::DataType mmaCoreMode
-                            = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
+                            = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
+                            CuSeqLenSides cuSeqLenSides = CuSeqLenSides::NONE)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -2936,6 +2959,35 @@ inline flatbuffers::FlatBufferBuilder
         statsUid = flatbuffers::Optional<int64_t>(stUid);
     }
 
+    flatbuffers::Optional<int64_t> cuSeqLenQUid = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> cuSeqLenKvUid = flatbuffers::nullopt;
+    const bool withCuSeqLenQ
+        = cuSeqLenSides == CuSeqLenSides::Q || cuSeqLenSides == CuSeqLenSides::BOTH;
+    const bool withCuSeqLenKv
+        = cuSeqLenSides == CuSeqLenSides::KV || cuSeqLenSides == CuSeqLenSides::BOTH;
+    // cu_seq_len_q / cu_seq_len_kv: INT32 [batch + 1, 1, 1, 1]
+    const std::vector<int64_t> cuSeqLenDims = {qDims[0] + 1, 1, 1, 1};
+    const std::vector<int64_t> cuSeqLenStrides = {1, 1, 1, 1};
+    const auto addCuSeqLen
+        = [&](bool enabled, const char* name, flatbuffers::Optional<int64_t>& uidOut) {
+              if(!enabled)
+              {
+                  return;
+              }
+              const auto cuUid = uid++;
+              tensorAttributes.push_back(
+                  hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+                      builder,
+                      cuUid,
+                      name,
+                      hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                      &cuSeqLenStrides,
+                      &cuSeqLenDims));
+              uidOut = flatbuffers::Optional<int64_t>(cuUid);
+          };
+    addCuSeqLen(withCuSeqLenQ, "cu_seq_len_q", cuSeqLenQUid);
+    addCuSeqLen(withCuSeqLenKv, "cu_seq_len_kv", cuSeqLenKvUid);
+
     auto sdpaAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateSdpaAttributes(
         builder,
         qUid,
@@ -2977,7 +3029,10 @@ inline flatbuffers::FlatBufferBuilder
         flatbuffers::nullopt, // right_bound
         flatbuffers::nullopt, // max_seq_len_kv
         hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT,
-        mmaCoreMode);
+        mmaCoreMode,
+        hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation::AUTO,
+        cuSeqLenQUid,
+        cuSeqLenKvUid);
 
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
     nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
@@ -3021,7 +3076,8 @@ inline flatbuffers::FlatBufferBuilder
                             bool causalMask = false,
                             bool overrideShapeEnabled = false,
                             hipdnn_flatbuffers_sdk::data_objects::DataType mmaCoreMode
-                            = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
+                            = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
+                            CuSeqLenSides cuSeqLenSides = CuSeqLenSides::NONE)
 {
     return createValidSdpaFwdGraph(qDims,
                                    qStrides,
@@ -3040,7 +3096,8 @@ inline flatbuffers::FlatBufferBuilder
                                    paddingMask,
                                    causalMask,
                                    overrideShapeEnabled,
-                                   mmaCoreMode);
+                                   mmaCoreMode,
+                                   cuSeqLenSides);
 }
 
 inline flatbuffers::FlatBufferBuilder createValidBlockScaleQuantizeGraph(
@@ -3413,52 +3470,136 @@ inline flatbuffers::FlatBufferBuilder createValidCustomOpGraph()
     return builder;
 }
 
-inline flatbuffers::FlatBufferBuilder createValidReductionGraph()
+// One of the two tensors of a single-node reduction graph built by createReductionGraph().
+struct ReductionTensorSpec
 {
+    // A dense, non-virtual tensor that is part of the graph.
+    static ReductionTensorSpec
+        dense(int64_t uid, std::vector<int64_t> dims, std::vector<int64_t> strides)
+    {
+        ReductionTensorSpec tensor;
+        tensor.uid = uid;
+        tensor.dims = std::move(dims);
+        tensor.strides = std::move(strides);
+        return tensor;
+    }
+
+    int64_t uid = 0;
+    std::vector<int64_t> dims;
+    // nullopt leaves the strides field out of the flatbuffer.
+    std::optional<std::vector<int64_t>> strides;
+    bool isVirtual = false;
+    bool isRuntimePassByValue = false;
+    // A value baked into the graph (TensorValue::Float32Value); nullopt writes no value.
+    std::optional<float> bakedValue;
+    std::optional<int64_t> raggedOffsetTensorUid;
+    // false leaves the tensor out of the graph, so the node's reference to `uid` dangles.
+    bool inGraph = true;
+};
+
+// Configuration for a single-node ReductionAttributes graph. The defaults describe a valid graph:
+// an fp32 ADD over the H and W axes of a packed NCHW tensor.
+struct ReductionGraphSpec
+{
+    static constexpr int64_t X_UID = 1;
+    static constexpr int64_t Y_UID = 2;
+
+    // `mode` over the axes where `yDims` is 1, with packed strides on both tensors.
+    static ReductionGraphSpec packed(hipdnn_flatbuffers_sdk::data_objects::ReductionMode mode,
+                                     const std::vector<int64_t>& xDims,
+                                     const std::vector<int64_t>& yDims,
+                                     hipdnn_flatbuffers_sdk::data_objects::DataType dataType
+                                     = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        ReductionGraphSpec spec;
+        spec.mode = mode;
+        spec.x.dims = xDims;
+        spec.x.strides = hipdnn_data_sdk::utilities::generateStrides(xDims);
+        spec.y.dims = yDims;
+        spec.y.strides = hipdnn_data_sdk::utilities::generateStrides(yDims);
+        spec.dataType = dataType;
+        return spec;
+    }
+
+    // The data type of y: yDataType when set, otherwise the same as x.
+    hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType() const
+    {
+        return yDataType.value_or(dataType);
+    }
+
+    hipdnn_flatbuffers_sdk::data_objects::ReductionMode mode
+        = hipdnn_flatbuffers_sdk::data_objects::ReductionMode::ADD;
+    ReductionTensorSpec x = ReductionTensorSpec::dense(X_UID, {2, 3, 4, 5}, {60, 20, 5, 1});
+    ReductionTensorSpec y = ReductionTensorSpec::dense(Y_UID, {2, 3, 1, 1}, {3, 1, 1, 1});
+    // The data type of x, and of y unless yDataType overrides it.
+    hipdnn_flatbuffers_sdk::data_objects::DataType dataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> yDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+    bool isDeterministic = false;
+    bool overrideShapeEnabled = false;
+};
+
+// Builds a single-node ReductionAttributes graph from `spec`; the default spec is the valid graph
+// ReductionGraphSpec describes. Graph tensor uids are unique, so an in-place spec
+// (y.uid == x.uid) emits the x tensor only, and the node references it twice.
+inline flatbuffers::FlatBufferBuilder createReductionGraph(const ReductionGraphSpec& spec = {})
+{
+    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
-        tensorAttributes;
+    std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensorAttributes;
 
-    const std::vector<int64_t> inDims = {4, 8};
-    const std::vector<int64_t> inStrides = {8, 1};
-    const std::vector<int64_t> outDims = {1, 8};
-    const std::vector<int64_t> outStrides = {8, 1};
+    const auto addTensor
+        = [&](const ReductionTensorSpec& tensor, const char* name, data_objects::DataType type) {
+              if(!tensor.inGraph)
+              {
+                  return;
+              }
+              const data_objects::Float32Value bakedValue(tensor.bakedValue.value_or(0.0f));
+              tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
+                  builder,
+                  tensor.uid,
+                  name,
+                  type,
+                  tensor.strides.has_value() ? &tensor.strides.value() : nullptr,
+                  &tensor.dims,
+                  tensor.isVirtual,
+                  tensor.bakedValue.has_value() ? data_objects::TensorValue::Float32Value
+                                                : data_objects::TensorValue::NONE,
+                  tensor.bakedValue.has_value() ? builder.CreateStruct(bakedValue).Union()
+                                                : flatbuffers::Offset<void>(),
+                  tensor.isRuntimePassByValue,
+                  tensor.raggedOffsetTensorUid));
+          };
 
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        1,
-        "input",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &inStrides,
-        &inDims));
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        2,
-        "output",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &outStrides,
-        &outDims));
+    addTensor(spec.x, "x", spec.dataType);
+    if(spec.y.uid != spec.x.uid)
+    {
+        addTensor(spec.y, "y", spec.outputDataType());
+    }
 
-    auto reductionAttr = hipdnn_flatbuffers_sdk::data_objects::CreateReductionAttributes(
-        builder, hipdnn_flatbuffers_sdk::data_objects::ReductionMode::ADD, 1, 2);
+    const auto reductionAttributes = data_objects::CreateReductionAttributes(
+        builder, spec.mode, spec.x.uid, spec.y.uid, spec.isDeterministic);
 
-    std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> nodes;
-    nodes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
-        builder,
-        "reduction",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ReductionAttributes,
-        reductionAttr.Union()));
+    const std::vector<flatbuffers::Offset<data_objects::Node>> nodes{
+        data_objects::CreateNodeDirect(builder,
+                                       "reduction",
+                                       spec.computeDataType,
+                                       data_objects::NodeAttributes::ReductionAttributes,
+                                       reductionAttributes.Union())};
 
-    auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
-        builder,
-        "test",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &tensorAttributes,
-        &nodes);
-    builder.Finish(graphOffset);
+    const auto graph = data_objects::CreateGraphDirect(builder,
+                                                       "test",
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::DataType::FLOAT,
+                                                       &tensorAttributes,
+                                                       &nodes,
+                                                       flatbuffers::nullopt,
+                                                       spec.overrideShapeEnabled);
+    builder.Finish(graph);
     return builder;
 }
 

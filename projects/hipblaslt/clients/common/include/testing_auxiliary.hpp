@@ -48,6 +48,7 @@
 #include "unit.hpp"
 #include "utility.hpp"
 #include <limits>
+#include <regex>
 
 void testing_aux_handle_init_bad_arg(const Arguments& arg)
 {
@@ -4189,6 +4190,30 @@ inline void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
         auto unmarked = algo_with_index(index & 0x7fffffff);
         EXPECT_EQ(isRocRollerSolutionSupported(roc_handle, tiled, &unmarked, &workspace),
                   rocblaslt_status_invalid_value);
+    }
+
+    // A device without block scaling, or one rocRoller does not know, gets no block-scaled
+    // rocRoller kernels rather than an exception.
+    RocblasltContractionProblem blockScaled = tiled;
+    blockScaled.scaleAType                  = blockScaled.scaleBType
+        = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0;
+    for(const char* arch : {"gfx942", "gfx1100"})
+    {
+        SCOPED_TRACE(arch);
+        hipblasLtHandle_t archHandle;
+        CHECK_HIPBLASLT_ERROR(hipblasLtCreate(&archHandle));
+        auto& archName = ((rocblaslt_handle)archHandle)->properties.gcnArchName;
+        strncpy(archName, arch, sizeof(archName));
+        int count = -1;
+        EXPECT_EQ(getRocRollerBestSolutions((rocblaslt_handle)archHandle,
+                                            blockScaled,
+                                            1,
+                                            &rocroller_result,
+                                            max_workspace_size,
+                                            &count),
+                  rocblaslt_status_success);
+        EXPECT_EQ(count, 0);
+        CHECK_HIPBLASLT_ERROR(hipblasLtDestroy(archHandle));
     }
 
     // Free GPU memory allocations

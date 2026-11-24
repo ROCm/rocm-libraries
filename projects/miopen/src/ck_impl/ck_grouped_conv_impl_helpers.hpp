@@ -14,6 +14,7 @@
 #include <cassert>
 #include <cstddef>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <vector>
 
@@ -201,6 +202,7 @@ struct CKArgsSplitK
     // BWD/WRW CKArgs is constructed unconditionally in FillValidKernelsIDs
     // before filtering, so narrowing in the constructor would assert on
     // >INT_MAX shapes even though no kernel is ultimately selected.
+    // Every member passed here must also be in Key().
     const NarrowedCKArrays2D& GetNarrowedArrays() const
     {
         narrowed = MakeNarrowedCKArrays<NarrowedCKArrays2D>(input,
@@ -219,6 +221,29 @@ struct CKArgsSplitK
     CKArgsSplitK(const CKArgsSplitK&)            = default;
     CKArgsSplitK(CKArgsSplitK&&)                 = default;
     CKArgsSplitK& operator=(const CKArgsSplitK&) = default;
+
+    /// Everything IsSupportedBy() depends on, so that its answer can be memoized per problem
+    /// (implicitgemm_ck_util.hpp, IsCKApplicable). It must list every member the derived
+    /// MakeArgPtr() reads (directly or through GetNarrowedArrays()); a member missing here would
+    /// make problems that differ only in it share an answer, so IsCKApplicable could give one of
+    /// them the other's answer. Adding a member to the CK arguments
+    /// means adding it here and a single-field case to CPU_CKArgsSplitKKey_NONE
+    /// (test/gtest/unit_ck_problem_cache.cpp).
+    auto Key() const
+    {
+        return std::tuple{data_type,
+                          alpha_beta_case,
+                          input,
+                          in_strides,
+                          output,
+                          out_strides,
+                          weight,
+                          wei_strides,
+                          strides,
+                          dilation,
+                          lPadding,
+                          rPadding};
+    }
 
     template <typename ConvPtr>
     bool IsSupportedBy(const ConvPtr& conv_ptr) const
@@ -327,14 +352,15 @@ bool CheckIsArgSupportedCommon(const miopen::conv::ProblemDescription& problem,
                                const std::string& kernel_id,
                                bool use_tf32)
 {
+    // Strict: a TF32 request checks the TF32 instance set only (no silent FP32 fallback), matching
+    // FillValidKernels/the 3D path. The TF32->FP32 availability fallback is applied one level up
+    // (IsArgsSupportedTf32Aware for restored configs; the lazy walk's FP32 second pass), so a TF32
+    // request never picks an FP32-only kernel while a lower-ranked TF32 kernel applies.
     if constexpr(std::is_same_v<DataType, float>)
     {
-        if(use_tf32 &&
-           miopen::solver::IsCKArgsSupported<DeviceOpPtrs<DataType, ck::tf32_t>, CKArgsType>(
-               problem, kernel_id))
-        {
-            return true;
-        }
+        if(use_tf32)
+            return miopen::solver::IsCKArgsSupported<DeviceOpPtrs<DataType, ck::tf32_t>,
+                                                     CKArgsType>(problem, kernel_id);
     }
     return miopen::solver::IsCKArgsSupported<DeviceOpPtrs<DataType, DataType>, CKArgsType>(
         problem, kernel_id);

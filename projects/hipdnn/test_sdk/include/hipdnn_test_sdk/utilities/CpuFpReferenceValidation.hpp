@@ -282,6 +282,9 @@ inline std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
     case hipdnn_flatbuffers_sdk::data_objects::DataType::INT32:
         rejectMatchingInfinitiesRequest(matchingInfinities);
         return std::make_unique<CpuIntReferenceValidation<int32_t>>();
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN:
+        rejectMatchingInfinitiesRequest(matchingInfinities);
+        return std::make_unique<CpuIntReferenceValidation<bool>>();
     default:
         throw std::runtime_error("Unsupported data type for allClose validator");
     }

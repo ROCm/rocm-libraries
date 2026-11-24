@@ -913,6 +913,13 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
     // lengths, sequence b is its length's tokens from its table entry, wherever the table's next
     // entry lies (vendored-kernel modification 47): the kernel clamps the length to the launch's,
     // writes no token outside the sequence, and reads no key past its length.
+    // Cumulative lengths (cu_seq_len_*) are a different form from the per-batch lengths the
+    // varlen helpers read; the kernels do not implement them.
+    if(attributes.cu_seq_len_q_tensor_uid().has_value()
+       || attributes.cu_seq_len_kv_tensor_uid().has_value())
+    {
+        return std::nullopt;
+    }
     const auto varlen = hasRaggedOperand(context, attributes)
                             ? servablePackedVarlenWithLengths(context, attributes, problem.batch)
                             : servableVarlenAsReferenceReads(context, attributes, problem.batch);
@@ -1338,7 +1345,14 @@ inline std::optional<CdnaTile> candidateTile(const KernelDefinition& kernel, Cdn
     return CdnaTile{false, *blockM, *splitKv == 1, *packGqa == 1, *dvSplit, dvTile};
 }
 
-/// The launch grid, or nullopt past int32: the dual-wave kernel one workgroup per (query
+/// Work-items per workgroup: blockM rows, each served by a fixed thread count per kernel family.
+inline int64_t candidateThreads(const CdnaTile& tile)
+{
+    return tile.blockM * (tile.dualwave ? DUALWAVE_THREADS_PER_ROW : GENERIC_THREADS_PER_ROW);
+}
+
+/// The launch grid, or nullopt past the launch limits (workgroups past int32 on any axis, or
+/// x-axis work-items past 32 bits): the dual-wave kernel one workgroup per (query
 /// head, query block, batch); the generic one per (batch, query tile, query head),
 /// flattened onto x.
 inline std::optional<std::array<int64_t, 3>> candidateGrid(const SdpaProblem& problem,
@@ -1347,7 +1361,8 @@ inline std::optional<std::array<int64_t, 3>> candidateGrid(const SdpaProblem& pr
     const auto queryBlocks = (problem.seqLenQ + tile.blockM - 1) / tile.blockM;
     if(tile.dualwave)
     {
-        if(queryBlocks > INT32_LIMIT || problem.numHeads > INT32_LIMIT)
+        if(queryBlocks > INT32_LIMIT || problem.numHeads > INT32_LIMIT
+           || !launchAxisFits(problem.numHeads, candidateThreads(tile)))
         {
             return std::nullopt;
         }
@@ -1366,7 +1381,8 @@ inline std::optional<std::array<int64_t, 3>> candidateGrid(const SdpaProblem& pr
               ? checkedProduct(
                     {problem.batch, (*rows + tile.blockM - 1) / tile.blockM, problem.numKvHeads})
               : checkedProduct({problem.batch, queryBlocks, problem.numHeads});
-    if(!gridX.has_value() || *gridX > INT32_LIMIT)
+    if(!gridX.has_value() || *gridX > INT32_LIMIT
+       || !launchAxisFits(*gridX, candidateThreads(tile)))
     {
         return std::nullopt;
     }
@@ -2231,7 +2247,7 @@ public:
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "flydsl_sdpa_cdna: launch grid exceeds int32 for kernel '"
+                "flydsl_sdpa_cdna: launch grid exceeds the launch limits for kernel '"
                     + toString(kernel.kernelId) + "'");
         }
 
@@ -2243,8 +2259,7 @@ public:
                                       kernel,
                                       options,
                                       tile->dualwave ? dualwaveSignature() : genericSignature());
-        const int64_t threads
-            = tile->blockM * (tile->dualwave ? DUALWAVE_THREADS_PER_ROW : GENERIC_THREADS_PER_ROW);
+        const int64_t threads = candidateThreads(*tile);
         // A split object runs one grid row per split (vendored-kernel modification 14).
         const auto splits
             = candidateSplits(problem, *tile, context.deviceProperties.multiProcessorCount);
@@ -2260,7 +2275,7 @@ public:
             const auto mergeGrid
                 = checkedProduct({problem.batch, problem.numHeads, problem.seqLenQ});
             if(!mergeSymbol.has_value() || mergeSymbol->empty() || !mergeGrid.has_value()
-               || *mergeGrid > INT32_LIMIT)
+               || *mergeGrid > INT32_LIMIT || !launchAxisFits(*mergeGrid, MERGE_THREADS))
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_BAD_PARAM,

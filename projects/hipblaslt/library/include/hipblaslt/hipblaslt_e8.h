@@ -27,6 +27,7 @@
 #pragma once
 
 #include <iostream>
+#include <string>
 
 #define HIP_HOST_DEVICE __host__ __device__
 #define HIP_HOST __host__

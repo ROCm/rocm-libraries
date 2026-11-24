@@ -157,10 +157,10 @@ Overrides the heuristic policy order for the outer loop. Read by every `EngineHe
 
 | Value      | Description                                                |
 |------------|------------------------------------------------------------|
-| (unset)    | Use the descriptor's `HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT` attribute if set; otherwise fall back to the built-in default `[SelectionHeuristic::Config, SelectionHeuristic::StaticOrdering]`. |
+| (unset)    | Use the descriptor's `HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT` attribute if set; otherwise use the list the descriptor's heuristic mode (`HIPDNN_ATTR_ENGINEHEUR_MODE`) selects. `HIPDNN_HEUR_MODE_FALLBACK`: `[SelectionHeuristic::Config, SelectionHeuristic::StaticOrdering]`. `HIPDNN_HEUR_MODE_A` / `HIPDNN_HEUR_MODE_INSTANT`: `[SelectionHeuristic::Config, SelectionHeuristic::ModeA, SelectionHeuristic::StaticOrdering]`. `HIPDNN_HEUR_MODE_B`: `[SelectionHeuristic::Config, SelectionHeuristic::ModeB, SelectionHeuristic::StaticOrdering]`. There is no mode-independent default list. `ModeA` ranks engines by their engine-level (L1) prediction and declines, leaving `StaticOrdering` to decide, when no applicable engine has one. |
 | `<list>`   | Comma-separated tokens consulted in the order written. Each token is either a policy name (hashed via `policyNameToId`) or a raw decimal int64 policy ID. Whitespace around tokens is trimmed; empty tokens are skipped. |
 
-This variable has the **highest priority**: it overrides both the descriptor attribute and the built-in default.
+This variable has the **highest priority**: it overrides both the descriptor attribute and the list the heuristic mode selects.
 
 **Example:**
 ```bash
@@ -332,8 +332,11 @@ export HIPDNN_INGESTOR_SHORTLIST_LIMIT=8
 - `predictConfiguration` (the `HIPDNN_ATTR_ENGINE_PREDICTION_METRIC_EXT` query path) applies
   the same limit to the candidates it predicts over, so its answer names a configuration plan
   build could actually shortlist.
-- A slotted engine's `slotCandidates` path ignores this limit entirely: every slot keeps its
-  full knob- and workspace-filtered catalog regardless of the value set here.
+- A slotted engine's `slotCandidates` path applies this limit too, on its ranked (plan-building
+  and predicting) call only: each slot's knob- and workspace-filtered catalog is further cut to
+  the best-ranked `n`. The unranked call `getMaxWorkspaceSize` uses keeps the full catalog, since
+  it must report the largest scratch any surviving kernel could need. A slot benchmark due to
+  a shortlist limit records nothing, the same as under a knob filter or workspace limit.
 
 ### Engine Applicability Threading
 
@@ -469,9 +472,9 @@ lookup.
 
 **A lookup never creates anything.** A key with no stored ranking is an ordinary miss. It leaves
 no file behind and holds no open file handle; only a write creates the versioned subtree and its
-shards. This matters because the lookup runs for every graph on the default heuristic policy list
-over an unbounded key space, so a lookup that created files would leave one empty file per distinct
-graph ever looked up.
+shards. This matters because `Config` heads every mode's heuristic policy list, so the lookup runs
+for every graph, over an unbounded key space: a lookup that created files would leave one empty
+file per distinct graph ever looked up.
 
 **Decline modes visible in `HIPDNN_LOG_LEVEL=info` logging**, each with its own distinguishable
 `[BuiltInConfig] policyFinalize:` log fragment:

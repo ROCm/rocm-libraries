@@ -11,6 +11,8 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -37,6 +39,10 @@ struct ModelShapeReport
 
     /// First reason a row was unusable.
     std::string firstProblem;
+
+    /// Rows that took a parameter's `model_shape_defaults` value because the file has no column
+    /// for it, by parameter.
+    std::map<std::string, int64_t> defaulted;
 };
 
 namespace detail
@@ -92,10 +98,19 @@ inline std::vector<std::string> csvFields(const std::string& line)
 /// @brief One row's text values as a point of @p metadata's declared types.
 ///
 /// Every declared parameter must be present and readable; a partial point is refused rather
-/// than defaulted, since a default would pass off an unrecorded shape as recorded.
+/// than defaulted, since a default would pass off an unrecorded shape as recorded. The one
+/// exception is a parameter the file has no column for at all and the operation lists under
+/// `model_shape_defaults` (`layout`, say): the listed value is the operation's own meaning of a
+/// source without it.
+/// Pack constants are not consulted: they answer for kernels, not for recorded workloads, and
+/// `alignment` or `generate_stats` left out of a file must not become a recorded decode shape.
+/// A column that exists but is empty on a row is still a refusal. Each parameter filled this way
+/// is appended to @p defaulted.
 inline bool pointFromColumns(const OperationMetadata& metadata,
                              const std::map<std::string, std::string>& values,
+                             const std::set<std::string>& columns,
                              ProblemPoint& point,
+                             std::vector<std::string>& defaulted,
                              std::string& problem)
 {
     point.clear();
@@ -104,6 +119,13 @@ inline bool pointFromColumns(const OperationMetadata& metadata,
         const auto found = values.find(parameter.name);
         if(found == values.end() || found->second.empty())
         {
+            const auto fallback = metadata.modelShapeDefaults.find(parameter.name);
+            if(columns.count(parameter.name) == 0 && fallback != metadata.modelShapeDefaults.end())
+            {
+                point[parameter.name] = fallback->second;
+                defaulted.push_back(parameter.name);
+                continue;
+            }
             problem = "no value for '" + parameter.name + "'";
             return false;
         }
@@ -206,6 +228,7 @@ inline std::vector<PoolEntry> readModelShapes(const OperationMetadata& metadata,
             column = column.substr(2);
         }
     }
+    const std::set<std::string> columns(header.begin(), header.end());
 
     std::vector<PoolEntry> entries;
     while(std::getline(file, line))
@@ -233,7 +256,8 @@ inline std::vector<PoolEntry> readModelShapes(const OperationMetadata& metadata,
 
         PoolEntry entry;
         std::string problem;
-        if(!detail::pointFromColumns(metadata, values, entry.point, problem))
+        std::vector<std::string> defaulted;
+        if(!detail::pointFromColumns(metadata, values, columns, entry.point, defaulted, problem))
         {
             ++report.unusable;
             if(report.firstProblem.empty())
@@ -241,6 +265,10 @@ inline std::vector<PoolEntry> readModelShapes(const OperationMetadata& metadata,
                 report.firstProblem = problem;
             }
             continue;
+        }
+        for(const auto& parameter : defaulted)
+        {
+            ++report.defaulted[parameter];
         }
 
         const auto name = values.find("name");

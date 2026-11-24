@@ -21,6 +21,7 @@ __all__ = [
 ]
 
 import dataclasses
+import re
 import sys
 import os
 from pathlib import Path
@@ -388,6 +389,30 @@ def _resolve_search_space(config: Dict[str, Any]) -> str:
     return ss
 
 
+_DATA_INIT_KEY = re.compile(r"DataInitType\w+|DataInitSeed")
+
+
+def _validate_gsu_and_data_init(config: Dict[str, Any]) -> None:
+    """Reject a non-boolean GSU_PER_MI and DATA_INIT entries that are not data-init settings.
+
+    Raises:
+        ValueError: If either key holds a value the generator cannot emit.
+    """
+    if not isinstance(config["GSU_PER_MI"], bool):
+        raise ValueError(f"GSU_PER_MI must be true or false, got {config['GSU_PER_MI']!r}")
+    data_init = config["DATA_INIT"]
+    if data_init is None:
+        return
+    if not isinstance(data_init, dict):
+        raise ValueError(f"DATA_INIT must map DataInit* names to integers, got {data_init!r}")
+    for key, value in data_init.items():
+        is_int = isinstance(value, int) and not isinstance(value, bool)
+        if not _DATA_INIT_KEY.fullmatch(str(key)) or not is_int:
+            raise ValueError(
+                f"DATA_INIT entry {key}: {value!r} is not a DataInitType* or DataInitSeed integer"
+            )
+
+
 def apply_input_config_defaults(config: Dict[str, Any]) -> None:
     """Apply per-ARCH defaults, hardware fields, search-space resolution, and kernel-cap rules.
 
@@ -397,6 +422,7 @@ def apply_input_config_defaults(config: Dict[str, Any]) -> None:
     config["ARCH"] = canonical_arch(config["ARCH"])
     for key, default in CONFIG_DEFAULTS_BY_ARCH[config["ARCH"]].items():
         config.setdefault(key, default)
+    _validate_gsu_and_data_init(config)
 
     _apply_arch_hardware_defaults(config)
 
