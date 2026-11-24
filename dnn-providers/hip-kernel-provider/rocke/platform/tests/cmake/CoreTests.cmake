@@ -96,6 +96,25 @@ if(BUILD_TESTING)
           TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU}
           ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
     endif()
+
+    # Checks that the compliance patterns load, that they find each leak they
+    # name, and that no git-tracked file of rocke holds a hit, so a product name
+    # or internal link added anywhere in the tree fails here. The tests read
+    # rocke/tools and the git checkout, which the installed test tree does not
+    # carry. Guarded on the pattern module so a platform-only copy of this
+    # directory still configures.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/compliance_patterns.py")
+      add_test(
+        NAME rocke_compliance_pytest
+        COMMAND "${Python3_EXECUTABLE}" -m pytest
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_compliance_patterns.py" -q)
+      set_tests_properties(
+        rocke_compliance_pytest
+        PROPERTIES
+          LABELS "ckc;python;host"
+          TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU}
+          ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
+    endif()
   else()
     message(WARNING
             "rocKE: Python3 interpreter not found; the Python-driven build-tree "
