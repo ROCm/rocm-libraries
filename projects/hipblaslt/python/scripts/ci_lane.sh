@@ -15,16 +15,19 @@
 #   venv   create a fresh venv with pytest
 #   rocm   install the pinned nightly (and the device wheel) into it
 #   build  build and install the bindings against that ROCm
-#   test   run the bindings' tests
+#   test   run the bindings' tests (only the CPU ones when no device wheel is named)
 #   clean  remove the venv
+#
+# Each command is echoed before it runs, so the log shows exactly what a lane did.
 #
 # Environment:
 #   HIPBLASLT_PY_ROCM_VERSION  the nightly to install (required by rocm), e.g. 10.3.0a20261116
 #   HIPBLASLT_PY_ROCM_INDEX    the wheel index (default: TheRock's nightly index)
 #   HIPBLASLT_PY_DEVICE        a device wheel to add, e.g. gfx942; empty for a CPU-only lane
 #   HIPBLASLT_PY_REQUIRE_GPU   1 on GPU lanes, so "no device" skips become failures
-#   HIPBLASLT_PY_WORK_DIR      where the steps keep the venv (default: $RUNNER_TEMP/hipblaslt-py
-#                              in CI, or a temporary directory when no step is named)
+#   HIPBLASLT_PY_WORK_DIR      where the steps keep the venv, as WORK_DIR/venv (default:
+#                              $RUNNER_TEMP/hipblaslt-py in CI, or a temporary directory when no
+#                              step is named). Only the venv inside it is ever removed.
 #   PYTHON                     the interpreter to build the venv from (default: python3)
 
 set -euo pipefail
@@ -34,19 +37,36 @@ device="${HIPBLASLT_PY_DEVICE:-}"
 python="${PYTHON:-python3}"
 package_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Echo a command (to stderr, so captured output stays clean), then run it.
+run() {
+    {
+        printf '+'
+        printf ' %q' "$@"
+        printf '\n'
+    } >&2
+    "$@"
+}
+
 work_dir="${HIPBLASLT_PY_WORK_DIR:-${RUNNER_TEMP:+${RUNNER_TEMP}/hipblaslt-py}}"
+# A directory this script made, and so may remove whole. A caller's directory never is.
+own_dir=""
 steps=("$@")
 if [[ ${#steps[@]} -eq 0 ]]; then
     steps=(venv rocm build test)
     if [[ -z "${work_dir}" ]]; then
         work_dir="$(mktemp -d)"
+        own_dir="${work_dir}"
     fi
-    # Leave the directory before removing it; Windows can't delete the current directory.
-    trap 'cd / && rm -rf "${work_dir}"' EXIT
+    trap step_clean EXIT
 fi
 : "${work_dir:?set HIPBLASLT_PY_WORK_DIR, or run every step at once}"
 if command -v cygpath >/dev/null 2>&1; then
     work_dir="$(cygpath -u "${work_dir}")"
+    [[ -z "${own_dir}" ]] || own_dir="${work_dir}"
+fi
+# Absolute before any step changes directory, so test and clean find the same place.
+if [[ "${work_dir}" != /* ]]; then
+    work_dir="${PWD}/${work_dir}"
 fi
 venv="${work_dir}/venv"
 
@@ -55,9 +75,9 @@ venv_tool() {
     local name="$1"
     shift
     if [[ -x "${venv}/bin/${name}" ]]; then
-        "${venv}/bin/${name}" "$@"
+        run "${venv}/bin/${name}" "$@"
     else
-        "${venv}/Scripts/${name}.exe" "$@"
+        run "${venv}/Scripts/${name}.exe" "$@"
     fi
 }
 
@@ -73,9 +93,9 @@ use_rocm() {
 }
 
 step_venv() {
-    rm -rf "${work_dir}"
-    mkdir -p "${work_dir}"
-    "${python}" -m venv "${venv}"
+    run rm -rf "${venv}"
+    run mkdir -p "${work_dir}"
+    run "${python}" -m venv "${venv}"
     venv_tool python -m pip install --upgrade pip
     venv_tool python -m pip install pytest
 }
@@ -98,17 +118,30 @@ step_build() {
 
 step_test() {
     use_rocm
+    local select=()
+    if [[ -z "${device}" ]]; then
+        # A CPU lane runs the CPU tests even on a machine that happens to have a GPU.
+        select=(-m "not gpu")
+    fi
     # Run from outside the source tree, so the tests import the installed package.
-    cd "${work_dir}"
-    venv_tool python -m pytest "${package_dir}/tests" -ra -v
+    run cd "${work_dir}"
+    venv_tool python -m pytest "${package_dir}/tests" -ra -v ${select[@]+"${select[@]}"}
 }
 
 step_clean() {
+    # Leave the directory before removing it; Windows can't delete the current directory.
     cd /
-    rm -rf "${work_dir}"
+    if [[ -n "${own_dir}" ]]; then
+        run rm -rf "${own_dir}"
+    else
+        run rm -rf "${venv}"
+    fi
 }
 
+echo "ci_lane.sh: steps '${steps[*]}', work dir ${work_dir}, device '${device:-none}'," \
+    "ROCm ${HIPBLASLT_PY_ROCM_VERSION:-unset}"
 for step in "${steps[@]}"; do
+    echo "==> ${step}"
     case "${step}" in
         venv | rocm | build | test | clean) "step_${step}" ;;
         *)
