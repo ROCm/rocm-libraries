@@ -1354,8 +1354,9 @@ int runGenerator(const std::vector<std::string>& args)
         };
 
         // Pack and model shapes are admitted first (finite and cheap); the search then fills
-        // only the remainder, excluding but still walking through already-pooled points. A
-        // source with share 0 is not collected at all, or it would displace enabled sources.
+        // only the remainder, starting its walks from the pooled points and walking through
+        // them, but excluding them. A source with share 0 is not collected at all, or it would
+        // displace enabled sources.
         const auto enabled = [&](const char* source) {
             return hipdnn_corpus_gen::sourceEnabled(options.shares, source);
         };
@@ -1413,6 +1414,15 @@ int runGenerator(const std::vector<std::string>& args)
             = options.count > 0
                   ? std::max<int64_t>(0, options.count - static_cast<int64_t>(pooled.size()))
                   : 0;
+        // The pack's geometries and the recorded shapes are where the engine's kernels and real
+        // workloads are known to sit: the search starts from them.
+        for(const auto& pool : pools)
+        {
+            for(const auto& entry : pool.second)
+            {
+                request.seedPoints.push_back(entry.point);
+            }
+        }
         const hipdnn_corpus_gen::ProblemOracle admits = [&](const ProblemPoint& point) {
             return searchFilter(result.operation, point) && searchOracle(point);
         };

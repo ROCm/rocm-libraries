@@ -36,6 +36,8 @@ struct ShapeDimension
     std::string name;
     int64_t low = 1;
     int64_t high = 1;
+    /// Values are searched at multiples of this (Parameter::step); 1 is every integer.
+    int64_t step = 1;
 };
 
 /// What the search reached, and what it did not.
@@ -130,6 +132,32 @@ inline int64_t fromLogFrom(double value, int64_t low, int64_t high)
     return std::clamp(offset + low - 1, low, high);
 }
 
+/// @p value moved to the nearest multiple of @p step inside [@p low, @p high]; unchanged when
+/// @p step is 1 or no multiple lies inside.
+inline int64_t snapToStep(int64_t value, int64_t step, int64_t low, int64_t high)
+{
+    if(step <= 1)
+    {
+        return value;
+    }
+    // The multiples inside the bounds, rounding toward the inside for either sign.
+    const auto first = (low >= 0 ? (low + step - 1) / step : low / step) * step;
+    const auto last = (high >= 0 ? high / step : (high - step + 1) / step) * step;
+    if(first > last)
+    {
+        return value;
+    }
+    const auto nearest
+        = static_cast<int64_t>(std::llround(static_cast<double>(value) / static_cast<double>(step)))
+          * step;
+    return std::clamp(nearest, first, last);
+}
+
+inline int64_t snapToStep(int64_t value, const ShapeDimension& dimension)
+{
+    return snapToStep(value, dimension.step, dimension.low, dimension.high);
+}
+
 /// Log-uniform draw across the box; a uniform draw would almost never visit small shapes.
 inline Shape drawLogUniform(const std::vector<ShapeDimension>& dimensions, std::mt19937_64& rng)
 {
@@ -138,7 +166,7 @@ inline Shape drawLogUniform(const std::vector<ShapeDimension>& dimensions, std::
     for(const auto& dimension : dimensions)
     {
         const double along = uniformReal(rng, toLog(1), toLogFrom(dimension.high, dimension.low));
-        shape.push_back(fromLogFrom(along, dimension.low, dimension.high));
+        shape.push_back(snapToStep(fromLogFrom(along, dimension.low, dimension.high), dimension));
     }
     return shape;
 }
@@ -391,8 +419,10 @@ inline std::optional<Shape> hitAndRunStep(const ShapeOracle& oracle,
         Shape candidate(current.size());
         for(size_t d = 0; d < dimensions.size(); ++d)
         {
-            candidate[d] = fromLogFrom(
-                position[d] + (t * direction[d]), dimensions[d].low, dimensions[d].high);
+            candidate[d] = snapToStep(fromLogFrom(position[d] + (t * direction[d]),
+                                                  dimensions[d].low,
+                                                  dimensions[d].high),
+                                      dimensions[d]);
         }
 
         if(candidate == current)

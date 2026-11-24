@@ -135,6 +135,113 @@ TEST(TestProblemSpace, AppliesTheOracleToWholeProblemPoints)
     }
 }
 
+TEST(TestProblemSpace, TheWalkStartsFromThePointsOtherSourcesHold)
+{
+    // An engine whose kernels serve one exact extent: neither the skeleton (the floor, with no
+    // regimes declared) nor a log-uniform draw over [1, 4096] lands on it. A pack geometry or a
+    // recorded shape at that extent is a start, from which the walk moves along N; the pooled
+    // point itself stays out of the result, as the caller holds it. Its dtype is fp32, and fp16
+    // starts from it too, since a geometry hints at a kernel whatever it was recorded under.
+    const ProblemOracle onlyM777
+        = [](const ProblemPoint& point) { return std::get<int64_t>(point.at("M")) == 777; };
+    const ProblemPoint pooled{
+        {"M", int64_t{777}}, {"N", int64_t{64}}, {"dtype", std::string("fp32")}};
+    const ProblemOracle held = [&pooled](const ProblemPoint& point) { return point == pooled; };
+
+    ExplorationRequest request;
+    request.pointsPerCombination = 20;
+    request.budgetPerCombination = 4000;
+    request.seed = 5;
+    EXPECT_TRUE(exploreProblemSpace(twoDimsAndADtype(), request, onlyM777, held).problems().empty())
+        << "the extent is found without the pooled point; the test no longer needs it";
+
+    request.seedPoints = {pooled};
+    const auto corpus = exploreProblemSpace(twoDimsAndADtype(), request, onlyM777, held);
+    ASSERT_EQ(corpus.combinations.size(), 2U);
+    for(const auto& combination : corpus.combinations)
+    {
+        EXPECT_GE(combination.problems.size(), 10U) << detail::describe(combination.categorical);
+        for(const auto& point : combination.problems)
+        {
+            EXPECT_EQ(std::get<int64_t>(point.at("M")), 777);
+            EXPECT_NE(point, pooled) << "the pooled point is the caller's, not the search's";
+        }
+    }
+}
+
+TEST(TestProblemSpace, AMultipleTheConstraintsRequireIsTheGranularityTheSearchLandsOn)
+{
+    // M is a multiple of 8 by the declaration's own constraint: the random starts, the walk and
+    // the neighbourhood all land on it, so nothing the search proposes is refused for it, and N,
+    // which no constraint aligns, is searched at every integer.
+    const auto metadata = metadataFor(R"({
+      "schema_version": "1.0",
+      "operation": "toy",
+      "parameters": { "M": { "type": "int64", "range": [8, 512] },
+                      "N": { "type": "int64" } },
+      "constraints": [ { "divisible": ["$q.M", 8] } ],
+      "stratification_axis": "working_set",
+      "regimes": {},
+      "archetypes": [ { "name": "a", "values": { "M": [64], "N": [100] } } ],
+      "neighbourhood": { "M": { "kind": "scale", "factors": [0.7, 1.3, 2.1] },
+                         "N": { "kind": "scale", "factors": [0.7, 1.3] } },
+      "graph_builder": { "function": "createValidMatmulGraph", "source": "x.hpp",
+                         "arguments": [] }
+    })");
+    ExplorationRequest request;
+    request.pointsPerCombination = 200;
+    request.seed = 7;
+
+    const auto corpus = exploreProblemSpace(metadata, request, ACCEPT_EVERYTHING);
+    EXPECT_EQ(corpus.constraintRejections, 0) << "the search proposed an M off its multiple";
+    EXPECT_GE(corpus.problems().size(), 150U) << "the search found little to judge it by";
+    std::set<int64_t> unaligned;
+    for(const auto& point : corpus.problems())
+    {
+        unaligned.insert(std::get<int64_t>(point.at("N")) % 8);
+    }
+    EXPECT_GT(corpus.combinations.front().fromExploration, 0);
+    EXPECT_GT(corpus.combinations.front().fromNeighbourhood, 0);
+    EXPECT_GT(unaligned.size(), 1U) << "no constraint aligns N";
+}
+
+TEST(TestProblemSpace, OnlyAConstantMultipleTheConstraintsRequireSetsAGranularity)
+{
+    const auto stepOf = [](const std::string& constraints, const std::string& parameter) {
+        const auto metadata = metadataFor(R"({
+          "schema_version": "1.0",
+          "operation": "toy",
+          "parameters": { "M": { "type": "int64" }, "G": { "type": "int64" },
+                          "x": { "type": "float64" },
+                          "mode": { "type": "enum", "values": ["a", "b"] } },
+          "constraints": [)" + constraints + R"(],
+          "stratification_axis": "working_set",
+          "regimes": {},
+          "graph_builder": { "function": "f", "source": "x.hpp", "arguments": [] }
+        })");
+        const auto* found = metadata.find(parameter);
+        return found == nullptr ? int64_t{-1} : found->step;
+    };
+    EXPECT_EQ(stepOf("", "M"), 1);
+    EXPECT_EQ(stepOf(R"({ "divisible": ["$q.M", 32] })", "M"), 32);
+    EXPECT_EQ(stepOf(R"({ "==": [{ "%": ["$q.M", 16] }, 0] })", "M"), 16);
+    EXPECT_EQ(stepOf(R"({ "==": [0, { "%": ["$q.M", 16] }] })", "M"), 16);
+    // Two multiples hold at their least common multiple.
+    EXPECT_EQ(stepOf(R"({ "divisible": ["$q.M", 4] }, { "divisible": ["$q.M", 6] })", "M"), 12);
+    // A divisor that is another parameter couples the two; it is not a fixed multiple.
+    EXPECT_EQ(stepOf(R"({ "divisible": ["$q.M", "$q.G"] })", "M"), 1);
+    // Only where it always holds: under a condition it is not the parameter's granularity.
+    EXPECT_EQ(
+        stepOf(R"({ "or": [{ "==": ["$q.mode", "a"] }, { "divisible": ["$q.M", 8] }] })", "M"), 1);
+    EXPECT_EQ(stepOf(R"({ "divisible": ["$q.x", 8] })", "x"), 1);
+
+    // The shipped declarations: MX scales K in blocks of 32, and nothing in hipDNN's definition
+    // of attention aligns a head width.
+    EXPECT_EQ(test::shippedOperation("mx_matmul").find("K")->step, 32);
+    EXPECT_EQ(test::shippedOperation("sdpa_fwd").find("head_dim")->step, 1);
+    EXPECT_EQ(test::shippedOperation("sdpa_bwd").find("head_dim")->step, 1);
+}
+
 TEST(TestProblemSpace, ProducesOneProblemPerCombinationWhenNothingIsNumeric)
 {
     // An all-categorical operation still has problems.
