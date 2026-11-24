@@ -34,8 +34,8 @@ class RTRT3DNode : public RTRT2DNode
     friend class NodeFactory;
 
 protected:
-    explicit RTRT3DNode(TreeNode* p)
-        : RTRT2DNode(p)
+    RTRT3DNode(TreeNode* p, NodeLayouts&& layouts)
+        : RTRT2DNode(p, std::move(layouts))
     {
         scheme = CS_3D_RTRT;
     }
@@ -57,8 +57,8 @@ class TRTRTR3DNode : public InternalNode
     friend class NodeFactory;
 
 protected:
-    explicit TRTRTR3DNode(TreeNode* p)
-        : InternalNode(p)
+    TRTRTR3DNode(TreeNode* p, NodeLayouts&& layouts)
+        : InternalNode(p, std::move(layouts))
     {
         scheme = CS_3D_TRTRTR;
     }
@@ -80,8 +80,8 @@ class BLOCKRC3DNode : public InternalNode
     friend class NodeFactory;
 
 protected:
-    explicit BLOCKRC3DNode(TreeNode* p)
-        : InternalNode(p)
+    BLOCKRC3DNode(TreeNode* p, NodeLayouts&& layouts)
+        : InternalNode(p, std::move(layouts))
     {
         scheme = CS_3D_BLOCK_RC;
     }
@@ -101,8 +101,8 @@ class BLOCKCR3DNode : public InternalNode
     friend class NodeFactory;
 
 protected:
-    explicit BLOCKCR3DNode(TreeNode* p)
-        : InternalNode(p)
+    BLOCKCR3DNode(TreeNode* p, NodeLayouts&& layouts)
+        : InternalNode(p, std::move(layouts))
     {
         scheme = CS_3D_BLOCK_CR;
     }
@@ -123,8 +123,8 @@ class RC3DNode : public RC2DNode
     friend class NodeFactory;
 
 protected:
-    explicit RC3DNode(TreeNode* p)
-        : RC2DNode(p)
+    RC3DNode(TreeNode* p, NodeLayouts&& layouts)
+        : RC2DNode(p, std::move(layouts))
     {
         scheme = CS_3D_RC;
     }
@@ -141,8 +141,8 @@ class PP3DNode : public InternalNode
     friend class NodeFactory;
 
 protected:
-    explicit PP3DNode(TreeNode* p)
-        : InternalNode(p)
+    PP3DNode(TreeNode* p, NodeLayouts&& layouts)
+        : InternalNode(p, std::move(layouts))
     {
         scheme = CS_3D_PP;
     }
@@ -160,8 +160,8 @@ class SBRCTranspose3DNode : public LeafNode
     friend class NodeFactory;
 
 protected:
-    SBRCTranspose3DNode(TreeNode* p, ComputeScheme s)
-        : LeafNode(p, s)
+    SBRCTranspose3DNode(TreeNode* p, ComputeScheme s, NodeLayouts&& layouts)
+        : LeafNode(p, s, std::move(layouts))
     {
         externalKernel = true;
         need_twd_table = true;
@@ -196,7 +196,8 @@ public:
             return NONE;
         // NB: from the benchmark results, diagonal transpose
         // benefits only some architectures
-        if(is_diagonal_sbrc_3D_length(length.front()) && is_cube_size(length)
+        if(is_diagonal_sbrc_3D_length(input_length(0)) && data_rank() == 3
+           && input_length(0) == input_length(1) && input_length(1) == input_length(2)
            && (is_device_gcn_arch(deviceProp, "gfx906")
                || is_device_gcn_arch(deviceProp, "gfx1030")))
             return DIAGONAL;
@@ -218,15 +219,15 @@ class SBRCTransXY_ZNode : public SBRCTranspose3DNode
     friend class NodeFactory;
 
 protected:
-    SBRCTransXY_ZNode(TreeNode* p, ComputeScheme s)
-        : SBRCTranspose3DNode(p, s)
+    SBRCTransXY_ZNode(TreeNode* p, ComputeScheme s, NodeLayouts&& layouts)
+        : SBRCTranspose3DNode(p, s, std::move(layouts))
     {
     }
 
     void   SetupGridParam_internal(GridParam& gp) override;
     size_t sbrc_3D_alignment_dimension() const override
     {
-        return length[2];
+        return input_length(2);
     }
 };
 
@@ -239,16 +240,15 @@ class SBRCTransZ_XYNode : public SBRCTranspose3DNode
     friend class NodeFactory;
 
 protected:
-    SBRCTransZ_XYNode(TreeNode* p, ComputeScheme s)
-        : SBRCTranspose3DNode(p, s)
+    SBRCTransZ_XYNode(TreeNode* p, ComputeScheme s, NodeLayouts&& layouts)
+        : SBRCTranspose3DNode(p, s, std::move(layouts))
     {
     }
 
     void   SetupGridParam_internal(GridParam& gp) override;
     size_t sbrc_3D_alignment_dimension() const override
     {
-        // return length[1] * length[2];
-        return length[1];
+        return input_length(1);
     }
 };
 
@@ -261,8 +261,8 @@ class RealCmplxTransZ_XYNode : public SBRCTranspose3DNode
     friend class NodeFactory;
 
 protected:
-    RealCmplxTransZ_XYNode(TreeNode* p, ComputeScheme s)
-        : SBRCTranspose3DNode(p, s)
+    RealCmplxTransZ_XYNode(TreeNode* p, ComputeScheme s, NodeLayouts&& layouts)
+        : SBRCTranspose3DNode(p, s, std::move(layouts))
     {
         twd_attach_halfN = true;
     }
@@ -270,8 +270,7 @@ protected:
     void   SetupGridParam_internal(GridParam& gp) override;
     size_t sbrc_3D_alignment_dimension() const override
     {
-        // return length[1] * length[2];
-        return length[1];
+        return input_length(1);
     }
 };
 
