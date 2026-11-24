@@ -181,6 +181,10 @@ pack-coverage engine adds its entry there on its branch.
   (`delivered`). An archetype never admitted is a warning with the reason: no explored
   combination it fits, a declared constraint, a graph past `--max-bytes` (GPT-3's matmul
   projections at the default 256 MiB), or the engine declining it.
+- `reports.search.<operation>` says where the sweep's engine queries went: `oracle_queries` in
+  all, and over each combination's first search the seeds checked and accepted, the random
+  foothold draws checked and accepted, the walk steps, and the searches that accepted no seed
+  (`no_seed_accepted`) with how many a draw rescued (`recovered_by_draws`).
 - `--form-floor n` asks n in every optional **form** the operation declares (`form_label`):
   for `sdpa_fwd` plain, `scale_unset`, `scale_tensor`, `dropout`, `padded`, `ragged`, `bias`,
   `sink`; for `sdpa_bwd` all but `sink`. Each form varies one optional attribute

@@ -177,6 +177,32 @@ struct ArchetypeTally
     std::optional<ProblemPoint> refused;
 };
 
+/// Where an exploration's oracle queries went, and what each combination's first search found
+/// from the seeds it was given.
+struct SearchAccount
+{
+    /// Every oracle query, over every pass: archetype and neighbourhood draws, the searches and
+    /// their growth. Memoized answers are not queries.
+    int64_t oracleQueries = 0;
+
+    /// Combinations whose first pass ran a search.
+    int64_t searched = 0;
+
+    /// Over those first searches: the given seeds checked and accepted, log-uniform draws for
+    /// a foothold checked and accepted, and walk steps checked (memoized revisits included).
+    int64_t seedChecks = 0;
+    int64_t seedsAccepted = 0;
+    int64_t drawChecks = 0;
+    int64_t drawsAccepted = 0;
+    int64_t walkChecks = 0;
+
+    /// First searches in which no given seed was accepted; of those, how many a log-uniform
+    /// draw found a foothold for, and how many found none at all.
+    int64_t noSeedAccepted = 0;
+    int64_t recoveredByDraws = 0;
+    int64_t foundNothing = 0;
+};
+
 /// The problem corpus and an account of how it was produced.
 struct ProblemCorpus
 {
@@ -211,6 +237,8 @@ struct ProblemCorpus
 
     /// Per declared archetype, in declaration order.
     std::vector<ArchetypeTally> archetypes;
+
+    SearchAccount search;
 
     /// Every problem point found, flattened.
     std::vector<ProblemPoint> problems() const
@@ -1370,6 +1398,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             else
             {
                 ++corpus.constraintAdmissions;
+                ++corpus.search.oracleQueries;
                 verdict = admits(point);
             }
             memo.emplace(shape, verdict);
@@ -1412,6 +1441,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             else if(!isHeld(categorical))
             {
                 ++corpus.constraintAdmissions;
+                ++corpus.search.oracleQueries;
                 if(admits(categorical))
                 {
                     result.problems.push_back(categorical);
@@ -1457,6 +1487,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
                 return Verdict::CONSTRAINT;
             }
             ++corpus.constraintAdmissions;
+            ++corpus.search.oracleQueries;
             if(!admits(point))
             {
                 return Verdict::ORACLE;
@@ -1665,6 +1696,28 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
                 return probed.stats.distinct == 0 ? probed : buildFeasibleShapeSet(oracle, search);
             }();
             result.stats = found.stats;
+            {
+                const auto& stats = found.stats;
+                auto& account = corpus.search;
+                ++account.searched;
+                account.seedChecks += stats.callerSeedAttempts;
+                account.seedsAccepted += stats.callerSeedsFound;
+                account.drawChecks += stats.seedAttempts - stats.callerSeedAttempts;
+                account.drawsAccepted += stats.seedsFound - stats.callerSeedsFound;
+                account.walkChecks += stats.oracleCalls - stats.seedAttempts;
+                if(stats.callerSeedsFound == 0)
+                {
+                    ++account.noSeedAccepted;
+                    if(stats.seedsFound > 0)
+                    {
+                        ++account.recoveredByDraws;
+                    }
+                    else
+                    {
+                        ++account.foundNothing;
+                    }
+                }
+            }
             for(const auto& shape : found.shapes)
             {
                 auto point = categorical;
