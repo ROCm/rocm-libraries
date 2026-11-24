@@ -121,9 +121,11 @@ struct ConvBuffers
 
 } // namespace
 
+using GPU_NaiveTimeout_FP32 = ::testing::TestWithParam<int>;
+
 // With MIOPEN_NAIVE_TIMEOUT=0 (opt-out), a naive solver must appear somewhere in the
 // results, confirming that the timeout logic did not fire.
-TEST(GPU_NaiveTimeout_FP32, NaivePresentWhenTimeoutDisabled)
+TEST_P(GPU_NaiveTimeout_FP32, NaivePresentWhenTimeoutDisabled)
 {
     auto& handle_ref      = get_handle();
     miopenHandle_t handle = &handle_ref;
@@ -149,7 +151,7 @@ TEST(GPU_NaiveTimeout_FP32, NaivePresentWhenTimeoutDisabled)
 // With MIOPEN_NAIVE_TIMEOUT=1 and MIOPEN_DEBUG_FIND_ONLY_SOLVER restricting the candidate
 // set to ConvDirectNaiveConvFwd, there are no non-naive solutions so defer_naive=false and
 // the timeout cannot fire (path B). Find must return a naive result rather than nothing.
-TEST(GPU_NaiveTimeout_FP32, NaiveNotSuppressedWhenOnlySolver)
+TEST_P(GPU_NaiveTimeout_FP32, NaiveNotSuppressedWhenOnlySolver)
 {
     auto& handle_ref      = get_handle();
     miopenHandle_t handle = &handle_ref;
@@ -171,7 +173,7 @@ TEST(GPU_NaiveTimeout_FP32, NaiveNotSuppressedWhenOnlySolver)
 // With MIOPEN_NAIVE_TIMEOUT=1 (default), find must return results. The naive solver may or
 // may not appear depending on whether it finished within the 3x budget — both outcomes are
 // valid. This test only verifies that the timeout mechanism does not break the find path.
-TEST(GPU_NaiveTimeout_FP32, FindSucceedsWithTimeoutEnabled)
+TEST_P(GPU_NaiveTimeout_FP32, FindSucceedsWithTimeoutEnabled)
 {
     auto& handle_ref      = get_handle();
     miopenHandle_t handle = &handle_ref;
@@ -185,7 +187,7 @@ TEST(GPU_NaiveTimeout_FP32, FindSucceedsWithTimeoutEnabled)
 
 // With MIOPEN_NAIVE_TIMEOUT_FACTOR=1 (0.01x budget), the wall-clock deadline expires
 // before the naive kernel can finish. Naive must be absent from the results.
-TEST(GPU_NaiveTimeout_FP32, NaiveSkippedWithTinyBudget)
+TEST_P(GPU_NaiveTimeout_FP32, NaiveSkippedWithTinyBudget)
 {
     auto& handle_ref      = get_handle();
     miopenHandle_t handle = &handle_ref;
@@ -215,7 +217,7 @@ TEST(GPU_NaiveTimeout_FP32, NaiveSkippedWithTinyBudget)
 // abandoned evaluation left behind. There is deliberately no uncaptured run in
 // between: one would have reclaimed a finished evaluation before the capture
 // and hidden a regression. Find has already loaded the solution's kernels.
-TEST(GPU_NaiveTimeout_FP32, CaptureAfterATimedOutNaiveEvaluationSucceeds)
+TEST_P(GPU_NaiveTimeout_FP32, CaptureAfterATimedOutNaiveEvaluationSucceeds)
 {
     if(IsWinogradOnlyArch(get_handle()))
         GTEST_SKIP() << "Direct finder is disabled by use_winograd_only on "
@@ -303,9 +305,13 @@ TEST(GPU_NaiveTimeout_FP32, CaptureAfterATimedOutNaiveEvaluationSucceeds)
     }
 }
 
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_NaiveTimeout_FP32, ::testing::Values(0));
+
+using CPU_NaiveTimeout_NONE = testing::TestWithParam<int>;
+
 // CPU-only: verify that MIOPEN_NAIVE_TIMEOUT can be set and read back via the debug
 // registry (the same path ScopedEnvironment uses in the GPU tests).
-TEST(CPU_NaiveTimeout_NONE, EnvVarRoundTrips)
+TEST_P(CPU_NaiveTimeout_NONE, EnvVarRoundTrips)
 {
     {
         ScopedEnvironment<bool> guard(MIOPEN_NAIVE_TIMEOUT, true);
@@ -316,3 +322,5 @@ TEST(CPU_NaiveTimeout_NONE, EnvVarRoundTrips)
         EXPECT_FALSE(lib_env::value<bool>(MIOPEN_NAIVE_TIMEOUT));
     }
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_NaiveTimeout_NONE, testing::Values(0));

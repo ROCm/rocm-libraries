@@ -929,7 +929,7 @@ TEST_P(GPU_ReduceMultiBlockWorkspace_FP16, PartialsAreStoredInComputeType)
 
 #define MIOPEN_REDUCE_MULTIBLOCK_NAME [](const auto& info) { return info.param.name; }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_ReduceMultiBlock_FP16,
                          ::testing::ValuesIn(Fp16CompFp32Smoke()),
                          MIOPEN_REDUCE_MULTIBLOCK_NAME);
