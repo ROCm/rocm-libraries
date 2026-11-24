@@ -15818,7 +15818,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZherkBatched_64(hipblasHandle_t           
     ldc    [int]
            ldc specifies the first dimension of C. ldc >= max( 1, n ).
 
-    @param[inout]
+    @param[in]
     strideC  [hipblasStride]
               stride from the start of one matrix (C_i) to the next one (C_i+1).
 
@@ -16266,7 +16266,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZherkxBatched_64(hipblasHandle_t          
     ldc    [int]
            ldc specifies the first dimension of C. ldc >= max( 1, n ).
 
-    @param[inout]
+    @param[in]
     strideC  [hipblasStride]
               stride from the start of one matrix (C_i) to the next one (C_i+1).
 
@@ -16720,7 +16720,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZher2kBatched_64(hipblasHandle_t          
     ldc    [int]
            ldc specifies the first dimension of C. ldc >= max( 1, n ).
 
-    @param[inout]
+    @param[in]
     strideC  [hipblasStride]
               stride from the start of one matrix (C_i) to the next one (C_i+1).
 
@@ -17281,7 +17281,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZsymmBatched_64(hipblasHandle_t           
     ldc    [int]
            ldc specifies the first dimension of C. ldc >= max( 1, m ).
 
-    @param[inout]
+    @param[in]
     strideC  [hipblasStride]
               stride from the start of one matrix (C_i) to the next one (C_i+1).
 
@@ -17866,7 +17866,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZsyrkBatched_64(hipblasHandle_t           
     ldc    [int]
            ldc specifies the first dimension of C. ldc >= max( 1, n ).
 
-    @param[inout]
+    @param[in]
     strideC  [hipblasStride]
               stride from the start of one matrix (C_i) to the next one (C_i+1).
 
@@ -18480,7 +18480,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZsyr2kBatched_64(hipblasHandle_t          
     ldc    [int]
            ldc specifies the first dimension of C. ldc >= max( 1, n ).
 
-    @param[inout]
+    @param[in]
     strideC  [hipblasStride]
               stride from the start of one matrix (C_i) to the next one (C_i+1).
 
@@ -19127,7 +19127,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZsyrkxBatched_64(hipblasHandle_t          
     ldc    [int]
            ldc specifies the first dimension of C. ldc >= max( 1, n ).
 
-    @param[inout]
+    @param[in]
     strideC  [hipblasStride]
               stride from the start of one matrix (C_i) to the next one (C_i+1).
 
@@ -20244,7 +20244,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZhemmBatched_64(hipblasHandle_t           
     ldc    [int]
            ldc specifies the first dimension of C. ldc >= max( 1, m ).
 
-    @param[inout]
+    @param[in]
     strideC  [hipblasStride]
               stride from the start of one matrix (C_i) to the next one (C_i+1).
 
