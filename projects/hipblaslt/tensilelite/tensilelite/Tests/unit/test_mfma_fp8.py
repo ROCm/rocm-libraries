@@ -42,7 +42,7 @@ from gpu_test_helpers import (
     collect_tile_vgprs,
     requires_gpu,
 )
-from tensilelite.Tests.gpu_detection import detect_gpu_target, gpu_is
+from gpu_detection import detect_gpu_target, gpu_is
 
 # ---------------------------------------------------------------------------
 # Constants

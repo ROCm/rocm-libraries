@@ -56,6 +56,13 @@ MASK_TYPE = {
 #: kernels classify as a different feature.
 WINDOW_RIGHT_BOUND = 0
 
+#: `sdpa_fwd`'s declared `window` values by width (corpus_gen/operations/sdpa_fwd.opmeta.json).
+#: `local_N` keeps the N keys ending at the diagonal (its `leftBound` is N), which is what a
+#: mined `sliding_window` counts, so the width maps unchanged. A width the declaration does
+#: not list has no query-CSV spelling; rounding it to a declared one would pass off a
+#: different shape as recorded.
+QUERY_WINDOW = {128: "local_128", 1024: "local_1024", 4096: "local_4096"}
+
 
 def _mask_fields(mask_type: int, window: int) -> dict:
     """The request's mask fields. A sliding window also states its right bound, which
@@ -987,11 +994,16 @@ def _shape_name(shape: dict, index: int) -> str:
 def write_query_csv(shapes: list[dict], path: Path) -> dict:
     """The mined corpus as the `q.<parameter>` columns `corpus_gen --model-shapes` reads.
 
-    Narrows to what `sdpa_fwd` can express (no sliding window, asymmetric head dim,
-    or sinks) and counts each drop by reason. `q.alignment` is `bottom_right` for a
-    bottom-right causal shape and `top_left` otherwise; it and `q.generate_stats`
-    (always `false`: sources record inference forwards) are always written because
-    argument resolution requires every parameter it reads.
+    Narrows to what `sdpa_fwd` can express and counts each drop by reason: an asymmetric
+    head dim, a window width the declaration does not list (`QUERY_WINDOW`), and a window
+    with seqlen_q > seqlen_k, which the declaration excludes. A sliding window is written
+    as its declared `q.window` value with `q.is_causal` true, the causal band (right bound
+    0) every mined window is; any other shape is `none`. `q.alignment` is `bottom_right`
+    for a bottom-right causal shape and `top_left` otherwise; it and `q.generate_stats`
+    (always `false`: sources record inference forwards) are always written, since a
+    parameter with no column and no `model_shape_defaults` entry is refused. `q.form` is
+    `sink` for a shape with attention sinks and `plain` otherwise. `q.layout` and `q.scale`
+    are not recorded by any source, so they are left to the declaration's defaults.
     """
     columns = [
         "name",
@@ -1006,6 +1018,8 @@ def write_query_csv(shapes: list[dict], path: Path) -> dict:
         "q.alignment",
         "q.generate_stats",
         "q.dtype",
+        "q.form",
+        "q.window",
     ]
     dropped: dict[str, int] = {}
     written = 0
@@ -1014,12 +1028,18 @@ def write_query_csv(shapes: list[dict], path: Path) -> dict:
         writer.writerow(columns)
         for index, shape in enumerate(shapes):
             reason = None
-            if shape["mask_type"] == SLIDING_WINDOW:
-                reason = "windowed mask, which sdpa_fwd declares no parameter for"
-            elif shape["hdim_q"] != shape["hdim_v"]:
+            window = "none"
+            if shape["hdim_q"] != shape["hdim_v"]:
                 reason = "asymmetric head dims (MLA), one head_dim declared"
-            elif shape.get("use_sinks"):
-                reason = "attention sinks, which sdpa_fwd declares no parameter for"
+            elif shape["mask_type"] == SLIDING_WINDOW:
+                window = QUERY_WINDOW.get(shape["sliding_window"])
+                if window is None:
+                    reason = (
+                        "window width sdpa_fwd does not declare "
+                        f"({', '.join(QUERY_WINDOW.values())})"
+                    )
+                elif shape["seqlen_q"] > shape["seqlen_k"]:
+                    reason = "window with seqlen_q > seqlen_k, which sdpa_fwd excludes"
             if reason is not None:
                 dropped[reason] = dropped.get(reason, 0) + 1
                 continue
@@ -1042,6 +1062,8 @@ def write_query_csv(shapes: list[dict], path: Path) -> dict:
                     ),
                     "false",
                     shape["dtype"],
+                    "sink" if shape.get("use_sinks") else "plain",
+                    window,
                 ]
             )
             written += 1
@@ -1122,7 +1144,8 @@ def main(argv=None) -> int:
         "tabular files. Off by default: they are a different mask kind, and a kernel "
         "that clamps top-left only will decline them anyway -- but they are excluded "
         "LOUDLY here rather than folded onto causal. A kept window is a causal band "
-        "(right_bound 0).",
+        "(right_bound 0); --out-query-csv writes it as sdpa_fwd's `q.window` when the "
+        "declaration lists its width and drops it, counted, otherwise.",
     )
     parser.add_argument(
         "--out",

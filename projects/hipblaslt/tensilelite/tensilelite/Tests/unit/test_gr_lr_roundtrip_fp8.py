@@ -36,7 +36,7 @@ from gpu_test_helpers import (
     alloc_export_vgprs,
     requires_gpu,
 )
-from tensilelite.Tests.gpu_detection import detect_gpu_target, gpu_is
+from gpu_detection import detect_gpu_target, gpu_is
 
 BPE = 1  # fp8: 1 byte per element
 

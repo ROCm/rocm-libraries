@@ -1,7 +1,7 @@
 
 FROM ubuntu:24.04
 ARG DEBIAN_FRONTEND=noninteractive
-ARG ROCMVERSION=10.1
+ARG ROCMVERSION=10.2
 
 # TheRock nightly tarball configuration.
 # By default, discovers the latest tarball from the nightlies index.
@@ -25,7 +25,7 @@ ENV HIP_PLATFORM=amd
 
 # Add rocm repository
 RUN set -xe && \
-    apt-get update && apt-get install -y apt-utils wget gnupg2 curl cmake git vim nano zip
+    apt-get update && apt-get install -y apt-utils wget gnupg2 curl git vim nano zip libssl-dev
 
 RUN if [ "$compiler_version" = "therock" ]; then \
         rm -rf /opt/rocm && mkdir /opt/rocm && \
@@ -42,13 +42,13 @@ RUN if [ "$compiler_version" = "therock" ]; then \
         tar -xzf /tmp/rocm.tar.gz -C /opt/rocm --strip-components=1 && \
         rm /tmp/rocm.tar.gz ; \
     else echo "using the release compiler" && \
-        wget -O therock-dist-linux.tar.gz https://stable.repo.amd.com/rocm/core/tarball/therock-dist-linux-multiarch-10.1.0.tar.gz && \
+        wget -O therock-dist-linux.tar.gz https://stable.repo.amd.com/rocm/core/tarball/therock-dist-linux-multiarch-10.2.0.tar.gz && \
         rm -rf /opt/rocm && mkdir /opt/rocm && \
         tar -xzf therock-dist-linux.tar.gz -C /opt/rocm --strip-components=1 && \
         rm therock-dist-linux.tar.gz && \
         rm -rf /opt/rocm/lib/libhiptensor* && \
-        wget https://repo.radeon.com/amdgpu-install/31.40/ubuntu/noble/amdgpu-install_31.40.314000-1_all.deb && \
-        apt install ./amdgpu-install_31.40.314000-1_all.deb -y; \
+        wget https://repo.radeon.com/amdgpu-install/31.70/ubuntu/noble/amdgpu-install_31.70.317000-1_all.deb && \
+        apt install ./amdgpu-install_31.70.317000-1_all.deb -y; \
     fi
     
 # Install SCCACHE
@@ -80,6 +80,13 @@ RUN set -x && \
     openssh-server \
     clang-format-18 \
     kmod && \
+# Install cmake
+    wget https://github.com/Kitware/CMake/releases/download/v4.5.1/cmake-4.5.1.tar.gz && \
+    tar -xzf cmake-4.5.1.tar.gz && \
+    cd cmake-4.5.1 && \
+    ./bootstrap --prefix=/usr/local && \
+    make && \
+    make install && \
 #Install latest ccache
     git clone https://github.com/ccache/ccache.git && \
     cd ccache && mkdir build && cd build && cmake .. && make install && \

@@ -298,7 +298,8 @@ namespace rocsparse
     // a column index is populated or not.
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
     ROCSPARSE_DEVICE_ILF void
-        bsrgeam_wf_per_row_multipass_device(rocsparse_direction dir,
+        bsrgeam_wf_per_row_multipass_device(rocsparse_int       row_base,
+                                            rocsparse_direction dir,
                                             rocsparse_int       mb,
                                             rocsparse_int       nb,
                                             rocsparse_int       block_dim,
@@ -321,7 +322,6 @@ namespace rocsparse
         static_assert(BLOCKSIZE % (BLOCKDIM * BLOCKDIM) == 0,
                       "BLOCKSIZE must be a multiple of (BLOCKDIM * BLOCKDIM).");
         rocsparse_int tid = hipThreadIdx_x;
-        rocsparse_int bid = hipBlockIdx_x;
 
         rocsparse_int lid = tid & (BLOCKDIM * BLOCKDIM - 1);
         rocsparse_int wid = tid / (BLOCKDIM * BLOCKDIM);
@@ -329,8 +329,12 @@ namespace rocsparse
         rocsparse_int r = lid & (BLOCKDIM - 1);
         rocsparse_int c = lid / BLOCKDIM;
 
-        // Each block processes a row
-        rocsparse_int row = (BLOCKSIZE / (BLOCKDIM * BLOCKDIM)) * bid + wid;
+        // Each block processes (BLOCKSIZE / (BLOCKDIM * BLOCKDIM)) rows from row_base.
+        // row_base + wid can exceed rocsparse_int when mb is near its maximum, but
+        // not uint32_t.
+        const uint32_t      row_u     = static_cast<uint32_t>(row_base) + wid;
+        const bool          row_valid = row_u < static_cast<uint32_t>(mb);
+        const rocsparse_int row       = static_cast<rocsparse_int>(row_u);
 
         // Row entry marker and value accumulator
         __shared__ int sdone[BLOCKSIZE / (BLOCKDIM * BLOCKDIM)];
@@ -338,15 +342,15 @@ namespace rocsparse
         __shared__ T   sdata[BLOCKSIZE];
 
         // Get row entry and exit point of A
-        rocsparse_int row_begin_A = (row < mb) ? bsr_row_ptr_A[row] - idx_base_A : 0;
-        rocsparse_int row_end_A   = (row < mb) ? bsr_row_ptr_A[row + 1] - idx_base_A : 0;
+        rocsparse_int row_begin_A = row_valid ? bsr_row_ptr_A[row] - idx_base_A : 0;
+        rocsparse_int row_end_A   = row_valid ? bsr_row_ptr_A[row + 1] - idx_base_A : 0;
 
         // Get row entry and exit point of B
-        rocsparse_int row_begin_B = (row < mb) ? bsr_row_ptr_B[row] - idx_base_B : 0;
-        rocsparse_int row_end_B   = (row < mb) ? bsr_row_ptr_B[row + 1] - idx_base_B : 0;
+        rocsparse_int row_begin_B = row_valid ? bsr_row_ptr_B[row] - idx_base_B : 0;
+        rocsparse_int row_end_B   = row_valid ? bsr_row_ptr_B[row + 1] - idx_base_B : 0;
 
         // Get row entry point of C
-        rocsparse_int row_begin_C = (row < mb) ? bsr_row_ptr_C[row] - idx_base_C : 0;
+        rocsparse_int row_begin_C = row_valid ? bsr_row_ptr_C[row] - idx_base_C : 0;
 
         // Load the first column of the current row from A and B to set the starting
         // point for the first chunk
@@ -358,7 +362,7 @@ namespace rocsparse
         // Begin of the current row chunk
         rocsparse_int chunk_begin = rocsparse::min(col_A, col_B);
 
-        sdone[wid] = (row < mb) ? 0 : 1;
+        sdone[wid] = row_valid ? 0 : 1;
 
         __syncthreads();
 
@@ -806,7 +810,8 @@ namespace rocsparse
     // a column index is populated or not.
     template <uint32_t BLOCKSIZE, uint32_t BLOCKDIM, typename T>
     ROCSPARSE_DEVICE_ILF void
-        bsrgeam_block_per_row_multipass_device2(rocsparse_direction dir,
+        bsrgeam_block_per_row_multipass_device2(rocsparse_int       row,
+                                                rocsparse_direction dir,
                                                 rocsparse_int       mb,
                                                 rocsparse_int       nb,
                                                 rocsparse_int       block_dim,
@@ -828,13 +833,9 @@ namespace rocsparse
         static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
         static_assert(BLOCKSIZE % BLOCKDIM == 0, "BLOCKSIZE must be a multiple of BLOCKDIM.");
         rocsparse_int tid = hipThreadIdx_x;
-        rocsparse_int bid = hipBlockIdx_x;
 
         rocsparse_int lid = tid & (BLOCKSIZE / BLOCKDIM - 1);
         rocsparse_int wid = tid / (BLOCKSIZE / BLOCKDIM);
-
-        // Each block processes a row
-        rocsparse_int row = bid;
 
         // Row entry marker and value accumulator
         __shared__ int table;

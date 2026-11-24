@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from tensilelite.Tests.gpu_detection import arch_matches, check_gpu_marks
+from gpu_detection import arch_matches, check_gpu_marks
 
 pytestmark = pytest.mark.unit
 

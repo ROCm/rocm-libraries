@@ -545,6 +545,29 @@ inline bool isImplicitDest(const StinkyRegister& reg, const StinkyInstruction& i
     return false;
 }
 
+inline bool isVccRegType(RegType t) {
+    return t == RegType::VCC || t == RegType::VCC_LO || t == RegType::VCC_HI;
+}
+
+inline bool isExecRegType(RegType t) {
+    return t == RegType::EXEC || t == RegType::EXEC_LO || t == RegType::EXEC_HI;
+}
+
+/// A source register is implicit (not printed) when it was added solely for dependency tracking.
+inline bool isImplicitSrc(const StinkyRegister& reg, const StinkyInstruction& inst) {
+    if (reg.dataType != StinkyRegister::Type::Register) return false;
+
+    RegType t = reg.reg.type;
+
+    if (t == RegType::SCC) return true;
+
+    if (isVccRegType(t) && inst.is(InstFlag::IF_ImplicitReadVCC)) return true;
+
+    if (isExecRegType(t) && inst.is(InstFlag::IF_ImplicitReadEXEC)) return true;
+
+    return false;
+}
+
 /// True iff `inst` is a returning MUBUF/FLAT/GLOBAL atomic -- i.e. one whose
 /// destination is a real (non-pseudo, non-implicit) register that a later
 /// instruction can consume, as opposed to a fire-and-forget atomic with no
@@ -596,6 +619,18 @@ inline bool isDSWrite(const StinkyInstruction& inst) {
 
 inline bool isDSAtomic(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_DSAtomic);
+}
+
+// Every DS-class access, both directions: what a GIR `Ds` action can be realized by. A write is
+// as much an access as a read -- `GirAccessData` carries the direction, the opcode does not.
+inline bool isDSAccess(const StinkyInstruction& inst) {
+    return isDSRead(inst) || isDSWrite(inst) || isDSAtomic(inst);
+}
+
+// The tensor-op family a GIR `Tensor` action can be realized by. Extend as it grows
+// (tensor_store), the same way isAsyncMemOp is extended.
+inline bool isTensorAccess(const StinkyInstruction& inst) {
+    return isTensorLoad(inst);
 }
 
 inline bool isBarrier(const StinkyInstruction& inst) {

@@ -19,6 +19,15 @@ bool product_fits_int(int a, int b)
 
 ConvParams ConvParams::unfolded() const
 {
+    // Return an invalid layer unchanged: normalizing it could make it valid.
+    if(!is_valid())
+        return *this;
+    const auto expected = expected_output_size();
+    const int set[]     = {p, q, e};
+    for(int axis = 0; axis < 3; ++axis)
+        if(expected[axis] > std::numeric_limits<int>::max() ||
+           (set[axis] != -1 && set[axis] != expected[axis]))
+            return *this;
     ConvParams out = *this;
     // Normalize before dims moves, since normalize_unused_axes keys off it.
     //
@@ -36,7 +45,10 @@ ConvParams ConvParams::unfolded() const
         return out;
     }
     if(dims != 3)
-        return *this;
+    {
+        out.compute_output_size();
+        return out;
+    }
 
     // Case A: depth is not convolved, so each depth plane is an independent
     // image and folds into the batch. Preferred when case B also applies, since
@@ -69,7 +81,8 @@ ConvParams ConvParams::unfolded() const
         return out;
     }
 
-    return *this;
+    out.compute_output_size();
+    return out;
 }
 
 size_t sizeof_data_type(DataType dtype)

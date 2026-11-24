@@ -6,7 +6,7 @@
 from contextlib import contextmanager
 from copy import deepcopy
 from rocisa.code import Module, Label
-from rocisa.container import sgpr, vgpr, MemTokenData
+from rocisa.container import sgpr, vgpr
 from rocisa.instruction import SMovB32, VMovB32, VReadfirstlaneB32, SCmpEQU32, SCBranchSCC1, SBranch, SWaitCnt, SBitcmp1B32, SBarrier, SLShiftRightB32, SLongBranchNegative
 from ..ExecutionPolicy import isPersistent
 from math import ceil, log2
@@ -658,19 +658,11 @@ class PersistentLoopOn(PersistentLoop):
     def closePersistentLoop(self, writer, kernel):
         module = Module("PersistentLoop closePersistentLoop")
         module.add(Label("PersistentLoopClose", ""))
-        if kernel.get("_PersistentVectorEpilogueLds", False) and not kernel["PrefetchAcrossPersistent"]:
-            # PAP0 has no live successor tile in LDS. Keep the original shared
-            # layout and hand it back to compute only after every wave finishes
-            # its vector reads. Emit after GW (and the main-loop barrier pass),
-            # so this protects the persistent back edge without an early drain.
-            module.add(SWaitCnt(dscnt=0, comment="finish vector epilogue before compute LDS reuse"))
-            barrier = SBarrier(comment="hand epilogue LDS back to persistent compute")
-            barrier.setMemToken(MemTokenData([writer.states.memTokenEpilogue]))
-            module.add(barrier)
-        module.add(Component.WorkAssignment.find(writer).persistentClusterNextTileArrive(writer, kernel))
+        assignment = Component.WorkAssignment.find(writer)
         if kernel.get("DebugPersistentKernelLoopForever", False):
+            module.add(assignment.persistentTileHandoff(writer, kernel))
             with writer.allocTmpSgpr(3, tag="PersistentLoop_close") as tmp:
                 module.add(SLongBranchNegative(Label("PersistentLoopStart", ""), tmp))
         else:
-            module.add(Component.WorkAssignment.find(writer).closeLoop(writer, kernel))
+            module.add(assignment.closeLoop(writer, kernel))
         return module

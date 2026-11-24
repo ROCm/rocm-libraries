@@ -64,6 +64,24 @@ SdpaFwdParams makeHd192x128Gfx950Params()
     return p;
 }
 
+// hd256 / gfx950 bf16 variant — the head-dim-256 rows of the gfx950 registry.
+SdpaFwdParams makeHd256Bf16Gfx950Params()
+{
+    SdpaFwdParams p{};
+    p.batchSize = 2U;
+    p.numHeadsQ = 16U;
+    p.numHeadsKv = 16U;
+    p.seqLenQ = 1024U;
+    p.seqLenKv = 1024U;
+    p.headDimQk = 256U;
+    p.headDimV = 256U;
+    p.tileSizeQo = 128U;
+    p.inBytesPerElement = 2U;
+    p.archString = "gfx950";
+    p.maskType = MaskType::NO_MASK;
+    return p;
+}
+
 } // namespace
 
 // =============================================================================
@@ -272,6 +290,47 @@ TEST(TestSdpaFwdPlanGridMath, GroupHd128Gfx950CausalUsesTgDivTwo)
     auto lp = computeFwdLaunchParams(p);
     EXPECT_EQ(lp.gridDimX, 16U); // nhead
     EXPECT_EQ(lp.gridDimY, 2U); // batch
+    EXPECT_EQ(lp.gridDimZ, 4U);
+    EXPECT_EQ(lp.blockDimX, 512U);
+}
+
+// AITER's gfx950 bf16 hd256 kernel does not merge causal Q-tiles (tg_div=1 in
+// get_grid_dim) and launches 256 threads in group mode (bdx in fmha_fwd_v3).
+TEST(TestSdpaFwdPlanGridMath, GroupHd256Bf16Gfx950CausalUsesTgDivOneAnd256BlockDim)
+{
+    auto p = makeHd256Bf16Gfx950Params();
+    p.group = SdpaFwdGroupModeParams{100, 101};
+    p.maskType = MaskType::TOP_LEFT_CAUSAL;
+    // qTiles = ceil(1024/128) = 8; tgDiv = 1; gdz = 8.
+    auto lp = computeFwdLaunchParams(p);
+    EXPECT_EQ(lp.gridDimX, 16U); // nhead
+    EXPECT_EQ(lp.gridDimY, 2U); // batch
+    EXPECT_EQ(lp.gridDimZ, 8U);
+    EXPECT_EQ(lp.blockDimX, 256U);
+}
+
+// The 256-thread launch is group-mode only; batch mode keeps 512 threads and tgDiv=1.
+TEST(TestSdpaFwdPlanGridMath, BatchHd256Bf16Gfx950CausalUsesTgDivOneAnd512BlockDim)
+{
+    auto p = makeHd256Bf16Gfx950Params();
+    p.maskType = MaskType::TOP_LEFT_CAUSAL;
+    // qTiles = ceil(1024/128) = 8; tgDiv = 1; gdx = 8.
+    auto lp = computeFwdLaunchParams(p);
+    EXPECT_EQ(lp.gridDimX, 8U);
+    EXPECT_EQ(lp.gridDimY, 16U); // nhead
+    EXPECT_EQ(lp.gridDimZ, 2U); // batch
+    EXPECT_EQ(lp.blockDimX, 512U);
+}
+
+// AITER keys both rules on bf16; fp8 hd256 on gfx950 keeps tile merging and 512 threads.
+TEST(TestSdpaFwdPlanGridMath, GroupHd256Fp8Gfx950CausalKeepsTgDivTwoAnd512BlockDim)
+{
+    auto p = makeHd256Bf16Gfx950Params();
+    p.inBytesPerElement = 1U;
+    p.group = SdpaFwdGroupModeParams{100, 101};
+    p.maskType = MaskType::TOP_LEFT_CAUSAL;
+    // qTiles = 8; tgDiv = 2; gdz = 4.
+    auto lp = computeFwdLaunchParams(p);
     EXPECT_EQ(lp.gridDimZ, 4U);
     EXPECT_EQ(lp.blockDimX, 512U);
 }

@@ -48,8 +48,8 @@ from rocisa.enum import RegisterType
 from tensilelite.Components.Subtile.Kernel import TileInfo, AB_B16, AB_B8
 from tensilelite.Components.Subtile.SubtileGREmit import graTileAssignment, globalReadDTLInitCommonSgpr, globalReadDoSubtile
 from tensilelite.Components.Subtile.SubtileLREmit import lraTileAssignment, localReadDoSubtile
-from tensilelite.Tests.gpu_detection import detect_gpu_target
-from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from gpu_detection import detect_gpu_target
+from rocisa_test_state import preserve_rocisa_kernel_state
 
 # ---- Assembler target ----
 def _assembler_target():
@@ -153,7 +153,7 @@ def _create_kernel(cfg, mi_wave_group=None, inst_k=32, bpe=2):
             "DataTypeB": dtype,
             "ComputeDataType": _mock_dtype(4),
             # Non-fused store-D default; GlobalWriteBatch reads this key unconditionally.
-            "FusedGemmA2A": False,
+            "FusedA2A": "Disabled",
         },
     }
 

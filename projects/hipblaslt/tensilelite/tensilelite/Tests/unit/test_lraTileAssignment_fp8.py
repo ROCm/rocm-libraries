@@ -33,7 +33,7 @@ from gpu_test_helpers import (
     export_register,
     print_offset_grid,
 )
-from tensilelite.Tests.gpu_detection import detect_gpu_target, gpu_is
+from gpu_detection import detect_gpu_target, gpu_is
 
 BPE = 1  # fp8: 1 byte per element
 

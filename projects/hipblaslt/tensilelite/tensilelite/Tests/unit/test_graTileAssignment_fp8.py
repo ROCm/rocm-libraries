@@ -63,7 +63,7 @@ from gpu_test_helpers import (
     compute_expected_subtile,
     print_offset_grid,
 )
-from tensilelite.Tests.gpu_detection import detect_gpu_target, gpu_is
+from gpu_detection import detect_gpu_target, gpu_is
 
 # FP8 constants
 BPE = 1        # fp8: 1 byte per element (shadows gpu_test_helpers.BPE=2)
