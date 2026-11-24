@@ -1122,7 +1122,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasIzaminStridedBatched_64(hipblasHandle_t   
               handle to the hipBLAS library context queue.
     @param[in]
     n         [int]
-              the number of elements in x and y.
+              the number of elements in x.
     @param[in]
     x         device pointer storing vector x.
     @param[in]
@@ -1130,7 +1130,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasIzaminStridedBatched_64(hipblasHandle_t   
               specifies the increment for the elements of x. incx must be > 0.
     @param[out]
     result
-              device pointer or host pointer to store the asum product.
+              device pointer or host pointer to store the asum result.
               Return value is 0.0 if n <= 0.
 
     ********************************************************************/
@@ -1483,12 +1483,12 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZaxpy_64(hipblasHandle_t         handle,
     @param[in]
     alpha     specifies the scalar alpha.
     @param[in]
-    x         pointer storing vector x on the GPU.
+    x         device array of device pointers storing each vector x_i.
     @param[in]
     incx      [int]
               specifies the increment for the elements of x.
     @param[inout]
-    y         pointer storing vector y on the GPU.
+    y         device array of device pointers storing each vector y_i.
     @param[in]
     incy      [int]
               specifies the increment for the elements of y.
@@ -1605,10 +1605,11 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZaxpyBatched_64(hipblasHandle_t           
               handle to the hipBLAS library context queue.
     @param[in]
     n         [int]
+              the number of elements in x and y.
     @param[in]
     alpha     specifies the scalar alpha.
     @param[in]
-    x         pointer storing vector x on the GPU.
+    x         device pointer to the first vector x_1 in the batch.
     @param[in]
     incx      [int]
               specifies the increment for the elements of x.
@@ -1616,7 +1617,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZaxpyBatched_64(hipblasHandle_t           
     stridex   [hipblasStride]
               specifies the increment between vectors of x.
     @param[inout]
-    y         pointer storing vector y on the GPU.
+    y         device pointer to the first vector y_1 in the batch.
     @param[in]
     incy      [int]
               specifies the increment for the elements of y.
@@ -2653,7 +2654,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZdotuStridedBatched_64(hipblasHandle_t    
               specifies the increment for the elements of x.
     @param[out]
     result
-              device pointer or host pointer to store the nrm2 product.
+              device pointer or host pointer to store the nrm2 result.
               Return value is 0.0 if n, incx<=0.
 
             ********************************************************************/
@@ -9012,6 +9013,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZhpr2StridedBatched_64(hipblasHandle_t    
               - If HIPBLAS_FILL_MODE_LOWER, the upper part of A is not referenced.
     @param[in]
     n         [int]
+              n specifies the number of rows and columns of A. n >= 0.
     @param[in]
     k         [int]
               specifies the number of sub- and super-diagonals.
@@ -9372,6 +9374,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDsbmvStridedBatched_64(hipblasHandle_t   h
               - If HIPBLAS_FILL_MODE_LOWER, the upper part of A is not referenced.
     @param[in]
     n         [int]
+              n specifies the number of rows and columns of A. n >= 0.
     @param[in]
     alpha
               specifies the scalar alpha.
@@ -10479,6 +10482,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDspr2StridedBatched_64(hipblasHandle_t   h
               - If HIPBLAS_FILL_MODE_LOWER, the upper part of A is not referenced.
     @param[in]
     n         [int]
+              n specifies the number of rows and columns of A. n >= 0.
     @param[in]
     alpha
               specifies the scalar alpha.
@@ -12876,7 +12880,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtbsvStridedBatched_64(hipblasHandle_t    
     \details
     The tpmv functions perform one of the matrix-vector operations:
 
-         x = A*x or x = A**T*x,
+         x = A*x or x = A**T*x or x = A**H*x,
 
     where ``x`` is an ``n``-element vector and ``A`` is an ``n`` by ``n`` unit, or non-unit, upper or lower triangular matrix, supplied in the pack form.
 
@@ -13009,7 +13013,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtpmv_64(hipblasHandle_t         handle,
     \details
     The tpmvBatched functions perform one of the matrix-vector operations:
 
-         x_i = A_i*x_i or x_i = A**T*x_i, 0 \le i < batchCount
+         x_i = A_i*x_i or x_i = A_i**T*x_i or x_i = A_i**H*x_i, 0 \le i < batchCount
 
     where ``x_i`` is an ``n``-element vector and ``A_i`` is an ``n`` by ``n`` (unit, or non-unit, upper or lower triangular matrix).
 
@@ -13145,7 +13149,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtpmvBatched_64(hipblasHandle_t           
     \details
     The tpmvStridedBatched functions perform one of the matrix-vector operations:
 
-         x_i = A_i*x_i or x_i = A**T*x_i, 0 \le i < batchCount
+         x_i = A_i*x_i or x_i = A_i**T*x_i or x_i = A_i**H*x_i, 0 \le i < batchCount
 
     where ``x_i`` is an n element vector and ``A_i`` is an ``n`` by ``n`` (unit, or non-unit, upper or lower triangular matrix),
     with strides specifying how to retrieve ``$x_i$`` (resp. ``$A_i$``) from ``$x_{i-1}$`` (resp. ``$A_i$``).
@@ -13734,7 +13738,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtpsvStridedBatched_64(hipblasHandle_t    
     \details
     The trmv functions perform one of the matrix-vector operations:
 
-         x = A*x or x = A**T*x,
+         x = A*x or x = A**T*x or x = A**H*x,
 
     where ``x`` is an ``n``-element vector and ``A`` is an ``n`` by ``n`` unit, or non-unit, upper or lower triangular matrix.
 
@@ -13870,7 +13874,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmv_64(hipblasHandle_t         handle,
     \details
     The trmvBatched functions perform one of the matrix-vector operations:
 
-         x_i = A_i*x_i or x_i = A**T*x_i, 0 \le i < batchCount
+         x_i = A_i*x_i or x_i = A_i**T*x_i or x_i = A_i**H*x_i, 0 \le i < batchCount
 
     where ``x_i`` is an ``n``-element vector and ``A_i`` is an ``n`` by ``n`` (unit, or non-unit, upper or lower triangular) matrix.
 
@@ -14018,7 +14022,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmvBatched_64(hipblasHandle_t           
     \details
     The trmvStridedBatched functions perform one of the matrix-vector operations:
 
-         x_i = A_i*x_i or x_i = A**T*x_i, 0 \le i < batchCount
+         x_i = A_i*x_i or x_i = A_i**T*x_i or x_i = A_i**H*x_i, 0 \le i < batchCount
 
     where ``x_i``is an ``n``-element vector and ``A_i`` is an ``n`` by ``n`` (unit, or non-unit, upper or lower triangular) matrix,
     with strides specifying how to retrieve ``$x_i$`` (resp. ``$A_i$``) from ``$x_{i-1}$`` (resp. ``$A_i$``).
@@ -14679,7 +14683,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrsvStridedBatched_64(hipblasHandle_t    
               specifies the form of op( B ).
     @param[in]
     m         [int]
-              number or rows of matrices op( A ) and C.
+              number of rows of matrices op( A ) and C.
     @param[in]
     n         [int]
               number of columns of matrices op( B ) and C.
@@ -15299,7 +15303,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDgemmGroupedBatched_64(hipblasHandle_t    
     @param[in]
     batchCount
               [int]
-              number of gemm operatons in the batch.
+              number of gemm operations in the batch.
 
     ********************************************************************/
 
@@ -17468,7 +17472,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZsymmStridedBatched_64(hipblasHandle_t    
     transA  [hipblasOperation_t]
             - HIPBLAS_OP_T: op(A) = A^T
             - HIPBLAS_OP_N: op(A) = A
-            - HIPBLAS_OP_C: op(A) = A^T
+            - HIPBLAS_OP_C: op(A) = A^H
             - HIPBLAS_OP_C is not supported for complex types. See cherk
             and zherk.
 
@@ -17640,7 +17644,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZsyrk_64(hipblasHandle_t         handle,
     transA  [hipblasOperation_t]
             - HIPBLAS_OP_T: op(A) = A^T
             - HIPBLAS_OP_N: op(A) = A
-            - HIPBLAS_OP_C: op(A) = A^T
+            - HIPBLAS_OP_C: op(A) = A^H
             - HIPBLAS_OP_C is not supported for complex types. See cherk
             and zherk.
 
@@ -17822,7 +17826,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZsyrkBatched_64(hipblasHandle_t           
     transA  [hipblasOperation_t]
             - HIPBLAS_OP_T: op(A) = A^T
             - HIPBLAS_OP_N: op(A) = A
-            - HIPBLAS_OP_C: op(A) = A^T
+            - HIPBLAS_OP_C: op(A) = A^H
             - HIPBLAS_OP_C is not supported for complex types. See cherk
             and zherk.
 
@@ -21329,7 +21333,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrsm_64(hipblasHandle_t         handle,
            ldb specifies the first dimension of each B_i. ldb >= max( 1, m ).
     @param[in]
     batchCount [int]
-                number of trsm operatons in the batch.
+                number of trsm operations in the batch.
     ********************************************************************/
 
 HIPBLAS_EXPORT hipblasStatus_t hipblasStrsmBatched(hipblasHandle_t    handle,
@@ -21527,7 +21531,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrsmBatched_64(hipblasHandle_t           
              stride from the start of one B_i matrix to the next B_(i + 1).
     @param[in]
     batchCount [int]
-                number of trsm operatons in the batch.
+                number of trsm operations in the batch.
     ********************************************************************/
 
 HIPBLAS_EXPORT hipblasStatus_t hipblasStrsmStridedBatched(hipblasHandle_t    handle,
@@ -21761,6 +21765,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrtri(hipblasHandle_t         handle,
               - 'HIPBLAS_DIAG_UNIT', A is unit triangular.
     @param[in]
     n         [int]
+              n specifies the number of rows and columns of A. n >= 0.
     @param[in]
     AP         device array of device pointers storing each matrix A_i.
     @param[in]
@@ -21847,6 +21852,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrtriBatched(hipblasHandle_t             
               - 'HIPBLAS_DIAG_UNIT', A is unit triangular.
     @param[in]
     n         [int]
+              n specifies the number of rows and columns of A. n >= 0.
     @param[in]
     AP         device pointer pointing to address of first matrix A_1.
     @param[in]
@@ -25798,7 +25804,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDotcStridedBatchedEx_64(hipblasHandle_t ha
               specifies the increment for the elements of x.
     @param[out]
     result
-              device pointer or host pointer to store the nrm2 product.
+              device pointer or host pointer to store the nrm2 result.
               The return value is 0.0 if n, incx<=0.
     @param[in]
     resultType
