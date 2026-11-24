@@ -692,7 +692,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zcopy_strided_batched_64(rocblas_handle   
     x         device pointer storing vector x.
     @param[in]
     incx      [rocblas_int]
-              specifies the increment for the elements of y.
+              specifies the increment for the elements of x.
     @param[in]
     y         device pointer storing vector y.
     @param[in]
@@ -2166,7 +2166,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dzasum_strided_batched_64(rocblas_handle h
     x         device pointer storing vector x.
     @param[in]
     incx      [rocblas_int]
-              specifies the increment for the elements of y.
+              specifies the increment for the elements of x.
     @param[out]
     result
               device pointer or host pointer to store the nrm2 product.
@@ -2409,7 +2409,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dznrm2_strided_batched_64(rocblas_handle h
     x         device pointer storing vector x.
     @param[in]
     incx      [rocblas_int]
-              specifies the increment for the elements of y.
+              specifies the increment for the elements of x.
     @param[out]
     result
               device pointer or host pointer to store the amax index.
@@ -2640,7 +2640,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_izamax_strided_batched_64(rocblas_handle h
     x         device pointer storing vector x.
     @param[in]
     incx      [rocblas_int]
-              specifies the increment for the elements of y.
+              specifies the increment for the elements of x.
     @param[out]
     result
               device pointer or host pointer to store the amin index.
@@ -24334,7 +24334,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_axpy_strided_batched_ex_64(rocblas_handle 
            specifies the datatype of vector x.
     @param[in]
     incx      [rocblas_int]
-              specifies the increment for the elements of y.
+              specifies the increment for the elements of x.
     @param[in]
     y         device pointer storing vector y.
     @param[in]
@@ -24760,7 +24760,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dotc_strided_batched_ex_64(rocblas_handle 
            specifies the datatype of the vector x.
     @param[in]
     incx      [rocblas_int]
-              specifies the increment for the elements of y.
+              specifies the increment for the elements of x.
     @param[out]
     results
               device pointer or host pointer to store the nrm2 product.
