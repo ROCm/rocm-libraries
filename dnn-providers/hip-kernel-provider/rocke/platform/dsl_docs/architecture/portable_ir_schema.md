@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | Implemented; byte-identity gated in CI, numerics gated on device |
 | **Decision** | Ship kernels as structured artifacts the C++ engine replays; no CPython at runtime |
-| **Implementation** | Python: `rocke/core/ir_export.py`, `rocke/portable_ir/`. C++: `cpp/portable_ir/` (`json_dom`, `cbor_dom`, `ir_import_json`, `recipe_vm`, `online`), headers in `cpp/include/rocke/`. |
+| **Implementation** | Python: `rocke/core/ir_export.py`, `rocke/portable_ir/`. C++: `cpp/portable_ir/` (`cbor_dom`, `ir_import_json`, `recipe_vm`, `online`) and `cpp/support/` (`json_dom`, `intexpr`), headers in `cpp/include/rocke/`. |
 | **Scope** | Three wire schemas plus the import/replay path that consumes them |
 
 ---
@@ -169,13 +169,23 @@ control flow.
 
 ```text
 <intexpr> := number
-           | {"spec": NAME} | {"var": NAME} | {"spec_str_eq": [NAME, literal]}
+           | {"spec": NAME} | {"var": NAME} | {"param": NAME}
+           | {"spec_str_eq": [NAME, literal]}
            | {"<OP>": [e, e]}   for OP in add sub mul div mod eq ne lt le gt ge
            | {"<FN>": e}        for FN in magic_multiplier magic_shift
 ```
 
 Note the arity difference: binary ops take a 2-element array, the unary functions
-take the operand directly.
+take the operand directly. `{"param": NAME}` names a kernel parameter's value; a
+recipe binds none, so the VM refuses it as an unknown param.
+
+One evaluator per engine reads this tree: `rocke/core/intexpr.py::eval_intexpr`
+and `cpp/support/intexpr.cpp::rocke_intexpr_eval`. Both compute in int64 and
+refuse, with the same error text, where C and Python could disagree: a number
+that is not an exact integer within +/-(2^53 - 1), a `div` or `mod` by zero or
+with a negative operand (Python floors, C truncates), and an `add`, `sub` or
+`mul` whose result leaves int64. `tests/core/test_intexpr.py` pins the two
+against one case table.
 
 `magic_multiplier` / `magic_shift` return the two operands of a strength-reduced
 unsigned division — `n // d` compiled as `(umul_hi(n, M) + n) >> s`, which is what
@@ -184,7 +194,7 @@ integers are *not* arithmetic on the divisor: the shift is `ceil(log2 d)` and th
 multiplier depends on `d`'s odd part, so a recipe that stays parametric in a
 divisor has to regenerate them rather than carry a formula. The divisor must
 satisfy `1 <= d < 2^31`. Three implementations must agree — the DSL helper that
-emits them, `recipe_expand.py::magic_division_constants`, and `recipe_vm.cpp` —
+emits them, `rocke/core/intexpr.py::magic_division_constants`, and `cpp/support/intexpr.cpp` --
 and tests pin all three.
 
 These reach constant values, integer attr values, and *type size fields* —

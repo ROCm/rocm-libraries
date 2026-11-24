@@ -21,6 +21,7 @@
  */
 #include "rocke/arch_domain.h"
 #include "rocke/arch_target.h"
+#include "rocke/ir_internal.h"
 #include "rocke/lower_llvm_internal.h"
 #include "rocke/tf32_internal.h"
 
@@ -35,6 +36,7 @@
 
 #include <exception>
 #include <new>
+#include <vector>
 
 /* The lowerer's private symbols live in namespace ckc; public entry points stay
  * at global scope under their extern "C" header declarations. */
@@ -90,8 +92,6 @@ static const rocke_isa_backend_t LL_BACKEND_GFX950
 static const rocke_isa_backend_t LL_BACKEND_GFX942 = {.gfx = "gfx942", LL_BACKEND_CDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX908 = {.gfx = "gfx908", LL_BACKEND_CDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX90A = {.gfx = "gfx90a", LL_BACKEND_CDNA_DEFAULTS};
-static const rocke_isa_backend_t LL_BACKEND_GFX1151 = {.gfx = "gfx1151", LL_BACKEND_RDNA_DEFAULTS};
-static const rocke_isa_backend_t LL_BACKEND_GFX1201 = {.gfx = "gfx1201", LL_BACKEND_RDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX11_GENERIC
     = {.gfx = "gfx11-generic", LL_BACKEND_RDNA_DEFAULTS};
 static const rocke_isa_backend_t LL_BACKEND_GFX12_GENERIC
@@ -125,9 +125,68 @@ static const rocke_isa_backend_t LL_BACKEND_GFX1250
 #undef LL_BACKEND_CDNA_DEFAULTS
 #undef LL_BACKEND_RDNA_DEFAULTS
 
+/* One backend per target whose arch_specs.json row holds facts of its own
+ * (Python BACKEND_REGISTRY). */
+static const rocke_isa_backend_t* const LL_BACKENDS[] = {
+    &LL_BACKEND_GFX908,
+    &LL_BACKEND_GFX90A,
+    &LL_BACKEND_GFX942,
+    &LL_BACKEND_GFX950,
+    &LL_BACKEND_GFX1250,
+    &LL_BACKEND_GFX11_GENERIC,
+    &LL_BACKEND_GFX12_GENERIC,
+};
+
+static const rocke_isa_backend_t* ll_registered_backend(const char* gfx)
+{
+    for(const rocke_isa_backend_t* backend : LL_BACKENDS)
+    {
+        if(strcmp(backend->gfx, gfx) == 0)
+        {
+            return backend;
+        }
+    }
+    return NULL;
+}
+
+/* A target whose row takes its facts from a generic target lowers through the
+ * generic's backend under its own name (Python: backend_for builds the generic's
+ * class on the target's own ArchTarget), so its arch-domain cells and messages
+ * stay its own. These backends are derived from the arch registry once, on first
+ * use; a function-local static is initialised exactly once even when lowerers
+ * start on several threads. */
+static const rocke_isa_backend_t* ll_member_backend(const char* gfx)
+{
+    static const std::vector<rocke_isa_backend_t> member_backends = [] {
+        std::vector<rocke_isa_backend_t> backends;
+        int count = 0;
+        const char* const* arches = rocke_known_arches(&count);
+        for(int i = 0; i < count; ++i)
+        {
+            const char* generic = rocke_arch_facts_of(arches[i]);
+            const rocke_isa_backend_t* shared
+                = generic != NULL ? ll_registered_backend(generic) : NULL;
+            if(shared != NULL)
+            {
+                rocke_isa_backend_t backend = *shared;
+                backend.gfx = arches[i]; /* static storage */
+                backends.push_back(backend);
+            }
+        }
+        return backends;
+    }();
+    for(const rocke_isa_backend_t& backend : member_backends)
+    {
+        if(strcmp(backend.gfx, gfx) == 0)
+        {
+            return &backend;
+        }
+    }
+    return NULL;
+}
+
 const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t* st)
 {
-    const rocke_isa_backend_t* base = NULL;
     /* No default. A NULL arch used to resolve to gfx950 silently, so a caller
      * that forgot the target lowered for one arch and compiled for another.
      * Mirrors the Python lowerer, which raises on `arch=None`. */
@@ -139,53 +198,14 @@ const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t
         }
         return NULL;
     }
-    if(strcmp(arch, "gfx950") == 0)
+    const rocke_isa_backend_t* base = ll_registered_backend(arch);
+    if(base == NULL)
     {
-        base = &LL_BACKEND_GFX950;
-    }
-    else if(strcmp(arch, "gfx942") == 0)
-    {
-        base = &LL_BACKEND_GFX942;
-    }
-    else if(strcmp(arch, "gfx908") == 0)
-    {
-        base = &LL_BACKEND_GFX908;
-    }
-    else if(strcmp(arch, "gfx90a") == 0)
-    {
-        base = &LL_BACKEND_GFX90A;
-    }
-    else if(strcmp(arch, "gfx1151") == 0)
-    {
-        base = &LL_BACKEND_GFX1151;
-    }
-    else if(strcmp(arch, "gfx1201") == 0)
-    {
-        base = &LL_BACKEND_GFX1201;
-    }
-    else if(strcmp(arch, "gfx11-generic") == 0)
-    {
-        base = &LL_BACKEND_GFX11_GENERIC;
-    }
-    else if(strcmp(arch, "gfx12-generic") == 0)
-    {
-        base = &LL_BACKEND_GFX12_GENERIC;
-    }
-    else if(strcmp(arch, "gfx1250") == 0)
-    {
-        base = &LL_BACKEND_GFX1250;
-    }
-    else
-    {
-        if(st)
-        {
-            *st = ROCKE_ERR_KEY;
-        }
-        return NULL;
+        base = ll_member_backend(arch);
     }
     if(st)
     {
-        *st = ROCKE_OK;
+        *st = base != NULL ? ROCKE_OK : ROCKE_ERR_KEY;
     }
     return base;
 }
@@ -447,8 +467,8 @@ const char* rocke_ll_fresh(rocke_lower_t* L, const char* hint)
 /* Intrinsic need-tracking (Python _need / self._decls)                   */
 /* ====================================================================== */
 
-/* Resolve a decl key to its declaration text: dyn_decls override, then the
- * flavor override table (LLVM22), then the base table. NULL if unknown. */
+/* Resolve a decl key to its declaration text: dyn_decls first, then the
+ * flavor's resolved table (rocke_ll_decl_text). NULL if unknown. */
 static const char* ll_resolve_decl(rocke_lower_t* L, const char* key)
 {
     if(!L || !key)
@@ -462,25 +482,7 @@ static const char* ll_resolve_decl(rocke_lower_t* L, const char* key)
             return L->dyn_decls.data[i].decl;
         }
     }
-    {
-        int novr = 0;
-        const rocke_ll_decl_t* ovr = rocke_ll_flavor_overrides(L->flavor, &novr);
-        for(int i = 0; i < novr; i++)
-        {
-            if(strcmp(ovr[i].key, key) == 0)
-            {
-                return ovr[i].decl;
-            }
-        }
-    }
-    for(int i = 0; i < ROCKE_LL_INTRINSIC_DECLS_COUNT; i++)
-    {
-        if(strcmp(ROCKE_LL_INTRINSIC_DECLS[i].key, key) == 0)
-        {
-            return ROCKE_LL_INTRINSIC_DECLS[i].decl;
-        }
-    }
-    return NULL;
+    return rocke_ll_decl_text(L->flavor, key);
 }
 
 static bool ll_need_has(const rocke_lower_t* L, const char* key)
@@ -652,22 +654,60 @@ const char* rocke_ll_param_llvm_type(rocke_lower_t* L, const rocke_param_t* p)
     return rocke_ll_llvm_type(L, p->type);
 }
 
+const rocke_param_t* rocke_ll_value_param(const rocke_lower_t* L, const rocke_value_t* v)
+{
+    if(!L || !L->kernel || !v || !v->name || v->name[0] != '%')
+        return NULL;
+    for(int i = 0; i < L->kernel->num_params; i++)
+    {
+        const rocke_param_t* p = L->kernel->params[i];
+        if(p && p->name && strcmp(v->name + 1, p->name) == 0)
+            return p;
+    }
+    return NULL;
+}
+
 const char* rocke_ll_value_ptr_type(rocke_lower_t* L, const rocke_value_t* v)
 {
-    int i;
     if(!v)
         return "";
     /* Python _Lowerer._ptr_llvm_type: kernel params carry the header's type. */
-    if(L && L->kernel && v->name)
-    {
-        for(i = 0; i < L->kernel->num_params; i++)
-        {
-            const rocke_param_t* p = L->kernel->params[i];
-            if(p && p->name && v->name[0] == '%' && strcmp(v->name + 1, p->name) == 0)
-                return rocke_ll_param_llvm_type(L, p);
-        }
-    }
+    const rocke_param_t* param = rocke_ll_value_param(L, v);
+    if(param)
+        return rocke_ll_param_llvm_type(L, param);
     return rocke_ll_llvm_type(L, v->type);
+}
+
+void rocke_ll_require_header_ptr(rocke_lower_t* L,
+                                 const char* op_name,
+                                 const rocke_value_t* ptr,
+                                 const char* operand,
+                                 const char* space,
+                                 const char* expected)
+{
+    const char* header = rocke_ll_value_ptr_type(L, ptr);
+    if(strcmp(header, expected) == 0)
+        return;
+    const rocke_param_t* param = rocke_ll_value_param(L, ptr);
+    const bool moved
+        = param
+          && strcmp(rocke_ll_param_llvm_type(L, param), rocke_ll_llvm_type(L, param->type)) != 0;
+    rocke_ll_fail(L,
+                  ROCKE_ERR_TYPE,
+                  "%s %s must be a %s pointer, got %s%s",
+                  op_name,
+                  operand,
+                  space,
+                  header,
+                  moved ? " (its parameter's addr_space)" : "");
+}
+
+void rocke_ll_require_global_header_ptr(rocke_lower_t* L,
+                                        const char* op_name,
+                                        const rocke_value_t* ptr,
+                                        const char* operand)
+{
+    rocke_ll_require_header_ptr(L, op_name, ptr, operand, "global", "ptr addrspace(1)");
 }
 
 int rocke_ll_anyptr_space(rocke_lower_t* L,
@@ -699,12 +739,8 @@ int rocke_ll_anyptr_space(rocke_lower_t* L,
             break;
         used += (size_t)n;
     }
-    rocke_ll_fail(L,
-                  ROCKE_ERR_VALUE,
-                  "%s: pointer operand is %s, but the intrinsic accepts only %s",
-                  op,
-                  ty,
-                  list);
+    rocke_ll_fail(
+        L, ROCKE_ERR_TYPE, "%s: pointer operand is %s, but the op accepts only %s", op, ty, list);
 }
 
 const char* rocke_ll_smem_storage_type(rocke_lower_t* L, const rocke_type_t* smem)
@@ -1262,45 +1298,66 @@ static void
     }
 }
 
-/* Size of one smem allocation in bytes (Python _seg_size).
- * No packed-only type has an entry: rocke_i_refuse_packed_only_value refuses
- * its LDS tiles. */
+/* Size of one smem allocation in bytes (Python _seg_size), measured with
+ * the same element width the accesses claim (rocke_i_type_bytes). */
 static int ll_smem_seg_size(const rocke_type_t* stype)
 {
     if(!stype || !stype->elem || !stype->elem->name)
         return 0;
-    const char* n = stype->elem->name;
-    int eb;
-    if(strcmp(n, "i8") == 0 || strcmp(n, "u8") == 0 || strcmp(n, "fp8e4m3") == 0
-       || strcmp(n, "bf8e5m2") == 0)
-        eb = 1;
-    else if(strcmp(n, "f16") == 0 || strcmp(n, "bf16") == 0)
-        eb = 2;
-    else if(strcmp(n, "i32") == 0 || strcmp(n, "tf32") == 0 || strcmp(n, "f32") == 0)
-        eb = 4;
-    else if(strcmp(n, "i64") == 0 || strcmp(n, "f64") == 0)
-        eb = 8;
-    else
-        eb = 2; /* default */
-    int seg = eb;
+    int seg = rocke_i_type_bytes(stype->elem);
     for(int d = 0; d < stype->rank; d++)
         seg *= stype->shape[d];
     return seg;
 }
 
-/* Alignment for one smem allocation (Python _align). A packed-only type never
- * reaches here: rocke_i_refuse_packed_only_value refuses its LDS tiles. */
-static int ll_smem_align(const rocke_type_t* stype)
+/* Record, per smem global, the widest alignment any access to it claims
+ * (Python _collect_smem_access_align). widest[] is parallel to smem_globals
+ * and starts at 0 ("no aligned access"). */
+static void
+    ll_collect_smem_access_align(rocke_lower_t* L, const rocke_region_t* region, int* widest)
 {
-    if(!stype || !stype->elem || !stype->elem->name)
-        return 4;
-    const char* n = stype->elem->name;
-    if(strcmp(n, "f64") == 0)
-        return 8;
-    if(strcmp(n, "i8") == 0 || strcmp(n, "u8") == 0 || strcmp(n, "fp8e4m3") == 0
-       || strcmp(n, "bf8e5m2") == 0)
-        return 16;
-    return 4;
+    if(!region)
+        return;
+    for(int i = 0; i < region->num_ops; i++)
+    {
+        const rocke_op_t* op = region->ops[i];
+        if(!op)
+            continue;
+        int align = rocke_ll_lds_access_align(op);
+        if(align > 0 && op->num_operands > 0 && op->operands[0])
+        {
+            const char* gn = ll_val_to_gname(L, op->operands[0]->name);
+            for(size_t g = 0; gn && g < L->smem_globals.len; g++)
+            {
+                if(strcmp(L->smem_globals.data[g].gname, gn) == 0)
+                {
+                    if(align > widest[g])
+                        widest[g] = align;
+                    break;
+                }
+            }
+        }
+        for(int r = 0; r < op->num_regions; r++)
+            ll_collect_smem_access_align(L, op->regions[r], widest);
+    }
+}
+
+/* Alignment for one smem allocation (Python _align): the larger of the
+ * element rule and the widest alignment its accesses claim. A packed-only
+ * type never reaches here: rocke_i_refuse_packed_only_value refuses its LDS
+ * tiles.
+ *
+ * The element rule is not redundant with `widest`: it is the only alignment
+ * for accesses that print no `align` and so are absent from `widest` -- the
+ * transpose reads, the async global-to-LDS copies and the LDS atomic.
+ * Byte-element segments get 16 bytes because ds_read_b64_tr_b8 on i8 / fp8
+ * tiles needs a 16-byte aligned base. Any other element gets at least the
+ * 4-byte LDS word, and an 8-byte element (f64, i64) its own width. */
+static int ll_smem_align(const rocke_type_t* stype, int widest)
+{
+    int elem_bytes = (stype && stype->elem) ? rocke_i_type_bytes(stype->elem) : 4;
+    int elem_align = elem_bytes == 1 ? 16 : (elem_bytes > 4 ? elem_bytes : 4);
+    return (widest > elem_align) ? widest : elem_align;
 }
 
 void rocke_ll_compute_smem_layout(rocke_lower_t* L)
@@ -1341,6 +1398,11 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
     ctx.num_intervals = n;
     ctx.counter = 0;
     ll_liveness_walk(&ctx, L->kernel ? L->kernel->body : NULL, -1);
+
+    int* access_align = (int*)rocke_arena_calloc(&L->arena, n * sizeof(int));
+    if(!access_align)
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "smem_layout: access_align alloc");
+    ll_collect_smem_access_align(L, L->kernel ? L->kernel->body : NULL, access_align);
 
     /* Fix up allocations with no uses: first_seq = last_seq = 0. */
     for(size_t i = 0; i < n; i++)
@@ -1412,7 +1474,7 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
         const rocke_type_t* stype = L->smem_globals.data[gi].stype;
         int seg = ll_smem_seg_size(stype);
         sizes[gi] = seg;
-        int aln = ll_smem_align(stype);
+        int aln = ll_smem_align(stype, access_align[gi]);
         int first_seq = intervals[gi].first_seq;
         int last_seq = intervals[gi].last_seq;
         /* Exclusive (cshuffle no-alias) allocations must not reuse another
@@ -1497,7 +1559,7 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
         if(e > pool_size)
             pool_size = e;
     }
-    L->smem_pool_size = (pool_size + 15) & ~15;
+    L->smem_pool_size = (pool_size + ROCKE_SMEM_POOL_ALIGN - 1) & ~(ROCKE_SMEM_POOL_ALIGN - 1);
 
     /* Populate L->smem_offsets in declaration order. */
     for(size_t i = 0; i < n; i++)
@@ -1969,15 +2031,9 @@ static const char* rocke_ll_scheduler_strategy(rocke_lower_t* L, const rocke_att
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "scheduler_strategy must be a string");
     }
     const char* strategy = v->u.s;
-    if(!rocke_scheduler_strategy_is_valid(strategy))
-    {
-        rocke_ll_fail(L,
-                      ROCKE_ERR_VALUE,
-                      "unsupported scheduler_strategy '%s'; expected one of: "
-                      "iterative-ilp, iterative-maxocc, iterative-minreg, max-ilp, "
-                      "max-memory-clause, or None",
-                      strategy);
-    }
+    char why[ROCKE_ERR_MSG_CAP];
+    if(rocke_scheduler_strategy_reason(strategy, why, sizeof why))
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", why);
     return strategy;
 }
 
@@ -2006,59 +2062,51 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
     rocke_strbuf_append(out, "\n");
 
     /* smem pool: a single unified addrspace(3) global backing all smem allocations.
-     * align 16 satisfies all segment alignments (strictest: 16 B for ds_read_b64_tr_b8
-     * on i8/fp8 tiles). */
+     * The pool alignment bounds every segment alignment (an access claims at
+     * most the pool alignment; see rocke_ll_lds_access_align). */
     if(L->smem_globals.len > 0 && L->smem_pool_name && L->smem_pool_size > 0)
     {
         rocke_strbuf_appendf(out,
                              "%s = internal unnamed_addr addrspace(3) "
-                             "global [%d x i8] poison, align 16\n",
+                             "global [%d x i8] poison, align %d\n",
                              L->smem_pool_name,
-                             L->smem_pool_size);
+                             L->smem_pool_size,
+                             ROCKE_SMEM_POOL_ALIGN);
         rocke_strbuf_append(out, "\n");
     }
 
-    /* Needed intrinsic declarations, in canonical TABLE order (then dynamic
-     * decls). This mirrors finalize iterating self._decls in insertion order.
-     *
-     * Python builds self._decls as dict(_INTRINSIC_DECLS) then .update(
-     * _INTRINSIC_DECLS_LLVM22_OVERRIDES) for the LLVM22 flavor. dict.update
-     * REPLACES the value text for an existing key but PRESERVES that key's
-     * original insertion position. So we must iterate the base table in order
-     * and, per needed key, emit the override text when the flavor is LLVM22 and
-     * the key has an override -- NOT emit all overrides in a separate leading
-     * loop (which would float overridden keys, e.g. make.buffer.rsrc, to the
-     * front of the declare block). */
+    /* The GPU-check word, when a gpu_checked_value failure path stores to it:
+     * zero at load, read and cleared by the host after the launch. */
+    if(L->gpu_check_word)
+    {
+        rocke_strbuf_appendf(out,
+                             "@%s = protected addrspace(1) externally_initialized global i32 0, "
+                             "align 4\n",
+                             L->gpu_check_word);
+        rocke_strbuf_append(out, "\n");
+    }
+
+    /* Needed intrinsic declarations, in the flavor's resolved table order
+     * (then dynamic decls). This mirrors finalize iterating self._decls in
+     * insertion order: _decls_for_flavor only replaces the text of base keys,
+     * so every key keeps its base-table position and takes the text the
+     * flavor resolves (rocke_ll_decl_at). */
     bool any_need = false;
-    int novr = 0;
-    const rocke_ll_decl_t* ovr = rocke_ll_flavor_overrides(L->flavor, &novr);
     for(int i = 0; i < ROCKE_LL_INTRINSIC_DECLS_COUNT; i++)
     {
-        const char* k = ROCKE_LL_INTRINSIC_DECLS[i].key;
-        const char* decl_text = ROCKE_LL_INTRINSIC_DECLS[i].decl;
-        for(int j = 0; j < novr; j++)
+        rocke_ll_decl_t d = rocke_ll_decl_at(L->flavor, i);
+        if(ll_need_has(L, d.key))
         {
-            if(strcmp(ovr[j].key, k) == 0)
-            {
-                decl_text = ovr[j].decl;
-                break;
-            }
-        }
-        if(ll_need_has(L, k))
-        {
-            rocke_strbuf_appendf(out, "%s\n", decl_text);
+            rocke_strbuf_appendf(out, "%s\n", d.decl);
             any_need = true;
         }
     }
-    /* dict.update appends override-only keys after the base keys. */
-    for(int i = 0; i < novr; ++i)
+    /* The matrix-call declarations follow the base keys, as in Python. */
+    for(int i = 0; const char* key = rocke_ll_matrix_decl_key_at(i); i++)
     {
-        bool in_base = false;
-        for(int j = 0; j < ROCKE_LL_INTRINSIC_DECLS_COUNT; ++j)
-            in_base |= strcmp(ovr[i].key, ROCKE_LL_INTRINSIC_DECLS[j].key) == 0;
-        if(!in_base && ll_need_has(L, ovr[i].key))
+        if(ll_need_has(L, key))
         {
-            rocke_strbuf_appendf(out, "%s\n", ovr[i].decl);
+            rocke_strbuf_appendf(out, "%s\n", rocke_ll_decl_text(L->flavor, key));
             any_need = true;
         }
     }
@@ -2361,10 +2409,12 @@ static rocke_status_t ll_lower_kernel_to_llvm_ex_impl(const rocke_kernel_def_t* 
     rocke_vec_init(&L.smem_offsets);
     rocke_vec_init(&L.smem_sizes);
     rocke_vec_init(&L.lds_prov);
+    rocke_vec_init(&L.loop_header_names);
     L.lds_aa = rocke_attr_get_bool(&kernel->attrs, "lds_alias_scopes", false);
     L.lds_aa_used = false;
     L.smem_pool_size = 0;
     L.smem_pool_name = NULL;
+    L.gpu_check_word = NULL;
     rocke_vec_init(&L.yield_stack);
     rocke_vec_init(&L.dbg_marks);
 

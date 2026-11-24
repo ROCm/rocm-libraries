@@ -26,11 +26,13 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
+#include "../../../shared/arithmetic.h"
 #include "../../../shared/device_properties.h"
 #include "../../../shared/gpubuf.h"
 #include "../../../shared/hip_object_wrapper.h"
@@ -39,7 +41,7 @@
 #include "../device/kernels/callback.h"
 #include "../device/kernels/common.h"
 #include "compute_scheme.h"
-#include "data_layout.h"
+#include "data_set.h"
 #include "enum_printer.h"
 #include "exec_info.h"
 #include "function_map_key.h"
@@ -48,6 +50,7 @@
 #include "load_store_ops.h"
 #include "logging.h"
 #include "rocfft_current_function.h"
+#include "rocfft_location.h"
 #include "rocfft_mpi.h"
 #include "rtc_kernel.h"
 #include <hip/hip_runtime_api.h>
@@ -182,79 +185,25 @@ class TreeNode;
 class LeafNode;
 class function_pool;
 
-// Identifier for a location that a buffer lives on, or that a kernel
-// will execute on.  this specifies a multi-process rank as well as a
-// device ID.
-struct rocfft_location_t
-{
-    rocfft_location_t() = default;
-    rocfft_location_t(int _comm_rank, int _device)
-        : comm_rank(_comm_rank)
-        , device(_device)
-    {
-    }
-
-    // return a location for the current device on comm rank 0
-    static rocfft_location_t rank0_current_device()
-    {
-        rocfft_location_t id;
-        if(hipGetDevice(&id.device) != hipSuccess)
-            throw std::runtime_error("hipGetDevice failed");
-        return id;
-    }
-
-    // allow locations to be sorted
-    bool operator<(const rocfft_location_t& other) const
-    {
-        if(comm_rank != other.comm_rank)
-            return comm_rank < other.comm_rank;
-        return device < other.device;
-    }
-
-    bool operator==(const rocfft_location_t& other) const
-    {
-        return comm_rank == other.comm_rank && device == other.device;
-    }
-
-    std::string str() const
-    {
-        std::string ret = "comm rank ";
-        ret += std::to_string(comm_rank);
-        ret += " device ";
-        ret += std::to_string(device);
-        return ret;
-    }
-
-    int comm_rank = 0;
-    int device    = 0;
-};
-
 // Conceptual representation of temporary buffers, e.g., for
 // workspaces or communications.
 class InternalTempBuffer
 {
-public:
-    InternalTempBuffer(rocfft_location_t _location)
+    // only TempBufferRegistry::emplace makes these, so that every one is registered
+    friend class TempBufferRegistry;
+
+    InternalTempBuffer(rocfft_location_t _location, size_t _size_bytes)
         : location(_location)
+        // Round size up to nearest multiple of 16 bytes, to ensure
+        // that buffers placed back to back are not misaligned.
+        , size_bytes(DivRoundingUp<size_t>(_size_bytes, 16) * 16)
     {
     }
+
+public:
     InternalTempBuffer(const InternalTempBuffer&) = delete;
     InternalTempBuffer& operator=(const InternalTempBuffer&) = delete;
     ~InternalTempBuffer()                                    = default;
-
-    void ensure_size_bytes(size_t in)
-    {
-        if(in > size_bytes)
-        {
-            size_bytes = in;
-            // Round size up to nearest multiple of 16 bytes, to
-            // ensure that if we satisfy two temp buffer requests
-            // with a single allocation, neither one will be
-            // unexpectedly misaligned.
-            auto remainder = size_bytes % 16;
-            size_bytes += remainder ? 16 - remainder : 0;
-        }
-    }
 
     size_t get_size_bytes() const
     {
@@ -266,9 +215,21 @@ public:
         return location;
     }
 
+    size_t get_offset_bytes() const
+    {
+        return offset_bytes;
+    }
+
+    void set_offset_bytes(size_t in)
+    {
+        offset_bytes = in;
+    }
+
 private:
     rocfft_location_t location;
-    size_t            size_bytes = 0;
+    const size_t      size_bytes;
+    // offset in the device's work buffer
+    size_t offset_bytes = 0;
 };
 
 // Class representing a buffer in a multi-plan item.
@@ -411,6 +372,49 @@ private:
     std::shared_ptr<InternalTempBuffer> temp_ptr;
 };
 
+// A plan's temp buffers, and the only way to create one.
+class TempBufferRegistry
+{
+public:
+    BufferPtr emplace(const rocfft_location_t& location, size_t size_bytes)
+    {
+        // make_shared can't reach the private constructor
+        std::shared_ptr<InternalTempBuffer> buf(new InternalTempBuffer(location, size_bytes));
+        buffers.push_back(buf);
+        return BufferPtr::temp(buf);
+    }
+
+    size_t size() const
+    {
+        return buffers.size();
+    }
+
+    // drop the buffers created after the first n
+    void truncate(size_t n)
+    {
+        if(n < buffers.size())
+            buffers.resize(n);
+    }
+
+    void clear()
+    {
+        buffers.clear();
+    }
+
+    auto begin() const
+    {
+        return buffers.begin();
+    }
+
+    auto end() const
+    {
+        return buffers.end();
+    }
+
+private:
+    std::vector<std::shared_ptr<InternalTempBuffer>> buffers;
+};
+
 // The mininal tree node data needed to decide the scheme
 struct NodeMetaData
 {
@@ -419,9 +423,7 @@ struct NodeMetaData
     std::vector<size_t>     length;
     std::vector<size_t>     outputLength;
     std::vector<size_t>     inStride, outStride;
-    std::vector<size_t>     inStrideBlue, outStrideBlue;
     size_t                  iDist = 0, oDist = 0;
-    size_t                  iDistBlue = 0, oDistBlue = 0;
     size_t                  iOffset = 0, oOffset = 0;
     int                     direction         = -1;
     rocfft_result_placement placement         = rocfft_placement_inplace;
@@ -434,15 +436,15 @@ struct NodeMetaData
 
     // TODO: `batch`, `dimension`, `length`, `outputLength` `inStride`,
     // `outStride`, `iDist`, and `oDist` could (and should) be replaced
-    // by two data_layout_t member objects instead.
-    inline data_layout_t layout_for(io_data_label io) const
+    // by two data_set_t member objects instead.
+    inline data_set_t layout_for(io_data_label io) const
     {
         switch(io)
         {
         case io_data_label::INPUT:
-            return data_layout_t::full_layout(length, inStride, batch, iDist);
+            return data_set_t::full_range(length, inStride, batch, iDist);
         case io_data_label::OUTPUT:
-            return data_layout_t::full_layout(outputLength, outStride, batch, oDist);
+            return data_set_t::full_range(outputLength, outStride, batch, oDist);
         default:
             throw std::invalid_argument("Unknown io data label given to "
                                         + ROCFFT_CURRENT_FUNCTION);
@@ -452,8 +454,8 @@ struct NodeMetaData
     inline bool is_using_default_contiguous_layout_for(io_data_label io) const
     {
         return layout_for(io)
-               == data_layout_t::default_full_layout(
-                   io == io_data_label::INPUT ? length : outputLength, batch);
+               == data_set_t::default_full_range(io == io_data_label::INPUT ? length : outputLength,
+                                                 batch);
     };
 
     explicit NodeMetaData(TreeNode* refNode);
@@ -573,14 +575,116 @@ public:
     // Stride of the FFT in each dimension
     std::vector<size_t> inStride, outStride;
 
-    // Stride of the fused Bluestein FFT in each dimension
-    std::vector<size_t> inStrideBlue, outStrideBlue;
-
     // Distance between consecutive batch members:
     size_t iDist = 0, oDist = 0;
 
-    // Distance between consecutive batch members in fused Bluestein nodes
-    size_t iDistBlue = 0, oDistBlue = 0;
+    // Encapsulation of Bluestein-specific additional members (stored as an
+    // optional instance in TreeNode object, valued only for nodes involved
+    // in a Bluestein algorithm strategy).
+    struct BluesteinParams
+    {
+        BluesteinParams(size_t transformLength, size_t paddedLength, BluesteinType bluesteinType)
+            : type(bluesteinType)
+            , transform_length(transformLength)
+            , padded_length(paddedLength)
+            , fuse(BluesteinFuseType::BFT_NONE)
+        {
+            if(paddedLength + 1 < 2 * transformLength)
+                throw std::invalid_argument(
+                    ROCFFT_CURRENT_FUNCTION
+                    + ": paddedLength is too small for the given transformLength");
+        }
+
+        // Bluestein strategy for this node; fixed at construction.
+        BluesteinType get_type() const
+        {
+            return type;
+        }
+        // Original (unpadded) FFT length "N", always complex.
+        size_t get_transform_length() const
+        {
+            return transform_length;
+        }
+        // Padded convolution length "M >= 2*N - 1", always complex.
+        size_t get_padded_length() const
+        {
+            return padded_length;
+        }
+
+        BluesteinFuseType get_fuse_type() const
+        {
+            return fuse;
+        }
+
+        // Load- and store-side descriptions of the data set in
+        // the convolution buffer (OB_TEMP_BLUESTEIN buffer), valued
+        // for fused-Bluestein's BFT_FWD_CHIRP_MUL and BFT_INV_CHIRP_MUL
+        // stages (only). These stages re-interpret the padded_length as
+        // the product of 2 smaller lengths (1D-via-2D transforms).
+        const std::optional<data_set_t>& get_conv_buf_layout(io_data_label io) const
+        {
+            return io == io_data_label::INPUT ? conv_buf_layout_in : conv_buf_layout_out;
+        }
+
+        // Set the fused-operation type.  A real (non-BFT_NONE) fuse type
+        // is only valid on a BT_MULTI_KERNEL_FUSED node, and such a node
+        // cannot be reset to BFT_NONE.
+        void set_fuse_type(BluesteinFuseType fuseType)
+        {
+            if((fuseType == BluesteinFuseType::BFT_NONE) != (type != BT_MULTI_KERNEL_FUSED))
+                throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
+                                            + ": a non-BFT_NONE fuse type requires a "
+                                              "BT_MULTI_KERNEL_FUSED node (and vice versa)");
+            fuse = fuseType;
+        }
+
+        void set_conv_buffer_layout(io_data_label io, data_set_t buffer_layout)
+        {
+            // Only the Hadamard-product stages address OB_TEMP_BLUESTEIN,
+            // on both sides.
+            if(type != BT_MULTI_KERNEL_FUSED
+               || (fuse != BluesteinFuseType::BFT_FWD_CHIRP_MUL
+                   && fuse != BluesteinFuseType::BFT_INV_CHIRP_MUL))
+            {
+                throw std::runtime_error(
+                    ROCFFT_CURRENT_FUNCTION
+                    + ": the Bluestein's convolution buffer's I/O layouts are relevant only for "
+                      "the FWD_CHIRP_MUL and INV_CHIRP_MUL stages of a BT_MULTI_KERNEL_FUSED");
+            }
+            auto buffer_layout_len = buffer_layout.lengths();
+            if(buffer_layout_len.size() < 2
+               || buffer_layout_len[0] * buffer_layout_len[1] != padded_length)
+            {
+                throw std::invalid_argument(
+                    ROCFFT_CURRENT_FUNCTION
+                    + ": the first two length dimensions of the convolution buffer layout must "
+                      "factorize the padded length");
+            }
+            const auto& other_layout = get_conv_buf_layout(other(io));
+            if(other_layout && !other_layout->is_dimensionally_consistent_with(buffer_layout))
+            {
+                throw std::invalid_argument(
+                    ROCFFT_CURRENT_FUNCTION
+                    + ": the I/O layouts of convolution buffers must be dimensionally consistent");
+            }
+
+            if(io == io_data_label::INPUT)
+                conv_buf_layout_in = std::move(buffer_layout);
+            else
+                conv_buf_layout_out = std::move(buffer_layout);
+        }
+
+    private:
+        BluesteinType             type;
+        size_t                    transform_length;
+        size_t                    padded_length;
+        BluesteinFuseType         fuse;
+        std::optional<data_set_t> conv_buf_layout_in, conv_buf_layout_out;
+    };
+
+    // Bluestein state: set on Bluestein nodes and their non-FFT children;
+    // FFT sub-plans (and their descendants) carry it only in the fused strategy.
+    std::optional<BluesteinParams> blue;
 
     // Offsets to start of data in buffer:
     size_t iOffset = 0, oOffset = 0;
@@ -637,22 +741,11 @@ public:
     ComputeScheme   scheme = CS_NONE;
     OperatingBuffer obIn = OB_UNINIT, obOut = OB_UNINIT;
 
-    // Length of the FFT for computing zero-padded linear convolutions
-    // in Bluestein's algorithm. If Bluestein is required to compute an
-    // FFT of length N, then lengthBlue >= 2N - 1.
-    size_t lengthBlue  = 0;
-    size_t lengthBlueN = 0;
-
     // Index of off-dimension in partial-pass nodes
     size_t ppOffDim = 0;
 
     // Index of current dimension (full pass) in partial-pass nodes
     size_t ppCurrDim = 0;
-
-    //
-    BluesteinType     typeBlue   = BluesteinType::BT_NONE;
-    BluesteinFuseType fuseBlue   = BluesteinFuseType::BFT_NONE;
-    bool              need_chirp = false;
 
     // Device pointers:
     // twiddle memory is owned by the repo
@@ -994,6 +1087,20 @@ public:
     // of user data
     bool IsBluesteinChirpSetup();
 
+    // return true if this node is a fused-Bluestein leaf whose kernel
+    // reads the chirp table.
+    bool NeedsChirp() const;
+
+    BluesteinFuseType GetBluesteinFuseType() const
+    {
+        return blue ? blue->get_fuse_type() : BluesteinFuseType::BFT_NONE;
+    }
+
+    BluesteinType GetBluesteinType() const
+    {
+        return blue ? blue->get_type() : BluesteinType::BT_NONE;
+    }
+
     // Assuming callbacks need to run on this node, return the
     // specific CallbackType for this node - takes into account
     // whether the node is treating real data as complex
@@ -1120,26 +1227,24 @@ public:
         // compute_ptrdiff returns the buffer size (one-past-the-end).
         auto ptrdiff = compute_ptrdiff(io_length, io_stride, batch, io_dist) - 1;
 
+        if(!blue || !blue->get_conv_buf_layout(io))
+            return ptrdiff;
         // Fused Bluestein kernels index the Bluestein work buffer in the same
         // kernel, over the same lengths but with the Bluestein strides + dist.
         // Whichever side reaches further decides the integer type.
-        const auto& io_stride_blue = io == io_data_label::INPUT ? inStrideBlue : outStrideBlue;
-        if(fuseBlue == BFT_NONE || io_stride_blue.size() < io_length.size())
-            return ptrdiff;
+        const auto fuse_type = GetBluesteinFuseType();
 
-        const auto& io_dist_blue = io == io_data_label::INPUT ? iDistBlue : oDistBlue;
-
-        // The INV_CHIRP_MUL CC load and FWD_CHIRP_MUL RC store add lengthBlue to the index
-        // in-kernel, to skip the chirp's FFT stored first in the Bluestein buffer.
-        const bool offset_by_length_blue
-            = (io == io_data_label::INPUT && fuseBlue == BFT_INV_CHIRP_MUL
+        // The INV_CHIRP_MUL CC load and FWD_CHIRP_MUL RC store add the padded length to the
+        // index in-kernel, to skip the chirp's FFT stored first in the Bluestein buffer.
+        const bool offset_by_padded_length
+            = (io == io_data_label::INPUT && fuse_type == BFT_INV_CHIRP_MUL
                && scheme == CS_KERNEL_STOCKHAM_BLOCK_CC)
-              || (io == io_data_label::OUTPUT && fuseBlue == BFT_FWD_CHIRP_MUL
+              || (io == io_data_label::OUTPUT && fuse_type == BFT_FWD_CHIRP_MUL
                   && scheme == CS_KERNEL_STOCKHAM_BLOCK_RC);
 
         return std::max(ptrdiff,
-                        compute_ptrdiff(io_length, io_stride_blue, batch, io_dist_blue) - 1
-                            + (offset_by_length_blue ? lengthBlue : 0));
+                        blue->get_conv_buf_layout(io)->buffer_element_count() - 1
+                            + (offset_by_padded_length ? blue->get_padded_length() : 0));
     };
 
     // Max stride or dist packed into the kernel argument buffer for a given
@@ -1156,26 +1261,27 @@ public:
                                                    : *std::max_element(io_stride.begin(), io_stride.end());
         max_stride             = std::max(max_stride, io_dist);
 
-        if(fuseBlue == BFT_NONE)
+        if(GetBluesteinFuseType() == BFT_NONE)
             return max_stride;
 
         // Fused Bluestein kernels also take the Bluestein lengths, and the
         // higher-dimension Bluestein strides + dist, as integer_type.  See
         // BluesteinData and RTCKernelStockham::get_launch_args.
-        max_stride = std::max({max_stride, lengthBlueN, lengthBlue});
+        // Note: max(padded_length, transform_length) == padded_length by construction.
+        max_stride = std::max(max_stride, blue->get_padded_length());
 
-        // BFT_FWD_CHIRP passes zeros for the Bluestein strides and dist.
-        if(fuseBlue == BFT_FWD_CHIRP)
+        // BFT_FWD_CHIRP does not use the convolution buffer
+        const auto& conv_layout = blue->get_conv_buf_layout(io);
+        if(!conv_layout)
             return max_stride;
 
-        const auto& io_stride_blue = io == io_data_label::INPUT ? inStrideBlue : outStrideBlue;
-        const auto& io_dist_blue   = io == io_data_label::INPUT ? iDistBlue : oDistBlue;
-
-        // Only dims 2 and 3 are packed; dims 0 and 1 are implied by lengthBlue.
+        const auto io_stride_blue = conv_layout->strides();
+        // Only dims 2 and 3 are packed; dims 0 and 1 are implied by
+        // padded_length.
         for(size_t i = 2; i < io_stride_blue.size() && i < 4; ++i)
             max_stride = std::max(max_stride, io_stride_blue[i]);
 
-        return std::max(max_stride, io_dist_blue);
+        return std::max(max_stride, conv_layout->distance());
     };
 
     virtual void GetKernelFactors();
@@ -1377,10 +1483,11 @@ private:
 struct CommRCCLAllToAll : public MultiPlanItem
 {
     // per-rank state for one all-to-all participant. Caller fills
-    // sendBuffer/recvBuffer; the constructor allocates the completion
-    // event. The collective runs on the comm-owned stream; the event is
-    // recorded on it after ncclGroupEnd so Wait() can sync on events like
-    // every other MultiPlanItem.
+    // sendBuffer/recvBuffer for every NCCL rank; only local participants
+    // have real buffers and a completion event. The collective runs
+    // on the comm-owned stream; the event is recorded on it after
+    // ncclGroupEnd so Wait() can sync on events like every other
+    // MultiPlanItem.
     struct agent_t
     {
         BufferPtr          sendBuffer;
@@ -1388,11 +1495,9 @@ struct CommRCCLAllToAll : public MultiPlanItem
         hipEvent_wrapper_t event;
     };
 
-    // _agents must be indexed by RCCL rank. The rocfft_rccl_comm_t type
-    // assigns ranks in sorted device-id order (this holds even for non-contiguous
-    // device sets such as {1, 3, 6}), so building the vector in the same
-    // order as _rccl.get_devices(), or equivalently in ascending device-id
-    // order, satisfies the contract.
+    // _agents must be indexed by NCCL rank (rccl.get_locations() order).
+    // Remote ranks may have empty buffers; events are allocated only
+    // for local locations.
     CommRCCLAllToAll(const rocfft_rccl_comm_t& _rccl,
                      rocfft_precision          _precision,
                      rocfft_array_type         _arrayType,
@@ -1404,24 +1509,16 @@ struct CommRCCLAllToAll : public MultiPlanItem
         , count_per_rank(_count_per_rank)
         , agents(std::move(_agents))
     {
-        // single-process RCCL only, so the local rank is always 0;
-        // ExecutesOnRank() relies on this being set explicitly since
-        // the MultiPlanItem base does not default-initialize it
-        local_comm_rank = 0;
-
-        // validate caller-supplied agent count against the communicator
         const auto nranks = rccl.num_ranks();
         if(agents.size() != nranks)
             throw std::invalid_argument(
                 "CommRCCLAllToAll: agents.size() (" + std::to_string(agents.size())
                 + ") must match rccl.num_ranks() (" + std::to_string(nranks) + ")");
 
-        // one completion event per device, on that device, so recording
-        // it on the comm stream is valid. The stream is comm-owned.
-        const auto devices = rccl.get_devices();
-        for(size_t r = 0; r < devices.size(); ++r)
+        for(const auto& loc : rccl.get_local_locations())
         {
-            rocfft_scoped_device scoped(devices[r]);
+            const int            r = rccl.get_rank(loc);
+            rocfft_scoped_device scoped(loc.device);
             agents[r].event.alloc();
         }
     }
@@ -1439,28 +1536,27 @@ struct CommRCCLAllToAll : public MultiPlanItem
     {
         for(const auto& a : agents)
         {
-            if(ptr == a.recvBuffer)
+            if(a.recvBuffer && ptr == a.recvBuffer)
                 return true;
         }
         return false;
     }
 
-    // the collective consumes each per-agent send buffer.
     bool ReadsFromBuffer(const BufferPtr& ptr) const override
     {
         for(const auto& a : agents)
         {
-            if(ptr == a.sendBuffer)
+            if(a.sendBuffer && ptr == a.sendBuffer)
                 return true;
         }
         return false;
     }
 
-    // single-process RCCL: all participating devices belong to the local
-    // process, so the collective runs on local_comm_rank only.
-    bool ExecutesOnRank(int comm_rank) const override
+    // ncclAlltoAll is collective: every rank that owns a participating
+    // location must launch its local participant(s).
+    bool ExecutesOnRank(int) const override
     {
-        return comm_rank == local_comm_rank;
+        return true;
     }
 
 private:
@@ -1468,10 +1564,8 @@ private:
 
     const rocfft_precision  precision;
     const rocfft_array_type arrayType;
-    const size_t            count_per_rank; // elements per rank (uniform)
+    const size_t            count_per_rank;
 
-    // per-rank send/recv buffers, indexed by RCCL rank to
-    // match the ordering returned by rccl.get_devices().
     std::vector<agent_t> agents;
 };
 
@@ -1573,8 +1667,7 @@ private:
     struct Transfer
     {
         // peer and local endpoints, both as (comm_rank, device) pairs;
-        // the peer's RCCL rank is derived at execution time from
-        // peer_location.device via rccl.get_rank().
+        // the peer's NCCL rank is rccl.get_rank(peer_location).
         rocfft_location_t peer_location;
         rocfft_location_t local_location;
         BufferPtr         buffer;
@@ -2019,12 +2112,12 @@ struct ExecPlan : public MultiPlanItem
 
     bool WritesToBuffer(const BufferPtr& ptr) const override
     {
-        return ptr == outputPtr;
+        return ptr == outputPtr || (workPtr && ptr == workPtr);
     }
 
     bool ReadsFromBuffer(const BufferPtr& ptr) const override
     {
-        return ptr == inputPtr;
+        return ptr == inputPtr || (workPtr && ptr == workPtr);
     }
 
     bool ExecutesOnRank(int comm_rank) const override

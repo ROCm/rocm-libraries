@@ -61,14 +61,20 @@ TEST_P(GPU_PReLU_bwd_BFP16, Test)
     Verify();
 };
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_PReLU_bwd_FP32, testing::ValuesIn(PReLUSmokeTestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_PReLU_bwd_FP16, testing::ValuesIn(PReLUSmokeTestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_PReLU_bwd_BFP16, testing::ValuesIn(PReLUSmokeTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_PReLU_bwd_FP32, testing::ValuesIn(PReLUSmokeTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_PReLU_bwd_FP16, testing::ValuesIn(PReLUSmokeTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_PReLU_bwd_BFP16, testing::ValuesIn(PReLUSmokeTestConfigs()));
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_PReLU_bwd_FP32, testing::ValuesIn(PReLUFullTestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Full, GPU_PReLU_bwd_FP16, testing::ValuesIn(PReLUFullTestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Full, GPU_PReLU_bwd_BFP16, testing::ValuesIn(PReLUFullTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_PReLU_bwd_FP32, testing::ValuesIn(PReLUFullTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_PReLU_bwd_FP16, testing::ValuesIn(PReLUFullTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_PReLU_bwd_BFP16, testing::ValuesIn(PReLUFullTestConfigs()));
 
-INSTANTIATE_TEST_SUITE_P(Perf, GPU_PReLU_bwd_FP32, testing::ValuesIn(PReLUPerfTestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Perf, GPU_PReLU_bwd_FP16, testing::ValuesIn(PReLUPerfTestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Perf, GPU_PReLU_bwd_BFP16, testing::ValuesIn(PReLUPerfTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(StandardPerf,
+                         GPU_PReLU_bwd_FP32,
+                         testing::ValuesIn(PReLUPerfTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(StandardPerf,
+                         GPU_PReLU_bwd_FP16,
+                         testing::ValuesIn(PReLUPerfTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(StandardPerf,
+                         GPU_PReLU_bwd_BFP16,
+                         testing::ValuesIn(PReLUPerfTestConfigs()));

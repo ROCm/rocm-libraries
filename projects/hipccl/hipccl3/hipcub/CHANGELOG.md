@@ -2,8 +2,45 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
-## hipCUB-5.0.0 for ROCm 10.2.0
+## hipCUB-5.1.0 for ROCm 10.3.0
 
+### Changed
+
+* Renamed the CMake option `CODE_COVERAGE` to `HIPCUB_ENABLE_COVERAGE`.
+* Tests no longer set `LLVM_PROFILE_FILE` through CTest. A value set in the environment when running `ctest` is now used. The `coverage_analysis` target still writes profiles to `coverage-report/profraw`.
+
+### Removed
+
+* Deprecated `CODE_COVERAGE`, use `HIPCUB_ENABLE_COVERAGE` instead.
+
+### Resolved issues
+
+* Fixed `BUILD_TEST`, `BUILD_BENCHMARK`, and `BUILD_EXAMPLE` being set to `OFF` in the CMake cache when hipCUB fetches rocPRIM in the same configure. Projects configured afterwards, such as rocThrust in the hipCCL superbuild, no longer lose their tests.
+* Fixed a build failure when libhipcxx is not on the include path. `radix_rank_sort_operations.hpp` included the libhipcxx `bit` header unconditionally, which does not exist in the standard library fallback.
+
+### Added
+
+* Added support for large number of segments and large number of items to `hipcub::DeviceSegmentedRadixSort::*`.
+* Added new `hipcub::WarpReduce` overloadings `hipcub::WarpReduce::Sum`, `hipcub::WarpReduce::Max` and `hipcub::WarpReduce::Min`.
+* Added fixed-size-segments variant for `hipcub::DeviceSegmentedReduce`.
+* Added support for large number of segments to `hipcub::DeviceSegmentedReduce::Reduce`'s fixed-size-segments variant.
+* Added support for large sizes to `hipcub::DeviceRunLengthEncode::Encode`.
+* Extended fixed-size-segments variant of `hipcub::DeviceSegmentedReduce` to support all operators (`Sum`, `Min/Max`, and `ArgMin/Max`).
+* Added support for large sizes to `hipcub::DeviceRunLengthEncode::NonTrivialRuns`.
+* Added env-based API for `hipcub::DeviceReduce::Reduce`.
+* Added env-based API for `hipcub::DeviceReduce::Sum`.
+* Feature parity with CCCL/CUB 3.1.4.
+
+### Changed
+
+* Changed `CCCL_MINIMUM_VERSION` to `3.1.4` to align with CUB.
+
+### Removed
+
+* Removed the deprecated thread operators `Equality`, `Inequality`, `Sum`, `Difference`, `Division`, `Max` and `Min`.
+
+## hipCUB-5.0.0 for ROCm 10.2.0
+ 
 ### Added
 
 * Feature parity with CCCL/CUB 3.0.0.
@@ -16,10 +53,6 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Replaced `#pragma unroll` by `_CCCL_PRAGMA_UNROLL_FULL()` and `#pragma nounroll` by `_CCCL_PRAGMA_NOUNROLL()`.
 * Updated `WarpExchange` template parameters for CUB compatibility. The third argument, `ARCH`, has been removed.
 * The block merge sort and thread sort algorithms now perform optional loop unrolling via `_CCCL_SORT_MAYBE_UNROLL()`.
-
-### Resolved issues
-
-* Fixed a build failure when libhipcxx is not on the include path. `radix_rank_sort_operations.hpp` included the libhipcxx `bit` header unconditionally, which does not exist in the standard library fallback.
 
 ### Removed
 * The hipCUB migration to cccl3 has resulted in the following removals and deprecations:

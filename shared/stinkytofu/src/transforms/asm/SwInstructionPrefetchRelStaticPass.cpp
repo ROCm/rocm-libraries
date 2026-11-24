@@ -55,8 +55,8 @@ class SwInstructionPrefetchRelStaticPass : public StinkyInstPass {
         const int64_t blockGlobalStart = m_byteOffsetBase;
         const bool allowIns =
             !m_skipSwPrefetchInNaturalLoopBodies || (findLoopForBB(m_loops, &bb) == nullptr);
-        // XNACK replay is what the drain before each prefetch guards against; where the driver
-        // has it off there is nothing to replay and nothing to pay for.
+        // XNACK replay is what the drain before a prefetch in an open replay group guards against;
+        // where the driver has it off there is nothing to replay and nothing to pay for.
         const bool emitXnackWait = passCtx.getAsmCapsConfig().enableXnackReplay;
         insertSwPrefetchLabels(bb, blockGlobalStart, archId, m_debug ? m_debugStream : nullptr,
                                &m_asmSetSymbols, emitXnackWait, allowIns, getName());

@@ -7,6 +7,7 @@ The optimizer discovers each transform (source->target) with rocKE's own solver 
 ladder; it never consults a table. These lock the ladder ordering + the validity gates on real layouts.
 """
 
+from rocke.core.ir import F16, F32
 from rocke.helpers.tiling.layouts.tile_distribution import make_tile_desc
 from rocke.helpers.tiling.mma.mma_operation import TileMma, Tiling
 from rocke.helpers.tiling.transforms import TransformPlan, as_forward_map
@@ -22,9 +23,9 @@ from rocke.helpers.tiling.layout_optimizer import (
 def _mma():
     return TileMma(
         (64, 64, 32),
-        a="f16",
-        b="f16",
-        c="f32",
+        a=F16,
+        b=F16,
+        c=F32,
         target="gfx90a",
         tiling=Tiling(atom_shape=(16, 16, 16)),
     )
@@ -127,12 +128,12 @@ def test_pairwise_k_match_gate():
     # per-operand soundness alone can pass while the PAIR is K-mismatched -> k_partner must catch it
     mma = _mma()
     a, b = mma.a_layout, mma.b_layout
-    ok = evaluate_transform(a, a, canon=a, k_partner=b)
+    ok = evaluate_transform(a, a, canon=a, k_partner=b, k_partner_canon=b)
     assert ok.k_match == "ok" and ok.works
     b_bad = {
         k: (c[0], 0) for k, c in as_forward_map(b).items()
     }  # scramble B's K -> mismatch
-    bad = evaluate_transform(a, a, canon=a, k_partner=b_bad)
+    bad = evaluate_transform(a, a, canon=a, k_partner=b_bad, k_partner_canon=b)
     assert bad.k_match != "ok" and not bad.works
 
 

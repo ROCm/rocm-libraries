@@ -36,6 +36,17 @@ struct TensorMismatch
     std::string report; ///< formatted header plus per-element diff, ready to print
 };
 
+/// The live rows of one dense output. A position whose index on `axis` is at least
+/// `lengths[index[0]]` holds no defined value and is not compared.
+struct LiveRows
+{
+    int axis = 1;
+    std::vector<int64_t> lengths;
+};
+
+/// Live rows keyed by output uid.
+using LiveRowMap = std::unordered_map<int64_t, LiveRows>;
+
 /// Where the expected values for one output uid come from — golden data on the
 /// bundle, or a reference executor's own output buffers.
 using ExpectedTensorLookup = std::function<hipdnn_data_sdk::utilities::ITensor&(int64_t uid)>;
@@ -55,7 +66,11 @@ using ExpectedTensorLookup = std::function<hipdnn_data_sdk::utilities::ITensor&(
 /// disagreements still fail, and finite elements are still graded by atol/rtol. It
 /// exists for an output whose correct value is infinite on both sides — an SDPA
 /// forward log-sum-exp row that is fully masked, whose reference and device values
-/// are both -inf and are both right.
+/// are both -inf and are both right. makeValidator() has no device implementation of it.
+///
+/// compareTensor() grades a floating-point ALLCLOSE tensor as
+/// ALLCLOSE_MATCHING_INFINITIES on the host, and a FLOAT, HALF, BFLOAT16 or DOUBLE one
+/// also on the device.
 ///
 /// Nothing selects RMS or ALLCLOSE_MATCHING_INFINITIES on its own: only an engine's
 /// TOML config can, via a [[validator_overrides]] entry naming the tensor.
@@ -108,6 +123,12 @@ using ToleranceLookup = std::function<ComparisonTolerance(
 /// Pure: no gtest, no config lookups, no harness state. Everything it needs to
 /// describe a failure is an argument. The mismatch report is always built on the
 /// host, whichever site made the pass/fail call.
+///
+/// A floating-point tensor graded by ALLCLOSE or ALLCLOSE_MATCHING_INFINITIES matches
+/// same-signed infinities on the host (see ValidatorKind). At the device site, a FLOAT,
+/// HALF, BFLOAT16 or DOUBLE tensor graded by either kind follows the same rule: a tensor
+/// that fails the device allclose is graded again on the host. A ragged tensor at the
+/// device site is reported as not comparable.
 std::optional<TensorMismatch>
     compareTensor(int64_t uid,
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
@@ -122,6 +143,12 @@ std::optional<TensorMismatch>
 ///
 /// `toleranceFor` resolves how each output is compared, so the caller owns the TOML
 /// override and this stays free of TestConfig.
+///
+/// An output in `liveRows` is compared at `hostOnlySite` (or at `site` when it is not set)
+/// through a host view of each side that skips the positions past each batch's live
+/// length. A ragged output is compared at `hostOnlySite` (or at `site`) too. A live-row
+/// or ragged output at the device site is reported as not comparable. Throws
+/// std::invalid_argument when an entry does not fit its output.
 std::vector<TensorMismatch>
     compareOutputs(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
                    const std::vector<int64_t>& outputUids,
@@ -129,7 +156,9 @@ std::vector<TensorMismatch>
                    const ExpectedTensorLookup& expectedFor,
                    const ToleranceLookup& toleranceFor,
                    ValidationSite site,
-                   const std::string& contextLine);
+                   const std::string& contextLine,
+                   const LiveRowMap& liveRows = {},
+                   std::optional<ValidationSite> hostOnlySite = std::nullopt);
 
 /// The tensor's name, or "uid=N" when the graph did not give it one.
 ///

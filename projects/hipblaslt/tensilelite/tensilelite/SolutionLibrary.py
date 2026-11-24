@@ -22,6 +22,7 @@
 #
 ################################################################################
 
+import copy
 from typing import Dict
 
 from . import Properties
@@ -30,6 +31,10 @@ from . import Contractions
 from .Common import state, IsaInfo
 from .Common.Architectures import gfxToIsa, supportsChipIdPredicate
 from .SolutionStructs.Naming import getSolutionNameMin, getKernelNameMin
+from .SolutionStructs.CompactSolution import hydrateSolution
+from .MatchingTable import MatchingTable, NotExactlyRepresentable
+from .Common.Utilities import printWarning
+from .SolutionStructs.Problem import isFusedA2A, splitFusedA2ARow
 
 class SingleSolutionLibrary:
     Tag = "Single"
@@ -90,7 +95,7 @@ class MatchingLibrary:
     StateKeys = [("type", "tag"), "properties", "table", "distance", "useKdTree"]
 
     @classmethod
-    def FromOriginalState(cls, d, solutions):
+    def FromOriginalState(cls, d, solutions, problemType=None):
         indices = d["indexOrder"]
         distance = d["distance"]
         origTable = d["table"]
@@ -100,7 +105,7 @@ class MatchingLibrary:
             3: Properties.Property("FreeSizeB", index=0),
             1: Properties.Property("BoundSize", index=0)
         }
-        if distance == "Equality" or distance == "GridBased":
+        if distance in ("Equality", "GridBased", "MeshBased"):
             propertyKeys[0] = Properties.Property("BatchSize", index=0)
 
         if distance == "Range":
@@ -115,26 +120,68 @@ class MatchingLibrary:
                 7: Properties.Property("BoundSize", index=0)
             }
 
+        fusedA2A = isFusedA2A(problemType)
+        if fusedA2A and distance != "Equality":
+            raise RuntimeError("fused GEMM+A2A logic supports only the Equality distance; got %s" % distance)
+
         properties = list([propertyKeys[i] for i in indices if i in propertyKeys])
         keyOrder = [i for i, j in enumerate(indices) if j in propertyKeys]
+        if fusedA2A:
+            properties += [Properties.Property("World"), Properties.Property("FusedA2AExtent")]
 
-        table = []
-
+        # Build the columns directly: an int64 key matrix, a float64 speed
+        # vector and solution references are a fifth to a sixth of the memory
+        # of one dict per row, and the parent keeps every table from logic
+        # loading until the libraries are written. The row dicts are built
+        # only when the columns cannot hold a value exactly (or NumPy is not
+        # installed), in which case the legacy form is kept.
+        hasSpeed = distance not in ("GridBased", "MeshBased")
+        keys = []
+        sols = []
+        speeds = [] if hasSpeed else None
         for row in origTable:
             try:
                 index = row[1][0]
-                value = IndexSolutionLibrary(solutions[index])
+                solution = solutions[index]
                 key = list([row[0][i] for i in keyOrder])
-                if distance == "GridBased":
-                    entry = {"key": key, "index": value}
-                else:
-                    entry = {"key": key, "index": value, "speed": row[1][1]}
-
-                table.append(entry)
+                if fusedA2A:
+                    key += splitFusedA2ARow(row[0], problemType)[2]
+                if hasSpeed:
+                    speed = row[1][1]
             except KeyError:
-                pass
-
-        table.sort(key=lambda r: r["key"])
+                continue
+            keys.append(key)
+            sols.append(solution)
+            if hasSpeed:
+                speeds.append(speed)
+        try:
+            table = MatchingTable.fromColumns(keys, sols, speeds)
+        except NotExactlyRepresentable as reason:
+            # Logic files hold int keys and numeric speeds, so this is rare by
+            # construction; say so when it happens, because this table and
+            # every table merged with it then stay row dicts in the parent.
+            source = next(
+                (getattr(s, "srcName", "") for s in sols if getattr(s, "srcName", "")),
+                "unknown logic file",
+            )
+            printWarning(
+                f"{distance} matching table from {source} kept as row dicts: {reason}"
+            )
+            table = None
+        if table is None:
+            # Rows typically outnumber solutions by orders of magnitude; the
+            # wrapper is immutable, so share one per solution.
+            wrappers = {}
+            table = []
+            for i, key in enumerate(keys):
+                value = wrappers.get(id(sols[i]))
+                if value is None:
+                    value = wrappers[id(sols[i])] = IndexSolutionLibrary(sols[i])
+                entry = {"key": key, "index": value}
+                if hasSpeed:
+                    entry["speed"] = speeds[i]
+                table.append(entry)
+            table.sort(key=lambda r: r["key"])
 
         return cls(properties, table, distance, d.get("useKdTree", False))
 
@@ -147,7 +194,18 @@ class MatchingLibrary:
                 and self.properties == other.properties \
                 and self.distance == other.distance
 
-        self.table += other.table
+        if isinstance(self.table, MatchingTable) and isinstance(other.table, MatchingTable):
+            self.table += other.table
+        elif len(other.table) == 0:
+            pass
+        elif len(self.table) == 0:
+            # Later merges replace the columns, but mutate the table object.
+            self.table = copy.copy(other.table)
+        else:
+            # Mixed or legacy forms merge as row dicts, as before.
+            mine = self.table.toRows() if isinstance(self.table, MatchingTable) else self.table
+            theirs = other.table.toRows() if isinstance(other.table, MatchingTable) else other.table
+            self.table = mine + theirs
 
         # useKdTree is a property of the merged table, not of either contributor. OR rather
         # than assert: logic files that share a key are written independently, and requiring
@@ -469,10 +527,12 @@ class MasterSolutionLibrary:
                     predicate = Properties.Predicate(tag="EqualityMatching")
                 elif d["Library"]["distance"] == "Range":
                     predicate = Properties.Predicate(tag="RangeMatching")
+                elif d["Library"]["distance"] == "MeshBased":
+                    predicate = Properties.Predicate(tag="MeshBasedMatching")
                 else:
                     predicate = Properties.Predicate(tag="GridBasedMatching") # to make different from TruePred
 
-                matchingLib = MatchingLibrary.FromOriginalState(d["Library"], solutions)
+                matchingLib = MatchingLibrary.FromOriginalState(d["Library"], solutions, d["ProblemType"])
                 library = PredicateLibrary(tag="Problem")
                 library.rows.append({"predicate": predicate, "library": matchingLib})
             elif d["LibraryType"] == "FreeSize":
@@ -675,8 +735,11 @@ class MasterSolutionLibrary:
 
     def applyNaming(self, splitGSU: bool):
         for s in list(self.solutions.values()):
-            s.name = getSolutionNameMin(s.originalSolution.getKernels()[0], splitGSU)
-            s.kernelName = getKernelNameMin(s.originalSolution.getKernels()[0], splitGSU)
+            # Hydrated once per solution: naming reads hundreds of state keys,
+            # which on a CompactSolution would otherwise each be a fallback.
+            kernel = hydrateSolution(s.originalSolution).getKernels()[0]
+            s.name = getSolutionNameMin(kernel, splitGSU)
+            s.kernelName = getKernelNameMin(kernel, splitGSU)
 
     def remapSolutionIndicesStartingFrom(self, curIndex):
         reIndexMap = {}

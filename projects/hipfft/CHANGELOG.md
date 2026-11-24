@@ -5,6 +5,15 @@ Documentation for hipFFT is available at
 
 ## (Unreleased) hipFFT 1.0.28
 
+### Resolved issues
+
+* `hipfftXtMemcpy` with `HIPFFT_COPY_DEVICE_TO_DEVICE` no longer returns
+  `HIPFFT_INTERNAL_ERROR` when direct peer access is unavailable, and no longer
+  calls `hipDeviceEnablePeerAccess`. The copy uses `hipMemcpyPeerAsync`. The
+  runtime stages through host memory when the devices cannot access each other.
+
+* Fixed the public headers to work in a pure-C (not C++) program.
+
 ## hipFFT 1.0.27 for ROCm 10.2
 
 ### Changed

@@ -49,7 +49,7 @@ extern "C" {
  *
  * Mirror of the Python frozen dataclass, field order identical:
  *   M, N, K, quant_mode, mantissa_dtype, preshuffle_b, group_size_mnk,
- *   block_tile_m, block_tile_n, name, per_input_row.
+ *   block_tile_m, block_tile_n, name.
  *
  * quant_mode  : "aquant" | "bquant" | "abquant"  (default "bquant")
  * mantissa_dtype : "fp8e4m3" | "bf8e5m2" | "i4_fp8" | "i4_bf8" (default fp8e4m3)
@@ -68,7 +68,6 @@ typedef struct rocke_block_scale_gemm_spec
     int block_tile_m; /* default 16 */
     int block_tile_n; /* default 16 */
     const char* name; /* default "rocke_block_scale_gemm" */
-    bool per_input_row; /* default true */
 } rocke_block_scale_gemm_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The caller

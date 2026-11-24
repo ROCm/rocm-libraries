@@ -10,8 +10,11 @@ Production tiled matrix-core, paged-KV decode:
 - `library/kernels/gfx950/attention_tiled_2d.py`, `library/kernels/gfx942/attention_tiled_2d.py`, `library/kernels/gfx1250/attention_tiled_2d.py`
 - `library/kernels/gfx950/attention_tiled_3d.py`, `library/kernels/gfx942/attention_tiled_3d.py`, `library/kernels/gfx1250/attention_tiled_3d.py`
 - `library/kernels/gfx950/attention_tiled_2d_fastkv_regp.py` -- fast paged-KV + register-resident P (gfx950)
-- `library/kernels/gfx950/attention_dense.py` -- dense (non-paged) flash prefill; block orders and
-  grid choice: [case study](../architecture/attention_thread_block_mapping_case_study.md)
+- `library/kernels/gfx950/attention_dense.py` -- dense flash prefill (contiguous or paged K/V); block orders and
+  grid choice: [case study](../architecture/attention_thread_block_mapping_case_study.md).
+  Optional fp8 e4m3 (OCP) K/V (`kv_storage_dtype="fp8e4m3"`) with per-tensor `k_scale` /
+  `v_scale`, dequantized on load into the bf16/fp16 compute path; default-order grid body
+  only, aligned contiguous (non-paged) KV, no sinks
 - `library/kernels/common/fmha_mfma.py` (unified MFMA/WMMA forward, MFMA on CDNA / WMMA on RDNA).
   Opt-in `FmhaMfmaSpec.free_stride` adds per-tensor batch strides and rebases Q/K/V/O per batch
   (`global_ptr_add`), so one kernel reads BSHD, BHSD, general strides and packed QKV. Default off and
@@ -35,7 +38,10 @@ RDNA / gfx1250 WMMA forward:
   (one query row per lane, transposed S/PV, shared padded LDS K/V; runtime shapes,
   head counts incl. a separate V head count, head widths, masks and bias strides;
   baked features: softcap, attention sinks, ALiBi, QQ-bias, OCP E4M3FN K/V, ragged and
-  paged (power-of-two page) layouts; body in `platform/python/rocke/helpers/rdna_attention.py`)
+  paged (power-of-two page; separate K and V block tables, which may be one table) layouts,
+  a batch-strided Q against a paged cache (`dense_q`)
+  and per-sequence live query counts (`seqused_q`); body in
+  `platform/python/rocke/helpers/rdna_attention.py`)
 - `library/kernels/gfx1151/wmma_fmha_decode.py` -- gfx11 / gfx12 split-KV, GQA-packed WMMA
   decode (Sq up to a few 16-row tiles: decode, speculative decode, cross attention); runtime
   split count with a fused or separate merge (`build_wmma_fmha_decode_module` ships decode +
@@ -580,7 +586,7 @@ The block order the kernel uses is keyed explicitly because auto may pick it fro
 
 The declaration lives on the spec that owns the body, not in the shared key function, because the two must agree: declaring a field the body still bakes is a cache collision — different problems served by the wrong binary. `library/tests/test_attention_builds.py::TestAttentionDenseRuntimeShapeCollision` guards that direction by asserting specs sharing a key lower to identical IR.
 
-Today only `library/kernels/gfx950/attention_dense.py` opts in, declaring `("batch", "seqlen_q", "seqlen_kv")` on its aligned, unshifted dense path. Sub-modes that still bake seqlen into the body — persistent, ragged, varlen, paged, sliding-window, and bottom-right causal with unequal Q/K lengths — declare nothing and keep per-shape identity. Equal-length bottom-right adds no extra shape specialization. `library/kernels/gfx942/attention_dense.py` opts in further on both its default and persistent grids (sliding-window included), declaring `("batch", "seqlen_q", "seqlen_kv", "num_query_heads", "num_kv_heads")`; only ragged, varlen and paged declare nothing. The persistent body also takes a host-computed fast-division magic/shift pair per work-decode divisor, after those five (`runtime_kernarg_fields`); the pairs are derived from the declared fields, so they do not enter the key. Every other family also declares nothing, so its identity is unchanged.
+Both dense kernels opt in, `library/kernels/gfx942/attention_dense.py` and `library/kernels/gfx950/attention_dense.py`, on their default and persistent grids (sliding window included), declaring `("batch", "seqlen_q", "seqlen_kv", "num_query_heads", "num_kv_heads")`. Sub-modes that still bake the shape into the body declare nothing and keep per-shape identity: ragged, varlen and paged on both arches, and on gfx950 also bottom-right causal with unequal Q/K lengths and the `gqa_pair` / `gqa_pair_2phase` persistent orders (their CTA count is a formula of the shape). Equal-length bottom-right adds no extra shape specialization. The persistent body also takes a host-computed fast-division magic/shift pair per work-decode divisor, after those five (`runtime_kernarg_fields`); the pairs are derived from the declared fields, so they do not enter the key. Every other family declares nothing, so its identity is unchanged.
 
 A spec on the runtime path also drops the `sq`/`sk` tokens from its symbol name, since one symbol now covers all shapes; the gfx942 spec likewise drops `hq`/`kv`. See `## Runtime Assumptions` in [runtime/limitations.md](../runtime/limitations.md) for why partial specialization (baking `batch` while keeping the seqlens runtime) is not safe to ship yet.
 

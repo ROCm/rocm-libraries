@@ -32,6 +32,7 @@ import copy
 import os
 
 import pytest
+from toolchain_test_helpers import build_toolchain_for
 
 pytestmark = pytest.mark.unit
 
@@ -94,16 +95,7 @@ def _isolated_globals_with_isa(isaInfoMap):
 
 def _toolchain_for(arch):
     """Return (assembler, isaInfoMap) for a single arch. Not cached — test isolation."""
-    from tensilelite.Common.Architectures import gfxToIsa
-    from tensilelite.Common.Capabilities import makeIsaInfoMap
-    from tensilelite.Toolchain.Validators import validateToolchain
-
-    isa = gfxToIsa(arch)
-    cxx = validateToolchain("amdclang++")
-    iim = makeIsaInfoMap([isa], cxx)
-    import codegen_harness as _ch
-    assembler = _ch.get_assembler()
-    return assembler, iim
+    return build_toolchain_for(arch)
 
 
 def _emit_config_with_debugconfig(config_path, arch, debug_config, limit=8):
@@ -117,7 +109,7 @@ def _emit_config_with_debugconfig(config_path, arch, debug_config, limit=8):
     from tensilelite.BenchmarkStructs import BenchmarkProcess, constructForkPermutations
     from tensilelite.Common.Types import makeDebugConfig
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
-    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
     import codegen_harness as _ch
 

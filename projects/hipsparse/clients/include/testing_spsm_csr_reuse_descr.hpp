@@ -29,7 +29,10 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_descr.hpp"
+#include "hipsparse_local_dnmat.hpp"
 #include "hipsparse_local_handle.hpp"
+#include "hipsparse_local_spmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -114,13 +117,11 @@ static void call_spsm(hipsparseHandle_t&     handle,
     CHECK_HIPSPARSE_ERROR(
         hipsparseSpMatSetAttribute(matA, HIPSPARSE_SPMAT_DIAG_TYPE, &diag, sizeof(diag)));
 
-    hipsparseDnMatDescr_t B, C1, C2;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&B, m, k, ldb, dB, typeT, HIPSPARSE_ORDER_COL));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&C1, m, k, ldc, dC_1, typeT, HIPSPARSE_ORDER_COL));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&C2, m, k, ldc, dC_2, typeT, HIPSPARSE_ORDER_COL));
+    hipsparseLocalDnMat B(m, k, ldb, dB, typeT, HIPSPARSE_ORDER_COL);
+    hipsparseLocalDnMat C1(m, k, ldc, dC_1, typeT, HIPSPARSE_ORDER_COL);
+    hipsparseLocalDnMat C2(m, k, ldc, dC_2, typeT, HIPSPARSE_ORDER_COL);
 
-    hipsparseSpSMDescr_t descr;
-    CHECK_HIPSPARSE_ERROR(hipsparseSpSM_createDescr(&descr));
+    hipsparseLocalSpSMDescr descr;
 
     // Query SpSM buffer
     size_t bufferSize;
@@ -223,11 +224,6 @@ static void call_spsm(hipsparseHandle_t&     handle,
         unit_check_near(1, nnz_C, 1, hC_gold.data(), hC_1.data());
         unit_check_near(1, nnz_C, 1, hC_gold.data(), hC_2.data());
     }
-
-    CHECK_HIPSPARSE_ERROR(hipsparseSpSM_destroyDescr(descr));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C1));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C2));
 }
 
 // Exercises the multi-configuration shared-buffer path: query bufferSize once
@@ -291,16 +287,12 @@ static void call_spsm_shared_buffer(hipsparseHandle_t&                       han
                 CHECK_HIPSPARSE_ERROR(hipsparseSpMatSetAttribute(
                     matA, HIPSPARSE_SPMAT_DIAG_TYPE, &diag, sizeof(diag)));
 
-                hipsparseDnMatDescr_t B, C;
-                CHECK_HIPSPARSE_ERROR(
-                    hipsparseCreateDnMat(&B, m, k, ldb, dB, typeT, HIPSPARSE_ORDER_COL));
-                CHECK_HIPSPARSE_ERROR(
-                    hipsparseCreateDnMat(&C, m, k, ldc, dC, typeT, HIPSPARSE_ORDER_COL));
+                hipsparseLocalDnMat B(m, k, ldb, dB, typeT, HIPSPARSE_ORDER_COL);
+                hipsparseLocalDnMat C(m, k, ldc, dC, typeT, HIPSPARSE_ORDER_COL);
 
                 for(hipsparseSpSMAlg_t alg : algs)
                 {
-                    hipsparseSpSMDescr_t descr;
-                    CHECK_HIPSPARSE_ERROR(hipsparseSpSM_createDescr(&descr));
+                    hipsparseLocalSpSMDescr descr;
 
                     size_t bufferSize;
                     CHECK_HIPSPARSE_ERROR(
@@ -316,12 +308,7 @@ static void call_spsm_shared_buffer(hipsparseHandle_t&                       han
                                                  descr,
                                                  &bufferSize));
                     buffer_size_max = std::max(buffer_size_max, bufferSize);
-
-                    CHECK_HIPSPARSE_ERROR(hipsparseSpSM_destroyDescr(descr));
                 }
-
-                CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
-                CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C));
             }
         }
     }
@@ -353,14 +340,10 @@ static void call_spsm_shared_buffer(hipsparseHandle_t&                       han
                         CHECK_HIP_ERROR(
                             hipMemcpy(dC, hC.data(), sizeof(T) * nnz_C, hipMemcpyHostToDevice));
 
-                        hipsparseDnMatDescr_t B, C;
-                        CHECK_HIPSPARSE_ERROR(
-                            hipsparseCreateDnMat(&B, m, k, ldb, dB, typeT, HIPSPARSE_ORDER_COL));
-                        CHECK_HIPSPARSE_ERROR(
-                            hipsparseCreateDnMat(&C, m, k, ldc, dC, typeT, HIPSPARSE_ORDER_COL));
+                        hipsparseLocalDnMat B(m, k, ldb, dB, typeT, HIPSPARSE_ORDER_COL);
+                        hipsparseLocalDnMat C(m, k, ldc, dC, typeT, HIPSPARSE_ORDER_COL);
 
-                        hipsparseSpSMDescr_t descr;
-                        CHECK_HIPSPARSE_ERROR(hipsparseSpSM_createDescr(&descr));
+                        hipsparseLocalSpSMDescr descr;
 
                         CHECK_HIPSPARSE_ERROR(
                             hipsparseSpSM_analysis(handle,
@@ -418,10 +401,6 @@ static void call_spsm_shared_buffer(hipsparseHandle_t&                       han
                         {
                             unit_check_near(1, nnz_C, 1, hC_gold.data(), hC_out.data());
                         }
-
-                        CHECK_HIPSPARSE_ERROR(hipsparseSpSM_destroyDescr(descr));
-                        CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
-                        CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C));
                     }
                 }
             }
@@ -480,9 +459,7 @@ void testing_spsm_csr_reuse_descr(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(dval, hcsr_val.data(), sizeof(T) * nnz, hipMemcpyHostToDevice));
 
     // Create matrix
-    hipsparseSpMatDescr_t matA;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateCsr(&matA, m, n, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, typeT));
+    hipsparseLocalCsr matA(m, n, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, typeT);
 
     const std::vector<hipsparseOperation_t> ops
         = {HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE};
@@ -547,9 +524,6 @@ void testing_spsm_csr_reuse_descr(Arguments argus)
                                      diags,
                                      algs,
                                      number_of_passes);
-
-    // Destroy matrix
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matA));
 #endif
 }
 

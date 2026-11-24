@@ -52,7 +52,7 @@ void runGpuVsCpuPointwiseUnary(hipdnn_flatbuffers_sdk::data_objects::PointwiseMo
     // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
     inputTensor.memory().hostData();
 
-    CpuReferencePointwiseImpl<DataType, DataType>::pointwiseCompute(
+    CpuReferencePointwiseImpl<DataType, double, DataType>::pointwiseCompute(
         operation, outputCpu, inputTensor);
 
     GpuReferencePointwise::pointwiseCompute<DataType, DataType>(operation, outputGpu, inputTensor);
@@ -81,7 +81,7 @@ void runGpuVsCpuPointwiseBinary(hipdnn_flatbuffers_sdk::data_objects::PointwiseM
     input0Tensor.memory().hostData();
     input1Tensor.memory().hostData();
 
-    CpuReferencePointwiseImpl<DataType, DataType, DataType>::pointwiseCompute(
+    CpuReferencePointwiseImpl<DataType, double, DataType, DataType>::pointwiseCompute(
         operation, outputCpu, input0Tensor, input1Tensor);
 
     GpuReferencePointwise::pointwiseCompute<DataType, DataType, DataType>(

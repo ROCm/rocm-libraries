@@ -9,8 +9,9 @@
  * builder-call sequence op-for-op, in the same order, with the same operands and
  * the same compile-time constants -- so the emitted IR is byte-identical to what
  * the Python helper produces. Where the Python calls a MfmaAtom method that the
- * atoms.h port does not expose (emit / zero_acc / lane_to_output), the tiny
- * builder sequence is inlined here verbatim.
+ * atoms.h port does not expose (emit / zero_acc), the single builder call is
+ * inlined here verbatim; lane_to_output is rocke_mfma_atom_lane_to_output
+ * (atoms.h).
  */
 
 #include "rocke/helper_rocke.helpers.mfma_gemm_inner.h"
@@ -496,71 +497,8 @@ rocke_value_t* rocke_mfma_k_loop(rocke_ir_builder_t* b,
  *         else:
  *             b.global_store(C, addr, val, align=4 if out_dtype=="f32" else 2)
  *
- * lane_to_output inlined (atoms.py:536-591).
+ * lane_to_output is rocke_mfma_atom_lane_to_output (atoms.h).
  */
-
-/* Inline of MfmaAtom.lane_to_output(b, lane, i): writes (row_in, col_in) for
- * accumulator slot i. Returns true on a supported (m,n); false sets the sticky
- * NotImplementedError (the Python `raise NotImplementedError` path). */
-static bool rocke_i_lane_to_output(rocke_ir_builder_t* b,
-                                   const rocke_mfma_atom_t* atom,
-                                   rocke_value_t* lane,
-                                   int i,
-                                   rocke_value_t** out_row,
-                                   rocke_value_t** out_col)
-{
-    if((atom->m == 16 && atom->n == 16))
-    {
-        rocke_value_t* c_atom_n = rocke_b_const_i32(b, atom->n);
-        rocke_value_t* n_in_atom = rocke_b_mod(b, lane, c_atom_n);
-        rocke_value_t* m_blk = rocke_b_div(b, lane, c_atom_n);
-        /* Python: row = b.add(b.mul(m_blk, b.const_i32(c_per_lane)),
-         *                     b.const_i32(i)). Sequence each builder call so the
-         * value counter matches Python's left-to-right argument evaluation
-         * (const c_per_lane -> mul -> const i -> add); C arg order is
-         * unspecified. */
-        rocke_value_t* c_cpl = rocke_b_const_i32(b, atom->c_per_lane);
-        rocke_value_t* row_mul = rocke_b_mul(b, m_blk, c_cpl);
-        rocke_value_t* c_i = rocke_b_const_i32(b, i);
-        rocke_value_t* row = rocke_b_add(b, row_mul, c_i);
-        *out_row = row;
-        *out_col = n_in_atom;
-        return true;
-    }
-    if((atom->m == 32 && atom->n == 32))
-    {
-        rocke_value_t* c_atom_n = rocke_b_const_i32(b, atom->n);
-        rocke_value_t* n_in_atom = rocke_b_mod(b, lane, c_atom_n);
-        rocke_value_t* m_blk = rocke_b_div(b, lane, c_atom_n);
-        int rb = i / 4;
-        int ri = i % 4;
-        /* Python: row = b.add(b.add(b.const_i32(rb*8),
-         *                           b.mul(m_blk, b.const_i32(4))),
-         *                     b.const_i32(ri)). Left-to-right order:
-         * const(rb*8) -> const(4) -> mul -> add(inner) -> const(ri) ->
-         * add(outer). */
-        rocke_value_t* c_rb = rocke_b_const_i32(b, rb * 8);
-        rocke_value_t* c_4 = rocke_b_const_i32(b, 4);
-        rocke_value_t* mblk4 = rocke_b_mul(b, m_blk, c_4);
-        rocke_value_t* row_inner = rocke_b_add(b, c_rb, mblk4);
-        rocke_value_t* c_ri = rocke_b_const_i32(b, ri);
-        rocke_value_t* row = rocke_b_add(b, row_inner, c_ri);
-        *out_row = row;
-        *out_col = n_in_atom;
-        return true;
-    }
-    if((atom->m == 4 && atom->n == 4))
-    {
-        rocke_value_t* c4 = rocke_b_const_i32(b, 4);
-        rocke_value_t* lane_in_batch = rocke_b_mod(b, lane, c4);
-        *out_row = rocke_b_const_i32(b, i);
-        *out_col = lane_in_batch;
-        return true;
-    }
-    rocke_i_set_err(
-        b, ROCKE_ERR_NOTIMPL, "no lane_to_output dispatch for atom %dx%d", atom->m, atom->n);
-    return false;
-}
 
 rocke_status_t rocke_store_acc_to_global(rocke_ir_builder_t* b,
                                          rocke_value_t* C,
@@ -631,10 +569,7 @@ rocke_status_t rocke_store_acc_to_global(rocke_ir_builder_t* b,
         rocke_value_t* c_f32;
         rocke_value_t* val;
 
-        if(!rocke_i_lane_to_output(b, atom, lane_decode->lane, i, &row_in, &col_in))
-        {
-            return b->status;
-        }
+        rocke_mfma_atom_lane_to_output(b, atom, lane_decode->lane, i, &row_in, &col_in);
         row = rocke_b_add(b, m_tile_base, row_in);
         col = rocke_b_add(b, n_tile_base, col_in);
         addr = rocke_b_add(b, rocke_b_mul(b, row, rocke_b_const_i32(b, N)), col);
