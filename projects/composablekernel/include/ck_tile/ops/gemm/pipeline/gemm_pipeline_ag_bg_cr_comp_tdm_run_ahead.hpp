@@ -101,10 +101,14 @@ struct GemmPipelineAgBgCrCompTDMRunAhead
     // LDS (Problem::DoubleSmemBuffer is not consulted), and cluster launch is rejected below.
     static constexpr bool DoubleSmemBuffer = true;
     static constexpr bool UseClusterLaunch = false;
-    // Validated only in the plain GEMM kernel, persistent or not: every kernel that derives from or
-    // wraps UniversalGemmKernel (Stream-K, MX, batched, grouped, multi-D, multi-ABD, batched
-    // contraction) rejects it at compile time (UniversalGemmKernel::kIsGemmKernelOnlyPipeline).
-    static constexpr bool kGemmKernelOnly = true;
+    // Validated only in the plain GEMM kernel, persistent or not, and in the Stream-K kernel:
+    // every other kernel that derives from or wraps UniversalGemmKernel (MX, batched, grouped,
+    // multi-D, multi-ABD, batched contraction) rejects it at compile time
+    // (UniversalGemmKernel::kIsGemmKernelOnlyPipeline). The next Stream-K segment may reuse the
+    // ring's LDS: the pipeline returns after a barrier with no fill in flight, whatever num_loop
+    // (>= 1) it ran.
+    static constexpr bool kGemmKernelOnly  = true;
+    static constexpr bool kSupportsStreamK = true;
 
     static constexpr index_t KSubTileNum = Policy::template GetPipelineSubTileNum<Problem>().value;
 

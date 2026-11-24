@@ -551,6 +551,17 @@ struct UniversalGemmKernel
     }();
 
     template <typename T>
+    using has_supports_stream_k = decltype(T::kSupportsStreamK);
+    /// True for a kIsGemmKernelOnlyPipeline that is also validated in the Stream-K kernel
+    /// (comp_tdm_ra). StreamKKernel accepts it; the batched and MX kernels still reject it.
+    static constexpr bool kPipelineSupportsStreamK = []() {
+        if constexpr(is_detected<has_supports_stream_k, GemmPipeline>{})
+            return static_cast<bool>(GemmPipeline::kSupportsStreamK);
+        else
+            return false;
+    }();
+
+    template <typename T>
     using has_split_k = decltype(T::kSupportsSplitK);
     /// False for a pipeline that only runs k_batch == 1 (its kernel rejects k_batch != 1):
     /// SplitKBatchOffset is then the whole K with no offset.
