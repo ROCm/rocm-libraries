@@ -606,11 +606,11 @@ std::vector<KnobCase> knobCases()
         {"Alibi_D64_Fp16Hq32Kv4_Sq256Skv384",
          withAlibi(makeShape(FP16, 64, 32, 4, Mask::CAUSAL_MASK_FLAG, MMA_UNSET, 1, 256, 384)),
          COLD,
-         Tile{128, 64}},
+         Tile{128, 128}},
         {"Alibi_D128_Fp16Hq9_Sq128",
          withAlibi(makeShape(FP16, 128, 9, 9, Mask::BOUNDS_TOP_LEFT, MMA_UNSET, 1, 128, 128)),
          COLD,
-         Tile{128, 128}},
+         Tile{128, 64}},
         // Additive bias: the catalog compiles it at 128/64 for every head size, dtype and
         // mask, so one case per class, each bias layout twice, forced and cold, with B > 1
         // and Sq != Skv among them, plus an Sq (384) that no 256 tile divides.
