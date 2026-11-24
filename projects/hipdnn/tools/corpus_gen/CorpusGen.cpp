@@ -1310,6 +1310,8 @@ int runGenerator(const std::vector<std::string>& args)
     /// Per operation, the categorical combinations --keep leaves and how many the search's bound
     /// left unexplored.
     nlohmann::json categoricalCombinations = nlohmann::json::object();
+    /// Per operation, where the sweep's oracle queries went (ProblemCorpus::search).
+    nlohmann::json searchAccount = nlohmann::json::object();
     /// Per operation, the declared value weights of each weighted categorical parameter.
     nlohmann::json categoricalWeights = nlohmann::json::object();
     bool searchFoundMore = false;
@@ -1500,6 +1502,26 @@ int runGenerator(const std::vector<std::string>& args)
                 {"constraint_empty",
                  static_cast<int64_t>(result.corpus.categoricalConstraintEmpty)},
                 {"not_explored", static_cast<int64_t>(result.corpus.categoricalNotExplored)}};
+            const auto& account = result.corpus.search;
+            searchAccount[result.operation]
+                = nlohmann::json{{"oracle_queries", account.oracleQueries},
+                                 {"searched", account.searched},
+                                 {"seed_checks", account.seedChecks},
+                                 {"seeds_accepted", account.seedsAccepted},
+                                 {"draw_checks", account.drawChecks},
+                                 {"draws_accepted", account.drawsAccepted},
+                                 {"walk_checks", account.walkChecks},
+                                 {"no_seed_accepted", account.noSeedAccepted},
+                                 {"recovered_by_draws", account.recoveredByDraws},
+                                 {"found_nothing", account.foundNothing}};
+            std::cerr << result.operation << ": " << account.oracleQueries
+                      << " oracle queries; first searches of " << account.searched
+                      << " combinations checked " << account.seedChecks << " seeds ("
+                      << account.seedsAccepted << " accepted), " << account.drawChecks
+                      << " foothold draws (" << account.drawsAccepted << " accepted), "
+                      << account.walkChecks << " walk steps; " << account.noSeedAccepted
+                      << " accepted no seed, of which " << account.recoveredByDraws
+                      << " found a foothold by drawing\n";
         }
         else
         {
@@ -1975,6 +1997,7 @@ int runGenerator(const std::vector<std::string>& args)
         addReport(manifest.reports, "served_extent", servedExtent);
         addReport(manifest.reports, "anchored_share", anchoredShare);
         addReport(manifest.reports, "categorical_combinations", categoricalCombinations);
+        addReport(manifest.reports, "search", searchAccount);
         addReport(manifest.reports, "categorical_weights", categoricalWeights);
         if(options.count > 0 && total < requested && !shortfall.empty())
         {

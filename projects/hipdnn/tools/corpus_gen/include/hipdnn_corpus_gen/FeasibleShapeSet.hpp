@@ -46,9 +46,15 @@ struct FeasibleSetStats
     /// Oracle calls; each is a graph build plus a predicate call.
     int64_t oracleCalls = 0;
 
-    /// Draws made seeking a foothold, and how many were accepted.
+    /// Draws made seeking a foothold, and how many were accepted: the caller's seeds
+    /// (FeasibleSetRequest::seeds), then log-uniform draws where those gave too few.
     int64_t seedAttempts = 0;
     int64_t seedsFound = 0;
+
+    /// Of seedAttempts and seedsFound, the caller's seeds; the rest are log-uniform draws.
+    /// Each attempt is one oracle call, so oracleCalls - seedAttempts were walk steps.
+    int64_t callerSeedAttempts = 0;
+    int64_t callerSeedsFound = 0;
 
     /// Footholds whose walk never moved. Evidence of isolated components, not a count.
     int64_t isolatedStarts = 0;
@@ -486,9 +492,11 @@ inline FeasibleShapeSet buildFeasibleShapeSet(const ShapeOracle& oracle,
             continue;
         }
         ++result.stats.seedAttempts;
+        ++result.stats.callerSeedAttempts;
         if(ask(seed))
         {
             ++result.stats.seedsFound;
+            ++result.stats.callerSeedsFound;
             record(seed);
             footholds.push_back(seed);
         }
