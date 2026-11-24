@@ -235,8 +235,7 @@ CI_TEST_TOOLS = Lane(
     "ci-test-tools",
     "the optional packages and LLVM tools these cases use, in the CI test "
     "environment: the file is in a CI-run entry, but TheRock's test step installs "
-    "no jsonschema or matplotlib, an ml_dtypes older than 0.6.0, and puts no LLVM "
-    "tools on PATH, so they skip",
+    "no jsonschema or matplotlib and puts no LLVM tools on PATH, so they skip",
     enrolled=True,
 )
 

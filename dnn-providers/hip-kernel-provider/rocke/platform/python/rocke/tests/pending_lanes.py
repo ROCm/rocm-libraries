@@ -1266,14 +1266,6 @@ PENDING: tuple[PendingTest, ...] = (
         "2027-01-31",
         "platform/tests/instances/test_rocke_numeric.py",
     ),
-    *_waiting(
-        CI_TEST_TOOLS,
-        "its fp6 decode check compares with ml_dtypes 0.6.0 or newer; the CI test "
-        "environment has an older one, so it skips there",
-        "rocKE platform; issue: none filed yet",
-        "2026-12-15",
-        "platform/tests/core/test_gfx1250_fp6_scaled_wmma.py",
-    ),
 )
 
 
