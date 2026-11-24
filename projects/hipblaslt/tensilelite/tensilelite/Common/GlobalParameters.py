@@ -180,9 +180,9 @@ globalParameters["CSVMergeSameProblemID"] = False
 #                              21=RandomNegPosLimited(-128~128 or -1~1), 23~26=Ind Cos/Sin Abs or Not
 #       - Problem-dependent: 8=SerialID, 9=SerialDim0, 10=SerialDim1, 11=Identity, 12~15= Cos/Sin, Abs or Not,
 #                            28=Maf1_0 (MAF1.0: no RNG; A = sin(idx), other tensors cos(idx), idx = logical
-#                               index i + j*rows + b*rows*cols; ScaleA/ScaleB = 0.5 when their own
-#                               DataInitTypeScaleA/B is 28 (A/B init does not set it); MX sides from
-#                               mxDataGenerator with every block scale 0.5),
+#                               index i + j*rows + b*rows*cols; ScaleA/ScaleB = 0.5 when their
+#                               DataInitTypeScaleA/B is 28, which is what the default -1 picks when
+#                               A/B is 28; MX sides from mxDataGenerator with every block scale 0.5),
 #                            29=Maf2_0 (MAF2.0: N(0,1) for Double/Float/Half/BFloat16/FP8, MX sides from
 #                               mxDataGenerator; fixed-seed, A/B/C get different seeds),
 #                            30=Maf2_0UnitScale (MAF2.0 X=1: MX FP8 and FP4 sides get unit block scales
@@ -200,8 +200,9 @@ globalParameters["DataInitTypeAlpha"] = 2
 globalParameters["DataInitTypeBeta"] = 2
 globalParameters["DataInitTypeBias"] = 3
 globalParameters["DataInitTypeGate"] = 3
-globalParameters["DataInitTypeScaleA"] = 2
-globalParameters["DataInitTypeScaleB"] = 2
+# -1: follow A (B): 28 (Maf1_0, scale 0.5) when DataInitTypeA (B) is 28, otherwise 2.
+globalParameters["DataInitTypeScaleA"] = -1
+globalParameters["DataInitTypeScaleB"] = -1
 globalParameters["DataInitTypeScaleC"] = 2
 globalParameters["DataInitTypeScaleD"] = 2
 globalParameters["DataInitTypeScaleAlphaVec"] = 3

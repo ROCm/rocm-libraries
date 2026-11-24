@@ -383,6 +383,22 @@ class TestDataInitParams:
         assert result["init-mx-a"] == "Zero"
         assert result["init-mx-b"] == "Zero"
 
+    def test_scale_ab_follow_maf1_0_operands(self, monkeypatch):
+        """DataInitTypeScaleA/B=-1: Maf1_0 (scale 0.5) for a Maf1_0 operand, otherwise Two."""
+        self._set_keys(monkeypatch, DataInitTypeA=28, DataInitTypeB=3,
+                       DataInitTypeScaleA=-1, DataInitTypeScaleB=-1)
+        result = dict(CW.dataInitParams(self._make_pt()))
+        assert result["init-scaleA"] == "Maf1_0"
+        assert result["init-scaleB"] == "Two"
+
+    def test_scale_ab_explicit_overrides_maf1_0(self, monkeypatch):
+        """An explicit DataInitTypeScaleA/B is kept even for a Maf1_0 operand."""
+        self._set_keys(monkeypatch, DataInitTypeA=-1, DataInitTypeB=-1, DataInitTypeAB=28,
+                       DataInitTypeScaleA=2, DataInitTypeScaleB=-1)
+        result = dict(CW.dataInitParams(self._make_pt()))
+        assert result["init-scaleA"] == "Two"
+        assert result["init-scaleB"] == "Maf1_0"
+
 
 # ===========================================================================
 # 4. writeClientConfigIni -- plain GEMM (lines 572-731)

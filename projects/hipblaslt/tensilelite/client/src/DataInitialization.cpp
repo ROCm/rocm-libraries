@@ -1275,6 +1275,20 @@ namespace TensileLite
                 {
                     m_vdata[i].init = InitMode::Zero;
                 }
+                // init-scaleA/B have no CLI default. A scale whose init was not given is 2, or
+                // 0.5 (Maf1_0) when its operand is Maf1_0: MAF1.0 scales A and B by 0.5 each, as
+                // hipBLASLt's maf1_0 does. An explicit init-scaleA/B always wins.
+                if(!args.count(initName)
+                   && (i == ContractionProblemGemm::TENSOR::SCALEA
+                       || i == ContractionProblemGemm::TENSOR::SCALEB))
+                {
+                    char const* operand
+                        = i == ContractionProblemGemm::TENSOR::SCALEA ? "init-a" : "init-b";
+                    m_vdata[i].init
+                        = args.count(operand) && args[operand].as<InitMode>() == InitMode::Maf1_0
+                              ? InitMode::Maf1_0
+                              : InitMode::Two;
+                }
 
                 for(auto p = m_vdata[i].pristine.begin(); p != m_vdata[i].pristine.end();)
                 {

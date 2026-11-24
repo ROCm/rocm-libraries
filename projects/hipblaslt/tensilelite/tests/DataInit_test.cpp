@@ -682,6 +682,42 @@ TEST(DataInitializationMafScaleTiles, Maf2_0KeepsTheBinomialScalesWithFreeBlocks
     EXPECT_NEAR(double(atMostHalf) / drawn, 0.5, 0.08);
 }
 
+// MAF1.0 scales A and B by 0.5 each (hipBLASLt's maf1_0 does the same). With scalar scaling on, a
+// Maf1_0 operand's scale defaults to 0.5 instead of the client default of 2, while an explicit
+// init-scaleA/B and every other operand init keep 2.
+TEST(DataInitializationMafScales, Maf1_0ScalesDefaultToHalf)
+{
+    using namespace TensileLite::Client;
+    auto scales = [](InitMode a, InitMode b, bool explicitScaleB) {
+        auto args = makeMinimalClientArgs(/*mxScaleFormat=*/0);
+        setOption(args, "use-scaleAB", std::string("Scalar"));
+        setOption(args, "init-a", a);
+        setOption(args, "init-b", b);
+        if(explicitScaleB)
+            setOption(args, "init-scaleB", InitMode::Two);
+        ClientProblemFactory factory(args);
+        CPUInputProbe        dataInit(args, factory);
+        auto const& gemm = dynamic_cast<ContractionProblemGemm const&>(*factory.problems()[0]);
+        dataInit.initializeCPUInputs(gemm);
+
+        std::array<float, 2> values{};
+        for(int s = 0; s < 2; s++)
+        {
+            int const tensor = s == 0 ? ContractionProblemGemm::TENSOR::SCALEA
+                                      : ContractionProblemGemm::TENSOR::SCALEB;
+            EXPECT_EQ(gemm.tensors()[tensor].dataType(), rocisa::DataType::Float);
+            auto const bytes = dataInit.cpuBytes(tensor, rocisa::DataType::Float, sizeof(float));
+            std::memcpy(&values[s], bytes.data(), sizeof(float));
+        }
+        return values;
+    };
+    EXPECT_EQ(scales(InitMode::Maf1_0, InitMode::Maf1_0, false),
+              (std::array<float, 2>{0.5f, 0.5f}));
+    EXPECT_EQ(scales(InitMode::Maf1_0, InitMode::Maf1_0, true), (std::array<float, 2>{0.5f, 2.0f}));
+    EXPECT_EQ(scales(InitMode::Random, InitMode::Maf2_0, false),
+              (std::array<float, 2>{2.0f, 2.0f}));
+}
+
 // B is K = 32 (one MX block) by N = 2 with a leading dimension of 64, so the client allocates
 // 64 + 32 = 96 bytes. The generated data must stay inside them; a generator buffer of
 // ldb * N = 128 bytes would spill 32 bytes past the end.
