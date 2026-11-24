@@ -19,7 +19,6 @@ Documentation for rocRAND is available at
 * Fixed race condition inside `poisson` distribution.
 * `rocrand_generate_poisson` and `rocrand_create_poisson_distribution` now return `ROCRAND_STATUS_OUT_OF_RANGE` for NaN and infinite `lambda` instead of crashing or returning success.
 * `rocrand_create_discrete_distribution` now returns `ROCRAND_STATUS_OUT_OF_RANGE` for a null `probabilities` pointer instead of crashing.
-* Fixed a crash in `rocrand_destroy_generator` for non-blocking host generators with queued Poisson generation. Destroying the generator now waits for the queued work.
 * Fixed a compilation error when calling `operator()(result_type* output, size_t size)` on the C++ wrapper engines in `rocrand.hpp`. An unused `template<class Generator>` parameter that could not be deduced from the arguments has been removed.
 
 ### Added
