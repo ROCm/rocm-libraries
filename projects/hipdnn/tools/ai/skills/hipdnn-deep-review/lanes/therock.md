@@ -96,23 +96,31 @@ python3 "$T/test_tools/determine_rocm_test_dependencies.py" --changed-projects "
 
 **Families.** Covered families = the caller's families ∩ families whose `tests_on_trigger` contains the current trigger − the job's
 `exclude_family`. Triggers: `pull_request` → `presubmit`, `push` → `postsubmit`, `schedule` → `nightly`. `workflow_dispatch` tests
-every requested family, at the `quick` tier. A family outside that set does not test unless a dispatch requests it or the PR carries
+every requested family, at a tier that is not always `quick` (see **Tier**). A family outside that set does not test unless a dispatch requests it or the PR carries
 the labels `ci:<family>` and `ci:test:<family>` (`$T/docs/development/ci_behavior_manipulation.md`). Quote the setup job's `tests
 disabled (...)` lines.
 
-**Tier.** Scoped PR or push: `standard`. Run-all (unclassified non-skipped path, shared CI change): `quick`. `schedule`:
-`comprehensive`. A family's `test_type_for_family` overrides these.
+**Tier.** TheRock's setup job computes one tier for the whole run (`_determine_test_type` in `configure_multi_arch_ci.py`): a
+`test_filter:<tier>` PR label wins outright, then a release build, then `schedule` (`comprehensive`), then an external-repo diff
+confined to CI plumbing (`quick`), then a changed submodule (`standard`), else `quick` by default. This is independent of run-all:
+breadth (which projects run) and tier (quick/standard/comprehensive/full) come from separate jobs' outputs — `changed_projects`/
+`run_all_tests` from the `configure` job, `test_type` from the `setup` job — a run-all PR is not necessarily `quick`, and a scoped PR
+is not necessarily `standard`. A family's `test_type_for_family` can still override the run's tier for that family alone
+(`amdgpu_family_matrix.py`, e.g. gfx125X forced to `quick`; on a `pull_request` event rocm-libraries also forces gfx950 to `quick`
+when any changed file matches `projects/hipblaslt/`).
 
-Confirm it from the `test_type` output of the `configure` job in `therock-multi-arch-ci.yml` and the `Test Artifacts (<family>,
-<release_type>, <test_type>, ...)` run name of each test job. `test_runner.py` `build_ctest_command` runs `-L ^<tier>$` and excludes
+Confirm the effective tier per family from its `Configure test matrix (<family>)` job (`Requesting job <component> with test_type
+<tier>` and any `Overriding test_type from ... to ...` line when a family override applied), and from the `Test Artifacts (<family>, <release_type>, <test_type>, ...)` run name of each test job. `test_runner.py` `build_ctest_command` runs `-L ^<tier>$` and excludes
 `<tier>_exclude` and `<tier>_therock_ci_exclude`. Tier labels come from each project's test category YAMLs (`*test_categories*.yaml`; registering a test in them is owned by `BUILD`: hand it off, do not file it)
 and cascade upward: a `quick` test also carries `standard`, `comprehensive` and `full`. hipDNN core puts every test in `quick`.
 Provider and integration YAMLs do not, so a test they categorize only as `comprehensive` never runs in PR CI.
 
+Behaviour checked against rocm-libraries `69f00b9e5422` and TheRock `4a6dabfc096b` (2026-11-23).
+
 **Timeout budget (main pass).** Each tier is its own CTest entry, `<binary>_<tier>_suite`, with a `category_timeouts` value in the
 project's `*test_categories*.yaml` (hipkernelprovider: quick 300 s, standard 2700 s, comprehensive 25200 s). Check three exposures for
-each covered family: run-all PRs (`quick`, always, because any PR touching an unclassified path runs it), scoped PRs (`standard`) and
-nightly (`comprehensive`). A family's `test_type_for_family` overrides these. The baseline comes from per-job logs, because
+each covered family: a presubmit run (read its actual tier from the job log — breadth, run-all vs. scoped, does not decide tier; see
+**Tier**), a `schedule` run (`comprehensive`), and any `test_type_for_family` override for that family. The baseline comes from per-job logs, because
 `gh run view --log` on a whole run can come back empty. Scan recent runs for successful jobs named `Test <job> (shard <i>/<N>) (<family>)`,
 fetch each such job's log, and read the entry's `Test #<n>: <entry> ... Passed <t> sec` line:
 
@@ -131,8 +139,9 @@ done < "$E/jobs-$JOB.tsv"
 
 Use the latest 3 runs that ran the entry for each (family, exposure). The baseline is the maximum over those runs of the maximum
 shard. With fewer than 3 runs, use the runs found and write their count. With none, or with logs `gh` cannot read (record the error),
-the line is `UNVERIFIED (no CI log)`. A run-all `quick` baseline can come from any run that executed the `quick` entry. Write one line
-per (entry, family, exposure) under **Checked, no finding**, with no `|`: `Timing-base: <entry> <family> <run-all|scoped|nightly>
+the line is `UNVERIFIED (no CI log)`. A `quick` baseline can come from any presubmit run that executed the `quick` entry, whatever its
+breadth (run-all or scoped — breadth does not decide tier; see **Tier**). Write one line per (entry, family, exposure) under
+**Checked, no finding**, with no `|`: `Timing-base: <entry> <family> <presubmit|schedule|override>
 max-shard <s>s limit <s>s (<run ids>)`, or `Timing-base: <entry> <family> <exposure> UNVERIFIED (no CI log)`. `ROCK-f1` (section 6)
 adds the change's delta.
 
@@ -384,8 +393,9 @@ report ([../findings.md](../findings.md) *Lane report*) and do no other check. I
    <exposure> base <s>s delta <s>s (<source>) bound <s>s/<N> shards limit <s>s`. Append any labels that apply (`pin-bump`, `upper
    bound`, `estimate (<arch>)`). `<source>` names the `RUN` log rows.
 5. **Finding.** A `bound` above `limit`, or a job total above `timeout_minutes`, is a finding, tiered by [../policy.md](../policy.md) *Review rules*:
-   - BLOCKING for the `run-all` (`quick`) or `scoped` (`standard`) exposure on a presubmit family, `pin-bump` cases included;
-   - IMPORTANT for the `nightly` (`comprehensive`) exposure.
+   - BLOCKING for the presubmit exposure on a presubmit family — whatever tier its job log shows, a `test_type_for_family` override
+     included — `pin-bump` cases included;
+   - IMPORTANT for the `schedule` (`comprehensive`) exposure.
 
    `Where` cites the entry's `category_timeouts` line and the case. A `Timing-base:` line
    with `UNVERIFIED (no CI log)` carries through as `UNVERIFIED`, never as a pass.
