@@ -30,6 +30,7 @@ from . import Contractions
 from .Common import state, IsaInfo
 from .Common.Architectures import gfxToIsa, supportsChipIdPredicate
 from .SolutionStructs.Naming import getSolutionNameMin, getKernelNameMin
+from .SolutionStructs.CompactSolution import hydrateSolution
 from .SolutionStructs.Problem import isFusedA2A, splitFusedA2ARow
 
 class SingleSolutionLibrary:
@@ -692,8 +693,11 @@ class MasterSolutionLibrary:
 
     def applyNaming(self, splitGSU: bool):
         for s in list(self.solutions.values()):
-            s.name = getSolutionNameMin(s.originalSolution.getKernels()[0], splitGSU)
-            s.kernelName = getKernelNameMin(s.originalSolution.getKernels()[0], splitGSU)
+            # Hydrated once per solution: naming reads hundreds of state keys,
+            # which on a CompactSolution would otherwise each be a fallback.
+            kernel = hydrateSolution(s.originalSolution).getKernels()[0]
+            s.name = getSolutionNameMin(kernel, splitGSU)
+            s.kernelName = getKernelNameMin(kernel, splitGSU)
 
     def remapSolutionIndicesStartingFrom(self, curIndex):
         reIndexMap = {}

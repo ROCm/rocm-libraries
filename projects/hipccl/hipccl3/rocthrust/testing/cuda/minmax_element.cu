@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -69,10 +69,10 @@ void TestMinMaxElementDevice(ExecutionPolicy exec)
   ASSERT_EQUAL(h_min - h_data.begin(), d_min - d_data.begin());
   ASSERT_EQUAL(h_max - h_data.begin(), d_max - d_data.begin());
 
-  h_max = thrust::minmax_element(h_data.begin(), h_data.end(), thrust::greater<int>()).first;
-  h_min = thrust::minmax_element(h_data.begin(), h_data.end(), thrust::greater<int>()).second;
+  h_max = thrust::minmax_element(h_data.begin(), h_data.end(), _THRUST_STD::greater<int>()).first;
+  h_min = thrust::minmax_element(h_data.begin(), h_data.end(), _THRUST_STD::greater<int>()).second;
 
-  minmax_element_kernel<<<1, 1>>>(exec, d_data.begin(), d_data.end(), thrust::greater<int>(), d_result.begin());
+  minmax_element_kernel<<<1, 1>>>(exec, d_data.begin(), d_data.end(), _THRUST_STD::greater<int>(), d_result.begin());
   {
     cudaError_t const err = cudaDeviceSynchronize();
     ASSERT_EQUAL(cudaSuccess, err);
