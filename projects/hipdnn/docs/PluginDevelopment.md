@@ -467,36 +467,36 @@ A provider that builds plans with the generic kernel ingestor can let users save
 
 A Universal Engine Descriptor (UED) fills `graph_match` with one of two arms: `native`, a C++ function the provider registers, or `nodes`, a declarative graph pattern ([RFC 0020 §4.3](./rfcs/0020_UniversalEngineDescriptor.md#43-the-nodes-pattern-normative)). Both arms are supported. This section lists what a provider that uses the generic kernel ingestor changes when it upgrades to the hipDNN that adds the `nodes` arm.
 
-#### 1. Read and pass `graph_match` as a `GraphMatch`
+#### 1. `graph_match`: nothing to change for a native engine
 
-`EngineDescriptor::graphMatch` (`hipdnn_plugin_sdk/ingestor/Descriptors.hpp`) holds the UED's `graph_match` as a `GraphMatch` variant:
+A provider whose engines use the `native` arm, or no `graph_match`, needs no code change. The new declarations below are introduced in hipdnn_plugin_sdk 1.2.0.
 
-- `std::monostate`: the UED has no `graph_match`.
-- `NativeGraphMatch{symbol}`: the `native` arm.
-- `std::shared_ptr<const CompiledGraphPattern>`: the `nodes` arm, compiled when the UED is read.
+`EngineDescriptor` (`hipdnn_plugin_sdk/ingestor/Descriptors.hpp`) holds the UED's `graph_match` in two members. The loader sets at most one of them:
 
-The `std::string EngineDescriptor::graphMatchNativeSymbol` member is removed. To read the native symbol, call `nativeGraphMatchSymbol(engine)`. It returns an empty string when the engine has no `native` arm.
+- `graphMatchNativeSymbol` (`std::string`): the symbol of the `native` arm. It is empty when the UED declares no `native` arm.
+- `graphMatchPattern` (`std::shared_ptr<const CompiledGraphPattern>`): the `nodes` arm, compiled when the UED is read. It is null when the UED declares no `nodes` arm.
 
-The unslotted and slotted `KernelIngestorStateManager<THandle>` constructors and `makeStateManager<THandle>()` take a `GraphMatch`. Their overloads that take the symbol as a string remain, marked `[[deprecated]]`; an empty string means no `graph_match`. A braced `{}` argument selects the `GraphMatch` overload, which also means no `graph_match`. The deprecated overloads will be removed in a later release.
+The overloads that take the symbol as a string are supported: the `KernelIngestorSharedState` and `KernelIngestorStateManager` constructors, and `makeStateManager<THandle>(set, symbol)`. `KernelIngestorSharedState::graphMatchFn()` is also supported. These calls carry only the `native` arm:
 
-Before:
+- An empty string or a braced `{}` means no `graph_match`.
+- `graphMatchFn()` returns `nullptr` for an engine that serves a `nodes` pattern.
+- `makeStateManager(set, symbol)` throws `std::invalid_argument` when `set.engine` has a `nodes` pattern, so the pattern is never silently dropped. This includes `makeStateManager(set, {})`, because a braced `{}` selects the string overload.
 
-```cpp
-const std::string symbol = set.engine.graphMatchNativeSymbol;
-auto manager = makeStateManager<MyHandle>(std::move(set), "my_provider.graph_match");
-```
+To serve whichever arm the UED declares, follow these steps:
 
-After:
+1. Call `engineGraphMatch(set.engine)` before you move `set`. It returns a `GraphMatch`: `std::monostate` for no `graph_match`, `NativeGraphMatch{symbol}` for the `native` arm, or the compiled pattern for the `nodes` arm.
+2. Pass the result to the overload that takes a `GraphMatch`.
 
 ```cpp
 using namespace hipdnn_plugin_sdk::ingestor;
 
-const std::string symbol = nativeGraphMatchSymbol(set.engine);
-auto manager
-    = makeStateManager<MyHandle>(std::move(set), NativeGraphMatch{"my_provider.graph_match"});
+auto graphMatch = engineGraphMatch(set.engine);
+auto manager = makeStateManager<MyHandle>(std::move(set), std::move(graphMatch));
 ```
 
-To serve whichever arm the UED declares, copy `set.engine.graphMatch` before you move `set`, then pass the copy. `makeEngine()` does this already. A `native` engine keeps its engine selector revision, so trained heuristic models keep matching it.
+`makeEngine()` already does this. To opt out of graph matching for an engine with a pattern, pass `GraphMatch{}` or `std::monostate{}` instead.
+
+A `native` engine keeps its engine selector revision, so trained heuristic models keep matching it.
 
 #### 2. Remove duplicate JSON keys
 

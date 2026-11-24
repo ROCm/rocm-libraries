@@ -12,6 +12,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -439,16 +440,19 @@ inline bool operator!=(const HeuristicDescriptor& lhs, const HeuristicDescriptor
 
 /// The `native` arm of a UED's `graph_match`: a GraphMatchRegistry symbol. The function it
 /// names decides the graph topology and publishes the binding.
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
 struct NativeGraphMatch
 {
     std::string symbol;
 };
 
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
 inline bool operator==(const NativeGraphMatch& lhs, const NativeGraphMatch& rhs)
 {
     return lhs.symbol == rhs.symbol;
 }
 
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
 inline bool operator!=(const NativeGraphMatch& lhs, const NativeGraphMatch& rhs)
 {
     return !(lhs == rhs);
@@ -459,30 +463,30 @@ inline bool operator!=(const NativeGraphMatch& lhs, const NativeGraphMatch& rhs)
 ///    the UMDs with an empty binding.
 ///  - NativeGraphMatch: the `native` arm, resolved through GraphMatchRegistry.
 ///  - CompiledGraphPattern: the declarative `nodes` arm, compiled against the op-schema
-///    registry when the UED is read (see CompiledGraphPattern.hpp). Never null. Immutable
-///    and shared by every copy of the descriptor.
+///    registry when the UED is read (see CompiledGraphPattern.hpp). Must not be null.
+///    Immutable and shared by every copy of the descriptor.
+/// engineGraphMatch() builds one from an EngineDescriptor.
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
 using GraphMatch
     = std::variant<std::monostate, NativeGraphMatch, std::shared_ptr<const CompiledGraphPattern>>;
 
-/// True when @p lhs and @p rhs declare the same arm with the same content. A compiled
-/// pattern compares by structure, not by pointer, because every parse of a UED compiles
-/// its own instance.
-inline bool sameGraphMatch(const GraphMatch& lhs, const GraphMatch& rhs)
+namespace detail
 {
-    if(lhs.index() != rhs.index())
+
+/// True when both are null, or both are set and compile the same pattern. A compiled pattern
+/// compares by structure, not by pointer, because every parse of a UED compiles its own
+/// instance.
+inline bool samePattern(const std::shared_ptr<const CompiledGraphPattern>& lhs,
+                        const std::shared_ptr<const CompiledGraphPattern>& rhs)
+{
+    if(lhs == nullptr || rhs == nullptr)
     {
-        return false;
+        return lhs == rhs;
     }
-    if(const auto* native = std::get_if<NativeGraphMatch>(&lhs))
-    {
-        return *native == std::get<NativeGraphMatch>(rhs);
-    }
-    if(const auto* pattern = std::get_if<std::shared_ptr<const CompiledGraphPattern>>(&lhs))
-    {
-        return **pattern == *std::get<std::shared_ptr<const CompiledGraphPattern>>(rhs);
-    }
-    return true;
+    return *lhs == *rhs;
 }
+
+} // namespace detail
 
 /// RFC 0021 §4: one position of a slotted engine's kernel program. A slot carries the selection
 /// members an unslotted engine carries itself.
@@ -541,8 +545,9 @@ struct EngineDescriptor
     /// claim (the backend then reports the engine as nondeterministic); a present
     /// vector, even an empty one, is the provider's explicit claim.
     std::optional<std::vector<int32_t>> numericalNotes;
-    /// The graph-topology match; std::monostate when the UED declares none.
-    GraphMatch graphMatch;
+    /// Resolved through GraphMatchRegistry; empty means this engine declares no
+    /// `native` graph_match (none, or a `nodes` pattern in graphMatchPattern).
+    std::string graphMatchNativeSymbol;
     /// Authored knob and binding semantics, not the JSON file-format version.
     hipdnn_data_sdk::utilities::Version revision{1, 0, 0};
     /// RFC 0021 §4 ordered slots; empty for an unslotted engine. When set, @ref
@@ -551,50 +556,48 @@ struct EngineDescriptor
     std::vector<SlotDescriptor> slots;
     /// RFC 0021 §6 bound token holding the shared workspace region's size; empty when none.
     std::string sharedWorkspaceToken;
+    /// The UED's `graph_match.nodes` pattern, compiled when the UED is read; null when the
+    /// UED declares none or declares the `native` arm. The loader sets at most one of this
+    /// and graphMatchNativeSymbol. Introduced in hipdnn_plugin_sdk 1.2.0.
+    std::shared_ptr<const CompiledGraphPattern> graphMatchPattern;
 };
 
 inline bool operator==(const EngineDescriptor& lhs, const EngineDescriptor& rhs)
 {
-    return sameGraphMatch(lhs.graphMatch, rhs.graphMatch)
-           && std::tie(lhs.id,
-                       lhs.name,
-                       lhs.sortKernelCatalog,
-                       lhs.predictEngine,
-                       lhs.predictApplicableKernels,
-                       lhs.metadataSchemaId,
-                       lhs.knobs,
-                       lhs.behaviorNotes,
-                       lhs.sdkVersion,
-                       lhs.numericalNotes,
-                       lhs.revision,
-                       lhs.slots,
-                       lhs.sharedWorkspaceToken)
-                  == std::tie(rhs.id,
-                              rhs.name,
-                              rhs.sortKernelCatalog,
-                              rhs.predictEngine,
-                              rhs.predictApplicableKernels,
-                              rhs.metadataSchemaId,
-                              rhs.knobs,
-                              rhs.behaviorNotes,
-                              rhs.sdkVersion,
-                              rhs.numericalNotes,
-                              rhs.revision,
-                              rhs.slots,
-                              rhs.sharedWorkspaceToken);
+    return std::tie(lhs.id,
+                    lhs.name,
+                    lhs.sortKernelCatalog,
+                    lhs.predictEngine,
+                    lhs.predictApplicableKernels,
+                    lhs.metadataSchemaId,
+                    lhs.knobs,
+                    lhs.behaviorNotes,
+                    lhs.sdkVersion,
+                    lhs.numericalNotes,
+                    lhs.graphMatchNativeSymbol,
+                    lhs.revision,
+                    lhs.slots,
+                    lhs.sharedWorkspaceToken)
+               == std::tie(rhs.id,
+                           rhs.name,
+                           rhs.sortKernelCatalog,
+                           rhs.predictEngine,
+                           rhs.predictApplicableKernels,
+                           rhs.metadataSchemaId,
+                           rhs.knobs,
+                           rhs.behaviorNotes,
+                           rhs.sdkVersion,
+                           rhs.numericalNotes,
+                           rhs.graphMatchNativeSymbol,
+                           rhs.revision,
+                           rhs.slots,
+                           rhs.sharedWorkspaceToken)
+           && detail::samePattern(lhs.graphMatchPattern, rhs.graphMatchPattern);
 }
 
 inline bool operator!=(const EngineDescriptor& lhs, const EngineDescriptor& rhs)
 {
     return !(lhs == rhs);
-}
-
-/// The engine's native graph_match symbol, or an empty string when its `graph_match` is not
-/// the `native` arm (a `nodes` pattern, or none).
-inline std::string nativeGraphMatchSymbol(const EngineDescriptor& engine)
-{
-    const auto* native = std::get_if<NativeGraphMatch>(&engine.graphMatch);
-    return native != nullptr ? native->symbol : std::string{};
 }
 
 namespace detail
@@ -612,6 +615,28 @@ inline GraphMatch graphMatchFromNativeSymbol(std::string symbol)
 }
 
 } // namespace detail
+
+/// The engine's graph_match as a GraphMatch: the compiled pattern when graphMatchPattern
+/// is set, otherwise detail::graphMatchFromNativeSymbol(graphMatchNativeSymbol), which is
+/// std::monostate for an empty symbol and NativeGraphMatch{symbol} otherwise. Pass it to a
+/// GraphMatch overload to serve whichever arm the UED declares.
+/// @throws std::invalid_argument when both graphMatchNativeSymbol and graphMatchPattern are set.
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
+inline GraphMatch engineGraphMatch(const EngineDescriptor& engine)
+{
+    if(engine.graphMatchPattern != nullptr)
+    {
+        if(!engine.graphMatchNativeSymbol.empty())
+        {
+            throw std::invalid_argument(
+                "engine '" + engine.name
+                + "' sets both graphMatchNativeSymbol and graphMatchPattern; a graph_match "
+                  "declares one arm");
+        }
+        return engine.graphMatchPattern;
+    }
+    return detail::graphMatchFromNativeSymbol(engine.graphMatchNativeSymbol);
+}
 
 /// Which inputs a matcher reads, and so what its failure prunes.
 enum class MatchScope

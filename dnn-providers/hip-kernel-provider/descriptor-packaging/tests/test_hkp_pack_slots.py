@@ -436,6 +436,24 @@ NEGATIVE_CASES = {
         _ued(_without("graph_match")),
         r"key 'shared_workspace' in UED fixture.ued.json requires a native graph_match",
     ),
+    "shared_workspace_with_a_nodes_pattern": (
+        _ued(
+            lambda doc: doc.update(
+                graph_match={
+                    "nodes": [
+                        {
+                            "kind": "op",
+                            "id": "pointwise",
+                            "op": "pointwise",
+                            "operands": {"in_0": "$x"},
+                            "results": {"out_0": "$y"},
+                        }
+                    ]
+                }
+            )
+        ),
+        r"key 'shared_workspace' in UED fixture.ued.json requires a native graph_match",
+    ),
     "shared_workspace_empty_token": (
         _ued(lambda doc: doc.update(shared_workspace="")),
         r"shared_workspace must be a nonempty string",

@@ -164,6 +164,8 @@ struct CatalogKeyHash
 /// Token name to MetadataValue map of what matching resolved for one graph.
 using BoundTokens = std::unordered_map<std::string, MetadataValue>;
 
+/// The bound value of @p token if present and of type T, else nullptr.
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
 template <typename T>
 inline const T* tryGetBoundValue(const BoundTokens& bound, std::string_view token)
 {

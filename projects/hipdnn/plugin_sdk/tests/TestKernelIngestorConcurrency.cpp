@@ -318,7 +318,7 @@ TEST(TestIngestorStateManagerConcurrency, ARankingSurvivesAConcurrentUnsortedAcc
         makeTestDispatches<TestHandle>(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(COUNTING_SCORE_SYMBOL),
-        NativeGraphMatch{BARRIER_GRAPH_SYMBOL});
+        BARRIER_GRAPH_SYMBOL);
 
     const TestGraph graph(makeGraphId(0x5E));
     const auto properties = testDeviceProperties();

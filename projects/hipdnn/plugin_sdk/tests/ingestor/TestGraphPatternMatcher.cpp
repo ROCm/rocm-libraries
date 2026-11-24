@@ -647,6 +647,62 @@ TEST(TestGraphPatternMatcher, AmbiguousGraphBindsTheFirstAssignment)
     EXPECT_EQ(std::get<std::string>(bound->at("left.operation")), "ABS");
 }
 
+/// Matches BINARY_POINTWISE_PATTERN against `t1 + in1 -> t3`, with @p in1 as the second input.
+std::optional<BoundTokens> matchBinaryAddWithSecondInput(std::unique_ptr<TensorAttributesT> in1)
+{
+    GraphT source;
+    source.tensors.push_back(patternTensor(1));
+    source.tensors.push_back(std::move(in1));
+    source.tensors.push_back(patternTensor(3));
+    source.nodes.push_back(pointwiseNode(PointwiseMode::ADD, 1, 2, 3));
+    const PatternTestGraph graph(source);
+    const auto compiled = compilePatternText(BINARY_POINTWISE_PATTERN);
+    return matchGraphPattern(*compiled, graph.context());
+}
+
+TEST(TestGraphPatternMatcher, BindsAWellFormedSecondInput)
+{
+    const auto bound = matchBinaryAddWithSecondInput(patternTensor(2));
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, "input_b"), 2);
+}
+
+/// A bound tensor that publishTensor() refuses, and how it is broken.
+struct UnpublishableTensorCase
+{
+    std::string name;
+    void (*breakTensor)(TensorAttributesT&);
+};
+
+class TestGraphPatternMatcherUnpublishable
+    : public ::testing::TestWithParam<UnpublishableTensorCase>
+{
+};
+
+/// The structure matches, so only the failed publication can decline the graph. A matcher
+/// that skipped the tensor instead would admit a graph whose bindings are incomplete.
+TEST_P(TestGraphPatternMatcherUnpublishable, DeclinesWhenABoundTensorCannotBePublished)
+{
+    auto tensor = patternTensor(2);
+    GetParam().breakTensor(*tensor);
+
+    EXPECT_FALSE(matchBinaryAddWithSecondInput(std::move(tensor)).has_value());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    BoundTensors,
+    TestGraphPatternMatcherUnpublishable,
+    ::testing::Values(UnpublishableTensorCase{"ZeroExtent",
+                                              [](TensorAttributesT& tensor) {
+                                                  tensor.dims = {1, 0, 1, 1};
+                                              }},
+                      UnpublishableTensorCase{"NanStoredScalar",
+                                              [](TensorAttributesT& tensor) {
+                                                  tensor.value.Set(Float32Value(
+                                                      std::numeric_limits<float>::quiet_NaN()));
+                                              }}),
+    [](const ::testing::TestParamInfo<UnpublishableTensorCase>& info) { return info.param.name; });
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

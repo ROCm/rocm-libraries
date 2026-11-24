@@ -9,7 +9,6 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -191,10 +190,7 @@ TEST(TestPointwisePacks, EveryPackSharesTheEngineDispatchAndAllButOneMatcher)
     // Two criteria each: one operation check of their own, plus the shared kernel-scoped
     // dtype check. The expensive graph work is the engine's graph_match, which runs once
     // per graph for every pack rather than being listed by any of them.
-    const auto* native
-        = std::get_if<hipdnn_plugin_sdk::ingestor::NativeGraphMatch>(&set.engine.graphMatch);
-    ASSERT_NE(native, nullptr);
-    EXPECT_FALSE(native->symbol.empty());
+    EXPECT_FALSE(set.engine.graphMatchNativeSymbol.empty());
     ASSERT_EQ(add.matcherIds.size(), 2U);
     ASSERT_EQ(mul.matcherIds.size(), 2U);
     ASSERT_EQ(sub.matcherIds.size(), 2U);

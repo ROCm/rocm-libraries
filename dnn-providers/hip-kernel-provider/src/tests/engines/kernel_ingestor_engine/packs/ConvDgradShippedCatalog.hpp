@@ -83,7 +83,7 @@ inline const ShippedCatalog& shippedCatalog(const std::string& arch, std::string
                                      + std::string(engineName));
         }
         loaded.knobs = set->engine.knobs;
-        const auto graphMatch = set->engine.graphMatch;
+        const auto graphMatch = set->engine.graphMatchNativeSymbol;
         loaded.manager
             = hipdnn_plugin_sdk::ingestor::makeStateManager<Handle>(std::move(*set), graphMatch);
     }

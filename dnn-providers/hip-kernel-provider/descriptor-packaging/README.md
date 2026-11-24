@@ -244,7 +244,8 @@ registry. A `native` UED never does.
 1. `--op-schema-registry <path>`.
 2. The `HKP_OP_SCHEMA_REGISTRY` environment variable.
 3. The `HKP_OP_SCHEMA_REGISTRY_UNAVAILABLE` environment variable. When it is set, a
-   `nodes` pattern fails the pack with its text as the reason.
+   `nodes` pattern fails the pack with its text as the reason. The build sets it
+   (`cmake/HkpPackaging.cmake`); it is not meant to be set by hand.
 4. The committed `projects/hipdnn/flatbuffers_sdk/op_schema_registry.json` of the
    repository the tool lives in.
 

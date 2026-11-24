@@ -535,6 +535,7 @@ inline std::optional<BoundTokens> matchGraphPatternOrThrow(const CompiledGraphPa
 /// every present variable's tensor fields, and every compiled attribute the matched node
 /// carries. nullopt declines the graph. Never throws. An unexpected failure is logged and
 /// declines the graph.
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
 inline std::optional<BoundTokens> matchGraphPattern(const CompiledGraphPattern& pattern,
                                                     const MatchContext& context)
 {

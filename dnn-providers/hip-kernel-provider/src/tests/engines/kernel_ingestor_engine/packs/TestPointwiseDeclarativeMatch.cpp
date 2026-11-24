@@ -9,7 +9,6 @@
 #include <memory>
 #include <string>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -158,8 +157,7 @@ TEST_P(TestPointwiseDeclarativeMatch, EngineApplicabilityFollowsThePattern)
     registerNativeIngestorSymbols();
     auto sets = loadValidatedDescriptorSets<Handle>(scratch.path());
     ASSERT_EQ(sets.size(), 1U);
-    ASSERT_TRUE(std::holds_alternative<std::shared_ptr<const CompiledGraphPattern>>(
-        sets.front().set.engine.graphMatch));
+    ASSERT_NE(sets.front().set.engine.graphMatchPattern, nullptr);
 
     // The staged packs name the architecture they were packed for.
     auto properties = testDeviceProperties();

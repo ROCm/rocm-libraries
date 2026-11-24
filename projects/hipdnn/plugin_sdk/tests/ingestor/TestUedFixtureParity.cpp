@@ -271,7 +271,7 @@ TEST(TestUedFixtureParity, SchemaPatternNodeLimitMatchesTheParser)
     const auto schema = readSchema();
     const auto& nodes = schema.at("properties").at("graph_match").at("properties").at("nodes");
 
-    EXPECT_EQ(nodes.at("maxItems").get<size_t>(), MAX_PATTERN_NODES);
+    EXPECT_EQ(nodes.at("maxItems").get<size_t>(), ingestor_detail::MAX_PATTERN_NODES);
 }
 
 /// Each object the runtime closes to unknown keys allows, in the schema, exactly the

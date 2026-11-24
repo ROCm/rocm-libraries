@@ -43,7 +43,7 @@ TEST(TestFlydslSdpaAiwPacks, IsOnePackWithAGraphMatchAndOneKernelScopedMatcher)
     const auto& set = loadedSet(FLYDSL_SDPA_AIW.engineName);
 
     EXPECT_EQ(distinctPackIdCount(set), 1U);
-    EXPECT_EQ(nativeGraphMatchSymbol(set.engine), FLYDSL_SDPA_AIW.graphMatcher);
+    EXPECT_EQ(set.engine.graphMatchNativeSymbol, FLYDSL_SDPA_AIW.graphMatcher);
 
     size_t graphScoped = 0;
     size_t kernelScoped = 0;
