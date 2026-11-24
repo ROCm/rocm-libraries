@@ -562,6 +562,40 @@ BenchmarkProblems:
           - Exact: [505, 509, 2, 256, 520, 520, 256, 256]
           - Exact: [505, 509, 2, 1600, 520, 520, 1600, 1600]
   ########################################
+  # Non-atomic StreamK 4 and 5 without TDM loads (TDMInst 0), so the TDM loads add no barrier to the
+  # tile handoff. With TDMStoreInst on, the barrier of the DynamicWorkQueue handoff keeps the next tile
+  # from writing LDS before every TDM store has read the staged tile, and the Hybrid kernel executes the
+  # flush barrier on its static arm only, the arm the default HybridAssignmentPolicy runs.
+  # MT64x64 gives 33 x 32 x 2 = 2112 tiles at K=128, more than the grid of the work queue, so each
+  # StreamK 4 workgroup stores several tiles, with NonEdge, M-edge, N-edge and corner tiles and a leading
+  # dimension larger than M. At K=1600 the 4 x 4 x 2 tiles are fewer than the persistent grid, so the
+  # static arm of StreamK 5 splits them between workgroups.
+  ########################################
+  -
+    - *problem_type_bf16
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 2, 2, 2, 2]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - TDMInst: [0]
+        - StoreVectorWidth: [-1]
+        - WorkGroupMapping: [8]
+        - StreamK: [4, 5]
+        - TDMStoreInst: [false, true]
+        - CompactLoopStore: [false, true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2049, 2047, 2, 128, 2064, 2064, 128, 128]
+          - Exact: [255, 253, 2, 1600, 272, 272, 1600, 1600]
+  ########################################
   # GlobalSplitU=-1 and 2 with MultipleBufferSingleKernel, AdaptiveGemmGSUA 0 and 1 and MbskPrefetchMethod
   # 0 and 1: the GSU == 1 branch goes through the TDM block, and with MbskPrefetchMethod 0 so does the
   # store of the reduced tile at GSU <= 2, from a TDM copy beside the buffer_store copy a larger GSU
@@ -1936,6 +1970,30 @@ BenchmarkProblems:
       - ProblemSizes:
         - Exact: [505, 509, 2, 256, 520, 520, 256, 256]
         - Exact: [505, 509, 2, 1600, 520, 520, 1600, 1600]
+  - - {OperationType: GEMM, DataType: h, DestDataType: h, ComputeDataType: s, HighPrecisionAccumulate: true, UseBeta: true,
+      Batched: true, TransposeA: true, TransposeB: false}
+    - InitialSolutionParameters: null
+      BenchmarkCommonParameters:
+      - KernelLanguage: [Assembly]
+      ForkParameters:
+      - MatrixInstruction:
+        - [16, 16, 32, 1, 1, 2, 2, 2, 2]
+      - WavefrontSize: [32]
+      - DepthU: [64]
+      - PrefetchGlobalRead: [1]
+      - PrefetchLocalRead: [1]
+      - ScheduleIterAlg: [3]
+      - TDMInst: [0]
+      - StoreVectorWidth: [-1]
+      - WorkGroupMapping: [8]
+      - StreamK: [4, 5]
+      - TDMStoreInst: [false, true]
+      - CompactLoopStore: [false, true]
+      BenchmarkJoinParameters: null
+      BenchmarkFinalParameters:
+      - ProblemSizes:
+        - Exact: [2049, 2047, 2, 128, 2064, 2064, 128, 128]
+        - Exact: [255, 253, 2, 1600, 272, 272, 1600, 1600]
   - - {OperationType: GEMM, DataType: h, DestDataType: h, ComputeDataType: s, HighPrecisionAccumulate: true, UseBeta: true,
       Batched: true, TransposeA: true, TransposeB: false}
     - InitialSolutionParameters: null
