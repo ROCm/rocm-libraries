@@ -20,25 +20,18 @@ namespace {
 using QDataType = FmhaFwdTypeConfig<DataTypeConfig>::QDataType;
 using ODataType = FmhaFwdTypeConfig<DataTypeConfig>::ODataType;
 
-// Round-to-nearest-even on a format with t significand bits (stored mantissa plus the
-// implicit leading 1) is bounded, relative to the true value, by
-//     max |q(x) - x| / x = 2^-t / (1 + 2^-t) = 1 / (2^t + 1)
-// reached at the midpoint of the first gap in a binade, where the error is a half ulp while
-// the value is already 1 + 2^-t. The bound is scale-invariant: it holds in every normal
-// binade, so it does not depend on where the kernel places P.
-constexpr double rne_bound(int significand_bits) { return 1.0 / ((1ull << significand_bits) + 1); }
+// The 1% output gain bound the quantization-scale suites use.
+constexpr double kOutputBound = 0.01;
 
-// Two casts stand between the exact attention and the stored output. P goes to e4m3 for
-// gemm_1 while l accumulates the unrounded P, so O carries the mass bias
-// sum(q(P))/sum(P) - 1 -- a mean of the per-element rounding errors weighted by P_j/sum(P),
-// which inherits their bound. O then goes to the output type. Every output threshold below
-// is this number and not a measured one: a measured threshold locks in one observation, so
-// it false-fails when the value legitimately shifts and stays quiet when a real regression
-// lands under it.
-constexpr double kOutputBound =
-    (1 + rne_bound(4)) *                                           // P -> e4m3
-        (1 + rne_bound(std::is_same_v<ODataType, float> ? 24 : 8)) // O -> fp32 or bf16
-    - 1;
+// d64 / d128 / d256 dispatch to qr_tdm_fp8_sched; every other head dim to qr_tdm.
+constexpr bool is_sched_hdim(int hdim) { return hdim == 64 || hdim == 128 || hdim == 256; }
+
+// qr_tdm_fp8_sched normalizes O by sum(q(P)) for per-tensor scales only, so no_scale keeps the
+// P-rounding mass bias there and is only held to the bound on qr_tdm head dims.
+bool skip_no_scale_on_sched(int hdim, quant_scale_enum qscale)
+{
+    return qscale == quant_scale_enum::no_scale && is_sched_hdim(hdim);
+}
 
 constexpr const char* prec_string()
 {
@@ -58,7 +51,7 @@ struct SinkExactResult
 
 // Score patterns. All three keep every q row identical, so the reference below stays a
 // single scalar computed from row 0. What differs is how the per-element P-rounding errors
-// combine: O/reference - 1 is sum(q(P))/sum(P) - 1, a mean of them weighted by P_j/sum(P).
+// combine: sum(q(P))/sum(P) - 1 is a mean of them weighted by P_j/sum(P).
 //   kFlat     all scores equal, so every P is exp2(kPShift) = 256, an e4m3 grid point. The
 //             rounding error is zero by construction and no mass bias is visible.
 //   kPeriodic a short score cycle repeated ~seqlen_k/9 times. The e4m3 cast of k collapses
@@ -74,8 +67,13 @@ enum ScorePattern : int
     kRandom   = 2
 };
 
-SinkExactResult run_sink_exact(
-    int hdim, int seqlen_k, int seqlen_q, float sink, bool store_lse, int pattern = kFlat)
+SinkExactResult run_sink_exact(int hdim,
+                               int seqlen_k,
+                               int seqlen_q,
+                               float sink,
+                               bool store_lse,
+                               int pattern             = kFlat,
+                               quant_scale_enum qscale = quant_scale_enum::pertensor)
 {
     SinkExactResult result;
 
@@ -131,7 +129,8 @@ SinkExactResult run_sink_exact(
     args.lse_ptr  = store_lse ? lse_buf.GetDeviceBuffer() : nullptr;
     args.sink_ptr = has_sink ? sink_buf.GetDeviceBuffer() : nullptr;
     // PERTENSOR with unit descales: the represented values above are the real values.
-    args.q_descale_ptr = args.k_descale_ptr = args.v_descale_ptr = scale_buf.GetDeviceBuffer();
+    if(qscale == quant_scale_enum::pertensor)
+        args.q_descale_ptr = args.k_descale_ptr = args.v_descale_ptr = scale_buf.GetDeviceBuffer();
 
     args.batch = args.nhead_q = args.nhead_k = args.num_head_q_total = 1;
     args.seqlen_q = args.max_seqlen_q = seqlen_q;
@@ -159,7 +158,7 @@ SinkExactResult run_sink_exact(
                            bias_enum::no_bias,
                            store_lse,
                            false, // no dropout
-                           quant_scale_enum::pertensor,
+                           qscale,
                            false, // no skip_min_seqlen_q
                            has_sink};
 
@@ -204,15 +203,16 @@ SinkExactResult run_sink_exact(
     return result;
 }
 
-// hdim, seqlen_k, seqlen_q, sink, store_lse
-class SinkExact : public ::testing::TestWithParam<std::tuple<int, int, int, float, bool>>
+// hdim, seqlen_k, seqlen_q, sink, store_lse, qscale
+class SinkExact
+    : public ::testing::TestWithParam<std::tuple<int, int, int, float, bool, quant_scale_enum>>
 {
 };
 
 INSTANTIATE_TEST_SUITE_P(
     TestCkTileFmhaFwd,
     SinkExact,
-    // d64 / d128 / d256 dispatch to qr_tdm_fp8_sched, the other head dims to qr_tdm.
+    // see is_sched_hdim for which head dims reach qr_tdm.
     ::testing::Combine(::testing::Values(32, 64, 96, 128, 160, 256, 512),
                        ::testing::Values(128, 500), // multi-tile, and a non-multiple tail
                        ::testing::Values(63, 64),   // padded and exact query tiles
@@ -220,20 +220,21 @@ INSTANTIATE_TEST_SUITE_P(
                                          4.f,       // sink dominates the row max
                                          6.f,       // sink dominates by a wide margin
                                          -ck_tile::numeric<float>::infinity()), // no-sink control
-                       ::testing::Bool()));
+                       ::testing::Bool(),
+                       ::testing::Values(quant_scale_enum::pertensor, quant_scale_enum::no_scale)));
 
 TEST_P(SinkExact, MatchesExactAttention)
 {
-    const auto [hdim, seqlen_k, seqlen_q, sink, store_lse] = GetParam();
+    const auto [hdim, seqlen_k, seqlen_q, sink, store_lse, qscale] = GetParam();
+    if(skip_no_scale_on_sched(hdim, qscale))
+        GTEST_SKIP() << "qr_tdm_fp8_sched does not normalize O by sum(q(P)) without a scale";
 
-    const auto result = run_sink_exact(hdim, seqlen_k, seqlen_q, sink, store_lse);
+    const auto result = run_sink_exact(hdim, seqlen_k, seqlen_q, sink, store_lse, kFlat, qscale);
     if(!result.dispatched)
         GTEST_SKIP() << "No instance for current parameters";
 
     EXPECT_TRUE(result.all_finite);
-    // kFlat puts every P on 256, a grid point, so the mass term is structurally zero here
-    // and only the output cast can contribute. kOutputBound covers both and is loose for
-    // this pattern on purpose: one bound, derived from the formats, no per-pattern tuning.
+    // kFlat puts every P on 256, a grid point, so P-rounding is structurally zero here.
     EXPECT_LT(result.max_relative_error, kOutputBound);
     // LSE is the mathematical log-sum-exp: it carries the unquantized row sum, so it is
     // held to fp32 accumulation error rather than to the output bound.
@@ -241,47 +242,71 @@ TEST_P(SinkExact, MatchesExactAttention)
         EXPECT_LT(result.max_lse_error, 1e-4);
 }
 
-// The mass bias only survives when the per-element errors share a sign; otherwise the
-// weighted mean cancels them. kPeriodic constructs the surviving case, so this is the suite
-// that can actually approach kOutputBound.
-// LSE is unaffected -- it reports l, the unrounded row sum.
-TEST(SinkQuantizedMass, NonuniformRealScores)
+// P-rounding errors that share a sign survive in the sum(q(P))/sum(P) mean instead of
+// cancelling. kPeriodic constructs that case: normalizing O by sum(q(P)) must still land
+// on the exact attention within the output bound.
+// LSE is unaffected -- it reports the unrounded row sum of P.
+// hdim, sink, store_lse, qscale
+class SinkQuantizedMassNonuniform
+    : public ::testing::TestWithParam<std::tuple<int, float, bool, quant_scale_enum>>
 {
-    for(int hdim : {32, 64, 96, 128, 160, 256, 512})
-    {
-        for(float sink : {-4.f, -ck_tile::numeric<float>::infinity()})
-        {
-            SCOPED_TRACE(::testing::Message() << "hdim=" << hdim << " sink=" << sink);
-            const auto result = run_sink_exact(hdim, 500, 63, sink, true, kPeriodic);
-            if(!result.dispatched)
-                GTEST_SKIP() << "No instance for current parameters";
-            EXPECT_TRUE(result.all_finite);
-            EXPECT_LT(result.max_relative_error, kOutputBound);
-            EXPECT_LT(result.max_lse_error, 1e-4);
-        }
-    }
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    SinkQuantizedMassNonuniform,
+    ::testing::Combine(::testing::Values(32, 64, 96, 128, 160, 256, 512),
+                       ::testing::Values(-4.f, -ck_tile::numeric<float>::infinity()),
+                       ::testing::Bool(),
+                       ::testing::Values(quant_scale_enum::pertensor, quant_scale_enum::no_scale)));
+
+TEST_P(SinkQuantizedMassNonuniform, MatchesExactAttention)
+{
+    const auto [hdim, sink, store_lse, qscale] = GetParam();
+    if(skip_no_scale_on_sched(hdim, qscale))
+        GTEST_SKIP() << "qr_tdm_fp8_sched does not normalize O by sum(q(P)) without a scale";
+
+    const auto result = run_sink_exact(hdim, 500, 63, sink, store_lse, kPeriodic, qscale);
+    if(!result.dispatched)
+        GTEST_SKIP() << "No instance for current parameters";
+
+    EXPECT_TRUE(result.all_finite);
+    EXPECT_LT(result.max_relative_error, kOutputBound);
+    EXPECT_LT(result.max_lse_error, 1e-4);
 }
 
 // The periodic case above is constructed and says nothing about what a real workload pays.
 // Here V=1 and there is no sink, so the exact output is 1.0 for every element and
-// max_relative_error IS the quantized-mass bias sum(q(P))/sum(P) - 1, with no other error
-// source mixed in, which is the point: kOutputBound is what the format permits, this is what
-// a real score distribution costs. Expect it far inside the bound.
-// Only the fp32-output binary can see it. Once the bias drops below half a bf16 ulp at 1.0,
-// the bf16 build rounds O back to exactly 1 and reports zero no matter what the bias was.
-TEST(SinkQuantizedMass, RandomRealScores)
+// max_relative_error is only output rounding and fp32 arithmetic: O is normalized by sum(q(P)),
+// so a real score distribution stays well inside the output bound.
+// seqlen_k, hdim, store_lse, qscale
+class SinkQuantizedMassRandom
+    : public ::testing::TestWithParam<std::tuple<int, int, bool, quant_scale_enum>>
 {
-    for(int seqlen_k : {512, 2048, 8192})
-    {
-        SCOPED_TRACE(::testing::Message() << "seqlen_k=" << seqlen_k);
-        const auto result =
-            run_sink_exact(128, seqlen_k, 64, -ck_tile::numeric<float>::infinity(), true, kRandom);
-        if(!result.dispatched)
-            GTEST_SKIP() << "No instance for current parameters";
-        EXPECT_TRUE(result.all_finite);
-        EXPECT_LT(result.max_relative_error, kOutputBound);
-        EXPECT_LT(result.max_lse_error, 1e-4);
-    }
+};
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         SinkQuantizedMassRandom,
+                         ::testing::Combine(::testing::Values(512, 2048, 8192),
+                                            ::testing::Values(96, 128, 160),
+                                            ::testing::Bool(),
+                                            ::testing::Values(quant_scale_enum::pertensor,
+                                                              quant_scale_enum::no_scale)));
+
+TEST_P(SinkQuantizedMassRandom, OutputCastOnly)
+{
+    const auto [seqlen_k, hdim, store_lse, qscale] = GetParam();
+    if(skip_no_scale_on_sched(hdim, qscale))
+        GTEST_SKIP() << "qr_tdm_fp8_sched does not normalize O by sum(q(P)) without a scale";
+
+    const auto result = run_sink_exact(
+        hdim, seqlen_k, 64, -ck_tile::numeric<float>::infinity(), store_lse, kRandom, qscale);
+    if(!result.dispatched)
+        GTEST_SKIP() << "No instance for current parameters";
+
+    EXPECT_TRUE(result.all_finite);
+    EXPECT_LT(result.max_relative_error, kOutputBound);
+    EXPECT_LT(result.max_lse_error, 1e-4);
 }
 
 } // namespace
