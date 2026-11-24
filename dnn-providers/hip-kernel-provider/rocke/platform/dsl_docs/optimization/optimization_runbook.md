@@ -3217,7 +3217,7 @@ CTA), so the in-tile B-load is a smaller fraction of kernel time.
 ### 17.7 Skinny-M Decode GEMM (o_proj M=2)
 
 Case study from `examples/dsl_o_proj_decode/`. The matmul is Qwen3-8B's
-`o_proj` decode: `bf16`, `M=2`, `N=4096`, `K=4096`, MI355X / gfx950, 8 TB/s
+`o_proj` decode: `bf16`, `M=2`, `N=4096`, `K=4096`, gfx950, 8 TB/s
 HBM peak. rocBLAS sits at 10.10 µs (best) / 42 % HBM efficiency. The
 exercise: do whatever it takes to match or exceed rocBLAS, end-to-end
 through the runbook loop.
@@ -3268,7 +3268,7 @@ of N=10 attempts × 500 iters with the §2.3 hygiene rules.
   help.
 * **HBM efficiency is the cap on skinny-M.** With `M=2, N=4096, K=4096,
   bf16`, B alone is 32 MB and each CTA sees a unique N-stripe — there is
-  no cross-CTA B-reuse. Total HBM ≈ 33.5 MB; sustained HBM on MI355X for
+  no cross-CTA B-reuse. Total HBM ≈ 33.5 MB; sustained HBM on gfx950 for
   streaming bf16 reads tops out near 3.5 TB/s ≈ 44 % of the 8 TB/s
   marketed peak. Both our kernel (44 %) and rocBLAS (42 %) live at this
   ceiling. Beating rocBLAS at this HBM efficiency means reducing total
@@ -3580,9 +3580,9 @@ points at the arch files directly.**
 
 Pick your target:
 
-- **[arch/gfx950.md](arch/gfx950.md)** — CDNA4 / MI350X / MI355X (the
+- **[arch/gfx950.md](arch/gfx950.md)** — CDNA4 (the
   DSL's default target).
-- **[arch/gfx942.md](arch/gfx942.md)** — CDNA3 / MI300X / MI325X.
+- **[arch/gfx942.md](arch/gfx942.md)** — CDNA3.
 
 See [arch/README.md](arch/README.md) for the index and how to add a new
 architecture. Every arch reference uses the same `21.x` layout, so a

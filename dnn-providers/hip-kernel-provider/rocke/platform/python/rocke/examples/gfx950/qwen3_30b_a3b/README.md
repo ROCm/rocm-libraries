@@ -1,7 +1,7 @@
 # Qwen3-30B-A3B Decode Step — CK DSL Optimization Examples
 
 End-to-end kernel optimization walkthrough for the Qwen3-30B-A3B decode step on
-AMD MI355X (gfx950).  Each numbered script benchmarks one layer against the
+gfx950.  Each numbered script benchmarks one layer against the
 production AITER/ATOM baseline, explains every optimization applied, and shows
 the measured speedup.
 
@@ -19,7 +19,7 @@ of GPU time per decode step (rolled up live by `07_full_decode_step.py`).**
 
 | Item | Value |
 |------|-------|
-| GPU | AMD MI355X (gfx950) |
+| GPU | gfx950 |
 | ROCm | 7.x |
 | ISA | `amdgcn-amd-amdhsa--gfx950` |
 | Python | venv with `torch`, `triton`, HIP-enabled PyTorch |
@@ -197,13 +197,13 @@ L2 bandwidth fetching large B tiles that cannot be reused across the 2 output ro
    FMA parallelism from HBM bandwidth.  `tile_k=1024` is the sweet spot for
    K=2048.
 
-3. **Chiplet swizzle**: MI355X has 8 XCDs, each with its own L2.  Without
+3. **Chiplet swizzle**: gfx950 has 8 XCDs, each with its own L2.  Without
    swizzling, all CTAs pile onto XCD 0 (default linearization).  `wgm` (work-
    group mapping) and `chunk_size` parameters distribute CTAs across all 8 XCDs
    so each XCD's L2 sees a non-overlapping B-tile shard, effectively multiplying
    the useful L2 bandwidth by 8×.
 
-**Results** (bf16, MI355X / gfx950, serial / exclusive GPU, 10 warmup ×
+**Results** (bf16, gfx950, serial / exclusive GPU, 10 warmup ×
 200 iters × 5 samples → median; numbers reported in `01_gemm_skinny.py`):
 ```
   QKV proj  M=2 N=2560 K=2048  tile_k=512
@@ -669,7 +669,7 @@ $PYTHON bench_atom.py --model <model> --config dsl_all
 $PYTHON bench_atom_sweep.py --model <model> --rounds 30
 ```
 
-**Measured results** (MI355X, Qwen3-30B-A3B, random weights, bs=2,
+**Measured results** (gfx950, Qwen3-30B-A3B, random weights, bs=2,
 input=512, output=200 tok, level=3 CUDAGraph, kv_cache_dtype=bf16,
 30 interleaved rounds):
 

@@ -521,7 +521,7 @@ def case_fmha_fwd_fp8() -> Result:
     )
     torch.manual_seed(40)
     Q = torch.randn(seq_q, HQ, head_size, dtype=torch.float16, device="cuda")
-    # MI355X uses OCP FP8 (e4m3fn, bias=7) -- ``e4m3fnuz`` is the
+    # gfx950 uses OCP FP8 (e4m3fn, bias=7) -- ``e4m3fnuz`` is the
     # older AMD pre-OCP format and would give 2x the values after cvt.
     K_f32 = (
         torch.randn(
@@ -578,7 +578,7 @@ def case_fmha_fwd_fp8() -> Result:
         scores = (Q[:, h, :].float() @ K_dq[:, kh, :].t()) / math.sqrt(head_size)
         probs = torch.softmax(scores, dim=-1)
         O_ref[:, h, :] = (probs @ V_dq[:, kh, :]).to(torch.float16)
-    r = _summarise(O, O_ref, tol=5e-3, note="OCP fp8e4m3fn (MI355X)")
+    r = _summarise(O, O_ref, tol=5e-3, note="OCP fp8e4m3fn (gfx950)")
     r.name = "fmha_fwd_fp8 (per-tensor scales)"
     return r
 

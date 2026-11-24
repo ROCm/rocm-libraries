@@ -530,7 +530,7 @@ The May study above optimized **multi-batch** d64. This update covers the
 **single-batch** (`num_seqs == 1`) d128/d64 long-prefill path, where a
 combinatorial autotuner exposed a routing bug and an occupancy story that, once
 fixed, crossed PyTorch flash across the whole prefill cohort. All numbers are
-MI355X / gfx950, LLVM backend (llvm22 + comgr 7.2), same-session HIP-event A/B vs
+gfx950, LLVM backend (llvm22 + comgr 7.2), same-session HIP-event A/B vs
 torch SDPA flash unless noted. A ratio >1.0 means CK DSL is faster than flash.
 
 ### Routing bug: single-batch fell off the combo

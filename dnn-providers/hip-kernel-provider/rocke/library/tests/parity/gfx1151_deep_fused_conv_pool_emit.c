@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: MIT
  *
  * tests/parity/gfx1151_deep_fused_conv_pool_emit.c -- C-side emitter for the
- * gfx1151 (RDNA3.5 / Strix Halo, wave32, WMMA 16x16x16) deep fused
+ * gfx1151 (RDNA3.5, wave32, WMMA 16x16x16) deep fused
  * conv0 -> conv1 -> maxpool parity harness. Selects one of N sampled spec
  * configs by argv[1] (the config index), builds the gfx1151-pinned
  * rocke_gfx1151_deep_fused_conv_pool_spec_t identically to the Python emitter

@@ -1,4 +1,4 @@
-# Ragged Grouped GEMM & MoE Case Study (gfx950 / MI355X)
+# Ragged Grouped GEMM & MoE Case Study (gfx950)
 
 Two related ragged bf16 GEMM kernels built on the same dense grouped-GEMM core
 (`grouped_gemm_hip.py`, 805 TF ceiling):

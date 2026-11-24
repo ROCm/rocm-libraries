@@ -18,7 +18,7 @@ stride_a, stride_b, stride_c)``; grid ``(ceil(N/TN), ceil(M/TM), E)`` with
 C ``[M,N]`` row-major, per expert, packed contiguously over E).
 
 Levers are command-line flags (defaults = the measured sweet spot for
-M/E=8192, N=1024, K=512, E=64 on gfx950 / MI355X); use ``--no-<flag>`` to
+M/E=8192, N=1024, K=512, E=64 on gfx950); use ``--no-<flag>`` to
 disable a boolean lever:
 
 * ``--dtl``   async direct-to-LDS DMA (``async_buffer_load_lds_addr``,

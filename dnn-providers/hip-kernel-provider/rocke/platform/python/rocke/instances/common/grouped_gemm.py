@@ -26,7 +26,7 @@ points:
    launches it once per group. This is what CK Tile's reference
    path does when ``persistent=False``. Correct, easy to reason
    about, but pays one ``hipModuleLaunchKernel`` round-trip per
-   group (~3-5us on MI300X/MI355X). Acceptable when the per-group
+   group (~3-5us on gfx942 / gfx950). Acceptable when the per-group
    work is large relative to the launch cost (typical for MoE).
 
    v1 optimisation note (this file): the per-group ``LaunchConfig``,
@@ -270,8 +270,8 @@ def build_grouped_gemm_single_launch(
 
     Grid ``(N_tile_max, M_tile_max, num_groups)``: ``block_id_z`` is the group
     index. All ``num_groups`` GEMMs run in **one** ``hipModuleLaunchKernel``,
-    eliminating the per-group HIP launch tax (~3-5us / group on MI300X /
-    MI355X) that the multi-launch :class:`GroupedGemmLauncher` pays.
+    eliminating the per-group HIP launch tax (~3-5us / group on gfx942 /
+    gfx950) that the multi-launch :class:`GroupedGemmLauncher` pays.
 
     The realised kernel is the **batched** universal-GEMM body
     (``UniversalGemmSpec(batched=True)``): the kernel reads ``block_id_z`` as

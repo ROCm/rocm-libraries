@@ -5,7 +5,7 @@ Shipped CK DSL examples come in two forms:
 1. **Python-owned generators** in `python/rocke/examples/`. They build HSACO + manifest and (for `examples/*.py` other than the bake-offs) launch + verify in one process.
 2. **CMake-integrated generators** in `example/ck_tile/dsl/<NN>_*/gen.py`. Each `gen.py` wraps a Python-owned generator and adds an `expected.json` gate for `test_rocke_examples.py`.
 
-Per the validation pass on this checkout, every shipped example builds and verifies end-to-end on MI355X / gfx950 / ROCm 7.0.2 / torch 2.8.0+rocm7.0.2.
+Per the validation pass on this checkout, every shipped example builds and verifies end-to-end on gfx950 / ROCm 7.0.2 / torch 2.8.0+rocm7.0.2.
 
 ## Python-Owned Generators (`python/rocke/examples/`)
 

@@ -32,7 +32,7 @@ class ArchProfile:
     example_args: List[str]  # extra CLI args for the build
     slurm_constraint: str  # sinfo AVAIL_FEATURES token (e.g. "GFX942")
     # gres uses generic gpu:1 + a feature constraint; specific gres names
-    # (gfx942-mi300x:1 etc.) vary per node so we keep it generic.
+    # vary per node so we keep it generic.
     slurm_gres: str = "gpu:1"
     slurm_time: str = "00:15:00"
     slurm_partition: str = "defq"
@@ -119,7 +119,7 @@ ARCHES: Dict[str, ArchProfile] = {
         ],
         slurm_constraint="GFX1151",
     ),
-    # RDNA4 / Navi 48. MARKHAM nodes (NFS-visible HOME), ROCm 7.2.0. Lane map is
+    # RDNA4. MARKHAM nodes (NFS-visible HOME), ROCm 7.2.0. Lane map is
     # hardware-confirmed (Stage 3 probe passed bit-exact), so the default example
     # is now the MatMulNBits large-N verify on a real Qwen3.5-9B shape
     # (attn out_proj: N=4096, K=4096, int4/g32). Swap N/K via example_args to

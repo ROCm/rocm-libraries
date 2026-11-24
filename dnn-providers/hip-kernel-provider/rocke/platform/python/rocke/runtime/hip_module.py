@@ -1463,7 +1463,7 @@ class Runtime:
         be safely freed by the Python frame's normal cleanup; no
         :attr:`_pending_args` bookkeeping is needed for the launch.
 
-        Empirical cost on ROCm 7 / MI355X: ~0.3 us per call vs
+        Empirical cost on ROCm 7 / gfx950: ~0.3 us per call vs
         ~43 us for the event-based fence. Mirrors CK Tile's
         ``launch_kernel`` post-amble (``hipStreamSynchronize(stream_id_)``).
 

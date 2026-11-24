@@ -431,7 +431,7 @@ def moe_fused_mega_fp8_grid(
     return (gx, num_m_blocks, 1)
 
 
-# Default persistent-grid cap: MI355X 256 CU x ~2 blocks/CU at block_size 256.
+# Default persistent-grid cap: gfx950 256 CU x ~2 blocks/CU at block_size 256.
 PERSISTENT_P_CAP = 512
 
 

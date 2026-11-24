@@ -7721,7 +7721,7 @@ def _encode_waitcnt_gfx11(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
 
     The gfx11 ``s_waitcnt`` field layout is *different* from the gfx9/gfx10
     split that :func:`_encode_waitcnt_gfx9_10` produces. It was determined
-    empirically on a gfx1151 (Strix Halo) node by assembling each counter
+    empirically on a gfx1151 node by assembling each counter
     in isolation with the ROCm 7.0.2 ``llvm-mc --show-encoding`` (LLVM's
     own AMDGPU ``encodeWaitcnt``); the encoded 16-bit immediates were:
 

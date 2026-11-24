@@ -10,7 +10,7 @@ emission, async copy, and LDS transpose reads — goes behind an
 
 Status (first milestone): for the CDNA targets wired up today (gfx942 / gfx950)
 the datalayout, triple, and the ``s_waitcnt`` *layout* are identical — this is
-hardware-verified for the base f16 GEMM path on both MI300X and MI350X. The
+hardware-verified for the base f16 GEMM path on both gfx942 and gfx950. The
 backend therefore selects the same shared constants for both, while exposing
 distinct classes (``Gfx950Backend`` vs ``Gfx9MfmaBackend``). The
 ``arch.vmcnt_bits`` fact is load-bearing: :meth:`ISABackend.encode_waitcnt`
@@ -339,7 +339,7 @@ class ISABackend:
 
 
 class Gfx950Backend(ISABackend):
-    """CDNA4 / MI350-MI355. 6-bit VMCNT, fp8/bf8/fp4 MFMA, ``ds_read_*_tr_*``,
+    """CDNA4. 6-bit VMCNT, fp8/bf8/fp4 MFMA, ``ds_read_*_tr_*``,
     160 KB LDS. This is the historical default; its output is the byte-identical
     baseline."""
 
@@ -444,7 +444,7 @@ _GFX1250_WMMA_FP8 = {
 
 
 class Gfx11RdnaBackend(ISABackend):
-    """RDNA3 / RDNA3.5 (gfx11, e.g. gfx1151 Strix Halo). **wave32**, **WMMA**
+    """RDNA3 / RDNA3.5 (gfx11, e.g. gfx1151). **wave32**, **WMMA**
     (no MFMA), and a distinct ``s_waitcnt`` layout from gfx9/10. Datalayout +
     triple are identical to CDNA on the ROCm releases we target (clang-verified
     on gfx1151), so those are inherited unchanged."""
@@ -458,7 +458,7 @@ class Gfx11RdnaBackend(ISABackend):
         encoding moved relative to gfx9). The CDNA value ``0x00027000`` makes
         every ``raw.ptr.buffer.load/store`` read 0 / drop on gfx11; this is
         the value that makes bounds-checked raw buffer access work on the
-        gfx1151 Strix Halo box."""
+        gfx1151 box."""
         return 0x31014000
 
     def _emit_named_mma(self, lowerer, op) -> None:
@@ -521,7 +521,7 @@ class Gfx11RdnaBackend(ISABackend):
 
 
 class Gfx12RdnaBackend(Gfx11RdnaBackend):
-    """RDNA4 (gfx12, e.g. gfx1201 Navi 48). **wave32**, **WMMA** with the gfx12
+    """RDNA4 (gfx12, e.g. gfx1201). **wave32**, **WMMA** with the gfx12
     fragment ABI: A/B operands are ``<8 x ...>`` per lane (the RDNA3/3.5
     cross-half duplication was removed) and the accumulator is column-distributed.
     Datalayout / triple / buffer SRD word3 / s_waitcnt layout are inherited from

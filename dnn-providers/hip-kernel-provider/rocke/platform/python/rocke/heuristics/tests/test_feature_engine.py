@@ -30,7 +30,7 @@ from feature_engine import (
 
 @pytest.fixture
 def fe():
-    """Default feature engine with MI355X-like hardware."""
+    """Default feature engine with gfx950-like hardware."""
     return GemmUniversalFeatureEngine(
         num_cus=256,
         lds_capacity=65536,

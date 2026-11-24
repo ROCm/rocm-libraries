@@ -74,7 +74,7 @@ convention for "validate rejected this spec on this arch") which is a SKIP.
 | `distribution_reduce_demo` | reduce | `common.distribution_reduce_demo` | `--M 128 --N 4096 --block-size 256 --vec 8` | torch row-reduce, exact-match verdict |
 | `numeric_differential_lane` | differential | `tests/instances/differential/numeric.py` | `--arch gfx950` | the full L6 numeric lane (GEMM/elementwise/norm/reduce/attention) as one repeatable example; per-config GREEN/XFAIL table digested |
 
-All five are pinned to `gfx950` (the box's MI355X). On a different arch they
+All five are pinned to `gfx950`. On a different arch they
 SKIP rather than fail.
 
 ## Registering another example

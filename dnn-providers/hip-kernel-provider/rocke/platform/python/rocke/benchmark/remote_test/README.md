@@ -59,8 +59,8 @@ benchmark/remote_test/
    On the node, `rocminfo` must enumerate **at least one GPU agent**
    (`Device Type: GPU`) — if only the CPU agent shows up, the host's
    `amdgpu` DRM driver hasn't bound to the device and no container
-   plumbing will rescue it. Common cause on new silicon (e.g. gfx1151
-   Strix Halo / PCI 0x1586): the node's DKMS amdgpu predates the PCI
+   plumbing will rescue it. Common cause on new silicon (e.g. gfx1151,
+   PCI 0x1586): the node's DKMS amdgpu predates the PCI
    ID — needs a ROCm 6.4+ driver bundle. The orchestrator runs
    `rocminfo` as a preflight inside the container and exits 42 with a
    clear message if no GPU agent is found, so this surfaces immediately

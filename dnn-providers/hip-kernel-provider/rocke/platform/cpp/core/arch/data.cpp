@@ -1462,7 +1462,7 @@ static const rocke_mma_op_t k_mma_gfx908[] = {
 };
 
 /* ----------------------------- gfx90a (CDNA2) ---------------------------- */
-/* MI200 (Aldebaran): wave64, 64 KB LDS, no async_lds, no fp8/bf8 native MFMA.
+/* gfx90a: wave64, 64 KB LDS, no async_lds, no fp8/bf8 native MFMA.
  * bf16 32x32x8 is hardware-supported (same MFMA atom dimensions as fp16 32x32x8;
  * bf16 arrived in CDNA2 with the same layout maps as fp16 for those shapes). */
 static const rocke_mma_op_t k_mma_gfx90a[] = {
