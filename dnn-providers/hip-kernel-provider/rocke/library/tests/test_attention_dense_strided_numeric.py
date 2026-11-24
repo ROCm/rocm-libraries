@@ -22,9 +22,9 @@ one of the twelve values wrong): they must fail the comparison. Refusal rows che
 reason.
 
 Every launch, LSE and KV-split cohorts included, goes through
-``run_attention_dense_torch`` of the arch's kernel module on device-buffer views, with an
-allocator of device buffers for the KV-split workspace. Nothing here imports torch: the
-lane that runs it has none.
+``run_attention_dense_torch`` of the arch's kernel module on device-buffer views,
+with an allocator of device buffers for the KV-split workspace. Nothing here imports
+torch: the lane that runs it has none.
 
 Device tests skip on a GPU of another arch or none (``ROCKE_REQUIRE_<ARCH>=1`` turns
 that skip into a failure). The CPU tests run the same checks against a host model of a

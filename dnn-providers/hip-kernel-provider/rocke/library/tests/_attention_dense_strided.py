@@ -52,7 +52,9 @@ from rocke.numeric.sdpa_reference import sdpa_reference
 from .sdpa.helpers import strided_view
 
 ROLES = DENSE_STRIDE_TENSORS  # ("q", "k", "v", "o")
-GUARD = 4096  # poison elements (a token row of every shape fits) in front of and behind every buffer's footprint
+# Poison elements in front of and behind every buffer's footprint (a token row of
+# every shape fits).
+GUARD = 4096
 # Quiet NaNs whose payload is not the canonical one a computation produces (fp16
 # 0x7E00, bf16 0x7FC0): a NaN the kernel writes into a gap is a bit change too.
 POISON_BITS = {"fp16": 0x7E5A, "bf16": 0x7FDA}
@@ -71,6 +73,7 @@ VIEW_HOOK: Callable[[dict], dict] | None = None
 
 
 def encode(values, dtype: str) -> np.ndarray:
+    """Raw 16-bit patterns (``uint16``) of ``values`` in ``dtype`` (fp16 or bf16)."""
     values = np.asarray(values)
     if dtype == "fp16":
         return np.ascontiguousarray(values.astype(np.float16)).view(np.uint16)
@@ -78,6 +81,8 @@ def encode(values, dtype: str) -> np.ndarray:
 
 
 def decode(bits, dtype: str) -> np.ndarray:
+    """The values (float64) of raw 16-bit patterns of ``dtype``: the inverse of
+    :func:`encode`."""
     bits = np.ascontiguousarray(bits, dtype=np.uint16)
     if dtype == "fp16":
         return bits.view(np.float16).astype(np.float64)
@@ -91,6 +96,9 @@ def decode(bits, dtype: str) -> np.ndarray:
 
 @dataclass(frozen=True)
 class Shape:
+    """One problem size: batch, query and key/value lengths, query and KV head counts
+    (the head size comes with the cohort)."""
+
     name: str
     b: int
     sq: int
@@ -105,6 +113,7 @@ class Shape:
         return (self.b, self.hkv, self.skv, d)
 
     def label(self, d: int) -> str:
+        """The shape as text, for seeds and reports."""
         return f"B{self.b} Sq{self.sq} Skv{self.skv} Hq{self.hq} Hkv{self.hkv} D{d}"
 
 
@@ -139,11 +148,14 @@ class Place:
     reported: tuple | None = None
 
     def need(self, dims) -> int:
+        """Buffer elements (before the guard band) the view reaches for ``dims``."""
         n = [dims[0], dims[1], dims[2], dims[3]]
         s = [*self.strides, self.dstride]
         return self.offset + 1 + sum((a - 1) * b for a, b in zip(n, s))
 
     def told(self) -> tuple:
+        """The strides the launch is told: ``reported`` when it lies, else the true
+        ones."""
         return self.strides if self.reported is None else self.reported
 
 
@@ -249,6 +261,8 @@ class Case:
     reason: str = ""  # a refuse case: text the ValueError must contain
 
     def data_place(self, role: str) -> Place:
+        """Where the data of ``role`` is written (the place the launch is told about,
+        except in a negative control)."""
         return (self.data or self.places)[role]
 
 
@@ -420,15 +434,19 @@ class Buffer:
 
     @property
     def itemsize(self) -> int:
+        """Bytes per element of the buffer."""
         return self.host.itemsize
 
     def ptr(self, offset: int = 0) -> int:
+        """The address ``offset`` elements past the guard band."""
         return self.addr + self.itemsize * (GUARD + offset)
 
     def fetch(self) -> np.ndarray:
+        """The buffer's current contents (read back from the backend)."""
         return self.backend.read(self)
 
     def data_ptr(self) -> int:
+        """The address of the first element past the guard band."""
         return self.ptr()
 
 
@@ -444,19 +462,24 @@ class LseView:
         self.buf, self.shape = buf, shape
 
     def data_ptr(self) -> int:
+        """The address of the first LSE element."""
         return self.buf.ptr(0)
 
     def numel(self) -> int:
+        """The element count, as torch reports it."""
         return math.prod(self.shape)
 
     def element_size(self) -> int:
+        """Bytes per element (FP32)."""
         return 4
 
     def stride(self, dim=None):
+        """The contiguous strides in elements (one of them with ``dim``)."""
         st = (self.shape[1] * self.shape[2], self.shape[2], 1, 1)
         return st if dim is None else st[dim]
 
     def is_contiguous(self) -> bool:
+        """Always true: the LSE buffer is packed."""
         return True
 
 
@@ -473,31 +496,39 @@ class View:
         self.shape = (b, s, h, d)
 
     def stride(self, dim=None):
+        """The strides in elements of ``[B, S, H, D]``, as the launch is told."""
         sb, sh, ss = self.place.told()
         st = (sb, ss, sh, self.place.dstride)
         return st if dim is None else st[dim]
 
     def data_ptr(self) -> int:
+        """The address of the view's first element."""
         return self.buf.ptr(self.place.offset + self.shift)
 
     def numel(self) -> int:
+        """The element count, as torch reports it."""
         return math.prod(self.shape)
 
     def element_size(self) -> int:
+        """Bytes per element (fp16 or bf16)."""
         return 2
 
     def is_contiguous(self) -> bool:
+        """Whether the strides the launch is told are the packed BSHD ones."""
         b, h, s, d = self.dims
         return tuple(self.stride()) == (s * h * d, h * d, d, 1)
 
-    def shifted(self, elements: int) -> "View":
+    def shifted(self, elements: int) -> View:
+        """The same view moved ``elements`` elements further into the buffer."""
         return View(self.buf, self.place, self.dims, self.shift + elements)
 
     def window(self, array: np.ndarray, writeable: bool = False) -> np.ndarray:
-        """The view's elements of ``array`` (the buffer's flat contents) as ``[B, S, H, D]``."""
+        """The view's elements of ``array`` (the buffer's flat contents) as
+        ``[B, S, H, D]``."""
         return place_window(array, self.place, self.dims, writeable)
 
     def footprint(self) -> np.ndarray:
+        """A boolean mask over the buffer: True where the view has an element."""
         inside = np.zeros(self.buf.host.size, dtype=bool)
         self.window(inside, writeable=True)[...] = True
         return inside
@@ -513,12 +544,14 @@ def _u8(array: np.ndarray):
 
 
 class _DevicePtr:
-    """An int device address with the ``data_ptr()`` the launcher reads, owning its memory."""
+    """An int device address with the ``data_ptr()`` the launcher reads, owning its
+    memory."""
 
     def __init__(self, mem):
         self._mem = mem
 
     def data_ptr(self) -> int:
+        """The device address of the memory this object owns."""
         return self._mem.ptr()
 
 
@@ -538,9 +571,14 @@ class HipBackend:
         from rocke.runtime import comgr
 
         info = comgr.loaded_compiler_info()
+        # None: COMGR failed to load; no version: the loaded compiler cannot be asked.
+        # Either way every launch has passed, so the label must not fail the cohort.
+        if info is None or info.llvm_version is None:
+            return "llvm unknown"
         return "llvm " + ".".join(str(n) for n in info.llvm_version)
 
     def alloc(self, host: np.ndarray):
+        """Copy ``host`` to a device buffer; ``(address, owner)``."""
         from rocke.runtime.launcher import DeviceMem
 
         mem = DeviceMem(host.nbytes)
@@ -548,6 +586,7 @@ class HipBackend:
         return mem.ptr(), mem
 
     def read(self, buf: Buffer) -> np.ndarray:
+        """The buffer's contents copied back from the device, after a sync."""
         from rocke.runtime import synchronize_and_release
 
         synchronize_and_release()
@@ -563,6 +602,7 @@ class HipBackend:
         return _DevicePtr(DeviceMem(4 * math.prod(shape)))
 
     def launch(self, kmod, spec, arch, q, k, v, o, scale, lse) -> None:
+        """Launch through the production runner of ``kmod`` and wait for it."""
         from rocke.runtime import synchronize_and_release
 
         kmod.run_attention_dense_torch(
@@ -598,11 +638,13 @@ class ModelBackend:
         self._next = 1 << 20
 
     def alloc(self, host: np.ndarray):
+        """A made-up address for ``host`` and a copy of it as the 'device' memory."""
         addr = self._next
         self._next += (host.nbytes + (1 << 16)) & ~0xFFFF
         return addr, host.copy()
 
     def read(self, buf: Buffer) -> np.ndarray:
+        """A copy of the buffer's host-memory contents."""
         return buf.handle.copy()
 
     @staticmethod
@@ -623,6 +665,8 @@ class ModelBackend:
             raise IndexError(f"model kernel out of bounds: {exc}") from exc
 
     def launch(self, kmod, spec, arch, q, k, v, o, scale, lse) -> None:
+        """Admit the strides as the runner does, then compute and write the model's O
+        (and LSE) through them, with the injected ``defect``."""
         ok, why = kmod.supports_attention_dense(spec, arch=arch)
         if not ok:
             raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
@@ -680,6 +724,7 @@ BODIES = {
 
 
 def kernel_module(arch: str):
+    """The dense attention kernel module of ``arch``."""
     return importlib.import_module(f"kernels.{arch}.attention_dense")
 
 
@@ -734,6 +779,9 @@ def make_spec(
 
 @dataclass(frozen=True)
 class Cohort:
+    """One compiled kernel: an arch, a body, a head size, a dtype, a mask and the LSE
+    choice. Its rows launch it with different shapes and strides."""
+
     arch: str
     body: str
     d: int
@@ -744,6 +792,7 @@ class Cohort:
 
     @property
     def id(self) -> str:
+        """The cohort's name in reports and test ids."""
         mask = "causal" if self.causal else "full"
         return f"{self.arch}-{self.body}-d{self.d}-{self.dtype}-{mask}" + (
             "-lse" if self.lse else ""
@@ -825,18 +874,22 @@ PACKED_ROWS = (
 
 
 def tolerance(dtype: str) -> float:
+    """Max absolute error allowed against the fp64 reference for ``dtype``."""
     return TOLERANCE[dtype]
 
 
 @dataclass
 class Logical:
+    """A shape's inputs and reference, in logical ``[B, S, H, D]`` order."""
+
     bits: dict  # role -> uint16 [B, S, H, D]
     o: np.ndarray  # fp64 [B, Sq, Hq, D]
     lse: np.ndarray  # fp64 [B, Hq, Sq]
 
 
 def make_logical(shape: Shape, d: int, dtype: str, causal: bool) -> Logical:
-    """Deterministic Q/K/V (as raw bits) and the fp64 reference of the decoded values."""
+    """Deterministic Q/K/V (as raw bits) and the fp64 reference of the decoded
+    values."""
     seed = zlib.crc32(f"{shape.label(d)}:{dtype}".encode())
     rng = np.random.default_rng(seed)
     bits, f64 = {}, {}
@@ -896,6 +949,9 @@ class Problem:
 
 @dataclass
 class Row:
+    """The outcome of one launch of a cohort: its status, its problems, the strides it
+    was told and its error against the reference."""
+
     cohort: str
     layout: str
     shape: str
@@ -909,6 +965,7 @@ class Row:
 
     @property
     def id(self) -> str:
+        """The row's name in reports: layout and shape."""
         return f"{self.layout}/{self.shape}"
 
 
@@ -959,7 +1016,8 @@ def check_launch(prob: Problem, shape: Shape, spec, logical: Logical, row: Row) 
 def run_case(
     backend, cohort: Cohort, case: Case, shape: Shape, spec, logical: Logical, kmod
 ) -> Row:
-    """Materialize ``case``, launch it and classify the outcome against ``case.expect``."""
+    """Materialize ``case``, launch it and classify the outcome against
+    ``case.expect``."""
     row = Row(cohort.id, case.layout, shape.name, case.expect)
     prob = Problem(backend, case, shape, spec, logical)
     views = dict(prob.views)
@@ -1015,6 +1073,8 @@ def run_case(
 
 @dataclass
 class CohortReport:
+    """The rows of one cohort with its problems, timing and compiler."""
+
     cohort: Cohort
     rows: list
     problems: list
@@ -1025,15 +1085,18 @@ class CohortReport:
 
     @property
     def ok(self) -> bool:
+        """Whether the cohort has no problem."""
         return not self.problems
 
     def counts(self) -> dict:
+        """How many rows ended in each status."""
         out = {}
         for row in self.rows:
             out[row.status] = out.get(row.status, 0) + 1
         return out
 
     def text(self) -> str:
+        """The cohort's summary line followed by one line per problem."""
         head = (
             f"{self.cohort.id}: served={self.served} rows={len(self.rows)} "
             f"{self.counts()} compiles={self.compiles} {self.compiler} "

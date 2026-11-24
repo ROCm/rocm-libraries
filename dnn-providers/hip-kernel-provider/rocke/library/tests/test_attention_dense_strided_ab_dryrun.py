@@ -3,25 +3,31 @@
 """CPU tests of ``benchmarks/common/attention_dense_strided_ab.py``: ``--list`` and
 ``--dry-run`` through real worker processes (one per arm tree, no torch, no GPU, no
 compiler), the control rule, the exclusion of refused and failed cases, the bar check
-in both directions, and the layout model.
+in both directions, the exit codes, the checks on a pre-built export, and the layout
+model.
 
 The tests that run the driver in a subprocess (``_run``: ``--list``, ``--dry-run``,
-``export``) export this rocKE source tree (``platform/python`` beside ``library``), which
-the installed CI tree does not have, so they skip there with that reason; the
+``export``) export this rocKE source tree (``platform/python`` beside ``library``),
+which the installed CI tree does not have, so they skip there with that reason; the
 pure-function tests (layouts, schedule, seeds, reference rows, shape files, spec
-identity, kernarg patching, root resolution) run in the CPU lane. Run the whole file
-from the source tree (pytest or ``run_all.py``) after a change to the harness.
+identity, kernarg patching, root resolution, export checks) run in the CPU lane. Run
+the whole file from the source tree (pytest or ``run_all.py``) after a change to the
+harness.
 
 The dry-run hooks the tests use (all addressed to one arm label):
 ``--dry-run-effect B=0.05`` (synthetic times +5%), ``--dry-run-refuse B=bhsd`` (arm B
-refuses a layout or a case id) and ``--dry-run-wrong B=bhsd`` (arm B's output checks fail).
+refuses a layout or a case id) and ``--dry-run-wrong B=bhsd`` (arm B's output checks
+fail). A dry run's bar never reads PASS (its times are made up), so a passing dry run
+exits with ``DRY_EXIT``, not 0.
 """
 
 from __future__ import annotations
 
 import base64
 import importlib.util
+import inspect
 import itertools
+import json
 import os
 import struct
 import subprocess
@@ -49,15 +55,17 @@ def _load_ab():
 
 ab = _load_ab()
 stats = ab.load_stats()
+DRY_EXIT = stats.EXIT_SYNTHETIC  # a dry run that passes its bar: not a measurement
 
 THREE_SHAPES = """\
 shapes:
-  - {id: g01, model: m, batch: 1, hq: 32, hkv: 8, d: 128, sq: 1024, sk: 1024, mask: causal_tl, dtype: bf16, select: gfx942_dense,
+  - {id: g01, model: m, batch: 1, hq: 32, hkv: 8, d: 128, sq: 1024, sk: 1024,
+     mask: causal_tl, dtype: bf16, select: gfx942_dense,
      override: {persistent: false}, layouts: [bshd, bhsd]}
-  - {id: g03, model: m, batch: 1, hq: 32, hkv: 8, d: 64, sq: 1024, sk: 1024, mask: causal_tl, dtype: bf16, select: gfx942_dense,
-     layouts: [bshd, bhsd]}
-  - {id: g05, model: m, batch: 2, hq: 32, hkv: 32, d: 64, sq: 1024, sk: 1024, mask: none, dtype: fp16, select: gfx942_dense,
-     layouts: [bshd, bhsd]}
+  - {id: g03, model: m, batch: 1, hq: 32, hkv: 8, d: 64, sq: 1024, sk: 1024,
+     mask: causal_tl, dtype: bf16, select: gfx942_dense, layouts: [bshd, bhsd]}
+  - {id: g05, model: m, batch: 2, hq: 32, hkv: 32, d: 64, sq: 1024, sk: 1024,
+     mask: none, dtype: fp16, select: gfx942_dense, layouts: [bshd, bhsd]}
 """
 
 
@@ -89,11 +97,12 @@ def _run(args, check=None):
 
 
 def _arms(*labels):
-    return [x for l in labels for x in ("--arm", f"{l}={_ROCKE}")]
+    return [x for label in labels for x in ("--arm", f"{label}={_ROCKE}")]
 
 
 @pytest.fixture(scope="module")
 def shapes3(tmp_path_factory):
+    """The three-shape file (two layouts each) the dry runs read."""
     path = tmp_path_factory.mktemp("ab_shapes") / "three.yaml"
     path.write_text(THREE_SHAPES)
     return path
@@ -103,7 +112,8 @@ _RUNS: dict = {}
 
 
 def _dry(shapes3, tmp_path_factory, name, *extra):
-    """One dry run (cached per flag set): arms A, B and control A2, all the current tree."""
+    """One dry run (cached per flag set): arms A, B and control A2, all the current
+    tree."""
     key = (name, extra)
     if key not in _RUNS:
         out = tmp_path_factory.mktemp(f"ab_{name}") / "r.yaml"
@@ -132,7 +142,7 @@ def _dry(shapes3, tmp_path_factory, name, *extra):
     return _RUNS[key]
 
 
-# ---- --list ---------------------------------------------------------------------- #
+# ---- --list ------------------------------------------------------------------------ #
 
 
 def test_list_shipped_shapes_with_two_arm_trees_has_equal_spec_identity():
@@ -157,8 +167,8 @@ def test_list_shipped_shapes_with_two_arm_trees_has_equal_spec_identity():
         and "FACTORY ERROR" not in out
     )
     assert (
-        "13 cases on layouts ['bshd']; expectation mismatches/errors/identity differences: 0"
-        in out
+        "13 cases on layouts ['bshd']; expectation mismatches/errors/identity "
+        "differences: 0" in out
     )
     assert (
         "g01/bshd" in out
@@ -168,24 +178,31 @@ def test_list_shipped_shapes_with_two_arm_trees_has_equal_spec_identity():
     )
 
 
-# ---- dry run ---------------------------------------------------------------------- #
+# ---- dry run ----------------------------------------------------------------------- #
 
 
 def test_dry_run_result_is_read_by_bar_and_by_the_analysis(shapes3, tmp_path_factory):
     run, out = _dry(shapes3, tmp_path_factory, "plain")
-    assert run.returncode == 0, run.stdout[-2000:] + run.stderr[-2000:]
-    assert (
-        run.stdout.count("AB_ROW ") == 6
-        and "AB_DONE " in run.stdout
-        and "BAR: PASS" in run.stdout
-    )
+    # Every case passes its checks and the ratios are clean, but the times are made up:
+    # the bar says so and the exit code is not 0.
+    assert run.returncode == DRY_EXIT, run.stdout[-2000:] + run.stderr[-2000:]
+    assert run.stdout.count("AB_ROW ") == 6 and "AB_DONE " in run.stdout
+    assert "BAR: NOT A MEASUREMENT (dry run)" in run.stdout
+    assert "BAR: PASS" not in run.stdout
     result = stats.load_structured(str(out))
     assert result["meta"]["baseline"] == "A" and result["meta"]["control"] == "A2"
+    assert result["meta"]["timing_method"] == stats.DRY_RUN_TIMING
     assert all(a["torch_imported"] is False for a in result["meta"]["arms"].values())
     assert [c["case"] for c in result["cases"]] == [
-        f"{s}/{l}" for s in ("g01", "g03", "g05") for l in ("bshd", "bhsd")
+        f"{s}/{lay}" for s in ("g01", "g03", "g05") for lay in ("bshd", "bhsd")
     ]
-    assert Path(str(out)[:-5] + ".stats.md").exists()
+    # The stats file carries the bar's lines too: read alone, it says the times are
+    # synthetic and whether every expected case is in.
+    md = Path(str(out)[:-5] + ".stats.md").read_text()
+    assert "| grid/bshd | 3 of 3 |" in md
+    assert "run: 6 of 6 expected cases recorded; finished" in md
+    assert "not a measurement" in md
+    assert md.rstrip().endswith("BAR: NOT A MEASUREMENT (dry run)")
     assert {p.name for p in out.parent.glob("*.export.yaml")} == {
         "A.export.yaml",
         "B.export.yaml",
@@ -211,16 +228,35 @@ def test_dry_run_result_is_read_by_bar_and_by_the_analysis(shapes3, tmp_path_fac
         "grid/bhsd": "pass",
     }
     bar = _run(["bar", str(out), "--n-boot", "300"])
-    assert bar.returncode == 0 and "BAR: PASS" in bar.stdout
+    assert bar.returncode == DRY_EXIT and "BAR: NOT A MEASUREMENT" in bar.stdout
     log = out.parent / "run.log"
     log.write_text(run.stdout)  # a log of AB_ROW lines is as good as the result file
     bar_log = _run(["bar", str(log), "--n-boot", "300"])
-    assert bar_log.returncode == 0 and "BAR: PASS" in bar_log.stdout
-    # the other --baseline: against the control's twin the same data still reads (same tree)
+    assert bar_log.returncode == DRY_EXIT
+    assert "run: 6 of 6 expected cases recorded; finished" in bar_log.stdout
+    # the other --baseline: against the control's twin the same data still reads (same
+    # tree)
     other = _run(
         ["bar", str(out), "--n-boot", "300", "--baseline", "A2", "--control", "A"]
     )
-    assert other.returncode == 0 and "baseline=A2 control=A" in other.stdout
+    assert other.returncode == DRY_EXIT and "baseline=A2 control=A" in other.stdout
+
+
+def test_a_finished_result_lists_its_cases_and_says_it_is_complete(
+    shapes3, tmp_path_factory
+):
+    """What ``bar`` needs to tell a finished run from a crashed one: the cases the run
+    promised at its start, a ``complete`` flag, and the same in the log."""
+    run, out = _dry(shapes3, tmp_path_factory, "plain")
+    meta = stats.load_structured(str(out))["meta"]
+    assert meta["expected_cases"] == [
+        f"{s}/{lay}" for s in ("g01", "g03", "g05") for lay in ("bshd", "bhsd")
+    ]
+    assert meta["complete"] is True
+    (done,) = [ln for ln in run.stdout.splitlines() if ln.startswith("AB_DONE ")]
+    assert json.loads(done.split(" ", 1)[1])["complete"] is True
+    (head,) = [ln for ln in run.stdout.splitlines() if ln.startswith("AB_META ")]
+    assert json.loads(head.split(" ", 1)[1])["complete"] is False  # until it ends
 
 
 def test_dry_run_schedule_is_mirrored_and_balanced(shapes3, tmp_path_factory):
@@ -249,12 +285,14 @@ def test_dry_run_bias_fails_the_bar_in_one_direction_only(shapes3, tmp_path_fact
     fast, out_fast = _dry(
         shapes3, tmp_path_factory, "fast", "--dry-run-effect", "B=-0.05"
     )
-    assert (
-        slow.returncode == 0 and fast.returncode == 0
-    )  # the run itself is fine; the bar judges
-    assert "BAR: FAIL" in slow.stdout and "BAR: PASS" in fast.stdout
+    # The run's exit code is its own bar's: a +5% arm fails it (1); the -5% arm passes
+    # every stratum, and only the made-up times keep the run from exiting 0.
+    assert slow.returncode == 1 and fast.returncode == DRY_EXIT
+    assert "BAR: FAIL" in slow.stdout and "BAR: NOT A MEASUREMENT" in fast.stdout
     assert _run(["bar", str(out_slow), "--n-boot", "300"]).returncode == 1
-    assert _run(["bar", str(out_fast), "--n-boot", "300"]).returncode == 0
+    assert _run(["bar", str(out_fast), "--n-boot", "300"]).returncode == DRY_EXIT
+    fast_an = stats.analyze(stats.load_structured(str(out_fast)), n_boot=300)
+    assert {e["arms"]["B"]["verdict"] for e in fast_an["strata"].values()} == {"pass"}
     an = stats.analyze(stats.load_structured(str(out_slow)), n_boot=300)
     for e in an["strata"].values():
         assert e["arms"]["B"]["geomean"] == pytest.approx(1.05, abs=0.01)
@@ -264,10 +302,11 @@ def test_dry_run_bias_fails_the_bar_in_one_direction_only(shapes3, tmp_path_fact
 def test_dry_run_refused_layout_is_excluded_from_that_arms_ratios_and_lost(
     shapes3, tmp_path_factory
 ):
-    """B refuses a layout the baseline serves: the run is valid (exit 0, nothing
-    failed to run), B's ratios skip those cases, and the bar fails them as lost."""
+    """B refuses a layout the baseline serves: the run is valid (no case failed to
+    run), B's ratios skip those cases, and the bar fails them as lost, so the run exits
+    with the bar's 1."""
     run, out = _dry(shapes3, tmp_path_factory, "refuse", "--dry-run-refuse", "B=bhsd")
-    assert run.returncode == 0, run.stdout[-2000:] + run.stderr[-2000:]
+    assert run.returncode == 1, run.stdout[-2000:] + run.stderr[-2000:]
     result = stats.load_structured(str(out))
     for c in result["cases"]:
         b = c["arms"]["B"]
@@ -343,15 +382,92 @@ def test_an_export_for_another_cu_count_is_refused(shapes3, tmp_path_factory):
         "--out",
         str(d / "r.yaml"),
     ]
-    run = _run([*run_args, "--arm", f"A={exp}"], check=1)
+    run = _run([*run_args, "--arm", f"A={exp}"], check=stats.EXIT_NO_DATA)
     assert "built for 228 CUs, this run for 304" in run.stderr
-    _run([*run_args, "--arm", f"A={exp}", "--num-cus", "228"], check=0)
+    _run([*run_args, "--arm", f"A={exp}", "--num-cus", "228"], check=DRY_EXIT)
     doc = stats.load_structured(str(exp))
     del doc["meta"]["num_cus"]
     old = d / "old.yaml"
     old.write_text(stats.dump_flow_yaml(doc))
-    run = _run([*run_args, "--arm", f"A={old}"], check=1)
+    run = _run([*run_args, "--arm", f"A={old}"], check=stats.EXIT_NO_DATA)
     assert "does not record the CU count" in run.stderr
+
+
+def test_a_baseline_that_refuses_the_packed_layout_is_an_error_not_a_skip(
+    shapes3, tmp_path_factory
+):
+    """Every tree serves packed BSHD. A baseline that declines it (a stub gap, a stride
+    bug) must not drop the case from every stratum while the bar passes on the rest;
+    declining another layout stays a neutral skip."""
+    run, out = _dry(
+        shapes3, tmp_path_factory, "base_refuses", "--dry-run-refuse", "A=bshd"
+    )
+    assert run.returncode == 1, run.stdout[-2000:] + run.stderr[-2000:]
+    result = stats.load_structured(str(out))
+    for c in result["cases"]:
+        if c["layout"] == "bshd":
+            assert c["status"] == "error"
+            assert c["arms"]["A"]["status"] == "error"
+            assert "the baseline refused the packed layout" in c["arms"]["A"]["reason"]
+        else:
+            assert c["status"] == "ok"
+    an = stats.analyze(result, n_boot=300)
+    assert an["strata"]["grid/bshd"]["arms"]["B"]["verdict"] == "fail (error)"
+    assert "BAR: FAIL" in run.stdout
+    other, out2 = _dry(
+        shapes3, tmp_path_factory, "base_refuses_bhsd", "--dry-run-refuse", "A=bhsd"
+    )
+    assert other.returncode == DRY_EXIT, other.stdout[-2000:] + other.stderr[-2000:]
+    for c in stats.load_structured(str(out2))["cases"]:
+        assert c["status"] == ("refused" if c["layout"] == "bhsd" else "ok")
+
+
+def _driver_args(shapes, out):
+    return ab.build_parser().parse_args(
+        [
+            "--arch",
+            "gfx942",
+            "--shapes",
+            str(shapes),
+            "--dry-run",
+            "--n-boot",
+            "100",
+            "--control",
+            "A2",
+            "--out",
+            str(out),
+        ]
+    )
+
+
+def test_a_run_that_crashes_partway_leaves_a_result_that_is_not_complete(
+    shapes3, tmp_path_factory, tmp_path, monkeypatch
+):
+    """The result is written after every case; the loop's end is what marks it
+    complete. A fault on the third case leaves two cases, the six that were promised,
+    and no ``complete``, so ``bar`` reads INCOMPLETE and not PASS."""
+    _, plain = _dry(shapes3, tmp_path_factory, "plain")
+    arms = [(x, str(plain.parent / f"{x}.export.yaml")) for x in ("A", "B")]
+    real, done = ab.run_case, []
+
+    def faulting(*args, **kwargs):
+        if len(done) == 2:
+            raise RuntimeError("device fault")
+        done.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(ab, "run_case", faulting)
+    out = tmp_path / "crashed.yaml"
+    with pytest.raises(RuntimeError, match="device fault"):
+        ab.run_driver(_driver_args(shapes3, out), arms, "A", "A2")
+    result = stats.load_structured(str(out))
+    assert [c["case"] for c in result["cases"]] == ["g01/bshd", "g01/bhsd"]
+    assert len(result["meta"]["expected_cases"]) == 6
+    assert result["meta"]["complete"] is False  # the ``finally`` must not set it
+    assert result["meta"]["finished_utc"]  # but it still stamps the end
+    bar = stats.bar_check(stats.analyze(result, n_boot=100))
+    assert bar["verdict"] == "INCOMPLETE" and bar["exit_code"] == stats.EXIT_INCOMPLETE
+    assert any(line.startswith("  missing: g03/bshd") for line in bar["lines"])
 
 
 def test_dry_run_check_failure_excludes_the_case_and_fails_the_arm(
@@ -387,8 +503,8 @@ def test_dry_run_packed_qkv_needs_equal_lengths(tmp_path):
     shapes = tmp_path / "s.yaml"
     shapes.write_text(
         "shapes:\n"
-        "  - {id: c01, batch: 1, hq: 32, hkv: 8, d: 128, sq: 1024, sk: 2048, mask: none, dtype: fp16, select: auto,\n"
-        "     layouts: [bshd, packed_qkv]}\n"
+        "  - {id: c01, batch: 1, hq: 32, hkv: 8, d: 128, sq: 1024, sk: 2048,\n"
+        "     mask: none, dtype: fp16, select: auto, layouts: [bshd, packed_qkv]}\n"
     )
     out = tmp_path / "r.yaml"
     run = _run(
@@ -406,7 +522,7 @@ def test_dry_run_packed_qkv_needs_equal_lengths(tmp_path):
             "--n-boot",
             "200",
         ],
-        check=0,
+        check=DRY_EXIT,
     )
     result = stats.load_structured(str(out))
     by = {c["case"]: c for c in result["cases"]}
@@ -459,19 +575,22 @@ def test_layouts_flag_and_rounds_rule(shapes3):
     )
 
 
-# ---- export: the recorded launches and the kernarg patching ------------------------------ #
+# ---- export: the recorded launches and the kernarg patching ------------------------ #
 
 EXPORT_SHAPES = """\
 shapes:
-  - {id: g01, model: m, batch: 2, hq: 32, hkv: 8, d: 128, sq: 1024, sk: 1024, mask: causal_tl, dtype: bf16, select: gfx942_dense,
+  - {id: g01, model: m, batch: 2, hq: 32, hkv: 8, d: 128, sq: 1024, sk: 1024,
+     mask: causal_tl, dtype: bf16, select: gfx942_dense,
      override: {persistent: false}, layouts: [bshd, bhsd, packed_qkv, batch_slice]}
-  - {id: k01, model: m, batch: 1, hq: 8, hkv: 1, d: 64, sq: 4096, sk: 4096, mask: causal_tl, dtype: fp16, select: gfx942_dense,
+  - {id: k01, model: m, batch: 1, hq: 8, hkv: 1, d: 64, sq: 4096, sk: 4096,
+     mask: causal_tl, dtype: fp16, select: gfx942_dense,
      override: {persistent: false, kv_segments: rule}}
 """
 
 
 @pytest.fixture(scope="module")
 def exported(tmp_path_factory):
+    """The bare dry-run export of case ``g01`` (all four layouts), read back."""
     d = tmp_path_factory.mktemp("ab_export")
     shapes = d / "s.yaml"
     shapes.write_text(EXPORT_SHAPES)
@@ -547,10 +666,12 @@ def test_cu_count_defaults_to_the_device_and_a_mismatched_export_is_refused(
         only="",
         out=str(tmp_path / "r.yaml"),
     )
-    # The advice is to export for this run's count, never to time the other part's specs.
+    # The advice is to export for this run's count, never to time the other part's
+    # specs.
     with pytest.raises(
         SystemExit,
-        match="built for 304 CUs, this run for 228; export it again with --num-cus 228 ",
+        match="built for 304 CUs, this run for 228; export it again with "
+        "--num-cus 228 ",
     ):
         ab.run_driver(run, [("A", str(export)), ("B", str(export))], "A", "A2")
 
@@ -575,7 +696,7 @@ def test_control_loads_the_baselines_code_object(tmp_path):
             str(out),
             "--no-stats",
         ],
-        check=0,
+        check=stats.EXIT_NO_DATA,  # no analysis, so no verdict: not an exit 0
     )
     for c in stats.load_structured(str(out))["cases"]:
         a = c["arms"]
@@ -606,11 +727,21 @@ def test_kv_split_export_records_the_combine_and_the_workspace(tmp_path):
     (rec,) = doc["cases"]
     main, combine = rec["launches"]
     assert rec["workspace_groups"] == 3 and "reduce" in combine["kernel"]
-    groups = lambda ln: [s["workspace"] for s in ln["slots"] if "workspace" in s]
+    # The recorded size is what the runner asked for: its largest buffer is the
+    # [B * Sq, Hq, segments, D] FP32 accumulator, whatever the harness assumes.
+    segments = rec["report"]["summary"]["kv_segments"]
+    assert segments > 1
+    assert rec["workspace_bytes"] == 4 * (1 * 4096) * 8 * segments * 64
+    assert rec["signature"] == ab.case_signature(
+        {**ab.load_shapes(str(shapes))[1], "layout": "bshd"}
+    )
+
+    def groups(launch):
+        return [s["workspace"] for s in launch["slots"] if "workspace" in s]
+
     assert sorted(set(groups(main))) == [0, 1, 2]
-    assert (
-        1 in groups(combine) and groups(combine).count(1) == 2
-    )  # seq_lens aliases the max buffer
+    # seq_lens aliases the max buffer
+    assert 1 in groups(combine) and groups(combine).count(1) == 2
     assert [s["buffer"] for s in combine["slots"] if "buffer" in s] == ["o"]
 
 
@@ -687,7 +818,255 @@ def test_locate_refuses_a_stray_sentinel_and_a_wrong_slot():
         ab.locate_pointer_slots(_signature(), values, bytes(ka), bases, {})
 
 
-# ---- the control rule and the arguments ------------------------------------------------- #
+# ---- a pre-built export is held to this run ---------------------------------------- #
+
+G01_CASE = {
+    "case": "g01/bshd",
+    "id": "g01",
+    "batch": 1,
+    "hq": 32,
+    "hkv": 8,
+    "d": 128,
+    "sq": 1024,
+    "sk": 1024,
+    "mask": "causal_tl",
+    "dtype": "bf16",
+    "select": "gfx942_dense",
+    "override": {"persistent": False},
+    "layout": "bshd",
+}
+
+
+def _export_doc(case=G01_CASE, **meta):
+    record = {"case": case["case"], "signature": ab.case_signature(case)}
+    return {
+        "meta": {"num_cus": 304, "arch": "gfx942", **meta},
+        "by_case": {case["case"]: record},
+    }
+
+
+def test_case_signature_holds_what_decides_the_launches_and_nothing_else():
+    named = {**G01_CASE, "model": "x", "expect": {"body": "grid"}, "case": "z"}
+    sig = ab.case_signature(named)
+    assert set(sig) == set(ab.SIGNATURE_FIELDS)
+    assert sig == ab.case_signature(G01_CASE)  # a label or an expectation is not one
+    assert sig["override"] == {"persistent": False}
+    assert json.loads(json.dumps(sig)) == sig
+    bare = {k: v for k, v in G01_CASE.items() if k != "override"}
+    assert ab.case_signature(bare)["override"] is None
+
+
+def test_an_export_built_for_this_run_is_accepted():
+    ab.check_export("A", _export_doc(), [G01_CASE], "gfx942", 304)
+    other_label = {**G01_CASE, "model": "renamed", "expect": {"body": "persistent"}}
+    ab.check_export("A", _export_doc(), [other_label], "gfx942", 304)
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        ({"hq": 16}, r"hq: exported 32, now 16"),
+        ({"sq": 2048, "mask": "none"}, r"sq: exported 1024, now 2048; mask: exported"),
+        ({"override": {"persistent": True}}, r"override: exported \{'persistent'"),
+        ({"layout": "bhsd"}, r"layout: exported 'bshd', now 'bhsd'"),
+    ],
+)
+def test_an_export_of_another_shape_is_refused_naming_the_field(change, reason):
+    """The shape file changed after the export (same ids, other numbers): launching the
+    stale kernargs on buffers sized for the new shape could write out of bounds."""
+    stale = _export_doc()
+    now = {**G01_CASE, **change}
+    stale["by_case"][now["case"]]["signature"] = ab.case_signature(G01_CASE)
+    with pytest.raises(
+        SystemExit,
+        match=r"arm A: its export of case g01/bshd was built for another shape \("
+        + reason,
+    ):
+        ab.check_export("A", stale, [now], "gfx942", 304)
+
+
+def test_an_export_that_lacks_a_case_or_its_shape_or_the_arch_is_refused():
+    missing = {**G01_CASE, "case": "g01/bhsd", "layout": "bhsd"}
+    with pytest.raises(SystemExit, match="its export holds no case 'g01/bhsd'"):
+        ab.check_export("A", _export_doc(), [missing], "gfx942", 304)
+    old = _export_doc()
+    del old["by_case"]["g01/bshd"]["signature"]
+    with pytest.raises(SystemExit, match="does not record the shape it was built for"):
+        ab.check_export("A", old, [G01_CASE], "gfx942", 304)
+    with pytest.raises(
+        SystemExit, match="built for arch 'gfx942', this run is for 'gfx950'"
+    ):
+        ab.check_export("A", _export_doc(), [G01_CASE], "gfx950", 304)
+    with pytest.raises(SystemExit, match="built for arch None"):
+        ab.check_export("A", _export_doc(arch=None), [G01_CASE], "gfx942", 304)
+    with pytest.raises(SystemExit, match="built for 228 CUs, this run for 304"):
+        ab.check_export("A", _export_doc(num_cus=228), [G01_CASE], "gfx942", 304)
+
+
+def test_a_stale_or_short_export_file_is_refused_before_anything_is_timed(
+    shapes3, tmp_path_factory, tmp_path
+):
+    _, plain = _dry(shapes3, tmp_path_factory, "plain")
+    arms = [
+        x
+        for lab in ("A", "B")
+        for x in ("--arm", f"{lab}={plain.parent / lab}.export.yaml")
+    ]
+    base = ["--arch", "gfx942", "--baseline", "A", "--control", "A2", "--dry-run"]
+    out = tmp_path / "r.yaml"
+    edited = tmp_path / "edited.yaml"
+    edited.write_text(
+        THREE_SHAPES.replace("hq: 32, hkv: 8, d: 128", "hq: 16, hkv: 8, d: 128")
+    )
+    refused = stats.EXIT_NO_DATA  # no verdict: not the 1 of a failed case
+    run = _run(
+        [*base, "--shapes", str(edited), *arms, "--out", str(out)], check=refused
+    )
+    assert (
+        "its export of case g01/bshd was built for another shape "
+        "(hq: exported 32, now 16)"
+    ) in run.stderr
+    longer = tmp_path / "longer.yaml"
+    longer.write_text(
+        THREE_SHAPES
+        + "  - {id: g07, batch: 1, hq: 8, hkv: 8, d: 64, sq: 1024, sk: 1024,\n"
+        "     mask: none, dtype: fp16, select: gfx942_dense}\n"
+    )
+    run = _run(
+        [*base, "--shapes", str(longer), *arms, "--out", str(out)], check=refused
+    )
+    assert "its export holds no case 'g07/bshd'" in run.stderr
+    assert not out.exists()  # nothing ran
+
+
+def test_arms_built_by_different_compilers_are_refused_before_anything_is_timed(
+    shapes3, tmp_path_factory, tmp_path
+):
+    """A compiler change reads as a code change, and the control cannot show it: the
+    arms of one run must come from one compiler."""
+    _, plain = _dry(shapes3, tmp_path_factory, "plain")
+    compiler = {"llvm_version": [22, 0, 0], "comgr_path": "/rocm/lib/libamd_comgr.so"}
+    files = {}
+    for label in ("A", "B"):
+        doc = stats.load_structured(str(plain.parent / f"{label}.export.yaml"))
+        doc["meta"]["compiler"] = compiler if label == "A" else None
+        files[label] = tmp_path / f"{label}.export.yaml"
+        files[label].write_text(stats.dump_flow_yaml(doc))
+    args = [
+        "--arch",
+        "gfx942",
+        "--shapes",
+        str(shapes3),
+        "--arm",
+        f"A={files['A']}",
+        "--arm",
+        f"B={files['B']}",
+        "--control",
+        "A2",
+        "--dry-run",
+        "--n-boot",
+        "100",
+        "--out",
+        str(tmp_path / "r.yaml"),
+    ]
+    run = _run(args, check=stats.EXIT_NO_DATA)
+    assert "arm 'B' was compiled with None, baseline 'A' with ((22, 0, 0)" in run.stderr
+    assert "export every arm in the environment that will time them" in run.stderr
+    doc = stats.load_structured(str(files["B"]))
+    doc["meta"]["compiler"] = dict(compiler)
+    files["B"].write_text(stats.dump_flow_yaml(doc))
+    _run(args, check=DRY_EXIT)  # the same compiler in both: timed
+
+
+def test_a_refusal_exits_with_no_verdict_and_its_reason_not_as_a_failure(
+    tmp_path, capsys
+):
+    """The harness refuses input by raising ``SystemExit`` with the reason; ``main``
+    prints it and exits ``EXIT_NO_DATA``, so a script never reads a stale export or an
+    unreadable file as the ``EXIT_FAIL`` of a slower or wrong arm. In-process (no
+    driver subprocess, no source tree), so it runs in the installed CPU lane."""
+    export = tmp_path / "a.export.yaml"
+    export.write_text(json.dumps({"meta": {"num_cus": 304, "arch": "gfx942"}}))
+    run = ["--arch", "gfx942", "--control", "A2", "--dry-run"]
+    run += ["--out", str(tmp_path / "r.yaml")]
+    junk_rows = tmp_path / "rows.yaml"
+    junk_rows.write_text("shapes: [1, 2]\n")
+    refusals = [
+        ([f"A={export}"], str(_SHAPES), "not an export"),
+        ([f"A={tmp_path}"], str(_SHAPES), "not a rocKE root"),
+        ([f"A={export}"], str(tmp_path / "nope.yaml"), "cannot read the shape file"),
+        ([f"A={export}"], str(junk_rows), "no shapes"),
+    ]
+    for arm, shapes, why in refusals:
+        argv = [*run, "--arm", *arm, "--shapes", shapes]
+        assert ab.main(argv) == stats.EXIT_NO_DATA != stats.EXIT_FAIL, why
+        assert why in capsys.readouterr().err
+    # An export of this run's CU count and arch that lacks the cases: stale.
+    stale = {"meta": _export_doc()["meta"], "cases": []}
+    export.write_text(stats.dump_flow_yaml(stale))
+    argv = [*run, "--arm", f"A={export}", "--shapes", str(_SHAPES)]
+    assert ab.main(argv) == stats.EXIT_NO_DATA
+    assert "its export holds no case" in capsys.readouterr().err
+    junk_log = tmp_path / "run.log"
+    junk_log.write_text("no rows here\n")
+    assert ab.main(["bar", str(junk_log)]) == stats.EXIT_NO_DATA
+    assert "refused: " in capsys.readouterr().err
+    with pytest.raises(SystemExit) as usage:  # argparse keeps its own exit code
+        ab.main(["--arch", "gfx1"])
+    assert usage.value.code == 2
+
+
+def test_the_workspace_allocator_keeps_the_largest_size_it_was_asked_for():
+    alloc = ab._WorkspaceAddresses()
+    big, small = alloc((4, 3, 2, 128)), alloc((4, 3, 2))
+    assert alloc.count == 2 and alloc.max_bytes == 4 * 4 * 3 * 2 * 128
+    assert big.data_ptr() != small.data_ptr()
+
+
+def test_segment_workspace_bytes_uses_the_recorded_size_or_the_old_runners_rule():
+    case = {"batch": 2, "sq": 1024, "hq": 8, "d": 64}
+    formula = 4 * 2 * 1024 * 8 * 3 * 64  # [B * Sq, Hq, segments, D] in FP32
+    huge = {"workspace_groups": 3, "workspace_bytes": 10**9}
+    tiny = {"workspace_groups": 3, "workspace_bytes": 5}
+    older = {"workspace_groups": 3, "workspace_bytes": None}  # allocates its own
+    assert ab.segment_workspace_bytes([huge, tiny], case, 3) == 10**9
+    assert ab.segment_workspace_bytes([older], case, 3) == formula
+    assert ab.segment_workspace_bytes([tiny, older], case, 3) == formula
+    assert ab.segment_workspace_bytes([{"workspace_groups": 0}], case, 1) == 0
+    assert ab.segment_workspace_bytes([], case, 1) == 0
+
+
+def test_the_public_surface_is_listed_and_documented():
+    """``__all__`` names every public function and class the module defines, each name
+    resolves, and each callable and public method carries a docstring."""
+    defined = {
+        name
+        for name, obj in vars(ab).items()
+        if not name.startswith("_")
+        and (inspect.isfunction(obj) or inspect.isclass(obj))
+        and obj.__module__ == ab.__name__
+    }
+    assert defined <= set(ab.__all__), sorted(defined - set(ab.__all__))
+    assert [n for n in ab.__all__ if not hasattr(ab, n)] == []
+    undocumented = []
+    for name in ab.__all__:
+        obj = getattr(ab, name)
+        if not callable(obj):
+            continue
+        if not inspect.getdoc(obj):
+            undocumented.append(name)
+        if inspect.isclass(obj):
+            undocumented += [
+                f"{name}.{meth}"
+                for meth, fn in vars(obj).items()
+                if inspect.isfunction(fn)
+                and not meth.startswith("_")
+                and not inspect.getdoc(fn)
+            ]
+    assert undocumented == []
+
+
+# ---- the control rule and the arguments -------------------------------------------- #
 
 
 def test_control_is_a_new_label_and_the_arguments_are_checked(shapes3, tmp_path):
@@ -717,17 +1096,17 @@ def test_resolve_rocke_root_accepts_the_root_and_the_repository_root(tmp_path):
     assert ab.resolve_rocke_root(str(link)) == str(
         root.resolve()
     )  # a symlink is the same tree
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit, match="not a rocKE root"):
         ab.resolve_rocke_root(str(tmp_path))
     assert (
         ab.parse_arms([f"A={root}", f"A2={tmp_path / 'repo'}"])[0][1]
         == ab.parse_arms([f"A2={tmp_path / 'repo'}"])[0][1]
     )
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit, match="label must match"):
         ab.parse_arms([f"bad label={root}"])
 
 
-# ---- the layout model and the schedule (pure functions) ---------------------------------- #
+# ---- the layout model and the schedule (pure functions) ---------------------------- #
 
 
 def _elements(view):
@@ -796,10 +1175,10 @@ def test_layout_strides_by_layout():
 
 
 def test_layout_packed_qkv_needs_equal_lengths():
-    with pytest.raises(ab.LayoutNotApplicable):
+    with pytest.raises(ab.LayoutNotApplicable, match="packed_qkv needs sq == sk"):
         ab.layout_plan("packed_qkv", _shape(sq=4, sk=8))
     ab.layout_plan("batch_slice", _shape(sq=4, sk=8))  # the others take any lengths
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="unknown layout 'nope'"):
         ab.layout_plan("nope", _shape())
 
 
@@ -838,9 +1217,9 @@ def test_expand_cases_filters():
     assert len(ab.expand_cases(shapes)) == 13
     one = ab.expand_cases(shapes, only=["g01", "k02"])
     assert [c["case"] for c in one] == ["g01/bshd", "k02/bshd"]
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit, match="no case left after --only / --layouts"):
         ab.expand_cases(shapes, layouts=["bhsd"])  # no shape lists it
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit, match=r"--only: unknown shape ids \['nope'\]"):
         ab.expand_cases(shapes, only=["nope"])
 
 
@@ -899,3 +1278,26 @@ def test_a_kernel_name_or_spec_field_difference_is_a_spec_mismatch():
     assert not ab.identities_equal({"A": base, "B": _identity(block_n=128)})
     assert ab.identities_equal({"A": base, "B": _identity(block_n=64)})
     assert ab.tuning_ids_equal({"A": base, "B": _identity(block_n=64)}) is True
+
+
+# ---- the strided numeric helper: a part that needs no device ----------------------- #
+
+
+def test_the_numeric_helpers_compiler_label_survives_a_compiler_it_cannot_query(
+    monkeypatch,
+):
+    """The label is read after every launch of a cohort has passed: a COMGR that failed
+    to load, or that cannot say its version, must not turn that into an error."""
+    from rocke.runtime import comgr
+
+    from . import _attention_dense_strided as helper
+
+    for info in (None, types.SimpleNamespace(llvm_version=None)):
+        monkeypatch.setattr(comgr, "loaded_compiler_info", lambda info=info: info)
+        assert helper.HipBackend.compiler_label() == "llvm unknown"
+    monkeypatch.setattr(
+        comgr,
+        "loaded_compiler_info",
+        lambda: types.SimpleNamespace(llvm_version=(22, 1, 0)),
+    )
+    assert helper.HipBackend.compiler_label() == "llvm 22.1.0"
