@@ -14197,7 +14197,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2_strided_batched_64(rocblas_handle   
             beta specifies the scalar beta. When beta is
             zero, then C need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C       pointer storing matrix C on the GPU.
             Matrix dimension is m by n.
 
@@ -14328,7 +14328,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemm_64(rocblas_handle                han
             beta specifies the scalar beta. When beta is
             zero, then C_i need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C       device array of device pointers storing each matrix C_i on the GPU.
             Matrix dimension is m by n.
 
@@ -14476,7 +14476,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemm_batched_64(rocblas_handle           
             beta specifies the scalar beta. When beta is
             zero, then C need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C        device pointer to first matrix C_1 of dimension (ldc, n) on the GPU.
 
     @param[in]
@@ -14622,7 +14622,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemm_strided_batched_64(rocblas_handle   
             beta specifies the scalar beta. When beta is
             zero, then C need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C       pointer storing matrix C on the GPU.
             The imaginary component of the diagonal elements are not used but are set to zero unless quick return.
             Only the upper/lower triangular part is accessed.
@@ -14738,7 +14738,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherk_64(rocblas_handle                han
             beta specifies the scalar beta. When beta is
             zero, then C need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C       device array of device pointers storing each matrix C_i on the GPU.
             The imaginary component of the diagonal elements are not used but are set to zero unless quick return.
             Only the upper/lower triangular part of each C_i is accessed.
@@ -14866,7 +14866,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherk_batched_64(rocblas_handle           
             beta specifies the scalar beta. When beta is
             zero, then C need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C       Device pointer to the first matrix C_1 on the GPU.
             The imaginary component of the diagonal elements are not used but are set to zero unless quick return.
             Only the upper/lower triangular part of each C_i is accessed.
@@ -15012,7 +15012,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherk_strided_batched_64(rocblas_handle   
             beta specifies the scalar beta. When beta is
             zero, then C need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C       pointer storing matrix C on the GPU.
             The imaginary component of the diagonal elements are not used but are set to zero unless quick return.
             Only the upper/lower triangular part is accessed.
@@ -15144,7 +15144,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher2k_64(rocblas_handle                ha
             beta specifies the scalar beta. When beta is
             zero, then C need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C       device array of device pointers storing each matrix C_i on the GPU.
             The imaginary component of the diagonal elements are not used but are set to zero unless quick return.
             Only the upper/lower triangular part of each C_i is accessed.
@@ -15293,7 +15293,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher2k_batched_64(rocblas_handle          
             beta specifies the scalar beta. When beta is
             zero, then C need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C       Device pointer to the first matrix C_1 on the GPU.
             The imaginary component of the diagonal elements are not used but are set to zero unless quick return.
             Only the upper/lower triangular part of each C_i is accessed.
@@ -15452,7 +15452,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher2k_strided_batched_64(rocblas_handle  
             beta specifies the scalar beta. When beta is
             zero, then C need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C       pointer storing matrix C on the GPU.
             The imaginary component of the diagonal elements are not used but are set to zero unless quick return.
             Only the upper/lower triangular part is accessed.
@@ -15588,7 +15588,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherkx_64(rocblas_handle                ha
             beta specifies the scalar beta. When beta is
             zero, then C need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C       device array of device pointers storing each matrix C_i on the GPU.
             The imaginary component of the diagonal elements are not used but are set to zero unless quick return.
             Only the upper/lower triangular part of each C_i is accessed.
@@ -15740,7 +15740,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherkx_batched_64(rocblas_handle          
             beta specifies the scalar beta. When beta is
             zero, then C need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C       Device pointer to the first matrix C_1 on the GPU.
             The imaginary component of the diagonal elements are not used but are set to zero unless quick return.
             Only the upper/lower triangular part of each C_i is accessed.
@@ -15895,7 +15895,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherkx_strided_batched_64(rocblas_handle  
             beta specifies the scalar beta. When beta is
             zero, then C need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C       pointer storing matrix C on the GPU.
             Matrix dimension is m by n.
 
@@ -16081,7 +16081,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymm_64(rocblas_handle                han
             beta specifies the scalar beta. When beta is
             zero, then C_i need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C       device array of device pointers storing each matrix C_i on the GPU.
             Matrix dimension is m by n.
 
@@ -16288,7 +16288,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymm_batched_64(rocblas_handle           
             beta specifies the scalar beta. When beta is
             zero, then C need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C        device pointer to first matrix C_1 of dimension (ldc, n) on the GPU.
 
     @param[in]
@@ -16512,7 +16512,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymm_strided_batched_64(rocblas_handle   
             beta specifies the scalar beta. When beta is
             zero, then C need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C       pointer storing matrix C on the GPU.
             Only the upper/lower triangular part is accessed.
 
@@ -16678,7 +16678,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrk_64(rocblas_handle                han
             beta specifies the scalar beta. When beta is
             zero, then C need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C       device array of device pointers storing each matrix C_i on the GPU.
             Only the upper/lower triangular part of each C_i is accessed.
 
@@ -16859,7 +16859,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrk_batched_64(rocblas_handle           
             beta specifies the scalar beta. When beta is
             zero, then C need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C       Device pointer to the first matrix C_1 on the GPU.
             Only the upper/lower triangular part of each C_i is accessed.
 
@@ -17068,7 +17068,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrk_strided_batched_64(rocblas_handle   
             beta specifies the scalar beta. When beta is
             zero, C need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C       pointer storing matrix C on the GPU.
 
     @param[in]
@@ -17257,7 +17257,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2k_64(rocblas_handle                ha
             beta specifies the scalar beta. When beta is
             zero, C need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C       device array of device pointers storing each matrix C_i on the GPU.
 
     @param[in]
@@ -17467,7 +17467,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2k_batched_64(rocblas_handle          
             beta specifies the scalar beta. When beta is
             zero, C need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C       Device pointer to the first matrix C_1 on the GPU.
 
     @param[in]
@@ -17701,7 +17701,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2k_strided_batched_64(rocblas_handle  
             beta specifies the scalar beta. When beta is
             zero, C need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C       pointer storing matrix C on the GPU.
             Only the upper/lower triangular part is accessed.
 
@@ -17895,7 +17895,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrkx_64(rocblas_handle                ha
             beta specifies the scalar beta. When beta is
             zero, then C need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C       device array of device pointers storing each matrix C_i on the GPU.
             Only the upper/lower triangular part of each C_i is accessed.
 
@@ -18110,7 +18110,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrkx_batched_64(rocblas_handle          
             beta specifies the scalar beta. When beta is
             zero, C need not be set before entry.
 
-    @param[in]
+    @param[in, out]
     C       Device pointer to the first matrix C_1 on the GPU.
             Only the upper/lower triangular part of each C_i is accessed.
 
@@ -23891,7 +23891,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_trsm_strided_batched_ex(rocblas_handle    
             zero, then C need not be set before
             entry. Same datatype as compute_type.
 
-    @param[in]
+    @param[in, out]
     C       pointer storing matrix C on the GPU.
             Only the upper/lower triangular part is accessed.
     @param[in]
@@ -23992,7 +23992,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_syrk_ex(rocblas_handle    handle,
             zero, then C need not be set before
             entry. Same datatype as the real component of the compute_type.
 
-    @param[in]
+    @param[in, out]
     C       pointer storing matrix C on the GPU.
             Only the upper/lower triangular part is accessed.
 
