@@ -839,6 +839,10 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
 #undef TRY_ADD_MOD
 #undef HANDLE_INST_TYPE
 
+    if (inst->keepWait) {
+        stinkyInst->addModifier<KeepWaitData>(KeepWaitData{});
+    }
+
     // Always add comment if present
     if (!inst->comment.empty()) {
         stinkyInst->addModifier<CommentData>(CommentData{inst->comment});
@@ -1342,6 +1346,7 @@ std::shared_ptr<LogicalInstruction> createLogicalFromRocisa(
     }
     LogicalInstruction* logical = IRBase::createIR<LogicalInstruction>(opcode);
     logical->comment = inst.comment;
+    logical->keepWait = inst.keepWait;
     fillLogicalOperands(logical, &inst, asmCaps, hasVgprMsb, archId);
     applyLogicalPayload(logical, &inst, asmCaps);
     return makeLogicalInstructionShared(logical);

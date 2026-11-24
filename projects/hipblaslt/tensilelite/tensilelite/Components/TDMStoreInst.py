@@ -59,9 +59,12 @@ from .NonTemporal import tdmCacheModifiers
 # PackData and TensorDataMover are imported where they are used: they load every component
 # (Component.py), and GlobalWriteBatch imports Solution, which imports this module.
 
-# StinkyRemoveWaitCntPass never removes a wait whose comment contains this tag. The TDM block tags
-# the waits that WaitCntInsertion does not re-derive.
-STINKY_KEEP = "[stinky-keep]"
+
+def _keptWait(wait):
+  """Mark a wait that WaitCntInsertion does not re-derive, so that StinkyRemoveWaitCntPass keeps it."""
+  wait.keepWait = True
+  return wait
+
 
 # The DS instruction offset field is 16-bit unsigned.
 DS_OFFSET_MAX = 0xFFFF
@@ -555,8 +558,7 @@ def emitTDMStoreLoadC(gwb) -> Module:
       module.add(_skipTest(gwb, sizeJ, tmp))
       module.add(SCBranchSCC1(labelName=skipLoad.getLabelName(), comment="skip the load"))
       module.add(tdm.issueLoad(group0.idx, group1.idx, tensor=tdmStoreModifiers(kw.states.asmCaps, gwb.kernel, "C")))
-      # StinkyRemoveWaitCntPass keeps a wait marked stinky-keep; nothing re-derives this one.
-      module.add(SWaitTensorcnt(tensorcnt=0, comment="wait for the TDM load of C " + STINKY_KEEP))
+      module.add(_keptWait(SWaitTensorcnt(tensorcnt=0, comment="wait for the TDM load of C")))
       module.add(skipLoad)
   module.add(kw._syncThreads(gwb.kernel, "every wave has loaded its part of the C tile"))
   return module
@@ -582,14 +584,13 @@ def emitTDMStoreFlush(gwb) -> Module:
       kw.allocTmpSgpr(4, alignment=4, tag="TDMStoreInst store descriptor group0") as group0:
     with kw.allocTmpSgpr(2, tag="TDMStoreInst store temporaries") as tmp:
       _tdmStoreDescriptor(gwb, module, tdm, group0.idx, group1.idx, tmp, "D")
-      # StinkyRemoveWaitCntPass keeps a wait marked stinky-keep; nothing re-derives this one.
-      module.add(SWaitCnt(dscnt=0, comment="staging stores done " + STINKY_KEEP))
+      module.add(_keptWait(SWaitCnt(dscnt=0, comment="staging stores done")))
       module.add(kw._syncThreads(gwb.kernel, "every wave has staged its part of the tile"))
       module.add(_skipTest(gwb, sizeJ, tmp))
       module.add(SCBranchSCC1(labelName=skipStore.getLabelName(), comment="skip the store"))
       module.add(tdm.issueStore(group0.idx, group1.idx, tensor=tdmStoreModifiers(kw.states.asmCaps, gwb.kernel)))
-      # Nor this one: after the OptNLL store, nothing re-derives it before s_endpgm.
-      module.add(SWaitTensorcnt(tensorcnt=0, comment="wait for the TDM store " + STINKY_KEEP))
+      # After the OptNLL store, nothing re-derives this wait before s_endpgm.
+      module.add(_keptWait(SWaitTensorcnt(tensorcnt=0, comment="wait for the TDM store")))
       module.add(skipStore)
   if isPersistent(gwb.kernel) and not _handoffBarriersLds(gwb.kernel):
     sync = kw._syncThreads(gwb.kernel, "every TDM store is done with the staged tile before the next tile writes LDS")

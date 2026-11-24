@@ -23,9 +23,9 @@
 // is not configurable; RemoveWaitCntOptions then applies policy to whatever
 // remains legal.
 //
-// A wait whose comment carries "stinky-keep" is kept before either check: its
-// emitter guards a hazard that StinkyWaitCntInsertionPass does not re-derive at
-// that point, although it regenerates waits of that opcode elsewhere.
+// A wait that carries KeepWaitData is kept before either check: its emitter
+// guards a hazard that StinkyWaitCntInsertionPass does not re-derive at that
+// point, although it regenerates waits of that opcode elsewhere.
 // ----------------------------------------------------------------------------
 
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
@@ -63,10 +63,9 @@ bool shouldRemove(const StinkyInstruction& inst, const RemoveWaitCntOptions& opt
     // IF_WaitTensorCnt is disjoint from IF_WaitCnt, so isWaitCnt() alone would
     // miss s_wait_tensorcnt.
     if (!isWaitCnt(inst) && !inst.is(InstFlag::IF_WaitTensorCnt)) return false;
-    // A wait whose comment carries "stinky-keep" guards a hazard WaitCntInsertion does not
-    // re-derive, such as the dscnt before a tensor_store_from_lds, so it is never removed.
-    if (const auto* c = inst.getModifier<CommentData>())
-        if (c->comment.find("stinky-keep") != std::string::npos) return false;
+    // KeepWaitData marks a wait whose hazard WaitCntInsertion does not re-derive, such as the
+    // dscnt before a tensor_store_from_lds, so it is never removed.
+    if (inst.getModifier<KeepWaitData>() != nullptr) return false;
     return isLegalToRemove(inst) && isRemovalWanted(inst, options);
 }
 

@@ -208,6 +208,9 @@ namespace rocisa
         std::shared_ptr<MemTokenData> m_memToken;
         // Complete GIR semantic action record carried with every physical realization.
         std::shared_ptr<GirActionData> m_girAction;
+        // StinkyRemoveWaitCntPass keeps a wait with keepWait set: its emitter guards a hazard
+        // that the wait-count insertion does not re-derive. StinkyTofu reads it as KeepWaitData.
+        bool keepWait = false;
 
         Instruction(InstType instType, const std::string& comment = "")
             : instType(instType)
@@ -227,6 +230,7 @@ namespace rocisa
                                           : nullptr)
             , m_girAction(other.m_girAction ? std::make_shared<GirActionData>(*other.m_girAction)
                                             : nullptr)
+            , keepWait(other.keepWait)
         {
         }
 
@@ -432,9 +436,14 @@ namespace rocisa
             return {};
         };
 
+        // compositeToInstruction replaces a composite by these before StinkyTofu converts the
+        // kernel, so they carry its keepWait.
         std::vector<std::shared_ptr<Instruction>> getInstructions()
         {
-            return setupInstructions();
+            auto instructions = setupInstructions();
+            for(auto& instruction : instructions)
+                instruction->keepWait = keepWait;
+            return instructions;
         }
 
         std::vector<InstructionInput> getParams() const override

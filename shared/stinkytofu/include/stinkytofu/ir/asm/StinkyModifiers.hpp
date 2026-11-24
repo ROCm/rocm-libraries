@@ -316,6 +316,7 @@ struct Modifier {
         EXEC_GROUP,
         TENSOR,
         GIR_ACTION,
+        KEEP_WAIT,
     };
 
     Modifier(Type type) : type(type) {}
@@ -1177,6 +1178,16 @@ struct WmmaPoolData : public TypedModifier<WmmaPoolData> {
     uint32_t poolIndex = 0;
 
     explicit WmmaPoolData(uint32_t idx) : TypedModifier<WmmaPoolData>(), poolIndex(idx) {}
+};
+
+/// Marks a wait that StinkyRemoveWaitCntPass keeps: its emitter guards a hazard that
+/// StinkyWaitCntInsertionPass does not re-derive at that point, such as the s_wait_dscnt before a
+/// tensor_store_from_lds. Both lowering paths set it from rocisa::Instruction::keepWait, and
+/// legalizeWaitCnt copies it to every wait it splits an s_waitcnt into.
+struct KeepWaitData : public TypedModifier<KeepWaitData> {
+    static constexpr Modifier::Type Type = Modifier::Type::KEEP_WAIT;
+
+    KeepWaitData() : TypedModifier<KeepWaitData>() {}
 };
 
 /// Holds raw (non-owning) pointers to the original instructions grouped into an

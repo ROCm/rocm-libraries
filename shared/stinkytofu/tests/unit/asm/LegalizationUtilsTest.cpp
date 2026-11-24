@@ -251,6 +251,33 @@ TEST_F(LegalizationUtilsTest, WaitCntKmcntOnlyEmitsKmcnt) {
     EXPECT_EQ(countByMnemonic("s_waitcnt"), 0);
 }
 
+TEST_F(LegalizationUtilsTest, WaitCntCopiesKeepWaitDataToEverySplitWait) {
+    // vlcnt + kmcnt -> s_wait_loadcnt + s_wait_kmcnt, both kept like the s_waitcnt.
+    SWaitCntData data;
+    data.vlcnt = 1;
+    data.kmcnt = 0;
+    StinkyInstruction* inst = createInst(GFX::s_waitcnt);
+    inst->addModifier<SWaitCntData>(data);
+    inst->addModifier<KeepWaitData>(KeepWaitData{});
+
+    AsmIRBuilder builder(*bb, arch);
+    auto result = legalizeWaitCnt(inst, builder, arch);
+
+    ASSERT_NE(result.first, nullptr);
+    int waits = 0;
+    int kept = 0;
+    for (auto it = bb->begin(); it != bb->end(); ++it) {
+        auto* wait = dyn_cast<StinkyInstruction>(&*it);
+        if (!wait) continue;
+        waits++;
+        if (wait->getModifier<KeepWaitData>() != nullptr) kept++;
+    }
+    EXPECT_EQ(countByMnemonic("s_wait_loadcnt"), 1);
+    EXPECT_EQ(countByMnemonic("s_wait_kmcnt"), 1);
+    EXPECT_EQ(waits, 2);
+    EXPECT_EQ(kept, 2);
+}
+
 // ---------------------------------------------------------------------------
 // legalizeDSLoadB192
 // ---------------------------------------------------------------------------

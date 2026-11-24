@@ -370,6 +370,9 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
     if (!irInst->comment.empty()) {
         asmInst->addModifier(CommentData(irInst->comment));
     }
+    if (irInst->keepWait) {
+        asmInst->addModifier(KeepWaitData{});
+    }
 
     // Copy instruction modifiers from logical IR to assembly IR
     if (irInst->ds.has_value()) {

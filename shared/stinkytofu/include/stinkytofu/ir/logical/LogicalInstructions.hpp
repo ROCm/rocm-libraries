@@ -110,6 +110,9 @@ class LogicalInstruction : public IRBase {
     std::optional<GirActionData>
         giraction;  ///< Complete finalized GIR action facts carried through logical lowering
 
+    /// Lowered to KeepWaitData: StinkyRemoveWaitCntPass keeps the wait.
+    bool keepWait = false;
+
     /// LLVM-style casting support
     static bool classof(const IRBase* ir) {
         return ir->getType() == IRType::LogicalIR;

@@ -16,7 +16,7 @@ from tensilelite.Common.DataType import DataType
 from tensilelite.Common.GlobalParameters import defaultSolution
 from tensilelite.Common.ValidParameters import validParameters
 from tensilelite.Components.GlobalWriteBatch import GlobalWriteBatchWriter
-from tensilelite.Components.TDMStoreInst import DS_OFFSET_MAX, STINKY_KEEP, hasEpilogueSideEffects, \
+from tensilelite.Components.TDMStoreInst import DS_OFFSET_MAX, hasEpilogueSideEffects, \
   TDM_TILE_DIM_MAX, storesFinalD, tdmStoreBlocks, tdmStoreLdsBytes, tdmStoreLdsSplit, tdmStoreModifiers, \
   tdmStoreRejectReason, tdmStoreVectorRejectReason
 from tensilelite.SolutionStructs.Naming import getKernelNameMin
@@ -1174,9 +1174,11 @@ def test_tdm_waits_survive_stinkytofu(gp_gfx1250, gfx1250_iim, assembler, capsys
   sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=tdm, TDMInst=3, StreamK=streamk)
   assert sol.get("Valid"), capsys.readouterr().out
   lines = asm.splitlines()
-  # Only the StinkyTofu pipeline writes STINKY_TOTAL_INST_BYTES; the kept staging wait shows its marker.
+  # Only the StinkyTofu pipeline writes STINKY_TOTAL_INST_BYTES; every TDM block keeps its staging wait through it.
   assert "STINKY_TOTAL_INST_BYTES" in asm
-  assert any(_code(line).startswith("s_wait_dscnt") and STINKY_KEEP in line for line in lines)
+  stores = sum(_code(line).startswith("tensor_store_from_lds") for line in lines)
+  staged = sum(_code(line).startswith("s_wait_dscnt") and "staging stores done" in line for line in lines)
+  assert stores and staged == stores, (staged, stores)
   drains = [i for i, line in enumerate(lines)
             if _code(line).startswith("s_wait_tensorcnt") and "drain tensor_load_to_lds" in line]
   assert drains
@@ -1497,7 +1499,7 @@ def test_c_load_wait_is_kept_before_the_barrier(gp_gfx1250, gfx1250_iim, assembl
     barrier = _nextLine(lines, load, ("s_barrier",))
     assert barrier is not None, lines[load]
     waits = [line for line in lines[load + 1:barrier] if _code(line).startswith("s_wait_tensorcnt")]
-    assert any(STINKY_KEEP in line for line in waits), (lines[load], waits)
+    assert any("wait for the TDM load of C" in line for line in waits), (lines[load], waits)
 
 
 @pytest.mark.parametrize("term", ["UseE", "Gradient", "UseGateResidual", "OutputAmaxD"])

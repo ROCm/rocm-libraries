@@ -165,6 +165,7 @@ Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
     // Get comment if present
     const CommentData* commentMod = inst->getModifier<CommentData>();
     std::string comment = commentMod ? commentMod->comment : "";
+    const bool keepWait = inst->getModifier<KeepWaitData>() != nullptr;
 
     // Check which counters are present
     bool hasVlcnt = (waitData->vlcnt != -1);
@@ -196,6 +197,9 @@ Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
         if (!comment.empty()) {
             waitInst->addModifier<CommentData>(CommentData{comment});
         }
+        if (keepWait) {
+            waitInst->addModifier<KeepWaitData>(KeepWaitData{});
+        }
         return waitInst;
     };
 
@@ -207,6 +211,9 @@ Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
         waitInst->addSrcReg(StinkyRegister(packMemDsWaitCnt(memCount, dsCount)));
         if (!comment.empty()) {
             waitInst->addModifier<CommentData>(CommentData{comment});
+        }
+        if (keepWait) {
+            waitInst->addModifier<KeepWaitData>(KeepWaitData{});
         }
         return waitInst;
     };
