@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import copy
 import json
-import os
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -62,29 +62,35 @@ def _ued(op_dir: Path) -> dict:
     return docs[f"flydsl_{OP}.ued.json"]
 
 
-def test_an_arch_model_binds_under_its_arch_and_keeps_the_default(
-    tmp_path: Path,
-) -> None:
+def test_an_arch_model_binds_under_its_arch_alone(tmp_path: Path) -> None:
     _install(tmp_path, "predict_engine", "gfx950", "model-950")
     _install(tmp_path, "sort_kernel_catalog", "gfx942", "ranker-942")
     ops = gen_descriptors.OpDescriptors(OP, FIELDS)
     ued = _ued(tmp_path)
-    # gfx942's ranker gives the estimate a gfx942 slot, so the pipeline can train one there;
-    # gfx950's estimate adds no ranker key, which would change the selector revision.
-    assert ued["predict_engine"] == {
-        "default": ops.estimate_uhd_id,
-        "gfx942": ops.estimate_uhd_id,
-        "gfx950": ["model-950"],
-    }
+    # The estimate binds only the arch with an installed model: no `default`, and no key for
+    # gfx942, which has a ranker but no model.
+    assert ued["predict_engine"] == {"gfx950": ["model-950"]}
     assert ued["sort_kernel_catalog"] == {
         "default": ops.uhd_id,
         "gfx942": ["ranker-942"],
     }
 
 
-def test_a_default_model_replaces_only_its_own_metric(tmp_path: Path) -> None:
-    # The estimate slot declares tflops, so a tflops estimate takes its place; the native
-    # ranker declares no metric, so a tflops ranker joins it.
+def test_the_estimate_binds_exactly_the_arches_with_a_model(tmp_path: Path) -> None:
+    _install(tmp_path, "predict_engine", "gfx950", "model-950")
+    _install(tmp_path, "predict_engine", "gfx1100", "model-1100")
+    _install(tmp_path, "predict_engine", "gfx942", "model-942")
+    # Sorted with `default` first, one list per key, and no key for an arch without a model.
+    assert _ued(tmp_path)["predict_engine"] == {
+        "gfx1100": ["model-1100"],
+        "gfx942": ["model-942"],
+        "gfx950": ["model-950"],
+    }
+
+
+def test_a_default_model_joins_the_native_ranker_only_by_metric(tmp_path: Path) -> None:
+    # The native ranker declares no metric, so a tflops ranker joins it; the estimate has no
+    # native entry, so its `default` is the model alone.
     _install(tmp_path, "predict_engine", "default", "model")
     _install(tmp_path, "sort_kernel_catalog", "default", "ranker")
     ued = _ued(tmp_path)
@@ -93,13 +99,34 @@ def test_a_default_model_replaces_only_its_own_metric(tmp_path: Path) -> None:
     assert ued["sort_kernel_catalog"] == {"default": [native, "ranker"]}
 
 
-def test_no_installed_model_leaves_the_engine_as_generated(tmp_path: Path) -> None:
-    assert (
-        _ued(tmp_path)
-        == gen_descriptors.OpDescriptors(OP, FIELDS).documents()[
-            f"flydsl_{OP}.ued.json"
-        ]
-    )
+def test_no_installed_model_leaves_no_estimate(tmp_path: Path) -> None:
+    ops = gen_descriptors.OpDescriptors(OP, FIELDS)
+    documents = ops.documents()
+    ued = _ued(tmp_path)
+    assert ued == documents[f"flydsl_{OP}.ued.json"]
+    assert "predict_engine" not in ued
+    assert ued["sort_kernel_catalog"] == {"default": ops.uhd_id}
+    assert not [name for name in documents if "engine_estimate" in name]
+
+
+def test_a_ranker_alone_gives_the_estimate_no_key(tmp_path: Path) -> None:
+    _install(tmp_path, "sort_kernel_catalog", "gfx942", "ranker-942")
+    assert "predict_engine" not in _ued(tmp_path)
+
+
+def test_a_leftover_engine_estimate_file_is_stale(tmp_path: Path) -> None:
+    documents = gen_descriptors.OpDescriptors(OP, FIELDS).documents()
+    folders = {Path(OP): documents}
+    gen_descriptors._write(tmp_path, folders)
+    assert gen_descriptors._check(tmp_path, folders) == []
+
+    leftover = tmp_path / OP / f"flydsl_{OP}_engine_estimate.uhd.json"
+    leftover.write_text("{}\n", encoding="utf-8")
+    assert gen_descriptors._check(tmp_path, folders) == [
+        f"{Path(OP) / leftover.name}: names no object in the manifest"
+    ]
+    gen_descriptors._write(tmp_path, folders)
+    assert not leftover.exists()
 
 
 def test_a_metric_less_model_binds_from_its_arch_folder(tmp_path: Path) -> None:
@@ -226,9 +253,11 @@ def test_two_metric_less_models_on_one_key_are_refused(tmp_path: Path) -> None:
 def _promote():
     """uhd_gen's promote module, so a binding is checked against promote rather than a copy
     of its rules. Skips without uhd_gen's requirements, as uhd_gen's suites do, unless the
-    build requires them (HIPDNN_REQUIRE_UHD_GEN_TESTS)."""
+    build requires them: uhd_gen's own `prerequisites_required()` reads that setting."""
     sys.path.insert(0, str(FLYDSL.parents[2] / "projects" / "hipdnn" / "tools"))
-    if os.environ.get("HIPDNN_REQUIRE_UHD_GEN_TESTS"):
+    from uhd_gen.conftest import prerequisites_required
+
+    if prerequisites_required():
         from uhd_gen import promote
 
         return promote
@@ -238,8 +267,8 @@ def _promote():
 @pytest.mark.parametrize(
     ("role", "arch", "metric"),
     [
-        ("predict_engine", "gfx950", "tflops"),  # a new key
-        ("predict_engine", "default", "tflops"),  # replaces the estimate slot
+        ("predict_engine", "gfx950", "tflops"),  # a new role and key
+        ("predict_engine", "default", "tflops"),  # a new role, bound under `default`
         ("sort_kernel_catalog", "gfx942", "tflops"),  # a new key
         (
             "sort_kernel_catalog",
@@ -255,13 +284,7 @@ def test_a_binding_is_what_promote_writes(
 ) -> None:
     promote = _promote()
     before = _ued(tmp_path)
-    # promote reads the metric of every UHD a key already binds from its installed file.
-    installed_ids = {}
-    for name, doc in gen_descriptors.OpDescriptors(OP, FIELDS).documents().items():
-        if name.endswith(".uhd.json"):
-            path = tmp_path / name
-            path.write_text(json.dumps(doc), encoding="utf-8")
-            installed_ids[doc["id"]] = path
+    installed_ids = _generated_uhds(tmp_path)
     model = str(uuid.uuid4())
     installed_ids[model] = _install(tmp_path, role, arch, model, metric=metric)
     holder = copy.deepcopy(before)
@@ -269,13 +292,71 @@ def test_a_binding_is_what_promote_writes(
     assert _ued(tmp_path)[role][arch] == written
 
 
+def _generated_uhds(op_dir: Path) -> dict[str, Path]:
+    """The generator's own UHDs written out: promote reads the metric of every UHD a key
+    already binds from its installed file."""
+    installed_ids = {}
+    for name, doc in gen_descriptors.OpDescriptors(OP, FIELDS).documents().items():
+        if name.endswith(".uhd.json"):
+            path = op_dir / name
+            path.write_text(json.dumps(doc), encoding="utf-8")
+            installed_ids[doc["id"]] = path
+    return installed_ids
+
+
+@pytest.mark.parametrize(
+    ("role", "arch", "first", "second"),
+    [
+        ("sort_kernel_catalog", "gfx942", "time", "tflops"),
+        ("predict_engine", "gfx950", "time", "tflops"),
+        ("predict_applicable_kernels", "gfx950", "tflops", None),
+    ],
+)
+def test_two_metrics_on_one_key_bind_as_promote_writes(
+    tmp_path: Path, role: str, arch: str, first: str, second: str | None
+) -> None:
+    """A key gains a second metric: the generator lists both, in the order promote writes
+    (metric-less first, then by metric name) whichever was promoted first."""
+    promote = _promote()
+    installed_ids = _generated_uhds(tmp_path)
+    earlier = str(uuid.uuid4())
+    installed_ids[earlier] = _install(tmp_path, role, arch, earlier, metric=first)
+    holder = copy.deepcopy(_ued(tmp_path))
+    later = str(uuid.uuid4())
+    installed_ids[later] = _install(tmp_path, role, arch, later, metric=second)
+    written, replaced = promote._rebind(
+        holder, role, arch, later, second, installed_ids
+    )
+    assert replaced == []
+    assert _ued(tmp_path)[role][arch] == written == [later, earlier]
+
+
 SHIPPED = FLYDSL.parent / "src/engines/kernel_ingestor_engine/descriptors/FlyDSL"
 # The reads that turn a name a graph may leave unbound into a value: the first argument of
 # each is read guarded.
 GUARDS = ("value_or_default", "present")
-# Read by every SDPA model and set by only some graphs: unguarded, a graph without them
-# makes the estimate unavailable.
-ALWAYS_GUARDED = ("$graph.nodes[0].attn_scale_value", "$graph.nodes[0].generate_stats")
+# Per family: the folder filter, the names read by every model of the family and set by only
+# some of its graphs (unguarded, a graph without them makes the estimate unavailable), and
+# the pattern of the names a backward model reads bare on purpose. The backward graph has no
+# ``generate_stats`` attribute (it takes the forward pass's stats as an input), so it is not
+# listed for it. A backward model reads its required tensors bare as plain features and also
+# inside guarded derived features, so a guard there says nothing about whether the name can
+# be unbound. ``flops`` is read bare too: a graph whose work is not counted has no tflops to
+# estimate, so the estimate is meant to be unavailable for it.
+SDPA_FAMILIES = {
+    "forward": (
+        lambda folder: not folder.startswith("sdpa_bwd"),
+        ("$graph.nodes[0].attn_scale_value", "$graph.nodes[0].generate_stats"),
+        None,
+    ),
+    "backward": (
+        lambda folder: folder.startswith("sdpa_bwd"),
+        ("$graph.nodes[0].attn_scale_value",),
+        re.compile(
+            r"\$graph\.(flops|nodes\[0\]\.(flops|(q|k|v|o|do|dq|dk|dv|stats)\..+))"
+        ),
+    ),
+}
 
 
 def _reads(expression, guarded: bool, out: list[tuple[str, bool]]) -> None:
@@ -295,11 +376,12 @@ def _reads(expression, guarded: bool, out: list[tuple[str, bool]]) -> None:
                 _reads(args, guarded, out)
 
 
-def _shipped_sdpa_reads() -> dict[str, list[tuple[str, bool]]]:
-    """The reads of every installed SDPA forward model, keyed by its path in the tree."""
+def _shipped_sdpa_reads(in_family) -> dict[str, list[tuple[str, bool]]]:
+    """The reads of every installed SDPA model whose folder ``in_family`` accepts, keyed by
+    its path in the tree."""
     reads = {}
     for path in sorted(SHIPPED.glob("sdpa_*/heuristics/**/heuristic.uhd.json")):
-        if path.relative_to(SHIPPED).parts[0].startswith("sdpa_bwd"):
+        if not in_family(path.relative_to(SHIPPED).parts[0]):
             continue
         out: list[tuple[str, bool]] = []
         _reads(
@@ -311,18 +393,31 @@ def _shipped_sdpa_reads() -> dict[str, list[tuple[str, bool]]]:
     return reads
 
 
-def test_every_shipped_sdpa_model_guards_what_any_sdpa_model_guards() -> None:
-    """A name some SDPA graphs leave unbound must be read through a guard by every model.
+@pytest.mark.parametrize("family", SDPA_FAMILIES)
+def test_every_shipped_sdpa_model_guards_what_any_sdpa_model_guards(
+    family: str,
+) -> None:
+    """A name some graphs of an SDPA family leave unbound must be read through a guard by
+    every model of that family.
 
-    One model's guard shows the name can be unbound on an SDPA forward graph; a sibling
+    One model's guard shows the name can be unbound on a graph of the family; a sibling
     reading it bare reports UNAVAILABLE for every graph that leaves it unbound, which no
-    other check sees (the generator, ``--check`` and the census all pass). Holds across the
-    whole SDPA forward family, so an engine with a single model is held to its siblings.
+    other check sees (the generator, ``--check`` and the census all pass). The forward
+    models (every ``sdpa_*`` folder but ``sdpa_bwd_*``) and the backward models (the split
+    estimates, the merged estimate and the merged ranker under ``sdpa_bwd_*``) are held
+    separately: the two families guard different sets of names, and a backward model reads
+    its required tensors (q, k, v, o, do, dq, dk, dv, stats) bare, as every backward graph
+    binds them, and ``flops`` bare, because a graph whose work is not counted has no tflops
+    to estimate; those are not held to the rule. An engine with a single model is held to
+    its siblings.
     """
-    reads = _shipped_sdpa_reads()
-    assert reads, f"no installed SDPA model under {SHIPPED}"
+    in_family, always_guarded, always_bound = SDPA_FAMILIES[family]
+    reads = _shipped_sdpa_reads(in_family)
+    assert reads, f"no installed SDPA {family} model under {SHIPPED}"
     guarded = {name for model in reads.values() for name, wrapped in model if wrapped}
-    guarded.update(ALWAYS_GUARDED)
+    guarded.update(always_guarded)
+    if always_bound:
+        guarded = {name for name in guarded if not always_bound.fullmatch(name)}
     bare = sorted(
         f"{path}: {name}"
         for path, model in reads.items()

@@ -152,6 +152,16 @@ instead sit in `artifacts/`. Any `.dvc` pointer under `rocKE/` is checked at con
 here and under the integration test root (`test_descriptors/integration/rocKE/`, whose
 `gfx950_conv_fwd_aot_seed` keeps its KDPs in `artifacts/` the same way).
 
+**Models bound by declared id stay in git.** The ASM SDPA engine's two L1 models
+(`src/engines/asm_sdpa_engine/descriptors/predict_engine/<arch>/asm_sdpa_engine_tflops.uhd.json`
+and `.bin`, about 200 KB each) are in git, not DVC, and are the only model blobs that are.
+An engine that declares its model ids in code (`AsmSdpaEngine::L1_MODEL_IDS`) and records
+the selector revision the models were trained against keeps them beside the source that
+revision hashes: the change that moves the revision replaces both models in the same commit,
+and the build reads and stages them from the source tree (the shipped-model gate reads them
+at configure time), so a checkout with no DVC pull still builds and tests the engine. At
+that size git carries them without the cost that puts rocKE's heuristic models in DVC.
+
 A KDP in `artifacts/` packs correctly: the packer walks the root recursively and computes
 each packed kernel's archive path from the descriptor's depth (`../../../kpack/...` here).
 The small descriptors name each other by id, not by path, so moving a KDP needs no edit to them.

@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
+#include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
 #include <hipdnn_frontend/detail/HipdnnDirectBackendWrapper.hpp>
 #include <hipdnn_frontend/version_number.h>
 
@@ -102,6 +103,8 @@ TEST(TestBackendFactory, HipdnnBackendCreatesDirectWrapperWithBackendVersion)
     auto backend = hipdnnBackend();
     EXPECT_TRUE(std::dynamic_pointer_cast<HipdnnDirectBackendWrapper>(backend));
     EXPECT_EQ(backend->version(), Version{std::string_view(backend->versionString())});
+    // The backend built from this tree accepts the heuristic modes the frontend sends it.
+    EXPECT_GE(backend->version(), heuristicModesBackendVersion());
 
     IHipdnnBackend::resetInstance();
 }

@@ -801,7 +801,9 @@ def test_a_new_metric_joins_the_arch_list_beside_the_incumbent(tmp_path):
     )
 
 
-def test_a_retrained_metric_replaces_only_its_own_entry_in_place(tmp_path):
+def test_a_retrained_metric_replaces_only_its_own_entry(tmp_path):
+    """The list comes back in the fixed order (metric-less first, then by metric name),
+    whatever order the UED held, so a generator deriving it writes the same bytes."""
     tree = _tree(tmp_path / "tree")
     _installed(tree / "old.uhd.json", OLD, {"metric": "time", "calibrated": False})
     _installed(
@@ -811,8 +813,8 @@ def test_a_retrained_metric_replaces_only_its_own_entry_in_place(tmp_path):
     plan = build_plan(_model(tmp_path / "model", tree, metric="time"), tree)
     _apply(plan)
     assert _read(tree / "engine.ued.json")["sort_kernel_catalog"]["gfx942"] == [
-        NEW,
         OTHER,
+        NEW,
     ]
     assert plan.old_heuristic == OLD
 
@@ -825,9 +827,34 @@ def test_a_metric_less_ranker_replaces_only_the_metric_less_entry(tmp_path):
     _bind(tree, [OTHER, OLD])
     _apply(build_plan(_model(tmp_path / "model", tree), tree))
     assert _read(tree / "engine.ued.json")["sort_kernel_catalog"]["gfx942"] == [
-        OTHER,
         NEW,
+        OTHER,
     ]
+
+
+def test_a_candidate_generator_replaces_only_its_own_metric_entry(tmp_path):
+    """`predict_applicable_kernels` keeps a list like the scoring roles: promoting onto a
+    key that already binds generators replaces the one of the same metric (here the
+    metric-less one) and keeps the rest."""
+    tree = _tree(tmp_path / "tree")
+    _installed(
+        tree / "other.uhd.json", OTHER, {"metric": "tflops", "calibrated": False}
+    )
+    ued = _read(tree / "engine.ued.json")
+    ued["predict_applicable_kernels"] = {"gfx942": [OTHER, OLD]}
+    _write(tree / "engine.ued.json", ued)
+    plan = build_plan(
+        _model(tmp_path / "model", tree),
+        tree,
+        role="predict_applicable_kernels",
+        arch="gfx942",
+    )
+    _apply(plan)
+    assert _read(tree / "engine.ued.json")["predict_applicable_kernels"]["gfx942"] == [
+        NEW,
+        OTHER,
+    ]
+    assert plan.old_heuristic == OLD
 
 
 def test_a_bound_uhd_the_tree_does_not_contain_cannot_be_classified(tmp_path):

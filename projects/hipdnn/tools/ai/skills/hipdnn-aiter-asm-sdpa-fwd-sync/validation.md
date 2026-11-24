@@ -10,7 +10,7 @@ Build the hip-kernel-provider with the `hipdnn-superbuild` skill (`../hipdnn-sup
 
 Run the hip-kernel-provider unit tests with the `hipdnn-superbuild-test` skill (`../hipdnn-superbuild-test/SKILL.md`):
 
-- Every update: the `TestAsmKpack*`, `TestAsmKernelPath`, `TestSdpaModuleCache`, `TestSdpaKernargRanges` and `TestAsmSdpaEngine` suites.
+- Every update: the `TestAsmKpack*`, `TestAsmKernelPath`, `TestSdpaModuleCache`, `TestSdpaKernargRanges`, `TestAsmSdpaEngine`, `TestAsmSdpaEngineDeclaration` (it holds the shipped-model gate, `ShippedL1ModelsRecordTheRevisionThisBuildComputes`) and `TestAsmSdpaSelectorRevision` (the revision recipe's probes) suites.
 - Forward modules: the `TestSdpaFwd*` suites.
 - Backward modules: the `TestSdpaBwd*` suites, among them `TestSdpaBwdOdoKernelArgs`, `TestSdpaBwdDqdkdvKernelArgs` and `TestSdpaBwdPostKernelArgs` (argument layout), `TestSdpaBwdArgsBuilder` (argument values per stage, arch and accumulator), `TestSdpaBwdRegistryLookup` (registry lookups per arch), `TestSdpaBwdPostStage`, `TestSdpaBwdPsskOffStrides`, `TestSdpaBwdPaddedHeadDims`, `TestSdpaBwdPlanGridMath` and `TestSdpaBwdPlanBuilder`.
 

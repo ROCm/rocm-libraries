@@ -28,13 +28,49 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <set>
 #include <sstream>
+#include <string>
 #include <tuple>
 #include <unordered_map>
 
 namespace hipdnn_backend
 {
+
+namespace
+{
+
+// Warns that an applicable engine has no L1 prediction in `metric` on `architecture`, once per
+// (engine name, metric, architecture) for the process. The architecture is the device's
+// gcnArchName without its feature suffix (e.g. "gfx90a:sramecc+:xnack-" reports "gfx90a").
+void warnOnceMissingEnginePrediction(
+    const std::string& engineName,
+    const std::string& metric,
+    const std::string& architecture,
+    const hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT& prediction)
+{
+    static std::mutex s_reportedMutex;
+    static std::set<std::tuple<std::string, std::string, std::string>> s_reported;
+
+    const std::string archName = architecture.substr(0, architecture.find(':'));
+    {
+        const std::lock_guard<std::mutex> guard(s_reportedMutex);
+        if(!s_reported.emplace(engineName, metric, archName).second)
+        {
+            return;
+        }
+    }
+
+    HIPDNN_BACKEND_LOG_WARN("engine '{}' is missing a '{}' prediction for {}{}{}",
+                            engineName,
+                            metric,
+                            archName,
+                            prediction.reason.empty() ? "" : ": ",
+                            prediction.reason);
+}
+
+} // namespace
 
 std::vector<int64_t> EngineHeuristicDescriptor::resolveHeuristicPolicyOrder()
 {
@@ -101,7 +137,7 @@ std::vector<int64_t> EngineHeuristicDescriptor::resolveHeuristicPolicyOrder()
     // StaticOrdering ranks engines (RFC 0007); it is unrelated to RFC 0019's `static_order`
     // UHD adapter, which ranks kernels inside one engine.
     using hipdnn_data_sdk::utilities::policyNameToId;
-    std::vector<int64_t> policyIds{policyNameToId("SelectionHeuristic::Config")};
+    std::vector<int64_t> policyIds{policyNameToId(hipdnn_data_sdk::utilities::CONFIG_POLICY_NAME)};
     switch(_heuristicMode)
     {
     case HIPDNN_HEUR_MODE_A:
@@ -114,7 +150,7 @@ std::vector<int64_t> EngineHeuristicDescriptor::resolveHeuristicPolicyOrder()
     default: // setHeuristicMode() admits no other mode.
         break;
     }
-    policyIds.push_back(policyNameToId("SelectionHeuristic::StaticOrdering"));
+    policyIds.push_back(policyNameToId(hipdnn_data_sdk::utilities::STATIC_ORDERING_POLICY_NAME));
     HIPDNN_BACKEND_LOG_DEBUG("Using the policy order of heuristic mode {}: {} policies",
                              static_cast<int>(_heuristicMode),
                              policyIds.size());
@@ -253,18 +289,27 @@ void EngineHeuristicDescriptor::finalize()
     const hipdnnPluginConstData_t serializedGraph = _graph->getSerializedGraph();
     // Predictions are requested in the effective metric; answers in another metric come back
     // INVALID (RFC 0019 §11.4).
-    const heuristics::SelectionHeuristic::PredictionProvider predict
-        = [&](int64_t engineId, hipdnnEnginePredictionKind_t kind) {
-              hipdnn_flatbuffers_sdk::data_objects::EngineConfigT config;
-              config.engine_id = engineId;
-              config.ranking_metric = _effectiveRankingMetric;
-              flatbuffers::FlatBufferBuilder builder;
-              builder.Finish(
-                  hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(builder, &config));
-              const hipdnnPluginConstData_t configBytes{builder.GetBufferPointer(),
-                                                        builder.GetSize()};
-              return engineRm->getEnginePrediction(configBytes, serializedGraph, kind);
-          };
+    const heuristics::SelectionHeuristic::PredictionProvider predict =
+        [&](int64_t engineId, hipdnnEnginePredictionKind_t kind) {
+            hipdnn_flatbuffers_sdk::data_objects::EngineConfigT config;
+            config.engine_id = engineId;
+            config.ranking_metric = _effectiveRankingMetric;
+            flatbuffers::FlatBufferBuilder builder;
+            builder.Finish(
+                hipdnn_flatbuffers_sdk::data_objects::EngineConfig::Pack(builder, &config));
+            const hipdnnPluginConstData_t configBytes{builder.GetBufferPointer(),
+                                                      builder.GetSize()};
+            auto prediction = engineRm->getEnginePrediction(configBytes, serializedGraph, kind);
+            if(kind == HIPDNN_ENGINE_PREDICTION_ENGINE
+               && prediction.status
+                      != hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::AVAILABLE)
+            {
+                const std::string engineName = engineRm->resolveEngineName(engineId, std::nullopt);
+                warnOnceMissingEnginePrediction(
+                    engineName, _effectiveRankingMetric, devProps.architecture_name, prediction);
+            }
+            return prediction;
+        };
 
     // Resolve ordered policy IDs
     auto orderedPolicyIds = resolveHeuristicPolicyOrder();

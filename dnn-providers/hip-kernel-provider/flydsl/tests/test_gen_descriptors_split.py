@@ -236,21 +236,19 @@ def _install_estimate(content_dir: Path, role: str, arch: str, model_id: str) ->
 def test_the_engine_estimate_is_engine_level_and_binds_installed_models(
     tmp_path: Path,
 ) -> None:
-    # Every engine carries the estimate's `default` slot; a trained whole-program model
-    # installed for an arch binds under that arch beside it (RFC 0021: engine-level), as the
-    # list `uhd_gen promote` writes for a key a trained model is bound under.
+    # Without a trained model the engine has no `predict_engine` and no estimate document;
+    # a trained whole-program model installed for an arch binds under that arch alone
+    # (RFC 0021: engine-level), as the list `uhd_gen promote` writes for a key a trained
+    # model is bound under.
     folders = _split(content_dir=tmp_path)
-    docs = folders[Path("sdpa_bwd_split")]
-    estimate = docs["flydsl_sdpa_bwd_split_engine_estimate.uhd.json"]
-    assert estimate["score"] == {"metric": "tflops"}
-    assert _ued(folders)["predict_engine"] == {"default": estimate["id"]}
+    assert sorted(folders[Path("sdpa_bwd_split")]) == ["flydsl_sdpa_bwd_split.ued.json"]
+    assert "predict_engine" not in _ued(folders)
 
     _install_estimate(tmp_path, "predict_engine", "gfx950", "model-950")
-    ued = _ued(_split(content_dir=tmp_path))
-    assert ued["predict_engine"] == {
-        "default": estimate["id"],
-        "gfx950": ["model-950"],
-    }
+    folders = _split(content_dir=tmp_path)
+    ued = _ued(folders)
+    assert ued["predict_engine"] == {"gfx950": ["model-950"]}
+    assert sorted(folders[Path("sdpa_bwd_split")]) == ["flydsl_sdpa_bwd_split.ued.json"]
     assert not any("sort_kernel_catalog" in slot for slot in ued["slots"])
 
 

@@ -139,10 +139,22 @@ inline Error
     return {ErrorCode::OK, ""};
 }
 
+/// The error for a heuristic mode list that names no mode.
+inline Error requireHeuristicModes(const std::vector<HeuristicMode>& modes)
+{
+    if(modes.empty())
+    {
+        return {ErrorCode::INVALID_VALUE, "No heuristic mode was requested."};
+    }
+    return {ErrorCode::OK, ""};
+}
+
 /// Ranked engine configurations for @p modes, as cudnn-frontend's get_heuristics_list builds
-/// them: one heuristic query per mode, in the order given, results concatenated. An engine an
-/// earlier mode returned is not repeated, since hipDNN returns one configuration per engine,
-/// and modes that select the same backend mode are queried once.
+/// them: one heuristic query per mode, in the order given, results concatenated. Modes that
+/// select the same backend mode are queried once. An engine an earlier mode returned is not
+/// repeated and keeps that mode's configuration: this returns one configuration per engine, so
+/// a later mode's configuration for an engine already listed, including ModeB's knob settings,
+/// is dropped. A mode whose query fails stops the call with that error.
 inline Error getEngineConfigsForModes(
     std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>>& engineConfigs,
     std::vector<int64_t>& engineIds,
@@ -152,10 +164,7 @@ inline Error getEngineConfigsForModes(
 {
     engineConfigs.clear();
     engineIds.clear();
-    if(modes.empty())
-    {
-        return {ErrorCode::INVALID_VALUE, "No heuristic mode was requested."};
-    }
+    HIPDNN_CHECK_ERROR(requireHeuristicModes(modes));
 
     std::vector<hipdnnBackendHeurMode_t> queried;
     for(const HeuristicMode mode : modes)

@@ -13,7 +13,6 @@
     ]
   },
   "predict_engine": {
-    "default": "41b032fe-2ed7-5dda-9518-0324ca564af0",
     "gfx1201": [
       "6a1ca75b-6db9-4f39-8ee9-1227ddf3a266"
     ]

@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <gtest/gtest.h>
 
@@ -711,6 +712,31 @@ TEST_F(TestCudnnShimNoteTriageBackend, DeselectBehaviorNoteOnTopEngineNarrowsToS
     EXPECT_EQ(planName, hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_NAME);
     EXPECT_EQ(graph.get_workspace_size_plan_at_index(0), -1);
     EXPECT_EQ(graph.get_workspace_size_plan_at_index(1), 0);
+}
+
+// The note filters only need engine ids, so each filter pass lists the engines through a
+// FALLBACK query, as engine indices do, whatever modes created the plans: no mode A
+// prediction runs for the filter.
+TEST_F(TestCudnnShimNoteTriageBackend, NoteFilterEnumeratesEnginesThroughFallbackOnly)
+{
+    installRegisteredEnginePlanMocks();
+    _behaviorNotesByEngineId[hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID]
+        = {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION};
+
+    fe::graph::Graph graph;
+    ASSERT_NO_FATAL_FAILURE(createPlans(graph));
+    ASSERT_NE(std::find(_sentModes.begin(), _sentModes.end(), HIPDNN_HEUR_MODE_A),
+              _sentModes.end());
+
+    graph.deselect_behavior_notes({BehNote::RUNTIME_COMPILATION});
+    _sentModes.clear();
+
+    auto err = graph.build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE);
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_FALSE(_sentModes.empty());
+    EXPECT_EQ(std::count(_sentModes.begin(), _sentModes.end(), HIPDNN_HEUR_MODE_FALLBACK),
+              static_cast<std::ptrdiff_t>(_sentModes.size()));
 }
 
 TEST_F(TestCudnnShimNoteTriageBackend, DeselectBehaviorNoteOnEveryEngineFailsBuild)

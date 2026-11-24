@@ -465,6 +465,36 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/ASM_SDPA_ENGINE.toml
         )
 
+        # The engine against the GPU reference, on the quick forward bundles. The C++ suite
+        # this once named (Smoke/IntegrationGpuSdpaFwdBfp16) no longer builds by default
+        # (BUILD_CPP_GRAPH_TESTS), so a filter on it ran zero tests and failed; the bundle
+        # suites are always registered, and are named after their folder
+        # (quick_SdpaFwd_<layout>). Under YAML categorization the suites are
+        # ASM_SDPA_ENGINE_gpu_ref_test_categories_integration.yaml, which gives the entry a
+        # tier (TheRock selects `-L ^standard$`); keep its patterns in step with this
+        # filter, which the legacy-label build passes instead. Registered here, not in
+        # integration_tests/, because the categorized suites are appended to
+        # HIPKERNELPROVIDER_CTEST_INSTALL_FILE, which exists only from above.
+        set(_asm_sdpa_gpu_ref_category_args "")
+        if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
+            list(APPEND _asm_sdpa_gpu_ref_category_args
+                TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_ASM_SDPA_GPU_REF_INTEGRATION_CATEGORIES_YAML}"
+                INSTALL_TEST_FILE "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+                TEST_NAME_PREFIX ${PROJECT_NAME}-asm-sdpa-gpu-ref-integration
+            )
+        endif()
+        add_external_integration_test_target(
+            TARGET_NAME    hip_kernel_provider_asm_sdpa_gpu_ref_integration_tests
+            PLUGIN_TARGET  hip_kernel_provider
+            ENGINE_NAME    ASM_SDPA_ENGINE
+            INSTALL_SUBDIR hip_kernel_provider
+            REFERENCE_EXECUTOR gpu
+            GTEST_FILTER   quick_SdpaFwd_*
+            ENVIRONMENT    ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            ${_asm_sdpa_gpu_ref_category_args}
+        )
+
         # Unlike the HIP_MLOPS block above, this target does not re-fold
         # EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider or re-apply
         # HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML (the provider-wide

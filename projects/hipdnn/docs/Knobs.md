@@ -252,6 +252,9 @@ The following global knobs are available in hipDNN:
 > [!NOTE]
 > Additional global knobs may be available depending on the engine. Use `get_knobs_for_engine()` to discover all available knobs for a specific engine.
 
+> [!NOTE]
+> The hip-kernel-provider's ASM SDPA engine honors `global.workspace_size_limit` without exposing it: `get_knobs_for_engine()` does not list it and the frontend's `create_execution_plan_ext` ignores a setting for it with a warning. A caller that sets it through the backend API (`HIPDNN_ATTR_ENGINECFG_KNOB_CHOICES`) has a plan that needs more workspace than the limit refused, and a negative or non-integer limit rejected, both with the plugin status `HIPDNN_PLUGIN_STATUS_INVALID_VALUE` (surfaced by the backend as `HIPDNN_STATUS_PLUGIN_ERROR`).
+
 ---
 
 ## Provider-Specific Knobs

@@ -8,7 +8,7 @@
 #define HIPDNN_BACKEND_STATIC_DEFINE
 
 #include "hipdnn_backend.h"
-#include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
+#include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_frontend/detail/HipdnnBackendInterface.hpp>
 
 // NOLINTBEGIN
@@ -16,14 +16,15 @@
 class Mock_hipdnn_backend : public hipdnn_frontend::detail::IHipdnnBackend
 {
 public:
-    // The mock stands in for a backend built from this tree, so it reports a version that accepts
-    // every frontend request. A test of an older backend overrides it with its own EXPECT_CALL.
+    // The mock stands in for a backend built from this tree, so it reports the version that
+    // accepts every frontend request. The literal is deliberate: a test that took it from
+    // hipdnn_frontend::detail::heuristicModesBackendVersion() would pass for any threshold. A
+    // test of another backend version overrides it with its own EXPECT_CALL.
     Mock_hipdnn_backend()
     {
         EXPECT_CALL(*this, version())
             .Times(::testing::AnyNumber())
-            .WillRepeatedly(
-                ::testing::Return(hipdnn_frontend::detail::heuristicModesBackendVersion()));
+            .WillRepeatedly(::testing::Return(hipdnn_data_sdk::utilities::Version{0, 5, 0}));
     }
 
     MOCK_METHOD(hipdnnStatus_t, create, (hipdnnHandle_t * handle), ());

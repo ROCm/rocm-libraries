@@ -7,18 +7,25 @@ include_guard(GLOBAL)
 # cmake-lint has no form spec for file(CONFIGURE); it is valid CMake.
 
 # ============================================================================
-# hkp_shipped_model_rows(<out-rows> <source-dir> <file>...)
+# hkp_shipped_model_rows(<out-rows> <out-count> <source-dir> <file>...)
 # ============================================================================
 # One C++ initializer row per `.uhd.json` in <file>... (paths relative to <source-dir>; any
 # other file, such as the model's `.bin`, is skipped): its path relative to the provider
 # directory, its top-level `id`, and `trained_against.selector_revision` ("" when absent).
-# A file with no readable `id` is a configure error: the loader would never bind it.
-function(hkp_shipped_model_rows _out_rows _source_dir)
+# <out-count> is the number of rows. Each model read is a configure dependency, so an edit to
+# it reconfigures. A file with no readable `id` is a configure error: the loader would never
+# bind it.
+function(hkp_shipped_model_rows _out_rows _out_count _source_dir)
     set(_rows "")
+    set(_count 0)
     foreach(_file IN LISTS ARGN)
         if(NOT _file MATCHES "\\.uhd\\.json$")
             continue()
         endif()
+        math(EXPR _count "${_count} + 1")
+        # The calling directory's property: a function runs in its caller's directory.
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                     "${_source_dir}/${_file}")
         file(READ "${_source_dir}/${_file}" _json)
         string(JSON _id ERROR_VARIABLE _error GET "${_json}" id)
         if(_error)
@@ -40,27 +47,24 @@ function(hkp_shipped_model_rows _out_rows _source_dir)
             "\"${_revision}\"},\n")
     endforeach()
     set(${_out_rows} "${_rows}" PARENT_SCOPE)
+    set(${_out_count} "${_count}" PARENT_SCOPE)
 endfunction()
 
 # ============================================================================
 # hkp_write_shipped_models_header(OUTPUT <header> NAMESPACE <ns> SOURCE_DIR <dir> FILES <file>...)
 # ============================================================================
-# Writes <header> with `<ns>::MODELS`, the table hkp_shipped_model_rows builds for FILES, so
-# a unit test checks the models its source tree ships without reading a tree at run time:
-# the binary may run where no checkout exists. FILES is the list that stages and installs
-# the models, so what is checked is what ships. An edit to a model reconfigures.
+# Writes <header> with `<ns>::MODELS`, the table hkp_shipped_model_rows builds for FILES, and
+# `<ns>::FILES`, the list itself, so a unit test checks the models its source tree ships and
+# what stages them without reading a tree at run time: the binary may run where no checkout
+# exists. FILES is the list that stages and installs the models, so what is checked is what
+# ships. An edit to a model reconfigures.
 function(hkp_write_shipped_models_header)
     cmake_parse_arguments(PARSE_ARGV 0 _arg "" "OUTPUT;NAMESPACE;SOURCE_DIR" "FILES")
-    hkp_shipped_model_rows(_rows "${_arg_SOURCE_DIR}" ${_arg_FILES})
-
-    set(_count 0)
+    hkp_shipped_model_rows(_rows _count "${_arg_SOURCE_DIR}" ${_arg_FILES})
+    list(LENGTH _arg_FILES _file_count)
+    set(_files "")
     foreach(_file IN LISTS _arg_FILES)
-        if(_file MATCHES "\\.uhd\\.json$")
-            math(EXPR _count "${_count} + 1")
-            # The calling directory's property: a function runs in its caller's directory.
-            set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-                         "${_arg_SOURCE_DIR}/${_file}")
-        endif()
+        string(APPEND _files "    \"${_file}\",\n")
     endforeach()
 
     string(CONCAT _text
@@ -71,6 +75,7 @@ function(hkp_write_shipped_models_header)
         "namespace ${_arg_NAMESPACE}\n{\n\n"
         "inline constexpr std::array<hip_kernel_provider::shipped_model_gate::ShippedModel, "
         "${_count}> MODELS{{\n${_rows}}};\n\n"
+        "inline constexpr std::array<const char*, ${_file_count}> FILES{{\n${_files}}};\n\n"
         "} // namespace ${_arg_NAMESPACE}\n")
     # Rewritten only when content changes, so a no-op reconfigure recompiles nothing.
     file(CONFIGURE OUTPUT "${_arg_OUTPUT}" CONTENT "${_text}" @ONLY)

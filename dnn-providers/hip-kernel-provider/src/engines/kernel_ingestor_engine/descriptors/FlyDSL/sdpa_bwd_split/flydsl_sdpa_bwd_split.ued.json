@@ -8,7 +8,6 @@
   },
   "shared_workspace": "ws.bytes",
   "predict_engine": {
-    "default": "cce91ef0-6b53-5888-ab97-18aa6f8cec29",
     "gfx1100": [
       "3d227fd8-8dd5-43e6-8599-1f0d9208a38e"
     ],

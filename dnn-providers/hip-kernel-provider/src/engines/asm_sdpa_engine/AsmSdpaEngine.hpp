@@ -4,7 +4,6 @@
 #pragma once
 
 #include <array>
-#include <functional>
 #include <memory>
 #include <string_view>
 #include <utility>
@@ -17,6 +16,11 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 #include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
+
+namespace hipdnn_plugin_sdk::ingestor
+{
+struct DescriptorCatalog;
+}
 #endif
 
 #include "core/Context.hpp"
@@ -35,6 +39,12 @@ class AsmSdpaEngine : public hipdnn_plugin_sdk::IEngine<Handle, Settings, Contex
 {
 public:
     AsmSdpaEngine();
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+    /// @brief An engine that binds its L1 models from @p catalog instead of the provider's
+    /// own descriptor catalog.
+    explicit AsmSdpaEngine(const hipdnn_plugin_sdk::ingestor::DescriptorCatalog& catalog);
+#endif
 
     void addPlanBuilder(std::unique_ptr<IPlanBuilder>&& planBuilder);
 
@@ -65,6 +75,11 @@ public:
     /// architecture may have one row per ranking metric (§4.4); each model answers in its
     /// own `score.metric`, and a second model for one (architecture, metric) disables it.
     /// An id nothing deploys leaves the engine UNAVAILABLE.
+    ///
+    /// The models were measured on one SKU per architecture: gfx942 on an MI300X, gfx950 on
+    /// an MI355X. The binding is by architecture string, so any other SKU that reports the
+    /// architecture (an MI308X on gfx942, an MI350X on gfx950) gets that estimate, not one
+    /// of its own.
     static constexpr std::array<std::pair<std::string_view, std::string_view>, 2> L1_MODEL_IDS{{
         {"gfx942", "5f2a7c14-9d3b-4e86-b0a1-6c4f21d8e370"}, // tflops
         {"gfx950", "8b61d0c9-24af-4d17-9e52-3a7c06b8f145"}, // tflops
@@ -76,20 +91,6 @@ public:
                       const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config,
                       hipdnnEnginePredictionKind_t kind,
                       bool evaluate) const override;
-
-    /// @brief The device an estimate is made for: the handle stream's outside a test.
-    using DeviceQuery = std::function<const hipDeviceProp_t&()>;
-
-    /// @brief getPrediction for the device @p device returns, asked only once a plan
-    /// builder serves @p graph. getPrediction passes the handle stream's device; a host
-    /// test passes a synthesized one to see what each architecture's model answers.
-    hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
-        getPredictionOn(Handle& handle,
-                        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
-                        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config,
-                        hipdnnEnginePredictionKind_t kind,
-                        bool evaluate,
-                        const DeviceQuery& device) const;
 
     size_t
         // NOLINTNEXTLINE(portability-template-virtual-member-function)
@@ -104,6 +105,13 @@ public:
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
         Context& executionContext) const override;
+
+protected:
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+    /// @brief The device an estimate is made for: the handle stream's. A host test
+    /// overrides it with a synthesized device, to see what each architecture's model answers.
+    virtual const hipDeviceProp_t& predictionDevice(Handle& handle) const;
+#endif
 
 private:
     // The first registered builder that accepts opGraph; every entry point uses it,

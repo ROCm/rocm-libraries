@@ -303,13 +303,25 @@ int main(int argc, char** argv)
     // which the unit root does not reach either. Where FlyDSL already added the whole
     // production root above, that root holds them; otherwise only this one folder is added,
     // through HIPDNN_DESCRIPTOR_PATH (additive too), so no production pack reaches the other
-    // suites. Never over a value the caller supplied.
-    if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_PATH").empty())
+    // suites. A value the caller supplied is kept and the folder appended after it, with
+    // the separator the loader splits the variable on, so the case sees its models whatever
+    // the caller exported.
+#ifdef _WIN32
+    constexpr char PATH_SEPARATOR = ';';
+#else
+    constexpr char PATH_SEPARATOR = ':';
+#endif
     {
         const auto asmSdpaModels = hip_kernel_provider::testing::descriptorSetRoot(
-            HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_RELDIR);
-        hipdnn_data_sdk::utilities::setEnv("HIPDNN_DESCRIPTOR_PATH",
-                                           asmSdpaModels.string().c_str());
+                                       HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_RELDIR)
+                                       .string();
+        auto descriptorPath = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_PATH");
+        if(!descriptorPath.empty())
+        {
+            descriptorPath += PATH_SEPARATOR;
+        }
+        descriptorPath += asmSdpaModels;
+        hipdnn_data_sdk::utilities::setEnv("HIPDNN_DESCRIPTOR_PATH", descriptorPath.c_str());
     }
 #endif
 

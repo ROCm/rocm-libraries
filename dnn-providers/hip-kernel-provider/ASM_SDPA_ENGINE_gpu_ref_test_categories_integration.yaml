@@ -1,0 +1,64 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# hip-kernel-provider ASM SDPA GPU-reference integration Test Categories Configuration.
+#
+# Applied to hipdnn_integration_tests when it is run against the hip-kernel-provider
+# plugin, pinned to ASM_SDPA_ENGINE via --test-engine and checked against the GPU
+# reference executor (--reference-executor gpu): the
+# hip_kernel_provider_asm_sdpa_gpu_ref_integration_tests target in
+# src/CMakeLists.txt. Without a tier here its CTest entry carries only
+# the integration_test, slow, external_integration_test and ASM_SDPA_ENGINE labels, so no
+# job that selects a tier (TheRock runs `ctest -L ^standard$ -LE ex_gpu`) would run it.
+#
+# The lane runs the quick forward bundle suites (quick_SdpaFwd_<layout>), named after
+# their folder; the C++ suites it once named no longer build by default
+# (BUILD_CPP_GRAPH_TESTS). The standard, comprehensive and full tiers run the same list:
+# pull requests run standard, nightly runs comprehensive. The lane stays out of quick and
+# ffm-quick, as the graph-capture lane does; the quick tier of
+# ASM_SDPA_ENGINE_test_categories_integration.yaml covers the CPU-reference run.
+# Keep the patterns in step with the GTEST_FILTER of the target, which the legacy-label
+# build passes instead of this file.
+
+_asm_sdpa_gpu_ref_patterns: &asm_sdpa_gpu_ref_patterns
+  - "quick_SdpaFwd_*"
+
+_asm_sdpa_gpu_ref_excludes: &asm_sdpa_gpu_ref_excludes
+  - "*DISABLED*"
+
+test_categories:
+  standard:
+    description: "ASM SDPA forward quick bundles against the GPU reference"
+    test_patterns: *asm_sdpa_gpu_ref_patterns
+    exclude: *asm_sdpa_gpu_ref_excludes
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "ASM SDPA forward quick bundles against the GPU reference"
+    test_patterns: *asm_sdpa_gpu_ref_patterns
+    exclude: *asm_sdpa_gpu_ref_excludes
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "ASM SDPA forward quick bundles against the GPU reference"
+    test_patterns: *asm_sdpa_gpu_ref_patterns
+    exclude: *asm_sdpa_gpu_ref_excludes
+    labels:
+      - "full"
+      - "all"
+
+# CTest kill limits: the tiers run the same list, so each gets the quick tier's limit of
+# ASM_SDPA_ENGINE_test_categories_integration.yaml.
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    standard: 1200
+    comprehensive: 1200
+    full: 1200

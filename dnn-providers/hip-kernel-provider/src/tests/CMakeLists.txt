@@ -260,11 +260,12 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     endif()
 
     # The ASM SDPA engine's L1 models ship loose in the production tree, under asm_sdpa/,
-    # which the unit root does not reach. EachDeclaredModelEstimatesOnItsArchitecture asks
-    # the engine for estimates from them, so main() names that one folder as an additive root
-    # (not the whole production tree, whose packs every other suite here would then load) and
-    # the binary is built after whichever step stages it: the product pack, or the provider's
-    # own copy when production packaging is dormant.
+    # which the unit root does not reach. TestAsmSdpaEngine.EachDeclaredModelEstimatesOnItsArchitecture
+    # asks the engine for estimates from them, so main() names that one folder as an additive
+    # root (not the whole production tree, whose packs every other suite here would then
+    # load), appended to any HIPDNN_DESCRIPTOR_PATH the caller exported, and the binary is
+    # built after whichever step stages it: the product pack, or the provider's own copy when
+    # production packaging is dormant.
     #
     # The case also gets the directory the binary is built into. It only compares that with
     # its own directory, to tell the build tree (where every model is staged) from an install

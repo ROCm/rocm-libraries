@@ -302,8 +302,12 @@ cudnn-frontend has no default mode list; hipDNN's default is
 ``{HeuristicMode::A}``, so a call that names no mode ranks by prediction where a
 model exists. Pass ``{HeuristicMode::FALLBACK}`` for the static order. A list of
 modes runs one heuristic query per mode, in the order given, and concatenates the
-results, skipping an engine an earlier mode already returned, so
-``{HeuristicMode::A, HeuristicMode::FALLBACK}`` is mode A's ranking. An empty list
+results. An engine an earlier mode already returned is not repeated and keeps the
+earlier mode's configuration: a later mode's configuration for an engine already
+listed is dropped, including mode B's knob settings. So
+``{HeuristicMode::A, HeuristicMode::FALLBACK}`` is mode A's ranking, and
+``{HeuristicMode::A, HeuristicMode::B}`` does not let B re-rank the engines A ranked.
+A mode whose query fails stops the call with that error. An empty list
 returns ``INVALID_VALUE`` before any query, where cudnn-frontend accepts it and fails
 later, at ``check_support()``.
 

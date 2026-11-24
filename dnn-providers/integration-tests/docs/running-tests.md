@@ -97,9 +97,9 @@ Use it to see the full picture of an engine. Do not use it to reproduce a tier.
 | hip-kernel-provider | `hip-kernel-provider-external-integration-check` | `HIP_MLOPS_ENGINE` | |
 | hip-kernel-provider | `hip-kernel-provider-asm-sdpa-external-integration-check` | `ASM_SDPA_ENGINE` | |
 | hipblaslt-provider, hip-kernel-provider | `<lane stem>-graph-capture-external-integration-check` | each engine that reports `SUPPORTS_GRAPH_CAPTURE` | runs a few quick suites with `--graph-capture`; see [Check stream capture](#5-check-stream-capture---graph-capture) |
-| hip-kernel-provider | `hip_kernel_provider_asm_sdpa_gpu_ref_integration_tests` | `ASM_SDPA_ENGINE` | GPU reference, C++ SDPA tests only, no tiers |
+| hip-kernel-provider | `hip_kernel_provider_asm_sdpa_gpu_ref_integration_tests` | `ASM_SDPA_ENGINE` | GPU reference, the quick forward SDPA bundles; tiers standard and above |
 
-A lane registered without a tier YAML, like the last row, is a single CTest
+A lane registered without a tier YAML is a single CTest
 test with no tier labels. The authoritative list is the set of
 `add_external_integration_test_target()` calls under `dnn-providers/`. To add
 one, see [Add an engine lane](adding-tests.md#add-an-engine-lane).

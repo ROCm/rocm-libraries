@@ -281,9 +281,9 @@ if(DEFINED hip_kernel_provider_integration_tests_TEST_ENVIRONMENT)
         "${hip_kernel_provider_integration_tests_TEST_ENVIRONMENT}" PARENT_SCOPE)
 endif()
 
-# Register the cross-provider ASM SDPA gpu-reference integration test target. In
-# standalone provider builds the harness may not already be in scope, so try to
-# import it first.
+# Register the cross-provider gpu-reference integration test targets (the ASM SDPA one is
+# registered in src/CMakeLists.txt, beside its tiered external lane). In standalone provider
+# builds the harness may not already be in scope, so try to import it first.
 if(NOT COMMAND add_external_integration_test_target)
     find_package(hipdnn_integration_tests CONFIG QUIET)
 endif()
@@ -387,22 +387,3 @@ foreach(_hkp_bwd_engine IN ITEMS split merged)
         )
     endforeach()
 endforeach()
-
-# The ASM SDPA forward engine against the GPU reference, on the quick forward bundles. The
-# C++ suite this once named (Smoke/IntegrationGpuSdpaFwdBfp16) no longer builds by default
-# (BUILD_CPP_GRAPH_TESTS), so a filter on it ran zero tests and failed; the bundle suites
-# are always registered, and are named after their folder (quick_SdpaFwd_<layout>).
-if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
-   AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
-    add_external_integration_test_target(
-        TARGET_NAME hip_kernel_provider_asm_sdpa_gpu_ref_integration_tests
-        PLUGIN_TARGET hip_kernel_provider
-        ENGINE_NAME ASM_SDPA_ENGINE
-        INSTALL_SUBDIR hip_kernel_provider
-        REFERENCE_EXECUTOR gpu
-        GTEST_FILTER
-            quick_SdpaFwd_*
-        ENVIRONMENT_MODIFICATION
-            ${TEST_ENVIRONMENT_MODIFICATION}
-    )
-endif()

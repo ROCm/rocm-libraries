@@ -8,9 +8,12 @@
 #         -P AsmSdpaSelectorRevisionFixtures.cmake
 #
 # Writes the header TestAsmSdpaSelectorRevision reads: the revision of LF and CRLF copies of
-# the engine tree, and the revision after each probe edit. Run by a build step whose
-# dependencies are the engine's files, not at configure time: it copies the tree twice and
-# runs the recipe once per probe, each run hashing every kernel.
+# the engine tree, the revision after each probe edit, and the engine files the recipe
+# neither hashes nor lists as left out. The probes are driven by the recipe's own lists
+# (hkp_asm_sdpa_sources, hkp_asm_sdpa_not_inputs, hkp_asm_sdpa_kernel_files), so they cannot
+# cover less than the recipe hashes. Run by a build step whose dependencies are the engine's
+# files, not at configure time: it copies the tree twice and runs the recipe once per probe,
+# each run hashing every kernel.
 
 # A -P script starts with every policy unset; without this CMP0053 is OLD, the @ escape
 # below does nothing, and every run warns.
@@ -51,17 +54,33 @@ foreach(_rel IN LISTS _files)
 endforeach()
 hkp_asm_sdpa_revision(_rev_lf "${_lf}")
 hkp_asm_sdpa_revision(_rev_crlf "${_crlf}")
+hkp_asm_sdpa_revision_prefix(_rev_prefix)
+# Every file of the engine tree is a decided input or a decided non-input; a new file that
+# is neither would otherwise be left out of the revision without anyone choosing it.
+hkp_asm_sdpa_unclassified_files(_unclassified "${ENGINE_DIR}")
+list(JOIN _unclassified ", " _unclassified)
 
 set(_probe_rows "")
 # Applies <change> to <rel> in the LF tree, records the revision, and restores the file.
-# EDIT appends a line; ADD creates <rel>. Restored from a copy because file(WRITE) would
-# rewrite line endings on Windows.
+# EDIT appends a line (a byte to a code object); ADD creates <rel>; MOVE renames <rel> to
+# <moved-to>. Restored from a copy because file(WRITE) would rewrite line endings on Windows.
 function(_probe _change _rel _must_expire)
     set(_path "${_lf}/${_rel}")
     set(_saved "${WORK_DIR}/probe_original")
+    set(_label "${_rel}")
     if(_change STREQUAL "EDIT")
         file(COPY_FILE "${_path}" "${_saved}")
-        file(APPEND "${_path}" "probe\n")
+        if(_rel MATCHES "\\.co$")
+            file(APPEND "${_path}" "x")
+        else()
+            file(APPEND "${_path}" "probe\n")
+        endif()
+    elseif(_change STREQUAL "MOVE")
+        set(_moved "${_lf}/${ARGV3}")
+        cmake_path(GET _moved PARENT_PATH _dir)
+        file(MAKE_DIRECTORY "${_dir}")
+        file(RENAME "${_path}" "${_moved}")
+        set(_label "${_rel} to ${ARGV3}")
     else()
         cmake_path(GET _path PARENT_PATH _dir)
         file(MAKE_DIRECTORY "${_dir}")
@@ -70,29 +89,34 @@ function(_probe _change _rel _must_expire)
     hkp_asm_sdpa_revision(_probed "${_lf}")
     if(_change STREQUAL "EDIT")
         file(RENAME "${_saved}" "${_path}")
+    elseif(_change STREQUAL "MOVE")
+        file(RENAME "${_moved}" "${_path}")
     else()
         file(REMOVE "${_path}")
     endif()
-    string(TOLOWER "${_change}" _label)
-    string(APPEND _label " ${_rel}")
-    set(_probe_rows "${_probe_rows}    Probe{\"${_label}\", \"${_probed}\", ${_must_expire}},\n"
+    string(TOLOWER "${_change}" _change_label)
+    set(_probe_rows "${_probe_rows}    Probe{\"${_change_label} ${_label}\", \"${_probed}\", ${_must_expire}},\n"
         PARENT_SCOPE)
 endfunction()
-# Every selection input of either direction.
-foreach(_source IN ITEMS
-        asm/asm_kernels/codegen.py asm/asm_kernels/co_metadata.py
-        asm/AsmKernelPath.hpp plans/SdpaKernelUtils.hpp
-        plans/SdpaFwdPlanBuilder.cpp plans/SdpaFwdPlanBuilder.hpp
-        plans/SdpaBwdPlanBuilder.cpp plans/SdpaBwdPlanBuilder.hpp
-        plans/SdpaPlanUtils.hpp
-        plans/SdpaFwdPlan.cpp plans/SdpaFwdPlan.hpp plans/SdpaFwdParams.hpp
-        plans/SdpaFwdLaunchParams.hpp
-        plans/SdpaBwdPlan.cpp plans/SdpaBwdPlan.hpp plans/SdpaBwdParams.hpp
-        plans/SdpaBwdLaunchParams.hpp
-        plans/SdpaFwdArgsBuilder.hpp plans/SdpaBwdArgsBuilder.hpp
-        asm/SdpaFwdKernelArgs.hpp asm/SdpaBwdKernelArgs.hpp asm/SgprPadding.hpp
-        asm/asm_kernels/gfx942/fmha_v3_fwd/fmha_fwd.csv)
+# Every selection source of either direction.
+hkp_asm_sdpa_sources(_sources)
+foreach(_source IN LISTS _sources)
     _probe(EDIT ${_source} true)
+endforeach()
+# The first CSV and code object of each direction: the bytes of a kernel, or the table of
+# them, and the arch directory they sit in, are selection inputs.
+hkp_asm_sdpa_kernel_files(_kernel_files "${_lf}")
+foreach(_direction IN ITEMS fwd bwd)
+    foreach(_extension IN ITEMS csv co)
+        set(_candidates "${_kernel_files}")
+        list(FILTER _candidates INCLUDE REGEX "/fmha_v3_${_direction}/.*\\.${_extension}$")
+        list(GET _candidates 0 _kernel)
+        file(RELATIVE_PATH _kernel_rel "${_lf}" "${_kernel}")
+        string(REGEX REPLACE "^asm/asm_kernels/[^/]+/" "asm/asm_kernels/gfx_probe/"
+               _kernel_moved "${_kernel_rel}")
+        _probe(EDIT ${_kernel_rel} true)
+        _probe(MOVE ${_kernel_rel} true ${_kernel_moved})
+    endforeach()
 endforeach()
 # A new kernel or arch directory, in either direction, is an inventory change.
 _probe(ADD asm/asm_kernels/gfx950/fmha_v3_fwd/fwd_probe.co true)
@@ -102,14 +126,11 @@ _probe(ADD asm/asm_kernels/gfx_probe/fmha_v3_bwd/fmha_bwd.csv true)
 # Provenance and docs cannot move a throughput number.
 _probe(EDIT asm/asm_kernels/gfx942/fmha_v3_fwd/SOURCE.md false)
 _probe(EDIT asm/asm_kernels/gfx942/fmha_v3_bwd/SOURCE.md false)
-_probe(EDIT asm/asm_kernels/README.md false)
-# The engine class reports details, binds L1 models and dispatches to a plan builder; the
-# builders, not it, choose the kernel.
-_probe(EDIT AsmSdpaEngine.cpp false)
-_probe(EDIT AsmSdpaEngine.hpp false)
-# Loading plumbing: it fetches the kernel the inputs chose.
-_probe(EDIT asm/AsmKpackArchive.hpp false)
-_probe(EDIT plans/SdpaModuleCache.hpp false)
+# Everything else in the engine tree is declared not to decide a kernel or its launch.
+hkp_asm_sdpa_not_inputs(_not_inputs)
+foreach(_not_input IN LISTS _not_inputs)
+    _probe(EDIT ${_not_input} false)
+endforeach()
 file(REMOVE_RECURSE "${WORK_DIR}")
 
 string(CONCAT _text
@@ -117,8 +138,11 @@ string(CONCAT _text
     "#pragma once\n\n"
     "#include <array>\n\n"
     "namespace asm_sdpa_engine::selector_revision_fixtures\n{\n\n"
+    "inline constexpr const char* REVISION_PREFIX = \"${_rev_prefix}\";\n"
     "inline constexpr const char* REVISION_LF = \"${_rev_lf}\";\n"
-    "inline constexpr const char* REVISION_CRLF = \"${_rev_crlf}\";\n\n"
+    "inline constexpr const char* REVISION_CRLF = \"${_rev_crlf}\";\n"
+    "// Engine files the recipe neither hashes nor lists as left out.\n"
+    "inline constexpr const char* UNCLASSIFIED_FILES = \"${_unclassified}\";\n\n"
     "struct Probe\n{\n    const char* change;\n    const char* revision;\n    bool mustExpire;\n};\n\n"
     "inline constexpr std::array PROBES{\n${_probe_rows}};\n\n"
     "} // namespace asm_sdpa_engine::selector_revision_fixtures\n")

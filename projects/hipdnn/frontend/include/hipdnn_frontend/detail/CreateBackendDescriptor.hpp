@@ -52,10 +52,10 @@ inline hipdnnStatus_t setEngineHeuristicMode(hipdnnBackendDescriptor_t heuristic
 
     using hipdnn_data_sdk::utilities::policyNameToId;
     const std::array<int64_t, 3> policyOrder = {
-        policyNameToId("SelectionHeuristic::Config"),
+        policyNameToId(hipdnn_data_sdk::utilities::CONFIG_POLICY_NAME),
         policyNameToId(mode == HIPDNN_HEUR_MODE_B ? hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME
                                                   : hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME),
-        policyNameToId("SelectionHeuristic::StaticOrdering")};
+        policyNameToId(hipdnn_data_sdk::utilities::STATIC_ORDERING_POLICY_NAME)};
     return hipdnnBackend()->backendSetAttribute(heuristicDesc,
                                                 HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT,
                                                 HIPDNN_TYPE_INT64,
