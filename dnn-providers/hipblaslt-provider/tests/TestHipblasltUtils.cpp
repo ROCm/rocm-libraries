@@ -342,3 +342,46 @@ TEST(TestHipblasltUtils, IsTypeMxOcp)
     EXPECT_FALSE(hipblaslt_utils::isTypeMxOcp(DataType::BFLOAT16));
     EXPECT_FALSE(hipblaslt_utils::isTypeMxOcp(DataType::INT8));
 }
+
+// ============================================================================
+// IsDenseRowMajor
+// ============================================================================
+
+TEST(TestHipblasltUtils, IsDenseRowMajorAcceptsDenseLayoutsOfAnyRank)
+{
+    EXPECT_TRUE(hipblaslt_utils::isDenseRowMajor({}, {}));
+    EXPECT_TRUE(hipblaslt_utils::isDenseRowMajor({7}, {1}));
+    EXPECT_TRUE(hipblaslt_utils::isDenseRowMajor({4, 5}, {5, 1}));
+    EXPECT_TRUE(hipblaslt_utils::isDenseRowMajor({2, 3, 4}, {12, 4, 1}));
+    EXPECT_TRUE(hipblaslt_utils::isDenseRowMajor({2, 3, 4, 5}, {60, 20, 5, 1}));
+}
+
+TEST(TestHipblasltUtils, IsDenseRowMajorDeclinesOtherStrideOrders)
+{
+    EXPECT_FALSE(hipblaslt_utils::isDenseRowMajor({4, 5}, {1, 4}));
+    EXPECT_FALSE(hipblaslt_utils::isDenseRowMajor({2, 3, 4}, {1, 2, 6}));
+    EXPECT_FALSE(hipblaslt_utils::isDenseRowMajor({2, 3, 4}, {12, 1, 3}));
+    // Padded outer stride, padded inner stride.
+    EXPECT_FALSE(hipblaslt_utils::isDenseRowMajor({2, 3, 4}, {16, 4, 1}));
+    EXPECT_FALSE(hipblaslt_utils::isDenseRowMajor({2, 3, 4}, {12, 4, 2}));
+}
+
+TEST(TestHipblasltUtils, IsDenseRowMajorIgnoresStridesOfSizeOneDimensions)
+{
+    EXPECT_TRUE(hipblaslt_utils::isDenseRowMajor({1, 5}, {0, 1}));
+    EXPECT_TRUE(hipblaslt_utils::isDenseRowMajor({1, 5}, {99, 1}));
+    EXPECT_TRUE(hipblaslt_utils::isDenseRowMajor({2, 1, 4}, {4, 123, 1}));
+    EXPECT_TRUE(hipblaslt_utils::isDenseRowMajor({1, 1, 1}, {7, 8, 9}));
+    // A trailing size-1 dimension does not change the expected stride of the one before it.
+    EXPECT_TRUE(hipblaslt_utils::isDenseRowMajor({4, 5, 1}, {5, 1, 0}));
+    // A size-1 stride is ignored, but the non-unit dimensions must still be dense.
+    EXPECT_FALSE(hipblaslt_utils::isDenseRowMajor({1, 5}, {5, 2}));
+    EXPECT_FALSE(hipblaslt_utils::isDenseRowMajor({2, 1, 4}, {5, 1, 1}));
+}
+
+TEST(TestHipblasltUtils, IsDenseRowMajorDeclinesRankMismatch)
+{
+    EXPECT_FALSE(hipblaslt_utils::isDenseRowMajor({4, 5}, {5}));
+    EXPECT_FALSE(hipblaslt_utils::isDenseRowMajor({4}, {5, 1}));
+    EXPECT_FALSE(hipblaslt_utils::isDenseRowMajor({}, {1}));
+}
