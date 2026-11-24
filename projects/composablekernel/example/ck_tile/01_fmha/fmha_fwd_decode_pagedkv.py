@@ -21,6 +21,8 @@ PAGE_SIZES = (16, 64, 128)
 _lib = None
 _buffers = {}
 _scales = {}
+# distinct scale numbers kept per device (captured graphs may hold their tensors)
+_MAX_SCALE_NUMBERS = 64
 
 # aiter pa_decode arguments this kernel has no use for (its own scratch and tuning)
 _IGNORED = ("context_partition_size", "exp_sums", "max_logits", "temporary_output")
@@ -93,6 +95,10 @@ def _scale_ptr(scale, device):
         # a host number: kept on the device, one tensor per value
         value = float(scale)
         if (device, value) not in _scales:
+            if sum(d == device for d, _ in _scales) >= _MAX_SCALE_NUMBERS:
+                raise ValueError(
+                    "too many distinct key_scale / value_scale numbers: pass a float32 tensor"
+                )
             _scales[(device, value)] = torch.tensor([value], dtype=torch.float32).to(
                 device
             )

@@ -96,7 +96,8 @@ inline bool fmha_fwd_decode_pagedkv_is_valid(const fmha_fwd_decode_pagedkv_trait
     // several clusters merge what each cluster merged: a cluster of one split merges nothing
     if(a.num_groups > 1 && t.num_splits < 2)
         return false;
-    // the fp8 conversion of Q does not saturate: a scale that is not positive and finite gives NaN
+    // the scale multiplies every logit: one that is not finite gives NaN outputs, and a
+    // negative one is not a softmax scale
     if(!(a.scale_s > 0.f) || !std::isfinite(a.scale_s))
         return false;
     return 1 <= t.num_splits && t.num_splits <= ck_tile::kFmhaFwdDecodeMaxClusterSplits;
