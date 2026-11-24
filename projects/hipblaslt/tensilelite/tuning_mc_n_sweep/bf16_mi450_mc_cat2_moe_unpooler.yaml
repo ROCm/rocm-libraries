@@ -1,0 +1,827 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# LWPARCH-565 - Meta LLM GEMMs on MI450-MC (gfx1250), BF16 TN, N sweep. SECOND PASS.
+# Category 2: moe unpooler  -  M x K = 8192 x 4096
+#
+# bf16 in/out, f32 compute, TN, batch 1, alpha 1, beta 0, lda = ldb = K, ldc = ldd = M.
+# Fused: bias (f32, applied to D) + scale-alpha vector, activation requested as none, i.e.
+# problem type Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs.
+#
+# ONE PROBLEM SIZE PER BenchmarkProblemSizeGroup - this is required, not a style choice
+# ---------------------------------------------------------------------------------------
+# With several sizes in one group the client aborts with "Insufficient rotating buffer size":
+#   - the allocator (client/src/DataInitialization.cpp:1289) sizes the pool from
+#     m_vdata[i].pristine[dataType].maxElements, i.e. the LARGEST problem in the group, and
+#     reserves S_max * (ceil(buffer/S_max) - 1)   (client/src/Rotating.cpp:80-88);
+#   - the check (client/src/DataInitialization.cpp:3713-3735) uses getRotatingSize() of the
+#     problem actually being run, and asks for (ceil(buffer/size_p) - 1) * size_p ~= buffer.
+# So any group whose smallest problem is meaningfully smaller than its largest one can fail.
+# With one size per group size_p == S_max and the check passes with equality. Do not "fix" this
+# by setting RotatingBufferMode 1: that path skips the check but changes what is allocated, so
+# the measurement stops matching what a real run does.
+#
+# Sizing against the real machine
+# -------------------------------
+# rocminfo on this box: 8 GPU agents of 96 CUs each (4 cards x 2 NPS2 partitions), PCI DID
+# 0x75c8 = MI450-MC Lyte. Tuning therefore targets 96 CUs per device, NOT the 168 active CUs
+# per package in the MI450X-MC spec. The LWPARCH-565 projection is also per NPS2 partition:
+# 2100 TF/s / 2 = 1050 TF/s at the 1335 MHz it assumes, and 17.1 TB/s / 2 = 8.55 TB/s, which is
+# within 1% of the 8.48 TB/s implied by its own numbers.
+#   workgroups = ceil(M / MT0) * ceil(N / MT1) * GlobalSplitU, target ~1-8 waves of 96.
+#
+# What the first pass measured (run_20261119b)
+# --------------------------------------------
+# Fitting the 20 winners at N <= 32:  t = 7.75 us + bytes / 8.91 TB/s
+# against the projection's            t = 1.99 us + bytes / 8.48 TB/s.
+# The streaming bandwidth is already there; the whole gap is per-kernel fixed cost. lm_head,
+# whose 414 MB of weights amortise that cost, came in at 1.03-1.10x of target at M <= 32,
+# while oproj (16.8 MB) sat at 1.8-2.1x. Edge sizes cost far more than the projection assumes:
+# 255 ran 19-55% slower than 256 and 511 17-55% slower than 512 even though they share a tile
+# count. Splitting every N into its own group also lets the aligned sizes use
+# AssertFree1ElementMultiple 16 while 17/255/511 keep 1, which they could not do when grouped.
+#
+# MatrixInstruction is [16,16,32,1,1,WaveTileM,WaveTileN,WaveGroupM,WaveGroupN];
+# MT0 = 16*WaveTileM*WaveGroupM, MT1 = 16*WaveTileN*WaveGroupN, WaveGroupM*WaveGroupN <= 4
+# (gfx1250 has no WGP mode, so a workgroup is capped at 4 waves).
+# Entries marked "v1 winner" are the macro tiles that actually won the first pass for this size.
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  Architecture: gfx1250
+  KernelTime: True
+  PreciseKernelTime: False
+  SleepPercent: 0
+  SyncsPerBenchmark: 1
+  NumBenchmarks: 1
+  NumWarmups: 50
+  EnqueuesPerSync: 500
+  SkipSlowSolutionRatio: 0.5
+  RotatingBufferSize: 384
+  NumElementsToValidate: 0
+  NumElementsToValidateWinner: 0
+  ExitOnFails: 0
+  BoundsCheck: 0
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeD: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  DataInitSeed: 1
+  CSVExportWinner: True
+  CSVMergeSameProblemID: True
+  CpuThreads: 32
+  PrintLevel: 1
+  PrintSolutionRejectionReason: True
+  KeepBuildTmp: False
+  # UseEffLike: False
+
+BenchmarkProblems:
+  -
+    - # ProblemType, TN (Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs)
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      UseBias: 1
+      Batched: True
+      UseScaleAlphaVec: 1
+      Activation: True
+      ActivationType: hipblaslt_all
+      ActivationComputeDataType: s
+      SupportUserArgs: True
+
+    - # N = 1   (edge size: N is not a multiple of 16)
+      # projection target 9.98 us. 48 solution configs.
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - TDMInst: [3]
+        - TDMIterateMode: [0]
+        - TDMSplit: [False]
+        - TDMPlusLdsBuf: [-1]
+        - StaggerU: [0]
+        - StreamK: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - ClusterLocalRead: [0]
+        - ClusterDim: [[1, 1]]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - LDSSegmentInterleave: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - HalfPLR: [0]
+        - SourceSwap: [False]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - AssertFree0ElementMultiple: [16]  # M = 8192
+        - AssertFree1ElementMultiple: [1]   # N = 1
+        - AssertSummationElementMultiple: [8]   # K = 4096
+        - Groups:
+          - # macro tile x DepthU. MT0 tiles M, MT1 tiles N (8192 output features).
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 4, 1]  # MT 64x16, 128 wg at GSU 1
+              DepthU: [128, 256]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 2, 1, 4, 1]  # MT 128x16, 64 wg at GSU 1  v1 winner
+              DepthU: [128, 256]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 4, 1, 4, 1]  # MT 256x16, 32 wg at GSU 1
+              DepthU: [128, 256]
+          - # split-K: 64 wg at MT1 128, GSU 1 -> target ~1-8 waves of 96
+            - GlobalSplitU: [1]
+            - GlobalSplitU: [2, 4, 8]
+              GlobalSplitUAlgorithm: [MultipleBuffer]
+          - # global prefetch into GL2
+            - PrefetchGL2: [0]
+            - PrefetchGL2: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [8192, 1, 1, 4096]
+        - ActivationArgs:
+          - [Enum: none]
+        - BiasTypeArgs: [s]
+
+    - # N = 16
+      # projection target 9.80 us. 96 solution configs.
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - TDMInst: [3]
+        - TDMIterateMode: [0]
+        - TDMSplit: [False]
+        - TDMPlusLdsBuf: [-1]
+        - StaggerU: [0]
+        - StreamK: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - ClusterLocalRead: [0]
+        - ClusterDim: [[1, 1]]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - LDSSegmentInterleave: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - HalfPLR: [0]
+        - SourceSwap: [False]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - AssertFree0ElementMultiple: [16]  # M = 8192
+        - AssertFree1ElementMultiple: [16]  # N = 16
+        - AssertSummationElementMultiple: [8]   # K = 4096
+        - Groups:
+          - # macro tile x DepthU. MT0 tiles M, MT1 tiles N (8192 output features).
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 4, 1]  # MT 64x16, 128 wg at GSU 1
+              DepthU: [128, 256]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 2, 1, 4, 1]  # MT 128x16, 64 wg at GSU 1  v1 winner
+              DepthU: [128, 256]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 4, 1, 4, 1]  # MT 256x16, 32 wg at GSU 1
+              DepthU: [128, 256]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 4, 1]  # MT 64x32, 128 wg at GSU 1
+              DepthU: [128, 256]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 2, 2, 4, 1]  # MT 128x32, 64 wg at GSU 1
+              DepthU: [128, 256]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 4, 2, 4, 1]  # MT 256x32, 32 wg at GSU 1
+              DepthU: [128, 256]
+          - # split-K: 64 wg at MT1 128, GSU 1 -> target ~1-8 waves of 96
+            - GlobalSplitU: [1]
+            - GlobalSplitU: [2, 4, 8]
+              GlobalSplitUAlgorithm: [MultipleBuffer]
+          - # global prefetch into GL2
+            - PrefetchGL2: [0]
+            - PrefetchGL2: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [8192, 16, 1, 4096]
+        - ActivationArgs:
+          - [Enum: none]
+        - BiasTypeArgs: [s]
+
+    - # N = 17   (edge size: N is not a multiple of 16)
+      # projection target 9.88 us. 72 solution configs.
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - TDMInst: [3]
+        - TDMIterateMode: [0]
+        - TDMSplit: [False]
+        - TDMPlusLdsBuf: [-1]
+        - StaggerU: [0]
+        - StreamK: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - ClusterLocalRead: [0]
+        - ClusterDim: [[1, 1]]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - LDSSegmentInterleave: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - HalfPLR: [0]
+        - SourceSwap: [False]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - AssertFree0ElementMultiple: [16]  # M = 8192
+        - AssertFree1ElementMultiple: [1]   # N = 17
+        - AssertSummationElementMultiple: [8]   # K = 4096
+        - Groups:
+          - # macro tile x DepthU. MT0 tiles M, MT1 tiles N (8192 output features).
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 4, 1]  # MT 64x16, 256 wg at GSU 1
+              DepthU: [128, 256]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 2, 1, 4, 1]  # MT 128x16, 128 wg at GSU 1
+              DepthU: [128, 256]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 4, 1, 4, 1]  # MT 256x16, 64 wg at GSU 1
+              DepthU: [128, 256]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 4, 1]  # MT 64x32, 128 wg at GSU 1
+              DepthU: [128, 256]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 2, 2, 4, 1]  # MT 128x32, 64 wg at GSU 1  v1 winner
+              DepthU: [128, 256]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 4, 2, 4, 1]  # MT 256x32, 32 wg at GSU 1
+              DepthU: [128, 256]
+          - # split-K: 64 wg at MT1 128, GSU 1 -> target ~1-8 waves of 96
+            - GlobalSplitU: [1]
+            - GlobalSplitU: [2, 4]
+              GlobalSplitUAlgorithm: [MultipleBuffer]
+          - # global prefetch into GL2
+            - PrefetchGL2: [0]
+            - PrefetchGL2: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [8192, 17, 1, 4096]
+        - ActivationArgs:
+          - [Enum: none]
+        - BiasTypeArgs: [s]
+
+    - # N = 32
+      # projection target 9.88 us. 108 solution configs.
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - TDMInst: [3]
+        - TDMIterateMode: [0]
+        - TDMSplit: [False]
+        - TDMPlusLdsBuf: [-1]
+        - StaggerU: [0]
+        - StreamK: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - ClusterLocalRead: [0]
+        - ClusterDim: [[1, 1]]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - LDSSegmentInterleave: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - HalfPLR: [0]
+        - SourceSwap: [False]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - AssertFree0ElementMultiple: [16]  # M = 8192
+        - AssertFree1ElementMultiple: [16]  # N = 32
+        - AssertSummationElementMultiple: [8]   # K = 4096
+        - Groups:
+          - # macro tile x DepthU. MT0 tiles M, MT1 tiles N (8192 output features).
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 4, 1]  # MT 64x16, 256 wg at GSU 1
+              DepthU: [128, 256]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 2, 1, 4, 1]  # MT 128x16, 128 wg at GSU 1
+              DepthU: [128, 256]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 4, 1, 4, 1]  # MT 256x16, 64 wg at GSU 1
+              DepthU: [128, 256]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 4, 1]  # MT 64x32, 128 wg at GSU 1
+              DepthU: [128, 256]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 2, 2, 4, 1]  # MT 128x32, 64 wg at GSU 1
+              DepthU: [128, 256]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 4, 2, 4, 1]  # MT 256x32, 32 wg at GSU 1  v1 winner
+              DepthU: [128, 256]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 4, 4, 1]  # MT 64x64, 128 wg at GSU 1
+              DepthU: [128, 256]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 2, 4, 4, 1]  # MT 128x64, 64 wg at GSU 1
+              DepthU: [128, 256]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 4, 4, 4, 1]  # MT 256x64, 32 wg at GSU 1
+              DepthU: [128, 256]
+          - # split-K: 64 wg at MT1 128, GSU 1 -> target ~1-8 waves of 96
+            - GlobalSplitU: [1]
+            - GlobalSplitU: [2, 4]
+              GlobalSplitUAlgorithm: [MultipleBuffer]
+          - # global prefetch into GL2
+            - PrefetchGL2: [0]
+            - PrefetchGL2: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [8192, 32, 1, 4096]
+        - ActivationArgs:
+          - [Enum: none]
+        - BiasTypeArgs: [s]
+
+    - # N = 64
+      # projection target 10.09 us. 72 solution configs.
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - TDMInst: [3]
+        - TDMIterateMode: [-1]
+        - TDMSplit: [False]
+        - TDMPlusLdsBuf: [-1]
+        - StaggerU: [0]
+        - StreamK: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - ClusterLocalRead: [0]
+        - ClusterDim: [[1, 1]]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - LDSSegmentInterleave: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - HalfPLR: [0]
+        - SourceSwap: [True]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - AssertFree0ElementMultiple: [16]  # M = 8192
+        - AssertFree1ElementMultiple: [16]  # N = 64
+        - AssertSummationElementMultiple: [8]   # K = 4096
+        - Groups:
+          - # macro tile x DepthU. MT0 tiles M, MT1 tiles N (8192 output features).
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 2, 4, 1]  # MT 64x32, 256 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 2, 2, 4, 1]  # MT 128x32, 128 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 4, 2, 4, 1]  # MT 256x32, 64 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 4, 4, 1]  # MT 64x64, 128 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 2, 4, 4, 1]  # MT 128x64, 64 wg at GSU 1  v1 winner
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 4, 4, 4, 1]  # MT 256x64, 32 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 8, 4, 1]  # MT 64x128, 128 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 4, 4, 2, 2]  # MT 128x128, 64 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 4, 8, 4, 1]  # MT 256x128, 32 wg at GSU 1
+              DepthU: [64, 128]
+          - # split-K: 64 wg at MT1 128, GSU 1 -> target ~1-8 waves of 96
+            - GlobalSplitU: [1]
+            - GlobalSplitU: [2]
+              GlobalSplitUAlgorithm: [MultipleBuffer]
+          - # global prefetch into GL2
+            - PrefetchGL2: [0]
+            - PrefetchGL2: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [8192, 64, 1, 4096]
+        - ActivationArgs:
+          - [Enum: none]
+        - BiasTypeArgs: [s]
+
+    - # N = 128
+      # projection target 11.67 us. 28 solution configs.
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - TDMInst: [3]
+        - TDMIterateMode: [-1]
+        - TDMSplit: [False]
+        - TDMPlusLdsBuf: [-1]
+        - StaggerU: [0]
+        - StreamK: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - ClusterLocalRead: [0]
+        - ClusterDim: [[1, 1]]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - LDSSegmentInterleave: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - HalfPLR: [0]
+        - SourceSwap: [True]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - AssertFree0ElementMultiple: [16]  # M = 8192
+        - AssertFree1ElementMultiple: [16]  # N = 128
+        - AssertSummationElementMultiple: [8]   # K = 4096
+        - Groups:
+          - # macro tile x DepthU. MT0 tiles M, MT1 tiles N (8192 output features).
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 4, 4, 1]  # MT 64x64, 256 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 2, 4, 4, 1]  # MT 128x64, 128 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 4, 4, 4, 1]  # MT 256x64, 64 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 8, 4, 1]  # MT 64x128, 128 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 4, 4, 2, 2]  # MT 128x128, 64 wg at GSU 1  v1 winner
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 16, 4, 1]  # MT 64x256, 128 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 2, 16, 4, 1]  # MT 128x256, 64 wg at GSU 1
+              DepthU: [64, 128]
+          - # split-K: 64 wg at MT1 128, GSU 1 -> target ~1-8 waves of 96
+            - GlobalSplitU: [1]
+          - # global prefetch into GL2
+            - PrefetchGL2: [0]
+            - PrefetchGL2: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [8192, 128, 1, 4096]
+        - ActivationArgs:
+          - [Enum: none]
+        - BiasTypeArgs: [s]
+
+    - # N = 255   (edge size: N is not a multiple of 16)
+      # projection target 19.71 us. 20 solution configs.
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - TDMInst: [3]
+        - TDMIterateMode: [-1]
+        - TDMSplit: [False]
+        - TDMPlusLdsBuf: [-1]
+        - StaggerU: [0]
+        - StreamK: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - ClusterLocalRead: [0]
+        - ClusterDim: [[1, 1]]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - LDSSegmentInterleave: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - HalfPLR: [0]
+        - SourceSwap: [True]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - AssertFree0ElementMultiple: [16]  # M = 8192
+        - AssertFree1ElementMultiple: [1]   # N = 255
+        - AssertSummationElementMultiple: [8]   # K = 4096
+        - Groups:
+          - # macro tile x DepthU. MT0 tiles M, MT1 tiles N (8192 output features).
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 8, 4, 1]  # MT 64x128, 256 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 4, 4, 2, 2]  # MT 128x128, 128 wg at GSU 1  v1 winner
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 4, 8, 4, 1]  # MT 256x128, 64 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 16, 4, 1]  # MT 64x256, 128 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 2, 16, 4, 1]  # MT 128x256, 64 wg at GSU 1
+              DepthU: [64, 128]
+          - # split-K: 128 wg at MT1 128, GSU 1 -> target ~1-8 waves of 96
+            - GlobalSplitU: [1]
+          - # global prefetch into GL2
+            - PrefetchGL2: [0]
+            - PrefetchGL2: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [8192, 255, 1, 4096]
+        - ActivationArgs:
+          - [Enum: none]
+        - BiasTypeArgs: [s]
+
+    - # N = 256
+      # projection target 19.74 us. 20 solution configs.
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - TDMInst: [3]
+        - TDMIterateMode: [-1]
+        - TDMSplit: [False]
+        - TDMPlusLdsBuf: [-1]
+        - StaggerU: [0]
+        - StreamK: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - ClusterLocalRead: [0]
+        - ClusterDim: [[1, 1]]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - LDSSegmentInterleave: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - HalfPLR: [0]
+        - SourceSwap: [True]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - AssertFree0ElementMultiple: [16]  # M = 8192
+        - AssertFree1ElementMultiple: [16]  # N = 256
+        - AssertSummationElementMultiple: [8]   # K = 4096
+        - Groups:
+          - # macro tile x DepthU. MT0 tiles M, MT1 tiles N (8192 output features).
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 8, 4, 1]  # MT 64x128, 256 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 4, 4, 2, 2]  # MT 128x128, 128 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 4, 8, 4, 1]  # MT 256x128, 64 wg at GSU 1  v1 winner
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 16, 4, 1]  # MT 64x256, 128 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 2, 16, 4, 1]  # MT 128x256, 64 wg at GSU 1
+              DepthU: [64, 128]
+          - # split-K: 128 wg at MT1 128, GSU 1 -> target ~1-8 waves of 96
+            - GlobalSplitU: [1]
+          - # global prefetch into GL2
+            - PrefetchGL2: [0]
+            - PrefetchGL2: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [8192, 256, 1, 4096]
+        - ActivationArgs:
+          - [Enum: none]
+        - BiasTypeArgs: [s]
+
+    - # N = 511   (edge size: N is not a multiple of 16)
+      # projection target 37.13 us. 32 solution configs.
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - TDMInst: [3]
+        - TDMIterateMode: [-1]
+        - TDMSplit: [False]
+        - TDMPlusLdsBuf: [-1]
+        - StaggerU: [0]
+        - StreamK: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - ClusterLocalRead: [0]
+        - ClusterDim: [[1, 1]]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - LDSSegmentInterleave: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - HalfPLR: [0]
+        - SourceSwap: [True]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - AssertFree0ElementMultiple: [16]  # M = 8192
+        - AssertFree1ElementMultiple: [1]   # N = 511
+        - AssertSummationElementMultiple: [8]   # K = 4096
+        - Groups:
+          - # macro tile x DepthU. MT0 tiles M, MT1 tiles N (8192 output features).
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 8, 4, 1]  # MT 64x128, 512 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 4, 4, 2, 2]  # MT 128x128, 256 wg at GSU 1  v1 winner
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 4, 8, 4, 1]  # MT 256x128, 128 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 16, 4, 1]  # MT 64x256, 256 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 2, 16, 4, 1]  # MT 128x256, 128 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 8, 8, 2, 2]  # MT 256x256, 64 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 32, 4, 1]  # MT 64x512, 128 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 2, 32, 4, 1]  # MT 128x512, 64 wg at GSU 1
+              DepthU: [64, 128]
+          - # split-K: 256 wg at MT1 128, GSU 1 -> target ~1-8 waves of 96
+            - GlobalSplitU: [1]
+          - # global prefetch into GL2
+            - PrefetchGL2: [0]
+            - PrefetchGL2: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [8192, 511, 1, 4096]
+        - ActivationArgs:
+          - [Enum: none]
+        - BiasTypeArgs: [s]
+
+    - # N = 512
+      # projection target 37.13 us. 32 solution configs.
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - TDMInst: [3]
+        - TDMIterateMode: [-1]
+        - TDMSplit: [False]
+        - TDMPlusLdsBuf: [-1]
+        - StaggerU: [0]
+        - StreamK: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - ClusterLocalRead: [0]
+        - ClusterDim: [[1, 1]]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - LDSSegmentInterleave: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - HalfPLR: [0]
+        - SourceSwap: [True]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - AssertFree0ElementMultiple: [16]  # M = 8192
+        - AssertFree1ElementMultiple: [16]  # N = 512
+        - AssertSummationElementMultiple: [8]   # K = 4096
+        - Groups:
+          - # macro tile x DepthU. MT0 tiles M, MT1 tiles N (8192 output features).
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 8, 4, 1]  # MT 64x128, 512 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 4, 4, 2, 2]  # MT 128x128, 256 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 4, 8, 4, 1]  # MT 256x128, 128 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 16, 4, 1]  # MT 64x256, 256 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 2, 16, 4, 1]  # MT 128x256, 128 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 8, 8, 2, 2]  # MT 256x256, 64 wg at GSU 1  v1 winner
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 1, 32, 4, 1]  # MT 64x512, 128 wg at GSU 1
+              DepthU: [64, 128]
+            - MatrixInstruction: [16, 16, 32, 1, 1, 2, 32, 4, 1]  # MT 128x512, 64 wg at GSU 1
+              DepthU: [64, 128]
+          - # split-K: 256 wg at MT1 128, GSU 1 -> target ~1-8 waves of 96
+            - GlobalSplitU: [1]
+          - # global prefetch into GL2
+            - PrefetchGL2: [0]
+            - PrefetchGL2: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [8192, 512, 1, 4096]
+        - ActivationArgs:
+          - [Enum: none]
+        - BiasTypeArgs: [s]
+
+LibraryLogic:
+  ScheduleName: "gfx1250"
+  DeviceNames: ["Device 75c8"]   # MI450-MC Lyte, confirmed from /sys PCI device id 0x75c8
+  ArchitectureName: "gfx1250"
+  LibraryType: "Equality"

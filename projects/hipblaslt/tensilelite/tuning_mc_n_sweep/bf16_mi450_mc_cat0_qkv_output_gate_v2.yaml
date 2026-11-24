@@ -1,0 +1,761 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  Architecture: gfx1250
+  KernelTime: True
+  PreciseKernelTime: False
+  SleepPercent: 0
+  SyncsPerBenchmark: 1
+  NumBenchmarks: 1
+  NumWarmups: 200
+  EnqueuesPerSync: 500
+  SkipSlowSolutionRatio: 0.0
+  RotatingBufferSize: 512
+  NumElementsToValidate: 0
+  NumElementsToValidateWinner: 0
+  ExitOnFails: 0
+  BoundsCheck: 0
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeD: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  DataInitSeed: 1
+  CSVExportWinner: True
+  CSVMergeSameProblemID: True
+  CpuThreads: 32
+  PrintLevel: 1
+  PrintSolutionRejectionReason: True
+  KeepBuildTmp: False
+  UseEffLike: False
+
+BenchmarkProblems:
+  -
+    - # ProblemType, TN (Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs)
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      UseBias: 1
+      Batched: True
+      UseScaleAlphaVec: 1
+      Activation: True
+      ActivationType: hipblaslt_all
+      ActivationComputeDataType: s
+      SupportUserArgs: True
+
+    - # N = 1   (edge size: N is not a multiple of 16)
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:      
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]  # MT16x16,  144 wg
+          - [16, 16, 32, 1, 1, 1, 1, 2, 1]  # MT32x16,   72 wg
+          - [16, 16, 32, 1, 1, 3, 1, 1, 1]  # MT48x16,   48 wg
+          - [16, 16, 32, 1, 1, 1, 1, 4, 1]  # MT64x16,   36 wg
+          - [16, 16, 32, 1, 1, 3, 1, 2, 1]  # MT96x16,   24 wg
+          - [16, 16, 32, 1, 1, 2, 1, 4, 1]  # MT128x16,  18 wg
+          - [16, 16, 32, 1, 1, 3, 1, 4, 1]  # MT192x16,  12 wg
+          - [16, 16, 32, 1, 1, 4, 1, 4, 1]  # MT256x16,   9 wg  <- shipped library winner
+        - DepthU: [128, 256, 512]
+        - HalfPLR: [0, 1]                  # 1 = half PLR for A, the operand on the swept-wide side
+        - PrefetchGL2: [1]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - TDMInst: [3]
+        - TDMIterateMode: [0]
+        - TDMSplit: [False]
+        - TDMPlusLdsBuf: [-1]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - ClusterLocalRead: [0]
+        - ClusterDim: [[1, 1]]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - LDSSegmentInterleave: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [False]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - AssertFree0ElementMultiple: [16]  # M = 2304
+        - AssertFree1ElementMultiple: [1]   # N = 1
+        - AssertSummationElementMultiple: [8]  # K = 8192
+        - Groups:
+          -
+            - GlobalSplitU: [1, 2, 4, 8, 16, 32]
+              GlobalSplitUAlgorithm: MultipleBuffer
+            - GlobalSplitU: [1, 2, 4, 8, 16, 32]
+              GlobalSplitUAlgorithm: MultipleBufferSingleKernel
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2304, 1, 1, 8192]
+        - ActivationArgs:
+          - [Enum: none]
+        - BiasTypeArgs: [s]
+
+    - # N = 2
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]  # MT16x16, 144 wg
+          - [16, 16, 32, 1, 1, 1, 1, 2, 1]  # MT32x16, 72 wg
+          - [16, 16, 32, 1, 1, 3, 1, 1, 1]  # MT48x16, 48 wg
+          - [16, 16, 32, 1, 1, 1, 1, 4, 1]  # MT64x16, 36 wg
+          - [16, 16, 32, 1, 1, 3, 1, 2, 1]  # MT96x16, 24 wg
+          - [16, 16, 32, 1, 1, 2, 1, 4, 1]  # MT128x16, 18 wg
+          - [16, 16, 32, 1, 1, 4, 1, 4, 1]  # MT256x16, 9 wg
+        - DepthU: [128, 256]
+        - HalfPLR: [0]
+        - PrefetchGL2: [0, 1]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - TDMInst: [3]
+        - TDMIterateMode: [0]
+        - TDMSplit: [False]
+        - TDMPlusLdsBuf: [-1]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - ClusterLocalRead: [0]
+        - ClusterDim: [[1, 1]]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - LDSSegmentInterleave: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [False]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - AssertFree0ElementMultiple: [16]  # M = 2304
+        - AssertFree1ElementMultiple: [2]   # N = 2
+        - AssertSummationElementMultiple: [8]  # K = 8192
+        - Groups:
+          -
+            - GlobalSplitU: [1, 2, 4, 8, 16]
+              GlobalSplitUAlgorithm: MultipleBuffer
+            - GlobalSplitU: [1, 2, 4, 8, 16, 32]
+              GlobalSplitUAlgorithm: MultipleBufferSingleKernel
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2304, 2, 1, 8192]
+        - ActivationArgs:
+          - [Enum: none]
+        - BiasTypeArgs: [s]
+
+    - # N = 4
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]  # MT16x16, 144 wg
+          - [16, 16, 32, 1, 1, 1, 1, 2, 1]  # MT32x16, 72 wg
+          - [16, 16, 32, 1, 1, 3, 1, 1, 1]  # MT48x16, 48 wg
+          - [16, 16, 32, 1, 1, 1, 1, 4, 1]  # MT64x16, 36 wg
+          - [16, 16, 32, 1, 1, 3, 1, 2, 1]  # MT96x16, 24 wg
+          - [16, 16, 32, 1, 1, 2, 1, 4, 1]  # MT128x16, 18 wg
+          - [16, 16, 32, 1, 1, 4, 1, 4, 1]  # MT256x16, 9 wg
+        - DepthU: [128, 256]
+        - HalfPLR: [0]
+        - PrefetchGL2: [0, 1]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - TDMInst: [3]
+        - TDMIterateMode: [0]
+        - TDMSplit: [False]
+        - TDMPlusLdsBuf: [-1]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - ClusterLocalRead: [0]
+        - ClusterDim: [[1, 1]]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - LDSSegmentInterleave: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [False]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - AssertFree0ElementMultiple: [16]  # M = 2304
+        - AssertFree1ElementMultiple: [4]   # N = 4
+        - AssertSummationElementMultiple: [8]  # K = 8192
+        - Groups:
+          -
+            - GlobalSplitU: [1, 2, 4, 8, 16]
+              GlobalSplitUAlgorithm: MultipleBuffer
+            - GlobalSplitU: [1, 2, 4, 8, 16, 32]
+              GlobalSplitUAlgorithm: MultipleBufferSingleKernel
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2304, 4, 1, 8192]
+        - ActivationArgs:
+          - [Enum: none]
+        - BiasTypeArgs: [s]
+
+    - # N = 8
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]  # MT16x16, 144 wg
+          - [16, 16, 32, 1, 1, 1, 1, 2, 1]  # MT32x16, 72 wg
+          - [16, 16, 32, 1, 1, 3, 1, 1, 1]  # MT48x16, 48 wg
+          - [16, 16, 32, 1, 1, 1, 1, 4, 1]  # MT64x16, 36 wg
+          - [16, 16, 32, 1, 1, 3, 1, 2, 1]  # MT96x16, 24 wg
+          - [16, 16, 32, 1, 1, 2, 1, 4, 1]  # MT128x16, 18 wg
+          - [16, 16, 32, 1, 1, 4, 1, 4, 1]  # MT256x16, 9 wg
+        - DepthU: [128, 256]
+        - HalfPLR: [0]
+        - PrefetchGL2: [0, 1]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - TDMInst: [3]
+        - TDMIterateMode: [0]
+        - TDMSplit: [False]
+        - TDMPlusLdsBuf: [-1]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - ClusterLocalRead: [0]
+        - ClusterDim: [[1, 1]]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - LDSSegmentInterleave: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [False]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - AssertFree0ElementMultiple: [16]  # M = 2304
+        - AssertFree1ElementMultiple: [8]   # N = 8
+        - AssertSummationElementMultiple: [8]  # K = 8192
+        - Groups:
+          -
+            - GlobalSplitU: [1, 2, 4, 8, 16]
+              GlobalSplitUAlgorithm: MultipleBuffer
+            - GlobalSplitU: [1, 2, 4, 8, 16, 32]
+              GlobalSplitUAlgorithm: MultipleBufferSingleKernel
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2304, 8, 1, 8192]
+        - ActivationArgs:
+          - [Enum: none]
+        - BiasTypeArgs: [s]
+
+    - # N = 16
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]  # MT16x16, 144 wg
+          - [16, 16, 32, 1, 1, 1, 1, 2, 1]  # MT32x16, 72 wg
+          - [16, 16, 32, 1, 1, 3, 1, 1, 1]  # MT48x16, 48 wg
+          - [16, 16, 32, 1, 1, 1, 1, 4, 1]  # MT64x16, 36 wg
+          - [16, 16, 32, 1, 1, 3, 1, 2, 1]  # MT96x16, 24 wg
+          - [16, 16, 32, 1, 1, 2, 1, 4, 1]  # MT128x16, 18 wg
+          - [16, 16, 32, 1, 1, 3, 1, 4, 1]  # MT192x16, 12 wg
+        - DepthU: [128, 256]
+        - HalfPLR: [0]
+        - PrefetchGL2: [0, 1]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - TDMInst: [3]
+        - TDMIterateMode: [0]
+        - TDMSplit: [False]
+        - TDMPlusLdsBuf: [-1]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - ClusterLocalRead: [0]
+        - ClusterDim: [[1, 1]]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - LDSSegmentInterleave: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [False]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - AssertFree0ElementMultiple: [16]  # M = 2304
+        - AssertFree1ElementMultiple: [16]  # N = 16
+        - AssertSummationElementMultiple: [8]  # K = 8192
+        - Groups:
+          -
+            - GlobalSplitU: [1, 2, 4, 8, 16]
+              GlobalSplitUAlgorithm: MultipleBuffer
+            - GlobalSplitU: [1, 2, 4, 8, 16, 32]
+              GlobalSplitUAlgorithm: MultipleBufferSingleKernel
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2304, 16, 1, 8192]
+        - ActivationArgs:
+          - [Enum: none]
+        - BiasTypeArgs: [s]
+
+    - # N = 17
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]  # MT16x16, 288 wg
+          - [16, 16, 32, 1, 1, 3, 1, 1, 1]  # MT48x16, 96 wg
+          - [16, 16, 32, 1, 1, 3, 1, 2, 1]  # MT96x16, 48 wg
+          - [16, 16, 32, 1, 1, 1, 2, 4, 1]  # MT64x32, 36 wg
+          - [16, 16, 32, 1, 1, 4, 1, 4, 1]  # MT256x16, 18 wg
+          - [16, 16, 32, 1, 1, 3, 2, 4, 1]  # MT192x32, 12 wg
+        - DepthU: [128, 256]
+        - HalfPLR: [0]
+        - PrefetchGL2: [0, 1]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - TDMInst: [3]
+        - TDMIterateMode: [0]
+        - TDMSplit: [False]
+        - TDMPlusLdsBuf: [-1]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - ClusterLocalRead: [0]
+        - ClusterDim: [[1, 1]]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - LDSSegmentInterleave: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [False]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - AssertFree0ElementMultiple: [16]  # M = 2304
+        - AssertFree1ElementMultiple: [1]   # N = 17
+        - AssertSummationElementMultiple: [8]  # K = 8192
+        - Groups:
+          -
+            - GlobalSplitU: [1, 2, 4, 8, 16]
+              GlobalSplitUAlgorithm: MultipleBuffer
+            - GlobalSplitU: [1, 2, 4, 8, 16, 32]
+              GlobalSplitUAlgorithm: MultipleBufferSingleKernel
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2304, 17, 1, 8192]
+        - ActivationArgs:
+          - [Enum: none]
+        - BiasTypeArgs: [s]
+
+    - # N = 24
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]  # MT16x16, 288 wg
+          - [16, 16, 32, 1, 1, 3, 1, 1, 1]  # MT48x16, 96 wg
+          - [16, 16, 32, 1, 1, 3, 1, 2, 1]  # MT96x16, 48 wg
+          - [16, 16, 32, 1, 1, 1, 2, 4, 1]  # MT64x32, 36 wg
+          - [16, 16, 32, 1, 1, 3, 3, 2, 1]  # MT96x48, 24 wg
+          - [16, 16, 32, 1, 1, 3, 1, 2, 2]  # MT96x32, 24 wg
+          - [16, 16, 32, 1, 1, 3, 3, 4, 1]  # MT192x48, 12 wg
+        - DepthU: [128, 256]
+        - HalfPLR: [0]
+        - PrefetchGL2: [0, 1]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - TDMInst: [3]
+        - TDMIterateMode: [0]
+        - TDMSplit: [False]
+        - TDMPlusLdsBuf: [-1]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - ClusterLocalRead: [0]
+        - ClusterDim: [[1, 1]]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - LDSSegmentInterleave: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [False]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - AssertFree0ElementMultiple: [16]  # M = 2304
+        - AssertFree1ElementMultiple: [8]   # N = 24
+        - AssertSummationElementMultiple: [8]  # K = 8192
+        - Groups:
+          -
+            - GlobalSplitU: [1, 2, 4, 8, 16]
+              GlobalSplitUAlgorithm: MultipleBuffer
+            - GlobalSplitU: [1, 2, 4, 8, 16, 32]
+              GlobalSplitUAlgorithm: MultipleBufferSingleKernel
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2304, 24, 1, 8192]
+        - ActivationArgs:
+          - [Enum: none]
+        - BiasTypeArgs: [s]
+
+    - # N = 32
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]  # MT16x16, 288 wg
+          - [16, 16, 32, 1, 1, 3, 1, 1, 1]  # MT48x16, 96 wg
+          - [16, 16, 32, 1, 1, 3, 1, 2, 1]  # MT96x16, 48 wg
+          - [16, 16, 32, 1, 1, 1, 2, 4, 1]  # MT64x32, 36 wg
+          - [16, 16, 32, 1, 1, 3, 2, 2, 2]  # MT96x64, 24 wg
+          - [16, 16, 32, 1, 1, 3, 1, 2, 2]  # MT96x32, 24 wg
+          - [16, 16, 32, 1, 1, 3, 4, 4, 1]  # MT192x64, 12 wg
+        - DepthU: [128, 256]
+        - HalfPLR: [0]
+        - PrefetchGL2: [0, 1]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - TDMInst: [3]
+        - TDMIterateMode: [0]
+        - TDMSplit: [False]
+        - TDMPlusLdsBuf: [-1]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - ClusterLocalRead: [0]
+        - ClusterDim: [[1, 1]]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - LDSSegmentInterleave: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [False]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - AssertFree0ElementMultiple: [16]  # M = 2304
+        - AssertFree1ElementMultiple: [16]  # N = 32
+        - AssertSummationElementMultiple: [8]  # K = 8192
+        - Groups:
+          -
+            - GlobalSplitU: [1, 2, 4, 8, 16]
+              GlobalSplitUAlgorithm: MultipleBuffer
+            - GlobalSplitU: [1, 2, 4, 8, 16, 32]
+              GlobalSplitUAlgorithm: MultipleBufferSingleKernel
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2304, 32, 1, 8192]
+        - ActivationArgs:
+          - [Enum: none]
+        - BiasTypeArgs: [s]
+
+    - # N = 48
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]  # MT16x16, 432 wg
+          - [16, 16, 32, 1, 1, 1, 1, 1, 4]  # MT16x64, 144 wg
+          - [16, 16, 32, 1, 1, 1, 2, 2, 2]  # MT32x64, 72 wg
+          - [16, 16, 32, 1, 1, 1, 3, 4, 1]  # MT64x48, 36 wg
+          - [16, 16, 32, 1, 1, 2, 2, 4, 1]  # MT128x32, 36 wg
+          - [16, 16, 32, 1, 1, 3, 2, 2, 2]  # MT96x64, 24 wg
+          - [16, 16, 32, 1, 1, 3, 4, 4, 1]  # MT192x64, 12 wg
+        - DepthU: [128, 256]
+        - HalfPLR: [0]
+        - PrefetchGL2: [0, 1]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - TDMInst: [3]
+        - TDMIterateMode: [-1]
+        - TDMSplit: [False]
+        - TDMPlusLdsBuf: [-1]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - ClusterLocalRead: [0]
+        - ClusterDim: [[1, 1]]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - LDSSegmentInterleave: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - AssertFree0ElementMultiple: [16]  # M = 2304
+        - AssertFree1ElementMultiple: [16]  # N = 48
+        - AssertSummationElementMultiple: [8]  # K = 8192
+        - Groups:
+          -
+            - GlobalSplitU: [1, 2, 4, 8, 16]
+              GlobalSplitUAlgorithm: MultipleBuffer
+            - GlobalSplitU: [1, 2, 4, 8, 16, 32]
+              GlobalSplitUAlgorithm: MultipleBufferSingleKernel
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2304, 48, 1, 8192]
+        - ActivationArgs:
+          - [Enum: none]
+        - BiasTypeArgs: [s]
+
+    - # N = 64
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 2]  # MT16x32, 288 wg
+          - [16, 16, 32, 1, 1, 3, 1, 1, 2]  # MT48x32, 96 wg
+          - [16, 16, 32, 1, 1, 3, 1, 2, 2]  # MT96x32, 48 wg
+          - [16, 16, 32, 1, 1, 1, 4, 4, 1]  # MT64x64, 36 wg
+          - [16, 16, 32, 1, 1, 3, 4, 2, 2]  # MT96x128, 24 wg
+          - [16, 16, 32, 1, 1, 3, 8, 4, 1]  # MT192x128, 12 wg
+          - [16, 16, 32, 1, 1, 3, 4, 4, 1]  # MT192x64, 12 wg
+        - DepthU: [128, 256]
+        - HalfPLR: [0]
+        - PrefetchGL2: [0, 1]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - TDMInst: [3]
+        - TDMIterateMode: [-1]
+        - TDMSplit: [False]
+        - TDMPlusLdsBuf: [-1]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - ClusterLocalRead: [0]
+        - ClusterDim: [[1, 1]]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - LDSSegmentInterleave: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - AssertFree0ElementMultiple: [16]  # M = 2304
+        - AssertFree1ElementMultiple: [16]  # N = 64
+        - AssertSummationElementMultiple: [8]  # K = 8192
+        - Groups:
+          -
+            - GlobalSplitU: [1, 2, 4, 8, 16]
+              GlobalSplitUAlgorithm: MultipleBuffer
+            - GlobalSplitU: [1, 2, 4, 8, 16, 32]
+              GlobalSplitUAlgorithm: MultipleBufferSingleKernel
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2304, 64, 1, 8192]
+        - ActivationArgs:
+          - [Enum: none]
+        - BiasTypeArgs: [s]
+
+    - # N = 128
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 4]  # MT16x64, 288 wg
+          - [16, 16, 32, 1, 1, 3, 1, 1, 4]  # MT48x64, 96 wg
+          - [16, 16, 32, 1, 1, 3, 2, 2, 2]  # MT96x64, 48 wg
+          - [16, 16, 32, 1, 1, 1, 8, 4, 1]  # MT64x128, 36 wg
+          - [16, 16, 32, 1, 1, 3, 8, 2, 2]  # MT96x256, 24 wg
+          - [16, 16, 32, 1, 1, 3, 8, 4, 1]  # MT192x128, 12 wg
+          - [16, 16, 32, 1, 1, 3, 16, 4, 1]  # MT192x256, 12 wg
+        - DepthU: [128, 256]
+        - HalfPLR: [0]
+        - PrefetchGL2: [0, 1]
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - TDMInst: [3]
+        - TDMIterateMode: [-1]
+        - TDMSplit: [False]
+        - TDMPlusLdsBuf: [-1]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - ClusterLocalRead: [0]
+        - ClusterDim: [[1, 1]]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - LDSSegmentInterleave: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - StoreVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - WorkGroupMapping: [1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - AssertFree0ElementMultiple: [16]  # M = 2304
+        - AssertFree1ElementMultiple: [16]  # N = 128
+        - AssertSummationElementMultiple: [8]  # K = 8192
+        - Groups:
+          -
+            - GlobalSplitU: [1, 2, 4, 8, 16]
+              GlobalSplitUAlgorithm: MultipleBuffer
+            - GlobalSplitU: [1, 2, 4, 8, 16, 32]
+              GlobalSplitUAlgorithm: MultipleBufferSingleKernel
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2304, 128, 1, 8192]
+        - ActivationArgs:
+          - [Enum: none]
+        - BiasTypeArgs: [s]
+
+LibraryLogic:
+  ScheduleName: "gfx1250"
+  DeviceNames: ["Device 75c8"]   # MI450-MC Lyte, confirmed from /sys PCI device id 0x75c8
+  ArchitectureName: "gfx1250"
+  LibraryType: "Equality"
