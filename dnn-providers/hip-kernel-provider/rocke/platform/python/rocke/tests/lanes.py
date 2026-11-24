@@ -42,7 +42,6 @@ from types import ModuleType
 from typing import NoReturn
 
 import pytest
-from packaging.version import Version
 
 from ..core.arch.target import known_arches
 
@@ -304,35 +303,18 @@ def skip_until(*lanes: Lane, reason: str) -> NoReturn:
     )
 
 
-def import_or_skip_until(
-    module_name: str, lane: Lane, *, minversion: str | None = None
-) -> ModuleType:
+def import_or_skip_until(module_name: str, lane: Lane) -> ModuleType:
     """The module ``module_name``, or skip the running case (or module) as
-    waiting for ``lane`` when it is not installed, or its ``__version__`` is
-    older than ``minversion``: ``pytest.importorskip`` that names the lane. A
-    module that is installed but fails to import (a broken build) raises."""
+    waiting for ``lane`` when it is not installed: ``pytest.importorskip``
+    that names the lane. A module that is installed but fails to import (a
+    broken build) raises."""
     __tracebackhide__ = True  # pytest reports the skip at the caller
     try:
-        module = importlib.import_module(module_name)
+        return importlib.import_module(module_name)
     except ModuleNotFoundError as error:
         if not _is_missing_module(error, module_name):
             raise
         skip_until(lane, reason=f"could not import {module_name!r}: {error}")
-    if minversion is not None:
-        found = getattr(module, "__version__", None)
-        if found is None:
-            skip_until(
-                lane,
-                reason=f"{module_name} has no __version__ to compare with the "
-                f"{minversion} this case needs",
-            )
-        if Version(found) < Version(minversion):
-            skip_until(
-                lane,
-                reason=f"{module_name} {found} is older than the {minversion} "
-                "this case needs",
-            )
-    return module
 
 
 def _is_missing_module(error: ModuleNotFoundError, module_name: str) -> bool:

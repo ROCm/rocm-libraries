@@ -5,9 +5,6 @@ helpers write that declaration."""
 
 from __future__ import annotations
 
-import sys
-import types
-
 import pytest
 from rocke.tests.lanes import (
     BINDING_LANE,
@@ -83,30 +80,12 @@ def test_skip_until_skips_with_the_declared_reason():
     assert skipped.value.allow_module_level
 
 
-def test_import_or_skip_until_returns_the_module_or_declares_its_lane(monkeypatch):
+def test_import_or_skip_until_returns_the_module_or_declares_its_lane():
     assert import_or_skip_until("json", CI_TEST_TOOLS).__name__ == "json"
     with pytest.raises(pytest.skip.Exception) as missing:
         import_or_skip_until("a_module_that_is_not_installed", CI_TEST_TOOLS)
     assert missing.value.msg.startswith(
         "waits for ci-test-tools: could not import 'a_module_that_is_not_installed'"
-    )
-    old = types.ModuleType("old_tool")
-    old.__version__ = "0.5.4"
-    monkeypatch.setitem(sys.modules, "old_tool", old)
-    assert import_or_skip_until("old_tool", CI_TEST_TOOLS, minversion="0.5")
-    with pytest.raises(pytest.skip.Exception) as too_old:
-        import_or_skip_until("old_tool", CI_TEST_TOOLS, minversion="0.6.0")
-    assert too_old.value.msg == (
-        "waits for ci-test-tools: old_tool 0.5.4 is older than the 0.6.0 this "
-        "case needs"
-    )
-    unversioned = types.ModuleType("unversioned_tool")
-    monkeypatch.setitem(sys.modules, "unversioned_tool", unversioned)
-    with pytest.raises(pytest.skip.Exception) as no_version:
-        import_or_skip_until("unversioned_tool", CI_TEST_TOOLS, minversion="1.0")
-    assert no_version.value.msg == (
-        "waits for ci-test-tools: unversioned_tool has no __version__ to compare "
-        "with the 1.0 this case needs"
     )
 
 
