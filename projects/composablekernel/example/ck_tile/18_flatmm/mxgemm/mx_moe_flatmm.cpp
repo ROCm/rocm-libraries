@@ -16,7 +16,13 @@ auto create_args(int argc, char* argv[])
                 "1024",
                 "N of the GEMM, a multiple of 256 (gemm1_gate_up: 2 x intermediate; gemm2: hidden)")
         .insert("K", "1024", "K of the GEMM (gemm1_gate_up: hidden; gemm2: intermediate)")
-        .insert("gemm_kind", "gemm1_gate_up", "gemm1_gate_up | gemm2 | gemm2_per_slot")
+        .insert(
+            "gemm_kind",
+            "gemm1_gate_up",
+            "gemm1_gate_up | gemm2 | gemm2_per_slot | layer (gate_up with MXFP4 output, then down)")
+        .insert("combine", "per_slot", "layer only: per_slot | atomic")
+        .insert("hidden", "1024", "layer only: hidden size")
+        .insert("inter", "512", "layer only: intermediate size")
         .insert("mx_prec", "fp4xfp4", "A x B data types: fp4xfp4 (a4w4) or fp8xfp4 (a8w4)")
         .insert("init",
                 "0",
@@ -39,6 +45,28 @@ int main(int argc, char* argv[])
     {
         const std::string prec = arg_parser.get_str("mx_prec");
         const std::string kind = arg_parser.get_str("gemm_kind");
+        if(kind == "layer")
+        {
+            if(prec != "fp4xfp4")
+                throw std::runtime_error("layer: only mx_prec=fp4xfp4");
+            MxMoeLayerCase l;
+            l.experts    = arg_parser.get_int("experts");
+            l.num_tokens = arg_parser.get_int("NumTokens");
+            l.topk       = arg_parser.get_int("TopK");
+            l.hidden     = arg_parser.get_int("hidden");
+            l.inter      = arg_parser.get_int("inter");
+            l.per_slot   = arg_parser.get_str("combine") != "atomic";
+            l.init       = arg_parser.get_int("init");
+            l.seed       = arg_parser.get_uint32("seed");
+            l.validate   = arg_parser.get_int("validate") != 0;
+            l.warmup     = arg_parser.get_int("warmup");
+            l.repeat     = arg_parser.get_int("repeat");
+            const auto r = run_mx_moe_layer(l);
+            if(l.repeat > 0)
+                std::cout << "time gate_up(+quant) " << r.ms_gate_up << " ms, down " << r.ms_down
+                          << " ms" << std::endl;
+            return r.pass ? 0 : 1;
+        }
         MxMoeCase c;
         c.experts    = arg_parser.get_int("experts");
         c.num_tokens = arg_parser.get_int("NumTokens");

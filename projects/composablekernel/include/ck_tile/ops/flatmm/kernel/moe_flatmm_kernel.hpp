@@ -33,6 +33,8 @@ struct MoeFlatmmHostArgs : ScaleFlatmmHostArgs<ScaleM, ScaleN, 0>
     const ck_tile::index_t n_padded_zeros;
     const ck_tile::index_t k_padded_zeros;
     ExpertBias exp_bias;
+    // kFFN_gemm1_gate_up_mx_quant only: output e8m0 scales of the quantized intermediate.
+    void* e_scale_ptr = nullptr;
 
     CK_TILE_HOST MoeFlatmmHostArgs() noexcept = default;
 
@@ -142,6 +144,13 @@ enum class MoeFlatmmKind
     // their weights in fp32. Exact and deterministic, and faster than the atomic gemm2 once
     // there are enough tokens to hide the second launch.
     kFFN_gemm2_per_slot,
+    // gemm1_gate_up whose output, SiLU(gate) * up, is quantized to MXFP4 in the epilogue: the
+    // packed fp4 values go to C[token * TopK + slot] (I / 2 bytes per row, I = N / 2) and one
+    // e8m0 scale per 32 columns to e_scale_ptr, in sorted-row order and the gfx1250 MX scale
+    // layout [sorted rows / 32][I / 128][32][4]. That is the A operand and A scale layout of
+    // gemm2 / gemm2_per_slot on the gfx1250 MX path, so no separate quantization kernel is needed.
+    // Requires an fp32 epilogue output type (the LDS staging type).
+    kFFN_gemm1_gate_up_mx_quant,
 };
 
 namespace moe {
@@ -247,7 +256,9 @@ struct MoeFlatmmKernel
     // A rows are (token, slot) rows, [NumTokens * TopK, K]: gemm2 and its per-slot variant.
     static constexpr bool AGatherPerSlot =
         kind == MoeFlatmmKind::kFFN_gemm2 || kind == MoeFlatmmKind::kFFN_gemm2_per_slot;
-    static constexpr bool IsGateUp      = kind == MoeFlatmmKind::kFFN_gemm1_gate_up;
+    // gate_up output, quantized to MXFP4 in the epilogue (see kFFN_gemm1_gate_up_mx_quant).
+    static constexpr bool IsMxQuantOut  = kind == MoeFlatmmKind::kFFN_gemm1_gate_up_mx_quant;
+    static constexpr bool IsGateUp      = kind == MoeFlatmmKind::kFFN_gemm1_gate_up || IsMxQuantOut;
     static constexpr bool IsGemm1SplitK = kind == MoeFlatmmKind::kFFN_gemm1_split_k;
     static constexpr bool IsBShuffled   = true;
 
@@ -327,6 +338,7 @@ struct MoeFlatmmKernel
         ScaleM scale_m;
         ScaleN scale_n;
         ExpertBias exp_bias;
+        void* e_scale_ptr; // kFFN_gemm1_gate_up_mx_quant only
     };
 
     template <class ScaleM     = FlatmmScalePointer<-1>,
@@ -355,7 +367,8 @@ struct MoeFlatmmKernel
                                                                hostArgs.k_padded_zeros,
                                                                hostArgs.scale_m,
                                                                hostArgs.scale_n,
-                                                               hostArgs.exp_bias};
+                                                               hostArgs.exp_bias,
+                                                               hostArgs.e_scale_ptr};
     }
 
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
@@ -487,6 +500,16 @@ struct MoeFlatmmKernel
             if(kargs.k_batch != 1)
             {
                 std::cerr << "Persistent mode doesn't support Kbatch >1 !" << std::endl;
+                return false;
+            }
+        }
+        if constexpr(IsMxQuantOut)
+        {
+            if(kargs.e_scale_ptr == nullptr || (kargs.N / 2) % 128 != 0 || kargs.M % 32 != 0)
+            {
+                std::cerr << "gate_up_mx_quant needs e_scale_ptr, N / 2 % 128 == 0 and "
+                             "M % 32 == 0!"
+                          << std::endl;
                 return false;
             }
         }
@@ -1029,6 +1052,92 @@ struct MoeFlatmmKernel
             this->operator()(kargs, block_offset_m, block_offset_n);
             partition_idx += gridDim.x;
         } while(UsePersistentKernel && partition_idx < total_valid_tile_cnt);
+    }
+
+    // kFFN_gemm1_gate_up_mx_quant: quantizes one shuffled chunk of the intermediate (fp32 in LDS,
+    // [MPerIterationShuffle rows, LDS columns]) to MXFP4 and stores it. Each thread holds 8
+    // consecutive values of a row, so a 32-column MX block lies on 4 adjacent lanes: they reduce
+    // the block's largest magnitude with two XOR shuffles. The e8m0 scale is
+    // 2^(floor(log2(amax)) - 2) (2 = largest exponent of fp4 e2m1), and the values are converted
+    // with round-to-nearest-even and saturation. Packed fp4 goes to the token-slot row; one lane
+    // per block writes the scale byte to the sorted row in the gfx1250 MX scale layout.
+    template <typename LdsWindow, typename Kargs>
+    CK_TILE_DEVICE static void store_mx_quant(const LdsWindow& out_lds_window,
+                                              const Kargs& kargs,
+                                              index_t sorted_row0,
+                                              index_t col0)
+    {
+#if defined(__gfx125__)
+        using EpiProblem                = typename EpiloguePipeline::Problem;
+        constexpr index_t Rows          = LdsWindow{}.get_window_lengths()[number<0>{}];
+        constexpr index_t Cols          = LdsWindow{}.get_window_lengths()[number<1>{}];
+        constexpr index_t QVec          = 8;  // fp4 values per conversion and per store
+        constexpr index_t BlockK        = 32; // MX block
+        constexpr index_t LanesPerBlock = BlockK / QVec;
+        using Pattern =
+            tile_distribution_encoding_pattern_2d<kBlockSize,
+                                                  Rows,
+                                                  Cols,
+                                                  QVec,
+                                                  tile_distribution_pattern::thread_raked,
+                                                  EpiProblem::kNumWaveGroups>;
+        static_assert(EpiProblem::kNumWaveGroups == 1 && Pattern::X1 == QVec && Pattern::X2 == 1 &&
+                          Pattern::X0 % LanesPerBlock == 0 && Cols % BlockK == 0,
+                      "MX quant store expects 8 consecutive values per thread");
+        static_assert(std::is_same_v<typename LdsWindow::DataType, float>,
+                      "kFFN_gemm1_gate_up_mx_quant needs an fp32 epilogue output type");
+        constexpr auto dstr = Pattern::make_2d_static_tile_distribution();
+        const auto values   = load_tile(make_tile_window(out_lds_window, dstr));
+        const auto idx      = dstr.calculate_index(); // [row, col] of this thread's first value
+
+        constexpr index_t token_id_offset = 24;
+        constexpr index_t token_id_mask   = (1 << token_id_offset) - 1;
+        const index_t inter               = kargs.N / 2; // intermediate size
+        const index_t row_bytes           = inter / 2;   // packed fp4
+        const index_t k_packs             = inter / (BlockK * 4);
+        const index_t col                 = col0 + idx[number<1>{}];
+        const index_t lane                = get_lane_id();
+        auto* data                        = static_cast<uint8_t*>(kargs.e_ptr);
+        auto* scales                      = static_cast<uint8_t*>(kargs.e_scale_ptr);
+
+        static_for<0, Pattern::Y2, 1>{}([&](auto y2) {
+            const index_t row = sorted_row0 + idx[number<0>{}] + y2;
+            fp32x8_t v;
+            float amax = 0.f;
+            static_for<0, QVec, 1>{}([&](auto j) {
+                v[j.value] = values.get_thread_buffer()[y2 * QVec + j];
+                amax       = max(amax, abs(v[j.value]));
+            });
+            amax = max(amax, warp_shuffle(amax, lane ^ 1));
+            amax = max(amax, warp_shuffle(amax, lane ^ 2));
+            // floor(log2(amax)) from the f32 exponent; 0 and subnormals give the smallest scale.
+            const int exp_amax    = static_cast<int>((bit_cast<uint32_t>(amax) >> 23) & 0xff) - 127;
+            const int shared      = max(-127, min(127, exp_amax - 2));
+            const float scale     = shared >= -126 ? bit_cast<float>(uint32_t(shared + 127) << 23)
+                                                   : bit_cast<float>(uint32_t(0x00400000)); // 2^-127
+            const uint32_t packed = __builtin_amdgcn_cvt_scalef32_pk8_fp4_f32(v, scale);
+
+            const index_t fused = kargs.p_sorted_token_ids[row];
+            const index_t token = fused & token_id_mask;
+            if(token < kargs.NumTokens)
+            {
+                const long_index_t slot_row =
+                    long_index_t(token) * kargs.TopK + (fused >> token_id_offset);
+                __builtin_memcpy(data + slot_row * row_bytes + col / 2, &packed, sizeof(packed));
+            }
+            if(lane % LanesPerBlock == 0)
+            {
+                const index_t kb = col / BlockK;
+                scales[long_index_t(row / 32) * k_packs * 128 + (kb / 4) * 128 + (row % 32) * 4 +
+                       kb % 4]   = static_cast<uint8_t>(shared + 127);
+            }
+        });
+#else
+        ignore = out_lds_window;
+        ignore = kargs;
+        ignore = sorted_row0;
+        ignore = col0;
+#endif
     }
 
     template <class MoeFlatmmKernelArgs>
@@ -1585,22 +1694,33 @@ struct MoeFlatmmKernel
 
                 block_sync_lds();
 
-                auto c_out_tensor =
-                    load_tile(make_tile_window(out_lds_window, dram_tile_distribution));
-                auto c_scatter_tile_window =
-                    make_tile_scatter_gather(c_block_window.get_bottom_tensor_view(),
-                                             c_block_window.get_window_lengths(),
-                                             c_block_window.get_window_origin(),
-                                             dram_tile_distribution,
-                                             c_scatter_offsets[mIter],
-                                             c_scatter_valids[mIter]);
-
-                if constexpr(!IsInputGemm ||
-                             decltype(c_block_window.get_bottom_tensor_view())::DstInMemOp ==
-                                 memory_operation_enum::atomic_add)
-                    c_scatter_tile_window.update(c_out_tensor);
+                if constexpr(IsMxQuantOut)
+                {
+                    constexpr index_t nIter = idx_y_start.at(number<1>{}) / NPerIterationShuffle;
+                    store_mx_quant(out_lds_window,
+                                   kargs,
+                                   coord_m + mIter * MPerIterationShuffle,
+                                   coord_n / 2 + nIter * LDS_NPerIterationShuffle);
+                }
                 else
-                    c_scatter_tile_window.store(c_out_tensor);
+                {
+                    auto c_out_tensor =
+                        load_tile(make_tile_window(out_lds_window, dram_tile_distribution));
+                    auto c_scatter_tile_window =
+                        make_tile_scatter_gather(c_block_window.get_bottom_tensor_view(),
+                                                 c_block_window.get_window_lengths(),
+                                                 c_block_window.get_window_origin(),
+                                                 dram_tile_distribution,
+                                                 c_scatter_offsets[mIter],
+                                                 c_scatter_valids[mIter]);
+
+                    if constexpr(!IsInputGemm ||
+                                 decltype(c_block_window.get_bottom_tensor_view())::DstInMemOp ==
+                                     memory_operation_enum::atomic_add)
+                        c_scatter_tile_window.update(c_out_tensor);
+                    else
+                        c_scatter_tile_window.store(c_out_tensor);
+                }
 
                 if constexpr(iAccess != num_access - 1)
                 {

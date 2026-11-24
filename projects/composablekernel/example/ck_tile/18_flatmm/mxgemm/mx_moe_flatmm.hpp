@@ -273,6 +273,63 @@ float launch_mx_moe_gemm(const HostArgs& args,
         return ck_tile::launch_kernel_time_mask(s, clear, moe_kernel);
 }
 
+// Random routing (top-k distinct experts per token, weights uniform in [0, 1), or 1 when init != 0)
+// sorted on the host into expert tiles of m_tile rows, padded with the sentinel token id
+// num_tokens, as moe_sorting does on the device.
+struct MxMoeRouting
+{
+    std::vector<int> expert;   // [num_tokens * topk]
+    std::vector<float> weight; // [num_tokens * topk], token order
+    std::vector<ck_tile::index_t> sorted_ids, sorted_expert_ids;
+    std::vector<float> sorted_weights;
+    int max_rows_per_expert = 0;
+    int M                   = 0; // sorted rows, padding included
+};
+
+inline MxMoeRouting
+make_mx_moe_routing(int experts, int num_tokens, int topk, int init, unsigned seed, int m_tile)
+{
+    MxMoeRouting r;
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<float> wdist(0.f, 1.f);
+    r.expert.resize(std::size_t(num_tokens) * topk);
+    r.weight.resize(std::size_t(num_tokens) * topk);
+    std::vector<int> perm(experts);
+    for(int t = 0; t < num_tokens; ++t)
+    {
+        std::iota(perm.begin(), perm.end(), 0);
+        std::shuffle(perm.begin(), perm.end(), rng);
+        for(int s = 0; s < topk; ++s)
+        {
+            r.expert[t * topk + s] = perm[s];
+            r.weight[t * topk + s] = init == 0 ? wdist(rng) : 1.f;
+        }
+    }
+    for(int e = 0; e < experts; ++e)
+    {
+        int rows = 0;
+        for(int t = 0; t < num_tokens; ++t)
+            for(int s = 0; s < topk; ++s)
+                if(r.expert[t * topk + s] == e)
+                {
+                    r.sorted_ids.push_back((s << 24) | t);
+                    r.sorted_weights.push_back(r.weight[t * topk + s]);
+                    ++rows;
+                }
+        r.max_rows_per_expert = std::max(r.max_rows_per_expert, rows);
+        const int padded      = ck_tile::integer_least_multiple(rows, m_tile);
+        for(int i = rows; i < padded; ++i)
+        {
+            r.sorted_ids.push_back(num_tokens); // sentinel: no token
+            r.sorted_weights.push_back(0.f);
+        }
+        for(int tile = 0; tile < padded / m_tile; ++tile)
+            r.sorted_expert_ids.push_back(e);
+    }
+    r.M = static_cast<int>(r.sorted_ids.size());
+    return r;
+}
+
 // Value of element (r, k) of a row-major A or B tensor (packed fp4 or one byte per element).
 template <typename T>
 float elem_at(const ck_tile::HostTensor<T>& t, std::size_t r, std::size_t k)
@@ -318,47 +375,14 @@ MxMoeResult run_mx_moe_case(const MxMoeCase& c)
         throw std::runtime_error("K must be a multiple of K_Tile (256) and N of N_Tile (256)");
 
     // ---- routing: top-k distinct experts per token, sorted into expert tiles ----
-    std::mt19937 rng(seed);
-    std::uniform_real_distribution<float> wdist(0.f, 1.f);
-    std::vector<int> route_expert(std::size_t(num_tokens) * topk);
-    std::vector<float> route_weight(std::size_t(num_tokens) * topk);
-    std::vector<int> perm(experts);
-    for(int t = 0; t < num_tokens; ++t)
-    {
-        std::iota(perm.begin(), perm.end(), 0);
-        std::shuffle(perm.begin(), perm.end(), rng);
-        for(int s = 0; s < topk; ++s)
-        {
-            route_expert[t * topk + s] = perm[s];
-            route_weight[t * topk + s] = init == 0 ? wdist(rng) : 1.f;
-        }
-    }
-
-    std::vector<ck_tile::index_t> sorted_ids, sorted_expert_ids;
-    std::vector<float> sorted_weights;
-    int max_rows_per_expert = 0;
-    for(int e = 0; e < experts; ++e)
-    {
-        int rows = 0;
-        for(int t = 0; t < num_tokens; ++t)
-            for(int s = 0; s < topk; ++s)
-                if(route_expert[t * topk + s] == e)
-                {
-                    sorted_ids.push_back((s << 24) | t);
-                    sorted_weights.push_back(route_weight[t * topk + s]);
-                    ++rows;
-                }
-        max_rows_per_expert = std::max(max_rows_per_expert, rows);
-        const int padded    = ck_tile::integer_least_multiple(rows, MTile);
-        for(int r = rows; r < padded; ++r)
-        {
-            sorted_ids.push_back(num_tokens); // sentinel: no token
-            sorted_weights.push_back(0.f);
-        }
-        for(int tile = 0; tile < padded / MTile; ++tile)
-            sorted_expert_ids.push_back(e);
-    }
-    const int M = static_cast<int>(sorted_ids.size()); // sorted rows, multiple of M_Tile
+    const MxMoeRouting rt    = make_mx_moe_routing(experts, num_tokens, topk, init, seed, MTile);
+    const auto& route_expert = rt.expert;
+    const auto& route_weight = rt.weight;
+    const auto& sorted_ids   = rt.sorted_ids;
+    const auto& sorted_expert_ids = rt.sorted_expert_ids;
+    const auto& sorted_weights    = rt.sorted_weights;
+    const int max_rows_per_expert = rt.max_rows_per_expert;
+    const int M                   = rt.M; // sorted rows, multiple of M_Tile
 
     const int rows_a  = kASlot ? num_tokens * topk : num_tokens;
     const int rows_c  = kASlot ? num_tokens : num_tokens * topk; // final output rows
@@ -583,4 +607,337 @@ MxMoeResult run_mx_moe_case(const MxMoeCase& c)
                       << "): " << (result.pass ? "correct" : "fail") << std::endl;
     }
     return result;
+}
+
+// ---- A whole MoE layer, a4w4 ----
+//
+//   1. gemm1_gate_up_mx_quant: X [tokens, hidden] x W_gate|up [experts, 2 * inter, hidden]
+//      -> SiLU(gate) * up, quantized to MXFP4 in the epilogue: the intermediate
+//      [tokens * topk, inter] (packed fp4) and its e8m0 scales in sorted-row order.
+//   2. down projection, reading that intermediate as is: gemm2 (fp32 atomic combine, fp32
+//      output) or gemm2_per_slot + MoeTopkCombineKernel (bf16 output).
+//
+// The check runs in two parts: the intermediate against a CPU quantization of the CPU
+// SiLU(gate) * up (with the same scale rule and CK's host fp4 conversion; values whose
+// fp32 input lands within rounding noise of a decision point may round the other way, so a
+// small fraction is allowed to differ), and the layer output against a CPU down projection of
+// the GPU intermediate.
+struct MxMoeLayerCase
+{
+    int experts    = 8;
+    int num_tokens = 512;
+    int topk       = 2;
+    int hidden     = 1024;
+    int inter      = 512;
+    bool per_slot  = true; // down projection: per-slot + combine, or the atomic gemm2
+    int init       = 0;
+    unsigned seed  = 11939;
+    bool validate  = true;
+    int warmup     = 0;
+    int repeat     = 0;
+    bool verbose   = true;
+};
+
+struct MxMoeLayerResult
+{
+    bool pass;                    // intermediate and output checks (true if not validated)
+    double intermediate_mismatch; // fraction of intermediate values that differ from the CPU
+    float ms_gate_up;             // timed launches, 0 if not timed
+    float ms_down;                // down projection (and combine for per-slot)
+    int sorted_rows;
+};
+
+inline MxMoeLayerResult run_mx_moe_layer(const MxMoeLayerCase& c)
+{
+    using F4                = ck_tile::pk_fp4_t;
+    using ScaleType         = ck_tile::e8m0_t;
+    const int E             = c.experts;
+    const int T             = c.num_tokens;
+    const int topk          = c.topk;
+    const int H             = c.hidden;
+    const int I             = c.inter;
+    const int MTile         = MXMoeFlatmmConfig::M_Tile;
+    constexpr int kTokenBit = 24;
+    if(H % MXMoeFlatmmConfig::K_Tile != 0 || I % MXMoeFlatmmConfig::K_Tile != 0 ||
+       (2 * I) % MXMoeFlatmmConfig::N_Tile != 0 || H % MXMoeFlatmmConfig::N_Tile != 0)
+        throw std::runtime_error("hidden and inter must be multiples of 256");
+
+    const MxMoeRouting rt = make_mx_moe_routing(E, T, topk, c.init, c.seed, MTile);
+    const int M           = rt.M;
+
+    // Operands: X, W1 (gate rows [0, I), up rows [I, 2I) per expert), W2, with MX scales.
+    auto tensor2d = [](std::size_t rows, std::size_t cols) {
+        return std::pair<std::vector<std::size_t>, std::vector<std::size_t>>{{rows, cols},
+                                                                             {cols, 1}};
+    };
+    auto [xl, xs]   = tensor2d(T, H);
+    auto [w1l, w1s] = tensor2d(std::size_t(E) * 2 * I, H);
+    auto [w2l, w2s] = tensor2d(std::size_t(E) * H, I);
+    ck_tile::HostTensor<F4> x(xl, xs), w1(w1l, w1s), w2(w2l, w2s);
+    auto [xsl, xss]   = tensor2d(T, H / kScaleBlockK);
+    auto [w1sl, w1ss] = tensor2d(std::size_t(E) * 2 * I, H / kScaleBlockK);
+    auto [w2sl, w2ss] = tensor2d(std::size_t(E) * H, I / kScaleBlockK);
+    ck_tile::HostTensor<ScaleType> xsc(xsl, xss), w1sc(w1sl, w1ss), w2sc(w2sl, w2ss);
+    const float lo = c.init == 0 ? -1.f : 1.f, hi = 1.f;
+    const float slo = c.init == 0 ? 0.5f : 1.f, shi = c.init == 0 ? 2.f : 1.f;
+    ck_tile::FillUniformDistribution<>{lo, hi, c.seed + 1}(x);
+    ck_tile::FillUniformDistribution<>{lo, hi, c.seed + 2}(w1);
+    ck_tile::FillUniformDistribution<>{lo, hi, c.seed + 3}(w2);
+    ck_tile::FillUniformDistribution<>{slo, shi, c.seed + 4}(xsc);
+    ck_tile::FillUniformDistribution<>{slo, shi, c.seed + 5}(w1sc);
+    ck_tile::FillUniformDistribution<>{slo, shi, c.seed + 6}(w2sc);
+
+    // Device layouts.
+    std::vector<F4> w1_shuf(w1.mData.size()), w2_shuf(w2.mData.size());
+    shuffle_fp4_weight(w1.data(), w1_shuf.data(), E, 2 * I, H, true);
+    shuffle_fp4_weight(w2.data(), w2_shuf.data(), E, H, I, false);
+    const int HB = H / kScaleBlockK, IB = I / kScaleBlockK;
+    std::vector<ScaleType> x_scale_sorted(std::size_t(M) * HB,
+                                          ck_tile::type_convert<ScaleType>(1.f));
+    for(int r = 0; r < M; ++r)
+    {
+        const int t = rt.sorted_ids[r] & 0xffffff;
+        if(t < T)
+            for(int kb = 0; kb < HB; ++kb)
+                x_scale_sorted[mx_scale_offset(r, kb, H)] = xsc(t, kb);
+    }
+    std::vector<ScaleType> w1_scale(std::size_t(E) * 2 * I * HB), w2_scale(std::size_t(E) * H * IB);
+    for(int e = 0; e < E; ++e)
+    {
+        for(int n = 0; n < 2 * I; ++n)
+            for(int kb = 0; kb < HB; ++kb)
+                w1_scale[std::size_t(e) * 2 * I * HB +
+                         mx_scale_offset(b_column(n, 2 * I, true), kb, H)] =
+                    w1sc(std::size_t(e) * 2 * I + n, kb);
+        for(int n = 0; n < H; ++n)
+            for(int kb = 0; kb < IB; ++kb)
+                w2_scale[std::size_t(e) * H * IB + mx_scale_offset(n, kb, I)] =
+                    w2sc(std::size_t(e) * H + n, kb);
+    }
+
+    using OutDataType = float; // the atomic gemm2 output; per-slot writes bf16
+    ck_tile::DeviceMem x_dev(x.get_element_space_size_in_bytes()), w1_dev(w1_shuf.size()),
+        w2_dev(w2_shuf.size()), xs_dev(x_scale_sorted.size()), w1s_dev(w1_scale.size()),
+        w2s_dev(w2_scale.size()), mid_dev(std::size_t(T) * topk * I / 2),
+        mids_dev(std::size_t(M) * IB), p_dev(std::size_t(T) * topk * H * sizeof(float)),
+        out_dev(std::size_t(T) * H * sizeof(OutDataType)),
+        out16_dev(std::size_t(T) * H * sizeof(ck_tile::bf16_t)), // per-slot combine output
+        ids_dev(rt.sorted_ids.size() * sizeof(ck_tile::index_t)),
+        eids_dev(rt.sorted_expert_ids.size() * sizeof(ck_tile::index_t)),
+        sw_dev(rt.sorted_weights.size() * sizeof(float)), tw_dev(rt.weight.size() * sizeof(float)),
+        mt_dev(sizeof(ck_tile::index_t));
+    x_dev.ToDevice(x.data());
+    w1_dev.ToDevice(w1_shuf.data());
+    w2_dev.ToDevice(w2_shuf.data());
+    xs_dev.ToDevice(x_scale_sorted.data());
+    w1s_dev.ToDevice(w1_scale.data());
+    w2s_dev.ToDevice(w2_scale.data());
+    ids_dev.ToDevice(rt.sorted_ids.data());
+    eids_dev.ToDevice(rt.sorted_expert_ids.data());
+    sw_dev.ToDevice(rt.sorted_weights.data());
+    tw_dev.ToDevice(rt.weight.data());
+    const ck_tile::index_t max_token_id = M;
+    mt_dev.ToDevice(&max_token_id);
+    mid_dev.SetZero();
+    mids_dev.SetZero();
+    out_dev.SetZero();
+
+    using SP   = ck_tile::FlatmmScalePointer<1, kScaleBlockK, ScaleType>;
+    using Args = ck_tile::MoeFlatmmHostArgs<SP, SP, ck_tile::FlatmmScalePointer<-1>>;
+    auto ids   = static_cast<const ck_tile::index_t*>(ids_dev.GetDeviceBuffer());
+    auto eids  = static_cast<const ck_tile::index_t*>(eids_dev.GetDeviceBuffer());
+    auto mtok  = static_cast<const ck_tile::index_t*>(mt_dev.GetDeviceBuffer());
+    Args gate_up{ids,
+                 sw_dev.GetDeviceBuffer(),
+                 eids,
+                 mtok,
+                 x_dev.GetDeviceBuffer(),
+                 w1_dev.GetDeviceBuffer(),
+                 mid_dev.GetDeviceBuffer(),
+                 T,
+                 E,
+                 topk,
+                 1,
+                 M,
+                 2 * I,
+                 H,
+                 H,
+                 H,
+                 I, // stride_C: the intermediate's logical width (the MX store addresses bytes)
+                 SP{static_cast<const ScaleType*>(xs_dev.GetDeviceBuffer()), M},
+                 SP{static_cast<const ScaleType*>(w1s_dev.GetDeviceBuffer()), 2 * I},
+                 {}};
+    gate_up.e_scale_ptr = mids_dev.GetDeviceBuffer();
+    void* down_out      = c.per_slot ? p_dev.GetDeviceBuffer() : out_dev.GetDeviceBuffer();
+    Args down{ids,
+              sw_dev.GetDeviceBuffer(),
+              eids,
+              mtok,
+              mid_dev.GetDeviceBuffer(),
+              w2_dev.GetDeviceBuffer(),
+              down_out,
+              T,
+              E,
+              topk,
+              1,
+              M,
+              H,
+              I,
+              I,
+              I,
+              H,
+              SP{static_cast<const ScaleType*>(mids_dev.GetDeviceBuffer()), M},
+              SP{static_cast<const ScaleType*>(w2s_dev.GetDeviceBuffer()), H},
+              {}};
+    const auto* tw = static_cast<const float*>(tw_dev.GetDeviceBuffer());
+
+    using K   = ck_tile::MoeFlatmmKind;
+    auto run1 = [&](const ck_tile::stream_config& s) {
+        return launch_mx_moe_gemm<K::kFFN_gemm1_gate_up_mx_quant, F4, F4, float>(gate_up, s, false);
+    };
+    auto run2 = [&](const ck_tile::stream_config& s, bool clear) {
+        return c.per_slot ? launch_mx_moe_gemm<K::kFFN_gemm2_per_slot, F4, F4, float>(
+                                down, s, false, tw, out16_dev.GetDeviceBuffer())
+                          : launch_mx_moe_gemm<K::kFFN_gemm2, F4, F4, float>(down, s, clear);
+    };
+    run1(ck_tile::stream_config{nullptr, false});
+    run2(ck_tile::stream_config{nullptr, false}, true);
+
+    std::vector<uint8_t> mid(std::size_t(T) * topk * I / 2), mid_scale(std::size_t(M) * IB);
+    mid_dev.FromDevice(mid.data());
+    mids_dev.FromDevice(mid_scale.data());
+    std::vector<float> out(std::size_t(T) * H);
+    if(c.per_slot)
+    {
+        std::vector<ck_tile::bf16_t> ob(out.size());
+        out16_dev.FromDevice(ob.data());
+        for(std::size_t i = 0; i < out.size(); ++i)
+            out[i] = ck_tile::type_convert<float>(ob[i]);
+    }
+    else
+        out_dev.FromDevice(out.data());
+
+    MxMoeLayerResult res{true, 0.0, 0.f, 0.f, M};
+    if(c.repeat > 0)
+    {
+        const ck_tile::stream_config s{nullptr, true, 0, c.warmup, c.repeat, true};
+        res.ms_gate_up = run1(s);
+        res.ms_down    = run2(s, false);
+    }
+    if(!c.validate)
+        return res;
+
+    // ---- reference ----
+    std::vector<float> xf(std::size_t(T) * H), w1f(w1.mData.size() * 2), w2f(w2.mData.size() * 2);
+    auto dequant =
+        [&](std::vector<float>& dst, const auto& v, const auto& sc, std::size_t rows, int K) {
+            ck_tile::make_ParallelTensorFunctor(
+                [&](std::size_t r) {
+                    for(int k = 0; k < K; ++k)
+                        dst[r * K + k] =
+                            fp4_at(v, r, k) * ck_tile::type_convert<float>(sc(r, k / kScaleBlockK));
+                },
+                rows)(std::thread::hardware_concurrency());
+        };
+    dequant(xf, x, xsc, T, H);
+    dequant(w1f, w1, w1sc, std::size_t(E) * 2 * I, H);
+    dequant(w2f, w2, w2sc, std::size_t(E) * H, I);
+    auto dot = [](const float* a, const float* b, int K) {
+        float acc = 0.f;
+        for(int k = 0; k < K; ++k)
+            acc += a[k] * b[k];
+        return acc;
+    };
+    // Sorted row of each (token, slot), for the intermediate's scales.
+    std::vector<int> sorted_row(std::size_t(T) * topk, -1);
+    for(int r = 0; r < M; ++r)
+    {
+        const int t = rt.sorted_ids[r] & 0xffffff, s = rt.sorted_ids[r] >> kTokenBit;
+        if(t < T)
+            sorted_row[std::size_t(t) * topk + s] = r;
+    }
+    // Intermediate: CPU SiLU(gate) * up quantized to MXFP4 vs the GPU's, both dequantized.
+    std::vector<float> mid_gpu(std::size_t(T) * topk * I);
+    std::vector<long> mismatches(std::size_t(T) * topk, 0);
+    ck_tile::make_ParallelTensorFunctor(
+        [&](std::size_t rc) {
+            const int t = rc / topk, e = rt.expert[rc], r = sorted_row[rc];
+            std::vector<float> h(I);
+            for(int n = 0; n < I; ++n)
+                h[n] = ck_tile::moe::MoeSilu{}(
+                    dot(&xf[std::size_t(t) * H], &w1f[(std::size_t(e) * 2 * I + n) * H], H),
+                    dot(&xf[std::size_t(t) * H], &w1f[(std::size_t(e) * 2 * I + I + n) * H], H));
+            for(int kb = 0; kb < IB; ++kb)
+            {
+                float amax = 0.f;
+                for(int j = 0; j < kScaleBlockK; ++j)
+                    amax = std::max(amax, std::abs(h[kb * kScaleBlockK + j]));
+                const int e_amax =
+                    static_cast<int>((ck_tile::bit_cast<uint32_t>(amax) >> 23) & 0xff) - 127;
+                const int shared      = std::max(-127, std::min(127, e_amax - 2));
+                const float scale_ref = std::ldexp(1.f, shared);
+                const int code = mid_scale[std::size_t(r / 32) * (I / 128) * 128 + (kb / 4) * 128 +
+                                           (r % 32) * 4 + kb % 4];
+                const float scale_gpu = std::ldexp(1.f, code - 127);
+                for(int j = 0; j < kScaleBlockK; ++j)
+                {
+                    const int n        = kb * kScaleBlockK + j;
+                    const uint8_t byte = mid[rc * (I / 2) + n / 2];
+                    const uint8_t nib  = n % 2 == 0 ? (byte & 0xf) : (byte >> 4);
+                    const float gpu =
+                        ck_tile::type_convert<float>(ck_tile::pk_fp4_t(ck_tile::pk_fp4_raw_t(nib))
+                                                         .template unpack<>(ck_tile::number<0>{})) *
+                        scale_gpu;
+                    // Saturate here: CK's host fp4 conversion maps every value beyond the fp4
+                    // range (6 after scaling) to +6, dropping the sign.
+                    const float hc = std::max(-6.f * scale_ref, std::min(6.f * scale_ref, h[n]));
+                    const auto q   = ck_tile::float_to_pk_fp4(hc, scale_ref);
+                    const float ref =
+                        ck_tile::type_convert<float>(q.template unpack<>(ck_tile::number<0>{})) *
+                        scale_ref;
+                    mid_gpu[rc * I + n] = gpu;
+                    mismatches[rc] += (gpu < ref || gpu > ref) ? 1 : 0;
+                }
+            }
+        },
+        std::size_t(T) * topk)(std::thread::hardware_concurrency());
+    long total_mismatch = 0;
+    for(auto m : mismatches)
+        total_mismatch += m;
+    res.intermediate_mismatch = double(total_mismatch) / (double(T) * topk * I);
+    const bool mid_ok         = res.intermediate_mismatch < 1e-3;
+
+    // Output: CPU down projection and weighted combine of the GPU intermediate.
+    std::vector<float> ref(std::size_t(T) * H, 0.f);
+    ck_tile::make_ParallelTensorFunctor(
+        [&](std::size_t t) {
+            for(int n = 0; n < H; ++n)
+            {
+                float v = 0.f;
+                for(int s = 0; s < topk; ++s)
+                {
+                    const std::size_t rc = t * topk + s;
+                    v += rt.weight[rc] *
+                         dot(&mid_gpu[rc * I], &w2f[(std::size_t(rt.expert[rc]) * H + n) * I], I);
+                }
+                ref[t * H + n] =
+                    c.per_slot
+                        ? ck_tile::type_convert<float>(ck_tile::type_convert<ck_tile::bf16_t>(v))
+                        : v;
+            }
+        },
+        T)(std::thread::hardware_concurrency());
+    float ref_max = 0.f;
+    for(float v : ref)
+        ref_max = std::max(ref_max, std::abs(v));
+    const bool out_ok =
+        ck_tile::check_err(out, ref, "layer output: incorrect results!", 1e-2, 1e-3 * ref_max);
+    res.pass = mid_ok && out_ok;
+    if(c.verbose)
+        std::cout << "mx_moe layer (" << (c.per_slot ? "per-slot" : "atomic") << "): experts " << E
+                  << ", tokens " << T << ", topk " << topk << ", hidden " << H << ", inter " << I
+                  << "; intermediate values differing from the CPU quantization: "
+                  << res.intermediate_mismatch * 100 << "%; output "
+                  << (out_ok ? "correct" : "fail") << std::endl;
+    return res;
 }
