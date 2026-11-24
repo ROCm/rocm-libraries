@@ -110,6 +110,8 @@ def _counts(spec, arch):
     return dict(
         resources=len(re.findall(r"@llvm\.amdgcn\.make\.buffer\.rsrc\.p8\.p1\(", ir)),
         copies=ir.count("call void @llvm.amdgcn.raw.ptr.buffer.load.lds"),
+        # gfx942 cfvst V: one i32 register load per key row and lane.
+        v_reg_loads=ir.count("call i32 @llvm.amdgcn.raw.ptr.buffer.load.i32"),
         page_loads=len(
             re.findall(
                 r"getelementptr inbounds i32, ptr addrspace\(1\) %block_tables", ir
@@ -132,10 +134,10 @@ def _counts(spec, arch):
 )
 def test_one_resource_per_wave_per_kv_tile_load(arch, body, variant):
     """i64 replaces the two whole-cache K/V resources with one per K or V tile
-    load, shared by all of the wave's copies of that tile (a resource per copy
-    would add one per copy). The varlen body's other resources (gfx950 bounds
-    its packed Q with one) stay as they are. Counts only; the GPU tests check
-    the addresses."""
+    load, shared by all of the wave's copies (or gfx942 cfvst register loads) of
+    that tile (a resource per copy would add one per copy). The varlen body's
+    other resources (gfx950 bounds its packed Q with one) stay as they are.
+    Counts only; the GPU tests check the addresses."""
     spec = _BODIES[body](arch, **variant)
     i32 = _counts(spec, arch)
     i64 = _counts(replace(spec, use_i64_kv_addr=True), arch)
@@ -145,6 +147,11 @@ def test_one_resource_per_wave_per_kv_tile_load(arch, body, variant):
     assert i64["copies"] % copies_per_tile == 0
     tile_loads = i64["copies"] // copies_per_tile
     assert tile_loads > 0
+    # cfvst V loads each of the wave's rows of the tile with one register load.
+    rows_per_wave = spec.block_n // spec.num_waves
+    assert i64["v_reg_loads"] == i32["v_reg_loads"]
+    assert i64["v_reg_loads"] % rows_per_wave == 0
+    tile_loads += i64["v_reg_loads"] // rows_per_wave
     assert i64["resources"] == i32["resources"] - 2 + tile_loads
     # The page lookup stays one per tile load, as on the i32 path.
     assert i64["page_loads"] == i32["page_loads"] == tile_loads

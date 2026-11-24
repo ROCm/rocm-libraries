@@ -150,37 +150,24 @@ _KERNEL_RESOURCE_BUDGETS = {
         "max_scratch_bytes": 64,
         "min_waves_per_simd": 2,
     },
-    # gfx942 fp16 D128 paged prefill: paged V always takes the DMA path (no cfvst),
-    # where the ROCm 7.1 comgr caps VGPR at 256 and spills 28 B; contiguous with
-    # use_cfvst=False spills the same there. ROCm 7.2 and later fit with no scratch.
-    "rocke_attention_dense_d128_hq32_kv8_bn64_fp16_sq8192_sk8192_causal_swa4096_pgd16_nb512_lazyrs_gfx942_b1_wpe2": {
-        "max_scratch_bytes": 32,
+    # gfx942 bf16 D128 paged (single sequence and varlen, i32 and i64 page bases):
+    # conflict-free V, where the ROCm 7.1 comgr caps VGPR at 256 and spills 56-72 B,
+    # as on contiguous bf16 D128 with conflict-free V. ROCm 7.2 and later fit with no
+    # scratch.
+    "rocke_attention_dense_d128_hq32_kv8_bn64_bf16_sq8192_sk8192_causal_swa4096_pgd16_nb512_lazyrs_gfx942_b1_wpe2": {
+        "max_scratch_bytes": 80,
         "min_waves_per_simd": 2,
     },
-    # gfx942 fp16 D128 paged varlen: the same DMA-V path, where the ROCm 7.1 comgr
-    # caps VGPR at 256 and spills 28 B (causal) / 32 B (sliding window). ROCm 7.2
-    # and later fit with no scratch.
-    "rocke_attention_dense_d128_hq16_kv4_bn64_fp16_sq1000_sk1000_causal_varlen_pgd16_nb256_lazyrs_nphqminswz_gfx942_b3_wpe2": {
-        "max_scratch_bytes": 32,
+    "rocke_attention_dense_d128_hq32_kv8_bn64_bf16_sq8192_sk8192_causal_swa4096_pgd16_nb512_i64kv_lazyrs_gfx942_b1_wpe2": {
+        "max_scratch_bytes": 80,
         "min_waves_per_simd": 2,
     },
-    "rocke_attention_dense_d128_hq16_kv4_bn64_fp16_sq1000_sk1000_causal_swa256_varlen_pgd16_nb256_lazyrs_nphqminswz_gfx942_b3_wpe2": {
-        "max_scratch_bytes": 32,
+    "rocke_attention_dense_d128_hq16_kv4_bn64_bf16_sq1000_sk1000_causal_varlen_pgd16_nb256_lazyrs_nphqminswz_gfx942_b3_wpe2": {
+        "max_scratch_bytes": 80,
         "min_waves_per_simd": 2,
     },
-    # gfx942 fp16 D128 paged with i64 page bases (single sequence and varlen): the
-    # same DMA-V path, where the ROCm 7.1 comgr caps VGPR at 256 and spills 20-28 B.
-    # ROCm 7.2 and later fit with no scratch.
-    "rocke_attention_dense_d128_hq32_kv8_bn64_fp16_sq8192_sk8192_causal_swa4096_pgd16_nb512_i64kv_lazyrs_gfx942_b1_wpe2": {
-        "max_scratch_bytes": 32,
-        "min_waves_per_simd": 2,
-    },
-    "rocke_attention_dense_d128_hq16_kv4_bn64_fp16_sq1000_sk1000_causal_varlen_pgd16_nb256_i64kv_lazyrs_nphqminswz_gfx942_b3_wpe2": {
-        "max_scratch_bytes": 32,
-        "min_waves_per_simd": 2,
-    },
-    "rocke_attention_dense_d128_hq16_kv4_bn64_fp16_sq1000_sk1000_causal_swa256_varlen_pgd16_nb256_i64kv_lazyrs_nphqminswz_gfx942_b3_wpe2": {
-        "max_scratch_bytes": 32,
+    "rocke_attention_dense_d128_hq16_kv4_bn64_bf16_sq1000_sk1000_causal_varlen_pgd16_nb256_i64kv_lazyrs_nphqminswz_gfx942_b3_wpe2": {
+        "max_scratch_bytes": 80,
         "min_waves_per_simd": 2,
     },
 }

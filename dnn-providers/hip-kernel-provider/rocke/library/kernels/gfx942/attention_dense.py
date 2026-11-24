@@ -613,7 +613,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     def resolved_use_cfvst(self) -> bool:
         """Resolved conflict-free-V decision (``None`` -> :func:`default_use_cfvst`)."""
         if self.use_cfvst is None:
-            return default_use_cfvst(self.head_size, self.dtype, self.paged)
+            return default_use_cfvst(self.head_size, self.dtype)
         return bool(self.use_cfvst)
 
     def resolved_v_row_pad(self) -> int:
@@ -622,7 +622,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         Read by both the builder's ``V_lds`` alloc and the :func:`_lds_bytes` budget, so
         the two cannot drift."""
         if self.v_row_pad is None:
-            return _v_row_pad(self.head_size, self.dtype, self.block_n, self.paged)
+            return _v_row_pad(self.head_size, self.dtype, self.block_n)
         return int(self.v_row_pad)
 
     def resolved_use_v_swizzle(self) -> bool:
@@ -633,7 +633,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         if not self.resolved_use_cfvst():
             return False
         if self.use_v_swizzle is None:
-            return _use_v_swizzle(self.head_size, self.dtype, self.paged)
+            return _use_v_swizzle(self.head_size, self.dtype)
         return bool(self.use_v_swizzle)
 
     def resolved_use_exp2_fast(self) -> bool:
@@ -831,15 +831,14 @@ def _tuning_name_tags(spec: "Gfx942AttentionDenseSpec") -> str:
     if spec.lds_row_pad != _DEFAULT_LDS_ROW_PAD:
         parts.append(f"krowpad{spec.lds_row_pad}")
     vp = spec.resolved_v_row_pad()
-    if vp != _v_row_pad(spec.head_size, spec.dtype, spec.block_n, spec.paged):
+    if vp != _v_row_pad(spec.head_size, spec.dtype, spec.block_n):
         parts.append(f"vrowpad{vp}")
     cfvst = spec.resolved_use_cfvst()
-    if cfvst != default_use_cfvst(spec.head_size, spec.dtype, spec.paged):
+    if cfvst != default_use_cfvst(spec.head_size, spec.dtype):
         parts.append("cfvst1" if cfvst else "cfvst0")
     swz = spec.resolved_use_v_swizzle()
     if swz != (
-        spec.resolved_use_cfvst()
-        and default_use_cfvst(spec.head_size, spec.dtype, spec.paged)
+        spec.resolved_use_cfvst() and default_use_cfvst(spec.head_size, spec.dtype)
     ):
         parts.append("vswz1" if swz else "vswz0")
     e2f = spec.resolved_use_exp2_fast()
@@ -965,7 +964,7 @@ def default_use_exp2_fast(head_size: int, dtype: str, persistent: bool) -> bool:
     return True
 
 
-def default_use_cfvst(head_size: int, dtype: str, paged: bool = False) -> bool:
+def default_use_cfvst(head_size: int, dtype: str) -> bool:
     """Whether to feed V through the P1 conflict-free perm_b32 store-path transpose.
 
     D128 only (both dtypes). Measured on gfx942:
@@ -977,12 +976,11 @@ def default_use_cfvst(head_size: int, dtype: str, paged: bool = False) -> bool:
         LLVM 23), and replaces the naive path's 128 element-wise ds_read_u16 per tile
         with 32 ds_read_b64, as on fp16.
     Gate on rows-per-DMA == 1 (D128) so the LDS budget and the body agree.
-    Never for paged K/V: the cfvst V loads are per thread across the whole tile, so
-    they would need their own block-table lookups; paged V takes the async DMA path,
-    with the same per-wave page lookup as K.
+    Paged K/V too: its loader gives each wave the rows of its async K copy, so one
+    block-table lookup per wave serves them.
     """
     del dtype  # both 2-byte dtypes take the same transposed-V path
-    return _rows_per_instr(head_size) == 1 and not paged
+    return _rows_per_instr(head_size) == 1
 
 
 def _use_bias_x4(spec: "Gfx942AttentionDenseSpec") -> bool:
@@ -1089,13 +1087,13 @@ def _v_swizzle_width(block_n: int) -> int:
     return max(64, 1 << (block_n - 1).bit_length())
 
 
-def _use_v_swizzle(head_size: int, dtype: str, paged: bool) -> bool:
+def _use_v_swizzle(head_size: int, dtype: str) -> bool:
     """Policy for the V^T bank-conflict swizzle: rides the :func:`default_use_cfvst` gate,
     since only the transposed-V (D128) store has a V_lds to swizzle."""
-    return default_use_cfvst(head_size, dtype, paged)
+    return default_use_cfvst(head_size, dtype)
 
 
-def _v_row_pad(head_size: int, dtype: str, block_n: int, paged: bool) -> int:
+def _v_row_pad(head_size: int, dtype: str, block_n: int) -> int:
     """V^T row (token-axis) pad, in elements, on the cfvst path (D128); 8 (no
     swizzle, original layout) everywhere else. On the cfvst path the row is widened to
     :func:`_v_swizzle_width` so the XOR swizzle (``col' = key ^ ((dim & (V_LDROW//4-1))
@@ -1108,7 +1106,7 @@ def _v_row_pad(head_size: int, dtype: str, block_n: int, paged: bool) -> int:
     separate, independently-sweepable decision (:meth:`resolved_use_v_swizzle`), so the
     pad value and the swizzle no longer silently toggle each other.
     """
-    if not default_use_cfvst(head_size, dtype, paged):
+    if not default_use_cfvst(head_size, dtype):
         return 8
     return _v_swizzle_width(block_n) - block_n
 
@@ -1433,14 +1431,7 @@ def supports_attention_dense(
     # packed async-DMA layout the naive path relies on. Turning cfvst OFF is always
     # legal (it is the naive path), so only the ON direction is gated. See
     # default_use_cfvst.
-    if spec.resolved_use_cfvst() and not default_use_cfvst(
-        spec.head_size, spec.dtype, spec.paged
-    ):
-        if spec.paged:
-            return False, (
-                "use_cfvst=True is rejected with paged K/V: the conflict-free-V "
-                "loader has no block-table lookup -- see default_use_cfvst"
-            )
+    if spec.resolved_use_cfvst() and not default_use_cfvst(spec.head_size, spec.dtype):
         return False, (
             f"use_cfvst=True is rejected at D{spec.head_size}/{spec.dtype}: "
             f"the conflict-free-V store is measured-negative there (D64 is VGPR-bound "
@@ -2234,6 +2225,8 @@ def _build_attention_dense_single_buffer(
             the contiguous dim pair ``(d0, d0+1)``. Loads go through ``v_rsrc`` so an
             out-of-range token is hardware-clamped to 0 (matches the async path)."""
             tile_tok0 = b.mul(tile_idx, b.const_i32(BN))
+            if spec.paged:
+                return _cfvst_load_v_paged(tile_tok0)
             payload = []
             for it in range(V_ITEMS):
                 blk = b.add(b.mul(b.const_i32(it), b.const_i32(THREADS)), tid)
@@ -2255,6 +2248,55 @@ def _build_attention_dense_single_buffer(
                     v_rsrc, b.mul(eoff1, b.const_i32(2)), zero_soff, dtype, 2
                 )
                 payload.append((d0, t0, b.bitcast(x0, I32), b.bitcast(x1, I32)))
+            return payload
+
+        def _cfvst_load_v_paged(tile_tok0):
+            """:func:`_cfvst_load_v` for paged K/V.
+
+            Wave ``w`` loads the tile's keys ``[w * ROWS_PER_WAVE, (w + 1) *
+            ROWS_PER_WAVE)``, two per item (``2 * V_ITEMS == ROWS_PER_WAVE`` at
+            D128), with the lane as the dim pair. Those are the rows its async K copy
+            takes, so they sit in one page (spec paged validation) and one block-table
+            lookup per wave serves them, instead of one per thread and item. Paged
+            varlen zeroes V past the sequence's ``kv_len``
+            (:func:`paged_v_tail_offset`)."""
+            if V_DIM_PAIRS != 64:
+                raise ValueError("paged cfvst V needs one dim pair per lane (D=128)")
+            w_row0 = b.mul(wave, b.const_i32(ROWS_PER_WAVE))
+            wave_key0 = b.add(tile_tok0, w_row0)
+            rsrc = v_rsrc
+            if PAGED_I64:
+                rsrc = paged_wave_page_rsrc(
+                    b, v, block_tables, _pg_seq_base, _pg_n_pages, wave_key0, spec
+                )
+            else:
+                row_base = paged_wave_row_base(
+                    b,
+                    block_tables,
+                    _pg_seq_base,
+                    _pg_n_pages,
+                    wave_key0,
+                    spec.block_size,
+                )
+            d0 = b.mul(lane, b.const_i32(2))
+            payload = []
+            for it in range(V_ITEMS):
+                t0 = b.add(w_row0, b.const_i32(2 * it))
+                xs = []
+                gk0 = b.add(tile_tok0, t0)
+                gks = (gk0, b.add(gk0, b.const_i32(1)))
+                for gk in gks:
+                    if PAGED_I64:
+                        row = paged_in_page_row(b, gk, spec.block_size)
+                    else:
+                        row = paged_kv_row(b, row_base, gk, spec.block_size)
+                    eoff = b.add(b.add(k_base, b.mul(row, _stride_k())), d0)
+                    off = b.mul(eoff, b.const_i32(2))
+                    if varlen:
+                        off = paged_v_tail_offset(b, off, gk, _pg_kv_len)
+                    x = b.buffer_load_vN(rsrc, off, zero_soff, dtype, 2)
+                    xs.append(b.bitcast(x, I32))
+                payload.append((d0, t0, xs[0], xs[1]))
             return payload
 
         def _cfvst_load_v_pipeline(tile_idx):

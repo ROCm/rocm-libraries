@@ -2282,10 +2282,17 @@ class TestDensePagedNumeric:
         The pages land at randomly permuted physical ids in a cache twice the
         needed size, and every unused page is NaN, so a wrong page or in-page row
         reads a NaN page or the wrong keys rather than a near miss. block_size
-        16/32/64 covers 4, 2 and 1 pages per 64-key tile. Paged V never takes the
-        cfvst path, so the dense run turns it off too, for identical arithmetic.
+        16/32/64 covers 4, 2 and 1 pages per 64-key tile. The dense run takes the
+        paged spec's V path (cfvst at D128), for identical arithmetic.
         """
         self._check_paged(dtype, block_size, sq, sq, window, d)
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    def test_paged_dma_v_matches_dense_bit_exact(self, dtype):
+        """D128 with cfvst off: V takes the async DMA copy and its page lookup."""
+        self._check_paged(dtype, 16, 1024, 1024, 256, 128, use_cfvst=False)
 
     @requires_gfx942_gpu
     @pytest.mark.gpu
@@ -2319,7 +2326,7 @@ class TestDensePagedNumeric:
         assert (out.float() - ref).abs().max().item() < _tolerance("fp16")
 
     @staticmethod
-    def _check_paged(dtype, block_size, sq, sk, window, d):
+    def _check_paged(dtype, block_size, sq, sk, window, d, use_cfvst=None):
         hq, hkv, B = 16, 4, 1
         tdt = getattr(torch, _TORCH_DT[dtype])
         scale = 1.0 / math.sqrt(d)
@@ -2345,9 +2352,15 @@ class TestDensePagedNumeric:
             sliding_window=window,
             kv_block_size=block_size,
         )
-        paged_spec = dataclasses.replace(shipped, num_kv_blocks=num_kv_blocks)
+        paged_spec = dataclasses.replace(
+            shipped, num_kv_blocks=num_kv_blocks, use_cfvst=use_cfvst
+        )
         dense_spec = dataclasses.replace(
-            shipped, paged=False, block_size=0, num_kv_blocks=0, use_cfvst=False
+            paged_spec,
+            paged=False,
+            block_size=0,
+            num_kv_blocks=0,
+            use_cfvst=paged_spec.resolved_use_cfvst(),
         )
 
         dense_out = torch.empty_like(q)
@@ -2367,7 +2380,7 @@ class TestDensePagedNumeric:
         )
         torch.cuda.synchronize()
 
-        name = f"{dtype} D{d} pgd{block_size} sq{sq} sk{sk} swa{window}"
+        name = f"{dtype} D{d} pgd{block_size} sq{sq} sk{sk} swa{window} {use_cfvst=}"
         assert torch.isfinite(paged_out).all(), f"{name}: read a NaN (unused) page"
         assert torch.equal(paged_out, dense_out), f"{name}: paged != dense bits"
         qi = torch.arange(sq, device="cuda").view(-1, 1)
@@ -2815,8 +2828,8 @@ class TestDensePagedI64Numeric:
         cache of ``num_kv_blocks`` pages; only those pages are written. V holds
         each page's logical index, so a read of the wrong page shows up in the
         output rather than averaging out as random V would. Compared bit-exact
-        against the contiguous kernel on the same K/V (cfvst off there, as paged V
-        never takes it, for identical arithmetic)."""
+        against the contiguous kernel on the same K/V and V path (cfvst), for
+        identical arithmetic."""
         sq, hq, hkv, d, bs = 1024, self._HQ, self._HKV, self._D, self._BS
         npages = sq // bs
         cache_bytes = num_kv_blocks * self._PAGE_BYTES
@@ -2841,7 +2854,7 @@ class TestDensePagedI64Numeric:
         shipped = _spec("fp16", d, hq, hkv, False, sq=sq)
         dense_out = torch.empty_like(q)
         run_attention_dense_torch(
-            spec=dataclasses.replace(shipped, use_cfvst=False),
+            spec=shipped,
             q=q,
             k=k,
             v=v,

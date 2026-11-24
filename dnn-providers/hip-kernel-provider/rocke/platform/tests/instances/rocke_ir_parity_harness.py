@@ -2385,6 +2385,17 @@ def cases():
                 "use_i64_kv_addr": True,
             },
         ),
+        # bf16 paged D128: takes conflict-free V with its per-wave page lookup.
+        (
+            "paged_swa_bf16_sq512",
+            {
+                "dtype": "bf16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+            },
+        ),
     ):
         add(
             "attention_dense",

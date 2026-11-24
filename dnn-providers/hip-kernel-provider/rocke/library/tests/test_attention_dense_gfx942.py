@@ -916,24 +916,25 @@ _PAGED = dict(sliding_window=256, paged=True, block_size=16, num_kv_blocks=256)
 
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
-def test_paged_is_supported_and_takes_the_dma_v_path(dtype):
-    """Paged builds at both dtypes and resolves cfvst off by policy, so its name
-    carries no ``cfvst0`` override tag."""
+def test_paged_is_supported_and_takes_the_cfvst_v_path(dtype):
+    """Paged builds at both dtypes and resolves cfvst on by policy, as contiguous
+    D128 does, so its name carries no cfvst override tag."""
     spec = _spec(dtype=dtype, **_PAGED)
     ok, why = supports_attention_dense(spec, arch="gfx942")
     assert ok, why
-    assert not spec.resolved_use_cfvst()
-    assert not spec.resolved_use_v_swizzle()
+    assert spec.resolved_use_cfvst()
+    assert spec.resolved_use_v_swizzle()
     assert "cfvst" not in gfx942_kernel_name(spec)
     params = [p.name for p in build_attention_dense(spec, arch="gfx942").params]
     assert params[-3:] == ["block_tables", "kv_lens", "block_table_stride"]
 
 
-def test_paged_rejects_forced_cfvst():
-    ok, why = supports_attention_dense(
-        _spec(dtype="fp16", use_cfvst=True, **_PAGED), arch="gfx942"
-    )
-    assert not ok and "paged" in why
+def test_paged_takes_the_dma_v_path_with_cfvst_off():
+    spec = _spec(dtype="fp16", use_cfvst=False, **_PAGED)
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert ok, why
+    assert "cfvst0" in gfx942_kernel_name(spec)
+    build_attention_dense(spec, arch="gfx942")
 
 
 def test_bottom_right_is_supported_without_a_window():
@@ -2212,7 +2213,7 @@ def test_v_row_pad_policy_matches_the_cfvst_swizzle_matrix(
     any tile width; 8 (no swizzle) everywhere else. This
     pins the derived values so a future edit that flips one arm updates this on purpose.
     """
-    assert _v_row_pad(head_size, dtype, block_n, False) == expected
+    assert _v_row_pad(head_size, dtype, block_n) == expected
 
 
 @pytest.mark.parametrize("block_n", [32, 64, 128])
@@ -2222,10 +2223,10 @@ def test_cfvst_swizzle_engages_at_every_block_n(block_n):
     turns off (a constant pad dropped it + wasted LDS at block_n != 64). The non-cfvst
     path stays unpadded (no swizzle)."""
     for dtype in ("fp16", "bf16"):
-        v_ldrow = block_n + _v_row_pad(128, dtype, block_n, False)
+        v_ldrow = block_n + _v_row_pad(128, dtype, block_n)
         assert v_ldrow == _v_swizzle_width(block_n), (dtype, block_n, v_ldrow)
         assert v_ldrow >= 64 and (v_ldrow & (v_ldrow - 1)) == 0, (block_n, v_ldrow)
-    assert _v_row_pad(64, "bf16", block_n, False) == 8
+    assert _v_row_pad(64, "bf16", block_n) == 8
 
 
 @pytest.mark.parametrize("block_n", [64, 32])
@@ -2245,7 +2246,7 @@ def test_cfvst_swizzle_is_emitted_in_ir_with_matching_store_read_mask(block_n):
     import re
 
     spec = _spec(head_size=128, dtype="fp16", block_n=block_n)
-    expected_mask = (block_n + _v_row_pad(128, "fp16", block_n, False)) // 4 - 1
+    expected_mask = (block_n + _v_row_pad(128, "fp16", block_n)) // 4 - 1
 
     def _swz_masks(ir):
         consts = {int(c) for c in re.findall(r"\band i32 [^,]+, (\d+)", ir)}
