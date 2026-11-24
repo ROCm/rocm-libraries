@@ -1,13 +1,17 @@
 #include "hipconv/hipconv.hpp"
 #include "conv_kernel.h"
+#include "device_runtime.h"
 #include "algorithm.h"
 #include "arch_registry.h"
 #include "hip_util.h"
 #include "launch_params.h"
+#include "registry.h"
 #include "tolerance.h"
 
 #include <array>
 #include <atomic>
+#include <cstdint>
+#include <initializer_list>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -15,6 +19,10 @@
 
 namespace hipconv
 {
+
+// Never launched: gives each GPU of the build a code object (docs/multi-arch-convergence.md),
+// which has_device_code queries.
+__global__ void device_code_anchor() {}
 
 namespace
 {
@@ -37,45 +45,43 @@ std::vector<ConvKernelHandle> handles(const std::vector<ScoredKernel>& scored)
     return out;
 }
 
-// Never launched; only something for hipFuncGetAttributes to ask about.
-__global__ void device_code_probe() {}
-
-// Whether this binary carries device code for the current GPU.
-//
-// The registry covers every arch in the tree, so a hit there does not mean the
-// kernels were built here. Cached per device; architectures can differ per GPU.
-bool device_code_available()
+// A selection or launch precondition; see hipconv.hpp.
+void check_device(const Device& device)
 {
-    int device = 0;
-    if(hipGetDevice(&device) != hipSuccess)
+    if(!device.arch)
+        throw std::invalid_argument("null arch handle");
+    if(device.cu_count <= 0 || device.cu_count > MAX_CU_COUNT)
+        throw std::invalid_argument("device.cu_count must be in [1, MAX_CU_COUNT]");
+}
+
+// Whether every tensor of the layer has at most MAX_TENSOR_ELEMENTS elements.
+bool within_size_limit(const ConvParams& par)
+{
+    // Reject groups <= 0; channels_per_group() would divide by zero.
+    if(par.groups <= 0)
         return false;
-
-    const auto probe = [] {
-        hipFuncAttributes attr{};
-        return hipFuncGetAttributes(&attr, reinterpret_cast<const void*>(&device_code_probe)) ==
-               hipSuccess;
+    const auto fits = [](std::initializer_list<int> extents) {
+        std::int64_t count = 1;
+        for(const int x : extents)
+            if(x > 0 && (__builtin_mul_overflow(count, x, &count) || count > MAX_TENSOR_ELEMENTS))
+                return false;
+        return true;
     };
+    return fits({par.n, par.d, par.h, par.w, par.c}) &&
+           fits({par.k, par.kd, par.kh, par.kw, par.channels_per_group()}) &&
+           fits({par.n, par.e, par.p, par.q, par.k});
+}
 
-    enum : signed char
-    {
-        unknown = 0,
-        present = 1,
-        absent  = -1
-    };
-    static constexpr int max_cached_devices = 32;
-    static std::array<std::atomic<signed char>, max_cached_devices> cache{};
+bool is_valid_layer(const ConvParams& par)
+{
+    return par.is_valid() && par.output_size_matches();
+}
 
-    if(device < 0 || device >= max_cached_devices)
-        return probe();
-
-    auto& slot       = cache[static_cast<std::size_t>(device)];
-    const auto known = slot.load(std::memory_order_relaxed);
-    if(known != unknown)
-        return known == present;
-
-    const bool available = probe();
-    slot.store(available ? present : absent, std::memory_order_relaxed);
-    return available;
+// Throws for a layer get_valid_configs rejects as invalid.
+void check_layer(const ConvParams& par)
+{
+    if(!is_valid_layer(par))
+        throw std::invalid_argument("invalid ConvParams");
 }
 
 } // anonymous namespace
@@ -101,42 +107,76 @@ std::vector<std::string_view> arch_names()
 
 std::optional<ArchHandle> resolve_arch(std::string_view name)
 {
-    if(!device_code_available())
-        return std::nullopt;
     return find_arch(name);
 }
 
-std::vector<ConvKernelHandle>
-get_valid_configs(ArchHandle arch, const ConvParams& par, Algorithm algo, std::size_t max_ranked)
+bool has_device_code(int hip_device)
 {
-    if(!arch)
-        throw std::invalid_argument("null arch handle");
-    for(const auto& entry : arch->algorithms)
+    enum : signed char
+    {
+        unknown = 0,
+        present = 1,
+        absent  = -1
+    };
+    static constexpr int max_cached_devices = 64;
+    static std::array<std::atomic<signed char>, max_cached_devices> cache{};
+
+    if(hip_device < 0)
+        return false;
+    const void* anchor = reinterpret_cast<const void*>(&device_code_anchor);
+    if(hip_device >= max_cached_devices)
+    {
+        const auto found = kernel_loads_on(anchor, hip_device);
+        return found.has_value() && *found;
+    }
+    auto& slot = cache[static_cast<std::size_t>(hip_device)];
+    if(const auto known = slot.load(std::memory_order_relaxed); known != unknown)
+        return known == present;
+    // A failed HIP call says nothing about the code object, so it is not cached.
+    const auto found = kernel_loads_on(anchor, hip_device);
+    if(!found.has_value())
+        return false;
+    signed char known = unknown;
+    if(slot.compare_exchange_strong(known, *found ? present : absent, std::memory_order_relaxed))
+        return *found;
+    return known == present;
+}
+
+std::vector<ConvKernelHandle> get_valid_configs(const Device& device,
+                                                const ConvParams& par,
+                                                Algorithm algo,
+                                                std::size_t max_ranked)
+{
+    check_device(device);
+    if(!is_valid_layer(par) || !within_size_limit(par))
+        return {};
+    for(const auto& entry : device.arch->algorithms)
     {
         if(entry.algorithm == algo)
-            return handles(entry.impl->get_valid_configs(par, max_ranked));
+            return handles(entry.impl->get_valid_configs(device, par, max_ranked));
     }
     return {};
 }
 
 std::vector<ConvKernelHandle>
-get_valid_configs(ArchHandle arch, const ConvParams& par, std::size_t max_ranked)
+get_valid_configs(const Device& device, const ConvParams& par, std::size_t max_ranked)
 {
-    if(!arch)
-        throw std::invalid_argument("null arch handle");
+    check_device(device);
+    if(!is_valid_layer(par) || !within_size_limit(par))
+        return {};
     std::vector<ScoredKernel> scored;
-    for(const auto& entry : arch->algorithms)
+    for(const auto& entry : device.arch->algorithms)
     {
-        auto cfgs = entry.impl->get_valid_configs(par, max_ranked);
+        auto cfgs = entry.impl->get_valid_configs(device, par, max_ranked);
         scored.insert(scored.end(), cfgs.begin(), cfgs.end());
     }
     keep_top_ranked(scored, max_ranked);
     return handles(scored);
 }
 
-std::optional<ConvKernelHandle> find_config(ArchHandle arch, const ConvParams& par)
+std::optional<ConvKernelHandle> find_config(const Device& device, const ConvParams& par)
 {
-    auto cfgs = get_valid_configs(arch, par);
+    auto cfgs = get_valid_configs(device, par);
     if(cfgs.empty())
         return std::nullopt;
     return cfgs.front();
@@ -144,20 +184,32 @@ std::optional<ConvKernelHandle> find_config(ArchHandle arch, const ConvParams& p
 
 namespace
 {
-// The full per-kernel predicate, for the entry points that ask a kernel directly
-// instead of going through ConvAlgorithm::get_valid_configs.
-bool kernel_supports(const ConvKernel* kernel, const ConvParams& par)
+// Applies get_valid_configs' filter to one kernel, for is_applicable and ConvLaunch::make.
+bool kernel_supports(const ConvKernel* kernel, const Device& device, const ConvParams& par)
 {
-    return kernel->supports_dims(par.dims) && kernel->is_applicable(par) &&
-           kernel->is_valid_config(par);
+    const auto algorithm_supports = [&] {
+        for(const auto& entry : device.arch->algorithms)
+            if(entry.algorithm == kernel->algorithm())
+                return entry.impl->is_applicable(par);
+        return false;
+    };
+    return is_valid_layer(par) && within_size_limit(par) && algorithm_supports() &&
+           kernel->supports_dims(par.dims) && kernel->is_applicable(device, par) &&
+           kernel->is_valid_config(device, par);
 }
-} // namespace
 
-bool is_applicable(ConvKernelHandle kernel, const ConvParams& par)
+void check_kernel(ConvKernelHandle kernel, const Device& device)
 {
     if(!kernel)
         throw std::invalid_argument("null kernel");
-    return kernel_supports(kernel, par);
+    check_device(device);
+}
+} // namespace
+
+bool is_applicable(ConvKernelHandle kernel, const Device& device, const ConvParams& par)
+{
+    check_kernel(kernel, device);
+    return kernel_supports(kernel, device, par);
 }
 
 std::string_view name(ConvKernelHandle kernel)
@@ -181,6 +233,65 @@ std::string describe_config(ConvKernelHandle kernel, bool full)
     return kernel->describe_config(full);
 }
 
+std::string describe_kernel(ConvKernelHandle kernel)
+{
+    if(!kernel)
+        throw std::invalid_argument("null kernel");
+    std::string description(kernel->name());
+    const std::string config = kernel->describe_config(true);
+    if(!config.empty())
+        description += "[" + config + "]";
+    return description;
+}
+
+auto split_kernel_description(std::string_view desc)
+    -> std::pair<std::string_view, std::string_view>
+{
+    char const* begin  = desc.data();
+    char const* cursor = begin;
+    char const* lim    = desc.data() + desc.size();
+
+    while(cursor < lim && *cursor != '[' && *cursor != ']')
+        ++cursor;
+    if(cursor == lim)
+        return {desc, ""};
+    char const* lbr_pos = cursor;
+    char const* rbr_pos = cursor + (lim - cursor - 1);
+    if(lbr_pos > begin && *lbr_pos == '[' && *rbr_pos == ']' && rbr_pos - lbr_pos > 1)
+        return {std::string_view{begin, lbr_pos}, std::string_view{lbr_pos + 1, rbr_pos}};
+
+    return {"", ""};
+}
+
+std::optional<ConvKernelHandle> find_kernel(ArchHandle arch, std::string_view description)
+{
+    if(!arch)
+        throw std::invalid_argument("null arch handle");
+    const std::less<> before;
+    if(before(arch, hipconv_arch_registry) ||
+       !before(arch, hipconv_arch_registry + hipconv_arch_registry_size))
+        throw std::invalid_argument("arch handle not from find_arch");
+
+    const auto [family_name, config] = split_kernel_description(description);
+    if(family_name.empty())
+        return std::nullopt;
+
+    const auto reprhash = RepresentationHashPair(config);
+    for(const auto& entry : arch->algorithms)
+    {
+        for(const ConvKernelGroup* group : entry.impl->kernel_groups())
+        {
+            if(!group->kernels.empty() && group->kernels.front()->name() == family_name)
+            {
+                auto kernel = group->get_kernel_by_config(reprhash);
+                if(kernel)
+                    return kernel;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
 bool matches_descriptor(ConvKernelHandle kernel, std::string_view spec, std::string* error)
 {
     if(!kernel)
@@ -188,21 +299,31 @@ bool matches_descriptor(ConvKernelHandle kernel, std::string_view spec, std::str
     return kernel->matches_descriptor(spec, error);
 }
 
-size_t get_workspace_size(ConvKernelHandle kernel, const ConvParams& par)
+size_t get_workspace_size(ConvKernelHandle kernel, const Device& device, const ConvParams& par)
 {
-    if(!kernel)
-        throw std::invalid_argument("null kernel");
-    return kernel->get_workspace_size(par);
+    check_kernel(kernel, device);
+    check_layer(par);
+    return kernel->get_workspace_size(device, par);
 }
 
-float get_weighted_throughput_index(ConvKernelHandle kernel, const ConvParams& par)
+bool is_deterministic(ConvKernelHandle kernel, const Device& device, const ConvParams& par)
 {
-    if(!kernel)
-        throw std::invalid_argument("null kernel");
-    return kernel->get_weighted_throughput_index(par);
+    check_kernel(kernel, device);
+    check_layer(par);
+    return kernel->is_deterministic(device, par);
+}
+
+float get_weighted_throughput_index(ConvKernelHandle kernel,
+                                    const Device& device,
+                                    const ConvParams& par)
+{
+    check_kernel(kernel, device);
+    check_layer(par);
+    return kernel->get_weighted_throughput_index(device, par);
 }
 
 hipconvError_t launch(ConvKernelHandle kernel,
+                      const Device& device,
                       const ConvParams& par,
                       const void* in,
                       const void* wei,
@@ -210,15 +331,16 @@ hipconvError_t launch(ConvKernelHandle kernel,
                       void* workspace,
                       hipStream_t stream)
 {
-    if(!kernel)
+    if(!kernel || !device.arch || device.cu_count <= 0 || device.cu_count > MAX_CU_COUNT ||
+       !is_valid_layer(par))
         return hipErrorInvalidValue;
-    auto lp = kernel->get_launch_params(par);
     // Internally hipconv throws on error; the public API translates that into
     // a return code. Execution faults are asynchronous and surface at a later
     // synchronization, not here.
     try
     {
-        kernel->launch(lp, par, in, wei, out, workspace, stream);
+        kernel->launch(
+            kernel->get_launch_params(device, par), device, par, in, wei, out, workspace, stream);
     }
     catch(const HipError& e)
     {
@@ -227,36 +349,42 @@ hipconvError_t launch(ConvKernelHandle kernel,
     return hipSuccess;
 }
 
-void get_tolerance(ConvKernelHandle kernel, const ConvParams& par, float& atol, float& rtol)
+void get_tolerance(ConvKernelHandle kernel,
+                   const Device& device,
+                   const ConvParams& par,
+                   float& atol,
+                   float& rtol)
 {
-    if(!kernel)
-        throw std::invalid_argument("null kernel");
-    kernel->get_tolerance(par, atol, rtol);
+    check_kernel(kernel, device);
+    check_layer(par);
+    kernel->get_tolerance(device, par, atol, rtol);
 }
 
 void get_recursive_summation_tolerance(const ConvParams& par, float& atol, float& rtol)
 {
+    check_layer(par);
     get_mixed_precision_tolerance(par, atol, rtol);
 }
 
 struct ConvLaunch::State
 {
     ConvKernel* kernel;
+    Device device;
     ConvParams par;
     LaunchParams lp;
     size_t workspace_size;
 };
 
-std::optional<ConvLaunch> ConvLaunch::make(ConvKernelHandle kernel, ConvParams par)
+std::optional<ConvLaunch>
+ConvLaunch::make(ConvKernelHandle kernel, const Device& device, ConvParams par)
 {
-    if(!kernel)
-        throw std::invalid_argument("null kernel");
-    if(!kernel_supports(kernel, par) || !kernel->runs_on_current_device(par))
+    check_kernel(kernel, device);
+    if(!kernel_supports(kernel, device, par))
         return std::nullopt;
 
-    auto lp = kernel->get_launch_params(par);
-    auto ws = kernel->get_workspace_size(par);
-    auto st = std::make_unique<State>(State{kernel, std::move(par), lp, ws});
+    auto lp = kernel->get_launch_params(device, par);
+    auto ws = kernel->get_workspace_size(device, par);
+    auto st = std::make_unique<State>(State{kernel, device, std::move(par), lp, ws});
     return ConvLaunch{std::move(st)};
 }
 
@@ -273,7 +401,12 @@ size_t ConvLaunch::workspace_size() const noexcept
 
 void ConvLaunch::get_tolerance(float& atol, float& rtol) const
 {
-    state_->kernel->get_tolerance(state_->par, atol, rtol);
+    state_->kernel->get_tolerance(state_->device, state_->par, atol, rtol);
+}
+
+const Device& ConvLaunch::device() const noexcept
+{
+    return state_->device;
 }
 
 const ConvParams& ConvLaunch::params() const noexcept
@@ -297,7 +430,8 @@ hipconvError_t ConvLaunch::launch(const void* in,
     // synchronization, not here.
     try
     {
-        state_->kernel->launch(state_->lp, state_->par, in, wei, out, workspace, stream);
+        state_->kernel->launch(
+            state_->lp, state_->device, state_->par, in, wei, out, workspace, stream);
     }
     catch(const HipError& e)
     {

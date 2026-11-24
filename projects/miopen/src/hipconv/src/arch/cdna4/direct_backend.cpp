@@ -3,28 +3,31 @@
 #include <array>
 
 using hipconv::ConvAlgorithm;
-using hipconv::ConvKernelSpan;
+using hipconv::ConvKernelGroup;
 using hipconv::ConvParams;
 
 // Defined by autoshard
-extern const ConvKernelSpan direct_cdna4_kernels;
-extern const ConvKernelSpan direct_l1_cdna4_kernels;
-extern const ConvKernelSpan direct_wgrad_cdna4_kernels;
-extern const ConvKernelSpan patch_embed_cdna4_kernels;
+extern const ConvKernelGroup direct_cdna4_kernels;
+extern const ConvKernelGroup direct_l1_cdna4_kernels;
+extern const ConvKernelGroup direct_wgrad_cdna4_kernels;
+extern const ConvKernelGroup patch_embed_cdna4_kernels;
+extern const ConvKernelGroup direct_flex_cdna4_kernels;
 
 namespace
 {
 
-bool is_applicable(const ConvParams& par)
+// Each family decides dilation itself: direct_flex supports any, the others none.
+bool is_applicable(const ConvParams& /*par*/)
 {
-    return par.dilation_h == 1 && par.dilation_w == 1;
+    return true;
 }
 
-constexpr std::array<const ConvKernelSpan*, 4> kernel_groups = {
+constexpr std::array<const ConvKernelGroup*, 5> kernel_groups = {
     &direct_l1_cdna4_kernels,
     &direct_cdna4_kernels,
     &direct_wgrad_cdna4_kernels,
     &patch_embed_cdna4_kernels,
+    &direct_flex_cdna4_kernels,
 };
 
 } // namespace

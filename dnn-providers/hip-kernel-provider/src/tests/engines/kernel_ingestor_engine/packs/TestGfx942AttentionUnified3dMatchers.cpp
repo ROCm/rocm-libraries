@@ -101,14 +101,14 @@ TEST(TestGfx942AttentionUnified3dMatchers, AcceptsAnyBatchAndKvLength)
 TEST(TestGfx942AttentionUnified3dMatchers, AcceptsBshdBhsdMixedAndPaddedKvViews)
 {
     auto spec = base();
-    spec.kStrides = bshdStrides(spec.numKvHeads, spec.seqLenKv, spec.headSize);
-    spec.vStrides = bhsdStrides(spec.numKvHeads, spec.seqLenKv, spec.headSize);
+    spec.kStrides = sdpaStrides(SdpaLayout::BSHD, spec.numKvHeads, spec.seqLenKv, spec.headSize);
+    spec.vStrides = sdpaStrides(SdpaLayout::BHSD, spec.numKvHeads, spec.seqLenKv, spec.headSize);
     EXPECT_TRUE(graphMatches(spec)) << "K BSHD, V BHSD";
 
     // A KV cache allocated for 1024 tokens with 512 valid: the batch and head strides
     // span the capacity, the logical Skv is 512.
     constexpr int64_t CAPACITY = 1024;
-    spec.kStrides = bhsdStrides(spec.numKvHeads, CAPACITY, spec.headSize);
+    spec.kStrides = sdpaStrides(SdpaLayout::BHSD, spec.numKvHeads, CAPACITY, spec.headSize);
     spec.vStrides = spec.kStrides;
     EXPECT_TRUE(graphMatches(spec)) << "capacity-padded BHSD";
 
@@ -205,7 +205,7 @@ TEST(TestGfx942AttentionUnified3dMatchers, DeclinesNonPositiveStrides)
     for(const int64_t bad : {0, -1})
     {
         auto spec = base();
-        auto strides = bhsdStrides(spec.numKvHeads, spec.seqLenKv, spec.headSize);
+        auto strides = sdpaStrides(SdpaLayout::BHSD, spec.numKvHeads, spec.seqLenKv, spec.headSize);
         strides[1] = bad;
         spec.vStrides = strides;
         EXPECT_FALSE(graphMatches(spec)) << bad;
@@ -365,6 +365,8 @@ TEST(TestGfx942AttentionUnified3dMatchers, DeclinesEveryUnsupportedOptionalFeatu
         {"max_seq_len_kv", [](Builder& b) { b.add_max_seq_len_kv(512); }},
         {"ragged seq_len_q", [](Builder& b) { b.add_seq_len_q_tensor_uid(EXTRA_UID); }},
         {"ragged seq_len_kv", [](Builder& b) { b.add_seq_len_kv_tensor_uid(EXTRA_UID); }},
+        {"cumulative cu_seq_len_q", [](Builder& b) { b.add_cu_seq_len_q_tensor_uid(EXTRA_UID); }},
+        {"cumulative cu_seq_len_kv", [](Builder& b) { b.add_cu_seq_len_kv_tensor_uid(EXTRA_UID); }},
         {"block mask", [](Builder& b) { b.add_block_mask_tensor_uid(EXTRA_UID); }},
         {"fp8 descale q", [](Builder& b) { b.add_descale_q_tensor_uid(EXTRA_UID); }},
         {"fp8 descale k", [](Builder& b) { b.add_descale_k_tensor_uid(EXTRA_UID); }},
@@ -591,6 +593,30 @@ TEST(TestGfx942AttentionUnified3dMatchers, WorkspaceIsTheGeometryHeadersLayoutFo
                   gfx942AttentionUnified3dWorkspace(3, spec.numQueryHeads, segments, spec.headSize)
                       .totalBytes)
             << segments;
+    }
+}
+
+TEST(TestGfx942AttentionUnified3dMatchers, ComputeDataTypeMustBeServedByFloatAccumulation)
+{
+    // The kernels accumulate and keep the softmax statistics in FLOAT, which meets an unset,
+    // FLOAT, HALF or BFLOAT16 compute type; a wider or non-floating one asks for a computation
+    // they do not perform.
+    for(const auto computeType : {data_objects::DataType::UNSET,
+                                  data_objects::DataType::FLOAT,
+                                  data_objects::DataType::HALF,
+                                  data_objects::DataType::BFLOAT16})
+    {
+        auto spec = base();
+        spec.computeDataType = computeType;
+        EXPECT_TRUE(graphMatches(spec)) << data_objects::EnumNameDataType(computeType);
+    }
+    for(const auto computeType : {data_objects::DataType::DOUBLE,
+                                  data_objects::DataType::INT32,
+                                  data_objects::DataType::FP8_E4M3})
+    {
+        auto spec = base();
+        spec.computeDataType = computeType;
+        EXPECT_FALSE(graphMatches(spec)) << data_objects::EnumNameDataType(computeType);
     }
 }
 

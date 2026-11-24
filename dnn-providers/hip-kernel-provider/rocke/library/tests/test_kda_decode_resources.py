@@ -5,12 +5,11 @@
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
-
 import pytest
 
 from dispatch.gdn import GdnDecodeRequest, dispatch_gdn_decode
+
+from ._gdn_decode_compile import compiled_resources
 
 ARCH = "gfx950"
 # Every KDA auto case: (state_dtype, fused, spec_id, tile). Each case runs one
@@ -21,27 +20,6 @@ CASES = (
     ("bf16", True, "kda_nw4_wtk8_bpv1", (4, 8, 1)),
     ("f32", True, "kda_nw4_wtk8_bpv1", (4, 8, 1)),
 )
-
-
-def _resources_for(kernel):
-    try:
-        from rocke.analysis.isa import analyze_hsaco
-        from rocke.helpers.compile import compile_kernel
-    except Exception as exc:  # pragma: no cover - environment-dependent
-        pytest.skip(f"comgr/resource tools unavailable: {exc}")
-
-    try:
-        artifact = compile_kernel(kernel, arch=ARCH, capture_ir_text=False)
-    except ImportError as exc:  # pragma: no cover - environment-dependent
-        pytest.skip(f"comgr toolchain unavailable: {exc}")
-
-    with tempfile.NamedTemporaryFile(suffix=".hsaco") as fh:
-        fh.write(bytes(artifact.hsaco))
-        fh.flush()
-        try:
-            return analyze_hsaco(Path(fh.name)).resources
-        except (FileNotFoundError, RuntimeError) as exc:  # pragma: no cover
-            pytest.skip(f"HSACO introspection unavailable: {exc}")
 
 
 def _assert_scratch_free(resources, *, spec_id: str, tile) -> None:
@@ -87,5 +65,5 @@ def test_dispatched_kda_tile_is_scratch_free(
     assert result.candidate.spec_id == expected_spec_id
     assert tile == expected_tile
 
-    resources = _resources_for(result.build())
+    resources = compiled_resources(result.build(), ARCH)
     _assert_scratch_free(resources, spec_id=expected_spec_id, tile=tile)

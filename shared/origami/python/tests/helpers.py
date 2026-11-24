@@ -29,6 +29,9 @@ HARDWARE = {
     "gfx1201": origami.get_hardware_for_arch(
         origami.architecture_t.gfx1201, 60, 128 * 1024, 512 * 1024, 6 * 1024 * 1024, 2500000
     ),
+    "gfx1250": origami.get_hardware_for_arch(
+        origami.architecture_t.gfx1250, 256, 320 * 1024, 512 * 1024, 4 * 1024 * 1024, 2400000
+    ),
 }
 
 

@@ -1443,6 +1443,10 @@ inline void testing_logging_write_error(const Arguments&)
     auto   future = done->get_future();
     float* x      = dx;
 
+    // The failed write below makes rocBLAS print an error to stderr, which is expected.
+    // No newline, so the error completes the line as "IGNORE: Error writing log file: ..."
+    rocblas_cerr << "IGNORE: " << std::flush;
+
     std::thread([done, x, device] {
         if(hipSetDevice(device) != hipSuccess)
         {

@@ -66,7 +66,6 @@ Tests:
   initialization: trig_float
   transA: T
   transB: N
-  splitk: 1
   iters: 1000
   cold_iters: 4000
   rotating: 512

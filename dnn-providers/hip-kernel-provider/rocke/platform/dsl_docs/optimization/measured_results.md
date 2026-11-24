@@ -44,7 +44,7 @@ A small handful of doc inaccuracies surfaced during this verification and were c
 - `BiasAdd` kwargs are `(param_name, dtype)` (was wrongly `bias_dtype` in `fusion/overview.md`).
 - `pack_f32_to(b, scalars_f32, *, dtype)` and `store_vec(b, ptr, idx, value, *, n)` are keyword-only with `dtype`/`n`, no `target_dtype` (was wrong in `primitives/intrinsics_and_primitives.md`).
 - `BatchedGemmSpec` and `GroupedGemmSpec` both require `name` (and `GroupedGemmSpec` also `trait`).
-- `DirectConvProblem` fields are `(N, H, W, groups, cpg, kpg, KH, KW, PAD, stride)` — not the `(Hi, Wi, Y, X, sH, sW, pH, pW, dH, dW)` shape used by `ConvProblem` (was wrong in `instances/convolution.md`).
+- `DirectConvProblem` fields are `(N, H, W, groups, cpg, kpg, KH, KW, PAD, stride)` — not the `(Hi, Wi, Y, X, sH, sW, pH, pW, dH, dW)` shape used by `ConvProblem` (was wrong in the convolution doc, now `library/kernels/conv/docs/convolution.md`).
 - `QDType` is `Literal["i8", "fp8e4m3", "bf8e5m2"]`, not an enum; values are plain strings (was wrong in `primitives/quantization.md`).
 
 ## Generated Example Harness

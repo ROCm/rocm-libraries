@@ -167,6 +167,10 @@
 - changed-files:
   - any-glob-to-any-file: 'shared/tensile/**/*'
 
+"shared: mosaic":
+- changed-files:
+  - any-glob-to-any-file: 'shared/mosaic/**/*'
+
 "project: rocwmma":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocwmma/**/*'

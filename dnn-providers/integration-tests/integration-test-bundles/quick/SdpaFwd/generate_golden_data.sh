@@ -147,6 +147,14 @@ if [[ "$TIER" == "all" || "$TIER" == "quick" ]]; then
     OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/fp16/hd192_causal_batch"
     generate_bundle "$OUTDIR" "Small" --causal bottom_right --dtype fp16 --q-dims 2 4 256 192 --v-dims 2 4 256 128 --seed 42 --attn-scale "$SCALE_D192"
 
+    # Dense BSHD Q/K/V/O with the frontend's packed [B, Hq, Sq, 1] FP32 stats (LSE), the
+    # layout hipkernel:Gfx942AttentionDense serves: BF16 hd128 GQA top-left causal, and FP16
+    # hd64 unmasked with Sq != Skv.
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/bf16/hd128_causal_gqa_stats"
+    generate_bundle "$OUTDIR" "Small" --layout bshd --stats --causal top_left --q-dims 2 2 256 128 --v-dims 2 1 256 128 --seed 42 --attn-scale "$SCALE_D128"
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bshd/fp16/hd64_nomask_stats"
+    generate_bundle "$OUTDIR" "Small" --layout bshd --stats --dtype fp16 --q-dims 2 4 128 64 --v-dims 2 4 256 64 --seed 42 --attn-scale "$SCALE_D64"
+
     echo ""
 fi
 
@@ -173,6 +181,11 @@ if [[ "$TIER" == "all" || "$TIER" == "standard" ]]; then
     OUTDIR="$GOLDEN_ROOT/standard/SdpaFwd/bhsd/fp16/hd128_nomask_batch_stats"
     generate_bundle "$OUTDIR" "MediumStats" --stats --dtype fp16 --q-dims 2 4 512 128 --v-dims 2 4 512 128 --seed 42 --attn-scale "$SCALE_D128"
     generate_bundle "$OUTDIR" "GqaStats" --stats --dtype fp16 --q-dims 1 8 256 128 --v-dims 1 2 256 128 --seed 42 --attn-scale "$SCALE_D128"
+
+    # Dense BSHD with packed FP32 stats (LSE): BF16 hd128 GQA with a 128-key top-left causal
+    # window (left_bound 128) at Sq == Skv, so every query row keeps a key.
+    OUTDIR="$GOLDEN_ROOT/standard/SdpaFwd/bshd/bf16/hd128_window_causal_stats"
+    generate_bundle "$OUTDIR" "Medium" --layout bshd --stats --causal top_left --left-bound 128 --q-dims 1 2 512 128 --v-dims 1 1 512 128 --seed 42 --attn-scale "$SCALE_D128"
 
     # BF16 hd128 bottom-right causal
     OUTDIR="$GOLDEN_ROOT/standard/SdpaFwd/bhsd/bf16/hd128_causal_batch"

@@ -19,6 +19,8 @@ namespace hipdnn_integration_tests::bundle
 ///                    late decline returned as an answer rather than thrown.
 ///   - execute()    — builds plans if needed, then runs the graph on a variant pack.
 ///   - benchmark()  — times the plan execute() built (--benchmark only).
+///   - captureReplay() — captures the plan execute() built into a HIP graph and
+///                    replays it (--graph-capture only).
 ///
 /// This is the only place in the harness that needs a handle, a device, or a
 /// loaded engine plugin. Kept in its own translation unit so the unit-test binary
@@ -40,6 +42,11 @@ public:
     hipdnn_frontend::AutotuneResult benchmark(GraphSession& session,
                                               VariantPack& variantPack,
                                               const BenchmarkSettings& settings) override;
+
+    CaptureResult captureReplay(GraphSession& session,
+                                VariantPack& variantPack,
+                                const CaptureSettings& settings,
+                                const ReplayHooks& hooks) override;
 };
 
 } // namespace hipdnn_integration_tests::bundle

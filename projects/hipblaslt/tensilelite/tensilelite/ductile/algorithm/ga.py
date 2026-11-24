@@ -148,6 +148,7 @@ class GeneticAlgorithm:
         self.logger.log_lines(self.__repr__(), logging.INFO)
     
     def update(self, best, pop, old_pop, scores):
+        scores[~np.isfinite(scores) | np.isnan(scores)] = 0
         scores[scores < 0] = -1.0
         
         pop.G = scores

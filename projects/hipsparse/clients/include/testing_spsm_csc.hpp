@@ -29,8 +29,10 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_descr.hpp"
 #include "hipsparse_local_dnmat.hpp"
 #include "hipsparse_local_handle.hpp"
+#include "hipsparse_local_spmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -75,19 +77,12 @@ void testing_spsm_csc_bad_arg(const Arguments& argus)
     float* dC   = (float*)dC_managed.get();
     void*  dbuf = (void*)dbuf_managed.get();
 
-    // SpSM structures
-    hipsparseSpMatDescr_t A;
-
-    hipsparseSpSMDescr_t descr;
-
-    verify_hipsparse_status_success(hipsparseSpSM_createDescr(&descr), "success");
+    hipsparseLocalSpSMDescr descr;
 
     size_t bsize;
 
     // Create SpSM structures
-    verify_hipsparse_status_success(
-        hipsparseCreateCsc(&A, m, n, nnz, dptr, drow, dval, idxType, idxType, idxBase, dataType),
-        "success");
+    hipsparseLocalCsc   A(m, n, nnz, dptr, drow, dval, idxType, idxType, idxBase, dataType);
     hipsparseLocalDnMat B(m, k, m, dB, dataType, order);
     hipsparseLocalDnMat C(m, k, m, dC, dataType, order);
 
@@ -169,9 +164,6 @@ void testing_spsm_csc_bad_arg(const Arguments& argus)
         hipsparseSpSM_solve(handle, transA, transB, &alpha, A, B, C, dataType, alg, nullptr, dbuf),
         "Error: descr is nullptr");
 
-    // Destruct
-    verify_hipsparse_status_success(hipsparseSpSM_destroyDescr(descr), "success");
-    verify_hipsparse_status_success(hipsparseDestroySpMat(A), "success");
 #endif
 }
 
@@ -297,13 +289,10 @@ void testing_spsm_csc(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(dC_2, hC_2.data(), sizeof(T) * nnz_C, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(d_alpha, &h_alpha, sizeof(T), hipMemcpyHostToDevice));
 
-    hipsparseSpSMDescr_t descr;
-    CHECK_HIPSPARSE_ERROR(hipsparseSpSM_createDescr(&descr));
+    hipsparseLocalSpSMDescr descr;
 
     // Create matrices
-    hipsparseSpMatDescr_t A;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateCsc(&A, m, m, nnz, dptr, drow, dval, typeI, typeJ, idx_base, typeT));
+    hipsparseLocalCsc A(m, m, nnz, dptr, drow, dval, typeI, typeJ, idx_base, typeT);
 
     // Create dense matrices
     hipsparseLocalDnMat B(B_m, B_n, ldb, dB, typeT, orderB);
@@ -456,8 +445,6 @@ void testing_spsm_csc(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 
-    CHECK_HIPSPARSE_ERROR(hipsparseSpSM_destroyDescr(descr));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(A));
 #endif
 }
 

@@ -43,7 +43,12 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
             # A workspace limit is a query constraint, which engine-level queries do not take.
             "workspace_limit_collect|--graph,g.fb,--collect-immediate,--workspace-limit,64|1|--workspace-limit"
             "workspace_limit_predict|--graph,g.fb,--predict-engine,--workspace-limit,64|1|--workspace-limit"
-            "workspace_limit_describe|--graph,g.fb,--describe-engine-prediction,--knob,global.workspace_size_limit=64|1|--workspace-limit")
+            "workspace_limit_describe|--graph,g.fb,--describe-engine-prediction,--knob,global.workspace_size_limit=64|1|--workspace-limit"
+            # A graph list measures each graph at engine level; one-graph options are refused.
+            "graph_list_with_graph|--graph-list,l.txt,--graph,g.fb,--collect-immediate|1|takes the place of --graph"
+            "graph_list_without_engine_mode|--graph-list,l.txt|1|takes the place of --graph"
+            "graph_list_with_problem_id|--graph-list,l.txt,--collect-immediate,--problem-id,p|1|takes the place of --graph"
+            "graph_list_with_query|--graph-list,l.txt,--collect-immediate,--query,q.n=1|1|takes the place of --graph")
         # The tests run a CMake driver script, so their one run-time prerequisite (the tool
         # binary) is appended to CHECK_DEPENDS_GLOBAL by hand, as for hipdnn_list_engines_smoke.
         # Build-tree only.

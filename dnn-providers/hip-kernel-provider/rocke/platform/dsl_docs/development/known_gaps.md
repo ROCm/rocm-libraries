@@ -147,18 +147,22 @@ gfx1250 instance uses multicast yet. The ops check the mask type but not that
 it is wave-uniform or that it selects only workgroups inside the launched
 cluster; both are left to the caller.
 
-**TDM has a descriptor builder but no production user.**
+**TDM covers rank 2 only.**
 `IRBuilder.tdm_descriptor_2d` (C: `rocke_b_tdm_descriptor_2d`) packs rank-2
-D# groups, and `isa_features/tdm_verify.py` runs a real global -> LDS -> global
-round trip with a padded row pitch. That round trip passes on a gfx1250 device,
-so `has_tdm` is set for gfx1250, but no gfx1250 instance uses TDM yet. Other
-limits:
+D# groups from a global pointer or an i64 global address (`global_addr_of`),
+and `isa_features/tdm_verify.py` runs a real global -> LDS -> global round trip
+with a padded row pitch, so `has_tdm` is set for gfx1250. The universal GEMM
+loads A and B through it on gfx1250 (`TraitSpec.tdm`). `encode_tdm_padding`
+(C: `rocke_encode_tdm_padding`) turns a row pad in bytes into the descriptor's
+pad fields; the GEMM's `lds_k_pad` and the winograd GEMM's row skew both go
+through it. Limits:
 
 - Only rank 2 is covered. D# groups 2 to 4 are zero, so there is no higher
   rank, gather, or iteration.
 - The multicast `workgroup_mask` is packed but never launched.
-- LDS padding is exposed only through the raw `pad_interval` and
-  `pad_amount` fields.
+- LDS padding is one gap of up to 512 bytes after every power-of-two
+  interval of 8 to 1024 bytes: the 3-bit `pad_interval` and 7-bit
+  `pad_amount` fields cannot express other pads.
 
 **The block-scaled GEMM prefetch flag is correctness-verified only.**
 `BlockScaledGemmSpec(prefetch=True)` is the named user of the data-prefetch
@@ -197,8 +201,8 @@ or are link-resolved-but-forward-declared; the byte-identity path is unaffected.
 |---|---|---|
 | `gemm_universal.cpp` | `all_dispatcher_configs()` host-side enumerator. | A streaming generator does not translate to a single C call; needs a callback-walker entry point added to the **public header `rocke/instance_gemm_universal.h`** (out of body-chunk edit scope). Emits no IR. |
 | `gemm_epilogue.cpp` | Heterogeneous-dtype `_storage_dtype` `ValueError` text. | No public `_storage_dtype` validator exists in a shared header. Emit-path call sites only need the resolved IR type (dtypes already validated upstream by `ck_gemm_storage_dtype` in `gemm_spec.cpp`), so IR is byte-identical; only the heterogeneous-reject *message* is deferred until a shared validator lands. |
-| `deep_fused_conv_pool_value_types_and_spec.cpp` | Leading underlying-conv gate (`conv_spec=spec.conv_spec()`; `is_valid_conv_spec`) in `is_valid_spec`. | The per-family gate `rocke_implicit_gemm_conv_is_valid_spec` is public, but `spec.conv_spec()`'s only C port requires an `ir_builder_t*` for `kernel_name_join`; this validator is pure-compute with no builder. Needs a builder-free `conv_spec()` / validate path. |
-| `deep_fused_conv_pool_conv1_gemm_and_lds_staging.cpp` | `rocke_conv_apply_accumulator_epilogue` peer (called via a local extern-C forward decl). | The peer's `ConvAccumulatorEpilogue` struct in its private header collides with this TU's struct of the same name; needs the peer epilogue type exposed through a non-conflicting shared header. Currently **link-resolved (correct at runtime)**; forward-decl retained. |
+| `library/cpp/instances/common/deep_fused_conv_pool_value_types_and_spec.cpp` | Leading underlying-conv gate (`conv_spec=spec.conv_spec()`; `is_valid_conv_spec`) in `is_valid_spec`. | The per-family gate `rocke_implicit_gemm_conv_is_valid_spec` is public, but `spec.conv_spec()`'s only C port requires an `ir_builder_t*` for `kernel_name_join`; this validator is pure-compute with no builder. Needs a builder-free `conv_spec()` / validate path. |
+| `library/cpp/instances/common/deep_fused_conv_pool_conv1_gemm_and_lds_staging.cpp` | `rocke_conv_apply_accumulator_epilogue` peer (called via a local extern-C forward decl). | The peer's `ConvAccumulatorEpilogue` struct in its private header collides with this TU's struct of the same name; needs the peer epilogue type exposed through a non-conflicting shared header. Currently **link-resolved (correct at runtime)**; forward-decl retained. |
 
 ---
 
@@ -322,6 +326,64 @@ retiring the C engine. Until then, keep dense emission changes gated by the
 cross-engine parity test and the representative golden above.
 
 **Sign-off:** rocKE attention maintainer, 2026-10-30.
+
+## 9. Tiling primitives — Python-only authoring layer
+
+**Subsystem:** `python/rocke/helpers/tiling/` (the fragment verbs, `TileMma`, the MMA catalog
+`traits/data/mma_traits.json` and the backend coverage record `traits/data/backend_coverage.json`)
+
+The tiling package builds kernels in Python only: it has no C++ twin of its verbs, its MMA plan or
+driver, and the C++ engine never reads the catalog or the coverage record.
+
+**What is gated:** the kernels it builds are lowered by both engines. Its MMA and fragment tests
+parametrize over `rocke.tests.engines.ENGINES` and lower each form the package emits with
+`lower_with_engine`: the Python case runs in every lane, and the C++ case, which skips only where the
+`rocke_engine` binding is not built, requires the same IR as the Python engine. They cover 8-bit
+vector loads and LDS accesses, packed sub-byte words, tf32 held as i32, and one single-instruction
+tile for every dense instruction the coverage record classes `issuable`, the family `TileMma`
+drives (`tests/helpers/tiling/mma/test_mma_issuable_pairs.py`). The tensor_transforms tests lower
+with `lower_with_both_engines`, which skips the whole case without the binding. The coverage record
+itself is measured with the Python lowerer at one LLVM flavor.
+
+**What unblocks a C++ twin:** a decision to port the authoring layer; until then, a new form the
+package emits gets a lowering test parametrized over `ENGINES`.
+
+---
+
+## 9. gfx942 4-warp GQA attention body — Python-only kernel builder
+
+**Subsystem:** `library/kernels/gfx942/attention_tiled_2d.py`
+(`build_gfx942_4warp_gqa`, `_build_gfx942_4warp_gqa_lean`),
+`library/kernels/common/attention_unified.py` (`_gfx942_4warp_route`)
+
+The gfx942 4-warp GQA paged-attention body (the D192/D256 bf16 lean body and
+the D128 sliding-window head-fold) has **no C++ twin**. The C selector mirrors
+the cohort predicate (`d256_gfx942_fast` in
+`instances/common/attention_unified_selectors.cpp` picks tile size 32 for it),
+but `instances/gfx942/attention_tiled_2d*.cpp` builds only the default tiled 2D
+body; nothing in `platform/cpp/` emits the 4-warp V-transpose kernel.
+
+| What's missing | Where |
+|---|---|
+| A C builder for `build_gfx942_4warp_gqa` (lean D192/D256 body and D128 fold) | `cpp/instances/gfx942/` |
+| The `_gfx942_4warp_route` launch geometry (BLOCK_M 128, 256 threads) | the C selectors return a tile size only |
+
+**What is gated:** the Python IR of each body is pinned at every
+`GOLDEN_FLAVORS` flavor by
+`platform/tests/golden/rocke_representative_ir_sha256/attention_d256.json`
+(`attention_d256/gfx942/4warp_gqa`, `4warp_gqa_d192`) and
+`attention_d128_swa.json` (`attention_d128_swa/gfx942/4warp_gqa_fold`), and the
+C++ *lowerer* is checked byte-identical against the Python lowerer on the
+`attention_d256` family
+(`library/tests/test_attention_ir_cpp_parity.py::test_attention_ir_cpp_python_byte_identity`).
+A body fix therefore re-blesses those goldens and needs no C++ change; the
+row-bound, block-table and keyless-row fixes of #13115 are one such change.
+
+**Why deferred:** the same owner decision as §6 and §8 — per-family C++ builder
+mirrors are not maintained for attention bodies added after the port.
+
+**What closes it:** a decision to restore per-family C++ builder mirrors, or
+retiring the C engine.
 
 ---
 

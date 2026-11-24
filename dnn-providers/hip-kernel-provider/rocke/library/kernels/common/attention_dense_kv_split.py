@@ -51,13 +51,11 @@ def max_kv_segments_for_extent(
     return s
 
 
-def check_kv_segments(spec) -> tuple[bool, str]:
-    """Shared admission for ``spec.kv_segments``: the default grid only, without a
-    sliding window, sinks or LSE output (each would need its own segment rule)."""
-    s = spec.kv_segments
-    if type(s) is not int or not 1 <= s <= MAX_KV_SEGMENTS:
-        return False, f"kv_segments must be an int in [1, {MAX_KV_SEGMENTS}], got {s!r}"
-    if s > 1 and (
+def kv_split_admits(spec) -> bool:
+    """Whether ``spec``'s grid and features admit ``kv_segments > 1``: the default
+    grid only, without a sliding window, sinks or LSE output (each would need its
+    own segment rule), ragged, varlen or paged."""
+    return not (
         spec.persistent
         or spec.sliding_window
         or spec.use_sinks
@@ -65,7 +63,15 @@ def check_kv_segments(spec) -> tuple[bool, str]:
         or spec.ragged
         or spec.varlen
         or spec.paged
-    ):
+    )
+
+
+def check_kv_segments(spec) -> tuple[bool, str]:
+    """Shared admission for ``spec.kv_segments`` (see :func:`kv_split_admits`)."""
+    s = spec.kv_segments
+    if type(s) is not int or not 1 <= s <= MAX_KV_SEGMENTS:
+        return False, f"kv_segments must be an int in [1, {MAX_KV_SEGMENTS}], got {s!r}"
+    if s > 1 and not kv_split_admits(spec):
         return False, (
             "kv_segments > 1 runs on the default grid only, without sliding window, "
             "sinks, LSE output, ragged, varlen or paged"

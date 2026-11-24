@@ -22,6 +22,7 @@
 import ctypes
 import os
 import unittest
+from unittest.mock import patch
 
 from rocke.portable_ir.examples import recipe_toy
 from rocke.portable_ir.src import abi
@@ -106,6 +107,26 @@ class TestBinaryAbiRefusal(unittest.TestCase):
         with self.assertRaises(RuntimeError) as cm:
             self._adopt(abi.BINARY_ABI - 1)
         self.assertIn(f"binary ABI v{abi.BINARY_ABI - 1}", str(cm.exception))
+
+    def test_previous_native_layout_is_refused_before_binding(self):
+        """ABI11 tags cover incompatible layouts, not the combined native ABI."""
+        from rocke.portable_ir.src import online
+
+        for reports in (8, 9, 10, 11):
+            with (
+                self.subTest(reports=reports),
+                patch.object(online, "_check_source_freshness"),
+                patch.object(online, "_bind") as bind,
+            ):
+                with self.assertRaisesRegex(RuntimeError, f"binary ABI v{reports}"):
+                    online._adopt(_StubLibrary(reports), "/stub/librocke.so")
+                bind.assert_not_called()
+
+    def test_pre_indexed_mma_library_is_refused(self):
+        """ABI 5 lacks the indexed MMA layout even with buffer-capable views."""
+        with self.assertRaises(RuntimeError) as cm:
+            self._adopt(5)
+        self.assertIn("binary ABI v5", str(cm.exception))
 
     def test_a_library_with_no_version_export_is_refused(self):
         """Predating the contract is itself the mismatch, not a reason to skip it."""

@@ -6,8 +6,7 @@
 # Fails if the shared library exports any defined symbol that is not on the allowlist. This
 # codifies the hidden-visibility baseline (library/src/CMakeLists.txt) + version script
 # (library/src/hiptensor.map): only the public C API and the two shared-state singletons
-# (hiptensor::HiptensorOptions, hiptensor::Logger, reached via hiptensor::LazySingleton) may
-# leave the .so. Everything else — internal C++ classes, Composable Kernel template
+# (hiptensor::HiptensorOptions, hiptensor::Logger) may leave the .so. Everything else — internal C++ classes, Composable Kernel template
 # instantiations — must stay local.
 #
 # Keep ALLOWLIST in lockstep with the `global:` section of library/src/hiptensor.map.
@@ -29,14 +28,10 @@ ALLOWLIST = [
     # extern "C" public API. Coarse prefix: admits any `hiptensor`-prefixed export, including
     # the test-only hiptensor*Reference helpers. Internal C++ (`_ZN9hiptensor...`) is still caught.
     re.compile(r"^hiptensor"),
-    # hiptensor::HiptensorOptions (shared singleton) + its LazySingleton plumbing. The
-    # LazySingleton instance()/static/guard forms (_ZN / _ZZN / _ZGVZN) only emit out-of-line
-    # in low-inlining builds (e.g. Debug); matched here to stay in lockstep with hiptensor.map.
+    # hiptensor::HiptensorOptions and hiptensor::Logger (shared singletons). Their instance() is
+    # a non-template member defined in the library, so its function-local static stays local.
     re.compile(r"^_ZN9hiptensor16HiptensorOptions"),
-    re.compile(r"^_Z(N|ZN|GVZN)9hiptensor13LazySingletonINS_16HiptensorOptionsEE"),
-    # hiptensor::Logger (shared singleton) + its LazySingleton plumbing
     re.compile(r"^_ZN9hiptensor6Logger"),
-    re.compile(r"^_Z(N|ZN|GVZN)9hiptensor13LazySingletonINS_6LoggerEE"),
     # Standard ELF/CRT entries. The version script already demotes these to local, so normally
     # none are exported; kept as an explicit safety net for a .so built without the script.
     re.compile(r"^_init$"),

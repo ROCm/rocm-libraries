@@ -1,0 +1,835 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "direct_c96_3x3_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              96,
+              14,
+              14
+            ],
+            "strides": [
+              18816,
+              1,
+              1344,
+              96
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              96,
+              1,
+              3,
+              3
+            ],
+            "strides": [
+              9,
+              1,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              96,
+              14,
+              14
+            ],
+            "strides": [
+              18816,
+              1,
+              1344,
+              96
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Depthwise convolution served by the direct depthwise family; 96 channels leave its last 64-channel tile partly empty.",
+        "operation": "ConvolutionFwd",
+        "seed": 1
+      }
+    },
+    {
+      "id": "direct_c96_3x3_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              96,
+              14,
+              14
+            ],
+            "strides": [
+              18816,
+              1,
+              1344,
+              96
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              96,
+              1,
+              3,
+              3
+            ],
+            "strides": [
+              9,
+              1,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              96,
+              14,
+              14
+            ],
+            "strides": [
+              18816,
+              1,
+              1344,
+              96
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Depthwise convolution served by the direct depthwise family; 96 channels leave its last 64-channel tile partly empty.",
+        "operation": "ConvolutionFwd",
+        "seed": 1
+      }
+    },
+    {
+      "id": "direct_c96_3x3_s2_odd_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              96,
+              9,
+              9
+            ],
+            "strides": [
+              7776,
+              1,
+              864,
+              96
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              96,
+              1,
+              3,
+              3
+            ],
+            "strides": [
+              9,
+              1,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              96,
+              17,
+              17
+            ],
+            "strides": [
+              27744,
+              1,
+              1632,
+              96
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Stride-2 depthwise convolution on an odd input height, served by the direct depthwise family.",
+        "operation": "ConvolutionFwd",
+        "seed": 1
+      }
+    },
+    {
+      "id": "direct_c96_3x3_s2_odd_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              96,
+              9,
+              9
+            ],
+            "strides": [
+              7776,
+              1,
+              864,
+              96
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              96,
+              1,
+              3,
+              3
+            ],
+            "strides": [
+              9,
+              1,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              96,
+              17,
+              17
+            ],
+            "strides": [
+              27744,
+              1,
+              1632,
+              96
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Stride-2 depthwise convolution on an odd input height, served by the direct depthwise family.",
+        "operation": "ConvolutionFwd",
+        "seed": 1
+      }
+    },
+    {
+      "id": "direct_c96_3x3_s2_even_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              96,
+              8,
+              9
+            ],
+            "strides": [
+              6912,
+              1,
+              864,
+              96
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              96,
+              1,
+              3,
+              3
+            ],
+            "strides": [
+              9,
+              1,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              96,
+              16,
+              18
+            ],
+            "strides": [
+              27648,
+              1,
+              1728,
+              96
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Stride-2 depthwise convolution on an even input height, served by the direct depthwise family.",
+        "operation": "ConvolutionFwd",
+        "seed": 1
+      }
+    },
+    {
+      "id": "direct_c96_3x3_s2_even_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              96,
+              8,
+              9
+            ],
+            "strides": [
+              6912,
+              1,
+              864,
+              96
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              96,
+              1,
+              3,
+              3
+            ],
+            "strides": [
+              9,
+              1,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              96,
+              16,
+              18
+            ],
+            "strides": [
+              27648,
+              1,
+              1728,
+              96
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            2,
+            2
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Stride-2 depthwise convolution on an even input height, served by the direct depthwise family.",
+        "operation": "ConvolutionFwd",
+        "seed": 1
+      }
+    },
+    {
+      "id": "direct_c64_3x3_tall_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              64,
+              70,
+              40
+            ],
+            "strides": [
+              179200,
+              1,
+              2560,
+              64
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              64,
+              1,
+              3,
+              3
+            ],
+            "strides": [
+              9,
+              1,
+              3,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              64,
+              70,
+              40
+            ],
+            "strides": [
+              179200,
+              1,
+              2560,
+              64
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Depthwise convolution on a tall input, served by the direct depthwise family.",
+        "operation": "ConvolutionFwd",
+        "seed": 1
+      }
+    },
+    {
+      "id": "direct_c64_3x3_tall_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              64,
+              70,
+              40
+            ],
+            "strides": [
+              179200,
+              1,
+              2560,
+              64
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              64,
+              1,
+              3,
+              3
+            ],
+            "strides": [
+              9,
+              1,
+              3,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              64,
+              70,
+              40
+            ],
+            "strides": [
+              179200,
+              1,
+              2560,
+              64
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            1,
+            1
+          ],
+          "parameters__pre_padding": [
+            1,
+            1
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Depthwise convolution on a tall input, served by the direct depthwise family.",
+        "operation": "ConvolutionFwd",
+        "seed": 1
+      }
+    },
+    {
+      "id": "direct_spatial_c5_17x17_half",
+      "values": {
+        "io_data_type": "half",
+        "intermediate_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              5,
+              56,
+              24
+            ],
+            "strides": [
+              6720,
+              1,
+              120,
+              5
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              5,
+              1,
+              17,
+              17
+            ],
+            "strides": [
+              289,
+              1,
+              17,
+              1
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              5,
+              56,
+              24
+            ],
+            "strides": [
+              6720,
+              1,
+              120,
+              5
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            8,
+            8
+          ],
+          "parameters__pre_padding": [
+            8,
+            8
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Large-filter depthwise convolution served by the direct depthwise family's spatial kernel on its runtime row loop.",
+        "operation": "ConvolutionFwd",
+        "seed": 1
+      }
+    },
+    {
+      "id": "direct_spatial_c5_17x17_bfloat16",
+      "values": {
+        "io_data_type": "bfloat16",
+        "intermediate_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              5,
+              56,
+              24
+            ],
+            "strides": [
+              6720,
+              1,
+              120,
+              5
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              5,
+              1,
+              17,
+              17
+            ],
+            "strides": [
+              289,
+              1,
+              17,
+              1
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              2,
+              5,
+              56,
+              24
+            ],
+            "strides": [
+              6720,
+              1,
+              120,
+              5
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "parameters__dilation": [
+            1,
+            1
+          ],
+          "parameters__post_padding": [
+            8,
+            8
+          ],
+          "parameters__pre_padding": [
+            8,
+            8
+          ],
+          "parameters__stride": [
+            1,
+            1
+          ]
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "manual",
+        "generator_version": "1.0.0",
+        "notes": "Large-filter depthwise convolution served by the direct depthwise family's spatial kernel on its runtime row loop.",
+        "operation": "ConvolutionFwd",
+        "seed": 1
+      }
+    }
+  ]
+}

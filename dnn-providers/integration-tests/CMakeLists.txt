@@ -73,6 +73,7 @@ include(ClangCheck)
 include(Sanitizers)
 include(WindowsDllStaging)
 include(Tests)
+include(LongPathManifest)
 include(HipdnnIntegrationTestHelpers)
 
 list(
@@ -172,6 +173,13 @@ if(Python3_FOUND)
                 ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_support_sidecar.py
     )
     set(HIPDNN_IT_SUPPORT_SIDECAR_TEST hipdnn_support_sidecar_python_tests)
+
+    add_test(
+        NAME hipdnn_migration_scripts_python_tests
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/migration-scripts/test_migration.py
+    )
+    set(HIPDNN_IT_MIGRATION_SCRIPTS_TEST hipdnn_migration_scripts_python_tests)
 
     # pytest-style suites (fixtures, parametrize), so they run under -m pytest
     # rather than as scripts; a bare `python file.py` would collect nothing.
@@ -275,6 +283,7 @@ add_executable(${INTEGRATION_TESTS_EXE}
     src/harness/bundle/VariantPackBuilder.cpp
     src/harness/gpu-graph-executor/GpuReferenceGraphExecutor.cpp
     src/harness/input-init/FillInputs.cpp
+    src/harness/input-init/ResampleBackwardInputs.cpp
     src/harness/input-init/SdpaBackwardInputs.cpp
 )
 
@@ -304,6 +313,7 @@ add_executable(${GOLDEN_DATA_TESTS_EXE}
     src/harness/bundle/VariantPackBuilder.cpp
     src/harness/gpu-graph-executor/GpuReferenceGraphExecutor.cpp
     src/harness/input-init/FillInputs.cpp
+    src/harness/input-init/ResampleBackwardInputs.cpp
     src/harness/input-init/SdpaBackwardInputs.cpp
     src/harness/reference-validation/BundleReferenceValidationHarness.cpp
     src/harness/reference-validation/GoldenDataPlan.cpp
@@ -335,6 +345,33 @@ target_compile_options(${GOLDEN_DATA_TESTS_EXE}
 
 clang_tidy_check(${GOLDEN_DATA_TESTS_EXE})
 
+# This check needs no plugin: --benchmark-reference with a mode that never
+# runs a reference must be refused before any engine loads. PASS_REGULAR_EXPRESSION
+# replaces the exit-code check, and the refusal message is printed only on that
+# exit. A device-less runner passes, as the binary skips itself before parsing, so
+# the entry is also staged into the installed CTest file below, which the GPU jobs
+# run.
+set(HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST hipdnn_integration_tests_benchmark_reference_refusal)
+set(HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_ARGS --benchmark-reference --skip-graph-validation)
+set(HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_PASS
+    "--benchmark-reference cannot be combined with --skip-graph-validation|No HIP devices available"
+)
+add_test(
+    NAME ${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST}
+    COMMAND ${INTEGRATION_TESTS_EXE} ${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_ARGS}
+)
+set_tests_properties(${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST} PROPERTIES
+    PASS_REGULAR_EXPRESSION "${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_PASS}"
+)
+if(TEST_ENVIRONMENT)
+    set_tests_properties(${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST} PROPERTIES
+        ENVIRONMENT "${TEST_ENVIRONMENT}")
+endif()
+if(TEST_ENVIRONMENT_MODIFICATION)
+    set_tests_properties(${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST} PROPERTIES
+        ENVIRONMENT_MODIFICATION "${TEST_ENVIRONMENT_MODIFICATION}")
+endif()
+
 # YAML test categorization has to be decided before the first add_*_test_target() call below:
 # _add_test_target_internal() (dnn-providers/cmake/Tests.cmake) skips the raw, unlabeled
 # add_test() for a target only while DNN_PROVIDER_TEST_CATEGORY_YAMLS is already set. Set
@@ -364,6 +401,9 @@ if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
     if(HIPDNN_IT_SUPPORT_SIDECAR_TEST)
         _apply_provider_ctest_category_labels(${HIPDNN_IT_SUPPORT_SIDECAR_TEST})
     endif()
+    if(HIPDNN_IT_MIGRATION_SCRIPTS_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_MIGRATION_SCRIPTS_TEST})
+    endif()
     if(HIPDNN_IT_BUNDLE_DISCOVERY_TEST)
         _apply_provider_ctest_category_labels(${HIPDNN_IT_BUNDLE_DISCOVERY_TEST})
     endif()
@@ -385,6 +425,7 @@ if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
     if(HIPDNN_IT_SDPA_BWD_GENERATOR_TEST)
         _apply_provider_ctest_category_labels(${HIPDNN_IT_SDPA_BWD_GENERATOR_TEST})
     endif()
+    _apply_provider_ctest_category_labels(${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST})
 else()
     message(STATUS "hipdnn-integration-tests: shared/ctest or test_categories.yaml not found, using legacy CTest labels")
 endif()
@@ -475,6 +516,31 @@ if(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED)
         )
     endforeach()
 
+    # The refusal check, next to the GTest suites. It is the only pre-registered check
+    # staged here: the others run python scripts from the source tree. Labelled from
+    # test_categories_external.yaml, which matches it by exact name only.
+    set(_refusal_install_cmd
+        "add_test(\"${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST}\" \"../hipdnn_integration_tests${CMAKE_EXECUTABLE_SUFFIX}\""
+    )
+    foreach(_refusal_arg IN LISTS HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_ARGS)
+        string(APPEND _refusal_install_cmd " \"${_refusal_arg}\"")
+    endforeach()
+    string(APPEND _refusal_install_cmd ")\n")
+    set(_refusal_install_properties
+        "PASS_REGULAR_EXPRESSION \"${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_PASS}\"")
+    # Unescaped, as the GTest suites above write theirs: ctest splits the quoted list.
+    if(TEST_ENVIRONMENT)
+        string(APPEND _refusal_install_properties " ENVIRONMENT \"${TEST_ENVIRONMENT}\"")
+    endif()
+    if(TEST_ENVIRONMENT_MODIFICATION)
+        string(APPEND _refusal_install_properties
+               " ENVIRONMENT_MODIFICATION \"${TEST_ENVIRONMENT_MODIFICATION}\"")
+    endif()
+    file(APPEND "${HIPDNN_IT_CTEST_INSTALL_FILE}"
+         "\n${_refusal_install_cmd}"
+         "set_tests_properties(\"${HIPDNN_IT_BENCHMARK_REFERENCE_REFUSAL_TEST}\" PROPERTIES ${_refusal_install_properties})\n")
+    apply_ctest_category_labels("${HIPDNN_IT_CTEST_CATEGORIES_YAML}" "${HIPDNN_IT_CTEST_INSTALL_FILE}")
+
     # Install the generated (category-labeled) CTestTestfile so
     # `ctest -L quick|standard|...` works from the installed tree.
     install(FILES "${HIPDNN_IT_CTEST_INSTALL_FILE}"
@@ -538,3 +604,4 @@ install(FILES
 )
 
 add_clang_tidy_custom_target()
+hipdnn_apply_long_path_manifest()

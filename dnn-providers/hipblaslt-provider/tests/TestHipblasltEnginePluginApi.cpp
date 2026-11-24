@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 
 #include <HipblasltPlugin.hpp>
+#include <algorithm>
+#include <array>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
@@ -14,6 +16,7 @@
 
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
+#include "TestWorkarounds.hpp"
 #include "mocks/MockHipdnnEnginePluginExecutionContext.hpp"
 
 using namespace hipdnn_data_sdk::utilities;
@@ -313,11 +316,13 @@ TEST(TestGpuHipblasltEnginePluginApi, GetEngineDetailsValid)
 TEST(TestGpuHipblasltEnginePluginApi, GetWorkspaceSizeValid)
 {
     SKIP_IF_NO_DEVICES();
+    [[maybe_unused]] const HipdnnEnginePluginHandle probe{};
+    SKIP_IF_WORKAROUND_ISSUE_9962(probe);
     hipdnnEnginePluginHandle_t handle = nullptr;
     ASSERT_EQ(hipdnnEnginePluginCreateImpl(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 
     // Create a valid flatbuffer graph and engine config
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidMatmulGraph();
     auto serializedGraph = builder.Release();
     hipdnnPluginConstData_t const opGraph
         = hipdnn_plugin_sdk::createValidConstDataGraph(serializedGraph);
@@ -328,12 +333,21 @@ TEST(TestGpuHipblasltEnginePluginApi, GetWorkspaceSizeValid)
     hipdnnPluginConstData_t const engineConfig
         = hipdnn_plugin_sdk::createValidConstDataEngineConfig(serializedEngineConfig);
 
+    // The engine must serve the graph for the workspace query to be meaningful.
+    std::array<int64_t, 8> engineIds = {};
+    uint32_t numEngines = 0;
+    ASSERT_EQ(hipdnnEnginePluginGetApplicableEngineIdsImpl(
+                  handle, &opGraph, engineIds.data(), engineIds.size(), &numEngines),
+              HIPDNN_PLUGIN_STATUS_SUCCESS);
+    ASSERT_LE(numEngines, engineIds.size());
+    ASSERT_NE(std::find(engineIds.begin(), engineIds.begin() + numEngines, HIPBLASLT_ENGINE_ID),
+              engineIds.begin() + numEngines);
+
     size_t workspaceSize = 0;
     auto status
         = hipdnnEnginePluginGetWorkspaceSizeImpl(handle, &engineConfig, &opGraph, &workspaceSize);
 
     EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
-    EXPECT_EQ(workspaceSize, 0u);
 
     EXPECT_EQ(hipdnnEnginePluginDestroyImpl(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
@@ -341,10 +355,12 @@ TEST(TestGpuHipblasltEnginePluginApi, GetWorkspaceSizeValid)
 TEST(TestGpuHipblasltEnginePluginApi, CreateExecutionContextValid)
 {
     SKIP_IF_NO_DEVICES();
+    [[maybe_unused]] const HipdnnEnginePluginHandle probe{};
+    SKIP_IF_WORKAROUND_ISSUE_9962(probe);
     hipdnnEnginePluginHandle_t handle = nullptr;
     ASSERT_EQ(hipdnnEnginePluginCreateImpl(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 
-    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidMatmulGraph();
     auto serializedGraph = builder.Release();
     hipdnnPluginConstData_t const opGraph
         = hipdnn_plugin_sdk::createValidConstDataGraph(serializedGraph);
@@ -364,5 +380,33 @@ TEST(TestGpuHipblasltEnginePluginApi, CreateExecutionContextValid)
 
     EXPECT_EQ(hipdnnEnginePluginDestroyExecutionContextImpl(handle, executionContext),
               HIPDNN_PLUGIN_STATUS_SUCCESS);
+    EXPECT_EQ(hipdnnEnginePluginDestroyImpl(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+}
+
+TEST(TestGpuHipblasltEnginePluginApi, CreateExecutionContextReturnsInternalErrorForUnservedGraph)
+{
+    SKIP_IF_NO_DEVICES();
+    hipdnnEnginePluginHandle_t handle = nullptr;
+    ASSERT_EQ(hipdnnEnginePluginCreateImpl(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+
+    // No hipBLASLt plan builder serves batchnorm, so no context is created.
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    auto serializedGraph = builder.Release();
+    hipdnnPluginConstData_t const opGraph
+        = hipdnn_plugin_sdk::createValidConstDataGraph(serializedGraph);
+
+    auto engineConfigBuilder
+        = hipdnn_test_sdk::utilities::createValidEngineConfig(HIPBLASLT_ENGINE_ID);
+    auto serializedEngineConfig = engineConfigBuilder.Release();
+    hipdnnPluginConstData_t const engineConfig
+        = hipdnn_plugin_sdk::createValidConstDataEngineConfig(serializedEngineConfig);
+
+    hipdnnEnginePluginExecutionContext_t executionContext = nullptr;
+    auto status = hipdnnEnginePluginCreateExecutionContextImpl(
+        handle, &engineConfig, &opGraph, &executionContext);
+
+    EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+    EXPECT_EQ(executionContext, nullptr);
+
     EXPECT_EQ(hipdnnEnginePluginDestroyImpl(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }

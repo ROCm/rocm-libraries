@@ -34,9 +34,8 @@
 #include <cufftXt.h>
 #endif
 
-#ifndef _WIN32
-#include <cstddef>
-#endif
+#include <hip/library_types.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -184,7 +183,7 @@ typedef void (*hipfftJITCallbackStoreD)(
    * executed on that device.
    *
    * If specified, the `cbdata` array must remain valid until either
-   * the plan is destroyed or callbacks are cleared from the plan.
+   * the plan is initialized or callbacks are cleared from the plan.
    *
    * This function must be called after the plan is allocated using
    * ::hipfftCreate, but before the plan is initialized by any of the
