@@ -558,7 +558,7 @@ class KernelWriterAssembly(KernelWriter):
     """
     tcA, tcB = tPA["tensorChar"], tPB["tensorChar"]
     module = Module("Tail folding: shrink TDM K dim (%s/%s)" % (tcA, tcB))
-    fields = [tdmKDimField(kernel, tc) for tc in (tcA, tcB)]
+    fields = [tdmKDimField(kernel, tc, allowIterate=not kernel["ReuseAcrossPersistent"]) for tc in (tcA, tcB)]
     assert None not in fields and fields[0][0] == fields[1][0], \
       "%s/%s do not keep K in one field: %s" % (tcA, tcB, fields)
     if not kernel["ReuseAcrossPersistent"]:
@@ -606,7 +606,7 @@ class KernelWriterAssembly(KernelWriter):
     unrollDim = pt["IndicesSummation"][self.states.unrollIdx]
     unitBytes = set()
     for tc in ("A", "B"):
-      field = tdmKDimField(kernel, tc)
+      field = tdmKDimField(kernel, tc, allowIterate=True)
       if field is None or field[1] != kernel["DepthU"] or pt.get("SwizzleTensor%s" % tc) or unrollDim in pt["MirrorDims%s" % tc] \
          or not self.isConstUnitStride(self.strideRef(tc, unrollDim)):
         return None
@@ -8133,7 +8133,7 @@ class KernelWriterAssembly(KernelWriter):
     if tdmGroupName is None and tc in ("A", "B") and commentTag == "stagger" \
         and kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]:
       # the split starts StaggerUIter steps into its k-tiles: its K dim starts that much shorter
-      field = tdmKDimField(kernel, tc)
+      field = tdmKDimField(kernel, tc, allowIterate=True)
       if field is None:
         raise RuntimeError("tail folding: %s keeps K in no single descriptor field" % tc)
       lo, hi = sgpr("tdm%sGroup1+%u" % (tc, field[0])), sgpr("tdm%sGroup1+%u" % (tc, field[0] + 1))
@@ -25548,7 +25548,7 @@ class KernelWriterAssembly(KernelWriter):
       # k-tiles of the lower splits, contiguous, from the folded count ceil(K/DU)), so its K dim starts at
       # K - S * DU. The split owning the partial last k-tile reaches K dim = r there. K % DU == 0: unchanged
       # (the K dim then only stays >= what the split still reads).
-      field = tdmKDimField(kernel, tc)
+      field = tdmKDimField(kernel, tc, allowIterate=True)
       if field is None:
         raise RuntimeError("tail folding: %s keeps K in no single descriptor field" % tc)
       lo, hi = sgpr("%s+%u" % (descSgprName(1), field[0])), sgpr("%s+%u" % (descSgprName(1), field[0] + 1))

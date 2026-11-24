@@ -4456,8 +4456,8 @@ class Solution(collections.abc.Mapping):
         or isPersistent(state)                                     # DataParallel / StreamK tiles start mid-K
         or du & (du - 1) != 0
         or not tdmWaveSeparated(state) or tdmSeparateABDescriptors(state) or tdmPairOnEveryWave(state, "A", "B")
-        or not tdmKDimTrackable(state)                             # TDMIterateMode
-        or not tdmKDimStepsInElements(state)                       # packed sub-byte F4/F6
+        or not tdmKDimTrackable(state, allowIterate=True)          # TDMIterateMode walks dim1, K stays in dim0
+        or not tdmKDimStepsInElements(state, allowIterate=True)    # packed sub-byte F4/F6
         or state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"] or state["ProblemType"]["Sparse"]
         or state.get("TDMSplit", 0) or state["DirectToVgprA"] or state["DirectToVgprB"]
         or state.get("UseSubtileImpl", False)

@@ -9,6 +9,7 @@ no tail loop is emitted. Any other kernel keeps the develop tail loop. With GSU 
 distributed; each split's K dim starts at its own first k-tile (GSUC 0: interleaved, GSUC 1: contiguous).
 The K dim step is the wave's TDM address increment shifted into the field, so a kernel whose step cannot be
 derived that way (swizzled / mirrored K, non-unit K stride, A/B element sizes that differ, ...) keeps the tail loop.
+A TDM iterate-mode tensor folds too: its load walks whole rows (dim1) and keeps K in dim0. RAP still rejects it.
 """
 
 import re
@@ -487,6 +488,69 @@ def test_rap_keeps_its_k_dim_shrink(tmp_path):
         assert "RAP: K dim -=" in assembly and "TailFolding:" not in assembly
 
 
+# TDM iterate mode on A: each load walks MT rows of A in LdsBlockSizePerPadA / (DU * bpe) = 8 row steps along dim1.
+_ITER = [("TDMIterateMode", 1), ("VectorWidthA", 8), ("LdsBlockSizePerPadA", 2048)]
+_ITER_MI = dict(mi=(16, 16, 32, 1, 1, 8, 2, 2, 2), wg=(32, 4, 1))
+
+
+def _k_dim_fields(asm, what):
+    # the descriptor SGPRs written by the TailFolding K dim updates whose comment starts with `what`: ({low}, {high})
+    tag = r"\], .*// TailFolding: K dim " + re.escape(what)
+    lo = set(re.findall(r"^s_sub_u32 s\[(sgprtdm[AB]Group1\+\d)" + tag + r".*\(low half\)", asm, re.M))
+    hi = set(re.findall(r"^s_subb_u32 s\[(sgprtdm[AB]Group1\+\d)" + tag + r".*\(high half\)", asm, re.M))
+    return lo, hi
+
+
+_DIM0 = ({"sgprtdmAGroup1+1"}, {"sgprtdmAGroup1+2"})
+_DIM0_AB = ({"sgprtdmAGroup1+1", "sgprtdmBGroup1+1"}, {"sgprtdmAGroup1+2", "sgprtdmBGroup1+2"})
+
+
+@pytest.mark.parametrize("case", ["gsu", "stagger_gsu"])
+def test_fold_iterate_mode(tmp_path, case):
+    # An iterate-mode tensor keeps K in dim0 (group 1 dwords 1-2) like any unroll-major tensor: the per-step shrink,
+    # the GSU split start and the stagger start all update that field, and no tail loop is emitted.
+    extra = [("GlobalSplitU", -1), ("GlobalSplitUAlgorithm", "MultipleBuffer")] if case == "gsu" else \
+            [("ClusterDim", [1, 1]), ("GlobalSplitU", 3), ("GlobalSplitUAlgorithm", "MultipleBuffer")]
+    asm = _emit_one(tmp_path, _config(_ITER + extra, **_ITER_MI), "tf_iter_%s.yaml" % case)
+    assert re.search(r"^s_or_b32 s\[sgprtdmAGroup1\], s\[sgprtdmAGroup1\], 0x80000 +// set iterate_enable", asm, re.M)
+    assert asm.index(CEIL) < asm.index("tensor_load_to_lds") and "label_TailLoopBeginL" not in asm
+    shrink = "-= (GSUC" if case == "gsu" else "-= wrapIter"
+    assert _k_dim_fields(asm, shrink) == _DIM0
+    assert len(re.findall(r"// TailFolding: K dim %s.* \(low half\)" % re.escape(shrink), asm)) > 0
+    if case == "gsu":
+        assert len(re.findall(r"// TailFolding: K dim -= \S.* \(low half\)", asm)) == _steps(asm)
+    starts = ["= K - split start"] + (["-= stagger start"] if case == "stagger_gsu" else [])
+    for what in starts:
+        lo, hi = _k_dim_fields(asm, what)
+        assert lo and lo <= _DIM0_AB[0] and hi and hi <= _DIM0_AB[1], what
+    _check_borrow_pairs(asm)
+
+
+def test_rap_iterate_mode_k_tail_still_rejected(tmp_path, capsys):
+    # RAP keeps rejecting an iterate-mode tensor when it would fold a K remainder (F8xF4 forces ASEM 32 < DepthU).
+    import pathlib
+    from tensilelite.Components.TDMFuse import tdmKDimTrackable
+    src = pathlib.Path(__file__).resolve().parents[1] / "common" / "gemm" / "gfx12" / "rap_gfx1250.yaml"
+    config = yaml.safe_load(src.read_text())
+    problem = config["BenchmarkProblems"][0]
+    keep = ("MatrixInstruction", "ReuseAcrossPersistent", "PrefetchAcrossPersistent")
+    problem[1]["ForkParameters"] = [p for p in problem[1]["ForkParameters"] if next(iter(p)) not in keep] + [
+        {"MatrixInstruction": [[16, 16, 128, 1, 1, 8, 2, 2, 2]]}, {"ReuseAcrossPersistent": [1]}, {"PrefetchAcrossPersistent": [0]},
+        {"TDMIterateMode": [1]}, {"VectorWidthA": [8]}, {"LdsBlockSizePerPadA": [2048]}, {"LdsPadA": [16]}]
+    config["BenchmarkProblems"] = [problem]
+    config["GlobalParameters"]["PrintSolutionRejectionReason"] = True
+    assert _emit(tmp_path, config, "rap_iter.yaml") == []
+    assert "ReuseAcrossPersistent with AssertSummationElementMultiple % DepthU != 0 requires TDM descriptor sets that keep K " \
+           "in one field (TDMFuse = 0, K-contiguous A and B that step K alike or by bytes, no sparse, no TDM iterate mode)" \
+           in capsys.readouterr().out
+    # the descriptor-level answer RAP asks for is unchanged; only tail folding allows iterate mode
+    from tensilelite.Common.DataType import DataType
+    kernel = {"TDMFuse": 0, "NumWaves": 4, "DepthU": 256, "MatrixInstK": 128, "_TDMIterateModeA": True,
+              "ProblemType": {"DataTypeA": DataType("F8"), "DataTypeB": DataType("F8"), "TLUA": False, "TLUB": False, "Sparse": 0,
+                              "MXBlockA": 0, "MXBlockB": 0}}
+    assert tdmKDimTrackable(kernel) is False and tdmKDimTrackable(kernel, allowIterate=True) is True
+
+
 def _next_free_sgpr(asm):
     return int(re.search(r"\.amdhsa_next_free_sgpr (\d+)", asm).group(1))
 
@@ -510,6 +574,8 @@ _SGPR_CASES = {
     "stagger_gsu": lambda: _config([("ClusterDim", [1, 1]), ("GlobalSplitU", 3), ("GlobalSplitUAlgorithm", "MultipleBuffer")]),
     "bias_sav_act": lambda: _store_kernarg_config(0, 0),
     "bias_sav_act_gl2_amaxd": lambda: _store_kernarg_config(1, 1),
+    "iterate": lambda: _config(_ITER, **_ITER_MI),
+    "iterate_stagger_gsu": lambda: _config(_ITER + [("ClusterDim", [1, 1]), ("GlobalSplitU", 3), ("GlobalSplitUAlgorithm", "MultipleBuffer")], **_ITER_MI),
 }
 
 
