@@ -9030,7 +9030,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZhpr2StridedBatched_64(hipblasHandle_t    
               specifies the increment for the elements of x.
     @param[in]
     beta      specifies the scalar beta.
-    @param[out]
+    @param[inout]
     y         pointer storing vector y on the GPU.
     @param[in]
     incy      [int]
@@ -9138,7 +9138,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDsbmv_64(hipblasHandle_t   handle,
               specifies the increment for the elements of each vector x_i.
     @param[in]
     beta      device pointer or host pointer to scalar beta.
-    @param[out]
+    @param[inout]
     y         device array of device pointers storing each vector y_i.
     @param[in]
     incy      [int]
@@ -9261,7 +9261,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDsbmvBatched_64(hipblasHandle_t     handle
                 This typically means stridex >= n * incx. stridex should be non zero.
     @param[in]
     beta      device pointer or host pointer to scalar beta.
-    @param[out]
+    @param[inout]
     y         device pointer to the first vector y_1 on the GPU.
     @param[in]
     incy      [int]
@@ -9384,7 +9384,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDsbmvStridedBatched_64(hipblasHandle_t   h
               specifies the increment for the elements of x.
     @param[in]
     beta      specifies the scalar beta.
-    @param[out]
+    @param[inout]
     y         pointer storing vector y on the GPU.
     @param[in]
     incy      [int]
@@ -9477,7 +9477,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDspmv_64(hipblasHandle_t   handle,
               specifies the increment for the elements of each vector x_i.
     @param[in]
     beta      device pointer or host pointer to scalar beta.
-    @param[out]
+    @param[inout]
     y         device array of device pointers storing each vector y_i.
     @param[in]
     incy      [int]
@@ -9586,7 +9586,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDspmvBatched_64(hipblasHandle_t     handle
                 This typically means stridex >= n * incx. stridex should be non zero.
     @param[in]
     beta      device pointer or host pointer to scalar beta.
-    @param[out]
+    @param[inout]
     y         Device pointer to the first vector y_1 on the GPU.
     @param[in]
     incy      [int]
@@ -10494,7 +10494,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDspr2StridedBatched_64(hipblasHandle_t   h
               specifies the increment for the elements of x.
     @param[in]
     beta      specifies the scalar beta.
-    @param[out]
+    @param[inout]
     y         pointer storing vector y on the GPU.
     @param[in]
     incy      [int]
@@ -10643,7 +10643,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZsymv_64(hipblasHandle_t         handle,
               specifies the increment for the elements of each vector x_i.
     @param[in]
     beta      device pointer or host pointer to scalar beta.
-    @param[out]
+    @param[inout]
     y         device array of device pointers storing each vector y_i.
     @param[in]
     incy      [int]
@@ -10812,7 +10812,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZsymvBatched_64(hipblasHandle_t           
                 This typically means stridex >= n * incx. stridex should be non zero.
     @param[in]
     beta      device pointer or host pointer to scalar beta.
-    @param[out]
+    @param[inout]
     y         Device pointer to the first vector y_1 on the GPU.
     @param[in]
     incy      [int]
