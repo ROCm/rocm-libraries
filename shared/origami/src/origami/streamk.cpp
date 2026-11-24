@@ -288,7 +288,8 @@ size_t grid_data_parallel(const problem_t& problem, const config_t& config) {
 // Launch grid of least modeled latency.  The candidates are the grids a Stream-K kernel is
 // launched with: one workgroup per tile (data parallel); the K of every tile split evenly over
 // 2 to biggest_allowable_split workgroups, while they fit the CUs; and one workgroup per CU up
-// to the kernel's occupancy per CU, which share the tiles.  A grid whose partial tiles do not
+// to the kernel's occupancy per CU (its resident slots when they are fewer than the CUs), which
+// share the tiles.  A grid whose partial tiles do not
 // fit in the workspace is left out.  Each candidate is modeled with config_t::launch_grid, which
 // does not select a grid again.  Ties go to the first candidate, data parallel first.
 size_t grid_analytical(const problem_t& problem,
@@ -310,9 +311,12 @@ size_t grid_analytical(const problem_t& problem,
   for (size_t split = 2; split <= biggest_allowable_split && tiles * split <= cu_count; ++split)
     add(tiles * split);
   // CUOccupancy counts the workgroups on hardware_t::OCCUPANCY_SIMDS SIMDs; a CU has simds_per_cu.
-  const size_t per_cu = std::max<size_t>(
-      static_cast<size_t>(std::max(config.occupancy, 1)) * hardware.simds_per_cu() / hardware_t::OCCUPANCY_SIMDS, 1);
-  for (size_t wgs = 1; wgs <= per_cu; ++wgs) add(cu_count * wgs);
+  // A kernel that takes more than a CU (a 16-wave workgroup per WGP) has fewer slots than CUs:
+  // a grid beyond its slots would not be resident at once.
+  const size_t slots = cu_count * static_cast<size_t>(std::max(config.occupancy, 1)) * hardware.simds_per_cu() /
+                       hardware_t::OCCUPANCY_SIMDS;
+  if (slots < cu_count) add(slots);
+  for (size_t wgs = 1; wgs * cu_count <= slots; ++wgs) add(cu_count * wgs);
 
   size_t best_grid    = tiles;
   double best_latency = std::numeric_limits<double>::infinity();
