@@ -114,4 +114,6 @@ TEST(ReductionModeTest, OutputModeMissingFromInputReturnsInvalidValue)
 {
     std::vector<float> d;
     EXPECT_EQ(reduceWithOutputMode('x', d), HIPTENSOR_STATUS_INVALID_VALUE);
+    // The modes are checked before C is copied, so a failed call leaves D untouched.
+    EXPECT_EQ(d, std::vector<float>(4, -1.0f));
 }
