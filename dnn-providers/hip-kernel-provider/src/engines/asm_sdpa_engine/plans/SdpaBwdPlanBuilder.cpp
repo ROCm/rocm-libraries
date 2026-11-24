@@ -714,8 +714,8 @@ bool isBatchShapeSupported(const std::string& archId, int64_t headDimQk, int64_t
         // and hdim_v == 128)`. gfx950 also ships hd64 and hd192 x hd192 batch rows,
         // whose DQDKDV kernels are the gfx942 ones rebuilt (`_recompile`), and
         // fmha_v3_bwd() would run them, but the engine declines them on purpose:
-        // they run slower than hipkernel:flydsl_sdpa_bwd_split, which serves these
-        // graphs, and their fp16 DQDKDV kernels round toward zero
+        // they run slower than hipkernel:flydsl_sdpa_bwd_split, which also serves
+        // these graphs, and their fp16 DQDKDV kernels round toward zero
         // (asm/asm_kernels/README.md).
         return (headDimQk > 64 && headDimQk <= 128 && headDimQk == headDimV)
                || (headDimQk == 192 && headDimV == 128);

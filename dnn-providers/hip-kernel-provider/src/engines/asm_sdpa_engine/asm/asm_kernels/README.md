@@ -85,12 +85,14 @@ Not every row is dispatched:
     (`v_cvt_pkrtz_f16_f32`); the gfx950 fp16 kernels the engine dispatches
     round to nearest even (`v_cvt_pk_f16_f32`).
 
-  `hipkernel:flydsl_sdpa_bwd_split` serves these graphs. Under the default
-  static engine order it ranks above `hipkernel:flydsl_sdpa_bwd_merged`, which
-  was slower than both, only because its engine ID is lower. The hd192
-  dq_convert and dq_shuffle rows are used: D_qk = 192 with D_v = 128 keys the
-  post stage on hdim_q 192. The hd192 odo rows are not used, because odo keys
-  on padded hdim_v (128).
+  The FlyDSL backward engines serve these graphs instead. Under heuristic
+  mode A or B (the frontend's default is A) their engine-level models rank
+  them. Under the static order alone (FALLBACK mode, or when neither engine
+  has a prediction), `hipkernel:flydsl_sdpa_bwd_split` ranks above
+  `hipkernel:flydsl_sdpa_bwd_merged`, which was slower than both, only
+  because its engine ID is lower. The hd192 dq_convert and dq_shuffle rows
+  are used: D_qk = 192 with D_v = 128 keys the post stage on hdim_q 192. The
+  hd192 odo rows are not used, because odo keys on padded hdim_v (128).
 
 ## Data-type contract
 
