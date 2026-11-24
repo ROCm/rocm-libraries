@@ -2413,7 +2413,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dznrm2_strided_batched_64(rocblas_handle h
     @param[out]
     result
               device pointer or host pointer to store the amax index.
-              Return value is 0.0 if n, incx<=0.
+              Return value is 0 if n, incx<=0.
 
     ********************************************************************/
 ROCBLAS_EXPORT rocblas_status rocblas_isamax(
@@ -2644,7 +2644,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_izamax_strided_batched_64(rocblas_handle h
     @param[out]
     result
               device pointer or host pointer to store the amin index.
-              Return value is 0.0 if n, incx<=0.
+              Return value is 0 if n, incx<=0.
 
     ********************************************************************/
 ROCBLAS_EXPORT rocblas_status rocblas_isamin(
