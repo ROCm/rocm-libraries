@@ -1020,10 +1020,16 @@ struct buffer_view<address_space_enum::global,
         amd_tdm_load<Coherence>(TDMDescriptor);
     }
 
-    template <typename TDMConfig_, typename DimTuple_, typename BoxDim_, index_t num_tensor_dims>
+    // OffsetType is the tensor view's: long_index_t for a LargeTensor view, whose offsets pass
+    // 2^31 elements, and index_t otherwise.
+    template <typename TDMConfig_,
+              typename DimTuple_,
+              typename BoxDim_,
+              index_t num_tensor_dims,
+              typename OffsetType = index_t>
     CK_TILE_DEVICE void tdm_store(const TDMConfig_& tdm_config,
                                   CK_TILE_LDS_ADDR remove_cvref_t<T>* smem,
-                                  index_t linear_offset,
+                                  OffsetType linear_offset,
                                   const DimTuple_& tensor_dims,
                                   const DimTuple_& global_strides,
                                   number<num_tensor_dims> = {})

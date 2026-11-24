@@ -578,10 +578,10 @@ struct tensor_view
                        DimTuple_& global_strides,
                        number<num_tensor_dims> = {})
     {
-        return buf_.template tdm_store<TDMConfig_, DimTuple_, BoxDim_, num_tensor_dims>(
+        return buf_.template tdm_store<TDMConfig_, DimTuple_, BoxDim_, num_tensor_dims, OffsetType>(
             tdm_config,
             smem,
-            coord.get_offset() / PackedSize,
+            static_cast<OffsetType>(coord.get_offset() / PackedSize),
             tensor_dims,
             global_strides,
             number<num_tensor_dims>{});

@@ -149,6 +149,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     static constexpr bool kPadK             = Problem::kPadK;
     static constexpr bool Preshuffle        = false;
     static constexpr bool LargeTensors      = Problem::LargeTensors;
+    static constexpr bool LargeTensorE      = Traits::kWideD;
     static constexpr index_t ScaleBlockSize = Problem::ScaleBlockSize;
     static constexpr index_t MXdlPackEff    = 1;
     static constexpr index_t NXdlPackEff    = 1;
