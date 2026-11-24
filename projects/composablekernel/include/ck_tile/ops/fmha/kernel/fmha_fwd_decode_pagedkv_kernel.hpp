@@ -230,9 +230,6 @@ struct FmhaFwdDecodePagedKVKernel
     static constexpr bool kHasGroups    = Traits::kHasGroups;
     // workgroups along x that form one cluster (make_cluster_kernel)
     static constexpr index_t kClusterSize = kNumSplits;
-    // a kv head with more than kM0 query heads takes one workgroup row of the grid per kM0 of
-    // them (a query block); each row reads the kv head's K and V on its own
-    static constexpr bool kHasQBlocks = Traits::kHasQBlocks;
 
     // clang-format off
     template <typename T> struct t2s;
@@ -247,8 +244,7 @@ struct FmhaFwdDecodePagedKVKernel
         return std::string("fmha_fwd_decode_pagedkv_d") + std::to_string(kHeadDim) + "_" +
                t2s<QDataType>::name + "_" + t2s<KDataType>::name + "kv_ps" +
                std::to_string(kPageBlockSize) + "_" + FmhaPipeline::name + "_s" +
-               std::to_string(kNumSplits) + (kHasGroups ? "_groups" : "_ngroups") +
-               (kHasQBlocks ? "_qblk" : "_nqblk");
+               std::to_string(kNumSplits) + (kHasGroups ? "_groups" : "_ngroups");
     }
 
     struct Kargs
@@ -277,9 +273,10 @@ struct FmhaFwdDecodePagedKVKernel
         uint16_t* gws_o_ptr; // per group, as ws_o_ptr with one split
         float* gws_ml_ptr;
         int32_t* counters_ptr; // per (batch, kv head, query block, row block)
-        // read with kHasQBlocks only: query blocks per kv head and ceil(2^32 / q_blocks)
+        // query blocks per kv head and ceil(2^32 / q_blocks): a kv head takes one workgroup row
+        // of the grid per kM0 of its query heads, and each row reads its K and V on its own
         index_t q_blocks;
-        uint32_t q_blocks_rcp;
+        uint64_t q_blocks_rcp;
     };
 
     // q_ptr, o_ptr: [batch][nhead_q][hdim]; k_ptr, v_ptr: the caches (see the pipeline);
@@ -289,9 +286,9 @@ struct FmhaFwdDecodePagedKVKernel
     // workspace_ptr: fmha_fwd_decode_pagedkv_workspace_bytes, needs no initialization.
     // counters_ptr: fmha_fwd_decode_pagedkv_num_counters int32; zero them once, every launch
     // leaves them zero, so launches of any shape can share them unless they run concurrently.
-    // The kernel checks none of this: nhead_q / nhead_k must be a whole number, above kM0 with
-    // kHasQBlocks only; the workspace and the counters are sized for nhead_k times the query
-    // blocks per kv head (fmha_fwd_decode_pagedkv_q_blocks).
+    // The kernel checks none of this: nhead_q / nhead_k must be a whole number; the workspace and
+    // the counters are sized for nhead_k times the query blocks per kv head
+    // (fmha_fwd_decode_pagedkv_q_blocks).
     CK_TILE_HOST static Kargs MakeKargs(const void* q_ptr,
                                         const void* k_ptr,
                                         const void* v_ptr,
@@ -310,7 +307,7 @@ struct FmhaFwdDecodePagedKVKernel
                                         index_t num_groups,
                                         float scale_s)
     {
-        const index_t q_blocks = kHasQBlocks ? (nhead_q / nhead_k + kM0 - 1) / kM0 : 1;
+        const index_t q_blocks = fmha_fwd_decode_pagedkv_q_blocks(nhead_q, nhead_k);
         const size_t heads     = static_cast<size_t>(batch) * nhead_k * q_blocks;
         const size_t rows      = heads * num_groups * kNumSplits * kM0;
         const size_t grows     = heads * num_groups * kM0;
@@ -339,10 +336,10 @@ struct FmhaFwdDecodePagedKVKernel
                 gws == nullptr ? nullptr : reinterpret_cast<float*>(gws + grows * kHeadDim * 2),
                 counters_ptr,
                 q_blocks,
-                static_cast<uint32_t>(((uint64_t{1} << 32) + q_blocks - 1) / q_blocks)};
+                ((uint64_t{1} << 32) + q_blocks - 1) / q_blocks};
     }
 
-    // q_blocks: query blocks per kv head (fmha_fwd_decode_pagedkv_q_blocks), 1 without kHasQBlocks
+    // q_blocks: query blocks per kv head (fmha_fwd_decode_pagedkv_q_blocks)
     CK_TILE_HOST static constexpr dim3
     GridSize(index_t batch, index_t nhead_k, index_t num_groups = 1, index_t q_blocks = 1)
     {
@@ -377,13 +374,10 @@ struct FmhaFwdDecodePagedKVKernel
         const index_t b  = blockIdx.z;
         const index_t sg = gi * kNumSplits + s; // split index within the (batch, kv head)
         // kv head g; of its query heads this workgroup takes gqa, from q0 on
-        index_t g = blockIdx.y, q0 = 0, gqa = a.nhead_ratio_qk;
-        if constexpr(kHasQBlocks)
-        {
-            g   = __umulhi(blockIdx.y, a.q_blocks_rcp);
-            q0  = (blockIdx.y - g * a.q_blocks) * kM0;
-            gqa = min(kM0, a.nhead_ratio_qk - q0);
-        }
+        const index_t g =
+            static_cast<index_t>((static_cast<uint64_t>(blockIdx.y) * a.q_blocks_rcp) >> 32);
+        const index_t q0  = (blockIdx.y - g * a.q_blocks) * kM0;
+        const index_t gqa = min(kM0, a.nhead_ratio_qk - q0);
 
         const index_t ctx   = a.seqlen_k_ptr[b];
         const index_t lo    = a.window_size > 0 ? max(0, ctx - a.window_size) : 0;
@@ -446,8 +440,7 @@ struct FmhaFwdDecodePagedKVKernel
             // partials: O / l in bf16 and (m, l)
             // workgroup row of the grid, over all sequences
             const long_index_t head =
-                kHasQBlocks ? static_cast<long_index_t>(b) * (a.nhead_k * a.q_blocks) + blockIdx.y
-                            : static_cast<long_index_t>(b) * a.nhead_k + g;
+                static_cast<long_index_t>(b) * (a.nhead_k * a.q_blocks) + blockIdx.y;
             const long_index_t part0 =
                 ((head * (kHasGroups ? a.num_groups : 1) + gi) * kNumSplits) * kM0;
             FmhaPipeline::StoreRows(res,

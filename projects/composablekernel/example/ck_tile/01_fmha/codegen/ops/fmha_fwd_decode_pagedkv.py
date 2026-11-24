@@ -38,8 +38,7 @@ using fmha_trait_{F_idx} = ck_tile::TileFmhaFwdDecodePagedKVTraits<{F_wave_split
                                                          {F_num_splits},
                                                          {F_groups},
                                                          {F_page_size},
-                                                         {F_occupancy},
-                                                         {F_qblocks}>;
+                                                         {F_occupancy}>;
 
 using fmha_pipeline_problem_{F_idx} = ck_tile::BlockFmhaFwdDecodePagedKVPipelineProblem<
     typename FmhaFwdDecodeTypeConfig<fmha_dtype_{F_idx}>::QDataType,
@@ -54,7 +53,7 @@ using fmha_pipeline_{F_idx} = ck_tile::BlockFmhaFwdDecodePagedKVPipelineTdm<
 
 using fmha_kernel_{F_idx} = ck_tile::FmhaFwdDecodePagedKVKernel<fmha_pipeline_{F_idx}>;
 
-using trait_{F_idx} = fmha_fwd_decode_pagedkv_traits_<{F_hdim}, {F_dtype}, {F_page_size}, {F_wave_split}, {F_num_splits}, {F_groups}, {F_qblocks}>;
+using trait_{F_idx} = fmha_fwd_decode_pagedkv_traits_<{F_hdim}, {F_dtype}, {F_page_size}, {F_wave_split}, {F_num_splits}, {F_groups}>;
 
 template<>
 float fmha_fwd_decode_pagedkv_<trait_{F_idx}, {F_arch.tag}>(const ck_tile::stream_config& s, fmha_fwd_decode_pagedkv_args a)
@@ -96,8 +95,8 @@ FMHA_FWD_DECODE_PAGEDKV_API_PER_DTYPE = """{F_if}(t.data_type.compare(\"{F_dtype
 }}
 """
 
-# one case per (hdim, page size, layout, groups, query blocks): the split count picks the instance
-FMHA_FWD_DECODE_PAGEDKV_API_PER_SHAPE = """{F_if}((t.hdim_q == {F_hdim}) && (t.page_block_size == {F_page_size}) && (t.wave_split == {F_wave_split}) && ((a.num_groups > 1) == {F_groups}) && ((a.nhead_q > 16 * a.nhead_k) == {F_qblocks})) {{
+# one case per (hdim, page size, layout, groups): the split count picks the instance
+FMHA_FWD_DECODE_PAGEDKV_API_PER_SHAPE = """{F_if}((t.hdim_q == {F_hdim}) && (t.page_block_size == {F_page_size}) && (t.wave_split == {F_wave_split}) && ((a.num_groups > 1) == {F_groups})) {{
     switch(t.num_splits) {{
 {F_inner_dispatch}
     default: break;
@@ -106,7 +105,7 @@ FMHA_FWD_DECODE_PAGEDKV_API_PER_SHAPE = """{F_if}((t.hdim_q == {F_hdim}) && (t.p
 """
 
 FMHA_FWD_DECODE_PAGEDKV_API_INNER_DISPATCH = """case {F_num_splits}: {{
-    using trait_ = fmha_fwd_decode_pagedkv_traits_<{F_hdim}, {F_dtype}, {F_page_size}, {F_wave_split}, {F_num_splits}, {F_groups}, {F_qblocks}>;
+    using trait_ = fmha_fwd_decode_pagedkv_traits_<{F_hdim}, {F_dtype}, {F_page_size}, {F_wave_split}, {F_num_splits}, {F_groups}>;
     return fmha_fwd_decode_pagedkv_<trait_, {F_arch.tag}>(s, a);
 }}
 """
@@ -116,7 +115,6 @@ FMHA_FWD_DECODE_PAGEDKV_API_INNER_DISPATCH = """case {F_num_splits}: {{
 class FmhaFwdDecodePagedKVPipeline:
     F_wave_split: str  # t: each wave runs its own pages, f: the waves share a step
     F_groups: str  # t: several clusters per (batch, kv head)
-    F_qblocks: str  # t: more than 16 query heads per kv head, in several workgroup rows
     F_page_size: int  # tokens per cache page
 
     @property
@@ -145,7 +143,6 @@ class FmhaFwdDecodePagedKVKernel:
             F_wave_split=BOOL_MAP[self.F_pipeline.F_wave_split],
             F_num_splits=self.F_num_splits,
             F_groups=BOOL_MAP[self.F_pipeline.F_groups],
-            F_qblocks=BOOL_MAP[self.F_pipeline.F_qblocks],
             F_page_size=self.F_pipeline.F_page_size,
             F_occupancy=-1,
         )
@@ -157,7 +154,6 @@ class FmhaFwdDecodePagedKVKernel:
             f"fmha_fwd_decode_pagedkv_d{self.F_hdim}_{self.F_dtype}_fp8kv_{self.F_pipeline.name}"
             + f"_s{self.F_num_splits}"
             + ("_groups" if self.F_pipeline.F_groups == "t" else "_ngroups")
-            + ("_qblk" if self.F_pipeline.F_qblocks == "t" else "_nqblk")
         )
 
     @property
@@ -166,7 +162,6 @@ class FmhaFwdDecodePagedKVKernel:
         return (
             f"fmha_fwd_decode_pagedkv_d{self.F_hdim}_{self.F_dtype}_fp8kv_{self.F_pipeline.name}"
             + ("_groups" if self.F_pipeline.F_groups == "t" else "_ngroups")
-            + ("_qblk" if self.F_pipeline.F_qblocks == "t" else "_nqblk")
             + f"{self.F_arch.filename_suffix}.cpp"
         )
 
@@ -206,7 +201,6 @@ class FmhaFwdDecodePagedKVApiPool:
                             F_wave_split=BOOL_MAP[pipeline.F_wave_split],
                             F_num_splits=k.F_num_splits,
                             F_groups=BOOL_MAP[pipeline.F_groups],
-                            F_qblocks=BOOL_MAP[pipeline.F_qblocks],
                             F_arch=arch,
                         )
                     per_shape += FMHA_FWD_DECODE_PAGEDKV_API_PER_SHAPE.format(
@@ -215,7 +209,6 @@ class FmhaFwdDecodePagedKVApiPool:
                         F_page_size=pipeline.F_page_size,
                         F_wave_split=BOOL_MAP[pipeline.F_wave_split],
                         F_groups=BOOL_MAP[pipeline.F_groups],
-                        F_qblocks=BOOL_MAP[pipeline.F_qblocks],
                         F_inner_dispatch=indent(inners),
                     )
                 per_dtype += FMHA_FWD_DECODE_PAGEDKV_API_PER_DTYPE.format(
@@ -243,11 +236,11 @@ class KernelComponentFactoryGfx125:
     @staticmethod
     def get_pipelines(dtype: str, hdim: int) -> List[FmhaFwdDecodePagedKVPipeline]:
         pipelines = []
-        for page_size, wave_split, groups, qblocks in itertools.product(
-            [16, 64, 128], ["f", "t"], ["f", "t"], ["f", "t"]
+        for page_size, wave_split, groups in itertools.product(
+            [16, 64, 128], ["f", "t"], ["f", "t"]
         ):
             pipelines.append(
-                FmhaFwdDecodePagedKVPipeline(wave_split, groups, qblocks, page_size)
+                FmhaFwdDecodePagedKVPipeline(wave_split, groups, page_size)
             )
         return pipelines
 

@@ -119,9 +119,7 @@ auto fmha_fwd_decode_pagedkv_create_kargs_and_grids(fmha_fwd_decode_pagedkv_args
                                        args.scale_s);
     // a kv head with more than 16 query heads takes several workgroup rows
     const ck_tile::index_t q_blocks =
-        FmhaKernel::kHasQBlocks
-            ? ck_tile::fmha_fwd_decode_pagedkv_q_blocks(args.nhead_q, args.nhead_k)
-            : 1;
+        ck_tile::fmha_fwd_decode_pagedkv_q_blocks(args.nhead_q, args.nhead_k);
     dim3 grids = FmhaKernel::GridSize(args.batch, args.nhead_k, args.num_groups, q_blocks);
     return ck_tile::make_tuple(kargs, grids);
 }
@@ -132,8 +130,7 @@ template <ck_tile::index_t HDim_,
           ck_tile::index_t kPageBlockSize_,
           bool kWaveSplit_,
           ck_tile::index_t kNumSplits_,
-          bool kHasGroups_,
-          bool kHasQBlocks_>
+          bool kHasGroups_>
 struct fmha_fwd_decode_pagedkv_traits_
 {
     static constexpr ck_tile::index_t HDim           = HDim_;
@@ -142,7 +139,6 @@ struct fmha_fwd_decode_pagedkv_traits_
     static constexpr bool kWaveSplit                 = kWaveSplit_;
     static constexpr ck_tile::index_t kNumSplits     = kNumSplits_;
     static constexpr bool kHasGroups                 = kHasGroups_;
-    static constexpr bool kHasQBlocks                = kHasQBlocks_;
 };
 
 template <typename Traits_, typename Arch_ = void>

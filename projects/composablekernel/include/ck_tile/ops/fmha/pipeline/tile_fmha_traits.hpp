@@ -245,14 +245,12 @@ template <bool kWaveSplit_ /* each wave runs its own pages instead of sharing a 
           bool kHasGroups_ /* several clusters per (batch, kv head) */,
           index_t kPageBlockSize_ /* tokens per cache page */,
           index_t kBlockPerCu_ = -1 /* overwrite occupancy if not -1 */,
-          bool kHasQBlocks_    = false /* the query heads of a kv head take several workgroups */,
           BlockAttentionKVCacheMemoryLayoutEnum kKVMemoryLayout_ =
               BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT,
           BlockAttentionKVCacheLookupTableEnum kKVLookupTable_ =
               BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D>
 struct TileFmhaFwdDecodePagedKVTraits
 {
-    static constexpr bool kHasQBlocks       = kHasQBlocks_;
     static constexpr bool kWaveSplit        = kWaveSplit_;
     static constexpr index_t kNumSplits     = kNumSplits_;
     static constexpr bool kHasGroups        = kHasGroups_;
