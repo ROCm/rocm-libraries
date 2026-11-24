@@ -28,6 +28,7 @@ from config_harness import (
     benchmark_problem_fingerprints,
     emit_kernels_from_config,
     golden_digest,
+    sgpr_hazards,
 )
 from tensilelite.Common.Architectures import gfxToIsa
 from rocisa_test_state import preserve_rocisa_kernel_state
@@ -266,6 +267,20 @@ def test_problem_fingerprint_selection_rejects_missing_group():
 
     with pytest.raises(ValueError, match=rf"does not exist.*{available}"):
         _select_benchmark_problem(entries, "config.yaml", 0, "not-present")
+
+
+@pytest.mark.parametrize(
+    "src,expected",
+    [
+        ("v_readfirstlane_b32 s0, v0\nlabel_A:\nv_mov_b32 v1, s0\n", 1),
+        ("v_readlane_b32 s4, v0, 0\ns_add_u32 s4, s4, 1\nlabel_skip:  /// tail\nv_mov_b32 v1, s4\n", 1),
+        ("v_readfirstlane_b32 s0, v0\ns_cbranch_scc1 label_T\ns_nop 4\nlabel_T:\nv_mov_b32 v1, s0\n", 1),
+        ("v_readfirstlane_b32 s0, v0\ns_branch label_T\nv_mov_b32 v1, s0\nlabel_T:\ns_nop 0\nv_mov_b32 v1, s0\n", 0),
+    ],
+    ids=["fall-through-label", "commented-label", "branch-target", "after-s_branch"],
+)
+def test_sgpr_hazards_follow_control_flow(src, expected):
+    assert len(sgpr_hazards(src)) == expected
 
 
 def test_emit_golden_digest(snapshot):

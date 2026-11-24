@@ -390,7 +390,7 @@ def assert_cluster_barrier_balanced(src, base):
 
 
 _SET_RE = re.compile(r"^\.set (\w+), (\d+)\s*$")
-_ANY_LABEL_RE = re.compile(r"^[\w.]+:\s*$")
+_ANY_LABEL_RE = re.compile(r"^([\w.]+):$")
 _INST_RE = re.compile(r"^([a-z][a-z0-9_]*)\b(.*)$")
 _VMEM_PREFIXES = ("buffer_", "global_", "flat_", "scratch_")
 
@@ -418,37 +418,51 @@ def _sgprs(operand, sets):
 
 def sgpr_hazards(src):
     """(line, writer, line, reader, wait states) for each read of an SGPR written by a
-    v_readfirstlane or v_readlane with fewer wait states than gfx950 requires; labels end the window."""
-    sets, insts = {}, []
+    v_readfirstlane or v_readlane with fewer wait states than gfx950 requires, along the fall-through
+    path and into s_branch / s_cbranch targets."""
+    sets, insts, labels = {}, [], {}
     for lineno, line in enumerate(src.splitlines(), 1):
         line = line.strip()
-        m = _SET_RE.match(line)
+        code = line.split("//")[0].strip()
+        m = _SET_RE.match(code)
         if m:
             sets[m.group(1)] = int(m.group(2))
-        elif _ANY_LABEL_RE.match(line):
-            insts.append(None)
-        elif m := _INST_RE.match(line):
-            ops = [o.strip().split()[0] for o in m.group(2).split("//")[0].split(",") if o.strip()]
+        elif m := _ANY_LABEL_RE.match(code):
+            labels[m.group(1)] = len(insts)
+        elif m := _INST_RE.match(code):
+            ops = [o.strip().split()[0] for o in m.group(2).split(",") if o.strip()]
             insts.append((lineno, m.group(1), [_sgprs(o, sets) for o in ops], ops, line))
-    hits = []
+    hits = set()
     for n, inst in enumerate(insts):
-        if inst is None or inst[1] not in ("v_readfirstlane_b32", "v_readlane_b32") or not inst[2][0]:
+        if inst[1] not in ("v_readfirstlane_b32", "v_readlane_b32") or not inst[2][0]:
             continue
-        waits = 0
-        for e in insts[n + 1:]:
-            if e is None or waits >= 5:
-                break
-            lineno, mn, regs, ops, line = e
-            if mn.startswith(_VMEM_PREFIXES):
-                needs = [5] * len(regs)
-            elif mn in ("v_readlane_b32", "v_writelane_b32"):
-                needs = [0, 2, 4]
-            else:
-                needs = [0] + [2 if mn.startswith("v_") else 0] * (len(regs) - 1)
-            if any(r & inst[2][0] and waits < need for r, need in zip(regs, needs)):
-                hits.append((inst[0], inst[4], lineno, line, waits))
-            waits += int(ops[0], 0) + 1 if mn == "s_nop" else 1
-    return hits
+        paths, seen = [(n + 1, 0)], set()
+        while paths:
+            i, waits = paths.pop()
+            while i < len(insts) and waits < 5 and (i, waits) not in seen:
+                seen.add((i, waits))
+                lineno, mn, regs, ops, line = insts[i]
+                if mn.startswith(_VMEM_PREFIXES):
+                    needs = [5] * len(regs)
+                elif mn in ("v_readlane_b32", "v_writelane_b32"):
+                    needs = [0, 2, 4]
+                else:
+                    needs = [0] + [2 if mn.startswith("v_") else 0] * (len(regs) - 1)
+                if any(r & inst[2][0] and waits < need for r, need in zip(regs, needs)):
+                    hits.add((inst[0], inst[4], lineno, line, waits))
+                waits += int(ops[0], 0) + 1 if mn == "s_nop" else 1
+                target = labels.get(ops[0]) if ops else None
+                if mn.startswith("s_cbranch") and target is not None:
+                    paths.append((target, waits))
+                if mn == "s_branch":
+                    if target is None:
+                        break
+                    i = target
+                elif mn in ("s_endpgm", "s_setpc_b64"):
+                    break
+                else:
+                    i += 1
+    return sorted(hits)
 
 
 def assert_no_sgpr_hazards(src, base):
