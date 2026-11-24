@@ -13,6 +13,9 @@
           "3_fp32_noaxis_tensor_uid_noelu_alpha_operationtanh_fwd"
         ],
         "support": {
+          "gfx1151": [
+            "linux"
+          ],
           "gfx942": [
             "linux"
           ],

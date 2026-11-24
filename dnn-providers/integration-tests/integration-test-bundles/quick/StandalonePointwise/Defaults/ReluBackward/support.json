@@ -6,6 +6,9 @@
           "1_3_2_2_fp32_nchw"
         ],
         "support": {
+          "gfx1151": [
+            "linux"
+          ],
           "gfx942": [
             "linux"
           ],

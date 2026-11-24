@@ -116,6 +116,7 @@
         ],
         "support": {
           "gfx1151": [
+            "linux",
             "windows"
           ]
         }
@@ -148,6 +149,7 @@
         ],
         "support": {
           "gfx1151": [
+            "linux",
             "windows"
           ]
         }

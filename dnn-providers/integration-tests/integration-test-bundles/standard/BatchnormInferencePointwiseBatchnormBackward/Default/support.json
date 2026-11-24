@@ -117,6 +117,7 @@
         ],
         "support": {
           "gfx1151": [
+            "linux",
             "windows"
           ],
           "gfx942": [

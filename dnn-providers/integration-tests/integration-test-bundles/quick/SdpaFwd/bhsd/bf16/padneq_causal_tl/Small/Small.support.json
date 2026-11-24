@@ -15,6 +15,7 @@
     },
     "hipkernel:flydsl_sdpa_rdna": {
       "gfx1151": [
+        "linux",
         "windows"
       ],
       "gfx1201": [
@@ -23,6 +24,7 @@
     },
     "hipkernel:flydsl_sdpa_rdna_decode": {
       "gfx1151": [
+        "linux",
         "windows"
       ],
       "gfx1201": [
