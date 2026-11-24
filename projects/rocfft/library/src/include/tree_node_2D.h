@@ -32,8 +32,8 @@ class RTRT2DNode : public InternalNode
     friend class NodeFactory;
 
 protected:
-    explicit RTRT2DNode(TreeNode* p)
-        : InternalNode(p)
+    RTRT2DNode(TreeNode* p, NodeLayouts&& layouts)
+        : InternalNode(p, std::move(layouts))
     {
         scheme = CS_2D_RTRT;
     }
@@ -49,8 +49,8 @@ class RC2DNode : public InternalNode
     friend class NodeFactory;
 
 protected:
-    explicit RC2DNode(TreeNode* p)
-        : InternalNode(p)
+    RC2DNode(TreeNode* p, NodeLayouts&& layouts)
+        : InternalNode(p, std::move(layouts))
     {
         scheme = CS_2D_RC;
     }
@@ -66,8 +66,8 @@ class Single2DNode : public LeafNode
     friend class NodeFactory;
 
 protected:
-    Single2DNode(TreeNode* p, ComputeScheme s)
-        : LeafNode(p, s)
+    Single2DNode(TreeNode* p, ComputeScheme s, NodeLayouts&& layouts)
+        : LeafNode(p, s, std::move(layouts))
     {
         externalKernel = true;
         need_twd_table = true;
