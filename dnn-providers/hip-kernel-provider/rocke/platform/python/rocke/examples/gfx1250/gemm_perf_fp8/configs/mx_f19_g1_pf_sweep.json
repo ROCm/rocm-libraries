@@ -1,0 +1,149 @@
+{
+  "_comment": "mx_env_sweep.py config for f19-17 (MAF): the MX best (pk0, packed scales, wave-uniform prefetch 2) at L2 prefetch 2 / 3 / 4, and with the block read order (ROCKE_EXP_MX_RA_ILV=1 ILVG=1, g1*) at the same distances. Cluster 4x4. Time with --data mxgemm.",
+  "base_env": {
+    "ROCKE_EXP_MX": "1",
+    "ROCKE_EXP_MX_SWZ": "1",
+    "ROCKE_EXP_MX_SCALE_MC": "0",
+    "ROCKE_EXP_MX_KFENCE": "1",
+    "ROCKE_EXP_MX_SCALE_NOCLIP": "1",
+    "ROCKE_EXP_MC_SOLO0": "1"
+  },
+  "variants": [
+    {
+      "name": "pk0pf2",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "2",
+        "ROCKE_EXP_GL2_CLUSTER": "2",
+        "ROCKE_EXP_MX_RA_NB1": "0",
+        "ROCKE_EXP_EPI_BATCH": "64",
+        "ROCKE_EXP_MX_RA_PRO": "1",
+        "ROCKE_EXP_GL2_SCALES": "1",
+        "ROCKE_EXP_MX_SCALE_PACK": "1"
+      }
+    },
+    {
+      "name": "pk0pf3",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "3",
+        "ROCKE_EXP_GL2_CLUSTER": "2",
+        "ROCKE_EXP_MX_RA_NB1": "0",
+        "ROCKE_EXP_EPI_BATCH": "64",
+        "ROCKE_EXP_MX_RA_PRO": "1",
+        "ROCKE_EXP_GL2_SCALES": "1",
+        "ROCKE_EXP_MX_SCALE_PACK": "1"
+      }
+    },
+    {
+      "name": "pk0pf4",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_CLUSTER": "2",
+        "ROCKE_EXP_MX_RA_NB1": "0",
+        "ROCKE_EXP_EPI_BATCH": "64",
+        "ROCKE_EXP_MX_RA_PRO": "1",
+        "ROCKE_EXP_GL2_SCALES": "1",
+        "ROCKE_EXP_MX_SCALE_PACK": "1"
+      }
+    },
+    {
+      "name": "g1pf2",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "2",
+        "ROCKE_EXP_GL2_CLUSTER": "2",
+        "ROCKE_EXP_MX_RA_NB1": "0",
+        "ROCKE_EXP_EPI_BATCH": "64",
+        "ROCKE_EXP_MX_RA_PRO": "1",
+        "ROCKE_EXP_GL2_SCALES": "1",
+        "ROCKE_EXP_MX_SCALE_PACK": "1",
+        "ROCKE_EXP_MX_RA_ILV": "1",
+        "ROCKE_EXP_MX_RA_ILVG": "1"
+      }
+    },
+    {
+      "name": "g1pf3",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "3",
+        "ROCKE_EXP_GL2_CLUSTER": "2",
+        "ROCKE_EXP_MX_RA_NB1": "0",
+        "ROCKE_EXP_EPI_BATCH": "64",
+        "ROCKE_EXP_MX_RA_PRO": "1",
+        "ROCKE_EXP_GL2_SCALES": "1",
+        "ROCKE_EXP_MX_SCALE_PACK": "1",
+        "ROCKE_EXP_MX_RA_ILV": "1",
+        "ROCKE_EXP_MX_RA_ILVG": "1"
+      }
+    },
+    {
+      "name": "g1pf4",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "4",
+        "ROCKE_EXP_GL2_CLUSTER": "2",
+        "ROCKE_EXP_MX_RA_NB1": "0",
+        "ROCKE_EXP_EPI_BATCH": "64",
+        "ROCKE_EXP_MX_RA_PRO": "1",
+        "ROCKE_EXP_GL2_SCALES": "1",
+        "ROCKE_EXP_MX_SCALE_PACK": "1",
+        "ROCKE_EXP_MX_RA_ILV": "1",
+        "ROCKE_EXP_MX_RA_ILVG": "1"
+      }
+    }
+  ],
+  "arms": [
+    {
+      "name": "c4x4",
+      "cluster": "4,4"
+    }
+  ],
+  "shapes": [
+    [
+      3072,
+      4096,
+      65536
+    ]
+  ],
+  "rounds": 5,
+  "warmup": 50,
+  "repeat": 100
+}
