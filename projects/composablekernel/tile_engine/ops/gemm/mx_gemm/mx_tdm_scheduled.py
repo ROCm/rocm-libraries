@@ -9,7 +9,8 @@ the pipeline's shape rules (MxGemmPipelineAgBgCrCompTDMScheduled::GetUnsupported
 must agree.
 
 The tuning knobs (TUNING_DEFAULTS) are the policy's template parameters and the cluster, which
-tile_engine's ``tuning_config`` section and the dispatcher's config carry; the rest comes from the
+tile_engine's ``pipeline_tuning_config.comp_tdm_scheduled`` section and the dispatcher's config
+carry; the rest comes from the
 tile config and the data types.
 """
 
@@ -19,10 +20,13 @@ import itertools
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-ATOM_K = 128
+#: The warp tile K (WMMA K) the pipeline supports (the policy's kAtomK): one K step.
+WMMA_K = 128
 WAVE = 32
 WAVES = 4
 BLOCK_K = 32
+#: The K of a scale row: four E8M0 scales of BLOCK_K values each ([ceil(K / 128)][MN][4]).
+SCALE_PACK_K = 4 * BLOCK_K
 DATA_PAD_BYTES = 16
 BANK_CYCLE_BYTES = 256
 MXS_BLOCK_BYTES = 256
@@ -51,14 +55,22 @@ TUNING_DEFAULTS: Dict[str, object] = {
     "interleave_lds_regions": True,
 }
 
-#: Shape-dependent code paths of an instance (the Problem's MxTdmScheduledGemmTraits): an
-#: instance fixes them and runs every problem they cover. The defaults run any M and N with no
-#: K tail. Every instance runs any tile count (the pipeline's TailNumber picks the parity).
+#: Shape-dependent code paths of an instance (the Problem's MxTdmScheduledGemmTraits<EdgeM,
+#: EdgeN, WideA, WideB, WideD, TailSteps>): an instance fixes them and runs every problem they
+#: cover. The defaults (MxTdmScheduledGemmTraits<>) run whole M and N tiles, narrow offsets and
+#: no K tail; shape_tuning sets them from a problem. Every instance runs any tile count (the
+#: pipeline's TailNumber picks the parity).
 SHAPE_DEFAULTS: Dict[str, object] = {
-    "edge": True,
+    "edge_m": False,
+    "edge_n": False,
+    "wide_a": False,
+    "wide_b": False,
+    "wide_d": False,
     "tail_steps": 0,
-    "wide": False,
 }
+
+_EDGE_KEYS = ("edge_m", "edge_n")
+_WIDE_KEYS = ("wide_a", "wide_b", "wide_d")
 
 # The short reason codes, in validate()'s order (MxTdmScheduledReason).
 REASONS = (
@@ -201,6 +213,7 @@ class MxTdmScheduledSpec:
     split_b_lds_read: bool = True
     interleave_lds_regions: bool = True
     mma: str = "32x16"
+    warp_tile_k: int = WMMA_K
     a_dtype: str = "fp4"
     b_dtype: str = "fp4"
 
@@ -241,7 +254,7 @@ class MxTdmScheduledSpec:
 
     @property
     def step_bytes(self) -> int:
-        return ATOM_K // self.k_per_byte
+        return self.warp_tile_k // self.k_per_byte
 
     @property
     def chunks_per_lane(self) -> int:
@@ -257,7 +270,7 @@ class MxTdmScheduledSpec:
 
     @property
     def k_steps(self) -> int:
-        return self.tile_k // ATOM_K
+        return self.tile_k // self.warp_tile_k
 
     @property
     def tail_steps(self) -> int:
@@ -265,13 +278,17 @@ class MxTdmScheduledSpec:
         partial tile of every K step, which the loop runs as a whole tile (full_tiles).
         """
         tail = self.K % self.tile_k
-        return 0 if tail > self.tile_k - ATOM_K else _ceil_div(tail, ATOM_K)
+        if tail > self.tile_k - self.warp_tile_k:
+            return 0
+        return _ceil_div(tail, self.warp_tile_k)
 
     @property
     def full_tiles(self) -> int:
         """The K tiles the loop runs (the pipeline's GetFullTiles): the whole tiles, and a
         partial tile of every K step."""
-        return self.K // self.tile_k + (self.K % self.tile_k > self.tile_k - ATOM_K)
+        return self.K // self.tile_k + (
+            self.K % self.tile_k > self.tile_k - self.warp_tile_k
+        )
 
     @property
     def edge_m(self) -> bool:
@@ -344,7 +361,7 @@ class MxTdmScheduledSpec:
             return block
 
         def scale_pad(repeat: int) -> Pad:
-            per_block = (ATOM_K // 32) * repeat
+            per_block = (SCALE_PACK_K // BLOCK_K) * repeat
             if repeat < 4 or per_block % 16 or (per_block // 16) & 1:
                 return Pad()
             return Pad(MXS_PAD_BYTES, MXS_BLOCK_BYTES)
@@ -564,7 +581,7 @@ class MxTdmScheduledSpec:
             mn_span = max(
                 _round_up(self.M, self.tile_m), _round_up(self.N, self.tile_n)
             )
-            if mn_span * _ceil_div(self.K, ATOM_K) * 4 > I32_SPAN:
+            if mn_span * _ceil_div(self.K, SCALE_PACK_K) * 4 > I32_SPAN:
                 return "scale_span"
             if self.K < self.tile_k:
                 return "k_short"
@@ -649,10 +666,15 @@ def normalize_tuning(tuning: Optional[Dict]) -> Dict[str, object]:
     out["cluster_dim"] = tuple(out["cluster_dim"])
     if len(out["cluster_dim"]) == 2:
         out["cluster_dim"] = (*out["cluster_dim"], 1)
-    for key in ("prefetch_lds_read", "split_b_lds_read", "interleave_lds_regions"):
+    for key in (
+        "prefetch_lds_read",
+        "split_b_lds_read",
+        "interleave_lds_regions",
+        *_EDGE_KEYS,
+        *_WIDE_KEYS,
+    ):
         out[key] = bool(out[key])
-    out["edge"] = bool(out["edge"])
-    out["wide"] = bool(out["wide"])
+    out["tail_steps"] = int(out["tail_steps"])
     return out
 
 
@@ -680,7 +702,8 @@ def schedule_tunings() -> List[Dict[str, object]]:
 
 
 def expand_tuning_config(tuning_config: Optional[Dict]) -> List[Dict[str, object]]:
-    """The product of a ``tuning_config`` section ({"key": {"values": [...]}}), normalized."""
+    """The product of a ``pipeline_tuning_config.comp_tdm_scheduled`` section
+    ({"key": {"values": [...]}}), normalized."""
     tuning_config = tuning_config or {}
     keys = sorted(tuning_config)
     values = []
@@ -689,7 +712,8 @@ def expand_tuning_config(tuning_config: Optional[Dict]) -> List[Dict[str, object
         vals = entry.get("values") if isinstance(entry, dict) else entry
         if not isinstance(vals, list) or not vals:
             raise ValueError(
-                f"tuning_config.{key} must be {{'values': [...]}} with a value"
+                f"pipeline_tuning_config.comp_tdm_scheduled.{key} must be "
+                "{'values': [...]} with a value"
             )
         values.append(vals)
     return [
@@ -715,12 +739,10 @@ def spec_from_tile(
     t = normalize_tuning(tuning)
     if tile_config.get("warp_k", 1) != 1:
         raise ValueError("comp_tdm_scheduled needs warp_k 1")
-    if (
-        tile_config.get("warp_tile_n", 16) != 16
-        or tile_config.get("warp_tile_k", 128) != 128
-    ):
+    warp_tile_k = tile_config.get("warp_tile_k", WMMA_K)
+    if tile_config.get("warp_tile_n", 16) != 16 or warp_tile_k != WMMA_K:
         raise ValueError(
-            "comp_tdm_scheduled needs a warp tile of 32x16x128 or 16x16x128"
+            f"comp_tdm_scheduled needs a warp tile of 32x16x{WMMA_K} or 16x16x{WMMA_K}"
         )
     mma = {32: "32x16", 16: "16x16"}.get(tile_config.get("warp_tile_m"))
     if mma is None:
@@ -740,6 +762,7 @@ def spec_from_tile(
         split_b_lds_read=t["split_b_lds_read"],
         interleave_lds_regions=t["interleave_lds_regions"],
         mma=mma,
+        warp_tile_k=warp_tile_k,
         a_dtype=a_dtype,
         b_dtype=b_dtype or a_dtype,
     )
@@ -747,16 +770,36 @@ def spec_from_tile(
 
 def instance_name_suffix(spec: MxTdmScheduledSpec, tuning: Optional[Dict]) -> str:
     """What a comp_tdm_scheduled instance adds to the tile_engine kernel name: the tuning suffix without the
-    parts the name already carries, then the shape traits that are not the defaults."""
+    parts the name already carries, then the shape traits that are on: _edgem, _edgen or
+    _edgemn, _tail<n>, and _wide with the wide operands (_widea, _wideabd, ...)."""
     t = normalize_tuning(tuning)
     suffix = spec.tuning_name(with_shape_parts=False)
-    if not t["edge"]:
-        suffix += "_noedge"
+    edges = "".join(k[-1] for k in _EDGE_KEYS if t[k])
+    if edges:
+        suffix += f"_edge{edges}"
     if t["tail_steps"]:
         suffix += f"_tail{t['tail_steps']}"
-    if t["wide"]:
-        suffix += "_wide"
+    wides = "".join(k[-1] for k in _WIDE_KEYS if t[k])
+    if wides:
+        suffix += f"_wide{wides}"
     return suffix
+
+
+def shape_tuning(
+    spec: MxTdmScheduledSpec, tuning: Optional[Dict]
+) -> Optional[Dict[str, object]]:
+    """The tuning of the instance that runs spec's M x N x K problem (MxTdmScheduledSelectTraits):
+    None if the tile is longer than K, else the tuning with the problem's tail_steps and the
+    edge and wide traits it needs turned on. Traits already on stay on (an edge or wide kernel
+    also runs problems that do not need them); tail_steps must be the problem's, so it is
+    replaced."""
+    if spec.tile_k > spec.K:
+        return None
+    t = normalize_tuning(tuning)
+    for key in (*_EDGE_KEYS, *_WIDE_KEYS):
+        t[key] = t[key] or getattr(spec, key)
+    t["tail_steps"] = spec.tail_steps
+    return t
 
 
 def validate_instance(spec: MxTdmScheduledSpec, tuning: Optional[Dict]) -> str:
@@ -790,12 +833,8 @@ def cpp_policy_type(tuning: Optional[Dict]) -> str:
 def cpp_kernel_traits(spec: MxTdmScheduledSpec, tuning: Optional[Dict]) -> str:
     """The MxTdmScheduledGemmTraits<...> spelling of a tuning's shape traits."""
     t = normalize_tuning(tuning)
-    edge = "true" if t["edge"] else "false"
-    wide = "true" if t["wide"] else "false"
-    return (
-        f"ck_tile::MxTdmScheduledGemmTraits<{edge}, {edge}, {wide}, {wide}, {wide}, "
-        f"{t['tail_steps']}>"
-    )
+    flags = ", ".join("true" if t[k] else "false" for k in (*_EDGE_KEYS, *_WIDE_KEYS))
+    return f"ck_tile::MxTdmScheduledGemmTraits<{flags}, {t['tail_steps']}>"
 
 
 __all__ = [
@@ -814,6 +853,7 @@ __all__ = [
     "is_default_tuning",
     "normalize_tuning",
     "schedule_tunings",
+    "shape_tuning",
     "spec_from_tile",
     "validate_instance",
 ]

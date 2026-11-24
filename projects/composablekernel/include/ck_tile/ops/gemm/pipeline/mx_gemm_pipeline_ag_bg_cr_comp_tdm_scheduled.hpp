@@ -335,7 +335,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         if(need.wide_d && !Traits::kWideD)
             return "D's offsets pass 2^31: needs a WideD instance";
         if(need.tail_steps != Traits::kTailSteps)
-            return "the K tail (K mod tile_k, in 128-wide K steps) is not the instance's TailSteps";
+            return "the K tail (K mod tile_k, in WMMA K steps) is not the instance's TailSteps";
         if(Problem::TailNum != TailNumber::Full && Base::GetTailNumber(K) != Problem::TailNum)
             return "the loop's K tile count's parity is not the instance's TailNum "
                    "(the base's TailHandler picks it)";

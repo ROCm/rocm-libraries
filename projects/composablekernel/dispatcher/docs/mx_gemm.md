@@ -103,7 +103,8 @@ instance's shape traits.
 
 `comp_tdm_scheduled` takes the cluster and its policy's knobs
 (`MxGemmPipelineAgBgCrCompTDMScheduledPolicy`) as a tuning, set per kernel or as a product
-(a `tuning_config` section in the sweep's JSON). Missing keys take the defaults:
+(its section of `pipeline_tuning_config` in the sweep's JSON). Missing keys take the
+defaults:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -112,16 +113,29 @@ instance's shape traits.
 | `prefetch_lds_read` | `true` | Read K step s+1 from LDS while step s computes |
 | `split_b_lds_read` | `true` | Read B from LDS in two halves (needs `prefetch_lds_read` and an even N repeat) |
 | `interleave_lds_regions` | `true` | Place the A and B components in different 64 KiB LDS segments |
-| `edge` | `true` | Partial M and N tiles (`false` drops the edge code) |
-| `tail_steps` | `0` | K tail in 128-wide steps (`K mod tile_k`) |
-| `wide` | `false` | 64-bit offsets for operands past 2^31 bytes |
+| `edge_m`, `edge_n` | `false` | A partial last M (N) tile |
+| `wide_a`, `wide_b`, `wide_d` | `false` | 64-bit offsets for A, B or D (E) past 2^31 bytes |
+| `tail_steps` | `0` | K steps (warp tile K, 128) of a K tail after the loop |
 
-The first five are the tuning knobs; the last three are shape traits fixed at
-compile time. Every kernel runs any K tile count: the pipeline picks the odd or even
-variant at run time, as the other TDM pipelines do. The kernel name adds the tuning
+The first five are the tuning knobs; the rest are shape traits fixed at compile time
+(`MxTdmScheduledGemmTraits`). An edge or wide kernel also runs problems without partial
+tiles or with narrow offsets; `tail_steps` must be the problem's: `ceil((K mod tile_k) /
+128)`, or `0` when `K mod tile_k` is above `tile_k - 128` (the loop then runs that partial
+tile as one more tile). Every kernel runs any K tile count: the pipeline picks the odd or
+even variant at run time, as the other TDM pipelines do. The kernel name adds the tuning
 suffix (`_pf<n>`, and `_lp0`, `_hplrnone` and `_lsi0` for the three knobs turned off)
-and the non-default traits, for example
-`..._256x256x512_2x2x1_32x16x128_c2x2_pf2_noedge`.
+and the traits that are on (`_edgem`, `_edgen` or `_edgemn`, `_tail<n>`, and `_wide` with
+the wide operands), for example `..._256x256x512_2x2x1_32x16x128_c2x2_pf2_edgemn_tail1`.
+
+The sweep driver sets the shape traits from each problem
+(`specialize_tdm_scheduled_configs` and `tdm_scheduled_for_problem` in
+`python/mx_gemm_tdm_scheduled_utils.py`), for
+`comp_tdm_scheduled` configs only: for each problem it drops the configs whose `tile_k` is
+above K, sets `tail_steps` to the problem's, and turns on the edge and wide traits the
+problem needs. Problems that need the same traits share one kernel, and each problem runs
+only its own kernels. Configs of other pipelines are not touched: they are built and run
+on every problem as before. `--no-shape-specialize` runs every kernel on every problem
+with the configured traits.
 
 In the dispatcher, put the keys at the top level of the configuration, or in
 `MxGemmKernelConfig(tuning={...})`:
@@ -132,18 +146,22 @@ MxGemmKernelConfig(datatype="fp4", gpu_target="gfx1250", pipeline="comp_tdm_sche
                    tuning={"cluster_dim": [2, 2], "gl2_prefetch_distance": 2})
 ```
 
-In a sweep JSON, add a `tuning_config` section; every combination of its
-values is tried with every tile, and invalid combinations are dropped by the
-policy's rules (`mx_gemm/mx_tdm_scheduled.py`):
+In a sweep JSON, add a `pipeline_tuning_config` section with one section per tuned
+pipeline; every combination of a pipeline's values is tried with every tile of that
+pipeline, and invalid combinations are dropped by the policy's rules
+(`mx_gemm/mx_tdm_scheduled.py`):
 
 ```json
-"tuning_config": {
-  "cluster_dim": {"values": [[4, 4], [2, 2]]},
-  "gl2_prefetch_distance": {"values": [4, 2]}
+"pipeline_tuning_config": {
+  "comp_tdm_scheduled": {
+    "cluster_dim": {"values": [[4, 4], [2, 2]]},
+    "gl2_prefetch_distance": {"values": [4, 2]}
+  }
 }
 ```
 
-Other pipelines reject tuning keys.
+Only `comp_tdm_scheduled` takes a tuning: a section for another pipeline, or the old
+flat `tuning_config` section, is an error, and other pipelines reject tuning keys.
 
 `mx_gemm/configs/comp_tdm_scheduled_tuning_gfx1250.json` lists every key above, so a
 sweep is a matter of editing its values. To run it on your own shapes, copy
@@ -157,8 +175,9 @@ python3 mx_gemm_full_benchmark.py comp_tdm_scheduled_tuning_gfx1250.json \
     --verify --csv comp_tdm_scheduled.csv
 ```
 
-A kernel whose cluster does not divide the problem's grid, or whose shape traits do not
-cover the problem, is reported as `SKIPPED`.
+A kernel whose cluster does not divide the problem's grid, or (with
+`--no-shape-specialize`) whose shape traits do not cover the problem, is reported as
+`SKIPPED`.
 
 The tuned instances of three problems each have a config:
 `comp_tdm_scheduled_maf_gfx1250.json`, `comp_tdm_scheduled_medium_gfx1250.json` and

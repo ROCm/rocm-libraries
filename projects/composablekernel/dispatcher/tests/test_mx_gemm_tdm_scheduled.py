@@ -10,6 +10,7 @@ tile_engine CMake builder rejects the pipeline (it runs through the dispatcher).
 is required.
 """
 
+import itertools
 import json
 import re
 import subprocess
@@ -37,6 +38,7 @@ for _p in (_DISP / "python", _DISP / "codegen", _GEMM, _MX, _HOST_TEST):
     sys.path.insert(0, str(_p))
 
 import gemm_validation_utils as vu  # noqa: E402
+import mx_gemm_tdm_scheduled_utils as tdm  # noqa: E402
 import mx_gemm_utils as mx  # noqa: E402
 import parity_cases  # noqa: E402
 import unified_mx_gemm_codegen as codegen  # noqa: E402
@@ -141,13 +143,119 @@ class TestTuning(unittest.TestCase):
             "ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, true, true, false>",
         )
         self.assertEqual(
-            sched.cpp_kernel_traits(spec, {"edge": False, "tail_steps": 2}),
+            sched.cpp_kernel_traits(spec, {"tail_steps": 2}),
             "ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, false, 2>",
         )
         self.assertEqual(
-            sched.instance_name_suffix(spec, {**t, "edge": False, "tail_steps": 2}),
-            "_c2x2_lsi0_noedge_tail2",
+            sched.cpp_kernel_traits(
+                spec, {"edge_n": True, "wide_a": True, "wide_d": 1}
+            ),
+            "ck_tile::MxTdmScheduledGemmTraits<false, true, true, false, true, 0>",
         )
+        self.assertEqual(
+            sched.instance_name_suffix(spec, {**t, "tail_steps": 2}), "_c2x2_lsi0_tail2"
+        )
+        # Every trait combination names its own kernel.
+        flags = ("edge_m", "edge_n", "wide_a", "wide_b", "wide_d")
+        suffixes = {
+            sched.instance_name_suffix(spec, dict(zip(flags, on)))
+            for on in itertools.product((False, True), repeat=len(flags))
+        }
+        self.assertEqual(len(suffixes), 2 ** len(flags))
+        self.assertEqual(
+            sched.instance_name_suffix(
+                spec, {"edge_m": True, "edge_n": True, "tail_steps": 1, "wide_b": True}
+            ),
+            "_c2x2_lsi0_edgemn_tail1_wideb",
+        )
+
+    def test_old_shape_keys_are_unknown(self):
+        for key in ("edge", "wide"):
+            with self.assertRaisesRegex(ValueError, "unknown"):
+                sched.normalize_tuning({key: True})
+
+
+class TestShapeTuning(unittest.TestCase):
+    """shape_tuning and the dispatcher's per-problem specialization."""
+
+    SHAPE_KEYS = ("edge_m", "edge_n", "wide_a", "wide_b", "wide_d", "tail_steps")
+
+    def traits(self, M, N, K, tile=TILE, tuning=None, **kw):
+        spec = sched.spec_from_tile(tile, tuning, M=M, N=N, K=K, **kw)
+        t = sched.shape_tuning(spec, tuning)
+        return None if t is None else {k: t[k] for k in self.SHAPE_KEYS}
+
+    def on(self, *keys, tail_steps=0):
+        return {
+            **{k: k in keys for k in self.SHAPE_KEYS[:-1]},
+            "tail_steps": tail_steps,
+        }
+
+    def test_traits_of_the_shape(self):
+        self.assertEqual(self.traits(4096, 4096, 65536), self.on())
+        self.assertEqual(self.traits(1920, 512, 6784), self.on("edge_m", tail_steps=1))
+        self.assertEqual(
+            self.traits(640, 8064, 615552),
+            self.on("edge_m", "edge_n", "wide_b", tail_steps=1),
+        )
+        self.assertEqual(
+            self.traits(7680, 2304, 830336), self.on("wide_a", tail_steps=3)
+        )
+        self.assertEqual(
+            self.traits(44416, 56832, 1280), self.on("edge_m", "wide_d", tail_steps=2)
+        )
+
+    def test_tile_longer_than_k_is_dropped(self):
+        self.assertIsNone(self.traits(1024, 1024, 256))
+
+    def test_long_k_tail_runs_without_a_tail(self):
+        fp8 = {**TILE, "tile_m": 128, "tile_n": 128, "tile_k": 256, "warp_tile_m": 16}
+        self.assertEqual(
+            self.traits(1024, 1024, 2048 + 160, fp8, a_dtype="fp8"), self.on()
+        )
+
+    def test_configured_traits(self):
+        # An edge or wide trait already on stays on; tail_steps becomes the problem's.
+        self.assertEqual(
+            self.traits(4096, 4096, 65536, tuning={"edge_m": True, "tail_steps": 2}),
+            self.on("edge_m"),
+        )
+
+    def test_specialize(self):
+        base = _kernel_config()
+        other = mx.MxGemmKernelConfig(
+            datatype="fp4",
+            gpu_target="gfx1250",
+            pipeline="comp_async_eight_waves",
+            tile_k=1024,
+        )
+        problems = [
+            {"M": 4096, "N": 4096, "K": 65536},
+            {"M": 2048, "N": 2048, "K": 8192},
+            {"M": 1920, "N": 512, "K": 6784},
+            {"M": 1024, "N": 1024, "K": 256},
+        ]
+        unique, per_problem, dropped = tdm.specialize_tdm_scheduled_configs(
+            [base], problems
+        )
+        # The first two need no trait and share one kernel; the third needs edge_m and a tail.
+        self.assertEqual(len(unique), 2)
+        self.assertEqual(per_problem[0], per_problem[1])
+        fitted = unique[per_problem[2][0]]
+        self.assertEqual(
+            {k: fitted.tuning[k] for k in self.SHAPE_KEYS},
+            self.on("edge_m", tail_steps=1),
+        )
+        self.assertIsNone(fitted._name_cache)
+        self.assertIsNone(base.tuning)
+        # tile_k 512 > K 256: the config is dropped there.
+        self.assertEqual(dropped, [0, 0, 0, 1])
+        self.assertEqual(per_problem[3], [])
+        # Other pipelines are not specialized.
+        with self.assertRaisesRegex(ValueError, "comp_async_eight_waves"):
+            tdm.tdm_scheduled_for_problem(other, 1024, 1024, 256)
+        with self.assertRaisesRegex(ValueError, "comp_async_eight_waves"):
+            tdm.specialize_tdm_scheduled_configs([base, other], problems)
 
 
 class TestParity(unittest.TestCase):
@@ -441,9 +549,11 @@ class TestDispatcher(unittest.TestCase):
 
     def test_tuning_config(self):
         path = _MX / "configs" / "comp_tdm_scheduled_tuning_gfx1250.json"
-        tuning_config = json.loads(path.read_text())["tuning_config"]
+        sections = json.loads(path.read_text())["pipeline_tuning_config"]
+        self.assertEqual(set(sections), {"comp_tdm_scheduled"})
         self.assertEqual(
-            set(tuning_config), {*sched.TUNING_DEFAULTS, *sched.SHAPE_DEFAULTS}
+            set(sections["comp_tdm_scheduled"]),
+            {*sched.TUNING_DEFAULTS, *sched.SHAPE_DEFAULTS},
         )
         cfgs = mx.expand_mx_sweep(path, "gfx1250", "fp4")
         self.assertTrue(cfgs)
@@ -458,12 +568,36 @@ class TestDispatcher(unittest.TestCase):
         for p in problems:
             self.assertEqual(set(p), {"M", "N", "K"})
 
+    def test_pipeline_tuning_config_sections(self):
+        config = json.loads(
+            (_MX / "configs" / "comp_tdm_scheduled_maf_gfx1250.json").read_text()
+        )
+        sections = config.pop("pipeline_tuning_config")
+        for bad, error in (
+            ({**config, "tuning_config": sections["comp_tdm_scheduled"]}, "now"),
+            (
+                {
+                    **config,
+                    "pipeline_tuning_config": {
+                        **sections,
+                        "comp_async_eight_waves": {},
+                    },
+                },
+                "take no tuning",
+            ),
+        ):
+            with self.subTest(error=error), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "sweep.json"
+                path.write_text(json.dumps(bad))
+                with self.assertRaisesRegex(ValueError, error):
+                    mx.expand_mx_sweep(path, "gfx1250", "fp4")
+
     def test_tuned_instance_configs(self):
         # Example 56's maf, medium and mab256.
         expect = {
-            "maf": "256x256x512_2x2x1_32x16x128_c4x4_hplrnone_noedge",
-            "medium": "128x128x1024_2x2x1_16x16x128_c4x4_hplrnone_noedge",
-            "mab": "256x16x512_4x1x1_16x16x128_c1x4_pf0_lp0_hplrnone_noedge",
+            "maf": "256x256x512_2x2x1_32x16x128_c4x4_hplrnone",
+            "medium": "128x128x1024_2x2x1_16x16x128_c4x4_hplrnone",
+            "mab": "256x16x512_4x1x1_16x16x128_c1x4_pf0_lp0_hplrnone",
         }
         for case, suffix in expect.items():
             with self.subTest(case=case):

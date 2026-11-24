@@ -190,6 +190,9 @@ def python_reason(row):
 def _cpp_row(row):
     sched = load_spec_module()
     t, tuning = row["tile"], row["tuning"]
+    if row["mnk"] != (0, 0, 0):
+        # The problem's instance: its shape traits (none if the tile is longer than K).
+        tuning = sched.shape_tuning(row_spec(row), tuning) or tuning
     shape = (
         f"ck_tile::ClusterTileGemmShape<{sched.cpp_cluster_sequence(tuning)}, "
         f"ck_tile::sequence<{t['tile_m']}, {t['tile_n']}, {t['tile_k']}>, "

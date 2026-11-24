@@ -30,6 +30,27 @@ GemmKernelBuilder, _validation_utils = _import_gemm_kernel_builder()
 GEMM_MX_PIPELINES_BY_ARCH = _validation_utils.GEMM_MX_PIPELINES_BY_ARCH
 TDM_SCHEDULED_PIPELINE = _validation_utils.MX_TDM_SCHEDULED_PIPELINE
 mx_tdm_scheduled = _validation_utils.load_mx_tdm_scheduled()
+#: The pipelines that take a section of "pipeline_tuning_config".
+TUNED_PIPELINES = (TDM_SCHEDULED_PIPELINE,)
+
+
+def pipeline_tuning_config(config):
+    """The sweep's "pipeline_tuning_config": {pipeline: {"key": {"values": [...]}}}, one
+    section per pipeline in TUNED_PIPELINES."""
+    if "tuning_config" in config:
+        raise ValueError(
+            '"tuning_config" is now "pipeline_tuning_config": '
+            f'{{"{TDM_SCHEDULED_PIPELINE}": {{...}}}}'
+        )
+    sections = config.get("pipeline_tuning_config") or {}
+    if not isinstance(sections, dict):
+        raise ValueError('"pipeline_tuning_config" must map pipelines to sections')
+    untuned = sorted(set(sections) - set(TUNED_PIPELINES))
+    if untuned:
+        raise ValueError(
+            f"pipeline_tuning_config: {untuned} take no tuning (tuned: {list(TUNED_PIPELINES)})"
+        )
+    return sections
 
 
 class MxGemmKernelBuilder(GemmKernelBuilder):
@@ -58,6 +79,9 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
             tier=tier,
             manifest_path=manifest_path,
         )
+        self.pipeline_tuning_config = pipeline_tuning_config(
+            getattr(self, "config", None) or {}
+        )
 
     def _generate_trait_combinations(self):
         arch = self.gpu_target.split(":", 1)[0]
@@ -70,12 +94,15 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
         ]
 
     # comp_tdm_scheduled carries a tuning besides its tile and traits: the cluster, the policy's
-    # knobs and the shape traits of the instance, from the optional "tuning_config" section (the
-    # product of its values; the defaults when absent). Other pipelines take no tuning. It is built
-    # only through the dispatcher (mx_gemm_full_benchmark.py); main() rejects it.
+    # knobs and the shape traits of the instance, from the optional
+    # "pipeline_tuning_config"."comp_tdm_scheduled" section (the product of its values; the
+    # defaults when absent). Other pipelines take no tuning. It is built only through the
+    # dispatcher (mx_gemm_full_benchmark.py); main() rejects it.
 
     def _scheduled_tunings(self):
-        return mx_tdm_scheduled.expand_tuning_config(self.config.get("tuning_config"))
+        return mx_tdm_scheduled.expand_tuning_config(
+            self.pipeline_tuning_config.get(TDM_SCHEDULED_PIPELINE)
+        )
 
     def _scheduled_spec(self, tile_config, tuning):
         out = mx_tdm_scheduled.TE_OUT_DTYPES[self._c_datatype()]

@@ -19,15 +19,20 @@
         "pad_k": {"values": [false]},
         "persistent": {"values": [false]}
     },
-    "tuning_config": {
-        "cluster_dim": {"values": [[4, 4], [2, 2], [1, 1]]},
-        "gl2_prefetch_distance": {"values": [4, 2, 0]},
-        "prefetch_lds_read": {"values": [true, false]},
-        "split_b_lds_read": {"values": [true, false]},
-        "interleave_lds_regions": {"values": [true, false]},
-        "edge": {"values": [true]},
-        "tail_steps": {"values": [0]},
-        "wide": {"values": [false]}
+    "pipeline_tuning_config": {
+        "comp_tdm_scheduled": {
+            "cluster_dim": {"values": [[4, 4], [2, 2], [1, 1]]},
+            "gl2_prefetch_distance": {"values": [4, 2, 0]},
+            "prefetch_lds_read": {"values": [true, false]},
+            "split_b_lds_read": {"values": [true, false]},
+            "interleave_lds_regions": {"values": [true, false]},
+            "edge_m": {"values": [true]},
+            "edge_n": {"values": [true]},
+            "wide_a": {"values": [false]},
+            "wide_b": {"values": [false]},
+            "wide_d": {"values": [false]},
+            "tail_steps": {"values": [0]}
+        }
     },
     "k_block_per_cu": 1
 }

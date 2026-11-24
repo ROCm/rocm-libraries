@@ -415,22 +415,8 @@ class MxGemmKernelConfig:
         """The codegen's comp_tdm_scheduled tuning suffix, else a hash of the tuning."""
         try:
             sched = _mx_codegen().mx_tdm_scheduled
-            tile = {
-                k: getattr(self, k)
-                for k in (
-                    "tile_m",
-                    "tile_n",
-                    "tile_k",
-                    "warp_m",
-                    "warp_n",
-                    "warp_k",
-                    "warp_tile_m",
-                    "warp_tile_n",
-                    "warp_tile_k",
-                )
-            }
             spec = sched.spec_from_tile(
-                tile,
+                self._tile_config(),
                 self.tuning,
                 self.datatype,
                 self.datatype,
@@ -454,6 +440,22 @@ class MxGemmKernelConfig:
             except (ValueError, TypeError):
                 continue
         return False
+
+    def _tile_config(self) -> Dict[str, int]:
+        return {
+            k: getattr(self, k)
+            for k in (
+                "tile_m",
+                "tile_n",
+                "tile_k",
+                "warp_m",
+                "warp_n",
+                "warp_k",
+                "warp_tile_m",
+                "warp_tile_n",
+                "warp_tile_k",
+            )
+        }
 
 
 # =============================================================================

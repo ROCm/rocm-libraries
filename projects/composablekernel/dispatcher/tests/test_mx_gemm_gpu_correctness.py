@@ -132,7 +132,8 @@ class TestMxGemmGpu(unittest.TestCase):
                 )
                 for pipeline in ("comp_tdm", "comp_tdm_v2")
             ]
-            # comp_tdm_scheduled (K-major scales); a 1x1 cluster runs any grid.
+            # comp_tdm_scheduled (K-major scales); a 1x1 cluster runs any grid, and the edge
+            # traits the partial M and N tiles below.
             configs += [
                 MxGemmKernelConfig(
                     datatype=dtype,
@@ -141,7 +142,7 @@ class TestMxGemmGpu(unittest.TestCase):
                     tile_m=m,
                     tile_n=n,
                     tile_k=256,
-                    tuning={"cluster_dim": [1, 1]},
+                    tuning={"cluster_dim": [1, 1], "edge_m": True, "edge_n": True},
                 )
                 for m, n in ((128, 128), (256, 256))
             ]

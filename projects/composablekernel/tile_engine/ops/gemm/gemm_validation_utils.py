@@ -630,7 +630,7 @@ def mx_tdm_scheduled_reject_reason(
     tuning=None,
 ) -> str:
     """Why a comp_tdm_scheduled instance is invalid ("" if valid). With tuning None, why the tile is
-    invalid under every schedule (the tuning_config product is checked per instance later).
+    invalid under every schedule (the pipeline_tuning_config product is checked per instance later).
     """
     if _base_gfx_arch(gpu_target) != "gfx1250":
         return f"{MX_TDM_SCHEDULED_PIPELINE} requires gfx1250"

@@ -6,9 +6,11 @@ Dispatcher bridge.
 
 Same three phases as gemm_full_benchmark.py, whose multi-GPU Phase 3 runner it
 reuses:
-  Phase 1: Expand the Tile Engine MX sweep JSON and compile every kernel to a
-           .so (parallel, no GPU)
-  Phase 2: Load problems (M, N, K shapes)
+  Phase 1: Expand the Tile Engine MX sweep JSON, fit any comp_tdm_scheduled
+           configs to each problem's shape (--no-shape-specialize: as configured),
+           and compile every kernel to a .so (parallel, no GPU)
+  Phase 2: Load problems (M, N, K shapes; read in Phase 1 to fit
+           comp_tdm_scheduled configs)
   Phase 3: Benchmark via subprocess isolation across all visible GPUs
 
 The sweep JSON is the one the Old-TE mx_gemm CMake build reads
@@ -40,6 +42,7 @@ _CONFIG_DIR = _THIS_DIR / "mx_gemm" / "configs"
 
 import gemm_full_benchmark as gfb  # noqa: E402  (also sets up sys.path)
 from dispatcher_common import normalize_arch  # noqa: E402
+from mx_gemm_tdm_scheduled_utils import specialize_tdm_scheduled_configs  # noqa: E402
 from mx_gemm_utils import (  # noqa: E402
     _get_arch,
     expand_mx_sweep,
@@ -56,6 +59,20 @@ def resolve_configs(configs, arch):
         names = (f"bridge_ci_config_{arch}.json", "default_ci_config.json")
         return [next(_CONFIG_DIR / n for n in names if (_CONFIG_DIR / n).exists())]
     return [Path(c) if Path(c).exists() else _CONFIG_DIR / c for c in configs]
+
+
+def built_kernel_indices(configs, lib_paths, built_kernels):
+    """The built_kernels index of each config's kernel (None for a failed build), with
+    gfb.unique_built_kernels' key."""
+
+    def key(cfg, lib):
+        return str(lib.resolve()), tuple(sorted(getattr(cfg, "launch_env", {}).items()))
+
+    index = {key(cfg, lib): i for i, (cfg, lib) in enumerate(built_kernels)}
+    return [
+        None if lib is None else index[key(cfg, lib)]
+        for cfg, lib in zip(configs, lib_paths)
+    ]
 
 
 def main():
@@ -140,6 +157,13 @@ def main():
         action="store_true",
         help="Run Phase 1 only (compile all kernels, skip benchmarking)",
     )
+    parser.add_argument(
+        "--no-shape-specialize",
+        action="store_true",
+        help="Run every kernel on every problem with its configured comp_tdm_scheduled "
+        "shape traits (default: fit each config's tail_steps, edge and wide traits to "
+        "each problem and skip tiles longer than K)",
+    )
     args = parser.parse_args()
 
     arch = normalize_arch(args.arch) if args.arch else _get_arch()
@@ -175,21 +199,43 @@ def main():
     if not all_configs:
         print(f"  ERROR: 0 configs expanded for {args.dtype} on {arch}")
         return 1
+
+    tdm_configs = [c for c in all_configs if c.pipeline == "comp_tdm_scheduled"]
+    specialize = bool(tdm_configs) and not args.no_shape_specialize
+    problems = None
+    build_configs = all_configs
+    if specialize:
+        problems = gfb.load_problems(args.problems, gfb.DEFAULT_VARIANT)
+        other_configs = [c for c in all_configs if c.pipeline != "comp_tdm_scheduled"]
+        fitted, tdm_pairs, dropped = specialize_tdm_scheduled_configs(
+            tdm_configs, problems
+        )
+        build_configs = other_configs + fitted
+        n_other = len(other_configs)
+        config_pairs = [
+            list(range(n_other)) + [n_other + i for i in indices]
+            for indices in tdm_pairs
+        ]
+        print(
+            f"  comp_tdm_scheduled shape-specialized for {len(problems)} problems: "
+            f"{len(tdm_configs)} configs -> {len(fitted)}, {sum(dropped)} "
+            "(config, problem) pairs dropped (tile_k > K)"
+        )
     print(f"  Build workers: {args.workers}")
 
     t0 = time.perf_counter()
     lib_paths = setup_multiple_mx_gemm_dispatchers(
-        all_configs,
+        build_configs,
         output_dir=args.output_dir,
         gfx_arch=arch,
         max_workers=args.workers,
     )
     build_time = time.perf_counter() - t0
-    built_kernels, duplicate_count = gfb.unique_built_kernels(all_configs, lib_paths)
+    built_kernels, duplicate_count = gfb.unique_built_kernels(build_configs, lib_paths)
     n_build_fail = sum(lib is None for lib in lib_paths)
 
     print(
-        f"\n  Built {len(all_configs)} configs -> {len(built_kernels)} unique kernels "
+        f"\n  Built {len(build_configs)} configs -> {len(built_kernels)} unique kernels "
         f"({duplicate_count} duplicates filtered, {n_build_fail} build failures) "
         f"in {build_time:.0f}s"
     )
@@ -207,12 +253,25 @@ def main():
     print("Phase 2: Load test problems")
     print(f"{'=' * 80}")
 
-    problems = gfb.load_problems(args.problems, gfb.DEFAULT_VARIANT)
+    if problems is None:
+        problems = gfb.load_problems(args.problems, gfb.DEFAULT_VARIANT)
     print(f"  Problems: {len(problems)}  Init: {args.init}")
-    print(
-        f"  Total measurements: {len(built_kernels)} x {len(problems)} = "
-        f"{len(built_kernels) * len(problems)}"
-    )
+    if specialize:
+        kernel_of = built_kernel_indices(build_configs, lib_paths, built_kernels)
+        pairs = []
+        for indices in config_pairs:
+            kernels = []
+            for i in indices:
+                if kernel_of[i] is not None and kernel_of[i] not in kernels:
+                    kernels.append(kernel_of[i])
+            pairs.append(kernels)
+        print(f"  Total measurements: {sum(map(len, pairs))}")
+    else:
+        pairs = [range(len(built_kernels))] * len(problems)
+        print(
+            f"  Total measurements: {len(built_kernels)} x {len(problems)} = "
+            f"{len(built_kernels) * len(problems)}"
+        )
 
     base_env = os.environ.copy()
     base_env["GEMM_PYPATH"] = os.pathsep.join(
@@ -221,7 +280,7 @@ def main():
     csv_path = Path(args.csv)
     stats = gfb.benchmark_on_devices(
         problems,
-        [range(len(built_kernels))] * len(problems),
+        pairs,
         built_kernels,
         devices,
         args,
