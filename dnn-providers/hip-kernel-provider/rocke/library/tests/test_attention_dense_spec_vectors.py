@@ -234,6 +234,18 @@ _CASES: tuple[dict, ...] = (
     ),
     dict(paged=True, block_size=16, num_kv_blocks=1 << 20, use_i64_kv_addr=True),
     dict(use_i64_kv_addr=True),
+    # Paged K/V is bounded by its cache, not the logical extent: a short chunk over
+    # 2 GiB of keys is valid on i64 pages, refused contiguous.
+    dict(
+        paged=True,
+        block_size=16,
+        num_kv_blocks=1 << 18,
+        use_i64_kv_addr=True,
+        varlen=True,
+        causal_bottom_right=True,
+        seqlen_kv=1 << 22,
+    ),
+    dict(causal_bottom_right=True, seqlen_kv=1 << 22),
     dict(paged=True, block_size=16, num_kv_blocks=64, batch=2),
     dict(paged=True, block_size=16, num_kv_blocks=64, varlen=True),
     dict(paged=True, block_size=16, num_kv_blocks=64, varlen=True, seqlen_kv=1024),
@@ -267,6 +279,23 @@ _CASES: tuple[dict, ...] = (
     dict(paged=True, block_size=16, num_kv_blocks=64, ragged=True, seqlen_kv=544),
     dict(paged=True, block_size=16, num_kv_blocks=64, causal=False),
     dict(paged=True, block_size=16, num_kv_blocks=64, causal_bottom_right=True),
+    # Paged varlen shifts each sequence's diagonal: unequal maxima pass, q > kv not.
+    dict(
+        paged=True,
+        block_size=16,
+        num_kv_blocks=64,
+        varlen=True,
+        seqlen_kv=1024,
+        causal_bottom_right=True,
+    ),
+    dict(
+        paged=True,
+        block_size=16,
+        num_kv_blocks=64,
+        varlen=True,
+        seqlen_q=1024,
+        causal_bottom_right=True,
+    ),
     # Swizzled Head-first auto order: contiguous takes it, paged keeps bt_hkv_minor.
     dict(
         seqlen_q=8192,
@@ -289,6 +318,8 @@ _CASES: tuple[dict, ...] = (
         use_sinks=True, paged=True, block_size=16, num_kv_blocks=64, sliding_window=256
     ),
     dict(use_sinks=True, varlen=True),
+    dict(use_sinks=True, varlen=True, causal_bottom_right=True, seqlen_kv=1024),
+    dict(use_sinks=True, varlen=True, sliding_window=128),
     # ---- one step either side of a validator comparison ----
     dict(num_kv_heads=7),
     dict(seqlen_q=320),

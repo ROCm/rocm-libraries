@@ -1285,9 +1285,10 @@ def supports_attention_dense(
     # returning the structured rejection the contract promises.
     if not isinstance(spec, AttentionDenseSpec):
         return False, f"spec must be an AttentionDenseSpec, got {type(spec).__name__}"
-    # Bottom-right causal shifts the diagonal by seqlen_kv - seqlen_q (a runtime value
-    # on the runtime-shape path). Only the plain causal band has that shifted form:
-    # the window prune is anchored on the top-left diagonal.
+    # Bottom-right causal shifts the diagonal by seqlen_kv - seqlen_q (a runtime
+    # value on the runtime-shape path; under paged varlen each sequence's own).
+    # Only the plain causal band has that shifted form: the window prune is
+    # anchored on the top-left diagonal.
     if spec.causal_bottom_right and spec.sliding_window:
         return False, (
             "gfx942 attention_dense: causal_bottom_right is not supported with "
@@ -1348,7 +1349,7 @@ def supports_attention_dense(
     # sliding_window is supported (KV-loop prune + window mask); the shared spec
     # __post_init__ re-run above enforces its constraints (W % block_n, causal).
     # use_sinks is supported here (m/l seed per work item). The shared __post_init__
-    # still rejects it combined with paged or varlen.
+    # rejects it with paged, and contiguous varlen is refused above.
     # use_additive_bias runs on both grids. It is refused where the body cannot honour
     # it: the KV-segment store returns before the epilogue that zeroes a row with no
     # live key, paged K/V has no bias-indexing rule, and the opt-in KDB/VPF pipeline
@@ -1846,7 +1847,10 @@ def _build_attention_dense_single_buffer(
     # Bottom-right causal: query row q sees keys k <= q + (seqlen_kv - seqlen_q).
     # The offset is read from the shape params on the runtime-shape path, so one
     # binary serves every chunk length. Off (plain top-left causal) emits nothing.
+    # Under (paged) varlen the spec lengths are only maxima, so each sequence's
+    # own kv_len - q_len is read at run time instead (BR_RUNTIME).
     BR = causal and spec.causal_bottom_right
+    BR_RUNTIME = BR and spec.varlen
 
     def _diag_off():
         if spec.runtime_shape:
@@ -2028,7 +2032,7 @@ def _build_attention_dense_single_buffer(
         it ``None`` and takes the one divide per CTA here."""
         if hkv is None:
             hkv = b.div(hq, gqa_p if spec.runtime_shape else b.const_i32(gqa))
-        diag_off = _diag_off() if BR else None
+        diag_off = _diag_off() if BR and not BR_RUNTIME else None
         q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
         if varlen:
             # Per-sequence token base from cu_seqlens_q; early-exit q-blocks past
@@ -2063,6 +2067,11 @@ def _build_attention_dense_single_buffer(
             )
             if varlen:
                 seqlen_kv_b = _pg_kv_len
+            if BR_RUNTIME:
+                # The host checks q_len <= kv_len per sequence under bottom-right,
+                # so the shift is non-negative and the tile divides below round
+                # like shifts.
+                diag_off = b.sub(seqlen_kv_b, seqlen_q_b)
         else:
             k_base = b.add(
                 b.mul(
@@ -2417,8 +2426,8 @@ def _build_attention_dense_single_buffer(
         # the trip count carries it.
         if varlen:
             # Ceil: the partial last tile is visited. Its keys past kv_len lie
-            # above every live row's diagonal (q_len == kv_len), so causal masks
-            # their scores.
+            # above every live row's diagonal (row q < q_len sees keys up to
+            # q + kv_len - q_len < kv_len), so causal masks their scores.
             n_ktiles_c = b.div(b.add(seqlen_kv_b, b.const_i32(BN - 1)), b.const_i32(BN))
         else:
             n_ktiles_c = (
@@ -3338,7 +3347,8 @@ def run_attention_dense_torch(
     ``[num_kv_blocks, block_size, Hkv, D]`` and ``block_tables`` ([B, max_pages] i32)
     / ``kv_lens`` ([B] i32) are required; with ``spec.varlen`` too, ``q``/``out`` are
     packed [total_q, Hq, D] with ``cu_seqlens_q`` (int32 [B+1]) only: each sequence's
-    KV length is its ``kv_lens`` entry and must equal its query length.
+    KV length is its ``kv_lens`` entry and must equal its query length
+    (bottom-right: be at least its query length).
     ``validate_paged=False`` skips the host check of the table and length contents
     (a device->host sync), see
     :func:`kernels.common._attention_dense_paged.validate_paged_launch`.

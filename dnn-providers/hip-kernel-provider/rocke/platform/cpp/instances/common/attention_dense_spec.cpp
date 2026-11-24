@@ -646,11 +646,13 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
         }
         if(s->varlen)
         {
-            if(s->seqlen_q != s->seqlen_kv)
+            /* Top-left aligns every sequence's diagonal at its first key, which is right
+             * only for q_len == kv_len; bottom-right shifts it per sequence. */
+            if(s->seqlen_q != s->seqlen_kv && !s->causal_bottom_right)
                 ROCKE_SPEC_FAIL(reason,
                                 cap,
-                                "paged varlen is self-attention prefill (q_len == kv_len per "
-                                "sequence): seqlen_q must equal seqlen_kv, got %d != %d",
+                                "paged varlen top-left is self-attention prefill (q_len == "
+                                "kv_len per sequence): seqlen_q must equal seqlen_kv, got %d != %d",
                                 s->seqlen_q,
                                 s->seqlen_kv);
             /* emit_lse is an arch field this port does not carry: only the Python
@@ -680,16 +682,18 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
                             s->block_n);
         if(!s->causal)
             ROCKE_SPEC_FAIL(reason, cap, "paged attention is causal-only");
-        /* The shifted diagonal is untested with paged K/V on both arches. */
-        if(s->causal_bottom_right)
-            ROCKE_SPEC_FAIL(reason, cap, "causal_bottom_right is not yet supported with paged KV");
+        /* The single-sequence paged body has no shifted diagonal; the varlen body
+         * shifts it per sequence. */
+        if(s->causal_bottom_right && !s->varlen)
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "causal_bottom_right is not supported with paged=True unless "
+                            "varlen=True");
     }
     else if(s->use_i64_kv_addr)
         ROCKE_SPEC_FAIL(reason, cap, "use_i64_kv_addr requires paged=True");
     if(s->use_sinks && s->paged)
         ROCKE_SPEC_FAIL(reason, cap, "use_sinks is not yet supported with paged KV");
-    if(s->use_sinks && s->varlen)
-        ROCKE_SPEC_FAIL(reason, cap, "use_sinks is not yet supported with varlen");
     return true;
 }
 
@@ -952,9 +956,10 @@ bool rocke_attention_dense_spec_preflight(const rocke_attention_dense_spec_t* s,
                         s->block_n,
                         s->block_m);
 
-    /* 4. 32-bit addressing. */
+    /* 4. 32-bit addressing. Paged K/V is addressed per page: the cache bound above
+     * covers the i32 path, and use_i64_kv_addr lifts it. */
     const ExactProduct kv_bytes({s->batch, s->seqlen_kv, s->num_kv_heads, s->head_size, 2});
-    if(kv_bytes.at_least((uint64_t)ROCKE_ATTENTION_DENSE_INT32_LIMIT))
+    if(!s->paged && kv_bytes.at_least((uint64_t)ROCKE_ATTENTION_DENSE_INT32_LIMIT))
     {
         char num[64];
         kv_bytes.str(num, sizeof(num));

@@ -31,14 +31,16 @@ def paged_varlen_lengths(name):
     return torch.randint(1, 1024, (3,), generator=gen).tolist()  # "random3"
 
 
-def paged_varlen_inputs(lens, block_size, d, dtype, hq=16, hkv=4):
+def paged_varlen_inputs(lens, block_size, d, dtype, hq=16, hkv=4, q_lens=None):
     """Packed Q and per-sequence K/V scattered into a paged cache built to catch
     any read the kernel must not use: a pool twice the needed pages at permuted
     ids, NaN in every unused page (block 0 included, which out-of-sequence lookups
     read), NaN in each last page's slots past the sequence's length, and table
-    columns past each sequence's pages set to an invalid id."""
+    columns past each sequence's pages set to an invalid id. ``lens`` are the KV
+    lengths; the query lengths are ``q_lens`` (bottom-right), else the same."""
     tdt = _TORCH_DT[dtype]
-    total = sum(lens)
+    q_lens = lens if q_lens is None else q_lens
+    total = sum(q_lens)
     q = torch.randn(total, hq, d, device="cuda", dtype=tdt)
     ks = [torch.randn(n, hkv, d, device="cuda", dtype=tdt) for n in lens]
     vs = [torch.randn(n, hkv, d, device="cuda", dtype=tdt) for n in lens]
@@ -61,23 +63,34 @@ def paged_varlen_inputs(lens, block_size, d, dtype, hq=16, hkv=4):
             k_cache[ids[p], :rows] = ks[b][p * block_size : p * block_size + rows]
             v_cache[ids[p], :rows] = vs[b][p * block_size : p * block_size + rows]
     cu = torch.tensor(
-        [0, *torch.tensor(lens).cumsum(0).tolist()], device="cuda", dtype=torch.int32
+        [0, *torch.tensor(q_lens).cumsum(0).tolist()], device="cuda", dtype=torch.int32
     )
     kv_lens = torch.tensor(lens, device="cuda", dtype=torch.int32)
     return q, ks, vs, k_cache, v_cache, table, kv_lens, cu
 
 
 def check_paged_varlen(
-    run, make_spec, reference, tolerance, lens, block_size, d, dtype, window
+    run,
+    make_spec,
+    reference,
+    tolerance,
+    lens,
+    block_size,
+    d,
+    dtype,
+    window,
+    q_lens=None,
 ):
     """One packed launch of ``lens`` against ``reference(q, k, v, scale, window)``
     per sequence ([1, S, H, D] tensors). ``make_spec(lens, block_size, d, dtype,
-    num_kv_blocks, window=...)`` builds the arch's varlen spec."""
+    num_kv_blocks, window=...)`` builds the arch's varlen spec. ``q_lens``: query
+    lengths that differ from the KV lengths ``lens`` (bottom-right)."""
     torch.manual_seed(0)
     scale = 1.0 / math.sqrt(d)
     q, ks, vs, k_cache, v_cache, table, kv_lens, cu = paged_varlen_inputs(
-        lens, block_size, d, dtype
+        lens, block_size, d, dtype, q_lens=q_lens
     )
+    q_lens = lens if q_lens is None else q_lens
     spec = make_spec(lens, block_size, d, dtype, k_cache.shape[0], window=window)
     assert spec.varlen
     # Unwritten rows stay NaN. The rows past the packed output catch a tail
@@ -101,9 +114,9 @@ def check_paged_varlen(
     torch.cuda.synchronize()
     assert torch.isnan(out_buf[total:]).all(), "store past the packed output"
     for b, n in enumerate(lens):
-        if n == 0:
+        if q_lens[b] == 0:
             continue
-        name = f"{dtype} D{d} pgd{block_size} swa{window} seq{b} len{n}"
+        name = f"{dtype} D{d} pgd{block_size} swa{window} seq{b} len{q_lens[b]}x{n}"
         got = out[int(cu[b]) : int(cu[b + 1])]
         assert torch.isfinite(got).all(), f"{name}: NaN (unwritten row or bad read)"
         ref = reference(
@@ -115,6 +128,8 @@ def check_paged_varlen(
         )[0]
         max_abs = (ref - got.float()).abs().max().item()
         assert max_abs < tolerance(dtype), f"{name}: max_abs={max_abs:.3e}"
+    # For negative controls against other references.
+    return q, ks, vs, out, cu, scale
 
 
 def check_whole_tile_sequences(run, make_spec, single_spec, lens, block_size, d):
@@ -175,13 +190,16 @@ def _run_packed(run, spec, q, k_cache, v_cache, table, kv_lens, cu, **kw):
     return out
 
 
-def check_i64_matches_i32(run, make_spec, lens, block_size, d, dtype, window):
+def check_i64_matches_i32(
+    run, make_spec, lens, block_size, d, dtype, window, q_lens=None
+):
     """One packed launch of ``lens`` through the i64 and the i32 page bases on
     the same poisoned cache: a page base or in-page offset off by anything reads
-    a NaN page, a NaN slot or wrong keys, so the bits differ."""
+    a NaN page, a NaN slot or wrong keys, so the bits differ. ``q_lens`` as in
+    ``check_paged_varlen``."""
     torch.manual_seed(0)
     q, _, _, k_cache, v_cache, table, kv_lens, cu = paged_varlen_inputs(
-        lens, block_size, d, dtype
+        lens, block_size, d, dtype, q_lens=q_lens
     )
     spec = make_spec(lens, block_size, d, dtype, k_cache.shape[0], window=window)
     assert spec.varlen and not spec.use_i64_kv_addr

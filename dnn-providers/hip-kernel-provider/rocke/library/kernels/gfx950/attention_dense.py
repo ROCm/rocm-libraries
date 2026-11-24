@@ -73,7 +73,10 @@ The mask is the cuDNN band ``(left = sliding_window, right = right_bound)`` on t
   top-left diagonal: key ``k`` is visible to query ``q`` iff ``q - k < left`` (when set)
   and ``k <= q + right`` (``causal=False``: unbounded; ``causal=True``: ``right_bound``,
   0 by default). A row whose band holds no key (``seqlen_q > seqlen_kv + window``)
-  outputs zeros. Bottom-right alignment (``causal_bottom_right``) is plain causal only.
+  outputs zeros. Bottom-right alignment (``causal_bottom_right``) is plain causal only;
+  with ``varlen`` its shift ``kv_len - q_len`` is read per sequence at run time
+  (contiguous varlen from ``cu_seqlens_q/kv``, paged varlen from ``kv_lens``)
+  instead of being baked from the spec maxima.
 
 Additive bias (``use_additive_bias``, grid body only): an fp32 ``[B|1, Hq|1, Sq|1,
 Skv]`` tensor added to the scaled scores before the mask. With it on, each score is
@@ -463,9 +466,9 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
             if self.varlen:
                 raise ValueError("fp8 KV is not yet supported with varlen=True")
         if self.causal_bottom_right:
-            # The non-persistent contiguous builder is the only gfx950 path
-            # that implements the compile-time shifted diagonal (paged: the shared
-            # spec).
+            # Only the non-persistent builder shifts the diagonal: by the baked
+            # length difference, or under varlen by each sequence's own
+            # kv_len - q_len at run time (paged: the shared spec).
             if self.persistent:
                 raise ValueError(
                     "causal_bottom_right is not supported with persistent=True"
@@ -473,10 +476,6 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
             if self.sliding_window > 0:
                 raise ValueError(
                     "causal_bottom_right is not supported with sliding_window>0"
-                )
-            if self.varlen:
-                raise ValueError(
-                    "causal_bottom_right is not supported with varlen=True"
                 )
         if self.wide_lds_dma:
             if not self.persistent:
@@ -945,9 +944,12 @@ def build_attention_dense(
     PAD = spec.lds_k_row_pad
     W = spec.sliding_window
     Wt = W // BN  # window length in KV tiles (0 when disabled)
-    # Compile-time bottom-right diagonal shift. The persistent builder returns
-    # above and deliberately remains unchanged.
-    DIAG_OFF = (Skv - Sq) if spec.causal_bottom_right else 0
+    # Bottom-right diagonal shift. With varlen the spec lengths are only maxima,
+    # so each sequence's shift kv_len - q_len is read at run time (diag_off_rt
+    # below); otherwise it is baked. The persistent builder returns above and
+    # deliberately remains unchanged.
+    BR_RUNTIME = spec.varlen and spec.causal_bottom_right
+    DIAG_OFF = (Skv - Sq) if spec.causal_bottom_right and not BR_RUNTIME else 0
     RIGHT = spec.right_bound  # keys visible ahead of the diagonal (causal only)
     DIAG_TILES = (DIAG_OFF + RIGHT) // BN
     # A row whose band holds no key (top-left, Sq > Skv + W - 1, with a window) must
@@ -1581,6 +1583,8 @@ def build_attention_dense(
         query_tok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
         if DIAG_OFF:
             query_tok = b.add(query_tok, b.const_i32(DIAG_OFF))
+        elif BR_RUNTIME:
+            query_tok = b.add(query_tok, diag_off_rt)
         # lower bound key: q - W + 1  (keep iff ktok > q - W)
         win_lo = b.sub(query_tok, b.const_i32(W)) if lower else None
         # upper bound key: q + RIGHT (the window anchor above stays unshifted)
@@ -1799,9 +1803,13 @@ def build_attention_dense(
         l_tile = b.fadd(l_local, b.warp_shuffle_xor(l_local, 32))
         return out, p_vals, l_tile
 
+    # The host checks q_len <= kv_len per sequence under bottom-right, so the
+    # shift is non-negative and the div below rounds like a shift.
+    diag_off_rt = b.sub(seqlen_kv_b, seqlen_q_b) if BR_RUNTIME else None
     if PAGED_VARLEN:
         # Ceil: the partial last tile is visited. Its keys past kv_len lie above
-        # every live row's diagonal (q_len == kv_len), so causal masks their scores.
+        # every live row's diagonal (row q < q_len sees keys up to
+        # q + kv_len - q_len < kv_len), so causal masks their scores.
         n_ktiles_val = b.div(b.add(seqlen_kv_b, b.const_i32(BN - 1)), b.const_i32(BN))
     elif varlen:
         n_ktiles_val = b.div(seqlen_kv_b, b.const_i32(BN))
@@ -1813,10 +1821,20 @@ def build_attention_dense(
         # Ceil the final reachable key to a KV-tile count. block_m is a
         # per-spec geometry choice; supports_attention_dense enforces that BN
         # divides it, so the qb term can stay outside the ceil.
-        n_upper = b.add(
-            b.mul(qb, b.const_i32(n_per)),
-            b.const_i32((spec.block_m - 1 + DIAG_OFF + RIGHT) // BN + 1),
-        )
+        if BR_RUNTIME:
+            # (BLOCK_M - 1 + off) // BN + 1, with the +1 folded into the numerator.
+            n_upper = b.add(
+                b.mul(qb, b.const_i32(n_per)),
+                b.div(
+                    b.add(diag_off_rt, b.const_i32(spec.block_m - 1 + BN)),
+                    b.const_i32(BN),
+                ),
+            )
+        else:
+            n_upper = b.add(
+                b.mul(qb, b.const_i32(n_per)),
+                b.const_i32((spec.block_m - 1 + DIAG_OFF + RIGHT) // BN + 1),
+            )
         n_upper = b.select(b.cmp_lt(n_upper, n_ktiles_val), n_upper, n_ktiles_val)
     else:
         n_upper = n_ktiles_val
@@ -2050,8 +2068,14 @@ def build_attention_dense(
     elif causal and spec.causal_diag_split:
         # Diagonal-only masking: below-diagonal tiles need no mask (~94% at Sq=8192).
         diag_start = b.mul(qb, b.const_i32(n_per))
+        # The spec refuses right_bound with varlen, so the runtime shift is the
+        # only term under BR_RUNTIME.
+        assert not (BR_RUNTIME and DIAG_TILES), "right_bound with varlen bottom-right"
         if DIAG_TILES:
             diag_start = b.add(diag_start, b.const_i32(DIAG_TILES))
+        elif BR_RUNTIME:
+            # Floor: a tile holding the shifted diagonal stays in the masked tail.
+            diag_start = b.add(diag_start, b.div(diag_off_rt, b.const_i32(BN)))
         if KVS > 1:
             body_upper = b.select(b.cmp_lt(diag_start, seg_lo1), seg_lo1, diag_start)
             body_upper = b.select(b.cmp_lt(body_upper, seg_hi), body_upper, seg_hi)
@@ -2188,7 +2212,7 @@ def build_attention_dense(
             qtok,
             seqlen_kv_b if varlen else seqlen_kv_p,
             causal=causal,
-            diagonal=DIAG_OFF,
+            diagonal=diag_off_rt if BR_RUNTIME else DIAG_OFF,
             window=W,
             right_bound=RIGHT,
         )
@@ -3597,8 +3621,11 @@ def run_attention_dense_torch(
     maxima (``ValueError``). Two valid inputs are not implemented
     (``NotImplementedError``): a sequence with queries and no keys, and, without LSE
     or an additive bias, with a sliding window, a sequence that leaves query rows
-    without a key (only those epilogues zero such a row). A sequence with no
-    queries may have no keys. With LSE the check is part of the LSE contract and
+    without a key (only those epilogues zero such a row); with sinks neither is
+    refused. Under ``causal_bottom_right`` every sequence needs ``q_len <= kv_len``
+    (``ValueError``). A sequence with no queries may have no keys. A paged launch
+    takes its lengths from ``kv_lens`` and is checked by the paged launch check
+    instead. With LSE the check is part of the LSE contract and
     always runs; without it, ``validate_varlen=False`` skips it on a hot or
     graph-captured path, except for an additive-bias launch, which is always
     checked (the bias is loaded unmasked, by in-sequence position).
@@ -3612,7 +3639,11 @@ def run_attention_dense_torch(
 
     Varlen (``spec.varlen``): q/k/v/o use packed [total_tok, H, D] storage.
     Pass both int32 ``cu_seqlens`` [batch+1]. The nonpersistent ABI also takes
-    batch/seqlen_q/seqlen_kv scalars; optional LSE is the final pointer.
+    batch/seqlen_q/seqlen_kv scalars; optional LSE is the final pointer. Each
+    sequence's Q length must be a block_m multiple and its KV length a block_n
+    multiple, both within the spec maxima; with ``causal_bottom_right`` each
+    sequence's diagonal is shifted by its own ``kv_len - q_len``, so
+    ``q_len <= kv_len``. Which of these the host checks is described above.
 
     Paged (``spec.paged``): K/V are a PAGED CACHE, not dense tensors -- ``k``/``v``
     are ``[num_kv_blocks, block_size, Hkv, D]`` and are addressed through
@@ -3622,8 +3653,9 @@ def run_attention_dense_torch(
     ``spec.paged`` is False). ``q``/``out`` stay dense/contiguous: [1, S, H, D] for
     one sequence, or, with ``spec.varlen`` (any ``batch``), packed
     [total_q, Hq, D] with ``cu_seqlens_q`` only: each sequence's KV length is its
-    ``kv_lens`` entry and must equal its query length. ``spec.block_size`` is the
-    cache page size and ``spec.num_kv_blocks`` MUST equal ``k.shape[0]``. The
+    ``kv_lens`` entry and must equal its query length (bottom-right: be at least
+    its query length). ``spec.block_size`` is the cache page size and
+    ``spec.num_kv_blocks`` MUST equal ``k.shape[0]``. The
     structural checks always run; ``validate_paged=False`` skips only the
     synchronized checks of the table and length contents, whose contract then
     falls to the caller (see

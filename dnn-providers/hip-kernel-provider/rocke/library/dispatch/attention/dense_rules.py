@@ -19,6 +19,7 @@ from operator import index
 from typing import Callable, Iterable, Mapping, Optional, Tuple
 
 from kernels.common.attention_dense_kv_split import kv_split_admits
+from kernels.common._spec_checks import kv_cache_needs_i64_addr
 from rocke.dispatch.tuning import WavesPerEuSpace
 from rocke.dispatch.tuning.walk import one_knob_at_a_time
 
@@ -265,8 +266,9 @@ def dense_paged_fields(req, block_n: int) -> dict:
 
     The block count is known only from the cache tensor, so this is the smallest
     cache that holds the request; binding retargets it from ``k.shape[0]``
-    (:meth:`AttentionTuningSpec.with_num_kv_blocks`). A varlen problem's lengths
-    are maxima (:func:`dense_paged_varlen`).
+    (:meth:`AttentionTuningSpec.with_num_kv_blocks`). When even that cache is past
+    the i32 K/V buffer range, the spec takes ``use_i64_kv_addr``. A varlen
+    problem's lengths are maxima (:func:`dense_paged_varlen`).
     """
     if req.layout.strip().lower() != "paged":
         return {}
@@ -284,6 +286,10 @@ def dense_paged_fields(req, block_n: int) -> dict:
         "block_size": block_size,
         "num_kv_blocks": int(req.batch) * pages_per_seq,
     }
+    kv_elem_bytes = 1 if getattr(req, "use_fp8", False) else 2
+    page_bytes = block_size * int(req.nhead_k) * int(req.hdim_q) * kv_elem_bytes
+    if kv_cache_needs_i64_addr(fields["num_kv_blocks"], page_bytes):
+        fields["use_i64_kv_addr"] = True
     if dense_paged_varlen(int(req.batch), int(req.seqlen_k), int(block_n)):
         fields["varlen"] = True
     return fields

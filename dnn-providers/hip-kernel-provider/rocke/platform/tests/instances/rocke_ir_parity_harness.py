@@ -1790,6 +1790,33 @@ def cases():
                 "kv_segments": 4,
             },
         ),
+        # Varlen bottom-right: the shift is each sequence's kv_len - q_len, read at
+        # run time instead of baked from the maxima.
+        (
+            "varlen_bottom_right_sq512",
+            {
+                "batch": 3,
+                "seqlen_kv": 1024,
+                "varlen": True,
+                "causal_bottom_right": True,
+            },
+        ),
+        # Varlen + sinks: the sink seeds each sequence's softmax, so keyless rows
+        # (empty KV, or past the window) come out as 0 with no host refusal.
+        (
+            "varlen_sinks_sq512",
+            {"batch": 3, "varlen": True, "use_sinks": True},
+        ),
+        (
+            "varlen_bottom_right_sinks_sq512",
+            {
+                "batch": 3,
+                "seqlen_kv": 1024,
+                "varlen": True,
+                "causal_bottom_right": True,
+                "use_sinks": True,
+            },
+        ),
         # --- persistent (grid-stride) grid + decode variants ---
         ("persistent_causal_sq512", {"persistent": True, "num_persistent": 256}),
         (
@@ -1959,6 +1986,20 @@ def cases():
                 "num_kv_blocks": 96,
                 "sliding_window": 256,
                 "use_i64_kv_addr": True,
+            },
+        ),
+        # Paged varlen bottom-right: per-sequence shift kv_lens[b] - q_len.
+        (
+            "paged_varlen_bottom_right_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "batch": 3,
+                "seqlen_kv": 1024,
+                "varlen": True,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 192,
+                "causal_bottom_right": True,
             },
         ),
         # --- Attention band: the cuDNN (left = sliding_window, right = right_bound)
@@ -2383,6 +2424,22 @@ def cases():
                 "num_kv_blocks": 96,
                 "sliding_window": 256,
                 "use_i64_kv_addr": True,
+            },
+        ),
+        # Paged varlen bottom-right: per-sequence shift kv_lens[b] - q_len, with
+        # the masked diagonal tail dispatch builds (causal_diag_split).
+        (
+            "paged_varlen_bottom_right_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "batch": 3,
+                "seqlen_kv": 1024,
+                "varlen": True,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 192,
+                "causal_bottom_right": True,
+                "causal_diag_split": True,
             },
         ),
         # bf16 paged D128: takes conflict-free V with its per-wave page lookup.

@@ -2684,6 +2684,121 @@ class TestDensePagedVarlenNumeric:
         )
 
 
+class TestDensePagedVarlenBottomRightNumeric:
+    """Paged varlen + ``causal_bottom_right``: each sequence's diagonal is shifted
+    by its own ``kv_len - q_len`` at run time (reference ``ki <= qi + kv_len -
+    q_len``)."""
+
+    # A mid-tile shift first, shift 0 on a sequence spanning several query blocks,
+    # an empty query over cached keys, a large shift on a 17-row query, a whole-tile
+    # shift, and a mid-tile shift on several query blocks with a partial last one.
+    _Q_LENS = [100, 300, 0, 17, 65, 300]
+    _KV_LENS = [491, 300, 50, 1017, 129, 777]
+
+    @classmethod
+    def _make_spec(cls, diag_split=True):
+        """The shipped spec of a bottom-right paged request (dispatch turns on
+        ``causal_diag_split``); ``diag_split=False`` takes the all-masked loop."""
+        from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
+
+        def make_spec(lens, block_size, d, dtype, num_kv_blocks, window=0):
+            spec = tuning_spec_with_knobs(
+                AttentionRequest(
+                    batch=len(lens),
+                    nhead_q=16,
+                    nhead_k=4,
+                    seqlen_q=max(cls._Q_LENS),
+                    seqlen_k=max(lens),
+                    hdim_q=d,
+                    hdim_v=d,
+                    arch="gfx942",
+                    mask_type=2,
+                    dtype=dtype,
+                    sliding_window=window,
+                    layout="paged",
+                    kv_block_size=block_size,
+                ),
+                "gfx942_dense",
+                {},
+            ).kernel_spec
+            assert spec.varlen and spec.causal_bottom_right and spec.causal_diag_split
+            return dataclasses.replace(
+                spec, num_kv_blocks=num_kv_blocks, causal_diag_split=diag_split
+            )
+
+        return make_spec
+
+    @staticmethod
+    def _reference(q, k, v, scale, window, shift=None):
+        if shift is None:
+            shift = k.shape[1] - q.shape[1]
+        qi = torch.arange(q.shape[1], device="cuda").view(-1, 1)
+        ki = torch.arange(k.shape[1], device="cuda").view(1, -1)
+        return _sdpa_reference(q, k, v, scale, attn_mask=ki <= qi + shift)
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "dtype,d,block_size,diag_split",
+        [
+            ("fp16", 128, 16, True),
+            ("fp16", 64, 64, True),
+            ("bf16", 128, 32, True),
+            ("fp16", 128, 16, False),
+        ],
+    )
+    def test_paged_varlen_matches_per_sequence_reference(
+        self, dtype, d, block_size, diag_split
+    ):
+        """Over the poisoned paged cache: the diagonal start, KV bound and mask of
+        later blocks, dead rows over a partial KV tile. A kernel that applied one
+        shift to every sequence, or none, must not also match."""
+        q_lens, kv_lens = self._Q_LENS, self._KV_LENS
+        q, ks, vs, out, cu, scale = check_paged_varlen(
+            run_attention_dense_torch,
+            self._make_spec(diag_split),
+            self._reference,
+            _tolerance,
+            kv_lens,
+            block_size,
+            d,
+            dtype,
+            0,
+            q_lens=q_lens,
+        )
+        first_shift = kv_lens[0] - q_lens[0]
+        for b, (q_len, kv_len) in enumerate(zip(q_lens, kv_lens)):
+            if q_len == 0:
+                continue
+            rows = slice(int(cu[b]), int(cu[b + 1]))
+            name = f"{dtype} D{d} pgd{block_size} seq{b} {q_len}x{kv_len}"
+            for control, shift in (("top-left", 0), ("first-sequence", first_shift)):
+                if shift == kv_len - q_len:
+                    continue
+                ref = self._reference(
+                    q[None, rows], ks[b][None], vs[b][None], scale, 0, shift
+                )
+                gap = (ref[0] - out[rows].float()).abs().max().item()
+                assert gap > 0.1, f"{name}: output also matches the {control} shift"
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("dtype,d", [("fp16", 128), ("bf16", 64)])
+    def test_paged_varlen_forced_i64_matches_i32_bit_exact(self, dtype, d):
+        """The per-sequence shift with i64 page bases reads the same pages as with
+        i32 ones."""
+        check_i64_matches_i32(
+            run_attention_dense_torch,
+            self._make_spec(),
+            self._KV_LENS,
+            16,
+            d,
+            dtype,
+            0,
+            q_lens=self._Q_LENS,
+        )
+
+
 class TestDensePagedI64Numeric:
     """Paged K/V with ``use_i64_kv_addr``: per-page buffer resources with a 64-bit
     page base, on small caches (forced) and on caches past the i32 range."""

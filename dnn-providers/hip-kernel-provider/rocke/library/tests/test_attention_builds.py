@@ -2319,8 +2319,8 @@ class TestAttentionHelpers(unittest.TestCase):
             str(ctx.exception), "use_sinks is not yet supported with paged KV"
         )
 
-    def test_gfx950_dense_sinks_rejected_with_varlen(self):
-        """AttentionDenseSpec.__post_init__ rejects use_sinks with varlen."""
+    def test_gfx950_dense_sinks_with_varlen(self):
+        """Sinks combine with contiguous varlen; paged varlen still rejects them."""
         from kernels.gfx950.attention_dense import AttentionDenseSpec
 
         base = dict(
@@ -2335,15 +2335,13 @@ class TestAttentionHelpers(unittest.TestCase):
             use_sinks=True,
         )
 
-        # Valid: sinks without varlen
-        spec = AttentionDenseSpec(**base)
-        self.assertTrue(spec.use_sinks)
-
-        # Reject: use_sinks + varlen
+        self.assertTrue(AttentionDenseSpec(varlen=True, **base).use_sinks)
         with self.assertRaises(ValueError) as ctx:
-            AttentionDenseSpec(varlen=True, **base)
+            AttentionDenseSpec(
+                varlen=True, paged=True, block_size=16, num_kv_blocks=64, **base
+            )
         self.assertEqual(
-            str(ctx.exception), "use_sinks is not yet supported with varlen"
+            str(ctx.exception), "use_sinks is not yet supported with paged KV"
         )
 
     def test_attention_3d_workspace_size_matches_shapes(self):

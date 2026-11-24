@@ -33,8 +33,10 @@ from rocke.dispatch.core import CandidateRegistry, KernelCandidate
 from .candidate import make_dense_candidate
 from .dense_rules import dense_paged_fields, dense_paged_tile_fits, dense_paged_varlen
 from .common import (
+    Alignment,
     AttentionMaskType,
     AttentionRequest,
+    _implied_alignment,
     _parse_attention_mask_type,
 )
 
@@ -139,10 +141,19 @@ def _narrow_window_geometry(head_size, dtype):
     return 128, _DENSE_BLOCK_N, False
 
 
-def _paged_varlen(batch: int, sq: int, sk: int, block_m: int, block_n: int) -> bool:
+def _paged_varlen(
+    batch: int,
+    sq: int,
+    sk: int,
+    block_m: int,
+    block_n: int,
+    *,
+    bottom_right: bool = False,
+) -> bool:
     """Whether a paged problem takes the varlen body on this tile."""
-    # No ragged body on gfx942: the paged varlen body bounds a partial Q tile.
-    return dense_paged_varlen(batch, sk, block_n) or sq % block_m != 0
+    # No ragged body on gfx942: the paged varlen body bounds a partial Q tile. Only
+    # the varlen body shifts the diagonal of a paged cache.
+    return bottom_right or dense_paged_varlen(batch, sk, block_n) or sq % block_m != 0
 
 
 def _derived(base, knobs: Mapping[str, object]) -> Mapping[str, object]:
@@ -152,7 +163,16 @@ def _derived(base, knobs: Mapping[str, object]) -> Mapping[str, object]:
     block_m = int(knobs.get("block_m", base.block_m))
     block_n = int(knobs.get("block_n", base.block_n))
     sq, sk = int(base.seqlen_q), int(base.seqlen_kv)
-    return {"varlen": _paged_varlen(int(base.batch), sq, sk, block_m, block_n)}
+    return {
+        "varlen": _paged_varlen(
+            int(base.batch),
+            sq,
+            sk,
+            block_m,
+            block_n,
+            bottom_right=bool(base.causal_bottom_right),
+        )
+    }
 
 
 # Additive-bias geometry (see :func:`_bias_geometry_spec`).
@@ -389,23 +409,36 @@ def _make_spec(
     # validator. Paged varlen handles each sequence's tails itself; its lengths
     # are maxima.
     paged = dense_paged_fields(req, bn)
-    if paged and int(req.batch) == 1 and sq % bm and sq != sk:
-        # The varlen body that bounds the tile is self-attention only.
-        raise ValueError(
-            "gfx942 paged K/V with a partial Q tile needs seqlen_q == seqlen_k "
-            f"(no ragged body on gfx942): seqlen_q={sq} is not a multiple of "
-            f"block_m={bm}, seqlen_k={sk}"
-        )
-    if paged and _paged_varlen(int(req.batch), sq, sk, bm, bn):
-        paged["varlen"] = True
-    ragged = (
-        (sq == sk) and ((sq % bm != 0) or (sk % bn != 0)) and not paged.get("varlen")
-    )
     # Bottom-right causal with seqlen_q != seqlen_k: the same predicate the router
     # matches against ``features`` below, so a band this body cannot shift (a
     # bottom-right window) reaches ``supports_attention_dense`` and is rejected
     # there instead of running top-left.
     bottom_right = "causal_bottom_right" in req.features()
+    if paged and int(req.batch) > 1 and mask_type != AttentionMaskType.NO_MASK:
+        # Several sequences: the lengths are maxima, and equal ones do not make
+        # each q_len == kv_len, so the requested alignment stands; the varlen body
+        # shifts each sequence's diagonal at run time.
+        alignment = (
+            _implied_alignment(mask_type)
+            if req.diagonal_alignment is None
+            else Alignment(int(req.diagonal_alignment))
+        )
+        bottom_right = alignment is Alignment.BOTTOM_RIGHT
+    if paged and int(req.batch) == 1 and sq % bm and sq != sk and not bottom_right:
+        # The varlen body that bounds the tile is self-attention only, or
+        # bottom-right.
+        raise ValueError(
+            "gfx942 paged K/V with a partial Q tile needs seqlen_q == seqlen_k "
+            f"(no ragged body on gfx942): seqlen_q={sq} is not a multiple of "
+            f"block_m={bm}, seqlen_k={sk}"
+        )
+    if paged and _paged_varlen(
+        int(req.batch), sq, sk, bm, bn, bottom_right=bottom_right
+    ):
+        paged["varlen"] = True
+    ragged = (
+        (sq == sk) and ((sq % bm != 0) or (sk % bn != 0)) and not paged.get("varlen")
+    )
     if bottom_right and mask_type == AttentionMaskType.NO_MASK:
         # The band normalizer maps a cross-length NO_MASK request on this arch to
         # the bottom-right causal band; the dense body serves only explicit

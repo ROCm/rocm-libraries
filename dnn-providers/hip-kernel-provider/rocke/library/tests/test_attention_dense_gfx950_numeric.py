@@ -2880,6 +2880,326 @@ class TestDensePagedI64Numeric:
         return out
 
 
+def _varlen_bottom_right_lengths(block_m, block_n):
+    """(q_lens, kv_lens) of three sequences, all pairs different: the first one's
+    shift (5 KV tiles) differs from the others' (0, and a large 30 tiles), so a
+    kernel that applied one shift to every sequence fails; the second spans three
+    query blocks."""
+    q_lens = [block_m, 3 * block_m, 2 * block_m]
+    shifts = [5 * block_n, 0, 30 * block_n]
+    return q_lens, [n + s for n, s in zip(q_lens, shifts)]
+
+
+def _assert_shift_controls_differ(got, reference, q_len, kv_len, first_shift, name):
+    """The output must not also match a top-left (shift 0) or a first-sequence-shift
+    reference where those differ from this sequence's own shift."""
+    for control, shift in (("top-left", 0), ("first-sequence shift", first_shift)):
+        if shift == kv_len - q_len:
+            continue
+        gap = (reference(shift) - got.float()).abs().max().item()
+        assert gap > 0.1, f"{name}: output also matches the {control} reference"
+
+
+class TestDenseVarlenBottomRightNumeric:
+    """Varlen + ``causal_bottom_right``: each sequence's diagonal is shifted by its
+    own ``kv_len - q_len`` at run time (reference ``ki <= qi + kv_len - q_len``)."""
+
+    # Paged lengths: a mid-tile shift first, shift 0 on a sequence spanning two
+    # query blocks, an empty query over cached keys, a large shift on a 17-row
+    # query, a whole-tile shift, and a mid-tile shift on several query blocks with
+    # a partial last one.
+    _PAGED_Q_LENS = [100, 300, 0, 17, 65, 300]
+    _PAGED_KV_LENS = [491, 300, 50, 1017, 129, 777]
+
+    @classmethod
+    def _paged_spec(cls, block_m=256):
+        def make_spec(lens, block_size, d, dtype, num_kv_blocks, window=0):
+            return dataclasses.replace(
+                _paged_varlen_spec(
+                    lens, block_size, d, dtype, num_kv_blocks, block_m=block_m
+                ),
+                seqlen_q=max(cls._PAGED_Q_LENS),
+                causal_bottom_right=True,
+            )
+
+        return make_spec
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("geometry", tuple(DENSE_TILE_GEOMETRIES))
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    @pytest.mark.parametrize("emit_lse", [False, True], ids=["out", "lse"])
+    def test_contiguous_varlen_matches_per_sequence_reference(
+        self, geometry, dtype, emit_lse
+    ):
+        tile = DENSE_TILE_GEOMETRIES[geometry]
+        bm, bn = int(tile["block_m"]), int(tile["block_n"])
+        q_lens, kv_lens = _varlen_bottom_right_lengths(bm, bn)
+        hq, hkv, d = 8, 2, 128
+        # Maxima above every sequence: only the per-sequence lengths may count.
+        spec = Gfx950AttentionDenseSpec(
+            batch=len(q_lens),
+            seqlen_q=4 * bm,
+            seqlen_kv=max(kv_lens) + bn,
+            num_query_heads=hq,
+            num_kv_heads=hkv,
+            head_size=d,
+            dtype=dtype,
+            block_m=bm,
+            block_n=bn,
+            varlen=True,
+            causal_bottom_right=True,
+            emit_lse=emit_lse,
+        )
+        cu_q = [0]
+        cu_k = [0]
+        for q_len, kv_len in zip(q_lens, kv_lens):
+            cu_q.append(cu_q[-1] + q_len)
+            cu_k.append(cu_k[-1] + kv_len)
+        torch.manual_seed(7)
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        q = torch.randn(cu_q[-1], hq, d, device="cuda", dtype=tdt)
+        k = torch.randn(cu_k[-1], hkv, d, device="cuda", dtype=tdt)
+        v = torch.randn_like(k)
+        out = torch.full_like(q, float("nan"))
+        lse = (
+            torch.full((cu_q[-1], hq, 1), float("nan"), device="cuda")
+            if emit_lse
+            else None
+        )
+        scale = 1.0 / math.sqrt(d)
+        run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=k,
+            v=v,
+            out=out,
+            scale=scale,
+            lse=lse,
+            cu_seqlens_q=torch.tensor(cu_q, device="cuda", dtype=torch.int32),
+            cu_seqlens_kv=torch.tensor(cu_k, device="cuda", dtype=torch.int32),
+        )
+        torch.cuda.synchronize()
+        for b, (q_len, kv_len) in enumerate(zip(q_lens, kv_lens)):
+            rows = slice(cu_q[b], cu_q[b + 1])
+            keys = slice(cu_k[b], cu_k[b + 1])
+
+            def reference(shift, rows=rows, keys=keys):
+                return _lse_reference(
+                    q[None, rows],
+                    k[None, keys],
+                    v[None, keys],
+                    scale,
+                    causal=True,
+                    diagonal=shift,
+                )
+
+            name = f"{geometry} {dtype} seq{b} {q_len}x{kv_len}"
+            ref_out, ref_lse = reference(kv_len - q_len)
+            got = out[rows]
+            assert torch.isfinite(got).all(), f"{name}: unwritten row or NaN"
+            max_abs = (ref_out[0] - got.float()).abs().max().item()
+            assert max_abs < _tolerance(dtype), f"{name}: max_abs={max_abs:.3e}"
+            if emit_lse:
+                lse_err = (lse[rows] - ref_lse[0].transpose(0, 1)).abs().max().item()
+                assert lse_err < _tolerance(dtype), f"{name}: lse err={lse_err:.3e}"
+            _assert_shift_controls_differ(
+                got,
+                lambda shift: reference(shift)[0][0],
+                q_len,
+                kv_len,
+                kv_lens[0] - q_lens[0],
+                name,
+            )
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "dtype,d,block_size,block_m",
+        [
+            ("fp16", 128, 16, 256),
+            ("fp16", 64, 64, 256),
+            ("bf16", 128, 32, 256),
+            ("fp16", 128, 16, 128),
+        ],
+    )
+    def test_paged_varlen_matches_per_sequence_reference(
+        self, dtype, d, block_size, block_m
+    ):
+        """``_PAGED_*_LENS`` over the poisoned paged cache (the diagonal start, KV
+        bound and mask of later blocks, dead rows over a partial KV tile)."""
+        q_lens, kv_lens = self._PAGED_Q_LENS, self._PAGED_KV_LENS
+        make_spec = self._paged_spec(block_m)
+
+        def reference(q, k, v, scale, window, shift=None):
+            if shift is None:
+                shift = k.shape[1] - q.shape[1]
+            return _lse_reference(q, k, v, scale, causal=True, diagonal=shift)[0]
+
+        q, ks, vs, out, cu, scale = check_paged_varlen(
+            run_attention_dense_torch,
+            make_spec,
+            reference,
+            _tolerance,
+            kv_lens,
+            block_size,
+            d,
+            dtype,
+            0,
+            q_lens=q_lens,
+        )
+        for b, (q_len, kv_len) in enumerate(zip(q_lens, kv_lens)):
+            if q_len == 0:
+                continue
+            q_b = q[None, int(cu[b]) : int(cu[b + 1])]
+            _assert_shift_controls_differ(
+                out[int(cu[b]) : int(cu[b + 1])],
+                lambda shift: reference(q_b, ks[b][None], vs[b][None], scale, 0, shift)[
+                    0
+                ],
+                q_len,
+                kv_len,
+                kv_lens[0] - q_lens[0],
+                f"{dtype} D{d} pgd{block_size} bm{block_m} seq{b} {q_len}x{kv_len}",
+            )
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("dtype,d", [("fp16", 128), ("bf16", 64)])
+    def test_paged_varlen_forced_i64_matches_i32_bit_exact(self, dtype, d):
+        """The per-sequence shift with i64 page bases reads the same pages as with
+        i32 ones; the IR-only check in test_attention_dense_bottom_right.py cannot
+        see a wrong page base or in-page offset."""
+        check_i64_matches_i32(
+            run_attention_dense_torch,
+            self._paged_spec(),
+            self._PAGED_KV_LENS,
+            16,
+            d,
+            dtype,
+            0,
+            q_lens=self._PAGED_Q_LENS,
+        )
+
+
+def _varlen_sinks_lengths(mode, block_m, block_n, emit_lse):
+    """(q_lens, kv_lens, window) per mode, each with rows that see no key.
+
+    ``causal``: a sequence with more queries than keys (top-left rows past kv_len
+    see every key) and, without LSE, one with no keys at all (LSE refuses empty
+    KV). ``bottom_right``: the per-sequence shifts of the bottom-right class.
+    ``window``: the second sequence's last 2 * block_m rows are past the window.
+    """
+    if mode == "bottom_right":
+        return (*_varlen_bottom_right_lengths(block_m, block_n), 0)
+    if mode == "window":
+        return [2 * block_m, 3 * block_m, block_m], [2 * block_m, block_m, block_m], 128
+    q_lens = [block_m, 3 * block_m, 2 * block_m, block_m]
+    kv_lens = [block_m + 5 * block_n, block_m, 2 * block_m, block_n if emit_lse else 0]
+    return q_lens, kv_lens, 0
+
+
+def _keyless_rows(q_len, kv_len, diagonal, window):
+    """Rows i of a causal sequence whose key range [i + diagonal - window + 1,
+    i + diagonal] (no lower bound without a window) misses [0, kv_len)."""
+    return [
+        i
+        for i in range(q_len)
+        if min(i + diagonal, kv_len - 1) < (i + diagonal - window + 1 if window else 0)
+    ]
+
+
+class TestDenseVarlenSinksNumeric:
+    """Contiguous varlen + sinks: the sink seeds each row's softmax, so rows with
+    no key (empty KV, past the window) are 0 with LSE = the sink logit."""
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("geometry", tuple(DENSE_TILE_GEOMETRIES))
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    @pytest.mark.parametrize("emit_lse", [False, True], ids=["out", "lse"])
+    @pytest.mark.parametrize("mode", ["causal", "bottom_right", "window"])
+    def test_matches_per_sequence_reference(self, geometry, dtype, emit_lse, mode):
+        tile = DENSE_TILE_GEOMETRIES[geometry]
+        bm, bn = int(tile["block_m"]), int(tile["block_n"])
+        q_lens, kv_lens, window = _varlen_sinks_lengths(mode, bm, bn, emit_lse)
+        hq, hkv, d = 8, 2, 128
+        spec = Gfx950AttentionDenseSpec(
+            batch=len(q_lens),
+            seqlen_q=4 * bm,
+            seqlen_kv=max(kv_lens) + bn,
+            num_query_heads=hq,
+            num_kv_heads=hkv,
+            head_size=d,
+            dtype=dtype,
+            block_m=bm,
+            block_n=bn,
+            varlen=True,
+            causal_bottom_right=mode == "bottom_right",
+            sliding_window=window,
+            use_sinks=True,
+            emit_lse=emit_lse,
+        )
+        cu_q, cu_k = [0], [0]
+        for q_len, kv_len in zip(q_lens, kv_lens):
+            cu_q.append(cu_q[-1] + q_len)
+            cu_k.append(cu_k[-1] + kv_len)
+        torch.manual_seed(11)
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        q = torch.randn(cu_q[-1], hq, d, device="cuda", dtype=tdt)
+        k = torch.randn(cu_k[-1], hkv, d, device="cuda", dtype=tdt)
+        v = torch.randn_like(k)
+        sinks = torch.randn(hq, device="cuda", dtype=tdt)
+        out = torch.full_like(q, float("nan"))
+        lse = (
+            torch.full((cu_q[-1], hq, 1), float("nan"), device="cuda")
+            if emit_lse
+            else None
+        )
+        scale = 1.0 / math.sqrt(d)
+        run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=k,
+            v=v,
+            out=out,
+            scale=scale,
+            lse=lse,
+            sinks=sinks,
+            cu_seqlens_q=torch.tensor(cu_q, device="cuda", dtype=torch.int32),
+            cu_seqlens_kv=torch.tensor(cu_k, device="cuda", dtype=torch.int32),
+        )
+        torch.cuda.synchronize()
+        keyless_rows = 0
+        for b, (q_len, kv_len) in enumerate(zip(q_lens, kv_lens)):
+            rows = slice(cu_q[b], cu_q[b + 1])
+            keys = slice(cu_k[b], cu_k[b + 1])
+            name = f"{mode} {geometry} {dtype} seq{b} {q_len}x{kv_len}"
+            diagonal = kv_len - q_len if mode == "bottom_right" else 0
+            ref_out, ref_lse = _lse_reference(
+                q[None, rows],
+                k[None, keys],
+                v[None, keys],
+                scale,
+                causal=True,
+                diagonal=diagonal,
+                window=window,
+                sinks=sinks,
+            )
+            got = out[rows]
+            assert torch.isfinite(got).all(), f"{name}: unwritten row or NaN"
+            max_abs = (ref_out[0] - got.float()).abs().max().item()
+            assert max_abs < _tolerance(dtype), f"{name}: max_abs={max_abs:.3e}"
+            keyless = _keyless_rows(q_len, kv_len, diagonal, window)
+            keyless_rows += len(keyless)
+            assert (got[keyless] == 0).all(), f"{name}: keyless row != 0"
+            if emit_lse:
+                lse_err = (lse[rows] - ref_lse[0].transpose(0, 1)).abs().max().item()
+                assert lse_err < _tolerance(dtype), f"{name}: lse err={lse_err:.3e}"
+        if mode == "window" or (mode == "causal" and not emit_lse):
+            assert keyless_rows, "the case must include rows that see no key"
+
+
 # Cross-length top-left (unshifted diagonal): sq < sk and sq > sk, ragged and
 # aligned. For sq > sk the ragged padded keys sit below the diagonal of every
 # row with q >= Skv, so correctness depends on the key-pad mask in the causal loops.

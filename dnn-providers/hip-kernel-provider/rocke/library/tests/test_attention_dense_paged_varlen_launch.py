@@ -241,3 +241,36 @@ def test_single_sequence_spec_refuses_cu_seqlens(arch):
                 cu_seqlens_q=I32DeviceTensor([0, 1024]),
             ),
         )
+
+
+# Bottom-right: each sequence's diagonal is shifted by its own kv_len - q_len,
+# so query lengths may be shorter than the KV lengths _LENS.
+_BR_CU = [0, 600, 617, 617]
+
+
+def _bottom_right_inputs(**overrides):
+    packed = CacheStandIn((_BR_CU[-1], _HQ, _D))
+    call = dict(q=packed, out=packed, cu_seqlens_q=I32DeviceTensor(list(_BR_CU)))
+    call.update(overrides)
+    return _inputs(**call)
+
+
+@pytest.mark.parametrize("arch", _ARCHES)
+def test_bottom_right_allows_shorter_queries(arch):
+    spec = dataclasses.replace(_spec(arch), causal_bottom_right=True)
+    _assert_reaches_compile(arch, spec=spec, **_bottom_right_inputs())
+
+
+@pytest.mark.parametrize("arch", _ARCHES)
+def test_bottom_right_refuses_a_query_longer_than_its_keys(arch):
+    spec = dataclasses.replace(_spec(arch), causal_bottom_right=True)
+    bad = _bottom_right_inputs(kv_lens=I32DeviceTensor([1000, 16, 0]))
+    with pytest.raises(ValueError, match=r"q_len=17 > kv_lens\[1\]=16"):
+        _launch(arch, spec=spec, **bad)
+    _assert_reaches_compile(arch, spec=spec, **bad, validate_paged=False)
+
+
+@pytest.mark.parametrize("arch", _ARCHES)
+def test_top_left_still_needs_equal_lengths(arch):
+    with pytest.raises(ValueError, match=r"q_len=600 != kv_lens\[0\]=1000"):
+        _launch(arch, **_bottom_right_inputs())

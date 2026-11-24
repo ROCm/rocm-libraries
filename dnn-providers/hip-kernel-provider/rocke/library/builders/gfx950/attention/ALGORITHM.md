@@ -513,6 +513,15 @@ mask (~94% of tiles at $S = 8192$); the KV loop is split into a mask-free body
 `[1, diag)` and a masked diagonal tail `[diag, n_upper)`, and the causal row
 limit clamps `n_upper` so fully-future tiles are never visited.
 
+**Bottom-right causal** (`causal_bottom_right`, plain causal on the default grid)
+shifts the diagonal by $S_k - S_q$: key $k$ is visible to query $q$ iff
+$k \le q + S_k - S_q$. The shift moves the mask compare, `n_upper` (ceil), `diag`
+(floor) and the LSE row mask together. With fixed lengths it is baked. With
+`varlen` the spec lengths are only maxima, so each sequence's shift
+$\text{kv\_len}_b - \text{q\_len}_b$ is computed at run time from its own
+lengths (§8.4), and the launcher checks $\text{q\_len}_b \le \text{kv\_len}_b$:
+a negative shift would hide keys the row should see.
+
 **head_size and the DMA loader.** One `async_buffer_load_lds` instruction moves
 64 lanes × 2 bf16 = 128 elements. At **D=128** that is exactly one padded K/V row
 per instruction (the fast path). At **D=64** the loader packs `128//D = 2` rows
@@ -659,16 +668,18 @@ i32 byte offsets covers the whole cache.
   contiguous buffer bound gives. A partial query tile takes the §8.3 ragged path.
 - **Packed sequences** (`varlen=True`, any $B$): Q/O are packed
   `[total_q, H_q, d]` with `cu_seqlens_q`; each sequence's KV length is
-  `kv_lens[b]` (no `cu_seqlens_kv`) and must equal its query length, so the causal
-  diagonal is the same top-left or bottom-right. The spec's $S_q$/$S_k$ are the
-  maxima and size the grid; query blocks past a sequence's end exit at once. Each
-  sequence's tails are bounded in the kernel:
+  `kv_lens[b]` (no `cu_seqlens_kv`). Top-left needs it equal to the query length;
+  bottom-right allows $\text{q\_len}_b \le \text{kv\_len}_b$ (prefix caching,
+  chunked prefill) and shifts each sequence's diagonal (§8.1). The spec's
+  $S_q$/$S_k$ are the maxima and size the grid; query blocks past a sequence's end
+  exit at once. Each sequence's tails are bounded in the kernel:
   - Q rows past the sequence load through a buffer resource bounded by the
     packed total (they read the next sequence's queries or zeros) and their
     stores are guarded off.
   - The last KV tile is visited ($⌈\text{kv\_len}/\text{block\_n}⌉$ tiles). Its
-    keys past `kv_len` lie above every live row's diagonal, so the causal select
-    already drops their scores; K needs no extra mask.
+    keys past `kv_len` lie above every live row's diagonal (bottom-right too: row
+    $q$ sees keys up to $q + \text{kv\_len} - \text{q\_len} < \text{kv\_len}$), so
+    the causal select already drops their scores; K needs no extra mask.
   - V rows past `kv_len` are not covered by that mask: $P = 0$ times a NaN in a
     stale page row is still NaN. Their DMA offset is pushed past the buffer bound,
     so the copy writes zeros into LDS.

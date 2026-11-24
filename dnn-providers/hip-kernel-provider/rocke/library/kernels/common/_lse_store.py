@@ -204,9 +204,14 @@ def dense_row_has_key(
 
     ``right_bound`` is the causal lookahead: the last visible key is
     ``diagonal + query_row + right_bound`` (ignored when not ``causal``).
+    ``diagonal`` is a Python int when baked, or an i32 value when it differs per
+    sequence (varlen bottom-right).
     """
     last_key = b.sub(kv_length, b.const_i32(1))
-    shifted_q = b.add(query_row, b.const_i32(diagonal)) if diagonal else query_row
+    if isinstance(diagonal, int):
+        shifted_q = b.add(query_row, b.const_i32(diagonal)) if diagonal else query_row
+    else:
+        shifted_q = b.add(query_row, diagonal)
     upper_q = b.add(shifted_q, b.const_i32(right_bound)) if right_bound else shifted_q
     upper = b.smin(last_key, upper_q) if causal else last_key
     lower = (
@@ -377,6 +382,12 @@ def validate_dense_varlen_offsets(
       bias epilogues zero such a row; the plain one stores the mean of V. This
       raises ``NotImplementedError``.
 
+    With sinks and without LSE neither is refused: the sink seeds every row's
+    softmax (``m`` = sink logit, ``l`` = 1), so a keyless row comes out as 0, the
+    reference value. Under ``causal_bottom_right`` each sequence shifts its
+    diagonal by its own ``kv_len - q_len``, and the varlen bodies take only a
+    non-negative shift: ``q_len > kv_len`` raises ``ValueError``.
+
     A slot with no queries may have no keys, in every path: its workgroups return
     on the query-block bound before they load K/V or write a row."""
     lengths = []
@@ -406,13 +417,19 @@ def validate_dense_varlen_offsets(
                 )
 
     window = spec.sliding_window
+    sinks_cover = spec.use_sinks and not spec.emit_lse
     check_window = (
-        window and not spec.emit_lse and not getattr(spec, "use_additive_bias", False)
+        window
+        and not spec.emit_lse
+        and not spec.use_sinks
+        and not getattr(spec, "use_additive_bias", False)
     )
     for i, (q_len, kv_len) in enumerate(zip(*lengths)):
         if q_len and not kv_len:
             if spec.emit_lse:
                 raise ValueError("LSE-enabled packed KV sequences must be nonempty")
+            if sinks_cover:
+                continue
             raise NotImplementedError(
                 f"NOT_YET_IMPLEMENTED: packed KV sequence {i} must be nonempty "
                 f"when it has queries (q_len={q_len})"
@@ -423,6 +440,13 @@ def validate_dense_varlen_offsets(
                 f"q_len={q_len}, kv_len={kv_len} leaves query rows with no key; "
                 "use emit_lse"
             )
+    if spec.causal_bottom_right:
+        for i, (q_len, kv_len) in enumerate(zip(*lengths)):
+            if q_len > kv_len:
+                raise ValueError(
+                    f"varlen sequence {i}: q_len={q_len} > kv_len={kv_len}; "
+                    "bottom-right causal needs q_len <= kv_len per sequence"
+                )
 
 
 Stride = Union[int, Value]

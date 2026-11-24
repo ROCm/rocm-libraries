@@ -409,9 +409,10 @@ def bind_dense_attention_torch(
     block-table/length value checks (graph capture, hot paths), as for the
     unified binding; the structural checks stay. Only for
     callers that meet the runner's value rules (in-range block ids, each
-    sequence's ``kv_len`` equal to its query length): the kernel trusts them, and
-    an out-of-range id reads a wrong page (zeros or a wrapped i32 offset; clamped
-    to the last block with ``use_i64_kv_addr``).
+    sequence's ``kv_len`` equal to its query length, or at least it under
+    bottom-right): the kernel trusts them, and an out-of-range id reads a wrong
+    page (zeros or a wrapped i32 offset; clamped to the last block with
+    ``use_i64_kv_addr``).
     """
     fp8_scales = (
         _DENSE_FP8_SCALE_OPTIONS

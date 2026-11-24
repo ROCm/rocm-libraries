@@ -191,7 +191,8 @@ def validate_paged_launch(
     dereferences must be in ``[0, num_kv_blocks)``. A single sequence needs
     ``kv_lens[0] == seqlen_kv``, since the kernel visits all ``seqlen_kv`` keys;
     paged varlen needs ``cu_seqlens_q`` to span the packed Q in order, and each
-    sequence ``q_len == kv_len`` within the spec maxima.
+    sequence's lengths within the spec maxima with ``q_len == kv_len``
+    (``q_len <= kv_len`` under ``causal_bottom_right``).
     Without ``validate_paged`` nothing checks the contents: the caller guarantees
     them, and a violation reads wrong pages without a fault.
     """
@@ -281,7 +282,15 @@ def validate_paged_launch(
                     f"paged kv_lens[{i}]={kv_len} outside [0, seqlen_kv="
                     f"{spec.seqlen_kv}]: the table holds only that many keys"
                 )
-            if q_lens[i] != kv_len:
+            if spec.causal_bottom_right:
+                # A negative shift would hide keys the row should see.
+                if q_lens[i] > kv_len:
+                    raise ValueError(
+                        f"paged varlen sequence {i}: q_len={q_lens[i]} > "
+                        f"kv_lens[{i}]={kv_len}; bottom-right causal needs "
+                        "q_len <= kv_len per sequence"
+                    )
+            elif q_lens[i] != kv_len:
                 raise ValueError(
                     f"paged varlen sequence {i}: q_len={q_lens[i]} != "
                     f"kv_lens[{i}]={kv_len}; the kernel aligns each sequence's "

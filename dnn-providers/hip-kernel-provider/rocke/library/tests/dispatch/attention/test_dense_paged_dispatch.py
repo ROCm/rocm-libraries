@@ -90,18 +90,8 @@ def test_persistent_variants_decline_paged(spec_id, batch):
             f"seqlen_q must equal seqlen_kv, got 512 != {_SQ}",
         ),
         (dict(kv_block_size=8), "must be >= 16"),
-        (
-            dict(mask_type=2, seqlen_q=1024, sliding_window=0),
-            "causal_bottom_right is not yet supported with paged",
-        ),
     ],
-    ids=[
-        "non_causal",
-        "partial_kv_tile_sq_ne_skv",
-        "multi_seq_sq_ne_skv",
-        "page_8",
-        "bottom_right",
-    ],
+    ids=["non_causal", "partial_kv_tile_sq_ne_skv", "multi_seq_sq_ne_skv", "page_8"],
 )
 def test_paged_outside_the_cohort_is_refused(arch, spec_id, overrides, error):
     with pytest.raises(ValueError, match=error):
@@ -130,8 +120,86 @@ def test_multi_seq_paged_request_builds_a_paged_varlen_spec(arch, spec_id, seqle
     req = _request(arch, batch=3, seqlen_q=seqlen, seqlen_k=seqlen)
     spec = dispatch_attention(pinned(req, spec_id)).spec.kernel_spec
     assert spec.paged and spec.varlen and not spec.ragged
+    assert not spec.causal_bottom_right  # top-left request
     assert spec.batch == 3
     assert spec.num_kv_blocks == 3 * -(-seqlen // _BS)
+
+
+_GFX950_CASES = [("gfx950", sid) for sid in _PAGED_SPEC_IDS["gfx950"]]
+
+
+# The band form of bottom-right causal: gfx942 dense serves only the explicit
+# causal mask kinds for cross-length requests.
+_BR_MASKS = [
+    (arch, sid, mask)
+    for arch, sid in _CASES
+    for mask in (
+        dict(mask_type=2),
+        dict(mask_type=0, right_bound=0, diagonal_alignment=1),
+    )
+    if arch == "gfx950" or mask["mask_type"] == 2
+]
+
+
+@pytest.mark.parametrize("arch,spec_id,mask", _BR_MASKS)
+@pytest.mark.parametrize(
+    "batch,sq,sk",
+    [(3, 512, _SQ), (3, _SQ, _SQ), (3, 1000, 1017), (1, 512, _SQ)],
+    ids=["multi_seq", "multi_seq_equal_maxima", "multi_seq_ragged", "one_seq"],
+)
+def test_bottom_right_paged_request_takes_the_per_sequence_shift(
+    arch, spec_id, mask, batch, sq, sk
+):
+    """Bottom-right over a paged cache runs on the varlen body, whose diagonal is
+    each sequence's own kv_len - q_len. Equal maxima keep the shift: the
+    sequences themselves may still differ."""
+    req = _request(
+        arch, batch=batch, seqlen_q=sq, seqlen_k=sk, sliding_window=0, **mask
+    )
+    spec = dispatch_attention(pinned(req, spec_id)).spec.kernel_spec
+    assert spec.paged and spec.varlen and spec.causal_bottom_right
+    assert (spec.batch, spec.seqlen_q, spec.seqlen_kv) == (batch, sq, sk)
+
+
+@pytest.mark.parametrize(
+    "batch,sq", [(3, _SQ), (1, 512)], ids=["multi_seq_equal_maxima", "one_seq"]
+)
+def test_gfx942_declines_a_bottom_right_paged_window(batch, sq):
+    """The gfx942 window is anchored on the top-left diagonal; equal maxima do not
+    make each sequence's q_len == kv_len, so a top-left fold would be wrong."""
+    req = _request("gfx942", batch=batch, seqlen_q=sq, mask_type=2, sliding_window=1024)
+    with pytest.raises(ValueError, match="causal_bottom_right"):
+        dispatch_attention(pinned(req, "gfx942_dense"))
+
+
+@pytest.mark.parametrize("arch,spec_id", _CASES)
+@pytest.mark.parametrize("seqlen", [_SQ, 1000], ids=["aligned", "ragged"])
+def test_one_sequence_equal_lengths_bottom_right_window_is_served(
+    arch, spec_id, seqlen
+):
+    """One sequence's request lengths are its own, so equal ones make the
+    bottom-right window the top-left one."""
+    req = _request(arch, mask_type=2, seqlen_q=seqlen, seqlen_k=seqlen)
+    spec = dispatch_attention(pinned(req, spec_id)).spec.kernel_spec
+    assert spec.paged and spec.sliding_window == 1024
+    assert not spec.causal_bottom_right
+
+
+@pytest.mark.parametrize("arch,spec_id", _GFX950_CASES)
+@pytest.mark.parametrize(
+    "mask",
+    [
+        dict(mask_type=2, sliding_window=1024),
+        dict(mask_type=3, sliding_window=0, right_bound=64, diagonal_alignment=1),
+    ],
+    ids=["swa", "lookahead"],
+)
+def test_gfx950_declines_equal_maxima_bottom_right_band(arch, spec_id, mask):
+    """The body anchors a window or lookahead top-left; over several sequences
+    equal maxima do not make that the bottom-right band."""
+    req = _request(arch, batch=3, **mask)
+    with pytest.raises(ValueError, match="several paged sequences"):
+        dispatch_attention(pinned(req, spec_id))
 
 
 @pytest.mark.parametrize("arch,spec_id", _CASES)
@@ -562,6 +630,30 @@ def test_binding_packed_sequences_to_a_cache_past_the_i32_range(arch, spec_id):
     assert seen["q"] is packed and seen["cu_seqlens_q"] is tensors["cu_seqlens_q"]
 
 
+@pytest.mark.parametrize("arch,spec_id", _CASES)
+def test_request_whose_own_pages_pass_the_i32_range_takes_i64(arch, spec_id):
+    """A short chunk over a long prefix needs more cache than the i32 K/V range
+    holds: selection takes i64 page bases rather than refusing the request."""
+
+    def spec_for(num_kv_blocks):
+        req = _request(
+            arch,
+            seqlen_q=512,
+            seqlen_k=num_kv_blocks * _BS,
+            mask_type=2,
+            sliding_window=0,
+        )
+        return dispatch_attention(pinned(req, spec_id)).spec.kernel_spec
+
+    assert not spec_for(_I32_BLOCKS).use_i64_kv_addr
+    # Just past the i64 threshold, and past 2 GiB of logical K/V, which a
+    # contiguous spec would refuse.
+    for blocks in (_I32_BLOCKS + 1, 2 * _I32_BLOCKS):
+        past = spec_for(blocks)
+        assert past.paged and past.use_i64_kv_addr
+        assert past.num_kv_blocks == blocks
+
+
 @pytest.mark.parametrize("arch", sorted(_PAGED_SPEC_IDS))
 def test_contiguous_dense_spec_ignores_the_block_count(arch):
     spec_id = _PAGED_SPEC_IDS[arch][0]
@@ -570,21 +662,27 @@ def test_contiguous_dense_spec_ignores_the_block_count(arch):
     assert tuning.with_num_kv_blocks(512) is tuning
 
 
-def _check_paged_varlen_dispatch_on_gpu(arch, spec_id, lens, *, one_seq_4d=False):
+def _check_paged_varlen_dispatch_on_gpu(
+    arch, spec_id, lens, *, one_seq_4d=False, q_lens=None
+):
     """Sequences of ``lens`` served end to end through dispatch: packed Q, pages
     permuted in a 2x cache whose unused pages and past-length slots are NaN, a
     table padded with garbage ids and a NaN-filled output, against per-sequence
     fp32 sliding-window references. ``one_seq_4d``: one sequence passed as
-    [1, S, Hq, D] without cu_seqlens_q, which the binding then builds."""
+    [1, S, Hq, D] without cu_seqlens_q, which the binding then builds.
+    ``q_lens``: shorter query lengths, requested as bottom-right causal (no
+    window); the reference shifts each sequence by its kv_len - q_len."""
     torch = pytest.importorskip("torch")
     if not torch.cuda.is_available():
         pytest.skip("no GPU")
     if torch.cuda.get_device_properties(0).gcnArchName.split(":")[0] != arch:
         pytest.skip(f"needs {arch}")
-    window, seqlen = 1024, max(lens)
+    bottom_right = q_lens is not None
+    q_lens = q_lens if bottom_right else lens
+    window, seqlen = (0 if bottom_right else 1024), max(lens)
     torch.manual_seed(0)
-    total = sum(lens)
-    cu = torch.tensor([0, *torch.tensor(lens).cumsum(0).tolist()], dtype=torch.int32)
+    total = sum(q_lens)
+    cu = torch.tensor([0, *torch.tensor(q_lens).cumsum(0).tolist()], dtype=torch.int32)
     q = torch.randn(total, _HQ, _D, device="cuda", dtype=torch.float16)
     pages = [-(-n // _BS) for n in lens]
     width = -(-seqlen // _BS)
@@ -630,22 +728,28 @@ def _check_paged_varlen_dispatch_on_gpu(arch, spec_id, lens, *, one_seq_4d=False
     req = _request(
         arch,
         batch=len(lens),
-        seqlen_q=seqlen,
+        seqlen_q=max(q_lens),
         seqlen_k=seqlen,
         sliding_window=window,
+        mask_type=2 if bottom_right else 1,
     )
     result = dispatch_attention(pinned(req, spec_id))
     assert result.spec.kernel_spec.varlen
+    assert result.spec.kernel_spec.causal_bottom_right == bottom_right
     result.bind_torch(tensors).launch()
     torch.cuda.synchronize()
     assert torch.isnan(out_buf[total:]).all(), "store past the packed output"
 
     rep = _HQ // _HKV
     for b, n in enumerate(lens):
+        if q_lens[b] == 0:
+            continue
         rows = slice(int(cu[b]), int(cu[b + 1]))
-        qi = torch.arange(n, device="cuda").view(-1, 1)
+        qi = torch.arange(q_lens[b], device="cuda").view(-1, 1) + (n - q_lens[b])
         ki = torch.arange(n, device="cuda").view(1, -1)
-        keep = (ki <= qi) & (ki > qi - window)
+        keep = ki <= qi
+        if window:
+            keep &= ki > qi - window
         ref = torch.nn.functional.scaled_dot_product_attention(
             q[rows].float().transpose(0, 1),
             ks[b].float().transpose(0, 1).repeat_interleave(rep, 0),
@@ -661,6 +765,24 @@ def _check_paged_varlen_dispatch_on_gpu(arch, spec_id, lens, *, one_seq_4d=False
 @pytest.mark.parametrize("arch,spec_id", _CASES)
 def test_multi_seq_paged_dispatch_matches_the_reference_on_gpu(arch, spec_id):
     _check_paged_varlen_dispatch_on_gpu(arch, spec_id, [_SQ, 1000, 17])
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("arch,spec_id", _CASES)
+def test_bottom_right_paged_dispatch_matches_the_reference_on_gpu(arch, spec_id):
+    """Prefix-cache style sequences: queries shorter than their keys (shift 0, mid
+    tile and large), and an empty query over cached keys."""
+    _check_paged_varlen_dispatch_on_gpu(
+        arch, spec_id, [_SQ, 1000, 300, 17], q_lens=[300, 1000, 0, 17]
+    )
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("arch,spec_id", _CASES)
+def test_one_sequence_bottom_right_dispatch_matches_the_reference_on_gpu(arch, spec_id):
+    _check_paged_varlen_dispatch_on_gpu(
+        arch, spec_id, [_SQ], q_lens=[512], one_seq_4d=True
+    )
 
 
 @pytest.mark.gpu

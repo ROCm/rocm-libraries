@@ -127,6 +127,10 @@ _DENSE_BR_BAND_ERROR = (
     "dense: a window or lookahead with bottom-right alignment and "
     "seqlen_q != seqlen_k is not implemented"
 )
+_DENSE_PACKED_BR_BAND_ERROR = (
+    "dense: a window or lookahead with bottom-right alignment over several "
+    "paged sequences is not implemented"
+)
 
 
 def _is_ragged(sq: int, sk: int, block_m: int, block_n: int) -> bool:
@@ -136,21 +140,34 @@ def _is_ragged(sq: int, sk: int, block_m: int, block_n: int) -> bool:
     return sq % block_m != 0 or sk % block_n != 0
 
 
-def _dense_band(req: AttentionRequest) -> Tuple[bool, int, bool]:
+def _dense_band(
+    req: AttentionRequest, *, per_sequence: bool = False
+) -> Tuple[bool, int, bool]:
     """``(causal, right_bound, moving_bottom_right)`` the dense body computes for
     ``req``. Raises ``ValueError`` for a band dense cannot serve.
 
     ``causal`` False is the unbounded right side; ``right_bound`` is the lookahead
     (0 = plain causal). The dense body anchors its window / lookahead on the
-    top-left diagonal; only the plain causal mask has a compile-time shifted
-    (bottom-right) variant, so a window or lookahead at bottom-right alignment with
+    top-left diagonal; only the plain causal mask has a shifted (bottom-right)
+    variant, so a window or lookahead at bottom-right alignment with
     ``seqlen_q != seqlen_k`` is rejected here instead of being computed top-left.
+    ``per_sequence`` (several packed sequences) makes ``seqlen_q`` / ``seqlen_k``
+    maxima: equal maxima then say nothing about each sequence's lengths, so plain
+    causal keeps the requested alignment and the body shifts each diagonal at run
+    time, while a window or lookahead at bottom-right alignment is rejected
+    whatever the maxima (folding it top-left would be wrong for any sequence with
+    ``q_len < kv_len``).
     """
     band = normalize_band(req, uniform_lengths=True)
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
     window = int(req.sliding_window)
     causal = band.right_bound is not None
     right_bound = band.right_bound or 0
+    if per_sequence and not normalize_band(req).top_left:
+        if window > 0 or right_bound > 0:
+            raise ValueError(_DENSE_PACKED_BR_BAND_ERROR)
+        if causal:
+            return True, 0, True
     if band.top_left or sq == sk:
         return causal, right_bound, False  # the diagonals coincide, or top-left
     # Bottom-right alignment with seqlen_q != seqlen_k.
@@ -160,7 +177,7 @@ def _dense_band(req: AttentionRequest) -> Tuple[bool, int, bool]:
         return False, 0, False  # full attention: alignment is moot
     if window > 0 or right_bound > 0:
         raise ValueError(_DENSE_BR_BAND_ERROR)
-    return True, 0, True  # plain causal, compile-time shifted diagonal
+    return True, 0, True  # plain causal, shifted diagonal
 
 
 def _default_block_m(req: AttentionRequest, variant: Gfx950DenseVariant) -> int:
@@ -184,12 +201,22 @@ def _default_block_m(req: AttentionRequest, variant: Gfx950DenseVariant) -> int:
 
 
 def _paged_varlen(
-    batch: int, sq: int, sk: int, window: int, block_m: int, block_n: int
+    batch: int,
+    sq: int,
+    sk: int,
+    window: int,
+    block_m: int,
+    block_n: int,
+    *,
+    bottom_right: bool = False,
 ) -> bool:
     """Whether a paged problem takes the varlen body on this tile."""
-    # The ragged body refuses a sliding window; the paged varlen body takes it.
-    return dense_paged_varlen(batch, sk, block_n) or (
-        window > 0 and _is_ragged(sq, sk, block_m, block_n)
+    # Only the varlen body shifts the diagonal of a paged cache, and the ragged
+    # body refuses a sliding window; the paged varlen body takes both.
+    return (
+        bottom_right
+        or dense_paged_varlen(batch, sk, block_n)
+        or (window > 0 and _is_ragged(sq, sk, block_m, block_n))
     )
 
 
@@ -203,7 +230,13 @@ def _derived(base, knobs: Mapping[str, object]) -> Mapping[str, object]:
     varlen = base.varlen
     if base.paged:
         varlen = _paged_varlen(
-            int(base.batch), sq, sk, int(base.sliding_window), block_m, block_n
+            int(base.batch),
+            sq,
+            sk,
+            int(base.sliding_window),
+            block_m,
+            block_n,
+            bottom_right=bool(base.causal_bottom_right),
         )
     ragged = _is_ragged(sq, sk, block_m, block_n)
     return {"ragged": ragged and not varlen, "varlen": varlen}
@@ -254,18 +287,23 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
     geometry = DENSE_TILE_GEOMETRIES[_WINDOW_TILE if window_tile else _DENSE_TILE]
     layout = GFX950_DENSE_LAYOUTS[_DENSE_LAYOUT]
     bn = int(geometry["block_n"])
-    causal, right_bound, moving_bottom_right = _dense_band(req)
     # The sliding-window tile keeps its own geometry; otherwise the shared tile,
     # halved on an under-filled wide-DMA grid.
     bm = int(geometry["block_m"]) if window_tile else _default_block_m(req, variant)
     paged = dense_paged_fields(req, bn)
-    if paged and _paged_varlen(int(req.batch), sq, sk, window, bm, bn):
+    causal, right_bound, moving_bottom_right = _dense_band(
+        req, per_sequence=bool(paged) and int(req.batch) > 1
+    )
+    if paged and _paged_varlen(
+        int(req.batch), sq, sk, window, bm, bn, bottom_right=moving_bottom_right
+    ):
         paged["varlen"] = True
     # Paged varlen handles each sequence's tails itself; its lengths are maxima.
     ragged = _is_ragged(sq, sk, bm, bn) and not paged.get("varlen")
     kv_segments = 1
     if (
         moving_bottom_right
+        and not paged
         and not variant.persistent
         and not req.use_sinks
         and not req.emit_lse

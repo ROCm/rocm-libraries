@@ -329,10 +329,13 @@ class AttentionDenseSpec:
                     f"buffer range ({I32_KV_BUFFER_BYTES:#x} B): set use_i64_kv_addr"
                 )
             if self.varlen:
-                if self.seqlen_q != self.seqlen_kv:
+                # Top-left aligns every sequence's diagonal at its first key, which
+                # is right only for q_len == kv_len; bottom-right shifts it per
+                # sequence (q_len <= kv_len, checked with the other BR rules above).
+                if self.seqlen_q != self.seqlen_kv and not self.causal_bottom_right:
                     raise ValueError(
-                        "paged varlen is self-attention prefill (q_len == kv_len "
-                        "per sequence): seqlen_q must equal seqlen_kv, got "
+                        "paged varlen top-left is self-attention prefill (q_len == "
+                        "kv_len per sequence): seqlen_q must equal seqlen_kv, got "
                         f"{self.seqlen_q} != {self.seqlen_kv}"
                     )
                 # emit_lse is declared by the arch specs.
@@ -360,17 +363,17 @@ class AttentionDenseSpec:
                 )
             if not self.causal:
                 raise ValueError("paged attention is causal-only")
-            if self.causal_bottom_right:
-                # The shifted diagonal is untested with paged K/V on both arches.
+            if self.causal_bottom_right and not self.varlen:
+                # The single-sequence paged body has no shifted diagonal; the varlen
+                # body shifts it per sequence.
                 raise ValueError(
-                    "causal_bottom_right is not yet supported with paged KV"
+                    "causal_bottom_right is not supported with paged=True unless "
+                    "varlen=True"
                 )
         elif self.use_i64_kv_addr:
             raise ValueError("use_i64_kv_addr requires paged=True")
         if self.use_sinks and self.paged:
             raise ValueError("use_sinks is not yet supported with paged KV")
-        if self.use_sinks and self.varlen:
-            raise ValueError("use_sinks is not yet supported with varlen")
 
     @property
     def num_waves(self) -> int:
@@ -743,7 +746,9 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
        signed i32 arithmetic, so the signed bound is the binding one on both paths.
 
        The UNIT differs per operand and is not cosmetic. K/V always go through a
-       buffer resource, so they are bounded in bytes. Q is bounded in bytes only
+       buffer resource, so they are bounded in bytes; paged K/V by the cache
+       bound of the spec instead, since a page id, not the logical row, builds
+       its offset. Q is bounded in bytes only
        when ``ragged`` (the buffer-resource path, whose voffset is ``addr * 2``)
        and in elements otherwise (``global_load_vN`` takes an element index). O is
        element-addressed in every mode, despite ``_emit_o_store`` naming its
@@ -792,7 +797,9 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
         * spec.head_size
         * spec.kv_elem_bytes
     )
-    if kv_bytes >= INT32_LIMIT:
+    # Paged K/V is addressed per page: the cache bound in the spec covers the
+    # i32 path, and use_i64_kv_addr lifts it.
+    if not spec.paged and kv_bytes >= INT32_LIMIT:
         return False, (
             f"K/V extent is {kv_bytes} B, at or past the 32-bit buffer-resource "
             f"limit ({INT32_LIMIT} B)"

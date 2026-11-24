@@ -8,8 +8,9 @@
 offsets (``ValueError``) it refuses two valid inputs the packed body does not
 implement (``NotImplementedError``): a sequence with queries and no keys, and, with a
 sliding window and neither LSE nor an additive bias, a sequence whose last query rows
-see no key (only those epilogues zero such a row). A slot with no queries may have no
-keys.
+see no key (only those epilogues zero such a row); with sinks and without LSE neither
+is refused. Under bottom-right causal every sequence needs ``q_len <= kv_len``. A slot
+with no queries may have no keys.
 
 No test needs torch or a GPU: the validator reads only ``device``, ``dtype``,
 ``shape``, ``is_contiguous()`` and ``tolist()`` of its offsets, and the launcher reaches
@@ -101,6 +102,18 @@ def test_no_window_allows_q_longer_than_kv():
     _check(_spec(), (512, 256), (256, 256))
 
 
+def test_bottom_right_accepts_queries_up_to_their_keys():
+    """Bottom-right shifts each diagonal by kv_len - q_len, which may be zero."""
+    spec = _spec(seqlen_q=256, seqlen_kv=512, causal_bottom_right=True)
+    _check(spec, (256, 256), (512, 256))
+
+
+def test_bottom_right_rejects_a_query_longer_than_its_keys():
+    spec = _spec(seqlen_q=256, seqlen_kv=512, causal_bottom_right=True)
+    with pytest.raises(ValueError, match="sequence 1: q_len=256 > kv_len=128"):
+        _check(spec, (256, 256), (512, 128))
+
+
 def test_window_accepts_sequences_that_all_keep_a_key():
     """q_len - kv_len = 64 < W: the last row (q = 511) still sees key 447."""
     _check(_spec(sliding_window=128), (512, 256), (448, 256))
@@ -130,6 +143,23 @@ def test_accepts_an_idle_slot_with_no_queries_and_no_keys(path, q_lengths, kv_le
     so a slot with q_len 0 never reads its (empty) keys: accepted with LSE and bias
     too, though they refuse every other empty KV sequence."""
     _check(_spec(**_PATHS[path]), q_lengths, kv_lengths)
+
+
+@pytest.mark.parametrize(
+    "over,q_lengths,kv_lengths",
+    [({}, (256, 256), (256, 0)), ({"sliding_window": 128}, (256, 512), (256, 384))],
+    ids=["empty_kv", "window"],
+)
+def test_sinks_accept_keyless_rows(over, q_lengths, kv_lengths):
+    """The sink seeds each row's softmax, so a keyless row comes out as 0."""
+    spec = _spec(use_sinks=True, **over)
+    _check(spec, q_lengths, kv_lengths)
+
+
+def test_sinks_keep_the_bottom_right_length_rule():
+    spec = _spec(seqlen_q=256, seqlen_kv=512, causal_bottom_right=True, use_sinks=True)
+    with pytest.raises(ValueError, match="sequence 1: q_len=256 > kv_len=128"):
+        _check(spec, (256, 256), (512, 128))
 
 
 def test_window_rejects_a_sequence_that_leaves_rows_without_a_key():

@@ -165,8 +165,16 @@ length × Hkv × D × 2 B) must still stay below 2 GiB, as must its Q extent (be
 
 `q`/`out` may be packed `[total_q, Hq, D]` with `cu_seqlens_q`, as for the
 unified path. A request with `batch > 1` builds a varlen spec: its lengths are
-the maxima, and each sequence's query and KV lengths must be equal. One sequence
-takes the varlen body too when the single-sequence body cannot bound its tails:
+the maxima, and each sequence's query and KV lengths must be equal. Plain causal
+at bottom-right alignment (`mask_type` 2, or `diagonal_alignment` 1) relaxes
+that to `q_len <= kv_len` (prefix caching, chunked prefill) on both arches,
+whose varlen bodies shift each sequence's diagonal by its own `kv_len - q_len`;
+dispatch keeps that body even at equal maxima, since the sequences may still
+differ, and takes it for one sequence with `seqlen_q < seqlen_k` too. That body
+anchors a window or lookahead top-left, so bottom-right with either is declined
+for several sequences even at equal maxima. gfx942 serves bottom-right only
+through `mask_type` 2 (its dense candidate refuses cross-length `mask_type` 0
+requests). One sequence takes the varlen body too when the single-sequence body cannot bound its tails:
 keys ending inside a KV tile (that body would read the padded keys from stale
 page rows, the varlen body zeroes them), or queries ending inside a Q tile where
 the single-sequence body has no ragged form (gfx942; gfx950 with a sliding
@@ -182,8 +190,9 @@ value checks. It is only for trusted callers that guarantee the dense kernel's
 contract themselves: block ids in `[0, num_kv_blocks)` over each sequence's
 first `ceil(kv_len / block_size)` table columns, and `kv_lens[0] == seqlen_kv` on the single-sequence body
 (it does not mask keys past `kv_lens`), or `cu_seqlens_q` spanning the packed Q in
-order with `q_len == kv_len <= seqlen_kv` per sequence on the varlen body. The
-cohort is the kernel's own `supports_attention_dense`.
+order with `q_len == kv_len <= seqlen_kv` per sequence on the varlen body
+(bottom-right: `q_len <= kv_len <= seqlen_kv`). The cohort is the kernel's own
+`supports_attention_dense`.
 
 Unified variant names are `attention_{arch}_u{path}_{variant_id}`, for example
 `attention_gfx950_u2d_narrow_nw1_mw16_t1xb_llvm` (the `spec_id` drops the
