@@ -2024,6 +2024,181 @@
         "seed": 1,
         "reference_source": "c++ integration suite: Full/IntegrationGpuBatchnormFwdInferenceActiv2dUpcastFp16 (derived from 1_16_112_112_fp16_nhwc_norlo_norslope_rhi6)"
       }
+    },
+    {
+      "id": "s1_2d_i16x16_n2c16_fp32_cf_relu",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              16,
+              1,
+              1
+            ],
+            "strides": [
+              16,
+              1,
+              1,
+              1
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 6,
+            "dims": [
+              2,
+              16,
+              16,
+              16
+            ],
+            "strides": [
+              4096,
+              256,
+              16,
+              1
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_batchnorm_inference_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU)",
+        "operation": "BatchnormInference+relu_fwd",
+        "plan_items": [
+          "S1",
+          "F7",
+          "F13",
+          "F20",
+          "G7"
+        ],
+        "purpose": "claim",
+        "size_class": "S",
+        "seed": 837101628,
+        "inputs": {
+          "2": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 983084023
+          },
+          "3": {
+            "kind": "free",
+            "lo": 0.5,
+            "hi": 1.5,
+            "seed": 306449180
+          },
+          "4": {
+            "kind": "free",
+            "lo": -0.1,
+            "hi": 0.1,
+            "seed": 1735272084
+          },
+          "5": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 394896430
+          },
+          "6": {
+            "kind": "free",
+            "lo": -1.0,
+            "hi": 1.0,
+            "seed": 320171752
+          }
+        },
+        "notes": "quick demo case (ALMIOPEN-2903)"
+      }
     }
   ]
 }
