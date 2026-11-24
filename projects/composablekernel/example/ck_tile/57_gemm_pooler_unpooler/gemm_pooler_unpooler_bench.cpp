@@ -96,11 +96,11 @@ int main(int argc, char* argv[])
         return 2;
     }
 
-    if(shape.split_n != 0 &&
-       (shape.bias || arg.get_str("streamk") != "none" || shape.split_n < 0 ||
-        shape.split_n >= shape.N || shape.split_n % 64 != 0))
+    if(shape.split_n != 0 && (shape.bias || arg.get_str("streamk") != "none" || shape.split_n < 0 ||
+                              shape.split_n >= shape.N || shape.split_n % 64 != 0))
     {
-        std::printf("-split_n needs -bias=0, -streamk=none and 0 < split_n < N, a multiple of 64\n");
+        std::printf(
+            "-split_n needs -bias=0, -streamk=none and 0 < split_n < N, a multiple of 64\n");
         return 2;
     }
     const std::string layout = arg.get_str("layout");
