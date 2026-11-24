@@ -276,7 +276,6 @@ def tensor_roles(graph_json: Mapping, *, node_index: int = 0) -> dict:
 
 def from_hipdnn_graph(
     graph_json: Mapping[str, Any],
-    arch: str,
     *,
     num_cus: int | None,
     node_index: int = 0,
@@ -284,11 +283,10 @@ def from_hipdnn_graph(
     """Lower a one-node ``SdpaBackward`` graph to an :class:`AttnBwdRequest`.
 
     ``num_cus`` is the device's compute-unit count (the tuning key's fill
-    bucket). ``arch`` is not read by the lowering (the engine's arch rule is
-    :func:`engine_verdict`'s). Raises :class:`HipdnnLoweringError` for a graph
-    the lowering cannot read, first failure first.
+    bucket). The engine's arch rule is :func:`engine_verdict`'s, not the
+    lowering's. Raises :class:`HipdnnLoweringError` for a graph the lowering
+    cannot read, first failure first.
     """
-    del arch
     node = _node(graph_json, node_index)
     inputs, outputs = _group(node, "inputs"), _group(node, "outputs")
     params = _group(node, "parameters")
@@ -952,10 +950,9 @@ def _f32_bits(x: float) -> str:
     return f"0x{struct.unpack('<I', struct.pack('<f', float(x)))[0]:08x}"
 
 
-def plan_record(plan: AttnBwdPlan, req: AttnBwdRequest, arch: str) -> dict:
+def plan_record(plan: AttnBwdPlan, arch: str) -> dict:
     """The engine's expected outcome of an accepted request: graph-match tokens,
     workspace layout and every launch with its kernargs in ABI order."""
-    del req
     if plan.arch != arch:
         raise ValueError(f"plan of {plan.arch}, not {arch}")
     total = int(plan.workspace_bytes)

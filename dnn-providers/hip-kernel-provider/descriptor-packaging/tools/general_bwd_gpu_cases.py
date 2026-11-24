@@ -205,7 +205,7 @@ def case_graph(c: Case) -> dict:
 def verdict(c: Case, arch: str):
     """``(code, plan)`` of the engine for ``c`` on ``arch``'s full device."""
     try:
-        req = H.from_hipdnn_graph(case_graph(c), arch, num_cus=FULL_CUS[arch])
+        req = H.from_hipdnn_graph(case_graph(c), num_cus=FULL_CUS[arch])
     except H.HipdnnLoweringError:
         return H.LOWERING, None
     code, _detail, plan = H.engine_verdict(req, arch)

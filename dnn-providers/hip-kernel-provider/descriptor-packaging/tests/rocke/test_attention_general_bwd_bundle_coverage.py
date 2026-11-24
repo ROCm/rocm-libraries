@@ -134,7 +134,7 @@ def test_accepted_cases_are_a_function_of_the_lowered_request(
         expect = verdicts[arch][cid]
         if expect["code"] != "OK":
             continue
-        request = H.from_hipdnn_graph(graph, arch, num_cus=FULL_CUS[arch])
+        request = H.from_hipdnn_graph(graph, num_cus=FULL_CUS[arch])
         rewritten = corpus_tool.normalize(H.to_hipdnn_graph(request))
         again = _verdict(corpus_tool, rewritten, arch)
         assert again == expect, f"{cid}: the rewritten graph plans differently"

@@ -392,13 +392,13 @@ def expressible(g: dict) -> bool:
 def outcome(g: dict, arch: str, num_cus: int):
     """``(expect, request)`` of a normalized graph."""
     try:
-        req = H.from_hipdnn_graph(g, arch, num_cus=num_cus)
+        req = H.from_hipdnn_graph(g, num_cus=num_cus)
     except H.HipdnnLoweringError as exc:
         return {"code": H.LOWERING, "detail": str(exc)[:DETAIL_CHARS]}, None
     code, detail, plan = H.engine_verdict(req, arch)
     if plan is None:
         return {"code": code, "detail": detail[:DETAIL_CHARS]}, req
-    return H.plan_record(plan, req, arch), req
+    return H.plan_record(plan, arch), req
 
 
 def entry(eid: str, arch: str, g: dict, num_cus: int, with_request: bool) -> dict:

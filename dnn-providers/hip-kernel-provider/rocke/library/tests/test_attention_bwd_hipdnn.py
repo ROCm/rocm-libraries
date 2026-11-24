@@ -171,13 +171,13 @@ def _entry(g, role):
     return next(t for t in g["tensors"] if t["uid"] == uid)
 
 
-def _lower(g, arch="gfx942", num_cus=304):
-    return from_hipdnn_graph(g, arch, num_cus=num_cus)
+def _lower(g, num_cus=304):
+    return from_hipdnn_graph(g, num_cus=num_cus)
 
 
 def _verdict(g, arch="gfx942", num_cus=304):
     try:
-        req = _lower(g, arch, num_cus)
+        req = _lower(g, num_cus)
     except HipdnnLoweringError as exc:
         return LOWERING, str(exc)
     code, detail, _plan = engine_verdict(req, arch)
@@ -665,7 +665,7 @@ def test_no_scale_is_hipdnn_unit_scale_and_round_trips():
     )
     back = to_hipdnn_graph(rocke_default)
     assert back["nodes"][0]["parameters"]["attn_scale_value"] == 0.125
-    assert from_hipdnn_graph(back, "gfx942", num_cus=304).scale == 0.125
+    assert from_hipdnn_graph(back, num_cus=304).scale == 0.125
 
 
 def test_padding_is_not_declared_by_the_engine():
@@ -742,10 +742,10 @@ def _round_trip_requests():
 def test_round_trip_keeps_the_plan(name, arch):
     req = _round_trip_requests()[name]
     plan = attn_bwd_plan(req, arch, policy=engine_policy())
-    back = _lower(to_hipdnn_graph(req), arch, num_cus=req.num_cus)
+    back = _lower(to_hipdnn_graph(req), num_cus=req.num_cus)
     code, detail, plan2 = engine_verdict(back, arch)
     assert code == "OK", detail
-    want, got = plan_record(plan, req, arch), plan_record(plan2, back, arch)
+    want, got = plan_record(plan, arch), plan_record(plan2, arch)
     if req.is_thd and req.ragged_offset_multipliers is None:
         # element offsets of Q are not whole LSE (or V) elements: the graph
         # counts its offsets in tokens, which changes only the multipliers
@@ -758,7 +758,7 @@ def test_round_trip_keeps_the_plan(name, arch):
         assert dict(back.ragged_offset_multipliers)["q"] == 8 * 64
     assert got == want
     # the lowered request is the canonical form: it lowers to itself
-    again = _lower(to_hipdnn_graph(back), arch, num_cus=back.num_cus)
+    again = _lower(to_hipdnn_graph(back), num_cus=back.num_cus)
     assert again == back
 
 
@@ -790,7 +790,7 @@ def test_inverse_refuses_what_hipdnn_cannot_express():
 def test_plan_record_lists_every_launch_in_abi_order():
     req = _lower(_thd_graph(h_k=4, h_v=2))
     _code, _, plan = engine_verdict(req, "gfx942")
-    rec = plan_record(plan, req, "gfx942")
+    rec = plan_record(plan, "gfx942")
     assert [(x["slot"], x["launch"]) for x in rec["launches"]] == [
         ("prep", ""),
         ("main", "main"),
@@ -826,7 +826,7 @@ def test_plan_record_lists_every_launch_in_abi_order():
 def test_plan_record_direct_dkv_has_no_kv_converts():
     req = _lower(_dense_graph())
     _code, _, plan = engine_verdict(req, "gfx950")
-    rec = plan_record(plan, req, "gfx950")
+    rec = plan_record(plan, "gfx950")
     assert [x["launch"] for x in rec["launches"]] == ["", "main", "dq"]
     assert "ws.dk_acc.offset" not in rec["tokens"]
 
@@ -850,6 +850,6 @@ def test_tuned_request_records_its_table_key():
     req = dataclasses.replace(req, num_xcds=None)
     code, detail, plan = engine_verdict(req, arch)
     assert code == "OK", detail
-    rec = plan_record(plan, req, arch)
+    rec = plan_record(plan, arch)
     assert rec["tokens"]["attention_general_bwd.main.tuning_key"] == 1
     assert "|" in s

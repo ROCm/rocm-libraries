@@ -128,7 +128,7 @@ def test_every_representative_plans_its_row_through_its_graph(arch):
         rep = r.representative
         for req in (
             rep,
-            from_hipdnn_graph(to_hipdnn_graph(rep), arch, num_cus=rep.num_cus),
+            from_hipdnn_graph(to_hipdnn_graph(rep), num_cus=rep.num_cus),
         ):
             code, detail, plan = engine_verdict(req, arch)
             assert code == "OK", (r.kernels, detail)
