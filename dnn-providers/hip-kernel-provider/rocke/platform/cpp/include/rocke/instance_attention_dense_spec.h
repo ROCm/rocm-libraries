@@ -33,6 +33,9 @@
  *     caller cannot set it once for a type and get it wrong per spec.
  *   - kernel_name() consults the _*_name_parts methods:
  *     rocke_attention_dense_name_parts_t, which the concrete spec fills.
+ *   - The entry points here use base storage: two bytes per K/V element and
+ *     no storage name token. Use the concrete gfx950 entry points for FP8;
+ *     they pass its width and token into the same checks and name assembler.
  *   - check_dense_spec_preflight re-runs the concrete type's validators: the
  *     base checks (run by preflight itself, on the same spec) and then the
  *     arch's own fields (rocke_attention_dense_validate_fn, optional).

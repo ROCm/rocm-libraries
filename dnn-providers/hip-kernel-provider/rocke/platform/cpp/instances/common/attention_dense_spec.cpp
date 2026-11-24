@@ -10,7 +10,7 @@
  * remainder is used only where its zero-ness matches Python's for every operand
  * sign (x % y == 0 holds in both languages for the same x, y != 0).
  */
-#include "rocke/instance_attention_dense_spec.h"
+#include "attention_dense_spec_internal.h"
 
 #include <limits.h>
 #include <stdarg.h>
@@ -491,6 +491,17 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
                                          char* reason,
                                          size_t cap)
 {
+    return rocke_dense_detail::validate(
+        s, t, lookahead, rocke_dense_detail::base_kv_elem_bytes, reason, cap);
+}
+
+bool rocke_dense_detail::validate(const rocke_attention_dense_spec_t* s,
+                                  const rocke_attention_dense_traits_t* t,
+                                  bool lookahead,
+                                  int kv_elem_bytes,
+                                  char* reason,
+                                  size_t cap)
+{
     if(s == NULL || t == NULL)
         ROCKE_SPEC_FAIL(reason, cap, "attention dense spec is NULL");
     if((t->num_persist_decodes != 0 && t->persist_decodes == NULL)
@@ -665,7 +676,7 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
         if(s->num_kv_blocks <= 0)
             ROCKE_SPEC_FAIL(reason, cap, "paged=True requires num_kv_blocks > 0");
         const ExactProduct cache_bytes(
-            {s->num_kv_blocks, s->block_size, s->num_kv_heads, s->head_size, 2});
+            {s->num_kv_blocks, s->block_size, s->num_kv_heads, s->head_size, kv_elem_bytes});
         if(cache_bytes.at_least(2147483648u))
         {
             char num[64];
@@ -803,6 +814,15 @@ rocke_status_t rocke_attention_dense_kernel_name(const rocke_attention_dense_spe
                                                  char* out,
                                                  size_t out_cap)
 {
+    return rocke_dense_detail::kernel_name(s, np, NULL, out, out_cap);
+}
+
+rocke_status_t rocke_dense_detail::kernel_name(const rocke_attention_dense_spec_t* s,
+                                               const rocke_attention_dense_name_parts_t* np,
+                                               const char* kv_storage_token,
+                                               char* out,
+                                               size_t out_cap)
+{
     if(!divisors_ok(s) || np == NULL || out == NULL || s->dtype == NULL)
         return ROCKE_ERR_VALUE;
     for(int count : {np->num_layout, np->num_band, np->num_algorithm})
@@ -860,6 +880,8 @@ rocke_status_t rocke_attention_dense_kernel_name(const rocke_attention_dense_spe
     }
     add("bn%d", s->block_n);
     add("%s", s->dtype);
+    if(kv_storage_token != NULL)
+        add("%s", kv_storage_token);
     if(s->block_m != ROCKE_DENSE_DEFAULT_BLOCK_M)
         add("bm%d", s->block_m);
     if(128 / s->head_size > 1)
@@ -913,6 +935,19 @@ bool rocke_attention_dense_spec_preflight(const rocke_attention_dense_spec_t* s,
                                           char* reason,
                                           size_t cap)
 {
+    return rocke_dense_detail::preflight(
+        s, t, lookahead, rocke_dense_detail::base_kv_elem_bytes, arch_validate, ctx, reason, cap);
+}
+
+bool rocke_dense_detail::preflight(const rocke_attention_dense_spec_t* s,
+                                   const rocke_attention_dense_traits_t* t,
+                                   bool lookahead,
+                                   int kv_elem_bytes,
+                                   rocke_attention_dense_validate_fn arch_validate,
+                                   const void* ctx,
+                                   char* reason,
+                                   size_t cap)
+{
     if(s == NULL || t == NULL || t->type_name == NULL)
         ROCKE_SPEC_FAIL(reason, cap, "attention dense spec, traits or type_name is NULL");
 
@@ -921,7 +956,7 @@ bool rocke_attention_dense_spec_preflight(const rocke_attention_dense_spec_t* s,
      * super().__post_init__() first, so the first failing reason is the same. */
     /* Sized for the caller's buffer, so only `reason` decides truncation. */
     std::vector<char> why(std::max(cap, (size_t)ROCKE_ATTENTION_DENSE_REASON_CAP), '\0');
-    if(!rocke_attention_dense_spec_validate(s, t, lookahead, why.data(), why.size())
+    if(!validate(s, t, lookahead, kv_elem_bytes, why.data(), why.size())
        || (arch_validate != NULL && !arch_validate(ctx, why.data(), why.size())))
         ROCKE_SPEC_FAIL(reason, cap, "invalid %s: %s", t->type_name, why.data());
 
@@ -954,7 +989,8 @@ bool rocke_attention_dense_spec_preflight(const rocke_attention_dense_spec_t* s,
                         s->block_m);
 
     /* 4. 32-bit addressing. */
-    const ExactProduct kv_bytes({s->batch, s->seqlen_kv, s->num_kv_heads, s->head_size, 2});
+    const ExactProduct kv_bytes(
+        {s->batch, s->seqlen_kv, s->num_kv_heads, s->head_size, kv_elem_bytes});
     if(kv_bytes.at_least((uint64_t)ROCKE_ATTENTION_DENSE_INT32_LIMIT))
     {
         char num[64];

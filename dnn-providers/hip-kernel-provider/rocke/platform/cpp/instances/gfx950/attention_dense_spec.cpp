@@ -3,9 +3,10 @@
 /* Host-only port of library/kernels/gfx950/attention_dense.py. The shared
  * validator/decode registry remains in instances/common/attention_dense_spec.cpp.
  * No builder, launcher, or provider dependencies belong in this layer. */
+#include "../common/attention_dense_spec_internal.h"
+#include "rocke/float_format.h"
 #include "rocke/instance_gfx950_attention_dense.h"
 #include "rocke/sha256.h"
-#include "rocke/float_format.h"
 
 #include <limits.h>
 #include <stdio.h>
@@ -19,6 +20,11 @@ namespace
 bool streq(const char* a, const char* b)
 {
     return a != NULL && b != NULL && strcmp(a, b) == 0;
+}
+
+bool fp8_kv(const rocke_gfx950_attention_dense_spec_t& s)
+{
+    return streq(s.kv_storage_dtype, "fp8e4m3");
 }
 
 void clear_reason(char* reason, size_t cap)
@@ -35,6 +41,11 @@ bool validate_arch(const void* ctx, char* reason, size_t cap)
     if(s == NULL)
         ROCKE_SPEC_FAIL(reason, cap, "attention dense spec is NULL");
     const auto& b = s->base;
+    if(s->kv_storage_dtype != NULL && !fp8_kv(*s))
+        ROCKE_SPEC_FAIL(reason,
+                        cap,
+                        "kv_storage_dtype must be None or one of ['fp8e4m3'], got %s",
+                        s->kv_storage_dtype);
     if(s->lds_v_row_pad < 0 || s->lds_v_row_pad % 8 != 0)
         ROCKE_SPEC_FAIL(
             reason,
@@ -62,7 +73,8 @@ bool validate_arch(const void* ctx, char* reason, size_t cap)
             rocke_strbuf_t value{};
             rocke_append_python_float_repr(&value, s->lazy_rescale_threshold);
             if(value.oom)
-                rocke_spec_set_reason(reason, cap, "out of memory formatting lazy_rescale_threshold");
+                rocke_spec_set_reason(
+                    reason, cap, "out of memory formatting lazy_rescale_threshold");
             else
                 rocke_spec_set_reasonf(reason,
                                        cap,
@@ -141,12 +153,19 @@ bool validate_arch(const void* ctx, char* reason, size_t cap)
         if(b.paged || b.varlen)
             ROCKE_SPEC_FAIL(reason, cap, "right_bound > 0 is not supported with paged / varlen");
     }
-    if(b.paged && !b.causal)
-        ROCKE_SPEC_FAIL(reason, cap, "paged attention is causal-only");
+    if(s->kv_storage_dtype != NULL)
+    {
+        if(b.persistent)
+            ROCKE_SPEC_FAIL(reason, cap, "fp8 KV is not yet supported with persistent=True");
+        if(b.paged)
+            ROCKE_SPEC_FAIL(reason, cap, "fp8 KV is not yet supported with paged KV");
+        if(b.ragged)
+            ROCKE_SPEC_FAIL(reason, cap, "fp8 KV is not yet supported with ragged=True");
+        if(b.varlen)
+            ROCKE_SPEC_FAIL(reason, cap, "fp8 KV is not yet supported with varlen=True");
+    }
     if(b.causal_bottom_right)
     {
-        if(b.paged)
-            ROCKE_SPEC_FAIL(reason, cap, "causal_bottom_right is not supported with paged=True");
         if(b.persistent)
             ROCKE_SPEC_FAIL(
                 reason, cap, "causal_bottom_right is not supported with persistent=True");
@@ -346,8 +365,17 @@ bool rocke_gfx950_attention_dense_spec_validate(const rocke_gfx950_attention_den
     if(s == NULL)
         ROCKE_SPEC_FAIL(reason, cap, "attention dense spec is NULL");
     const auto t = rocke_gfx950_attention_dense_traits();
-    return rocke_attention_dense_spec_validate(&s->base, &t, s->right_bound != 0, reason, cap)
+    const int kv_elem_bytes = rocke_gfx950_attention_dense_kv_elem_bytes(s);
+    return rocke_dense_detail::validate(
+               &s->base, &t, s->right_bound != 0, kv_elem_bytes, reason, cap)
            && validate_arch(s, reason, cap);
+}
+
+int rocke_gfx950_attention_dense_kv_elem_bytes(const rocke_gfx950_attention_dense_spec_t* s)
+{
+    if(s == NULL)
+        return 0;
+    return fp8_kv(*s) ? 1 : rocke_dense_detail::base_kv_elem_bytes;
 }
 
 int rocke_gfx950_attention_dense_resolved_exp_per_pv_step(
@@ -498,7 +526,8 @@ rocke_status_t rocke_gfx950_attention_dense_kernel_name(
     rocke_attention_dense_name_parts_t parts;
     if(const auto status = rocke_gfx950_attention_dense_name_parts(s, &parts); status != ROCKE_OK)
         return status;
-    return rocke_attention_dense_kernel_name(&s->base, &parts, out, cap);
+    return rocke_dense_detail::kernel_name(
+        &s->base, &parts, fp8_kv(*s) ? "kvfp8e4m3" : NULL, out, cap);
 }
 
 rocke_status_t rocke_gfx950_dense_static_lds_bytes(int head_size,
@@ -569,8 +598,14 @@ bool rocke_gfx950_supports_attention_dense(const rocke_gfx950_attention_dense_sp
         ROCKE_SPEC_FAIL(reason, cap, "attention dense spec is NULL");
     const auto t = rocke_gfx950_attention_dense_traits();
     const auto& b = s->base;
-    if(!rocke_attention_dense_spec_preflight(
-           &b, &t, s->right_bound != 0, validate_arch, s, reason, cap))
+    if(!rocke_dense_detail::preflight(&b,
+                                      &t,
+                                      s->right_bound != 0,
+                                      rocke_gfx950_attention_dense_kv_elem_bytes(s),
+                                      validate_arch,
+                                      s,
+                                      reason,
+                                      cap))
         return false;
     bool bm_ok = false;
     for(const auto& geometry : ROCKE_DENSE_TILE_GEOMETRIES)
@@ -603,7 +638,28 @@ bool rocke_gfx950_supports_attention_dense(const rocke_gfx950_attention_dense_sp
                         b.head_size,
                         b.block_n,
                         ROCKE_GFX950_DENSE_LDS_CAPACITY_BYTES);
-    return rocke_attention_dense_check_kv_segments(&b, s->kv_segments, s->emit_lse, reason, cap);
+    if(!rocke_attention_dense_check_kv_segments(&b, s->kv_segments, s->emit_lse, reason, cap))
+        return false;
+    if(s->kv_storage_dtype != NULL)
+    {
+        /* Preflight established that block_n divides block_m (128 or 256).
+         * Each of the wave's 64 threads loads eight flat K/V elements. */
+        const int tile_elems = b.block_n * b.head_size;
+        const int elems_per_load = waves * 64 * 8;
+        if(tile_elems % elems_per_load != 0)
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "fp8 dense requires block_n*head_size=%d divisible by threads*8=%d "
+                            "(block_n=%d, head_size=%d, num_waves=%d)",
+                            tile_elems,
+                            elems_per_load,
+                            b.block_n,
+                            b.head_size,
+                            waves);
+        if(b.use_sinks)
+            ROCKE_SPEC_FAIL(reason, cap, "fp8 dense does not support attention sinks yet");
+    }
+    return true;
 }
 
 rocke_status_t rocke_gfx950_attention_dense_grid(const rocke_gfx950_attention_dense_spec_t* s,
@@ -657,9 +713,18 @@ rocke_status_t rocke_gfx950_attention_dense_signature(rocke_arena_t* arena,
     rocke_signature_builder_t sig;
     if(rocke_signature_builder_init(&sig, arena) != ROCKE_OK)
         return ROCKE_ERR_VALUE;
-    for(const char* name : {"q_ptr", "k_ptr", "v_ptr", "o_ptr"})
-        rocke_signature_builder_ptr(&sig, name, s->base.dtype, "global");
+    const bool fp8 = fp8_kv(*s);
+    const char* kv_dtype = fp8 ? s->kv_storage_dtype : s->base.dtype;
+    rocke_signature_builder_ptr(&sig, "q_ptr", s->base.dtype, "global");
+    rocke_signature_builder_ptr(&sig, "k_ptr", kv_dtype, "global");
+    rocke_signature_builder_ptr(&sig, "v_ptr", kv_dtype, "global");
+    rocke_signature_builder_ptr(&sig, "o_ptr", s->base.dtype, "global");
     rocke_signature_builder_scalar(&sig, "scale", "f32");
+    if(fp8)
+    {
+        rocke_signature_builder_scalar(&sig, "k_scale", "f32");
+        rocke_signature_builder_scalar(&sig, "v_scale", "f32");
+    }
     for(size_t i = 0; i < fields.count; ++i)
         rocke_signature_builder_scalar(&sig, fields.names[i], "i32");
     if(s->base.use_sinks)

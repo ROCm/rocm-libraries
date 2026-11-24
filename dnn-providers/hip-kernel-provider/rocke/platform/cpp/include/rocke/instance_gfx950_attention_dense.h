@@ -12,7 +12,7 @@
  * Strings are caller-owned and use rocke_py_str_repr's existing Unicode limits.
  *
  * validate mirrors __post_init__; supports additionally runs shared preflight,
- * tile/LDS and KV-segment admission. Reasons follow the shared header's contract.
+ * tile/LDS, KV-segment and FP8 admission. Reasons follow the shared header's contract.
  * Property/name/launch accessors require a supported spec. runtime_args has the
  * additional fast-division dividend check, just as Python does; it is not folded
  * into supports. All output arrays are caller-owned; signature storage is owned
@@ -60,6 +60,7 @@ typedef struct rocke_gfx950_attention_dense_spec
     const char* pv_loop_order; /* NULL = None */
     bool causal_diag_split; /* true */
     int o_store_width; /* 4 */
+    const char* kv_storage_dtype; /* NULL = compute dtype (default); or "fp8e4m3" */
 } rocke_gfx950_attention_dense_spec_t;
 
 rocke_gfx950_attention_dense_spec_t rocke_gfx950_attention_dense_spec_default(void);
@@ -72,6 +73,8 @@ bool rocke_gfx950_supports_attention_dense(const rocke_gfx950_attention_dense_sp
                                            char* reason,
                                            size_t reason_cap);
 
+/* Stored K/V element width: 1 for fp8e4m3, 2 otherwise; 0 for NULL spec. */
+int rocke_gfx950_attention_dense_kv_elem_bytes(const rocke_gfx950_attention_dense_spec_t* spec);
 int rocke_gfx950_attention_dense_resolved_exp_per_pv_step(
     const rocke_gfx950_attention_dense_spec_t* spec);
 bool rocke_gfx950_attention_dense_resolved_pv_sched_fence(
@@ -85,8 +88,9 @@ const char* rocke_gfx950_attention_dense_resolved_pv_loop_order(
 bool rocke_gfx950_attention_dense_runtime_shape(const rocke_gfx950_attention_dense_spec_t* spec);
 
 /* Names refer to static strings. runtime_param_fields are the five fields
- * excluded from binary identity; shape_kernarg_fields is the complete scalar
- * ABI after scale, including fastdiv pairs (or the three baked-grid scalars). */
+ * excluded from binary identity; shape_kernarg_fields lists only shape scalars,
+ * including fastdiv pairs (or the three baked-grid scalars). They follow scale
+ * and, for FP8 K/V, the f32 k_scale and v_scale in the signature. */
 typedef struct rocke_gfx950_dense_fields
 {
     const char* names[ROCKE_GFX950_DENSE_MAX_RUNTIME_FIELDS];

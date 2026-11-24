@@ -732,7 +732,7 @@ def _dump(data: dict) -> str:
     items = list(data.items())
     for i, (key, value) in enumerate(items):
         tail = "," if i + 1 < len(items) else ""
-        if key == "cases":
+        if key in ("cases", "signatures"):
             rows = [json.dumps(c, separators=(",", ":")) for c in value]
             lines.append(f' "{key}": [\n  ' + ",\n  ".join(rows) + f"\n ]{tail}")
         elif key == "hook_tables":
@@ -1186,6 +1186,44 @@ def _gfx950_cases():
             for h in (32767, 32768)
         ],
     ]
+    # Only K/V storage changes: compare the pointer/scale ABI for each compute
+    # dtype, and put both a nondefault BM and a layout suffix after its name tag.
+    fp8 = dict(kv_storage_dtype="fp8e4m3")
+    for dtype in ("bf16", "fp16"):
+        for storage in (None, "fp8e4m3"):
+            cases.append(
+                dict(
+                    dtype=dtype, kv_storage_dtype=storage, block_m=128, lds_k_row_pad=0
+                )
+            )
+    cases += [
+        dict(kv_storage_dtype=""),
+        dict(kv_storage_dtype="fp16", lds_v_row_pad=-8),  # storage before arch knobs
+        dict(dtype="bad", kv_storage_dtype="fp16"),  # base before storage
+        *[
+            dict(fp8, **{k: True})
+            for k in ("persistent", "ragged", "varlen", "use_sinks")
+        ],
+        # With BM256, threads*8=4096: D64*BN32 falls short; BN64 fits exactly.
+        dict(fp8, head_size=64, block_n=32),
+        dict(fp8, head_size=64, block_n=64),
+        dict(fp8, head_size=64, block_n=32, kv_segments=0),
+        # Two K/V heads of D128: 2^22 rows reach 2 GiB only at two bytes;
+        # 2^23 rows reach it even at one. Keep Q/O small throughout.
+        dict(seqlen_kv=1 << 22),
+        dict(fp8, seqlen_kv=1 << 22),
+        dict(fp8, seqlen_kv=1 << 23),
+        # Physical cache (16 rows/block), not logical sequence length. At
+        # 2^18 blocks only fp8 gets as far as the concrete paged rejection.
+        dict(paged=True, block_size=16, num_kv_blocks=1 << 18),
+        dict(fp8, paged=True, block_size=16, num_kv_blocks=1 << 18),
+        dict(fp8, paged=True, block_size=16, num_kv_blocks=1 << 19),
+        # Plain causal D64: accepted page sizes beyond the minimum of 16.
+        *[
+            dict(paged=True, head_size=64, block_size=n, num_kv_blocks=32)
+            for n in (32, 64)
+        ],
+    ]
     for persistent, decodes in ((True, PERSIST_DECODES), (False, NONPERSIST_DECODES)):
         for decode in decodes:
             cases.append(
@@ -1273,7 +1311,13 @@ def _gfx950_expect(spec, arch="gfx950"):
     ok, why = gfx.supports_attention_dense(spec, arch=arch)
     if reason is None and arch == "gfx950":
         why = None
-    result = dict(valid=valid, reason=reason, supports=ok, supports_reason=why)
+    result = dict(
+        valid=valid,
+        reason=reason,
+        supports=ok,
+        supports_reason=why,
+        kv_elem_bytes=spec.kv_elem_bytes,
+    )
     if not ok:
         return result
     result.update(
@@ -1315,6 +1359,18 @@ def _gfx950_expect(spec, arch="gfx950"):
 def _gfx950_build():
     from kernels.gfx950.attention_dense import gfx950_dense_tile_legality
 
+    cases = []
+    signatures = []  # First occurrence fixes the index; preserve argument order.
+    for raw in _gfx950_cases():
+        overrides = dict(raw)
+        arch = overrides.pop("arch", "gfx950")
+        expect = _gfx950_expect(_gfx950_spec(overrides), arch)
+        if "signature" in expect:
+            signature = expect.pop("signature")
+            if signature not in signatures:
+                signatures.append(signature)
+            expect["signature_id"] = signatures.index(signature)
+        cases.append(dict(spec=overrides, arch=arch, expect=expect))
     return {
         "_comment": "Generated with --regenerate; concrete gfx950 declared-type C contract. "
         "int32/bool/double/optional-string only, no Python numeric-kind coercion.",
@@ -1329,15 +1385,9 @@ def _gfx950_build():
             for d in (0, 64, 128)
         },
         "generated": {"seed": _GFX950_SEED, "count": _GFX950_COUNT},
-        "cases": [
-            dict(
-                spec={f.name: getattr(spec, f.name) for f in fields(spec)},
-                arch=c.get("arch", "gfx950"),
-                expect=_gfx950_expect(spec, c.get("arch", "gfx950")),
-            )
-            for c in _gfx950_cases()
-            for spec in [_gfx950_spec(c)]
-        ],
+        "base": _BASE,
+        "signatures": signatures,
+        "cases": cases,
     }
 
 
@@ -1352,7 +1402,11 @@ def test_gfx950_contract_matches_current_python():
 
 def test_gfx950_vectors_cover_host_boundaries():
     """Keep important consumer paths represented, not just the table's size."""
-    cases = json.loads(GFX950_VECTORS.read_text(encoding="utf-8"))["cases"]
+    data = json.loads(GFX950_VECTORS.read_text(encoding="utf-8"))
+    cases = [
+        dict(c, spec={**data["defaults"], **data["base"], **c["spec"]})
+        for c in data["cases"]
+    ]
     supported = [c for c in cases if c["expect"]["supports"]]
     for persistent, key, decodes in (
         (True, "resolved_persist_decode", PERSIST_DECODES),

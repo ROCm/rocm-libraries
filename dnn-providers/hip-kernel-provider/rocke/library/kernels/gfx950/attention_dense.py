@@ -232,8 +232,7 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
     kv_segments: int = field(default=1, kw_only=True)
     # KV-cache storage format. None keeps KV at the compute dtype; "fp8e4m3"
     # reads 1-byte fp8 KV and dequants to dtype in the loader (Q stays dtype).
-    # Lives here, not on the shared spec: only this arch's loader decodes fp8,
-    # and the shared spec is the one the C++ engine mirrors.
+    # Lives here, not on the shared spec: only this arch's loader decodes fp8.
     kv_storage_dtype: str | None = field(default=None, kw_only=True)
 
     @property

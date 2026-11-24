@@ -114,6 +114,7 @@ const Field fields[] = {B(batch, Integer),
                         F(emit_lse, Boolean),
                         F(right_bound, Integer),
                         F(kv_segments, Integer),
+                        F(kv_storage_dtype, String),
                         F(lds_num_buffers, Integer),
                         F(lds_k_row_pad, Integer),
                         F(lazy_rescale_threshold, Float),
@@ -221,11 +222,14 @@ void parts(const char values[][ROCKE_ATTENTION_DENSE_NAME_PART_CAP], int n, cons
     for(int i = 0; i < n; ++i)
         CHECK(eqstr(values[i], want->arr[i]));
 }
-void check_case(const jd_val_t* c, rocke_arena_t* arena)
+void check_case(const jd_val_t* c, const jd_val_t* root, rocke_arena_t* arena)
 {
     Spec s = rocke_gfx950_attention_dense_spec_default();
+    if(const auto* base = get(root, "base"))
+        CHECK(load(s, base));
     CHECK(load(s, get(c, "spec")));
     const auto* e = get(c, "expect");
+    CHECK(eqnum(rocke_gfx950_attention_dense_kv_elem_bytes(&s), get(e, "kv_elem_bytes")));
     char reason[4096] = {};
     bool valid = rocke_gfx950_attention_dense_spec_validate(&s, reason, sizeof(reason));
     CHECK(eqbool(valid, get(e, "valid")));
@@ -304,6 +308,15 @@ void check_case(const jd_val_t* c, rocke_arena_t* arena)
     size_t n = 0;
     CHECK(rocke_gfx950_attention_dense_signature(arena, &s, &sig, &n) == ROCKE_OK);
     const auto* signature = get(e, "signature");
+    // An external live case may instead carry the full Python signature inline.
+    if(!signature)
+    {
+        const auto* table = get(root, "signatures");
+        double id;
+        if(table && table->kind == JD_ARR && rocke_jnum(get(e, "signature_id"), &id) && id >= 0
+           && id < table->arr_len && static_cast<int>(id) == id)
+            signature = table->arr[static_cast<int>(id)];
+    }
     CHECK(arr(signature, n));
     if(arr(signature, n))
         for(size_t i = 0; i < n; ++i)
@@ -388,7 +401,7 @@ void check_vectors(const char* text)
         for(int i = 0; i < cases->arr_len; ++i)
         {
             where = "case " + std::to_string(i);
-            check_case(cases->arr[i], &arena);
+            check_case(cases->arr[i], root, &arena);
         }
     rocke_arena_destroy(&arena);
 }
