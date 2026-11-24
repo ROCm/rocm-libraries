@@ -172,6 +172,15 @@ pack-coverage engine adds its entry there on its branch.
   `reports.anchored_share.<operation>` (`anchored`, `delivered`, `share`, `anchor_scaling`) gives
   the share of the sweep's graphs delivered after the cut to `--count` that come from the
   archetypes and their neighbourhoods, with or without it.
+- Every archetype is drawn until one of its points is admitted, even where the archetype share
+  of a combination's points rounds to none, and the cut to `--count` keeps one graph of each
+  admitted archetype (counted against `--count`, as the served edges are). Which archetype a
+  combination tries first is keyed by `--seed`, not the declaration order.
+  `reports.anchored_share.<operation>.archetypes.<name>` counts each one's draws (`drawn`,
+  `refused_by_constraints`, `refused_by_oracle`, `admitted`) and the graphs it put in the set
+  (`delivered`). An archetype never admitted is a warning with the reason: no explored
+  combination it fits, a declared constraint, a graph past `--max-bytes` (GPT-3's matmul
+  projections at the default 256 MiB), or the engine declining it.
 - `--form-floor n` asks n in every optional **form** the operation declares (`form_label`):
   for `sdpa_fwd` plain, `scale_unset`, `scale_tensor`, `dropout`, `padded`, `ragged`, `bias`,
   `sink`; for `sdpa_bwd` all but `sink`. Each form varies one optional attribute

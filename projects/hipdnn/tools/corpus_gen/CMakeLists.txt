@@ -115,6 +115,15 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
                 # A --count far below the first pass cuts it, and anchored_share counts what is
                 # left: the corpus's sweep graphs, not the problems explored before the cut.
                 "anchored_share_counts_the_delivered_corpus|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,100|0|100|||reports.anchored_share.matmul.delivered=100"
+                # anchored_share accounts for each archetype: GPT-3's
+                # projections are past the default --max-bytes at every
+                # declared size, refused by the oracle and never admitted;
+                # the square benchmark fits and is.
+                "each_archetype_is_accounted_for|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,100|0|100|||reports.anchored_share.matmul.archetypes.gpt3_175b_projection.admitted=0,reports.anchored_share.matmul.archetypes.gpt3_175b_projection.refused_by_oracle>=1,reports.anchored_share.matmul.archetypes.square_benchmark.admitted>=1"
+                # The cut keeps a graph of every admitted archetype: at
+                # --count 8 it would otherwise drop decode_gemv and
+                # llama3_70b_projection.
+                "the_cut_keeps_each_admitted_archetype|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,8|0|8|||reports.anchored_share.matmul.archetypes.decode_gemv.delivered>=1,reports.anchored_share.matmul.archetypes.llama3_70b_projection.delivered>=1"
                 # A focused search that stops without proof reports the regime not reached, not
                 # saturated, and the short quota exits 3: with the sweep off and 100 oracle calls a
                 # combination, this seed's search finds none of cross_long_gqa, a sliver (more

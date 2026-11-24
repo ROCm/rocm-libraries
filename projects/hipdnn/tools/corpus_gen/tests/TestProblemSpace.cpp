@@ -886,6 +886,105 @@ TEST(TestProblemSpace, TheAnchoredShareCollapsesAtALargeCountUnlessAnchorScaling
     EXPECT_GT(scaled.anchoredShare(), 0.4);
 }
 
+namespace
+{
+
+/// Sixteen combinations (the values of `mode`), each fitting every archetype in @p archetypes
+/// (a JSON array), drawn for a fifth of each combination's points.
+OperationMetadata sixteenCombinations(const std::string& archetypes)
+{
+    return metadataFor(R"({
+      "schema_version": "1.0",
+      "operation": "toy",
+      "parameters": {
+        "M":    { "type": "int64" },
+        "N":    { "type": "int64" },
+        "mode": { "type": "enum", "values": ["a", "b", "c", "d", "e", "f", "g", "h",
+                                             "i", "j", "k", "l", "m", "n", "o", "p"] }
+      },
+      "stratification_axis": "working_set",
+      "regimes": {},
+      "graph_builder": { "function": "f", "source": "x.hpp", "arguments": [] },
+      "archetypes": )" + archetypes
+                       + R"(,
+      "mixture": { "archetypes": 0.2, "neighbourhood": 0.0, "exploration": 0.8 }
+    })");
+}
+
+} // namespace
+
+TEST(TestProblemSpace, EachCombinationStartsItsArchetypeDrawsWhereTheSeedSays)
+{
+    // Five points a combination leave one archetype draw. Were every combination to start at
+    // the first declared archetype, it would take every one of them and the second would hold
+    // only the draw that makes sure of it once.
+    const auto metadata = sixteenCombinations(R"([
+        { "name": "first",  "values": { "M": [100], "N": [100] } },
+        { "name": "second", "values": { "M": [200], "N": [200] } }])");
+    ExplorationRequest request;
+    request.pointsPerCombination = 5;
+    request.budgetPerCombination = 400;
+    request.seed = 6;
+    const auto corpus = exploreProblemSpace(metadata, request, ACCEPT_EVERYTHING);
+    ASSERT_EQ(corpus.archetypes.size(), 2U);
+    EXPECT_GE(corpus.archetypes[0].admitted, 4);
+    EXPECT_GE(corpus.archetypes[1].admitted, 4);
+    EXPECT_EQ(corpus.archetypes[0].admitted + corpus.archetypes[1].admitted, 17)
+        << "one draw per combination, and the second archetype's own in the first";
+}
+
+TEST(TestProblemSpace, EveryArchetypeIsDrawnOnceEvenWhereItsShareRoundsToNone)
+{
+    // Two points a combination leave the archetype share at 0.4 of a problem, which rounds to
+    // none, so no quota draws one; each archetype is still drawn until one point is admitted.
+    // One the engine refuses is tried a bounded number of times and kept for the report.
+    const auto metadata = sixteenCombinations(R"([
+        { "name": "served",  "values": { "M": [100], "N": [100] } },
+        { "name": "refused", "values": { "M": [3000], "N": [100] } }])");
+    const ProblemOracle not3000
+        = [](const ProblemPoint& point) { return std::get<int64_t>(point.at("M")) != 3000; };
+    ExplorationRequest request;
+    request.pointsPerCombination = 2;
+    request.budgetPerCombination = 400;
+    request.seed = 6;
+    const auto corpus = exploreProblemSpace(metadata, request, not3000);
+    ASSERT_EQ(corpus.archetypes.size(), 2U);
+
+    const auto& served = corpus.archetypes[0];
+    EXPECT_EQ(served.admitted, 1) << "drawn until admitted once, then left to the quotas";
+    const auto problems = corpus.problems();
+    EXPECT_EQ(std::count_if(problems.begin(),
+                            problems.end(),
+                            [](const ProblemPoint& point) {
+                                return std::get<int64_t>(point.at("M")) == 100
+                                       && std::get<int64_t>(point.at("N")) == 100;
+                            }),
+              1);
+
+    const auto& refused = corpus.archetypes[1];
+    EXPECT_EQ(refused.admitted, 0);
+    EXPECT_EQ(refused.refusedByOracle, refused.drawn);
+    EXPECT_GT(refused.drawn, 0);
+    EXPECT_LE(refused.drawn, 64) << "the tries for an archetype nothing admits are bounded";
+    ASSERT_TRUE(refused.refused.has_value());
+    EXPECT_EQ(std::get<int64_t>(refused.refused->at("M")), 3000);
+
+    // The rounding is reported once, not as a refusal in every combination.
+    const auto& skipped = corpus.skippedCombinations;
+    EXPECT_EQ(std::count_if(skipped.begin(),
+                            skipped.end(),
+                            [](const std::string& line) {
+                                return line.find("no declared archetype") != std::string::npos;
+                            }),
+              0);
+    EXPECT_EQ(std::count_if(skipped.begin(),
+                            skipped.end(),
+                            [](const std::string& line) {
+                                return line.find("rounds to none") != std::string::npos;
+                            }),
+              1);
+}
+
 TEST(TestProblemSpace, AnchorScalingNeverShrinksTheFixedQuotasAndNeedsATarget)
 {
     // max(pointsPerCombination, target / combinations): a target the first pass already covers,

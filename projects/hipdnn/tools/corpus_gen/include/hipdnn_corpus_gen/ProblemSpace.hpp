@@ -18,6 +18,7 @@
 #include <limits>
 #include <map>
 #include <numeric>
+#include <optional>
 #include <random>
 #include <set>
 #include <string>
@@ -137,6 +138,10 @@ struct CombinationResult
     std::vector<ProblemPoint> problems;
     FeasibleSetStats stats;
 
+    /// The declared archetype (an index into OperationMetadata::archetypes) of each of the
+    /// first @ref fromArchetypes problems.
+    std::vector<size_t> archetypeOf;
+
     /// Growth toward @ref ExplorationRequest::corpusTarget stopped because doubling the search
     /// found no new point.
     bool saturated = false;
@@ -151,6 +156,25 @@ struct CombinationResult
     /// seed reproduces them.
     std::vector<ProblemPoint> lowest;
     std::vector<ProblemPoint> highest;
+};
+
+/// What became of one declared archetype's draws over the whole exploration.
+struct ArchetypeTally
+{
+    std::string name;
+
+    /// Draws that fit a combination and were put to the checks, a repeat of a point already
+    /// judged there aside; one the caller holds counts here and in none of the outcomes below.
+    int64_t drawn = 0;
+    int64_t refusedByConstraints = 0;
+
+    /// Refused by the oracle: the engine, the benchmarking size ceiling, or a graph that does
+    /// not build.
+    int64_t refusedByOracle = 0;
+    int64_t admitted = 0;
+
+    /// The first point the oracle refused, so a caller can say why.
+    std::optional<ProblemPoint> refused;
 };
 
 /// The problem corpus and an account of how it was produced.
@@ -184,6 +208,9 @@ struct ProblemCorpus
     /// Why the corpus holds fewer than @ref ExplorationRequest::corpusTarget problems, one line
     /// per combination. Empty when the target was met or not set.
     std::vector<std::string> shortfall;
+
+    /// Per declared archetype, in declaration order.
+    std::vector<ArchetypeTally> archetypes;
 
     /// Every problem point found, flattened.
     std::vector<ProblemPoint> problems() const
@@ -1234,6 +1261,14 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
 {
     ProblemCorpus corpus;
     corpus.operation = metadata.operation;
+    for(const auto& archetype : metadata.archetypes)
+    {
+        ArchetypeTally tally;
+        tally.name = archetype.name;
+        corpus.archetypes.push_back(std::move(tally));
+    }
+    // Explored combinations whose archetype share rounds to no problem.
+    size_t archetypeQuotaZero = 0;
 
     const auto numericWindow = detail::numericWindow(metadata, request);
     for(const auto& dimension : numericWindow)
@@ -1403,27 +1438,35 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         std::set<std::string> seen;
         std::vector<ProblemPoint> anchored;
 
-        const auto accept = [&](const ProblemPoint& point) {
+        enum class Verdict
+        {
+            REPEATED,
+            CONSTRAINT,
+            ORACLE,
+            HELD,
+            ADMITTED
+        };
+        const auto judge = [&](const ProblemPoint& point) {
             if(!seen.insert(detail::describe(point)).second)
             {
-                return false;
+                return Verdict::REPEATED;
             }
             if(!detail::satisfiesConstraints(metadata, point))
             {
                 ++corpus.constraintRejections;
-                return false;
+                return Verdict::CONSTRAINT;
             }
             ++corpus.constraintAdmissions;
             if(!admits(point))
             {
-                return false;
+                return Verdict::ORACLE;
             }
             if(isHeld(point))
             {
                 ++heldFound[index];
-                return false;
+                return Verdict::HELD;
             }
-            return true;
+            return Verdict::ADMITTED;
         };
 
         size_t archetypeQuota = 0;
@@ -1444,23 +1487,83 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
                 = static_cast<size_t>(std::max(0.0, metadata.mixture.neighbourhood * total));
         }
 
+        // One draw from archetype @p which: false when it does not describe this combination
+        // or a check refused the point.
+        int64_t drawnHere = 0;
+        const auto drawArchetype = [&](size_t which) {
+            const auto drawn
+                = detail::drawFromArchetype(metadata, metadata.archetypes[which], categorical, rng);
+            if(!drawn.has_value())
+            {
+                return false;
+            }
+            ++drawnHere;
+            auto& tally = corpus.archetypes[which];
+            const auto verdict = judge(*drawn);
+            if(verdict != Verdict::REPEATED)
+            {
+                ++tally.drawn;
+            }
+            switch(verdict)
+            {
+            case Verdict::ADMITTED:
+                ++tally.admitted;
+                anchored.push_back(*drawn);
+                result.problems.push_back(*drawn);
+                result.archetypeOf.push_back(which);
+                ++result.fromArchetypes;
+                return true;
+            case Verdict::CONSTRAINT:
+                ++tally.refusedByConstraints;
+                break;
+            case Verdict::ORACLE:
+                ++tally.refusedByOracle;
+                if(!tally.refused.has_value())
+                {
+                    tally.refused = *drawn;
+                }
+                break;
+            case Verdict::REPEATED:
+            case Verdict::HELD:
+            default:
+                break;
+            }
+            return false;
+        };
+
+        if(!metadata.mixture.isExplorationOnly() && pointsFor(index) > 0)
+        {
+            // Every archetype is drawn until a point of it is admitted somewhere, whatever the
+            // quotas, as every declared categorical value is: an archetype is a workload the
+            // declaration names. A few tries per combination it fits that the first pass gives
+            // points, within a bound per archetype, so one the engine or the size ceiling
+            // refuses costs little.
+            constexpr size_t FLOOR_TRIES_PER_COMBINATION = 4;
+            constexpr int64_t FLOOR_DRAWS_PER_ARCHETYPE = 64;
+            for(size_t which = 0; which < metadata.archetypes.size(); ++which)
+            {
+                const auto& tally = corpus.archetypes[which];
+                for(size_t attempt = 0; attempt < FLOOR_TRIES_PER_COMBINATION && tally.admitted == 0
+                                        && tally.drawn < FLOOR_DRAWS_PER_ARCHETYPE;
+                    ++attempt)
+                {
+                    drawArchetype(which);
+                }
+            }
+        }
+
+        // The cycle starts at an archetype the seed picks per combination: from the first
+        // declared every time, a quota of one would always go to the first that fits.
         // Capped so archetypes the engine declines cannot consume the whole budget.
+        const size_t firstArchetype = metadata.archetypes.empty()
+                                          ? 0
+                                          : static_cast<size_t>(detail::tieKey(request.seed, index)
+                                                                % metadata.archetypes.size());
         const size_t archetypeAttempts = archetypeQuota * 20;
         for(size_t attempt = 0; attempt < archetypeAttempts && anchored.size() < archetypeQuota;
             ++attempt)
         {
-            const auto& archetype = metadata.archetypes[attempt % metadata.archetypes.size()];
-            const auto drawn = detail::drawFromArchetype(metadata, archetype, categorical, rng);
-            if(!drawn.has_value())
-            {
-                continue;
-            }
-            if(accept(*drawn))
-            {
-                anchored.push_back(*drawn);
-                result.problems.push_back(*drawn);
-                ++result.fromArchetypes;
-            }
+            drawArchetype((firstArchetype + attempt) % metadata.archetypes.size());
         }
 
         // Perturb only admitted anchors; with none, the budget goes to exploration.
@@ -1471,7 +1574,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         {
             const auto& anchor = anchored[attempt % anchored.size()];
             const auto moved = detail::perturbWithinNeighbourhood(metadata, anchor, rng);
-            if(accept(moved))
+            if(judge(moved) == Verdict::ADMITTED)
             {
                 result.problems.push_back(moved);
                 ++result.fromNeighbourhood;
@@ -1479,12 +1582,27 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             }
         }
 
-        if(!metadata.archetypes.empty() && anchored.empty() && pointsFor(index) > 0)
+        // Reported so it is not mistaken for an operation with no declared workloads.
+        if(!metadata.archetypes.empty() && anchored.empty() && pointsFor(index) > 0
+           && !metadata.mixture.isExplorationOnly())
         {
-            // Reported so it is not mistaken for an operation with no declared workloads.
-            corpus.skippedCombinations.push_back("no declared archetype was admitted for "
-                                                 + detail::describe(categorical)
-                                                 + "; that combination is exploration only");
+            if(archetypeQuota == 0)
+            {
+                ++archetypeQuotaZero;
+            }
+            else if(drawnHere > 0)
+            {
+                corpus.skippedCombinations.push_back(
+                    "no declared archetype was admitted for " + detail::describe(categorical) + " ("
+                    + std::to_string(drawnHere)
+                    + " drawn, all refused); that combination is exploration only");
+            }
+            else
+            {
+                corpus.skippedCombinations.push_back("no declared archetype describes "
+                                                     + detail::describe(categorical)
+                                                     + "; that combination is exploration only");
+            }
         }
 
         // The search fills whatever the anchored draws did not.
@@ -1568,6 +1686,14 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         }
 
         corpus.combinations.push_back(std::move(result));
+    }
+    if(archetypeQuotaZero > 0)
+    {
+        corpus.skippedCombinations.push_back(
+            std::to_string(archetypeQuotaZero)
+            + " explored combinations drew no archetype: the mixture's archetype share of their "
+              "points rounds to none (ExplorationRequest::anchorScaling, --anchor-scaling, "
+              "scales it toward the corpus target)");
     }
 
     // Growth toward corpusTarget: the first pass gave each combination a modest fixed target
