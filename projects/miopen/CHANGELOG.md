@@ -192,6 +192,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   their instance lists, applicability answers and default backward-weights configurations. The
   LGBM perf-config picker remembers its ranking per problem. `MIOPEN_DEBUG_CK_PROBLEM_CACHE=0`
   turns off the per-problem CK caches.
+* [Conv] Creating a convolution or GEMM descriptor no longer draws from `std::random_device`. On
+  CPUs where `RDSEED` often reports no entropy available, each draw cost tens of microseconds, so
+  applications that create a convolution descriptor per call paid it on every convolution.
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
