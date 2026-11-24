@@ -12,6 +12,10 @@ any command::
 
     ROCKE_RUN_RECORDS_DIR=<dir> PYTEST_PLUGINS=rocke.tests.run_records ctest ...
 
+A pytest a test starts over a fixture tree of its own takes its environment
+from :func:`fixture_session_environment`, so it records nothing; one that runs
+the product's test files records them, as the entry's own sessions do.
+
 A record names the test file by its absolute path in the tree that ran it
 (an installed tree or a source checkout) and the test by its pytest node name
 after the file (``[Class::]test[params]``). Its ``event`` is one of:
@@ -53,7 +57,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -71,6 +75,7 @@ __all__ = [
     "RECORDS_DIR_ENV",
     "UNFINISHED",
     "RunRecord",
+    "fixture_session_environment",
     "note_deselection",
     "read_run_records",
 ]
@@ -131,6 +136,18 @@ class RunRecord:
                 f"RunRecord failed - event={self.event!r}, node={self.node!r}, "
                 "expected a node name exactly for a test-level event"
             )
+
+
+def fixture_session_environment(
+    env: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """A copy of ``env`` (default ``os.environ``) without
+    ``ROCKE_RUN_RECORDS_DIR``, for a pytest that a test starts over a fixture
+    tree of its own: that session's outcomes belong to the test, not to the
+    run, so it records nothing. A child pytest that runs the product's test
+    files keeps the variable, so the run records those tests."""
+    env = os.environ if env is None else env
+    return {name: value for name, value in env.items() if name != RECORDS_DIR_ENV}
 
 
 def read_run_records(directory: Path) -> Iterator[RunRecord]:

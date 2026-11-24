@@ -40,6 +40,7 @@ from reference_common.numeric import (
     max_abs_upper,
 )
 from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
+from rocke.tests.run_records import fixture_session_environment
 
 from ._child_pytest import pin_child_rootdir
 
@@ -961,7 +962,8 @@ def test_reference_pytest_selects_variants_by_id(
     (tmp_path / "fictional_reference/worker.py").write_text(
         f"from {operation}_reference.worker import run\n"
     )
-    env = dict(os.environ, AMDGPU_TARGETS=architecture)
+    env = fixture_session_environment()
+    env["AMDGPU_TARGETS"] = architecture
     env["PYTHONPATH"] = os.pathsep.join(
         [
             str(Path(rocke.__file__).resolve().parent.parent),

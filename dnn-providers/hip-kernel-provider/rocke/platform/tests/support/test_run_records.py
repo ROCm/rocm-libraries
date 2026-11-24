@@ -263,6 +263,9 @@ def test_a_marker_deselection_declares_the_lane_whose_marker_rejects_it(tmp_path
 
 
 def test_a_child_pytest_process_writes_records_of_its_own(tmp_path):
+    """A child pytest that runs the product's test files (as test_portable_ir's
+    test_unit and test_in_tree_suites do) inherits the records directory and
+    records its tests in a file of its own."""
     tree = tmp_path / "tree"
     (tree / "child").mkdir(parents=True)
     child = _write(
@@ -292,6 +295,46 @@ def test_a_child_pytest_process_writes_records_of_its_own(tmp_path):
     assert ran == {
         ("test_parent.py", "test_runs_a_child"),
         ("test_child.py", "test_in_the_child"),
+    }
+
+
+def test_a_pytest_over_a_fixture_tree_records_nothing(tmp_path):
+    """A test that runs pytest over a fixture tree of its own (here one whose
+    test fails on purpose) starts it with fixture_session_environment: the
+    run's records hold only the outer test."""
+    tree = tmp_path / "tree"
+    (tree / "fixture").mkdir(parents=True)
+    fixture = _write(
+        tree / "fixture",
+        "test_fixture.py",
+        "def test_meant_to_fail():\n    assert False\n",
+    )
+    _write(
+        tree,
+        "test_parent.py",
+        f"""
+        import subprocess, sys
+        from rocke.tests.run_records import fixture_session_environment
+
+        def test_runs_a_fixture_session():
+            env = fixture_session_environment()
+            assert env["PYTEST_PLUGINS"] == "rocke.tests.run_records"
+            subprocess.run(
+                [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", {str(fixture)!r}],
+                env=env,
+                check=False,
+            )
+        """,
+    )
+    records = tmp_path / "records"
+    _run_pytest(tree, records, "test_parent.py")
+    assert len(list(records.glob("*.jsonl"))) == 1
+    assert {
+        (Path(record.file).name, record.node, record.event)
+        for record in read_run_records(records)
+    } == {
+        ("test_parent.py", "test_runs_a_fixture_session", "collected"),
+        ("test_parent.py", "test_runs_a_fixture_session", "ran"),
     }
 
 

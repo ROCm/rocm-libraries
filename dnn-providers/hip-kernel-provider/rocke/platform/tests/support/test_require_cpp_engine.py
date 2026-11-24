@@ -18,6 +18,7 @@ from rocke.core import native_engine
 from rocke.core.backend import CPP_STRICT_ENV
 from rocke.tests.engines import native_engine_or_skip
 from rocke.tests.lanes import REQUIRE_CPP_ENGINE_ENV
+from rocke.tests.run_records import fixture_session_environment
 from rocke.tests.subprocess_launcher import rocke_python_command, rocke_subprocess_env
 
 _CPP_CASE = """
@@ -35,7 +36,7 @@ def _run_cpp_case(tmp_path, *, plugin: bool, hide: bool) -> subprocess.Completed
     plugin_arguments = ("-p", "rocke.tests.require_cpp_engine") if plugin else ()
     env = {
         key: value
-        for key, value in rocke_subprocess_env().items()
+        for key, value in rocke_subprocess_env(fixture_session_environment()).items()
         if key not in (CPP_STRICT_ENV, REQUIRE_CPP_ENGINE_ENV)
     }
     if hide:

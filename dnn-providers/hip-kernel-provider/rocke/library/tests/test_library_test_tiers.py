@@ -16,6 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 import rocke
+from rocke.tests.run_records import fixture_session_environment
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
@@ -215,7 +216,7 @@ def test_gate_module_requires_loaded_preflight_conftest():
 def test_inherited_pytest_addopts_cannot_filter_direct_gate(addopts, tmp_path):
     gate = tmp_path / _EXPECTED_GATES["counted-structural"].name
     gate.write_text("def test_selected_name():\n    pass\n", encoding="utf-8")
-    environment = dict(os.environ)
+    environment = fixture_session_environment()
     environment.update(
         {
             "PYTEST_ADDOPTS": addopts,
@@ -250,7 +251,7 @@ def test_inherited_config_file_cannot_filter_direct_gate(tmp_path):
     config.write_text(
         "[pytest]\npython_functions = test_selected_name\n", encoding="utf-8"
     )
-    environment = dict(os.environ)
+    environment = fixture_session_environment()
     environment.update(
         {
             "PYTEST_ADDOPTS": f"--config-file={config.as_posix()}",
@@ -287,7 +288,7 @@ def test_environment_plugin_cannot_filter_direct_gate(tmp_path):
         "def pytest_collection_modifyitems(items):\n    items[:] = items[:1]\n",
         encoding="utf-8",
     )
-    environment = dict(os.environ)
+    environment = fixture_session_environment()
     environment.update(
         {
             "PYTEST_PLUGINS": "gate_selector_plugin",
@@ -321,7 +322,7 @@ def test_gate_warning_options_are_not_selection_filters(warning_arg, tmp_path):
     pin_child_rootdir(tmp_path)
     gate = tmp_path / _EXPECTED_GATES["counted-structural"].name
     gate.write_text("def test_selected_name():\n    pass\n", encoding="utf-8")
-    environment = dict(os.environ)
+    environment = fixture_session_environment()
     environment.update(
         {
             "ROCKE_EXPLICIT_GATE_RUN": "1",

@@ -13,6 +13,7 @@ import unittest
 from pathlib import Path
 
 import pytest
+from rocke.tests.run_records import fixture_session_environment
 from rocke.tests.subprocess_launcher import rocke_subprocess_env
 from rocke.tests.sweep_guard import assert_case_ran
 
@@ -81,7 +82,7 @@ def _run_pytest_in_tree(tree: Path, conftest: str) -> subprocess.CompletedProces
     return subprocess.run(
         [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-rfE", "-q"],
         cwd=tree,
-        env=rocke_subprocess_env(),
+        env=rocke_subprocess_env(fixture_session_environment()),
         capture_output=True,
         text=True,
         check=False,
