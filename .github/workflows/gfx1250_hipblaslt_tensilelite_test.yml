@@ -161,6 +161,9 @@ jobs:
       # Run both suites as gfx1250-strict.
       HSA_DISABLE_GFX12_STRICT: "0"
       # The pinned ROCm SDK nightly; the install and the compiler check both read it.
+      # Do not move past 10.3.0a20261122 until ROCM-34928 (runtime) or ROCM-34931
+      # (hipBLASLt to code object v5) lands.
+      # Until then, the compiler check's mismatch warning is expected.
       ROCM_SDK_VERSION: ${{ inputs.rocm_sdk_version || '10.3.0a20261122' }}
       GTEST_PRINT_TIME: "0"
       PYTHONUNBUFFERED: "1"
