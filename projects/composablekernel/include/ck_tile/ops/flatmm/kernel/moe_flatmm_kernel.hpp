@@ -137,6 +137,11 @@ enum class MoeFlatmmKind
     kFFN_gemm1_gate_up,
     kFFN_gemm2,
     kFFN_gemm1_split_k,
+    // gemm2 that stores each (token, slot) row to C[token * TopK + slot] with a plain store: no
+    // routing weight, no atomics. MoeTopkCombineKernel then sums each token's TopK rows with
+    // their weights in fp32. Exact and deterministic, and faster than the atomic gemm2 once
+    // there are enough tokens to hide the second launch.
+    kFFN_gemm2_per_slot,
 };
 
 namespace moe {
@@ -238,7 +243,10 @@ struct MoeFlatmmKernel
     static_assert(DsLayout::size() == DsDataType::size(),
                   "The size of DsLayout and DsDataType should be the same");
 
-    static constexpr bool IsInputGemm   = kind != MoeFlatmmKind::kFFN_gemm2;
+    static constexpr bool IsInputGemm = kind != MoeFlatmmKind::kFFN_gemm2;
+    // A rows are (token, slot) rows, [NumTokens * TopK, K]: gemm2 and its per-slot variant.
+    static constexpr bool AGatherPerSlot =
+        kind == MoeFlatmmKind::kFFN_gemm2 || kind == MoeFlatmmKind::kFFN_gemm2_per_slot;
     static constexpr bool IsGateUp      = kind == MoeFlatmmKind::kFFN_gemm1_gate_up;
     static constexpr bool IsGemm1SplitK = kind == MoeFlatmmKind::kFFN_gemm1_split_k;
     static constexpr bool IsBShuffled   = true;
@@ -647,7 +655,7 @@ struct MoeFlatmmKernel
             {
                 return make_naive_tensor_view<address_space_enum::global>(
                     a_ptr,
-                    make_tuple(IsInputGemm ? kargs.NumTokens : kargs.NumTokens * kargs.TopK,
+                    make_tuple(AGatherPerSlot ? kargs.NumTokens * kargs.TopK : kargs.NumTokens,
                                splitk_batch_offset.splitted_k),
                     make_tuple(kargs.stride_A, 1),
                     number<FlatmmPipeline::GetVectorSizeA()>{},
@@ -658,7 +666,7 @@ struct MoeFlatmmKernel
                 return make_naive_tensor_view<address_space_enum::global>(
                     a_ptr,
                     make_tuple(splitk_batch_offset.splitted_k,
-                               IsInputGemm ? kargs.NumTokens : kargs.NumTokens * kargs.TopK),
+                               AGatherPerSlot ? kargs.NumTokens * kargs.TopK : kargs.NumTokens),
                     make_tuple(kargs.stride_A, 1),
                     number<FlatmmPipeline::GetVectorSizeA()>{},
                     number<1>{});
@@ -1049,7 +1057,7 @@ struct MoeFlatmmKernel
             const index_t fused_token =
                 kargs.p_sorted_token_ids[row_idx]; // topk-idx[31:24] + token_idx[23:0]
             index_t gather_token_id = fused_token & token_id_mask;
-            if constexpr(!IsInputGemm)
+            if constexpr(AGatherPerSlot)
             {
                 gather_token_id = gather_token_id * kargs.TopK + (fused_token >> token_id_offset);
             }
@@ -1220,6 +1228,9 @@ struct MoeFlatmmKernel
             constexpr int DynamicTileOffsetFlag = 0;
 
             constexpr bool EnableBias = decltype(kargs.exp_bias)::GranularityMN != -1;
+            static_assert(!(EnableBias && kind == MoeFlatmmKind::kFFN_gemm2_per_slot),
+                          "kFFN_gemm2_per_slot would add the bias once per slot; add it in the "
+                          "combine instead");
 
             auto permute_tensor_view = [&](auto naive_view, auto is_needed_to_permute_N_PACK) {
                 if constexpr(!is_needed_to_permute_N_PACK)

@@ -11,6 +11,9 @@
 //   gemm2          A = intermediate    [num_tokens * topk, K]
 //                  B = down weights    [experts, N, K]
 //                  C = [num_tokens, N] += routing weight * (A B), accumulated with atomics
+//   gemm2_per_slot as gemm2, but row (token, slot) of A B is stored to P[num_tokens * topk, N]
+//                  and MoeTopkCombineKernel sums each token's rows with their weights:
+//                  C = [num_tokens, N], bf16, exact in fp32 and deterministic
 //
 // The routing is random (top-k distinct experts per token) and sorted on the host into expert
 // tiles of M_Tile rows, padded with a sentinel token id, as moe_sorting does on the device.
@@ -170,7 +173,11 @@ template <ck_tile::MoeFlatmmKind kind,
           typename BDataType,
           typename CDataType,
           typename HostArgs>
-float launch_mx_moe_gemm(const HostArgs& args, const ck_tile::stream_config& s, bool clear_c)
+float launch_mx_moe_gemm(const HostArgs& args,
+                         const ck_tile::stream_config& s,
+                         bool clear_c,
+                         const float* topk_weights = nullptr, // gemm2_per_slot: [tokens, topk]
+                         void* combined            = nullptr)            // gemm2_per_slot: bf16 [tokens, N]
 {
     using Config  = MXMoeFlatmmConfig;
     using Row     = ck_tile::tensor_layout::gemm::RowMajor;
@@ -244,20 +251,41 @@ float launch_mx_moe_gemm(const HostArgs& args, const ck_tile::stream_config& s, 
         if(clear_c)
             HIP_CHECK_ERROR(hipMemsetAsync(args.e_ptr, 0, c_bytes, s.stream_id_));
     };
-    return ck_tile::launch_kernel_time_mask(
-        s, clear, ck_tile::make_kernel<Config::kBlockPerCu>(Kernel{}, grids, blocks, 0, kargs));
+    const auto moe_kernel =
+        ck_tile::make_kernel<Config::kBlockPerCu>(Kernel{}, grids, blocks, 0, kargs);
+    if constexpr(kind == ck_tile::MoeFlatmmKind::kFFN_gemm2_per_slot)
+    {
+        // P = this kernel's output; the combine reads it and the router's top-k weights.
+        using Combine     = ck_tile::MoeTopkCombineKernel<CDataType, ck_tile::bf16_t>;
+        const auto ckargs = Combine::MakeKargs(
+            args.e_ptr, topk_weights, combined, args.NumTokens, args.TopK, args.N, args.N, args.N);
+        if(!Combine::IsSupportedArgument(ckargs))
+            throw std::runtime_error("Arguments not supported by the top-k combine kernel");
+        return ck_tile::launch_kernel_time_mask(
+            s,
+            clear,
+            moe_kernel,
+            ck_tile::make_kernel<1>(
+                Combine{}, Combine::GridSize(ckargs), Combine::BlockSize(), 0, ckargs));
+    }
+    else
+        return ck_tile::launch_kernel_time_mask(s, clear, moe_kernel);
 }
 
 template <ck_tile::MoeFlatmmKind kind>
 MxMoeResult run_mx_moe_case(const MxMoeCase& c)
 {
-    using ADataType        = ck_tile::pk_fp4_t;
-    using BDataType        = ck_tile::pk_fp4_t;
-    using ScaleType        = ck_tile::e8m0_t;
-    constexpr bool kGateUp = kind == ck_tile::MoeFlatmmKind::kFFN_gemm1_gate_up;
-    // gemm2 accumulates the top-k contributions of a token with atomics; fp32 keeps that exact
-    // up to the accumulation order.
-    using CDataType = std::conditional_t<kGateUp, ck_tile::bf16_t, float>;
+    using ADataType         = ck_tile::pk_fp4_t;
+    using BDataType         = ck_tile::pk_fp4_t;
+    using ScaleType         = ck_tile::e8m0_t;
+    constexpr bool kGateUp  = kind == ck_tile::MoeFlatmmKind::kFFN_gemm1_gate_up;
+    constexpr bool kPerSlot = kind == ck_tile::MoeFlatmmKind::kFFN_gemm2_per_slot;
+    // A rows per (token, slot): gemm2 and gemm2_per_slot.
+    constexpr bool kASlot = kind == ck_tile::MoeFlatmmKind::kFFN_gemm2 || kPerSlot;
+    // gemm2 accumulates the top-k contributions of a token with fp32 atomics; gemm2_per_slot
+    // stores them in fp32 and the combine writes bf16.
+    using CDataType   = std::conditional_t<kGateUp, ck_tile::bf16_t, float>;
+    using OutDataType = std::conditional_t<kPerSlot, ck_tile::bf16_t, CDataType>;
 
     const int experts    = c.experts;
     const int num_tokens = c.num_tokens;
@@ -316,15 +344,20 @@ MxMoeResult run_mx_moe_case(const MxMoeCase& c)
     }
     const int M = static_cast<int>(sorted_ids.size()); // sorted rows, multiple of M_Tile
 
-    const int rows_a  = kGateUp ? num_tokens : num_tokens * topk;
-    const int rows_c  = kGateUp ? num_tokens * topk : num_tokens;
+    const int rows_a  = kASlot ? num_tokens * topk : num_tokens;
+    const int rows_c  = kASlot ? num_tokens : num_tokens * topk; // final output rows
+    const int rows_p  = kPerSlot ? num_tokens * topk : rows_c;   // rows the MoE kernel writes
     const int outputN = kGateUp ? N / 2 : N;
 
     if(c.verbose)
-        std::cout << "mx_moe_flatmm " << (kGateUp ? "gemm1_gate_up" : "gemm2") << ": experts "
-                  << experts << ", tokens " << num_tokens << ", topk " << topk << ", N " << N
-                  << ", K " << K << ", sorted rows " << M << ", most rows of one expert "
-                  << max_rows_per_expert << " (M_Tile " << MTile << ")" << std::endl;
+        std::cout << "mx_moe_flatmm "
+                  << (kGateUp    ? "gemm1_gate_up"
+                      : kPerSlot ? "gemm2_per_slot"
+                                 : "gemm2")
+                  << ": experts " << experts << ", tokens " << num_tokens << ", topk " << topk
+                  << ", N " << N << ", K " << K << ", sorted rows " << M
+                  << ", most rows of one expert " << max_rows_per_expert << " (M_Tile " << MTile
+                  << ")" << std::endl;
     if(c.verbose && max_rows_per_expert <= MTile)
         std::cout << "note: no expert spans more than one M tile; multi-tile experts are not "
                      "exercised"
@@ -385,7 +418,7 @@ MxMoeResult run_mx_moe_case(const MxMoeCase& c)
         const int s = sorted_ids[r] >> 24;
         if(t >= num_tokens)
             continue;
-        const int ra = kGateUp ? t : t * topk + s;
+        const int ra = kASlot ? t * topk + s : t;
         for(int kb = 0; kb < KB; ++kb)
             a_scale_sorted[mx_scale_offset(r, kb, K)] = a_scale(ra, kb);
     }
@@ -401,7 +434,12 @@ MxMoeResult run_mx_moe_case(const MxMoeCase& c)
     ck_tile::DeviceMem b_dev(b_shuffled.size() * sizeof(BDataType));
     ck_tile::DeviceMem a_scale_dev(a_scale_sorted.size() * sizeof(ScaleType));
     ck_tile::DeviceMem b_scale_dev(b_scale_shuffled.size() * sizeof(ScaleType));
-    ck_tile::DeviceMem c_dev(std::size_t(rows_c) * outputN * sizeof(CDataType));
+    ck_tile::DeviceMem c_dev(std::size_t(rows_p) * outputN * sizeof(CDataType));
+    // gemm2_per_slot: the router's top-k weights in token order and the combined output.
+    ck_tile::DeviceMem topk_w_dev(kPerSlot ? route_weight.size() * sizeof(float) : 0);
+    ck_tile::DeviceMem out_dev(kPerSlot ? std::size_t(rows_c) * outputN * sizeof(OutDataType) : 0);
+    if constexpr(kPerSlot)
+        topk_w_dev.ToDevice(route_weight.data());
     ck_tile::DeviceMem sorted_ids_dev(sorted_ids.size() * sizeof(ck_tile::index_t));
     ck_tile::DeviceMem sorted_eids_dev(sorted_expert_ids.size() * sizeof(ck_tile::index_t));
     ck_tile::DeviceMem sorted_w_dev(sorted_weights.size() * sizeof(float));
@@ -443,16 +481,28 @@ MxMoeResult run_mx_moe_case(const MxMoeCase& c)
               {}};
 
     // One untimed launch for the result.
+    const auto* topk_w = static_cast<const float*>(topk_w_dev.GetDeviceBuffer());
     launch_mx_moe_gemm<kind, ADataType, BDataType, CDataType>(
-        args, ck_tile::stream_config{nullptr, false, c.verbose ? 1 : 0}, true);
-    std::vector<CDataType> c_out(std::size_t(rows_c) * outputN);
-    c_dev.FromDevice(c_out.data());
+        args,
+        ck_tile::stream_config{nullptr, false, c.verbose ? 1 : 0},
+        !kPerSlot,
+        topk_w,
+        out_dev.GetDeviceBuffer());
+    std::vector<OutDataType> c_out(std::size_t(rows_c) * outputN);
+    if constexpr(kPerSlot)
+        out_dev.FromDevice(c_out.data());
+    else
+        c_dev.FromDevice(c_out.data());
 
     MxMoeResult result{true, 0.f, max_rows_per_expert, M};
     if(c.repeat > 0)
     {
         result.ms = launch_mx_moe_gemm<kind, ADataType, BDataType, CDataType>(
-            args, ck_tile::stream_config{nullptr, true, 0, c.warmup, c.repeat, true}, true);
+            args,
+            ck_tile::stream_config{nullptr, true, 0, c.warmup, c.repeat, true},
+            false, // a clear would be timed too; gemm2's output is not checked after this
+            topk_w,
+            out_dev.GetDeviceBuffer());
         const double flop = 2.0 * (std::size_t(num_tokens) * topk) * N * K;
         if(c.verbose)
             std::cout << "time " << result.ms << " ms, " << flop / 1e9 / result.ms
@@ -505,9 +555,9 @@ MxMoeResult run_mx_moe_case(const MxMoeCase& c)
             },
             rows_c)(std::thread::hardware_concurrency());
 
-        std::vector<CDataType> c_ref_typed(c_ref.size());
+        std::vector<OutDataType> c_ref_typed(c_ref.size());
         std::transform(c_ref.begin(), c_ref.end(), c_ref_typed.begin(), [](float v) {
-            return ck_tile::type_convert<CDataType>(v);
+            return ck_tile::type_convert<OutDataType>(v);
         });
         const float rtol = 1e-2f, atol = 1e-2f;
         result.pass =

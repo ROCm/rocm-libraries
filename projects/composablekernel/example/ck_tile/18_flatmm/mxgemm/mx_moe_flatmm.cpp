@@ -16,7 +16,7 @@ auto create_args(int argc, char* argv[])
                 "1024",
                 "N of the GEMM, a multiple of 256 (gemm1_gate_up: 2 x intermediate; gemm2: hidden)")
         .insert("K", "1024", "K of the GEMM (gemm1_gate_up: hidden; gemm2: intermediate)")
-        .insert("gemm_kind", "gemm1_gate_up", "gemm1_gate_up | gemm2")
+        .insert("gemm_kind", "gemm1_gate_up", "gemm1_gate_up | gemm2 | gemm2_per_slot")
         .insert("mx_prec", "fp4xfp4", "A x B data types; supported: fp4xfp4")
         .insert("init",
                 "0",
@@ -55,7 +55,9 @@ int main(int argc, char* argv[])
             return run_mx_moe_case<ck_tile::MoeFlatmmKind::kFFN_gemm1_gate_up>(c).pass ? 0 : 1;
         if(kind == "gemm2")
             return run_mx_moe_case<ck_tile::MoeFlatmmKind::kFFN_gemm2>(c).pass ? 0 : 1;
-        throw std::runtime_error("gemm_kind must be gemm1_gate_up or gemm2");
+        if(kind == "gemm2_per_slot")
+            return run_mx_moe_case<ck_tile::MoeFlatmmKind::kFFN_gemm2_per_slot>(c).pass ? 0 : 1;
+        throw std::runtime_error("gemm_kind must be gemm1_gate_up, gemm2 or gemm2_per_slot");
     }
     catch(const std::runtime_error& e)
     {
