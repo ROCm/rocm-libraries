@@ -173,8 +173,10 @@ struct ArchetypeTally
     int64_t refusedByOracle = 0;
     int64_t admitted = 0;
 
-    /// The first point the oracle refused, so a caller can say why.
-    std::optional<ProblemPoint> refused;
+    /// The first points the oracle refused, at most @ref MAX_REFUSED_KEPT, so a caller can say
+    /// why: one point does not tell a size ceiling from an engine declining the rest.
+    static constexpr size_t MAX_REFUSED_KEPT = 16;
+    std::vector<ProblemPoint> refused;
 };
 
 /// Where an exploration's oracle queries went, and what each combination's first search found
@@ -1549,9 +1551,9 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
                 break;
             case Verdict::ORACLE:
                 ++tally.refusedByOracle;
-                if(!tally.refused.has_value())
+                if(tally.refused.size() < ArchetypeTally::MAX_REFUSED_KEPT)
                 {
-                    tally.refused = *drawn;
+                    tally.refused.push_back(*drawn);
                 }
                 break;
             case Verdict::REPEATED:

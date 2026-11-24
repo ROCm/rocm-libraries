@@ -966,8 +966,15 @@ TEST(TestProblemSpace, EveryArchetypeIsDrawnOnceEvenWhereItsShareRoundsToNone)
     EXPECT_EQ(refused.refusedByOracle, refused.drawn);
     EXPECT_GT(refused.drawn, 0);
     EXPECT_LE(refused.drawn, 64) << "the tries for an archetype nothing admits are bounded";
-    ASSERT_TRUE(refused.refused.has_value());
-    EXPECT_EQ(std::get<int64_t>(refused.refused->at("M")), 3000);
+    // Enough refused points are kept to tell refusal reasons apart, within a bound.
+    EXPECT_EQ(
+        refused.refused.size(),
+        std::min(static_cast<size_t>(refused.refusedByOracle), ArchetypeTally::MAX_REFUSED_KEPT));
+    EXPECT_GT(refused.refused.size(), 1U);
+    for(const auto& point : refused.refused)
+    {
+        EXPECT_EQ(std::get<int64_t>(point.at("M")), 3000);
+    }
 
     // The rounding is reported once, not as a refusal in every combination.
     const auto& skipped = corpus.skippedCombinations;
