@@ -583,7 +583,8 @@ void addReport(nlohmann::json& reports, const char* key, const nlohmann::json& r
 }
 
 /// The mixture of the corpus delivered, after the cut: of the sweep graphs in @p chosen, how
-/// many the sweep of @p corpus drew from archetypes or their neighbourhood.
+/// many the sweep of @p corpus drew from archetypes or their neighbourhood, and per declared
+/// archetype how many of its draws the checks admitted and the cut delivered.
 nlohmann::json deliveredAnchoredShare(const std::vector<hipdnn_corpus_gen::PoolEntry>& chosen,
                                       const hipdnn_corpus_gen::ProblemCorpus& corpus,
                                       bool anchorScaling)
@@ -593,6 +594,16 @@ nlohmann::json deliveredAnchoredShare(const std::vector<hipdnn_corpus_gen::PoolE
     {
         anchoredKeys.insert(hipdnn_corpus_gen::detail::describe(point));
     }
+    std::map<std::string, size_t> archetypeOf;
+    for(const auto& combination : corpus.combinations)
+    {
+        for(size_t i = 0; i < combination.archetypeOf.size(); ++i)
+        {
+            archetypeOf.emplace(hipdnn_corpus_gen::detail::describe(combination.problems[i]),
+                                combination.archetypeOf[i]);
+        }
+    }
+    std::vector<int64_t> deliveredOf(corpus.archetypes.size(), 0);
     int64_t delivered = 0;
     int64_t anchored = 0;
     for(const auto& entry : chosen)
@@ -600,16 +611,63 @@ nlohmann::json deliveredAnchoredShare(const std::vector<hipdnn_corpus_gen::PoolE
         if(entry.source == "sweep")
         {
             ++delivered;
-            anchored += static_cast<int64_t>(
-                anchoredKeys.count(hipdnn_corpus_gen::detail::describe(entry.point)));
+            const auto key = hipdnn_corpus_gen::detail::describe(entry.point);
+            anchored += static_cast<int64_t>(anchoredKeys.count(key));
+            const auto found = archetypeOf.find(key);
+            if(found != archetypeOf.end())
+            {
+                ++deliveredOf[found->second];
+            }
         }
+    }
+    auto archetypes = nlohmann::json::object();
+    for(size_t i = 0; i < corpus.archetypes.size(); ++i)
+    {
+        const auto& tally = corpus.archetypes[i];
+        archetypes[tally.name]
+            = nlohmann::json{{"drawn", tally.drawn},
+                             {"refused_by_constraints", tally.refusedByConstraints},
+                             {"refused_by_oracle", tally.refusedByOracle},
+                             {"admitted", tally.admitted},
+                             {"delivered", deliveredOf[i]}};
     }
     return nlohmann::json{
         {"anchored", anchored},
         {"delivered", delivered},
         {"share",
          delivered == 0 ? 0.0 : static_cast<double>(anchored) / static_cast<double>(delivered)},
-        {"anchor_scaling", anchorScaling}};
+        {"anchor_scaling", anchorScaling},
+        {"archetypes", archetypes}};
+}
+
+/// Why no draw of @p tally's archetype was admitted, from the first point the oracle refused:
+/// a graph that does not build, or one over the --max-bytes ceiling, is told apart from an
+/// engine or a --keep clause declining it.
+std::string whyNeverAdmitted(const hipdnn_corpus_gen::ArchetypeTally& tally,
+                             const hipdnn_corpus_gen::OperationMetadata& metadata,
+                             int64_t maxBytes)
+{
+    if(tally.drawn == 0)
+    {
+        return "no explored combination it fits was given points";
+    }
+    if(!tally.refused.has_value())
+    {
+        return "every draw broke a declared constraint or repeated a point";
+    }
+    const auto example = hipdnn_corpus_gen::detail::describe(*tally.refused);
+    const auto built = hipdnn_corpus_gen::buildAdmissible(metadata, *tally.refused);
+    if(!built.has_value())
+    {
+        return "its graph does not build, e.g. " + example;
+    }
+    const auto bytes = hipdnn_corpus_gen::graphBytes(*built);
+    if(maxBytes > 0 && bytes > maxBytes)
+    {
+        return "over --max-bytes, e.g. " + example + " needs " + std::to_string(bytes >> 20)
+               + " MiB against " + std::to_string(maxBytes >> 20) + " MiB";
+    }
+    return "the engine or a --keep clause declined it, e.g. " + example;
 }
 
 /// Weighs the sweep's pool of @p pools for the cut (weighGroups) and says on stderr which
@@ -1479,6 +1537,17 @@ int runGenerator(const std::vector<std::string>& args)
         {
             std::cerr << "\n  " << skipped;
         }
+        // An archetype is a workload the declaration names; one with no point in the corpus is
+        // said, with the reason, rather than left to be noticed missing.
+        for(const auto& tally : result.corpus.archetypes)
+        {
+            if(tally.admitted == 0 && !metadata.mixture.isExplorationOnly())
+            {
+                std::cerr << "\n  WARNING: archetype " << tally.name << " was never admitted ("
+                          << tally.drawn
+                          << " drawn): " << whyNeverAdmitted(tally, metadata, options.maxBytes);
+            }
+        }
         // Sweep shortfalls are reported only if the corpus ends up short after selection.
         for(const auto& reason : result.corpus.shortfall)
         {
@@ -1621,6 +1690,45 @@ int runGenerator(const std::vector<std::string>& args)
                     .at(result.operation + "|" + hipdnn_corpus_gen::detail::describe(entry.point))
                     .key;
             });
+        // One graph of each admitted archetype is kept through the cut, as the served edges
+        // are: an archetype is a workload the declaration names, and a cut to --count would
+        // otherwise drop the rarer ones. Each one's first admitted point, within the room
+        // --count leaves past the quotas and the edges, so the corpus never outgrows it; when
+        // not all fit, the seed picks which. Without --count nothing is cut.
+        if(options.count > 0)
+        {
+            int64_t room = options.count - static_cast<int64_t>(reserved.size());
+            if(quotas != quotasFor.end())
+            {
+                for(const auto& quota : quotas->second)
+                {
+                    room -= quota.second;
+                }
+            }
+            std::vector<std::optional<ProblemPoint>> firstAdmitted(result.corpus.archetypes.size());
+            for(const auto& combination : result.corpus.combinations)
+            {
+                for(size_t i = 0; i < combination.archetypeOf.size(); ++i)
+                {
+                    auto& first = firstAdmitted[combination.archetypeOf[i]];
+                    if(!first.has_value())
+                    {
+                        first = combination.problems[i];
+                    }
+                }
+            }
+            const hipdnn_corpus_gen::detail::ScatteredOrder order(firstAdmitted.size(),
+                                                                  request.seed);
+            for(size_t step = 0; step < firstAdmitted.size() && room > 0; ++step)
+            {
+                const auto& first = firstAdmitted[order(step)];
+                if(first.has_value()
+                   && reserved.insert(hipdnn_corpus_gen::detail::describe(*first)).second)
+                {
+                    --room;
+                }
+            }
+        }
 
         // Spread a cut over categorical combinations as well as regimes.
         for(auto& pool : pools)
