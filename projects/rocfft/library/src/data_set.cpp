@@ -443,16 +443,45 @@ data_set_t data_set_t::reinterpret_as(rocfft_array_type new_array_type) const
     }
 
     const bool to_complex = array_type_is_real(array_type);
-    if(array_type_is_planar(to_complex ? new_array_type : array_type))
-        throw std::logic_error(ROCFFT_CURRENT_FUNCTION
-                               + ": reinterpreting real data as planar complex data (or vice"
-                                 " versa) is not implemented yet.");
     // real <-> complex/hermitian: length axis 0 is split/merged, so it must be the
     // embedding's length axis 0 for get_embedding_data_set() to commute with this
     if(embedding && (*embedding)[0] != 0)
         throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
                                     + " requires length axis 0 of an embedded data set to be"
                                       " the embedding's length axis 0.");
+
+    if(array_type_is_planar(to_complex ? new_array_type : array_type))
+    {
+        // Real elements 2k and 2k + 1 are element k in planes 0 and 1, respectively.
+        // Other strides and distances stay in real-element units.
+        auto ret = *this;
+        if(to_complex)
+        {
+            if(len_axes[0].lower % 2 != 0 || len_axes[0].upper % 2 != 0)
+                throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
+                                            + " requires even bounds along length axis 0 to"
+                                              " reinterpret real data as planar data.");
+            ret.len_axes[0].lower /= 2;
+            ret.len_axes[0].upper /= 2;
+            ret.len_axes[0].inbuffer_stride *= 2;
+            ret.set_array_type_and_offsets(new_array_type,
+                                           {offsets[0], offsets[0] + len_axes[0].inbuffer_stride});
+        }
+        else
+        {
+            if(len_axes[0].inbuffer_stride % 2 != 0
+               || offsets[1] != offsets[0] + len_axes[0].inbuffer_stride / 2)
+                throw std::invalid_argument(
+                    ROCFFT_CURRENT_FUNCTION
+                    + " requires an even stride along length axis 0 and planes offset by half of"
+                      " it to reinterpret planar data as real data.");
+            ret.len_axes[0].lower *= 2;
+            ret.len_axes[0].upper *= 2;
+            ret.len_axes[0].inbuffer_stride /= 2;
+            ret.set_array_type_and_offsets(new_array_type, {offsets[0], 0});
+        }
+        return ret;
+    }
 
     // real element 2k (resp. 2k + 1) is the real (resp. imaginary) part of complex
     // element k: positions in real units are twice the positions in complex units
