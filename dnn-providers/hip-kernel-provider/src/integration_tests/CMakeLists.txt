@@ -265,9 +265,13 @@ endif()
 # engines on gfx1100 and gfx1201, FlyDSL forward content; neither ASM forward nor Flash2 serves
 # it) and HKP_SDPA_SELECTION_BWD_ARCHS for the backward graph (ASM on gfx942 and gfx950, FlyDSL
 # content: merged and the split engine, which needs prep, dkdv and dq).
+# HKP_SDPA_SELECTION_BWD_CLAIMED_ARCHS is the subset of HKP_SDPA_SELECTION_BWD_ARCHS that ships a
+# claimed backward engine (the FlyDSL part only: ASM_SDPA_ENGINE's backward is never claimed, so
+# it is excluded even on the archs it serves).
 # HKP_SDPA_SELECTION_ASM_ONLY enables the graph only ASM_SDPA_ENGINE serves.
 set(_hkp_selection_fwd_archs "")
 set(_hkp_selection_bwd_archs "")
+set(_hkp_selection_bwd_claimed_archs "")
 if(ENABLE_ASM_SDPA_ENGINE)
     list(APPEND _hkp_selection_bwd_archs gfx942 gfx950)
     target_compile_definitions(hip_kernel_provider_integration_tests
@@ -299,23 +303,28 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             list(APPEND _hkp_selection_fwd_archs
                  ${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_${_hkp_selection_op}})
         endforeach()
-        list(APPEND _hkp_selection_bwd_archs ${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_sdpa_bwd_merged})
+        list(APPEND _hkp_selection_bwd_claimed_archs
+             ${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_sdpa_bwd_merged})
         foreach(_hkp_selection_arch IN LISTS HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_sdpa_bwd_prep)
             if(_hkp_selection_arch IN_LIST HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_sdpa_bwd_dkdv
                AND _hkp_selection_arch IN_LIST HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_sdpa_bwd_dq)
-                list(APPEND _hkp_selection_bwd_archs ${_hkp_selection_arch})
+                list(APPEND _hkp_selection_bwd_claimed_archs ${_hkp_selection_arch})
             endif()
         endforeach()
+        list(APPEND _hkp_selection_bwd_archs ${_hkp_selection_bwd_claimed_archs})
     endif()
 endif()
 list(REMOVE_DUPLICATES _hkp_selection_fwd_archs)
 list(REMOVE_DUPLICATES _hkp_selection_bwd_archs)
+list(REMOVE_DUPLICATES _hkp_selection_bwd_claimed_archs)
 string(REPLACE ";" "," _hkp_selection_fwd_archs "${_hkp_selection_fwd_archs}")
 string(REPLACE ";" "," _hkp_selection_bwd_archs "${_hkp_selection_bwd_archs}")
+string(REPLACE ";" "," _hkp_selection_bwd_claimed_archs "${_hkp_selection_bwd_claimed_archs}")
 target_compile_definitions(hip_kernel_provider_integration_tests
     PRIVATE
         HKP_SDPA_SELECTION_FWD_ARCHS="${_hkp_selection_fwd_archs}"
         HKP_SDPA_SELECTION_BWD_ARCHS="${_hkp_selection_bwd_archs}"
+        HKP_SDPA_SELECTION_BWD_CLAIMED_ARCHS="${_hkp_selection_bwd_claimed_archs}"
 )
 # The native suite drives the frontend graph builders of the ingestor lane, so it follows their
 # gate (the one of the determinism device cases in determinism/CMakeLists.txt).

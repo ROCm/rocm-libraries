@@ -374,6 +374,11 @@ std::vector<DeterminismRow> flydslForwardRows()
             "Bf16Hd23HeadPadPacked",
             archs,
             packedSlots(shaped(BF16, withHead(ODD_BASE, 23), true), {67, 19}, {143, 40}));
+        add(rows,
+            CDNA,
+            "Bf16Hd7HeadPadPackedOneToken",
+            archs,
+            packedSlots(shaped(BF16, {2, 8, 2, 1, 1, 7}, true), {1, 1}, {1, 1}));
         addF32(rows, CDNA, "F32Hd37HeadPad", archs, shaped(F32, withHead(ODD_BASE, 37), true));
     }
 #endif
@@ -706,6 +711,11 @@ std::vector<DeterminismRow> flydslForwardRows()
             "Bf16Hd23HeadPadPacked",
             archs,
             packedSlots(shaped(BF16, withHead(ODD_BASE, 23), true), {67, 19}, {143, 40}));
+        add(rows,
+            RDNA,
+            "Bf16Hd7HeadPadPackedOneToken",
+            archs,
+            packedSlots(shaped(BF16, {2, 8, 2, 1, 1, 7}, true), {1, 1}, {1, 1}));
         addF32(rows, RDNA, "F32Hd37HeadPad", archs, shaped(F32, withHead(ODD_BASE, 37), true));
 
         // 16-bit dropout, gfx11 only.
@@ -1034,6 +1044,11 @@ std::vector<DeterminismRow> flydslForwardRows()
             "Bf16Hd23HeadPadPacked",
             archs,
             packedSlots(shaped(BF16, withHead(ODD_BASE, 23), true), {67, 19}, {143, 40}));
+        add(rows,
+            AIW,
+            "Bf16Hd7HeadPadPackedOneToken",
+            archs,
+            packedSlots(shaped(BF16, {2, 8, 2, 1, 1, 7}, true), {1, 1}, {1, 1}));
     }
 #endif
 

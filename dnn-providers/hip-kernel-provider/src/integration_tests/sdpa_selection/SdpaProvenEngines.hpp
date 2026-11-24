@@ -24,12 +24,16 @@
  * survivor.
  */
 // CMakeLists.txt defines them for the integration binary: the comma-separated architectures an
-// engine of the build serves the forward and the backward graph on.
+// engine of the build serves the forward and the backward graph on, and (for the backward graph)
+// the subset of those architectures that ships a claimed engine.
 #ifndef HKP_SDPA_SELECTION_FWD_ARCHS
 #define HKP_SDPA_SELECTION_FWD_ARCHS ""
 #endif
 #ifndef HKP_SDPA_SELECTION_BWD_ARCHS
 #define HKP_SDPA_SELECTION_BWD_ARCHS ""
+#endif
+#ifndef HKP_SDPA_SELECTION_BWD_CLAIMED_ARCHS
+#define HKP_SDPA_SELECTION_BWD_CLAIMED_ARCHS ""
 #endif
 
 namespace hip_kernel_provider::sdpa_selection
@@ -58,8 +62,10 @@ struct SelectionRow
     /// pins the first.
     std::vector<std::string> unclaimedRanked;
     /// Whether a claimed engine ranks the row's graph on this architecture, so the filter is
-    /// expected to leave a survivor. False only where every ranked engine is unclaimed
-    /// (BwdAsmOnly on gfx942, where ASM_SDPA_ENGINE ranks alone and backward never claims).
+    /// expected to leave a survivor. False on an architecture where every engine that ranks the
+    /// graph is unclaimed: BwdAsmOnly's one architecture (ASM_SDPA_ENGINE ranks alone and
+    /// backward never claims), and BwdBf16Hd128's architectures that ASM serves but no claimed
+    /// backward engine is built for.
     /// A fact about the graph's ranking, not a list of claimed engines.
     bool expectsSurvivor = true;
 };
@@ -120,6 +126,7 @@ inline std::vector<SelectionRow> selectionRows()
     };
     const auto fwdServed = archsOf(HKP_SDPA_SELECTION_FWD_ARCHS);
     const auto bwdServed = archsOf(HKP_SDPA_SELECTION_BWD_ARCHS);
+    const auto bwdClaimedArchs = archsOf(HKP_SDPA_SELECTION_BWD_CLAIMED_ARCHS);
 
     std::vector<Case> cases;
     // Forward: ASM forward declines the graph -- its kernel table has no bf16 head-size-64 row
@@ -144,13 +151,23 @@ inline std::vector<SelectionRow> selectionRows()
     bwdUnclaimedArchs.emplace_back("gfx950");
     bwdUnclaimed.emplace_back("ASM_SDPA_ENGINE");
 #endif
+    // Architectures ASM serves without a claimed backward engine built: the filter leaves no
+    // survivor there, whatever FlyDSL's content for this build happens to cover.
+    std::vector<std::string> bwdNoSurvivorArchs;
+    for(const auto& arch : bwdServed)
+    {
+        if(!built(bwdClaimedArchs, arch))
+        {
+            bwdNoSurvivorArchs.push_back(arch);
+        }
+    }
     cases.push_back({"BwdBf16Hd128",
                      GraphKind::BACKWARD,
                      {"gfx90a", "gfx942", "gfx950", "gfx1100"},
                      bwdServed,
                      bwdUnclaimedArchs,
                      bwdUnclaimed,
-                     {}});
+                     bwdNoSurvivorArchs});
 #ifdef HKP_SDPA_SELECTION_ASM_ONLY
     cases.push_back({"BwdAsmOnly",
                      GraphKind::BACKWARD_ASM_ONLY,

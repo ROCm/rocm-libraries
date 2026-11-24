@@ -405,6 +405,18 @@ bool hasAlignedRows(const data_objects::TensorAttributes& tensor)
     return true;
 }
 
+/// The prefill kernel masks tail rows (seq index >= the operand's own Sq) of its
+/// 16-row wave tile only by binding the O/LSE buffer resource to
+/// (rows - 1) * stride + width elements: with rows == 1 that bound collapses to
+/// width elements, so a row (sequence) stride below the row's own width lets a
+/// tail-row store land in range instead of being dropped. isWellFormedOperand's
+/// overlap check skips extent-1 axes and so never catches this.
+bool hasRowRoomForTailStores(const data_objects::TensorAttributes& tensor)
+{
+    return tensor.dims()->Get(SEQ_AXIS) > 1
+           || tensor.strides()->Get(SEQ_AXIS) >= tensor.dims()->Get(HEAD_SIZE_AXIS);
+}
+
 bool addressFitsI32(const data_objects::TensorAttributes& tensor, int64_t elementBytes)
 {
     int64_t maximum = 0;
@@ -983,7 +995,7 @@ std::optional<std::pair<bool, int64_t>> lseFor(const MatchContext& context,
     }
     const int64_t lseUid = attributes.stats_tensor_uid().value();
     const auto* lse = findTensor(context, lseUid);
-    if(lse == nullptr || !isWellFormedOperand(*lse)
+    if(lse == nullptr || !isWellFormedOperand(*lse) || !hasRowRoomForTailStores(*lse)
        || lse->data_type() != data_objects::DataType::FLOAT
        || lse->dims()->Get(BATCH_AXIS) != p.batch || lse->dims()->Get(HEAD_AXIS) != p.queryHeads
        || lse->dims()->Get(SEQ_AXIS) != p.seqLenQ || lse->dims()->Get(HEAD_SIZE_AXIS) != 1
@@ -1195,8 +1207,9 @@ std::optional<BoundTokens>
             return std::nullopt;
         }
     }
-    else if(!isWellFormedOperand(*q) || !isWellFormedOperand(*o) || !addressFitsI32(*q, 2)
-            || !addressFitsI32(*o, 2) || !hasAlignedRows(*q) || !hasAlignedRows(*o))
+    else if(!isWellFormedOperand(*q) || !isWellFormedOperand(*o) || !hasRowRoomForTailStores(*o)
+            || !addressFitsI32(*q, 2) || !addressFitsI32(*o, 2) || !hasAlignedRows(*q)
+            || !hasAlignedRows(*o))
     {
         return std::nullopt;
     }
@@ -1420,7 +1433,8 @@ std::optional<BoundTokens> graphMatchesFor(std::string_view engine, const MatchC
     const auto* v = findTensor(context, attributes.v_tensor_uid());
     const auto* o = findTensor(context, attributes.o_tensor_uid());
     if(q == nullptr || k == nullptr || v == nullptr || o == nullptr || !isWellFormedOperand(*q)
-       || !isWellFormedOperand(*k) || !isWellFormedOperand(*v) || !isWellFormedOperand(*o))
+       || !isWellFormedOperand(*k) || !isWellFormedOperand(*v) || !isWellFormedOperand(*o)
+       || !hasRowRoomForTailStores(*o))
     {
         return std::nullopt;
     }

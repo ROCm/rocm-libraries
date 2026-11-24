@@ -258,6 +258,7 @@ inline bool headPadCopyable(const data_objects::TensorAttributes& tensor)
         return false;
     }
     int64_t last = 0;
+    const bool packed = tensor.ragged_offset_tensor_uid().has_value();
     for(uint32_t axis = 0; axis < SDPA_RANK; ++axis)
     {
         const int64_t extent = dims->Get(axis);
@@ -265,7 +266,7 @@ inline bool headPadCopyable(const data_objects::TensorAttributes& tensor)
         {
             return false;
         }
-        if(extent == 1)
+        if(extent == 1 && (!packed || axis != SEQ_AXIS))
         {
             continue;
         }
@@ -277,8 +278,7 @@ inline bool headPadCopyable(const data_objects::TensorAttributes& tensor)
         }
         last += *reach;
     }
-    return !tensor.ragged_offset_tensor_uid().has_value()
-           || tensor.ragged_offset_multiplier() == strides->Get(SEQ_AXIS);
+    return !packed || tensor.ragged_offset_multiplier() == strides->Get(SEQ_AXIS);
 }
 
 /// The padded graph's serialized bytes and the graph over them. Built in place and never moved:
@@ -613,8 +613,11 @@ inline HeadPadPlan
         {
             width = std::max(widthQk, widthV);
         }
+        const bool packed = tensor.ragged_offset_tensor_uid().has_value();
         const auto stride = [&](uint32_t axis) {
-            return dims->Get(axis) == 1 ? int64_t{0} : strides->Get(axis) * units;
+            return dims->Get(axis) == 1 && (!packed || axis != SEQ_AXIS)
+                       ? int64_t{0}
+                       : strides->Get(axis) * units;
         };
         HeadPadOperand result;
         result.uid = uid;
