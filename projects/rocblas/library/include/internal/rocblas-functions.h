@@ -14483,7 +14483,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemm_batched_64(rocblas_handle           
     ldc    [rocblas_int]
            ldc specifies the first dimension of C. ldc >= max( 1, m ).
 
-    @param[in, out]
+    @param[in]
     stride_C  [rocblas_stride]
               stride from the start of one matrix (C_i) to the next one (C_i+1).
 
@@ -14875,7 +14875,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherk_batched_64(rocblas_handle           
     ldc    [rocblas_int]
            ldc specifies the first dimension of C. ldc >= max( 1, n ).
 
-    @param[in, out]
+    @param[in]
     stride_C  [rocblas_stride]
               stride from the start of one matrix (C_i) to the next one (C_i+1).
 
@@ -15302,7 +15302,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher2k_batched_64(rocblas_handle          
     ldc    [rocblas_int]
            ldc specifies the first dimension of C. ldc >= max( 1, n ).
 
-    @param[in, out]
+    @param[in]
     stride_C  [rocblas_stride]
               stride from the start of one matrix (C_i) to the next one (C_i+1).
 
@@ -15749,7 +15749,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherkx_batched_64(rocblas_handle          
     ldc    [rocblas_int]
            ldc specifies the first dimension of C. ldc >= max( 1, n ).
 
-    @param[in, out]
+    @param[in]
     stride_C  [rocblas_stride]
               stride from the start of one matrix (C_i) to the next one (C_i+1).
 
@@ -16295,7 +16295,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymm_batched_64(rocblas_handle           
     ldc    [rocblas_int]
            ldc specifies the first dimension of C. ldc >= max( 1, m ).
 
-    @param[in, out]
+    @param[in]
     stride_C  [rocblas_stride]
               stride from the start of one matrix (C_i) to the next one (C_i+1).
 
@@ -16867,7 +16867,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrk_batched_64(rocblas_handle           
     ldc    [rocblas_int]
            ldc specifies the first dimension of C. ldc >= max( 1, n ).
 
-    @param[in, out]
+    @param[in]
     stride_C  [rocblas_stride]
               stride from the start of one matrix (C_i) to the next one (C_i+1)
 
@@ -17474,7 +17474,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2k_batched_64(rocblas_handle          
     ldc    [rocblas_int]
            ldc specifies the first dimension of C. ldc >= max( 1, n ).
 
-    @param[in, out]
+    @param[in]
     stride_C  [rocblas_stride]
               stride from the start of one matrix (C_i) to the next one (C_i+1).
 
@@ -18118,7 +18118,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrkx_batched_64(rocblas_handle          
     ldc    [rocblas_int]
            ldc specifies the first dimension of C. ldc >= max( 1, n ).
 
-    @param[in, out]
+    @param[in]
     stride_C  [rocblas_stride]
               stride from the start of one matrix (C_i) to the next one (C_i+1).
 
