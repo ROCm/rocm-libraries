@@ -17,7 +17,6 @@ Alternatively, you can build hipBLAS standalone using the following
 instructions.
 
 This topic covers how to install hipBLAS on Microsoft Windows from a package and how to build and install it from the source code.
-For a list of installation prerequisites, see :doc:`hipBLAS prerequisites <prerequisites>`.
 
 Prerequisites for Microsoft Windows
 ===================================

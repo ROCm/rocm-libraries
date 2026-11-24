@@ -8,9 +8,11 @@ Errors that a setter or filter "records" are returned by the next `validate()`, 
 
 ## Heuristic modes
 
-Every `HeurMode_t` (`A`, `B`, `FALLBACK`, `OPENSOURCE`) is accepted. `A` and `B` select hipDNN's `SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB` prediction policies, which rank engines by trained UHD models rather than by cuDNN's heuristics and decline to static engine selection when no applicable engine has a usable prediction (see the [Porting Guide](./PortingGuide.md)). `OPENSOURCE` uses hipDNN's default engine selection and logs a warning on its first use in a process. Plan choice and performance can differ from cuDNN.
+Every `HeurMode_t` (`A`, `B`, `FALLBACK`, `OPENSOURCE`) is accepted and forwarded as the backend heuristic mode: `A` as `HIPDNN_HEUR_MODE_A`, `B` as `HIPDNN_HEUR_MODE_B`, `FALLBACK` as `HIPDNN_HEUR_MODE_FALLBACK`. `A` and `B` select hipDNN's `SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB` prediction policies, which rank engines by trained UHD models rather than by cuDNN's heuristics and decline to static engine selection when no applicable engine has a usable prediction (see the [Porting Guide](./PortingGuide.md)). `FALLBACK` is hipDNN's model-free static (fallback) order, as cuDNN's `FALLBACK` is its non-heuristic order. `OPENSOURCE` is treated as `FALLBACK` and also logs a warning on its first use in a process. Where no applicable engine has a trained model, `A` and `FALLBACK` rank alike. Plan choice and performance can differ from cuDNN.
 
-The v0.x builders accept every `CUDNN_HEUR_MODE_*` (`INSTANT`, `A`, `B`, `FALLBACK`). `A` and `B` rank by the `ModeA` and `ModeB` policies, `INSTANT` as `A` (NVIDIA's alias), and `FALLBACK` by hipDNN's default engine selection; no mode logs a warning. Every mode returns the same engines, the ones `FALLBACK` finds, in its own order. With `HIPDNN_HEUR_POLICY_ORDER` set, the environment overrides the requested policy and every mode orders alike.
+A list of modes follows cudnn-frontend: one heuristic query per mode, in the order given, results concatenated; an engine an earlier mode already returned is not repeated, because hipDNN returns one configuration per engine. `{A, FALLBACK}` is therefore `A`'s ranking, since every mode returns the same applicable engines. An empty list is rejected with `INVALID_VALUE` before any query; cudnn-frontend v1.33.0 accepts it in `create_execution_plans()` and fails later, at `check_support()`. Upstream cudnn-frontend has no default for the mode list; hipDNN defaults it to `{HeuristicMode::A}` (and `{HeurMode_t::A}` in the compatibility layer) as a convenience, so a call that names no mode ranks by `A`. Pass `{FALLBACK}` for the static order.
+
+The v0.x builders accept every `CUDNN_HEUR_MODE_*` (`INSTANT`, `A`, `B`, `FALLBACK`). `A` and `B` rank by the `ModeA` and `ModeB` policies, `INSTANT` as `A` (NVIDIA's alias), and `FALLBACK` by hipDNN's model-free static (fallback) order; no mode logs a warning. Every mode returns the same engines, the ones `FALLBACK` finds, in its own order. With `HIPDNN_HEUR_POLICY_ORDER` set, the environment overrides the policy list the requested mode selects and every mode orders alike.
 
 ## Note filters
 
@@ -76,17 +78,25 @@ Engines verified for stream capture report `SUPPORTS_GRAPH_CAPTURE`, so `select_
 
 ## Engine filtering
 
-`deselect_engines`, the behavior-note filters, and the determinism filter are applied to the applicable engines after plan creation. A filter set after plans were created takes effect at the next `check_support()`, `build_plans()`, or `build_plan_at_index()`, including for plans already created.
+The native `Graph` keeps cuDNN's filter semantics: filters persist until changed, `check_support()` answers "is this supported with these filters?", and `build_plans()` builds the best plan that passes them ([RFC 0025](rfcs/0025_NumericalNotes.md) §4 lists the differences). The shim reapplies its own filters (`deselect_engines`, the behavior-note filters, and the determinism filter) to the applicable engines after plan creation, as native `deselect_engines`, which replaces its list. A filter set after plans were created takes effect at the next `check_support()`, `build_plans()`, `build_plan_at_index()`, or `autotune()`, including for plans already created.
 
-If the filters bar only some engines, `build_plans(HEURISTICS_CHOICE)` builds the top-ranked surviving plan, as cuDNN does, instead of failing because the top-ranked engine was barred.
+If the filters bar only some engines, `build_plans(HEURISTICS_CHOICE)` builds the first plan that passes them, as cuDNN does, instead of failing because the top-ranked engine was barred. It calls the native `build_plans`, which walks past the plans the shim's filters remove.
 
-hipDNN's native `build_plans(HEURISTICS_CHOICE)` falls back on any plan-build failure. If the active plan fails to finalize, it logs a WARN with the engine ID and the failure, then tries the other ranked plans (scanning the ranked list from the top) and logs a WARN for each that also fails; the first plan that builds becomes the active plan. Plans barred by filters, descriptor-invalid plans, deselected engines, and plans over the workspace limit are skipped with an INFO line. When no plan builds, the error code is `GRAPH_EXECUTION_PLAN_CREATION_FAILED` and its message lists every attempted engine's failure, in attempt order; this includes a graph with a single plan. An active plan that builds but whose workspace exceeds the `deselect_workspace_greater_than` limit is an error, not skipped. A preferred engine (`set_preferred_engine_id_ext`) is a soft preference: if its plan fails to build, the fallback applies. `build_plans(ALL)` and `build_plan_at_index` do not fall back. When the shim's own filters bar the active plan, the shim retargets with `build_plan_at_index`, which does not walk the fallback: if the retarget target fails to build, its error is returned.
+hipDNN's native `build_plans(HEURISTICS_CHOICE)` falls back on any plan-build failure. If the active plan is removed by a filter or fails to finalize, it tries the other ranked plans (scanning the ranked list from the top); the first plan that passes the filters and builds becomes the active plan. It logs a WARN with the engine ID and the failure for each plan that fails to finalize, and an INFO line, `plan index i (engine e) skipped: <reason>`, for each plan a filter removes. The workspace limit is judged on each plan's engine-config workspace before the plan is finalized; a plan that finalizes over the limit despite its engine config is rejected with a WARN, and the walk moves on. When no plan builds, the error code is `GRAPH_EXECUTION_PLAN_CREATION_FAILED` and its message lists every skipped or failed engine and its reason, in attempt order; this includes a graph with a single plan. A repeated `HEURISTICS_CHOICE` call after a plan was built returns OK and changes nothing, as in cuDNN. A repeated `ALL` call keeps the active plan, builds only the plans not yet built, and returns OK. The shim skips its survivor check on a repeat build, for either policy.
 
-If no created plan survives, the next plan creation (`create_execution_plans`, `create_execution_plan`), `check_support()`, `build_plans()`, or `build_plan_at_index()` returns `GRAPH_NOT_SUPPORTED`; cuDNN returns `GRAPH_EXECUTION_PLAN_CREATION_FAILED` from `check_support()`. This includes `deselect_engines` alone barring every applicable engine.
+If the shim's own filters bar every created plan, the next plan creation (`create_execution_plans`, `create_execution_plan`), `check_support()`, `build_plans()`, or `build_plan_at_index()` returns `GRAPH_NOT_SUPPORTED`; cuDNN returns `GRAPH_EXECUTION_PLAN_CREATION_FAILED` from `check_support()`. This includes `deselect_engines` alone barring every applicable engine. The exception is a repeat `build_plans()` after a successful build, which returns OK and keeps the built plan. When only the workspace limit leaves no plan, `check_support()`, `build_plans()` and `build_plan_at_index()` return `GRAPH_EXECUTION_PLAN_CREATION_FAILED`, as cuDNN does.
+
+Differences from cuDNN that follow from the shim's filter handling:
+
+- `check_support()` marks no plan, so clearing a filter re-admits a plan in hipDNN. In cuDNN a plan `check_support()` removed stays removed.
+- After plans are recreated, a repeat `build_plans` builds one of the new plans. cuDNN keeps the earlier candidate.
+- A failed note read fails a repeat `build_plans` and `autotune`. cuDNN's repeat `build_plans` returns OK without reading notes.
+- After `deserialize`, `check_support()` and `build_plan_at_index()` on a plan whose engine matches a name kept by `deselect_engines` return `GRAPH_NOT_SUPPORTED`. cuDNN keeps the names across `deserialize` too, and its `check_support()` fails there for lack of engine configs.
+- Copies of a `Graph` share one plan set and active plan, and the copy that pushes its filters last decides the native filter list. In cuDNN each copy owns its plan list. Tracked in [#16330](https://github.com/ROCm/rocm-libraries/issues/16330).
 
 ## Engine indices
 
-Engine indices are dense and graph-local, `0 .. get_engine_count() - 1`, in hipDNN's `FALLBACK` ranking of the applicable engines (not cuDNN's, and not the ranking of the requested heuristic mode, `A` and `B` included). `get_engine_count()` refreshes the index-to-engine map. `get_knobs_for_engine`, `create_execution_plan`, and `deselect_engines(std::vector<int64_t>)` translate indices through it, so every index names the same engine. The `int64_t` overload of `deselect_engines` is a hipDNN extension.
+Engine indices are dense and graph-local, `0 .. get_engine_count() - 1`, in hipDNN's `FALLBACK` ranking of the applicable engines, which is the static (fallback) order (not cuDNN's, and not the ranking of the requested heuristic mode, `A` and `B` included). `get_engine_count()` refreshes the index-to-engine map. `get_knobs_for_engine`, `create_execution_plan`, and `deselect_engines(std::vector<int64_t>)` translate indices through it, so every index names the same engine. The `int64_t` overload of `deselect_engines` is a hipDNN extension. It shares one list with the name overload: the last call of either kind replaces the list, and an empty list clears it. In C++ a clearing call spells the type, for example `deselect_engines(std::vector<std::string>{})`, because `{}` matches both overloads.
 
 ## Knobs
 
@@ -116,7 +126,7 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 | Mixed per-side form (`cu_seq_len_*` on one side, `seq_len_*` on the other) | Rejected by cudnn-frontend v1.25.0 and v1.26.0; accepted from v1.27.0 | Accepted (`SdpaFwdNode` Rule 6c) |
 | `padding_mask` | Must be `true` whenever any length tensor (`seq_len_*` or `cu_seq_len_*`) is set | Required for `cu_seq_len_*` only; `seq_len_*` with `padding_mask=false` still validates |
 | Paged K/V with `cu_seq_len_*` | Accepted by cudnn-frontend v1.25.0 | Rejected: `SdpaFwdNode::validatePagedKv` requires `seq_len_q` and `seq_len_kv` for paged K/V |
-| Engine support | Unified SDPA engine on cuDNN 9.24+ (mixed per-side forms: 9.25+) | Only an engine plugin reporting API version 1.6.0 or newer; no in-tree engine or reference implements them yet |
+| Engine support | Unified SDPA engine on cuDNN 9.24+ (mixed per-side forms: 9.25+) | Only an engine plugin reporting API version 1.6.0 or newer. The hip-kernel-provider ASM SDPA engine serves `cu_seq_len_q` and `cu_seq_len_kv` together on ragged Q, K, V and O (gfx942, gfx950); no other in-tree engine or reference implements them yet |
 
 ## Build and execute
 
@@ -149,7 +159,7 @@ On gfx90a, `hipkernel:flydsl_sdpa_bwd_split` serves fp16 graphs with the gfx90a 
 
 ## hipDNN extensions
 
-- `Graph::is_supported_ext(cudnnHandle_t, std::vector<HeurMode_t> = {FALLBACK})`: returns `OK` if any engine supports the graph, `GRAPH_NOT_SUPPORTED` otherwise. Builds the operation graph if needed; does not create or invalidate plans.
+- `Graph::is_supported_ext(cudnnHandle_t, std::vector<HeurMode_t> = {A})`: returns `OK` if any engine supports the graph, `GRAPH_NOT_SUPPORTED` otherwise. Builds the operation graph if needed; does not create or invalidate plans.
 - `Graph::get_name`, `get_io_data_type`, `get_compute_data_type`, `get_intermediate_data_type`.
 - `Graph::deserialize(data, enforce_precompiled)` without a handle.
 - `HIPDNN_COMPATIBILITY_CUDNN_FRONTEND` macro.
@@ -295,7 +305,7 @@ These differ from cuDNN:
 
 | Case | Compatibility layer behavior |
 |---|---|
-| Heuristic mode (`setHeurMode`) | `A` and `INSTANT` rank the graph's engines by hipDNN's `ModeA` policy, `B` by `ModeB`, `FALLBACK` by hipDNN's fallback rank; every mode returns the same engines. Each mode queries hipDNN once per graph, on its first use, so the first `INSTANT` (the builder's default) or `A`/`B` query of a graph costs a second heuristic run. See [Heuristic modes](#heuristic-modes) |
+| Heuristic mode (`setHeurMode`) | `A` and `INSTANT` rank the graph's engines by hipDNN's `ModeA` policy, `B` by `ModeB`, `FALLBACK` by hipDNN's static (fallback) order; every mode returns the same engines. Each mode queries hipDNN once per graph, on its first use, so the first `INSTANT` (the builder's default) or `A`/`B` query of a graph costs a second heuristic run. See [Heuristic modes](#heuristic-modes) |
 | Heuristic results of `A`, `B` and `INSTANT` | ranked by the policy, but every result uses the engine's default configuration: mode B's predicted knob settings and the ranking metric the policies attach to their configurations are not carried |
 | `EngineHeuristics::getEngineConfig(count)` | returns the first `count` results (at most `getEngineConfigCount()`): objects fixed at `build()`, the same on every call. Upstream also returns at most `count` results, but refills its descriptors from cuDNN on each call. Every result for a given engine of a graph, from any heuristics or fallback list, shares that engine's default hipDNN configuration: their `get_raw_desc()` is equal |
 | Matmul on gfx115x under Windows | hipBLASLt declines every matmul there (a hipBLASLt GEMM crash workaround), and no other provider runs matmul, so a v8 matmul graph has no engine |

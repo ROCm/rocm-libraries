@@ -31,11 +31,11 @@
 #define MIOPEN_EXPECT_CHECK_RET(val) EXPECT_EQ(val, miopenStatusSuccess)
 #define MIOPEN_EXPECT_BAD_PARAM_CHECK_RET(val) EXPECT_EQ(val, miopenStatusBadParm)
 
-class CPU_ConvFindModeAPI_NONE : public ::testing::Test
+class CPU_ConvFindModeAPI_NONE : public testing::TestWithParam<int>
 {
 };
 
-TEST_F(CPU_ConvFindModeAPI_NONE, ConvFindModeAPI)
+TEST_P(CPU_ConvFindModeAPI_NONE, ConvFindModeAPI)
 {
     miopenConvolutionDescriptor_t conv_descr = nullptr;
     MIOPEN_ASSERT_CHECK_RET(miopenCreateConvolutionDescriptor(&conv_descr));
@@ -93,3 +93,5 @@ TEST_F(CPU_ConvFindModeAPI_NONE, ConvFindModeAPI)
 
     MIOPEN_ASSERT_CHECK_RET(miopenDestroyConvolutionDescriptor(conv_descr));
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_ConvFindModeAPI_NONE, testing::Values(0));
