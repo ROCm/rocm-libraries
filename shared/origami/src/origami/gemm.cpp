@@ -3482,6 +3482,7 @@ double compute_total_latency(const problem_t& problem,
   // MT_M x MT_N f32 partial of every other workgroup that worked on it, on the critical path.
   // A tile split over s workgroups has s - 1 partials; a grid that shares tiles unevenly has
   // one.
+  double L_fixup = 0.0;
   if (w4 && config.stream_k > 0 && context.num_wgs != context.num_output_tiles) {
     const double tiles    = static_cast<double>(context.num_output_tiles);
     const double wgs      = static_cast<double>(context.num_wgs);
@@ -3489,14 +3490,14 @@ double compute_total_latency(const problem_t& problem,
     const double tile_iters = static_cast<double>(std::max<size_t>(math::safe_ceil_div(K, MT_K), 1));
     const double partials = wgs > tiles ? std::min(std::ceil(wgs / tiles), tile_iters) - 1.0
                                         : (context.num_output_tiles % context.num_wgs ? 1.0 : 0.0);
-    // A partial is MT_M x MT_N f32, read by the one workgroup that finishes the tile through
-    // its CU's L2 path.
+    // The owner reads and adds a partial (MT_M x MT_N f32) at the measured rate of that loop,
+    // which is a time: charged in the device's cycles, after the kernel's clock.
     const double partial_bytes = static_cast<double>(config.mt.m * config.mt.n) * 4.0;
-    const double cu_l2_rate    = hardware.mem1_perf_ratio / static_cast<double>(std::max<size_t>(hardware.N_CU, 1));
-    total_latency += partials * partial_bytes / cu_l2_rate;
+    L_fixup = partials * partial_bytes / (w4a16_params_t::SK_FIXUP_GB_PER_S * 1e9) * (device.compute_clock_ghz * 1e9);
   }
 
   total_latency *= clock_ratio;
+  total_latency += L_fixup;
 
   //  4) Kernel launch overhead
   total_latency += hardware.is_cdna5() ? heuristic_defaults_t::GFX1250_KERNEL_LAUNCH_CLK

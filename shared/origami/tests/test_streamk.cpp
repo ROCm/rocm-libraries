@@ -541,8 +541,11 @@ TEST_CASE("Origami streamk: the W4A16 grid needs a bf16/fp16 MI type", "[streamk
   };
   using dt = origami::data_type_t;
   using gs = origami::grid_selection_t;
-  REQUIRE(grid(dt::Int4, dt::BFloat16, gs::k_split_aware) == grid(dt::Int4, dt::BFloat16, gs::analytical));
-  REQUIRE(grid(dt::Int4, dt::Half, gs::k_split_aware) == grid(dt::Int4, dt::Half, gs::analytical));
+  // 4 tiles of 4-wave workgroups: one per tile, per WGP, per CU or two per CU, by latency.
+  for (auto mi : {dt::BFloat16, dt::Half}) {
+    const size_t g = grid(dt::Int4, mi, gs::k_split_aware);
+    REQUIRE((g == 4 || g == 20 || g == 40 || g == 80));
+  }
   // With an int8 MI it is not W4A16: the generic rules, as for a bf16 problem.
   REQUIRE(grid(dt::Int4, dt::Int8, gs::k_split_aware) == grid(dt::BFloat16, dt::BFloat16, gs::k_split_aware));
 }

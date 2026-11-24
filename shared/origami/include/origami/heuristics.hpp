@@ -313,7 +313,8 @@ struct heuristic_defaults_t {
  * The two architectures run the same kernels on the same ISA, so every constant that describes
  * the kernels is the same on both.  What differs is read from hardware_t (CUs, SIMDs per CU,
  * MALL, memory rates, per-workgroup costs) and from the kernel's CUOccupancy.  None of the
- * constants is fitted: [KERNEL] marks a property of the kernels of the set, counted in them.
+ * constants is fitted to the picks: [KERNEL] marks a property of the kernels of the set, counted
+ * in them, and [MEASURED] a rate timed on the device.
  */
 struct w4a16_params_t {
 
@@ -328,6 +329,13 @@ struct w4a16_params_t {
   static constexpr double F16_DEQUANT_VALU_PER_ELEM       = 3.4;  // [KERNEL]
   static constexpr double BF16_DOT2_DEQUANT_VALU_PER_ELEM = 2.6;  // [KERNEL]
   static constexpr double F16_DOT2_DEQUANT_VALU_PER_ELEM  = 2.3;  // [KERNEL]
+
+  // Rate at which the workgroup that finishes a split tile reads and adds the partials of the
+  // others (MT_M x MT_N f32 each), one after another.  [MEASURED] on a gfx1151: the kernel
+  // time of six kernels (4, 8 and 16 waves, partials of 6 to 196 KB) with the K of 4 to 9 tiles
+  // split in 2, 4 and 8, less the time of their K loops at that grid, is 0.05 to 0.10 us per
+  // KB of partial and does not depend on K (128x128x64 is the exception, at 0.23).
+  static constexpr double SK_FIXUP_GB_PER_S = 12.0;  // [MEASURED]
 };
 
 /// Whether the W4A16 terms apply to @p problem on @p hardware. The latency model and the
