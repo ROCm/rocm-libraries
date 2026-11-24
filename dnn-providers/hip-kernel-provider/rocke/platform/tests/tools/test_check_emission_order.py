@@ -168,9 +168,8 @@ def test_named_lambdas_count_only_in_their_own_file(tmp_path, monkeypatch):
         "void f(B* b) { auto lane = [&] { return rocke_b_mul(b, p, q); };\n"
         "x = rocke_b_add(b, lane(), rocke_b_mul(b, p, q)); }\n"
     )
-    assert [s.callee for s in ceo.scan([tmp_path])[str(tmp_path / "a.cpp")]] == [
-        "rocke_b_add"
-    ]
+    found = ceo.scan([tmp_path])
+    assert [[s.callee for s in sites] for sites in found.values()] == [["rocke_b_add"]]
 
 
 def test_member_functions_are_derived():
