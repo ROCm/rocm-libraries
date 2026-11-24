@@ -32,7 +32,10 @@
         8,
         512
       ],
-      "description": "Per-head width. 8 and up: narrower is not an attention head, and without a range the search spends half its draws below 16."
+      "common_values": [
+        192
+      ],
+      "description": "Per-head width. 8 and up: narrower is not an attention head, and without a range the search spends half its draws below 16. The common value is the MLA width, beside the regime buckets 64, 128 and 256, so the search is seeded where an MLA combination can hold a problem: the constraints admit no other width there, which a walk does not find by stepping."
     },
     "value_head_dim": {
       "type": "enum",
@@ -44,7 +47,7 @@
         "same": 3,
         "mla": 1
       },
-      "description": "Width of V, and so of O (and dO, dV), against Q and K's head_dim. same (default): equal, as nearly every model has. mla: 64 narrower, DeepSeek's multi-head latent attention, whose Q and K carry a 64-wide rotary part that V does not -- 192/128 in prefill and training, 576/512 with the latent absorbed in decode. hipDNN requires only Q and K's last dims to agree (SdpaFwdNode Rule 2, SdpaBwdNode Rule 3; O, dO and dV take V's), and ASM SDPA and FlyDSL ship kernels for such pairs. Declared only with head_dim >= 128, so V keeps 64 or more."
+      "description": "Width of V, and so of O (and dO, dV), against Q and K's head_dim. same (default): equal, as nearly every model has. mla: 64 narrower, DeepSeek's multi-head latent attention, whose Q and K carry a 64-wide rotary part that V does not -- 192/128 in prefill and training, 576/512 with the latent absorbed in decode. hipDNN requires only Q and K's last dims to agree (SdpaFwdNode Rule 2, SdpaBwdNode Rule 3; O, dO and dV take V's), and ASM SDPA and FlyDSL ship kernels for such pairs. The backward declares the training pair only (head_dim 192): the absorbed 576/512 form is an inference rewrite no training step runs, and the other widths the 64 offset gives (128/64, 129/65) are no model's. The deepseek_v3_mla_prefill archetype anchors it."
     },
     "is_causal": {
       "type": "bool",
@@ -470,9 +473,9 @@
           ]
         },
         {
-          "<=": [
-            128,
-            "$q.head_dim"
+          "==": [
+            "$q.head_dim",
+            192
           ]
         }
       ]
@@ -563,6 +566,22 @@
           "==": [
             "$q.layout",
             "qkv_packed"
+          ]
+        }
+      ]
+    },
+    {
+      "or": [
+        {
+          "!=": [
+            "$q.layout",
+            "qkv_packed"
+          ]
+        },
+        {
+          "==": [
+            "$q.alignment",
+            "top_left"
           ]
         }
       ]
@@ -3559,7 +3578,7 @@
     },
     {
       "name": "cross_attention",
-      "note": "more queries than keys, from different tensors: diffusion and encoder-decoder attention over a short text or memory sequence. Bidirectional, as such attention is; a causal mask over more queries than keys is declared too (top-left, where every query row keeps a key), reached by exploration",
+      "note": "more queries than keys, from different tensors: diffusion and encoder-decoder attention over a short text or memory sequence. Bidirectional, as such attention is, and causal too: the mask over more queries than keys anchored top-left, where every query row keeps a key, which exploration alone reaches a few times in thousands of graphs",
       "values": {
         "batch": [
           1,
@@ -3591,7 +3610,43 @@
           160
         ],
         "is_causal": [
-          false
+          false,
+          true
+        ]
+      }
+    },
+    {
+      "name": "deepseek_v3_mla_prefill",
+      "source": "DeepSeek-V3 config.json (qk_nope_head_dim 128, qk_rope_head_dim 64, v_head_dim 128, 128 heads)",
+      "note": "multi-head latent attention as it trains, the latent expanded: Q and K 192 wide (128 + the 64-wide rotary part), V 128, one KV head per query head; all 128 heads, or the 16 of a tensor-parallel shard (and DeepSeek-V2-Lite)",
+      "values": {
+        "batch": [
+          1,
+          2,
+          4
+        ],
+        "heads": [
+          16,
+          128
+        ],
+        "heads_kv": [
+          "$q.heads"
+        ],
+        "seqlen_q": [
+          2048,
+          4096
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          192
+        ],
+        "value_head_dim": [
+          "mla"
+        ],
+        "is_causal": [
+          true
         ]
       }
     }

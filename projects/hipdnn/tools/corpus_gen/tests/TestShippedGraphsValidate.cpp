@@ -22,6 +22,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
@@ -183,26 +184,31 @@ TEST(TestShippedGraphsValidate, EverySdpaFormLayoutScaleWindowAndSequenceRelatio
                                   {512, 512, 192, true},
                                   {1, 4096, 128, true},
                                   {197, 197, 8, false}};
-        // The declared cross attention archetype, drawn once, is a shape too.
+        // The absorbed MLA decode width, which the forward declares under value_head_dim mla.
+        if(operation == "sdpa_fwd")
+        {
+            shapes.push_back({1, 4096, 576, true});
+        }
+        // The declared cross attention archetype, drawn once, is a shape too. It draws either
+        // mask, and a draw of the mask the combination does not hold is no point, so it is drawn
+        // until one lands.
         const auto crossAttention = std::find_if(
             metadata.archetypes.begin(), metadata.archetypes.end(), [](const Archetype& archetype) {
                 return archetype.name == "cross_attention";
             });
-        if(operation == "sdpa_fwd")
+        ASSERT_TRUE(crossAttention != metadata.archetypes.end()) << operation;
+        std::mt19937_64 rng(7);
+        std::optional<ProblemPoint> drawn;
+        for(int attempt = 0; attempt < 64 && !drawn.has_value(); ++attempt)
         {
-            ASSERT_TRUE(crossAttention != metadata.archetypes.end()) << operation;
-        }
-        if(crossAttention != metadata.archetypes.end())
-        {
-            std::mt19937_64 rng(7);
-            const auto drawn = detail::drawFromArchetype(
+            drawn = detail::drawFromArchetype(
                 metadata, *crossAttention, test::withDefaultCategoricals(metadata, {}), rng);
-            ASSERT_TRUE(drawn.has_value()) << operation;
-            shapes.push_back({std::get<int64_t>(drawn->at("seqlen_q")),
-                              std::get<int64_t>(drawn->at("seqlen_k")),
-                              std::get<int64_t>(drawn->at("head_dim")),
-                              std::get<bool>(drawn->at("is_causal"))});
         }
+        ASSERT_TRUE(drawn.has_value()) << operation;
+        shapes.push_back({std::get<int64_t>(drawn->at("seqlen_q")),
+                          std::get<int64_t>(drawn->at("seqlen_k")),
+                          std::get<int64_t>(drawn->at("head_dim")),
+                          std::get<bool>(drawn->at("is_causal"))});
         const auto& windows = windowParameter->values;
         int64_t validated = 0;
         std::map<std::string, int64_t> validatedFor;

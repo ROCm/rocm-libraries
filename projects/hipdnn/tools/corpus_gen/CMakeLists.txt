@@ -72,10 +72,10 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
                 "default_operations|--without-engine,--operation,matmul,--count,4|0|4"
                 "empty|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,4,--keep,q.M=-7|2|0"
                 # With quotas and no --count, the corpus is the quotas alone. The first pass still
-                # runs before the quota is filled, and the forward's default one is about 9000
-                # problems (50 for each of about 180 live combinations of the unweighted
-                # parameters, the form among them), tens of seconds depending on the host:
-                # --per-combination 10 shortens it to about 1800 problems.
+                # runs before the quota is filled, and the forward's default one is about 3000
+                # problems (50 for each of about 60 live combinations of the unweighted
+                # parameters, the form among them), seconds to tens of seconds depending on the
+                # host: --per-combination 10 shortens it to about 600 problems.
                 "regime_quota|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,10,--regime-quota,decode_short_mha=3|0|3"
                 # One form axis of eight labels: one graph under each, and nothing else. Each
                 # label is a value of the manifest's own `form` column and a reported quota. The
@@ -92,18 +92,21 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
                 # A sweep with no share still delivers the regimes the quotas name.
                 "regime_quota_without_sweep|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-quota,decode_short_mha=3,--sweep-share,0|0|3"
                 # A keep on enum facets narrows the categorical combinations before the search's
-                # bound: of sdpa_fwd's 23040, the 8 of is_causal x alignment x generate_stats, 2 of
+                # bound: of sdpa_fwd's 53760, the 8 of is_causal x alignment x generate_stats, 2 of
                 # them empty by the declaration and none left unexplored, as manifest.json reports
                 # them (total:constraint_empty:not_explored), and the declared weights of the
                 # weighted facets.
                 "keep_narrows_combinations|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--count,20,--keep,q.form=plain,--keep,q.layout=bshd,--keep,q.scale=inv_sqrt_d,--keep,q.window=none,--keep,q.dtype=fp16,--keep,q.value_head_dim=same|0|20||8:2:0|reports.categorical_weights.sdpa_fwd.layout.bshd=2.0,reports.categorical_weights.sdpa_fwd.scale.inv_sqrt_d=2.0,reports.categorical_weights.sdpa_fwd.window.none=3.0"
                 # Past the bound of 1024 the sample holds combinations that can hold a problem
-                # only: of the 23040, 6660 are empty by the declaration, and 15356 of the 16380
+                # only: of the 53760, 19460 are empty by the declaration, and 33276 of the 34300
                 # that are not are left out.
-                "combinations_past_the_bound|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,2,--count,20|0|20||23040:6660:15356"
+                "combinations_past_the_bound|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,2,--count,20|0|20||53760:19460:33276"
                 # The cut to --count holds every form at about an even share (an eighth), though
-                # fewer combinations can hold some forms than others.
-                "count_cut_keeps_forms_even|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,10,--count,400|0|400|||||9:plain:scale_unset:scale_tensor:dropout:padded:ragged:bias:sink"
+                # fewer combinations can hold some forms than others. The weighted dtype splits
+                # the first pass's budget rather than multiplying it, so --per-combination 30
+                # gives the cut the first pass of about 1800 problems it had at 10 with three
+                # unweighted dtypes; at 10 scale_unset falls to 35 of 400.
+                "count_cut_keeps_forms_even|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,30,--count,400|0|400|||||9:plain:scale_unset:scale_tensor:dropout:padded:ragged:bias:sink"
                 # With --anchor-scaling the declared mixture (80% archetypes and neighbourhood)
                 # holds at a count far above the first pass; without it the first pass's fixed
                 # quotas are diluted by exploration. anchored_share reports the delivered corpus.
@@ -113,9 +116,10 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
                 # left: the corpus's sweep graphs, not the problems explored before the cut.
                 "anchored_share_counts_the_delivered_corpus|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,100|0|100|||reports.anchored_share.matmul.delivered=100"
                 # A focused search that stops without proof reports the regime not reached, not
-                # saturated, and the short quota exits 3: with the sweep off this seed's search
-                # finds none of cross_long_gqa, a sliver (more than 2048 keys, then more queries).
-                "regime_not_reached|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-quota,cross_long_gqa=1,--regime-quota,decode_short_mha=3,--sweep-share,0,--seed,1|3|3|||reports.regime_quota.sdpa_fwd.cross_long_gqa.saturated=OFF,reports.regime_quota.sdpa_fwd.cross_long_gqa.delivered=0,reports.regime_quota.sdpa_fwd.decode_short_mha.delivered=3"
+                # saturated, and the short quota exits 3: with the sweep off and 100 oracle calls a
+                # combination, this seed's search finds none of cross_long_gqa, a sliver (more
+                # than 2048 keys, then more queries).
+                "regime_not_reached|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-quota,cross_long_gqa=1,--regime-quota,decode_short_mha=3,--sweep-share,0,--seed,1,--budget,100|3|3|||reports.regime_quota.sdpa_fwd.cross_long_gqa.saturated=OFF,reports.regime_quota.sdpa_fwd.cross_long_gqa.delivered=0,reports.regime_quota.sdpa_fwd.decode_short_mha.delivered=3"
                 # The model shapes file carries no column for layout, scale, window or
                 # value_head_dim, so its one row takes the declared defaults, and the report
                 # counts them.

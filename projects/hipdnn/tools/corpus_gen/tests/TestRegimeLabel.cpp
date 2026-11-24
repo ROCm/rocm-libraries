@@ -12,6 +12,7 @@
 #include "OperationsDir.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <set>
 #include <string>
 #include <vector>
@@ -345,14 +346,16 @@ TEST(TestRegimeFocus, ARegimeInACorpusWhoseEveryCombinationIsEmptyIsSaturated)
 
 TEST(TestRegimeFocus, ARegimeTheDeclaredConstraintsExcludeIsSaturatedWithoutAskingTheEngine)
 {
-    // Cross attention (more queries than keys) is admitted only under a non-causal mask, so
-    // under a causal keep every proposal in the regime breaks a constraint.
+    // Cross attention (more queries than keys) under a causal mask is admitted only anchored
+    // top-left, where every query row keeps a key, so under a causal, bottom-right keep every
+    // proposal in the regime breaks a constraint. (A causal keep alone admits the top-left
+    // half, which a search that finds its footholds then serves.)
     const auto metadata = shippedSdpa();
     std::string error;
     const auto focus = compileRegimeFocus(metadata, "cross_long_gqa", error);
     ASSERT_TRUE(focus.has_value()) << error;
     auto request = focusRequest();
-    request.keep = {{"is_causal", "true"}};
+    request.keep = {{"is_causal", "true"}, {"alignment", "bottom_right"}};
     int64_t asked = 0;
     const ProblemOracle counting = [&asked](const ProblemPoint&) {
         ++asked;
@@ -388,8 +391,8 @@ TEST(TestRegimeFocus, AnUnservedRegimeCostsOnlyTheProbe)
     // The sample is capped at maxCombinations, plus one extra combination per declared value it
     // missed, so the cap is what the enumeration actually yields.
     size_t total = 0;
-    const auto combinations
-        = detail::categoricalCombinations(metadata.parameters, request.maxCombinations, total);
+    const auto combinations = detail::categoricalCombinations(
+        metadata.parameters, request.maxCombinations, request.seed, total);
     EXPECT_LE(found.proposed, static_cast<int64_t>(combinations.size()) * request.probeBudget);
 }
 
@@ -458,7 +461,10 @@ TEST_P(TestShippedValueWeights,
     // over every point, so over every point the weighted and the unweighted share both fall
     // within the tolerance of 0.5 (about 0.5 and 0.47 in sdpa_bwd). Among the points whose form states
     // the scale the weight is what remains once the forced share, the rows of those two forms,
-    // is taken out, and the unweighted 1/3 is further from it than the tolerance.
+    // is taken out. The lanes are a seeded sample of the combinations, so the realised share
+    // moves with the seed: over seeds 1 to 8 it fell within 0.034 of the weighted share in both
+    // declarations, inside the tolerance below; the weighted share must also be nearer than the
+    // unweighted 1/3, which in sdpa_bwd can sit as close as 0.05.
     const auto* formParameter = metadata.find("form");
     ASSERT_NE(formParameter, nullptr);
     EXPECT_TRUE(formParameter->weights.empty()) << "the forms are even strata, not weighted";
@@ -490,7 +496,10 @@ TEST_P(TestShippedValueWeights,
     EXPECT_NEAR(shareOf("layout", "bshd", false), 0.4, 0.05);
     EXPECT_NEAR(shareOf("layout", "bhsd", false), 0.2, 0.05);
     EXPECT_NEAR(shareOf("scale", "inv_sqrt_d", false), 0.5, 0.1);
-    EXPECT_NEAR(shareOf("scale", "inv_sqrt_d", true), statedInvSqrtD, 0.03);
+    const auto stated = shareOf("scale", "inv_sqrt_d", true);
+    EXPECT_NEAR(stated, statedInvSqrtD, 0.045);
+    EXPECT_LT(std::abs(stated - statedInvSqrtD), std::abs(stated - (1.0 / 3.0)))
+        << "the stated scales are nearer an even split than the declared weight";
     // No form is starved. The three that fewer combinations can hold sit below an even share by
     // construction: scale_unset and scale_tensor take inv_sqrt_d only (half the scale weight),
     // and ragged the token-major layouts only (bshd's 2 of 5 here, with no qkv_packed in a
@@ -511,9 +520,9 @@ TEST_P(TestShippedValueWeights,
     const auto few = exploreRegime(metadata, *focus, request, 60, SERVES_EVERYTHING, {}, {});
     ASSERT_GE(few.problems.size(), 60u);
     size_t total = 0;
-    const auto lanes
-        = detail::categoricalCombinations(metadata.parameters, request.maxCombinations, total)
-              .size();
+    const auto lanes = detail::categoricalCombinations(
+                           metadata.parameters, request.maxCombinations, request.seed, total)
+                           .size();
     EXPECT_LT(few.proposed, static_cast<int64_t>(lanes) * request.budgetPerCombination / 8)
         << "proposed " << few.proposed << " over " << lanes << " lanes";
 }

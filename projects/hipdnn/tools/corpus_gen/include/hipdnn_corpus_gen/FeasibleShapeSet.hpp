@@ -143,6 +143,27 @@ inline Shape drawLogUniform(const std::vector<ShapeDimension>& dimensions, std::
     return shape;
 }
 
+/// A log-uniform draw with about half its coordinates taken from @p seed instead, each clamped
+/// into the box. A region pinned to a few values of one parameter (head_dim 192 or 576 under
+/// MLA) is a set of measure zero that a log-uniform draw never lands in, and a seed that holds
+/// the value can still be refused for another coordinate (a sequence length outside the
+/// regime); crossing the two keeps the seed's value where the region needs it and redraws the
+/// rest.
+inline Shape drawCrossedWithSeed(const std::vector<ShapeDimension>& dimensions,
+                                 const Shape& seed,
+                                 std::mt19937_64& rng)
+{
+    auto shape = drawLogUniform(dimensions, rng);
+    for(size_t d = 0; d < dimensions.size() && d < seed.size(); ++d)
+    {
+        if(bernoulli(rng, 0.5))
+        {
+            shape[d] = std::clamp(seed[d], dimensions[d].low, dimensions[d].high);
+        }
+    }
+    return shape;
+}
+
 /// Squared distance in log space, where spread is judged.
 inline double logDistanceSquared(const Shape& a, const Shape& b)
 {
@@ -463,20 +484,32 @@ inline FeasibleShapeSet buildFeasibleShapeSet(const ShapeOracle& oracle,
         {
             const auto allowance
                 = std::max<int64_t>(1, request.oracleBudget / (request.restarts * 2));
-            for(int64_t attempt = 0;
-                attempt < allowance && result.stats.oracleCalls < request.oracleBudget;
-                ++attempt)
-            {
-                ++result.stats.seedAttempts;
-                Shape candidate = detail::drawLogUniform(request.dimensions, rng);
-                if(ask(candidate))
+            const auto seek = [&](const auto& draw) {
+                for(int64_t attempt = 0;
+                    attempt < allowance && result.stats.oracleCalls < request.oracleBudget;
+                    ++attempt)
                 {
-                    ++result.stats.seedsFound;
-                    record(candidate);
-                    current = std::move(candidate);
-                    started = true;
-                    break;
+                    ++result.stats.seedAttempts;
+                    Shape candidate = draw();
+                    if(ask(candidate))
+                    {
+                        ++result.stats.seedsFound;
+                        record(candidate);
+                        current = std::move(candidate);
+                        return true;
+                    }
                 }
+                return false;
+            };
+            started = seek([&]() { return detail::drawLogUniform(request.dimensions, rng); });
+            // Only when log-uniform draws find nothing: a search they serve is drawn as before.
+            if(!started && !request.seeds.empty())
+            {
+                started = seek([&]() {
+                    const auto& seed
+                        = request.seeds[detail::uniformIndex(rng, request.seeds.size())];
+                    return detail::drawCrossedWithSeed(request.dimensions, seed, rng);
+                });
             }
         }
 

@@ -458,6 +458,7 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
     for(auto& combination : detail::categoricalCombinations(
             metadata.parameters,
             request.maxCombinations,
+            request.seed,
             totalCombinations,
             [&metadata](const ProblemPoint& candidate) {
                 return !detail::excludedByCategoricals(metadata, candidate);

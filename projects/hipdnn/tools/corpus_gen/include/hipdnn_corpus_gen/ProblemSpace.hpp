@@ -10,6 +10,7 @@
 #include <hipdnn_corpus_gen/WorkloadSampling.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -239,18 +240,20 @@ inline uint64_t tieKey(uint64_t seed, size_t index)
     return z ^ (z >> 31);
 }
 
-/// A fixed bijection of [0, @p total), the order a product too large to take whole is walked in:
-/// a balanced Feistel network over the bits of the smallest even power of two at least @p total,
-/// its rounds keyed by tieKey, cycle-walked (applied again until the value is in range), which
-/// keeps it a bijection of [0, total). Unlike a stride through the product, it ties no digit of
-/// the mixed-radix index to another: even a stride coprime to the product moves some digits
-/// together, and sdpa_fwd's 23040 combinations walked at a stride of 14239 held 1 scale_unset
-/// combination where 56 were due, because the one scale that form admits was a value of the
-/// digit the stride had tied to it.
+/// A bijection of [0, @p total) chosen by @p seed, the order a product too large to take whole
+/// is walked in: a balanced Feistel network over the bits of the smallest even power of two at
+/// least @p total, each round keyed by tieKey of the seed and the round number, cycle-walked
+/// (applied again until the value is in range), which keeps it a bijection of [0, total).
+/// Unlike a stride through the product, it ties no digit of the mixed-radix index to another:
+/// even a stride coprime to the product moves some digits together, and sdpa_fwd's 23040
+/// combinations walked at a stride of 14239 held 1 scale_unset combination where 56 were due,
+/// because the one scale that form admits was a value of the digit the stride had tied to it.
+/// Keyed by the seed, a given seed revisits the same combinations and another seed reaches
+/// others, so regenerating a corpus under a new seed widens what the sample has covered.
 class ScatteredOrder
 {
 public:
-    explicit ScatteredOrder(size_t total)
+    ScatteredOrder(size_t total, uint64_t seed)
         : _total(total)
     {
         while(_halfBits < 32 && (uint64_t{1} << (2 * _halfBits)) < total)
@@ -258,6 +261,10 @@ public:
             ++_halfBits;
         }
         _halfMask = (uint64_t{1} << _halfBits) - 1;
+        for(size_t round = 0; round < ROUNDS; ++round)
+        {
+            _roundKeys[round] = tieKey(seed, round);
+        }
     }
 
     /// The combination index visited at @p step, for a step below the total.
@@ -272,15 +279,15 @@ public:
     }
 
 private:
-    static constexpr uint64_t ROUNDS = 4;
+    static constexpr size_t ROUNDS = 4;
 
     uint64_t permute(uint64_t value) const
     {
         uint64_t left = value >> _halfBits;
         uint64_t right = value & _halfMask;
-        for(uint64_t round = 0; round < ROUNDS; ++round)
+        for(const auto key : _roundKeys)
         {
-            const uint64_t mixed = left ^ (tieKey(round, static_cast<size_t>(right)) & _halfMask);
+            const uint64_t mixed = left ^ (tieKey(key, static_cast<size_t>(right)) & _halfMask);
             left = right;
             right = mixed;
         }
@@ -290,6 +297,7 @@ private:
     size_t _total;
     uint64_t _halfBits = 1;
     uint64_t _halfMask = 1;
+    std::array<uint64_t, ROUNDS> _roundKeys{};
 };
 
 /// The cross product of every categorical parameter's declared values that @p keep admits, at
@@ -299,11 +307,13 @@ private:
 /// Past the limit the product is sampled, not cut to a prefix (a prefix keeps only the first
 /// values of the earliest parameters), and each value the sample missed gets a combination of
 /// its own, so a model trained on the corpus has seen every value (§5.2). The sample walks the
-/// product in a fixed pseudo-random order (ScatteredOrder), so it visits distinct combinations
-/// spread over every pair of values rather than along whichever digits a stride ties together.
-/// @p live, when given, says which combinations can hold a problem (see excludedByCategoricals):
-/// only those are sampled, so the limit is spent on combinations that count. The order is a
-/// fixed function of the product, so the result is reproducible.
+/// product in a pseudo-random order @p seed chooses (ScatteredOrder), so it visits distinct
+/// combinations spread over every pair of values rather than along whichever digits a stride
+/// ties together. @p live, when given, says which combinations can hold a problem (see
+/// excludedByCategoricals): only those are sampled, so the limit is spent on combinations that
+/// count. The order is a function of the product and @p seed, so a seed reproduces its sample
+/// and different seeds sample different combinations. Within the limit, @p seed is unused:
+/// the whole product is enumerated in order.
 ///
 /// @p constraintEmpty, when given, receives how many combinations of the admitted product @p
 /// live refuses, counted over the whole product and not only the part the sample walks: past
@@ -315,6 +325,7 @@ private:
 inline std::vector<ProblemPoint>
     categoricalCombinations(const std::vector<Parameter>& parameters,
                             size_t limit,
+                            uint64_t seed,
                             size_t& total,
                             const std::function<bool(const ProblemPoint&)>& live = {},
                             const std::vector<KeepClause>& keep = {},
@@ -377,7 +388,7 @@ inline std::vector<ProblemPoint>
         return combinations;
     }
 
-    const ScatteredOrder order(total);
+    const ScatteredOrder order(total, seed);
     const auto counts = [&live](const ProblemPoint& point) { return !live || live(point); };
 
     combinations.reserve(limit);
@@ -1125,6 +1136,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
     const auto combinations = detail::categoricalCombinations(
         metadata.parameters,
         request.maxCombinations,
+        request.seed,
         totalCombinations,
         [&metadata](const ProblemPoint& combination) {
             return !detail::excludedByCategoricals(metadata, combination);
