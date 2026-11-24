@@ -392,7 +392,6 @@ repos:
         name: rocKE C++ builder calls emit in a fixed order
         entry: >-
           python dnn-providers/hip-kernel-provider/rocke/platform/tools/check_emission_order.py
-          --also dnn-providers/hip-kernel-provider/rocke/library/tests/parity
         language: python
         files: &rocke_emission_order_files >-
           (?x)^dnn-providers/hip-kernel-provider/rocke/(

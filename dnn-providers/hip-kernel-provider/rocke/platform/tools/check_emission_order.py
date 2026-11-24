@@ -32,9 +32,9 @@
 # preprocessor lines are ignored, functions are matched by name across files,
 # and an emitting call hidden behind a macro is not seen.
 #
-# It scans platform/cpp/, platform/tests/instances/parity/ and library/cpp/
-# (plus any --also directories) and fails on any site not in KNOWN_SITES, and
-# on any KNOWN_SITES entry that no longer occurs.
+# It scans platform/cpp/, platform/tests/instances/parity/, library/cpp/ and
+# library/tests/parity/ (plus any --also directories) and fails on any site not
+# in KNOWN_SITES, and on any KNOWN_SITES entry that no longer occurs.
 
 from __future__ import annotations
 
@@ -53,6 +53,7 @@ DEFAULT_ROOTS = (
     CPP_ROOT,
     PLATFORM / "tests" / "instances" / "parity",
     ROCKE / "library" / "cpp",
+    ROCKE / "library" / "tests" / "parity",
 )
 SUFFIXES = {".c", ".cpp", ".h", ".hpp"}
 
@@ -380,7 +381,7 @@ def main(argv: list[str]) -> int:
         default=[],
         type=Path,
         metavar="DIR",
-        help="also scan the C/C++ files under DIR (e.g. library/tests/parity)",
+        help="also scan the C/C++ files under DIR",
     )
     args = parser.parse_args(argv)
     errors = problems(scan([*DEFAULT_ROOTS, *args.also]))

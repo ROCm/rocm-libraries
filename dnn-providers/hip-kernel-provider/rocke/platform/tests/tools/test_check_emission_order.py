@@ -284,9 +284,10 @@ def test_known_sites_are_keyed_by_the_path_scan_reports():
         assert (ceo.PLATFORM / rel).is_file() or (ceo.ROCKE / rel).is_file(), rel
 
 
-def test_the_library_cpp_tree_is_scanned_by_default():
-    library_cpp = ceo.ROCKE / "library" / "cpp"
-    assert library_cpp.is_dir() and library_cpp in ceo.DEFAULT_ROOTS
+def test_the_library_trees_are_scanned_by_default():
+    for tree in (("library", "cpp"), ("library", "tests", "parity")):
+        root = ceo.ROCKE.joinpath(*tree)
+        assert root.is_dir() and root in ceo.DEFAULT_ROOTS, root
 
 
 def test_a_site_outside_platform_is_reported_relative_to_rocke(tmp_path, monkeypatch):
