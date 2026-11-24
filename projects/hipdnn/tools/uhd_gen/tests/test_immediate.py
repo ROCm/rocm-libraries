@@ -297,6 +297,26 @@ def test_every_runtime_response_is_checked_against_the_model(evaluator):
         prediction_scorer(descriptor(row), [first, second])
 
 
+def test_responses_from_one_rebuilt_engine_warn_once(evaluator, caplog):
+    """Every response from an engine another compiler rebuilt reports the same provenance;
+    the codegen difference is warned about once, not once per response."""
+    model = _built_by("cg-A")
+    responses = []
+    for index in range(3):
+        response = _rebuilt(
+            dict(model, graph_id=f"g{index}", graph_key=f"g{index}"), "codegen"
+        )
+        response.update(model=UHD, status="available", metric="tflops", value=1234)
+        responses.append(response)
+    prediction_scorer(descriptor(model), responses)
+    warnings = [
+        record
+        for record in caplog.records
+        if record.levelname == "WARNING" and "model records" in record.getMessage()
+    ]
+    assert len(warnings) == 1
+
+
 @pytest.mark.parametrize(
     "snapshot, snapshot_codegen",
     [

@@ -567,6 +567,23 @@ hold the schema and the packer together (below).
         "revision": {"$ref": "#/definitions/revision"}
       }
     },
+    "slot_name": {
+      "description": "RFC 0021 slot name: a lowercase identifier, never the reserved `global`.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(?![\\s\\S])",
+      "not": {"const": "global"}
+    },
+    "slot_dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {"^(x-|_)": {}},
+      "required": ["slot", "id", "revision"],
+      "properties": {
+        "slot": {"$ref": "#/definitions/slot_name"},
+        "id": {"$ref": "#/definitions/uuid"},
+        "revision": {"$ref": "#/definitions/revision"}
+      }
+    },
     "sha256": {
       "description": "SHA-256 of the named file: 64 lowercase hexadecimal digits, no prefix.",
       "type": "string",
@@ -621,16 +638,22 @@ hold the schema and the packer together (below).
       "patternProperties": {"^(x-|_)": {}},
       "anyOf": [
         {"required": ["ued", "kmd", "umd"]},
+        {"required": ["ued", "kmds", "umd"]},
         {"required": ["selector_revision"]}
       ],
+      "not": {"required": ["kmd", "kmds"]},
       "dependencies": {
-        "ued": ["kmd", "umd"],
+        "ued": {"required": ["umd"], "anyOf": [{"required": ["kmd"]}, {"required": ["kmds"]}]},
         "kmd": ["ued", "umd"],
-        "umd": ["ued", "kmd"]
+        "kmds": ["ued", "umd"],
+        "umd": {"required": ["ued"], "anyOf": [{"required": ["kmd"]}, {"required": ["kmds"]}]},
+        "slot": ["kmd"]
       },
       "properties": {
         "ued": {"$ref": "#/definitions/dependency"},
         "kmd": {"$ref": "#/definitions/dependency"},
+        "kmds": {"type": "array", "minItems": 1, "items": {"$ref": "#/definitions/slot_dependency"}},
+        "slot": {"$ref": "#/definitions/slot_name"},
         "umd": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/definitions/dependency"}},
         "selector_revision": {"type": "string", "minLength": 1},
         "codegen_revision": {"type": "string", "minLength": 1},
@@ -690,6 +713,8 @@ hold the schema and the packer together (below).
     {"required": ["custom_library"], "properties": {"adapter": {"const": "custom_library"}}}
   ],
   "allOf": [
+    {"if": {"properties": {"version": {"const": "1.0"}}},
+     "then": {"properties": {"trained_against": {"not": {"anyOf": [{"required": ["slot"]}, {"required": ["kmds"]}]}}}}},
     {"if": {"properties": {"version": {"enum": ["1.0", "1.1"]}}},
      "then": {"properties": {"trained_against": {"not": {"required": ["codegen_revision"]}}}}},
     {"oneOf": [
@@ -798,8 +823,8 @@ spelled any way but 64 lowercase hexadecimal digits, a `custom_library` with no 
 that is not a portable descriptor-relative file name. The path pattern refuses a leading `/`, any
 backslash, colon or NUL, every `..` segment, and an empty or `.` final segment; the runtime parser
 applies the same spelling rules and then resolves symlinks, refusing a path whose target leaves the
-descriptor's directory, which no schema can express. Any `version` other than `1.0` is rejected by the
-`const`, which is the accept rule working as intended rather than a gap.
+descriptor's directory, which no schema can express. A `version` outside `1.0`-`1.2` is rejected by the
+`enum`, which is the accept rule working as intended rather than a gap.
 
 **Schema and packer parity.** The hip-kernel-provider packaging tests
 (`descriptor-packaging/tests/test_hkp_pack_sidecars.py`) validate every in-tree UHD against

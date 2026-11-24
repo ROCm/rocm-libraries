@@ -11,6 +11,7 @@ import json
 import itertools
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -24,7 +25,7 @@ from hkp_pack.descriptors import (
 )
 from hkp_pack.errors import HkpPackError
 from hkp_pack.kernel_signature import exported_kernels, kernel_signature
-from hkp_pack.rocke_compile import code_object_identity
+from hkp_pack.rocke_compile import artifact_identity, code_object_identity
 from pack_helpers import GENERIC_TARGETS, _kdp, _restamp, _silent, _write_json
 from synthesised_objects import _arg, _kernel, _object, requires_msgpack
 from test_specialization_agreement import (
@@ -323,6 +324,29 @@ def test_identity_digests_the_documented_canonical_json():
     """
     assert code_object_identity(["; ir"], "amdgcn-amd-amdhsa--gfx942", ["-O3"]) == (
         "c7ac4b0c9a56d0f9fe3deca3df317be3cb2ab2607e5663715bde6295574d78ce"
+    )
+
+
+@pytest.mark.quick
+def test_a_compiles_identity_digests_every_kernel_in_link_order_and_its_options():
+    """`compile_rocke_variant` stamps this; rocKE-off builds never run that compile,
+    so the wiring is pinned here with stand-in artifacts. A module's identity covers
+    every kernel, not only the primary, in the order they are linked, and the COMGR
+    options the compile recorded."""
+    isa = "amdgcn-amd-amdhsa--gfx942"
+    module = SimpleNamespace(
+        llvm_text="; a", llvm_texts=("; a", "; b", "; c"), isa=isa, options=("-O3",)
+    )
+    assert artifact_identity(module, module=True) == code_object_identity(
+        ["; a", "; b", "; c"], isa, ["-O3"]
+    )
+    rebuilt = SimpleNamespace(**{**vars(module), "options": ("-O3", "-mcumode")})
+    assert artifact_identity(rebuilt, module=True) == code_object_identity(
+        ["; a", "; b", "; c"], isa, ["-O3", "-mcumode"]
+    )
+    single = SimpleNamespace(llvm_text="; a", isa=isa, options=("-O3",))
+    assert artifact_identity(single, module=False) == code_object_identity(
+        ["; a"], isa, ["-O3"]
     )
 
 

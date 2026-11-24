@@ -94,8 +94,8 @@ public:
     /// @param provenance The engine's own `trained_against`: pass engineBindingProvenance(set).
     ///        Its `codegen_revision` is compared with each L1 model's recorded one, logging a
     ///        warning when they differ, and is published in the binding's `trained_against`, so
-    ///        a model trained from those bindings records it. Without the key the engine never
-    ///        warns and publishes none.
+    ///        a model trained from those bindings records it. Without the key, or with a null
+    ///        provenance, the engine never warns and publishes none.
     /// @throws std::invalid_argument if a knob names no field in the metadata schema, or, for a
     ///         slotted engine, in its slot's schema.
     GenericEngine(
@@ -151,7 +151,10 @@ public:
         // its rankers, packs, kernels and native symbols; an L1 model measured against another
         // selector changes which engine is chosen. §8.1 codegen_revision is only warned about:
         // it moves when a compiler rebuilds the same kernels.
-        const auto codegenRevision = _provenance.value("codegen_revision", std::string{});
+        // A null provenance (what `{}` constructs) is the same as an empty object.
+        const auto codegenRevision = _provenance.is_object()
+                                         ? _provenance.value("codegen_revision", std::string{})
+                                         : std::string{};
         for(const auto& [metric, byArch] : predictions)
         {
             for(const auto& [arch, descriptor] : byArch)

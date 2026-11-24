@@ -6076,6 +6076,22 @@ void expectDigestRejected(const std::string& key,
         << recorder.getRecordedLogsAsString();
 }
 
+/// Asserts an empty digest is refused as an empty string, before its shape is read, so the
+/// message names the key and quotes no value.
+void expectEmptyDigestRejected(const std::string& key, const std::string& scratchLabel)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(scratchLabel));
+    writePackagedKernelWithDigest(dir.path(), key, "");
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "key '" + key + "' in"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "must not be empty"))
+        << recorder.getRecordedLogsAsString();
+}
+
 } // namespace
 
 TEST(TestDescriptorLoader, RejectsASha256ThatIsTooShort)
@@ -6104,16 +6120,7 @@ TEST(TestDescriptorLoader, RejectsASha256WithANonHexCharacter)
 
 TEST(TestDescriptorLoader, RejectsASha256ThatIsEmpty)
 {
-    // requireString already refuses an empty value; the length rule must own the case anyway,
-    // in case requireString ever softens.
-    auto recorder
-        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("sha256_empty"));
-    writePackagedKernelWithDigest(dir.path(), "sha256", "");
-
-    EXPECT_TRUE(loadFrom(dir.path()).empty());
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "sha256"))
-        << recorder.getRecordedLogsAsString();
+    expectEmptyDigestRejected("sha256", "sha256_empty");
 }
 
 TEST(TestDescriptorLoader, AcceptsAConformingSha256)
@@ -6202,19 +6209,7 @@ TEST(TestDescriptorLoader, RejectsAnIdentityThatIsNotASha256Digest)
 {
     expectDigestRejected("identity", std::string(63, 'c'), "identity_short");
     expectDigestRejected("identity", std::string(64, 'C'), "identity_upper");
-
-    // An empty one is refused as an empty string, before its shape is read, so the message
-    // quotes no value.
-    auto recorder
-        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("identity_empty"));
-    writePackagedKernelWithDigest(dir.path(), "identity", "");
-
-    EXPECT_TRUE(loadFrom(dir.path()).empty());
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "key 'identity' in"))
-        << recorder.getRecordedLogsAsString();
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "must not be empty"))
-        << recorder.getRecordedLogsAsString();
+    expectEmptyDigestRejected("identity", "identity_empty");
 }
 
 namespace

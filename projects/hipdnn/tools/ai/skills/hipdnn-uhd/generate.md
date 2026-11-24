@@ -179,8 +179,9 @@ candidate is every slot's pick, named `prep=<id>|dkdv=<id>|dq=<id>`, and a knob 
 
 - **Roles.** L2 is one metric-less ranker **per slot**, trained from that slot's rows; L1 is
   the engine-level `predict_engine`, trained as above from the bench's L1 corpus; its
-  `trained_against` names every slot's KMD in `kmds` and `train` writes it as a `1.1` UHD. A slot ranker is trained
-  without `--metric`: one that declares `score.metric` makes the loader drop the engine, and
+  `trained_against` names every slot's KMD in `kmds` and `train` writes it as a `1.1` UHD,
+  or `1.2` when it also records `codegen_revision`. A slot ranker is trained without
+  `--metric`: one that declares `score.metric` makes the loader drop the engine, and
   `generate --slot` and `promote` refuse it. Slots carry no `predict_applicable_kernels`.
 - **Collect (step 5, L2).** `uhd_gen generate` refuses to collect measurements for a slotted
   engine (`generate measures an engine that declares no slots`). Sweep each graph with `hipdnn_bench --sweep`,

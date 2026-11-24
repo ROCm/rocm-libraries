@@ -323,6 +323,20 @@ def code_object_identity(llvm_texts, isa, options):
     )
 
 
+def artifact_identity(artifact, *, module):
+    """`code_object_identity` of what one rocke compile handed COMGR.
+
+    A module's object is built from every kernel's IR in link order
+    (`artifact.llvm_texts`), a single kernel's from `artifact.llvm_text`; both with
+    the ISA name and the COMGR options the compile recorded.
+    """
+    return code_object_identity(
+        artifact.llvm_texts if module else (artifact.llvm_text,),
+        artifact.isa,
+        artifact.options,
+    )
+
+
 def _resolved_comgr_path():
     """Best-effort path of the comgr the rocke loader resolved, for diagnostics.
 
@@ -645,11 +659,7 @@ def compile_rocke_variant(
     observations["code_object_sha256"] = hashlib.sha256(artifact.hsaco).hexdigest()
     # With ROCKE_DEBUG_LOC set the IR embeds absolute source paths, so the identity
     # of a debug-info build also depends on where the tree is checked out.
-    observations["code_object_identity"] = code_object_identity(
-        artifact.llvm_texts if is_module else (artifact.llvm_text,),
-        artifact.isa,
-        artifact.options,
-    )
+    observations["code_object_identity"] = artifact_identity(artifact, module=is_module)
     if is_module:
         # Only a module records companions, so a single-kernel compile's
         # evidence -- and the descriptor digest binding it -- is unchanged.

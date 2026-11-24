@@ -1313,6 +1313,20 @@ TEST(TestIngestorGenericEngine, AnEngineModelMeasuredOnOtherCodeObjectsBindsAndW
                 .status,
             PredictionStatus::AVAILABLE);
     }
+    // A null provenance, what `{}` constructs, is no provenance: it binds silently too.
+    const auto unprovenanced = std::make_unique<StubEngine>(
+        engineDescriptor,
+        makeStubStateManager(),
+        resolver,
+        std::map<std::string, std::map<std::string, HeuristicDescriptor>>{
+            {"tflops", {{"default", model}}}},
+        std::map<std::string, std::set<std::string>>{},
+        "selector-new",
+        nlohmann::json{});
+    EXPECT_EQ(
+        unprovenanced->getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true)
+            .status,
+        PredictionStatus::AVAILABLE);
     EXPECT_EQ(countWarnings(), 0);
 
     // Rebuilt code objects: binds, and warns naming both revisions once per arch whose model

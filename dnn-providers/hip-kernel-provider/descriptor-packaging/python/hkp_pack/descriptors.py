@@ -932,6 +932,12 @@ def _string(value, where):
         raise HkpPackError(f"{where} must be a nonempty string")
 
 
+#: UHD file-format versions, and the first one each `trained_against` member may appear in
+#: (UhdParser.hpp; uhd_gen's provenance.py keeps the same table).
+_UHD_VERSIONS = ("1.0", "1.1", "1.2")
+_UHD_MEMBER_VERSIONS = {"slot": "1.1", "kmds": "1.1", "codegen_revision": "1.2"}
+
+
 def _validate_trained_against(value, where, version):
     # RFC 0019 §4.1: names either the descriptor set (ued/kmd/umd, all or none) or,
     # for a model bound by provider-declared UUID, a selector_revision. Either may add
@@ -940,22 +946,23 @@ def _validate_trained_against(value, where, version):
     # RFC 0021 §9 adds the slot forms, valid from UHD 1.1: `slot` beside `kmd`, or
     # `kmds` in place of `kmd`. @p version is the UHD's own. Loader is authoritative:
     # UhdParser.hpp.
-    if (
-        version == "1.0"
-        and isinstance(value, dict)
-        and ("slot" in value or "kmds" in value)
-    ):
+    required = max(
+        (
+            _UHD_MEMBER_VERSIONS[key]
+            for key in _UHD_MEMBER_VERSIONS
+            if isinstance(value, dict) and key in value
+        ),
+        key=_UHD_VERSIONS.index,
+        default="1.0",
+    )
+    if _UHD_VERSIONS.index(version) < _UHD_VERSIONS.index(required):
+        if required == _UHD_MEMBER_VERSIONS["codegen_revision"]:
+            raise HkpPackError(
+                f"{where} records codegen_revision, which requires UHD version {required}"
+            )
         raise HkpPackError(
             f"{where} uses slot provenance ('slot' or 'kmds'), which requires "
-            "UHD version 1.1"
-        )
-    if (
-        version in ("1.0", "1.1")
-        and isinstance(value, dict)
-        and "codegen_revision" in value
-    ):
-        raise HkpPackError(
-            f"{where} records codegen_revision, which requires UHD version 1.2"
+            f"UHD version {required}"
         )
     _known_keys(
         value,
@@ -1070,7 +1077,7 @@ def _validate_uhd(desc, source_root, require_dvc=False):
         where,
     )
     _require(doc, ("version", "id", "name", "adapter"), where)
-    if doc["version"] not in ("1.0", "1.1", "1.2"):
+    if doc["version"] not in _UHD_VERSIONS:
         raise HkpPackError(
             f"{where}: unsupported file-format version {doc['version']!r}"
         )

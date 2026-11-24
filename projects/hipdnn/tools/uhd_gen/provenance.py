@@ -16,7 +16,7 @@ _SLOT_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 #: Descriptor file-format versions the tooling reads; 1.1 adds the RFC 0021 slot members.
 SUPPORTED_FILE_VERSIONS = ("1.0", "1.1")
 #: UHD file-format versions the tooling reads; 1.2 adds `trained_against.codegen_revision`.
-UHD_FILE_VERSIONS = (*SUPPORTED_FILE_VERSIONS, "1.2")
+UHD_FILE_VERSIONS = ("1.0", "1.1", "1.2")
 #: UED and KDP members that exist only from file-format 1.1.
 _SLOT_MEMBERS = frozenset({"slots", "slot", "shared_workspace"})
 _UUID = re.compile(r"^[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$")
@@ -27,6 +27,9 @@ _MAX_INT64 = 2**63 - 1
 #: `trained_against` member: the digest of the engine's code objects. The runtime binds a
 #: model whose value differs and warns; it is recorded, never a compatibility key.
 CODEGEN_REVISION = "codegen_revision"
+#: The first UHD file-format version each `trained_against` member may appear in: the RFC
+#: 0021 slot forms from 1.1, `codegen_revision` from 1.2. A member not listed is 1.0.
+UHD_MEMBER_VERSIONS = {"slot": "1.1", "kmds": "1.1", CODEGEN_REVISION: "1.2"}
 
 logger = logging.getLogger(__name__)
 
@@ -210,6 +213,34 @@ def record_feature_semantics(snapshot: object, current: int) -> dict:
     if FEATURE_SEMANTICS_REVISION in recorded:
         require_feature_semantics(recorded, current)
     return {**recorded, FEATURE_SEMANTICS_REVISION: current}
+
+
+def minimum_uhd_version(trained_against: object) -> str:
+    """The lowest UHD file-format version that admits every member of `trained_against`."""
+    members = set(trained_against) if isinstance(trained_against, dict) else set()
+    return max(
+        (
+            UHD_MEMBER_VERSIONS[member]
+            for member in members & UHD_MEMBER_VERSIONS.keys()
+        ),
+        key=UHD_FILE_VERSIONS.index,
+        default="1.0",
+    )
+
+
+def uhd_version_refusal(version: str, trained_against: object) -> str | None:
+    """Why a UHD at `version` cannot carry `trained_against`, or None when it can.
+
+    The wording matches `UhdParser.hpp` and hkp_pack's validator."""
+    required = minimum_uhd_version(trained_against)
+    if UHD_FILE_VERSIONS.index(version) >= UHD_FILE_VERSIONS.index(required):
+        return None
+    if required == UHD_MEMBER_VERSIONS[CODEGEN_REVISION]:
+        return f"trained_against records {CODEGEN_REVISION}, which requires UHD version {required}"
+    return (
+        "trained_against uses slot provenance ('slot' or 'kmds'), which requires UHD "
+        f"version {required}"
+    )
 
 
 def hard_provenance(snapshot):
