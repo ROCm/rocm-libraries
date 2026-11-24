@@ -138,6 +138,9 @@ struct BuilderArgument
     std::string name;
     Kind kind = Kind::DIRECT;
     std::string source; ///< DIRECT, DTYPE_OF
+    /// DTYPE_OF: the source's declared values this argument spells as another dtype; a value
+    /// not listed is its own spelling.
+    std::map<std::string, std::string> dtypeMap;
     /// One expression per element, followed by the elements' `when` conditions.
     hipdnn_plugin_sdk::uhd::ExpressionSet expressions;
     /// Scalar EXPR: resolves to an unfloored double (e.g. a softmax scale), not a dim.
@@ -982,6 +985,41 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
             resolved.kind = *kind;
             resolved.source = argument.value("source", "");
             resolved.of = argument.value("of", "");
+            if(argument.contains("map"))
+            {
+                // `map` re-spells the source's declared values for this argument alone: a role
+                // whose type differs from the declared one (an fp8 forward's bf16 output).
+                const auto* source = metadata.find(detail::queryReference(resolved.source));
+                if(resolved.kind != BuilderArgument::Kind::DTYPE_OF
+                   || !argument.at("map").is_object())
+                {
+                    load.errors.push_back("argument '" + resolved.name
+                                          + "': 'map' is an object on a dtype_of argument");
+                }
+                else
+                {
+                    for(const auto& [from, to] : argument.at("map").items())
+                    {
+                        if(!to.is_string() || to.get<std::string>().empty())
+                        {
+                            load.errors.push_back("argument '" + resolved.name + "' maps '" + from
+                                                  + "' to something that is not a dtype name");
+                        }
+                        else if(source == nullptr || source->type != ParameterType::ENUM
+                                || std::find(source->values.begin(), source->values.end(), from)
+                                       == source->values.end())
+                        {
+                            load.errors.push_back("argument '" + resolved.name + "' maps '" + from
+                                                  + "', which '" + resolved.source
+                                                  + "' does not declare");
+                        }
+                        else
+                        {
+                            resolved.dtypeMap[from] = to.get<std::string>();
+                        }
+                    }
+                }
+            }
             if(argument.contains("constant"))
             {
                 resolved.constant = argument.at("constant");

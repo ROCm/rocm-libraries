@@ -471,7 +471,10 @@ enum SdpaOperandUid : int64_t
     SDPA_DROPOUT_OFFSET_UID,
     SDPA_SINK_UID,
     SDPA_Q_OFFSETS_UID,
-    SDPA_KV_OFFSETS_UID
+    SDPA_KV_OFFSETS_UID,
+    SDPA_DESCALE_Q_UID,
+    SDPA_DESCALE_K_UID,
+    SDPA_DESCALE_V_UID
 };
 
 /// What the `dropout` form drops. Any non-zero rate selects the dropout kernel; this one is the
@@ -501,6 +504,39 @@ inline std::optional<builders::TensorSpec> sdpaOperand(const ArgumentResolution&
         return std::nullopt;
     }
     return tensorFrom(uid, name, *d, *st, *type);
+}
+
+/// Whether @p type is one of the four fp8 encodings an attention graph takes its Q, K and V in.
+/// FP8_E8M0 is a block-scale type, never an operand's.
+inline bool isFp8Operand(hipdnn_flatbuffers_sdk::data_objects::DataType type)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    return type == DataType::FP8_E4M3 || type == DataType::FP8_E5M2
+           || type == DataType::FP8_E4M3_FNUZ || type == DataType::FP8_E5M2_FNUZ;
+}
+
+/// @brief Binds the Q, K and V descales of an fp8 forward, one FLOAT element each from the
+/// shared `descaleDims`, `descaleStrides` and `descaleDataType`. Returns the reason it cannot,
+/// empty on success.
+///
+/// An fp8 attention graph is not valid without them: the plans that take fp8 decline a graph
+/// missing one (SdpaFwdPlanBuilder.cpp checkFp8Descales; the references' isSupportedSdpaFwdNode),
+/// and the graph's dtype says it is fp8, so no `form` selects them.
+inline std::string applySdpaFp8Descales(const ArgumentResolution& resolved,
+                                        const std::string& builder,
+                                        builders::SdpaForwardOperands& operands)
+{
+    const auto* d = dims(resolved, "descaleDims");
+    const auto* st = dims(resolved, "descaleStrides");
+    const auto type = dtype(resolved, "descaleDataType");
+    if(d == nullptr || st == nullptr || !type.has_value())
+    {
+        return builder + ": fp8 inputs need descaleDims/descaleStrides/descaleDataType";
+    }
+    operands.descaleQ = tensorFrom(SDPA_DESCALE_Q_UID, "descale_q", *d, *st, *type);
+    operands.descaleK = tensorFrom(SDPA_DESCALE_K_UID, "descale_k", *d, *st, *type);
+    operands.descaleV = tensorFrom(SDPA_DESCALE_V_UID, "descale_v", *d, *st, *type);
+    return {};
 }
 
 /// @brief Binds the per-batch valid lengths, INT32 [B, 1, 1, 1] seq_len_q and seq_len_kv, with
@@ -787,7 +823,13 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              auto qTensor = detail::tensorFrom(1, "q", *q, *qs, *type);
              auto kTensor = detail::tensorFrom(2, "k", *k, *ks, *type);
              auto vTensor = detail::tensorFrom(3, "v", *v, *vs, *type);
-             auto oTensor = detail::tensorFrom(4, "o", *o, *os, *type);
+             // O takes `oDataType` when declared (an fp8 forward writes bf16), else the inputs'.
+             const auto oType = detail::dtype(resolved, "oDataType");
+             if(resolved.find("oDataType") != nullptr && !oType.has_value())
+             {
+                 return {{}, "sdpaForward: oDataType is not a dtype name"};
+             }
+             auto oTensor = detail::tensorFrom(4, "o", *o, *os, oType.value_or(*type));
              auto stats = options.generateStats ? detail::tensorRole(resolved, 5, "stats", *type)
                                                 : std::nullopt;
 
@@ -813,6 +855,10 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              {
                  error = detail::applySdpaCommonForm(
                      resolved, "sdpaForward", form, options, operands);
+             }
+             if(error.empty() && detail::isFp8Operand(*type))
+             {
+                 error = detail::applySdpaFp8Descales(resolved, "sdpaForward", operands);
              }
              if(!error.empty())
              {

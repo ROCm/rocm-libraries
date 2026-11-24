@@ -194,8 +194,10 @@ inline ArgumentResolution resolveArguments(const GraphBuilderSpec& spec, const P
                                    + "' is not a dtype name";
                 return resolution;
             }
-            // Kept as the declared name; the dispatch maps it to the FlatBuffers enum.
-            resolved.value = *name;
+            // Kept as the declared name, or as the argument's own spelling of it; the dispatch
+            // maps it to the FlatBuffers enum.
+            const auto spelled = argument.dtypeMap.find(*name);
+            resolved.value = spelled == argument.dtypeMap.end() ? *name : spelled->second;
             break;
         }
 
