@@ -32,7 +32,7 @@ benchmark/remote_test/
    ```sshconfig
    # ~/.ssh/config (NOT in the repo)
    Host rocke-login
-       HostName some-login.internal.example
+       HostName <login-host>
        User <your-login-user>
        IdentityFile ~/.ssh/id_ed25519
        # Add ProxyJump, Port, etc. here as needed.
