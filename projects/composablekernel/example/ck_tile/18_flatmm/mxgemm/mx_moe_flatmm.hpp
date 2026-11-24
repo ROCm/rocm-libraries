@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 // MX (microscaling) MoE GEMM on gfx1250 (shared by tile_example_mx_moe_flatmm and
-// test_tile_mx_moe_flatmm): A and B are MXFP4 (pk_fp4_t) with one e8m0 scale per
+// test_tile_mx_moe_flatmm): B is MXFP4 (pk_fp4_t), A is MXFP4 (a4w4) or MX FP8 (fp8_t, a8w4),
+// both with one e8m0 scale per
 // 32 K values. One launch runs one FFN GEMM of an MoE layer:
 //
 //   gemm1_gate_up  A = tokens          [num_tokens, K]          (gathered by sorted token id)
@@ -272,14 +273,29 @@ float launch_mx_moe_gemm(const HostArgs& args,
         return ck_tile::launch_kernel_time_mask(s, clear, moe_kernel);
 }
 
-template <ck_tile::MoeFlatmmKind kind>
+// Value of element (r, k) of a row-major A or B tensor (packed fp4 or one byte per element).
+template <typename T>
+float elem_at(const ck_tile::HostTensor<T>& t, std::size_t r, std::size_t k)
+{
+    if constexpr(std::is_same_v<T, ck_tile::pk_fp4_t>)
+        return fp4_at(t, r, k);
+    else
+        return ck_tile::type_convert<float>(t(r, k));
+}
+
+// ADataType: ck_tile::pk_fp4_t (a4w4) or ck_tile::fp8_t (a8w4).
+template <ck_tile::MoeFlatmmKind kind, typename ADataType_ = ck_tile::pk_fp4_t>
 MxMoeResult run_mx_moe_case(const MxMoeCase& c)
 {
-    using ADataType         = ck_tile::pk_fp4_t;
-    using BDataType         = ck_tile::pk_fp4_t;
-    using ScaleType         = ck_tile::e8m0_t;
-    constexpr bool kGateUp  = kind == ck_tile::MoeFlatmmKind::kFFN_gemm1_gate_up;
-    constexpr bool kPerSlot = kind == ck_tile::MoeFlatmmKind::kFFN_gemm2_per_slot;
+    using ADataType = ADataType_;
+    static_assert(std::is_same_v<ADataType, ck_tile::pk_fp4_t> ||
+                      std::is_same_v<ADataType, ck_tile::fp8_t>,
+                  "A must be MXFP4 or MX FP8");
+    constexpr int APackedSize = ck_tile::numeric_traits<ADataType>::PackedSize;
+    using BDataType           = ck_tile::pk_fp4_t;
+    using ScaleType           = ck_tile::e8m0_t;
+    constexpr bool kGateUp    = kind == ck_tile::MoeFlatmmKind::kFFN_gemm1_gate_up;
+    constexpr bool kPerSlot   = kind == ck_tile::MoeFlatmmKind::kFFN_gemm2_per_slot;
     // A rows per (token, slot): gemm2 and gemm2_per_slot.
     constexpr bool kASlot = kind == ck_tile::MoeFlatmmKind::kFFN_gemm2 || kPerSlot;
     // gemm2 accumulates the top-k contributions of a token with fp32 atomics; gemm2_per_slot
@@ -390,7 +406,7 @@ MxMoeResult run_mx_moe_case(const MxMoeCase& c)
             ck_tile::HostTensor<ADataType> row({std::size_t(1), std::size_t(K)},
                                                {std::size_t(K), std::size_t(1)});
             ck_tile::FillUniformDistribution<>{vals[r % 7], vals[r % 7]}(row);
-            std::copy(row.begin(), row.end(), a_host.begin() + std::size_t(r) * K / 2);
+            std::copy(row.begin(), row.end(), a_host.begin() + std::size_t(r) * K / APackedSize);
         }
         ck_tile::FillUniformDistribution<>{1.f, 1.f}(b_host);
         ck_tile::FillUniformDistribution<>{1.f, 1.f}(a_scale);
@@ -517,7 +533,7 @@ MxMoeResult run_mx_moe_case(const MxMoeCase& c)
             ck_tile::make_ParallelTensorFunctor(
                 [&](std::size_t r) {
                     for(int k = 0; k < K; ++k)
-                        out[r * K + k] = fp4_at(data, r, k) *
+                        out[r * K + k] = elem_at(data, r, k) *
                                          ck_tile::type_convert<float>(scale(r, k / kScaleBlockK));
                 },
                 rows)(std::thread::hardware_concurrency());
