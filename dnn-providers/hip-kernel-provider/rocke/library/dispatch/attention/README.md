@@ -154,9 +154,10 @@ problem.
 A `layout="paged"` request reaches the non-persistent dense body on both arches
 (`layout_paged`: the gfx950 grid variants and the gfx942 candidate, which then
 starts on the default grid). One paged sequence also runs on the persistent body
-when pinned (`gfx950_dense_persist`, or the gfx942 `persistent` knob); wide DMA
-stays contiguous-only, and several sequences need the varlen body, which has no
-persistent form. It takes the same tile as a contiguous request where
+when pinned (`gfx950_dense_persist`, or the gfx942 `persistent` knob); the gfx950
+wide-DMA body (`gfx950_dense_persist_widedma`) takes it only with pages of at least
+one KV tile, and several sequences need the varlen body, which has no persistent
+form. It takes the same tile as a contiguous request where
 its pages fit that tile (whole pages per KV tile, each wave's rows in one page),
 else the default 256×64 tile. Binding sets `num_kv_blocks` (the cache extent, a
 kernarg on the runtime-shape path) from `k.shape[0]`; `block_tables` and `kv_lens` come

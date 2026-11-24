@@ -67,11 +67,25 @@ def test_paged_request_builds_a_paged_spec(arch, spec_id, overrides):
     assert not spec.varlen  # whole KV tiles keep the single-sequence kernel
 
 
-@pytest.mark.parametrize("batch", [1, 3], ids=["single_seq", "multi_seq"])
-def test_wide_dma_persistent_variant_declines_paged(batch):
-    with pytest.raises(ValueError, match="layout_paged"):
-        dispatch_attention(
-            pinned(_request("gfx950", batch=batch), "gfx950_dense_persist_widedma")
+@pytest.mark.parametrize("window", [0, 1024], ids=["plain_causal", "swa"])
+def test_wide_dma_takes_one_paged_sequence_with_tile_sized_pages(window):
+    req = _request("gfx950", kv_block_size=64, sliding_window=window)
+    spec = tuning_spec_with_knobs(req, "gfx950_dense_persist_widedma", {}).kernel_spec
+    assert spec.paged and spec.wide_lds_dma and spec.block_size == spec.block_n
+
+
+@pytest.mark.parametrize(
+    "overrides,error",
+    [
+        (dict(), "block_size >= block_n"),  # pages smaller than the KV tile
+        (dict(kv_block_size=64, batch=3), "varlen|single-sequence"),
+    ],
+    ids=["small_pages", "multi_seq"],
+)
+def test_wide_dma_declines_other_paged_requests(overrides, error):
+    with pytest.raises(ValueError, match=error):
+        tuning_spec_with_knobs(
+            _request("gfx950", **overrides), "gfx950_dense_persist_widedma", {}
         )
 
 

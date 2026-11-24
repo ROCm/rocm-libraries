@@ -1569,7 +1569,7 @@ class TestAttentionHelpers(unittest.TestCase):
             # Cache past the i32 range without use_i64_kv_addr.
             dict(block_size=16, num_kv_blocks=70000),
             dict(block_size=16, num_kv_blocks=512, batch=2),  # multi-seq, not varlen
-            # Persistent takes paged on the plain body; wide DMA stays contiguous.
+            # Wide DMA needs the KV tile in one page (block_size >= block_n).
             dict(block_size=16, num_kv_blocks=512, persistent=True, wide_lds_dma=True),
             dict(
                 block_size=16, num_kv_blocks=512, causal=False, sliding_window=0
@@ -1580,17 +1580,24 @@ class TestAttentionHelpers(unittest.TestCase):
         ):
             with self.subTest(kw=kw), self.assertRaises(ValueError):
                 AttentionDenseSpec(paged=True, **{**base, **kw})
-        # Accept: plain causal (no window), D64, and the persistent body.
+        # Accept: plain causal (no window), D64, the persistent body, and wide DMA
+        # with tile-sized pages.
         for kw in (
             dict(sliding_window=0),
             dict(head_size=64),
             dict(persistent=True, num_persistent=256),
+            dict(
+                block_size=64,
+                num_kv_blocks=128,
+                persistent=True,
+                num_persistent=256,
+                wide_lds_dma=True,
+            ),
         ):
             with self.subTest(kw=kw):
+                kw = {"block_size": 16, "num_kv_blocks": 512, **kw}
                 ok, why = supports_attention_dense(
-                    AttentionDenseSpec(
-                        paged=True, block_size=16, num_kv_blocks=512, **{**base, **kw}
-                    )
+                    AttentionDenseSpec(paged=True, **{**base, **kw})
                 )
                 self.assertTrue(ok, why)
         # 0-cost when off: a non-paged spec is unaffected.
@@ -2116,7 +2123,8 @@ class TestAttentionHelpers(unittest.TestCase):
 
     def test_dense_paged_persistent_compiles_and_fits_budget(self):
         """comgr build + resource-budget net for paged K/V on the persistent body
-        (one sequence): fp16/bf16 D128 with i32 and i64 page bases, and D64."""
+        (one sequence): fp16/bf16 D128 with i32 and i64 page bases, and D64; on
+        gfx950 also the wide-DMA body with tile-sized pages."""
         from dataclasses import replace
 
         for arch in ("gfx942", "gfx950"):
@@ -2144,9 +2152,20 @@ class TestAttentionHelpers(unittest.TestCase):
                         variants = [spec]
                         if d == 128:
                             variants.append(replace(spec, use_i64_kv_addr=True))
+                        if d == 128 and arch == "gfx950":
+                            wide = replace(
+                                spec,
+                                block_size=64,
+                                num_kv_blocks=128,
+                                wide_lds_dma=True,
+                            )
+                            variants += [wide, replace(wide, use_i64_kv_addr=True)]
                         for variant in variants:
                             with self.subTest(
-                                dtype=dt, d=d, i64=variant.use_i64_kv_addr
+                                dtype=dt,
+                                d=d,
+                                i64=variant.use_i64_kv_addr,
+                                wide=getattr(variant, "wide_lds_dma", False),
                             ):
                                 k = ad.build_attention_dense(variant, arch=arch)
                                 art = _compile_or_skip(k, arch=arch)

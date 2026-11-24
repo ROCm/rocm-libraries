@@ -109,8 +109,7 @@ GFX950_DENSE_VARIANTS: Tuple[Gfx950DenseVariant, ...] = (
         DENSE_PERSIST_ALGORITHM,
         persistent=True,
         wide_lds_dma=False,
-        # One paged sequence runs on the plain persistent body when pinned; wide
-        # DMA stays contiguous-only (its rows per wave skip the page lookup).
+        # One paged sequence runs on the persistent bodies when pinned.
         features=_FEATURES | {"layout_paged"},
     ),
     Gfx950DenseVariant(
@@ -118,7 +117,8 @@ GFX950_DENSE_VARIANTS: Tuple[Gfx950DenseVariant, ...] = (
         DENSE_PERSIST_ALGORITHM,
         persistent=True,
         wide_lds_dma=True,
-        features=_FEATURES,
+        # Paged only with whole KV tiles per page (the spec refuses smaller pages).
+        features=_FEATURES | {"layout_paged"},
     ),
 )
 GFX950_DENSE_VARIANT_BY_NAME = {v.candidate_name: v for v in GFX950_DENSE_VARIANTS}

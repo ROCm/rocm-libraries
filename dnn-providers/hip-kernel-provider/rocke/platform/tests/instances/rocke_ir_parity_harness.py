@@ -2055,6 +2055,33 @@ def cases():
                 "num_persistent": 256,
             },
         ),
+        # Wide DMA on paged K/V: one page per KV tile, looked up once per tile.
+        (
+            "persist_wdma_paged_causal_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 64,
+                "num_kv_blocks": 8,
+                "persistent": True,
+                "num_persistent": 256,
+                "wide_lds_dma": True,
+            },
+        ),
+        (
+            "persist_wdma_paged_i64_swa_bf16_sq512",
+            {
+                "dtype": "bf16",
+                "paged": True,
+                "block_size": 64,
+                "num_kv_blocks": 8,
+                "sliding_window": 256,
+                "use_i64_kv_addr": True,
+                "persistent": True,
+                "num_persistent": 256,
+                "wide_lds_dma": True,
+            },
+        ),
         # --- Attention band: the cuDNN (left = sliding_window, right = right_bound)
         # band on the top-left diagonal. causal=False is the unbounded right side.
         # Non-causal (left-only) window: default + persistent grids.

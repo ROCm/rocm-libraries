@@ -2510,6 +2510,15 @@ class TestDensePagedNumeric:
 
     @requires_gfx950_gpu
     @pytest.mark.gpu
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    @pytest.mark.parametrize("sq,window", [(1024, 256), (2048, 0)])
+    def test_paged_wide_dma_matches_dense_bit_exact(self, dtype, sq, window):
+        """Paged on the wide-DMA body (one page per KV tile): the same bits as
+        contiguous K/V there."""
+        self._check_paged(dtype, 64, sq, sq, window, 128, persistent=True, wide=True)
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
     @pytest.mark.parametrize(
         "sq,sk,window",
         [
@@ -2538,7 +2547,9 @@ class TestDensePagedNumeric:
         assert (out.float() - ref).abs().max().item() < _tolerance("fp16")
 
     @staticmethod
-    def _check_paged(dtype, block_size, sq, sk, window, d, persistent=False):
+    def _check_paged(
+        dtype, block_size, sq, sk, window, d, persistent=False, wide=False
+    ):
         import torch
 
         hq, hkv, B = 16, 4, 1
@@ -2572,8 +2583,9 @@ class TestDensePagedNumeric:
         )
         if persistent:
             # Paged on the persistent body against contiguous on the same body.
-            paged_spec = dataclasses.replace(paged_spec, persistent=True)
-            dense_spec = dataclasses.replace(dense_spec, persistent=True)
+            knobs = dict(persistent=True, wide_lds_dma=wide)
+            paged_spec = dataclasses.replace(paged_spec, **knobs)
+            dense_spec = dataclasses.replace(dense_spec, **knobs)
 
         dense_out = torch.empty_like(q)
         run_attention_dense_torch(
@@ -2592,7 +2604,7 @@ class TestDensePagedNumeric:
         )
         torch.cuda.synchronize()
 
-        name = f"{dtype} D{d} pgd{block_size} sq{sq} sk{sk} swa{window} {persistent=}"
+        name = f"{dtype} D{d} pgd{block_size} sq{sq} sk{sk} swa{window} {persistent=} {wide=}"
         assert torch.isfinite(paged_out).all(), f"{name}: read a NaN (unused) page"
         assert torch.equal(paged_out, dense_out), f"{name}: paged != dense bits"
         ref = _standard_reference(q, k, v, scale, sliding_window=window)
@@ -2739,7 +2751,16 @@ class TestDensePagedI64Numeric:
         """The same check on the persistent body, whose page lookup is its own."""
         self._check_forced_i64(dtype, 16, 256, d, persistent=True)
 
-    def _check_forced_i64(self, dtype, block_size, window, d, persistent=False):
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    def test_forced_i64_wide_dma_matches_i32_bit_exact(self, dtype):
+        """The same check on the wide-DMA body: one page resource per KV tile."""
+        self._check_forced_i64(dtype, 64, 256, 128, persistent=True, wide=True)
+
+    def _check_forced_i64(
+        self, dtype, block_size, window, d, persistent=False, wide=False
+    ):
         import torch
 
         sq, hq, hkv = 1024, self._HQ, self._HKV
@@ -2767,6 +2788,7 @@ class TestDensePagedI64Numeric:
             block_size=block_size,
             num_kv_blocks=num_kv_blocks,
             persistent=persistent,
+            wide_lds_dma=wide,
         )
         outs = [
             self._run_paged(

@@ -484,9 +484,16 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 raise ValueError("wide_lds_dma requires persistent=True")
             if self.head_size != 128 or self.block_n != 64:
                 raise ValueError("wide_lds_dma requires head_size=128 and block_n=64")
-            if self.ragged or self.varlen or self.paged:
+            if self.ragged or self.varlen:
                 raise ValueError(
-                    "wide_lds_dma is validated only for aligned contiguous K/V"
+                    "wide_lds_dma is validated only for aligned single-sequence K/V"
+                )
+            # A wave's wide copy spans rows of the whole KV tile, so the tile must
+            # sit in one page: one wave-uniform block-table lookup per tile.
+            if self.paged and self.block_size < self.block_n:
+                raise ValueError(
+                    f"wide_lds_dma with paged K/V requires block_size >= block_n "
+                    f"({self.block_n}), got {self.block_size}"
                 )
             if (
                 self.lds_k_group_pad != 8
@@ -2832,20 +2839,51 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                         _DMA_DWORDS,
                     )
 
-        def _wide_src(row, tile_key0, n_in_wave, line_id, d_bucket):
+        def _wide_tile(src, rsrc, tile_key0):
+            """``(rsrc, row0)``: the resource and cache row of the tile's first key.
+            Paged: the whole tile sits in one page (spec), so one block-table
+            lookup per tile serves every wave; the i64 form addresses rows
+            within the page's own resource."""
+            if PAGED_I64:
+                rsrc = paged_wave_page_rsrc(
+                    b,
+                    src,
+                    block_tables,
+                    _pg_seq_base,
+                    _pg_n_pages,
+                    tile_key0,
+                    spec.block_size,
+                    page_bounds,
+                )
+                return rsrc, paged_in_page_row(b, tile_key0, spec.block_size)
+            if spec.paged:
+                row_base = paged_wave_row_base(
+                    b,
+                    block_tables,
+                    _pg_seq_base,
+                    _pg_n_pages,
+                    tile_key0,
+                    spec.block_size,
+                )
+                return rsrc, paged_kv_row(b, row_base, tile_key0, spec.block_size)
+            return rsrc, tile_key0
+
+        def _wide_src(row, tile_key0, n_in_wave, line_id, d_bucket, row0=None):
             """Element offset of a wide-DMA lane's first K/V element. On the runtime
             path the wave-uniform part goes through readfirstlane, as in
-            ``_async_load``, so the lane part stays one VGPR."""
-            if RT:
+            ``_async_load``, so the lane part stays one VGPR. Paged passes the
+            tile's first cache row as ``row0``; the in-tile row stays lane-local."""
+            if RT or row0 is not None:
                 lane_part = b.add(
                     b.mul(
                         b.add(b.mul(n_in_wave, b.const_i32(8)), line_id), _stride_k()
                     ),
                     b.mul(d_bucket, b.const_i32(8)),
                 )
+                key0 = tile_key0 if row0 is None else row0
                 return b.add(
                     lane_part,
-                    b.to_sgpr_u32(b.add(k_base, b.mul(tile_key0, _stride_k()))),
+                    b.to_sgpr_u32(b.add(k_base, b.mul(key0, _stride_k()))),
                 )
             return b.add(
                 b.add(k_base, b.mul(row, _stride_k())),
@@ -2860,13 +2898,17 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             )
             n_in_wave = b.div(lane, b.const_i32(8))
             d_bucket = b.mod(lane, b.const_i32(8))
+            rsrc, row0 = _wide_tile(k, k_rsrc, tile_key0)
+            row0 = row0 if spec.paged else None
             for n_pass in range(WIDE_LINE_PASSES):
                 line_id = b.add(wave_s, b.const_i32(n_pass * WAVES))
                 krow = b.add(
                     tile_key0,
                     b.add(b.mul(n_in_wave, b.const_i32(8)), line_id),
                 )
-                src_base = _wide_src(krow, tile_key0, n_in_wave, line_id, d_bucket)
+                src_base = _wide_src(
+                    krow, tile_key0, n_in_wave, line_id, d_bucket, row0
+                )
                 for d_rpt in range(K_D_RPT):
                     line = b.add(
                         b.mul(line_id, b.const_i32(K_LINE_STRIDE * 2)),
@@ -2878,7 +2920,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                     )
                     voff = b.add(src_base, b.const_i32(d_rpt * 64))
                     b.async_buffer_load_lds_addr(
-                        k_rsrc,
+                        rsrc,
                         row_base,
                         b.mul(voff, b.const_i32(2)),
                         zero_soff,
@@ -2893,13 +2935,17 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             )
             n_in_wave = b.div(lane, b.const_i32(8))
             d_bucket = b.mod(lane, b.const_i32(8))
+            rsrc, row0 = _wide_tile(v, v_rsrc, tile_key0)
+            row0 = row0 if spec.paged else None
             for n_pass in range(WIDE_LINE_PASSES):
                 line_id = b.add(wave_s, b.const_i32(n_pass * WAVES))
                 vrow = b.add(
                     tile_key0,
                     b.add(b.mul(n_in_wave, b.const_i32(8)), line_id),
                 )
-                src_base = _wide_src(vrow, tile_key0, n_in_wave, line_id, d_bucket)
+                src_base = _wide_src(
+                    vrow, tile_key0, n_in_wave, line_id, d_bucket, row0
+                )
                 for d_rpt in range(V_D_RPT):
                     line = b.add(
                         b.mul(line_id, b.const_i32(V_LINE_STRIDE * 2)),
@@ -2911,7 +2957,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                     )
                     voff = b.add(src_base, b.const_i32(d_rpt * 64))
                     b.async_buffer_load_lds_addr(
-                        v_rsrc,
+                        rsrc,
                         row_base,
                         b.mul(voff, b.const_i32(2)),
                         zero_soff,
