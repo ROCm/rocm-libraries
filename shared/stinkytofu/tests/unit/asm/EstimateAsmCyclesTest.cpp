@@ -1226,6 +1226,53 @@ TEST_F(EstimateAsmCyclesTest, AnalysisDoesNotMutateIROrMetadata) {
            "metadata as a side effect of AM.getResult().";
 }
 
+// The publishing pass annotates the primary loop only. Prologue and epilogue
+// comments are matched exactly by callers, so a cycle suffix there changes them.
+TEST_F(EstimateAsmCyclesTest, CycleCommentsStayInsidePrimaryLoop) {
+    BasicBlock* pre = func->createBasicBlockBefore(loopBB, "prologue");
+    BasicBlock* post = func->createBasicBlock("epilogue");
+
+    auto addCommented = [&](BasicBlock* bb, char const* comment) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
+        inst->addDestReg(StinkyRegister("v", 0, 1));
+        inst->addSrcReg(StinkyRegister("v", 1, 1));
+        inst->addSrcReg(StinkyRegister("v", 2, 1));
+        inst->issueCycles = 1;
+        inst->addModifier<CommentData>(CommentData(comment));
+        return inst;
+    };
+    StinkyInstruction* preInst =
+        addCommented(pre, "hand compute LDS back to persistent TDM prefetch");
+    StinkyInstruction* loopInst = addCommented(loopBB, "loop math");
+    {
+        AsmIRBuilder builder(*loopBB, arch);
+        StinkyInstruction* branch = builder.create(getMCIDByUOp(GFX::s_cbranch_scc0, arch));
+        branch->addModifier(LabelData("label_LoopBeginL"));
+        branch->issueCycles = 1;
+    }
+    StinkyInstruction* postInst =
+        addCommented(post, "Apply StreamK tail K-offset to TDM global addr");
+
+    func->setGemmTileConfig(gemmConfig);
+    PassContext passCtx;
+    passCtx.setGemmTileConfig(gemmConfig);
+    passCtx.setBasicBlockFilter(BasicBlockFilterBuilder::all());
+    AnalysisManager AM;
+    std::unique_ptr<Pass> pass = createEstimateAsmCyclesPass();
+    (void)pass->run(*func, passCtx, AM);
+
+    auto commentOf = [](StinkyInstruction* inst) {
+        CommentData const* c = inst->getModifier<CommentData>();
+        return c != nullptr ? c->comment : std::string();
+    };
+    EXPECT_EQ(commentOf(preInst), "hand compute LDS back to persistent TDM prefetch");
+    EXPECT_EQ(commentOf(postInst), "Apply StreamK tail K-offset to TDM global addr");
+    std::string const loopComment = commentOf(loopInst);
+    EXPECT_NE(loopComment.find("loop math"), std::string::npos);
+    EXPECT_NE(loopComment.find("<This is "), std::string::npos);
+}
+
 // Prologue blocks, including a peeled InitC clone whose label contains
 // LoopBeginL, sum into preloop. The primary loop is the range from
 // label_LoopBeginL through the block that branches back to it, even when that

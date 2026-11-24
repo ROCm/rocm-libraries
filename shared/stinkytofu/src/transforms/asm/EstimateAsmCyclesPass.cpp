@@ -622,8 +622,9 @@ class EstimateAsmCyclesPassImpl : public Pass {
             // computeEstimatedCyclesPerInstruction).
             perInstCycles_[inst] = static_cast<uint32_t>(replay.cycles < 0 ? 0 : replay.cycles);
 
-            // Update total cycles
-            if (annotateComments_ && !isLabel(*inst)) {
+            // Annotate only the primary loop. Prologue, epilogue, and the
+            // persistent-loop handoff keep the comments callers match exactly.
+            if (annotateComments_ && scope == BlockCycleScope::LoopBody && !isLabel(*inst)) {
                 appendComment(inst, "<This is " + std::to_string(replay.cycles) + "-cycle>");
             }
         }
