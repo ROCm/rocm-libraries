@@ -43,7 +43,7 @@ void TestOffsetIteratorTraits()
 
   static_assert(_THRUST_STD::is_same_v<thrust::iterator_traversal_t<it>, thrust::random_access_traversal_tag>);
 
-  static_assert(::internal::is_cpp17_random_access_iterator<it>::value);
+  static_assert(_THRUST_STD::__has_random_access_traversal<it>);
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
   static_assert(_THRUST_STD::output_iterator<it, int>);
@@ -188,28 +188,28 @@ void TestOffsetIteratorComparisonAndDistance()
   auto test = [](auto iter1, auto iter2) {
     ASSERT_EQUAL(iter1 == iter2, true);
     ASSERT_EQUAL(iter1 - iter2, 0);
-    ASSERT_EQUAL(thrust::distance(iter1, iter2), 0);
+    ASSERT_EQUAL(_THRUST_STD::distance(iter1, iter2), 0);
 
     iter1++;
     ASSERT_EQUAL(iter1 == iter2, false);
     ASSERT_EQUAL(iter1 - iter2, 1);
-    ASSERT_EQUAL(thrust::distance(iter1, iter2), -1);
+    ASSERT_EQUAL(_THRUST_STD::distance(iter1, iter2), -1);
 
     iter2++;
     ASSERT_EQUAL(iter1 == iter2, true);
     ASSERT_EQUAL(iter1 - iter2, 0);
-    ASSERT_EQUAL(thrust::distance(iter1, iter2), 0);
+    ASSERT_EQUAL(_THRUST_STD::distance(iter1, iter2), 0);
 
     iter1 += 100;
     iter2 += 100;
     ASSERT_EQUAL(iter1 == iter2, true);
     ASSERT_EQUAL(iter1 - iter2, 0);
-    ASSERT_EQUAL(thrust::distance(iter1, iter2), 0);
+    ASSERT_EQUAL(_THRUST_STD::distance(iter1, iter2), 0);
 
     iter1 -= 5;
     ASSERT_EQUAL(iter1 == iter2, false);
     ASSERT_EQUAL(iter1 - iter2, -5);
-    ASSERT_EQUAL(thrust::distance(iter1, iter2), 5);
+    ASSERT_EQUAL(_THRUST_STD::distance(iter1, iter2), 5);
   };
 
   Vector v(101);

@@ -236,4 +236,4 @@ using CPU_Handle_NONE = HandleTest;
 
 TEST_P(CPU_Handle_NONE, TestHIP) { this->RunHIP(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, CPU_Handle_NONE, GetCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_Handle_NONE, GetCases(), TestNameGenerator{});

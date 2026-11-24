@@ -220,7 +220,7 @@ TEST_F(SolutionIteratorSelectionTest, ASolutionMustBeValidForEverySlice)
     ClientProblemFactory factory(TestUtils::makeSplitClientArgs({128, 128, 1, 64}, 2, "M"));
     auto*                full = factory.problems()[0].get();
 
-    ExposedIterator split(library, hardware, 2.0, 1, false, false);
+    ExposedIterator split(library, hardware, 2.0, 1, false, false, false);
     split.setReporter(reporter);
     split.setSplit(&factory);
     split.preProblem(full);
@@ -228,7 +228,7 @@ TEST_F(SolutionIteratorSelectionTest, ASolutionMustBeValidForEverySlice)
 
     // The same solution is fine for the full problem when it is not split, and a solution without
     // restrictions is fine for every slice.
-    ExposedIterator whole(library, hardware, 2.0, 1, false, false);
+    ExposedIterator whole(library, hardware, 2.0, 1, false, false, false);
     whole.setReporter(reporter);
     whole.preProblem(full);
     EXPECT_TRUE(whole.valid(*solution1));

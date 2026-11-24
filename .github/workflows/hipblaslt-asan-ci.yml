@@ -6,7 +6,7 @@ on:
       - opened
       - synchronize
       - reopened
-    paths:
+    paths: &host_asan_paths
       - "projects/hipblaslt/**"
       - "projects/hipsparselt/**"
       - "test/therock/test_hipblaslt.py"
@@ -14,6 +14,9 @@ on:
       - "test/therock/lsan.supp"
       - ".github/workflows/hipblaslt-asan-ci.yml"
       - ".github/actions/ci-env/**"
+  push:
+    branches: [develop]
+    paths: *host_asan_paths
   workflow_dispatch:
     inputs:
       test_type:
@@ -25,7 +28,10 @@ on:
     - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
 
 env:
-  TEST_TYPE: ${{ inputs.test_type || (github.event_name == 'pull_request' && 'quick') || 'standard' }}
+  TEST_TYPE: >-
+    ${{ inputs.test_type ||
+        ((github.event_name == 'pull_request' || github.event_name == 'push') && 'quick') ||
+        'standard' }}
 
 permissions:
   contents: read
@@ -252,6 +258,9 @@ jobs:
       ARTIFACT_GROUP: ${{ matrix.family }}-host-asan
       THEROCK_RUN_ID: ${{ github.run_id }}-host-asan-${{ matrix.family }}
       HSA_XNACK: "0"
+      # Work around intermittent correctness failures with device-memory signals.
+      # Remove after ROCM-34728 is fixed and default-signal repros pass HOST_ASAN.
+      DEBUG_CLR_DEV_SIGNALS: "0"
       TEST_COMPONENT: ${{ matrix.component }}
     steps:
       - name: Checkout TheRock repository

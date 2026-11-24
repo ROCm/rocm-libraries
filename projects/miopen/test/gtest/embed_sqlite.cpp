@@ -83,4 +83,4 @@ TEST_P(CPU_EmbedSQLite_NONE, EmbedSQLite)
 #endif
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, CPU_EmbedSQLite_NONE, testing::ValuesIn({0}));
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_EmbedSQLite_NONE, testing::ValuesIn({0}));
