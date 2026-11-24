@@ -31,8 +31,8 @@ class TRTRT1DNode : public InternalNode
     friend class NodeFactory;
 
 protected:
-    explicit TRTRT1DNode(TreeNode* p)
-        : InternalNode(p)
+    TRTRT1DNode(TreeNode* p, NodeLayouts&& layouts)
+        : InternalNode(p, std::move(layouts))
     {
         scheme = CS_L1D_TRTRT;
     }
@@ -48,8 +48,8 @@ class CC1DNode : public InternalNode
     friend class NodeFactory;
 
 protected:
-    explicit CC1DNode(TreeNode* p)
-        : InternalNode(p)
+    CC1DNode(TreeNode* p, NodeLayouts&& layouts)
+        : InternalNode(p, std::move(layouts))
     {
         scheme = CS_L1D_CC;
     }
@@ -65,8 +65,8 @@ class CRT1DNode : public InternalNode
     friend class NodeFactory;
 
 protected:
-    explicit CRT1DNode(TreeNode* p)
-        : InternalNode(p)
+    CRT1DNode(TreeNode* p, NodeLayouts&& layouts)
+        : InternalNode(p, std::move(layouts))
     {
         scheme = CS_L1D_CRT;
     }
@@ -82,8 +82,8 @@ class Stockham1DNode : public LeafNode
     friend class NodeFactory;
 
 protected:
-    Stockham1DNode(TreeNode* p, ComputeScheme s)
-        : LeafNode(p, s)
+    Stockham1DNode(TreeNode* p, ComputeScheme s, NodeLayouts&& layouts)
+        : LeafNode(p, s, std::move(layouts))
     {
         externalKernel = true;
         need_twd_table = true;
@@ -103,8 +103,8 @@ class StockhamPP1DNode : public Stockham1DNode
     friend class NodeFactory;
 
 protected:
-    StockhamPP1DNode(TreeNode* p, ComputeScheme s)
-        : Stockham1DNode(p, s)
+    StockhamPP1DNode(TreeNode* p, ComputeScheme s, NodeLayouts&& layouts)
+        : Stockham1DNode(p, s, std::move(layouts))
     {
     }
 
@@ -122,8 +122,8 @@ class SBCCNode : public LeafNode
     friend class NodeFactory;
 
 protected:
-    SBCCNode(TreeNode* p, ComputeScheme s)
-        : LeafNode(p, s)
+    SBCCNode(TreeNode* p, ComputeScheme s, NodeLayouts&& layouts)
+        : LeafNode(p, s, std::move(layouts))
     {
         externalKernel = true;
         need_twd_table = true;
@@ -164,8 +164,8 @@ class SBCCPPNode : public SBCCNode
     friend class NodeFactory;
 
 protected:
-    SBCCPPNode(TreeNode* p, ComputeScheme s)
-        : SBCCNode(p, s)
+    SBCCPPNode(TreeNode* p, ComputeScheme s, NodeLayouts&& layouts)
+        : SBCCNode(p, s, std::move(layouts))
     {
     }
 
@@ -183,8 +183,8 @@ class SBRCNode : public LeafNode
     friend class NodeFactory;
 
 protected:
-    SBRCNode(TreeNode* p, ComputeScheme s)
-        : LeafNode(p, s)
+    SBRCNode(TreeNode* p, ComputeScheme s, NodeLayouts&& layouts)
+        : LeafNode(p, s, std::move(layouts))
     {
         externalKernel = true;
         need_twd_table = true;
@@ -219,8 +219,8 @@ class SBCRNode : public LeafNode
     friend class NodeFactory;
 
 protected:
-    SBCRNode(TreeNode* p, ComputeScheme s)
-        : LeafNode(p, s)
+    SBCRNode(TreeNode* p, ComputeScheme s, NodeLayouts&& layouts)
+        : LeafNode(p, s, std::move(layouts))
     {
         externalKernel = true;
         need_twd_table = true;

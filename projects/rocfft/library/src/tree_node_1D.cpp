@@ -26,7 +26,105 @@
 #include "node_factory.h"
 #include "repo.h"
 #include "tuning_helper.h"
+#include <array>
 #include <numeric>
+
+namespace
+{
+    constexpr auto INPUT  = io_data_label::INPUT;
+    constexpr auto OUTPUT = io_data_label::OUTPUT;
+
+    void swap_factor_axes(data_set_t& layout)
+    {
+        layout.reorder_axes(std::array<size_t, 2>{1, 0}, axis_scope::length_only);
+    }
+
+    data_set_t split_factors(const data_set_t& layout, size_t inner_length)
+    {
+        // The child geometry comes from the stage; buffer assignment selects its type.
+        return layout.split_length_axis(0, inner_length)
+            .with_element_type(rocfft_array_type_unset, layout.get_precision());
+    }
+
+    template <typename SetStride>
+    void visit_packed_factor_strides(const data_set_t& layout, bool swapped, SetStride set_stride)
+    {
+        const size_t inner = swapped ? 1 : 0;
+        const size_t outer = 1 - inner;
+        set_stride(inner, 1);
+        size_t stride = layout.axis_span(inner);
+        set_stride(outer, stride);
+        stride *= layout.axis_span(outer);
+        const size_t last = layout.get_full_rank() - 1;
+        for(size_t axis = 2; axis < last; ++axis)
+        {
+            set_stride(axis, stride);
+            stride *= layout.axis_span(axis);
+        }
+        set_stride(last, stride);
+    }
+
+    data_set_t packed_factors(data_set_t layout, bool swapped = false)
+    {
+        visit_packed_factor_strides(layout, swapped, [&](size_t axis, size_t stride) {
+            layout.set_axis_stride(axis, stride);
+        });
+        return layout;
+    }
+
+    void set_packed_factor_strides(TreeNode& node, io_data_label io, bool swapped)
+    {
+        visit_packed_factor_strides(node.layout_for(io), swapped, [&](size_t axis, size_t stride) {
+            node.set_axis_stride(io, axis, stride);
+        });
+    }
+
+    void set_split_factor_strides(TreeNode&         node,
+                                  io_data_label     io,
+                                  const data_set_t& source,
+                                  bool              swapped)
+    {
+        const auto&  target = node.layout_for(io);
+        const size_t inner  = swapped ? 1 : 0;
+        const size_t outer  = 1 - inner;
+        const size_t rank   = source.get_full_rank();
+        const size_t extra  = target.get_full_rank() - rank;
+        assert(extra == 1 || extra == 2);
+        const size_t inner_stride = source.axis_stride(0);
+        const size_t outer_stride = inner_stride * target.axis_span(inner);
+        node.set_axis_stride(io, inner, inner_stride);
+        node.set_axis_stride(io, outer, outer_stride);
+        // A nested CC/CRT under TRTRT splits the parent's first axis into three digits.
+        if(extra == 2)
+            node.set_axis_stride(io, 2, outer_stride * target.axis_span(outer));
+        for(size_t axis = 1; axis < rank; ++axis)
+            node.set_axis_stride(io, axis + extra, source.axis_stride(axis));
+    }
+
+    void set_swapped_factor_strides(TreeNode& node, io_data_label io, const data_set_t& source)
+    {
+        const size_t rank = source.get_full_rank();
+        assert(node.layout_for(io).get_full_rank() == rank);
+        node.set_axis_stride(io, 0, source.axis_stride(1));
+        node.set_axis_stride(io, 1, source.axis_stride(0));
+        for(size_t axis = 2; axis < rank; ++axis)
+            node.set_axis_stride(io, axis, source.axis_stride(axis));
+    }
+
+    data_set_t bluestein_workspace(const data_set_t& packed_stage, bool swap_factors = false)
+    {
+        // The Bluestein workspace ABI treats every axis except the outer batch as a
+        // length axis, including the demoted FFT factor and any inherited batch axes.
+        auto spans   = packed_stage.lengths_and_batches();
+        auto strides = packed_stage.strides_and_distances();
+        if(swap_factors)
+        {
+            std::swap(spans[0], spans[1]);
+            strides[1] = spans[0];
+        }
+        return data_set_t(std::vector<size_t>(spans.size(), 0), spans, strides);
+    }
+}
 
 /*****************************************************
  * L1D_TRTRT  *
@@ -50,71 +148,42 @@ void TRTRT1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         determined_scheme_node1 = child_scheme_trees[1]->curScheme;
     }
 
-    size_t lenFactor1 = length.back();
-    size_t lenFactor0 = length[0] / lenFactor1;
-    if(lenFactor0 * lenFactor1 != length[0])
+    if(length_factor == 0 || input_length(0) % length_factor != 0)
         throw std::runtime_error("L1D_TRTRT wrong factorization");
-    length.pop_back();
 
-    // first transpose
-    auto trans1Plan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
-    trans1Plan->length.push_back(lenFactor0);
-    trans1Plan->length.push_back(lenFactor1);
-    trans1Plan->dimension = 2;
-    for(size_t index = 1; index < length.size(); index++)
-    {
-        trans1Plan->length.push_back(length[index]);
-    }
-    trans1Plan->outputLength = trans1Plan->length;
+    auto adInput               = split_factors(input_layout(), input_length(0) / length_factor);
+    auto adAfterFirstTranspose = packed_factors(adInput, true);
+    auto daStage               = adAfterFirstTranspose;
+    swap_factor_axes(daStage);
 
-    // first row fft
-    NodeMetaData row1PlanData(this);
-    row1PlanData.length.push_back(lenFactor1);
-    row1PlanData.length.push_back(lenFactor0);
-    row1PlanData.dimension = 1;
-    for(size_t index = 1; index < length.size(); index++)
-    {
-        row1PlanData.length.push_back(length[index]);
-    }
-    row1PlanData.outputLength = row1PlanData.length;
+    auto adStage                = packed_factors(adInput);
+    auto daAfterSecondTranspose = adStage;
+    swap_factor_axes(daAfterSecondTranspose);
+
+    auto adOutput = split_factors(output_layout(), length_factor);
+    swap_factor_axes(adOutput);
+
+    // [A,D] transpose -> [D,A] row -> [D,A] transpose -> [A,D] row and transpose.
+    auto trans1Plan = NodeFactory::CreateNodeFromScheme(
+        CS_KERNEL_TRANSPOSE, this, std::move(adInput), std::move(adAfterFirstTranspose));
+
+    const auto   row1Stage = daStage.get_data_set_for_len_axes({0});
+    NodeMetaData row1PlanData(row1Stage, row1Stage, this);
 
     auto row1Plan = NodeFactory::CreateExplicitNode(row1PlanData, this, determined_scheme_node1);
     row1Plan->large1D = 0;
     row1Plan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[1].get());
 
-    // second transpose
-    auto trans2Plan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
-    trans2Plan->length.push_back(lenFactor1);
-    trans2Plan->length.push_back(lenFactor0);
-    trans2Plan->dimension = 2;
-    trans2Plan->large1D   = length[0];
-    for(size_t index = 1; index < length.size(); index++)
-    {
-        trans2Plan->length.push_back(length[index]);
-    }
-    trans2Plan->outputLength = trans2Plan->length;
+    auto trans2Plan = NodeFactory::CreateNodeFromScheme(
+        CS_KERNEL_TRANSPOSE, this, std::move(daStage), std::move(daAfterSecondTranspose));
+    trans2Plan->large1D = input_length(0);
 
-    // second row fft
-    auto row2Plan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM, this);
-    row2Plan->length.push_back(lenFactor0);
-    row2Plan->length.push_back(lenFactor1);
-    row2Plan->dimension = 1;
-    for(size_t index = 1; index < length.size(); index++)
-    {
-        row2Plan->length.push_back(length[index]);
-    }
-    row2Plan->outputLength = row2Plan->length;
+    const auto row2Stage = adStage.get_data_set_for_len_axes({0});
+    auto       row2Plan
+        = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM, this, row2Stage, row2Stage);
 
-    // third transpose
-    auto trans3Plan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
-    trans3Plan->length.push_back(lenFactor0);
-    trans3Plan->length.push_back(lenFactor1);
-    trans3Plan->dimension = 2;
-    for(size_t index = 1; index < length.size(); index++)
-    {
-        trans3Plan->length.push_back(length[index]);
-    }
-    trans3Plan->outputLength = trans3Plan->length;
+    auto trans3Plan = NodeFactory::CreateNodeFromScheme(
+        CS_KERNEL_TRANSPOSE, this, std::move(adStage), std::move(adOutput));
 
     // --------------------------------
     // Fuse Shims
@@ -147,173 +216,39 @@ void TRTRT1DNode::AssignParams_internal()
     auto& row2Plan   = childNodes[3];
     auto& trans3Plan = childNodes[4];
 
-    trans1Plan->inStride.push_back(inStride[0]);
-    trans1Plan->inStride.push_back(trans1Plan->length[0] * inStride[0]);
-    trans1Plan->iDist = iDist;
-    for(size_t index = 1; index < length.size(); index++)
-        trans1Plan->inStride.push_back(inStride[index]);
+    set_split_factor_strides(*trans1Plan, INPUT, input_layout(), false);
 
-    if(trans1Plan->obOut == OB_TEMP)
-    {
-        trans1Plan->outStride.push_back(trans1Plan->length[1]);
-        trans1Plan->outStride.push_back(1);
-        trans1Plan->oDist = trans1Plan->length[0] * trans1Plan->outStride[0];
-
-        for(size_t index = 1; index < length.size(); index++)
-        {
-            trans1Plan->outStride.push_back(trans1Plan->oDist);
-            trans1Plan->oDist *= length[index];
-        }
-    }
+    // Top-level TRTRT and its nested TRTRT rows can reuse the parent's output strides.
+    // Inside other multidimensional plans, non-temp intermediate buffers assume packing.
+    const bool reuse_output_strides = parent == nullptr || parent->scheme == CS_L1D_TRTRT;
+    if(trans1Plan->obOut == OB_TEMP || !reuse_output_strides)
+        set_packed_factor_strides(*trans1Plan, OUTPUT, true);
     else
-    {
-        if((parent == NULL) || (parent->scheme == CS_L1D_TRTRT))
-        {
-            trans1Plan->outStride.push_back(outStride[0] * (trans1Plan->length[1]));
-            trans1Plan->outStride.push_back(outStride[0]);
-            trans1Plan->oDist = oDist;
+        set_split_factor_strides(*trans1Plan, OUTPUT, output_layout(), true);
 
-            for(size_t index = 1; index < length.size(); index++)
-                trans1Plan->outStride.push_back(outStride[index]);
-        }
-        else
-        {
-            // we dont have B info here, need to assume packed data and descended
-            // from 2D/3D
-            // assert((parent->obOut == OB_USER_OUT) || (parent->obOut == OB_TEMP_CMPLX_FOR_REAL));
-
-            trans1Plan->outStride.push_back(trans1Plan->length[1]);
-            trans1Plan->outStride.push_back(1);
-            trans1Plan->oDist = trans1Plan->length[0] * trans1Plan->length[1];
-
-            for(size_t index = 1; index < length.size(); index++)
-            {
-                trans1Plan->outStride.push_back(trans1Plan->oDist);
-                trans1Plan->oDist *= length[index];
-            }
-        }
-    }
-
-    row1Plan->inStride = trans1Plan->outStride;
-    std::swap(row1Plan->inStride[0], row1Plan->inStride[1]);
-    row1Plan->iDist = trans1Plan->oDist;
-
+    set_swapped_factor_strides(*row1Plan, INPUT, trans1Plan->output_layout());
     if(row1Plan->placement == rocfft_placement_inplace)
-    {
-        row1Plan->outStride = row1Plan->inStride;
-        row1Plan->oDist     = row1Plan->iDist;
-    }
+        row1Plan->set_strides(OUTPUT, row1Plan->input_layout());
     else
-    {
-        row1Plan->outStride.push_back(outStride[0]);
-        row1Plan->outStride.push_back(outStride[0] * row1Plan->length[0]);
-        row1Plan->oDist = oDist;
-
-        for(size_t index = 1; index < length.size(); index++)
-            row1Plan->outStride.push_back(outStride[index]);
-    }
-
+        set_split_factor_strides(*row1Plan, OUTPUT, output_layout(), false);
     row1Plan->AssignParams();
 
-    trans2Plan->inStride = row1Plan->outStride;
-    trans2Plan->iDist    = row1Plan->oDist;
-
-    if(trans2Plan->obOut == OB_TEMP)
-    {
-        trans2Plan->outStride.push_back(trans2Plan->length[1]);
-        trans2Plan->outStride.push_back(1);
-        trans2Plan->oDist = trans2Plan->length[0] * trans2Plan->outStride[0];
-
-        for(size_t index = 1; index < length.size(); index++)
-        {
-            trans2Plan->outStride.push_back(trans2Plan->oDist);
-            trans2Plan->oDist *= length[index];
-        }
-    }
+    trans2Plan->set_strides(INPUT, row1Plan->output_layout());
+    if(trans2Plan->obOut == OB_TEMP || !reuse_output_strides)
+        set_packed_factor_strides(*trans2Plan, OUTPUT, true);
     else
-    {
-        if((parent == NULL) || (parent && (parent->scheme == CS_L1D_TRTRT)))
-        {
-            trans2Plan->outStride.push_back(outStride[0] * (trans2Plan->length[1]));
-            trans2Plan->outStride.push_back(outStride[0]);
-            trans2Plan->oDist = oDist;
+        set_split_factor_strides(*trans2Plan, OUTPUT, output_layout(), true);
 
-            for(size_t index = 1; index < length.size(); index++)
-                trans2Plan->outStride.push_back(outStride[index]);
-        }
-        else
-        {
-            // we dont have B info here, need to assume packed data and descended
-            // from 2D/3D
-            trans2Plan->outStride.push_back(trans2Plan->length[1]);
-            trans2Plan->outStride.push_back(1);
-            trans2Plan->oDist = trans2Plan->length[0] * trans2Plan->length[1];
-
-            for(size_t index = 1; index < length.size(); index++)
-            {
-                trans2Plan->outStride.push_back(trans2Plan->oDist);
-                trans2Plan->oDist *= length[index];
-            }
-        }
-    }
-
-    row2Plan->inStride = trans2Plan->outStride;
-    std::swap(row2Plan->inStride[0], row2Plan->inStride[1]);
-    row2Plan->iDist = trans2Plan->oDist;
-
+    set_swapped_factor_strides(*row2Plan, INPUT, trans2Plan->output_layout());
     if(row2Plan->obIn == row2Plan->obOut)
-    {
-        row2Plan->outStride = row2Plan->inStride;
-        row2Plan->oDist     = row2Plan->iDist;
-    }
-    else if(row2Plan->obOut == OB_TEMP)
-    {
-        row2Plan->outStride.push_back(1);
-        row2Plan->outStride.push_back(row2Plan->length[0]);
-        row2Plan->oDist = row2Plan->length[1] * row2Plan->outStride[1];
-
-        for(size_t index = 1; index < length.size(); index++)
-        {
-            row2Plan->outStride.push_back(row2Plan->oDist);
-            row2Plan->oDist *= length[index];
-        }
-    }
+        row2Plan->set_strides(OUTPUT, row2Plan->input_layout());
+    else if(row2Plan->obOut == OB_TEMP || !reuse_output_strides)
+        set_packed_factor_strides(*row2Plan, OUTPUT, false);
     else
-    {
-        if((parent == NULL) || (parent && (parent->scheme == CS_L1D_TRTRT)))
-        {
-            row2Plan->outStride.push_back(outStride[0]);
-            row2Plan->outStride.push_back(outStride[0] * (row2Plan->length[0]));
-            row2Plan->oDist = oDist;
+        set_split_factor_strides(*row2Plan, OUTPUT, output_layout(), false);
 
-            for(size_t index = 1; index < length.size(); index++)
-                row2Plan->outStride.push_back(outStride[index]);
-        }
-        else
-        {
-            // we dont have B info here, need to assume packed data and descended
-            // from 2D/3D
-            row2Plan->outStride.push_back(1);
-            row2Plan->outStride.push_back(row2Plan->length[0]);
-            row2Plan->oDist = row2Plan->length[0] * row2Plan->length[1];
-
-            for(size_t index = 1; index < length.size(); index++)
-            {
-                row2Plan->outStride.push_back(row2Plan->oDist);
-                row2Plan->oDist *= length[index];
-            }
-        }
-    }
-
-    trans3Plan->inStride = row2Plan->outStride;
-    trans3Plan->iDist    = row2Plan->oDist;
-
-    trans3Plan->outStride.push_back(outStride[0] * (trans3Plan->length[1]));
-    trans3Plan->outStride.push_back(outStride[0]);
-    trans3Plan->oDist = oDist;
-
-    for(size_t index = 1; index < length.size(); index++)
-        trans3Plan->outStride.push_back(outStride[index]);
+    trans3Plan->set_strides(INPUT, row2Plan->output_layout());
+    set_split_factor_strides(*trans3Plan, OUTPUT, output_layout(), true);
 }
 
 /*****************************************************
@@ -334,44 +269,38 @@ void CC1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         }
     }
 
-    size_t lenFactor1 = length.back();
-    size_t lenFactor0 = length[0] / lenFactor1;
-    if(lenFactor0 * lenFactor1 != length[0])
+    if(length_factor == 0 || input_length(0) % length_factor != 0)
         throw std::runtime_error("L1D_CC wrong factorization");
-    length.pop_back();
 
-    // first plan, column-to-column
-    auto col2colPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CC, this);
+    auto       daInput = split_factors(input_layout(), input_length(0) / length_factor);
+    const auto adStage = packed_factors(daInput);
+    swap_factor_axes(daInput);
+    auto daStage = adStage;
+    swap_factor_axes(daStage);
+    auto adOutput = split_factors(output_layout(), length_factor);
+    swap_factor_axes(adOutput);
+
+    // Column-to-column transforms D, then row-to-column transforms A.
+    auto col2colPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CC,
+                                                         this,
+                                                         daInput.get_data_set_for_len_axes({0}),
+                                                         daStage.get_data_set_for_len_axes({0}));
 
     if(GetBluesteinFuseType() != BFT_NONE)
         col2colPlan->blue = blue;
 
     // large1D flag to confirm we need multiply twiddle factor
-    col2colPlan->large1D = length[0];
-    col2colPlan->length.push_back(lenFactor1);
-    col2colPlan->length.push_back(lenFactor0);
-    col2colPlan->dimension = 1;
-    for(size_t index = 1; index < length.size(); index++)
-    {
-        col2colPlan->length.push_back(length[index]);
-    }
-    col2colPlan->outputLength      = col2colPlan->length;
+    col2colPlan->large1D           = input_length(0);
     col2colPlan->legacyOutputOrder = OutputAxisOrder::SWAP_01;
 
     // second plan, row-to-column
-    auto row2colPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_RC, this);
+    auto row2colPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_RC,
+                                                         this,
+                                                         adStage.get_data_set_for_len_axes({0}),
+                                                         adOutput.get_data_set_for_len_axes({0}));
 
     if(GetBluesteinFuseType() != BFT_NONE)
         row2colPlan->blue = blue;
-
-    row2colPlan->length.push_back(lenFactor0);
-    row2colPlan->length.push_back(lenFactor1);
-    row2colPlan->dimension = 1;
-    for(size_t index = 1; index < length.size(); index++)
-    {
-        row2colPlan->length.push_back(length[index]);
-    }
-    row2colPlan->outputLength = row2colPlan->length;
 
     // CC , RC
     childNodes.emplace_back(std::move(col2colPlan));
@@ -383,169 +312,49 @@ void CC1DNode::AssignParams_internal()
     auto& col2colPlan = childNodes[0];
     auto& row2colPlan = childNodes[1];
 
-    if((obOut == OB_USER_OUT) || (obOut == OB_TEMP_CMPLX_FOR_REAL) || (obOut == OB_TEMP_BLUESTEIN))
+    const bool output_to_boundary
+        = obOut == OB_USER_OUT || obOut == OB_TEMP_CMPLX_FOR_REAL || obOut == OB_TEMP_BLUESTEIN;
+    if(!output_to_boundary)
     {
-        // B -> T
-        col2colPlan->inStride.push_back(inStride[0] * col2colPlan->length[1]);
-        col2colPlan->inStride.push_back(inStride[0]);
-        col2colPlan->iDist = iDist;
+        if(isRootNode())
+            throw std::runtime_error("error: out-buffer mangled for root node (L1D_CC)");
 
-        col2colPlan->outStride.push_back(col2colPlan->length[1]);
-        col2colPlan->outStride.push_back(1);
-        col2colPlan->oDist = length[0];
+        // Bluestein only takes this branch during its pre-pass, before buffers are assigned.
+        assert((obOut == OB_UNINIT || !blue)
+               && "fused Bluestein stages must take the first branch once buffers are assigned");
+    }
 
-        for(size_t index = 1; index < length.size(); index++)
-        {
-            col2colPlan->inStride.push_back(inStride[index]);
-            col2colPlan->outStride.push_back(col2colPlan->oDist);
-            col2colPlan->oDist *= length[index];
-        }
+    set_split_factor_strides(*col2colPlan, INPUT, input_layout(), true);
 
+    // Nested TRTRT predicts the intermediate layout using its parent's output strides.
+    // For other parents, or when writing from temp to the boundary, it is packed.
+    if(!output_to_boundary && parent->scheme == CS_L1D_TRTRT)
+        set_split_factor_strides(*col2colPlan, OUTPUT, parent->output_layout(), true);
+    else
+        set_packed_factor_strides(*col2colPlan, OUTPUT, true);
+
+    set_swapped_factor_strides(*row2colPlan, INPUT, col2colPlan->output_layout());
+    set_split_factor_strides(*row2colPlan, OUTPUT, output_layout(), true);
+
+    if(output_to_boundary)
+    {
         if(col2colPlan->GetBluesteinFuseType() == BFT_FWD_CHIRP_MUL
            || col2colPlan->GetBluesteinFuseType() == BFT_INV_CHIRP_MUL)
         {
-            // identical convolution buffer layout on either I/O side
-            std::vector<size_t> col2col_strides(col2colPlan->length.size(), 1);
-            col2col_strides[0] = col2colPlan->length[1];
-            auto tmp           = col2colPlan->length[0] * col2colPlan->length[1];
-            for(size_t i = 2; i < col2col_strides.size(); i++)
-            {
-                col2col_strides[i] = tmp;
-                tmp *= col2colPlan->length[i];
-            }
-            auto c2c_layout = data_set_t::full_range(
-                col2colPlan->length, col2col_strides, col2colPlan->batch, tmp);
-            for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
-                col2colPlan->blue->set_conv_buffer_layout(io, c2c_layout);
-        }
-
-        // T -> B
-        row2colPlan->inStride.push_back(1);
-        row2colPlan->inStride.push_back(row2colPlan->length[0]);
-        row2colPlan->iDist = length[0];
-
-        row2colPlan->outStride.push_back(outStride[0] * row2colPlan->length[1]);
-        row2colPlan->outStride.push_back(outStride[0]);
-        row2colPlan->oDist = oDist;
-
-        for(size_t index = 1; index < length.size(); index++)
-        {
-            row2colPlan->inStride.push_back(row2colPlan->iDist);
-            row2colPlan->iDist *= length[index];
-            row2colPlan->outStride.push_back(outStride[index]);
+            // The CC stage uses the same packed layout on either side of its workspace.
+            auto workspace = bluestein_workspace(col2colPlan->output_layout());
+            col2colPlan->blue->set_conv_buffer_layout(INPUT, workspace);
+            col2colPlan->blue->set_conv_buffer_layout(OUTPUT, std::move(workspace));
         }
 
         if(row2colPlan->GetBluesteinFuseType() == BFT_FWD_CHIRP_MUL
            || row2colPlan->GetBluesteinFuseType() == BFT_INV_CHIRP_MUL)
         {
-            for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
-            {
-                // The convolution workspace is described in packed order. Only
-                // its higher-axis strides and distance are passed to the kernel.
-                auto lens = row2colPlan->length;
-                if(io == io_data_label::OUTPUT)
-                    std::swap(lens[0], lens[1]);
-                std::vector<size_t> row2col_strides(lens.size(), 1);
-                row2col_strides[1] = lens[0];
-                auto tmp           = lens[0] * lens[1];
-                for(size_t i = 2; i < row2col_strides.size(); i++)
-                {
-                    row2col_strides[i] = tmp;
-                    tmp *= lens[i];
-                }
-                row2colPlan->blue->set_conv_buffer_layout(
-                    io, data_set_t::full_range(lens, row2col_strides, row2colPlan->batch, tmp));
-            }
-        }
-    }
-    else
-    {
-        // a root node must output to OB_USER_OUT,
-        // so if we're here, the parent must not be nullptr (not a root node)
-        if(isRootNode())
-            throw std::runtime_error("error: out-buffer mangled for root node (L1D_CC)");
-
-        // Bluestein nodes only get here in AssignChirpBuffers' pre-pass, before buffers are assigned
-        assert((obOut == OB_UNINIT || !blue)
-               && "fused Bluestein stages must take the first branch once buffers are assigned");
-
-        // here we don't have B info right away, we get it through its parent
-        // T-> B
-        col2colPlan->inStride.push_back(inStride[0] * col2colPlan->length[1]);
-        col2colPlan->inStride.push_back(inStride[0]);
-        col2colPlan->iDist = iDist;
-
-        for(size_t index = 1; index < length.size(); index++)
-        {
-            col2colPlan->inStride.push_back(inStride[index]);
-        }
-
-        if(parent->scheme == CS_L1D_TRTRT)
-        {
-            col2colPlan->outStride.push_back(parent->outStride[0] * col2colPlan->length[1]);
-            col2colPlan->outStride.push_back(parent->outStride[0]);
-            col2colPlan->outStride.push_back(parent->outStride[0] * col2colPlan->length[1]
-                                             * col2colPlan->length[0]);
-            col2colPlan->oDist = parent->oDist;
-
-            for(size_t index = 1; index < parent->length.size(); index++)
-            {
-                col2colPlan->outStride.push_back(parent->outStride[index]);
-            }
-        }
-        else
-        {
-            // we dont have B info here, need to assume packed data and descended
-            // from 2D/3D
-            //assert(parent->outStride[0] == 1);
-
-            col2colPlan->outStride.push_back(col2colPlan->length[1]);
-            col2colPlan->outStride.push_back(1);
-            col2colPlan->oDist = col2colPlan->length[1] * col2colPlan->length[0];
-
-            for(size_t index = 1; index < length.size(); index++)
-            {
-                col2colPlan->outStride.push_back(col2colPlan->oDist);
-                col2colPlan->oDist *= length[index];
-            }
-        }
-
-        // B -> T
-        if(parent->scheme == CS_L1D_TRTRT)
-        {
-            row2colPlan->inStride.push_back(parent->outStride[0]);
-            row2colPlan->inStride.push_back(parent->outStride[0] * row2colPlan->length[0]);
-            row2colPlan->inStride.push_back(parent->outStride[0] * row2colPlan->length[0]
-                                            * row2colPlan->length[1]);
-            row2colPlan->iDist = parent->oDist;
-
-            for(size_t index = 1; index < parent->length.size(); index++)
-            {
-                row2colPlan->inStride.push_back(parent->outStride[index]);
-            }
-        }
-        else
-        {
-            // we dont have B info here, need to assume packed data and descended
-            // from 2D/3D
-            row2colPlan->inStride.push_back(1);
-            row2colPlan->inStride.push_back(row2colPlan->length[0]);
-            row2colPlan->iDist = row2colPlan->length[0] * row2colPlan->length[1];
-
-            for(size_t index = 1; index < length.size(); index++)
-            {
-                row2colPlan->inStride.push_back(row2colPlan->iDist);
-                row2colPlan->iDist *= length[index];
-            }
-        }
-
-        row2colPlan->outStride.push_back(outStride[0] * row2colPlan->length[1]);
-        row2colPlan->outStride.push_back(outStride[0]);
-        row2colPlan->oDist = oDist;
-
-        for(size_t index = 1; index < length.size(); index++)
-        {
-            row2colPlan->outStride.push_back(outStride[index]);
+            // The RC stage's workspace output is packed in the transposed order.
+            row2colPlan->blue->set_conv_buffer_layout(
+                INPUT, bluestein_workspace(row2colPlan->input_layout()));
+            row2colPlan->blue->set_conv_buffer_layout(
+                OUTPUT, bluestein_workspace(row2colPlan->input_layout(), true));
         }
     }
 
@@ -560,28 +369,28 @@ void CC1DNode::AssignParams_internal()
     //
     // Fused Bluestein is excluded: its stages' convolution buffer layouts
     // are set against the original geometry, which the reshape would break.
-    if(iDist == 1 && oDist == 1 && col2colPlan->obOut == OB_TEMP
-       && GetBluesteinType() != BT_MULTI_KERNEL_FUSED)
+    const bool interleave = input_distance() == 1 && output_distance() == 1
+                            && col2colPlan->obOut == OB_TEMP
+                            && GetBluesteinType() != BT_MULTI_KERNEL_FUSED;
+    col2colPlan->inner_batch_layout            = interleave;
+    row2colPlan->inner_batch_layout            = interleave;
+    col2colPlan->largeTwdBatchIsTransformCount = interleave;
+    if(interleave)
     {
-        // hack the plan to put batch as second dimension since it moves
-        // faster than the actual second dimension
-        std::swap(col2colPlan->length.back(), col2colPlan->batch);
-        col2colPlan->outputLength = col2colPlan->length;
-        col2colPlan->iDist        = col2colPlan->inStride.back();
-        col2colPlan->inStride     = {col2colPlan->inStride.back() * col2colPlan->batch, 1};
-        // make output the same shape as input (even though it's going to
-        // a temp buffer), so both read+write are coalesced the same
-        col2colPlan->outStride                     = col2colPlan->inStride;
-        col2colPlan->oDist                         = col2colPlan->iDist;
-        col2colPlan->largeTwdBatchIsTransformCount = true;
+        // This traversal has only two non-batch strides. The old layout could
+        // not pass the footprint check with additional inherited axes.
+        if(data_rank() != 1)
+            throw std::runtime_error(
+                "Inconsistent length/stride dimensions given to compute_ptrdiff");
 
-        // again, make batch the second dimension
-        std::swap(row2colPlan->length.back(), row2colPlan->batch);
-        row2colPlan->outputLength = row2colPlan->length;
-        row2colPlan->inStride     = {inStride.front(), 1};
-        row2colPlan->iDist        = row2colPlan->length.front() * inStride.front();
-        row2colPlan->oDist        = outStride.front();
-        row2colPlan->outStride    = {row2colPlan->batch * outStride.front(), 1};
+        // Store strides in logical [transform, factor, B] order. The kernel
+        // sees [transform, B, factor], so both endpoints already have the
+        // right strides; only the two views of the temp buffer change.
+        col2colPlan->set_strides(OUTPUT, col2colPlan->input_layout());
+        const auto first_stride = input_stride(0);
+        row2colPlan->set_strides(
+            INPUT,
+            std::array<size_t, 3>{first_stride, row2colPlan->input_length(0) * first_stride, 1});
     }
 }
 
@@ -604,49 +413,30 @@ void CRT1DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         }
     }
 
-    size_t lenFactor1 = length.back();
-    size_t lenFactor0 = length[0] / lenFactor1;
-    if(lenFactor0 * lenFactor1 != length[0])
+    if(length_factor == 0 || input_length(0) % length_factor != 0)
         throw std::runtime_error("L1D_CRT wrong factorization");
-    length.pop_back();
 
-    // first plan, column-to-column
-    auto col2colPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CC, this);
-    // large1D flag to confirm we need multiply twiddle factor
-    col2colPlan->large1D = length[0];
-    col2colPlan->length.push_back(lenFactor1);
-    col2colPlan->length.push_back(lenFactor0);
-    col2colPlan->dimension = 1;
-    for(size_t index = 1; index < length.size(); index++)
-    {
-        col2colPlan->length.push_back(length[index]);
-    }
-    col2colPlan->outputLength      = col2colPlan->length;
+    auto daInput = split_factors(input_layout(), input_length(0) / length_factor);
+    auto adStage = packed_factors(daInput);
+    swap_factor_axes(daInput);
+    auto daStage = adStage;
+    swap_factor_axes(daStage);
+    auto adOutput = split_factors(output_layout(), length_factor);
+    swap_factor_axes(adOutput);
+
+    auto col2colPlan               = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CC,
+                                                         this,
+                                                         daInput.get_data_set_for_len_axes({0}),
+                                                         daStage.get_data_set_for_len_axes({0}));
+    col2colPlan->large1D           = input_length(0);
     col2colPlan->legacyOutputOrder = OutputAxisOrder::SWAP_01;
 
-    // second plan, row-to-row
-    auto row2rowPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM, this);
-    row2rowPlan->length.push_back(lenFactor0);
-    row2rowPlan->length.push_back(lenFactor1);
-    row2rowPlan->dimension = 1;
-    for(size_t index = 1; index < length.size(); index++)
-    {
-        row2rowPlan->length.push_back(length[index]);
-    }
-    row2rowPlan->outputLength = row2rowPlan->length;
-    // memo: A worth-noting try
-    // row2rowPlan->allowOutofplace = false;
+    const auto rowStage = adStage.get_data_set_for_len_axes({0});
+    auto       row2rowPlan
+        = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM, this, rowStage, rowStage);
 
-    // third plan, transpose
-    auto transPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
-    transPlan->length.push_back(lenFactor0);
-    transPlan->length.push_back(lenFactor1);
-    transPlan->dimension = 2;
-    for(size_t index = 1; index < length.size(); index++)
-    {
-        transPlan->length.push_back(length[index]);
-    }
-    transPlan->outputLength = transPlan->length;
+    auto transPlan = NodeFactory::CreateNodeFromScheme(
+        CS_KERNEL_TRANSPOSE, this, std::move(adStage), std::move(adOutput));
 
     // --------------------------------
     // Fuse Shims
@@ -670,136 +460,30 @@ void CRT1DNode::AssignParams_internal()
     auto& row2rowPlan = childNodes[1];
     auto& transPlan   = childNodes[2];
 
-    if((obOut == OB_USER_OUT) || (obOut == OB_TEMP_CMPLX_FOR_REAL))
+    const bool output_to_boundary = obOut == OB_USER_OUT || obOut == OB_TEMP_CMPLX_FOR_REAL;
+    if(!output_to_boundary && isRootNode())
+        throw std::runtime_error("error: out-buffer mangled for root node (L1D_CRT)");
+
+    const bool reuse_parent_strides = !output_to_boundary && parent->scheme == CS_L1D_TRTRT;
+    if(!output_to_boundary && !reuse_parent_strides)
     {
-        // B -> T
-        col2colPlan->inStride.push_back(inStride[0] * col2colPlan->length[1]);
-        col2colPlan->inStride.push_back(inStride[0]);
-        col2colPlan->iDist = iDist;
-
-        col2colPlan->outStride.push_back(col2colPlan->length[1]);
-        col2colPlan->outStride.push_back(1);
-        col2colPlan->oDist = length[0];
-
-        for(size_t index = 1; index < length.size(); index++)
-        {
-            col2colPlan->inStride.push_back(inStride[index]);
-            col2colPlan->outStride.push_back(col2colPlan->oDist);
-            col2colPlan->oDist *= length[index];
-        }
-
-        // T -> T
-        row2rowPlan->inStride.push_back(1);
-        row2rowPlan->inStride.push_back(row2rowPlan->length[0]);
-        row2rowPlan->iDist = length[0];
-
-        for(size_t index = 1; index < length.size(); index++)
-        {
-            row2rowPlan->inStride.push_back(row2rowPlan->iDist);
-            row2rowPlan->iDist *= length[index];
-        }
-
-        row2rowPlan->outStride = row2rowPlan->inStride;
-        row2rowPlan->oDist     = row2rowPlan->iDist;
-
-        // T -> B
-        transPlan->inStride = row2rowPlan->outStride;
-        transPlan->iDist    = row2rowPlan->oDist;
-
-        transPlan->outStride.push_back(outStride[0] * (transPlan->length[1]));
-        transPlan->outStride.push_back(outStride[0]);
-        transPlan->oDist = oDist;
-
-        for(size_t index = 1; index < length.size(); index++)
-            transPlan->outStride.push_back(outStride[index]);
+        // From a 2D/3D parent the intermediate layout assumes packing.
+        assert(parent->output_stride(0) == 1);
+        for(size_t axis = 1; axis < parent->data_rank(); ++axis)
+            assert(parent->output_stride(axis)
+                   == parent->output_stride(axis - 1) * parent->input_length(axis - 1));
     }
+
+    set_split_factor_strides(*col2colPlan, INPUT, input_layout(), true);
+    if(reuse_parent_strides)
+        set_split_factor_strides(*col2colPlan, OUTPUT, parent->output_layout(), true);
     else
-    {
-        // a root node must output to OB_USER_OUT,
-        // so if we're here, the parent must not be nullptr (not a root node)
-        if(isRootNode())
-            throw std::runtime_error("error: out-buffer mangled for root node (L1D_CRT)");
+        set_packed_factor_strides(*col2colPlan, OUTPUT, true);
 
-        // T -> B
-        col2colPlan->inStride.push_back(inStride[0] * col2colPlan->length[1]);
-        col2colPlan->inStride.push_back(inStride[0]);
-        col2colPlan->iDist = iDist;
-
-        for(size_t index = 1; index < length.size(); index++)
-            col2colPlan->inStride.push_back(inStride[index]);
-
-        if(parent->scheme == CS_L1D_TRTRT)
-        {
-            col2colPlan->outStride.push_back(parent->outStride[0] * col2colPlan->length[1]);
-            col2colPlan->outStride.push_back(parent->outStride[0]);
-            col2colPlan->outStride.push_back(parent->outStride[0] * col2colPlan->length[1]
-                                             * col2colPlan->length[0]);
-            col2colPlan->oDist = parent->oDist;
-
-            for(size_t index = 1; index < parent->length.size(); index++)
-                col2colPlan->outStride.push_back(parent->outStride[index]);
-        }
-        else
-        {
-            // we dont have B info here, need to assume packed data and descended
-            // from 2D/3D
-            assert(parent->outStride[0] == 1);
-            for(size_t index = 1; index < parent->length.size(); index++)
-                assert(parent->outStride[index]
-                       == (parent->outStride[index - 1] * parent->length[index - 1]));
-
-            col2colPlan->outStride.push_back(col2colPlan->length[1]);
-            col2colPlan->outStride.push_back(1);
-            col2colPlan->oDist = col2colPlan->length[1] * col2colPlan->length[0];
-
-            for(size_t index = 1; index < length.size(); index++)
-            {
-                col2colPlan->outStride.push_back(col2colPlan->oDist);
-                col2colPlan->oDist *= length[index];
-            }
-        }
-
-        // B -> B
-        if(parent->scheme == CS_L1D_TRTRT)
-        {
-            row2rowPlan->inStride.push_back(parent->outStride[0]);
-            row2rowPlan->inStride.push_back(parent->outStride[0] * row2rowPlan->length[0]);
-            row2rowPlan->inStride.push_back(parent->outStride[0] * row2rowPlan->length[0]
-                                            * row2rowPlan->length[1]);
-            row2rowPlan->iDist = parent->oDist;
-
-            for(size_t index = 1; index < parent->length.size(); index++)
-                row2rowPlan->inStride.push_back(parent->outStride[index]);
-        }
-        else
-        {
-            // we dont have B info here, need to assume packed data and descended
-            // from 2D/3D
-            row2rowPlan->inStride.push_back(1);
-            row2rowPlan->inStride.push_back(row2rowPlan->length[0]);
-            row2rowPlan->iDist = row2rowPlan->length[0] * row2rowPlan->length[1];
-
-            for(size_t index = 1; index < length.size(); index++)
-            {
-                row2rowPlan->inStride.push_back(row2rowPlan->iDist);
-                row2rowPlan->iDist *= length[index];
-            }
-        }
-
-        row2rowPlan->outStride = row2rowPlan->inStride;
-        row2rowPlan->oDist     = row2rowPlan->iDist;
-
-        // B -> T
-        transPlan->inStride = row2rowPlan->outStride;
-        transPlan->iDist    = row2rowPlan->oDist;
-
-        transPlan->outStride.push_back(outStride[0] * transPlan->length[1]);
-        transPlan->outStride.push_back(outStride[0]);
-        transPlan->oDist = oDist;
-
-        for(size_t index = 1; index < length.size(); index++)
-            transPlan->outStride.push_back(outStride[index]);
-    }
+    set_swapped_factor_strides(*row2rowPlan, INPUT, col2colPlan->output_layout());
+    row2rowPlan->set_strides(OUTPUT, row2rowPlan->input_layout());
+    transPlan->set_strides(INPUT, row2rowPlan->output_layout());
+    set_split_factor_strides(*transPlan, OUTPUT, output_layout(), true);
 }
 
 // Leaf Node..
@@ -862,7 +546,7 @@ void StockhamPP1DNode::SetupGridParam_internal(GridParam& gp)
 
 bool StockhamPP1DNode::CreateDeviceResources()
 {
-    return CreatePartialPassDeviceResources(length[ppOffDim]);
+    return CreatePartialPassDeviceResources(input_length(ppOffDim));
 }
 
 /*****************************************************
@@ -904,7 +588,7 @@ bool SBCCNode::KernelCheck(std::vector<FMKey>& kernel_keys)
 void SBCCNode::TuneDirectRegType()
 {
     // half precision has not been tested yet, disable it for now.
-    if(precision == rocfft_precision_half)
+    if(get_precision() == rocfft_precision_half)
     {
         dir2regMode = FORCE_OFF_OR_NOT_SUPPORT;
         return;
@@ -913,8 +597,8 @@ void SBCCNode::TuneDirectRegType()
     // for Navi, Haven't tested all.
     if(is_device_gcn_arch(deviceProp, "gfx1030"))
     {
-        if((length[0] != 64) && (length[0] != 81) && (length[0] != 200) && (length[0] != 100)
-           && (length[0] != 168))
+        const auto len = input_length(0);
+        if(len != 64 && len != 81 && len != 200 && len != 100 && len != 168)
             dir2regMode = FORCE_OFF_OR_NOT_SUPPORT;
     }
     else if(is_device_gcn_arch(deviceProp, "gfx908"))
@@ -925,7 +609,7 @@ void SBCCNode::TuneDirectRegType()
         std::map<rocfft_precision, std::set<size_t>> exceptions
             = {{rocfft_precision_single, {125, 192, 216, 224, 240, 243}},
                {rocfft_precision_double, {224, 343}}};
-        if(length_excepted(exceptions, precision, length[0]))
+        if(length_excepted(exceptions, get_precision(), input_length(0)))
             dir2regMode = FORCE_OFF_OR_NOT_SUPPORT;
     }
     else if(is_device_gcn_arch(deviceProp, "gfx90a"))
@@ -936,7 +620,7 @@ void SBCCNode::TuneDirectRegType()
         std::map<rocfft_precision, std::set<size_t>> exceptions
             = {{rocfft_precision_single, {125, 192, 216, 200, 224, 240}},
                {rocfft_precision_double, {125, 224, 243}}};
-        if(length_excepted(exceptions, precision, length[0]))
+        if(length_excepted(exceptions, get_precision(), input_length(0)))
             dir2regMode = FORCE_OFF_OR_NOT_SUPPORT;
     }
 }
@@ -946,8 +630,10 @@ void SBCCNode::InitIntrinsicMode()
     const auto& view = GetKernelView();
     // 1. General rejections: (Guard) cases we definitely can't use buffer instruction
     // 2. half precision has not been tested yet, disable it for now.
-    if(((uint64_t)view.iDist * view.batch * complex_type_size(precision) >= 0xFFFFFFFF)
-       || ((uint64_t)view.oDist * view.batch * complex_type_size(precision) >= 0xFFFFFFFF)
+    const auto precision    = get_precision();
+    const auto element_size = complex_type_size(precision);
+    if(((uint64_t)view.iDist * view.batch * element_size >= 0xFFFFFFFF)
+       || ((uint64_t)view.oDist * view.batch * element_size >= 0xFFFFFFFF)
        || (precision == rocfft_precision_half))
     {
         intrinsicMode = IntrinsicAccessType::DISABLE_BOTH;
@@ -997,7 +683,7 @@ void SBCCNode::TuneIntrinsicMode()
         std::map<rocfft_precision, std::set<size_t>> exceptions
             = {{rocfft_precision_single, {96, 125, 192, 256, 343}},
                {rocfft_precision_double, {192, 240, 256, 343}}};
-        if(length_excepted(exceptions, precision, length[0]))
+        if(length_excepted(exceptions, get_precision(), input_length(0)))
             intrinsicMode = IntrinsicAccessType::DISABLE_BOTH;
     }
     // 3. exception cases on 908. Based on benchmark results
@@ -1007,7 +693,7 @@ void SBCCNode::TuneIntrinsicMode()
         // {104,sp/dp}, {192,dp}, {240,dp}, {289,sp}
         std::map<rocfft_precision, std::set<size_t>> exceptions
             = {{rocfft_precision_single, {104, 289}}, {rocfft_precision_double, {104, 192, 240}}};
-        if(length_excepted(exceptions, precision, length[0]))
+        if(length_excepted(exceptions, get_precision(), input_length(0)))
             intrinsicMode = IntrinsicAccessType::DISABLE_BOTH;
     }
 }
@@ -1060,7 +746,7 @@ bool SBCCPPNode::CreateDeviceResources()
 {
     // this node's length is rotated so that its own transform dimension comes
     // first, which shifts ppOffDim (a plan dimension) one slot to the right
-    return CreatePartialPassDeviceResources(length[(ppOffDim + 1) % length.size()]);
+    return CreatePartialPassDeviceResources(input_length((ppOffDim + 1) % data_rank()));
 }
 
 /*****************************************************
@@ -1071,11 +757,14 @@ FMKey SBRCNode::GetKernelKey() const
     if(specified_key)
         return *specified_key.get();
 
+    const auto len       = input_length(0);
+    const auto precision = get_precision();
+
     // NB: Need to make sure that sbrcTranstype has the correct value
     if(sbrcTranstype == SBRC_TRANSPOSE_TYPE::NONE)
     {
         // find the base kernel at first
-        FMKey baseKey(length[0], precision, scheme, TILE_ALIGNED);
+        FMKey baseKey(len, precision, scheme, TILE_ALIGNED);
         // if we have the base kernel, then we set the exact sbrc_trans_type and return the real key
         // if we don't, then we simply return a key with NONE sbrc_trans_type
         // which will make KernelCheck() trigger an exception
@@ -1086,7 +775,7 @@ FMKey SBRCNode::GetKernelKey() const
         }
     }
 
-    return FMKey(length[0], precision, scheme, sbrcTranstype);
+    return FMKey(len, precision, scheme, sbrcTranstype);
 }
 
 bool SBRCNode::KernelCheck(std::vector<FMKey>& kernel_keys)
@@ -1110,7 +799,7 @@ bool SBRCNode::KernelCheck(std::vector<FMKey>& kernel_keys)
 void SBRCNode::TuneDirectRegType()
 {
     // half precision has not been tested yet, disable it for now.
-    if(precision == rocfft_precision_half)
+    if(get_precision() == rocfft_precision_half)
     {
         dir2regMode = FORCE_OFF_OR_NOT_SUPPORT;
         return;
@@ -1122,7 +811,7 @@ void SBRCNode::TuneDirectRegType()
         // {49,sp}, {128,sp}, {64,dp}, {81,dp}, {100,dp}
         std::map<rocfft_precision, std::set<size_t>> exceptions
             = {{rocfft_precision_single, {49, 128}}, {rocfft_precision_double, {64, 81, 100}}};
-        if(length_excepted(exceptions, precision, length[0]))
+        if(length_excepted(exceptions, get_precision(), input_length(0)))
             dir2regMode = FORCE_OFF_OR_NOT_SUPPORT;
     }
     else if(is_device_gcn_arch(deviceProp, "gfx908"))
@@ -1132,7 +821,7 @@ void SBRCNode::TuneDirectRegType()
         std::map<rocfft_precision, std::set<size_t>> exceptions
             = {{rocfft_precision_single, {81, 100, 128, 192, 200, 512}},
                {rocfft_precision_double, {125, 128}}};
-        if(length_excepted(exceptions, precision, length[0]))
+        if(length_excepted(exceptions, get_precision(), input_length(0)))
             dir2regMode = FORCE_OFF_OR_NOT_SUPPORT;
     }
     else if(is_device_gcn_arch(deviceProp, "gfx90a"))
@@ -1142,7 +831,7 @@ void SBRCNode::TuneDirectRegType()
         std::map<rocfft_precision, std::set<size_t>> exceptions
             = {{rocfft_precision_single, {49, 81, 100, 125, 200, 512}},
                {rocfft_precision_double, {64, 81, 100, 125}}};
-        if(length_excepted(exceptions, precision, length[0]))
+        if(length_excepted(exceptions, get_precision(), input_length(0)))
             dir2regMode = FORCE_OFF_OR_NOT_SUPPORT;
     }
     // we don't enable the features for others
@@ -1168,7 +857,7 @@ void SBRCNode::SetupGridParam_internal(GridParam& gp)
 
 SBRC_TRANSPOSE_TYPE SBRCNode::sbrc_transpose_type(unsigned int blockWidth) const
 {
-    auto alignment_dimension = length[1];
+    const auto alignment_dimension = inner_batch_layout ? batch_count() : input_length(1);
     return (alignment_dimension % blockWidth == 0) ? TILE_ALIGNED : TILE_UNALIGNED;
 }
 
@@ -1204,7 +893,7 @@ bool SBCRNode::KernelCheck(std::vector<FMKey>& kernel_keys)
 void SBCRNode::TuneDirectRegType()
 {
     // half precision has not been tested yet, disable it for now.
-    if(precision == rocfft_precision_half)
+    if(get_precision() == rocfft_precision_half)
     {
         dir2regMode = FORCE_OFF_OR_NOT_SUPPORT;
         return;
@@ -1222,7 +911,7 @@ void SBCRNode::TuneDirectRegType()
     if(is_device_gcn_arch(deviceProp, "gfx90a"))
     {
         // {200,sp} is bad
-        if(length[0] == 200 && precision == rocfft_precision_single)
+        if(input_length(0) == 200 && get_precision() == rocfft_precision_single)
             dir2regMode = FORCE_OFF_OR_NOT_SUPPORT;
     }
 }
@@ -1232,8 +921,10 @@ void SBCRNode::InitIntrinsicMode()
     const auto& view = GetKernelView();
     // 1. General rejections: (Guard) cases we definitely can't use buffer instruction
     // 2. half precision has not been tested yet, disable it for now.
-    if(((uint64_t)view.iDist * view.batch * complex_type_size(precision) >= 0xFFFFFFFF)
-       || ((uint64_t)view.oDist * view.batch * complex_type_size(precision) >= 0xFFFFFFFF)
+    const auto precision    = get_precision();
+    const auto element_size = complex_type_size(precision);
+    if(((uint64_t)view.iDist * view.batch * element_size >= 0xFFFFFFFF)
+       || ((uint64_t)view.oDist * view.batch * element_size >= 0xFFFFFFFF)
        || (precision == rocfft_precision_half))
     {
         intrinsicMode = IntrinsicAccessType::DISABLE_BOTH;
