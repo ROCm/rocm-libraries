@@ -7,7 +7,7 @@ Ranking Regression Tests for W4A16 (int4 A, bf16/fp16 activations) on gfx1150 an
 Same baselines and comparison as test_ranking_regression.py, with two differences that the
 W4A16 model needs:
 - The configs are the kernels hipBLASLt ships (data/w4a16_configs.csv), with the wave
-  layout, Stream-K and occupancy that the W4A16 latency model and its grid rule read, not a
+  layout, Stream-K and occupancy that the W4A16 latency model and its launch grid read, not a
   synthetic grid. A decode kernel serves one token count and is only ranked for it.
 - The problems are W4A16 shapes (data/w4a16_problem_data.csv): prefill and 1 to 5 tokens.
 

@@ -334,20 +334,28 @@ TEST_CASE("GEMM: W4A16 Stream-K sharing tiles is not charged whole waves", "[gem
   REQUIRE(latency(1024 * 4, 3) >= 0.9 * latency(1024 * 4, 0));
 }
 
-TEST_CASE("GEMM: W4A16 Stream-K charges the partial tiles of a split", "[gemm][w4a16]") {
-  auto hardware = make_w4a16_gfx1151_hardware();
-  auto latency  = [&](size_t mt_m, size_t mt_n) {
-    auto problem    = make_problem(896, 128, 4864);
+TEST_CASE("GEMM: W4A16 Stream-K charges the partials of a split tile", "[gemm][w4a16]") {
+  const auto hardware = make_w4a16_gfx1151_hardware();
+  // One 128x128 tile with 4 K iterations, on grids that give every workgroup one iteration or
+  // none: 4 workgroups hold the tile's 4 iterations and the owner reads the 3 partials of the
+  // others; 8 workgroups cannot split it further, so there are no more partials to read.
+  auto latency = [&](size_t launch_grid) {
+    auto problem    = make_problem(128, 128, 256);
     problem.a_dtype = origami::data_type_t::Int4;
-    problem.num_cus = 40;
-    auto config     = make_config(mt_m, mt_n, 64, 16, 16, 16, false, 1, 2, 0, 0, 3);
+    auto config     = make_config(128, 128, 64, 16, 16, 16, false, 1, 2, 0, 0, 3);
     config.workspace_size            = std::numeric_limits<size_t>::max() / 2;
     config.workspace_size_per_elem_c = 4;
+    config.launch_grid               = launch_grid;
     return origami::gemm::compute_total_latency(problem, hardware, config);
   };
-  // 896x128 output on 40 CUs: 7 tiles of 128x128 split six ways each against 28
-  // tiles of 64x64 shared over the CUs; the split was measured 2.3x slower on gfx1151.
-  REQUIRE(latency(128, 128) > latency(64, 64));
+  // A partial is 128 x 128 f32 (64 KB) through the CU's L2 path; between 2 and 4 workgroups the
+  // tile gains two partials.
+  const double partial = 128.0 * 128.0 * 4.0 / (hardware.mem1_perf_ratio / static_cast<double>(hardware.N_CU));
+  REQUIRE(partial > 0.0);
+  REQUIRE(latency(4) < std::numeric_limits<double>::max());
+  REQUIRE(latency(8) < std::numeric_limits<double>::max());
+  // No partials without a split.
+  REQUIRE(latency(1) < latency(4) + 3.0 * partial);
 }
 
 TEST_CASE("GEMM: compute_timestep_latency", "[gemm]") {
