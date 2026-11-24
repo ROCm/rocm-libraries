@@ -121,4 +121,4 @@ using namespace rnn_extra;
 
 TEST_P(GPU_RNNExtra_FP32, FloatTest_rnn_extra) { Run2dDriverFloat(); };
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_RNNExtra_FP32, testing::Values(GetTestCases("--float")));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_RNNExtra_FP32, testing::Values(GetTestCases("--float")));

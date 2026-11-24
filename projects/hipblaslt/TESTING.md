@@ -388,6 +388,9 @@ a pull request that touches hipBLASLt gets the `quick` tier; scheduled nightly r
 | `quick` (pull requests) | `*smoke*-*HipBufferTransferMemoryMode.*/Managed` |
 | `standard` (nightly) | `*smoke*:*quick*:*pre_checkin*-*known_bug*:*HipBufferTransferMemoryMode.*/Managed` |
 
+The dedicated HOST_ASAN jobs run with `DEBUG_CLR_DEV_SIGNALS=0` to work around
+[ROCM-34728](https://amd-hub.atlassian.net/browse/ROCM-34728).
+
 Both tiers temporarily exclude the two managed-memory buffer cases for the ASAN allocator
 failure tracked in ROCM-34263 and [rocm-systems #15163](https://github.com/ROCm/rocm-systems/issues/15163).
 The `Device` cases remain enabled, and non-ASAN runs retain both memory modes. The runner comment
