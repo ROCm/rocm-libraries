@@ -14,7 +14,7 @@
 namespace hipdnn_test_sdk::utilities
 {
 
-template <class DeviceExecutor, class OutputType, class... InputTypes>
+template <class DeviceExecutor, class OutputType, class ComputeType, class... InputTypes>
 class ReferencePointwiseBase
 {
 public:
@@ -42,36 +42,36 @@ public:
     }
 
     // Unary operations
-    template <typename InputType, typename ComputeType = double>
+    template <typename InputType>
     static void pointwiseCompute(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
                                  hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
                                  const hipdnn_data_sdk::utilities::TensorBase<InputType>& input)
     {
-        executeUnaryOperation<InputType, ComputeType>(operation, output, input);
+        executeUnaryOperation<InputType>(operation, output, input);
     }
 
-    template <typename InputType, typename ParamType, typename ComputeType = double>
+    template <typename InputType, typename ParamType>
     static void pointwiseCompute(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
                                  hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
                                  const hipdnn_data_sdk::utilities::TensorBase<InputType>& input,
                                  const ParamType lowerClip,
                                  const ParamType upperClip,
                                  const ParamType lowerSlope,
-                                 const ParamType swishBeta = ParamType{1},
-                                 const ParamType eluAlpha = ParamType{1},
-                                 const ParamType softplusBeta = ParamType{1})
+                                 const ParamType swishBeta = static_cast<ParamType>(1),
+                                 const ParamType eluAlpha = static_cast<ParamType>(1),
+                                 const ParamType softplusBeta = static_cast<ParamType>(1))
     {
         static_assert(hipdnn_test_sdk::detail::IS_VALID_TENSOR_TYPE_V<ParamType>,
                       "ParamType must be a valid tensor type for scalar parameters");
-        executeParameterizedUnaryOperation<InputType, ParamType, ComputeType>(operation,
-                                                                              output,
-                                                                              input,
-                                                                              lowerClip,
-                                                                              upperClip,
-                                                                              lowerSlope,
-                                                                              swishBeta,
-                                                                              eluAlpha,
-                                                                              softplusBeta);
+        executeParameterizedUnaryOperation<InputType, ParamType>(operation,
+                                                                 output,
+                                                                 input,
+                                                                 lowerClip,
+                                                                 upperClip,
+                                                                 lowerSlope,
+                                                                 swishBeta,
+                                                                 eluAlpha,
+                                                                 softplusBeta);
     }
 
     static void pointwiseCompute(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
@@ -90,35 +90,28 @@ public:
     }
 
     // Binary operations
-    template <typename Input1Type, typename Input2Type, typename ComputeType = double>
+    template <typename Input1Type, typename Input2Type>
     static void pointwiseCompute(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
                                  hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
                                  const hipdnn_data_sdk::utilities::TensorBase<Input1Type>& input1,
                                  const hipdnn_data_sdk::utilities::TensorBase<Input2Type>& input2)
     {
-        executeBinaryOperation<Input1Type, Input2Type, ComputeType>(
-            operation, output, input1, input2);
+        executeBinaryOperation<Input1Type, Input2Type>(operation, output, input1, input2);
     }
 
-    template <typename Input0Type,
-              typename Input1Type,
-              typename Input2Type,
-              typename ComputeType = double>
+    template <typename Input0Type, typename Input1Type, typename Input2Type>
     static void pointwiseCompute(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
                                  hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
                                  const hipdnn_data_sdk::utilities::TensorBase<Input0Type>& input0,
                                  const hipdnn_data_sdk::utilities::TensorBase<Input1Type>& input1,
                                  const hipdnn_data_sdk::utilities::TensorBase<Input2Type>& input2)
     {
-        executeTernaryOperation<Input0Type, Input1Type, Input2Type, ComputeType>(
+        executeTernaryOperation<Input0Type, Input1Type, Input2Type>(
             operation, output, input0, input1, input2);
     }
 
     // Parameterized binary operations
-    template <typename Input1Type,
-              typename Input2Type,
-              typename ParamType,
-              typename ComputeType = double>
+    template <typename Input1Type, typename Input2Type, typename ParamType>
     static void pointwiseCompute(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
                                  hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
                                  const hipdnn_data_sdk::utilities::TensorBase<Input1Type>& input1,
@@ -126,27 +119,26 @@ public:
                                  const ParamType lowerClip,
                                  const ParamType upperClip,
                                  const ParamType lowerSlope,
-                                 const ParamType swishBeta = ParamType{1},
-                                 const ParamType eluAlpha = ParamType{1},
-                                 const ParamType softplusBeta = ParamType{1})
+                                 const ParamType swishBeta = static_cast<ParamType>(1),
+                                 const ParamType eluAlpha = static_cast<ParamType>(1),
+                                 const ParamType softplusBeta = static_cast<ParamType>(1))
     {
         static_assert(hipdnn_test_sdk::detail::IS_VALID_TENSOR_TYPE_V<ParamType>,
                       "ParamType must be a valid tensor type for scalar parameters");
-        executeParameterizedBinaryOperation<Input1Type, Input2Type, ParamType, ComputeType>(
-            operation,
-            output,
-            input1,
-            input2,
-            lowerClip,
-            upperClip,
-            lowerSlope,
-            swishBeta,
-            eluAlpha,
-            softplusBeta);
+        executeParameterizedBinaryOperation<Input1Type, Input2Type, ParamType>(operation,
+                                                                               output,
+                                                                               input1,
+                                                                               input2,
+                                                                               lowerClip,
+                                                                               upperClip,
+                                                                               lowerSlope,
+                                                                               swishBeta,
+                                                                               eluAlpha,
+                                                                               softplusBeta);
     }
 
 private:
-    template <typename InputType, typename ComputeType>
+    template <typename InputType>
     static void
         executeUnaryOperation(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
                               hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
@@ -166,10 +158,10 @@ private:
             policy.executeUnary(input, output, pointwise::TanhForward<ComputeType>{});
             break;
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ABS:
-            policy.executeUnary(input, output, pointwise::AbsoluteValue{});
+            policy.executeUnary(input, output, pointwise::AbsoluteValue<ComputeType>{});
             break;
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::NEG:
-            policy.executeUnary(input, output, pointwise::Negation{});
+            policy.executeUnary(input, output, pointwise::Negation<ComputeType>{});
             break;
         case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY:
             policy.executeUnary(input, output, pointwise::Identity<ComputeType>{});
@@ -230,7 +222,7 @@ private:
         policy.markOutputModified(output);
     }
 
-    template <typename InputType, typename ParamType, typename ComputeType>
+    template <typename InputType, typename ParamType>
     static void executeParameterizedUnaryOperation(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
         hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
@@ -273,14 +265,14 @@ private:
                 pointwise::SoftplusForward<ComputeType>{static_cast<ComputeType>(softplusBeta)});
             break;
         default:
-            executeUnaryOperation<InputType, ComputeType>(operation, output, input);
+            executeUnaryOperation<InputType>(operation, output, input);
             return;
         }
 
         policy.markOutputModified(output);
     }
 
-    template <typename Input1Type, typename Input2Type, typename ComputeType>
+    template <typename Input1Type, typename Input2Type>
     static void
         executeBinaryOperation(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
                                hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
@@ -385,7 +377,7 @@ private:
         policy.markOutputModified(output);
     }
 
-    template <typename Input0Type, typename Input1Type, typename Input2Type, typename ComputeType>
+    template <typename Input0Type, typename Input1Type, typename Input2Type>
     static void
         executeTernaryOperation(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
                                 hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
@@ -409,7 +401,7 @@ private:
         policy.markOutputModified(output);
     }
 
-    template <typename Input1Type, typename Input2Type, typename ParamType, typename ComputeType>
+    template <typename Input1Type, typename Input2Type, typename ParamType>
     static void executeParameterizedBinaryOperation(
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
         hipdnn_data_sdk::utilities::TensorBase<OutputType>& output,
@@ -457,8 +449,7 @@ private:
                 pointwise::SoftplusBackward<ComputeType>{static_cast<ComputeType>(softplusBeta)});
             break;
         default:
-            executeBinaryOperation<Input1Type, Input2Type, ComputeType>(
-                operation, output, input1, input2);
+            executeBinaryOperation<Input1Type, Input2Type>(operation, output, input1, input2);
             return;
         }
 

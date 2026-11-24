@@ -76,12 +76,16 @@ PREDICATE_FORK_PARAMETER_KEYS = (
     "AssertFree0ElementMultiple",
     "AssertFree1ElementMultiple",
     "AssertSummationElementMultiple",
+    "AssertTensorBytesLessThan",
+    "AssertAnySizeLessThan",
+    "AssertMXScalesPreSwizzled",
 ) + ASSERT_DIM_MAP_PARAMETERS
 
 # Single-valued ForkParameters frozen into custom.config. Predicates select
 # the solution; StaggerU is a solution knob (handwritten kernels declare 0
-# because they do not implement Tensile's in-loop wrap).
-CUSTOM_CONFIG_FORK_PARAMETER_KEYS = PREDICATE_FORK_PARAMETER_KEYS + ("StaggerU",)
+# because they do not implement Tensile's in-loop wrap); MXScaleFormat tells the
+# client which scale layout the kernel reads (HostPreSwizzle on gfx950).
+CUSTOM_CONFIG_FORK_PARAMETER_KEYS = PREDICATE_FORK_PARAMETER_KEYS + ("StaggerU", "MXScaleFormat")
 
 
 def _parse_tensile_yaml(path, kernel_name=None):

@@ -38,13 +38,13 @@ namespace rocsparse
     // Kernel to copy array of integers with mix precisions
     //
     template <uint32_t BLOCKSIZE, typename TARGET, typename SOURCE>
-    __launch_bounds__(BLOCKSIZE) __global__
-        static void copy_indexbase_iarray_mix_safe(const size_t               nitems_,
-                                                   TARGET*                    target_,
-                                                   const rocsparse_index_base target_indexbase_,
-                                                   const SOURCE*              source_,
-                                                   const rocsparse_index_base source_indexbase_,
-                                                   size_t*                    count_out_of_limits_)
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void copy_indexbase_iarray_mix_safe(const size_t               nitems_,
+                                        TARGET*                    target_,
+                                        const rocsparse_index_base target_indexbase_,
+                                        const SOURCE*              source_,
+                                        const rocsparse_index_base source_indexbase_,
+                                        size_t*                    count_out_of_limits_)
     {
         // AISPARSE-686. `BLOCKSIZE * hipBlockIdx_x` is unsigned-int arithmetic -- both
         // operands are unsigned int -- so it wrapped at 2^32 before it was ever
@@ -94,13 +94,13 @@ namespace rocsparse
     // Kernel to copy array of integers with mix precisions
     //
     template <uint32_t BLOCKSIZE, typename TARGET, typename SOURCE>
-    __launch_bounds__(BLOCKSIZE) __global__
-        static void copy_iarray_mix_safe(const size_t  nitems_,
-                                         TARGET*       target_,
-                                         const size_t  target_inc_,
-                                         const SOURCE* source_,
-                                         const size_t  source_inc_,
-                                         size_t*       count_out_of_limits_)
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void copy_iarray_mix_safe(const size_t  nitems_,
+                              TARGET*       target_,
+                              const size_t  target_inc_,
+                              const SOURCE* source_,
+                              const size_t  source_inc_,
+                              size_t*       count_out_of_limits_)
     {
         // AISPARSE-686. Same unsigned-int wrap, same missing stride loop and the same
         // block-uniform bound as copy_indexbase_iarray_mix_safe above.
@@ -385,11 +385,11 @@ namespace rocsparse
                            && std::is_same<SOURCE, rocsparse_float_complex>{}))>>
     {
         template <uint32_t BLOCKSIZE>
-        __launch_bounds__(BLOCKSIZE) __global__
-            static void run(const size_t             nitems_,
-                            TARGET*                  target_,
-                            const SOURCE*            source_,
-                            floating_data_t<SOURCE>* conversion_error_)
+        ROCSPARSE_KERNEL(BLOCKSIZE)
+        void run(const size_t             nitems_,
+                 TARGET*                  target_,
+                 const SOURCE*            source_,
+                 floating_data_t<SOURCE>* conversion_error_)
         {
             // AISPARSE-686. `BLOCKSIZE * hipBlockIdx_x` is unsigned-int arithmetic, so
             // it wrapped at 2^32 before it was ever assigned to a size_t, and there
@@ -437,11 +437,11 @@ namespace rocsparse
         std::enable_if_t<rocsparse::uses_shared_real_widening_kernel_v<TARGET, SOURCE>>>
     {
         template <uint32_t BLOCKSIZE>
-        __launch_bounds__(BLOCKSIZE) __global__
-            static void run(const size_t             nitems_,
-                            TARGET*                  target_,
-                            const SOURCE*            source_,
-                            floating_data_t<SOURCE>* conversion_error_)
+        ROCSPARSE_KERNEL(BLOCKSIZE)
+        void run(const size_t             nitems_,
+                 TARGET*                  target_,
+                 const SOURCE*            source_,
+                 floating_data_t<SOURCE>* conversion_error_)
         {
             const size_t stride = static_cast<size_t>(BLOCKSIZE) * hipGridDim_x;
             for(size_t base = static_cast<size_t>(BLOCKSIZE) * hipBlockIdx_x; base < nitems_;
@@ -475,11 +475,11 @@ namespace rocsparse
         using TARGET = rocsparse_float_complex;
 
         template <uint32_t BLOCKSIZE>
-        __launch_bounds__(BLOCKSIZE) __global__
-            static void run(const size_t             nitems_,
-                            TARGET*                  target_,
-                            const SOURCE*            source_,
-                            floating_data_t<SOURCE>* conversion_error_)
+        ROCSPARSE_KERNEL(BLOCKSIZE)
+        void run(const size_t             nitems_,
+                 TARGET*                  target_,
+                 const SOURCE*            source_,
+                 floating_data_t<SOURCE>* conversion_error_)
         {
             // AISPARSE-686. Same unsigned-int wrap and same missing stride loop as the
             // rest of this file. Block-uniform bound (hipBlockIdx_x, hipGridDim_x,
@@ -528,11 +528,11 @@ namespace rocsparse
         using TARGET = rocsparse_float_complex;
 
         template <uint32_t BLOCKSIZE>
-        __launch_bounds__(BLOCKSIZE) __global__
-            static void run(const size_t             nitems_,
-                            TARGET*                  target_,
-                            const SOURCE*            source_,
-                            floating_data_t<SOURCE>* conversion_error_)
+        ROCSPARSE_KERNEL(BLOCKSIZE)
+        void run(const size_t             nitems_,
+                 TARGET*                  target_,
+                 const SOURCE*            source_,
+                 floating_data_t<SOURCE>* conversion_error_)
         {
             // AISPARSE-686. Same unsigned-int wrap and same missing stride loop as the
             // rest of this file. Block-uniform bound (hipBlockIdx_x, hipGridDim_x,
@@ -585,11 +585,11 @@ namespace rocsparse
         using TARGET = rocsparse_double_complex;
 
         template <uint32_t BLOCKSIZE>
-        __launch_bounds__(BLOCKSIZE) __global__
-            static void run(size_t                   nitems_,
-                            TARGET*                  target_,
-                            const SOURCE*            source_,
-                            floating_data_t<SOURCE>* conversion_error_)
+        ROCSPARSE_KERNEL(BLOCKSIZE)
+        void run(size_t                   nitems_,
+                 TARGET*                  target_,
+                 const SOURCE*            source_,
+                 floating_data_t<SOURCE>* conversion_error_)
         {
             // AISPARSE-686. `BLOCKSIZE * hipBlockIdx_x` is unsigned-int arithmetic, so
             // it wrapped at 2^32 before it was ever assigned to a size_t, and there
@@ -617,11 +617,11 @@ namespace rocsparse
         using TARGET = float;
         using SOURCE = double;
         template <uint32_t BLOCKSIZE>
-        __launch_bounds__(BLOCKSIZE) __global__
-            static void run(size_t                   nitems_,
-                            TARGET*                  target_,
-                            const SOURCE*            source_,
-                            floating_data_t<SOURCE>* conversion_error_)
+        ROCSPARSE_KERNEL(BLOCKSIZE)
+        void run(size_t                   nitems_,
+                 TARGET*                  target_,
+                 const SOURCE*            source_,
+                 floating_data_t<SOURCE>* conversion_error_)
         {
             // AISPARSE-686. Same unsigned-int wrap and same missing stride loop as the
             // rest of this file. Block-uniform bound (hipBlockIdx_x, hipGridDim_x,
