@@ -1,13 +1,37 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#pragma once
+
 #include <cstdint>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
+#include <vector>
 
+#include "compilation/KernelCompileOptions.hpp"
 #include "core/Utils.hpp"
 
 namespace hip_kernel_provider::rmsnorm
 {
+
+/// One launch of an RMSnorm kernel: the entry point of the compiled source and its 1D
+/// geometry.
+struct RMSnormLaunch
+{
+    const char* entryPoint;
+    unsigned int blockSize;
+    unsigned int gridSize;
+};
+
+/// What an RMSnorm plan compiles and launches: the compile options that bake the graph into
+/// the source, and its launches in order, all entry points of one program. Built by
+/// buildRMSnormFwdKernel()/buildRMSnormBwdKernel(), which the HIP MLOps engine's plans and
+/// the kernel ingestor's HipMlops packs both call, so the two engines compile and launch the
+/// same program for the same graph.
+struct RMSnormKernelBuild
+{
+    compilation::KernelCompileOptions options;
+    std::vector<RMSnormLaunch> launches;
+};
 
 enum class Direction
 {

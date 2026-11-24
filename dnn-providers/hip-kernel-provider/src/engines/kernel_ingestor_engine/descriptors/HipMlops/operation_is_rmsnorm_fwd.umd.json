@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "0b96268d-8474-4aad-8af0-bf29a7407392",
+  "name": "graph operation is rmsnorm_fwd",
+  "scope": "graph",
+  "match_symbol": "hipkernel.hip_mlops.rmsnorm_fwd_match"
+}

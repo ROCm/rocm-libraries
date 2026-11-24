@@ -123,11 +123,11 @@ size_t RMSnormBwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) c
     return 0;
 }
 
-void RMSnormBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelCompiler,
-                             [[maybe_unused]] const hipDeviceProp_t& deviceProperties)
+RMSnormKernelBuild buildRMSnormBwdKernel(const RMSnormBwdParams& params,
+                                         const std::string& gcnArchName)
 {
     // Extract dimensions from x tensor
-    const auto* xDims = _params.x()->dims();
+    const auto* xDims = params.x()->dims();
     if(const auto xRank = xDims->size(); xRank < 4 || xRank > 5)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -136,32 +136,30 @@ void RMSnormBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelCompi
     }
 
     // Get problem dimensions
-    const ProblemDescription problem(_params.x(), _params.scale(), Direction::BACKWARD);
+    const ProblemDescription problem(params.x(), params.scale(), Direction::BACKWARD);
     const int64_t stride = problem.stride();
     const int64_t outerSize = problem.outerSize();
     const int64_t innerSize = problem.innerSize();
-    const auto shapes = launchShapes(outerSize, stride, innerSize);
+    const auto shapes = RMSnormBwdPlan::launchShapes(outerSize, stride, innerSize);
     for(const auto& shape : shapes)
     {
         checkLaunchFitsThreadLimit(shape);
     }
 
-    // Get activation parameters and activation mode
+    // Get activation mode
     auto activationMode = ActivationMode::PASTHRU;
-    if(const auto& activation = _params.optActivation(); activation.has_value())
+    if(const auto& activation = params.optActivation(); activation.has_value())
     {
-        _activationAlpha = static_cast<float>(activation->alpha);
-        _activationBeta = static_cast<float>(activation->beta);
         activationMode = activation->mode;
     }
 
     // Determine input/output data type configuration
-    const auto xDataType = _params.x()->data_type();
-    const auto dYDataType = _params.dy()->data_type();
-    const auto dXDataType = _params.dx()->data_type();
-    const auto scaleDataType = _params.scale()->data_type();
-    const auto computeDataType = _params.invRMS()->data_type();
-    const auto yDataType = _params.y() == nullptr ? dYDataType : _params.y()->data_type();
+    const auto xDataType = params.x()->data_type();
+    const auto dYDataType = params.dy()->data_type();
+    const auto dXDataType = params.dx()->data_type();
+    const auto scaleDataType = params.scale()->data_type();
+    const auto computeDataType = params.invRMS()->data_type();
+    const auto yDataType = params.y() == nullptr ? dYDataType : params.y()->data_type();
     const std::string xTypeString = getKernelParamTypeString(xDataType);
     const std::string dYTypeString = getKernelParamTypeString(dYDataType);
     const std::string dXTypeString = getKernelParamTypeString(dXDataType);
@@ -170,16 +168,12 @@ void RMSnormBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelCompi
     const std::string yTypeString = getKernelParamTypeString(yDataType);
 
     // Calculate block and grid dimensions
-    const auto xlocalsize = static_cast<unsigned int>(LOCAL_SIZE);
+    const auto xlocalsize = static_cast<unsigned int>(shapes[0].threadsPerBlock);
     const auto xgridsizeBwdData = static_cast<unsigned int>(shapes[0].blocks);
     const auto xgridsizeBwdScaleBias = static_cast<unsigned int>(shapes[1].blocks);
-    const unsigned int ylocalsize = 1;
-    const unsigned int ygridsize = 1;
-    const unsigned int zlocalsize = 1;
-    const unsigned int zgridsize = 1;
 
     // Prepare compilation options
-    KernelCompileOptions options(_params.x(), deviceProperties);
+    KernelCompileOptions options(params.x(), gcnArchName);
     options.add("HIP_PLUGIN_RMSNORM_LOCAL_SIZE", xlocalsize);
     options.add("HIP_PLUGIN_RMSNORM_INNER_SIZE", innerSize);
     options.add("HIP_PLUGIN_RMSNORM_OUTER_SIZE", outerSize);
@@ -192,16 +186,30 @@ void RMSnormBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelCompi
     options.add("HIP_PLUGIN_RMSNORM_Y_TYPE", yTypeString);
     options.add("HIP_PLUGIN_RMSNORM_NRN_OP_ID", static_cast<int>(activationMode));
 
-    // Compile kernels and configure launch dimensions
-    _compiledProgram = kernelCompiler.compile("RMSNormBwd.cpp", options);
-    _runnableKernels.push_back(_compiledProgram->getKernel("RMSnormBwdData"));
-    _runnableKernels.push_back(_compiledProgram->getKernel("RMSnormBwdScaleBias"));
-    for(auto& kernel : _runnableKernels)
+    std::vector<RMSnormLaunch> launches{{"RMSnormBwdData", xlocalsize, xgridsizeBwdData},
+                                        {"RMSnormBwdScaleBias", xlocalsize, xgridsizeBwdScaleBias}};
+    return {std::move(options), std::move(launches)};
+}
+
+void RMSnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
+                             const hipDeviceProp_t& deviceProperties)
+{
+    const auto build = buildRMSnormBwdKernel(_params, std::string(deviceProperties.gcnArchName));
+
+    if(const auto& activation = _params.optActivation(); activation.has_value())
     {
-        kernel->setBlockSize(xlocalsize, ylocalsize, zlocalsize);
+        _activationAlpha = static_cast<float>(activation->alpha);
+        _activationBeta = static_cast<float>(activation->beta);
     }
-    _runnableKernels[0]->setGridSize(xgridsizeBwdData, ygridsize, zgridsize);
-    _runnableKernels[1]->setGridSize(xgridsizeBwdScaleBias, ygridsize, zgridsize);
+
+    // Compile kernels and configure launch dimensions
+    _compiledProgram = kernelCompiler.compile("RMSNormBwd.cpp", build.options);
+    for(const auto& launch : build.launches)
+    {
+        _runnableKernels.push_back(_compiledProgram->getKernel(launch.entryPoint));
+        _runnableKernels.back()->setBlockSize(launch.blockSize, 1, 1);
+        _runnableKernels.back()->setGridSize(launch.gridSize, 1, 1);
+    }
 }
 
 void RMSnormBwdPlan::execute([[maybe_unused]] const Handle& handle,

@@ -27,65 +27,6 @@ namespace hip_kernel_provider::rmsnorm
 namespace
 {
 
-void backwardActivationCheckTensors(
-    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& activationAttr,
-    const hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributes& bwdAttr,
-    const std::unordered_map<int64_t,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
-        tensorMap)
-{
-    const auto activationIn1Uid = activationAttr.in_1_tensor_uid();
-    if(!activationIn1Uid.has_value()
-       && activationAttr.operation()
-              != hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Activation backward requires in_1 tensor (forward activation input)");
-    }
-
-    if(activationAttr.out_0_tensor_uid() != bwdAttr.dy_tensor_uid())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Rmsnorm backward dy input must be the activation output tensor");
-    }
-
-    const auto& activationTensorIn0
-        = findTensorAttributes(tensorMap, activationAttr.in_0_tensor_uid());
-    if(activationTensorIn0.virtual_())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Activation in_0 (dy gradient) must be non-virtual");
-    }
-
-    const auto& actTensorOut = findTensorAttributes(tensorMap, activationAttr.out_0_tensor_uid());
-    if(!actTensorOut.virtual_()
-       || (activationIn1Uid.has_value()
-           && findTensorAttributes(tensorMap, activationIn1Uid.value()).virtual_()))
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Activation input from rmsnorm must not be virtual, output must be virtual");
-    }
-
-    const auto& bwdTensorDy = findTensorAttributes(tensorMap, bwdAttr.dy_tensor_uid());
-    const auto& bwdTensorDx = findTensorAttributes(tensorMap, bwdAttr.dx_tensor_uid());
-    const auto& bwdTensorDscale = findTensorAttributes(tensorMap, bwdAttr.dscale_tensor_uid());
-    const auto* bwdTensorDbias
-        = bwdAttr.dbias_tensor_uid().has_value()
-              ? &findTensorAttributes(tensorMap, bwdAttr.dbias_tensor_uid().value())
-              : nullptr;
-
-    if(!bwdTensorDy.virtual_() || bwdTensorDx.virtual_() || bwdTensorDscale.virtual_()
-       || (bwdTensorDbias != nullptr && bwdTensorDbias->virtual_()))
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Rmsnorm backward dy input must be virtual, output tensors must be non-virtual");
-    }
-}
-
 bool launchShapesFitThreadLimit(
     const hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributes& bwdAttr,
     const std::unordered_map<int64_t,
@@ -210,9 +151,9 @@ bool RMSnormBwdPlanBuilder::isApplicable(
         {
             const auto& node0 = opGraph.getNode(0);
             const auto& node1 = opGraph.getNode(1);
-            backwardActivationCheckTensors(*node0.attributes_as_PointwiseAttributes(),
-                                           *node1.attributes_as_RMSNormBackwardAttributes(),
-                                           opGraph.getTensorMap());
+            checkBwdActivationTensors(*node0.attributes_as_PointwiseAttributes(),
+                                      *node1.attributes_as_RMSNormBackwardAttributes(),
+                                      opGraph.getTensorMap());
             rmsnorm::RMSnormValidator validator(opGraph.getTensorMap());
             validator.checkBwdActivationTensorConfigSupported(
                 *node0.attributes_as_PointwiseAttributes(),
@@ -292,7 +233,7 @@ void buildPlanBackwardActivation(
     const auto& bwdAttr
         = nodeWrapperBwd
               .attributesAs<hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributes>();
-    backwardActivationCheckTensors(activationAttr, bwdAttr, opGraph.getTensorMap());
+    checkBwdActivationTensors(activationAttr, bwdAttr, opGraph.getTensorMap());
 
     RMSnormBwdParams params(bwdAttr, activationAttr, opGraph.getTensorMap());
     auto plan = std::make_unique<RMSnormBwdPlan>(std::move(params));

@@ -1,0 +1,45 @@
+{
+  "version": "1.0",
+  "id": "e97dbe01-18f3-4aec-873a-1c8c0c05c9f5",
+  "name": "hipkernel:hip_mlops_rmsnorm_bwd",
+  "matchers": [
+    "fb1704ea-7f73-40ad-aa83-7bf48e979f4a",
+    "c40efc15-aad7-46c6-a393-850e79444a9f"
+  ],
+  "engine": "0b6c4367-d91b-471e-be5a-ea77669b8897",
+  "dispatch": "f545fe94-5140-4eb5-8846-062ba22ec7b9",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "0b6c4367-d91b-471e-be5a-ea77669b8897",
+          "kmd_id": "b8616f7b-3831-4ef3-93cb-f0d1a01fb102",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "operation"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "6c2969a1-68fa-4c97-bb6c-a4cf47efe3ff",
+      "name": "hip_mlops.rmsnorm_bwd",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/rmsnorm/RMSNormBwd.cpp",
+        "entry_point": "RMSnormBwdData"
+      },
+      "metadata": {
+        "operation": "RMSNORM_BWD"
+      },
+      "priority": 0
+    }
+  ],
+  "arch": []
+}

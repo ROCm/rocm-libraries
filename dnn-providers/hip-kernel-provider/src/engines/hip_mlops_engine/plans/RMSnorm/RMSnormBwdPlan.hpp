@@ -12,9 +12,11 @@
 #include "compilation/IRunnableKernel.hpp"
 #include "core/Handle.hpp"
 #include "core/Utils.hpp"
+#include "engines/hip_mlops_engine/plans/RMSnorm/RMSnormCommon.hpp"
 #include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
 
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace hip_kernel_provider
@@ -69,6 +71,15 @@ private:
     std::optional<core::utils::ActivationParams> _optActivation;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _y = nullptr;
 };
+
+/// The compile options and launches of the RMSNormBwd program for @p params on
+/// @p gcnArchName: RMSnormBwdData, then RMSnormBwdScaleBias. A fused activation's backward is
+/// compiled in; its alpha and beta are launch arguments.
+///
+/// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 4D or 5D, or a grid
+///         that does not fit one launch.
+RMSnormKernelBuild buildRMSnormBwdKernel(const RMSnormBwdParams& params,
+                                         const std::string& gcnArchName);
 
 class RMSnormBwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {

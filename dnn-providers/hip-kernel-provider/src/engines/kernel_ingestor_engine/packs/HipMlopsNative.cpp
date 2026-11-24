@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -17,8 +18,11 @@
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/layernorm_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/layernorm_backward_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/resample_bwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/resample_fwd_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/rmsnorm_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/rmsnorm_backward_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
@@ -36,6 +40,9 @@
 #include "compilation/KpackModuleCache.hpp"
 #include "core/Handle.hpp"
 #include "core/Utils.hpp"
+#include "engines/hip_mlops_engine/plans/RMSnorm/RMSnormApplicabilityChecks.hpp"
+#include "engines/hip_mlops_engine/plans/RMSnorm/RMSnormBwdPlan.hpp"
+#include "engines/hip_mlops_engine/plans/RMSnorm/RMSnormFwdPlan.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormApplicabilityChecks.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormBwdPlan.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormFwdPlan.hpp"
@@ -56,7 +63,9 @@
  * (`builtin_engine`). Each family accepts exactly the graphs the hand-written engine's plan
  * builder accepts, through that builder's own validator, and compiles the same embedded
  * source with the same compile options and launches (buildResampleFwdKernel(),
- * buildLayernormBwdKernel() and friends), so the two engines serve a graph with one program.
+ * buildLayernormBwdKernel(), buildRMSnormFwdKernel() and friends), so the two engines serve a
+ * graph with one program. RMSnorm also serves the hand-written builders' two-node graphs, a
+ * ReLU fused after the forward or before the backward.
  * The hand-written engine's engine-level checks (ragged and misaligned tensors) run first,
  * here as there.
  *
@@ -85,6 +94,8 @@ constexpr std::string_view RESAMPLE_FWD = "RESAMPLE_FWD";
 constexpr std::string_view RESAMPLE_BWD = "RESAMPLE_BWD";
 constexpr std::string_view LAYERNORM_FWD = "LAYERNORM_FWD";
 constexpr std::string_view LAYERNORM_BWD = "LAYERNORM_BWD";
+constexpr std::string_view RMSNORM_FWD = "RMSNORM_FWD";
+constexpr std::string_view RMSNORM_BWD = "RMSNORM_BWD";
 
 // ---------------------------------------------------------------------------
 // Matching
@@ -100,24 +111,64 @@ bool passesEngineChecks(const MatchContext& context)
            && core::utils::hasOnly16ByteAlignedTensors(tensorMap);
 }
 
+/// The RMSnorm operation a two-node graph fuses with a ReLU, or nullopt: the forward then
+/// the activation, or the activation's backward then the backward (the hand-written RMSnorm
+/// builders' two-node case). Throws what the checks throw.
+std::optional<std::string_view> fusedFamilyOf(const MatchContext& context)
+{
+    const auto& first = context.graph.getNodeWrapper(0);
+    const auto& second = context.graph.getNodeWrapper(1);
+    const auto& tensorMap = context.graph.getTensorMap();
+    if(first.attributesType() == data_objects::NodeAttributes::RMSNormAttributes
+       && second.attributesType() == data_objects::NodeAttributes::PointwiseAttributes)
+    {
+        const auto& rmsnorm = first.attributesAs<data_objects::RMSNormAttributes>();
+        const auto& activation = second.attributesAs<data_objects::PointwiseAttributes>();
+        rmsnorm::checkFwdActivationTensors(rmsnorm, activation, tensorMap);
+        rmsnorm::RMSnormValidator(tensorMap).checkFwdActivationTensorConfigSupported(rmsnorm,
+                                                                                     activation);
+        return RMSNORM_FWD;
+    }
+    if(first.attributesType() == data_objects::NodeAttributes::PointwiseAttributes
+       && second.attributesType() == data_objects::NodeAttributes::RMSNormBackwardAttributes)
+    {
+        const auto& activation = first.attributesAs<data_objects::PointwiseAttributes>();
+        const auto& rmsnorm = second.attributesAs<data_objects::RMSNormBackwardAttributes>();
+        rmsnorm::checkBwdActivationTensors(activation, rmsnorm, tensorMap);
+        rmsnorm::RMSnormValidator(tensorMap).checkBwdActivationTensorConfigSupported(activation,
+                                                                                     rmsnorm);
+        return RMSNORM_BWD;
+    }
+    return std::nullopt;
+}
+
 /// The operation of the family that serves @p context's graph, or nullopt. Mirrors the
-/// hand-written plan builders' isApplicable(): one node of the family's attributes, fp32
-/// compute, and the family's validator. Families are disjoint by node type.
+/// hand-written plan builders' isApplicable(): fp32 compute throughout, one node of the
+/// family's attributes (or RMSnorm's fused pair), and the family's validator. Families are
+/// disjoint by node type.
 std::optional<std::string_view> familyOf(const MatchContext& context)
 {
-    if(context.graph.nodeCount() != 1)
+    const auto nodeCount = context.graph.nodeCount();
+    if(nodeCount != 1 && nodeCount != 2)
     {
         return std::nullopt;
     }
-    const auto& node = context.graph.getNodeWrapper(0);
-    if(node.computeDataType() != data_objects::DataType::FLOAT)
+    for(uint32_t i = 0; i < nodeCount; ++i)
     {
-        return std::nullopt;
+        if(context.graph.getNodeWrapper(i).computeDataType() != data_objects::DataType::FLOAT)
+        {
+            return std::nullopt;
+        }
     }
 
+    const auto& node = context.graph.getNodeWrapper(0);
     const auto& tensorMap = context.graph.getTensorMap();
     try
     {
+        if(nodeCount == 2)
+        {
+            return fusedFamilyOf(context);
+        }
         switch(node.attributesType())
         {
         case data_objects::NodeAttributes::ResampleFwdAttributes:
@@ -136,6 +187,14 @@ std::optional<std::string_view> familyOf(const MatchContext& context)
             layernorm::LayernormValidator(tensorMap).checkTensorConfigSupported(
                 node.attributesAs<data_objects::LayernormBackwardAttributes>());
             return LAYERNORM_BWD;
+        case data_objects::NodeAttributes::RMSNormAttributes:
+            rmsnorm::RMSnormValidator(tensorMap).checkFwdTensorConfigSupported(
+                node.attributesAs<data_objects::RMSNormAttributes>());
+            return RMSNORM_FWD;
+        case data_objects::NodeAttributes::RMSNormBackwardAttributes:
+            rmsnorm::RMSnormValidator(tensorMap).checkBwdTensorConfigSupported(
+                node.attributesAs<data_objects::RMSNormBackwardAttributes>());
+            return RMSNORM_BWD;
         default:
             return std::nullopt;
         }
@@ -264,6 +323,30 @@ IngestorKernelCode compileEntryPoint(const compilation::IKernelCompiler& compile
     code.setBlockSize(blockSize, 1, 1);
     code.setGridSize(gridSize, 1, 1);
     return code;
+}
+
+/// Compiles every launch of @p build (a family's KernelBuild), in order, out of one program.
+template <typename KernelBuild>
+std::vector<IngestorKernelCode> compileLaunches(const compilation::IKernelCompiler& compiler,
+                                                const compilation::KpackKernelLoader& loader,
+                                                const MatchContext& context,
+                                                const KernelDefinition& kernel,
+                                                const KernelBuild& build)
+{
+    std::vector<IngestorKernelCode> codes;
+    codes.reserve(build.launches.size());
+    for(const auto& launch : build.launches)
+    {
+        codes.push_back(compileEntryPoint(compiler,
+                                          loader,
+                                          context,
+                                          kernel,
+                                          build.options,
+                                          launch.entryPoint,
+                                          launch.blockSize,
+                                          launch.gridSize));
+    }
+    return codes;
 }
 
 /// Shared by every family's handler: no workspace unless the family says otherwise, and
@@ -425,29 +508,6 @@ public:
 // ---------------------------------------------------------------------------
 // Dispatch: Layernorm
 // ---------------------------------------------------------------------------
-
-/// Compiles every launch of @p build, in order, out of one program.
-std::vector<IngestorKernelCode> compileLaunches(const compilation::IKernelCompiler& compiler,
-                                                const compilation::KpackKernelLoader& loader,
-                                                const MatchContext& context,
-                                                const KernelDefinition& kernel,
-                                                const layernorm::LayernormKernelBuild& build)
-{
-    std::vector<IngestorKernelCode> codes;
-    codes.reserve(build.launches.size());
-    for(const auto& launch : build.launches)
-    {
-        codes.push_back(compileEntryPoint(compiler,
-                                          loader,
-                                          context,
-                                          kernel,
-                                          build.options,
-                                          launch.entryPoint,
-                                          launch.blockSize,
-                                          launch.gridSize));
-    }
-    return codes;
-}
 
 /// LayernormFwd(x, y, scale, bias, mean, invVariance, epsilon); mean and inverse variance
 /// are optional outputs.
@@ -637,6 +697,201 @@ public:
 };
 
 // ---------------------------------------------------------------------------
+// Dispatch: RMSnorm
+// ---------------------------------------------------------------------------
+
+/// The uid of an optional operand the plan params hold, or nullopt.
+std::optional<int64_t> uidOf(const data_objects::TensorAttributes* tensor)
+{
+    return tensor == nullptr ? std::nullopt : std::optional<int64_t>(tensor->uid());
+}
+
+/// The alpha and beta launch arguments of a fused activation, zero without one.
+std::pair<float, float>
+    activationArguments(const std::optional<core::utils::ActivationParams>& activation)
+{
+    return activation.has_value() ? std::make_pair(static_cast<float>(activation->alpha),
+                                                   static_cast<float>(activation->beta))
+                                  : std::make_pair(0.0f, 0.0f);
+}
+
+/// RMSnormFwd(x, scale, bias, y, invRms, epsilon, alpha, beta). Bias and the inverse RMS are
+/// optional; y is the fused activation's output when there is one.
+class PreparedRmsnormFwd : public PreparedHipMlops
+{
+public:
+    PreparedRmsnormFwd(IngestorKernelCode code,
+                       const rmsnorm::RMSnormFwdParams& params,
+                       hipdnn_plugin_sdk::ScalarOperand epsilon)
+        : _code(std::move(code))
+        , _x(params.x()->uid())
+        , _scale(params.scale()->uid())
+        , _bias(uidOf(params.bias()))
+        , _y(params.optActivation().has_value() && params.activationOut() != nullptr
+                 ? params.activationOut()->uid()
+                 : params.y()->uid())
+        , _invRms(uidOf(params.invRMS()))
+        , _epsilon(epsilon)
+        , _activation(activationArguments(params.optActivation()))
+    {
+    }
+
+    const IngestorKernelCode& kernelCode() const override
+    {
+        return _code;
+    }
+
+    void launch(hipStream_t stream,
+                const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                uint32_t numDeviceBuffers,
+                void* /*workspace*/) const override
+    {
+        const Buffers buffer(deviceBuffers, numDeviceBuffers);
+        // Changing this argument list means changing RMSNormFwd.cpp with it.
+        _code.kernelForStream(stream).launch(stream,
+                                             buffer(_x),
+                                             buffer(_scale),
+                                             buffer(_bias),
+                                             buffer(_y),
+                                             buffer(_invRms),
+                                             buffer.scalar(_epsilon),
+                                             _activation.first,
+                                             _activation.second);
+    }
+
+private:
+    IngestorKernelCode _code;
+    int64_t _x;
+    int64_t _scale;
+    std::optional<int64_t> _bias;
+    int64_t _y;
+    std::optional<int64_t> _invRms;
+    hipdnn_plugin_sdk::ScalarOperand _epsilon;
+    std::pair<float, float> _activation;
+};
+
+/// RMSnormBwdData(dy, x, scale, invRms, dx, y, alpha, beta), then
+/// RMSnormBwdScaleBias(dy, x, invRms, dscale, dbias, y, alpha, beta). With a fused
+/// activation, dy is the gradient the activation reads and y its forward input (x for
+/// IDENTITY, which ignores it); dbias is optional.
+class PreparedRmsnormBwd : public PreparedHipMlops
+{
+public:
+    PreparedRmsnormBwd(std::vector<IngestorKernelCode> codes,
+                       const rmsnorm::RMSnormBwdParams& params)
+        : _codes(std::move(codes))
+        , _dy(params.dy()->uid())
+        , _x(params.x()->uid())
+        , _scale(params.scale()->uid())
+        , _invRms(params.invRMS()->uid())
+        , _dx(params.dx()->uid())
+        , _dscale(params.dscale()->uid())
+        , _dbias(uidOf(params.dbias()))
+        , _y(uidOf(params.y()))
+        , _activation(activationArguments(params.optActivation()))
+    {
+    }
+
+    const IngestorKernelCode& kernelCode() const override
+    {
+        return _codes.front();
+    }
+
+    void launch(hipStream_t stream,
+                const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                uint32_t numDeviceBuffers,
+                void* /*workspace*/) const override
+    {
+        const Buffers buffer(deviceBuffers, numDeviceBuffers);
+        void* dy = buffer(_dy);
+        void* x = buffer(_x);
+        void* invRms = buffer(_invRms);
+        void* y = buffer(_y);
+        const auto [alpha, beta] = _activation;
+
+        // Changing these argument lists means changing RMSNormBwd.cpp with them.
+        _codes[0].kernelForStream(stream).launch(
+            stream, dy, x, buffer(_scale), invRms, buffer(_dx), y, alpha, beta);
+        _codes[1].kernelForStream(stream).launch(
+            stream, dy, x, invRms, buffer(_dscale), buffer(_dbias), y, alpha, beta);
+    }
+
+private:
+    std::vector<IngestorKernelCode> _codes;
+    int64_t _dy;
+    int64_t _x;
+    int64_t _scale;
+    int64_t _invRms;
+    int64_t _dx;
+    int64_t _dscale;
+    std::optional<int64_t> _dbias;
+    std::optional<int64_t> _y;
+    std::pair<float, float> _activation;
+};
+
+class RmsnormFwdDispatchHandler : public HipMlopsDispatchHandler
+{
+public:
+    using HipMlopsDispatchHandler::HipMlopsDispatchHandler;
+
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
+                                              const BoundTokens& /*bound*/,
+                                              const KernelDefinition& kernel) const override
+    {
+        const auto& graph = context.graph;
+        const auto& tensorMap = graph.getTensorMap();
+        const auto& attributes
+            = graph.getNodeWrapper(0).attributesAs<data_objects::RMSNormAttributes>();
+        // A fused graph's ReLU follows the RMSnorm.
+        const auto params
+            = graph.nodeCount() == 2
+                  ? rmsnorm::RMSnormFwdParams(
+                        attributes,
+                        graph.getNodeWrapper(1).attributesAs<data_objects::PointwiseAttributes>(),
+                        tensorMap)
+                  : rmsnorm::RMSnormFwdParams(attributes, tensorMap);
+        const auto build
+            = rmsnorm::buildRMSnormFwdKernel(params, context.deviceProperties.gcnArchName);
+        auto codes = compileLaunches(_compiler, _loader, context, kernel, build);
+
+        return std::make_unique<PreparedRmsnormFwd>(
+            std::move(codes.front()),
+            params,
+            hipdnn_plugin_sdk::makeScalarOperand(
+                tensorMap, attributes.epsilon_tensor_uid(), "Epsilon"));
+    }
+};
+
+class RmsnormBwdDispatchHandler : public HipMlopsDispatchHandler
+{
+public:
+    using HipMlopsDispatchHandler::HipMlopsDispatchHandler;
+
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
+                                              const BoundTokens& /*bound*/,
+                                              const KernelDefinition& kernel) const override
+    {
+        const auto& graph = context.graph;
+        const auto& tensorMap = graph.getTensorMap();
+        // A fused graph's ReLU backward precedes the RMSnorm backward.
+        const bool fused = graph.nodeCount() == 2;
+        const auto& attributes = graph.getNodeWrapper(fused ? 1 : 0)
+                                     .attributesAs<data_objects::RMSNormBackwardAttributes>();
+        const auto params
+            = fused ? rmsnorm::RMSnormBwdParams(
+                          attributes,
+                          graph.getNodeWrapper(0).attributesAs<data_objects::PointwiseAttributes>(),
+                          tensorMap)
+                    : rmsnorm::RMSnormBwdParams(attributes, tensorMap);
+        const auto build
+            = rmsnorm::buildRMSnormBwdKernel(params, context.deviceProperties.gcnArchName);
+
+        return std::make_unique<PreparedRmsnormBwd>(
+            compileLaunches(_compiler, _loader, context, kernel, build), params);
+    }
+};
+
+// ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
 
@@ -674,6 +929,8 @@ void registerHipMlopsSymbols(SymbolScope<Handle>& scope)
     scope.add("hipkernel.hip_mlops.resample_bwd_match", &operationMatches<RESAMPLE_BWD>);
     scope.add("hipkernel.hip_mlops.layernorm_fwd_match", &operationMatches<LAYERNORM_FWD>);
     scope.add("hipkernel.hip_mlops.layernorm_bwd_match", &operationMatches<LAYERNORM_BWD>);
+    scope.add("hipkernel.hip_mlops.rmsnorm_fwd_match", &operationMatches<RMSNORM_FWD>);
+    scope.add("hipkernel.hip_mlops.rmsnorm_bwd_match", &operationMatches<RMSNORM_BWD>);
 
     scope.add("hipkernel.hip_mlops.resample_fwd_dispatch",
               &dispatchHandler<ResampleFwdDispatchHandler>());
@@ -683,6 +940,10 @@ void registerHipMlopsSymbols(SymbolScope<Handle>& scope)
               &dispatchHandler<LayernormFwdDispatchHandler>());
     scope.add("hipkernel.hip_mlops.layernorm_bwd_dispatch",
               &dispatchHandler<LayernormBwdDispatchHandler>());
+    scope.add("hipkernel.hip_mlops.rmsnorm_fwd_dispatch",
+              &dispatchHandler<RmsnormFwdDispatchHandler>());
+    scope.add("hipkernel.hip_mlops.rmsnorm_bwd_dispatch",
+              &dispatchHandler<RmsnormBwdDispatchHandler>());
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

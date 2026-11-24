@@ -306,4 +306,110 @@ void RMSnormValidator::checkActivationModeSupported(
     checkNormalizationActivationModeSupported(pointwiseAttr, isBwd, "Rmsnorm");
 }
 
+void checkFwdActivationTensors(
+    const hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes& fwdAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& activationAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    if(activationAttr.in_0_tensor_uid() != fwdAttr.y_tensor_uid())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Rmsnorm forward y output must be the activation input tensor");
+    }
+
+    const auto& activationTensorIn0
+        = findTensorAttributes(tensorMap, activationAttr.in_0_tensor_uid());
+    if(!activationTensorIn0.virtual_())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Activation in_0 (y) must be virtual");
+    }
+
+    const auto& activationTensorOut0
+        = findTensorAttributes(tensorMap, activationAttr.out_0_tensor_uid());
+    if(activationTensorOut0.virtual_())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Activation output must be non-virtual");
+    }
+
+    const auto& fwdTensorX = findTensorAttributes(tensorMap, fwdAttr.x_tensor_uid());
+    const auto& fwdTensorY = findTensorAttributes(tensorMap, fwdAttr.y_tensor_uid());
+    const auto* fwdTensorInvRms
+        = fwdAttr.inv_rms_tensor_uid().has_value()
+              ? &findTensorAttributes(tensorMap, fwdAttr.inv_rms_tensor_uid().value())
+              : nullptr;
+
+    if(fwdTensorX.virtual_() || !fwdTensorY.virtual_()
+       || (fwdTensorInvRms != nullptr && fwdTensorInvRms->virtual_()))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Rmsnorm forward x input must not be virtual, y output tensor must be virtual, inverse "
+            "RMS output tensor must not be virtual");
+    }
+}
+
+void checkBwdActivationTensors(
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& activationAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributes& bwdAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    const auto activationIn1Uid = activationAttr.in_1_tensor_uid();
+    if(!activationIn1Uid.has_value()
+       && activationAttr.operation()
+              != hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Activation backward requires in_1 tensor (forward activation input)");
+    }
+
+    if(activationAttr.out_0_tensor_uid() != bwdAttr.dy_tensor_uid())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Rmsnorm backward dy input must be the activation output tensor");
+    }
+
+    const auto& activationTensorIn0
+        = findTensorAttributes(tensorMap, activationAttr.in_0_tensor_uid());
+    if(activationTensorIn0.virtual_())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Activation in_0 (dy gradient) must be non-virtual");
+    }
+
+    const auto& actTensorOut = findTensorAttributes(tensorMap, activationAttr.out_0_tensor_uid());
+    if(!actTensorOut.virtual_()
+       || (activationIn1Uid.has_value()
+           && findTensorAttributes(tensorMap, activationIn1Uid.value()).virtual_()))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Activation input from rmsnorm must not be virtual, output must be virtual");
+    }
+
+    const auto& bwdTensorDy = findTensorAttributes(tensorMap, bwdAttr.dy_tensor_uid());
+    const auto& bwdTensorDx = findTensorAttributes(tensorMap, bwdAttr.dx_tensor_uid());
+    const auto& bwdTensorDscale = findTensorAttributes(tensorMap, bwdAttr.dscale_tensor_uid());
+    const auto* bwdTensorDbias
+        = bwdAttr.dbias_tensor_uid().has_value()
+              ? &findTensorAttributes(tensorMap, bwdAttr.dbias_tensor_uid().value())
+              : nullptr;
+
+    if(!bwdTensorDy.virtual_() || bwdTensorDx.virtual_() || bwdTensorDscale.virtual_()
+       || (bwdTensorDbias != nullptr && bwdTensorDbias->virtual_()))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Rmsnorm backward dy input must be virtual, output tensors must be non-virtual");
+    }
+}
+
 } // namespace hip_kernel_provider::rmsnorm

@@ -68,13 +68,21 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                   "${_hip_mlops_dir}/layernorm/LayernormFwd.cpp"
                   "${_hip_mlops_dir}/layernorm/LayernormBwd.cpp"
                   "${_hip_mlops_dir}/layernorm/LayernormCommon.hpp"
+                  "${_hip_mlops_dir}/rmsnorm/RMSNormFwd.cpp"
+                  "${_hip_mlops_dir}/rmsnorm/RMSNormBwd.cpp"
                   "${CMAKE_CURRENT_SOURCE_DIR}/../engines/hip_mlops_engine/kernels/types/VectorTypes.hpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/../engines/hip_mlops_engine/kernels/common/HipKernelActivation.hpp"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/../engines/hip_mlops_engine/kernels/common/HipKernelMath.hpp"
             KEYS kernels/resample/ResampleFwd.cpp
                  kernels/resample/ResampleBwd.cpp
                  kernels/layernorm/LayernormFwd.cpp
                  kernels/layernorm/LayernormBwd.cpp
                  LayernormCommon.hpp
+                 kernels/rmsnorm/RMSNormFwd.cpp
+                 kernels/rmsnorm/RMSNormBwd.cpp
                  VectorTypes.hpp
+                 HipKernelActivation.hpp
+                 HipKernelMath.hpp
         )
     endif()
 endif()

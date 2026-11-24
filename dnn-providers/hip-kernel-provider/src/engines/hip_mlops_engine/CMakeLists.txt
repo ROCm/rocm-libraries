@@ -13,6 +13,9 @@ target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/layernorm/LayernormFwdPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/layernorm/LayernormBwdPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/layernorm/LayernormUtilities.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/plans/RMSnorm/RMSnormApplicabilityChecks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/plans/RMSnorm/RMSnormFwdPlan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/plans/RMSnorm/RMSnormBwdPlan.cpp
 )
 
 if(NOT ENABLE_HIP_MLOPS_ENGINE)
@@ -32,9 +35,6 @@ target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/batchnorm/BatchnormApplicabilityChecks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/batchnorm/BatchnormFwdTrainingPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/RMSnorm/RMSnormPlanBuilder.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/plans/RMSnorm/RMSnormFwdPlan.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/plans/RMSnorm/RMSnormApplicabilityChecks.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/plans/RMSnorm/RMSnormBwdPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/RMSnorm/RMSnormBwdPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/layernorm/LayernormPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/resample/ResamplePlanBuilder.cpp

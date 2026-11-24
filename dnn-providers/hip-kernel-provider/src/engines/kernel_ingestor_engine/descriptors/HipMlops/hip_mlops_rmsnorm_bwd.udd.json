@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "f545fe94-5140-4eb5-8846-062ba22ec7b9",
+  "name": "HipMlops rmsnorm_bwd dispatch",
+  "dispatch_symbol": "hipkernel.hip_mlops.rmsnorm_bwd_dispatch"
+}

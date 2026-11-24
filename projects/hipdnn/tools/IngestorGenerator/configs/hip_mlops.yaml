@@ -79,6 +79,34 @@ packs:
           operation: LAYERNORM_BWD
         priority: 0
 
+  # Each also serves the hand-written builders' two-node graphs, a ReLU fused after the
+  # forward or before the backward; the graph match tells them apart from the plain ones.
+  - name: rmsnorm_fwd
+    discriminator: rmsnorm_fwd
+    dispatch: rmsnorm_fwd
+    kernels:
+      - name: hip_mlops.rmsnorm_fwd
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/rmsnorm/RMSNormFwd.cpp
+          entry_point: RMSnormFwd
+        metadata:
+          operation: RMSNORM_FWD
+        priority: 0
+  # One program, two launches: RMSnormBwdData, then RMSnormBwdScaleBias by symbol.
+  - name: rmsnorm_bwd
+    discriminator: rmsnorm_bwd
+    dispatch: rmsnorm_bwd
+    kernels:
+      - name: hip_mlops.rmsnorm_bwd
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/rmsnorm/RMSNormBwd.cpp
+          entry_point: RMSnormBwdData
+        metadata:
+          operation: RMSNORM_BWD
+        priority: 0
+
 # Embedded source compiled at plan build: every field is matcher-only.
 specialization:
   metadata_fields: []

@@ -55,4 +55,28 @@ public:
         const hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributes& rmsNormBwdAttr);
 };
 
+/// The tensor wiring of a fused forward graph, RMSnorm then a pointwise activation: the
+/// activation reads the RMSnorm's y, which is virtual, and writes a non-virtual output; x and
+/// the inverse RMS are not virtual.
+///
+/// @throws HipdnnPluginException with BAD_PARAM when the graph is not wired so.
+void checkFwdActivationTensors(
+    const hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes& fwdAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& activationAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
+/// The tensor wiring of a fused backward graph, a pointwise activation backward then the
+/// RMSnorm backward: the activation writes the RMSnorm's dy, which is virtual, from a
+/// non-virtual gradient (and forward input, unless IDENTITY); the outputs are not virtual.
+///
+/// @throws HipdnnPluginException with BAD_PARAM when the graph is not wired so.
+void checkBwdActivationTensors(
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& activationAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributes& bwdAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
 } // namespace hip_kernel_provider::rmsnorm
