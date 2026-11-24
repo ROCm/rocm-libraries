@@ -11,6 +11,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/NodeWrapper.hpp>
 
 namespace hip_kernel_provider::batchnorm
 {
@@ -134,6 +135,54 @@ void checkInferenceActivationTensors(
 void checkInferenceVarianceExtActivationTensors(
     const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr,
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
+/// The first node of a batchnorm training graph: its BatchnormAttributes.
+///
+/// @throws HipdnnPluginException with BAD_PARAM when the node is not batchnorm training.
+const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes&
+    checkTrainingNode(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper& node);
+
+/// The activation after batchnorm training: identity, ReLU, clipped ReLU or clamp (not leaky
+/// ReLU), reading the batchnorm's y.
+///
+/// @throws HipdnnPluginException with BAD_PARAM otherwise.
+const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& checkTrainingActivationNode(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper& node,
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr);
+
+/// The tensor wiring of a one-node training graph as the training plan builder checks it: x,
+/// scale, bias and y are not virtual, nor the saved statistics unless both are (then they are
+/// not requested), nor any running statistics.
+///
+/// @throws HipdnnPluginException with BAD_PARAM when the graph is not wired so.
+void checkTrainingTensorVirtuality1Node(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
+/// The tensor wiring of a training graph fused with an activation: as the one-node graph, but
+/// y is virtual and the activation's output is not.
+///
+/// @throws HipdnnPluginException with BAD_PARAM when the graph is not wired so.
+void checkTrainingTensorVirtuality2Node(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
+/// The tensor wiring of the three-node backward fusion, batchnorm inference then an
+/// activation's backward then the batchnorm backward.
+///
+/// @throws HipdnnPluginException with BAD_PARAM when the graph is not wired so.
+void checkBackwardActivationTensors(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap);

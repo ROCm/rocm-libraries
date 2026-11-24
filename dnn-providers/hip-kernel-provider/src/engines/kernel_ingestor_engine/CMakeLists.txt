@@ -261,10 +261,15 @@ if(HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR)
               "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/rmsnorm/RMSNormFwd.cpp"
               "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/rmsnorm/RMSNormBwd.cpp"
               "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/batchnorm/BatchNormFwdInferSpatial.cpp"
-              "${CMAKE_CURRENT_SOURCE_DIR}/../hip_mlops_engine/kernels/batchnorm/Configuration.hpp"
-              "${CMAKE_CURRENT_SOURCE_DIR}/../hip_mlops_engine/kernels/types/VectorTypes.hpp"
-              "${CMAKE_CURRENT_SOURCE_DIR}/../hip_mlops_engine/kernels/common/HipKernelActivation.hpp"
-              "${CMAKE_CURRENT_SOURCE_DIR}/../hip_mlops_engine/kernels/common/HipKernelMath.hpp"
+              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/batchnorm/BatchNormFwdTrainSpatial.cpp"
+              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/batchnorm/BatchNormBwdSpatial.cpp"
+              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/batchnorm/Configuration.hpp"
+              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/batchnorm/BatchnormFunctions.hpp"
+              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/batchnorm/ReductionFunctions.hpp"
+              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/batchnorm/StaticUnroll.hpp"
+              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/types/VectorTypes.hpp"
+              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/common/HipKernelActivation.hpp"
+              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/common/HipKernelMath.hpp"
         KEYS kernels/resample/ResampleFwd.cpp
              kernels/resample/ResampleBwd.cpp
              kernels/layernorm/LayernormFwd.cpp
@@ -273,7 +278,12 @@ if(HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR)
              kernels/rmsnorm/RMSNormFwd.cpp
              kernels/rmsnorm/RMSNormBwd.cpp
              kernels/batchnorm/BatchNormFwdInferSpatial.cpp
+             kernels/batchnorm/BatchNormFwdTrainSpatial.cpp
+             kernels/batchnorm/BatchNormBwdSpatial.cpp
              Configuration.hpp
+             BatchnormFunctions.hpp
+             ReductionFunctions.hpp
+             StaticUnroll.hpp
              VectorTypes.hpp
              HipKernelActivation.hpp
              HipKernelMath.hpp

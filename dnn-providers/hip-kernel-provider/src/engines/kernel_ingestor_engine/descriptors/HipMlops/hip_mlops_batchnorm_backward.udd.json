@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "61a28042-064e-44b8-9281-742e74f792ef",
+  "name": "HipMlops batchnorm_backward dispatch",
+  "dispatch_symbol": "hipkernel.hip_mlops.batchnorm_backward_dispatch"
+}

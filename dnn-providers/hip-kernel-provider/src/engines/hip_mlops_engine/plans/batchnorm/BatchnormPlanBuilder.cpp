@@ -58,112 +58,6 @@ auto getBatchnormBackwardFusionNodeAttrsLogErrors(
     }
 }
 
-void batchnormBwdFusionCheckTensors(
-    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
-    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
-    const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr,
-    const std::unordered_map<int64_t,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
-        tensorMap)
-{
-    const auto actIn1Uid = actAttr.in_1_tensor_uid();
-    if(!actIn1Uid.has_value())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Activation backward requires in_1 tensor (forward activation input)");
-    }
-
-    if(actIn1Uid.value() != bnInfAttr.y_tensor_uid())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Activation in_1 must be the batchnorm inference output tensor (y)");
-    }
-
-    if(actAttr.out_0_tensor_uid() != bnBwdAttr.dy_tensor_uid())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Batchnorm backward dy input must be the activation output tensor");
-    }
-
-    if(bnBwdAttr.x_tensor_uid() != bnInfAttr.x_tensor_uid())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Batchnorm backward must use the same X tensor as batchnorm inference");
-    }
-
-    if(bnBwdAttr.mean_tensor_uid().has_value()
-       && bnBwdAttr.mean_tensor_uid().value() != bnInfAttr.mean_tensor_uid())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Batchnorm backward must use the same mean tensor as batchnorm inference");
-    }
-
-    if(bnBwdAttr.inv_variance_tensor_uid().has_value()
-       && bnBwdAttr.inv_variance_tensor_uid().value() != bnInfAttr.inv_variance_tensor_uid())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Batchnorm backward must use the same inv_variance tensor as batchnorm inference");
-    }
-
-    if(bnBwdAttr.scale_tensor_uid() != bnInfAttr.scale_tensor_uid())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Batchnorm backward must use the same scale tensor as batchnorm inference");
-    }
-
-    const auto& bnInfTensorX = findTensorAttributes(tensorMap, bnInfAttr.x_tensor_uid());
-    const auto& bnInfTensorMean = findTensorAttributes(tensorMap, bnInfAttr.mean_tensor_uid());
-    const auto& bnInfTensorInvVar
-        = findTensorAttributes(tensorMap, bnInfAttr.inv_variance_tensor_uid());
-    const auto& bnInfTensorScale = findTensorAttributes(tensorMap, bnInfAttr.scale_tensor_uid());
-    const auto& bnInfTensorBias = findTensorAttributes(tensorMap, bnInfAttr.bias_tensor_uid());
-    const auto& bnInfTensorY = findTensorAttributes(tensorMap, bnInfAttr.y_tensor_uid());
-
-    if(bnInfTensorX.virtual_() || bnInfTensorMean.virtual_() || bnInfTensorInvVar.virtual_()
-       || bnInfTensorScale.virtual_() || bnInfTensorBias.virtual_() || !bnInfTensorY.virtual_())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Batchnorm inference input tensors must be non-virtual, output tensor must be virtual");
-    }
-
-    const auto& actTensorIn0 = findTensorAttributes(tensorMap, actAttr.in_0_tensor_uid());
-    if(actTensorIn0.virtual_())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Activation in_0 (dy gradient) must be non-virtual");
-    }
-
-    const auto& actTensorIn1 = findTensorAttributes(tensorMap, actIn1Uid.value());
-    const auto& actTensorOut = findTensorAttributes(tensorMap, actAttr.out_0_tensor_uid());
-    if(!actTensorIn1.virtual_() || !actTensorOut.virtual_())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Activation input from batchnorm must be virtual, output must be virtual");
-    }
-
-    const auto& bnBwdTensorDy = findTensorAttributes(tensorMap, bnBwdAttr.dy_tensor_uid());
-    const auto& bnBwdTensorDx = findTensorAttributes(tensorMap, bnBwdAttr.dx_tensor_uid());
-    const auto& bnBwdTensorDscale = findTensorAttributes(tensorMap, bnBwdAttr.dscale_tensor_uid());
-    const auto& bnBwdTensorDbias = findTensorAttributes(tensorMap, bnBwdAttr.dbias_tensor_uid());
-
-    if(!bnBwdTensorDy.virtual_() || bnBwdTensorDx.virtual_() || bnBwdTensorDscale.virtual_()
-       || bnBwdTensorDbias.virtual_())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Batchnorm backward dy input must be virtual, output tensors must be non-virtual");
-    }
-}
-
 bool batchnormBwdFusionCheckTensorsLogErrors(
     const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
@@ -174,7 +68,7 @@ bool batchnormBwdFusionCheckTensorsLogErrors(
 {
     try
     {
-        batchnormBwdFusionCheckTensors(bnInfAttr, actAttr, bnBwdAttr, tensorMap);
+        checkBackwardActivationTensors(bnInfAttr, actAttr, bnBwdAttr, tensorMap);
         return true;
     }
     catch(const std::exception& e)
@@ -579,7 +473,7 @@ void buildPlanFusedBackwardsActivation(
     Context& executionContext)
 {
     const auto [bnInfAttr, actAttr, bnBwdAttr] = getBatchnormBackwardFusionNodeAttrs(opGraph);
-    batchnormBwdFusionCheckTensors(bnInfAttr, actAttr, bnBwdAttr, opGraph.getTensorMap());
+    checkBackwardActivationTensors(bnInfAttr, actAttr, bnBwdAttr, opGraph.getTensorMap());
 
     BatchnormBwdParams params(bnBwdAttr, actAttr, bnInfAttr, opGraph.getTensorMap());
     auto plan = std::make_unique<BatchnormBwdPlan>(std::move(params));

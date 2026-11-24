@@ -19,6 +19,8 @@ target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/batchnorm/BatchnormApplicabilityChecks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/batchnorm/BatchnormFwdInferencePlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/batchnorm/BatchnormFwdInferenceWithVariancePlan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/plans/batchnorm/BatchnormFwdTrainingPlan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/plans/batchnorm/BatchnormBwdPlan.cpp
 )
 
 if(NOT ENABLE_HIP_MLOPS_ENGINE)
@@ -31,8 +33,6 @@ add_subdirectory(kernels)
 target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/HipMlopsEngine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/batchnorm/BatchnormPlanBuilder.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/plans/batchnorm/BatchnormFwdTrainingPlan.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/plans/batchnorm/BatchnormBwdPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/batchnorm/BatchnormFwdTrainingPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/RMSnorm/RMSnormPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/RMSnorm/RMSnormBwdPlanBuilder.cpp

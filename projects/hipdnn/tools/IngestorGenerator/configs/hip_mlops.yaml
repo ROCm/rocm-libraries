@@ -134,6 +134,34 @@ packs:
         metadata:
           operation: BATCHNORM_INFERENCE_VARIANCE
         priority: 0
+  # Batchnorm training, alone or followed by an activation: one launch, or for the
+  # multi-workgroup variant three, all from one program.
+  - name: batchnorm_training
+    discriminator: batchnorm_training
+    dispatch: batchnorm_training
+    kernels:
+      - name: hip_mlops.batchnorm_training
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/batchnorm/BatchNormFwdTrainSpatial.cpp
+          entry_point: BatchNormFwdTrainSpatial
+        metadata:
+          operation: BATCHNORM_TRAINING
+        priority: 0
+  # Batchnorm backward, alone or fused after an inference and an activation's backward: one
+  # launch, or for the multi-workgroup variant up to five, all from one program.
+  - name: batchnorm_backward
+    discriminator: batchnorm_backward
+    dispatch: batchnorm_backward
+    kernels:
+      - name: hip_mlops.batchnorm_backward
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/batchnorm/BatchNormBwdSpatial.cpp
+          entry_point: BatchNormBwdSpatial
+        metadata:
+          operation: BATCHNORM_BACKWARD
+        priority: 0
 
 # Embedded source compiled at plan build: every field is matcher-only.
 specialization:

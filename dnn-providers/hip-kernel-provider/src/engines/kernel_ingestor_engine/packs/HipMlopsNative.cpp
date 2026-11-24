@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENGINE_HIP_MLOPS_INGESTOR
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -11,12 +12,15 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_backward_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_inference_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/layernorm_attributes_generated.h>
@@ -47,8 +51,10 @@
 #include "engines/hip_mlops_engine/plans/RMSnorm/RMSnormBwdPlan.hpp"
 #include "engines/hip_mlops_engine/plans/RMSnorm/RMSnormFwdPlan.hpp"
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormApplicabilityChecks.hpp"
+#include "engines/hip_mlops_engine/plans/batchnorm/BatchnormBwdPlan.hpp"
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormFwdInferencePlan.hpp"
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormFwdInferenceWithVariancePlan.hpp"
+#include "engines/hip_mlops_engine/plans/batchnorm/BatchnormFwdTrainingPlan.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormApplicabilityChecks.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormBwdPlan.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormFwdPlan.hpp"
@@ -70,9 +76,9 @@
  * builder accepts, through that builder's own validator, and compiles the same embedded
  * source with the same compile options and launches (buildResampleFwdKernel(),
  * buildLayernormBwdKernel(), buildRMSnormFwdKernel() and friends), so the two engines serve a
- * graph with one program. RMSnorm and batchnorm inference also serve the hand-written
- * builders' two-node graphs: an activation fused after the forward (and for RMSnorm, before
- * the backward).
+ * graph with one program. RMSnorm and batchnorm also serve the hand-written builders'
+ * fused graphs: an activation after the forward (two nodes), and before the backward (RMSnorm:
+ * two nodes; batchnorm: three, from the inference that produced the activation's input).
  * The hand-written engine's engine-level checks (ragged and misaligned tensors) run first,
  * here as there.
  *
@@ -105,6 +111,8 @@ constexpr std::string_view RMSNORM_FWD = "RMSNORM_FWD";
 constexpr std::string_view RMSNORM_BWD = "RMSNORM_BWD";
 constexpr std::string_view BATCHNORM_INFERENCE = "BATCHNORM_INFERENCE";
 constexpr std::string_view BATCHNORM_INFERENCE_VARIANCE = "BATCHNORM_INFERENCE_VARIANCE";
+constexpr std::string_view BATCHNORM_TRAINING = "BATCHNORM_TRAINING";
+constexpr std::string_view BATCHNORM_BACKWARD = "BATCHNORM_BACKWARD";
 
 // ---------------------------------------------------------------------------
 // Matching
@@ -171,17 +179,65 @@ std::optional<std::string_view> fusedFamilyOf(const MatchContext& context)
             batchnorm, activation);
         return BATCHNORM_INFERENCE_VARIANCE;
     }
+    if(first.attributesType() == data_objects::NodeAttributes::BatchnormAttributes)
+    {
+        const auto& batchnorm = batchnorm::checkTrainingNode(first);
+        const auto& activation = batchnorm::checkTrainingActivationNode(second, batchnorm);
+        batchnorm::checkTrainingTensorVirtuality2Node(batchnorm, activation, tensorMap);
+        BatchnormValidator(tensorMap).checkFwdTrainingActivationTensorConfigSupported(batchnorm,
+                                                                                      activation);
+        return BATCHNORM_TRAINING;
+    }
     return std::nullopt;
+}
+
+/// The batchnorm backward a three-node graph fuses, or nullopt: the inference that produced
+/// the activation's input, the activation's backward, then the backward (the hand-written
+/// batchnorm builder's three-node case). Throws what the checks throw.
+std::optional<std::string_view> threeNodeFamilyOf(const MatchContext& context)
+{
+    const auto& graph = context.graph;
+    const auto& tensorMap = graph.getTensorMap();
+    const auto& inference
+        = graph.getNodeWrapper(0).attributesAs<data_objects::BatchnormInferenceAttributes>();
+    const auto& activation
+        = graph.getNodeWrapper(1).attributesAs<data_objects::PointwiseAttributes>();
+    const auto& backward
+        = graph.getNodeWrapper(2).attributesAs<data_objects::BatchnormBackwardAttributes>();
+    batchnorm::checkBackwardActivationTensors(inference, activation, backward, tensorMap);
+    BatchnormValidator(tensorMap).checkBwdActivationTensorConfigSupported(
+        inference, activation, backward);
+    return BATCHNORM_BACKWARD;
+}
+
+/// One-node batchnorm training. The hand-written engine serves it through
+/// BatchnormPlanBuilder or, when that declines, BatchnormFwdTrainingPlanBuilder; both build the
+/// same plan and run the same validator, and differ only in which operands may be virtual, so
+/// either builder's operand check suffices.
+void checkTrainingGraph(const MatchContext& context)
+{
+    const auto& tensorMap = context.graph.getTensorMap();
+    const auto& attributes
+        = context.graph.getNodeWrapper(0).attributesAs<data_objects::BatchnormAttributes>();
+    try
+    {
+        batchnorm::checkOneNodeOperandsNotVirtual(context.graph.getNode(0), tensorMap);
+    }
+    catch(const std::exception&)
+    {
+        batchnorm::checkTrainingTensorVirtuality1Node(attributes, tensorMap);
+    }
+    BatchnormValidator(tensorMap).checkFwdTrainingTensorConfigSupported(attributes);
 }
 
 /// The operation of the family that serves @p context's graph, or nullopt. Mirrors the
 /// hand-written plan builders' isApplicable(): fp32 compute throughout, one node of the
-/// family's attributes (or RMSnorm's fused pair), and the family's validator. Families are
-/// disjoint by node type.
+/// family's attributes (or a fused graph of two or three), and the family's validator.
+/// Families are disjoint by their first node's type.
 std::optional<std::string_view> familyOf(const MatchContext& context)
 {
     const auto nodeCount = context.graph.nodeCount();
-    if(nodeCount != 1 && nodeCount != 2)
+    if(nodeCount < 1 || nodeCount > 3)
     {
         return std::nullopt;
     }
@@ -200,6 +256,10 @@ std::optional<std::string_view> familyOf(const MatchContext& context)
         if(nodeCount == 2)
         {
             return fusedFamilyOf(context);
+        }
+        if(nodeCount == 3)
+        {
+            return threeNodeFamilyOf(context);
         }
         switch(node.attributesType())
         {
@@ -237,6 +297,14 @@ std::optional<std::string_view> familyOf(const MatchContext& context)
             BatchnormValidator(tensorMap).checkInferenceVarianceExtTensorConfigSupported(
                 node.attributesAs<data_objects::BatchnormInferenceAttributesVarianceExt>());
             return BATCHNORM_INFERENCE_VARIANCE;
+        case data_objects::NodeAttributes::BatchnormAttributes:
+            checkTrainingGraph(context);
+            return BATCHNORM_TRAINING;
+        case data_objects::NodeAttributes::BatchnormBackwardAttributes:
+            batchnorm::checkOneNodeOperandsNotVirtual(context.graph.getNode(0), tensorMap);
+            BatchnormValidator(tensorMap).checkBwdTensorConfigSupported(
+                node.attributesAs<data_objects::BatchnormBackwardAttributes>());
+            return BATCHNORM_BACKWARD;
         default:
             return std::nullopt;
         }
@@ -1029,22 +1097,37 @@ private:
     std::pair<float, float> _activation;
 };
 
-/// Compiles @p build's entry point of @p kernel's source with its 3D geometry.
+/// Compiles entry point @p entryPoint of @p kernel's source with @p options and a 3D geometry.
+IngestorKernelCode compileBatchnormLaunch(const compilation::IKernelCompiler& compiler,
+                                          const compilation::KpackKernelLoader& loader,
+                                          const MatchContext& context,
+                                          const KernelDefinition& kernel,
+                                          const compilation::KernelCompileOptions& options,
+                                          const char* entryPoint,
+                                          const std::array<unsigned int, 3>& blockSize,
+                                          const std::array<unsigned int, 3>& gridSize)
+{
+    auto code = buildIngestorKernelCode(
+        compiler, loader, context, entryPointKernelDefinition(kernel, entryPoint), options, {});
+    code.setBlockSize(blockSize[0], blockSize[1], blockSize[2]);
+    code.setGridSize(gridSize[0], gridSize[1], gridSize[2]);
+    return code;
+}
+
 IngestorKernelCode compileBatchnormInference(const compilation::IKernelCompiler& compiler,
                                              const compilation::KpackKernelLoader& loader,
                                              const MatchContext& context,
                                              const KernelDefinition& kernel,
                                              const batchnorm::BatchnormInferenceKernelBuild& build)
 {
-    auto code = buildIngestorKernelCode(compiler,
-                                        loader,
-                                        context,
-                                        entryPointKernelDefinition(kernel, build.entryPoint),
-                                        build.options,
-                                        {});
-    code.setBlockSize(build.blockSize[0], build.blockSize[1], build.blockSize[2]);
-    code.setGridSize(build.gridSize[0], build.gridSize[1], build.gridSize[2]);
-    return code;
+    return compileBatchnormLaunch(compiler,
+                                  loader,
+                                  context,
+                                  kernel,
+                                  build.options,
+                                  build.entryPoint,
+                                  build.blockSize,
+                                  build.gridSize);
 }
 
 class BatchnormInferenceDispatchHandler : public HipMlopsDispatchHandler
@@ -1118,6 +1201,386 @@ public:
 };
 
 // ---------------------------------------------------------------------------
+// Dispatch: batchnorm training and backward
+// ---------------------------------------------------------------------------
+
+/// Compiles every launch of @p build, in order, out of one program.
+std::vector<IngestorKernelCode>
+    compileBatchnormLaunches(const compilation::IKernelCompiler& compiler,
+                             const compilation::KpackKernelLoader& loader,
+                             const MatchContext& context,
+                             const KernelDefinition& kernel,
+                             const batchnorm::BatchnormKernelBuild& build)
+{
+    std::vector<IngestorKernelCode> codes;
+    codes.reserve(build.launches.size());
+    for(const auto& launch : build.launches)
+    {
+        codes.push_back(compileBatchnormLaunch(compiler,
+                                               loader,
+                                               context,
+                                               kernel,
+                                               build.options,
+                                               launch.entryPoint,
+                                               launch.blockSize,
+                                               launch.gridSize));
+    }
+    return codes;
+}
+
+/// BatchNormFwdTrainSpatial, or for variant 2 the mean/variance, final mean/variance and
+/// normalization launches, which stash their statistics in y. The saved statistics and the
+/// running statistics are each optional, and choose the argument lists.
+class PreparedBatchnormTraining : public PreparedHipMlops
+{
+public:
+    PreparedBatchnormTraining(
+        std::vector<IngestorKernelCode> codes,
+        int variant,
+        const batchnorm::BatchnormFwdTrainingParams& params,
+        const data_objects::BatchnormAttributes& attributes,
+        const std::unordered_map<int64_t, const data_objects::TensorAttributes*>& tensorMap)
+        : _codes(std::move(codes))
+        , _variant(variant)
+        , _x(params.x()->uid())
+        , _y(params.optActivation().has_value() && params.activationOut() != nullptr
+                 ? params.activationOut()->uid()
+                 : params.y()->uid())
+        , _scale(params.scale()->uid())
+        , _bias(params.bias()->uid())
+        , _epsilon(hipdnn_plugin_sdk::makeScalarOperand(
+              tensorMap, attributes.epsilon_tensor_uid(), "Epsilon"))
+        , _activation(activationArguments(params.optActivation()))
+    {
+        if(params.hasSaveMeanVariance())
+        {
+            _saved = std::array<int64_t, 2>{params.mean()->uid(), params.invVariance()->uid()};
+        }
+        if(params.hasRunningStats())
+        {
+            _running = std::array<int64_t, 4>{params.prevRunningMean()->uid(),
+                                              params.prevRunningVariance()->uid(),
+                                              params.nextRunningMean()->uid(),
+                                              params.nextRunningVariance()->uid()};
+            _momentum = hipdnn_plugin_sdk::makeScalarOperand(
+                tensorMap, attributes.momentum_tensor_uid().value(), "Momentum");
+        }
+    }
+
+    const IngestorKernelCode& kernelCode() const override
+    {
+        return _codes.front();
+    }
+
+    void launch(hipStream_t stream,
+                const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                uint32_t numDeviceBuffers,
+                void* /*workspace*/) const override
+    {
+        const Buffers buffer(deviceBuffers, numDeviceBuffers);
+        const auto resolve = [&](const hipdnn_plugin_sdk::ScalarOperand& operand) {
+            return hipdnn_plugin_sdk::toDouble(
+                hipdnn_plugin_sdk::resolveScalarOperand(operand, deviceBuffers, numDeviceBuffers));
+        };
+        void* x = buffer(_x);
+        void* y = buffer(_y);
+        void* scale = buffer(_scale);
+        void* bias = buffer(_bias);
+        const double epsilon = resolve(_epsilon);
+        const double expAvgFactor = _momentum.has_value() ? resolve(*_momentum) : 0.0;
+        void* saveMean = _saved.has_value() ? buffer((*_saved)[0]) : nullptr;
+        void* saveInvVariance = _saved.has_value() ? buffer((*_saved)[1]) : nullptr;
+        void* prevMean = _running.has_value() ? buffer((*_running)[0]) : nullptr;
+        void* prevVariance = _running.has_value() ? buffer((*_running)[1]) : nullptr;
+        void* nextMean = _running.has_value() ? buffer((*_running)[2]) : nullptr;
+        void* nextVariance = _running.has_value() ? buffer((*_running)[3]) : nullptr;
+        const auto [alpha, beta] = _activation;
+        const bool saved = _saved.has_value();
+        const bool running = _running.has_value();
+
+        // Changing these argument lists means changing BatchNormFwdTrainSpatial.cpp with them.
+        if(_variant != 2)
+        {
+            auto& kernel = _codes[0].kernelForStream(stream);
+            if(saved && running)
+            {
+                kernel.launch(stream,
+                              x,
+                              y,
+                              scale,
+                              bias,
+                              expAvgFactor,
+                              prevMean,
+                              prevVariance,
+                              nextMean,
+                              nextVariance,
+                              epsilon,
+                              saveMean,
+                              saveInvVariance,
+                              alpha,
+                              beta);
+            }
+            else if(saved)
+            {
+                kernel.launch(
+                    stream, x, y, scale, bias, epsilon, saveMean, saveInvVariance, alpha, beta);
+            }
+            else if(running)
+            {
+                kernel.launch(stream,
+                              x,
+                              y,
+                              scale,
+                              bias,
+                              expAvgFactor,
+                              prevMean,
+                              prevVariance,
+                              nextMean,
+                              nextVariance,
+                              epsilon,
+                              alpha,
+                              beta);
+            }
+            else
+            {
+                kernel.launch(stream, x, y, scale, bias, epsilon, alpha, beta);
+            }
+            return;
+        }
+
+        _codes[0].kernelForStream(stream).launch(stream, x, y);
+        auto& finalKernel = _codes[1].kernelForStream(stream);
+        if(saved && running)
+        {
+            finalKernel.launch(stream,
+                               y,
+                               expAvgFactor,
+                               prevMean,
+                               prevVariance,
+                               nextMean,
+                               nextVariance,
+                               epsilon,
+                               saveMean,
+                               saveInvVariance);
+        }
+        else if(saved)
+        {
+            finalKernel.launch(stream, y, epsilon, saveMean, saveInvVariance);
+        }
+        else if(running)
+        {
+            finalKernel.launch(
+                stream, y, expAvgFactor, prevMean, prevVariance, nextMean, nextVariance, epsilon);
+        }
+        else
+        {
+            finalKernel.launch(stream, y, epsilon);
+        }
+        _codes[2].kernelForStream(stream).launch(stream, x, y, scale, bias, alpha, beta);
+    }
+
+private:
+    std::vector<IngestorKernelCode> _codes;
+    int _variant;
+    int64_t _x;
+    int64_t _y;
+    int64_t _scale;
+    int64_t _bias;
+    hipdnn_plugin_sdk::ScalarOperand _epsilon;
+    std::optional<hipdnn_plugin_sdk::ScalarOperand> _momentum;
+    std::optional<std::array<int64_t, 2>> _saved;
+    std::optional<std::array<int64_t, 4>> _running;
+    std::pair<float, float> _activation;
+};
+
+/// BatchNormBwdSpatial, or for variant 2 the launches BatchnormBwdPlan::execute() indexes:
+/// with saved statistics 0, 1 and 4, otherwise all five, stashing in dx. Without saved
+/// statistics epsilon is the hand-written plan's default.
+class PreparedBatchnormBackward : public PreparedHipMlops
+{
+public:
+    PreparedBatchnormBackward(std::vector<IngestorKernelCode> codes,
+                              int variant,
+                              const batchnorm::BatchnormBwdParams& params)
+        : _codes(std::move(codes))
+        , _variant(variant)
+        , _x(params.x()->uid())
+        , _dy(params.dy()->uid())
+        , _dx(params.dx()->uid())
+        , _scale(params.scale()->uid())
+        , _dscale(params.dscale()->uid())
+        , _dbias(params.dbias()->uid())
+        , _bias(uidOf(params.bias()))
+        , _activation(activationArguments(params.optActivation()))
+    {
+        if(params.hasSavedStats())
+        {
+            _saved = std::array<int64_t, 2>{params.savedMean()->uid(),
+                                            params.savedInvVariance()->uid()};
+        }
+    }
+
+    const IngestorKernelCode& kernelCode() const override
+    {
+        return _codes.front();
+    }
+
+    void launch(hipStream_t stream,
+                const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                uint32_t numDeviceBuffers,
+                void* /*workspace*/) const override
+    {
+        const Buffers buffer(deviceBuffers, numDeviceBuffers);
+        void* x = buffer(_x);
+        void* dy = buffer(_dy);
+        void* dx = buffer(_dx);
+        void* scale = buffer(_scale);
+        void* dscale = buffer(_dscale);
+        void* dbias = buffer(_dbias);
+        void* bias = buffer(_bias);
+        void* savedMean = _saved.has_value() ? buffer((*_saved)[0]) : nullptr;
+        void* savedInvVariance = _saved.has_value() ? buffer((*_saved)[1]) : nullptr;
+        const double epsilon = hipdnn_data_sdk::utilities::BATCHNORM_DEFAULT_EPSILON;
+        const auto [alpha, beta] = _activation;
+        const auto kernel
+            = [&](size_t index) -> auto& { return _codes[index].kernelForStream(stream); };
+
+        // Changing these argument lists means changing BatchNormBwdSpatial.cpp with them.
+        if(_variant != 2)
+        {
+            if(_saved.has_value())
+            {
+                kernel(0).launch(stream,
+                                 x,
+                                 dy,
+                                 dx,
+                                 scale,
+                                 bias,
+                                 dscale,
+                                 dbias,
+                                 savedMean,
+                                 savedInvVariance,
+                                 alpha,
+                                 beta);
+            }
+            else
+            {
+                kernel(0).launch(
+                    stream, x, dy, dx, scale, bias, dscale, dbias, epsilon, alpha, beta);
+            }
+            return;
+        }
+
+        if(_saved.has_value())
+        {
+            kernel(0).launch(
+                stream, x, dy, dx, scale, bias, savedMean, savedInvVariance, alpha, beta);
+            kernel(1).launch(stream, dx, dscale, dbias);
+            kernel(4).launch(stream,
+                             x,
+                             dy,
+                             dx,
+                             scale,
+                             bias,
+                             dscale,
+                             dbias,
+                             savedMean,
+                             savedInvVariance,
+                             alpha,
+                             beta);
+        }
+        else
+        {
+            kernel(0).launch(stream, x, dx);
+            kernel(1).launch(stream, dx, epsilon);
+            kernel(2).launch(stream, x, dy, dx, scale, bias, alpha, beta);
+            kernel(3).launch(stream, dx, dscale, dbias);
+            kernel(4).launch(stream, x, dy, dx, scale, bias, dscale, dbias, alpha, beta);
+        }
+    }
+
+private:
+    std::vector<IngestorKernelCode> _codes;
+    int _variant;
+    int64_t _x;
+    int64_t _dy;
+    int64_t _dx;
+    int64_t _scale;
+    int64_t _dscale;
+    int64_t _dbias;
+    std::optional<int64_t> _bias;
+    std::optional<std::array<int64_t, 2>> _saved;
+    std::pair<float, float> _activation;
+};
+
+class BatchnormTrainingDispatchHandler : public HipMlopsDispatchHandler
+{
+public:
+    using HipMlopsDispatchHandler::HipMlopsDispatchHandler;
+
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
+                                              const BoundTokens& /*bound*/,
+                                              const KernelDefinition& kernel) const override
+    {
+        const auto& graph = context.graph;
+        const auto& tensorMap = graph.getTensorMap();
+        const auto& attributes
+            = graph.getNodeWrapper(0).attributesAs<data_objects::BatchnormAttributes>();
+        // A fused graph's activation follows the batchnorm.
+        const auto params
+            = graph.nodeCount() == 2
+                  ? batchnorm::BatchnormFwdTrainingParams(
+                        attributes,
+                        graph.getNodeWrapper(1).attributesAs<data_objects::PointwiseAttributes>(),
+                        tensorMap)
+                  : batchnorm::BatchnormFwdTrainingParams(attributes, tensorMap);
+        const auto& properties = context.deviceProperties;
+        const auto build = batchnorm::buildBatchnormFwdTrainingKernel(
+            params, properties.gcnArchName, properties.multiProcessorCount, properties.warpSize);
+
+        return std::make_unique<PreparedBatchnormTraining>(
+            compileBatchnormLaunches(_compiler, _loader, context, kernel, build),
+            build.variant,
+            params,
+            attributes,
+            tensorMap);
+    }
+};
+
+class BatchnormBackwardDispatchHandler : public HipMlopsDispatchHandler
+{
+public:
+    using HipMlopsDispatchHandler::HipMlopsDispatchHandler;
+
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
+                                              const BoundTokens& /*bound*/,
+                                              const KernelDefinition& kernel) const override
+    {
+        const auto& graph = context.graph;
+        const auto& tensorMap = graph.getTensorMap();
+        // A fused graph is the inference, the activation's backward, then the backward.
+        const bool fused = graph.nodeCount() == 3;
+        const auto& backward = graph.getNodeWrapper(fused ? 2 : 0)
+                                   .attributesAs<data_objects::BatchnormBackwardAttributes>();
+        const auto params
+            = fused ? batchnorm::BatchnormBwdParams(
+                          backward,
+                          graph.getNodeWrapper(1).attributesAs<data_objects::PointwiseAttributes>(),
+                          graph.getNodeWrapper(0)
+                              .attributesAs<data_objects::BatchnormInferenceAttributes>(),
+                          tensorMap)
+                    : batchnorm::BatchnormBwdParams(backward, tensorMap);
+        const auto build
+            = batchnorm::buildBatchnormBwdKernel(params, context.deviceProperties.gcnArchName);
+
+        return std::make_unique<PreparedBatchnormBackward>(
+            compileBatchnormLaunches(_compiler, _loader, context, kernel, build),
+            build.variant,
+            params);
+    }
+};
+
+// ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
 
@@ -1161,6 +1624,10 @@ void registerHipMlopsSymbols(SymbolScope<Handle>& scope)
               &operationMatches<BATCHNORM_INFERENCE>);
     scope.add("hipkernel.hip_mlops.batchnorm_inference_variance_match",
               &operationMatches<BATCHNORM_INFERENCE_VARIANCE>);
+    scope.add("hipkernel.hip_mlops.batchnorm_training_match",
+              &operationMatches<BATCHNORM_TRAINING>);
+    scope.add("hipkernel.hip_mlops.batchnorm_backward_match",
+              &operationMatches<BATCHNORM_BACKWARD>);
 
     scope.add("hipkernel.hip_mlops.resample_fwd_dispatch",
               &dispatchHandler<ResampleFwdDispatchHandler>());
@@ -1178,6 +1645,10 @@ void registerHipMlopsSymbols(SymbolScope<Handle>& scope)
               &dispatchHandler<BatchnormInferenceDispatchHandler>());
     scope.add("hipkernel.hip_mlops.batchnorm_inference_variance_dispatch",
               &dispatchHandler<BatchnormInferenceVarianceDispatchHandler>());
+    scope.add("hipkernel.hip_mlops.batchnorm_training_dispatch",
+              &dispatchHandler<BatchnormTrainingDispatchHandler>());
+    scope.add("hipkernel.hip_mlops.batchnorm_backward_dispatch",
+              &dispatchHandler<BatchnormBackwardDispatchHandler>());
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

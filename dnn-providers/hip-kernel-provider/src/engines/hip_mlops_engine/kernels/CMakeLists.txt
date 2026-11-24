@@ -4,18 +4,17 @@
 include("${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/KernelEmbedding.cmake")
 
 
-# List kernel files to embed
+# Every family's kernels live beside the HipMlops descriptors, where the kernel ingestor
+# compiles them; this engine embeds them under their bare names until it is retired.
 add_kernels_for_embedding(
     TARGET hip_kernel_provider_impl
     FILES
-    ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchNormFwdTrainSpatial.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchNormBwdSpatial.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/BatchnormFunctions.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/Configuration.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/ReductionFunctions.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/StaticUnroll.hpp
-    # Families migrated to the kernel ingestor keep their sources beside the HipMlops
-    # descriptors; this engine embeds them under their bare names until it is retired.
+    ${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/batchnorm/BatchNormFwdTrainSpatial.cpp
+    ${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/batchnorm/BatchNormBwdSpatial.cpp
+    ${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/batchnorm/BatchnormFunctions.hpp
+    ${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/batchnorm/Configuration.hpp
+    ${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/batchnorm/ReductionFunctions.hpp
+    ${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/batchnorm/StaticUnroll.hpp
     ${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/batchnorm/BatchNormFwdInferSpatial.cpp
     ${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/resample/ResampleFwd.cpp
     ${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/resample/ResampleBwd.cpp
@@ -24,6 +23,6 @@ add_kernels_for_embedding(
     ${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/layernorm/LayernormFwd.cpp
     ${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/rmsnorm/RMSNormFwd.cpp
     ${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/rmsnorm/RMSNormBwd.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/types/VectorTypes.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/common/HipKernelActivation.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/common/HipKernelMath.hpp)
+    ${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/types/VectorTypes.hpp
+    ${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/common/HipKernelActivation.hpp
+    ${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/common/HipKernelMath.hpp)

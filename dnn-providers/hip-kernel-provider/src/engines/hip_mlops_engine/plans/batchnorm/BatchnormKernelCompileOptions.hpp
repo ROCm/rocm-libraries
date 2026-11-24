@@ -5,6 +5,7 @@
 
 #include <array>
 #include <string>
+#include <vector>
 
 #include "compilation/KernelCompileOptions.hpp"
 #include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
@@ -111,6 +112,26 @@ struct BatchnormInferenceKernelBuild
     unsigned int channelStride;
     unsigned int spatialStride;
     unsigned int batchStride;
+};
+
+/// One launch of a batchnorm kernel: an entry point of the compiled source and its 3D geometry.
+struct BatchnormLaunch
+{
+    const char* entryPoint;
+    std::array<unsigned int, 3> blockSize;
+    std::array<unsigned int, 3> gridSize;
+};
+
+/// What a batchnorm training or backward plan compiles and launches: the compile options, the
+/// kernel variant the launch heuristics chose, and the launches in the order the plan's
+/// execute() indexes them, all entry points of one program. Built by
+/// buildBatchnormFwdTrainingKernel() and buildBatchnormBwdKernel(), which the HIP MLOps
+/// engine's plans and the kernel ingestor's HipMlops packs both call.
+struct BatchnormKernelBuild
+{
+    BatchnormKernelCompileOptions options;
+    int variant;
+    std::vector<BatchnormLaunch> launches;
 };
 
 } // namespace hip_kernel_provider::batchnorm

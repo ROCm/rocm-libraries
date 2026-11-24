@@ -183,9 +183,9 @@ TEST(TestHipMlopsResamplePack, TakesOverTheHandWrittenEnginesNameAndId)
 {
     const auto& set = loadedSet(ENGINE_NAME);
     EXPECT_EQ(set.engine.builtinEngine, BUILTIN_NAME);
-    // One pack per migrated operation: Resample, Layernorm and RMSnorm forward and backward,
-    // and batchnorm inference with an inverse variance or a variance.
-    EXPECT_EQ(distinctPackIdCount(set), 8U);
+    // One pack per operation: Resample, Layernorm and RMSnorm forward and backward, and
+    // batchnorm inference (with an inverse variance or a variance), training and backward.
+    EXPECT_EQ(distinctPackIdCount(set), 10U);
 
     core::Container container;
     const auto ids = container.getEngineManager().getAllEngineIds();

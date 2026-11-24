@@ -12,8 +12,10 @@
 #include "compilation/IRunnableKernel.hpp"
 #include "core/Handle.hpp"
 #include "core/Utils.hpp"
+#include "engines/hip_mlops_engine/plans/batchnorm/BatchnormKernelCompileOptions.hpp"
 
 #include <memory>
+#include <string>
 
 namespace hip_kernel_provider
 {
@@ -89,6 +91,17 @@ private:
     std::optional<core::utils::ActivationParams> _optActivation;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _activationOut;
 };
+
+/// The compile options, variant and launches of the BatchNormFwdTrainSpatial program for
+/// @p params on @p gcnArchName: one launch, or for variant 2 the mean/variance, final
+/// mean/variance and normalization launches. The launch heuristics size for a device of
+/// @p multiProcessorCount CUs of @p warpSize lanes.
+///
+/// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 3D, 4D or 5D.
+BatchnormKernelBuild buildBatchnormFwdTrainingKernel(const BatchnormFwdTrainingParams& params,
+                                                     const std::string& gcnArchName,
+                                                     int multiProcessorCount,
+                                                     int warpSize);
 
 class BatchnormFwdTrainingPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {

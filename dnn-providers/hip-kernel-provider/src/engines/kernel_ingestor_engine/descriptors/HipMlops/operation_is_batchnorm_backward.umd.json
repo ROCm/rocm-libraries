@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "2b2535b1-3c62-4f63-b1a5-3cc128715c30",
+  "name": "graph operation is batchnorm_backward",
+  "scope": "graph",
+  "match_symbol": "hipkernel.hip_mlops.batchnorm_backward_match"
+}

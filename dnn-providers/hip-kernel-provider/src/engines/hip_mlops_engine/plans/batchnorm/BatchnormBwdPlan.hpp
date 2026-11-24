@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -22,6 +23,7 @@
 #include "compilation/IRunnableKernel.hpp"
 #include "core/Handle.hpp"
 #include "core/Utils.hpp"
+#include "engines/hip_mlops_engine/plans/batchnorm/BatchnormKernelCompileOptions.hpp"
 
 namespace hip_kernel_provider
 {
@@ -84,6 +86,14 @@ private:
     std::optional<core::utils::ActivationParams> _optActivation;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _bias = nullptr;
 };
+
+/// The compile options, variant and launches of the BatchNormBwdSpatial program for @p params
+/// on @p gcnArchName: one launch, or for variant 2 the five launches BatchnormBwdPlan::execute()
+/// indexes (three of which run with saved statistics).
+///
+/// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 3D, 4D or 5D.
+BatchnormKernelBuild buildBatchnormBwdKernel(const BatchnormBwdParams& params,
+                                             const std::string& gcnArchName);
 
 class BatchnormBwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {

@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "deba22e5-4149-4d39-a970-095cf53e6a34",
+  "name": "graph operation is batchnorm_training",
+  "scope": "graph",
+  "match_symbol": "hipkernel.hip_mlops.batchnorm_training_match"
+}

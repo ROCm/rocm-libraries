@@ -197,25 +197,20 @@ size_t BatchnormBwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle)
     return 0;
 }
 
-void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
-                               const hipDeviceProp_t& deviceProperties)
+BatchnormKernelBuild buildBatchnormBwdKernel(const BatchnormBwdParams& params,
+                                             const std::string& gcnArchName)
 {
-    const auto problem = extractProblemDescription(_params);
+    const auto problem = extractProblemDescription(params);
 
-    if(_params.optActivation().has_value())
-    {
-        _activationAlpha = static_cast<float>(_params.optActivation()->alpha);
-        _activationBeta = static_cast<float>(_params.optActivation()->beta);
-    }
-
-    // _usesSavedStats is true when the caller supplied mean/variance, so the backward
+    // usesSavedStats is true when the caller supplied mean/variance, so the backward
     // pass need not recompute them. That sets how many per-channel fields the
     // multi-workgroup reduction path stashes into the dx-aliased buffer: 4 when it must
     // compute stats (mean, variance, dscale, dbias), 2 when they are supplied (dscale,
     // dbias only). The applicability gate selects that path only when this many fields
     // fit in dx, so this count must not be too small. This matches the logic captured
     // in MIOpen backward_spatial.cpp.
-    const unsigned int stashValuesBwd = !_usesSavedStats ? 4u : 2u;
+    const bool usesSavedStats = params.hasSavedStats();
+    const unsigned int stashValuesBwd = !usesSavedStats ? 4u : 2u;
     KernelConfig config;
     if(useMultiple(problem))
     {
@@ -230,7 +225,7 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
         defaultConfigSpatialSingle(problem, config);
     }
 
-    _kernelVariant = config.variant;
+    const int variant = config.variant;
 
     size_t xlocalsize = config.xlocalsize;
     const size_t ylocalsize = config.ylocalsize;
@@ -246,28 +241,24 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
 
     // Get activation mode
     auto activationMode = ActivationMode::PASTHRU;
-    if(_params.optActivation().has_value())
+    if(params.optActivation().has_value())
     {
-        activationMode = (*_params.optActivation()).mode;
+        activationMode = (*params.optActivation()).mode;
     }
 
-    BatchnormKernelCompileOptions options(_params.x(),
-                                          _params.dy(),
-                                          _params.savedMean(),
-                                          _params.scale(),
-                                          deviceProperties,
-                                          activationMode);
+    BatchnormKernelCompileOptions options(
+        params.x(), params.dy(), params.savedMean(), params.scale(), gcnArchName, activationMode);
     options.update("HIP_PLUGIN_USE_FPMIX", problem.useFp16Mix());
     options.update("HIP_PLUGIN_USE_BFPMIX", problem.useBfp16Mix());
     options.update("HIP_PLUGIN_USE_FPUPCAST", problem.useFp16Upcast());
     options.update("HIP_PLUGIN_USE_BFPUPCAST", problem.useBfp16Upcast());
-    options.update("HIP_PLUGIN_BN_USESAVED", _usesSavedStats);
+    options.update("HIP_PLUGIN_BN_USESAVED", usesSavedStats);
     options.update("HIP_PLUGIN_BN_BATCHES", problem.batches());
     options.update("HIP_PLUGIN_BN_CHANNELS", problem.channels());
     options.update("HIP_PLUGIN_BN_SPATIAL_SIZE", problem.spatialSize());
-    options.update("HIP_PLUGIN_BN_VARIANT", _kernelVariant);
+    options.update("HIP_PLUGIN_BN_VARIANT", variant);
 
-    if(_kernelVariant != 2)
+    if(variant != 2)
     {
         xlocalsize = 1024;
         if(((problem.inCstride() < 256) && (problem.batches() < 256))
@@ -284,10 +275,11 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
         options.update("HIP_PLUGIN_BN_LDS_SIZE", ldsSize);
         options.update("HIP_PLUGIN_BN_VEC_SIZE", config.vectorsize);
 
-        _compiledProgram = kernelCompiler.compile("BatchNormBwdSpatial.cpp", options);
-        _runnableKernels.push_back(_compiledProgram->getKernel("BatchNormBwdSpatial"));
-        _runnableKernels[0]->setBlockSize(static_cast<unsigned int>(xlocalsize), 1, 1);
-        _runnableKernels[0]->setGridSize(static_cast<unsigned int>(xgridsize / xlocalsize), 1, 1);
+        std::vector<BatchnormLaunch> launches{
+            {"BatchNormBwdSpatial",
+             {static_cast<unsigned int>(xlocalsize), 1, 1},
+             {static_cast<unsigned int>(xgridsize / xlocalsize), 1, 1}}};
+        return {std::move(options), variant, std::move(launches)};
     }
     else
     {
@@ -340,39 +332,62 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
         options.update("HIP_PLUGIN_BN_GRP1_FINAL", ylocalsizeFinal);
         options.update("HIP_PLUGIN_BN_GRP2_FINAL", zlocalsizeFinal);
 
-        _compiledProgram = kernelCompiler.compile("BatchNormBwdSpatial.cpp", options);
-        _runnableKernels.push_back(
-            _compiledProgram->getKernel(_usesSavedStats ? "BatchNormBwdSpatialDScaleDBias"
-                                                        : "BatchNormBwdSpatialMeanVariance"));
-        _runnableKernels.push_back(
-            _compiledProgram->getKernel(_usesSavedStats ? "BatchNormBwdSpatialFinalDScaleDBias"
-                                                        : "BatchNormBwdSpatialFinalMeanVariance"));
-        _runnableKernels.push_back(_compiledProgram->getKernel(
-            _usesSavedStats ? "BatchNormBwdSpatialDX" : "BatchNormBwdSpatialDScaleDBias"));
-        _runnableKernels.push_back(_compiledProgram->getKernel(
-            _usesSavedStats ? "BatchNormBwdSpatialDX" : "BatchNormBwdSpatialFinalDScaleDBias"));
-        _runnableKernels.push_back(_compiledProgram->getKernel("BatchNormBwdSpatialDX"));
+        // The five launches execute() indexes; with saved statistics it runs 0, 1 and 4.
+        const std::array<const char*, 5> entryPoints = {
+            usesSavedStats ? "BatchNormBwdSpatialDScaleDBias" : "BatchNormBwdSpatialMeanVariance",
+            usesSavedStats ? "BatchNormBwdSpatialFinalDScaleDBias"
+                           : "BatchNormBwdSpatialFinalMeanVariance",
+            usesSavedStats ? "BatchNormBwdSpatialDX" : "BatchNormBwdSpatialDScaleDBias",
+            usesSavedStats ? "BatchNormBwdSpatialDX" : "BatchNormBwdSpatialFinalDScaleDBias",
+            "BatchNormBwdSpatialDX"};
 
+        std::vector<BatchnormLaunch> launches;
         for(size_t i = 0; i < 5; ++i)
         {
             if(i == 1 || i == 3)
             {
-                _runnableKernels[i]->setBlockSize(static_cast<unsigned int>(xlocalsizeFinal),
-                                                  static_cast<unsigned int>(ylocalsizeFinal),
-                                                  static_cast<unsigned int>(zlocalsizeFinal));
-                _runnableKernels[i]->setGridSize(
-                    static_cast<unsigned int>(xgridsize / xlocalsizeFinal), 1, 1);
+                launches.push_back(
+                    {entryPoints[i],
+                     {static_cast<unsigned int>(xlocalsizeFinal),
+                      static_cast<unsigned int>(ylocalsizeFinal),
+                      static_cast<unsigned int>(zlocalsizeFinal)},
+                     {static_cast<unsigned int>(xgridsize / xlocalsizeFinal), 1, 1}});
             }
             else
             {
-                _runnableKernels[i]->setBlockSize(static_cast<unsigned int>(xlocalsize),
-                                                  static_cast<unsigned int>(ylocalsize),
-                                                  static_cast<unsigned int>(zlocalsize));
-                _runnableKernels[i]->setGridSize(static_cast<unsigned int>(xgridsize / xlocalsize),
-                                                 static_cast<unsigned int>(ygridsize / ylocalsize),
-                                                 static_cast<unsigned int>(zgridsize / zlocalsize));
+                launches.push_back({entryPoints[i],
+                                    {static_cast<unsigned int>(xlocalsize),
+                                     static_cast<unsigned int>(ylocalsize),
+                                     static_cast<unsigned int>(zlocalsize)},
+                                    {static_cast<unsigned int>(xgridsize / xlocalsize),
+                                     static_cast<unsigned int>(ygridsize / ylocalsize),
+                                     static_cast<unsigned int>(zgridsize / zlocalsize)}});
             }
         }
+        return {std::move(options), variant, std::move(launches)};
+    }
+}
+
+void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
+                               const hipDeviceProp_t& deviceProperties)
+{
+    if(_params.optActivation().has_value())
+    {
+        _activationAlpha = static_cast<float>(_params.optActivation()->alpha);
+        _activationBeta = static_cast<float>(_params.optActivation()->beta);
+    }
+
+    const auto build = buildBatchnormBwdKernel(_params, std::string(deviceProperties.gcnArchName));
+    _kernelVariant = build.variant;
+
+    _compiledProgram = kernelCompiler.compile("BatchNormBwdSpatial.cpp", build.options);
+    for(const auto& launch : build.launches)
+    {
+        _runnableKernels.push_back(_compiledProgram->getKernel(launch.entryPoint));
+        _runnableKernels.back()->setBlockSize(
+            launch.blockSize[0], launch.blockSize[1], launch.blockSize[2]);
+        _runnableKernels.back()->setGridSize(
+            launch.gridSize[0], launch.gridSize[1], launch.gridSize[2]);
     }
 }
 

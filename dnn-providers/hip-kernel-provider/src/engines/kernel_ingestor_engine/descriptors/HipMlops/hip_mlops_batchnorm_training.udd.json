@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "a8d82761-e049-4e14-85fb-c6f217590713",
+  "name": "HipMlops batchnorm_training dispatch",
+  "dispatch_symbol": "hipkernel.hip_mlops.batchnorm_training_dispatch"
+}

@@ -201,15 +201,16 @@ size_t BatchnormFwdTrainingPlan::getWorkspaceSize([[maybe_unused]] const Handle&
     return 0;
 }
 
-void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
-                                       const hipDeviceProp_t& deviceProperties)
+BatchnormKernelBuild buildBatchnormFwdTrainingKernel(const BatchnormFwdTrainingParams& params,
+                                                     const std::string& gcnArchName,
+                                                     int multiProcessorCount,
+                                                     int warpSize)
 {
     // Determine data type configuration
-    auto xDataType = _trainingParams.x()->data_type();
-    auto yDataType = _trainingParams.optActivation().has_value()
-                         ? _trainingParams.activationOut()->data_type()
-                         : _trainingParams.y()->data_type();
-    auto scaleDataType = _trainingParams.scale()->data_type();
+    auto xDataType = params.x()->data_type();
+    auto yDataType = params.optActivation().has_value() ? params.activationOut()->data_type()
+                                                        : params.y()->data_type();
+    auto scaleDataType = params.scale()->data_type();
 
     // NOTE: Although the batchnorm spatial training kernel support the
     // FP16 IO and FP16 scale/bias data types, the hip kernel plugin
@@ -233,7 +234,7 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
           && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
 
     // Extract dimensions from x tensor
-    const auto* xDims = _trainingParams.x()->dims();
+    const auto* xDims = params.x()->dims();
 
     size_t batches = 0;
     size_t channels = 0;
@@ -274,7 +275,7 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     auto inCstride = static_cast<unsigned int>(spatialSize);
 
     // Detect layout
-    const bool isLayoutChannelLast = isChannelLastLayout(_trainingParams.x());
+    const bool isLayoutChannelLast = isChannelLastLayout(params.x());
 
     // Kernel launch parameters
     // NOTE: These are generally selected based on heuristics and tuning,
@@ -301,9 +302,9 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
 
     // Get the kernel launch configuration based on heuristics
     hip_kernel_provider::batchnorm::KernelConfig config;
-    const size_t minWorkgroups = std::max(
-        size_t(1), size_t(0.6f * static_cast<float>(deviceProperties.multiProcessorCount)));
-    const auto waveSize = static_cast<size_t>(deviceProperties.warpSize);
+    const size_t minWorkgroups
+        = std::max(size_t(1), size_t(0.6f * static_cast<float>(multiProcessorCount)));
+    const auto waveSize = static_cast<size_t>(warpSize);
     const hip_kernel_provider::batchnorm::ProblemDescription problem(
         batches,
         channels,
@@ -391,26 +392,25 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
 
     // Get activation mode
     auto activationMode = ActivationMode::PASTHRU;
-    if(_trainingParams.optActivation().has_value() && _trainingParams.activationOut() != nullptr)
+    if(params.optActivation().has_value() && params.activationOut() != nullptr)
     {
-        activationMode = _trainingParams.optActivation()->mode;
+        activationMode = params.optActivation()->mode;
     }
 
     // Prepare compilation options
-    BatchnormKernelCompileOptions options(_trainingParams.x(),
-                                          _trainingParams.optActivation().has_value()
-                                              ? _trainingParams.activationOut()
-                                              : _trainingParams.y(),
-                                          _trainingParams.mean(),
-                                          _trainingParams.scale(),
-                                          deviceProperties,
-                                          activationMode);
+    BatchnormKernelCompileOptions options(
+        params.x(),
+        params.optActivation().has_value() ? params.activationOut() : params.y(),
+        params.mean(),
+        params.scale(),
+        gcnArchName,
+        activationMode);
     options.update("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
     options.update("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
     options.update("HIP_PLUGIN_USE_FPUPCAST", useFp16Upcast);
     options.update("HIP_PLUGIN_USE_BFPUPCAST", useBfp16Upcast);
-    options.update("HIP_PLUGIN_BN_SAVE_MEAN_VARIANCE", _trainingParams.hasSaveMeanVariance());
-    options.update("HIP_PLUGIN_BN_RUNNING_RESULT", _trainingParams.hasRunningStats());
+    options.update("HIP_PLUGIN_BN_SAVE_MEAN_VARIANCE", params.hasSaveMeanVariance());
+    options.update("HIP_PLUGIN_BN_RUNNING_RESULT", params.hasRunningStats());
     options.update("HIP_PLUGIN_BN_VARIANT", variant);
     options.update("HIP_PLUGIN_BN_LDS_SIZE", ldsnogcn);
     options.update("HIP_PLUGIN_BN_LDSGCN_SIZE", ldsgcn);
@@ -430,53 +430,57 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     options.update("HIP_PLUGIN_BN_GRP1_FINAL", ylocalsizeFinal);
     options.update("HIP_PLUGIN_BN_GRP2_FINAL", zlocalsizeFinal);
 
-    // Compile the kernel and configure launch parameters based on the selected variant
-    _compiledProgram = kernelCompiler.compile("BatchNormFwdTrainSpatial.cpp", options);
+    const std::array<unsigned int, 3> block{static_cast<unsigned int>(xlocalsize),
+                                            static_cast<unsigned int>(ylocalsize),
+                                            static_cast<unsigned int>(zlocalsize)};
+    const std::array<unsigned int, 3> grid{static_cast<unsigned int>(xgridsize / xlocalsize),
+                                           static_cast<unsigned int>(ygridsize / ylocalsize),
+                                           static_cast<unsigned int>(zgridsize / zlocalsize)};
+    std::vector<BatchnormLaunch> launches;
     if(variant != 2)
     {
-        _runnableKernels.push_back(_compiledProgram->getKernel("BatchNormFwdTrainSpatial"));
-        _runnableKernels[0]->setBlockSize(static_cast<unsigned int>(xlocalsize),
-                                          static_cast<unsigned int>(ylocalsize),
-                                          static_cast<unsigned int>(zlocalsize));
-        _runnableKernels[0]->setGridSize(static_cast<unsigned int>(xgridsize / xlocalsize),
-                                         static_cast<unsigned int>(ygridsize / ylocalsize),
-                                         static_cast<unsigned int>(zgridsize / zlocalsize));
+        launches.push_back({"BatchNormFwdTrainSpatial", block, grid});
     }
     else
     {
-        // For variant 2, we need to configure three kernels
-        _runnableKernels.push_back(
-            _compiledProgram->getKernel("BatchNormFwdTrainSpatialMeanVariance"));
-        _runnableKernels.push_back(
-            _compiledProgram->getKernel("BatchNormFwdTrainSpatialFinalMeanVariance"));
-        _runnableKernels.push_back(_compiledProgram->getKernel("BatchNormFwdTrainSpatialNorm"));
-
-        _runnableKernels[0]->setBlockSize(static_cast<unsigned int>(xlocalsize),
-                                          static_cast<unsigned int>(ylocalsize),
-                                          static_cast<unsigned int>(zlocalsize));
-        _runnableKernels[0]->setGridSize(static_cast<unsigned int>(xgridsize / xlocalsize),
-                                         static_cast<unsigned int>(ygridsize / ylocalsize),
-                                         static_cast<unsigned int>(zgridsize / zlocalsize));
-        _runnableKernels[1]->setBlockSize(static_cast<unsigned int>(xlocalsizeFinal),
-                                          static_cast<unsigned int>(ylocalsizeFinal),
-                                          static_cast<unsigned int>(zlocalsizeFinal));
-        _runnableKernels[1]->setGridSize(static_cast<unsigned int>(xgridsize / xlocalsizeFinal),
-                                         static_cast<unsigned int>(1),
-                                         static_cast<unsigned int>(1));
-        _runnableKernels[2]->setBlockSize(static_cast<unsigned int>(xlocalsize),
-                                          static_cast<unsigned int>(ylocalsize),
-                                          static_cast<unsigned int>(zlocalsize));
-        _runnableKernels[2]->setGridSize(static_cast<unsigned int>(xgridsize / xlocalsize),
-                                         static_cast<unsigned int>(ygridsize / ylocalsize),
-                                         static_cast<unsigned int>(zgridsize / zlocalsize));
+        // For variant 2, three kernels
+        launches.push_back({"BatchNormFwdTrainSpatialMeanVariance", block, grid});
+        launches.push_back({"BatchNormFwdTrainSpatialFinalMeanVariance",
+                            {static_cast<unsigned int>(xlocalsizeFinal),
+                             static_cast<unsigned int>(ylocalsizeFinal),
+                             static_cast<unsigned int>(zlocalsizeFinal)},
+                            {static_cast<unsigned int>(xgridsize / xlocalsizeFinal), 1, 1}});
+        launches.push_back({"BatchNormFwdTrainSpatialNorm", block, grid});
     }
 
-    HIPDNN_PLUGIN_LOG_INFO("BatchnormFwdTrainingPlan: Compiled kernel with variant: "
+    HIPDNN_PLUGIN_LOG_INFO("BatchnormFwdTraining: selected variant: "
                            << variant << ", stash method: " << stashMethod
                            << ", and vectorsize: " << vectorsize);
 
+    return {std::move(options), variant, std::move(launches)};
+}
+
+void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
+                                       const hipDeviceProp_t& deviceProperties)
+{
+    const auto build = buildBatchnormFwdTrainingKernel(_trainingParams,
+                                                       std::string(deviceProperties.gcnArchName),
+                                                       deviceProperties.multiProcessorCount,
+                                                       deviceProperties.warpSize);
+
+    // Compile the kernel and configure the launches of the selected variant
+    _compiledProgram = kernelCompiler.compile("BatchNormFwdTrainSpatial.cpp", build.options);
+    for(const auto& launch : build.launches)
+    {
+        _runnableKernels.push_back(_compiledProgram->getKernel(launch.entryPoint));
+        _runnableKernels.back()->setBlockSize(
+            launch.blockSize[0], launch.blockSize[1], launch.blockSize[2]);
+        _runnableKernels.back()->setGridSize(
+            launch.gridSize[0], launch.gridSize[1], launch.gridSize[2]);
+    }
+
     // Store kernel launch parameters
-    _kernelVariant = variant;
+    _kernelVariant = build.variant;
 }
 
 void BatchnormFwdTrainingPlan::execute(const Handle& handle,

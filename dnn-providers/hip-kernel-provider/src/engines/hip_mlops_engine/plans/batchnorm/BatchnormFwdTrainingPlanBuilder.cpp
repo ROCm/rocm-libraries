@@ -15,242 +15,6 @@ using namespace hip_kernel_provider::core::utils;
 namespace hip_kernel_provider::batchnorm
 {
 
-namespace
-{
-
-bool isNodeActivFwd(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attr)
-{
-    using PointwiseMode = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
-
-    // Check if operation is supported for batchnorm fusion
-    switch(attr.operation())
-    {
-    case PointwiseMode::IDENTITY:
-        return true;
-    case PointwiseMode::RELU_FWD:
-        break; // Continue to parameter validation
-    default:
-        return false;
-    }
-
-    // Batchnorm training fusion supports:
-    // - Standard ReLU (no parameters)
-    // - Clipped ReLU (relu_upper_clip only)
-    // - CLAMP (relu_lower_clip + relu_upper_clip)
-    // But does NOT support Leaky ReLU (relu_lower_clip_slope)
-    return !attr.relu_lower_clip_slope();
-}
-
-const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes&
-    checkBatchnormNode(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper& node)
-{
-    if(node.attributesType()
-       != hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BatchnormAttributes)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                       "First node must be batchnorm");
-    }
-
-    const auto& bnAttr
-        = node.attributesAs<hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes>();
-
-    return bnAttr;
-}
-
-const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes&
-    checkActivationNode(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper& node,
-                        const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr)
-{
-    if(node.attributesType()
-       != hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                       "Second node must be pointwise");
-    }
-
-    const auto& activAttr
-        = node.attributesAs<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>();
-
-    if(!isNodeActivFwd(activAttr))
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Unsupported activation mode for batchnorm fusion");
-    }
-
-    if(activAttr.in_0_tensor_uid() != bnAttr.y_tensor_uid())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Activation input must match batchnorm output");
-    }
-
-    return activAttr;
-}
-
-void checkRunningStatisticsTensorVirtuality(
-    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
-    const std::unordered_map<int64_t,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
-        tensorMap)
-{
-    // Optional running statistics tensors must be non-virtual if present
-    if(bnAttr.prev_running_mean_tensor_uid().has_value())
-    {
-        const auto& bnTensorAttrPrevRunningMean
-            = findTensorAttributes(tensorMap, bnAttr.prev_running_mean_tensor_uid().value());
-        if(bnTensorAttrPrevRunningMean.virtual_())
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Batchnorm prev_running_mean tensor must be non-virtual");
-        }
-    }
-
-    if(bnAttr.prev_running_variance_tensor_uid().has_value())
-    {
-        const auto& bnTensorAttrPrevRunningVar
-            = findTensorAttributes(tensorMap, bnAttr.prev_running_variance_tensor_uid().value());
-        if(bnTensorAttrPrevRunningVar.virtual_())
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Batchnorm prev_running_variance tensor must be non-virtual");
-        }
-    }
-
-    if(bnAttr.next_running_mean_tensor_uid().has_value())
-    {
-        const auto& bnTensorAttrNextRunningMean
-            = findTensorAttributes(tensorMap, bnAttr.next_running_mean_tensor_uid().value());
-        if(bnTensorAttrNextRunningMean.virtual_())
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Batchnorm next_running_mean tensor must be non-virtual");
-        }
-    }
-
-    if(bnAttr.next_running_variance_tensor_uid().has_value())
-    {
-        const auto& bnTensorAttrNextRunningVar
-            = findTensorAttributes(tensorMap, bnAttr.next_running_variance_tensor_uid().value());
-        if(bnTensorAttrNextRunningVar.virtual_())
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Batchnorm next_running_variance tensor must be non-virtual");
-        }
-    }
-}
-
-void checkTensorVirtuality1Node(
-    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
-    const std::unordered_map<int64_t,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
-        tensorMap)
-{
-    // Check for virtual tensors - 1-node case (solo batchnorm training)
-    const auto& bnTensorX = findTensorAttributes(tensorMap, bnAttr.x_tensor_uid());
-    const auto& bnTensorScale = findTensorAttributes(tensorMap, bnAttr.scale_tensor_uid());
-    const auto& bnTensorBias = findTensorAttributes(tensorMap, bnAttr.bias_tensor_uid());
-    const auto& bnTensorY = findTensorAttributes(tensorMap, bnAttr.y_tensor_uid());
-
-    if(bnTensorX.virtual_() || bnTensorScale.virtual_() || bnTensorBias.virtual_()
-       || bnTensorY.virtual_())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Batchnorm training tensors must be non-virtual for 1-node graph");
-    }
-
-    // Optional mean/variance tensors must be non-virtual if present, except a saved pair that is
-    // virtual in both tensors, which is not requested.
-    const bool unrequestedSavedPair = hasUnrequestedSavedPair(bnAttr, tensorMap);
-    if(!unrequestedSavedPair && bnAttr.mean_tensor_uid().has_value())
-    {
-        const auto& bnTensorMean
-            = findTensorAttributes(tensorMap, bnAttr.mean_tensor_uid().value());
-        if(bnTensorMean.virtual_())
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Batchnorm mean tensor must be non-virtual");
-        }
-    }
-
-    if(!unrequestedSavedPair && bnAttr.inv_variance_tensor_uid().has_value())
-    {
-        const auto& bnTensorInvVar
-            = findTensorAttributes(tensorMap, bnAttr.inv_variance_tensor_uid().value());
-        if(bnTensorInvVar.virtual_())
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Batchnorm inv_variance tensor must be non-virtual");
-        }
-    }
-
-    checkRunningStatisticsTensorVirtuality(bnAttr, tensorMap);
-}
-
-void checkTensorVirtuality2Node(
-    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
-    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& actAttr,
-    const std::unordered_map<int64_t,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
-        tensorMap)
-{
-    // Check for virtual tensors - 2-node case (batchnorm training + activation)
-    const auto& bnTensorX = findTensorAttributes(tensorMap, bnAttr.x_tensor_uid());
-    const auto& bnTensorScale = findTensorAttributes(tensorMap, bnAttr.scale_tensor_uid());
-    const auto& bnTensorBias = findTensorAttributes(tensorMap, bnAttr.bias_tensor_uid());
-    const auto& bnTensorY = findTensorAttributes(tensorMap, bnAttr.y_tensor_uid());
-
-    if(bnTensorX.virtual_() || bnTensorScale.virtual_() || bnTensorBias.virtual_()
-       || !bnTensorY.virtual_())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Batchnorm training input tensors must be non-virtual, output tensor must be virtual");
-    }
-
-    // Optional mean/variance tensors must be non-virtual if present
-    if(bnAttr.mean_tensor_uid().has_value())
-    {
-        const auto& bnTensorMean
-            = findTensorAttributes(tensorMap, bnAttr.mean_tensor_uid().value());
-        if(bnTensorMean.virtual_())
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Batchnorm mean tensor must be non-virtual");
-        }
-    }
-
-    if(bnAttr.inv_variance_tensor_uid().has_value())
-    {
-        const auto& bnTensorInvVar
-            = findTensorAttributes(tensorMap, bnAttr.inv_variance_tensor_uid().value());
-        if(bnTensorInvVar.virtual_())
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Batchnorm inv_variance tensor must be non-virtual");
-        }
-    }
-
-    checkRunningStatisticsTensorVirtuality(bnAttr, tensorMap);
-
-    const auto& actTensorIn0 = findTensorAttributes(tensorMap, actAttr.in_0_tensor_uid());
-    const auto& actTensorOut = findTensorAttributes(tensorMap, actAttr.out_0_tensor_uid());
-
-    if(!actTensorIn0.virtual_() || actTensorOut.virtual_())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Activation input from batchnorm must be virtual, output must be non virtual");
-    }
-}
-
-} // namespace
-
 BatchnormFwdTrainingPlanBuilder::BatchnormFwdTrainingPlanBuilder(
     const IKernelCompiler& kernelCompiler, const IDevicePropertyProvider& devicePropertyProvider)
     : _kernelCompiler(kernelCompiler)
@@ -280,7 +44,7 @@ bool BatchnormFwdTrainingPlanBuilder::isApplicable(
     try
     {
         // Common batchnorm validation
-        const auto& bnAttr = checkBatchnormNode(opGraph.getNodeWrapper(0));
+        const auto& bnAttr = checkTrainingNode(opGraph.getNodeWrapper(0));
 
         auto hasFloatComputeDataType = [](const auto& node) {
             return node->computeDataType() == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
@@ -300,7 +64,7 @@ bool BatchnormFwdTrainingPlanBuilder::isApplicable(
         if(opGraph.nodeCount() == 1)
         {
             // Solo batchnorm training
-            checkTensorVirtuality1Node(bnAttr, opGraph.getTensorMap());
+            checkTrainingTensorVirtuality1Node(bnAttr, opGraph.getTensorMap());
 
             // Validate applicability before kernel dispatch by checking tensor configurations
             // and operation parameters manually.
@@ -312,8 +76,8 @@ bool BatchnormFwdTrainingPlanBuilder::isApplicable(
         }
 
         // nodeCount == 2: Batchnorm training + activation fusion
-        const auto& activAttr = checkActivationNode(opGraph.getNodeWrapper(1), bnAttr);
-        checkTensorVirtuality2Node(bnAttr, activAttr, opGraph.getTensorMap());
+        const auto& activAttr = checkTrainingActivationNode(opGraph.getNodeWrapper(1), bnAttr);
+        checkTrainingTensorVirtuality2Node(bnAttr, activAttr, opGraph.getTensorMap());
 
         validator.checkFwdTrainingActivationTensorConfigSupported(bnAttr, activAttr);
 
@@ -368,8 +132,8 @@ void BatchnormFwdTrainingPlanBuilder::buildPlan(
     else if(opGraph.nodeCount() == 2)
     {
         // Batchnorm training + activation fusion
-        const auto& bnAttr = checkBatchnormNode(opGraph.getNodeWrapper(0));
-        const auto& activAttr = checkActivationNode(opGraph.getNodeWrapper(1), bnAttr);
+        const auto& bnAttr = checkTrainingNode(opGraph.getNodeWrapper(0));
+        const auto& activAttr = checkTrainingActivationNode(opGraph.getNodeWrapper(1), bnAttr);
         BatchnormValidator validator(opGraph.getTensorMap());
         validator.checkFwdTrainingActivationTensorConfigSupported(bnAttr, activAttr);
 
