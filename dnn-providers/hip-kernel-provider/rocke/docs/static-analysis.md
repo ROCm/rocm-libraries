@@ -171,21 +171,39 @@ existing builder is not by itself a reason to refactor.
 complexity, Halstead volume (below) and comment density. Higher is better.
 Ranks: **A** 20–100, **B** 10–19, **C** 0–9.
 
-**Large files always score 0.** The formula starts at 171 points, subtracts
-penalties for size, and adds up to 50 back for comments. For this kernel, SLOC
-costs 135 points and Halstead volume 53, and the 33% comment share earns 46
-back. That leaves about 29 points, and every point of cyclomatic complexity in
-the file costs another 0.23, so a few hundred branches take it to 0. MI
-therefore says nothing about quality in big kernel files. Use it to compare
-small and medium files (tools, dispatch, tests), where it does move.
+**Large files score 0, unless their Halstead volume is 0.** The formula starts
+at 171 points, subtracts penalties for size, and adds up to 50 back for
+comments. For this kernel, SLOC costs 135 points and Halstead volume 53, and
+the 33% comment share earns 46 back. That leaves about 29 points, and every
+point of cyclomatic complexity in the file costs another 0.23, so a few hundred
+branches take it to 0. MI therefore says nothing about quality in big kernel
+files. Use it to compare small and medium files (tools, dispatch, tests), where
+it does move.
+
+**Volume 0 means MI 100.** radon returns 100 for any file whose Halstead volume
+is 0, however long it is and however complex. That is the case for a file made
+only of assignments and calls (see the next section): 30,000 lines of
+`x = f(a, b)` score 100, while 30,000 lines of `x = a + b` score 0. A high MI
+on call-heavy code is therefore no evidence of maintainability either.
 
 ### Halstead metrics
 
-These count *operators* (`+`, `=`, calls, keywords) and *operands* (names,
-constants) across the whole file:
+These count *operators* and *operands* (names, constants) across the whole
+file, but radon recognises only these operators:
+
+- arithmetic (`+`, `*`, `//`, ...), comparison (`<`, `==`, `in`, ...), boolean
+  (`and`, `or`) and unary (`-x`, `not x`) operators;
+- augmented assignment (`+=`).
+
+Plain assignment (`=`), calls, attribute access and keywords (`if`, `for`,
+`return`) count for nothing, and an operand is counted only as an operand of
+one of those operators. Code made only of assignments and calls has V 0 and
+bugs 0, however large it is. Builder code is mostly calls, so for it V and D
+measure the arithmetic and comparisons, not the size.
 
 - **V (volume):** how much information the code contains, about
-  `length × log2(vocabulary)`. It grows with size; 26140 here.
+  `length × log2(vocabulary)` over the counted operators and operands. It grows
+  with the amount of arithmetic and comparison; 26140 here.
 - **D (difficulty):** how error-prone the code is to write and read. It rises
   with the variety of operators in use and with how often the same names are
   reused. As a rough guide, under 10 reads easily and 20+ is dense.
@@ -198,7 +216,10 @@ constants) across the whole file:
   comment lines.
 - **comment lines:** `#` comments plus docstring and multi-line string lines,
   shown as a share of LOC.
-- **functions:** functions, methods and nested functions in the file.
+- **functions:** functions, methods and nested functions in the file. A method
+  of a class nested in a class is listed under the whole chain
+  (`Outer.Inner.method`). radon does not report a class defined inside a
+  function at all, so such a class's methods are missing.
 
 ## pyright: type checking
 

@@ -40,7 +40,7 @@ import os
 import subprocess
 import sys
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -210,6 +210,39 @@ def _with_closures(fn: Any, prefix: str = "") -> Iterator[tuple[str, Any]]:
         yield from _with_closures(inner, name)
 
 
+def _inner_class_functions(cls: Any, prefix: str) -> Iterator[tuple[str, Any]]:
+    """Yield the methods of the classes nested in ``cls``, at any depth.
+
+    radon lists a top-level class's methods in its flat result but reaches a
+    class nested in a class only through ``inner_classes``, so those methods
+    need their own walk. radon names them by the innermost class only
+    (``Inner.m``), so the name is rebuilt here from the whole chain
+    (``Outer.Inner.m``).
+    """
+    for inner in cls.inner_classes:
+        qualified = f"{prefix}.{inner.name}"
+        for method in inner.methods:
+            yield from _with_closures(method, qualified)
+        yield from _inner_class_functions(inner, qualified)
+
+
+def _named_functions(blocks: Iterable[Any]) -> Iterator[tuple[str, Any]]:
+    """Every function, method and nested function in ``cc_visit``'s result.
+
+    ``cc_visit`` lists module functions and the methods of top-level classes
+    flat, plus one summary block per top-level class; only that summary leads
+    to classes nested in a class. A class defined inside a function is not
+    reported by radon at all, so its methods are missing from the report.
+    """
+    from radon.visitors import Class, Function
+
+    for blk in blocks:
+        if isinstance(blk, Function):
+            yield from _with_closures(blk)
+        elif isinstance(blk, Class):
+            yield from _inner_class_functions(blk, blk.name)
+
+
 def _print_summary(
     f: Path, raw: Any, mi: float, hal: Any, funcs: list[tuple[str, Any]]
 ) -> None:
@@ -249,14 +282,15 @@ def run_radon(files: list[Path]) -> None:
     from radon.complexity import cc_visit
     from radon.metrics import h_visit, mi_visit
     from radon.raw import analyze
-    from radon.visitors import Function
 
     print(
         "Ranks -- CC: A 1-5, B 6-10, C 11-20, D 21-30, E 31-40, F 41+ (per function)."
-        "\n         MI: A 20-100, B 10-19, C 0-9 (per file; size-penalised, so very"
-        "\n             large files score 0 regardless of quality)."
-        "\n  Halstead: V = volume (information content), D = difficulty (error"
-        "\n            proneness), bugs = V/3000 delivered-bug estimate.\n"
+        "\n         MI: A 20-100, B 10-19, C 0-9 (per file; size-penalised, but 100"
+        "\n             whenever Halstead V is 0, however large the file)."
+        "\n  Halstead: V = volume, D = difficulty, bugs = V/3000. radon counts only"
+        "\n            arithmetic, comparison, boolean and unary operators and"
+        "\n            augmented assignment; `=` and calls add nothing, so"
+        "\n            call-heavy code reads as V 0.\n"
     )
     hot: list[tuple[str, Any, Path]] = []
     for f in files:
@@ -265,14 +299,7 @@ def run_radon(files: list[Path]) -> None:
             raw = analyze(code)
             mi = mi_visit(code, multi=True)
             hal = h_visit(code).total
-            # cc_visit lists functions and methods flat, plus a summary block
-            # per class; keep the functions, each with its nested functions.
-            funcs = [
-                named
-                for blk in cc_visit(code)
-                if isinstance(blk, Function)
-                for named in _with_closures(blk)
-            ]
+            funcs = list(_named_functions(cc_visit(code)))
         except SyntaxError as e:
             print(f"{_show(f)}: radon could not parse ({e})")
             continue

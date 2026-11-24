@@ -923,3 +923,103 @@ def test_radon_report_is_quiet_for_simple_code(adv, tmp_path, capsys):
     out = capsys.readouterr().out
     assert "avg CC 1.0 (A)" in out
     assert "Most complex functions" not in out
+
+
+_NESTED_CLASSES = (
+    "def top(a):\n"
+    "    def helper(x):\n"
+    "        if x:\n"
+    "            return 1\n"
+    "        return 0\n"
+    "    return helper(a)\n"
+    "\n"
+    "\n"
+    "class Outer:\n"
+    "    def method(self, a):\n"
+    "        if a:\n"
+    "            return 1\n"
+    "        return 0\n"
+    "\n"
+    "    class Inner:\n"
+    "        def method(self, a):\n"
+    "            def local(z):\n"
+    "                if z:\n"
+    "                    return 1\n"
+    "                return 0\n"
+    "            return local(a)\n"
+    "\n"
+    "        class Deep:\n"
+    "            def method(self, a):\n"
+    "                for i in a:\n"
+    "                    if i:\n"
+    "                        return 1\n"
+    "                return 0\n"
+)
+
+
+def test_radon_lists_methods_of_nested_classes(adv):
+    pytest.importorskip("radon")
+    from radon.complexity import cc_visit
+
+    # A list, not a dict: a method visited twice must show up twice.
+    scored = sorted(
+        (name, fn.complexity)
+        for name, fn in adv._named_functions(cc_visit(_NESTED_CLASSES))
+    )
+    # radon's own flat list has no entry for the two nested classes' methods, and
+    # names them by the innermost class only; the report needs the whole chain.
+    # Each top-level method comes up once (no second visit through its class).
+    assert scored == [
+        ("Outer.Inner.Deep.method", 3),
+        ("Outer.Inner.method", 1),
+        ("Outer.Inner.method.local", 2),
+        ("Outer.method", 2),
+        ("top", 1),
+        ("top.helper", 2),
+    ]
+
+
+def test_radon_report_counts_and_ranks_nested_class_methods(adv, tmp_path, capsys):
+    pytest.importorskip("radon")
+    branches = "".join(
+        f"            if a == {i}:\n                a += 1\n" for i in range(12)
+    )
+    sample = tmp_path / "sample.py"
+    sample.write_text(
+        "class Outer:\n"
+        "    class Inner:\n"
+        f"        def busy(self, a):\n{branches}            return a\n",
+        encoding="utf-8",
+    )
+    adv.run_radon([sample])
+    out = capsys.readouterr().out
+    assert "functions 1" in out
+    # 12 branches + 1 = complexity 13, rank C, listed under the full class chain.
+    assert re.search(r"\bC\s+13\s+\S*sample\.py:3\s+Outer\.Inner\.busy\b", out)
+
+
+def test_radon_reads_a_file_of_calls_as_zero_volume(adv, tmp_path, capsys):
+    pytest.importorskip("radon")
+    from radon.metrics import h_visit, mi_visit
+
+    # The pinned radon counts Halstead operators only from arithmetic, comparison,
+    # boolean and unary operators and augmented assignment; `=` and calls add none
+    # (builder code is nearly all calls). The guide and the report banner say so.
+    calls = "".join(f"x{i} = f(a, b)\n" for i in range(4000))
+    arith = "".join(f"x{i} = a + b\n" for i in range(4000))
+    assert h_visit(calls).total.volume == 0
+    assert h_visit(arith).total.volume > 0
+    # mi_visit returns 100 when the volume is 0, however long the file is...
+    assert mi_visit(calls, multi=True) == 100.0
+    # ...and only a file with volume > 0 is size-penalised.
+    assert mi_visit(arith, multi=True) < 100.0
+
+    sample = tmp_path / "calls.py"
+    sample.write_text(calls, encoding="utf-8")
+    adv.run_radon([sample])
+    out = capsys.readouterr().out
+    assert "MI 100.0 (A)" in out
+    assert "Halstead V 0 " in out
+    assert "whenever Halstead V is 0" in out
+    assert "call-heavy code reads as V 0" in out
+    assert "score 0 regardless" not in out  # the old, wrong blanket claim
