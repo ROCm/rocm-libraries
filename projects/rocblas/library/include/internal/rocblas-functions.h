@@ -1438,7 +1438,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zswap_batched_64(rocblas_handle           
     @param[in]
     stridey   [rocblas_stride]
               stride from the start of one vector (y_i) and the next one (y_i+1).
-              There are no restrictions placed on stride_x. However, ensure that stride_y is of an appropriate size. For a typical
+              There are no restrictions placed on stride_y. However, ensure that stride_y is of an appropriate size. For a typical
               case, this means stride_y >= n * incy. stridey should be non zero.
      @param[in]
      batch_count [rocblas_int]
@@ -1647,15 +1647,16 @@ ROCBLAS_EXPORT rocblas_status rocblas_zaxpy_64(rocblas_handle                han
               handle to the rocBLAS library context queue.
     @param[in]
     n         [rocblas_int]
+              the number of elements in x and y.
     @param[in]
     alpha     specifies the scalar alpha.
     @param[in]
-    x         pointer storing vector x on the GPU.
+    x         device array of device pointers storing each vector x_i.
     @param[in]
     incx      [rocblas_int]
               specifies the increment for the elements of x.
     @param[in, out]
-    y         pointer storing vector y on the GPU.
+    y         device array of device pointers storing each vector y_i.
     @param[in]
     incy      [rocblas_int]
               specifies the increment for the elements of y.
@@ -1768,10 +1769,11 @@ ROCBLAS_EXPORT rocblas_status rocblas_zaxpy_batched_64(rocblas_handle           
               handle to the rocBLAS library context queue.
     @param[in]
     n         [rocblas_int]
+              the number of elements in x and y.
     @param[in]
     alpha     specifies the scalar alpha.
     @param[in]
-    x         pointer storing vector x on the GPU.
+    x         device pointer to the first vector x_1 in the batch.
     @param[in]
     incx      [rocblas_int]
               specifies the increment for the elements of x.
@@ -1779,7 +1781,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zaxpy_batched_64(rocblas_handle           
     stridex   [rocblas_stride]
               specifies the increment between vectors of x.
     @param[in, out]
-    y         pointer storing vector y on the GPU.
+    y         device pointer to the first vector y_1 in the batch.
     @param[in]
     incy      [rocblas_int]
               specifies the increment for the elements of y.
@@ -1916,7 +1918,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zaxpy_strided_batched_64(rocblas_handle   
               handle to the rocBLAS library context queue.
     @param[in]
     n         [rocblas_int]
-              the number of elements in x and y.
+              the number of elements in x.
     @param[in]
     x         device pointer storing vector x.
     @param[in]
@@ -1924,7 +1926,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zaxpy_strided_batched_64(rocblas_handle   
               specifies the increment for the elements of x. incx must be > 0.
     @param[out]
     result
-              device pointer or host pointer to store the asum product.
+              device pointer or host pointer to store the asum result.
               Return value is 0.0 if n <= 0.
 
     ********************************************************************/
@@ -2169,7 +2171,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dzasum_strided_batched_64(rocblas_handle h
               specifies the increment for the elements of x.
     @param[out]
     result
-              device pointer or host pointer to store the nrm2 product.
+              device pointer or host pointer to store the nrm2 result.
               Return value is 0.0 if n, incx<=0.
 
     ********************************************************************/
@@ -3713,7 +3715,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_drotm_64(rocblas_handle handle,
     incx    [rocblas_int]
             specifies the increment between elements of each x_i.
     @param[in, out]
-    y       device array of device pointers storing each vector y_1.
+    y       device array of device pointers storing each vector y_i.
     @param[in]
     incy    [rocblas_int]
             specifies the increment between elements of each y_i.
@@ -10786,6 +10788,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpsv_strided_batched_64(rocblas_handle   
             - if rocblas_fill_lower, the upper part of A is not referenced.
     @param[in]
     n         [rocblas_int]
+              n specifies the number of rows and columns of A. n >= 0.
     @param[in]
     alpha
               specifies the scalar alpha.
@@ -11277,6 +11280,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymv_strided_batched_64(rocblas_handle   
             - if rocblas_fill_lower, the upper part of A is not referenced.
     @param[in]
     n         [rocblas_int]
+              n specifies the number of rows and columns of A. n >= 0.
     @param[in]
     alpha
               specifies the scalar alpha.
@@ -11578,6 +11582,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspmv_strided_batched_64(rocblas_handle ha
               - if rocblas_fill_lower, the upper part of A is not referenced.
     @param[in]
     n         [rocblas_int]
+              n specifies the number of rows and columns of A. n >= 0.
     @param[in]
     k         [rocblas_int]
               specifies the number of sub- and super-diagonals.
@@ -16479,7 +16484,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymm_strided_batched_64(rocblas_handle   
     transA  [rocblas_operation]
             - rocblas_operation_transpose:           op(A) = A^T
             - rocblas_operation_none:                op(A) = A
-            - rocblas_operation_conjugate_transpose: op(A) = A^T
+            - rocblas_operation_conjugate_transpose: op(A) = A^H
             - rocblas_operation_conjugate_transpose is not supported for complex types. See cherk
             and zherk.
 
@@ -16645,7 +16650,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrk_64(rocblas_handle                han
     transA  [rocblas_operation]
             - rocblas_operation_transpose:           op(A) = A^T
             - rocblas_operation_none:                op(A) = A
-            - rocblas_operation_conjugate_transpose: op(A) = A^T
+            - rocblas_operation_conjugate_transpose: op(A) = A^H
             - rocblas_operation_conjugate_transpose is not supported for complex types. See cherk
             and zherk.
 
@@ -16822,7 +16827,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrk_batched_64(rocblas_handle           
     transA  [rocblas_operation]
             - rocblas_operation_transpose:           op(A) = A^T
             - rocblas_operation_none:                op(A) = A
-            - rocblas_operation_conjugate_transpose: op(A) = A^T
+            - rocblas_operation_conjugate_transpose: op(A) = A^H
             - rocblas_operation_conjugate_transpose is not supported for complex types. See cherk
             and zherk.
 
@@ -17025,7 +17030,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrk_strided_batched_64(rocblas_handle   
     trans  [rocblas_operation]
             - rocblas_operation_transpose:           op( A ) = A^T, op( B ) = B^T
             - rocblas_operation_none:                op( A ) = A, op( B ) = B
-            - rocblas_operation_conjugate_transpose: op( A ) = A^T, op( B ) = B^T
+            - rocblas_operation_conjugate_transpose: op( A ) = A^H, op( B ) = B^H
             - rocblas_operation_conjugate_transpose is not supported for complex types in csyr2k and zsyr2k.
 
     @param[in]
@@ -17659,7 +17664,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2k_strided_batched_64(rocblas_handle  
     trans  [rocblas_operation]
             - rocblas_operation_transpose:           op( A ) = A^T, op( B ) = B^T
             - rocblas_operation_none:                op( A ) = A, op( B ) = B
-            - rocblas_operation_conjugate_transpose: op( A ) = A^T, op( B ) = B^T
+            - rocblas_operation_conjugate_transpose: op( A ) = A^H, op( B ) = B^H
             - rocblas_operation_conjugate_transpose is not supported for complex types in csyrkx and zsyrkx.
 
     @param[in]
@@ -19157,6 +19162,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrtri(rocblas_handle                handl
               - 'rocblas_diagonal_unit': A is unit triangular.
     @param[in]
     n         [rocblas_int]
+              n specifies the number of rows and columns of A. n >= 0.
     @param[in]
     A         device array of device pointers storing each matrix A_i.
     @param[in]
@@ -19239,6 +19245,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrtri_batched(rocblas_handle             
               - 'rocblas_diagonal_unit': A is unit triangular.
     @param[in]
     n         [rocblas_int]
+              n specifies the number of rows and columns of A. n >= 0.
     @param[in]
     A         device pointer pointing to address of first matrix A_1.
     @param[in]
@@ -19357,7 +19364,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrtri_strided_batched(rocblas_handle     
 
     @param[in]
     transA  [rocblas_operation]
-            - transB:    op(A) = A.
+            - rocblas_operation_none:    op(A) = A.
             - rocblas_operation_transpose:      op(A) = A^T
             - rocblas_operation_conjugate_transpose:  op(A) = A^H
 
@@ -19547,7 +19554,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsm_64(rocblas_handle                han
             - rocblas_fill_lower:  each A_i is a  lower triangular matrix.
     @param[in]
     transA  [rocblas_operation]
-            - transB:    op(A) = A
+            - rocblas_operation_none:    op(A) = A
             - rocblas_operation_transpose:      op(A) = A^T
             - rocblas_operation_conjugate_transpose:  op(A) = A^H
     @param[in]
@@ -19582,7 +19589,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsm_64(rocblas_handle                han
            ldb specifies the first dimension of each B_i. ldb >= max( 1, m ).
     @param[in]
     batch_count [rocblas_int]
-                number of trsm operatons in the batch.
+                number of trsm operations in the batch.
     ********************************************************************/
 ROCBLAS_EXPORT rocblas_status rocblas_strsm_batched(rocblas_handle     handle,
                                                     rocblas_side       side,
@@ -19738,7 +19745,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsm_batched_64(rocblas_handle           
             - rocblas_fill_lower:  each A_i is a  lower triangular matrix.
     @param[in]
     transA  [rocblas_operation]
-            - transB:    op(A) = A.
+            - rocblas_operation_none:    op(A) = A.
             - rocblas_operation_transpose:      op(A) = A^T.
             - rocblas_operation_conjugate_transpose:  op(A) = A^H.
     @param[in]
@@ -19780,7 +19787,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsm_batched_64(rocblas_handle           
              stride from the start of one B_i matrix to the next B_(i + 1).
     @param[in]
     batch_count [rocblas_int]
-                number of trsm operatons in the batch.
+                number of trsm operations in the batch.
     ********************************************************************/
 ROCBLAS_EXPORT rocblas_status rocblas_strsm_strided_batched(rocblas_handle    handle,
                                                             rocblas_side      side,
@@ -19943,7 +19950,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsm_strided_batched_64(rocblas_handle   
               specifies the form of op( B ).
     @param[in]
     m         [rocblas_int]
-              number or rows of matrices op( A ) and C.
+              number of rows of matrices op( A ) and C.
     @param[in]
     n         [rocblas_int]
               number of columns of matrices op( B ) and C.
@@ -20152,13 +20159,13 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgemm_64(rocblas_handle                han
               specifies the form of op( B ).
     @param[in]
     m         [rocblas_int]
-              matrix dimention m.
+              matrix dimension m.
     @param[in]
     n         [rocblas_int]
-              matrix dimention n.
+              matrix dimension n.
     @param[in]
     k         [rocblas_int]
-              matrix dimention k.
+              matrix dimension k.
     @param[in]
     alpha     device pointer or host pointer specifying the scalar alpha.
     @param[in]
@@ -20374,13 +20381,13 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgemm_batched_64(rocblas_handle           
               specifies the form of op( B ).
     @param[in]
     m         [rocblas_int]
-              matrix dimention m.
+              matrix dimension m.
     @param[in]
     n         [rocblas_int]
-              matrix dimention n.
+              matrix dimension n.
     @param[in]
     k         [rocblas_int]
-              matrix dimention k.
+              matrix dimension k.
     @param[in]
     alpha     device pointer or host pointer specifying the scalar alpha.
     @param[in]
@@ -20412,7 +20419,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgemm_batched_64(rocblas_handle           
     @param[in]
     batch_count
               [rocblas_int]
-              number of gemm operatons in the batch.
+              number of gemm operations in the batch.
 
     ********************************************************************/
 ROCBLAS_EXPORT rocblas_status rocblas_sgemm_strided_batched(rocblas_handle    handle,
@@ -22637,7 +22644,7 @@ ROCBLAS_EXPORT rocblas_status
             - rocblas_operation_conjugate_transpose:  op(B) = B^H
     @param[in]
     n         [rocblas_int]
-              number or rows of matrices op( A ), columns of op( B ), and (rows, columns) of C.
+              number of rows of matrices op( A ), columns of op( B ), and (rows, columns) of C.
     @param[in]
     k         [rocblas_int]
               number of rows of matrices op( B ) and columns of op( A ).
@@ -22821,7 +22828,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgemmt_64(rocblas_handle                ha
             - rocblas_operation_conjugate_transpose:  op(B_i) = B_i^H
     @param[in]
     n         [rocblas_int]
-              number or rows of matrices op( A_i ), columns of op( B_i ), and (rows, columns) of C_i.
+              number of rows of matrices op( A_i ), columns of op( B_i ), and (rows, columns) of C_i.
     @param[in]
     k         [rocblas_int]
               number of rows of matrices op( B_i ) and columns of op( A_i ).
@@ -23016,7 +23023,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgemmt_batched_64(rocblas_handle          
             - rocblas_operation_conjugate_transpose:  op(B_i) = B_i^H
     @param[in]
     n         [rocblas_int]
-              number or rows of matrices op( A_i ), columns of op( B_i ), and (rows, columns) of C_i.
+              number of rows of matrices op( A_i ), columns of op( B_i ), and (rows, columns) of C_i.
     @param[in]
     k         [rocblas_int]
               number of rows of matrices op( B_i ) and columns of op( A_i ).
@@ -23051,7 +23058,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgemmt_batched_64(rocblas_handle          
     @param[in]
     batch_count
               [rocblas_int]
-              number of gemm operatons in the batch.
+              number of gemm operations in the batch.
 
     ********************************************************************/
 ROCBLAS_EXPORT rocblas_status rocblas_sgemmt_strided_batched(rocblas_handle    handle,
@@ -23387,7 +23394,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_geam_ex(rocblas_handle            handle,
 
     @param[in]
     transA  [rocblas_operation]
-            - transB:    op(A) = A.
+            - rocblas_operation_none:    op(A) = A.
             - rocblas_operation_transpose:      op(A) = A^T
             - rocblas_operation_conjugate_transpose:  op(A) = A^H
 
@@ -23565,7 +23572,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_trsm_ex(rocblas_handle    handle,
 
     @param[in]
     transA  [rocblas_operation]
-            - transB:    op(A) = A.
+            - rocblas_operation_none:    op(A) = A.
             - rocblas_operation_transpose:      op(A) = A^T
             - rocblas_operation_conjugate_transpose:  op(A) = A^H
 
@@ -23711,7 +23718,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_trsm_batched_ex(rocblas_handle    handle,
 
     @param[in]
     transA  [rocblas_operation]
-            - transB:    op(A) = A.
+            - rocblas_operation_none:    op(A) = A.
             - rocblas_operation_transpose:      op(A) = A^T
             - rocblas_operation_conjugate_transpose:  op(A) = A^H
 
@@ -23855,7 +23862,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_trsm_strided_batched_ex(rocblas_handle    
     transA  [rocblas_operation]
             - rocblas_operation_transpose:           op(A) = A^T
             - rocblas_operation_none:                op(A) = A
-            - rocblas_operation_conjugate_transpose: op(A) = A^T
+            - rocblas_operation_conjugate_transpose: op(A) = A^H
             - rocblas_operation_conjugate_transpose is not supported for complex types. See cherk
             and zherk.
 
@@ -24763,7 +24770,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dotc_strided_batched_ex_64(rocblas_handle 
               specifies the increment for the elements of x.
     @param[out]
     results
-              device pointer or host pointer to store the nrm2 product.
+              device pointer or host pointer to store the nrm2 result.
               Return value is 0.0 if n, incx<=0.
     @param[in]
     result_type [rocblas_datatype]
