@@ -1,0 +1,67 @@
+{
+  "_comment": "mx_env_sweep.py config, B0 4096x4096x65536: plain fp8 (ROCKE_EXP_MX off: the early-refill champion loop) with and without the batched cshuffle copy-out (ROCKE_EXP_EPI_BATCH=64), at clusters none / 1x4 / 4x4; the MX best (mxpf3) as the anchor.",
+  "base_env": {
+    "ROCKE_EXP_MX": "1",
+    "ROCKE_EXP_MX_SWZ": "1",
+    "ROCKE_EXP_MX_SCALE_MC": "0",
+    "ROCKE_EXP_MX_KFENCE": "1",
+    "ROCKE_EXP_MX_SCALE_NOCLIP": "1",
+    "ROCKE_EXP_MC_SOLO0": "1"
+  },
+  "variants": [
+    {
+      "name": "plain",
+      "env": {
+        "ROCKE_EXP_MX": ""
+      }
+    },
+    {
+      "name": "plaineb",
+      "env": {
+        "ROCKE_EXP_MX": "",
+        "ROCKE_EXP_EPI_BATCH": "64"
+      }
+    },
+    {
+      "name": "mxpf3",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "3",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_RA_NB1": "24",
+        "ROCKE_EXP_EPI_BATCH": "64",
+        "ROCKE_EXP_MX_RA_PRO": "1",
+        "ROCKE_EXP_GL2_SCALES": "1"
+      }
+    }
+  ],
+  "arms": [
+    {
+      "name": "c1x1"
+    },
+    {
+      "name": "c1x4",
+      "cluster": "1,4"
+    },
+    {
+      "name": "c4x4",
+      "cluster": "4,4"
+    }
+  ],
+  "shapes": [
+    [
+      4096,
+      4096,
+      65536
+    ]
+  ],
+  "rounds": 5,
+  "warmup": 50,
+  "repeat": 100
+}

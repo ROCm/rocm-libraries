@@ -1998,7 +1998,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     # read pipeline). Every wave issues one data load, chosen by
                     # selects (odd waves A, even waves B, half the rows each),
                     # and one K-step row of its operand's scale tile.
-                    if _tdm_waves != 4 or not (_mx and _mx_ra) or block_m != block_n:
+                    if _tdm_waves != 4 or not _mx_ra or block_m != block_n:
                         raise ValueError("ROCKE_EXP_TDM_SPLIT=2 needs 4 waves, ROCKE_EXP_MX_RA and a square tile")
                     c2 = b.const_i32(2)
                     comp = b.div(_tdm_wave_id, c2)
@@ -2043,6 +2043,8 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                             pad_amount=_tdm_pad_amount, workgroup_mask=mask,
                         )
                     b.tensor_load_to_lds(*groups, cachepolicy=0)
+                    if not _mx:
+                        return  # plain fp8: no scale tiles
                     # Scales: wave component c loads K-step row c of its operand's
                     # [ksteps][rows * 4] tile (constant extents, as SCALE_NOCLIP).
                     ksteps = block_k // 128
@@ -2066,7 +2068,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     b.tensor_load_to_lds(*sgroups, cachepolicy=0)
                     return
                 if _os_mx.environ.get("ROCKE_EXP_TDM_SPLIT") == "1":
-                    if _tdm_waves != 4 or not (_mx and _mx_ra):
+                    if _tdm_waves != 4 or not _mx_ra:
                         raise ValueError("ROCKE_EXP_TDM_SPLIT needs 4 waves and ROCKE_EXP_MX_RA")
                     c2 = b.const_i32(2)
                     comp = b.div(_tdm_wave_id, c2)
@@ -3478,15 +3480,24 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             if fenced:
                 b.sched_barrier(0)
 
-        a_row_in_atom, _ = op.a_layout().coord(b, lane, 0)
-        _, b_col_in_atom = op.b_layout().coord(b, lane, 0)
-        k_in_atom = b.mul(b.div(lane, b.const_i32(16)), b.const_i32(16))
+        a_row_in_atom, a_k_plain = op.a_layout().coord(b, lane, 0)
+        b_k_plain, b_col_in_atom = op.b_layout().coord(b, lane, 0)
+        if _mx:
+            # Scaled WMMA lane map: lane holds K chunks (2c + lane // 16) * 16.
+            k_in_atom = b.mul(b.div(lane, b.const_i32(16)), b.const_i32(16))
+            a_k_in, b_k_in, frag_chunk = k_in_atom, k_in_atom, 32
+        else:
+            # Plain fp8 WMMA: the op's own lane map, K-contiguous 16 B chunks.
+            k_in_atom = a_k_plain
+            a_k_in, b_k_in, frag_chunk = a_k_plain, b_k_plain, 16
         lane16 = b.mod(lane, b.const_i32(16))
         warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
         warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
         ks = block_k // 128
 
         rowmap = _os_ra.environ.get("ROCKE_EXP_MX_ROWMAP") == "1"
+        if rowmap and not _mx:
+            raise ValueError("ROCKE_EXP_MX_ROWMAP needs ROCKE_EXP_MX")
         if rowmap:
             # Lane l of repeat r reads wave row r + l * R (R = repeats = 8, 256 B
             # rows), stored by the split loads' TDM iterate mode as blocks of 8
@@ -3545,16 +3556,18 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 return _rm_frag(A_smem, rmb["a"], p, kk, mi)
             row = b.add(warp_m_off, b.const_i32(mi * t.warp_tile_m + (p * block_m if _prefetch else 0)))
             kb = b.const_i32(kk * t.warp_tile_k)
-            return _emit_frag_smem_load(A_smem, a_row_in_atom, k_in_atom, row, kb, a_per_lane, 32)
+            return _emit_frag_smem_load(A_smem, a_row_in_atom, a_k_in, row, kb, a_per_lane, frag_chunk)
 
         def rd_b(p, kk, ni):
             if rowmap:
                 return _rm_frag(A_smem if _lds_ilv else B_smem, rmb["b"], p, kk, ni)
             row = b.add(warp_n_off, b.const_i32(ni * t.warp_tile_n + (p * block_n if _prefetch else 0)))
             kb = b.const_i32(kk * t.warp_tile_k)
-            return _emit_frag_smem_load(B_smem, b_col_in_atom, k_in_atom, row, kb, b_per_lane, 32)
+            return _emit_frag_smem_load(B_smem, b_col_in_atom, b_k_in, row, kb, b_per_lane, frag_chunk)
 
         def rd_scales(p, kk):
+            if not _mx:
+                return [], []
             row = b.const_i32((p * ks if _prefetch else 0) + kk)
 
             def words(smem, mn_off, reps, step):
@@ -3587,7 +3600,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         def unflat(vals):
             vals = list(vals)
             out = []
-            for n in (mfmas_m, mfmas_m, mfmas_n, half, half):
+            for n in (mfmas_m, mfmas_m if _mx else 0, mfmas_n if _mx else 0, half, half):
                 out.append(vals[:n])
                 vals = vals[n:]
             return tuple(out)
@@ -3662,7 +3675,10 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             for j, mi in order[lo:hi]:
                 ni = which * half + j
                 f = mi * mfmas_n + ni
-                acc[f] = b.mma(_mx_op.op_id, a[mi], bh[j], acc[f], sa[mi], sb[ni])
+                if _mx:
+                    acc[f] = b.mma(_mx_op.op_id, a[mi], bh[j], acc[f], sa[mi], sb[ni])
+                else:
+                    acc[f] = _emit_mma(b, op, a[mi], bh[j], acc[f])
 
         def _refill(p, k_cur):
             k_next = b.add(k_cur, bk2)
@@ -3910,7 +3926,8 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             _for_results = acc
             return
 
-        if spec.trait.tdm_early_refill and _mx and _mx_ra:
+        # The read-ahead loop serves the MX kernel and, with no scales, plain fp8.
+        if spec.trait.tdm_early_refill and _mx_ra:
             _emit_kloop_mx_readahead()
             return
         if spec.trait.tdm_early_refill:

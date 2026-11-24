@@ -275,18 +275,20 @@ class _Problem:
         self._h2d(self.sb, b.reshape(n, k // 128, 4).transpose(1, 0, 2).copy())
         self.swz = swz
 
-    def args(self):
+    def args(self, plain=False):
+        """Kernel arguments; ``plain`` (no ROCKE_EXP_MX): without the scale pointers."""
         m, n, k = self.shape
-        return (struct.pack("<QQQiii", self.a, self.b, self.c, m, n, k)
-                + struct.pack("<iQQ", 0, self.sa, self.sb))
+        head = struct.pack("<QQQiii", self.a, self.b, self.c, m, n, k)
+        return head if plain else head + struct.pack("<iQQ", 0, self.sa, self.sb)
 
     def free(self):
         for p in (self.a, self.b, self.c, self.sa, self.sb):
             self.rt.free(p)
 
 
-def _verify(rt, fn, grid, block, cluster, swz, mn):
-    """Exact (integer set) and rand-bound checks at K = 8192."""
+def _verify(rt, fn, grid, block, cluster, swz, mn, plain=False):
+    """Exact (integer set) and rand-bound checks at K = 8192; ``plain`` (no
+    ROCKE_EXP_MX): the reference without scales."""
     import numpy as np
 
     from rocke.examples.gfx1250.gemm_perf_fp8.fp8_data import (
@@ -305,7 +307,7 @@ def _verify(rt, fn, grid, block, cluster, swz, mn):
 
     def run():
         rt.memset(p.c, 0, m * n * 2)
-        rt.launch(fn, grid, block, p.args(), cluster=cluster)
+        rt.launch(fn, grid, block, p.args(plain), cluster=cluster)
         rt.wait_stream(0)
         buf = (ctypes.c_uint8 * (m * n * 2))()
         rt.memcpy_d2h(buf, p.c, m * n * 2)
@@ -313,6 +315,8 @@ def _verify(rt, fn, grid, block, cluster, swz, mn):
             np.float32).reshape(m, n)
 
     def deq(x, s):
+        if plain:
+            return x
         return x * np.repeat(np.exp2(s.astype(np.float64) - 127.0), 32, axis=1)
 
     rng = np.random.default_rng(7)
@@ -412,6 +416,9 @@ def main():
         manifest.write_text(json.dumps(saved, indent=1) + "\n")
     swz_of = {t: (dict(base, **v.get("env", {})).get("ROCKE_EXP_MX_SWZ") == "1")
               for v in cfg["variants"] for t in [f"{v['name']}|{a['name']}" for a in cfg["arms"]]}
+    # A variant whose env drops ROCKE_EXP_MX (set it to "") builds the plain fp8 kernel.
+    plain_of = {t: not (dict(base, **v.get("env", {})).get("ROCKE_EXP_MX"))
+                for v in cfg["variants"] for t in [f"{v['name']}|{a['name']}" for a in cfg["arms"]]}
     if o.dry_run or not built:
         return
 
@@ -440,7 +447,7 @@ def main():
             fl = 2.0 * shape[0] * shape[1] * shape[2]
             for r in range(rounds):
                 for t in (tags if r % 2 == 0 else tags[::-1]):
-                    if prob.swz != swz_of[t]:
+                    if not plain_of[t] and prob.swz != swz_of[t]:
                         prob.put_scales(*prob.scales, swz_of[t])
                     rt.wait_stream(0)
                     time.sleep(1.0)
@@ -453,7 +460,7 @@ def main():
                             tainted, why = True, ["amd-smi failed"]
                         if tainted:
                             _log("  pair busy: " + "; ".join(w for w in why if any(f"HIP {i} " in w for i in pair) or w == "amd-smi failed"))
-                    args = prob.args()
+                    args = prob.args(plain_of[t])
                     for _ in range(warm):
                         rt.launch(fns[t], grid, block, args, cluster=launch_cluster[t])
                     rt.wait_stream(0)
@@ -499,7 +506,7 @@ def main():
         _log("\n== verify (K = 8192) of the best kernels")
         for shape, t in best:
             grid, block = _launch_geometry(spec, (shape[0], shape[1], 8192))
-            exact, rel, ok = _verify(rt, fns[t], grid, block, launch_cluster[t], swz_of[t], shape[:2])
+            exact, rel, ok = _verify(rt, fns[t], grid, block, launch_cluster[t], swz_of[t], shape[:2], plain_of[t])
             _log(f"  {t} {shape[0]}x{shape[1]}: int_exact={exact} rand_rel={rel:.1e} "
                  + ("PASS" if exact and ok else "FAIL"))
     for m in mods.values():
