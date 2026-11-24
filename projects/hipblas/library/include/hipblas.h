@@ -20414,14 +20414,14 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZhemmStridedBatched_64(hipblasHandle_t    
             - If side == HIPBLAS_SIDE_LEFT,  lda >= max( 1, m ).
             - If side == HIPBLAS_SIDE_RIGHT, lda >= max( 1, n ).
 
-    @param[inout]
+    @param[in]
     B       Device pointer to the matrix B of dimension (ldb, n) on the GPU.
 
     @param[in]
     ldb    [int]
            ldb specifies the first dimension of B. ldb >= max( 1, m ).
 
-    @param[in]
+    @param[out]
     C      Device pointer to the matrix C of dimension (ldc, n) on the GPU.
            Users can pass in the same matrix B to parameter C to achieve
            in-place functionality for trmm.
@@ -20638,7 +20638,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmm_64(hipblasHandle_t         handle,
             - If side == HIPBLAS_SIDE_LEFT,  lda >= max( 1, m ).
             - If side == HIPBLAS_SIDE_RIGHT, lda >= max( 1, n ).
 
-    @param[inout]
+    @param[in]
     B       device array of device pointers storing each matrix B_i of
             dimension (ldb, n) on the GPU.
 
@@ -20646,7 +20646,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmm_64(hipblasHandle_t         handle,
     ldb    [int]
            ldb specifies the first dimension of B_i. ldb >= max( 1, m ).
 
-    @param[in]
+    @param[out]
     C      device array of device pointers storing each matrix C_i of
            dimension (ldc, n) on the GPU. Users can pass in the same
            matrices B to parameter C to achieve in-place functionality of trmmBatched.
@@ -20878,7 +20878,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmmBatched_64(hipblasHandle_t           
     strideA  [hipblasStride]
               stride from the start of one matrix (A_i) to the next one (A_i+1).
 
-    @param[inout]
+    @param[in]
     B      Device pointer to the first matrix B_0 on the GPU. Each B_i is of
            dimension ( ldb, n ).
 
@@ -20890,7 +20890,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmmBatched_64(hipblasHandle_t           
     strideB  [hipblasStride]
               stride from the start of one matrix (B_i) to the next one (B_i+1).
 
-    @param[in]
+    @param[out]
     C      Device pointer to the first matrix C_0 on the GPU. Each C_i is of
            dimension ( ldc, n ).
 
