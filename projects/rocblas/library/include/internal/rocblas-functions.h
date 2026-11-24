@@ -12301,7 +12301,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgerc_batched_64(rocblas_handle           
               stride from the start of one vector (x_i) to the next one (x_i+1).
               There are no restrictions placed on stride_x. However, ensure that stride_x is of an appropriate size. For a typical
               case, this means stride_x >= m * incx.
-    @param[in, out]
+    @param[in]
     y         device pointer to the first vector (y_1) in the batch.
     @param[in]
     incy      [rocblas_int]
