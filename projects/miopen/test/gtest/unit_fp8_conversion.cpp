@@ -169,24 +169,35 @@ void TestFormats(Fp8Type fp8_type)
 
 } // namespace
 
-// NOLINTNEXTLINE(google-readability-avoid-underscore-in-googletest-name)
-TEST(GPU_Fp8Conversion_FP8, DefaultAndSoftwareFallback) { TestFormats(Fp8Type::Fp8); }
+using GPU_Fp8Conversion_FP8 = ::testing::TestWithParam<int>;
 
 // NOLINTNEXTLINE(google-readability-avoid-underscore-in-googletest-name)
-TEST(GPU_Bfp8Conversion_BFP8, DefaultAndSoftwareFallback) { TestFormats(Fp8Type::Bfp8); }
+TEST_P(GPU_Fp8Conversion_FP8, DefaultAndSoftwareFallback) { TestFormats(Fp8Type::Fp8); }
+
+using GPU_Bfp8Conversion_BFP8 = ::testing::TestWithParam<int>;
+
+// NOLINTNEXTLINE(google-readability-avoid-underscore-in-googletest-name)
+TEST_P(GPU_Bfp8Conversion_BFP8, DefaultAndSoftwareFallback) { TestFormats(Fp8Type::Bfp8); }
 
 #else
 
+using GPU_Fp8Conversion_FP8 = ::testing::TestWithParam<int>;
+
 // NOLINTNEXTLINE(google-readability-avoid-underscore-in-googletest-name)
-TEST(GPU_Fp8Conversion_FP8, SkippedForNonHipBackend)
+TEST_P(GPU_Fp8Conversion_FP8, SkippedForNonHipBackend)
 {
     GTEST_SKIP() << "HIP backend not available";
 }
 
+using GPU_Bfp8Conversion_BFP8 = ::testing::TestWithParam<int>;
+
 // NOLINTNEXTLINE(google-readability-avoid-underscore-in-googletest-name)
-TEST(GPU_Bfp8Conversion_BFP8, SkippedForNonHipBackend)
+TEST_P(GPU_Bfp8Conversion_BFP8, SkippedForNonHipBackend)
 {
     GTEST_SKIP() << "HIP backend not available";
 }
 
 #endif
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Fp8Conversion_FP8, ::testing::Values(0));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Bfp8Conversion_BFP8, ::testing::Values(0));

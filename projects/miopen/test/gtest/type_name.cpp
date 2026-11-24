@@ -44,10 +44,14 @@ struct ns_class
 };
 } // namespace foo
 
-TEST(CPU_type_name_NONE, check_type_name)
+using CPU_type_name_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_type_name_NONE, check_type_name)
 {
     EXPECT_EQ(miopen::get_type_name<global_class>(), "global_class");
     EXPECT_EQ(miopen::get_type_name<global_class::inner_class>(), "global_class::inner_class");
     EXPECT_EQ(miopen::get_type_name<foo::ns_class>(), "foo::ns_class");
     EXPECT_EQ(miopen::get_type_name<foo::ns_class::inner_class>(), "foo::ns_class::inner_class");
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_type_name_NONE, testing::Values(0));
