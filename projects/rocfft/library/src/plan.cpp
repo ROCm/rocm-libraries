@@ -177,27 +177,6 @@ const data_set_t& rocfft_plan_description_t::undistributed_layout_for(io_data_la
     return io == io_data_label::INPUT ? input_layout : output_layout;
 }
 
-bool rocfft_plan_description_t::multiple_devices_in_rank(const rocfft_field_t& field)
-{
-    // map ranks to a set of distinct devices
-    std::map<int, std::set<int>> rank_devices;
-
-    // collect information on bricks in the field
-    for(const auto& brick : field.get_bricks())
-    {
-        auto& devices = rank_devices[brick.location.comm_rank];
-        devices.insert(brick.location.device);
-    }
-
-    // any rank needs to have multiple devices to return true
-    for(const auto& rank_device : rank_devices)
-    {
-        if(rank_device.second.size() > 1)
-            return true;
-    }
-    return false;
-}
-
 size_t rocfft_plan_t::AddMultiPlanItem(std::unique_ptr<MultiPlanItem>&& item,
                                        const std::vector<size_t>&       antecedents)
 {
@@ -2597,27 +2576,18 @@ std::vector<size_t> rocfft_plan_t::GlobalTranspose(const field_view_t&        in
     }
 #endif
 
-    // All-to-all transpose is preferred as it's faster. This requires
-    // that each rank have a single base pointer to send/receive with
-    // offsets for every other rank.
-    // That's only feasible if each rank has data on just one device
-    // (since we can hipMalloc a single buffer per device and have
-    // offsets into it).
-
-    // Fall back to point-to-point transfers if all-to-all is not
-    // possible.
-
-    if(rocfft_plan_description_t::multiple_devices_in_rank(input.field)
-       || rocfft_plan_description_t::multiple_devices_in_rank(output.field))
-    {
-        return GlobalTransposeP2P(input, output, antecedents);
-    }
-    else
+    // GlobalTransposeA2A keeps a single send/recv slot per peer rank and throws on ranks
+    // with nothing to send or receive: each rank must own exactly one brick on either side
+    const auto comm_size = static_cast<size_t>(desc.get_local_comm_size());
+    if(comm_size > 1 && input.field.num_bricks() == comm_size
+       && output.field.num_bricks() == comm_size && input.field.ranks().size() == comm_size
+       && output.field.ranks().size() == comm_size)
     {
         // GlobalTransposeA2A will use MPI_Ialltoall when possible,
         // falling back to MPI_Ialltoallv otherwise
         return GlobalTransposeA2A(input, output, antecedents);
     }
+    return GlobalTransposeP2P(input, output, antecedents);
 }
 
 #ifdef ROCFFT_RCCL_ENABLE
