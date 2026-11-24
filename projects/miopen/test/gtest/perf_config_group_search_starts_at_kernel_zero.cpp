@@ -82,7 +82,9 @@ Problem MakeSearchProblem3D(group_conv::GroupConvTestConfig<3u> conv,
 
 } // namespace
 
-TEST(GPU_PerfConfig_HipImplicitGemmGroupFwdXdlops_FP16, SearchStartsAtKernelZero)
+using GPU_PerfConfig_HipImplicitGemmGroupFwdXdlops_FP16 = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_PerfConfig_HipImplicitGemmGroupFwdXdlops_FP16, SearchStartsAtKernelZero)
 {
     const auto device_name = miopen::solver::GetCurrentDeviceName();
     if(device_name.empty())
@@ -106,7 +108,13 @@ TEST(GPU_PerfConfig_HipImplicitGemmGroupFwdXdlops_FP16, SearchStartsAtKernelZero
     EXPECT_TRUE(cfg.IsValid(problem));
 }
 
-TEST(GPU_PerfConfig_HipImplicitGemmGroupBwdXdlops_FP16, SearchStartsAtKernelZero)
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_PerfConfig_HipImplicitGemmGroupFwdXdlops_FP16,
+                         ::testing::Values(0));
+
+using GPU_PerfConfig_HipImplicitGemmGroupBwdXdlops_FP16 = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_PerfConfig_HipImplicitGemmGroupBwdXdlops_FP16, SearchStartsAtKernelZero)
 {
     const auto device_name = miopen::solver::GetCurrentDeviceName();
     if(device_name.empty())
@@ -131,7 +139,13 @@ TEST(GPU_PerfConfig_HipImplicitGemmGroupBwdXdlops_FP16, SearchStartsAtKernelZero
     EXPECT_TRUE(cfg.IsValid(problem));
 }
 
-TEST(GPU_PerfConfig_HipImplicitGemmGroupWrwXdlops_FP32, SearchStartsAtKernelZero)
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_PerfConfig_HipImplicitGemmGroupBwdXdlops_FP16,
+                         ::testing::Values(0));
+
+using GPU_PerfConfig_HipImplicitGemmGroupWrwXdlops_FP32 = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_PerfConfig_HipImplicitGemmGroupWrwXdlops_FP32, SearchStartsAtKernelZero)
 {
     const auto device_name = miopen::solver::GetCurrentDeviceName();
     if(device_name.empty())
@@ -156,12 +170,18 @@ TEST(GPU_PerfConfig_HipImplicitGemmGroupWrwXdlops_FP32, SearchStartsAtKernelZero
     EXPECT_TRUE(cfg.IsValid(problem));
 }
 
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_PerfConfig_HipImplicitGemmGroupWrwXdlops_FP32,
+                         ::testing::Values(0));
+
 // --- Host-only advance walk for the non-split solvers (2D Fwd, 3D Fwd, 3D Bwd). With valid_kernels
 // pre-populated, SetNextValue() bypasses the CK populate branch and runs only the advance path: it
 // must visit index 0..N-1 in order and then return false without stepping out of bounds. (The
 // split-k Bwd/Wrw advance walk is covered in perf_config_group_deterministic_set_next_value.cpp.)
 
-TEST(CPU_PerfConfigGroupFwdAdvance_NONE, WalksEveryKernelThenExhausts)
+using CPU_PerfConfigGroupFwdAdvance_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_PerfConfigGroupFwdAdvance_NONE, WalksEveryKernelThenExhausts)
 {
     const auto problem =
         MakeSearchProblem({1, 64, 64, 64, {28, 28}, {3, 3}, {1, 1}, {1, 1}, {1, 1}},
@@ -188,7 +208,7 @@ TEST(CPU_PerfConfigGroupFwdAdvance_NONE, WalksEveryKernelThenExhausts)
     EXPECT_EQ(cfg.index, 2);
 }
 
-TEST(CPU_PerfConfigGroupFwdAdvance_NONE, SingleKernelExhaustsWithoutReemit)
+TEST_P(CPU_PerfConfigGroupFwdAdvance_NONE, SingleKernelExhaustsWithoutReemit)
 {
     const auto problem =
         MakeSearchProblem({1, 64, 64, 64, {28, 28}, {3, 3}, {1, 1}, {1, 1}, {1, 1}},
@@ -208,7 +228,11 @@ TEST(CPU_PerfConfigGroupFwdAdvance_NONE, SingleKernelExhaustsWithoutReemit)
     EXPECT_EQ(cfg.kernel_id, "A");
 }
 
-TEST(CPU_PerfConfig3DGroupFwdAdvance_NONE, WalksEveryKernelThenExhausts)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_PerfConfigGroupFwdAdvance_NONE, testing::Values(0));
+
+using CPU_PerfConfig3DGroupFwdAdvance_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_PerfConfig3DGroupFwdAdvance_NONE, WalksEveryKernelThenExhausts)
 {
     const auto problem = MakeSearchProblem3D(
         {1, 64, 64, 64, {4, 28, 28}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}},
@@ -234,7 +258,11 @@ TEST(CPU_PerfConfig3DGroupFwdAdvance_NONE, WalksEveryKernelThenExhausts)
     EXPECT_EQ(cfg.index, 2);
 }
 
-TEST(CPU_PerfConfig3DGroupBwdAdvance_NONE, WalksEveryKernelThenExhausts)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_PerfConfig3DGroupFwdAdvance_NONE, testing::Values(0));
+
+using CPU_PerfConfig3DGroupBwdAdvance_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_PerfConfig3DGroupBwdAdvance_NONE, WalksEveryKernelThenExhausts)
 {
     const auto problem = MakeSearchProblem3D(
         {1, 64, 64, 64, {4, 28, 28}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}},
@@ -259,3 +287,5 @@ TEST(CPU_PerfConfig3DGroupBwdAdvance_NONE, WalksEveryKernelThenExhausts)
     EXPECT_FALSE(cfg.SetNextValue(problem));
     EXPECT_EQ(cfg.index, 2);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_PerfConfig3DGroupBwdAdvance_NONE, testing::Values(0));

@@ -1513,7 +1513,7 @@ bool RegisterPerfDbChildProcess()
 
 [[maybe_unused]] const bool perfdb_child_registered = RegisterPerfDbChildProcess();
 
-class CPU_PerfDb_NONE : public ::testing::Test
+class CPU_PerfDb_NONE : public testing::TestWithParam<int>
 {
 protected:
     TempFile temp_file{"miopen.tests.perfdb"};
@@ -1570,10 +1570,12 @@ protected:
 // Known issue: https://trac.cppcheck.net/ticket/9160 (wontfix).
 // Same workaround used in conv_ai_3d_heuristics.cpp.
 // cppcheck-suppress syntaxError
-TEST_F(CPU_PerfDb_NONE, RamDb_AllTests) { DbTests<RamDb>(); }
+TEST_P(CPU_PerfDb_NONE, RamDb_AllTests) { DbTests<RamDb>(); }
 
-TEST_F(CPU_PerfDb_NONE, PlainTextDb_AllTests) { DbTests<PlainTextDb>(); }
+TEST_P(CPU_PerfDb_NONE, PlainTextDb_AllTests) { DbTests<PlainTextDb>(); }
 
-TEST_F(CPU_PerfDb_NONE, MultiFileDb_AllTests) { MultiFileDbTests(); }
+TEST_P(CPU_PerfDb_NONE, MultiFileDb_AllTests) { MultiFileDbTests(); }
+
+INSTANTIATE_TEST_SUITE_P(Standard, CPU_PerfDb_NONE, testing::Values(0));
 
 } // anonymous namespace

@@ -360,7 +360,9 @@ private:
     const unsigned int test_w = 1500;
 };
 
-TEST(GPU_SoftmaxFind20_FP32, softmaxForward)
+using GPU_SoftmaxFind20_FP32 = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_SoftmaxFind20_FP32, softmaxForward)
 {
     Handle& handle = get_handle();
 
@@ -374,7 +376,7 @@ TEST(GPU_SoftmaxFind20_FP32, softmaxForward)
     test.Finalize(solutions);
 }
 
-TEST(GPU_SoftmaxFind20_FP32, softmaxBackward_fp32)
+TEST_P(GPU_SoftmaxFind20_FP32, softmaxBackward_fp32)
 {
     Handle& handle = get_handle();
 
@@ -388,7 +390,11 @@ TEST(GPU_SoftmaxFind20_FP32, softmaxBackward_fp32)
     test.Finalize(solutions);
 }
 
-TEST(GPU_SoftmaxFind20_FP16, softmaxBackward_log_instance_mode_fp16)
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_SoftmaxFind20_FP32, ::testing::Values(0));
+
+using GPU_SoftmaxFind20_FP16 = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_SoftmaxFind20_FP16, softmaxBackward_log_instance_mode_fp16)
 {
     Handle& handle = get_handle();
 
@@ -402,7 +408,7 @@ TEST(GPU_SoftmaxFind20_FP16, softmaxBackward_log_instance_mode_fp16)
     test.Finalize(solutions);
 }
 
-TEST(GPU_SoftmaxFind20_FP16, softmaxBackward_log_channel_mode_fp16)
+TEST_P(GPU_SoftmaxFind20_FP16, softmaxBackward_log_channel_mode_fp16)
 {
     Handle& handle = get_handle();
 
@@ -416,7 +422,11 @@ TEST(GPU_SoftmaxFind20_FP16, softmaxBackward_log_channel_mode_fp16)
     test.Finalize(solutions);
 }
 
-TEST(GPU_SoftmaxFind20_BFP16, softmaxBackward_log_instance_mode_bfp16)
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_SoftmaxFind20_FP16, ::testing::Values(0));
+
+using GPU_SoftmaxFind20_BFP16 = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_SoftmaxFind20_BFP16, softmaxBackward_log_instance_mode_bfp16)
 {
     Handle& handle = get_handle();
 
@@ -430,7 +440,7 @@ TEST(GPU_SoftmaxFind20_BFP16, softmaxBackward_log_instance_mode_bfp16)
     test.Finalize(solutions);
 }
 
-TEST(GPU_SoftmaxFind20_BFP16, softmaxBackward_log_channel_mode_bfp16)
+TEST_P(GPU_SoftmaxFind20_BFP16, softmaxBackward_log_channel_mode_bfp16)
 {
     Handle& handle = get_handle();
 
@@ -443,3 +453,5 @@ TEST(GPU_SoftmaxFind20_BFP16, softmaxBackward_log_channel_mode_bfp16)
 
     test.Finalize(solutions);
 }
+
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_SoftmaxFind20_BFP16, ::testing::Values(0));

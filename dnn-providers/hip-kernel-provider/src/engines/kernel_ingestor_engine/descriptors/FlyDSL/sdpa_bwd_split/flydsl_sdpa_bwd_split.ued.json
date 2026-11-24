@@ -10,10 +10,10 @@
   "predict_engine": {
     "default": "cce91ef0-6b53-5888-ab97-18aa6f8cec29",
     "gfx1100": [
-      "66758ad0-552d-4e37-8035-af5c0cc648b9"
+      "3d227fd8-8dd5-43e6-8599-1f0d9208a38e"
     ],
     "gfx1101": [
-      "072c8fc3-3a65-4b28-be0f-65dc3c6be83c"
+      "d3c055d7-77da-4e0d-8c4e-4e1da27b59b0"
     ],
     "gfx1150": [
       "037147ec-b28e-49cc-86b6-8131f39e6371"
@@ -22,13 +22,13 @@
       "664345cc-eb3e-45eb-a5d2-16b553dd17f1"
     ],
     "gfx90a": [
-      "f19435c1-43c6-4e84-a50a-a946ce8b5da6"
+      "3d2fff33-068e-4497-92e7-50a5b9430dbc"
     ],
     "gfx942": [
-      "01ade74b-8b1f-4ac1-8577-35cefdfacf09"
+      "d40a114e-bd38-4b28-8333-82b7e684881b"
     ],
     "gfx950": [
-      "0da21986-9b1f-418f-ab1f-d5f0e1b15f26"
+      "310724e9-1e28-430f-a15e-bd06e6b31c0a"
     ]
   },
   "slots": [

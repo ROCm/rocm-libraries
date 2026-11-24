@@ -378,15 +378,19 @@ default), and they run on a two-GPU gfx950 node in Math CI's `precheckin` on pul
 **How the tiers are applied in CI.** TheRock's test lane runs hipBLASLt through the CTest presets
 built from this file ([TheRock#5230](https://github.com/ROCm/TheRock/pull/5230)), so the tiers above
 are what CI actually runs. A pull request to this repository gets the `standard` tier in Multi-Arch
-CI, because TheRock treats any rocm-libraries change as a submodule change, except on gfx950, where
-a pull request that touches hipBLASLt gets the `quick` tier; scheduled nightly runs get
-`comprehensive`. The hipBLASLt ASAN lane drives `hipblaslt-test` directly through
-[`test/therock/test_hipblaslt.py`](../../test/therock/test_hipblaslt.py) with these filters:
+CI, because TheRock treats any rocm-libraries change as a submodule change. On gfx950, hipBLASLt
+tests run only for a pull request that touches `projects/hipblaslt/`, and they get the same tier as
+gfx94X. Scheduled nightly runs get `comprehensive`. The hipBLASLt ASAN lane drives
+`hipblaslt-test` directly through [`test/therock/test_hipblaslt.py`](../../test/therock/test_hipblaslt.py)
+with these filters:
 
 | ASAN tier | GTest filter |
 | --- | --- |
 | `quick` (pull requests) | `*smoke*-*HipBufferTransferMemoryMode.*/Managed` |
 | `standard` (nightly) | `*smoke*:*quick*:*pre_checkin*-*known_bug*:*HipBufferTransferMemoryMode.*/Managed` |
+
+The dedicated HOST_ASAN jobs run with `DEBUG_CLR_DEV_SIGNALS=0` to work around
+[ROCM-34728](https://amd-hub.atlassian.net/browse/ROCM-34728).
 
 Both tiers temporarily exclude the two managed-memory buffer cases for the ASAN allocator
 failure tracked in ROCM-34263 and [rocm-systems #15163](https://github.com/ROCm/rocm-systems/issues/15163).

@@ -50,7 +50,9 @@ void DestroyWithinTimeout(miopenHandle_t handle)
 
 } // namespace
 
-TEST(GPU_HipdnnReentry_FP32, RejectedCallThenDestroyReturns)
+using GPU_HipdnnReentry_FP32 = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_HipdnnReentry_FP32, RejectedCallThenDestroyReturns)
 {
     if(miopen::wrapper::GetForwardingMode() != miopen::wrapper::ForwardingMode::Enabled)
         GTEST_SKIP() << "needs MIOPEN_HIPDNN_FORWARDING=1; run it through "
@@ -132,3 +134,5 @@ TEST(GPU_HipdnnReentry_FP32, RejectedCallThenDestroyReturns)
 
     DestroyWithinTimeout(handle);
 }
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_HipdnnReentry_FP32, ::testing::Values(0));

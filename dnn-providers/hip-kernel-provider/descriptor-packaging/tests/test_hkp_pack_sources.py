@@ -809,7 +809,7 @@ class TestLaunchOrderCarriesNoMeaning:
                 ".",
                 ".",
                 ARCH,
-                "hipcc",
+                "hip_compiler",
                 "dir",
                 {},
                 {},
@@ -1225,7 +1225,7 @@ class TestEveryReaderOfAUkdsKernel:
         ukd = _sources_ukd({"k0": _rocke_entry(), "k1": _packed_entry(PRIMARY)})
         with pytest.raises(HkpPackError) as info:
             pipeline._compile_ukd_variant(
-                ukd, "W", ".", ".", ARCH, "hipcc", ".", {}, {}, {}, {}, {}, None
+                ukd, "W", ".", ".", ARCH, "hip_compiler", ".", {}, {}, {}, {}, {}, None
             )
         assert "'k1' has kind 'kpack'" in str(info.value)
 
