@@ -106,4 +106,11 @@ class STINKYTOFU_EXPORT RegisterAllocator {
     virtual Expected<AllocationResult> allocate(const AllocationContext& context) = 0;
 };
 
+/// \p refusal without the "@<function>: " every refusal of \p function starts
+/// with, for quoting one refusal inside another.
+inline std::string withoutFunctionName(const Function& function, const std::string& refusal) {
+    const std::string prefix = "@" + function.getName() + ": ";
+    return refusal.starts_with(prefix) ? refusal.substr(prefix.size()) : refusal;
+}
+
 }  // namespace stinkytofu

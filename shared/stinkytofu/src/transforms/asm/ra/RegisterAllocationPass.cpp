@@ -423,13 +423,6 @@ std::string shadowReport(const Function& function, const AllocationResult& colou
     return text;
 }
 
-/// \p message without the "@function: " that every refusal starts with, for
-/// quoting one refusal inside another.
-std::string withoutFunctionName(const Function& function, const std::string& message) {
-    const std::string prefix = "@" + function.getName() + ": ";
-    return message.starts_with(prefix) ? message.substr(prefix.size()) : message;
-}
-
 /// The architecture's rules with any forced statuses applied, or a message
 /// naming what was wrong with the request.
 ///

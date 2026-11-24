@@ -1216,14 +1216,6 @@ bool weightMayEvict(const Block& evictor, const Block& occupant) {
     return occupant.weight < evictor.weight;
 }
 
-/// \p message without the "@function: " every refusal starts with, for quoting
-/// one refusal inside another.
-std::string withoutFunction(const AllocationContext& context, std::string message) {
-    const std::string prefix = "@" + context.function.getName() + ": ";
-    if (message.starts_with(prefix)) message.erase(0, prefix.size());
-    return message;
-}
-
 /// \p result, the unplanned run \p first made, or a retry without folding when
 /// a fold may be what refused it.
 Expected<AllocationResult> withoutFoldsIfNeeded(const AllocationContext& context, bool followHints,
@@ -1242,7 +1234,8 @@ Expected<AllocationResult> withoutFoldsIfNeeded(const AllocationContext& context
     // stopped too: it is a different colouring, and without this line a reader
     // cannot tell a fold that never happened from one that did and also failed.
     return Expected<AllocationResult>::Error(
-        unfolded.getError() + "\n    with folding: " + withoutFunction(context, result.getError()));
+        unfolded.getError() +
+        "\n    with folding: " + withoutFunctionName(context.function, result.getError()));
 }
 
 }  // namespace
@@ -1271,7 +1264,7 @@ Expected<AllocationResult> runGreedyPlacement(const AllocationContext& context, 
             context.planOutcome->honoured = planned.honouredBlocks();
         }
         if (result.hasValue()) return result;
-        planRefusal = withoutFunction(context, result.getError());
+        planRefusal = withoutFunctionName(context.function, result.getError());
     }
 
     Greedy greedy(context, followHints, policy, mayFold, /*mayPlan=*/false);
