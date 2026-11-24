@@ -8,6 +8,12 @@ add_gtest_executable(test_tdm_real_lengths test_tdm_real_lengths.cpp)
 
 add_gtest_executable(test_element_space_clamp test_element_space_clamp.cpp)
 
+# Async global->LDS row gather through tile_scatter_gather; the gfx1250 path only.
+if(GPU_TARGETS MATCHES "gfx125")
+    add_gtest_executable(test_tile_scatter_gather_async_load
+        test_tile_scatter_gather_async_load.cpp)
+endif()
+
 # Negative compile checks: a reference into a temporary tensor view must be rejected.
 # The object libraries are excluded from "all"; a ctest entry builds each one and passes
 # only when the build output contains the -Wdangling diagnostic for the bound reference.
