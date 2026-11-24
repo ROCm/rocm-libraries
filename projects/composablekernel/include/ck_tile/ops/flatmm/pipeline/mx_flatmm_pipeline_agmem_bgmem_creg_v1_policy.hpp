@@ -169,6 +169,72 @@ struct MXFlatmmPipelineAgBgCrPolicy : UniversalFlatmmPipelineAgBgCrPolicy
                                 MakeMX_ABytesDramTileDistribution());
     }
 
+    // Row-gather variant for MoE: each A row of the tile comes from its own token. The caller
+    // (MoeFlatmmKernel) passes a tile_scatter_gather whose per-row offsets are in ADataType
+    // elements and were computed with GetADramTileDistribution() (the byte distribution below),
+    // so row Y0 of that distribution indexes the offsets. Only gfx1250 is supported: on gfx950
+    // the DRAM-side XOR swizzle above would have to be applied to gathered rows as well.
+    template <typename BottomTensorView_,
+              typename WindowLengths_,
+              typename StaticTileDistribution_,
+              typename StaticPageIndexArray_,
+              typename StaticValidArray_,
+              index_t HsGatherDim,
+              index_t NumCoord,
+              typename YsGatherDims,
+              bool UseGlobalLoad>
+    CK_TILE_DEVICE static constexpr auto
+    MakeMX_AAsyncLoadBytesDramWindow(const tile_scatter_gather<BottomTensorView_,
+                                                               WindowLengths_,
+                                                               StaticTileDistribution_,
+                                                               StaticPageIndexArray_,
+                                                               StaticValidArray_,
+                                                               HsGatherDim,
+                                                               NumCoord,
+                                                               YsGatherDims,
+                                                               UseGlobalLoad>& window_tmp)
+    {
+#if !defined(__gfx125__)
+        static_assert(sizeof(ADataType) == 0, "MX A row gather is only supported on gfx1250");
+#endif
+        static_assert(std::is_same_v<StaticValidArray_, std::nullptr_t> && HsGatherDim == 0 &&
+                          NumCoord == 1 && std::is_same_v<YsGatherDims, sequence<0>> &&
+                          !UseGlobalLoad,
+                      "MX A row gather expects a plain row gather window");
+
+        // Byte view and window of the plain path, built from the same tensor view and origin.
+        const auto plain =
+            MakeMX_AAsyncLoadBytesDramWindow(make_tile_window(window_tmp.get_bottom_tensor_view(),
+                                                              window_tmp.get_window_lengths(),
+                                                              window_tmp.get_window_origin()));
+
+        // The plain path sizes the byte buffer with the element count of the source view, which
+        // overstates it for packed types. Use the exact byte size so that rows past the end
+        // (padding entries of the sorted token list) read as zero instead of past the buffer.
+        const auto [rows, cols] =
+            window_tmp.get_bottom_tensor_view().get_tensor_descriptor().get_lengths();
+        const auto& plain_view = plain.get_bottom_tensor_view();
+        const auto& plain_desc = plain_view.get_tensor_descriptor();
+        const auto exact_desc  = remove_cvref_t<decltype(plain_desc)>(
+            plain_desc.get_transforms(), rows * (cols * sizeof(ADataType) / APackedSize));
+        const auto byte_view = make_tensor_view<address_space_enum::global>(
+            plain_view.get_buffer_view().p_data_, exact_desc);
+
+        // Row offsets: ADataType elements of the source view -> bytes.
+        constexpr index_t NumRows = StaticPageIndexArray_::size();
+        statically_indexed_array<index_t, NumRows> byte_offsets;
+        static_for<0, NumRows, 1>{}([&](auto i) {
+            byte_offsets(i) =
+                window_tmp.page_idx_[i] * static_cast<index_t>(sizeof(ADataType)) / APackedSize;
+        });
+
+        return make_tile_scatter_gather(byte_view,
+                                        plain.get_window_lengths(),
+                                        plain.get_window_origin(),
+                                        MakeMX_ABytesDramTileDistribution(),
+                                        byte_offsets);
+    }
+
     CK_TILE_DEVICE static constexpr auto MakeMX_ALdsBytesBlockDescriptor()
     {
         constexpr index_t K2 = std::is_same_v<ADataType, pk_fp6x16_t> ? DWORDx3 : AK1 / APackedSize;

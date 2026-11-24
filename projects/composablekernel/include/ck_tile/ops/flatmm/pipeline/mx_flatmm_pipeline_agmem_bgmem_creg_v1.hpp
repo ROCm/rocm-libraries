@@ -184,6 +184,20 @@ struct MXFlatmmPipelineAGmemBGmemCRegV1 : FlatmmPipelineAGmemBGmemCRegV1<Problem
 
     static constexpr bool DoubleSmemBuffer = true;
 
+    // Read by MoeFlatmmKernel to build its B view. The MX pipeline only reads the plain
+    // preshuffled B layout.
+    static constexpr auto BMemNTType         = Problem::BMemNTType;
+    static constexpr bool BPreShufflePermute = Problem::BPreShufflePermute;
+    static_assert(!BPreShufflePermute, "MX flatmm pipeline does not support a permuted B layout");
+
+    // Thread distribution of the A DRAM loads (rows x bytes). A caller that gathers A rows
+    // (MoeFlatmmKernel) computes one row offset per Y0 index of this distribution and passes a
+    // tile_scatter_gather as the A window; see MakeMX_AAsyncLoadBytesDramWindow.
+    CK_TILE_DEVICE static constexpr auto GetADramTileDistribution()
+    {
+        return PipelinePolicy::template MakeMX_ABytesDramTileDistribution<Problem>();
+    }
+
     template <typename KernelArgs>
     CK_TILE_DEVICE static auto MakeScaleABlockWindow(const KernelArgs& kargs,
                                                      const index_t block_idx_m)
