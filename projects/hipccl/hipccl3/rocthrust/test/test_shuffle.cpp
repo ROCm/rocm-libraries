@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -17,6 +17,8 @@
 
 #include <thrust/detail/config.h>
 
+#include <thrust/gather.h>
+#include <thrust/iterator/shuffle_iterator.h>
 #include <thrust/random.h>
 #include <thrust/scatter.h>
 #include <thrust/sequence.h>
@@ -413,42 +415,105 @@ constexpr double CephesFunctions::A[];
 constexpr double CephesFunctions::B[];
 constexpr double CephesFunctions::C[];
 
-TYPED_TEST(ShuffleVectorTests, TestShuffleSimple)
+struct iterator_shuffle_copy
 {
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  template <typename Iterator, typename ResultIterator>
+  void operator()(Iterator first, Iterator last, ResultIterator result, thrust::default_random_engine& g)
+  {
+    auto shuffle_iter = thrust::make_shuffle_iterator(static_cast<uint64_t>(last - first), g);
+    thrust::gather(shuffle_iter, shuffle_iter + (last - first), first, result);
+  }
+};
 
-  using Vector = typename TestFixture::input_type;
+struct iterator_shuffle
+{
+  template <typename Iterator>
+  void operator()(Iterator first, Iterator last, thrust::default_random_engine& g)
+  {
+    using thrust::system::detail::generic::select_system;
+    using InputType = typename thrust::detail::it_value_t<Iterator>;
+    using System    = typename thrust::iterator_system<Iterator>::type;
+    System system;
+    auto policy = select_system(system);
+    thrust::detail::temporary_array<InputType, System> temp(policy, first, last);
+    iterator_shuffle_copy{}(temp.begin(), temp.end(), first, g);
+  }
+};
 
+struct thrust_shuffle
+{
+  template <typename Iterator>
+  void operator()(Iterator first, Iterator last, thrust::default_random_engine& g)
+  {
+    thrust::shuffle(first, last, g);
+  }
+};
+
+struct thrust_shuffle_copy
+{
+  template <typename Iterator>
+  void operator()(Iterator first, Iterator last, Iterator result, thrust::default_random_engine& g)
+  {
+    thrust::shuffle_copy(first, last, result, g);
+  }
+};
+
+template <class ShuffleFunc, typename Vector>
+void TestShuffleSimpleBase()
+{
   Vector data{0, 1, 2, 3, 4};
   Vector shuffled(data.begin(), data.end());
   thrust::default_random_engine g(2);
-  thrust::shuffle(shuffled.begin(), shuffled.end(), g);
+  ShuffleFunc{}(shuffled.begin(), shuffled.end(), g);
   thrust::sort(shuffled.begin(), shuffled.end());
   // Check all of our data is present
   // This only tests for strange conditions like duplicated elements
   ASSERT_EQ(shuffled, data);
 }
 
-TYPED_TEST(ShuffleVectorTests, TestShuffleCopySimple)
+TYPED_TEST(ShuffleVectorTests, TestShuffleSimple)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
   using Vector = typename TestFixture::input_type;
+  TestShuffleSimpleBase<thrust_shuffle, Vector>();
+}
 
+TYPED_TEST(ShuffleVectorTests, TestShuffleSimpleIterator)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using Vector = typename TestFixture::input_type;
+  TestShuffleSimpleBase<iterator_shuffle, Vector>();
+}
+
+template <typename ShuffleFunc, typename ShuffleCopyFunc, typename Vector>
+void TestShuffleCopySimpleBase()
+{
   Vector data{0, 1, 2, 3, 4};
   Vector shuffled(5);
   thrust::default_random_engine g(2);
-  thrust::shuffle_copy(data.begin(), data.end(), shuffled.begin(), g);
+  ShuffleCopyFunc{}(data.begin(), data.end(), shuffled.begin(), g);
   g.seed(2);
-  thrust::shuffle(data.begin(), data.end(), g);
+  ShuffleFunc{}(data.begin(), data.end(), g);
   ASSERT_EQ(shuffled, data);
 }
 
-TYPED_TEST(ShuffleVariablesTests, TestHostDeviceIdentical)
+TYPED_TEST(ShuffleVectorTests, TestShuffleCopySimple)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-  using T = typename TestFixture::input_type;
+  using Vector = typename TestFixture::input_type;
+  TestShuffleCopySimpleBase<thrust_shuffle, thrust_shuffle_copy, Vector>();
+}
 
+TYPED_TEST(ShuffleVectorTests, TestShuffleCopySimpleIterator)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using Vector = typename TestFixture::input_type;
+  TestShuffleCopySimpleBase<iterator_shuffle, iterator_shuffle_copy, Vector>();
+}
+
+template <typename ShuffleFunc, typename T>
+void TestHostDeviceIdenticalBase()
+{
   for (auto size : get_sizes())
   {
     SCOPED_TRACE(testing::Message() << "with size= " << size);
@@ -461,27 +526,39 @@ TYPED_TEST(ShuffleVariablesTests, TestHostDeviceIdentical)
     thrust::default_random_engine host_g(183);
     thrust::default_random_engine device_g(183);
 
-    thrust::shuffle(host_result.begin(), host_result.end(), host_g);
-    thrust::shuffle(device_result.begin(), device_result.end(), device_g);
+    ShuffleFunc{}(host_result.begin(), host_result.end(), host_g);
+    ShuffleFunc{}(device_result.begin(), device_result.end(), device_g);
 
     ASSERT_EQ(device_result, host_result);
   }
 }
 
-TYPED_TEST(ShuffleVariablesTests, TestFunctionIsBijection)
+TYPED_TEST(ShuffleVariablesTests, TestHostDeviceIdentical)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
   using T = typename TestFixture::input_type;
+  TestHostDeviceIdenticalBase<thrust_shuffle, T>();
+}
 
+TYPED_TEST(ShuffleVariablesTests, TestHostDeviceIdenticalIterator)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  TestHostDeviceIdenticalBase<iterator_shuffle, T>();
+}
+
+template <typename BijectionFunc, typename T>
+void TestFunctionIsBijectionBase()
+{
   thrust::default_random_engine device_g(0xD5);
 
   for (auto size : get_sizes())
   {
     SCOPED_TRACE(testing::Message() << "with size= " << size);
 
-    thrust::system::detail::generic::feistel_bijection device_f(size, device_g);
+    BijectionFunc device_f(size, device_g);
 
-    const size_t total_length = device_f.nearest_power_of_two();
+    const size_t total_length = device_f.size();
     if (static_cast<double>(total_length) >= static_cast<double>(std::numeric_limits<T>::max()) || size == 0)
     {
       return;
@@ -504,32 +581,93 @@ TYPED_TEST(ShuffleVariablesTests, TestFunctionIsBijection)
   }
 }
 
-TYPED_TEST(ShuffleVariablesTests, TestBijectionLength)
+TYPED_TEST(ShuffleVariablesTests, TestFunctionIsBijection)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  TestFunctionIsBijectionBase<thrust::detail::feistel_bijection, T>();
+}
+
+TYPED_TEST(ShuffleVariablesTests, TestFunctionIsBijectionIterator)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  TestFunctionIsBijectionBase<thrust::detail::random_bijection<uint64_t>, T>();
+}
+
+TYPED_TEST(ShuffleVariablesTests, TestFeistelBijectionLength)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   thrust::default_random_engine g(0xD5);
 
   uint64_t m = 31;
-  thrust::system::detail::generic::feistel_bijection f(m, g);
+  thrust::detail::feistel_bijection f(m, g);
   ASSERT_EQ(f.nearest_power_of_two(), uint64_t(32));
 
   m = 32;
-  f = thrust::system::detail::generic::feistel_bijection(m, g);
+  f = thrust::detail::feistel_bijection(m, g);
   ASSERT_EQ(f.nearest_power_of_two(), uint64_t(32));
 
   m = 1;
-  f = thrust::system::detail::generic::feistel_bijection(m, g);
+  f = thrust::detail::feistel_bijection(m, g);
   ASSERT_EQ(f.nearest_power_of_two(), uint64_t(16));
+}
+TYPED_TEST(ShuffleVariablesTests, TestShuffleIteratorConstructibleFromBijection)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::default_random_engine g(0xD5);
+
+  thrust::detail::feistel_bijection f(32, g);
+  thrust::shuffle_iterator<uint64_t, decltype(f)> it(f);
+
+  g.seed(0xD5);
+  thrust::detail::random_bijection<uint64_t> f2(32, g);
+  thrust::shuffle_iterator<uint64_t, decltype(f2)> it2(f2);
+
+  g.seed(0xD5);
+  thrust::shuffle_iterator<uint64_t> it3(32, g);
+
+  ASSERT_EQ(f.size(), f2.size());
+  ASSERT_EQ(true, thrust::equal(thrust::device, it, it + f.size(), it2));
+  ASSERT_EQ(true, thrust::equal(thrust::device, it, it + f.size(), it3));
+}
+
+TYPED_TEST(ShuffleVariablesTests, TestShuffleAndPermutationIterator)
+{
+  thrust::default_random_engine g(0xD5);
+
+  auto it = thrust::make_shuffle_iterator(32, g);
+
+  thrust::device_vector<uint64_t> data(32);
+  thrust::sequence(data.begin(), data.end(), 0);
+
+  auto permute_it = thrust::make_permutation_iterator(data.begin(), it);
+
+  thrust::device_vector<uint64_t> premute_vec(32);
+  thrust::gather(it, it + 32, data.begin(), premute_vec.begin());
+
+  ASSERT_EQ(true, thrust::equal(permute_it, permute_it + 32, premute_vec.begin()));
+}
+
+TYPED_TEST(ShuffleVariablesTests, TestShuffleIteratorStateless)
+{
+  thrust::default_random_engine g(0xD5);
+
+  auto it = thrust::make_shuffle_iterator(32, g);
+
+  ASSERT_EQ(*it, *it);
+  ASSERT_EQ(*(it + 1), *(it + 1));
+  ++it;
+  ASSERT_EQ(*(it - 1), *(it - 1));
 }
 
 // Individual input keys should be permuted to output locations with uniform
 // probability. Perform chi-squared test with confidence 99.9%.
-TYPED_TEST(ShuffleVectorTests, TestShuffleKeyPosition)
+template <typename ShuffleFunc, typename Vector>
+void TestShuffleKeyPositionBase()
 {
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  using Vector       = typename TestFixture::input_type;
   using T            = typename Vector::value_type;
   size_t m           = 20;
   size_t num_samples = 100;
@@ -541,7 +679,7 @@ TYPED_TEST(ShuffleVectorTests, TestShuffleKeyPosition)
   for (size_t i = 0; i < num_samples; i++)
   {
     Vector shuffled(sequence.begin(), sequence.end());
-    thrust::shuffle(shuffled.begin(), shuffled.end(), g);
+    ShuffleFunc{}(shuffled.begin(), shuffled.end(), g);
     thrust::host_vector<T> tmp(shuffled.begin(), shuffled.end());
 
     for (auto j = 0ull; j < m; j++)
@@ -561,6 +699,20 @@ TYPED_TEST(ShuffleVectorTests, TestShuffleKeyPosition)
   // and 99.9% confidence
   double confidence_threshold = 43.82;
   ASSERT_LT(chi_squared, confidence_threshold);
+}
+
+TYPED_TEST(ShuffleVectorTests, TestShuffleKeyPosition)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using Vector = typename TestFixture::input_type;
+  TestShuffleKeyPositionBase<thrust_shuffle, Vector>();
+}
+
+TYPED_TEST(ShuffleVectorTests, TestShuffleKeyPositionIterator)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using Vector = typename TestFixture::input_type;
+  TestShuffleKeyPositionBase<iterator_shuffle, Vector>();
 }
 
 struct vector_compare
@@ -586,11 +738,9 @@ struct vector_compare
 // Brute force check permutations are uniformly distributed on small input
 // Uses a chi-squared test indicating 99% confidence the output is uniformly
 // random
-TYPED_TEST(ShuffleVectorTests, TestShuffleUniformPermutation)
+template <typename ShuffleFunc, typename Vector>
+void TestShuffleUniformPermutationBase()
 {
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  using Vector = typename TestFixture::input_type;
   using T      = typename Vector::value_type;
 
   size_t m                  = 5;
@@ -602,7 +752,7 @@ TYPED_TEST(ShuffleVectorTests, TestShuffleUniformPermutation)
   thrust::default_random_engine g(0xD5);
   for (auto i = 0ull; i < num_samples; i++)
   {
-    thrust::shuffle(sequence.begin(), sequence.end(), g);
+    ShuffleFunc{}(sequence.begin(), sequence.end(), g);
     thrust::host_vector<T> tmp(sequence.begin(), sequence.end());
     permutation_counts[tmp]++;
   }
@@ -619,11 +769,22 @@ TYPED_TEST(ShuffleVectorTests, TestShuffleUniformPermutation)
   ASSERT_GT(p_score, 0.01);
 }
 
-TYPED_TEST(ShuffleVectorTests, TestShuffleEvenSpacingBetweenOccurances)
+TYPED_TEST(ShuffleVectorTests, TestShuffleUniformPermutation)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using Vector = typename TestFixture::input_type;
+  TestShuffleUniformPermutationBase<thrust_shuffle, Vector>();
+}
 
-  using Vector                = typename TestFixture::input_type;
+TYPED_TEST(ShuffleVectorTests, TestShuffleUniformPermutationIterator)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using Vector = typename TestFixture::input_type;
+  TestShuffleUniformPermutationBase<iterator_shuffle, Vector>();
+}
+template <typename ShuffleFunc, typename Vector>
+void TestShuffleEvenSpacingBetweenOccurancesBase()
+{
   using T                     = typename Vector::value_type;
   const uint64_t shuffle_size = 10;
   const uint64_t num_samples  = 1000;
@@ -634,7 +795,7 @@ TYPED_TEST(ShuffleVectorTests, TestShuffleEvenSpacingBetweenOccurances)
   thrust::default_random_engine g(0xD6);
   for (auto i = 0ull; i < num_samples; i++)
   {
-    thrust::shuffle(sequence.begin(), sequence.end(), g);
+    ShuffleFunc{}(sequence.begin(), sequence.end(), g);
     thrust::host_vector<T> tmp(sequence.begin(), sequence.end());
     h_results.insert(h_results.end(), sequence.begin(), sequence.end());
   }
@@ -674,11 +835,23 @@ TYPED_TEST(ShuffleVectorTests, TestShuffleEvenSpacingBetweenOccurances)
   }
 }
 
-TYPED_TEST(ShuffleVectorTests, TestShuffleEvenDistribution)
+TYPED_TEST(ShuffleVectorTests, TestShuffleEvenSpacingBetweenOccurances)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using Vector = typename TestFixture::input_type;
+  TestShuffleEvenSpacingBetweenOccurancesBase<thrust_shuffle, Vector>();
+}
 
-  using Vector                   = typename TestFixture::input_type;
+TYPED_TEST(ShuffleVectorTests, TestShuffleEvenSpacingBetweenOccurancesIterator)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using Vector = typename TestFixture::input_type;
+  TestShuffleEvenSpacingBetweenOccurancesBase<iterator_shuffle, Vector>();
+}
+
+template <typename ShuffleFunc, typename Vector>
+void TestShuffleEvenDistributionBase()
+{
   using T                        = typename Vector::value_type;
   const uint64_t shuffle_sizes[] = {10, 100, 500};
   thrust::default_random_engine g(0xD5);
@@ -695,7 +868,7 @@ TYPED_TEST(ShuffleVectorTests, TestShuffleEvenDistribution)
     for (auto i = 0ull; i < num_samples; i++)
     {
       thrust::sequence(sequence.begin(), sequence.end(), 0);
-      thrust::shuffle(sequence.begin(), sequence.end(), g);
+      ShuffleFunc{}(sequence.begin(), sequence.end(), g);
       thrust::host_vector<T> tmp(sequence.begin(), sequence.end());
       for (uint64_t j = 0; j < shuffle_size; j++)
       {
@@ -724,4 +897,17 @@ TYPED_TEST(ShuffleVectorTests, TestShuffleEvenDistribution)
       ASSERT_GT(p_score_num, 0.001 / (double) shuffle_size);
     }
   }
+}
+
+TYPED_TEST(ShuffleVectorTests, TestShuffleEvenDistribution)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using Vector = typename TestFixture::input_type;
+  TestShuffleEvenDistributionBase<thrust_shuffle, Vector>();
+}
+TYPED_TEST(ShuffleVectorTests, TestShuffleEvenDistributionIterator)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using Vector = typename TestFixture::input_type;
+  TestShuffleEvenDistributionBase<iterator_shuffle, Vector>();
 }

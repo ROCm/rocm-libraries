@@ -446,6 +446,12 @@ validParameters = { # we need to make sure this matches develop
     # segment at the same time. Pair 1's accumulator halves are swapped back before the epilogue.
     #   0 = off (default), 1 = on.
     "LDSSegmentBRotate": [0, 1],
+    # gfx1250 TDM, MIWaveGroup [2, 2]: each wave covers one M half.
+    # With smaller VectorWidthA, adjacent lanes read adjacent A rows.
+    # VectorWidthA and inherited VectorWidthMXSA retain their values.
+    # WTA == VWA (MIWaveTile[0] == VectorWidthA) keeps the original path.
+    # B keeps its VectorWidthB layout and iterate setting.
+    "WaveTileContiguousA": [False, True],
     # Persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
     # generated code keeps that first-PGR data durable and restores borrowed
@@ -1422,6 +1428,7 @@ validParameters = { # we need to make sure this matches develop
     # 1: Use iterate-mode for A
     # 2: Use iterate-mode for B
     # 3: Use iterate-mode for both A and B
+    # WaveTileContiguousA disables A iterate: 1 resolves to 0, 3 to 2; auto only checks B.
     "TDMIterateMode": [-1, 0, 1, 2, 3]
 }
 

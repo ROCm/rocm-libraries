@@ -58,6 +58,7 @@
 
 #include "ProgramOptions.hpp"
 #include "Utility.hpp"
+#include "TensileLiteClientVersion.hpp"
 
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
 #include "Profiler.hpp"
@@ -80,6 +81,7 @@
 #include <memory>
 #include <numeric>
 #include <sstream>
+#include <string_view>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -329,6 +331,9 @@ namespace TensileLite
                 ("csv-export-extra-cols",    po::value<bool>()->default_value(false), "CSV exports winner information")
                 ("csv-merge-same-problems",  po::value<bool>()->default_value(false), "CSV merge rows of same problem id")
                 ("PrintWinnersOnly",         po::value<bool>()->default_value(false), "PrintWinnersOnly")
+                ("print-rejected-predicates", po::value<bool>()->default_value(false), "Log the evaluation of every predicate of "
+                                                                                       "solutions rejected by their predicates (needs "
+                                                                                       "log-level Verbose or Debug).")
 
                 ("problem-size,p",           vector_default_empty<std::string>(), "Specify a problem size.  Comma-separated list of "
                                                                                   "sizes, in the order of the Einstein notation.")
@@ -878,6 +883,25 @@ namespace TensileLite
 
 int main(int argc, const char* argv[])
 {
+    // One-line identity queries. They touch no GPU, so callers can run them
+    // anywhere, under a short timeout, before using the client.
+    if(argc == 2)
+    {
+        std::string_view const query(argv[1]);
+        char const*            answer = nullptr;
+        if(query == "--version")
+            answer = TENSILELITE_CLIENT_VERSION;
+        else if(query == "--source-revision")
+            answer = TENSILELITE_CLIENT_SOURCE_REVISION;
+        else if(query == "--build-rocm")
+            answer = TENSILELITE_CLIENT_BUILD_ROCM;
+        if(answer)
+        {
+            std::cout << answer << '\n';
+            return 0;
+        }
+    }
+
     using namespace TensileLite;
     using namespace TensileLite::Client;
 

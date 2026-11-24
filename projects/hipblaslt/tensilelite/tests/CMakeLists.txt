@@ -256,6 +256,11 @@ endif()
 
 enable_testing()
 
+if(TARGET tensilelite-client)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/TensileLiteIdentityTests.cmake")
+    hipblaslt_add_tensilelite_identity_tests()
+endif()
+
 #################################################
 #        Tests for cpu-gemm-driver              #
 #################################################
