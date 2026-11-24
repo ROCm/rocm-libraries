@@ -84,10 +84,10 @@ using GPU_LSTM_dropout_FP16 = GPU_LSTM_dropout_test<half_float::half>;
 
 TEST_P(GPU_LSTM_dropout_FP16, HalfTest) { RunTest(); }
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_LSTM_dropout_FP16, testing::ValuesIn(GetTestCases()));
+INSTANTIATE_TEST_SUITE_P(Comprehensive, GPU_LSTM_dropout_FP16, testing::ValuesIn(GetTestCases()));
 
 using GPU_LSTM_dropout_FP32 = GPU_LSTM_dropout_test<float>;
 
 TEST_P(GPU_LSTM_dropout_FP32, FloatTest) { RunTest(); }
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_LSTM_dropout_FP32, testing::ValuesIn(GetTestCases()));
+INSTANTIATE_TEST_SUITE_P(Comprehensive, GPU_LSTM_dropout_FP32, testing::ValuesIn(GetTestCases()));
