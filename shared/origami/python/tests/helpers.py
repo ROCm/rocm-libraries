@@ -56,7 +56,7 @@ def _w4a16_device(
 
 # Hardware objects of the W4A16 ranking regression (test_w4a16_ranking_regression.py).
 W4A16_HARDWARE = {
-    "gfx1150": _w4a16_device(origami.architecture_t.gfx1150, 16, 512 * 1024, 2.8, 1.5),
+    "gfx1150": _w4a16_device(origami.architecture_t.gfx1150, 16, 512 * 1024, 2.8, 2.9 / 2.8),
     "gfx1151": _w4a16_device(origami.architecture_t.gfx1151, 40, 768 * 1024, 1.0, 2.9),
 }
 

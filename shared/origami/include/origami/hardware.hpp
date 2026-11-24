@@ -363,7 +363,7 @@ class ORIGAMI_EXPORT hardware_t {
       std::optional<int> pci_chip_id = std::nullopt,
       size_t n_cu = 0) noexcept {
     // mem_clock_ratio is max. SCLK / max. MCLK as HIP reports them (printed by hipblaslt-bench).
-    // Only gfx1151 and gfx1250 are set that way; the 1.5 entries have not been checked.
+    // Only gfx1150, gfx1151 and gfx1250 are set that way; the 1.5 entries have not been checked.
     switch (arch) {
       case architecture_t::gfx90a:
         return {5.5, 1.21875121875121875122 * 1.2, 1.2, 4, std::make_tuple(0, 0.03, 0), 1.5, 4, 16 * 1024};
@@ -388,8 +388,10 @@ class ORIGAMI_EXPORT hardware_t {
         // AMD Navi 32
         return {4.86133, 1.21875121875121875122 * 1.28305, 0.420583, 2, std::make_tuple(0, 0.13169, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1150:
-        // AMD Strix Point iGPU
-        return {1.497, NO_MALL_AVAILABLE, 0.0300383, 2, std::make_tuple(0, 0.18, 0), 1.5, 2, 32 * 1024};
+        // AMD Strix Point iGPU: HIP reports 2900 / 2800 MHz.  DRAM-bound kernels stream
+        // 0.0703 TB/s (the median of the W4A16 dot2 kernels on weights over 8 MB; the peak
+        // measured on the device is 0.0841); the constant is scaled by memory / compute clock.
+        return {1.497, NO_MALL_AVAILABLE, 0.0703 * 2.8 / 2.9, 2, std::make_tuple(0, 0.18, 0), 2.9 / 2.8, 2, 32 * 1024};
       case architecture_t::gfx1151:
         // AMD Strix Halo iGPU: HIP reports 2900 / 1000 MHz.  DRAM streams 0.215 TB/s; the
         // constant is scaled by memory / compute clock.
