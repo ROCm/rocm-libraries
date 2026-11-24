@@ -7,6 +7,9 @@
 // problem setup (random top-k routing sorted into 32-row expert tiles, MX data and scale layouts,
 // reference) is shared with tile_example_mx_moe_flatmm.
 //
+// The layer cases chain gemm1_gate_up_mx_quant (SiLU(gate) * up quantized to MXFP4 in the
+// epilogue) into the down projection.
+//
 // The cases cover the token gather (row-mapping data), padding rows (token counts that are not a
 // multiple of the tile), experts spanning several tiles, many small experts, and one token.
 
@@ -87,5 +90,59 @@ class MxMoeFlatmmA8W4 : public ::testing::TestWithParam<MoeCase>
 
 MX_MOE_TESTS(MxMoeFlatmmA4W4, ck_tile::pk_fp4_t);
 MX_MOE_TESTS(MxMoeFlatmmA8W4, ck_tile::fp8_t);
+
+// A whole layer, a4w4: gemm1_gate_up_mx_quant writes the intermediate as MXFP4 (checked
+// bit-exact against a CPU quantization), then the down projection reads it as is.
+struct LayerCase
+{
+    const char* name;
+    int experts;
+    int num_tokens;
+    int topk;
+    int hidden;
+    int inter;
+    int init;
+};
+
+std::ostream& operator<<(std::ostream& os, const LayerCase& c) { return os << c.name; }
+
+const LayerCase kLayerCases[] = {
+    {"Constant", 4, 128, 2, 512, 512, 1},
+    {"Random", 4, 128, 2, 512, 512, 0},
+    {"SeveralTilesPerExpert", 2, 256, 2, 512, 512, 0},
+    {"PaddingRows", 8, 37, 2, 512, 512, 0},
+    {"ManyExperts", 64, 64, 8, 512, 768, 0},
+    {"OneToken", 8, 1, 2, 512, 512, 0},
+};
+
+class MxMoeLayer : public ::testing::TestWithParam<LayerCase>
+{
+};
+
+void run_layer(const LayerCase& t, bool per_slot)
+{
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "the MX MoE path is implemented for gfx1250 only";
+    MxMoeLayerCase c;
+    c.experts    = t.experts;
+    c.num_tokens = t.num_tokens;
+    c.topk       = t.topk;
+    c.hidden     = t.hidden;
+    c.inter      = t.inter;
+    c.init       = t.init;
+    c.per_slot   = per_slot;
+    c.verbose    = false;
+    const auto r = run_mx_moe_layer(c);
+    EXPECT_EQ(r.intermediate_mismatch, 0.0) << "the MXFP4 intermediate differs from the CPU";
+    EXPECT_TRUE(r.pass);
+}
+
+TEST_P(MxMoeLayer, PerSlot) { run_layer(GetParam(), true); }
+TEST_P(MxMoeLayer, Atomic) { run_layer(GetParam(), false); }
+
+INSTANTIATE_TEST_SUITE_P(A4W4,
+                         MxMoeLayer,
+                         ::testing::ValuesIn(kLayerCases),
+                         [](const auto& param_info) { return std::string(param_info.param.name); });
 
 } // namespace
