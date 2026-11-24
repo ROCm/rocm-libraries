@@ -127,10 +127,10 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdmPolicy
         }
         __builtin_amdgcn_tensor_load_to_lds(
             bit_cast<uint32x4_t>(amd_wave_read_first_lane(g0.bitfield)),
-            amd_wave_read_first_lane(g1.bitfield),
-            amd_wave_read_first_lane(g2.bitfield),
-            amd_wave_read_first_lane(g3.bitfield),
-            int32x8_t{},
+            bit_cast<uint32x8_t>(amd_wave_read_first_lane(g1.bitfield)),
+            bit_cast<uint32x4_t>(amd_wave_read_first_lane(g2.bitfield)),
+            bit_cast<uint32x4_t>(amd_wave_read_first_lane(g3.bitfield)),
+            uint32x8_t{},
             0);
     }
 #endif
