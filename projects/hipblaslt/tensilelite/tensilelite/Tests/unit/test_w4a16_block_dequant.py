@@ -42,7 +42,7 @@ needs_logic = pytest.mark.skipif(
 # Solution construction
 # ---------------------------------------------------------------------------
 def _w4a16_params(iim, isa, *, blockSize=32, depthU=128, glvwA=8, zeroPoint=False, **overrides):
-    from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+    from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
         matrixInstructionToMIParameters,
     )
 
@@ -124,10 +124,10 @@ def _w4a16_params(iim, isa, *, blockSize=32, depthU=128, glvwA=8, zeroPoint=Fals
 
 @pytest.fixture(scope="module")
 def toolchain():
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.Common.Capabilities import makeIsaInfoMap
+    from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
+    from tensilelite.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
     try:
         cxx = validateToolchain("amdclang++")
@@ -143,7 +143,7 @@ def toolchain():
 
 
 def _solution(toolchain, **kw):
-    from Tensile.SolutionStructs.Solution import Solution
+    from tensilelite.SolutionStructs.Solution import Solution
 
     isa, iim, assembler, _cxx = toolchain
     return Solution(_w4a16_params(iim, isa, **kw), False, True, False, assembler, iim)
@@ -155,10 +155,10 @@ def _emit(toolchain, **kw):
 
 def _emit_solution(toolchain, sol):
     import rocisa
-    from Tensile.Common.Types import DebugConfig
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
-    from Tensile.SolutionStructs.Naming import getKernelFileBase
-    from Tensile.TensileCreateLibrary.Run import (
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.SolutionStructs.Naming import getKernelFileBase
+    from tensilelite.TensileCreateLibrary.Run import (
         generateKernelObjectsFromSolutions,
         processKernelSource,
     )
@@ -247,7 +247,7 @@ def test_prefetch_and_schedule_are_each_fine_alone(toolchain, kw):
 def test_iters_per_group_is_the_counter_period():
     """The period blockScaleAIncrement counts to. An off-by-one here scales A by
     a neighbouring K group, which is wrong by a factor rather than a little."""
-    from Tensile.SolutionStructs.Problem import blockDequantItersPerGroupA
+    from tensilelite.SolutionStructs.Problem import blockDequantItersPerGroupA
 
     pt = {"UseScaleAB": "Block", "ScaleBlockSizesA": [128]}
     assert blockDequantItersPerGroupA(pt, 128) == 1
@@ -464,7 +464,7 @@ def test_problem_type_carries_block_scale_to_predicates(toolchain):
     """The library-logic ProblemType must round-trip the group size, and emit it
     as a predicate so only matching kernels are selected. The scale type is not
     among them: it follows B, which already has a predicate of its own."""
-    from Tensile.Contractions import ProblemType as CProblemType
+    from tensilelite.Contractions import ProblemType as CProblemType
 
     sol = _solution(toolchain)
     assert sol.get("Valid") is True
@@ -472,8 +472,8 @@ def test_problem_type_carries_block_scale_to_predicates(toolchain):
 
     assert pt.useScaleAB == ""
     assert pt.scaleBlockSizesA == (32,)
-    from Tensile.Common.Utilities import state
-    from Tensile.Contractions import Solution as CSolution
+    from tensilelite.Common.Utilities import state
+    from tensilelite.Contractions import Solution as CSolution
     serialized = state(CSolution.FromSolutionStruct(
         sol, False, False, False, toolchain[2], toolchain[1]).problemType)
     assert not {"scaleBlockSizeA", "scaleBlockSizesA", "scaleZeroPointA", "int4EncodingA"} & serialized.keys()
@@ -495,7 +495,7 @@ def test_problem_type_carries_block_scale_to_predicates(toolchain):
 def test_block_scale_predicates_absent_when_mode_off(toolchain):
     """A plain bf16 solution must not carry the w4a16 predicates, or it would
     stop matching ordinary problems."""
-    from Tensile.Contractions import ProblemType as CProblemType
+    from tensilelite.Contractions import ProblemType as CProblemType
 
     sol = _solution(
         toolchain,
@@ -517,8 +517,8 @@ def test_block_scale_predicates_absent_when_mode_off(toolchain):
 def test_client_config_carries_block_scale(toolchain, tmp_path):
     """ClientWriter must pass the group size and scale type to the benchmark
     client, otherwise its CPU reference cannot apply the scale."""
-    from Tensile.ClientWriter import writeClientConfigIni  # noqa: F401  (import check)
-    import Tensile.ClientWriter as CW
+    from tensilelite.ClientWriter import writeClientConfigIni  # noqa: F401  (import check)
+    import tensilelite.ClientWriter as CW
     import inspect
 
     src = inspect.getsource(CW)
@@ -645,7 +645,7 @@ def test_zero_point_solution_is_valid(toolchain):
 
 @pytest.mark.parametrize("custom", [False, True])
 def test_eight_row_alignment_applies_only_to_generated_kernels(toolchain, custom):
-    from Tensile.SolutionStructs.Validators.BlockDequant import validateBlockDequantCombination
+    from tensilelite.SolutionStructs.Validators.BlockDequant import validateBlockDequantCombination
 
     params = dict(_solution(toolchain, zeroPoint=True))
     params["MacroTile0"] = 4
@@ -808,7 +808,7 @@ def test_zero_point_without_block_mode_is_rejected(toolchain):
 
 
 def test_zero_point_carried_to_predicates(toolchain):
-    from Tensile.Contractions import ProblemType as CProblemType
+    from tensilelite.Contractions import ProblemType as CProblemType
 
     sol = _solution(toolchain, zeroPoint=True)
     pt = CProblemType.FromOriginalState(sol["ProblemType"].state)
@@ -982,7 +982,7 @@ def test_stagger_is_off_with_a_tail_loop(toolchain):
 
 
 def test_runtime_group_catalog_generates_prefill(toolchain):
-    from Tensile import LibraryIO
+    from tensilelite import LibraryIO
 
     _, iim, assembler, _ = toolchain
     paths = sorted(GFX1151_LOGIC.glob("*/*I4*.yaml"))

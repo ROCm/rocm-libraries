@@ -5,7 +5,7 @@
 from pathlib import Path
 import pytest
 import yaml
-from Tensile.Common.Utilities import state
+from tensilelite.Common.Utilities import state
 from test_w4a16_block_dequant import toolchain, GFX1151_LOGIC, needs_logic
 
 pytestmark = pytest.mark.unit
@@ -22,7 +22,7 @@ DECODE_KERNELS = {
 def test_q27b_equality_dispatch_keys():
     from types import SimpleNamespace
 
-    from Tensile.SolutionLibrary import MatchingLibrary
+    from tensilelite.SolutionLibrary import MatchingLibrary
 
     path = GFX1151_LOGIC / "Equality/gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_Q27B.yaml"
     logic = yaml.safe_load(path.read_text())
@@ -68,8 +68,8 @@ def test_block_scale_equality_grids_do_not_merge_duplicate_shape_keys():
     from copy import deepcopy
     from types import SimpleNamespace
 
-    from Tensile.LibraryIO import prepareLibraryLogicDict
-    from Tensile.SolutionLibrary import MasterSolutionLibrary
+    from tensilelite.LibraryIO import prepareLibraryLogicDict
+    from tensilelite.SolutionLibrary import MasterSolutionLibrary
 
     class IndexOnlySolution:
         @staticmethod
@@ -105,8 +105,8 @@ def test_block_scale_equality_grids_do_not_merge_duplicate_shape_keys():
 
 
 def test_runtime_group_predicate_accepts_only_declared_groups():
-    from Tensile.Contractions import ProblemType
-    from Tensile.SolutionStructs import ProblemType as OriginalProblemType
+    from tensilelite.Contractions import ProblemType
+    from tensilelite.SolutionStructs import ProblemType as OriginalProblemType
 
     config = dict(DataType=4, DataTypeA=24, DataTypeB=4, DestDataType=4,
                   ComputeDataType=0, HighPrecisionAccumulate=True,
@@ -142,7 +142,7 @@ def test_runtime_group_predicate_accepts_only_declared_groups():
 @pytest.mark.parametrize("n,tile_n", [(109, 112), (128, 128)])
 def test_symmetric_prefill_rounded_query_selects_narrow_tile(m, k, tile_m, n, tile_n):
     from types import SimpleNamespace
-    from Tensile.SolutionLibrary import MatchingLibrary
+    from tensilelite.SolutionLibrary import MatchingLibrary
 
     path = GFX1151_LOGIC / "Equality/gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_Q27B.yaml"
     logic = yaml.safe_load(path.read_text())
@@ -162,8 +162,8 @@ def test_symmetric_prefill_rounded_query_selects_narrow_tile(m, k, tile_m, n, ti
 @needs_logic
 def test_runtime_group_lazy_library_shares_one_group_partition():
     from types import SimpleNamespace
-    from Tensile.LibraryIO import prepareLibraryLogicDict
-    from Tensile.SolutionLibrary import MasterSolutionLibrary
+    from tensilelite.LibraryIO import prepareLibraryLogicDict
+    from tensilelite.SolutionLibrary import MasterSolutionLibrary
 
     class IndexOnlySolution:
         @staticmethod
@@ -183,8 +183,8 @@ def test_runtime_group_lazy_library_shares_one_group_partition():
 @pytest.mark.parametrize("groups, dataTypeA", [
     ([16, 32], 24), ([256], 24), ([32, "64"], 24), (["32"], 24), ("32", 24), (None, 24), ([], 24), ([32], 4)])
 def test_invalid_runtime_groups_are_rejected(groups, dataTypeA):
-    from Tensile.Contractions import ProblemType
-    from Tensile.SolutionStructs import ProblemType as OriginalProblemType
+    from tensilelite.Contractions import ProblemType
+    from tensilelite.SolutionStructs import ProblemType as OriginalProblemType
 
     problem = OriginalProblemType(dict(
         DataType=4, DataTypeA=dataTypeA, DataTypeB=4, DestDataType=4,
@@ -198,7 +198,7 @@ def test_invalid_runtime_groups_are_rejected(groups, dataTypeA):
 @needs_logic
 @pytest.mark.parametrize("groups", [[32, 64, 128], [32]])
 def test_multi_group_custom_logic_requires_runtime_argument(monkeypatch, toolchain, groups):
-    from Tensile import LibraryIO
+    from tensilelite import LibraryIO
     path = GFX1151_LOGIC / "Equality/gfx1151_Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZPU8_Q27B.yaml"
     logic = yaml.safe_load(path.read_text())
     logic["ProblemType"]["ScaleBlockSizesA"] = groups
@@ -225,8 +225,8 @@ def test_no_shipped_w4a16_prefill_assembly():
 
 @needs_logic
 def test_shipped_w4a16_kernels_do_not_support_scalar_operand_scales():
-    from Tensile.Contractions import ProblemType
-    from Tensile.SolutionStructs import ProblemType as OriginalProblemType
+    from tensilelite.Contractions import ProblemType
+    from tensilelite.SolutionStructs import ProblemType as OriginalProblemType
 
     catalogs = list(GFX1151_LOGIC.glob("*/*I4*.yaml"))
     assert catalogs
@@ -248,7 +248,7 @@ def test_shipped_w4a16_kernels_do_not_support_scalar_operand_scales():
     ([32], False, "Signed", "_SABB32_"),
 ])
 def test_problem_type_name_separates_runtime_group(groups, zero_point, encoding, token):
-    from Tensile.SolutionStructs import ProblemType
+    from tensilelite.SolutionStructs import ProblemType
 
     name = str(ProblemType(dict(
         DataType=4, DataTypeA=24, DataTypeB=4, DestDataType=4, ComputeDataType=0,
