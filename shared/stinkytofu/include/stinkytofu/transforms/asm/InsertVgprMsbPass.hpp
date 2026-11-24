@@ -51,8 +51,11 @@ STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertVgprMsbPass();
 /// Replays the s_set_vgpr_msb setters in \p function, block by block, and
 /// describes the first instruction that runs with a bank other than one it
 /// names, in a slot it depends on; nothing when there is none. Labels, calls
-/// and block starts leave no word known. InsertVgprMsbPass asserts on it in
-/// debug builds.
+/// and block starts leave no word known.
+///
+/// InsertVgprMsbPass asserts on it after every run. StinkyTofu keeps
+/// assertions on in Release builds (CMakeLists.txt), so a wrong word stops
+/// kernel generation there too rather than reaching the assembler.
 STINKYTOFU_EXPORT std::optional<std::string> firstVgprMsbMismatch(const Function& function);
 
 }  // namespace stinkytofu

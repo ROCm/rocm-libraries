@@ -178,6 +178,10 @@ class InsertVgprMsbPassImpl : public Pass {
             emitRemark(passCtx, {OptimizationRemark::Kind::Missed, "InsertVgprMsb",
                                  "UnbankableOperand", operand});
         }
+        // Asserted, unlike the operands above: a mismatch is a word this pass
+        // got wrong, so some instruction would touch a register it does not
+        // name. StinkyTofu keeps assertions in Release builds (CMakeLists.txt),
+        // so this stops kernel generation there too.
 #ifndef NDEBUG
         const std::optional<std::string> mismatch = firstVgprMsbMismatch(func);
         if (mismatch) std::cerr << "[InsertVgprMsb] " << *mismatch << "\n";
