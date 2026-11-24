@@ -59,7 +59,7 @@ The following table lists all operations currently supported in hipDNN:
 - Supports
     - standard ReLU: no clips set, or relu_lower_clip = 0
     - clipped ReLU: relu_upper_clip set
-    - CLAMP: relu_lower_clip and relu_upper_clip set
+    - CLAMP: relu_lower_clip set, with or without relu_upper_clip
 - relu_lower_clip_slope must be unset or 0 (leaky ReLU is not supported when fused)
 #### Bias, output and tensor requirements
 - Bias dims, after left-padding with 1 to the convolution output rank, are `[1, K, 1, ...]` where K is the output channel count
@@ -99,16 +99,17 @@ The following table lists all operations currently supported in hipDNN:
 >   - **Convolution Forward + (Bias) + Activation:** Combines convolution forward, optional bias addition, and forward activation
 
 > [!NOTE]
-> **Activation Functions (fused):** Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips). Leaky ReLU (non-zero `relu_lower_clip_slope`), Sigmoid and Tanh are **not** supported when fused onto a producer op; use a standalone activation node for those.
+> **Activation Functions (fused):** Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with a configurable lower clip and an optional upper clip). Leaky ReLU (non-zero `relu_lower_clip_slope`), Sigmoid and Tanh are **not** supported when fused onto a producer op; use a standalone activation node for those.
 
 > [!NOTE]
-> **Standalone Activation:** A single-node pointwise graph supports ReLU, Clipped ReLU (configurable upper clip), CLAMP (configurable lower/upper clips), Leaky ReLU (configurable negative slope), Sigmoid and Tanh. Tensors have rank 1-4. `x` and `y` have identical dims and are both packed with the same layout, in any dimension order; strides of unit dimensions are ignored. A padded, sliced, broadcast or otherwise non-packed tensor is declined because of [MIOpen issue 16024](https://github.com/ROCm/rocm-libraries/issues/16024).
+> **Standalone Activation:** A single-node pointwise graph supports ReLU, Clipped ReLU (configurable upper clip), CLAMP (configurable lower clip and optional upper clip), Leaky ReLU (configurable negative slope), Sigmoid and Tanh. Tensors have rank 1-4. `x` and `y` have identical dims and are both packed with the same layout, in any dimension order; strides of unit dimensions are ignored. A padded, sliced, broadcast or otherwise non-packed tensor is declined because of [MIOpen issue 16024](https://github.com/ROCm/rocm-libraries/issues/16024).
 
 > [!NOTE]
 > **ReLU parameters:** An unset `relu_lower_clip` is treated as 0, an unset `relu_upper_clip` as no
 > upper bound, and an unset `relu_lower_clip_slope` or a slope of exactly 0 as no leaky slope, so
 > equivalent encodings select the same MIOpen activation. A non-zero `relu_lower_clip` without an
-> upper clip is not supported.
+> upper clip runs as CLAMP with the float maximum as its upper bound, as the hipDNN reference does.
+> Leaky ReLU with a non-zero `relu_lower_clip` is not supported.
 
 > [!NOTE]
 > **Standalone Binary Elementwise:** A single-node pointwise graph supports ADD, SUB, MUL, MAX and MIN
