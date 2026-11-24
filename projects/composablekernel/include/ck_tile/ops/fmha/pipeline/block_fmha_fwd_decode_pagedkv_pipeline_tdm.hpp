@@ -116,10 +116,14 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
         return static_cast<const T*>(static_cast<const void*>(p));
     }
     CK_TILE_DEVICE static bool is_neg_inf(float x) { return __builtin_isinf(x) && x < 0.f; }
-    CK_TILE_DEVICE static float bf16_to_f32(uint32_t x) { return __uint_as_float(x << 16); }
+    CK_TILE_DEVICE static float bf16_to_f32(uint32_t x)
+    {
+        return bf16_to_float_raw(static_cast<uint16_t>(x));
+    }
+    // round to nearest even; float_to_bf16_rtn_raw also tests for NaN, in every element stored
     CK_TILE_DEVICE static uint32_t f32_to_bf16(float f)
     {
-        const uint32_t u = __float_as_uint(f);
+        const uint32_t u = bit_cast<uint32_t>(f);
         return (u + 0x7fff + ((u >> 16) & 1)) >> 16;
     }
     CK_TILE_DEVICE static uint32_t pack_bf16(float a, float b)
@@ -128,13 +132,12 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
     }
     CK_TILE_DEVICE static float fp16_to_f32(uint32_t x)
     {
-        return static_cast<float>(__builtin_bit_cast(_Float16, static_cast<uint16_t>(x)));
+        return type_convert<float>(bit_cast<fp16_t>(static_cast<uint16_t>(x)));
     }
     CK_TILE_DEVICE static uint32_t pack_fp16(float a, float b)
     {
-        return __builtin_bit_cast(uint16_t, static_cast<_Float16>(a)) |
-               (static_cast<uint32_t>(__builtin_bit_cast(uint16_t, static_cast<_Float16>(b)))
-                << 16);
+        return bit_cast<uint16_t>(type_convert<fp16_t>(a)) |
+               (static_cast<uint32_t>(bit_cast<uint16_t>(type_convert<fp16_t>(b))) << 16);
     }
     // two elements of O in the output type
     CK_TILE_DEVICE static uint32_t pack_o(float a, float b)
@@ -149,8 +152,8 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
     // x of the lane 16 away, with a VALU permute: a bpermute would queue behind the LDS reads
     CK_TILE_DEVICE static float other_half(float x)
     {
-        return __uint_as_float(static_cast<uint32_t>(__builtin_amdgcn_permlanex16(
-            0, static_cast<int32_t>(__float_as_uint(x)), 0x76543210, 0xfedcba98, false, true)));
+        return bit_cast<float>(__builtin_amdgcn_permlanex16(
+            0, bit_cast<int32_t>(x), 0x76543210, 0xfedcba98, false, true));
     }
 
     // pairwise: shorter dependency chains than a running max or sum
@@ -368,18 +371,18 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
                 qv[4 * j + 2] * qinv, qv[4 * j + 3] * qinv, x, true);
         }
         // column n of S^T in log2 units
-        const float scl = qmax / 448.f * kds * scale_s * 1.4426950408889634f;
+        const float scl = qmax / 448.f * kds * scale_s * log2e_v<float>;
 
         // step t's copies of this wave are in LDS; zero the V bytes of the tokens before the
         // window and past the context: their P is 0, but their bytes may be NaN codes
         const auto land = [&](index_t t) {
             // two gathers per step
             if(issued > t + 2)
-                __builtin_amdgcn_s_wait_tensorcnt(4);
+                s_wait_tensorcnt<4>();
             else if(issued > t + 1)
-                __builtin_amdgcn_s_wait_tensorcnt(2);
+                s_wait_tensorcnt<2>();
             else
-                __builtin_amdgcn_s_wait_tensorcnt(0);
+                s_wait_tensorcnt<0>();
             // the step's pages are consecutive: if the first starts inside the window and the
             // last lies in the range and the context, every token is valid (the common case, one
             // scalar test instead of one per page)
