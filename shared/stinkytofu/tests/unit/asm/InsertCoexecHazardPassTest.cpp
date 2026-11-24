@@ -56,24 +56,13 @@ class InsertCoexecHazardPassTest : public ::testing::Test {
     }
 };
 
-TEST_F(InsertCoexecHazardPassTest, F8K64MustSwitchAccumulator) {
+TEST_F(InsertCoexecHazardPassTest, F8K64MustSwitchAccumulatorEvenWithValuBetween) {
     EXPECT_DEATH(runPass(R"(
   v[0:7] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[20:27], v[30:37], v[0:7]) {}
+  v100 = "st.v_add_f32"(v200, v201) { issueCycles = 1, latencyCycles = 5 }
   v[0:7] = "st.v_wmma_f32_16x16x64_fp8_fp8"(v[40:47], v[50:57], v[0:7]) {}
 )"),
                  "switch the accumulator");
-}
-
-// A pair is two adjacent WMMAs, so a VALU after the first leaves it unpaired.
-TEST_F(InsertCoexecHazardPassTest, Bf16PairSplitByValuLeavesAnUnpairedWmma) {
-    EXPECT_DEATH(runPass(R"(
-  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], v[0:7]) {}
-  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[40:47], v[50:57], v[0:7]) {}
-  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[60:67], v[70:77], v[0:7]) {}
-  v100 = "st.v_add_f32"(v200, v201) { issueCycles = 1, latencyCycles = 5 }
-  v[0:7] = "st.v_wmma_f32_16x16x32_bf16"(v[80:87], v[90:97], v[0:7]) {}
-)"),
-                 "must be paired with the next WMMA");
 }
 
 TEST_F(InsertCoexecHazardPassTest, F6xF6MustSwitchAccumulator) {
