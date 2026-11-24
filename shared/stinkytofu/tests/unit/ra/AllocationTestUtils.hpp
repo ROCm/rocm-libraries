@@ -86,24 +86,36 @@ inline AllocationRules evenVBasesOnly(RuleStatus status = RuleStatus::Active) {
     return AllocationRules({rule});
 }
 
-/// Registers \p rules for the test triple for the duration of a scope.
+/// Registers \p rules for the test triple for the duration of a scope, then
+/// puts back whatever was registered before.
 ///
 /// allocateRegisters resolves the table from the triple rather than taking it as
 /// a parameter, so a test that wants a rule in force at the driver level has to
 /// go through the registry. Below the driver, pass a table to AllocationSetup.
+///
+/// The test triple is gfx1250's, whose shipped table registers itself once per
+/// process. Clearing it instead of restoring it would leave every later test in
+/// the binary without gfx1250's rules.
 class ScopedArchRules {
    public:
-    explicit ScopedArchRules(AllocationRules rules) {
+    explicit ScopedArchRules(AllocationRules rules)
+        : previous_(AllocationRulesRegistry::registeredFactory(raTestTriple())) {
         AllocationRulesRegistry::setArch(
             raTestTriple(), [table = std::move(rules)](const AsmCapsConfig&) { return table; });
     }
 
     ~ScopedArchRules() {
-        AllocationRulesRegistry::clearArch(raTestTriple());
+        if (previous_.has_value())
+            AllocationRulesRegistry::setArch(raTestTriple(), std::move(*previous_));
+        else
+            AllocationRulesRegistry::clearArch(raTestTriple());
     }
 
     ScopedArchRules(const ScopedArchRules&) = delete;
     ScopedArchRules& operator=(const ScopedArchRules&) = delete;
+
+   private:
+    std::optional<AllocationRulesRegistry::Factory> previous_;
 };
 
 /// Namespace scope so its default member initializers are usable in the default

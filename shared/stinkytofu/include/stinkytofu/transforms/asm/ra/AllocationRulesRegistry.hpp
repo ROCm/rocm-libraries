@@ -38,6 +38,7 @@
 
 #include <array>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -61,8 +62,15 @@ class STINKYTOFU_EXPORT AllocationRulesRegistry {
     /// True when \p arch has rules registered, even if every one is Off.
     static bool hasArch(const std::array<int, 3>& arch);
 
+    /// The factory registered for \p arch, which may be empty, or nullopt when
+    /// none is. With setArch(), what lets a caller that replaces a registration
+    /// for a while put the old one back.
+    static std::optional<Factory> registeredFactory(const std::array<int, 3>& arch);
+
     /// Remove the registration for \p arch. Mainly for tests, which register a
-    /// table for one triple and clear it afterwards.
+    /// table for one triple and clear it afterwards. A shipped table registers
+    /// itself once per process, so a test that replaces one puts it back with
+    /// registeredFactory() and setArch() instead.
     static void clearArch(const std::array<int, 3>& arch);
 
     /// Registered arch keys, sorted (form `gfxMNS`).

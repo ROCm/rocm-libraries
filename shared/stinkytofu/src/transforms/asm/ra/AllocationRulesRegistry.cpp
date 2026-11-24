@@ -66,6 +66,14 @@ bool AllocationRulesRegistry::hasArch(const std::array<int, 3>& arch) {
     return factories.find(archKey(arch)) != factories.end();
 }
 
+std::optional<AllocationRulesRegistry::Factory> AllocationRulesRegistry::registeredFactory(
+    const std::array<int, 3>& arch) {
+    const auto& factories = registry().factories;
+    const auto it = factories.find(archKey(arch));
+    if (it == factories.end()) return std::nullopt;
+    return it->second;
+}
+
 void AllocationRulesRegistry::clearArch(const std::array<int, 3>& arch) {
     registry().factories.erase(archKey(arch));
 }
