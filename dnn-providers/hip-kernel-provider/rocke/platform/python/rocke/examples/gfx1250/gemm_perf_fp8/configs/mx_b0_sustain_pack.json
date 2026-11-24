@@ -1,0 +1,74 @@
+{
+  "_comment": "mx_env_sweep.py config: sustained timing (50 warmup + 1000 launches, 3 rounds) of the B0 MX starting champion (mxswz), the previous best (pf3) and the new best (pk0pf6), each at clusters 1x4 and 4x4.",
+  "base_env": {
+    "ROCKE_EXP_MX": "1",
+    "ROCKE_EXP_MX_SWZ": "1",
+    "ROCKE_EXP_MX_SCALE_MC": "0",
+    "ROCKE_EXP_MX_KFENCE": "1",
+    "ROCKE_EXP_MX_SCALE_NOCLIP": "1",
+    "ROCKE_EXP_MC_SOLO0": "1"
+  },
+  "variants": [
+    {
+      "name": "mxswz",
+      "env": {}
+    },
+    {
+      "name": "pf3",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "3",
+        "ROCKE_EXP_GL2_CLUSTER": "1",
+        "ROCKE_EXP_MX_RA_NB1": "24",
+        "ROCKE_EXP_EPI_BATCH": "64",
+        "ROCKE_EXP_MX_RA_PRO": "1",
+        "ROCKE_EXP_GL2_SCALES": "1"
+      }
+    },
+    {
+      "name": "pk0pf6",
+      "env": {
+        "ROCKE_EXP_MX_RA": "2",
+        "ROCKE_EXP_MX_RA_BAR": "0",
+        "ROCKE_EXP_TDM_SPLIT": "2",
+        "ROCKE_EXP_MX_RA_CB": "1",
+        "ROCKE_EXP_MX_RA_CW": "0",
+        "ROCKE_EXP_MX_RA_CS": "0",
+        "ROCKE_EXP_MX_RA_NOBRANCH": "1",
+        "ROCKE_EXP_GL2_PREFETCH": "6",
+        "ROCKE_EXP_GL2_CLUSTER": "2",
+        "ROCKE_EXP_MX_RA_NB1": "0",
+        "ROCKE_EXP_EPI_BATCH": "64",
+        "ROCKE_EXP_MX_RA_PRO": "1",
+        "ROCKE_EXP_GL2_SCALES": "1",
+        "ROCKE_EXP_MX_SCALE_PACK": "1"
+      }
+    }
+  ],
+  "arms": [
+    {
+      "name": "c1x4",
+      "cluster": "1,4"
+    },
+    {
+      "name": "c4x4",
+      "cluster": "4,4"
+    }
+  ],
+  "shapes": [
+    [
+      4096,
+      4096,
+      65536
+    ]
+  ],
+  "rounds": 3,
+  "warmup": 50,
+  "repeat": 1000
+}
