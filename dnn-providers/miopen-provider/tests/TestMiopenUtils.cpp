@@ -8,7 +8,10 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
+#include <string>
 
 using namespace miopen_plugin;
 using namespace miopen_utils;
@@ -661,6 +664,56 @@ TEST(TestMiopenUtils, EnvFindEnforceIsSetOnlyForEnforcingValues)
             "MIOPEN_FIND_ENFORCE", value);
         EXPECT_TRUE(miopen_utils::envFindEnforceIsSet()) << "MIOPEN_FIND_ENFORCE=" << value;
     }
+}
+
+// =============================================================================
+// THROW_ON_MIOPEN_FAILURE / LOG_ON_MIOPEN_FAILURE must evaluate a failing call exactly once: the
+// error message is built from the status already returned, and the failing MIOpen call must not
+// be re-issued to build it (a second call relaunches work, or leaks what a create call made).
+// =============================================================================
+
+TEST(TestMiopenUtils, ThrowOnMiopenFailureEvaluatesFailingCallOnce)
+{
+    int calls = 0;
+    const auto failingCall = [&calls]() {
+        ++calls;
+        return miopenStatusBadParm;
+    };
+
+    try
+    {
+        THROW_ON_MIOPEN_FAILURE(failingCall());
+        FAIL() << "THROW_ON_MIOPEN_FAILURE did not throw";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+    {
+        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+        EXPECT_NE(e.getMessage().find(miopenGetErrorString(miopenStatusBadParm)), std::string::npos)
+            << e.getMessage();
+    }
+    EXPECT_EQ(calls, 1);
+}
+
+TEST(TestMiopenUtils, LogOnMiopenFailureEvaluatesFailingCallOnce)
+{
+    int calls = 0;
+    const auto failingCall = [&calls]() {
+        ++calls;
+        return miopenStatusBadParm;
+    };
+
+    // The logging macro builds its message only when ERROR logging is enabled, and the level
+    // defaults to off (HIPDNN_LOG_LEVEL). Enable it here so that a macro that re-issues the call
+    // to build the message fails this test whatever the environment and the test order.
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    // Called bare: wrapping the logging macro in EXPECT_NO_THROW trips clang-tidy on the logger's
+    // internal variable name. An unexpected exception still fails the test.
+    LOG_ON_MIOPEN_FAILURE(failingCall());
+    EXPECT_EQ(calls, 1);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "MIOpen error occurred"))
+        << recorder.getRecordedLogsAsString();
 }
 
 // =============================================================================
