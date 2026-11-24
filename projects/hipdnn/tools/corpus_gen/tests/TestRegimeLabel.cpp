@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <set>
 #include <string>
 #include <vector>
@@ -418,6 +419,94 @@ TEST(TestRegimeFocus, EveryLabelTheFacetsCanSpellIsListedAndCompiles)
     }
     EXPECT_NE(std::find(labels.begin(), labels.end(), "decode_short_mha"), labels.end());
     EXPECT_NE(std::find(labels.begin(), labels.end(), "append_long_gqa"), labels.end());
+}
+
+TEST(TestRegimeFocus, EveryShippedDeclarationLabelsItsRegimesAndEachLabelCompiles)
+{
+    // An unlabelled corpus is one regime: coverage reports it as such, sizing skips it, and a
+    // floor cannot spread over it, so a convolution corpus held no depthwise or 3-D graph that a
+    // regime floor could ask for. Every declaration labels its regimes, every label it spells
+    // compiles to a focus, and no two spell the same label.
+    size_t declarations = 0;
+    for(const auto& entry :
+        std::filesystem::directory_iterator(hipdnn_corpus_gen::test::operationsDir()))
+    {
+        if(entry.path().string().find(".opmeta.json") == std::string::npos)
+        {
+            continue;
+        }
+        const auto metadata = test::shippedOperation(entry.path().filename().string().substr(
+            0, entry.path().filename().string().find(".opmeta.json")));
+        ++declarations;
+        EXPECT_FALSE(metadata.regimeLabel.empty()) << metadata.operation << " labels no regime";
+        const auto labels = declaredRegimeLabels(metadata);
+        EXPECT_GE(labels.size(), 2U) << metadata.operation;
+        EXPECT_EQ(std::set<std::string>(labels.begin(), labels.end()).size(), labels.size())
+            << metadata.operation;
+        for(const auto& label : labels)
+        {
+            std::string error;
+            EXPECT_TRUE(compileRegimeFocus(metadata, label, error).has_value())
+                << metadata.operation << " " << label << ": " << error;
+        }
+    }
+    EXPECT_GT(declarations, 20U);
+}
+
+TEST(TestRegimeFocus, AConvolutionIsLabelledByItsFilterItsGroupingAndItsRank)
+{
+    const auto metadata = test::shippedOperation("conv_fwd");
+    const auto conv = [&metadata](int64_t c,
+                                  int64_t k,
+                                  int64_t groups,
+                                  int64_t r,
+                                  int64_t stride,
+                                  const std::string& spatial,
+                                  int64_t depth,
+                                  int64_t t) {
+        return regimeLabel(metadata,
+                           test::withDefaultCategoricals(metadata,
+                                                         ProblemPoint{{"N", int64_t{8}},
+                                                                      {"C", c},
+                                                                      {"K", k},
+                                                                      {"groups", groups},
+                                                                      {"H", int64_t{56}},
+                                                                      {"W", int64_t{56}},
+                                                                      {"R", r},
+                                                                      {"S", r},
+                                                                      {"pad_h", r / 2},
+                                                                      {"pad_w", r / 2},
+                                                                      {"stride_h", stride},
+                                                                      {"stride_w", stride},
+                                                                      {"dilation_h", int64_t{1}},
+                                                                      {"dilation_w", int64_t{1}},
+                                                                      {"D", depth},
+                                                                      {"T", t},
+                                                                      {"pad_d", t / 2},
+                                                                      {"stride_d", int64_t{1}},
+                                                                      {"dilation_d", int64_t{1}},
+                                                                      {"spatial", spatial}}));
+    };
+    EXPECT_EQ(conv(64, 256, 1, 1, 1, "2d", 1, 1), "pointwise_dense_2d");
+    EXPECT_EQ(conv(3, 768, 1, 16, 16, "2d", 1, 1), "patch_dense_2d");
+    EXPECT_EQ(conv(64, 64, 1, 2, 2, "2d", 1, 1), "patch_dense_2d");
+    EXPECT_EQ(conv(64, 64, 1, 3, 2, "2d", 1, 1), "small_dense_2d");
+    EXPECT_EQ(conv(3, 64, 1, 7, 2, "2d", 1, 1), "large_dense_2d");
+    EXPECT_EQ(conv(96, 96, 96, 7, 1, "2d", 1, 1), "large_depthwise_2d");
+    EXPECT_EQ(conv(256, 256, 32, 3, 1, "2d", 1, 1), "small_grouped_2d");
+    EXPECT_EQ(conv(256, 256, 1, 1, 1, "3d", 16, 1), "pointwise_dense_3d");
+    EXPECT_EQ(conv(320, 320, 1, 1, 1, "3d", 16, 3), "small_dense_3d");
+    EXPECT_EQ(conv(96, 96, 96, 3, 1, "3d", 16, 3), "small_depthwise_3d");
+
+    // The depthwise label ties groups to C, so its focus searches neither apart; the 3-D rank
+    // pins the spatial facet (2-D is `otherwise`, which pins nothing).
+    std::string error;
+    const auto focus = compileRegimeFocus(metadata, "small_depthwise_3d", error);
+    ASSERT_TRUE(focus.has_value()) << error;
+    ASSERT_EQ(focus->ties.count("groups"), 1U);
+    EXPECT_EQ(focus->ties.at("groups"), "C");
+    ASSERT_EQ(focus->categoricalPins.count("spatial"), 1U);
+    EXPECT_EQ(focus->categoricalPins.at("spatial"), ParameterValue(std::string("3d")));
 }
 
 TEST(TestRegimeFocus, AFloorIsAskedOfEveryRegimeNoQuotaNames)

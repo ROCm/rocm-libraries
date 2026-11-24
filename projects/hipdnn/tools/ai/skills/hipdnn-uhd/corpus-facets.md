@@ -161,17 +161,31 @@ pack-coverage engine adds its entry there on its branch.
   changing either is a new set and a full re-collection.
 - Each set's evaluation slice ([data.md](data.md)) is held out of training through
   `uhd_gen generate --eval-benchmarks`; a closed shape set uses `--recall` instead.
+- Every declaration labels its regimes (`regime_label`, the manifest's `regime` column), so
+  coverage, the evaluation slice, sizing and growth read and aim per regime: SDPA by phase,
+  context and grouping; convolutions by kernel (`pointwise`, `patch` where the stride equals the
+  filter, `small` up to 3, `large`), grouping (`depthwise`, `grouped`, `dense`) and rank
+  (`2d`, `3d`), as `small_depthwise_2d`; the matmuls by shape (`skinny` with M or N of 16 or
+  less, `deep_k` with K four times the larger or more, `regular`); the layer and RMS norms by
+  rows (`few`, 64 or fewer) and width (`narrow` to 512, `wide` from 8192, `mid`); batchnorm by
+  rank and plane (`small`, 196 points or fewer); pooling by rank and window (`global`,
+  `local`); pointwise by size; reductions by rows and columns. An unlabelled corpus is one
+  regime, which sizing skips and a floor cannot spread.
 - `--regime-quota` / `--regime-quotas` ask at least n problems in a named regime (a sizing's
   quotas use these); `--regime-floor n` asks n in every regime the operation declares and
   reports a regime the engine does not serve as short, without failing. A regime is reported
   `saturated` only when the search proved it holds no more problems; a focused search that stops
   without that proof reports the regime `not reached`, and a quota left short then exits 3.
-- `--anchor-scaling` keeps the declared archetype/neighbourhood mixture at a large `--count`;
-  without it the anchored share falls as exploration fills the set. It changes the set, so it
-  is part of the set's identity like `--count` and `--seed`. `manifest.json`'s
-  `reports.anchored_share.<operation>` (`anchored`, `delivered`, `share`, `anchor_scaling`) gives
-  the share of the sweep's graphs delivered after the cut to `--count` that come from the
-  archetypes and their neighbourhoods, with or without it.
+- Anchor scaling, the default, keeps the declared archetype/neighbourhood mixture at a large
+  `--count`; `--no-anchor-scaling` fixes the quotas at the first pass's, and the anchored share
+  then falls as exploration fills the set (`matmul` at `--count 2000`: 0.24 against 0.73, its
+  median K 268 against 2048). It changes the set, so it is part of the set's identity like
+  `--count` and `--seed`. `manifest.json`'s `reports.anchored_share.<operation>` (`anchored`,
+  `delivered`, `share`, `anchor_scaling`) gives the share of the sweep's graphs delivered after
+  the cut to `--count` that come from the archetypes and their neighbourhoods, either way.
+- Each combination starts its round of archetypes at one of its own, so every declared
+  archetype anchors some combination; a round from the first declared one left `conv_fwd`'s
+  depthwise, grouped and 3-D archetypes undrawn (1 depthwise graph in 2000).
 - `--form-floor n` asks n in every optional **form** the operation declares (`form_label`):
   for `sdpa_fwd` plain, `scale_unset`, `scale_tensor`, `dropout`, `padded`, `ragged`, `bias`,
   `sink`; for `sdpa_bwd` all but `sink`. Each form varies one optional attribute

@@ -94,6 +94,22 @@
         },
         1
       ]
+    },
+    {
+      "or": [
+        {
+          "==": [
+            "$q.spatial",
+            "2d"
+          ]
+        },
+        {
+          ">": [
+            "$q.D",
+            1
+          ]
+        }
+      ]
     }
   ],
   "// constraints": "D is 1 for 2-D problems (it is then absent from the tensors); an activation-free graph pins mode rather than repeat itself under every mode; training and backward statistics need more than one value per channel.",
@@ -127,6 +143,49 @@
       ]
     }
   },
+  "// regime_label": "The population a problem is reported, held out and grown under. rank: the spatial facet. plane: small (196 points per channel per sample or fewer, the 14x14 and 7x7 late stages) or large: a per-channel reduction over few points is bound by the channel count and the launch, over many by bandwidth, and kernels split there.",
+  "regime_label": [
+    {
+      "name": "rank",
+      "labels": [
+        {
+          "label": "3d",
+          "when": {
+            "==": [
+              "$q.spatial",
+              "3d"
+            ]
+          }
+        }
+      ],
+      "otherwise": "2d"
+    },
+    {
+      "name": "plane",
+      "labels": [
+        {
+          "label": "small",
+          "when": {
+            "<=": [
+              {
+                "*": [
+                  {
+                    "*": [
+                      "$q.H",
+                      "$q.W"
+                    ]
+                  },
+                  "$q.D"
+                ]
+              },
+              196
+            ]
+          }
+        }
+      ],
+      "otherwise": "large"
+    }
+  ],
   "graph_builder": {
     "function": "batchnormInferenceActivationBackward",
     "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
@@ -858,5 +917,6 @@
     "archetypes": 0.2,
     "neighbourhood": 0.6,
     "exploration": 0.2
-  }
+  },
+  "// bounds": "A 3-D problem has a depth above 1; at depth 1 it is the 2-D problem in five-dimensional tensors, which the 2-D archetype, whose depth is 1, otherwise filled half the 3-D corpus with."
 }

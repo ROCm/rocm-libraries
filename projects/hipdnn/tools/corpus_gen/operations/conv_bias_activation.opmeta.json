@@ -34,10 +34,18 @@
     },
     "R": {
       "type": "int64",
+      "range": [
+        1,
+        64
+      ],
       "description": "Filter height"
     },
     "S": {
       "type": "int64",
+      "range": [
+        1,
+        64
+      ],
       "description": "Filter width"
     },
     "pad_h": {
@@ -57,16 +65,32 @@
       "description": "Padding; 0 is unpadded"
     },
     "stride_h": {
-      "type": "int64"
+      "type": "int64",
+      "range": [
+        1,
+        32
+      ]
     },
     "stride_w": {
-      "type": "int64"
+      "type": "int64",
+      "range": [
+        1,
+        32
+      ]
     },
     "dilation_h": {
-      "type": "int64"
+      "type": "int64",
+      "range": [
+        1,
+        32
+      ]
     },
     "dilation_w": {
-      "type": "int64"
+      "type": "int64",
+      "range": [
+        1,
+        32
+      ]
     },
     "dtype": {
       "type": "enum",
@@ -116,6 +140,10 @@
     },
     "T": {
       "type": "int64",
+      "range": [
+        1,
+        16
+      ],
       "description": "Filter depth; 1 and absent for 2-D."
     },
     "pad_d": {
@@ -126,10 +154,18 @@
       ]
     },
     "stride_d": {
-      "type": "int64"
+      "type": "int64",
+      "range": [
+        1,
+        32
+      ]
     },
     "dilation_d": {
-      "type": "int64"
+      "type": "int64",
+      "range": [
+        1,
+        32
+      ]
     },
     "layout": {
       "type": "enum",
@@ -227,6 +263,139 @@
       ]
     }
   },
+  "// regime_label": "The population a problem is reported, held out and grown under: the filter's shape, the grouping and the rank. kernel: pointwise (1x1, and 1 deep in 3-D: a GEMM over channels), patch (stride equal to the filter, a non-overlapping patchify such as a ViT or ConvNeXt stem or a 2x2 downsample), small (3 or less on each side, 3x3 and its separable halves), large (5x5 and wider, the stems and large-kernel depthwise). grouping: depthwise (one channel per group, MobileNet, ConvNeXt, X3D), grouped (ResNeXt), dense. rank: the spatial facet. Every engine family splits along these lines -- implicit GEMM against direct and Winograd kernels, depthwise and grouped kernels of their own, 3-D kernels -- so a model's accuracy is read, and its corpus grown, per label rather than over one unlabelled population.",
+  "regime_label": [
+    {
+      "name": "kernel",
+      "labels": [
+        {
+          "label": "pointwise",
+          "when": {
+            "and": [
+              {
+                "==": [
+                  "$q.R",
+                  1
+                ]
+              },
+              {
+                "==": [
+                  "$q.S",
+                  1
+                ]
+              },
+              {
+                "==": [
+                  "$q.T",
+                  1
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "label": "patch",
+          "when": {
+            "and": [
+              {
+                ">": [
+                  "$q.R",
+                  1
+                ]
+              },
+              {
+                "==": [
+                  "$q.stride_h",
+                  "$q.R"
+                ]
+              },
+              {
+                "==": [
+                  "$q.stride_w",
+                  "$q.S"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "label": "small",
+          "when": {
+            "and": [
+              {
+                "<=": [
+                  "$q.R",
+                  3
+                ]
+              },
+              {
+                "<=": [
+                  "$q.S",
+                  3
+                ]
+              },
+              {
+                "<=": [
+                  "$q.T",
+                  3
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "otherwise": "large"
+    },
+    {
+      "name": "grouping",
+      "labels": [
+        {
+          "label": "depthwise",
+          "when": {
+            "and": [
+              {
+                ">": [
+                  "$q.groups",
+                  1
+                ]
+              },
+              {
+                "==": [
+                  "$q.groups",
+                  "$q.C"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "label": "grouped",
+          "when": {
+            ">": [
+              "$q.groups",
+              1
+            ]
+          }
+        }
+      ],
+      "otherwise": "dense"
+    },
+    {
+      "name": "rank",
+      "labels": [
+        {
+          "label": "3d",
+          "when": {
+            "==": [
+              "$q.spatial",
+              "3d"
+            ]
+          }
+        }
+      ],
+      "otherwise": "2d"
+    }
+  ],
   "graph_builder": {
     "function": "convolutionBiasActivation",
     "source": "hipdnn_corpus_gen/GraphBuilders.hpp",
@@ -1435,6 +1604,76 @@
                 "$q.pad_d"
               ]
             }
+          ]
+        }
+      ]
+    },
+    {
+      "<=": [
+        "$q.pad_h",
+        {
+          "*": [
+            "$q.dilation_h",
+            {
+              "-": [
+                "$q.R",
+                1
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "<=": [
+        "$q.pad_w",
+        {
+          "*": [
+            "$q.dilation_w",
+            {
+              "-": [
+                "$q.S",
+                1
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "<=": [
+        "$q.pad_d",
+        {
+          "*": [
+            "$q.dilation_d",
+            {
+              "-": [
+                "$q.T",
+                1
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "or": [
+        {
+          "==": [
+            "$q.spatial",
+            "2d"
+          ]
+        },
+        {
+          ">": [
+            "$q.D",
+            1
+          ]
+        },
+        {
+          ">": [
+            "$q.T",
+            1
           ]
         }
       ]
@@ -3465,6 +3704,368 @@
           1
         ]
       }
+    },
+    {
+      "name": "video_unet_temporal_3x1x1",
+      "note": "the temporal convolution of a video diffusion UNet (Stable Video Diffusion, AnimateDiff): a 3-frame kernel over the latent's frames, pointwise in space, at the UNet's widths",
+      "values": {
+        "N": [
+          1,
+          2
+        ],
+        "C": [
+          320,
+          640,
+          1280
+        ],
+        "K": [
+          "$q.C"
+        ],
+        "groups": [
+          1
+        ],
+        "D": [
+          14,
+          16,
+          25
+        ],
+        "H": [
+          16,
+          32,
+          64
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "T": [
+          3
+        ],
+        "R": [
+          1
+        ],
+        "S": [
+          1
+        ],
+        "pad_d": [
+          1
+        ],
+        "pad_h": [
+          0
+        ],
+        "pad_w": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "stride_h": [
+          1
+        ],
+        "stride_w": [
+          1
+        ],
+        "dilation_d": [
+          1
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "video_vae_3x3x3",
+      "note": "a 3-D VAE's convolution over pixel-space frames (CogVideoX, HunyuanVideo, Wan): few frames, wide images, a few hundred channels",
+      "values": {
+        "N": [
+          1
+        ],
+        "C": [
+          128,
+          256,
+          512
+        ],
+        "K": [
+          "$q.C"
+        ],
+        "groups": [
+          1
+        ],
+        "D": [
+          5,
+          9,
+          17
+        ],
+        "H": [
+          64,
+          128,
+          256
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "T": [
+          3
+        ],
+        "R": [
+          3
+        ],
+        "S": [
+          3
+        ],
+        "pad_d": [
+          1
+        ],
+        "pad_h": [
+          1
+        ],
+        "pad_w": [
+          1
+        ],
+        "stride_d": [
+          1
+        ],
+        "stride_h": [
+          1
+        ],
+        "stride_w": [
+          1
+        ],
+        "dilation_d": [
+          1
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "resnet3d_pointwise_1x1x1",
+      "note": "the 1x1x1 projections of a 3-D ResNet bottleneck (I3D, SlowFast, X3D): channel mixing over a clip's frames",
+      "values": {
+        "N": [
+          1,
+          4,
+          8,
+          16
+        ],
+        "C": [
+          64,
+          256,
+          512,
+          1024,
+          2048
+        ],
+        "K": [
+          64,
+          256,
+          512,
+          1024,
+          2048
+        ],
+        "groups": [
+          1
+        ],
+        "D": [
+          4,
+          8,
+          16,
+          32
+        ],
+        "H": [
+          56,
+          28,
+          14,
+          7
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "T": [
+          1
+        ],
+        "R": [
+          1
+        ],
+        "S": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "pad_h": [
+          0
+        ],
+        "pad_w": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "stride_h": [
+          1
+        ],
+        "stride_w": [
+          1
+        ],
+        "dilation_d": [
+          1
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "medical_unet3d_3x3x3",
+      "note": "a volumetric segmentation UNet's 3x3x3 convolution (nnU-Net, 3-D UNet) over a 3-D patch at its encoder widths",
+      "values": {
+        "N": [
+          1,
+          2
+        ],
+        "C": [
+          32,
+          64,
+          128,
+          256,
+          320
+        ],
+        "K": [
+          "$q.C"
+        ],
+        "groups": [
+          1
+        ],
+        "D": [
+          32,
+          64,
+          128
+        ],
+        "H": [
+          "$q.D"
+        ],
+        "W": [
+          "$q.D"
+        ],
+        "T": [
+          3
+        ],
+        "R": [
+          3
+        ],
+        "S": [
+          3
+        ],
+        "pad_d": [
+          1
+        ],
+        "pad_h": [
+          1
+        ],
+        "pad_w": [
+          1
+        ],
+        "stride_d": [
+          1
+        ],
+        "stride_h": [
+          1
+        ],
+        "stride_w": [
+          1
+        ],
+        "dilation_d": [
+          1
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "x3d_depthwise_3x3x3",
+      "note": "X3D's channelwise 3x3x3 convolution: depthwise over a clip, with a spatial stride at a stage's first block",
+      "values": {
+        "N": [
+          1,
+          4,
+          8
+        ],
+        "C": [
+          48,
+          96,
+          192,
+          432
+        ],
+        "K": [
+          "$q.C"
+        ],
+        "groups": [
+          "$q.C"
+        ],
+        "D": [
+          13,
+          16
+        ],
+        "H": [
+          56,
+          28,
+          14,
+          7
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "T": [
+          3
+        ],
+        "R": [
+          3
+        ],
+        "S": [
+          3
+        ],
+        "pad_d": [
+          1
+        ],
+        "pad_h": [
+          1
+        ],
+        "pad_w": [
+          1
+        ],
+        "stride_d": [
+          1
+        ],
+        "stride_h": [
+          1,
+          2
+        ],
+        "stride_w": [
+          "$q.stride_h"
+        ],
+        "dilation_d": [
+          1
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          1
+        ]
+      }
     }
   ],
   "neighbourhood": {
@@ -3532,5 +4133,6 @@
   "// archetypes": "Correlated tuples from real networks (RFC 0019.13 \u00a712.2). Realism is a joint fact: C=3 is a real convolution beside K=64, a 7x7 filter and a 224x224 image, and meaningless beside K=905. Each archetype fixes one coherent geometry -- filter size, dilation and padding together -- and varies stride inside it, because padding is chosen to suit the filter and dilation while stride is chosen independently of both. Between them these cover stride 1/2/4/16, padding 0 through 5, dilation 1 through 4, and group counts from 1 through depthwise.",
   "// neighbourhood": "How a draw may drift and stay a layer. R, S, stride, padding and dilation are all deliberately absent: they form one coupled geometry, and moving any of them alone breaks the pairing the archetypes exist to record -- a 7x7 that drifts to 3x3 while pad stays 3, or a 16x16 patch projection whose stride falls to 1, is valid and is in no network. Coverage of those axes comes from declaring more geometries, not from perturbing one. W repeats the 1 ratio because most images are square and a uniform draw over {1, 1.33, 2} would say otherwise.",
   "// mixture": "Anchors alone memorise a handful of shapes; the wide net alone put 0.04% of ten thousand draws anywhere near a real layer. The exploration share is \u00a75.4's floor -- an engine still has to answer for problems nobody wrote down.",
-  "// spatial": "spatial and layout are axes of the problem: 3-D problems add a depth to every tensor and to the geometry, and channels_last stores activations NHWC/NDHWC and the filter KRSC. 2-D problems pin every depth parameter to its identity."
+  "// spatial": "spatial and layout are axes of the problem: 3-D problems add a depth to every tensor and to the geometry, and channels_last stores activations NHWC/NDHWC and the filter KRSC. 2-D problems pin every depth parameter to its identity.",
+  "// bounds": "Bounds on the geometry the search proposes, none of which a network uses beyond: filters up to 64 (RepLKNet's 31x31 and SLaK's 51x51 are the widest published), 16 deep in 3-D; strides and dilations up to 32 (ViT-B/32's patch, DeepLab's atrous rates of 6 to 24). Unbounded, the log-uniform exploration put a third of its draws at strides in the hundreds or thousands and 14% of the corpus at an output one or two rows high. Padding is held to the dilated filter's extent less one: more pads rows that no filter tap reaches. A 3-D problem has a depth or a depth filter above 1; with both 1 it is the 2-D problem written in five-dimensional tensors, which the 2-D archetypes, whose depth is 1, otherwise filled 3-D's half of the corpus with."
 }

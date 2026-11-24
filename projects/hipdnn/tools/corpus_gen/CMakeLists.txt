@@ -107,11 +107,12 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
                 # gives the cut the first pass of about 1800 problems it had at 10 with three
                 # unweighted dtypes; at 10 scale_unset falls to 35 of 400.
                 "count_cut_keeps_forms_even|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--per-combination,30,--count,400|0|400|||||9:plain:scale_unset:scale_tensor:dropout:padded:ragged:bias:sink"
-                # With --anchor-scaling the declared mixture (80% archetypes and neighbourhood)
-                # holds at a count far above the first pass; without it the first pass's fixed
-                # quotas are diluted by exploration. anchored_share reports the delivered corpus.
-                "anchor_scaling_holds_the_mixture|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,2000,--anchor-scaling|0|2000|||reports.anchored_share.matmul.anchor_scaling=ON|>=60"
-                "anchor_scaling_off_dilutes_the_mixture|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,2000|0|2000|||reports.anchored_share.matmul.anchor_scaling=OFF|<=30"
+                # Anchor scaling, the default, holds the declared mixture (80% archetypes and
+                # neighbourhood) at a count far above the first pass; --no-anchor-scaling leaves
+                # the first pass's fixed quotas to be diluted by exploration. anchored_share
+                # reports the delivered corpus.
+                "anchor_scaling_holds_the_mixture|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,2000|0|2000|||reports.anchored_share.matmul.anchor_scaling=ON|>=60"
+                "anchor_scaling_off_dilutes_the_mixture|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,2000,--no-anchor-scaling|0|2000|||reports.anchored_share.matmul.anchor_scaling=OFF|<=30"
                 # A --count far below the first pass cuts it, and anchored_share counts what is
                 # left: the corpus's sweep graphs, not the problems explored before the cut.
                 "anchored_share_counts_the_delivered_corpus|--without-engine,--operations,${_operations_dir},--operation,matmul,--count,100|0|100|||reports.anchored_share.matmul.delivered=100"

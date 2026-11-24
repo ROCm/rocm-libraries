@@ -1333,12 +1333,24 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
                 = static_cast<size_t>(std::max(0.0, metadata.mixture.neighbourhood * total));
         }
 
-        // Capped so archetypes the engine declines cannot consume the whole budget.
+        // Capped so archetypes the engine declines cannot consume the whole budget. Each
+        // combination starts the round at an archetype of its own. A combination's quota is a
+        // fifth of its first-pass count, often fewer anchors than there are archetypes, and a
+        // round that always began at the first declared one never reached the rest: conv_fwd's
+        // quota of 10 over 28 archetypes left its depthwise, grouped and 3-D ones (21 to 27)
+        // undrawn, 1 depthwise graph in 2000. Keyed past the combinations' apportion keys
+        // (tieKey(seed, index)), so the two orders are not the same draw.
         const size_t archetypeAttempts = archetypeQuota * 20;
+        const size_t firstArchetype
+            = metadata.archetypes.empty()
+                  ? 0
+                  : static_cast<size_t>(detail::tieKey(request.seed, combinations.size() + index)
+                                        % metadata.archetypes.size());
         for(size_t attempt = 0; attempt < archetypeAttempts && anchored.size() < archetypeQuota;
             ++attempt)
         {
-            const auto& archetype = metadata.archetypes[attempt % metadata.archetypes.size()];
+            const auto& archetype
+                = metadata.archetypes[(firstArchetype + attempt) % metadata.archetypes.size()];
             const auto drawn = detail::drawFromArchetype(metadata, archetype, categorical, rng);
             if(!drawn.has_value())
             {
