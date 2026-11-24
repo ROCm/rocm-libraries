@@ -1305,6 +1305,18 @@ try
         }
     }
 
+    // Peers' entries may be addresses in another process, but this rank's own entry is
+    // local, so a host pointer or one on another device is caught here rather than as a
+    // hang in the kernel.
+    hipPointerAttribute_t ownAttr{};
+    if(hipPointerGetAttributes(&ownAttr, peerFlags[rank]) != hipSuccess
+       || ownAttr.type != hipMemoryTypeDevice || ownAttr.device != h->device)
+    {
+        log_error(__func__, "own flag region is not device memory on this device; rank", (int)rank);
+        rocblaslt::Debug::Instance().markerStop();
+        return HIPBLAS_STATUS_INVALID_VALUE;
+    }
+
     for(uint32_t j = 0; j < world; ++j)
         h->device_comm_peer_flags[j] = peerFlags[j];
     h->device_comm_rank     = rank;

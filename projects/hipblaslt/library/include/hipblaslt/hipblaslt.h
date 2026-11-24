@@ -937,12 +937,17 @@ hipblasStatus_t hipblasLtDeviceCommFlagBytes(uint32_t nChannels, size_t* bytes);
  *    the owner's kernel polls it;
  *  - be aligned to ``HIPBLASLT_DEVICE_COMM_FLAG_ALIGNMENT`` bytes;
  *  - be zero-filled, and every write to it complete, before the first collective that uses it;
- *  - not be written by the caller afterwards; and
+ *  - not be written by the caller while a collective that uses it is in flight on any rank.
+ *    The kernel sets each flag back to zero when a collective completes, so another handle
+ *    can register the same region later. If a collective does not complete, stop all ranks
+ *    and zero-fill the region again before a handle registers it; and
  *  - outlive every handle that registered it, and every collective launched on those handles.
  *
  *  Every rank must register with the same \p world and \p nChannels, and \p peerFlags must
  *  name the same regions on every rank, each as addressed from that rank's process. The
- *  library cannot verify any of this.
+ *  library checks only that this rank's own entry is device memory on the handle's device; it
+ *  cannot verify the rest. A mismatch does not return an error: a peer can write past the end
+ *  of a smaller region and corrupt memory on the GPU that owns it.
  *
  *  Registration may be made at most once per handle, which makes \p world immutable: \p world
  *  participates in solution selection, so changing communicators means destroying the handle.

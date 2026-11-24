@@ -528,6 +528,33 @@ namespace
         EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 1, 1, one), HIPBLAS_STATUS_SUCCESS);
     }
 
+    // Only this rank's own entry can be inspected, so a peer entry that is not device memory
+    // on this device still registers.
+    TEST_F(FusedA2AComm_pre_checkin, RejectsOwnEntryNotOnThisDevice)
+    {
+        alignas(HIPBLASLT_DEVICE_COMM_FLAG_ALIGNMENT) static char
+            host[HIPBLASLT_DEVICE_COMM_FLAG_ALIGNMENT];
+
+        void* const hostOwn[2] = {host, flags.ptr};
+        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 2, 1, hostOwn), HIPBLAS_STATUS_INVALID_VALUE);
+
+        int deviceCount = 0, device = 0;
+        ASSERT_EQ(hipGetDeviceCount(&deviceCount), hipSuccess);
+        ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+        if(deviceCount > 1)
+        {
+            ASSERT_EQ(hipSetDevice((device + 1) % deviceCount), hipSuccess);
+            FlagRegion other{1};
+            ASSERT_EQ(hipSetDevice(device), hipSuccess);
+            void* const otherOwn[1] = {other.ptr};
+            EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 1, 1, otherOwn),
+                      HIPBLAS_STATUS_INVALID_VALUE);
+        }
+
+        void* const hostPeer[2] = {flags.ptr, host};
+        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 2, 1, hostPeer), HIPBLAS_STATUS_SUCCESS);
+    }
+
     TEST_F(FusedA2AComm_pre_checkin, MultipleChannelsRegister)
     {
         void* const one[1] = {flags.ptr};
