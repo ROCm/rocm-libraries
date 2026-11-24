@@ -19,8 +19,10 @@
 using Config   = miopen::solver::conv::PerformanceConfigConvHipConv;
 using TestCase = miopen::unit_tests::ConvTestCase;
 
+using CPU_PerfConfig_ConvHipConv_NONE = ::testing::TestWithParam<int>;
+
 // A kernel label contains commas, which field-wise perf-config serialization would split on.
-TEST(CPU_PerfConfig_ConvHipConv_NONE, SerializeRoundTrip)
+TEST_P(CPU_PerfConfig_ConvHipConv_NONE, SerializeRoundTrip)
 {
     Config stored;
     stored.descriptor = "direct[tile_size_k=256,tile_size_n=1,tile_size_h=16,tile_size_w=16]";
@@ -30,8 +32,12 @@ TEST(CPU_PerfConfig_ConvHipConv_NONE, SerializeRoundTrip)
     EXPECT_EQ(loaded.descriptor, stored.descriptor);
 }
 
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_PerfConfig_ConvHipConv_NONE, ::testing::Values(0));
+
+using GPU_PerfConfig_ConvHipConv_FP16 = ::testing::TestWithParam<int>;
+
 // A perf-db record selects its config only under the hipconv minor version that wrote it.
-TEST(GPU_PerfConfig_ConvHipConv_FP16, VersionStamp)
+TEST_P(GPU_PerfConfig_ConvHipConv_FP16, VersionStamp)
 {
     if(!IsTestSupportedByDevice(Gpu::gfx950 | Gpu::gfx125X))
         GTEST_SKIP();
@@ -87,7 +93,7 @@ TEST(GPU_PerfConfig_ConvHipConv_FP16, VersionStamp)
 // The perf-config picker's ConvHipConv candidates for this device carry this build's config
 // version. IsValidPerformanceConfig rejects a record of any other version, so a model left on
 // an older version after a hipconv config bump would run the default config on every problem.
-TEST(GPU_PerfConfig_ConvHipConv_FP16, PickerCatalogVersion)
+TEST_P(GPU_PerfConfig_ConvHipConv_FP16, PickerCatalogVersion)
 {
     if(!IsTestSupportedByDevice(Gpu::gfx950 | Gpu::gfx125X))
         GTEST_SKIP();
@@ -137,7 +143,7 @@ TEST(GPU_PerfConfig_ConvHipConv_FP16, PickerCatalogVersion)
 // margin. Forward never asks for the default config, the default config's record is one of the
 // candidates PickConfig scores, PickConfig abstains when the default is not among them, and a pick
 // that clears the margin is never the default itself.
-TEST(GPU_PerfConfig_ConvHipConv_FP16, PickerDefaultMargin)
+TEST_P(GPU_PerfConfig_ConvHipConv_FP16, PickerDefaultMargin)
 {
     if(!IsTestSupportedByDevice(Gpu::gfx950))
         GTEST_SKIP();
@@ -200,5 +206,7 @@ TEST(GPU_PerfConfig_ConvHipConv_FP16, PickerDefaultMargin)
     EXPECT_EQ(std::find(picked.begin(), picked.end(), record), picked.end());
 }
 #endif // MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
+
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_PerfConfig_ConvHipConv_FP16, ::testing::Values(0));
 
 #endif // MIOPEN_USE_HIPCONV

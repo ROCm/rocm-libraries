@@ -11,7 +11,7 @@ import pytest
 
 import hipdnn_frontend as hipdnn
 
-from .graph_builders import build_pointwise_add_graph
+from .graph_builders import build_pointwise_add_graph, build_sdpa_graph
 from .helpers import NullHandle, build_all_plans
 
 
@@ -244,3 +244,207 @@ class TestGraphExecuteTimedExt:
             hipdnn.TimingQuality.DEVICE_ONLY,
             hipdnn.TimingQuality.UNSTALLED,
         )
+
+
+class TestCheckTensorUidsSet:
+    """Tests for Graph.checkTensorUidsSet()."""
+
+    def test_uids_not_set_before_assignment(self):
+        """Tensors without explicit UIDs fail the UID check."""
+        graph = _build_pointwise_add_graph([8, 16], [8, 16])
+        assert graph.checkTensorUidsSet().is_bad()
+
+    def test_uids_set_after_manual_assignment(self):
+        """Setting UIDs on all tensors passes the check."""
+        graph = _build_pointwise_add_graph([8, 16], [8, 16])
+        assert graph.checkTensorUidsSet().is_bad()
+        for uid, name in enumerate(("a", "b", "out"), start=1):
+            graph.getTensorsByName()[name].set_uid(uid)
+        assert graph.checkTensorUidsSet().is_good()
+
+
+class TestGetTensorsByUidAndName:
+    """Tests for Graph.getTensorsByUid() and getTensorsByName()."""
+
+    def test_get_tensors_by_uid_returns_all_tensors(self):
+        """getTensorsByUid() returns a dict with an entry per tensor in the graph."""
+        graph = _build_pointwise_add_graph([8, 16], [8, 16])
+        for uid, name in enumerate(("a", "b", "out"), start=1):
+            graph.getTensorsByName()[name].set_uid(uid)
+        tensors_by_uid = graph.getTensorsByUid()
+        assert isinstance(tensors_by_uid, dict)
+        assert len(tensors_by_uid) == 3
+        assert all(t.get_uid() == uid for uid, t in tensors_by_uid.items())
+
+    def test_get_tensors_by_name_returns_named_tensors(self):
+        """getTensorsByName() returns a dict keyed by tensor name."""
+        graph = _build_pointwise_add_graph([8, 16], [8, 16])
+        tensors_by_name = graph.getTensorsByName()
+        assert isinstance(tensors_by_name, dict)
+        assert "a" in tensors_by_name
+        assert "b" in tensors_by_name
+        assert "out" in tensors_by_name
+
+    def test_uid_and_name_maps_are_consistent(self):
+        """Both maps reference the same set of tensors by UID."""
+        graph = _build_pointwise_add_graph([4, 8], [4, 8])
+        for uid, name in enumerate(("a", "b", "out"), start=1):
+            graph.getTensorsByName()[name].set_uid(uid)
+        by_uid = graph.getTensorsByUid()
+        by_name = graph.getTensorsByName()
+        assert {t.get_uid() for t in by_name.values()} == set(by_uid)
+
+
+@pytest.mark.gpu
+class TestGraphBuild:
+    """Tests for Graph.build() one-shot lifecycle."""
+
+    def test_build_produces_executable_graph(self):
+        """build() validates, builds, creates plans, and finalizes in one call."""
+        graph, a, b, out = build_pointwise_add_graph(n=1, c=1, h=2, w=2)
+        handle = hipdnn.create_handle()
+        result = graph.build(handle)
+        assert result.is_good(), f"build() failed: {result.get_message()}"
+        plan_bytes = graph.to_compiled_plan_binary()
+        assert isinstance(plan_bytes, bytes) and len(plan_bytes) > 0
+
+    def test_build_with_invalid_graph_fails(self):
+        """build() on an empty graph returns a bad error."""
+        graph = hipdnn.Graph()
+        handle = hipdnn.create_handle()
+        result = graph.build(handle)
+        assert result.is_bad()
+
+
+@pytest.mark.gpu
+class TestCompiledPlanSerialization:
+    """Tests for to_compiled_plan_binary() / from_compiled_plan_binary()."""
+
+    def test_compiled_plan_round_trip(self):
+        """Serialize a compiled plan and restore it on a fresh graph."""
+        graph, a, b, out = build_pointwise_add_graph(n=1, c=1, h=2, w=2)
+        handle = hipdnn.create_handle()
+        assert graph.build(handle).is_good()
+
+        plan_bytes = graph.to_compiled_plan_binary()
+        assert isinstance(plan_bytes, bytes)
+        assert len(plan_bytes) > 0
+
+        # Restore on a fresh graph and verify round-trip
+        restored = hipdnn.Graph()
+        assert restored.from_compiled_plan_binary(handle, plan_bytes).is_good()
+        assert restored.to_compiled_plan_binary() == plan_bytes
+
+    def test_to_compiled_plan_binary_without_build_raises(self):
+        """Calling to_compiled_plan_binary() before build() raises RuntimeError."""
+        graph = _build_pointwise_add_graph([8, 16], [8, 16])
+        with pytest.raises(RuntimeError):
+            graph.to_compiled_plan_binary()
+
+
+_sdpa_available = hasattr(hipdnn.Graph(), "set_override_shape_enabled")
+
+
+@pytest.mark.skipif(not _sdpa_available, reason="HIPDNN_ENABLE_SDPA not compiled in")
+class TestOverrideShapeEnabled:
+    """Tests for set_override_shape_enabled() / is_override_shape_enabled()."""
+
+    def test_default_is_disabled(self):
+        """Override shape mode is disabled by default."""
+        g = hipdnn.Graph()
+        assert not g.is_override_shape_enabled()
+
+    def test_enable_and_query(self):
+        """set_override_shape_enabled(True) enables the mode."""
+        g = hipdnn.Graph()
+        result = g.set_override_shape_enabled(True)
+        assert result is g  # fluent API returns self
+        assert g.is_override_shape_enabled()
+
+    def test_disable_after_enable(self):
+        """set_override_shape_enabled(False) disables the mode."""
+        g = hipdnn.Graph()
+        g.set_override_shape_enabled(True)
+        g.set_override_shape_enabled(False)
+        assert not g.is_override_shape_enabled()
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not _sdpa_available, reason="HIPDNN_ENABLE_SDPA not compiled in")
+class TestOverrideExecution:
+    """Tests for execute() with shape/stride overrides."""
+
+    def test_execute_override_without_enabled_flag_fails(self):
+        """Override execution on a graph built without set_override_shape_enabled fails."""
+        graph, a, b, out = build_pointwise_add_graph(n=1, c=1, h=2, w=2)
+        handle = hipdnn.create_handle()
+        assert graph.build(handle).is_good()
+
+        result = graph.execute(
+            handle,
+            {},
+            0,
+            override_uids=[a.get_uid()],
+            override_shapes=[[1, 1, 2, 2]],
+            override_strides=[[4, 4, 2, 1]],
+        )
+        assert result.is_bad() and "set_override_shape_enabled" in result.get_message()
+
+    def test_execute_override_with_enabled_flag_succeeds(self):
+        """Override execution succeeds on an SDPA graph built with overrides enabled."""
+        graph, q, k, v, o, stats = build_sdpa_graph()
+        graph.set_override_shape_enabled(True)
+        handle = hipdnn.create_handle()
+        result = graph.build(handle)
+        if result.is_bad():
+            pytest.skip(f"No SDPA engine with override support: {result.get_message()}")
+
+        # Override with halved sequence lengths
+        q_dim = q.get_dim()  # [2, 8, 16, 64]
+        k_dim = k.get_dim()  # [2, 8, 32, 64]
+        v_dim = v.get_dim()  # [2, 8, 32, 64]
+        o_dim = [q_dim[0], q_dim[1], q_dim[2] // 2, q_dim[3]]
+        q_ovr = [q_dim[0], q_dim[1], q_dim[2] // 2, q_dim[3]]
+        k_ovr = [k_dim[0], k_dim[1], k_dim[2] // 2, k_dim[3]]
+        v_ovr = [v_dim[0], v_dim[1], v_dim[2] // 2, v_dim[3]]
+
+        def _row_major_strides(dims):
+            strides = [1] * len(dims)
+            for i in range(len(dims) - 2, -1, -1):
+                strides[i] = strides[i + 1] * dims[i + 1]
+            return strides
+
+        override_uids = [q.get_uid(), k.get_uid(), v.get_uid(), o.get_uid()]
+        override_shapes = [q_ovr, k_ovr, v_ovr, o_dim]
+        override_strides = [_row_major_strides(s) for s in override_shapes]
+
+        # Allocate device buffers for the original (max) dimensions
+        q_buf = hipdnn.DeviceBuffer(int(np.prod(q_dim)) * np.dtype(np.float32).itemsize)
+        k_buf = hipdnn.DeviceBuffer(int(np.prod(k_dim)) * np.dtype(np.float32).itemsize)
+        v_buf = hipdnn.DeviceBuffer(int(np.prod(v_dim)) * np.dtype(np.float32).itemsize)
+        o_buf = hipdnn.DeviceBuffer(int(np.prod(q_dim)) * np.dtype(np.float32).itemsize)
+        stats_buf = hipdnn.DeviceBuffer(
+            int(np.prod(stats.get_dim())) * np.dtype(np.float32).itemsize
+        )
+
+        variant_pack = {
+            q.get_uid(): q_buf.ptr(),
+            k.get_uid(): k_buf.ptr(),
+            v.get_uid(): v_buf.ptr(),
+            o.get_uid(): o_buf.ptr(),
+            stats.get_uid(): stats_buf.ptr(),
+        }
+
+        ws_size = graph.get_workspace_size()
+        ws_buf = hipdnn.DeviceBuffer(ws_size) if ws_size > 0 else None
+        ws_ptr = ws_buf.ptr() if ws_buf else 0
+
+        result = graph.execute(
+            handle,
+            variant_pack,
+            ws_ptr,
+            override_uids=override_uids,
+            override_shapes=override_shapes,
+            override_strides=override_strides,
+        )
+        assert result.is_good(), f"Override execute failed: {result.get_message()}"
