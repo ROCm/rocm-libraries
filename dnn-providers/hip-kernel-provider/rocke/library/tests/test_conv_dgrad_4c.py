@@ -167,6 +167,38 @@ class TestDgrad4cSpec(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     make_dgrad_4c_spec(p)
 
+    def test_aot_route_refuses_strided_and_dilated(self):
+        # The AOT route builds the spec on the transposed problem without a
+        # dgrad check and relies on the forward validator: the transposition
+        # must carry stride and dilation so it refuses them, and must keep an
+        # explicit column padding.
+        from kernels.conv.direct_variants import direct_spec_for_problem
+
+        p = _problem(N=2, H=16, W=16, groups=32)
+        knobs = dict(
+            block_q=4, block_groups=16, dgrad_weights_lds=True, stage_rows=False
+        )
+        variant = "direct_grouped_dgrad_4c"
+        got, why = direct_spec_for_problem(variant, p, knobs, "gfx950")
+        self.assertIsNotNone(got, why)
+        for tag, kw, reason in (
+            ("stride", {"stride": 2}, "stride"),
+            ("dil_h", {"dil_h": 2}, "dilation"),
+            ("dil_w", {"dil_w": 2}, "dilation"),
+        ):
+            with self.subTest(case=tag):
+                got, why = direct_spec_for_problem(
+                    variant, replace(p, **kw), knobs, "gfx950"
+                )
+                self.assertIsNone(got)
+                self.assertIn(reason, why)
+        got, why = direct_spec_for_problem(
+            variant, replace(p, pad_w=1), knobs, "gfx950"
+        )
+        self.assertIsNotNone(got, why)
+        self.assertEqual(got.problem.pad_w, 1)
+        self.assertEqual((got.problem.Ho, got.problem.Wo), (p.H, p.W))
+
     def test_tap_bound_and_lds_staging_passes(self):
         # Python and C++ share DCONV4C_MAX_TAPS (the C++ builder's per-tap
         # arrays are sized by it). With KH*KW <= 16 the LDS staging pass

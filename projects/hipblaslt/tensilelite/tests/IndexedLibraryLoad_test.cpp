@@ -710,6 +710,67 @@ TEST_F(IndexedLibraryParityTest, ResolveByIndexWorksWithoutAnyPriorQuery)
     EXPECT_EQ(solution->index, indices.front());
     EXPECT_EQ(master->blobCache->materializedCount(), 1u)
         << "resolving one index must not materialize the rest";
+
+    ASSERT_NE(master->resolvedSolutions.find(indices.front()), nullptr)
+        << "a resolved index must be recorded for the lock-free path";
+    EXPECT_EQ(master->resolveSolutionByIndex(indices.front()), solution)
+        << "a resolved index must return the object it published";
+    EXPECT_EQ(master->blobCache->materializedCount(), 1u);
+}
+
+TEST_F(IndexedLibraryParityTest, ResolvingALegacyIndexAgainReturnsTheSameObject)
+{
+    auto fixture = legacyFixture();
+    if(!fs::is_regular_file(fixture))
+        GTEST_SKIP() << "no legacy library fixture at " << fixture;
+
+    auto lib = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(fixture.string());
+    if(!lib)
+        GTEST_SKIP() << fixture << " does not load";
+    auto* master
+        = dynamic_cast<MasterSolutionLibrary<ContractionProblemGemm, ContractionSolution>*>(
+            lib.get());
+    ASSERT_NE(master, nullptr);
+    ASSERT_FALSE(master->solutions.empty());
+
+    int const index    = master->solutions.begin()->first;
+    auto      solution = master->resolveSolutionByIndex(index);
+    ASSERT_NE(solution, nullptr);
+    EXPECT_EQ(solution, master->solutions.at(index));
+    ASSERT_NE(master->resolvedSolutions.find(index), nullptr)
+        << "a resolved index must be recorded for the lock-free path";
+    EXPECT_EQ(master->resolveSolutionByIndex(index), solution);
+}
+
+// The local-kernel case is LocalKernelMaster.smoke_SolutionForCallOwnsLocalIndex.
+TEST_F(IndexedLibraryParityTest, SolutionForCallOwnsOnlyUnresolvedIndices)
+{
+    auto fixture = legacyFixture();
+    if(!fs::is_regular_file(fixture))
+        GTEST_SKIP() << "no legacy library fixture at " << fixture;
+
+    auto lib = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(fixture.string());
+    if(!lib)
+        GTEST_SKIP() << fixture << " does not load";
+    auto* master
+        = dynamic_cast<MasterSolutionLibrary<ContractionProblemGemm, ContractionSolution>*>(
+            lib.get());
+    ASSERT_NE(master, nullptr);
+    ASSERT_FALSE(master->solutions.empty());
+
+    const AMDGPU device = TensileLite::testing::makeDevice(
+        TensileLite::testing::_MI350_CHIP_ID, TensileLite::testing::_SPX_CU, "mi350spx");
+    const auto problem = TensileLite::testing::dummyProblem();
+    const int  index   = master->solutions.begin()->first;
+
+    std::shared_ptr<ContractionSolution> owner;
+    auto const* first = master->getSolutionByIndexForCall(problem, device, index, owner);
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(first, owner.get()) << "an unresolved index is returned through owner";
+
+    std::shared_ptr<ContractionSolution> second;
+    EXPECT_EQ(master->getSolutionByIndexForCall(problem, device, index, second), first);
+    EXPECT_EQ(second, nullptr) << "a resolved index needs no owner";
 }
 
 // ---------------------------------------------------------------------------
@@ -1454,6 +1515,51 @@ TEST_F(PlaceholderIndexedShardTest, ShardRegistersOnceWhenReachedFromBothSides)
         << "a shard reached from both sides must still register exactly once";
 }
 
+namespace
+{
+    // Counts shard parses. The first waits up to 50 ms for a second, so loads
+    // that are not serialized overlap.
+    struct CountingMaster : Master
+    {
+        mutable std::atomic<int> shardLoads{0};
+
+        void beforeShardLoaded(std::string const&) const override
+        {
+            shardLoads.fetch_add(1);
+            auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+            while(shardLoads.load() < 2 && std::chrono::steady_clock::now() < deadline)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    };
+} // namespace
+
+TEST_F(PlaceholderIndexedShardTest, ConcurrentIndexLookupsParseShardOnce)
+{
+    if(!layOutLibrary())
+        GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
+
+    CountingMaster master;
+    ASSERT_TRUE(master.initLibraryMapping(masterPath().string()));
+
+    constexpr int                                     kThreads = 8;
+    std::vector<std::shared_ptr<ContractionSolution>> got(kThreads);
+    std::vector<std::thread>                          threads;
+    for(int t = 0; t < kThreads; t++)
+        threads.emplace_back([&, t]() {
+            got[t] = master.resolveSolutionByIndex(shardIndices[t % shardIndices.size()]);
+        });
+    for(auto& thread : threads)
+        thread.join();
+
+    EXPECT_EQ(master.shardLoads.load(), 1) << "concurrent misses parsed the shard more than once";
+    EXPECT_EQ(master.solutionSources.size(), 1u);
+    for(int t = 0; t < kThreads; t++)
+    {
+        ASSERT_NE(got[t], nullptr) << "thread " << t;
+        EXPECT_EQ(got[t]->index, shardIndices[t % shardIndices.size()]);
+    }
+}
+
 TEST_F(PlaceholderIndexedShardTest, AllSolutionsIteratorLoadsUnvisitedIndexedShards)
 {
     if(!layOutLibrary())
@@ -1472,7 +1578,7 @@ TEST_F(PlaceholderIndexedShardTest, AllSolutionsIteratorLoadsUnvisitedIndexedSha
     // cache, otherwise the iterator sees an empty solutions map and throws.
     EXPECT_NO_THROW({
         Client::AllSolutionsIterator iterator(
-            master, std::shared_ptr<Hardware>{}, 2.0, -1, -1, false);
+            master, std::shared_ptr<Hardware>{}, 2.0, -1, -1, false, false);
     });
 
     EXPECT_EQ(master->solutions.size(), shardIndices.size());

@@ -52,7 +52,11 @@ RMSnormBwdParams::RMSnormBwdParams(
                  ? tensorMap.at(attributes.dbias_tensor_uid().value())
                  : nullptr)
     , _optActivation(parseActivation(pointwiseAttributes))
-    , _y(tensorMap.at(pointwiseAttributes.in_1_tensor_uid().value()))
+    // The passthrough gradient ignores the activation input; reuse x for unary IDENTITY.
+    , _y(pointwiseAttributes.operation()
+                 == hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY
+             ? _x
+             : tensorMap.at(pointwiseAttributes.in_1_tensor_uid().value()))
 {
 }
 

@@ -1,9 +1,19 @@
 # Integration test configuration for MIOPEN_ENGINE
 # Filters use GTest-style globs: * matches any sequence of characters
-# Later entries take precedence over earlier ones when multiple filters match
+# Later tolerance entries win; the first matching skip wins
 
 [meta]
 version = 1
+
+# -- Convolution-forward dynamic tolerance --
+# Coefficient c of the summation-order terms (c * sqrt(K) * u32 on sigma in atol, and on |ref| in
+# rtol) for float outputs. The base value of the harness (4) leaves a headroom of at least 1.5
+# over every solver family measured except Winograd, whose float error is 2 to 3 times larger
+# (up to 5.68 in units of sqrt(K) * u32 * (sigma + |ref|) on the calibration data, gfx942 and
+# gfx90a). 9 leaves Winograd a headroom of at least 1.5.
+# See dnn-providers/integration-tests/docs/tolerances.md, "Float outputs".
+[conv_fwd_tolerance.float]
+summation_order = 9.0
 
 # -- Tolerance Overrides --
 # Override default tolerances for specific tests or groups of tests.
@@ -50,18 +60,77 @@ filters = ["*_ConvolutionWrw_Default.8_16_16_16_16_bfp16_ncdhw_dil1x1x1_postpad0
 atol = 1.19
 rtol = 0.3
 
-# 3D fp32 conv forward accumulates a ~432-term dot product in fp32 on both GPU
-# and CPU reference, giving an ~1-2e-5 absolute error floor independent of
-# output magnitude. The default 1e-5 atol dips below it for small-magnitude
-# outputs, flaking IntegrationGpuConvFwd3dFp32 (~19% on Windows gfx1151). Raise
-# atol to 5e-5 (rtol unchanged at the 1e-5 default) for the 3D fp32 forward
-# cases only; 5e-5 clears the floor while staying ~50x below the worst-case
-# bound (~2.5e-3).
-# 3D fp32 conv forward override for the bundle cases
+# Conv forward fp32 numerical floor, calibrated on gfx942 from the conv-fwd test plan
+# run (docs/test-plans/convolution-fwd.md). MIOpen and the GPU reference accumulate in
+# different orders, so the absolute error of a long fp32 reduction grows with the
+# accumulation length A = C/G x filter volume. Observed worst absolute error:
+#   A <= 1,152 (L, M, H, E shapes)     5.2e-5
+#   A 3,200 - 4,608 (L10, A1, A2)      1.9e-4
+#   A >= 65,536 (S19, L19, X4)         8.2e-3
+# Each class takes about 2x its observed maximum in atol; rtol stays at the 1e-5
+# default, since the error is absolute. The classes are selected by shape id, not by A,
+# so their actual A ranges are wider than the table: 3 - 1,920 for the first (M7, H5,
+# H6, L14, L58, L59 and X2 above 1,152), 640 - 4,608 for the second, and 256 - 628,864
+# for the third (S19 includes cases at A 256 and 4,096, S45 at 288). R shapes were
+# placed by measurement; every case passes in its class on gfx942 and gfx90a.
+# Temporary: these three classes are removed when the dynamic conv-fwd tolerance
+# (ROCm/rocm-libraries#15481) lands, which then grades fp32 conv forward.
 [[tolerance_overrides]]
-filters = ["*_ConvolutionFwd_Default.*fp32_ncdhw*", "*_ConvolutionFwd_Default.*fp32_ndhwc*"]
-atol = 5e-5
+filters = [
+    "*_ConvolutionFwd*.l*_fp32_*",
+    "*_ConvolutionFwd*.m*_fp32_*",
+    "*_ConvolutionFwd*.h*_fp32_*",
+    "*_ConvolutionFwd*.x*_fp32_*",
+    "*_ConvolutionFwd*.e*_fp32_*",
+    "*_ConvolutionFwd*.s31_*_fp32_*",
+    "*_ConvolutionFwd*.s59_*_fp32_*",
+    "*_ConvolutionFwd*.r029_*_fp32_*",
+    "*_ConvolutionFwd*.r061_*_fp32_*",
+    "*_ConvolutionFwd*.r065_*_fp32_*",
+    "*_ConvolutionFwd*.r121_*_fp32_*",
+    "*_ConvolutionFwd*.r122_*_fp32_*",
+]
+atol = 1e-4
 rtol = 1e-5
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionFwd*.a*_fp32_*",
+    "*_ConvolutionFwd*.l10_*_fp32_*",
+    "*_ConvolutionFwd*.l30_*_fp32_*",
+    "*_ConvolutionFwd*.l36_*_fp32_*",
+    "*_ConvolutionFwd*.l40_*_fp32_*",
+    "*_ConvolutionFwd*.l41_*_fp32_*",
+    "*_ConvolutionFwd*.l43_*_fp32_*",
+    "*_ConvolutionFwd*.r028_*_fp32_*",
+    "*_ConvolutionFwd*.r083_*_fp32_*",
+    "*_ConvolutionFwd*.r119_*_fp32_*",
+    "*_ConvolutionFwd*.r131_*_fp32_*",
+]
+atol = 5e-4
+rtol = 1e-5
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionFwd*.s19_*_fp32_*",
+    "*_ConvolutionFwd*.l19_*_fp32_*",
+    "*_ConvolutionFwd*.x4_*_fp32_*",
+    "*_ConvolutionFwd*.s45_*_fp32_*",
+    "*_ConvolutionFwd*.l45_*_fp32_*",
+    "*_ConvolutionFwd*.r066_*_fp32_*",
+    "*_ConvolutionFwd*.r067_*_fp32_*",
+]
+atol = 2e-2
+rtol = 1e-5
+
+# X4 fp16 (2D, C 2048, 3x3: accumulation length 18,432). MIOpen's fp16 output varies
+# from run to run at this length, by up to 0.17 against the GPU reference (one element
+# of 12,544 above the default 0.1 in some runs). Interim class until the dynamic fp16
+# tolerance replaces the fixed one (ALMIOPEN-3187).
+[[tolerance_overrides]]
+filters = ["*_ConvolutionFwd*.x4_*_fp16_*"]
+atol = 0.2
+rtol = 0.1
 
 # MatmulPointwise Variant3 bf16 swish — single-element ULP mismatch at
 # magnitude ~2.0 (diff=3.125e-2, one bf16 ULP). Default atol=0.01 is
@@ -80,3 +149,51 @@ rtol = 0.01
 #   filters: array of GTest globs matched against the full GTest name
 #   reason:  human-readable string surfaced in the GTEST_SKIP message
 # First matching entry wins.
+
+# conv-fwd test plan (docs/test-plans/convolution-fwd.md): the cases are probes (a typed
+# rejection or a correct accept is the pass criterion). The plugin declines graphs of the kinds
+# MIOpen can compute wrongly or fault on (mixed data types, mixed layouts, non-packed tensors of
+# grouped or 3D channels-last convolutions, a bias that is not per-channel, a bias data type
+# different from the io type; epic ALMIOPEN-3008); the rules are conservative and also decline
+# some graphs MIOpen computes correctly. Declined cases end as skips with the
+# engine-does-not-support-this-graph reason and need no entry here. The entries below quarantine
+# the cases the applicability check cannot decline.
+
+# Reference gap, not an MIOpen defect: MIOpen executes these graphs, but no hipDNN
+# reference implements the add with the bias as its first operand and a half bias node.
+# Temporary: remove when the reference fix (ALMIOPEN-3227) lands.
+[[test_skips]]
+filters = ["*_ConvolutionFwdPointwise_Variant2.*_f25first_*"]
+reason  = "conv -> bias -> relu with the bias as the add's first operand: MIOpen executes it, but neither the GPU nor the CPU reference implements that operand order with a half bias node, so the case is unverifiable; reference gap tracked in ALMIOPEN-3227"
+
+# Order-dependent MIOpen defect: MIOpen's invoker cache key leaves out tensor strides,
+# so a padded-stride 3-D channels-last problem run after its packed sibling of the same
+# shape, data type and layout (the same case id without the f16fast / f16chan /
+# f16plane item) in one process reuses the packed invoker and computes wrong results.
+# The order dependence is shown for the three comprehensive cases (fail after the
+# sibling, pass alone; ALMIOPEN-3356) and inferred for the six full cases, whose packed
+# siblings are comprehensive cases that the full suite runs in the same process
+# (ALMIOPEN-3241 reports them failing in full runs). The plugin declines non-packed 3-D
+# channels-last forward tensors, so these padded-stride cases end as skips on their own; the
+# entry stays until ALMIOPEN-3356 is fixed.
+# Applies on every arch (the cache key is not arch-specific). Temporary: remove when
+# ALMIOPEN-3356 is fixed.
+[[test_skips]]
+filters = [
+    "*_ConvolutionFwd_Default.s3_f16chan_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl",
+    "*_ConvolutionFwd_Default.s3_f16chan_3d_i16x16x16_n2c16k32_f3x3x3_bf16_cl",
+    "*_ConvolutionFwd_Default.s3_f16fast_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl",
+    "*_ConvolutionFwd_Default.s1_f16fast_3d_i16x16x16_n2c16k32_f1x1x1_bf16_cl",
+    "*_ConvolutionFwd_Default.s5_f16chan_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl",
+    "*_ConvolutionFwd_Default.s7_f16fast_3d_i16x16x16_n2c16k32g2_f3x3x3_bf16_cl",
+    "*_ConvolutionFwd_Default.s11_f16chan_3d_i16x16x16_n2c3k16_f7x7x7_fp16_cl",
+    "*_ConvolutionFwd_Default.s16_f16chan_3d_i32x32x32_n2c16k32_f3x3x3_fp16_cl",
+    "*_ConvolutionFwd_Default.s22_f16chan_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl",
+    "*_ConvolutionFwd_Default.s13a_f16fast_3d_i16x16x16_n2c16k16g16_f3x3x3_bf16_cl",
+    "*_ConvolutionFwd_Default.s14_f16plane_3d_i15x15x15_n2c13k17_f3x3x3_fp32_cl",
+    "*_ConvolutionFwd_Default.s20_f16plane_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl",
+    "*_ConvolutionFwd_Default.s3_f16plane_3d_i16x16x16_n2c16k32_f3x3x3_fp16_cl",
+    "*_ConvolutionFwd_Default.s3_f16plane_3d_i16x16x16_n2c16k32_f3x3x3_fp32_cl",
+    "*_ConvolutionFwd_Default.s9_f16plane_3d_i16x16x16_n8c16k32_f1x1x1_fp32_cl",
+]
+reason  = "3-D channels-last conv with a padded channel or plane stride returns wrong results (66-85% of elements) when its packed same-shape sibling ran earlier in the same process: MIOpen's invoker cache key leaves out strides; tracked in ALMIOPEN-3356 (also reported as ALMIOPEN-3241)"

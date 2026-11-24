@@ -1658,6 +1658,38 @@ def cases():
         ("bn128_sq512", {"block_n": 128}),
         ("noncausal_sq512", {"causal": False}),
         ("hqswz_sq512", {"nonpersist_decode": "hq_minor_swz"}),
+        # fp8 KV sync-dequant loader (aligned KV, default grid). Flash + SWA at
+        # D128 (unpacked LDS row) and D64 (K_GROUP>1 packed-row store) lock both
+        # loader layouts through the golden and the cpp byte-identity gate.
+        ("fp8_causal_sq512", {"kv_storage_dtype": "fp8e4m3"}),
+        (
+            "fp8_swa_w128_sq512",
+            {"kv_storage_dtype": "fp8e4m3", "sliding_window": 128},
+        ),
+        ("fp8_d64_causal_sq512", {"kv_storage_dtype": "fp8e4m3", "head_size": 64}),
+        (
+            "fp8_d64_swa_w128_sq512",
+            {"kv_storage_dtype": "fp8e4m3", "head_size": 64, "sliding_window": 128},
+        ),
+        # fp16 compute/output with fp8 KV. D128 + D64 lock the
+        # fp16 MFMA dequant path through the golden and cpp byte-identity gate.
+        ("fp8_fp16_causal_sq512", {"kv_storage_dtype": "fp8e4m3", "dtype": "fp16"}),
+        (
+            "fp8_fp16_d64_causal_sq512",
+            {"kv_storage_dtype": "fp8e4m3", "dtype": "fp16", "head_size": 64},
+        ),
+        # fp8 with the remaining masks the grid variant advertises: non-causal
+        # (full) and the moving bottom-right diagonal. The loader is mask-
+        # independent, so these lock that it stays byte-identical under each mask.
+        ("fp8_noncausal_sq512", {"kv_storage_dtype": "fp8e4m3", "causal": False}),
+        (
+            "fp8_bottom_right_sq512",
+            {
+                "kv_storage_dtype": "fp8e4m3",
+                "seqlen_kv": 1024,
+                "causal_bottom_right": True,
+            },
+        ),
         # --- bottom-right diagonal. Four cases pin the aligned and arbitrary
         # shifted-diagonal routes, the sink composition, and the BM128 geometry.
         (
@@ -1777,6 +1809,33 @@ def cases():
         (
             "paged_swa_fp16_sq512",
             {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+            },
+        ),
+        (
+            "paged_causal_fp16_sq512",
+            {"dtype": "fp16", "paged": True, "block_size": 16, "num_kv_blocks": 32},
+        ),
+        (
+            "paged_swa_fp16_d64_sq512",
+            {
+                "dtype": "fp16",
+                "head_size": 64,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+            },
+        ),
+        # Paged K/V on the sliding-window tile dispatch picks for small grids.
+        (
+            "paged_swa_fp16_bm128_sq512",
+            {
+                "geometry": "bm128",
                 "dtype": "fp16",
                 "paged": True,
                 "block_size": 16,
@@ -1923,6 +1982,69 @@ def cases():
                 "causal_diag_split": True,
                 "kv_segments": 4,
                 "block_m": 128,
+            },
+        ),
+        # Paged K/V, the same cohort as the gfx950 case of this name.
+        (
+            "paged_swa_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+            },
+        ),
+        (
+            "paged_causal_fp16_sq512",
+            {"dtype": "fp16", "paged": True, "block_size": 16, "num_kv_blocks": 32},
+        ),
+        (
+            "paged_swa_fp16_d64_sq512",
+            {
+                "dtype": "fp16",
+                "head_size": 64,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+            },
+        ),
+        # Paged K/V on the smaller tiles dispatch picks: half-height (under-filled
+        # grid), narrow window with the wave skip (D128), narrow window (bf16 D64).
+        (
+            "paged_causal_fp16_bm128_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "block_m": 128,
+            },
+        ),
+        (
+            "paged_swa_fp16_bm128_bn32_wskip_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+                "block_m": 128,
+                "block_n": 32,
+                "window_wave_skip": True,
+            },
+        ),
+        (
+            "paged_swa_bf16_d64_bm64_sq512",
+            {
+                "head_size": 64,
+                "paged": True,
+                "block_size": 32,
+                "num_kv_blocks": 16,
+                "sliding_window": 256,
+                "block_m": 64,
+                "waves_per_eu": 4,
             },
         ),
     ):

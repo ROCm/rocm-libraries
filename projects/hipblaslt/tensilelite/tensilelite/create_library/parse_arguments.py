@@ -44,6 +44,7 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
     """
 
     argParser = ArgumentParser(
+        prog="tensilelite create-library",
         description="TensileCreateLibrary generates libraries and code object files "
         "for a set of supplied logic files.",
     )
@@ -220,7 +221,7 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         "in StreamK hybrid-assignment kernels"
     )
 
-    args = argParser.parse_args()
+    args = argParser.parse_args(input)
 
     arguments = {}
     arguments["RuntimeLanguage"] = args.RuntimeLanguage

@@ -27,6 +27,7 @@ import pytest
 pytestmark = pytest.mark.unit
 
 import hashlib
+import importlib
 import os
 import shutil
 from collections import namedtuple
@@ -39,7 +40,8 @@ class MockCompiler:
     def __init__(self, version=(6, 0, 0), rocm_version=(6, 0, 0), asan=False):
         self.version = MockVersion(*version)
         self.rocm_version = MockVersion(*rocm_version)
-        self.default_args = ["amdclang++", "-O3"]
+        self.path = "amdclang++"
+        self.default_args = [self.path, "-O3"]
         if asan:
             self.default_args.append("-fsanitize=address")
 
@@ -111,6 +113,62 @@ class TestComputeCacheKey:
         k1 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], MockCompiler(asan=False))
         k2 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], MockCompiler(asan=True))
         assert k1 != k2
+
+    def test_compiler_flags_change_key(self, tmp_path):
+        from tensilelite.Toolchain.HelperKernelCache import _computeCacheKey
+        kernel_path = _write_test_files(tmp_path)
+        cxx17 = MockCompiler()
+        cxx17.default_args.append("-std=c++17")
+        cxx20 = MockCompiler()
+        cxx20.default_args.append("-std=c++20")
+        k1 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], cxx17)
+        k2 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], cxx20)
+        assert k1 != k2
+
+    def test_launcher_and_compiler_path_do_not_change_key(self, tmp_path):
+        from tensilelite.Toolchain.HelperKernelCache import _computeCacheKey
+        kernel_path = _write_test_files(tmp_path)
+        direct = MockCompiler()
+        launched = MockCompiler()
+        launched.path = "/opt/rocm/bin/amdclang++"
+        launched.default_args = ["ccache", launched.path, "-O3"]
+        k1 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], direct)
+        k2 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], launched)
+        assert k1 == k2
+
+    @pytest.mark.parametrize("option, first, second", [
+        ("-include", "first.h", "second.h"),
+        ("-target", "amdgcn-amd-amdhsa", "x86_64-unknown-linux-gnu"),
+    ])
+    def test_compiler_option_value_changes_key(self, tmp_path, option, first, second):
+        from tensilelite.Toolchain.HelperKernelCache import _computeCacheKey
+        kernel_path = _write_test_files(tmp_path)
+        compiler = MockCompiler()
+        compiler.default_args.extend([option, first])
+        k1 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], compiler)
+        compiler.default_args[-1] = second
+        k2 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], compiler)
+        assert k1 != k2
+
+    @pytest.mark.parametrize("platform", ["posix", "nt"])
+    def test_real_compiler_launcher_does_not_change_key(self, tmp_path, monkeypatch, platform):
+        from tensilelite.Toolchain.HelperKernelCache import _computeCacheKey
+        component = importlib.import_module("tensilelite.Toolchain.Component")
+        version = MockVersion(6, 0, 0)
+        monkeypatch.setattr(component, "_getVersion", lambda *args: version)
+        monkeypatch.setattr(component.Component, "_rocm_version", version)
+        monkeypatch.setattr(component, "os_name", platform)
+        monkeypatch.setenv("ROCM_PATH", "C:/ROCm")
+        kernel_path = _write_test_files(tmp_path)
+        monkeypatch.delenv("Tensile_CXX_COMPILER_LAUNCHER", raising=False)
+        direct = component.Compiler(Path("amdclang++"), "sha1", asan_build=True, save_temps=True)
+        monkeypatch.setenv("Tensile_CXX_COMPILER_LAUNCHER", "ccache --verbose")
+        launched = component.Compiler(
+            Path("/other/rocm/bin/amdclang++"), "sha1", asan_build=True, save_temps=True
+        )
+        k1 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], direct)
+        k2 = _computeCacheKey(kernel_path, tmp_path, ["gfx942"], launched)
+        assert k1 == k2
 
     def test_static_header_change_changes_key(self, tmp_path):
         from tensilelite.Toolchain.HelperKernelCache import _computeCacheKey
