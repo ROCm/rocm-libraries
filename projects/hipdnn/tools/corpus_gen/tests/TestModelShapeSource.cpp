@@ -308,8 +308,8 @@ TEST_P(TestShippedModelShapeDefaults,
     const auto metadata = test::shippedOperation(GetParam());
     ModelShapeReport report;
 
-    // kHeader has no layout, scale or window column: a file mined before they were declared. The
-    // backward declares no window and no generate_stats, and its file predates the form too.
+    // kHeader has no layout, scale, window or value_head_dim column: a file mined before they
+    // were declared. The backward declares no generate_stats, and its file predates the form too.
     const auto text
         = forward ? kHeader + std::string(kRow) : csvWithout({"q.form", "q.generate_stats"});
     const auto entries = readModelShapes(metadata, tree.write("m.csv", text), report);
@@ -319,18 +319,16 @@ TEST_P(TestShippedModelShapeDefaults,
     EXPECT_EQ(entries.front().point.at("layout"), ParameterValue{std::string("bshd")});
     EXPECT_EQ(entries.front().point.at("scale"), ParameterValue{std::string("inv_sqrt_d")});
     EXPECT_EQ(entries.front().point.at("form"), ParameterValue{std::string("plain")});
-    if(forward)
-    {
-        EXPECT_EQ(entries.front().point.at("window"), ParameterValue{std::string("none")});
-    }
-    else
-    {
-        EXPECT_EQ(entries.front().point.count("window"), 0U);
-    }
+    EXPECT_EQ(entries.front().point.at("window"), ParameterValue{std::string("none")});
+    EXPECT_EQ(entries.front().point.at("value_head_dim"), ParameterValue{std::string("same")});
     // The manifest can say which columns were filled in, and for how many rows.
-    EXPECT_EQ(report.defaulted,
-              forward ? (std::map<std::string, int64_t>{{"layout", 1}, {"scale", 1}, {"window", 1}})
-                      : (std::map<std::string, int64_t>{{"form", 1}, {"layout", 1}, {"scale", 1}}));
+    std::map<std::string, int64_t> defaulted{
+        {"layout", 1}, {"scale", 1}, {"value_head_dim", 1}, {"window", 1}};
+    if(!forward)
+    {
+        defaulted["form"] = 1;
+    }
+    EXPECT_EQ(report.defaulted, defaulted);
 }
 
 INSTANTIATE_TEST_SUITE_P(SdpaDeclarations,
