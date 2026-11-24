@@ -1374,8 +1374,8 @@ rocfft_status
             // (resp. output) offset values will be ignored and nonzero offset values on
             // output (resp. input) cannot be accepted (note: planar array types not
             // supported if any I/O field is set)
-            if((inFields.empty() && input_layout.get_offset() != 0 && !outFields.empty())
-               || (outFields.empty() && output_layout.get_offset() != 0 && !inFields.empty()))
+            if((inFields.empty() && !outFields.empty() && input_layout.get_offset() != 0)
+               || (outFields.empty() && !inFields.empty() && output_layout.get_offset() != 0))
             {
                 // NB: unreachable while non-zero offsets are rejected above (AIFFT-549)
                 throw std::runtime_error("Nonzero input (resp. output) offset values cannot be "
