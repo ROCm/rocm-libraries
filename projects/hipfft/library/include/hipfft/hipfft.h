@@ -555,9 +555,9 @@ HIPFFT_EXPORT hipfftResult hipfftSetAutoAllocation(hipfftHandle plan, int autoAl
 HIPFFT_EXPORT hipfftResult hipfftSetWorkArea(hipfftHandle plan, void* workArea);
 
 /* @cond
- * This function is defined and documented in hipfftXt.h.  It was
+ * This function is declared and documented in hipfftXt.h.  It was
  * incorrectly added here when introduced, and this incorrect
- * definition will be removed in a future release.
+ * declaration will be removed in a future release.
  *  */
 HIPFFT_EXPORT hipfftResult hipfftXtSetWorkArea(hipfftHandle plan, void** workArea);
 /* @endcond */
