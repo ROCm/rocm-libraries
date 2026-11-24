@@ -11,9 +11,7 @@ Documentation for hipFFT is available at
   `HIPFFT_INTERNAL_ERROR` when direct peer access is unavailable, and no longer
   calls `hipDeviceEnablePeerAccess`. The copy uses `hipMemcpyPeerAsync`. The
   runtime stages through host memory when the devices cannot access each other.
-* Declared `hipfftXtSetWorkArea` in hipfftXt.h, duplicating the
-  existing declaration in hipfft.h.  The entry in hipfft.h was
-  accidental and will be removed in a future release.
+* Declared `hipfftXtSetWorkArea` in `hipfftXt.h`, where it is documented. The duplicate declaration in `hipfft.h` was added by mistake and will be removed in a future release.
 
 ## hipFFT 1.0.27 for ROCm 10.2
 
