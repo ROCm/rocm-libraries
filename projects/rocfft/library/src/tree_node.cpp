@@ -117,18 +117,6 @@ data_set_t& NodeLayouts::mutable_layout_for(io_data_label io)
     return layouts[layout_index(io)];
 }
 
-rocfft_array_type NodeLayouts::input_array_type() const
-{
-    return input_layout().has_array_type() ? input_layout().get_array_type()
-                                           : rocfft_array_type_unset;
-}
-
-rocfft_array_type NodeLayouts::output_array_type() const
-{
-    return output_layout().has_array_type() ? output_layout().get_array_type()
-                                            : rocfft_array_type_unset;
-}
-
 NodeMetaData::NodeMetaData(data_set_t input, data_set_t output, TreeNode* refNode)
     : NodeLayouts(std::move(input), std::move(output))
 {

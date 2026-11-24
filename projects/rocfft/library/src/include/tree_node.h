@@ -493,8 +493,16 @@ public:
     {
         return input_layout().get_precision();
     }
-    rocfft_array_type input_array_type() const;
-    rocfft_array_type output_array_type() const;
+    rocfft_array_type input_array_type() const
+    {
+        return input_layout().has_array_type() ? input_layout().get_array_type()
+                                               : rocfft_array_type_unset;
+    }
+    rocfft_array_type output_array_type() const
+    {
+        return output_layout().has_array_type() ? output_layout().get_array_type()
+                                                : rocfft_array_type_unset;
+    }
 
 protected:
     NodeLayouts(const NodeLayouts&) = default;
