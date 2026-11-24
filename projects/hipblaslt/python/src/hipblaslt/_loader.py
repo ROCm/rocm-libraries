@@ -19,22 +19,27 @@ import posixpath
 import sys
 import warnings
 from dataclasses import dataclass
-from typing import Callable, Iterable, Mapping, Sequence
+from typing import Callable, Iterable, Mapping, NamedTuple, Sequence
 
 __all__ = [
     "LIBRARY_ENV",
+    "build_runtime_warning",
     "Candidate",
     "candidate_libraries",
     "check_companions",
     "check_override_can_take_effect",
+    "check_single_hip_runtime",
     "check_single_hipblaslt",
+    "check_soname",
     "choose_library",
     "compatible_already_loaded",
     "dependencies_to_preload",
     "elf_dynamic",
+    "ElfDynamic",
     "hip_runtime_to_preload",
     "HipblasLtLoadError",
     "HipblasLtLoadWarning",
+    "loaded_hip_runtimes",
     "loaded_hipblaslt",
     "LoadInfo",
     "matches_lib_name",
@@ -251,6 +256,62 @@ def dependencies_to_preload(
     return order
 
 
+def check_soname(path: str, soname: str, lib_name: str) -> None:
+    """Raise before loading `path` if its SONAME isn't the name _core links against.
+
+    Loading it anyway would map it, then load a second hipBLASLt for _core, and neither can be
+    unloaded: retrying in the same process would still fail.
+    """
+    if soname and lib_name and soname != lib_name:
+        raise HipblasLtLoadError(
+            f"{path} is {soname}, but these bindings need {lib_name}. Point {LIBRARY_ENV} at a "
+            f"{lib_name}, or rebuild the bindings against that hipBLASLt."
+        )
+
+
+def _is_hip_runtime(path: str, platform: str) -> bool:
+    b = _base(path, platform)
+    if platform == "win32":
+        return b.startswith("amdhip64") and b.endswith(".dll")
+    return b.startswith("libamdhip64.so")
+
+
+def loaded_hip_runtimes(loaded: Iterable[str], platform: str) -> list[str]:
+    """The HIP runtime files among the process's loaded libraries, deduplicated."""
+    out: list[str] = []
+    for p in loaded:
+        if _is_hip_runtime(p, platform) and not any(
+            _same_file(p, q, platform) for q in out
+        ):
+            out.append(p)
+    return out
+
+
+def check_single_hip_runtime(loaded: Iterable[str], platform: str) -> None:
+    """Raise if the process has more than one HIP runtime, such as libamdhip64.so.5 and .so.7."""
+    runtimes = loaded_hip_runtimes(loaded, platform)
+    if len(runtimes) > 1:
+        raise HipblasLtLoadError(
+            f"This process has more than one HIP runtime: {', '.join(runtimes)}. hipBLASLt and "
+            "the code that loaded the other one can't share a process; import hipblaslt first, "
+            "or make sure one ROCm comes first on the search path."
+        )
+
+
+def build_runtime_warning(
+    runtimes: Sequence[str], source: str, build_hip_runtime: str, platform: str
+) -> str | None:
+    """A warning when the build-time hipBLASLt runs on another HIP runtime than its build's."""
+    if source != "build" or not build_hip_runtime or not runtimes:
+        return None
+    if _same_file(runtimes[0], build_hip_runtime, platform):
+        return None
+    return (
+        f"The HIP runtime in this process is {runtimes[0]}, not {build_hip_runtime}, the one "
+        "these bindings and their hipBLASLt were built with."
+    )
+
+
 def check_single_hipblaslt(path: str, loaded: Iterable[str], platform: str) -> None:
     """Raise unless the only libhipblaslt in the process is `path`."""
     found = loaded_hipblaslt(loaded, platform)
@@ -321,10 +382,12 @@ def not_the_build_warning(
     )
 
 
-def override_warning(override: str) -> str:
+def override_warning(override: str, runtimes: Sequence[str] = ()) -> str:
+    runtime = runtimes[0] if runtimes else "not loaded yet"
     return (
-        f"{LIBRARY_ENV} is set, so hipBLASLt and its HIP runtime come from {override}. Importing a "
-        "framework built against a different ROCm afterward (torch, for example) will fail to load."
+        f"{LIBRARY_ENV} is set, so hipBLASLt comes from {override}; its HIP runtime is {runtime}. "
+        "Importing a framework built against a different ROCm afterward (torch, for example) "
+        "will fail to load."
     )
 
 
@@ -453,19 +516,28 @@ def _windows_modules() -> list[str]:
     return out
 
 
-_DT_NULL, _DT_NEEDED, _DT_STRTAB, _DT_STRSZ, _DT_RPATH, _DT_RUNPATH = (
+_DT_NULL, _DT_NEEDED, _DT_STRTAB, _DT_STRSZ, _DT_SONAME, _DT_RPATH, _DT_RUNPATH = (
     0,
     1,
     5,
     10,
+    14,
     15,
     29,
 )
 
 
-def elf_dynamic(path: str) -> tuple[list[str], bool] | None:
-    """A 64-bit little-endian ELF's NEEDED names, and whether DT_RPATH (not DT_RUNPATH) governs
-    its search path. None for anything else, or a file that can't be read."""
+class ElfDynamic(NamedTuple):
+    needed: list[str]
+    rpath_governs: (
+        bool  # DT_RPATH, which LD_LIBRARY_PATH can't override, and no DT_RUNPATH
+    )
+    soname: str
+
+
+def elf_dynamic(path: str) -> ElfDynamic | None:
+    """A 64-bit little-endian ELF's NEEDED names, search-path kind and SONAME. None for anything
+    else, or a file that can't be read."""
     import struct
 
     try:
@@ -516,7 +588,8 @@ def elf_dynamic(path: str) -> tuple[list[str], bool] | None:
         return strings[at : strings.index(b"\0", at)].decode("utf-8", "replace")
 
     needed = [string(v) for t, v in entries if t == _DT_NEEDED]
-    return needed, _DT_RPATH in tags and _DT_RUNPATH not in tags
+    soname = string(tags[_DT_SONAME]) if _DT_SONAME in tags else ""
+    return ElfDynamic(needed, _DT_RPATH in tags and _DT_RUNPATH not in tags, soname)
 
 
 def _rocm_sdk_find(name: str) -> list[str]:
@@ -588,6 +661,9 @@ def load(
         ),
         os.path.isfile,
     )
+    if platform != "win32":
+        dynamic = elf_dynamic(chosen.path)
+        check_soname(chosen.path, dynamic.soname if dynamic else "", lib_name)
     # Companions already loaded from another build would make the preload fail with an
     # "undefined symbol" error, or, between ABI-compatible builds, load and mix silently.
     check_companions(chosen.path, before, platform)
@@ -604,13 +680,12 @@ def load(
     else:
         runtime = hip_runtime_to_preload(chosen, build_hip_runtime, before, platform)
         first = [runtime] if runtime and os.path.isfile(runtime) else []
-        dynamic = elf_dynamic(chosen.path)
-        if environ.get("LD_LIBRARY_PATH") and dynamic and not dynamic[1]:
+        if environ.get("LD_LIBRARY_PATH") and dynamic and not dynamic.rpath_governs:
             # LD_LIBRARY_PATH is searched before DT_RUNPATH, so another ROCm there would supply
             # hipBLASLt's companions. Load them from hipBLASLt's own directory first.
             first += dependencies_to_preload(
                 chosen.path,
-                lambda p: (elf_dynamic(p) or ([], False))[0],
+                lambda p: (elf_dynamic(p) or ElfDynamic([], False, "")).needed,
                 os.path.isfile,
                 before + first,
                 platform,
@@ -618,17 +693,29 @@ def load(
         for lib in first + [chosen.path]:
             _preload(lib, environ)
 
+    after = loaded_libraries()
+    check_single_hip_runtime(after, platform)
+    runtimes = loaded_hip_runtimes(after, platform)
     if override:
         _log.info("hipBLASLt loaded from %s (%s)", chosen.path, LIBRARY_ENV)
-        warnings.warn(override_warning(override), HipblasLtLoadWarning, stacklevel=3)
+        warnings.warn(
+            override_warning(override, runtimes), HipblasLtLoadWarning, stacklevel=3
+        )
     else:
         _log.info("hipBLASLt loaded from %s (%s)", chosen.path, chosen.source)
         warn_if_not_the_build(chosen.path, chosen.source)
+        msg = build_runtime_warning(
+            runtimes, chosen.source, build_hip_runtime, platform
+        )
+        if msg:
+            warnings.warn(msg, HipblasLtLoadWarning, stacklevel=3)
     return LoadInfo(chosen.path, chosen.source, preloaded=True)
 
 
 def check_after_import(info: LoadInfo) -> None:
-    """The checks that need _core loaded: one hipBLASLt, with companions from its build."""
+    """The checks that need _core loaded: one hipBLASLt and one HIP runtime, with companions
+    from hipBLASLt's build."""
     loaded = loaded_libraries()
     check_single_hipblaslt(info.path, loaded, sys.platform)
+    check_single_hip_runtime(loaded, sys.platform)
     check_companions(info.path, loaded, sys.platform)

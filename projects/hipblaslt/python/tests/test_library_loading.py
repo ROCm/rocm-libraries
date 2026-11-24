@@ -107,6 +107,43 @@ def test_build_time_fallback():
     assert r["source"] == "build", r
 
 
+def test_an_override_with_the_wrong_soname_is_refused_before_loading(tmp_path):
+    # Same file name, different SONAME: refused before it's mapped, so the process can recover.
+    real = hipblaslt.library.path
+    data = open(real, "rb").read()
+    soname = os.path.basename(real).encode()
+    wrong = soname[:-1] + (b"0" if soname[-1:] != b"0" else b"9")
+    assert data.count(soname + b"\0") == 1
+    fake = tmp_path / os.path.basename(real)
+    fake.write_bytes(data.replace(soname + b"\0", wrong + b"\0"))
+    code = textwrap.dedent(
+        f"""
+        import os, warnings
+        warnings.simplefilter("ignore")
+        try:
+            import hipblaslt
+            raise SystemExit("imported")
+        except ImportError as e:
+            assert "{wrong.decode()}" in str(e), e
+        assert not any("{fake}" in l for l in open("/proc/self/maps"))
+        del os.environ["HIPBLASLT_PY_LIBRARY"]
+        import hipblaslt
+        print("recovered")
+        """
+    )
+    env = {k: v for k, v in os.environ.items() if k not in _DROP}
+    env["HIPBLASLT_PY_LIBRARY"] = str(fake)
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert out.returncode == 0, out.stderr[-4000:]
+    assert out.stdout.strip().endswith("recovered")
+
+
 def test_override_wins():
     expected = _default_choice()
     r = _import_in_child(HIPBLASLT_PY_LIBRARY=expected["path"])

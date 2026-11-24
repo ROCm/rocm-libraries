@@ -188,9 +188,11 @@ def test_windows_module_names_are_matched_case_insensitively():
 
 
 def test_override_warning_names_the_library_and_the_framework_risk():
-    msg = L.override_warning("/o/libhipblaslt.so.1")
+    msg = L.override_warning("/o/libhipblaslt.so.1", ["/elsewhere/libamdhip64.so.7"])
     assert "/o/libhipblaslt.so.1" in msg
     assert "torch" in msg
+    # The runtime that actually loaded, which needn't be next to the override.
+    assert "/elsewhere/libamdhip64.so.7" in msg
 
 
 # --- check 3: companion libraries from another build --------------------------------------------
@@ -328,9 +330,86 @@ def test_an_already_loaded_dependency_isnt_loaded_again():
 def test_the_extensions_dynamic_section_names_hipblaslt():
     from hipblaslt import _core
 
-    needed, governed_by_rpath = L.elf_dynamic(_core.__file__)
-    assert any(n.startswith("libhipblaslt.so") for n in needed)
-    assert isinstance(governed_by_rpath, bool)
+    dynamic = L.elf_dynamic(_core.__file__)
+    assert any(n.startswith("libhipblaslt.so") for n in dynamic.needed)
+    assert isinstance(dynamic.rpath_governs, bool)
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads an ELF file")
+def test_the_loaded_library_reports_its_soname():
+    import hipblaslt
+
+    assert L.elf_dynamic(hipblaslt.library.path).soname.startswith("libhipblaslt.so.")
+
+
+# --- the chosen file's SONAME, before it's loaded ------------------------------------------------
+
+
+def test_a_matching_or_unknown_soname_passes():
+    L.check_soname("/o/libhipblaslt.so.1", "libhipblaslt.so.1", "libhipblaslt.so.1")
+    L.check_soname("/o/libhipblaslt.so.1", "", "libhipblaslt.so.1")
+    L.check_soname("/o/libhipblaslt.so.1", "libhipblaslt.so.0", "")
+
+
+def test_a_different_soname_raises_before_loading():
+    with pytest.raises(
+        L.HipblasLtLoadError, match="is libhipblaslt.so.0.*need libhipblaslt.so.1"
+    ):
+        L.check_soname("/o/libhipblaslt.so.1", "libhipblaslt.so.0", "libhipblaslt.so.1")
+
+
+# --- one HIP runtime -----------------------------------------------------------------------------
+
+
+def test_two_hip_runtimes_raise():
+    loaded = [
+        "/old/lib/libamdhip64.so.5",
+        "/new/lib/libamdhip64.so.7.2.0",
+        "/x/libc.so.6",
+    ]
+    assert L.loaded_hip_runtimes(loaded, "linux") == loaded[:2]
+    with pytest.raises(L.HipblasLtLoadError, match="more than one HIP runtime"):
+        L.check_single_hip_runtime(loaded, "linux")
+
+
+def test_one_hip_runtime_passes_even_under_two_names(tmp_path):
+    L.check_single_hip_runtime(["/r/lib/libamdhip64.so.7", "/r/lib/libc.so.6"], "linux")
+    real = tmp_path / "libamdhip64.so.7"
+    real.write_bytes(b"runtime")
+    (tmp_path / "other").mkdir()
+    os.link(real, tmp_path / "other" / "libamdhip64.so.7")
+    L.check_single_hip_runtime(
+        [str(real), str(tmp_path / "other" / "libamdhip64.so.7")], sys.platform
+    )
+
+
+def test_windows_hip_runtimes_are_amdhip64_dlls():
+    loaded = [r"C:\r\bin\amdhip64_6.dll", r"C:\s\bin\AMDHIP64_7.DLL"]
+    with pytest.raises(L.HipblasLtLoadError):
+        L.check_single_hip_runtime(loaded, "win32")
+
+
+def test_the_build_on_another_runtime_warns():
+    msg = L.build_runtime_warning(
+        ["/other/libamdhip64.so.7"], "build", "/rocm/lib/libamdhip64.so.7", "linux"
+    )
+    assert msg and "/other/" in msg and "/rocm/lib/" in msg
+
+
+@pytest.mark.parametrize(
+    "runtimes,source",
+    [
+        (["/rocm/lib/libamdhip64.so.7"], "build"),
+        (["/other/libamdhip64.so.7"], "rocm-sdk"),
+        ([], "build"),
+    ],
+    ids=["its-own-runtime", "not-the-build", "no-runtime-yet"],
+)
+def test_no_runtime_warning_otherwise(runtimes, source):
+    assert (
+        L.build_runtime_warning(runtimes, source, "/rocm/lib/libamdhip64.so.7", "linux")
+        is None
+    )
 
 
 def test_a_file_that_isnt_elf_has_no_dynamic_section(tmp_path):
