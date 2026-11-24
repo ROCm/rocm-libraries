@@ -34,8 +34,15 @@ operands ``q``, ``k``, ``v``, ``o``, each ``dims`` = ``[B, H, S, D]``,
 power of two, in bytes, that divides the base address), ``virtual``,
 ``ragged``; ``expect`` (``"admit"`` or one decline reason); and, on ``admit``
 rows only, ``strides``: the 12 canonical strides in the order
-``stride_{q,k,v,o}_{batch,head,token}``. Integers only. A row has one defect,
-except the ``order_*`` rows, which have two and pin which reason wins.
+``stride_{q,k,v,o}_{batch,head,token}``. Integers only. Each row is built around
+one defect, but some also break a rule a later check enforces (a head-dim stride
+of 2 also overlaps the head axis; a zero or negative stride also overlaps): the
+first check wins, so those rows pin the check order as well. The ``order_*``
+rows have two defects on purpose and pin which reason wins.
+
+The tests after the table cover what the table cannot: reading views, the raw
+addresses and views of callers without torch, the check of O against Q, K and V
+at launch, and the slab and parameter helpers the kernels call.
 
 Pure host code -- no torch, no GPU, no compiler.
 """
@@ -64,9 +71,9 @@ from kernels.common._attention_dense_strides import (
     dense_operand_from_view,
     dense_slab_bytes,
     dense_strides_admit,
+    emit_dense_slab_ptr,
     packed_dense_operand,
-    packed_dense_strides,
-    view_dense_strides,
+    packed_launch_strides,
 )
 from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
 from kernels.gfx950.attention_dense import Gfx950AttentionDenseSpec
@@ -119,15 +126,15 @@ _CHECK_ORDER = (
 def _prob(**changes) -> dict:
     """A problem (the spec fields the predicate reads); the default is a small
     GQA batch of 2: Hq=8, Hkv=2, D=128, S=64, one 64-row tile."""
-    p = dict(
-        batch=2,
-        seqlen_q=64,
-        seqlen_kv=64,
-        num_query_heads=8,
-        num_kv_heads=2,
-        head_size=128,
-        block_n=64,
-    )
+    p = {
+        "batch": 2,
+        "seqlen_q": 64,
+        "seqlen_kv": 64,
+        "num_query_heads": 8,
+        "num_kv_heads": 2,
+        "head_size": 128,
+        "block_n": 64,
+    }
     p.update(changes)
     return p
 
@@ -140,17 +147,18 @@ def _dims(p: dict, t: str) -> list[int]:
 
 
 def _op(dims, strides, align=16, virtual=False, ragged=False) -> dict:
-    return dict(
-        dims=list(dims),
-        strides=list(strides),
-        align=align,
-        virtual=virtual,
-        ragged=ragged,
-    )
+    return {
+        "dims": list(dims),
+        "strides": list(strides),
+        "align": align,
+        "virtual": virtual,
+        "ragged": ragged,
+    }
 
 
 def packed(p: dict, t: str) -> dict:
-    """Packed ``[B, S, H, D]``: strides (S*H*D, D, H*D, 1) for (batch, head, token, dim)."""
+    """Packed ``[B, S, H, D]``: strides (S*H*D, D, H*D, 1) for (batch, head, token,
+    dim)."""
     B, H, S, D = _dims(p, t)
     return _op([B, H, S, D], [S * H * D, D, H * D, 1])
 
@@ -177,7 +185,7 @@ def mod(**changes):
 
 def to_bhsd(op: dict) -> dict:
     """``op`` laid out as packed ``[B, H, S, D]``: strides (H*S*D, S*D, D, 1)."""
-    B, H, S, D = op["dims"]
+    _, H, S, D = op["dims"]
     return with_(op, strides=[H * S * D, S * D, D, 1])
 
 
@@ -771,11 +779,13 @@ def _hand_canonical(case: dict) -> list[int]:
     return out
 
 
-_STALE = (
-    "{path} is not what the case table of {test} renders. If the table or the "
-    "rules changed on purpose, run `python {test} --regenerate`, review the diff "
-    "and mirror the change in the C++ twin of dense_strides_admit."
-)
+def _stale(path: str, test: str) -> str:
+    """The message of a vectors file that the table no longer renders."""
+    return (
+        f"{path} is not what the case table of {test} renders. If the table or the "
+        f"rules changed on purpose, run `python {test} --regenerate`, review the diff "
+        "and mirror the change in the C++ twin of dense_strides_admit."
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -786,7 +796,7 @@ _STALE = (
 def test_vectors_file_is_what_the_table_renders():
     want = _render(_build())
     got = VECTORS.read_text(encoding="utf-8")
-    assert got == want, _STALE.format(path=VECTORS.name, test=Path(__file__).name)
+    assert got == want, _stale(VECTORS.name, Path(__file__).name)
 
 
 def test_header_constants_are_the_modules():
@@ -962,6 +972,22 @@ def test_first_failing_operand_is_named_in_the_detail():
             assert verdict.detail.split()[0] == first, (reason, verdict.detail)
 
 
+def test_a_rank_decline_says_which_count_is_wrong():
+    """Wrong dims and wrong strides give different details, the C++ twin's."""
+    for t, override, detail in (
+        ("q", mod(dims=[2, 8, 64], strides=[65536, 128, 1024]), "q has rank 3, not 4"),
+        ("v", mod(strides=[16384, 128, 256]), "v has 3 strides for its 4 dims, not 4"),
+        (
+            "k",
+            mod(dims=[2, 2, 64, 128, 1], strides=[16384, 128, 256, 1, 1]),
+            "k has rank 5, not 4",
+        ),
+    ):
+        row = _case("x", "operand", **{t: override})
+        verdict = dense_strides_admit(_spec(row["problem"]), _operands(row))
+        assert (verdict.reason, verdict.detail) == ("operand", detail)
+
+
 # --------------------------------------------------------------------------- #
 # c) names and packed strides of real specs
 # --------------------------------------------------------------------------- #
@@ -1011,7 +1037,7 @@ def test_packed_strides_of_a_real_spec_are_contiguous_bshd(cls):
         (131072, 128, 256),
         (524288, 128, 1024),
     )
-    got = packed_dense_strides(spec)
+    got = ds.packed_dense_strides(spec)
     assert got == want
     assert list(got) == list(DENSE_STRIDE_NAMES)
     assert dense_operand_dims(spec, "q") == (2, 8, 512, 128)
@@ -1054,6 +1080,22 @@ class _View:
         return True
 
 
+class _StridesOnly:
+    """The view of a caller without torch: shape, stride() and data_ptr(), and no
+    is_contiguous()."""
+
+    def __init__(self, shape, strides, ptr):
+        self.shape = tuple(shape)
+        self._strides = tuple(strides)
+        self._ptr = ptr
+
+    def stride(self):
+        return self._strides
+
+    def data_ptr(self):
+        return self._ptr
+
+
 def _bshd_view(p, t, ptr=0x1000):
     B, H, S, D = _dims(p, t)
     return _View((B, S, H, D), (S * H * D, H * D, D, 1), ptr)
@@ -1065,6 +1107,11 @@ def _bhsd_view(p, t, ptr=0x1000):
     return _View((B, S, H, D), (H * S * D, D, S * D, 1), ptr)
 
 
+# One sentinel base per tensor, 256 MiB apart, so that the tensors of a launch never
+# share a byte (a P0 tensor is at most 256 KiB): the launch refuses an O that meets
+# Q, K or V.
+_BASES = {"q": 0x1000_0000, "k": 0x2000_0000, "v": 0x3000_0000, "o": 0x4000_0000}
+
 # P0 = batch 2, Sq = Skv = 64, Hq = 8, Hkv = 2, D = 128, by hand.
 _P0_BSHD = _named(
     (65536, 128, 1024), (16384, 128, 256), (16384, 128, 256), (65536, 128, 1024)
@@ -1074,40 +1121,21 @@ _P0_BHSD = _named(
 )
 
 
-def test_view_strides_of_bshd_and_bhsd_views():
+def test_operand_strides_of_bshd_and_bhsd_views():
+    """A [B, S, H, D] view becomes (B, H, S, D) dims and strides, as given."""
     spec = _spec(P0)
-    bshd = {t: _bshd_view(P0, t) for t in TENSORS}
-    assert view_dense_strides(spec, **bshd) == _P0_BSHD
-    bhsd = {t: _bhsd_view(P0, t) for t in TENSORS}
-    assert view_dense_strides(spec, **bhsd) == _P0_BHSD
-    # Given as they are: not validated, not canonicalized.
-    odd = dict(bshd, q=_View((2, 64, 8, 128), (-3, 7, 0, 1)))
-    got = view_dense_strides(spec, **odd)
-    assert (got["stride_q_batch"], got["stride_q_head"], got["stride_q_token"]) == (
-        -3,
-        0,
-        7,
-    )
-
-
-def test_view_strides_of_an_object_without_stride_are_the_packed_ones():
-    spec = _spec(P0)
-    got = view_dense_strides(spec, q=1234, k=_bshd_view(P0, "k"), v=object(), o=0)
-    assert got == _P0_BSHD
-    assert list(got) == list(DENSE_STRIDE_NAMES)
-
-
-def test_view_strides_refuse_a_view_that_is_not_4d():
-    spec = _spec(P0)
-    flat = _View((2, 64, 1024), (65536, 1024, 1))
-    with pytest.raises(ValueError, match="4 strides"):
-        view_dense_strides(
-            spec,
-            q=flat,
-            k=_bshd_view(P0, "k"),
-            v=_bshd_view(P0, "v"),
-            o=_bshd_view(P0, "o"),
-        )
+    for make, want in ((_bshd_view, _P0_BSHD), (_bhsd_view, _P0_BHSD)):
+        for t in TENSORS:
+            op = dense_operand_from_view(make(P0, t))
+            assert op.dims == dense_operand_dims(spec, t)
+            triple = tuple(want[f"stride_{t}_{a}"] for a in ("batch", "head", "token"))
+            assert op.strides == triple + (1,), (make.__name__, t)
+    # Not validated and not canonicalized there: the predicate declines these.
+    odd = dense_operand_from_view(_View((2, 64, 8, 128), (-3, 7, 0, 1)))
+    assert odd.strides == (-3, 0, 7, 1)
+    ops = {t: packed_dense_operand(spec, t) for t in TENSORS}
+    verdict = dense_strides_admit(spec, dict(ops, q=odd))
+    assert (verdict.ok, verdict.reason) == (False, "stride_alignment")
 
 
 def test_operand_from_a_view():
@@ -1128,9 +1156,13 @@ def test_operand_from_a_view():
         assert dense_operand_from_view(_bshd_view(P0, "q", ptr)).align == align, hex(
             ptr
         )
-    # No data_ptr: assumed to be 16-byte aligned.
-    bare = SimpleNamespace(shape=(2, 64, 8, 128), stride=lambda: (65536, 1024, 128, 1))
+    # No data_ptr(): a DeviceMem's ptr() gives the address; with neither, the base
+    # is assumed to be 16-byte aligned.
+    shape, strides = (2, 64, 8, 128), (65536, 1024, 128, 1)
+    bare = SimpleNamespace(shape=shape, stride=lambda: strides)
     assert dense_operand_from_view(bare).align == 16
+    mem = SimpleNamespace(shape=shape, stride=lambda: strides, ptr=lambda: 0x1008)
+    assert dense_operand_from_view(mem).align == 8
     # Another rank keeps its own dims, which the predicate then declines.
     flat = _View((2, 64, 1024), (65536, 1024, 1))
     op = dense_operand_from_view(flat)
@@ -1152,7 +1184,9 @@ def _launch_spec(p=None, **extra):
 
 
 def _views(p, make=_bshd_view, **replace):
-    views = {t: make(p, t) for t in TENSORS}
+    """The four views of problem ``p``, each at its own sentinel base, with
+    ``replace`` swapped in."""
+    views = {t: make(p, t, _BASES[t]) for t in TENSORS}
     views.update(replace)
     return views
 
@@ -1162,18 +1196,39 @@ def test_launch_packed_views_give_the_packed_values(serves):
     spec = _launch_spec()
     got = admit_dense_launch_strides(spec, **_views(P0), serves_strides=serves)
     assert got == _P0_BSHD
-    assert got == packed_dense_strides(spec)
+    assert got == packed_launch_strides(spec)
     # Raw addresses (no .stride()) are taken as packed.
-    bare = admit_dense_launch_strides(
-        spec, q=0x1000, k=0x2000, v=0x3000, o=0x4000, serves_strides=serves
-    )
+    bare = admit_dense_launch_strides(spec, **_BASES, serves_strides=serves)
     assert bare == _P0_BSHD
+
+
+def test_launch_takes_an_object_without_stride_as_packed():
+    """A raw address, an object with only an address, or one with no address at
+    all is a packed operand; the 12 values come back in name order."""
+    got = admit_dense_launch_strides(
+        _launch_spec(),
+        q=_BASES["q"],
+        k=_bshd_view(P0, "k", _BASES["k"]),
+        v=object(),
+        o=SimpleNamespace(data_ptr=lambda: _BASES["o"]),
+        serves_strides=False,
+    )
+    assert got == _P0_BSHD
+    assert list(got) == list(DENSE_STRIDE_NAMES)
+
+
+def test_launch_refuses_a_view_that_is_not_4d():
+    flat = _View((2, 64, 1024), (65536, 1024, 1), _BASES["q"])
+    with pytest.raises(ValueError, match=r"declined \(operand\): q has rank 3"):
+        admit_dense_launch_strides(
+            _launch_spec(), **_views(P0, q=flat), serves_strides=True
+        )
 
 
 def test_launch_a_batch_of_one_canonicalizes_the_unused_stride():
     p = _prob(batch=1)
     spec = _launch_spec(p)
-    views = _views(p, q=_View((1, 64, 8, 128), (99999, 1024, 128, 1)))
+    views = _views(p, q=_View((1, 64, 8, 128), (99999, 1024, 128, 1), _BASES["q"]))
     got = admit_dense_launch_strides(spec, **views, serves_strides=False)
     assert got["stride_q_batch"] == 0
     assert got["stride_k_batch"] == got["stride_v_batch"] == got["stride_o_batch"] == 0
@@ -1188,7 +1243,7 @@ def test_launch_bhsd_views_need_a_body_that_serves_strides():
     got = admit_dense_launch_strides(spec, **views, serves_strides=True)
     assert got == _P0_BHSD
     # One BHSD view is enough to refuse a body that reads packed storage only.
-    one = _views(P0, k=_bhsd_view(P0, "k"))
+    one = _views(P0, k=_bhsd_view(P0, "k", _BASES["k"]))
     with pytest.raises(ValueError, match="k is not packed"):
         admit_dense_launch_strides(spec, **one, serves_strides=False)
 
@@ -1199,7 +1254,7 @@ def test_launch_kv_split_needs_a_packed_o():
     with pytest.raises(ValueError, match="combine kernel"):
         admit_dense_launch_strides(spec, **views, serves_strides=True)
     # Q, K and V may be strided; O packed.
-    ok = _views(P0, _bhsd_view, o=_bshd_view(P0, "o"))
+    ok = _views(P0, _bhsd_view, o=_bshd_view(P0, "o", _BASES["o"]))
     got = admit_dense_launch_strides(spec, **ok, serves_strides=True)
     assert got == _named(
         (65536, 8192, 128), (16384, 8192, 128), (16384, 8192, 128), (65536, 128, 1024)
@@ -1211,12 +1266,39 @@ def test_launch_kv_split_needs_a_packed_o():
 
 def test_launch_a_declined_view_raises_with_its_reason():
     spec = _launch_spec()
-    views = _views(P0, k=_bshd_view(P0, "k", ptr=0x1008))
+    views = _views(P0, k=_bshd_view(P0, "k", _BASES["k"] + 8))
     with pytest.raises(ValueError, match="pointer_alignment"):
         admit_dense_launch_strides(spec, **views, serves_strides=True)
-    views = _views(P0, v=_View((2, 64, 2, 128), (16384, 256, 128, 2)))
+    views = _views(P0, v=_View((2, 64, 2, 128), (16384, 256, 128, 2), _BASES["v"]))
     with pytest.raises(ValueError, match="head_dim_stride"):
         admit_dense_launch_strides(spec, **views, serves_strides=False)
+
+
+@pytest.mark.parametrize("serves", [False, True])
+def test_launch_measures_the_alignment_of_a_raw_address(serves):
+    """A raw address, or an object with only data_ptr() or ptr(), is checked at
+    the alignment of its address, not assumed to be 16-byte aligned."""
+    spec = _launch_spec()
+    for t, misaligned, align in (
+        ("q", _BASES["q"] + 2, 2),
+        ("k", SimpleNamespace(data_ptr=lambda: _BASES["k"] + 8), 8),
+        ("v", SimpleNamespace(ptr=lambda: _BASES["v"] + 4), 4),
+        ("o", _BASES["o"] + 1, 1),
+    ):
+        views = dict(_BASES, **{t: misaligned})
+        with pytest.raises(
+            ValueError, match=rf"\(pointer_alignment\): {t} base is {align}-byte"
+        ):
+            admit_dense_launch_strides(spec, **views, serves_strides=serves)
+    # 16-byte aligned addresses, in every form, are admitted.
+    aligned = {
+        "q": _BASES["q"] + 16,
+        "k": SimpleNamespace(data_ptr=lambda: _BASES["k"] + 32),
+        "v": SimpleNamespace(ptr=lambda: _BASES["v"] + 48),
+        "o": _BASES["o"],
+    }
+    got = admit_dense_launch_strides(spec, **aligned, serves_strides=serves)
+    assert got == _P0_BSHD
 
 
 @pytest.mark.parametrize("flag", ["varlen", "paged"])
@@ -1225,15 +1307,168 @@ def test_launch_varlen_and_paged_read_contiguous_storage_only(flag):
     strided = _views(P0, _bhsd_view)
     with pytest.raises(ValueError, match="not packed"):
         admit_dense_launch_strides(spec, **strided, serves_strides=True)
-    # Contiguous views, and raw addresses: the packed values, even for views the
-    # predicate would decline (the kernel does not read the strides).
+    # Contiguous views, and raw addresses: the packed values, even for a view the
+    # predicate would decline (packed [total_tokens, H, D] has rank 3; the kernel
+    # does not read the strides).
+    tokens = _View((128, 8, 128), (1024, 128, 1), _BASES["q"])
+    for views in (_views(P0), dict(_BASES), _views(P0, q=tokens)):
+        got = admit_dense_launch_strides(spec, **views, serves_strides=False)
+        assert got == packed_launch_strides(spec) == _P0_BSHD
+
+
+@pytest.mark.parametrize("flag", ["varlen", "paged"])
+def test_launch_varlen_and_paged_check_the_alignment_of_every_address(flag):
+    """The varlen and paged bodies claim 16-byte aligned Q/K/V/O pointers too: a
+    view, a raw address, or an object with only data_ptr() or ptr() is checked at
+    the alignment of its address, as on every other body. Address 0 and an
+    object with no address are not refused."""
+    spec = _launch_spec(**{flag: True})
+    for t, misaligned, align in (
+        ("q", _BASES["q"] + 2, 2),
+        ("k", SimpleNamespace(data_ptr=lambda: _BASES["k"] + 8), 8),
+        ("v", SimpleNamespace(ptr=lambda: _BASES["v"] + 4), 4),
+        ("o", _BASES["o"] + 1, 1),
+        ("q", _bshd_view(P0, "q", _BASES["q"] + 8), 8),
+        ("o", _View((128, 8, 128), (1024, 128, 1), _BASES["o"] + 4), 4),
+    ):
+        for views in (dict(_BASES), _views(P0)):
+            views[t] = misaligned
+            with pytest.raises(
+                ValueError,
+                match=rf"declined \(pointer_alignment\): {t} base is {align}-byte "
+                r"aligned, needs 16",
+            ):
+                admit_dense_launch_strides(spec, **views, serves_strides=False)
     for views in (
-        _views(P0),
-        dict(q=1, k=2, v=3, o=4),
-        _views(P0, q=_bshd_view(P0, "q", ptr=0x1008)),
+        {
+            "q": _BASES["q"] + 16,
+            "k": SimpleNamespace(data_ptr=lambda: _BASES["k"] + 32),
+            "v": SimpleNamespace(ptr=lambda: _BASES["v"] + 48),
+            "o": _bshd_view(P0, "o", _BASES["o"] + 64),
+        },
+        {"q": 0, "k": object(), "v": _BASES["v"], "o": _BASES["o"]},
     ):
         got = admit_dense_launch_strides(spec, **views, serves_strides=False)
-        assert got == packed_dense_strides(spec) == _P0_BSHD
+        assert got == _P0_BSHD
+
+
+@pytest.mark.parametrize("flag", ["varlen", "paged"])
+def test_launch_varlen_and_paged_judge_a_view_by_its_strides(flag):
+    """A view with shape and stride() but no is_contiguous() (a caller without
+    torch) is packed only when its strides are the row-major ones of its shape;
+    an extent-1 axis may have any stride."""
+    spec = _launch_spec(**{flag: True})
+    B, S, H, D = 2, 64, 8, 128
+    base = _BASES["q"]
+    for q in (
+        _StridesOnly((B, S, H, D), (H * S * D, D, S * D, 1), base),  # [B, H, S, D]
+        _StridesOnly((100, H, D), (H * D + 64, D, 1), base),  # padded tokens
+    ):
+        with pytest.raises(ValueError, match="q is not packed"):
+            admit_dense_launch_strides(spec, **_views(P0, q=q), serves_strides=False)
+    for q in (
+        _StridesOnly((B, S, H, D), (S * H * D, H * D, D, 1), base),
+        _StridesOnly((100, H, D), (H * D, D, 1), base),  # varlen [tokens, H, D]
+        _StridesOnly((1, S, H, D), (12345, H * D, D, 1), base),
+    ):
+        got = admit_dense_launch_strides(spec, **_views(P0, q=q), serves_strides=False)
+        assert got == _P0_BSHD
+
+
+@pytest.mark.parametrize("varlen", [False, True])
+def test_launch_refuses_a_non_contiguous_view_without_strides(varlen):
+    """A view that says it is not contiguous but has no stride() has a layout
+    that cannot be read: refused on every body. One that says it is contiguous
+    is packed."""
+    spec = _launch_spec(varlen=varlen)
+    gap = SimpleNamespace(is_contiguous=lambda: False, data_ptr=lambda: _BASES["v"])
+    with pytest.raises(ValueError, match="v is not packed"):
+        admit_dense_launch_strides(spec, **_views(P0, v=gap), serves_strides=True)
+    dense = SimpleNamespace(is_contiguous=lambda: True, data_ptr=lambda: _BASES["v"])
+    got = admit_dense_launch_strides(spec, **_views(P0, v=dense), serves_strides=True)
+    assert got == _P0_BSHD
+
+
+# --------------------------------------------------------------------------- #
+# e2) O may not share storage with Q, K or V
+# --------------------------------------------------------------------------- #
+
+
+def _fused_qkv(p: dict, base: int) -> dict[str, _View]:
+    """Q, K and V as views of one ``[B, S, Hq + 2 Hkv, D]`` buffer at ``base``."""
+    B, Hq, S, D = _dims(p, "q")
+    Hkv = p["num_kv_heads"]
+    width = Hq + 2 * Hkv
+    strides = (S * width * D, width * D, D, 1)
+    return {
+        "q": _View((B, S, Hq, D), strides, base),
+        "k": _View((B, S, Hkv, D), strides, base + _ELEM_BYTES * Hq * D),
+        "v": _View((B, S, Hkv, D), strides, base + _ELEM_BYTES * (Hq + Hkv) * D),
+    }
+
+
+def test_launch_refuses_an_o_inside_the_fused_qkv_buffer():
+    spec = _launch_spec()
+    qkv = _fused_qkv(P0, _BASES["q"])
+    # O in its own buffer: admitted, Q, K and V at the fused strides
+    # (batch 64*12*128, head 128, token 12*128).
+    o = _bshd_view(P0, "o", _BASES["o"])
+    got = admit_dense_launch_strides(spec, **qkv, o=o, serves_strides=True)
+    fused = (98304, 128, 1536)
+    assert got == _named(fused, fused, fused, (65536, 128, 1024))
+    # O written over Q (in place), or carved out of the same buffer at V's offset:
+    # refused before anything launches.
+    B, Hq, S, D = _dims(P0, "o")
+    carved = _View((B, S, Hq, D), qkv["q"].stride(), qkv["v"].data_ptr())
+    for o in (qkv["q"], carved):
+        with pytest.raises(ValueError, match="o overlaps q:"):
+            admit_dense_launch_strides(spec, **qkv, o=o, serves_strides=True)
+
+
+@pytest.mark.parametrize("serves", [False, True])
+def test_launch_refuses_an_o_that_shares_bytes_with_an_input(serves):
+    """Packed tensors: an O at the storage of Q, K or V is refused, naming that
+    input; an O that starts right after an input's last byte is admitted."""
+    spec = _launch_spec()
+    for t in ("q", "k", "v"):
+        views = _views(P0, o=_bshd_view(P0, "o", _BASES[t]))
+        with pytest.raises(ValueError, match=f"o overlaps {t}:"):
+            admit_dense_launch_strides(spec, **views, serves_strides=serves)
+    # Q is 2*64*8*128 elements of 2 bytes: bytes [base, base + 0x40000).
+    q_end = _BASES["q"] + 2 * 64 * 8 * 128 * _ELEM_BYTES
+    assert q_end == _BASES["q"] + 0x40000
+    touching = _views(P0, o=_bshd_view(P0, "o", q_end))
+    got = admit_dense_launch_strides(spec, **touching, serves_strides=serves)
+    assert got == _P0_BSHD
+    inside = _views(P0, o=_bshd_view(P0, "o", q_end - 16))
+    with pytest.raises(ValueError, match="o overlaps q:"):
+        admit_dense_launch_strides(spec, **inside, serves_strides=serves)
+    # Raw addresses are spanned as packed tensors.
+    raw = dict(_BASES, o=_BASES["k"] + 0x100)
+    with pytest.raises(ValueError, match="o overlaps k:"):
+        admit_dense_launch_strides(spec, **raw, serves_strides=serves)
+
+
+@pytest.mark.parametrize("flag", ["varlen", "paged"])
+def test_launch_varlen_and_paged_refuse_an_o_over_an_input(flag):
+    spec = _launch_spec(**{flag: True})
+    views = _views(P0, o=_bshd_view(P0, "o", _BASES["v"]))
+    with pytest.raises(ValueError, match="o overlaps v:"):
+        admit_dense_launch_strides(spec, **views, serves_strides=False)
+
+
+def test_launch_does_not_span_a_zero_or_unknown_address():
+    """Synthetic launches keep working: a base of 0, or a tensor with no address,
+    is not checked against the others."""
+    spec = _launch_spec()
+    no_address = SimpleNamespace(
+        shape=(2, 64, 8, 128), stride=lambda: (65536, 1024, 128, 1)
+    )
+    for o in (0, no_address):
+        got = admit_dense_launch_strides(
+            spec, q=0, k=_BASES["k"], v=_BASES["v"], o=o, serves_strides=False
+        )
+        assert got == _P0_BSHD
 
 
 # --------------------------------------------------------------------------- #
@@ -1369,6 +1604,39 @@ def test_slab_bytes_ir_form_agrees_with_the_int_form():
     assert _run_ir(b, out, **{n.name: 0, s.name: 256}) == 0
 
 
+def test_slab_pointer_zero_extends_before_it_multiplies():
+    """The one slab-pointer emitter of both arches: each i32 operand is
+    zero-extended to i64 before its multiply, so the offset cannot wrap at 2^31,
+    then one scale by the element size and one pointer add. The op order is the
+    one the IR goldens of both arches pin."""
+    from rocke.core.ir import F16, I32, I64, IRBuilder, PtrType
+
+    b = IRBuilder("t")
+    ptr = b.param("ptr", PtrType(F16, "global"))
+    batch, head = b.param("bt", I32), b.param("h", I32)
+    strides = declare_dense_stride_params(b)
+    out = emit_dense_slab_ptr(b, strides, ptr, batch, head, "k")
+    ops = b.kernel.body.ops
+    assert [op.name for op in ops] == [
+        "arith.zext",
+        "arith.zext",
+        "arith.mul",
+        "arith.zext",
+        "arith.zext",
+        "arith.mul",
+        "arith.add",
+        "arith.constant",
+        "arith.mul",
+        "tile.global_ptr_add",
+    ]
+    zext_inputs = [op.operands[0].name for op in ops if op.name == "arith.zext"]
+    assert zext_inputs == ["%bt", "%stride_k_batch", "%h", "%stride_k_head"]
+    assert all(op.results[0].type == I64 for op in ops[:-1])
+    assert ops[7].attrs["value"] == ds.DENSE_ELEM_BYTES == 2
+    assert [v.name for v in ops[-1].operands] == ["%ptr", ops[8].results[0].name]
+    assert ops[-1].results[0] is out
+
+
 def test_declare_params_adds_the_twelve_strides_last():
     from rocke.core.ir import I32, IRBuilder, Value
 
@@ -1411,7 +1679,8 @@ def test_signature_lists_the_twelve_strides_as_i32_scalars():
 #           seqlen_kv = 2**24 - 128 = 16777088 pads to itself, R = 2**24: admit;
 #           one row more pads to 16777152, R = 16777280: refused.
 #   2 bytes: the same two rows are both refused (2x the reach), and the 2-byte edge
-#           rows KV_REACH_EXACT_SEQLEN / KV_REACH_PAST_SEQLEN above are 8388480 / 8388481.
+#           rows KV_REACH_EXACT_SEQLEN / KV_REACH_PAST_SEQLEN above are 8388480 /
+#           8388481.
 FP8_KV_EDGE_ADMIT = 2**24 - 128
 FP8_KV_EDGE_REFUSED = FP8_KV_EDGE_ADMIT + 1
 
@@ -1437,7 +1706,8 @@ def test_an_fp8_kv_spec_counts_the_kv_reach_in_one_byte_elements():
     two_byte = dense_strides_admit(_spec(p), _packed_operands(_spec(p)))
     assert (two_byte.ok, two_byte.reason) == (False, "size_limit")
     assert dense_strides_admit(_fp8_kv(p), _packed_operands(_spec(p))).ok
-    # The 1-byte edge: exactly admitted, one row more refused; a 2-byte spec refuses both.
+    # The 1-byte edge: exactly admitted, one row more refused; a 2-byte spec refuses
+    # both.
     for seqlen, ok in ((FP8_KV_EDGE_ADMIT, True), (FP8_KV_EDGE_REFUSED, False)):
         q = dict(P_KVREACH, seqlen_kv=seqlen)
         verdict = dense_strides_admit(_fp8_kv(q), _packed_operands(_spec(q)))

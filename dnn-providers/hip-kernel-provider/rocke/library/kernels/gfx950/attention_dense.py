@@ -171,6 +171,7 @@ from kernels.common._attention_dense_strides import (
     append_dense_stride_signature,
     declare_dense_stride_params,
     dense_slab_bytes,
+    emit_dense_slab_ptr,
     packed_launch_strides,
 )
 from kernels.common._spec_checks import require_bool
@@ -1080,10 +1081,10 @@ def build_attention_dense(
         # After every other param; attention_dense_signature appends the same four.
         additive_bias = declare_additive_bias_params(b)
     # The 12 Q/K/V/O element strides, the constant tail of every dense ABI, after the
-    # additive-bias parameters. Only the
-    # bodies _reads_dense_strides admits address through them; the others keep packed
-    # [B, S, H, D] addressing and ignore them (body_serves_strides).
-    sp = declare_dense_stride_params(b)
+    # additive-bias parameters. Only the bodies _reads_dense_strides admits address
+    # through them; the others keep packed [B, S, H, D] addressing and ignore them
+    # (body_serves_strides).
+    stride_args = declare_dense_stride_params(b)
     STRIDED = _reads_dense_strides(spec)
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
 
@@ -1099,8 +1100,9 @@ def build_attention_dense(
     d_base = b.mul(lane_h, b.const_i32(8))
     # The wave index as an SGPR value, taken here at kernel entry under full EXEC.
     # The strided K/V LDS-DMA destinations are formed from it (see lds_wave_bytes
-    # below). The bodies that keep packed addressing emit neither: ragged, varlen
-    # and paged keep the per-row destination, and the fp8 K/V body has no DMA.
+    # below). The bodies that keep packed addressing emit neither: ragged, varlen,
+    # paged and additive bias keep the per-row destination, and the fp8 K/V body
+    # has no DMA.
     wave_s = b.to_sgpr_u32(wave) if STRIDED else None
     # Mask sentinel, written into RAW (unscaled) scores; it also seeds the running
     # max m (log2 units) when there are no sinks. It is a power of two so
@@ -1154,14 +1156,14 @@ def build_attention_dense(
         # Per-tensor slab bases: the batch and head part of every address, one 64-bit
         # pointer add per workgroup (query head for Q and O, KV head for K and V).
         # Each tensor has its own token stride: V does not borrow K's, O not Q's.
-        q_slab = _dense_slab_ptr(b, sp, q, bt, hq, "q")
-        k_slab = _dense_slab_ptr(b, sp, k, bt, hkv, "k")
-        v_slab = _dense_slab_ptr(b, sp, v, bt, hkv, "v")
-        o_slab = _dense_slab_ptr(b, sp, o, bt, hq, "o")
-        s_q = sp["stride_q_token"]
-        s_k = sp["stride_k_token"]
-        s_v = sp["stride_v_token"]
-        s_o = sp["stride_o_token"]
+        q_slab = emit_dense_slab_ptr(b, stride_args, q, bt, hq, "q")
+        k_slab = emit_dense_slab_ptr(b, stride_args, k, bt, hkv, "k")
+        v_slab = emit_dense_slab_ptr(b, stride_args, v, bt, hkv, "v")
+        o_slab = emit_dense_slab_ptr(b, stride_args, o, bt, hq, "o")
+        s_q = stride_args["stride_q_token"]
+        s_k = stride_args["stride_k_token"]
+        s_v = stride_args["stride_v_token"]
+        s_o = stride_args["stride_o_token"]
     elif varlen:
         # Per-sequence token bases from cu_seqlens; early-exit q-blocks that fall
         # past this sequence's length (packed [total_tok, H, D] layout).
@@ -1299,7 +1301,10 @@ def build_attention_dense(
     # that plus the constant ``i * group_bytes`` (the same offset as
     # ``(wave * groups_per_wave + i) * group_bytes``). Each DMA's M0 is then a scalar
     # add: no per-row VGPR and no per-row v_readfirstlane in the KV loop. Only the
-    # bodies that read the strides (_async_load_strided) take this form.
+    # strided bodies of this builder (grid and KV-segment, _async_load_strided below)
+    # take this form. The packed-only bodies keep the per-row form, and so does the
+    # non-wide strided persistent body (see its _async_load_strided); the wide-DMA
+    # persistent body keeps its LDS line index in an SGPR of its own.
     _groups_per_wave = ROWS_PER_WAVE // ROWS_PER_INSTR
     lds_wave_bytes = {}
     if STRIDED:
@@ -2348,19 +2353,6 @@ def _emit_o_store(
 # --------------------------------------------------------------------------- #
 
 
-def _dense_slab_ptr(b, strides, ptr, batch, head, tensor):
-    """``ptr`` moved to the (``batch``, ``head``) slab of ``tensor`` (``"q"``,
-    ``"k"``, ``"v"`` or ``"o"``): one 64-bit pointer add of
-    ``2 * (batch * stride_<t>_batch + head * stride_<t>_head)`` bytes. ``strides``
-    maps the stride parameter names to their IR values. The host admits only
-    non-negative strides below 2^31, so each zero-extends before the multiply."""
-    elems = b.add(
-        b.mul(b.zext(batch, I64), b.zext(strides[f"stride_{tensor}_batch"], I64)),
-        b.mul(b.zext(head, I64), b.zext(strides[f"stride_{tensor}_head"], I64)),
-    )
-    return b.global_ptr_add(ptr, b.mul(elems, b.const_i64(DENSE_ELEM_BYTES)))
-
-
 def _dense_row_offset(b, token_stride, lane_row, *, qb, block_m, wave):
     """Element offset, within a Q or O slab, of row ``q_tile_start + 32 * wave +
     lane_row`` (column 0): the wave's rows and the lane's row stay in the per-lane
@@ -2564,7 +2556,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         )
     # The 12 stride params, last (see build_attention_dense). Only the specs
     # _reads_dense_strides admits address through them (always the runtime-shape body).
-    sp = declare_dense_stride_params(b)
+    stride_args = declare_dense_stride_params(b)
     STRIDED = _reads_dense_strides(spec)
     assert not STRIDED or RT, "the strided persistent body is the runtime-shape body"
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
@@ -2657,10 +2649,10 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         # KV head) slab, rebuilt per work item inside the loop (only its 64-bit base
         # moves); the bound is the contract's one slab-bound function and does not
         # depend on the work item, so it is computed once per workgroup.
-        s_q = sp["stride_q_token"]
-        s_k = sp["stride_k_token"]
-        s_v = sp["stride_v_token"]
-        s_o = sp["stride_o_token"]
+        s_q = stride_args["stride_q_token"]
+        s_k = stride_args["stride_k_token"]
+        s_v = stride_args["stride_v_token"]
+        s_o = stride_args["stride_o_token"]
         k_slab_bytes = dense_slab_bytes(
             seqlen_kv_p, s_k, head_size=D, elem_bytes=DENSE_ELEM_BYTES, b=b
         )
@@ -2761,12 +2753,12 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             # This work item's slabs: Q from its slab with its own token stride, K and V
             # buffer resources over their slabs (O's slab is rebuilt in the epilogue from
             # the re-decoded (batch, head), as the packed form does for its O base).
-            q_slab = _dense_slab_ptr(b, sp, q, bt, hq, "q")
+            q_slab = emit_dense_slab_ptr(b, stride_args, q, bt, hq, "q")
             k_rsrc = b.buffer_rsrc(
-                _dense_slab_ptr(b, sp, k, bt, hkv, "k"), k_slab_bytes
+                emit_dense_slab_ptr(b, stride_args, k, bt, hkv, "k"), k_slab_bytes
             )
             v_rsrc = b.buffer_rsrc(
-                _dense_slab_ptr(b, sp, v, bt, hkv, "v"), v_slab_bytes
+                emit_dense_slab_ptr(b, stride_args, v, bt, hkv, "v"), v_slab_bytes
             )
             # Everything that does not depend on the work item stays in the lane offset
             # (the loop-invariant part LLVM would otherwise hoist as one VGPR pair per
@@ -2979,7 +2971,16 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             global offsets with the tensor's own token stride ``s_tok``. The vector
             offset is the workgroup-invariant lane part (the wave's first row
             included) plus the wave-uniform row term, which goes through a scalar
-            register and steps by one DMA issue's rows per issue."""
+            register and steps by one DMA issue's rows per issue.
+
+            The LDS destination keeps the per-row VGPR form of the packed body (a
+            VGPR wave index, so M0 needs a readfirstlane per DMA), not the scalar
+            destination of the grid body's loader. That was a choice of scope when
+            this body learned the strides, not a measured one: the scalar form has
+            not been built or timed on this body. Timed without it, the persistent
+            family (this body and the wide-DMA one) passes the speed bar only
+            through the bar's floor, not against the measured noise (the gfx950
+            persistent results of the launch-time strides case study)."""
             buf_off = b.mul(b.zext(buf_val, I64), b.const_i64(bytes_per_buf))
             if ROWS_PER_INSTR == 1:
                 n_issue, step = ROWS_PER_WAVE, 1
@@ -3667,7 +3668,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         if STRIDED:
             # O from its own slab (the re-decoded batch and head) with its own token
             # stride; the row offset is slab relative.
-            o_ptr = _dense_slab_ptr(b, sp, o, bt_e, hq_e, "o")
+            o_ptr = emit_dense_slab_ptr(b, stride_args, o, bt_e, hq_e, "o")
             o_row = _mfma_32x32_c_col(b, lane, 0)
             qtok = b.add(q_tok0, o_row)
             q_row_byte = _dense_row_offset(
@@ -3872,7 +3873,10 @@ def _reads_dense_strides(spec: AttentionDenseSpec) -> bool:
     specs, whose K/V extents are bounded by per-sequence offsets, partial tiles or a
     page cache instead of a dense slab, the fp8 K/V-cache bodies, whose
     synchronous dequant loader reads K and V through plain packed pointers, and the
-    additive-bias bodies, whose bias reads are written against packed Q/K/V/O."""
+    additive-bias bodies. Those address Q, K, V and O as packed tensors and index
+    the bias read by the bias's own three strides only; the D128 LSE bias body sits
+    at the 256-VGPR budget (it keeps its bias loads scalar because the 4-wide ones
+    spill), so the extra stride arithmetic may not fit."""
     if spec.kv_storage_dtype is not None:
         return False
     if spec.use_additive_bias:
@@ -3960,11 +3964,17 @@ def run_attention_dense_torch(
     into an fma; see the scale-range note above ``_EMPTY_ROW_MAX_GRID``). A NaN
     or infinite scale raises ``ValueError``; a finite scale outside the range
     raises ``NotImplementedError``. Returns ``out``.
-    The strides of q/k/v/out reach the kernel as kernargs; they are checked
-    before launch (:func:`~kernels.common._attention_dense_strides.
-    admit_dense_launch_strides`), and a body that does not serve strides
-    (:func:`body_serves_strides`) refuses any tensor that is not packed with a
-    ``ValueError``. A tensor without ``.stride()`` is taken as packed.
+    The strides of q/k/v/out reach the kernel as kernargs. They are checked before
+    launch by
+    :func:`~kernels.common._attention_dense_strides.admit_dense_launch_strides`,
+    which raises ``ValueError`` for a layout the contract declines, for a tensor
+    that is not packed when the body does not serve strides
+    (:func:`body_serves_strides`), for an ``out`` whose bytes meet those of
+    ``q``, ``k`` or ``v``, and, on every body, for a base address that is not
+    16-byte aligned, measured on the real address (a view's ``data_ptr()`` or
+    ``ptr()``, or a raw address). A tensor without ``.stride()`` (a raw address,
+    or an object with only ``data_ptr()`` or ``ptr()``) is taken as packed; one
+    whose ``is_contiguous()`` is False is refused.
     torch is imported lazily by the launcher — this module stays torch-free at
     import time.
 
@@ -3976,11 +3986,26 @@ def run_attention_dense_torch(
     those rows instead write the sink logit as LSE. Invalid padded rows do not
     write. Supplying ``lse`` with ``emit_lse=False`` is an error.
     ``q``/``k``/``v``/``out``/``lse`` may be any buffers that have the attributes the
-    launch and its checks read (``shape``, ``stride()``, ``data_ptr()``, ``device``, and
-    for ``lse`` ``dtype``, ``numel()``, ``element_size()``, ``is_contiguous()``), so a
-    caller without torch can pass device-buffer views. With ``kv_segments > 1`` the
-    runner allocates the segment workspace with torch unless ``workspace_allocator`` is
-    given: ``workspace_allocator(shape)`` returns an FP32 buffer with ``data_ptr()``.
+    launch and its checks read, so a caller without torch can pass device-buffer
+    views. Each of q/k/v/out needs ``shape``, ``stride()`` and ``data_ptr()``, or is
+    a raw address, and some launches read more:
+
+    * ``q`` needs ``device`` for an additive-bias launch and ``dtype`` with
+      ``spec.use_sinks`` (a raw address there raises ``ValueError``), and
+      ``device`` for ``kv_segments > 1``;
+    * a varlen launch whose offsets are checked (below) reads ``q.device`` and the
+      token counts ``q.shape[0]`` and ``k.shape[0]``; with ``emit_lse`` it also
+      reads ``ndim`` and ``is_contiguous()`` of each of q/k/v/out;
+    * with ``spec.paged`` the ``k``/``v`` page caches also need ``device``,
+      ``dtype``, ``is_cuda`` and ``is_contiguous()``; with the fp8 K/V cache ``k``
+      and ``v`` need the OCP fp8 ``dtype`` (anything else raises ``ValueError``);
+    * with ``emit_lse`` each of q/k/v/out also needs ``device``, ``numel()`` and
+      ``element_size()``, and ``lse`` needs ``shape``, ``dtype``, ``numel()``,
+      ``element_size()``, ``is_contiguous()``, ``data_ptr()`` and ``device``.
+
+    With ``kv_segments > 1`` the runner allocates the segment workspace with torch
+    unless ``workspace_allocator`` is given: ``workspace_allocator(shape)`` returns
+    an FP32 buffer with ``data_ptr()``.
     A varlen launch checks its cumulative offsets on the host (a device sync):
     int32 ``[batch+1]`` on q's device, spanning the packed tensors, Q lengths
     block_m multiples and KV lengths block_n multiples, both within their spec
@@ -4061,6 +4086,14 @@ def run_attention_dense_torch(
     if not spec.varlen and (cu_seqlens_q is not None or cu_seqlens_kv is not None):
         raise ValueError("cu_seqlens_* provided but spec.varlen is False")
     validate_paged_launch(spec, k, v, block_tables, kv_lens, validate_paged)
+    # The bias is checked against q's device and the sinks against q's dtype. A raw
+    # address (the SDPA replay's form) has neither, so such a launch refuses it
+    # before a check reads it: the bias here, ahead of the sinks checks.
+    if spec.use_additive_bias and not hasattr(q, "device"):
+        raise ValueError(
+            "spec.use_additive_bias=True requires q with a device to check "
+            f"additive_bias against, got {type(q).__name__}"
+        )
     if not spec.use_sinks and sinks is not None:
         raise ValueError("sinks provided but spec.use_sinks is False")
     if spec.use_sinks:
@@ -4070,13 +4103,17 @@ def run_attention_dense_torch(
             raise ValueError(
                 f"sinks must have shape ({spec.num_query_heads},), got {tuple(sinks.shape)}"
             )
+        if not hasattr(q, "dtype"):
+            raise ValueError(
+                "spec.use_sinks=True requires q with a dtype to check sinks "
+                f"against, got {type(q).__name__}"
+            )
         if sinks.dtype != q.dtype:
             raise ValueError(f"sinks dtype {sinks.dtype} must match q dtype {q.dtype}")
         if not sinks.is_contiguous():
             raise ValueError("sinks must be contiguous")
         if not sinks.is_cuda:
             raise ValueError("sinks must be a CUDA tensor")
-    # q is read only for a bias launch: plain launches may pass placeholder operands.
     bias_strides = validate_dense_additive_bias(
         spec,
         additive_bias,

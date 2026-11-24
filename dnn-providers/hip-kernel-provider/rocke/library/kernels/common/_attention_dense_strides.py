@@ -7,36 +7,74 @@ Every dense attention kernel (gfx942 and gfx950, every body) takes twelve
 trailing ``i32`` kernel parameters: one ``(batch, head, token)`` element stride
 triple per tensor Q, K, V and O, declared after every other parameter in the
 order of :data:`DENSE_STRIDE_NAMES`. The head-dim stride is 1 and is not a
-parameter. Tensors are logical ``[B, S, H, D]`` views (``[B, Skv, Hkv, D]`` for
-K and V) of any storage.
+parameter. A caller hands the runner logical ``[B, S, H, D]`` views
+(``[B, Skv, Hkv, D]`` for K and V) of any storage, in torch's axis order. The
+predicate works in ``(B, H, S, D)`` order, hipDNN's graph order and the order of
+its C++ twin; :func:`dense_operand_from_view` reorders a view into it.
 
-This module is the single source of:
+Which function to call:
 
-* the names (:data:`DENSE_STRIDE_NAMES`), their kernel parameters
-  (:func:`declare_dense_stride_params`) and launcher signature
-  (:func:`append_dense_stride_signature`);
-* the packed values (:func:`packed_dense_strides`), the values read off tensor
-  views (:func:`view_dense_strides`) and their canonical form
-  (:func:`canonical_dense_strides`);
-* the bytes a K/V slab load may reach (:func:`dense_slab_bytes`, one function for
-  the host predicate and the kernel's buffer-resource bound);
-* the host admission predicate (:func:`dense_strides_admit`) with the decline
-  reasons of :data:`DENSE_STRIDE_REASONS`, and the runner's use of it
-  (:func:`admit_dense_launch_strides`).
+* a kernel builder: :func:`declare_dense_stride_params` for the parameters,
+  :func:`emit_dense_slab_ptr` for a pointer moved to its (batch, head) slab and
+  :func:`dense_slab_bytes` with ``b`` for the ``num_records`` of a K/V slab; its
+  launcher signature: :func:`append_dense_stride_signature`;
+* a runner, before it launches: :func:`admit_dense_launch_strides`, which reads
+  the four views, applies every check below and returns the 12 values to pass;
+* a launch path without views (the runtime-args helpers, the SDPA replay
+  export): :func:`packed_launch_strides`;
+* a caller that describes operands without views (the table of
+  ``test_attention_dense_strided_admission.py`` behind the vectors file, and the
+  hipDNN IngestorGenerator test ``tests/test_ground_truth_layouts.py``, which
+  checks that it admits every layout the ground-truth tool writes):
+  :func:`dense_strides_admit` on :class:`DenseOperand`.
 
-The predicate has a C++ twin in the hipDNN engines; both are pinned to one
-vectors file (see ``library/tests/test_attention_dense_strided_admission.py``). Pure host
-code apart from the two IR helpers: no torch import, no GPU.
+The other functions are building blocks of these.
+
+The predicate has a C++ twin,
+``src/engines/kernel_ingestor_engine/packs/AttentionDenseStrides.hpp`` in the
+hip-kernel-provider. Both are pinned to one vectors file,
+``platform/tests/golden/attention_dense_stride_vectors.json``, which
+``library/tests/test_attention_dense_strided_admission.py`` renders from its
+hand-written table. Python measures a view's alignment from its address; the
+twin takes the alignment the graph declares. The design and its measurements are
+in ``dense_attention_launch_time_strides_case_study.md`` under
+``library/builders/gfx950/attention/prefill/``.
+
+Related checks elsewhere look alike but stay separate, because their units and
+rules differ. The strided split-KV decode path (``_attention_strided_kv.py``,
+checked by ``attention_kv_cache.KvTensorLayout``) takes byte strides, 64-bit
+batch and head strides and a span the host computes. The backward plan
+(``attention_bwd_plan``) also admits interleaved views through an exact overlap
+test, and ``_attention_bwd_addr.StridedTensorAddr`` scales element strides with a
+clamp. Dense takes ``i32`` element strides, bounds the K/V reach inside the
+kernel and is held to its C++ twin by the shared vectors, so a change to the
+dense rules does not carry over to those families, nor theirs to dense.
+``_sdpa_fwd_strides.contiguous_strides`` gives the packed values used here.
+
+The kernels form these addresses with plain IR builder arithmetic, not the
+platform ``rocke.helpers.tensor_view`` layer, because that layer lacks three
+things these bodies need: vector loads through a buffer view serve f16 only
+(dense also reads bf16), its global vector loads take no ``align=`` (dense loads
+claim 8 and 16 bytes), and a descriptor offset is one ``i32`` element offset,
+with no 64-bit (batch, head) slab rebase.
+
+Pure host code, apart from the IR helpers that take a builder ``b``
+(:func:`declare_dense_stride_params`, :func:`emit_dense_slab_ptr` and
+:func:`dense_slab_bytes`): no torch import, no GPU.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 
 from kernels.common._sdpa_fwd_strides import contiguous_strides
 from kernels.common.attention_dense_spec import INT32_LIMIT
+
+if TYPE_CHECKING:
+    from rocke.core.ir import IRBuilder, Value
+    from rocke.helpers.spec import SignatureBuilder
 
 # The tensors in parameter order, and the three axes of each, in order.
 DENSE_STRIDE_TENSORS = ("q", "k", "v", "o")
@@ -55,8 +93,18 @@ DENSE_ELEM_BYTES = 2
 # conservative rule for every body: the kernels tolerate less on some operands.
 DENSE_STRIDE_MULTIPLE = 8
 DENSE_POINTER_ALIGN = 16
-# K/V loads may reach this many tiles past the padded length: an empty KV segment
-# still loads tiles n_upper and n_upper + 1.
+# K/V tiles a load may reach past the padded length. The gfx950 grid, KV-segment and
+# persistent bodies prime a K/V double buffer with tiles start_tile and
+# start_tile + 1 before their loop, and an empty KV segment starts at
+# start_tile = n_upper (the padded tile count), so the furthest tile they load is
+# n_upper + 1. The gfx950 sliding-window bodies stop one tile past the padded
+# length; the gfx942 bodies load tile j inside the loop and stop at n_upper - 1.
+# test_kv_loads_stay_inside_the_admitted_reach and
+# test_the_slack_is_what_the_deepest_prefetch_needs (in
+# tests/test_attention_dense_gfx950_varlen_kv_bound.py) walk the IR of every strided
+# body to pin this value to the builders. A body that loads further ahead must
+# raise it, and the C++ twin's DENSE_SLAB_SLACK_TILES with it (the vectors file's
+# header pins the two equal).
 DENSE_SLAB_SLACK_TILES = 2
 # Byte offsets of a batch/head slab base are 64-bit.
 _INT64_LIMIT = 2**63
@@ -72,12 +120,39 @@ DENSE_STRIDE_REASONS = (
 )
 
 
+class DenseProblem(Protocol):
+    """The spec fields the predicate reads: an attention dense spec, or any object
+    that has them (the vectors table and the hipDNN IngestorGenerator test pass a
+    namespace)."""
+
+    @property
+    def batch(self) -> int: ...
+
+    @property
+    def seqlen_q(self) -> int: ...
+
+    @property
+    def seqlen_kv(self) -> int: ...
+
+    @property
+    def num_query_heads(self) -> int: ...
+
+    @property
+    def num_kv_heads(self) -> int: ...
+
+    @property
+    def head_size(self) -> int: ...
+
+    @property
+    def block_n(self) -> int: ...
+
+
 # --------------------------------------------------------------------------- #
 # Names and kernel ABI
 # --------------------------------------------------------------------------- #
 
 
-def declare_dense_stride_params(b) -> dict:
+def declare_dense_stride_params(b: IRBuilder) -> dict[str, Value]:
     """Declare the 12 stride parameters on IR builder ``b`` (``i32``, in
     :data:`DENSE_STRIDE_NAMES` order) and return them by name. Call it after
     every other parameter of the kernel: the strides are the constant tail of
@@ -87,13 +162,37 @@ def declare_dense_stride_params(b) -> dict:
     return {name: b.param(name, I32) for name in DENSE_STRIDE_NAMES}
 
 
-def append_dense_stride_signature(sig):
-    """``sig`` (a :class:`rocke.helpers.spec.SignatureBuilder`) with the 12
-    ``i32`` stride scalars appended, mirroring
+def append_dense_stride_signature(sig: SignatureBuilder) -> SignatureBuilder:
+    """``sig`` with the 12 ``i32`` stride scalars appended, mirroring
     :func:`declare_dense_stride_params`."""
     for name in DENSE_STRIDE_NAMES:
         sig = sig.scalar(name, "i32")
     return sig
+
+
+def emit_dense_slab_ptr(
+    b: IRBuilder,
+    strides: Mapping[str, Value],
+    ptr: Value,
+    batch: Value,
+    head: Value,
+    tensor: str,
+) -> Value:
+    """``ptr`` moved to the (``batch``, ``head``) slab of ``tensor`` (``"q"``,
+    ``"k"``, ``"v"`` or ``"o"``): one 64-bit pointer add of
+    ``DENSE_ELEM_BYTES * (batch * stride_<t>_batch + head * stride_<t>_head)``
+    bytes. ``strides`` maps the stride parameter names to their ``i32`` values
+    (:func:`declare_dense_stride_params`). The host admits only non-negative
+    strides below 2^31 and holds the slab base below 2^63 bytes (``size_limit``),
+    so each operand is zero-extended to ``i64`` before the multiply and the
+    offset cannot wrap at 2^31. Offsets inside the slab stay 32-bit."""
+    from rocke.core.ir import I64
+
+    elems = b.add(
+        b.mul(b.zext(batch, I64), b.zext(strides[f"stride_{tensor}_batch"], I64)),
+        b.mul(b.zext(head, I64), b.zext(strides[f"stride_{tensor}_head"], I64)),
+    )
+    return b.global_ptr_add(ptr, b.mul(elems, b.const_i64(DENSE_ELEM_BYTES)))
 
 
 # --------------------------------------------------------------------------- #
@@ -101,14 +200,14 @@ def append_dense_stride_signature(sig):
 # --------------------------------------------------------------------------- #
 
 
-def _tensor_dims(spec, tensor: str) -> tuple[int, int]:
+def _tensor_dims(spec: DenseProblem, tensor: str) -> tuple[int, int]:
     """``(seqlen, heads)`` of one tensor of ``spec``."""
     if tensor in ("q", "o"):
         return spec.seqlen_q, spec.num_query_heads
     return spec.seqlen_kv, spec.num_kv_heads
 
 
-def dense_operand_dims(spec, tensor: str) -> tuple[int, int, int, int]:
+def dense_operand_dims(spec: DenseProblem, tensor: str) -> tuple[int, int, int, int]:
     """Logical ``(B, H, S, D)`` extents of ``tensor`` (``"q"``, ``"k"``, ``"v"``
     or ``"o"``) for ``spec``: the axis order of :data:`DENSE_STRIDE_AXES` plus
     the head dim."""
@@ -116,9 +215,11 @@ def dense_operand_dims(spec, tensor: str) -> tuple[int, int, int, int]:
     return (spec.batch, heads, seqlen, spec.head_size)
 
 
-def packed_dense_strides(spec) -> dict[str, int]:
+def packed_dense_strides(spec: DenseProblem) -> dict[str, int]:
     """The 12 stride values (element units) of packed ``[B, S, H, D]`` tensors
-    of ``spec``, keyed by :data:`DENSE_STRIDE_NAMES` in that order."""
+    of ``spec``, keyed by :data:`DENSE_STRIDE_NAMES` in that order. Not
+    canonical (an extent-1 axis keeps its packed stride), so a launch must not
+    pass these: it passes :func:`packed_launch_strides`."""
     out: dict[str, int] = {}
     for t in DENSE_STRIDE_TENSORS:
         seqlen, heads = _tensor_dims(spec, t)
@@ -130,7 +231,9 @@ def packed_dense_strides(spec) -> dict[str, int]:
     return out
 
 
-def canonical_dense_strides(spec, strides: Mapping[str, int]) -> dict[str, int]:
+def canonical_dense_strides(
+    spec: DenseProblem, strides: Mapping[str, int]
+) -> dict[str, int]:
     """``strides`` (the 12 values) with every extent-1 axis canonicalized:
     batch and head to 0, token to the head size. An extent-1 axis is never
     stepped, so its stride carries no information and may be anything."""
@@ -147,7 +250,7 @@ def canonical_dense_strides(spec, strides: Mapping[str, int]) -> dict[str, int]:
     return out
 
 
-def packed_launch_strides(spec) -> dict[str, int]:
+def packed_launch_strides(spec: DenseProblem) -> dict[str, int]:
     """The 12 values a kernel of ``spec`` is launched with for packed
     ``[B, S, H, D]`` tensors: :func:`packed_dense_strides` in canonical form.
     Every launch path (``attention_dense_runtime_args``, the runners, the SDPA
@@ -161,9 +264,13 @@ class DenseOperand:
     """One dense tensor as the predicate sees it.
 
     ``dims`` and ``strides`` are in logical ``(B, H, S, D)`` order (strides in
-    elements; ``strides[3]`` is the head-dim stride). ``align`` is a power of
-    two the base address is a multiple of, in bytes. ``virtual`` and ``ragged``
-    (a ragged offset tensor) are graph properties the kernels cannot serve."""
+    elements; ``strides[3]`` is the head-dim stride): hipDNN's graph order and
+    the C++ twin's. Torch views are ``[B, S, H, D]``;
+    :func:`dense_operand_from_view` reorders them. ``align`` is a power of two
+    the base address is a multiple of, in bytes; here it is measured from the
+    address, while the C++ twin takes the alignment the graph declares.
+    ``virtual`` and ``ragged`` (a ragged offset tensor) are graph properties the
+    kernels cannot serve."""
 
     dims: tuple[int, ...]
     strides: tuple[int, ...]
@@ -178,15 +285,34 @@ def _address_align(ptr: int) -> int:
     return 256 if ptr % 256 == 0 else ptr & -ptr
 
 
-def dense_operand_from_view(view) -> DenseOperand:
+def _base_address(view: Any) -> int | None:
+    """The device address ``view`` stands for, in the forms the launcher packs
+    (``rocke.runtime.packing.device_pointer``): an int, ``data_ptr()`` or a
+    ``DeviceMem``'s ``ptr()``. None when it has none of them."""
+    if isinstance(view, int):
+        return view
+    for name in ("data_ptr", "ptr"):
+        method = getattr(view, name, None)
+        if callable(method):
+            return int(method())
+    return None
+
+
+def _align_of(view: Any) -> int:
+    """The alignment of ``view``'s address, or :data:`DENSE_POINTER_ALIGN`
+    when it has no address to measure."""
+    addr = _base_address(view)
+    return DENSE_POINTER_ALIGN if addr is None else _address_align(addr)
+
+
+def dense_operand_from_view(view: Any) -> DenseOperand:
     """:class:`DenseOperand` of a logical ``[B, S, H, D]`` tensor view (anything
-    with ``.shape`` and ``.stride()``; ``.data_ptr()`` gives the alignment when
-    present, otherwise :data:`DENSE_POINTER_ALIGN` is assumed). A view of another
-    rank keeps its own dims, which the predicate then declines."""
+    with ``.shape`` and ``.stride()``). Its address (``data_ptr()`` or ``ptr()``)
+    gives the alignment; without one, :data:`DENSE_POINTER_ALIGN` is assumed. A
+    view of another rank keeps its own dims, which the predicate then declines."""
     shape = tuple(int(n) for n in view.shape)
     st = tuple(int(s) for s in view.stride())
-    ptr = getattr(view, "data_ptr", None)
-    align = _address_align(ptr()) if callable(ptr) else DENSE_POINTER_ALIGN
+    align = _align_of(view)
     if len(shape) != 4 or len(st) != 4:
         return DenseOperand(dims=shape, strides=st, align=align)
     return DenseOperand(
@@ -196,42 +322,51 @@ def dense_operand_from_view(view) -> DenseOperand:
     )
 
 
-def packed_dense_operand(spec, tensor: str) -> DenseOperand:
-    """:class:`DenseOperand` of a packed ``[B, S, H, D]`` tensor of ``spec``."""
+def packed_dense_operand(
+    spec: DenseProblem, tensor: str, *, align: int = DENSE_POINTER_ALIGN
+) -> DenseOperand:
+    """:class:`DenseOperand` of a packed ``[B, S, H, D]`` tensor of ``spec``
+    whose base address is a multiple of ``align`` bytes."""
     packed = packed_dense_strides(spec)
     return DenseOperand(
         dims=dense_operand_dims(spec, tensor),
         strides=tuple(packed[f"stride_{tensor}_{a}"] for a in DENSE_STRIDE_AXES) + (1,),
+        align=align,
     )
 
 
-def _has_strides(view) -> bool:
+def _has_strides(view: Any) -> bool:
+    """Whether ``view`` describes its layout (``shape`` and ``stride()``)."""
     return callable(getattr(view, "stride", None)) and hasattr(view, "shape")
 
 
-def view_dense_strides(spec, *, q, k, v, o) -> dict[str, int]:
-    """The 12 stride values (element units, as given: not validated, not
-    canonicalized) of four logical ``[B, S, H, D]`` tensor views. A tensor
-    without ``.stride()`` (a raw address, a ``DeviceMem``) is taken as packed."""
-    packed = packed_dense_strides(spec)
-    out: dict[str, int] = {}
-    for t, view in zip(DENSE_STRIDE_TENSORS, (q, k, v, o)):
-        if not _has_strides(view):
-            out.update(
-                {
-                    f"stride_{t}_{a}": packed[f"stride_{t}_{a}"]
-                    for a in DENSE_STRIDE_AXES
-                }
-            )
-            continue
-        op = dense_operand_from_view(view)
-        if len(op.strides) != 4:
-            raise ValueError(
-                f"{t}: a [B, S, H, D] view has 4 strides, got {len(op.strides)}"
-            )
-        for i, axis in enumerate(DENSE_STRIDE_AXES):
-            out[f"stride_{t}_{axis}"] = op.strides[i]
-    return out
+def _is_row_major(shape: Sequence[int], strides: Sequence[int]) -> bool:
+    """Whether ``strides`` are the packed row-major strides of ``shape``. An
+    extent-1 axis is never stepped, so its stride is ignored, and an empty view
+    is packed: the rule of torch's ``is_contiguous()``."""
+    if len(shape) != len(strides):
+        return False
+    if 0 in shape:
+        return True
+    want = 1
+    for n, s in zip(reversed(shape), reversed(strides)):
+        if n != 1:
+            if s != want:
+                return False
+            want *= n
+    return True
+
+
+def _view_is_packed(view: Any) -> bool:
+    """Whether ``view`` is packed storage: judged by its strides when it has
+    ``shape`` and ``stride()`` (``is_contiguous()`` is not needed), else by its
+    ``is_contiguous()``; a view with neither (a raw address) is taken as packed."""
+    if _has_strides(view):
+        return _is_row_major(
+            tuple(int(n) for n in view.shape), tuple(int(s) for s in view.stride())
+        )
+    contiguous = getattr(view, "is_contiguous", None)
+    return not callable(contiguous) or bool(contiguous())
 
 
 # --------------------------------------------------------------------------- #
@@ -239,7 +374,14 @@ def view_dense_strides(spec, *, q, k, v, o) -> dict[str, int]:
 # --------------------------------------------------------------------------- #
 
 
-def dense_slab_bytes(rows, token_stride, *, head_size: int, elem_bytes: int, b=None):
+def dense_slab_bytes(
+    rows: int | Value,
+    token_stride: int | Value,
+    *,
+    head_size: int,
+    elem_bytes: int,
+    b: IRBuilder | None = None,
+) -> int | Value:
     """Extent of the first ``rows`` rows of one (batch, head) slab:
     ``rows > 0 ? elem_bytes * ((rows - 1) * token_stride + head_size) : 0``.
 
@@ -248,8 +390,8 @@ def dense_slab_bytes(rows, token_stride, *, head_size: int, elem_bytes: int, b=N
     ``i32`` values and the result is the ``i32`` ``num_records`` of a K/V slab
     buffer resource, with ``rows`` the valid rows (at most ``seqlen_kv``).
     :func:`dense_strides_admit` holds every offset a load forms, up to the
-    furthest element of :func:`dense_kv_reach_rows` (``seqlen_kv`` plus the slack),
-    below 2^31 bytes, so that record count is below 2^31 too.
+    furthest element of :func:`dense_kv_reach_rows` (``seqlen_kv`` plus the
+    slack), below 2^31 bytes, so that record count is below 2^31 too.
     """
     if b is None:
         rows, token_stride = int(rows), int(token_stride)
@@ -266,11 +408,16 @@ def dense_slab_bytes(rows, token_stride, *, head_size: int, elem_bytes: int, b=N
     )
 
 
-def dense_kv_elem_bytes(spec) -> int:
+def dense_kv_elem_bytes(spec: DenseProblem) -> int:
     """Bytes per stored K/V element of ``spec``: its ``kv_elem_bytes`` where it has
     one (1 on the gfx950 fp8 K/V-cache spec), else :data:`DENSE_ELEM_BYTES`. Q and
     O are always :data:`DENSE_ELEM_BYTES`."""
     return int(getattr(spec, "kv_elem_bytes", DENSE_ELEM_BYTES))
+
+
+def _elem_bytes(spec: DenseProblem, tensor: str) -> int:
+    """Bytes per stored element of ``tensor`` of ``spec``."""
+    return dense_kv_elem_bytes(spec) if tensor in ("k", "v") else DENSE_ELEM_BYTES
 
 
 def dense_kv_reach_rows(seqlen_kv: int, block_n: int) -> int:
@@ -280,13 +427,13 @@ def dense_kv_reach_rows(seqlen_kv: int, block_n: int) -> int:
     return padded + DENSE_SLAB_SLACK_TILES * block_n
 
 
-def dense_slab_fits(spec, tensor: str, token_stride: int) -> bool:
+def dense_slab_fits(spec: DenseProblem, tensor: str, token_stride: int) -> bool:
     """Whether every in-slab offset of ``tensor`` fits the kernel's 32-bit index.
 
     K and V (buffer resources, byte offsets): the furthest element a load may
     address, row ``dense_kv_reach_rows - 1``, starts below 2^31 bytes. Q and O
-    (64-bit slab base, then a 32-bit element index): ``(S - 1) * sS + D < 2^31``
-    elements."""
+    (64-bit slab base, then a 32-bit element index):
+    ``(S - 1) * token_stride + D < 2^31`` elements."""
     D = spec.head_size
     if tensor in ("k", "v"):
         rows = dense_kv_reach_rows(spec.seqlen_kv, spec.block_n)
@@ -315,10 +462,31 @@ class DenseStrideVerdict(NamedTuple):
 
 
 def _decline(reason: str, detail: str) -> DenseStrideVerdict:
+    """A declined verdict."""
     return DenseStrideVerdict(False, reason, detail)
 
 
-def _overlap_free(dims, strides) -> bool:
+def _misaligned_base(tensor: str, align: int) -> DenseStrideVerdict | None:
+    """The ``pointer_alignment`` decline of ``tensor`` whose base is a multiple of
+    ``align`` bytes, or None when that is a multiple of
+    :data:`DENSE_POINTER_ALIGN`. The predicate and the varlen/paged launch path
+    share it, so both say the same thing."""
+    if align % DENSE_POINTER_ALIGN == 0:
+        return None
+    return _decline(
+        "pointer_alignment",
+        f"{tensor} base is {align}-byte aligned, needs {DENSE_POINTER_ALIGN}",
+    )
+
+
+def _raise_declined(verdict: DenseStrideVerdict) -> None:
+    """Raise the ``ValueError`` a runner gives for a declined ``verdict``."""
+    raise ValueError(
+        f"dense attention strides declined ({verdict.reason}): {verdict.detail}"
+    )
+
+
+def _overlap_free(dims: Sequence[int], strides: Sequence[int]) -> bool:
     """No two index tuples of the view share an element: walking the axes of
     extent > 1 by increasing stride, each stride clears the span of the axes
     before it."""
@@ -332,17 +500,18 @@ def _overlap_free(dims, strides) -> bool:
 
 
 def dense_strides_admit(
-    spec, operands: Mapping[str, DenseOperand]
+    spec: DenseProblem, operands: Mapping[str, DenseOperand]
 ) -> DenseStrideVerdict:
     """Admit four dense operands (keys ``"q"``, ``"k"``, ``"v"``, ``"o"``) for
     ``spec``, or decline with the first failing check.
 
     ``spec`` supplies ``batch``, ``seqlen_q``, ``seqlen_kv``, ``num_query_heads``,
-    ``num_kv_heads``, ``head_size`` and ``block_n``. The checks run in the order
+    ``num_kv_heads``, ``head_size`` and ``block_n``, and optionally
+    ``kv_elem_bytes`` (:func:`dense_kv_elem_bytes`). The checks run in the order
     of :data:`DENSE_STRIDE_REASONS`; inside a check the operands go q, k, v, o.
 
-    * ``operand``: rank 4, dims equal to the spec's ``(B, H, S, D)``, not
-      virtual, no ragged offset;
+    * ``operand``: rank 4, not virtual, no ragged offset, every extent positive,
+      and dims equal to the spec's ``(B, H, S, D)``;
     * ``head_dim_stride``: the head-dim stride is exactly 1;
     * ``stride_alignment``: on every axis of extent > 1 the stride is positive
       and a multiple of :data:`DENSE_STRIDE_MULTIPLE` elements, and the token
@@ -352,11 +521,13 @@ def dense_strides_admit(
       :data:`DENSE_POINTER_ALIGN` bytes;
     * ``size_limit``: every canonical stride is below 2^31, the slab offsets fit
       (:func:`dense_slab_fits`), and the byte offset of the last slab's base plus
-      its ``S`` rows, ``2 * ((B - 1) * sB + (H - 1) * sH) + 2 * ((S - 1) * sS + D)``,
-      is below 2^63.
+      its ``S`` rows,
+      ``2 * ((B - 1) * s_b + (H - 1) * s_h) + 2 * ((S - 1) * s_s + D)``, is below
+      2^63.
 
     Extent-1 axes are exempt and canonicalized (:func:`canonical_dense_strides`).
-    The whole-tensor 2^31 preflight of the spec stays a separate check.
+    The whole-tensor 2^31 preflight of the spec stays a separate check, and so
+    does the check of O against the inputs (:func:`admit_dense_launch_strides`).
     """
     names = DENSE_STRIDE_TENSORS
     want = {t: dense_operand_dims(spec, t) for t in names}
@@ -364,8 +535,12 @@ def dense_strides_admit(
 
     for t in names:
         op = operands[t]
-        if len(op.dims) != 4 or len(op.strides) != 4:
+        if len(op.dims) != 4:
             return _decline("operand", f"{t} has rank {len(op.dims)}, not 4")
+        if len(op.strides) != 4:
+            return _decline(
+                "operand", f"{t} has {len(op.strides)} strides for its 4 dims, not 4"
+            )
         if op.virtual:
             return _decline("operand", f"{t} is a virtual tensor")
         if op.ragged:
@@ -414,12 +589,9 @@ def dense_strides_admit(
                 "overlap themselves",
             )
     for t in names:
-        if operands[t].align % DENSE_POINTER_ALIGN:
-            return _decline(
-                "pointer_alignment",
-                f"{t} base is {operands[t].align}-byte aligned, needs "
-                f"{DENSE_POINTER_ALIGN}",
-            )
+        misaligned = _misaligned_base(t, operands[t].align)
+        if misaligned is not None:
+            return misaligned
     raw = {
         f"stride_{t}_{axis}": operands[t].strides[i]
         for t in names
@@ -427,65 +599,174 @@ def dense_strides_admit(
     }
     canon = canonical_dense_strides(spec, raw)
     for t in names:
-        sB, sH, sS = (canon[f"stride_{t}_{a}"] for a in DENSE_STRIDE_AXES)
-        for axis, s in zip(DENSE_STRIDE_AXES, (sB, sH, sS)):
+        s_b, s_h, s_s = (canon[f"stride_{t}_{a}"] for a in DENSE_STRIDE_AXES)
+        for axis, s in zip(DENSE_STRIDE_AXES, (s_b, s_h, s_s)):
             if s >= INT32_LIMIT:
                 return _decline(
                     "size_limit", f"{t} {axis} stride {s} is not below 2^31"
                 )
-        if not dense_slab_fits(spec, t, sS):
+        if not dense_slab_fits(spec, t, s_s):
             return _decline(
                 "size_limit",
-                f"{t} slab with token stride {sS} passes the 32-bit offset limit",
+                f"{t} slab with token stride {s_s} passes the 32-bit offset limit",
             )
         B, H = want[t][0], want[t][1]
-        elem = dense_kv_elem_bytes(spec) if t in ("k", "v") else DENSE_ELEM_BYTES
-        base = elem * ((B - 1) * sB + (H - 1) * sH)
-        slab = dense_slab_bytes(want[t][2], sS, head_size=D, elem_bytes=elem)
+        elem = _elem_bytes(spec, t)
+        base = elem * ((B - 1) * s_b + (H - 1) * s_h)
+        slab = dense_slab_bytes(want[t][2], s_s, head_size=D, elem_bytes=elem)
         if base + slab >= _INT64_LIMIT:
             return _decline("size_limit", f"{t} slab base offset passes 64 bits")
     return DenseStrideVerdict(True, strides=canon)
 
 
+# --------------------------------------------------------------------------- #
+# Launch
+# --------------------------------------------------------------------------- #
+
+
+def _byte_span(
+    addr: int | None, dims: Sequence[int], strides: Sequence[int], elem_bytes: int
+) -> tuple[int, int] | None:
+    """``[first, end)`` bytes of the elements of a view at base address ``addr``:
+    ``addr`` plus ``elem_bytes * (1 + sum((n - 1) * s))``. None when the address
+    is 0 or unknown or the view is empty. The launch calls it only on admitted
+    views, whose axes of extent > 1 all have positive strides
+    (:func:`dense_strides_admit` or the packed check refused the rest), so the
+    first element is at ``addr``."""
+    if not addr or any(n <= 0 for n in dims):
+        return None
+    last = sum((n - 1) * s for n, s in zip(dims, strides))
+    return addr, addr + elem_bytes * (last + 1)
+
+
+def _refuse_output_overlap(spans: Mapping[str, tuple[int, int] | None]) -> None:
+    """Raise ``ValueError`` when O's byte span meets the span of Q, K or V.
+
+    The kernels declare O ``noalias`` and write it while other workgroups still
+    read the inputs, so an O that shares storage with one (say, a view into a
+    fused QKV buffer) gives wrong results with no error. It is a span test: an O
+    interleaved with an input without sharing an element is refused too. A
+    tensor whose span is None (``_byte_span``) is not checked.
+
+    The LSE output has a check of its own (``_lse_store._check_lse_buffer``) with
+    the same span formula. The two stay apart because their inputs differ: that
+    one reads ``data_ptr()`` and ``element_size()`` off torch-like tensors and
+    holds LSE against every input of the launch, the bias and the sinks included.
+    This one takes the address forms the launcher packs (an int, ``data_ptr()``
+    or ``ptr()``), counts each tensor at the spec's element size, skips address 0
+    (synthetic host launches), and holds O against Q, K and V only: the runner
+    passes it no other tensor, and the C++ launch check
+    (``denseOutputOverlapsInput``) has the same scope."""
+    o = spans.get("o")
+    if o is None:
+        return
+    for t in ("q", "k", "v"):
+        span = spans.get(t)
+        if span is not None and span[0] < o[1] and o[0] < span[1]:
+            raise ValueError(
+                f"dense attention: o overlaps {t}: o bytes [{o[0]:#x}, {o[1]:#x}) "
+                f"meet {t} bytes [{span[0]:#x}, {span[1]:#x}); the kernel writes O "
+                f"while it still reads {t}, so O needs storage of its own"
+            )
+
+
+def _launch_operand(spec: DenseProblem, tensor: str, view: Any) -> DenseOperand:
+    """:class:`DenseOperand` of one runner argument: read off the view when it
+    has ``shape`` and ``stride()``, else packed with the alignment of its
+    address. A view that says it is not contiguous but has no ``stride()`` is
+    refused: its layout cannot be read."""
+    if _has_strides(view):
+        return dense_operand_from_view(view)
+    if not _view_is_packed(view):
+        raise ValueError(
+            f"dense attention: {tensor} is not packed and has no stride() to read "
+            "its layout from"
+        )
+    return packed_dense_operand(spec, tensor, align=_align_of(view))
+
+
 def admit_dense_launch_strides(
-    spec, *, q, k, v, o, serves_strides: bool
+    spec: DenseProblem,
+    *,
+    q: Any,
+    k: Any,
+    v: Any,
+    o: Any,
+    serves_strides: bool,
 ) -> dict[str, int]:
     """The 12 stride values a runner launches ``spec`` with, or ``ValueError``
     before anything is launched.
 
-    Varlen (packed ``[total_tokens, H, D]``) and paged (a K/V page cache) bodies
-    read packed storage only: every tensor that has strides must be contiguous,
-    and the kernel gets :func:`packed_launch_strides` (it does not read them).
-    Every other
-    body: the four ``[B, S, H, D]`` views go through :func:`dense_strides_admit`
-    (a decline raises with its reason); a body that does not serve strides
-    (``serves_strides`` False) also requires the canonical strides to equal the
-    packed ones (``not packed``), and with ``kv_segments > 1`` O must be packed
-    (the combine kernel writes packed O). A tensor without ``.stride()`` is taken
-    as packed."""
+    ``q``, ``k``, ``v`` and ``o`` are torch tensors, duck-typed views (``shape``
+    and ``stride()``, with ``data_ptr()`` or ``ptr()`` for the address) or raw
+    device addresses. ``serves_strides`` is ``body_serves_strides(spec)`` of the
+    arch's ``attention_dense`` module. ``spec`` may also carry ``varlen``,
+    ``paged`` and ``kv_segments``; each defaults to off.
+
+    * Every body: each base address is a multiple of :data:`DENSE_POINTER_ALIGN`
+      bytes (``pointer_alignment``), the alignment measured from the address
+      itself, whether it is an int, ``data_ptr()`` or ``ptr()``. An object with
+      none of these is taken as aligned, and so is address 0.
+    * Varlen (packed ``[total_tokens, H, D]``) and paged (a K/V page cache)
+      bodies read packed storage only: every view must be packed (judged by its
+      strides when it has them, else by ``is_contiguous()``; a raw address is
+      taken as packed), and the kernel gets :func:`packed_launch_strides`. The
+      extents are not checked here: they are not the spec's ``[B, S, H, D]``.
+    * Every other body: the four ``[B, S, H, D]`` views go through
+      :func:`dense_strides_admit`, and a decline raises with its reason. A raw
+      address, or a view without ``stride()``, is a packed operand. When
+      ``serves_strides`` is False the canonical strides must equal the packed
+      ones (``not packed``), and with ``kv_segments > 1`` O must be packed (the
+      combine kernel writes packed O).
+    * Every body: O's bytes may not meet those of Q, K or V
+      (:func:`_refuse_output_overlap`). Spans come from each view's dims and
+      strides; a raw address of a varlen or paged body, or an address of 0, is
+      not checked.
+    """
     views = dict(zip(DENSE_STRIDE_TENSORS, (q, k, v, o)))
     if getattr(spec, "varlen", False) or getattr(spec, "paged", False):
         for t, view in views.items():
-            contiguous = getattr(view, "is_contiguous", None)
-            if callable(contiguous) and not contiguous():
+            if not _view_is_packed(view):
                 raise ValueError(
                     f"dense attention: {t} is not packed: a varlen or paged body "
                     "reads contiguous storage only"
                 )
-        return packed_launch_strides(spec)
-    operands = {
-        t: (
-            dense_operand_from_view(view)
-            if _has_strides(view)
-            else packed_dense_operand(spec, t)
+        # The kernels claim 16-byte aligned Q/K/V/O pointers on these bodies too.
+        for t, view in views.items():
+            misaligned = _misaligned_base(t, _align_of(view))
+            if misaligned is not None:
+                _raise_declined(misaligned)
+        _refuse_output_overlap(
+            {
+                t: (
+                    _byte_span(
+                        _base_address(view),
+                        tuple(int(n) for n in view.shape),
+                        tuple(int(s) for s in view.stride()),
+                        _elem_bytes(spec, t),
+                    )
+                    if _has_strides(view)
+                    else None
+                )
+                for t, view in views.items()
+            }
         )
-        for t, view in views.items()
-    }
+        return packed_launch_strides(spec)
+    operands = {t: _launch_operand(spec, t, view) for t, view in views.items()}
     verdict = dense_strides_admit(spec, operands)
     if not verdict.ok:
-        raise ValueError(
-            f"dense attention strides declined ({verdict.reason}): {verdict.detail}"
-        )
+        _raise_declined(verdict)
+    _refuse_output_overlap(
+        {
+            t: _byte_span(
+                _base_address(views[t]),
+                operands[t].dims,
+                operands[t].strides,
+                _elem_bytes(spec, t),
+            )
+            for t in DENSE_STRIDE_TENSORS
+        }
+    )
     packed = packed_launch_strides(spec)
     for t in DENSE_STRIDE_TENSORS:
         keys = [f"stride_{t}_{a}" for a in DENSE_STRIDE_AXES]
@@ -516,20 +797,16 @@ __all__ = [
     "DENSE_STRIDE_REASONS",
     "DENSE_STRIDE_TENSORS",
     "DenseOperand",
-    "DenseStrideVerdict",
     "admit_dense_launch_strides",
     "append_dense_stride_signature",
     "canonical_dense_strides",
     "declare_dense_stride_params",
-    "dense_kv_elem_bytes",
     "dense_kv_reach_rows",
     "dense_operand_dims",
     "dense_operand_from_view",
     "dense_slab_bytes",
-    "dense_slab_fits",
     "dense_strides_admit",
+    "emit_dense_slab_ptr",
     "packed_dense_operand",
-    "packed_dense_strides",
     "packed_launch_strides",
-    "view_dense_strides",
 ]

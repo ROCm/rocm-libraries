@@ -243,11 +243,22 @@ def _check_lse_buffer(lse, q, expected, inputs):
     """Shared caller-owned LSE buffer contract: FP32, exact shape, contiguous,
     on q's GPU, and not overlapping any input or output tensor.
 
-    A "tensor" is anything with the attributes read here (``shape``, ``dtype``,
-    ``is_contiguous()``, ``data_ptr()``, ``numel()``, ``element_size()``, and
-    ``stride()`` / ``is_cuda`` / ``device`` where noted): a torch tensor, or the
-    device-buffer view of a caller that does not use torch. ``is_cuda`` defaults to
-    True when absent."""
+    Every tensor here is a torch tensor or the device-buffer view of a caller that
+    does not use torch; these are the attributes each one needs:
+
+    * ``lse``: ``shape``, ``dtype`` (FP32 is any dtype whose ``str()`` ends in
+      ``float32``: torch's or numpy's), ``is_contiguous()``, ``data_ptr()``,
+      ``numel()``, ``element_size()`` and ``device``. One of the first six missing
+      raises ``ValueError``.
+    * ``q``: ``device``.
+    * each tensor of ``inputs`` that is not None (q, k, v, out and the optional
+      tensors): ``device`` and ``numel()``, and, when it has elements,
+      ``shape``, ``stride()``, ``data_ptr()`` and ``element_size()``. These are
+      read without a check first, so a missing one raises ``AttributeError``: a
+      caller without torch that asks for LSE passes views that have all of them.
+
+    ``is_cuda`` is optional everywhere and taken as True when absent; ``device``
+    is still compared with q's."""
     if not all(
         hasattr(lse, a)
         for a in (

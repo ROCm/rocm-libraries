@@ -272,6 +272,7 @@ from kernels.common._attention_dense_strides import (
     append_dense_stride_signature,
     declare_dense_stride_params,
     dense_slab_bytes,
+    emit_dense_slab_ptr,
     packed_launch_strides,
 )
 from kernels.common._spec_checks import require_bool
@@ -1045,19 +1046,22 @@ def _use_vpf(spec: "Gfx942AttentionDenseSpec") -> bool:
     return spec.v_reg_prefetch
 
 
-def _reads_dense_strides(spec: "Gfx942AttentionDenseSpec") -> bool:
+def _reads_dense_strides(spec: Gfx942AttentionDenseSpec) -> bool:
     """Whether the body addresses Q, K, V and O through its 12 stride parameters.
 
     Every body declares the parameters
     (:data:`~kernels.common._attention_dense_strides.DENSE_STRIDE_NAMES`), so the
     kernel ABI is one. The grid, KV-segment grid and persistent bodies read them:
-    D64 and D128, LSE, sinks, sliding window and bottom-right included. Two kinds
+    D64 and D128, LSE, sinks, sliding window and bottom-right included. Three kinds
     of body keep packed ``[B, S, H, D]`` addressing and ignore them: the opt-in
     BF16 KDB/VPF pipeline (its V loader has its own scalar-offset form and the body
-    sits at the VGPR budget) and the compile-time-shape specs (``paged``; ragged
-    and varlen are refused by :func:`supports_attention_dense`), whose K/V extents
-    are baked, and the additive-bias bodies, whose bias reads are written against
-    packed Q/K/V/O."""
+    sits at the VGPR budget), the compile-time-shape specs (``paged``; ragged and
+    varlen are refused by :func:`supports_attention_dense`), whose K/V extents are
+    baked, and the additive-bias bodies. Those address Q, K, V and O as packed
+    tensors and index the bias read by the bias's own three strides only; the
+    extra stride arithmetic is not shown to fit their register budget (the gfx950
+    D128 LSE bias body keeps its bias loads scalar because the 4-wide ones
+    spill)."""
     return (
         spec.runtime_shape
         and not spec.use_additive_bias
@@ -1653,9 +1657,9 @@ def _build_attention_dense_single_buffer(
     buffering (lds_num_buffers=2) and V register prefetch (v_reg_prefetch=True)
     as independent tuning knobs, off by default. At (1, False) the original single-buffer
     body is unchanged. Each tile computes QK then softmax/PV.
-    The per-work-item compute is factored into
-    ``_run_work_item(qb, hq, bt)``, shared by the default grid (one CTA per work item)
-    and the P4 persistent grid-stride path (one CTA strides over many). Perf levers
+    The per-work-item compute is factored into ``_run_work_item(qb, hq, bt)``, shared
+    by the default grid (one workgroup per work item) and the P4 persistent
+    grid-stride path (one workgroup strides over many). Perf levers
     are all on: conflict-free V/cfvst (P1, D128), exp2_fast + fused rescale (P2),
     per-config waves-per-eu (P3), persistent grid-stride + qb/hkv-major decode (P4).
     The transposed-QK architecture (S^T=K@Q^T so P feeds PV lane-locally) is kept
@@ -1773,8 +1777,9 @@ def _build_attention_dense_single_buffer(
         # After every other param; attention_dense_signature appends the same four.
         additive_bias = declare_additive_bias_params(b)
     # The 12 i32 element strides (batch, head, token of Q, K, V, O), the constant
-    # tail of every dense ABI (the gfx950 order), after the additive-bias parameters; only the bodies
-    # _reads_dense_strides admits read them (body_serves_strides).
+    # tail of every dense ABI (the gfx950 order), after the additive-bias
+    # parameters. Only the bodies _reads_dense_strides admits read them
+    # (body_serves_strides).
     stride_args = declare_dense_stride_params(b)
     STRIDED = _reads_dense_strides(spec)
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
@@ -1920,19 +1925,26 @@ def _build_attention_dense_single_buffer(
         """i64 LDS byte offset ``first_bytes + step_bytes`` of one DMA row."""
         return b.zext(b.add(first_bytes, b.const_i32(step_bytes)), I64)
 
-    # The LDS-DMA destination of the strided bodies, chosen per body from gfx942
-    # node measurements against develop:
-    # * LDS_ROW_VGPR: develop's per-row form (VGPR wave index, one readfirstlane per
-    #   row) on the non-causal BF16 D128 grid and KV-segment bodies. There the scalar
-    #   base gives a KV-loop schedule that is slower than develop's; the causal rows
-    #   of the same bodies keep the scalar base, because with the per-row form they
-    #   spill VGPRs to scratch.
-    # * LDS_BASE_PER_KERNEL: the scalar base formed once per kernel, so the per-row M0
-    #   values are loop-invariant SGPRs. Formed per KV tile it re-runs the
-    #   readfirstlane and the row sums in every tile, which measured slower on the D64
-    #   grid. The sliding-window bodies keep the per-tile form: next to the window
-    #   state the hoisted per-row SGPRs (one per DMA row) exceed the SGPR budget and
-    #   spill.
+    # The LDS-DMA destination (M0) of the strided bodies, chosen per body from
+    # timings on one gfx942 part at LLVM 22, on the shapes the case study reports
+    # (so its numbers are post-selection), with no sweep of the existing spec
+    # knobs; re-time it when the body or the compiler changes. Numbers: the gfx942
+    # results and "What the kernels showed" in the launch-time strides case study
+    # (builders/gfx950/attention/prefill/).
+    # * LDS_ROW_VGPR, the non-causal BF16 D128 grid and KV-segment bodies: the
+    #   per-row form of the packed bodies (a VGPR wave index, one readfirstlane per
+    #   DMA row). The scalar base timed slower on those shapes; why was not
+    #   isolated. The causal bodies of the same head size and dtype keep the
+    #   scalar base: with the per-row form they spill VGPRs to scratch (offline
+    #   resource check, LLVM 22 and 23).
+    # * LDS_BASE_PER_KERNEL, every other strided body without a sliding window: the
+    #   scalar base formed once per kernel, so each row's M0 is a loop-invariant
+    #   SGPR. Formed once per KV tile instead, the readfirstlane and the row sums
+    #   run again in every tile, which timed slower on the D64 grid.
+    # * The sliding-window bodies form the scalar base once per KV tile: hoisted
+    #   per kernel, the per-row SGPRs (one per DMA row) next to the window state
+    #   spill SGPRs on some shapes (offline resource check). This form was not
+    #   timed.
     LDS_ROW_VGPR = (
         STRIDED
         and D == 128
@@ -1964,17 +1976,6 @@ def _build_attention_dense_single_buffer(
         k_rsrc = b.buffer_rsrc(k, b.const_i32(B * Skv * _kv_elem_bytes))
         v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * _kv_elem_bytes))
 
-    def _slab_ptr(ptr, t, bt, h):
-        """``ptr`` advanced to the (batch ``bt``, head ``h``) slab of tensor ``t``
-        (``"q"``, ``"k"``, ``"v"`` or ``"o"``): a 64-bit byte offset
-        ``2 * (bt * stride_batch + h * stride_head)``. Every offset inside the slab
-        stays 32-bit."""
-        off = b.add(
-            b.mul(b.zext(bt, I64), b.zext(stride_args[f"stride_{t}_batch"], I64)),
-            b.mul(b.zext(h, I64), b.zext(stride_args[f"stride_{t}_head"], I64)),
-        )
-        return b.global_ptr_add(ptr, b.mul(off, b.const_i64(DENSE_ELEM_BYTES)))
-
     def _kv_slab_rsrc(ptr, t, bt, hkv):
         """Buffer resource over one K or V slab: ``n = seqlen_kv`` rows at the
         tensor's own token stride, ``num_records = dense_slab_bytes(n, ...)`` (the
@@ -1987,7 +1988,7 @@ def _build_attention_dense_single_buffer(
             elem_bytes=DENSE_ELEM_BYTES,
             b=b,
         )
-        return b.buffer_rsrc(_slab_ptr(ptr, t, bt, hkv), nrec)
+        return b.buffer_rsrc(emit_dense_slab_ptr(b, stride_args, ptr, bt, hkv, t), nrec)
 
     def _strided_async_load(rsrc, lds_base, tile_key0, group_pad, t, wave_lds):
         """LDS-DMA of one ``BN``-row tile of tensor ``t`` (K, or V on the D64 path)
@@ -1998,13 +1999,14 @@ def _build_attention_dense_single_buffer(
         wave-uniform row term goes through ``to_sgpr_u32`` and joins it with one
         vector add per issue. LDS destination: the scalar wave base ``wave_lds``
         (:func:`_lds_wave_bases`) plus a constant per row, or, with ``wave_lds``
-        None (``LDS_ROW_VGPR``, D128 only), develop's per-row VGPR offset."""
-        sS = stride_args[f"stride_{t}_token"]
+        None (``LDS_ROW_VGPR``, D128 only), the per-row VGPR offset of the packed
+        bodies."""
+        s_tok = stride_args[f"stride_{t}_token"]
         if ROWS_PER_INSTR == 1:
             # D128: one row per instruction, each lane moves 2 elements (4 bytes).
             row0 = b.mul(wave, b.const_i32(ROWS_PER_WAVE))
-            lane_off = b.add(b.mul(row0, sS), b.mul(lane, b.const_i32(2)))
-            row_u = b.to_sgpr_u32(b.mul(tile_key0, sS))
+            lane_off = b.add(b.mul(row0, s_tok), b.mul(lane, b.const_i32(2)))
+            row_u = b.to_sgpr_u32(b.mul(tile_key0, s_tok))
             for r in range(ROWS_PER_WAVE):
                 if wave_lds is None:
                     row = b.add(b.mul(wave, b.const_i32(ROWS_PER_WAVE)), b.const_i32(r))
@@ -2013,7 +2015,7 @@ def _build_attention_dense_single_buffer(
                     row_lds_off = _scalar_lds_off(wave_lds[0], r * K_LDROW_BYTES)
                 row_base = b.smem_ptr_add(lds_base, row_lds_off)
                 if r:
-                    row_u = b.to_sgpr_u32(b.add(row_u, sS))
+                    row_u = b.to_sgpr_u32(b.add(row_u, s_tok))
                 voff = b.add(lane_off, row_u)
                 b.async_buffer_load_lds_addr(
                     rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
@@ -2025,8 +2027,8 @@ def _build_attention_dense_single_buffer(
         sub_row = b.div(lane, b.const_i32(lanes_per_row))
         col = b.mul(b.mod(lane, b.const_i32(lanes_per_row)), b.const_i32(2))
         wave_row0 = b.mul(wave, b.const_i32(ROWS_PER_WAVE))
-        lane_off = b.add(b.mul(b.add(wave_row0, sub_row), sS), col)
-        row_u = b.to_sgpr_u32(b.mul(tile_key0, sS))
+        lane_off = b.add(b.mul(b.add(wave_row0, sub_row), s_tok), col)
+        row_u = b.to_sgpr_u32(b.mul(tile_key0, s_tok))
         for it in range(ROWS_PER_WAVE // ROWS_PER_INSTR):
             if group_pad:
                 row_lds_off = _scalar_lds_off(
@@ -2039,7 +2041,7 @@ def _build_attention_dense_single_buffer(
             row_base = b.smem_ptr_add(lds_base, row_lds_off)
             if it:
                 row_u = b.to_sgpr_u32(
-                    b.add(row_u, b.mul(sS, b.const_i32(ROWS_PER_INSTR)))
+                    b.add(row_u, b.mul(s_tok, b.const_i32(ROWS_PER_INSTR)))
                 )
             voff = b.add(lane_off, row_u)
             b.async_buffer_load_lds_addr(
@@ -2087,17 +2089,20 @@ def _build_attention_dense_single_buffer(
         The LDS store coordinates ``(d0, t0)`` are unchanged; with ``V_DIM_PAIRS ==
         64`` and ``THREADS == 64 * WAVES`` item ``it`` of a lane loads token rows
         ``t0 = 2 * (it * WAVES + wave)`` and ``t0 + 1`` at dims ``2 * lane`` and
-        ``2 * lane + 1``: a lane part ``2 * wave * sV + 2 * lane`` in one VGPR plus
+        ``2 * lane + 1``: a lane part ``2 * wave * s_v + 2 * lane`` in one VGPR plus
         a wave-uniform row term through ``to_sgpr_u32``."""
         if V_DIM_PAIRS != 64 or THREADS != 64 * WAVES:
-            raise ValueError("strided cfvst V addressing needs D=128")
-        sV = stride_args["stride_v_token"]
+            raise ValueError(
+                f"strided cfvst V load - head_size={D}, threads={THREADS}, expected "
+                f"head_size=128 and threads={64 * WAVES} ({WAVES} waves)"
+            )
+        s_v = stride_args["stride_v_token"]
         tile_tok0 = b.mul(tile_idx, b.const_i32(BN))
         lane_off = b.add(
-            b.mul(b.mul(wave, b.const_i32(2)), sV), b.mul(lane, b.const_i32(2))
+            b.mul(b.mul(wave, b.const_i32(2)), s_v), b.mul(lane, b.const_i32(2))
         )
-        item_rows = b.mul(sV, b.const_i32(2 * WAVES))
-        row_u = b.to_sgpr_u32(b.mul(tile_tok0, sV))
+        item_rows = b.mul(s_v, b.const_i32(2 * WAVES))
+        row_u = b.to_sgpr_u32(b.mul(tile_tok0, s_v))
         payload = []
         for it in range(V_ITEMS):
             blk = b.add(b.mul(b.const_i32(it), b.const_i32(THREADS)), tid)
@@ -2107,7 +2112,7 @@ def _build_attention_dense_single_buffer(
             d0 = b.mul(dg, b.const_i32(2))
             if it:
                 row_u = b.to_sgpr_u32(b.add(row_u, item_rows))
-            row_u1 = b.to_sgpr_u32(b.add(row_u, sV))
+            row_u1 = b.to_sgpr_u32(b.add(row_u, s_v))
             x0 = b.buffer_load_vN(
                 rsrc, b.mul(b.add(lane_off, row_u), b.const_i32(2)), zero_soff, dtype, 2
             )
@@ -2225,7 +2230,7 @@ def _build_attention_dense_single_buffer(
             q_base = k_base = None
             kr = _kv_slab_rsrc(k, "k", bt, hkv)
             vr = _kv_slab_rsrc(v, "v", bt, hkv)
-            q_slab = _slab_ptr(q, "q", bt, hq)
+            q_slab = emit_dense_slab_ptr(b, stride_args, q, bt, hq, "q")
             s_q = stride_args["stride_q_token"]
         else:
             kr, vr = k_rsrc, v_rsrc
@@ -2727,15 +2732,26 @@ def _build_attention_dense_single_buffer(
             # identical accumulation order as a nested (nsub,i) loop, so l_local and
             # the packed casts are numerically bit-identical: pure live-range relief.
             #
-            # PV in issue order (the strided cfvst bodies): O is rescaled first and each
-            # PV MFMA is emitted right after the P pack it reads, so the program order
-            # already interleaves the softmax exps with the PV MFMAs. Every value is
-            # computed by the same operations in the same order (bit-identical output);
-            # only the order the LLVM scheduler starts from changes. From the block order
-            # (all exps, then all PV) the strided persistent causal D128 kernel was
-            # scheduled with every exp ahead of the first PV MFMA, measurably slower
-            # than develop's kernel, whose schedule overlaps them. The PV fence and
-            # priority tuning knobs keep the block order they are defined against.
+            # PV in issue order (the strided cfvst bodies): O is rescaled first and
+            # each PV MFMA is emitted as soon as the P pack it reads exists, in
+            # PV_STEPS order. Only with pv_loop_order "k_major" does every MFMA follow
+            # its own pack. With the default "d_major" only the first output tile's
+            # chain does: at D128 and block_n 64 that is 8 of the 32 PV MFMAs, and 25
+            # come after the last exp, so the exps and PV MFMAs interleave in part.
+            # The output is bit-identical (same operations, same order per
+            # accumulator); only the order the LLVM scheduler starts from changes.
+            # In block order (all exps, then all PV MFMAs) LLVM 22 put every exp of
+            # the strided persistent causal D128 kernel ahead of the first PV MFMA;
+            # this order gives part of that overlap back. The schedule differs
+            # between compiler versions: offline, at LLVM 23 and 24 this kernel stays
+            # serialized with the default order, and only "k_major" interleaves at
+            # all four pinned versions. Timed only at LLVM 22 on one part, on the
+            # shapes the case study reports (post-selection), with no sweep of
+            # pv_loop_order, pv_priority, pv_sched_fence_mask or waves_per_eu; the
+            # large gains at 1K-2K sequence length come with the strides alone (a
+            # compiler schedule effect), not from this order. Setting the PV fence
+            # or priority knob turns this order off: those knobs are defined against
+            # the block order.
             pv_in_issue_order = (
                 STRIDED and USE_CFVST and PV_FENCE_MASK is None and not PV_PRIORITY
             )
@@ -3200,7 +3216,7 @@ def _build_attention_dense_single_buffer(
                 rcp_l = b.select(bias_row_live, rcp_l, rcp_zero)
         if STRIDED:
             # O's own slab and token stride (not Q's).
-            o_dst = _slab_ptr(o, "o", bt, hq)
+            o_dst = emit_dense_slab_ptr(b, stride_args, o, bt, hq, "o")
             qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
             q_row_byte = b.mul(qtok, stride_args["stride_o_token"])
         else:
@@ -3270,7 +3286,7 @@ def _build_attention_dense_single_buffer(
             row_has_key=row_has_key,
         )
 
-    # ---- grid dispatch: default (one CTA per work item) vs persistent (P4) ----
+    # ---- grid dispatch: default (one workgroup per work item) vs persistent (P4) ----
     if spec.persistent:
         # 1-D grid of NP long-lived CTAs; each grid-strides over the flattened work
         # space W = NQB*Hq*B, amortizing per-CTA launch + scalar setup + the cold LDS
@@ -3428,10 +3444,10 @@ def attention_dense_signature(spec: AttentionDenseSpec):
 
 def body_serves_strides(spec: AttentionDenseSpec) -> bool:
     """Whether the body for ``spec`` reads its 12 stride kernargs
-    (:func:`_reads_dense_strides`): the grid, KV-segment grid and persistent bodies
-    on the runtime shape. ``run_attention_dense_torch`` admits any stride set the
-    contract accepts for them; for the KDB/VPF pipeline and the compile-time-shape
-    specs (False) it admits packed ``[B, S, H, D]`` tensors only."""
+    (:func:`_reads_dense_strides`, which lists the bodies that do not).
+    ``run_attention_dense_torch`` admits any stride set the contract accepts for a
+    body that does; for the others (False) it admits packed ``[B, S, H, D]``
+    tensors only."""
     return _reads_dense_strides(_as_gfx942_spec(spec))
 
 
@@ -3485,11 +3501,17 @@ def run_attention_dense_torch(
     / ``kv_lens`` ([B] i32) are required; ``validate_paged=False`` skips the host check
     of their contents (a device->host sync), see
     :func:`kernels.common._attention_dense_paged.validate_paged_launch`.
-    The strides of q/k/v/out reach the kernel as kernargs; they are checked before
-    launch (:func:`~kernels.common._attention_dense_strides.
-    admit_dense_launch_strides`), and a body that does not serve strides
-    (:func:`body_serves_strides`) refuses any tensor that is not packed with a
-    ``ValueError``. A tensor without ``.stride()`` is taken as packed.
+    The strides of q/k/v/out reach the kernel as kernargs. They are checked before
+    launch by
+    :func:`~kernels.common._attention_dense_strides.admit_dense_launch_strides`,
+    which raises ``ValueError`` for a layout the contract declines, for a tensor
+    that is not packed when the body does not serve strides
+    (:func:`body_serves_strides`), for an ``out`` whose bytes meet those of
+    ``q``, ``k`` or ``v``, and, on every body, for a base address that is not
+    16-byte aligned, measured on the real address (a view's ``data_ptr()`` or
+    ``ptr()``, or a raw address). A tensor without ``.stride()`` (a raw address,
+    or an object with only ``data_ptr()`` or ``ptr()``) is taken as packed; one
+    whose ``is_contiguous()`` is False is refused.
     Returns ``out``. torch is imported lazily by the launcher, so this module stays
     torch-free at import time. Serves both the default and the P4 persistent grid
     (``spec.persistent``) -- ``attention_dense_grid`` picks the right launch shape.
@@ -3514,11 +3536,22 @@ def run_attention_dense_torch(
     LSE. Supplying ``lse`` with ``emit_lse=False`` is an error.
 
     ``q``/``k``/``v``/``out``/``lse`` may be any buffers that have the attributes the
-    launch and its checks read (``shape``, ``stride()``, ``data_ptr()``, ``device``, and
-    for ``lse`` ``dtype``, ``numel()``, ``element_size()``, ``is_contiguous()``), so a
-    caller without torch can pass device-buffer views. With ``kv_segments > 1`` the
-    runner allocates the segment workspace with torch unless ``workspace_allocator`` is
-    given: ``workspace_allocator(shape)`` returns an FP32 buffer with ``data_ptr()``.
+    launch and its checks read, so a caller without torch can pass device-buffer
+    views. Each of q/k/v/out needs ``shape``, ``stride()`` and ``data_ptr()``, or is
+    a raw address, and some launches read more:
+
+    * ``q`` needs ``device`` for an additive-bias launch and ``dtype`` with
+      ``spec.use_sinks`` (a raw address there raises ``ValueError``), and
+      ``device`` for ``kv_segments > 1``;
+    * with ``spec.paged`` the ``k``/``v`` page caches also need ``device``,
+      ``dtype``, ``is_cuda`` and ``is_contiguous()``;
+    * with ``emit_lse`` each of q/k/v/out also needs ``device``, ``numel()`` and
+      ``element_size()``, and ``lse`` needs ``shape``, ``dtype``, ``numel()``,
+      ``element_size()``, ``is_contiguous()``, ``data_ptr()`` and ``device``.
+
+    With ``kv_segments > 1`` the runner allocates the segment workspace with torch
+    unless ``workspace_allocator`` is given: ``workspace_allocator(shape)`` returns
+    an FP32 buffer with ``data_ptr()``.
 
     Additive bias (``spec.use_additive_bias``): pass ``additive_bias``, an fp32
     ``[B|1, Hq|1, Sq|1, Skv]`` tensor (``Sq``/``Skv`` the spec's) on q's device,
@@ -3548,6 +3581,14 @@ def run_attention_dense_torch(
             "is rejected by supports_attention_dense); the ABI has no cu_seqlens args"
         )
     validate_paged_launch(spec, k, v, block_tables, kv_lens, validate_paged)
+    # The bias is checked against q's device and the sinks against q's dtype. A raw
+    # address (the SDPA replay's form) has neither, so such a launch refuses it
+    # before a check reads it: the bias here, ahead of the sinks checks.
+    if spec.use_additive_bias and not hasattr(q, "device"):
+        raise ValueError(
+            "spec.use_additive_bias=True requires q with a device to check "
+            f"additive_bias against, got {type(q).__name__}"
+        )
     if not spec.use_sinks and sinks is not None:
         raise ValueError("sinks provided but spec.use_sinks is False")
     if spec.use_sinks:
@@ -3557,13 +3598,17 @@ def run_attention_dense_torch(
             raise ValueError(
                 f"sinks must have shape ({spec.num_query_heads},), got {tuple(sinks.shape)}"
             )
+        if not hasattr(q, "dtype"):
+            raise ValueError(
+                "spec.use_sinks=True requires q with a dtype to check sinks "
+                f"against, got {type(q).__name__}"
+            )
         if sinks.dtype != q.dtype:
             raise ValueError(f"sinks dtype {sinks.dtype} must match q dtype {q.dtype}")
         if not sinks.is_contiguous():
             raise ValueError("sinks must be contiguous")
         if not sinks.is_cuda:
             raise ValueError("sinks must be a CUDA tensor")
-    # q is read only for a bias launch: plain launches may pass placeholder operands.
     bias_strides = validate_dense_additive_bias(
         spec,
         additive_bias,
