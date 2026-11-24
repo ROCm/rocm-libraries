@@ -8,7 +8,7 @@ from copy import deepcopy
 from rocisa.code import Module, Label
 from rocisa.container import sgpr, vgpr, ContinuousRegister, EXEC, VCC, MemTokenData
 from rocisa.instruction import SMovB32, VMovB32, VReadfirstlaneB32, SCmpEQU32, SCBranchSCC1, SBranch, SWaitCnt, SBitcmp1B32, SBarrier, SLShiftRightB32, SLongBranchNegative, VWritelaneB32, VReadlaneB32
-from ..ExecutionPolicy import isPersistent, isStreamK
+from ..ExecutionPolicy import isPersistent, isStreamK, isStreamKSpatialCluster
 from math import ceil, log2
 from ..Component import Component
 from ..Common import persistentSpatialCluster
@@ -1597,6 +1597,11 @@ class PersistentLoop(Component):
         # before issuing the same first-PGR group. Keep other paths unchanged.
         lateHandoff = (not subtile and kernel.get("ScheduleIterAlg") == 4
                        and writer.papTdmSupportsIncrementalUpdate(kernel))
+        # Multicast: release this workgroup's bank before the scalar setup so
+        # peers' arrivals overlap it; only the cluster wait gates the issue.
+        if lateHandoff and persistentSpatialCluster(kernel) and not isStreamKSpatialCluster(kernel):
+            module.add(assignment.persistentClusterPrefetchRelease(writer, kernel))
+            handoff = lambda: assignment.persistentClusterPrefetchAcquire(writer, kernel)
         if not lateHandoff:
             module.add(handoff())
         carrier = getattr(writer.states, "papAddressCarrier", None)
