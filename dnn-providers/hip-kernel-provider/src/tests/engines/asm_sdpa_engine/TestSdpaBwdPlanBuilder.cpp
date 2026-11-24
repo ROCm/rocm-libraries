@@ -3858,15 +3858,15 @@ TEST_F(TestSdpaBwdPlanBuilder, BuildPlanDeclinesA16GraphsTheA16KernelsDoNotServe
 
 // Each case adds exactly one field to a graph the engine accepts and expects the decline, so
 // deleting that field's decline fails that case and no other. The unmodified graph is asserted
-// accepted first: the device check declines every graph on a non-gfx942 device, which would make
-// a bare EXPECT_FALSE pass without testing the field.
+// accepted first: the device check declines every graph on a device that is neither gfx942 nor
+// gfx950, which would make a bare EXPECT_FALSE pass without testing the field.
 class TestSdpaBwdUnservedFields : public TestSdpaBwdPlanBuilder
 {
 protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
-        if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+        if(!bwd_dispatch::isSupportedArch(deviceString()))
         {
             GTEST_SKIP();
         }
