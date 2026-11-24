@@ -266,6 +266,21 @@ set_tests_properties(dispatcher_test_batched_bridge PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
+# Batched Stream-K and the batched comp_tdm_v3 / comp_tdm_pc kernels in the batched
+# bridge: naming, sweep expansion, compile flags, the Stream-K launch and C reset,
+# and the batched benchmark's per-budget work units. CPU-only.
+add_test(
+    NAME dispatcher_test_batched_streamk_bridge
+    COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_CURRENT_SOURCE_DIR} -p test_batched_streamk_bridge.py -v
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_batched_streamk_bridge PROPERTIES
+    LABELS "dispatcher;python;gemm;validation"
+    TIMEOUT 120
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # Architecture-aware LDS staging budget regression test
 add_test(
     NAME dispatcher_test_lds_capacity_arch_aware
@@ -468,9 +483,9 @@ foreach(_search_test ck_search_core adaptive_search_coordinator gemm_search_adap
     )
 endforeach()
 
-# MX bridge host tests and CMake configuration tests. Report missing host build
+# MX bridge host tests, CMake configuration tests and comp_tdm_scheduled. Report missing host build
 # tools as a skipped CMake test rather than an all-skipped pass.
-foreach(_mx_test bridge cmake)
+foreach(_mx_test bridge cmake tdm_scheduled)
     add_test(
         NAME dispatcher_test_mx_gemm_${_mx_test}
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_unittest_77.py test_mx_gemm_${_mx_test}.py

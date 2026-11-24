@@ -60,14 +60,16 @@ struct HostBiasGuard
 
 } // namespace
 
-TEST(CPU_Fp8ExponentBias_NONE, KernelParamsUseDeviceBias)
+using CPU_Fp8ExponentBias_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_Fp8ExponentBias_NONE, KernelParamsUseDeviceBias)
 {
     ExpectKernelBias("gfx942", 0);
     ExpectKernelBias("gfx950", 1);
     ExpectKernelBias("gfx1200", 1);
 }
 
-TEST(CPU_Fp8ExponentBias_NONE, HostBiasSwitchesInOneProcess)
+TEST_P(CPU_Fp8ExponentBias_NONE, HostBiasSwitchesInOneProcess)
 {
     HostBiasGuard guard;
 
@@ -89,3 +91,5 @@ TEST(CPU_Fp8ExponentBias_NONE, HostBiasSwitchesInOneProcess)
     SetHostFp8ExponentBias<float8_fnuz>("gfx942");
     check(false);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_Fp8ExponentBias_NONE, testing::Values(0));

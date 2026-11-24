@@ -34,6 +34,7 @@ invocation) mirrors ``test_mubuf.py`` so that a regression in either the
 rocisa-side classes or the stinkytofu-side mapping is caught here.
 """
 
+import copy
 import re
 
 import pytest
@@ -44,6 +45,7 @@ from rocisa.instruction import (
     GlobalInv,
     GlobalWb,
     MacroInstruction,
+    SBarrier,
     SWaitCnt,
     SWaitXCnt,
 )
@@ -72,7 +74,9 @@ def _isa_context():
     rocisa.rocIsa.getInstance().setKernel(_ISA, 32)
 
 
-def _emit(mod: Module, name: str) -> str:
+def _emit(
+    mod: Module, name: str, *, logical_ir: bool = False, insert_waits: bool = False
+) -> str:
     """Convert ``mod`` to a stinkytofu module and return the emitted assembly."""
     mod.setParent()  # resolves symbolic register names before conversion
 
@@ -88,7 +92,11 @@ def _emit(mod: Module, name: str) -> str:
     )
 
     st = rocisa.toStinkyTofuModule(
-        mod, _ISA, name, signature=sig, options={"OptLevel": 0}
+        mod, _ISA, name, signature=sig,
+        options={
+            "OptLevel": 0, "LowerViaLogicalIR": logical_ir,
+            "EnableWaitCntInsertion": insert_waits, "wavefrontSize": 32,
+        }
     )
     st.runOptimizationPipeline()
     return st.emitAssembly()
@@ -280,3 +288,33 @@ def test_streamk_full_release_sequence_preserves_ordering():
         "expected global_wb to remain between drain and post-fence waits, "
         f"got:\n{asm}"
     )
+
+
+@pytest.mark.parametrize("count", [-1, 0, 2, 63])
+def test_sbarrier_tensor_count_survives_native_copy(count):
+    barrier = SBarrier(tensorcnt=count)
+    assert barrier.tensorcnt == count
+    assert copy.deepcopy(barrier).tensorcnt == count
+
+
+@pytest.mark.parametrize("count", [-2, 64])
+def test_sbarrier_rejects_invalid_tensor_count(count):
+    with pytest.raises(ValueError, match="tensorcnt"):
+        SBarrier(tensorcnt=count)
+
+
+@pytest.mark.parametrize("logical_ir", [False, True])
+@pytest.mark.parametrize("count", [0, 2])
+def test_sbarrier_tensor_count_survives_native_lowering(logical_ir, count):
+    mod = Module("sbarrier_tensor_count")
+    # Wait insertion operates on named compute regions. Text boundaries survive
+    # logical instruction replacement and keep the region's endpoints valid.
+    region = Module("noLoadLoopBody")
+    region.addComment0("begin tensor barrier region")
+    region.add(SBarrier(tensorcnt=count))
+    region.addComment0("end tensor barrier region")
+    mod.add(region)
+    asm = _emit(mod, "sbarrier_tensor_count", logical_ir=logical_ir, insert_waits=True)
+    wait = re.search(rf"s_wait_tensorcnt\s+{count}\b", asm)
+    assert wait is not None, asm
+    assert wait.start() < asm.index("s_barrier_signal -1"), asm

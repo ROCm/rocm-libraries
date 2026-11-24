@@ -10,9 +10,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <hip/hip_runtime.h>
+#include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <string>
-#include <unordered_map>
 #include <utility>
 
 namespace
@@ -96,25 +96,22 @@ void SdpaBwdPlan::execute(const Handle& handle,
             "workspace (see getMaxWorkspaceSize())");
     }
 
-    // 2. Build UID->ptr map from device buffers
-    std::unordered_map<int64_t, void*> uidToPtrMap;
-    for(uint32_t i = 0; i < numDeviceBuffers; ++i)
-    {
-        uidToPtrMap[deviceBuffers[i].uid] = deviceBuffers[i].ptr;
-    }
+    // 2. Resolve tensor pointers. Throws HipdnnPluginException(INVALID_VALUE), naming the uid,
+    // for an operand the caller supplied no buffer for.
+    const auto bufferPtr = [&](int64_t uid) {
+        return hipdnn_plugin_sdk::findDeviceBuffer(uid, deviceBuffers, numDeviceBuffers).ptr;
+    };
+    void* qPtr = bufferPtr(_params.qUid);
+    void* kPtr = bufferPtr(_params.kUid);
+    void* vPtr = bufferPtr(_params.vUid);
+    void* oPtr = bufferPtr(_params.oUid);
+    void* doPtr = bufferPtr(_params.doUid);
+    void* lsePtr = bufferPtr(_params.statsUid);
+    void* dqPtr = bufferPtr(_params.dqUid);
+    void* dkPtr = bufferPtr(_params.dkUid);
+    void* dvPtr = bufferPtr(_params.dvUid);
 
-    // 3. Resolve tensor pointers
-    void* qPtr = uidToPtrMap.at(_params.qUid);
-    void* kPtr = uidToPtrMap.at(_params.kUid);
-    void* vPtr = uidToPtrMap.at(_params.vUid);
-    void* oPtr = uidToPtrMap.at(_params.oUid);
-    void* doPtr = uidToPtrMap.at(_params.doUid);
-    void* lsePtr = uidToPtrMap.at(_params.statsUid);
-    void* dqPtr = uidToPtrMap.at(_params.dqUid);
-    void* dkPtr = uidToPtrMap.at(_params.dkUid);
-    void* dvPtr = uidToPtrMap.at(_params.dvUid);
-
-    // 4. Carve workspace into sub-buffers. Layout: D buffer | dq_acc, where
+    // 3. Carve workspace into sub-buffers. Layout: D buffer | dq_acc, where
     // dq_acc exists only when a post kernel writes dQ from it.
     auto* dBufPtr = workspace;
     const size_t wsOffset
@@ -122,12 +119,12 @@ void SdpaBwdPlan::execute(const Handle& handle,
     const bool needPostProcessing = _postKernel.has_value();
     void* dqAccPtr = needPostProcessing ? static_cast<char*>(workspace) + wsOffset : nullptr;
 
-    // 5. Resolve attention scale at execute time (runtime pass-by-value support).
+    // 4. Resolve attention scale at execute time (runtime pass-by-value support).
     // Throws BAD_PARAM before the first launch for a scale the kernels mishandle.
     const float resolvedScale = plan_utils::resolveSupportedAttnScale(
         _params.attnScale, deviceBuffers, numDeviceBuffers, "SdpaBwdPlan::execute");
 
-    // 6. Build convenience args struct (mirrors AITER mha_bwd_args).
+    // 5. Build convenience args struct (mirrors AITER mha_bwd_args).
     // Byte-stride uint32 overflow was already rejected by isApplicable (A32)
     // or buildPlan (A16).
     const MhaBwdArgs mhaArgs = buildMhaBwdArgs(_params,
@@ -145,7 +142,7 @@ void SdpaBwdPlan::execute(const Handle& handle,
                                                dqAccPtr,
                                                needPostProcessing);
 
-    // 7. Launch kernels on the same stream, which orders them without
+    // 6. Launch kernels on the same stream, which orders them without
     // explicit barriers.
     auto stream = handle.getStream();
 

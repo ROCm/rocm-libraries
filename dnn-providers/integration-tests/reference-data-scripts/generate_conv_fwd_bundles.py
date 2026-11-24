@@ -597,6 +597,11 @@ class Builder:
     def A(self, aid, pair, **kw):
         return self._make(dict(P.ACCUM_SHAPES[aid]), pair, (aid,), "A", **kw)
 
+    def E(self, eid, dt):
+        e = P.E_SHAPES[eid]
+        lay = e.get("layout", "cf")
+        return self._make(dict(e["shape"]), (lay, dt), (eid,), "E")
+
     def R(self, rid):
         return P.new(**P.shape_R(rid), ids=(rid,), size="R", src=P.r_source(rid))
 
@@ -792,6 +797,16 @@ def rules(lv):
                     regression="a relu_lower_clip_slope of 0 must run as standard ReLU (#14363)",
                 )
             )
+        # Layout and stride edges (plan section 3.6), after every other case so no id
+        # moves.
+        for eid, e in P.E_SHAPES.items():
+            for dt in P.CORE_DTYPES:
+                c = b.E(eid, dt)
+                add(
+                    v_layouts(c, e["mix"])
+                    if "mix" in e
+                    else v_nonpacked(c, e["stride"])
+                )
 
     else:  # full: which wider sweeps must exist in the full suite?
         for r in P.RANKS:

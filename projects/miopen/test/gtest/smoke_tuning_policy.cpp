@@ -13,7 +13,7 @@
 MIOPEN_LIB_ENV_VAR(MIOPEN_USER_DB_PATH)
 MIOPEN_LIB_ENV_VAR(MIOPEN_ENABLE_LOGGING)
 
-class CPU_TuningPolicy_NONE : public ::testing::Test
+class CPU_TuningPolicy_NONE : public testing::TestWithParam<int>
 {
 protected:
     void testSetInvalidValue(const miopenTuningPolicy_t original_policy, int invalid)
@@ -33,7 +33,7 @@ protected:
     }
 };
 
-TEST_F(CPU_TuningPolicy_NONE, TestTuningPolicyGetterAndSetterValidValues)
+TEST_P(CPU_TuningPolicy_NONE, TestTuningPolicyGetterAndSetterValidValues)
 {
     auto&& handle = get_handle();
     miopenTuningPolicy_t test_tuning_policy;
@@ -67,7 +67,7 @@ TEST_F(CPU_TuningPolicy_NONE, TestTuningPolicyGetterAndSetterValidValues)
     EXPECT_EQ(test_tuning_policy, miopenTuningPolicy_t::miopenTuningPolicyNone);
 }
 
-TEST_F(CPU_TuningPolicy_NONE, TestTuningPolicyGetterAndSetterErrorHandling)
+TEST_P(CPU_TuningPolicy_NONE, TestTuningPolicyGetterAndSetterErrorHandling)
 {
     testSetInvalidValue(miopenTuningPolicy_t::miopenTuningPolicyDbUpdate, -1);
     testSetInvalidValue(miopenTuningPolicy_t::miopenTuningPolicySearch, 0);
@@ -75,7 +75,7 @@ TEST_F(CPU_TuningPolicy_NONE, TestTuningPolicyGetterAndSetterErrorHandling)
     testSetInvalidValue(miopenTuningPolicy_t::miopenTuningPolicyDbClean, 1000);
 }
 
-TEST_F(CPU_TuningPolicy_NONE, TestNullHandleForTuningPolicy)
+TEST_P(CPU_TuningPolicy_NONE, TestNullHandleForTuningPolicy)
 {
     miopenTuningPolicy_t test_tuning_policy;
 
@@ -85,14 +85,14 @@ TEST_F(CPU_TuningPolicy_NONE, TestNullHandleForTuningPolicy)
               miopenStatusBadParm);
 }
 
-TEST_F(CPU_TuningPolicy_NONE, TestNullPolicyPointer)
+TEST_P(CPU_TuningPolicy_NONE, TestNullPolicyPointer)
 {
     auto&& handle = get_handle();
 
     EXPECT_EQ(miopenGetTuningPolicy(&handle, nullptr), miopenStatusBadParm);
 }
 
-TEST_F(CPU_TuningPolicy_NONE, TestGetApiLogged)
+TEST_P(CPU_TuningPolicy_NONE, TestGetApiLogged)
 {
     ScopedEnvironment<std::string> enable_logging(MIOPEN_ENABLE_LOGGING, "ON");
     miopenTuningPolicy_t policy;
@@ -116,7 +116,7 @@ TEST_F(CPU_TuningPolicy_NONE, TestGetApiLogged)
 #endif
 }
 
-TEST_F(CPU_TuningPolicy_NONE, TestSetApiLogged)
+TEST_P(CPU_TuningPolicy_NONE, TestSetApiLogged)
 {
     miopenTuningPolicy_t original_policy;
     auto&& handle = get_handle();
@@ -142,3 +142,5 @@ TEST_F(CPU_TuningPolicy_NONE, TestSetApiLogged)
     status = miopenSetTuningPolicy(&handle, original_policy);
     ASSERT_EQ(status, miopenStatusSuccess);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_TuningPolicy_NONE, testing::Values(0));
