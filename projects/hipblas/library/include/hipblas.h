@@ -6321,7 +6321,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZgercBatched_64(hipblasHandle_t           
               There are no restrictions placed on stridex. However, the user should
               ensure that stridex is of an appropriate size. For a typical
               case, this means stridex >= m * incx.
-    @param[inout]
+    @param[in]
     y         device pointer to the first vector (y_1) in the batch.
     @param[in]
     incy      [int]
