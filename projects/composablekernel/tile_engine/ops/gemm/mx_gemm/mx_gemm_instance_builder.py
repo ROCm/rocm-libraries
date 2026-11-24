@@ -28,10 +28,9 @@ def _import_gemm_kernel_builder():
 
 GemmKernelBuilder, _validation_utils = _import_gemm_kernel_builder()
 GEMM_MX_PIPELINES_BY_ARCH = _validation_utils.GEMM_MX_PIPELINES_BY_ARCH
-TDM_SCHEDULED_PIPELINE = _validation_utils.MX_TDM_SCHEDULED_PIPELINE
-mx_tdm_scheduled = _validation_utils.load_mx_tdm_scheduled()
+mx_pipeline_extension = _validation_utils.mx_pipeline_extension
 #: The pipelines that take a section of "pipeline_tuning_config".
-TUNED_PIPELINES = (TDM_SCHEDULED_PIPELINE,)
+TUNED_PIPELINES = tuple(_validation_utils.load_mx_pipeline_extensions().EXTENSIONS)
 
 
 def pipeline_tuning_config(config):
@@ -40,7 +39,7 @@ def pipeline_tuning_config(config):
     if "tuning_config" in config:
         raise ValueError(
             '"tuning_config" is now "pipeline_tuning_config": '
-            f'{{"{TDM_SCHEDULED_PIPELINE}": {{...}}}}'
+            f"{{<pipeline>: {{...}}}} for one of {list(TUNED_PIPELINES)}"
         )
     sections = config.get("pipeline_tuning_config") or {}
     if not isinstance(sections, dict):
@@ -93,28 +92,15 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
             and not (arch == "gfx1250" and (combo[5] or combo[6]))  # pad_k, persistent
         ]
 
-    # comp_tdm_scheduled carries a tuning besides its tile and traits: the cluster, the policy's
-    # knobs and the shape traits of the instance, from the optional
-    # "pipeline_tuning_config"."comp_tdm_scheduled" section (the product of its values; the
-    # defaults when absent). Other pipelines take no tuning. It is built only through the
-    # dispatcher (mx_gemm_full_benchmark.py); main() rejects it.
+    # A pipeline with an extension (mx_pipeline_extensions.py) carries a tuning besides its tile
+    # and traits, from its optional "pipeline_tuning_config" section (the product of its values;
+    # the defaults when absent), and its own rules, name suffix and C++ instance. Other pipelines
+    # take no tuning.
 
-    def _scheduled_tunings(self):
-        return mx_tdm_scheduled.expand_tuning_config(
-            self.pipeline_tuning_config.get(TDM_SCHEDULED_PIPELINE)
-        )
-
-    def _scheduled_spec(self, tile_config, tuning):
-        out = mx_tdm_scheduled.TE_OUT_DTYPES[self._c_datatype()]
-        return mx_tdm_scheduled.spec_from_tile(
-            tile_config, tuning, self.datatype, self.datatype, out
-        )
-
-    def _scheduled_reject_reason(self, tile_config, tuning):
-        keys = ("tile", "warp", "warp_tile")
-        dims = [tile_config[f"{k}_{d}"] for k in keys for d in "mnk"]
-        return _validation_utils.mx_tdm_scheduled_reject_reason(
-            *dims,
+    def _pipeline_reject_reason(self, extension, tile_config, tuning):
+        return _validation_utils.mx_pipeline_reject_reason(
+            extension,
+            tile_config,
             self.datatype,
             self.datatype,
             self._c_datatype(),
@@ -122,29 +108,40 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
             tuning,
         )
 
-    def scheduled_name_suffix(self, tile_config, tuning):
-        return mx_tdm_scheduled.instance_name_suffix(
-            self._scheduled_spec(tile_config, tuning), tuning
+    def pipeline_name_suffix(self, pipeline, tile_config, tuning):
+        return mx_pipeline_extension(pipeline).name_suffix(
+            tile_config, tuning, self.datatype, self.datatype, self._c_datatype()
         )
 
     def _get_sampled_kernel_list(self):
-        """The parent's enumeration with every comp_tdm_scheduled entry expanded over the valid
-        tunings (key "tuning"; None for other pipelines), then sampled. The dispatcher's
-        expand_mx_sweep calls it."""
+        """The parent's enumeration with every entry of an extension's pipeline expanded over
+        its valid tunings (key "tuning"; None for other pipelines), then sampled. The
+        dispatcher's expand_mx_sweep calls it."""
         max_instances, self.max_instances = self.max_instances, None
         try:
             kernels = super()._get_sampled_kernel_list()
         finally:
             self.max_instances = max_instances
+        tunings = {}
         expanded = []
         for kernel in kernels:
-            if kernel["trait_combo"][0] != TDM_SCHEDULED_PIPELINE:
+            pipeline = kernel["trait_combo"][0]
+            extension = mx_pipeline_extension(pipeline)
+            if extension is None:
                 expanded.append({**kernel, "tuning": None})
                 continue
-            for tuning in self._scheduled_tunings():
-                if self._scheduled_reject_reason(kernel["tile_config"], tuning):
+            if pipeline not in tunings:
+                tunings[pipeline] = extension.expand_tuning(
+                    self.pipeline_tuning_config.get(pipeline)
+                )
+            for tuning in tunings[pipeline]:
+                if self._pipeline_reject_reason(
+                    extension, kernel["tile_config"], tuning
+                ):
                     continue
-                suffix = self.scheduled_name_suffix(kernel["tile_config"], tuning)
+                suffix = self.pipeline_name_suffix(
+                    pipeline, kernel["tile_config"], tuning
+                )
                 expanded.append(
                     {**kernel, "name": kernel["name"] + suffix, "tuning": tuning}
                 )
@@ -153,14 +150,20 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
     def _generate_kernel_instance(
         self, tile_config, trait_combo, validate=False, tuning=None
     ):
-        if self._normalize_trait_combo(trait_combo)[0] == TDM_SCHEDULED_PIPELINE:
-            return self._generate_scheduled_instance(tile_config, trait_combo, tuning)
-        if tuning is not None and not mx_tdm_scheduled.is_default_tuning(tuning):
-            raise ValueError(f"only {TDM_SCHEDULED_PIPELINE} takes a tuning")
+        pipeline = self._normalize_trait_combo(trait_combo)[0]
+        extension = mx_pipeline_extension(pipeline)
+        if extension is not None:
+            return self._generate_extension_instance(
+                extension, tile_config, trait_combo, tuning
+            )
+        if tuning:
+            raise ValueError(
+                f"{pipeline} takes no tuning (tuned: {list(TUNED_PIPELINES)})"
+            )
         return super()._generate_kernel_instance(tile_config, trait_combo, validate)
 
-    def _generate_scheduled_instance(self, tile_config, trait_combo, tuning):
-        tuning = mx_tdm_scheduled.normalize_tuning(tuning)
+    def _generate_extension_instance(self, extension, tile_config, trait_combo, tuning):
+        tuning = extension.normalize_tuning(tuning)
         pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent = (
             self._normalize_trait_combo(trait_combo)
         )
@@ -177,20 +180,16 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
             gpu_target=self.gpu_target,
         ):
             raise ValueError(
-                f"{TDM_SCHEDULED_PIPELINE} needs an epilogue of "
-                f"{_validation_utils.MX_TDM_SCHEDULED_EPILOGUES}, "
+                f"{pipeline} needs an epilogue of {extension.epilogues}, "
                 "the intrawave scheduler, no padding and no persistence"
             )
-        reason = self._scheduled_reject_reason(tile_config, tuning)
+        reason = self._pipeline_reject_reason(extension, tile_config, tuning)
         if reason:
             raise ValueError(f"tile {tile_config} with tuning {tuning}: {reason}")
-        spec = self._scheduled_spec(tile_config, tuning)
         kernel_name = self._format_kernel_name(
             trait_combo, tile_config
-        ) + mx_tdm_scheduled.instance_name_suffix(spec, tuning)
-        instance_code = self._scheduled_instance_code(
-            kernel_name, tile_config, spec, tuning
-        )
+        ) + self.pipeline_name_suffix(pipeline, tile_config, tuning)
+        instance_code = extension.instance_code(self, kernel_name, tile_config, tuning)
 
         simplified_name = kernel_name[len(self.kernel_name_prefix) + 1 :]
         header_file = (
@@ -201,108 +200,6 @@ class MxGemmKernelBuilder(GemmKernelBuilder):
             f.write(instance_code)
         print(f"Generated {header_file}")
         return kernel_name, instance_code
-
-    def _scheduled_instance_code(self, kernel_name, tile_config, spec, tuning):
-        t = tile_config
-        return f"""// Generated kernel instance for {kernel_name}
-#pragma once
-
-#include <stdexcept>
-#include <string>
-#include "ck_tile/core.hpp"
-#include "ck_tile/host.hpp"
-#include "ck_tile/ops/epilogue.hpp"
-#include "ck_tile/ops/gemm.hpp"
-{self.populate_kernel_dtype_layout()}
-// Kernel name for display
-constexpr const char* KERNEL_NAME = "{kernel_name}";
-
-// comp_tdm_scheduled (MxGemmPipelineAgBgCrCompTDMScheduled): K-major scales, E = A * B^T.
-struct SelectedKernel {{
-    static constexpr ck_tile::index_t BlockSize = 128;
-    static constexpr ck_tile::index_t TileM = {t["tile_m"]};
-    static constexpr ck_tile::index_t TileN = {t["tile_n"]};
-    static constexpr ck_tile::index_t TileK = {t["tile_k"]};
-    static constexpr ck_tile::index_t WarpPerBlock_M = {t["warp_m"]};
-    static constexpr ck_tile::index_t WarpPerBlock_N = {t["warp_n"]};
-    static constexpr ck_tile::index_t WarpPerBlock_K = 1;
-    static constexpr ck_tile::index_t WarpTileM = {t["warp_tile_m"]};
-    static constexpr ck_tile::index_t WarpTileN = 16;
-    static constexpr ck_tile::index_t WarpTileK = 128;
-    static constexpr bool Preshuffle = false;
-    static constexpr bool KMajorScales = true;
-    // The B reshuffle interface the profiler names (unused: B is not preshuffled).
-    static constexpr ck_tile::index_t N_Warp_Tile = WarpTileN;
-    static constexpr ck_tile::index_t K_Warp_Tile = WarpTileK;
-    static constexpr ck_tile::index_t BContiguousItemsPerAccess =
-        std::is_same_v<BDataType, ck_tile::pk_fp4_t> ? 32 : 16;
-    static constexpr bool BPreshuffleLaneInterleavedK = true;
-
-    using Cluster = {mx_tdm_scheduled.cpp_cluster_sequence(tuning)};
-    using Policy = {mx_tdm_scheduled.cpp_policy_type(tuning)};
-    using Traits = {mx_tdm_scheduled.cpp_kernel_traits(spec, tuning)};
-    using Pipeline = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduled<
-        ck_tile::MxGemmTdmScheduledProblem<
-            ADataType,
-            BDataType,
-            CDataType,
-            ck_tile::ClusterTileGemmShape<Cluster,
-                                          ck_tile::sequence<TileM, TileN, TileK>,
-                                          ck_tile::sequence<WarpPerBlock_M, WarpPerBlock_N, 1>,
-                                          ck_tile::sequence<WarpTileM, WarpTileN, WarpTileK>>,
-            Traits>,
-        Policy>;
-    // One kernel per TailNumber of the pipeline (Pipeline::WithTailNum).
-    template <typename P>
-    using KernelOf = ck_tile::MxGemmKernel<
-        ck_tile::GemmTile2DNMajorPartitioner<typename P::BlockGemmShape>,
-        P,
-        ck_tile::MxTdmStoreEpilogue<P>>;
-
-    // The pipeline's TailHandler picks the kernel of the loop's tile count on the host.
-    static float launch(const MxGemmHostArgs& args, const ck_tile::stream_config& stream)
-    {{
-        const ck_tile::index_t full_tiles = Pipeline::GetFullTiles(args.K);
-        return Pipeline::TailHandler(
-            [&](auto, auto tail_num) {{
-                return launch_kernel<
-                    KernelOf<typename Pipeline::template WithTailNum<decltype(tail_num)::value>>>(
-                    args, stream);
-            }},
-            Pipeline::BlockHasHotloop(full_tiles),
-            Pipeline::GetBlockLoopTailNum(full_tiles));
-    }}
-
-    template <typename Kernel>
-    static float launch_kernel(const MxGemmHostArgs& args, const ck_tile::stream_config& stream)
-    {{
-        const auto kargs = Kernel::MakeKernelArgs(args);
-        if(!Kernel::IsSupportedArgument(kargs))
-        {{
-            const char* why = Kernel::GetUnsupportedReason(kargs);
-            throw std::runtime_error(std::string("Arguments not supported: ") +
-                                     (why ? why : "see CK_TILE_LOGGING"));
-        }}
-        const dim3 grids  = Kernel::GridSize(args.M, args.N, args.k_batch);
-        const dim3 blocks = Kernel::BlockSize();
-        if constexpr(Kernel::ClusterLaunch)
-        {{
-#if CK_TILE_ENABLE_CLUSTER_LAUNCH
-            return ck_tile::launch_kernel(
-                stream,
-                ck_tile::make_kernel<1>(Kernel{{}}, Kernel::ClusterSize(), grids, blocks, 0, kargs));
-#else
-            throw std::runtime_error(Kernel::GetName() + ": this build has no cluster launch");
-#endif
-        }}
-        else
-        {{
-            return ck_tile::launch_kernel(
-                stream, ck_tile::make_kernel<1>(Kernel{{}}, grids, blocks, 0, kargs));
-        }}
-    }}
-}};
-"""
 
     def _generate_all_individual(self, num_workers=None):
         """Generate individual kernel files for separate compilation with parallel processing"""
@@ -530,10 +427,12 @@ def main():
                 .get("pipeline", {})
                 .get("values", [])
             )
-        if TDM_SCHEDULED_PIPELINE in pipelines:
-            sys.exit(
-                f"{TDM_SCHEDULED_PIPELINE} runs through the dispatcher (mx_gemm_full_benchmark.py)"
-            )
+        for pipeline in pipelines:
+            extension = mx_pipeline_extension(pipeline)
+            if extension is not None and extension.dispatcher_only:
+                sys.exit(
+                    f"{pipeline} runs through the dispatcher (mx_gemm_full_benchmark.py)"
+                )
     builder = MxGemmKernelBuilder(
         kernel_name_prefix,
         args.working_path,

@@ -101,6 +101,14 @@ says why): `k_batch` must be 1 and the strides packed, K must be a multiple of
 32, and the K tail, the tile parity and partial M and N tiles must match the
 instance's shape traits.
 
+A pipeline that needs more than the shared tile and trait configs registers an extension
+(`MxPipelineExtension` in `tile_engine/ops/gemm/mx_gemm/mx_pipeline_extensions.py`): its
+tuning keys, validity rules, kernel name suffix, C++ instance, extra compile flags and, if
+it has shape traits, how a config is fitted to a problem. The builder, the codegen, this
+bridge and the sweep driver look the pipeline up (`mx_pipeline_extension(pipeline)`) and
+never name it; pipelines without an extension take no tuning. `comp_tdm_scheduled` is the
+one extension today.
+
 `comp_tdm_scheduled` takes the cluster and its policy's knobs
 (`MxGemmPipelineAgBgCrCompTDMScheduledPolicy`) as a tuning, set per kernel or as a product
 (its section of `pipeline_tuning_config` in the sweep's JSON). Missing keys take the
@@ -127,15 +135,15 @@ suffix (`_pf<n>`, and `_lp0`, `_hplrnone` and `_lsi0` for the three knobs turned
 and the traits that are on (`_edgem`, `_edgen` or `_edgemn`, `_tail<n>`, and `_wide` with
 the wide operands), for example `..._256x256x512_2x2x1_32x16x128_c2x2_pf2_edgemn_tail1`.
 
-The sweep driver sets the shape traits from each problem
-(`specialize_tdm_scheduled_configs` and `tdm_scheduled_for_problem` in
-`python/mx_gemm_tdm_scheduled_utils.py`), for
-`comp_tdm_scheduled` configs only: for each problem it drops the configs whose `tile_k` is
-above K, sets `tail_steps` to the problem's, and turns on the edge and wide traits the
-problem needs. Problems that need the same traits share one kernel, and each problem runs
-only its own kernels. Configs of other pipelines are not touched: they are built and run
-on every problem as before. `--no-shape-specialize` runs every kernel on every problem
-with the configured traits.
+The sweep driver sets the shape traits from each problem (`specialize_configs` and
+`fit_to_problem` in `python/mx_gemm_shape_fit.py`, calling the extension's
+`fit_to_problem`), for the configs whose pipeline has shape traits only. For
+`comp_tdm_scheduled`, for each problem it drops the configs whose `tile_k` is above K, sets
+`tail_steps` to the problem's, and turns on the edge and wide traits the problem needs.
+Problems that need the same traits share one kernel, and each problem runs only its own
+kernels. Configs of other pipelines are not touched: they are built and run on every
+problem as before. `--no-shape-specialize` runs every kernel on every problem with the
+configured traits.
 
 In the dispatcher, put the keys at the top level of the configuration, or in
 `MxGemmKernelConfig(tuning={...})`:

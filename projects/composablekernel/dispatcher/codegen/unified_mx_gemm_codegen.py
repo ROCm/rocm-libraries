@@ -25,9 +25,9 @@ mx_gemm is microscaling GEMM (fp4/fp8 A*B, per-32-K e8m0 block scales), gfx950
 and gfx1250. Both targets provide async, eight-wave async, and weight-preshuffle
 pipelines with CShuffle; gfx1250 also provides TDM V1 and V2 with the TDM epilogue,
 and comp_tdm_scheduled (K-major scales, the TDM epilogue).
-Only comp_tdm_scheduled takes tuning keys, at the top level of the config (the cluster, the
-policy's knobs and the instance's shape traits; mx_tdm_scheduled.TUNING_DEFAULTS and
-SHAPE_DEFAULTS).
+Only the pipelines with an extension (tile_engine's mx_gemm/mx_pipeline_extensions.py) take
+tuning keys, at the top level of the config; the extension also owns their rules, name suffix
+and C++ instance.
 Both use intrawave scheduling. The default warp tile is 16x16x128;
 gfx1250 TDM V1/V2 also expose 32x32x128 and FP4 32x16x128. Native pipeline
 compilation determines instruction support; codegen does not distinguish A0/B0.
@@ -62,15 +62,18 @@ for _p in (str(_THIS_DIR), str(_GEMM_DIR), str(_MX_GEMM_DIR)):
 from codegen_common import normalize_gfx_arch  # noqa: E402
 from gemm_validation_utils import (  # noqa: E402
     GEMM_MX_PIPELINES_BY_ARCH,
-    MX_TDM_SCHEDULED_PIPELINE,
     is_tile_config_valid,
-    load_mx_tdm_scheduled,
-    mx_tdm_scheduled_reject_reason,
+    load_mx_pipeline_extensions,
+    mx_pipeline_extension,
+    mx_pipeline_reject_reason,
     validate_gemm_mx_warp_tile_combination,
 )
 
-mx_tdm_scheduled = load_mx_tdm_scheduled()
-TUNING_KEYS = (*mx_tdm_scheduled.TUNING_DEFAULTS, *mx_tdm_scheduled.SHAPE_DEFAULTS)
+_EXTENSIONS = load_mx_pipeline_extensions().EXTENSIONS
+#: The tuning keys of every extension (rejected on the pipelines without one).
+TUNING_KEYS = tuple(
+    dict.fromkeys(k for ext in _EXTENSIONS.values() for k in ext.tuning_keys)
+)
 
 
 def _load_mx_builder():
@@ -99,19 +102,30 @@ ARCH_TRAITS = {
     "gfx1250": ("comp_tdm", "tdm"),
 }
 VALID_SCHEDULER = "intrawave"
-TDM_EPILOGUE_PIPELINES = ("comp_tdm", "comp_tdm_v2", MX_TDM_SCHEDULED_PIPELINE)
+TDM_EPILOGUE_PIPELINES = ("comp_tdm", "comp_tdm_v2")
+
+
+def _default_epilogue(pipeline: str) -> str:
+    extension = mx_pipeline_extension(pipeline)
+    if extension is not None:
+        return extension.epilogues[0]
+    return "tdm" if pipeline in TDM_EPILOGUE_PIPELINES else "cshuffle"
 
 
 def _tuning_from_cfg(cfg: dict) -> Optional[dict]:
-    """The comp_tdm_scheduled tuning of a config (normalized), or None for other pipelines."""
-    given = {k: cfg[k] for k in TUNING_KEYS if k in cfg}
-    if cfg.get("pipeline") != MX_TDM_SCHEDULED_PIPELINE:
+    """The tuning of a config's pipeline extension (normalized), or None for a pipeline
+    without one."""
+    extension = mx_pipeline_extension(cfg.get("pipeline"))
+    if extension is None:
+        given = sorted(k for k in TUNING_KEYS if k in cfg)
         if given:
             raise ValueError(
-                f"tuning keys {sorted(given)} are only for {MX_TDM_SCHEDULED_PIPELINE}"
+                f"tuning keys {given} are only for {', '.join(sorted(_EXTENSIONS))}"
             )
         return None
-    return mx_tdm_scheduled.normalize_tuning(given)
+    return extension.normalize_tuning(
+        {k: cfg[k] for k in extension.tuning_keys if k in cfg}
+    )
 
 
 _REQUIRED_TILE_KEYS = (
@@ -148,7 +162,7 @@ def _validate(cfg: dict) -> None:
             f"pipeline must be one of {GEMM_MX_PIPELINES_BY_ARCH[arch]} on {arch}, got {pipeline!r}"
         )
 
-    valid_epilogue = "tdm" if pipeline in TDM_EPILOGUE_PIPELINES else "cshuffle"
+    valid_epilogue = _default_epilogue(pipeline)
     epilogue = cfg.get("epilogue", valid_epilogue)
     if epilogue != valid_epilogue:
         raise ValueError(
@@ -185,13 +199,15 @@ def _validate(cfg: dict) -> None:
                 "gfx1250 MX GEMM does not support persistent execution or K padding"
             )
     tuning = _tuning_from_cfg(cfg)
-    if pipeline == MX_TDM_SCHEDULED_PIPELINE:
-        if cfg.get("pad_m") or cfg.get("pad_n"):
-            raise ValueError(
-                f"{MX_TDM_SCHEDULED_PIPELINE} takes no padding (edge=true)"
-            )
-        reason = mx_tdm_scheduled_reject_reason(
-            *(tc[key] for key in _REQUIRED_TILE_KEYS),
+    extension = mx_pipeline_extension(pipeline)
+    if extension is not None:
+        reason = extension.trait_reject_reason(
+            epilogue,
+            bool(cfg.get("persistent")),
+            (cfg.get("pad_m"), cfg.get("pad_n"), cfg.get("pad_k")),
+        ) or mx_pipeline_reject_reason(
+            extension,
+            {key: tc[key] for key in _REQUIRED_TILE_KEYS},
             datatype,
             datatype,
             "fp16",
@@ -235,7 +251,7 @@ def _trait_combo_from_cfg(cfg: dict) -> Tuple:
     """7-tuple: (pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent)."""
     valid_pipeline, _ = ARCH_TRAITS[normalize_gfx_arch(cfg["gpu_target"])]
     pipeline = cfg.get("pipeline", valid_pipeline)
-    valid_epilogue = "tdm" if pipeline in TDM_EPILOGUE_PIPELINES else "cshuffle"
+    valid_epilogue = _default_epilogue(pipeline)
     return (
         cfg.get("pipeline", valid_pipeline),
         cfg.get("epilogue", valid_epilogue),
@@ -336,7 +352,7 @@ def kernel_name(cfg: dict) -> str:
     with _make_builder(cfg) as builder:
         name = builder._format_kernel_name(trait_combo, tile_config)
         if tuning is not None:
-            name += builder.scheduled_name_suffix(tile_config, tuning)
+            name += builder.pipeline_name_suffix(trait_combo[0], tile_config, tuning)
         return name
 
 

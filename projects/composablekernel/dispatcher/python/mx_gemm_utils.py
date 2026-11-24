@@ -72,6 +72,25 @@ def _mx_codegen():
     return module
 
 
+@functools.lru_cache(maxsize=1)
+def _mx_pipeline_extensions():
+    """tile_engine's mx_pipeline_extensions module (the codegen's)."""
+    return _mx_codegen().load_mx_pipeline_extensions()
+
+
+def mx_pipeline_extension(pipeline: Optional[str]):
+    """The MxPipelineExtension of a pipeline (its tuning, rules, name suffix, flags and
+    problem fitting), or None if the shared configs describe it."""
+    return _mx_pipeline_extensions().extension(pipeline)
+
+
+def _default_epilogue(pipeline: str) -> str:
+    extension = mx_pipeline_extension(pipeline)
+    if extension is not None:
+        return extension.epilogues[0]
+    return "tdm" if pipeline in ("comp_tdm", "comp_tdm_v2") else "cshuffle"
+
+
 def _get_arch() -> str:
     """Detect GPU arch via rocminfo and validate; raise on failure. Never defaults."""
     import subprocess
@@ -279,8 +298,8 @@ class MxGemmKernelConfig:
 
     k_block_per_cu: int = 1
 
-    # comp_tdm_scheduled only: the tuning knobs and the instance's shape traits (keys of
-    # mx_tdm_scheduled.TUNING_DEFAULTS / SHAPE_DEFAULTS; missing keys take the defaults).
+    # The tuning of a pipeline with an extension (mx_pipeline_extension(pipeline).tuning_keys;
+    # missing keys take the defaults). Other pipelines take none.
     tuning: Optional[Dict[str, Any]] = None
 
     # cached name so we do not re-shell the codegen repeatedly.
@@ -289,23 +308,18 @@ class MxGemmKernelConfig:
     def to_codegen_config(self) -> dict:
         arch = normalize_arch(self.gpu_target or _get_arch())
         pipeline = self.pipeline or ("comp_tdm" if arch == "gfx1250" else "comp_async")
-        epilogue = self.epilogue or (
-            "tdm"
-            if pipeline in ("comp_tdm", "comp_tdm_v2", "comp_tdm_scheduled")
-            else "cshuffle"
-        )
+        epilogue = self.epilogue or _default_epilogue(pipeline)
         # Normalized here: the codegen picks only the keys it knows, so a misspelled key
         # would otherwise build the default tuning under the requested name.
-        tuning = (
-            {
+        tuning = {}
+        if self.tuning:
+            extension = mx_pipeline_extension(pipeline)
+            if extension is None:
+                raise ValueError(f"{pipeline} takes no tuning")
+            tuning = {
                 k: list(v) if isinstance(v, tuple) else v
-                for k, v in _mx_codegen()
-                .mx_tdm_scheduled.normalize_tuning(self.tuning)
-                .items()
+                for k, v in extension.normalize_tuning(self.tuning).items()
             }
-            if self.tuning
-            else {}
-        )
         return {
             **tuning,
             "datatype": self.datatype,
@@ -379,7 +393,7 @@ class MxGemmKernelConfig:
           mx_gemm_{dtype}_{layout}_comp_async_cshuffle_intrawave_
           {PadM}_{PadN}_{PadK}[_{Persistent}]_
           {tileM}x{tileN}x{tileK}_{warpM}x{warpN}x{warpK}_{wtM}x{wtN}x{wtK}
-          [comp_tdm_scheduled: the tuning suffix]
+          [a pipeline with an extension: its tuning suffix]
         Used when the codegen script is absent, fails or times out. The name keys the
         .so cache and the dedup, so different tunings must never share one.
         """
@@ -390,12 +404,7 @@ class MxGemmKernelConfig:
             self.datatype,
             self.layout,
             pipeline,
-            self.epilogue
-            or (
-                "tdm"
-                if pipeline in ("comp_tdm", "comp_tdm_v2", "comp_tdm_scheduled")
-                else "cshuffle"
-            ),
+            self.epilogue or _default_epilogue(pipeline),
             self.scheduler,
             str(self.pad_m),
             str(self.pad_n),
@@ -407,22 +416,17 @@ class MxGemmKernelConfig:
         parts.append(f"{self.warp_m}x{self.warp_n}x{self.warp_k}")
         parts.append(f"{self.warp_tile_m}x{self.warp_tile_n}x{self.warp_tile_k}")
         name = "_".join(parts)
-        if pipeline == "comp_tdm_scheduled":
-            name += self._fallback_tuning_suffix()
+        extension = mx_pipeline_extension(pipeline)
+        if extension is not None:
+            name += self._fallback_tuning_suffix(extension)
         return name
 
-    def _fallback_tuning_suffix(self) -> str:
-        """The codegen's comp_tdm_scheduled tuning suffix, else a hash of the tuning."""
+    def _fallback_tuning_suffix(self, extension) -> str:
+        """The codegen's tuning suffix of the pipeline's extension, else a hash of the tuning."""
         try:
-            sched = _mx_codegen().mx_tdm_scheduled
-            spec = sched.spec_from_tile(
-                self._tile_config(),
-                self.tuning,
-                self.datatype,
-                self.datatype,
-                sched.TE_OUT_DTYPES["fp16"],
+            return extension.name_suffix(
+                self._tile_config(), self.tuning, self.datatype, self.datatype, "fp16"
             )
-            return sched.instance_name_suffix(spec, self.tuning)
         except Exception:  # noqa: BLE001
             key = json.dumps(self.tuning or {}, sort_keys=True, default=list)
             return "_t" + hashlib.sha1(key.encode()).hexdigest()[:8]
@@ -854,15 +858,6 @@ _MX_CODEGEN_FLAGS = (
 # know -amdgpu-coerce-illegal-types). Mirror that probe so the bridge matches
 # Old-TE wherever the compiler accepts it and stays buildable where it does not.
 _MX_PROBED_CODEGEN_FLAGS = (("-mllvm", "-amdgpu-coerce-illegal-types=1"),)
-# comp_tdm_scheduled only, as its CMake targets (example 56, tests, tile_engine)
-_MX_TDM_SCHEDULED_FLAGS = (
-    "-mllvm",
-    "-amdgpu-expert-scheduling-mode",
-    "-mllvm",
-    "-enable-post-misched=false",
-    "-mllvm",
-    "-greedy-regclass-priority-trumps-globalness",
-)
 
 
 @functools.lru_cache(maxsize=None)
@@ -895,6 +890,7 @@ def _mx_codegen_flags() -> Tuple[str, ...]:
 
 
 def _compile_kernel(hpp: Path, so: Path, arch: str, pipeline: str = "") -> bool:
+    extension = mx_pipeline_extension(pipeline)
     inc = [
         f"-I{_CK_ROOT}/include",
         f"-I{_CK_ROOT}",
@@ -912,7 +908,7 @@ def _compile_kernel(hpp: Path, so: Path, arch: str, pipeline: str = "") -> bool:
         "-O3",
         "-std=c++20",
         *_mx_codegen_flags(),
-        *(_MX_TDM_SCHEDULED_FLAGS if pipeline == "comp_tdm_scheduled" else ()),
+        *(extension.compile_flags if extension else ()),
         *inc,
         "-DCK_TILE_SINGLE_KERNEL_INCLUDE",
         f"-include{hpp}",

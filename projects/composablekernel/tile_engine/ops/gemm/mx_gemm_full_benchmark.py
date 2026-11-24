@@ -6,11 +6,10 @@ Dispatcher bridge.
 
 Same three phases as gemm_full_benchmark.py, whose multi-GPU Phase 3 runner it
 reuses:
-  Phase 1: Expand the Tile Engine MX sweep JSON, fit any comp_tdm_scheduled
-           configs to each problem's shape (--no-shape-specialize: as configured),
-           and compile every kernel to a .so (parallel, no GPU)
-  Phase 2: Load problems (M, N, K shapes; read in Phase 1 to fit
-           comp_tdm_scheduled configs)
+  Phase 1: Expand the Tile Engine MX sweep JSON, fit the configs whose pipeline
+           has shape traits to each problem's shape (--no-shape-specialize: as
+           configured), and compile every kernel to a .so (parallel, no GPU)
+  Phase 2: Load problems (M, N, K shapes; read in Phase 1 to fit those configs)
   Phase 3: Benchmark via subprocess isolation across all visible GPUs
 
 The sweep JSON is the one the Old-TE mx_gemm CMake build reads
@@ -42,7 +41,7 @@ _CONFIG_DIR = _THIS_DIR / "mx_gemm" / "configs"
 
 import gemm_full_benchmark as gfb  # noqa: E402  (also sets up sys.path)
 from dispatcher_common import normalize_arch  # noqa: E402
-from mx_gemm_tdm_scheduled_utils import specialize_tdm_scheduled_configs  # noqa: E402
+from mx_gemm_shape_fit import has_shape_traits, specialize_configs  # noqa: E402
 from mx_gemm_utils import (  # noqa: E402
     _get_arch,
     expand_mx_sweep,
@@ -160,9 +159,9 @@ def main():
     parser.add_argument(
         "--no-shape-specialize",
         action="store_true",
-        help="Run every kernel on every problem with its configured comp_tdm_scheduled "
-        "shape traits (default: fit each config's tail_steps, edge and wide traits to "
-        "each problem and skip tiles longer than K)",
+        help="Run every kernel on every problem with its configured shape traits "
+        "(default: fit the shape traits of each config whose pipeline has them to "
+        "each problem, and skip the configs that cannot run it)",
     )
     args = parser.parse_args()
 
@@ -200,26 +199,24 @@ def main():
         print(f"  ERROR: 0 configs expanded for {args.dtype} on {arch}")
         return 1
 
-    tdm_configs = [c for c in all_configs if c.pipeline == "comp_tdm_scheduled"]
-    specialize = bool(tdm_configs) and not args.no_shape_specialize
+    shaped_configs = [c for c in all_configs if has_shape_traits(c)]
+    specialize = bool(shaped_configs) and not args.no_shape_specialize
     problems = None
     build_configs = all_configs
     if specialize:
         problems = gfb.load_problems(args.problems, gfb.DEFAULT_VARIANT)
-        other_configs = [c for c in all_configs if c.pipeline != "comp_tdm_scheduled"]
-        fitted, tdm_pairs, dropped = specialize_tdm_scheduled_configs(
-            tdm_configs, problems
-        )
+        other_configs = [c for c in all_configs if not has_shape_traits(c)]
+        fitted, shaped_pairs, dropped = specialize_configs(shaped_configs, problems)
         build_configs = other_configs + fitted
         n_other = len(other_configs)
         config_pairs = [
             list(range(n_other)) + [n_other + i for i in indices]
-            for indices in tdm_pairs
+            for indices in shaped_pairs
         ]
         print(
-            f"  comp_tdm_scheduled shape-specialized for {len(problems)} problems: "
-            f"{len(tdm_configs)} configs -> {len(fitted)}, {sum(dropped)} "
-            "(config, problem) pairs dropped (tile_k > K)"
+            f"  Shape-specialized for {len(problems)} problems: "
+            f"{len(shaped_configs)} configs -> {len(fitted)}, {sum(dropped)} "
+            "(config, problem) pairs dropped"
         )
     print(f"  Build workers: {args.workers}")
 

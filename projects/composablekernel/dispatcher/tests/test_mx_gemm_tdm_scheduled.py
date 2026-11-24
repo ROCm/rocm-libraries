@@ -38,12 +38,13 @@ for _p in (_DISP / "python", _DISP / "codegen", _GEMM, _MX, _HOST_TEST):
     sys.path.insert(0, str(_p))
 
 import gemm_validation_utils as vu  # noqa: E402
-import mx_gemm_tdm_scheduled_utils as tdm  # noqa: E402
+import mx_gemm_shape_fit as shape_fit  # noqa: E402
 import mx_gemm_utils as mx  # noqa: E402
 import parity_cases  # noqa: E402
 import unified_mx_gemm_codegen as codegen  # noqa: E402
 
-sched = vu.load_mx_tdm_scheduled()
+sched = vu.load_mx_pipeline_extensions().mx_tdm_scheduled
+EXT = vu.mx_pipeline_extension("comp_tdm_scheduled")
 BUILDER = _MX / "mx_gemm_instance_builder.py"
 TILE = {
     "tile_m": 256,
@@ -235,9 +236,7 @@ class TestShapeTuning(unittest.TestCase):
             {"M": 1920, "N": 512, "K": 6784},
             {"M": 1024, "N": 1024, "K": 256},
         ]
-        unique, per_problem, dropped = tdm.specialize_tdm_scheduled_configs(
-            [base], problems
-        )
+        unique, per_problem, dropped = shape_fit.specialize_configs([base], problems)
         # The first two need no trait and share one kernel; the third needs edge_m and a tail.
         self.assertEqual(len(unique), 2)
         self.assertEqual(per_problem[0], per_problem[1])
@@ -253,9 +252,9 @@ class TestShapeTuning(unittest.TestCase):
         self.assertEqual(per_problem[3], [])
         # Other pipelines are not specialized.
         with self.assertRaisesRegex(ValueError, "comp_async_eight_waves"):
-            tdm.tdm_scheduled_for_problem(other, 1024, 1024, 256)
+            shape_fit.fit_to_problem(other, 1024, 1024, 256)
         with self.assertRaisesRegex(ValueError, "comp_async_eight_waves"):
-            tdm.specialize_tdm_scheduled_configs([base, other], problems)
+            shape_fit.specialize_configs([base, other], problems)
 
 
 class TestParity(unittest.TestCase):
@@ -302,9 +301,7 @@ class TestValidationUtils(unittest.TestCase):
         self.assertNotIn("comp_tdm_scheduled", vu.GEMM_MX_PIPELINES_BY_ARCH["gfx950"])
         self.assertIn(
             "gfx1250",
-            vu.mx_tdm_scheduled_reject_reason(
-                *TILE.values(), "fp4", "fp4", "fp16", "gfx950"
-            ),
+            vu.mx_pipeline_reject_reason(EXT, TILE, "fp4", "fp4", "fp16", "gfx950"),
         )
 
     def test_traits(self):
@@ -399,13 +396,19 @@ class TestValidationUtils(unittest.TestCase):
         dims = [{**TILE, "tile_n": 64, "warp_m": 1, "warp_n": 4}[k] for k in TILE]
         self.assertIn(
             "split_b_read",
-            vu.mx_tdm_scheduled_reject_reason(
-                *dims, "fp4", "fp4", "fp16", "gfx1250", {}
+            vu.mx_pipeline_reject_reason(
+                EXT, dict(zip(TILE, dims)), "fp4", "fp4", "fp16", "gfx1250", {}
             ),
         )
         self.assertEqual(
-            vu.mx_tdm_scheduled_reject_reason(
-                *dims, "fp4", "fp4", "fp16", "gfx1250", {"split_b_lds_read": False}
+            vu.mx_pipeline_reject_reason(
+                EXT,
+                dict(zip(TILE, dims)),
+                "fp4",
+                "fp4",
+                "fp16",
+                "gfx1250",
+                {"split_b_lds_read": False},
             ),
             "",
         )
@@ -609,7 +612,7 @@ class TestDispatcher(unittest.TestCase):
 
 class TestCompileFlags(unittest.TestCase):
     def test_sched_flags_only_for_comp_tdm_scheduled(self):
-        flags = mx._MX_TDM_SCHEDULED_FLAGS
+        flags = EXT.compile_flags
         for pipeline, expect in (("comp_tdm_scheduled", True), ("comp_tdm", False)):
             run_result = mock.Mock(returncode=0, stderr="")
             with mock.patch.object(mx, "_mx_codegen_flags", return_value=()):
