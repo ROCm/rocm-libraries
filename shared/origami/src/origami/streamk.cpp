@@ -494,8 +494,12 @@ size_t select_grid_size(const problem_t& problem,
 
     case grid_selection_t::data_parallel: return streamk::grid_data_parallel(problem, config);
 
-    case grid_selection_t::analytical:
-      return streamk::grid_analytical(problem, hardware, config, 10);
+    case grid_selection_t::analytical: {
+      // Each candidate is modeled as its own launch, which selects its reduction.
+      config_t launches           = config;
+      launches.reduction_strategy = reduction_t::none;
+      return streamk::grid_analytical(problem, hardware, launches, 10);
+    }
 
     case grid_selection_t::k_split_aware:
       return streamk::grid_k_split_aware(problem, hardware, config, cu_count, cu_budget);

@@ -339,26 +339,30 @@ TEST_CASE("GEMM: W4A16 Stream-K sharing tiles is not charged whole waves", "[gem
 
 TEST_CASE("GEMM: W4A16 Stream-K charges the partials of a split tile", "[gemm][w4a16]") {
   const auto hardware = make_w4a16_gfx1151_hardware();
-  // One 128x128 tile with 4 K iterations, on grids that give every workgroup one iteration or
-  // none: 4 workgroups hold the tile's 4 iterations and the owner reads the 3 partials of the
-  // others; 8 workgroups cannot split it further, so there are no more partials to read.
-  auto latency = [&](size_t launch_grid) {
-    auto problem    = make_problem(128, 128, 256);
+  // One 128x128 tile split over `splits` workgroups that run 1984 of K each, so that the K loop
+  // of a workgroup does not change with the split; few tokens, so that the memory does not
+  // either.  A handwritten kernel names its reduction: it has no separate reduction launch.
+  auto latency = [&](size_t splits, origami::reduction_t reduction = origami::reduction_t::tree) {
+    auto problem    = make_problem(128, 8, 1984 * splits);
     problem.a_dtype = origami::data_type_t::Int4;
     auto config     = make_config(128, 128, 64, 16, 16, 16, false, 1, 2, 0, 0, 3);
     config.workspace_size            = std::numeric_limits<size_t>::max() / 2;
     config.workspace_size_per_elem_c = 4;
-    config.launch_grid               = launch_grid;
+    config.launch_grid               = splits;
+    config.reduction_strategy        = reduction;
     return origami::gemm::compute_total_latency(problem, hardware, config);
   };
-  // A partial is 128 x 128 f32 (64 KB) through the CU's L2 path; between 2 and 4 workgroups the
-  // tile gains two partials.
-  const double partial = 128.0 * 128.0 * 4.0 / (hardware.mem1_perf_ratio / static_cast<double>(hardware.N_CU));
-  REQUIRE(partial > 0.0);
-  REQUIRE(latency(4) < std::numeric_limits<double>::max());
-  REQUIRE(latency(8) < std::numeric_limits<double>::max());
-  // No partials without a split.
-  REQUIRE(latency(1) < latency(4) + 3.0 * partial);
+  // The owner waits for, reads and adds each of the other workgroups' partials (128 x 128 f32)
+  // one after another: the measured handshake and bytes of each, in the device's cycles, and
+  // nothing else for the reduction.
+  using w4 = origami::w4a16_params_t;
+  const double partial = (w4::SK_FIXUP_HANDSHAKE_US * 1e-6 + 128.0 * 128.0 * 4.0 / (w4::SK_FIXUP_GB_PER_S * 1e9)) *
+                         hardware.compute_clock_ghz * 1e9;
+  REQUIRE(latency(4) - latency(2) == Approx(2.0 * partial).epsilon(0.15));
+  REQUIRE(latency(8) - latency(4) == Approx(4.0 * partial).epsilon(0.15));
+  // A config that names no reduction has it selected, here a separate launch (few tiles, many
+  // K iterations), which is not the in-kernel fixup.
+  REQUIRE(latency(8, origami::reduction_t::none) != latency(8));
 }
 
 TEST_CASE("GEMM: compute_timestep_latency", "[gemm]") {

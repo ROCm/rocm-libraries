@@ -60,6 +60,10 @@ def create_config(row: dict) -> origami.config_t:
     config.occupancy = value("occupancy")
     config.workgroup_mapping = value("workgroup_mapping")
     config.stream_k = value("stream_k")
+    # Handwritten kernels: the Stream-K partials are reduced in the kernel (as hipBLASLt's
+    # makeOrigamiConfig sets it).
+    if config.stream_k:
+        config.reduction_strategy = origami.reduction_t.Tree
     # Ranked with unlimited workspace, as the Prediction library does.
     config.workspace_size = UNLIMITED
     config.workspace_size_per_elem_c = UNLIMITED

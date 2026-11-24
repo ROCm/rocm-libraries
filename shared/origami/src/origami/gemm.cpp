@@ -640,7 +640,11 @@ std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameter
   reduction_t reduction_strategy = reduction_t::none;
 
   if (config.stream_k > 0) {
-    reduction_strategy = streamk::select_reduction(problem, hardware, config, grid_selection);
+    // A config that names its reduction keeps it (a handwritten kernel reduces in the kernel:
+    // it has no separate reduction launch to select).
+    reduction_strategy = (config.reduction_strategy != reduction_t::none)
+                             ? config.reduction_strategy
+                             : streamk::select_reduction(problem, hardware, config, grid_selection);
     auto config_with_reduction               = config;
     config_with_reduction.reduction_strategy = reduction_strategy;
     num_wgs = (config.launch_grid > 0)
@@ -2491,7 +2495,8 @@ double compute_epilogue_latency(const problem_t& problem,
     // Per-tile K-split reduction (in-kernel: spinlock/tree/atomic).  This still
     // uses byte movement plus fixed sync terms because the reduction path is
     // serialized by inter-WG handoff rather than by D-store coalescing alone.
-    if (splitting_factor > 1 && !is_parallel_reduction) {
+    // (Where the fixup is measured it is charged once for the kernel, in compute_total_latency.)
+    if (splitting_factor > 1 && !is_parallel_reduction && !measured_terms) {
       size_t n_partials = splitting_factor - 1;
       double per_cu_reduce_bw = reduce_bw / static_cast<double>(num_output_tiles);
       double partial_bytes    = static_cast<double>(n_partials) * tile_m * tile_n *
@@ -3517,22 +3522,24 @@ double compute_total_latency(const problem_t& problem,
   }
   double total_latency             = L_timestep * timesteps;
 
-  // W4A16 Stream-K partial tiles: the workgroup that finishes a tile reads and adds the
-  // MT_M x MT_N f32 partial of every other workgroup that worked on it, on the critical path.
-  // A tile split over s workgroups has s - 1 partials; a grid that shares tiles unevenly has
-  // one.
+  // Stream-K partial tiles, where the fixup is measured: the workgroup that owns a tile waits
+  // for, reads and adds the whole MT_M x MT_N f32 partial of every other workgroup that worked
+  // on it, on the critical path.  A tile split over s workgroups has s - 1 partials; a grid
+  // that shares tiles unevenly has one.
   double L_fixup = 0.0;
-  if (w4 && config.stream_k > 0 && context.num_wgs != context.num_output_tiles) {
+  if (heuristic_defaults_t::has_measured_tile_terms(hardware.arch) && config.stream_k > 0 &&
+      context.reduction_strategy != reduction_t::parallel && context.num_wgs != context.num_output_tiles) {
     const double tiles    = static_cast<double>(context.num_output_tiles);
     const double wgs      = static_cast<double>(context.num_wgs);
     // (A tile cannot be split over more workgroups than it has K iterations.)
     const double tile_iters = static_cast<double>(std::max<size_t>(math::safe_ceil_div(K, MT_K), 1));
     const double partials = wgs > tiles ? std::min(std::ceil(wgs / tiles), tile_iters) - 1.0
                                         : (context.num_output_tiles % context.num_wgs ? 1.0 : 0.0);
-    // The owner reads and adds a partial (MT_M x MT_N f32) at the measured rate of that loop,
-    // which is a time: charged in the device's cycles, after the kernel's clock.
+    // Measured times: charged in the device's cycles, after the kernel's clock.
     const double partial_bytes = static_cast<double>(config.mt.m * config.mt.n) * 4.0;
-    L_fixup = partials * partial_bytes / (w4a16_params_t::SK_FIXUP_GB_PER_S * 1e9) * (device.compute_clock_ghz * 1e9);
+    const double seconds = partials * (w4a16_params_t::SK_FIXUP_HANDSHAKE_US * 1e-6 +
+                                       partial_bytes / (w4a16_params_t::SK_FIXUP_GB_PER_S * 1e9));
+    L_fixup = seconds * (device.compute_clock_ghz * 1e9);
   }
 
   total_latency *= clock_ratio;

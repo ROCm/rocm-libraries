@@ -141,6 +141,13 @@ namespace TensileLite
             .workspace_size            = std::numeric_limits<size_t>::max(),
             .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
             .stream_k                  = (sm.isStreamK() ? (sm.hasDynamicAssignment() ? 4 : sm.hasHybridAssignment() ? 5 : 3) : 0),
+            // A handwritten custom kernel reduces its Stream-K partials in the kernel (see
+            // ContractionSolution::getSKReduction): Origami must not rank it with a separate
+            // reduction launch.
+            .reduction_strategy        = (sm.isStreamK() && !solution.customKernel.name.empty()
+                                          && !solution.customKernel.generated)
+                                             ? origami::reduction_t::tree
+                                             : origami::reduction_t::none,
             .index                     = index,
             .grvw_a                    = static_cast<std::size_t>(sm.grvwA),
             .grvw_b                    = static_cast<std::size_t>(sm.grvwB),

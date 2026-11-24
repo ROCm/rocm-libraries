@@ -330,12 +330,18 @@ struct w4a16_params_t {
   static constexpr double BF16_DOT2_DEQUANT_VALU_PER_ELEM = 2.6;  // [KERNEL]
   static constexpr double F16_DOT2_DEQUANT_VALU_PER_ELEM  = 2.3;  // [KERNEL]
 
-  // Rate at which the workgroup that finishes a split tile reads and adds the partials of the
-  // others (MT_M x MT_N f32 each), one after another.  [MEASURED] on a gfx1151: the kernel
-  // time of six kernels (4, 8 and 16 waves, partials of 6 to 196 KB) with the K of 4 to 9 tiles
-  // split in 2, 4 and 8, less the time of their K loops at that grid, is 0.05 to 0.10 us per
-  // KB of partial and does not depend on K (128x128x64 is the exception, at 0.23).
-  static constexpr double SK_FIXUP_GB_PER_S = 12.0;  // [MEASURED]
+  // Stream-K fixup (Components/StreamK.py, linear reduction): the workgroup that owns a tile
+  // waits for the flag of each other workgroup that worked on it, loads that workgroup's whole
+  // MT_M x MT_N f32 partial from the workspace and adds it, one partial after another.
+  // [MEASURED] on a gfx1151: one tile split over 2 to 6 workgroups with the same K each (so the
+  // K loops do not change), seven kernels of 4, 8 and 16 waves and partials of 2 to 197 KB:
+  // the kernel grows by 0.2 us per partial plus its bytes at 69 GB/s (0.3 us for 2 KB, 1.6 for
+  // 98 KB, 3.2 for 197 KB), whatever part of the tile lies inside the problem.  Kernels whose
+  // epilogue has registers for 2 accumulators at a time (128x128x64 and 160x128x64, 32 and 40
+  // load batches a partial where the others have 1 or 2) take 0.08 us more per batch; the
+  // batches are not known to the model and are not charged.
+  static constexpr double SK_FIXUP_GB_PER_S       = 69.0;  // [MEASURED]
+  static constexpr double SK_FIXUP_HANDSHAKE_US   = 0.2;   // [MEASURED]
 };
 
 /// Whether the W4A16 terms apply to @p problem on @p hardware. The latency model and the
