@@ -66,6 +66,7 @@ from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Problem import isFusedA2A
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .SolutionStructs.segment_interleave import wave_tile_span
+from .SolutionStructs.mxs_interleave_extra import LOCAL_READ_SELECTION_TABLE
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
@@ -9026,6 +9027,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                            _ds_store2_b64, _ds_store_b64, _ds_store2_b32,
                            _ds_store_b32, _ds_store_b16, _ds_store_b8 ]
         }
+
+    # Solution folds MXScaleVgprInterleaveExtraVgpr using this table (mxs_interleave_extra).
+    assert tuple((i.blockWidth, i.numOffsets, i.numAddresses) for i in self.memoryInstructions["LocalRead"]) \
+        == LOCAL_READ_SELECTION_TABLE, "LocalRead memory instructions changed: update mxs_interleave_extra.LOCAL_READ_SELECTION_TABLE"
 
     ####################################
     # choose memory instructions

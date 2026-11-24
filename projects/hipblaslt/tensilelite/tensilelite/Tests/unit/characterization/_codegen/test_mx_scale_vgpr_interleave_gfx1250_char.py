@@ -184,17 +184,50 @@ def test_mx_scale_vgpr_interleave_tight_budget(kernels_on_off):
     assert fewer >= 1, "no kernel has fewer scale-bank conflicts than the default layout"
 
 
-@pytest.fixture(scope="module", params=[c for c in _CONFIGS if c[1]], ids=[c[0] for c in _CONFIGS if c[1]])
-def kernels_extra_vgprs(request, tmp_path_factory):
-    # The same config with the solution parameter MXScaleVgprInterleaveExtraVgpr set.
-    name, _ = request.param
+def _emit_with_extra_vgpr(name, tmp_path_factory, values="true", limit=8):
+    """The same designed config with MXScaleVgprInterleaveExtraVgpr: [values] forked in."""
     with open(os.path.join(_DESIGNED, name)) as f:
         text = f.read()
-    assert text.count("    ForkParameters:\n") == 1
-    text = text.replace("    ForkParameters:\n", "    ForkParameters:\n    - MXScaleVgprInterleaveExtraVgpr: [true]\n")
+    text, n = re.subn(r"(ForkParameters:\n)(\s*)- ",
+                      lambda m: f"{m.group(1)}{m.group(2)}- MXScaleVgprInterleaveExtraVgpr: [{values}]\n{m.group(2)}- ",
+                      text, count=1)
+    assert n == 1
     path = tmp_path_factory.mktemp("extra_vgprs") / name
     path.write_text(text)
-    return emit_kernels_from_config(str(path), limit=8, arch=_ARCH)
+    return emit_kernels_from_config(str(path), limit=limit, arch=_ARCH)
+
+
+@pytest.fixture(scope="module", params=_CONFIGS, ids=_IDS)
+def kernels_extra_requested(request, tmp_path_factory):
+    name, tight = request.param
+    return tight, _emit(name), _emit_with_extra_vgpr(name, tmp_path_factory)
+
+
+@pytest.fixture(scope="module", params=[c for c in _CONFIGS if c[1]], ids=[c[0] for c in _CONFIGS if c[1]])
+def kernels_extra_vgprs(request, tmp_path_factory):
+    name, _ = request.param
+    return _emit_with_extra_vgpr(name, tmp_path_factory)
+
+
+def _without_random_labels(src):
+    # The cluster barrier labels carry a random suffix that differs between two emissions.
+    return re.sub(r"(skipCBPreSignal_)[A-Za-z0-9]{16}", r"\1X", src)
+
+
+def test_extra_vgpr_is_folded_unless_the_layout_needs_it(kernels_extra_requested):
+    # Solution folds True into False when the conflict-free layout fits the default span: the kernel is
+    # then identical to the one without the parameter. Where it does not fit, True changes the layout.
+    # (The harness canonicalizes kernel names, so the sources are compared.)
+    tight, default, extra = kernels_extra_requested
+    assert default and len(default) == len(extra)
+    for (_, defaultSrc, _), (_, extraSrc, extraErr) in zip(default, extra):
+        assert extraErr == 0
+        assert (_without_random_labels(defaultSrc) != _without_random_labels(extraSrc)) == tight
+
+
+def test_extra_vgpr_on_a_non_mx_kernel_is_rejected(tmp_path_factory):
+    # rich_gemm_sb has no MX scales: with the parameter set to True no solution survives.
+    assert _emit_with_extra_vgpr("rich_gemm_sb.yaml", tmp_path_factory) == []
 
 
 def test_mx_scale_vgpr_interleave_extra_vgprs_is_conflict_free(kernels_extra_vgprs):
