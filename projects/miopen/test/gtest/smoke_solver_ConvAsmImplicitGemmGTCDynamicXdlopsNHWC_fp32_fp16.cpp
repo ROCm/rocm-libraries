@@ -104,10 +104,10 @@ TEST_P(GPU_Conv2dTuningDynamicXdlops_FP16,
     }
 };
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_Conv2dTuningDynamicXdlops_FP32,
                          testing::Values(GetTestCases()));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_Conv2dTuningDynamicXdlops_FP16,
                          testing::Values(GetTestCases()));

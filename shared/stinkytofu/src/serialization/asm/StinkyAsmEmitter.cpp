@@ -539,33 +539,10 @@ static void emitMnemonic(std::ostream& os, const StinkyInstruction& inst) {
     }
 }
 
-static bool isVCCType(RegType t) {
-    return t == RegType::VCC || t == RegType::VCC_LO || t == RegType::VCC_HI;
-}
-
-static bool isEXECType(RegType t) {
-    return t == RegType::EXEC || t == RegType::EXEC_LO || t == RegType::EXEC_HI;
-}
-
-// isImplicitDest() (destination-side) is shared -- see StinkyAsmIR.hpp. It is
-// also consumed by the waitcnt dataflow's isReturningAtomic(), so both agree
-// on exactly the same "does this atomic return a value" answer.
-
-/// A source register is implicit (not printed) when it was added solely
-/// for dependency tracking.
-static bool isImplicitSrc(const StinkyRegister& reg, const StinkyInstruction& inst) {
-    if (reg.dataType != StinkyRegister::Type::Register) return false;
-
-    RegType t = reg.reg.type;
-
-    if (t == RegType::SCC) return true;
-
-    if (isVCCType(t) && inst.is(IF_ImplicitReadVCC)) return true;
-
-    if (isEXECType(t) && inst.is(IF_ImplicitReadEXEC)) return true;
-
-    return false;
-}
+// isImplicitDest() / isImplicitSrc() are shared -- see StinkyAsmIR.hpp. The destination side
+// is also consumed by the waitcnt dataflow's isReturningAtomic(), the source side by every
+// consumer that indexes printed operands (True16 half selectors, OperandHalves.hpp), so all of
+// them agree on exactly what takes a printed slot.
 
 static FieldType fieldTypeForEmittedSrcOperand(const StinkyInstruction& inst, size_t emitSrcIndex) {
     const HwInstDesc* desc = inst.getHwInstDesc();

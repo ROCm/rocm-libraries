@@ -61,7 +61,7 @@ namespace {
  * @brief Configuration for the 3D Backward Data grouped convolution solver
  *
  * This solver does NOT use split_k parameter (unlike 2D Backward which does).
- * Only supports Candidate Selection heuristics (gfx942/gfx950).
+ * Only supports Candidate Selection heuristics (gfx942/gfx950/gfx1250).
  * Note: 3D solvers do not have KTN models, so solver_name is used for all architectures.
  */
 // clang-format off

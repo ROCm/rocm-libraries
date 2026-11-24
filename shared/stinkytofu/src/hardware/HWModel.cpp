@@ -18,13 +18,44 @@ namespace {
 // load-bearing. One definition in one TU, reached through an exported function,
 // keeps that sound.
 
-// This arch's per-form wait-hide counts. Rows may be added in any order.
-// Other arches omit .waitHide.
-constexpr HWModel::WaitHide::Form kGfx1250WaitHideForms[] = {
-    {.costLatency = 4, .dstVgprs = 8, .xdlVaVdst = 13, .csmaccVaVdst = 13},
-    {.costLatency = 8, .dstVgprs = 8, .xdlVaVdst = 12, .csmaccVaVdst = 12},
-    {.costLatency = 8, .dstVgprs = 16, .xdlVaVdst = 11, .csmaccVaVdst = 11},
-    {.costLatency = 16, .dstVgprs = 8, .xdlVaVdst = 12, .csmaccVaVdst = 12},
+// This arch's per-form wait-hide rules; other arches omit .waitHide.
+using Hide = HWModel::WaitHide::Hide;
+using RoleHide = HWModel::WaitHide::RoleHide;
+using RuleSet = HWModel::WaitHide::RuleSet;
+using Form = HWModel::WaitHide::Form;
+
+constexpr RoleHide roleHide(Hide wmma, Hide mix = {}, Hide valu = {}) {
+    return {.wmma = wmma, .mix = mix, .valu = valu};
+}
+constexpr RuleSet rules(RoleHide dst, RoleHide src = {}, int wmmaSlots = 1) {
+    return {.dst = dst, .src = src, .wmmaSlots = wmmaSlots};
+}
+// A CSMACC producer takes the form's XDL rules; only the src VALU-only count differs.
+constexpr RuleSet forCsmaccProducer(RuleSet xdl) {
+    xdl.src.valu = {0, 12};
+    return xdl;
+}
+// One row: the XDL rules as given, the CSMACC rules derived from them.
+constexpr Form form(int costLatency, int dstVgprs, bool scaled, RuleSet xdl) {
+    return {.costLatency = costLatency,
+            .dstVgprs = dstVgprs,
+            .scaled = scaled,
+            .xdl = xdl,
+            .csmacc = forCsmaccProducer(xdl)};
+}
+
+constexpr Form kGfx1250WaitHideForms[] = {
+    // One row per WMMA form, keyed by (cost latency, dst VGPRs, scaled).
+    // form(key, rules(dst, src)): dst = RAW / WAW hazards, src = WAR hazards.
+    // roleHide({wmma}, {mix lead, tail}, {valu}).
+    form(4, 8, false, rules(roleHide({13, 0}, {6, 7}, {0, 21}), roleHide({9, 0}, {2, 7}, {0, 10}))),
+    form(4, 8, true,
+         rules(roleHide({8, 0}, {5, 6}, {0, 21}), roleHide({5, 0}, {2, 6}, {0, 10}), 2)),
+    form(8, 8, false, rules(roleHide({12, 0}, {5, 7}, {0, 21}), roleHide({9, 0}, {1, 8}, {0, 9}))),
+    form(8, 8, true, rules(roleHide({7, 0}, {4, 6}, {0, 21}), roleHide({5, 0}, {1, 8}, {0, 9}), 2)),
+    form(8, 16, true,
+         rules(roleHide({7, 0}, {3, 8}, {0, 21}), roleHide({5, 0}, {1, 8}, {0, 10}), 2)),
+    form(16, 8, false, rules(roleHide({12, 0}, {5, 7}, {0, 21}), roleHide({9, 0}, {1, 8}, {0, 9}))),
 };
 
 constexpr HWModel kGfx1250Model = {
@@ -80,9 +111,13 @@ constexpr HWModel kGfx1250Model = {
     .waitHide =
         {
             .forms = kGfx1250WaitHideForms,
-            .vmVsrcLds = 11,
-            .vmVsrcTex = 11,
-            .vmVsrcBridge = 11,
+            // Form-independent sets: producers whose rules do not come from a form row (CSMACC
+            // before a latch, TRANS, f64).
+            .noLatchCsmacc = rules({}, roleHide({}, {}, {0, 12})),
+            .dpmacc = rules({}, roleHide({}, {}, {0, 12})),
+            .vmVsrcLds = 10,
+            .vmVsrcTex = 10,
+            .vmVsrcBridge = 10,
         },
 };
 

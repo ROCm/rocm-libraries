@@ -159,7 +159,7 @@ INSTANTIATE_TEST_SUITE_P(
                      testing::ValuesIn(GetLargeStrideFwdTestCases<TestDataType::FP16>())));
 
 INSTANTIATE_TEST_SUITE_P(
-    Full,
+    Comprehensive,
     GPU_UnitTestConvSolverImplicitGemmGroupFwdXdlops_LargeStride_BFP16,
     testing::Combine(testing::Values(GetTestParams<TestDataType::BF16>()),
                      testing::Values(miopenTensorNHWC, miopenTensorNCHW),

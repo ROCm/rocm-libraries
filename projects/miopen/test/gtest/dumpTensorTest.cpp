@@ -152,20 +152,44 @@ std::string GetFullFileName(const std::string& filename)
 }
 } // namespace
 
-TEST(CPU_Dump_FP32, testDump) { testDump<float>(GetFullFileName("float.bin")); }
+using CPU_Dump_FP32 = testing::TestWithParam<int>;
 
-TEST(CPU_Dump_NAN_FP32, testDump) { testDumpWithNan<float>(GetFullFileName("nan_float.bin")); }
+TEST_P(CPU_Dump_FP32, testDump) { testDump<float>(GetFullFileName("float.bin")); }
 
-TEST(CPU_Dump_FP16, testDump) { testDump<half_float::half>(GetFullFileName("half_float.bin")); }
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_Dump_FP32, testing::Values(0));
 
-TEST(CPU_Dump_NAN_FP16, testDump)
+using CPU_Dump_NAN_FP32 = testing::TestWithParam<int>;
+
+TEST_P(CPU_Dump_NAN_FP32, testDump) { testDumpWithNan<float>(GetFullFileName("nan_float.bin")); }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_Dump_NAN_FP32, testing::Values(0));
+
+using CPU_Dump_FP16 = testing::TestWithParam<int>;
+
+TEST_P(CPU_Dump_FP16, testDump) { testDump<half_float::half>(GetFullFileName("half_float.bin")); }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_Dump_FP16, testing::Values(0));
+
+using CPU_Dump_NAN_FP16 = testing::TestWithParam<int>;
+
+TEST_P(CPU_Dump_NAN_FP16, testDump)
 {
     testDumpWithNan<half_float::half>(GetFullFileName("nan_half_float.bin"));
 }
 
-TEST(CPU_Dump_BFP16, testDump) { testDump<bfloat16>(GetFullFileName("bfloat16.bin")); }
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_Dump_NAN_FP16, testing::Values(0));
 
-TEST(CPU_Dump_NAN_BFP16, testDump)
+using CPU_Dump_BFP16 = testing::TestWithParam<int>;
+
+TEST_P(CPU_Dump_BFP16, testDump) { testDump<bfloat16>(GetFullFileName("bfloat16.bin")); }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_Dump_BFP16, testing::Values(0));
+
+using CPU_Dump_NAN_BFP16 = testing::TestWithParam<int>;
+
+TEST_P(CPU_Dump_NAN_BFP16, testDump)
 {
     testDumpWithNan<bfloat16>(GetFullFileName("nan_bfloat16.bin"));
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_Dump_NAN_BFP16, testing::Values(0));
