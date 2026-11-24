@@ -669,7 +669,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasGetBatchBetaStride(hipblasHandle_t handle,
     @param[out]
     result
               device pointer or host pointer to store the amax index.
-              Return value is 0.0 if n, incx<=0.
+              Return value is 0 if n, incx<=0.
 
     ********************************************************************/
 HIPBLAS_EXPORT hipblasStatus_t
@@ -899,7 +899,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasIzamaxStridedBatched_64(hipblasHandle_t   
     @param[out]
     result
               device pointer or host pointer to store the amin index.
-              Return value is 0.0 if n, incx<=0.
+              Return value is 0 if n, incx<=0.
 
     ********************************************************************/
 
