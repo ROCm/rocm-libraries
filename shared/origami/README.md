@@ -16,6 +16,12 @@
   - [C++](#build-and-install-origami-c)
   - [CMake Options](#cmake-options)
   - [Origami Tests](#origami-tests)
+  - [Neural Network (NN) Backend](#neural-network-nn-backend)
+    - [Supported Backends](#supported-backends)
+    - [Model Files](#model-files)
+    - [Runtime Configuration](#runtime-configuration)
+    - [hipBLASLt Integration](#hipblaslt-integration)
+    - [NN Tests](#nn-tests)
 - [Debug Logging](#debug-logging)
   - [Text Log](#text-log)
   - [CSV Log](#csv-log)
@@ -312,6 +318,124 @@ Run selector tests (requires torch):
 ```bash
 python -m pytest tests/test_selector.py -v
 ```
+
+## Neural Network (NN) Backend
+
+`origami::rank_configs` takes a `rank_options_t` that chooses how the candidates are ranked: `inference_mode_t::analytical` (the default), `nn` (an ML backend only; throws if no model resolves), `nn_fallback` (an ML backend when a model resolves, else analytical) or `analytical_rerank` (analytical, then a re-rank backend re-orders its top candidates). `nn_backend_t` picks the backend: `auto_select` resolves `nn_model`, then the caller's `library_models`, then the session default.
+
+### Supported Backends
+
+| Backend | `nn_backend_t` / `backend_id_t` | Status | Model format |
+|---------|---------------------------------|--------|--------------|
+| **olc** (Origami Learned Correction, OLC) | `olc` / `olc_v1` | Re-rank only (`analytical_rerank`) | ORIOLC binary (`.orr`) |
+| **tilewright** | `tilewright` / `tilewright_v1` | Reserved, not in this tree | — |
+| **embedding_similarity** | `embedding_similarity` / `embedding_similarity_v1` | Reserved, not in this tree | — |
+
+No full-ranking backend is built in, so `nn` throws and `nn_fallback` ranks analytically. A full-ranking backend plugs in as an `IRecommender` (`nn/detail/recommender.hpp`, `src/nn/dispatch.cpp`) with its file loader in `src/nn/model_registry.cpp`, under its reserved `backend_id_t`, `nn_backend_t` and `library_models_t` slot.
+
+**olc** (OLC) is a gradient-boosted tree ensemble that predicts each candidate's `log(measured / origami_latency)`. With `inference_mode_t::analytical_rerank`, `rank_configs` ranks analytically and hands the results to the caller's `rerank_source_t::prepare` (its own adjustment of the order, if any); the backend then takes the first `top_n` (10) results the caller accepts, orders them by `origami_latency * exp(yhat)` (the prepared order on ties) and moves them to the front; every other result keeps its prepared order. It never adds a candidate and never ranks by the correction alone. Its 159 features (`features/gemm_olc`, schema c6-5) are a name mapping of Origami's own intermediates (`compute_gemm_intermediates` in `origami/gemm_intermediates.hpp`, also in the Python bindings), including the Stream-K launch the candidate's context models (`gemm_intermediates_t::launch_terms`), plus the coalesced-load counts the caller supplies per candidate (`nn/olc/types.hpp`: `rerank_source_t`, `kernel_fields_t`). One model serves a dtype class on one arch, shared by the class's logic stems: bf16 (A/B BFloat16), tf32 (A/B/C/D f32 with xf32 math) or fp8 (F8BS: A/B Float8 into Float8 math, C/D BFloat16, no MX blocks).
+
+An OLC model is checked when it loads (`nn/olc/load_validate.hpp`) and refused unless it matches: arch, dtype class, feature-schema hash and Origami source hash (sha256 of the analytical sources at configure time; the `nn/` tree is excluded), and the kernel library by manifest diff (`nn/olc/library_stamp.hpp`): kernels may be removed, and added when their gated structural values (DTL, MFMA, LDS mode, one LDS buffer, MT_K) were seen in training. Every call it declines (problem of another dtype class or outside the training M/N/K/batch ranges, fewer than two candidates, a feature it cannot compute) leaves the prepared order unchanged and reports why to the caller (`rerank_source_t::outcome`). A CU budget (`problem_t::num_cus`) is not a range: the features see it. A model's RNGE section holds exactly M, N, K and batch, each once; a file with any other range (for example `num_cus`) is refused at load.
+
+### Model Files
+
+Model files live under `shared/origami/data/nn/<backend>/<arch>/`, each directory with an `origami_nn_index` that maps a hipBLASLt logic file's stem to its model (`data/nn/README.md`). After a hipBLASLt build, every such directory is copied next to its arch's Tensile library under `Tensile/library/<arch>/`, with one `origami_nn_index` holding every backend's entries, and installed with the library (`lib/hipblaslt/library/<arch>/` on Linux).
+
+OLC models live under `shared/origami/data/nn/olc/<arch>/` (`origami_nn_index` and the `origami_olc_<arch>_<dtype>.orr` models, all tracked) with index lines
+
+```
+<logic_stem>  olc  origami_olc_<arch>_<dtype>.orr
+```
+
+An OLC model is loaded for the library it serves, since its checks need that library's manifest:
+
+```cpp
+#include "origami/nn/nn.hpp"
+
+const std::string path =
+    origami::nn::index_weights_path(logic_stem, origami::nn::backend_id_t::olc_v1, library_dir);
+origami::nn::olc::deployment_t target{"gfx950", "bf16", &library_manifest};
+origami::nn::olc::status_t status;
+std::string detail;
+auto handle = origami::nn::load_olc_model(path, target, &status, &detail);
+// handle >= 0 on success; -1 with status / detail saying why the model was refused
+```
+
+#### Shipped OLC models
+
+`data/nn/olc/gfx950/` ships one model per dtype class (`origami_olc_gfx950_{bf16,tf32,fp8}.orr`, 2.3–2.7 MB each). hipBLASLt colocates them next to the gfx950 kernel library and installs them with it; they are used only with `HIPBLASLT_ORIGAMI_OLC=1` (off by default). They were trained on hipBLASLt's default uniform summation order (on), on the general training set plus a workload-like round (3,742 shapes: test-workload shapes with one dimension scaled by 0.7 or 1.4, the other two kept).
+
+Measured on MI350X (gfx950) on the test set (plain shapes), OLC off vs on with the same build, library and card at 256 CUs; speedup is time off / time on, the per-shape geometric mean with a 95% bootstrap interval; slower beyond noise counts shapes more than max(5%, 0.5 µs) slower:
+
+| dtype | shapes | speedup | slower beyond noise | worst shape | strict holdout (shapes): speedup |
+|-------|-------:|---------|--------------------:|------------:|---------------------------------|
+| BF16 | 715 | 1.0314 [1.0255, 1.0376] | 3.2% | 0.84× | (143) 1.0152 [1.0032, 1.0315] |
+| TF32 | 573 | 1.0382 [1.0314, 1.0452] | 3.0% | 0.81× | (137) 1.0253 [1.0133, 1.0381] |
+| FP8 | 713 | 1.0573 [1.0491, 1.0659] | 2.1% | 0.79× | (143) 1.0761 [1.0590, 1.0947] |
+
+No training shape matches a test shape in M, N, K and batch, or comes within 5% of it in all of M, N and K. The workload-like round was derived from about 80% of the test shapes, so on those the table measures this workload rather than unseen shapes. The other ~20%, the strict holdout (whole clusters of test shapes; no training shape within distance 1 in log2(M, N, K, batch)), measures generalization: there the models are as fast as the previous ones (trained without the workload-like round), 1.0018 [0.9953, 1.0085] (BF16), 1.0043 [0.9977, 1.0121] (TF32) and 0.9973 [0.9903, 1.0037] (FP8), against 1.0108, 1.0112 and 1.0081 on the whole test set. The models were trained at 256 CUs; a CU budget (`--sm_count_target`) reaches them through their features.
+
+OLC adds about +117 µs (BF16), +115 µs (TF32) and +145 µs (FP8) to a warm `hipblasLtMatmulAlgoGetHeuristic` call (hipblaslt-bench "Solution selection time", uniform summation order on, the default), and +0.12–0.27 s once, to a process's first call, which loads the model and checks it against the kernel library. That is a few µs more than the previous models in the same session (+6, +8 and +14 µs warm): the trees have 6–10% more leaves. Host-only on one core, the previous models' warm extra was +96 / +86 / +111 µs with uniform summation order on and +63 / +55 / +58 µs with it off.
+
+Most of the difference comes from develop's uniform-summation-order predicate, which OLC evaluates on about 10 candidates per call (stock stops at the first valid one). Its ResolvedStaggerU clause (`uniformSummationOrderLaunchObstacle` in `ContractionSolution.cpp`) recomputes AutoWGM and AutoStaggerU, two Origami predictions, for every candidate, although under uniform summation order `calculateAutoStaggerU()` leaves only mapping 1 or StaggerU 0, so the clause cannot refuse. Fixing that clause in develop will remove most of the extra.
+
+A model is stamped with the Origami sources it was trained against (`origami_source_hash`: the configure-time `ORIGAMI_SOURCE_HASH` of `shared/origami/CMakeLists.txt`, over the `.hpp` files of `include/origami/` except `include/origami/nn/` and the `.cpp`/`.hpp` files of `src/origami/` and `src/simulator/`), so **any edit to those files makes every build refuse the shipped models** until they are re-stamped or retrained. Two tests fail loudly instead of letting that ship:
+
+* `origami-tests "[shipped]"` (`OLC: shipped models load in this build`): every shipped model must be readable and match this build's arch, dtype, feature schema and Origami source hash. On a source-hash mismatch it computes the model features on the feature-parity samples (`tests/data/olc/parity_reference_v5*.csv`) and compares them bit for bit with `tests/data/olc/feature_digests.txt`, the features the models were validated with. Bit-identical: the models are still valid and the test prints the re-stamp command. Changed: the models must be retrained, and the test names the changed columns.
+* `tensilelite-tests` `OrigamiOLCLibrary.ShippedModelsAcceptBuiltLibrary`: every shipped model must be accepted against the kernel library the build made (the manifest diff hipBLASLt runs at load), so a library change the model was not trained for (`RETRAIN-REQUIRED`) fails too, and the library directory's copies must be the shipped files. It reads `<HIPBLASLT_TENSILE_LIBPATH>/library` (or the installed `lib/hipblaslt/library`, or `HIPBLASLT_ORIGAMI_OLC_TEST_LIBRARY`) and skips without a built library or a HIP device.
+
+The feature extractor itself (`src/nn/features/gemm_olc.cpp`, outside the stamp) is covered on every run by `OLC: features match the training feature builder`, which compares all 159 columns with the training pipeline's values on the parity samples (integer-valued columns exactly, the others to a relative 1e-6).
+
+When `"[shipped]"` says the sources changed but the features are bit-identical, re-stamp and commit the models with the source change (from the repository root):
+
+```bash
+./build/tests/origami-tests "[olc]"       # the parity tests pass
+python3 shared/origami/tools/origami_olc_restamp.py --tests ./build/tests/origami-tests
+./build/tests/origami-tests "[shipped]"     # passes now
+git add shared/origami/data/nn/olc
+```
+
+`origami_olc_restamp.py` needs only the Python standard library. Before it rewrites anything it runs `origami-tests "[digests]"` with the binary it is given, which must be built from the current sources: the features on the parity samples must be bit-identical to `feature_digests.txt`, or it refuses. It then rewrites only the HEAD stamps (trees, features and manifest stay byte-identical). It computes the source hash with the CMake rule (`--source-hash` prints it), and `--check` exits 1 while a model is stale.
+
+When the features changed, or the kernel library test reports `RETRAIN-REQUIRED`, the models must be retrained. Training and export live outside this repository (OrigamiML and its ORIOLC exporter); contact the OLC owners (@ROCm/origami-reviewers; models: @aliry95amd). A retrained model replaces the file here, and the digests are recorded at the same time:
+
+```bash
+ORIGAMI_OLC_RECORD_FEATURE_DIGESTS=$PWD/shared/origami/tests/data/olc/feature_digests.txt \
+    ./build/tests/origami-tests "[shipped]"
+```
+
+### Runtime Configuration
+
+| Variable | Description |
+|----------|-------------|
+| `ORIGAMI_NN_DIAG` | Print a line when an OLC model loads (`arch`, dtype, schema, columns, trees) |
+| `ORIGAMI_NN_WEIGHTS_DIR` | Directory of the `origami_nn_index` to read when the caller passes none |
+| `HIPBLASLT_ORIGAMI_OLC=1` | hipBLASLt: load OLC models with the prediction rows that use them and re-rank their candidates (default off) |
+| `TENSILE_PREDICTION_LIB=1` | hipBLASLt: skip the tuned `Equality`/`Range` rows so the `PredictionMatching` row decides (how the re-rank is measured) |
+
+### hipBLASLt Integration
+
+Example: hipblaslt-bench on gfx950, bf16 TN, with the OLC re-rank:
+
+```bash
+export TENSILE_PREDICTION_LIB=1
+export HIPBLASLT_ORIGAMI_OLC=1
+
+hipblaslt-bench -m 3405 -n 4000 -k 5000 -r bf16_r \
+  --transA T --transB N --bias_vector
+```
+
+The models must sit next to the kernel library hipBLASLt loads (its build or install directory, or `HIPBLASLT_TENSILE_LIBPATH` if set); with the variable pointing at a copy of the library without them, every call keeps Origami's order.
+
+hipBLASLt loads a prediction row's OLC model when it deserializes the row (`OrigamiOLC::loadForLogic`: once per model file, against the build and the library directory's prediction-row manifest) and passes `analytical_rerank` with a `rerank_source_t`: the re-rank sees Origami's order as is, and its candidates are the configs that pass the row's predicates, one per kernel name; their kernel fields are the solution's `NumLoadsCoalesced`. The Stream-K launch features come from Origami's own launch model, which matches the launch `ContractionSolution::computeStreamKDecisions` takes with the prediction row's inputs (the kernel's per-element workspace and per-tile-extras capability, the call's CU budget and uniform summation order); hipBLASLt's `TENSILE_STREAMK_*` and persistent-grid overrides, a workspace smaller than a launch's partial tiles need, and the dynamic sub-mode of StreamK=5 under a CU budget are not in that model. FP8 re-ranks plain F8BS calls (Float8 compute input, A/B scales unset or scalar); vector-scaled (A/B or alpha), MX and swizzled calls keep Origami's order. Tuned `Equality`/`Range` rows still take precedence: only the `PredictionMatching` row's candidates are re-ranked. With `HIPBLASLT_LOG_MASK` including info, each call logs `OLC ok ...` or `OLC fallback (<reason>) ...`.
+
+### NN Tests
+
+```bash
+./build/tests/origami-tests "[nn]"
+```
+
+`[nn]` covers the options, the registry and the OLC backend (`[nn][olc]`). The OLC tests' models and feature-parity samples (bf16, tf32, fp8) are the small fixtures in `tests/data/olc/`; `[shipped]` checks the shipped models in `data/nn/olc/` (see "Shipped OLC models"). Both are installed with the tests (`<bindir>/origami/test-data/`), where an installed `origami-tests` finds them next to itself; a missing data directory fails these tests instead of skipping them.
 
 ## Debug Logging
 

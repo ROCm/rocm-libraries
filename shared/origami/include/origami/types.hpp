@@ -38,6 +38,7 @@
 #include <variant>
 
 #include "origami/math.hpp"
+#include "origami/nn/types.hpp"
 #include "origami/origami_export.h"
 
 namespace origami {
@@ -496,6 +497,11 @@ struct tensile_params_t {
   /// allows instead of the scalar edge path.
   int adaptive_gemm = 0;
 
+  /// The Stream-K kernel can hand out a tile's extra iterations within the tile
+  /// (TensileLite InternalArgsSupport::perTileExtraIters); under uniform summation order its
+  /// split factor need not divide the tile's iterations (streamk::uniform_grid).
+  bool stream_k_per_tile_extra_iters = false;
+
   constexpr bool operator==(const tensile_params_t& o) const noexcept {
     return depth_u == o.depth_u && global_split_u == o.global_split_u &&
            global_accumulation == o.global_accumulation && local_split_u == o.local_split_u &&
@@ -517,7 +523,8 @@ struct tensile_params_t {
            lds_transpose_read_a == o.lds_transpose_read_a &&
            lds_transpose_read_b == o.lds_transpose_read_b && tdm_inst == o.tdm_inst &&
            prefetch_gl2 == o.prefetch_gl2 && prefetch_local_read == o.prefetch_local_read &&
-           half_plr == o.half_plr && multicast == o.multicast && adaptive_gemm == o.adaptive_gemm;
+           half_plr == o.half_plr && multicast == o.multicast && adaptive_gemm == o.adaptive_gemm &&
+           stream_k_per_tile_extra_iters == o.stream_k_per_tile_extra_iters;
   }
 
   std::size_t hash() const {
@@ -556,7 +563,8 @@ struct tensile_params_t {
                               prefetch_local_read,
                               half_plr,
                               multicast,
-                              adaptive_gemm);
+                              adaptive_gemm,
+                              stream_k_per_tile_extra_iters);
   }
 };
 
@@ -779,6 +787,10 @@ struct problem_t {
   /// MX block size.
   std::size_t a_mx_block_size = 0;
   std::size_t b_mx_block_size = 0;
+
+  /// The launch keeps a uniform summation order (hipBLASLt's default): a static Stream-K grid
+  /// is snapped onto a row-uniform one (streamk::uniform_grid).
+  bool uniform_summation_order = false;
 };
 
 /**
@@ -814,6 +826,49 @@ struct staggerU_t {
 
   /// StaggerUStrideShift size.
   std::size_t staggerUStrideShift = 0;
+};
+
+/**
+ * @brief How rank_configs chooses between analytical and ML inference.
+ */
+enum class inference_mode_t : std::uint8_t {
+  analytical,   ///< Roofline latency model (default)
+  nn,           ///< ML only; error if no model resolved
+  nn_fallback,  ///< ML if model available; else analytical
+  analytical_rerank,  ///< Analytical, then a re-rank backend re-orders its top candidates
+};
+
+/**
+ * @brief Which ML backend rank_configs uses when inference != analytical.
+ */
+enum class nn_backend_t : std::uint8_t {
+  auto_select,          ///< Resolve from handle, library_models, session default
+  tilewright,           ///< Force tilewright_v1
+  embedding_similarity, ///< Force embedding_similarity_v1
+  olc,                  ///< Force olc_v1 (re-rank backend, inference == analytical_rerank)
+};
+
+/**
+ * @brief Options for origami::rank_configs.
+ */
+struct rank_options_t {
+  /// Analytical model when inference == analytical, or on nn_fallback miss.
+  model_t analytical_model = model_t::gemm;
+
+  /// Inference backend selection (analytical vs ML).
+  inference_mode_t inference = inference_mode_t::analytical;
+
+  /// ML backend selection (tilewright vs ES). Ignored when inference == analytical.
+  nn_backend_t nn_backend = nn_backend_t::auto_select;
+
+  /// Per-call NN model override. invalid_handle → resolve via library_models / default.
+  nn::model_handle_t nn_model = nn::invalid_handle;
+
+  /// Per-library dual-model binding for nn_backend resolution.
+  const nn::library_models_t* library_models = nullptr;
+
+  /// Backend-specific knobs (tilewright min_scored, force_cell, etc.).
+  nn::inference_options_t nn = {};
 };
 
 /**

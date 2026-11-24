@@ -7408,8 +7408,6 @@ namespace TensileLite
                     // Same clamp as the packer / gate: K==0 yields I==0 otherwise.
                     const size_t I
                         = std::max(size_t{1}, problem.getItersPerTile(self.sizeMapping));
-                    // Matches origami::streamk MinItersPerCU (streamk.cpp).
-                    constexpr size_t MinItersPerCU = 8;
                     // "will RUN", not "is supported": the device branches on the
                     // packed uniform-summation-order bit, which the packer sets
                     // only when both terms hold. The mode term is redundant under
@@ -7444,39 +7442,17 @@ namespace TensileLite
                           && !self.sizeMapping.isPersistentDataParallel()
                           && reductionStrat != origami::reduction_t::parallel;
 
-                    if(g0 > tiles)
-                    {
-                        const size_t F0    = g0 / tiles;
-                        size_t       FStar = 1; // always admissible (all-full)
-                        for(size_t F = F0; F >= 2; --F)
-                        {
-                            if((tiles * F) % clusterWidth != 0)
-                                continue;
-                            // Tree all-partial without per-tile extras needs
-                            // F | I. Parallel extras are per PartialIdx and
-                            // tile-symmetric without that capability bit, so
-                            // skip the divisibility requirement for parallel.
-                            if(reductionStrat != origami::reduction_t::parallel
-                               && !perTileExtraIters && (I % F) != 0)
-                                continue;
-                            if((I / F) < MinItersPerCU)
-                                continue;
-                            // F==1 needs no partials; for F>=2 require workspace fit.
-                            if(self.partialTileSize(tiles * F) > problem.workspaceSize())
-                                continue;
-                            // Stay inside the flag region these grids will use.
-                            if(flagRegionBinds
-                               && (tiles * F) > static_cast<size_t>(StreamKFlagElements))
-                                continue;
-                            FStar = F;
-                            break;
-                        }
-                        grid = tiles * FStar;
-                    }
-                    else if(g0 < tiles)
-                    {
-                        grid = tiles;
-                    }
+                    static_assert(StreamKFlagElements == origami::streamk::FLAG_ELEMENTS);
+                    grid = origami::streamk::uniform_grid(
+                        g0,
+                        tiles,
+                        I,
+                        reductionStrat,
+                        clusterWidth,
+                        perTileExtraIters,
+                        self.partialTileSize(1),
+                        problem.workspaceSize(),
+                        flagRegionBinds ? static_cast<size_t>(StreamKFlagElements) : 0);
 
                     if(grid != g0
                        && (pAMDGPU->persistentFixedGrid > 0 || pAMDGPU->persistentMaxCUs > 0
@@ -7646,15 +7622,13 @@ namespace TensileLite
 
     size_t ContractionSolution::partialTileSize(size_t skGrid) const
     {
-        size_t size = 0;
-
-        size_t tileSize
-            = sizeMapping.macroTile.x * sizeMapping.macroTile.y * sizeMapping.workspaceSizePerElemC;
-        size += tileSize * skGrid; // Partials tile per WG
+        // Partials tile per WG.
         // TODO batches
         // TODO round up for alignment?
-
-        return size;
+        return origami::streamk::partial_tile_bytes(sizeMapping.macroTile.x,
+                                                    sizeMapping.macroTile.y,
+                                                    sizeMapping.workspaceSizePerElemC,
+                                                    skGrid);
     }
 
     // Single source of truth for the StreamK launch decisions. The reduction, grid,

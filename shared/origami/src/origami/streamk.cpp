@@ -8,6 +8,9 @@
 #include "origami/math.hpp"
 #include "origami/types.hpp"
 
+#include <algorithm>
+#include <limits>
+
 namespace origami {
 namespace streamk {
 size_t compute_number_of_output_tiles(size_t mt_m, size_t mt_n, size_t m, size_t n, size_t batch) {
@@ -413,7 +416,6 @@ size_t grid_k_split_aware(const problem_t& problem,
     // TODO Benchmark to check if limits are correct
     // constexpr int MinItersForParallel = 64;
     // constexpr int MaxTilesForParallel = 16;
-    constexpr int MinItersPerCU = 8;
 
     if (config.reduction_strategy == reduction_t::parallel) {
       size_t virt_cu_count = cu_count;
@@ -425,7 +427,7 @@ size_t grid_k_split_aware(const problem_t& problem,
       const size_t maxSplitsForTiles = virt_cu_count / tiles;
 
       // Find max splitting factor to ensure each CU has a minimum number of iterations to do
-      const size_t maxSplitsForIters = iters_per_tile / MinItersPerCU;
+      const size_t maxSplitsForIters = iters_per_tile / MIN_ITERS_PER_CU;
 
       const size_t maxSplits = std::min(maxSplitsForTiles, maxSplitsForIters);
       sk_grid                = tiles * maxSplits;
@@ -434,7 +436,7 @@ size_t grid_k_split_aware(const problem_t& problem,
       for (size_t frac : tile_fractions) {
         const size_t splitGrid  = tiles * frac;
         const size_t itersPerCU = iters_per_tile / frac;
-        if (splitGrid <= cu_count && itersPerCU >= MinItersPerCU) {
+        if (splitGrid <= cu_count && itersPerCU >= MIN_ITERS_PER_CU) {
           sk_grid = splitGrid;
           break;
         }
@@ -535,6 +537,253 @@ hybrid_mode_t select_hybrid_mode(const problem_t& problem,
   return (tiles_per_cu > streamk_hybrid_defaults_t::TILES_PER_CU_THRESHOLD_HIGH_OCCUPANCY)
              ? hybrid_mode_t::dynamic
              : hybrid_mode_t::static_;
+}
+
+size_t padded_iters_per_tile(size_t iters_per_tile, size_t k_granularity) {
+  if (k_granularity <= 1 || iters_per_tile == 0) return iters_per_tile;
+  return ((iters_per_tile + k_granularity - 1) / k_granularity) * k_granularity;
+}
+
+static_split_t static_split(size_t tiles,
+                            size_t iters_per_tile,
+                            size_t grid,
+                            int full_tiles,
+                            bool force_dp_only,
+                            size_t k_granularity) {
+  static_split_t split;
+  if (grid == 0) return split;
+
+  // Each workgroup runs an even share of Stream-K iterations, then whole data-parallel tiles.
+  // A grid that divides the tiles needs no Stream-K tiles; force-DP-only keeps every tile whole.
+  const bool big_enough  = tiles > grid;
+  std::uint32_t sk_tiles = force_dp_only ? 0u : static_cast<std::uint32_t>(grid);
+  if (!force_dp_only && tiles % grid != 0) {
+    sk_tiles = big_enough ? static_cast<std::uint32_t>(grid * full_tiles + tiles % grid)
+                          : static_cast<std::uint32_t>(tiles);
+    sk_tiles = std::min(sk_tiles, static_cast<std::uint32_t>(tiles));
+  }
+  split.sk_tiles = sk_tiles;
+
+  // The stride and the leftover are whole K units, over padded tiles.
+  const size_t g            = std::max(k_granularity, size_t{1});
+  const size_t padded_iters = padded_iters_per_tile(iters_per_tile, g);
+  const size_t sk_iters     = static_cast<size_t>(sk_tiles) * padded_iters;
+  split.sk_iters_per_wg     = static_cast<std::uint32_t>(g * (sk_iters / g / grid));
+  split.extra_iters =
+      static_cast<std::uint32_t>(sk_iters - static_cast<size_t>(split.sk_iters_per_wg) * grid);
+  return split;
+}
+
+bool static_split_row_uniform(const static_split_t& split,
+                              size_t tiles,
+                              size_t iters_per_tile,
+                              size_t grid,
+                              bool per_tile_capable,
+                              bool uniform_summation_order,
+                              size_t k_granularity) {
+  // Chunks are cut from the padded flat space.  The kernel takes the per-tile mapping only when
+  // it can and the launch asks for uniform summation order.
+  const size_t padded_iters  = padded_iters_per_tile(iters_per_tile, k_granularity);
+  const bool per_tile_active = per_tile_capable && uniform_summation_order;
+  // A tile's fold signature is the ordered list of chunk lengths summed into it; every tile of
+  // the launch must share one.  That holds when:
+  //  sk_tiles == 0       force-DP-only, every tile whole;
+  //  sk_tiles == tiles, extra_iters == 0 and sk_iters_per_wg | I
+  //                      no data-parallel region: grid == tiles, or equal all-partial chunks.
+  //                      A mixed split (sk_tiles == grid < tiles, grid | tiles) is data parallel
+  //                      then Stream-K; gfx950 skips the tree-partials workspace when
+  //                      tiles % grid == 0 and never stores the Stream-K half of D, so it is
+  //                      refused until the device path writes every tile;
+  //  per-tile extras     sk_tiles == tiles and tiles | grid, with a kernel that hands out the
+  //                      extras within each tile: every tile gets the same remainder pattern.
+  // Without per-tile extras, extra_iters != 0 means two chunk lengths under the global first-E
+  // mapping.  sk_iters_per_wg != 0 is checked because tiles == 0 is reachable.
+  if (split.sk_tiles == 0) return true;
+  if (split.sk_iters_per_wg != 0 && split.extra_iters == 0 && split.sk_tiles == tiles &&
+      padded_iters % split.sk_iters_per_wg == 0)
+    return true;
+  if (per_tile_active && split.sk_tiles == tiles && tiles != 0 && grid % tiles == 0 &&
+      split.sk_iters_per_wg != 0)
+    return true;
+  return false;
+}
+
+iter_range_t workgroup_iter_range(size_t w,
+                                  size_t tiles,
+                                  size_t iters_per_tile,
+                                  size_t grid,
+                                  bool per_tile_capable,
+                                  bool uniform_summation_order,
+                                  size_t k_granularity) {
+  iter_range_t range;
+  if (grid == 0 || tiles == 0 || k_granularity == 0) return range;
+
+  const size_t g            = k_granularity;
+  const size_t padded_iters = padded_iters_per_tile(iters_per_tile, g);
+  const size_t total_iters  = tiles * padded_iters;
+  // The device adds g, not 1, to the long chunks, and E workgroups get one.
+  const size_t W = g * (total_iters / g / grid);
+  const size_t E = (total_iters - W * grid) / g;
+
+  // The device takes the per-tile branch only when the kernel supports it and the packed
+  // uniform-summation-order bit is set; mirror both, or the fixup reads the wrong partials.
+  const bool per_tile_active = per_tile_capable && uniform_summation_order;
+  if (per_tile_active && grid % tiles == 0) {
+    const size_t F     = grid / tiles;
+    const size_t q     = w / F;
+    const size_t s     = w % F;
+    const size_t base  = g * (padded_iters / g / F);
+    const size_t rem_i = (padded_iters - base * F) / g;
+    range.start        = q * padded_iters + s * base + g * std::min(s, rem_i);
+    range.end          = range.start + base + (s < rem_i ? g : size_t{0});
+    return range;
+  }
+
+  // Global first-E mapping.
+  if (w < E) {
+    range.start = w * (W + g);
+    range.end   = range.start + (W + g);
+  } else {
+    range.start = E * (W + g) + (w - E) * W;
+    range.end   = range.start + W;
+  }
+  return range;
+}
+
+bool parallel_reduction_row_uniform(reduction_t reduction,
+                                    size_t grid,
+                                    size_t tiles,
+                                    int stream_k_atomic,
+                                    bool static_two_tile_packing) {
+  // Workgroup i reduces into tile i / F at partial i % F, F = grid / tiles: every tile sees the
+  // same partial set and K ranges when F >= 2 and grid is an exact multiple of tiles.
+  if (reduction != reduction_t::parallel) return false;
+  if (stream_k_atomic != 0) return false;
+  if (!static_two_tile_packing) return false;
+  if (grid == 0 || tiles == 0) return false;
+  if (grid % tiles != 0) return false;
+  if ((grid / tiles) < 2) return false;
+  return true;
+}
+
+dynamic_items_t dynamic_items(size_t tiles,
+                              size_t iters_per_tile,
+                              size_t k_granularity,
+                              int override_tiles,
+                              int override_split) {
+  dynamic_items_t items;
+  items.sk_tiles = override_tiles > -1 ? static_cast<std::uint32_t>(override_tiles) : 0;
+  items.sk_split = override_split > -1 ? static_cast<std::uint32_t>(override_split) : 2;
+  // Whole K units per work item, over the padded tile; the device clamps the last one.
+  const std::uint32_t k_gran = static_cast<std::uint32_t>(std::max(k_granularity, size_t{1}));
+  const std::uint32_t iters  = static_cast<std::uint32_t>(
+      padded_iters_per_tile(std::max(size_t{1}, iters_per_tile), k_gran));
+  // (n + d - 1) / d in 32 bits, as the kernel arguments are packed.
+  auto ceil_div = [](std::uint32_t n, std::uint32_t d) { return (n + (d - 1)) / d; };
+  items.sk_iters_per_wi = k_gran * ceil_div(ceil_div(iters, items.sk_split), k_gran);
+  items.sk_split        = ceil_div(iters, items.sk_iters_per_wi);
+  items.total_items = (tiles - items.sk_tiles) + items.sk_tiles * items.sk_split;
+  return items;
+}
+
+reduction_t reconcile_reduction(reduction_t reduction, size_t grid, size_t tiles) {
+  if (reduction == reduction_t::parallel && (tiles == 0 || (grid / tiles) < 2))
+    return reduction_t::tree;
+  return reduction;
+}
+
+bool straddles_tiles(size_t iters_per_tile, size_t grid, size_t tiles) {
+  return grid > 0 && iters_per_tile > 1 && (tiles % grid) != 0;
+}
+
+size_t partial_tile_bytes(size_t mt_m, size_t mt_n, size_t workspace_size_per_elem_c, size_t grid) {
+  return mt_m * mt_n * workspace_size_per_elem_c * grid;
+}
+
+size_t uniform_grid(size_t grid,
+                    size_t tiles,
+                    size_t iters_per_tile,
+                    reduction_t reduction,
+                    size_t cluster_width,
+                    bool per_tile_extra_iters,
+                    size_t tile_bytes,
+                    size_t workspace_size,
+                    size_t flag_entries) {
+  if (tiles == 0 || grid == 0) return grid;
+  if (grid < tiles) return tiles;
+  if (grid == tiles) return grid;
+
+  const size_t I = iters_per_tile;
+  size_t f_star  = 1;  // all-full, always admissible
+  for (size_t F = grid / tiles; F >= 2; --F) {
+    if ((tiles * F) % cluster_width != 0) continue;
+    // Tree all-partial without per-tile extras needs F | I; parallel extras are per partial.
+    if (reduction != reduction_t::parallel && !per_tile_extra_iters && (I % F) != 0) continue;
+    if ((I / F) < MIN_ITERS_PER_CU) continue;
+    if (tile_bytes * (tiles * F) > workspace_size) continue;
+    if (flag_entries != 0 && (tiles * F) > flag_entries) continue;
+    f_star = F;
+    break;
+  }
+  return tiles * f_star;
+}
+
+partials_t launch_partials(const launch_t& d) {
+  if (!d.is_streamk || d.is_dynamic) return {};
+  if (d.reduction == reduction_t::parallel && d.sk_split >= 2)
+    return {d.tiles * d.sk_split, d.tiles};
+  const std::uint64_t sk = d.dp_only ? 0 : d.sk_tiles, iters = d.iters_per_tile, G = d.final_grid;
+  if (G == 0 || sk == 0 || iters == 0) return {};
+  const std::uint64_t T = sk * iters, W = T / G, E = T % G;
+  // Every workgroup owns whole tiles: no start falls inside one.
+  if (E == 0 && W % iters == 0) return {};
+  // Walk s_g = g * W + min(g, E) as (tile, offset) = (s_g / iters, s_g % iters) without dividing:
+  // s_{g+1} - s_g = W + (g < E).
+  partials_t out;
+  const std::uint64_t Wq = W / iters, Wr = W % iters;
+  std::uint64_t tile = 0, off = 0, last = std::numeric_limits<std::uint64_t>::max();
+  for (std::uint64_t g = 1; g < G; ++g) {
+    tile += Wq;
+    off += Wr + (g - 1 < E ? 1 : 0);
+    if (off >= iters) {
+      off -= iters;
+      ++tile;
+    }
+    if (off == 0) continue;
+    ++out.partials;
+    if (tile != last) {
+      ++out.split_tiles;
+      last = tile;
+    }
+  }
+  return out;
+}
+
+launch_terms_t launch_terms(const problem_t& problem, const launch_t& sk) {
+  launch_terms_t t;
+  if (!sk.is_streamk) return t;
+  const double m     = static_cast<double>(problem.size.m);
+  const double n     = static_cast<double>(problem.size.n);
+  const double batch = static_cast<double>(std::max<size_t>(problem.batch, 1));
+  const double bpe_d = datatype_to_bits(problem.d_dtype) / 8.0;
+
+  const partials_t pt  = launch_partials(sk);
+  const double grid    = static_cast<double>(sk.final_grid);
+  const double tiles   = static_cast<double>(sk.tiles);
+  const std::uint64_t cus = (problem.num_cus > 0 && problem.num_cus < sk.cu_count)
+                                ? static_cast<std::uint64_t>(problem.num_cus)
+                                : sk.cu_count;
+  const std::uint64_t slots = cus * static_cast<std::uint64_t>(std::max(sk.cu_occupancy, 1));
+  const double waves        = slots ? static_cast<double>((sk.final_grid + slots - 1) / slots)
+                                    : std::numeric_limits<double>::quiet_NaN();
+  const double mt = static_cast<double>(sk.mt_x) * static_cast<double>(sk.mt_y) *
+                    static_cast<double>(sk.workspace_size_per_elem_c);
+  t.grid_over_tiles         = grid / tiles;
+  t.split_tiles_frac        = static_cast<double>(pt.split_tiles) / tiles;
+  t.fixup_bytes_over_output = ((2.0 * static_cast<double>(pt.partials)) * mt) / (m * n * batch * bpe_d);
+  t.num_wgs                 = grid;
+  t.timesteps               = waves * tiles / grid;
+  return t;
 }
 }  // namespace streamk
 }  // namespace origami

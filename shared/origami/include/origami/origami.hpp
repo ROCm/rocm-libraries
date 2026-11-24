@@ -111,6 +111,20 @@ ORIGAMI_EXPORT std::vector<prediction_result_t> rank_configs(const problem_t& pr
 ORIGAMI_EXPORT void memoize_non_temporal_availability(std::vector<config_t>& configs);
 
 /**
+ * @brief Rank configurations using analytical or ML inference options.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param configs List of candidate configurations to rank
+ * @param options Inference mode, backend selection, and NN knobs
+ * @return std::vector<prediction_result_t> Configurations ranked by predicted performance
+ */
+ORIGAMI_EXPORT std::vector<prediction_result_t> rank_configs(const problem_t& problem,
+                                              const hardware_t& hardware,
+                                              const std::vector<config_t>& configs,
+                                              rank_options_t options);
+
+/**
  * @brief Select best configuration based only on M, N, K dimensions with default settings.
  *
  * @param M Problem dimension M

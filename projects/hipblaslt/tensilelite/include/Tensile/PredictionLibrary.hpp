@@ -28,11 +28,13 @@
 
 #include <algorithm>
 #include <atomic>
+#include <functional>
 #include <iostream>
 #include <set>
 #include <vector>
 
 #include <Tensile/Debug.hpp>
+#include <Tensile/OrigamiOLC.hpp>
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/UtilsOrigami.hpp>
@@ -55,6 +57,18 @@ namespace TensileLite
     {
         std::vector<std::pair<int, std::shared_ptr<MySolution>>> solution_list;
         std::vector<origami::config_t>                           origami_config_list;
+
+        /// The origami::nn models of this row's logic file (origami_nn_index), if any.
+        origami::nn::library_models_t nn_models;
+
+        /// With an OLC model: per solution_list entry, the position of the first entry with
+        /// the same solutionName (the re-rank skips repeated kernels by name; set with the model).
+        std::vector<std::uint32_t> solution_name_ids;
+
+        /// When set, called with each prediction row as it is deserialized on this thread
+        /// (OrigamiOLC builds the library manifest of a model from it).
+        static inline thread_local std::function<void(ProblemPredictionLibrary const&)> const*
+            deserializeObserver = nullptr;
 
         static std::string Type()
         {
@@ -169,7 +183,7 @@ namespace TensileLite
 
             const bool debug = Debug::Instance().printPropertyEvaluation();
 
-            auto considerSolution = [&](std::shared_ptr<MySolution> const& solution) {
+            auto matches = [&](std::shared_ptr<MySolution> const& solution) {
                 Task task(hardware, problem, *solution);
                 const bool hwMatch = (*(solution->hardwarePredicate))(hardware);
                 // With uniform summation order off, the filter stays
@@ -197,7 +211,23 @@ namespace TensileLite
                     PredicateDebugger::printFooter(std::cout, predicateMatch);
                 }
 
-                if(predicateMatch)
+                return predicateMatch;
+            };
+
+            // The row applies no adjustment of Origami's order of its own.
+            auto keepOrder = [](std::vector<origami::prediction_result_t>&) {};
+
+            // OLC's re-rank: it re-orders Origami's order and takes the predicate
+            // verdicts of the configs it offers.
+            OrigamiOLC::RerankSource<MyProblem,
+                                       MySolution,
+                                       decltype(matches),
+                                       decltype(keepOrder)>
+                rerankSource(solution_list, solution_name_ids, matches, keepOrder);
+
+            auto considerSolution = [&](std::shared_ptr<MySolution> const& solution) {
+                const int known = rerankSource.verdict(solution.get());
+                if(known < 0 ? matches(solution) : known == 1)
                 {
                     rv.emplace_back(solution);
                 }
@@ -223,10 +253,22 @@ namespace TensileLite
                     .mi_dtype    = miDataType,
                     .a_mx_block_size = 0, // MX Data types come from rocroller
                     .b_mx_block_size = 0, // MX Data types come from rocroller
+                    .uniform_summation_order
+                    = problem.getParams().uniformSummationOrder() != 0,
                 };
 
+                origami::rank_options_t rank_options;
+                rank_options.library_models = &nn_models;
+                // nn_models.olc is set only with HIPBLASLT_ORIGAMI_OLC=1 (deserialization).
+                if(nn_models.olc >= 0 && OrigamiOLC::problemClass(problem) != nullptr)
+                {
+                    rerankSource.activate(origami_problem);
+                    rank_options.inference        = origami::inference_mode_t::analytical_rerank;
+                    rank_options.nn_backend       = origami::nn_backend_t::olc;
+                    rank_options.nn.rerank_source = &rerankSource;
+                }
                 auto prediction_result = origami::rank_configs(
-                    origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
+                    origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list, rank_options);
 
                 for(const auto& r : prediction_result)
                 {

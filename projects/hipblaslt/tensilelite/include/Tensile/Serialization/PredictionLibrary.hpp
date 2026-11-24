@@ -45,6 +45,26 @@ namespace TensileLite
             using Library = ProblemPredictionLibrary<MyProblem, MySolution>;
             using iot     = IOTraits<IO>;
 
+            static std::string logic_stem_from_path(const std::string& path)
+            {
+                std::string stem     = path;
+                const auto  slashPos = stem.find_last_of("/\\");
+                if(slashPos != std::string::npos)
+                    stem = stem.substr(slashPos + 1);
+                const auto periodPos = stem.find('.');
+                if(periodPos != std::string::npos)
+                    stem = stem.substr(0, periodPos);
+                return stem;
+            }
+
+            static std::string directory_from_path(const std::string& path)
+            {
+                const auto slashPos = path.find_last_of("/\\");
+                if(slashPos == std::string::npos)
+                    return ".";
+                return path.substr(0, slashPos);
+            }
+
             static void mapping(IO& io, Library& lib)
             {
                 auto ctx = static_cast<LibraryIOContext<MySolution>*>(iot::getContext(io));
@@ -131,8 +151,10 @@ namespace TensileLite
                                 .cache_hints_a             = solution->sizeMapping.cacheHintA(),
                                 .cache_hints_b             = solution->sizeMapping.cacheHintB(),
                                 .cache_hints_d             = solution->sizeMapping.cacheHintD(),
+                                // The per-call workspace is not known here (unbounded); the
+                                // partial-tile size is the kernel's own, as at launch.
                                 .workspace_size            = std::numeric_limits<size_t>::max(),
-                                .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
+                                .workspace_size_per_elem_c = solution->sizeMapping.workspaceSizePerElemC,
                                 .stream_k                  = (solution->sizeMapping.isStreamK() ? (solution->sizeMapping.hasDynamicAssignment() ? 4 : solution->sizeMapping.hasHybridAssignment() ? 5 : 3) : 0),
                                 .index                     = local_index,
                                 .grvw_a                    = static_cast<std::size_t>(
@@ -175,6 +197,8 @@ namespace TensileLite
                                     .half_plr             = solution->sizeMapping.HalfPLR,
                                     .multicast = solution->sizeMapping.Multicast != 0,
                                     .adaptive_gemm = solution->sizeMapping.adaptiveGemm,
+                                    .stream_k_per_tile_extra_iters
+                                    = solution->internalArgsSupport.perTileExtraIters,
                                 },
                             };
 
@@ -183,6 +207,19 @@ namespace TensileLite
                     }
                     // Once per library load. rank_configs reads the flags.
                     origami::memoize_non_temporal_availability(lib.origami_config_list);
+                    if(auto const* observe = Library::deserializeObserver)
+                        (*observe)(lib);
+
+                    // Not while a library manifest is collected (OrigamiOLC::libraryManifest).
+                    if(OrigamiOLC::enabled() && !Library::deserializeObserver)
+                    {
+                        lib.nn_models.olc
+                            = OrigamiOLC::loadForLogic(logic_stem_from_path(ctx->filename),
+                                                         directory_from_path(ctx->filename));
+                        if(lib.nn_models.olc >= 0)
+                            lib.solution_name_ids
+                                = OrigamiOLC::solutionNameIds(lib.solution_list);
+                    }
                 }
             }
             const static bool flow = false;

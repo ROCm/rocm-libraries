@@ -10,6 +10,7 @@
 #include <type_traits>
 #include <variant>
 
+#include <origami/streamk.hpp>
 #include <origami/types.hpp>
 
 #include <Tensile/ContractionProblem_fwd.hpp>
@@ -463,9 +464,7 @@ namespace TensileLite
          */
         static inline size_t paddedItersPerTile(size_t itersPerTile, size_t kGranularity)
         {
-            if(kGranularity <= 1 || itersPerTile == 0)
-                return itersPerTile;
-            return ((itersPerTile + kGranularity - 1) / kGranularity) * kGranularity;
+            return origami::streamk::padded_iters_per_tile(itersPerTile, kGranularity);
         }
 
         /**
@@ -540,10 +539,7 @@ namespace TensileLite
         static inline origami::reduction_t reconcileReduction(
             origami::reduction_t reductionStrat, size_t skGrid, size_t tiles)
         {
-            if(reductionStrat == origami::reduction_t::parallel
-               && (tiles == 0 || (skGrid / tiles) < 2))
-                return origami::reduction_t::tree;
-            return reductionStrat;
+            return origami::streamk::reconcile_reduction(reductionStrat, skGrid, tiles);
         }
 
         // Whether a Stream-K workgroup can stop part-way through a tile, which
@@ -558,7 +554,7 @@ namespace TensileLite
         // caller keeps that as a separate check.
         static inline bool straddlesTiles(size_t itersPerTile, size_t skGrid, size_t tiles)
         {
-            return skGrid > 0 && itersPerTile > 1 && (tiles % skGrid) != 0;
+            return origami::streamk::straddles_tiles(itersPerTile, skGrid, tiles);
         }
 
         /**
