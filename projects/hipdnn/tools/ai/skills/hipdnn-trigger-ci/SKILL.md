@@ -50,7 +50,20 @@ Infer options from the user request:
    python3 <skill-directory>/scripts/trigger_ci.py --pr <pr-number> status
    python3 <skill-directory>/scripts/trigger_ci.py [--branch <branch>] watch [--run-id <run-id>]
    ```
-   `status` with `--pr` shows `gh pr checks`; otherwise it lists the 10 most recent runs on the branch. `--branch` takes precedence over `--pr` in every subcommand. `status` exits non-zero when the query itself fails, including a PR with no checks yet; failing or pending checks are reported, not treated as errors. `watch` without `--run-id` follows the in-progress or queued run with the highest run ID on the branch and exits with the run's status, or exits non-zero when there is no such run; with `--run-id` on a finished run it prints the conclusion and exits with it. After a real dispatch, the reported run ID is the newest `workflow_dispatch` run of that workflow on the branch, so a run someone else dispatched on the same branch at the same moment can still be picked up.
+   `status` with `--pr` first warns (read-only) when the PR's own CI cannot run, then shows `gh pr checks`; otherwise it lists the 10 most recent runs on the branch. `--branch` takes precedence over `--pr` in every subcommand. `status` exits non-zero when the query itself fails, including a PR with no checks yet; failing or pending checks are reported, not treated as errors. `watch` without `--run-id` follows the in-progress or queued run with the highest run ID on the branch and exits with the run's status, or exits non-zero when there is no such run; with `--run-id` on a finished run it prints the conclusion and exits with it. After a real dispatch, the reported run ID is the newest `workflow_dispatch` run of that workflow on the branch, so a run someone else dispatched on the same branch at the same moment can still be picked up.
+
+## Why PR CI did not run
+
+Before dispatching for a PR, or when the user asks why its CI did not run, check `gh pr view <pr-number> --repo ROCm/rocm-libraries --hostname github.com --json isDraft,mergeable,mergeStateStatus,labels` (`status --pr` and `dispatch --pr --dry-run` print these as warnings):
+
+- **Draft, no `ci:run-on-draft` label**: TheRock Multi-Arch CI skips its builds and tests on draft PRs (TheRock's `should_skip_ci` in `configure_multi_arch_ci.py`, gated on the `ci:run-on-draft` label). Say so, and offer to mark the PR ready or add the label: rocm-libraries' workflow triggers on `ready_for_review` as well as `opened`/`synchronize`/`reopened`/`labeled`, so marking the PR ready on its own starts a run. Adding the label instead is a write to the PR: run `gh api --hostname github.com -X POST repos/ROCm/rocm-libraries/issues/<pr-number>/labels -f 'labels[]=ci:run-on-draft'` only after the user explicitly approves. The script never adds it.
+- **`mergeable` = `CONFLICTING` (`mergeStateStatus` = `DIRTY`)**: GitHub runs no `pull_request` workflow while the PR conflicts with its base; only `pull_request_target` ones (PR Bot, Auto Label) appear. The fix is to rebase or resolve the conflict, not to dispatch. `UNKNOWN` means GitHub has not computed it yet; ask again.
+
+## Effective test tier
+
+TheRock's setup job computes one tier for the whole run (`_determine_test_type` in `configure_multi_arch_ci.py`): a `test_filter:<tier>` PR label wins outright, then a release build, then `schedule`, then an external-repo diff confined to CI plumbing (`quick`), then a changed submodule (`standard`), else `quick` by default. Each family's **"Configure test matrix (<family>)"** job receives that tier and can still override it per family (`test_type_for_family` in `amdgpu_family_matrix.py`, e.g. gfx125X forced to `quick`; on a `pull_request` event rocm-libraries also forces gfx950 to `quick` when any changed file matches `projects/hipblaslt/`). Read the job's own log lines to see the result: `INFO:root:Requesting job <component> with test_type <tier>`, and `Overriding test_type from ... to ...` when a family override applied. `status` (for the newest multi-arch run on the branch) and `watch` (after the run ends) print that tier per family; quote it from there.
+
+Behaviour checked against rocm-libraries `69f00b9e5422` and TheRock `4a6dabfc096b` (2026-11-23).
 
 ## Test reference
 
@@ -99,6 +112,7 @@ Summarize:
 - The exact `gh workflow run` command (dry-run output) and whether it was dispatched
 - Workflow, branch and the `-f` inputs (GPU families, test labels)
 - Run ID and URL when dispatched, or the status/watch result
+- Any PR CI blocker (draft without `ci:run-on-draft`, merge conflict) and the effective tier per family
 
 ## Notes
 

@@ -102,12 +102,12 @@ ctest --test-dir <install>/bin/<dir> -L '^standard$' -LE ex_gpu --output-on-fail
 
 ### Test tiers
 
-Every test belongs to a tier, expressed as a ctest label: `quick`, `standard`, `comprehensive`, `full`. Tiers are cumulative in intent; in practice, how much each tier selects differs by project, and core and samples run all their tests at every tier because they are fast. Budgets and tier policy follow TheRock (ROCm's multi-repository build and CI system): [test_filtering.md](https://github.com/ROCm/TheRock/blob/main/docs/development/test_filtering.md). Principles: [Testing Strategy: Tier policy](./testing/TESTING_STRATEGY.md#tier-policy). Standalone and superbuild builds need third-party libraries from the environment or `-DALLOW_FETCH_DEPS=ON` ([Building hipDNN](./Building.md#third-party-libraries)). CI facts below are from this repo's workflows, checked 2026-10-22.
+Every test belongs to a tier, expressed as a ctest label: `quick`, `standard`, `comprehensive`, `full`. Tiers are cumulative in intent; in practice, how much each tier selects differs by project, and core and samples run all their tests at every tier because they are fast. Budgets and tier policy follow TheRock (ROCm's multi-repository build and CI system): [test_filtering.md](https://github.com/ROCm/TheRock/blob/main/docs/development/test_filtering.md). Principles: [Testing Strategy: Tier policy](./testing/TESTING_STRATEGY.md#tier-policy). Standalone and superbuild builds need third-party libraries from the environment or `-DALLOW_FETCH_DEPS=ON` ([Building hipDNN](./Building.md#third-party-libraries)). CI facts below are from this repo's workflows and TheRock's `configure_multi_arch_ci.py`, checked against rocm-libraries `69f00b9e5422` and TheRock `4a6dabfc096b` (2026-11-23).
 
 | Tier | Role (intended) | Runs today in CI | Budget |
 |------|-----------------|------------------|--------|
-| `quick` | Pre-submit minimum: CPU-only unit tests plus a minimal enablement set that flags obvious breaks across providers | Workflow dispatch; fallback when a PR or push cannot be mapped to projects (shared-CI script or config changes, unclassified paths) | < 5 min |
-| `standard` | `quick` plus slower enablement and high-priority regression cases | Every PR and push to `develop` that touches hipDNN: Linux gfx94X, Windows gfx110X | < 30 min |
+| `quick` | Pre-submit minimum: CPU-only unit tests plus a minimal enablement set that flags obvious breaks across providers | Fallback when a PR or push cannot be mapped to projects (shared-CI script or config changes, unclassified paths) | < 5 min |
+| `standard` | `quick` plus slower enablement and high-priority regression cases | Every PR and push to `develop` that touches hipDNN: Linux gfx94X, Windows gfx110X; also the default for a `workflow_dispatch` run that carries no `test_filter` label | < 30 min |
 | `comprehensive` | Nightly breadth | Nightly: Linux gfx94X, Windows gfx1151 | < 2 h |
 | `full` | Release: much broader cases and regression testing | TheRock prerelease builds (outside this repo) | 2 h or more |
 
@@ -127,7 +127,7 @@ Labels on a PR change what CI runs. Required GitHub checks are configured outsid
 | `ci:asan`, `ci:host-asan` | Enables the PR ASAN workflow, which builds ASAN (`ci:asan`) or host-ASAN (`ci:host-asan`) binaries and does not run tests |
 | `ci:gfx*`, `ci:build:gfx*`, `ci:test:gfx*`, `ci:run-all-archs`, `ci:platform:linux`, `ci:platform:windows` | Selects GPU families and platforms |
 | `ci:cpu-test-only` | Disables the GPU test runner for all families |
-| `test_filter:<tier>` | No effect on the PR workflow: its tier is `standard` (or `quick` on a fallback) |
+| `test_filter:<tier>` | Sets the run's tier outright: this is the highest-priority rule in TheRock's tier decision, overriding the release/schedule/diff-based defaults in the tier table above |
 
 ### What gates a pull request
 
@@ -145,7 +145,7 @@ Climb only as far as you need.
 
 1. **Run the label locally.** Build the preset for the affected component and run `ctest -L '^standard$'` as in [Building and running tests](#building-and-running-tests). This matches what a PR runs, minus the GPU architecture.
 2. **Run the installed tree.** Install the build and run the `ctest --test-dir <install>/bin/<dir> ...` command above. This catches missing install rules and files that only exist in the build tree.
-3. **Dispatch the workflow.** Run `therock-multi-arch-ci.yml` through `workflow_dispatch` with `linux_amdgpu_families` or `windows_amdgpu_families` (for example `gfx950`) and `pr_labels: test:hipdnn`. Dispatch runs `quick`.
+3. **Dispatch the workflow.** Run `therock-multi-arch-ci.yml` through `workflow_dispatch` with `linux_amdgpu_families` or `windows_amdgpu_families` (for example `gfx950`) and `pr_labels: test:hipdnn`. Without a `test_filter:<tier>` label in `pr_labels`, dispatch has no diff to classify and falls through to the same priority chain as a PR, defaulting to `standard`; add `test_filter:quick` to `pr_labels` for the `quick` tier instead.
 
 Local and CI runs differ in:
 
