@@ -201,6 +201,23 @@ ROCDECODE_QUICK_CASES = (
 )
 
 
+# rocprofiler-systems installs a generated CTest file: multi-line
+# set_tests_properties, CMake variables, and setup/cleanup fixtures. It cannot
+# be split into per-test commands, so ctest itself runs under rocJITsu. The
+# exclusions mirror TheRock's test_rocprofiler_systems.py (AIPROFSYST-441).
+CTEST_DRIVEN_COMPONENTS = ("rocprofiler-systems",)
+SYSTEMS_EXCLUDED_TESTS = (
+    "transferbench-sys-run|fork.*|openmp-target.*|roctx-sampling|"
+    "roctx-runtime-instrument|jacobi-usm-sys-run|jacobi-roctx.*|jpeg-decode.*|"
+    "matrix-exponential.*|scratch-memory.*|selective-region-region-1-filter.*|"
+    "selective-region-region-2-and-3.*|"
+    "selective-region-no-marker-region-1-filter.*|shmem-pingpong.*|video-decode.*"
+)
+SYSTEMS_EXCLUDED_LABELS = (
+    "annotate|mpi|julia|attach|lulesh|network|overflow|thread_limit"
+)
+
+
 def component_name_for(rocm_root: Path, ctest_file: Path) -> str | None:
     """Name a CTest directory under bin/, share/ or libexec/.
 
@@ -235,7 +252,9 @@ def _quick_test(name: str, command: list[str]) -> dict:
     }
 
 
-def source_quick_group(rocm_root: Path, name: str) -> dict | None:
+def source_quick_group(
+    rocm_root: Path, name: str, label: str = DEFAULT_LABEL
+) -> dict | None:
     """Quick cases whose binaries are built from the nightly sample sources.
 
     rocjpeg and rocdecode ship CMake sources under share/, not a prebuilt
@@ -260,6 +279,26 @@ def source_quick_group(rocm_root: Path, name: str) -> dict | None:
             return None
         tests = [_quick_test("aqlprofile-legacy-tests", [str(script)])]
         return {"component": name, "directory": rocm_root, "tests": tests}
+    if name == "rocprofiler-systems":
+        # Serial on purpose: the tests share one profiling backend and rely on
+        # CTest fixtures, so the whole tree runs through one ctest process.
+        source = rocm_root / "share" / "rocprofiler-systems" / "tests"
+        if not (source / "CTestTestfile.cmake").is_file():
+            return None
+        command = [
+            "ctest",
+            "--test-dir",
+            str(source),
+            "--output-on-failure",
+            "-L",
+            label,
+            "--exclude-regex",
+            SYSTEMS_EXCLUDED_TESTS,
+            "--label-exclude",
+            SYSTEMS_EXCLUDED_LABELS,
+        ]
+        tests = [_quick_test("rocprofiler-systems-ctest", command)]
+        return {"component": name, "directory": source, "tests": tests}
     if name == "rocprofiler-sdk":
         # The nightly ships the SDK tests as a CMake project, not a prebuilt
         # CTest tree. The workflow configures and builds it into
@@ -332,6 +371,8 @@ def discover(
             continue
         if wanted is not None and name not in wanted:
             continue
+        if name in CTEST_DRIVEN_COMPONENTS:
+            continue
         parsed = list(
             parse_ctest_file(
                 ctest_file.read_text(encoding="utf-8", errors="replace")
@@ -359,7 +400,7 @@ def discover(
         for name in sorted(wanted):
             if name in seen:
                 continue
-            group = source_quick_group(rocm_root, name)
+            group = source_quick_group(rocm_root, name, label)
             if group is None:
                 continue
             seen.add(name)

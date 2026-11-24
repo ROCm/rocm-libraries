@@ -169,6 +169,43 @@ class ParseInstalledCTestTest(unittest.TestCase):
             self.assertTrue(Path(command[command.index("--test-dir") + 1]).is_absolute())
             self.assertEqual(command[command.index("-LE") + 1], "spm")
 
+    def test_named_rocprofiler_systems_runs_ctest_with_label_and_exclusions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tests = root / "share" / "rocprofiler-systems" / "tests"
+            # Generated CTest files use CMake variables the line parser cannot
+            # evaluate, so the file must not be split into per-test commands.
+            write_ctest(tests, ["quick"], ["ainic-settings-present"])
+            found = sweep.discover(
+                root, label="^quick$", components=["rocprofiler-systems"]
+            )
+            self.assertEqual(
+                [item["component"] for item in found], ["rocprofiler-systems"]
+            )
+            self.assertEqual(found[0]["directory"], tests)
+            self.assertEqual(
+                [test["name"] for test in found[0]["tests"]],
+                ["rocprofiler-systems-ctest"],
+            )
+            command = found[0]["tests"][0]["command"]
+            self.assertEqual(command[0], "ctest")
+            self.assertEqual(command[command.index("--test-dir") + 1], str(tests))
+            self.assertEqual(command[command.index("-L") + 1], "^quick$")
+            self.assertIn("fork.*", command[command.index("--exclude-regex") + 1])
+            self.assertIn("mpi", command[command.index("--label-exclude") + 1])
+            self.assertNotIn("--parallel", command)
+
+    def test_rocprofiler_systems_label_follows_the_requested_label(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tests = root / "share" / "rocprofiler-systems" / "tests"
+            write_ctest(tests, ["standard"])
+            found = sweep.discover(
+                root, label="^standard$", components=["rocprofiler-systems"]
+            )
+            command = found[0]["tests"][0]["command"]
+            self.assertEqual(command[command.index("-L") + 1], "^standard$")
+
     def test_rocprofiler_sdk_without_test_sources_is_unknown(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(
