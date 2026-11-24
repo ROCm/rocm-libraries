@@ -34,6 +34,10 @@
  * One case per applicability rule the matcher must decline, in severity order:
  * silent-wrong-answer cases first, then faults, then declined features.
  *
+ * Rules the gfx942 pack shares belong in TestAttentionDenseMatchers.cpp, which runs them
+ * on both arches. What stays here is what gfx950 alone decides: it serves no sliding
+ * window and writes no softmax statistics, and its tiles and ranking are its own.
+ *
  * These are matcher-only: no device, no compile, no launch.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
@@ -42,20 +46,8 @@ namespace
 {
 
 using namespace attention_dense_graphs;
-using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
 
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx950_attention_dense.score";
-/// The mask type graph_match derives and kernel_match compares, as the engine names it.
-constexpr std::string_view CAUSAL_TOKEN = "gfx950_attention_dense.causal";
-/// The additive-bias tokens graph_match binds (the uid and strides only when the flag is 1).
-constexpr std::string_view BIAS_TOKEN = "gfx950_attention_dense.bias";
-constexpr std::string_view BIAS_UID_TOKEN = "gfx950_attention_dense.bias.uid";
-constexpr std::string_view BIAS_STRIDE_BATCH_TOKEN = "gfx950_attention_dense.bias.stride_batch";
-constexpr std::string_view BIAS_STRIDE_HEAD_TOKEN = "gfx950_attention_dense.bias.stride_head";
-constexpr std::string_view BIAS_STRIDE_QUERY_TOKEN = "gfx950_attention_dense.bias.stride_query";
-
-/// The bound token prepare() reads the softmax scale from, as an IEEE-754 bit pattern.
-constexpr std::string_view SCALE_BITS_TOKEN = "gfx950_attention_dense.scale_bits";
 
 /// graph_match over @p spec. This suite's base graph is GraphSpec's default: bf16, D128,
 /// B=2, Hq=Hkv=4, Sq=Skv=256, top-left causal.
@@ -78,8 +70,6 @@ struct KernelSpec
     int64_t ragged = 0;
     int64_t blockM = 256;
     int64_t blockN = 64;
-    /// Absent is a record written before the field, which the KMD default completes to 0.
-    std::optional<int64_t> useAdditiveBias;
     /// The descriptor id's final byte. Only the ranking cases vary it.
     unsigned idByte = 0xa1;
 };
@@ -115,10 +105,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(const KernelSpec& spec)
         {std::string("block_m"), spec.blockM},
         {std::string("block_n"), spec.blockN},
     };
-    if(spec.useAdditiveBias.has_value())
-    {
-        kernel.metadata[std::string("use_additive_bias")] = *spec.useAdditiveBias;
-    }
+    // No use_additive_bias: the bias cases live in TestAttentionDenseMatchers.cpp, where
+    // they run on both arches, so every candidate here is a plain record.
     return kernel;
 }
 
@@ -395,27 +383,6 @@ std::vector<Tile> coldOrder(const GraphSpec& graph, const std::vector<KernelSpec
 // Positive controls. Every negative below is only meaningful because these pass.
 // ---------------------------------------------------------------------------
 
-TEST(TestGfx950AttentionDenseGraphMatch, AcceptsDenseBshdCausalGraph)
-{
-    EXPECT_TRUE(matchGraph(GraphSpec{}).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, AcceptsNoMaskGraph)
-{
-    GraphSpec spec;
-    spec.leftBound = std::nullopt;
-    spec.rightBound = std::nullopt;
-    EXPECT_TRUE(matchGraph(spec).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, AcceptsGroupedQueryAttention)
-{
-    GraphSpec spec;
-    spec.numQueryHeads = 8;
-    spec.numKvHeads = 2;
-    EXPECT_TRUE(matchGraph(spec).has_value());
-}
-
 TEST(TestGfx950AttentionDenseGraphMatch, AcceptsHeadSize64)
 {
     GraphSpec spec;
@@ -427,47 +394,6 @@ TEST(TestGfx950AttentionDenseGraphMatch, AcceptsHeadSize64)
 // Silent-wrong-answer cases first
 // ---------------------------------------------------------------------------
 
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBhsdLayout)
-{
-    // The kernel bakes BSHD strides and takes no stride kernargs; BHSD is wrong elements.
-    // One operand at a time runs on both arches in TestAttentionDenseMatchers.cpp.
-    GraphSpec spec;
-    spec.setEveryLayout(SdpaLayout::BHSD);
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, AcceptsSingleHeadUnderEitherStrideSpelling)
-{
-    // A single-head tensor is byte-identically BSHD and BHSD; strict compare would
-    // decline a graph the kernel serves perfectly and empty the whole catalog.
-    GraphSpec bshd;
-    bshd.numQueryHeads = 1;
-    bshd.numKvHeads = 1;
-    EXPECT_TRUE(matchGraph(bshd).has_value());
-
-    GraphSpec bhsd = bshd;
-    bhsd.setEveryLayout(SdpaLayout::BHSD);
-    EXPECT_TRUE(matchGraph(bhsd).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesPaddedSequenceStride)
-{
-    // Far likelier in a real graph than a full transpose: BSHD axis ORDER, but token rows
-    // padded past heads * headSize. The kernel bakes heads * headSize as the row stride,
-    // so every row after the first is read off by the accumulated padding.
-    //
-    // batch = 1 makes the batch axis unit-extent and therefore exempt from the stride
-    // compare, which leaves the sequence-stride clause as the only thing that can catch
-    // this. Heads and sequence both stay above 1 so neither of those is exempted away.
-    GraphSpec packed;
-    packed.batch = 1;
-    EXPECT_TRUE(matchGraph(packed).has_value());
-
-    GraphSpec padded = packed;
-    padded.operand(Q_UID).layout = SdpaLayout::PADDED_BSHD;
-    EXPECT_FALSE(matchGraph(padded).has_value());
-}
-
 // ---------------------------------------------------------------------------
 // Decline logging. hipDNN tells the caller only "No engine configurations available for
 // the graph", so the engine's INFO line is the one place the cause shows. Each line
@@ -478,26 +404,6 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesPaddedSequenceStride)
 LoggedDecline loggedDecline(const GraphSpec& spec)
 {
     return attention_dense_graphs::loggedDecline(GFX950_ATTENTION_DENSE, spec);
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, LogsTheOperandAndTheBakedStridesWhenQIsNotBshd)
-{
-    GraphSpec spec;
-    spec.operand(Q_UID).layout = SdpaLayout::BHSD;
-    const auto decline = loggedDecline(spec);
-    EXPECT_EQ(decline.cause, "layout");
-    EXPECT_NE(decline.detail.find("Q (uid 1)"), std::string::npos) << decline.detail;
-    // The BSHD strides for dims [2, 4, 256, 128].
-    EXPECT_NE(decline.detail.find("131072, 128, 512, 1"), std::string::npos) << decline.detail;
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, LogsTheOutputWhenOnlyOIsNotBshd)
-{
-    GraphSpec spec;
-    spec.operand(O_UID).layout = SdpaLayout::BHSD;
-    const auto decline = loggedDecline(spec);
-    EXPECT_EQ(decline.cause, "layout");
-    EXPECT_NE(decline.detail.find("O (uid 4)"), std::string::npos) << decline.detail;
 }
 
 TEST(TestGfx950AttentionDenseGraphMatch, LogsTheCauseOfEachOtherDecline)
@@ -553,177 +459,6 @@ TEST(TestGfx950AttentionDenseGraphMatch, LogsTheCauseOfEachOtherDecline)
     }
 }
 
-TEST(TestGfx950AttentionDenseGraphMatch, LogsNoDeclineForAGraphItServes)
-{
-    const auto recorder
-        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-    EXPECT_TRUE(matchGraph(GraphSpec{}).has_value());
-    EXPECT_FALSE(recorder.hasLogContaining(std::string(GFX950_ATTENTION_DENSE_ENGINE_NAME)
-                                           + " declined the graph"));
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, LogsNoDeclineForAGraphWithNoSdpaForwardNode)
-{
-    // graph_match sees every graph the catalog misses on. One with no SDPA-forward node
-    // was never this engine's, so it declines without a line.
-    GraphSpec spec;
-    spec.pointwiseOnly = true;
-    const auto decline = loggedDecline(spec);
-    EXPECT_TRUE(decline.cause.empty()) << "[" << decline.cause << "]" << decline.detail;
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesPaddedOutputSequenceStride)
-{
-    // Exact-equality rule, same as the inputs: a dense-but-padded row stride is not the
-    // layout the epilogue bakes. Batch is 1 so the batch axis is unit-extent and exempt,
-    // leaving the sequence stride as the only clause that can reject this graph.
-    GraphSpec spec;
-    spec.batch = 1;
-    EXPECT_TRUE(matchGraph(spec).has_value());
-
-    GraphSpec padded = spec;
-    padded.operand(O_UID).layout = SdpaLayout::PADDED_BSHD;
-    EXPECT_FALSE(matchGraph(padded).has_value());
-}
-
-// ---------------------------------------------------------------------------
-// One stride axis at a time. hasBshdStrides ANDs four per-axis clauses, and the layouts
-// above each break two at once (BHSD: head and sequence; padded: sequence and batch).
-// Each case below perturbs exactly one axis of one operand at B=2, H=4, so no axis is
-// unit-extent and exempt, and that axis's clause is the only one that can decline it.
-// ---------------------------------------------------------------------------
-
-/// Indices into a (B, H, S, D) stride vector.
-constexpr std::size_t BATCH_STRIDE = 0;
-constexpr std::size_t HEAD_STRIDE = 1;
-constexpr std::size_t ELEMENT_STRIDE = 3;
-
-/// The packed BSHD strides of the base shape with the stride at @p axis replaced.
-std::vector<int64_t> packedStridesWith(std::size_t axis, int64_t stride)
-{
-    auto strides = sdpaStrides(SdpaLayout::BSHD, HEADS, SEQ, HEAD_SIZE);
-    strides.at(axis) = stride;
-    return strides;
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAPaddedBatchStrideAlone)
-{
-    // A query sliced out of a larger allocation: rows and heads packed, batches spaced one
-    // row further apart. The kernel bakes S * H * D as the batch pitch, so every batch
-    // after the first is read one row early.
-    const GraphSpec spec;
-    EXPECT_TRUE(matchGraph(spec).has_value());
-
-    GraphSpec padded = spec;
-    padded.operand(Q_UID).strides
-        = packedStridesWith(BATCH_STRIDE, SEQ * HEADS * HEAD_SIZE + HEADS * HEAD_SIZE);
-    EXPECT_FALSE(matchGraph(padded).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAKeyValueCacheViewByItsBatchStride)
-{
-    // K and V as views of a cache allocated for twice the sequence: each batch's rows are
-    // packed, but batches sit a whole cache length apart.
-    const GraphSpec spec;
-    EXPECT_TRUE(matchGraph(spec).has_value());
-
-    const auto cacheView = packedStridesWith(BATCH_STRIDE, 2 * SEQ * HEADS * HEAD_SIZE);
-    GraphSpec keyView = spec;
-    keyView.operand(K_UID).strides = cacheView;
-    EXPECT_FALSE(matchGraph(keyView).has_value());
-
-    GraphSpec valueView = spec;
-    valueView.operand(V_UID).strides = cacheView;
-    EXPECT_FALSE(matchGraph(valueView).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesABroadcastBatchStride)
-{
-    // Batch stride 0: one K broadcast across the batch. The kernel would read a distinct
-    // K per batch from memory that holds one.
-    const GraphSpec spec;
-    EXPECT_TRUE(matchGraph(spec).has_value());
-
-    GraphSpec broadcast = spec;
-    broadcast.operand(K_UID).strides = packedStridesWith(BATCH_STRIDE, 0);
-    EXPECT_FALSE(matchGraph(broadcast).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAHeadStrideAlone)
-{
-    // Rows packed at H * D, heads at a 2 * D pitch: the heads overlap one another.
-    const GraphSpec spec;
-    EXPECT_TRUE(matchGraph(spec).has_value());
-
-    GraphSpec overlapping = spec;
-    overlapping.operand(K_UID).strides = packedStridesWith(HEAD_STRIDE, 2 * HEAD_SIZE);
-    EXPECT_FALSE(matchGraph(overlapping).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesABroadcastHeadStride)
-{
-    // Head stride 0: the MQA-expanded view, one KV head presented as H of them. The
-    // kernel would read H distinct heads from memory that holds one.
-    const GraphSpec spec;
-    EXPECT_TRUE(matchGraph(spec).has_value());
-
-    GraphSpec expanded = spec;
-    expanded.operand(K_UID).strides = packedStridesWith(HEAD_STRIDE, 0);
-    EXPECT_FALSE(matchGraph(expanded).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesANonUnitElementStrideAlone)
-{
-    // head_size stride 2 with every other axis packed: legal as a stride vector, and read
-    // by the kernel as if contiguous.
-    const GraphSpec spec;
-    EXPECT_TRUE(matchGraph(spec).has_value());
-
-    GraphSpec strided = spec;
-    strided.operand(Q_UID).strides = packedStridesWith(ELEMENT_STRIDE, 2);
-    EXPECT_FALSE(matchGraph(strided).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBsdhLayout)
-{
-    // Token-major like BSHD but head fastest-varying: same row and batch pitch, with the
-    // head and element strides exchanged.
-    GraphSpec spec;
-    spec.operand(Q_UID).layout = SdpaLayout::BSDH;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBottomRightCausalWhenSeqLensDiffer)
-{
-    // Top-left causal clamp != bottom-right when Sq != Skv: serving it is a wrong answer.
-    GraphSpec spec;
-    spec.seqLenKv = SEQ * 2;
-    spec.alignment = data_objects::DiagonalAlignment::BOTTOM_RIGHT;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, AcceptsBottomRightCausalWhenSeqLensMatch)
-{
-    // The complement: every shipped quick/SdpaFwd causal bundle sets BOTTOM_RIGHT at
-    // Sq == Skv; declining it outright declines all of them.
-    GraphSpec spec;
-    spec.alignment = data_objects::DiagonalAlignment::BOTTOM_RIGHT;
-    EXPECT_TRUE(matchGraph(spec).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesTheDeprecatedBottomRightBooleanAtUnequalSeqLens)
-{
-    // causal_mask_bottom_right alone, no bounds: bottom-right causal, which the top-left
-    // kernel serves only at Sq == Skv. Read as top-left instead, Sq != Skv would be
-    // served with the other corner's mask.
-    GraphSpec spec;
-    spec.leftBound = std::nullopt;
-    spec.rightBound = std::nullopt;
-    spec.causalMaskBottomRightDeprecated = true;
-    spec.seqLenKv = SEQ * 2;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
 TEST(TestGfx950AttentionDenseGraphMatch, ServesTheDeprecatedBottomRightBooleanAtEqualSeqLens)
 {
     // The positive neighbour: at Sq == Skv the corners coincide, and the graph is served
@@ -745,68 +480,6 @@ TEST(TestGfx950AttentionDenseGraphMatch, ServesTheDeprecatedBottomRightBooleanAt
 // ---------------------------------------------------------------------------
 // Faults and malformed input
 // ---------------------------------------------------------------------------
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesGraphWithNoStrides)
-{
-    GraphSpec spec;
-    spec.omitStrides = true;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesMultiNodeGraph)
-{
-    GraphSpec spec;
-    spec.twoNodes = true;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAnOperandWithNoDims)
-{
-    // dims is optional in the schema, so a verified graph can carry an operand without
-    // one. Every extent the matcher reads comes from it.
-    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
-    {
-        SCOPED_TRACE(uid);
-        GraphSpec spec;
-        spec.omitDimsUid = uid;
-        EXPECT_FALSE(matchGraph(spec).has_value());
-    }
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesARaggedOperand)
-{
-    // A ragged offset tensor packs the sequences back to back; the kernel indexes every
-    // operand as dense (B, S, H, D).
-    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
-    {
-        SCOPED_TRACE(uid);
-        GraphSpec spec;
-        spec.raggedUid = uid;
-        EXPECT_FALSE(matchGraph(spec).has_value());
-    }
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAGraphMissingAnOperandTensor)
-{
-    // The node names a uid the graph holds no tensor for: there is nothing to read a shape
-    // from, and nothing for that operand's pointer argument to address.
-    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
-    {
-        SCOPED_TRACE(uid);
-        GraphSpec spec;
-        spec.omitTensorUid = uid;
-        EXPECT_FALSE(matchGraph(spec).has_value());
-    }
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesANonSdpaNode)
-{
-    // One node, but not an SDPA one. DeclinesMultiNodeGraph covers the node count; this
-    // covers the node's type, without which its attributes would be read as SDPA's.
-    GraphSpec spec;
-    spec.pointwiseOnly = true;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
 
 TEST(TestGfx950AttentionDenseKernelMatch, RefusesAGraphWithoutASingleSdpaNode)
 {
@@ -846,70 +519,6 @@ TEST(TestGfx950AttentionDenseKernelMatch, RefusesAGraphMissingTheQueryOrKeyTenso
     }
 }
 
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAnOperandOfAnotherRank)
-{
-    // Every axis index the matcher reads assumes rank 4. A rank-5 K carries all four of
-    // them and more, so only the rank check stands between it and a match; rank 3 would
-    // have its missing axis read out of bounds.
-    const auto packed = sdpaStrides(SdpaLayout::BSHD, HEADS, SEQ, HEAD_SIZE);
-    const std::vector<int64_t> rank4Dims{BATCH, HEADS, SEQ, HEAD_SIZE};
-    const std::vector<int64_t> rank5Dims{BATCH, HEADS, SEQ, HEAD_SIZE, 1};
-    const std::vector<int64_t> rank5Strides{packed.at(0), packed.at(1), packed.at(2), 1, 1};
-
-    GraphSpec control;
-    control.operand(K_UID).dims = rank4Dims;
-    control.operand(K_UID).strides = packed;
-    EXPECT_TRUE(matchGraph(control).has_value());
-
-    GraphSpec bothRank5 = control;
-    bothRank5.operand(K_UID).dims = rank5Dims;
-    bothRank5.operand(K_UID).strides = rank5Strides;
-    EXPECT_FALSE(matchGraph(bothRank5).has_value());
-
-    GraphSpec dimsRank5 = control;
-    dimsRank5.operand(K_UID).dims = rank5Dims;
-    EXPECT_FALSE(matchGraph(dimsRank5).has_value());
-
-    GraphSpec stridesRank5 = control;
-    stridesRank5.operand(K_UID).strides = rank5Strides;
-    EXPECT_FALSE(matchGraph(stridesRank5).has_value());
-
-    GraphSpec rank3 = control;
-    rank3.operand(K_UID).dims = std::vector<int64_t>{BATCH, HEADS, SEQ};
-    rank3.operand(K_UID).strides = std::vector<int64_t>{packed.at(0), packed.at(1), packed.at(2)};
-    EXPECT_FALSE(matchGraph(rank3).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAZeroExtent)
-{
-    // A zero batch or a zero-length KV sequence. The fixture's strides stay consistent
-    // with the zero and no bound is approached, so the extent check is the only one that
-    // fails.
-    GraphSpec noBatch;
-    noBatch.batch = 0;
-    EXPECT_FALSE(matchGraph(noBatch).has_value());
-
-    GraphSpec noKeys;
-    noKeys.seqLenKv = 0;
-    EXPECT_FALSE(matchGraph(noKeys).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAVirtualOperand)
-{
-    // A virtual tensor has no device buffer for the launch to hand the kernel.
-    GraphSpec spec;
-    spec.virtualUid = K_UID;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAPassByValueOperand)
-{
-    // A runtime pass-by-value tensor is a scalar, not a buffer the ABI takes a pointer to.
-    GraphSpec spec;
-    spec.passByValueUid = V_UID;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesUnsupportedHeadSize)
 {
     GraphSpec spec;
@@ -928,59 +537,6 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesUnsupportedHeadSize)
 // extents too large to derive strides from at all.
 // ---------------------------------------------------------------------------
 
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesOverflowingOutputExtents)
-{
-    // O's extents here are positive and rank-4, so the well-formedness predicate passes
-    // them through, but S * H * D for those extents is 2^63 -- one past INT64_MAX, and that
-    // product is what hasBshdStrides derives O's batch stride from. As ordered, the
-    // head-count compare rejects the graph before O's layout is read; the case exists to
-    // keep the overflow-capable domain reachable and declined. O's strides are written out
-    // as the ordinary dense BSHD spelling of the PROBLEM shape, so no stride value is what
-    // rejects this graph.
-    const GraphSpec spec;
-    EXPECT_TRUE(matchGraph(spec).has_value());
-
-    GraphSpec overflowing = spec;
-    overflowing.operand(O_UID).dims
-        = std::vector<int64_t>{BATCH, int64_t{1} << 16, int64_t{1} << 31, int64_t{1} << 16};
-    overflowing.operand(O_UID).strides = sdpaStrides(SdpaLayout::BSHD, HEADS, SEQ, HEAD_SIZE);
-    EXPECT_FALSE(matchGraph(overflowing).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, AbsentAttentionScaleBindsOne)
-{
-    // cuDNN's default: no attn_scale_value and no scale tensor means no scaling, at every
-    // head size.
-    for(const int64_t headSize : {int64_t{64}, int64_t{128}})
-    {
-        SCOPED_TRACE(headSize);
-        GraphSpec spec;
-        spec.headSize = headSize;
-        spec.attnScaleValue = std::nullopt;
-        const auto bound = matchGraph(spec);
-        ASSERT_TRUE(bound.has_value());
-        EXPECT_EQ(
-            hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, SCALE_BITS_TOKEN).value_or(-1),
-            ieee754Bits(1.0F));
-    }
-
-    // An explicit scale still wins over the default.
-    GraphSpec explicitScale;
-    explicitScale.attnScaleValue = 0.5F;
-    const auto bound = matchGraph(explicitScale);
-    ASSERT_TRUE(bound.has_value());
-    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, SCALE_BITS_TOKEN).value_or(-1),
-              ieee754Bits(0.5F));
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBothDeprecatedCausalBooleans)
-{
-    GraphSpec spec;
-    spec.causalMaskDeprecated = true;
-    spec.causalMaskBottomRightDeprecated = true;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
 // ---------------------------------------------------------------------------
 // Extents whose products do not fit in int64_t. Every one is declined, and every one
 // would be accepted by an unchecked product that wrapped modulo 2^64: the wrapped value
@@ -989,23 +545,6 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBothDeprecatedCausalBooleans)
 // deriving them would overflow. The 32-bit bounds, and K/V and Q/O counts past int64_t,
 // run on both arches in TestAttentionDenseMatchers.cpp.
 // ---------------------------------------------------------------------------
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAQueryBatchStrideOf2To67)
-{
-    // Q dims {2, 2^30, 2^30, 128}: S * H * D = 2^67, which does not fit in int64_t, and Q
-    // and O carry the batch stride 0 it would wrap to beside packed head, row and element
-    // strides. hasBshdStrides forms that product through checkedProduct, which removes the
-    // undefined behaviour but is not observable in any verdict: every graph whose S * H * D
-    // overflows also overflows B * S * H * D, which the Q bound declines.
-    const std::vector<int64_t> wrappedStrides{0, HEAD_SIZE, (int64_t{1} << 30) * HEAD_SIZE, 1};
-    GraphSpec spec;
-    spec.numQueryHeads = int64_t{1} << 30;
-    spec.seqLenQ = int64_t{1} << 30;
-    spec.numKvHeads = 1;
-    spec.operand(Q_UID).strides = wrappedStrides;
-    spec.operand(O_UID).strides = wrappedStrides;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesKeyValueExtentsOf2To97Bytes)
 {
@@ -1028,85 +567,9 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesKeyValueExtentsOf2To97Bytes)
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesTheGraphMatchGateCounterexample)
-{
-    // A graph whose bound products wrap to 0 is declined. Packed BSHD, bf16, H8, D128,
-    // unmasked, Q {2^20, 8, 2^34, 128} and K/V {2^20, 8, 2^33, 128}: every stride fits,
-    // and both bound products are exactly 2^64, which wraps to 0. Every length is a
-    // multiple of every tile, so unchecked the whole catalog would admit it.
-    GraphSpec spec;
-    spec.batch = int64_t{1} << 20;
-    spec.numQueryHeads = 8;
-    spec.numKvHeads = 8;
-    spec.seqLenQ = int64_t{1} << 34;
-    spec.seqLenKv = int64_t{1} << 33;
-    spec.leftBound = std::nullopt;
-    spec.rightBound = std::nullopt;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
 // ---------------------------------------------------------------------------
 // Declined optional features
 // ---------------------------------------------------------------------------
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAnAttnMaskUidNamingNoTensor)
-{
-    GraphSpec spec;
-    spec.attnMaskUid = EXTRA_UID;
-    const auto decline = loggedDecline(spec);
-    EXPECT_EQ(decline.cause, "attn_mask") << decline.detail;
-    EXPECT_NE(decline.detail.find("uid 99"), std::string::npos) << decline.detail;
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesDeviceResidentScaleTensor)
-{
-    GraphSpec spec;
-    spec.scaleTensorUid = EXTRA_UID;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesVarlen)
-{
-    GraphSpec spec;
-    spec.seqLenQUid = EXTRA_UID;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesCuSeqLenOnEachSide)
-{
-    // Control: the unmodified graph matches. padding_mask stays false in GraphSpec, so only
-    // the cu_seq_len decline can reject the graphs below.
-    ASSERT_TRUE(matchGraph(GraphSpec{}).has_value());
-
-    GraphSpec q;
-    q.cuSeqLenQUid = EXTRA_UID;
-    EXPECT_FALSE(matchGraph(q).has_value());
-
-    GraphSpec kv;
-    kv.cuSeqLenKvUid = EXTRA_UID;
-    EXPECT_FALSE(matchGraph(kv).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesPagedKv)
-{
-    GraphSpec spec;
-    spec.pageTableKUid = EXTRA_UID;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAttentionSinks)
-{
-    GraphSpec spec;
-    spec.sinkTokenUid = EXTRA_UID;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBlockSparseMask)
-{
-    GraphSpec spec;
-    spec.blockMaskUid = EXTRA_UID;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
 
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesSoftmaxStatsBothSpellings)
 {
@@ -1125,134 +588,6 @@ TEST(TestGfx950AttentionDenseGraphMatch, AcceptsExplicitlyDisabledStats)
     GraphSpec spec;
     spec.generateStats = false;
     EXPECT_TRUE(matchGraph(spec).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesDropout)
-{
-    GraphSpec spec;
-    spec.dropoutProbability = 0.1F;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesFp8Descale)
-{
-    GraphSpec spec;
-    spec.descaleQUid = EXTRA_UID;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesEveryOtherSpellingOfEachDeclinedFeature)
-{
-    // The cases above decline each feature through one spelling. Every other uid that
-    // requests the same feature is set here on its own, so dropping any one of them from
-    // its decline is seen.
-    using UidField = std::optional<int64_t> GraphSpec::*;
-    const std::vector<std::pair<const char*, UidField>> spellings{
-        {"seq_len_kv", &GraphSpec::seqLenKvUid},
-        {"cu_seq_len_q", &GraphSpec::cuSeqLenQUid},
-        {"cu_seq_len_kv", &GraphSpec::cuSeqLenKvUid},
-        {"seed", &GraphSpec::seedUid},
-        {"offset", &GraphSpec::offsetUid},
-        {"dropout_mask", &GraphSpec::dropoutMaskUid},
-        {"dropout_scale", &GraphSpec::dropoutScaleUid},
-        {"page_table_v", &GraphSpec::pageTableVUid},
-        {"descale_k", &GraphSpec::descaleKUid},
-        {"descale_v", &GraphSpec::descaleVUid},
-        {"descale_s", &GraphSpec::descaleSUid},
-        {"scale_s", &GraphSpec::scaleSUid},
-        {"scale_o", &GraphSpec::scaleOUid},
-        {"amax_s", &GraphSpec::amaxSUid},
-        {"amax_o", &GraphSpec::amaxOUid},
-        {"max", &GraphSpec::maxUid},
-        {"sum_exp", &GraphSpec::sumExpUid},
-        {"rng_dump", &GraphSpec::rngDumpUid},
-    };
-    for(const auto& [name, field] : spellings)
-    {
-        SCOPED_TRACE(name);
-        GraphSpec spec;
-        spec.*field = EXTRA_UID;
-        EXPECT_FALSE(matchGraph(spec).has_value());
-    }
-
-    // Paged KV's scalar spelling.
-    GraphSpec maxSeqLenKv;
-    maxSeqLenKv.maxSeqLenKv = static_cast<int32_t>(SEQ);
-    EXPECT_FALSE(matchGraph(maxSeqLenKv).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesAlibiMask)
-{
-    GraphSpec spec;
-    spec.alibiMask = true;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesPaddingMask)
-{
-    GraphSpec spec;
-    spec.paddingMask = true;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesNonAutoImplementationHint)
-{
-    GraphSpec spec;
-    spec.implementation = data_objects::AttentionImplementation::COMPOSITE;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, AcceptsTheSixteenBitMmaCoreModes)
-{
-    // mma_core_mode is the MMA operand precision, and this kernel's operands are the
-    // graph's fp16/bf16 inputs. HALF is also what the cuDNN-compat shim sets whenever the
-    // caller leaves the field unset, so declining it would decline every shim graph.
-    // Each graph is matched against the kernel built for its own dtype.
-    for(const auto dataType : {data_objects::DataType::BFLOAT16, data_objects::DataType::HALF})
-    {
-        for(const auto mode : {data_objects::DataType::UNSET,
-                               data_objects::DataType::HALF,
-                               data_objects::DataType::BFLOAT16})
-        {
-            SCOPED_TRACE(std::string("graph ") + data_objects::EnumNameDataType(dataType)
-                         + ", mma_core_mode " + data_objects::EnumNameDataType(mode));
-            GraphSpec spec;
-            spec.dataType = dataType;
-            spec.mmaCoreMode = mode;
-            KernelSpec kernel;
-            kernel.dtype = dataType == data_objects::DataType::HALF ? "FP16" : "BF16";
-            EXPECT_TRUE(matchesKernel(spec, kernel));
-        }
-    }
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesMmaCoreModeFloat)
-{
-    // An fp32-operand MMA is a computation this kernel never performs.
-    for(const auto dataType : {data_objects::DataType::BFLOAT16, data_objects::DataType::HALF})
-    {
-        SCOPED_TRACE(std::string("graph ") + data_objects::EnumNameDataType(dataType)
-                     + ", mma_core_mode FLOAT");
-        GraphSpec spec;
-        spec.dataType = dataType;
-        spec.mmaCoreMode = data_objects::DataType::FLOAT;
-        EXPECT_FALSE(matchGraph(spec).has_value());
-    }
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesEveryFp8MmaCoreMode)
-{
-    for(const auto mode : {data_objects::DataType::FP8_E4M3,
-                           data_objects::DataType::FP8_E5M2,
-                           data_objects::DataType::FP8_E8M0,
-                           data_objects::DataType::FP8_E4M3_FNUZ,
-                           data_objects::DataType::FP8_E5M2_FNUZ})
-    {
-        SCOPED_TRACE(data_objects::EnumNameDataType(mode));
-        GraphSpec spec;
-        spec.mmaCoreMode = mode;
-        EXPECT_FALSE(matchGraph(spec).has_value());
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1294,73 +629,6 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesWhenDeprecatedBoolIsSetAlongsid
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesDeprecatedCausalWithRightBoundBelowMinusOne)
-{
-    GraphSpec spec;
-    spec.causalMaskDeprecated = true;
-    spec.rightBound = -5;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, StillServesPlainDeprecatedCausalWithNoBound)
-{
-    // The control: bound-wins must not over-fire and decline ordinary deprecated-causal.
-    GraphSpec spec;
-    spec.causalMaskDeprecated = true;
-    spec.leftBound = std::nullopt;
-    spec.rightBound = std::nullopt;
-    EXPECT_TRUE(matchGraph(spec).has_value());
-}
-
-/// Both spellings of one causal mask must bind identically, as causal, so neither reaches a
-/// candidate the other would not: served by the causal kernel, refused by the unmasked one.
-void expectOneCausalMask(const GraphSpec& bounds, const GraphSpec& flag)
-{
-    const auto boundsBinding = matchGraph(bounds);
-    const auto flagBinding = matchGraph(flag);
-    ASSERT_TRUE(boundsBinding.has_value());
-    ASSERT_TRUE(flagBinding.has_value());
-    EXPECT_EQ(tryGetBoundInt(*boundsBinding, CAUSAL_TOKEN), std::optional<int64_t>{1});
-    EXPECT_EQ(tryGetBoundInt(*flagBinding, CAUSAL_TOKEN), std::optional<int64_t>{1});
-    EXPECT_TRUE(*boundsBinding == *flagBinding);
-
-    KernelSpec causal;
-    causal.causal = 1;
-    KernelSpec unmasked;
-    unmasked.causal = 0;
-    for(const GraphSpec* spec : std::initializer_list<const GraphSpec*>{&bounds, &flag})
-    {
-        SCOPED_TRACE(spec == &bounds ? "bounds" : "deprecated flag");
-        EXPECT_TRUE(matchesKernel(*spec, causal));
-        EXPECT_FALSE(matchesKernel(*spec, unmasked));
-    }
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, BoundsAndTheDeprecatedFlagSpellTheSameTopLeftCausalMask)
-{
-    // left -1 / right 0 / TOP_LEFT and causal_mask=true with no bounds are one mask.
-    const GraphSpec bounds;
-    GraphSpec flag;
-    flag.causalMaskDeprecated = true;
-    flag.leftBound = std::nullopt;
-    flag.rightBound = std::nullopt;
-    expectOneCausalMask(bounds, flag);
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch,
-     BoundsAndTheDeprecatedFlagSpellTheSameBottomRightCausalMask)
-{
-    // left -1 / right 0 / BOTTOM_RIGHT and causal_mask_bottom_right=true with no bounds are
-    // one mask. At the default Sq == Skv the corners coincide, so both are served as causal.
-    GraphSpec bounds;
-    bounds.alignment = data_objects::DiagonalAlignment::BOTTOM_RIGHT;
-    GraphSpec flag;
-    flag.causalMaskBottomRightDeprecated = true;
-    flag.leftBound = std::nullopt;
-    flag.rightBound = std::nullopt;
-    expectOneCausalMask(bounds, flag);
-}
-
 TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBidirectionalSlidingWindow)
 {
     // A graph with both left_bound and a non-zero right_bound is a bidirectional window.
@@ -1368,17 +636,6 @@ TEST(TestGfx950AttentionDenseGraphMatch, DeclinesBidirectionalSlidingWindow)
     // serving it would produce silent wrong numerics.
     GraphSpec spec;
     spec.leftBound = 127;
-    spec.rightBound = 64;
-    EXPECT_FALSE(matchGraph(spec).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesCausalWithNonZeroRightBound)
-{
-    // A graph with causal_mask=true and right_bound > 0 also describes a shape the kernel
-    // cannot serve correctly. The right_bound wins over the deprecated causal boolean.
-    GraphSpec spec;
-    spec.causalMaskDeprecated = true;
-    spec.leftBound = std::nullopt;
     spec.rightBound = 64;
     EXPECT_FALSE(matchGraph(spec).has_value());
 }
@@ -1392,21 +649,6 @@ TEST(TestGfx950AttentionDenseGraphMatch, ServesDeprecatedCausalWithCausalBounds)
     KernelSpec causal;
     causal.causal = 1;
     EXPECT_TRUE(matchesKernel(spec, causal));
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, ReadsDeprecatedCausalWithBottomRightAlignmentAsBottomRight)
-{
-    // causal_mask keeps the stored alignment, so this is bottom-right causal: served at
-    // Sq == Skv, declined where the corners differ.
-    GraphSpec spec;
-    spec.causalMaskDeprecated = true;
-    spec.leftBound = std::nullopt;
-    spec.rightBound = std::nullopt;
-    spec.alignment = data_objects::DiagonalAlignment::BOTTOM_RIGHT;
-    EXPECT_TRUE(matchGraph(spec).has_value());
-
-    spec.seqLenKv = SEQ * 2;
-    EXPECT_FALSE(matchGraph(spec).has_value());
 }
 
 // ---------------------------------------------------------------------------
@@ -1933,283 +1175,6 @@ TEST(TestGfx950AttentionDenseScore, NeverRanksATileThatCannotServeTheShape)
 }
 
 } // namespace
-
-// ---------------------------------------------------------------------------
-// Additive bias (attn_mask)
-// ---------------------------------------------------------------------------
-
-namespace
-{
-
-/// The int32_t element count: a bias element index below it is addressable in 32 bits.
-constexpr int64_t INT32_LIMIT = int64_t{1} << 31;
-
-int64_t boundOr(const BoundTokens& bound, std::string_view token, int64_t fallback)
-{
-    return hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, token).value_or(fallback);
-}
-
-} // namespace
-
-TEST(TestGfx950AttentionDenseGraphMatch, BindsAFullBiasAndItsStrides)
-{
-    const auto bound = matchGraph(withBias({BATCH, HEADS, SEQ, SEQ}));
-    ASSERT_TRUE(bound.has_value());
-    EXPECT_EQ(boundOr(*bound, BIAS_TOKEN, -1), 1);
-    EXPECT_EQ(boundOr(*bound, BIAS_UID_TOKEN, -1), BIAS_UID);
-    EXPECT_EQ(boundOr(*bound, BIAS_STRIDE_BATCH_TOKEN, -1), HEADS * SEQ * SEQ);
-    EXPECT_EQ(boundOr(*bound, BIAS_STRIDE_HEAD_TOKEN, -1), SEQ * SEQ);
-    EXPECT_EQ(boundOr(*bound, BIAS_STRIDE_QUERY_TOKEN, -1), SEQ);
-}
-
-/// An extent-1 axis broadcasts through stride 0, whatever stride the tensor writes on it:
-/// the kernel multiplies every axis index by its stride, and only a zero keeps a broadcast
-/// axis on its one row.
-TEST(TestGfx950AttentionDenseGraphMatch, BindsStrideZeroOnEveryBroadcastAxis)
-{
-    constexpr int64_t ANY = 12345;
-    const auto keyRow = matchGraph(withBias({1, 1, 1, SEQ}, {{ANY, ANY, ANY, 1}}));
-    ASSERT_TRUE(keyRow.has_value());
-    EXPECT_EQ(boundOr(*keyRow, BIAS_STRIDE_BATCH_TOKEN, -1), 0);
-    EXPECT_EQ(boundOr(*keyRow, BIAS_STRIDE_HEAD_TOKEN, -1), 0);
-    EXPECT_EQ(boundOr(*keyRow, BIAS_STRIDE_QUERY_TOKEN, -1), 0);
-
-    const auto perBatch = matchGraph(withBias({BATCH, 1, SEQ, SEQ}, {{SEQ * SEQ, ANY, SEQ, 1}}));
-    ASSERT_TRUE(perBatch.has_value());
-    EXPECT_EQ(boundOr(*perBatch, BIAS_STRIDE_BATCH_TOKEN, -1), SEQ * SEQ);
-    EXPECT_EQ(boundOr(*perBatch, BIAS_STRIDE_HEAD_TOKEN, -1), 0);
-    EXPECT_EQ(boundOr(*perBatch, BIAS_STRIDE_QUERY_TOKEN, -1), SEQ);
-
-    const auto perHead = matchGraph(withBias({1, HEADS, SEQ, SEQ}));
-    ASSERT_TRUE(perHead.has_value());
-    EXPECT_EQ(boundOr(*perHead, BIAS_STRIDE_BATCH_TOKEN, -1), 0);
-    EXPECT_EQ(boundOr(*perHead, BIAS_STRIDE_HEAD_TOKEN, -1), SEQ * SEQ);
-    EXPECT_EQ(boundOr(*perHead, BIAS_STRIDE_QUERY_TOKEN, -1), SEQ);
-
-    // A broadcast axis's written stride is never used, so one the range check would refuse
-    // on a full axis (negative, or 2^31 and above) is accepted there.
-    const auto unusable = matchGraph(withBias({1, 1, SEQ, SEQ}, {{-1, int64_t{1} << 40, SEQ, 1}}));
-    ASSERT_TRUE(unusable.has_value());
-    EXPECT_EQ(boundOr(*unusable, BIAS_STRIDE_BATCH_TOKEN, -1), 0);
-    EXPECT_EQ(boundOr(*unusable, BIAS_STRIDE_HEAD_TOKEN, -1), 0);
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, BindsNoBiasForAGraphWithoutOne)
-{
-    const auto bound = matchGraph(GraphSpec{});
-    ASSERT_TRUE(bound.has_value());
-    EXPECT_EQ(boundOr(*bound, BIAS_TOKEN, -1), 0);
-    EXPECT_EQ(boundOr(*bound, BIAS_UID_TOKEN, -1), -1);
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesABiasTheKernelCannotRead)
-{
-    struct Case
-    {
-        const char* what;
-        GraphSpec spec;
-        const char* cause;
-    };
-    std::vector<Case> cases;
-
-    auto halfBias = withBias({BATCH, HEADS, SEQ, SEQ});
-    biasTensor(halfBias).dataType = data_objects::DataType::BFLOAT16;
-    cases.push_back({"a bf16 bias (the kernel reads fp32)", halfBias, "attn_mask"});
-
-    cases.push_back({"a rank-3 bias", withBias({HEADS, SEQ, SEQ}), "attn_mask"});
-    cases.push_back(
-        {"a key extent other than Skv", withBias({BATCH, HEADS, SEQ, SEQ / 2}), "attn_mask"});
-    cases.push_back(
-        {"a key axis that is not unit-stride",
-         withBias({BATCH, HEADS, SEQ, SEQ}, {{HEADS * SEQ * SEQ * 2, SEQ * SEQ * 2, SEQ * 2, 2}}),
-         "attn_mask"});
-    cases.push_back(
-        {"a head extent that is neither 1 nor Hq", withBias({BATCH, 2, SEQ, SEQ}), "attn_mask"});
-    cases.push_back(
-        {"a query extent that is neither 1 nor Sq", withBias({BATCH, HEADS, 2, SEQ}), "attn_mask"});
-    cases.push_back({"a negative stride on a full axis",
-                     withBias({BATCH, HEADS, SEQ, SEQ}, {{-HEADS * SEQ * SEQ, SEQ * SEQ, SEQ, 1}}),
-                     "attn_mask"});
-    cases.push_back({"a stride of 2^31",
-                     withBias({BATCH, HEADS, SEQ, SEQ}, {{int64_t{1} << 31, SEQ * SEQ, SEQ, 1}}),
-                     "attn_mask"});
-    // One less passes the stride check, so only the reach check stops it: the batch axis
-    // alone then reaches past element 2^31 - 1.
-    cases.push_back(
-        {"a stride of 2^31 - 1 on a full axis",
-         withBias({BATCH, HEADS, SEQ, SEQ}, {{(int64_t{1} << 31) - 1, SEQ * SEQ, SEQ, 1}}),
-         "size_limit"});
-    // Every stride fits in i32, but (B-1)*2^30 + (Hq-1)*2^29 is past 2^31.
-    cases.push_back(
-        {"a last element past 2^31",
-         withBias({BATCH, HEADS, SEQ, SEQ}, {{int64_t{1} << 30, int64_t{1} << 29, SEQ, 1}}),
-         "size_limit"});
-
-    auto virtualBias = withBias({BATCH, HEADS, SEQ, SEQ});
-    biasTensor(virtualBias).isVirtual = true;
-    cases.push_back({"a virtual bias", virtualBias, "attn_mask"});
-
-    auto raggedBias = withBias({BATCH, HEADS, SEQ, SEQ});
-    biasTensor(raggedBias).raggedOffsetUid = EXTRA_UID;
-    cases.push_back({"a ragged bias", raggedBias, "attn_mask"});
-
-    auto byValueBias = withBias({BATCH, HEADS, SEQ, SEQ});
-    biasTensor(byValueBias).passByValue = true;
-    cases.push_back({"a pass-by-value bias", byValueBias, "attn_mask"});
-
-    for(const auto& c : cases)
-    {
-        SCOPED_TRACE(c.what);
-        const auto decline = loggedDecline(c.spec);
-        EXPECT_EQ(decline.cause, c.cause) << decline.detail;
-        EXPECT_NE(decline.detail.find("attn_mask"), std::string::npos) << decline.detail;
-    }
-}
-
-/// The last element the kernel reaches is (Skv-1) + (Sq-1)*sq + (Hq-1)*hs + (B-1)*bs. A
-/// batch stride that puts it at 2^31 - 1 is the largest bias the kernel can address; one
-/// more element is refused.
-TEST(TestGfx950AttentionDenseGraphMatch, AdditiveBiasReachAdmitsTheLastGraphUnderIt)
-{
-    ASSERT_EQ(BATCH, 2) << "the batch stride below is (B-1) * stride with B-1 = 1";
-    const int64_t headStride = SEQ * SEQ;
-    const int64_t rest = (SEQ - 1) + (SEQ - 1) * SEQ + (HEADS - 1) * headStride;
-    const int64_t lastFittingBatchStride = INT32_LIMIT - 1 - rest;
-
-    const auto under = matchGraph(
-        withBias({BATCH, HEADS, SEQ, SEQ}, {{lastFittingBatchStride, headStride, SEQ, 1}}));
-    ASSERT_TRUE(under.has_value()) << "last element 2^31 - 1";
-    EXPECT_EQ(boundOr(*under, BIAS_STRIDE_BATCH_TOKEN, -1), lastFittingBatchStride);
-
-    const auto decline = loggedDecline(
-        withBias({BATCH, HEADS, SEQ, SEQ}, {{lastFittingBatchStride + 1, headStride, SEQ, 1}}));
-    EXPECT_EQ(decline.cause, "size_limit") << "last element exactly 2^31: " << decline.detail;
-}
-
-/// Every case above has Hq = Hkv and Sq = Skv, where a bias extent read from the wrong
-/// side of the graph (key/value heads for query heads, the key length for the query length)
-/// would match too. These use a GQA cross-attention graph, where the four differ.
-namespace
-{
-
-constexpr int64_t GQA_Q_HEADS = 8;
-constexpr int64_t GQA_KV_HEADS = 2;
-constexpr int64_t CROSS_SQ = 256;
-constexpr int64_t CROSS_SKV = 512;
-
-/// The base graph at Hq = 8, Hkv = 2, Sq = 256, Skv = 512 with an fp32 bias of @p dims.
-GraphSpec crossAttentionWithBias(std::vector<int64_t> dims,
-                                 const std::optional<std::vector<int64_t>>& strides = {})
-{
-    GraphSpec spec = withBias(std::move(dims), strides);
-    spec.numQueryHeads = GQA_Q_HEADS;
-    spec.numKvHeads = GQA_KV_HEADS;
-    spec.seqLenQ = CROSS_SQ;
-    spec.seqLenKv = CROSS_SKV;
-    return spec;
-}
-
-} // namespace
-
-/// The bias a graph carries is [B, Hq, Sq, Skv]: query heads and query rows on the middle
-/// axes, the key length last.
-TEST(TestGfx950AttentionDenseGraphMatch, BindsABiasSizedFromTheQueryExtentsOfACrossAttentionGraph)
-{
-    const auto bound
-        = matchGraph(crossAttentionWithBias({BATCH, GQA_Q_HEADS, CROSS_SQ, CROSS_SKV}));
-    ASSERT_TRUE(bound.has_value());
-    EXPECT_EQ(boundOr(*bound, BIAS_STRIDE_BATCH_TOKEN, -1), GQA_Q_HEADS * CROSS_SQ * CROSS_SKV);
-    EXPECT_EQ(boundOr(*bound, BIAS_STRIDE_HEAD_TOKEN, -1), CROSS_SQ * CROSS_SKV);
-    EXPECT_EQ(boundOr(*bound, BIAS_STRIDE_QUERY_TOKEN, -1), CROSS_SKV);
-
-    // Each axis at 1 broadcasts, whatever its neighbours are.
-    EXPECT_TRUE(matchGraph(crossAttentionWithBias({1, 1, CROSS_SQ, CROSS_SKV})).has_value());
-    EXPECT_TRUE(matchGraph(crossAttentionWithBias({1, 1, 1, CROSS_SKV})).has_value());
-}
-
-TEST(TestGfx950AttentionDenseGraphMatch, DeclinesABiasSizedFromAnotherExtentOfACrossAttentionGraph)
-{
-    struct Case
-    {
-        const char* what;
-        std::vector<int64_t> dims;
-    };
-    const std::vector<Case> cases{
-        {"key/value heads where query heads belong", {BATCH, GQA_KV_HEADS, CROSS_SQ, CROSS_SKV}},
-        {"the key length where the query length belongs",
-         {BATCH, GQA_Q_HEADS, CROSS_SKV, CROSS_SKV}},
-        {"the query length where the key length belongs", {BATCH, GQA_Q_HEADS, CROSS_SQ, CROSS_SQ}},
-    };
-    for(const auto& c : cases)
-    {
-        SCOPED_TRACE(c.what);
-        const auto decline = loggedDecline(crossAttentionWithBias(c.dims));
-        EXPECT_EQ(decline.cause, "attn_mask") << decline.detail;
-    }
-}
-
-/// The last element the kernel reaches is sized by the query heads and the query rows, not
-/// by the key/value heads or the key length. Each graph below is on one side of the 2^31
-/// limit by the correct extents and on the other by the wrong ones.
-TEST(TestGfx950AttentionDenseGraphMatch, AdditiveBiasReachIsSizedByQueryHeadsAndQueryRows)
-{
-    // Reach (Sq - 1) * 5e6 + (Skv - 1) = 1.275e9 + 511: under the limit. Sized by Skv
-    // instead of Sq it is 2.555e9, over it.
-    constexpr int64_t QUERY_STRIDE = 5'000'000;
-    EXPECT_TRUE(
-        matchGraph(crossAttentionWithBias({1, 1, CROSS_SQ, CROSS_SKV}, {{0, 0, QUERY_STRIDE, 1}}))
-            .has_value())
-        << "a reach sized from the key length instead of the query length";
-
-    // Reach (Hq - 1) * 335544320 + (Skv - 1) = 2.349e9: over the limit. Sized by Hkv
-    // instead of Hq it is 3.4e8, under it.
-    constexpr int64_t FAR_HEAD_STRIDE = (int64_t{1} << 28) + (int64_t{1} << 26);
-    const auto decline = loggedDecline(
-        crossAttentionWithBias({1, GQA_Q_HEADS, 1, CROSS_SKV}, {{0, FAR_HEAD_STRIDE, 1, 1}}));
-    EXPECT_EQ(decline.cause, "size_limit") << decline.detail;
-}
-
-/// A bias graph is served by bias candidates only, and a plain graph by plain ones: their
-/// scores differ, and so do their argument lists. A record without the field is a plain
-/// candidate (the KMD default 0).
-TEST(TestGfx950AttentionDenseKernelMatch, PairsBiasGraphsWithBiasCandidatesOnly)
-{
-    const auto biasGraph = withBias({BATCH, HEADS, SEQ, SEQ});
-    KernelSpec biasKernel;
-    biasKernel.useAdditiveBias = 1;
-    KernelSpec plainKernel;
-    plainKernel.useAdditiveBias = 0;
-    const KernelSpec legacyKernel;
-
-    EXPECT_TRUE(matchesKernel(biasGraph, biasKernel));
-    EXPECT_FALSE(matchesKernel(biasGraph, plainKernel));
-    EXPECT_FALSE(matchesKernel(biasGraph, legacyKernel));
-
-    EXPECT_FALSE(matchesKernel(GraphSpec{}, biasKernel));
-    EXPECT_TRUE(matchesKernel(GraphSpec{}, plainKernel));
-    EXPECT_TRUE(matchesKernel(GraphSpec{}, legacyKernel));
-
-    // A field that is neither 0 nor 1 is a malformed record: it serves no graph.
-    KernelSpec malformedKernel;
-    malformedKernel.useAdditiveBias = 2;
-    EXPECT_FALSE(matchesKernel(biasGraph, malformedKernel));
-    EXPECT_FALSE(matchesKernel(GraphSpec{}, malformedKernel));
-}
-
-/// kernel_match reads the bias flag from the binding instead of assuming one; a binding
-/// that lacks it (a renamed token) is refused rather than read as "no bias".
-TEST(TestGfx950AttentionDenseKernelMatch, RefusesABindingWithoutTheBiasFlag)
-{
-    auto bound = matchGraph(GraphSpec{});
-    ASSERT_TRUE(bound.has_value());
-    KernelSpec plainKernel;
-    plainKernel.useAdditiveBias = 0;
-    ASSERT_TRUE(kernelMatchesWithBinding(GraphSpec{}, *bound, plainKernel));
-
-    bound->erase(std::string(BIAS_TOKEN));
-    EXPECT_FALSE(kernelMatchesWithBinding(GraphSpec{}, *bound, plainKernel));
-    EXPECT_FALSE(kernelMatchesWithBinding(GraphSpec{}, *bound, KernelSpec{}));
-}
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
 
