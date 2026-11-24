@@ -1000,6 +1000,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                     number<ki * kPMI + mi>{},
                     p_src.get_thread_buffer().template get_as<p_bulk_t>(ki));
             });
+            // Sum fp32 P before q(P) is decoded, so P need not stay live across the decode.
+            if constexpr(kStoreLSE)
+                store_band_sum(rowsum_p, ReduceRowSumLocal(p_band), mi);
 
             // q(P) back to fp32, one packed convert per 8 values, in the cast's buffer order.
             constexpr index_t kBandBuf = decltype(p_src)::get_thread_buffer_size();
@@ -1015,8 +1018,6 @@ struct BlockFmhaPipelineQRKSVSTdm
                 });
             });
             store_band_sum(rowsum_p_quant, ReduceRowSumLocal(p_quant_band), mi);
-            if constexpr(kStoreLSE)
-                store_band_sum(rowsum_p, ReduceRowSumLocal(p_band), mi);
         });
         p_scale = e8m0_one();
         return make_tuple(p_tile, rowsum_p_quant, rowsum_p);
