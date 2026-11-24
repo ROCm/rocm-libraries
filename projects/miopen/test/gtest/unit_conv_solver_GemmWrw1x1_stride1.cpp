@@ -112,7 +112,9 @@ TEST_P(CPU_UnitTestConvSolverGemmWrw1x1Stride1DevApplicabilityWrw_NONE, GemmWrw1
     this->RunTest(miopen::solver::conv::GemmWrw1x1_stride1{});
 };
 
-TEST(CPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_NONE, NHWCUsesStride1Solver)
+using CPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_NONE, NHWCUsesStride1Solver)
 {
     using TestCase = miopen::unit_tests::ConvTestCase;
 
@@ -129,7 +131,7 @@ TEST(CPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_NONE, NHWCUsesStride1Solver)
     EXPECT_FALSE(miopen::solver::conv::GemmWrwUniversal{}.IsApplicable(context, problem));
 }
 
-TEST(CPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_NONE, NDHWCUsesStride1Solver)
+TEST_P(CPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_NONE, NDHWCUsesStride1Solver)
 {
     using TestCase = miopen::unit_tests::ConvTestCase;
 
@@ -149,51 +151,55 @@ TEST(CPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_NONE, NDHWCUsesStride1Solver)
     EXPECT_FALSE(miopen::solver::conv::GemmWrwUniversal{}.IsApplicable(context, problem));
 }
 
-// Smoke tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         CPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_NONE,
+                         testing::Values(0));
+
+// Quick tests
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
                                           testing::ValuesIn(GetConvTestCases(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_BFP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
                                           testing::ValuesIn(GetConvTestCases(miopenBFloat16))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_FP32,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
                                           testing::ValuesIn(GetConvTestCases(miopenFloat))));
 
 // Channel-last smoke tests
-INSTANTIATE_TEST_SUITE_P(SmokeNhwc,
+INSTANTIATE_TEST_SUITE_P(StandardNhwc,
                          GPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_FP16,
                          testing::Combine(testing::Values(GetTestParamsNhwc()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
                                           testing::ValuesIn(GetConvTestCasesNhwc(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(SmokeNhwc,
+INSTANTIATE_TEST_SUITE_P(StandardNhwc,
                          GPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_BFP16,
                          testing::Combine(testing::Values(GetTestParamsNhwc()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
                                           testing::ValuesIn(GetConvTestCasesNhwc(miopenBFloat16))));
 
-INSTANTIATE_TEST_SUITE_P(SmokeNhwc,
+INSTANTIATE_TEST_SUITE_P(StandardNhwc,
                          GPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_FP32,
                          testing::Combine(testing::Values(GetTestParamsNhwc()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
                                           testing::ValuesIn(GetConvTestCasesNhwc(miopenFloat))));
 
 // Device applicability test
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_UnitTestConvSolverGemmWrw1x1Stride1DevApplicabilityWrw_NONE,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(GetConvTestCases(miopenFloat)[0])));
 
-INSTANTIATE_TEST_SUITE_P(SmokeNhwc,
+INSTANTIATE_TEST_SUITE_P(StandardNhwc,
                          CPU_UnitTestConvSolverGemmWrw1x1Stride1DevApplicabilityWrw_NONE,
                          testing::Combine(testing::Values(GetTestParamsNhwc()),
                                           testing::Values(GetConvTestCasesNhwc(miopenFloat)[0])));

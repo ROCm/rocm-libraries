@@ -205,7 +205,7 @@ TEST_P(GPU_ConvFwdBiasResAddActiv_FP16, ConvFusedAPI)
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_ConvFwdBiasResAddActiv_FP16,
                          testing::Combine(testing::Values(miopenConvolutionFwdAlgoImplicitGEMM),
                                           testing::ValuesIn(ConvTestConfigs()),

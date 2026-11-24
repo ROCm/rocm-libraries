@@ -256,6 +256,7 @@ namespace TensileLite
                 iot::mapOptional(io, "PrefetchGL2", s.PrefetchGL2);
                 iot::mapOptional(io, "TDMInst", s.TDMInst);
                 iot::mapOptional(io, "Multicast", s.Multicast);
+                iot::mapOptional(io, "a2aSubRounds", s.a2aSubRounds);
             }
 
             const static bool flow = false;
@@ -310,6 +311,7 @@ namespace TensileLite
                 iot::mapOptional(io, "useScaleCD", s.useScaleCD);
                 iot::mapOptional(io, "useScaleAlphaVec", s.useScaleAlphaVec);
                 iot::mapOptional(io, "outputAmaxD", s.outputAmaxD);
+                iot::mapOptional(io, "outputPeerD", s.outputPeerD);
                 iot::mapRequired(io, "highPrecisionAccumulate", s.highPrecisionAccumulate);
                 iot::mapOptional(io, "useInitialStridesAB", s.useInitialStridesAB);
                 iot::mapOptional(io, "useInitialStridesCD", s.useInitialStridesCD);
@@ -333,7 +335,7 @@ namespace TensileLite
                 iot::mapOptional(io, "mxTypeB", s.mxTypeB);
                 iot::mapOptional(io, "swizzleTensorA", s.swizzleTensorA);
                 iot::mapOptional(io, "swizzleTensorB", s.swizzleTensorB);
-                iot::mapOptional(io, "fusedGemmA2A", s.fusedGemmA2A);
+                iot::mapOptional(io, "fusedA2A", s.fusedA2A);
                 iot::mapOptional(io, "stochasticRounding", s.stochasticRounding);
                 iot::mapOptional(io, "metadataLayout", s.metadataLayout);
                 // mxScaleFormat is mapped as optional so logic files that omit it

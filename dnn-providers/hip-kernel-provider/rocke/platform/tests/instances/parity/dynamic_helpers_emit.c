@@ -4,7 +4,8 @@
  * tests/parity/dynamic_helpers_emit.c -- C-side emitter for the runtime-shape
  * (AOT) helpers: rocke_software_pipeline_run_ping_pong_dynamic and the dynamic
  * coordinate transforms (embed_dynamic, unmerge_magic_dynamic, pad_dynamic,
- * the dynamic tensor descriptor) and rocke_chiplet_transform_chunked_runtime.
+ * the dynamic tensor descriptor), rocke_chiplet_transform_chunked_runtime and
+ * the gated / contiguous / per-plane XCD remaps (rocke_xcd_remap_*).
  * Builds each kernel identically to
  * dynamic_helpers_emit.py so run_diff.py can byte-compare the two engines'
  * .ll; see that file for the config-by-config rationale.
@@ -448,6 +449,50 @@ static void build_chiplet_runtime_chunk(rocke_ir_builder_t* b)
     chiplet_runtime(b, true);
 }
 
+/* ------------------------------------------------------------------------- */
+/* xcd_remap (gated / contiguous) and xcd_remap_plane                        */
+/* ------------------------------------------------------------------------- */
+
+static void build_xcd_remap_gated(rocke_ir_builder_t* b)
+{
+    rocke_value_t* o = ptr_param(b, "O", rocke_i32(), false);
+    rocke_value_t* p_n = rocke_b_param(b, "p_num_wgs", rocke_i32(), NULL);
+    rocke_value_t* p_xcds = rocke_b_param(b, "p_xcds", rocke_i32(), NULL);
+    rocke_value_t* p_chunk = rocke_b_param(b, "p_chunk", rocke_i32(), NULL);
+    rocke_value_t* wgid = rocke_b_block_id_x(b);
+    rocke_value_t* remapped = rocke_xcd_remap_gated(b, wgid, p_n, p_xcds, p_chunk);
+    rocke_b_global_store(b, o, wgid, remapped, 1);
+    rocke_b_ret(b);
+}
+
+static void build_xcd_remap_contiguous(rocke_ir_builder_t* b)
+{
+    rocke_value_t* o = ptr_param(b, "O", rocke_i32(), false);
+    rocke_value_t* p_n = rocke_b_param(b, "p_num_wgs", rocke_i32(), NULL);
+    rocke_value_t* wgid = rocke_b_block_id_x(b);
+    rocke_value_t* remapped = rocke_xcd_remap_contiguous(b, wgid, p_n, 8);
+    rocke_b_global_store(b, o, wgid, remapped, 1);
+    rocke_b_ret(b);
+}
+
+static void build_xcd_remap_plane(rocke_ir_builder_t* b)
+{
+    rocke_value_t* o = ptr_param(b, "O", rocke_i32(), false);
+    rocke_value_t* q = ptr_param(b, "P", rocke_i32(), false);
+    rocke_value_t* p_gx = rocke_b_param(b, "p_gx", rocke_i32(), NULL);
+    rocke_value_t* p_gy = rocke_b_param(b, "p_gy", rocke_i32(), NULL);
+    rocke_value_t* p_xcds = rocke_b_param(b, "p_xcds", rocke_i32(), NULL);
+    rocke_value_t* p_chunk = rocke_b_param(b, "p_chunk", rocke_i32(), NULL);
+    rocke_value_t* x = rocke_b_block_id_x(b);
+    rocke_value_t* y = rocke_b_block_id_y(b);
+    rocke_xcd_remap_plane_result_t r = rocke_xcd_remap_plane(b, x, y, p_gx, p_gy, p_xcds, p_chunk);
+    rocke_value_t* row = rocke_b_mul(b, p_gx, y);
+    rocke_value_t* lin = rocke_b_add(b, x, row);
+    rocke_b_global_store(b, o, lin, r.x, 1);
+    rocke_b_global_store(b, q, lin, r.y, 1);
+    rocke_b_ret(b);
+}
+
 typedef void (*build_fn_t)(rocke_ir_builder_t*);
 
 /* Index-for-index with the Python emitter's CONFIGS list. */
@@ -463,6 +508,9 @@ static const build_fn_t CONFIGS[] = {
     build_chiplet_runtime_default,
     build_chiplet_runtime_chunk,
     build_mixed_strides,
+    build_xcd_remap_gated,
+    build_xcd_remap_contiguous,
+    build_xcd_remap_plane,
 };
 
 static const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));

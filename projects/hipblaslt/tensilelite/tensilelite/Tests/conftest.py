@@ -36,7 +36,23 @@ except ImportError:
 testdir = os.path.dirname(__file__)
 moddir = os.path.dirname(testdir)
 rootdir = os.path.dirname(moddir)
+if testdir not in sys.path:
+    sys.path.insert(0, testdir)
 sys.path.append(rootdir)
+
+
+def pytest_report_header(config):
+    # pytest captures the workers' "Launching N threads" lines; show each worker's pool budget.
+    import importlib
+
+    # One --tx entry per pytest-xdist worker, after -n auto and --maxprocesses are applied.
+    workers = len(getattr(config.option, "tx", None) or []) or 1
+    try:
+        parallel = importlib.import_module("tensilelite.Common.Parallel")
+        return parallel.describePoolSizeBudget(workers)
+    except Exception as e:  # a header must never fail the session
+        return "TensileLite pool budget: unavailable (%s)" % e
+
 
 def pytest_addoption(parser):
     parser.addoption("--tensile-options")
@@ -244,28 +260,9 @@ def worker_lock_instance(worker_lock_path):
 
 @pytest.fixture
 def tensile_args(request, pytestconfig, builddir, worker_lock_path):
-    rv = []
-    if worker_lock_path:
-        rv += ["--client-lock", str(worker_lock_path)]
-
-    extraOptions = pytestconfig.getoption("--tensile-options")
-    if extraOptions is not None:
-        rv += extraOptions.split(",")
-    if pytestconfig.getoption("--global-parameters"):
-        rv += ["--global-parameters", pytestconfig.getoption("--global-parameters")]
+    from tensile_args import tensileArgs
     world = request.node.get_closest_marker("world")
-    if world:
-        rv += ["--global-parameters", f"WorldFilter={list(world.args)}"]
-    if not pytestconfig.getoption("--no-common-build"):
-        if pytestconfig.getoption("--prebuilt-client"):
-            rv += ["--prebuilt-client", pytestconfig.getoption("--prebuilt-client")]
-
-    # Forward --gpu-targets to tensilelite. Do NOT forward --build-only or
-    # --use-cache here — those are hardcoded in each test function's args.
-    if pytestconfig.getoption("--gpu-targets"):
-        rv += ["--gpu-targets", pytestconfig.getoption("--gpu-targets")]
-
-    return rv
+    return tensileArgs(pytestconfig.getoption, worker_lock_path, world.args if world else None)
 
 def visibleDeviceCount():
     """
@@ -285,6 +282,9 @@ def visibleDeviceCount():
     from tensilelite.ParallelExecution import detectAvailableGpus
     return detectAvailableGpus()
 
+_UNSET = object()
+
+
 def commSkipMark(config, devices):
     """Mark to apply to a `comm` test that needs `devices` devices, or None when it can run here."""
     if config.getoption("--build-only", default=False):
@@ -299,6 +299,29 @@ def commSkipMark(config, devices):
     if count < devices:
         return pytest.mark.skip(
             reason=f"comm tests need {devices} visible HIP devices, found {count}")
+    return None
+
+
+def dpxSkipMark(config):
+    """Mark to apply to a `dpx` test, or None when this machine has a GPU in DPX mode.
+
+    `dpx` tests need the two partitions of one GPU, which can reach each other's memory. Two
+    separate cards (SPX) are not enough, so the number of devices is not what is checked; see
+    gpu_detection.dpx_pairs.
+    """
+    if config.getoption("--build-only", default=False):
+        return None
+
+    if hasattr(config, "workerinput"):
+        return pytest.mark.skip(
+            reason="dpx tests need two partitions of one GPU; assign_gpu_to_worker pins each "
+                   "xdist worker to one")
+
+    from gpu_detection import has_dpx
+    if not has_dpx():
+        return pytest.mark.skip(
+            reason="dpx tests need a GPU in DPX mode: two visible HIP devices that are the two "
+                   "partitions of one GPU (same PCI domain, bus and device, different function)")
     return None
 
 
@@ -335,6 +358,7 @@ def pytest_collection_modifyitems(config, items):
     need: the largest world they are marked with, or two.
     """
     commSkips = {}
+    dpxSkip = _UNSET
 
     for item in items:
 
@@ -351,6 +375,12 @@ def pytest_collection_modifyitems(config, items):
                 commSkips[devices] = commSkipMark(config, devices)
             if commSkips[devices] is not None:
                 item.add_marker(commSkips[devices])
+
+        if item.get_closest_marker("dpx"):
+            if dpxSkip is _UNSET:
+                dpxSkip = dpxSkipMark(config)
+            if dpxSkip is not None:
+                item.add_marker(dpxSkip)
 
 @pytest.fixture
 def useGlobalParameters(tensile_args):

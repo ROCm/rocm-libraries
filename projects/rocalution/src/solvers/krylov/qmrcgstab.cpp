@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -287,85 +287,18 @@ namespace rocalution
             return;
         }
 
-        // rho = (r0,r)
-        rho = r0->Dot(*r);
+        // With p = v = d = 0 and rho = alpha = omega = 1 the first iteration is p = r, d = p
+        p->Zeros();
+        v->Zeros();
+        d->Zeros();
 
-        // beta = rho
-        beta = rho;
+        rho      = static_cast<ValueType>(1);
+        alpha    = static_cast<ValueType>(1);
+        omega    = static_cast<ValueType>(1);
+        theta2sq = static_cast<ValueType>(0);
+        eta2     = static_cast<ValueType>(0);
 
-        // p = p + r
-        p->AddScale(*r, static_cast<ValueType>(1));
-
-        // v = Ap
-        op->Apply(*p, v);
-
-        // rho_old = (r0,v)
-        rho_old = r0->Dot(*v);
-
-        // alpha = (r0,r) / (r0,v)
-        alpha = rho / rho_old;
-
-        // r = r - alpha * v
-        r->AddScale(*v, -alpha);
-
-        // First quasi-minimization and update iterate
-
-        // theta1 = ||r|| / tau2
-        theta1   = this->Norm_(*r) / tau2;
-        theta1sq = theta1 * theta1;
-
-        // c = 1 / sqrt(1 + theta1 * theta1)
-        c = static_cast<ValueType>(1) / sqrt(static_cast<ValueType>(1) + theta1sq);
-
-        // tau1 = tau2 * theta1 * c
-        tau1 = tau2 * theta1 * c;
-
-        // eta1 = c * c * alpha
-        eta1 = c * c * alpha;
-
-        // d = p
-        d->CopyFrom(*p);
-
-        // x = x + eta1 * d
-        x->AddScale(*d, eta1);
-
-        // Compute t_k, omega and update r_k
-
-        // t = Ar
-        op->Apply(*r, t);
-
-        // omega = (r,t) / (t,t)
-        omega = r->Dot(*t) / t->Dot(*t);
-
-        // d = theta1 * theta1 * eta1 / omega * d + r
-        d->ScaleAdd(theta1sq * eta1 / omega, *r);
-
-        // r = r - omega * t
-        r->AddScale(*t, -omega);
-
-        // Second quasi-minimization and update iterate
-
-        // theta2 = ||r|| / tau1
-        theta2   = this->Norm_(*r) / tau1;
-        theta2sq = theta2 * theta2;
-
-        // c = 1 / sqrt(1 + theta2 * theta2)
-        c = static_cast<ValueType>(1) / sqrt(static_cast<ValueType>(1) + theta2sq);
-
-        // tau2 = tau1 * theta2 * c
-        tau2 = tau1 * theta2 * c;
-
-        // eta2 = c * c * omega
-        eta2 = c * c * omega;
-
-        // x = x + eta2 * d
-        x->AddScale(*d, eta2);
-
-        // residual <= sqrt(#iter+1) * |tau2|
-        res_norm
-            = sqrt(static_cast<double>(this->iter_ctrl_.GetIterationCount() + 1)) * std::abs(tau2);
-
-        while(!this->iter_ctrl_.CheckResidual(res_norm, this->index_))
+        while(true)
         {
             // rho_old = rho
             rho_old = rho;
@@ -431,6 +364,12 @@ namespace rocalution
             if(omega == static_cast<ValueType>(0))
             {
                 LOG_INFO("QMRCGStab omega == 0 !!!");
+
+                // x has moved along d, so the first half step counts as an iteration
+                // residual <= sqrt(#iter+1) * |tau1|
+                res_norm = sqrt(static_cast<double>(this->iter_ctrl_.GetIterationCount() + 1))
+                           * std::abs(tau1);
+                this->iter_ctrl_.CheckResidual(res_norm, this->index_);
                 break;
             }
 
@@ -464,13 +403,19 @@ namespace rocalution
             // residual <= sqrt(#iter+1) * |tau2|
             res_norm = sqrt(static_cast<double>(this->iter_ctrl_.GetIterationCount() + 1))
                        * std::abs(tau2);
+
+            if(this->iter_ctrl_.CheckResidual(res_norm, this->index_))
+            {
+                break;
+            }
         }
 
         // Compute final residual
         op->Apply(*x, r0);
         r0->ScaleAdd(static_cast<ValueType>(-1), rhs);
 
-        this->iter_ctrl_.CheckResidual(std::abs(this->Norm_(*r0)));
+        // The last iteration is already counted
+        this->iter_ctrl_.CheckResidualNoCount(std::abs(this->Norm_(*r0)));
 
         log_debug(this, "QMRCGStab::SolveNonPrecond_()", " #*# end");
     }
@@ -519,91 +464,19 @@ namespace rocalution
             return;
         }
 
-        // rho = (r0,r)
-        rho = r0->Dot(*r);
+        // With p = v = d = 0 and rho = alpha = omega = 1 the first iteration is p = r,
+        // d = M^-1 p
+        p->Zeros();
+        v->Zeros();
+        d->Zeros();
 
-        // beta = rho
-        beta = rho;
+        rho      = static_cast<ValueType>(1);
+        alpha    = static_cast<ValueType>(1);
+        omega    = static_cast<ValueType>(1);
+        theta2sq = static_cast<ValueType>(0);
+        eta2     = static_cast<ValueType>(0);
 
-        // p = p + r
-        p->AddScale(*r, static_cast<ValueType>(1));
-
-        // Mz = p
-        this->precond_->SolveZeroSol(*p, z);
-
-        // v = Az
-        op->Apply(*z, v);
-
-        // rho_old = (r0,v)
-        rho_old = r0->Dot(*v);
-
-        // alpha = (r0,r) / (r0,v)
-        alpha = rho / rho_old;
-
-        // r = r - alpha * v
-        r->AddScale(*v, -alpha);
-
-        // First quasi-minimization and update iterate
-
-        // theta1 = ||r|| / tau2
-        theta1   = this->Norm_(*r) / tau2;
-        theta1sq = theta1 * theta1;
-
-        // c = 1 / sqrt(1 + theta1 * theta1)
-        c = static_cast<ValueType>(1) / sqrt(static_cast<ValueType>(1) + theta1sq);
-
-        // tau1 = tau2 * theta1 * c
-        tau1 = tau2 * theta1 * c;
-
-        // eta1 = c * c * alpha
-        eta1 = c * c * alpha;
-
-        // d = p
-        d->CopyFrom(*z);
-
-        // x = x + eta1 * d
-        x->AddScale(*d, eta1);
-
-        // Compute t_k, omega and update r_k
-
-        // Mz = r
-        this->precond_->SolveZeroSol(*r, z);
-
-        // t = Az
-        op->Apply(*z, t);
-
-        // omega = (r,t) / (t,t)
-        omega = t->Dot(*r) / t->Dot(*t);
-
-        // d = theta1 * theta1 * eta1 / omega * d + r
-        d->ScaleAdd(theta1sq * eta1 / omega, *z);
-
-        // r = r - omega * t
-        r->AddScale(*t, -omega);
-
-        // Second quasi-minimization and update iterate
-
-        // theta2 = ||r|| / tau1
-        theta2   = this->Norm_(*r) / tau1;
-        theta2sq = theta2 * theta2;
-
-        // c = 1 / sqrt(1 + theta2 * theta2)
-        c = static_cast<ValueType>(1) / sqrt(static_cast<ValueType>(1) + theta2sq);
-
-        // tau2 = tau1 * theta2 * c
-        tau2 = tau1 * theta2 * c;
-
-        // eta2 = c * c * omega
-        eta2 = c * c * omega;
-
-        // x = x + eta2 * d
-        x->AddScale(*d, eta2);
-
-        // residual <= sqrt(#iter+1) * |tau2|
-        res_norm
-            = sqrt(static_cast<double>(this->iter_ctrl_.GetIterationCount() + 1)) * std::abs(tau2);
-
-        while(!this->iter_ctrl_.CheckResidual(res_norm, this->index_))
+        while(true)
         {
             // rho_old = rho
             rho_old = rho;
@@ -675,6 +548,12 @@ namespace rocalution
             if(omega == static_cast<ValueType>(0))
             {
                 LOG_INFO("QMRCGStab omega == 0 !!!");
+
+                // x has moved along d, so the first half step counts as an iteration
+                // residual <= sqrt(#iter+1) * |tau1|
+                res_norm = sqrt(static_cast<double>(this->iter_ctrl_.GetIterationCount() + 1))
+                           * std::abs(tau1);
+                this->iter_ctrl_.CheckResidual(res_norm, this->index_);
                 break;
             }
 
@@ -708,13 +587,19 @@ namespace rocalution
             // residual <= sqrt(#iter+1) * |tau2|
             res_norm = sqrt(static_cast<double>(this->iter_ctrl_.GetIterationCount() + 1))
                        * std::abs(tau2);
+
+            if(this->iter_ctrl_.CheckResidual(res_norm, this->index_))
+            {
+                break;
+            }
         }
 
         // Compute final residual
         op->Apply(*x, r0);
         r0->ScaleAdd(static_cast<ValueType>(-1), rhs);
 
-        this->iter_ctrl_.CheckResidual(std::abs(this->Norm_(*r0)));
+        // The last iteration is already counted
+        this->iter_ctrl_.CheckResidualNoCount(std::abs(this->Norm_(*r0)));
 
         log_debug(this, "QMRCGStab::SolvePrecond_()", " #*# end");
     }

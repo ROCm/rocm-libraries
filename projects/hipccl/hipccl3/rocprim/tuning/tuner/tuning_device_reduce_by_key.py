@@ -64,8 +64,10 @@ class Tuner(BaseTuner):
 
     def tune_all(self) -> None:
         """Tune for all key type and value type combinations"""
+        # Values are what gets reduced, so floating-point value types need their own configs
+        value_types = COMMON_VALUE_TYPES + ["double", "float", "rocprim::half"]
         for key_type in COMMON_KEY_TYPES:
-            for value_type in COMMON_VALUE_TYPES:
+            for value_type in value_types:
                 self.tune_type({"key_type": key_type, "value_type": value_type})
 
 

@@ -164,6 +164,8 @@ struct GraphSpec
     std::optional<int64_t> scaleTensorUid;
     std::optional<int64_t> seqLenQUid;
     std::optional<int64_t> seqLenKvUid;
+    std::optional<int64_t> cuSeqLenQUid;
+    std::optional<int64_t> cuSeqLenKvUid;
     std::optional<int64_t> seedUid;
     std::optional<int64_t> offsetUid;
     std::optional<int64_t> dropoutMaskUid;
@@ -359,6 +361,14 @@ inline flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
         if(spec.seqLenKvUid.has_value())
         {
             attributesBuilder.add_seq_len_kv_tensor_uid(*spec.seqLenKvUid);
+        }
+        if(spec.cuSeqLenQUid.has_value())
+        {
+            attributesBuilder.add_cu_seq_len_q_tensor_uid(*spec.cuSeqLenQUid);
+        }
+        if(spec.cuSeqLenKvUid.has_value())
+        {
+            attributesBuilder.add_cu_seq_len_kv_tensor_uid(*spec.cuSeqLenKvUid);
         }
         if(spec.seedUid.has_value())
         {
