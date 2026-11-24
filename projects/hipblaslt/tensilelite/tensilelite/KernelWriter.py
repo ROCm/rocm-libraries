@@ -57,6 +57,7 @@ from .Components.PersistentLoop import PersistentKernelState
 from .Components.StreamK import StreamKKernelState
 from .Components.CustomSchedule import customMainLoopSchedule
 from .Components.ClusterLoad import ClusterLoadTDM
+from .Components.WorkGroupMappingAlgos import WGM_MAGIC_SGPRS, wgmRemapMagicPersistent
 from .Components.Subtile.Kernel import *
 from .Components.Subtile.SubtileLdsLayout import applyLdsLayout
 from .Components.DecouplePGR import decouplePGRBlocks, decoupledSingleBuffered, dcpLdsSide, dcpLateFillIncrements
@@ -10856,6 +10857,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if isPersistent(kernel):
       Component.WorkAssignment.find(self).registerRequirements(
           self, kernel, requiredUnalignedSgprVar, requiredAligned4SgprVar)
+      if wgmRemapMagicPersistent(kernel):
+        requiredUnalignedSgprVar.extend(WGM_MAGIC_SGPRS)
 
     if kernel["UseSubtileImpl"]:
       # DTL addressing SGPRs not needed when TDM handles global-to-LDS
