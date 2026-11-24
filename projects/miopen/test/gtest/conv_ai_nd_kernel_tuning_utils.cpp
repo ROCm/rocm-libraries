@@ -178,10 +178,8 @@ void CheckGetFeaturesND_MapValues(const std::map<std::string, float>& features,
     expected["conv_stride_w"] = static_cast<float>(
         miopen::solver::ProblemInterpreter::GetAdjustedConvolutionStrideW(problem));
 
-    if(is3d)
-    {
-        expected["dilation_d"] = static_cast<float>(problem.GetDilationD());
-    }
+    // dilation_d is supplied in both 2D and 3D (see GetFeaturesND), so check it unconditionally.
+    expected["dilation_d"] = static_cast<float>(problem.GetDilationD());
     expected["dilation_h"] = static_cast<float>(problem.GetDilationH());
     expected["dilation_w"] = static_cast<float>(problem.GetDilationW());
 
@@ -309,11 +307,11 @@ protected:
 // SolverHeuristicConfig Tests
 // ===============================================================================
 
-class CPU_SolverHeuristicConfig_NONE : public ::testing::Test
+class CPU_SolverHeuristicConfig_NONE : public ::testing::TestWithParam<int>
 {
 };
 
-TEST_F(CPU_SolverHeuristicConfig_NONE, IsValidSplitK_PowerOfTwo)
+TEST_P(CPU_SolverHeuristicConfig_NONE, IsValidSplitK_PowerOfTwo)
 {
     // Create a config that uses split_k with range 1-128
     SolverHeuristicConfig cfg{"TestSolver", "TestSolverKTN", 2, true, 1, 128, false, true};
@@ -329,7 +327,7 @@ TEST_F(CPU_SolverHeuristicConfig_NONE, IsValidSplitK_PowerOfTwo)
     EXPECT_TRUE(cfg.IsValidSplitK(128));
 }
 
-TEST_F(CPU_SolverHeuristicConfig_NONE, IsValidSplitK_NonPowerOfTwo)
+TEST_P(CPU_SolverHeuristicConfig_NONE, IsValidSplitK_NonPowerOfTwo)
 {
     SolverHeuristicConfig cfg{"TestSolver", "TestSolverKTN", 2, true, 1, 128, false, true};
 
@@ -342,7 +340,7 @@ TEST_F(CPU_SolverHeuristicConfig_NONE, IsValidSplitK_NonPowerOfTwo)
     EXPECT_FALSE(cfg.IsValidSplitK(100));
 }
 
-TEST_F(CPU_SolverHeuristicConfig_NONE, IsValidSplitK_OutOfRange)
+TEST_P(CPU_SolverHeuristicConfig_NONE, IsValidSplitK_OutOfRange)
 {
     SolverHeuristicConfig cfg{"TestSolver", "TestSolverKTN", 2, true, 1, 128, false, true};
 
@@ -353,7 +351,7 @@ TEST_F(CPU_SolverHeuristicConfig_NONE, IsValidSplitK_OutOfRange)
     EXPECT_FALSE(cfg.IsValidSplitK(-1)); // Not autodeduce since not supported
 }
 
-TEST_F(CPU_SolverHeuristicConfig_NONE, IsValidSplitK_AutoDeduce)
+TEST_P(CPU_SolverHeuristicConfig_NONE, IsValidSplitK_AutoDeduce)
 {
     // Config that supports autodeduce
     SolverHeuristicConfig cfg_with_auto{"TestSolver", "TestSolverKTN", 2, true, 1, 128, true, true};
@@ -364,7 +362,7 @@ TEST_F(CPU_SolverHeuristicConfig_NONE, IsValidSplitK_AutoDeduce)
     EXPECT_FALSE(cfg_no_auto.IsValidSplitK(CkSplitkAutoDeduce));
 }
 
-TEST_F(CPU_SolverHeuristicConfig_NONE, IsValidSplitK_NoSplitKSolver)
+TEST_P(CPU_SolverHeuristicConfig_NONE, IsValidSplitK_NoSplitKSolver)
 {
     // Config for solver that doesn't use split_k (like Forward)
     SolverHeuristicConfig cfg{"TestSolver", "TestSolverKTN", 2, false, 0, 0, false, true};
@@ -375,7 +373,7 @@ TEST_F(CPU_SolverHeuristicConfig_NONE, IsValidSplitK_NoSplitKSolver)
     EXPECT_FALSE(cfg.IsValidSplitK(2));
 }
 
-TEST_F(CPU_SolverHeuristicConfig_NONE, PassesSplitKGate_NonSplitKAcceptsBareCandidate)
+TEST_P(CPU_SolverHeuristicConfig_NONE, PassesSplitKGate_NonSplitKAcceptsBareCandidate)
 {
     // Non-split-k solver (Forward / 3D-Fwd / 3D-Bwd): a bare kernel id yields split_k 1. The lazy
     // walk's gate must NOT reject it -- IsValidSplitK accepts only 0 for these solvers, so gating
@@ -385,7 +383,7 @@ TEST_F(CPU_SolverHeuristicConfig_NONE, PassesSplitKGate_NonSplitKAcceptsBareCand
     EXPECT_TRUE(fwd.PassesSplitKGate(/*is_deterministic=*/true, /*split_k=*/1));
 }
 
-TEST_F(CPU_SolverHeuristicConfig_NONE, PassesSplitKGate_SplitKValidatesValue)
+TEST_P(CPU_SolverHeuristicConfig_NONE, PassesSplitKGate_SplitKValidatesValue)
 {
     SolverHeuristicConfig wrw{"TestSolver", "TestSolverKTN", 2, true, 1, 128, false, true};
     EXPECT_TRUE(wrw.PassesSplitKGate(false, 8));    // power-of-two in range
@@ -393,14 +391,14 @@ TEST_F(CPU_SolverHeuristicConfig_NONE, PassesSplitKGate_SplitKValidatesValue)
     EXPECT_FALSE(wrw.PassesSplitKGate(false, 256)); // out of range
 }
 
-TEST_F(CPU_SolverHeuristicConfig_NONE, PassesSplitKGate_DeterministicForcesUnitSplitK)
+TEST_P(CPU_SolverHeuristicConfig_NONE, PassesSplitKGate_DeterministicForcesUnitSplitK)
 {
     SolverHeuristicConfig wrw{"TestSolver", "TestSolverKTN", 2, true, 1, 128, false, true};
     EXPECT_TRUE(wrw.PassesSplitKGate(/*is_deterministic=*/true, 1));
     EXPECT_FALSE(wrw.PassesSplitKGate(/*is_deterministic=*/true, 8));
 }
 
-TEST_F(CPU_SolverHeuristicConfig_NONE, GetSolverNameForArch_gfx90a)
+TEST_P(CPU_SolverHeuristicConfig_NONE, GetSolverNameForArch_gfx90a)
 {
     SolverHeuristicConfig cfg{"ConvHipImplicitGemmGroupBwdXdlops",
                               "ConvHipIgemmGroupXdlops",
@@ -415,7 +413,7 @@ TEST_F(CPU_SolverHeuristicConfig_NONE, GetSolverNameForArch_gfx90a)
     EXPECT_STREQ(cfg.GetSolverNameForArch("gfx90a"), "ConvHipIgemmGroupXdlops");
 }
 
-TEST_F(CPU_SolverHeuristicConfig_NONE, GetSolverNameForArch_gfx942)
+TEST_P(CPU_SolverHeuristicConfig_NONE, GetSolverNameForArch_gfx942)
 {
     SolverHeuristicConfig cfg{"ConvHipImplicitGemmGroupBwdXdlops",
                               "ConvHipIgemmGroupXdlops",
@@ -431,7 +429,7 @@ TEST_F(CPU_SolverHeuristicConfig_NONE, GetSolverNameForArch_gfx942)
     EXPECT_STREQ(cfg.GetSolverNameForArch("gfx950"), "ConvHipImplicitGemmGroupBwdXdlops");
 }
 
-TEST_F(CPU_SolverHeuristicConfig_NONE, SolverConfigs_Consistency)
+TEST_P(CPU_SolverHeuristicConfig_NONE, SolverConfigs_Consistency)
 {
     // Test that actual solver configs are consistent
     // Forward solver: no split_k
@@ -473,15 +471,17 @@ TEST_F(CPU_SolverHeuristicConfig_NONE, SolverConfigs_Consistency)
     EXPECT_EQ(wrw_cfg.split_k_max, 128);
 }
 
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_SolverHeuristicConfig_NONE, ::testing::Values(0));
+
 // ===============================================================================
 // HeuristicInitState Tests
 // ===============================================================================
 
-class CPU_HeuristicInitState_NONE : public ::testing::Test
+class CPU_HeuristicInitState_NONE : public ::testing::TestWithParam<int>
 {
 };
 
-TEST_F(CPU_HeuristicInitState_NONE, Reset_WithSplitK)
+TEST_P(CPU_HeuristicInitState_NONE, Reset_WithSplitK)
 {
     std::vector<std::string> valid_kernels;
     int index             = 99;
@@ -496,7 +496,7 @@ TEST_F(CPU_HeuristicInitState_NONE, Reset_WithSplitK)
     EXPECT_EQ(kernel_id, "");
 }
 
-TEST_F(CPU_HeuristicInitState_NONE, Reset_WithoutSplitK)
+TEST_P(CPU_HeuristicInitState_NONE, Reset_WithoutSplitK)
 {
     std::vector<std::string> valid_kernels;
     int index             = 99;
@@ -511,7 +511,7 @@ TEST_F(CPU_HeuristicInitState_NONE, Reset_WithoutSplitK)
     EXPECT_EQ(kernel_id, "");
 }
 
-TEST_F(CPU_HeuristicInitState_NONE, SetResult_WithSplitK)
+TEST_P(CPU_HeuristicInitState_NONE, SetResult_WithSplitK)
 {
     std::vector<std::string> valid_kernels = {"kernel_A", "kernel_B", "kernel_C"};
     int index                              = 0;
@@ -526,7 +526,7 @@ TEST_F(CPU_HeuristicInitState_NONE, SetResult_WithSplitK)
     EXPECT_EQ(kernel_id, "kernel_B+4");
 }
 
-TEST_F(CPU_HeuristicInitState_NONE, SetResult_WithoutSplitK)
+TEST_P(CPU_HeuristicInitState_NONE, SetResult_WithoutSplitK)
 {
     std::vector<std::string> valid_kernels = {"kernel_A", "kernel_B", "kernel_C"};
     int index                              = 0;
@@ -541,7 +541,7 @@ TEST_F(CPU_HeuristicInitState_NONE, SetResult_WithoutSplitK)
     EXPECT_EQ(kernel_id, "kernel_C");
 }
 
-TEST_F(CPU_HeuristicInitState_NONE, SetResult_InvalidIndex)
+TEST_P(CPU_HeuristicInitState_NONE, SetResult_InvalidIndex)
 {
     std::vector<std::string> valid_kernels = {"kernel_A", "kernel_B"};
     int index                              = 0;
@@ -563,7 +563,7 @@ TEST_F(CPU_HeuristicInitState_NONE, SetResult_InvalidIndex)
     EXPECT_EQ(kernel_id, "");
 }
 
-TEST_F(CPU_HeuristicInitState_NONE, KernelIdFormatting)
+TEST_P(CPU_HeuristicInitState_NONE, KernelIdFormatting)
 {
     std::vector<std::string> valid_kernels = {"DeviceOp<1,2,3>"};
     int index                              = 0;
@@ -582,6 +582,8 @@ TEST_F(CPU_HeuristicInitState_NONE, KernelIdFormatting)
     state.SetResult(0, 128, true);
     EXPECT_EQ(kernel_id, "DeviceOp<1,2,3>+128");
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_HeuristicInitState_NONE, ::testing::Values(0));
 
 // Non-parameterized utility tests
 // Parameterized feature extraction tests
@@ -610,8 +612,9 @@ TEST_P(GPU_ConvNDKernelTuning_FP32, GetFeaturesND_Test)
     int max_cu        = 304;
     auto features     = GetFeaturesND(problem, max_cu, device_arch);
 
-    // 2D has 23 features, 3D has 29 features (6 depth-related features)
-    size_t expected_feature_count = (spatial_dim == 3) ? 29u : 23u;
+    // 2D has 24 features (dilation_d is supplied in both 2D and 3D), 3D adds 5 more
+    // depth-only features (in_d, out_d, fil_d, pad_d, conv_stride_d) for 29 total.
+    size_t expected_feature_count = (spatial_dim == 3) ? 29u : 24u;
     ASSERT_EQ(features.size(), expected_feature_count);
     CheckGetFeaturesND_MapValues(features, problem, param.direction, spatial_dim == 3);
 }
@@ -673,9 +676,10 @@ TEST_P(GPU_ConvNDKernelTuningAI_FP32, CandidateSelectionModel_Test)
 // Fixed fixture tests for specific directions (non-parameterized)
 #endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 
-// ------------------- Full Solver Tests -------------------
+// ------------------- Standard Solver Tests -------------------
 
-class GPU_Conv2DKernelTuningSolver_FP32 : public GPU_ConvNDKernelTuningAI_Base
+class GPU_Conv2DKernelTuningSolver_FP32 : public GPU_ConvNDKernelTuningAI_Base,
+                                          public ::testing::WithParamInterface<int>
 {
 protected:
     void SetUp() override
@@ -686,7 +690,8 @@ protected:
     }
 };
 
-class GPU_Conv3DKernelTuningSolver_FP32 : public GPU_ConvNDKernelTuningAI_Base
+class GPU_Conv3DKernelTuningSolver_FP32 : public GPU_ConvNDKernelTuningAI_Base,
+                                          public ::testing::WithParamInterface<int>
 {
 protected:
     void SetUp() override
@@ -697,7 +702,7 @@ protected:
     }
 };
 
-TEST_F(GPU_Conv2DKernelTuningSolver_FP32, FullSolverPathway_Wrw_Test)
+TEST_P(GPU_Conv2DKernelTuningSolver_FP32, FullSolverPathway_Wrw_Test)
 {
 #if !MIOPEN_USE_COMPOSABLEKERNEL
     GTEST_SKIP() << "Composable Kernel is disabled, skipping CK-dependent solver test";
@@ -717,7 +722,7 @@ TEST_F(GPU_Conv2DKernelTuningSolver_FP32, FullSolverPathway_Wrw_Test)
 #endif
 }
 
-TEST_F(GPU_Conv2DKernelTuningSolver_FP32, FullSolverPathway_Fwd_Test)
+TEST_P(GPU_Conv2DKernelTuningSolver_FP32, FullSolverPathway_Fwd_Test)
 {
 #if !MIOPEN_USE_COMPOSABLEKERNEL
     GTEST_SKIP() << "Composable Kernel is disabled, skipping CK-dependent solver test";
@@ -736,7 +741,7 @@ TEST_F(GPU_Conv2DKernelTuningSolver_FP32, FullSolverPathway_Fwd_Test)
 #endif
 }
 
-TEST_F(GPU_Conv2DKernelTuningSolver_FP32, FullSolverPathway_Bwd_Test)
+TEST_P(GPU_Conv2DKernelTuningSolver_FP32, FullSolverPathway_Bwd_Test)
 {
 #if !MIOPEN_USE_COMPOSABLEKERNEL
     GTEST_SKIP() << "Composable Kernel is disabled, skipping CK-dependent solver test";
@@ -756,7 +761,7 @@ TEST_F(GPU_Conv2DKernelTuningSolver_FP32, FullSolverPathway_Bwd_Test)
 #endif
 }
 
-TEST_F(GPU_Conv3DKernelTuningSolver_FP32, FullSolverPathway_Wrw_Test)
+TEST_P(GPU_Conv3DKernelTuningSolver_FP32, FullSolverPathway_Wrw_Test)
 {
 #if !MIOPEN_USE_COMPOSABLEKERNEL
     GTEST_SKIP() << "Composable Kernel is disabled, skipping CK-dependent solver test";
@@ -776,7 +781,7 @@ TEST_F(GPU_Conv3DKernelTuningSolver_FP32, FullSolverPathway_Wrw_Test)
 #endif
 }
 
-TEST_F(GPU_Conv3DKernelTuningSolver_FP32, FullSolverPathway_Fwd_Test)
+TEST_P(GPU_Conv3DKernelTuningSolver_FP32, FullSolverPathway_Fwd_Test)
 {
 #if !MIOPEN_USE_COMPOSABLEKERNEL
     GTEST_SKIP() << "Composable Kernel is disabled, skipping CK-dependent solver test";
@@ -795,7 +800,7 @@ TEST_F(GPU_Conv3DKernelTuningSolver_FP32, FullSolverPathway_Fwd_Test)
 #endif
 }
 
-TEST_F(GPU_Conv3DKernelTuningSolver_FP32, FullSolverPathway_Bwd_Test)
+TEST_P(GPU_Conv3DKernelTuningSolver_FP32, FullSolverPathway_Bwd_Test)
 {
 #if !MIOPEN_USE_COMPOSABLEKERNEL
     GTEST_SKIP() << "Composable Kernel is disabled, skipping CK-dependent solver test";
@@ -815,15 +820,19 @@ TEST_F(GPU_Conv3DKernelTuningSolver_FP32, FullSolverPathway_Bwd_Test)
 #endif
 }
 
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_Conv2DKernelTuningSolver_FP32, ::testing::Values(0));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_Conv3DKernelTuningSolver_FP32, ::testing::Values(0));
+
 // ------------------- Cross-Platform Diagnostic Tests -------------------
 
-class CPU_ConvNDKernelTuningDiagnostic_NONE : public GPU_ConvNDKernelTuning_Base
+class CPU_ConvNDKernelTuningDiagnostic_NONE : public GPU_ConvNDKernelTuning_Base,
+                                              public ::testing::WithParamInterface<int>
 {
 protected:
     bool RequiresAIModels() const override { return false; }
 };
 
-TEST_F(CPU_ConvNDKernelTuningDiagnostic_NONE, ArchitectureCompatibility_2D_Test)
+TEST_P(CPU_ConvNDKernelTuningDiagnostic_NONE, ArchitectureCompatibility_2D_Test)
 {
     std::vector<std::string> test_architectures = {"gfx942", "gfx950", "gfx90a", "gfx908"};
     std::string test_solver                     = "ConvHipImplicitGemmGroupWrwXdlops";
@@ -838,7 +847,7 @@ TEST_F(CPU_ConvNDKernelTuningDiagnostic_NONE, ArchitectureCompatibility_2D_Test)
     }
 }
 
-TEST_F(CPU_ConvNDKernelTuningDiagnostic_NONE, ArchitectureCompatibility_3D_Test)
+TEST_P(CPU_ConvNDKernelTuningDiagnostic_NONE, ArchitectureCompatibility_3D_Test)
 {
     std::vector<std::string> test_architectures = {"gfx942", "gfx950", "gfx90a", "gfx908"};
     std::string test_solver                     = "ConvHipImplicitGemm3DGroupWrwXdlops";
@@ -853,7 +862,7 @@ TEST_F(CPU_ConvNDKernelTuningDiagnostic_NONE, ArchitectureCompatibility_3D_Test)
     }
 }
 
-TEST_F(CPU_ConvNDKernelTuningDiagnostic_NONE, GetFeatures2D_CrossPlatform_Test)
+TEST_P(CPU_ConvNDKernelTuningDiagnostic_NONE, GetFeatures2D_CrossPlatform_Test)
 {
     auto problem                        = GetReusable2DProblemDescription();
     int max_cu                          = 304;
@@ -862,12 +871,12 @@ TEST_F(CPU_ConvNDKernelTuningDiagnostic_NONE, GetFeatures2D_CrossPlatform_Test)
     for(const auto& arch : test_archs)
     {
         auto features = GetFeaturesND(problem, max_cu, arch);
-        EXPECT_EQ(features.size(), 23u) << "Feature count inconsistent for " << arch;
+        EXPECT_EQ(features.size(), 24u) << "Feature count inconsistent for " << arch;
         EXPECT_EQ(features.at("spatial_dim"), 2.0f) << "Spatial dim incorrect for " << arch;
     }
 }
 
-TEST_F(CPU_ConvNDKernelTuningDiagnostic_NONE, GetFeatures3D_CrossPlatform_Test)
+TEST_P(CPU_ConvNDKernelTuningDiagnostic_NONE, GetFeatures3D_CrossPlatform_Test)
 {
     auto problem                        = GetReusable3DProblemDescription();
     int max_cu                          = 304;
@@ -881,15 +890,17 @@ TEST_F(CPU_ConvNDKernelTuningDiagnostic_NONE, GetFeatures3D_CrossPlatform_Test)
     }
 }
 
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_ConvNDKernelTuningDiagnostic_NONE, ::testing::Values(0));
+
 // ===============================================================================
 // FillValidKernelsGeneric Tests
 // ===============================================================================
 
-class CPU_FillValidKernelsGeneric_NONE : public ::testing::Test
+class CPU_FillValidKernelsGeneric_NONE : public ::testing::TestWithParam<int>
 {
 };
 
-TEST_F(CPU_FillValidKernelsGeneric_NONE, Documentation_Test)
+TEST_P(CPU_FillValidKernelsGeneric_NONE, Documentation_Test)
 {
     // This test documents the purpose of FillValidKernelsGeneric:
     // It provides a single reusable template that handles data type dispatch
@@ -898,15 +909,17 @@ TEST_F(CPU_FillValidKernelsGeneric_NONE, Documentation_Test)
     SUCCEED();
 }
 
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_FillValidKernelsGeneric_NONE, ::testing::Values(0));
+
 // ===============================================================================
 // RunKTNGeneric Tests
 // ===============================================================================
 
-class CPU_RunKTNGeneric_NONE : public ::testing::Test
+class CPU_RunKTNGeneric_NONE : public ::testing::TestWithParam<int>
 {
 };
 
-TEST_F(CPU_RunKTNGeneric_NONE, Documentation_Test)
+TEST_P(CPU_RunKTNGeneric_NONE, Documentation_Test)
 {
     // This test documents the purpose of RunKTNGeneric:
     // It provides a single reusable template that dispatches KTN model execution
@@ -914,6 +927,8 @@ TEST_F(CPU_RunKTNGeneric_NONE, Documentation_Test)
     // eliminating the need for each solver to implement its own ktn_runner lambda.
     SUCCEED();
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_RunKTNGeneric_NONE, ::testing::Values(0));
 
 // ===============================================================================
 // RunAIHeuristics Integration Tests
@@ -954,7 +969,7 @@ TEST_P(CPU_SplitKValidation_Parameterized_NONE, ValidateSplitKRange)
                                 << " but got " << (actual ? "true" : "false");
 }
 
-INSTANTIATE_TEST_SUITE_P(Unit,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_SplitKValidation_Parameterized_NONE,
                          ::testing::Values(
                              // (value, min, max, expected)
@@ -982,11 +997,11 @@ INSTANTIATE_TEST_SUITE_P(Unit,
 // Deterministic Mode Enforcement Tests
 // ===============================================================================
 
-class CPU_DeterministicMode_NONE : public ::testing::Test
+class CPU_DeterministicMode_NONE : public ::testing::TestWithParam<int>
 {
 };
 
-TEST_F(CPU_DeterministicMode_NONE, HeuristicInit_SetsSplitK1)
+TEST_P(CPU_DeterministicMode_NONE, HeuristicInit_SetsSplitK1)
 {
     std::vector<std::string> valid_kernels = {"kernel_A"};
     int index                              = 0;
@@ -1003,7 +1018,7 @@ TEST_F(CPU_DeterministicMode_NONE, HeuristicInit_SetsSplitK1)
     EXPECT_EQ(kernel_id, "kernel_A+1");
 }
 
-TEST_F(CPU_DeterministicMode_NONE, AllBackwardSolvers_SupportDeterministic)
+TEST_P(CPU_DeterministicMode_NONE, AllBackwardSolvers_SupportDeterministic)
 {
     // Verify all backward/WrW solvers are configured to support deterministic mode
     // by using split_k that can be set to 1
@@ -1051,20 +1066,22 @@ TEST_F(CPU_DeterministicMode_NONE, AllBackwardSolvers_SupportDeterministic)
     }
 }
 
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_DeterministicMode_NONE, ::testing::Values(0));
+
 // ------------------- Test Instantiations -------------------
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_ConvNDKernelTuning_FP32,
                          ::testing::ValuesIn(GenSmokeTestCases()),
                          ConvNDKernelTuningTestName);
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_ConvNDKernelTuning_FP32,
                          ::testing::ValuesIn(GenFullTestCases()),
                          ConvNDKernelTuningTestName);
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     GPU_ConvNDKernelTuningAI_FP32,
     ::testing::Values(ConvNDKernelTuningTestParam{2,
                                                   miopenFloat,
@@ -1076,8 +1093,10 @@ INSTANTIATE_TEST_SUITE_P(
 
 #else
 // Dummy test when AI kernel tuning is disabled
-TEST(CPU_ConvNDKernelTuningDisabled_NONE, FeatureDisabled)
+using CPU_ConvNDKernelTuningDisabled_NONE = ::testing::TestWithParam<int>;
+TEST_P(CPU_ConvNDKernelTuningDisabled_NONE, FeatureDisabled)
 {
     GTEST_SKIP() << "AI kernel tuning features are disabled in this build";
 }
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_ConvNDKernelTuningDisabled_NONE, ::testing::Values(0));
 #endif // MIOPEN_ENABLE_AI_KERNEL_TUNING

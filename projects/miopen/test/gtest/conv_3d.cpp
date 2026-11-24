@@ -111,4 +111,4 @@ using namespace conv_3d;
 
 TEST_P(GPU_conv3d_FP32, FloatTest_conv_3d) { Run2dDriver(); };
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_conv3d_FP32, testing::Values(GetTestCases("--float")));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_conv3d_FP32, testing::Values(GetTestCases("--float")));
