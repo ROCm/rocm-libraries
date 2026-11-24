@@ -3636,7 +3636,8 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         if splitbar and k_atoms < 2:
             raise ValueError("ROCKE_EXP_MX_RA_SPLITBAR needs two K-atoms per tile")
         # ROCKE_EXP_MX_RA_PRO=1: the prologue waits for tile 0 only (each wave
-        # issues two loads a tile with ROCKE_EXP_TDM_SPLIT=2), not tile 1 too.
+        # issues one load a tile with ROCKE_EXP_TDM_SPLIT=2, two with MX's
+        # scales), not tile 1 too.
         pro_partial = (_os_ra.environ.get("ROCKE_EXP_MX_RA_PRO") == "1"
                        and _os_ra.environ.get("ROCKE_EXP_TDM_SPLIT") == "2")
         # EXPERIMENT (diagnostic): ROCKE_EXP_MX_RA_STAMP=1 (RA=2) stamps each
@@ -3826,7 +3827,9 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             b.inline_asm(_CL_SYNC, "~{scc},~{memory}")
         emit_load_phase(A_smem, B_smem, k_lo, lds_parity=0)
         emit_load_phase(A_smem, B_smem, b.add(k_lo, c_block_k), lds_parity=1)
-        b.s_wait_tensorcnt(2 if pro_partial else 0)
+        # With the split loads each wave issues one data load per tile, plus one
+        # scale load with MX: tile 1's loads are the last 2 (MX) or 1 (plain).
+        b.s_wait_tensorcnt((2 if _mx else 1) if pro_partial else 0)
         b.s_barrier_bare()
         a0, sa0, sb0 = rd_head(0, 0)
         head0 = (a0, sa0, sb0, [rd_b(0, 0, j) for j in range(half)],
