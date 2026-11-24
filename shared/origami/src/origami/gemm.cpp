@@ -2031,15 +2031,19 @@ double compute_memory_latency(const problem_t& problem,
   // 8) DRAM latency
   double dram_bw    = hardware.mem3_perf_ratio * bw_limited;
   double L_mem_dram = (dram_bw > 0) ? (Ld_dram / dram_bw) : 0.0;
-  // Workgroups that advance through K in step (one per tile) read, at any time, the same
-  // offset of every stored vector.  When the vectors are a whole number of 4 KB pages apart
-  // those reads do not spread over the memory: the stream of that operand runs at the rate of
-  // one CU (measured on gfx1151: cold activations of K = 2048 or 4096 bf16, 4 or 8 KB apart,
-  // stream at 42 GB/s where K = 1984 or 4032 streams at over 200; charged where the tile terms
-  // are measured).  A Stream-K grid that shares or splits the tiles puts its workgroups at
-  // different K and is not slowed.
-  if (heuristic_defaults_t::has_measured_tile_terms(hardware.arch) && dram_bw > 0 &&
-      context.num_wgs == context.num_output_tiles) {
+  // Workgroups that advance through K in step read, at any time, the same offset of every
+  // stored vector.  When the vectors are a whole number of 4 KB pages apart those reads do not
+  // spread over the memory: the stream of that operand runs at the rate of one CU (measured on
+  // gfx1151: cold activations of K = 2048 or 4096 bf16, 4 or 8 KB apart, stream at 42 GB/s
+  // where K = 1984 or 4032 streams at over 200).  It is charged where it was measured, which is
+  // behind a MALL: on gfx1150, which has none, K = 2048 and 4096 time as any other K (per-kernel
+  // campaign, 2000 timings each).
+  // Stream-K hands out the K iterations of all tiles in order, so workgroup i starts at
+  // i x tiles / workgroups tiles: the workgroups stand at workgroups / gcd(workgroups, tiles)
+  // different K positions (one when each runs whole tiles, the splits when a tile is split evenly).
+  if (heuristic_defaults_t::has_measured_tile_terms(hardware.arch) && dram_bw > 0 && hardware.has_MALL()) {
+    const size_t wgs = std::max<size_t>(context.num_wgs, 1), tiles = std::max<size_t>(context.num_output_tiles, 1);
+    const size_t k_positions = wgs / std::gcd(wgs, tiles);
     constexpr size_t page_bytes = 4096;
     auto page_aligned = [&](size_t given, bool vectors_along_k, size_t other_dim, double elem_bytes) {
       const size_t natural = static_cast<size_t>(static_cast<double>(vectors_along_k ? problem.size.k : other_dim) * elem_bytes);
@@ -2048,10 +2052,11 @@ double compute_memory_latency(const problem_t& problem,
     };
     const bool a_aligned = page_aligned(problem.a_stride_bytes, problem.a_transpose == transpose_t::T, problem.size.m, context.a_bytes);
     const bool b_aligned = page_aligned(problem.b_stride_bytes, problem.b_transpose != transpose_t::T, problem.size.n, context.b_bytes);
-    const double one_cu_bw = hardware.mem3_perf_ratio * compute_mem_bw_from_occupancy(hardware, 1);
-    if ((a_aligned || b_aligned) && one_cu_bw > 0 && one_cu_bw < dram_bw)
-      L_mem_dram = (a_aligned ? Ld_A_dram / one_cu_bw : Ld_A_dram / dram_bw) +
-                   (b_aligned ? Ld_B_dram / one_cu_bw : Ld_B_dram / dram_bw);
+    const double in_step_bw =
+        static_cast<double>(k_positions) * hardware.mem3_perf_ratio * compute_mem_bw_from_occupancy(hardware, 1);
+    if ((a_aligned || b_aligned) && in_step_bw < dram_bw)
+      L_mem_dram = (a_aligned ? Ld_A_dram / in_step_bw : Ld_A_dram / dram_bw) +
+                   (b_aligned ? Ld_B_dram / in_step_bw : Ld_B_dram / dram_bw);
   }
 
   // 9) Worst-case across all memory levels.  A K-iteration's loads are all in flight together,

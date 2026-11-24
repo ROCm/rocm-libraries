@@ -3586,13 +3586,14 @@ TEST_CASE("GEMM: vectors a whole number of pages apart stream slowly when read i
   t.wave_group_m = 2;
   t.wave_group_n = 2;
   config.backend = t;
-  auto latency = [&](size_t b_stride_bytes, size_t launch_grid) {
+  auto latency_on = [&](const origami::hardware_t& hw, size_t b_stride_bytes, size_t launch_grid) {
     auto p           = problem;
     p.b_stride_bytes = b_stride_bytes;
     auto c           = config;
     c.launch_grid    = launch_grid;
-    return origami::gemm::compute_total_latency(p, hardware, c);
+    return origami::gemm::compute_total_latency(p, hw, c);
   };
+  auto latency = [&](size_t b_stride_bytes, size_t launch_grid) { return latency_on(hardware, b_stride_bytes, launch_grid); };
   const size_t tiles = 2 * 16;
   // K = 2048 bf16 is 4096 B a vector: one workgroup per tile reads the same offset of every
   // vector at a time, and they do not spread over the memory.  Unpadded (0) is that stride.
@@ -3601,4 +3602,7 @@ TEST_CASE("GEMM: vectors a whole number of pages apart stream slowly when read i
   REQUIRE(latency(8192, tiles) == latency(4096, tiles));
   // A grid that shares the tiles has its workgroups at different K.
   REQUIRE(latency(4096, 20) == latency(4096 - 128, 20));
+  // Measured behind a MALL only: gfx1150 has none and times K = 2048 as any other K.
+  const auto gfx1150 = make_w4a16_gfx1150_hardware();
+  REQUIRE(latency_on(gfx1150, 4096, tiles) == latency_on(gfx1150, 4096 - 128, tiles));
 }
