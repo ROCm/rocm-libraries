@@ -153,7 +153,14 @@ def _second_variant(build_block, metadata_block):
 
 
 @pytest.fixture
-def packed_hip_variant_set(tmp_path, empty_arch_fixture, hipcc, rocm_kpack_dir):
+def packed_hip_variant_set(
+    tmp_path,
+    empty_arch_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+):
     """Pack the empty_arch solo shard with a second inline kernel derived from its
     first by `mutate`, returning the shipped KDP's path."""
 
@@ -172,7 +179,9 @@ def packed_hip_variant_set(tmp_path, empty_arch_fixture, hipcc, rocm_kpack_dir):
             source_root=src,
             arches=[_HIP_ARCH],
             out_root=tmp_path / "out",
-            hipcc=hipcc,
+            hip_compiler=hip_compiler,
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
             rocm_kpack_dir=rocm_kpack_dir,
             inter_root=tmp_path / "inter",
         )
@@ -305,7 +314,7 @@ class TestCliEndToEnd:
 
 # Real-bundle regressions: everything above runs against a purpose-built fixture,
 # these against every git-tracked bundle the repository carries -- no pack, no
-# hipcc, no GPU. Two roots are wired and both read: `examples/descriptors` is the
+# compiler, no GPU. Two roots are wired and both read: `examples/descriptors` is the
 # documented sample tree, and the engine root is what a consumer loads. A producer
 # subtree a root does not carry skips with a named reason. New bundles need no change
 # here, since the roots are globbed.

@@ -176,7 +176,7 @@ jobs:
           if [[ "${EVENT_NAME}" == "pull_request" ]]; then
             if gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" \
                  --jq '.[].filename' | grep -q '^projects/hipblaslt/'; then
-              overrides='{"gfx950":{"linux":{"tests_on_trigger":["presubmit"],"test_labels_for_family":["test:hipblaslt"],"test_type_for_family":"quick"}}}'
+              overrides='{"gfx950":{"linux":{"tests_on_trigger":["presubmit"],"test_labels_for_family":["test:hipblaslt"]}}}'
             fi
           fi
           echo "Resolved family_overrides: ${overrides}"
