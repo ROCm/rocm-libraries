@@ -900,6 +900,12 @@ class UnifiedAttention2DTiledSpec:
                     "use_fast_paged_kv_desc is restricted to bf16 h64kv8 "
                     "HD=64 BS=32 T=64 num_warps=4"
                 )
+            # The sliced-K loads address pages only through the generic paged
+            # descriptor, which the fast path does not build.
+            if self.use_k_sliced_ring:
+                raise ValueError(
+                    "use_fast_paged_kv_desc does not support use_k_sliced_ring"
+                )
         if self.use_agpr_alloc_zero:
             _agpr0_r4_s1mask_hlpv = (
                 self.use_mfma_32x32
