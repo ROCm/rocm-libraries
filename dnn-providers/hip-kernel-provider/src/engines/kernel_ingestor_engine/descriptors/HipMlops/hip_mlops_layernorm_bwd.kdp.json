@@ -1,0 +1,45 @@
+{
+  "version": "1.0",
+  "id": "c71e8029-078f-49dc-946e-50f364b59c88",
+  "name": "hipkernel:hip_mlops_layernorm_bwd",
+  "matchers": [
+    "317abfbc-e533-494b-9ff7-06aa02ba8a6f",
+    "c40efc15-aad7-46c6-a393-850e79444a9f"
+  ],
+  "engine": "0b6c4367-d91b-471e-be5a-ea77669b8897",
+  "dispatch": "4e8e83b2-76e6-4381-8bd6-42c2920ab20a",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "0b6c4367-d91b-471e-be5a-ea77669b8897",
+          "kmd_id": "b8616f7b-3831-4ef3-93cb-f0d1a01fb102",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "operation"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "79aaddc6-770f-4179-b599-8a31953c5b50",
+      "name": "hip_mlops.layernorm_bwd",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/layernorm/LayernormBwd.cpp",
+        "entry_point": "LayernormBwd"
+      },
+      "metadata": {
+        "operation": "LAYERNORM_BWD"
+      },
+      "priority": 0
+    }
+  ],
+  "arch": []
+}

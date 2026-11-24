@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "11eea4cb-4f45-476e-8642-3f34f59c0df9",
+  "name": "HipMlops layernorm_fwd dispatch",
+  "dispatch_symbol": "hipkernel.hip_mlops.layernorm_fwd_dispatch"
+}

@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "317abfbc-e533-494b-9ff7-06aa02ba8a6f",
+  "name": "graph operation is layernorm_bwd",
+  "scope": "graph",
+  "match_symbol": "hipkernel.hip_mlops.layernorm_bwd_match"
+}

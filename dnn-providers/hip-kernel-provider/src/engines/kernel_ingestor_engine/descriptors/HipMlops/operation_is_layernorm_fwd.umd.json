@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "064ea345-5d1c-4ccf-8b0e-4186df47f746",
+  "name": "graph operation is layernorm_fwd",
+  "scope": "graph",
+  "match_symbol": "hipkernel.hip_mlops.layernorm_fwd_match"
+}

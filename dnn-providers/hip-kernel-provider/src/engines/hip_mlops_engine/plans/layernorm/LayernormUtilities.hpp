@@ -6,8 +6,11 @@
 #include <cstdint>
 #include <optional>
 #include <unordered_map>
+#include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+
+#include "compilation/KernelCompileOptions.hpp"
 
 namespace hip_kernel_provider::layernorm
 {
@@ -16,6 +19,26 @@ enum class Direction
 {
     FORWARD,
     BACKWARD
+};
+
+/// One launch of a layernorm kernel: the entry point of the compiled source and its 1D
+/// geometry.
+struct LayernormLaunch
+{
+    const char* entryPoint;
+    unsigned int blockSize;
+    unsigned int gridSize;
+};
+
+/// What a layernorm plan compiles and launches: the compile options that bake the graph into
+/// the source, and its launches in order, all entry points of one program. Built by
+/// buildLayernormFwdKernel()/buildLayernormBwdKernel(), which the HIP MLOps engine's plans and
+/// the kernel ingestor's HipMlops packs both call, so the two engines compile and launch the
+/// same program for the same graph.
+struct LayernormKernelBuild
+{
+    compilation::KernelCompileOptions options;
+    std::vector<LayernormLaunch> launches;
 };
 
 class ProblemDescription

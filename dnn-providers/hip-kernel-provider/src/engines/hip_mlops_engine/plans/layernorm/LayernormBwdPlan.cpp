@@ -101,17 +101,40 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* LayernormBwdParams
     return _dbias;
 }
 
-LayernormBwdPlan::LayernormBwdPlan(LayernormBwdParams&& params)
-    : _params(std::move(params))
+namespace
+{
+
+/// The work-items one parallel pass keeps busy on a device with @p multiProcessorCount CUs.
+size_t reqdWorkItemCount(int multiProcessorCount, size_t localSize)
+{
+    return 4 * localSize * static_cast<size_t>(multiProcessorCount);
+}
+
+bool isParallel(int multiProcessorCount, size_t localSize, size_t innerSize, size_t outerSize)
+{
+    const size_t reqd = reqdWorkItemCount(multiProcessorCount, localSize);
+    return innerSize <= reqd && innerSize * outerSize > reqd;
+}
+
+size_t parallelSize(int multiProcessorCount, size_t localSize, size_t innerSize, size_t outerSize)
+{
+    const size_t reqd = reqdWorkItemCount(multiProcessorCount, localSize);
+    size_t size = 1;
+    while(size * innerSize < reqd && static_cast<double>(size) < std::sqrt(outerSize))
+    {
+        size *= 2;
+    }
+    return size;
+}
+
+ProblemDescription bwdProblem(const LayernormBwdParams& params)
 {
     const auto statAttr
-        = _params.mean() == nullptr ? std::nullopt : std::make_optional(_params.mean());
-    const ProblemDescription problem(_params.x(), _params.scale(), statAttr, Direction::BACKWARD);
-    _outerSize = problem.outerSize();
-    _innerSize = problem.innerSize();
-    _stride = problem.stride();
-    _localSize = LayernormBwdParams::MAX_LOCAL_SIZE;
+        = params.mean() == nullptr ? std::nullopt : std::make_optional(params.mean());
+    return {params.x(), params.scale(), statAttr, Direction::BACKWARD};
 }
+
+} // namespace
 
 std::vector<KernelLaunchShape> LayernormBwdPlan::launchShapes(int64_t outerSize,
                                                               int64_t innerSize,
@@ -136,35 +159,12 @@ std::vector<KernelLaunchShape> LayernormBwdPlan::launchShapes(int64_t outerSize,
     return shapes;
 }
 
-size_t LayernormBwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
-{
-    auto deviceProperties = hip_kernel_provider_common::getDeviceProperties(handle.getStream());
-
-    // Workspace only needed for the parallel backward pass or for fallback mean/rstd calculations
-    const bool parallel = isParallel(deviceProperties,
-                                     static_cast<size_t>(_localSize),
-                                     static_cast<size_t>(_innerSize),
-                                     static_cast<size_t>(_outerSize));
-    const size_t parallelSize = getParallelSize(deviceProperties,
-                                                static_cast<size_t>(_localSize),
-                                                static_cast<size_t>(_innerSize),
-                                                static_cast<size_t>(_outerSize));
-    const size_t sizeFromParallel
-        = parallel ? 2 * static_cast<size_t>(_innerSize) * parallelSize : 0;
-
-    const size_t sizeFromFallbackMeanRstd
-        = _params.mean() == nullptr || _params.invVariance() == nullptr
-              ? 2 * static_cast<size_t>(_outerSize) * static_cast<size_t>(_stride)
-              : 0;
-
-    return 4 * (sizeFromParallel + sizeFromFallbackMeanRstd);
-}
-
-void LayernormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
-                               const hipDeviceProp_t& deviceProperties)
+LayernormKernelBuild buildLayernormBwdKernel(const LayernormBwdParams& params,
+                                             const std::string& gcnArchName,
+                                             int multiProcessorCount)
 {
     // Ensure that the input tensor is either 4D or 5D
-    const auto* xDims = _params.x()->dims();
+    const auto* xDims = params.x()->dims();
     if(xDims->size() != 4 && xDims->size() != 5)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -172,91 +172,122 @@ void LayernormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
                                                            + std::to_string(xDims->size()));
     }
 
+    const auto problem = bwdProblem(params);
+    const int64_t outerSize = problem.outerSize();
+    const int64_t innerSize = problem.innerSize();
+    const int64_t stride = problem.stride();
+    const int64_t localSize = LayernormBwdParams::MAX_LOCAL_SIZE;
+
     // Determine input/output data type configuration
-    const auto inputDataType = _params.x()->data_type();
-    const auto outputDataType = _params.dy()->data_type();
-    const auto scaleBiasDataType = _params.scale()->data_type();
+    const auto inputDataType = params.x()->data_type();
+    const auto outputDataType = params.dy()->data_type();
+    const auto scaleBiasDataType = params.scale()->data_type();
     const auto meanInvVarianceDataType
-        = (_params.mean() == nullptr) ? inputDataType : _params.mean()->data_type();
+        = (params.mean() == nullptr) ? inputDataType : params.mean()->data_type();
     const std::string inputTypeString = getKernelParamTypeString(inputDataType);
     const std::string outputTypeString = getKernelParamTypeString(outputDataType);
     const std::string scaleBiasTypeString = getKernelParamTypeString(scaleBiasDataType);
     const std::string meanInvVarianceTypeString = getKernelParamTypeString(meanInvVarianceDataType);
 
-    _isParallel = isParallel(deviceProperties,
-                             static_cast<size_t>(_localSize),
-                             static_cast<size_t>(_innerSize),
-                             static_cast<size_t>(_outerSize));
-    const size_t parallelSize = _isParallel ? getParallelSize(deviceProperties,
-                                                              static_cast<size_t>(_localSize),
-                                                              static_cast<size_t>(_innerSize),
-                                                              static_cast<size_t>(_outerSize))
-                                            : 0;
+    const bool parallel = isParallel(multiProcessorCount,
+                                     static_cast<size_t>(localSize),
+                                     static_cast<size_t>(innerSize),
+                                     static_cast<size_t>(outerSize));
+    const size_t partialSums = parallel ? parallelSize(multiProcessorCount,
+                                                       static_cast<size_t>(localSize),
+                                                       static_cast<size_t>(innerSize),
+                                                       static_cast<size_t>(outerSize))
+                                        : 0;
 
-    const auto shapes = launchShapes(_outerSize,
-                                     _innerSize,
-                                     _stride,
-                                     _localSize,
-                                     _isParallel,
-                                     static_cast<int64_t>(parallelSize));
+    const auto shapes = LayernormBwdPlan::launchShapes(
+        outerSize, innerSize, stride, localSize, parallel, static_cast<int64_t>(partialSums));
     for(const auto& shape : shapes)
     {
         checkLaunchFitsThreadLimit(shape);
     }
 
     // Prepare compilation options
-    KernelCompileOptions options(_params.x(), deviceProperties);
-    options.add("HIP_PLUGIN_LAYERNORM_OUTER_SIZE", _outerSize);
-    options.add("HIP_PLUGIN_LAYERNORM_INNER_SIZE", _innerSize);
-    options.add("HIP_PLUGIN_LAYERNORM_STRIDE", _stride);
-    options.add("HIP_PLUGIN_LAYERNORM_LOCAL_SIZE", _localSize);
-    options.add("HIP_PLUGIN_LAYERNORM_PARALLEL_SIZE", parallelSize);
+    KernelCompileOptions options(params.x(), gcnArchName);
+    options.add("HIP_PLUGIN_LAYERNORM_OUTER_SIZE", outerSize);
+    options.add("HIP_PLUGIN_LAYERNORM_INNER_SIZE", innerSize);
+    options.add("HIP_PLUGIN_LAYERNORM_STRIDE", stride);
+    options.add("HIP_PLUGIN_LAYERNORM_LOCAL_SIZE", localSize);
+    options.add("HIP_PLUGIN_LAYERNORM_PARALLEL_SIZE", partialSums);
     options.add("HIP_PLUGIN_LAYERNORM_INPUT_TYPE", inputTypeString);
     options.add("HIP_PLUGIN_LAYERNORM_OUTPUT_TYPE", outputTypeString);
     options.add("HIP_PLUGIN_LAYERNORM_SCALE_BIAS_TYPE", scaleBiasTypeString);
     options.add("HIP_PLUGIN_LAYERNORM_MEAN_INV_VARIANCE_TYPE", meanInvVarianceTypeString);
 
-    // Compile kernel and configure launch dimensions
-    _compiledProgram = kernelCompiler.compile("LayernormBwd.cpp", options);
-    _runnableKernels.push_back(_compiledProgram->getKernel("LayernormBwd"));
-    _runnableKernels[0]->setBlockSize(static_cast<unsigned int>(_localSize),
-                                      static_cast<unsigned int>(1),
-                                      static_cast<unsigned int>(1));
-    _runnableKernels[0]->setGridSize(static_cast<unsigned int>(shapes[0].blocks),
-                                     static_cast<unsigned int>(1),
-                                     static_cast<unsigned int>(1));
-
-    if(_isParallel)
+    const auto block = static_cast<unsigned int>(localSize);
+    std::vector<LayernormLaunch> launches{
+        {"LayernormBwd", block, static_cast<unsigned int>(shapes[0].blocks)}};
+    if(parallel)
     {
-        HIPDNN_PLUGIN_LOG_INFO("LayernormBwdPlan: parallel");
-
-        _runnableKernels.push_back(_compiledProgram->getKernel("LayernormBwdScaleBiasParallel"));
-        _runnableKernels[1]->setBlockSize(static_cast<unsigned int>(_localSize),
-                                          static_cast<unsigned int>(1),
-                                          static_cast<unsigned int>(1));
-        _runnableKernels[1]->setGridSize(static_cast<unsigned int>(shapes[1].blocks),
-                                         static_cast<unsigned int>(1),
-                                         static_cast<unsigned int>(1));
-
-        _runnableKernels.push_back(_compiledProgram->getKernel("LayernormBwdScaleBiasReduceSum"));
-        _runnableKernels[2]->setBlockSize(static_cast<unsigned int>(_localSize),
-                                          static_cast<unsigned int>(1),
-                                          static_cast<unsigned int>(1));
-        _runnableKernels[2]->setGridSize(static_cast<unsigned int>(shapes[2].blocks),
-                                         static_cast<unsigned int>(1),
-                                         static_cast<unsigned int>(1));
+        launches.push_back({"LayernormBwdScaleBiasParallel",
+                            block,
+                            static_cast<unsigned int>(shapes[1].blocks)});
+        launches.push_back({"LayernormBwdScaleBiasReduceSum",
+                            block,
+                            static_cast<unsigned int>(shapes[2].blocks)});
     }
     else
     {
-        HIPDNN_PLUGIN_LOG_INFO("LayernormBwdPlan: not parallel");
+        launches.push_back({"LayernormBwdScaleBias",
+                            block,
+                            static_cast<unsigned int>(align(innerSize, localSize))});
+    }
+    return {std::move(options), std::move(launches)};
+}
 
-        _runnableKernels.push_back(_compiledProgram->getKernel("LayernormBwdScaleBias"));
-        _runnableKernels[1]->setBlockSize(static_cast<unsigned int>(_localSize),
-                                          static_cast<unsigned int>(1),
-                                          static_cast<unsigned int>(1));
-        _runnableKernels[1]->setGridSize(static_cast<unsigned int>(shapes[1].blocks),
-                                         static_cast<unsigned int>(1),
-                                         static_cast<unsigned int>(1));
+size_t layernormBwdWorkspaceBytes(const LayernormBwdParams& params, int multiProcessorCount)
+{
+    const auto problem = bwdProblem(params);
+    const auto outerSize = static_cast<size_t>(problem.outerSize());
+    const auto innerSize = static_cast<size_t>(problem.innerSize());
+    const auto stride = static_cast<size_t>(problem.stride());
+    const auto localSize = static_cast<size_t>(LayernormBwdParams::MAX_LOCAL_SIZE);
+
+    // Workspace only needed for the parallel backward pass or for fallback mean/rstd calculations
+    const bool parallel = isParallel(multiProcessorCount, localSize, innerSize, outerSize);
+    const size_t sizeFromParallel
+        = parallel
+              ? 2 * innerSize * parallelSize(multiProcessorCount, localSize, innerSize, outerSize)
+              : 0;
+    const size_t sizeFromFallbackMeanRstd
+        = params.mean() == nullptr || params.invVariance() == nullptr ? 2 * outerSize * stride : 0;
+
+    return 4 * (sizeFromParallel + sizeFromFallbackMeanRstd);
+}
+
+LayernormBwdPlan::LayernormBwdPlan(LayernormBwdParams&& params)
+    : _params(std::move(params))
+    , _isParallel(false)
+{
+}
+
+size_t LayernormBwdPlan::getWorkspaceSize(const Handle& handle) const
+{
+    const auto deviceProperties
+        = hip_kernel_provider_common::getDeviceProperties(handle.getStream());
+    return layernormBwdWorkspaceBytes(_params, deviceProperties.multiProcessorCount);
+}
+
+void LayernormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
+                               const hipDeviceProp_t& deviceProperties)
+{
+    const auto build = buildLayernormBwdKernel(
+        _params, std::string(deviceProperties.gcnArchName), deviceProperties.multiProcessorCount);
+    _isParallel = build.launches.size() == 3;
+    HIPDNN_PLUGIN_LOG_INFO(
+        (_isParallel ? "LayernormBwdPlan: parallel" : "LayernormBwdPlan: not parallel"));
+
+    // Compile kernel and configure launch dimensions
+    _compiledProgram = kernelCompiler.compile("LayernormBwd.cpp", build.options);
+    for(const auto& launch : build.launches)
+    {
+        _runnableKernels.push_back(_compiledProgram->getKernel(launch.entryPoint));
+        _runnableKernels.back()->setBlockSize(launch.blockSize, 1, 1);
+        _runnableKernels.back()->setGridSize(launch.gridSize, 1, 1);
     }
 }
 
@@ -331,36 +362,6 @@ void LayernormBwdPlan::execute(const Handle& handle,
                                     dbiasBuffer.ptr,
                                     workspace);
     }
-}
-
-size_t LayernormBwdPlan::getReqdWorkItemCount(const hipDeviceProp_t& deviceProperties,
-                                              size_t localSize)
-{
-    return 4 * localSize * static_cast<size_t>(deviceProperties.multiProcessorCount);
-}
-
-bool LayernormBwdPlan::isParallel(const hipDeviceProp_t& deviceProperties,
-                                  size_t localSize,
-                                  size_t innerSize,
-                                  size_t outerSize)
-{
-    const size_t reqdWorkItemCount = getReqdWorkItemCount(deviceProperties, localSize);
-    return innerSize <= reqdWorkItemCount && innerSize * outerSize > reqdWorkItemCount;
-}
-
-size_t LayernormBwdPlan::getParallelSize(const hipDeviceProp_t& deviceProperties,
-                                         size_t localSize,
-                                         size_t innerSize,
-                                         size_t outerSize)
-{
-    const size_t reqdWorkItemCount = getReqdWorkItemCount(deviceProperties, localSize);
-    size_t parallelSize = 1;
-    while(parallelSize * innerSize < reqdWorkItemCount
-          && static_cast<double>(parallelSize) < std::sqrt(outerSize))
-    {
-        parallelSize *= 2;
-    }
-    return parallelSize;
 }
 
 } // namespace hip_kernel_provider::layernorm

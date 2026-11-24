@@ -65,9 +65,15 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             TARGET hip_kernel_provider_tests
             FILES "${_hip_mlops_dir}/resample/ResampleFwd.cpp"
                   "${_hip_mlops_dir}/resample/ResampleBwd.cpp"
+                  "${_hip_mlops_dir}/layernorm/LayernormFwd.cpp"
+                  "${_hip_mlops_dir}/layernorm/LayernormBwd.cpp"
+                  "${_hip_mlops_dir}/layernorm/LayernormCommon.hpp"
                   "${CMAKE_CURRENT_SOURCE_DIR}/../engines/hip_mlops_engine/kernels/types/VectorTypes.hpp"
             KEYS kernels/resample/ResampleFwd.cpp
                  kernels/resample/ResampleBwd.cpp
+                 kernels/layernorm/LayernormFwd.cpp
+                 kernels/layernorm/LayernormBwd.cpp
+                 LayernormCommon.hpp
                  VectorTypes.hpp
         )
     endif()

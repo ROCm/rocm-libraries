@@ -21,9 +21,9 @@ add_kernels_for_embedding(
     # descriptors; this engine embeds them under their bare names until it is retired.
     ${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/resample/ResampleFwd.cpp
     ${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/resample/ResampleBwd.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/layernorm/LayernormBwd.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/layernorm/LayernormCommon.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/layernorm/LayernormFwd.cpp
+    ${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/layernorm/LayernormBwd.cpp
+    ${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/layernorm/LayernormCommon.hpp
+    ${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/layernorm/LayernormFwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/types/VectorTypes.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/common/HipKernelActivation.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/common/HipKernelMath.hpp)

@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "4e8e83b2-76e6-4381-8bd6-42c2920ab20a",
+  "name": "HipMlops layernorm_bwd dispatch",
+  "dispatch_symbol": "hipkernel.hip_mlops.layernorm_bwd_dispatch"
+}

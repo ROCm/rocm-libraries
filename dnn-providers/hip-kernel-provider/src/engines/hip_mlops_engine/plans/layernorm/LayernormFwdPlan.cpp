@@ -97,11 +97,11 @@ size_t LayernormFwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle)
     return 0;
 }
 
-void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
-                               const hipDeviceProp_t& deviceProperties)
+LayernormKernelBuild buildLayernormFwdKernel(const LayernormFwdParams& params,
+                                             const std::string& gcnArchName)
 {
     // Extract dimensions from x tensor
-    const auto* xDims = _params.x()->dims();
+    const auto* xDims = params.x()->dims();
     // Ensure that the input tensor is either 4D or 5D
     if(xDims->size() != 4 && xDims->size() != 5)
     {
@@ -111,13 +111,13 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     }
 
     const auto statAttr
-        = _params.mean() == nullptr ? std::nullopt : std::make_optional(_params.mean());
-    const ProblemDescription problem(_params.x(), _params.scale(), statAttr, Direction::FORWARD);
+        = params.mean() == nullptr ? std::nullopt : std::make_optional(params.mean());
+    const ProblemDescription problem(params.x(), params.scale(), statAttr, Direction::FORWARD);
     const int64_t outerSize = problem.outerSize();
     const int64_t innerSize = problem.innerSize();
     const int64_t stride = problem.stride();
 
-    const auto shapes = launchShapes(outerSize, stride);
+    const auto shapes = LayernormFwdPlan::launchShapes(outerSize, stride);
     for(const auto& shape : shapes)
     {
         checkLaunchFitsThreadLimit(shape);
@@ -125,24 +125,20 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
 
     const int64_t xlocalsize = shapes[0].threadsPerBlock;
     const int64_t xgridsize = shapes[0].blocks;
-    const int64_t ylocalsize = 1;
-    const int64_t ygridsize = 1;
-    const int64_t zlocalsize = 1;
-    const int64_t zgridsize = 1;
 
     // Determine input/output data type configuration
-    const auto inputDataType = _params.x()->data_type();
-    const auto outputDataType = _params.y()->data_type();
-    const auto scaleBiasDataType = _params.scale()->data_type();
+    const auto inputDataType = params.x()->data_type();
+    const auto outputDataType = params.y()->data_type();
+    const auto scaleBiasDataType = params.scale()->data_type();
     const auto meanInvVarianceDataType
-        = (_params.mean() == nullptr) ? inputDataType : _params.mean()->data_type();
+        = (params.mean() == nullptr) ? inputDataType : params.mean()->data_type();
     const std::string inputTypeString = getKernelParamTypeString(inputDataType);
     const std::string outputTypeString = getKernelParamTypeString(outputDataType);
     const std::string scaleBiasTypeString = getKernelParamTypeString(scaleBiasDataType);
     const std::string meanInvVarianceTypeString = getKernelParamTypeString(meanInvVarianceDataType);
 
     // Prepare compilation options
-    KernelCompileOptions options(_params.x(), deviceProperties);
+    KernelCompileOptions options(params.x(), gcnArchName);
     options.add("HIP_PLUGIN_LAYERNORM_OUTER_SIZE", outerSize);
     options.add("HIP_PLUGIN_LAYERNORM_INNER_SIZE", innerSize);
     options.add("HIP_PLUGIN_LAYERNORM_STRIDE", stride);
@@ -152,16 +148,23 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     options.add("HIP_PLUGIN_LAYERNORM_SCALE_BIAS_TYPE", scaleBiasTypeString);
     options.add("HIP_PLUGIN_LAYERNORM_MEAN_INV_VARIANCE_TYPE", meanInvVarianceTypeString);
 
-    // Compile kernel and configure launch dimensions
-    _compiledProgram = kernelCompiler.compile("LayernormFwd.cpp", options);
-    _runnableKernel = _compiledProgram->getKernel("LayernormFwd");
+    return {std::move(options),
+            {{"LayernormFwd",
+              static_cast<unsigned int>(xlocalsize),
+              static_cast<unsigned int>(xgridsize)}}};
+}
 
-    _runnableKernel->setBlockSize(static_cast<unsigned int>(xlocalsize),
-                                  static_cast<unsigned int>(ylocalsize),
-                                  static_cast<unsigned int>(zlocalsize));
-    _runnableKernel->setGridSize(static_cast<unsigned int>(xgridsize),
-                                 static_cast<unsigned int>(ygridsize),
-                                 static_cast<unsigned int>(zgridsize));
+void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
+                               const hipDeviceProp_t& deviceProperties)
+{
+    const auto build = buildLayernormFwdKernel(_params, std::string(deviceProperties.gcnArchName));
+    const auto& launch = build.launches.front();
+
+    // Compile kernel and configure launch dimensions
+    _compiledProgram = kernelCompiler.compile("LayernormFwd.cpp", build.options);
+    _runnableKernel = _compiledProgram->getKernel(launch.entryPoint);
+    _runnableKernel->setBlockSize(launch.blockSize, 1, 1);
+    _runnableKernel->setGridSize(launch.gridSize, 1, 1);
 }
 
 void LayernormFwdPlan::execute(const Handle& handle,

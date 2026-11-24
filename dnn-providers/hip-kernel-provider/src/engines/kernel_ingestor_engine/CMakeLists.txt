@@ -255,9 +255,15 @@ if(HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR)
         TARGET hip_kernel_provider_impl
         FILES "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/resample/ResampleFwd.cpp"
               "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/resample/ResampleBwd.cpp"
+              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/layernorm/LayernormFwd.cpp"
+              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/layernorm/LayernormBwd.cpp"
+              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/layernorm/LayernormCommon.hpp"
               "${CMAKE_CURRENT_SOURCE_DIR}/../hip_mlops_engine/kernels/types/VectorTypes.hpp"
         KEYS kernels/resample/ResampleFwd.cpp
              kernels/resample/ResampleBwd.cpp
+             kernels/layernorm/LayernormFwd.cpp
+             kernels/layernorm/LayernormBwd.cpp
+             LayernormCommon.hpp
              VectorTypes.hpp
     )
 endif()

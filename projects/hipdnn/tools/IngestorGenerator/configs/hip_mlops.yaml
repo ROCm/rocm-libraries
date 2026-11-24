@@ -51,6 +51,34 @@ packs:
           operation: RESAMPLE_BWD
         priority: 0
 
+  - name: layernorm_fwd
+    discriminator: layernorm_fwd
+    dispatch: layernorm_fwd
+    kernels:
+      - name: hip_mlops.layernorm_fwd
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/layernorm/LayernormFwd.cpp
+          entry_point: LayernormFwd
+        metadata:
+          operation: LAYERNORM_FWD
+        priority: 0
+  # One program, two or three launches: LayernormBwd, then LayernormBwdScaleBias, or
+  # LayernormBwdScaleBiasParallel and LayernormBwdScaleBiasReduceSum. The handler launches
+  # the entry points after the first by symbol (entryPointKernelDefinition).
+  - name: layernorm_bwd
+    discriminator: layernorm_bwd
+    dispatch: layernorm_bwd
+    kernels:
+      - name: hip_mlops.layernorm_bwd
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/layernorm/LayernormBwd.cpp
+          entry_point: LayernormBwd
+        metadata:
+          operation: LAYERNORM_BWD
+        priority: 0
+
 # Embedded source compiled at plan build: every field is matcher-only.
 specialization:
   metadata_fields: []

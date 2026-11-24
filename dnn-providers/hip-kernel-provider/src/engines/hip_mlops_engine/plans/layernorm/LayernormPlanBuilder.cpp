@@ -30,38 +30,13 @@ namespace
 size_t getMaxBwdWorkspaceSize(const Handle& handle,
                               const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
-    // Workspace only needed for the parallel backward pass or for fallback mean/rstd calculations
-    const auto& node = opGraph.getNode(0);
-    auto deviceProperties = hip_kernel_provider_common::getDeviceProperties(handle.getStream());
-    auto attr = node.attributes_as_LayernormBackwardAttributes();
-    auto xTensorAttr = opGraph.getTensorMap().at(attr->x_tensor_uid());
-    auto scaleTensorAttr = std::make_optional(opGraph.getTensorMap().at(attr->scale_tensor_uid()));
-    auto meanTensorAttr
-        = attr->mean_tensor_uid().has_value()
-              ? std::make_optional(opGraph.getTensorMap().at(attr->mean_tensor_uid().value()))
-              : std::nullopt;
-    const ProblemDescription problem(
-        xTensorAttr, scaleTensorAttr.value(), meanTensorAttr, Direction::BACKWARD);
-    const auto outerSize = problem.outerSize();
-    const auto innerSize = problem.innerSize();
-    const auto stride = problem.stride();
-    const bool parallel
-        = LayernormBwdPlan::isParallel(deviceProperties,
-                                       static_cast<size_t>(LayernormBwdParams::MAX_LOCAL_SIZE),
-                                       static_cast<size_t>(innerSize),
-                                       static_cast<size_t>(outerSize));
-    const size_t parallelSize
-        = LayernormBwdPlan::getParallelSize(deviceProperties,
-                                            static_cast<size_t>(LayernormBwdParams::MAX_LOCAL_SIZE),
-                                            static_cast<size_t>(innerSize),
-                                            static_cast<size_t>(outerSize));
-    const size_t sizeFromParallel
-        = parallel ? 2 * static_cast<size_t>(innerSize) * parallelSize : 0;
-    const size_t sizeFromFallbackMeanRstd
-        = !attr->mean_tensor_uid().has_value() || !attr->inv_variance_tensor_uid().has_value()
-              ? 2 * static_cast<size_t>(outerSize) * static_cast<size_t>(stride)
-              : 0;
-    return 4 * (sizeFromParallel + sizeFromFallbackMeanRstd);
+    const auto& attr
+        = opGraph.getNodeWrapper(0)
+              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes>();
+    const LayernormBwdParams params(attr, opGraph.getTensorMap());
+    const auto deviceProperties
+        = hip_kernel_provider_common::getDeviceProperties(handle.getStream());
+    return layernormBwdWorkspaceBytes(params, deviceProperties.multiProcessorCount);
 }
 
 std::vector<KernelLaunchShape>

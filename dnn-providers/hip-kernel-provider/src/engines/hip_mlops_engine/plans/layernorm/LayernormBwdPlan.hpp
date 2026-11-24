@@ -12,9 +12,11 @@
 #include "compilation/IKernelCompiler.hpp"
 #include "compilation/IRunnableKernel.hpp"
 #include "core/Handle.hpp"
+#include "engines/hip_mlops_engine/plans/layernorm/LayernormUtilities.hpp"
 #include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
 
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace hip_kernel_provider
@@ -65,6 +67,22 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _dbias;
 };
 
+/// The compile options and launches of the LayernormBwd program for @p params on
+/// @p gcnArchName, on a device with @p multiProcessorCount CUs: LayernormBwd, then
+/// LayernormBwdScaleBias, or LayernormBwdScaleBiasParallel and LayernormBwdScaleBiasReduceSum
+/// when the inner size is small enough to split the reduction across workgroups.
+///
+/// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 4D or 5D, or a grid
+///         that does not fit one launch.
+LayernormKernelBuild buildLayernormBwdKernel(const LayernormBwdParams& params,
+                                             const std::string& gcnArchName,
+                                             int multiProcessorCount);
+
+/// The workspace the LayernormBwd launches need on a device with @p multiProcessorCount CUs:
+/// the parallel reduction's partial sums, and mean and inverse variance when the graph does
+/// not supply them.
+size_t layernormBwdWorkspaceBytes(const LayernormBwdParams& params, int multiProcessorCount);
+
 class LayernormBwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {
 public:
@@ -93,21 +111,8 @@ public:
                                                        bool isParallel,
                                                        int64_t parallelSize);
 
-    static size_t getReqdWorkItemCount(const hipDeviceProp_t& deviceProperties, size_t localSize);
-
-    static bool isParallel(const hipDeviceProp_t& deviceProperties,
-                           size_t localSize,
-                           size_t innerSize,
-                           size_t outerSize);
-
-    static size_t getParallelSize(const hipDeviceProp_t& deviceProperties,
-                                  size_t localSize,
-                                  size_t innerSize,
-                                  size_t outerSize);
-
 private:
     LayernormBwdParams _params;
-    int64_t _innerSize, _outerSize, _stride, _localSize;
 
     // Populated by compile()
     std::unique_ptr<ICompiledProgram> _compiledProgram;

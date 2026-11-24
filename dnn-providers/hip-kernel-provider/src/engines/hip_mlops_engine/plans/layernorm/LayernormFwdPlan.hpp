@@ -12,9 +12,11 @@
 #include "compilation/IRunnableKernel.hpp"
 #include "core/Handle.hpp"
 #include "core/Utils.hpp"
+#include "engines/hip_mlops_engine/plans/layernorm/LayernormUtilities.hpp"
 #include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
 
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace hip_kernel_provider
@@ -60,6 +62,13 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _invVariance;
     hipdnn_plugin_sdk::ScalarOperand _epsilon;
 };
+
+/// The compile options and single launch of the LayernormFwd kernel for @p params on
+/// @p gcnArchName.
+///
+/// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 4D or 5D.
+LayernormKernelBuild buildLayernormFwdKernel(const LayernormFwdParams& params,
+                                             const std::string& gcnArchName);
 
 class LayernormFwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {

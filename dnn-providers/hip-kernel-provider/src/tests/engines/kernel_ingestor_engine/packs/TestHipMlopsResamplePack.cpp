@@ -9,10 +9,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <optional>
-#include <string>
-#include <string_view>
-#include <variant>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -23,15 +19,11 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/resample_bwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/resample_fwd_attributes_generated.h>
-#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
-#include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
-#include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "core/Container.hpp"
-#include "core/Context.hpp"
-#include "core/Handle.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/HipMlopsTestSupport.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
@@ -47,13 +39,8 @@ namespace
 using namespace hip_kernel_provider;
 using namespace hip_kernel_provider::kernel_ingestor_engine;
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
-using hipdnn_plugin_sdk::ingestor::BoundTokens;
+using namespace hip_kernel_provider::kernel_ingestor_engine::testing::hip_mlops;
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
-
-constexpr std::string_view ENGINE_NAME = "hipkernel:HipMlops";
-constexpr std::string_view BUILTIN_NAME = "HIP_MLOPS_ENGINE";
-constexpr std::string_view GRAPH_MATCHER = "hipkernel.hip_mlops.graph_match";
-constexpr std::string_view OPERATION_TOKEN = "hip_mlops.operation";
 
 constexpr int64_t SOURCE_UID = 1; // x (forward) or dy (backward)
 constexpr int64_t RESULT_UID = 2; // y (forward) or dx (backward)
@@ -84,16 +71,6 @@ struct ResampleGraph
     data_objects::DataType computeType = data_objects::DataType::FLOAT;
     bool twoNodes = false;
 };
-
-std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims)
-{
-    std::vector<int64_t> strides(dims.size(), 1);
-    for(size_t i = dims.size(); i-- > 1;)
-    {
-        strides[i - 1] = strides[i] * dims[i];
-    }
-    return strides;
-}
 
 flatbuffers::FlatBufferBuilder buildResampleGraph(const ResampleGraph& spec)
 {
@@ -193,27 +170,9 @@ flatbuffers::FlatBufferBuilder buildResampleGraph(const ResampleGraph& spec)
     return builder;
 }
 
-std::optional<BoundTokens> match(const ResampleGraph& spec)
+auto match(const ResampleGraph& spec)
 {
-    registerNativeIngestorSymbols();
-    const GraphFixture fixture(buildResampleGraph(spec));
-    return hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(std::string(GRAPH_MATCHER))(
-        fixture.context());
-}
-
-std::optional<std::string> boundOperation(const std::optional<BoundTokens>& bound)
-{
-    if(!bound.has_value())
-    {
-        return std::nullopt;
-    }
-    const auto entry = bound->find(std::string(OPERATION_TOKEN));
-    if(entry == bound->end())
-    {
-        return std::nullopt;
-    }
-    const auto* value = std::get_if<std::string>(&entry->second);
-    return value == nullptr ? std::nullopt : std::make_optional(*value);
+    return matchGraph(buildResampleGraph(spec));
 }
 
 // ---------------------------------------------------------------------------
@@ -224,7 +183,8 @@ TEST(TestHipMlopsResamplePack, TakesOverTheHandWrittenEnginesNameAndId)
 {
     const auto& set = loadedSet(ENGINE_NAME);
     EXPECT_EQ(set.engine.builtinEngine, BUILTIN_NAME);
-    EXPECT_EQ(distinctPackIdCount(set), 2U);
+    // One pack per migrated operation: Resample and Layernorm, forward and backward.
+    EXPECT_EQ(distinctPackIdCount(set), 4U);
 
     core::Container container;
     const auto ids = container.getEngineManager().getAllEngineIds();
@@ -296,69 +256,6 @@ INSTANTIATE_TEST_SUITE_P(
 // ---------------------------------------------------------------------------
 // Numerics through the engine
 // ---------------------------------------------------------------------------
-
-size_t elementCount(const std::vector<int64_t>& dims)
-{
-    size_t count = 1;
-    for(const auto dim : dims)
-    {
-        count *= static_cast<size_t>(dim);
-    }
-    return count;
-}
-
-/// A device buffer of @p count elements of T, freed on scope exit.
-template <typename T>
-class DeviceBuffer
-{
-public:
-    explicit DeviceBuffer(size_t count, const std::vector<T>& host = {})
-        : _count(count)
-    {
-        EXPECT_EQ(hipSuccess, hipMalloc(&_ptr, count * sizeof(T)));
-        if(!host.empty())
-        {
-            EXPECT_EQ(hipSuccess,
-                      hipMemcpy(_ptr, host.data(), count * sizeof(T), hipMemcpyHostToDevice));
-        }
-        else
-        {
-            EXPECT_EQ(hipSuccess, hipMemset(_ptr, 0xFF, count * sizeof(T)));
-        }
-    }
-    ~DeviceBuffer()
-    {
-        static_cast<void>(hipFree(_ptr));
-    }
-    DeviceBuffer(const DeviceBuffer&) = delete;
-    DeviceBuffer& operator=(const DeviceBuffer&) = delete;
-
-    void* get() const
-    {
-        return _ptr;
-    }
-    std::vector<T> read() const
-    {
-        std::vector<T> host(_count);
-        EXPECT_EQ(hipSuccess,
-                  hipMemcpy(host.data(), _ptr, _count * sizeof(T), hipMemcpyDeviceToHost));
-        return host;
-    }
-
-private:
-    void* _ptr = nullptr;
-    size_t _count;
-};
-
-std::vector<float> deterministicValues(size_t count, float phase)
-{
-    std::vector<float> values(count);
-    for(size_t i = 0; i < count; ++i)
-    {
-        values[i] = 2.0f * std::sin(0.71f * static_cast<float>(i) + phase);
-    }
-    return values;
-}
 
 /// Packed NCHW offset.
 size_t at(int64_t n, int64_t c, int64_t h, int64_t w, int64_t height, int64_t width)
@@ -473,34 +370,6 @@ void expectNear(const std::vector<float>& actual, const std::vector<float>& expe
     }
 }
 
-/// Builds the engine's plan for @p spec through the provider, as a plan build would, and
-/// executes it on @p buffers.
-void executeThroughTheEngine(const ResampleGraph& spec,
-                             const std::vector<hipdnnPluginDeviceBuffer_t>& buffers)
-{
-    const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(BUILTIN_NAME);
-    core::Container container;
-    auto& engineManager = container.getEngineManager();
-    Handle handle;
-
-    const auto builder = buildResampleGraph(spec);
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
-        builder.GetBufferPointer(), builder.GetSize());
-    const auto applicable = engineManager.getApplicableEngineIds(handle, graph);
-    ASSERT_THAT(applicable, ::testing::Contains(engineId));
-
-    hipdnn_test_sdk::utilities::MockEngineConfig engineConfig;
-    EXPECT_CALL(engineConfig, isValid()).WillRepeatedly(::testing::Return(false));
-    EXPECT_CALL(engineConfig, engineId()).WillRepeatedly(::testing::Return(engineId));
-
-    Context context;
-    ASSERT_NO_THROW(engineManager.initializeExecutionContext(handle, graph, engineConfig, context));
-    ASSERT_TRUE(context.hasValidPlan());
-    ASSERT_NO_THROW(context.plan().execute(
-        handle, buffers.data(), static_cast<uint32_t>(buffers.size()), nullptr));
-    ASSERT_EQ(hipSuccess, hipStreamSynchronize(handle.getStream()));
-}
-
 TEST(TestHipMlopsResampleDevice, ForwardMatchesTheReferenceForEveryMode)
 {
     SKIP_IF_NO_DEVICES();
@@ -519,8 +388,8 @@ TEST(TestHipMlopsResampleDevice, ForwardMatchesTheReferenceForEveryMode)
 
         const DeviceBuffer<float> dx(elementCount(INPUT_DIMS), x);
         const DeviceBuffer<float> dy(elementCount(OUTPUT_DIMS));
-        ASSERT_NO_FATAL_FAILURE(
-            executeThroughTheEngine(spec, {{SOURCE_UID, dx.get()}, {RESULT_UID, dy.get()}}));
+        ASSERT_NO_FATAL_FAILURE(executeThroughTheEngine(
+            buildResampleGraph(spec), {{SOURCE_UID, dx.get()}, {RESULT_UID, dy.get()}}));
 
         expectNear(dy.read(), forwardReference(x, mode));
     }
@@ -537,7 +406,7 @@ TEST(TestHipMlopsResampleDevice, MaxpoolIndexAndBackwardMatchTheReference)
     const DeviceBuffer<float> xBuffer(elementCount(INPUT_DIMS), x);
     const DeviceBuffer<float> yBuffer(elementCount(OUTPUT_DIMS));
     const DeviceBuffer<int32_t> indexBuffer(elementCount(OUTPUT_DIMS));
-    ASSERT_NO_FATAL_FAILURE(executeThroughTheEngine(forward,
+    ASSERT_NO_FATAL_FAILURE(executeThroughTheEngine(buildResampleGraph(forward),
                                                     {{SOURCE_UID, xBuffer.get()},
                                                      {RESULT_UID, yBuffer.get()},
                                                      {INDEX_UID, indexBuffer.get()}}));
@@ -567,7 +436,7 @@ TEST(TestHipMlopsResampleDevice, MaxpoolIndexAndBackwardMatchTheReference)
     const DeviceBuffer<float> dy(elementCount(OUTPUT_DIMS), dyValues);
     const DeviceBuffer<float> dx(elementCount(INPUT_DIMS));
     ASSERT_NO_FATAL_FAILURE(executeThroughTheEngine(
-        backward,
+        buildResampleGraph(backward),
         {{SOURCE_UID, dy.get()}, {RESULT_UID, dx.get()}, {INDEX_UID, indexBuffer.get()}}));
     expectNear(dx.read(), backwardReference(dyValues, data_objects::ResampleMode::MAXPOOL, index));
 }
@@ -588,8 +457,8 @@ TEST(TestHipMlopsResampleDevice, AveragingBackwardMatchesTheReference)
 
         const DeviceBuffer<float> dy(elementCount(OUTPUT_DIMS), dyValues);
         const DeviceBuffer<float> dx(elementCount(INPUT_DIMS));
-        ASSERT_NO_FATAL_FAILURE(
-            executeThroughTheEngine(spec, {{SOURCE_UID, dy.get()}, {RESULT_UID, dx.get()}}));
+        ASSERT_NO_FATAL_FAILURE(executeThroughTheEngine(
+            buildResampleGraph(spec), {{SOURCE_UID, dy.get()}, {RESULT_UID, dx.get()}}));
 
         expectNear(dx.read(), backwardReference(dyValues, mode, {}));
     }
