@@ -178,9 +178,8 @@ void SdpaBwdPlan::execute(const Handle& handle,
     // writes and does not zero it first; stale data there would corrupt dQ.
     // - dq_acc: AITER allocates it with workspace_alloc(..., zero_init=true)
     //   (mha_bwd.cu:595).
-    // - dQ, when DQDKDV writes it directly (gfx942 A16, and gfx950 A16 at
-    //   D_qk = 64): AITER's Python layer zeroes dQ before every ASM backward
-    //   (aiter/ops/mha.py:2885-2886).
+    // - dQ, when DQDKDV writes it directly (gfx942 A16): AITER's Python layer
+    //   zeroes dQ before every ASM backward (aiter/ops/mha.py:2885-2886).
     hipError_t memsetErr = hipSuccess;
     const char* zeroed = nullptr;
     if(needPostProcessing)
@@ -230,8 +229,8 @@ void SdpaBwdPlan::execute(const Handle& handle,
             "SdpaBwdPlan::execute: hipModuleLaunchKernel failed for SDPA backward DQDKDV");
     }
 
-    // 7c. Post kernel: DQ_CONVERT (A32) or DQ_SHUFFLE (gfx950 A16, D_qk != 64)
-    // writes dQ from dq_acc (AITER mha_bwd.cu:752-759).
+    // 7c. Post kernel: DQ_CONVERT (A32) or DQ_SHUFFLE (gfx950 A16) writes dQ
+    // from dq_acc (AITER mha_bwd.cu:752-759).
     if(needPostProcessing)
     {
         auto postArgs = buildPostArgs(mhaArgs);

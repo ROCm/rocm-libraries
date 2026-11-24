@@ -141,11 +141,8 @@ struct SdpaBwdTestCase
     std::optional<float> absoluteToleranceCap;
 };
 
-// Both archs serve 64 <= D <= 192 with D_qk == D_v; gfx950 also serves
-// D_qk = 192 with D_v = 128. On gfx950 the hd64 and hd192 rows are the gfx942
-// kernels rebuilt (`_recompile`), which AITER v0.1.29 runs through its C++
-// mha_bwd() although its Python gate (aiter/ops/mha.py
-// can_impl_fmha_v3_bwd_gfx950) sends them to CK.
+// gfx942 serves 64 <= D <= 192 with D_qk == D_v; gfx950 serves 64 < D <= 128
+// with D_qk == D_v, and D_qk = 192 with D_v = 128 (bwd_dispatch::isBatchShapeSupported).
 const std::vector<std::string> K_GFX942_ONLY = {"gfx942"};
 const std::vector<std::string> K_GFX950_ONLY = {"gfx950"};
 
@@ -184,12 +181,16 @@ std::vector<SdpaBwdTestCase> getSdpaBwdSmokeTestCases()
         // [B, S, H, D] falls back to the psskddv kernel.
         SdpaBwdTestCase({1, 1, 384, 128}, {1, 1, 384, 128}).onlyOn(K_GFX942_ONLY),
         SdpaBwdTestCase({1, 1, 384, 128}, {1, 1, 384, 128}).withBshdDo().onlyOn(K_GFX942_ONLY),
-        // hd64 top-left causal with S_q != S_kv (hd64 dq_convert), and the A16
-        // causal rows at hd64 (S_q == S_kv, a multiple of 64).
-        SdpaBwdTestCase({1, 1, 128, 64}, {1, 1, 256, 64}, std::nullopt, -1, 0, true),
-        SdpaBwdTestCase({1, 1, 128, 64}, {1, 1, 128, 64}, std::nullopt, -1, 0, true).withA16(),
-        // hd192 bottom-right causal with S_q != S_kv (hd192 dq_convert).
-        SdpaBwdTestCase({1, 1, 128, 192}, {1, 1, 256, 192}, std::nullopt, -1, 0, false),
+        // gfx942 hd64 top-left causal with S_q != S_kv (hd64 dq_convert), and the
+        // gfx942 A16 causal rows at hd64 (S_q == S_kv, a multiple of 64).
+        SdpaBwdTestCase({1, 1, 128, 64}, {1, 1, 256, 64}, std::nullopt, -1, 0, true)
+            .onlyOn(K_GFX942_ONLY),
+        SdpaBwdTestCase({1, 1, 128, 64}, {1, 1, 128, 64}, std::nullopt, -1, 0, true)
+            .withA16()
+            .onlyOn(K_GFX942_ONLY),
+        // gfx942 hd192 bottom-right causal with S_q != S_kv (hd192 dq_convert).
+        SdpaBwdTestCase({1, 1, 128, 192}, {1, 1, 256, 192}, std::nullopt, -1, 0, false)
+            .onlyOn(K_GFX942_ONLY),
         // gfx950 A16: top-left sliding window (mask=3) and D_qk = 192 with D_v = 128
         // top-left causal (hd192 dq_shuffle).
         SdpaBwdTestCase({1, 2, 256, 128}, {1, 2, 256, 128}, std::nullopt, 64, 64, true)
@@ -197,16 +198,6 @@ std::vector<SdpaBwdTestCase> getSdpaBwdSmokeTestCases()
             .onlyOn(K_GFX950_ONLY),
         SdpaBwdTestCase({1, 1, 128, 192}, {1, 1, 256, 128}, std::nullopt, -1, 0, true)
             .withA16()
-            .onlyOn(K_GFX950_ONLY),
-        // One case per gfx950 hd64 and hd192 row family the cases above leave out
-        // (A32 masks 0-2, A16 masks 0-1), so this tier reaches every gfx950 row
-        // family these head dims select.
-        SdpaBwdTestCase({1, 1, 128, 64}, {1, 1, 256, 64}).onlyOn(K_GFX950_ONLY),
-        SdpaBwdTestCase({1, 1, 128, 64}, {1, 1, 256, 64}, std::nullopt, -1, 0, false)
-            .onlyOn(K_GFX950_ONLY),
-        SdpaBwdTestCase({1, 1, 128, 64}, {1, 1, 128, 64}).withA16().onlyOn(K_GFX950_ONLY),
-        SdpaBwdTestCase({1, 1, 128, 192}, {1, 1, 256, 192}).onlyOn(K_GFX950_ONLY),
-        SdpaBwdTestCase({1, 1, 128, 192}, {1, 1, 256, 192}, std::nullopt, -1, 0, true)
             .onlyOn(K_GFX950_ONLY),
     };
 }
@@ -249,31 +240,38 @@ std::vector<SdpaBwdTestCase> getSdpaBwdComprehensiveTestCases()
             .withNonPackedLayouts(),
         // Head dims other than 128. Padded ones (72, 96, 136, 160) run the next
         // registry head dim's kernel with the graph's head dim in the kernargs.
-        SdpaBwdTestCase({1, 2, 256, 64}, {1, 2, 256, 64}),
-        SdpaBwdTestCase({1, 2, 256, 64}, {1, 2, 512, 64}, std::nullopt, -1, 0, false),
+        SdpaBwdTestCase({1, 2, 256, 64}, {1, 2, 256, 64}).onlyOn(K_GFX942_ONLY),
+        SdpaBwdTestCase({1, 2, 256, 64}, {1, 2, 512, 64}, std::nullopt, -1, 0, false)
+            .onlyOn(K_GFX942_ONLY),
         SdpaBwdTestCase({1, 2, 256, 72}, {1, 2, 256, 72}),
         SdpaBwdTestCase({1, 2, 256, 96}, {1, 2, 256, 96}),
         SdpaBwdTestCase({1, 2, 256, 96}, {1, 2, 256, 96}, std::nullopt, -1, 0, true),
         SdpaBwdTestCase({1, 2, 256, 96}, {1, 2, 256, 96}, std::nullopt, 64, 64, false),
-        SdpaBwdTestCase({1, 2, 256, 136}, {1, 2, 256, 136}),
-        SdpaBwdTestCase({1, 2, 256, 160}, {1, 2, 256, 160}, std::nullopt, -1, 0, true),
-        SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 256, 192}),
-        SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 256, 192}, std::nullopt, -1, 0, true),
-        // B = 2 with S_kv not a multiple of 64 on the hd64 and hd192 rows, so the
-        // dq_acc batch stride and the sequence tail reach them.
-        SdpaBwdTestCase({2, 2, 200, 64}, {2, 2, 200, 64}),
-        SdpaBwdTestCase({2, 2, 136, 192}, {2, 2, 200, 192}, std::nullopt, -1, 0, false),
-        // S_q = 1 on the hd64 and hd192 rows, whose gfx950 dqdkdv kernels are the
-        // gfx942 ones rebuilt. hd64 takes the atol cap of the other S_q = 1 cases. hd192
-        // caps it at 6.25e-2 because its bf16 dQ is close to the 0.5 limit at 1e-2: over
-        // seeds 0-7 at 1e-2 the worst ratio was 0.45 on an MI325X (gfx942) and 0.36 on
-        // an MI355X (gfx950) in one run. Over seeds 0-7 in two runs on those GPU models,
-        // at each case's own atol, the worst ratio is at most 0.18 at hd64 (1e-2) and
-        // 0.08 at hd192 (6.25e-2). At hd192 the smallest largest |dV|, |dK| and |dQ| are
-        // 0.25, 0.38 and 0.80; a halved or all-zero output fails there once its largest
-        // |ref| exceeds 0.16, so each of them fails.
-        SdpaBwdTestCase({1, 2, 1, 64}, {1, 2, 256, 64}).withAbsoluteToleranceCap(1e-2f),
-        SdpaBwdTestCase({1, 2, 1, 192}, {1, 2, 256, 192}).withAbsoluteToleranceCap(6.25e-2f),
+        SdpaBwdTestCase({1, 2, 256, 136}, {1, 2, 256, 136}).onlyOn(K_GFX942_ONLY),
+        SdpaBwdTestCase({1, 2, 256, 160}, {1, 2, 256, 160}, std::nullopt, -1, 0, true)
+            .onlyOn(K_GFX942_ONLY),
+        SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 256, 192}).onlyOn(K_GFX942_ONLY),
+        SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 256, 192}, std::nullopt, -1, 0, true)
+            .onlyOn(K_GFX942_ONLY),
+        // B = 2 with S_kv not a multiple of 64 on the gfx942 hd64 and hd192 rows, so
+        // the dq_acc batch stride and the sequence tail reach them.
+        SdpaBwdTestCase({2, 2, 200, 64}, {2, 2, 200, 64}).onlyOn(K_GFX942_ONLY),
+        SdpaBwdTestCase({2, 2, 136, 192}, {2, 2, 200, 192}, std::nullopt, -1, 0, false)
+            .onlyOn(K_GFX942_ONLY),
+        // S_q = 1 on the gfx942 hd64 and hd192 rows. hd64 takes the atol cap of the other
+        // S_q = 1 cases. hd192 caps it at 6.25e-2 because its bf16 dQ is close to the 0.5
+        // limit at 1e-2: over seeds 0-7 at 1e-2 the worst ratio was 0.45 on an MI325X
+        // (gfx942) in one run. Over seeds 0-7 in two runs, at each case's own atol, the
+        // worst ratio is at most 0.18 at hd64 (1e-2) and 0.08 at hd192 (6.25e-2). At hd192
+        // the smallest largest |dV|, |dK| and |dQ| are 0.25, 0.38 and 0.80; a halved or
+        // all-zero output fails there once its largest |ref| exceeds 0.16, so each of them
+        // fails.
+        SdpaBwdTestCase({1, 2, 1, 64}, {1, 2, 256, 64})
+            .withAbsoluteToleranceCap(1e-2f)
+            .onlyOn(K_GFX942_ONLY),
+        SdpaBwdTestCase({1, 2, 1, 192}, {1, 2, 256, 192})
+            .withAbsoluteToleranceCap(6.25e-2f)
+            .onlyOn(K_GFX942_ONLY),
         // D_qk = 192 with D_v = 128: the hd128 odo, the 192 x 128 dqdkdv and the
         // hd192 dq_convert kernels.
         SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 256, 128}).onlyOn(K_GFX950_ONLY),
@@ -289,8 +287,7 @@ std::vector<SdpaBwdTestCase> getSdpaBwdComprehensiveTestCases()
         // The a16 accumulator. gfx942 ships only A16 rows without sequence
         // padding (S_q == S_kv, S_kv % 64 == 0, packed strides) for D <= 128,
         // no mask or causal, and writes dQ directly; a bottom-right causal mask
-        // runs the top-left kernel (AITER mha_bwd.cu:374-377). gfx950 hd64 has
-        // the same rows rebuilt, without the bottom-right remap.
+        // runs the top-left kernel (AITER mha_bwd.cu:374-377).
         SdpaBwdTestCase({1, 2, 256, 128}, {1, 2, 256, 128}).withA16().onlyOn(K_GFX942_ONLY),
         SdpaBwdTestCase({2, 2, 256, 128}, {2, 2, 256, 128}).withA16().onlyOn(K_GFX942_ONLY),
         SdpaBwdTestCase({1, 2, 256, 128}, {1, 2, 256, 128}, std::nullopt, -1, 0, true)
@@ -299,7 +296,7 @@ std::vector<SdpaBwdTestCase> getSdpaBwdComprehensiveTestCases()
         SdpaBwdTestCase({1, 2, 256, 128}, {1, 2, 256, 128}, std::nullopt, -1, 0, false)
             .withA16()
             .onlyOn(K_GFX942_ONLY),
-        SdpaBwdTestCase({1, 2, 256, 64}, {1, 2, 256, 64}).withA16(),
+        SdpaBwdTestCase({1, 2, 256, 64}, {1, 2, 256, 64}).withA16().onlyOn(K_GFX942_ONLY),
         SdpaBwdTestCase({1, 2, 256, 96}, {1, 2, 256, 96}, std::nullopt, -1, 0, true)
             .withA16()
             .onlyOn(K_GFX942_ONLY),
@@ -641,9 +638,8 @@ TEST_P(IntegrationGpuSdpaBwdBf16, Correctness)
     // dQ, dK and dV reach BF16 through these paths:
     // - A32 (gfx942 and gfx950): DQDKDV accumulates dQ in FP32 and dq_convert rounds it
     //   to BF16 once.
-    // - A16 on gfx942, and on gfx950 at D_qk = 64: DQDKDV writes dQ directly.
-    // - A16 on gfx950 at D_qk != 64: DQDKDV accumulates into a 16-bit dq_acc and
-    //   dq_shuffle writes dQ.
+    // - A16 on gfx942: DQDKDV writes dQ directly.
+    // - A16 on gfx950: DQDKDV accumulates into a 16-bit dq_acc and dq_shuffle writes dQ.
     // The CPU reference accumulates in FP32 and rounds to BF16 once. The kernels also
     // recompute the softmax with their own rounding, so near-zero probabilities differ
     // from the reference's, and the dS = P * (dP - D) subtraction amplifies the
@@ -672,21 +668,17 @@ INSTANTIATE_TEST_SUITE_P(Comprehensive,
 TEST_P(IntegrationGpuSdpaBwdFp16, Correctness)
 {
     // FP16 takes the paths the BF16 test lists; its 10-bit mantissa (BF16 has 7) leaves
-    // less rounding error on each. Some kernels convert FP32 to FP16 by rounding toward
-    // zero (v_cvt_pkrtz_f16_f32), which biases every output toward zero: every gfx942
-    // dqdkdv and dq_convert kernel (gfx942 has no round-to-nearest packed conversion), and
-    // on gfx950 the hd64 and hd192 x hd192 dqdkdv kernels, which are the gfx942 ones
-    // rebuilt. The other gfx950 kernels round to nearest even.
+    // less rounding error on each. Every gfx942 dqdkdv and dq_convert kernel converts
+    // FP32 to FP16 by rounding toward zero (v_cvt_pkrtz_f16_f32; gfx942 has no
+    // round-to-nearest packed conversion), which biases every output toward zero. The
+    // gfx950 kernels the engine serves round to nearest even.
     //
     // atol = rtol = 1e-2 on both paths; the S_q = 1 caps are at or above it and change
-    // nothing. Measured as for BF16: the largest error uses 27% of the bound, and a halved
-    // dQ, dK or dV exceeds it at least 5.7 times. atol = rtol = 5e-3 would reach 53%.
-    // Where a round-toward-zero kernel writes the output, |gpu| averages 0.07% below |ref|
-    // and the mean |error| is 0.07% of the mean |ref|. gfx950 A32 dQ is about half as
-    // biased (0.035% below, mean |error| 0.04%): a round-to-nearest dq_convert writes it,
-    // but dqdkdv still rounds dS toward zero before the dQ product. Where round-to-nearest
-    // kernels do all the rounding there is no measurable bias and the error is 0.02%;
-    // BF16 shows 0.15-0.2%.
+    // nothing. Measured as for BF16: the largest error uses at most 27% of the bound, and
+    // a halved dQ, dK or dV exceeds it at least 5.7 times. Where a round-toward-zero kernel
+    // writes the output, |gpu| averages 0.07% below |ref| and the mean |error| is 0.07% of
+    // the mean |ref|. Where round-to-nearest kernels do all the rounding there is no
+    // measurable bias and the error is 0.02%; BF16 shows 0.15-0.2%.
     const SdpaBwdTolerance a32{1e-2f, 1e-2f};
     const SdpaBwdTolerance a16{1e-2f, 1e-2f};
 

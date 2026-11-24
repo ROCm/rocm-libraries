@@ -16,10 +16,9 @@ namespace asm_sdpa_engine
 ///
 /// - A32: dQ is accumulated in FP32 into a dq_acc workspace, then a DQ_CONVERT
 ///   kernel writes dQ (ODO -> DQDKDV -> DQ_CONVERT).
-/// - A16: dQ is accumulated in 16 bits. On gfx942, and on gfx950 at D_qk = 64,
-///   the DQDKDV kernel writes dQ directly (ODO -> DQDKDV); on gfx950 at other
-///   head dims it accumulates into a Q-dtype dq_acc workspace and a DQ_SHUFFLE
-///   kernel writes dQ (ODO -> DQDKDV -> DQ_SHUFFLE).
+/// - A16: dQ is accumulated in 16 bits. On gfx942 the DQDKDV kernel writes dQ
+///   directly (ODO -> DQDKDV); on gfx950 it accumulates into a Q-dtype dq_acc
+///   workspace and a DQ_SHUFFLE kernel writes dQ (ODO -> DQDKDV -> DQ_SHUFFLE).
 enum class AccumulatorType : uint8_t
 {
     A32,

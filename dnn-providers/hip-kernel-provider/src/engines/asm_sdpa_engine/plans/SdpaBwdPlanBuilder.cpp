@@ -427,21 +427,17 @@ struct VerifiedKernel
     int hdimQ;
     int hdimV;
 };
-constexpr std::array<VerifiedKernel, 14> K_VERIFIED_KERNELS{{
+constexpr std::array<VerifiedKernel, 10> K_VERIFIED_KERNELS{{
     {"gfx942", "bf16", 64, 64},
     {"gfx942", "bf16", 128, 128},
     {"gfx942", "bf16", 192, 192},
     {"gfx942", "fp16", 64, 64},
     {"gfx942", "fp16", 128, 128},
     {"gfx942", "fp16", 192, 192},
-    {"gfx950", "bf16", 64, 64},
     {"gfx950", "bf16", 128, 128},
     {"gfx950", "bf16", 192, 128},
-    {"gfx950", "bf16", 192, 192},
-    {"gfx950", "fp16", 64, 64},
     {"gfx950", "fp16", 128, 128},
     {"gfx950", "fp16", 192, 128},
-    {"gfx950", "fp16", 192, 192},
 }};
 
 // bwd_dispatch::isVerifiedDispatch() for the dqdkdv row already resolved for
@@ -539,13 +535,12 @@ size_t dispatchLogIndex(const std::string& archId,
 // Why the a16 accumulator cannot serve a backward graph that isApplicable
 // accepted on archId, followed by the dispatch inputs, or std::nullopt when it
 // can. isApplicable resolves the A32 rows only, and the A16 kernels serve fewer
-// graphs: every gfx942 A16 row and every gfx950 hd64 A16 row is pssk = 0,
-// which needs S_q == S_kv, S_kv % 64 == 0, the pssk = 0 stride layout and
-// tensors that span at most 4 GiB, and neither arch ships A16 rows for every
-// mask and head dim. AITER's Python layer sends these graphs to CK
-// (aiter/ops/mha.py can_impl_fmha_v3_bwd()). getCustomKnobs offers a16 only
-// when this returns std::nullopt, and buildPlan declines an a16 request with
-// the reason.
+// graphs: every gfx942 A16 row is pssk = 0, which needs S_q == S_kv,
+// S_kv % 64 == 0, the pssk = 0 stride layout and tensors that span at most
+// 4 GiB, and neither arch ships A16 rows for every mask and head dim. AITER's
+// Python layer sends these graphs to CK (aiter/ops/mha.py
+// can_impl_fmha_v3_bwd()). getCustomKnobs offers a16 only when this returns
+// std::nullopt, and buildPlan declines an a16 request with the reason.
 std::optional<std::string>
     a16DeclineReason(const std::string& archId,
                      const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
@@ -709,38 +704,45 @@ bool isBatchShapeSupported(const std::string& archId, int64_t headDimQk, int64_t
     {
         return false;
     }
-    // gfx942: aiter/ops/mha.py can_impl_fmha_v3_bwd() (:2729-2731), `hdim_q ==
-    // hdim_v` and `hdim_q >= 64 and hdim_q <= 192`. gfx950 ships hd64 and
-    // hd192 rows for the same range (the gfx942 kernels rebuilt, `_recompile`),
-    // and fmha_v3_bwd(), which mha_bwd() calls before its CK fallback, has no
-    // head-dim gate for D <= 192 besides `% 8` (its other one is gfx950 hd256).
-    // Only the Python gate
-    // can_impl_fmha_v3_bwd_gfx950() (:2851-2854) sends them to CK, as a routing
-    // choice. gfx950 also serves D_qk = 192 with D_v = 128.
-    if(!isSupportedArch(archId))
+    if(archId == "gfx942")
     {
-        return false;
+        // aiter/ops/mha.py can_impl_fmha_v3_bwd() (:2729-2731): `hdim_q ==
+        // hdim_v` and `hdim_q >= 64 and hdim_q <= 192`.
+        return headDimQk == headDimV && headDimQk >= 64 && headDimQk <= 192;
     }
-    if(headDimQk == headDimV && headDimQk >= 64 && headDimQk <= 192)
+    if(archId == "gfx950")
     {
-        return true;
+        // aiter/ops/mha.py can_impl_fmha_v3_bwd_gfx950() (:2851-2854):
+        // `(hdim_q > 64 and hdim_q <= 128 and hdim_q == hdim_v) or (hdim_q == 192
+        // and hdim_v == 128)`. gfx950 also ships hd64 and hd192 x hd192 batch rows,
+        // whose DQDKDV kernels are the gfx942 ones rebuilt (`_recompile`), and
+        // fmha_v3_bwd() would run them, but the engine declines them on purpose:
+        // they run slower than hipkernel:flydsl_sdpa_bwd_split, which serves these
+        // graphs, and their fp16 DQDKDV kernels round toward zero
+        // (asm/asm_kernels/README.md).
+        return (headDimQk > 64 && headDimQk <= 128 && headDimQk == headDimV)
+               || (headDimQk == 192 && headDimV == 128);
     }
-    return archId == "gfx950" && headDimQk == 192 && headDimV == 128;
+    return false;
 }
 
 bool isBatchWindowSupported(const std::string& archId, int64_t headDimQk)
 {
-    // Both archs ship window rows at hd128 only, which serve 64 < D <= 128
-    // (paddedHeadDims): aiter/ops/mha.py can_impl_fmha_v3_bwd_gfx950()
-    // (:2855-2856), "sliding window kernels are hd128 only", where any window
-    // counts (:2829-2830, "a left size of 0 is a window too"), and on gfx942
-    // can_impl_fmha_v3_bwd() psskddv() (:2718). The gfx942 window test (:2604,
-    // `swa = (window_size_left > 0) or (window_size_right > 0)`) does not count
-    // a window with left bound 0 and right bound 0 or -1, which then falls out
-    // of every family. That is a classification artifact, not a kernel limit:
-    // the engine classifies the band itself, and the gfx942 window kernel
-    // serves it like any other window.
-    return isSupportedArch(archId) && headDimQk > 64 && headDimQk <= 128;
+    if(archId == "gfx950")
+    {
+        // aiter/ops/mha.py can_impl_fmha_v3_bwd_gfx950() (:2855-2856): "sliding
+        // window kernels are hd128 only", `not swa or hdim_q <= 128`, where any
+        // window counts (:2829-2830, "a left size of 0 is a window too").
+        return headDimQk <= 128;
+    }
+    // aiter/ops/mha.py can_impl_fmha_v3_bwd() serves windows through psskddv()
+    // for 64 < D <= 128 only (:2718). Its window test (:2604, `swa =
+    // (window_size_left > 0) or (window_size_right > 0)`) does not count a
+    // window with left bound 0 and right bound 0 or -1, which then falls out of
+    // every family. That is a classification artifact, not a kernel limit: the
+    // engine classifies the band itself, and the gfx942 window kernel serves it
+    // like any other window.
+    return headDimQk > 64 && headDimQk <= 128;
 }
 
 bool psskOffStridesMatch(const BhsStrides& q,
@@ -1251,8 +1253,8 @@ bool SdpaBwdPlanBuilder::isApplicable(
     auto headDimQk = static_cast<int>(qTensor->dims()->Get(3));
     auto headDimV = static_cast<int>(vTensor->dims()->Get(3));
 
-    // Head dims no ASM kernel on this arch serves (see
-    // bwd_dispatch::isBatchShapeSupported).
+    // Head dims AITER does not send to the ASM kernels on this arch, including
+    // the ones the registry has rows for (see bwd_dispatch::isBatchShapeSupported).
     HIP_KERNEL_RETURN_FALSE_IF(
         !bwd_dispatch::isBatchShapeSupported(deviceString, headDimQk, headDimV),
         deviceString + " backward does not serve D_qk = " + std::to_string(headDimQk)
@@ -1329,7 +1331,7 @@ bool SdpaBwdPlanBuilder::isApplicable(
     }
     const auto& request = classified.request;
 
-    // Windows no ASM kernel serves (see bwd_dispatch::isBatchWindowSupported).
+    // Windows AITER sends to CK (see bwd_dispatch::isBatchWindowSupported).
     HIP_KERNEL_RETURN_FALSE_IF(
         classified.maskType == MaskType::SLIDING_WINDOW
             && !bwd_dispatch::isBatchWindowSupported(deviceString, headDimQk),
@@ -1870,15 +1872,12 @@ std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaBwdPlanBuilder::get
     accKnob.knob_id = K_ACC_TYPE_KNOB_NAME;
     accKnob.description
         = "Accumulator precision for the backward dQ gradient. a32: dQ accumulates in FP32 and a "
-          "dq_convert kernel writes it. a16: dQ accumulates in 16 bits; on gfx942, and on gfx950 "
-          "at D_qk = 64, the kernel writes dQ directly; on gfx950 at other head dims it "
-          "accumulates into a 16-bit buffer that a dq_shuffle kernel writes to dQ. a16 is a "
-          "valid value only for graphs the a16 kernels serve on this device. The kernels that "
-          "write dQ directly (gfx942 D_qk == D_v <= 128, gfx950 D_qk == D_v == 64) need "
-          "S_q == S_kv, S_kv a multiple of 64 and no sliding window, and on gfx950 no "
-          "bottom-right causal mask, among other limits; the gfx950 dq_shuffle ones serve the "
-          "graphs a32 serves, except D_qk == D_v > 128, unless the 16-bit dq_acc of one batch "
-          "exceeds 4 GiB";
+          "dq_convert kernel writes it. a16: dQ accumulates in 16 bits; gfx942 writes dQ "
+          "directly, gfx950 accumulates into a 16-bit buffer that a dq_shuffle kernel writes "
+          "to dQ. a16 is a valid value only for graphs the a16 kernels serve on this device. "
+          "On gfx942 they need S_q == S_kv, S_kv a multiple of 64, D_qk == D_v <= 128 and no "
+          "sliding window, among other limits; on gfx950 they serve the graphs a32 serves "
+          "unless the 16-bit dq_acc of one batch exceeds 4 GiB";
 
     StringValueT defaultValue;
     defaultValue.value = "a32";
