@@ -8,6 +8,7 @@ from __future__ import annotations
 import importlib.util
 import multiprocessing as mp
 import os
+import warnings
 from pathlib import Path
 from types import ModuleType
 from typing import Dict, List, Optional, Tuple
@@ -17,11 +18,11 @@ import yaml
 
 
 def _load_solution_id_gen() -> ModuleType:
-    """Load SolutionIdGen without importing ``tensilelite.Common``.
+    """Load SolutionIdGen by file path.
 
-    This keeps the test runnable on a Python with only pytest and PyYAML,
-    without tensilelite or rocisa installed. ``from tensilelite.Common.SolutionIdGen
-    import ...`` would execute ``tensilelite.Common.__init__``, which imports rocisa.
+    This keeps the corpus test runnable on a Python with only pytest and
+    PyYAML, without tensilelite or rocisa installed, as ``logic_corpus.py``
+    requires.
 
     Args:
         None.
@@ -33,7 +34,7 @@ def _load_solution_id_gen() -> ModuleType:
         FileNotFoundError: If ``SolutionIdGen.py`` is missing.
         ImportError: If the module spec or loader cannot be created.
     """
-    module_path = Path(__file__).resolve().parents[2] / "Common" / "SolutionIdGen.py"
+    module_path = Path(__file__).resolve().parents[2] / "SolutionIdGen.py"
     if not module_path.is_file():
         raise FileNotFoundError(f"SolutionIdGen.py not found: {module_path}")
     spec = importlib.util.spec_from_file_location("tensile_solution_id_gen", module_path)
@@ -532,3 +533,40 @@ def test_solution_uid_unique_across_logic_files(logic_root: Path) -> None:
             f"{missing} solution(s) under {logic_root} are missing SolutionUID "
             f"(set {STRICT_ENV}=0 to warn only during migration)"
         )
+    if missing > 0:
+        warnings.warn(
+            f"{missing} solution(s) under {logic_root} have no SolutionUID "
+            f"(set {STRICT_ENV}=1 to fail on them)",
+            stacklevel=1,
+        )
+
+
+def test_corpus_check_warns_or_fails_on_missing_uids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Solutions with no UID warn by default and fail in strict mode.
+
+    Args:
+        tmp_path: Pytest temporary-directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the missing solution is not warned about, or does
+            not fail when ``HIPBLASLT_REQUIRE_SOLUTION_UID`` is set.
+    """
+    (tmp_path / "logic.yaml").write_text(
+        "Solutions:\n- SolutionIndex: 0\n  SolutionUID: 0u3E\n- SolutionIndex: 1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HIPBLASLT_UID_TEST_PROCESSES", "1")
+
+    monkeypatch.delenv(STRICT_ENV, raising=False)
+    with pytest.warns(UserWarning, match="1 solution"):
+        test_solution_uid_unique_across_logic_files(tmp_path)
+
+    monkeypatch.setenv(STRICT_ENV, "1")
+    with pytest.raises(pytest.fail.Exception, match="missing SolutionUID"):
+        test_solution_uid_unique_across_logic_files(tmp_path)

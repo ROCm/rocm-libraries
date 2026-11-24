@@ -181,9 +181,14 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     # checks' CTest suites select from each engine's
     # ../hipkernel_Gfx9*Attention*_test_categories_integration.yaml instead, and
     # ../descriptor-packaging/tests/test_attention_bundle_filters.py fails on a mismatch.
+    # The SdpaFwdPlan bundles are the generic SDPA forward tests every SDPA engine runs.
+    # The GPU-reference targets use the same filters and run every SdpaFwdPlan case on purpose:
+    # they check each attention engine against the GPU reference on the full set.
     string(JOIN ":" HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
         "quick_SdpaFwd_Default.*" "standard_SdpaFwd_Default.*"
-        "comprehensive_SdpaFwd_Default.*" "full_SdpaFwd_Default.*")
+        "comprehensive_SdpaFwd_Default.*" "full_SdpaFwd_Default.*"
+        "quick_SdpaFwdPlan_*" "standard_SdpaFwdPlan_*"
+        "comprehensive_SdpaFwdPlan_*" "full_SdpaFwdPlan_*")
     # Plus the dense BSHD stats (LSE) bundles: no other SdpaFwd bundle binds a stats
     # output Gfx942AttentionDense serves.
     set(HKP_GFX942_ATTENTION_DENSE_GTEST_FILTER
@@ -403,6 +408,34 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         )
     else()
         message(STATUS "hipdnn_integration_tests not found - skipping external-integration-check")
+    endif()
+
+    set(_pointwise_available FALSE)
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+        hkp_product_offers_engine(_pointwise_available "hipkernel:StandalonePointwise")
+    endif()
+    if(_pointwise_available AND TARGET hipdnn_integration_tests)
+        set(_pointwise_external_category_args "")
+        if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
+            list(APPEND _pointwise_external_category_args
+                TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../hipkernel_StandalonePointwise_test_categories_integration.yaml"
+                INSTALL_TEST_FILE "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+                TEST_NAME_PREFIX ${PROJECT_NAME}-standalone-pointwise-external-integration
+                ENVIRONMENT ${TEST_ENVIRONMENT}
+                ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            )
+        endif()
+        add_external_integration_test_target(
+            TARGET_NAME ${PROJECT_NAME}-standalone-pointwise-external-integration-check
+            PLUGIN_TARGET hip_kernel_provider
+            ENGINE_NAME "hipkernel:StandalonePointwise"
+            INSTALL_SUBDIR hip_kernel_provider
+            TEST_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_StandalonePointwise.toml
+            ${_pointwise_external_category_args}
+        )
+    elseif(HIPDNN_ENABLE_KERNEL_INGESTOR AND NOT _pointwise_available)
+        message(STATUS
+            "hipkernel:StandalonePointwise is not shipped by this descriptor configuration - skipping standalone-pointwise-external-integration-check")
     endif()
 
     set(_asm_sdpa_external_category_args "")
@@ -627,39 +660,39 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             list(APPEND _flydsl_all_archs ${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_${_op}})
         endforeach()
         list(REMOVE_DUPLICATES _flydsl_all_archs)
+        # The SDPA forward engines share config/hipkernel_flydsl_sdpa.toml, which leads each of
+        # their generated files.
+        set(_flydsl_sdpa_static "${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_flydsl_sdpa.toml")
         foreach(_op IN LISTS _flydsl_engine_ops)
             if(_op MATCHES "^sdpa_")
                 if(NOT HIPDNN_ENABLE_SDPA)
                     continue()
                 endif()
-                set(_bundle SdpaFwd)
+                # The SdpaFwdPlan bundles are the generic SDPA forward tests every SDPA engine runs.
+                set(_bundles SdpaFwd SdpaFwdPlan)
                 set(_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../hipkernel_flydsl_sdpa_test_categories_integration.yaml")
             elseif(_op STREQUAL "rmsnorm")
-                set(_bundle RMSNorm)
+                set(_bundles RMSNorm)
                 set(_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../hipkernel_flydsl_rmsnorm_test_categories_integration.yaml")
             else()
-                set(_bundle RMSNormBackward)
+                set(_bundles RMSNormBackward)
                 set(_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../hipkernel_flydsl_rmsnorm_bwd_test_categories_integration.yaml")
             endif()
             set(_engine "hipkernel:flydsl_${_op}")
             string(REPLACE "_" "-" _op_dash "${_op}")
             set(_archs "${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_${_op}}")
+            set(_filter "")
+            foreach(_tier IN ITEMS quick standard comprehensive full)
+                foreach(_bundle IN LISTS _bundles)
+                    list(APPEND _filter "${_tier}_${_bundle}_*.*")
+                endforeach()
+            endforeach()
+            list(JOIN _filter ":" _filter)
 
             foreach(_arch IN LISTS _archs)
-                set(_others "${_flydsl_all_archs}")
-                list(REMOVE_ITEM _others "${_arch}")
-                list(TRANSFORM _others PREPEND "\"")
-                list(TRANSFORM _others APPEND "\"")
-                list(JOIN _others ", " _others_toml)
                 set(_toml "${CMAKE_CURRENT_BINARY_DIR}/flydsl_integration/hipkernel_flydsl_${_op}_${_arch}.toml")
-                string(CONCAT _toml_text
-                    "# Generated by hip-kernel-provider/src/CMakeLists.txt for ${_engine}, ${_arch} shard.\n"
-                    "[meta]\nversion = 1\n")
-                if(_others_toml)
-                    string(APPEND _toml_text
-                        "\n[[test_skips]]\narchs = [${_others_toml}]\nfilters = [\"*\"]\n"
-                        "reason = \"${_engine}: this entry runs on ${_arch} only\"\n")
-                endif()
+                set(_toml_static "")
+                set(_toml_trailer "")
                 # A padded or fully masked query row has LSE = -inf in the engine and in the
                 # reference alike (SEM-008), which plain allclose fails. Only the SDPA stats
                 # output is graded with matching infinities; O keeps the default. That
@@ -667,13 +700,20 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                 # HIPDNN_TEST_VALIDATOR=cpu (below).
                 set(_lane_environment ${TEST_ENVIRONMENT})
                 if(_op MATCHES "^sdpa_")
-                    string(APPEND _toml_text
+                    set(_toml_static "${_flydsl_sdpa_static}")
+                    string(CONCAT _toml_trailer
                         "\n[[validator_overrides]]\nfilters = [\"*_SdpaFwd*\"]\n"
                         "tensors = [\"LSE\", \"*::Stats\"]\n"
                         "validator = \"allclose_matching_infinities\"\n")
                     list(APPEND _lane_environment "HIPDNN_TEST_VALIDATOR=cpu")
                 endif()
-                file(WRITE "${_toml}" "${_toml_text}")
+                hkp_flydsl_arch_toml("${_toml}"
+                    ENGINE "${_engine}"
+                    ARCH "${_arch}"
+                    GENERATED_BY "hip-kernel-provider/src/CMakeLists.txt"
+                    STATIC_TOML "${_toml_static}"
+                    ARCHS ${_flydsl_all_archs}
+                    TRAILER "${_toml_trailer}")
 
                 _hkp_census_external_test_file(_shard_ctest ${_arch})
                 # The shard names this TOML, so it is reserved with the shard as well as
@@ -696,7 +736,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                     INSTALL_STAGING_KEY hkp_census_${_arch}
                     TEST_CONFIG    "${_toml}"
                     REFERENCE_EXECUTOR gpu
-                    GTEST_FILTER   "quick_${_bundle}_*.*:standard_${_bundle}_*.*:comprehensive_${_bundle}_*.*:full_${_bundle}_*.*"
+                    GTEST_FILTER   "${_filter}"
                     ENVIRONMENT    ${_lane_environment}
                     ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
                     ${_category_args}

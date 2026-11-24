@@ -40,7 +40,7 @@
 #   against the installed tree, where the labels below pick the tier and the
 #   tier's patterns have been baked into the hipblaslt-test entry as a gtest
 #   filter. The standard tier therefore invoked
-#       hipblaslt-test --gtest_filter=*smoke*:*quick*:*pre_checkin*:*HostUnit*:*TuningStore.*-*known_bug*
+#       hipblaslt-test --gtest_filter=*smoke*:*quick*:*pre_checkin*:*HostUnit*:*TuningStore.*:*OnlineTuner.*-*known_bug*
 #
 #   The HostUnit cases also carry a "smoke_" test-name prefix. That is redundant
 #   for the path above, since "*HostUnit*" already selects them in every tier,
@@ -52,6 +52,11 @@
 #   them. They are compiled into hipblaslt-test, rather than run through the
 #   standalone hipblaslt-test-tuning-store binary, so hipBLASLt keeps one ctest
 #   entry per tier (see the comment on that target in clients/CMakeLists.txt).
+#
+#   "*OnlineTuner.*" is the online tuner's unit tests, compiled into
+#   hipblaslt-test for the same reason; every tier runs them. Cases needing two
+#   devices are in OnlineTuner_multi_gpu and HipSolutionAdapterEventTest_multi_gpu,
+#   which only the multi_gpu tier selects.
 #
 # These tiers are TheRock ctest presets; they are NOT a port of hipBLASLt's
 # rocJenkins job filters (those are wired differently).
@@ -70,6 +75,7 @@ test_categories:
       - "*smoke*"
       - "*HostUnit*"
       - "*TuningStore.*"
+      - "*OnlineTuner.*"
     exclude:
       - "*known_bug*"
     labels:
@@ -84,6 +90,7 @@ test_categories:
       - "*pre_checkin*"
       - "*HostUnit*"
       - "*TuningStore.*"
+      - "*OnlineTuner.*"
     exclude:
       - "*known_bug*"
     labels:
@@ -100,6 +107,7 @@ test_categories:
       - "*nightly*"
       - "*HostUnit*"
       - "*TuningStore.*"
+      - "*OnlineTuner.*"
     exclude:
       - "*known_bug*"
     labels:
@@ -117,6 +125,7 @@ test_categories:
       - "*HMM*"
       - "*HostUnit*"
       - "*TuningStore.*"
+      - "*OnlineTuner.*"
     exclude:
       - "*known_bug*"
     labels:

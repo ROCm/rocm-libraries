@@ -2712,7 +2712,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
         alltoall_eligible = false;
 
     // two RCCL collective strategies are supported:
-    // 1. ncclAllToAll with disjoint per-device send/recv buffers.
+    // 1. ncclAlltoAll with disjoint per-device send/recv buffers.
     //    used when the transpose pattern is alltoall_eligible.
     // 2. grouped ncclSend/ncclRecv with per-transfer pack/recv
     //    buffers.  used whenever the pattern is not alltoall_eligible:
@@ -2740,7 +2740,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
     if(LOG_PLAN_ENABLED())
     {
         if(use_alltoall)
-            log_plan("RCCL backend: using ncclAllToAll (disjoint buffers, "
+            log_plan("RCCL backend: using ncclAlltoAll (disjoint buffers, "
                      "uniform count_per_rank="
                      + std::to_string(uniform_count) + ", nbricks_in=" + std::to_string(nbricks_in)
                      + ")\n");
@@ -2824,7 +2824,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
                                                    a2aSendBufs[src_rank],
                                                    dst_rank * uniform_count,
                                                    info.intersection.strides_and_distances(),
-                                                   "pack for ncclAllToAll"),
+                                                   "pack for ncclAlltoAll"),
                                    deps_reading_input(info.inBrickIdx));
             multiPlan[packIdx]->group = itemGroup;
             packItems.push_back(packIdx);
@@ -2842,7 +2842,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
         auto rcclAllToAll = std::make_unique<CommRCCLAllToAll>(
             rccl, precision, input.array_type, uniform_count, std::move(agents));
         rcclAllToAll->group       = itemGroup;
-        rcclAllToAll->description = "RCCL ncclAllToAll";
+        rcclAllToAll->description = "RCCL ncclAlltoAll";
 
         auto a2aIdx              = AddMultiPlanItem(std::move(rcclAllToAll), packItems);
         multiPlan[a2aIdx]->group = itemGroup;
@@ -2869,7 +2869,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
                                                    output.buffers[info.outBrickIdx],
                                                    info.intersection.offset_in(outBrick.layout),
                                                    outBrick.layout.strides_and_distances(),
-                                                   "unpack from ncclAllToAll"),
+                                                   "unpack from ncclAlltoAll"),
                                    {a2aIdx});
             multiPlan[unpackIdx]->group = itemGroup;
             ret.push_back(unpackIdx);

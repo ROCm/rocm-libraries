@@ -236,7 +236,7 @@ On `hipdnn.Graph`:
   first time a call needs it.
 - `build()` runs `validate` and `build_operation_graph`; `build(heur_modes)`
   also creates, checks and builds the execution plans. The hipDNN form
-  `build(handle, modes=[FALLBACK], policy=HEURISTICS_CHOICE)` does the same
+  `build(handle, modes=[A], policy=HEURISTICS_CHOICE)` does the same
   with the given handle, modes and build-plan policy.
 - `execute(tensor_to_device_buffer, workspace, handle=None)` and
   `execute_plan_at_index(tensor_to_device_buffer, workspace, index,
@@ -312,7 +312,9 @@ Remaining differences from `cudnn.pygraph`:
   one, not in the constructor.
 - `GraphNotSupportedError` (`cudnnGraphNotSupportedError`) derives from
   `RuntimeError`, so `except RuntimeError` also catches it.
-- `create_execution_plans()` defaults `modes` to `[heur_mode.FALLBACK]`.
+- `create_execution_plans()` defaults `modes` to `[heur_mode.A]`, so it ranks
+  engines by their L1 predictions where a model exists; cuDNN has no default.
+  Pass `[heur_mode.FALLBACK]` for the static order.
 - `deselect_engines()`, `deselect_workspace_greater_than()` and the note
   filters (`select_numeric_notes()`, `deselect_numeric_notes()`,
   `select_behavior_notes()`, `deselect_behavior_notes()`) return the graph,
