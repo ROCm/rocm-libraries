@@ -108,7 +108,7 @@ void Launch(const Config& c, fmha_fwd_args args)
                                            Lse,
                                            false,
                                            ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE,
-                                           -1,
+                                           Base::kBlockPerCu,
                                            false,
                                            HasSink>;
     using Problem =

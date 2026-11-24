@@ -11,6 +11,7 @@
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_sched_fp8_policy.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_output.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_executor.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_tdm_sched_pipeline_common.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_fp8_schedule.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_softmax.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_tdm_sched_fp8_features.hpp"
@@ -149,6 +150,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     }
 
     static constexpr const char* name = "qr_tdm_fp8_sched";
+    using Common                      = FmhaTdmSchedPipelineCommon;
 
     static constexpr bool kUsesUntransposedVKernelPath = true;
     static constexpr bool kUsesTdmAffineDramPath       = true;
@@ -601,17 +603,12 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         }
 
         // TDM configs for Q/K/V; LDS padding comes from the policy, no cluster multicast.
-        const auto set_padding = [](TDMConfig& config, auto padding) {
-            config.pad_enable              = padding[I0];
-            config.pad_config.pad_amount   = padding[I1];
-            config.pad_config.pad_interval = padding[number<2>{}];
-        };
         TDMConfig tdm_config_q;
         TDMConfig tdm_config_k;
         TDMConfig tdm_config_v;
-        set_padding(tdm_config_q, Policy::template GetLdsPaddingConfigQ<Problem>());
-        set_padding(tdm_config_k, Policy::template GetLdsPaddingConfigK<Problem>());
-        set_padding(tdm_config_v, Policy::template GetLdsPaddingConfigV<Problem>());
+        Common::SetTdmPadding(tdm_config_q, Policy::template GetLdsPaddingConfigQ<Problem>());
+        Common::SetTdmPadding(tdm_config_k, Policy::template GetLdsPaddingConfigK<Problem>());
+        Common::SetTdmPadding(tdm_config_v, Policy::template GetLdsPaddingConfigV<Problem>());
 
         // Q tile in LDS: staged in V1, which the iteration-0 V prefetch overwrites first.
         auto q_dram_window = make_tile_window(
@@ -1718,23 +1715,13 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
             auto run_loop = [&](auto mx_all_fast) {
                 do
                 {
-                    bool is_even_loop   = kUseCountdownLoop ? even_buffer : i_total_loops % 2 == 0;
-                    auto k_lds_cur_ptr  = is_even_loop
-                                              ? static_cast<KDataType* __restrict__>(smem_ptrk0)
-                                              : static_cast<KDataType* __restrict__>(smem_ptrk1);
-                    auto k_lds_next_ptr = is_even_loop
-                                              ? static_cast<KDataType* __restrict__>(smem_ptrk1)
-                                              : static_cast<KDataType* __restrict__>(smem_ptrk0);
-                    auto v_lds_next_ptr = is_even_loop
-                                              ? static_cast<VDataType* __restrict__>(smem_ptrv1)
-                                              : static_cast<VDataType* __restrict__>(smem_ptrv0);
-                    auto v_lds_cur_ptr  = is_even_loop
-                                              ? static_cast<VDataType* __restrict__>(smem_ptrv0)
-                                              : static_cast<VDataType* __restrict__>(smem_ptrv1);
-                    mainloop(k_lds_cur_ptr,
-                             k_lds_next_ptr,
-                             v_lds_next_ptr,
-                             v_lds_cur_ptr,
+                    bool is_even_loop  = kUseCountdownLoop ? even_buffer : i_total_loops % 2 == 0;
+                    const auto buffers = Common::SelectKvBuffers<KDataType, VDataType>(
+                        is_even_loop, smem_ptrk0, smem_ptrk1, smem_ptrv0, smem_ptrv1);
+                    mainloop(buffers.k_cur,
+                             buffers.k_next,
+                             buffers.v_next,
+                             buffers.v_cur,
                              mx_all_fast,
                              std::false_type{});
                     if constexpr(kUseCountdownLoop)
@@ -1761,15 +1748,12 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
             auto run_tiles             = [&](auto sink_escape, index_t end) {
                 while(i_total_loops < end)
                 {
-                    const bool is_even_loop = i_total_loops % 2 == 0;
-                    mainloop(static_cast<KDataType* __restrict__>(is_even_loop ? smem_ptrk0
-                                                                               : smem_ptrk1),
-                             static_cast<KDataType* __restrict__>(is_even_loop ? smem_ptrk1
-                                                                               : smem_ptrk0),
-                             static_cast<VDataType* __restrict__>(is_even_loop ? smem_ptrv1
-                                                                               : smem_ptrv0),
-                             static_cast<VDataType* __restrict__>(is_even_loop ? smem_ptrv0
-                                                                               : smem_ptrv1),
+                    const auto buffers = Common::SelectKvBuffers<KDataType, VDataType>(
+                        i_total_loops % 2 == 0, smem_ptrk0, smem_ptrk1, smem_ptrv0, smem_ptrv1);
+                    mainloop(buffers.k_cur,
+                             buffers.k_next,
+                             buffers.v_next,
+                             buffers.v_cur,
                              std::false_type{},
                              sink_escape);
                     i_total_loops++;
@@ -1782,23 +1766,13 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         {
             do
             {
-                bool is_even_loop   = kUseCountdownLoop ? even_buffer : i_total_loops % 2 == 0;
-                auto k_lds_cur_ptr  = is_even_loop
-                                          ? static_cast<KDataType* __restrict__>(smem_ptrk0)
-                                          : static_cast<KDataType* __restrict__>(smem_ptrk1);
-                auto k_lds_next_ptr = is_even_loop
-                                          ? static_cast<KDataType* __restrict__>(smem_ptrk1)
-                                          : static_cast<KDataType* __restrict__>(smem_ptrk0);
-                auto v_lds_next_ptr = is_even_loop
-                                          ? static_cast<VDataType* __restrict__>(smem_ptrv1)
-                                          : static_cast<VDataType* __restrict__>(smem_ptrv0);
-                auto v_lds_cur_ptr  = is_even_loop
-                                          ? static_cast<VDataType* __restrict__>(smem_ptrv0)
-                                          : static_cast<VDataType* __restrict__>(smem_ptrv1);
-                mainloop(k_lds_cur_ptr,
-                         k_lds_next_ptr,
-                         v_lds_next_ptr,
-                         v_lds_cur_ptr,
+                bool is_even_loop  = kUseCountdownLoop ? even_buffer : i_total_loops % 2 == 0;
+                const auto buffers = Common::SelectKvBuffers<KDataType, VDataType>(
+                    is_even_loop, smem_ptrk0, smem_ptrk1, smem_ptrv0, smem_ptrv1);
+                mainloop(buffers.k_cur,
+                         buffers.k_next,
+                         buffers.v_next,
+                         buffers.v_cur,
                          std::false_type{},
                          bool_constant<Features::kSinkEscapeEveryTile>{});
                 if constexpr(kUseCountdownLoop)
@@ -1858,7 +1832,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                     }
                     else
                     {
-                        lse_acc(i_idx) = m_[i_idx] * scale_of(i_idx) / C_LOG2E + log(l_[i_idx]);
+                        lse_acc(i_idx) = Common::RowLse(m_[i_idx], scale_of(i_idx), l_[i_idx]);
                     }
                 });
 
@@ -1867,15 +1841,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
 
             sweep_tile_span(o_spans[I0], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
-                const auto tmp       = [&]() {
-                    if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                                 FmhaMask::IsMasking)
-                    {
-                        return l[i_idx] == 0.f ? 0.f : 1 / l[i_idx];
-                    }
-                    else
-                        return 1 / l[i_idx];
-                }();
+                const auto tmp =
+                    Common::RowInvSum<(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                                       FmhaMask::IsMasking)>(l[i_idx]);
                 sweep_tile_span(o_spans[I1], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
                     output(i_j_idx) *= tmp;
