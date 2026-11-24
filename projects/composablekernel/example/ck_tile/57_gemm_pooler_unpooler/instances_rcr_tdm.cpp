@@ -1,0 +1,15 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+// The pooler / unpooler bench instances with A RowMajor, B ColumnMajor and the tdm epilogue.
+
+#include "gemm_pooler_unpooler_bench.hpp"
+
+namespace pooler_bench {
+
+int dispatch_rcr_tdm(const ck_tile::ArgParser& arg, const Shape& shape, const std::string& name)
+{
+    return dispatch_layout<RowMajor, ColumnMajor, false>(arg, shape, name);
+}
+
+} // namespace pooler_bench
