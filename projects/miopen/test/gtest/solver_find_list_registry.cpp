@@ -18,7 +18,9 @@
 // miopenStatusInternalError from solver::Id::GetAlgo() because the id is
 // unknown. This test fails fast on that drift instead of letting it ship and
 // surface as a runtime crash in a workload.
-TEST(CPU_SolverFindListRegistry_NONE, AllFindSolversAreRegistered)
+using CPU_SolverFindListRegistry_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_SolverFindListRegistry_NONE, AllFindSolversAreRegistered)
 {
     const auto db_ids = GetAllFindSolverDbIds();
     ASSERT_FALSE(db_ids.empty()) << "Find solver lists returned no solvers; test wiring is broken.";
@@ -50,7 +52,7 @@ TEST(CPU_SolverFindListRegistry_NONE, AllFindSolversAreRegistered)
 // those the Find lists are the only path in and the solver is unreachable
 // outright. This test fails on that drift instead of letting a solver ship
 // silently disabled.
-TEST(CPU_SolverFindListRegistry_NONE, AllRegisteredConvSolversAreFindReachable)
+TEST_P(CPU_SolverFindListRegistry_NONE, AllRegisteredConvSolversAreFindReachable)
 {
     const auto db_ids = GetAllFindSolverDbIds();
     ASSERT_FALSE(db_ids.empty()) << "Find solver lists returned no solvers; test wiring is broken.";
@@ -71,3 +73,5 @@ TEST(CPU_SolverFindListRegistry_NONE, AllRegisteredConvSolversAreFindReachable)
                "Add it to the appropriate SolverContainer in mlo_dir_conv.cpp.";
     }
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_SolverFindListRegistry_NONE, testing::Values(0));

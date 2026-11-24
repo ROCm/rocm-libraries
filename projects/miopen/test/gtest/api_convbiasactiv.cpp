@@ -198,7 +198,7 @@ std::vector<CBATestCase> GetTestValues()
     return {
         {16, 128, 16, 16, 128, 3, 3, 0, 0, 1, 1, 1, 1, miopenActivationRELU, miopenConvolution}};
 }
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_ConvBiasActivFwd_FP32,
                          testing::Combine(testing::Values(miopenConvolutionFwdAlgoDirect,
                                                           miopenConvolutionFwdAlgoWinograd),

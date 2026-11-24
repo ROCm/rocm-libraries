@@ -81,7 +81,20 @@ const GroupLengthSet& groupLengthSet(GroupLengths lengths)
     // keys, so all of its rows see no key under every mask.
     static const GroupLengthSet s_edge
         = {{401, 0, 260}, {300, 299, 0}, {16, 480, 560, 900}, {24, 440, 760, 1100}};
-    return lengths == GroupLengths::EDGE ? s_edge : s_standard;
+    // Batch 1. The first batch of s_standard, so it keeps that set's properties; its slots
+    // fill the B * S = 512 token capacity of each side.
+    static const GroupLengthSet s_singleBatch = {{401}, {483}, {16, 432}, {24, 512}};
+    switch(lengths)
+    {
+    case GroupLengths::STANDARD:
+        return s_standard;
+    case GroupLengths::EDGE:
+        return s_edge;
+    case GroupLengths::SINGLE_BATCH:
+        return s_singleBatch;
+    default:
+        throw std::invalid_argument("Unknown GroupLengths value");
+    }
 }
 
 // Writes @p values into the INT32 token table @p tensor.
@@ -255,7 +268,7 @@ protected:
                       testCase.seqQ);
             ASSERT_LE(*std::max_element(lengths.seqLensKv.begin(), lengths.seqLensKv.end()),
                       testCase.seqKv);
-            if(testCase.groupLengths == GroupLengths::STANDARD)
+            if(testCase.groupLengths != GroupLengths::EDGE)
             {
                 // Each batch must span at least two Q-tiles of this row.
                 ASSERT_GT(*std::min_element(lengths.seqLensQ.begin(), lengths.seqLensQ.end()),
@@ -657,6 +670,29 @@ GraphTestCase groupTestCase(const fmha_v3_fwdConfig& config, bool withStats, Gro
     return testCase;
 }
 
+// Whether the engine serves @p config with fewer K/V heads than Q heads: the gfx950 head
+// dim 256 kernels do not support GQA/MQA.
+bool servesGqa(const fmha_v3_fwdConfig& config)
+{
+    return config.arch != "gfx950" || config.hdim_q != 256;
+}
+
+// @p testCase with two K/V heads for its four Q heads (GQA ratio 2).
+GraphTestCase withGqa(GraphTestCase testCase)
+{
+    testCase.numHeadsKv = 2;
+    testCase.name += "Gqa";
+    return testCase;
+}
+
+// @p testCase with one K/V head for its four Q heads (MQA).
+GraphTestCase withMqa(GraphTestCase testCase)
+{
+    testCase.numHeadsKv = 1;
+    testCase.name += "Mqa";
+    return testCase;
+}
+
 // Each causal group row under a top-left causal mask, with Q, K, V and O on one offset
 // table: every batch's Q and K/V lengths are then equal, where the two causal alignments
 // agree, so the engine serves the top-left mask with the row's bottom-right kernel.
@@ -756,6 +792,66 @@ std::vector<GraphTestCase> getGroupEdgeLengthTestCases()
     return cases;
 }
 
+// Group-mode cases that differ from those of the other group instances in one property.
+// Every group row that serves GQA runs with stats over the standard lengths with two Q
+// heads per K/V head (GQA) and with one K/V head (MQA); with GQA it also runs with stats
+// and cu_seq_len over the edge lengths and, for causal rows, under a top-left mask on one
+// shared offset table. Every group row runs with stats over a single batch, and every
+// causal group row runs under a top-left mask with stats through one cu_seq_len table for
+// both sides. Each case matches its counterpart in getGroupStatsTestCases,
+// getGroupEdgeLengthTestCases, getGroupTopLeftCausalTestCases or getGroupCuSeqLenTestCases
+// apart from the K/V head count, the batch count or the stats.
+std::vector<GraphTestCase> getGroupCoverageTestCases()
+{
+    std::vector<GraphTestCase> cases;
+    for(const auto& [key, config] : cfg_fmha_fwd)
+    {
+        if(!isGroupRow(config))
+        {
+            continue;
+        }
+
+        auto singleBatch = groupTestCase(config, /*withStats=*/true, GroupLengths::SINGLE_BATCH);
+        singleBatch.name += "SingleBatch";
+        cases.push_back(singleBatch);
+
+        const bool causal = isBottomRightCausalRow(config);
+        auto topLeftConfig = config;
+        topLeftConfig.mask = static_cast<int>(plan_utils::MaskType::TOP_LEFT_CAUSAL);
+        if(causal)
+        {
+            auto sharedCuSeqLen
+                = groupTestCase(topLeftConfig, /*withStats=*/true, GroupLengths::STANDARD);
+            sharedCuSeqLen.cuSeqLens = true;
+            sharedCuSeqLen.sharedCuSeqLen = true;
+            sharedCuSeqLen.name += "SharedCuSeqLen";
+            cases.push_back(sharedCuSeqLen);
+        }
+
+        if(!servesGqa(config))
+        {
+            continue;
+        }
+        const auto standard = groupTestCase(config, /*withStats=*/true, GroupLengths::STANDARD);
+        cases.push_back(withGqa(standard));
+        cases.push_back(withMqa(standard));
+
+        auto edge = groupTestCase(config, /*withStats=*/true, GroupLengths::EDGE);
+        edge.cuSeqLens = true;
+        edge.name += "CuSeqLenEdge";
+        cases.push_back(withGqa(edge));
+
+        if(causal)
+        {
+            auto topLeft = configToTestCase(topLeftConfig);
+            topLeft.sharedOffsetTable = true;
+            topLeft.name += "SharedOffsets";
+            cases.push_back(withGqa(topLeft));
+        }
+    }
+    return cases;
+}
+
 // Every fp8 row with mma_core_mode set to each FP8 path value cuDNN writes: FP8_E4M3 (the
 // sdpa_fp8() default) and FP8_E5M2. The mode names the MMA path, not the FP8_E4M3_FNUZ input
 // encoding.
@@ -836,6 +932,11 @@ INSTANTIATE_TEST_SUITE_P(GroupCuSeqLen,
 INSTANTIATE_TEST_SUITE_P(GroupEdgeLengths,
                          IntegrationGpuSdpaFwdBf16,
                          testing::ValuesIn(getGroupEdgeLengthTestCases()),
+                         GraphTestCase::getName);
+
+INSTANTIATE_TEST_SUITE_P(StandardGroupCoverage,
+                         IntegrationGpuSdpaFwdBf16,
+                         testing::ValuesIn(getGroupCoverageTestCases()),
                          GraphTestCase::getName);
 
 TEST_P(IntegrationGpuSdpaFwdShapeSweepBf16, Correctness)
