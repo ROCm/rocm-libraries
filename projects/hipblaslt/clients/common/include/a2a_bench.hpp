@@ -476,7 +476,7 @@ namespace hipblaslt_bench
             }
         }
 
-        // Fine-grained, because peers' copy engines write it while this device polls.
+        // Fine-grained: peers write it (copy engines or kernel stores) while this device polls.
         size_t bytesFlags = 0;
         CHECK_LT_RC(hipblasLtDeviceCommFlagBytes(kCommChannels, &bytesFlags));
         CHECK_HIP_RC(hipExtMallocWithFlags(&res.dFlags, bytesFlags, hipDeviceMallocFinegrained));

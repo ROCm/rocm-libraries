@@ -933,8 +933,8 @@ hipblasStatus_t hipblasLtDeviceCommFlagBytes(uint32_t nChannels, size_t* bytes);
  *
  *  - be resident on its owner's device, and allocated fine-grained or uncached
  *    (``hipDeviceMallocFinegrained``, ``hipDeviceMallocUncached``, or a VMM allocation of type
- *    ``hipMemAllocationTypeUncached``): peers' copy engines write it while the owner's kernel
- *    polls it;
+ *    ``hipMemAllocationTypeUncached``): peers write it (copy engines or kernel stores) while
+ *    the owner's kernel polls it;
  *  - be aligned to ``HIPBLASLT_DEVICE_COMM_FLAG_ALIGNMENT`` bytes;
  *  - be zero-filled, and every write to it complete, before the first collective that uses it;
  *  - not be written by the caller afterwards; and

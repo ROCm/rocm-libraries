@@ -463,7 +463,7 @@ namespace
         CHECK_HIP(hipMemset(self.dD, 0, bytesCD));
         CHECK_HIP(hipMemset(self.dRecv, 0, bytesRecv));
 
-        // Fine-grained, because peers' copy engines write it while this device polls.
+        // Fine-grained: peers write it (copy engines or kernel stores) while this device polls.
         size_t bytesFlags = 0;
         CHECK_LT(hipblasLtDeviceCommFlagBytes(kChannels, &bytesFlags));
         CHECK_HIP(hipExtMallocWithFlags(&self.dFlags, bytesFlags, hipDeviceMallocFinegrained));
