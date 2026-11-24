@@ -152,7 +152,8 @@ def merge_solutions(
         LibraryCollection: LibraryCollection with all merged solutions.
 
     Raises:
-        ValueError: If no valid YAML library logic files found.
+        ValueError: If no valid YAML library logic files found or if there is a library type mismatch.
+        NotImplementedError: If there is a default solution mismatch for a library.
 
     Note:
         For duplicate problem sizes, keeps the solution with highest performance.
@@ -179,11 +180,15 @@ def merge_solutions(
     libs: dict[str, Library] = {}
     for lib in sorted(parallel_for(load_library, lib_paths), key=lambda k: k.name):
         if lib.name not in libs:
-            for size in lib.sizes:
+            for size in lib.sizes or []:
                 if trim_size:
                     size[0] = size[0][:4]
             libs[lib.name] = lib
             continue
+
+        if libs[lib.name].type != lib.type:
+            raise ValueError(f"Library type mismatch for library '{lib.name}': "
+                             f"'{libs[lib.name].type}' != '{lib.type}'.")
 
         if libs[lib.name].default_solution != lib.default_solution:
             raise NotImplementedError(f"Default solution mismatch for library '{lib.name}'. "
@@ -192,7 +197,7 @@ def merge_solutions(
         base_sols = libs[lib.name].solutions
         base_sizes = libs[lib.name].sizes
         for i, sol in enumerate(lib.solutions):
-            sizes = [sz for sz in lib.sizes if sz[1][0] == i]
+            sizes = [sz for sz in lib.sizes or [] if sz[1][0] == i]
             sol = copy.deepcopy(sol)
             _sanitize_solution(sol)
             sol["SolutionIndex"] = len(base_sols)
@@ -213,7 +218,7 @@ def merge_solutions(
         if epilogues and _library_supports_epilogues(lib):
             lib.add_epilogues()
         merged.append(lib)
-        logger.info(f"Processed {len(lib.solutions)} solutions and {len(lib.sizes)} sizes for '{lib.name}'")
+        logger.info(f"Processed {len(lib.solutions)} solutions and {len(lib.sizes or [])} sizes for '{lib.name}'")
 
     return merged
 

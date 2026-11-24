@@ -40,7 +40,7 @@ import logging
 import re
 
 from pathlib import Path
-from typing import List, Tuple, Iterator
+from typing import Callable, Hashable, List, Tuple, Iterator
 
 from geko import bench
 from geko.constants import INDEX_TYPE_MAP, MX_SCALE_DATATYPE_ENUM
@@ -556,132 +556,132 @@ class Library:
 
         return str(bench_file), str(verif_file)
 
-    @staticmethod
-    def _solution_key(sol: dict) -> tuple:
-        """Return a hashable fingerprint for a solution, ignoring bookkeeping keys.
+    def _solution_keyer(self) -> Callable[[dict], Hashable]:
+        """Build the function that fingerprints a solution for deduplication.
 
-        Two solutions that produce the same ``_solution_key`` are functionally
-        identical and compile to the same kernel binary.  The key is a sorted
-        tuple of ``(param, value)`` pairs with transient / index-only fields
-        excluded.
-
-        Args:
-            sol: Solution dictionary.
+        Two solutions with the same key are the same solution. When TensileLite is
+        importable the key is ``SolutionNameMin``, recomputed exactly as
+        ``TensileMergeLibrary`` does (``sanitizeSolutions`` + ``reNameSolutions``),
+        so geko and TensileMergeLibrary agree on what a duplicate is. Otherwise the
+        key is the sorted ``(param, value)`` pairs of the solution with the library
+        defaults filled in and the bookkeeping fields dropped.
 
         Returns:
-            tuple: Hashable key suitable for deduplication.
+            Callable[[dict], Hashable]: Maps a solution dict to a hashable key.
         """
-        _SKIP = frozenset({"SolutionIndex", "SolutionNameMin", "KernelNameMin", "BaseName"})
-        return tuple(sorted(
-            (k, str(v)) for k, v in sol.items() if k not in _SKIP
-        ))
+        defaults = self.default_solution or {}
 
-    def dedup_solutions(self) -> int:
-        """Merge solutions with identical parameters, remapping sizes.
+        def sanitize(sol: dict) -> dict:
+            sol = dict(sol)
+            if sol.get("StaggerU") == 0:
+                sol["StaggerUMapping"] = 0
+                sol["StaggerUStride"] = 0
+                sol["_staggerStrideShift"] = 0
+            return sol
 
-        After tuning, the same kernel configuration can appear multiple times
-        (e.g. from different build directories or tuning iterations).  This
-        method keeps the first occurrence of each unique configuration and
-        remaps all ``sizes`` entries that referenced the duplicates.
+        try:
+            from tensilelite.Common.GlobalParameters import defaultSolution
+            from tensilelite.ExecutionPolicy import normalize_execution_policy_with_defaults
+            from tensilelite.SolutionStructs.Naming import getSolutionNameMin
+        except ImportError:
+            logger.warning(
+                f"{self.name} | TensileLite is not importable, deduplicating solutions by their parameters "
+                "instead of SolutionNameMin"
+            )
+            skip = frozenset({"SolutionIndex", "SolutionUID", "SolutionNameMin", "KernelNameMin", "BaseName"})
+            return lambda sol: tuple(
+                sorted((k, str(v)) for k, v in {**defaults, **sanitize(sol)}.items() if k not in skip)
+            )
 
-        Returns:
-            int: Number of duplicate solutions removed.
+        problem = self.problem
 
-        Side effects:
-            Modifies ``self.solutions`` and ``self.sizes`` in place.
-        """
-        seen: dict[tuple, int] = {}
-        old_to_new: dict[int, int] = {}
-        new_sols = []
+        def tensile_key(sol: dict) -> str:
+            sol = normalize_execution_policy_with_defaults(sanitize(sol), defaults)
+            for param, value in defaultSolution.items():
+                sol.setdefault(param, value)
+            sol["ProblemType"] = problem
+            return getSolutionNameMin(sol, splitGSU=False)
 
-        for sol in self.solutions:
-            key = self._solution_key(sol)
-            old_idx = sol["SolutionIndex"]
-            if key in seen:
-                old_to_new[old_idx] = seen[key]
-            else:
-                new_idx = len(new_sols)
-                seen[key] = new_idx
-                old_to_new[old_idx] = new_idx
-                sol = copy.deepcopy(sol)
-                sol["SolutionIndex"] = new_idx
-                new_sols.append(sol)
-
-        n_removed = len(self.solutions) - len(new_sols)
-        if n_removed == 0:
-            return 0
-
-        for size in self.sizes:
-            size[1][0] = old_to_new[size[1][0]]
-
-        self.solutions = new_sols
-        logger.info(
-            f"{self.name} | Removed {n_removed} duplicate solution(s) "
-            f"({len(self.solutions) + n_removed} -> {len(self.solutions)})"
-        )
-        return n_removed
+        return tensile_key
 
     def trim(self) -> None:
         """Remove duplicate solutions for the same problem size, keeping the best performing one.
 
         For each unique problem size, if multiple solutions exist, only the solution
-        with the highest GFLOPS performance is retained. Also deduplicates solutions
-        with identical parameters (same kernel configuration) and removes unused
-        solutions that are not referenced by any size.  Solution indices are
-        renumbered to be contiguous.
+        with the highest GFLOPS performance is retained. Also removes unused solutions
+        that are not referenced by any size and merges solutions that are the same
+        (same ``SolutionNameMin`` as ``TensileMergeLibrary`` when TensileLite is
+        importable, same parameters otherwise), remapping their sizes to the first
+        copy. Solution indices are renumbered to be contiguous.
+
+        If the library has no sizes (``None``), only the solutions are deduplicated.
 
         Side effects:
             Modifies 'self.sizes' and 'self.solutions' in place.
         """
-        # Step 1 — Deduplicate solutions with identical parameters.
-        # This must run before size dedup so that sizes pointing to
-        # duplicate solutions are consolidated first, giving the
-        # per-size best-performer selection correct solution counts.
-        self.dedup_solutions()
+        no_sizes = self.sizes is None
 
-        # Step 2 — Remove duplicate sizes (keep best performer per size).
-        size_map = {
-            tuple(size[0]): [sidx for sidx, sz in enumerate(self.sizes) if sz[0] == size[0]] for size in self.sizes
-        }
-        keep = set()
-        for size, indices in size_map.items():
-            if len(indices) == 1:
-                keep.add(indices[0])
-                continue
-            keep_idx = max(indices, key=lambda sidx: self.sizes[sidx][1][1])
-            keep.add(keep_idx)
-            perf = self.sizes[keep_idx][1][1]
-            logger.info(
-                f"{self.name} | {len(indices)} solutions found for {size}, keeping solution with highest performance: {perf}"
-            )
-        self.sizes = [self.sizes[keep_idx] for keep_idx in keep]
-
-        # Step 3 — Trim unused solutions and invalid sizes.
-        sol_indices = set([size[1][0] for size in self.sizes])
-        if len(sol_indices) != len(self.solutions) or max(sol_indices) > len(self.solutions):
-            new_sols = []
-            new_sizes = []
-            for i, sol in enumerate(self.solutions):
-                sizes = [sz for sz in self.sizes if sz[1][0] == i]
-                if len(sizes) == 0:
+        # Step 1 — Remove duplicate sizes (keep best performer per size).
+        if not no_sizes:
+            size_map = {
+                tuple(size[0]): [sidx for sidx, sz in enumerate(self.sizes) if sz[0] == size[0]] for size in self.sizes
+            }
+            keep = set()
+            for size, indices in size_map.items():
+                if len(indices) == 1:
+                    keep.add(indices[0])
                     continue
-                kidx = len(new_sols)
+                keep_idx = max(indices, key=lambda sidx: self.sizes[sidx][1][1])
+                keep.add(keep_idx)
+                perf = self.sizes[keep_idx][1][1]
+                logger.info(
+                    f"{self.name} | {len(indices)} solutions found for {size}, keeping solution with highest performance: {perf}"
+                )
+            self.sizes = [self.sizes[keep_idx] for keep_idx in keep]
+
+        # Step 2 — Trim unused solutions and invalid sizes, and merge duplicate solutions.
+        # Done after step 1 so only solutions that are actually used get fingerprinted.
+        sizes_by_sol: dict[int, list] = {}
+        for size in self.sizes or []:
+            sizes_by_sol.setdefault(size[1][0], []).append(size)
+
+        solution_key = self._solution_keyer()
+        seen: dict[Hashable, int] = {}
+        new_sols = []
+        new_sizes_by_sol: list[list] = []
+        n_unused = n_duplicates = 0
+        for i, sol in enumerate(self.solutions):
+            sizes = sizes_by_sol.get(i)
+            if not sizes and not no_sizes:
+                n_unused += 1
+                continue
+            key = solution_key(sol)
+            kidx = seen.get(key)
+            if kidx is None:
+                kidx = seen[key] = len(new_sols)
                 sol = copy.deepcopy(sol)
                 sol["SolutionIndex"] = kidx
-                sizes = copy.deepcopy(sizes)
-                for size in sizes:
-                    size[1][0] = kidx
                 new_sols.append(sol)
-                new_sizes.extend(sizes)
+                new_sizes_by_sol.append([])
+            else:
+                n_duplicates += 1
+            for size in sizes or []:
+                size = copy.deepcopy(size)
+                size[1][0] = kidx
+                new_sizes_by_sol[kidx].append(size)
+        new_sizes = [size for group in new_sizes_by_sol for size in group]
 
-            if len(new_sizes) < len(self.sizes):
-                logger.info(
-                    f"{self.name} | Removed {len(self.sizes) - len(new_sizes)} sizes that point to non-existing solutions"
-                )
-            if len(new_sols) < len(self.solutions):
-                logger.info(f"{self.name} | Removed {len(self.solutions) - len(new_sols)} unused solutions")
+        if not no_sizes and len(new_sizes) < len(self.sizes):
+            logger.info(
+                f"{self.name} | Removed {len(self.sizes) - len(new_sizes)} sizes that point to non-existing solutions"
+            )
+        if n_unused:
+            logger.info(f"{self.name} | Removed {n_unused} unused solutions")
+        if n_duplicates:
+            logger.info(f"{self.name} | Merged {n_duplicates} duplicate solutions")
 
-            self.solutions = new_sols
+        self.solutions = new_sols
+        if not no_sizes:
             self.sizes = new_sizes
 
     def dump(self, output_dir, name: str | None = None) -> None:
@@ -777,14 +777,6 @@ class LibraryCollection:
         """Call 'trim' on each Library in the collection."""
         for lib in self.libs:
             lib.trim()
-
-    def dedup_solutions(self) -> int:
-        """Call 'dedup_solutions' on each Library in the collection.
-
-        Returns:
-            int: Total number of duplicate solutions removed across all libraries.
-        """
-        return sum(lib.dedup_solutions() for lib in self.libs)
 
     def dump(self, output_dir: str | Path) -> None:
         """Call 'dump' on each Library in the collection.
