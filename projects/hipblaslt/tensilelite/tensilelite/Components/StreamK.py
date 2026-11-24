@@ -2048,7 +2048,9 @@ class StreamK(TileProcessingStrategy):
 
             # Align NEPB to an N-group so CLS can compact.
         numElementsPerBatchPreCLS = numElementsPerBatch
-        if kernel["CompactLoopStore"] and not kernel["NumElementsPerBatchStore"]:
+        # Only align for LocalSplitU == 1: useCLS below requires it, so with LSU > 1 the shrink
+        # would split the batch without ever forming a CLS loop.
+        if kernel["CompactLoopStore"] and not kernel["NumElementsPerBatchStore"] and kernel["LocalSplitU"] == 1:
             numElementsPerBatch = self._skAlignNEPBForCLS(kernel, len(elements[edgeI]), numElementsPerBatch, gwvw, edge)
 
         numBatches = max(1, ceilDivide(len(elements[edgeI]),numElementsPerBatch))
@@ -2940,7 +2942,9 @@ class StreamK(TileProcessingStrategy):
             #    numElementsPerBatch = numVectorsPerBatch * kernel["GlobalWriteVectorWidth"]
             # Align NEPB to an N-group so CLS can compact (same as partials).
             numElementsPerBatchPreCLS = numElementsPerBatch
-            if kernel["CompactLoopStore"] and not kernel["NumElementsPerBatchStore"]:
+            # Only align for LocalSplitU == 1 (see partialsWriteProcedure): with LSU > 1 useCLS is
+            # never set, and the shrink would split the peer-partial loads into several wait rounds.
+            if kernel["CompactLoopStore"] and not kernel["NumElementsPerBatchStore"] and kernel["LocalSplitU"] == 1:
                 numElementsPerBatch = self._skAlignNEPBForCLS(kernel, len(elements[edgeI]), numElementsPerBatch, gwvw, edge)
             numBatches = max(1, ceilDivide(len(elements[edgeI]),numElementsPerBatch))
 
