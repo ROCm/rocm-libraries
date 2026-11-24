@@ -54,7 +54,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_csr, T, I, J, A, B, C>
         ROCSPARSE_ROUTINE_TRACE;
         switch(alg)
         {
-        case rocsparse_sddmm_alg_dense:
+        case deprecated_rocsparse_sddmm_alg_dense:
         {
             if(nnz == 0)
             {
@@ -101,7 +101,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_csr, T, I, J, A, B, C>
         ROCSPARSE_ROUTINE_TRACE;
         switch(alg)
         {
-        case rocsparse_sddmm_alg_dense:
+        case deprecated_rocsparse_sddmm_alg_dense:
         case rocsparse_sddmm_alg_default:
         {
             return rocsparse_status_success;
@@ -145,7 +145,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_csr, T, I, J, A, B, C>
 
         switch(alg)
         {
-        case rocsparse_sddmm_alg_dense:
+        case deprecated_rocsparse_sddmm_alg_dense:
         {
 
             if(nnz == 0)

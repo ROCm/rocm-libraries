@@ -16,7 +16,7 @@ THE SPEC COMES FROM DISPATCH, NOT FROM THIS FILE
 ------------------------------------------------
 Both harnesses (this one and the benchmark) used to HAND-BUILD an
 ``AttentionDenseSpec`` from CLI defaults. That is a silent-staleness machine: the
-tuning that actually ships lives in ``dispatch.attention.gfx942_dense._base_spec``
+tuning that actually ships lives in ``dispatch.attention.gfx942_dense.tuned_base_spec``
 (per-config ``waves_per_eu``, the 304-CTA persistent grid, the auto persistent
 decision, the ragged path), and a hardcoded CLI default freezes whatever that
 policy happened to be on the day the flag was written. A harness that measures a
@@ -44,9 +44,11 @@ These helpers (:func:`add_dense_tuning_args`, :func:`dense_request`,
 from here rather than keeping a second, drifting resolver.
 
 NOTE: ``--sw`` (sliding window) now builds a supported spec (KV-loop prune + window
-mask); only the degenerate shape whose last query block's window starts past
-``seqlen_kv`` is rejected (zero-trip KV loop -> NaN), and only without sinks: with
-sinks those rows output 0, softmax over the sink alone. ``--use-sinks`` adds random
+mask). Two degenerate shapes are rejected: the last query block's window starting
+past ``seqlen_kv`` (zero-trip KV loop -> NaN), unless sinks are on; and
+``seqlen_q - seqlen_kv >= W``, whose last rows see no key and would average V, unless
+sinks or ``emit_lse`` are on. With sinks those rows output 0, softmax over the sink
+alone; the LSE path zeroes them. ``--use-sinks`` adds random
 per-head sink logits and checks against a manual sink reference; it combines with
 ``--sw``. ``--persistent`` is NOT a
 deferred mode either: the persistent grid ships and dispatch turns it on
@@ -106,6 +108,7 @@ _OVERRIDE_FIELDS = (
     "lds_k_group_pad",
     "num_persistent",
     "persist_decode",
+    "nonpersist_decode",
 )
 
 
@@ -156,9 +159,16 @@ def add_dense_tuning_args(ap: argparse.ArgumentParser) -> None:
     ap.add_argument(
         "--persist-decode",
         dest="persist_decode",
-        choices=["auto", "qb_major", "hkv_major"],
+        choices=sorted(Gfx942AttentionDenseSpec.supported_persist_decodes()),
         default=None,
         help="persistent work-item decode; default = dispatch's 'auto'",
+    )
+    ap.add_argument(
+        "--nonpersist-decode",
+        dest="nonpersist_decode",
+        choices=sorted(Gfx942AttentionDenseSpec.supported_nonpersist_decodes()),
+        default=None,
+        help="non-persistent block order; default = dispatch's 'auto'",
     )
     ap.add_argument(
         "--interleave",
@@ -515,10 +525,15 @@ def main():
         )
         spec = resolve_dense_spec(req, overrides)
         if args.dry_run:
+            decode = (
+                spec.resolved_persist_decode
+                if spec.persistent
+                else spec.resolved_nonpersist_decode
+            )
             print(
                 f"Sq={sq:<6d} {describe_dense_spec(spec, overrides)}  "
                 f"(persistent={spec.persistent} np={spec.num_persistent} "
-                f"decode={spec.persist_decode} wpe={spec.waves_per_eu} "
+                f"decode={decode} wpe={spec.waves_per_eu} "
                 f"bn={spec.block_n} kpad={spec.lds_k_group_pad})"
             )
             continue

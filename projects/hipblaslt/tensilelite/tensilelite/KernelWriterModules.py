@@ -137,7 +137,9 @@ def wait(states, kernel, tPA, tPB, skipGlobalRead, skipLocalWrite, \
 ##############################################################################
 def syncThreads(kernel, archCaps, asmCaps, comment="", skipForceWaitcnt0=False, memoryToken=None):
     imod = Module("syncThreads")
-    if kernel["NumThreads"] > kernel["WavefrontSize"]:
+    # The cluster handshake is anchored on workgroup barriers, so a one-wave
+    # cluster kernel still needs them.
+    if kernel["NumThreads"] > kernel["WavefrontSize"] or kernel.get("ClusterBarrier"):
         if asmCaps["SeparateVscnt"]:
             imod.add(SWaitCnt(dscnt=0, comment="extra navi wait"))
         elif kernel["_ScheduleIterAlg"] == 2 \

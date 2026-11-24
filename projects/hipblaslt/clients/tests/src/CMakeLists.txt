@@ -5,23 +5,32 @@ target_sources(hipblaslt-test
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_gtest_main.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/hip_buffer_transfer_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/device_vector_guard_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/caching_library_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/concurrent_handles_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/contraction_problem_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hip_solution_adapter_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/secure_env_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/arch_revision_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/adaptive_sm_count_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/efficiency_monitor_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/matmul_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/device_scalar_alpha_ext_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/math_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/scale_buffer_size_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/auxiliary_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/heuristic_workspace_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/grouped_matmul_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/data_type_names_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/benchmark_stats_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/benchmark_collective_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/candidate_search_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/candidate_preparation_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/matrix_transform_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_gtest_ext_op.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/error_paths_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/utility_helpers_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk5_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk_multistream_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk_null_stream_test.cpp
@@ -31,11 +40,15 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/contraction_problem_update_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/tuning_cache_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/tuning_store_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tuning_tune_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tuning_scratch_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ulp_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/arguments_a2a_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/unit_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/algo_errors_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/fast_check_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/relaunch_compare_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/host_memory_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/w4a16_layout_gtest.cpp
 )
 
@@ -51,6 +64,22 @@ if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
         ${CMAKE_CURRENT_SOURCE_DIR}/fused_a2a_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/fused_a2a_multiprocess_gtest.cpp
     )
+endif()
+
+# The registration tests run their DISABLED_ workers in child processes,
+# because registered kernels are process-global. The cases that need code
+# objects built for another architecture, or with stand-in kernels, compile
+# them with hiprtc, so it is required rather than letting those cases lapse.
+if(HIPBLASLT_ENABLE_LOCAL_KERNELS)
+    target_sources(hipblaslt-test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/local_kernel_library_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/local_kernel_register_test.cpp
+    )
+    find_package(hiprtc CONFIG REQUIRED)
+    target_link_libraries(hipblaslt-test PRIVATE hiprtc::hiprtc)
+    if(NOT HIPBLASLT_ENABLE_YAML)
+        target_link_libraries(hipblaslt-test PRIVATE ${hipblaslt_msgpack_target})
+    endif()
 endif()
 
 # NOTE: secure_env_gtest.cpp (ROCM-26729) intentionally includes the header-only

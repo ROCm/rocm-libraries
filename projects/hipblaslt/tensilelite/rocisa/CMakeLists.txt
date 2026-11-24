@@ -158,13 +158,10 @@ block()
 
     if(ROCISA_STANDALONE)
         set(STINKYTOFU_ENABLE_WERROR ON)
-        # Both steppings need the bindings, and they are separate entries in
-        # GPU_TARGETS, so a strict-only build matches neither if only one is named.
-        if("gfx1250" IN_LIST GPU_TARGETS OR "gfx1250-strict" IN_LIST GPU_TARGETS)
-            set(STINKYTOFU_BUILD_PYTHON ON)
-        else()
-            set(STINKYTOFU_BUILD_PYTHON OFF)
-        endif()
+        # gfx1250 codegen imports this module. TheRock publishes one generic
+        # artifact shared by every GPU family, so a gfx942-only build that
+        # skips it removes the module from the tree FFM actually runs.
+        set(STINKYTOFU_BUILD_PYTHON ON)
         add_subdirectory("${_stinkytofu_src_dir}" stinkytofu EXCLUDE_FROM_ALL)
         set(_stinkytofu_from_subdirectory TRUE)
     else()
@@ -172,11 +169,8 @@ block()
             set(BUILD_SHARED_LIBS OFF)
             set(CMAKE_SKIP_INSTALL_RULES ON)
             set(STINKYTOFU_ENABLE_WERROR ON)
-            if("gfx1250" IN_LIST GPU_TARGETS OR "gfx1250-strict" IN_LIST GPU_TARGETS)
-                set(STINKYTOFU_BUILD_PYTHON ON)
-            else()
-                set(STINKYTOFU_BUILD_PYTHON OFF)
-            endif()
+            # See the standalone branch: every family build has to ship the module.
+            set(STINKYTOFU_BUILD_PYTHON ON)
             add_subdirectory("${_stinkytofu_src_dir}" stinkytofu EXCLUDE_FROM_ALL)
         endblock()
         set(_stinkytofu_from_subdirectory TRUE)
@@ -335,6 +329,26 @@ block()
                 DEPENDS "${_intrinsics_bc_dst}")
             add_dependencies(_rocisa rocisa_stage_intrinsics)
         endif()
+
+        # Stage the adaptor as a sibling of rocisa/ and stinkytofu/ so
+        # `import rocisa_stinkytofu_adaptor` resolves from the same PYTHONPATH
+        # root (build/tensilelite/rocisa). Copy the inner package directory;
+        # the source tree wraps it in an extra path component.
+        set(_adaptor_src
+            "${CMAKE_CURRENT_SOURCE_DIR}/../rocisa_stinkytofu_adaptor/rocisa_stinkytofu_adaptor")
+        set(_adaptor_dst "${CMAKE_CURRENT_BINARY_DIR}/rocisa_stinkytofu_adaptor")
+        file(GLOB _adaptor_py CONFIGURE_DEPENDS "${_adaptor_src}/*.py")
+        add_custom_command(
+            OUTPUT "${_adaptor_dst}/__init__.py"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                    "${_adaptor_src}" "${_adaptor_dst}"
+            DEPENDS ${_adaptor_py}
+            COMMENT "Staging rocisa_stinkytofu_adaptor next to rocisa"
+            VERBATIM
+        )
+        add_custom_target(rocisa_stage_adaptor ALL
+            DEPENDS "${_adaptor_dst}/__init__.py")
+        add_dependencies(_rocisa rocisa_stage_adaptor)
     endif()
 
     if(ROCISA_STANDALONE)
@@ -362,6 +376,44 @@ block()
         install(TARGETS _rocisa DESTINATION "${_rocisa_install_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py"
             DESTINATION "${_rocisa_install_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
+
+        # Ship the standalone stinkytofu backend as siblings of rocisa/ in the
+        # installed Python root (lib/hipblaslt). The block above only stages it
+        # into the *build tree*; downstream projects that codegen against the
+        # *installed* tensilelite -- e.g. hipSPARSELt's THEROCK build, which
+        # pulls hipBLASLt via find_package rather than add_subdirectory -- import
+        # from this install layout. Without these rules import stinkytofu fails
+        # there, rocisa/__init__.py silently falls back to native, and the
+        # per-ISA guard in TensileCreateLibrary/Run.py refuses to emit gfx1250
+        # kernels. STINKYTOFU_BUILD_PYTHON is on for every GPU family, because
+        # TheRock's generic artifact is shared and a family that skips the
+        # module removes it for the gfx1250 FFM run.
+        if(TARGET stinkytofu_python)
+            set(_stinkytofu_install_dir "${CMAKE_INSTALL_LIBDIR}/hipblaslt/stinkytofu")
+            set(_adaptor_install_dir "${CMAKE_INSTALL_LIBDIR}/hipblaslt/rocisa_stinkytofu_adaptor")
+            # _stinkytofu.so statically embeds libstinkytofu in the integrated
+            # build (stinkytofu is configured with BUILD_SHARED_LIBS OFF), so its
+            # INSTALL_RPATH of $ORIGIN is self-sufficient; mirror _rocisa's
+            # TheRock RPATH origin so packaging rewrites it consistently.
+            set_property(TARGET stinkytofu_python PROPERTY THEROCK_INSTALL_RPATH_ORIGIN
+                "${_stinkytofu_install_dir}")
+            install(TARGETS stinkytofu_python
+                LIBRARY DESTINATION "${_stinkytofu_install_dir}"
+                COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
+            install(FILES "${_stinkytofu_src_dir}/python_module/stinkytofu/__init__.py"
+                DESTINATION "${_stinkytofu_install_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
+            # intrinsics.st.bc is loaded at runtime from next to _stinkytofu.so.
+            if(TARGET intrinsics_compiled)
+                install(FILES "${CMAKE_BINARY_DIR}/intrinsics.st.bc"
+                    DESTINATION "${_stinkytofu_install_dir}" COMPONENT ${TENSILELITE_DEVEL_COMPONENT})
+            endif()
+            # The adaptor is a pure-Python package; install the inner package
+            # directory so `import rocisa_stinkytofu_adaptor` resolves.
+            install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../rocisa_stinkytofu_adaptor/rocisa_stinkytofu_adaptor/"
+                DESTINATION "${_adaptor_install_dir}"
+                COMPONENT ${TENSILELITE_DEVEL_COMPONENT}
+                FILES_MATCHING PATTERN "*.py")
+        endif()
     endif()
 
     # Example plugin — the target only exists when stinkytofu is configured with

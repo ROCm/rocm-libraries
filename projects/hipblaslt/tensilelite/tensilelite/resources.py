@@ -33,7 +33,7 @@ def _root() -> Traversable:
 
 
 def _resource(*parts: str) -> Traversable:
-    """Return a package resource under the Tensile package root."""
+    """Return a package resource under the tensilelite package root."""
     item = _root()
     for part in parts:
         item = item / part
@@ -41,7 +41,7 @@ def _resource(*parts: str) -> Traversable:
 
 
 def _resource_text(*parts: str, encoding: str = "utf-8") -> str:
-    """Read a package resource under the Tensile package root as text."""
+    """Read a package resource under the tensilelite package root as text."""
     return _resource(*parts).read_text(encoding=encoding)
 
 

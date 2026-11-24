@@ -443,6 +443,16 @@ size_t MiopenConvPlanBuilder::getMaxWorkspaceSize(
                 + std::to_string(opGraph.nodeCount()) + " nodes");
     }
 
+    // Benchmarking runs Find, which should see every solver. The range max bounds them all and,
+    // unlike miopen*GetWorkSpaceSize, does not change with the find-db. A default cached by
+    // initializeExecutionSettings() already holds it.
+    if(executionSettings.benchmarkingEnabled()
+       && !executionSettings.workspaceSizeLimit().has_value()
+       && !executionSettings.defaultWorkspaceSize().has_value())
+    {
+        return getWorkspaceSizeRange(handle, opGraph).max;
+    }
+
     const auto& node = opGraph.getNode(0);
 
     switch(node.attributes_type())

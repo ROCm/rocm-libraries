@@ -4,7 +4,9 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
 
+from . import agreement
 from . import generic_targets as gtmod
+from . import sources as sourcesmod
 from .errors import HkpPackError
 from .rocke_compile import ROCKE_TARGETS
 
@@ -85,6 +87,9 @@ class Descriptor:
     doc: dict
     rel_dir: Path = Path(".")
     sidecars: list = field(default_factory=list)
+    #: The `<model>.dvc` pointer of a model file that is not pulled, when the UHD is
+    #: to be left out of the build (set by _resolve_sidecar).
+    unpulled_pointer: object = None
 
     @property
     def type(self):
@@ -99,6 +104,9 @@ class Descriptor:
 class FlatInput:
     descriptors: list = field(default_factory=list)
     generic_targets: object = None
+    #: One `{"uhd_id", "uhd", "pointer"}` entry per UHD left out of the build for an
+    #: un-pulled model (set by _drop_unpulled_models; paths are source-root relative).
+    unpulled_models: list = field(default_factory=list)
 
     def by_type(self, dtype):
         return [d for d in self.descriptors if d.type == dtype]
@@ -368,6 +376,117 @@ def _validate_embedded_source_file(source_file, where):
         )
 
 
+def _validate_hip_source(ks, where):
+    """A hip kernel_source's `source`, `entry` and `build`; shared by a UKD's
+    `kernel_source` and each authored `sources` entry."""
+    _require(ks, ["source", "entry"], where)
+    if "build" not in ks:
+        raise HkpPackError(f"{where} has invalid build (absent)")
+    validate_hip_build(ks["build"], where)
+
+
+def _validate_hsaco_source(ks, where):
+    """A hsaco kernel_source's `file` and `symbol`; shared by a UKD's
+    `kernel_source` and each authored `sources` entry."""
+    _require(ks, ["file", "symbol"], where)
+    for field_name in ("file", "symbol"):
+        value = ks[field_name]
+        if not isinstance(value, str) or not value:
+            raise HkpPackError(
+                f"{where} hsaco '{field_name}' must be a non-empty string"
+            )
+    if not ks["symbol"].isascii():
+        raise HkpPackError(f"{where} hsaco 'symbol' must be ASCII")
+
+
+def _require_hsaco_arch(ukd, where):
+    """An hsaco UKD's non-empty `arch`, for one launch or a `sources` map. Its code
+    objects are built for specific archs, so a wildcard would ship their bytes into
+    every shard."""
+    if not ukd.get("arch"):
+        raise HkpPackError(
+            f"{where} hsaco requires a non-empty 'arch' naming the arch(es) "
+            "its code objects run on"
+        )
+
+
+def _validate_sources(ukd, where):
+    """A UKD's `sources` map: two or more launches, all rocke, all hip or all
+    hsaco (authored) or all kpack (packed). Returns the kind they share. Launches
+    may name one kernel.
+
+    A single entry says what `kernel_source` says, so it is refused: two spellings
+    of one fact is how descriptors drift. embedded_source entries are refused.
+    """
+    sources = ukd["sources"]
+    if not isinstance(sources, dict) or len(sources) < 2:
+        raise HkpPackError(
+            f"{where} sources must be an object with at least two launches "
+            "(one launch is a kernel_source)"
+        )
+    kinds = set()
+    for name, ks in sources.items():
+        if not sourcesmod.LAUNCH_NAME.match(name):
+            raise HkpPackError(
+                f"{where} sources has invalid launch name {name!r} "
+                "(expected a lowercase identifier)"
+            )
+        if not isinstance(ks, dict) or "kind" not in ks:
+            raise HkpPackError(f"{where} sources '{name}' missing 'kind'")
+        kind = ks["kind"]
+        if kind in sourcesmod.UNSUPPORTED_AUTHORED_KINDS or kind not in (
+            "rocke",
+            "hip",
+            "hsaco",
+            "kpack",
+        ):
+            raise sourcesmod.refuse_authored_kind(where, name, kind)
+        kinds.add(kind)
+        if kind == "rocke":
+            _require(ks, ["source", "builder", "spec"], f"{where} sources '{name}'")
+            validate_rocke_spec(ks["spec"], where)
+            validate_rocke_target(ks, where)
+            if "role" in ks and (
+                not isinstance(ks["role"], str)
+                or not sourcesmod.LAUNCH_NAME.match(ks["role"])
+            ):
+                raise HkpPackError(
+                    f"{where} sources '{name}' has invalid role {ks['role']!r} "
+                    "(expected a lowercase identifier)"
+                )
+        elif kind == "hip" or kind == "hsaco":
+            if "role" in ks:
+                raise HkpPackError(
+                    f"{where} sources '{name}' carries 'role', which only a rocke "
+                    "entry may have"
+                )
+            if kind == "hip":
+                _validate_hip_source(ks, f"{where} sources '{name}'")
+            else:
+                _validate_hsaco_source(ks, f"{where} sources '{name}'")
+        else:
+            _require(
+                ks,
+                ["library", "toc_key", "symbol", "sha256", "signature"],
+                f"{where} sources '{name}'",
+            )
+            if "role" in ks:
+                raise HkpPackError(
+                    f"{where} sources '{name}' carries 'role', which is authored-only"
+                )
+    if len(kinds) != 1:
+        raise HkpPackError(f"{where} sources mix kernel kinds {sorted(kinds)}")
+    kind = kinds.pop()
+    if kind == "kpack":
+        version = ukd.get("version")
+        if not isinstance(version, str) or not sourcesmod.reads_sources(version):
+            raise HkpPackError(
+                f"{where} carries sources under version '{version}' "
+                f"(needs {sourcesmod.SOURCES_VERSION} or later)"
+            )
+    return kind
+
+
 def _validate_ukd_fields(ukd, where, log=print):
     """Validate the shape shared by inline and standalone UKDs.
 
@@ -377,7 +496,18 @@ def _validate_ukd_fields(ukd, where, log=print):
     """
     if not isinstance(ukd, dict):
         raise HkpPackError(f"{where} is not a JSON object")
-    _require(ukd, ["id", "name", "kernel_source", "metadata", "priority"], where)
+    _require(ukd, ["id", "name"], where)
+    if "kernel_source" in ukd and "sources" in ukd:
+        raise HkpPackError(
+            f"{where} carries both 'kernel_source' and 'sources'; a UKD carries "
+            "exactly one"
+        )
+    if "kernel_source" not in ukd and "sources" not in ukd:
+        raise HkpPackError(
+            f"{where} missing required field 'kernel_source' (a multi-launch UKD "
+            "carries 'sources' instead)"
+        )
+    _require(ukd, ["metadata", "priority"], where)
     if "arch" in ukd:
         arch = ukd["arch"]
         if not isinstance(arch, list) or not all(
@@ -387,6 +517,12 @@ def _validate_ukd_fields(ukd, where, log=print):
                 f"{where} 'arch' must be a list of strings (empty = wildcard)"
             )
         _reject_nonbare_arch(arch, where)
+    if "sources" in ukd:
+        kind = _validate_sources(ukd, where)
+        _validate_provenance(ukd.get("provenance", {}), where, produced=kind == "kpack")
+        if kind == "hsaco":
+            _require_hsaco_arch(ukd, where)
+        return
     ks = ukd["kernel_source"]
     if not isinstance(ks, dict) or "kind" not in ks:
         raise HkpPackError(f"{where} kernel_source missing 'kind'")
@@ -398,31 +534,14 @@ def _validate_ukd_fields(ukd, where, log=print):
         )
     _validate_provenance(ukd.get("provenance", {}), where, produced=kind == "kpack")
     if kind == "hip":
-        _require(ks, ["source", "entry"], where)
-        if "build" not in ks:
-            raise HkpPackError(f"{where} has invalid build (absent)")
-        validate_hip_build(ks["build"], where)
+        _validate_hip_source(ks, where)
     elif kind == "rocke":
         _require(ks, ["source", "builder", "spec"], where)
         validate_rocke_spec(ks["spec"], where)
         validate_rocke_target(ks, where)
     elif kind == "hsaco":
-        _require(ks, ["file", "symbol"], where)
-        for field_name in ("file", "symbol"):
-            value = ks[field_name]
-            if not isinstance(value, str) or not value:
-                raise HkpPackError(
-                    f"{where} hsaco '{field_name}' must be a non-empty string"
-                )
-        if not ks["symbol"].isascii():
-            raise HkpPackError(f"{where} hsaco 'symbol' must be ASCII")
-        # An hsaco object is built for specific archs, so a wildcard would ship
-        # its bytes into every shard.
-        if not ukd.get("arch"):
-            raise HkpPackError(
-                f"{where} hsaco requires a non-empty 'arch' naming the arch(es) "
-                "the code object runs on"
-            )
+        _validate_hsaco_source(ks, where)
+        _require_hsaco_arch(ukd, where)
     elif kind == "kpack":
         _require(ks, ["library", "toc_key", "symbol", "sha256", "signature"], where)
     else:
@@ -454,6 +573,52 @@ def _validate_standalone_ukd(desc, log=print):
     _validate_ukd_fields(doc, where, log)
 
 
+# RFC 0021 §4: a slot name is a lowercase identifier; `global` belongs to RFC 0004.
+_SLOT_NAME_RE = re.compile(r"[a-z][a-z0-9_]*")
+_RESERVED_SLOT_NAME = "global"
+# UED members that move into each slot (RFC 0021 §4): none may stay beside `slots`.
+_SLOT_ENGINE_MEMBERS = (
+    "metadata",
+    "sort_kernel_catalog",
+    "knobs",
+    "predict_applicable_kernels",
+)
+_SLOT_KEYS = ("name", "metadata", "sort_kernel_catalog", "knobs")
+
+
+def _require_slot_version(doc, member, where):
+    """RFC 0021 §9: slot members exist from format 1.1.
+
+    Mirrors the loader's requireSlotVersion and versionIsSupported: major 1 and
+    minor exactly 1 is the span a slotted file may declare; the version's shape
+    was already checked by _validate_version.
+    """
+    major, minor = (int(half) for half in doc["version"].split("."))
+    if major == 1 and minor < 1:
+        raise HkpPackError(
+            f"{where} declares version {doc['version']} but uses slot member "
+            f"'{member}'; slot members require version 1.1"
+        )
+    if major != 1 or minor > 1:
+        # The loader's versionIsSupported skips a descriptor above 1.1, so a slotted
+        # file declaring more would pack and then silently drop at load.
+        raise HkpPackError(
+            f"{where} declares version {doc['version']} but uses slot member "
+            f"'{member}'; this packer supports slot members only at version 1.1"
+        )
+
+
+def _validate_slot_name(name, where):
+    if not isinstance(name, str) or not _SLOT_NAME_RE.fullmatch(name):
+        raise HkpPackError(
+            f"slot name {name!r} in {where} must match ^[a-z][a-z0-9_]*$"
+        )
+    if name == _RESERVED_SLOT_NAME:
+        raise HkpPackError(
+            f"slot name '{name}' in {where} is reserved for engine-wide knobs"
+        )
+
+
 def _validate_kdp(desc, log=print):
     doc = desc.doc
     path = desc.path
@@ -470,6 +635,10 @@ def _validate_kdp(desc, log=print):
         )
     _reject_nonbare_arch(arch, where)
     _validate_provenance(doc.get("provenance", {}), where)
+    if "slot" in doc:
+        _require_slot_version(doc, "slot", where)
+        _string(doc["slot"], f"{where}.slot")
+        _validate_slot_name(doc["slot"], where)
     kds = doc["kernelDescriptors"]
     if not isinstance(kds, list) or not kds:
         raise HkpPackError(f"{where} 'kernelDescriptors' must be a non-empty list")
@@ -499,17 +668,21 @@ def _validate_ued(desc):
             f"{where} name '{name}' must be scoped 'namespace:local' "
             "matching ^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$"
         )
-    _require(doc, ["metadata"], where)
-    _validate_uuid(doc["metadata"], f"{where}.metadata")
+    slotted = "slots" in doc
+    if slotted:
+        _require_slot_version(doc, "slots", where)
+        for member in _SLOT_ENGINE_MEMBERS:
+            if member in doc:
+                raise HkpPackError(
+                    f"key '{member}' in {where} must not appear beside 'slots'; "
+                    "declare it per slot"
+                )
+        _validate_slots(doc["slots"], where)
+    else:
+        _require(doc, ["metadata"], where)
+        _validate_uuid(doc["metadata"], f"{where}.metadata")
     for key in ("knobs", "behavior_notes", "numerical_notes"):
-        values = doc.get(key, [])
-        if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
-            raise HkpPackError(f"{where}.{key} must be an array of strings")
-        seen = set()
-        for value in values:
-            if value in seen:
-                raise HkpPackError(f"{where}.{key} lists '{value}' twice")
-            seen.add(value)
+        _validate_unique_strings(doc.get(key, []), key, where)
     for note in doc.get("behavior_notes", []):
         if note not in _BEHAVIOR_NOTES:
             raise HkpPackError(
@@ -526,30 +699,82 @@ def _validate_ued(desc):
         graph_match = doc["graph_match"]
         _known_keys(graph_match, ("native", "provenance"), f"{where}.graph_match")
         _string(graph_match.get("native"), f"{where}.graph_match.native")
+    # RFC 0021 §6: the bound token holding the shared region's size. Only a native
+    # graph match can publish it; the token's value is the runtime's to check.
+    if "shared_workspace" in doc:
+        _require_slot_version(doc, "shared_workspace", where)
+        if not slotted:
+            raise HkpPackError(f"key 'shared_workspace' in {where} requires 'slots'")
+        _string(doc["shared_workspace"], f"{where}.shared_workspace")
+        if "graph_match" not in doc:
+            raise HkpPackError(
+                f"key 'shared_workspace' in {where} requires a native graph_match"
+            )
     for role in _UHD_ROLES:
-        if role not in doc:
+        if role in doc:
+            _validate_role_map(doc[role], role, where)
+
+
+def _validate_unique_strings(values, key, where):
+    if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
+        raise HkpPackError(f"{where}.{key} must be an array of strings")
+    seen = set()
+    for value in values:
+        if value in seen:
+            raise HkpPackError(f"{where}.{key} lists '{value}' twice")
+        seen.add(value)
+
+
+def _validate_role_map(entries, role, where):
+    """An arch-to-UUID map; a scoring role may list one UHD per metric."""
+    if not isinstance(entries, dict) or not entries:
+        raise HkpPackError(f"{where}.{role} must be a nonempty arch-to-UUID map")
+    for arch, value in entries.items():
+        if arch != "default":
+            _reject_nonbare_arch([arch], where)
+        entry_where = f"{where}.{role}.{arch}"
+        if isinstance(value, str) or role not in _METRIC_ROLES:
+            _validate_uuid(value, entry_where)
             continue
-        entries = doc[role]
-        if not isinstance(entries, dict) or not entries:
-            raise HkpPackError(f"{where}.{role} must be a nonempty arch-to-UUID map")
-        for arch, value in entries.items():
-            if arch != "default":
-                _reject_nonbare_arch([arch], where)
-            entry_where = f"{where}.{role}.{arch}"
-            if isinstance(value, str) or role not in _METRIC_ROLES:
-                _validate_uuid(value, entry_where)
-                continue
-            # RFC 0019 §3.1: a scoring role may list one UHD per metric.
-            if not isinstance(value, list) or not value:
-                raise HkpPackError(
-                    f"{entry_where} must be a UUID or a nonempty list of UUIDs"
-                )
-            seen = set()
-            for identity in value:
-                _validate_uuid(identity, entry_where)
-                if canonical_id(identity) in seen:
-                    raise HkpPackError(f"{entry_where} lists {identity} twice")
-                seen.add(canonical_id(identity))
+        # RFC 0019 §3.1: a scoring role may list one UHD per metric.
+        if not isinstance(value, list) or not value:
+            raise HkpPackError(
+                f"{entry_where} must be a UUID or a nonempty list of UUIDs"
+            )
+        seen = set()
+        for identity in value:
+            _validate_uuid(identity, entry_where)
+            if canonical_id(identity) in seen:
+                raise HkpPackError(f"{entry_where} lists {identity} twice")
+            seen.add(canonical_id(identity))
+
+
+def _validate_slots(slots, where):
+    """RFC 0021 §4: a nonempty ordered list of uniquely named slots, each with a
+    KMD and optionally a ranker and knobs. Mirrors the loader's slot parse."""
+    if not isinstance(slots, list) or not slots:
+        raise HkpPackError(f"key 'slots' in {where} must be a non-empty array of slots")
+    seen = set()
+    for index, slot in enumerate(slots):
+        _known_keys(slot, _SLOT_KEYS, f"slots[{index}] in {where}")
+        _string(slot.get("name"), f"slots[{index}].name in {where}")
+        name = slot["name"]
+        _validate_slot_name(name, where)
+        if name in seen:
+            raise HkpPackError(
+                f"slot name '{name}' is declared more than once in {where}"
+            )
+        seen.add(name)
+        slot_where = f"{where} slot '{name}'"
+        _require(slot, ["metadata"], slot_where)
+        _validate_uuid(slot["metadata"], f"{slot_where}.metadata")
+        # A slot ranker is a single UHD per arch: its metric-less rule is checked
+        # in _validate_role_metrics, once the UHDs are loaded.
+        if "sort_kernel_catalog" in slot:
+            _validate_role_map(
+                slot["sort_kernel_catalog"], "sort_kernel_catalog", slot_where
+            )
+        _validate_unique_strings(slot.get("knobs", []), "knobs", slot_where)
 
 
 # hipdnn_data_sdk::utilities::Version reads `sdk_version` with three `operator>>`
@@ -588,6 +813,7 @@ _UHD_ADAPTERS = (
     "native",
     "tree_data",
     "table",
+    "linear_data",
     "custom_library",
 )
 _BEHAVIOR_NOTES = ("runtime_compilation",)
@@ -604,6 +830,8 @@ _UED_KEYS = (
     "name",
     "sdk_version",
     *_UHD_ROLES,
+    "slots",
+    "shared_workspace",
     "metadata",
     "knobs",
     "behavior_notes",
@@ -668,13 +896,32 @@ def _string(value, where):
         raise HkpPackError(f"{where} must be a nonempty string")
 
 
-def _validate_trained_against(value, where):
+def _validate_trained_against(value, where, slot_forms):
     # RFC 0019 §4.1: names either the descriptor set (ued/kmd/umd, all or none) or,
     # for a model bound by provider-declared UUID, a selector_revision. Either may add
-    # feature_semantics_revision (integer >= 1). Loader is authoritative: UhdParser.hpp.
+    # feature_semantics_revision (integer >= 1). RFC 0021 §9 adds the slot forms,
+    # valid only in a 1.1 UHD (@p slot_forms): `slot` beside `kmd`, or `kmds` in place
+    # of `kmd`. Loader is authoritative: UhdParser.hpp.
+    if (
+        not slot_forms
+        and isinstance(value, dict)
+        and ("slot" in value or "kmds" in value)
+    ):
+        raise HkpPackError(
+            f"{where} uses slot provenance ('slot' or 'kmds'), which requires "
+            "UHD version 1.1"
+        )
     _known_keys(
         value,
-        ("ued", "kmd", "umd", "selector_revision", "feature_semantics_revision"),
+        (
+            "ued",
+            "kmd",
+            "kmds",
+            "slot",
+            "umd",
+            "selector_revision",
+            "feature_semantics_revision",
+        ),
         where,
     )
     if "feature_semantics_revision" in value:
@@ -687,7 +934,7 @@ def _validate_trained_against(value, where):
             raise HkpPackError(
                 f"{where}.feature_semantics_revision must be an integer >= 1"
             )
-    names_descriptor_set = any(key in value for key in ("ued", "kmd", "umd"))
+    names_descriptor_set = _names_descriptor_set(value)
     if "selector_revision" in value:
         revision = value["selector_revision"]
         if not isinstance(revision, str) or not revision:
@@ -696,12 +943,24 @@ def _validate_trained_against(value, where):
         raise HkpPackError(
             f"{where} must name a descriptor set (ued/kmd/umd) or a selector_revision"
         )
+    if "slot" in value and "kmd" not in value:
+        raise HkpPackError(f"{where}.slot requires kmd, and excludes kmds")
+    if "kmd" in value and "kmds" in value:
+        raise HkpPackError(f"{where} names both kmd and kmds")
     if not names_descriptor_set:
         return
-    _require(value, ("ued", "kmd", "umd"), where)
+    # All three or none: `kmds` stands in for `kmd`.
+    kmd_key = "kmds" if "kmds" in value else "kmd"
+    _require(value, ("ued", kmd_key, "umd"), where)
     if not isinstance(value["umd"], list):
         raise HkpPackError(f"{where}.umd must be an array")
+    if kmd_key == "kmds":
+        _validate_kmds(value["kmds"], where)
+    if "slot" in value:
+        _validate_slot_name(value["slot"], f"{where}.slot")
     for kind in ("ued", "kmd", "umd"):
+        if kind == "kmd" and kmd_key == "kmds":
+            continue
         dependencies = value[kind] if kind == "umd" else [value[kind]]
         seen = set()
         for dependency in dependencies:
@@ -716,10 +975,29 @@ def _validate_trained_against(value, where):
             seen.add(identity)
 
 
-def _validate_uhd(desc, source_root):
+def _validate_kmds(kmds, where):
+    """`trained_against.kmds`: one `{slot, id, revision}` per slot, no repeats."""
+    if not isinstance(kmds, list) or not kmds:
+        raise HkpPackError(f"{where}.kmds must be a non-empty array")
+    names = set()
+    for entry in kmds:
+        entry_where = f"{where}.kmds"
+        _known_keys(entry, ("slot", "id", "revision"), entry_where)
+        _require(entry, ("slot", "id", "revision"), entry_where)
+        _string(entry["slot"], f"{entry_where}.slot")
+        _validate_slot_name(entry["slot"], f"{where}.kmds")
+        if entry["slot"] in names:
+            raise HkpPackError(f"{where}.kmds names slot '{entry['slot']}' twice")
+        names.add(entry["slot"])
+        _validate_uuid(entry["id"], entry_where)
+        _validate_version(entry["revision"], f"{entry_where} revision")
+
+
+def _validate_uhd(desc, source_root, require_dvc=False):
     """Mirror the canonical Draft7 header, then resolve artifact sidecars safely.
 
-    Packaging requires artifacts to exist; runtime may retain an unavailable model binding.
+    Packaging requires artifacts to exist, except a DVC-tracked model that was not
+    pulled (see _resolve_sidecar); runtime may retain an unavailable model binding.
     """
     doc = desc.doc
     where = f"UHD {desc.path.name}"
@@ -743,7 +1021,7 @@ def _validate_uhd(desc, source_root):
         where,
     )
     _require(doc, ("version", "id", "name", "adapter"), where)
-    if doc["version"] != "1.0":
+    if doc["version"] not in ("1.0", "1.1"):
         raise HkpPackError(
             f"{where}: unsupported file-format version {doc['version']!r}"
         )
@@ -759,7 +1037,7 @@ def _validate_uhd(desc, source_root):
     if adapter != "static_order" or "objective" in doc:
         _require(doc, ("objective",), where)
         _require_enum(doc, "objective", ("max", "min"), where)
-    if adapter in ("tree_data", "table"):
+    if adapter in ("tree_data", "table", "linear_data"):
         _require(doc, ("features_signature", "features_hash", "trained_against"), where)
     if "features_signature" in doc:
         signature = doc["features_signature"]
@@ -781,7 +1059,9 @@ def _validate_uhd(desc, source_root):
         ):
             raise HkpPackError(f"{where}.features_hash must be a sha256 digest")
     if "trained_against" in doc:
-        _validate_trained_against(doc["trained_against"], f"{where}.trained_against")
+        _validate_trained_against(
+            doc["trained_against"], f"{where}.trained_against", doc["version"] == "1.1"
+        )
     if "categorical_encoding" in doc:
         encoding = doc["categorical_encoding"]
         if not isinstance(encoding, dict):
@@ -829,6 +1109,20 @@ def _validate_uhd(desc, source_root):
                     f"{where}: score.metric '{score['metric']}' requires objective "
                     f"'{expected}', got {doc.get('objective')!r}"
                 )
+    if adapter == "linear_data":
+        # A log slowdown against the catalog's best (RFC 0019 §7.5): lower is better and in
+        # no registered unit, as UhdParser requires.
+        score = doc.get("score", {})
+        if (
+            doc["objective"] != "min"
+            or "metric" in score
+            or score.get("calibrated")
+            or score.get("transform", "identity") != "identity"
+        ):
+            raise HkpPackError(
+                f"{where}: linear_data requires objective 'min' and no score.metric, "
+                "calibration or transform"
+            )
     body = doc[adapter]
     if adapter == "static_order":
         # static_order ranks by UKD priority, then descriptor id. Declared criteria are
@@ -867,7 +1161,9 @@ def _validate_uhd(desc, source_root):
         # The runtime supports no library configuration; only `{}` loads.
         if "config" in body and body["config"] != {}:
             raise HkpPackError(f"{where}.custom_library.config must be an empty object")
-    desc.sidecars.append(_resolve_sidecar(desc, source_root, body[key]))
+    sidecar = _resolve_sidecar(desc, source_root, body[key], require_dvc)
+    if sidecar is not None:
+        desc.sidecars.append(sidecar)
 
 
 def _validate_contained_path(payload, where):
@@ -885,7 +1181,7 @@ def _validate_contained_path(payload, where):
         )
 
 
-def _resolve_sidecar(desc, source_root, payload):
+def _resolve_sidecar(desc, source_root, payload, require_dvc=False):
     """Resolve a descriptor-relative payload path to a carriable Sidecar.
 
     No root-relative fallback (matching compile_hip_variant): a typo must not bind
@@ -922,9 +1218,21 @@ def _resolve_sidecar(desc, source_root, payload):
             "folder, where the per-arch archive is written"
         )
     if not found:
+        # A model tracked by a DVC pointer that was never pulled is not a bug in
+        # the descriptor. Strict builds (release) still refuse it.
+        pointer = (Path(source_root) / dest).with_name(dest.name + ".dvc")
+        if not require_dvc and pointer.is_file():
+            desc.unpulled_pointer = pointer
+            return None
         raise HkpPackError(
             f"{where} payload source not found: {payload} (looked for {resolved}, "
             f"resolved relative to descriptor folder {Path(desc.rel_dir).as_posix()})"
+            + (
+                f"; its DVC pointer {pointer} exists, so run: dvc pull -r ingestor "
+                f"{pointer}"
+                if pointer.is_file()
+                else ""
+            )
         )
     return Sidecar(source=resolved, rel_dir=dest.parent, name=dest.name)
 
@@ -950,7 +1258,7 @@ def _validate_kmd(desc):
         _require_enum(entry, "type", _METADATA_TYPES, entry_where)
 
 
-def _validate_shape(desc, source_root, log=print):
+def _validate_shape(desc, source_root, log=print, *, require_dvc=False):
     doc = desc.doc
     path = desc.path
     if not isinstance(doc, dict):
@@ -979,13 +1287,19 @@ def _validate_shape(desc, source_root, log=print):
     if dtype == "udd":
         _validate_udd(desc)
     if dtype == "uhd":
-        _validate_uhd(desc, source_root)
+        _validate_uhd(desc, source_root, require_dvc)
     if dtype == "kmd":
         _validate_kmd(desc)
 
 
 def load_flat_input(
-    root, generic_targets, log=print, *, exclude_folders=(), disabled_kinds=()
+    root,
+    generic_targets,
+    log=print,
+    *,
+    exclude_folders=(),
+    disabled_kinds=(),
+    require_dvc=False,
 ):
     """Load and structurally validate every *.json descriptor under a root.
 
@@ -1009,6 +1323,12 @@ def load_flat_input(
     `disabled_kinds` names `kernel_source` kinds this build has no producer
     for: those UKDs are still read and validated, then pruned like an
     arch-pruned UKD once validation passes. An unknown kind raises HkpPackError.
+    A UHD whose model file is absent while a `<model>.dvc` pointer sits beside it
+    (a `dvc pull` that was not run) is validated, then left out with a warning: the
+    UHD and its model do not ship, and a UED naming it keeps a dangling UHD id, which
+    the loader treats as that role being off. `require_dvc` makes it an error
+    instead, as a release build wants. A missing model with no pointer is always an
+    error.
 
     There is exactly ONE root. Child folders under it scope the content (a
     `hip/` tree and a `rocKE/` tree, per-integration folders beneath those);
@@ -1077,7 +1397,7 @@ def load_flat_input(
             doc=_read_json(jp),
             rel_dir=rel_dir,
         )
-        _validate_shape(desc, root, log)
+        _validate_shape(desc, root, log, require_dvc=require_dvc)
         descriptors.append(desc)
 
     flat = FlatInput(descriptors=descriptors, generic_targets=generic_targets)
@@ -1088,6 +1408,7 @@ def load_flat_input(
     _warn_orphan_standalone_ukds(flat, log)
     if disabled_kinds:
         _drop_disabled_kinds(flat, frozenset(disabled_kinds), log)
+    _drop_unpulled_models(flat, log, root)
     return flat
 
 
@@ -1160,7 +1481,7 @@ def validate_generic_arch(flat):
                 ukd, standalone = entry, None
             ukd_arch = _arch_entries(ukd)
             ukd_generics = [a for a in ukd_arch if gtmod.is_generic_shaped(a)]
-            kind = ukd.get("kernel_source", {}).get("kind")
+            kind = sourcesmod.kind_of(ukd)
             if kind == "rocke" and (kdp_generics or ukd_generics):
                 generic = (kdp_generics or ukd_generics)[0]
                 raise HkpPackError(
@@ -1201,6 +1522,37 @@ def validate_generic_arch(flat):
                 )
 
 
+def _drop_unpulled_models(flat, log, root):
+    """Drop every UHD whose model file is absent but tracked by a DVC pointer.
+
+    Runs after validation, so the dropped UHD is still checked and the UEDs naming
+    it still resolve against it. Nothing of it ships: not the UHD, not its model.
+    A UED left naming it is a dangling UHD id, which the loader treats as a role
+    that is off for the architecture, not as an error (RFC 0020 §13.2); the engine
+    stays available. Each one is noted on `flat.unpulled_models`, which the packer
+    writes beside the packed tree (see pipeline.UNPULLED_RECORD) so a census can tell
+    a model left out on purpose from a UHD the packer lost.
+    """
+    kept = []
+    for desc in flat.descriptors:
+        if desc.unpulled_pointer is not None:
+            log(
+                f"warning: not shipping UHD {desc.path.name} (id '{desc.id}'): its "
+                f"model file is not pulled; run: dvc pull -r ingestor "
+                f"{desc.unpulled_pointer}"
+            )
+            flat.unpulled_models.append(
+                {
+                    "uhd_id": canonical_id(desc.id),
+                    "uhd": (Path(desc.rel_dir) / desc.path.name).as_posix(),
+                    "pointer": Path(desc.unpulled_pointer).relative_to(root).as_posix(),
+                }
+            )
+            continue
+        kept.append(desc)
+    flat.descriptors = kept
+
+
 def _drop_disabled_kinds(flat, disabled_kinds, log):
     """Prune every UKD whose kind this build has no producer for, as arch pruning
     prunes one that does not apply.
@@ -1214,7 +1566,7 @@ def _drop_disabled_kinds(flat, disabled_kinds, log):
 
     def _disabled(entry):
         doc = ukd_by_id[canonical_id(entry)].doc if isinstance(entry, str) else entry
-        return doc["kernel_source"]["kind"] in disabled_kinds
+        return sourcesmod.kind_of(doc) in disabled_kinds
 
     dropped = set()
     for kdp in flat.kdps():
@@ -1235,7 +1587,7 @@ def _drop_disabled_kinds(flat, disabled_kinds, log):
         if id(d) in dropped:
             continue
         if d.type == UKD_TYPE:
-            kind = d.doc["kernel_source"]["kind"]
+            kind = sourcesmod.kind_of(d.doc)
             if kind in disabled_kinds:
                 log(
                     f"standalone UKD {d.path.name} (id '{d.doc.get('id')}'): "
@@ -1347,62 +1699,274 @@ def _validate_references(flat):
         for kind in ("kmd", "uhd")
     }
     for ued in flat.by_type("ued"):
-        references = [(ued.doc["metadata"], "kmd")]
-        references += [
-            (ref, "uhd")
-            for role in _UHD_ROLES
-            for ref in _role_references(ued.doc, role)
-        ]
-        for ref, kind in references:
+        for ref, kind in _ued_references(ued.doc):
             if canonical_id(ref) not in by_kind[kind]:
                 raise HkpPackError(
                     f"UED {ued.path.name} references unknown {kind.upper()} descriptor Id '{ref}'"
                 )
-        # The loader drops an engine exposing a knob its KMD does not declare.
-        kmd = by_kind["kmd"][canonical_id(ued.doc["metadata"])]
-        declared = {entry["name"] for entry in kmd.doc["fields"]}
-        for knob in ued.doc.get("knobs", []):
-            if knob not in declared:
-                raise HkpPackError(
-                    f"UED {ued.path.name} exposes knob '{knob}', which KMD "
-                    f"{kmd.path.name} does not declare"
-                )
+        # The loader drops an engine exposing a knob its KMD does not declare; a
+        # slotted engine's knobs are checked against each slot's own KMD.
+        for who, scope in _selection_scopes(ued):
+            kmd = by_kind["kmd"][canonical_id(scope["metadata"])]
+            declared = {entry["name"] for entry in kmd.doc["fields"]}
+            for knob in scope.get("knobs", []):
+                if knob not in declared:
+                    raise HkpPackError(
+                        f"{who} exposes knob '{knob}', which KMD "
+                        f"{kmd.path.name} does not declare"
+                    )
         _validate_role_metrics(ued, by_kind["uhd"])
+        _validate_slot_provenance(ued, by_kind["uhd"])
+    _validate_slot_packs(flat)
+
+
+def _selection_scopes(ued):
+    """The (label, document) pairs that own a KMD and knobs: the engine, or each slot."""
+    if "slots" not in ued.doc:
+        return [(f"UED {ued.path.name}", ued.doc)]
+    return [
+        (f"UED {ued.path.name} slot '{slot['name']}'", slot)
+        for slot in ued.doc["slots"]
+    ]
+
+
+def _ued_references(doc):
+    """Every (id, kind) a UED names: its KMDs, and the UHDs of its roles and slot rankers."""
+    if "metadata" in doc:
+        yield doc["metadata"], "kmd"
+    for slot in doc.get("slots", []):
+        yield slot["metadata"], "kmd"
+        for ref in _role_references(slot, "sort_kernel_catalog"):
+            yield ref, "uhd"
+    for role in _UHD_ROLES:
+        for ref in _role_references(doc, role):
+            yield ref, "uhd"
+
+
+def _validate_slot_packs(flat):
+    """RFC 0021 §4: `KDP.slot` is required for a slotted engine's pack, forbidden
+    otherwise, and names a declared slot; a kernel serves at most one slot.
+
+    The kernel check covers kernels whose identity is static: an inline UKD's id
+    or a standalone UKD named by id.
+    """
+    ued_by_id = {canonical_id(d.id): d for d in flat.by_type("ued")}
+    claimed = {}
+    for kdp in flat.kdps():
+        ued = ued_by_id.get(canonical_id(kdp.doc.get("engine")))
+        if ued is None:
+            continue
+        slot = kdp.doc.get("slot")
+        engine = ued.doc["name"]
+        if "slots" not in ued.doc:
+            if slot is not None:
+                raise HkpPackError(
+                    f"KDP {kdp.path.name} declares slot '{slot}', but engine "
+                    f"'{engine}' declares no slots"
+                )
+            continue
+        agreement.pack_kmd_reference(ued.doc, kdp.doc, f"KDP {kdp.path.name}")
+        served = claimed.setdefault(canonical_id(ued.id), {})
+        for entry in kdp.doc["kernelDescriptors"]:
+            kernel = canonical_id(entry if isinstance(entry, str) else entry.get("id"))
+            if served.setdefault(kernel, slot) != slot:
+                raise HkpPackError(
+                    f"KDP {kdp.path.name} lists kernel {kernel}, which already "
+                    f"serves slot '{served[kernel]}' of engine '{engine}'; a "
+                    "kernel serves at most one slot"
+                )
 
 
 def _validate_role_metrics(ued, uhd_by_id):
     """At most one model per metric for each architecture a scoring role names.
 
     RFC 0019 §3.1: the loader disables a metric with two models. A `predict_engine`
-    model must declare a metric.
+    model must declare a metric. A slot ranker must not (RFC 0021 §7): a slot has
+    no time of its own, so the loader rejects an engine whose slot ranker names one.
     """
-    for role in _METRIC_ROLES:
-        for arch, value in ued.doc.get(role, {}).items():
-            where = f"UED {ued.path.name}.{role}.{arch}"
-            by_metric = {}
-            for ref in [value] if isinstance(value, str) else value:
-                metric = (uhd_by_id[canonical_id(ref)].doc.get("score") or {}).get(
-                    "metric"
+    scopes = [(f"UED {ued.path.name}", ued.doc, _METRIC_ROLES, False)]
+    scopes += [
+        (who, slot, ("sort_kernel_catalog",), True)
+        for who, slot in _selection_scopes(ued)
+        if slot is not ued.doc
+    ]
+    for prefix, scope, roles, slot_ranker in scopes:
+        for role in roles:
+            for arch, value in scope.get(role, {}).items():
+                where = f"{prefix}.{role}.{arch}"
+                by_metric = {}
+                for ref in [value] if isinstance(value, str) else value:
+                    metric = (uhd_by_id[canonical_id(ref)].doc.get("score") or {}).get(
+                        "metric"
+                    )
+                    if metric is None and role == "predict_engine":
+                        raise HkpPackError(
+                            f"{where} names UHD '{ref}', which declares no "
+                            "score.metric; an engine prediction needs one"
+                        )
+                    if metric is not None and slot_ranker:
+                        raise HkpPackError(
+                            f"{where} names UHD '{ref}', which declares "
+                            f"score.metric '{metric}'; a slot ranker must be metric-less"
+                        )
+                    if metric in by_metric:
+                        what = f"metric '{metric}'" if metric else "no metric"
+                        raise HkpPackError(
+                            f"{where} names two UHDs with {what}: "
+                            f"'{by_metric[metric]}' and '{ref}'"
+                        )
+                    by_metric[metric] = ref
+
+
+def _workspace_token_read(signature):
+    """The smallest `$ws.*` reference a feature signature reads, or None.
+
+    Reads statically: every string leaf of an entry is a reference when it begins
+    with a single `$`, as ExpressionSet::isReference decides. RFC 0021 §6 reserves
+    the `ws.` root for the shared region, so a slot ranker could never bind it.
+    """
+    found = []
+
+    def walk(node):
+        if isinstance(node, str):
+            if len(node) > 1 and node[0] == "$" and node[1] != "$":
+                if node[1:].startswith("ws."):
+                    found.append(node)
+        elif isinstance(node, list):
+            for child in node:
+                walk(child)
+        elif isinstance(node, dict):
+            for child in node.values():
+                walk(child)
+
+    walk(signature)
+    return min(found) if found else None
+
+
+def _names_descriptor_set(trained):
+    return isinstance(trained, dict) and any(
+        key in trained for key in ("ued", "kmd", "kmds", "umd")
+    )
+
+
+def _require_descriptor_set(trained, where):
+    """A model bound to a slotted engine that records `trained_against` records a
+    descriptor set; a `selector_revision` alone leaves the set it was trained on
+    unchecked, and the loader disables such a model."""
+    if trained is not None and not _names_descriptor_set(trained):
+        raise HkpPackError(
+            f"{where}: trained_against records no descriptor set, which a model "
+            "bound to a UED must"
+        )
+
+
+def _refuse_slot_provenance(ued, uhd_by_id):
+    """An engine that declares no slots cannot satisfy a model naming slot
+    provenance (`slot` or `kmds`); the loader disables that model."""
+    for role in _UHD_ROLES:
+        for ref in _role_references(ued.doc, role):
+            uhd = uhd_by_id[canonical_id(ref)]
+            trained = uhd.doc.get("trained_against")
+            if isinstance(trained, dict) and ("slot" in trained or "kmds" in trained):
+                raise HkpPackError(
+                    f"UED {ued.path.name} {role} UHD {uhd.path.name}: "
+                    "trained_against names slot provenance ('slot' or 'kmds'), "
+                    "which an engine that declares no slots cannot satisfy"
                 )
-                if metric is None and role == "predict_engine":
-                    raise HkpPackError(
-                        f"{where} names UHD '{ref}', which declares no "
-                        "score.metric; an engine prediction needs one"
-                    )
-                if metric in by_metric:
-                    what = f"metric '{metric}'" if metric else "no metric"
-                    raise HkpPackError(
-                        f"{where} names two UHDs with {what}: "
-                        f"'{by_metric[metric]}' and '{ref}'"
-                    )
-                by_metric[metric] = ref
+
+
+def _validate_slot_provenance(ued, uhd_by_id):
+    """RFC 0021 §8/§9: the slot rankers and the engine prediction of a slotted
+    engine, as far as the packer can resolve them.
+
+    A slot ranker reads no `ws.*` token and, when it records `trained_against`,
+    names a descriptor set, its own slot and that slot's KMD. A `predict_engine` model records
+    `kmds` naming every declared slot once, each with the slot's KMD. Revisions
+    and the matchers a model was trained on bind at load, when the loaded packs
+    exist, and stay the loader's to check. An unslotted engine is refused any slot
+    provenance instead (see `_refuse_slot_provenance`).
+    """
+    slots = ued.doc.get("slots")
+    if slots is None:
+        _refuse_slot_provenance(ued, uhd_by_id)
+        return
+    kmd_of = {slot["name"]: canonical_id(slot["metadata"]) for slot in slots}
+    for who, slot in _selection_scopes(ued):
+        for ref in _role_references(slot, "sort_kernel_catalog"):
+            uhd = uhd_by_id[canonical_id(ref)]
+            where = f"{who} ranker UHD {uhd.path.name}"
+            token = _workspace_token_read(uhd.doc.get("features_signature"))
+            if token is not None:
+                raise HkpPackError(
+                    f"{where}: feature signature reads '{token}', a "
+                    "shared-workspace token a slotted engine reserves"
+                )
+            trained = uhd.doc.get("trained_against")
+            _require_descriptor_set(trained, where)
+            if trained is None:
+                continue
+            if "kmds" in trained:
+                raise HkpPackError(
+                    f"{where}: trained_against names kmds, but the ranker of "
+                    f"slot '{slot['name']}' must name its own slot's kmd"
+                )
+            if "slot" not in trained:
+                raise HkpPackError(
+                    f"{where}: trained_against names no slot, but the ranker of "
+                    f"slot '{slot['name']}' must name the slot it was trained for"
+                )
+            if trained["slot"] != slot["name"]:
+                raise HkpPackError(
+                    f"{where}: trained_against names slot '{trained['slot']}', "
+                    f"but the ranker serves slot '{slot['name']}'"
+                )
+            if canonical_id(trained["kmd"]["id"]) != kmd_of[slot["name"]]:
+                raise HkpPackError(
+                    f"{where}: trained_against names a KMD other than the one "
+                    f"of slot '{slot['name']}'"
+                )
+    for ref in _role_references(ued.doc, "predict_engine"):
+        uhd = uhd_by_id[canonical_id(ref)]
+        where = f"UED {ued.path.name} predict_engine UHD {uhd.path.name}"
+        trained = uhd.doc.get("trained_against")
+        _require_descriptor_set(trained, where)
+        if trained is None:
+            continue
+        if "slot" in trained:
+            raise HkpPackError(
+                f"{where}: trained_against names a single slot, but a slotted "
+                "engine's predict_engine model must name every slot's KMD in kmds"
+            )
+        if "kmds" not in trained:
+            raise HkpPackError(
+                f"{where}: trained_against names kmd, but a slotted engine's "
+                "predict_engine model must name every slot's KMD in kmds"
+            )
+        named = {}
+        for entry in trained["kmds"]:
+            if entry["slot"] not in kmd_of:
+                raise HkpPackError(
+                    f"{where}: trained_against kmds names slot '{entry['slot']}', "
+                    "which the engine does not declare"
+                )
+            if canonical_id(entry["id"]) != kmd_of[entry["slot"]]:
+                raise HkpPackError(
+                    f"{where}: trained_against kmds names a KMD other than the "
+                    f"one of slot '{entry['slot']}'"
+                )
+            named[entry["slot"]] = entry
+        for name in kmd_of:
+            if name not in named:
+                raise HkpPackError(
+                    f"{where}: trained_against kmds does not name slot '{name}'"
+                )
 
 
 def reachable_generic_ids(flat, surviving_kdps):
     """Canonical ids (canonical_id) of the generics reachable from surviving KDPs.
 
-    Walks KDP -> {matchers, engine, dispatch} and UED -> {role models, metadata}
-    transitively. A generic survives pruning iff its canonical id is in this set.
+    Walks KDP -> {matchers, engine, dispatch} and UED -> {role models, metadata,
+    each slot's metadata and ranker} transitively. A generic survives pruning iff its canonical id is in this set.
     """
     by_id = flat.generic_by_id()
     reachable = set()
@@ -1418,8 +1982,5 @@ def reachable_generic_ids(flat, surviving_kdps):
         reachable.add(rid)
         gdesc = by_id[rid]
         if gdesc.type == "ued":
-            pending.append(gdesc.doc.get("metadata"))
-            pending += [
-                ref for role in _UHD_ROLES for ref in _role_references(gdesc.doc, role)
-            ]
+            pending += [ref for ref, _kind in _ued_references(gdesc.doc)]
     return reachable

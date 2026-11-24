@@ -23,6 +23,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
+#include <hipdnn_test_sdk/utilities/RaggedLengthUids.hpp>
 
 #include "harness/bundle/BundleDiscovery.hpp"
 #include "harness/bundle/SweepManifestCache.hpp"
@@ -106,8 +107,10 @@ struct IntegrationTestBundle
             attrByUid[attributes->uid()] = attributes;
         }
 
-        // Ragged tensors are constructed from their offset tensor, so they load last.
-        // Offset tensors are always inputs, so an output's offset is already loaded.
+        // Ragged tensors are constructed from their offset tensor and, when the node
+        // declares one, their seq_len tensor, so they load last. Both are always
+        // inputs, so an output's offset and seq_len are already loaded.
+        const auto lengthUids = hipdnn_test_sdk::utilities::raggedLengthUids(graph);
         const auto loadUids = [&](const std::vector<int64_t>& uids) {
             std::vector<int64_t> raggedUids;
             for(const int64_t uid : uids)
@@ -136,8 +139,10 @@ struct IntegrationTestBundle
                                              + " references missing offset tensor "
                                              + std::to_string(offsetUid));
                 }
+                const auto lengths
+                    = hipdnn_test_sdk::utilities::findRaggedLengths(lengthUids, tensors, uid);
                 tensors[uid] = hipdnn_test_sdk::utilities::raggedTensorFromFileAndAttributes(
-                    blobs->pathForUid(uid), *attributes, offsetIt->second);
+                    blobs->pathForUid(uid), *attributes, offsetIt->second, lengths);
             }
         };
 
@@ -234,7 +239,7 @@ inline std::vector<int64_t> allTensorUids(const nlohmann::json& graphJson)
 
 // Replaces test_sdk's getOutputTensorUidsFromGraph(), which assumes every
 // node wraps output UIDs in an "outputs" sub-object. ReductionAttributes,
-// ResampleFwdAttributes, and CustomOpAttributes emit flat keys instead,
+// ResampleFwdAttributes, ResampleBwdAttributes, and CustomOpAttributes emit flat keys instead,
 // causing node.at("outputs") to throw for those ops.
 inline std::vector<int64_t> extractOutputUidsFromJson(const nlohmann::json& graphJson)
 {
@@ -274,8 +279,8 @@ inline std::vector<int64_t> extractOutputUidsFromJson(const nlohmann::json& grap
         }
 
         // Flat scalar fallback: Reduction ("out_tensor_uid"),
-        // ResampleFwd ("y_tensor_uid")
-        for(const auto& key : {"out_tensor_uid", "y_tensor_uid"})
+        // ResampleFwd ("y_tensor_uid"), ResampleBwd ("dx_tensor_uid")
+        for(const auto& key : {"out_tensor_uid", "y_tensor_uid", "dx_tensor_uid"})
         {
             if(node.contains(key) && node.at(key).is_number_integer())
             {
@@ -744,6 +749,46 @@ inline std::optional<std::filesystem::path>
     return goldenPath.parent_path();
 }
 
+// The rules that tie a bundle's metadata flags to the golden data it declares.
+// "Declared" is a fact about the checked-in files, not about the checkout: the
+// `.tensors.dvc` pointer (or a sweep case's `golden.path`) is in git, the blobs it
+// names are only there after `dvc pull`. Reading it from the pointer keeps these
+// rules the same on a machine that has not pulled.
+//
+//   * Both references disabled (not on an expected rejection, which ignores them):
+//     nothing but golden data could ever verify the
+//     bundle, so it must declare some.
+//   * An expected-rejection bundle is never executed, so golden data beside it is
+//     meaningless, and would also pull the bundle into the golden-data binary.
+//
+// `where` names the bundle or sweep case in the thrown message.
+inline void checkGoldenDeclarationRules(const hipdnn_integration_tests::BundleMetadata& metadata,
+                                        bool goldenDeclared,
+                                        const std::string& where)
+{
+    if(metadata.expectedRejection)
+    {
+        // The reference flags are ignored on an expected rejection (nothing is ever
+        // compared), so the both-off rule below must not apply to it.
+        if(goldenDeclared)
+        {
+            throw hipdnn_integration_tests::BundleMetadataError(
+                where
+                + " is an expected_rejection bundle but declares golden data; it is never"
+                  " executed, so there is nothing to compare against");
+        }
+        return;
+    }
+    if(metadata.noCpuReference && metadata.noGpuReference && !goldenDeclared)
+    {
+        throw hipdnn_integration_tests::BundleMetadataError(
+            where
+            + " disables both references (no_cpu_reference and no_gpu_reference) but declares no"
+              " golden data; add golden data ({Name}.tensors.dvc or output blobs, or the sweep"
+              " case's golden.path) or enable a reference");
+    }
+}
+
 } // namespace detail
 
 // Load a direct bundle from its graph .json path, classifying the outcome.
@@ -758,6 +803,8 @@ inline std::optional<std::filesystem::path>
 //   * golden outputs present, no metadata  -> LoadError::UNVALIDATABLE_GOLDEN_DATA
 //   * no golden outputs, no metadata       -> bundle with empty metadata
 //   * metadata present but malformed       -> throws BundleMetadataError
+//   * metadata flags that contradict the golden data it declares (both references
+//     off with none, expected_rejection with some) -> throws BundleMetadataError
 //   * valid graph, input blobs absent      -> bundle with blobs == nullopt
 //   * inputs present, outputs absent       -> bundle verified against reference
 //   * inputs and outputs present           -> bundle verified against golden data
@@ -821,6 +868,13 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
     }
     bundle.metadata = std::move(*metadata);
 
+    // The `.tensors.dvc` pointer counts as declaring golden data even when the blobs
+    // it names have not been pulled.
+    auto pointerPath = jsonPath;
+    pointerPath.replace_extension(".tensors.dvc");
+    const bool goldenDeclared = goldenOutputsPresent || std::filesystem::exists(pointerPath);
+    detail::checkGoldenDeclarationRules(bundle.metadata, goldenDeclared, jsonPath.string());
+
     detail::describeTensorBlobs(bundle, *graphJson, blobPathForUid);
 
     return bundle;
@@ -879,7 +933,8 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
     bundle.graphBuffer = std::move(graphBuffer);
 
     // Mirror the direct-bundle path: extractOutputUidsFromJson handles flat-uid
-    // ops (Reduction/ResampleFwd/CustomOp) that getOutputTensorUidsFromGraph throws on.
+    // ops (Reduction/ResampleFwd/ResampleBwd/CustomOp) that getOutputTensorUidsFromGraph
+    // throws on.
     {
         auto allOutputUids = detail::extractOutputUidsFromJson(expandedGraph);
         const auto wrapper = bundle.graphWrapper();
@@ -916,6 +971,10 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered,
     }
     bundle.metadata = hipdnn_integration_tests::parseBundleMetadataJson(
         caseJson->at("metadata"), discovered.diagnosticPath().string());
+
+    detail::checkGoldenDeclarationRules(bundle.metadata,
+                                        goldenOutputsPresent || goldenDirectory.has_value(),
+                                        discovered.diagnosticPath().string());
 
     if(goldenDirectory.has_value())
     {

@@ -27,7 +27,7 @@ from . import LibraryIO
 from .Common.GlobalParameters import defaultInternalSupportParams, defaultSolution
 from .Common.Constants import HR
 from .CustomKernels import isCustomKernelConfig
-from .SolutionStructs.Problem import ProblemType
+from .SolutionStructs.Problem import ProblemSizesMock, ProblemType
 from .SolutionStructs.Problem import _defaultProblemType as defaultProblemType
 from .Common.GlobalParameters import globalParameters
 from .Common.Architectures import gfxToIsa, isaToGfx, steppingArchOf, tuningArchOf
@@ -641,7 +641,12 @@ def formProblemSize(
     # verbatim instead of recovering a single size from the exact logic.
     if problemSizes is not None:
         temp["ProblemSizes"] = [
-            {key: FlowList(value) for key, value in entry.items()}
+            {
+                key: {k: makeFlow(v) for k, v in value.items()}
+                if isinstance(value, dict)
+                else FlowList(value)
+                for key, value in entry.items()
+            }
             for entry in problemSizes
         ]
     # for origami exactLogic is not present so we need to create it
@@ -651,9 +656,24 @@ def formProblemSize(
         )
         temp["ProblemSizes"] = [{"Exact": FlowList([1, 1, 1, 1])}]
     else:
-        for size, mapping in exactLogic:
-            if mapping[0] == solutionIndex:
-                temp["ProblemSizes"] = [{"Exact": FlowList(size)}]
+        problems = ProblemSizesMock(
+            exactLogic, problemTypeStat
+        ).problems
+        for problem, (_, mapping) in zip(problems, exactLogic):
+            if mapping[0] != solutionIndex:
+                continue
+            if problem.world is None:
+                temp["ProblemSizes"] = [{"Exact": FlowList(problem.sizes)}]
+            else:
+                temp["ProblemSizes"] = [
+                    {
+                        "Exact": {
+                            "sizes": FlowList(problem.sizes),
+                            "world": problem.world,
+                            "a2aExtent": problem.a2aExtent,
+                        }
+                    }
+                ]
         if "ProblemSizes" not in temp:
             tPrint(
                 1,
@@ -1573,10 +1593,10 @@ def TensileLibLogicToYaml(
 def parseArgs():
     argParser = argparse.ArgumentParser()
     argHelp = {
-        "input": "Library logic file or benchmark data file (1_BenchmarkProblems/.../Data/*_Final.yaml) to be converted to tensile input yaml file.",
+        "input": "Library logic file or benchmark data file (1_BenchmarkProblems/.../Data/*_Final.yaml) to be converted to TensileLite input YAML file.",
         "indices": "Comma-separated list of Solution indices from the input file to extract. Ex: 0,3,4,5",
         "output": "Base Output file name.",
-        "skipMI": "Skips the MatrixInstruction field in the tensile yaml file",
+        "skipMI": "Skips the MatrixInstruction field in the TensileLite YAML file",
         "runConfig": "Tuning config to inherit GlobalParameters and LibraryLogic from. Located automatically from the input path when omitted.",
         "noRunConfig": "Emit built-in defaults instead of inheriting run settings from the originating config.",
         "keepEpilogues": "Keep the epilogue settings (activation, bias, scale-alpha-vector, scale-AB) the input records. By default they are left out, as in a config geko tunes without epilogues.",
@@ -1663,4 +1683,4 @@ def main():
             args.keep_epilogues,
         )
         tensileYamlFiles.append(tensileYamlFile)
-    tPrint(1, f"Tensile Files generated: {tensileYamlFiles}")
+    tPrint(1, f"TensileLite files generated: {tensileYamlFiles}")

@@ -57,6 +57,11 @@ class _StubCompiler:
         self.version = v
         self.rocm_version = v
         self.default_args = []
+        # It also names its output dirs through compilerTargetOf(a, compiler.path).
+        # None means "no compiler to ask", which still resolves build aliases but
+        # leaves every other spec alone -- no subprocess, and the same names
+        # these snapshots were taken with.
+        self.path = None
 
     def __call__(self, includeDir, archs, kernelPath, objPath):
         self.calls.append((includeDir, tuple(archs), kernelPath, objPath))

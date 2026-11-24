@@ -55,6 +55,7 @@ struct GemmTileConfig {
     // The tile sizes default to 0, which is NOT a valid tile, so 0 there means
     // "nobody configured this" and is worth complaining about.
     std::array<int, 3> arch{0, 0, 0};  ///< GPU architecture [gfx, major, minor]
+    std::string archName;              ///< Stepping, e.g. "gfx1250v0"; empty = resolve by arch only
     uint32_t TileA0 = 0;               ///< Tile size for A dimension 0; 0 = unset
     uint32_t TileB0 = 0;               ///< Tile size for B dimension 0; 0 = unset
     uint32_t TileM0 = 0;               ///< Tile size for M dimension 0; 0 = unset
@@ -105,7 +106,8 @@ struct PassFeatureConfig {
         /// Cycles of queued WMMA work that must remain before a non-WMMA pick (ds_load,
         /// filler, tensor_load) may issue; below it, and with room in the queue, the next
         /// ready WMMA goes first so the pipe never runs dry. Picks the scheduler is forced
-        /// to make (a promoted barrier) are not held. 0 = off; ignored at depth 1.
+        /// to make (a promoted barrier) are not held. < 0 = automatic: one WMMA short of a full
+        /// queue, (wmmaQueueDepth - 1) x the next WMMA's latency. 0 = off; ignored at depth 1.
         int wmmaQueueCoverCycles = 0;
         /// How many WMMAs one refill issues once the queue drops below the refill line
         /// (wmmaQueueCoverCycles). Fixed: wmmaBatchSize of them. Dynamic: as many as it takes
@@ -120,12 +122,6 @@ struct PassFeatureConfig {
         /// (see DsSpreadPacer), and a load issues only while the ds queue has a free credit. Off =
         /// ds_loads issue as soon as they are ready and a credit is free.
         bool dsSpread = true;
-        /// Queued WMMA cover (cycles) to have in the pipe when a barrier issues, so the WMMAs hide
-        /// its stall. The WMMAs before the barrier's threshold are reserved for it: the queue is
-        /// refilled to this cover ahead of other work, and ds_loads the barrier waits on are
-        /// released that many WMMAs earlier. Applies with dsSpread (or when set > 0) and the
-        /// queue model; < 0 = automatic (72 cycles, at most a full queue), 0 = off.
-        int wmmaBarrierCoverCycles = -1;
         /// Cycles the LDS needs to return one ds_load (its return rate, the old throttle latency /
         /// queue depth). The windows the ds_loads in front of a barrier need are at least
         /// loads * cycles / WMMA window. 0 = off (the even-spread density only).
@@ -141,11 +137,11 @@ struct PassFeatureConfig {
         /// WMMA windows by the region's matrix latency. 0 disables the extra
         /// gap. Mirrors ModuleOptions::TensorLoadDsLoadGapCycles.
         int tensorLoadDsLoadGapCycles = 64;
-        /// Max cycle-distance between two adjacent barrier groups for
-        /// StinkyMergeBarrierPass to merge them into a single multi-token
-        /// barrier group. 0 = use the CDNA5 default (kCdna5MergeBarrierThreshold).
-        /// Internal tuning knob only — deliberately not surfaced as a module
-        /// option, so TensileLite cannot set it.
+        /// Unused by StinkyMergeBarrierPass. Adjacent groups merge only when no
+        /// matrix instruction is issued between them. Kept so existing callers
+        /// and --merge-barrier-threshold= still parse. Internal knob only —
+        /// deliberately not surfaced as a module option, so TensileLite cannot
+        /// set it.
         int mergeBarrierThreshold = 0;
         /// Mirrors ModuleOptions::ClusterBarrier: InsertClusterBarrierPass will run
         /// after the scheduler and plant SCC-clobbering handshakes around workgroup
@@ -171,6 +167,9 @@ struct PassFeatureConfig {
         /// InsertWaitAlu would put an s_wait_alu of count <= this before (WaitAluTracker
         /// query) is held until just before the next s_barrier_wait; < 0 = off.
         int waitAluHoldStrictCount = -1;
+        /// Mirrors ModuleOptions::EnableESM2: InsertWaitAlu runs, so the queue keeps its
+        /// scoreboard (WaitAluTracker) and asks it where fillers and unplaced memory ops go.
+        bool waitAluScoreboard = false;
         /// Mirrors ModuleOptions::PrefetchLeadWmmas. A global prefetch is held until
         /// this many WMMA windows before the tensor_load it precedes, staggered over its
         /// group; below 8 marks a single-stage loop (whole group at the load's window,
@@ -203,18 +202,27 @@ struct AsmCapsConfig {
 
     /// rocisa archCaps `RequiresXCntForVolatileVMEM`. False on the standalone
     /// path, which has no rocisa to ask.
-    /// When set alone (without `enableXnackReplay`), Gfx1250HazardPass only
-    /// inserts atomic drains (Rule 4a). See Gfx1250HazardPass for the full
+    /// When set alone (without `enableXnackReplay`), Gfx1250XnackHazardPass only
+    /// inserts atomic drains (Rule 4a). See Gfx1250XnackHazardPass for the full
     /// rule set (Rules 1–4).
     bool requiresXCntForVolatileVMEM = false;
 
-    /// Enable full XNACK replay protection in Gfx1250HazardPass:
+    /// Enable full XNACK replay protection in Gfx1250XnackHazardPass:
     ///   - Source-clobber checks: SMEM Rule 3, FLAT Rule 2
     ///   - Boundary drains: ForeverSleep, ScalarPrefetch, VgprMsb
     ///   - Atomic drains: Rule 4a (implies `requiresXCntForVolatileVMEM`)
     /// When false, all of the above are skipped; only Rule 4a remains
     /// active if `requiresXCntForVolatileVMEM` is set independently.
-    /// See Gfx1250HazardPass for the complete rule definitions.
+    /// See Gfx1250XnackHazardPass for the complete rule definitions.
+    ///
+    /// The relative SW instruction-prefetch passes read the same flag for the
+    /// drain before a prefetch that would follow an open SMEM group, so a caller
+    /// gets replay protection from both passes or from neither. There is
+    /// deliberately no third "unspecified" state: a caller that leaves this false
+    /// gets no gfx1250 replay protection anywhere, which is what
+    /// Gfx1250XnackHazardPass has always done with it. Every in-tree entry point
+    /// sets it -- `Backend::configurePassManager` from `ModuleOptions`, and
+    /// `stinkytofu-opt` from its `--arch` target ID.
     bool enableXnackReplay = false;
 };
 }  // namespace stinkytofu

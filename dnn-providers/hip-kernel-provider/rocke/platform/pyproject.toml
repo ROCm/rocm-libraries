@@ -46,4 +46,5 @@ where = ["python"]
 include = ["rocke*"]
 
 [tool.setuptools.package-data]
-rocke = ["**/*.json"]
+# The tensor_transforms emit tests compare the printed IR with these goldens.
+rocke = ["**/*.json", "tests/helpers/tiling/tensor_transforms/golden/*.txt"]

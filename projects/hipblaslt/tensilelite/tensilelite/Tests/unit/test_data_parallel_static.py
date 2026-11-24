@@ -22,27 +22,30 @@ from rocisa.code import Label, Module
 from rocisa.container import sgpr, vgpr
 from rocisa.enum import RegisterType
 from rocisa.instruction import (
+    SAddCU32,
+    SAddU32,
     SAndB32,
     SBranch,
     SCmpEQU32,
     SCmpEQU64,
     SCmpGeU32,
     SMovB32,
+    SMulHIU32,
     SMulI32,
     SSubU32,
     VMovB32,
 )
 from rocisa.register import RegisterPool
 
-import Tensile.KernelWriter as kw_module
-import Tensile.KernelWriterAssembly as kwa_module
-from Tensile.Common.DataType import DataType
-from Tensile.Components.StreamK import StreamKTwoTileDPFirst
-from Tensile.Components.TileProcessingStrategy import DataParallel
-from Tensile.Components.PersistentLoop import PersistentLoopOn
-from Tensile.Components.WorkAssignment import StaticGrid
-from Tensile.Components.Subtile.SubtileGREmit import tdmApplyTileKOffsetSubtile
-from Tensile.Contractions import SizeMapping
+import tensilelite.KernelWriter as kw_module
+import tensilelite.KernelWriterAssembly as kwa_module
+from tensilelite.Common.DataType import DataType
+from tensilelite.Components.StreamK import StreamKTwoTileDPFirst
+from tensilelite.Components.TileProcessingStrategy import DataParallel
+from tensilelite.Components.PersistentLoop import PersistentLoopOn
+from tensilelite.Components.WorkAssignment import StaticGrid
+from tensilelite.Components.Subtile.SubtileGREmit import tdmApplyTileKOffsetSubtile
+from tensilelite.Contractions import SizeMapping
 
 # Reuse the established component-level harness helpers rather than reinventing
 # them (see test_segment_interleave_state / cms_validation_base for the in-repo
@@ -57,11 +60,10 @@ from test_PrefetchAcrossPersistent import (
     _tensor_parameters,
 )
 
-# Real-Solution gfx1250 toolchain fixtures. Imported so pytest resolves them as
-# fixtures in this module (they auto-skip when amdclang++ cannot target gfx1250).
+# Reuse the gfx1250 global setup and PrefetchGL2 capability gate. The assembler
+# fixture is inherited from unit/conftest.py.
 from test_prefetchgl2_streamk_guard import (  # noqa: F401  (fixtures used by name)
     _gp_gfx1250,
-    assembler,
     gfx1250_iim,
 )
 
@@ -84,6 +86,10 @@ class _SimpleSgprPool:
         self._next += size
         self.checked_out.append((base, size, tag))
         return base
+
+    def checkOutAligned(self, size, alignment, tag="", *args, **kwargs):
+        self._next += (-self._next) % alignment
+        return self.checkOut(size, tag)
 
     def checkIn(self, idx):
         self.checked_in.append(idx)
@@ -115,6 +121,14 @@ class _SKWriter:
         self._next_tmp += size + alignment
         yield SimpleNamespace(idx=base, size=size)
 
+    @contextmanager
+    def allocTmpSgprList(self, nums, alignmentList=None, tag=""):
+        out = []
+        for size in nums:
+            out.append(SimpleNamespace(idx=self._next_tmp, size=size))
+            self._next_tmp += size
+        yield out
+
     # StreamK constant SGPRs are kept in-place (returns the symbolic name) in this
     # mock; isPersistentConstantsToVgprEnabled=False so no VGPR readfirstlane fires.
     def acquirePersistentConstSgpr(self, kernel, name):
@@ -126,6 +140,9 @@ class _SKWriter:
     def isPersistentConstantsToVgprEnabled(self, kernel):
         return False
 
+    def readbackStreamKConst(self, kernel, dst, name):
+        return Module("readback %s" % name)
+
     def cmpNamedArgTypeEq(self, module, value, comment=""):
         kw_module.KernelWriter.cmpNamedArgTypeEq(self, module, value, comment)
 
@@ -135,6 +152,9 @@ class _SKWriter:
     def s_mul_u64_u32(self, *args, **kwargs):
         return Module("s_mul_u64_u32 stub")
 
+
+    globalReadIncsOperand = kwa_module.KernelWriterAssembly.globalReadIncsOperand
+    useConstSgprGlobalReadIncsForTc = kwa_module.KernelWriterAssembly.useConstSgprGlobalReadIncsForTc
 
     def isTdmWaveSeparated(self, kernel):
         return kwa_module.KernelWriterAssembly.isTdmWaveSeparated(self, kernel)
@@ -146,6 +166,10 @@ class _SKWriter:
 
     def _tdmPairedParityOrder(self, kernel, tpa, tpb):
         return kwa_module.KernelWriterAssembly._tdmPairedParityOrder(self, kernel, tpa, tpb)
+
+
+    def tdmPairOnEveryWave(self, kernel, tpa, tpb):
+        return kwa_module.KernelWriterAssembly.tdmPairOnEveryWave(self, kernel, tpa, tpb)
 
 
 def _sk_common_kernel(dp_only):
@@ -331,15 +355,47 @@ def test_tdm_apply_streamk_offset_wave_separated_noop_under_dp_only():
     writer = _SKWriter()
     tpa, tpb = _tensor_parameters()
 
-    dp_mod = kwa_module.KernelWriterAssembly.tdmApplyTileKOffsetWaveSeparated(
-        writer, {"TileProcessingStrategy": "DataParallel"}, tpa, tpb
-    )
+    for method in (kwa_module.KernelWriterAssembly.tdmApplyTileKOffsetWaveSeparated,
+                   kwa_module.KernelWriterAssembly.tdmApplyTileKOffset):
+        dp_mod = method(writer, {"TileProcessingStrategy": "DataParallel"}, tpa, tpb)
+        assert dp_mod.itemsSize() == 0
     nodp_mod = kwa_module.KernelWriterAssembly.tdmApplyTileKOffsetWaveSeparated(
         writer, {"TileProcessingStrategy": "StreamK"}, tpa, tpb
     )
 
-    assert dp_mod.itemsSize() == 0
     assert _instruction_indices(_module_items(nodp_mod), SMulI32, src_contains="StreamKLocalStart")
+
+
+@pytest.mark.parametrize("waves,constant_increments,metadata", [
+    (1, False, False), (1, False, True), (1, True, True),
+    (4, False, False), (4, False, True),
+])
+def test_tdm_k_offsets_use_each_descriptor_increment_and_full_width_add(waves, constant_increments, metadata):
+    writer = _SKWriter()
+    writer.states.a.useConstSgprGlobalReadIncs = constant_increments
+    writer.states.b.useConstSgprGlobalReadIncs = constant_increments
+    kernel = {"TileProcessingStrategy": "StreamK", "TDMFuse": 0,
+              "NumWaves": waves, "enableTDMMetadata": metadata}
+    tpa, tpb = _tensor_parameters()
+    if waves == 1:
+        method = kwa_module.KernelWriterAssembly.tdmApplyTileKOffset
+        descriptors = [(tc, "GlobalReadIncs" + tc if constant_increments
+                        else sgpr("GlobalReadIncs" + tc + "+0")) for tc in ("A", "B")]
+    else:
+        method = kwa_module.KernelWriterAssembly.tdmApplyTileKOffsetWaveSeparated
+        descriptors = [("A", sgpr("tdmABIncs"))]
+    if metadata:
+        descriptors.append(("Metadata", sgpr("GlobalReadIncsMetadata")))
+    instructions = list(method(writer, kernel, tpa, tpb).flatitems())
+    assert len(instructions) == 4 * len(descriptors)
+    for index, (tensor, increment) in enumerate(descriptors):
+        high, low, add, carry = instructions[4 * index:4 * index + 4]
+        assert [type(i) for i in (high, low, add, carry)] == [SMulHIU32, SMulI32, SAddU32, SAddCU32]
+        assert list(high.getParams())[1:] == list(low.getParams())[1:] == [
+            sgpr("StreamKLocalStart"), increment]
+        address = "tdm" + tensor + "Group0"
+        assert list(add.getParams()) == [sgpr(address + "+2"), sgpr(address + "+2"), low.getParams()[0]]
+        assert list(carry.getParams()) == [sgpr(address + "+3"), sgpr(address + "+3"), high.getParams()[0]]
 
 
 def _tdm_setup_increment_items(dp_only):
@@ -465,8 +521,8 @@ def _static_gfx1250_params(gfx1250_iim, dp_only):
     AddressWS/AddressFlags/SrdWS/StreamKLocalStart/StreamKLocalEnd, fits under the
     gfx1250 SGPR budget and emits cleanly -- otherwise the non-DP baseline
     overflows (which is exactly the pressure the DP-only reduction relieves)."""
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
         matrixInstructionToMIParameters,
     )
 
@@ -537,11 +593,11 @@ def _emit_static_kernel_asm(gfx1250_iim, assembler, capsys, dp_only):
     import shutil
 
     import rocisa
-    from Tensile.Common.Types import DebugConfig
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
-    from Tensile.SolutionStructs.Naming import getKernelFileBase
-    from Tensile.SolutionStructs.Solution import Solution
-    from Tensile.TensileCreateLibrary.Run import (
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.SolutionStructs.Naming import getKernelFileBase
+    from tensilelite.SolutionStructs.Solution import Solution
+    from tensilelite.TensileCreateLibrary.Run import (
         generateKernelObjectsFromSolutions,
         processKernelSource,
     )
@@ -588,36 +644,51 @@ def test_non_dp_only_kernel_asm_retains_workspace_and_local_sgpr_symbols(
 
 
 # ---------------------------------------------------------------------------
-# 10. peekTileBatch: the batch of the tile at NextTile, with none of the
-#     side effects that would make it unsafe where ReuseAcrossPersistent
-#     needs it.
+# 10. peekTileBatch with an M-tile: which A the tile at NextTile needs -- its
+#     batch and its M-tile -- with none of the side effects that would make it
+#     unsafe where ReuseAcrossPersistent needs it.
 # ---------------------------------------------------------------------------
-def test_rap_tile_batch_reads_the_pending_tile_without_claiming_it(monkeypatch):
+def test_rap_tile_a_identity_reads_the_pending_tile_without_claiming_it(monkeypatch):
     """RAP asks for this before it knows whether it will run the tile here.
 
-    The reuse copy can only serve tiles in the batch its resident A was filled
-    from, so it opens by comparing the pending tile's batch against that one and
-    branching to the fill copy when they differ. The comparison therefore runs at
-    a point that may still jump away, and the two emitters that already compute
-    this batch cannot: ``skTileIndex`` resets the local-read offsets and
-    ``skIndexToWG`` claims WorkGroup0/1/2 for the tile.
+    The reuse copy can only serve tiles whose A is the one its resident
+    registers were filled from, so it opens by comparing the pending tile's A
+    identity against that one and branching to the fill copy when they differ.
+    The comparison therefore runs at a point that may still jump away, and the
+    two emitters that already compute this identity cannot: ``skTileIndex``
+    resets the local-read offsets and ``skIndexToWG`` claims WorkGroup0/1/2 for
+    the tile.
 
-    So peekTileBatch repeats their arithmetic and writes only its destination. A
-    later edit that reaches for skIndexToWG instead would leave WorkGroup* set
+    So peekTileBatch repeats their arithmetic and writes only its destinations.
+    A later edit that reaches for skIndexToWG instead would leave WorkGroup* set
     for a tile the fill copy then re-derives, which no build failure would catch.
     """
     writer = _SKWriter()
     kernel = _sk_common_kernel(dp_only=True)
-    kernel["WavefrontSize"] = 32
+    kernel.update({
+        "WavefrontSize": 32,
+        "WorkGroupMappingXCC": 1,
+        "ClusterDim": [1, 1],
+    })
 
     monkeypatch.setattr(kw_module.Component.TileProcessingStrategy, "find", lambda writer: _processing())
-    rendered = str(StaticGrid().peekTileBatch(writer, kernel, "RAPResidentBatch"))
+    rendered = str(
+        StaticGrid().peekTileBatch(writer, kernel, "RAPResidentBatch", "RAPResidentMTile")
+    )
 
     # NextTile names pending work; activation advances it only when claimed.
     assert "s[sgprNextTile]" in rendered
     # Tiles per batch, the divisor that turns a tile index into a batch.
     assert "s[sgprNumWorkGroups0], s[sgprNumWorkGroups1]" in rendered
     assert "s[sgprRAPResidentBatch]" in rendered
+    # A is indexed by M as well, so the M-tile has to come out of the same walk.
+    # Without it the guard would pass a tile that shares the batch but needs a
+    # different A -- which is every extra M-tile M > MacroTile0 introduces.
+    assert "s[sgprRAPResidentMTile]" in rendered
+    assert "s[sgprNumWorkGroups0]" in rendered
+    # A reads the M-tile DefaultWGM gives the tile, so the peek remaps it too
+    # (test_ReuseAcrossPersistent checks the values).
+    assert "s[sgprWGM]" in rendered
 
     for claimed in ("sgprWorkGroup0", "sgprWorkGroup1", "sgprWorkGroup2"):
         assert claimed not in rendered, (

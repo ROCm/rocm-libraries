@@ -235,9 +235,7 @@ if(BUILD_WITH_TRSM_REFACTORING)
   list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_sptrsm.cpp)
 endif()
 
-if(BUILD_WITH_ELL_TRSV)
-  list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_spsv_ell.cpp)
-endif()
+list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_spsv_ell.cpp)
 
 if(BUILD_WITH_SPSORT)
   list(APPEND ROCSPARSE_BENCHMARK_SOURCES

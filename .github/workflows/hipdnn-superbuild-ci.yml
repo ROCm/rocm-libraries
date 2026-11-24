@@ -11,6 +11,7 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - '.github/workflows/hipdnn-superbuild-ci.yml'
+      - '.github/requirements-hipdnn-superbuild-ci.txt'
       - 'projects/hipdnn/**'
       - 'dnn-providers/**'
   schedule:
@@ -59,7 +60,7 @@ jobs:
           predicate-quantifier: every
           filters: |
             code:
-              - '{projects/hipdnn/**,dnn-providers/**,.github/workflows/hipdnn-superbuild-ci.yml}'
+              - '{projects/hipdnn/**,dnn-providers/**,.github/workflows/hipdnn-superbuild-ci.yml,.github/requirements-hipdnn-superbuild-ci.txt}'
               - '!**/*.md'
               - '!**/*.rst'
               - '!projects/hipdnn/docs/**'
@@ -113,6 +114,7 @@ jobs:
             dnn-providers
             projects/hipdnn
             projects/miopen
+            shared/ctest
             test
 
       # Shared CI constants, kpack-ref among them, defined in one place.
@@ -251,9 +253,26 @@ jobs:
           set -euo pipefail
           dvc pull --recursive dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors
 
+      # The gfx950 dgrad AOT instance lists are DVC-tracked too (same `ingestor`
+      # remote), and hipdnn_ingestor_generator_pytest reads them straight from
+      # the source tree -- without this pull, only the .dvc pointers are present
+      # and every test that loads them fails with FileNotFoundError.
+      - name: Fetch dgrad instance lists
+        run: |
+          set -euo pipefail
+          dvc pull --recursive projects/hipdnn/tools/IngestorGenerator/configs
+          # A pull can exit 0 having fetched nothing, or only one of the two dtype
+          # lists; check both so a partial pull is not mistaken for a full one.
+          bf16_count=$(find projects/hipdnn/tools/IngestorGenerator/configs -name '*_bf16.instances.json' | wc -l)
+          fp16_count=$(find projects/hipdnn/tools/IngestorGenerator/configs -name '*_fp16.instances.json' | wc -l)
+          test "$bf16_count" -gt 0 || { echo "dvc pull produced no bf16 dgrad instance lists" >&2; exit 1; }
+          test "$fp16_count" -gt 0 || { echo "dvc pull produced no fp16 dgrad instance lists" >&2; exit 1; }
+          echo "Fetched $bf16_count bf16 and $fp16_count fp16 dgrad instance list(s)"
+
       # Must precede configure: configuration fails if pytest is not importable
-      # by the interpreter descriptor-packaging registers its tests under. The
-      # interpreter is named explicitly because it must be the one passed as
+      # by the interpreter descriptor-packaging registers its tests under, and,
+      # with HIPDNN_REQUIRE_UHD_GEN_TESTS=ON, if uhd_gen's requirements are not.
+      # The interpreter is named explicitly because it must be the one passed as
       # -DPython3_EXECUTABLE below -- a bare `pip` here would install into the
       # setup-python tool-cache interpreter instead.
       - name: Install Python dependencies
@@ -270,8 +289,12 @@ jobs:
             -DENABLE_CLANG_FORMAT=OFF \
             -DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON \
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
+            -DHIPKERNELPROVIDER_ENABLE_FLYDSL=ON \
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
+            -DHIPDNN_ENABLE_TOOLING_TESTS=ON \
+            -DHIPDNN_REQUIRE_UHD_GEN_TESTS=ON \
+            -DHIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS=ON \
             -DHIPDNN_ENABLE_SDPA=ON \
             -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
             -DENABLE_CLANG_TIDY=OFF \
@@ -279,7 +302,8 @@ jobs:
             -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
             -DPython_EXECUTABLE="$VENV_PYTHON" \
             -DPython3_EXECUTABLE="$VENV_PYTHON" \
-            -DHIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES=ON
+            -DHIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES=ON \
+            -DHIPKERNELPROVIDER_MIN_PACKAGING_PROBES=1
 
       - name: Build
         run: cmake --build build
@@ -298,25 +322,19 @@ jobs:
       - name: Add ROCm bin to PATH
         run: echo "$ROCM_SDK_PATH/bin" >> "$GITHUB_PATH"
 
-      # --output-junit is relative to --test-dir: this writes build/ctest-junit.xml.
+      # See the Linux lane for why there are two ctest calls. Serial this step was 14-20 min
+      # on Windows.
       - name: Run tests
-        id: run-tests
-        run: ctest --test-dir build --output-on-failure --output-junit ctest-junit.xml
-
-      # ctest counts a disabled or not-run test as success. Read the junit
-      # "Run tests" wrote and fail if a declared packaging probe (listed in the
-      # manifest configure wrote) did not run or failed. Runs whenever "Run
-      # tests" ran, pass or fail, so a probe failure is reported by name.
-      # --min-probes 1: this lane never builds every architecture the descriptors
-      # name, so a manifest with no probe means discovery broke. Drop the flag if
-      # the lane starts building them all.
-      - name: Check packaging probes ran
-        if: ${{ !cancelled() && steps.run-tests.outcome != 'skipped' }}
+        env:
+          # shared_ctest_optional_args_scope configures a nested CMake project whose
+          # find_package(Python3) must find the venv with PyYAML. actions/setup-python exports
+          # Python3_ROOT_DIR for its own Python, which has no PyYAML, so override it.
+          Python3_ROOT_DIR: ${{ env.VENV_PATH }}
         run: |
-          "$VENV_PYTHON" .github/scripts/check_probe_junit.py \
-            --junit build/ctest-junit.xml \
-            --manifest build/hkp-probes/manifest.txt \
-            --min-probes 1
+          rc=0
+          ctest --test-dir build --output-on-failure --no-tests=error --parallel 16 -L '^full$' || rc=$?
+          ctest --test-dir build --output-on-failure --no-tests=error --parallel 16 -LE '^(quick|standard|comprehensive|ffm-quick|full)$' || rc=$?
+          exit $rc
 
       - name: Patch ROCm SDK with superbuild outputs
         shell: pwsh
@@ -386,6 +404,7 @@ jobs:
             dnn-providers
             projects/hipdnn
             projects/miopen
+            shared/ctest
             test
 
       # Shared CI constants, kpack-ref among them, defined in one place.
@@ -513,9 +532,40 @@ jobs:
           test "$count" -gt 0 || { echo "dvc pull produced no golden blobs" >&2; exit 1; }
           echo "Fetched $count golden tensor blob(s)"
 
+      # test_registry_regeneration.py regenerates the gfx950 attention catalog and
+      # diffs it against the shipped KDP. The rocKE KDPs are DVC-managed (each pointer
+      # names the `ingestor` remote), and this lane packs the example descriptors
+      # rather than the production tree, so nothing else fetches them. Without them
+      # both tests skip, and the tooling suite fails skips inside pytest. Same pull as
+      # the Windows lane, which packs the production tree.
+      - name: Fetch rocKE descriptors
+        run: |
+          set -euo pipefail
+          LOGNAME=github-runner dvc pull --recursive dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors
+          # A pull can exit 0 having fetched nothing; count what it should produce.
+          count=$(find dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors -name '*.kdp.json' -path '*artifacts*' | wc -l)
+          test "$count" -gt 0 || { echo "dvc pull produced no rocKE KDPs" >&2; exit 1; }
+          echo "Fetched $count rocKE KDP(s)"
+
+      # Same reasoning as the Windows lane: the gfx950 dgrad AOT instance lists
+      # are DVC-tracked (same `ingestor` remote), and hipdnn_ingestor_generator_pytest
+      # reads them straight from the source tree.
+      - name: Fetch dgrad instance lists
+        run: |
+          set -euo pipefail
+          LOGNAME=github-runner dvc pull --recursive projects/hipdnn/tools/IngestorGenerator/configs
+          # A pull can exit 0 having fetched nothing, or only one of the two dtype
+          # lists; check both so a partial pull is not mistaken for a full one.
+          bf16_count=$(find projects/hipdnn/tools/IngestorGenerator/configs -name '*_bf16.instances.json' | wc -l)
+          fp16_count=$(find projects/hipdnn/tools/IngestorGenerator/configs -name '*_fp16.instances.json' | wc -l)
+          test "$bf16_count" -gt 0 || { echo "dvc pull produced no bf16 dgrad instance lists" >&2; exit 1; }
+          test "$fp16_count" -gt 0 || { echo "dvc pull produced no fp16 dgrad instance lists" >&2; exit 1; }
+          echo "Fetched $bf16_count bf16 and $fp16_count fp16 dgrad instance list(s)"
+
       # Must precede configure: configuration fails if pytest is not importable
-      # by the interpreter descriptor-packaging registers its tests under. The
-      # interpreter is named explicitly because it must be the one passed as
+      # by the interpreter descriptor-packaging registers its tests under, and,
+      # with HIPDNN_REQUIRE_UHD_GEN_TESTS=ON, if uhd_gen's requirements are not.
+      # The interpreter is named explicitly because it must be the one passed as
       # -DPython3_EXECUTABLE below -- a bare `pip` here would install into the
       # setup-python tool-cache interpreter instead.
       - name: Install Python dependencies
@@ -532,8 +582,12 @@ jobs:
             -DENABLE_CLANG_FORMAT=OFF \
             -DENABLE_CLANG_TIDY=ON \
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
+            -DHIPKERNELPROVIDER_ENABLE_FLYDSL=ON \
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
+            -DHIPDNN_ENABLE_TOOLING_TESTS=ON \
+            -DHIPDNN_REQUIRE_UHD_GEN_TESTS=ON \
+            -DHIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS=ON \
             -DHIPDNN_ENABLE_SDPA=ON \
             -DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT="$GITHUB_WORKSPACE/dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors" \
             -DHIPKERNELPROVIDER_ROCKE_COMGR_LIB="$HKP_ROCKE_COMGR_LIB" \
@@ -543,10 +597,20 @@ jobs:
             -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
             -DPython_EXECUTABLE="$VENV_PYTHON" \
             -DPython3_EXECUTABLE="$VENV_PYTHON" \
-            -DHIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES=ON
+            -DHIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES=ON \
+            -DHIPKERNELPROVIDER_MIN_PACKAGING_PROBES=1
 
       - name: Build
         run: cmake --build build
+
+      # The touch makes the build run flatc again, also when the checkout gives the committed
+      # header a newer timestamp than the schema.
+      - name: Check the committed ingestor plan header matches its schema
+        run: |
+          set -euo pipefail
+          touch dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/serialization/ingestor_plan.fbs
+          cmake --build build --target hkp_generate_ingestor_plan_header
+          git diff --exit-code -- dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/serialization/ingestor_plan_generated.h
 
       # Packing is skipped with a STATUS message, so a resolution regression
       # would otherwise pass CI while producing no archives.
@@ -558,28 +622,53 @@ jobs:
           test "${#kpacks[@]}" -gt 0 || { echo "no .kpack archives produced" >&2; exit 1; }
           printf '%s\n' "${kpacks[@]}"
 
-      # --output-junit is relative to --test-dir: this writes build/ctest-junit.xml.
+      # ctest runs in parallel: the suites are independent processes, and the ones that share
+      # state are marked RUN_SERIAL / FIXTURES_* in CMake, which ctest honors. Serial this step
+      # was 7.7-11.3 min, dominated by a few long Python suites running back to back.
+      #
+      # shared/ctest registers each gtest binary once per tier (quick, standard, comprehensive,
+      # ffm-quick, full) with the same or a narrower filter, and `full` runs a superset, so the
+      # `full` label selects each binary once. Entries with no tier label (rocke_*, hkp-probe-*,
+      # shared_ctest_*, ...) are selected by the second call. Both calls always run.
       - name: Run tests
-        id: run-tests
         env:
           # Native rocKE AUTO detection must see the wheel COMGR used by packaging.
           ROCKE_COMGR_LIB: ${{ env.HKP_ROCKE_COMGR_LIB }}
-        run: ctest --test-dir build --output-on-failure --output-junit ctest-junit.xml
-
-      # ctest counts a disabled or not-run test as success. Read the junit
-      # "Run tests" wrote and fail if a declared packaging probe (listed in the
-      # manifest configure wrote) did not run or failed. Runs whenever "Run
-      # tests" ran, pass or fail, so a probe failure is reported by name.
-      # --min-probes 1: this lane never builds every architecture the descriptors
-      # name, so a manifest with no probe means discovery broke. Drop the flag if
-      # the lane starts building them all.
-      - name: Check packaging probes ran
-        if: ${{ !cancelled() && steps.run-tests.outcome != 'skipped' }}
+          # The shared_ctest_* tests configure a nested CMake project: give it Ninja (the
+          # runner has no make), and point its find_package(Python3) at the venv with PyYAML.
+          # actions/setup-python exports Python3_ROOT_DIR for its own Python, which has no
+          # PyYAML and takes precedence over VIRTUAL_ENV.
+          CMAKE_GENERATOR: Ninja
+          Python3_ROOT_DIR: ${{ env.VENV_PATH }}
         run: |
-          "$VENV_PYTHON" .github/scripts/check_probe_junit.py \
-            --junit build/ctest-junit.xml \
-            --manifest build/hkp-probes/manifest.txt \
-            --min-probes 1
+          rc=0
+          ctest --test-dir build --output-on-failure --no-tests=error --parallel 16 -L '^full$' || rc=$?
+          ctest --test-dir build --output-on-failure --no-tests=error --parallel 16 -LE '^(quick|standard|comprehensive|ffm-quick|full)$' || rc=$?
+          exit $rc
+
+      # The full support matrix is too large to commit (only its overview is,
+      # in dnn-providers/integration-tests/), so publish it from every run.
+      # Both renderers read the committed support-claim sidecars, not the
+      # build, so this runs even when the build or tests failed.
+      - name: Render support matrix
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          scripts=dnn-providers/integration-tests/scripts
+          "$VENV_PYTHON" "$scripts/render_support_matrix.py" \
+            --output build/support-matrix/SUPPORT_MATRIX.md
+          "$VENV_PYTHON" "$scripts/render_support_matrix.py" --overview-only \
+            --output build/support-matrix/SUPPORT_MATRIX_GRAPH_OVERVIEW.md
+          "$VENV_PYTHON" "$scripts/support_features/feature_matrix.py" \
+            --output build/support-matrix/SUPPORT_MATRIX_OVERVIEW.md
+
+      - name: Upload support matrix
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hipdnn-support-matrix
+          path: build/support-matrix/
+          if-no-files-found: error
 
       # Golden-data validation used to live here as a schedule-gated re-run of the
       # external integration targets with HIPDNN_TEST_VERIFICATION_MODE=golden-check.

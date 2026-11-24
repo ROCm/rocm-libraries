@@ -152,7 +152,7 @@ def buildSourceCodeObjectFiles(
         compiler(str(includeDir), cmdlineArchs, str(kernelPath), objPath)
 
     # The bundler names the compiler target; an alias writes under its own name.
-    outDirs = {compilerTargetOf(baseArchName(a)): baseArchName(a) for a in cmdlineArchs}
+    outDirs = {compilerTargetOf(baseArchName(a), compiler.path): baseArchName(a) for a in cmdlineArchs}
     with timing_context("python_kernel_build_src_co.unbundle"):
         for target in bundler.targets(objPath):
           match = re.search("gfx.*$", target)

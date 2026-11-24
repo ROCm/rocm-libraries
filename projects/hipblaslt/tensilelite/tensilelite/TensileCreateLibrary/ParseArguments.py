@@ -219,6 +219,14 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         help="Emit s_ttracedata mainloop iteration markers for SQTT/trace decoders "
         "(subtile kernels only; adds 2 instructions per iteration)"
     )
+    argParser.add_argument(
+        "--emit-occupancy-probe",
+        dest="EmitOccupancyProbe",
+        action="store_true",
+        default=False,
+        help="Emit the CU-occupancy probe (ProbeAddr/ProbeEpoch/ProbeGrid kernel args) "
+        "in StreamK hybrid-assignment kernels"
+    )
 
     args = argParser.parse_args()
 
@@ -230,6 +238,7 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
     arguments["EnableMarker"] = args.EnableMarker
     arguments["DisableAsmComments"] = args.DisableAsmComments
     arguments["EmitMainloopTraceMarker"] = args.EmitMainloopTraceMarker
+    arguments["EmitOccupancyProbe"] = args.EmitOccupancyProbe
     if args.CmakeCxxCompiler:
         os.environ["CMAKE_CXX_COMPILER"] = args.CmakeCxxCompiler
     arguments["LogicFormat"] = args.LogicFormat

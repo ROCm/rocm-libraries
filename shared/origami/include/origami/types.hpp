@@ -438,12 +438,19 @@ struct tensile_params_t {
   /// Number of waves per workgroup
   std::size_t wave_num = 4;
 
+  /// Threads per wavefront the kernel was built for (0 = the architecture's default)
+  int wavefront_size = 0;
+
   /// Wave group dimensions [wave_group_m, wave_group_n]
   int wave_group_m = 2;
   int wave_group_n = 2;
 
   /// Prefetch global read depth
   int prefetch_global_read = 2;
+
+  /// Buffer load/store flags - use buffer instructions for global memory access
+  bool buffer_load = true;
+  bool buffer_store = true;
 
   /// Math clocks per unrolled loop iteration (0 = auto-calculate)
   int math_clocks_unrolled_loop = 0;
@@ -460,6 +467,16 @@ struct tensile_params_t {
   bool one_lds_buffer = false;
   bool source_swap = false;
 
+  /// LDS layout per operand (TensileLite UnrollMajorLDS): 1 = K contiguous,
+  /// 0 = M/N contiguous, -1 = unknown (derived from the problem's transpose using
+  /// TensileLite's default TransposeLDS).
+  int unroll_major_lds_a = -1;
+  int unroll_major_lds_b = -1;
+
+  /// Operand is read from LDS with transpose loads.
+  bool lds_transpose_read_a = false;
+  bool lds_transpose_read_b = false;
+
   constexpr bool operator==(const tensile_params_t& o) const noexcept {
     return depth_u == o.depth_u && global_split_u == o.global_split_u &&
            global_accumulation == o.global_accumulation && local_split_u == o.local_split_u &&
@@ -467,14 +484,19 @@ struct tensile_params_t {
            direct_to_lds_a == o.direct_to_lds_a && direct_to_lds_b == o.direct_to_lds_b &&
            num_loads_coalesced_a == o.num_loads_coalesced_a &&
            num_loads_coalesced_b == o.num_loads_coalesced_b && wave_num == o.wave_num &&
-           wave_group_m == o.wave_group_m && wave_group_n == o.wave_group_n &&
-           prefetch_global_read == o.prefetch_global_read &&
+           wavefront_size == o.wavefront_size && wave_group_m == o.wave_group_m &&
+           wave_group_n == o.wave_group_n && prefetch_global_read == o.prefetch_global_read &&
+           buffer_load == o.buffer_load && buffer_store == o.buffer_store &&
            math_clocks_unrolled_loop == o.math_clocks_unrolled_loop && swizzle_a == o.swizzle_a &&
            swizzle_b == o.swizzle_b && workgroup_mapping_xcc == o.workgroup_mapping_xcc &&
            workgroup_mapping_xcc_group == o.workgroup_mapping_xcc_group &&
            global_split_u_coalesced == o.global_split_u_coalesced &&
            global_split_u_wgm_round_robin == o.global_split_u_wgm_round_robin &&
-           one_lds_buffer == o.one_lds_buffer && source_swap == o.source_swap;
+           one_lds_buffer == o.one_lds_buffer && source_swap == o.source_swap &&
+           unroll_major_lds_a == o.unroll_major_lds_a &&
+           unroll_major_lds_b == o.unroll_major_lds_b &&
+           lds_transpose_read_a == o.lds_transpose_read_a &&
+           lds_transpose_read_b == o.lds_transpose_read_b;
   }
 
   std::size_t hash() const {
@@ -489,9 +511,12 @@ struct tensile_params_t {
                               num_loads_coalesced_a,
                               num_loads_coalesced_b,
                               wave_num,
+                              wavefront_size,
                               wave_group_m,
                               wave_group_n,
                               prefetch_global_read,
+                              buffer_load,
+                              buffer_store,
                               math_clocks_unrolled_loop,
                               swizzle_a,
                               swizzle_b,
@@ -500,7 +525,11 @@ struct tensile_params_t {
                               global_split_u_coalesced,
                               global_split_u_wgm_round_robin,
                               one_lds_buffer,
-                              source_swap);
+                              source_swap,
+                              unroll_major_lds_a,
+                              unroll_major_lds_b,
+                              lds_transpose_read_a,
+                              lds_transpose_read_b);
   }
 };
 
@@ -586,10 +615,12 @@ struct config_t {
   /// Global write vector width for matrix D (elements per store)
   std::size_t gwvw_d = 1;
 
-  /// LDS load vector width for matrix A (elements per LDS read)
+  /// TensileLite VectorWidthA: contiguous M elements a lane owns across adjacent
+  /// MFMA blocks.  Sets the LDS read width only when A is M-contiguous in LDS.
   int vector_width_a = 1;
 
-  /// LDS load vector width for matrix B (elements per LDS read)
+  /// TensileLite VectorWidthB: contiguous N elements a lane owns across adjacent
+  /// MFMA blocks.  Sets the LDS read width only when B is N-contiguous in LDS.
   int vector_width_b = 1;
 
   /// cluster dimensions

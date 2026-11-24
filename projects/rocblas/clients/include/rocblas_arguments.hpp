@@ -187,6 +187,7 @@ struct Arguments
     int use_hipblaslt;
 
     bool cleanup;
+    bool size_query;
 
     /*************************************************************************
      *                     End Of Arguments                                  *
@@ -275,7 +276,8 @@ struct Arguments
     OPER(repeatability_check) SEP    \
     OPER(alpha_beta_stride) SEP      \
     OPER(use_hipblaslt) SEP          \
-    OPER(cleanup)
+    OPER(cleanup) SEP                \
+    OPER(size_query)
     // clang-format on
 
     // Validate input format.

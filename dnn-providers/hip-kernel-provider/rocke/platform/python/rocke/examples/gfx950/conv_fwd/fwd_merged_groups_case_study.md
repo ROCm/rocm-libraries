@@ -580,7 +580,7 @@ Separately, and not a substitute for the above:
   rather than only proving the default path is undisturbed. The parity
   emitters compare the two engines against each other; they have no golden.
 - Separately, the representative IR golden
-  (`platform/tests/golden/rocke_representative_ir_sha256.json`) was re-blessed
+  (`platform/tests/golden/rocke_representative_ir_sha256/`) was re-blessed
   to add merged/depthwise cases at every LLVM flavor (llvm20/llvm22/llvm23):
   `conv/gfx950/n2h14c64k64r3g64/{dw_unmerged, dw_unmerged_cshuffle,
   dw_gm4_direct, dw_gm8_cshuffle, dw_gm32_cshuffle, dw_gm64_cshuffle}` and

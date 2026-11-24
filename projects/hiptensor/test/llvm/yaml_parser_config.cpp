@@ -304,7 +304,8 @@ namespace llvm
                 io.mapOptional("Alphas", (std::vector<std::vector<double>>&)(doc.alphas()));
                 io.mapOptional("Betas",
                                (std::vector<std::vector<double>>&)(doc.betas()),
-                               std::vector<std::vector<double>>(doc.alphas().size()));
+                               std::vector<std::vector<double>>(doc.alphas().size(),
+                                                                std::vector<double>{0.0}));
                 io.mapOptional("Ranges", (std::vector<std::vector<size_t>>&)doc.problemRanges());
                 io.mapOptional("Random Ranges",
                                (std::vector<std::vector<size_t>>&)doc.problemRandRanges());

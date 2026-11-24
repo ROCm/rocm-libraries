@@ -84,11 +84,6 @@ static void dconv_xform_params(rocke_ir_builder_t* b,
     }
 }
 
-static bool dconv_xform_is_bf16(const rocke_direct_conv_problem_t* p)
-{
-    return p->dtype != NULL && strcmp(p->dtype, "bf16") == 0;
-}
-
 /* ===================================================================== *
  *  build_direct_transpose_weights_dgrad
  * ===================================================================== */
@@ -98,7 +93,7 @@ static rocke_kernel_def_t*
 {
     const rocke_direct_conv_problem_t* p = &spec->problem;
     const bool RTC = spec->runtime_channels;
-    const bool is_bf16 = dconv_xform_is_bf16(p);
+    const bool is_bf16 = rocke_direct_conv_problem_is_bf16(p);
     const int BLOCK = 64;
     const rocke_type_t* io_type = rocke_b_io_ir_type(b, p->dtype);
     dconv_xform_params_t prm;
@@ -165,7 +160,7 @@ static rocke_kernel_def_t*
     else
     {
         int lengths[4];
-        lengths[0] = rocke_direct_conv_problem_total_k(p);
+        lengths[0] = (int)rocke_direct_conv_problem_total_k(p);
         lengths[1] = p->KH;
         lengths[2] = p->KW;
         lengths[3] = p->cpg;
@@ -199,7 +194,7 @@ static rocke_kernel_def_t*
     else
     {
         int lengths[4];
-        lengths[0] = rocke_direct_conv_problem_total_c(p);
+        lengths[0] = (int)rocke_direct_conv_problem_total_c(p);
         lengths[1] = p->KH;
         lengths[2] = p->KW;
         lengths[3] = p->kpg;
@@ -368,7 +363,7 @@ static rocke_kernel_def_t*
     const rocke_direct_conv_problem_t* p = &spec->problem;
     const bool fold_k32 = spec->fold_k32;
     const bool RTC = spec->runtime_channels;
-    const bool is_bf16 = dconv_xform_is_bf16(p);
+    const bool is_bf16 = rocke_direct_conv_problem_is_bf16(p);
     const int K_ATOM_SZ = fold_k32 ? 32 : 16;
     const int ELEMS_PER_LANE = fold_k32 ? 8 : 4;
     const int N_K_ATOMS = (p->kpg + K_ATOM_SZ - 1) / K_ATOM_SZ;
@@ -437,15 +432,6 @@ static rocke_kernel_def_t*
         rocke_value_t* a1 = rocke_b_add(b, m2, q_in_lane);
         k_new_val = rocke_b_add(b, m1, a1);
     }
-    /* The Python computes a first c_new_base (atom*16 + c4*4) it never reads;
-     * the IR is emitted all the same. */
-    {
-        rocke_value_t* m1 = rocke_b_mul(b, grp, rocke_b_const_i32(b, p->kpg));
-        rocke_value_t* m2 = rocke_b_mul(b, atom_idx, rocke_b_const_i32(b, 16));
-        rocke_value_t* m3 = rocke_b_mul(b, c4, rocke_b_const_i32(b, 4));
-        rocke_value_t* a1 = rocke_b_add(b, m2, m3);
-        (void)rocke_b_add(b, m1, a1);
-    }
     rocke_value_t* src_ok;
     {
         rocke_value_t* m1 = rocke_b_mul(b, m_idx, rocke_b_const_i32(b, 16));
@@ -457,13 +443,14 @@ static rocke_kernel_def_t*
         rocke_value_t* lt2 = rocke_b_cmp_lt(b, a2, rocke_b_const_i32(b, p->kpg));
         src_ok = rocke_b_land(b, lt1, lt2);
     }
+    /* W_T's last dim is the per-group kpg (the transpose writes
+     * W_T[c_abs, r', s', k_in_g]): the group is already in k_new, so the
+     * column is the K slice alone. */
     rocke_value_t* c_new_base;
     {
-        rocke_value_t* m1 = rocke_b_mul(b, grp, rocke_b_const_i32(b, p->kpg));
         rocke_value_t* m2 = rocke_b_mul(b, atom_idx, rocke_b_const_i32(b, K_ATOM_SZ));
         rocke_value_t* m3 = rocke_b_mul(b, c4, rocke_b_const_i32(b, ELEMS_PER_LANE));
-        rocke_value_t* a1 = rocke_b_add(b, m2, m3);
-        c_new_base = rocke_b_add(b, m1, a1);
+        c_new_base = rocke_b_add(b, m2, m3);
     }
     rocke_value_t* src_off = NULL;
     rocke_value_t* src_valid = NULL;
@@ -486,9 +473,11 @@ static rocke_kernel_def_t*
         rocke_value_t* m2 = rocke_b_mul(b, tid, rocke_b_const_i32(b, ELEMS_PER_LANE));
         dst_off = rocke_b_add(b, m1, m2);
     }
-    rocke_value_t* safe_dst
-        = rocke_b_select(b, src_ok, rocke_b_mul(b, dst_off, c_half_bytes), oob_sentinel);
-    dconv_xform_store(b, is_bf16, d_rsrc, safe_dst, c0, val, ELEMS_PER_LANE / 2);
+    /* Every lane stores, zeros where the source is out of range: the main
+     * kernel masks only the dY operand of a partial K-atom. */
+    val = rocke_b_select(b, src_ok, val, rocke_b_zero_vec(b, io_type, ELEMS_PER_LANE));
+    dconv_xform_store(
+        b, is_bf16, d_rsrc, rocke_b_mul(b, dst_off, c_half_bytes), c0, val, ELEMS_PER_LANE / 2);
     if(!rocke_ir_builder_ok(b))
         return NULL;
     return rocke_ir_builder_kernel(b);

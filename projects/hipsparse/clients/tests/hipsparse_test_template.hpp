@@ -31,6 +31,7 @@
 
 #include <exception>
 #include <hip/hip_runtime_api.h>
+#include <hipsparse/hipsparse.h>
 
 namespace
 {

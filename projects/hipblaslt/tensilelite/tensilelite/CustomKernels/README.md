@@ -20,6 +20,7 @@ external manifest.
 | `aiter/`      | External: AITER-sourced GEMM kernels.             |
 | `ck/`         | External: Composable Kernel-sourced kernels.     |
 | `rocblas/`    | External: rocBLAS wvSpltK skinny-GEMM kernels.   |
+| `vllm/`       | External: vLLM wvSplitK skinny-GEMM kernels.     |
 | `rocroller/`  | External: rocRoller-sourced kernels.              |
 | `wave/`       | External: Wave (handwritten) kernels.             |
 | `triton/`     | External: Triton-compiled GEMM kernels.           |
@@ -103,6 +104,20 @@ custom.config:
 `Source`, `Version`, and `Features` are presence-checked but otherwise
 provenance only — they are read by the validator, not by the runtime.
 
+Under uniform summation order, which hipBLASLt applies unless the caller turns
+it off, hipBLASLt refuses an external kernel unless its `CustomKernel` block
+sets `uniformSummationOrder: true` (default `false`). Set it only for a kernel
+that reduces every row of D in the same order, so that identical rows of A give
+bitwise-identical rows of D, and that has no compiled-in StaggerU, which
+hipBLASLt still refuses. The declaration has to hold for every problem the
+kernel's predicates admit, including partial tiles, any K, and padded leading
+dimensions; hipBLASLt has no way to check it. A kernel that declares it also
+needs a case in `clients/tests/src/row_uniformity_gtest.cpp` (see the
+`SkinnyTn` cases): a shape library logic routes to it, checked row-uniform on
+the device, with the kernel asserted as the default pick on its architecture.
+`AddCustomConfig` copies the key from the kernel's `CustomKernel` entry in the
+test YAML.
+
 ## Adding a new external kernel
 
 The `tensilelite.AddCustomConfig` helper extracts the Tensile-side interface from
@@ -136,6 +151,33 @@ same code object as Tensile's kernels, and `ld.lld` rejects mixed ABI versions.
 The kernel must then be at code object version 4, the version hipBLASLt builds
 its libraries at: either strip its `.amdhsa_code_object_version` directive so the
 assembler's flag applies, or emit it with `-mcode-object-version=4`.
+
+A kernel captured from rocRoller arrives carrying rocRoller's internal view of
+the kernel, in two forms that nothing here reads:
+
+- a dump of the kernel representation inside `.amdgpu_metadata`, under the keys
+  `.kernel_graph`, `.kernel_graph_dot` and `.command`;
+- whole-line `//` comments narrating codegen -- register allocation, expression
+  lowering, liveness -- which outnumber the instructions by better than ten to
+  one.
+
+Both dominate the file, and the graph dump also dominates the assembled object,
+so remove them before committing the kernel:
+
+```bash
+python -m tensilelite.StripKernelGraphs tensilelite/CustomKernels/rocroller/<kernel>.s
+```
+
+The comment strip runs only where `custom.config` says `Origin: rocroller`, and
+keeps any comment carrying a licence or an annotation marker (`TODO`, `FIXME`,
+`XXX`, `HACK`, `NOTE`, `WARNING`); the hand-written kernels elsewhere in this
+tree are left alone. Instructions keep their trailing `// (op N)` tags, so the
+assembled `.text` is unchanged -- only the metadata note shrinks, by exactly the
+three deleted keys.
+
+Pass `--check` instead to report without writing; it exits non-zero when
+provenance is still present, which suits a pre-commit or continuous-integration
+gate.
 
 ## Validation
 

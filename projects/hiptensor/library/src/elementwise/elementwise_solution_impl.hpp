@@ -47,7 +47,7 @@ namespace hiptensor
         {
         }
 
-        bool initArgs(std::vector<float> const&                    scalarValues,
+        bool initArgs(std::vector<double> const&                   scalarValues,
                       std::vector<std::vector<std::size_t>> const& inLengthsArray,
                       std::vector<std::vector<std::size_t>> const& inStridesArray,
                       std::vector<std::vector<int32_t>> const&     inModesArray,
@@ -179,8 +179,10 @@ namespace hiptensor
                         deviceInBuffers,
                         deviceOutBuffers,
                         // ck::tensor_operation::element_wise::PassThrough{}));
-                        typename Traits::CombinedOp{typename Traits::AOp{operators[0]},
-                                                    typename Traits::ScaleOp{scalarValues[0]}}));
+                        typename Traits::CombinedOp{
+                            typename Traits::AOp{operators[0]},
+                            typename Traits::ScaleOp{
+                                static_cast<decltype(Traits::ScaleOp::scale_)>(scalarValues[0])}}));
                 }
             }
             else if constexpr(Traits::InstanceType
@@ -194,10 +196,14 @@ namespace hiptensor
                     deviceOutBuffers,
                     typename Traits::CombinedOp{
                         typename Traits::ACOp{operators[0]},
-                        typename Traits::AOp{CkHiptensorUnaryOp{operators[1]},
-                                             CkScale{scalarValues[0]}},
-                        typename Traits::COp{CkHiptensorUnaryOp{operators[2]},
-                                             CkScale{scalarValues[1]}},
+                        typename Traits::AOp{
+                            CkHiptensorUnaryOp{operators[1]},
+                            typename Traits::ScaleOp{
+                                static_cast<decltype(Traits::ScaleOp::scale_)>(scalarValues[0])}},
+                        typename Traits::COp{
+                            CkHiptensorUnaryOp{operators[2]},
+                            typename Traits::ScaleOp{
+                                static_cast<decltype(Traits::ScaleOp::scale_)>(scalarValues[1])}},
                     })); // ignore opB since none operation should be applied on output
             }
             else if constexpr(Traits::InstanceType
@@ -212,12 +218,18 @@ namespace hiptensor
                     typename Traits::CombinedOp{
                         typename Traits::ABCOp{operators[0]},
                         typename Traits::ABOp{operators[1]},
-                        typename Traits::AOp{CkHiptensorUnaryOp{operators[2]},
-                                             CkScale{scalarValues[0]}},
-                        typename Traits::AOp{CkHiptensorUnaryOp{operators[3]},
-                                             CkScale{scalarValues[1]}},
-                        typename Traits::COp{CkHiptensorUnaryOp{operators[4]},
-                                             CkScale{scalarValues[2]}},
+                        typename Traits::AOp{
+                            CkHiptensorUnaryOp{operators[2]},
+                            typename Traits::ScaleOp{
+                                static_cast<decltype(Traits::ScaleOp::scale_)>(scalarValues[0])}},
+                        typename Traits::BOp{
+                            CkHiptensorUnaryOp{operators[3]},
+                            typename Traits::ScaleOp{
+                                static_cast<decltype(Traits::ScaleOp::scale_)>(scalarValues[1])}},
+                        typename Traits::COp{
+                            CkHiptensorUnaryOp{operators[4]},
+                            typename Traits::ScaleOp{
+                                static_cast<decltype(Traits::ScaleOp::scale_)>(scalarValues[2])}},
                     })); // ignore opB since none operation should be applied on output
             }
             else

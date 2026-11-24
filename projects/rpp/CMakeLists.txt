@@ -392,10 +392,9 @@ endif()
 
 message("-- ${White}${PROJECT_NAME} -- Using Compiler - Path:" ${CMAKE_CXX_COMPILER} "\tVersion:" ${CMAKE_CXX_COMPILER_VERSION} "\tCompiler:" ${CMAKE_CXX_COMPILER_ID}${ColourReset})
 message("-- ${White}${PROJECT_NAME} -- CMAKE_CXX_FLAGS:${CMAKE_CXX_FLAGS}${ColourReset}")
-target_link_libraries(${PROJECT_NAME} PRIVATE
-    OpenMP::OpenMP_CXX
-    HALF::half
-)
+target_link_libraries(${PROJECT_NAME} PRIVATE OpenMP::OpenMP_CXX)
+target_include_directories(${PROJECT_NAME} PUBLIC $<BUILD_INTERFACE:${HALF_INCLUDE_DIRS}>)
+
 if(RPP_HIP_HOST_TARGET)
     target_link_libraries(${PROJECT_NAME} PUBLIC ${RPP_HIP_HOST_TARGET})
 endif()
@@ -445,8 +444,10 @@ endif()
 # Test suite
 enable_testing()
 include(CTest)
-add_subdirectory(test)
-add_subdirectory(utilities/test_suite)
+if(BUILD_TESTING)
+    add_subdirectory(test)
+    add_subdirectory(utilities/test)
+endif()
 
 # Installation
 # install RPP libs -- {ROCM_PATH}/lib

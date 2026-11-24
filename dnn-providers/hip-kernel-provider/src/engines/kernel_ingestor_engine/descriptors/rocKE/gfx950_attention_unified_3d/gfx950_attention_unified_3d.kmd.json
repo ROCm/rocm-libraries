@@ -1,0 +1,51 @@
+{
+  "version": "1.0",
+  "id": "372fd988-a41b-4fac-9eda-2cfd3c67ecbd",
+  "name": "Gfx950AttentionUnified3D variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "head_size",
+      "type": "int",
+      "default_value": 128
+    },
+    {
+      "name": "num_query_heads",
+      "type": "int",
+      "default_value": 8
+    },
+    {
+      "name": "num_kv_heads",
+      "type": "int",
+      "default_value": 8
+    },
+    {
+      "name": "block_size",
+      "type": "int",
+      "default_value": 16
+    },
+    {
+      "name": "mask_type",
+      "type": "int",
+      "default_value": 2
+    },
+    {
+      "name": "sliding_window",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "num_segments",
+      "type": "int",
+      "default_value": 16
+    },
+    {
+      "name": "use_decode_grid",
+      "type": "int",
+      "default_value": 1
+    }
+  ]
+}

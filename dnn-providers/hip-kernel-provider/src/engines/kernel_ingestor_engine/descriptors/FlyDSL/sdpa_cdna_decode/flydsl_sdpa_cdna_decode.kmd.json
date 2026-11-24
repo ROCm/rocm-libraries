@@ -1,0 +1,59 @@
+{
+  "version": "1.0",
+  "id": "3ebdeb0d-adbe-50c3-b251-ea4b5710d50f",
+  "name": "flydsl sdpa_cdna_decode variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "head_dim",
+      "type": "int"
+    },
+    {
+      "name": "causal",
+      "type": "int"
+    },
+    {
+      "name": "block_m",
+      "type": "int"
+    },
+    {
+      "name": "waves_per_eu",
+      "type": "int"
+    },
+    {
+      "name": "has_bias",
+      "type": "int"
+    },
+    {
+      "name": "kv_gpfetch",
+      "type": "int"
+    },
+    {
+      "name": "head_dim_v",
+      "type": "int"
+    },
+    {
+      "name": "qk_mask",
+      "type": "int"
+    },
+    {
+      "name": "dv_split",
+      "type": "int"
+    },
+    {
+      "name": "k_chunk",
+      "type": "int"
+    },
+    {
+      "name": "has_sink",
+      "type": "int"
+    },
+    {
+      "name": "merge_symbol",
+      "type": "string"
+    }
+  ]
+}

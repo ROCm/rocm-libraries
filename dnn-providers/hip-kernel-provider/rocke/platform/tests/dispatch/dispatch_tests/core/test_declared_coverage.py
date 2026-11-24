@@ -13,7 +13,12 @@ from __future__ import annotations
 
 import unittest
 
-from rocke.core.arch import ArchTarget, known_arches
+from rocke.core.arch import (
+    ArchTarget,
+    arches_with_own_facts,
+    known_arches,
+    listed_arch_for,
+)
 from rocke.dispatch.families.moe import MOE_REGISTRY, MoeRequest
 from rocke.dispatch.families.norm import NORM_REGISTRY, NormRequest
 
@@ -78,7 +83,11 @@ class TestDeclaredCoverage(unittest.TestCase):
     def test_no_candidate_admits_an_architecture_it_did_not_declare(self):
         for registry, requests in _FAMILIES:
             for candidate in registry.candidates():
-                undeclared = set(known_arches()) - set(candidate.capability.arches)
+                undeclared = {
+                    arch
+                    for arch in known_arches()
+                    if listed_arch_for(arch, candidate.capability.arches) is None
+                }
                 for arch in sorted(undeclared):
                     with self.subTest(candidate=candidate.name, arch=arch):
                         for req in requests(arch):
@@ -126,9 +135,24 @@ class TestDeclaredCoverage(unittest.TestCase):
                         {
                             c.name
                             for c in registry.candidates()
-                            if arch in c.capability.arches
+                            if listed_arch_for(arch, c.capability.arches) is not None
                         },
                     )
+
+    def test_norm_declares_each_target_with_its_own_facts_once(self):
+        """Norm serves every known target, but declares only the ones that hold
+        facts of their own: a processor whose row points at a generic target is
+        served through that generic's entry, so listing it as well would only
+        build the generic's kernels again under another name."""
+        for candidate in NORM_REGISTRY.candidates():
+            with self.subTest(candidate=candidate.name):
+                self.assertEqual(candidate.capability.arches, arches_with_own_facts())
+        for arch in known_arches():
+            with self.subTest(arch=arch):
+                self.assertEqual(
+                    {c.name for c in NORM_REGISTRY.for_arch(arch)},
+                    {c.name for c in NORM_REGISTRY.candidates()},
+                )
 
     def test_coverage_manifest_is_complete(self):
         for registry, _ in _FAMILIES:

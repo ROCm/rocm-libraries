@@ -271,6 +271,248 @@ static int make_cfg_raw(int idx, rocke_implicit_gemm_conv_spec_t* spec, const ch
         *arch = "gfx950";
         return 0;
     }
+    case 29:
+    case 30:
+    case 31:
+    case 32:
+    {
+        /* Group merging on WMMA (wave32). Same depthwise problem as 21-28.
+         * 29: gfx1250 mem/cshuffle, 30: gfx1250 wavelet/cshuffle, 31: gfx1250
+         * direct epilogue (vector_size_c pinned to 1), 32: gfx1151 (gfx11
+         * WMMA, 16x16x16 atom) mem/cshuffle. Keep in lockstep with
+         * conv_implicit_gemm_emit.py. */
+        static const int kGm[] = {8, 16, 4, 8}; /* idx 29..32 */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 64;
+        spec->group_merge = kGm[idx - 29];
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 1;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = (idx == 32) ? 16 : 32;
+        spec->wave_size = 32;
+        if(idx == 30)
+        {
+            spec->pipeline = "wavelet";
+            spec->num_load_waves = 2;
+        }
+        if(idx == 31)
+        {
+            spec->has_vector_size_c = true;
+            spec->vector_size_c = 1;
+        }
+        else
+        {
+            spec->epilogue = "cshuffle";
+        }
+        *arch = (idx == 32) ? "gfx1151" : "gfx1250";
+        return 0;
+    }
+    case 33:
+    case 34:
+    case 35:
+    {
+        /* Grid-per-group WMMA (unmerged) on gfx1250 grouped problems.
+         * 33: groups=4 (cpg=kpg=16) mem/cshuffle, 34:
+         * depthwise (cpg=kpg=1) mem/default, 35: groups=4 wavelet/cshuffle.
+         * Keep in lockstep with conv_implicit_gemm_emit.py. */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = (idx == 34) ? 64 : 4;
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 2;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->wave_size = 32;
+        if(idx == 35)
+        {
+            spec->pipeline = "wavelet";
+            spec->num_load_waves = 2;
+        }
+        if(idx != 34)
+        {
+            spec->epilogue = "cshuffle";
+        }
+        *arch = "gfx1250";
+        return 0;
+    }
+    case 36:
+    case 37:
+    case 38:
+        /* Grouped pointwise (1x1, stride 1, no pad): the flat fast path with
+         * the group's channel slab on A, the within-group filter bound on B and
+         * the group's columns in D's K-wide rows. groups=4, cpg=kpg=16. 36:
+         * direct store, 37: cshuffle store, 38: async_dma loaders. Keep in
+         * lockstep with conv_implicit_gemm_emit.py. */
+        spec->problem = rocke_conv_problem_default(2, 14, 14, 64, 64, 1, 1);
+        spec->problem.groups = 4;
+        if(idx == 37)
+            spec->epilogue = "cshuffle";
+        if(idx == 38)
+            spec->async_dma = true;
+        *arch = "gfx950";
+        return 0;
+    case 39:
+        /* Grouped pointwise on the WMMA direct store, which spells the
+         * pointwise D offset out inline rather than through d_addr. */
+        spec->problem = rocke_conv_problem_default(2, 14, 14, 64, 64, 1, 1);
+        spec->problem.groups = 4;
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 2;
+        spec->warp_n = 1;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 32;
+        spec->wave_size = 32;
+        *arch = "gfx1250";
+        return 0;
+    default:
+        return -1;
+    }
+}
+
+/* Split-K forward (split_k > 1) and its single-launch cluster form
+ * (split_k_cluster) on gfx1250 WMMA, plus one MFMA rejection. Keep in lockstep
+ * with _split_k_spec() in conv_implicit_gemm_emit.py.
+ *   40: wavelet/cshuffle, 16x16x64 tile (small M, deep K)
+ *   41: mem/cshuffle, 64x64 tile, 2x2 warps
+ *   42: mem/default (vector_size_c=1), 32x32x32 tile
+ *   43: grouped (groups=2) wavelet/cshuffle
+ *   44: cluster S=4, mem/cshuffle, 16x16x64 tile
+ *   45: cluster S=8, mem/cshuffle, 64x64 tile
+ *   46: cluster S=15, mem/cshuffle, 16x16x64 tile
+ *   47: cluster S=4, grouped (groups=2), 32x32 tile, 1x2 warps
+ *   48: cluster S=12, mem/default, 32x32x32 tile
+ *   49: split_k=2 on gfx950 (MFMA): rejected by both engines
+ *   50: split_k=2 with a bias acc_epilogue: rejected by both engines
+ *   51: split_k=0: rejected by both engines
+ *   52: cluster S=4 with K=kpg=10 (not a multiple of 4): rejected by both
+ *   53: cluster S=4 on gfx1201 (no cluster launch): rejected by both engines */
+static int make_cfg_split_k(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
+{
+    const rocke_conv_problem_t small_m
+        = rocke_conv_problem_make(1, 7, 7, 256, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+    const rocke_conv_problem_t csh_64
+        = rocke_conv_problem_make(2, 12, 12, 128, 96, 3, 3, 1, 1, 1, 1, 1, 1);
+    const rocke_conv_problem_t dflt
+        = rocke_conv_problem_make(1, 9, 9, 64, 40, 3, 3, 1, 1, 1, 1, 1, 1);
+    rocke_conv_problem_t grouped
+        = rocke_conv_problem_make(1, 10, 10, 128, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+    const rocke_conv_problem_t odd_k
+        = rocke_conv_problem_make(1, 7, 7, 256, 10, 3, 3, 1, 1, 1, 1, 1, 1);
+    grouped.groups = 2;
+
+    *spec = rocke_implicit_gemm_conv_spec_default();
+    spec->tile_m = 16;
+    spec->tile_n = 16;
+    spec->tile_k = 64;
+    spec->warp_m = 1;
+    spec->warp_n = 1;
+    spec->warp_tile_m = 16;
+    spec->warp_tile_n = 16;
+    spec->warp_tile_k = 32;
+    spec->wave_size = 32;
+    spec->has_vector_size_a = true;
+    spec->vector_size_a = 8;
+    spec->has_vector_size_b = true;
+    spec->vector_size_b = 8;
+    spec->has_vector_size_c = true;
+    spec->vector_size_c = 8;
+    spec->pipeline = "wavelet";
+    spec->epilogue = "cshuffle";
+    spec->num_load_waves = 1;
+    spec->split_k = 2;
+    *arch = "gfx1250";
+
+    switch(idx)
+    {
+    case 40:
+        spec->problem = small_m;
+        return 0;
+    case 41:
+    case 45:
+        spec->problem = csh_64;
+        spec->tile_m = 64;
+        spec->tile_n = 64;
+        spec->warp_m = 2;
+        spec->warp_n = 2;
+        spec->pipeline = "mem";
+        spec->split_k_cluster = (idx == 45) ? 8 : 0;
+        return 0;
+    case 42:
+    case 48:
+        spec->problem = dflt;
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->tile_k = 32;
+        spec->warp_m = 2;
+        spec->warp_n = 1;
+        spec->epilogue = "default";
+        spec->vector_size_c = 1;
+        spec->pipeline = "mem";
+        spec->split_k_cluster = (idx == 48) ? 12 : 0;
+        return 0;
+    case 43:
+        spec->problem = grouped;
+        return 0;
+    case 44:
+    case 46:
+        spec->problem = small_m;
+        spec->pipeline = "mem";
+        spec->split_k_cluster = (idx == 44) ? 4 : 15;
+        return 0;
+    case 47:
+        spec->problem = grouped;
+        spec->tile_m = 32;
+        spec->tile_n = 32;
+        spec->warp_m = 1;
+        spec->warp_n = 2;
+        spec->pipeline = "mem";
+        spec->split_k_cluster = 4;
+        return 0;
+    case 49:
+        spec->problem = csh_64;
+        spec->tile_m = 64;
+        spec->tile_n = 64;
+        spec->warp_m = 2;
+        spec->warp_n = 2;
+        spec->warp_tile_m = 32;
+        spec->warp_tile_n = 32;
+        spec->warp_tile_k = 16;
+        spec->wave_size = 64;
+        spec->pipeline = "mem";
+        *arch = "gfx950";
+        return 0;
+    case 50:
+        spec->problem = small_m;
+        spec->pipeline = "mem";
+        spec->acc_epilogue.bias = 1.0;
+        return 0;
+    case 51:
+        spec->problem = small_m;
+        spec->split_k = 0;
+        return 0;
+    case 52:
+        spec->problem = odd_k;
+        spec->pipeline = "mem";
+        spec->split_k_cluster = 4;
+        spec->vector_size_c = 2;
+        return 0;
+    case 53:
+        spec->problem = small_m;
+        spec->pipeline = "mem";
+        spec->split_k_cluster = 4;
+        spec->warp_tile_k = 16;
+        *arch = "gfx1201";
+        return 0;
     default:
         return -1;
     }
@@ -283,7 +525,12 @@ static int make_cfg_raw(int idx, rocke_implicit_gemm_conv_spec_t* spec, const ch
  * conv_implicit_gemm_emit.py. */
 static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char** arch)
 {
-    if(make_cfg_raw(idx, spec, arch) != 0)
+    if(idx >= 40 && idx <= 53)
+    {
+        if(make_cfg_split_k(idx, spec, arch) != 0)
+            return -1;
+    }
+    else if(make_cfg_raw(idx, spec, arch) != 0)
         return -1;
     if(strcmp(spec->epilogue, "default") == 0 && !spec->has_vector_size_c)
     {

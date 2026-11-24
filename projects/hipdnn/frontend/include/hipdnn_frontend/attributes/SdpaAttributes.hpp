@@ -138,7 +138,10 @@ public:
     // Scalar attributes
     std::optional<float> dropout_probability;
     std::optional<float> attn_scale_value;
+    /// Left diagonal-band bound: each query row keeps this many keys, including the diagonal;
+    /// -1 is unbounded and 0 is rejected.
     std::optional<int64_t> left_bound;
+    /// Right diagonal-band bound: keys up to this many past the diagonal are kept; -1 is unbounded.
     std::optional<int64_t> right_bound;
     std::optional<int32_t> max_seq_len_kv;
 
@@ -667,12 +670,37 @@ public:
         attn_scale_value = value;
         return *this;
     }
+    /**
+     * @brief Set the left bound of the diagonal attention band (sliding window).
+     *
+     * Follows cuDNN: a left bound of L keeps the L keys ending at the diagonal, diagonal
+     * included, so query i attends to keys j with j > i + offset - L (offset is 0 for
+     * TOP_LEFT and seq_kv - seq_q for BOTTOM_RIGHT). Must be >= 1, or -1 for unbounded.
+     * A FlashAttention-style window_size_left = W is the same window as a left bound of W + 1.
+     *
+     * Two values differ from cuDNN. -1 means unbounded here, where cuDNN leaves the bound
+     * unset. 0 is rejected in both directions, where cuDNN 9.10 and later accepts it in the
+     * forward pass: a provider whose kernels take FlashAttention's window would pass L - 1,
+     * turning 0 into -1, which those kernels read as unbounded.
+     *
+     * @param value The left bound L > 0, or -1 for unbounded. Graph validation rejects 0 and
+     *              values below -1.
+     * @return Reference to this object for method chaining.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_diagonal_band_left_bound(int64_t value)
     {
         left_bound = value;
         return *this;
     }
+    /**
+     * @brief Set the right diagonal-band bound (cuDNN semantics).
+     *
+     * right_bound = R keeps keys up to R past the diagonal; 0 is causal.
+     *
+     * @param value R >= 0, or -1 for unbounded. Graph validation rejects values below -1.
+     * @return Reference to this object for method chaining.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_diagonal_band_right_bound(int64_t value)
     {
@@ -746,7 +774,15 @@ public:
     {
         return set_generate_stats(!value);
     }
-    // cuDNN set_sliding_window_length(n) forwards to the left diagonal-band bound.
+    /**
+     * @brief cuDNN-compatible alias of set_diagonal_band_left_bound().
+     *
+     * A window length of n keeps the n keys ending at the diagonal, as in cuDNN.
+     *
+     * @param value Window length n: keys per query row, including the diagonal. n > 0, or -1
+     *              for unbounded; graph validation rejects 0 and values below -1.
+     * @return Reference to this object for method chaining.
+     */
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_sliding_window_length(int value)
     {

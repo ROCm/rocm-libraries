@@ -59,8 +59,9 @@ bool referenceCoversGraph(ReferenceExecutorType type, const void* graphBuffer, s
 /// shape worth spending the time on". Folding the second into the first would make
 /// a runtime-cost decision look like a missing capability.
 ///
-/// Only the CPU reference is gated, and only for Sdpa: it is scalar, so it is
-/// restricted to the `quick` tier and to shapes under a working-set cap. Excluded
+/// Only the CPU reference is gated, and only for Sdpa forward and backward: it is scalar, so
+/// it is restricted to the `quick` tier and, per direction, to shapes under a cost cap (a
+/// working-set cap for the forward, a multiply-accumulate cap for the backward). Excluded
 /// bundles stay covered by the GPU lane, so this trades CPU cross-checking of the
 /// larger shapes for a golden-data run that finishes. That trade only holds while
 /// the GPU lane actually runs, which is the planner's job to establish -- see
@@ -117,6 +118,11 @@ const std::vector<KnownReferenceGap>& knownReferenceGaps();
 
 /// The entry for this (reference, bundle) pair, or nullptr when none exists.
 const KnownReferenceGap* findKnownReferenceGap(ReferenceExecutorType type,
+                                               std::string_view bundleId);
+
+/// The same lookup in a caller's table (tests exercise the gap path with their own entries).
+const KnownReferenceGap* findKnownReferenceGap(const std::vector<KnownReferenceGap>& gaps,
+                                               ReferenceExecutorType type,
                                                std::string_view bundleId);
 
 } // namespace hipdnn_integration_tests::bundle

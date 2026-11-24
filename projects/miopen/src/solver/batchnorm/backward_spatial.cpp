@@ -195,8 +195,8 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
                                                const miopen::batchnorm::ProblemDescription& problem,
                                                const PerformanceConfigBnBwdBackward& config) const
 {
-    const auto& handle      = context.GetStream();
-    const unsigned wavesize = (miopen::StartsWith(handle.GetDeviceName(), "gfx10") ? 32 : 64);
+    const auto& handle  = context.GetStream();
+    const auto wavesize = handle.GetWavefrontWidth();
 
     bool bfpmixparm   = false;
     bool bbfpmixparam = false;
@@ -277,7 +277,8 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
                                       in_cstride,
                                       ylocalsize,
                                       zlocalsize,
-                                      nelements);
+                                      nelements,
+                                      vectorsize);
 
         // WG size for Final kernels (NHWC)
         if(problem.IsLayoutNHWC() && c % 2 == 0 && xlocalsize % 2 == 0)
@@ -345,6 +346,10 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
             };
 
             build_params.Define("HIP_ENABLE_EXTRA_WARP_SYNC_TYPES");
+            if(MIOPEN_USE_RNE_BFLOAT16)
+            {
+                build_params.Define("MIOPEN_USE_RNE_BFLOAT16");
+            }
 
             kernel.comp_options = build_params.GenerateFor(kbp::HIP());
 

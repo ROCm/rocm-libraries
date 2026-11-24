@@ -10,6 +10,7 @@ Loads, stores, barriers, async copies, and MFMA ops are never moved or removed.
 
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass
 from typing import Dict, List, Mapping, Optional, Tuple
 
@@ -144,10 +145,21 @@ def _cse_key(op: Op) -> Tuple:
 
 
 def _freeze_attr(v):
+    """``v`` as a hashable key that is equal only for attrs that lower the same.
+
+    Python's ``==`` would merge values the C++ engine keeps apart (it compares
+    an attr's kind, and a float's bits): ``-0.0 == 0.0``, ``1 == 1.0 == True``,
+    and a NaN never equals itself. So a float is keyed by its bit pattern and a
+    bool by its kind; two constants ``0.0`` and ``-0.0`` stay two values.
+    """
     if isinstance(v, (tuple, list)):
         return tuple(_freeze_attr(x) for x in v)
     if isinstance(v, dict):
         return tuple(sorted((k, _freeze_attr(x)) for k, x in v.items()))
+    if isinstance(v, bool):
+        return ("bool", v)
+    if isinstance(v, float):
+        return ("float", struct.pack("<d", v))
     return v
 
 

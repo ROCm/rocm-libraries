@@ -127,12 +127,12 @@ class InstructionEmitter:
         self._dispatch = {
             'mfma':         lambda em, ui: self.emit_mfma(em.source, ui),
             'lr':           lambda em, ui: self.emit_lr(em.source, ui),
-            'gr':           lambda em, ui: self.emit_gr(em.source),
+            'gr':           lambda em, ui: self.emit_gr(em.source, ui),
             'wait_gr':      lambda em, ui: self.emit_wait_gr(em.source),
             'wait_lr':      lambda em, ui: self.emit_wait_lr(),
             'sync':         lambda em, ui: self.emit_sync(),
-            'lr_inc':       lambda em, ui: self.emit_lr_inc(em.source),
-            'gr_inc':       lambda em, ui: self.emit_gr_inc(em.source),
+            'lr_inc':       lambda em, ui: self.emit_lr_inc(em.source, ui),
+            'gr_inc':       lambda em, ui: self.emit_gr_inc(em.source, ui),
             'skip':         lambda em, ui: self.emit_skip(em.source),
             'mask_k':       lambda em, ui: self.emit_mask_k(em.source),
             'inline':       lambda em, ui: self.emit_inline(em.source),
@@ -148,6 +148,13 @@ class InstructionEmitter:
         """Emit MFMA instructions from MFMAPlacement."""
         module = Module()
         subIterK = placement.subIterK
+        # Dual-period MXFP8: the data body is unrolled scaleReuse times per
+        # 256-K scale epoch (unroll_iter in [0, scaleReuse)).  Scales live on
+        # the epoch, not on the data subIterK axis (numSubIterK == 1), so the
+        # K-phase that selects the scale byte within the shared 4B dword is the
+        # data-iteration parity, i.e. unroll_iter, NOT subIterK (always 0).
+        dualPeriodScale = self.hasScale and getattr(self.config, 'dualPeriodScale', False)
+        scalePhase = (unroll_iter % self.config.scaleReuse) if dualPeriodScale else subIterK
         tile_maps = {t: placement.vgpr_tile_maps[t][unroll_iter]
                      for t in placement.vgpr_tile_maps}
 
@@ -185,8 +192,8 @@ class InstructionEmitter:
                 mShapeB = self.tileInfoMap['SB'].lrSubtileShape[0]
                 kShapeA = self.tileInfoMap['SA'].lrSubtileShape[1]
                 kShapeB = self.tileInfoMap['SB'].lrSubtileShape[1]
-                sAsel = (a % mShapeA) + mShapeA * (subIterK % kShapeA)
-                sBsel = (b % mShapeB) + mShapeB * (subIterK % kShapeB)
+                sAsel = (a % mShapeA) + mShapeA * (scalePhase % kShapeA)
+                sBsel = (b % mShapeB) + mShapeB * (scalePhase % kShapeB)
             else:
                 scaleAVgpr = scaleBVgpr = -1
                 sAsel = sBsel = 0
@@ -195,7 +202,7 @@ class InstructionEmitter:
                 self.writer, self.kernel, aTile, bTile, dTile, dTile,
                 scaleAVgpr=scaleAVgpr, scaleBVgpr=scaleBVgpr,
                 scaleAsel=sAsel, scaleBsel=sBsel,
-                comment=f"MFMA C[{a},{b}] += A[{a},K={subIterK}] * B[{b},K={subIterK}]"))
+                comment=f"MFMA C[{a},{b}] += A[{a},K={scalePhase}] * B[{b},K={scalePhase}]"))
         return list(module.flatitems())
 
     def emit_lr(self, placement, unroll_iter=0):
@@ -232,14 +239,33 @@ class InstructionEmitter:
                     module.add(emitSingleDsRead(
                         ti, tileId, subtileK, subIterK_within, dstTile, swizzled=swizzled))
         elif tensor in ('SA', 'SB'):
+            # Dual-period MXFP8: one scale dword covers both K phases of the
+            # epoch and lives in a globally-colored VGPR that survives across
+            # the scaleReuse-unrolled data iterations.  Read it once per epoch
+            # (unroll_iter 0); later data iterations reuse the resident dword
+            # (the MFMA selects the K-phase byte via op_sel_hi).  This keeps the
+            # steady-state epoch at exactly six scale ds_reads.
+            if getattr(self.config, 'dualPeriodScale', False) and unroll_iter > 0:
+                return []
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             ti = self.tileInfoMap[tensor]
             lrGran = self.config.lrSA if tensor == 'SA' else self.config.lrSB
             vgprTilesScale = self.vgprTilesSA if tensor == 'SA' else self.vgprTilesSB
+            # Same uid-local fold as A/B above, and inert for the same reason:
+            # numUnroll > 1 for a scale tensor means its LDS region holds one
+            # uid's worth of k and the base register swaps between them, so k
+            # has to come back to the start of the region rather than running
+            # past its end. Multi-DU proper leaves the scales at numUnroll == 1
+            # — there the region really does span every k — so only the
+            # four-deep tail takes this branch.
+            nUnroll = self.config.numUnroll.get(tensor, 1)
+            k_start = placement.tiles.subIterK_start
+            if nUnroll > 1:
+                k_start %= self._per_uid_k[tensor]
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
                 scaleGroupIdx = tileId // lrGran.mn
                 groupKey = scaleGroupIdx * lrGran.mn
-                kGroupIdx = placement.tiles.subIterK_start // ti.lrSubtileShape[1]
+                kGroupIdx = k_start // ti.lrSubtileShape[1]
                 numKGroups = ti.lrLocalSubtileGrid[1]
                 dsOffset = int(ti.lrSubtileSize) * (scaleGroupIdx * numKGroups + kGroupIdx)
                 vdst = next(iter(vgprTilesScale[tile_map[groupKey]]))
@@ -250,7 +276,7 @@ class InstructionEmitter:
                     comment=f"scale{tc}[group{scaleGroupIdx},K={placement.tiles.subIterK_start}]: load 4B from LDS"))
         return list(module.flatitems())
 
-    def emit_gr(self, placement):
+    def emit_gr(self, placement, unroll_iter=0):
         """Emit GR (buffer_load) instructions from GRPlacement."""
         module = Module()
         tensor = placement.tensor
@@ -265,6 +291,12 @@ class InstructionEmitter:
                     module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK,
                                                     writer=self.writer))
         elif tensor in ('SA', 'SB'):
+            # Dual-period MXFP8: one scale epoch (256 K) feeds scaleReuse data
+            # iterations.  Prefetch the next epoch's scales (SRD advance + DTL
+            # load) exactly once per epoch (unroll_iter 0); later data
+            # iterations must NOT re-advance the scale SRD or re-issue the load.
+            if getattr(self.config, 'dualPeriodScale', False) and unroll_iter > 0:
+                return []
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             module.add(globalReadDoScaleSubtile(tc, self.writer, self.kernel))
         return list(module.flatitems())
@@ -294,6 +326,42 @@ class InstructionEmitter:
         if force_drain:
             grCnt = 0
             label = "full drain"
+        elif counts.use_gr_placement_counts:
+            # Multi-partition (block scheduling forces four; VGPR pressure can
+            # also split). A partition boundary need not land on a GR-subtile
+            # boundary, so the raw GRPlacement atom counts convert to
+            # buffer_loads by ceil rather than through the grMap table.
+            import math
+            sa_info = self.tileInfoMap.get('SA')
+            sb_info = self.tileInfoMap.get('SB')
+            def _to_loads(n, ratio):
+                return math.ceil(n / ratio) if (n and ratio) else 0
+            nA  = _to_loads(counts.A,  self.tileInfoA.loadRatioGR)
+            nB  = _to_loads(counts.B,  self.tileInfoB.loadRatioGR)
+            nSA = _to_loads(counts.SA, sa_info.loadRatioGR) if sa_info else 0
+            nSB = _to_loads(counts.SB, sb_info.loadRatioGR) if sb_info else 0
+            grCnt = nA + nB + nSA + nSB
+            assert grCnt > 0, (
+                f"use_gr_placement_counts=True but buffer_load sum is 0 "
+                f"(nA={nA} nB={nB} nSA={nSA} nSB={nSB}); "
+                f"check mt1_ops GRPlacement counts at build_preloop call site"
+            )
+            label = f"mt1-partition-0: A={nA} B={nB} SA={nSA} SB={nSB}"
+        elif counts.use_num_gr_total:
+            # Single-partition fast path: exact buffer_load count from tileInfo.
+            # Avoids the grMap formula which miscounts when loadRatioGR >= 1.
+            sa_info = self.tileInfoMap.get('SA')
+            sb_info = self.tileInfoMap.get('SB')
+            nA  = self.tileInfoA.numGRTotal
+            nB  = self.tileInfoB.numGRTotal
+            nSA = sa_info.numGRTotal if sa_info else 0
+            nSB = sb_info.numGRTotal if sb_info else 0
+            grCnt = nA + nB + nSA + nSB
+            assert grCnt > 0, (
+                f"use_num_gr_total=True but numGRTotal sums to 0 "
+                f"(nA={nA} nB={nB} nSA={nSA} nSB={nSB})"
+            )
+            label = f"per-subIterK: A={nA} B={nB} SA={nSA} SB={nSB}"
         else:
             grCnt = (counts.A * grMap['A'] +
                      counts.B * grMap['B'] +
@@ -319,23 +387,38 @@ class InstructionEmitter:
         mod = source.build(self)
         return list(mod.flatitems()) if mod is not None else []
 
-    def emit_lr_inc(self, source):
+    def emit_lr_inc(self, source, unroll_iter=0):
         """Emit localReadLDSBufferSwap for a single tensor."""
         tensor = source.tensor
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
         module = Module()
+        # Dual-period MXFP8: the scale LDS double-buffer is driven on the 256-K
+        # epoch cadence.  Toggle the scale LR read-half once per epoch
+        # (unroll_iter 0) so it tracks the GR write-half swap; toggling on every
+        # data iteration would net to zero over the epoch and leave the LR
+        # reading the stale half.
+        if tensor in ('SA', 'SB') and getattr(self.config, 'dualPeriodScale', False) \
+                and unroll_iter > 0:
+            return []
         module.add(localReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
 
-    def emit_gr_inc(self, source):
+    def emit_gr_inc(self, source, unroll_iter=0):
         """Emit globalReadPtrUpdates + globalReadLDSBufferSwap for a single tensor."""
         tensor = source.tensor
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
+        hold = getattr(source, 'holdOnLastIter', False)
         module = Module()
         if tensor in ('SA', 'SB'):
-            module.add(globalReadScalePtrUpdates(tc, self.writer, self.kernel))
+            # Dual-period MXFP8: advance the scale SRD and swap the scale LDS
+            # double-buffer once per 256-K epoch (unroll_iter 0).  Advancing on
+            # every data iteration would over-stride the scale pointer by
+            # scaleReuse and desynchronize scales from data.
+            if getattr(self.config, 'dualPeriodScale', False) and unroll_iter > 0:
+                return []
+            module.add(globalReadScalePtrUpdates(tc, self.writer, self.kernel, hold))
         else:
-            module.add(globalReadPtrUpdates(tc, self.writer, self.kernel))
+            module.add(globalReadPtrUpdates(tc, self.writer, self.kernel, hold))
         module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
 
@@ -398,9 +481,18 @@ class InstructionEmitter:
                 module.add(cmpCls(
                     src0=sgpr("LoopCounterL"), src1=sgpr(litSgpr),
                     comment=f"LoopCounter {source.compare} {source.value}?"))
-        module.add(SCBranchSCC1(
-            labelName=skipLabel.getLabelName(),
-            comment=source.branchComment or f"skip to {source.target}"))
+        # PostLoopStoreInNll bias/SAV bloats the NLL bodies so this preloop skip
+        # (e.g. SkipToNLL, which jumps across the whole preloop+mainloop+NGLL) can
+        # exceed the +-simm16 short-branch range. Emit a 32-bit long branch in that
+        # mode; every other kernel keeps the original short branch (byte-identical).
+        if getattr(self.writer.states, "postLoopStoreInNll", False):
+            module.add(self.writer.longBranchScc1(
+                skipLabel, posNeg=1,
+                comment=(source.branchComment or f"skip to {source.target}") + " (long)"))
+        else:
+            module.add(SCBranchSCC1(
+                labelName=skipLabel.getLabelName(),
+                comment=source.branchComment or f"skip to {source.target}"))
         return list(module.flatitems())
 
     def _mfma_K_constants(self):

@@ -278,9 +278,10 @@ class WmmaFmhaDecodeSpec:
         return bool(self.bias or self.softcap or self.alibi or self.qq_bias)
 
     # ---- hipDNN catalog metadata ----
-    # hipkernel:Gfx1151WmmaAttention ships this spec beside WmmaFmhaFwdV2Spec, and
-    # its IngestorGenerator specialization binds each matcher field to one accessor
-    # both specs define (configs/gfx1151_wmma_attention.yaml).
+    # hipkernel:Gfx1151WmmaAttentionDecode ships this spec, and
+    # hipkernel:Gfx1151WmmaAttention WmmaFmhaFwdV2Spec; both IngestorGenerator
+    # specializations bind each matcher field to one accessor both specs define
+    # (configs/gfx1151_wmma_attention_decode.yaml, configs/gfx1151_wmma_attention.yaml).
     def catalog_kind(self) -> str:
         """``"decode"``: this object runs the split-KV decode (with its merge)."""
         return "decode"

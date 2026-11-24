@@ -254,13 +254,13 @@ def test_ductile_backend_forwards_auto_pop_size_to_ga(monkeypatch, tmp_path, con
         def evaluate(self, _best):
             return np.array([1.0], dtype=np.float32)
 
-    monkeypatch.setattr("Tensile.backends.ductile_backend.GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.GeneticAlgorithm", FakeGA)
     monkeypatch.setattr(
-        "Tensile.backends.ductile_backend._generate_ga_solutions",
+        "tensilelite.backends.ductile_backend._generate_ga_solutions",
         lambda *_args, **_kwargs: [types.SimpleNamespace(), types.SimpleNamespace()],
     )
     monkeypatch.setattr(
-        "Tensile.backends.ductile_backend.printExit",
+        "tensilelite.backends.ductile_backend.printExit",
         lambda msg: (_ for _ in ()).throw(RuntimeError(msg)),
     )
 
@@ -300,13 +300,13 @@ def test_ductile_backend_forwards_on_generation_end_callback_to_ga(monkeypatch, 
         def evaluate(self, _best):
             return np.array([1.0], dtype=np.float32)
 
-    monkeypatch.setattr("Tensile.backends.ductile_backend.GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.GeneticAlgorithm", FakeGA)
     monkeypatch.setattr(
-        "Tensile.backends.ductile_backend._generate_ga_solutions",
+        "tensilelite.backends.ductile_backend._generate_ga_solutions",
         lambda *_args, **_kwargs: [types.SimpleNamespace(), types.SimpleNamespace()],
     )
     monkeypatch.setattr(
-        "Tensile.backends.ductile_backend.printExit",
+        "tensilelite.backends.ductile_backend.printExit",
         lambda msg: (_ for _ in ()).throw(RuntimeError(msg)),
     )
     _patch_ductile_backend_primitives(monkeypatch, _base_ductile_merged_config())
@@ -347,13 +347,13 @@ def test_save_iteration_csv_copies_results_into_ga_iters_dir(monkeypatch, tmp_pa
         def evaluate(self, _best):
             return np.array([1.0], dtype=np.float32)
 
-    monkeypatch.setattr("Tensile.backends.ductile_backend.GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.GeneticAlgorithm", FakeGA)
     monkeypatch.setattr(
-        "Tensile.backends.ductile_backend._generate_ga_solutions",
+        "tensilelite.backends.ductile_backend._generate_ga_solutions",
         lambda *_args, **_kwargs: [_fake_solution("sol0"), _fake_solution("sol1")],
     )
     monkeypatch.setattr(
-        "Tensile.backends.ductile_backend.getSolutionNameMin",
+        "tensilelite.backends.ductile_backend.getSolutionNameMin",
         lambda solution, _splitgsu: solution.name,
     )
     _patch_ductile_backend_primitives(monkeypatch, _base_ductile_merged_config())
@@ -386,9 +386,9 @@ def test_save_iteration_csv_noop_when_no_results_file_yet(monkeypatch, tmp_path)
         def evaluate(self, _best):
             return np.array([1.0], dtype=np.float32)
 
-    monkeypatch.setattr("Tensile.backends.ductile_backend.GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.GeneticAlgorithm", FakeGA)
     monkeypatch.setattr(
-        "Tensile.backends.ductile_backend._generate_ga_solutions",
+        "tensilelite.backends.ductile_backend._generate_ga_solutions",
         lambda *_args, **_kwargs: [types.SimpleNamespace(), types.SimpleNamespace()],
     )
     _patch_ductile_backend_primitives(monkeypatch, _base_ductile_merged_config())
@@ -1105,21 +1105,21 @@ def test_run_captures_and_forwards_rocisa_data_to_validate_fn(monkeypatch, tmp_p
         def evaluate(self, _b):
             return np.array([1.0], dtype=np.float32)
 
-    monkeypatch.setattr("Tensile.backends.ductile_backend.GeneticAlgorithm", FakeGA)
-    monkeypatch.setattr("Tensile.backends.ductile_backend.SearchSpace", _CapturingSearchSpace)
-    monkeypatch.setattr("Tensile.backends.ductile_backend.Selection", _FakeFactory)
-    monkeypatch.setattr("Tensile.backends.ductile_backend.Crossover", _FakeFactory)
-    monkeypatch.setattr("Tensile.backends.ductile_backend.Survival", _FakeFactory)
-    monkeypatch.setattr("Tensile.backends.ductile_backend.Mutation", _FakeMutation)
-    monkeypatch.setattr("Tensile.backends.ductile_backend.Mating", _FakeMating)
-    monkeypatch.setattr("Tensile.backends.ductile_backend.ductile_config.update", lambda _: _base_merged_config())
-    monkeypatch.setattr("Tensile.backends.ductile_backend.ductile_config.populate", lambda c, n: {"name": c[n]["name"]})
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.SearchSpace", _CapturingSearchSpace)
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.Selection", _FakeFactory)
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.Crossover", _FakeFactory)
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.Survival", _FakeFactory)
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.Mutation", _FakeMutation)
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.Mating", _FakeMating)
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.ductile_config.update", lambda _: _base_merged_config())
+    monkeypatch.setattr("tensilelite.backends.ductile_backend.ductile_config.populate", lambda c, n: {"name": c[n]["name"]})
     monkeypatch.setattr(
-        "Tensile.backends.ductile_backend.getSolutionNameMin",
+        "tensilelite.backends.ductile_backend.getSolutionNameMin",
         lambda solution, _splitgsu: getattr(solution, "name", f"Cijk_{solution.solIdx}"),
     )
     monkeypatch.setattr(
-        "Tensile.backends.ductile_backend._generate_ga_solutions",
+        "tensilelite.backends.ductile_backend._generate_ga_solutions",
         lambda *a, **kw: [types.SimpleNamespace()],
     )
 

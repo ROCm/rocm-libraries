@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,7 @@
 extern "C" {
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \brief Work estimation step of the sparse matrix sparse matrix product:
 *  \f[
@@ -90,7 +91,6 @@ extern "C" {
 *                                        &bufferSize1, dBuffer1);
 *  \endcode
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEMMreuse_workEstimation(hipsparseHandle_t          handle,
                                                       hipsparseOperation_t       opA,
@@ -116,6 +116,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_workEstimation(hipsparseHandle_t      han
                                                       void*                  externalBuffer1);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \brief Nnz calculation step of the sparse matrix sparse matrix product:
 *  \f[
@@ -184,7 +185,6 @@ hipsparseStatus_t hipsparseSpGEMMreuse_workEstimation(hipsparseHandle_t      han
 *    hipFree(dBuffer2);
 *  \endcode
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEMMreuse_nnz(hipsparseHandle_t          handle,
                                            hipsparseOperation_t       opA,
@@ -220,6 +220,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_nnz(hipsparseHandle_t      handle,
 
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \brief Copy step of the sparse matrix sparse matrix product:
 *  \f[
@@ -286,7 +287,6 @@ hipsparseStatus_t hipsparseSpGEMMreuse_nnz(hipsparseHandle_t      handle,
 *    hipFree(dBuffer3);
 *  \endcode
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEMMreuse_copy(hipsparseHandle_t          handle,
                                             hipsparseOperation_t       opA,
@@ -312,6 +312,7 @@ hipsparseStatus_t hipsparseSpGEMMreuse_copy(hipsparseHandle_t      handle,
                                             void*                  externalBuffer5);
 #endif
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 /*! \ingroup generic_module
 *  \brief Copy step of the sparse matrix sparse matrix product:
 *  \f[
@@ -351,7 +352,6 @@ hipsparseStatus_t hipsparseSpGEMMreuse_copy(hipsparseHandle_t      handle,
 *          \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
 *          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
 */
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpGEMMreuse_compute(hipsparseHandle_t          handle,
                                                hipsparseOperation_t       opA,

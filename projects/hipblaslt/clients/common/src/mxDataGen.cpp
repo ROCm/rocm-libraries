@@ -431,6 +431,18 @@ std::vector<float> generateData(T                           dgen,
                         / static_cast<size_t>(elementsPerMXBlock)
                   : 0;
 
+        // When K runs along the columns the generator blocks along the contiguous MN
+        // dimension instead, so a partial trailing K block has no representation: the
+        // scales it emits describe MN blocks, not K blocks. The grid check below only
+        // catches that when the counts fail to factor, which depends on MN. At M = 64,
+        // K = 33 the 66 scales divide by kBlocks = 2 and pass it, leaving the reference
+        // to index a 64 by 2 grid into 66 entries. Reject the shape itself.
+        if(!kIsRows && elementsPerMXBlock > 0
+           && kExtent % static_cast<size_t>(elementsPerMXBlock) != 0)
+            throw std::runtime_error(
+                "GFX950 scales with K along the columns require K to be a multiple of "
+                + std::to_string(elementsPerMXBlock) + ", got " + std::to_string(kExtent));
+
         // Number of scale rows in scaleBytes. The generator emits one scale per
         // (MN, K block) pair, so scaleBytes.size() == mnExtent * kBlocks and the
         // row count divides straight back out.
@@ -446,8 +458,32 @@ std::vector<float> generateData(T                           dgen,
                   ? scaleBytes.size() / kBlocks
                   : static_cast<size_t>(kIsRows ? sizes[1] : sizes[0]);
 
+        // The grid has to describe the whole buffer. The swizzle checks this too, but
+        // the transpose below indexes mnExtent * kBlocks entries and would run off both
+        // vectors first. A free-dim contiguous operand whose K is not a multiple of the
+        // block size lands here: the generator blocks along the contiguous dimension, so
+        // its scale count does not factor into the K blocks the swizzle expects.
+        if(mnExtent * kBlocks != scaleBytes.size())
+            throw std::runtime_error("GFX950 scales do not form an MN by K block grid: "
+                                     + std::to_string(mnExtent) + " x " + std::to_string(kBlocks)
+                                     + " covers " + std::to_string(mnExtent * kBlocks) + " of "
+                                     + std::to_string(scaleBytes.size()) + " scales");
+
+        // The swizzle reads its input as [MN][K block]. A K-contiguous operand's
+        // natural scales are already in that order; a free-dim contiguous one's
+        // are [K block][MN] and must be transposed first.
+        std::vector<uint8_t> mnMajorScaleBytes;
+        if(!kIsRows)
+        {
+            mnMajorScaleBytes.resize(scaleBytes.size());
+            for(size_t kb = 0; kb < kBlocks; ++kb)
+                for(size_t mn = 0; mn < mnExtent; ++mn)
+                    mnMajorScaleBytes[mn * kBlocks + kb] = scaleBytes[kb * mnExtent + mn];
+        }
+        std::vector<uint8_t> const& swizzleInput = kIsRows ? scaleBytes : mnMajorScaleBytes;
+
         swizzledScaleBytes = DGen::preSwizzleScalesGFX950(
-            scaleBytes, {/*numScaleRows=*/mnExtent, /*numScaleCols=*/kBlocks});
+            swizzleInput, {/*numScaleRows=*/mnExtent, /*numScaleCols=*/kBlocks});
         break;
     }
     case MXScaleLayout::GFX1250:

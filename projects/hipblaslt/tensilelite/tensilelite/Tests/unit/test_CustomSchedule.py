@@ -522,7 +522,8 @@ class TestCustomScheduleBF16:
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == (2 if NT else 1)
         assert schedule_info.numMfma == 56
-        assert bool(kernel.get("SwapGlobalReadOrder", 0)) == NT
+        # 224x128 NT issues B first; the 128x224 mirror issues A first.
+        assert bool(kernel.get("SwapGlobalReadOrder", 0)) == (NT and mt0 > mt1)
         valid, message = isValid(schedule_info, {"kernel" : kernel})
         assert valid, message
 

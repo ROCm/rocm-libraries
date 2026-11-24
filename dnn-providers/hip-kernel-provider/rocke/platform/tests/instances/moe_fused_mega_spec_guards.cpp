@@ -13,8 +13,8 @@
  *      drift, the budget gate starts rejecting valid specs;
  *   2. an over-budget tiling is rejected by the fused total even though both
  *      GEMM sub-specs pass their own validator;
- *   3. the fp8 mega rejects the scaled-f8f6f4 hero atom on a target without the
- *      instruction, and accepts the catalog 16x16x32 atom there;
+ *   3. the fp8 mega rejects the K=128 hero atom on a target whose MMA catalog
+ *      does not list it, and accepts the catalog 16x16x32 atom there;
  *   4. the fp8 mega rejects a wave32 target with gemm_universal's phrasing.
  *
  * The two _lds_allocs ports live in the instances' *_internal.h headers (they
@@ -308,10 +308,9 @@ static void test_fp8_guards(void)
     size_t i;
     static const char* const wave32_arches[] = {"gfx1250", "gfx1151"};
 
-    /* 1. The K=128 hero atom lowers to mfma.scale.f32.16x16x128.f8f6f4, which
-     * gfx942 does not have. It is not a catalog shape anywhere, so the shared
-     * catalog guard is skipped and this needs its own rejection -- otherwise the
-     * CDNA4-only instruction reaches comgr as an uncatchable LLVM abort. */
+    /* 1. The K=128 hero atom is the gfx950 fp8 16x16x128 MFMA, which the gfx942
+     * MMA catalog does not list. The catalog guard refuses it before the
+     * instruction can reach comgr as an uncatchable LLVM abort. */
     spec = fp8_spec();
     rocke_fused_mega_kernel_spec_fp8_post_init(&spec);
     ll = fp8_lower(&spec, "gfx942", err, sizeof(err));
@@ -322,8 +321,8 @@ static void test_fp8_guards(void)
     }
     else
     {
-        expect_contains("fp8/gfx942_hero_atom", err, "16x16x128");
-        expect_contains("fp8/gfx942_hero_atom", err, "gfx942");
+        expect_contains(
+            "fp8/gfx942_hero_atom", err, "(fp8e4m3 16x16x128) is not in the gfx942 MMA catalog");
     }
 
     /* 2. The legacy K=32 path IS a gfx942 catalog shape, so it must still build.
@@ -360,7 +359,9 @@ static void test_fp8_guards(void)
     }
     else
     {
-        expect_contains("fp8/gfx942_hero_down_atom", err, "16x16x128");
+        expect_contains("fp8/gfx942_hero_down_atom",
+                        err,
+                        "(fp8e4m3 16x16x128) is not in the gfx942 MMA catalog");
     }
 
     /* 3. Every lane map in the fp8 mega is wave64 (the amax butterfly is a
@@ -384,7 +385,7 @@ static void test_fp8_guards(void)
         }
     }
 
-    /* 4. gfx950 default still builds the hero atom. */
+    /* 4. gfx950's MMA catalog lists the hero atom, so its default spec builds. */
     spec = fp8_spec();
     rocke_fused_mega_kernel_spec_fp8_post_init(&spec);
     ll = fp8_lower(&spec, "gfx950", err, sizeof(err));

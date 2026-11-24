@@ -30,8 +30,36 @@ test_categories:
   # The unit categories run a partial slice of the suite (quick/standard exclude
   # GPU tests), so syrupy would flag the un-exercised snapshots as failures.
   # `--snapshot-warn-unused` downgrades those to warnings instead of errors.
+  #
+  # The quick and standard categories also pass `--dist=worksteal`. It only takes
+  # effect when pytest-xdist runs (parallel_workers > 1), and it needs
+  # pytest-xdist 3.2 or newer. xdist's default `load` scheduler
+  # sends each worker a fixed block of consecutive tests sized by count and never
+  # takes tests back, and about half of the unit suite's runtime sits in one
+  # block of consecutive tests (characterization/_codegen). One or two workers
+  # received that block while the rest finished and sat idle. `worksteal` lets
+  # idle workers take not-yet-started tests from busy ones.
+  #
+  # Under xdist each worker only sees its own tests, so syrupy no longer prints
+  # its "N snapshots passed" summary and cannot report unused snapshots. Mismatches
+  # still fail the tests, and unused snapshots were only warnings here.
+  #
+  # The quick and standard categories run eight xdist workers (parallel_workers:
+  # 8), overriding the global 1. The job's CPU allocation is 25 CPUs
+  # (KUBE_CPU_REQUEST), which the host's CPU count does not reflect. Each worker
+  # repeats its own startup (collecting the whole tree and priming ISA
+  # capabilities), so more workers stop paying for themselves: measured locally
+  # under a 25-CPU quota with worksteal and in-process ParallelMap, eight workers
+  # took 98 s and 25 took 102 s, against 394 s for one. The unit conftest pins
+  # CpuThreads to 1, so the tests no longer fan out their own process pools on
+  # top of the xdist workers.
+  #
+  # comprehensive and full stay at one worker: they also run the GPU unit tests
+  # (marker `gpu`), which take no per-GPU lock, so eight workers would all use
+  # the runner's one GPU. See execution_settings below.
   quick:
     description: "Fast host-only sanity checks (rocisa + TensileLite unit, no GPU)"
+    parallel_workers: 8
     test_paths:
       - "rocisa_tests"
       - "tensilelite/Tests/unit"
@@ -39,6 +67,7 @@ test_categories:
       - "gpu"
     pytest_args:
       - "--snapshot-warn-unused"
+      - "--dist=worksteal"
     labels:
       - "quick"
       - "pre-commit"
@@ -46,6 +75,7 @@ test_categories:
 
   standard:
     description: "Pre-checkin validation (rocisa + TensileLite unit, no GPU)"
+    parallel_workers: 8
     test_paths:
       - "rocisa_tests"
       - "tensilelite/Tests/unit"
@@ -53,6 +83,7 @@ test_categories:
       - "gpu"
     pytest_args:
       - "--snapshot-warn-unused"
+      - "--dist=worksteal"
     labels:
       - "standard"
       - "pr"

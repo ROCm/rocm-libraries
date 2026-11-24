@@ -14,7 +14,7 @@ import os
 
 import pytest
 
-from config_helpers import configMarks, findAvailableArchs
+from config_helpers import _usingStinkytofuBackend, configMarks, findAvailableArchs
 
 # These validate the gfx1250 xfail/ffm marking logic in-process, so tag them into the gfx1250 arch suite (-m gfx1250) alongside the
 # auto-added `common` mark, keeping them collected wherever gfx1250 marking is
@@ -36,6 +36,17 @@ _SKIP_GFX1250_STRICT_CONFIG = os.path.join(
 )
 # A gfx1250-strict config, tagged ``skip-gfx1250`` but not ``skip-gfx1250-strict``.
 _STRICT_ONLY_CONFIG = os.path.join(_COMMON_DIR, "gemm", "gfx12", "bf16_gfx1250-strict.yaml")
+
+# A gfx1250 config tagged ``skip-stinkytofu`` (subtile, not yet supported on the
+# stinkytofu backend). On a base gfx1250 target none of its arch-skip marks fire,
+# so skip-stinkytofu is the only thing that can add a skip -- which isolates the
+# backend gating below.
+_SKIP_STINKYTOFU_CONFIG = os.path.join(
+    _COMMON_DIR, "gemm", "gfx12", "subtile_bf16_gfx1250_cluster.yaml"
+)
+
+# The reason configMarks attaches to the skip it adds for skip-stinkytofu.
+_STINKYTOFU_SKIP_REASON = "Not yet supported in stinkytofu backend"
 
 _FFM_MEMFILE = "/dev/shm/hsakmt_model_root_test"
 
@@ -130,3 +141,101 @@ def test_base_skip_gfx1250_inert_on_strict_target():
     base = configMarks(_STRICT_ONLY_CONFIG, _TESTS_ROOT, findAvailableArchs("gfx1250"))
     assert pytest.mark.skip not in strict
     assert pytest.mark.skip in base
+
+
+# --- skip-stinkytofu backend gating ---------------------------------------
+#
+# configMarks skips a skip-stinkytofu config whenever its kernels would be built
+# on the stinkytofu backend. _usingStinkytofuBackend resolves that backend from
+# (in order) ROCISA_BACKEND, the gfx1250 target, and whether rocisa has swapped
+# in the stinkytofu adaptor. That last signal is process-global, so the fixture
+# below pins rocisa.__file__ with monkeypatch to keep these in-process tests
+# independent of the backend rocisa actually selected for the test process.
+
+
+@pytest.fixture
+def stinkytofu_backend(monkeypatch):
+    """Pin _usingStinkytofuBackend's view of the loaded rocisa module.
+
+    Returns a setter ``set_backend(adaptor=)`` that overrides ``rocisa.__file__``
+    to look like the adaptor shim or the native module, so the unset-env +
+    gfx1250 branch is deterministic regardless of the real backend.
+    """
+    import rocisa
+
+    def set_backend(*, adaptor):
+        monkeypatch.setattr(
+            rocisa,
+            "__file__",
+            "/pkg/rocisa_stinkytofu_adaptor/__init__.py" if adaptor else "/pkg/rocisa/__init__.py",
+            raising=False,
+        )
+
+    return set_backend
+
+
+def _has_stinkytofu_skip(marks):
+    """Whether configMarks added its skip-stinkytofu skip (matched by reason).
+
+    The arch-skip path adds a bare ``pytest.mark.skip``; the skip-stinkytofu path
+    adds ``pytest.mark.skip(reason=...)``, so match on the reason rather than on
+    mark identity to tell the two apart.
+    """
+    return any(
+        getattr(m, "name", None) == "skip"
+        and getattr(m, "kwargs", {}).get("reason") == _STINKYTOFU_SKIP_REASON
+        for m in marks
+    )
+
+
+def test_using_stinkytofu_env_rocisa_forces_native(monkeypatch):
+    """ROCISA_BACKEND=rocisa -> native even on a gfx1250 target."""
+    monkeypatch.setenv("ROCISA_BACKEND", "rocisa")
+    assert _usingStinkytofuBackend(["gfx1250"]) is False
+
+
+def test_using_stinkytofu_env_stinkytofu_ignores_arch(monkeypatch):
+    """ROCISA_BACKEND=stinkytofu -> stinkytofu even on a non-gfx1250 target."""
+    monkeypatch.setenv("ROCISA_BACKEND", "stinkytofu")
+    assert _usingStinkytofuBackend(["gfx950"]) is True
+
+
+def test_using_stinkytofu_unset_non_gfx1250_is_native(monkeypatch):
+    """Unset env + no gfx1250 target -> native; only gfx1250 routes to stinkytofu."""
+    monkeypatch.delenv("ROCISA_BACKEND", raising=False)
+    assert _usingStinkytofuBackend(["gfx950"]) is False
+
+
+def test_using_stinkytofu_unset_gfx1250_adaptor_loaded(monkeypatch, stinkytofu_backend):
+    """Unset env + gfx1250 target + adaptor already loaded -> stinkytofu."""
+    monkeypatch.delenv("ROCISA_BACKEND", raising=False)
+    stinkytofu_backend(adaptor=True)
+    assert _usingStinkytofuBackend(["gfx1250"]) is True
+
+
+def test_using_stinkytofu_unset_gfx1250_native_fallback(monkeypatch, stinkytofu_backend):
+    """Unset env + gfx1250 target + adaptor not loaded (stinkytofu unavailable, so
+    rocisa stayed on native) -> NOT stinkytofu. Resolved from the loaded module,
+    so no second nanobind binding is imported to find this out."""
+    monkeypatch.delenv("ROCISA_BACKEND", raising=False)
+    stinkytofu_backend(adaptor=False)
+    assert _usingStinkytofuBackend(["gfx1250"]) is False
+
+
+def test_skip_stinkytofu_fires_when_autoselected(monkeypatch, stinkytofu_backend):
+    """The regression this change fixes: a skip-stinkytofu config is skipped when
+    stinkytofu is auto-selected (ROCISA_BACKEND unset) on a gfx1250 target, not
+    only when the backend is requested explicitly."""
+    monkeypatch.delenv("ROCISA_BACKEND", raising=False)
+    stinkytofu_backend(adaptor=True)
+    marks = configMarks(_SKIP_STINKYTOFU_CONFIG, _TESTS_ROOT, ["gfx1250"])
+    assert _has_stinkytofu_skip(marks)
+
+
+def test_skip_stinkytofu_inert_on_native_fallback(monkeypatch, stinkytofu_backend):
+    """A skip-stinkytofu config still runs when stinkytofu is unavailable and
+    rocisa has stayed on native."""
+    monkeypatch.delenv("ROCISA_BACKEND", raising=False)
+    stinkytofu_backend(adaptor=False)
+    marks = configMarks(_SKIP_STINKYTOFU_CONFIG, _TESTS_ROOT, ["gfx1250"])
+    assert not _has_stinkytofu_skip(marks)

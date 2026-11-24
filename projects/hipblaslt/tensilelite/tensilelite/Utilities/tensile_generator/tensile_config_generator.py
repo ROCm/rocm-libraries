@@ -35,7 +35,7 @@ import concurrent.futures
 
 
 # Paths to the input and output files
-parser = argparse.ArgumentParser(description="""Generate Tensile config file""")
+parser = argparse.ArgumentParser(description="""Generate TensileLite config file""")
 
 parser.add_argument(
     "--hipblaslt_log",
@@ -44,7 +44,7 @@ parser.add_argument(
 
 parser.add_argument(
     "--tensile_config", type=str,
-    help="Path to tensile config file")
+    help="Path to TensileLite config file")
 
 parser.add_argument(
     "--gpus", type=int, default=1,

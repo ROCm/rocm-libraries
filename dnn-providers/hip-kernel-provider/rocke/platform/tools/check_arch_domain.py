@@ -2,14 +2,23 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# check_arch_domain.py -- gate the arch-domain warning lane against a blessed
-# allowlist.
+# check_arch_domain.py -- gate the arch-domain lane over the representative
+# corpus.
 #
-# The lowerer consults the committed arch-domain artifact every time a kernel
-# demands an intrinsic declaration, and warns when the table says the target
-# provably cannot lower it (see rocke.core.arch.domain). This tool lowers the
-# whole representative corpus at every committed LLVM flavor, harvests those
-# warnings, and compares them against EXPECTED_WARNINGS below.
+# Both lowerers consult the committed arch-domain artifact every time a kernel
+# demands an intrinsic declaration (see rocke.core.arch.domain). A measured
+# negative -- the target provably cannot lower the intrinsic -- is refused in
+# `error` mode unless a committed waiver covers the cell, and reported in `warn`
+# mode. This tool lowers the whole corpus at every committed LLVM flavor with the
+# lane in `warn` mode, harvests what it reports, and requires:
+#
+#   * no negative without a waiver: a kernel demanding an intrinsic its target
+#     cannot lower is a kernel bug, and waivers are for wrong measurements;
+#   * no stale waiver: a waived cell that no longer measures negative means the
+#     column was fixed, and the waiver goes in the same change;
+#   * when the rocke_engine extension is importable, the C++ engine in `error`
+#     mode refuses exactly the cases the Python lowerer would, over the same
+#     intrinsic -- one table only helps if both engines act on it alike.
 #
 # Lowering is pure Python and the artifact is committed data, so this gate needs
 # no toolchain and rules on every flavor on any host. It overlaps
@@ -33,12 +42,13 @@ import os
 import sys
 import warnings
 from pathlib import Path
-from typing import NamedTuple
 
 from _flavor_gate import requires_newer_flavor
 
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parent  # tools -> rocke/platform
+
+Cell = tuple[str, str, str]  # (key, arch, flavor)
 
 
 def _bootstrap_sys_path() -> None:
@@ -56,109 +66,31 @@ def _bootstrap_sys_path() -> None:
             break
 
 
-class Expected(NamedTuple):
-    """One allowlisted demand: why it is allowed, and by which corpus cases."""
+def _harvest(
+    cases: list[dict], flavor: str
+) -> tuple[dict[str, set[Cell]], list[tuple[str, str]], list[tuple[str, str]]]:
+    """Lower every case at ``flavor`` and collect what the lane reports.
 
-    reason: str
-    cases: frozenset[str]
-
-
-# Every (declaration key, target, flavor) the corpus is currently allowed to
-# demand against a target the artifact says cannot lower it, with the reason
-# and the corpus cases that may demand it. Naming the cases is what keeps the
-# list from widening in silence: a different case that starts demanding the
-# same intrinsic is a new finding, and fixing one of two cases makes the entry
-# stale rather than leaving it to cover whatever comes next.
-#
-# Name the defect, not a tracker ID: the tracking reference belongs in the
-# commit that adds the entry, and an entry nobody owns cannot burn down.
-#
-# Same rule as KNOWN_BAD in check_ir_validity.py and KNOWN_VIOLATIONS in
-# library/tests/test_library_layering.py: **this list only ever SHRINKS**. An
-# entry, or one of its cases, that stops firing is itself a failure, and a new
-# entry is a kernel bug to fix rather than a line to add.
-EXPECTED_WARNINGS: dict[tuple[str, str, str], Expected] = {}
-
-# `wmma.i32.16x16x16.iu4`/`.iu8` on gfx11-generic and gfx1151 at llvm20 were
-# listed here as artifact false negatives. Generator 5 builds each probe from
-# the declare `opt` resolves, so `immarg` comes from the LLVM being measured and
-# those four cells now measure `ok`; the entries are deleted rather than kept.
-
-
-def judge(
-    found: dict[tuple[str, str, str], set[str]],
-    expected: dict[tuple[str, str, str], Expected],
-    lowered: dict[str, set[str]],
-    known_cases: set[str],
-    flavors: list[str],
-) -> tuple[
-    dict[tuple[str, str, str], set[str]],
-    list[tuple[tuple[str, str, str], str, str]],
-]:
-    """Compare what fired with the allowlist.
-
-    ``found`` maps (key, arch, flavor) to the case ids that demanded it,
-    ``lowered`` maps a flavor to the case ids that lowered there, and
-    ``known_cases`` is every case id in the corpus.
-
-    Returns ``(unexpected, stale)``. Unexpected: a triple the allowlist does not
-    have, or, for one it does have, only the cases it does not name. Stale: an
-    allowlisted case that lowered at the flavor and no longer demands the
-    intrinsic, or that the corpus no longer has. A case that did not run -- a
-    filtered selection, or an instance that declines the flavor -- says nothing,
-    so it is never judged.
-    """
-    unexpected: dict[tuple[str, str, str], set[str]] = {}
-    for triple, case_ids in found.items():
-        allowed = expected[triple].cases if triple in expected else frozenset()
-        extra = case_ids - allowed
-        if extra:
-            unexpected[triple] = set(extra)
-    stale: list[tuple[tuple[str, str, str], str, str]] = []
-    for triple, entry in sorted(expected.items()):
-        flavor = triple[2]
-        if flavor not in flavors:
-            continue
-        for case_id in sorted(entry.cases):
-            if case_id not in known_cases:
-                stale.append((triple, case_id, "the corpus has no such case"))
-            elif case_id in lowered.get(flavor, set()) and case_id not in found.get(
-                triple, set()
-            ):
-                stale.append((triple, case_id, "lowered, and no longer demands it"))
-    return unexpected, stale
-
-
-def _harvest(cases: list[dict], flavor: str) -> tuple[
-    dict[tuple[str, str, str], set[str]],
-    list[tuple[str, str]],
-    list[tuple[str, str]],
-    set[str],
-]:
-    """Lower every case at ``flavor`` and collect the arch-domain warnings.
-
-    Returns the warnings keyed by (key, arch, flavor) -> the case ids that
-    raised them, then two separate lists of cases that did not lower: the ones
-    that *could not* at this flavor, and the ones that failed. The last item is
-    the ids that did lower, which is what lets the gate tell an allowlisted case
-    that stopped demanding an intrinsic from one that never ran.
+    Returns the cells each case fired, keyed by case id, then two separate lists
+    of cases that did not lower: the ones that *could not* at this flavor, and
+    the ones that failed.
 
     The split matters because this gate lowers the corpus at *every* committed
     flavor, so an llvm23-gated instance always refuses on the llvm20/llvm22
     passes of a clean tree; counting those as failures would red the gate (and
     `run_all.py`) for cases never answerable at that vintage. A genuine lowering
     error is still red -- reported rather than raised only so one broken family
-    cannot hide the warning state of the rest.
+    cannot hide the state of the rest.
 
     The native lowerer is called directly, NOT the backend-dispatched public
-    entry point: the default backend is the C++ engine and only the Python
-    lowerer consults the arch-domain table, so dispatching would harvest nothing
-    and call every EXPECTED_WARNINGS entry stale on any host with the extension.
+    entry point: the C++ engine has no warning channel, so dispatching to it
+    would report only through the post-pass and blur which engine said what.
+    The C++ engine gets its own pass, :func:`_cpp_verdicts`.
     """
     from rocke.core.lower_llvm import ArchDomainWarning
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower_native
 
-    found: dict[tuple[str, str, str], set[str]] = {}
+    fired: dict[str, set[Cell]] = {}
     errors: list[tuple[str, str]] = []
     unlowerable: list[tuple[str, str]] = []
     lowered: set[str] = set()
@@ -178,12 +110,54 @@ def _harvest(cases: list[dict], flavor: str) -> tuple[
         for item in caught:
             w = item.message
             if isinstance(w, ArchDomainWarning):
-                found.setdefault((w.key, w.arch, w.flavor), set()).add(case["case_id"])
-    return found, errors, unlowerable, lowered
+                fired.setdefault(case["case_id"], set()).add((w.key, w.arch, w.flavor))
+    return fired, errors, unlowerable
+
+
+def _cpp_verdicts(
+    cases: list[dict], flavor: str, refuse: dict[str, set[Cell]]
+) -> tuple[list[str], list[str]]:
+    """Lower every case through the C++ engine in `error` mode and compare.
+
+    ``refuse`` maps a case id to the unwaived negatives the Python lowerer hit,
+    which is exactly what it would refuse over. The C++ engine must refuse those
+    cases, over one of those cells, and lower every other case. Returns one line
+    per disagreement, then one per case the engine failed on for some other
+    reason -- not this gate's verdict to judge, so listed rather than counted.
+    """
+    from rocke.core.backend import BackendMismatch, _lower_via_cpp_engine
+    from rocke.core.ir_serialize import serialize
+    from rocke.core.lower_llvm import ArchDomainError
+
+    out: list[str] = []
+    unjudged: list[str] = []
+    for case in cases:
+        cid = case["case_id"]
+        expected = refuse.get(cid, set())
+        try:
+            _lower_via_cpp_engine(serialize(case["build"]()), case["arch"], flavor)
+        except ArchDomainError as exc:
+            if (exc.key, exc.arch, exc.flavor) not in expected:
+                out.append(f"{cid} @ {flavor}: cpp refused, python did not -- {exc}")
+            continue
+        except BackendMismatch as exc:
+            # The backend raises this, not ArchDomainError, when the engine
+            # refused a cell this checkout's table does not: an extension built
+            # from other columns or waivers. That is the disagreement this gate
+            # exists to find, so it is counted rather than filed below.
+            out.append(f"{cid} @ {flavor}: cpp refused, python did not -- {exc}")
+            continue
+        except Exception as exc:  # noqa: BLE001 -- not this gate's verdict
+            if not requires_newer_flavor(exc):
+                unjudged.append(f"{cid} @ {flavor}: {type(exc).__name__}: {exc}")
+            continue
+        if expected:
+            out.append(f"{cid} @ {flavor}: python refuses, cpp lowered it")
+    return out, unjudged
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="rocKE arch-domain warning gate")
+    ap = argparse.ArgumentParser(description="rocKE arch-domain gate")
     ap.add_argument(
         "--only", default="", help="restrict to case ids containing SUBSTR (comma-sep)"
     )
@@ -193,23 +167,20 @@ def main() -> int:
         default="",
         help="restrict to LLVM flavors (comma-separated; default: all committed)",
     )
-    ap.add_argument(
-        "--verbose", action="store_true", help="list every expected warning too"
-    )
+    ap.add_argument("--verbose", action="store_true", help="list waived reports too")
     args = ap.parse_args()
-
-    # Pin the lane on before anything imports the lowerer: an exported
-    # ROCKE_ARCH_DOMAIN=off would otherwise give a green gate over a disabled
-    # lane. See _harvest for the matching backend pin.
-    os.environ["ROCKE_ARCH_DOMAIN"] = "warn"
 
     _bootstrap_sys_path()
     from rocke.core.arch import domain as arch_domain
     from rocke.core.lower_llvm import LLVM_FLAVORS
     from rocke_ir_parity_harness import cases
 
+    # Pin the lane to `warn` before lowering anything: an exported `off` would
+    # give a green gate over a disabled lane, and `error` would stop each case
+    # at its first negative instead of reporting all of them.
+    os.environ[arch_domain.MODE_ENV] = arch_domain.MODE_WARN
+
     keep = list(cases())
-    known_cases = {c["case_id"] for c in keep}
     if args.only:
         wanted = [s for s in args.only.split(",") if s]
         keep = [c for c in keep if any(w in c["case_id"] for w in wanted)]
@@ -228,49 +199,77 @@ def main() -> int:
     flavors = [f for f in wanted_flavors if arch_domain.load(f) is not None]
     skipped = [f for f in wanted_flavors if f not in flavors]
 
+    try:
+        import rocke_engine  # noqa: F401 -- only probing for the C++ pass
+    except ImportError:
+        cpp = False
+    else:
+        cpp = True
+
     print("== rocKE arch-domain lane ==")
     print(f"   cases   : {len(keep)}")
     print(f"   flavors : {', '.join(flavors) or '(none)'}")
     if skipped:
         print(f"   skipped : {', '.join(skipped)} (no committed column)")
+    print(
+        f"   engines : {'python + cpp' if cpp else 'python (rocke_engine not importable)'}"
+    )
     if not flavors:
         print("\nRESULT: RED - no committed arch-domain column to gate against.")
         return 1
 
-    found: dict[tuple[str, str, str], set[str]] = {}
+    waivers = arch_domain.waivers()
+    fired: dict[Cell, set[str]] = {}
     errors: list[tuple[str, str]] = []
     unlowerable: list[tuple[str, str]] = []
-    lowered: dict[str, set[str]] = {}
+    disagreements: list[str] = []
+    unjudged: list[str] = []
     for flavor in flavors:
-        got, errs, skipped_cases, ran = _harvest(keep, flavor)
-        found.update(got)
+        by_case, errs, not_asked = _harvest(keep, flavor)
         errors.extend(errs)
-        unlowerable.extend(skipped_cases)
-        lowered[flavor] = ran
+        unlowerable.extend(not_asked)
+        for cid, cells in by_case.items():
+            for cell in cells:
+                fired.setdefault(cell, set()).add(cid)
+        if cpp:
+            refuse = {
+                cid: {c for c in cells if c not in waivers}
+                for cid, cells in by_case.items()
+            }
+            os.environ[arch_domain.MODE_ENV] = arch_domain.MODE_ERROR
+            try:
+                differ, failed = _cpp_verdicts(keep, flavor, refuse)
+            finally:
+                os.environ[arch_domain.MODE_ENV] = arch_domain.MODE_WARN
+            disagreements.extend(differ)
+            unjudged.extend(failed)
 
-    # What ran bounds what can be judged: a --flavor, --arch or --only selection
-    # narrows it, and an allowlisted case that did not run is neither confirmed
-    # nor stale.
-    unexpected, stale = judge(found, EXPECTED_WARNINGS, lowered, known_cases, flavors)
-    in_scope = {
-        k
-        for k, entry in EXPECTED_WARNINGS.items()
-        if k[2] in flavors and entry.cases & lowered.get(k[2], set())
-    }
+    unwaived = {k: v for k, v in fired.items() if k not in waivers}
+    reported = {k: v for k, v in fired.items() if k in waivers}
+    # Judged against the columns, not the corpus: a waiver exists for a wrong
+    # measurement, which a kernel outside the corpus may be the one to hit.
+    stale = []
+    for key, arch, flavor in sorted(waivers):
+        table = arch_domain.load(flavor)
+        cell = table.lookup(key, arch) if table is not None else None
+        if cell is None or not arch_domain.is_negative(cell.status):
+            stale.append((key, arch, flavor))
 
     print()
-    print(f"   expected  : {len(in_scope & set(found))} / {len(in_scope)} in scope")
-    print(f"   unexpected: {len(unexpected)}")
-    if stale:
-        print(f"   stale     : {len(stale)}")
+    print(f"   waivers   : {len(waivers)} on file, {len(reported)} reported here")
+    print(f"   unwaived  : {len(unwaived)}")
     if unlowerable:
         print(f"   not asked : {len(unlowerable)} (instance needs a newer LLVM)")
+    if unjudged:
+        print(
+            f"   not judged: {len(unjudged)} (the C++ engine failed for another reason)"
+        )
 
-    if args.verbose:
-        print("\n== expected warnings that fired ==")
-        for k in sorted(set(found) & set(EXPECTED_WARNINGS)):
-            print(f"  {k[0]}  [{k[1]} @ {k[2]}]")
-            for cid in sorted(found[k]):
+    if args.verbose and reported:
+        print("\n== waived negatives the corpus demands (reported, not refused) ==")
+        for k in sorted(reported):
+            print(f"  {k[0]}  [{k[1]} @ {k[2]}]  -- {waivers[k].reason}")
+            for cid in sorted(reported[k]):
                 print(f"      {cid}")
 
     if unlowerable and args.verbose:
@@ -280,54 +279,63 @@ def main() -> int:
         for cid, msg in unlowerable:
             print(f"  {cid}\n    {msg}")
 
+    if unjudged and args.verbose:
+        print("\n== not judged (the C++ engine could not lower these at all) ==")
+        for line in unjudged:
+            print(f"  {line}")
+
     if errors:
         print("\n== cases that failed to lower ==")
         for cid, msg in errors:
             print(f"  {cid}\n    {msg}")
 
-    if unexpected:
-        print("\n== UNEXPECTED warnings ==")
-        for k in sorted(unexpected):
+    if unwaived:
+        print("\n== UNWAIVED negatives (refused in error mode) ==")
+        for k in sorted(unwaived):
             print(f"\n  {k[0]}  [{k[1]} @ {k[2]}]")
-            if k in EXPECTED_WARNINGS:
-                print("      allowlisted, but not for these cases:")
-            for cid in sorted(unexpected[k]):
+            for cid in sorted(unwaived[k]):
                 print(f"      {cid}")
         print(
             "\n  A kernel is demanding an intrinsic its target cannot lower. Fix "
-            "the kernel; do not add to EXPECTED_WARNINGS."
+            "the kernel. A waiver is for a wrong measurement, not a kernel bug."
         )
 
     if stale:
-        print("\n== STALE EXPECTED_WARNINGS entries (a case no longer demands it) ==")
-        for k, case_id, why in stale:
+        print("\n== STALE waivers (the cell no longer measures negative) ==")
+        for k in stale:
             print(
-                f"  {k[0]}  [{k[1]} @ {k[2]}]\n      {case_id}: {why}\n"
-                f"    reason on file: {EXPECTED_WARNINGS[k].reason}"
+                f"  {k[0]}  [{k[1]} @ {k[2]}]\n    reason on file: {waivers[k].reason}"
             )
         print(
-            "\n  EXPECTED_WARNINGS only shrinks. Delete these cases, and an entry "
-            "with none left, in the change that fixed them."
+            "\n  Delete these from arch_domain_waivers.json in the change that "
+            "fixed the column."
         )
+
+    if disagreements:
+        print("\n== the C++ engine disagrees with the Python lowerer ==")
+        for line in disagreements:
+            print(f"  {line}")
 
     print()
     if errors:
         print(f"RESULT: RED - {len(errors)} case(s) failed to lower.")
         return 1
-    if unexpected:
+    if unwaived:
         print(
-            f"RESULT: RED - {len(unexpected)} intrinsic demand(s) the target "
+            f"RESULT: RED - {len(unwaived)} intrinsic demand(s) the target "
             "provably cannot lower."
         )
         return 1
     if stale:
-        print("RESULT: RED - EXPECTED_WARNINGS is stale; remove the entries above.")
+        print(f"RESULT: RED - {len(stale)} stale waiver(s); remove them.")
+        return 1
+    if disagreements:
+        print(f"RESULT: RED - the engines disagree on {len(disagreements)} case(s).")
         return 1
     tail = f" ({len(unlowerable)} not asked)" if unlowerable else ""
-    if found:
+    if reported:
         print(
-            f"RESULT: GREEN - the lane fires exactly the {len(found)} documented "
-            f"warning(s).{tail}"
+            f"RESULT: GREEN - only waived cells fire ({len(reported)} reported).{tail}"
         )
     else:
         print(f"RESULT: GREEN - no kernel demands an unavailable intrinsic.{tail}")

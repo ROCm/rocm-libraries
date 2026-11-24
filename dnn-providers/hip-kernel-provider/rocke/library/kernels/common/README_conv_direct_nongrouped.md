@@ -52,7 +52,8 @@ p_A_stride_{n,hi,wi}, p_D_stride_{n,ho,wo}
 
 Dilation (`DirectConvProblem.dil_h` / `dil_w`) widens the staged halo to
 `(tile-1)*stride + (K-1)*dil + 1` and spaces the taps `dil` rows / columns apart
-in it; the kernel is the only direct variant that computes a dilated
+in it. Of the direct variants, this one, `direct_fwd_wmma`,
+`direct_fwd_tapouter_wmma` and `direct_dgrad_wmma` compute a dilated
 convolution. The AOT cache bakes a few dilated 3x3 rows next to the undilated
 ones (`kernels.conv.direct_aot_jobs._NONGROUPED_DILATED`).
 
