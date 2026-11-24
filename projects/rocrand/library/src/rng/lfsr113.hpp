@@ -366,6 +366,7 @@ public:
         {
             return status;
         }
+        m_engines.track_capture(m_stream);
 
         constexpr unsigned int init_threads = 256;
         const unsigned int     init_blocks  = (m_engines_size + init_threads - 1) / init_threads;

@@ -472,6 +472,7 @@ public:
         {
             return status;
         }
+        m_engines.track_capture(m_stream);
 
         status = rocrand_make_state_mtgp32(m_engines.data(),
                                            mtgp32dc_params_fast_11213,
