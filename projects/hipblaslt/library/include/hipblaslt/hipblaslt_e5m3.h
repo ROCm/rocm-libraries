@@ -28,6 +28,7 @@
 
 #include <hip/hip_fp16.h>          // __half_raw
 #include <iostream>
+#include <string>
 
 #define HIP_HOST_DEVICE __host__ __device__
 #define HIP_HOST __host__

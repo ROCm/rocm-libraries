@@ -231,6 +231,17 @@ struct rocfft_field_t
         return bricks.empty();
     }
 
+    inline std::set<size_t> ranks() const
+    {
+        return std::accumulate(bricks.begin(),
+                               bricks.end(),
+                               std::set<size_t>{},
+                               [](std::set<size_t> ranks, const rocfft_brick_t& brick) {
+                                   ranks.insert(brick.location.comm_rank);
+                                   return ranks;
+                               });
+    }
+
 private:
     /**
      * @return true iff all parts of the field's full range of logical indices are covered
@@ -351,7 +362,7 @@ struct rocfft_plan_description_t
      * 
      * - Usage of multiple I/O fields in descriptors is reported as unsupported;
      * 
-     * - I/O array types are not planar if the corresponding field(s) are set;
+     * - I/O array types are not planar if any (input or output) field is set;
      * 
      * - I/O array types are consistent with the expected data types;
      * 
@@ -465,10 +476,6 @@ struct rocfft_plan_description_t
         }
     }
 
-    // returns true if a field has bricks such that any rank has
-    // bricks on more than one device
-    static bool multiple_devices_in_rank(const rocfft_field_t& field);
-
 private:
 #ifdef ROCFFT_MPI_ENABLE
     // Communicate bricks on all ranks to all other ranks
@@ -491,11 +498,11 @@ struct rocfft_plan_t
     rocfft_plan_description_t desc;
 
 #ifdef ROCFFT_RCCL_ENABLE
-    // RCCL communicator used by GlobalTransposeRCCL.  Populated only
-    // when the plan runs in a single process (local_comm_size == 1)
-    // and has >= 2 local devices; empty otherwise, in which case
-    // GlobalTransposeP2P / GlobalTransposeA2A handle the transpose.
-    // Value-semantic handle; copies share state via shared_ptr<Impl>.
+    // RCCL communicator used by GlobalTransposeRCCL.  Populated for
+    // single-process multi-GPU plans, and for multi-process plans when
+    // every MPI rank's bricks use exactly one device. Empty otherwise,
+    // in which case GlobalTransposeP2P / GlobalTransposeA2A handle the
+    // transpose.
     rocfft_rccl_comm_t rccl;
 #endif
 
@@ -534,10 +541,11 @@ struct rocfft_plan_t
     bool BuildEmbarrassinglyParallelPlan();
 
 #ifdef ROCFFT_RCCL_ENABLE
-    // populate the rccl communicator from the description's local devices,
-    // before any communicating plan-building path is chosen, empty when not
-    // applicable. any failure is swallowed internally, leaving rccl empty so
-    // the caller falls back to the P2P / A2A paths
+    // populate the rccl communicator from the plan's brick locations
+    // before any plan-building path is chosen. empty when not applicable.
+    // multi-process init is collective; local failure is synchronized so
+    // no rank enters ncclCommInitRank alone. on failure rccl is left
+    // empty so the caller falls back to P2P / A2A.
     void InitRCCLCommunicator() noexcept;
 #endif
 
@@ -601,10 +609,11 @@ private:
     // (non-std::exception) throws.
     void discard_failed_multi_device_plan(const std::string& calling_func, const char* except_what);
 
-    // Temp buffers allocated during plan creation for multi-device
-    // plans are remembered here.  Mapped per-location.  Individual
-    // plan items can have void*'s that point to these buffers.
-    std::multimap<rocfft_location_t, std::shared_ptr<InternalTempBuffer>> tempBuffers;
+    // Temp buffers requested during plan creation, one per request.
+    // DetermineTempBufferUserAllocs places them in the per-device
+    // work buffers, overlapping only buffers that are never in use
+    // at the same time.
+    TempBufferRegistry tempBuffers;
 
     // Per-device temp buffer size that we'll ask users to allocate - we
     // roll up all of the individual allocations into a single number
@@ -689,78 +698,6 @@ private:
                                                     const std::optional<StoreOps>& storeOps,
                                                     bool                           partOfMultiPlan);
 
-    // RAII struct to 'lease' a temp buffer from a multimap of per-device
-    // buffers.  When this struct is destroyed, the buffer is returned to
-    // the map for reuse.
-    struct TempBufferLease
-    {
-        TempBufferLease(
-            std::multimap<rocfft_location_t, std::shared_ptr<InternalTempBuffer>>& _tempBuffers,
-            int                                                                    local_comm_rank,
-            rocfft_location_t                                                      _location,
-            size_t                                                                 byte_size)
-            : location(_location)
-            , tempBuffers(&_tempBuffers)
-        {
-            // no need to allocate anything for non-local ranks
-            if(local_comm_rank != location.comm_rank)
-            {
-                // instead allocate a placeholder that remembers which
-                // rank this was for, to aid debugging
-                buf = std::make_shared<InternalTempBuffer>(location);
-                return;
-            }
-
-            // return an existing buffer that's big enough, if one exists
-            auto i = tempBuffers->lower_bound(location);
-            if(i != tempBuffers->upper_bound(location))
-            {
-                // found a buffer, ensure it's big enough
-                i->second->ensure_size_bytes(byte_size);
-
-                // leasing out this temp buffer, remove it from the map
-                buf = i->second;
-                tempBuffers->erase(i);
-                return;
-            }
-            // no buffer was found, allocate a new one
-            buf = std::make_shared<InternalTempBuffer>(location);
-            buf->ensure_size_bytes(byte_size);
-        }
-        ~TempBufferLease()
-        {
-            // return the buffer to the map
-            if(buf)
-                tempBuffers->emplace(std::make_pair(location, std::move(buf)));
-        }
-        // allow moves, disallow copies
-        TempBufferLease(TempBufferLease&& other)
-            : location(other.location)
-            , tempBuffers(other.tempBuffers)
-            , buf(std::move(other.buf))
-        {
-        }
-        TempBufferLease& operator=(TempBufferLease&& other)
-        {
-            location    = other.location;
-            tempBuffers = other.tempBuffers;
-            buf         = std::move(other.buf);
-            return *this;
-        }
-        TempBufferLease(const TempBufferLease& other) = delete;
-        TempBufferLease& operator=(const TempBufferLease& other) = delete;
-
-        std::shared_ptr<InternalTempBuffer> data()
-        {
-            return buf;
-        }
-
-    private:
-        rocfft_location_t                                                      location;
-        std::multimap<rocfft_location_t, std::shared_ptr<InternalTempBuffer>>* tempBuffers;
-        std::shared_ptr<InternalTempBuffer>                                    buf;
-    };
-
     /**
      * @brief Creates and returns the metadata configuring the single-device execution
      * plan item used for tackling the plan's task. If the plan's task cannot be handled
@@ -770,25 +707,19 @@ private:
      * - read (resp. write) directly from (resp. into) the user's input (resp. output)
      *   data buffer, if that data is undistributed and expected on the given location at
      *   execution. If not, default packed layouts for in-place operations are set on
-     *   input and output (possibly requiring temporary, leased I/O);
+     *   input and output (possibly requiring temporary I/O);
      * 
      * - operate in-place, unless the above made that impossible or if the plan's
      *   configuration does not guarantee that it is safe to do so.
      * 
      * If the returned configuration is such that reading (resp. writing) directly from
      * (resp. to) a user-provided input (resp. output) data buffer cannot or should not
-     * be done, leased temporary buffers of appropriate sizes are created instead and
-     * appended to the given `leased_io`.
+     * be done, temporary buffers of appropriate sizes are created instead.
      * 
-     * @param[inout] leased_io vector of leased temporary buffers. If a temporary buffer
-     * needs to be leased for the input and/or output of the single-device execution plan
-     * that the returned object configures, that leased buffer is created and appended to
-     * this vector.
      * @param[in] exec_plan_location location where the single-device execution plan
      * configured by the returned object is meant to reside.
      */
-    NodeMetaData get_single_dev_exec_plan_metadata(std::vector<TempBufferLease>& leased_io,
-                                                   const rocfft_location_t& exec_plan_location);
+    NodeMetaData get_single_dev_exec_plan_metadata(const rocfft_location_t& exec_plan_location);
 
     struct field_view_t
     {
@@ -871,10 +802,9 @@ private:
     };
 
     template <io_data_label field_view_label>
-    embarrassingly_parallel_fft make_embarrassingly_parallel_fft_from_user_field(
-        const std::set<size_t>        fft_len_dims,
-        std::vector<TempBufferLease>& leased_buffers,
-        bool                          prefer_in_place_if_possible);
+    embarrassingly_parallel_fft
+        make_embarrassingly_parallel_fft_from_user_field(const std::set<size_t> fft_len_dims,
+                                                         bool prefer_in_place_if_possible);
 
     std::vector<size_t> create_plan_items_for(const embarrassingly_parallel_fft& parallel_fft,
                                               const std::vector<size_t>&         antecedents);
@@ -893,9 +823,8 @@ private:
                                            const std::vector<size_t>& antecedents);
 
 #ifdef ROCFFT_RCCL_ENABLE
-    // RCCL-based global transpose for single-process multi-GPU plans.
-    // Dispatches to ncclAllToAll for uniform NxN patterns and to a
-    // grouped ncclSend/ncclRecv path for everything else.
+    // RCCL-based global transpose. Dispatches to ncclAlltoAll for
+    // uniform NxN patterns and to grouped ncclSend/ncclRecv otherwise.
     std::vector<size_t> GlobalTransposeRCCL(const field_view_t&        input,
                                             const field_view_t&        output,
                                             const std::vector<size_t>& antecedents);

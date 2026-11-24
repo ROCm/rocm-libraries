@@ -102,6 +102,8 @@ All hold simultaneously, or the numbers are not comparable:
   state.
 - **Correctness separately, once per corpus per arm** — never inferred from a timing
   row.
+- **The default pick, not only the autotuned one.** Report the engine's untuned (cold)
+  pick against the baseline too; users who do not autotune get that kernel.
 
 A reduction sweep (RUNBOOK stage 6) is not a comparative cohort: one arm, kernels compared
 only within one autotune ranking, at least two rounds. The other conditions still hold.

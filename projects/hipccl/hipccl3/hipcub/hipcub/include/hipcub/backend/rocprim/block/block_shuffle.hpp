@@ -38,19 +38,8 @@
 
 BEGIN_HIPCUB_NAMESPACE
 
-
-
-template <
-    typename            T,
-    int                 BLOCK_DIM_X,
-    int                 BLOCK_DIM_Y         = 1,
-    int                 BLOCK_DIM_Z         = 1,
-    int                 ARCH            = HIPCUB_ARCH>
-class BlockShuffle : public ::rocprim::block_shuffle<
-                    T,
-                    BLOCK_DIM_X,
-                    BLOCK_DIM_Y,
-                    BLOCK_DIM_Z>
+template<typename T, int BLOCK_DIM_X, int BLOCK_DIM_Y = 1, int BLOCK_DIM_Z = 1>
+class BlockShuffle : public ::rocprim::block_shuffle<T, BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z>
 {
   static_assert(
       BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z > 0,

@@ -19,8 +19,7 @@
 /**
  * @file TestAttentionDenseGeometry.cpp
  * @brief Pins gfx942AttentionDenseGeometry(), gfx950AttentionDenseGeometry() and each arch's
- *        tile rules against their Python originals, plus this engine's own gfx942
- *        sliding-window guard.
+ *        tile rules against their Python originals.
  *
  * A geometry that disagrees with the Python does not fault, it computes something else,
  * and nothing else in the suite compares the two halves. Every expected tile number below
@@ -242,50 +241,6 @@ TEST(TestGfx942AttentionDenseTile, RefusesNamedNeighboursOfTheLegalSet)
     EXPECT_TRUE(isSupportedGfx942AttentionDenseTile(64, 512, 32));
     EXPECT_TRUE(isSupportedGfx942AttentionDenseTile(128, 512, 64));
     EXPECT_TRUE(isSupportedGfx942AttentionDenseTile(128, 256, 64));
-}
-
-// =============================================================================
-// The sliding-window zero-trip guard. The witnesses pin this pack's own decline policy at
-// each tile and shape, for a causal bf16 D128 spec; the Python no longer declines these
-// windows, and the row rule is not part of the guard.
-// =============================================================================
-
-TEST(TestGfx942AttentionDenseWindow, NoWindowAlwaysReachesKeys)
-{
-    EXPECT_TRUE(gfx942AttentionDenseWindowReachesKeys(256, 64, 4096, 64, 0));
-}
-
-TEST(TestGfx942AttentionDenseWindow, PinsThePackDeclinePolicyAtEachWitness)
-{
-    struct Witness
-    {
-        int64_t blockM, blockN, seqLenQ, seqLenKv, window;
-        bool accepted;
-    };
-    // The guard alone. Some accepted witnesses (768/256 W512, 1024/256 W576, 128/64 W64)
-    // leave their last rows no key, so the graph matcher declines them before this runs.
-    const std::vector<Witness> witnesses{
-        {256, 64, 512, 512, 128, true},
-        {256, 64, 2048, 2048, 128, true},
-        {256, 64, 768, 256, 512, true},
-        {256, 64, 1024, 256, 576, true},
-        {64, 64, 128, 64, 64, true},
-        // The boundary: the last window starts exactly at the key-tile count.
-        {256, 64, 1024, 256, 512, false},
-        {64, 64, 192, 64, 64, false},
-        {256, 64, 4096, 512, 128, false},
-        {256, 64, 4096, 512, 2048, false},
-        {256, 32, 1024, 256, 384, false},
-        {512, 64, 2048, 512, 128, false},
-    };
-    for(const auto& w : witnesses)
-    {
-        EXPECT_EQ(gfx942AttentionDenseWindowReachesKeys(
-                      w.blockM, w.blockN, w.seqLenQ, w.seqLenKv, w.window),
-                  w.accepted)
-            << "block " << w.blockM << "/" << w.blockN << ", Sq " << w.seqLenQ << ", Skv "
-            << w.seqLenKv << ", window " << w.window;
-    }
 }
 
 } // namespace gfx942

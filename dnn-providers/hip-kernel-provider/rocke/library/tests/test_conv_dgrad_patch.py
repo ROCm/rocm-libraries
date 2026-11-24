@@ -342,22 +342,15 @@ class TestPatchIdentity(unittest.TestCase):
         self.assertNotIn("patch", off.label())
 
     def test_off_keeps_the_historical_hash(self):
-        import hashlib
-        import json
-        from dataclasses import asdict
-
         from kernels.conv.kernel_identity import KernelIdentity
 
+        # Pinned literal: the hash ``stable_hash()`` gives this identity with
+        # ``patch`` off. Every field added after it is left out of the hash at
+        # its default, so an identity that does not use such a field keeps its
+        # hash and its AOT cache entries. A change here orphans the cache.
         ident = replace(KernelIdentity.from_label(self.LABEL), patch=False)
-        fields = asdict(ident)
-        for name in ("ws_replicas", "prefetch_addr", "prefetch_global_regs", "patch"):
-            if not fields[name]:
-                del fields[name]
-        if fields["streamk"] == "off" and not fields["streamk_reduction"]:
-            del fields["streamk"], fields["streamk_reduction"]
-        payload = json.dumps(fields, sort_keys=True, separators=(",", ":"))
         self.assertEqual(
-            ident.stable_hash(), hashlib.sha1(payload.encode()).hexdigest()
+            ident.stable_hash(), "e8f7063e499219b036f4194967f2fa6311530819"
         )
 
     def test_aot_job_builds_it(self):

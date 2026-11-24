@@ -65,6 +65,10 @@ TEST(SchedulingKnobHeuristics, DegenerateFallsBackToStaticDefaults) {
         EXPECT_EQ(resolved.reduceClusterBarrierPerLoopSource, SchedulingKnobSource::StaticDefault);
         EXPECT_EQ(resolved.queueFillSafetyMarginCycles, 32);
         EXPECT_EQ(resolved.queueFillSafetyMarginCyclesSource, SchedulingKnobSource::StaticDefault);
+        EXPECT_EQ(resolved.tensorLoadWmmaSpace, 0);
+        EXPECT_EQ(resolved.tensorLoadWmmaSpaceSource, SchedulingKnobSource::StaticDefault);
+        EXPECT_EQ(resolved.tensorLoadDsLoadGapCycles, 64);
+        EXPECT_EQ(resolved.tensorLoadDsLoadGapCyclesSource, SchedulingKnobSource::StaticDefault);
     }
 
     EXPECT_EQ(staticSchedulingKnobDefaults(kGfx1250).clusterBarrierRule3SignalLeadCycles,
@@ -90,6 +94,10 @@ TEST(SchedulingKnobHeuristics, PolicyUsedWhenMainLoopHasBothCounts) {
     EXPECT_EQ(resolved.reduceClusterBarrierPerLoopSource, SchedulingKnobSource::Policy);
     EXPECT_EQ(resolved.queueFillSafetyMarginCycles, 32);
     EXPECT_EQ(resolved.queueFillSafetyMarginCyclesSource, SchedulingKnobSource::Policy);
+    EXPECT_EQ(resolved.tensorLoadWmmaSpace, kPolicyTensorLoadWmmaSpace);
+    EXPECT_EQ(resolved.tensorLoadWmmaSpaceSource, SchedulingKnobSource::Policy);
+    EXPECT_EQ(resolved.tensorLoadDsLoadGapCycles, kPolicyTensorLoadDsLoadGapCycles);
+    EXPECT_EQ(resolved.tensorLoadDsLoadGapCyclesSource, SchedulingKnobSource::Policy);
 }
 
 TEST(SchedulingKnobHeuristics, Rule3LeadUses200WhenSumWmmaLatencyExceeds500) {
@@ -181,10 +189,14 @@ TEST(SchedulingKnobHeuristics, ModuleOptionsSentinelsMapToOverrides) {
     // Struct default: Rule3 is -1 (unset).
     EXPECT_EQ(opts.ClusterBarrierRule3SignalLeadCycles, -1);
     EXPECT_EQ(opts.ReduceClusterBarrierPerLoop, -1);
+    EXPECT_EQ(opts.TensorLoadWmmaSpace, -1);
+    EXPECT_EQ(opts.TensorLoadDsLoadGapCycles, -1);
 
     SchedulingKnobOverrides empty = schedulingKnobOverridesFromModuleOptions(opts);
     EXPECT_FALSE(empty.clusterBarrierRule3SignalLeadCycles.has_value());
     EXPECT_FALSE(empty.reduceClusterBarrierPerLoop.has_value());
+    EXPECT_FALSE(empty.tensorLoadWmmaSpace.has_value());
+    EXPECT_FALSE(empty.tensorLoadDsLoadGapCycles.has_value());
 
     opts.ClusterBarrierRule3SignalLeadCycles = 0;  // co-locate
     opts.ReduceClusterBarrierPerLoop = 0;
@@ -198,6 +210,29 @@ TEST(SchedulingKnobHeuristics, ModuleOptionsSentinelsMapToOverrides) {
     SchedulingKnobOverrides enabled = schedulingKnobOverridesFromModuleOptions(opts);
     ASSERT_TRUE(enabled.reduceClusterBarrierPerLoop.has_value());
     EXPECT_TRUE(*enabled.reduceClusterBarrierPerLoop);
+
+    // 0 is an explicit off for both tensor-load knobs, not the unset sentinel.
+    opts.TensorLoadWmmaSpace = 0;
+    opts.TensorLoadDsLoadGapCycles = 0;
+    SchedulingKnobOverrides tensorOff = schedulingKnobOverridesFromModuleOptions(opts);
+    ASSERT_TRUE(tensorOff.tensorLoadWmmaSpace.has_value());
+    EXPECT_EQ(*tensorOff.tensorLoadWmmaSpace, 0);
+    ASSERT_TRUE(tensorOff.tensorLoadDsLoadGapCycles.has_value());
+    EXPECT_EQ(*tensorOff.tensorLoadDsLoadGapCycles, 0);
+}
+
+TEST(SchedulingKnobHeuristics, TensorLoadUserOverrideWinsOverPolicy) {
+    HeuristicSchedulingKnobPolicy policy;
+    SchedulingKnobOverrides overrides;
+    overrides.tensorLoadWmmaSpace = 10;
+    const SchedulingFeatures features = makeFeatures(/*wmma=*/4, /*ds=*/4);
+
+    const ResolvedSchedulingKnobs resolved = resolveSchedulingKnobs(features, overrides, policy);
+
+    EXPECT_EQ(resolved.tensorLoadWmmaSpace, 10);
+    EXPECT_EQ(resolved.tensorLoadWmmaSpaceSource, SchedulingKnobSource::User);
+    EXPECT_EQ(resolved.tensorLoadDsLoadGapCycles, kPolicyTensorLoadDsLoadGapCycles);
+    EXPECT_EQ(resolved.tensorLoadDsLoadGapCyclesSource, SchedulingKnobSource::Policy);
 }
 
 TEST(SchedulingKnobHeuristics, LogResolvedSchedulingKnobsFormat) {
@@ -220,6 +255,8 @@ TEST(SchedulingKnobHeuristics, LogResolvedSchedulingKnobsFormat) {
     EXPECT_NE(line.find("rule3SignalLeadCycles=100(static)"), std::string::npos);
     EXPECT_NE(line.find("reduceClusterBarrierPerLoop=0(static)"), std::string::npos);
     EXPECT_NE(line.find("queueFillSafetyMarginCycles=0(static)"), std::string::npos);
+    EXPECT_NE(line.find("tensorLoadWmmaSpace=0(static)"), std::string::npos);
+    EXPECT_NE(line.find("tensorLoadDsLoadGapCycles=64(static)"), std::string::npos);
 }
 
 TEST(SchedulingKnobHeuristics, LogResolvedSchedulingKnobsIfDebugHonorsDebugOnly) {

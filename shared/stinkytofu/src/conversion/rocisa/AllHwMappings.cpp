@@ -181,17 +181,26 @@ std::vector<StinkyInstruction*> lowerRocisaSchedulingFence(rocisa::Instruction& 
 // the last line) and legalizeBarrier's behavior. We mirror the mem
 // token onto signal manually so the implicit-dependency pass groups
 // both halves with the fenced memory ops (see BarrierTest::TokenGrouped_*).
+// GirActionData is different: ToStinkyTofuUtils attaches it generically
+// to every instruction returned by a conversion.
 std::vector<StinkyInstruction*> lowerRocisaSBarrier(rocisa::Instruction& inst,
                                                     AsmIRBuilder& irBuilder) {
     auto* sBarrier = dynamic_cast<rocisa::SBarrier*>(&inst);
     assert(sBarrier != nullptr && "lowerRocisaSBarrier: expected rocisa::SBarrier");
+
+    auto requireTensorCompletion = [&](StinkyInstruction* barrier) {
+        if (sBarrier->getTensorcnt() >= 0)
+            barrier->addModifier<SWaitTensorCntData>(
+                SWaitTensorCntData{static_cast<int8_t>(sBarrier->getTensorcnt())});
+        return barrier;
+    };
 
     // Legacy form: emit s_barrier and let legalizeBarrier expand it on
     // architectures that need split signal/wait (gfx1250).
     if (!sBarrier->getHasNewBarrier()) {
         const HwInstDesc* desc = getMCIDByUOp(GFX::s_barrier, irBuilder.arch);
         assert(desc != nullptr && "s_barrier not available on this arch");
-        return {irBuilder.create(desc)};
+        return {requireTensorCompletion(irBuilder.create(desc))};
     }
 
     const int code = (sBarrier->getHasClusterBarrier() && sBarrier->getClusterBarrier()) ? -3 : -1;
@@ -213,13 +222,13 @@ std::vector<StinkyInstruction*> lowerRocisaSBarrier(rocisa::Instruction& inst,
 
     // Separate signal-only or wait-only form: emit a single instruction.
     if (sBarrier->getSeparate()) {
-        return {sBarrier->getWait() ? createWait() : createSignal()};
+        return {requireTensorCompletion(sBarrier->getWait() ? createWait() : createSignal())};
     }
 
     // Default split form: signal then wait in BB, but return {wait, signal}
     // so the caller attaches comment/mem token to wait. Mirror mem token
     // onto signal here.
-    StinkyInstruction* signalInst = createSignal();
+    StinkyInstruction* signalInst = requireTensorCompletion(createSignal());
     StinkyInstruction* waitInst = createWait();
     if (auto memToken = inst.getMemToken()) {
         signalInst->addModifier<MemTokenData>(MemTokenData{memToken->tokens});

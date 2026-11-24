@@ -73,6 +73,6 @@ TEST_P(GPU_MIOpenDriverRegressionGfx9Test_FP16, MIOpenDriverRegressionHalfGfx9)
     RunMIOpenDriver();
 };
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_MIOpenDriverRegressionGfx9Test_FP16,
                          testing::Values(GetTestCases()));

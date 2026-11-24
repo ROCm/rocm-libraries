@@ -40,35 +40,56 @@ parameters, iterates ``available_engines()``: the part of :data:`ENGINES` this
 run can drive. The installed wheel has no ``rocke_engine`` binding, so such a
 test runs the Python engine alone there and both engines wherever the binding
 is supplied. ``all_engines_backend`` is the ``backend`` argument that runs those
-same engines through ``compile_kernel`` and similar entry points.
+same engines through ``compile_kernel`` and similar entry points, and
+``lower_spec_with_all_engines`` lowers an instance spec with them, each engine
+building the kernel with its own builder.
+
+The helpers above drive each engine directly. ``assert_backend_lane_rejects``
+instead checks one refusal through the public ``lower_kernel_to_llvm``
+dispatcher in one row of the source backend matrix (``TESTING.md`` section
+5.1.1, one name per row in :data:`BACKEND_LANES`), asserting the exception that
+row's caller observes.
+
+Every engine this run can drive, plus the verifier:
+``assert_refused_everywhere`` and ``assert_accepted_everywhere`` run the Python
+verifier and the LLVM and HIP lowerings of each engine in
+``available_engines()``. Unlike the both-engine helpers they do not skip when
+the binding is absent.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import sys
 from collections.abc import Callable
 from types import ModuleType
 from typing import Literal
 
 import pytest
 
-from rocke.core.backend import _lower_via_cpp_engine
+from rocke.core.backend import _lower_via_cpp_engine, cpp_fallbacks
 from rocke.core.ir import KernelDef
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.core.lower_llvm import _lower_kernel_to_llvm_python, lower_kernel_to_llvm
+from rocke.core.verify import verify
 
 __all__ = [
+    "BACKEND_LANES",
     "ENGINES",
     "Engine",
     "all_engines_backend",
+    "assert_accepted_everywhere",
+    "assert_backend_lane_rejects",
     "assert_both_engines_reject",
     "assert_both_engines_reject_hip",
     "assert_engine_rejects",
     "assert_engine_rejects_hip",
+    "assert_refused_everywhere",
     "available_engines",
     "lower_hip_with_both_engines",
     "lower_hip_with_engine",
+    "lower_spec_with_all_engines",
     "lower_with_both_engines",
     "lower_with_engine",
 ]
@@ -103,6 +124,29 @@ def all_engines_backend() -> str:
     """The ``backend`` that lowers with every engine in ``available_engines()``:
     ``"both"`` when the ``rocke_engine`` binding is importable, else ``"python"``."""
     return "both" if "cpp" in available_engines() else "python"
+
+
+def lower_spec_with_all_engines(
+    spec: object,
+    arch: str,
+    *,
+    build_kernel: Callable[..., KernelDef],
+    lower_spec: Callable[..., object],
+) -> str:
+    """The LLVM IR of the instance ``spec`` describes, for ``arch``, from every
+    engine in ``available_engines()``.
+
+    With the ``rocke_engine`` binding, each engine's builder builds the kernel
+    from the spec (``lower_spec(spec, arch=arch, backend="both")``, an
+    instance's ``rocke.core.backend.lower_*`` entry point), both kernels are
+    lowered, and the two texts must be the same byte for byte. Without it,
+    ``build_kernel(spec, arch=arch)``, the Python builder, lowered by the
+    default lowerer; a ``lower_*`` entry point needs the binding even for the
+    Python backend.
+    """
+    if "cpp" in available_engines():
+        return lower_spec(spec, arch=arch, backend="both").llvm_text
+    return lower_kernel_to_llvm(build_kernel(spec, arch=arch), arch=arch)
 
 
 def _require_native_engine() -> ModuleType:
@@ -142,8 +186,13 @@ def _assert_native_rejects(
     with pytest.raises(RuntimeError) as native_error:
         lower()
     text = str(native_error.value)
-    suffix = f"(status {status}): {message}" if status is not None else f": {message}"
-    assert text.endswith(suffix), text
+    assert text.endswith(_native_refusal_suffix(message, status)), text
+
+
+def _native_refusal_suffix(message: str, status: int | None) -> str:
+    """How the binding's refusal text ends: ``"(status N): " + message``, or
+    ``": " + message`` when ``status`` is not compared."""
+    return f"(status {status}): {message}" if status is not None else f": {message}"
 
 
 def _python_llvm(kernel: KernelDef, arch: str, llvm_flavor: str | None) -> str:
@@ -292,3 +341,140 @@ def assert_both_engines_reject_hip(
         lambda: lower_kernel_to_hip(kernel, arch=arch), error_type, message
     )
     _assert_native_rejects(lambda: _native_hip(kernel, arch), message, None)
+
+
+# The rows of the source backend matrix in TESTING.md section 5.1.1: each
+# lane's ROCKE_BACKEND and ROCKE_CPP_STRICT (None leaves the variable unset).
+_LANE_ENVIRONMENT: dict[str, tuple[str | None, str | None]] = {
+    "installed-fallback": (None, None),
+    "python": ("python", None),
+    "cpp-permissive": ("cpp", "0"),
+    "cpp-strict": ("cpp", "1"),
+    "both": ("both", "1"),
+}
+
+BACKEND_LANES: tuple[str, ...] = tuple(_LANE_ENVIRONMENT)
+
+# The lanes in which the dispatcher is expected to fall back to the Python
+# engine: the C++ engine refuses (cpp-permissive) or is absent
+# (installed-fallback).
+_FALLBACK_LANES = frozenset({"cpp-permissive", "installed-fallback"})
+
+
+def assert_backend_lane_rejects(
+    monkeypatch: pytest.MonkeyPatch,
+    lane: str,
+    kernel: KernelDef,
+    arch: str,
+    *,
+    error_type: type[Exception],
+    message: str,
+    llvm_flavor: str,
+) -> None:
+    """Assert that ``lower_kernel_to_llvm`` refuses ``kernel`` in backend ``lane``.
+
+    ``lane`` is one of :data:`BACKEND_LANES`. The lane's ``ROCKE_BACKEND`` and
+    ``ROCKE_CPP_STRICT`` are set through ``monkeypatch``, and an inherited value
+    is cleared where the row leaves the variable unset. ``installed-fallback``
+    also hides the ``rocke_engine`` binding, as in the installed wheel; the
+    ``cpp-*`` and ``both`` lanes skip, naming the reason, when it is not built.
+
+    In the ``cpp-strict`` lane the caller sees the C++ engine's own refusal: a
+    ``RuntimeError`` (not a subclass) whose text ends with
+    ``"(status N): " + message``, ``N`` being the status ``error_type`` maps to,
+    as in :func:`assert_engine_rejects`. In every other lane it sees the Python
+    engine's: exactly ``error_type`` (not a subclass) with exactly ``message``.
+    The two fallback lanes must also have fallen back for the expected reason:
+    ``cpp-permissive`` after the C++ engine refused with ``message``,
+    ``installed-fallback`` after the binding failed to import. Only these two
+    lanes silence the fallback warning (``ROCKE_CPP_QUIET_FALLBACK``); every
+    other lane clears it and must not fall back at all. ``error_type`` must be
+    one the C++ status map covers, as for :func:`assert_engine_rejects`; that
+    is checked in every lane. ``llvm_flavor`` is required because the
+    ``cpp`` lanes cannot resolve a flavor without a compiler.
+    """
+    if lane not in _LANE_ENVIRONMENT:
+        raise ValueError(f"lane={lane!r}, expected one of {BACKEND_LANES}")
+    status = _native_status(error_type)
+    backend, strict = _LANE_ENVIRONMENT[lane]
+    for variable, value in (("ROCKE_BACKEND", backend), ("ROCKE_CPP_STRICT", strict)):
+        if value is None:
+            monkeypatch.delenv(variable, raising=False)
+        else:
+            monkeypatch.setenv(variable, value)
+    if lane in _FALLBACK_LANES:
+        # The fallback is asserted below, so its stderr warning would be noise.
+        monkeypatch.setenv("ROCKE_CPP_QUIET_FALLBACK", "1")
+    else:
+        # A fallback here is unexpected: keep its warning, even if inherited
+        # from the caller's environment.
+        monkeypatch.delenv("ROCKE_CPP_QUIET_FALLBACK", raising=False)
+    if lane == "installed-fallback":
+        monkeypatch.setitem(sys.modules, "rocke_engine", None)
+    elif lane != "python":
+        _require_native_engine()
+    fallbacks_before = len(cpp_fallbacks())
+    with pytest.raises(Exception) as refusal:
+        lower_kernel_to_llvm(kernel, arch=arch, llvm_flavor=llvm_flavor)
+    fallbacks = [reason for _, reason in cpp_fallbacks()[fallbacks_before:]]
+    if lane == "cpp-strict":
+        assert type(refusal.value) is RuntimeError, repr(refusal.value)
+        assert str(refusal.value).endswith(
+            _native_refusal_suffix(message, status)
+        ), str(refusal.value)
+    else:
+        assert type(refusal.value) is error_type, repr(refusal.value)
+        assert str(refusal.value) == message, str(refusal.value)
+    if lane == "cpp-permissive":
+        assert len(fallbacks) == 1 and fallbacks[0].endswith(": " + message), fallbacks
+    elif lane == "installed-fallback":
+        assert len(fallbacks) == 1 and fallbacks[0].startswith(
+            "BackendError: "
+        ), fallbacks
+    else:
+        assert fallbacks == [], fallbacks
+
+
+def assert_refused_everywhere(
+    kernel: KernelDef,
+    arch: str,
+    error_type: type[Exception],
+    message: str,
+    llvm_flavor: str | None = None,
+    *,
+    engines: tuple[Engine, ...] | None = None,
+) -> None:
+    """Assert that the Python verifier reports ``message`` for ``kernel`` and
+    that the LLVM and HIP lowerings of each of ``engines`` (default:
+    ``available_engines()``) refuse it as :func:`assert_engine_rejects` and
+    :func:`assert_engine_rejects_hip` check. ``engines=("python",)`` holds a
+    kernel only the Python engine can receive (one serialized IR cannot
+    spell) to the Python engine alone. The C++ verifier is not reached through
+    the binding; the native tests check it."""
+    assert message in [diagnostic.message for diagnostic in verify(kernel)]
+    for engine in available_engines() if engines is None else engines:
+        assert_engine_rejects(
+            kernel,
+            arch,
+            engine=engine,
+            error_type=error_type,
+            message=message,
+            llvm_flavor=llvm_flavor,
+        )
+        assert_engine_rejects_hip(
+            kernel, arch, engine=engine, error_type=error_type, message=message
+        )
+
+
+def assert_accepted_everywhere(
+    kernel: KernelDef, arch: str, llvm_flavor: str | None = None
+) -> None:
+    """Assert that the Python verifier reports nothing for ``kernel`` and that
+    the LLVM and HIP lowerings of every engine in ``available_engines()`` accept
+    it, the two engines emitting the same text where both run."""
+    assert verify(kernel) == []
+    # The last engine available lowers with the Python engine too, and for
+    # "cpp" asserts the texts are identical.
+    engine = available_engines()[-1]
+    lower_with_engine(kernel, arch, engine=engine, llvm_flavor=llvm_flavor)
+    lower_hip_with_engine(kernel, arch, engine=engine)
