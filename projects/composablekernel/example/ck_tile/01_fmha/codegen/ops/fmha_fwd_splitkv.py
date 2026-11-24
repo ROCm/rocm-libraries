@@ -96,7 +96,7 @@ using fmha_traits_base = ck_tile::TileFmhaTraits<{F_spad},
                                             {F_qscale},
                                             {F_occupancy},
                                             false,
-                                            false>;
+                                            {F_sink}>;
 // merged: a KV head's query heads (one query each) as the tile's rows
 using fmha_traits = std::conditional_t<kMergeHeads,
                                        ck_tile::TileFmhaMergeHeadsTraits<fmha_traits_base>,
@@ -147,7 +147,7 @@ using fmha_kernel = ck_tile::FmhaFwdKernel<fmha_pipeline, fmha_epilogue, true>;
 }} // anonymous namespace
 
 using trait_{F_idx} = fmha_fwd_splitkv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout},
-                        {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, true, false, false, false, {F_spad}, {F_skpad}, {F_dpad},
+                        {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, true, false, false, {F_sink}, {F_spad}, {F_skpad}, {F_dpad},
                         {F_dvpad}, {F_occupancy}, {F_qscale}>;
 
 namespace {{
@@ -161,21 +161,25 @@ void run_{F_idx}(const ck_tile::stream_config& s, fmha_fwd_splitkv_args a)
     ck_tile::make_kernel<kBlockPerCu, {F_arch.tag}>(k_{{}}, grids, blocks, 0, kargs)(ck_tile::stream_config{{s.stream_id_}});
 }}
 
-// GQA decode: a KV head's single-query heads fold into one tile's rows (K/V read once)
+// GQA decode: a KV head's single-query heads fold into one tile's rows (K/V read once); batch
+// mode without a bias (a merged row's index is its head's)
+constexpr bool kCanMergeHeads_{F_idx} = !{F_mode} && {F_bias} == ck_tile::BlockAttentionBiasEnum::NO_BIAS;
 bool merge_heads_{F_idx}(const fmha_fwd_splitkv_args& a)
 {{
-    return a.seqlen_q == 1 && a.max_seqlen_q == 1 && a.nhead_q > a.nhead_k &&
-           a.nhead_q / a.nhead_k <= {F_bm0};
+    return kCanMergeHeads_{F_idx} && a.seqlen_q == 1 && a.max_seqlen_q == 1 &&
+           a.nhead_q > a.nhead_k && a.nhead_q / a.nhead_k <= {F_bm0};
 }}
 }} // anonymous namespace
 
 template<>
 void fmha_fwd_splitkv_oneshot_<trait_{F_idx}, {F_arch.tag}>(const ck_tile::stream_config& s, fmha_fwd_splitkv_args a)
 {{
-    if(merge_heads_{F_idx}(a))
-        run_{F_idx}<true>(s, a);
-    else
-        run_{F_idx}<false>(s, a);
+    if constexpr(kCanMergeHeads_{F_idx})
+    {{
+        if(merge_heads_{F_idx}(a))
+            return run_{F_idx}<true>(s, a);
+    }}
+    run_{F_idx}<false>(s, a);
 }}
 
 // the forward kernel's own checks (descale layouts, merged rows' strides), ahead of the launch
@@ -188,7 +192,12 @@ bool fmha_fwd_splitkv_supported_<trait_{F_idx}, {F_arch.tag}>(const fmha_fwd_spl
         (void)grids;
         return k_::IsSupportedArgument(kargs);
     }};
-    return merge_heads_{F_idx}(a) ? check(std::true_type{{}}) : check(std::false_type{{}});
+    if constexpr(kCanMergeHeads_{F_idx})
+    {{
+        if(merge_heads_{F_idx}(a))
+            return check(std::true_type{{}});
+    }}
+    return check(std::false_type{{}});
 }}
 
 template<>
@@ -452,7 +461,7 @@ float fmha_fwd_splitkv(fmha_fwd_splitkv_traits t, fmha_fwd_splitkv_args a, const
 """
 
 FMHA_FWD_SPLITKV_API_INNER_DISPATCH = """{F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.do_fp8_static_quant == {F_squant}) && (t.qscale_type == {F_qscale_check}) &&
-        ((a.block_table_ptr != nullptr) == {F_pagedkv}) && (t.has_sink == {F_sink}) && ({F_scheck}) && ({F_seqtune}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint})) {{
+        ((a.block_table_ptr != nullptr) == {F_pagedkv}) && ({F_sink_check}) && ({F_scheck}) && ({F_seqtune}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint})) {{
     using traits_ = fmha_fwd_splitkv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, true, {F_squant}, {F_pagedkv},{F_sink}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_occupancy}, {F_qscale_enum}>;
 
     // get combine kernel tile sizes
@@ -540,6 +549,11 @@ class FmhaFwdSplitKVApiTrait:
     def seqtune(self, max_bm0: int) -> str:
         if self.bm0 == max_bm0:
             return "true/*fall back to largest tile*/"
+        elif self.pipeline_tag == "qr_tdm_pingpong" and self.bm0 == 16:
+            rows = qr_tdm_pingpong_splitkv_decode_rows(self.dtype, self.hdim)
+            if self.mode == "group":
+                return f"a.max_seqlen_q <= {rows}"
+            return f"a.seqlen_q <= {rows}"
         else:
             if self.mode == "group":
                 return f"a.max_seqlen_q <= {self.bm0}"
@@ -782,7 +796,9 @@ class FmhaFwdSplitKVApiPool:
                             F_pipeline_enum=PIPELINE_ENUM_MAP[trait.pipeline_tag],
                             F_logits=BOOL_MAP[trait.logits],
                             F_mask=get_mask_map(self.mask_impl)[trait.mask],
-                            F_mask_check=get_mask_check_map(self.mask_impl)[trait.mask],
+                            F_mask_check="true"
+                            if qr_tdm_pingpong_any_mask(trait, self.mask_impl)
+                            else get_mask_check_map(self.mask_impl)[trait.mask],
                             F_bias_check=BIAS_CHECK_MAP[trait.bias],
                             F_bias=BIAS_MAP[trait.bias],
                             F_lse=BOOL_MAP[trait.lse],
@@ -791,6 +807,7 @@ class FmhaFwdSplitKVApiPool:
                             F_qscale_enum=QSCALE_MAP[trait.qscale],
                             F_pagedkv=BOOL_MAP[trait.pagedkv],
                             F_sink=BOOL_MAP[trait.sink],
+                            F_sink_check=f"t.has_sink == {BOOL_MAP[trait.sink]}",
                             F_scheck=trait.scheck,
                             F_seqtune=trait.seqtune(max_bm0),
                             F_skcheck=trait.skcheck,
@@ -892,6 +909,7 @@ class FmhaFwdSplitKVKernel:
             F_dvpad=BOOL_MAP[self.F_pipeline.F_dvpad],
             F_logits=BOOL_MAP[self.F_pipeline.F_logits],
             F_bias=BIAS_MAP[self.F_pipeline.F_bias],
+            F_sink=BOOL_MAP[self.F_pipeline.F_sink],
             F_occupancy=t.F_occupancy,
             F_pipeline_enum=PIPELINE_ENUM_MAP[self.F_pipeline.tag],
             F_mask=get_mask_map(self.mask_impl)[self.F_pipeline.F_mask],
@@ -1168,9 +1186,102 @@ GFX125_QR_TDM_PINGPONG_SPLITKV_HDIMS = GFX125_QR_TDM_PINGPONG_HDIMS
 # bucket up's instances there (its padded ones), as before these buckets existed.
 GFX125_SPLITKV_FALLBACK_BUCKETS = {96: 128, 160: 256, 192: 256}
 
+# qr_tdm_pingpong's split-KV features: every (logits soft cap, bias, sink) combination. They
+# take the padded head-dim instances (any head dim of the bucket) in batch and group mode; with
+# the simplified masks only the masking kernel (no mask is its unbounded window,
+# qr_tdm_pingpong_any_mask). Sinks stay compiled in or out: compiled in, the kernel gives up
+# its no-sink trip schedule (gfx1250 decode, soft cap and group mode 5..28% slower).
+GFX125_QR_TDM_PINGPONG_SPLITKV_FEATURES = tuple(
+    itertools.product(("f", "t"), ("no", "bias", "alibi"), ("f", "t"))
+)
+
+
+def qr_tdm_pingpong_splitkv_decode_rows(dtype, hdim):
+    """The query rows qr_tdm_pingpong's 16-row split tile takes; more take the 64-row one.
+    fp8 / MX up to d64 keep it to 32 rows (gfx1250, 32k keys, 32/8 heads: d64 17..32 rows
+    fp8 19..33%, MX 9..17% faster than the 64-row tile; d128 and 16-bit inputs no gain)."""
+    return 32 if dtype in GFX125_QR_TDM_PINGPONG_SPLITKV_QSCALES and hdim <= 64 else 16
+
+
+def _gfx125_qr_tdm_pingpong_splitkv_tiles(hdim_pair, fp8=False, mx=False):
+    """qr_tdm_pingpong's split-KV tiles: the 16-row decode tile with the longest trips (a
+    split's keys are long), then the 64-row one for longer queries (small-query prefill)."""
+    tiles = _gfx125_qr_tdm_pingpong_tiles(hdim_pair, fp8=fp8, mx=mx)
+    return [tiles[0], next(t for t in tiles if t.F_bm0 == 64)]
+
+
+def qr_tdm_pingpong_any_mask(trait, mask_impl) -> bool:
+    """qr_tdm_pingpong's padded split-KV instances (the features') take every mask type with
+    the simplified masks: their masking kernel reads no mask as an unbounded window."""
+    return (
+        trait.pipeline_tag == "qr_tdm_pingpong"
+        and trait.dpad == "t"
+        and mask_impl == "simplified"
+        and trait.mask == "s_mask"
+    )
+
+
+def _qr_tdm_pingpong_splitkv_pipelines(mask_impl, squant, qscale):
+    """qr_tdm_pingpong's split-KV pipelines at one input width: the plain decode on whole head
+    dims (batch mode), then every feature on padded head dims (batch and group mode; with the
+    simplified masks, on the masking kernel alone: qr_tdm_pingpong_any_mask)."""
+    Pipeline = FmhaFwdSplitKVPipeline
+    masks = get_mask_map(mask_impl).keys()
+    feature_masks = ["s_mask"] if mask_impl == "simplified" else masks
+
+    def masks_of(logits, bias, sink):
+        # sinks alone keep a no-mask kernel too, ahead of the masking one (gfx1250 d64 decode,
+        # 32k keys, sink logits: the masking kernel 18% slower; the other features within 5%)
+        if mask_impl == "simplified" and (logits, bias, sink) == ("f", "no", "t"):
+            return ["s_no", "s_mask"]
+        return feature_masks
+
+    #                    vlayout spad skpad dpad dvpad logits bias lse squant pagedkv sink mask
+    pipelines = [
+        Pipeline(
+            "qr_tdm_pingpong",
+            "row",
+            "t",
+            "t",
+            "f",
+            "f",
+            "f",
+            "no",
+            "t",
+            squant,
+            "f",
+            "f",
+            mask,
+            qscale,
+        )  # fmt: skip
+        for mask in masks
+    ]
+    pipelines += [
+        Pipeline(
+            "qr_tdm_pingpong",
+            "row",
+            "t",
+            "t",
+            "t",
+            "t",
+            logits,
+            bias,
+            "t",
+            squant,
+            "f",
+            sink,
+            mask,
+            qscale,
+        )  # fmt: skip
+        for logits, bias, sink in GFX125_QR_TDM_PINGPONG_SPLITKV_FEATURES
+        for mask in masks_of(logits, bias, sink)
+    ]
+    return pipelines
+
+
 # qr_tdm_pingpong's fp8 / MX split-KV: the input types and their quantization scales
 GFX125_QR_TDM_PINGPONG_SPLITKV_QSCALES = {
-    "fp8bf16": ("no", "pertensor", "perhead", "blockscale"),
+    "fp8bf16": ("pertensor", "perhead", "blockscale"),
     "mxfp8bf16": ("mx",),
 }
 
@@ -1181,18 +1292,13 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
     @staticmethod
     def get_combine_pipelines(dtype, hdim) -> List[FmhaFwdSplitKVCombinePipeline]:
         if dtype in GFX125_QR_TDM_PINGPONG_SPLITKV_QSCALES:
-            # what qr_tdm_pingpong's split kernels pair with (spad, no dvpad; with and
-            # without the LSE)
+            # what qr_tdm_pingpong's split kernels pair with (spad; whole and padded head
+            # dims; with and without the LSE)
             return [
-                FmhaFwdSplitKVCombinePipeline("unused", "t", "f", lse, "f")
-                for lse in ("t", "f")
+                FmhaFwdSplitKVCombinePipeline("unused", "t", dvpad, lse, "f")
+                for dvpad, lse in itertools.product(("f", "t"), ("t", "f"))
             ]
         return KernelComponentFactoryBase.get_combine_pipelines(dtype, hdim)
-
-    @staticmethod
-    def combine_group_mode(dtype, hdim) -> bool:
-        # group mode's split kernels are qr_tdm's (16 bits, on its own head dims)
-        return dtype in ["fp16", "bf16"] and hdim in (32, 64, 128, 256)
 
     @staticmethod
     def get_combine_hdim_tile_size_dict(dtype: str) -> Optional[dict]:
@@ -1218,12 +1324,9 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
         pipelines = []
         if dtype in ["fp16", "bf16"]:
             squant = "f"
-            # qr_tdm_pingpong's decode tile first (its seqtune takes up to 16 query rows), on
-            # whole and on padded head dims: no bias, soft cap, paged KV or sink.
-            for mask in get_mask_map(mask_impl).keys():
-                #                             vlayout spad skpad dpad dvpad logits bias lse squant pagedkv sink mask
-                pipelines.append(Pipeline("qr_tdm_pingpong", "row", "t", "t", "f", "f", "f", "no", "t", squant, "f", "f", mask))  # fmt: skip
-                pipelines.append(Pipeline("qr_tdm_pingpong", "row", "t", "t", "t", "t", "f", "no", "t", squant, "f", "f", mask))  # fmt: skip
+            # qr_tdm_pingpong's decode tile first (its seqtune takes up to 16 query rows); what
+            # it does not take (paged KV, KV cache, soft cap or sinks with a bias) is qr_tdm's
+            pipelines += _qr_tdm_pingpong_splitkv_pipelines(mask_impl, squant, "no")
             # Entries with an unpadded seqlen go first: spad/skpad == t predicates
             # always hold, so the fully padded (t, t) entries must come last.
             # Soft cap with bias is dropped in get_fwd_splitkv_blobs.
@@ -1250,12 +1353,8 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                 pipelines.append(Pipeline("qr", "row", "t", "t", "f", "f", logits, bias, "t", squant, "f", "f", mask))  # fmt: skip
         elif dtype in GFX125_QR_TDM_PINGPONG_SPLITKV_QSCALES:
             # fp8 / MX: qr_tdm_pingpong's decode tile only, at each quantization scale
-            for qscale, mask in itertools.product(
-                GFX125_QR_TDM_PINGPONG_SPLITKV_QSCALES[dtype],
-                get_mask_map(mask_impl).keys(),
-            ):
-                #                             vlayout spad skpad dpad dvpad logits bias lse squant pagedkv sink mask
-                pipelines.append(Pipeline("qr_tdm_pingpong", "row", "t", "t", "f", "f", "f", "no", "t", "f", "f", "f", mask, qscale))  # fmt: skip
+            for qscale in GFX125_QR_TDM_PINGPONG_SPLITKV_QSCALES[dtype]:
+                pipelines += _qr_tdm_pingpong_splitkv_pipelines(mask_impl, "f", qscale)
         elif dtype in ["fp8fp16", "fp8bf16", "mxfp8", "mxfp4"]:
             pass
         else:
@@ -1267,7 +1366,7 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
         if dtype in GFX125_QR_TDM_PINGPONG_SPLITKV_QSCALES:
             mx = dtype.startswith("mx")
             return {
-                str(h): [_gfx125_qr_tdm_pingpong_tiles((h, h_v), fp8=True, mx=mx)[0]]
+                str(h): _gfx125_qr_tdm_pingpong_splitkv_tiles((h, h_v), fp8=True, mx=mx)
                 for h, h_v in GFX125_QR_TDM_PINGPONG_SPLITKV_HDIMS
             }
         if dtype in ["fp16", "bf16"]:
@@ -1284,8 +1383,8 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
             # up's instances behind pingpong's: GFX125_SPLITKV_FALLBACK_BUCKETS)
             result = {}
             for h, h_v in GFX125_QR_TDM_PINGPONG_SPLITKV_HDIMS:
-                pp = _gfx125_qr_tdm_pingpong_tiles((h, h_v))[0]
-                result[str(h)] = [pp] + ([tiles[str(h)]] if str(h) in tiles else [])
+                pp = _gfx125_qr_tdm_pingpong_splitkv_tiles((h, h_v))
+                result[str(h)] = pp + ([tiles[str(h)]] if str(h) in tiles else [])
             return result
         elif dtype in ["bf8"]:
             return {
@@ -1339,8 +1438,8 @@ def get_fwd_splitkv_blobs(
                 is_pingpong_tile = tile.F_pipeline_tag == "qr_tdm_pingpong"
                 if is_pingpong_tile != (pipeline.tag == "qr_tdm_pingpong"):
                     continue
-                # (qr_tdm_pingpong's split-KV: batch mode)
-                if is_pingpong_tile and mode == "group":
+                # (qr_tdm_pingpong's split-KV in group mode: its padded instances)
+                if is_pingpong_tile and mode == "group" and pipeline.F_dpad == "f":
                     continue
                 # Use qr_nwarp_sshuffle with multiple N warps and qr otherwise
                 if not is_pingpong_tile and (tile.F_rn0 != 1) != (
@@ -1360,10 +1459,11 @@ def get_fwd_splitkv_blobs(
                     if pipeline.F_spad != "t" or pipeline.F_skpad != "t":
                         # in group mode, spad/skpad must be true, since we can't predict if seqlen of current batch need pad or not
                         continue
-                # logits_soft_cap is only allowed if no bias
+                # logits_soft_cap is only allowed if no bias (qr_tdm_pingpong: either)
                 if not (
                     (pipeline.F_logits == "t" and pipeline.F_bias == "no")
                     or pipeline.F_logits == "f"
+                    or pipeline.tag == "qr_tdm_pingpong"
                 ):
                     continue
                 k = Kernel(
@@ -1458,10 +1558,6 @@ def get_fwd_splitkv_combine_blobs(
         for hdim_str, mode in itertools.product(d.keys(), MODE_MAP.keys()):
             tile = d[hdim_str]
             hdim = int(hdim_str)
-            if mode == "group" and not getattr(
-                factory, "combine_group_mode", lambda dt, h: True
-            )(dtype, hdim):
-                continue
             for pipeline in factory.get_combine_pipelines(dtype, hdim):
                 if mode == "group":
                     if pipeline.F_spad != "t":
@@ -1596,8 +1692,12 @@ def write_blobs(
                 else kernel.F_tile.F_constraint,
             )
         )
-    # behind pingpong's in its own buckets, the next qr_tdm bucket up's padded instances
-    # (GFX125_SPLITKV_FALLBACK_BUCKETS): dispatched there, not compiled again
+    # behind pingpong's in its own buckets, the next bucket up's padded instances
+    # (GFX125_SPLITKV_FALLBACK_BUCKETS): dispatched there, not compiled again. qr_tdm's take
+    # what pingpong does not (paged KV, KV cache); pingpong's own come first where the bucket's
+    # pingpong tile is narrower than the bucket (d192: its 192/128 tile, so d192/192 takes
+    # d256's padded pingpong instances)
+    narrow_pingpong = {h for h, h_v in GFX125_QR_TDM_PINGPONG_SPLITKV_HDIMS if h_v < h}
     for arch, by_dtype in api_pool.pool.items():
         if not arch.name.startswith("gfx125"):
             continue
@@ -1605,9 +1705,17 @@ def write_blobs(
             for bucket, up in GFX125_SPLITKV_FALLBACK_BUCKETS.items():
                 if bucket not in by_hdim or up not in by_hdim:
                     continue
-                for t in list(by_hdim[up]):
-                    if t.pipeline_tag == "qr_tdm" and (t.dpad, t.dvpad) == ("t", "t"):
-                        api_pool.register_traits(dataclasses.replace(t, bucket=bucket))
+                tags = (
+                    ("qr_tdm_pingpong", "qr_tdm")
+                    if bucket in narrow_pingpong
+                    else ("qr_tdm",)
+                )
+                for tag in tags:
+                    for t in list(by_hdim[up]):
+                        if t.pipeline_tag == tag and (t.dpad, t.dvpad) == ("t", "t"):
+                            api_pool.register_traits(
+                                dataclasses.replace(t, bucket=bucket)
+                            )
     write_fwd_splitkv_api(api_pool, output_dir)
 
 

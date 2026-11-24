@@ -602,7 +602,13 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                                              index_t i_split    = 0)
     {
         if constexpr(kHasSink)
+        {
+            // split-KV: the sink tiles go to split 0, the window's tiles are shared out
+            if(num_splits > 1)
+                return mask.GetSplitSinkTileRangeAlongX(
+                    q_origin.at(I0), number<kM0>{}, number<kN0>{}, num_splits, i_split);
             return mask.GetSinkTileRangeAlongX(q_origin.at(I0), number<kM0>{}, number<kN0>{});
+        }
         else
         {
             auto [start, end] =

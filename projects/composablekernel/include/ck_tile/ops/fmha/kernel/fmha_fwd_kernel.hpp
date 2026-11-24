@@ -240,10 +240,11 @@ struct FmhaFwdKernel
     // rows itself (MergedHeads); qr_tdm_pingpong takes the merged rows' q descales, MX scales
     // and sink logits by their heads (BlockFmhaQuantScales), the kernel's Q/O views carrying
     // the rest.
-    // Split-KV runs qr_tdm_pingpong, with the LSE every split must store and no sink tokens (a
-    // split takes a range of key tiles); merged heads keep their rows' strides on each split.
-    static_assert(!kSplitKV || (kPipelineName == "qr_tdm_pingpong" && kStoreLSE && !kHasSink),
-                  "split-KV is implemented for qr_tdm_pingpong with LSE, without sink tokens");
+    // Split-KV runs qr_tdm_pingpong, with the LSE every split must store (sink tokens: split 0
+    // takes the sink tiles, the splits share the window's); merged heads keep their rows'
+    // strides on each split.
+    static_assert(!kSplitKV || (kPipelineName == "qr_tdm_pingpong" && kStoreLSE),
+                  "split-KV is implemented for qr_tdm_pingpong with LSE");
     static_assert(!kMergeNumHeadGroupsSeqLenQ || kPipelineName == "qr_tdm_fp8_sched" ||
                       kPipelineName == "qr_tdm_pingpong",
                   "merged query heads are implemented for qr_tdm_fp8_sched and qr_tdm_pingpong");

@@ -3186,6 +3186,10 @@ class SplitKVQrTdmTiles(unittest.TestCase):
                 first_tdm = min(i for i, t in enumerate(tags) if t == "QRKSVS_TDM")
                 self.assertLess(last_pp, first_tdm)
                 self.assertEqual({int(d) for d, t in traits if t == "QRKSVS_TDM"}, {up})
+                # d192's pingpong tile is 192/128: d192/192 takes d256's padded pingpong
+                # instances, ahead of qr_tdm's
+                pp_dims = {int(d) for d, t in traits if t == "QRKSVS_TDM_PINGPONG"}
+                self.assertEqual(pp_dims, {h, up} if h == 192 else {h})
                 self.assertFalse(
                     any(
                         f.startswith(f"fmha_fwd_splitkv_d{h}_") and "qr_tdm_v" in f
@@ -3232,7 +3236,8 @@ class SplitKVDecodeDispatch(unittest.TestCase):
 
     def test_only_tdm_pipelines_merge_heads_with_a_sink(self):
         # A merged row reads the sink logit of its own q head only in the TDM
-        # pipelines; the others read one per kv head.
+        # pipelines; the others read one per kv head. qr_tdm_pingpong's split-KV (the
+        # forward kernel) merges in batch mode without a bias, in its own kernel body.
         for target in ("gfx1250", "gfx942"):
             sink = [
                 k
@@ -3241,30 +3246,58 @@ class SplitKVDecodeDispatch(unittest.TestCase):
             ]
             self.assertTrue(sink, target)
             for kernel in sink:
+                if kernel.F_pipeline.tag == "qr_tdm_pingpong":
+                    self.assertIn(
+                        "constexpr bool kCanMergeHeads_",
+                        kernel.template,
+                        kernel.filename,
+                    )
+                    continue
                 self.assertEqual(
                     "(!true || true)" in kernel.template,
-                    kernel.F_pipeline.tag in ("qr_tdm", "qr_tdm_pingpong"),
+                    kernel.F_pipeline.tag == "qr_tdm",
                     kernel.filename,
                 )
 
     def test_pingpong_takes_up_to_16_rows_ahead_of_qr_tdm(self):
-        # qr_tdm_pingpong's split-KV (the forward kernel): its 16-row decode tile, batch mode,
-        # no sink, bias, soft cap or paged KV
+        # qr_tdm_pingpong's split-KV (the forward kernel): its 16-row decode tile and its
+        # 64-row one; the plain call on whole head dims in batch mode, the features (soft cap,
+        # bias / ALiBi, group mode) on padded ones, those with sinks as a runtime value and the
+        # masking kernel for any mask; never paged KV
         kernels = self._kernels("gfx1250", 0)
         pingpong = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_pingpong"]
         self.assertTrue(pingpong)
         for kernel in pingpong:
-            self.assertEqual((kernel.F_mode, kernel.F_tile.F_bm0), ("batch", 16))
-            self.assertEqual(
-                (
-                    kernel.F_pipeline.F_sink,
-                    kernel.F_pipeline.F_bias,
-                    kernel.F_pipeline.F_logits,
-                    kernel.F_pipeline.F_pagedkv,
-                ),
-                ("f", "no", "f", "f"),
-                kernel.filename,
-            )
+            p = kernel.F_pipeline
+            self.assertIn(kernel.F_tile.F_bm0, (16, 64), kernel.filename)
+            self.assertEqual(p.F_pagedkv, "f", kernel.filename)
+            padded = (p.F_dpad, p.F_dvpad) == ("t", "t")
+            if p.F_logits == "t" or p.F_bias != "no" or kernel.F_mode == "group":
+                self.assertTrue(padded, kernel.filename)
+            if padded:
+                # the masking kernel takes no mask too; sinks alone keep a no-mask one
+                if p.F_mask == "s_no":
+                    self.assertEqual(
+                        (p.F_logits, p.F_bias, p.F_sink),
+                        ("f", "no", "t"),
+                        kernel.filename,
+                    )
+                else:
+                    self.assertEqual(p.F_mask, "s_mask", kernel.filename)
+            else:
+                self.assertEqual(p.F_sink, "f", kernel.filename)
+        for mode in ("batch", "group"):
+            for bm0 in (16, 64):
+                self.assertTrue(
+                    [k for k in pingpong if (k.F_mode, k.F_tile.F_bm0) == (mode, bm0)]
+                )
+        self.assertTrue(
+            [
+                k
+                for k in pingpong
+                if (k.F_pipeline.F_logits, k.F_pipeline.F_bias) == ("t", "bias")
+            ]
+        )
         # Dispatch takes the first hit in emission order: rows 17 and up fall
         # through to the b64 qr_tdm entries behind the 16-row ones.
         for dtype in ("fp16", "bf16"):

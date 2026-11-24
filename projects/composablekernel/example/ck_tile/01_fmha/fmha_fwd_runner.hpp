@@ -196,15 +196,15 @@ int override_num_splits_if_necessary(int batch,
                 return 1;
             // The workgroups the split kernel launches a split. merge_heads: the split kernel
             // folds a KV head's single-query heads into one tile's rows (the caller knows
-            // which instance takes the call); qr_tdm_pingpong's 16-row tile takes every query
-            // of fp8 / MX and of d512 (no other split-kv tile there), else queries past 16
-            // rows take qr_tdm's 64-row one.
-            const int ratio             = nhead / std::max(nhead_k, 1);
-            const bool merge            = merge_heads;
-            const int rows              = merge ? ratio : max_seqlen_q;
-            const bool only_decode_tile = kv_elem_bytes == 1 || hdim_q > 256;
-            const int tile              = rows <= 16 || only_decode_tile ? 16 : 64;
-            const int blocks            = batch * (merge ? std::max(nhead_k, 1) : nhead) *
+            // which instance takes the call); up to 16 rows (32 at fp8 / MX up to d64) take
+            // the 16-row tile, more the 64-row one.
+            const int ratio  = nhead / std::max(nhead_k, 1);
+            const bool merge = merge_heads;
+            const int rows   = merge ? ratio : max_seqlen_q;
+            // (fp8 / MX up to d64 keep the 16-row tile to 32 rows, as the split-KV dispatch)
+            const int decode_rows = kv_elem_bytes == 1 && hdim_q <= 64 ? 32 : 16;
+            const int tile        = rows <= decode_rows ? 16 : 64;
+            const int blocks      = batch * (merge ? std::max(nhead_k, 1) : nhead) *
                                ck_tile::integer_divide_ceil(rows, tile);
             const int wgps = props.multiProcessorCount;
             if(blocks >= wgps)
@@ -918,18 +918,20 @@ fwd_result fmha_fwd_run(mode_enum mode,
                                 .at(ck_tile::number<2>{});
             return std::max(end - start, 0);
         }();
-        // the calls qr_tdm_pingpong's split-KV takes (else qr_tdm's)
-        const bool pingpong_split = tdm && mode == mode_enum::batch &&
-                                    bias.type == bias_enum::no_bias && logits_soft_cap == 0.f &&
-                                    !use_kvcache && mask.sink == 0;
-        // single-query GQA heads the split kernel folds into one tile's rows: pingpong up to
-        // 16 a KV head; the others without a bias, with a mask or a sink only the TDM ones
-        // and not with both
+        // the calls qr_tdm_pingpong's split-KV takes (else qr_tdm's): no KV cache / paged KV
+        // or batch-mode K padding
         const int ratio     = nhead / std::max(nhead_k, 1);
         const bool has_sink = mask.sink > 0 || init_sink_value != 0;
+        const bool has_bias = bias.type != bias_enum::no_bias;
+        const bool pingpong_split =
+            tdm && !use_kvcache &&
+            !(mode == mode_enum::batch && !seqlen_kpads.empty() && 0 <= seqlen_kpads[0]);
+        // single-query GQA heads the split kernel folds into one tile's rows: pingpong up to
+        // 16 a KV head, batch mode without a bias; the others without a bias, with a mask or a
+        // sink only the TDM ones and not with both
         const bool merge_rule =
             pingpong_split
-                ? ratio <= 16
+                ? mode == mode_enum::batch && !has_bias && ratio <= 16
                 : bias.type == bias_enum::no_bias &&
                       (mask.type == mask_enum::no_mask ? (!has_sink || tdm) : (tdm && !has_sink));
         const bool merge_heads = !packed && max_seqlen_q == 1 && ratio > 1 && merge_rule;

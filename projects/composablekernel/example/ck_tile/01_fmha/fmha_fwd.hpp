@@ -1290,8 +1290,15 @@ auto fmha_fwd_splitkv_create_kargs_and_grids(fmha_fwd_splitkv_args args)
 template <typename Kernel>
 auto fmha_fwd_splitkv_pingpong_create_kargs_and_grids(fmha_fwd_splitkv_args args)
 {
-    static_assert(Kernel::kSplitKV && !Kernel::kIsGroupMode);
+    static_assert(Kernel::kSplitKV);
     fmha_fwd_args f{};
+    // group mode: physical starts, and the logical K lengths where K is padded
+    if constexpr(Kernel::kIsGroupMode)
+    {
+        f.seqstart_q_ptr = args.seqstart_q_ptr;
+        f.seqstart_k_ptr = args.seqstart_k_ptr;
+        f.seqlen_k_ptr   = args.seqlen_k_ptr;
+    }
     f.q_ptr                      = args.q_ptr;
     f.k_ptr                      = args.k_ptr;
     f.v_ptr                      = args.v_ptr;
