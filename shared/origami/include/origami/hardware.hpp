@@ -364,7 +364,7 @@ class ORIGAMI_EXPORT hardware_t {
         return {4.86133, 1.21875121875121875122 * 1.28305, 0.420583, 2, std::make_tuple(0, 0.13169, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1150:
         // AMD Strix Point iGPU
-        return {1.497, NO_MALL_AVAILABLE, 0.077, 16, std::make_tuple(0, 0.18, 0), 1.5, 2, 32 * 1024};
+        return {1.497, NO_MALL_AVAILABLE, 0.0300383, 2, std::make_tuple(0, 0.18, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1151:
         // AMD Strix Halo iGPU
         return {2.47, 1.21875121875121875122 * 0.93, 0.215, 2, std::make_tuple(0, 0.22, 0), 1.5, 2, 32 * 1024};

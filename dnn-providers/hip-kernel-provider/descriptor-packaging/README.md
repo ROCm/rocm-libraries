@@ -12,7 +12,7 @@ minimal authored source root.
 and archive (`arch: [<G>]`) into each selected member's folder; no generic-named folder is
 installed. Disk use grows with the number of members.
 
-Copies depend only on the source tree, the generic's spelling, hipcc and the table, so they are
+Copies depend only on the source tree, the generic's spelling, the HIP compiler and the table, so they are
 identical across member folders and separate per-arch builds, and the loader collapses them to
 one entry. Copies from different compilers differ in `provenance`, and the loader drops both.
 
@@ -131,6 +131,15 @@ not a directory is fatal.
 Test roots hold no family folder today. The first family folder added under
 `test_descriptors/` must also gate the test binary's cases: a fixture root that goes
 dormant still leaves cases in that binary that expect its descriptors.
+
+A pack wipes its `OUT_ROOT` before refilling it, so nothing else may write there with a
+rule of its own: the next repack deletes it and no edge restores it. Files that must ship
+in a packed tree without being packed — the ASM SDPA engine's loose L1 models
+(`asm_sdpa/predict_engine/<arch>/`), declared as `HIPKERNELPROVIDER_PRODUCT_STAGE_FILES`
+in the provider's `CMakeLists.txt` — are passed as `STAGE_FILES <src> <dest>` pairs to
+`hkp_wire_pack_target()`, which copies them inside the pack command, after the packer
+and before the stamp, with each `<src>` an input. With production packaging dormant the
+provider stages and installs them itself.
 
 Two rules govern the walk:
 
@@ -415,7 +424,7 @@ still validates a packed `sources`, so a shipped tree can be checked.
 - **Provenance (`hip`, `hsaco`).** `origin_kind` is the shared kind and
   `provenance.sources` is keyed by launch name with each launch's authored identity:
   `{source, entry, build}` for `hip` and `{file, sha256, symbol}` for `hsaco`. The toolchain
-  field is top level as for a single launch (`hipcc_version` for `hip`, none for `hsaco`).
+  field is top level as for a single launch (`hip_version` for `hip`, none for `hsaco`).
   No compiler observed these kernels, so there is **no `effective_spec`** and no consumer
   agreement evidence. A declaration with `metadata_fields` over a `hip` or `hsaco`
   `sources` UKD is refused, exactly as for a single launch; one without them leaves the
@@ -950,10 +959,10 @@ PYTHONPATH=descriptor-packaging/python:/opt/rocm-kpack/python \
 `HIPKERNELPROVIDER_ROCM_KPACK_DIR`) is the kpack archive reader/writer most of the suite
 round-trips through. Its absence is diagnosed once by the `rocm_kpack_dir` fixture in
 `tests/conftest.py`: every test needing it skips with one message naming the dependency.
-Set `HIPKERNELPROVIDER_KPACK_REQUIRE_ROCM_KPACK=1` (mirroring `_REQUIRE_HIPCC` /
+Set `HIPKERNELPROVIDER_KPACK_REQUIRE_ROCM_KPACK=1` (mirroring `_REQUIRE_HIP_COMPILER` /
 `_REQUIRE_COMGR`) to turn that skip into a hard failure, e.g. in CI.
 
-`-m quick` selects the load-time/pure-unit subset needing neither `hipcc` nor
+`-m quick` selects the load-time/pure-unit subset needing neither the HIP compiler nor
 `rocm_kpack`/comgr.
 
 Every rocKE test lives in `tests/rocke/`, whose own `conftest.py` owns the rocKE
