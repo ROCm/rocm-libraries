@@ -1458,6 +1458,76 @@ TEST(StreamKLaunchSummaryTest, GeneratedKernelNameKeepsOrigamiReduction)
     EXPECT_EQ(solution.getSKReduction(problem, env.device), origami::reduction_t::none);
 }
 
+// origami's prefer_parallel_split is set only for a handwritten kernel
+// that completes parallel reduction.
+TEST(StreamKLaunchSummaryTest, CustomPrefersParallelSplitScope)
+{
+    ContractionSolution solution;
+    initStreamKSolution(solution, 3);
+    EXPECT_FALSE(solution.customPrefersParallelSplit()) << "not a custom kernel";
+
+    solution.customKernel.name = "probe";
+    solution.customKernel.streamKReductions
+        = {CustomReductionMode::Tree, CustomReductionMode::Parallel};
+    solution.customKernel.generated = true;
+    EXPECT_FALSE(solution.customPrefersParallelSplit()) << "generated kernel";
+
+    solution.customKernel.generated = false;
+    EXPECT_TRUE(solution.customPrefersParallelSplit());
+
+    solution.customKernel.streamKReductions = {CustomReductionMode::Tree};
+    EXPECT_FALSE(solution.customPrefersParallelSplit()) << "tree-only kernel";
+
+    solution.customKernel.streamKReductions = {CustomReductionMode::Parallel};
+    EXPECT_TRUE(solution.customPrefersParallelSplit());
+}
+
+// 128 tiles (above cuCount / 4) with an odd itersPerTile: a handwritten
+// parallel kernel is admitted to parallel F = 2, and
+// the workspace query agrees with the launch snapshot on grid, reduction and
+// bytes. The same kernel marked generated keeps origami's tree reduction.
+TEST(StreamKLaunchSummaryTest, CustomKernelPrefersParallelAboveQuarterCus)
+{
+    AnalyticalEnv       env;
+    ContractionSolution solution;
+    solution.kernelName = "test_streamk_custom_parallel";
+    initStreamKSolution(solution, 3);
+    solution.customKernel.name = solution.kernelName;
+    solution.customKernel.streamKReductions
+        = {CustomReductionMode::Tree, CustomReductionMode::Parallel};
+    solution.customKernel.generated             = false;
+    solution.customKernel.workspaceType         = CustomWorkspaceType::StreamKWithReduction;
+    solution.customKernel.workspaceSizePerElemC = 4;
+    solution.customKernel.macrotile             = TensileLite::dim3(128, 128, 64);
+
+    auto problem = makeGemmProblem(1024, 2048, 64 * 1025);
+    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+    ASSERT_FALSE(Debug::Instance().useStreamKDataParrallel())
+        << "unset TENSILE_STREAMK_DATA_PARALLEL before running this suite";
+
+    for(int uso : {0, 1})
+    {
+        SCOPED_TRACE(uso);
+        problem.setParams().setUniformSummationOrder(uso);
+        ASSERT_EQ(solution.getSKReduction(problem, env.device), origami::reduction_t::parallel);
+
+        auto d = solution.computeStreamKDecisions(problem, env.device);
+        ASSERT_EQ(d.tiles, 128u) << "1024/128 * 2048/128";
+        ASSERT_EQ(problem.getItersPerTile(solution.sizeMapping), 1025u);
+        EXPECT_EQ(d.reduction, origami::reduction_t::parallel);
+        EXPECT_EQ(d.finalGrid, 256u);
+        EXPECT_EQ(d.skSplit, 2u);
+        EXPECT_EQ(solution.getSKGrid(problem, env.device, d.tiles, d.reduction), d.finalGrid);
+        ASSERT_TRUE(d.workspaceAllocated);
+        EXPECT_EQ(d.requiredWorkspaceBytes, solution.partialTileSize(d.finalGrid));
+        EXPECT_EQ(solution.requiredWorkspaceSize(problem, env.device), d.requiredWorkspaceBytes);
+        EXPECT_FALSE(d.workspaceDPFallbackFired);
+    }
+
+    solution.customKernel.generated = true;
+    EXPECT_EQ(solution.getSKReduction(problem, env.device), origami::reduction_t::tree);
+}
+
 // ---------------------------------------------------------------------------
 // The batched parallel-reduction scenario, which is what separates the two
 // sizings. getNumTiles() folds the batch count into its result for every

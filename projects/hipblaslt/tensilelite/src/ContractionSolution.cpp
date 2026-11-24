@@ -6352,9 +6352,10 @@ namespace TensileLite
                 .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
             };
             origami::config_t origami_config = {
-                .mt = {static_cast<size_t>(sizeMapping.macroTile.x),
-                       static_cast<size_t>(sizeMapping.macroTile.y),
-                       static_cast<size_t>(sizeMapping.depthU)},
+                .mt                    = {static_cast<size_t>(sizeMapping.macroTile.x),
+                                          static_cast<size_t>(sizeMapping.macroTile.y),
+                                          static_cast<size_t>(sizeMapping.depthU)},
+                .prefer_parallel_split = customPrefersParallelSplit(),
             };
 
             reductionStrat = origami::streamk::select_reduction(
@@ -6548,6 +6549,11 @@ namespace TensileLite
                          customKernel.streamKReductions.end(),
                          mode)
                != customKernel.streamKReductions.end();
+    }
+
+    bool ContractionSolution::customPrefersParallelSplit() const
+    {
+        return handwrittenCustomKernel() && customKernelReduces(CustomReductionMode::Parallel);
     }
 
     bool ContractionSolution::customDataParallelClamp(origami::reduction_t reduction) const
@@ -7611,6 +7617,7 @@ namespace TensileLite
                         // the DataParallel launch itself has no reduction strategy.
                         .reduction_strategy = self.sizeMapping.isPersistentDataParallel()
                                                   ? origami::reduction_t::tree : reductionStrat,
+                        .prefer_parallel_split = self.customPrefersParallelSplit(),
                     };
 
                     TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
