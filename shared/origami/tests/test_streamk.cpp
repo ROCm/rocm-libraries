@@ -7,6 +7,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <limits>
+#include <tuple>
 #include "common.hpp"
 
 namespace {
@@ -620,4 +621,66 @@ TEST_CASE("Origami streamk: W4A16 on gfx1150 follows gfx1151's rules, without sh
   REQUIRE(grid(gfx1150, 512, 128, 64, 128, 8) == 16);
   // 16-wave workgroups fill a CU on both: data parallel.
   REQUIRE(grid(gfx1150, 512, 128, 64, 128, 16) == 8);
+}
+
+TEST_CASE("Origami streamk: a config can name the launch grid to model", "[streamk][grid]") {
+  const auto hardware = make_hardware(950);
+  const auto problem  = make_problem(4096, 4096, 4096);
+  auto config         = make_config(128, 128, 64);
+  const auto selected =
+      origami::gemm::compute_launch_parameters(problem, hardware, config, config.grid_selection);
+  config.launch_grid = 3 * hardware.N_CU;
+  const auto forced =
+      origami::gemm::compute_launch_parameters(problem, hardware, config, config.grid_selection);
+  REQUIRE(std::get<1>(forced) == 3 * hardware.N_CU);
+  REQUIRE(std::get<1>(forced) != std::get<1>(selected));
+  // The latency follows the grid: here the K of each of the 1024 tiles split in two.
+  auto other        = config;
+  other.launch_grid = 2048;
+  REQUIRE(origami::gemm::compute_total_latency(problem, hardware, config)
+          != origami::gemm::compute_total_latency(problem, hardware, other));
+  // A kernel without Stream-K launches one workgroup per tile whatever the config names.
+  auto data_parallel        = make_config(128, 128, 64, 16, 16, 16, false, 1, 1, 0, 0, 0);
+  data_parallel.launch_grid = 3 * hardware.N_CU;
+  REQUIRE(std::get<1>(origami::gemm::compute_launch_parameters(
+              problem, hardware, data_parallel, data_parallel.grid_selection))
+          == 32 * 32);
+}
+
+TEST_CASE("Origami streamk: the analytical grid has the least modeled latency", "[streamk][grid]") {
+  const auto hardware = make_hardware(950);
+  for (const auto& [m, n, k] : {std::tuple<size_t, size_t, size_t>{4096, 4096, 4096},
+                                std::tuple<size_t, size_t, size_t>{512, 256, 16384},
+                                std::tuple<size_t, size_t, size_t>{8192, 300, 2048}}) {
+    CAPTURE(m, n, k);
+    const auto problem = make_problem(m, n, k);
+    auto config        = make_config(128, 128, 64);
+    config.occupancy   = 3;
+    config.workspace_size            = std::numeric_limits<size_t>::max() / 2;
+    config.workspace_size_per_elem_c = 4;
+    const size_t tiles = origami::streamk::compute_number_of_output_tiles(128, 128, m, n, 1);
+    const size_t grid  =
+        origami::streamk::select_grid_size(problem, hardware, config, origami::grid_selection_t::analytical);
+    auto latency = [&](size_t launch_grid) {
+      auto c        = config;
+      c.launch_grid = launch_grid;
+      return origami::gemm::compute_total_latency(problem, hardware, c);
+    };
+    // Data parallel, a K split, and one to three workgroups per CU.
+    REQUIRE(latency(grid) <= latency(tiles));
+    if (2 * tiles <= hardware.N_CU) { REQUIRE(latency(grid) <= latency(2 * tiles)); }
+    for (size_t per_cu : {1, 2, 3}) REQUIRE(latency(grid) <= latency(per_cu * hardware.N_CU));
+    // It is one of the launchable grids, and the model with that selection reports it.
+    const auto launch =
+        origami::gemm::compute_launch_parameters(problem, hardware, config, origami::grid_selection_t::analytical);
+    REQUIRE(std::get<1>(launch) == grid);
+  }
+  // Partial tiles that do not fit in the workspace leave only whole-tile grids.
+  const auto problem = make_problem(4096, 4096, 4096);
+  auto config        = make_config(128, 128, 64);
+  config.workspace_size            = 0;
+  config.workspace_size_per_elem_c = 4;
+  const size_t grid =
+      origami::streamk::select_grid_size(problem, hardware, config, origami::grid_selection_t::analytical);
+  REQUIRE((32 * 32) % grid == 0);
 }

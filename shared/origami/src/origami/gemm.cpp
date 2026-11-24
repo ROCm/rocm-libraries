@@ -610,7 +610,9 @@ std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameter
     reduction_strategy = streamk::select_reduction(problem, hardware, config, grid_selection);
     auto config_with_reduction               = config;
     config_with_reduction.reduction_strategy = reduction_strategy;
-    num_wgs = streamk::select_grid_size(problem, hardware, config_with_reduction, grid_selection);
+    num_wgs = (config.launch_grid > 0)
+                  ? config.launch_grid
+                  : streamk::select_grid_size(problem, hardware, config_with_reduction, grid_selection);
   }
 
   // There are cases in which StreamK combines multiple output MTs and assigns to 1 WG.

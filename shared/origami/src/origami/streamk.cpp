@@ -2,6 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include "origami/streamk.hpp"
+
+#include <algorithm>
 #include "origami/gemm.hpp"
 #include "origami/hardware.hpp"
 #include "origami/heuristics.hpp"
@@ -283,45 +285,46 @@ size_t grid_data_parallel(const problem_t& problem, const config_t& config) {
       config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
 }
 
+// Launch grid of least modeled latency.  The candidates are the grids a Stream-K kernel is
+// launched with: one workgroup per tile (data parallel); the K of every tile split evenly over
+// 2 to biggest_allowable_split workgroups, while they fit the CUs; and one workgroup per CU up
+// to the kernel's occupancy per CU, which share the tiles.  A grid whose partial tiles do not
+// fit in the workspace is left out.  Each candidate is modeled with config_t::launch_grid, which
+// does not select a grid again.  Ties go to the first candidate, data parallel first.
 size_t grid_analytical(const problem_t& problem,
                        const hardware_t& hardware,
                        const config_t& config,
                        size_t biggest_allowable_split) {
-  // Extract parameters from structured types
-  size_t M     = problem.size.m;
-  size_t N     = problem.size.n;
-  size_t batch = problem.batch;
-
-  size_t MT_M = config.mt.m;
-  size_t MT_N = config.mt.n;
-
-  // compute how many 32×32 tiles are needed in each dim,
-  // then multiply to get total grid size:
-  size_t grid = ((M + MT_M - 1) / MT_M) * ((N + MT_N - 1) / MT_N) * batch;
-
+  const size_t tiles = compute_number_of_output_tiles(
+      config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
   // Honor the caller's CU budget (problem.num_cus); 0 means use all CUs.
-  const size_t cu_count = resolve_num_cus(problem.num_cus, hardware.N_CU);
-  size_t max_hw_split = std::floor(cu_count / grid);
-  size_t MAX_SPLIT    = std::min(biggest_allowable_split, max_hw_split);
+  const size_t cu_count  = resolve_num_cus(problem.num_cus, hardware.N_CU);
+  const size_t tile_size = config.mt.m * config.mt.n * config.workspace_size_per_elem_c;
 
-  size_t best_split   = 1;
+  std::vector<size_t> candidates{tiles};
+  auto add = [&](size_t grid) {
+    if (grid == 0 || std::find(candidates.begin(), candidates.end(), grid) != candidates.end()) return;
+    if (tiles % grid != 0 && tile_size * grid > config.workspace_size) return;
+    candidates.push_back(grid);
+  };
+  for (size_t split = 2; split <= biggest_allowable_split && tiles * split <= cu_count; ++split)
+    add(tiles * split);
+  // CUOccupancy counts the workgroups on hardware_t::OCCUPANCY_SIMDS SIMDs; a CU has simds_per_cu.
+  const size_t per_cu = std::max<size_t>(
+      static_cast<size_t>(std::max(config.occupancy, 1)) * hardware.simds_per_cu() / hardware_t::OCCUPANCY_SIMDS, 1);
+  for (size_t wgs = 1; wgs <= per_cu; ++wgs) add(cu_count * wgs);
+
+  size_t best_grid    = tiles;
   double best_latency = std::numeric_limits<double>::infinity();
-
-  for (size_t split = 1; split <= MAX_SPLIT; ++split) {
-    double latency = gemm::compute_total_latency(problem, hardware, config);
-
+  config_t candidate  = config;
+  for (size_t grid : candidates) {
+    candidate.launch_grid = grid;
+    const double latency  = gemm::compute_total_latency(problem, hardware, candidate);
     if (latency < best_latency) {
       best_latency = latency;
-      best_split   = split;
+      best_grid    = grid;
     }
-    best_latency = latency;
-    best_split   = split;
   }
-
-  size_t best_grid = best_split * grid;
-
-  // you now have both `grid` and `best_split`—
-  // return whichever is appropriate (here we stick with split):
   return best_grid;
 }
 

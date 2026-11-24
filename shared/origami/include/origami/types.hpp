@@ -630,6 +630,10 @@ struct config_t {
   /// Grid selection algorithm.
   grid_selection_t grid_selection = grid_selection_t::k_split_aware;
 
+  /// Stream-K launch grid (workgroups) to model the kernel with.  0: the grid that
+  /// streamk::select_grid_size picks with grid_selection.
+  std::size_t launch_grid = 0;
+
   /// Index of config, not used by Origami but can be used by the user
   std::size_t index = 0;
 
