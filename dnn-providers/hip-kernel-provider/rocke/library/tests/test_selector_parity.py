@@ -8,22 +8,19 @@ inputs -- covering the selectors and gate predicates that route a problem
 into the correct kernel variant.  No GPU, no subprocess, no rocke_engine .so
 required.
 
-Primary motivation: PR #9220 silently broke parity by removing the bias-
-exclusion guard from Python ``_enable_combo_2d``, routing biased combo-geometry
-attention onto the transposed combo path while C++ still refused bias.  These
-tests encode the expected routing decisions so that kind of regression is caught
+Primary motivation: an earlier change altered routing without a test, by
+removing the bias-exclusion guard from Python ``_enable_combo_2d``. These tests
+encode the expected routing decisions so that kind of change is caught
 immediately on any developer machine.
 
-NOTE ON EXPECTED FAILURES (PR #9220 regression):
-Tests marked with @skip document a known divergence introduced by
-PR #9220, which removed the bias-exclusion guard from Python _enable_combo_2d.
-Python now routes biased combo-geometry problems onto the combo path while
-C++ (attention_unified_selectors.cpp) still refuses them. The tests are
-written for the CORRECT behavior (bias should block combo_2d) and are being skipped until the Python guard is restored.
+Bias admission is deliberate: biased combo-geometry problems ride the transposed
+combo path (without the mask-once / mask-limit sub-flags), and the C++ selectors
+in attention_unified_selectors.cpp now do the same.
 """
 
 from __future__ import annotations
 
+import os
 import unittest
 from contextlib import contextmanager
 from dataclasses import asdict, fields, replace
@@ -53,7 +50,6 @@ from kernels.gfx950.attention_tiled_2d import (
 from kernels.gfx1250.attention_tiled_2d import (
     UnifiedAttention2DTiledSpec as Gfx1250TiledSpec,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -141,10 +137,6 @@ class TestEnableCombo2d(unittest.TestCase):
     (sinks or not), or fp16 only when use_sinks (the fp16 widening was measured
     on sink prefill)."""
 
-    _BIAS_BUG = (
-        "PR #9220: Python _enable_combo_2d missing bias guard (C++ still refuses bias)"
-    )
-
     def _gate(self, problem: UnifiedAttentionProblem, arch: str = "gfx950") -> bool:
         with _patch_arch(arch):
             return _au._enable_combo_2d(problem, arch)
@@ -152,18 +144,14 @@ class TestEnableCombo2d(unittest.TestCase):
     def test_canonical_combo_fires(self):
         self.assertTrue(self._gate(_combo_prob()))
 
-    @unittest.skip(_BIAS_BUG)
-    def test_qq_bias_blocks_combo(self):
-        """use_qq_bias=True must disable combo_2d (was the #9220 bug)."""
-        self.assertFalse(self._gate(_combo_prob(use_qq_bias=True)), self._BIAS_BUG)
+    def test_qq_bias_admits_combo(self):
+        self.assertTrue(self._gate(_combo_prob(use_qq_bias=True)))
 
-    @unittest.skip(_BIAS_BUG)
-    def test_alibi_blocks_combo(self):
-        self.assertFalse(self._gate(_combo_prob(use_alibi=True)), self._BIAS_BUG)
+    def test_alibi_admits_combo(self):
+        self.assertTrue(self._gate(_combo_prob(use_alibi=True)))
 
-    @unittest.skip(_BIAS_BUG)
-    def test_softcap_blocks_combo(self):
-        self.assertFalse(self._gate(_combo_prob(softcap=50.0)), self._BIAS_BUG)
+    def test_softcap_admits_combo(self):
+        self.assertTrue(self._gate(_combo_prob(softcap=50.0)))
 
     def test_fp16_no_sinks_blocks_combo(self):
         # fp16 combo is sink-prefill only; non-sink fp16 stays off the combo path.
@@ -199,8 +187,6 @@ class TestEnableCombo2d(unittest.TestCase):
 class TestCombo2dRouting(unittest.TestCase):
     """combo_2d problems must get the full 32x32 transposed stack."""
 
-    _BIAS_BUG = "PR #9220: Python _enable_combo_2d missing bias guard"
-
     def test_combo_gets_transposed_flags(self):
         s = _spec(_combo_prob())
         self.assertTrue(s["use_mfma_32x32"])
@@ -208,21 +194,25 @@ class TestCombo2dRouting(unittest.TestCase):
         self.assertTrue(s["use_transposed_half_local_pv"])
         self.assertTrue(s["use_transposed_scalar_state"])
 
-    @unittest.skip(_BIAS_BUG)
-    def test_biased_combo_does_not_get_fast_paged_kv(self):
-        """#9220: biased combo must NOT get use_fast_paged_kv_desc."""
+    def test_qq_bias_combo_gets_fast_paged_kv(self):
+        """Bias keeps the combo stack, including the fast paged-KV descriptor,
+        but drops the mask-once / mask-limit sub-flags."""
         s = _spec(_combo_prob(use_qq_bias=True))
-        self.assertFalse(s["use_fast_paged_kv_desc"], self._BIAS_BUG)
+        self.assertTrue(s["use_fast_paged_kv_desc"])
+        self.assertFalse(s["use_transposed_mask_once"])
+        self.assertFalse(s["use_transposed_mask_limit"])
 
-    @unittest.skip(_BIAS_BUG)
-    def test_alibi_combo_no_fast_paged_kv(self):
+    def test_alibi_combo_gets_fast_paged_kv(self):
         s = _spec(_combo_prob(use_alibi=True))
-        self.assertFalse(s["use_fast_paged_kv_desc"], self._BIAS_BUG)
+        self.assertTrue(s["use_fast_paged_kv_desc"])
+        self.assertFalse(s["use_transposed_mask_once"])
+        self.assertFalse(s["use_transposed_mask_limit"])
 
-    @unittest.skip(_BIAS_BUG)
-    def test_softcap_combo_no_fast_paged_kv(self):
+    def test_softcap_combo_gets_fast_paged_kv(self):
         s = _spec(_combo_prob(softcap=50.0))
-        self.assertFalse(s["use_fast_paged_kv_desc"], self._BIAS_BUG)
+        self.assertTrue(s["use_fast_paged_kv_desc"])
+        self.assertFalse(s["use_transposed_mask_once"])
+        self.assertFalse(s["use_transposed_mask_limit"])
 
     def test_combo_no_sw_gets_fast_paged_kv(self):
         s = _spec(_combo_prob())
@@ -234,14 +224,12 @@ class TestCombo2dRouting(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Bias x geometry cohort matrix (covers the #9220 class of divergence)
+# Bias x geometry cohort matrix (covers the bias-guard class of divergence)
 # ---------------------------------------------------------------------------
 
 
 class TestBiasGeometryCohorts(unittest.TestCase):
     """Systematic sweep of bias flags x combo-geometry dimensions."""
-
-    _BIAS_BUG = "PR #9220: Python _enable_combo_2d missing bias guard"
 
     def _fast_kv(self, problem: UnifiedAttentionProblem) -> bool:
         return _spec(problem)["use_fast_paged_kv_desc"]
@@ -250,26 +238,20 @@ class TestBiasGeometryCohorts(unittest.TestCase):
     def test_canonical_combo(self):
         self.assertTrue(self._fast_kv(_combo_prob()))
 
-    # ---- PR #9220 biased-combo cohort (skip the test until bug is fixed) ----
-    @unittest.skip(_BIAS_BUG)
-    def test_qq_bias_blocks_fast_paged_kv(self):
-        self.assertFalse(self._fast_kv(_combo_prob(use_qq_bias=True)), self._BIAS_BUG)
+    # ---- biased combo cohort: bias is admitted ----
+    def test_qq_bias_keeps_fast_paged_kv(self):
+        self.assertTrue(self._fast_kv(_combo_prob(use_qq_bias=True)))
 
-    @unittest.skip(_BIAS_BUG)
-    def test_alibi_blocks_fast_paged_kv(self):
-        self.assertFalse(self._fast_kv(_combo_prob(use_alibi=True)), self._BIAS_BUG)
+    def test_alibi_keeps_fast_paged_kv(self):
+        self.assertTrue(self._fast_kv(_combo_prob(use_alibi=True)))
 
-    @unittest.skip(_BIAS_BUG)
-    def test_softcap_blocks_fast_paged_kv(self):
-        self.assertFalse(self._fast_kv(_combo_prob(softcap=50.0)), self._BIAS_BUG)
+    def test_softcap_keeps_fast_paged_kv(self):
+        self.assertTrue(self._fast_kv(_combo_prob(softcap=50.0)))
 
-    @unittest.skip(_BIAS_BUG)
-    def test_alibi_and_qq_bias_no_combo(self):
-        self.assertFalse(
-            self._fast_kv(_combo_prob(use_alibi=True, use_qq_bias=True)), self._BIAS_BUG
-        )
+    def test_alibi_and_qq_bias_keep_combo(self):
+        self.assertTrue(self._fast_kv(_combo_prob(use_alibi=True, use_qq_bias=True)))
 
-    # ---- geometry boundaries (not affected by #9220) ----
+    # ---- geometry boundaries (not affected by bias) ----
     def test_seqlen_at_boundary_no_combo(self):
         self.assertFalse(self._fast_kv(_combo_prob(max_seqlen_q=256)))
 
@@ -493,6 +475,68 @@ class TestI64KvAddr(unittest.TestCase):
                         )
                     self.assertEqual(meta.kv_addr_limit, limit)
                     _au._check_kv_addr_width(p, _kv_cache(n, p), limit)
+
+    @staticmethod
+    def _decode_prob(num_kv_blocks: int) -> UnifiedAttentionProblem:
+        # 16 tokens x 8 kv-heads x 128 dims x 2 bytes = 32 KiB blocks, like the
+        # combo shape, so the same block counts straddle the i32 buffer range.
+        return _prob(
+            128,
+            16,
+            32,
+            8,
+            max_seqlen_q=1,
+            max_seqlen_k=8192,
+            num_seqs=4,
+            total_q=4,
+            num_kv_blocks=num_kv_blocks,
+        )
+
+    _GFX942_3D_I64_REASON = (
+        "gfx942 tiled 3D does not support i64 KV addressing "
+        "(paged KV cache past what its K/V loader reads) yet"
+    )
+
+    def test_gfx942_3d_gate_rejects_i64_kv(self):
+        # The gfx942 3D spec has no i64 KV path. Rejecting at the gate lets auto
+        # dispatch fall back to 2D for a decode problem select_path() sends to
+        # 3D, instead of raising from the spec. 65537 blocks are past 2^31 bytes,
+        # beyond every gfx942 3D K/V loader.
+        small = self._decode_prob(_AT_I32_LIMIT)
+        large = self._decode_prob(65537)
+        self.assertEqual(large.select_path(), "3d")
+        for arch in ("gfx942", "gfx942:sramecc+"):
+            with self.subTest(arch=arch):
+                ok, _ = _au.supports_native_unified_attention_3d_tiled(small, arch)
+                self.assertTrue(ok)
+                self.assertEqual(
+                    _au.supports_native_unified_attention_3d_tiled(large, arch),
+                    (False, self._GFX942_3D_I64_REASON),
+                )
+        ok, _ = _au.supports_native_unified_attention_tiled(large, "gfx942")
+        self.assertTrue(ok)
+
+    def test_gfx942_3d_gate_follows_the_kv_loader(self):
+        # Past the i32 buffer range but within 2^31 bytes: the wide K/V loader
+        # reads it with i32 offsets, so the 3D spec needs no i64 and the gate
+        # admits it. The async copies are bounded by the buffer range, so with
+        # the wide loader off the spec would need i64 and the gate rejects it.
+        for n in (_OVER_I32_LIMIT, 65536):
+            p = self._decode_prob(n)
+            with self.subTest(num_kv_blocks=n):
+                ok, _ = _au.supports_native_unified_attention_3d_tiled(p, "gfx942")
+                self.assertTrue(ok)
+                with mock.patch.dict(os.environ, {"HIPDNN_GFX942_3D_WKV": "0"}):
+                    self.assertEqual(
+                        _au.supports_native_unified_attention_3d_tiled(p, "gfx942"),
+                        (False, self._GFX942_3D_I64_REASON),
+                    )
+
+    def test_gfx950_3d_gate_admits_i64_kv(self):
+        ok, _ = _au.supports_native_unified_attention_3d_tiled(
+            self._decode_prob(_OVER_I32_LIMIT), "gfx950"
+        )
+        self.assertTrue(ok)
 
 
 # d128 bs16 4-kv-head bf16 blocks are 16 KiB, so 131072 blocks are exactly 2^31
@@ -771,6 +815,7 @@ class TestKvAddrLimit(unittest.TestCase):
             "use_sinks",
             "use_alibi",
             "use_qq_bias",
+            # Loads only the separate bias tensor.
             "use_additive_bias",
             "use_transposed_scalar_state",
             "use_transposed_invariant_hoist",
@@ -884,6 +929,33 @@ class TestKvAddrLimit(unittest.TestCase):
         # an i64 branch: an i64 problem gets no cache limit.
         p = _cfvst_prob(num_kv_blocks=_OVER_I32_LIMIT)
         with _patch_arch("gfx942"), _clear_launch_memos():
+            spec = _asb._tiled_spec_from_problem(p, "gfx942")
+            self.assertTrue(spec.use_i64_kv_addr)
+            self.assertTrue(spec.use_conflict_free_v_store)
+            meta = _au._get_2d_launch_meta(
+                p, _au._tiled_cache_key(p, "gfx942"), arch="gfx942"
+            )
+        self.assertIsNone(meta.kv_addr_limit)
+
+    def test_gfx942_decode_refused_by_3d_falls_back_to_i64_cfvst(self):
+        # fp16 D64 decode with equal head counts on a cache past 2 GiB: the 3D
+        # gate refuses i64 on gfx942, so this launches 2D, and that spec must be
+        # an i64 kernel with no cache limit rather than an i32 one that refuses.
+        block_bytes = 32 * 32 * 64 * 2
+        p = _prob(
+            64,
+            32,
+            32,
+            32,
+            dtype="fp16",
+            max_seqlen_q=1,
+            num_seqs=8,
+            total_q=8,
+            num_kv_blocks=2**31 // block_bytes + 1,
+        )
+        with _patch_arch("gfx942"), _clear_launch_memos():
+            ok, _ = _au.supports_native_unified_attention_3d_tiled(p, "gfx942")
+            self.assertFalse(ok)
             spec = _asb._tiled_spec_from_problem(p, "gfx942")
             self.assertTrue(spec.use_i64_kv_addr)
             self.assertTrue(spec.use_conflict_free_v_store)
