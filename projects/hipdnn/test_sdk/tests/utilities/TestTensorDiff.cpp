@@ -40,8 +40,8 @@ TEST(TestComputeTensorDiff, IdenticalTensorsHaveNoMismatches)
 
     EXPECT_EQ(summary.totalElements, 16u);
     EXPECT_EQ(summary.mismatchCount, 0u);
-    EXPECT_FLOAT_EQ(summary.maxAbsDiff, 0.0f);
-    EXPECT_FLOAT_EQ(summary.meanAbsDiff, 0.0f);
+    EXPECT_DOUBLE_EQ(summary.maxAbsDiff, 0.0);
+    EXPECT_DOUBLE_EQ(summary.meanAbsDiff, 0.0);
     EXPECT_TRUE(summary.worstMismatches.empty());
 }
 
@@ -65,14 +65,14 @@ TEST(TestComputeTensorDiff, DetectsSingleMismatch)
 
     EXPECT_EQ(summary.totalElements, 6u);
     EXPECT_EQ(summary.mismatchCount, 1u);
-    EXPECT_FLOAT_EQ(summary.maxAbsDiff, 1.0f);
-    EXPECT_FLOAT_EQ(summary.meanAbsDiff, 1.0f);
+    EXPECT_DOUBLE_EQ(summary.maxAbsDiff, 1.0);
+    EXPECT_DOUBLE_EQ(summary.meanAbsDiff, 1.0);
     ASSERT_EQ(summary.maxDiffIndices.size(), 2u);
     EXPECT_EQ(summary.maxDiffIndices[0], 1);
     EXPECT_EQ(summary.maxDiffIndices[1], 2);
     ASSERT_EQ(summary.worstMismatches.size(), 1u);
-    EXPECT_FLOAT_EQ(summary.worstMismatches[0].refValue, 1.0f);
-    EXPECT_FLOAT_EQ(summary.worstMismatches[0].implValue, 2.0f);
+    EXPECT_DOUBLE_EQ(summary.worstMismatches[0].refValue, 1.0);
+    EXPECT_DOUBLE_EQ(summary.worstMismatches[0].implValue, 2.0);
 }
 
 TEST(TestComputeTensorDiff, MismatchesWithinToleranceAreIgnored)
@@ -126,9 +126,9 @@ TEST(TestComputeTensorDiff, WorstMismatchesCappedAtMaxMismatches)
     ASSERT_EQ(summary.worstMismatches.size(), maxMismatches);
 
     // Must retain the largest 3 diffs (10, 9, 8), sorted descending
-    EXPECT_FLOAT_EQ(summary.worstMismatches[0].absDiff, 10.0f);
-    EXPECT_FLOAT_EQ(summary.worstMismatches[1].absDiff, 9.0f);
-    EXPECT_FLOAT_EQ(summary.worstMismatches[2].absDiff, 8.0f);
+    EXPECT_DOUBLE_EQ(summary.worstMismatches[0].absDiff, 10.0);
+    EXPECT_DOUBLE_EQ(summary.worstMismatches[1].absDiff, 9.0);
+    EXPECT_DOUBLE_EQ(summary.worstMismatches[2].absDiff, 8.0);
 }
 
 TEST(TestComputeTensorDiff, ZeroMaxMismatchesSuppressesEntries)
@@ -147,7 +147,7 @@ TEST(TestComputeTensorDiff, ZeroMaxMismatchesSuppressesEntries)
 
     EXPECT_EQ(summary.mismatchCount, 4u);
     EXPECT_TRUE(summary.worstMismatches.empty());
-    EXPECT_GT(summary.maxAbsDiff, 0.0f);
+    EXPECT_GT(summary.maxAbsDiff, 0.0);
 }
 
 TEST(TestComputeTensorDiff, DoubleCountsMismatchesAboveFloatRange)
@@ -202,6 +202,24 @@ TEST(TestComputeTensorDiff, DoubleCountsTheSameMismatchesAsTheValidator)
     EXPECT_TRUE(validator.allClose(ref, impl));
 }
 
+TEST(TestComputeTensorDiff, DoubleReportsValuesAboveFloatRange)
+{
+    Tensor<double> ref({1});
+    Tensor<double> impl({1});
+    ref.setHostValue(1e300, 0);
+    impl.setHostValue(1e301, 0);
+
+    auto summary = computeTensorDiff<double>(ref, impl, 0.0f, 1e-6f);
+
+    ASSERT_EQ(summary.mismatchCount, 1u);
+    EXPECT_DOUBLE_EQ(summary.maxAbsDiff, 9e300);
+    EXPECT_DOUBLE_EQ(summary.meanAbsDiff, 9e300);
+    ASSERT_EQ(summary.worstMismatches.size(), 1u);
+    EXPECT_DOUBLE_EQ(summary.worstMismatches[0].absDiff, 9e300);
+    EXPECT_DOUBLE_EQ(summary.worstMismatches[0].refValue, 1e300);
+    EXPECT_DOUBLE_EQ(summary.worstMismatches[0].implValue, 1e301);
+}
+
 TEST(TestComputeTensorDiff, RelativeToleranceScalesWithTheReference)
 {
     Tensor<float> ref({1});
@@ -225,10 +243,10 @@ TEST(TestPrintTensorDiffSummary, OutputContainsExpectedFields)
     TensorDiffSummary summary{};
     summary.totalElements = 100;
     summary.mismatchCount = 5;
-    summary.maxAbsDiff = 0.01f;
-    summary.meanAbsDiff = 0.005f;
+    summary.maxAbsDiff = 0.01;
+    summary.meanAbsDiff = 0.005;
     summary.maxDiffIndices = {1, 2, 3};
-    summary.worstMismatches = {{{1, 2, 3}, 1.0f, 1.01f, 0.01f}};
+    summary.worstMismatches = {{{1, 2, 3}, 1.0, 1.01, 0.01}};
 
     std::ostringstream oss;
     printTensorDiffSummary(oss, "testTensor", summary);
@@ -245,8 +263,8 @@ TEST(TestPrintTensorDiffSummary, NoMismatchesOmitsWorstSection)
     TensorDiffSummary summary{};
     summary.totalElements = 50;
     summary.mismatchCount = 0;
-    summary.maxAbsDiff = 0.0f;
-    summary.meanAbsDiff = 0.0f;
+    summary.maxAbsDiff = 0.0;
+    summary.meanAbsDiff = 0.0;
 
     std::ostringstream oss;
     printTensorDiffSummary(oss, "clean", summary);
@@ -366,7 +384,7 @@ TYPED_TEST(RaggedTensorDiff, ReportsInBlockDifference)
 
     EXPECT_EQ(summary.totalElements, 20u);
     EXPECT_EQ(summary.mismatchCount, 1u);
-    EXPECT_FLOAT_EQ(summary.maxAbsDiff, 1.5f);
+    EXPECT_DOUBLE_EQ(summary.maxAbsDiff, 1.5);
     EXPECT_EQ(summary.maxDiffIndices, (std::vector<int64_t>{1, 1, 2, 1}));
 }
 

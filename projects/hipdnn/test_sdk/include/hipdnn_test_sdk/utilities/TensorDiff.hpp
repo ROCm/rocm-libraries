@@ -26,17 +26,17 @@ namespace hipdnn_test_sdk::utilities
 struct TensorDiffEntry
 {
     std::vector<int64_t> indices;
-    float refValue;
-    float implValue;
-    float absDiff;
+    double refValue;
+    double implValue;
+    double absDiff;
 };
 
 struct TensorDiffSummary
 {
     size_t totalElements;
     size_t mismatchCount;
-    float maxAbsDiff;
-    float meanAbsDiff;
+    double maxAbsDiff;
+    double meanAbsDiff;
     std::vector<int64_t> maxDiffIndices;
     std::vector<TensorDiffEntry> worstMismatches;
 };
@@ -51,8 +51,8 @@ TensorDiffSummary computeTensorDiff(hipdnn_data_sdk::utilities::ITensor& referen
     TensorDiffSummary summary{};
     summary.totalElements = 0;
     summary.mismatchCount = 0;
-    summary.maxAbsDiff = 0.0f;
-    summary.meanAbsDiff = 0.0f;
+    summary.maxAbsDiff = 0.0;
+    summary.meanAbsDiff = 0.0;
 
     const auto raggedLayout = reference.raggedIterationInfo();
     if(reference.elementCount() != implementation.elementCount()
@@ -91,16 +91,15 @@ TensorDiffSummary computeTensorDiff(hipdnn_data_sdk::utilities::ITensor& referen
 
         const auto refDouble = static_cast<double>(refValue);
         const auto implDouble = static_cast<double>(implValue);
-        const double exactAbsDiff = std::fabs(implDouble - refDouble);
+        const double absDiff = std::fabs(implDouble - refDouble);
         const double threshold = static_cast<double>(absoluteTolerance)
                                  + static_cast<double>(relativeTolerance) * std::fabs(refDouble);
 
-        if(exactAbsDiff > threshold)
+        if(absDiff > threshold)
         {
-            const auto absDiff = static_cast<float>(exactAbsDiff);
             const std::lock_guard<std::mutex> lock(mtx);
             ++summary.mismatchCount;
-            sumAbsDiff += exactAbsDiff;
+            sumAbsDiff += absDiff;
 
             if(absDiff > summary.maxAbsDiff)
             {
@@ -112,10 +111,7 @@ TensorDiffSummary computeTensorDiff(hipdnn_data_sdk::utilities::ITensor& referen
             {
                 if(summary.worstMismatches.size() < maxMismatches)
                 {
-                    summary.worstMismatches.push_back({indices,
-                                                       static_cast<float>(refValue),
-                                                       static_cast<float>(implValue),
-                                                       absDiff});
+                    summary.worstMismatches.push_back({indices, refDouble, implDouble, absDiff});
                 }
                 else
                 {
@@ -127,10 +123,7 @@ TensorDiffSummary computeTensorDiff(hipdnn_data_sdk::utilities::ITensor& referen
                                            });
                     if(absDiff > minIt->absDiff)
                     {
-                        *minIt = {indices,
-                                  static_cast<float>(refValue),
-                                  static_cast<float>(implValue),
-                                  absDiff};
+                        *minIt = {indices, refDouble, implDouble, absDiff};
                     }
                 }
             }
@@ -145,8 +138,7 @@ TensorDiffSummary computeTensorDiff(hipdnn_data_sdk::utilities::ITensor& referen
 
     if(summary.mismatchCount > 0)
     {
-        summary.meanAbsDiff
-            = static_cast<float>(sumAbsDiff / static_cast<double>(summary.mismatchCount));
+        summary.meanAbsDiff = sumAbsDiff / static_cast<double>(summary.mismatchCount);
 
         std::sort(summary.worstMismatches.begin(),
                   summary.worstMismatches.end(),
