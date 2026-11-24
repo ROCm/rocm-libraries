@@ -306,6 +306,14 @@ def _lraTileAssignmentScaleSwizzled_legacy(writer, kernel):
   module.add(VAddU32(dst=vgpr(tiA_.sharedVgprLROffset[0]), src0=vgpr(tiA_.sharedVgprLROffset[0]), src1=sgpr(tmpSgpr), comment="scaleA: +=LDS offset"))
   module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(writer.ldsStartOffsetMXSB), comment="scale: LDS offset for B scale"))
   module.add(VAddU32(dst=vgpr(tiB_.sharedVgprLROffset[0]), src0=vgpr(tiB_.sharedVgprLROffset[0]), src1=sgpr(tmpSgpr), comment="scaleB: +=LDS offset"))
+  # Sub-group scale tile (16-wide macrotile): read the scale dword rotated by the
+  # workgroup's tile index inside its 32-row swizzle group (see computeLoadSrd).
+  # Added before the swap value below so the XOR toggle keeps the offset.
+  for ti_ in [tiA_, tiB_]:
+    _off = "ScaleByteOff%s" % ti_.tc
+    if _off in writer.sgprs:
+      module.add(VAddU32(dst=vgpr(ti_.sharedVgprLROffset[0]), src0=vgpr(ti_.sharedVgprLROffset[0]), src1=sgpr(_off),
+                         comment="scale%s: += tile index in swizzle group (byte-rotated LR)" % ti_.tc))
   module.add(SMovB32(dst=sgpr(tmpSgpr), src=writer.ldsTotalSize, comment="scale: total LDS size for swap"))
   for ti_ in [tiA_, tiB_]:
     for i in range(len(ti_.sharedVgprLROffset)):

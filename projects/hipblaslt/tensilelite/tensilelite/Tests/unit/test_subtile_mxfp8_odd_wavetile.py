@@ -5,10 +5,10 @@
 Skinny GEMMs want a 16xN or Mx16 macrotile, i.e. MIWaveTile == 1 (odd) along the
 narrow dimension.  MXFP8 historically required even MIWaveTile in both M and N
 because the MX scale local read packs 2 scale MMA tiles in M x 2 in K per VGPR
-(MXScaleLRGeometry.subtileShape = (2, 2)).  The scale grid is now sized with
-ceil, so an odd scale-tile count allocates a full trailing scale group whose
-unused half is inert, and the gate allows odd MIWaveTile for mxfp8 (8-bit-float
-A and B).
+(MXScaleLRGeometry.subtileShape = (2, 2)).  A 16-wide tile is half of a 32-row
+scale swizzle group: the scale grid is sized with ceil, the scale SRD base sits
+at the group, and the scale local-read address is offset by the workgroup's
+half so the byte select picks it.  The gate allows MIWaveTile == 1 for mxfp8.
 
 These tests pin the contract:
   * odd / skinny MIWaveTile mxfp8 solutions VALIDATE (previously rejected).
@@ -127,8 +127,8 @@ def _solve(gfx950_iim, assembler, mi, depth_u=128):
 _SKINNY_M    = [16, 16, 128, 1, 1, 1, 4, 1, 4]  # MT16x256  (skinny M=1, partitionable N -> dual-period)
 _SKINNY_N    = [16, 16, 128, 1, 1, 4, 1, 4, 1]  # MT256x16  (skinny N=1, partitionable M -> dual-period)
 _EVEN_SMALL  = [16, 16, 128, 1, 1, 2, 2, 1, 1]  # MT32x32   (even, not partitionable)
-# Rejected: a 16-wide tile is only correct on the dual-period path (the legacy
-# scale SRD faults at deep K), so a non-partitionable 16-wide tile is rejected;
+# Rejected: a 16-wide tile is only validated on the dual-period path, so a
+# non-partitionable 16-wide tile is rejected;
 # odd MIWaveTile >= 3 mis-computes a tile once the grid tiles across that dim
 # (GPU: MT48x64 fails on (96,128)); MIWaveTile==1 with >1 wave is inexact.
 _SKINNY_SQ   = [16, 16, 128, 1, 1, 1, 1, 1, 1]  # MT16x16   (both 16-wide, non-dual -> rejected)
@@ -161,8 +161,8 @@ def test_even_non_partitionable_avoids_dual_period(_gp_gfx950, gfx950_iim, assem
 
 # ---------------------------------------------------------------------------
 # Unsupported configs must be REJECTED (not emitted as a wrong/faulting kernel):
-#  - a 16-wide tile that is NOT dual-period (e.g. 16x16): the legacy scale SRD
-#    faults at deep K, so it is rejected rather than shipped,
+#  - a 16-wide tile that is NOT dual-period (e.g. 16x16): not validated on the
+#    legacy scale path, so it is rejected rather than shipped,
 #  - odd MIWaveTile >= 3 mis-computes a tile across the grid (GPU-confirmed),
 #  - MIWaveTile==1 with >1 wave has inexact per-wave scale sizing.
 # ---------------------------------------------------------------------------

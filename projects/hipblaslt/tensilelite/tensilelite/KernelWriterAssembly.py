@@ -1315,6 +1315,7 @@ class KernelWriterAssembly(KernelWriter):
       "LocalWriteBaseAddrA", "LocalWriteBaseAddrB",
       "LocalWriteBaseAddrMXSA", "LocalWriteBaseAddrMXSB",
       "SwapA", "SwapB", "SwapMXSA", "SwapMXSB",
+      "ScaleByteOffMXSA", "ScaleByteOffMXSB",
     ]
     for name in sgprsToUndefine:
       if name in self.sgprs:
@@ -6014,34 +6015,20 @@ class KernelWriterAssembly(KernelWriter):
                   module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]), comment="buffer_load limit for %s (tile-boundary, avoids 32-bit overflow)"%tc))
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
                     strideF, comment="tlu=0, scaled tile-offset by stride"))
-          if isMxSwizzledScaleLayout and swizzleSize0 > kernel[tP["mt"]]:
-            # Sub-group MX-scale macrotile: swizzleSize0/MT M-tiles share one
-            # 32-row swizzle group, interleaved one scale byte apart (the 2x2
-            # pack puts M-tile m at byte m of each scale dword).  Part A placed
-            # the SRD base at this workgroup's GROUP; here add the intra-group
-            # M-tile byte (wg % tilesPerGroup) to the SRD base only.  Because the
-            # DTL load's LDS-write base (M0) is independent of the SRD base, this
-            # byte-rotates just the global read, so the kernel's byte-0 scale
-            # select consumes this workgroup's M-tile (M1 for an odd workgroup).
-            # Scale bpeGR == 1, so the M-tile index is already the byte offset.
+          if isMxSwizzledScaleLayout and swizzleSize0 > kernel[tP["mt"]] and ("ScaleByteOff%s"%tc) in self.sgprs:
+            # Sub-group MX-scale macrotile (a 16-wide tile in a 32-row swizzle
+            # group): swizzleSize0/MT workgroups share one group, and the 2x2
+            # scale pack puts tile m of the group at byte m of each scale dword.
+            # The global read stays at the GROUP base (floor above), so it is
+            # in bounds exactly like an even tile's.  Which tile of the group
+            # this workgroup owns is recorded here and applied on the LDS side:
+            # lraTileAssignmentScaleSwizzled adds it to the scale local-read
+            # address, so ds_read_b32 returns the dword rotated by that many
+            # bytes and the kernel's compile-time byte-0 select picks this
+            # workgroup's tile.  Nothing is read outside the scale tensor.
             tilesPerGroup = swizzleSize0 // kernel[tP["mt"]]
-            module.add(SAndB32(dst=sgpr(stmp+0), src0=sgpr(tP["wg"]), src1=(tilesPerGroup - 1),
-                               comment="wg %% %u = intra-group M-tile index"%tilesPerGroup))
-            module.add(SAddU32(dst=sgpr(tileStart+0), src0=sgpr(tileStart+0), src1=sgpr(stmp+0),
-                               comment="+ intra-group M-tile byte offset (sub-group scale tile)"))
-            # Dual-period only: its Srd+2 limit is (numLine+1)*span -- a full span
-            # of headroom whose sole purpose is to bounds-clamp the trailing phantom
-            # PGR prefetch to 0 at the last M/N-tile.  The +byte base shift above
-            # moves that clamp point one byte, so without this the phantom reads one
-            # byte past the scale allocation and page-faults at deep K.  Shrinking
-            # num_records by the same byte keeps base+num_records at the allocation
-            # end; real scale reads sit below it and are unaffected.  The legacy
-            # (non-dual-period) path has no phantom prefetch and a tighter limit
-            # (numLine*span + one K-step), where this subtraction would clip a real
-            # scale byte -- so it is scoped out.
-            if kernel.get("_DualPeriodMXFP8"):
-              module.add(SSubU32(dst=sgpr("Srd%s+2"%tc), src0=sgpr("Srd%s+2"%tc), src1=sgpr(stmp+0),
-                                 comment="shrink num_records by the M-tile byte (keep window end at the scale allocation)"))
+            module.add(SAndB32(dst=sgpr("ScaleByteOff%s"%tc), src0=sgpr(tP["wg"]), src1=(tilesPerGroup - 1),
+                               comment="%s: wg %% %u = tile index inside its swizzle group (LR byte offset)"%(tc, tilesPerGroup)))
           if isPreShuffledAB:
             module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
                       swizzleSize0, comment="pre-shuffled: scale by %u rows per block"%swizzleSize0))

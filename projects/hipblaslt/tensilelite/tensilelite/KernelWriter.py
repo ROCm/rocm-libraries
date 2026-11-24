@@ -11132,6 +11132,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           requiredUnalignedSgprVar.append("SwapMXSA")
         if kernel["ProblemType"]["MXBlockB"]:
           requiredUnalignedSgprVar.append("SwapMXSB")
+        # A 16-wide MX tile is half of a 32-row scale swizzle group: remember which
+        # half this workgroup owns (set per tile in computeLoadSrd, consumed by the
+        # scale local-read address setup).
+        if kernel["ProblemType"]["MXBlockA"] and kernel["MacroTileA"] < 32:
+          requiredUnalignedSgprVar.append("ScaleByteOffMXSA")
+        if kernel["ProblemType"]["MXBlockB"] and kernel["MacroTileB"] < 32:
+          requiredUnalignedSgprVar.append("ScaleByteOffMXSB")
       if kernel["ProblemType"]["Sparse"] and kernel["LocalWriteUseSgprMetadata"]:
         requiredUnalignedSgprVar.append("SwapMetadata")
 
