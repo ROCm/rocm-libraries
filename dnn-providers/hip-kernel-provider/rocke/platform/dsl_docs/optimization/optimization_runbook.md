@@ -316,7 +316,6 @@ Use the best available vendor / library baseline:
 - Triton: AITER ships the production `unified_attention` kernel that
   vLLM and AITER use. Path comes in via `AITER_PATH` env var.
 - AITER FA / FA2 for the FMHA shapes.
-- Torch eager: `examples/common/ck_tile_parity.py::_bench_torch`.
 - A naive scalar `_fmha_warp_body.py` (`fmha_warp_fwd_inner_body`) is
   the **correctness oracle** for the FMHA family. Several FMHA specs
   still ship with the warp-scalar body (paged_prefill, splitkv_decode,

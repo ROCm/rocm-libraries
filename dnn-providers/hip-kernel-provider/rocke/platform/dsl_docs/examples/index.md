@@ -16,7 +16,7 @@ Per the validation pass on this checkout, every shipped example builds and verif
 | `bake_off_direct_conv_4c.py`                      | Direct grouped 4c conv generator.                                | `python -m builders.common.bake_off_direct_conv_4c --output-dir "$OUT_DIR"` |
 | `distribution_reduce_demo.py`                     | 1D distribution-driven row-reduce.                               | `python python/rocke/examples/distribution_reduce_demo.py --M 32 --N 4096` |
 | `distribution_2d_add_demo.py`                     | 2D distribution-driven elementwise add.                          | `python python/rocke/examples/distribution_2d_add_demo.py --H 64 --W 128` |
-| `ck_tile_parity.py`                               | Small-op parity harness vs torch reference. Returns non-zero if any op exceeds its tolerance gate. | `python python/rocke/examples/ck_tile_parity.py --op all` |
+| `ck_tile_parity.py`                               | Small-op parity harness vs numpy references. Returns non-zero if any op exceeds its tolerance gate. | `python python/rocke/examples/ck_tile_parity.py --op all` |
 | `parity_unified_attention.py`                     | Triton vs rocKE attention parity. All paths (`auto`, `2d`, `3d`) on the AITER unified-attention contract. Lives in `library/builders/gfx950/attention/prefill/`. | `python -m builders.gfx950.attention.prefill.parity_unified_attention --attempts 10 --warmup 5` |
 
 The bake-offs build a HSACO and manifest; you launch / verify with `python -m rocke.run_manifest <hsaco> manifest.json --verify`. The other examples are self-contained and verify in-process.

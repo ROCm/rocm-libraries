@@ -76,7 +76,6 @@ platform/dsl_docs/optimization/utilities/tools/dsl_probes/probe_targeted_bench.p
 platform/dsl_docs/optimization/utilities/tools/stage1_benchmark/_ua_shape_utils.py: import torch_object
 platform/dsl_docs/optimization/utilities/tools/stage1_benchmark/benchmark_triton_unified_attention.py: import torch_api
 platform/pyproject.toml: config
-platform/python/rocke/examples/common/ck_tile_parity.py: import torch_api torch_object
 platform/python/rocke/examples/common/distribution_2d_add_demo.py: import torch_api torch_object
 platform/python/rocke/examples/common/distribution_reduce_demo.py: import torch_api torch_object
 platform/python/rocke/examples/common/parity_extended_kernels.py: import torch_api torch_object
