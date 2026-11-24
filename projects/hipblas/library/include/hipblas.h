@@ -666,7 +666,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasGetBatchBetaStride(hipblasHandle_t handle,
     @param[in]
     incx      [int]
               specifies the increment for the elements of y.
-    @param[inout]
+    @param[out]
     result
               device pointer or host pointer to store the amax index.
               Return value is 0.0 if n, incx<=0.
@@ -896,7 +896,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasIzamaxStridedBatched_64(hipblasHandle_t   
     @param[in]
     incx      [int]
               specifies the increment for the elements of y.
-    @param[inout]
+    @param[out]
     result
               device pointer or host pointer to store the amin index.
               Return value is 0.0 if n, incx<=0.
@@ -1128,7 +1128,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasIzaminStridedBatched_64(hipblasHandle_t   
     @param[in]
     incx      [int]
               specifies the increment for the elements of x. incx must be > 0.
-    @param[inout]
+    @param[out]
     result
               device pointer or host pointer to store the asum product.
               Return value is 0.0 if n <= 0.
@@ -1375,9 +1375,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDzasumStridedBatched_64(hipblasHandle_t   
     @param[in]
     incx      [int]
               specifies the increment for the elements of x.
-    @param[out]
-    y         device pointer storing vector y.
     @param[inout]
+    y         device pointer storing vector y.
+    @param[in]
     incy      [int]
               specifies the increment for the elements of y.
 
@@ -1487,9 +1487,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZaxpy_64(hipblasHandle_t         handle,
     @param[in]
     incx      [int]
               specifies the increment for the elements of x.
-    @param[out]
-    y         pointer storing vector y on the GPU.
     @param[inout]
+    y         pointer storing vector y on the GPU.
+    @param[in]
     incy      [int]
               specifies the increment for the elements of y.
 
@@ -1615,9 +1615,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZaxpyBatched_64(hipblasHandle_t           
     @param[in]
     stridex   [hipblasStride]
               specifies the increment between vectors of x.
-    @param[out]
-    y         pointer storing vector y on the GPU.
     @param[inout]
+    y         pointer storing vector y on the GPU.
+    @param[in]
     incy      [int]
               specifies the increment for the elements of y.
     @param[in]
@@ -1764,7 +1764,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZaxpyStridedBatched_64(hipblasHandle_t    
     @param[in]
     incx      [int]
               specifies the increment for the elements of x.
-    @param[out]
+    @param[inout]
     y         device pointer storing vector y.
     @param[in]
     incy      [int]
@@ -2073,7 +2073,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZcopyStridedBatched_64(hipblasHandle_t    
     @param[in]
     incy      [int]
               specifies the increment for the elements of y.
-    @param[inout]
+    @param[out]
     result
               device pointer or host pointer to store the dot product.
               Return value is 0.0 if n <= 0.
@@ -2247,7 +2247,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZdotu_64(hipblasHandle_t         handle,
     @param[in]
     batchCount [int]
                 number of instances in the batch.
-    @param[inout]
+    @param[out]
     result
               device array or host array of batchCount size to store the dot products of each batch.
               Returns 0.0 for each element if n <= 0.
@@ -2443,7 +2443,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZdotuBatched_64(hipblasHandle_t           
     @param[in]
     batchCount [int]
                 number of instances in the batch.
-    @param[inout]
+    @param[out]
     result
               device array or host array of batchCount size to store the dot products of each batch.
               Returns 0.0 for each element if n <= 0.
@@ -2651,7 +2651,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZdotuStridedBatched_64(hipblasHandle_t    
     @param[in]
     incx      [int]
               specifies the increment for the elements of y.
-    @param[inout]
+    @param[out]
     result
               device pointer or host pointer to store the nrm2 product.
               Return value is 0.0 if n, incx<=0.
@@ -3385,9 +3385,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZdrotStridedBatched_64(hipblasHandle_t   h
     a       device pointer or host pointer to the input vector element, overwritten with r.
     @param[inout]
     b       device pointer or host pointer to the input vector element, overwritten with z.
-    @param[inout]
+    @param[out]
     c       device pointer or host pointer to the cosine element of the Givens rotation.
-    @param[inout]
+    @param[out]
     s       device pointer or host pointer to the sine element of the Givens rotation.
 
             ********************************************************************/
@@ -3443,9 +3443,9 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZrotg_64(hipblasHandle_t   handle,
     a       device array of device pointers storing each single input vector element a_i, overwritten with r_i.
     @param[inout]
     b       device array of device pointers storing each single input vector element b_i, overwritten with z_i.
-    @param[inout]
+    @param[out]
     c       device array of device pointers storing each cosine element of the Givens rotation for the batch.
-    @param[inout]
+    @param[out]
     s       device array of device pointers storing each sine element of the Givens rotation for the batch.
     @param[in]
     batchCount [int]
@@ -3536,12 +3536,12 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZrotgBatched_64(hipblasHandle_t         ha
     @param[in]
     strideb [hipblasStride]
              distance between elements of b in batch (distance between b_i and b_(i + 1)).
-    @param[inout]
+    @param[out]
     c       device strided_batched pointer or host strided_batched pointer to the first cosine element of the Givens rotations c_1.
     @param[in]
     stridec [hipblasStride]
              distance between elements of c in batch (distance between c_i and c_(i + 1)).
-    @param[inout]
+    @param[out]
     s       device strided_batched pointer or host strided_batched pointer to the sine element of the Givens rotations s_1.
     @param[in]
     strides [hipblasStride]
@@ -12920,7 +12920,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtbsvStridedBatched_64(hipblasHandle_t    
           - Note that when DIAG = HIPBLAS_DIAG_UNIT, the diagonal elements of A are
           not referenced, but are assumed to be unity.
 
-    @param[in]
+    @param[inout]
     x       device pointer storing vector x.
 
     @param[in]
@@ -13043,7 +13043,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtpmv_64(hipblasHandle_t         handle,
     AP         device pointer storing pointer of matrices A_i
               of dimension ( lda, n ).
 
-    @param[in]
+    @param[inout]
     x         device pointer storing vectors x_i.
 
     @param[in]
@@ -13184,7 +13184,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtpmvBatched_64(hipblasHandle_t           
     strideA  [hipblasStride]
               stride from the start of one A_i matrix to the next A_{i + 1}.
 
-    @param[in]
+    @param[inout]
     x         device pointer storing the vector x_0.
 
     @param[in]
@@ -13773,7 +13773,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtpsvStridedBatched_64(hipblasHandle_t    
               specifies the leading dimension of A.
               lda = max( 1, n ).
 
-    @param[in]
+    @param[inout]
     x         device pointer storing vector x.
 
     @param[in]
@@ -13909,7 +13909,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmv_64(hipblasHandle_t         handle,
               specifies the leading dimension of A_i.
               lda >= max( 1, n ).
 
-    @param[in]
+    @param[inout]
     x         device pointer storing vectors x_i.
 
     @param[in]
@@ -14062,7 +14062,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmvBatched_64(hipblasHandle_t           
     strideA  [hipblasStride]
               stride from the start of one A_i matrix to the next A_{i + 1}.
 
-    @param[in]
+    @param[inout]
     x         device pointer storing the vector x_0.
 
     @param[in]
@@ -14231,7 +14231,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmvStridedBatched_64(hipblasHandle_t    
               specifies the leading dimension of A.
               lda = max( 1, n ).
 
-    @param[in]
+    @param[inout]
     x         device pointer storing vector x.
 
     @param[in]
@@ -14367,7 +14367,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrsv_64(hipblasHandle_t         handle,
               specifies the leading dimension of each A_i.
               lda = max(1, n).
 
-    @param[in]
+    @param[inout]
     x         device array of device pointers storing each vector x_i.
 
     @param[in]
@@ -25463,7 +25463,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasAxpyStridedBatchedEx_64(hipblasHandle_t ha
     @param[in]
     incy      [int]
               specifies the increment for the elements of y.
-    @param[inout]
+    @param[out]
     result
               device pointer or host pointer to store the dot product.
               Return value is 0.0 if n <= 0.
@@ -25573,7 +25573,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDotcEx_64(hipblasHandle_t handle,
     @param[in]
     batchCount [int]
               number of instances in the batch.
-    @param[inout]
+    @param[out]
     result
               device array or host array of batchCount size to store the dot products of each batch.
               Returns 0.0 for each element if n <= 0.
@@ -25693,7 +25693,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDotcBatchedEx_64(hipblasHandle_t handle,
     @param[in]
     batchCount [int]
               number of instances in the batch.
-    @param[inout]
+    @param[out]
     result
               device array or host array of batchCount size to store the dot products of each batch.
               Returns 0.0 for each element if n <= 0.
@@ -25796,7 +25796,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDotcStridedBatchedEx_64(hipblasHandle_t ha
     @param[in]
     incx      [int]
               specifies the increment for the elements of y.
-    @param[inout]
+    @param[out]
     result
               device pointer or host pointer to store the nrm2 product.
               The return value is 0.0 if n, incx<=0.
