@@ -254,6 +254,7 @@ std::unique_ptr<TreeNode> RTFuseShim::FuseKernels()
         fused->outStride[2] = transpose->outStride[0];
     }
     fused->outputLength = transpose->outputLength;
+    fused->legacyOutputOrder = transpose->legacyOutputOrder;
 
     return fused;
 }

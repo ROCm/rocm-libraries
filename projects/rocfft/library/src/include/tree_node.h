@@ -586,7 +586,7 @@ public:
     // with input strides [1, A] and output strides [B, 1].
     std::vector<size_t> length, outputLength;
 
-    // Packed output order for buffer-fit checks performed before assigning strides.
+    // Preserve the packed output order used by legacy buffer-fit and collapse decisions.
     enum class OutputAxisOrder : uint8_t
     {
         IDENTITY,

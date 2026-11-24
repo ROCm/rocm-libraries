@@ -461,6 +461,10 @@ void TreeNode::CollapseContiguousDims()
     // into axis of larger index (so that batch dimension is never removed), iff collapsing
     // is valid for both the input and output node's data layouts for the considered couple
     // of axes
+    // Develop tested collapse eligibility against the packed output spans for
+    // these nodes. Keep that choice; additional collapses can change kernels.
+    auto collapseOutputLength = std::move(outputLength);
+    PermuteOutputAxes(legacyOutputOrder, collapseOutputLength);
     auto first_axis_it = collapsible_axes.begin();
     while(first_axis_it != collapsible_axes.end())
     {
@@ -483,11 +487,11 @@ void TreeNode::CollapseContiguousDims()
 
             auto& keep_ilength      = keep_idx < length.size() ? length[keep_idx] : batch;
             auto& keep_istride      = keep_idx < length.size() ? inStride[keep_idx] : iDist;
-            auto&       keep_olength = keep_idx < length.size() ? outputLength[keep_idx] : batch;
             auto& keep_ostride      = keep_idx < length.size() ? outStride[keep_idx] : oDist;
+            auto& keep_olength = keep_idx < length.size() ? collapseOutputLength[keep_idx] : batch;
             const auto& del_ilength = del_idx < length.size() ? length[del_idx] : batch;
             const auto& del_istride = del_idx < length.size() ? inStride[del_idx] : iDist;
-            const auto& del_olength       = outputLength[del_idx];
+            const auto& del_olength = collapseOutputLength[del_idx];
             const auto& del_ostride = del_idx < length.size() ? outStride[del_idx] : oDist;
             const bool  keep_is_multiple_of_del
                 = (keep_ilength == 1 || keep_istride == del_istride * del_ilength)
@@ -524,7 +528,7 @@ void TreeNode::CollapseContiguousDims()
             // effectively erase the axis of index del_idx
             length.erase(length.begin() + del_idx);
             inStride.erase(inStride.begin() + del_idx);
-            outputLength.erase(outputLength.begin() + del_idx);
+            collapseOutputLength.erase(collapseOutputLength.begin() + del_idx);
             outStride.erase(outStride.begin() + del_idx);
             if(del_idx == *first_axis_it)
                 collapsible_axes.erase(first_axis_it);
@@ -551,6 +555,12 @@ void TreeNode::CollapseContiguousDims()
         else
             first_axis_it++;
     }
+
+    // The packed-order nodes do not change shape. Restore their output spans
+    // in input-axis order, including any axes collapsed above.
+    if(legacyOutputOrder != OutputAxisOrder::IDENTITY)
+        std::copy(length.begin(), length.end(), collapseOutputLength.begin());
+    outputLength = std::move(collapseOutputLength);
 }
 
 bool TreeNode::IsBluesteinChirpSetup()
