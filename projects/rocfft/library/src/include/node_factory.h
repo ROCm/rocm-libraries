@@ -46,7 +46,9 @@ private:
 public:
     // Create node (user level) using this function
     static std::unique_ptr<TreeNode> CreateNodeFromScheme(ComputeScheme s,
-                                                          TreeNode*     parent = nullptr);
+                                                          TreeNode*     parent,
+                                                          data_set_t    input,
+                                                          data_set_t    output);
     static std::unique_ptr<TreeNode> CreateExplicitNode(NodeMetaData& nodeData,
                                                         TreeNode*     parent,
                                                         ComputeScheme determined_scheme = CS_NONE);
@@ -74,7 +76,9 @@ public:
 
     // determine function:
     static bool use_CS_2D_SINGLE(const function_pool& pool,
-                                 const NodeMetaData&  nodeData,
+                                 size_t               length0,
+                                 size_t               length1,
+                                 rocfft_precision     precision,
                                  rocfft_array_type    inArrayType,
                                  rocfft_array_type    outArrayType);
     static bool use_CS_2D_RC(const function_pool& pool,
