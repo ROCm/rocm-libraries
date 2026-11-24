@@ -1,0 +1,122 @@
+{
+  "aliases": {},
+  "flavors": {
+    "llvm20": {
+      "cases": {
+        "conv_direct_fwd_flex_mfma/gfx950/bf16_k3d12_bk256_sc4": {
+          "arch": "gfx950",
+          "bytes": 813118,
+          "family": "conv_direct_fwd_flex_mfma",
+          "kernel_name": "fwd_flex_mfma_f3x3_p12x12_s1_d12x12_k256_sc4_bf16",
+          "sha256": "6da8500e54b3860ca9f32018ef28738bd6923387a08caca9ef44f3c2f36da44b",
+          "status": "ok"
+        },
+        "conv_direct_fwd_flex_mfma/gfx950/bf16_k3s2_bk256_sc1": {
+          "arch": "gfx950",
+          "bytes": 830303,
+          "family": "conv_direct_fwd_flex_mfma",
+          "kernel_name": "fwd_flex_mfma_f3x3_p1x1_s2_d1x1_k256_sc1_bf16",
+          "sha256": "33d2108167aeac4be6afaa9db66cef9b4c997786adb3b156cb626608b4de8878",
+          "status": "ok"
+        },
+        "conv_direct_fwd_flex_mfma/gfx950/fp16_k1x7_bk128_sc2": {
+          "arch": "gfx950",
+          "bytes": 617937,
+          "family": "conv_direct_fwd_flex_mfma",
+          "kernel_name": "fwd_flex_mfma_f1x7_p0x3_s1_d1x1_k128_sc2",
+          "sha256": "2d28ef0ff27dcff799ec4986a141b3066f2414e3719e0b1ec89995c9758d21c5",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm22": {
+      "cases": {
+        "conv_direct_fwd_flex_mfma/gfx950/bf16_k3d12_bk256_sc4": {
+          "arch": "gfx950",
+          "bytes": 814562,
+          "family": "conv_direct_fwd_flex_mfma",
+          "kernel_name": "fwd_flex_mfma_f3x3_p12x12_s1_d12x12_k256_sc4_bf16",
+          "sha256": "75f2de9ad4c1801b234a6e276b84bc5d8337e2cd46ad3014394d29e46a5b8249",
+          "status": "ok"
+        },
+        "conv_direct_fwd_flex_mfma/gfx950/bf16_k3s2_bk256_sc1": {
+          "arch": "gfx950",
+          "bytes": 831661,
+          "family": "conv_direct_fwd_flex_mfma",
+          "kernel_name": "fwd_flex_mfma_f3x3_p1x1_s2_d1x1_k256_sc1_bf16",
+          "sha256": "ab6448443c397b08ff771599ff91272978da1112bbe48c4befaa4c4b0885c47e",
+          "status": "ok"
+        },
+        "conv_direct_fwd_flex_mfma/gfx950/fp16_k1x7_bk128_sc2": {
+          "arch": "gfx950",
+          "bytes": 619380,
+          "family": "conv_direct_fwd_flex_mfma",
+          "kernel_name": "fwd_flex_mfma_f1x7_p0x3_s1_d1x1_k128_sc2",
+          "sha256": "4ee108bf91c4c6db39346b4637411be014bfc4cb10e744db86ac0e0c750ab256",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm23": {
+      "cases": {
+        "conv_direct_fwd_flex_mfma/gfx950/bf16_k3d12_bk256_sc4": {
+          "arch": "gfx950",
+          "bytes": 814626,
+          "family": "conv_direct_fwd_flex_mfma",
+          "kernel_name": "fwd_flex_mfma_f3x3_p12x12_s1_d12x12_k256_sc4_bf16",
+          "sha256": "65ec1e222bc2bb7356a182f81c6d7de8cbc4a2af6ad5b15285a73a3357e54ab5",
+          "status": "ok"
+        },
+        "conv_direct_fwd_flex_mfma/gfx950/bf16_k3s2_bk256_sc1": {
+          "arch": "gfx950",
+          "bytes": 831725,
+          "family": "conv_direct_fwd_flex_mfma",
+          "kernel_name": "fwd_flex_mfma_f3x3_p1x1_s2_d1x1_k256_sc1_bf16",
+          "sha256": "1dcf6bf48b78bfeafd0f9b8d446d4e80eff906e8c10cd33d3596598edf03775a",
+          "status": "ok"
+        },
+        "conv_direct_fwd_flex_mfma/gfx950/fp16_k1x7_bk128_sc2": {
+          "arch": "gfx950",
+          "bytes": 619444,
+          "family": "conv_direct_fwd_flex_mfma",
+          "kernel_name": "fwd_flex_mfma_f1x7_p0x3_s1_d1x1_k128_sc2",
+          "sha256": "4549a145fc662f73906144f76fdcc94a15cd08284a85486775226c09cc6203a3",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm24": {
+      "cases": {
+        "conv_direct_fwd_flex_mfma/gfx950/bf16_k3d12_bk256_sc4": {
+          "arch": "gfx950",
+          "bytes": 814626,
+          "family": "conv_direct_fwd_flex_mfma",
+          "kernel_name": "fwd_flex_mfma_f3x3_p12x12_s1_d12x12_k256_sc4_bf16",
+          "sha256": "65ec1e222bc2bb7356a182f81c6d7de8cbc4a2af6ad5b15285a73a3357e54ab5",
+          "status": "ok"
+        },
+        "conv_direct_fwd_flex_mfma/gfx950/bf16_k3s2_bk256_sc1": {
+          "arch": "gfx950",
+          "bytes": 831725,
+          "family": "conv_direct_fwd_flex_mfma",
+          "kernel_name": "fwd_flex_mfma_f3x3_p1x1_s2_d1x1_k256_sc1_bf16",
+          "sha256": "1dcf6bf48b78bfeafd0f9b8d446d4e80eff906e8c10cd33d3596598edf03775a",
+          "status": "ok"
+        },
+        "conv_direct_fwd_flex_mfma/gfx950/fp16_k1x7_bk128_sc2": {
+          "arch": "gfx950",
+          "bytes": 619444,
+          "family": "conv_direct_fwd_flex_mfma",
+          "kernel_name": "fwd_flex_mfma_f1x7_p0x3_s1_d1x1_k128_sc2",
+          "sha256": "4549a145fc662f73906144f76fdcc94a15cd08284a85486775226c09cc6203a3",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    }
+  },
+  "schema": "ck.dsl.ir_golden_sha256/v2"
+}

@@ -504,6 +504,7 @@ def test_impact_scope_is_the_ingestor_paths_and_plugin_sdk_headers(part):
             "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/GpuGenericTargets.hpp",
         ),
         ("APPL", "projects/hipdnn/flatbuffers_sdk/schemas/tensor_attributes.fbs"),
+        ("TIER", "dnn-providers/integration-tests/tests/TestGpuPointwisePlan.cpp"),
     ],
 )
 def test_packets_concern_lane_takes_trigger_files_only(
@@ -547,6 +548,84 @@ def test_appl_scope_is_providers_engine_headers_and_schemas(part):
     assert {r[0] for r in part.concern_scope("APPL", rows)} == set(inside)
 
 
+def test_tier_scope_is_test_sources_bundles_and_tier_yaml(part):
+    # catches: an added test, bundle or tier YAML that never reaches TIER, or product
+    # code and documentation that does
+    inside = (
+        "dnn-providers/integration-tests/tests/TestGpuPointwisePlan.cpp",
+        "dnn-providers/integration-tests/tests/gpu-ref/PointwiseShapeCatalog.hpp",
+        "dnn-providers/integration-tests/integration-test-bundles/quick/SdpaFwd/a.json",
+        "dnn-providers/miopen-provider/test_categories_integration.yaml",
+        "projects/hipdnn/python/frontend_wheel_package/tests/test_x.py",
+        "dnn-providers/hip-kernel-provider/src/tests/GemmTests.cpp",
+        "projects/hipdnn/tools/DescriptorGenerator/foo_test.py",
+        "dnn-providers/hip-kernel-provider/src/integration_tests/asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp",
+        "dnn-providers/hipblaslt-provider/integration_tests/IntegrationGpuMxMatmulUnsupported.cpp",
+        "dnn-providers/miopen-provider/integration_tests/CMakeLists.txt",
+    )
+    outside = (
+        "projects/hipdnn/backend/src/Foo.cpp",
+        "projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp",
+        "projects/hipdnn/CMakeLists.txt",
+        "projects/hipdnn/docs/TESTING.md",
+        "dnn-providers/integration-tests/docs/adding-tests.md",
+    )
+    rows = [(p, 1, "") for p in inside + outside]
+    assert {r[0] for r in part.concern_scope("TIER", rows)} == set(inside)
+
+
+REPO_ROOT = Path(__file__).resolve().parents[5]
+GTEST_MACRO = re.compile(
+    r"^\s*(?:TEST|TEST_F|TEST_P|TYPED_TEST|TYPED_TEST_P|INSTANTIATE_TEST_SUITE_P"
+    r"|INSTANTIATE_TYPED_TEST_SUITE_P)\s*\(",
+    re.M,
+)
+PYTEST_FUNC = re.compile(r"^(?:async\s+)?def test_\w*\s*\(", re.M)
+
+
+def tree_test_sources(part):
+    """Every non-documentation file in the hipDNN and provider trees that is a test by
+    content (a GTest macro in C++, or a pytest function in a file pytest collects by its
+    default `test_*.py` / `*_test.py` names), a bundle file, or a tier YAML."""
+    found = []
+    for top in ("projects/hipdnn", "dnn-providers"):
+        for path in (REPO_ROOT / top).rglob("*"):
+            rel = path.relative_to(REPO_ROOT).as_posix()
+            if not path.is_file() or part.is_docs(rel):
+                continue
+            if "/integration-test-bundles/" in rel or (
+                "test_categories" in path.name and path.suffix == ".yaml"
+            ):
+                found.append(rel)
+                continue
+            if path.suffix in (".cpp", ".cc", ".hpp"):
+                pattern = GTEST_MACRO
+            elif path.suffix == ".py" and (
+                path.name.startswith("test_") or path.stem.endswith("_test")
+            ):
+                pattern = PYTEST_FUNC
+            else:
+                continue
+            if pattern.search(path.read_text(encoding="utf-8", errors="replace")):
+                found.append(rel)
+    return found
+
+
+@pytest.mark.skipif(
+    not (REPO_ROOT / "dnn-providers").is_dir(), reason="needs the rocm-libraries tree"
+)
+def test_tier_scope_covers_every_test_in_the_tree(part):
+    # catches: a test directory or naming convention the TIER path patterns do not know,
+    # so a change adding tests there gets no TIER packet. The oracle is the file content
+    # (GTest macros, pytest functions), independent of the path patterns under test.
+    sources = tree_test_sources(part)
+    assert sources, "found no test sources; the tree walk is broken"
+    rows = [(p, 1, "") for p in sources]
+    inside = {r[0] for r in part.concern_scope("TIER", rows)}
+    missed = sorted(set(sources) - inside)
+    assert not missed, f"{len(missed)} test files outside TIER scope: {missed[:20]}"
+
+
 def test_leak_sweep_allowlist_covers_every_report_lane(part):
     # catches: a report lane missing from the LEAK sweep's finding-ID allow-list, so its
     # finding IDs are flagged as leaks
@@ -558,7 +637,7 @@ def test_leak_sweep_allowlist_covers_every_report_lane(part):
     assert sorted(match.group(1).split("|")) == sorted(part.REPORT_LANES)
 
 
-@pytest.mark.parametrize("lane", ["APPL", "IMPACT"])
+@pytest.mark.parametrize("lane", ["APPL", "IMPACT", "TIER"])
 def test_lane_id_is_a_provisional_id(part, lane):
     """A finding ID from a concern lane is recognised, like every other report lane."""
     # catches: the lane dropped from CONCERN_LANES/REPORT_LANES, so its findings are
@@ -608,10 +687,76 @@ def test_orient_gate_accepts_added_files_and_flags_paths_absent_at_base(
     with pytest.raises(SystemExit) as exc:
         run(part, "orient-gate", rd)
     assert exc.value.code == 1
-    assert capsys.readouterr().out == "not at base: src/x\n"
+    assert capsys.readouterr().out == "not at base: src/x (cited at CONTEXT.md:1)\n"
     (rd / "CONTEXT.md").write_text("Area `src/old.cpp:1` and dir `src`.\n")
     run(part, "orient-gate", rd)
     assert capsys.readouterr().out == ""
+
+
+def test_orient_gate_checks_context_orient_links_against_the_round(
+    part, tmp_path, capsys
+):
+    clone = tmp_path / "clone"
+    (clone / "src").mkdir(parents=True)
+    (clone / "src" / "old.cpp").write_text("x\n")
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t"}
+    env.update(GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t", HOME=str(tmp_path))
+    for args in (["init", "-q"], ["add", "."], ["commit", "-qm", "base"]):
+        subprocess.run(["git", "-C", str(clone), *args], check=True, env=env)
+    base = subprocess.run(
+        ["git", "-C", str(clone), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    (tmp_path / "r1").mkdir()
+    rd = make_round(tmp_path / "r1", [(1, 0, "src/old.cpp")])
+    (rd / "PIN.md").write_text(f"CLONE: {clone}\nBASE: {base}\n")
+    (rd / "orient").mkdir()
+    (rd / "orient" / "core.md").write_text("Reads `src/old.cpp:1`.\n")
+    (rd / "CONTEXT.md").write_text("| core | `orient/core.md` |\n")
+    run(part, "orient-gate", rd)
+    assert capsys.readouterr().out == ""
+    (rd / "CONTEXT.md").write_text(
+        "| core | `orient/core.md` |\n| io | `orient/io.md` |\n"
+    )
+    with pytest.raises(SystemExit) as exc:
+        run(part, "orient-gate", rd)
+    assert exc.value.code == 1
+    assert (
+        capsys.readouterr().out == "not at base: orient/io.md (cited at CONTEXT.md:2)\n"
+    )
+
+
+def test_orient_gate_reports_extra_count_for_a_citation_in_two_places(
+    part, tmp_path, capsys
+):
+    clone = tmp_path / "clone"
+    (clone / "src").mkdir(parents=True)
+    (clone / "src" / "old.cpp").write_text("x\n")
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t"}
+    env.update(GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t", HOME=str(tmp_path))
+    for args in (["init", "-q"], ["add", "."], ["commit", "-qm", "base"]):
+        subprocess.run(["git", "-C", str(clone), *args], check=True, env=env)
+    base = subprocess.run(
+        ["git", "-C", str(clone), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    (tmp_path / "r1").mkdir()
+    rd = make_round(tmp_path / "r1", [(1, 0, "src/new.hpp")])
+    (rd / "PIN.md").write_text(f"CLONE: {clone}\nBASE: {base}\n")
+    (rd / "orient").mkdir()
+    (rd / "orient" / "a.md").write_text("Also touches `src/gone.hpp`.\n")
+    (rd / "CONTEXT.md").write_text("Removes `src/gone.hpp`.\n")
+    with pytest.raises(SystemExit) as exc:
+        run(part, "orient-gate", rd)
+    assert exc.value.code == 1
+    assert (
+        capsys.readouterr().out
+        == "not at base: src/gone.hpp (cited at CONTEXT.md:1, +1 more)\n"
+    )
 
 
 def test_every_ingestor_impact_surface_pattern_triggers_the_impact_lane(part):
@@ -632,3 +777,56 @@ def test_every_ingestor_impact_surface_pattern_triggers_the_impact_lane(part):
         and not pattern.split("*", 1)[0].startswith(part.IMPACT_PREFIXES)
     ]
     assert uncovered == []
+
+
+def test_design_lane_id_is_a_provisional_id(part):
+    # catches: DESIGN missing from REPORT_LANES, so `DESIGN-p1` is not recognised.
+    assert part.PROVISIONAL_ID.findall("see DESIGN-p1 and DESIGN2-p3") == [
+        "DESIGN-p1",
+        "DESIGN2-p3",
+    ]
+
+
+def test_design_scope_is_the_non_documentation_files(part):
+    rows = [
+        (path, 1, f"1\t0\t{path}")
+        for path in (
+            "projects/hipdnn/backend/a.cpp",
+            "projects/hipdnn/CMakeLists.txt",
+            "projects/hipdnn/docs/guide.md",
+            "projects/hipdnn/docs/notes.txt",
+            "LICENSE",
+        )
+    ]
+    assert {r[0] for r in part.concern_scope("DESIGN", rows)} == {
+        "projects/hipdnn/backend/a.cpp",
+        "projects/hipdnn/CMakeLists.txt",
+    }
+
+
+def test_packets_design_lane_is_not_applicable_to_a_docs_only_change(
+    part, tmp_path, capsys
+):
+    rd = make_round(tmp_path, [(1, 0, "projects/hipdnn/docs/guide.md")])
+    run(part, "areas", rd)
+    (rd / "owners.tsv").write_text("DOCS\tprojects/hipdnn/docs/guide.md\n")
+    run(part, "packets", rd, "--lanes", "DESIGN")
+    assert not (rd / "packets" / "DESIGN.md").exists()
+    assert "DESIGN: no changed file in scope, N/A" in capsys.readouterr().out
+
+
+def test_leak_sweep_allow_list_matches_every_report_lane(part):
+    # catches: a lane in REPORT_LANES missing from the sweep allow-list, whose IDs of 10
+    # or more then count as sweep hits and the Synthesize gate never passes.
+    leaks = (SCRIPT.parent.parent / "lanes" / "leaks.md").read_text()
+    allow = next(
+        line
+        for line in leaks.splitlines()
+        if line.startswith("^(") and "[0-9]*-p?[0-9]+$" in line
+    )
+    pattern = re.compile(allow)
+    for lane in part.REPORT_LANES:
+        assert pattern.fullmatch(f"{lane}-12"), lane
+        assert pattern.fullmatch(f"{lane}2-p3"), lane
+    listed = allow[2 : allow.index(")")].split("|")
+    assert sorted(listed) == sorted(part.REPORT_LANES)

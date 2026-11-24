@@ -24,7 +24,8 @@ Map the behavior the change adds or alters to the tests that exercise it, and re
 - Support claims: a new bundle for an engine and arch the change claims has a claim in its sidecar (`<bundle>.support.json`, or
   `support.json` for a sweep), so a regression fails instead of skipping (`dnn-providers/integration-tests/docs/file-formats.md` §
   "Support-claim sidecars", `dnn-providers/integration-tests/docs/adding-tests.md` § "Updating support claims", `dnn-providers/integration-tests/docs/support-claim-enforcement.md`).
-- Tiers: new cases land in the tier CI runs for the PR, not only `full` or `comprehensive`.
+- Tiers: new cases land in the tier CI runs for the PR (`standard` runs on every PR), not only `full` or `comprehensive`. What a case
+  costs in its tier, and whether it belongs in a cheaper one, is `TIER`'s: hand placement to it. `quick` keeps at most one basic test per feature, so a behavior's PR coverage is `standard`.
 - Python and C++ entry points both, when the change is visible through both (Python tests:
   `projects/hipdnn/python/frontend_wheel_package/tests`).
 

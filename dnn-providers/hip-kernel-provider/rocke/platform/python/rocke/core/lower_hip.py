@@ -29,10 +29,11 @@ from .ir import (
     _FENCE_ORDERINGS,
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
+    _ORPHAN_YIELD_ERROR,
     F64,
     _int_add_wrap_error,
     _int_cmp_pred_error,
-    _scf_for_carried_descriptor_error,
+    _scf_for_error,
     KernelDef,
     Op,
     PtrType,
@@ -45,12 +46,15 @@ from .ir import (
     _global_ptr_offset_op_error,
     _global_ptr_to_i64_op_error,
     _gpu_check_failed_op_error,
-    _if_else_branch_yield,
+    _if_else_yields,
+    _ldexp_op_error,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
     _trap_op_error,
+    claimed_align,
     dpp_ctrl_attr,
+    element_type,
     dpp_xor_ctrl,
     gpu_check_word_symbol,
     require_streaming_arch,
@@ -769,11 +773,7 @@ class _Lowerer:
         elem_name = op.attrs.get("elem_type", "f16")
         prefix = _vec_prefix(elem_name, "global_load_vN")
         byte_count = vec * (dtype_info(elem_name).encoded_bits // 8)
-        align = int(op.attrs.get("align", vec * 2))
-        if align <= 0 or align & (align - 1):
-            raise ValueError(
-                "global_load_vN: alignment must be a positive power of two"
-            )
+        align = claimed_align(op, vec, element_type(op.result.type))
         nontemporal = _nontemporal(op)
         if nontemporal:
             require_streaming_arch(op.name, self.arch.gfx)
@@ -1934,6 +1934,15 @@ class _Lowerer:
         # we promote to f32 first.
         self._math1(op, "exp2f")
 
+    def _op_math_ldexp(self, op: Op) -> None:
+        error = _ldexp_op_error(op)
+        if error:
+            raise ValueError(error)
+        value, exponent = op.operands
+        self._emit(
+            f"float {_name(op.result)} = __builtin_ldexpf({_name(value)}, {_name(exponent)});"
+        )
+
     def _op_math_log2(self, op: Op) -> None:
         # ``log2f`` is HIP's device runtime base-2 log entry point; for
         # fp16/bf16 we promote to f32 first (same promote-compute-demote
@@ -2415,11 +2424,7 @@ class _Lowerer:
         elem_name = op.attrs.get("elem_type", "f16")
         prefix = _vec_prefix(elem_name, "global_store_vN")
         byte_count = n * (dtype_info(elem_name).encoded_bits // 8)
-        align = int(op.attrs.get("align", byte_count))
-        if align <= 0 or align & (align - 1):
-            raise ValueError(
-                "global_store_vN: alignment must be a positive power of two"
-            )
+        align = claimed_align(op, n, element_type(val.type))
         nontemporal = _nontemporal(op)
         if nontemporal:
             require_streaming_arch(op.name, self.arch.gfx)
@@ -3009,9 +3014,9 @@ class _Lowerer:
     # -------------------- control flow --------------------
 
     def _op_scf_for(self, op: Op) -> None:
-        descriptor_error = _scf_for_carried_descriptor_error(op)
-        if descriptor_error is not None:
-            raise ValueError(descriptor_error)
+        error = _scf_for_error(op)
+        if error is not None:
+            raise ValueError(error)
         num_iter = op.attrs.get("num_iter_args", 0)
         lower = op.operands[0]
         upper = op.operands[1]
@@ -3055,19 +3060,13 @@ class _Lowerer:
 
     def _op_scf_yield(self, op: Op) -> None:
         # Map each yielded value to the corresponding iter_arg variable.
-        # We find the enclosing scf.for by walking up the lowering's region
-        # stack; here we just rely on positional order in the for op's
-        # iter_args attr captured at parent time. To make this robust, the
-        # builder records iter_args; the lowering matches them positionally.
-        # In practice we assume scf.yield is the last op in the for body.
+        # The lowering matches the yielded values to the for op's iter_args
+        # attr positionally; _scf_for_error has checked that this yield ends
+        # the loop body and gives one value per iter_args entry.
         parent_for = _find_enclosing_for(self.kernel.body, op)
         if parent_for is None:
-            raise RuntimeError("scf.yield without enclosing scf.for")
+            raise ValueError(_ORPHAN_YIELD_ERROR)
         meta = parent_for.attrs.get("iter_args", [])
-        if len(op.operands) != len(meta):
-            raise RuntimeError(
-                f"scf.yield: {len(op.operands)} values vs {len(meta)} iter_args"
-            )
         for m, v in zip(meta, op.operands):
             self._emit(f"{m['name'][1:]} = {_name(v)};")
 
@@ -3083,14 +3082,14 @@ class _Lowerer:
         # The results are variables declared before the ``if``; the
         # ``scf.yield`` that ends each branch assigns them.
         # First: the rule checks the condition and branch counts read below.
-        yields = [_if_else_branch_yield(op, branch) for branch in range(2)]
+        then_yield, else_yield = _if_else_yields(op)
         (cond,) = op.operands
         for result in op.results:
             self._emit(f"{_type_to_hip(result.type)} {_name(result)};")
         self._emit(f"if({_name(cond)}) {{")
-        self._lower_if_else_branch(op, op.regions[0], yields[0])
+        self._lower_if_else_branch(op, op.regions[0], then_yield)
         self._emit("} else {")
-        self._lower_if_else_branch(op, op.regions[1], yields[1])
+        self._lower_if_else_branch(op, op.regions[1], else_yield)
         self._emit("}")
 
     def _lower_if_else_branch(self, op: Op, region: Region, yld: Optional[Op]) -> None:

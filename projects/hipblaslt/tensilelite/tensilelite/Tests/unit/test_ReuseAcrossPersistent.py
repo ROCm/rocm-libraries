@@ -470,7 +470,7 @@ def test_a_rap_kernel_never_reaches_the_tail_loop_emitter(
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
     from tensilelite.create_library.run import generateKernelObjectsFromSolutions
-    from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+    from rocisa_test_state import preserve_rocisa_kernel_state
 
     sol = Solution(_make_params(gfx1250_iim, AssertSummationElementMultiple=32),
                    False, False, False, assembler, gfx1250_iim)
@@ -718,7 +718,7 @@ def _kernelSource(sol, assembler):
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
     from tensilelite.create_library.run import generateKernelObjectsFromSolutions
-    from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+    from rocisa_test_state import preserve_rocisa_kernel_state
 
     with preserve_rocisa_kernel_state():
         (kernel,) = generateKernelObjectsFromSolutions([sol])

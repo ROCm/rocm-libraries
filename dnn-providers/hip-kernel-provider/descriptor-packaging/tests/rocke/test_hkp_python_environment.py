@@ -125,7 +125,7 @@ foreach(label first second)
         NAME "${label}"
         SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/authored"
         OUT_ROOT "${CMAKE_CURRENT_BINARY_DIR}/${label}"
-        ARCHES gfx942 HIPCC unused
+        ARCHES gfx942 HIP_COMPILER unused
         ROCM_KPACK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/kpack with spaces"
         ENABLE_ROCKE ON ROCKE_INTERP "${interp}" ROCKE_READY "${ready}"
         ROCKE_PYTHON_DIR "${python_dir}" ROCKE_WHEEL_STAMP "${wheel_stamp}"

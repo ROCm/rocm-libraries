@@ -28,6 +28,10 @@ public:
     MiopenBatchnormPlanBuilder(const MiopenBatchnormPlanBuilder&) = delete;
     MiopenBatchnormPlanBuilder& operator=(const MiopenBatchnormPlanBuilder&) = delete;
 
+    // Every check of isApplicable; none of them needs a handle.
+    static bool
+        isGraphApplicable(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph);
+
     bool isApplicable(
         const HipdnnMiopenHandle& handle,
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override;

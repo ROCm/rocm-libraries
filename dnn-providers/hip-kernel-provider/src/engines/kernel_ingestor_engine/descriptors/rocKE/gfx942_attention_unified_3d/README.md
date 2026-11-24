@@ -53,8 +53,8 @@ from DVC.
 The L1 `predict_engine` (predicts the engine's TFLOPS) is held: its selector revision was recorded on
 an older build, so the runtime refuses it on a build of the current source. It follows in a separate
 change, once re-measured on a build of current source. It is measured under the L2 and its selector
-revision digests the code objects packed at build time, so retrain it whenever the L2 or the catalog
-(the KDP) changes.
+revision digests the code objects packed at build time, so retrain it whenever the L2, the catalog
+(the KDP) or the compiler that packs it changes.
 
 A build without `dvc pull -r ingestor` on a `model.bin.dvc` packs the bundle without that
 model: the pack warns, the model's UHD does not ship, and the loader logs the dangling id

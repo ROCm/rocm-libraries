@@ -120,4 +120,4 @@ using namespace conv3d_test;
 
 TEST_P(GPU_Conv3d_Test_FP32, FloatTest_conv3d_test) { Run3dDriver(miopenFloat); };
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Conv3d_Test_FP32, testing::Values(GetTestCases("--float")));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_Conv3d_Test_FP32, testing::Values(GetTestCases("--float")));
