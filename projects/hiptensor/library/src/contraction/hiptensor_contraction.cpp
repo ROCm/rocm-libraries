@@ -150,8 +150,9 @@ static bool isPacked(std::vector<std::size_t> const& lengths,
 // last one.
 static std::size_t byteSpan(hiptensorTensorDescriptor_t const desc)
 {
-    auto const lengths = hiptensor::getTensorLengths(desc);
-    auto const strides = hiptensor::getTensorStrides(desc);
+    // References: getTensorLengths and getTensorStrides return copies.
+    auto const& lengths = desc->mLengths;
+    auto const& strides = desc->mStrides;
     if(hiptensor::elementsFromLengths(lengths) == 0)
     {
         return 0;
