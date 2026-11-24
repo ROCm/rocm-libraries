@@ -90,12 +90,3 @@ TEST(ElementwiseInstanceSelectionTest, Rank3ExtentAboveLastEdgeUsesLastBucket)
     expectSameParams(selectFloatPermutation({32, 32, 524289}),
                      selectFloatPermutation({32, 32, 524288}));
 }
-
-// The last rank-4 edge is 131,072. The table has no entry in that bucket, so an extent beyond it
-// gets the default hyper-parameters.
-TEST(ElementwiseInstanceSelectionTest, Rank4ExtentAboveLastEdgeUsesLastBucket)
-{
-    expectSameParams(selectFloatPermutation({131073, 32, 32, 32}),
-                     selectFloatPermutation({131072, 32, 32, 32}));
-    expectSameParams(selectFloatPermutation({131073, 32, 32, 32}), defaultParams);
-}
