@@ -78,5 +78,8 @@ Migrate from standalone packages
 2. Keep your existing ``find_package(rocprim)``, ``find_package(hipcub)``, and ``find_package(rocthrust)`` calls, or replace them with a single ``find_package(hipccl)``.
 3. Remove any hard-coded ``-Iinstall_prefix/include`` that relied on the old flat header locations.
    Use the CMake targets, or ``-Iinstall_prefix/include/hipccl``.
-4. Don't depend on the compatibility symlinks.
-   They're temporary and will be removed in a future release.
+
+.. note::
+
+   The compatibility symlinks are temporary and will be removed in a future release.
+   Don't depend on them.

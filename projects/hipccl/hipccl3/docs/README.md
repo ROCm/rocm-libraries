@@ -9,4 +9,4 @@ Each component keeps its own documentation:
 - [`../rocprim/docs/`](../rocprim/docs/)
 - [`../hipcub/docs/`](../hipcub/docs/)
 - [`../rocthrust/docs/`](../rocthrust/docs/)
-- [`../libhipcxx/docs/`](../libhipcxx/docs/)
+- [libhipcxx `docs/`](https://github.com/ROCm/libhipcxx/tree/amd-develop/docs) (separate repository, `ROCm/libhipcxx`)
