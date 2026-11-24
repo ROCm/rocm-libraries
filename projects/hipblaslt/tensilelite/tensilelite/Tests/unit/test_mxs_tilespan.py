@@ -443,3 +443,45 @@ class TestScaleSelectEffect:
         kernel["ProblemType"] = {"MXBlockFreeA": 128, "MXBlockA": 128}
         mapping = [_scale_sel(stub, kernel, "MXSA", 0, idx) for idx in range(4)]
         assert mapping == [(0, 0), (0, 1), (1, 0), (1, 1)]
+
+
+class _E8M0:
+    """The scale element type: one byte, which is the only width the model maps directly."""
+
+    @staticmethod
+    def numBytes():
+        return 1
+
+
+class TestLoopModelScaleMerge:
+    """The MODELLED merge must equal the grouping the scale reads actually emit.
+
+    `loopModelTarget` tells theta how many tiles one scale ds_load covers, and theta turns that
+    into the carrier a consumer addresses.  Under `WaveTileContiguousA` a read group holds ONE
+    scale tile, so taking the parent's configured VectorWidth doubles the modelled merge while
+    the plan still emits pairs -- the consumer then reads a carrier the fill never wrote, which
+    the register-dataflow check reports as WRONG SOURCE.
+    """
+
+    @staticmethod
+    def _kernel(contiguous):
+        return {
+            "ProblemType": {"DataTypeMXSA": _E8M0()},
+            "UnrollMajorLDSMXSA": 1,
+            "MXScaleFormat": "InMemorySwizzle",
+            # Equal by derivation (`VectorWidthMXSA = VectorWidthA`); only the contiguous rule
+            # separates them, so a test that set just one of the two would not discriminate.
+            "VectorWidthA": 2,
+            "VectorWidthMXSA": 2,
+            "WaveTileContiguousA": contiguous,
+        }
+
+    def test_merge_follows_the_scale_read_width(self):
+        from tensilelite.Components.LoopModel.Theta import mxScaleTilesPerRead
+
+        stub = types.SimpleNamespace(
+            states=types.SimpleNamespace(asmCaps={"HasWMMA_V3": True}))
+        ordinary = mxScaleTilesPerRead(stub, self._kernel(False), "MXSA", 4, 4)
+        contiguous = mxScaleTilesPerRead(stub, self._kernel(True), "MXSA", 4, 4)
+        assert ordinary == 2, "an ordinary wave reads VectorWidth tiles' scales per ds_load"
+        assert contiguous == 1, "a contiguous A reads one tile's scales per ds_load"

@@ -138,3 +138,21 @@ def test_setup_restore_clocks_handler_no_smi(isolate_globals, monkeypatch):
     GP.setupRestoreClocks()
     captured[0]()
     assert calls == []
+
+
+def test_assign_global_parameters_loop_model_overrides(isolate_globals, isa_info_map, monkeypatch):
+    """The two LoopModel config keys reach globalParameters; both default off."""
+    _set_rocm_version(monkeypatch)
+    GP.assignGlobalParameters({"OutputLoopIR": True, "LoopModelIRVerify": True}, isa_info_map)
+    assert GP.globalParameters["OutputLoopIR"] is True
+    assert GP.globalParameters["LoopModelIRVerify"] is True
+
+
+def test_assign_global_parameters_gir_schedule_paths_are_exclusive(
+        isolate_globals, isa_info_map, monkeypatch, tmp_path):
+    """Dumping and loading one schedule at once has no defined order; it is refused."""
+    _set_rocm_version(monkeypatch)
+    with pytest.raises(RuntimeError, match="mutually exclusive"):
+        GP.assignGlobalParameters(
+            {"GIRScheduleDumpPath": str(tmp_path / "d"),
+             "GIRScheduleLoadPath": str(tmp_path / "l")}, isa_info_map)

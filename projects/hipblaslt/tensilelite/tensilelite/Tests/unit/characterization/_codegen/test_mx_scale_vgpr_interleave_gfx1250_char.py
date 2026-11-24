@@ -9,9 +9,15 @@ v_wmma_scale costs one cycle when its two scale VGPRs share a VGPR bank
 (index % 8). The interleave is on by default (KernelWriter.do["MXScaleVgprInterleave"]).
 Where it applies, every v_wmma_scale must read its two scales from disjoint banks, every MXS
 reference must resolve inside v0-v255, and no VGPR may be reached through two different scale
-blocks. It never raises the VGPR count: a kernel whose layout needs a larger scale region than the
-default keeps the default layout (kernels already at the 1024 VGPR limit would not assemble).
-With the switch off every kernel keeps the default layout, whose scale banks collide.
+blocks. Each v_wmma_scale must still read the scales the same ds_loads wrote as in the default
+layout. It never raises the VGPR count: a layout that needs a larger scale region than the default
+is taken only when the accumulators keep their place, and otherwise the kernel keeps the default
+layout (kernels already at the 1024 VGPR limit would not assemble). With the switch off every
+kernel keeps the default layout, whose scale banks collide.
+
+The loop-model cases keep a different number of MXSA and MXSB buffers, and their drain names a
+later MXSA buffer through an earlier one's symbol. The three-buffer case needs one VGPR past the
+default span, and StinkyTofu recolours its VGPRs, so its scales are read as registers.
 
 pytestmark = pytest.mark.unit. CPU-only; no GPU.
 """
@@ -37,6 +43,8 @@ _CONFIGS = [
     ("streamk_cluster_multicast_pgr2.yaml", False),
     ("streamk_tdm_prefetchgl2.yaml", False),
     ("streamk_tdm_prefetchgl2_f4.yaml", False),
+    ("loopmodel_mxf8_scale_buffers.yaml", False),
+    ("loopmodel_mxf8_three_mxsa_buffers.yaml", False),
 ]
 _IDS = [name for name, _ in _CONFIGS]
 _VGPRS = re.compile(r"\.amdhsa_next_free_vgpr\s+(\d+)")
@@ -63,6 +71,51 @@ def _range(operand, sym):
     lo = _eval(m.group(1), sym)
     hi = _eval(m.group(2), sym) if m.group(2) else lo
     return None if lo is None or hi is None else range(lo, hi + 1)
+
+
+_MSB_BIAS = re.compile(r"\s*-\s*(?:256|512|768)\s*$")
+_PLAIN = re.compile(r"v(\d+)$")
+
+
+def _physical(operand, sym):
+    """The VGPRs an operand names. A trailing -256, -512 or -768 is the s_set_vgpr_msb window the
+    index is encoded in, not part of the index: v[856-768:871-768] is v856."""
+    operand = operand.strip()
+    m = _PLAIN.match(operand)
+    if m:
+        return range(int(m.group(1)), int(m.group(1)) + 1)
+    m = _RANGE.match(operand)
+    if not m:
+        return None
+    lo = _eval(_MSB_BIAS.sub("", m.group(1)), sym)
+    hi = _eval(_MSB_BIAS.sub("", m.group(2)), sym) if m.group(2) else lo
+    return None if lo is None or hi is None else range(lo, hi + 1)
+
+
+def _feeds(src):
+    """For each v_wmma_scale in program order, the ds_loads that last wrote its MXSA and MXSB
+    scales, named by opcode and LDS offset -- which data the WMMA reads, whatever holds it."""
+    sym, last, out = {}, {}, []
+    for raw in src.splitlines():
+        line = raw.split("//")[0].strip()
+        m = _SET.match(line)
+        if m:
+            value = _eval(m.group(2), sym)
+            if value is None:
+                sym.pop(m.group(1), None)
+            else:
+                sym[m.group(1)] = value
+            continue
+        op, _, rest = line.partition(" ")
+        if op.startswith("ds_load"):
+            offset = re.search(r"\boffset:(\d+)", rest)
+            for v in _physical(_OPERANDS.split(rest)[0], sym) or ():
+                last[v] = "%s@%s" % (op, offset.group(1) if offset else 0)
+        elif op.startswith("v_wmma_scale"):
+            ops = _OPERANDS.split(rest)
+            out.append(tuple(frozenset(last.get(v) for v in _physical(ops[i].split()[0], sym) or ())
+                             for i in (5, 4)))
+    return out
 
 
 def _scan(src):
@@ -96,7 +149,9 @@ def _scan(src):
                 shared += owner.setdefault(v, block) != block
         if line.startswith("v_wmma_scale"):
             wmma += 1
-            s0, s1 = _range(ops[4], sym), _range(ops[5].split()[0], sym)
+            # A recoloured kernel names its scales as plain registers, not through the symbols.
+            s0, s1 = _physical(ops[4].split()[0], sym), _physical(ops[5].split()[0], sym)
+            high += sum(v >= 256 for regs in (s0, s1) if regs for v in regs)
             if s0 and s1 and {v % 8 for v in s0} & {v % 8 for v in s1}:
                 conflicts += 1
     return wmma, conflicts, high, shared, pieces
@@ -161,6 +216,19 @@ def test_mx_scale_vgpr_interleave_never_adds_vgprs(kernels_on_off):
     assert [b for b, _s, _e in off] == [b for b, _s, _e in on]
     for (base, src, _e), (_b, srcOff, _eOff) in zip(on, off):
         assert _vgprs(src) <= _vgprs(srcOff), f"{base}: the interleave raised the VGPR count"
+
+
+def test_mx_scale_vgpr_interleave_keeps_each_wmmas_scales(kernels_on_off):
+    # The interleave moves scales, never which ones a WMMA reads: every v_wmma_scale must take both
+    # from the same ds_load as in the default layout. A bank count cannot see a reference remapped
+    # onto the wrong register, and recolouring can resolve an undefined one without complaint.
+    _fallsBack, on, off = kernels_on_off
+    for (base, src, _e), (_b, srcOff, _eOff) in zip(on, off):
+        feeds, feedsOff = _feeds(src), _feeds(srcOff)
+        assert feeds and len(feeds) == len(feedsOff), f"{base}: v_wmma_scale count differs"
+        wrong = [i for i, (a, b) in enumerate(zip(feeds, feedsOff)) if a != b]
+        assert not wrong, (f"{base}: {len(wrong)}/{len(feeds)} v_wmma_scale read a scale another "
+                           f"ds_load wrote, first #{wrong[0]}: {feeds[wrong[0]]} vs {feedsOff[wrong[0]]}")
 
 
 def test_mx_scale_vgpr_interleave_falls_back(kernels_on_off):

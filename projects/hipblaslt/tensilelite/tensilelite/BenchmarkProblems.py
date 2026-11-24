@@ -325,7 +325,9 @@ def _generateForkedSolutions(problemType, constantParams, forkPermutations, asse
         itertools.repeat(isaInfoMap),
         itertools.repeat(rocisa.rocIsa.getInstance().getData())
     )
-    raw_solutions = ParallelMap2(_generate_single_solution, forkIters, "fork solutions", return_as="list")
+    # `forkPermutations` is lazy and states its own length; the `zip` cannot, so pass the count.
+    raw_solutions = ParallelMap2(_generate_single_solution, forkIters, "fork solutions",
+                                 return_as="list", count=len(forkPermutations))
 
     # Filter out None and duplicates. Solutions compare by name, and that name
     # records only the register-allocation mode, so two configs with one mode
@@ -974,6 +976,12 @@ def main(
     if config is None:
         print(f'No config specified in {globalParameters["ConfigPath"]}, built client only')
         return
+
+    # A schedule override is external to the Solution parameters used by cache.yaml. Force
+    # codegen so dumping sees every kernel and loading cannot reuse a pre-override code object.
+    if globalParameters.get("GIRScheduleDumpPath") \
+            or globalParameters.get("GIRScheduleLoadPath"):
+        useCache = False
 
     # Parse and validate backend config using shared contract
     backend = parse_backend_config(backend if backend else None)
