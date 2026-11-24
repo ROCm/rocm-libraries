@@ -266,9 +266,9 @@ void Single2DNode::SetupGridParam_internal(GridParam& gp)
 {
     const auto& view   = GetKernelView();
     const auto  lens   = view.lengths();
-    auto kernel = GetKernel();
-    bwd         = kernel.transforms_per_block;
-    wgs         = kernel.workgroup_size;
+    auto        kernel = GetKernel();
+    bwd                = kernel.transforms_per_block;
+    wgs                = kernel.workgroup_size;
 
     gp.b_x   = (view.batch + bwd - 1) / bwd;
     gp.wgs_x = wgs;

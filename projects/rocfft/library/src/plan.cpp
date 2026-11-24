@@ -1940,10 +1940,11 @@ void rocfft_plan_t::MakeSingleDevPlanWithGatherScatterIfNeeded()
     // should not be instructed to operate on another device, as it may be
     // incapable of accessing any user-provided work buffer if peer-to-peer
     // device access is not enabled.
-    const auto exec_plan_location = rocfft_location_t::rank0_current_device();
-    const bool plan_is_single_dev = desc.has_undistributed_io_on_current_location();
+    const auto              exec_plan_location = rocfft_location_t::rank0_current_device();
+    const bool              plan_is_single_dev = desc.has_undistributed_io_on_current_location();
     std::vector<data_set_t> exec_plan_io_layouts;
-    auto exec_plan_metadata = get_single_dev_exec_plan_metadata(exec_plan_location, exec_plan_io_layouts);
+    auto                    exec_plan_metadata
+        = get_single_dev_exec_plan_metadata(exec_plan_location, exec_plan_io_layouts);
     if(plan_is_single_dev
        && (exec_plan_metadata.input_buffer.ptr_type() == BufferPtr::PTR_TEMP
            || exec_plan_metadata.output_buffer.ptr_type() == BufferPtr::PTR_TEMP))

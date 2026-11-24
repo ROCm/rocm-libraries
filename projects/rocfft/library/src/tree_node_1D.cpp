@@ -1016,9 +1016,9 @@ void SBCCNode::SetupGridParam_internal(GridParam& gp)
 {
     const auto& view   = GetKernelView();
     const auto  lens   = view.lengths();
-    auto kernel = GetKernel();
-    bwd         = kernel.transforms_per_block;
-    wgs         = kernel.workgroup_size;
+    auto        kernel = GetKernel();
+    bwd                = kernel.transforms_per_block;
+    wgs                = kernel.workgroup_size;
 
     lds = lens[0] * bwd;
 
@@ -1035,7 +1035,7 @@ void SBCCPPNode::SetupGridParam_internal(GridParam& gp)
 {
     const auto& view   = GetKernelView();
     const auto  lens   = view.lengths();
-    auto kernel = GetKernel();
+    auto        kernel = GetKernel();
 
     bwd = kernel.transforms_per_block;
     wgs = kernel.workgroup_size;
@@ -1276,9 +1276,9 @@ void SBCRNode::SetupGridParam_internal(GridParam& gp)
 {
     const auto& view   = GetKernelView();
     const auto  lens   = view.lengths();
-    auto kernel = pool.get_kernel(GetKernelKey());
-    wgs         = kernel.workgroup_size;
-    bwd         = kernel.transforms_per_block;
+    auto        kernel = pool.get_kernel(GetKernelKey());
+    wgs                = kernel.workgroup_size;
+    bwd                = kernel.transforms_per_block;
 
     const auto lds_padding = ebtype != EmbeddedType::NONE ? 1 : 0;
 

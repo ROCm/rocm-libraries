@@ -1189,14 +1189,14 @@ public:
 
 public:
     // leaf node would print additional informations about kernel setting
-    void         Print(rocfft_ostream& os, int indent = 0, bool detailed = false) const override;
-    bool         KernelCheck(std::vector<FMKey>& kernel_keys = EmptyFMKeyVec) override;
-    void         SanityCheck(SchemeTree*         solution_scheme = nullptr,
-                             std::vector<FMKey>& kernel_keys     = EmptyFMKeyVec) override;
-    bool         CreateDevKernelArgs() final;
-    bool         CreateDeviceResources() override;
-    void         SetupGridParam(GridParam& gp) override;
-    FMKey        GetKernelKey() const override;
+    void  Print(rocfft_ostream& os, int indent = 0, bool detailed = false) const override;
+    bool  KernelCheck(std::vector<FMKey>& kernel_keys = EmptyFMKeyVec) override;
+    void  SanityCheck(SchemeTree*         solution_scheme = nullptr,
+                      std::vector<FMKey>& kernel_keys     = EmptyFMKeyVec) override;
+    bool  CreateDevKernelArgs() final;
+    bool  CreateDeviceResources() override;
+    void  SetupGridParam(GridParam& gp) override;
+    FMKey GetKernelKey() const override;
 
     // Called after buffer assignment, fusion, and padding, before RTC.
     void              BuildKernelView();

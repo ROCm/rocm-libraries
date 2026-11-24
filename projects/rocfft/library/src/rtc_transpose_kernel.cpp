@@ -165,7 +165,7 @@ RTCKernelArgs RTCKernelTranspose::get_launch_args(DeviceCallIn& data)
     kargs.append_kint(view.oDist);
 
     // pass gridX, gridY and gridZ to restore a 3-D GPU grid, if needed for large grids
-    unsigned int tileX = data.node->precision == rocfft_precision_single ? 64 : 32;
+    unsigned int tileX     = data.node->precision == rocfft_precision_single ? 64 : 32;
     unsigned int gridYrows = lengths[1] * (num_lengths > 2 ? lengths[2] : 1);
     auto         highdim   = std::min<size_t>(num_lengths, 3);
 

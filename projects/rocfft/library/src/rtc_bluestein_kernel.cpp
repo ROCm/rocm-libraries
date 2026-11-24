@@ -50,9 +50,9 @@ RTCKernel::RTCGenerator RTCKernelBluesteinSingle::generate_from_node(const LeafN
     // allocate enough blocks for all higher dims + batch
     unsigned int batch_accum
         = product(view.lengths().begin() + 1, view.lengths().end()) * view.batch;
-    auto         bwd         = config.transforms_per_block;
-    generator.gridDim        = {DivRoundingUp(batch_accum, bwd)};
-    generator.blockDim       = config.workgroup_size;
+    auto bwd           = config.transforms_per_block;
+    generator.gridDim  = {DivRoundingUp(batch_accum, bwd)};
+    generator.blockDim = config.workgroup_size;
 
     const KIntType itype = view.itype;
 

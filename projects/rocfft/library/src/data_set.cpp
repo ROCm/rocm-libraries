@@ -574,8 +574,8 @@ void data_set_t::compress_axes_consistently_in(std::span<data_set_t> data_sets,
     // true iff axis `outer` may be merged over axis `inner` (of the group) in `d`, with
     // the same spans as in the first data set
     auto mergeable = [&](const data_set_t& d, size_t outer, size_t inner) {
-        const auto& o = (d.*axes)[outer];
-        const auto& i = (d.*axes)[inner];
+        const auto& o         = (d.*axes)[outer];
+        const auto& i         = (d.*axes)[inner];
         const auto& reference = data_sets.front().*axes;
         if(legacy_packed_spans)
         {

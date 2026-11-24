@@ -92,7 +92,7 @@ protected:
     void SetupGridParam_internal(GridParam& gp) override;
 
 public:
-    bool                CreateDeviceResources() override;
+    bool CreateDeviceResources() override;
 };
 
 /*****************************************************
@@ -111,7 +111,7 @@ protected:
     void SetupGridParam_internal(GridParam& gp) override;
 
 public:
-    bool                CreateDeviceResources() override;
+    bool CreateDeviceResources() override;
 };
 
 /*****************************************************
@@ -172,7 +172,7 @@ protected:
     void SetupGridParam_internal(GridParam& gp) override;
 
 public:
-    bool                CreateDeviceResources() override;
+    bool CreateDeviceResources() override;
 };
 
 /*****************************************************
