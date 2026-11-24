@@ -2,5 +2,7 @@
 # packages and package-data in pyproject.toml; setuptools copies those into
 # the sdist on its own, so they are not listed here.
 include release_metadata.py
+include packaging_backend/_tensilelite_build_backend.py
+include VERSION
 include requirements.txt
 global-exclude __pycache__ *.py[cod] CMakeCache.txt install_manifest.txt

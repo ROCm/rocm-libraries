@@ -54,4 +54,4 @@ TEST_P(CPU_TransposedWinogradIsDynamic_NONE, DynamicInnerSolversGiveDynamicWrapp
     EXPECT_TRUE((conv::TransposedConvBinWinoRxS<3, 2>{}.IsDynamic()));
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, CPU_TransposedWinogradIsDynamic_NONE, testing::Values(0));
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_TransposedWinogradIsDynamic_NONE, testing::Values(0));

@@ -37,6 +37,7 @@
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
@@ -71,8 +72,23 @@ namespace
         }
     }
 
+    // Captures hipblaslt_cerr for the life of the object, then restores it.
+    struct CaptureErrorStream
+    {
+        hipblaslt_internal_ostream saved = std::move(hipblaslt_cerr);
+        CaptureErrorStream()
+        {
+            hipblaslt_cerr = hipblaslt_internal_ostream{};
+        }
+        ~CaptureErrorStream()
+        {
+            hipblaslt_cerr = std::move(saved);
+        }
+    };
+
     // Runs the hipblaslt-bench -v checks of D (norm and allclose) through check() on host
-    // buffers of T (f32 or f16), M x N per batch, and counts the checks that failed.
+    // buffers of T (f32 or f16), M x N per batch, and counts the checks that failed. With
+    // auxiliary, D matches and E is checked against result instead.
     template <typename T = float>
     struct BenchVerifyD
     {
@@ -82,6 +98,7 @@ namespace
         hipblasLtBatchMode_t       mode;
         std::vector<HipHostBuffer> gold, result;
         double                     norm_error = 0, atol = 1, rtol = 1;
+        int64_t                    extra_failures = 0; // failed checks of E in the last run
 
         BenchVerifyD(int64_t m, int64_t n, int64_t batches, hipblasLtBatchMode_t mode)
             : m(m)
@@ -108,7 +125,7 @@ namespace
             return static_cast<T*>(buffers[0].buf())[batch * m * n + i];
         }
 
-        // output_type overrides the type check() is told D has, for a type it cannot compare.
+        // output_type overrides the type of the output under test, D or E.
         int64_t run(hipDataType input_type  = type,
                     hipDataType output_type = type,
                     bool        allclose    = true,
@@ -130,6 +147,7 @@ namespace
             std::vector<double>        tol{0};
             double                     max_ulp = 0, avg_ulp = 0;
             const int64_t              before = hipblaslt_bench_options::verification_failures();
+            const int64_t extra_before          = hipblaslt_bench_options::extra_check_failures();
             check(arg,
                   gemm_count,
                   {m},
@@ -154,11 +172,12 @@ namespace
                   rtol,
                   max_ulp,
                   avg_ulp,
-                  output_type,
+                  auxiliary ? type : output_type,
                   HIP_R_32F,
                   output_type,
                   HIP_R_32F,
                   mode);
+            extra_failures = hipblaslt_bench_options::extra_check_failures() - extra_before;
             return hipblaslt_bench_options::verification_failures() - before;
         }
     };
@@ -210,6 +229,9 @@ namespace
                 result[0].as<float>()[test.length - 1] = corrupt ? 2.0f : 1.0f;
                 std::vector<double> tol{0};
                 double              norm_error = 0, atol = 0, rtol = 0, max_ulp = 0, avg_ulp = 0;
+                CaptureErrorStream  capture;
+                const int64_t       d_before     = hipblaslt_bench_options::verification_failures();
+                const int64_t       extra_before = hipblaslt_bench_options::extra_check_failures();
                 ::testing::TestPartResultArray failures;
                 {
                     ::testing::ScopedFakeTestPartResultReporter reporter(
@@ -244,15 +266,134 @@ namespace
                           HIP_R_32F,
                           HIP_R_32F);
                 }
+                EXPECT_EQ(hipblaslt_bench_options::verification_failures(), d_before);
+                EXPECT_EQ(hipblaslt_bench_options::extra_check_failures() - extra_before,
+                          corrupt ? 1 : 0);
                 EXPECT_EQ(failures.size(), corrupt ? 1 : 0);
                 if(corrupt)
                 {
                     if(failures.size() == 1)
                         EXPECT_TRUE(failures.GetTestPartResult(0).fatally_failed());
                     EXPECT_GT(norm_error, 0.1);
+                    EXPECT_NE(hipblaslt_cerr.str().find("norm check failed for the bias gradient"),
+                              std::string::npos);
                 }
                 else
                     EXPECT_EQ(norm_error, 0);
+            }
+        }
+    }
+
+    TEST(BenchVerify, smoke_AmaxChecksOneValuePerGemm)
+    {
+        BenchVerifyD               d(2, 2, 3, HIPBLASLT_BATCH_MODE_STRIDED);
+        std::vector<HipHostBuffer> gold, result, unused;
+        gold.emplace_back(HIP_R_32F, 3);
+        result.emplace_back(HIP_R_32F, 3);
+        // Only element 0 is an output. Mismatched sentinels make a per-batch read fail.
+        for(int i = 0; i < 3; ++i)
+        {
+            gold[0].as<float>()[i]   = 1.0f;
+            result[0].as<float>()[i] = 1000.0f;
+        }
+        for(int check_kind : {0, 1, 2}) // norm, unit, near
+        {
+            for(bool corrupt : {false, true})
+            {
+                SCOPED_TRACE(::testing::Message()
+                             << "check=" << check_kind << " corrupt=" << corrupt);
+                Arguments arg{};
+                arg.init();
+                arg.unit_check        = check_kind != 0;
+                arg.norm_check        = check_kind == 0;
+                arg.allclose_check    = 0;
+                arg.norm_check_assert = true;
+                arg.amaxD             = true;
+                arg.a_type = arg.b_type  = HIP_R_32F;
+                arg.compute_type         = HIPBLAS_COMPUTE_32F;
+                result[0].as<float>()[0] = corrupt ? 2.0f : 1.0f;
+                std::vector<double> tol{check_kind == 2 ? 0.01 : 0.0};
+                double              norm_error = 0, atol = 0, rtol = 0, max_ulp = 0, avg_ulp = 0;
+                const int64_t       d_before     = hipblaslt_bench_options::verification_failures();
+                const int64_t       extra_before = hipblaslt_bench_options::extra_check_failures();
+                CaptureErrorStream  capture;
+                ::testing::TestPartResultArray assertions;
+                {
+                    ::testing::ScopedFakeTestPartResultReporter reporter(
+                        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD,
+                        &assertions);
+                    check(arg,
+                          1,
+                          {2},
+                          {2},
+                          {2},
+                          {2},
+                          {4},
+                          {4},
+                          {3},
+                          {0},
+                          d.gold,
+                          d.result,
+                          gold,
+                          result,
+                          unused,
+                          unused,
+                          unused,
+                          unused,
+                          tol,
+                          norm_error,
+                          atol,
+                          rtol,
+                          max_ulp,
+                          avg_ulp,
+                          HIP_R_32F,
+                          HIP_R_32F,
+                          HIP_R_32F,
+                          HIP_R_32F);
+                }
+                EXPECT_EQ(assertions.size(), corrupt ? 1 : 0);
+                EXPECT_EQ(hipblaslt_bench_options::verification_failures(), d_before);
+                EXPECT_EQ(hipblaslt_bench_options::extra_check_failures() - extra_before,
+                          corrupt && check_kind == 0 ? 1 : 0);
+                EXPECT_EQ(norm_error, corrupt && check_kind == 0 ? 1.0 : 0.0);
+                if(corrupt && check_kind == 0)
+                    EXPECT_NE(
+                        hipblaslt_cerr.str().find("norm check failed for amaxD of gemm 0: batch 0"),
+                        std::string::npos);
+            }
+        }
+    }
+
+    TEST(BenchVerify, smoke_BiasGradientRejectsMultipleBatches)
+    {
+        for(int check_kind : {0, 1, 2}) // norm, unit, allclose
+        {
+            SCOPED_TRACE(check_kind);
+            Arguments arg{};
+            arg.init();
+            arg.norm_check     = check_kind == 0;
+            arg.unit_check     = check_kind == 1;
+            arg.allclose_check = check_kind == 2;
+            arg.gradient       = true;
+            arg.bias_vector    = true;
+            arg.batch_count    = 3;
+            // The shared client must reject this before allocating or computing the reference.
+            try
+            {
+                testing_matmul_with_bias(arg,
+                                         HIP_R_32F,
+                                         HIP_R_32F,
+                                         HIP_R_32F,
+                                         HIP_R_32F,
+                                         HIP_R_32F,
+                                         HIP_R_32F,
+                                         HIP_R_32F,
+                                         HIP_R_32F);
+                FAIL() << "Expected the unsupported bias-gradient batch count to be rejected";
+            }
+            catch(const std::invalid_argument& error)
+            {
+                EXPECT_STREQ(error.what(), "bias-gradient verification supports only one batch");
             }
         }
     }
@@ -287,8 +428,22 @@ namespace
                 for(int64_t i = 0; i < 32; i++)
                     d.at(d.result, b, i) *= 1.000004f;
             EXPECT_EQ(d.run(HIP_R_32F, HIP_R_32F, true, true, auxiliary), 0);
+            EXPECT_EQ(d.extra_failures, 0);
             EXPECT_GT(d.norm_error, 1e-5);
         }
+    }
+
+    // A wrong E is reported by name but counted apart from D, so --verify_strict ignores it.
+    TEST(BenchVerify, smoke_WrongAuxiliaryIsReportedButNotCountedForD)
+    {
+        BenchVerifyD d(8, 4, 3, HIPBLASLT_BATCH_MODE_STRIDED);
+        d.at(d.result, 2, 5) = 7;
+        CaptureErrorStream capture;
+        EXPECT_EQ(d.run(HIP_R_32F, HIP_R_32F, false, false, true), 0);
+        EXPECT_EQ(d.extra_failures, 1);
+        EXPECT_NE(hipblaslt_cerr.str().find("norm check failed for E of gemm 0: batch 2 has"),
+                  std::string::npos)
+            << hipblaslt_cerr.str();
     }
 
     TEST(BenchVerify, smoke_NormAssertRejectsOneBadBatch)
@@ -299,6 +454,7 @@ namespace
             BenchVerifyD d(1, 1, 8, HIPBLASLT_BATCH_MODE_STRIDED);
             d.at(d.gold, 7, 0)   = 1.0f;
             d.at(d.result, 7, 0) = 1.00004f;
+            CaptureErrorStream             capture;
             ::testing::TestPartResultArray failures;
             {
                 ::testing::ScopedFakeTestPartResultReporter reporter(
@@ -308,6 +464,10 @@ namespace
             }
             ASSERT_EQ(failures.size(), 1);
             EXPECT_TRUE(failures.GetTestPartResult(0).fatally_failed());
+            // The failure is printed before the assertion stops the run.
+            const std::string line = std::string("norm check failed for ") + (auxiliary ? "E" : "D")
+                                     + " of gemm 0: batch 7 has";
+            EXPECT_NE(hipblaslt_cerr.str().find(line), std::string::npos) << hipblaslt_cerr.str();
             EXPECT_GT(d.norm_error, 1e-5);
             EXPECT_LT(d.norm_error / d.batches, 1e-5);
         }
@@ -385,27 +545,41 @@ namespace
         EXPECT_EQ(beyond_limit.run(), 1);
     }
 
-    // A D type that norm_check_general cannot compare is counted as a failure, so exit 0
-    // under --verify_strict always means D was checked.
+    // A type the norm check cannot compare must be reported and rejected even with an
+    // assertion enabled: its uncomputed error of zero is not evidence of a correct result.
     TEST(BenchVerify, smoke_UncomparableOutputTypeCountsAsFailure)
     {
-        BenchVerifyD d(8, 4, 3, HIPBLASLT_BATCH_MODE_STRIDED);
-        EXPECT_GT(norm_tolerance(HIP_R_4F_E2M1), 0);
-        EXPECT_FALSE(norm_check_general_supports(HIP_R_4F_E2M1));
-        struct RestoreErrorStream
+        ASSERT_GT(norm_tolerance(HIP_R_4F_E2M1), 0);
+        ASSERT_FALSE(norm_check_general_supports(HIP_R_4F_E2M1));
+        for(bool auxiliary : {false, true})
         {
-            hipblaslt_internal_ostream saved = std::move(hipblaslt_cerr);
-            ~RestoreErrorStream()
+            for(bool norm_assert : {false, true})
             {
-                hipblaslt_cerr = std::move(saved);
+                SCOPED_TRACE(::testing::Message()
+                             << "auxiliary=" << auxiliary << " norm_assert=" << norm_assert);
+                BenchVerifyD                   d(8, 4, 3, HIPBLASLT_BATCH_MODE_STRIDED);
+                CaptureErrorStream             capture;
+                ::testing::TestPartResultArray assertions;
+                int64_t                        d_failures = 0;
+                {
+                    ::testing::ScopedFakeTestPartResultReporter reporter(
+                        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD,
+                        &assertions);
+                    d_failures = d.run(HIP_R_32F, HIP_R_4F_E2M1, false, norm_assert, auxiliary);
+                }
+                EXPECT_EQ(d_failures, auxiliary ? 0 : 1);
+                EXPECT_EQ(d.extra_failures, auxiliary ? 1 : 0);
+                ASSERT_EQ(assertions.size(), norm_assert ? 1 : 0);
+                if(norm_assert)
+                    EXPECT_TRUE(assertions.GetTestPartResult(0).fatally_failed());
+                const auto diagnostic = hipblaslt_cerr.str();
+                EXPECT_EQ(diagnostic.find("Error type in norm_check_general"), std::string::npos);
+                EXPECT_NE(
+                    diagnostic.find(auxiliary ? "so E was not verified" : "so D was not verified"),
+                    std::string::npos)
+                    << diagnostic;
             }
-        } restore_error_stream;
-        hipblaslt_cerr        = hipblaslt_internal_ostream{};
-        const auto failures   = d.run(HIP_R_4F_E2M1, HIP_R_4F_E2M1, false);
-        const auto diagnostic = hipblaslt_cerr.str();
-        EXPECT_EQ(failures, 1);
-        EXPECT_EQ(diagnostic.find("Error type in norm_check_general"), std::string::npos);
-        EXPECT_NE(diagnostic.find("so D was not verified"), std::string::npos);
+        }
     }
 
     TEST(BenchVerify, smoke_UnknownOutputTypeCountsAsFailure)
@@ -723,6 +897,39 @@ namespace
                              MEMORY_SHORTAGE_STRING "this case needs");
     }
 
+    // A strided grouped GEMM of two problems that the CPU reference checks with unit_check.
+    Arguments grouped_unit_check_case()
+    {
+        Arguments arg    = unit_check_case(256, 144, 32, HIP_R_16F);
+        arg.grouped_gemm = 2;
+        for(int i = 0; i < arg.grouped_gemm; ++i)
+        {
+            arg.M[i]   = 256 >> i;
+            arg.N[i]   = 144;
+            arg.K[i]   = 32;
+            arg.lda[i] = arg.ldc[i] = arg.ldd[i] = arg.M[i];
+            arg.ldb[i]                           = arg.K[i];
+            arg.stride_a[i]                      = arg.M[i] * arg.K[i];
+            arg.stride_b[i]                      = arg.K[i] * arg.N[i];
+            arg.stride_c[i] = arg.stride_d[i] = arg.M[i] * arg.N[i];
+        }
+        arg.use_ext = arg.use_ext_setproblem = true;
+        arg.algo_method                      = 2;
+        return arg;
+    }
+
+    TEST(MatmulMemory_pre_checkin, grouped_case_is_not_stopped_by_a_released_host_buffer)
+    {
+        // hC is released once it has seeded hD_gold. A check that took the released buffer for a
+        // failed allocation would stop the case for memory, which fails here rather than skips.
+        const int arch = hipblaslt_get_arch();
+        if(arch / 100 == 11 || arch / 10 == 120)
+            GTEST_SKIP() << "the grouped GEMM cases do not run on this architecture";
+        ScopedVariable fail("HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP", "1");
+        testing_matmul(grouped_unit_check_case());
+        EXPECT_FALSE(IsSkipped());
+    }
+
     // Runs one case with the estimate check on and returns what it measured.
     MemoryEstimateMeasurement measure_estimate(const Arguments& arg)
     {
@@ -737,19 +944,25 @@ namespace
 #ifndef __linux__
         GTEST_SKIP() << "the estimate check reads the peak resident memory from /proc";
 #endif
-        // In the f32 case six 256 MiB host buffers make up the estimate, each with the pool's 20%
-        // extra. In the f16 case the CPU reference's 1 GiB float copy of A is most of it. The
-        // bound on the overestimate keeps the preflight from skipping cases that would fit.
+        // In the f32 case two 256 MiB host buffers make up the estimate, each with the pool's 20%
+        // extra: hD_gold, and hC, whose memory hD_1 then takes. In the f16 case the CPU
+        // reference's 1 GiB float copy of A is most of it. The bound on the overestimate keeps
+        // the preflight from skipping cases that would fit.
         struct Shape
         {
             const char* name;
             int64_t     m, n, k;
             hipDataType type;
         };
-        // A small case first, since the check leaves out the first case in the process.
-        testing_matmul(unit_check_case(64, 64, 16, HIP_R_32F));
-        for(const Shape& s : {Shape{"f32, 8192 x 8192 x 16", 8192, 8192, 16, HIP_R_32F},
-                              Shape{"f16, 16384 x 16 x 16384", 16384, 16, 16384, HIP_R_16F}})
+        const Shape shapes[] = {{"f32, 8192 x 8192 x 16", 8192, 8192, 16, HIP_R_32F},
+                                {"f16, 16384 x 16 x 16384", 16384, 16, 16384, HIP_R_16F}};
+        // TensileLite loads a problem type's kernel library on the first case of that type, and
+        // the f16 one raised the peak by about 2 GiB on 96-CU gfx1250. A small case of each type
+        // runs first so the measured cases leave that out. It also covers the check skipping
+        // the first case in the process.
+        for(const Shape& s : shapes)
+            testing_matmul(unit_check_case(64, 64, 16, s.type));
+        for(const Shape& s : shapes)
         {
             SCOPED_TRACE(s.name);
             auto m = measure_estimate(unit_check_case(s.m, s.n, s.k, s.type));
