@@ -686,7 +686,7 @@ the C++ build and test.
 | Integration / smoke tests (client GTest) | Yes | Component team | Validate behavior across key scenarios |
 | Characterization goldens | Yes, when `tensilelite/` is touched | Component team | Asserted by the gating `preliminary` job and by the TensileLite coverage lane. Review every golden diff; never bulk-regenerate |
 | AddressSanitizer build and tests | **No** | Component team | The hipBLASLt ASAN lane runs quick tests for relevant PRs and pushes to `develop`, standard tests nightly, and the selected test type manually, but its summary check is not required. Keep it green anyway |
-| JIT build and tests (gfx942 / gfx950) | **No** | Component team | The `hipBLASLt JIT CI` workflow (`.github/workflows/hipblaslt-jit-ci.yml`, checks named `JIT (gfx942)` and `JIT (gfx950)`) builds the host library with JIT on, runs the `jit-cpu` tests with every GPU hidden and the `jit-gpu` tests on one GPU runner per architecture, then builds without JIT and runs that build's `jit-cpu` tests. It runs on pull requests that change a path in its `paths:` filter, and on manual dispatch. Failures belong to the component team. None of its jobs is a required check, so a red job does not block a merge. Reproduce a failure locally from [clients/tests/jit/README.md](clients/tests/jit/README.md) |
+| JIT build and tests (gfx942 / gfx950) | Yes, when a JIT path is touched | Component team / CI | Enforced by the `Component CI: hipBLASLt JIT` lane (`.github/workflows/component-ci-hipblaslt-jit.yml`, checks named `JIT (gfx942)` and `JIT (gfx950)`), which rolls up to the required `Component CI Summary`. It builds the host library with JIT on, runs the `jit-cpu` tests with every GPU hidden and the `jit-gpu` tests on one GPU runner per architecture, then builds without JIT and runs that build's `jit-cpu` tests. `component_ci.py` selects it from the changed paths, and a manual Component CI run includes it. A fork pull request skips the GPU jobs. Reproduce a failure locally from [clients/tests/jit/README.md](clients/tests/jit/README.md) |
 | Code coverage floor and ratchet (TensileLite) | Yes, when `tensilelite/` is touched | Component team / CI | Enforced by the `Component CI: TensileLite coverage` lane, which rolls up to the required `Component CI Summary`. Floors move up only, on the honor system |
 | Formatting and lint (`pre-commit`) | Yes | CI / DevOps | Maintain hooks |
 | Sensitive-word scan (the Math CI job named `static-analysis`) | Yes | CI / DevOps | Gating, but it is a disclosure gate rather than code analysis |
@@ -724,6 +724,8 @@ tracked as a gap.
 - The logic corpus checks on logic-only changes, through `Component CI Summary`
 - The rocjitsu GEMM workload runner unit tests, through `Component CI Summary`, when
   `clients/scripts/rocjitsu` changes
+- The JIT build and `jit-cpu` / `jit-gpu` tests on gfx942 and gfx950, through
+  `Component CI Summary`, when a JIT path changes
 - `pre-commit`
 
 **Informational.** Worth reading, cannot block a merge.

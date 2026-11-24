@@ -1,39 +1,17 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-name: hipBLASLt JIT CI
+name: "Component CI: hipBLASLt JIT"
+
+# Called by component-ci.yml. Path selection lives in component_ci.py, and this
+# lane rolls up to the required Component CI Summary. A fork pull request does
+# not reach the GPU runners: the test job skips unless the head is this repo.
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-    paths:
-      - "projects/hipblaslt/library/src/amd_detail/hipblaslt-jit-*"
-      - "projects/hipblaslt/CMakeLists.txt"
-      - "projects/hipblaslt/library/src/amd_detail/CMakeLists.txt"
-      - "projects/hipblaslt/clients/tests/jit/**"
-      - "projects/hipblaslt/scripts/jit/**"
-      - "projects/hipblaslt/tensilelite/include/Tensile/AMDGPUPredicates.hpp"
-      - "projects/hipblaslt/tensilelite/include/Tensile/CachingLibrary.hpp"
-      - "projects/hipblaslt/tensilelite/include/Tensile/ExactLogicLibrary.hpp"
-      - "projects/hipblaslt/tensilelite/include/Tensile/LocalKernelIndex.hpp"
-      - "projects/hipblaslt/tensilelite/include/Tensile/Tensile.hpp"
-      - "projects/hipblaslt/tensilelite/include/Tensile/ContractionProblem.hpp"
-      - "projects/hipblaslt/tensilelite/include/Tensile/ContractionSolution.hpp"
-      - "projects/hipblaslt/tensilelite/include/Tensile/Serialization/**"
-      - "projects/hipblaslt/tensilelite/include/Tensile/msgpack/**"
-      - "projects/hipblaslt/tensilelite/src/ContractionProblem.cpp"
-      - "projects/hipblaslt/tensilelite/src/ContractionSolution.cpp"
-      - "projects/hipblaslt/tensilelite/src/msgpack/**"
-      - "projects/hipblaslt/tensilelite/tensilelite/Common/GlobalParameters.py"
-      - ".github/workflows/hipblaslt-jit-ci.yml"
-  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
-  cancel-in-progress: true
 
 jobs:
   setup:

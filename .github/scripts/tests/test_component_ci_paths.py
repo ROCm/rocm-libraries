@@ -69,6 +69,20 @@ class MiopenProseSelectionTest(unittest.TestCase):
         changed = self.DOCS | {"projects/miopen/src/convolution.cpp"}
         self.assertTrue(detect_changed_components(changed)["miopen"])
 
+    def test_jit_library_source_runs_jit(self):
+        changed = {
+            "projects/hipblaslt/library/src/amd_detail/hipblaslt-jit-library.cpp"
+        }
+        selected = detect_changed_components(changed)
+        self.assertTrue(selected["hipblaslt_jit"])
+        self.assertFalse(selected["geko"])
+
+    def test_unrelated_file_skips_jit(self):
+        changed = {"projects/hipblaslt/utilities/geko/pyproject.toml"}
+        selected = detect_changed_components(changed)
+        self.assertFalse(selected["hipblaslt_jit"])
+        self.assertTrue(selected["geko"])
+
     def test_package_license_runs_miopen(self):
         changed = {"projects/miopen/LICENSE.md"}
         self.assertTrue(detect_changed_components(changed)["miopen"])
