@@ -670,11 +670,11 @@ the baseline's.
 | family (shapes) | seed | A2/A p95 | B/A geomean [95% interval] | shapes wholly above the band | speed bar |
 |---|---|---|---|---|---|
 | persistent (12) | 0 | 0.11% | -1.62% [-3.24, -0.40] | none | pass |
-| persistent (12) | 1 | 0.10% | -1.61% [-3.16, -0.41] | none | pass |
+| persistent (12) | 1 | 0.10% | -1.61% [-3.21, -0.43] | none | pass |
 | grid (8) | 0 | 0.13% | -1.55% [-4.03, +0.54] | q15 | **fail** |
 | grid (8) | 1 | 0.08% | -1.61% [-4.12, +0.47] | q15 | **fail** |
 | KV-segment (2) | 0 | 0.03% | +0.78% [-0.11, +1.76] | q20K | **fail** |
-| KV-segment (2) | 1 | 0.18% | +0.94% [-0.19, +2.12] | q20K | **fail** |
+| KV-segment (2) | 1 | 0.18% | +0.94% [-0.19, +2.13] | q20K | **fail** |
 
 Failing cases (95% interval wholly above the band, in both seeds):
 
@@ -684,7 +684,7 @@ Failing cases (95% interval wholly above the band, in both seeds):
   cost is reading the strides in the D64 body. The selection set's k03 (a forced D64 bf16 causal
   KV-segment shape) failed the same way.
 - **q20K** (KV-segment, D128, bf16, causal, 4/1 heads, S 4096, forced): +1.65% [+1.32, +1.85] and
-  +2.06% [+1.78, +2.19]. The strides alone are neutral here (+0.13% [-0.12, +0.51]); the scalar base
+  +2.06% [+1.78, +2.23]. The strides alone are neutral here (+0.13% [-0.12, +0.51]); the scalar base
   costs +1.40% [+1.20, +1.50] and the PV order +0.49% [+0.37, +0.61].
 
 Near the band, not failing: q17 (+0.76%, +0.82%), q12G (+0.90%, +0.82%), q18 (+0.73%, +0.44%). The
@@ -721,7 +721,7 @@ Pass rule, point by point (the rule is below):
 |---|---|
 | 1 numeric gate | pass in 7 of 7 runs; 22 of 22 cases |
 | 2 shipped bar per family | persistent pass in both seeds; grid fail (q15); KV-segment fail (q20K) |
-| 3 "persistent faster" | kept: -1.62% [-3.24, -0.40] and -1.61% [-3.16, -0.41], not the post-selection -3.50% |
+| 3 "persistent faster" | kept: -1.62% [-3.24, -0.40] and -1.61% [-3.21, -0.43], not the post-selection -3.50% |
 | 4 a lever's comment may claim a gain only with an upper bound below 0 | PV order: yes on the causal D128 persistent rows (it costs on the non-causal ones); per-row exception: no, no measured effect; scalar base: yes as registered, not with q20K; `k_major`: no evidence for a default |
 | 5 D and E diagnostic on q14G and q20K | q14G spills as expected; q20K does not |
 
