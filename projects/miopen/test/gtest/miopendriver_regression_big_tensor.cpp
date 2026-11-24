@@ -73,6 +73,6 @@ TEST_P(GPU_MIOpenDriverRegressionBigTensorTest_FP32, MIOpenDriverRegressionBigTe
     RunMIOpenDriver();
 };
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_MIOpenDriverRegressionBigTensorTest_FP32,
                          testing::Values(GetTestCases()));

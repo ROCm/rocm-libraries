@@ -181,40 +181,40 @@ TEST_P(CPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicWrwXdlopsNHWCDevApplicabil
     this->RunTest(miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC{});
 };
 
-// Smoke tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
+// Quick tests
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicWrwXdlopsNHWCWrw_FP16,
                          testing::Combine(testing::Values(GetSmokeTestParams(miopenHalf)),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
                                           testing::ValuesIn(GetConvSmokeTestCases(miopenHalf))));
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicWrwXdlopsNHWCWrw_BFP16,
     testing::Combine(testing::Values(GetSmokeTestParams(miopenBFloat16)),
                      testing::Values(miopenConvolutionAlgoImplicitGEMM),
                      testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicWrwXdlopsNHWCWrw_FP32,
                          testing::Combine(testing::Values(GetSmokeTestParams(miopenFloat)),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
                                           testing::ValuesIn(GetConvSmokeTestCases(miopenFloat))));
 
-// Full tests
-INSTANTIATE_TEST_SUITE_P(Full,
+// Standard tests
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicWrwXdlopsNHWCWrw_FP16,
                          testing::Combine(testing::Values(GetFullTestParams(miopenHalf)),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
                                           testing::ValuesIn(GetConvFullTestCases(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicWrwXdlopsNHWCWrw_BFP16,
                          testing::Combine(testing::Values(GetFullTestParams(miopenBFloat16)),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
                                           testing::ValuesIn(GetConvFullTestCases(miopenBFloat16))));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicWrwXdlopsNHWCWrw_FP32,
                          testing::Combine(testing::Values(GetFullTestParams(miopenFloat)),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
@@ -222,21 +222,21 @@ INSTANTIATE_TEST_SUITE_P(Full,
 
 // High Tol tests
 INSTANTIATE_TEST_SUITE_P(
-    Full,
+    Standard,
     GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicWrwXdlopsNHWCWrwHighTol_FP16,
     testing::Combine(testing::Values(GetHighTolTestParams(miopenHalf)),
                      testing::Values(miopenConvolutionAlgoImplicitGEMM),
                      testing::ValuesIn(GetConvHighTolTestCases(miopenHalf))));
 
 INSTANTIATE_TEST_SUITE_P(
-    Full,
+    Standard,
     GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicWrwXdlopsNHWCWrwHighTol_BFP16,
     testing::Combine(testing::Values(GetHighTolTestParams(miopenBFloat16)),
                      testing::Values(miopenConvolutionAlgoImplicitGEMM),
                      testing::ValuesIn(GetConvHighTolTestCases(miopenBFloat16))));
 
 INSTANTIATE_TEST_SUITE_P(
-    Full,
+    Standard,
     GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicWrwXdlopsNHWCWrwHighTol_FP32,
     testing::Combine(testing::Values(GetHighTolTestParams(miopenFloat)),
                      testing::Values(miopenConvolutionAlgoImplicitGEMM),
@@ -244,7 +244,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 // Device applicability test
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     CPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicWrwXdlopsNHWCDevApplicabilityWrw_NONE,
     testing::Combine(testing::Values(GetSmokeTestParams(miopenFloat)),
                      testing::Values(GetConvSmokeTestCases(miopenFloat)[0])));

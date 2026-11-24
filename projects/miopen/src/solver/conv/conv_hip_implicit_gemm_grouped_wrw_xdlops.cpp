@@ -242,8 +242,8 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::RunParameterPredictionModel
 bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::IsModelApplicable(
     const ExecutionContext& ctx, const ProblemDescription& problem) const
 {
-    if(ctx.GetStream().GetDeviceName() != "gfx90a" && ctx.GetStream().GetDeviceName() != "gfx942" &&
-       ctx.GetStream().GetDeviceName() != "gfx950")
+    const auto arch = ai::common::NormalizeArch(ctx.GetStream().GetDeviceName());
+    if(arch != "gfx90a" && arch != "gfx942" && arch != "gfx950" && arch != "gfx1250")
         return false;
     if(problem.GetInDataType() != miopenFloat && problem.GetInDataType() != miopenHalf &&
        problem.GetInDataType() != miopenBFloat16)
@@ -369,7 +369,12 @@ void PerformanceConfigHipImplicitGemmGroupWrwXdlops::HeuristicInit(
                                                      mode_use_tf32,
                                                      k2DWrwSolverConfig.uses_split_k);
 
-        return RunAIHeuristics(k2DWrwSolverConfig,
+        // Enable autodeduce only for gfx1250: on gfx942/gfx950 explicit split_k
+        // ranks equally well and the net effect is neutral (measured on gfx950).
+        auto wrw_cfg = k2DWrwSolverConfig;
+        wrw_cfg.supports_split_k_autodeduce =
+            (miopen::ai::common::NormalizeArch(ctx.GetStream().GetDeviceName()) == "gfx1250");
+        return RunAIHeuristics(wrw_cfg,
                                state,
                                ctx,
                                problem,

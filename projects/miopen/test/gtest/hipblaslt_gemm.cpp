@@ -111,19 +111,19 @@ class GPU_HipBLASLtGEMMTest_BFP8 : public testing::TestWithParam<TestCase>
 {
 };
 
-class GPU_HipBLASLtGEMMTest_I64 : public testing::Test
+class GPU_HipBLASLtGEMMTest_I64 : public ::testing::TestWithParam<int>
 {
 };
 
-class GPU_HipBLASLtGEMMTest_I32 : public testing::Test
+class GPU_HipBLASLtGEMMTest_I32 : public ::testing::TestWithParam<int>
 {
 };
 
-class GPU_HipBLASLtGEMMTest_I8 : public testing::Test
+class GPU_HipBLASLtGEMMTest_I8 : public ::testing::TestWithParam<int>
 {
 };
 
-class GPU_HipBLASLtGEMMTest_FP64 : public testing::Test
+class GPU_HipBLASLtGEMMTest_FP64 : public ::testing::TestWithParam<int>
 {
 };
 
@@ -299,7 +299,9 @@ static void CheckExceptionsWithSkip([[maybe_unused]] miopenDataType_t dataType)
 } // namespace hipblaslt_gemm
 using namespace hipblaslt_gemm;
 
-TEST(CPU_HipBLASLtGEMMTest_FP8, FNUZEncoding)
+using CPU_HipBLASLtGEMMTest_FP8 = testing::TestWithParam<int>;
+
+TEST_P(CPU_HipBLASLtGEMMTest_FP8, FNUZEncoding)
 {
     EXPECT_EQ(Float8Fnuz(1.0f).__x, 0x40);
     EXPECT_EQ(Float8Fnuz(-0.0f).__x, 0x00);
@@ -310,7 +312,11 @@ TEST(CPU_HipBLASLtGEMMTest_FP8, FNUZEncoding)
     EXPECT_TRUE(std::isnan(static_cast<float>(value)));
 }
 
-TEST(CPU_HipBLASLtGEMMTest_BFP8, FNUZEncoding)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_HipBLASLtGEMMTest_FP8, testing::Values(0));
+
+using CPU_HipBLASLtGEMMTest_BFP8 = testing::TestWithParam<int>;
+
+TEST_P(CPU_HipBLASLtGEMMTest_BFP8, FNUZEncoding)
 {
     EXPECT_EQ(BFloat8Fnuz(1.0f).__x, 0x40);
     EXPECT_EQ(BFloat8Fnuz(-0.0f).__x, 0x00);
@@ -321,49 +327,65 @@ TEST(CPU_HipBLASLtGEMMTest_BFP8, FNUZEncoding)
     EXPECT_TRUE(std::isnan(static_cast<float>(value)));
 }
 
-TEST_F(GPU_HipBLASLtGEMMTest_FP32, CheckHipBLASLtGEMMException)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_HipBLASLtGEMMTest_BFP8, testing::Values(0));
+
+using GPU_HipBLASLtGEMMTestException_FP32 = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_HipBLASLtGEMMTestException_FP32, CheckHipBLASLtGEMMException)
 {
     using e_mask = enabled<Gpu::gfx94X, Gpu::gfx90A, Gpu::gfx110X, Gpu::gfx115X>;
     using d_mask = disabled<Gpu::gfx103X, Gpu::gfx900, Gpu::gfx906, Gpu::gfx908>;
     CheckExceptionsWithSkip<float, d_mask, e_mask>(miopenDataType_t::miopenFloat);
 };
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_HipBLASLtGEMMTestException_FP32, ::testing::Values(0));
+
 TEST_P(GPU_HipBLASLtGEMMTest_FP32, RunHipBLASLtGEMM)
 {
     using e_mask = enabled<Gpu::gfx94X, Gpu::gfx90A, Gpu::gfx110X, Gpu::gfx115X>;
     using d_mask = disabled<Gpu::gfx103X, Gpu::gfx900, Gpu::gfx906, Gpu::gfx908>;
     RunGemmDescriptors<float, d_mask, e_mask>(GetParam(), miopenDataType_t::miopenFloat);
 };
-INSTANTIATE_TEST_SUITE_P(Full, GPU_HipBLASLtGEMMTest_FP32, testing::ValuesIn(GetTestCases()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_HipBLASLtGEMMTest_FP32, testing::ValuesIn(GetTestCases()));
 
-TEST_F(GPU_HipBLASLtGEMMTest_FP16, CheckHipBLASLtGEMMException)
+using GPU_HipBLASLtGEMMTestException_FP16 = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_HipBLASLtGEMMTestException_FP16, CheckHipBLASLtGEMMException)
 {
     using e_mask = enabled<Gpu::gfx94X, Gpu::gfx90A, Gpu::gfx110X, Gpu::gfx115X>;
     using d_mask = disabled<Gpu::gfx103X, Gpu::gfx900, Gpu::gfx906, Gpu::gfx908>;
     CheckExceptionsWithSkip<float16, d_mask, e_mask>(miopenDataType_t::miopenHalf);
 };
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_HipBLASLtGEMMTestException_FP16, ::testing::Values(0));
+
 TEST_P(GPU_HipBLASLtGEMMTest_FP16, RunHipBLASLtGEMM)
 {
     using e_mask = enabled<Gpu::gfx94X, Gpu::gfx90A, Gpu::gfx110X, Gpu::gfx115X>;
     using d_mask = disabled<Gpu::gfx103X, Gpu::gfx900, Gpu::gfx906, Gpu::gfx908>;
     RunGemmDescriptors<float16, d_mask, e_mask>(GetParam(), miopenDataType_t::miopenHalf);
 };
-INSTANTIATE_TEST_SUITE_P(Full, GPU_HipBLASLtGEMMTest_FP16, testing::ValuesIn(GetTestCases()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_HipBLASLtGEMMTest_FP16, testing::ValuesIn(GetTestCases()));
 
-TEST_F(GPU_HipBLASLtGEMMTest_BFP16, CheckHipBLASLtGEMMException)
+using GPU_HipBLASLtGEMMTestException_BFP16 = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_HipBLASLtGEMMTestException_BFP16, CheckHipBLASLtGEMMException)
 {
     using e_mask = enabled<Gpu::gfx94X, Gpu::gfx90A, Gpu::gfx110X, Gpu::gfx115X>;
     using d_mask = disabled<Gpu::gfx103X, Gpu::gfx900, Gpu::gfx906, Gpu::gfx908>;
     CheckExceptionsWithSkip<bfloat16, d_mask, e_mask>(miopenDataType_t::miopenBFloat16);
 };
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_HipBLASLtGEMMTestException_BFP16, ::testing::Values(0));
+
 TEST_P(GPU_HipBLASLtGEMMTest_BFP16, RunHipBLASLtGEMM)
 {
     using e_mask = enabled<Gpu::gfx94X, Gpu::gfx90A, Gpu::gfx110X, Gpu::gfx115X>;
     using d_mask = disabled<Gpu::gfx103X, Gpu::gfx900, Gpu::gfx906, Gpu::gfx908>;
     RunGemmDescriptors<bfloat16, d_mask, e_mask>(GetParam(), miopenDataType_t::miopenBFloat16);
 };
-INSTANTIATE_TEST_SUITE_P(Full, GPU_HipBLASLtGEMMTest_BFP16, testing::ValuesIn(GetTestCases()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_HipBLASLtGEMMTest_BFP16, testing::ValuesIn(GetTestCases()));
 
-TEST_F(GPU_HipBLASLtGEMMTest_FP8, CheckHipBLASLtGEMMException)
+using GPU_HipBLASLtGEMMTestException_FP8 = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_HipBLASLtGEMMTestException_FP8, CheckHipBLASLtGEMMException)
 {
     using e_mask = enabled<Gpu::gfx94X>;
     using d_mask = disabled<Gpu::gfx103X,
@@ -375,6 +397,8 @@ TEST_F(GPU_HipBLASLtGEMMTest_FP8, CheckHipBLASLtGEMMException)
                             Gpu::gfx115X>;
     CheckExceptionsWithSkip<Float8Fnuz, d_mask, e_mask>(miopenDataType_t::miopenFloat8_fnuz);
 };
+INSTANTIATE_TEST_SUITE_P(Full, GPU_HipBLASLtGEMMTestException_FP8, ::testing::Values(0));
+
 TEST_P(GPU_HipBLASLtGEMMTest_FP8, RunHipBLASLtGEMM)
 {
     using e_mask = enabled<Gpu::gfx94X>;
@@ -387,9 +411,11 @@ TEST_P(GPU_HipBLASLtGEMMTest_FP8, RunHipBLASLtGEMM)
                             Gpu::gfx115X>;
     RunGemmDescriptors<Float8Fnuz, d_mask, e_mask>(GetParam(), miopenDataType_t::miopenFloat8_fnuz);
 };
-INSTANTIATE_TEST_SUITE_P(Full, GPU_HipBLASLtGEMMTest_FP8, testing::ValuesIn(GetTestCases()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_HipBLASLtGEMMTest_FP8, testing::ValuesIn(GetTestCases()));
 
-TEST_F(GPU_HipBLASLtGEMMTest_BFP8, CheckHipBLASLtGEMMException)
+using GPU_HipBLASLtGEMMTestException_BFP8 = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_HipBLASLtGEMMTestException_BFP8, CheckHipBLASLtGEMMException)
 {
 #ifdef ENABLE_HIPBLASLT_BF8
     using e_mask = enabled<Gpu::gfx94X>;
@@ -405,6 +431,8 @@ TEST_F(GPU_HipBLASLtGEMMTest_BFP8, CheckHipBLASLtGEMMException)
     CheckExceptions<BFloat8Fnuz>(miopenDataType_t::miopenInt64);
 #endif
 };
+INSTANTIATE_TEST_SUITE_P(Full, GPU_HipBLASLtGEMMTestException_BFP8, ::testing::Values(0));
+
 TEST_P(GPU_HipBLASLtGEMMTest_BFP8, RunHipBLASLtGEMM)
 {
 #ifdef ENABLE_HIPBLASLT_BF8
@@ -422,26 +450,30 @@ TEST_P(GPU_HipBLASLtGEMMTest_BFP8, RunHipBLASLtGEMM)
     GTEST_SKIP();
 #endif
 };
-INSTANTIATE_TEST_SUITE_P(Full, GPU_HipBLASLtGEMMTest_BFP8, testing::ValuesIn(GetTestCases()));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_HipBLASLtGEMMTest_BFP8, testing::ValuesIn(GetTestCases()));
 
-TEST_F(GPU_HipBLASLtGEMMTest_I64, CheckHipBLASLtGEMMException)
+TEST_P(GPU_HipBLASLtGEMMTest_I64, CheckHipBLASLtGEMMException)
 {
     CheckExceptions<int64_t>(miopenDataType_t::miopenInt64);
 };
+INSTANTIATE_TEST_SUITE_P(Full, GPU_HipBLASLtGEMMTest_I64, ::testing::Values(0));
 
-TEST_F(GPU_HipBLASLtGEMMTest_I32, CheckHipBLASLtGEMMException)
+TEST_P(GPU_HipBLASLtGEMMTest_I32, CheckHipBLASLtGEMMException)
 {
     CheckExceptions<int>(miopenDataType_t::miopenInt32);
 };
+INSTANTIATE_TEST_SUITE_P(Full, GPU_HipBLASLtGEMMTest_I32, ::testing::Values(0));
 
-TEST_F(GPU_HipBLASLtGEMMTest_I8, CheckHipBLASLtGEMMException)
+TEST_P(GPU_HipBLASLtGEMMTest_I8, CheckHipBLASLtGEMMException)
 {
     CheckExceptions<int8_t>(miopenDataType_t::miopenInt8);
 };
+INSTANTIATE_TEST_SUITE_P(Full, GPU_HipBLASLtGEMMTest_I8, ::testing::Values(0));
 
-TEST_F(GPU_HipBLASLtGEMMTest_FP64, CheckHipBLASLtGEMMException)
+TEST_P(GPU_HipBLASLtGEMMTest_FP64, CheckHipBLASLtGEMMException)
 {
     CheckExceptions<double>(miopenDataType_t::miopenDouble);
 };
+INSTANTIATE_TEST_SUITE_P(Full, GPU_HipBLASLtGEMMTest_FP64, ::testing::Values(0));
 
 #endif

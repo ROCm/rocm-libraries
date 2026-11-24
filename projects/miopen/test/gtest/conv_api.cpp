@@ -25,4 +25,8 @@ void testGetConvolutionSpatialDim(void)
     }
 }
 
-TEST(CPU_ConvApi_NONE, testGetConvolutionSpatialDim) { testGetConvolutionSpatialDim(); }
+using CPU_ConvApi_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_ConvApi_NONE, testGetConvolutionSpatialDim) { testGetConvolutionSpatialDim(); }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_ConvApi_NONE, testing::Values(0));
