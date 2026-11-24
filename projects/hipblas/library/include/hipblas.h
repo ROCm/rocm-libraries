@@ -12880,7 +12880,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtbsvStridedBatched_64(hipblasHandle_t    
     \details
     The tpmv functions perform one of the matrix-vector operations:
 
-         x = A*x or x = A**T*x or x = A**H*x,
+         x = A*x or x = A^T*x or x = A^H*x,
 
     where ``x`` is an ``n``-element vector and ``A`` is an ``n`` by ``n`` unit, or non-unit, upper or lower triangular matrix, supplied in the pack form.
 
@@ -13016,7 +13016,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtpmv_64(hipblasHandle_t         handle,
     \details
     The tpmvBatched functions perform one of the matrix-vector operations:
 
-         x_i = A_i*x_i or x_i = A_i**T*x_i or x_i = A_i**H*x_i, 0 \le i < batchCount
+         x_i = A_i*x_i or x_i = A_i^T*x_i or x_i = A_i^H*x_i, 0 \le i < batchCount
 
     where ``x_i`` is an ``n``-element vector and ``A_i`` is an ``n`` by ``n`` (unit, or non-unit, upper or lower triangular matrix).
 
@@ -13155,7 +13155,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtpmvBatched_64(hipblasHandle_t           
     \details
     The tpmvStridedBatched functions perform one of the matrix-vector operations:
 
-         x_i = A_i*x_i or x_i = A_i**T*x_i or x_i = A_i**H*x_i, 0 \le i < batchCount
+         x_i = A_i*x_i or x_i = A_i^T*x_i or x_i = A_i^H*x_i, 0 \le i < batchCount
 
     where ``x_i`` is an n element vector and ``A_i`` is an ``n`` by ``n`` (unit, or non-unit, upper or lower triangular matrix),
     with strides specifying how to retrieve ``$x_i$`` (resp. ``$A_i$``) from ``$x_{i-1}$`` (resp. ``$A_i$``).
@@ -13747,7 +13747,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtpsvStridedBatched_64(hipblasHandle_t    
     \details
     The trmv functions perform one of the matrix-vector operations:
 
-         x = A*x or x = A**T*x or x = A**H*x,
+         x = A*x or x = A^T*x or x = A^H*x,
 
     where ``x`` is an ``n``-element vector and ``A`` is an ``n`` by ``n`` unit, or non-unit, upper or lower triangular matrix.
 
@@ -13886,7 +13886,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmv_64(hipblasHandle_t         handle,
     \details
     The trmvBatched functions perform one of the matrix-vector operations:
 
-         x_i = A_i*x_i or x_i = A_i**T*x_i or x_i = A_i**H*x_i, 0 \le i < batchCount
+         x_i = A_i*x_i or x_i = A_i^T*x_i or x_i = A_i^H*x_i, 0 \le i < batchCount
 
     where ``x_i`` is an ``n``-element vector and ``A_i`` is an ``n`` by ``n`` (unit, or non-unit, upper or lower triangular) matrix.
 
@@ -14037,7 +14037,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmvBatched_64(hipblasHandle_t           
     \details
     The trmvStridedBatched functions perform one of the matrix-vector operations:
 
-         x_i = A_i*x_i or x_i = A_i**T*x_i or x_i = A_i**H*x_i, 0 \le i < batchCount
+         x_i = A_i*x_i or x_i = A_i^T*x_i or x_i = A_i^H*x_i, 0 \le i < batchCount
 
     where ``x_i``is an ``n``-element vector and ``A_i`` is an ``n`` by ``n`` (unit, or non-unit, upper or lower triangular) matrix,
     with strides specifying how to retrieve ``$x_i$`` (resp. ``$A_i$``) from ``$x_{i-1}$`` (resp. ``$A_i$``).
