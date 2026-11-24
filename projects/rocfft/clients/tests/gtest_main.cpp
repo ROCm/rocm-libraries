@@ -363,7 +363,7 @@ static int dump_test_plans(const std::filesystem::path& dir, const std::string& 
     // ponytail: run serially for the process-wide redirect and JIT bitcode cache;
     // concurrent dumping would need a per-plan sink and a thread-safe cache.
     EnvironmentSetTemp env_compile_only{"ROCFFT_INTERNAL_COMPILE_ONLY", "1"};
-    size_t             failed = 0;
+    size_t             failed  = 0;
     size_t             skipped = 0;
     for(const auto& token : tokens)
     {
