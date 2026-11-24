@@ -122,7 +122,8 @@ all have returned, dispatch `SYNTH`.
 **Gate:** every area whose scout did not fail twice has `orient/<slug>.md` whose `Describes` sha is `$BASE`,
 `CONTEXT.md` exists, and `partition.py orient-gate` exits 0: every repository path they cite in
 backticks exists at `$BASE` or is a `files.txt` path absent at `$BASE` (a file the change adds);
-it prints `not at base: <path>` for any other.
+a citation of `orient/<slug>.md` itself (CONTEXT.md's Areas table) is checked against this round's own
+`orient/` directory instead. It prints `not at base: <path> (cited at <file>:<line>)` for any other.
 
 Fix each `not at base` citation by hand or re-dispatch the scout. Then publish `CONTEXT.md`
 and `orient/*.md` to `$KNOWLEDGE/<KEY>-r<N>/` (the store's own conventions win), replacing
