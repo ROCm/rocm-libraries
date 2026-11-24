@@ -711,6 +711,7 @@ defaultBenchmarkCommonParameters = [
     {"TDMSplit": [False]},
     {"TDMLoadWaveSync": [False]},
     {"TDMStoreInst": [False]},
+    {"TDMStoreLdsPad": [0]},
     {"MXScaleFormat": ["Auto"]},
     {"MXLoadInst": ["Auto"]},
     # SwInstructionPrefetch — StinkyTofu software instruction-prefetch mode (single integer):

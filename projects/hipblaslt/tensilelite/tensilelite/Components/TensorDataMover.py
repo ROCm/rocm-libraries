@@ -665,10 +665,11 @@ class TensorDataMoverStore:
 
     Not a Component: TensorDataMoverLoad already matches TDMInst/HasTDM, and a second match would
     make Component.find() raise. The descriptor layout is the one tensor_load_to_lds uses; for the
-    tile of D or C, tile_dim0 = MacroTile0 (contiguous), tile_dim1 = the columns of one wave and
-    tensor_dim0_stride = StrideD or StrideC, with tile_dim0 and the stride in data_size units: elements,
-    except complex double, whose element is two 8-byte units.
-    Elements outside tensor_dim0/tensor_dim1 are neither written nor read, which is what clamps an edge tile.
+    tile of D or C, tile_dim0 = the pitch of the staged tile, MacroTile0 + TDMStoreLdsPad (contiguous), tile_dim1 =
+    the columns of one wave and tensor_dim0_stride = StrideD or StrideC, with tile_dim0 and the stride in data_size
+    units: elements, except complex double, whose element is two 8-byte units.
+    A store drops the elements outside tensor_dim0/tensor_dim1 and a load writes zeros for them, which is what clamps
+    an edge tile and keeps the TDMStoreLdsPad pad rows out of D.
     mem_token is the LDS memory token of the tile the instruction reads or writes.
     """
     GROUP0_NUM_SGPR = 4

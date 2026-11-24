@@ -1521,6 +1521,7 @@
     'TDMPlusLdsBuf',
     'TDMSplit',
     'TDMStoreInst',
+    'TDMStoreLdsPad',
     'TailloopInNll',
     'TemporalHint',
     'TemporalHintA',
@@ -2898,6 +2899,15 @@
         True,
       ]),
       'len': 2,
+      'type': 'list',
+    }),
+    'TDMStoreLdsPad': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 6,
       'type': 'list',
     }),
     'TailloopInNll': dict({

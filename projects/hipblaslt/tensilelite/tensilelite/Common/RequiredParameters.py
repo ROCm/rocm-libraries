@@ -151,6 +151,7 @@ def getRequiredParametersMin() -> set:
         "TDMLoadWaveSync",
         "TDMIterateMode",
         "TDMStoreInst",
+        "TDMStoreLdsPad",
         "MXScaleFormat",
         "MXLoadInst",
         'SwInstructionPrefetch',
