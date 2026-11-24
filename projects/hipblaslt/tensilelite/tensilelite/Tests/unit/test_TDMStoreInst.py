@@ -131,7 +131,6 @@ def test_accepts_dynamic_gsu(algorithm, aga):
 
 
 @pytest.mark.parametrize("overrides", [
-  {"AdaptiveGemm": 1},
   {"StoreRemapVectorWidth": -1},
   {"StoreRemapVectorWidth": 4},
   {"StoreRemapVectorWidth": 8},
@@ -154,7 +153,7 @@ def test_accepts_dynamic_gsu(algorithm, aga):
    "TileProcessingStrategy": "StreamK", "GlobalSplitU": 0},
 ])
 def test_accepts_supported_options(overrides):
-  """AdaptiveGemm, StoreRemapVectorWidth (-1, which Solution resolves, 4 and 8), the
+  """StoreRemapVectorWidth (-1, which Solution resolves, 4 and 8), the
   epilogue vectors along M, N or either, also with the device-scalar bit of UseScaleAlphaVec, ScaleAB,
   ScaleCD, GroupedGemm and the activations."""
   assert tdmStoreRejectReason(_state(**overrides)) is None
@@ -168,6 +167,8 @@ _OUTPUT = "TDMStoreInst supports fp32 D, fp64, complex float and complex double 
   "int32 and int8 D from int32 accumulators, and bf16, fp16, fp8 and bf8 D converted from fp32 accumulators"
 _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
 _TILE = "TDMStoreInst requires the staged tile's tile_dim0 (data_size units) and tile_dim1 (columns per wave) to fit 16 bits"
+_ADAPTIVE = "TDMStoreInst does not support AdaptiveGemm=1 without per-element outputs beyond C and D: every block of " \
+  "its store-width cascade would be the same TDM block, so AdaptiveGemm=1 would only add copies of it"
 _ZGEMM_STATE = {"DestDataType": DataType("z"), "ComputeDataType": DataType("z"), "HighPrecisionAccumulate": False}
 
 
@@ -194,6 +195,14 @@ _ZGEMM_STATE = {"DestDataType": DataType("z"), "ComputeDataType": DataType("z"),
 ])
 def test_rejects_unsupported(overrides, reason):
   assert tdmStoreRejectReason(_state(**overrides)) == reason
+
+
+def test_adaptive_gemm_1_needs_per_element_outputs():
+  """Without per-element outputs beyond C and D every block of the store-width cascade of AdaptiveGemm=1 is the same
+  TDM block, so the solution is rejected. With one of them, AmaxD here, the edge blocks keep their own code and
+  AdaptiveGemm=1 is accepted."""
+  assert tdmStoreRejectReason(_state(AdaptiveGemm=1)) == _ADAPTIVE
+  assert tdmStoreRejectReason(_state(AdaptiveGemm=1, OutputAmaxD=True)) is None
 
 
 @pytest.mark.parametrize("overrides", [
@@ -253,16 +262,6 @@ def test_rejects_d_vectors_the_staging_does_not_cover(dest, svw):
                      "(vector width %u)" % (bps, svw)
   else:
     assert reason is None, (dest, svw)
-
-
-@pytest.mark.parametrize("adaptive, lsu, rejected", [(1, 1, True), (0, 1, False), (1, 2, False)])
-def test_side_effect_kernels_check_every_width_of_their_cascade(adaptive, lsu, rejected):
-  """With per-element outputs beyond C and D every block stages at its own width: complex double at store vector width
-  6 stages 96 bytes, which the staging covers, but AdaptiveGemm=1 also builds the block of width 3, whose 48 bytes it
-  does not. AdaptiveGemm=0 and LocalSplitU > 1 keep only the widths 6 and 1; without E only width 6 stages."""
-  state = _state(DestDataType=DataType("z"), StoreVectorWidth=6, UseE=True, AdaptiveGemm=adaptive, LocalSplitU=lsu)
-  assert (tdmStoreVectorRejectReason(state) is not None) == rejected
-  assert tdmStoreVectorRejectReason(dict(state, ProblemType=dict(state["ProblemType"], UseE=False))) is None
 
 
 @pytest.mark.parametrize("overrides, rejected", [
@@ -325,14 +324,13 @@ def _blocks(tdm, edge=True, atomic=False, accumulation=None, vectorWidths=(8, 1)
 _VECTOR_WIDTHS = {0: (8, 1), 1: (8, 4, 2, 1)}
 
 
-@pytest.mark.parametrize("adaptive", [0, 1])
-@pytest.mark.parametrize("svw", [1, 2, 4, 8])
-def test_the_switch_picks_blocks_of_the_store_width_cascade(svw, adaptive):
+@pytest.mark.parametrize("svw", [1, 8])
+def test_the_switch_picks_blocks_of_the_store_width_cascade(svw):
   """TDMStoreInst on picks every block of the store-width cascade: with edge blocks the masked ones
   narrower than the store vector width, the narrowest one (EdgeM) and the masked block of the store
   vector width (EdgeN) - which together are the whole cascade - and without edge blocks the unmasked
   one (NonEdge). TDMStoreInst off picks none, so every block keeps its buffer_store."""
-  cascade = [svw, 1] if adaptive == 0 else [w for w in (8, 4, 2, 1) if w <= svw]
+  cascade = [svw, 1]
   edgeM = {w for w in cascade if w < svw} | {min(cascade)}
   expected = {0: set(), 1: edgeM | {svw}}
   for tdm in (False, True):
@@ -563,19 +561,16 @@ _TDM_TDMINST = [(False, 3)] + [(True, tdmInst) for tdmInst in (0, 3)]
 
 
 @pytest.mark.parametrize("sourceSwap", [False, True])
-@pytest.mark.parametrize("adaptive", [0, 1])
 @pytest.mark.parametrize("tdm, tdmInst", _TDM_TDMINST)
-def test_emitted_paths_of_the_switch(gp_gfx1250, gfx1250_iim, assembler, capsys, tdm, tdmInst, adaptive,
-                                     sourceSwap):
+def test_emitted_paths_of_the_switch(gp_gfx1250, gfx1250_iim, assembler, capsys, tdm, tdmInst, sourceSwap):
   """With the switch off every block keeps its buffer_store. With it on, every path of a final-D store --
   EdgeM, EdgeN and NonEdge -- stores through the TDM block, which reads C from the staged tile, so no block
   of the direct store keeps a buffer_store of D; the GSU>1 copy of the partials still keeps buffer_store.
   The block drains tensor_load_to_lds before it reuses the main-loop LDS only when A or B is a TDM load."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=tdm, TDMInst=tdmInst, AdaptiveGemm=adaptive,
-                       SourceSwap=sourceSwap)
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=tdm, TDMInst=tdmInst, SourceSwap=sourceSwap)
   assert sol.get("Valid"), capsys.readouterr().out
   assert sol["StoreVectorWidth"] == 8
-  cascade = list(_VECTOR_WIDTHS[adaptive])
+  cascade = list(_VECTOR_WIDTHS[0])
   stores = _stores(asm)
   for beta in "01":
     direct = stores[("GSU1", beta)]
@@ -609,14 +604,13 @@ def test_optnll_store_goes_through_the_tdm_block(gp_gfx1250, gfx1250_iim, assemb
   assert bool(optNLL["buffer"]) == (not tdm), optNLL
 
 
-@pytest.mark.parametrize("adaptive", [0, 1])
-def test_turning_it_on_only_adds_the_tdm_blocks(gp_gfx1250, gfx1250_iim, assembler, capsys, adaptive):
+def test_turning_it_on_only_adds_the_tdm_blocks(gp_gfx1250, gfx1250_iim, assembler, capsys):
   """In a kernel without MultipleBufferSingleKernel, TDMStoreInst adds, drops or moves no global-write label or
   branch to one, so it never checks the alignment of the columns, and a kernel with it on equals its switched-off
   twin outside the blocks it stores through the TDM block."""
   asms = {}
   for tdm in (False, True):
-    sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=tdm, AdaptiveGemm=adaptive)
+    sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=tdm)
     assert sol.get("Valid"), capsys.readouterr().out
     asms[tdm] = asm
   for tdm, asm in asms.items():
@@ -627,13 +621,11 @@ def test_turning_it_on_only_adds_the_tdm_blocks(gp_gfx1250, gfx1250_iim, assembl
   # the global write is the same whether the switch is off or on.
 
 
-@pytest.mark.parametrize("adaptive", [0, 1])
 @pytest.mark.parametrize("tdm", (0, 1))
-def test_sourceswap_store_vector_width_2(gp_gfx1250, gfx1250_iim, assembler, capsys, tdm, adaptive):
+def test_sourceswap_store_vector_width_2(gp_gfx1250, gfx1250_iim, assembler, capsys, tdm):
   """With SourceSwap the store vector width is VectorWidthA: MIWaveTile0=2 gives 2, whose only
   narrower path is VW1, and TDMStoreInst sends both the VW2 and the VW1 path through the TDM block."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 2, 8, 4, 1], TDMStoreInst=tdm,
-                       AdaptiveGemm=adaptive, SourceSwap=True)
+  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 2, 8, 4, 1], TDMStoreInst=tdm, SourceSwap=True)
   assert sol.get("Valid"), capsys.readouterr().out
   assert sol["StoreVectorWidth"] == 2
   stores = _stores(asm)
@@ -1406,9 +1398,7 @@ def _skeleton(asm):
 
 
 @pytest.mark.parametrize("vectors", [False, True])
-@pytest.mark.parametrize("adaptive", [0, 1])
-def test_store_vector_width_1_stores_the_one_masked_block(gp_gfx1250, gfx1250_iim, assembler, capsys,
-                                                                        adaptive, vectors):
+def test_store_vector_width_1_stores_the_one_masked_block(gp_gfx1250, gfx1250_iim, assembler, capsys, vectors):
   """At store vector width 1 the store-width cascade has one masked block, the narrowest and the one of the
   store vector width at once, so TDMStoreInst stores it through the TDM block. It keeps the labels and
   branches of the switched-off kernel, which send the M-edge, N-edge-only and corner tiles all to that block, and its
@@ -1416,7 +1406,7 @@ def test_store_vector_width_1_stores_the_one_masked_block(gp_gfx1250, gfx1250_ii
   offset 0."""
   kernels = {}
   for tdm in (False, True):
-    sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=tdm, StoreVectorWidth=1, AdaptiveGemm=adaptive,
+    sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=tdm, StoreVectorWidth=1,
                          **({"ProblemType": {"UseBias": 1, "UseScaleAlphaVec": 1}} if vectors else {}))
     assert sol.get("Valid"), capsys.readouterr().out
     assert sol["StoreVectorWidth"] == 1
@@ -1596,6 +1586,34 @@ def test_side_effect_kernels_keep_the_edge_blocks(gp_gfx1250, gfx1250_iim, assem
     assert sum("stage D element" in line for line in tdm[k]) == len(pick(ref[k], "D", "buffer_store")), k
     if k.startswith("B1_"):
       assert pick(tdm[k], "C", "buffer_load") == pick(ref[k], "C", "buffer_load") != [], k
+
+
+def test_adaptive_gemm_1_keeps_the_edge_code_of_every_width(gp_gfx1250, gfx1250_iim, assembler, capsys):
+  """With per-element outputs beyond C and D, the gate residual here, AdaptiveGemm=1 is accepted and changes the edge
+  code: at store vector width 8 the edge TDM blocks are the blocks of every width of the cascade, 8, 4, 2 and 1, each
+  the edge block of its width in the kernel with the switch off, with its C loads, staging D in place of its D
+  stores. Every width is staged, so complex double with E at store vector width 6 is rejected for the 48 bytes of its
+  block of width 3, which neither AdaptiveGemm=0 nor LocalSplitU > 1 builds."""
+  problemType = _SIDE_EFFECTS["gate_residual"]
+  _, base = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=False, AdaptiveGemm=1, ProblemType=problemType)
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, AdaptiveGemm=1, ProblemType=problemType)
+  assert base and sol.get("Valid") and sol["AdaptiveGemm"] and sol["StoreVectorWidth"] == 8, capsys.readouterr().out
+  ref, blocks = _storeBlocks(base), _storeBlocks(asm)
+  edges = {k: v for k, v in blocks.items()
+           if k.endswith("_GSU1_Then") and any(line.startswith("tensor_store_from_lds ") for line in v)}
+  for beta in "01":
+    widths = {int(re.search(r"_VW(\d+)_", k).group(1)) for k in edges if k.startswith("B%s_" % beta)}
+    assert widths == set(_VECTOR_WIDTHS[1]), (beta, sorted(edges))
+  pick = lambda lines, tc, op: _sameRegs([line for line in lines if line.startswith(op) and "s[sgprSrd%s:" % tc in line])
+  for k, v in edges.items():
+    assert k in ref and not pick(v, "D", "buffer_store"), k
+    assert sum("stage D element" in line for line in v) == len(pick(ref[k], "D", "buffer_store")), k
+    if k.startswith("B1_"):
+      assert pick(v, "C", "buffer_load") == pick(ref[k], "C", "buffer_load") != [], k
+  state = _state(DestDataType=DataType("z"), StoreVectorWidth=6, UseE=True, AdaptiveGemm=1)
+  assert tdmStoreVectorRejectReason(state) is not None
+  assert tdmStoreVectorRejectReason(dict(state, AdaptiveGemm=0)) is None
+  assert tdmStoreVectorRejectReason(dict(state, LocalSplitU=2)) is None
 
 
 @pytest.mark.parametrize("tdmInst", [1, 2])

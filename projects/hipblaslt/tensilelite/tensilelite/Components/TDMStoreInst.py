@@ -24,10 +24,11 @@ block, label or branch of the cascade. The one addition is in a MultipleBufferSi
 MbskPrefetchMethod 0, whose reduced tile globalWriteElements then generates twice, through the TDM block
 and through buffer_store, behind a compare of the runtime GSU and a branch to the copy
 (tdmStoreRejectReason). With AdaptiveGemm=0 the narrowest masked block is the only one narrower than
-the store vector width, which every M-edge workgroup takes. With AdaptiveGemm=1 an M-edge workgroup
-takes the widest block whose vector width divides SizeI, so the masked block of the store vector
-width also stores the M-edge tiles of a SizeI it divides. At store vector width 1 the narrowest masked
-block is the one of the store vector width, so EdgeM and EdgeN are that same single block.
+the store vector width, which every M-edge workgroup takes. With AdaptiveGemm=1, which TDMStoreInst
+admits only with per-element outputs beyond C and D (tdmStoreRejectReason), an M-edge workgroup takes
+the widest block whose vector width divides SizeI, so the masked block of the store vector width also
+stores the M-edge tiles of a SizeI it divides. At store vector width 1 the narrowest masked block is
+the one of the store vector width, so EdgeM and EdgeN are that same single block.
 
 The block runs in the phases of GlobalWriteBatchWriter. _prolog of the first batch calls
 emitTDMStoreSetup and, with beta != 0, emitTDMStoreLoadC, so the C tile is in LDS before any element
@@ -102,6 +103,11 @@ def tdmStoreRejectReason(state):
   outputs beyond C and D (hasEpilogueSideEffects) the TDM blocks of the edge paths are generated as the edge
   block, with its masks, vector width and C loads, and only stage D in place of its store. GroupedGemm sets the sizes, strides and addresses
   the block reads for each group.
+  AdaptiveGemm=1 adds a block for every halving of the store vector width, and an M-edge workgroup takes the
+  widest one whose vector width divides SizeI. Without outputs beyond C and D every TDM block stages at the store
+  vector width without masks, so the blocks would only repeat the TDM block of AdaptiveGemm=0, and TDMStoreInst
+  requires AdaptiveGemm=0. With them each TDM block of an edge path keeps the width, masks and C loads of its own
+  block, so AdaptiveGemm=1 changes the edge code and is supported.
   A GlobalSplitU=-1 kernel, with any GlobalSplitUAlgorithm and AdaptiveGemmGSUA, uses the block when
   the runtime GSU is 1; the partials and atomics of its GSU>1 branch keep buffer_store. The reduced tile of a
   MultipleBufferSingleKernel GSU>1 branch goes to SrdTD, which addresses D while SrdD addresses the workspace, at
@@ -136,6 +142,9 @@ def tdmStoreRejectReason(state):
   if not isPersistent(state) and state["GlobalSplitU"] not in (1, -1) \
      and state["GlobalSplitUAlgorithm"] != "MultipleBufferSingleKernel":
     return "TDMStoreInst requires GlobalSplitU=1 or -1, or MultipleBufferSingleKernel"
+  if state["AdaptiveGemm"] and not hasEpilogueSideEffects(pt):
+    return "TDMStoreInst does not support AdaptiveGemm=1 without per-element outputs beyond C and D: every block of " \
+           "its store-width cascade would be the same TDM block, so AdaptiveGemm=1 would only add copies of it"
   if state["UseSubtileImpl"]:
     return "TDMStoreInst does not support UseSubtileImpl"
   if isFusedA2A(pt):
