@@ -822,8 +822,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
 
         // dscnt 0 + barrier retires every wavefront's Q reads before the iteration-0 V1 write.
         __builtin_amdgcn_sched_barrier(0);
+        // The MX scale copies issue no asyncmark, so wait on ASYNCcnt itself.
         if constexpr(kMx)
-            s_wait_asynccnt<0>();
+            __builtin_amdgcn_s_wait_asynccnt(0);
         s_wait_tensorcnt_barrier<kTdmIssuedAfterK0, 0>();
         if constexpr(kMx)
         {
@@ -1588,7 +1589,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
             auto load_next_k = [&]() {
                 // Fixed boundary: the next K TDM transfer follows softmax.
                 if constexpr(kMx)
-                    s_wait_asynccnt<0>();
+                    __builtin_amdgcn_s_wait_asynccnt(0); // no asyncmark, see the prologue
                 block_sync_lds<v_lds_insts>();
                 if constexpr(kMx)
                 {
