@@ -309,8 +309,16 @@ inline bool is_w4a16(const problem_t& problem, const hardware_t& hardware) {
 
 /// Peak DRAM read bandwidth of the device for the W4A16 decode model, in bytes/us (measured), or
 /// nullopt where the device has no decode model.
+// TODO(AIESW-51613): these values should come from hardware_t (mem3_perf_ratio is the DRAM
+// bandwidth), not from here.  The values hardware_t holds today are wrong: about 623 GB/s on
+// gfx1151 and 31 GB/s on gfx1150, against the 247 and 84.1 GB/s measured.  The tile model is
+// calibrated with them (it underestimates the memory latency and gfx1150's value compensates
+// for that), so the Origami model has to be fixed before they can change.  Until then the
+// decode model keeps the measured bandwidths here.
 inline std::optional<double> w4a16_decode_dram_bytes_per_us(const hardware_t& hardware) {
   switch (hardware.arch) {
+    case hardware_t::architecture_t::gfx1150:
+      return 84.1e3;  // [MEASURED] Strix Point: 78.3 GiB/s
     case hardware_t::architecture_t::gfx1151:
       return 247.0e3;  // [MEASURED] Strix Halo: 230 GiB/s
     default:

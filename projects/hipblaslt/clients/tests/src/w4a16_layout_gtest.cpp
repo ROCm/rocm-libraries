@@ -106,8 +106,9 @@ namespace
             hipDeviceProp_t properties;
             ASSERT_EQ(hipGetDevice(&device), hipSuccess);
             ASSERT_EQ(hipGetDeviceProperties(&properties, device), hipSuccess);
-            if(std::string(properties.gcnArchName).find("gfx1151") != 0)
-                GTEST_SKIP() << "W4A16 custom kernels require gfx1151";
+            const std::string arch(properties.gcnArchName);
+            if(arch.find("gfx1150") != 0 && arch.find("gfx1151") != 0)
+                GTEST_SKIP() << "W4A16 custom kernels require gfx1150 or gfx1151";
             ASSERT_EQ(hipMalloc(&storage, m * k * sizeof(float)), hipSuccess);
             ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
             ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
