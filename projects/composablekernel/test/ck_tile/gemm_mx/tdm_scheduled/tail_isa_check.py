@@ -51,11 +51,6 @@ FLAGS = [
     "-DCK_USE_NATIVE_MX_SUPPORT", "-DCK_GFX1250_SUPPORT", "-DUSE_NEW_UNIFIED_FRAMEWORK=0",
     "-Wno-undefined-func-template",
 ]  # fmt: skip
-SOURCE_ORDER_FLAGS = [
-    "-mllvm",
-    "-enable-misched=false",
-    "-DCK_TILE_TDM_SCHEDULED_SOURCE_ORDER=1",
-]
 SINGLE_TAIL_FLAGS = ["-DCK_TILE_FORCE_SINGLE_TAIL_HANDLER"]
 
 
@@ -77,7 +72,6 @@ class Instance:
     split_b: bool = True
     edge: tuple = (True, True)
     tail_steps: int = 1
-    source_order: bool = False
     single_tail: bool = False
 
     def checks(self):
@@ -88,9 +82,7 @@ class Instance:
         return ["Full"] if self.single_tail else ["One", "Two"]
 
     def flags(self):
-        return (SOURCE_ORDER_FLAGS if self.source_order else []) + (
-            SINGLE_TAIL_FLAGS if self.single_tail else []
-        )
+        return SINGLE_TAIL_FLAGS if self.single_tail else []
 
     def source(self, tail_num):
         b = lambda v: "true" if v else "false"  # noqa: E731
@@ -126,11 +118,6 @@ INSTANCES = [
     Instance("half_b_no_tail", tail_steps=0),
     Instance("full", split_b=False),
     Instance("direct", lds_prefetch=False, split_b=False),
-    Instance("half_b_source_order", source_order=True),
-    Instance("full_source_order", split_b=False, source_order=True),
-    Instance(
-        "direct_source_order", lds_prefetch=False, split_b=False, source_order=True
-    ),
     Instance("half_b_single_tail", single_tail=True),
     Instance("half_b_single_tail_no_tail", tail_steps=0, single_tail=True),
     # No edge and no K tail: the loop may still run a partial last tile.
