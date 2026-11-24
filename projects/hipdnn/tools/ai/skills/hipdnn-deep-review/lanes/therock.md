@@ -21,6 +21,9 @@ git clone -q --filter=blob:none https://github.com/ROCm/TheRock "$T" && git -C "
 
 When the block stops, the lane returns `STOP: <reason>`. Later blocks begin with `. ./env.sh;
 T=$(cat "$SCRATCH/ROCK/T"); ROCK_REF=$(cat "$SCRATCH/ROCK/ref"); ROCK_REF_BASE=$(cat "$SCRATCH/ROCK/ref-base")` and set `PYTHONPATH` themselves.
+**Helper drift.** Every TheRock function or field this lane names is checked at the pin before use; a missing one makes the block print
+`HELPER-DRIFT: <fn> not found in TheRock $ROCK_REF` to stderr, and the lane reports an IMPORTANT finding (kind `process`): "lanes/therock.md
+names `<fn>`, which TheRock `<pin>` lacks; update the skill", naming any replacement it used.
 
 Each line the final `grep -v` leaves must check out another repository; a TheRock ref there is a finding. When `$ROCK_REF_BASE` differs from
 `$ROCK_REF`, the change bumps TheRock: every ref must move together, and you review the bump with `git -C "$T" log --oneline
@@ -40,13 +43,10 @@ Each line the final `grep -v` leaves must check out another repository; a TheRoc
 
 Classify every changed file with TheRock's skip-ci patterns: the base patterns plus the repo's `.github/skip-ci-config.toml` at
 `$HEAD`. The loop prints every file (`is_ci_run_required` stops listing at ten). An external repository passes an empty
-workflow allowlist, so `.github/workflows/` files are classified by the patterns alone. Checked against TheRock `4a6dabfc096b`
-(2026-11-24). If the pin lacks `_is_path_unrelated_to_ci`, the block searches the module for a replacement function that
-classifies `projects/hipdnn/docs/TESTING.md` as skip and `projects/hipdnn/backend/src/HipdnnBackend.cpp` as CI-relevant. A passing
-replacement makes the block print `HELPER-DRIFT:` naming it and classify with it; the lane then reports a finding (kind
-`process`, tier `IMPORTANT`) that this file names `_is_path_unrelated_to_ci`, that the pin lacks it, naming the replacement
-used, and that the skill needs updating. If no candidate passes, the block prints `STOP:` and the lane ends on the same
-finding, stating that no replacement passed the check.
+workflow allowlist, so `.github/workflows/` files are classified by the patterns alone. When the pin lacks
+`_is_path_unrelated_to_ci` (**Helper drift**), the block uses the first function whose source uses `fnmatch` and that classifies
+`projects/hipdnn/docs/TESTING.md` as skip and `projects/hipdnn/backend/src/HipdnnBackend.cpp` as CI-relevant; with none it prints
+`STOP:` to stderr and the lane ends on the drift finding.
 
 ```bash
 . ./env.sh; T=$(cat "$SCRATCH/ROCK/T"); ROCK_REF=$(cat "$SCRATCH/ROCK/ref"); export PYTHONPATH=$T/build_tools/github_actions
@@ -59,13 +59,13 @@ DOC, COD = "projects/hipdnn/docs/TESTING.md", "projects/hipdnn/backend/src/Hipdn
 def try_fn(fn, path):
     try: n = len(inspect.signature(fn).parameters); return fn(path, p) if n == 2 else fn(path, p, set()) if n == 3 else None
     except Exception: return None
-skip = (lambda x: f._is_path_unrelated_to_ci(x, p, set())) if hasattr(f, "_is_path_unrelated_to_ci") else None
-if skip is None:
-    for name, fn in inspect.getmembers(f, inspect.isfunction):
-        if try_fn(fn, DOC) is True and try_fn(fn, COD) is False:
-            print(f"HELPER-DRIFT: _is_path_unrelated_to_ci missing from TheRock {sys.argv[2]}; using {name}", file=sys.stderr)
-            skip = lambda x, fn=fn: try_fn(fn, x); break
-if skip is None: sys.exit("STOP: TheRock pin has no _is_path_unrelated_to_ci and no replacement passed the docs/.cpp check")
+def candidate(fn):
+    try: return "fnmatch" in inspect.getsource(fn) and try_fn(fn, DOC) is True and try_fn(fn, COD) is False
+    except Exception: return False
+H = "_is_path_unrelated_to_ci"; use = H if hasattr(f, H) else next((n for n, fn in inspect.getmembers(f, inspect.isfunction) if candidate(fn)), None)
+if use != H: print(f"HELPER-DRIFT: {H} not found in TheRock {sys.argv[2]}" + (f"; using {use}" if use else ""), file=sys.stderr)
+if use is None: sys.exit(f"STOP: TheRock pin has no {H} and no replacement passed the docs/.cpp check")
+skip = lambda x, fn=getattr(f, use): try_fn(fn, x)
 for x in sys.stdin.read().splitlines(): print("[skip]" if skip(x) else "[ci]  ", x)' "$C" "$ROCK_REF"
 ```
 
@@ -96,37 +96,36 @@ python3 "$T/test_tools/determine_rocm_test_dependencies.py" --changed-projects "
 
 **Families.** Covered families = the caller's families ∩ families whose `tests_on_trigger` contains the current trigger − the job's
 `exclude_family`. Triggers: `pull_request` → `presubmit`, `push` → `postsubmit`, `schedule` → `nightly`. `workflow_dispatch` tests
-every requested family, at a tier that is not always `quick` (see **Tier**). A family outside that set does not test unless a dispatch requests it or the PR carries
+every requested family (tier: see **Tier**). A family outside that set does not test unless a dispatch requests it or the PR carries
 the labels `ci:<family>` and `ci:test:<family>` (`$T/docs/development/ci_behavior_manipulation.md`). Quote the setup job's `tests
 disabled (...)` lines.
 
-**Tier.** TheRock's setup job computes one tier for the whole run (`_determine_test_type` in `configure_multi_arch_ci.py`): a
-`test_filter:<tier>` PR label wins outright, then a release build, then `schedule` (`comprehensive`), then an external-repo diff
-confined to CI plumbing (`quick`), then a changed submodule (`standard`), else `quick` by default. This is independent of run-all:
-breadth (which projects run) and tier (quick/standard/comprehensive/full) come from separate jobs' outputs — `changed_projects`/
-`run_all_tests` from the `configure` job, `test_type` from the `setup` job — a run-all PR is not necessarily `quick`, and a scoped PR
-is not necessarily `standard`. A family's `test_type_for_family` can still override the run's tier for that family alone
-(`amdgpu_family_matrix.py`, e.g. gfx125X forced to `quick`; on a `pull_request` event rocm-libraries also forces gfx950 to `quick`
-when any changed file matches `projects/hipblaslt/`).
+**Tier.** Do not infer the tier from breadth (run-all vs. scoped). Before CI has run, read `_determine_test_type`
+(`build_tools/github_actions/configure_multi_arch_ci.py`) and the per-family overrides (`test_type_for_family`,
+`build_tools/github_actions/amdgpu_family_matrix.py`) in `$T` and apply them to this PR's labels and changed files; when one is missing (**Helper drift**)
+and reading the code identifies no replacement, the tier prediction is `UNVERIFIED`:
 
-Confirm the effective tier per family from its `Configure test matrix (<family>)` job (`Requesting job <component> with test_type
-<tier>` and any `Overriding test_type from ... to ...` line when a family override applied), and from the `Test Artifacts (<family>, <release_type>, <test_type>, ...)` run name of each test job. `test_runner.py` `build_ctest_command` runs `-L ^<tier>$` and excludes
+```bash
+. ./env.sh; T=$(cat "$SCRATCH/ROCK/T"); ROCK_REF=$(cat "$SCRATCH/ROCK/ref"); G=$T/build_tools/github_actions
+for fn in _determine_test_type:configure_multi_arch_ci.py test_type_for_family:amdgpu_family_matrix.py; do
+  "$GREP" -qw "${fn%%:*}" "$G/${fn#*:}" 2>/dev/null || echo "HELPER-DRIFT: ${fn%%:*} not found in TheRock $ROCK_REF" >&2
+done
+```
+
+Once CI has run, each family's `Configure test matrix (<family>)` job log is authoritative. `test_runner.py` `build_ctest_command` runs `-L ^<tier>$` and excludes
 `<tier>_exclude` and `<tier>_therock_ci_exclude`. Tier labels come from each project's test category YAMLs (`*test_categories*.yaml`; registering a test in them is owned by `BUILD`: hand it off, do not file it)
 and cascade upward: a `quick` test also carries `standard`, `comprehensive` and `full`. hipDNN core puts every test in `quick`.
 Provider and integration YAMLs do not, so a test they categorize only as `comprehensive` never runs in PR CI.
 
-Behaviour checked against rocm-libraries `69f00b9e5422` and TheRock `4a6dabfc096b` (2026-11-23).
-
 **Timeout budget (main pass).** Each tier is its own CTest entry, `<binary>_<tier>_suite`, with a `category_timeouts` value in the
-project's `*test_categories*.yaml` (hipkernelprovider: quick 300 s, standard 2700 s, comprehensive 25200 s). Check three exposures for
-each covered family: a presubmit run (read its actual tier from the job log — breadth, run-all vs. scoped, does not decide tier; see
-**Tier**), a `schedule` run (`comprehensive`), and any `test_type_for_family` override for that family. The baseline comes from per-job logs, because
+project's `*test_categories*.yaml` (hipkernelprovider: quick 300 s, standard 2700 s, comprehensive 25200 s). Check two exposures for
+each covered family, each at the tier it runs (see **Tier**): presubmit and `schedule`. The baseline comes from per-job logs, because
 `gh run view --log` on a whole run can come back empty. Scan recent runs for successful jobs named `Test <job> (shard <i>/<N>) (<family>)`,
 fetch each such job's log, and read the entry's `Test #<n>: <entry> ... Passed <t> sec` line:
 
 ```bash
 . ./env.sh; E="$EVIDENCE/r<N>/lanes/ROCK-evidence"; mkdir -p "$E"; JOB=<job>; ENTRY=<binary>_<tier>_suite
-WF=therock-multi-arch-ci.yml  # run-all and scoped; the nightly exposure uses therock-multi-arch-ci-nightly.yml
+WF=therock-multi-arch-ci.yml  # presubmit; the schedule exposure uses therock-multi-arch-ci-nightly.yml
 for id in $(gh run list -R <owner>/<repo> --workflow "$WF" --limit 100 --json databaseId -q '.[].databaseId'); do
   gh run view "$id" -R <owner>/<repo> --json jobs -q ".jobs[] | select(.conclusion==\"success\" and (.name|test(\"Test $JOB \"))) |
     \"$id\t\(.databaseId)\t\(.name)\"" || echo "gh run view failed: $id" >&2
@@ -139,9 +138,8 @@ done < "$E/jobs-$JOB.tsv"
 
 Use the latest 3 runs that ran the entry for each (family, exposure). The baseline is the maximum over those runs of the maximum
 shard. With fewer than 3 runs, use the runs found and write their count. With none, or with logs `gh` cannot read (record the error),
-the line is `UNVERIFIED (no CI log)`. A `quick` baseline can come from any presubmit run that executed the `quick` entry, whatever its
-breadth (run-all or scoped — breadth does not decide tier; see **Tier**). Write one line per (entry, family, exposure) under
-**Checked, no finding**, with no `|`: `Timing-base: <entry> <family> <presubmit|schedule|override>
+the line is `UNVERIFIED (no CI log)`. A baseline can come from any run of that exposure that executed the entry. Write one line
+per (entry, family, exposure) under **Checked, no finding**, with no `|`: `Timing-base: <entry> <family> <presubmit|schedule>
 max-shard <s>s limit <s>s (<run ids>)`, or `Timing-base: <entry> <family> <exposure> UNVERIFIED (no CI log)`. `ROCK-f1` (section 6)
 adds the change's delta.
 
@@ -393,9 +391,8 @@ report ([../findings.md](../findings.md) *Lane report*) and do no other check. I
    <exposure> base <s>s delta <s>s (<source>) bound <s>s/<N> shards limit <s>s`. Append any labels that apply (`pin-bump`, `upper
    bound`, `estimate (<arch>)`). `<source>` names the `RUN` log rows.
 5. **Finding.** A `bound` above `limit`, or a job total above `timeout_minutes`, is a finding, tiered by [../policy.md](../policy.md) *Review rules*:
-   - BLOCKING for the presubmit exposure on a presubmit family — whatever tier its job log shows, a `test_type_for_family` override
-     included — `pin-bump` cases included;
-   - IMPORTANT for the `schedule` (`comprehensive`) exposure.
+   - BLOCKING for the presubmit exposure on a presubmit family, `pin-bump` cases included;
+   - IMPORTANT for the `schedule` exposure.
 
    `Where` cites the entry's `category_timeouts` line and the case. A `Timing-base:` line
    with `UNVERIFIED (no CI log)` carries through as `UNVERIFIED`, never as a pass.
