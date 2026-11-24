@@ -148,7 +148,7 @@ def _bundler() -> str:
 def _to_code_object(blob: bytes, arch: str, out: Path) -> Path:
     """Return a bare AMDGPU ELF path for ``blob``.
 
-    ``compile_kernel`` (comgr) already yields a bare ELF; ``amdclang++ --genco`` and
+    ``compile_kernel`` (comgr) already yields a bare ELF; the HIP route and
     saved ``.hsaco`` files may be a ``__CLANG_OFFLOAD_BUNDLE__`` that must be
     unbundled first.
     """
@@ -372,7 +372,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument(
         "--hip",
         action="store_true",
-        help="compile through amdclang++ --genco instead of the comgr LLVM path",
+        help="compile through the HIP route (amdclang++) instead of the comgr LLVM path",
     )
     args = p.parse_args(argv)
 

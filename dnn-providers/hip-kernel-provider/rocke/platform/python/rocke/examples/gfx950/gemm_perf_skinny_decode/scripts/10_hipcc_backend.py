@@ -5,7 +5,7 @@
 HIP-C++ -> amdclang++ backend instead of the default LLVM-IR -> libamd_comgr.
 
 `rocke.helpers.compile_kernel_via_hip` lowers the same IR to HIP C++
-and pushes it through `amdclang++ --genco -O3`. The runtime ABI is identical
+and pushes it through `amdclang++ --offload-device-only -x hip -O3`. The runtime ABI is identical
 (same HSACO arg-pack), but the codegen path is different:
 
   default (compile_kernel):       IR -> LLVM IR -> libamd_comgr      ~90 ms

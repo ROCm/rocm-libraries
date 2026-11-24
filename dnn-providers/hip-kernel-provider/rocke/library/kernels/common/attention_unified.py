@@ -123,7 +123,7 @@ class UnifiedAttentionProblem:
     #   - ``None`` (default): auto-pick. Uses the LLVM-direct
     #     pipeline (``compile_kernel``) except for large prefill
     #     (``max_seqlen_q > 512 or num_seqs * max_seqlen_q > 1024``),
-    #     where ``amdclang++ --genco`` is measurably faster (≈5% on
+    #     where the HIP route (amdclang++) is measurably faster (≈5% on
     #     ``b4_q1000_kv1000``) thanks to clang's heavier scheduling.
     #   - ``"llvm"``: always use the LLVM-direct path (~90ms compile).
     #   - ``"hip"``: always lower to HIP C++ and compile via amdclang++
@@ -5794,7 +5794,7 @@ def _get_3d_pipeline(
 def _select_2d_compile_backend(problem: UnifiedAttentionProblem, arch: str) -> str:
     """Pick the compile backend (LLVM-direct vs HIP) for the 2D tiled kernel.
 
-    The HIP path (``amdclang++ --genco``) is measurably faster than the
+    The HIP path (``amdclang++ --offload-device-only -x hip``) is measurably faster than the
     LLVM-direct path on large-batch bf16/fp16 prefill (≈5% on
     ``b4_q1000_kv1000``) because clang's frontend + AMDGPU backend
     pipeline does heavier instruction scheduling for the long
