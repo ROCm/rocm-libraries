@@ -15,6 +15,8 @@ start two workers, so they run wherever this process may use two CPUs.
 from __future__ import annotations
 
 import collections
+import itertools
+import json
 import os
 import signal
 import subprocess
@@ -359,6 +361,204 @@ def _running(pid: int) -> bool:
     return state != "Z"
 
 
+# Each test of the run-alone tree records the process it ran in and when it
+# started and ended; each pytest process records when it ended. The plain tests
+# sleep, so a run-alone test running beside them would overlap them in time.
+_RUN_ALONE_CONFTEST = """
+    import json
+    import os
+    import time
+
+    from rocke.tests.ci_shard import current_worker
+
+    def _log(config, **fields):
+        log = config.rootpath / "events"
+        log.mkdir(exist_ok=True)
+        with (log / f"{os.getpid()}.jsonl").open("a") as out:
+            out.write(json.dumps({"pid": os.getpid(), **fields}) + "\\n")
+
+    def pytest_runtest_call(item):
+        item.stash_started = time.time()
+
+    def pytest_runtest_teardown(item):
+        _log(
+            item.config,
+            test=item.name,
+            started=item.stash_started,
+            ended=time.time(),
+            worker=current_worker(),
+        )
+
+    def pytest_unconfigure(config):
+        _log(config, process_ended=time.time(), worker=current_worker())
+"""
+_RUN_ALONE_TREE = """
+    import time
+    import pytest
+
+    @pytest.mark.parametrize("index", range(8))
+    def test_shares(index):
+        time.sleep(0.2)
+
+    @pytest.mark.rocke_run_alone
+    @pytest.mark.parametrize("size", ["2gib", "4gib"])
+    def test_alone(size):
+        time.sleep(0.2)
+
+    @pytest.mark.rocke_run_alone
+    def test_alone_too():
+        time.sleep(0.2)
+"""
+
+
+def _write_run_alone_tree(root: Path, conftest_extra: str = "") -> Path:
+    tree = _write_tree(root, _RUN_ALONE_TREE)
+    (tree / "conftest.py").write_text(
+        textwrap.dedent(_RUN_ALONE_CONFTEST) + textwrap.dedent(conftest_extra),
+        encoding="utf-8",
+    )
+    return tree
+
+
+def _events(tree: Path) -> list[dict]:
+    return [
+        json.loads(line)
+        for path in sorted((tree / "events").glob("*.jsonl"))
+        for line in path.read_text().splitlines()
+    ]
+
+
+@needs_two_cpus
+def test_run_alone_tests_run_after_every_worker_has_exited(tmp_path):
+    """No run-alone test overlaps any other test or any worker process: they
+    run, one after another, in one process started once every worker ended."""
+    tree = _write_run_alone_tree(tmp_path)
+    result = _run(
+        tree, tmp_path / "records", "--strict-markers", WORKERS_OPTION, str(_WORKERS)
+    )
+    assert result.returncode == 0, result.stdout[-3000:]
+    assert "run-alone tests: 3; they run after the workers" in result.stdout
+    assert "[alone] " in result.stdout
+    assert f"{_WORKERS} workers exited [0, 0], the run-alone process 0" in (
+        result.stdout
+    )
+
+    events = _events(tree)
+    tests = [event for event in events if "test" in event]
+    alone = [event for event in tests if event["test"].startswith("test_alone")]
+    shared = [event for event in tests if not event["test"].startswith("test_alone")]
+    assert sorted(event["test"] for event in alone) == [
+        "test_alone[2gib]",
+        "test_alone[4gib]",
+        "test_alone_too",
+    ]
+    assert len(shared) == 8
+    # One process, the run-alone one (index == count), ran them, and nothing else.
+    assert {event["pid"] for event in alone} == {alone[0]["pid"]}
+    assert {tuple(event["worker"]) for event in alone} == {(_WORKERS, _WORKERS)}
+    assert alone[0]["pid"] not in {event["pid"] for event in shared}
+    # Every worker had ended before the first run-alone test started.
+    worker_ends = [
+        event["process_ended"]
+        for event in events
+        if "process_ended" in event
+        and event["worker"] is not None
+        and event["worker"][0] < _WORKERS
+    ]
+    assert len(worker_ends) == _WORKERS
+    assert max(worker_ends) <= min(event["started"] for event in alone)
+    # The run-alone tests ran one after another.
+    intervals = sorted((event["started"], event["ended"]) for event in alone)
+    assert all(
+        ended <= started for (_, ended), (started, _) in itertools.pairwise(intervals)
+    )
+    # Each test ran exactly once, as in a run in one process.
+    assert set(_ran(tmp_path / "records").values()) == {1}
+    assert len(_ran(tmp_path / "records")) == 11
+
+
+@needs_two_cpus
+def test_no_run_alone_process_starts_when_none_is_selected(tmp_path):
+    tree = _write_run_alone_tree(tmp_path)
+    result = _run(tree, None, "-k", "not alone", WORKERS_OPTION, str(_WORKERS))
+    assert result.returncode == 0, result.stdout[-3000:]
+    assert "[alone]" not in result.stdout
+    assert "run-alone" not in result.stdout
+    assert f"{_WORKERS} workers exited [0, 0] in" in result.stdout
+
+
+@needs_two_cpus
+def test_no_run_alone_process_starts_after_an_interrupted_worker(tmp_path):
+    tree = _write_run_alone_tree(
+        tmp_path,
+        """
+        def pytest_collection_finish(session):
+            if current_worker() == (1, 2):
+                raise KeyboardInterrupt
+        """,
+    )
+    result = _run(tree, None, WORKERS_OPTION, str(_WORKERS))
+    assert result.returncode == pytest.ExitCode.INTERRUPTED, result.stdout[-3000:]
+    assert "[alone]" not in result.stdout
+    assert "run-alone" not in result.stdout
+
+
+@needs_two_cpus
+def test_the_run_alone_process_runs_only_its_ci_shards_tests(tmp_path):
+    tree = _write_tree(
+        tmp_path,
+        """
+        import pytest
+
+        @pytest.mark.parametrize("index", range(8))
+        def test_shares(index):
+            pass
+
+        @pytest.mark.rocke_run_alone
+        @pytest.mark.parametrize("index", range(24))
+        def test_alone(index):
+            pass
+        """,
+    )
+    one = _run(tree, tmp_path / "one", shard="1/3")
+    split = _run(
+        tree, tmp_path / "split", "-v", WORKERS_OPTION, str(_WORKERS), shard="1/3"
+    )
+    assert one.returncode == split.returncode == 0, split.stdout[-3000:]
+    alone_one = {n for n in _ran(tmp_path / "one") if n.startswith("test_alone")}
+    assert 0 < len(alone_one) < 24
+    assert _ran(tmp_path / "split") == _ran(tmp_path / "one")
+    assert f"run-alone tests: {len(alone_one)};" in split.stdout
+    ran_alone = {
+        line.split("::", 1)[1].split()[0]
+        for line in split.stdout.splitlines()
+        if line.startswith("[alone] ") and " PASSED" in line
+    }
+    assert ran_alone == alone_one
+
+
+@needs_two_cpus
+def test_run_alone_tests_run_when_worker_0_reports_nothing(tmp_path):
+    """A worker 0 that ends before it reports its selection does not lose the
+    run-alone tests: the run-alone process runs them all the same."""
+    tree = _write_run_alone_tree(
+        tmp_path,
+        """
+        import pytest
+
+        @pytest.hookimpl(tryfirst=True)
+        def pytest_collection_modifyitems(config, items):
+            if current_worker() == (0, 2):
+                os._exit(3)
+        """,
+    )
+    result = _run(tree, tmp_path / "records", WORKERS_OPTION, str(_WORKERS))
+    assert result.returncode == pytest.ExitCode.INTERNAL_ERROR, result.stdout[-3000:]
+    assert "worker 0 reported no count of run-alone tests" in result.stdout
+    ran = _ran(tmp_path / "records")
+    assert {"test_alone[2gib]", "test_alone[4gib]", "test_alone_too"} <= ran.keys()
+
+
 # --------------------------------------------------------------------- the rules
 
 
@@ -419,9 +619,11 @@ def test_the_run_exits_with_the_most_severe_worker_status(statuses, combined):
     assert combined_exit_status(statuses) == combined
 
 
-@pytest.mark.parametrize("text", ["1/1", "x/4", "2", "²/4", "-1/4"])
+@pytest.mark.parametrize("text", ["2/1", "0/0", "x/4", "2", "²/4", "-1/4"])
 def test_a_malformed_worker_variable_is_refused(text):
     with pytest.raises(ValueError, match="current_worker failed - ROCKE_TEST_WORKER"):
         ci_shard.current_worker({ci_shard.WORKER_ENV: text})
     assert ci_shard.current_worker({ci_shard.WORKER_ENV: "1/4"}) == (1, 4)
+    # The run-alone process after four workers.
+    assert ci_shard.current_worker({ci_shard.WORKER_ENV: "4/4"}) == (4, 4)
     assert ci_shard.current_worker({}) is None

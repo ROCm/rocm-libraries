@@ -62,6 +62,8 @@ GTEST_INDEX_ENV = "GTEST_SHARD_INDEX"
 GTEST_TOTAL_ENV = "GTEST_TOTAL_SHARDS"
 # ``"<index>/<count>"`` (0-based) in a worker process of
 # ``rocke.tests.ctest_workers``: the share of the run's tests it runs.
+# ``"<count>/<count>"`` in the process that runs the run's run-alone tests
+# after its ``count`` workers have exited.
 WORKER_ENV = "ROCKE_TEST_WORKER"
 # The option that makes a run take its shard from the gtest pair. A CTest entry
 # whose command carries it runs only its CI shard's share.
@@ -281,9 +283,11 @@ def adopt_worker() -> tuple[int, int] | None:
 def current_worker(env: Mapping[str, str] | None = None) -> tuple[int, int] | None:
     """``(index, count)`` from :data:`WORKER_ENV` of ``env`` (default: this
     process's, as :func:`adopt_worker` took it, else ``os.environ``) when the
-    process is a worker of ``rocke.tests.ctest_workers``, else ``None``. Raises
-    ``ValueError`` for a value other than ``<index>/<count>`` with
-    ``0 <= index < count``."""
+    process is a worker of ``rocke.tests.ctest_workers`` (``index < count``) or
+    the process that runs the run-alone tests after the ``count`` workers
+    (``index == count``), else ``None``. Raises ``ValueError`` for a value
+    other than ``<index>/<count>`` with ``0 <= index <= count`` and
+    ``count >= 1``."""
     if env is None and _adopted_worker[0]:
         return _adopted_worker[1]
     env = os.environ if env is None else env
@@ -292,10 +296,10 @@ def current_worker(env: Mapping[str, str] | None = None) -> tuple[int, int] | No
         return None
     index, _, count = text.partition("/")
     digits = all(part.isascii() and part.isdigit() for part in (index, count))
-    if not (digits and int(index) < int(count)):
+    if not (digits and 1 <= int(count) and int(index) <= int(count)):
         raise ValueError(
             f"current_worker failed - {WORKER_ENV}={text!r}, expected "
-            "<index>/<count> with 0 <= index < count"
+            "<index>/<count> with 0 <= index <= count and count >= 1"
         )
     return int(index), int(count)
 

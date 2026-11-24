@@ -748,7 +748,10 @@ _FAR_CASES = {
 _FAR_BYTES = (4 << 30) + (512 << 20)  # per cache
 
 
+# Its caches take most of a small device's memory, so it runs with no other
+# test process on the device (rocke.tests.ctest_workers).
 @pytest.mark.gpu
+@pytest.mark.rocke_run_alone
 @_NEEDS_RDNA
 @pytest.mark.parametrize("case", sorted(_FAR_CASES))
 def test_paged_cache_past_4gib(case):

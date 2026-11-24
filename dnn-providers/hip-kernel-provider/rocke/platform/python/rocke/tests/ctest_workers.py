@@ -23,6 +23,16 @@ first, the others by a hash that does not repeat the CI shard's
 the tests of one parameter set in the same worker, in the order they would run
 without workers. A worker whose share is empty passes when the selection is not.
 
+A test marked ``rocke_run_alone`` (:data:`RUN_ALONE_MARKER`) needs the device
+to itself: it allocates most of the GPU's memory, so a test of another worker
+holding device memory at the same time could make it fail. No worker runs it.
+Worker 0 reports how many such tests the selection holds; when it holds any,
+the run starts one more pytest process once every worker has exited (unless
+one was interrupted), which runs them, one after another, on all the CPUs the
+run may use. While it runs, no other process of this entry exists, so none
+holds device memory. Its output lines are prefixed with ``[alone]``; the run
+exits with the combined status of the workers and that process.
+
 The worker count is at most the CPUs the process may use
 (:func:`~rocke.tests.host_cpus.available_cpus`); with one, or for a run that
 needs one process (:data:`_SINGLE_PROCESS_OPTIONS`: ``--collect-only``,
@@ -44,6 +54,7 @@ import dataclasses
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -66,8 +77,10 @@ from .host_cpus import available_cpus
 
 __all__ = [
     "PLUGIN_NAME",
+    "RUN_ALONE_MARKER",
     "WORKERS_OPTION",
     "combined_exit_status",
+    "register_run_alone_marker",
     "worker_count",
     "worker_cpus",
     "worker_keys",
@@ -75,8 +88,15 @@ __all__ = [
 
 PLUGIN_NAME = "rocke.tests.ctest_workers"
 WORKERS_OPTION = "--rocke-workers"
+#: The mark of a test that needs the device to itself (the module docstring).
+RUN_ALONE_MARKER = "rocke_run_alone"
 #: The pid of the process that started a worker.
 _PARENT_ENV = "ROCKE_TEST_WORKER_PARENT"
+#: The directory of one run's bookkeeping: worker 0 writes the number of
+#: run-alone tests of the selection to :data:`_RUN_ALONE_REPORT` there.
+_RUN_DIR_ENV = "ROCKE_TEST_WORKER_RUN_DIR"
+_RUN_ALONE_REPORT = "run_alone_tests"
+_RUN_ALONE_PREFIX = b"[alone] "
 _SHARD_PLUGIN = "rocke.tests.ctest_shard"
 #: How long the run waits for a worker's output to end once the worker has
 #: exited (a process the worker left running may hold its output open).
@@ -135,8 +155,20 @@ def pytest_addoption(parser):
     )
 
 
+def register_run_alone_marker(config) -> None:
+    """Declare the ``rocke_run_alone`` mark, so a run that marks tests without
+    loading this plugin does not warn about an unknown mark."""
+    config.addinivalue_line(
+        "markers",
+        f"{RUN_ALONE_MARKER}: the test needs the device to itself; "
+        "rocke.tests.ctest_workers runs it after the workers, in a process of "
+        "its own",
+    )
+
+
 def _worker_of_run() -> tuple[int, int] | None:
-    """``(index, count)`` when this process is a worker, else None."""
+    """``(index, count)`` when this process is a worker or the run-alone
+    process (``index == count``), else None."""
     try:
         return current_worker()
     except ValueError as error:
@@ -270,39 +302,134 @@ def _run_workers(config, count: int, usable: int) -> int:
         Path(config.option.basetemp).mkdir(parents=True, exist_ok=True)
     lock = threading.Lock()
     workers: list[_Worker] = []
-    try:
-        for index in range(count):
-            process = subprocess.Popen(
-                _worker_argv(config, index),
-                cwd=config.invocation_params.dir,
-                env={**environment, WORKER_ENV: f"{index}/{count}"},
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+    with tempfile.TemporaryDirectory(prefix="rocke-ctest-workers-") as directory:
+        run_dir = Path(directory)
+        try:
+            for index in range(count):
+                workers.append(
+                    _start_worker(
+                        config,
+                        index,
+                        count,
+                        {**environment, _RUN_DIR_ENV: str(run_dir)},
+                        f"[w{index}] ".encode(),
+                        out.buffer,
+                        lock,
+                    )
+                )
+            statuses = _wait_for(workers)
+            alone_status = _run_alone_after_workers(
+                config, count, usable, statuses, run_dir, workers, lock
             )
-            relay = threading.Thread(
-                target=_relay_lines,
-                args=(process.stdout, f"[w{index}] ".encode(), out.buffer, lock),
-                name=f"rocke-ctest-workers-relay-{index}",
-                daemon=True,
-            )
-            relay.start()
-            workers.append(_Worker(index, process, relay))
-        statuses = [worker.process.wait() for worker in workers]
-        for worker in workers:
-            worker.relay.join(_RELAY_DRAIN_SECONDS)
-    finally:
-        for worker in workers:
-            if worker.process.poll() is None:
-                worker.process.kill()
-                worker.process.wait()
-    status = combined_exit_status(statuses)
+        finally:
+            for worker in workers:
+                if worker.process.poll() is None:
+                    worker.process.kill()
+                    worker.process.wait()
+    alone_statuses = [] if alone_status is None else [alone_status]
+    status = combined_exit_status(statuses + alone_statuses)
+    alone_text = (
+        "" if alone_status is None else f", the run-alone process {alone_status}"
+    )
     out.write(
-        f"rocke-ctest-workers: {count} workers exited {statuses} in "
+        f"rocke-ctest-workers: {count} workers exited {statuses}{alone_text} in "
         f"{time.monotonic() - started:.1f}s; the run exits {status}\n"
     )
     out.flush()
     return status
+
+
+def _run_alone_after_workers(
+    config,
+    count: int,
+    usable: int,
+    statuses: Sequence[int],
+    run_dir: Path,
+    workers: list[_Worker],
+    lock: threading.Lock,
+) -> int | None:
+    """Run the run-alone tests once the ``count`` workers have exited with
+    ``statuses``, in one process on all ``usable`` CPUs, appended to
+    ``workers``; return its exit status, or None when it does not start: no
+    run-alone test was selected, or a worker was interrupted (the run is
+    stopping). Every worker has exited, so no other process of this entry
+    holds device memory while it runs."""
+    if pytest.ExitCode.INTERRUPTED in statuses:
+        return None
+    reported = _run_alone_count(run_dir)
+    if reported == 0:
+        return None
+    out = sys.stdout
+    if reported is None:
+        out.write(
+            "rocke-ctest-workers: worker 0 reported no count of run-alone "
+            "tests; they run after the workers, in one process\n"
+        )
+    else:
+        out.write(
+            f"rocke-ctest-workers: run-alone tests: {reported}; they run after "
+            "the workers, in one process\n"
+        )
+    out.flush()
+    alone = _start_worker(
+        config,
+        count,
+        count,
+        {**_worker_environment(usable), _RUN_DIR_ENV: str(run_dir)},
+        _RUN_ALONE_PREFIX,
+        out.buffer,
+        lock,
+    )
+    workers.append(alone)
+    [status] = _wait_for([alone])
+    return status
+
+
+def _start_worker(
+    config,
+    index: int,
+    count: int,
+    environment: dict[str, str],
+    prefix: bytes,
+    sink: BinaryIO,
+    lock: threading.Lock,
+) -> _Worker:
+    """Start the pytest process ``index/count`` (:data:`WORKER_ENV`) and a
+    thread relaying its output lines to ``sink``, each behind ``prefix``."""
+    process = subprocess.Popen(
+        _worker_argv(config, index),
+        cwd=config.invocation_params.dir,
+        env={**environment, WORKER_ENV: f"{index}/{count}"},
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    relay = threading.Thread(
+        target=_relay_lines,
+        args=(process.stdout, prefix, sink, lock),
+        name=f"rocke-ctest-workers-relay-{index}",
+        daemon=True,
+    )
+    relay.start()
+    return _Worker(index, process, relay)
+
+
+def _wait_for(workers: Sequence[_Worker]) -> list[int]:
+    """The exit status of each of ``workers``, once each has exited and its
+    output has been relayed."""
+    statuses = [worker.process.wait() for worker in workers]
+    for worker in workers:
+        worker.relay.join(_RELAY_DRAIN_SECONDS)
+    return statuses
+
+
+def _run_alone_count(run_dir: Path) -> int | None:
+    """The number of run-alone tests worker 0 reported in ``run_dir``, or None
+    when it reported none (it ended before its selection was made)."""
+    try:
+        return int((run_dir / _RUN_ALONE_REPORT).read_text(encoding="ascii"))
+    except (OSError, ValueError):
+        return None
 
 
 def _relay_lines(
@@ -329,25 +456,50 @@ def _relay_lines(
 
 #: The pid of the process that started this worker; 0 in any other process.
 _parent_pid = 0
+#: The run's bookkeeping directory (:data:`_RUN_DIR_ENV`); None in any process
+#: that is no worker.
+_run_dir: Path | None = None
+
+
+def _is_run_alone_process(worker: tuple[int, int]) -> bool:
+    """Whether ``worker`` (:func:`~rocke.tests.ci_shard.current_worker`) is the
+    process that runs the run-alone tests after the workers."""
+    index, count = worker
+    return index == count
+
+
+def _runs_alone(item) -> bool:
+    return item.get_closest_marker(RUN_ALONE_MARKER) is not None
+
+
+def _role(worker: tuple[int, int]) -> str:
+    index, count = worker
+    if _is_run_alone_process(worker):
+        return f"the run-alone process after {count} workers"
+    return f"worker {index}/{count}"
 
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_load_initial_conftests(early_config, parser, args):
-    """In a worker, before any conftest runs: take the worker's identity and
-    its parent's pid out of the environment (:func:`~rocke.tests.ci_shard.adopt_worker`),
-    so a pytest process a test starts is no worker, and run on the worker's
-    block of the CPUs (Linux), before a library sizes its thread pool to them."""
-    global _parent_pid
+    """In a worker, before any conftest runs: take the worker's identity, its
+    parent's pid and where it reports the run-alone tests out of the
+    environment (:func:`~rocke.tests.ci_shard.adopt_worker`), so a pytest
+    process a test starts is no worker, and run on the worker's block of the
+    CPUs (Linux), before a library sizes its thread pool to them. The run-alone
+    process keeps every CPU of the run."""
+    global _parent_pid, _run_dir
     try:
         worker = adopt_worker()
     except ValueError as error:
         raise pytest.UsageError(f"rocke-ctest-workers: {error}") from error
     parent = os.environ.pop(_PARENT_ENV, "")
+    run_dir = os.environ.pop(_RUN_DIR_ENV, "")
     if worker is None:
         return
     _parent_pid = int(parent) if parent.isascii() and parent.isdigit() else 0
+    _run_dir = Path(run_dir) if run_dir else None
     setaffinity = getattr(os, "sched_setaffinity", None)
-    if setaffinity is None:
+    if setaffinity is None or _is_run_alone_process(worker):
         return
     index, count = worker
     block = worker_cpus(
@@ -357,6 +509,7 @@ def pytest_load_initial_conftests(early_config, parser, args):
 
 
 def pytest_configure(config):
+    register_run_alone_marker(config)
     if _worker_of_run() is not None:
         _stop_with_parent()
 
@@ -412,26 +565,35 @@ _STATE = pytest.StashKey[_WorkerState]()
 @pytest.hookimpl(hookwrapper=True)
 def pytest_collection_modifyitems(config, items):
     """After every other selection (the CI shard's included), keep this
-    worker's share. The other workers' items are dropped, not deselected: the
-    worker that runs an item reports it, and ``rocke.tests.run_records``
-    records each item once per run."""
+    worker's share: no run-alone test, and its part of the others; the
+    run-alone process keeps the run-alone tests alone. Worker 0 reports how
+    many run-alone tests there are. The items a process does not run are
+    dropped, not deselected: the process that runs an item reports it, and
+    ``rocke.tests.run_records`` records each item once per run."""
     yield
     worker = _worker_of_run()
     if worker is None:
         return
     index, count = worker
     state = config.stash[_STATE] = _WorkerState(before=len(items))
-    placement = worker_keys(
-        [shard_key(item) for item in items], shard_costs(items), count
-    )
-    items[:] = [item for item in items if placement[shard_key(item)] == index]
+    alone = [item for item in items if _runs_alone(item)]
+    if _is_run_alone_process(worker):
+        items[:] = alone
+    else:
+        items[:] = [item for item in items if not _runs_alone(item)]
+        if index == 0 and _run_dir is not None:
+            (_run_dir / _RUN_ALONE_REPORT).write_text(str(len(alone)), encoding="ascii")
+        placement = worker_keys(
+            [shard_key(item) for item in items], shard_costs(items), count
+        )
+        items[:] = [item for item in items if placement[shard_key(item)] == index]
     state.kept = len(items)
 
 
 def pytest_report_header(config):
     worker = _worker_of_run()
     if worker is not None:
-        return f"rocke-ctest-workers: worker {worker[0]}/{worker[1]}"
+        return f"rocke-ctest-workers: {_role(worker)}"
     return None
 
 
@@ -440,8 +602,8 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
     worker = _worker_of_run()
     if state is not None and worker is not None:
         terminalreporter.write_line(
-            f"rocke-ctest-workers: worker {worker[0]}/{worker[1]} kept "
-            f"{state.kept} of {state.before}"
+            f"rocke-ctest-workers: {_role(worker)} kept {state.kept} of "
+            f"{state.before}"
         )
 
 

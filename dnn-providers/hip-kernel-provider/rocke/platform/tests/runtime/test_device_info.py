@@ -148,6 +148,10 @@ def test_device_info_owns_snapshot_with_read_only_properties() -> None:
             setattr(info, name, None)
 
 
+# Another test process allocating or freeing device memory between its two
+# reads would change the free bytes, so it runs with no other test process on
+# the device (rocke.tests.ctest_workers).
+@pytest.mark.rocke_run_alone
 def test_gpu_free_memory_shrinks_by_an_allocation() -> None:
     """hipMemGetInfo's free bytes drop while a 256 MiB buffer is held."""
     from rocke.runtime.launcher import DeviceMem

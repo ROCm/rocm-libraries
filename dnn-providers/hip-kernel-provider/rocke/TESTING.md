@@ -879,11 +879,16 @@ shows each worker's output as it comes, every line prefixed with `[w<index>]`.
 The few GPU tests of such an entry (the platform pytest parts have some) share
 the shard's GPU among the workers. `rocke_library_gpu_pytest` takes workers
 too, its workers sharing the shard's GPU: its tests compile their kernels on
-the CPU before they launch them. A run with `--collect-only`, `-x`,
-`--maxfail`, `--junitxml` or another option that needs one process runs in one
-process. The workers of entries that a parallel `ctest -j` runs at once take
-their CPU blocks from a rotation the entry picks from its process id, so they
-mostly land apart.
+the CPU before they launch them. Mark a test `rocke_run_alone` when another
+process using the device at the same time can change its result, as when it
+needs most of the device's memory or reads the free memory. No worker runs
+it: when the CI shard selects such tests, the entry runs them one after
+another in one more pytest process, started once every worker has exited, so
+no other process of this entry exists meanwhile; its lines are prefixed with
+`[alone]`. A run with `--collect-only`, `-x`, `--maxfail`, `--junitxml` or
+another option that needs one process runs in one process. The workers of
+entries that a parallel `ctest -j` runs at once take their CPU blocks from a
+rotation the entry picks from its process id, so they mostly land apart.
 
 **The explicit gates are never sharded.** `rocke_library_counted_structural_gate`
 and `rocke_library_counted_compiler_gate` do not use `_ROCKE_INSTALLED_PYTEST`.

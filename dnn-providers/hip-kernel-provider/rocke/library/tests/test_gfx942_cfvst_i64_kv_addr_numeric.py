@@ -112,6 +112,9 @@ def test_route_compiles_i64_cfvst_without_limit(dtype, head_size, block_size):
     assert meta.kv_addr_limit is None
 
 
+# Its caches take most of a small device's memory, so it runs with no other
+# test process on the device (rocke.tests.ctest_workers).
+@pytest.mark.rocke_run_alone
 @pytest.mark.parametrize("dtype,head_size,block_size", _CASES)
 def test_cfvst_prefill_on_top_blocks_past_2gib(
     gfx942_with_room, dtype, head_size, block_size

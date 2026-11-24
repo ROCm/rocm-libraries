@@ -212,6 +212,9 @@ def test_i64_ragged_lengths_and_block_table_tail(gfx942):
     _assert_matches_reference(out, q, k, v, block_table, lengths)
 
 
+# Its caches take most of a small device's memory, so it runs with no other
+# test process on the device (rocke.tests.ctest_workers).
+@pytest.mark.rocke_run_alone
 def test_i64_decode_reads_past_2gib(gfx942):
     """A cache just over 2 GiB per tensor whose pages straddle the 2^31-byte
     offset, so the i64 page bases are exercised with real addresses."""
