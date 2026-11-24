@@ -346,11 +346,6 @@ class AttentionDenseSpec:
                     "paged multi-sequence (batch>1) needs varlen=True "
                     "(packed Q + cu_seqlens_q)"
                 )
-            if self.persistent:
-                raise ValueError(
-                    "paged + persistent not yet implemented "
-                    "(persistent builder is contiguous-only)"
-                )
             if self.dtype not in ("fp16", "bf16"):
                 raise ValueError(f"paged not yet implemented for dtype={self.dtype}")
             if not self.varlen and self.seqlen_kv % self.block_n:

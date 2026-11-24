@@ -2498,6 +2498,18 @@ class TestDensePagedNumeric:
 
     @requires_gfx950_gpu
     @pytest.mark.gpu
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    @pytest.mark.parametrize("block_size", [16, 64])
+    @pytest.mark.parametrize("sq,window", [(1024, 256), (2048, 0)])
+    @pytest.mark.parametrize("d", [128, 64])
+    def test_paged_persistent_matches_dense_bit_exact(
+        self, dtype, block_size, sq, window, d
+    ):
+        """Paged on the persistent body: the same bits as contiguous K/V there."""
+        self._check_paged(dtype, block_size, sq, sq, window, d, persistent=True)
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
     @pytest.mark.parametrize(
         "sq,sk,window",
         [
@@ -2526,7 +2538,7 @@ class TestDensePagedNumeric:
         assert (out.float() - ref).abs().max().item() < _tolerance("fp16")
 
     @staticmethod
-    def _check_paged(dtype, block_size, sq, sk, window, d):
+    def _check_paged(dtype, block_size, sq, sk, window, d, persistent=False):
         import torch
 
         hq, hkv, B = 16, 4, 1
@@ -2558,6 +2570,10 @@ class TestDensePagedNumeric:
         dense_spec = dataclasses.replace(
             shipped, paged=False, block_size=0, num_kv_blocks=0
         )
+        if persistent:
+            # Paged on the persistent body against contiguous on the same body.
+            paged_spec = dataclasses.replace(paged_spec, persistent=True)
+            dense_spec = dataclasses.replace(dense_spec, persistent=True)
 
         dense_out = torch.empty_like(q)
         run_attention_dense_torch(
@@ -2576,7 +2592,7 @@ class TestDensePagedNumeric:
         )
         torch.cuda.synchronize()
 
-        name = f"{dtype} D{d} pgd{block_size} sq{sq} sk{sk} swa{window}"
+        name = f"{dtype} D{d} pgd{block_size} sq{sq} sk{sk} swa{window} {persistent=}"
         assert torch.isfinite(paged_out).all(), f"{name}: read a NaN (unused) page"
         assert torch.equal(paged_out, dense_out), f"{name}: paged != dense bits"
         ref = _standard_reference(q, k, v, scale, sliding_window=window)
@@ -2713,6 +2729,17 @@ class TestDensePagedI64Numeric:
         """The same small permuted cache (unused pages NaN) through the i64 and
         the i32 form: an in-page offset or page base off by anything reads a NaN
         page or wrong keys, so the bits differ."""
+        self._check_forced_i64(dtype, block_size, window, d)
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("d", [128, 64])
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    def test_forced_i64_persistent_matches_i32_bit_exact(self, dtype, d):
+        """The same check on the persistent body, whose page lookup is its own."""
+        self._check_forced_i64(dtype, 16, 256, d, persistent=True)
+
+    def _check_forced_i64(self, dtype, block_size, window, d, persistent=False):
         import torch
 
         sq, hq, hkv = 1024, self._HQ, self._HKV
@@ -2739,6 +2766,7 @@ class TestDensePagedI64Numeric:
             paged=True,
             block_size=block_size,
             num_kv_blocks=num_kv_blocks,
+            persistent=persistent,
         )
         outs = [
             self._run_paged(

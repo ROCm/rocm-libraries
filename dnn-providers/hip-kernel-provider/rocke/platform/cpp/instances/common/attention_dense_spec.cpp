@@ -663,11 +663,6 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
                             cap,
                             "paged multi-sequence (batch>1) needs varlen=True (packed Q + "
                             "cu_seqlens_q)");
-        if(s->persistent)
-            ROCKE_SPEC_FAIL(reason,
-                            cap,
-                            "paged + persistent not yet implemented (persistent builder is "
-                            "contiguous-only)");
         if(!streq(s->dtype, "fp16") && !streq(s->dtype, "bf16"))
             ROCKE_SPEC_FAIL(reason, cap, "paged not yet implemented for dtype=%s", s->dtype);
         /* The padded keys of a partial KV tile would read stale page rows (or block 0)

@@ -946,6 +946,17 @@ def test_paged_takes_the_dma_v_path_with_cfvst_off():
     build_attention_dense(spec, arch="gfx942")
 
 
+@pytest.mark.parametrize("knob", [dict(lds_num_buffers=2), dict(v_reg_prefetch=True)])
+def test_paged_refuses_the_pipelined_v_loader(knob):
+    paged = dict(_PAGED, sliding_window=0)
+    assert supports_attention_dense(
+        _spec(dtype="bf16", persistent=True, **paged), arch="gfx942"
+    )[0]
+    spec = _spec(dtype="bf16", persistent=True, **paged, **knob)
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert not ok and "paged K/V" in why
+
+
 def test_bottom_right_is_supported_without_a_window():
     """Bottom-right causal is the plain causal band shifted by seqlen_kv - seqlen_q;
     a window cannot shift with it, so that combination stays rejected."""

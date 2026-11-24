@@ -2465,6 +2465,10 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         sinks = b.param(
             "sink_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
         )
+    PAGED_I64 = spec.paged and spec.use_i64_kv_addr
+    block_tables = kv_lens = bt_stride = None
+    if spec.paged:
+        block_tables, kv_lens, bt_stride = declare_paged_params(b)
     if spec.emit_lse:
         lse = b.param(
             "lse_ptr",
@@ -2558,7 +2562,27 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     zero_soff = b.const_i32(0)
     K_lds_addr = b.smem_addr_of(K_lds)
     V_lds_addr = b.smem_addr_of(V_lds)
-    if RT:
+    if spec.paged:
+        # Bounded by the page cache, as on the grid body: the num_kv_blocks kernarg
+        # on the runtime-shape path, baked where the spec bakes the shape.
+        if RT:
+            page_bytes = paged_page_bytes_ir(
+                b, spec.block_size, b.mul(stride_k_p, b.const_i32(2))
+            )
+            num_kv_blocks = rt["num_kv_blocks"]
+        else:
+            page_bytes = b.const_i32(paged_page_bytes(spec))
+            num_kv_blocks = b.const_i32(spec.num_kv_blocks)
+    if PAGED_I64:
+        # One resource per page, built per wave and tile in _async_load.
+        k_rsrc = v_rsrc = None
+        page_bounds = (num_kv_blocks, page_bytes)
+    elif spec.paged:
+        # The whole cache: any page id the table can name is in range.
+        cache_bytes = paged_cache_bytes_ir(b, num_kv_blocks, page_bytes)
+        k_rsrc = b.buffer_rsrc(k, cache_bytes)
+        v_rsrc = b.buffer_rsrc(v, cache_bytes)
+    elif RT:
         # num_records must track THIS launch's extent: one binary serves every shape.
         k_rsrc = b.buffer_rsrc(
             k, b.mul(b.mul(batch_p, seqlen_kv_p), b.mul(stride_k_p, b.const_i32(2)))
@@ -2633,10 +2657,18 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             b.mul(b.mul(bt, _sq()), _stride_q()),
             b.mul(hq, b.const_i32(D)),
         )
-        k_base = b.add(
-            b.mul(b.mul(bt, _skv()), _stride_k()),
-            b.mul(hkv, b.const_i32(D)),
-        )
+        if spec.paged:
+            # The block table places the sequence's keys, so no batch term. Set up per
+            # work item: the sequence (bt) can change between items.
+            k_base = b.mul(hkv, b.const_i32(D))
+            _pg_seq_base, _pg_n_pages, _ = paged_seq_setup(
+                b, bt, kv_lens, bt_stride, spec.block_size
+            )
+        else:
+            k_base = b.add(
+                b.mul(b.mul(bt, _skv()), _stride_k()),
+                b.mul(hkv, b.const_i32(D)),
+            )
 
         q_tok = b.add(q_tok0, lane_m)
         q_packs = []
@@ -2651,7 +2683,9 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 raw = b.global_load_vN(q, addr, dtype, 8, align=16)
             q_packs.append(raw)
 
-        def _async_load(rsrc, lds_base, buf_val, tile_key0, bytes_per_buf, group_bytes):
+        def _async_load(
+            src, rsrc, lds_base, buf_val, tile_key0, bytes_per_buf, group_bytes
+        ):
             """Async DMA one K/V tile (see default builder ``_async_load``).
             ROWS_PER_INSTR==1 (D==128): incremental one-instr-per-padded-row fast
             path (byte-identical), where a group IS a row.
@@ -2659,7 +2693,70 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             group placed at ``group_bytes`` stride (K carries the inter-group pad,
             V's stride is the plain unpadded ROWS_PER_INSTR*D pitch)."""
             buf_off = b.mul(b.zext(buf_val, I64), b.const_i64(bytes_per_buf))
-            if ROWS_PER_INSTR == 1:
+            if spec.paged:
+                # A wave's rows sit in one page (spec paged validation), so one
+                # block-table lookup per wave and tile, as on the grid body.
+                wave_key0 = b.add(tile_key0, b.mul(wave, b.const_i32(ROWS_PER_WAVE)))
+            if PAGED_I64:
+                rsrc = paged_wave_page_rsrc(
+                    b,
+                    src,
+                    block_tables,
+                    _pg_seq_base,
+                    _pg_n_pages,
+                    wave_key0,
+                    spec.block_size,
+                    page_bounds,
+                )
+            elif spec.paged:
+                _wphys_base = paged_wave_row_base(
+                    b,
+                    block_tables,
+                    _pg_seq_base,
+                    _pg_n_pages,
+                    wave_key0,
+                    spec.block_size,
+                )
+
+            def _kv_row(gkey):
+                if PAGED_I64:
+                    return paged_in_page_row(b, gkey, spec.block_size)
+                if spec.paged:
+                    return paged_kv_row(b, _wphys_base, gkey, spec.block_size)
+                return gkey
+
+            if ROWS_PER_INSTR == 1 and spec.paged:
+                # The wave's rows are consecutive rows of one page: the first row's
+                # cache row is wave-uniform (readfirstlane keeps it scalar, as on
+                # the runtime path below), the lane part is the column alone.
+                gcol = b.mul(lane, b.const_i32(2))
+                row_lds_off = b.add(
+                    buf_off,
+                    b.zext(
+                        b.mul(
+                            b.mul(wave, b.const_i32(ROWS_PER_WAVE)),
+                            b.const_i32(group_bytes),
+                        ),
+                        I64,
+                    ),
+                )
+                row_u = b.to_sgpr_u32(
+                    b.add(k_base, b.mul(_kv_row(wave_key0), _stride_k()))
+                )
+                for r in range(ROWS_PER_WAVE):
+                    row_base = b.smem_ptr_add(lds_base, row_lds_off)
+                    voff = b.add(gcol, row_u)
+                    b.async_buffer_load_lds_addr(
+                        rsrc,
+                        row_base,
+                        b.mul(voff, b.const_i32(2)),
+                        zero_soff,
+                        _DMA_DWORDS,
+                    )
+                    if r + 1 < ROWS_PER_WAVE:
+                        row_lds_off = b.add(row_lds_off, b.const_i64(group_bytes))
+                        row_u = b.to_sgpr_u32(b.add(row_u, _stride_k()))
+            elif ROWS_PER_INSTR == 1:
                 row0 = b.mul(wave, b.const_i32(ROWS_PER_WAVE))
                 row_lds_off = b.add(
                     buf_off, b.zext(b.mul(row0, b.const_i32(group_bytes)), I64)
@@ -2725,7 +2822,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                         buf_off, b.zext(b.mul(grp, b.const_i32(group_bytes)), I64)
                     )
                     row_base = b.smem_ptr_add(lds_base, row_lds_off)
-                    gkey = b.add(b.add(tile_key0, row0), sub_row)
+                    gkey = _kv_row(b.add(b.add(tile_key0, row0), sub_row))
                     voff = b.add(b.add(k_base, b.mul(gkey, _stride_k())), col)
                     b.async_buffer_load_lds_addr(
                         rsrc,
@@ -2826,6 +2923,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 _async_load_k_wide(lds_base, buf_val, tile_key0)
             else:
                 _async_load(
+                    k,
                     k_rsrc,
                     lds_base,
                     buf_val,
@@ -2839,6 +2937,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 _async_load_v_wide(lds_base, buf_val, tile_key0)
             else:
                 _async_load(
+                    v,
                     v_rsrc,
                     lds_base,
                     buf_val,

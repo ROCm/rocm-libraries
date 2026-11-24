@@ -170,6 +170,21 @@ _KERNEL_RESOURCE_BUDGETS = {
         "max_scratch_bytes": 80,
         "min_waves_per_simd": 2,
     },
+    # gfx950 D128 paged on the persistent body: the page lookup leaves it within a few
+    # VGPRs of the 256 ceiling on every comgr, so pin the 2-wave occupancy it shares
+    # with the contiguous persistent body (no spill: the default budget).
+    "rocke_attention_dense_d128_bn64_fp16_causal_swa4096_pgd16_lazyrs_persist256": {
+        "min_waves_per_simd": 2,
+    },
+    "rocke_attention_dense_d128_bn64_fp16_causal_swa4096_pgd16_i64kv_lazyrs_persist256": {
+        "min_waves_per_simd": 2,
+    },
+    "rocke_attention_dense_d128_bn64_bf16_causal_swa4096_pgd16_lazyrs_persist256": {
+        "min_waves_per_simd": 2,
+    },
+    "rocke_attention_dense_d128_bn64_bf16_causal_swa4096_pgd16_i64kv_lazyrs_persist256": {
+        "min_waves_per_simd": 2,
+    },
 }
 
 # Every kernel_name ``_assert_resources_fit`` is handed, so a budget whose key no
@@ -1554,7 +1569,8 @@ class TestAttentionHelpers(unittest.TestCase):
             # Cache past the i32 range without use_i64_kv_addr.
             dict(block_size=16, num_kv_blocks=70000),
             dict(block_size=16, num_kv_blocks=512, batch=2),  # multi-seq, not varlen
-            dict(block_size=16, num_kv_blocks=512, persistent=True),
+            # Persistent takes paged on the plain body; wide DMA stays contiguous.
+            dict(block_size=16, num_kv_blocks=512, persistent=True, wide_lds_dma=True),
             dict(
                 block_size=16, num_kv_blocks=512, causal=False, sliding_window=0
             ),  # causal-only
@@ -1564,8 +1580,12 @@ class TestAttentionHelpers(unittest.TestCase):
         ):
             with self.subTest(kw=kw), self.assertRaises(ValueError):
                 AttentionDenseSpec(paged=True, **{**base, **kw})
-        # Accept: plain causal (no window) and D64.
-        for kw in (dict(sliding_window=0), dict(head_size=64)):
+        # Accept: plain causal (no window), D64, and the persistent body.
+        for kw in (
+            dict(sliding_window=0),
+            dict(head_size=64),
+            dict(persistent=True, num_persistent=256),
+        ):
             with self.subTest(kw=kw):
                 ok, why = supports_attention_dense(
                     AttentionDenseSpec(
@@ -2093,6 +2113,47 @@ class TestAttentionHelpers(unittest.TestCase):
                             art = _compile_or_skip(k, arch=arch)
                             self.assertGreater(art.hsaco_bytes, 0)
                             _assert_resources_fit(art, arch=arch, kernel_name=k.name)
+
+    def test_dense_paged_persistent_compiles_and_fits_budget(self):
+        """comgr build + resource-budget net for paged K/V on the persistent body
+        (one sequence): fp16/bf16 D128 with i32 and i64 page bases, and D64."""
+        from dataclasses import replace
+
+        for arch in ("gfx942", "gfx950"):
+            ad = importlib.import_module(f"kernels.{arch}.attention_dense")
+            AttentionDenseSpec = dense_arch_spec_class(ad)
+            with self.subTest(arch=arch):
+                for dt in ("fp16", "bf16"):
+                    for d in (128, 64):
+                        spec = AttentionDenseSpec(
+                            batch=1,
+                            seqlen_q=8192,
+                            seqlen_kv=8192,
+                            num_query_heads=32,
+                            num_kv_heads=8,
+                            head_size=d,
+                            causal=True,
+                            dtype=dt,
+                            sliding_window=4096,
+                            block_n=64,
+                            persistent=True,
+                            paged=True,
+                            block_size=16,
+                            num_kv_blocks=512,
+                        )
+                        variants = [spec]
+                        if d == 128:
+                            variants.append(replace(spec, use_i64_kv_addr=True))
+                        for variant in variants:
+                            with self.subTest(
+                                dtype=dt, d=d, i64=variant.use_i64_kv_addr
+                            ):
+                                k = ad.build_attention_dense(variant, arch=arch)
+                                art = _compile_or_skip(k, arch=arch)
+                                self.assertGreater(art.hsaco_bytes, 0)
+                                _assert_resources_fit(
+                                    art, arch=arch, kernel_name=k.name
+                                )
 
     def test_dense_paged_smaller_tiles_compile_and_fit_budget(self):
         """comgr build + resource-budget net for paged K/V on the smaller dense

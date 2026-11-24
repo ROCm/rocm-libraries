@@ -287,7 +287,8 @@ def tuned_base_spec(req: AttentionRequest):
         return _bias_geometry_spec(req)
     head_size = int(req.hdim_q)
     # The persistent grid measured ahead at D128 for every batch and mask; at
-    # D64 the non-persistent grid did. Paged K/V runs on the default grid.
+    # D64 the non-persistent grid did. Paged K/V starts on the default grid; the
+    # persistent knob pins it onto the persistent one.
     paged = bool(dense_paged_fields(req, _DENSE_BLOCK_N))
     spec = _make_spec(
         req,

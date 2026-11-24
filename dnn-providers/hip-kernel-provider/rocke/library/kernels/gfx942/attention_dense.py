@@ -1461,6 +1461,7 @@ def supports_attention_dense(
     # the other tile sizes have not been validated for these pipeline modes.
     if (_use_kdb(spec) or _use_vpf(spec)) and not (
         spec.persistent
+        and not spec.paged  # the pipelined V loader has no block-table lookup
         and bf16_cfvst_supported(spec)
         and spec.resolved_use_cfvst()
         and spec.block_n == 64
@@ -1468,7 +1469,7 @@ def supports_attention_dense(
         return False, (
             "NOT_YET_IMPLEMENTED: lds_num_buffers=2 or v_reg_prefetch=True requires "
             "persistent=True, bf16 D128 top-left causal CFVST at block_n=64, without "
-            "sliding_window or sinks"
+            "sliding_window, sinks or paged K/V"
         )
     if spec.iglp_mode not in (0, 1):
         return False, f"iglp_mode must be 0 or 1, got {spec.iglp_mode}"
@@ -3183,7 +3184,7 @@ def _build_attention_dense_single_buffer(
         if not spec.runtime_shape:
             raise ValueError(
                 "gfx942 attention_dense: the persistent grid needs runtime_shape "
-                "(ragged/varlen/paged are not supported)"
+                "(ragged and contiguous varlen are not supported)"
             )
         NP = spec.num_persistent
         # ragged rejected -> Sq % BLOCK_M == 0, exact. BLOCK_M is a compile-time

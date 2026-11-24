@@ -2002,6 +2002,59 @@ def cases():
                 "causal_bottom_right": True,
             },
         ),
+        # Paged K/V on the plain persistent body (one sequence): the runtime-shape
+        # path at D128 and D64, per-page i64 resources, and ragged Q, whose baked
+        # shape bakes the cache bound too.
+        (
+            "persist_paged_causal_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "persistent": True,
+                "num_persistent": 256,
+            },
+        ),
+        (
+            "persist_paged_swa_fp16_d64_sq512",
+            {
+                "dtype": "fp16",
+                "head_size": 64,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+                "persistent": True,
+                "num_persistent": 256,
+            },
+        ),
+        (
+            "persist_paged_i64_swa_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+                "use_i64_kv_addr": True,
+                "persistent": True,
+                "num_persistent": 256,
+            },
+        ),
+        (
+            "persist_paged_ragged_causal_fp16_sq500",
+            {
+                "dtype": "fp16",
+                "seqlen_q": 500,
+                "ragged": True,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "persistent": True,
+                "num_persistent": 256,
+            },
+        ),
         # --- Attention band: the cuDNN (left = sliding_window, right = right_bound)
         # band on the top-left diagonal. causal=False is the unbounded right side.
         # Non-causal (left-only) window: default + persistent grids.
@@ -2451,6 +2504,39 @@ def cases():
                 "block_size": 16,
                 "num_kv_blocks": 32,
                 "sliding_window": 256,
+            },
+        ),
+        # Paged on the persistent grid (one sequence): fp16, bf16 D128 with
+        # conflict-free V, and per-page i64 resources.
+        (
+            "persist_paged_causal_fp16_sq512",
+            {
+                **_persist942,
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+            },
+        ),
+        (
+            "persist_paged_swa_bf16_sq512",
+            {
+                **_persist942,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+            },
+        ),
+        (
+            "persist_paged_i64_causal_fp16_sq512",
+            {
+                **_persist942,
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "use_i64_kv_addr": True,
             },
         ),
     ):

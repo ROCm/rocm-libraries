@@ -67,13 +67,42 @@ def test_paged_request_builds_a_paged_spec(arch, spec_id, overrides):
     assert not spec.varlen  # whole KV tiles keep the single-sequence kernel
 
 
-@pytest.mark.parametrize(
-    "spec_id", ["gfx950_dense_persist", "gfx950_dense_persist_widedma"]
-)
 @pytest.mark.parametrize("batch", [1, 3], ids=["single_seq", "multi_seq"])
-def test_persistent_variants_decline_paged(spec_id, batch):
+def test_wide_dma_persistent_variant_declines_paged(batch):
     with pytest.raises(ValueError, match="layout_paged"):
-        dispatch_attention(pinned(_request("gfx950", batch=batch), spec_id))
+        dispatch_attention(
+            pinned(_request("gfx950", batch=batch), "gfx950_dense_persist_widedma")
+        )
+
+
+_PINNED_PERSISTENT = pytest.mark.parametrize(
+    "arch,spec_id,knobs",
+    [
+        ("gfx950", "gfx950_dense_persist", {}),
+        ("gfx942", "gfx942_dense", {"persistent": True}),
+    ],
+    ids=["gfx950_persist", "gfx942_persistent_knob"],
+)
+
+
+@_PINNED_PERSISTENT
+@pytest.mark.parametrize(
+    "overrides",
+    [dict(), dict(sliding_window=0), dict(hdim_q=64, hdim_v=64)],
+    ids=["swa", "plain_causal", "d64"],
+)
+def test_pinned_persistent_takes_one_paged_sequence(arch, spec_id, knobs, overrides):
+    req = _request(arch, **overrides)
+    spec = tuning_spec_with_knobs(req, spec_id, knobs).kernel_spec
+    assert spec.paged and spec.persistent and not spec.varlen
+    assert spec.runtime_shape  # the cache bound is the num_kv_blocks kernarg
+
+
+@_PINNED_PERSISTENT
+def test_pinned_persistent_refuses_paged_varlen(arch, spec_id, knobs):
+    """Several sequences need the varlen body, which has no persistent form."""
+    with pytest.raises(ValueError, match="varlen"):
+        tuning_spec_with_knobs(_request(arch, batch=3), spec_id, knobs)
 
 
 @pytest.mark.parametrize("arch,spec_id", _CASES)
