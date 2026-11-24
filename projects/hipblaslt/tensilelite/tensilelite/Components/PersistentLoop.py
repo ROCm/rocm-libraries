@@ -1066,6 +1066,46 @@ class PersistentKernelState:
       module.add(self.halfPlrPrefetchAcrossPersistentReturnLabel(loopCopy))
       return module
 
+    def halfPlrPapDispatchBound(self):
+      """Highest LoopCounter that enters the HalfPLR PAP dispatch (prepare at two, issue at one)."""
+      return 2 if getattr(self.states, "papAddressCarrier", None) is not None else 1
+
+    def halfPlrPapFoldsLoopExit(self, kernel, loopIdx, loopCopy, endCounter):
+      """Whether a multi-trip copy boundary can share one test between loop exit and PAP."""
+      return bool(kernel["HalfPLR"] and kernel["PrefetchAcrossPersistent"]) \
+          and loopIdx == self.states.unrollIdx and loopCopy >= 0 and endCounter == 0
+
+    def halfPlrPapMasksLastTripOutOfLine(self, kernel):
+      """Whether the shared PAP block applies HalfPLR's in-place last-trip increment mask.
+
+      Every last unrolled trip is entered through that block at LoopCounter one: the
+      one-trip entry, every multi-trip copy boundary and the final copy's cold path all
+      test the counter there. So the mask, conditional on PAP not having primed, runs
+      once per tile instead of on every trip.
+      """
+      return bool(kernel["HalfPLR"] and kernel["PrefetchAcrossPersistent"]) \
+          and not self.hplrMasksLoopIncrement(kernel, 0) \
+          and not kernel.get("UseSubtileImpl") \
+          and not kernel["UseCustomMainLoopSchedule"] \
+          and not kernel["ReuseAcrossPersistent"] \
+          and (kernel["SuppressNoLoadLoop"] or not kernel["PrefetchGlobalRead"])
+
+    def callHalfPlrPrefetchAcrossPersistentOrExit(self, kernel, loopCopy, exitLabel):
+      """One hoistable test per trip: counters at or below the PAP dispatch bound leave
+      the loop body for an out-of-line stub that exits on zero or runs PAP and returns."""
+      module = Module("callHalfPlrPrefetchAcrossPersistentOrExit")
+      if not hasattr(self.states, "halfPlrPapExitLabels"):
+        self.states.halfPlrPapExitLabels = {}
+      self.states.halfPlrPapExitLabels[loopCopy] = exitLabel.getLabelName()
+      module.add(SCmpLeU32(
+          src0=self.loopCounter(kernel, self.states.unrollIdx), src1=self.halfPlrPapDispatchBound(),
+          comment="last trips leave the loop body: exit at zero, else HalfPLR PAP"))
+      module.add(SCBranchSCC1(
+          labelName=self.halfPlrPrefetchAcrossPersistentEntryLabel(loopCopy).getLabelName(),
+          comment="out-of-line loop exit or HalfPLR PAP entry"))
+      module.add(self.halfPlrPrefetchAcrossPersistentReturnLabel(loopCopy))
+      return module
+
     def emitHalfPlrPrefetchAcrossPersistentBlock(
         self, kernel, tensorParametersA, tensorParametersB):
       """Emit one PAP body shared by all three rotating HalfPLR loop copies."""
@@ -1094,8 +1134,14 @@ class PersistentKernelState:
         else:
           selector = lifetime.enter_context(self.allocTmpSgpr(1, tag="HalfPlrPAPReturnSelector"))
           selectMove, returnReg = SMovB32, sgpr(selector.idx)
+        exitLabels = getattr(self.states, "halfPlrPapExitLabels", {})
         for loopCopy in sorted(entryLabels):
           module.add(entryLabels[loopCopy])
+          if loopCopy in exitLabels:
+            module.add(SCmpEQU32(
+                src0=self.loopCounter(kernel, self.states.unrollIdx), src1=0,
+                comment="folded loop-exit test of HalfPLR loop copy %u" % loopCopy))
+            module.add(SCBranchSCC1(labelName=exitLabels[loopCopy], comment="exit unrolled loop"))
           module.add(selectMove(
               dst=returnReg, src=loopCopy,
               comment="select branch-back label for HalfPLR loop copy %u" % loopCopy))
@@ -1130,6 +1176,7 @@ class PersistentKernelState:
           # coordinates also survive store, so reuse them after an issued load.
           module.add(self.papPublishNextTileCoordinates())
           module.add(self.papClearPreparedAddress("PAP HalfPLR consume prepared addresses"))
+        module.add(self.papMaskLastTripIncrements(kernel, tensorParametersA, tensorParametersB))
         if preparedReturn is not None:
           module.add(preparedReturn)
         if returnVgpr is not None:

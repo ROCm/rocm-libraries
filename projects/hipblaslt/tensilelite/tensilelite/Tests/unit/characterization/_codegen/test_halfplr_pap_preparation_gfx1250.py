@@ -53,7 +53,11 @@ def assert_shared_dispatch_assembly(src):
     for copy in (1, 2):
         begin, end = label(f"ReturnFromHalfPlrPAP_{copy}"), label(f"ReturnFromHalfPlrPAP_{copy + 1}")
         phase = lines[begin:end]
-        assert phase[1].startswith("s_cmp_eq_i32 s[sgprLoopCounterL]")
+        # The loop-exit test of a middle copy is folded into its out-of-line PAP entry.
+        assert not phase[1].startswith("s_cmp_eq_i32 s[sgprLoopCounterL]")
+        stub = lines[label(f"HalfPlrPAPEntry_{copy}") + 1:][:2]
+        assert stub[0].startswith("s_cmp_eq_u32 s[sgprLoopCounterL], 0")
+        assert stub[1].startswith("s_cbranch_scc1 label_LoopEndL")
         issues = [i for i, line in enumerate(phase) if line.startswith("tensor_load_to_lds")]
         assert len(issues) >= 2
         remaining = phase[issues[-1] + 1:]

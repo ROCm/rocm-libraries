@@ -508,7 +508,9 @@ class Stub:
                      "tdmDescriptorSetOwner", "tdmLastIterDisableSgprs", "defineTdmSgprs",
                      "_dcpTokenSide", "_dcpCurrentToken", "_dcpTdmIssueTokens",
                      "tdmPairOnEveryWave", "removeStaggerCopies", "tdmHalfPlrReenableSgprs",
-                     "removeStaggerIncs", "graIncrementMask", "releaseGlobalReadIncsSgprsAfterTdmWaveSep",
+                     "removeStaggerIncs", "graIncrementMask", "graIncrementMaskTargets",
+                     "halfPlrPapMasksLastTripOutOfLine", "papMaskLastTripIncrements",
+                     "releaseGlobalReadIncsSgprsAfterTdmWaveSep",
                      "hplrMasksLoopIncrement", "hplrLastIterCompare",
                      "_emitTdmWaveSetSkipSCC"):
             fn = getattr(KernelWriterAssembly, name, None)
@@ -2053,6 +2055,28 @@ def test_halfplr_mask_zeroes_exactly_the_increments_it_names(state):
     # Every shadow increment the mask zeroes is one defineTdmSgprs defines.
     assert {name for name in zeroed if not name.startswith("GlobalReadIncs")} \
         <= _definedTdmSgprs(writer, state), zeroed
+
+
+@pytest.mark.parametrize("state", _halfPlrMaskStates(), ids=_maskStateId)
+def test_pap_masks_the_same_increments_once_per_tile(state):
+    """With PAP the loop body keeps no mask; the PAP block zeroes the same increments unless primed."""
+    writer = _definedTdmWriter()
+    tPA, tPB = {"tensorChar": "A"}, {"tensorChar": "B"}
+    zeroed = re.findall(r"s_cmov_b32 s\[sgpr(\w+?)\], 0", str(writer.graIncrementMask(state, tPA, tPB)))
+    pap = dict(state, PrefetchAcrossPersistent=1, SuppressNoLoadLoop=True, PrefetchGlobalRead=2,
+               UseCustomMainLoopSchedule=False, ReuseAcrossPersistent=False)
+    assert str(writer.graIncrementMask(pap, tPA, tPB)).strip() == ""
+    block = str(writer.papMaskLastTripIncrements(pap, tPA, tPB)).splitlines()
+    if writer.hplrMasksLoopIncrement(pap, 0):
+        # The counter-folded mask needs no register zeroing in either place.
+        assert not writer.halfPlrPapMasksLastTripOutOfLine(pap)
+        assert zeroed == [] and block == []
+        return
+    assert writer.halfPlrPapMasksLastTripOutOfLine(pap)
+    assert block[0].startswith("s_bitcmp1_b32 s[sgprPersistentPrefetchState], 0")
+    selected = [re.match(r"s_cselect_b32 s\[sgpr(\w+?)\], s\[sgpr\1\], 0\b", line).group(1)
+                for line in block[1:]]
+    assert selected == zeroed
 
 
 @pytest.mark.parametrize("staggerUCode", [True, False])

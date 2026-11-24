@@ -11011,14 +11011,32 @@ class KernelWriterAssembly(KernelWriter):
 
         # For multi-trip loops, prefetch after decrementing to one and return
         # here before entering the final trip.
-        if loopIdx == self.states.unrollIdx and loopCopy >= 0:
-          module.add(self.callHalfPlrPrefetchAcrossPersistent(kernel, loopCopy+1))
+        papFoldsExit = jumpNeeded and not rapNoBackEdge \
+            and self.halfPlrPapFoldsLoopExit(kernel, loopIdx, loopCopy, endCounter)
+        if papFoldsExit and not finalLoop:
+          # Every trip pays one hoistable test instead of a PAP test plus an exit test
+          # that cannot be scheduled ahead of the PAP return label.
+          exitLabel = loopLabelEnd
+          if not kernel["SuppressNoLoadLoop"] and kernel["ExpandPointerSwap"]:
+            exitLabel = loopLabelEndOddExit if oddLabel else loopLabelEndEvenExit
+          module.add(self.callHalfPlrPrefetchAcrossPersistentOrExit(kernel, loopCopy+1, exitLabel))
+          jumpNeeded = False
+        else:
+          if papFoldsExit:
+            # The final copy keeps its hot back edge and leaves the PAP test and the exit
+            # test below for the last trips only.
+            module.add(SCmpGtU32(src0=loopCounter, src1=self.halfPlrPapDispatchBound(),
+                                 comment="counter%s above the HalfPLR PAP dispatch bound" % loopChar))
+            module.add(SCBranchSCC1(labelName=loopLabelBegin.getLabelName(),
+                                    comment="restart Loop%s" % loopChar))
+          if loopIdx == self.states.unrollIdx and loopCopy >= 0:
+            module.add(self.callHalfPlrPrefetchAcrossPersistent(kernel, loopCopy+1))
 
-        if not rapNoBackEdge:
-          module.add(SCmpEQI32(
-              src0=loopCounter, \
-              src1=hex(endCounter), \
-              comment="counter%s==%d"%(loopChar,endCounter) ))
+          if not rapNoBackEdge:
+            module.add(SCmpEQI32(
+                src0=loopCounter, \
+                src1=hex(endCounter), \
+                comment="counter%s==%d"%(loopChar,endCounter) ))
 
     jumpLabel = loopLabelEnd
     if not tailLoop and not kernel["SuppressNoLoadLoop"] and kernel["ExpandPointerSwap"]:
@@ -27737,6 +27755,24 @@ class KernelWriterAssembly(KernelWriter):
       comment="no increment on the last iters"))
     return mod
 
+  def graIncrementMaskTargets(self, kernel, tPA, tPB) -> list:
+    """The increment SGPRs HalfPLR zeroes in place for the last unrolled trip."""
+    if kernel["NumWaves"] > 1 and tdmSharedScaleSetActive(kernel):
+      # Shared set zeros tdmABIncs; the separate data tensor (not tdmSharedScaleSetOwner) zeros its own GlobalReadIncs.
+      sep = "B" if tdmSharedScaleSetOwner(kernel) == "A" else "A"
+      # A stashed scale advances its stash by its own increment.
+      return ["tdmABIncs", f"GlobalReadIncs{sep}"] + [f"GlobalReadIncs{tc}" for tc in tdmStashedMembers(kernel)]
+    if kernel["NumWaves"] > 1 and self.tdmPairOnEveryWave(kernel, tPA, tPB):
+      return ["GlobalReadIncsA", "GlobalReadIncsB"]
+    if kernel["NumWaves"] > 1:
+      if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+        return ["tdmABIncs", "tdmMXSAMXSBIncs"]
+      # A lone scale has no tdmMXSAMXSBIncs; it advances by its own increment.
+      return ["tdmABIncs"] + [f"GlobalReadIncs{mxs}" for mxs in ("MXSA", "MXSB")
+                              if kernel["ProblemType"][f"MXBlock{mxs[-1]}"]]
+    return ["GlobalReadIncsA", "GlobalReadIncsB"] + [f"GlobalReadIncs{mxs}" for mxs in ("MXSA", "MXSB")
+                                                     if kernel["ProblemType"][f"MXBlock{mxs[-1]}"]]
+
   def graIncrementMask(self, kernel, tPA, tPB) -> Module:
     mod = Module("graIncrementMask")
     if not kernel["HalfPLR"]:
@@ -27745,38 +27781,30 @@ class KernelWriterAssembly(KernelWriter):
     if self.hplrMasksLoopIncrement(kernel, 0):
       # tdmIncrementAB masks each single-wave increment itself.
       return mod
+    if self.halfPlrPapMasksLastTripOutOfLine(kernel):
+      # papMaskLastTripIncrements masks once per tile, ahead of the last trip.
+      return mod
     if kernel["PrefetchAcrossPersistent"]:
       with self.allocTmpSgpr(1, tag="graIncrementMask_notPrimed") as tmpSgprRes:
         mod.add(self.hplrLastIterCompare(kernel, tmpSgprRes.idx))
     else:
       mod.add(self.hplrLastIterCompare(kernel, None))
-    if kernel["NumWaves"] > 1 and tdmSharedScaleSetActive(kernel):
-      # Shared set zeros tdmABIncs; the separate data tensor (not tdmSharedScaleSetOwner) zeros its own GlobalReadIncs.
-      sep = "B" if tdmSharedScaleSetOwner(kernel) == "A" else "A"
-      mod.add(SCMovB32(dst=sgpr("tdmABIncs"), src=0, comment=""))
-      mod.add(SCMovB32(dst=sgpr(f"GlobalReadIncs{sep}"), src=0, comment=""))
-      # A stashed scale advances its stash by its own increment.
-      for tc in tdmStashedMembers(kernel):
-        mod.add(SCMovB32(dst=sgpr(f"GlobalReadIncs{tc}"), src=0, comment=""))
-    elif kernel["NumWaves"] > 1 and self.tdmPairOnEveryWave(kernel, tPA, tPB):
-      mod.add(SCMovB32(dst=sgpr("GlobalReadIncsA"), src=0, comment=""))
-      mod.add(SCMovB32(dst=sgpr("GlobalReadIncsB"), src=0, comment=""))
-    elif kernel["NumWaves"] > 1:
-      mod.add(SCMovB32(dst=sgpr("tdmABIncs"), src=0, comment=""))
-      if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
-        mod.add(SCMovB32(dst=sgpr("tdmMXSAMXSBIncs"), src=0, comment=""))
-      else:
-        # A lone scale has no tdmMXSAMXSBIncs; it advances by its own increment.
-        for mxs in ("MXSA", "MXSB"):
-          if kernel["ProblemType"][f"MXBlock{mxs[-1]}"]:
-            mod.add(SCMovB32(dst=sgpr(f"GlobalReadIncs{mxs}"), src=0, comment=""))
-    else:
-      mod.add(SCMovB32(dst=sgpr("GlobalReadIncsA"), src=0, comment=""))
-      mod.add(SCMovB32(dst=sgpr("GlobalReadIncsB"), src=0, comment=""))
-      if kernel["ProblemType"]["MXBlockA"]:
-        mod.add(SCMovB32(dst=sgpr("GlobalReadIncsMXSA"), src=0, comment=""))
-      if kernel["ProblemType"]["MXBlockB"]:
-        mod.add(SCMovB32(dst=sgpr("GlobalReadIncsMXSB"), src=0, comment=""))
+    for target in self.graIncrementMaskTargets(kernel, tPA, tPB):
+      mod.add(SCMovB32(dst=sgpr(target), src=0, comment=""))
+    return mod
+
+  def papMaskLastTripIncrements(self, kernel, tPA, tPB) -> Module:
+    """graIncrementMask for the last unrolled trip, applied after its PAP handoff.
+
+    The tail rebuilds a primed tile's descriptor from the increments, so they stay live then.
+    """
+    mod = Module("papMaskLastTripIncrements")
+    if not self.halfPlrPapMasksLastTripOutOfLine(kernel):
+      return mod
+    mod.add(SBitcmp1B32(src0=sgpr("PersistentPrefetchState"), src1=0, comment="PAP primed the next tile?"))
+    for target in self.graIncrementMaskTargets(kernel, tPA, tPB):
+      mod.add(SCSelectB32(dst=sgpr(target), src0=sgpr(target), src1=0,
+                          comment="no increment on the last iters unless primed"))
     return mod
 
 def _tdmEmitWaveCarriesSCC(mod, kernel, tc) -> bool:
