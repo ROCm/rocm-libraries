@@ -11,7 +11,9 @@ Outputs boolean flags per component via GITHUB_OUTPUT:
   - hipblaslt_rocjitsu_scripts=true/false
 
 Each component defines a set of path patterns. If any changed file matches,
-that component is marked as triggered.
+that component is marked as triggered. A component may also list exclusions:
+changed files that match one (and none of its exceptions) are ignored for that
+component only.
 
 Usage:
   python component_ci.py
@@ -52,8 +54,9 @@ COMPONENTS = {
     ],
     # The logic corpus is tuning data outside tensilelite/, so a change to it
     # alone triggers no TensileLite lane. This one validates the whole corpus
-    # and runs the unit tests that read it; the validator and the tests' corpus
-    # plumbing trigger it too.
+    # and runs the unit tests that read it; the validator, the tests' corpus
+    # plumbing, and the SolutionUID codec that the uniqueness test reads
+    # trigger it too.
     "hipblaslt_logic_corpus": [
         "projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic/**",
         "projects/hipblaslt/scripts/run_tensile_logic_check.py",
@@ -62,6 +65,7 @@ COMPONENTS = {
         "projects/hipblaslt/tensilelite/tensilelite/Tests/unit/logic_corpus.py",
         "projects/hipblaslt/tensilelite/tensilelite/Tests/unit/"
         "test_solution_uid_uniqueness.py",
+        "projects/hipblaslt/tensilelite/tensilelite/SolutionIdGen.py",
         "projects/hipblaslt/tensilelite/tox.ini",
         ".github/workflows/component-ci-logic-corpus.yml",
     ],
@@ -69,6 +73,25 @@ COMPONENTS = {
         "projects/hipblaslt/clients/scripts/rocjitsu/**",
         ".github/scripts/run_rocjitsu_hipblaslt_gemm_race_checks.sh",
         ".github/workflows/component-ci-hipblaslt-rocjitsu-scripts.yml",
+    ],
+}
+
+# Prose that no step of a component's CI reads. A change confined to these
+# files does not trigger the component; any other matching change still does.
+# fnmatch's * crosses "/", so "projects/miopen/*.md" covers nested files.
+EXCLUSIONS = {
+    "miopen": [
+        "projects/miopen/*.md",
+        "projects/miopen/*.rst",
+    ],
+}
+
+# Files matching an exclusion that still trigger the component.
+EXCLUSION_EXCEPTIONS = {
+    "miopen": [
+        # rocm_create_package installs the top-level license into the package
+        # that the MIOpen workflow builds.
+        "projects/miopen/LICENSE.md",
     ],
 }
 
@@ -86,10 +109,17 @@ INFRA_PATHS = [
 # while component CI uses fnmatch glob patterns with cross-component triggers
 # (e.g. rocisa triggers when stinkytofu changes because it depends on it).
 def detect_changed_components(changed_files: set[str]) -> dict[str, bool]:
+    infra_changed = matches_paths(changed_files, INFRA_PATHS)
     results = {}
     for key, patterns in COMPONENTS.items():
-        all_patterns = patterns + INFRA_PATHS
-        results[key] = matches_paths(changed_files, all_patterns)
+        excluded = EXCLUSIONS.get(key, [])
+        exceptions = EXCLUSION_EXCEPTIONS.get(key, [])
+        relevant = [
+            f
+            for f in changed_files
+            if not matches_paths([f], excluded) or matches_paths([f], exceptions)
+        ]
+        results[key] = infra_changed or matches_paths(relevant, patterns)
     return results
 
 
@@ -100,7 +130,9 @@ def main():
     if is_workflow_dispatch:
         changed = {key: True for key in COMPONENTS}
     else:
-        changed_files = get_modified_paths(base_ref)
+        # Both sides of a rename: moving a source file to an excluded or
+        # unrelated path must still trigger the component it left.
+        changed_files = get_modified_paths(base_ref, detect_renames=False)
         changed = detect_changed_components(changed_files)
 
     print(f"Changed components: {changed}")

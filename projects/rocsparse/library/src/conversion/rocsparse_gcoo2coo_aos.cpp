@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -42,6 +42,13 @@ rocsparse_status rocsparse::gcoo2coo_aos(rocsparse_handle     handle,
 {
     ROCSPARSE_ROUTINE_TRACE;
 
+    // Values first: an unsupported data type pair is rejected before anything is written.
+    if(source_val != nullptr && target_val != nullptr)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(
+            handle, nnz, target_val_type, target_val, source_val_type, source_val));
+    }
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(
         handle, nnz, target_ind_type, target_ind, 2, source_row_type, source_row, 1));
 
@@ -55,11 +62,6 @@ rocsparse_status rocsparse::gcoo2coo_aos(rocsparse_handle     handle,
         source_col,
         1));
 
-    if(source_val != nullptr && target_val != nullptr)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(
-            handle, nnz, target_val_type, target_val, source_val_type, source_val));
-    }
     return rocsparse_status_success;
 }
 

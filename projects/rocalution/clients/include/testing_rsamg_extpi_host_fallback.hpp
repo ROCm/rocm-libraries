@@ -27,6 +27,7 @@
 
 #include "utility.hpp"
 
+#include <algorithm>
 #include <gtest/gtest.h>
 #include <memory>
 #include <rocalution/rocalution.hpp>
@@ -38,19 +39,20 @@ using namespace rocalution;
 // operator back to the host as soon as one row needs 4096 entries or more.
 static constexpr int extpi_lds_capacity = 4096;
 
-// Build a star matrix whose centre is the only fine point and whose num_coarse rays are all
-// coarse points. Every off-diagonal entry is a strong connection, so the interpolatory set of
-// the centre is the complete set of rays and row 0 of the interpolation operator ends up with
-// num_coarse entries. That is the only knob the test needs to move the fill across the LDS
-// capacity.
+// Build a star matrix whose centre, in row centre, is the only fine point and whose num_coarse
+// rays are all coarse points. Every off-diagonal entry is a strong connection, so the
+// interpolatory set of the centre is the complete set of rays and the centre row of the
+// interpolation operator ends up with num_coarse entries. That is the knob the test needs to
+// move the fill across the LDS capacity.
 //
-//   row 0     : [num_coarse, -1, -1, ... , -1]
-//   row i > 0 : [-1, 0, ... , 2 (at column i), ... , 0]
+//   row centre : [-1, ... , num_coarse (at column centre), ... , -1]
+//   ray row i  : [0, ... , -1 (at column centre), ... , 2 (at column i), ... , 0]
 //
 // The matrix is a weakly diagonally dominant M-matrix, so the interpolation weights are well
 // defined: the centre interpolates each ray with weight 1 / num_coarse.
 template <typename T>
 static int gen_extpi_wide_fine_row(int                   num_coarse,
+                                   int                   centre,
                                    std::vector<PtrType>& csr_ptr,
                                    std::vector<int>&     csr_col,
                                    std::vector<T>&       csr_val,
@@ -68,45 +70,38 @@ static int gen_extpi_wide_fine_row(int                   num_coarse,
 
     PtrType idx = 0;
 
-    // Centre row, diagonal first so that the columns stay ascending
-    csr_ptr[0]   = idx;
-    csr_col[idx] = 0;
-    csr_val[idx] = static_cast<T>(num_coarse);
-    strong[idx]  = 0;
-    ++idx;
-
-    for(int i = 1; i <= num_coarse; ++i)
-    {
-        csr_col[idx] = i;
-        csr_val[idx] = static_cast<T>(-1);
-        strong[idx]  = 1;
-        ++idx;
-    }
-
-    // Ray rows
-    for(int i = 1; i <= num_coarse; ++i)
+    for(int i = 0; i < nrow; ++i)
     {
         csr_ptr[i] = idx;
 
-        csr_col[idx] = 0;
-        csr_val[idx] = static_cast<T>(-1);
-        strong[idx]  = 1;
-        ++idx;
+        if(i == centre)
+        {
+            // Centre row, connected to every ray
+            for(int j = 0; j < nrow; ++j)
+            {
+                csr_col[idx] = j;
+                csr_val[idx] = static_cast<T>(j == centre ? num_coarse : -1);
+                strong[idx]  = (j != centre);
+                ++idx;
+            }
+        }
+        else
+        {
+            // Ray row, connected to the centre only, with ascending columns
+            for(int j : {std::min(i, centre), std::max(i, centre)})
+            {
+                csr_col[idx] = j;
+                csr_val[idx] = static_cast<T>(j == i ? 2 : -1);
+                strong[idx]  = (j != i);
+                ++idx;
+            }
+        }
 
-        csr_col[idx] = i;
-        csr_val[idx] = static_cast<T>(2);
-        strong[idx]  = 0;
-        ++idx;
+        // The centre is fine, every ray is coarse
+        cf_map[i] = (i != centre);
     }
 
     csr_ptr[nrow] = idx;
-
-    // The centre is fine, every ray is coarse
-    cf_map[0] = 0;
-    for(int i = 1; i <= num_coarse; ++i)
-    {
-        cf_map[i] = 1;
-    }
 
     return nrow;
 }
@@ -122,10 +117,17 @@ static T extpi_tolerance()
 // fit into LDS. The host then scanned the already scanned offsets a second time and produced a
 // garbage operator. Running the same interpolation on the host and on the accelerator and
 // comparing the two operators catches that.
+//
+// With the centre in row 1, row 0 is a coarse point, so the first wavefront of the first block
+// returns from the extended+i kernels before the wavefront of the centre builds its LDS hash
+// table. The hash tables of a full wavefront used to synchronise with a block-wide barrier,
+// which the returned wavefront never reaches. Under GPU AddressSanitizer, which moves LDS into
+// device memory that work-item 0 frees on exit, this was a heap-use-after-free.
 template <typename T>
 void testing_rsamg_extpi_host_fallback(Arguments argus)
 {
     int num_coarse = argus.size;
+    int centre     = argus.index;
 
     std::vector<PtrType> csr_ptr;
     std::vector<int>     csr_col;
@@ -133,8 +135,9 @@ void testing_rsamg_extpi_host_fallback(Arguments argus)
     std::vector<int>     cf_map;
     std::vector<uint8_t> strong;
 
-    int nrow = gen_extpi_wide_fine_row(num_coarse, csr_ptr, csr_col, csr_val, cf_map, strong);
-    int nnz  = csr_ptr[nrow];
+    int nrow
+        = gen_extpi_wide_fine_row(num_coarse, centre, csr_ptr, csr_col, csr_val, cf_map, strong);
+    int nnz = csr_ptr[nrow];
 
     // LocalVector<bool> needs a contiguous bool array, which std::vector<bool> cannot provide
     std::unique_ptr<bool[]> strong_data(new bool[nnz]);

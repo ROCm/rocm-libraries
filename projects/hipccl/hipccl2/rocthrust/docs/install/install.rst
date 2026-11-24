@@ -14,6 +14,12 @@ see :ref:`ROCm Core SDK components <rocm:release-components>`.
 For advanced workflows, source builds, or custom configurations, see
 :doc:`Build from source <./source-build>`.
 
+.. note::
+
+   To build `HYPRE <https://github.com/hypre-space/hypre>`__ with HIP support
+   against rocThrust, use HYPRE 3.2.0 or later. Earlier HYPRE versions fail to
+   compile with ROCm 7.1.0 and later.
+
 .. _install-rocm:
 
 Install the ROCm Core SDK

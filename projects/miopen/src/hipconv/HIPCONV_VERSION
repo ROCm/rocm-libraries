@@ -1,6 +1,6 @@
-EMU version: v0.5.0-rc7
-EMU commit: 29f079343ad2a2f1f475d04b43c5f589320fcad8
-Snapshot date: 2026-11-12
+EMU version: v0.5.1-rc1
+EMU commit: 201c04f63d04c0fdc9baf679064e57e1665f406d
+Snapshot date: 2026-11-20
 Arches: cdna3,cdna4,cdna5
 Files:
   ./.clang-format
@@ -202,6 +202,7 @@ Files:
   ./src/arch/cdna5/direct_wgrad/config_matcher.hpp
   ./src/arch/cdna5/direct_wgrad/config_table.hpp
   ./src/arch/cdna5/direct_wgrad/kernel.hpp
+  ./src/arch/cdna5/grid_limits.h
   ./src/arch/cdna5/grouped/grouped_multi_g/config.hpp
   ./src/arch/cdna5/grouped/grouped_multi_g/config_desc.cpp
   ./src/arch/cdna5/grouped/grouped_multi_g/config_desc.h

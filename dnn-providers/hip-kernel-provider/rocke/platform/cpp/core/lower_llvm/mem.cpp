@@ -41,6 +41,16 @@ static int64_t ll_attr_int(const rocke_op_t* op, const char* key, int64_t dflt)
     return dflt;
 }
 
+/* The `align` that scalar global load or store `op` prints: its
+ * rocke_i_align_attr, refused as the vector accesses refuse it, or
+ * `unannotated` (the op's own claim for IR without `align`) when the op carries
+ * none. Python lower_llvm.py::_scalar_global_align. */
+static int64_t ll_scalar_global_align(const rocke_op_t* op, int64_t unannotated)
+{
+    const int64_t align = rocke_i_align_attr(op);
+    return align != 0 ? align : unannotated;
+}
+
 /* str attr with default (Python op.attrs.get(key, dflt)). */
 static const char* ll_attr_str(const rocke_op_t* op, const char* key, const char* dflt)
 {
@@ -160,7 +170,7 @@ static void op_memref_global_load(rocke_lower_t* L, const rocke_op_t* op)
     const rocke_value_t* idx = op->operands[1];
     const char* ptr_ty = ll_global_load_ptr_type(L, "global_load_f16", ptr);
     const char* gep = rocke_ll_fresh(L, "gep");
-    int64_t align = ll_attr_int(op, "align", 2);
+    const int64_t align = ll_scalar_global_align(op, 2);
     rocke_ll_emitf(L,
                    "  %s = getelementptr inbounds half, %s %s, i32 %s",
                    gep,
@@ -180,7 +190,7 @@ static void op_memref_global_load_typed(rocke_lower_t* L, const rocke_op_t* op)
     /* The GEP index takes the operand's own width, as in global_load_vN. */
     const char* idx_ty = rocke_ll_llvm_type(L, idx->type);
     const char* gep = rocke_ll_fresh(L, "gep");
-    int64_t align = ll_attr_int(op, "align", 1);
+    const int64_t align = ll_scalar_global_align(op, 1);
     rocke_ll_emitf(L,
                    "  %s = getelementptr inbounds %s, %s %s, %s %s",
                    gep,
@@ -200,7 +210,7 @@ static void op_memref_global_store(rocke_lower_t* L, const rocke_op_t* op)
     const rocke_value_t* val = op->operands[2];
     rocke_ll_require_global_header_ptr(L, "store_f16", ptr, "ptr");
     const char* gep = rocke_ll_fresh(L, "gep");
-    int64_t align = ll_attr_int(op, "align", 2);
+    const int64_t align = ll_scalar_global_align(op, 2);
     rocke_ll_emitf(L,
                    "  %s = getelementptr inbounds half, ptr addrspace(1) %s, i32 %s",
                    gep,
@@ -221,7 +231,7 @@ static void op_memref_global_store_typed(rocke_lower_t* L, const rocke_op_t* op)
     rocke_ll_require_global_header_ptr(L, "global_store", ptr, "ptr");
     const char* elem_ty = rocke_ll_llvm_type(L, val->type);
     const char* gep = rocke_ll_fresh(L, "gep");
-    int64_t align = ll_attr_int(op, "align", 1);
+    const int64_t align = ll_scalar_global_align(op, 1);
     rocke_ll_emitf(L,
                    "  %s = getelementptr inbounds %s, ptr addrspace(1) %s, i32 %s",
                    gep,
