@@ -1034,8 +1034,8 @@ namespace
                                             const rocsparse::check_matrix_ell_sort_limits& limits,
                                             rocsparse_data_status&                         data)
     {
-        const I            m = static_cast<I>(rows.size());
-        std::vector<I>     cols;
+        const I        m = static_cast<I>(rows.size());
+        std::vector<I> cols;
         ell_pack<I>(rows, static_cast<int>(width), base_of(base), cols);
         device_vector<I> dcol(cols);
 
