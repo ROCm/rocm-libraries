@@ -50,13 +50,13 @@ void warnOnceMissingEnginePrediction(
     const std::string& architecture,
     const hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT& prediction)
 {
-    static std::mutex reportedMutex;
-    static std::set<std::tuple<std::string, std::string, std::string>> reported;
+    static std::mutex s_reportedMutex;
+    static std::set<std::tuple<std::string, std::string, std::string>> s_reported;
 
     const std::string archName = architecture.substr(0, architecture.find(':'));
     {
-        const std::lock_guard<std::mutex> guard(reportedMutex);
-        if(!reported.emplace(engineName, metric, archName).second)
+        const std::lock_guard<std::mutex> guard(s_reportedMutex);
+        if(!s_reported.emplace(engineName, metric, archName).second)
         {
             return;
         }
