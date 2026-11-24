@@ -76,8 +76,8 @@ The additive-bias bodies (`use_additive_bias`, hipDNN's `attn_mask`) are packed-
 architectures. Their bias read indexes only by the bias's own three strides. They ignore the twelve
 because they were added while this work was open and were not ported to it; on gfx950 the D128 bias
 body with LSE already sits at the 256-VGPR budget (it keeps its bias loads scalar because the
-4-wide ones spill), so the extra stride arithmetic may not fit. Serving strides there is a separate
-follow-up. The hipDNN dense engines decline a graph that has an `attn_mask` and operands that are
+4-wide ones spill), so the extra stride arithmetic may not fit. Serving strides there is tracked in
+AICK-3355. The hipDNN dense engines decline a graph that has an `attn_mask` and operands that are
 not packed BSHD, with the cause `attn_mask` in the INFO log.
 
 A KV-segment launch with a strided O is refused (the combine step needs a packed O). The baseline
@@ -204,6 +204,9 @@ per table. The numeric gate passed for every arm in every run of these tables.
 ### 3.1 gfx950 (256 CU, LLVM 22), baseline `84c6e7ced46`
 
 These kernels were measured before a later change of the gfx950 bodies in the base (section 3.3).
+The 26 shapes are the selection set of the gfx950 work. The re-time on the code after that change,
+with the shipped harness, is in section 7.1; where the two differ, section 7.1 is the current
+result (the grid family still passes, the persistent family does not).
 
 Shapes: the 13 grid-family shapes (g01-g06 grid, k01-k03 KV-segment, h01-h04 grid pinned) and 13
 persistent shapes (p01-p13; p02, p04, p06, p08, p13 take the wide-DMA body). A/A' p95 per table:
@@ -236,8 +239,8 @@ ones, p02 among them, already had a scalar destination in the baseline, so for t
 is the stride addressing itself, whose cause within the body has not been isolated.
 
 An independent re-measurement of the lever alone ran on an earlier version of the shipped
-harness (`SCRIPT_VERSION` `dense-strided-ab-1`; the version in this change has not run on a
-device, section 7). Baseline `74a573ca382` against a build with the lever and the twelve
+harness (`SCRIPT_VERSION` `dense-strided-ab-1`; the version in this change ran later, section 7.1).
+Baseline `74a573ca382` against a build with the lever and the twelve
 declared-but-ignored arguments, A/A' p95 0.15%: -1.86% [-2.30, -1.44], 13 of 13 shapes faster,
 numeric gate of form (a) on every arm; two more seeds gave -1.76% [-2.18, -1.37] and -1.86%
 [-2.30, -1.47]. (`74a573ca382` and `84c6e7ced46` differ in two gfx950 IR rows, both varlen,
@@ -246,8 +249,10 @@ which are not timed.) Run in a separate process per arm, the same pair gave A/A'
 
 ### 3.2 gfx942 (304 CU, LLVM 22), baseline `74a573ca382`
 
-30 shapes in three groups (table above): grid 12 (8 factory-served D64 shapes and the 4 forced "G"
-D128 rows), KV-segment 3 (forced), persistent 15. Numeric gate: form (b), 30 of 30 shapes, every
+The selection set: the 30 shapes that chose the gfx942 body changes, so the intervals below are
+post-selection (the held-out run on 22 other shapes is in section 7.1). 30 shapes in three groups
+(table above): grid 12 (8 factory-served D64 shapes and the 4 forced "G" D128 rows), KV-segment 3
+(forced), persistent 15. Numeric gate: form (b), 30 of 30 shapes, every
 arm, before and after timing: the new output bit-identical to the baseline's, the baseline within
 tolerance of the fp64 reference.
 
@@ -347,7 +352,9 @@ What chose what:
 - **The PV issue order.** LA to LAPS in run C only (the persistent paragraph above); on the grid
   it moves the geomean by less than 0.1 point.
 
-Section 7.1 sets up a held-out run on 22 other shapes that would test these choices.
+Section 7.1 gives the held-out run on 22 other shapes that tested these choices: the PV order and
+the scalar base held in part, the per-row exception showed no effect, and the grid and KV-segment
+families fail the bar on one shape each.
 
 ### 3.3 The code that was timed and the code in this change
 
@@ -365,7 +372,8 @@ library rows.
 changed both bodies that were timed, the grid body and the persistent body, in the baseline as
 much as in this change: it moved 45 of the 47 gfx950 representative rows that existed at
 measurement. Section 3.1 and the gfx950 half of the catalog sweep (section 5) therefore describe
-the gfx950 kernels before that change; neither has been re-run since. (`84c6e7ced46` to
+the gfx950 kernels before that change. The speed rows were re-timed on the code after it (section
+7.1); the catalog sweep has not been re-run. (`84c6e7ced46` to
 `c3448b0c5f5` moved none of the 47 rows.)
 
 Rows added since the measurements were not timed: the fp8 K/V-cache and paged rows (packed-only),
@@ -408,8 +416,9 @@ on all 26 gfx950 shapes.
   against 26 in the baseline. On the block_m 128 causal kernels it adds an overlap the baseline
   never had (13 MFMAs in the exp span of p04), which is where most of its gain comes from
   (section 3.2). With the default `d_major` order only the first output tile's chain (8 of the
-  32 PV MFMAs) follows its own pack; all 32 do only with `pv_loop_order="k_major"`, which was
-  never timed on a device. With this order the persistent result moved from a smaller gain with
+  32 PV MFMAs) follows its own pack; all 32 do only with `pv_loop_order="k_major"`, which the
+  held-out run timed (section 7.1): slower on the causal D128 persistent kernels and spilling on
+  two D64 grid shapes, so it is not a default. With this order the persistent result moved from a smaller gain with
   several shapes above the band to the -3.5% above. The schedule is compiler-specific (offline
   ISA): at LLVM 23 and 24 the baseline's block_m 256 causal persistent kernel is itself
   serialized and the default PV order stays serialized, while the block_m 128 baseline kernels
@@ -574,10 +583,10 @@ This is independent of the strides and is relevant to any regeneration of these 
   not: its gfx942 runner needs torch at launch, so its torch-free export fails, and with torch
   imported the export is pinned to torch's LLVM 22. A cross-compiler A/B against the baseline is
   therefore not possible with the shipped harness as it is.
-- **The gfx950 measurements predate #15951** (section 3.3), which changed the timed gfx950 bodies
-  in the base: the speed rows of section 3.1 and the gfx950 half of the catalog sweep (sections
-  5.1 and 5.2). Neither has been re-run since. #15951 changes only gfx950 code, so the gfx942
-  rows are not affected by it.
+- **The gfx950 selection-set rows and the catalog sweep predate #15951** (section 3.3), which
+  changed the timed gfx950 bodies in the base. The speed rows were re-timed on the code after it
+  (section 7.1); the gfx950 half of the catalog sweep (sections 5.1 and 5.2) has not been re-run.
+  #15951 changes only gfx950 code, so the gfx942 rows are not affected by it.
 - **How the gate rows were measured.** The speed rows of sections 3.1 (apart from the independent
   lever re-measurement) and 3.2 come from earlier scratch versions of the in-process harness whose
   design the shipped harness inherits (they loaded each arm's kernel file as a separate module in
@@ -588,46 +597,178 @@ This is independent of the strides and is relevant to any regeneration of these 
   reproduced the gfx950 lever result inside its interval. The version in this change
   (`dense-strided-ab-2`) changed in review: its export format (a shape signature and
   `workspace_bytes` per case), the segment-workspace buffers it sizes from `workspace_bytes`, the
-  completeness, round-count and compiler checks, and its exit codes. It has not run on any
-  device; its device path is exercised only by CPU dry runs and host tests. No version of the
-  shipped harness has been run on gfx942 or on the gfx950 persistent family, and the shape files
-  of those two sets are not shipped (the table in section 2 is their source). The trees of the
+  completeness, round-count and compiler checks, and its exit codes. That version ran on a
+  device after the scratch runs, for the held-out gfx942 run and the gfx950 re-time (section
+  7.1); the rows of sections 3.1 and 3.2 above it did not. The shape files of the gfx950
+  persistent family and of the two gfx942 sets are not shipped (the table in section 2 and the
+  table in section 7.1 are their source). The trees of the
   diagnostic arms (lever only, declared-but-ignored, and the gfx942 arms of section 3.2) are not
   in the repository.
-- **gfx942 evidence is post-selection.** The destination form and the PV order were chosen by
-  timing the same 30 shapes that section 3.2 reports. No sweep of the existing gfx942 knobs
-  (`pv_priority`, `pv_loop_order`, `pv_sched_fence_mask`, `waves_per_eu` and the others) on the
-  strided build was recorded before the body was changed. A held-out validation is set up in
-  section 7.1 (22 shapes not used for the choice, the arms, the commands and the pass rule, all
-  written down before any run) and has not been run: it needs a gfx942 device.
+- **gfx942 selection-set evidence is post-selection.** The destination form and the PV order were
+  chosen by timing the same 30 shapes that section 3.2 reports. No sweep of the existing gfx942
+  knobs (`pv_priority`, `pv_loop_order`, `pv_sched_fence_mask`, `waves_per_eu` and the others) on
+  the strided build was recorded before the body was changed. The held-out run of section 7.1
+  (22 shapes not used for the choice, arms, commands and pass rule written down before the run)
+  tested these choices: LLVM 22 and one 304-CU part only, no sliding-window body, no non-BSHD
+  layout.
 - **Speed on strided layouts** is not a comparison against the baseline (the baseline cannot launch
   them); it rests on the catalog sweep against each graph's BSHD twin.
-- **gfx950 persistent bodies:** +0.27% overall, six shapes above the measured noise; p02 at +1.02%
-  has its median just above the 1% floor, and its interval straddles it. The row passes only
-  through the band's 1% floor, and it is accepted. A speed pass like the gfx942 one would be a
+- **gfx950 persistent bodies:** the selection-set row (before #15951) was +0.27% overall, six
+  shapes above the measured noise, and passed only through the band's 1% floor. The re-time after
+  #15951 (section 7.1) fails the bar in three of three seeds: p09 (D64, 64/8 heads, S 2048,
+  causal, bf16) is +1.5% to +1.6%, wholly above the band, with p10 near it and p12 unstable between
+  runs. The failure is accepted and not explained. A speed pass like the gfx942 one would be a
   follow-up: a port of the scalar LDS destination to the non-wide persistent bodies, and, for the
   wide-DMA ones (which already have it), a look at what the stride addressing costs inside the
   work loop.
 - **gfx942 residuals:** the grid and KV-segment rows fail the bar and are accepted exceptions:
   g02G (forced grid, not a configuration the dispatcher picks) and k03 (KV-segment D64) are above
-  the 1% band, and the KV-segment row rests on three forced shapes. Also accepted: the LLVM 20
-  two-SGPR spill of g06.
-- **Bodies that ignore the strides** (section 1): the additive-bias bodies on both architectures;
-  on gfx950 the `gqa_pair` work orders, ragged, varlen, paged and fp8 K/V-cache bodies; on gfx942
-  the K double-buffer and V register-prefetch pipelines and paged K/V. A strided layout for one of
-  them still needs a copy. Serving them is follow-up work.
+  the 1% band, and the KV-segment row rests on three forced shapes. The held-out run adds two:
+  q15 (a factory-chosen D64 bf16 causal grid shape, +1.2% to +1.4%) and q20K (a forced D128 bf16
+  causal KV-segment shape, +1.7% to +2.1%); the 30-shape and 22-shape sets fail the same two
+  families. Also accepted: the LLVM 20 two-SGPR spill of g06.
+- **Bodies that ignore the strides** (section 1). A strided layout for one of them still needs a
+  copy; serving them is tracked per body family:
+  - AICK-3355: the additive-bias bodies, on both architectures.
+  - AICK-3356: the gfx950 fp8 K/V-cache bodies.
+  - AICK-3357: the ragged, varlen and paged bodies (on gfx942, paged).
+  - AICK-3358: the gfx950 `gqa_pair` persistent work orders and the gfx942 K double-buffer and V
+    register-prefetch pipelines.
+- **Trained rankers and strided graphs.** The trained rankers (UHD) of both dense engines take the
+  Q/K/V/O strides as input features, but they were trained on corpus graphs that are all packed
+  BSHD (the corpus tool has no layout or stride facet), so a ranking for a graph that is not
+  packed is extrapolated. The engine-level sweep of section 5 (0 of 32 strided cells per
+  architecture slower than their BSHD twin) is the only check of it. The fingerprint gate of the
+  rankers passes. This change adds no new instance to any catalog.
 - **Catalog gap on gfx950** (section 5.2): a manifest that frees `waves_per_eu` and the PV
   scheduling knobs, or per-head-group variants, would remove it; it predates this change.
 - **The sweep numbers are engine-level** (see section 6), the shortlist-then-verdict design bounds
   but does not remove the winner's curse, and the correctness gate of the sweep runs in its own phase
   of the same campaign, not inside every timing phase.
 
-### 7.1 Held-out gfx942 validation (set up, not run)
+### 7.1 Held-out gfx942 validation and gfx950 re-time: results
 
-The gfx942 body changes were chosen on the 30 shapes of section 3.2, so their intervals are
-post-selection. This run tests them on 22 shapes that played no part in the choice. Its shapes,
-arms, commands and pass rule are fixed here, before any device run, so a later result is read
-against them and not against a rule chosen after seeing it.
+Two sets of device runs of the shipped harness (`dense-strided-ab-2`, from this change, unedited),
+packed BSHD tensors, LLVM 22 in every arm and in the timing process, 24 rounds, an A/A' control in
+every run, one 304-CU gfx942 and one 256-CU gfx950. The code timed is this change at `2cb5a1aed24`. The
+base merged since changed both dense kernel files only by naming the LDS-DMA widths (the capability
+table, #16179); the dense IR goldens did not change and the current tree matches them at LLVM 20,
+22, 23 and 24. The numeric gate passed for every arm, before and after timing, in every run, and
+the output hash of every arm equals the baseline's in every case: the outputs are bit-identical to
+the baseline's.
+
+- **gfx942 held-out run.** The 22 shapes of the design below, none of them one of the 30 that chose
+  the body changes. Baseline A: the merge base of this change, `05205668b34`. The pass rule
+  below was fixed before the run. Arms B (this change) and C to G (one edit each).
+- **gfx950 re-time.** Not held-out: the 26 selection shapes of section 3.1, re-timed after #15951.
+  Baseline A: `e77263495e2` (contains #15951; its code objects equal those of the merge base on all
+  26 shapes). Grid and KV-segment family: seeds 0 and 1. Persistent and wide-DMA family: seeds 0, 1
+  and 2.
+
+**gfx942 held-out, B against A.** The band is max(1%, A2/A p95) = 1.00% in every row.
+
+| family (shapes) | seed | A2/A p95 | B/A geomean [95% interval] | shapes wholly above the band | speed bar |
+|---|---|---|---|---|---|
+| persistent (12) | 0 | 0.11% | -1.62% [-3.24, -0.40] | none | pass |
+| persistent (12) | 1 | 0.10% | -1.61% [-3.16, -0.41] | none | pass |
+| grid (8) | 0 | 0.13% | -1.55% [-4.03, +0.54] | q15 | **fail** |
+| grid (8) | 1 | 0.08% | -1.61% [-4.12, +0.47] | q15 | **fail** |
+| KV-segment (2) | 0 | 0.03% | +0.78% [-0.11, +1.76] | q20K | **fail** |
+| KV-segment (2) | 1 | 0.18% | +0.94% [-0.19, +2.12] | q20K | **fail** |
+
+Failing cases (95% interval wholly above the band, in both seeds):
+
+- **q15** (D64 grid, bf16, causal, batch 2, 40/8 heads, S 3072, the factory's choice): +1.38%
+  [+1.23, +1.56] and +1.23% [+1.13, +1.40]. No gfx942 lever touches the D64 code, so B, C, D and E
+  run the same code object here, and the strides alone give +1.13% [+1.07, +1.26] against A: the
+  cost is reading the strides in the D64 body. The selection set's k03 (a forced D64 bf16 causal
+  KV-segment shape) failed the same way.
+- **q20K** (KV-segment, D128, bf16, causal, 4/1 heads, S 4096, forced): +1.65% [+1.32, +1.85] and
+  +2.06% [+1.78, +2.19]. The strides alone are neutral here (+0.13% [-0.12, +0.51]); the scalar base
+  costs +1.40% [+1.20, +1.50] and the PV order +0.49% [+0.37, +0.61].
+
+Near the band, not failing: q17 (+0.76%, +0.82%), q12G (+0.90%, +0.82%), q18 (+0.73%, +0.44%). The
+persistent gain sits in two short-sequence block_m 128 shapes, q21 (-8.4%, -8.3%) and q08 (-5.7%,
+-5.4%); the other ten persistent shapes are between -1.2% and +0.3%.
+
+**gfx942 lever results** (each pair in its own run with its own A/A' control; "[a, b]" the 95%
+interval):
+
+| lever (pair) | rows | geomean | reading |
+|---|---|---|---|
+| PV issue order (B/C) | causal D128 persistent: q01, q02, q04, q06, q08, q09 | -1.77% [-3.02, -0.97] | helps |
+| same | non-causal bf16 persistent: q21, q03, q07 | +1.95% [+1.67, +2.18], +0.26% [+0.19, +0.44], +0.27% [+0.03, +0.43] (per row) | costs |
+| same | non-causal fp16 persistent: q05, q10, q22 | -0.16%, -0.16%, -0.04% (per row; every interval spans 0) | no effect |
+| same | all persistent (12); grid (8) | -0.72% [-1.64, +0.07]; -0.04% [-0.17, +0.09] | no effect over the family |
+| per-row exception (B/G) | q11G, q12G | -1.51% [-4.30, +1.39] | no measured effect; the two rows go opposite ways: q11G +1.31%, q12G -4.25% |
+| scalar base (B/D) | the 13 rows where the two differ, without q14G and q20K (as registered) | -0.41% [-0.63, -0.12] | small gain |
+| same | the same rows with q20K | -0.28% [-0.58, +0.08] | crosses 0 |
+| same | q20K (causal KV-segment), q21 (non-causal persistent), per row | +1.40% [+1.20, +1.50]; +0.86% [+0.61, +1.43] | the opposite: a cost |
+| strides alone (E/A) | causal D128 persistent (6) | +1.06% [+0.11, +1.75] | neutral to slower |
+| k_major (F/B) | causal D128 persistent (6) | +3.17% [+2.39, +4.13] | slower on all six (+2.2% to +5.2%); not a default |
+
+The short-sequence persistent gain is there with the strides alone on q21 (strides alone -8.60%,
+this change -8.44%, the PV order +1.95%); on q08 the strides alone give -1.10% and the PV order
+most of the rest (-4.66%). Resources, from the exported code objects: this change has no spill and
+no scratch on any of the 22 kernels; the per-row form on every D128 body (arms D and E) spills on
+q14G (5 VGPRs, 24 B scratch), as expected, but not on q20K (no spill, no scratch), where the
+expectation of the rule below was wrong, so its D and E times are real measurements; `k_major`
+spills on q15 and q18 (14 VGPRs, 60 B scratch) and is +8.2% and +8.8% slower there.
+
+Pass rule, point by point (the rule is below):
+
+| # | result |
+|---|---|
+| 1 numeric gate | pass in 7 of 7 runs; 22 of 22 cases |
+| 2 shipped bar per family | persistent pass in both seeds; grid fail (q15); KV-segment fail (q20K) |
+| 3 "persistent faster" | kept: -1.62% [-3.24, -0.40] and -1.61% [-3.16, -0.41], not the post-selection -3.50% |
+| 4 a lever's comment may claim a gain only with an upper bound below 0 | PV order: yes on the causal D128 persistent rows (it costs on the non-causal ones); per-row exception: no, no measured effect; scalar base: yes as registered, not with q20K; `k_major`: no evidence for a default |
+| 5 D and E diagnostic on q14G and q20K | q14G spills as expected; q20K does not |
+
+**gfx950 re-time, B against A** (26 selection shapes, after #15951). The band is 1.00% in every
+row.
+
+| family (shapes) | seed | A2/A p95 | B/A geomean [95% interval] | shapes wholly above the band | speed bar |
+|---|---|---|---|---|---|
+| grid + KV-segment (13) | 0 | 0.05% | -1.84% [-2.70, -1.08] | none | pass |
+| grid + KV-segment (13) | 1 | 0.04% | -1.80% [-2.66, -1.04] | none | pass |
+| persistent + wide-DMA (13) | 0 | 0.16% | +0.17% [-0.07, +0.47] | p09 | **fail** |
+| persistent + wide-DMA (13) | 1 | 0.25% | +0.20% [-0.04, +0.49] | p09 | **fail** |
+| persistent + wide-DMA (13) | 2 | 0.14% | +0.25% [-0.02, +0.58] | p09 | **fail** |
+
+The grid family is faster on every shape, from -5.18% (g06) to -0.38% (h04), a larger and more
+spread-out gain than the -1.48% of section 3.1. The persistent family's geomean is about what it
+was, but the bar fails on one shape:
+
+- **p09** (D64, 64/8 heads, S 2048, causal, bf16, non-wide persistent body): +1.61% [+1.40, +1.68],
+  +1.48% [+1.34, +1.62], +1.49% [+1.37, +1.55]. It is stable: +1.4% to +1.6% in 5 of 5 runs (three
+  seeds, a 48-round run, and a reversed run with the head as the baseline, which gave -1.36%
+  [-1.47, -1.26]). Its resources change from 61 SGPRs and 206 VGPRs (base) to 78 and 184 (this
+  change), with no spill either way; p11, the same body at 32/32 heads and S 4096 in fp16, has the
+  same resource change and costs nothing (-0.06%).
+- **p10** (D64, 64/8 heads, S 8192, no mask, fp16): +0.86% to +0.97% in every run; its interval
+  touches 1% but was never wholly above it.
+- **p12** (D64, 32/32 heads, S 16384, bf16) is unstable between runs, and the seed is not the cause:
+  over 9 runs it read about 0% in 4 and +1.06% to +1.74% in 5, with the same seed giving both
+  outcomes and identical code objects and arguments; in three runs it was wholly above the band. The 95% interval of one run understates its run-to-run variation. Buffer placement is the
+  likely cause and was not isolated.
+- p02, the row that was +1.02% before #15951, is +0.16% to +0.21% now.
+
+**These regressions are measured, not explained.** The gfx942 rows q15 and q20K and the gfx950 rows
+p09, p10 and p12 were not profiled. The arm pairs say which change costs what on q15 (the strides
+alone) and q20K (the scalar base and the PV order); why the stride addressing costs more on the D64
+64/8-head persistent shapes of gfx950, and why p12 moves between runs, was not isolated. They are
+accepted as residuals of this change, not passed.
+
+**What the PR may say.** "Not slower than the baseline" holds on held-out or re-timed shapes for the
+gfx942 persistent family and the gfx950 grid and KV-segment family only. It does not hold for the
+gfx942 grid family (q15) and KV-segment family (q20K), or the gfx950 persistent family (p09). The
+gfx942 "persistent faster" claim stays with the held-out interval (about -1.6%), not -3.50%. Not
+covered: sliding-window bodies (the harness has no window field), compilers other than LLVM 22,
+the 228-CU gfx942 part, and layouts other than BSHD (the shape file has `layouts: [bshd]` only).
+
+**Design of the gfx942 held-out run** (fixed before the run, so the result is read against it and
+not against a rule chosen after seeing it).
 
 **Shapes.** None is one of the 30: each differs from every one of them in batch, head pair,
 sequence length, or dtype with mask, and 11 of the 22 differ from each of the 30 in at least two
@@ -667,7 +808,7 @@ spec with its own KV-split rule), as in section 2.
 Write them in the schema of `library/benchmarks/common/attention_dense_strided_ab_shapes.yaml`
 (`mask: causal_tl` or `none`, `select: auto`, `layouts: [bshd]`); the G rows add
 `override: {persistent: false}` and the K rows `override: {persistent: false, kv_segments: rule}`.
-`--list` on this tree, with the baseline and arms B to G below, gives the bodies above for every
+`--list` on this tree, with the baseline and arms B to G below, gave the bodies above for every
 arm and an equal spec in every arm (22 cases, no mismatch). The sliding-window bodies are left
 out because neither the harness request nor its fp64 reference has a window field.
 
@@ -731,4 +872,5 @@ python $HARN bar <each result>
    it is a separate change (it keeps every kernel name while changing the code, so it needs a
    golden re-bless and a check of every name-keyed cache).
 5. D and E are expected to spill to scratch on q14G and q20K (the per-row form on causal bf16
-   D128), so their times there are diagnostic only.
+   D128), so their times there are diagnostic only. (Result: q14G spilled, q20K did not, so the
+   q20K times were taken as measurements.)

@@ -84,7 +84,8 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
   `lds_num_buffers` 2 pipelines, and the bias variants (`use_additive_bias` 1), whose bias
   read indexes only by the bias's own three strides. The bias kernels address packed Q, K, V
   and O, and the extra stride arithmetic is not shown to fit their register budget; serving
-  strides there is a separate follow-up. A strided graph with an `attn_mask` is declined at the graph match (see
+  strides there is tracked in AICK-3355 (the K double-buffer and V register-prefetch pipelines:
+  AICK-3358). A strided graph with an `attn_mask` is declined at the graph match (see
   `attn_mask` above).
   The head-dim stride must be 1, every stride of an axis longer than 1 a multiple of 8 elements
   (a token stride at least the head size), no operand may overlap itself, each operand must
@@ -128,8 +129,8 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
     - Split KV (`kv_segments` > 1; needs a workspace and a combine launch).
     - Window rows that see no key (seqlen_q - seqlen_kv >= W) in a graph that binds a stats
       (LSE) output: see the Mask entry above.
-  - Not yet in the gfx942 kernel: an `attn_mask` over Q, K, V or O that are not packed BSHD
-    (BHSD, a batch slice, a fused QKV buffer). The bias bodies ignore the strides, so the
+  - Not yet in the gfx942 kernel (AICK-3355): an `attn_mask` over Q, K, V or O that are not
+    packed BSHD (BHSD, a batch slice, a fused QKV buffer). The bias bodies ignore the strides, so the
     graph match declines such a graph with the cause `attn_mask` instead of letting every
     bias kernel miss.
   - Not in the catalog: sliding windows other than 128, 512, 1024 and 2048 keys (W is a

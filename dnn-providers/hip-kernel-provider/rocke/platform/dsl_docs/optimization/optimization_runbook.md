@@ -1284,9 +1284,10 @@ layout match, independent of the atom's compute throughput.
   compile-time group constant per copy: deriving it per row in a VGPR costs a
   VGPR and a `v_readfirstlane` per issue in the loop. On the gfx950 dense
   attention grid bodies this paid for the extra address arithmetic of
-  launch-time strides; on gfx942 it did not help every body (it timed slower on
-  the non-causal bf16 D128 grid, which keeps the per-row form), so time it per
-  body and re-check the schedule (Section 8.5).
+  launch-time strides; on gfx942 it did not help every body (on the selection
+  shapes it timed slower on the non-causal bf16 D128 grid, which keeps the
+  per-row form; on held-out shapes that choice shows no measured effect), so
+  time it per body and re-check the schedule (Section 8.5).
 
 ### 8.3 Waits And Barriers
 

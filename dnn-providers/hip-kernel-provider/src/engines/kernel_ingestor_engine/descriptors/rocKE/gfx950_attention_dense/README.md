@@ -43,8 +43,8 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx950AttentionDense`.
   ignores them, so a bias graph is served only with packed operands. The bias read indexes only
   by the bias's own three strides. The bias kernels address packed Q, K, V and O, and rocKE's
   D128 bias body with LSE already sits at the 256-VGPR budget, so the extra stride arithmetic
-  may not fit; serving strides there is a separate follow-up. A strided graph with an `attn_mask` is declined at the graph match (see
-  `attn_mask` above).
+  may not fit; serving strides there is tracked in AICK-3355. A strided graph with an
+  `attn_mask` is declined at the graph match (see `attn_mask` above).
   The head-dim stride must be 1, every stride of an axis longer than 1 a multiple of 8 elements
   (a token stride at least the head size), no operand may overlap itself, each operand must
   declare a base alignment that is a multiple of 16 bytes, and the slabs must stay inside the kernel's
@@ -70,7 +70,7 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx950AttentionDense`.
   flag, and refuses a `dispatch.v5` plan that says its bias kernel reads the strides. Beyond
   that, `reads_strides` and `block_n` are trusted, as `block_m` is: a saved plan carries no KMD
   knobs, so the restore cannot ask which body its code object is.
-- Not covered (follow-up): an `attn_mask` over Q, K, V or O that are not packed BSHD (BHSD, a
+- Not covered (AICK-3355): an `attn_mask` over Q, K, V or O that are not packed BSHD (BHSD, a
   batch slice, a fused QKV buffer), declined as above.
 
 ## Files
