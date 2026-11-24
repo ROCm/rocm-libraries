@@ -25,7 +25,7 @@ extern "C" __global__ void RMSnormBwdScaleBias(const DyType* __restrict__ dy,
                                                ComputeType alpha,
                                                ComputeType beta)
 {
-    static_assert(std::is_same<ComputeType, float>::value,
+    static_assert(hip_kernel_provider::traits::is_same<ComputeType, float>::value,
                   "ComputeType must be float for the RMSnormBwdScaleBias kernel");
 
     const unsigned int tidx = threadIdx.x + blockIdx.x * LOCAL_SIZE;
@@ -79,7 +79,7 @@ extern "C" __global__ void RMSnormBwdData(const DyType* __restrict__ dy,
                                           ComputeType alpha,
                                           ComputeType beta)
 {
-    static_assert(std::is_same<ComputeType, float>::value,
+    static_assert(hip_kernel_provider::traits::is_same<ComputeType, float>::value,
                   "ComputeType must be float for the RMSnormBwdData kernel");
 
     const unsigned int gid = blockIdx.x;

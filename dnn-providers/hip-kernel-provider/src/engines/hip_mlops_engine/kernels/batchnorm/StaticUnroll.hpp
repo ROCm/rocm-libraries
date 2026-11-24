@@ -92,7 +92,8 @@ struct static_unroll_impl
         static constexpr bool kHasContent
             = (Increment > 0 && IBegin < IEnd) || (Increment < 0 && IBegin > IEnd);
 
-        using type = typename std::conditional<kHasContent, type0, type1>::type;
+        using type =
+            typename hip_kernel_provider::traits::conditional<kHasContent, type0, type1>::type;
     };
 
     template <class>

@@ -23,5 +23,7 @@ add_kernels_for_embedding(
     ${CMAKE_CURRENT_SOURCE_DIR}/layernorm/LayernormCommon.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/layernorm/LayernormFwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/types/VectorTypes.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/common/FixedWidthTypes.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/common/TypeTraits.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/common/HipKernelActivation.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/common/HipKernelMath.hpp)

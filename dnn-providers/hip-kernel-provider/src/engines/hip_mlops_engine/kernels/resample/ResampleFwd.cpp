@@ -1,9 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <cstdint>
-#include <type_traits>
-
+#include "FixedWidthTypes.hpp"
 #include "VectorTypes.hpp"
 
 using InputType = HIP_PLUGIN_RESAMPLE_INPUT_TYPE;
@@ -89,7 +87,7 @@ extern "C" __global__ void ResampleFwd(const InputType* __restrict__ x,
                                        OutputType* __restrict__ y,
                                        IndexType* __restrict__ index)
 {
-    static_assert(std::is_same<ComputeType, float>::value,
+    static_assert(hip_kernel_provider::traits::is_same<ComputeType, float>::value,
                   "ResampleFwd currently supports float compute type only");
 
     const uint64_t gid = blockIdx.x * blockDim.x + threadIdx.x;

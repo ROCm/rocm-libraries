@@ -184,4 +184,34 @@ TEST_F(TestKernelCompileOptions, VerifiesArchOptions)
     EXPECT_TRUE(hasOption(options, "--offload-arch=gfx110"));
 }
 
+// The DPP inline asm is gated by a per-arch denylist that does not cover gfx117x/gfx125x, so
+// HIP_PLUGIN_USE_AMDGCN must stay 0 for every architecture until the gating moves to __GFX9__.
+TEST_F(TestKernelCompileOptions, KeepsAmdgcnDisabledForAllArchitectures)
+{
+    for(const char* arch :
+        {"gfx90a", "gfx942", "gfx950", "gfx1030", "gfx1170", "gfx1201", "gfx1250"})
+    {
+        setUpTestCase(DataType::FLOAT, TensorLayout::NCHW, arch);
+
+        const KernelCompileOptions options(_inputTensorAttrs, _deviceProps);
+
+        EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_USE_AMDGCN=0")) << arch;
+    }
+}
+
+TEST_F(TestKernelCompileOptions, UnlistedArchitecturesHaveNoArchFlags)
+{
+    for(const char* arch : {"gfx1170", "gfx1250"})
+    {
+        setUpTestCase(DataType::FLOAT, TensorLayout::NCHW, arch);
+
+        const KernelCompileOptions options(_inputTensorAttrs, _deviceProps);
+
+        EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_GFX103X=0")) << arch;
+        EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_GFX110X=0")) << arch;
+        EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_GFX115X=0")) << arch;
+        EXPECT_TRUE(hasOption(options, "-DHIP_PLUGIN_GFX120X=0")) << arch;
+    }
+}
+
 };

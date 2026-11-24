@@ -4,8 +4,8 @@
 #pragma once
 
 #include "HipKernelActivation.hpp"
+#include "TypeTraits.hpp"
 #include "VectorTypes.hpp"
-#include <type_traits>
 
 // hip_kernel_provider root configs
 namespace hip_kernel_provider
@@ -196,25 +196,25 @@ struct proto_config
     using compute_vec_type =
         typename hip_kernel_provider::mapped_vector_type<compute_type, VecSize>::type;
 
-    using input_channel_vec_type = typename std::
+    using input_channel_vec_type = typename traits::
         conditional<HipKernelConfig::layout_channel_last, input_vec_type, input_type>::type;
-    using output_channel_vec_type = typename std::
+    using output_channel_vec_type = typename traits::
         conditional<HipKernelConfig::layout_channel_last, output_vec_type, output_type>::type;
     using scale_bias_channel_vec_type =
-        typename std::conditional<HipKernelConfig::layout_channel_last,
-                                  scale_bias_vec_type,
-                                  scale_bias_type>::type;
+        typename traits::conditional<HipKernelConfig::layout_channel_last,
+                                     scale_bias_vec_type,
+                                     scale_bias_type>::type;
     using mean_inv_variance_channel_vec_type =
-        typename std::conditional<HipKernelConfig::layout_channel_last,
-                                  mean_inv_variance_vec_type,
-                                  mean_inv_variance_type>::type;
-    using compute_channel_vec_type = typename std::
+        typename traits::conditional<HipKernelConfig::layout_channel_last,
+                                     mean_inv_variance_vec_type,
+                                     mean_inv_variance_type>::type;
+    using compute_channel_vec_type = typename traits::
         conditional<HipKernelConfig::layout_channel_last, compute_vec_type, compute_type>::type;
 
-    using fp_type = typename std::conditional<
+    using fp_type = typename traits::conditional<
         input_type_strategy == type_strategy::fpmix,
         _Float16,
-        typename std::conditional<input_type_strategy == type_strategy::fp32, float, __bf16>::
+        typename traits::conditional<input_type_strategy == type_strategy::fp32, float, __bf16>::
             type>::type;
     using fp_prec_type = float;
     using fp_accum_type = float;

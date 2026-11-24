@@ -6,7 +6,7 @@
 #ifndef __HIPCC_RTC__
 #include <hip/hip_fp16.h>
 #endif
-#include <type_traits>
+#include "TypeTraits.hpp"
 
 namespace hip_kernel_provider
 {
@@ -107,7 +107,7 @@ namespace detail
 template <typename OutType, typename InType>
 constexpr __forceinline__ __device__ __host__ OutType scalarcast(InType in)
 {
-    if constexpr(std::is_same<OutType, InType>::value)
+    if constexpr(traits::is_same<OutType, InType>::value)
     {
         return in;
     }

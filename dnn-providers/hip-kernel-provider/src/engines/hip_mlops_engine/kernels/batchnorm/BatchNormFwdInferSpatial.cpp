@@ -70,7 +70,7 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
             inhat[i]
                 = hip_kernel_provider::applyActivation<ComputeType, hip_plugin_config::neuron_op>(
                     inhat[i], alpha, beta);
-            if constexpr(std::is_same_v<InputType, OutputType>)
+            if constexpr(hip_kernel_provider::traits::is_same_v<InputType, OutputType>)
             {
                 value[i] = hip_kernel_provider::cast<OutputType>(inhat[i]);
             }
@@ -82,7 +82,7 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
 
         // write output value
         OutputVecType* outPtr = reinterpret_cast<OutputVecType*>(out + batchIndex);
-        if constexpr(std::is_same_v<InputType, OutputType>)
+        if constexpr(hip_kernel_provider::traits::is_same_v<InputType, OutputType>)
         {
             *outPtr = *reinterpret_cast<const OutputVecType*>(value);
         }

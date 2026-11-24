@@ -159,7 +159,7 @@ __forceinline__ __device__ unsigned int getStashIndex(unsigned int vindex,
     // For upcast, two _FLOAT values can only be stored in one _FLOAT_PREC value if _FLOAT is not the same type as _FLOAT_PREC (i.e. only during backwards)
     if constexpr(hip_kernel_provider::config::input_type_strategy == type_strategy::fpmix
                  || (hip_kernel_provider::config::input_type_strategy == type_strategy::fpupcast
-                     && !std::is_same_v<FpPrecType_C, FpType_C>))
+                     && !traits::is_same_v<FpPrecType_C, FpType_C>))
     {
         // 2 _FLOAT values are used to store 1 _FLOAT_PREC value.
         if constexpr(hip_kernel_provider::config::layout_channel_last)
@@ -193,7 +193,7 @@ __forceinline__ __device__ unsigned int getStashIndex(unsigned int vindex,
     else if constexpr(hip_kernel_provider::config::input_type_strategy == type_strategy::bfpmix
                       || (hip_kernel_provider::config::input_type_strategy
                               == type_strategy::bfpupcast
-                          && !std::is_same_v<FpPrecType_C, FpType_C>))
+                          && !traits::is_same_v<FpPrecType_C, FpType_C>))
     {
         // 2 _FLOAT values are used to store 1 _FLOAT_PREC value.
         if constexpr(hip_kernel_provider::config::layout_channel_last)
@@ -404,7 +404,7 @@ __forceinline__ __device__ void running_stash(const FpPrecType_C* __restrict pre
 
 template <typename FpPrecType,
           hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
-          typename std::enable_if_t<NrnOpType == ActivationMode::PASTHRU>* = nullptr>
+          typename traits::enable_if_t<NrnOpType == ActivationMode::PASTHRU>* = nullptr>
 __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& tmp,
                                                              FpPrecType const&,
                                                              FpPrecType const&)
@@ -414,7 +414,7 @@ __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& t
 
 template <typename FpPrecType,
           hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
-          typename std::enable_if_t<NrnOpType == ActivationMode::PASTHRU>* = nullptr>
+          typename traits::enable_if_t<NrnOpType == ActivationMode::PASTHRU>* = nullptr>
 __forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType const& dy,
                                                                  FpPrecType const&,
                                                                  FpPrecType const&,
@@ -427,7 +427,7 @@ __forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType cons
 
 template <typename FpPrecType,
           hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
-          typename std::enable_if_t<NrnOpType == ActivationMode::RELU>* = nullptr>
+          typename traits::enable_if_t<NrnOpType == ActivationMode::RELU>* = nullptr>
 __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& tmp,
                                                              FpPrecType const&,
                                                              FpPrecType const&)
@@ -437,7 +437,7 @@ __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& t
 
 template <typename FpPrecType,
           hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
-          typename std::enable_if_t<NrnOpType == ActivationMode::RELU>* = nullptr>
+          typename traits::enable_if_t<NrnOpType == ActivationMode::RELU>* = nullptr>
 __forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType const& dy,
                                                                  FpPrecType const& xnorm,
                                                                  FpPrecType const& scale,
@@ -451,7 +451,7 @@ __forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType cons
 
 template <typename FpPrecType,
           hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
-          typename std::enable_if_t<NrnOpType == ActivationMode::CLIPPED_RELU>* = nullptr>
+          typename traits::enable_if_t<NrnOpType == ActivationMode::CLIPPED_RELU>* = nullptr>
 __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& tmp,
                                                              FpPrecType const& _alpha,
                                                              FpPrecType const&)
@@ -461,7 +461,7 @@ __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& t
 
 template <typename FpPrecType,
           hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
-          typename std::enable_if_t<NrnOpType == ActivationMode::CLIPPED_RELU>* = nullptr>
+          typename traits::enable_if_t<NrnOpType == ActivationMode::CLIPPED_RELU>* = nullptr>
 __forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType const& dy,
                                                                  FpPrecType const& xnorm,
                                                                  FpPrecType const& scale,
@@ -475,7 +475,7 @@ __forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType cons
 
 template <typename FpPrecType,
           hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
-          typename std::enable_if_t<NrnOpType == ActivationMode::CLAMP>* = nullptr>
+          typename traits::enable_if_t<NrnOpType == ActivationMode::CLAMP>* = nullptr>
 __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& tmp,
                                                              FpPrecType const& _alpha,
                                                              FpPrecType const& _beta)
@@ -485,7 +485,7 @@ __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& t
 
 template <typename FpPrecType,
           hip_kernel_provider::ActivationMode NrnOpType = hip_kernel_provider::config::neuron_op,
-          typename std::enable_if_t<NrnOpType == ActivationMode::CLAMP>* = nullptr>
+          typename traits::enable_if_t<NrnOpType == ActivationMode::CLAMP>* = nullptr>
 __forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType const& dy,
                                                                  FpPrecType const& xnorm,
                                                                  FpPrecType const& scale,

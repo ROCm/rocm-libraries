@@ -148,6 +148,10 @@ private:
         add("HIP_PLUGIN_USE_FPUPCAST", false);
         add("HIP_PLUGIN_USE_BFPUPCAST", false);
         add("HIP_PLUGIN_LAYOUT_CHANNEL_LAST", isLayoutChannelLast);
+        // Decision: the DPP/row_bcast inline-asm path stays disabled. Kernel gating uses a per-arch
+        // denylist (batchnorm/Configuration.hpp) and the GFX*X flags below do not cover gfx117x or
+        // gfx125x, so enabling this would compile row_bcast asm on unsupported targets. Before
+        // enabling, gate on __GFX9__ as MIOpen does (MIOpen #12889, #13321, #7587).
         add("HIP_PLUGIN_USE_AMDGCN", 0);
     }
 

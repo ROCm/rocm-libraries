@@ -1,9 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <cstdint>
-#include <type_traits>
-
+#include "FixedWidthTypes.hpp"
 #include "VectorTypes.hpp"
 
 using DyType = HIP_PLUGIN_RESAMPLE_DY_TYPE;
@@ -97,7 +95,7 @@ extern "C" __global__ void ResampleBwd(const DyType* __restrict__ dy,
                                        const IndexType* __restrict__ index,
                                        DxType* __restrict__ dx)
 {
-    static_assert(std::is_same<ComputeType, float>::value,
+    static_assert(hip_kernel_provider::traits::is_same<ComputeType, float>::value,
                   "ResampleBwd currently supports float compute type only");
 
     const uint64_t gid = static_cast<uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;

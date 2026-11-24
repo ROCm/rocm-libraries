@@ -23,7 +23,7 @@ extern "C" __global__ void RMSnormFwd(const InputType* __restrict__ x,
                                       ComputeType beta)
 {
     // ComputeType must be float to prevent precision loss
-    static_assert(std::is_same<ComputeType, float>::value,
+    static_assert(hip_kernel_provider::traits::is_same<ComputeType, float>::value,
                   "ComputeType must be float for the RMSnormFwd kernel");
 
     const unsigned int gid = blockIdx.x;
