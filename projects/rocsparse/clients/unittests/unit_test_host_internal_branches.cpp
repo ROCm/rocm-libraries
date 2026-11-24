@@ -1219,21 +1219,21 @@ TEST_F(HostInternalBranches, copy_csrmv_info)
 
     auto fill
         = [&](_rocsparse_csrmv_info& info, rocsparse_indextype itype, rocsparse_indextype jtype) {
-              info.m                  = 1;
-              info.n                  = 1;
-              info.nnz                = 1;
-              info.max_rows           = 1;
-              info.trans              = rocsparse_operation_transpose;
-              info.adaptive.size      = 1;
-              info.adaptive.first_row = 0;
-              info.adaptive.last_row  = 1;
-              info.lrb.size           = 1;
+              info.m                                          = 1;
+              info.n                                          = 1;
+              info.nnz                                        = 1;
+              info.max_rows                                   = 1;
+              info.trans                                      = rocsparse_operation_transpose;
+              info.adaptive.size                              = 1;
+              info.adaptive.first_row                         = 0;
+              info.adaptive.last_row                          = 1;
+              info.lrb.size                                   = 1;
               info.lrb.nRowsBins[rocsparse::lrb_num_bins - 1] = 1;
-              info.index_type_I       = itype;
-              info.index_type_J       = jtype;
-              info.descr              = nullptr;
-              info.csr_row_ptr        = nullptr;
-              info.csr_col_ind        = nullptr;
+              info.index_type_I                               = itype;
+              info.index_type_J                               = jtype;
+              info.descr                                      = nullptr;
+              info.csr_row_ptr                                = nullptr;
+              info.csr_col_ind                                = nullptr;
               alloc(reinterpret_cast<void**>(&info.adaptive.row_blocks));
               alloc(reinterpret_cast<void**>(&info.adaptive.wg_flags));
               alloc(reinterpret_cast<void**>(&info.adaptive.wg_ids));
