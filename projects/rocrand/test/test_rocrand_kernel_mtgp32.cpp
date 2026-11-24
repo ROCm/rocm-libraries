@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -112,11 +112,11 @@ void rocrand_normal_kernel(GeneratorState* states, float* output, const size_t s
         {
             if(state_id % 2 == 0)
             {
-                output[index] = rocrand_normal_double2(&state).x;
+                output[index] = rocrand_normal2(&state).x;
             }
             else
             {
-                output[index] = rocrand_normal_double(&state);
+                output[index] = rocrand_normal(&state);
             }
         }
         // Next position
@@ -392,7 +392,10 @@ TEST(rocrand_kernel_mtgp32, rocrand_normal)
 
     ROCRAND_CHECK(rocrand_make_state_mtgp32(states, mtgp32dc_params_fast_11213, 8, 0));
 
-    const size_t output_size = 8192;
+    // 2^20 values (even blocks: rocrand_normal2, odd blocks: rocrand_normal). The standard error is
+    // ~0.001 for the mean and ~0.0014 for the variance, so the tolerances below are ~5-7 standard
+    // errors. The test is deterministic (fixed seed and parameter sets), so it cannot flake.
+    const size_t output_size = 1 << 20;
     float*       output;
     HIP_CHECK(hipMallocHelper(&output, output_size * sizeof(float)));
     HIP_CHECK(hipDeviceSynchronize());
@@ -406,16 +409,21 @@ TEST(rocrand_kernel_mtgp32, rocrand_normal)
     HIP_CHECK(hipFree(output));
     HIP_CHECK(hipFree(states));
 
-    double mean = std::accumulate(output_host.begin(), output_host.end(), 0.0) / output_size;
-    EXPECT_NEAR(mean, 0.0, 0.2);
-
-    double stddev = 0;
     for(auto v : output_host)
     {
-        stddev += std::pow(static_cast<double>(v) - mean, 2);
+        ASSERT_TRUE(std::isfinite(v));
     }
-    stddev = stddev / output_size;
-    EXPECT_NEAR(stddev, 1.0, 0.2);
+
+    double mean = std::accumulate(output_host.begin(), output_host.end(), 0.0) / output_size;
+    EXPECT_NEAR(mean, 0.0, 0.005);
+
+    double variance = 0;
+    for(auto v : output_host)
+    {
+        variance += std::pow(static_cast<double>(v) - mean, 2);
+    }
+    variance = variance / output_size;
+    EXPECT_NEAR(variance, 1.0, 0.01);
 }
 
 TEST(rocrand_kernel_mtgp32, rocrand_normal_double)

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -606,6 +606,8 @@ double2 rocrand_log_normal_double2(rocrand_state_xorwow* state, double mean, dou
  *
  * Generates and returns a log-normally distributed \p float value using MTGP32
  * generator in \p state, and increments position of the generator by one.
+ * On AMD GPUs the inverse-CDF transform and the exponential use hardware \c log,
+ * \c sqrt and \c exp instructions.
  *
  * \param state  Pointer to a state to use
  * \param mean   Mean of the related log-normal distribution
@@ -616,8 +618,16 @@ double2 rocrand_log_normal_double2(rocrand_state_xorwow* state, double mean, dou
 __forceinline__ __device__
 float rocrand_log_normal(rocrand_state_mtgp32* state, float mean, float stddev)
 {
-    float r = rocrand_device::detail::normal_distribution(rocrand(state));
+    float r = rocrand_device::detail::normal_distribution_fast(rocrand(state));
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__)
+    // The relative error of the hardware exp (v_exp_f32) only reaches a few 1e-6 near the edges
+    // of the float range, far below the ~2e-3 relative error of the erfinv approximation used by
+    // normal_distribution_fast() (see its description in rocrand_normal.h). Results below the
+    // normal float range (~1.2e-38) are flushed to 0.
+    return __expf(mean + (stddev * r));
+#else
     return expf(mean + (stddev * r));
+#endif
 }
 
 /**
