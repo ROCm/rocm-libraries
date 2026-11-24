@@ -112,7 +112,6 @@ set( rocfft-test_source
 # Only build it when linked rocFFT is new enough to guarantee this contract.
 set( ROCFFT_C_HEADER_SELF_CONTAINED_MIN_VERSION "1.0.38" )
 set( ROCFFT_LINKED_VERSION "" )
-set( ROCFFT_ENABLE_C_API_COMPILE_TEST OFF )
 if( DEFINED rocfft_VERSION AND NOT "${rocfft_VERSION}" STREQUAL "" )
   set( ROCFFT_LINKED_VERSION "${rocfft_VERSION}" )
 elseif( DEFINED rocfft_VERSION_MAJOR
@@ -310,7 +309,7 @@ find_package( GTest QUIET )
 if( GTest_FOUND )
     target_link_libraries( rocfft-test PRIVATE GTest::gtest )
 else()
-  include( ${PROJECT_SOURCE_DIR}/../cmake/build-gtest.cmake )
+  include( ${CMAKE_CURRENT_LIST_DIR}/../../cmake/build-gtest.cmake )
   add_dependencies( rocfft-test gtest )
   list( APPEND rocfft-test_include_dirs ${GTEST_INCLUDE_DIRS} )
   list( APPEND rocfft-test_link_libs ${GTEST_LIBRARIES} )
@@ -410,7 +409,7 @@ set_target_properties(rocfft-test
 # specified a build time
 # TODO: amdgcnspirv is not compatible with ASAN.
 get_target_property(test_opts rocfft-test COMPILE_OPTIONS)
-if( NOT WIN32 AND NOT test_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
+if( NOT test_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
   target_compile_options( rocfft-test PRIVATE --offload-arch=amdgcnspirv )
   target_link_options( rocfft-test PRIVATE --offload-arch=amdgcnspirv )
 endif()
@@ -547,7 +546,7 @@ if( ROCFFT_MPI_ENABLE )
     # specified a build time
     # TODO: amdgcnspirv is not compatible with ASAN.
     get_target_property(worker_opts ${worker} COMPILE_OPTIONS)
-    if( NOT WIN32 AND NOT worker_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
+    if( NOT worker_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
       target_compile_options( ${worker} PRIVATE --offload-arch=amdgcnspirv )
       target_link_options( ${worker} PRIVATE --offload-arch=amdgcnspirv )
     endif()

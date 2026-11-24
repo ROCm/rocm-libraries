@@ -8,8 +8,10 @@ spelled, walks the definitions of the LLVM IR both engines emit: from a store
 back to the loads and loop phis it is computed from. :class:`KernelIR` holds
 those definitions by SSA name and answers the questions every such walk asks
 (which instruction defines a value, with which operands, what a loop phi starts
-with and carries round the loop). A test adds the queries specific to its
-kernel in a subclass.
+with and carries round the loop). It also evaluates the integer
+index arithmetic of an address for given work-item ids and loop counters, so a
+test can check, for every lane, which element a load reads or a store writes.
+A test adds the queries specific to its kernel in a subclass.
 
 It reads the one kernel of a module as the rocke lowering prints it; it is not a
 general LLVM IR parser. :func:`intrinsic_calls` finds the calls of one intrinsic.
@@ -19,12 +21,17 @@ from __future__ import annotations
 
 import re
 
+import numpy as np
+
 __all__ = ["KernelIR", "intrinsic_calls"]
 
 _DEFINITION = re.compile(r"^\s*(%[\w.]+) = (.*)$")
 _LABEL = re.compile(r"^([\w.]+):")
 _CALLEE = re.compile(r"@([\w.]+)\((.*)\)")
 _INCOMING = re.compile(r"\[\s*([^,\]]+?)\s*,\s*(%[\w.]+)\s*\]")
+_LOOP_BOUND = re.compile(r"icmp slt i32 (%[\w.]+), (\d+)$")
+_BUFFER_LOAD = "llvm.amdgcn.raw.ptr.buffer.load"
+_BUFFER_RESOURCE = "llvm.amdgcn.make.buffer.rsrc"
 
 
 def intrinsic_calls(llvm_text: str, intrinsic: str) -> list[str]:
@@ -119,3 +126,81 @@ class KernelIR:
             for i, line in enumerate(self.lines)
             if line.strip().startswith(name + " = ")
         )
+
+    def is_buffer_load(self, name: str) -> bool:
+        """Whether ``name`` is a raw buffer load (any width)."""
+        return self.opcode(name) == _BUFFER_LOAD
+
+    def buffer_param(self, resource: str) -> str:
+        """The pointer parameter a buffer resource is made from (``%C``)."""
+        assert self.opcode(resource).startswith(_BUFFER_RESOURCE), resource
+        return self.operands(resource)[0]
+
+    def buffer_load_access(self, load: str) -> tuple[str, str, str]:
+        """(pointer parameter, lane byte offset, scalar byte offset) of a raw
+        buffer load: the offsets are SSA names or literals, for
+        :meth:`evaluate`."""
+        assert self.is_buffer_load(load), self.definitions[load]
+        resource, lane_offset, scalar_offset, _ = self.operands(load)
+        return self.buffer_param(resource), lane_offset, scalar_offset
+
+    def call_named(self, callee: str) -> str:
+        """The value defined by the one call of ``callee`` (for example
+        ``llvm.amdgcn.workitem.id.x``)."""
+        (name,) = [
+            n
+            for n, text in self.definitions.items()
+            if text.startswith("call ") and self.callee(text) == callee
+        ]
+        return name
+
+    def loop_counter(self, phi: str) -> tuple[str, int, int]:
+        """(counter, first value, end) of the loop whose header defines
+        ``phi``: the header's i32 phi that its ``icmp slt`` compares with a
+        constant bound, the value it starts with, and that bound."""
+        header = self.block_of[phi]
+        header_i32_phis = {
+            n
+            for n, text in self.definitions.items()
+            if self.block_of[n] == header and text.startswith("phi i32 ")
+        }
+        ((counter, end),) = [
+            (m.group(1), int(m.group(2)))
+            for m in map(_LOOP_BOUND.search, self.definitions.values())
+            if m and m.group(1) in header_i32_phis
+        ]
+        first, _ = self.incoming(counter)
+        return counter, int(first), end
+
+    def evaluate(
+        self, name: str, inputs: dict[str, np.ndarray | int]
+    ) -> np.ndarray | np.int64:
+        """Evaluate an i32 index value with numpy, given values (scalars or
+        arrays that broadcast) for the work-item ids and loop counters it
+        reads, keyed by SSA name. Every value here is a non-negative index, so
+        ``sdiv`` / ``srem`` are floor division and remainder; a
+        ``readfirstlane`` passes its operand through, which is right for the
+        wave-uniform values the lowering reads that way. An instruction this
+        does not know fails the test."""
+        if not name.startswith("%"):
+            return np.int64(name)
+        if name in inputs:
+            return inputs[name]
+        op = self.opcode(name)
+        args = [self.evaluate(v, inputs) for v in self.operands(name)]
+        if op in ("sext", "zext", "trunc", "llvm.amdgcn.readfirstlane"):
+            return args[0]
+        if op == "add":
+            return args[0] + args[1]
+        if op == "sub":
+            return args[0] - args[1]
+        if op == "mul":
+            return args[0] * args[1]
+        if op == "shl":
+            return args[0] << args[1]
+        if op == "or":
+            return args[0] | args[1]
+        if op in ("sdiv", "srem"):
+            assert (np.asarray(args[0]) >= 0).all() and args[1] > 0
+            return args[0] // args[1] if op == "sdiv" else args[0] % args[1]
+        raise AssertionError(f"not modelled: {self.definitions[name]}")

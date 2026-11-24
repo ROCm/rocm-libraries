@@ -26,6 +26,8 @@
 
 #include "SolutionIterator.hpp"
 
+#include "ClientProblemFactory.hpp"
+
 #include "ResultReporter.hpp"
 #include "TimingInstrumentation.hpp"
 #include <Tensile/Debug.hpp>
@@ -43,15 +45,22 @@ namespace TensileLite
             std::shared_ptr<Hardware>                                      hardware,
             po::variables_map const&                                       args)
         {
-            bool   bestSolution        = args["best-solution"].as<bool>();
-            int    gridbasedTopSols    = Debug::Instance().getGridbasedTopSols();
-            bool   printWinnerOnly     = args["PrintWinnersOnly"].as<bool>();
-            double predictionThreshold = args["prediction-threshold"].as<double>();
+            bool   bestSolution            = args["best-solution"].as<bool>();
+            int    gridbasedTopSols        = Debug::Instance().getGridbasedTopSols();
+            bool   printWinnerOnly         = args["PrintWinnersOnly"].as<bool>();
+            double predictionThreshold     = args["prediction-threshold"].as<double>();
+            bool   printRejectedPredicates = args["print-rejected-predicates"].as<bool>();
+            bool   requireSelectedSolution = args["require-selected-solution"].as<bool>();
 
             if(bestSolution)
             {
-                return std::make_shared<TopSolutionIterator>(
-                    library, hardware, predictionThreshold, gridbasedTopSols, printWinnerOnly);
+                return std::make_shared<TopSolutionIterator>(library,
+                                                             hardware,
+                                                             predictionThreshold,
+                                                             gridbasedTopSols,
+                                                             requireSelectedSolution,
+                                                             printWinnerOnly,
+                                                             printRejectedPredicates);
             }
             else
             {
@@ -65,6 +74,7 @@ namespace TensileLite
                     firstSolutionIdx,
                     numSolutions,
                     printWinnerOnly,
+                    printRejectedPredicates,
                     AllSolutionsIterator::CreateCriteria(library, hardware, args));
             }
         }
@@ -72,10 +82,12 @@ namespace TensileLite
         SolutionIterator::SolutionIterator(
             std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
             std::shared_ptr<Hardware>                                      hardware,
-            bool                                                           printWinnerOnly)
+            bool                                                           printWinnerOnly,
+            bool                                                           printRejectedPredicates)
             : m_library(library)
             , m_hardware(hardware)
             , m_printWinnerOnly(printWinnerOnly)
+            , m_printRejectedPredicates(printRejectedPredicates)
         {
         }
 
@@ -92,7 +104,7 @@ namespace TensileLite
             {
                 if(isReportValid)
                     m_reporter->report(ResultKey::Validation, "WRONG_HARDWARE");
-                if(m_reporter->logAtLevel(LogLevel::Verbose))
+                if(m_printRejectedPredicates && m_reporter->logAtLevel(LogLevel::Verbose))
                 {
                     std::ostringstream msg;
                     solution.hardwarePredicate->debugEval(*m_hardware, msg);
@@ -125,7 +137,8 @@ namespace TensileLite
             {
                 if(isReportValid)
                     m_reporter->report(ResultKey::Validation, "DID_NOT_SATISFY_ASSERTS");
-                if(m_reporter->logAtLevel(LogLevel::Verbose) && !m_printWinnerOnly)
+                if(m_printRejectedPredicates && m_reporter->logAtLevel(LogLevel::Verbose)
+                   && !m_printWinnerOnly)
                 {
                     std::ostringstream msg;
                     solution.problemPredicate->debugEval(problem, msg);
@@ -159,6 +172,16 @@ namespace TensileLite
             }
             else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
             {
+                if(m_split != nullptr && m_split->numSlices() > 1)
+                {
+                    for(size_t d = 0; d < m_split->numSlices(); d++)
+                        if(!checkSolution(
+                               solution,
+                               *dynamic_cast<ContractionProblemGemm*>(
+                                   m_split->sliceProblem(m_problem, d))))
+                            return false;
+                    return true;
+                }
                 return checkSolution(solution, *problem);
             }
             else
@@ -348,8 +371,9 @@ namespace TensileLite
             int                                                            firstSolutionIdx,
             int                                                            numSolutions,
             bool                                                           printWinnerOnly,
+            bool                                                           printRejectedPredicates,
             RunCriteria                                                    runCriteria)
-            : SolutionIterator(library, hardware, printWinnerOnly)
+            : SolutionIterator(library, hardware, printWinnerOnly, printRejectedPredicates)
             , m_runCriteria(runCriteria)
             , m_predictionThreshold(predictionThreshold)
         {
@@ -547,8 +571,9 @@ namespace TensileLite
         BestSolutionIterator::BestSolutionIterator(
             std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
             std::shared_ptr<Hardware>                                      hardware,
-            bool                                                           printWinnerOnly)
-            : SolutionIterator(library, hardware, printWinnerOnly)
+            bool                                                           printWinnerOnly,
+            bool                                                           printRejectedPredicates)
+            : SolutionIterator(library, hardware, printWinnerOnly, printRejectedPredicates)
         {
         }
 
@@ -609,10 +634,13 @@ namespace TensileLite
             std::shared_ptr<Hardware>                                      hardware,
             double                                                         predictionThreshold,
             int                                                            numSolutions,
-            bool                                                           printWinnerOnly)
-            : SolutionIterator(library, hardware, printWinnerOnly)
+            bool                                                           requireSelectedSolution,
+            bool                                                           printWinnerOnly,
+            bool                                                           printRejectedPredicates)
+            : SolutionIterator(library, hardware, printWinnerOnly, printRejectedPredicates)
             , m_numSolutions(numSolutions)
             , m_predictionThreshold(predictionThreshold)
+            , m_requireSelectedSolution(requireSelectedSolution)
         {
         }
 
@@ -647,6 +675,27 @@ namespace TensileLite
             }
             if(m_solutions.size() == 0)
             {
+                if(m_requireSelectedSolution)
+                {
+                    // No fallback: report it, count it as an error and skip the problem
+                    // (moreSolutionsInProblem() is false with no solution and an empty queue).
+                    m_problemsWithoutSelection++;
+                    m_currentSolutionIdx = 0;
+                    auto const* gemmProblem = dynamic_cast<const ContractionProblemGemm*>(problem);
+                    if(auto groupedProblem
+                       = dynamic_cast<const ContractionProblemGroupedGemm*>(problem))
+                        gemmProblem = &groupedProblem->gemms[0];
+                    std::ostringstream msg;
+                    msg << "[TopSolutionIterator] No solution selected for problem "
+                        << gemmProblem->operationIdentifier() << " sizes";
+                    for(auto size : gemmProblem->problemSizes())
+                        msg << " " << size;
+                    msg << ": the library returned no solution and --require-selected-solution"
+                           " is set, so library solution 0 is not used instead."
+                        << std::endl;
+                    m_reporter->log(LogLevel::Error, msg.str());
+                    return;
+                }
                 // See the note in BestSolutionIterator::preProblem.
                 if(auto fallback = m_library->resolveSolutionByIndex(0))
                     m_solutions.push_back(fallback);
@@ -735,6 +784,11 @@ namespace TensileLite
                 }
             }
 
+        }
+
+        int TopSolutionIterator::error() const
+        {
+            return m_problemsWithoutSelection;
         }
 
         bool TopSolutionIterator::moreSolutionsInProblem() const

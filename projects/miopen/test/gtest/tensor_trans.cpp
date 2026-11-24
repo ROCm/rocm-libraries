@@ -197,9 +197,9 @@ inline auto GetCasesFull()
     return cases;
 }
 
-// Smoke (pre-commit) and Standard (per-CI) shape subsets with a representative
+// Quick (pre-commit) and Standard (per-PR) shape subsets with a representative
 // spread (small/large channel counts plus non-power-of-two dims). The full
-// 40-shape list stays in GenCasesFull (used by the Full instantiation).
+// 40-shape list stays in GenCasesFull (used by the Comprehensive instantiation).
 inline auto GenCasesSmoke()
 {
     static const std::vector<std::vector<int>> tensor_src{{64, 64, 56, 56}, {64, 2048, 7, 7}};
@@ -332,14 +332,14 @@ TEST_P(GPU_TensorTrans_I8, TestInt8) { this->Run(); }
 TEST_P(GPU_TensorTrans_FP16, TestFloat16) { this->Run(); }
 TEST_P(GPU_TensorTrans_FP32, TestFloat32) { this->Run(); }
 
-// Tiered: Smoke (pre-commit) and Standard (per-CI) run shape subsets; Full
-// (comprehensive/nightly) runs the complete shape list so no coverage is lost.
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorTrans_I8, GetCasesSmoke(), TestNameGenerator{});
+// Tiered: Quick (pre-commit) and Standard (per-PR) run shape subsets; Comprehensive
+// (nightly) runs the complete shape list so no coverage is lost.
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_TensorTrans_I8, GetCasesSmoke(), TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Standard, GPU_TensorTrans_I8, GetCasesStandard(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_TensorTrans_I8, GetCasesFull(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorTrans_FP16, GetCasesSmoke(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Comprehensive, GPU_TensorTrans_I8, GetCasesFull(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_TensorTrans_FP16, GetCasesSmoke(), TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Standard, GPU_TensorTrans_FP16, GetCasesStandard(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_TensorTrans_FP16, GetCasesFull(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorTrans_FP32, GetCasesSmoke(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Comprehensive, GPU_TensorTrans_FP16, GetCasesFull(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_TensorTrans_FP32, GetCasesSmoke(), TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Standard, GPU_TensorTrans_FP32, GetCasesStandard(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_TensorTrans_FP32, GetCasesFull(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Comprehensive, GPU_TensorTrans_FP32, GetCasesFull(), TestNameGenerator{});

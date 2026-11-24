@@ -220,7 +220,8 @@ field. What a family needs beyond its axes is a `KnobSpace` hook:
 
 - `validate(base, kernel)` is the legality gate for anything the kernel's own
   validator does not model; it also prunes the walk. Attention's gfx950 2D
-  space uses it for the LDS budget and the padded-K / aliased-Q rule.
+  space uses it for the LDS budget (a padded K slot that holds Q is refused
+  earlier, by the kernel spec itself).
 - `outer_knob` with `outer_values(base, level)` and `outer_default(base)`
   names one field that is cheap to sweep on top of every knob set: the walk
   checks a knob set once and only rebuilds it per outer value, so the drop

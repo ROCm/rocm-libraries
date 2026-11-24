@@ -57,6 +57,21 @@ _FACTS_OF = re.compile(
 _INT_FIELDS = ("wave_size", "lds_capacity_bytes", "vmcnt_bits")
 _STR_FIELDS = ("family", "target_family")
 
+# The universal GEMM's capabilities (arch_specs.json "gemm"; in data.cpp a
+# rocke_ati_gemm_caps_t that the arch's registry row points at).
+_GEMM_ATOMS = re.compile(
+    r"static const int k_gemm_atoms_(?P<sym>\w+)\[\]\[3\] = \{(?P<body>.*?)\};", re.S
+)
+_GEMM_CAPS = re.compile(
+    r"static const rocke_ati_gemm_caps_t k_gemm_(?P<sym>\w+) = \{(?P<body>.*?)\n\};",
+    re.S,
+)
+_REGISTRY_ROW = re.compile(
+    r'\{"(?P<gfx>[\w-]+)", &k_target_\w+'
+    r'(?:, (?:"(?P<facts_of>[\w-]+)"|NULL))?(?:, &k_gemm_(?P<gemm>\w+))?\}'
+)
+_GEMM_FLAGS = ("fp8_ab", "wmma_cshuffle", "cshuffle_lds_aliased")
+
 
 def _field(body: str, name: str) -> str:
     # Top-level fields only: a nested aggregate (.mma, .memory, .limits) never
@@ -83,6 +98,43 @@ def _cpp_targets() -> dict[str, dict[str, str]]:
         source = by_symbol[m.group("src")]
         targets[m.group("gfx")] = {**targets[source], "facts_of": source}
     return targets
+
+
+def _cpp_gemm_caps() -> dict[str, dict]:
+    """Each arch's GEMM capabilities as data.cpp's registry resolves them: a
+    ``facts_of`` row takes its source's, and a row without a block gets none."""
+    src = (platform_root() / "cpp" / "core" / "arch" / "data.cpp").read_text()
+    atoms = {
+        m.group("sym"): [
+            [int(v) for v in t]
+            for t in re.findall(r"\{(\d+), (\d+), (\d+)\}", m.group("body"))
+        ]
+        for m in _GEMM_ATOMS.finditer(src)
+    }
+    blocks = {}
+    for m in _GEMM_CAPS.finditer(src):
+        body = m.group("body")
+        ref = re.search(r"\.wmma_atoms = k_gemm_atoms_(\w+),", body)
+        caps = {"wmma_atoms": atoms[ref.group(1)] if ref else []}
+        for flag in _GEMM_FLAGS:
+            caps[flag] = re.search(r"\." + flag + r" = true,", body) is not None
+        blocks[m.group("sym")] = caps
+    registry = src[src.index("const rocke_ati_arch_row_t rocke_ati_arch_registry[]") :]
+    rows = {m.group("gfx"): m for m in _REGISTRY_ROW.finditer(registry)}
+    none = {"wmma_atoms": [], **{flag: False for flag in _GEMM_FLAGS}}
+    resolved = {}
+    for gfx, m in rows.items():
+        own = rows[m.group("facts_of")] if m.group("facts_of") else m
+        resolved[gfx] = blocks[own.group("gemm")] if own.group("gemm") else none
+    return resolved
+
+
+def _python_gemm_caps(row: dict) -> dict:
+    gemm = row.get("gemm", {})
+    return {
+        "wmma_atoms": [list(a) for a in gemm.get("wmma_atoms", [])],
+        **{flag: gemm.get(flag, False) for flag in _GEMM_FLAGS},
+    }
 
 
 def _python_targets() -> dict[str, dict]:
@@ -141,6 +193,36 @@ class TestArchTableEngineParity(unittest.TestCase):
                     self.assertEqual(cpp[field], py[field])
             with self.subTest(arch=arch, field="facts_of"):
                 self.assertEqual(cpp.get("facts_of"), py.get("facts_of"))
+
+    def test_gemm_capabilities_agree(self):
+        cpp_caps = _cpp_gemm_caps()
+        self.assertEqual(set(cpp_caps), set(self.py))
+        for arch, row in self.py.items():
+            with self.subTest(arch=arch):
+                self.assertEqual(cpp_caps[arch], _python_gemm_caps(row))
+
+    def test_gemm_capabilities_parse_found_the_blocks(self):
+        # Guards the regexes: gfx1250 sets every flag and the RDNA targets
+        # inherit their generic's atom, so an empty parse cannot pass.
+        cpp_caps = _cpp_gemm_caps()
+        self.assertEqual(
+            cpp_caps["gfx1250"],
+            {
+                "wmma_atoms": [[16, 16, 32], [16, 16, 64], [16, 16, 128]],
+                "fp8_ab": True,
+                "wmma_cshuffle": True,
+                "cshuffle_lds_aliased": True,
+            },
+        )
+        self.assertEqual(cpp_caps["gfx1201"]["wmma_atoms"], [[16, 16, 16]])
+        self.assertEqual(cpp_caps["gfx942"]["wmma_atoms"], [])
+
+    def test_gemm_wmma_atoms_are_sorted(self):
+        # The C++ validator lists them in table order where Python sorts them,
+        # so the two reject messages agree only while the table is sorted.
+        for arch, caps in _cpp_gemm_caps().items():
+            with self.subTest(arch=arch):
+                self.assertEqual(caps["wmma_atoms"], sorted(caps["wmma_atoms"]))
 
     def test_gfx1250_carries_the_raised_lds_capacity(self):
         # Named rather than left to the loop above: this is the value Phase 0

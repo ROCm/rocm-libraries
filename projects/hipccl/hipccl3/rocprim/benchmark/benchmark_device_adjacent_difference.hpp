@@ -108,16 +108,16 @@ struct device_adjacent_difference_benchmark : public primbench::benchmark_interf
 
         const auto launch = [&]
         {
-            return common::dispatch_adjacent_difference(left_tag,
-                                                        alias_tag,
-                                                        d_temp_storage.get(),
-                                                        temp_storage_size,
-                                                        d_input.get(),
-                                                        d_output.get(),
-                                                        items,
-                                                        rocprim::plus<>{},
-                                                        stream,
-                                                        debug_synchronous);
+            return common::dispatch_adjacent_difference<Config>(left_tag,
+                                                                alias_tag,
+                                                                d_temp_storage.get(),
+                                                                temp_storage_size,
+                                                                d_input.get(),
+                                                                d_output.get(),
+                                                                items,
+                                                                rocprim::plus<>{},
+                                                                stream,
+                                                                debug_synchronous);
         };
         HIP_CHECK(launch());
         d_temp_storage.resize(temp_storage_size);

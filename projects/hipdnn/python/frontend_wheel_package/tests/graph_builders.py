@@ -21,14 +21,14 @@ import hipdnn_frontend as hipdnn
 from .helpers import create_float_graph
 
 
-def _scalar_tensor(value=1e-5):
+def scalar_tensor(value=1e-5):
     """A [1]-shaped FLOAT tensor holding a compile-time scalar (epsilon)."""
     tensor = hipdnn.Tensor.create([1], hipdnn.DataType.FLOAT)
     tensor.set_value(value)
     return tensor
 
 
-def _unpack(outputs, count, kind=tuple):
+def unpack(outputs, count, kind=tuple):
     """Return a node's multi-output container, asserting its bound type and arity.
 
     ``kind`` is the Python type the binding is contracted to produce, and it
@@ -205,7 +205,7 @@ def build_batchnorm_training_graph(n=4, c=8, h=8, w=8):
     attrs.set_epsilon(epsilon)
 
     outputs = graph.batchnorm(x, scale, bias, attrs)
-    y, mean, inv_variance, _next_mean, _next_var = _unpack(outputs, 5, list)
+    y, mean, inv_variance, _next_mean, _next_var = unpack(outputs, 5, list)
     y.set_name("y")
     y.set_output(True)
     mean.set_name("mean")
@@ -237,7 +237,7 @@ def build_batchnorm_backward_graph(n=4, c=8, h=8, w=8):
     attrs.set_name("batchnorm_backward_node")
 
     outputs = graph.batchnorm_backward(dy, x, scale, attrs)
-    dx, dscale, dbias = _unpack(outputs, 3, list)
+    dx, dscale, dbias = unpack(outputs, 3, list)
     dx.set_name("dx")
     dx.set_output(True)
     dscale.set_name("dscale")
@@ -332,7 +332,7 @@ def build_layernorm_graph():
     scale.set_name("scale")
     bias = hipdnn.Tensor.create([6, 4], hipdnn.DataType.FLOAT)
     bias.set_name("bias")
-    epsilon = _scalar_tensor()
+    epsilon = scalar_tensor()
     epsilon.set_name("epsilon")
 
     outputs = graph.layernorm(
@@ -343,7 +343,7 @@ def build_layernorm_graph():
         .set_epsilon(epsilon)
         .set_forward_phase(hipdnn.NormFwdPhase.INFERENCE),
     )
-    y, mean, inv_variance = _unpack(outputs, 3)
+    y, mean, inv_variance = unpack(outputs, 3)
     y.set_name("y")
     y.set_output(True)
 
@@ -366,7 +366,7 @@ def build_layernorm_backward_graph():
     mean.set_name("mean")
     inv_variance = hipdnn.Tensor.create([16, 1, 1, 1], hipdnn.DataType.FLOAT)
     inv_variance.set_name("inv_variance")
-    epsilon = _scalar_tensor()
+    epsilon = scalar_tensor()
     epsilon.set_name("epsilon")
 
     outputs = graph.layernorm_backward(
@@ -378,7 +378,7 @@ def build_layernorm_backward_graph():
         .set_inv_variance(inv_variance)
         .set_epsilon(epsilon),
     )
-    dx, dscale, dbias = _unpack(outputs, 3)
+    dx, dscale, dbias = unpack(outputs, 3)
     dx.set_name("dx")
     dscale.set_name("dscale")
     dbias.set_name("dbias")
@@ -396,7 +396,7 @@ def build_rmsnorm_graph():
     x.set_name("x")
     scale = hipdnn.Tensor.create([1, 64, 32, 32], hipdnn.DataType.FLOAT)
     scale.set_name("scale")
-    epsilon = _scalar_tensor()
+    epsilon = scalar_tensor()
     epsilon.set_name("epsilon")
 
     outputs = graph.rmsnorm(
@@ -406,7 +406,7 @@ def build_rmsnorm_graph():
         .set_epsilon(epsilon)
         .set_forward_phase(hipdnn.NormFwdPhase.TRAINING),
     )
-    y, inv_rms = _unpack(outputs, 2)
+    y, inv_rms = unpack(outputs, 2)
     y.set_name("y")
     inv_rms.set_name("inv_rms")
     y.set_output(True)
@@ -434,7 +434,7 @@ def build_rmsnorm_backward_graph():
     outputs = graph.rmsnorm_backward(
         dy, x, scale, inv_rms, hipdnn.RMSNormBackwardAttributes()
     )
-    dx, dscale, dbias = _unpack(outputs, 3)
+    dx, dscale, dbias = unpack(outputs, 3)
     dx.set_name("dx")
     dscale.set_name("dscale")
     dx.set_output(True)
@@ -475,7 +475,7 @@ def build_block_scale_quantize_graph():
         x,
         hipdnn.BlockScaleQuantizeAttributes().set_block_size(32),
     )
-    y, scale = _unpack(outputs, 2)
+    y, scale = unpack(outputs, 2)
     y.set_name("y")
     scale.set_name("scale")
     for output in (y, scale):
@@ -557,7 +557,7 @@ def build_custom_op_graph():
         2,
         hipdnn.CustomOpAttributes().set_custom_op_id("example.identity"),
     )
-    y0, y1 = _unpack(outputs, 2, list)
+    y0, y1 = unpack(outputs, 2, list)
     for output in (y0, y1):
         output.set_dim([4, 8]).set_stride([8, 1]).set_output(True)
         output.set_data_type(hipdnn.DataType.FLOAT)
@@ -587,7 +587,7 @@ def build_resample_graph():
     x = hipdnn.Tensor.create([1, 3, 4, 4], hipdnn.DataType.FLOAT)
     x.set_name("x")
 
-    y, index = _unpack(graph.resample(x, _resample_fwd_attributes()), 2)
+    y, index = unpack(graph.resample(x, _resample_fwd_attributes()), 2)
     y.set_name("y")
     y.set_output(True)
 
@@ -667,7 +667,7 @@ def build_sdpa_graph():
     v.set_name("v")
 
     outputs = graph.sdpa(q, k, v, hipdnn.SdpaAttributes().set_generate_stats(True))
-    o, stats = _unpack(outputs, 2)
+    o, stats = unpack(outputs, 2)
     o.set_name("o")
     stats.set_name("stats")
     o.set_output(True)
@@ -699,7 +699,7 @@ def build_sdpa_backward_graph():
     outputs = graph.sdpa_backward(
         q, k, v, o, d_o, stats, hipdnn.SdpaBackwardAttributes()
     )
-    dq, dk, dv = _unpack(outputs, 3)
+    dq, dk, dv = unpack(outputs, 3)
     dq.set_name("dq")
     dk.set_name("dk")
     dv.set_name("dv")

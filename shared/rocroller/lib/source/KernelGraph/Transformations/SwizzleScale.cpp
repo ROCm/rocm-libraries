@@ -967,6 +967,12 @@ namespace rocRoller
                             && !m_params->transposeMemoryAccess[LayoutType::MATRIX_B],
                         "Non-TN is not supported by SwizzleScale");
 
+            // The swizzle layout spreads each 256-element tile over four 16-lane
+            // groups; with fewer lanes its per-wave sizes truncate to zero.
+            AssertFatal(m_context->kernel()->wavefront_size() == 64,
+                        "SwizzleScale requires wave64",
+                        ShowValue(m_context->kernel()->wavefront_size()));
+
             auto newGraph = original;
 
             auto const rootTag = newGraph.control.roots().only().value();

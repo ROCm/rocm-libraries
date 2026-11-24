@@ -46,7 +46,8 @@ def toFile(outputFile: Union[Path, TextIOWrapper], contents: List[str], delimite
         - Providing an open file is useful for writing multiple calls to the same file.
     """
     assert isinstance(contents, list), f"contents must be a list, found {type(contents)}"
-    assert isinstance(contents[0], str), f"contents elements must be a str, found {type(contents[0])}"
+    if contents:
+        assert isinstance(contents[0], str), f"contents elements must be a str, found {type(contents[0])}"
 
     isTextIO = isinstance(outputFile, TextIOWrapper)
     if isTextIO:

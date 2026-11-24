@@ -5,12 +5,14 @@ target_sources(hipblaslt-test
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_gtest_main.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/client_handle_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hip_buffer_transfer_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/device_vector_guard_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/caching_library_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/concurrent_handles_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/contraction_problem_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hip_solution_adapter_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/long_path_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/secure_env_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/mx_scale_format_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/gfx950_mx_scale_layout_gtest.cpp
@@ -18,6 +20,7 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/efficiency_monitor_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/matmul_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/device_scalar_alpha_ext_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/partitioned_gemm_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/math_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/scale_buffer_size_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/auxiliary_gtest.cpp
@@ -32,6 +35,9 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_gtest_ext_op.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/error_paths_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/utility_helpers_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/experimental_api_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/experimental_api_off_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/experimental/contract_partitioned_gemm_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk5_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk_multistream_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk_null_stream_test.cpp
@@ -47,17 +53,29 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/arguments_a2a_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/unit_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/algo_errors_gtest.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/row_order_matmul_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/fast_check_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relaunch_compare_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/host_memory_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/maf_init_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/w4a16_layout_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/fp6_tile128x4_args_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/handwritten_algo_reuse_gtest.cpp
 )
 
 if(NOT WIN32)
     target_sources(hipblaslt-test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/multi_gpu_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/cotenant_gtest.cpp
+    )
+endif()
+
+# The online tuner's unit tests, against a private copy of the tuner; a shared
+# libhipblaslt exports neither. Coverage and static builds link the library's
+# own objects, where the copies would clash, so they leave these cases out.
+if(HIPBLASLT_BUILD_SHARED_LIBS AND NOT HIPBLASLT_ENABLE_COVERAGE)
+    target_sources(hipblaslt-test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/online_tuner_test.cpp
+        ${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/OnlineTuner.cpp
     )
 endif()
 
@@ -76,7 +94,11 @@ if(HIPBLASLT_ENABLE_LOCAL_KERNELS)
     target_sources(hipblaslt-test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/local_kernel_library_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/local_kernel_register_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/local_kernel_persist_test.cpp
     )
+    if(HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST)
+        target_compile_definitions(hipblaslt-test PRIVATE HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST)
+    endif()
     find_package(hiprtc CONFIG REQUIRED)
     target_link_libraries(hipblaslt-test PRIVATE hiprtc::hiprtc)
     if(NOT HIPBLASLT_ENABLE_YAML)

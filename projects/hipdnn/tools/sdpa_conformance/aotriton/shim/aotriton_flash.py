@@ -22,7 +22,7 @@ no hipDNN engine produced. With
 with zeros: AOTriton's wrapper rejects NaN in M under ``is_testing``, and ``test_forward.py`` compares
 only O. The reference fallback still fills M with the real LSE.
 
-Two differences from AOTriton's own wrapper, both visible to the vendored tests:
+Three differences from AOTriton's own wrapper, all visible to the vendored tests:
 
 * With dropout, ``encoded_softmax`` is filled from this tool's own Philox mask (``hipdnn_sdpa.philox_mask``,
   ``_keep_mask``): +0.5 where kept, -0.5 where dropped. It is not the value AOTriton's kernel writes, and
@@ -30,6 +30,10 @@ Two differences from AOTriton's own wrapper, both visible to the vendored tests:
 * ``pyaotriton.hipGetLastError`` is a stub that always returns ``hipSuccess``. The vendored
   ``is_testing`` check after each call and the illegal-address handlers therefore never fire; a GPU
   fault surfaces only through the exception hipDNN or torch raises.
+* A sliding window hipDNN's band cannot express declines in both directions before any hipDNN call
+  (``EngineDeclined`` with an ``adapter:`` reason, ``_window_mask``): a negative numeric bound such as
+  ``(-1, 3)``, which leaves the diagonal out, or a numeric left beside a right sentinel of the other
+  diagonal. AOTriton runs both.
 """
 
 import os
@@ -88,11 +92,53 @@ def _engine(direction):
 # --------------------------------------------------------------------------- mapping
 
 
-def _mask(causal):
+_SENTINEL_ALIGNMENT = {
+    WindowValue.TOP_LEFT_ALIGNED: "tl",
+    WindowValue.BOTTOM_RIGHT_ALIGNED: "br",
+}
+
+
+def _window_mask(window, direction):
+    """``Mask`` for AOTriton's window ``(left, right)`` or ``(left, right, p)``.
+
+    AOTriton keeps key j for query i iff ``i - L <= j <= i + R`` (``_common_test.resolve_window``).
+    The principal diagonal ``p`` (0 when absent) measures a numeric bound from the top-left
+    diagonal (0) or from the bottom-right one (1), so it picks the alignment. A sentinel left is
+    unbounded; a sentinel right is 0 from the diagonal it names; sentinels ignore ``p``. cuDNN's left
+    bound counts the diagonal, so ``left = L + 1``. hipDNN's band always holds the diagonal and has one
+    alignment, so a negative numeric bound, or a numeric left beside a right sentinel of the other
+    diagonal, declines.
+    """
+    assert len(window) in (2, 3), f"unsupported causal value {window!r}"
+    p = window[2] if len(window) == 3 else 0
+    assert p in (0, 1), f"principal diagonal must be 0 or 1, got {p!r}"
+    sdpa = _sdpa()
+    left, right = int(window[0]), int(window[1])
+    alignment = "br" if p else "tl"
+    if right in _SENTINEL_ALIGNMENT:
+        if left in _SENTINEL_ALIGNMENT:
+            return sdpa.Mask(_SENTINEL_ALIGNMENT[right], None, 0)
+        if _SENTINEL_ALIGNMENT[right] != alignment:
+            raise sdpa.EngineDeclined(
+                direction,
+                f"adapter: window {window!r}: a numeric left and a right sentinel measured from "
+                "different diagonals; a hipDNN mask has one alignment",
+            )
+        right = 0
+    if right < 0 or (left < 0 and left not in _SENTINEL_ALIGNMENT):
+        raise sdpa.EngineDeclined(
+            direction,
+            f"adapter: window {window!r}: a negative bound; hipDNN's band always keeps the diagonal",
+        )
+    return sdpa.Mask(
+        alignment, None if left in _SENTINEL_ALIGNMENT else left + 1, right
+    )
+
+
+def _mask(causal, direction):
     sdpa = _sdpa()
     if isinstance(causal, tuple):
-        left, right = causal
-        return sdpa.Mask("tl", int(left) + 1, int(right))
+        return _window_mask(causal, direction)
     if isinstance(causal, bool):
         return sdpa.Mask("tl", None, 0) if causal else None
     if causal == CausalType.NONE:
@@ -373,7 +419,7 @@ def attn_fwd(
         scale=float(sm_scale),
         o=o,
         stats=_dense_stats(M, q),
-        mask=_mask(causal),
+        mask=_mask(causal, "fwd"),
         dropout=_dropout(dropout_p, philox_seed, philox_offset1, philox_offset2),
         varlen=None,
         seed_out=philox_seed_output,
@@ -428,7 +474,7 @@ def attn_fwd_varlen(
         scale=float(sm_scale),
         o=o,
         stats=_varlen_stats(M, q, varlen_type == "padded", lse_layout),
-        mask=_mask(causal),
+        mask=_mask(causal, "fwd"),
         dropout=_dropout(dropout_p, philox_seed, philox_offset1, philox_offset2),
         varlen=varlen,
         seed_out=philox_seed_output,
@@ -502,7 +548,7 @@ def attn_bwd(
         scale=float(sm_scale),
         b=b,
         db=db,
-        mask=_mask(causal),
+        mask=_mask(causal, "bwd"),
         dropout=_dropout(dropout_p, philox_seed, philox_offset1, philox_offset2),
         varlen=None,
     )
@@ -562,7 +608,7 @@ def attn_bwd_varlen(
         scale=float(sm_scale),
         b=b,
         db=db,
-        mask=_mask(causal),
+        mask=_mask(causal, "bwd"),
         dropout=_dropout(dropout_p, philox_seed, philox_offset1, philox_offset2),
         varlen=varlen,
     )
