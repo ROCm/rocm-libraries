@@ -847,6 +847,58 @@ _ONE_SIDED_MX = "MX scales on one tensor only"
 _STREAMK = {"StreamK": 3, "StreamKForceDPOnly": 1}
 
 
+@pytest.mark.parametrize("fuse, numWaves, subtile, shared", [
+    (0, 4, False, True),
+    (0, 2, False, True),
+    (0, 1, False, False),     # one wave keeps a descriptor and a load per tensor
+    (0, 4, True, False),      # so does the subtile path
+    (1, 4, False, False),
+    (2, 4, False, False),
+    (3, 4, False, False),
+])
+def test_ab_share_one_load_follows_the_load_modifiers(fuse, numWaves, subtile, shared):
+    kernel = dict(_kernel(fuse, numWaves), UseSubtileImpl=subtile)
+    assert TF.tdmABShareOneLoad(kernel) is shared
+    # The writer agrees: A and B issue from one instruction exactly when they share it.
+    a, b = (dict(kernel, TemporalHintA=1, TemporalHintB=0), dict(kernel, TemporalHintA=0, TemporalHintB=1))
+    disagreeing_drops = _issued(a, "A") is None and _issued(b, "B") is None
+    assert disagreeing_drops is shared
+
+
+def test_disagreeing_hints_on_a_shared_ab_load_issue_the_equal_hint_code():
+    """On the shared {A, B} load a disagreeing pair issues the modifiers of
+    TemporalHintA=TemporalHintB=0, while TDMFuse=1 keeps the pairs apart."""
+    shared = _kernel(0)
+    equal = _issued(dict(shared, TemporalHintA=0, TemporalHintB=0), "A")
+    assert _issued(dict(shared, TemporalHintA=0, TemporalHintB=1), "A") == equal
+    assert _issued(dict(shared, TemporalHintA=1, TemporalHintB=0), "B") == equal
+    paired = _kernel(1)
+    assert (_issued(dict(paired, TemporalHintA=0, TemporalHintB=1), "B")
+            != _issued(dict(paired, TemporalHintA=0, TemporalHintB=0), "B"))
+
+
+@pytest.mark.parametrize("fuse, hintA, hintB, numWaves, repeats", [
+    (0, 0, 1, 4, True),
+    (0, 1, 0, 2, True),
+    (0, 0, 0, 4, False),
+    (0, 1, 1, 4, False),
+    (0, 0, 1, 1, False),
+    (1, 0, 1, 4, False),
+    (3, 1, 0, 2, False),
+])
+def test_ductile_drops_hints_that_repeat_the_equal_hint_kernel(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, fuse, hintA, hintB, numWaves, repeats):
+    """TensileLite builds every pair; the GA validity check drops the ones that only rename
+    the TemporalHintA=TemporalHintB=0 kernel."""
+    from tensilelite.backends.ductile_backend import _repeats_equal_hint_kernel
+
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=fuse,
+                       TemporalHintA=hintA, TemporalHintB=hintB, **_WAVES[numWaves])
+    assert sol.get("Valid") is True, out
+    assert sol["NumWaves"] == numWaves
+    assert _repeats_equal_hint_kernel(sol) is repeats
+
+
 @pytest.mark.parametrize("numWaves", [2, 4])
 @pytest.mark.parametrize("mx", sorted(_ONE_SCALE))
 @pytest.mark.parametrize("fuse", sorted(TDM_FUSE_GROUPING))

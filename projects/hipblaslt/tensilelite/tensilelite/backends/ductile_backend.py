@@ -25,6 +25,7 @@ from ..Common.GlobalParameters import globalParameters
 from ..Common.TimingInstrumentation import record_timing, timing_context
 from ..SolutionStructs.Naming import getKernelFileBase, getSolutionNameMin
 from ..KernelWriterAssembly import KernelWriterAssembly
+from ..Components.TDMFuse import tdmABShareOneLoad
 from .base import OptimizationBackend
 
 
@@ -54,8 +55,22 @@ def _generate_single_solution_with_groups(perm, problemType, constantParams, ass
     return _build_and_validate_solution(solution, assembler, debugConfig, isaInfoMap, silent=silent)
 
 
+def _repeats_equal_hint_kernel(solution) -> bool:
+    """True when the solution builds the TemporalHintA=TemporalHintB=0 code under another name.
+
+    Where one TDM load moves both A and B (tdmABShareOneLoad), a TemporalHint is
+    emitted only when TemporalHintA and TemporalHintB agree, so a disagreeing pair
+    issues the same instructions as both hints at 0. Its kernel name differs, so
+    the GA would build and time it as a separate kernel.
+    """
+    return tdmABShareOneLoad(solution) and solution["TemporalHintA"] != solution["TemporalHintB"]
+
+
 def _validate_solution(problemType, constantParams, assembler, debugConfig, isaInfoMap, perm, get_kernel_src=False, rocIsaData=None):
     """Validate a solution candidate for GA SearchSpace constraint checking.
+
+    Besides TensileLite's own rejection, a candidate that only renames another
+    kernel (_repeats_equal_hint_kernel) is invalid here, so the GA redraws it.
     """
     if rocIsaData is not None:
         rocisa.rocIsa.getInstance().setData(rocIsaData)
@@ -63,7 +78,7 @@ def _validate_solution(problemType, constantParams, assembler, debugConfig, isaI
     solution_object = _generate_single_solution_with_groups(
         perm, problemType, constantParams, assembler, debugConfig, isaInfoMap, silent=True
     )
-    if solution_object is None:
+    if solution_object is None or _repeats_equal_hint_kernel(solution_object):
         return False
 
     kernelWriterAssembly = KernelWriterAssembly(assembler, debugConfig)
