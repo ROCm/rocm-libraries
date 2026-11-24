@@ -119,7 +119,7 @@ void TestTabulateOutputIteratorTraits()
 
   static_assert(_THRUST_STD::is_same_v<thrust::iterator_traversal_t<it>, thrust::random_access_traversal_tag>);
 
-  static_assert(::internal::is_cpp17_random_access_iterator<it>::value);
+  static_assert(_THRUST_STD::__has_random_access_traversal<it>);
 
   // FIXME(bgruber): all up to and including random access should be true
 #if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
@@ -162,7 +162,7 @@ void TestTabulateOutputIterator()
   static constexpr std::size_t select_every_nth = 3;
   auto selected_it_end =
     thrust::copy_if(zipped_in, zipped_in + num_items, tabulate_out_it, select_op{select_every_nth});
-  const auto num_selected = static_cast<std::size_t>(thrust::distance(tabulate_out_it, selected_it_end));
+  const auto num_selected = static_cast<std::size_t>(_THRUST_STD::distance(tabulate_out_it, selected_it_end));
 
   // Prepare expected data
   Vector expected_output(num_items, T{42});

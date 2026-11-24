@@ -1345,7 +1345,7 @@ public:
         int num_h_chunks = 1;
         if(n_full_blocks > 1)
         {
-            const int base_wgs = blocks_w_n * blocks_c * blocks_n_fold;
+            const int64_t base_wgs = static_cast<int64_t>(blocks_w_n) * blocks_c * blocks_n_fold;
             // Target ~4 workgroups per CU; only tile when the base grid falls short.
             const int target_wgs = 4 * dev.cu_count;
             // Each chunk re-reads one warm-up kh-block, so cap chunks at n_full_blocks/2
@@ -1357,7 +1357,7 @@ public:
             const int max_chunks_by_halo = max(2, n_full_blocks / 2);
             if(base_wgs < target_wgs)
             {
-                num_h_chunks = divup(target_wgs, base_wgs);
+                num_h_chunks = divup(target_wgs, static_cast<int>(base_wgs));
                 num_h_chunks = min(num_h_chunks, max_chunks_by_halo);
                 num_h_chunks = min(num_h_chunks, n_full_blocks);
                 num_h_chunks = max(num_h_chunks, 1);

@@ -78,7 +78,7 @@ TEST_P(GPU_MIOpenDriverRegressionGfx10Test_FP32, MIOpenDriverRegressionFloatHalf
     RunMIOpenDriver(GetParam());
 };
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_MIOpenDriverRegressionGfx10Test_FP32,
                          testing::Values(GetTestCases(miopendriver::basearg::bn::Float)));
 
@@ -87,6 +87,6 @@ TEST_P(GPU_MIOpenDriverRegressionGfx10Test_FP16, MIOpenDriverRegressionFloatHalf
     RunMIOpenDriver(GetParam());
 };
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_MIOpenDriverRegressionGfx10Test_FP16,
                          testing::Values(GetTestCases(miopendriver::basearg::bn::Half)));

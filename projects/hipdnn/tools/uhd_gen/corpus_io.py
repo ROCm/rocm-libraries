@@ -1,6 +1,6 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Read a corpus as CSV (collected), Parquet (published, §8.3) or JSON, by suffix.
+"""Read a corpus as CSV (collected), Parquet (published, §8.3) or JSON, by suffix; write JSON.
 
 Identity columns are pinned to text at the read so every format agrees: `read_csv` would
 otherwise turn a device id `0123` into 123. Imports nothing from this package (cycles).
@@ -18,6 +18,7 @@ __all__ = [
     "IDENTITY_DTYPES",
     "pin_identity_dtypes",
     "read_corpus_frame",
+    "write_json",
 ]
 
 #: Columns that name a thing rather than measure one, in both the §8.3 envelope's and
@@ -63,3 +64,14 @@ def read_corpus_frame(path: Path) -> pd.DataFrame:
         # so a written corpus would not read back as the same features.
         frame = pd.read_csv(path, dtype=IDENTITY_DTYPES, float_precision="round_trip")
     return pin_identity_dtypes(frame)
+
+
+def write_json(path: Path, value) -> None:
+    """Write `value` as the JSON every artifact is written as (two-space indent, UTF-8, LF
+    newlines, no NaN), creating the directory."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
