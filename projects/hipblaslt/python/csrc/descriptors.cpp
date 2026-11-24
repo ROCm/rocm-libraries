@@ -209,6 +209,7 @@ namespace
             {HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT, {Kind::I32}},
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
             {HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE, {Kind::PTR}},
+            {HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE, {Kind::PTR}},
 #endif
             {HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT,
              {Kind::I32, "hipblasLtInt4Encoding_t", "Int4Encoding"}},
