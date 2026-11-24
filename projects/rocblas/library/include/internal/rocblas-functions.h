@@ -138,7 +138,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zdscal_64(
     The scal_batched functions scale each element of vector ``x_i`` with scalar ``alpha``, for ``i`` = 1, ... , ``batch_count``:
 
         x_i := alpha * x_i,
-    
+
     where (``x_i``) is the i-th instance of the batch.
 
     @param[in]
@@ -251,7 +251,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zdscal_batched_64(rocblas_handle          
     The scal_strided_batched functions scale each element of vector ``x_i`` with scalar ``alpha``, for ``i`` = 1, ... , ``batch_count``:
 
         x_i := alpha * x_i,
-   
+
     where (``x_i``) is the i-th instance of the batch.
 
      @param[in]
@@ -456,7 +456,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zcopy_64(rocblas_handle                han
     The copy_batched functions copy each element ``x_i[j]`` into ``y_i[j]``, for  ``j`` = 1 , ... , ``n``; ``i`` = 1 , ... , ``batch_count``:
 
         y_i := x_i,
-    
+
     where (``x_i``, ``y_i``) is the i-th instance of the batch and
     ``x_i`` and``y_i`` are vectors.
 
@@ -553,7 +553,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zcopy_batched_64(rocblas_handle           
     The copy_strided_batched functions copy each element ``x_i[j]`` into ``y_i[j]``, for  ``j`` = 1 , ... , ``n``; ``i`` = 1 , ... , ``batch_count``:
 
         y_i := x_i,
-   
+
     where (``x_i``, ``y_i``) is the i-th instance of the batch and
     ``x_i`` and ``y_i`` are vectors.
 
@@ -845,7 +845,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zdotc_64(rocblas_handle                han
     The dotc_batched functions performs a batch of dot products of the conjugate of complex vector ``x`` and complex vector`` y``:
 
         result_i = conjugate (x_i) * y_i;
-   
+
     where (``x_i``, ``y_i``) is the i-th instance of the batch and
     ``x_i`` and ``y_i`` are vectors, for ``i`` = 1, ..., ``batch_count``.
 
@@ -1030,7 +1030,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zdotc_batched_64(rocblas_handle           
     The dotc_strided_batched functions perform a batch of dot products of the conjugate of complex vector ``x`` and complex vector ``y``:
 
         result_i = conjugate (x_i) * y_i;
-   
+
     where (``x_i``, ``y_i``) is the i-th instance of the batch.
     ``x_i`` and ``y_i`` are vectors, for ``i`` = 1, ..., ``batch_count``.
 
@@ -1547,9 +1547,9 @@ ROCBLAS_EXPORT rocblas_status rocblas_zswap_strided_batched_64(rocblas_handle   
     @param[in]
     incx      [rocblas_int]
               specifies the increment for the elements of x.
-    @param[out]
-    y         device pointer storing vector y.
     @param[in, out]
+    y         device pointer storing vector y.
+    @param[in]
     incy      [rocblas_int]
               specifies the increment for the elements of y.
 
@@ -1654,9 +1654,9 @@ ROCBLAS_EXPORT rocblas_status rocblas_zaxpy_64(rocblas_handle                han
     @param[in]
     incx      [rocblas_int]
               specifies the increment for the elements of x.
-    @param[out]
-    y         pointer storing vector y on the GPU.
     @param[in, out]
+    y         pointer storing vector y on the GPU.
+    @param[in]
     incy      [rocblas_int]
               specifies the increment for the elements of y.
 
@@ -1778,9 +1778,9 @@ ROCBLAS_EXPORT rocblas_status rocblas_zaxpy_batched_64(rocblas_handle           
     @param[in]
     stridex   [rocblas_stride]
               specifies the increment between vectors of x.
-    @param[out]
-    y         pointer storing vector y on the GPU.
     @param[in, out]
+    y         pointer storing vector y on the GPU.
+    @param[in]
     incy      [rocblas_int]
               specifies the increment for the elements of y.
     @param[in]
@@ -4140,7 +4140,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_drotmg_strided_batched_64(rocblas_handle h
         y := alpha*A*x    + beta*y,   or
         y := alpha*A**T*x + beta*y,   or
         y := alpha*A**H*x + beta*y,
-   
+
     where ``alpha`` and ``beta`` are scalars, ``x`` and ``y`` are vectors, and ``A`` is an
     ``m`` by ``n`` banded matrix with ``kl`` sub-diagonals and ``ku`` super-diagonals.
 
@@ -4330,7 +4330,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgbmv_64(rocblas_handle                han
         y_i := alpha*A_i*x_i    + beta*y_i,   or
         y_i := alpha*A_i**T*x_i + beta*y_i,   or
         y_i := alpha*A_i**H*x_i + beta*y_i,
-   
+
     where (``A_i``, ``x_i``, ``y_i``) is the i-th instance of the batch,
     ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
     ``m`` by ``n`` banded matrix with ``kl`` sub-diagonals and ``ku`` super-diagonals,
@@ -4533,7 +4533,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgbmv_batched_64(rocblas_handle           
         y_i := alpha*A_i*x_i    + beta*y_i,   or
         y_i := alpha*A_i**T*x_i + beta*y_i,   or
         y_i := alpha*A_i**H*x_i + beta*y_i,
-   
+
     where (``A_i``, ``x_i``, ``y_i``) is the i-th instance of the batch,
     ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
     ``m`` by ``n`` banded matrix with ``kl`` sub-diagonals and ``ku`` super-diagonals,
@@ -4769,7 +4769,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgbmv_strided_batched_64(rocblas_handle   
         y := alpha*A*x    + beta*y,   or
         y := alpha*A**T*x + beta*y,   or
         y := alpha*A**H*x + beta*y,
-   
+
     where ``alpha`` and ``beta`` are scalars, ``x`` and ``y`` are vectors, and ``A`` is an
     ``m`` by ``n`` matrix.
 
@@ -4920,7 +4920,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgemv_64(rocblas_handle                han
         y_i := alpha*A_i*x_i    + beta*y_i,   or
         y_i := alpha*A_i**T*x_i + beta*y_i,   or
         y_i := alpha*A_i**H*x_i + beta*y_i,
-   
+
     where (``A_i``, ``x_i``, ``y_i``) is the i-th instance of the batch,
     ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
     ``m`` by ``n`` matrix, for ``i`` = 1, ..., ``batch_count``.
@@ -5195,7 +5195,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_tssgemv_batched_64(rocblas_handle         
         y_i := alpha*A_i*x_i    + beta*y_i,   or
         y_i := alpha*A_i**T*x_i + beta*y_i,   or
         y_i := alpha*A_i**H*x_i + beta*y_i,
-   
+
     where (``A_i``, ``x_i``, ``y_i``) is the i-th instance of the batch,
     ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
     ``m`` by ``n`` matrix, for ``i`` = 1, ..., ``batch_count``.
@@ -5528,7 +5528,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_tssgemv_strided_batched_64(rocblas_handle 
     The hbmv functions perform the matrix-vector operations:
 
         y := alpha*A*x + beta*y
-   
+
     where ``alpha`` and ``beta`` are scalars, ``x`` and ``y`` are ``n``-element vectors, and ``A`` is an
     ``n`` by ``n`` Hermitian band matrix, with ``k`` super-diagonals.
 
@@ -5656,7 +5656,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhbmv_64(rocblas_handle                han
     The hbmv_batched functions perform one of the matrix-vector operations:
 
         y_i := alpha*A_i*x_i + beta*y_i
-   
+
     where ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are ``n``-element vectors, and ``A_i`` is an
     ``n`` by ``n`` Hermitian band matrix with ``k`` super-diagonals, for each batch in ``i`` = [1, ``batch_count``].
 
@@ -5791,7 +5791,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhbmv_batched_64(rocblas_handle           
     The hbmv_strided_batched functions perform one of the matrix-vector operations:
 
         y_i := alpha*A_i*x_i + beta*y_i
-   
+
     where ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are ``n``-element vectors, and ``A_i`` is an
     ``n`` by ``n`` Hermitian band matrix with ``k`` super-diagonals, for each batch in ``i`` = [1, ``batch_count``].
 
@@ -5947,7 +5947,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhbmv_strided_batched_64(rocblas_handle   
     The hemv functions perform one of the matrix-vector operations:
 
         y := alpha*A*x + beta*y
-   
+
     where ``alpha`` and ``beta`` are scalars, ``x`` and ``y`` are ``n``-element vectors, and ``A`` is an
     ``n`` by ``n`` Hermitian matrix.
 
@@ -6051,7 +6051,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemv_64(rocblas_handle                han
     The hemv_batched functions perform one of the matrix-vector operations:
 
         y_i := alpha*A_i*x_i + beta*y_i
-   
+
     where ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are ``n``-element vectors, and ``A_i`` is an
     ``n`` by ``n`` Hermitian matrix, for each batch in ``i`` = [1, ``batch_count``].
 
@@ -6162,7 +6162,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemv_batched_64(rocblas_handle           
     The hemv_strided_batched functions perform one of the matrix-vector operations:
 
         y_i := alpha*A_i*x_i + beta*y_i
-   
+
     where ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are ``n``-element vectors, and ``A_i`` is an
     ``n`` by ``n`` Hermitian matrix, for each batch in ``i`` = [1, ``batch_count``].
 
@@ -6294,7 +6294,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemv_strided_batched_64(rocblas_handle   
     The her functions perform the matrix-vector operations:
 
         A := A + alpha*x*x**H
-   
+
     where ``alpha`` is a real scalar, ``x`` is a vector, and ``A`` is an
     ``n`` by ``n`` Hermitian matrix.
 
@@ -6379,7 +6379,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher_64(rocblas_handle                hand
     The her_batched functions performs the matrix-vector operations:
 
         A_i := A_i + alpha*x_i*x_i**H
-   
+
     where ``alpha`` is a real scalar, ``x_i`` is a vector, and ``A_i`` is an
     ``n`` by ``n`` symmetric matrix, for ``i`` = 1, ..., ``batch_count``.
 
@@ -6471,7 +6471,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher_batched_64(rocblas_handle            
     The her_strided_batched functions perform the matrix-vector operations:
 
         A_i := A_i + alpha*x_i*x_i**H
-   
+
     where ``alpha`` is a real scalar, ``x_i`` is a vector, and ``A_i`` is an
     ``n`` by ``n`` Hermitian matrix, for ``i`` = 1, ..., ``batch_count``.
 
@@ -6576,7 +6576,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher_strided_batched_64(rocblas_handle    
     The her2 functions perform the matrix-vector operations:
 
         A := A + alpha*x*y**H + conj(alpha)*y*x**H
-   
+
     where ``alpha`` is a complex scalar, ``x`` and ``y`` are vectors, and ``A`` is an
     ``n`` by ``n`` Hermitian matrix.
 
@@ -6673,7 +6673,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher2_64(rocblas_handle                han
     The her2_batched functions perform the matrix-vector operations:
 
         A_i := A_i + alpha*x_i*y_i**H + conj(alpha)*y_i*x_i**H
-   
+
     where ``alpha`` is a complex scalar, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
     ``n`` by ``n`` Hermitian matrix for each batch in ``i`` = [1, ``batch_count``].
 
@@ -6777,7 +6777,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher2_batched_64(rocblas_handle           
     The her2_strided_batched functions perform the matrix-vector operations:
 
         A_i := A_i + alpha*x_i*y_i**H + conj(alpha)*y_i*x_i**H
-   
+
     where ``alpha`` is a complex scalar, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
     ``n`` by ``n`` Hermitian matrix for each batch in ``i`` = [1, ``batch_count``].
 
@@ -6902,7 +6902,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher2_strided_batched_64(rocblas_handle   
     The hpmv functions perform the matrix-vector operation:
 
         y := alpha*A*x + beta*y
-   
+
     where ``alpha`` and ``beta`` are scalars, ``x`` and ``y`` are ``n``-element vectors and A is an
     ``n`` by ``n`` Hermitian matrix, supplied in packed form (see description below).
 
@@ -7015,7 +7015,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpmv_64(rocblas_handle                han
     The hpmv_batched functions perform the matrix-vector operation:
 
         y_i := alpha*A_i*x_i + beta*y_i
-   
+
     where ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are ``n``-element vectors and ``A_i`` is an
     ``n`` by ``n`` Hermitian matrix, supplied in packed form (see description below),
     for each batch in ``i`` = [1, ``batch_count``].
@@ -7136,7 +7136,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpmv_batched_64(rocblas_handle           
     The hpmv_strided_batched functions perform the matrix-vector operation:
 
         y_i := alpha*A_i*x_i + beta*y_i
-   
+
     where ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are ``n``-element vectors and ``A_i`` is an
     ``n`` by ``n`` Hermitian matrix, supplied in packed form (see description below),
     for each batch in ``i`` = [1, ``batch_count``].
@@ -7278,7 +7278,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpmv_strided_batched_64(rocblas_handle   
     The hpr functions perform the matrix-vector operations:
 
         A := A + alpha*x*x**H
-   
+
     where ``alpha`` is a real scalar, ``x`` is a vector, and ``A`` is an
     ``n`` by ``n`` Hermitian matrix, supplied in packed form.
 
@@ -7373,7 +7373,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpr_64(rocblas_handle                hand
     The hpr_batched functions perform the matrix-vector operations:
 
         A_i := A_i + alpha*x_i*x_i**H
-   
+
     where ``alpha`` is a real scalar, ``x_i`` is a vector, and ``A_i`` is an
     ``n`` by ``n`` symmetric matrix, supplied in packed form, for ``i`` = 1, ..., ``batch_count``.
 
@@ -7475,7 +7475,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpr_batched_64(rocblas_handle            
     The hpr_strided_batched functions perform the matrix-vector operations:
 
         A_i := A_i + alpha*x_i*x_i**H
-   
+
     where ``alpha`` is a real scalar, ``x_i`` is a vector, and ``A_i`` is an
     ``n`` by ``n`` symmetric matrix, supplied in packed form, for ``i`` = 1, ..., ``batch_count``.
 
@@ -7591,7 +7591,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpr_strided_batched_64(rocblas_handle    
     The hpr2 functions perform the matrix-vector operations:
 
         A := A + alpha*x*y**H + conj(alpha)*y*x**H
-   
+
     where ``alpha`` is a complex scalar, ``x`` and ``y`` are vectors, and ``A`` is an
     ``n`` by ``n`` Hermitian matrix, supplied in packed form.
 
@@ -7699,7 +7699,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpr2_64(rocblas_handle                han
     The hpr2_batched functions perform the matrix-vector operations:
 
         A_i := A_i + alpha*x_i*y_i**H + conj(alpha)*y_i*x_i**H
-   
+
     where ``alpha`` is a complex scalar, ``x_i`` and``y_i`` are vectors, and ``A_i`` is an
     ``n`` by ``n`` symmetric matrix, supplied in packed form, for ``i`` = 1, ..., ``batch_count``.
 
@@ -7814,7 +7814,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpr2_batched_64(rocblas_handle           
     The hpr2_strided_batched functions perform the matrix-vector operations:
 
         A_i := A_i + alpha*x_i*y_i**H + conj(alpha)*y_i*x_i**H
-   
+
     where ``alpha`` is a complex scalar, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
     ``n`` by ``n`` symmetric matrix, supplied in packed form, for ``i`` = 1, ..., ``batch_count``.
 
@@ -7952,10 +7952,10 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpr2_strided_batched_64(rocblas_handle   
         x = A*x or
         x = A**T*x or
         x = A**H*x
-   
+
     where ``x`` is an ``n``-element vector and ``A`` is an ``n`` by ``n`` unit, or non-unit, upper or lower triangular matrix.
     The vector ``x`` is overwritten.
-   
+
     @param[in]
     handle    [rocblas_handle]
               handle to the rocBLAS library context queue.
@@ -8086,7 +8086,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrmv_64(rocblas_handle                han
         x_i = A_i*x_i or
         x_i = A_i**T*x_i or
         x_i = A_i**H*x_i, 0 < i < batch_count
-   
+
     where ``x_i`` is an ``n``-element vector and ``A_i`` is an ``n`` by ``n`` (unit, or non-unit, upper or lower triangular matrix).
     The vectors ``x_i`` are overwritten.
 
@@ -8234,7 +8234,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrmv_batched_64(rocblas_handle           
         x_i = A_i*x_i or
         x_i = A_i**T*x_i, or
         x_i = A_i**H*x_i, 0 < i < batch_count
-   
+
     where ``x_i`` is an ``n``-element vector and ``A_i`` is an ``n`` by ``n`` (unit, or non-unit, upper or lower triangular matrix)
     with strides specifying how to retrieve ``$x_i$`` (resp. ``$A_i$``) from ``$x_{i-1}$`` (resp. ``$A_i$``).
 
@@ -8407,7 +8407,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrmv_strided_batched_64(rocblas_handle   
         x = A*x or
         x = A**T*x or
         x = A**H*x
-   
+
     where ``x`` is an ``n`` element vector and ``A`` is an ``n`` by ``n`` unit, or non-unit,
     upper or lower triangular matrix, supplied in the pack form.
     The vector ``x`` is overwritten.
@@ -8544,7 +8544,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpmv_64(rocblas_handle                han
         x_i = A_i*x_i or
         x_i = A_i**T*x_i or
         x_i = A_i**H*x_i, 0 < i < batch_count
-   
+
     where ``x_i`` is an ``n``-element vector and ``A_i`` is an ``n`` by ``n`` (unit, or non-unit, upper or lower triangular matrix).
     The vectors ``x_i`` are overwritten.
 
@@ -8679,7 +8679,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpmv_batched_64(rocblas_handle           
         x_i = A_i*x_i or
         x_i = A_i**T*x_i or
         x_i = A_i**H*x_i, 0 < i < batch_count
-   
+
     where ``x_i`` is an ``n``-element vector and ``A_i`` is an ``n`` by ``n`` (unit, or non-unit, upper or lower triangular) matrix
     with strides specifying how to retrieve ``$x_i$`` (resp. $``A_i$``) from ``$x_{i-1}$`` (resp. ``$A_i$``).
     The vectors ``x_i`` are overwritten.
@@ -8839,7 +8839,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpmv_strided_batched_64(rocblas_handle   
         x := A*x      or
         x := A**T*x   or
         x := A**H*x,
-   
+
     ``x`` is a vector, and ``A`` is a banded ``n`` by ``n`` matrix (see description below).
 
     @param[in]
@@ -9007,7 +9007,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztbmv_64(rocblas_handle                han
         x_i := A_i*x_i      or
         x_i := A_i**T*x_i   or
         x_i := A_i**H*x_i,
-   
+
     where (``A_i``, ``x_i``) is the i-th instance of the batch,
     ``x_i`` is a vector, and ``A_i`` is an ``n`` by ``n`` matrix, for ``i`` = 1, ..., ``batch_count``.
 
@@ -9187,7 +9187,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztbmv_batched_64(rocblas_handle           
         x_i := A_i*x_i      or
         x_i := A_i**T*x_i   or
         x_i := A_i**H*x_i,
-   
+
     where (``A_i``, ``x_i``) is the i-th instance of the batch,
     ``x_i`` is a vector, and ``A_i`` is an ``n`` by ``n`` matrix, for ``i`` = 1, ..., ``batch_count``.
 
@@ -9389,7 +9389,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztbmv_strided_batched_64(rocblas_handle   
          A*x = b or
          A**T*x = b or
          A**H*x = b
-   
+
     where ``x`` and ``b`` are vectors and ``A`` is a banded triangular matrix.
 
     @param[in]
@@ -9540,7 +9540,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztbsv_64(rocblas_handle                han
          A_i*x_i = b_i or
          A_i**T*x_i = b_i or
          A_i**H*x_i = b_i
-   
+
     where ``x_i`` and ``b_i`` are vectors and ``A_i`` is a banded triangular matrix,
     for ``i`` = [1, ``batch_count``].
 
@@ -9705,7 +9705,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztbsv_batched_64(rocblas_handle           
          A_i*x_i = b_i or
          A_i**T*x_i = b_i or
          A_i**H*x_i = b_i
-   
+
     where ``x_i`` and ``b_i`` are vectors and ``A_i`` is a banded triangular matrix,
     for ``i`` = [1, ``batch_count``].
 
@@ -9891,7 +9891,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztbsv_strided_batched_64(rocblas_handle   
          A*x = b or
          A**T*x = b or
          A**H*x = b,
-   
+
     where ``x`` and ``b`` are vectors and ``A`` is a triangular matrix.
     The vector ``x`` is overwritten on ``b``.
 
@@ -10028,7 +10028,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsv_64(rocblas_handle                han
          A_i*x_i = b_i or
          A_i**T*x_i = b_i or
          A_i**H*x_i = b_i,
-   
+
     where (``A_i``, ``x_i``, ``b_i``) is the i-th instance of the batch.
     ``x_i`` and ``b_i`` are vectors and ``A_i`` is an
     ``n`` by ``n`` triangular matrix.
@@ -10177,7 +10177,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsv_batched_64(rocblas_handle           
          A_i*x_i = b_i or
          A_i**T*x_i = b_i or
          A_i**H*x_i = b_i,
-   
+
     where (``A_i``, ``x_i``, ``b_i``) is the i-th instance of the batch,
     ``x_i`` and ``b_i`` are vectors, and ``A_i`` is an ``n`` by ``n`` triangular matrix, for ``i`` = 1, ..., ``batch_count``.
 
@@ -10349,7 +10349,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsv_strided_batched_64(rocblas_handle   
          A*x = b or
          A**T*x = b or
          A**H*x = b
-   
+
     where ``x`` and ``b`` are vectors and ``A`` is a triangular matrix stored in the packed format.
 
     The input vector ``b`` is overwritten by the output vector ``x``.
@@ -10474,7 +10474,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpsv_64(rocblas_handle                han
          A_i*x_i = b_i or
          A_i**T*x_i = b_i or
          A_i**H*x_i = b_i
-   
+
     where ``x_i`` and ``b_i`` are vectors and ``A_i`` is a triangular matrix stored in the packed format,
     for ``i`` in [1, ``batch_count``].
 
@@ -10611,7 +10611,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpsv_batched_64(rocblas_handle           
          A_i*x_i = b_i or
          A_i**T*x_i = b_i or
          A_i**H*x_i = b_i
-   
+
     where ``x_i`` and ``b_i`` are vectors and ``A_i`` is a triangular matrix stored in the packed format,
     for ``i`` in [1, ``batch_count``].
 
@@ -10769,7 +10769,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpsv_strided_batched_64(rocblas_handle   
     The symv functions perform the matrix-vector operation:
 
         y := alpha*A*x + beta*y
-   
+
     where ``alpha`` and ``beta`` are scalars, and ``x`` and ``y`` are ``n``-element vectors.
     ``A`` should contain an upper or lower triangular ``n`` by ``n`` symmetric matrix.
 
@@ -10913,7 +10913,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymv_64(rocblas_handle                han
     The symv_batched functions perform the matrix-vector operation:
 
         y_i := alpha*A_i*x_i + beta*y_i
-   
+
     where (``A_i``, ``x_i``, ``y_i``) is the i-th instance of the batch,
     ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
     ``n`` by ``n`` symmetric matrix, for ``i`` = 1, ..., ``batch_count``.
@@ -11070,7 +11070,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymv_batched_64(rocblas_handle           
     The symv_strided_batched functions perform the matrix-vector operation:
 
         y_i := alpha*A_i*x_i + beta*y_i
-   
+
     where (``A_i``, ``x_i``, ``y_i``) is the i-th instance of the batch,
     ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
     ``n`` by ``n`` symmetric matrix, for ``i`` = 1, ..., ``batch_count``.
@@ -11263,7 +11263,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymv_strided_batched_64(rocblas_handle   
     The spmv functions perform the matrix-vector operation:
 
         y := alpha*A*x + beta*y
-   
+
     where ``alpha`` and ``beta`` are scalars, and ``x`` and ``y`` are ``n``-element vectors.
     ``A`` should contain an upper or lower triangular ``n`` by ``n`` packed symmetric matrix.
 
@@ -11349,7 +11349,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspmv_64(rocblas_handle handle,
     The spmv_batched functions perform the matrix-vector operation:
 
         y_i := alpha*A_i*x_i + beta*y_i
-   
+
     where (``A_i``, ``x_i``, ``y_i``) is the i-th instance of the batch,
     ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
     ``n`` by ``n`` symmetric matrix, for ``i`` = 1, ..., ``batch_count``.
@@ -11444,7 +11444,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspmv_batched_64(rocblas_handle      handl
     The spmv_strided_batched functions perform the matrix-vector operation:
 
         y_i := alpha*A_i*x_i + beta*y_i
-   
+
     where (``A_i``, ``x_i``, ``y_i``) is the i-th instance of the batch,
     ``alpha`` and ``beta`` are scalars, ``x_`` and ``y_i`` are vectors, and ``A_i`` is an
     ``n`` by ``n`` symmetric matrix, for ``i`` = 1, ..., ``batch_count``.
@@ -11564,7 +11564,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspmv_strided_batched_64(rocblas_handle ha
     The sbmv functions perform the matrix-vector operation:
 
         y := alpha*A*x + beta*y
-   
+
     where ``alpha`` and ``beta`` are scalars, and ``x`` and ``y`` are ``n``-element vectors.
     ``A`` should contain an upper or lower triangular ``n`` by ``n ``symmetric banded matrix.
 
@@ -11664,7 +11664,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dsbmv_64(rocblas_handle handle,
     The sbmv_batched functions perform the matrix-vector operation:
 
         y_i := alpha*A_i*x_i + beta*y_i
-   
+
     where (``A_i``, ``x_i``, ``y_i``) is the i-th instance of the batch,
     ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
     ``n`` by ``n`` symmetric banded matrix, for ``i`` = 1, ..., ``batch_count``.
@@ -11775,7 +11775,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dsbmv_batched_64(rocblas_handle      handl
     The sbmv_strided_batched functions perform the matrix-vector operation:
 
         y_i := alpha*A_i*x_i + beta*y_i
-   
+
     where (``A_i``, ``x_i``, ``y_i``) is the i-th instance of the batch,
     ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
     ``n`` by ``n`` symmetric banded matrix, for ``i`` = 1, ..., ``batch_count``.
@@ -11910,7 +11910,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dsbmv_strided_batched_64(rocblas_handle ha
 
         A := A + alpha*x*y**T , OR
         A := A + alpha*x*y**H for gerc
-   
+
     where ``alpha`` is a scalar, ``x`` and ``y`` are vectors, and ``A`` is an
     ``m`` by ``n`` matrix.
 
@@ -12084,7 +12084,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgerc_64(rocblas_handle                han
 
         A := A + alpha*x*y**T , OR
         A := A + alpha*x*y**H for gerc
-   
+
     where (``A_i``, ``x_i``, ``y_i``) is the i-th instance of the batch,
     ``alpha`` is a scalar, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
     ``m`` by ``n`` matrix, for ``i`` = 1, ..., ``batch_count``.
@@ -12274,7 +12274,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgerc_batched_64(rocblas_handle           
 
         A_i := A_i + alpha*x_i*y_i**T, OR
         A_i := A_i + alpha*x_i*y_i**H  for gerc
-   
+
     where (``A_i``, ``x_i``, ``y_i``) is the i-th instance of the batch,
     ``alpha`` is a scalar, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
     ``m`` by ``n`` matrix, for ``i`` = 1, ..., ``batch_count``.
@@ -12512,7 +12512,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgerc_strided_batched_64(rocblas_handle   
     The spr functions perform the matrix-vector operations:
 
         A := A + alpha*x*x**T
-   
+
     where ``alpha`` is a scalar, ``x`` is a vector, and ``A`` is an
     ``n`` by ``n`` symmetric matrix, supplied in packed form.
 
@@ -12641,7 +12641,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zspr_64(rocblas_handle                hand
     The spr_batched functions perform the matrix-vector operations:
 
         A_i := A_i + alpha*x_i*x_i**T
-   
+
     where ``alpha`` is a scalar, ``x_i`` is a vector, and ``A_i`` is an
     ``n`` by ``n`` symmetric matrix, supplied in packed form, for ``i`` = 1, ..., ``batch_count``.
 
@@ -12780,7 +12780,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zspr_batched_64(rocblas_handle            
     The spr_strided_batched functions perform the matrix-vector operations:
 
         A_i := A_i + alpha*x_i*x_i**T
-   
+
     where ``alpha`` is a scalar, ``x_i`` is a vector, and ``A_i`` is an
     ``n`` by ``n`` symmetric matrix, supplied in packed form, for ``i`` = 1, ..., ``batch_count``.
 
@@ -12941,7 +12941,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zspr_strided_batched_64(rocblas_handle    
     The spr2 functions perform the matrix-vector operation:
 
         A := A + alpha*x*y**T + alpha*y*x**T
-   
+
     where ``alpha`` is a scalar, ``x`` and ``y`` are vectors, and ``A`` is an
     ``n`` by ``n`` symmetric matrix, supplied in packed form.
 
@@ -13050,7 +13050,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspr2_64(rocblas_handle handle,
     The spr2_batched functions perform the matrix-vector operation:
 
         A_i := A_i + alpha*x_i*y_i**T + alpha*y_i*x_i**T
-   
+
     where ``alpha`` is a scalar, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
     ``n`` by ``n`` symmetric matrix, supplied in packed form, for ``i`` = 1, ..., ``batch_count``.
 
@@ -13166,7 +13166,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspr2_batched_64(rocblas_handle      handl
     The spr2_strided_batched functions perform the matrix-vector operation:
 
         A_i := A_i + alpha*x_i*y_i**T + alpha*y_i*x_i**T
-   
+
     where ``alpha`` is a scalar, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
     ``n`` by ``n`` symmetric matrix, supplied in packed form, for ``i`` = 1, ..., ``batch_count``.
 
@@ -13304,7 +13304,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspr2_strided_batched_64(rocblas_handle ha
     The syr functions perform the matrix-vector operations:
 
         A := A + alpha*x*x**T
-   
+
     where ``alpha`` is a scalar, ``x`` is a vector, and ``A`` is an
     ``n`` by ``n`` symmetric matrix.
 
@@ -13416,7 +13416,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr_64(rocblas_handle                hand
     The syr_batched functions perform a batch of matrix-vector operations:
 
         A[i] := A[i] + alpha*x[i]*x[i]**T
-   
+
     where ``alpha`` is a scalar, ``x`` is an array of vectors, and ``A`` is an array of
       ``n`` by ``n`` symmetric matrices, for ``i`` = 1 , ... , ``batch_count``.
 
@@ -13538,7 +13538,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr_batched_64(rocblas_handle            
     The syr_strided_batched functions perform the matrix-vector operations:
 
         A[i] := A[i] + alpha*x[i]*x[i]**T
-   
+
     where ``alpha`` is a scalar, ``x`` is an array of vectors, and ``A`` is an array of
     ``n`` by ``n`` symmetric matrices, for ``i`` = 1 , ... , ``batch_count``.
 
@@ -13682,7 +13682,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr_strided_batched_64(rocblas_handle    
     The syr2 functions perform the matrix-vector operations:
 
         A := A + alpha*x*y**T + alpha*y*x**T
-   
+
     where ``alpha`` is a scalar, ``x`` and ``y`` are vectors, and ``A`` is an
     ``n`` by ``n`` symmetric matrix.
 
@@ -13814,7 +13814,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2_64(rocblas_handle                han
     The syr2_batched functions perform a batch of matrix-vector operations:
 
         A[i] := A[i] + alpha*x[i]*y[i]**T + alpha*y[i]*x[i]**T
-   
+
     where ``alpha`` is a scalar, ``x[i]`` and ``y[i]`` are vectors, and ``A[i]`` is a
     ``n`` by ``n`` symmetric matrix, for ``i`` = 1 , ... , ``batch_count``.
 
@@ -13957,7 +13957,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2_batched_64(rocblas_handle           
     The syr2_strided_batched functions perform the matrix-vector operations:
 
         A[i] := A[i] + alpha*x[i]*y[i]**T + alpha*y[i]*x[i]**T
-   
+
     where ``alpha`` is a scalar, ``x[i]`` and ``y[i]`` are vectors, and ``A[i]`` is a
     ``n`` by ``n`` symmetric matrices, for ``i`` = 1 , ... , ``batch_count``.
 
@@ -16059,7 +16059,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymm_64(rocblas_handle                han
     @param[in]
     A       device array of device pointers storing each matrix A_i on the GPU.
             - A_i is m by m if side == rocblas_side_left.
-            - A_i is n by n if side == rocblas_side_right.   
+            - A_i is n by n if side == rocblas_side_right.
             - Only the upper/lower triangular part is accessed.
 
     @param[in]
@@ -18307,7 +18307,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrkx_strided_batched_64(rocblas_handle  
     triangular matrix and the strictly upper triangular part of
     ``A`` is not referenced. Here, ``k`` is ``m`` when ``side == rocblas_side_left``
     and is ``n`` when ``side == rocblas_side_right``.
-    
+
     Note that when ``diag == rocblas_diagonal_unit``, the diagonal elements of
     ``A`` are not referenced either but are assumed to be unity.
 
@@ -23975,11 +23975,11 @@ ROCBLAS_EXPORT rocblas_status rocblas_syrk_ex(rocblas_handle    handle,
     @param[in]
     A       pointer storing matrix A on the GPU.
             Matrix dimension is ( lda, k ) when transA = rocblas_operation_none. Otherwise, (lda, n).
-    
+
     @param[in]
     a_type [rocblas_datatype]
            specifies the datatype of matrix A.
-    
+
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A.
@@ -23995,15 +23995,15 @@ ROCBLAS_EXPORT rocblas_status rocblas_syrk_ex(rocblas_handle    handle,
     @param[in]
     C       pointer storing matrix C on the GPU.
             Only the upper/lower triangular part is accessed.
-    
+
     @param[in]
     c_type [rocblas_datatype]
            specifies the datatype of matrix C.
-    
+
     @param[in]
     ldc    [rocblas_int]
            ldc specifies the first dimension of C. ldc >= max( 1, n ).
-    
+
     @param[in]
     execution_type [rocblas_datatype]
            specifies the datatype of computation.
@@ -24865,7 +24865,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_nrm2_batched_ex_64(rocblas_handle   handle
 //! @}
 
 /*! @{
-    \brief <b>  BLAS_EX API </b> 
+    \brief <b>  BLAS_EX API </b>
 
     \details
     The nrm2_strided_batched_ex functions compute the Euclidean norm over a batch of real or complex vectors.
