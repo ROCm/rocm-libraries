@@ -33,7 +33,7 @@
 
 #define MIOPEN_CHECK_RET(val) ASSERT_EQ(val, miopenStatusSuccess)
 
-class GPU_ConvStridedTensors_FP32 : public ::testing::Test
+class GPU_ConvStridedTensors_FP32 : public ::testing::TestWithParam<int>
 {
 protected:
     void SetUp() override
@@ -142,7 +142,7 @@ protected:
     std::vector<float> h_output;
 };
 
-TEST_F(GPU_ConvStridedTensors_FP32, ConvStridedTensorsNotImplemented)
+TEST_P(GPU_ConvStridedTensors_FP32, ConvStridedTensorsNotImplemented)
 {
     auto device = Device(handle);
 
@@ -196,3 +196,5 @@ TEST_F(GPU_ConvStridedTensors_FP32, ConvStridedTensorsNotImplemented)
               miopenStatusSuccess);
     ASSERT_TRUE(device.Synchronize());
 }
+
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_ConvStridedTensors_FP32, ::testing::Values(0));

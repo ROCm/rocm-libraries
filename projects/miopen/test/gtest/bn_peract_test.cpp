@@ -1193,10 +1193,13 @@ TEST_P(GPU_BnPeract_FP16, TestFloat16) { this->Run(); }
 TEST_P(GPU_BnPeract_FP32, TestFloat32) { this->Run(); }
 TEST_P(GPU_BnPeract_BFP16, TestBFloat16) { this->Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BnPeract_FP16, GetSmokeTestCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BnPeract_FP32, GetSmokeTestCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BnPeract_BFP16, GetSmokeTestCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_BnPeract_FP16, GetSmokeTestCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_BnPeract_FP32, GetSmokeTestCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_BnPeract_BFP16, GetSmokeTestCases(), TestNameGenerator{});
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_BnPeract_FP16, GetFullTestCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_BnPeract_FP32, GetFullTestCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_BnPeract_BFP16, GetFullTestCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Comprehensive, GPU_BnPeract_FP16, GetFullTestCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Comprehensive, GPU_BnPeract_FP32, GetFullTestCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         GPU_BnPeract_BFP16,
+                         GetFullTestCases(),
+                         TestNameGenerator{});

@@ -297,6 +297,22 @@ int main(int argc, char** argv)
     }
 #endif
 
+#if defined(HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_RELDIR) \
+    && !defined(HIPKERNELPROVIDER_FLYDSL_PRODUCT_DESCRIPTOR_RELDIR)
+    // The ASM SDPA engine's L1 models ship loose under the production tree's asm_sdpa/,
+    // which the unit root does not reach either. Where FlyDSL already added the whole
+    // production root above, that root holds them; otherwise only this one folder is added,
+    // through HIPDNN_DESCRIPTOR_PATH (additive too), so no production pack reaches the other
+    // suites. Never over a value the caller supplied.
+    if(hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_PATH").empty())
+    {
+        const auto asmSdpaModels = hip_kernel_provider::testing::descriptorSetRoot(
+            HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_RELDIR);
+        hipdnn_data_sdk::utilities::setEnv("HIPDNN_DESCRIPTOR_PATH",
+                                           asmSdpaModels.string().c_str());
+    }
+#endif
+
     // Initialize test logging infrastructure to forward logs to std::cerr based
     // on the current environment HIPDNN_LOG_LEVEL value when this function is called.
     // NOTE: Logs are not routed to the backend by the recordingCallback returned here

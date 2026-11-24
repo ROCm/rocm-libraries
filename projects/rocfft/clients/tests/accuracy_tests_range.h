@@ -184,6 +184,6 @@ const static std::vector<std::vector<size_t>> partial_pass_adhoc_3D
        {280, 128, 128}
 
 };
-const static std::vector<size_t> partial_pass_batch_range_3D = {1, 5, 10, 20, 50};
+const static std::vector<size_t> partial_pass_batch_range_3D = {50, 20, 10, 5, 1};
 
 #endif // ACCURACY_TESTS_RANGE_H

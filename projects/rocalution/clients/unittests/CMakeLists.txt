@@ -142,9 +142,13 @@ if(SUPPORT_HIP AND NOT WIN32)
   )
 endif()
 
+# The fault injection finds librocalution_hip through an address taken in this
+# executable, which only points into the library when the executable is
+# position-independent
 set_target_properties(rocalution-unit-test-lifecycle PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
+  POSITION_INDEPENDENT_CODE ON
   RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
 )
 

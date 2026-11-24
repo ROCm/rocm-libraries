@@ -188,7 +188,7 @@ TEST_P(GPU_ConvBiasActivFind2InferFusionFind_FP32, ConvBiasActivFind2Float_testF
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    Full,
+    Standard,
     GPU_ConvBiasActivFind2InferFusionFind_FP32,
     testing::Combine(testing::Values(miopenActivationRELU),
                      testing::ValuesIn(GetNetworkForFusionCompileStepTest<ConvTestCaseBase>()),
@@ -196,13 +196,13 @@ INSTANTIATE_TEST_SUITE_P(
 
 #endif
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_ConvBiasActivFind2Infer_FP32,
                          testing::Combine(testing::Values(miopenActivationRELU),
                                           testing::ValuesIn(GetNetwork1<ConvTestCaseBase>()),
                                           testing::Values(miopenTensorNCHW)));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_ConvBiasActivFind2Infer_FP16,
                          testing::Combine(testing::Values(miopenActivationPASTHRU,
                                                           miopenActivationLOGISTIC,

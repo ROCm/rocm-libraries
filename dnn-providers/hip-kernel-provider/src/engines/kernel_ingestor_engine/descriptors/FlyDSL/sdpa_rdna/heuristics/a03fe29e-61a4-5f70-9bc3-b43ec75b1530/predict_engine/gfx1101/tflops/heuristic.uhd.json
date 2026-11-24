@@ -1,25 +1,16 @@
 {
   "version": "1.0",
-  "id": "c472baba-16a2-4d69-af87-f4e0f1cc5dd1",
-  "name": "hipkernel:flydsl_sdpa_rdna (gfx1101, 234 contribution(s))",
+  "id": "dd9804c1-4a4e-4af3-ac98-17550213bd0b",
+  "name": "hipkernel:flydsl_sdpa_rdna (gfx1101, 251 contribution(s))",
   "adapter": "mlp_data",
   "features_signature": [
     "$flydsl_sdpa_rdna.align_bottom_right",
-    "$flydsl_sdpa_rdna.bias.uid",
     "$flydsl_sdpa_rdna.causal",
-    "$flydsl_sdpa_rdna.dropout_offset.uid",
     "$flydsl_sdpa_rdna.dropout_p",
-    "$flydsl_sdpa_rdna.dropout_seed.uid",
-    "$flydsl_sdpa_rdna.ragged_offset_kv.uid",
-    "$flydsl_sdpa_rdna.ragged_offset_q.uid",
+    "$flydsl_sdpa_rdna.left_bound",
     "$flydsl_sdpa_rdna.right_bound",
-    "$flydsl_sdpa_rdna.scale",
     "$flydsl_sdpa_rdna.scale_source",
-    "$flydsl_sdpa_rdna.seq_len_kv.uid",
-    "$flydsl_sdpa_rdna.seq_len_q.uid",
     "$flydsl_sdpa_rdna.sink.stride",
-    "$flydsl_sdpa_rdna.sink.uid",
-    "$flydsl_sdpa_rdna.stats.uid",
     "$graph.arithmetic_intensity",
     "$graph.flops",
     "$graph.flops_by_type.SdpaAttributes",
@@ -51,12 +42,6 @@
     {
       "value_or_default": [
         "$graph.nodes[0].attn_mask.dims[3]",
-        -1
-      ]
-    },
-    {
-      "value_or_default": [
-        "$graph.nodes[0].attn_mask.numel",
         -1
       ]
     },
@@ -96,12 +81,6 @@
         -1
       ]
     },
-    {
-      "value_or_default": [
-        "$graph.nodes[0].attn_scale_value",
-        1.0
-      ]
-    },
     "$graph.nodes[0].data_dependent",
     "$graph.nodes[0].diagonal_alignment",
     {
@@ -124,16 +103,20 @@
     "$graph.nodes[0].k.dims[1]",
     "$graph.nodes[0].k.dims[2]",
     "$graph.nodes[0].k.dims[3]",
-    "$graph.nodes[0].k.numel",
     "$graph.nodes[0].k.strides[0]",
     "$graph.nodes[0].k.strides[1]",
     "$graph.nodes[0].k.strides[2]",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].left_bound",
+        -1
+      ]
+    },
     "$graph.nodes[0].o.data_type",
     "$graph.nodes[0].o.dims[0]",
     "$graph.nodes[0].o.dims[1]",
     "$graph.nodes[0].o.dims[2]",
     "$graph.nodes[0].o.dims[3]",
-    "$graph.nodes[0].o.numel",
     "$graph.nodes[0].o.strides[0]",
     "$graph.nodes[0].o.strides[1]",
     "$graph.nodes[0].o.strides[2]",
@@ -164,12 +147,6 @@
     {
       "value_or_default": [
         "$graph.nodes[0].offset.dims[3]",
-        -1
-      ]
-    },
-    {
-      "value_or_default": [
-        "$graph.nodes[0].offset.numel",
         -1
       ]
     },
@@ -215,7 +192,6 @@
     "$graph.nodes[0].q.dims[1]",
     "$graph.nodes[0].q.dims[2]",
     "$graph.nodes[0].q.dims[3]",
-    "$graph.nodes[0].q.numel",
     "$graph.nodes[0].q.strides[0]",
     "$graph.nodes[0].q.strides[1]",
     "$graph.nodes[0].q.strides[2]",
@@ -252,12 +228,6 @@
     {
       "value_or_default": [
         "$graph.nodes[0].scale.dims[3]",
-        -1
-      ]
-    },
-    {
-      "value_or_default": [
-        "$graph.nodes[0].scale.numel",
         -1
       ]
     },
@@ -329,12 +299,6 @@
     },
     {
       "value_or_default": [
-        "$graph.nodes[0].seed.numel",
-        -1
-      ]
-    },
-    {
-      "value_or_default": [
         "$graph.nodes[0].seed.rank",
         -1
       ]
@@ -396,12 +360,6 @@
     {
       "value_or_default": [
         "$graph.nodes[0].seq_len_kv.dims[3]",
-        -1
-      ]
-    },
-    {
-      "value_or_default": [
-        "$graph.nodes[0].seq_len_kv.numel",
         -1
       ]
     },
@@ -473,12 +431,6 @@
     },
     {
       "value_or_default": [
-        "$graph.nodes[0].seq_len_q.numel",
-        -1
-      ]
-    },
-    {
-      "value_or_default": [
         "$graph.nodes[0].seq_len_q.rank",
         -1
       ]
@@ -540,12 +492,6 @@
     {
       "value_or_default": [
         "$graph.nodes[0].sink_token.dims[3]",
-        -1
-      ]
-    },
-    {
-      "value_or_default": [
-        "$graph.nodes[0].sink_token.numel",
         -1
       ]
     },
@@ -617,12 +563,6 @@
     },
     {
       "value_or_default": [
-        "$graph.nodes[0].stats.numel",
-        -1
-      ]
-    },
-    {
-      "value_or_default": [
         "$graph.nodes[0].stats.rank",
         -1
       ]
@@ -662,45 +602,66 @@
     "$graph.nodes[0].v.dims[1]",
     "$graph.nodes[0].v.dims[2]",
     "$graph.nodes[0].v.dims[3]",
-    "$graph.nodes[0].v.numel",
     "$graph.nodes[0].v.strides[0]",
     "$graph.nodes[0].v.strides[1]",
     "$graph.nodes[0].v.strides[2]",
     "$graph.tensor_count",
-    "$graph.tensors[0].data_type",
-    "$graph.tensors[0].dims[0]",
-    "$graph.tensors[0].dims[1]",
-    "$graph.tensors[0].dims[2]",
-    "$graph.tensors[0].dims[3]",
-    "$graph.tensors[0].strides[0]",
-    "$graph.tensors[0].strides[1]",
-    "$graph.tensors[0].strides[2]",
-    "$graph.tensors[1].data_type",
-    "$graph.tensors[1].dims[0]",
-    "$graph.tensors[1].dims[1]",
-    "$graph.tensors[1].dims[2]",
-    "$graph.tensors[1].dims[3]",
-    "$graph.tensors[1].strides[0]",
-    "$graph.tensors[1].strides[1]",
-    "$graph.tensors[1].strides[2]",
-    "$graph.tensors[2].data_type",
-    "$graph.tensors[2].dims[0]",
-    "$graph.tensors[2].dims[1]",
-    "$graph.tensors[2].dims[2]",
-    "$graph.tensors[2].dims[3]",
-    "$graph.tensors[2].strides[0]",
-    "$graph.tensors[2].strides[1]",
-    "$graph.tensors[2].strides[2]",
-    "$graph.tensors[3].data_type",
-    "$graph.tensors[3].dims[0]",
-    "$graph.tensors[3].dims[1]",
-    "$graph.tensors[3].dims[2]",
-    "$graph.tensors[3].dims[3]",
-    "$graph.tensors[3].strides[0]",
-    "$graph.tensors[3].strides[1]",
-    "$graph.tensors[3].strides[2]"
+    {
+      "!=": [
+        "$flydsl_sdpa_rdna.bias.uid",
+        -1
+      ]
+    },
+    {
+      "!=": [
+        "$flydsl_sdpa_rdna.dropout_offset.uid",
+        -1
+      ]
+    },
+    {
+      "!=": [
+        "$flydsl_sdpa_rdna.dropout_seed.uid",
+        -1
+      ]
+    },
+    {
+      "!=": [
+        "$flydsl_sdpa_rdna.ragged_offset_kv.uid",
+        -1
+      ]
+    },
+    {
+      "!=": [
+        "$flydsl_sdpa_rdna.ragged_offset_q.uid",
+        -1
+      ]
+    },
+    {
+      "!=": [
+        "$flydsl_sdpa_rdna.seq_len_kv.uid",
+        -1
+      ]
+    },
+    {
+      "!=": [
+        "$flydsl_sdpa_rdna.seq_len_q.uid",
+        -1
+      ]
+    },
+    {
+      "!=": [
+        "$flydsl_sdpa_rdna.sink.uid",
+        -1
+      ]
+    },
+    {
+      "!=": [
+        "$flydsl_sdpa_rdna.stats.uid",
+        -1
+      ]
+    }
   ],
-  "features_hash": "sha256:599d84c3f84cfd9e",
+  "features_hash": "sha256:7a2c8052c4d6ba4b",
   "trained_against": {
     "ued": {
       "id": "a03fe29e-61a4-5f70-9bc3-b43ec75b1530",
@@ -727,6 +688,6 @@
   },
   "mlp_data": {
     "artifact": "model.bin",
-    "hash": "58ce810922958c9ca9670326d750ac43538f4fca371a0b6c1992bcc499fed4dc"
+    "hash": "cd63f01943d460da7f79757b66c0b14616023612189cc47e53e8d525a92bda15"
   }
 }
