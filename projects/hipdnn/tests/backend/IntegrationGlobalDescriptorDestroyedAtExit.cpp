@@ -18,6 +18,7 @@
 namespace
 {
 
+#if !defined(_WIN32)
 // Destroys backend descriptors from its destructor, as an application object would.
 class LateBackendDescriptors
 {
@@ -52,6 +53,7 @@ private:
 
 hipdnn_tests::PluginUnloadProbe gPluginUnloadProbe;
 LateBackendDescriptors gLateDescriptors;
+#endif
 
 class IntegrationGlobalBackendDescriptorDestroyedAtExit
     : public hipdnn_tests::IntegrationGlobalObjectDestroyedAtExit

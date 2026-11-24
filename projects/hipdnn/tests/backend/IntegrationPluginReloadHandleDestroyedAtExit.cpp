@@ -19,6 +19,7 @@
 namespace
 {
 
+#if !defined(_WIN32)
 hipdnn_tests::PluginUnloadProbe gPluginUnloadProbe;
 
 // Constructed on first use, between the two plugin loads. A namespace-scope object would be
@@ -28,6 +29,7 @@ hipdnn_tests::LateBackendHandle& handleCreatedBetweenLoads()
     static hipdnn_tests::LateBackendHandle s_handle;
     return s_handle;
 }
+#endif
 
 class IntegrationPluginReloadHandleDestroyedAtExit
     : public hipdnn_tests::IntegrationGlobalObjectDestroyedAtExit
