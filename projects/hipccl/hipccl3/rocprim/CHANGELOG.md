@@ -4,6 +4,13 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ## rocPRIM 5.1.0 for ROCm 10.3.0
 
+### Added
+
+* Added support for large number of segments and large number of items to `rocprim::device_segmented_radix_sort`.
+* Added fixed-size-segments variant for `rocprim::device_segmented_reduce`.
+* Added support for large number of segments to `rocprim::device_segmented_reduce`.
+* Added support for large sizes to `rocprim::device_run_length_encode` and `rocprim::device_run_length_encode_non_trivial_runs`.
+
 ### Changed
 
 * Renamed the CMake option `BUILD_CODE_COVERAGE` to `ROCPRIM_ENABLE_COVERAGE`. The test-only preprocessor define `CODE_COVERAGE` is now `ROCPRIM_ENABLE_COVERAGE`.
@@ -14,6 +21,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 * Added autotuned gfx950 (MI355X) configs for the following device algorithms:
   * `adjacent_find`, `merge`, `partition` (flag, predicate, three-way, two-way flag, two-way predicate), `radix_sort` (block sort), `reduce`, `run_length_encode`, `run_length_encode_non_trivial_runs`, `scan`, `scan_by_key`, `search_n`, `segmented_reduce`, `select` (flag, predicate, predicated flag, unique, unique by key), `transform`, and `transform` (pointer).
+* `block_histogram` uses the __match_any intrinsic.
 
 ### Removed
 
@@ -38,6 +46,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
   * `radix_sort` onesweep variant (`device_radix_sort_onesweep.hpp`). The tuner's shared memory check let oversized configs through.
 
 ### Resolved Issues
+
 * Fixed incorrect output in `device_segmented_topk_air.hpp:choose_pivot_bin` when `radix_bits` does not divide the `key` width.
 
 ## rocPRIM 5.0.0 for ROCm 10.2.0

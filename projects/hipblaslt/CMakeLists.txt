@@ -461,6 +461,19 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-opt-in-features.h"
 )
 
+# Experimental API registry: fails configure once a feature is past its deadline, and
+# generates hipblaslt-experimental-features.h and the library's private feature list.
+# Sets HIPBLASLT_EXPERIMENTAL_FRAGMENTS.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/rocm_feature_releases.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt_experimental.cmake")
+set(HIPBLASLT_EXPERIMENTAL_HEADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hipblaslt")
+include("${CMAKE_CURRENT_SOURCE_DIR}/library/experimental/features.cmake")
+hipblaslt_experimental_finalize(
+    TEMPLATE "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hipblaslt-experimental-features.h.in"
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-experimental-features.h"
+    REGISTRY "${CMAKE_CURRENT_BINARY_DIR}/library/src/hipblaslt-experimental-registry.inc"
+)
+
 # `hipblaslt::mxdatagen` lives in clients/common (next to its source), and is
 # only built when at least one consumer needs it. tensilelite/client and
 # tensilelite/tests reach for it on the same condition, so we drive the
@@ -518,6 +531,15 @@ if(HIPBLASLT_ENABLE_HOST)
     endif()
     rocm_set_soversion(hipblaslt "${hipblaslt_SOVERSION}")
     add_library(roc::hipblaslt ALIAS hipblaslt)
+
+    # roc::hipblaslt plus ROCM_ENABLE_EXPERIMENTAL_APIS=1, the ROCm-wide switch that makes
+    # hipblaslt/hipblaslt-experimental.h declare the experimental API. Installed and exported
+    # with roc::hipblaslt, but not listed in hipblaslt_LIBRARIES, so nobody opts in by accident.
+    add_library(hipblaslt-experimental INTERFACE)
+    target_link_libraries(hipblaslt-experimental INTERFACE hipblaslt)
+    target_compile_definitions(hipblaslt-experimental INTERFACE ROCM_ENABLE_EXPERIMENTAL_APIS=1)
+    set_target_properties(hipblaslt-experimental PROPERTIES EXPORT_NAME hipblaslt_experimental)
+    add_library(roc::hipblaslt_experimental ALIAS hipblaslt-experimental)
 
     target_link_libraries(hipblaslt
         PUBLIC
@@ -625,7 +647,7 @@ if(HIPBLASLT_ENABLE_HOST)
         message(WARNING "llvm-strip not found, using default strip tool. This may cause stripping to fail during packaging.")
     endif()
 
-    rocm_install_targets(TARGETS hipblaslt)
+    rocm_install_targets(TARGETS hipblaslt hipblaslt-experimental)
 
     get_target_property(hipblaslt_public_headers roc::hipblaslt INTERFACE_SOURCES)
 
@@ -894,8 +916,6 @@ hipblaslt_add_version_resource(hipblaslt-test-tuning-store "AMD hipBLASLt Tuning
 #   share/hipblaslt/tensilelite/tensilelite/ — TensileLite Python package
 #   share/hipblaslt/tensilelite/rocisa/       — rocisa Python package (normalized layout)
 #   share/hipblaslt/tensilelite/rocisa_tests/ — rocisa pytest modules
-#   share/hipblaslt/tensilelite/stinkytofu/   — stinkytofu Python package (gfx1250 backend)
-#   share/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/ — rocisa facade over stinkytofu
 if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     set(_tensilelite_install_dest "${CMAKE_INSTALL_DATADIR}/hipblaslt/tensilelite")
     set(_tensilelite_src "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
@@ -973,37 +993,6 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         endif()
     endif()
 
-    # FFM runs with PYTHONPATH=share/hipblaslt/tensilelite. The lib/hipblaslt
-    # install in rocisa/CMakeLists.txt is a different root, and TheRock's lib
-    # component keeps lib/hipblaslt/rocisa plus every *.so. Put the package
-    # here so gfx1250 codegen can import it. The *.so is claimed by the lib
-    # artifact; these Python files stay in the test artifact; flattening
-    # puts them back next to each other. The target exists for every GPU
-    # family (see STINKYTOFU_BUILD_PYTHON in rocisa/CMakeLists.txt).
-    if(TARGET stinkytofu_python)
-        set(_stinkytofu_py_src "${ROCM_LIBRARIES_ROOT}/shared/stinkytofu")
-        install(TARGETS stinkytofu_python
-            LIBRARY DESTINATION "${_tensilelite_install_dest}/stinkytofu"
-            COMPONENT tests
-        )
-        install(FILES "${_stinkytofu_py_src}/python_module/stinkytofu/__init__.py"
-            DESTINATION "${_tensilelite_install_dest}/stinkytofu"
-            COMPONENT tests
-        )
-        if(TARGET intrinsics_compiled)
-            install(FILES "${CMAKE_BINARY_DIR}/intrinsics.st.bc"
-                DESTINATION "${_tensilelite_install_dest}/stinkytofu"
-                COMPONENT tests
-            )
-        endif()
-        install(DIRECTORY
-            "${_tensilelite_src}/rocisa_stinkytofu_adaptor/rocisa_stinkytofu_adaptor/"
-            DESTINATION "${_tensilelite_install_dest}/rocisa_stinkytofu_adaptor"
-            COMPONENT tests
-            FILES_MATCHING PATTERN "*.py"
-        )
-    endif()
-
     # rocisa tests
     install(
         DIRECTORY "${_tensilelite_src}/rocisa/test/"
@@ -1038,9 +1027,14 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
     )
 
     if(TENSILELITE_ENABLE_CLIENT)
+        set(_tensilelite_client_dest "${CMAKE_INSTALL_LIBEXECDIR}/hipblaslt/tensilelite")
+        # TheRock computes install RPATHs relative to this location; without it they
+        # assume bin/ and miss <prefix>/lib from libexec/hipblaslt/tensilelite.
+        set_property(TARGET tensilelite-client PROPERTY THEROCK_INSTALL_RPATH_ORIGIN
+            "${_tensilelite_client_dest}")
         install(
             TARGETS tensilelite-client
-            RUNTIME DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/hipblaslt/tensilelite"
+            RUNTIME DESTINATION "${_tensilelite_client_dest}"
             COMPONENT tests
         )
     endif()

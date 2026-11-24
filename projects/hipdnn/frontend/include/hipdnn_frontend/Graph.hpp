@@ -206,7 +206,8 @@ struct OverrideEntry
 class Graph : public INode
 {
 private:
-    std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> _graphDesc;
+    // Shared with copies only once finalized; see the copy constructor.
+    std::shared_ptr<detail::ScopedHipdnnBackendDescriptor> _graphDesc;
     bool _graphDescFinalized = false;
 
 protected:
@@ -215,16 +216,21 @@ protected:
     // settings produced it. The single-plan lifecycle populates a vector of size 1
     // at index 0; autotuning populates multiple entries and sets the active index
     // to the winner.
+    //
+    // A copy of the graph shares the engine config, which is finalized when created, and
+    // the execution plan once it is finalized. An unfinalized execution plan is finalized
+    // in place, so a copy gets a new one.
     struct CompiledPlan
     {
-        std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> engineConfigDesc;
-        std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> executionPlanDesc;
+        std::shared_ptr<detail::ScopedHipdnnBackendDescriptor> engineConfigDesc;
+        std::shared_ptr<detail::ScopedHipdnnBackendDescriptor> executionPlanDesc;
         int64_t engineId = -1;
         std::vector<KnobSetting> knobSettings;
         int64_t workspaceSize = -1; ///< Cached workspace size; -1 = not yet queried
         bool barred = false; ///< A filter removed the plan; never set on the finalized active plan
         bool deserialized
             = false; ///< Installed by deserialization: no engine config, never filtered
+        bool executionPlanFinalized = false; ///< executionPlanDesc is finalized
     };
 
     // All compiled plans. create_execution_plans() retains all engine configs
@@ -307,6 +313,10 @@ protected:
         }
 
         _executionPlanFinalized = (finalization == detail::ActivePlanFinalization::FINALIZED);
+        if(_executionPlanFinalized)
+        {
+            _compiledPlans[_activePlanIndex].executionPlanFinalized = true;
+        }
         _selectedEngineId = _compiledPlans[_activePlanIndex].engineId;
     }
 
@@ -334,7 +344,8 @@ protected:
         CompiledPlan plan;
         plan.deserialized = true;
         plan.executionPlanDesc
-            = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(executionPlan);
+            = std::make_shared<detail::ScopedHipdnnBackendDescriptor>(executionPlan);
+        plan.executionPlanFinalized = true;
 
         // A deserialized compiled plan is finalized by construction. Saving it again returns the
         // plan bytes the backend kept at load; the plan is not serialized again.
@@ -519,6 +530,7 @@ protected:
                     std::string("Failed to finalize execution plan descriptor")
                         + " Backend error: " + backendErrMsg.data()};
         }
+        plan.executionPlanFinalized = true;
 
         int64_t wsSize = 0;
         auto wsStatus = detail::hipdnnBackend()->backendGetAttribute(
@@ -1127,7 +1139,7 @@ private:
     }
 
     /// Set the graph descriptor and its finalization state atomically
-    void setGraphDesc(std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> desc, bool finalized)
+    void setGraphDesc(std::shared_ptr<detail::ScopedHipdnnBackendDescriptor> desc, bool finalized)
     {
         _noteVerdicts.clear();
         _graphDesc = std::move(desc);
@@ -1329,7 +1341,7 @@ private:
                != notes.end();
     }
 
-    Error initializeEngineConfig(hipdnnBackendDescriptor_t engineHeuristicDesc)
+    Error initializeEngineConfig(const std::vector<HeuristicMode>& modes)
     {
         // The backend's SelectionHeuristic::Config built-in honors
         // HIPDNN_HEUR_CONFIG_PATH inside the policy loop, so the
@@ -1340,8 +1352,8 @@ private:
         // back to the heuristic's choice.
         std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigs;
         std::vector<int64_t> engineIds;
-        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::getEngineConfigs(
-            engineConfigs, engineIds, engineHeuristicDesc, /*getAll=*/true));
+        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::getEngineConfigsForModes(
+            engineConfigs, engineIds, _graphDesc->get(), modes, _rankingMetric));
 
         size_t selectedIndex = 0;
         if(_preferredEngineId.has_value())
@@ -2550,8 +2562,72 @@ public:
         HIPDNN_FE_LOG_INFO("Creating new Graph instance");
     }
 
-    // Copy operations disabled via INode base class
-    // Move operations defaulted - automatically handles all members
+    /**
+     * @brief Copy a graph the way a cuDNN frontend graph is copied
+     *
+     * The copy shares the nodes and tensors, the built operation graph and the finalized
+     * execution plans with @p other. It owns its plan list, active plan, engine filters and
+     * graph settings, so recreating plans, changing filters or building through one graph
+     * leaves the other alone. Nodes added to one graph after the copy are not in the other.
+     *
+     * Descriptors that are not finalized yet are finalized in place later, so they are never
+     * shared: an operation graph lowered without a handle stays with @p other and the copy
+     * lowers its own when it next needs one, and each unfinalized execution plan gets a new
+     * descriptor.
+     */
+    Graph(const Graph& other)
+        : INode(other.graph_attributes)
+    {
+        // Copies every data member; a member added to Graph must be added here too.
+        _sub_nodes = other._sub_nodes;
+
+        if(other._graphDescFinalized)
+        {
+            _graphDesc = other._graphDesc;
+            _graphDescFinalized = true;
+        }
+
+        _compiledPlans = other._compiledPlans;
+        for(auto& plan : _compiledPlans)
+        {
+            if(plan.executionPlanDesc && !plan.executionPlanFinalized)
+            {
+                plan.executionPlanDesc = std::make_shared<detail::ScopedHipdnnBackendDescriptor>(
+                    HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
+            }
+        }
+        _activePlanIndex = other._activePlanIndex;
+        _executionPlanFinalized = other._executionPlanFinalized;
+        _selectedEngineId = other._selectedEngineId;
+        _planSpecs = other._planSpecs;
+
+        _maxWorkspaceAllowed = other._maxWorkspaceAllowed;
+        _barredEngineIds = other._barredEngineIds;
+        _selectedNumericalNotes = other._selectedNumericalNotes;
+        _deselectedNumericalNotes = other._deselectedNumericalNotes;
+        _selectedBehaviorNotes = other._selectedBehaviorNotes;
+        _deselectedBehaviorNotes = other._deselectedBehaviorNotes;
+        // Verdicts belong to the operation graph, so they carry over only with it.
+        if(_graphDescFinalized)
+        {
+            _noteVerdicts = other._noteVerdicts;
+        }
+
+        _preferredEngineId = other._preferredEngineId;
+        _isOverrideShapeEnabled = other._isOverrideShapeEnabled;
+        _rankingMetric = other._rankingMetric;
+    }
+
+    /// @brief Replace this graph with a copy of @p other; see the copy constructor.
+    Graph& operator=(const Graph& other)
+    {
+        if(this != &other)
+        {
+            *this = Graph(other);
+        }
+        return *this;
+    }
+
     Graph(Graph&&) = default;
     Graph& operator=(Graph&&) = default;
 
@@ -2861,7 +2937,7 @@ public:
      */
     // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
     Error get_ranked_engine_ids(std::vector<int64_t>& rankedEngineIds,
-                                const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
+                                const std::vector<HeuristicMode>& modes = {HeuristicMode::A})
     {
         if(!hasReadyGraphDesc())
         {
@@ -2870,13 +2946,9 @@ public:
                     "ranked engine ids."};
         }
 
-        detail::ScopedHipdnnBackendDescriptor engineHeuristicDesc;
-        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
-            engineHeuristicDesc, _graphDesc->get(), modes, /*findFirst=*/false, _rankingMetric));
-
         std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigs;
-        HIPDNN_CHECK_ERROR(detail::getEngineConfigs(
-            engineConfigs, rankedEngineIds, engineHeuristicDesc.get(), true));
+        HIPDNN_CHECK_ERROR(detail::getEngineConfigsForModes(
+            engineConfigs, rankedEngineIds, _graphDesc->get(), modes, _rankingMetric));
 
         return {ErrorCode::OK, ""};
     }
@@ -3087,8 +3159,7 @@ public:
      *         get_message() for the specific failure reason.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
-    Error create_execution_plans(const std::vector<HeuristicMode>& modes
-                                 = {HeuristicMode::FALLBACK})
+    Error create_execution_plans(const std::vector<HeuristicMode>& modes = {HeuristicMode::A})
     {
         HIPDNN_FE_LOG_INFO("Creating execution plans for graph " << graph_attributes.get_name());
 
@@ -3108,11 +3179,7 @@ public:
                     "execution plan."};
         }
 
-        detail::ScopedHipdnnBackendDescriptor engineHeuristicDesc;
-        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
-            engineHeuristicDesc, _graphDesc->get(), modes, /*findFirst=*/false, _rankingMetric));
-
-        HIPDNN_CHECK_ERROR(initializeEngineConfig(engineHeuristicDesc.get()));
+        HIPDNN_CHECK_ERROR(initializeEngineConfig(modes));
 
         // Allocate an unfinalized execution plan descriptor for each engine
         // config. build_plans() will finalize the active plan (default) or all
@@ -3246,7 +3313,7 @@ public:
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error is_supported_ext(hipdnnHandle_t handle,
-                           const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
+                           const std::vector<HeuristicMode>& modes = {HeuristicMode::A})
     {
         HIPDNN_FE_LOG_INFO("Checking engine support for graph " << graph_attributes.get_name());
 
@@ -3259,9 +3326,18 @@ public:
             HIPDNN_CHECK_ERROR(finalizeGraphDescWithHandle(handle));
         }
 
+        // Applicability does not depend on the mode, so one query answers for every mode.
+        if(modes.empty())
+        {
+            return {ErrorCode::INVALID_VALUE, "No heuristic mode was requested."};
+        }
         detail::ScopedHipdnnBackendDescriptor engineHeuristicDesc;
-        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
-            engineHeuristicDesc, _graphDesc->get(), modes, /*findFirst=*/true, _rankingMetric));
+        HIPDNN_CHECK_ERROR(
+            hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(engineHeuristicDesc,
+                                                                             _graphDesc->get(),
+                                                                             modes.front(),
+                                                                             /*findFirst=*/true,
+                                                                             _rankingMetric));
 
         HIPDNN_CHECK_ERROR(detail::hasEngineConfigs(engineHeuristicDesc.get()));
 
@@ -3884,7 +3960,7 @@ public:
 
                 // The active plan, and any plan an earlier ALL or build_plan_at_index()
                 // finalized, is already built: finalizing it again fails in the backend.
-                if(isFinalizedActivePlan(i) || plan.workspaceSize != -1)
+                if(plan.executionPlanFinalized)
                 {
                     continue;
                 }
@@ -4079,7 +4155,7 @@ public:
      */
     // NOLINTBEGIN(readability-identifier-naming)
     Error build(hipdnnHandle_t handle,
-                const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK},
+                const std::vector<HeuristicMode>& modes = {HeuristicMode::A},
                 BuildPlanPolicy policy = BuildPlanPolicy::HEURISTICS_CHOICE,
                 [[maybe_unused]] bool do_multithreaded_builds = false)
     // NOLINTEND(readability-identifier-naming)
@@ -4135,7 +4211,7 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error get_engine_configs(hipdnnHandle_t handle,
                              std::vector<EngineConfigInfo>& configs,
-                             const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
+                             const std::vector<HeuristicMode>& modes = {HeuristicMode::A})
     {
         configs.clear();
 
@@ -4145,14 +4221,10 @@ public:
                     "Graph has not been built. Call build_operation_graph() first."};
         }
 
-        detail::ScopedHipdnnBackendDescriptor engineHeuristicDesc;
-        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
-            engineHeuristicDesc, _graphDesc->get(), modes, /*findFirst=*/false, _rankingMetric));
-
         std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigDescs;
         std::vector<int64_t> engineIds;
-        HIPDNN_CHECK_ERROR(detail::getEngineConfigs(
-            engineConfigDescs, engineIds, engineHeuristicDesc.get(), /*getAll=*/true));
+        HIPDNN_CHECK_ERROR(detail::getEngineConfigsForModes(
+            engineConfigDescs, engineIds, _graphDesc->get(), modes, _rankingMetric));
 
         configs.reserve(engineIds.size());
         for(size_t i = 0; i < engineIds.size(); ++i)
@@ -4213,7 +4285,7 @@ public:
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error get_engine_configs(std::vector<EngineConfigInfo>& configs,
-                             const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
+                             const std::vector<HeuristicMode>& modes = {HeuristicMode::A})
     {
         return get_engine_configs(nullptr, configs, modes);
     }
@@ -4515,7 +4587,7 @@ public:
      * @return ErrorCode::OK on success
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
-    Error add_all_engines(const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
+    Error add_all_engines(const std::vector<HeuristicMode>& modes = {HeuristicMode::A})
     {
         if(!_compiledPlans.empty())
         {
@@ -5205,9 +5277,8 @@ public:
                         + " is filtered: " + verdict.skipReason};
         }
 
-        // If workspace size is still -1, the plan has not been finalized yet.
-        // Compile it using the same pattern as build_plans(ALL).
-        if(plan.workspaceSize == -1)
+        // Finalize the plan unless it already is, using the same pattern as build_plans(ALL).
+        if(!plan.executionPlanFinalized)
         {
             std::string rejection;
             HIPDNN_CHECK_ERROR(finalizePlanWithinLimit(planIndex, rejection));
@@ -7458,8 +7529,9 @@ public:
      * @brief Choose the ranking metric engine selection and kernel choice optimize.
      *
      * @c "tflops" ranks higher first; @c "time" (milliseconds) lower first (RFC 0019 §4.4).
-     * Engine order changes only under HeuristicMode A/B, where engines with no model for the
-     * metric rank last; the default FALLBACK mode (Config, then StaticOrdering) ignores it.
+     * Engine order follows it under every heuristic mode while an applicable engine has a
+     * model for the metric; engines with none rank last. HeuristicMode A (the default) ranks
+     * by ModeA, B by ModeB; FALLBACK is model-free and ignores the metric for engine order.
      * An engine that ranks its own kernels ranks them by it in every mode. Applies to later
      * heuristic queries and explicit-engine configurations; HIPDNN_HEUR_RANKING_METRIC
      * overrides it for heuristic selection.

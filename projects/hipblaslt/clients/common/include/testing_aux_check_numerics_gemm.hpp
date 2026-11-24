@@ -106,7 +106,12 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
     // per-call loop -- only the H2D copy of A and the C zero-init vary
     // per call, so we malloc/create once and reuse, drastically cutting
     // the test's wallclock cost in CI.
-    auto run_scenario = [&](int total, int inject_at, uint32_t* out_reported) {
+    // caller_error_pending leaves an error the caller has not read before each
+    // call, which the call must neither fail on nor clear.
+    auto run_scenario = [&](int       total,
+                            int       inject_at,
+                            uint32_t* out_reported,
+                            bool      caller_error_pending = false) {
         ASSERT_GE(inject_at, kNoInjection);
         ASSERT_LE(inject_at, total);
         ASSERT_NE(out_reported, nullptr);
@@ -183,6 +188,11 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
             const float* hA    = dirty ? A_dirty.data() : A_clean.data();
             CHECK_HIP_ERROR(hipMemcpy(dA, hA, sizeof(float) * M * K, hipMemcpyHostToDevice));
             CHECK_HIP_ERROR(hipMemset(dC, 0, sizeof(float) * M * N));
+            if(caller_error_pending)
+            {
+                void* unused = nullptr;
+                EXPECT_EQ(hipMalloc(&unused, SIZE_MAX), hipErrorOutOfMemory);
+            }
 
             float alpha = 1.0f, beta = 0.0f;
             EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
@@ -203,6 +213,15 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
                                                   stream),
                                   HIPBLAS_STATUS_SUCCESS);
             CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+            if(caller_error_pending)
+            {
+                // Looking up a kernel for its first launch clears the last
+                // error by itself, so only later calls must leave it in place.
+                const hipError_t last = hipGetLastError();
+                if(i > 1)
+                    EXPECT_EQ(last, hipErrorOutOfMemory)
+                        << "call " << i << " consumed the caller's error";
+            }
         }
 
         EXPECT_HIPBLAS_STATUS(hipblasLtCheckNumericsDrain(handle, out_reported),
@@ -296,6 +315,17 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
     reset_env();
     setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
     run_scenario(/*total=*/6, /*inject_at=*/kNoInjection, &reported);
+    EXPECT_EQ(reported, 0u);
+
+    // A clean run with an error the caller left unread before each call: the
+    // scan must not report it as its own launch failure, which fails a correct
+    // matmul with HIPBLAS_STATUS_INTERNAL_ERROR.
+    reset_env();
+    setenv("HIPBLASLT_CHECK_NUMERICS", "2", 1);
+    run_scenario(/*total=*/3,
+                 /*inject_at=*/kNoInjection,
+                 &reported,
+                 /*caller_error_pending=*/true);
     EXPECT_EQ(reported, 0u);
 
     // RAII redirect of std::cerr -> ostringstream for the lifetime of one

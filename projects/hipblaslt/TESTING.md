@@ -343,7 +343,11 @@ kernels on CPU and hands an artifact to a GPU stage for the run phase.
 | `standard` | smoke + quick + pre_checkin | ~30 min | 3600 s |
 | `comprehensive` | standard + nightly | ~2 h | 7200 s |
 | `full` | comprehensive + HMM (needs a managed-memory capable host) | up to 24 h | 86400 s |
-| `stress` | stress only: size-threshold and address-overflow cases needing up to about 33 GiB of device memory (the 2^32 C and D batch-stride case) and, for the unit_check cases, up to about 48 GiB of host memory on gfx90a; for large-memory runners or a weekly run. A case that does not fit skips with the amounts (see below). The fast_check cases among them skip in a run with no gtest filter, such as TheRock's | ~10 min on gfx90a for the fast_check cases, longer with more solutions; the older stress cases add their host-reference time | 14400 s |
+| `stress` | stress only: size-threshold and address-overflow cases needing up to about 33 GiB of device memory (the 2^32 C and D batch-stride case) and, for the unit_check cases, up to about 48 GiB of host memory on gfx90a; for large-memory runners or a weekly run. A case that does not fit skips with the amounts (see below). The fast_check cases among them skip in a run whose gtest filter selects nothing in particular (no filter, `*`, or exclusions only), such as Math CI's unfiltered `precheckin`. No CI lane runs the ctest `stress` tier today. Math CI's `precheckin` and the gfx1250 workflow run the older unit_check stress cases but skip the fast_check ones; outside CI, a weekly QA suite that runs `--gtest_filter=*matmul*` runs the fast_check cases | ~10 min on gfx90a for the fast_check cases, longer with more solutions; the older stress cases add their host-reference time | 14400 s |
+
+The `sdc_hunt` cases are in no tier. Their fast_check cases run only when a positive pattern of the
+gtest filter contains `sdc_hunt`, so a broad filter such as `*matmul*` skips them; see
+[`clients/scripts/sdc_hunt/README.md`](clients/scripts/sdc_hunt/README.md).
 
 The clients check host memory before pinning a host buffer, against the smaller of `MemAvailable`
 and the headroom under the container's memory limit. On a machine with no container limit, set
@@ -374,15 +378,19 @@ default), and they run on a two-GPU gfx950 node in Math CI's `precheckin` on pul
 **How the tiers are applied in CI.** TheRock's test lane runs hipBLASLt through the CTest presets
 built from this file ([TheRock#5230](https://github.com/ROCm/TheRock/pull/5230)), so the tiers above
 are what CI actually runs. A pull request to this repository gets the `standard` tier in Multi-Arch
-CI, because TheRock treats any rocm-libraries change as a submodule change, except on gfx950, where
-a pull request that touches hipBLASLt gets the `quick` tier; scheduled nightly runs get
-`comprehensive`. The hipBLASLt ASAN lane drives `hipblaslt-test` directly through
-[`test/therock/test_hipblaslt.py`](../../test/therock/test_hipblaslt.py) with these filters:
+CI, because TheRock treats any rocm-libraries change as a submodule change. On gfx950, hipBLASLt
+tests run only for a pull request that touches `projects/hipblaslt/`, and they get the same tier as
+gfx94X. Scheduled nightly runs get `comprehensive`. The hipBLASLt ASAN lane drives
+`hipblaslt-test` directly through [`test/therock/test_hipblaslt.py`](../../test/therock/test_hipblaslt.py)
+with these filters:
 
 | ASAN tier | GTest filter |
 | --- | --- |
 | `quick` (pull requests) | `*smoke*-*HipBufferTransferMemoryMode.*/Managed` |
 | `standard` (nightly) | `*smoke*:*quick*:*pre_checkin*-*known_bug*:*HipBufferTransferMemoryMode.*/Managed` |
+
+The dedicated HOST_ASAN jobs run with `DEBUG_CLR_DEV_SIGNALS=0` to work around
+[ROCM-34728](https://amd-hub.atlassian.net/browse/ROCM-34728).
 
 Both tiers temporarily exclude the two managed-memory buffer cases for the ASAN allocator
 failure tracked in ROCM-34263 and [rocm-systems #15163](https://github.com/ROCm/rocm-systems/issues/15163).

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -40,7 +40,7 @@ void TestTransformReduceDevice(ExecutionPolicy exec)
   thrust::device_vector<T> result(1);
 
   transform_reduce_kernel<<<1, 1>>>(
-    exec, data.begin(), data.end(), thrust::negate<T>(), init, thrust::plus<T>(), result.begin());
+    exec, data.begin(), data.end(), _THRUST_STD::negate<T>(), init, _THRUST_STD::plus<T>(), result.begin());
   cudaError_t const err = cudaDeviceSynchronize();
   ASSERT_EQUAL(cudaSuccess, err);
 
@@ -72,7 +72,7 @@ void TestTransformReduceCudaStreams()
   cudaStreamCreate(&s);
 
   T result = thrust::transform_reduce(
-    thrust::cuda::par.on(s), data.begin(), data.end(), thrust::negate<T>(), init, thrust::plus<T>());
+    thrust::cuda::par.on(s), data.begin(), data.end(), _THRUST_STD::negate<T>(), init, _THRUST_STD::plus<T>());
   cudaStreamSynchronize(s);
 
   ASSERT_EQUAL(8, result);

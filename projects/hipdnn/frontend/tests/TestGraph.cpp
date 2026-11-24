@@ -33,6 +33,7 @@
 #include <filesystem>
 #include <functional>
 #include <limits>
+#include <map>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -53,9 +54,9 @@ namespace hipdnn_frontend
 static_assert(!std::is_copy_constructible_v<INode>, "INode must not be copy constructible");
 static_assert(!std::is_copy_assignable_v<INode>, "INode must not be copy assignable");
 
-// Ensure Graph cannot be copied, only moved (inherits deleted copy from INode or explicitly deleted)
-static_assert(!std::is_copy_constructible_v<Graph>, "Graph must not be copy constructible");
-static_assert(!std::is_copy_assignable_v<Graph>, "Graph must not be copy assignable");
+// Graph is copyable, as a cuDNN frontend graph is
+static_assert(std::is_copy_constructible_v<Graph>, "Graph must be copy constructible");
+static_assert(std::is_copy_assignable_v<Graph>, "Graph must be copy assignable");
 
 // Optional: Explicitly verify that move semantics ARE available
 static_assert(std::is_move_constructible_v<Graph>, "Graph must be move constructible");
@@ -70,6 +71,7 @@ public:
     using Graph::build_operation_graph_via_descriptors;
     using Graph::CompiledPlan;
     using Graph::compilePlanFromSpec;
+    using Graph::get_raw_graph_descriptor;
 
     std::vector<std::shared_ptr<INode>>& getPrivateGraphSubnodes()
     {
@@ -361,6 +363,24 @@ public:
     {
         return _selectedEngineId;
     }
+
+    /// The execution plan descriptor's backend handle of the plan at `index`.
+    hipdnnBackendDescriptor_t executionPlanHandleAt(size_t index) const
+    {
+        const auto& desc = _compiledPlans.at(index).executionPlanDesc;
+        return desc ? desc->get() : nullptr;
+    }
+
+    hipdnnBackendDescriptor_t engineConfigHandleAt(size_t index) const
+    {
+        const auto& desc = _compiledPlans.at(index).engineConfigDesc;
+        return desc ? desc->get() : nullptr;
+    }
+
+    std::vector<NumericalNote> getDeselectedNumericalNotes() const
+    {
+        return _deselectedNumericalNotes;
+    }
 };
 }
 
@@ -530,6 +550,11 @@ protected:
     // engine-config workspace read for an engine without an entry fails the test, so a filter
     // that reads more than it must is caught.
     std::vector<int64_t> _rankedEngineIds;
+    // A heuristic query in a mode listed here answers that mode's ranking instead of
+    // _rankedEngineIds. Every mode the frontend sets is recorded, in order.
+    std::map<hipdnnBackendHeurMode_t, std::vector<int64_t>> _rankedEngineIdsByMode;
+    std::unordered_map<hipdnnBackendDescriptor_t, hipdnnBackendHeurMode_t> _heuristicModes;
+    std::vector<hipdnnBackendHeurMode_t> _queriedModes;
     std::unordered_map<hipdnnBackendDescriptor_t, int64_t> _engineIdByDesc;
     std::unordered_map<int64_t, std::vector<hipdnnBackendNumericalNote_t>> _numericalNotes;
     std::unordered_map<int64_t, std::vector<hipdnnBackendBehaviorNote_t>> _behaviorNotes;
@@ -589,13 +614,19 @@ protected:
     {
         if(attribute == HIPDNN_ATTR_ENGINEHEUR_RESULTS)
         {
-            const auto available = static_cast<int64_t>(_rankedEngineIds.size());
+            const auto mode = _heuristicModes.find(descriptor);
+            const auto byMode = mode == _heuristicModes.end()
+                                    ? _rankedEngineIdsByMode.end()
+                                    : _rankedEngineIdsByMode.find(mode->second);
+            const auto& ranked
+                = byMode == _rankedEngineIdsByMode.end() ? _rankedEngineIds : byMode->second;
+            const auto available = static_cast<int64_t>(ranked.size());
             const auto count
                 = requestedCount == 0 ? available : std::min(requestedCount, available);
             auto* configs = static_cast<hipdnnBackendDescriptor_t*>(elements);
             for(int64_t i = 0; requestedCount > 0 && i < count; ++i)
             {
-                _engineIdByDesc[configs[i]] = _rankedEngineIds[static_cast<size_t>(i)];
+                _engineIdByDesc[configs[i]] = ranked[static_cast<size_t>(i)];
             }
             *elementCount = count;
             return HIPDNN_STATUS_SUCCESS;
@@ -611,6 +642,11 @@ protected:
         if(attribute == HIPDNN_ATTR_ENGINE_GLOBAL_INDEX)
         {
             *static_cast<int64_t*>(elements) = engineIdOf(descriptor);
+            return HIPDNN_STATUS_SUCCESS;
+        }
+        if(attribute == HIPDNN_ATTR_ENGINE_KNOB_INFO)
+        {
+            *elementCount = 0;
             return HIPDNN_STATUS_SUCCESS;
         }
         if(attribute == HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE)
@@ -683,6 +719,12 @@ protected:
                 {
                     _engineIdByDesc[descriptor]
                         = engineIdOf(*static_cast<const hipdnnBackendDescriptor_t*>(elements));
+                }
+                else if(attribute == HIPDNN_ATTR_ENGINEHEUR_MODE)
+                {
+                    const auto mode = *static_cast<const hipdnnBackendHeurMode_t*>(elements);
+                    _heuristicModes[descriptor] = mode;
+                    _queriedModes.push_back(mode);
                 }
                 return HIPDNN_STATUS_SUCCESS;
             });
@@ -11914,6 +11956,64 @@ TEST_F(TestGraph, BuildPlansAllSkipsPlanWithOtherFailure)
     EXPECT_EQ(*graph.selectedEngineIdForTest(), 20);
 }
 
+TEST_F(TestGraph, BuildPlansAllDoesNotFinalizeAgainAPlanWhoseWorkspaceQueryFailed)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.setActivePlanForTest(0);
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1));
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(GraphTestUtils::executionPlanHandleFor(10),
+                                    HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE,
+                                    HIPDNN_TYPE_INT64,
+                                    1,
+                                    _,
+                                    _))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+
+    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+
+    result = graph.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+}
+
+TEST_F(TestGraph, BuildPlansAllFinalizesAPlanWithACachedWorkspaceThatWasNeverFinalized)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/0, /*barred=*/false);
+    graph.setActivePlanForTest(0);
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
+
+    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+}
+
+TEST_F(TestGraph, BuildPlanAtIndexFinalizesAPlanWithACachedWorkspaceThatWasNeverFinalized)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/0, /*barred=*/false);
+    graph.setActivePlanForTest(0);
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
+
+    auto result = graph.build_plan_at_index(0);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+}
+
 // ============================================================================
 // Engine filters: note filters, evaluation, persistence
 //
@@ -13078,6 +13178,224 @@ TEST_F(TestGraph, FiltersSurviveASecondCreateExecutionPlans)
     ASSERT_TRUE(result.is_good()) << result.get_message();
     ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
     EXPECT_EQ(*graph.selectedEngineIdForTest(), 20);
+}
+
+// --------------------------------------------------------------------------
+// Graph copies
+// --------------------------------------------------------------------------
+
+TEST_F(TestGraph, CopySharesTheOperationGraphAndFinalizedPlans)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareRankedGraph(graph, {10, 20});
+    ASSERT_TRUE(graph.create_execution_plans().is_good());
+    ASSERT_TRUE(graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE).is_good());
+
+    const hipdnn_frontend::GraphTestUtils copy = graph;
+
+    EXPECT_EQ(copy.get_raw_graph_descriptor(), graph.get_raw_graph_descriptor());
+    ASSERT_EQ(copy.getCompiledPlansCount(), 2u);
+    EXPECT_EQ(copy.engineConfigHandleAt(0), graph.engineConfigHandleAt(0));
+    EXPECT_EQ(copy.engineConfigHandleAt(1), graph.engineConfigHandleAt(1));
+    EXPECT_EQ(copy.executionPlanHandleAt(0), graph.executionPlanHandleAt(0));
+    EXPECT_EQ(copy.getActivePlanIndex(), 0u);
+    EXPECT_TRUE(copy.isExecutionPlanFinalized());
+    ASSERT_TRUE(copy.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*copy.selectedEngineIdForTest(), 10);
+
+    // Plan 1 was not built, so its descriptor would be finalized in place: the copy owns a
+    // new one.
+    EXPECT_NE(copy.executionPlanHandleAt(1), nullptr);
+    EXPECT_NE(copy.executionPlanHandleAt(1), graph.executionPlanHandleAt(1));
+}
+
+TEST_F(TestGraph, CopySharesADeserializedPlan)
+{
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.installDeserializedPlanForTest();
+
+    const hipdnn_frontend::GraphTestUtils copy = graph;
+
+    EXPECT_EQ(copy.executionPlanHandleAt(0), graph.executionPlanHandleAt(0));
+    EXPECT_TRUE(copy.isExecutionPlanFinalized());
+}
+
+TEST_F(TestGraph, BuildingACopyLeavesTheOriginalsPlansUnbuilt)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareRankedGraph(graph, {10, 20});
+    ASSERT_TRUE(graph.create_execution_plans().is_good());
+
+    hipdnn_frontend::GraphTestUtils copy = graph;
+    EXPECT_CALL(*_mockBackend, backendFinalize(graph.executionPlanHandleAt(0))).Times(0);
+    EXPECT_CALL(*_mockBackend, backendFinalize(graph.executionPlanHandleAt(1))).Times(0);
+
+    const auto built = copy.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(built.is_good()) << built.get_message();
+
+    EXPECT_TRUE(copy.isExecutionPlanFinalized());
+    EXPECT_FALSE(graph.isExecutionPlanFinalized());
+}
+
+TEST_F(TestGraph, RecreatingPlansOnACopyLeavesTheOriginalsBuiltPlan)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareRankedGraph(graph, {10, 20});
+    ASSERT_TRUE(graph.create_execution_plans().is_good());
+    ASSERT_TRUE(graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE).is_good());
+    const auto builtPlan = graph.executionPlanHandleAt(0);
+
+    hipdnn_frontend::GraphTestUtils copy = graph;
+    copy.deselect_engines(std::vector<int64_t>{10});
+    ASSERT_TRUE(copy.create_execution_plans().is_good());
+    ASSERT_TRUE(copy.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE).is_good());
+    ASSERT_TRUE(copy.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*copy.selectedEngineIdForTest(), 20);
+
+    EXPECT_TRUE(graph.getBarredEngineIds().empty());
+    EXPECT_EQ(graph.executionPlanHandleAt(0), builtPlan);
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 10);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    auto variantPack = testVariantPack();
+    const auto executed = graph.execute(_handle, variantPack, nullptr);
+    EXPECT_TRUE(executed.is_good()) << executed.get_message();
+}
+
+TEST_F(TestGraph, CopiesOwnTheirEngineFilters)
+{
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.deselect_engines(std::vector<int64_t>{10});
+    graph.deselect_workspace_greater_than(100);
+    graph.deselect_numeric_notes({NumericalNote::NONDETERMINISTIC});
+
+    hipdnn_frontend::GraphTestUtils copy = graph;
+    EXPECT_EQ(copy.getBarredEngineIds(), (std::unordered_set<int64_t>{10}));
+    EXPECT_EQ(copy.getMaxWorkspaceAllowed(), 100);
+    EXPECT_EQ(copy.getDeselectedNumericalNotes(),
+              (std::vector<NumericalNote>{NumericalNote::NONDETERMINISTIC}));
+
+    copy.deselect_engines(std::vector<int64_t>{20});
+    copy.deselect_workspace_greater_than(50);
+    copy.deselect_numeric_notes({NumericalNote::TENSOR_CORE});
+    graph.deselect_engines(std::vector<int64_t>{});
+
+    EXPECT_TRUE(graph.getBarredEngineIds().empty());
+    EXPECT_EQ(graph.getMaxWorkspaceAllowed(), 100);
+    EXPECT_EQ(graph.getDeselectedNumericalNotes(),
+              (std::vector<NumericalNote>{NumericalNote::NONDETERMINISTIC}));
+    EXPECT_EQ(copy.getBarredEngineIds(), (std::unordered_set<int64_t>{20}));
+    EXPECT_EQ(copy.getMaxWorkspaceAllowed(), 50);
+    EXPECT_EQ(
+        copy.getDeselectedNumericalNotes(),
+        (std::vector<NumericalNote>{NumericalNote::NONDETERMINISTIC, NumericalNote::TENSOR_CORE}));
+}
+
+TEST_F(TestGraph, CopyLowersItsOwnOperationGraphWhenTheOriginalsIsNotFinalized)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryGraphExt(_, _, _, _))
+        .WillByDefault([](hipdnnBackendDescriptor_t,
+                          size_t requestedSize,
+                          size_t* graphByteSize,
+                          uint8_t* buf) {
+            *graphByteSize = 4;
+            if(buf != nullptr && requestedSize >= 4)
+            {
+                std::memset(buf, 0xAA, 4);
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    hipdnn_frontend::GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    // serialize() lowers the graph without a handle, so the descriptor is not finalized.
+    std::vector<uint8_t> data;
+    ASSERT_TRUE(graph.serialize(data).is_good());
+    const auto originalDesc = graph.get_raw_graph_descriptor();
+    ASSERT_NE(originalDesc, nullptr);
+
+    hipdnn_frontend::GraphTestUtils copy = graph;
+    EXPECT_EQ(copy.get_raw_graph_descriptor(), nullptr);
+
+    EXPECT_CALL(*_mockBackend, backendFinalize(_)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend, backendFinalize(originalDesc)).Times(0);
+    const auto built = copy.build_operation_graph(_handle);
+    ASSERT_TRUE(built.is_good()) << built.get_message();
+    EXPECT_NE(copy.get_raw_graph_descriptor(), nullptr);
+    EXPECT_NE(copy.get_raw_graph_descriptor(), originalDesc);
+    EXPECT_EQ(graph.get_raw_graph_descriptor(), originalDesc);
+}
+
+TEST_F(TestGraph, NodesAddedToACopyAreNotInTheOriginal)
+{
+    hipdnn_frontend::GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+
+    hipdnn_frontend::GraphTestUtils copy = graph;
+    EXPECT_EQ(copy.getPrivateGraphSubnodes(), graph.getPrivateGraphSubnodes());
+
+    createBasicBatchnormGraph(copy);
+    EXPECT_EQ(graph.getPrivateGraphSubnodes().size(), 1u);
+    EXPECT_EQ(copy.getPrivateGraphSubnodes().size(), 2u);
+}
+
+TEST_F(TestGraph, SharedDescriptorsAreDestroyedOnceByTheLastCopy)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    std::unordered_map<hipdnnBackendDescriptor_t, int> destroyed;
+    ON_CALL(*_mockBackend, backendDestroyDescriptor(_))
+        .WillByDefault([&destroyed](hipdnnBackendDescriptor_t desc) {
+            ++destroyed[desc];
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    auto graph = std::make_unique<hipdnn_frontend::GraphTestUtils>();
+    prepareRankedGraph(*graph, {10, 20});
+    ASSERT_TRUE(graph->create_execution_plans().is_good());
+    ASSERT_TRUE(graph->build_plans(BuildPlanPolicy::HEURISTICS_CHOICE).is_good());
+    const auto graphDesc = graph->get_raw_graph_descriptor();
+    const auto builtPlan = graph->executionPlanHandleAt(0);
+
+    hipdnnBackendDescriptor_t copysOwnPlan = nullptr;
+    {
+        // The copy and its destruction are what this test checks.
+        // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
+        const hipdnn_frontend::GraphTestUtils copy = *graph;
+        copysOwnPlan = copy.executionPlanHandleAt(1);
+    }
+    EXPECT_EQ(destroyed[graphDesc], 0);
+    EXPECT_EQ(destroyed[builtPlan], 0);
+    EXPECT_EQ(destroyed[copysOwnPlan], 1);
+
+    graph.reset();
+    EXPECT_EQ(destroyed[graphDesc], 1);
+    EXPECT_EQ(destroyed[builtPlan], 1);
+}
+
+TEST_F(TestGraph, CopyAssignmentReplacesTheTargetsState)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils source;
+    prepareRankedGraph(source, {10, 20});
+    ASSERT_TRUE(source.create_execution_plans().is_good());
+    ASSERT_TRUE(source.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE).is_good());
+
+    hipdnn_frontend::GraphTestUtils target;
+    target.deselect_engines(std::vector<int64_t>{30});
+    target = source;
+
+    EXPECT_EQ(target.get_raw_graph_descriptor(), source.get_raw_graph_descriptor());
+    EXPECT_EQ(target.executionPlanHandleAt(0), source.executionPlanHandleAt(0));
+    EXPECT_TRUE(target.isExecutionPlanFinalized());
+    EXPECT_TRUE(target.getBarredEngineIds().empty());
+
+    const auto& alias = target;
+    target = alias;
+    EXPECT_EQ(target.executionPlanHandleAt(0), source.executionPlanHandleAt(0));
+    EXPECT_TRUE(target.isExecutionPlanFinalized());
 }
 
 TEST_F(TestGraph, CreateExecutionPlanExtOnEngineRemovedByFilterFailsCheckSupportAndBuildPlans)
@@ -17484,70 +17802,10 @@ TEST_F(TestGraph, DeserializeLegacyBareGraphBlobReconstructsGraphNoPlan)
     EXPECT_FALSE(graph2.hasExecutionPlan());
 }
 
-// Config first, requested prediction policies in order without duplicates, StaticOrdering
-// last; HIPDNN_ATTR_ENGINEHEUR_MODE still carries exactly one FALLBACK mode.
-TEST_F(TestGraph, HeuristicModeAAndBTravelAsPolicyOrderNotAsBackendMode)
-{
-    auto* heurDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9911);
-    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, _))
-        .WillOnce(
-            [&heurDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
-                *descriptor = heurDesc;
-                return HIPDNN_STATUS_SUCCESS;
-            });
-
-    EXPECT_CALL(*_mockBackend,
-                backendSetAttribute(heurDesc,
-                                    HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH,
-                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                    1,
-                                    _));
-
-    EXPECT_CALL(
-        *_mockBackend,
-        backendSetAttribute(heurDesc, HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_HEUR_MODE, 1, _))
-        .WillOnce([](hipdnnBackendDescriptor_t,
-                     hipdnnBackendAttributeName_t,
-                     hipdnnBackendAttributeType_t,
-                     int64_t,
-                     const void* arrayOfElements) {
-            EXPECT_EQ(*static_cast<const hipdnnBackendHeurMode_t*>(arrayOfElements),
-                      HIPDNN_HEUR_MODE_FALLBACK);
-            return HIPDNN_STATUS_SUCCESS;
-        });
-
-    std::vector<int64_t> policyOrder;
-    EXPECT_CALL(*_mockBackend,
-                backendSetAttribute(
-                    heurDesc, HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, HIPDNN_TYPE_INT64, _, _))
-        .WillOnce([&policyOrder](hipdnnBackendDescriptor_t,
-                                 hipdnnBackendAttributeName_t,
-                                 hipdnnBackendAttributeType_t,
-                                 int64_t count,
-                                 const void* arrayOfElements) {
-            const auto* ids = static_cast<const int64_t*>(arrayOfElements);
-            policyOrder.assign(ids, ids + count);
-            return HIPDNN_STATUS_SUCCESS;
-        });
-
-    detail::ScopedHipdnnBackendDescriptor heuristicDesc;
-    const auto error = detail::createEngineHeuristicDescriptorForGraph(
-        heuristicDesc,
-        reinterpret_cast<hipdnnBackendDescriptor_t>(0x4242),
-        {HeuristicMode::B, HeuristicMode::A, HeuristicMode::B, HeuristicMode::FALLBACK});
-    ASSERT_TRUE(error.is_good()) << error.get_message();
-
-    using hipdnn_data_sdk::utilities::policyNameToId;
-    EXPECT_EQ(policyOrder,
-              (std::vector<int64_t>{policyNameToId("SelectionHeuristic::Config"),
-                                    policyNameToId(hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME),
-                                    policyNameToId(hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME),
-                                    policyNameToId("SelectionHeuristic::StaticOrdering")}));
-}
-
-// Leaving both attributes unset keeps HIPDNN_HEUR_POLICY_ORDER, HIPDNN_HEUR_RANKING_METRIC
-// and the backend defaults in charge (RFC 0007 §5.3.3).
-TEST_F(TestGraph, FallbackOnlyHeuristicModeLeavesPolicyOrderUnset)
+// Each frontend mode travels as the backend heuristic mode, as CUDNN_ATTR_ENGINEHEUR_MODE does;
+// the frontend never sends a policy order of its own, leaving HIPDNN_HEUR_POLICY_ORDER, the
+// ranking metric and the mode's built-in policy list in charge (RFC 0007 §5.3).
+TEST_F(TestGraph, HeuristicModeTravelsAsTheBackendMode)
 {
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, _, _, _))
@@ -17556,15 +17814,300 @@ TEST_F(TestGraph, FallbackOnlyHeuristicModeLeavesPolicyOrderUnset)
                 backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT, _, _, _))
         .Times(0);
     EXPECT_CALL(*_mockBackend,
-                backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH, _, _, _));
-    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_MODE, _, 1, _));
+                backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH, _, _, _))
+        .Times(AnyNumber());
+    hipdnnBackendHeurMode_t sent = HIPDNN_HEUR_MODE_FALLBACK;
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_HEUR_MODE, 1, _))
+        .WillRepeatedly([&sent](hipdnnBackendDescriptor_t,
+                                hipdnnBackendAttributeName_t,
+                                hipdnnBackendAttributeType_t,
+                                int64_t,
+                                const void* arrayOfElements) {
+            sent = *static_cast<const hipdnnBackendHeurMode_t*>(arrayOfElements);
+            return HIPDNN_STATUS_SUCCESS;
+        });
 
-    detail::ScopedHipdnnBackendDescriptor heuristicDesc;
-    const auto error = detail::createEngineHeuristicDescriptorForGraph(
-        heuristicDesc,
-        reinterpret_cast<hipdnnBackendDescriptor_t>(0x4242),
-        {HeuristicMode::FALLBACK});
-    EXPECT_TRUE(error.is_good()) << error.get_message();
+    const std::vector<std::pair<HeuristicMode, hipdnnBackendHeurMode_t>> cases{
+        {HeuristicMode::A, HIPDNN_HEUR_MODE_A},
+        {HeuristicMode::B, HIPDNN_HEUR_MODE_B},
+        {HeuristicMode::FALLBACK, HIPDNN_HEUR_MODE_FALLBACK},
+        {HeuristicMode::OPENSOURCE, HIPDNN_HEUR_MODE_FALLBACK}};
+    for(const auto& [mode, expected] : cases)
+    {
+        sent = static_cast<hipdnnBackendHeurMode_t>(-1);
+        detail::ScopedHipdnnBackendDescriptor heuristicDesc;
+        const auto error = detail::createEngineHeuristicDescriptorForGraph(
+            heuristicDesc, reinterpret_cast<hipdnnBackendDescriptor_t>(0x4242), mode);
+        ASSERT_TRUE(error.is_good()) << error.get_message();
+        EXPECT_EQ(sent, expected) << to_string(mode);
+    }
+}
+
+// A backend older than 0.5.0 rejects modes A and B, so the frontend sends what that backend
+// accepts (RFC 0005 §4.6.3): mode FALLBACK, plus the mode's policy order for A and B.
+TEST_F(TestGraph, OlderBackendGetsFallbackModeWithThePolicyOrder)
+{
+    using hipdnn_data_sdk::utilities::policyNameToId;
+    EXPECT_CALL(*_mockBackend, version())
+        .WillRepeatedly(Return(hipdnn_data_sdk::utilities::Version{0, 4, 0}));
+    EXPECT_CALL(*_mockBackend, versionString()).WillRepeatedly(Return("0.4.0"));
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH, _, _, _))
+        .Times(AnyNumber());
+    std::vector<hipdnnBackendHeurMode_t> sentModes;
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_HEUR_MODE, 1, _))
+        .WillRepeatedly([&sentModes](hipdnnBackendDescriptor_t,
+                                     hipdnnBackendAttributeName_t,
+                                     hipdnnBackendAttributeType_t,
+                                     int64_t,
+                                     const void* arrayOfElements) {
+            sentModes.push_back(*static_cast<const hipdnnBackendHeurMode_t*>(arrayOfElements));
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    std::vector<int64_t> sentOrder;
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, HIPDNN_TYPE_INT64, _, _))
+        .WillRepeatedly([&sentOrder](hipdnnBackendDescriptor_t,
+                                     hipdnnBackendAttributeName_t,
+                                     hipdnnBackendAttributeType_t,
+                                     int64_t elementCount,
+                                     const void* arrayOfElements) {
+            const auto* ids = static_cast<const int64_t*>(arrayOfElements);
+            sentOrder.assign(ids, ids + elementCount);
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    const auto orderFor = [](const char* predictionPolicy) {
+        return std::vector<int64_t>{policyNameToId("SelectionHeuristic::Config"),
+                                    policyNameToId(predictionPolicy),
+                                    policyNameToId("SelectionHeuristic::StaticOrdering")};
+    };
+    const std::vector<std::pair<HeuristicMode, std::vector<int64_t>>> cases{
+        {HeuristicMode::A, orderFor(hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME)},
+        {HeuristicMode::B, orderFor(hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME)},
+        {HeuristicMode::FALLBACK, {}},
+        {HeuristicMode::OPENSOURCE, {}}};
+    for(const auto& [mode, expectedOrder] : cases)
+    {
+        sentModes.clear();
+        sentOrder.clear();
+        detail::ScopedHipdnnBackendDescriptor heuristicDesc;
+        const auto error = detail::createEngineHeuristicDescriptorForGraph(
+            heuristicDesc,
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
+            reinterpret_cast<hipdnnBackendDescriptor_t>(0x4242),
+            mode);
+        ASSERT_TRUE(error.is_good()) << error.get_message();
+        EXPECT_EQ(sentModes, std::vector<hipdnnBackendHeurMode_t>{HIPDNN_HEUR_MODE_FALLBACK})
+            << to_string(mode);
+        EXPECT_EQ(sentOrder, expectedOrder) << to_string(mode);
+    }
+}
+
+// The Graph entry points that query heuristics. A null `modes` calls the entry point without a
+// mode list, so its default applies. `ids` receives the engine IDs the call produced, in order,
+// when the entry point exposes them.
+struct HeuristicEntryPoint
+{
+    const char* name;
+    // build() lowers the operation graph itself; every other entry point needs it lowered.
+    bool lowersGraph;
+    // is_supported_ext() reports applicability only: one query, no engine list.
+    bool reportsEngines;
+    std::function<Error(
+        GraphTestUtils&, hipdnnHandle_t, const std::vector<HeuristicMode>*, std::vector<int64_t>&)>
+        call;
+};
+
+static std::vector<HeuristicEntryPoint> heuristicEntryPoints()
+{
+    using Modes = const std::vector<HeuristicMode>*;
+    const auto engineIdsOf = [](const std::vector<EngineConfigInfo>& configs) {
+        std::vector<int64_t> ids;
+        ids.reserve(configs.size());
+        for(const auto& config : configs)
+        {
+            ids.push_back(config.engineId);
+        }
+        return ids;
+    };
+    return {
+        {"get_ranked_engine_ids",
+         false,
+         true,
+         [](GraphTestUtils& graph, hipdnnHandle_t, Modes modes, std::vector<int64_t>& ids) {
+             return modes != nullptr ? graph.get_ranked_engine_ids(ids, *modes)
+                                     : graph.get_ranked_engine_ids(ids);
+         }},
+        {"create_execution_plans",
+         false,
+         true,
+         [](GraphTestUtils& graph, hipdnnHandle_t, Modes modes, std::vector<int64_t>& ids) {
+             auto error = modes != nullptr ? graph.create_execution_plans(*modes)
+                                           : graph.create_execution_plans();
+             ids = graph.getCompiledPlanEngineIds();
+             return error;
+         }},
+        {"get_engine_configs",
+         false,
+         true,
+         [engineIdsOf](
+             GraphTestUtils& graph, hipdnnHandle_t, Modes modes, std::vector<int64_t>& ids) {
+             std::vector<EngineConfigInfo> configs;
+             auto error = modes != nullptr ? graph.get_engine_configs(configs, *modes)
+                                           : graph.get_engine_configs(configs);
+             ids = engineIdsOf(configs);
+             return error;
+         }},
+        {"get_engine_configs with a handle",
+         false,
+         true,
+         [engineIdsOf](
+             GraphTestUtils& graph, hipdnnHandle_t, Modes modes, std::vector<int64_t>& ids) {
+             // A null handle selects the handle overload and skips the engine-name query.
+             std::vector<EngineConfigInfo> configs;
+             auto error = modes != nullptr ? graph.get_engine_configs(nullptr, configs, *modes)
+                                           : graph.get_engine_configs(nullptr, configs);
+             ids = engineIdsOf(configs);
+             return error;
+         }},
+        {"add_all_engines",
+         false,
+         true,
+         [](GraphTestUtils& graph, hipdnnHandle_t, Modes modes, std::vector<int64_t>& ids) {
+             auto error
+                 = modes != nullptr ? graph.add_all_engines(*modes) : graph.add_all_engines();
+             ids = graph.getPlanSpecEngineIds();
+             return error;
+         }},
+        {"is_supported_ext",
+         false,
+         false,
+         [](GraphTestUtils& graph, hipdnnHandle_t handle, Modes modes, std::vector<int64_t>&) {
+             return modes != nullptr ? graph.is_supported_ext(handle, *modes)
+                                     : graph.is_supported_ext(handle);
+         }},
+        {"build",
+         true,
+         true,
+         [](GraphTestUtils& graph, hipdnnHandle_t handle, Modes modes, std::vector<int64_t>& ids) {
+             auto error = modes != nullptr ? graph.build(handle, *modes) : graph.build(handle);
+             ids = graph.getCompiledPlanEngineIds();
+             return error;
+         }},
+    };
+}
+
+class TestGraphHeuristicEntryPoints : public TestGraph
+{
+protected:
+    // Calls `entry` on a fresh batchnorm graph, recording only the modes this call sends.
+    Error callOnFreshGraph(const HeuristicEntryPoint& entry,
+                           const std::vector<HeuristicMode>* modes,
+                           std::vector<int64_t>& ids)
+    {
+        GraphTestUtils graph;
+        createBasicBatchnormGraph(graph);
+        if(!entry.lowersGraph)
+        {
+            const auto built = graph.build_operation_graph(_handle);
+            EXPECT_TRUE(built.is_good()) << built.get_message();
+        }
+        _queriedModes.clear();
+        return entry.call(graph, _handle, modes, ids);
+    }
+
+    void SetUp() override
+    {
+        TestGraph::SetUp();
+        installEngineFilterMocks();
+        for(const int64_t engineId : {10, 20, 100, 200, 300, 400})
+        {
+            _engineConfigWorkspace[engineId] = 0;
+        }
+    }
+};
+
+// Called without a mode list, every entry point queries mode A alone: the frontend's default,
+// so default selection ranks engines by their L1 predictions (RFC 0019 §11.3). A default left
+// at FALLBACK sends FALLBACK and fails here.
+TEST_F(TestGraphHeuristicEntryPoints, EveryEntryPointDefaultsToModeA)
+{
+    _rankedEngineIds = {10, 20};
+    _rankedEngineIdsByMode[HIPDNN_HEUR_MODE_A] = {20, 10};
+    for(const auto& entry : heuristicEntryPoints())
+    {
+        SCOPED_TRACE(entry.name);
+        std::vector<int64_t> ids;
+        const auto error = callOnFreshGraph(entry, nullptr, ids);
+        ASSERT_TRUE(error.is_good()) << error.get_message();
+        EXPECT_EQ(_queriedModes, std::vector<hipdnnBackendHeurMode_t>{HIPDNN_HEUR_MODE_A});
+        if(entry.reportsEngines)
+        {
+            EXPECT_EQ(ids, (std::vector<int64_t>{20, 10}));
+        }
+    }
+}
+
+// As cudnn-frontend's get_heuristics_list: one query per mode in the order given, results
+// concatenated. An engine returned by an earlier mode is not repeated, and a repeated mode is
+// not queried again. is_supported_ext() asks only whether any engine applies, which does not
+// depend on the mode, so it queries the first mode once.
+TEST_F(TestGraphHeuristicEntryPoints, EveryEntryPointQueriesEachModeOnceAndConcatenates)
+{
+    _rankedEngineIdsByMode = {{HIPDNN_HEUR_MODE_B, {200, 100}},
+                              {HIPDNN_HEUR_MODE_A, {100, 300}},
+                              {HIPDNN_HEUR_MODE_FALLBACK, {300, 100, 200, 400}}};
+    const std::vector<HeuristicMode> modes{
+        HeuristicMode::B, HeuristicMode::A, HeuristicMode::B, HeuristicMode::FALLBACK};
+    for(const auto& entry : heuristicEntryPoints())
+    {
+        SCOPED_TRACE(entry.name);
+        std::vector<int64_t> ids;
+        const auto error = callOnFreshGraph(entry, &modes, ids);
+        ASSERT_TRUE(error.is_good()) << error.get_message();
+        if(entry.reportsEngines)
+        {
+            EXPECT_EQ(_queriedModes,
+                      (std::vector<hipdnnBackendHeurMode_t>{
+                          HIPDNN_HEUR_MODE_B, HIPDNN_HEUR_MODE_A, HIPDNN_HEUR_MODE_FALLBACK}));
+            EXPECT_EQ(ids, (std::vector<int64_t>{200, 100, 300, 400}));
+        }
+        else
+        {
+            EXPECT_EQ(_queriedModes, std::vector<hipdnnBackendHeurMode_t>{HIPDNN_HEUR_MODE_B});
+        }
+    }
+}
+
+// A mode list naming no mode is rejected with INVALID_VALUE before any heuristic query.
+TEST_F(TestGraphHeuristicEntryPoints, EveryEntryPointRejectsAnEmptyModeList)
+{
+    _rankedEngineIds = {10, 20};
+    const std::vector<HeuristicMode> noModes;
+    for(const auto& entry : heuristicEntryPoints())
+    {
+        SCOPED_TRACE(entry.name);
+        std::vector<int64_t> ids;
+        const auto error = callOnFreshGraph(entry, &noModes, ids);
+        EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+        EXPECT_TRUE(_queriedModes.empty());
+    }
+}
+
+// hipDNN rejects a query that names no mode, without a backend call. (cudnn-frontend v1.33.0
+// accepts an empty list in create_execution_plans() and fails later, at check_support().)
+TEST_F(TestGraph, EmptyModeListIsRejected)
+{
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(_, _)).Times(0);
+    std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> configs;
+    std::vector<int64_t> engineIds;
+    const auto error = detail::getEngineConfigsForModes(
+        configs, engineIds, reinterpret_cast<hipdnnBackendDescriptor_t>(0x4242), {}, {});
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
 // Captures a HIPDNN_TYPE_CHAR attribute value as the backend reads it: count bytes, no NUL.
@@ -17615,7 +18158,7 @@ TEST_F(TestGraph, RankingMetricTravelsOnTheHeuristicDescriptor)
     const auto error = detail::createEngineHeuristicDescriptorForGraph(
         heuristicDesc,
         reinterpret_cast<hipdnnBackendDescriptor_t>(0x4242),
-        {HeuristicMode::A},
+        HeuristicMode::A,
         /*findFirst=*/false,
         "time");
     ASSERT_TRUE(error.is_good()) << error.get_message();
