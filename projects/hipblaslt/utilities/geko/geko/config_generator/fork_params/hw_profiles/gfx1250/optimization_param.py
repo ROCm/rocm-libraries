@@ -554,34 +554,34 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
 
     @param
     def tdm_fuse(self, ctx: SizeContext) -> ForkParameter:
-        """[1], plus 3 for MX problems -- groupings where A and B never share a TDM load.
+        """[0, 1], plus 3 for MX problems; flat, independent of the MI group.
 
         TDMFuse picks which tensors share a TDM descriptor set (Components/TDMFuse.py):
         0 {A, B} + {MXSA, MXSB} (develop's default), 1 {A, MXSA} + {MXSB, B},
         2 {A, MXSA, MXSB} + {B}, 3 {B, MXSA, MXSB} + {A}.
 
         A ``tensor_load_to_lds`` carries one set of th/scope/nv bits for every
-        tensor it moves. Under TDMFuse=0 A and B share that instruction, so a
-        TemporalHint is applied only when TemporalHintA and TemporalHintB agree:
-        of the four (A, B) pairs swept below, (0, 1) and (1, 0) both build the
-        (0, 0) kernel and only (1, 1) differs. TDMFuse 1 and 3 give A and B a
-        descriptor set each, so every pair builds its own kernel. Once TDMFuse is
-        coupled per MI group, ``_GFX1250TemporalHintCoupling`` in
-        post_processor.py moves TemporalHintA/B into the groups and gives
-        TDMFuse=0 entries only the agreeing pairs.
+        tensor it moves. Under TDMFuse=0 on more than one wave A and B share that
+        instruction, and a TemporalHint is applied only when TemporalHintA and
+        TemporalHintB agree: a disagreeing pair builds the (0, 0) code under
+        another kernel name, so the Ductile backend's validity check drops it.
+        TDMFuse 1 and 3 give A and B a descriptor set each, so every pair builds
+        its own kernel.
 
-        3 is offered for MX problems only: without MX scales TDMFuse 1-3 all
-        reduce to {A} + {B} and issue the same loads, so 3 would rebuild the
-        TDMFuse=1 kernel under another name. 2 is not offered.
+        0 is the only grouping with the paired LDS layout of
+        LDSSegmentInterleave=1 (TensileLite rejects a non-persistent
+        LDSSegmentInterleave=1 kernel it cannot pair) and the only value a
+        one-wave MI builds. 3 is offered for MX problems only: without MX scales
+        TDMFuse 1-3 all reduce to {A} + {B} and issue the same loads, so 3 would
+        rebuild the TDMFuse=1 kernel under another name. 2 is not offered.
 
         TDMFuse 1-3 need more than one wave, and with MX scales on both tensors
-        TDMFuse 3 builds only on 2 or 4 waves; ``_GFX1250TDMFuseWaveCount`` in
-        post_processor.py gives each MI the values it builds. TDMFuse>0 also
-        rules out the paired LDS layout, so ``_GFX1250SegmentInterleaveLayout``
-        gives LDSSegmentInterleave=1 entries TDMFuse=0 and offers the
-        LDSSegmentInterleave=0 entries TDMFuse 0 next to the values above.
+        TDMFuse 3 builds only on 2 or 4 waves; TensileLite rejects the others
+        and the GA redraws them. TDMFuse stays flat so the GA can change it
+        without redrawing the MI; ``_GFX1250TDMFuseNarrowing`` in
+        post_processor.py only drops a value no MI of the size can use.
         """
-        return self._make_param("TDMFuse", [1, 3] if self._mx_block() else [1])
+        return self._make_param("TDMFuse", [0, 1, 3] if self._mx_block() else [0, 1])
 
     @param
     def compact_loop_store(self, ctx: SizeContext) -> ForkParameter:
@@ -1031,16 +1031,13 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
         StreamK as well, and TensileLite builds the paired LDS layouts for
         StreamK / persistent kernels too.
 
-        The paired layout needs TDMFuse=0, while this profile pins TDMFuse to 1
-        so TemporalHintA/B apply independently (see ``tdm_fuse``). Rather than
-        give up either, ``_GFX1250SegmentInterleaveLayout`` in post_processor.py
-        couples the two per MI group: each MI that can interleave gets an
-        LDSSegmentInterleave=1 entry with TDMFuse=0, and every MI keeps
-        LDSSegmentInterleave=0 entries with TDMFuse 0 and 1, so TDMFuse=1's
-        independent temporal hints stay in the search for 0
-        (``_GFX1250TemporalHintCoupling`` then pairs the hints with each
-        entry's TDMFuse). MIs whose
-        MIWaveGroup or LocalSplitU cannot interleave stay at 0.
+        The paired layout needs TDMFuse=0, which ``tdm_fuse`` offers next to
+        1 and 3. Both parameters stay flat: TensileLite rejects a
+        non-persistent LDSSegmentInterleave=1 kernel it cannot pair, and an
+        MI whose MIWaveGroup or LocalSplitU cannot interleave, and the GA
+        redraws those. A persistent kernel it cannot pair, TDMFuse 1 and 3
+        included, keeps the unpaired interleave, a kernel of its own. Rule C
+        of the geometry narrowing drops 1 when no MI can interleave.
         """
         return self._make_param("LDSSegmentInterleave", [0, 1])
 
@@ -1068,18 +1065,18 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
     # load tensor ("TemporalHint=7 is reserved for loads").
     @param
     def temporal_hint_a(self, ctx: SizeContext) -> ForkParameter:
-        """[0, 1], independent of TemporalHintB only under TDMFuse > 0.
+        """[0, 1]; flat, like TemporalHintB.
 
-        Under TDMFuse=0 A and B share one TDM load, so only agreeing pairs differ
-        (see ``tdm_fuse``). When TDMFuse is coupled per MI group,
-        ``_GFX1250TemporalHintCoupling`` moves TemporalHintA/B into the groups
-        with every pair for TDMFuse > 0 and the agreeing pairs for TDMFuse = 0.
+        Under TDMFuse=0 on more than one wave A and B share one TDM load, so
+        only agreeing pairs build distinct kernels, and the Ductile backend's
+        validity check drops the others (see ``tdm_fuse``). Under TDMFuse > 0 every pair builds its own
+        kernel.
         """
         return self._make_param("TemporalHintA", [0, 1])
 
     @param
     def temporal_hint_b(self, ctx: SizeContext) -> ForkParameter:
-        """[0, 1]; coupled with TDMFuse like TemporalHintA (see ``temporal_hint_a``)."""
+        """[0, 1]; see ``temporal_hint_a``."""
         return self._make_param("TemporalHintB", [0, 1])
 
     @param
