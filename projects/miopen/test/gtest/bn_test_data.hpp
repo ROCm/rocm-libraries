@@ -396,7 +396,7 @@ struct BNBwdTestData : public BNTestData<XDataType, DyDataType, AccDataType, TCo
     void
     SetUpImpl(const TConfig& config, miopenBatchNormMode_t t_bnmode, miopenTensorLayout_t t_layout)
     {
-        BNTestData<XDataType, DxDataType, AccDataType, TConfig>::SetUpImpl(
+        BNTestData<XDataType, DyDataType, AccDataType, TConfig>::SetUpImpl(
             config, t_bnmode, t_layout);
         CreateTensors();
         InitTensorsWithRandValue();
@@ -425,7 +425,9 @@ struct BNBwdTestData : public BNTestData<XDataType, DyDataType, AccDataType, TCo
     miopen::Allocator::ManageDataPtr dBias_dev;
     miopen::Allocator::ManageDataPtr dScale_ref_dev;
     miopen::Allocator::ManageDataPtr dBias_ref_dev;
-    double epsilon = std::numeric_limits<float>::epsilon();
+    // Previously, the epsilon was set to std::numeric_limits<float>::epsilon(),
+    // but now it is set to the one used in the MIOpenDriver
+    double epsilon = 1e-5;
 
     float alphaDataDiff{1.0f}, betaDataDiff{0.0f};
     float alphaParamDiff{1.0f}, betaParamDiff{0.0f};
@@ -452,6 +454,7 @@ private:
         bnBias = tensor<ScaleDataType>{
             BNTestData<XDataType, DyDataType, AccDataType, TConfig>::tensor_layout,
             derivedBnDesc.GetLengths()};
+        // Initialize the savedMean and savedInvVar tensors, use an empty one only if needed
         savedMean = tensor<MeanVarDataType>{
             BNTestData<XDataType, DyDataType, AccDataType, TConfig>::tensor_layout,
             derivedBnDesc.GetLengths()};
@@ -474,14 +477,24 @@ private:
 
     void InitTensorsWithRandValue()
     {
-        dy.generate(uniform_signed_initializer<DyDataType>(2e-3 /*scale*/, 1000 /*range*/));
-        bnScale.generate(uniform_signed_initializer<ScaleDataType>(2e-3 /*scale*/, 1000 /*range*/));
-        bnBias.generate(uniform_signed_initializer<ScaleDataType>(2e-3 /*scale*/, 1000 /*range*/));
-        savedMean.generate(
-            uniform_signed_initializer<MeanVarDataType>(2e-3 /*scale*/, 1000 /*range*/));
-        savedInvVar.generate(
-            uniform_signed_initializer<MeanVarDataType>(2e-3 /*scale*/, 1000 /*range*/));
-
+        dy.generate(uniform_signed_initializer<DyDataType>(2e-3 /*scale*/, 1000 /*range*/), 1);
+        bnScale.generate(uniform_signed_initializer<ScaleDataType>(2e-3 /*scale*/, 1000 /*range*/),
+                         2);
+        bnBias.generate(uniform_signed_initializer<ScaleDataType>(2e-3 /*scale*/, 1000 /*range*/),
+                        3);
+        if(BNTestData<XDataType, DyDataType, AccDataType, TConfig>::bn_config.save)
+        {
+            savedMean.generate(
+                uniform_signed_initializer<MeanVarDataType>(2e-3 /*scale*/, 1000 /*range*/), 4);
+            savedInvVar.generate(
+                uniform_signed_initializer<MeanVarDataType>(2e-3 /*scale*/, 1000 /*range*/), 5);
+        }
+        else
+        {
+            // This branch is possibly not needed
+            std::fill(savedMean.begin(), savedMean.end(), 0.);
+            std::fill(savedInvVar.begin(), savedInvVar.end(), 0.);
+        }
         std::fill(dScale.begin(), dScale.end(), 0.);
         std::fill(dBias.begin(), dBias.end(), 0.);
 
@@ -492,12 +505,19 @@ private:
     {
         auto&& handle = get_handle();
 
-        bnScale_dev     = handle.Write(bnScale.data);
-        bnBias_dev      = handle.Write(bnBias.data);
-        savedMean_dev   = handle.Write(savedMean.data);
-        savedInvVar_dev = handle.Write(savedInvVar.data);
-        dy_dev          = handle.Write(dy.data);
-
+        bnScale_dev = handle.Write(bnScale.data);
+        bnBias_dev  = handle.Write(bnBias.data);
+        if(BNTestData<XDataType, DyDataType, AccDataType, TConfig>::bn_config.save)
+        {
+            savedMean_dev   = handle.Write(savedMean.data);
+            savedInvVar_dev = handle.Write(savedInvVar.data);
+        }
+        else
+        {
+            savedMean_dev   = nullptr;
+            savedInvVar_dev = nullptr;
+        }
+        dy_dev     = handle.Write(dy.data);
         dScale_dev = handle.Write(dScale.data);
         dBias_dev  = handle.Write(dBias.data);
     }

@@ -522,6 +522,12 @@ protected:
         bn_bwd_test_data.dBias.data = handle.Read<DscaleDbiasDataType>(
             bn_bwd_test_data.dBias_dev, bn_bwd_test_data.dBias.data.size());
 
+        tensor<MeanVarDataType> empty;
+        if(!bn_config.save)
+        {
+            bn_bwd_test_data.savedMean   = empty;
+            bn_bwd_test_data.savedInvVar = empty;
+        }
         test::ComputeCPUBNBwd(bn_bwd_test_data);
 
         test::CompareTensor<DxDataType, AccDataType>(
