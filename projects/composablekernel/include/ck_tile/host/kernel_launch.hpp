@@ -158,6 +158,7 @@ CK_TILE_HOST auto make_kernel(KernelImpl /*f*/,
         else if constexpr(kattr_max_waves_per_eu_v<Attr> > 0)
         {
             static_assert(!kattr_no_packed_fp32_ops_v<Attr>);
+            static_assert(MinBlockPerCu <= 0, "kentry_max_waves ignores MinBlockPerCu");
             return kentry_max_waves<Attr, KernelImpl, Args...>;
         }
         else

@@ -1153,13 +1153,12 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     max_seqlen_q,
                     max_seqlen_k,
                     mask.type == mask_enum::mask_top_left)};
-            const int start =
-                range_mask.GetSinkTileRangeAlongX(0, ck_tile::number<1>{}, ck_tile::number<64>{})
-                    .at(ck_tile::number<1>{});
-            const int end = range_mask
-                                .GetSinkTileRangeAlongX(
-                                    max_seqlen_q - 1, ck_tile::number<1>{}, ck_tile::number<64>{})
-                                .at(ck_tile::number<2>{});
+            constexpr auto key_tile = ck_tile::number<64>{};
+            const int start = range_mask.GetSinkTileRangeAlongX(0, ck_tile::number<1>{}, key_tile)
+                                  .at(ck_tile::number<1>{});
+            const int end =
+                range_mask.GetSinkTileRangeAlongX(max_seqlen_q - 1, ck_tile::number<1>{}, key_tile)
+                    .at(ck_tile::number<2>{});
             return std::max(end - start, 0);
         }();
         num_splits = override_num_splits_if_necessary(batch,

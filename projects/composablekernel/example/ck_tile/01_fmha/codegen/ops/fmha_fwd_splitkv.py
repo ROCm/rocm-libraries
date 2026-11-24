@@ -147,7 +147,7 @@ static void run(const ck_tile::stream_config& s, fmha_fwd_splitkv_args a)
     using k_ = fmha_kernel;
     auto [kargs, grids] = fmha_fwd_splitkv_create_kargs_and_grids<k_>(a);
     const dim3 blocks                      = k_::BlockSize();
-    constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
+    constexpr ck_tile::index_t kBlockPerCu = k_::kMaxWavesPerEu == 0 ? k_::kBlockPerCu : 0;
     using attr_ = std::conditional_t<k_::kMaxWavesPerEu == 0, {F_arch.tag},
         ck_tile::kernel_attr_for<{F_arch.tag}, ck_tile::kernel_attr_max_waves_per_eu<k_::kMaxWavesPerEu>>>;
     ck_tile::make_kernel<kBlockPerCu, attr_>(k_{{}}, grids, blocks, 0, kargs)(ck_tile::stream_config{{s.stream_id_}});
@@ -786,8 +786,10 @@ class FmhaFwdSplitKVKernel:
             F_kvlayout=kvlayout_template_arg(
                 self.F_pipeline.F_qscale, self.F_pipeline.F_kvlayout
             ),
-            # the 5D path reads its lengths from seqlen_k_ptr: uneven only
-            F_uneven="true" if self.F_pipeline.kv5d else "kHasUnevenSplits",
+            # the TDM pipelines always take uneven splits
+            F_uneven="true"
+            if self.F_pipeline.tag in TDM_PIPELINES_TAG
+            else "kHasUnevenSplits",
             F_kv5d_open=kv5d_traits[0],
             F_kv5d_close=kv5d_traits[1],
             F_pipeline_enum=PIPELINE_ENUM_MAP[self.F_pipeline.tag],

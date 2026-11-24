@@ -85,10 +85,8 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
     static constexpr bool kStoreLSE         = Problem::kStoreLSE;
     static constexpr bool kHasSink          = Problem::kHasSink;
     static constexpr bool kIsPagedKV        = Problem::kIsPagedKV;
-    // Paged walks start on a page-friendly boundary that can precede the split,
-    // so the head erase below is needed there whatever the split bounds look
-    // like. Everywhere else this follows the problem.
-    static constexpr bool kHasUnevenSplits = kIsPagedKV || Problem::kHasUnevenSplits;
+    // as in the other TDM pipelines; codegen instantiates only uneven splits for them
+    static constexpr bool kHasUnevenSplits = true;
 
     // Merged rows are the q heads of one kv head at query position 0
     // (seqlen_q == 1), so they all take the mask of row 0.
@@ -395,9 +393,9 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
         if constexpr(FmhaMask::IsMasking || kPadSeqLenK || kHasUnevenSplits)
         {
             // Sink loops are deliberately not counted: a split with no ordinary KV
-            // work exits through the closed form below, which decides sink ownership.
-            // Looping over sink tiles instead gives -inf LSE when the rows are fully
-            // masked (SplitKvSinkDroppedSink).
+            // work exits through the closed form below, where only split 0 puts the
+            // sink logit into its LSE. Looping over sink tiles instead gives -inf LSE
+            // when the rows are fully masked (SplitKvSinkDroppedSink).
             const index_t logical_num_total_loop =
                 integer_divide_ceil(logical_seqlen_k_end - logical_seqlen_k_start, kN0);
             if(logical_num_total_loop <= 0)
