@@ -36,6 +36,12 @@ Documentation for rocFFT is available at
 * Some multi-device plans may read their input before the work queued on the streams set with
   `rocfft_execution_info_set_stream` is complete. Synchronize these streams before calling
   `rocfft_execute`. This issue will be addressed in an upcoming release.
+* Without the RCCL backend, multi-process plans in which each rank's bricks are on a single device
+  may hang if a rank has no input or no output brick, and may produce incorrect results if a rank
+  has several input or output bricks. Give each rank exactly one input brick and one output brick
+  to avoid this. This issue will be addressed in an upcoming release.
+* Without the RCCL backend, single-process plans with several bricks, all on the same device, fail
+  at execution. This issue will be addressed in an upcoming release.
 
 ## rocFFT 1.0.41 for ROCm 10.2
 
