@@ -8,7 +8,9 @@ The fp32 bias is read at element
 a stride of 0 broadcasts that dimension), where ``q_head`` is the query head.
 It is added to the log2-domain score: after any softcap in the tiled kernels
 (``softcap(QK * scale) + bias``), before the mask in the dense kernel. The
-builders are Python only; the C++ lowerer lowers the IR they emit.
+tiled 2D and 3D builders are mirrored by
+instance_attention_additive_bias_internal.h in the C++ engine; the dense
+builders are Python only, and the C++ lowerer lowers the IR they emit.
 
 Device side: :func:`declare_additive_bias_params` adds the four kernel params,
 :func:`additive_bias_row` computes a query row's base index once, and

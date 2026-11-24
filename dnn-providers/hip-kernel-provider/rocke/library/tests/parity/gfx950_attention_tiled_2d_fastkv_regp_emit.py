@@ -54,6 +54,18 @@ _CONFIGS = {
     7: dict(_BASE, sliding_window=256),
     8: dict(_BASE, use_sinks=True),
     9: dict(_BASE, use_i64_kv_addr=True),
+    # idx10: additive bias; both engines' fastKV builders reject it (see
+    # _EXPECTED_REJECTIONS). Mask-once is off: the spec refuses bias with
+    # mask-once, which would otherwise reject first and leave the fastKV
+    # reject untested.
+    10: dict(_BASE, use_transposed_mask_once=False, use_additive_bias=True),
+}
+
+# Configs both engines must reject, with the reason each one pins: run_diff
+# requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
+# reason, a typo included).
+_EXPECTED_REJECTIONS = {
+    10: r"fastKV register-P experiment does not support additive bias",
 }
 
 

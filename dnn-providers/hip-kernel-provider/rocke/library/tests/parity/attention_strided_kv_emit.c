@@ -1,7 +1,8 @@
 /* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  * SPDX-License-Identifier: MIT
  * Mirrors attention_strided_kv_emit.py without changing public spec layouts
- * (12, 13: strided with swizzled K/V LDS tiles on gfx942, gfx950). */
+ * (12, 13: strided with swizzled K/V LDS tiles on gfx942, gfx950; 14, 15:
+ * strided with additive bias on gfx942, gfx950, which both engines reject). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,15 +17,16 @@ int main(int argc, char** argv)
     if(argc < 2)
         return 2;
     const int idx = atoi(argv[1]);
-    if(idx < 0 || idx >= 14)
+    if(idx < 0 || idx >= 16)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 1;
     }
-    const int swizzle = idx >= 12;
-    const int use942 = swizzle ? idx == 12 : idx % 6 < 3;
-    const int ci = swizzle ? 1 : idx % 3;
-    const int strided = idx < 6 || swizzle;
+    const int swizzle = idx >= 12 && idx < 14;
+    const int bias = idx >= 14;
+    const int use942 = (swizzle || bias) ? (idx == 12 || idx == 14) : idx % 6 < 3;
+    const int ci = (swizzle || bias) ? 1 : idx % 3;
+    const int strided = idx < 6 || swizzle || bias;
     const char* arch = use942 ? "gfx942" : "gfx950";
     const char* mode = argc > 2 ? argv[2] : "ll";
     const int dims[] = {64, 128, 256};
@@ -43,6 +45,7 @@ int main(int argc, char** argv)
     s.num_segments = 4;
     s.num_seqs = 3;
     s.use_kv_lds_swizzle = swizzle;
+    s.use_additive_bias = bias;
     rocke_ir_builder_t b;
     if(rocke_ir_builder_init(&b, "strided_kv") != ROCKE_OK)
         return 1;
