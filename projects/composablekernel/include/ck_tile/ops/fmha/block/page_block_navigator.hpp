@@ -333,6 +333,138 @@ struct PageBlockNavigator
     TensorView last_view;
 };
 
+namespace detail {
+
+// Problems with kKVLayout5D set read K/V through Paged5DTileNavigator; the others are linear.
+template <typename Problem, typename = void>
+struct is_kv_layout_5d : std::false_type
+{
+};
+
+template <typename Problem>
+struct is_kv_layout_5d<Problem, std::void_t<decltype(Problem::kKVLayout5D)>>
+    : bool_constant<Problem::kKVLayout5D>
+{
+};
+
+template <typename Problem>
+inline constexpr bool is_kv_layout_5d_v = is_kv_layout_5d<Problem>::value;
+
+// what the pipelines take in place of a Paged5DTileNavigator on linear KV
+struct no_paged5d_navigator
+{
+};
+
+} // namespace detail
+
+// sglang's 5D paged KV cache with one page per tile: per (page, kv head), K is [d / X][token][X]
+// and V is [token / X][d][X], X elements = 16 bytes, so every page of a head is contiguous. Tile
+// i of a sequence reads the page row[min(i, num_pages - 1)] of its block table row; the clamp
+// keeps the lookup ahead of the last tile inside the sequence's pages.
+template <typename KDataType_,
+          typename VDataType_,
+          index_t kPageSize_,
+          index_t kHeadDim_,
+          amd_buffer_coherence_enum Coherence = amd_buffer_coherence_enum::coherence_default>
+struct Paged5DTileNavigator
+{
+    using KDataType = KDataType_;
+    using VDataType = VDataType_;
+
+    static constexpr index_t kPageSize = kPageSize_;
+    static constexpr index_t kHeadDim  = kHeadDim_;
+    static constexpr index_t kX        = 16 / sizeof(KDataType);
+    static constexpr index_t kKRows    = kHeadDim / kX;
+    static constexpr index_t kVRows    = kPageSize / kX;
+
+    static_assert(sizeof(KDataType) == sizeof(VDataType) && kHeadDim % kX == 0 &&
+                  kPageSize % kX == 0);
+
+    CK_TILE_HOST_DEVICE static constexpr index_t table_index(index_t i_page, index_t num_pages)
+    {
+        return min(i_page, num_pages - 1);
+    }
+
+    CK_TILE_HOST_DEVICE index_t page_id(index_t i_page) const
+    {
+        const index_t i = amd_wave_read_first_lane(table_index(i_page, num_pages));
+#if defined(__HIP_DEVICE_COMPILE__)
+        // the table is read-only, so a uniform index lets it be a scalar load
+        return cast_pointer_to_constant_address_space(table_row)[i];
+#else
+        return table_row[i];
+#endif
+    }
+
+    // K and V of a page share the page stride, so one offset serves both
+    CK_TILE_HOST_DEVICE long_index_t page_offset(index_t page) const
+    {
+        return static_cast<long_index_t>(page) * page_stride;
+    }
+
+    CK_TILE_HOST_DEVICE const KDataType* k_page_at(long_index_t page_off) const
+    {
+        return k_head + page_off;
+    }
+
+    CK_TILE_HOST_DEVICE const VDataType* v_page_at(long_index_t page_off) const
+    {
+        return v_head + page_off;
+    }
+
+    CK_TILE_HOST_DEVICE static constexpr auto k_page_lengths()
+    {
+        return make_tuple(number<kKRows>{}, number<kPageSize * kX>{});
+    }
+
+    CK_TILE_HOST_DEVICE static constexpr auto v_page_lengths()
+    {
+        return make_tuple(number<kVRows>{}, number<kHeadDim * kX>{});
+    }
+
+    CK_TILE_HOST_DEVICE auto make_k_page_view(long_index_t page_off) const
+    {
+        return make_naive_tensor_view<address_space_enum::global,
+                                      memory_operation_enum::set,
+                                      Coherence>(k_page_at(page_off),
+                                                 k_page_lengths(),
+                                                 make_tuple(number<kPageSize * kX>{}, number<1>{}),
+                                                 number<kX>{},
+                                                 number<1>{});
+    }
+
+    CK_TILE_HOST_DEVICE auto make_v_page_view(long_index_t page_off) const
+    {
+        return make_naive_tensor_view<address_space_enum::global,
+                                      memory_operation_enum::set,
+                                      Coherence>(v_page_at(page_off),
+                                                 v_page_lengths(),
+                                                 make_tuple(number<kHeadDim * kX>{}, number<1>{}),
+                                                 number<kX>{},
+                                                 number<1>{});
+    }
+
+    // V page as one row per (token / X, d): only the first v_tail_len tokens of each row are in
+    // the tensor, so a TDM box over it zero-fills the rest
+    CK_TILE_HOST_DEVICE auto make_v_tail_view(long_index_t page_off, index_t v_tail_len) const
+    {
+        return make_naive_tensor_view<address_space_enum::global,
+                                      memory_operation_enum::set,
+                                      Coherence>(
+            v_page_at(page_off),
+            make_tuple(number<kVRows * kHeadDim>{}, v_tail_len),
+            make_tuple(number<kX>{}, number<1>{}),
+            number<1>{},
+            number<1>{});
+    }
+
+    const int32_t* table_row;
+    index_t num_pages;
+    const KDataType* k_head;
+    const VDataType* v_head;
+    index_t page_stride; // elements between pages, K and V alike
+};
+
 template <typename TensorView>
 CK_TILE_HOST_DEVICE auto make_page_block_navigator(const TensorView& tensor_view)
 {

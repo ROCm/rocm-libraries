@@ -263,6 +263,13 @@ list(APPEND FMHA_QR_TDM_SCHED_TEST_TARGETS test_ck_tile_fmha_reference)
 # Keep the umbrella a superset of what the regex matches.
 add_dependencies(${TEST_NAME} test_ck_tile_fmha_reference)
 
+# The split-KV mask range arithmetic is a host test on every FMHA architecture.
+add_gtest_executable(test_ck_tile_fmha_fwd_splitkv_mask test_fmha_fwd_splitkv_mask.cpp)
+add_dependencies(${TEST_NAME} test_ck_tile_fmha_fwd_splitkv_mask)
+get_test_property(test_ck_tile_fmha_fwd_splitkv_mask LABELS FMHA_SPLITKV_MASK_COMMON_LABELS)
+set_tests_properties(test_ck_tile_fmha_fwd_splitkv_mask PROPERTIES
+    LABELS "${FMHA_SPLITKV_MASK_COMMON_LABELS};${TEST_NAME};CK_TILE_FMHA_TESTS")
+
 # Python integration test for the fmha_fwd codegen path.
 #
 # Drives the real `generate.py` with a JSON tune-config

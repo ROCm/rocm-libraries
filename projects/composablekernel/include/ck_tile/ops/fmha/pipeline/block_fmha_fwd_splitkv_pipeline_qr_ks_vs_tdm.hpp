@@ -1161,7 +1161,10 @@ struct BlockFmhaFwdSplitKVPingPongProblem : Problem_
     static constexpr bool kSkipMinSeqlenQ = false;
 };
 
-template <typename Problem_, typename Policy_ = BlockFmhaPipelineQRKSVSTdmPingPongPolicy>
+template <typename Problem_,
+          typename Policy_ = std::conditional_t<detail::is_kv_layout_5d_v<Problem_>,
+                                                BlockFmhaPipelineQRKSVSTdmPingPongPaged5DPolicy,
+                                                BlockFmhaPipelineQRKSVSTdmPingPongPolicy>>
 struct BlockFmhaFwdSplitKVPipelineQRKSVSTdmPingPong
     : BlockFmhaPipelineQRKSVSTdmPingPong<BlockFmhaFwdSplitKVPingPongProblem<Problem_>, Policy_>
 {
@@ -1172,10 +1175,12 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdmPingPong
     using Problem  = remove_cvref_t<Problem_>;
     using FmhaMask = remove_cvref_t<typename Problem::FmhaMask>;
 
-    // qr_tdm_pingpong reads K and V through one tensor view each, and would fold
-    // the sink logit into the softmax of every split.
-    static_assert(!Problem::kIsPagedKV && !Problem::kHasSink && !Problem::kDoFp8StaticQuant,
-                  "qr_tdm_pingpong split-kv supports neither paged kv, sink nor fp8");
+    // qr_tdm_pingpong reads K and V through one tensor view each (paged: one page each, 5D
+    // only), and would fold the sink logit into the softmax of every split.
+    static_assert(Problem::kIsPagedKV == Base::kPaged5D && !Problem::kHasSink &&
+                      !Problem::kDoFp8StaticQuant,
+                  "qr_tdm_pingpong split-kv supports paged kv only in the 5D layout, and neither "
+                  "sink nor fp8 static quant");
 
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowLengths,
@@ -1206,20 +1211,42 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdmPingPong
                                         void* smem_ptr,
                                         float sink_v) const
     {
-        // without paged kv, each navigator holds one tensor view
-        return Base::operator()(
-            q_dram_block_window_tmp,
-            k_page_block_navigator.make_tile_window(k_dram_block_window_lengths, {0, 0})
-                .at(number<1>{}),
-            v_page_block_navigator.make_tile_window(v_dram_block_window_lengths, {0, 0})
-                .at(number<1>{}),
-            bias_dram_block_window_tmp,
-            lse_acc_dram_block_window_tmp,
-            typename Base::FmhaMask{mask, num_splits, i_split},
-            position_encoding,
-            scale_s,
-            smem_ptr,
-            sink_v);
+        if constexpr(Base::kPaged5D)
+        {
+            // the K / V windows start on a page; the pipeline turns the pages
+            using Nav = remove_cvref_t<KPageBlockNavigator>;
+            return Base::operator()(
+                q_dram_block_window_tmp,
+                make_tile_window(
+                    k_page_block_navigator.make_k_page_view(0), Nav::k_page_lengths(), {0, 0}),
+                make_tile_window(
+                    k_page_block_navigator.make_v_page_view(0), Nav::v_page_lengths(), {0, 0}),
+                bias_dram_block_window_tmp,
+                lse_acc_dram_block_window_tmp,
+                typename Base::FmhaMask{mask, num_splits, i_split},
+                position_encoding,
+                scale_s,
+                smem_ptr,
+                sink_v,
+                k_page_block_navigator);
+        }
+        else
+        {
+            // without paged kv, each navigator holds one tensor view
+            return Base::operator()(
+                q_dram_block_window_tmp,
+                k_page_block_navigator.make_tile_window(k_dram_block_window_lengths, {0, 0})
+                    .at(number<1>{}),
+                v_page_block_navigator.make_tile_window(v_dram_block_window_lengths, {0, 0})
+                    .at(number<1>{}),
+                bias_dram_block_window_tmp,
+                lse_acc_dram_block_window_tmp,
+                typename Base::FmhaMask{mask, num_splits, i_split},
+                position_encoding,
+                scale_s,
+                smem_ptr,
+                sink_v);
+        }
     }
 };
 

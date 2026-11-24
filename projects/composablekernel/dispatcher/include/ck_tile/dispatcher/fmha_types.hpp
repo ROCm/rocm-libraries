@@ -282,6 +282,10 @@ struct fmha_fwd_splitkv_args
     ck_tile::index_t window_size_right;
     ck_tile::index_t sink_size;
     ck_tile::index_t mask_type;
+
+    const void* q_descale_ptr = nullptr;
+    const void* k_descale_ptr = nullptr;
+    const void* v_descale_ptr = nullptr;
 };
 
 struct fmha_fwd_appendkv_args
@@ -453,8 +457,11 @@ struct fmha_fwd_splitkv_traits
     mask_enum mask_type;
     bias_enum bias_type;
     bool has_lse;
-    bool do_fp8_static_quant = false;
-    bool has_sink            = false;
+    bool do_fp8_static_quant     = false;
+    bool has_sink                = false;
+    quant_scale_enum qscale_type = quant_scale_enum::no_scale;
+    ck_tile::BlockAttentionKVCacheMemoryLayoutEnum kv_memory_layout =
+        ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT;
 };
 
 struct fmha_fwd_appendkv_traits
@@ -603,3 +610,8 @@ static_assert(sizeof(fmha_fwd_args) >= 300, "fmha_fwd_args layout may have chang
 static_assert(sizeof(fmha_bwd_traits) >= 32, "fmha_bwd_traits layout may have changed upstream");
 static_assert(sizeof(fmha_bwd_args) >= 350, "fmha_bwd_args layout may have changed upstream");
 #endif
+// The split-kv args and traits, fallback or upstream: both definitions must have these sizes.
+static_assert(sizeof(fmha_fwd_splitkv_args) == 320,
+              "fmha_fwd_splitkv_args differs between the fallback and fmha_fwd.hpp");
+static_assert(sizeof(fmha_fwd_splitkv_traits) == sizeof(std::string) + 32,
+              "fmha_fwd_splitkv_traits differs between the fallback and fmha_fwd.hpp");

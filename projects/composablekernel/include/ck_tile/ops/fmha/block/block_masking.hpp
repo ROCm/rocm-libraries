@@ -675,6 +675,8 @@ struct SplitKVAttentionMask
     {
     }
 
+    // A non-empty split starts on a multiple of XTile (SplitTileRange), which the 5D paged KV
+    // pipeline takes for the page of its first tile.
     template <index_t YTile, index_t XTile>
     CK_TILE_HOST_DEVICE constexpr auto
     GetTileRangeAlongX(index_t i_y, number<YTile>, number<XTile>) const

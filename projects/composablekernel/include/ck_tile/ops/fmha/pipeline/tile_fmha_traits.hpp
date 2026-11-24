@@ -57,6 +57,23 @@ inline constexpr bool
                                      std::void_t<decltype(Traits::kMergeNumHeadGroupsSeqLenQ)>> =
         Traits::kMergeNumHeadGroupsSeqLenQ;
 
+// Split-kv traits whose K/V are sglang's 5D pages, read one page per tile through
+// Paged5DTileNavigator.
+template <typename BaseTraits_>
+struct TileFmhaPaged5DTraits : BaseTraits_
+{
+    static_assert(BaseTraits_::kIsPagedKV, "the 5D KV layout is a paged layout");
+    static constexpr auto kKVMemoryLayout =
+        BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT;
+};
+
+template <typename Traits, typename = void>
+inline constexpr auto kTraitsKVMemoryLayout = BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT;
+template <typename Traits>
+inline constexpr auto
+    kTraitsKVMemoryLayout<Traits, std::void_t<decltype(Traits::kKVMemoryLayout)>> =
+        Traits::kKVMemoryLayout;
+
 template <bool kPadSeqLenQ_ /* padding for seqlen_q */,
           bool kPadSeqLenK_ /* padding for seqlen_k */,
           bool kPadHeadDimQ_ /* padding for hdim_q */,
@@ -163,9 +180,10 @@ template <bool kPadSeqLenQ_ /* padding for seqlen_q */,
           bool kDoFp8StaticQuant_,
           bool kIsPagedKV_,
           bool kHasUnevenSplits_,
-          bool kMergeNumHeadGroupsSeqLenQ_ = false,
-          index_t kBlockPerCu_             = -1, /* overwrite occupancy if not -1 */
-          bool kHasSink_                   = false>
+          bool kMergeNumHeadGroupsSeqLenQ_         = false,
+          index_t kBlockPerCu_                     = -1, /* overwrite occupancy if not -1 */
+          bool kHasSink_                           = false,
+          BlockAttentionQuantScaleEnum QScaleEnum_ = BlockAttentionQuantScaleEnum::NO_SCALE>
 struct TileFmhaFwdSplitKVTraits
 {
     static constexpr bool kPadSeqLenQ       = kPadSeqLenQ_;
@@ -183,6 +201,7 @@ struct TileFmhaFwdSplitKVTraits
     static constexpr bool kMergeNumHeadGroupsSeqLenQ = kMergeNumHeadGroupsSeqLenQ_;
     static constexpr index_t kBlockPerCu             = kBlockPerCu_;
     static constexpr bool kHasSink                   = kHasSink_;
+    static constexpr auto QScaleEnum                 = QScaleEnum_;
 };
 
 template <bool kPadSeqLenQ_ /* padding for seqlen_q */,

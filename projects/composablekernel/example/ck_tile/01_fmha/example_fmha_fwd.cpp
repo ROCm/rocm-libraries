@@ -122,8 +122,36 @@ auto create_args(int argc, char* argv[])
                 "Batch-mode only: per-batch effective seqlen for KV (exclude PAD).\n"
                 "Comma-separated list of length 'b'. If empty, no override.")
         .insert("init_sink", "0", "value to init the output tensor sink value for validation")
+        .insert("pack_gqa", "1", "1: enable Pack-GQA (fold GQA Q heads into seqlen for non-causal)")
+        .insert("kv_layout",
+                "linear",
+                "paged K/V layout:\n"
+                "  linear, b*h*s*d or b*s*h*d pages\n"
+                "  vec5d, sglang vectorized 5D pages (page_block_size=64) through the split-kv\n"
+                "  api, s_k one length per sequence (the last one repeats)")
+        .insert("dump_vec5d",
+                "",
+                "file prefix: with kv_layout=vec5d, write the paged and vec5d K/V, the block "
+                "table and a meta json, then exit")
+        .insert("bt_width", "0", "kv_layout=vec5d: block table row width, 0 = longest s_k's pages")
+        .insert("bt_fill",
+                "poison",
+                "kv_layout=vec5d: block table entries past a sequence\n"
+                "  poison, a page of NaN\n"
+                "  fault, a page id outside the pool")
         .insert(
-            "pack_gqa", "1", "1: enable Pack-GQA (fold GQA Q heads into seqlen for non-causal)");
+            "tail_fill", "nan", "kv_layout=vec5d: slots past s_k in a last page, zero|finite|nan")
+        .insert("vec5d_warm_sk",
+                "",
+                "kv_layout=vec5d: first run once with these lengths, same splits and workspace")
+        .insert("vec5d_host_sk", "-1", "kv_layout=vec5d: args.seqlen_k, -1 = the longest s_k")
+        .insert("vec5d_diff",
+                "0",
+                "kv_layout=vec5d, v=1: rerun on linear K/V, O and LSE must be bitwise equal")
+        .insert("rerun",
+                "0",
+                "v=1: rerun this many times on NaN outputs and split-kv workspace, each run "
+                "bitwise equal to the validated one");
 
     bool result = arg_parser.parse(argc, argv);
     return std::make_tuple(result, arg_parser);
@@ -168,6 +196,17 @@ auto run(const ck_tile::ArgParser& arg_parser)
     uint32_t seed                    = arg_parser.get_uint32("seed");
     int init_sink_value              = arg_parser.get_int("init_sink");
     int pack_gqa                     = arg_parser.get_int("pack_gqa");
+    fmha_fwd_kv_options kv;
+    kv.layout        = arg_parser.get_str("kv_layout");
+    kv.dump_vec5d    = arg_parser.get_str("dump_vec5d");
+    kv.bt_width      = arg_parser.get_int("bt_width");
+    kv.bt_fill       = arg_parser.get_str("bt_fill");
+    kv.tail_fill     = arg_parser.get_str("tail_fill");
+    kv.warm_seqlen_k = arg_parser.get_int_vec("vec5d_warm_sk");
+    kv.host_seqlen_k = arg_parser.get_int("vec5d_host_sk");
+    kv.diff_linear   = arg_parser.get_bool("vec5d_diff");
+    fmha_fwd_splitkv_options splitkv;
+    splitkv.rerun = arg_parser.get_int("rerun");
 
     ck_tile::stream_config stream_config{nullptr,
                                          true,
@@ -217,7 +256,10 @@ auto run(const ck_tile::ArgParser& arg_parser)
                                         init_sink_value,
                                         pack_gqa,
                                         stream_config,
-                                        json);
+                                        json,
+                                        nullptr,
+                                        kv,
+                                        splitkv);
 }
 
 int main(int argc, char* argv[])

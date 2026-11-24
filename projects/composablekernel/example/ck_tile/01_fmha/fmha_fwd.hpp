@@ -451,6 +451,9 @@ struct fmha_fwd_splitkv_args
     ck_tile::index_t batch_stride_block_table; // only used if 'block_table_ptr' is not nullptr
     // only used if 'block_table_ptr' is not nullptr. Must be a multiple of the
     // kernel's kN0; the kernel does not check it, a violation gives wrong results.
+    // With traits.kv_memory_layout == VECTORIZED_LAYOUT (sglang's 5D pages) it must be 64;
+    // batch_stride_k/v are then the page strides and nhead_stride_k/v the head strides inside a
+    // page, the same for K and V, and seqlen_k_ptr gives the lengths.
     ck_tile::index_t page_block_size;
     bool is_gappy; // differentiate seqstart_k_ptr usage. only used if 'block_table_ptr' is not
                    // nullptr.
@@ -527,6 +530,11 @@ struct fmha_fwd_splitkv_args
     ck_tile::index_t window_size_right;
     ck_tile::index_t sink_size;
     ck_tile::index_t mask_type;
+
+    // device pointers to one float each, required with qscale_type == pertensor and read only then
+    const void* q_descale_ptr = nullptr;
+    const void* k_descale_ptr = nullptr;
+    const void* v_descale_ptr = nullptr;
 };
 
 struct fmha_fwd_appendkv_args
@@ -1185,7 +1193,10 @@ auto fmha_fwd_splitkv_create_kargs_and_grids(fmha_fwd_splitkv_args args)
                                      args.window_size_right,
                                      args.sink_size,
                                      args.mask_type,
-                                     args.sink_ptr);
+                                     args.sink_ptr,
+                                     args.q_descale_ptr,
+                                     args.k_descale_ptr,
+                                     args.v_descale_ptr);
         }
         else
         { // create batch mode kernel arguments
@@ -1234,7 +1245,10 @@ auto fmha_fwd_splitkv_create_kargs_and_grids(fmha_fwd_splitkv_args args)
                                      args.window_size_right,
                                      args.sink_size,
                                      args.mask_type,
-                                     args.sink_ptr);
+                                     args.sink_ptr,
+                                     args.q_descale_ptr,
+                                     args.k_descale_ptr,
+                                     args.v_descale_ptr);
         }
     }();
 
@@ -1692,7 +1706,11 @@ template <ck_tile::index_t HDim_,
           bool kPadSK_,
           bool kPadD_,
           bool kPadDv_,
-          int kOccupancy_ = -1>
+          int kOccupancy_ = -1,
+          ck_tile::BlockAttentionQuantScaleEnum QScaleEnum_ =
+              ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE,
+          ck_tile::BlockAttentionKVCacheMemoryLayoutEnum KVMemoryLayout_ =
+              ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT>
 struct fmha_fwd_splitkv_traits_
 {
     static constexpr ck_tile::index_t HDim           = HDim_;
@@ -1719,7 +1737,9 @@ struct fmha_fwd_splitkv_traits_
     static constexpr bool kHasSink                   = kHasSink_;
     // See fmha_fwd_traits_::kOccupancy for rationale (per-tile symbol split
     // to keep occupancy-only variants from colliding at link time).
-    static constexpr int kOccupancy = kOccupancy_;
+    static constexpr int kOccupancy      = kOccupancy_;
+    static constexpr auto QScaleEnum     = QScaleEnum_;
+    static constexpr auto KVMemoryLayout = KVMemoryLayout_;
 };
 
 template <typename Traits_, typename Arch = void>
@@ -1850,8 +1870,12 @@ struct fmha_fwd_splitkv_traits
     mask_enum mask_type;
     bias_enum bias_type; // 0:no bias, 1:elementwise bias, 2:alibi. sync with BlockAttentionBiasEnum
     bool has_lse;
-    bool do_fp8_static_quant = false;
-    bool has_sink            = false;
+    bool do_fp8_static_quant     = false;
+    bool has_sink                = false;
+    quant_scale_enum qscale_type = quant_scale_enum::no_scale;
+    // VECTORIZED_LAYOUT: sglang's 5D pages (see fmha_fwd_splitkv_args::page_block_size)
+    ck_tile::BlockAttentionKVCacheMemoryLayoutEnum kv_memory_layout =
+        ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT;
     // TODO: padding check is inside this api
 };
 float fmha_fwd_splitkv(fmha_fwd_splitkv_traits,

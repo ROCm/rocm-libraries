@@ -14,6 +14,7 @@
 #include <array>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <functional>
 #include <cmath>
 #include <numeric>
@@ -249,6 +250,78 @@ struct ScalesConfig<TypeConfig, true>
     static constexpr ck_tile::index_t kVScaleGranularity  = TypeConfig::kVScaleGranularity;
 };
 
+// sglang vectorized_5d paged cache (kvcache/shuffle_5d_cache.py), X = 16 / sizeof(T):
+// K (blocks, nhead_k, hdim / X, page, X), V (blocks, nhead_k, page / X, hdim, X).
+template <typename T>
+std::vector<T> to_vec5d_k(const ck_tile::HostTensor<T>& k, bool i_perm)
+{
+    constexpr ck_tile::index_t X  = 16 / sizeof(T);
+    const ck_tile::index_t blocks = k.get_length(0);
+    const ck_tile::index_t nhead  = k.get_length(i_perm ? 1 : 2);
+    const ck_tile::index_t page   = k.get_length(i_perm ? 2 : 1);
+    const ck_tile::index_t hdim   = k.get_length(3);
+
+    std::vector<T> out(k.get_element_size());
+    for(ck_tile::index_t i_b = 0; i_b < blocks; ++i_b)
+        for(ck_tile::index_t i_h = 0; i_h < nhead; ++i_h)
+            for(ck_tile::index_t i_t = 0; i_t < page; ++i_t)
+                for(ck_tile::index_t i_d = 0; i_d < hdim; ++i_d)
+                {
+                    // a pool may hold more than 2^31 elements
+                    const std::size_t row =
+                        (static_cast<std::size_t>(i_b) * nhead + i_h) * (hdim / X) + i_d / X;
+                    out[row * page * X + i_t * X + i_d % X] =
+                        i_perm ? k(i_b, i_h, i_t, i_d) : k(i_b, i_t, i_h, i_d);
+                }
+    return out;
+}
+
+// takes a row-major V: (blocks, nhead_k, page, hdim) or (blocks, page, nhead_k, hdim)
+template <typename T>
+std::vector<T> to_vec5d_v(const ck_tile::HostTensor<T>& v, bool i_perm)
+{
+    constexpr ck_tile::index_t X  = 16 / sizeof(T);
+    const ck_tile::index_t blocks = v.get_length(0);
+    const ck_tile::index_t nhead  = v.get_length(i_perm ? 1 : 2);
+    const ck_tile::index_t page   = v.get_length(i_perm ? 2 : 1);
+    const ck_tile::index_t hdim   = v.get_length(3);
+
+    std::vector<T> out(v.get_element_size());
+    for(ck_tile::index_t i_b = 0; i_b < blocks; ++i_b)
+        for(ck_tile::index_t i_h = 0; i_h < nhead; ++i_h)
+            for(ck_tile::index_t i_t = 0; i_t < page; ++i_t)
+                for(ck_tile::index_t i_d = 0; i_d < hdim; ++i_d)
+                {
+                    const std::size_t row =
+                        (static_cast<std::size_t>(i_b) * nhead + i_h) * (page / X) + i_t / X;
+                    out[row * hdim * X + i_d * X + i_t % X] =
+                        i_perm ? v(i_b, i_h, i_t, i_d) : v(i_b, i_t, i_h, i_d);
+                }
+    return out;
+}
+
+// Paged K/V options beyond page_block_size. vec5d is sglang's 5D pool (to_vec5d_k / to_vec5d_v)
+// read by the split-kv api, with one length per sequence from seqlen_k_ptr.
+struct fmha_fwd_kv_options
+{
+    std::string layout = "linear"; // linear | vec5d
+    std::string dump_vec5d;        // vec5d: write the host K/V, block table and meta, then exit
+    ck_tile::index_t bt_width = 0; // vec5d: block table row width, 0 = the longest sequence's pages
+    std::string bt_fill   = "poison"; // vec5d entries past a sequence: poison (NaN page) | fault
+    std::string tail_fill = "nan";    // vec5d slots past seqlen_k in a last page: zero|finite|nan
+    // vec5d: run once with these lengths first, on the same splits and workspace, unvalidated
+    std::vector<ck_tile::index_t> warm_seqlen_k{};
+    ck_tile::index_t host_seqlen_k = -1;    // vec5d: args.seqlen_k, -1 = the longest sequence
+    bool diff_linear               = false; // vec5d: rerun on linear K/V, O / LSE bitwise equal
+};
+
+struct fmha_fwd_splitkv_options
+{
+    // with -v=1: rerun this many times on NaN outputs and split workspace, each run bitwise equal
+    // to the validated one
+    int rerun = 0;
+};
+
 template <typename DataTypeConfig>
 fwd_result fmha_fwd_run(mode_enum mode,
                         ck_tile::index_t batch,
@@ -287,8 +360,10 @@ fwd_result fmha_fwd_run(mode_enum mode,
                         int init_sink_value,
                         int pack_gqa,
                         const ck_tile::stream_config& stream_config,
-                        std::optional<std::string> json   = std::nullopt,
-                        std::string* selected_kernel_name = nullptr)
+                        std::optional<std::string> json         = std::nullopt,
+                        std::string* selected_kernel_name       = nullptr,
+                        const fmha_fwd_kv_options& kv           = {},
+                        const fmha_fwd_splitkv_options& splitkv = {})
 {
     using TypeConfig = FmhaFwdTypeConfig<DataTypeConfig>;
 
@@ -437,11 +512,57 @@ fwd_result fmha_fwd_run(mode_enum mode,
         page_block_size = 0;
     }
 #endif
+    const bool kv_vec5d = kv.layout == "vec5d";
+    if(kv.layout != "linear" && !kv_vec5d)
+    {
+        std::cerr << "kv_layout must be linear or vec5d" << std::endl;
+        return fwd_result::invalid_args;
+    }
+    // vec5d: the split-kv api reads it (page 64, batch mode, the same head dim for K and V)
+    if(kv_vec5d && (page_block_size != 64 || !is_v_rowmajor || mode != mode_enum::batch ||
+                    ck_tile::numeric_traits<KDataType>::PackedSize != 1 ||
+                    ck_tile::numeric_traits<VDataType>::PackedSize != 1 ||
+                    hdim_q % static_cast<ck_tile::index_t>(16 / sizeof(KDataType)) != 0 ||
+                    hdim_v != hdim_q || 0 < seqlen_knew || 0 < rotary_dim || 0.f < p_drop))
+    {
+        std::cerr
+            << "kv_layout=vec5d needs page_block_size=64, vlayout=r, batch mode, unpacked K/V, "
+               "hdim_q a multiple of 16 bytes, hdim_v == hdim_q, no appendkv and no dropout"
+            << std::endl;
+        return fwd_result::invalid_args;
+    }
+    const bool valid_bt_fill = kv.bt_fill == "poison" || kv.bt_fill == "fault";
+    const bool valid_tail_fill =
+        kv.tail_fill == "zero" || kv.tail_fill == "finite" || kv.tail_fill == "nan";
+    if(kv_vec5d && (kv.bt_width < 0 || !valid_bt_fill || !valid_tail_fill))
+    {
+        std::cerr << "kv_layout=vec5d needs bt_width >= 0, bt_fill poison|fault and tail_fill "
+                     "zero|finite|nan"
+                  << std::endl;
+        return fwd_result::invalid_args;
+    }
+    // the gpu reference (-v=2) reads K/V as linear pages
+    if(kv_vec5d && do_validation == 2)
+    {
+        std::cerr << "kv_layout=vec5d validates on the host only (-v=0 or 1)" << std::endl;
+        return fwd_result::invalid_args;
+    }
+    // both run after the host validation
+    if(splitkv.rerun < 0 || ((0 < splitkv.rerun || kv.diff_linear) && do_validation != 1))
+    {
+        std::cerr << "rerun needs to be >= 0; rerun and vec5d_diff need -v=1" << std::endl;
+        return fwd_result::invalid_args;
+    }
+    if(kv.diff_linear && !kv_vec5d)
+    {
+        std::cerr << "vec5d_diff needs kv_layout=vec5d" << std::endl;
+        return fwd_result::invalid_args;
+    }
     // batch_prefill supports flexible page sizes (not just multiples of 128)
     const bool need_128_aligned_page =
         (CK_TILE_FMHA_FWD_APPENDKV_API || CK_TILE_FMHA_FWD_SPLITKV_API ||
          CK_TILE_FMHA_FWD_PAGEDKV_API);
-    if(need_128_aligned_page && 0 < page_block_size && !(page_block_size % 128 == 0))
+    if(need_128_aligned_page && !kv_vec5d && 0 < page_block_size && !(page_block_size % 128 == 0))
     {
         std::cerr << "only paged-kvcache block size divisible by 128 are currently supported"
                   << std::endl;
@@ -497,6 +618,39 @@ fwd_result fmha_fwd_run(mode_enum mode,
         return fwd_result::invalid_args;
     }
 
+    // vec5d keeps one seqlen_k per sequence (batch mode otherwise takes the first s_k only); a
+    // shorter list repeats its last value
+    std::vector<ck_tile::index_t> vec5d_seqlen_ks, vec5d_warm_seqlen_ks;
+    if(kv_vec5d)
+    {
+        vec5d_seqlen_ks = seqlen_ks;
+        vec5d_seqlen_ks.resize(batch, seqlen_ks.back());
+        if(!kv.warm_seqlen_k.empty())
+        {
+            vec5d_warm_seqlen_ks = kv.warm_seqlen_k;
+            vec5d_warm_seqlen_ks.resize(batch, kv.warm_seqlen_k.back());
+        }
+        const auto has_negative = [](const std::vector<ck_tile::index_t>& lengths) {
+            return std::any_of(
+                lengths.begin(), lengths.end(), [](ck_tile::index_t len) { return len < 0; });
+        };
+        if(has_negative(vec5d_seqlen_ks) || has_negative(vec5d_warm_seqlen_ks))
+        {
+            std::cerr << "kv_layout=vec5d needs every s_k (and vec5d_warm_sk) >= 0" << std::endl;
+            return fwd_result::invalid_args;
+        }
+        // a warm-up longer than s_k would take the NaN slots past s_k for keys
+        bool warm_past_seqlen_k = false;
+        for(std::size_t wb = 0; wb < vec5d_warm_seqlen_ks.size(); ++wb)
+            warm_past_seqlen_k |= vec5d_seqlen_ks[wb] < vec5d_warm_seqlen_ks[wb];
+        if(warm_past_seqlen_k && kv.tail_fill == "nan")
+        {
+            std::cerr << "kv_layout=vec5d with tail_fill=nan needs every vec5d_warm_sk <= its s_k"
+                      << std::endl;
+            return fwd_result::invalid_args;
+        }
+    }
+
     std::tie(seqlen_qs, seqlen_ks, seqlen_qpads, seqlen_kpads) =
         generate_missing_seqlens(mode,
                                  batch,
@@ -507,6 +661,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
                                  /*seqlen_k_min=*/0 < seqlen_knew ? seqlen_knew : 0,
                                  need_append_kvcache,
                                  random_engine);
+    if(kv_vec5d)
+        seqlen_ks = vec5d_seqlen_ks;
 
     if(ck_tile::numeric_traits<VDataType>::PackedSize != 0)
     {
@@ -700,10 +856,27 @@ fwd_result fmha_fwd_run(mode_enum mode,
         }
     }
 
+    // vec5d also maps the pages the warm-up lengths need
+    ck_tile::index_t paged_seqlen_k = max_seqlen_k;
+    for(const ck_tile::index_t warm_seqlen_k : vec5d_warm_seqlen_ks)
+        paged_seqlen_k = std::max(paged_seqlen_k, warm_seqlen_k);
     const ck_tile::index_t max_num_page_blocks =
         (0 < page_block_size
-             ? batch * std::max(1, ck_tile::integer_divide_ceil(max_seqlen_k, page_block_size))
+             ? batch * std::max(1, ck_tile::integer_divide_ceil(paged_seqlen_k, page_block_size))
              : 0);
+    // vec5d: the pool ends with one poison page, all NaN, named by the unused table entries
+    const ck_tile::index_t num_pool_pages = max_num_page_blocks + (kv_vec5d ? 1 : 0);
+    const ck_tile::index_t max_pages_per_seq =
+        (0 < page_block_size ? max_num_page_blocks / batch : 0);
+    // vec5d rows may be wider than the longest sequence, as sglang's are
+    const ck_tile::index_t block_table_cols =
+        (kv_vec5d && 0 < kv.bt_width ? kv.bt_width : max_pages_per_seq);
+    if(block_table_cols < max_pages_per_seq)
+    {
+        std::cerr << "bt_width " << block_table_cols << " is below the " << max_pages_per_seq
+                  << " pages of the longest sequence" << std::endl;
+        return fwd_result::invalid_args;
+    }
 
     // legalize num_splits according to other options
     if(num_splits < 1)
@@ -711,10 +884,10 @@ fwd_result fmha_fwd_run(mode_enum mode,
         int nhead_merged        = nhead;
         int max_seqlen_q_merged = max_seqlen_q;
         // When max_seqlen_q == 1 and multiple head groups are merged (kMergeNumHeadGroupsSeqLenQ)
-        // then more splits are required. With a mask or a sink, only the gfx125 fp16/bf16 (TDM)
-        // instances merge, and not with both.
-        const bool tdm =
-            ck_tile::is_gfx125_supported() && (data_type == "fp16" || data_type == "bf16");
+        // then more splits are required. With a mask or a sink, only the gfx125 fp16/bf16/fp8bf16
+        // (TDM) instances merge, and not with both.
+        const bool tdm = ck_tile::is_gfx125_supported() &&
+                         (data_type == "fp16" || data_type == "bf16" || data_type == "fp8bf16");
         const bool has_sink = mask.sink > 0 || init_sink_value != 0;
         const bool merges_heads =
             mask.type == mask_enum::no_mask ? (!has_sink || tdm) : (tdm && !has_sink);
@@ -843,9 +1016,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
         get_lengths(i_perm, shape_batch, nhead, shape_seqlen_q, hdim_q));
     ck_tile::HostTensor<SMPLComputeDataType> sink_host({nhead});
     ck_tile::HostTensor<KDataType> k_host(
-        0 < page_block_size
-            ? get_lengths(i_perm, max_num_page_blocks, nhead_k, page_block_size, hdim_q)
-            : get_lengths(i_perm, shape_batch, nhead_k, shape_seqlen_k, hdim_q));
+        0 < page_block_size ? get_lengths(i_perm, num_pool_pages, nhead_k, page_block_size, hdim_q)
+                            : get_lengths(i_perm, shape_batch, nhead_k, shape_seqlen_k, hdim_q));
     /// NOTICE: always use same shape for knew_host & vnew_host in batch/group mode
     ck_tile::HostTensor<KDataType> knew_host(
         0 < seqlen_knew
@@ -854,8 +1026,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
     ck_tile::HostTensor<VDataType> v_host(
         0 < page_block_size
             ? (is_v_rowmajor
-                   ? get_lengths(i_perm, max_num_page_blocks, nhead_k, page_block_size, hdim_v)
-                   : get_lengths(i_perm, max_num_page_blocks, nhead_k, hdim_v, page_block_size))
+                   ? get_lengths(i_perm, num_pool_pages, nhead_k, page_block_size, hdim_v)
+                   : get_lengths(i_perm, num_pool_pages, nhead_k, hdim_v, page_block_size))
             : (is_v_rowmajor ? get_lengths(i_perm, shape_batch, nhead_k, shape_seqlen_k, hdim_v)
                              : get_lengths(i_perm, shape_batch, nhead_k, hdim_v, shape_seqlen_k)));
     ck_tile::HostTensor<VDataType> vnew_host(
@@ -944,7 +1116,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
                    : std::array<ck_tile::index_t, 4>{1, 1, 1, 1});
 
     ck_tile::HostTensor<int32_t> block_table_host(
-        0 < page_block_size ? std::array<ck_tile::index_t, 2>{batch, max_num_page_blocks / batch}
+        0 < page_block_size ? std::array<ck_tile::index_t, 2>{batch, block_table_cols}
                             : std::array<ck_tile::index_t, 2>{1, 1});
 
     ck_tile::HostTensor<int32_t> cache_batch_idx_host(use_cache_batch_idx
@@ -1079,9 +1251,10 @@ fwd_result fmha_fwd_run(mode_enum mode,
 
         float qkv_max = 3.f;
 
+        // split-KV: a different amax per tensor, so a descale read from the wrong pointer shows
         q_descale_host(0) = qkv_max / q_dtype_max;
-        k_descale_host(0) = qkv_max / k_dtype_max;
-        v_descale_host(0) = qkv_max / v_dtype_max;
+        k_descale_host(0) = (1 < num_splits || kv_vec5d ? 2.5f : qkv_max) / k_dtype_max;
+        v_descale_host(0) = (1 < num_splits || kv_vec5d ? 1.5f : qkv_max) / v_dtype_max;
     }
     else if(qscale.type == quant_scale_enum::blockscale)
     {
@@ -1136,6 +1309,80 @@ fwd_result fmha_fwd_run(mode_enum mode,
 
     iota_shuffle(block_table_host.begin(), block_table_host.end(), 0, random_engine);
     iota_shuffle(cache_batch_idx_host.begin(), cache_batch_idx_host.end(), 0, random_engine);
+    // K/V element (page, kv head, slot, d) of the paged host tensors, whatever i_perm says
+    const auto paged_at = [&](auto& tensor,
+                              ck_tile::index_t page,
+                              ck_tile::index_t h,
+                              ck_tile::index_t s,
+                              ck_tile::index_t d) -> auto& {
+        return i_perm ? tensor(page, h, s, d) : tensor(page, s, h, d);
+    };
+    if(kv_vec5d)
+    {
+        // sglang's pool: row wb of the block table names sequence wb's pages, scattered over the
+        // pool; the entries past them name the poison page (bt_fill=poison) or an id outside the
+        // pool (bt_fill=fault), neither of which the kernel may read. page_outside_pool is far past
+        // any pool this runner allocates, so its address is expected to be unmapped.
+        constexpr int32_t page_outside_pool = 0x3fffffff;
+        const int32_t poison_page           = max_num_page_blocks;
+        const int32_t unused_page = (kv.bt_fill == "fault" ? page_outside_pool : poison_page);
+        std::vector<int32_t> shuffled_pages(max_num_page_blocks);
+        iota_shuffle(shuffled_pages.begin(), shuffled_pages.end(), 0, random_engine);
+        for(ck_tile::index_t wb = 0; wb < batch; ++wb)
+        {
+            ck_tile::index_t mapped_seqlen_k = seqlen_ks[wb];
+            if(!vec5d_warm_seqlen_ks.empty())
+                mapped_seqlen_k = std::max(mapped_seqlen_k, vec5d_warm_seqlen_ks[wb]);
+            const ck_tile::index_t used_pages =
+                ck_tile::integer_divide_ceil(mapped_seqlen_k, page_block_size);
+            for(ck_tile::index_t j = 0; j < block_table_cols; ++j)
+                block_table_host(wb, j) =
+                    (j < used_pages ? shuffled_pages[wb * max_pages_per_seq + j] : unused_page);
+        }
+
+        // within the fp8 range, and a range uniform_real_distribution<float> takes for wider types
+        constexpr float kFiniteTailMax = 448.f;
+        const float k_max              = std::min(
+            ck_tile::type_convert<float>(ck_tile::numeric<KDataType>::max()), kFiniteTailMax);
+        std::uniform_real_distribution<float> finite_value(-k_max, k_max);
+        // the value of a slot past seqlen_k, as tail_fill says
+        const auto tail_value = [&](auto nan) {
+            using T = decltype(nan);
+            if(kv.tail_fill == "nan")
+                return nan;
+            if(kv.tail_fill == "zero")
+                return ck_tile::type_convert<T>(0.f);
+            return ck_tile::type_convert<T>(finite_value(random_engine));
+        };
+        const auto k_nan = ck_tile::numeric<KDataType>::quiet_NaN();
+        const auto v_nan = ck_tile::numeric<VDataType>::quiet_NaN();
+
+        // the poison page is NaN throughout
+        for(ck_tile::index_t h = 0; h < nhead_k; ++h)
+            for(ck_tile::index_t s = 0; s < page_block_size; ++s)
+            {
+                for(ck_tile::index_t d = 0; d < hdim_q; ++d)
+                    paged_at(k_host, poison_page, h, s, d) = k_nan;
+                for(ck_tile::index_t d = 0; d < hdim_v; ++d)
+                    paged_at(v_host, poison_page, h, s, d) = v_nan;
+            }
+
+        // the slots of a last page past seqlen_k (of the validated run, not the warm-up one)
+        for(ck_tile::index_t wb = 0; wb < batch; ++wb)
+        {
+            if(seqlen_ks[wb] % page_block_size == 0) // also an empty sequence
+                continue;
+            const int32_t page = block_table_host(wb, seqlen_ks[wb] / page_block_size);
+            for(ck_tile::index_t s = seqlen_ks[wb] % page_block_size; s < page_block_size; ++s)
+                for(ck_tile::index_t h = 0; h < nhead_k; ++h)
+                {
+                    for(ck_tile::index_t d = 0; d < hdim_q; ++d)
+                        paged_at(k_host, page, h, s, d) = tail_value(k_nan);
+                    for(ck_tile::index_t d = 0; d < hdim_v; ++d)
+                        paged_at(v_host, page, h, s, d) = tail_value(v_nan);
+                }
+        }
+    }
     if(init_sink_value != 0)
     {
         // Keep the sink small and centered near zero. A sink far above rowmax makes
@@ -1145,6 +1392,57 @@ fwd_result fmha_fwd_run(mode_enum mode,
         // hides tile-window offset bugs in the sink path.
         ck_tile::FillUniformDistribution<SMPLComputeDataType>{-1.f, 1.f, next_seed()}(sink_host);
     }
+    if(kv_vec5d && !kv.dump_vec5d.empty())
+    {
+        const auto write = [&](const std::string& suffix, const void* data, std::size_t size) {
+            std::ofstream file(kv.dump_vec5d + suffix, std::ios::binary);
+            file.write(static_cast<const char*>(data), static_cast<std::streamsize>(size));
+            return static_cast<bool>(file);
+        };
+        const auto k_vec5d = to_vec5d_k(k_host, i_perm);
+        const auto v_vec5d = to_vec5d_v(v_host, i_perm);
+        bool written =
+            write("_k_paged.bin", k_host.data(), k_host.get_element_space_size_in_bytes()) &&
+            write("_v_paged.bin", v_host.data(), v_host.get_element_space_size_in_bytes()) &&
+            write("_k_vec5d.bin", k_vec5d.data(), k_vec5d.size() * sizeof(KDataType)) &&
+            write("_v_vec5d.bin", v_vec5d.data(), v_vec5d.size() * sizeof(VDataType)) &&
+            write("_block_table.bin",
+                  block_table_host.data(),
+                  block_table_host.get_element_space_size_in_bytes());
+        {
+            std::ofstream meta(kv.dump_vec5d + "_meta.json");
+            meta << "{\"blocks\": " << num_pool_pages << ", \"nhead_k\": " << nhead_k
+                 << ", \"bt_width\": " << block_table_cols
+                 << ", \"poison_page\": " << max_num_page_blocks << ", \"bt_fill\": \""
+                 << kv.bt_fill << "\", \"page\": " << page_block_size << ", \"hdim_q\": " << hdim_q
+                 << ", \"hdim_v\": " << hdim_v << ", \"i_perm\": " << (i_perm ? "true" : "false")
+                 << ", \"dtype\": \"" << data_type << "\", \"elem_size_k\": " << sizeof(KDataType)
+                 << ", \"elem_size_v\": " << sizeof(VDataType) << ", \"batch\": " << batch
+                 << ", \"seqlen_k\": [";
+            for(std::size_t i = 0; i < seqlen_ks.size(); ++i)
+                meta << (i == 0 ? "" : ", ") << seqlen_ks[i];
+            meta << "], \"warm_seqlen_k\": [";
+            for(std::size_t i = 0; i < vec5d_warm_seqlen_ks.size(); ++i)
+                meta << (i == 0 ? "" : ", ") << vec5d_warm_seqlen_ks[i];
+            meta << "]}\n";
+            written = written && static_cast<bool>(meta);
+        }
+        if(!written)
+        {
+            std::cerr << "failed to write the vec5d dump " << kv.dump_vec5d << "_*" << std::endl;
+            return fwd_result::failure;
+        }
+        std::cout << "vec5d dump written to " << kv.dump_vec5d << "_*" << std::endl;
+        return fwd_result::success;
+    }
+#if !CK_TILE_FMHA_FWD_SPLITKV_API
+    if(kv_vec5d)
+    {
+        std::cerr << "kv_layout=vec5d runs through the split-kv api, which is not built"
+                  << std::endl;
+        return fwd_result::invalid_args;
+    }
+#endif
     ck_tile::DeviceMem q_buf(q_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem k_buf(k_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem v_buf(v_host.get_element_space_size_in_bytes());
@@ -1197,8 +1495,16 @@ fwd_result fmha_fwd_run(mode_enum mode,
     ck_tile::DeviceMem cache_batch_idx_buf(cache_batch_idx_host.get_element_space_size_in_bytes());
 
     q_buf.ToDevice(q_host.data());
-    k_buf.ToDevice(k_host.data());
-    v_buf.ToDevice(v_host.data());
+    if(kv_vec5d)
+    {
+        k_buf.ToDevice(to_vec5d_k(k_host, i_perm).data());
+        v_buf.ToDevice(to_vec5d_v(v_host, i_perm).data());
+    }
+    else
+    {
+        k_buf.ToDevice(k_host.data());
+        v_buf.ToDevice(v_host.data());
+    }
     sink_buf.ToDevice(sink_host.data());
     knew_buf.ToDevice(knew_host.data());
     vnew_buf.ToDevice(vnew_host.data());
@@ -1282,6 +1588,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
         }
         std::cout << "]";
     };
+    if(kv_vec5d)
+        print_vec("vec5d s_k", seqlen_ks);
 
     if(has_group_padding)
     {
@@ -1344,6 +1652,14 @@ fwd_result fmha_fwd_run(mode_enum mode,
             {
                 traits.has_dropout = (p_drop > 0.0f);
                 traits.qscale_type = qscale.type;
+            }
+            else if constexpr(std::is_same_v<fmha_fwd_splitkv_traits,
+                                             std::decay_t<decltype(traits)>>)
+            {
+                traits.qscale_type = qscale.type;
+                traits.kv_memory_layout =
+                    kv_vec5d ? ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT
+                             : ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT;
             }
             else if constexpr(std::is_same_v<fmha_fwd_pagedkv_traits,
                                              std::decay_t<decltype(traits)>>)
@@ -1449,7 +1765,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
         const ck_tile::index_t batch_stride_o_acc =
             (pack_gqa_nhead_ * num_splits * pack_gqa_seqlen_q_ * hdim_v);
         const ck_tile::index_t batch_stride_o = (pack_gqa_nhead_ * pack_gqa_seqlen_q_ * hdim_v);
-        const ck_tile::index_t batch_stride_block_table = (max_num_page_blocks / batch);
+        const ck_tile::index_t batch_stride_block_table = block_table_cols;
         const ck_tile::index_t batch_stride_q_descale   = num_block_scale_q * nhead;
         const ck_tile::index_t batch_stride_k_descale   = num_block_scale_kv * nhead_k;
         const ck_tile::index_t batch_stride_v_descale   = num_block_scale_kv * nhead_k;
@@ -1715,6 +2031,15 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     (use_cache_batch_idx ? cache_batch_idx_buf.GetDeviceBuffer() : nullptr);
 
                 args.num_splits = num_splits;
+                // fp8 static quant is not used here
+                args.scale_p = 1.f;
+                args.scale_o = 1.f;
+                if(qscale.type == quant_scale_enum::pertensor)
+                {
+                    args.q_descale_ptr = q_descale_buf.GetDeviceBuffer();
+                    args.k_descale_ptr = k_descale_buf.GetDeviceBuffer();
+                    args.v_descale_ptr = v_descale_buf.GetDeviceBuffer();
+                }
                 // the kernel reads each group's seqlen_q, so the grid and the head merging
                 // choice need the longest one rather than the total
                 if(mode == mode_enum::group)
@@ -1738,6 +2063,18 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     ((mode == mode_enum::batch && use_kvcache) || 0 <= k_paddings_[0]
                          ? seqlen_k_buf.GetDeviceBuffer()
                          : nullptr);
+                if(kv_vec5d)
+                {
+                    // sglang's 5D pool is (pages, nhead_k, ...) whatever i_perm says, one
+                    // page * hdim block per (page, head) for K and V alike; stride_k / stride_v
+                    // are not read
+                    args.nhead_stride_k = page_block_size * hdim_q;
+                    args.nhead_stride_v = page_block_size * hdim_v;
+                    args.batch_stride_k = nhead_k * page_block_size * hdim_q;
+                    args.batch_stride_v = nhead_k * page_block_size * hdim_v;
+                    // the kernel takes the lengths from seqlen_k_ptr
+                    args.seqlen_k = kv.host_seqlen_k < 0 ? max_seqlen_k : kv.host_seqlen_k;
+                }
             }
             else if constexpr(std::is_same_v<fmha_fwd_pagedkv_args, std::decay_t<decltype(args)>>)
             {
@@ -1862,7 +2199,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
         }
 #endif // CK_TILE_FMHA_FWD_BATCH_PREFILL_API
 #if CK_TILE_FMHA_FWD_PAGEDKV_API
-        if(1 == num_splits && use_kvcache)
+        // vec5d is read by the split-kv api alone, whatever the split count
+        if(1 == num_splits && use_kvcache && !kv_vec5d)
         {
             fmha_fwd_pagedkv_traits fmha_pagedkv_traits;
             init_traits(fmha_pagedkv_traits);
@@ -1900,6 +2238,40 @@ fwd_result fmha_fwd_run(mode_enum mode,
 
         return fmha_fwd(fmha_traits, fmha_args, sc);
     };
+
+    // all-one bytes are a NaN in bf16, fp16 and fp32
+    constexpr uint8_t nan_byte = 0xff;
+    if(kv_vec5d)
+    {
+        // the split-kv workspace starts as NaN, so a split that leaves its rows unwritten shows
+        o_acc_buf.SetBytePattern(nan_byte);
+        lse_acc_buf.SetBytePattern(nan_byte);
+        // a graph replay: the same splits and workspace with other lengths, nothing of which
+        // may reach the validated run
+        if(!vec5d_warm_seqlen_ks.empty())
+        {
+            seqlen_k_buf.ToDevice(vec5d_warm_seqlen_ks.data());
+            if(run_fwd(ck_tile::stream_config{stream_config.stream_id_, false, 0}) < 0.0f)
+            {
+                std::cout << ", not supported yet" << std::flush << std::endl;
+                return fwd_result::no_instance;
+            }
+            HIP_CHECK_ERROR(hipDeviceSynchronize());
+            seqlen_k_buf.ToDevice(seqlen_ks.data());
+            // O and the LSE must come from the validated run; the workspace keeps what the
+            // replay left, so its NaN check covers only the rows the replay did not write
+            o_buf.SetBytePattern(nan_byte);
+            lse_buf.SetBytePattern(nan_byte);
+        }
+        // the kernel takes every length from seqlen_k_ptr
+        std::vector<ck_tile::index_t> device_seqlen_ks(batch);
+        seqlen_k_buf.FromDevice(device_seqlen_ks.data());
+        if(device_seqlen_ks != seqlen_ks)
+        {
+            std::cerr << "seqlen_k on the device differs from s_k" << std::endl;
+            return fwd_result::failure;
+        }
+    }
 
     float fwd_ave_time = -1.0f;
 #if CK_TILE_FMHA_ENABLE_HEAD_GROUPING
@@ -2069,6 +2441,109 @@ fwd_result fmha_fwd_run(mode_enum mode,
         o_buf.FromDevice(o_host.data());
         lse_buf.FromDevice(lse_host.data());
         randval_buf.FromDevice(randval_host.data());
+        if(kv_vec5d)
+        {
+            // every split row is finite, or empty: LSE -inf and O 0 (an empty split must write)
+            lse_acc_buf.FromDevice(lse_acc_host.data());
+            o_acc_buf.FromDevice(o_acc_host.data());
+            std::size_t bad_rows = 0;
+            for(std::size_t row = 0; row < lse_acc_host.get_element_size(); ++row)
+            {
+                const LSEDataType row_lse       = lse_acc_host.data()[row];
+                const OaccDataType* row_o_begin = o_acc_host.data() + row * hdim_v;
+                const OaccDataType* row_o_end   = row_o_begin + hdim_v;
+                const bool empty_row =
+                    std::isinf(row_lse) && row_lse < 0 &&
+                    std::all_of(row_o_begin, row_o_end, [](OaccDataType x) { return x == 0; });
+                const bool finite_row = std::isfinite(row_lse) &&
+                                        std::all_of(row_o_begin, row_o_end, [](OaccDataType x) {
+                                            return std::isfinite(x);
+                                        });
+                if(!empty_row && !finite_row)
+                    ++bad_rows;
+            }
+            if(bad_rows != 0)
+                std::cerr << "split-kv workspace: " << bad_rows << " rows neither finite nor empty"
+                          << std::endl;
+            pass &= bad_rows == 0;
+        }
+#if CK_TILE_FMHA_FWD_SPLITKV_API
+        if(kv_vec5d && kv.diff_linear)
+        {
+            // the linear split-kv kernel on the same fp8 bytes, descales and splits: O and LSE
+            // must match bit for bit
+            const ck_tile::index_t linear_seqlen_k = std::max(1, max_seqlen_k);
+            ck_tile::HostTensor<KDataType> k_linear({batch, nhead_k, linear_seqlen_k, hdim_q});
+            ck_tile::HostTensor<VDataType> v_linear({batch, nhead_k, linear_seqlen_k, hdim_v});
+            k_linear.SetZero();
+            v_linear.SetZero();
+            for(ck_tile::index_t wb = 0; wb < batch; ++wb)
+                for(ck_tile::index_t h = 0; h < nhead_k; ++h)
+                    for(ck_tile::index_t s = 0; s < seqlen_ks[wb]; ++s)
+                    {
+                        const int32_t page          = block_table_host(wb, s / page_block_size);
+                        const ck_tile::index_t slot = s % page_block_size;
+                        for(ck_tile::index_t d = 0; d < hdim_q; ++d)
+                            k_linear(wb, h, s, d) = paged_at(k_host, page, h, slot, d);
+                        for(ck_tile::index_t d = 0; d < hdim_v; ++d)
+                            v_linear(wb, h, s, d) = paged_at(v_host, page, h, slot, d);
+                    }
+            ck_tile::DeviceMem k_linear_buf(k_linear.get_element_space_size_in_bytes());
+            ck_tile::DeviceMem v_linear_buf(v_linear.get_element_space_size_in_bytes());
+            ck_tile::DeviceMem o_linear_buf(o_host.get_element_space_size_in_bytes());
+            ck_tile::DeviceMem lse_linear_buf(lse_host.get_element_space_size_in_bytes());
+            k_linear_buf.ToDevice(k_linear.data());
+            v_linear_buf.ToDevice(v_linear.data());
+
+            fmha_fwd_splitkv_traits linear_traits;
+            init_traits(linear_traits);
+            linear_traits.kv_memory_layout =
+                ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT;
+            fmha_fwd_splitkv_args linear_args;
+            init_args(linear_args);
+            linear_args.k_ptr                    = k_linear_buf.GetDeviceBuffer();
+            linear_args.v_ptr                    = v_linear_buf.GetDeviceBuffer();
+            linear_args.o_ptr                    = o_linear_buf.GetDeviceBuffer();
+            linear_args.lse_ptr                  = lse_linear_buf.GetDeviceBuffer();
+            linear_args.block_table_ptr          = nullptr;
+            linear_args.batch_stride_block_table = 0;
+            linear_args.page_block_size          = 0;
+            // the lengths still come from seqlen_k_ptr
+            linear_args.seqlen_k       = linear_seqlen_k;
+            linear_args.stride_k       = hdim_q;
+            linear_args.stride_v       = hdim_v;
+            linear_args.nhead_stride_k = linear_seqlen_k * hdim_q;
+            linear_args.nhead_stride_v = linear_seqlen_k * hdim_v;
+            linear_args.batch_stride_k = nhead_k * linear_seqlen_k * hdim_q;
+            linear_args.batch_stride_v = nhead_k * linear_seqlen_k * hdim_v;
+            const ck_tile::stream_config linear_stream_config{
+                stream_config.stream_id_, false, stream_config.log_level_};
+            const float linear_time =
+                fmha_fwd_splitkv(linear_traits, linear_args, linear_stream_config);
+
+            std::string diff_result = "no_instance";
+            bool same               = false;
+            if(0.0f <= linear_time)
+            {
+                HIP_CHECK_ERROR(hipDeviceSynchronize());
+                ck_tile::HostTensor<ODataType> o_linear(o_host.get_lengths());
+                ck_tile::HostTensor<LSEDataType> lse_linear(lse_host.get_lengths());
+                o_linear_buf.FromDevice(o_linear.data());
+                lse_linear_buf.FromDevice(lse_linear.data());
+                const bool same_o = std::memcmp(o_linear.data(),
+                                                o_host.data(),
+                                                o_host.get_element_space_size_in_bytes()) == 0;
+                const bool same_lse =
+                    !lse || std::memcmp(lse_linear.data(),
+                                        lse_host.data(),
+                                        lse_host.get_element_space_size_in_bytes()) == 0;
+                same        = same_o && same_lse;
+                diff_result = same ? "same" : "differ";
+            }
+            std::cout << ", vec5d_diff:" << diff_result << std::flush;
+            pass &= same;
+        }
+#endif
 
         constexpr bool supports_qscale = std::is_same_v<DataTypeConfig, FmhaFwdFp8> ||
                                          std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16>;
@@ -2944,6 +3419,36 @@ fwd_result fmha_fwd_run(mode_enum mode,
             {
                 break;
             }
+        }
+
+        // a split-kv workspace row left unwritten shows as NaN in O, a nondeterministic run as a
+        // difference
+        for(int i_rerun = 0; pass && i_rerun < splitkv.rerun; ++i_rerun)
+        {
+            o_buf.SetBytePattern(nan_byte);
+            lse_buf.SetBytePattern(nan_byte);
+            o_acc_buf.SetBytePattern(nan_byte);
+            lse_acc_buf.SetBytePattern(nan_byte);
+            if(run_fwd(ck_tile::stream_config{stream_config.stream_id_, false, 0}) < 0.0f)
+            {
+                pass = false;
+                break;
+            }
+            ck_tile::HostTensor<ODataType> o_rerun(o_host.get_lengths());
+            ck_tile::HostTensor<LSEDataType> lse_rerun(lse_host.get_lengths());
+            o_buf.FromDevice(o_rerun.data());
+            lse_buf.FromDevice(lse_rerun.data());
+            const bool same_o = std::memcmp(o_rerun.data(),
+                                            o_host.data(),
+                                            o_host.get_element_space_size_in_bytes()) == 0;
+            const bool same_lse =
+                !lse || std::memcmp(lse_rerun.data(),
+                                    lse_host.data(),
+                                    lse_host.get_element_space_size_in_bytes()) == 0;
+            if(!(same_o && same_lse))
+                std::cerr << "rerun " << i_rerun + 1 << ": O or LSE differs from the validated run"
+                          << std::endl;
+            pass &= same_o && same_lse;
         }
 
         std::cout << ", valid:" << (pass ? "y" : "n") << std::flush << std::endl;

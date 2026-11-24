@@ -300,6 +300,11 @@ struct BlockFmhaFwdSplitKVPipelineProblem
     static constexpr bool kMergeNumHeadGroupsSeqLenQ = Traits::kMergeNumHeadGroupsSeqLenQ;
     static constexpr index_t kBlockPerCu             = Traits::kBlockPerCu;
     static constexpr bool kHasSink                   = Traits::kHasSink;
+    static constexpr auto QScaleEnum                 = Traits::QScaleEnum;
+    static constexpr auto kKVMemoryLayout            = kTraitsKVMemoryLayout<Traits>;
+    // sglang's 5D paged KV, read by the pingpong pipeline (detail::is_kv_layout_5d_v)
+    static constexpr bool kKVLayout5D =
+        kKVMemoryLayout == BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT;
 
     // qr_tdm LDS-arena knobs read by the shared qr_tdm policy. The split-kv
     // qr_tdm asserts kUseDoubleKVLdsBuffer is false. kProgressiveDsLoadK only

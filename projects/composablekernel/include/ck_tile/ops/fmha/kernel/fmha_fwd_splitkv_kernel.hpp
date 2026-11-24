@@ -6,10 +6,13 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
+#include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
+#include "ck_tile/ops/fmha/block/page_block_navigator.hpp"
 #include "ck_tile/ops/fmha/block/variants.hpp"
 #include "ck_tile/ops/fmha/detail/fmha_fwd_kernel_path_markers.hpp"
 
 #include <string>
+#include <string_view>
 #include <type_traits>
 
 // S[seqlen_q, seqlen_k] = Q[seqlen_q, hdim_q] @ K[seqlen_k, hdim_q]
@@ -64,6 +67,7 @@ struct FmhaFwdSplitKVKernel
     static constexpr bool kDoFp8StaticQuant = FmhaPipeline::Problem::kDoFp8StaticQuant;
     static constexpr bool kIsPagedKV        = FmhaPipeline::Problem::kIsPagedKV;
     static constexpr bool kHasSink          = FmhaPipeline::Problem::kHasSink;
+    static constexpr auto QScaleEnum        = FmhaPipeline::Problem::QScaleEnum;
     static constexpr bool kMergeNumHeadGroupsSeqLenQ =
         FmhaPipeline::Problem::kMergeNumHeadGroupsSeqLenQ;
     using AttentionVariant = ck_tile::remove_cvref_t<typename FmhaPipeline::AttentionVariant>;
@@ -89,6 +93,15 @@ struct FmhaFwdSplitKVKernel
     static_assert(!kUsesUntransposedVKernelPath || kUsesTdmAffineDramPath,
                   "untransposed V requires the TDM affine DRAM path");
 
+    // sglang's 5D paged KV (see Paged5DTileNavigator); seqlen_k comes from seqlen_k_ptr
+    static constexpr bool kKVLayout5D = detail::is_kv_layout_5d_v<typename FmhaPipeline::Problem>;
+    static_assert(!kKVLayout5D ||
+                      (kIsPagedKV && !kIsGroupMode && !kHasSink && kUsesTdmAffineDramPath),
+                  "5D paged kv: batch mode TDM pipelines, without sink");
+    // the split qr_tdm is on the TDM path too, but only qr_tdm_pingpong turns the 5D pages
+    static_assert(!kKVLayout5D || std::string_view{FmhaPipeline::name} == "qr_tdm_pingpong",
+                  "5D paged kv: qr_tdm_pingpong only");
+
     // see FmhaFwdKernel::kKVCoherence
 #if defined(__gfx125__)
     static constexpr auto kKVCoherence = detail::uses_kv_nt_ht_hint_v<FmhaPipeline>
@@ -103,6 +116,10 @@ struct FmhaFwdSplitKVKernel
     static_assert(!kMergeNumHeadGroupsSeqLenQ ||
                   (kMergeNumHeadGroupsSeqLenQ && BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
                    ((!kHasMask && !kHasSink) || kUsesTdmAffineDramPath)));
+
+    static_assert(QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ||
+                      (QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR && !kDoFp8StaticQuant),
+                  "split-kv supports only the per-tensor descale, without fp8 static quant");
 
     // clang-format off
     template <typename T> struct t2s;
@@ -144,7 +161,9 @@ struct FmhaFwdSplitKVKernel
             "v" + (std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor> ? "r" : "c") + (pn.empty() ? "_npad" : "_" + pn) +
             (kHasLogitsSoftCap ? "_logits" : "_nlogits" ) + (BiasEnum == BlockAttentionBiasEnum::NO_BIAS ? _SS_("_nbias") : (_SS_("_") + BlockAttentionBiasEnumToStr<BiasEnum>::name)) +
             (kHasMask ? "_" + _SS_(FmhaMask::name) : "_nmask") + (kStoreLSE ? "_lse" : "_nlse" ) +
-            (kDoFp8StaticQuant ? "_squant" : "_nsquant") + (kIsPagedKV ? "_pagedkv" : "_npagedkv" ) + (kHasSink ? "_sink" : "_nsink" );
+            (kDoFp8StaticQuant ? "_squant" : "_nsquant") + (kIsPagedKV ? "_pagedkv" : "_npagedkv" ) + (kHasSink ? "_sink" : "_nsink" ) +
+            (QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ? _SS_("") : (_SS_("_") + BlockAttentionQuantScaleEnumToStr<QScaleEnum>::name)) +
+            (kKVLayout5D ? "_kv5d" : "");
         #undef _SS_
         #undef _TS_
         // clang-format on
@@ -251,6 +270,13 @@ struct FmhaFwdSplitKVKernel
         float scale_p;
     };
 
+    struct QScaleKargs
+    {
+        const void* q_descale_ptr;
+        const void* k_descale_ptr;
+        const void* v_descale_ptr;
+    };
+
     struct CommonPageBlockTableKargs
     {
         const int32_t* block_table_ptr;
@@ -278,7 +304,10 @@ struct FmhaFwdSplitKVKernel
           std::conditional_t<kHasMask, MaskKargs, EmptyKargs<1>>,
           std::conditional_t<kDoFp8StaticQuant, Fp8StaticQuantKargs, EmptyKargs<2>>,
           std::conditional_t<kIsPagedKV, CommonPageBlockTableKargs, CacheBatchIdxKargs>,
-          std::conditional_t<kHasLogitsSoftCap, LogitsSoftCapKargs, EmptyKargs<3>>
+          std::conditional_t<kHasLogitsSoftCap, LogitsSoftCapKargs, EmptyKargs<3>>,
+          std::conditional_t<QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR,
+                             QScaleKargs,
+                             EmptyKargs<5>>
     {
         const int32_t* seqlen_k_ptr;
 
@@ -301,7 +330,10 @@ struct FmhaFwdSplitKVKernel
           std::conditional_t<kHasMask, MaskKargs, EmptyKargs<1>>,
           std::conditional_t<kDoFp8StaticQuant, Fp8StaticQuantKargs, EmptyKargs<2>>,
           std::conditional_t<kIsPagedKV, GroupModePageBlockTableKargs, EmptyKargs<3>>,
-          std::conditional_t<kHasLogitsSoftCap, LogitsSoftCapKargs, EmptyKargs<4>>
+          std::conditional_t<kHasLogitsSoftCap, LogitsSoftCapKargs, EmptyKargs<4>>,
+          std::conditional_t<QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR,
+                             QScaleKargs,
+                             EmptyKargs<5>>
     {
         const int32_t* seqstart_q_ptr;
         const int32_t* seqstart_k_ptr;
@@ -371,7 +403,10 @@ struct FmhaFwdSplitKVKernel
               ck_tile::index_t window_size_right,
               ck_tile::index_t sink_size,
               ck_tile::index_t mask_type,
-              const void* sink_ptr = nullptr)
+              const void* sink_ptr      = nullptr,
+              const void* q_descale_ptr = nullptr,
+              const void* k_descale_ptr = nullptr,
+              const void* v_descale_ptr = nullptr)
     {
         Kargs kargs{{q_ptr,
                      k_ptr,
@@ -408,6 +443,7 @@ struct FmhaFwdSplitKVKernel
                     {},                   // placeholder for fp8_static_quant args
                     {},                   // placeholder for paged-block table or cache_batch_idx
                     {},                   // placeholder for logits_soft_cap
+                    {},                   // placeholder for qscale
                     reinterpret_cast<const int32_t*>(seqlen_k_ptr),
                     batch_stride_q,
                     batch_stride_k,
@@ -451,6 +487,12 @@ struct FmhaFwdSplitKVKernel
         if constexpr(kHasLogitsSoftCap)
         {
             kargs.init_logits_soft_cap(logits_soft_cap);
+        }
+        if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR)
+        {
+            kargs.q_descale_ptr = q_descale_ptr;
+            kargs.k_descale_ptr = k_descale_ptr;
+            kargs.v_descale_ptr = v_descale_ptr;
         }
 
         return kargs;
@@ -501,7 +543,10 @@ struct FmhaFwdSplitKVKernel
               ck_tile::index_t window_size_right,
               ck_tile::index_t sink_size,
               ck_tile::index_t mask_type,
-              const void* sink_ptr = nullptr)
+              const void* sink_ptr      = nullptr,
+              const void* q_descale_ptr = nullptr,
+              const void* k_descale_ptr = nullptr,
+              const void* v_descale_ptr = nullptr)
     {
         Kargs kargs{{q_ptr,
                      k_ptr,
@@ -538,6 +583,7 @@ struct FmhaFwdSplitKVKernel
                     {},                   // placeholder for fp8_static_quant args
                     {},                   // placeholder for paged-block table
                     {},                   // placeholder for logits_soft_cap
+                    {},                   // placeholder for qscale
                     reinterpret_cast<const int32_t*>(seqstart_q_ptr),
                     reinterpret_cast<const int32_t*>(seqstart_k_ptr),
                     reinterpret_cast<const int32_t*>(seqlen_k_ptr),
@@ -576,6 +622,12 @@ struct FmhaFwdSplitKVKernel
         if constexpr(kHasLogitsSoftCap)
         {
             kargs.init_logits_soft_cap(logits_soft_cap);
+        }
+        if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR)
+        {
+            kargs.q_descale_ptr = q_descale_ptr;
+            kargs.k_descale_ptr = k_descale_ptr;
+            kargs.v_descale_ptr = v_descale_ptr;
         }
         return kargs;
     }
@@ -664,6 +716,17 @@ struct FmhaFwdSplitKVKernel
         long_index_t batch_offset_o_acc   = 0;
         index_t kv_l2p_offset =
             0; // logical-to-physical offset of seqlen_k coordinate. only used for paged-kvcache
+
+        // The q and k descales fold into scale_s, which everything below (sink, softmax, LSE)
+        // reads; v_descale scales the output.
+        [[maybe_unused]] float v_descale = 1.f;
+        if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR)
+        {
+            kargs.scale_s *= *static_cast<const float*>(kargs.q_descale_ptr) *
+                             *static_cast<const float*>(kargs.k_descale_ptr);
+            v_descale = *static_cast<const float*>(kargs.v_descale_ptr);
+        }
+
         const float sink_value =
             kargs.sink_ptr != nullptr
                 ? (*(static_cast<const float*>(kargs.sink_ptr) + i_nhead)) / kargs.scale_s
@@ -918,7 +981,24 @@ struct FmhaFwdSplitKVKernel
         }();
 
         auto k_page_block_navigator = [&, i_batch_ = i_batch]() {
-            if constexpr(kIsPagedKV)
+            if constexpr(kKVLayout5D)
+            {
+                // K and V share it, and the page and head strides (checked by the api)
+                const long_index_t head_off =
+                    static_cast<long_index_t>(i_nhead_k) * kargs.nhead_stride_k;
+                return Paged5DTileNavigator<KDataType,
+                                            VDataType,
+                                            FmhaPipeline::kN0,
+                                            FmhaPipeline::kQKHeaddim,
+                                            kKVCoherence>{
+                    reinterpret_cast<const int32_t*>(kargs.block_table_ptr) +
+                        i_batch_ * kargs.batch_stride_block_table,
+                    integer_divide_ceil(kargs.seqlen_k, FmhaPipeline::kN0),
+                    reinterpret_cast<const KDataType*>(kargs.k_ptr) + head_off,
+                    reinterpret_cast<const VDataType*>(kargs.v_ptr) + head_off,
+                    kargs.batch_stride_k};
+            }
+            else if constexpr(kIsPagedKV)
             {
                 const auto* block_indices =
                     reinterpret_cast<const int32_t*>(kargs.block_table_ptr) +
@@ -948,7 +1028,11 @@ struct FmhaFwdSplitKVKernel
         }();
 
         auto v_page_block_navigator = [&, i_batch_ = i_batch]() {
-            if constexpr(kIsPagedKV)
+            if constexpr(kKVLayout5D)
+            {
+                return k_page_block_navigator;
+            }
+            else if constexpr(kIsPagedKV)
             {
                 const auto* block_indices =
                     reinterpret_cast<const int32_t*>(kargs.block_table_ptr) +
@@ -1201,6 +1285,11 @@ struct FmhaFwdSplitKVKernel
                                       sink_v);
             }
         }();
+
+        if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR)
+        {
+            tile_elementwise_inout([v_descale](auto& x) { x *= v_descale; }, o_acc_tile);
+        }
 
         // Oacc DRAM and Oacc DRAM window
         auto o_acc_dram = [&] {

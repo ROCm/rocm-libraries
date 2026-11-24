@@ -3744,6 +3744,685 @@ TEST_P(SplitKVMaskedMergedHeads, DataTypeConfig)
     CHECK_SPLITKV_RESULT(result);
 }
 
+// fp8 decode with per-tensor descales on the gfx125 split-KV pingpong pipeline, the only fp8 split
+// instances: one 16-row tile of Q heads (packed without a mask, merged with one), a partial last
+// K tile (1000), and empty splits (16 keys over 8 splits).
+class SplitKVFp8PerTensor : public TestWithParam<std::tuple<bool, int, std::string, int, bool>>
+{
+};
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SplitKVFp8PerTensor);
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         SplitKVFp8PerTensor,
+                         Combine(EnableTestIf(std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16>),
+                                 Values(16, 1000, 1024), // seqlen_k
+                                 Values("0", "b:127,0"),
+                                 Values(3, 8), // num_splits
+                                 Bool()));     // lse
+
+TEST_P(SplitKVFp8PerTensor, DataTypeConfig)
+{
+    auto [_, seqlen_k, mask_str, num_splits, lse] = GetParam();
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "fp8 split-kv instances exist only on gfx1250";
+
+    auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::batch,
+                                               2,  // batch
+                                               16, // nhead
+                                               1,  // nhead_k
+                                               {1},
+                                               {seqlen_k},
+                                               128,
+                                               128,
+                                               0,     // seqlen_knew
+                                               {-1},  // seqlen_qpads
+                                               {-1},  // seqlen_kpads
+                                               {},    // q_eff_lens_per_batch
+                                               {},    // kv_eff_lens_per_batch
+                                               0,     // rotary_dim
+                                               true,  // i_perm
+                                               true,  // o_perm
+                                               0,     // scale_s
+                                               0,     // logits_soft_cap
+                                               true,  // is_v_rowmajor
+                                               lse,   // lse
+                                               0,     // page_block_size
+                                               false, // use_cache_batch_idx
+                                               "n",   // bias_str
+                                               0.0f,  // p_drop
+                                               0,     // drop_seed
+                                               0,     // drop_offset
+                                               false, // drop_prefs
+                                               mask_str,
+                                               "pt",
+                                               true, // is_rotary_interleaved
+                                               num_splits,
+                                               COMMON_ARGS);
+    ASSERT_EQ(result, fwd_result::success);
+}
+
+// sglang's 5D paged fp8 KV (kv_layout=vec5d) on the gfx1250 split-KV pingpong tile: page 64, a
+// 1152 wide block table whose spare entries name a NaN page, NaN (or finite) slots past every
+// sequence's end, one length per sequence.
+constexpr ck_tile::index_t kSglangBlockTableWidth = 1152;
+
+struct Paged5DCase
+{
+    std::string name;
+    int batch;
+    int nhead_k;
+    std::vector<int> seqlen_k; // one per sequence
+    int num_splits;
+    std::string mask;
+    fmha_fwd_kv_options kv{"vec5d", "", kSglangBlockTableWidth};
+    int pack_gqa = 1;
+    bool lse     = true;
+};
+
+static Paged5DCase Paged5D(std::string name,
+                           int batch,
+                           int nhead_k,
+                           std::vector<int> seqlen_k,
+                           int num_splits,
+                           std::string mask)
+{
+    return Paged5DCase{
+        std::move(name), batch, nhead_k, std::move(seqlen_k), num_splits, std::move(mask)};
+}
+
+template <typename Edit>
+static Paged5DCase With(Paged5DCase c, Edit&& edit)
+{
+    edit(c);
+    return c;
+}
+
+static std::vector<Paged5DCase> Paged5DCases()
+{
+    const std::string no_mask = "0";
+    const std::string swa     = "b:2047,0"; // gpt-oss sliding window
+    const std::vector<int> b4 = {1, 65, 2048, 9000};
+    std::vector<int> b32(32);
+    std::mt19937 gen(20261120);
+    std::uniform_int_distribution<int> seqlen_k(1, 9000);
+    for(auto& s : b32)
+        s = seqlen_k(gen);
+    const auto finite_tail = [](auto& c) { c.kv.tail_fill = "finite"; };
+    const auto fault       = [](auto& c) { c.kv.bt_fill = "fault"; };
+    const auto diff_linear = [](auto& c) { c.kv.diff_linear = true; };
+    return {
+        // one sequence: 129 over 3 splits ends a split inside the last page, 2080 ends a tile at
+        // 32 keys, 3000 starts the window mid page, ctx 1 over 32 splits leaves 31 empty
+        Paged5D("ctx1_ns1", 1, 1, {1}, 1, no_mask),
+        Paged5D("ctx63_ns2_swa", 1, 1, {63}, 2, swa),
+        Paged5D("ctx64_ns3", 1, 1, {64}, 3, no_mask),
+        Paged5D("ctx65_ns1", 1, 1, {65}, 1, no_mask),
+        Paged5D("ctx127_ns2_swa", 1, 1, {127}, 2, swa),
+        Paged5D("ctx129_ns3", 1, 1, {129}, 3, no_mask),
+        Paged5D("ctx1000_ns7_swa", 1, 1, {1000}, 7, swa),
+        Paged5D("ctx2049_ns8_swa", 1, 1, {2049}, 8, swa),
+        Paged5D("ctx2080_ns3", 1, 1, {2080}, 3, no_mask),
+        Paged5D("ctx3000_ns16_swa", 1, 1, {3000}, 16, swa),
+        Paged5D("ctx8191_ns32", 1, 1, {8191}, 32, no_mask),
+        Paged5D("ctx1_ns32", 1, 1, {1}, 32, no_mask),
+        Paged5D("ctx8191_ns0", 1, 1, {8191}, 0, no_mask), // the runner's split heuristic
+        // finite slots past the end: only the S mask keeps them out
+        With(Paged5D("ctx65_ns3_finite", 1, 1, {65}, 3, no_mask), finite_tail),
+        With(Paged5D("ctx3000_ns8_swa_finite", 1, 1, {3000}, 8, swa), finite_tail),
+        // batches, a length per sequence; ctx 0 between two others, ctx 1 reads table[0]
+        Paged5D("b4_ns8", 4, 1, b4, 8, no_mask),
+        Paged5D("b4_ns3_swa", 4, 1, b4, 3, swa),
+        Paged5D("b32_ns16", 32, 1, b32, 16, swa),
+        Paged5D("hk2_ns3", 2, 2, {65, 129}, 3, no_mask),
+        Paged5D("hk2_ns8_swa", 2, 2, {2049, 3000}, 8, swa),
+        Paged5D("ctx0_mixed_ns4", 3, 1, {70, 0, 1}, 4, no_mask),
+        // args.seqlen_k apart from the device lengths; a replay with longer lengths on the same
+        // workspace first, which reads the slots past s_k (finite here)
+        With(Paged5D("b4_host_sk1", 4, 1, b4, 8, no_mask), [](auto& c) { c.kv.host_seqlen_k = 1; }),
+        With(Paged5D("warm_b2_ns8", 2, 1, {65, 3000}, 8, swa),
+             [](auto& c) {
+                 c.kv.warm_seqlen_k = {4000, 9000};
+                 c.kv.tail_fill     = "finite";
+             }),
+        // spare entries name a page outside the pool
+        With(Paged5D("fault_ctx0_mixed", 3, 1, {70, 0, 1}, 4, no_mask), fault),
+        With(Paged5D("fault_ctx65_ns1", 1, 1, {65}, 1, no_mask), fault),
+        // packed Q heads off, LSE off
+        With(Paged5D("ctx1000_ns3_nopack", 1, 1, {1000}, 3, no_mask),
+             [](auto& c) { c.pack_gqa = 0; }),
+        With(Paged5D("ctx1000_ns3_nolse", 1, 1, {1000}, 3, no_mask),
+             [](auto& c) { c.lse = false; }),
+        // bitwise equal to the linear split kernel on the same bytes
+        With(Paged5D("diff_ctx129_ns3", 1, 1, {129}, 3, no_mask), diff_linear),
+        With(Paged5D("diff_b4_ns8_swa", 4, 1, b4, 8, swa), diff_linear),
+        With(Paged5D("diff_hk2_ns3", 2, 2, {2049, 3000}, 3, no_mask), diff_linear),
+    };
+}
+
+class SplitKVPaged5D : public TestWithParam<Paged5DCase>
+{
+};
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SplitKVPaged5D);
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         SplitKVPaged5D,
+                         ValuesIn(std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16>
+                                      ? Paged5DCases()
+                                      : std::vector<Paged5DCase>{}),
+                         [](const auto& test_info) { return test_info.param.name; });
+
+TEST_P(SplitKVPaged5D, DataTypeConfig)
+{
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "the 5D paged split-kv instances exist only on gfx1250";
+    const Paged5DCase& c = GetParam();
+
+    // stream_config.log_level_ 1 has the api print the kernel names
+    testing::internal::CaptureStdout();
+    const auto result = fmha_fwd_run<DataTypeConfig>(
+        mode_enum::batch,
+        c.batch,
+        16, // nhead
+        c.nhead_k,
+        {1},
+        c.seqlen_k,
+        128,
+        128,
+        0,     // seqlen_knew
+        {-1},  // seqlen_qpads
+        {-1},  // seqlen_kpads
+        {},    // q_eff_lens_per_batch
+        {},    // kv_eff_lens_per_batch
+        0,     // rotary_dim
+        true,  // i_perm
+        true,  // o_perm
+        0,     // scale_s
+        0,     // logits_soft_cap
+        true,  // is_v_rowmajor
+        c.lse, // lse
+        64,    // page_block_size
+        false, // use_cache_batch_idx
+        "n",   // bias_str
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        c.mask,
+        "pt",
+        true, // is_rotary_interleaved
+        c.num_splits,
+        "3",
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1, // do_validation
+        0, // init_sink
+        c.pack_gqa,
+        stream_config,
+        std::nullopt,
+        nullptr,
+        c.kv);
+    const std::string out = testing::internal::GetCapturedStdout();
+    ASSERT_EQ(result, fwd_result::success) << out;
+    // the 5D instance ran, through the split-kv api even with one split
+    EXPECT_NE(out.find("_b16x64x128x128x64x128_"), std::string::npos) << out;
+    EXPECT_NE(out.find("_pagedkv_nsink_pertensor_kv5d"), std::string::npos) << out;
+    if(c.kv.diff_linear)
+    {
+        EXPECT_NE(out.find("_npagedkv_nsink_pertensor, "), std::string::npos) << out;
+        EXPECT_NE(out.find("vec5d_diff:same"), std::string::npos) << out;
+    }
+}
+
+// The lookup one page past a sequence (the K of the trip after its last) must stay on the last
+// page, since sglang's row entries past a sequence may hold stale ids of other requests. An empty
+// sequence has no page to clamp to (table_index(0, 0) is -1): the pipeline leaves before its
+// first lookup.
+TEST(TestCkTileFmhaFwd, Paged5DNavigatorClamp)
+{
+    constexpr ck_tile::index_t kPage       = 64;
+    constexpr ck_tile::index_t kHdim       = 128;
+    constexpr ck_tile::index_t kPageStride = 2 * kPage * kHdim; // two kv heads per page
+    using Nav = ck_tile::Paged5DTileNavigator<ck_tile::fp8_t, ck_tile::fp8_t, kPage, kHdim>;
+    static_assert(Nav::table_index(0, 1) == 0 && Nav::table_index(1, 1) == 0 &&
+                  Nav::table_index(3, 3) == 2);
+    constexpr int32_t kStalePage = 0x7fffffff;
+    for(const ck_tile::index_t num_pages : {1, 2, 3, 18})
+    {
+        // the sequence's pages, then entries it does not own
+        std::vector<int32_t> row(num_pages + 3, kStalePage);
+        for(ck_tile::index_t j = 0; j < num_pages; ++j)
+            row[j] = 100 + 7 * j;
+        const Nav nav{row.data(), num_pages, nullptr, nullptr, kPageStride};
+        for(ck_tile::index_t i = 0; i < num_pages + 3; ++i)
+        {
+            const ck_tile::index_t last = std::min(i, num_pages - 1);
+            EXPECT_EQ(Nav::table_index(i, num_pages), last) << num_pages << " pages, page " << i;
+            EXPECT_EQ(nav.page_id(i), row[last]) << num_pages << " pages, page " << i;
+        }
+        // the offset K and V share is taken in 64 bits
+        EXPECT_EQ(nav.page_offset(kStalePage),
+                  static_cast<ck_tile::long_index_t>(kStalePage) * kPageStride);
+    }
+}
+
+// Direct fmha_fwd_splitkv() calls on a valid 5D decode (1 sequence of 64 keys, 16 Q heads over 1 K
+// head, one split). Paged5DReject changes one field the api must refuse; the accepted case shows
+// the refusals are not an api that refuses everything.
+struct Paged5DApi
+{
+    std::vector<std::unique_ptr<ck_tile::DeviceMem>> buffers;
+    fmha_fwd_splitkv_traits traits{};
+    fmha_fwd_splitkv_args args{};
+};
+
+static Paged5DApi MakePaged5DApi()
+{
+    using TypeConfig                    = FmhaFwdTypeConfig<FmhaFwdFp8Bf16>;
+    constexpr ck_tile::index_t kNheadQ  = 16;
+    constexpr ck_tile::index_t kHdim    = 128;
+    constexpr ck_tile::index_t kPage    = 64;
+    constexpr ck_tile::index_t kSeqlenK = kPage;
+
+    Paged5DApi api;
+    // a zeroed device buffer, filled from host when given
+    const auto device_buffer = [&](std::size_t bytes, const void* host = nullptr) {
+        api.buffers.push_back(std::make_unique<ck_tile::DeviceMem>(bytes));
+        api.buffers.back()->SetZero();
+        if(host != nullptr)
+            api.buffers.back()->ToDevice(host);
+        return api.buffers.back()->GetDeviceBuffer();
+    };
+    const int32_t block_table[1] = {0};
+    const int32_t seqlen_k[1]    = {kSeqlenK};
+    const float descale[3]       = {1.f, 1.f, 1.f}; // q, k, v
+    const mask_info mask         = mask_info::decode("0", 1, kSeqlenK);
+
+    auto& t               = api.traits;
+    t.hdim_q              = kHdim;
+    t.hdim_v              = kHdim;
+    t.data_type           = "fp8bf16";
+    t.is_group_mode       = false;
+    t.is_v_rowmajor       = true;
+    t.has_logits_soft_cap = false;
+    t.mask_type           = mask.type;
+    t.bias_type           = bias_enum::no_bias;
+    t.has_lse             = true;
+    t.qscale_type         = quant_scale_enum::pertensor;
+    t.kv_memory_layout    = ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::VECTORIZED_LAYOUT;
+
+    auto& a = api.args;
+    a.q_ptr = device_buffer(kNheadQ * kHdim * sizeof(TypeConfig::QDataType));
+    // one zero page, for K and V
+    a.k_ptr                    = device_buffer(kPage * kHdim * sizeof(TypeConfig::KDataType));
+    a.v_ptr                    = a.k_ptr;
+    a.lse_acc_ptr              = device_buffer(kNheadQ * sizeof(TypeConfig::LSEDataType));
+    a.o_acc_ptr                = device_buffer(kNheadQ * kHdim * sizeof(TypeConfig::OaccDataType));
+    a.lse_ptr                  = device_buffer(kNheadQ * sizeof(TypeConfig::LSEDataType));
+    a.o_ptr                    = device_buffer(kNheadQ * kHdim * sizeof(TypeConfig::ODataType));
+    a.block_table_ptr          = device_buffer(sizeof(block_table), block_table);
+    a.batch_stride_block_table = 1;
+    a.page_block_size          = kPage;
+    a.seqlen_k_ptr             = device_buffer(sizeof(seqlen_k), seqlen_k);
+    const auto* descale_dev    = static_cast<const float*>(device_buffer(sizeof(descale), descale));
+    a.q_descale_ptr            = descale_dev;
+    a.k_descale_ptr            = descale_dev + 1;
+    a.v_descale_ptr            = descale_dev + 2;
+
+    a.batch        = 1;
+    a.seqlen_q     = 1;
+    a.max_seqlen_q = 1;
+    a.seqlen_k     = kSeqlenK;
+    a.hdim_q       = kHdim;
+    a.hdim_v       = kHdim;
+    a.nhead_q      = kNheadQ;
+    a.nhead_k      = 1;
+    a.num_splits   = 1;
+    a.scale_s      = 1.f / std::sqrt(static_cast<float>(kHdim));
+    a.scale_p      = 1.f;
+    a.scale_o      = 1.f;
+
+    a.stride_q     = kHdim;
+    a.stride_k     = kHdim;
+    a.stride_v     = kHdim;
+    a.stride_o_acc = kHdim;
+    a.stride_o     = kHdim;
+    // K and V: the nhead / batch strides are the 5D pool's head / page strides
+    a.nhead_stride_q       = kHdim;
+    a.nhead_stride_k       = kPage * kHdim;
+    a.nhead_stride_v       = kPage * kHdim;
+    a.nhead_stride_lse     = 1;
+    a.nhead_stride_lse_acc = 1;
+    a.nhead_stride_o_acc   = kHdim;
+    a.nhead_stride_o       = kHdim;
+    a.batch_stride_q       = kNheadQ * kHdim;
+    a.batch_stride_k       = kPage * kHdim;
+    a.batch_stride_v       = kPage * kHdim;
+    a.batch_stride_lse     = kNheadQ;
+    a.batch_stride_lse_acc = kNheadQ;
+    a.batch_stride_o_acc   = kNheadQ * kHdim;
+    a.batch_stride_o       = kNheadQ * kHdim;
+    a.split_stride_lse_acc = 1;
+    a.split_stride_o_acc   = kHdim;
+
+    a.window_size_left  = mask.left;
+    a.window_size_right = mask.right;
+    a.sink_size         = mask.sink;
+    a.mask_type         = static_cast<ck_tile::index_t>(mask.type);
+    return api;
+}
+
+TEST(TestCkTileFmhaFwd, Paged5DApiAccepts)
+{
+    if(!std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16> || !ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "the 5D paged split-kv instances exist only for fp8bf16 on gfx1250";
+    auto api = MakePaged5DApi();
+    testing::internal::CaptureStdout();
+    const float rc =
+        fmha_fwd_splitkv(api.traits, api.args, ck_tile::stream_config{nullptr, false, 1});
+    const std::string out = testing::internal::GetCapturedStdout();
+    HIP_CHECK_ERROR(hipDeviceSynchronize());
+    ASSERT_GE(rc, 0) << out;
+    EXPECT_NE(out.find("_pertensor_kv5d"), std::string::npos) << out;
+}
+
+struct Paged5DRejectCase
+{
+    const char* name;
+    void (*edit)(fmha_fwd_splitkv_traits&, fmha_fwd_splitkv_args&);
+};
+
+static std::vector<Paged5DRejectCase> Paged5DRejectCases()
+{
+    using Layout = ck_tile::BlockAttentionKVCacheMemoryLayoutEnum;
+    // R1 - R11 break one precondition of the 5D api, R12 one dispatch condition of its instances,
+    // R14 leaves out a descale the kernel would read
+    return {
+        {"R1_fp16", [](auto& traits, auto&) { traits.data_type = "fp16"; }},
+        {"R2_hdim64",
+         [](auto& traits, auto& args) {
+             traits.hdim_q = 64;
+             traits.hdim_v = 64;
+             args.hdim_q   = 64;
+             args.hdim_v   = 64;
+         }},
+        {"R3_group", [](auto& traits, auto&) { traits.is_group_mode = true; }},
+        {"R4_sink", [](auto& traits, auto&) { traits.has_sink = true; }},
+        {"R5_no_scale",
+         [](auto& traits, auto&) { traits.qscale_type = quant_scale_enum::no_scale; }},
+        {"R6_no_table", [](auto&, auto& args) { args.block_table_ptr = nullptr; }},
+        {"R7_gappy", [](auto&, auto& args) { args.is_gappy = true; }},
+        {"R8_no_seqlen_k_ptr", [](auto&, auto& args) { args.seqlen_k_ptr = nullptr; }},
+        {"R9_page128", [](auto&, auto& args) { args.page_block_size = 128; }},
+        {"R10_batch_stride_v", [](auto&, auto& args) { args.batch_stride_v += 1; }},
+        {"R11_nhead_stride_v", [](auto&, auto& args) { args.nhead_stride_v += 1; }},
+        {"R12_logits", [](auto& traits, auto&) { traits.has_logits_soft_cap = true; }},
+        {"R12_bias", [](auto& traits, auto&) { traits.bias_type = bias_enum::elementwise_bias; }},
+        {"R12_squant", [](auto& traits, auto&) { traits.do_fp8_static_quant = true; }},
+        {"R12_col_v", [](auto& traits, auto&) { traits.is_v_rowmajor = false; }},
+        {"R12_32_rows", [](auto&, auto& args) { args.nhead_q = 32; }},
+        // a linear request on a page-64 table finds no 5D kernel either
+        {"R13_linear",
+         [](auto& traits, auto&) { traits.kv_memory_layout = Layout::LINEAR_LAYOUT; }},
+        {"R14_no_v_descale", [](auto&, auto& args) { args.v_descale_ptr = nullptr; }},
+    };
+}
+
+class Paged5DReject : public TestWithParam<Paged5DRejectCase>
+{
+};
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(Paged5DReject);
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         Paged5DReject,
+                         ValuesIn(std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16>
+                                      ? Paged5DRejectCases()
+                                      : std::vector<Paged5DRejectCase>{}),
+                         [](const auto& test_info) { return std::string(test_info.param.name); });
+
+TEST_P(Paged5DReject, DataTypeConfig)
+{
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "the 5D paged split-kv instances exist only on gfx1250";
+    auto api = MakePaged5DApi();
+    GetParam().edit(api.traits, api.args);
+    testing::internal::CaptureStdout();
+    const float rc =
+        fmha_fwd_splitkv(api.traits, api.args, ck_tile::stream_config{nullptr, false, 1});
+    const std::string out = testing::internal::GetCapturedStdout();
+    HIP_CHECK_ERROR(hipDeviceSynchronize());
+    // R13 may find a linear paged instance, but never the 5D one
+    if(std::string_view{GetParam().name} == "R13_linear" && 0 <= rc)
+        EXPECT_EQ(out.find("_kv5d"), std::string::npos) << out;
+    else
+        EXPECT_LT(rc, 0) << out;
+}
+
+// fmha_fwd_splitkv() on an fp8 decode given on the host: Q (16 heads x 128), K and V (one head,
+// seqlen_k x 128) and the per-tensor descales {q, k, v}. O (16 x 128) and the LSE (16) come back
+// as float, the kernel names in out.
+struct Fp8SplitResult
+{
+    float api_rc;
+    std::string out;
+    std::vector<float> o;
+    std::vector<float> lse;
+};
+
+static Fp8SplitResult RunFp8Split(const std::vector<ck_tile::fp8_t>& q,
+                                  const std::vector<ck_tile::fp8_t>& k,
+                                  const std::vector<ck_tile::fp8_t>& v,
+                                  const std::array<float, 3>& descale,
+                                  int num_splits,
+                                  const std::string& mask_str)
+{
+    using TypeConfig                  = FmhaFwdTypeConfig<FmhaFwdFp8Bf16>;
+    using ODataType                   = TypeConfig::ODataType;
+    using LSEDataType                 = TypeConfig::LSEDataType;
+    constexpr ck_tile::index_t kNhead = 16;
+    constexpr ck_tile::index_t kHdim  = 128;
+    const auto seqlen_k               = static_cast<ck_tile::index_t>(k.size() / kHdim);
+    const mask_info mask              = mask_info::decode(mask_str, 1, seqlen_k);
+
+    std::vector<std::unique_ptr<ck_tile::DeviceMem>> buffers;
+    // a device copy of host, or zeros
+    const auto device_buffer = [&](std::size_t bytes, const void* host = nullptr) {
+        buffers.push_back(std::make_unique<ck_tile::DeviceMem>(bytes));
+        buffers.back()->SetZero();
+        if(host != nullptr)
+            buffers.back()->ToDevice(host);
+        return buffers.back()->GetDeviceBuffer();
+    };
+    // NaN until the kernel writes them
+    ck_tile::DeviceMem o_buf(kNhead * kHdim * sizeof(ODataType));
+    ck_tile::DeviceMem lse_buf(kNhead * sizeof(LSEDataType));
+    o_buf.SetBytePattern(0xff);
+    lse_buf.SetBytePattern(0xff);
+
+    fmha_fwd_splitkv_traits t{};
+    t.hdim_q              = kHdim;
+    t.hdim_v              = kHdim;
+    t.data_type           = "fp8bf16";
+    t.is_group_mode       = false;
+    t.is_v_rowmajor       = true;
+    t.has_logits_soft_cap = false;
+    t.mask_type           = mask.type;
+    t.bias_type           = bias_enum::no_bias;
+    t.has_lse             = true;
+    t.qscale_type         = quant_scale_enum::pertensor;
+
+    // Q [head][d], K and V [key][d], the split workspace [head][split][d]
+    fmha_fwd_splitkv_args a{};
+    a.q_ptr       = device_buffer(q.size() * sizeof(ck_tile::fp8_t), q.data());
+    a.k_ptr       = device_buffer(k.size() * sizeof(ck_tile::fp8_t), k.data());
+    a.v_ptr       = device_buffer(v.size() * sizeof(ck_tile::fp8_t), v.data());
+    a.lse_acc_ptr = device_buffer(kNhead * num_splits * sizeof(TypeConfig::LSEDataType));
+    a.o_acc_ptr   = device_buffer(kNhead * num_splits * kHdim * sizeof(TypeConfig::OaccDataType));
+    a.lse_ptr     = lse_buf.GetDeviceBuffer();
+    a.o_ptr       = o_buf.GetDeviceBuffer();
+    const auto* descale_dev =
+        static_cast<const float*>(device_buffer(sizeof(descale), descale.data()));
+    a.q_descale_ptr = descale_dev;
+    a.k_descale_ptr = descale_dev + 1;
+    a.v_descale_ptr = descale_dev + 2;
+
+    a.batch        = 1;
+    a.seqlen_q     = 1;
+    a.max_seqlen_q = 1;
+    a.seqlen_k     = seqlen_k;
+    a.hdim_q       = kHdim;
+    a.hdim_v       = kHdim;
+    a.nhead_q      = kNhead;
+    a.nhead_k      = 1;
+    a.num_splits   = num_splits;
+    a.scale_s      = 1.f / std::sqrt(static_cast<float>(kHdim));
+    a.scale_p      = 1.f;
+    a.scale_o      = 1.f;
+
+    a.stride_q             = kHdim;
+    a.stride_k             = kHdim;
+    a.stride_v             = kHdim;
+    a.stride_o_acc         = kHdim;
+    a.stride_o             = kHdim;
+    a.nhead_stride_q       = kHdim;
+    a.nhead_stride_k       = seqlen_k * kHdim;
+    a.nhead_stride_v       = seqlen_k * kHdim;
+    a.nhead_stride_lse     = 1;
+    a.nhead_stride_lse_acc = num_splits;
+    a.nhead_stride_o_acc   = num_splits * kHdim;
+    a.nhead_stride_o       = kHdim;
+    a.batch_stride_q       = kNhead * kHdim;
+    a.batch_stride_k       = seqlen_k * kHdim;
+    a.batch_stride_v       = seqlen_k * kHdim;
+    a.batch_stride_lse     = kNhead;
+    a.batch_stride_lse_acc = kNhead * num_splits;
+    a.batch_stride_o_acc   = kNhead * num_splits * kHdim;
+    a.batch_stride_o       = kNhead * kHdim;
+    a.split_stride_lse_acc = 1;
+    a.split_stride_o_acc   = kHdim;
+
+    a.window_size_left  = mask.left;
+    a.window_size_right = mask.right;
+    a.sink_size         = mask.sink;
+    a.mask_type         = static_cast<ck_tile::index_t>(mask.type);
+
+    Fp8SplitResult r;
+    testing::internal::CaptureStdout();
+    r.api_rc = fmha_fwd_splitkv(t, a, ck_tile::stream_config{nullptr, false, 1});
+    r.out    = testing::internal::GetCapturedStdout();
+    HIP_CHECK_ERROR(hipDeviceSynchronize());
+
+    std::vector<ODataType> o(kNhead * kHdim);
+    std::vector<LSEDataType> lse(kNhead);
+    o_buf.FromDevice(o.data());
+    lse_buf.FromDevice(lse.data());
+    for(const ODataType x : o)
+        r.o.push_back(ck_tile::type_convert<float>(x));
+    r.lse.assign(lse.begin(), lse.end());
+    return r;
+}
+
+// fp8 P is 448 p, the e4m3 maximum at p = 1, so p of a row's largest score must be exactly 1
+// however large the scores: here all of them 448 x 448 x 128 x 2 x 2 / sqrt(128), so O is V.
+class SplitKVFp8LargeScores : public TestWithParam<std::tuple<bool, std::string>>
+{
+};
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SplitKVFp8LargeScores);
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         SplitKVFp8LargeScores,
+                         Combine(EnableTestIf(std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16>),
+                                 Values("0", "b")));
+
+TEST_P(SplitKVFp8LargeScores, DataTypeConfig)
+{
+    auto [_, mask_str] = GetParam();
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "fp8 split-kv instances exist only on gfx1250";
+    constexpr int kNhead     = 16;
+    constexpr int kHdim      = 128;
+    constexpr float kDescale = 2.f;
+    // The combine kernel weighs a split by exp(its LSE - the final LSE), which at these scores is
+    // rounded 1 up: two splits would weigh 2 / e in all, so seqlen_k 64 keeps one split.
+    constexpr int kSeqlenK = 64;
+
+    const auto fp8_max = ck_tile::numeric<ck_tile::fp8_t>::max();
+    const auto fp8_one = ck_tile::type_convert<ck_tile::fp8_t>(1.f);
+    const auto r       = RunFp8Split(std::vector<ck_tile::fp8_t>(kNhead * kHdim, fp8_max),
+                               std::vector<ck_tile::fp8_t>(kSeqlenK * kHdim, fp8_max),
+                               std::vector<ck_tile::fp8_t>(kSeqlenK * kHdim, fp8_one),
+                                     {kDescale, kDescale, 1.f},
+                               2, // num_splits
+                               mask_str);
+    ASSERT_GE(r.api_rc, 0) << r.out;
+
+    const double max_value = ck_tile::type_convert<float>(fp8_max);
+    const double score =
+        kDescale * kDescale / std::sqrt(static_cast<double>(kHdim)) * max_value * max_value * kHdim;
+    const double lse = score + std::log(static_cast<double>(kSeqlenK));
+    const auto bad_o =
+        std::count_if(r.o.begin(), r.o.end(), [](float x) { return !(std::abs(x - 1.f) < 1e-2f); });
+    EXPECT_EQ(bad_o, 0) << "O[0] = " << r.o[0] << r.out;
+    for(const float row_lse : r.lse)
+        EXPECT_NEAR(row_lse, lse, 1e-5 * lse) << r.out;
+}
+
+// A zero q * k descale, or one that underflows to 0, makes every score 0: attention is uniform,
+// so O is the mean of V and the LSE log(seqlen_k), with masked scores and the -inf initial row
+// max in the softmax.
+class SplitKVFp8ZeroScale
+    : public TestWithParam<std::tuple<bool, std::string, std::tuple<float, float>>>
+{
+};
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SplitKVFp8ZeroScale);
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         SplitKVFp8ZeroScale,
+                         Combine(EnableTestIf(std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16>),
+                                 Values("0", "b"),
+                                 Values(std::tuple{0.f, 1.f},
+                                        std::tuple{0x1p-80f, 0x1p-80f}))); // q, k descale
+
+TEST_P(SplitKVFp8ZeroScale, DataTypeConfig)
+{
+    auto [_, mask_str, qk_descale] = GetParam();
+    auto [q_descale, k_descale]    = qk_descale;
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "fp8 split-kv instances exist only on gfx1250";
+    constexpr int kNhead   = 16;
+    constexpr int kHdim    = 128;
+    constexpr int kSeqlenK = 1000;
+
+    // finite Q and K, and V of exact fp8 values that vary along the keys and d
+    std::vector<ck_tile::fp8_t> q(kNhead * kHdim);
+    std::vector<ck_tile::fp8_t> k(kSeqlenK * kHdim);
+    std::vector<ck_tile::fp8_t> v(kSeqlenK * kHdim);
+    for(std::size_t i = 0; i < q.size(); ++i)
+        q[i] = ck_tile::type_convert<ck_tile::fp8_t>(static_cast<float>(i % 7) - 3.f);
+    for(std::size_t i = 0; i < k.size(); ++i)
+    {
+        k[i] = ck_tile::type_convert<ck_tile::fp8_t>(static_cast<float>(i % 5) - 2.f);
+        v[i] = ck_tile::type_convert<ck_tile::fp8_t>(0.25f * static_cast<float>(i % 9));
+    }
+    const auto r = RunFp8Split(q, k, v, {q_descale, k_descale, 1.f}, 3, mask_str);
+    ASSERT_GE(r.api_rc, 0) << r.out;
+
+    std::vector<double> mean_v(kHdim, 0.);
+    for(int i_k = 0; i_k < kSeqlenK; ++i_k)
+        for(int d = 0; d < kHdim; ++d)
+            mean_v[d] += ck_tile::type_convert<float>(v[i_k * kHdim + d]) / kSeqlenK;
+    int bad_o = 0;
+    for(int h = 0; h < kNhead; ++h)
+        for(int d = 0; d < kHdim; ++d)
+            bad_o += !(std::abs(r.o[h * kHdim + d] - mean_v[d]) < 1e-2);
+    EXPECT_EQ(bad_o, 0) << "O[0] = " << r.o[0] << ", mean V[0] = " << mean_v[0] << r.out;
+    for(const float row_lse : r.lse)
+        EXPECT_NEAR(row_lse, std::log(static_cast<double>(kSeqlenK)), 1e-3) << r.out;
+}
+
 #endif // CK_TILE_FMHA_FWD_SPLITKV_API
 
 #if CK_TILE_FMHA_FWD_APPENDKV_API
