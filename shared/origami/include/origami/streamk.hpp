@@ -63,10 +63,6 @@ ORIGAMI_EXPORT reduction_t select_reduction(const problem_t& problem,
 /**
  * @brief Based on the provided kernel config, select the best grid dimension.
  *
- * For grid_selection_t::k_split_aware, the reduction strategy is taken from
- * config.reduction_strategy if it is set (not reduction_t::none). Otherwise it is chosen
- * with select_reduction().
- *
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param config Kernel configuration.
@@ -77,6 +73,23 @@ ORIGAMI_EXPORT size_t select_grid_size(const problem_t& problem,
                         const hardware_t& hardware,
                         const config_t& config,
                         grid_selection_t algorithm);
+
+/**
+ * @brief Like the public select_grid_size(), but the reduction strategy is supplied by the caller.
+ *
+ * Library-internal: intentionally not exported from liborigami, so it is not part of the
+ * public ABI.
+ *
+ * For grid_selection_t::k_split_aware the grid is sized for @p reduction and
+ * config.reduction_strategy is ignored. This lets a caller that already chose a strategy
+ * (e.g. with select_reduction()) get a grid that is consistent with it. Other algorithms
+ * ignore @p reduction.
+ */
+size_t select_grid_size(const problem_t& problem,
+                        const hardware_t& hardware,
+                        const config_t& config,
+                        grid_selection_t algorithm,
+                        reduction_t reduction);
 
 /**
  * @brief Pick the SK3-vs-SK4 sub-path for a StreamK=5 hybrid kernel.

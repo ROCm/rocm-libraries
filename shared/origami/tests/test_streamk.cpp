@@ -478,14 +478,13 @@ TEST_CASE("Origami streamk: select_grid_size reduction strategy", "[streamk]") {
     REQUIRE(origami::streamk::select_grid_size(problem, hardware, config, algo) == 200);
   }
 
-  SECTION("an unset strategy is chosen with select_reduction()") {
-    // select_reduction() picks parallel for this problem.
+  SECTION("an unset strategy behaves like tree in the public select_grid_size()") {
+    // select_reduction() would pick parallel for this problem, but the public entry point
+    // only honors config.reduction_strategy; none means "not parallel".
     REQUIRE(origami::streamk::select_reduction(problem, hardware, config, algo) ==
             origami::reduction_t::parallel);
     config.reduction_strategy = origami::reduction_t::none;
-    REQUIRE(origami::streamk::select_grid_size(problem, hardware, config, algo) == 250);
-    config.reduction_strategy = origami::reduction_t::parallel;
-    REQUIRE(origami::streamk::select_grid_size(problem, hardware, config, algo) == 250);
+    REQUIRE(origami::streamk::select_grid_size(problem, hardware, config, algo) == 200);
   }
 
   SECTION("other algorithms ignore the reduction strategy") {
@@ -498,5 +497,46 @@ TEST_CASE("Origami streamk: select_grid_size reduction strategy", "[streamk]") {
       config.reduction_strategy = origami::reduction_t::tree;
       REQUIRE(origami::streamk::select_grid_size(problem, hardware, config, a) == with_parallel);
     }
+  }
+}
+
+TEST_CASE("Origami streamk: compute_launch_parameters ignores a preset reduction_strategy",
+          "[streamk]") {
+  // compute_launch_parameters sizes the grid for the strategy select_reduction() picks and
+  // reports that same strategy, whatever config.reduction_strategy was preset to.
+  auto base                      = make_config(128, 128, 64);
+  base.stream_k                  = 5;
+  base.grid_selection            = origami::grid_selection_t::k_split_aware;
+  base.workspace_size            = 1ull << 28;
+  base.workspace_size_per_elem_c = 4;
+
+  const auto launch = [](const origami::problem_t& p,
+                         const origami::hardware_t& h,
+                         origami::config_t c,
+                         origami::reduction_t preset) {
+    c.reduction_strategy = preset;
+    return origami::gemm::compute_launch_parameters(p, h, c, c.grid_selection);
+  };
+
+  SECTION("preset parallel with a small K does not divide by zero") {
+    const auto problem  = make_problem(1024, 1024, 64);
+    const auto hardware = make_hardware(950);
+    const auto expected = launch(problem, hardware, base, origami::reduction_t::none);
+    REQUIRE(std::get<0>(expected) == origami::reduction_t::tree);
+    REQUIRE(std::get<1>(expected) == 64);
+
+    const auto result = launch(problem, hardware, base, origami::reduction_t::parallel);
+    REQUIRE(result == expected);
+  }
+
+  SECTION("preset tree with a large K keeps the grid and reported strategy consistent") {
+    const auto problem  = make_problem(1, 1, 65536);
+    const auto hardware = make_hardware(942);
+    const auto expected = launch(problem, hardware, base, origami::reduction_t::none);
+    REQUIRE(std::get<0>(expected) == origami::reduction_t::parallel);
+    REQUIRE(std::get<1>(expected) == 128);
+
+    const auto result = launch(problem, hardware, base, origami::reduction_t::tree);
+    REQUIRE(result == expected);
   }
 }

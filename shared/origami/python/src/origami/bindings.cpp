@@ -372,7 +372,10 @@ NB_MODULE(origami, m) {
         &origami::streamk::select_reduction,
         "Select best StreamK reduction strategy");
   m.def("select_grid_size",
-        &origami::streamk::select_grid_size,
+        static_cast<size_t (*)(const origami::problem_t&,
+                               const origami::hardware_t&,
+                               const origami::config_t&,
+                               origami::grid_selection_t)>(&origami::streamk::select_grid_size),
         "Select best grid size for the given configuration");
 
   // GEMM functions [gemm.cpp] — ordered to match gemm.cpp implementation

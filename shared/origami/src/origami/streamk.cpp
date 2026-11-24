@@ -367,11 +367,13 @@ static size_t correct_sk_grid_for_partial_tiles(size_t sk_grid,
 //        the physical N_CU), else 0 ("no genuine cap / use all CUs"). Computed
 //        by select_grid_size so this file-local helper keeps its original
 //        max_cus-driven grid-cap and occupancy-multiplier semantics.
+// @param reduction Reduction strategy the grid is sized for. The caller chooses it, so this
+//        helper never reads config.reduction_strategy.
 size_t grid_k_split_aware(const problem_t& problem,
-                          const hardware_t& hardware,
                           const config_t& config,
                           size_t cu_count,
-                          size_t cu_budget) {
+                          size_t cu_budget,
+                          reduction_t reduction) {
   size_t tiles = compute_number_of_output_tiles(
       config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
 
@@ -419,12 +421,7 @@ size_t grid_k_split_aware(const problem_t& problem,
     // constexpr int MaxTilesForParallel = 16;
     constexpr int MinItersPerCU = 8;
 
-    const reduction_t reduction_strategy =
-        (config.reduction_strategy != reduction_t::none)
-            ? config.reduction_strategy
-            : select_reduction(problem, hardware, config, grid_selection_t::k_split_aware);
-
-    if (reduction_strategy == reduction_t::parallel) {
+    if (reduction == reduction_t::parallel) {
       size_t virt_cu_count = cu_count;
       // TODO check if using occupancy info makes workspace too large
       // if (occupancy > 1)
@@ -465,6 +462,15 @@ size_t select_grid_size(const problem_t& problem,
                         const hardware_t& hardware,
                         const config_t& config,
                         grid_selection_t algorithm) {
+  // Public entry point: an unset (none) config.reduction_strategy means "not parallel".
+  return select_grid_size(problem, hardware, config, algorithm, config.reduction_strategy);
+}
+
+size_t select_grid_size(const problem_t& problem,
+                        const hardware_t& hardware,
+                        const config_t& config,
+                        grid_selection_t algorithm,
+                        reduction_t reduction) {
   // Single source of truth for the CU budget: problem.num_cus (0 or >= physical
   // N_CU means "use all CUs").
   size_t cu_count = resolve_num_cus(problem.num_cus, hardware.N_CU);
@@ -492,7 +498,7 @@ size_t select_grid_size(const problem_t& problem,
       return streamk::grid_analytical(problem, hardware, config, 10);
 
     case grid_selection_t::k_split_aware:
-      return streamk::grid_k_split_aware(problem, hardware, config, cu_count, cu_budget);
+      return streamk::grid_k_split_aware(problem, config, cu_count, cu_budget, reduction);
 
     case grid_selection_t::number_of_cus:
     default: return cu_count;

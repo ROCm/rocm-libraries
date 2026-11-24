@@ -9,5 +9,4 @@
 ### Changed
 
 * `rank_configs()`, `select_config()` and `select_topk_configs()` are now built on `argsort_configs()`. Ranking results are unchanged, but only the returned configs are copied rather than every candidate.
-* `streamk::select_grid_size()` with `grid_selection_t::k_split_aware` now picks the reduction strategy itself, the same way `streamk::select_reduction()` does, when `config.reduction_strategy` is `reduction_t::none` (the default). A `config_t` that sets `reduction_strategy` is used as before. Behavior change: for a default `config_t`, `none` used to behave like "not parallel"; large-K, low-tile problems may now get the parallel-reduction grid.
 * `datatype_to_bits()` is now an `inline constexpr noexcept` function defined in `origami/types.hpp`, and `data_type_to_bytes()` is now `inline constexpr noexcept`. `datatype_to_bits()` is no longer exported from the Origami library (it no longer has `ORIGAMI_EXPORT`), so it is not an exported symbol of `liborigami`. Code that includes `origami/types.hpp` is unaffected. The Python binding is unchanged.
