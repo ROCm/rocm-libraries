@@ -74,7 +74,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Improved CK Tile FMHA forward and backward performance with dropout on gfx1250 by computing the Philox random number generator's products with 32-bit multiplies.
 * Improved fp16 and bf16 CK Tile FMHA forward performance on gfx11, gfx1200, and gfx1201 by retuning the default tiles, using separate K and V LDS buffers, reducing register pressure for padded head dimensions, and restoring the faster software bf16 conversion.
 * Improved grouped convolution forward performance on gfx1250 with wavelet direct-load instances that load the weight tile with TDM and synchronize the compute waves with named barriers, for fp16 and bf16 2D (NHWGC) and 3D (NDHWGC) convolutions.
-* Improved CK Tile TDM GEMM performance on gfx1250 for tile shapes that lost their LDS padding to avoid wrong results, such as tiles whose LDS rows are not a power of two, by padding them at an interval that divides the LDS row.
+* Improved CK Tile TDM GEMM performance on gfx1250 by restoring LDS padding for affected tile shapes, such as those with non-power-of-two LDS rows. The padding interval now evenly divides the LDS row, preventing incorrect results.
 
 ### Resolved issues
 
