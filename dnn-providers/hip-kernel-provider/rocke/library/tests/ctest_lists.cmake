@@ -253,6 +253,8 @@ endif()
 # Quick runs this entry unsplit on one CI shard, so its TIMEOUT holds the S2
 # headroom of TESTING.md 5.0.3 over the whole run: about 145 s from an install
 # on a loaded host, timed with ctest -R '^rocke_library_attention_cpu_pytest$'.
+# From a source tree at the head of the launch-time strides change the run takes
+# about 210 s on a loaded host, which the strided tests lengthen.
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_bwd_gemm.py"
     "tests/library/tests/test_attention_bwd_body.py"
@@ -338,7 +340,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_cpu_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
        "  ENVIRONMENT \"\${_rocke_library_attention_cpu_pytest_environment}\"\n"
-       "  TIMEOUT 360)\n")
+       "  TIMEOUT 420)\n")
 
 # The A/B harness driver tests (test_attention_dense_strided_ab_dryrun.py) run the
 # driver in a subprocess that exports the rocKE source tree, which the installed
