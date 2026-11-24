@@ -151,6 +151,24 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
                                                  static_cast<double>(hardware.simds_per_cu()) /
                                                  static_cast<double>(hardware_t::OCCUPANCY_SIMDS),
                                              tile_schedule, num_wgs, active_cus);
+  // A grid of fewer workgroups than CUs does not leave SIMDs idle while a workgroup has waves
+  // for them: the workgroups spread over the WGPs, and one that is alone on its WGP runs its
+  // waves on all of its hardware_t::OCCUPANCY_SIMDS SIMDs, two CUs' worth (measured: 20
+  // workgroups on the 40 CUs of gfx1151 take the time of 40 with the same work).  The
+  // workgroups then count as a fraction per CU and keep every CU they can fill active.
+  if (heuristic_defaults_t::has_measured_tile_terms(hardware.arch) && tile_schedule != hybrid_mode_t::dynamic &&
+      num_wgs < n_cu) {
+    const double waves = static_cast<double>(std::max(tparams(config).wave_group_m, 1) *
+                                             std::max(tparams(config).wave_group_n, 1) *
+                                             std::max(tparams(config).local_split_u, 1));
+    const double spread = static_cast<double>(hardware.simds_per_cu()) /
+                          std::min(waves, static_cast<double>(hardware_t::OCCUPANCY_SIMDS));
+    const double per_cu = std::clamp(static_cast<double>(num_wgs) / static_cast<double>(n_cu), std::min(spread, 1.0), 1.0);
+    if (per_cu < resident_wgs) {
+      resident_wgs = per_cu;
+      active_cus   = std::min<size_t>(n_cu, static_cast<size_t>(std::llround(static_cast<double>(num_wgs) / per_cu)));
+    }
+  }
   mem_bw_limited       = compute_mem_bw_from_occupancy(hardware, active_cus);
   write_mem_bw_limited = compute_mem_bw_from_occupancy(hardware, num_output_tiles);
 
@@ -3449,13 +3467,21 @@ double compute_total_latency(const problem_t& problem,
   if (w4 && config.stream_k > 0 && context.num_wgs < context.num_output_tiles
       && context.num_wgs <= usable_cus)
     timesteps = static_cast<double>(context.num_output_tiles) / static_cast<double>(context.num_wgs);
+  // A timestep is the time of a tile on one CU.  Workgroups that take more than a CU each (a
+  // fraction resident per CU) run a tile that much faster, in as many batches as their
+  // resident slots need.
+  if (heuristic_defaults_t::has_measured_tile_terms(hardware.arch) && context.resident_wgs < 1.0 &&
+      context.num_wgs <= usable_cus) {
+    const double slots = static_cast<double>(usable_cus) * static_cast<double>(std::max(config.occupancy, 1)) *
+                         static_cast<double>(hardware.simds_per_cu()) / static_cast<double>(hardware_t::OCCUPANCY_SIMDS);
+    timesteps *= context.resident_wgs * std::ceil(static_cast<double>(context.num_wgs) / std::max(slots, 1.0));
+  }
   double total_latency             = L_timestep * timesteps;
 
-  // W4A16 Stream-K partial tiles: the workgroup that finishes a tile waits for, reads and adds
-  // the MT_M x MT_N f32 partial of every other workgroup that worked on it, on the critical
-  // path. A tile split over s workgroups has s - 1 partials; a grid that shares tiles unevenly
-  // has one. Without it, splitting a few large tiles' K over every CU looked as fast as
-  // splitting many small ones, and was measured up to 2.3x slower.
+  // W4A16 Stream-K partial tiles: the workgroup that finishes a tile reads and adds the
+  // MT_M x MT_N f32 partial of every other workgroup that worked on it, on the critical path.
+  // A tile split over s workgroups has s - 1 partials; a grid that shares tiles unevenly has
+  // one.
   if (w4 && config.stream_k > 0 && context.num_wgs != context.num_output_tiles) {
     const double tiles    = static_cast<double>(context.num_output_tiles);
     const double wgs      = static_cast<double>(context.num_wgs);
