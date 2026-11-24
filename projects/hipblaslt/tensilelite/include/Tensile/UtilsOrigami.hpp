@@ -38,6 +38,20 @@
 namespace TensileLite
 {
 
+    /**
+     * Bytes from one stored vector of a matrix operand to the next (its leading dimension times
+     * its element size), for origami::problem_t::a_stride_bytes and b_stride_bytes. 0 for a
+     * tensor without a second dimension.
+     */
+    template <typename Tensor>
+    inline std::size_t operandStrideBytes(const Tensor& tensor)
+    {
+        const auto& strides = tensor.strides();
+        return strides.size() > 1
+                   ? static_cast<std::size_t>(static_cast<double>(strides[1]) * tensor.elementBytes())
+                   : 0;
+    }
+
     inline origami::data_type_t datatypeToAnalyticalDatatype(rocisa::DataType type)
     {
         switch(type)

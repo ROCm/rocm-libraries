@@ -7242,6 +7242,8 @@ namespace TensileLite
                         .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
                         .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
                         .mi_dtype    = datatypeToAnalyticalDatatype(problem.computeInputTypeA()),
+                        .a_stride_bytes = operandStrideBytes(problem.a()),
+                        .b_stride_bytes = operandStrideBytes(problem.b()),
                     };
                     if(Debug::Instance().printPropertyEvaluation() && self.sizeMapping.CUOccupancy <= 0)
                     {

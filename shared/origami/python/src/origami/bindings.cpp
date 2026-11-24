@@ -259,7 +259,9 @@ NB_MODULE(origami, m) {
       .def_rw("d_dtype", &origami::problem_t::d_dtype)
       .def_rw("mi_dtype", &origami::problem_t::mi_dtype)
       .def_rw("a_mx_block_size", &origami::problem_t::a_mx_block_size)
-      .def_rw("b_mx_block_size", &origami::problem_t::b_mx_block_size);
+      .def_rw("b_mx_block_size", &origami::problem_t::b_mx_block_size)
+      .def_rw("a_stride_bytes", &origami::problem_t::a_stride_bytes)
+      .def_rw("b_stride_bytes", &origami::problem_t::b_stride_bytes);
 
   nanobind::class_<origami::staggerU_t>(m, "staggerU_t")
       .def(nanobind::init<>())

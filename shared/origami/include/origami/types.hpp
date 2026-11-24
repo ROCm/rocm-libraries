@@ -783,6 +783,11 @@ struct problem_t {
   /// MX block size.
   std::size_t a_mx_block_size = 0;
   std::size_t b_mx_block_size = 0;
+
+  /// Bytes from one stored vector of A (B) to the next: lda (ldb) times the element size.
+  /// 0: the stride of an unpadded matrix.
+  std::size_t a_stride_bytes = 0;
+  std::size_t b_stride_bytes = 0;
 };
 
 /**

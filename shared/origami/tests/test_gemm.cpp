@@ -256,6 +256,9 @@ static origami::problem_t make_w4a16_decode_problem(size_t rows, size_t tokens, 
   auto problem    = make_problem(rows, tokens, k);
   problem.a_dtype = origami::data_type_t::Int4;
   problem.b_dtype = problem.c_dtype = problem.d_dtype = problem.mi_dtype = mi_dtype;
+  // Weight rows padded to an odd multiple of 128 B, as they are measured: rows a whole number
+  // of pages apart (K a multiple of 8192) would stream at the rate of one CU.
+  problem.a_stride_bytes = ((k / 2) + 255) / 256 * 256 + 128;
   return problem;
 }
 
@@ -3568,4 +3571,34 @@ TEST_CASE("GEMM: gfx115x runs kernels of matrix instructions at their own clock"
   const double dot2_29 = origami::gemm::compute_total_latency(problem, device, dot2) - launch;
   const double dot2_21 = origami::gemm::compute_total_latency(problem, pinned, dot2) - launch;
   REQUIRE(dot2_29 / 2.9 < dot2_21 / 2.1);
+}
+
+TEST_CASE("GEMM: vectors a whole number of pages apart stream slowly when read in step", "[gemm][gfx1151]") {
+  const auto hardware = origami::hardware_t::get_hardware_for_arch(
+      origami::hardware_t::architecture_t::gfx1151, 40, 65536, 786432, 2 << 20, 2900000);
+  // 64 weight rows x 1024 tokens: the activations (B) are what the kernel streams.
+  auto problem    = make_problem(64, 1024, 2048);
+  problem.a_dtype = origami::data_type_t::Int4;
+  auto config     = make_config(32, 64, 64, 16, 16, 16, false, 1, 8, 0, 0, 3);
+  config.workspace_size            = std::numeric_limits<size_t>::max() / 2;
+  config.workspace_size_per_elem_c = 4;
+  origami::tensile_params_t t;
+  t.wave_group_m = 2;
+  t.wave_group_n = 2;
+  config.backend = t;
+  auto latency = [&](size_t b_stride_bytes, size_t launch_grid) {
+    auto p           = problem;
+    p.b_stride_bytes = b_stride_bytes;
+    auto c           = config;
+    c.launch_grid    = launch_grid;
+    return origami::gemm::compute_total_latency(p, hardware, c);
+  };
+  const size_t tiles = 2 * 16;
+  // K = 2048 bf16 is 4096 B a vector: one workgroup per tile reads the same offset of every
+  // vector at a time, and they do not spread over the memory.  Unpadded (0) is that stride.
+  REQUIRE(latency(4096, tiles) > 1.5 * latency(4096 - 128, tiles));
+  REQUIRE(latency(0, tiles) == latency(4096, tiles));
+  REQUIRE(latency(8192, tiles) == latency(4096, tiles));
+  // A grid that shares the tiles has its workgroups at different K.
+  REQUIRE(latency(4096, 20) == latency(4096 - 128, 20));
 }
