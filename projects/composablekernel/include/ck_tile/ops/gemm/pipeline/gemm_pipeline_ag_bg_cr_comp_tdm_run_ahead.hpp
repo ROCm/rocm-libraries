@@ -116,7 +116,7 @@ struct GemmPipelineAgBgCrCompTDMRunAhead
     // map the wave id over MWarps x NWarps only and nothing reduces partial sums across K waves.
     // A wave id past MWarps x NWarps would get an M warp index of MWarps or more: it would read A
     // past its LDS slot and own C rows outside the block tile. It would still reach every
-    // StepBarrier, so the result is silent corruption, not a hang.
+    // step barrier, so the result is silent corruption, not a hang.
     static_assert(BlockGemmShape::BlockWarps::at(number<2>{}) == 1,
                   "BlockWarps[2] (K waves) must be 1: BlockGemm distributes waves over M and N "
                   "only and the pipeline has no K-wave reduction");
@@ -283,16 +283,18 @@ struct GemmPipelineAgBgCrCompTDMRunAhead
             };
 
             // Makes step `step` (in `slot`) readable by every wave and refills the slot it frees.
-            // Every wave must already have ISSUED all of its LDS reads of step - 1: the drain below
-            // completes them, so after the barrier the slot step + RunAhead reuses (last read at
+            // Every wave must already have ISSUED all of its LDS reads of step - 1: the barrier
+            // drains them, so after it the slot step + RunAhead reuses (last read at
             // step + RunAhead - NumSlots <= step - 1) is free.
             auto handoff = [&](auto slot, index_t step) {
                 if(fills_a || fills_b)
                     retire(max(min(RunAhead - 1, num_loop - 1 - step), 0));
-                s_wait_dscnt<0>();
-                StepBarrier();
+                // Its fences cover LDS accesses only, not tensor transfers: the retire above is
+                // what publishes the filled slot.
+                block_sync_lds();
                 // Every wave's first loads go out before a filling wave's descriptor arithmetic.
                 prefetch_first(slot);
+                __builtin_amdgcn_sched_barrier(0);
                 if(step + RunAhead < num_loop)
                     fill(number<(slot.value + RunAhead) % NumSlots>{});
             };
@@ -303,6 +305,10 @@ struct GemmPipelineAgBgCrCompTDMRunAhead
                     fill(s);
             });
 
+            // Always taken: the host rejects K <= 0 (UniversalGemmKernel::IsTdmArgumentSupported),
+            // so num_loop >= 1. Kept anyway because removing it, or replacing it with
+            // __builtin_assume(num_loop > 0), changes register allocation in the K loop below and
+            // adds s_set_vgpr_msb instructions.
             if(num_loop > 0)
             {
                 handoff(number<0>{}, 0);
@@ -378,11 +384,9 @@ struct GemmPipelineAgBgCrCompTDMRunAhead
                     __builtin_amdgcn_sched_barrier(0);
                     block_gemm(c_block_tile, a_tiles[i.value % 2], b_tiles[i.value % 2]);
                 });
+                // The next step barrier may hand this slot to a fill; it drains these reads first.
                 block_gemm(
                     c_block_tile, a_tiles[(KSubTileNum - 1) % 2], b_tiles[(KSubTileNum - 1) % 2]);
-
-                // The next StepBarrier may hand this slot to a fill: retire its reads first.
-                s_wait_dscnt<0>();
             };
 
             // Prime: the first RunAhead steps go out before any barrier.
@@ -402,7 +406,7 @@ struct GemmPipelineAgBgCrCompTDMRunAhead
                         if(fills_a || fills_b)
                             retire(min(RunAhead - 1, num_loop - 1 - k));
 
-                        StepBarrier();
+                        block_sync_lds();
 
                         if(k + RunAhead < num_loop)
                             fill(number<(slot.value + RunAhead) % NumSlots>{});
@@ -415,7 +419,7 @@ struct GemmPipelineAgBgCrCompTDMRunAhead
         }
 
         // The epilogue stages C through the same LDS: nobody may still be reading the ring.
-        StepBarrier();
+        block_sync_lds();
 
         return c_block_tile;
 #else
@@ -428,20 +432,6 @@ struct GemmPipelineAgBgCrCompTDMRunAhead
     }
 
     private:
-    // A fenced workgroup barrier, built like __syncthreads(). The release fence makes the barrier
-    // wait for this wave's own LDS reads of the slot about to be reused; the acquire fence keeps
-    // the compiler from hoisting the next slot's LDS reads above the barrier. Neither covers a
-    // tensor transfer, which is why a filling wave retires its fills before arriving.
-    CK_TILE_DEVICE static void StepBarrier()
-    {
-#if defined(__gfx125__)
-        __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
-        __builtin_amdgcn_s_barrier_signal(-1);
-        __builtin_amdgcn_s_barrier_wait(-1);
-        __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
-#endif
-    }
-
     // One operand's fill: the DRAM window it walks and the LDS copy window of every slot.
     // Calling it with a slot issues one TENSOR_LOAD_TO_LDS (NumCoord == 1 on the non-gather
     // path, tile_window.hpp) and advances the DRAM window by one K block.
