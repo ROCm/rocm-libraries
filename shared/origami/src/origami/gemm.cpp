@@ -2850,8 +2850,14 @@ double compute_tile_latency(const problem_t& problem,
   // L_main — steady-state main iters with load + compute overlap.  Falls
   // back to additive (non-overlapped) mode when pgr <= 1.  On gfx1151 a PGR 1 kernel was
   // measured to overlap as well (full kernel time = compute-only time).
+  // Where the tile terms are measured, so do the kernels of matrix instructions without
+  // prefetch: per K iteration the W4A16 WMMA kernels with PGR 0 take the time of their
+  // instructions, alone on a WGP as with another workgroup on it (their operands go through
+  // LDS, which holds an iteration while the next loads).  Only a kernel without that stage,
+  // dot2, waits for its loads before it works.
+  const bool lds_staged = wg_costs && !masked_tail;
   const bool additive_iter =
-      pgr <= 0 || (pgr == 1 && hardware.arch != hardware_t::architecture_t::gfx1151);
+      (pgr <= 0 || (pgr == 1 && hardware.arch != hardware_t::architecture_t::gfx1151)) && !lds_staged;
   const double L_mem_stream         = L_mem * static_cast<double>(num_main_iters);
   const double L_compute_stream     = L_compute * static_cast<double>(num_main_iters);
   const double L_compute_stream_eff = L_compute_stream * compute_tile_penalty;
