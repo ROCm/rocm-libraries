@@ -1,5 +1,6 @@
 # Branches merged, in this order, into users/jascampb/uhd-xengine-eval-integration by
 # rebuild_integration.sh. One remote branch name per line; '#' starts a comment.
-# Everything else has merged to develop (2026-11-21); develop selects ModeA by default (#15720).
-users/jascampb/uhd-initial-provider-integration
+# The first-release engines are on develop (2026-11-24), which selects ModeA by default (#15720);
+# the corpus generator comes from the SDPA corpus coverage branch (#16583).
+users/jascampb/sdpa-corpus-coverage
 users/jascampb/uhd-xengine-eval-harness
