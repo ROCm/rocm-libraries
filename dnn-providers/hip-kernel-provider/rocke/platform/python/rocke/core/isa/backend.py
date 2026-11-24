@@ -290,14 +290,20 @@ class ISABackend:
             )
         a = forms[0].operand(lowerer, op, "a")
         b = forms[1].operand(lowerer, op, "b")
+        # EXPERIMENT (uncommitted): scale selectors from the op's scale_sel_a /
+        # scale_sel_b attributes (default 0): which lane half (0-15 or 16-31)
+        # holds the 16 rows' scale words.
+        sel_a, sel_b = (int(op.attrs.get(k, 0)) for k in ("scale_sel_a", "scale_sel_b"))
+        if sel_a not in (0, 1) or sel_b not in (0, 1):
+            raise ValueError(f"{name}: scale_sel_a / scale_sel_b must be 0 or 1")
         lowerer._need(decl_key)
         lowerer._current().emit(
             f"  {op.result.name} = call <8 x float> @{intrinsic}("
             f"i32 {fmt0}, {signature.matrix_types[0]} {a}, "
             f"i32 {fmt1}, {signature.matrix_types[1]} {b}, "
             f"i16 0, <8 x float> {lowerer._operand(c)}, "
-            f"i32 0, i32 {spec.scale_formats[0]}, {scale_ty} {lowerer._operand(a_scale)}, "
-            f"i32 0, i32 {spec.scale_formats[1]}, {scale_ty} {lowerer._operand(b_scale)}, "
+            f"i32 {sel_a}, i32 {spec.scale_formats[0]}, {scale_ty} {lowerer._operand(a_scale)}, "
+            f"i32 {sel_b}, i32 {spec.scale_formats[1]}, {scale_ty} {lowerer._operand(b_scale)}, "
             f"i1 false, i1 false)"
         )
 

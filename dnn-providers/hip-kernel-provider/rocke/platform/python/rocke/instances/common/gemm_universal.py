@@ -3495,7 +3495,17 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
         ks = block_k // 128
 
+        # EXPERIMENT: ROCKE_EXP_MX_SCALE_PACK=1 (MX, swizzled scales): two repeats
+        # share a scale register: lanes 0-15 hold repeat i, lanes 16-31 repeat
+        # i + R/2, and each WMMA picks its half with the scale selector. One
+        # 128-bit read per operand per K-atom; half the scale VGPRs.
+        scale_pack = _mx and _os_ra.environ.get("ROCKE_EXP_MX_SCALE_PACK") == "1"
+        if scale_pack and not (swz and mfmas_m == mfmas_n == 8):
+            raise ValueError("ROCKE_EXP_MX_SCALE_PACK needs ROCKE_EXP_MX_SWZ=1 and 8 repeats")
+        sc_h = mfmas_m // 2 if scale_pack else mfmas_m  # scale words per operand
         rowmap = _os_ra.environ.get("ROCKE_EXP_MX_ROWMAP") == "1"
+        if scale_pack and rowmap:
+            raise ValueError("ROCKE_EXP_MX_SCALE_PACK does not support ROCKE_EXP_MX_ROWMAP")
         if rowmap and not _mx:
             raise ValueError("ROCKE_EXP_MX_ROWMAP needs ROCKE_EXP_MX")
         if rowmap:
@@ -3571,6 +3581,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             row = b.const_i32((p * ks if _prefetch else 0) + kk)
 
             def words(smem, mn_off, reps, step):
+                if scale_pack:
+                    # lane half s reads repeats s * R/2 .. +R/2 of its row: one b128
+                    base = b.add(b.add(mn_off, b.mul(lane16, b.const_i32(reps))),
+                                 b.mul(b.div(lane, b.const_i32(16)), b.const_i32(reps // 2)))
+                    v = _emit_smem_load(b, smem, row, base, 4, I32)
+                    return [b.vec_extract(v, i) for i in range(4)]
                 if swz or rowmap:
                     base = b.add(mn_off, b.mul(lane16, b.const_i32(reps)))
                     out = []
@@ -3600,7 +3616,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         def unflat(vals):
             vals = list(vals)
             out = []
-            for n in (mfmas_m, mfmas_m if _mx else 0, mfmas_n if _mx else 0, half, half):
+            for n in (mfmas_m, sc_h if _mx else 0, (mfmas_n // 2 if scale_pack else mfmas_n) if _mx else 0, half, half):
                 out.append(vals[:n])
                 vals = vals[n:]
             return tuple(out)
@@ -3682,7 +3698,16 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             for idx, (j, mi) in enumerate(sel):
                 ni = which * half + j
                 f = mi * mfmas_n + ni
-                if _mx:
+                if _mx and scale_pack:
+                    ha, hb = mfmas_m // 2, mfmas_n // 2
+                    sel = {}
+                    if mi // ha:
+                        sel["scale_sel_a"] = 1
+                    if ni // hb:
+                        sel["scale_sel_b"] = 1
+                    acc[f] = b.mma(_mx_op.op_id, a[mi], bh[j], acc[f], sa[mi % ha], sb[ni % hb],
+                                   attrs=sel or None)
+                elif _mx:
                     acc[f] = b.mma(_mx_op.op_id, a[mi], bh[j], acc[f], sa[mi], sb[ni])
                 elif reuse_b:
                     nxt = sel[idx + 1] if idx + 1 < len(sel) else None
