@@ -115,6 +115,24 @@ if(BUILD_TESTING)
           TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU}
           ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
     endif()
+
+    # No new use of PyTorch anywhere under rocke/: each remaining use is on the
+    # allowlist beside the test, which only shrinks. The check lists the source
+    # checkout through git, which the installed test tree is not, so it runs here.
+    # The allowlist covers the whole rocke tree, so a platform-only copy of this
+    # directory, which has no library/ beside it, does not register it.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../library")
+      add_test(
+        NAME rocke_no_torch_check
+        COMMAND "${Python3_EXECUTABLE}" -m pytest
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_no_torch.py" -q)
+      set_tests_properties(
+        rocke_no_torch_check
+        PROPERTIES
+          LABELS "ckc;python;host"
+          TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU}
+          ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
+    endif()
   else()
     message(WARNING
             "rocKE: Python3 interpreter not found; the Python-driven build-tree "

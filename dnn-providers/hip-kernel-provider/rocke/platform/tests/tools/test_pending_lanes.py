@@ -83,6 +83,7 @@ from rocke.tests.pending_lanes import (
 )
 from rocke.tests.provider_categories import provider_category_labels
 from rocke.tests.quarantine import skip_quarantined_items
+from rocke.tests.torch_uses import TorchUseKind, file_kinds, torch_uses_in_python
 
 ROCKE = platform_root().parent
 # The tiers pull-request and push CI select.
@@ -504,35 +505,14 @@ def listing_breaches(pending: Iterable[PendingTest]) -> list[str]:
 
 def imports_torch(test_file: Path) -> bool:
     """Whether a test module imports torch anywhere, a function body included:
-    an ``import torch[.x]`` or ``from torch[.x] import`` statement, or a call of
-    ``importorskip``, ``import_or_skip_until``, ``import_module`` or
-    ``find_spec`` with ``"torch"`` (a module that checks for torch, for a child
-    process that imports it)."""
-    tree = ast.parse(test_file.read_text(encoding="utf-8"))
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            modules = [alias.name for alias in node.names]
-        elif isinstance(node, ast.ImportFrom) and node.level == 0:
-            modules = [node.module or ""]
-        elif isinstance(node, ast.Call):
-            function = node.func
-            name = function.attr if isinstance(function, ast.Attribute) else None
-            if isinstance(function, ast.Name):
-                name = function.id
-            first = node.args[0] if node.args else None
-            if name not in (
-                "importorskip",
-                "import_or_skip_until",
-                "import_module",
-                "find_spec",
-            ) or not (isinstance(first, ast.Constant) and isinstance(first.value, str)):
-                continue
-            modules = [first.value]
-        else:
-            continue
-        if any(module.partition(".")[0] == "torch" for module in modules):
-            return True
-    return False
+    an import, ``importorskip``/``import_or_skip_until``, or a call of
+    ``__import__``, ``import_module`` or ``find_spec`` with ``"torch"`` (a module
+    that checks for torch, for a child process that imports it)."""
+    source = test_file.read_text(encoding="utf-8")
+    return bool(
+        file_kinds(torch_uses_in_python(source, str(test_file)))
+        & {TorchUseKind.IMPORT, TorchUseKind.IMPORTORSKIP}
+    )
 
 
 def test_audit_finds_files_in_limbo_and_stale_entries():

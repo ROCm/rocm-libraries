@@ -118,8 +118,10 @@ Non-package assets resolve through `rocke.assets` (`platform_root()`,
   changes kernels. Lint with `ruff check` (no `--fix`).
 - **Cross-platform** — scripts under the rocke tree are Python, not `.sh`; use
   `tempfile`, `os.cpu_count()`, `pathlib`, `shutil.which` — no `/tmp`, `nproc`, `sudo`.
-- **torch is optional** — numpy is the only hard dep; gate torch behind `importorskip`
-  in tests and lazy/guarded imports in code.
+- **No torch** — existing uses are being removed, and their allowlist
+  (`platform/tests/tools/no_torch_allowlist.txt`) only shrinks. Until a test's
+  use is removed, it declares torch with `import_or_skip_until("torch", TORCH_IN_CI)`.
+  Rule: [`TESTING.md` §6](TESTING.md#6-invariants--contracts).
 - **No build artifacts in git** — never commit `build*/`, `_deps/`, `*.a`/`*.o`/`*.so`,
   `*.egg-info/`, `__pycache__/`. Always build out-of-tree on a local filesystem.
 

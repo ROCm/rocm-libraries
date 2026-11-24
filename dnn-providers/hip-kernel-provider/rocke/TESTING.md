@@ -77,7 +77,7 @@ something *different*, and conflating them is how false confidence creeps in.
 
 | Oracle type | Question it answers | Mechanism in rocKE | Serves |
 |---|---|---|---|
-| **Reference oracle** | Is the math correct? | Run on GPU, compare to an independent reference (numpy / torch) | Kernel correctness (A) |
+| **Reference oracle** | Is the math correct? | Run on GPU, compare to an independent reference (numpy; the legacy torch references are being removed) | Kernel correctness (A) |
 | **Oracle-free (closed-form / property)** | Is the math correct, without a reference implementation? | Run on GPU on inputs whose exact output follows from first principles (e.g. zero-Q attention: uniform probabilities over the legal keys); check the stored bits exactly or against a modeled error bound, and re-run the check under deliberately wrong rules that must be rejected | Kernel correctness (A), on the constructed inputs |
 | **Regression / characterization** | Did the output change? | sha256 of canonical IR vs. a pinned baseline | Platform output stability (B) |
 | **Differential / pseudo-oracle** | Do the two implementations agree? | **Byte-identity** of emitted IR, Python engine vs C++ engine | Platform equivalence (B) |
@@ -109,7 +109,8 @@ Question A. The quality of the *artifacts* rocKE emits.
 
 The **reference oracle**, and the *only* place ground-truth correctness is
 established: emit → compile → launch on a **HIP device** → compare to an
-independent numpy/torch reference. These lanes are the narrowest and slowest part
+independent numpy reference (legacy lanes still compare to torch until their
+uses are removed). These lanes are the narrowest and slowest part
 of the strategy, require a GPU (legacy lanes skip off-device; required pinned-reference lanes fail), and are where
 the strategy's biggest holes live (see
 [§7](#7-current-state-vs-target-the-gap-registry-wip)):
@@ -1534,6 +1535,19 @@ Cross-cutting properties every change must preserve:
   reference an absolute or repo-rooted path; the tree drops into another repo
   verbatim.
 - **SSOT** — the MMA/arch fragment tables have one meaning shared by both engines.
+- **No torch** — rocKE does not use torch: references are numpy
+  (`rocke.numeric`), device data is `DeviceArray`. Existing uses are being
+  removed; the allowlist only shrinks. `rocke_no_torch_check`
+  (`platform/tests/tools/test_no_torch.py`, build tree, standard tier) reads every
+  Python, requirements, `pyproject.toml` and CMake file under `rocke/` with
+  `rocke.tests.torch_uses` and fails on a use that
+  `platform/tests/tools/no_torch_allowlist.txt` does not list, and on a listed
+  line that no longer matches the tree. Until a test's use is removed, it
+  declares torch with `import_or_skip_until("torch", TORCH_IN_CI)`; code that
+  still needs torch imports it lazily behind a guard. When you
+  remove a use, remove its line (or its kind); never add one. Names that only
+  carry torch (`run_unified_attention_torch`) are not uses:
+  `python -m rocke.tests.torch_uses --names` lists them.
 
 ## 7. Current state vs target: the gap registry (WIP)
 

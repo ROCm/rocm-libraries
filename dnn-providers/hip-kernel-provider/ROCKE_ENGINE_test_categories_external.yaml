@@ -338,9 +338,10 @@ test_categories:
       # Not registered on Windows (see rocke/platform/CMakeLists.txt).
       - "rocke_hip_source_identity"
       - "rocke_hip_lowering_parity"
-      # Registered only in the build tree: it scans the git-tracked files of
-      # rocke (see rocke/platform/tests/cmake/CoreTests.cmake).
+      # Registered only in the build tree: they list the source checkout through
+      # git (see rocke/platform/tests/cmake/CoreTests.cmake).
       - "rocke_compliance_pytest"
+      - "rocke_no_torch_check"
     labels:
       - "standard"
       - "comprehensive"

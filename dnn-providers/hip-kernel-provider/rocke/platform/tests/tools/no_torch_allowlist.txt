@@ -1,0 +1,140 @@
+# Files under rocke/ that still use torch, with the kinds of use each makes
+# (rocke.tests.torch_uses.TorchUseKind). rocKE does not use torch: this list
+# only shrinks. Remove a file's line, or a kind from it, when its use goes;
+# never add one. test_no_torch.py fails on any use not listed here and on any
+# line that no longer matches the tree. Paths are relative to rocke/.
+CMakeLists.txt: config
+library/benchmarks/common/attention_bwd_bench.py: import torch_api torch_object
+library/benchmarks/common/attention_bwd_rocke_arm.py: import torch_api torch_object
+library/benchmarks/common/attention_bwd_unified_bench.py: import torch_api torch_object
+library/benchmarks/common/attention_combo_sweep.py: import torch_api torch_object
+library/benchmarks/common/attention_sweep.py: import torch_object
+library/benchmarks/common/benchmark_rocke_unified_attention.py: import torch_api
+library/benchmarks/common/benchmark_winograd_conv.py: import torch_api
+library/benchmarks/common/grouped_conv/benchmark_grouped_conv.py: import torch_object
+library/benchmarks/gfx1250/attention/prefill/benchmark_prefill2d_live.py: import torch_api torch_object
+library/benchmarks/gfx942/attention/decode/benchmark_decode_live.py: import torch_api torch_object
+library/benchmarks/gfx942/attention/prefill/benchmark_dense_prefill_live.py: import torch_api torch_object
+library/benchmarks/gfx942/attention/prefill/benchmark_mla_prefill_live.py: import torch_api torch_object
+library/benchmarks/gfx942/attention/prefill/benchmark_prefill2d_live.py: import torch_api torch_object
+library/benchmarks/gfx950/attention/decode/benchmark_decode_live.py: import torch_api torch_object
+library/benchmarks/gfx950/attention/decode/decode_dispatch_diagnose.py: import torch_api torch_object
+library/benchmarks/gfx950/attention/decode/decode_table_sweep.py: import torch_api torch_object
+library/benchmarks/gfx950/attention/decode/fp8_decode_vs_baselines.py: import torch_api torch_object
+library/benchmarks/gfx950/attention/decode/fp8_decode_wpe3_ab.py: import torch_api torch_object
+library/benchmarks/gfx950/attention/prefill/benchmark_dense_prefill_live.py: import torch_api torch_object
+library/benchmarks/gfx950/attention/prefill/benchmark_prefill2d_fastkv_regp.py: import torch_api
+library/benchmarks/gfx950/attention/prefill/benchmark_prefill2d_live.py: import torch_api torch_object
+library/benchmarks/gfx950/attention/prefill/benchmark_prefill2d_traces.py: import torch_api
+library/benchmarks/gfx950/attention/prefill/dense_prefill_table_sweep.py: import torch_api torch_object
+library/benchmarks/gfx950/conv_dgrad/run_one_dgrad.py: import torch_object
+library/builders/common/conv_reference.py: import torch_object
+library/builders/common/parity_fmha_extended.py: import torch_api torch_object
+library/builders/common/torch_flash_reference.py: import torch_object
+library/builders/gfx1151/attention/survey.py: import torch_api torch_object
+library/builders/gfx1250/attention/aiter_ua2_runner.py: import torch_api torch_object
+library/builders/gfx942/attention/prefill/attention_dense_prefill.py: import torch_api torch_object
+library/builders/gfx942/attention/prefill/bf16_wide_check.py: import torch_api torch_object
+library/builders/gfx942/attention/prefill/gqa_head_fold_bench.py: import torch_api
+library/builders/gfx942/attention/prefill/parity_unified_attention.py: import torch_api torch_object
+library/builders/gfx950/attention/prefill/_profile_one.py: import torch_api torch_object
+library/builders/gfx950/attention/prefill/attention_dense_prefill.py: import torch_api torch_object
+library/builders/gfx950/attention/prefill/parity_unified_attention.py: import torch_api torch_object
+library/builders/gfx950/gdn/gdn_decode.py: import torch_api torch_object
+library/builders/gfx950/qwen3_30b_a3b/03_decode_attention.py: import torch_api torch_object
+library/dispatch/sdpa/bind_shared.py: torch_interop
+library/kernels/common/attention_bwd_comgr.py: import
+library/kernels/common/attention_unified.py: import torch_api torch_interop torch_object
+library/tests/conv_reference/check_torch_reference.py: import importorskip torch_object
+library/tests/conv_reference/cli.py: import
+library/tests/conv_reference/torch_reference.py: import torch_object
+library/tests/ctest_lists.cmake: config
+library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py: torch_interop
+library/tests/sdpa/binding_harness.py: import torch_api torch_object
+library/tests/sdpa/bwd_cases.py: import torch_object
+library/tests/sdpa/helpers.py: import torch_object
+library/tests/sdpa/test_dense_sdpa_binding.py: importorskip torch_object
+library/tests/sdpa/test_dense_sdpa_numeric.py: importorskip
+library/tests/sdpa/test_sdpa_bwd_case_table.py: importorskip torch_object
+library/tests/sdpa/test_sdpa_case_table.py: importorskip
+library/tests/sdpa/test_sdpa_reference.py: importorskip torch_object
+library/tests/sdpa/test_unified_sdpa_binding.py: importorskip torch_object
+library/tests/sdpa/test_unified_sdpa_numeric.py: importorskip
+library/tests/sdpa_reference/check_torch_reference.py: import importorskip torch_api torch_object
+library/tests/sdpa_reference/torch_reference.py: import torch_api torch_object
+library/tests/test_attention_builds.py: importorskip
+library/tests/test_attention_bwd_bench.py: importorskip torch_object
+library/tests/test_attention_unified_lse_numeric.py: importorskip torch_api torch_object
+library/tests/test_attention_workspace.py: torch_api torch_object
+library/tests/test_benchmark_tf32_plumbing.py: importorskip torch_object
+library/tests/test_conv_batch_and_miopen_parse.py: importorskip torch_object
+library/tests/test_extended_parity_attention.py: import
+library/tests/test_strided_kv_decode.py: importorskip torch_object
+library/tests/test_strided_kv_decode_numeric.py: importorskip torch_api torch_object
+platform/dsl_docs/development/verify_dsl_docs.py: import torch_api torch_object
+platform/dsl_docs/optimization/utilities/tools/dsl_probes/probe_rocprof_single.py: import torch_api torch_object
+platform/dsl_docs/optimization/utilities/tools/dsl_probes/probe_targeted_bench.py: import torch_api
+platform/dsl_docs/optimization/utilities/tools/stage1_benchmark/_ua_shape_utils.py: import torch_object
+platform/dsl_docs/optimization/utilities/tools/stage1_benchmark/benchmark_triton_unified_attention.py: import torch_api
+platform/pyproject.toml: config
+platform/python/rocke/examples/common/ck_tile_parity.py: import torch_api torch_object
+platform/python/rocke/examples/common/distribution_2d_add_demo.py: import torch_api torch_object
+platform/python/rocke/examples/common/distribution_reduce_demo.py: import torch_api torch_object
+platform/python/rocke/examples/common/elementwise_verify_hip.py: import torch_object
+platform/python/rocke/examples/common/parity_extended_kernels.py: import torch_api torch_object
+platform/python/rocke/examples/gfx1250/qwen3_30b_a3b/qwen3_30b_a3b_integration.py: import torch_object
+platform/python/rocke/examples/gfx950/fused_mega_moe/reproduce_levels.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/gemm_perf_skinny_decode/scripts/03_correctness.py: import torch_object
+platform/python/rocke/examples/gfx950/gemm_perf_skinny_decode/scripts/04_compare_rocblas.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/gemm_perf_skinny_decode/scripts/09_preshuffle_b.py: import torch_object
+platform/python/rocke/examples/gfx950/gemm_perf_skinny_decode/scripts/10_hipcc_backend.py: import torch_object
+platform/python/rocke/examples/gfx950/gemm_perf_skinny_decode/scripts/11_final_compare.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/gemm_perf_skinny_decode/scripts/12_direct_to_lds.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/gemm_perf_skinny_decode/scripts/13_dtl_sweep.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/gemm_perf_skinny_decode/scripts/14_dtl_push.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/gemm_perf_skinny_decode/scripts/15_warp_geom.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/gemm_perf_skinny_decode/scripts/16_more_lanes.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/gemm_perf_skinny_decode/scripts/17_confirm_wpe.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/gemm_perf_skinny_decode/scripts/18_dtl_prefetch.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/gemm_perf_skinny_decode/scripts/19_multiwarp_probe.py: import torch_object
+platform/python/rocke/examples/gfx950/gemm_perf_skinny_decode/scripts/20_dtl_multiwarp.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/gemm_perf_skinny_decode/scripts/21_chiplet.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/gemm_perf_skinny_decode/scripts/22_confirm_winner.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/gemm_perf_skinny_decode/scripts/23_splitk_universal.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/gemm_perf_skinny_decode/scripts/24_splitk_dispatch.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/gemm_perf_square_warpspec/scripts/ladder.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/grouped_gemm/grouped_gemm_hip.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/grouped_gemm/ragged_gemm_hip.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/grouped_gemm/ragged_moe_hip.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/moe/active_tile_skip_check.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/moe/fused_moe_e2e_perf.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/moe/fused_moe_preshuffle_check.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/moe/tune_gate_up_silu.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/qwen3_30b_a3b/01_gemm_skinny.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/qwen3_30b_a3b/02_rmsnorm.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/qwen3_30b_a3b/04_topk_softmax.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/qwen3_30b_a3b/05_moe_sorting.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/qwen3_30b_a3b/06_moe_e2e.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/qwen3_30b_a3b/07_full_decode_step.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/qwen3_30b_a3b/_common.py: import torch_api torch_object
+platform/python/rocke/examples/gfx950/qwen3_30b_a3b_decode.py: import torch_api torch_object
+platform/python/rocke/examples/run_all.py: import torch_api
+platform/python/rocke/helpers/fuse.py: import torch_api torch_object
+platform/python/rocke/helpers/fusion_memory.py: import torch_object
+platform/python/rocke/helpers/fusion_validation.py: import torch_api torch_object
+platform/python/rocke/instances/common/fused_moe_e2e.py: import torch_api torch_object
+platform/python/rocke/runtime/__init__.py: torch_interop
+platform/python/rocke/runtime/comgr.py: import
+platform/python/rocke/runtime/device_array.py: torch_interop
+platform/python/rocke/runtime/launcher.py: import torch_interop torch_object
+platform/python/rocke/runtime/stall_gate.py: torch_interop
+platform/python/rocke/runtime/torch_interop.py: import torch_api torch_object
+platform/python/rocke/torch_backend.py: import torch_api
+platform/requirements.txt: config
+platform/tests/instances/differential/numeric.py: import torch_api torch_object
+platform/tests/instances/test_gfx1250_qwen_integration.py: import torch_api torch_object
+platform/tests/instances/test_gfx950_grouped_gemm.py: import
+platform/tests/instances/test_rocke_numeric.py: import
+platform/tests/runtime/test_device_array.py: importorskip torch_api torch_interop torch_object
+platform/tests/runtime/test_parameter_contract.py: torch_interop
+platform/tests/test_rocke.py: import importorskip torch_interop torch_object

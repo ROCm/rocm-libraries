@@ -635,7 +635,8 @@ if(ROCKE_INSTALL_TESTS)
     # LDS analyzer and dsl_probes tests (load tools from the adjacent dsl_doc
     # source tree), the arch-table parity test (reads cpp/core/arch/data.cpp),
     # the MMA catalog cross-check unit tests (load tools/ from the source tree),
-    # and the arch-domain artifact/probe unit tests. The host-only support-policy
+    # the tree-wide check of rocke.tests.torch_uses and its allowlist (they list
+    # the source checkout), and the arch-domain artifact/probe unit tests. The host-only support-policy
     # units are installed with the rest of tests/tools; the full regeneration
     # sweep has its own CTest timeout and resource policy.
     # Include run_all.py: installed runner unit tests import it as a dependency.
@@ -665,7 +666,9 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "test_check_mma_catalog.py" EXCLUDE
               PATTERN "test_gpu_references.py" EXCLUDE
               PATTERN "test_pending_lanes.py" EXCLUDE
-              PATTERN "test_limbo_audit.py" EXCLUDE)
+              PATTERN "test_limbo_audit.py" EXCLUDE
+              PATTERN "test_no_torch.py" EXCLUDE
+              PATTERN "no_torch_allowlist.txt" EXCLUDE)
 
     endblock()
 

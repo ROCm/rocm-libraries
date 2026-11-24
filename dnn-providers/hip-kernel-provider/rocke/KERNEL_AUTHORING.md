@@ -12,7 +12,7 @@ optimize a kernel — that lives in the field manual
 and the optimization runbook
 ([optimization_runbook.md](platform/dsl_docs/optimization/optimization_runbook.md)),
 which this doc routes to. The hard *invariants* it depends on (byte-identity,
-one-way dependency, relative-paths, no-`ruff --fix`, torch-optional, default arch)
+one-way dependency, relative-paths, no-`ruff --fix`, no torch, default arch)
 are owned by [platform/AGENTS.md](platform/AGENTS.md) — that file wins on any
 conflict. This doc adds the *process* around them (the DoD, the check command,
 change-type checklists, and the attention appendix); it is a workflow map, not
