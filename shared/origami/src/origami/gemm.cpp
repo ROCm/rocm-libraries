@@ -3132,16 +3132,18 @@ double compute_tile_latency(const problem_t& problem,
   // workgroups that share its SIMDs (those of the hardware_t::OCCUPANCY_SIMDS SIMDs the
   // occupancy counts: a WGP on RDNA, which is two CUs) work while it waits, so the SIMDs stay
   // busy unless the wait outlasts the others' work: a tile takes the longer of the work and of
-  // the wait plus one workgroup's share of the work.  The exception is the first round: the
-  // workgroups launched together run their phases in step, and only the later ones, which
-  // start as slots free up, interleave.
+  // the wait plus one workgroup's share of the work.  The exception is the first round, below.
   const double sharing = resident * static_cast<double>(hardware_t::OCCUPANCY_SIMDS) /
                          static_cast<double>(hardware.simds_per_cu());
   if (wg_costs && additive_iter && sharing > 1.0) {
     const double mem_phase   = (L_mem_stream * eff_scale + L_tail_mem_part + L_prologue) * weight_tile_total;
     const double own_phase   = L_tile_total - mem_phase;
     const double interleaved = std::max(own_phase, mem_phase + own_phase / sharing);
-    L_tile_total = interleaved + (mem_phase + own_phase - interleaved) / resident_rounds;
+    // First round: the set-up and the stores of the workgroups launched together are not
+    // behind anybody's loads; their K loops interleave as the loads come back one by one.
+    const double fixed   = std::min((L_setup * eff_scale + L_epilogue + L_lsu_reduce) * weight_tile_total, own_phase);
+    const double in_step = std::max(own_phase, mem_phase + fixed + (own_phase - fixed) / sharing);
+    L_tile_total = interleaved + (in_step - interleaved) / resident_rounds;
   }
   // gfx1250: work outside the tile model that every tile round repeats, growing with the output tile and one
   // K-iteration of A and B (time vs tile rounds of real kernels).
