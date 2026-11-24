@@ -1,0 +1,35 @@
+{
+  "version": "1.0",
+  "id": "2b03da32-a4e6-4d2a-a071-451bda1bc465",
+  "name": "AttentionGeneralBwd prep variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "head_size",
+      "type": "int"
+    },
+    {
+      "name": "seq_mode",
+      "type": "string"
+    },
+    {
+      "name": "stage_vec",
+      "type": "int"
+    },
+    {
+      "name": "worklist",
+      "type": "bool"
+    },
+    {
+      "name": "rows_per_cta",
+      "type": "int"
+    },
+    {
+      "name": "narrow_vec",
+      "type": "int"
+    }
+  ]
+}
