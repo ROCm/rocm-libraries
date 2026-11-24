@@ -71,6 +71,23 @@ def test_only_existing_first_buffers_are_retained(scales, expected):
     assert writer.vgprPool.size() == 678
 
 
+def test_interleaved_scale_payload_names_each_first_buffer_piece():
+    writer, kernel = _writer()
+    writer.states.mxsa.startVgprValu = writer.states.mxsb.startVgprValu = 2
+    writer.states.mxsb.numVgprValuPerBlock = 4
+    # MXScaleVgprInterleave: X0 of MXSA/MXSB at +0/+4, X1 at +8/+12.
+    writer.states.mxsInterleave = {
+        "piece": {"A": 4, "B": 4},
+        "blocks": {"A": {(0, 0): 0, (1, 0): 4}, "B": {(0, 0): 0, (1, 0): 4}},
+        "offsets": {("A", 0, 0): 0, ("B", 0, 0): 4, ("A", 4, 0): 8, ("B", 4, 0): 12},
+    }
+    ranges = writer.papLocalReadPayloadRanges(kernel)
+    assert ranges == ((286, 64), (416, 128), (2, 4), (6, 4))
+    writer.papReclaimValuRegisters(kernel, 0, 18, "ValuMXSAB")
+    lent = {r for r in range(18) if writer.vgprPool.getPool()[r].status == RegisterPool.Status.Available}
+    assert lent == {0, 1} | set(range(10, 18))
+
+
 @pytest.mark.parametrize("change", ["budget", "format", "pap_off"])
 def test_unsupported_resource_or_format_keeps_ordinary_entry(change):
     writer, kernel = _writer(limit=896 if change == "budget" else 1024)

@@ -39,13 +39,29 @@ class PersistentKernelState:
             # Packed/converted inputs need an additional pack lifetime contract.
             # The initial path uses reads that already produce WMMA operands.
             if all(kernel["UnrollMajorLDS" + tc] for tc, _ in tensors):
-                ranges = [(info.startVgprValu, info.numVgprValuPerBlock)
-                          for _, info in tensors]
+                ranges = [r for tc, info in tensors
+                          for r in self._papFirstBufferRanges(tc, info)]
                 if (self.states.totalVgprs + sum(size for _, size in ranges) + 16
                         > self.states.regCaps["MaxVgpr"]):
                     ranges = []
         self.states.papLocalReadPayload = tuple(ranges)
         return self.states.papLocalReadPayload
+
+    def _papFirstBufferRanges(self, tc, info):
+        """VGPR ranges of the X0_I0 operand block of one tensor.
+
+        MXScaleVgprInterleave places the MXSA and MXSB pieces of every block
+        pair in one region whose base both tensors share, so a scale block is
+        not contiguous from its startVgprValu.
+        """
+        plan = getattr(self.states, "mxsInterleave", None)
+        if plan is None or tc not in ("MXSA", "MXSB"):
+            return [(info.startVgprValu, info.numVgprValuPerBlock)]
+        side = tc[-1]
+        block = plan["blocks"][side][(0, 0)]
+        return [(info.startVgprValu + rel, plan["piece"][side])
+                for (ptc, poff, _), rel in sorted(plan["offsets"].items())
+                if ptc == side and poff == block]
 
 
     def papReclaimValuRegisters(self, kernel, start, size, tag, *, add=True):

@@ -214,6 +214,65 @@ def test_prepared_entry_coordinates_survive_epilogue(tmp_path, monkeypatch, clus
             assert "PAP activate retained PersistentPhantomTile" in src
 
 
+def _vgpr_evaluator(src):
+    raw = {}
+    for match in re.finditer(r"^\.set (\w+), (.+)$", src, re.M):
+        raw.setdefault(match[1], match[2].strip())
+
+    def evaluate(expr):
+        total = 0
+        for sign, token in re.findall(r"([+-]?)\s*(\w+)", expr):
+            value = int(token, 0) if token[0].isdigit() else evaluate(raw[token])
+            total += -value if sign == "-" else value
+        return total
+    return evaluate
+
+
+def _vgpr_destinations(line, evaluate):
+    # Drop the s_set_vgpr_msb bias so every operand names its physical VGPR.
+    code = re.sub(r"-(?:256|512|768)(?=[:\]+])", "", line.split("//")[0]).strip()
+    match = re.match(r"(v_\w+|ds_load\w*|global_load\w*|buffer_load\w*)\s+(v\[[^\]]+\]|v\d+)", code)
+    if not match or match[1].startswith(("v_cmp", "v_readlane", "v_readfirstlane")):
+        return set()
+    operand = match[2]
+    if operand.startswith("v["):
+        bounds = operand[2:-1].split(":")
+        return set(range(evaluate(bounds[0]), evaluate(bounds[-1]) + 1))
+    return {int(operand[1:])}
+
+
+@pytest.mark.parametrize("wave_tile", [[4, 8], [4, 4]], ids=["miwt4x8", "miwt4x4-mx-interleave"])
+def test_carried_first_plr_operands_survive_epilogue(tmp_path, wave_tile):
+    # MIWT4x4 shares one MX-scale region between MXSA and MXSB, so the MXSB
+    # X0 block does not start at its startVgprValu.
+    config = yaml.safe_load(_config(tmp_path, AssertSummationElementMultiple=256,
+                                    VectorWidthB=wave_tile[1]).read_text())
+    group = config["BenchmarkProblems"][0][1]["ForkParameters"][-1]["Groups"][0][0]
+    group["MatrixInstruction"] = [16, 16, 128, 1, 1, *wave_tile, 2, 2]
+    path = tmp_path / "pap_wave_tile.yaml"
+    path.write_text(yaml.safe_dump(config, sort_keys=False))
+    results = emit_kernels_from_config(path, limit=1, arch="gfx1250")
+    assert_real_gfx1250_kernels(results)
+    for name, src, _ in results:
+        assert_assembles(src, name)
+        shared = ".set vgprValuMXSB_X0_I0_BASE, vgprMXSBase+0" in src
+        assert shared == (wave_tile == [4, 4])
+        evaluate = _vgpr_evaluator(src)
+        lines = src.splitlines()
+        issued = next(i for i, line in enumerate(lines) if "PAP record first PLR operands issued" in line)
+        first = max(i for i in range(issued) if "PAP both next groups issued?" in lines[i])
+        carried = set()
+        for line in lines[first:issued]:
+            if line.startswith("ds_load"):
+                carried |= _vgpr_destinations(line, evaluate)
+        assert carried
+        backedge = next(i for i in range(issued, len(lines))
+                        if "branch to label_PersistentLoopStart" in lines[i])
+        clobbers = [line for line in lines[issued + 1:backedge]
+                    if _vgpr_destinations(line, evaluate) & carried]
+        assert not clobbers, "\n".join(clobbers[:8])
+
+
 def test_tail_entry_keeps_ordinary_tile_setup(tmp_path):
     results = emit_kernels_from_config(_config(tmp_path), limit=1, arch="gfx1250")
     assert_real_gfx1250_kernels(results)
