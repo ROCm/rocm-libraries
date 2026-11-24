@@ -169,7 +169,8 @@ struct AttentionDenseGeometry
  *
  * Each engine defines one at namespace scope in its own native file. The function pointers
  * are that arch's restatement of its own Python (its Gfx9xxAttentionDenseGeometry.hpp),
- * except the window guard, which is this engine's own policy.
+ * except the keyless-window rule (windowLeavesRowsWithoutKeys), which is this engine's
+ * own policy.
  */
 struct AttentionDenseArch
 {
@@ -178,9 +179,6 @@ struct AttentionDenseArch
     /// The engine name its decline lines carry.
     std::string_view engineName;
     AttentionDenseTokens tokens;
-    /// Whether kernelMatches compares the candidate's num_query_heads/num_kv_heads with the
-    /// graph's: true where the catalog lists each head configuration as its own entry.
-    bool matchesHeadCounts = false;
     /// Whether (blockM, blockN) is a tile the kernel is built with at headSize. Total over
     /// every int64 triple.
     bool (*isSupportedTile)(int64_t headSize, int64_t blockM, int64_t blockN) = nullptr;
@@ -193,11 +191,9 @@ struct AttentionDenseArch
                                        int64_t batch,
                                        const std::string& kernelName)
         = nullptr;
-    /// This engine's sliding-window zero-trip guard for one candidate's tile, or nullptr for
-    /// an arch that serves no window: its graph match declines every windowed mask.
-    bool (*windowReachesKeys)(
-        int64_t blockM, int64_t blockN, int64_t seqLenQ, int64_t seqLenKv, int64_t slidingWindow)
-        = nullptr;
+    /// Whether this arch's graph match serves a sliding-window mask. An arch that does not
+    /// declines every windowed mask.
+    bool servesWindows = false;
     /// Whether a candidate writes the softmax statistics (LSE) through a trailing lse_ptr,
     /// read from a KMD field only that arch's manifest declares; nullopt for a record
     /// without a valid value. nullptr for an arch whose catalog has no LSE kernel: its
@@ -221,7 +217,7 @@ struct AttentionDenseArch
 
     bool servesSlidingWindow() const
     {
-        return windowReachesKeys != nullptr;
+        return servesWindows;
     }
 
     bool servesStats() const
@@ -321,11 +317,14 @@ hipdnn_plugin_sdk::ingestor::MetadataValues launchValues(const AttentionDenseBin
  *
  * As both arches' graph and kernel match require, `causal` must be 0 or 1; `sliding_window`
  * non-negative, 0 unless `causal` is 1, and not so narrow that the last query rows see no
- * key (seqlen_q - seqlen_kv >= sliding_window); `num_query_heads` a multiple of
- * `num_kv_heads`; `head_size` 64 or 128; K/V below 2^31 bytes and Q/O below 2^31
- * elements; and `seqlen_q` a multiple of `block_m`, since the kernel addresses Q and O
- * without a bounds check. One exception: gfx950's graph match declines every window, but
- * its reader still takes a causal one within these rules: its frozen v1/v2 samples hold one.
+ * key (seqlen_q - seqlen_kv >= sliding_window), except as the next sentence says;
+ * `num_query_heads` a multiple of `num_kv_heads`; `head_size` 64 or 128; K/V below 2^31
+ * bytes and Q/O below 2^31 elements; and `seqlen_q` a multiple of `block_m`, since the
+ * kernel addresses Q and O without a bounds check. An arch that serves windows (gfx942)
+ * restores a window that leaves the last query rows no key for a plan without a stats
+ * output, and refuses it for a plan with one. One exception: gfx950's graph match declines
+ * every window, but its reader still takes a causal one within these rules: its frozen v1/v2
+ * samples hold one.
  *
  * An arch that serves stats also reads `stats.uid`, which must be ATTENTION_DENSE_NO_STATS
  * or a uid (non-negative). An arch that serves grids also reads `grid_order`, which must

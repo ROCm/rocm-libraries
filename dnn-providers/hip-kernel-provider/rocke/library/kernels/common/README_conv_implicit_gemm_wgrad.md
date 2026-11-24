@@ -223,7 +223,11 @@ split-K cost model (`kernels.conv.split_k_planner`) it picks the cheapest
 clamped to `[1, wg_K]`). On an arch with a `WgradSplitPolicy` (gfx1250), that
 fallback uses the policy instead; see "Split-K on gfx1250 (WMMA)" below. The
 resolver's `override` argument forces it (the benchmark sets it from
-`ROCKE_CONV_SPLIT_K`); the resolver itself reads no environment.
+`ROCKE_CONV_SPLIT_K`); the resolver itself reads no environment. On the CK-formula
+fallback a bf16/fp16 degree above `ATOMIC_16BIT_MAX_SPLIT_K` (128) is not run on
+the packed atomic: `reduction="auto"` moves it to the f32 workspace when one
+fits (else holds it to 128 on the atomic when the atomic is available), and
+`reduction="atomic"` holds it to 128.
 
 ### Split-K cshuffle atomic epilogue
 

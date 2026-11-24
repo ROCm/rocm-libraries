@@ -442,7 +442,7 @@ namespace TensileLite
                     {
                         ScopedTimer timer(gpuInputCategory("gpu_input_reset_rotating_init",
                                                            "gpu_input_prep_rotating_init"));
-                        auto mem = m_rm->getRotatingMemory();
+                        auto const& mem = m_rm->getRotatingMemory();
                         // init mode 1 rotating data
                         for(size_t j = 1; j < mem.size(); j++)
                             for(size_t i = 0; i < m_vdata.size(); i++)
