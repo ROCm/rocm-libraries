@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 //
 // MX (a4w4) MoE GEMM on gfx1250: MoeFlatmmKernel on MXFlatmmPipelineAGmemBGmemCRegV1, one FFN
-// GEMM per launch (gemm1_gate_up, gemm2), checked against a CPU reference. The problem setup
+// GEMM per launch (gemm1_gate_up; gemm2 with atomic combine; gemm2_per_slot followed by
+// MoeTopkCombineKernel), checked against a CPU reference. The problem setup
 // (random top-k routing sorted into 32-row expert tiles, MX data and scale layouts, reference)
 // is shared with tile_example_mx_moe_flatmm.
 //
@@ -71,6 +72,11 @@ TEST_P(MxMoeFlatmm, Gemm1GateUp)
 }
 
 TEST_P(MxMoeFlatmm, Gemm2) { run_case<ck_tile::MoeFlatmmKind::kFFN_gemm2>(GetParam()); }
+
+TEST_P(MxMoeFlatmm, Gemm2PerSlot)
+{
+    run_case<ck_tile::MoeFlatmmKind::kFFN_gemm2_per_slot>(GetParam());
+}
 
 INSTANTIATE_TEST_SUITE_P(Fp4xFp4,
                          MxMoeFlatmm,
