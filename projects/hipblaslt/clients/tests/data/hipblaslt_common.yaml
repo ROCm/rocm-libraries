@@ -58,6 +58,9 @@ Datatypes:
         nan: 893
         norm_dist_one_special: 894
         uniform_low_precision: 999
+        maf1_0: 1000
+        maf2_0: 1001
+        maf2_0_unit_scale: 1002
   - hipblaslt_activation_type:
       bases: [ c_int ]
       attr:
@@ -645,6 +648,9 @@ Arguments:
   - streams: c_uint16
   - devices: c_uint8
   - a2a_world: c_uint8
+  - partitions: c_uint8
+  - split_dim: c_char
+  - part_place: c_char*8
   - norm_check: c_int8
   - allclose_check: c_int8
   - unit_check: c_int8
@@ -764,6 +770,9 @@ Defaults:
   streams: 0
   devices: 0
   a2a_world: 1
+  partitions: 1
+  split_dim: 'N'
+  part_place: 'SSSS'
   a2a_extent: 0
   gpu_arch: ''
   gpu_arch_exclude: ''

@@ -56,6 +56,9 @@ namespace
         // Further calls, one per entry, with these shapes (each no larger than in groups);
         // needs !fixedM.
         std::vector<std::vector<GroupShape>> reruns;
+        // Before each further call, leave an error the caller has not read, which the call
+        // must neither fail on nor clear.
+        bool callerErrorPending = false;
     };
 
     constexpr size_t kWorkspace = size_t{64} << 20;
@@ -771,7 +774,15 @@ namespace
                     rewrite(layout, rowsAttr, m);
                     rewrite(layout, colsAttr, n);
                 }
+                if(tc.callerErrorPending)
+                {
+                    void* unused = nullptr;
+                    ASSERT_EQ(hipMalloc(&unused, SIZE_MAX), hipErrorOutOfMemory);
+                }
                 matmulAndCheck();
+                if(tc.callerErrorPending)
+                    EXPECT_EQ(hipGetLastError(), hipErrorOutOfMemory)
+                        << "the call consumed the caller's error";
             }
         }
 
@@ -805,6 +816,16 @@ namespace
                    const std::vector<GroupShape>&              shapes,
                    std::optional<hipblasLtMatmulMatrixScale_t> launchAs = std::nullopt)
         {
+            runMX(elemType, elemType, outType, mode, shapes, launchAs);
+        }
+
+        void runMX(hipDataType                                 typeA,
+                   hipDataType                                 typeB,
+                   hipDataType                                 outType,
+                   hipblasLtMatmulMatrixScale_t                mode,
+                   const std::vector<GroupShape>&              shapes,
+                   std::optional<hipblasLtMatmulMatrixScale_t> launchAs = std::nullopt)
+        {
             const bool preSwizzled  = mode == HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
             const MXScaleMode scale = mxScaleMode(mode);
             const MXPadding   pad   = mxPadding(scale.block);
@@ -821,14 +842,14 @@ namespace
             }
 
             MXOperand A, B;
-            A.init(k, m, elemType, scale, pad, preSwizzled, rng);
-            B.init(k, n, elemType, scale, pad, preSwizzled, rng);
+            A.init(k, m, typeA, scale, pad, preSwizzled, rng);
+            B.init(k, n, typeB, scale, pad, preSwizzled, rng);
             GroupedMatrix C, D;
             C.init(m, n, false, outType, rng);
             D.init(m, n, false, outType, rng);
 
-            auto layA = makeLayout(elemType, groups, &k, &m, &k, HIPBLASLT_INTEGER_WIDTH_32);
-            auto layB = makeLayout(elemType, groups, &k, &n, &k, HIPBLASLT_INTEGER_WIDTH_32);
+            auto layA = makeLayout(typeA, groups, &k, &m, &k, HIPBLASLT_INTEGER_WIDTH_32);
+            auto layB = makeLayout(typeB, groups, &k, &n, &k, HIPBLASLT_INTEGER_WIDTH_32);
             auto layC = makeLayout(outType, groups, &m, &n, &C.ld, HIPBLASLT_INTEGER_WIDTH_32);
             auto layD = makeLayout(outType, groups, &m, &n, &D.ld, HIPBLASLT_INTEGER_WIDTH_32);
 
@@ -994,6 +1015,19 @@ namespace
         tc.opA    = HIPBLAS_OP_T;
         tc.groups = {{64, 64, 32}, {48, 32, 64}, {96, 80, 16}, {32, 16, 32}};
         tc.reruns = {{{16, 64, 8}, {48, 0, 64}, {5, 3, 0}, {32, 16, 31}}};
+        run(tc);
+    }
+
+    // An error the caller left unread is not the record pack's launch failure: each call
+    // with the launch setup reused succeeds, and leaves the error for the caller to read.
+    TEST_F(GroupedMatmul, smoke_CallerErrorPendingIsNotALaunchFailure)
+    {
+        Case tc;
+        // T/N has grouped solutions on gfx942 and gfx950; N/N has none on gfx950.
+        tc.opA                = HIPBLAS_OP_T;
+        tc.groups             = {{64, 48, 32}, {17, 5, 64}, {33, 70, 40}};
+        tc.reruns             = {tc.groups, tc.groups};
+        tc.callerErrorPending = true;
         run(tc);
     }
 
@@ -1189,6 +1223,25 @@ namespace
         runMX(HIP_R_4F_E2M1, HIP_R_16BF, HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT, kMXShapes);
     }
 
+    // Mixed MXFP4 A x MXFP8 B (MoE: MXFP4 expert weights, MXFP8 tokens), and the reverse.
+    TEST_F(GroupedMatmul, smoke_MXFP4xMXFP8TNPreSwizzled)
+    {
+        runMX(HIP_R_4F_E2M1,
+              HIP_R_8F_E4M3,
+              HIP_R_16BF,
+              HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT,
+              kMXShapes);
+    }
+
+    TEST_F(GroupedMatmul, smoke_MXFP8xMXFP4TNPreSwizzled)
+    {
+        runMX(HIP_R_8F_E4M3,
+              HIP_R_4F_E2M1,
+              HIP_R_16BF,
+              HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT,
+              kMXShapes);
+    }
+
     // With the same FP8 layouts, the MX scale modes select only MX kernels and the scalar
     // scale mode selects only non-MX kernels.
     TEST_F(GroupedMatmul, smoke_MXAndFP8SelectDifferentKernels)
@@ -1252,6 +1305,10 @@ namespace
                       layout, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &mode, sizeof(mode), &written),
                   HIPBLAS_STATUS_SUCCESS);
         EXPECT_EQ(mode, HIPBLASLT_BATCH_MODE_GROUPED);
+        int32_t grouped = HIPBLASLT_BATCH_MODE_GROUPED;
+        EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                      layout, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &grouped, sizeof(grouped)),
+                  HIPBLAS_STATUS_SUCCESS);
         int32_t strided = HIPBLASLT_BATCH_MODE_STRIDED;
         EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
                       layout, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &strided, sizeof(strided)),
@@ -1304,13 +1361,29 @@ namespace
         // A regular layout cannot be switched to grouped mode or given grouped arrays.
         hipblasLtMatrixLayout_t regular = nullptr;
         ASSERT_EQ(hipblasLtMatrixLayoutCreate(&regular, HIP_R_16F, 8, 8, 8), HIPBLAS_STATUS_SUCCESS);
-        int32_t grouped = HIPBLASLT_BATCH_MODE_GROUPED;
         EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
                       regular, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &grouped, sizeof(grouped)),
                   HIPBLAS_STATUS_INVALID_VALUE);
         EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
                       regular, HIPBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_ARRAY, &rowsArray, sizeof(rowsArray)),
                   HIPBLAS_STATUS_INVALID_VALUE);
+        // Out-of-range batch modes are rejected and leave the mode unchanged.
+        for(int32_t badMode : {3, 7, -1})
+            EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                          regular, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &badMode, sizeof(badMode)),
+                      HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(hipblasLtMatrixLayoutGetAttribute(
+                      regular, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &mode, sizeof(mode), &written),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(mode, HIPBLASLT_BATCH_MODE_STRIDED);
+        // Pointer-array and strided modes are still accepted on a regular layout.
+        int32_t ptrArray = HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+        EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                      regular, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &ptrArray, sizeof(ptrArray)),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                      regular, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &strided, sizeof(strided)),
+                  HIPBLAS_STATUS_SUCCESS);
         hipblasLtMatrixLayoutDestroy(regular);
 
         // Alpha/beta batch strides accept only 0 or 1; a valid stride reads back.

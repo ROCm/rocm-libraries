@@ -154,13 +154,15 @@ void Run2dDriver(void)
 using namespace conv_extra;
 
 TEST_P(GPU_conv_extra_FP32, FloatTest_conv_extra) { Run2dDriver(); };
-INSTANTIATE_TEST_SUITE_P(Full, GPU_conv_extra_FP32, testing::Values(GetTestCases("--float")));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_conv_extra_FP32, testing::Values(GetTestCases("--float")));
 
 TEST_P(GPU_conv_extra_FP16, HalfTest_conv_extra) { Run2dDriver(); };
-INSTANTIATE_TEST_SUITE_P(Full, GPU_conv_extra_FP16, testing::Values(GetTestCases("--half")));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_conv_extra_FP16, testing::Values(GetTestCases("--half")));
 
 TEST_P(GPU_conv_extra_BFP16, bHalfTest_conv_extra) { Run2dDriver(); };
-INSTANTIATE_TEST_SUITE_P(Full, GPU_conv_extra_BFP16, testing::Values(GetTestCases("--bfloat16")));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_conv_extra_BFP16,
+                         testing::Values(GetTestCases("--bfloat16")));
 
 TEST_P(GPU_conv_extra_I8, Int8Test_conv_extra) { Run2dDriver(); };
-INSTANTIATE_TEST_SUITE_P(Full, GPU_conv_extra_I8, testing::Values(GetTestCases("--int8")));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_conv_extra_I8, testing::Values(GetTestCases("--int8")));

@@ -209,7 +209,9 @@ using float16 = half_float::half;
 
 #define X_CONCAT_FIRST_SECOND_(first, second) first##second
 
-#define X_INSTANTIATE_CAST(TEST_TYPE, DST_TYPE, SRC_TYPE, ...)                            \
+// TIER is the prefix of the full cross-product instantiation: the test_categories.yaml tier
+// (Comprehensive or Full) whose filter selects that type pair.
+#define X_INSTANTIATE_CAST(TIER, TEST_TYPE, DST_TYPE, SRC_TYPE, ...)                      \
     using GPU_binaryTensorOps_cast_##SRC_TYPE##_##TEST_TYPE =                             \
         GPU_binaryTensorOps<DST_TYPE, SRC_TYPE>;                                          \
     TEST_P(GPU_binaryTensorOps_cast_##SRC_TYPE##_##TEST_TYPE,                             \
@@ -219,7 +221,7 @@ using float16 = half_float::half;
     };                                                                                    \
                                                                                           \
     INSTANTIATE_TEST_SUITE_P(                                                             \
-        Smoke,                                                                            \
+        Quick,                                                                            \
         GPU_binaryTensorOps_cast_##SRC_TYPE##_##TEST_TYPE,                                \
         testing::Combine(testing::Values(std::vector<size_t>{32, 8, 10}),                 \
                          testing::Values(std::vector<int>{7, 11}),                        \
@@ -227,45 +229,46 @@ using float16 = half_float::half;
                          testing::Values(true, false)));                                  \
                                                                                           \
     INSTANTIATE_TEST_SUITE_P(                                                             \
-        Full,                                                                             \
+        TIER,                                                                             \
         GPU_binaryTensorOps_cast_##SRC_TYPE##_##TEST_TYPE,                                \
         testing::Combine(testing::ValuesIn(get_sub_tensor<size_t>()),                     \
                          testing::ValuesIn(get_tensor_offsets()),                         \
                          testing::ValuesIn({1.0f / 127 / 127, 1.0f / 127, 127.0f, 1.0f}), \
                          testing::Values(true, false)));
 
-X_INSTANTIATE_CAST(FP32, float, float);
-X_INSTANTIATE_CAST(FP16, float16, float);
-X_INSTANTIATE_CAST(BFP16, bfloat16, float);
-X_INSTANTIATE_CAST(I32, int, float);
-X_INSTANTIATE_CAST(I8, int8_t, float);
+X_INSTANTIATE_CAST(Comprehensive, FP32, float, float);
+X_INSTANTIATE_CAST(Comprehensive, FP16, float16, float);
+X_INSTANTIATE_CAST(Comprehensive, BFP16, bfloat16, float);
+X_INSTANTIATE_CAST(Full, I32, int, float);
+X_INSTANTIATE_CAST(Full, I8, int8_t, float);
 
-X_INSTANTIATE_CAST(FP32, float, float16);
-X_INSTANTIATE_CAST(FP16, float16, float16);
-X_INSTANTIATE_CAST(BFP16, bfloat16, float16, DISABLED_);
-X_INSTANTIATE_CAST(I32, int, float16);
-X_INSTANTIATE_CAST(I8, int8_t, float16);
+X_INSTANTIATE_CAST(Comprehensive, FP32, float, float16);
+X_INSTANTIATE_CAST(Comprehensive, FP16, float16, float16);
+X_INSTANTIATE_CAST(Full, BFP16, bfloat16, float16, DISABLED_);
+X_INSTANTIATE_CAST(Full, I32, int, float16);
+X_INSTANTIATE_CAST(Full, I8, int8_t, float16);
 
-X_INSTANTIATE_CAST(FP32,
+X_INSTANTIATE_CAST(Full,
+                   FP32,
                    float,
                    bfloat16,
                    DISABLED_); // bfp16 is just broken except float->bfp16 case
-X_INSTANTIATE_CAST(FP16, float16, bfloat16, DISABLED_);
-X_INSTANTIATE_CAST(BFP16, bfloat16, bfloat16, DISABLED_);
-X_INSTANTIATE_CAST(I32, int, bfloat16, DISABLED_);
-X_INSTANTIATE_CAST(I8, int8_t, bfloat16, DISABLED_);
+X_INSTANTIATE_CAST(Full, FP16, float16, bfloat16, DISABLED_);
+X_INSTANTIATE_CAST(Full, BFP16, bfloat16, bfloat16, DISABLED_);
+X_INSTANTIATE_CAST(Full, I32, int, bfloat16, DISABLED_);
+X_INSTANTIATE_CAST(Full, I8, int8_t, bfloat16, DISABLED_);
 
-X_INSTANTIATE_CAST(FP32, float, int);
-X_INSTANTIATE_CAST(FP16, float16, int);
-X_INSTANTIATE_CAST(BFP16, bfloat16, int, DISABLED_);
-X_INSTANTIATE_CAST(I32, int, int);
-X_INSTANTIATE_CAST(I8, int8_t, int);
+X_INSTANTIATE_CAST(Comprehensive, FP32, float, int);
+X_INSTANTIATE_CAST(Comprehensive, FP16, float16, int);
+X_INSTANTIATE_CAST(Full, BFP16, bfloat16, int, DISABLED_);
+X_INSTANTIATE_CAST(Full, I32, int, int);
+X_INSTANTIATE_CAST(Full, I8, int8_t, int);
 
-X_INSTANTIATE_CAST(FP32, float, int8_t);
-X_INSTANTIATE_CAST(FP16, float16, int8_t);
-X_INSTANTIATE_CAST(BFP16, bfloat16, int8_t, DISABLED_);
-X_INSTANTIATE_CAST(I32, int, int8_t);
-X_INSTANTIATE_CAST(I8, int8_t, int8_t);
+X_INSTANTIATE_CAST(Comprehensive, FP32, float, int8_t);
+X_INSTANTIATE_CAST(Comprehensive, FP16, float16, int8_t);
+X_INSTANTIATE_CAST(Full, BFP16, bfloat16, int8_t, DISABLED_);
+X_INSTANTIATE_CAST(Full, I32, int, int8_t);
+X_INSTANTIATE_CAST(Full, I8, int8_t, int8_t);
 
 #undef X_INSTANTIATE_CAST
 #undef X_CONCAT_FIRST_SECOND_
@@ -274,14 +277,14 @@ X_INSTANTIATE_CAST(I8, int8_t, int8_t);
     using GPU_binaryTensorOps_copy_##TEST_TYPE = GPU_binaryTensorOps<REAL_TYPE>;               \
     TEST_P(GPU_binaryTensorOps_copy_##TEST_TYPE, TestTensorCopy) { RunCopy(); };               \
                                                                                                \
-    INSTANTIATE_TEST_SUITE_P(Smoke,                                                            \
+    INSTANTIATE_TEST_SUITE_P(Quick,                                                            \
                              GPU_binaryTensorOps_copy_##TEST_TYPE,                             \
                              testing::Combine(testing::Values(std::vector<size_t>{32, 8, 10}), \
                                               testing::Values(std::vector<int>{7, 11}),        \
                                               testing::Values(0.0f),                           \
                                               testing::Values(false)));                        \
                                                                                                \
-    INSTANTIATE_TEST_SUITE_P(Full,                                                             \
+    INSTANTIATE_TEST_SUITE_P(Comprehensive,                                                    \
                              GPU_binaryTensorOps_copy_##TEST_TYPE,                             \
                              testing::Combine(testing::ValuesIn(get_sub_tensor<size_t>()),     \
                                               testing::ValuesIn(get_tensor_offsets()),         \

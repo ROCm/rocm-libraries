@@ -77,7 +77,7 @@ struct OpenGatesOnExit
 // block that acquire() on a gate only this thread can open.
 constexpr std::size_t kTestMaxDraining = 2;
 
-class GPU_StreamTracker_FP32 : public ::testing::Test
+class GPU_StreamTracker_FP32 : public ::testing::TestWithParam<int>
 {
 protected:
     /// A gate the fixture opens at teardown if the test has not: a test that
@@ -187,7 +187,7 @@ struct WatchedFree
 
 } // namespace
 
-TEST_F(GPU_StreamTracker_FP32, AcquireRelease)
+TEST_P(GPU_StreamTracker_FP32, AcquireRelease)
 {
     auto slot = tracker.acquire(handle);
     ASSERT_NE(slot.stream, nullptr);
@@ -200,7 +200,7 @@ TEST_F(GPU_StreamTracker_FP32, AcquireRelease)
     tracker.release(slot2);
 }
 
-TEST_F(GPU_StreamTracker_FP32, AcquireIsNotAHandlePoolStream)
+TEST_P(GPU_StreamTracker_FP32, AcquireIsNotAHandlePoolStream)
 {
     // The Handle's stream-pool indices are claimed by hardcoded number elsewhere
     // (MHA, RNN), so a tracker slot must never alias one of them.
@@ -220,7 +220,7 @@ TEST_F(GPU_StreamTracker_FP32, AcquireIsNotAHandlePoolStream)
     tracker.release(slot);
 }
 
-TEST_F(GPU_StreamTracker_FP32, AcquireGrowsPool)
+TEST_P(GPU_StreamTracker_FP32, AcquireGrowsPool)
 {
     auto slot1 = tracker.acquire(handle);
     auto slot2 = tracker.acquire(handle);
@@ -230,7 +230,7 @@ TEST_F(GPU_StreamTracker_FP32, AcquireGrowsPool)
     tracker.release(slot1);
 }
 
-TEST_F(GPU_StreamTracker_FP32, AbandonAndReclaim)
+TEST_P(GPU_StreamTracker_FP32, AbandonAndReclaim)
 {
     auto slot = tracker.acquire(handle);
 
@@ -250,7 +250,7 @@ TEST_F(GPU_StreamTracker_FP32, AbandonAndReclaim)
     ASSERT_EQ(hipFree(dev_ptr), hipSuccess);
 }
 
-TEST_F(GPU_StreamTracker_FP32, AbandonStillDraining)
+TEST_P(GPU_StreamTracker_FP32, AbandonStillDraining)
 {
     auto slot = tracker.acquire(handle);
 
@@ -273,7 +273,7 @@ TEST_F(GPU_StreamTracker_FP32, AbandonStillDraining)
     tracker.release(next);
 }
 
-TEST_F(GPU_StreamTracker_FP32, CascadeAbandonReclaim)
+TEST_P(GPU_StreamTracker_FP32, CascadeAbandonReclaim)
 {
     constexpr int kCount = 4;
     std::vector<miopen::StreamTracker::Slot> slots;
@@ -306,7 +306,7 @@ TEST_F(GPU_StreamTracker_FP32, CascadeAbandonReclaim)
     }
 }
 
-TEST_F(GPU_StreamTracker_FP32, AbandonedScratchIsReleasedWhenItsKernelRetires)
+TEST_P(GPU_StreamTracker_FP32, AbandonedScratchIsReleasedWhenItsKernelRetires)
 {
     // The release must not wait for a later MIOpen call: a caller that finds,
     // captures, and from then on only replays the graph makes none (issue
@@ -326,7 +326,7 @@ TEST_F(GPU_StreamTracker_FP32, AbandonedScratchIsReleasedWhenItsKernelRetires)
     EXPECT_TRUE(ReleasedWithin(scratch)) << "scratch not released after its kernel retired";
 }
 
-TEST_F(GPU_StreamTracker_FP32, ReleaseDuringAnUnrelatedGlobalCaptureLeavesItValid)
+TEST_P(GPU_StreamTracker_FP32, ReleaseDuringAnUnrelatedGlobalCaptureLeavesItValid)
 {
     // Regression for issue #12121. The release runs on the tracker's worker
     // whenever the kernel retires, so it can land inside anyone's capture. Under
@@ -365,7 +365,7 @@ TEST_F(GPU_StreamTracker_FP32, ReleaseDuringAnUnrelatedGlobalCaptureLeavesItVali
     ASSERT_EQ(hipFree(dev_ptr), hipSuccess);
 }
 
-TEST_F(GPU_StreamTracker_FP32, AcquireWaitsOutABacklogRatherThanGrowOrDecline)
+TEST_P(GPU_StreamTracker_FP32, AcquireWaitsOutABacklogRatherThanGrowOrDecline)
 {
     // At MaxDraining(), acquire() waits for a stream to retire and then hands
     // back that one. It must not decline: the caller would skip a solver
@@ -406,7 +406,7 @@ TEST_F(GPU_StreamTracker_FP32, AcquireWaitsOutABacklogRatherThanGrowOrDecline)
     tracker.release(slot);
 }
 
-TEST_F(GPU_StreamTracker_FP32, ReclaimTracksTheDoneEventWhenOneIsSupplied)
+TEST_P(GPU_StreamTracker_FP32, ReclaimTracksTheDoneEventWhenOneIsSupplied)
 {
     // A slot is not reclaimed before its completion event signals, and comes
     // back with the spent event cleared.
@@ -436,7 +436,7 @@ TEST_F(GPU_StreamTracker_FP32, ReclaimTracksTheDoneEventWhenOneIsSupplied)
     tracker.release(reclaimed);
 }
 
-TEST_F(GPU_StreamTracker_FP32, ScratchAllocateAndReuse)
+TEST_P(GPU_StreamTracker_FP32, ScratchAllocateAndReuse)
 {
     auto s1 = handle.GetScratchBuffer(1024);
     ASSERT_NE(s1, nullptr);
@@ -450,7 +450,7 @@ TEST_F(GPU_StreamTracker_FP32, ScratchAllocateAndReuse)
     EXPECT_EQ(s1, s3);
 }
 
-TEST_F(GPU_StreamTracker_FP32, ScratchFreedWhenCallersRelease)
+TEST_P(GPU_StreamTracker_FP32, ScratchFreedWhenCallersRelease)
 {
     // Fresh Handle so no other test can hold a ref to this scratch allocation.
     miopen::Handle fresh_handle{};
@@ -464,7 +464,7 @@ TEST_F(GPU_StreamTracker_FP32, ScratchFreedWhenCallersRelease)
     EXPECT_TRUE(weak.expired());
 }
 
-TEST_F(GPU_StreamTracker_FP32, ScratchGrows)
+TEST_P(GPU_StreamTracker_FP32, ScratchGrows)
 {
     auto s1 = handle.GetScratchBuffer(1);
     ASSERT_NE(s1, nullptr);
@@ -476,19 +476,19 @@ TEST_F(GPU_StreamTracker_FP32, ScratchGrows)
     EXPECT_GE(s2->size, s1->size + 1);
 }
 
-TEST_F(GPU_StreamTracker_FP32, ScratchReturnsNullOnOversize)
+TEST_P(GPU_StreamTracker_FP32, ScratchReturnsNullOnOversize)
 {
     auto s = handle.GetScratchBuffer(handle.GetGlobalMemorySize());
     EXPECT_EQ(s, nullptr);
 }
 
-TEST_F(GPU_StreamTracker_FP32, ScratchReturnsNullOnZero)
+TEST_P(GPU_StreamTracker_FP32, ScratchReturnsNullOnZero)
 {
     auto s = handle.GetScratchBuffer(0);
     EXPECT_EQ(s, nullptr);
 }
 
-TEST_F(GPU_StreamTracker_FP32, ALateCallbackDoesNotRetireALaterReuseOfItsStream)
+TEST_P(GPU_StreamTracker_FP32, ALateCallbackDoesNotRetireALaterReuseOfItsStream)
 {
     // acquire() can reclaim a slot on its done event before the worker has
     // handled that slot's callback. If the stream is then reused and abandoned
@@ -527,7 +527,7 @@ TEST_F(GPU_StreamTracker_FP32, ALateCallbackDoesNotRetireALaterReuseOfItsStream)
     EXPECT_TRUE(ReleasedWithin(b_scratch)) << "the later abandonment was never retired";
 }
 
-TEST_F(GPU_StreamTracker_FP32, DestroyingTheTrackerWaitsForAbandonedWorkAndReleasesIt)
+TEST_P(GPU_StreamTracker_FP32, DestroyingTheTrackerWaitsForAbandonedWorkAndReleasesIt)
 {
     // Teardown must outlast the abandoned kernel - it runs from code objects the
     // Handle unloads next - let every callback run, and stop the worker with all
@@ -559,7 +559,7 @@ TEST_F(GPU_StreamTracker_FP32, DestroyingTheTrackerWaitsForAbandonedWorkAndRelea
     EXPECT_TRUE(scratch.expired()) << "teardown left the abandoned scratch behind";
 }
 
-TEST_F(GPU_StreamTracker_FP32, ConcurrentFindsOnOneTrackerNeitherDeadlockNorLeak)
+TEST_P(GPU_StreamTracker_FP32, ConcurrentFindsOnOneTrackerNeitherDeadlockNorLeak)
 {
     // Threads running find on one handle drive acquire/abandon/release against
     // the runtime's callback thread and the worker, with acquire() and the worker
@@ -598,7 +598,7 @@ TEST_F(GPU_StreamTracker_FP32, ConcurrentFindsOnOneTrackerNeitherDeadlockNorLeak
     EXPECT_TRUE(scratch.expired()) << "a slot kept its scratch past teardown";
 }
 
-TEST_F(GPU_StreamTracker_FP32, AcquireLeavesTheDeallocatorToTheWorker)
+TEST_P(GPU_StreamTracker_FP32, AcquireLeavesTheDeallocatorToTheWorker)
 {
     // acquire() runs inside find. It may reclaim a slot itself, on the slot's done
     // event, but freeing the scratch is the worker's job: a deallocator can block
@@ -645,7 +645,7 @@ TEST_F(GPU_StreamTracker_FP32, AcquireLeavesTheDeallocatorToTheWorker)
     slow_tracker.release(std::move(next));
 }
 
-TEST_F(GPU_StreamTracker_FP32, AcquireAtTheCapReclaimsFinishedSlotsWhoseCallbacksAreHeld)
+TEST_P(GPU_StreamTracker_FP32, AcquireAtTheCapReclaimsFinishedSlotsWhoseCallbacksAreHeld)
 {
     // SweepLocked is the backstop for a callback that is late or never comes:
     // with the backlog full, acquire() must take back a slot whose done event
@@ -704,7 +704,7 @@ TEST_F(GPU_StreamTracker_FP32, AcquireAtTheCapReclaimsFinishedSlotsWhoseCallback
     tracker.release(slot);
 }
 
-TEST_F(GPU_StreamTracker_FP32, SharedScratchSurvivesUntilItsLastHolderLetsGo)
+TEST_P(GPU_StreamTracker_FP32, SharedScratchSurvivesUntilItsLastHolderLetsGo)
 {
     // Evaluations share one scratch buffer to keep the footprint down. Retiring
     // an abandoned holder must only drop its reference: the buffer has to stay
@@ -740,7 +740,7 @@ TEST_F(GPU_StreamTracker_FP32, SharedScratchSurvivesUntilItsLastHolderLetsGo)
     tracker.release(std::move(running));
 }
 
-TEST_F(GPU_StreamTracker_FP32, ReleaseReturnsTheSlotToThePoolClean)
+TEST_P(GPU_StreamTracker_FP32, ReleaseReturnsTheSlotToThePoolClean)
 {
     // A released slot sits idle in the pool, so it must not pin its buffer; and
     // a done event left on it would read as complete if the stream were later
@@ -763,7 +763,7 @@ TEST_F(GPU_StreamTracker_FP32, ReleaseReturnsTheSlotToThePoolClean)
     tracker.release(std::move(again));
 }
 
-TEST_F(GPU_StreamTracker_FP32, AReusedSlotIsNotReclaimedOnItsPreviousDoneEvent)
+TEST_P(GPU_StreamTracker_FP32, AReusedSlotIsNotReclaimedOnItsPreviousDoneEvent)
 {
     // The worker retires a slot and it goes back into the pool. If the old,
     // completed done event stayed on it, the stream's next abandonment would be
@@ -796,7 +796,7 @@ TEST_F(GPU_StreamTracker_FP32, AReusedSlotIsNotReclaimedOnItsPreviousDoneEvent)
     gate.open();
 }
 
-TEST_F(GPU_StreamTracker_FP32, TheWorkerFreesOutsideTheTrackerLock)
+TEST_P(GPU_StreamTracker_FP32, TheWorkerFreesOutsideTheTrackerLock)
 {
     // The worker runs the deallocator, which can block - the default one's
     // hipFree waits for every stream on the device. Holding the tracker lock
@@ -826,13 +826,17 @@ TEST_F(GPU_StreamTracker_FP32, TheWorkerFreesOutsideTheTrackerLock)
         << "acquire() waited for the worker's deallocation";
 }
 
-TEST(CPU_StreamTracker_NONE, ZeroCapIsRaisedToOne)
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_StreamTracker_FP32, ::testing::Values(0));
+
+using CPU_StreamTracker_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_StreamTracker_NONE, ZeroCapIsRaisedToOne)
 {
     // A zero cap would leave acquire() waiting on an empty backlog forever.
     EXPECT_EQ(miopen::StreamTracker{0}.MaxDraining(), 1u);
 }
 
-TEST(CPU_StreamTracker_NONE, BacklogCapFollowsGpuMaxHwQueues)
+TEST_P(CPU_StreamTracker_NONE, BacklogCapFollowsGpuMaxHwQueues)
 {
     using miopen::StreamTracker;
     // The hardware rings less the handle's stream and the slot being handed out,
@@ -848,3 +852,5 @@ TEST(CPU_StreamTracker_NONE, BacklogCapFollowsGpuMaxHwQueues)
     for(const char* bad : {"0", "-1", "abc", "", "99999999999999999999999"})
         EXPECT_EQ(StreamTracker::MaxDrainingFor(bad), 2u) << "GPU_MAX_HW_QUEUES=\"" << bad << '"';
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_StreamTracker_NONE, testing::Values(0));
