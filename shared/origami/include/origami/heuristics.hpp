@@ -335,8 +335,11 @@ struct w4a16_params_t {
   // MT_M x MT_N f32 partial from the workspace and adds it, one partial after another.
   // [MEASURED] on a gfx1151: one tile split over 2 to 6 workgroups with the same K each (so the
   // K loops do not change), seven kernels of 4, 8 and 16 waves and partials of 2 to 197 KB:
-  // the kernel grows by 0.2 us per partial plus its bytes at 69 GB/s (0.3 us for 2 KB, 1.6 for
-  // 98 KB, 3.2 for 197 KB), whatever part of the tile lies inside the problem.  Kernels whose
+  // the kernel grows per partial by 0.3 us for 2 KB, 1.6 for 98 KB, 3.2 for 197 KB, whatever
+  // part of the tile lies inside the problem: the bytes at 69 GB/s, on top of the flag poll.
+  // The poll is a load that goes to memory, charged as a load round trip: with the CUs shared
+  // a partial of 2 KB costs 0.4 to 0.65 us (80 and 40 workgroups of 32x16x128 as 2 to 40
+  // splits per tile, the same K each), 0.3 with the device idle.  Kernels whose
   // epilogue has registers for 2 accumulators at a time (128x128x64 and 160x128x64, 32 and 40
   // load batches a partial where the others have 1 or 2) take 0.08 us more per batch; the
   // batches are not known to the model and are not charged.
@@ -346,7 +349,6 @@ struct w4a16_params_t {
   // tiles, 10 split in 4 25.8, 5 split in 8 30: 2 to 3.4 MB of partials at 115 to 125 GB/s,
   // half the DRAM rate); that bound is computed from the hardware's bandwidth.
   static constexpr double SK_FIXUP_GB_PER_S       = 69.0;  // [MEASURED]
-  static constexpr double SK_FIXUP_HANDSHAKE_US   = 0.2;   // [MEASURED]
 };
 
 /// Whether the W4A16 terms apply to @p problem on @p hardware. The latency model and the

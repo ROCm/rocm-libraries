@@ -3507,15 +3507,16 @@ double compute_total_latency(const problem_t& problem,
     const double tile_iters = static_cast<double>(std::max<size_t>(math::safe_ceil_div(K, MT_K), 1));
     const double partials = wgs > tiles ? std::min(std::ceil(wgs / tiles), tile_iters) - 1.0
                                         : (context.num_output_tiles % context.num_wgs ? 1.0 : 0.0);
-    // The owner's handshake and its loads of each partial, one after another, are measured
-    // times.  The partials do not go through the caches (their stores and loads are glc slc):
+    // The owner's loads of each partial, one after another, are a measured rate.  The partials do not go through the caches (their stores and loads are glc slc):
     // every partial of the kernel is stored and then loaded through the device's memory, which
     // bounds the fixup when many tiles are split at once.  A workgroup leaves a partial where
     // it starts inside a tile: workgroups - gcd(workgroups, tiles) of them.  In the device's
     // cycles, after the kernel's clock.
     const double partial_bytes = static_cast<double>(config.mt.m * config.mt.n) * 4.0;
     const double clock_hz      = device.compute_clock_ghz * 1e9;
-    const double L_handshake   = partials * w4a16_params_t::SK_FIXUP_HANDSHAKE_US * 1e-6 * clock_hz;
+    // The owner polls each peer's flag with a load that goes to memory (s_load glc dlc): a
+    // load round trip per partial, at the kernel's clock.
+    const double L_handshake   = partials * heuristic_defaults_t::load_latency_cycles(hardware.arch) * clock_ratio;
     const double L_owner       = partials * partial_bytes / (w4a16_params_t::SK_FIXUP_GB_PER_S * 1e9) * clock_hz;
     const double kernel_partials =
         static_cast<double>(context.num_wgs - std::gcd(context.num_wgs, context.num_output_tiles));

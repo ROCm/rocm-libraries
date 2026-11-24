@@ -358,8 +358,9 @@ TEST_CASE("GEMM: W4A16 Stream-K charges the partials of a split tile", "[gemm][w
   // one after another: the measured handshake and bytes of each, in the device's cycles, and
   // nothing else for the reduction.
   using w4 = origami::w4a16_params_t;
-  const double partial = (w4::SK_FIXUP_HANDSHAKE_US * 1e-6 + 128.0 * 128.0 * 4.0 / (w4::SK_FIXUP_GB_PER_S * 1e9)) *
-                         hardware.compute_clock_ghz * 1e9;
+  // (The poll: a load round trip at the kernel's 2.1 GHz.)
+  const double partial = origami::heuristic_defaults_t::load_latency_cycles(hardware.arch) * hardware.compute_clock_ghz / 2.1 +
+                         128.0 * 128.0 * 4.0 / (w4::SK_FIXUP_GB_PER_S * 1e9) * hardware.compute_clock_ghz * 1e9;
   REQUIRE(latency(4) - latency(2) == Approx(2.0 * partial).epsilon(0.15));
   REQUIRE(latency(8) - latency(4) == Approx(4.0 * partial).epsilon(0.15));
   // A config that names no reduction has it selected, here a separate launch (few tiles, many
