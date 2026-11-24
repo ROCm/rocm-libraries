@@ -10788,7 +10788,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpsv_strided_batched_64(rocblas_handle   
             - if rocblas_fill_lower, the upper part of A is not referenced.
     @param[in]
     n         [rocblas_int]
-              n specifies the number of rows and columns of A. n >= 0.
+              the number of rows and columns of matrix A. n >= 0.
     @param[in]
     alpha
               specifies the scalar alpha.
@@ -11280,7 +11280,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymv_strided_batched_64(rocblas_handle   
             - if rocblas_fill_lower, the upper part of A is not referenced.
     @param[in]
     n         [rocblas_int]
-              n specifies the number of rows and columns of A. n >= 0.
+              the number of rows and columns of matrix A. n >= 0.
     @param[in]
     alpha
               specifies the scalar alpha.
@@ -11582,7 +11582,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspmv_strided_batched_64(rocblas_handle ha
               - if rocblas_fill_lower, the upper part of A is not referenced.
     @param[in]
     n         [rocblas_int]
-              n specifies the number of rows and columns of A. n >= 0.
+              the number of rows and columns of matrix A. n >= 0.
     @param[in]
     k         [rocblas_int]
               specifies the number of sub- and super-diagonals.
@@ -16484,7 +16484,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymm_strided_batched_64(rocblas_handle   
     transA  [rocblas_operation]
             - rocblas_operation_transpose:           op(A) = A^T
             - rocblas_operation_none:                op(A) = A
-            - rocblas_operation_conjugate_transpose: op(A) = A^H
+            - rocblas_operation_conjugate_transpose: op(A) = A^T
             - rocblas_operation_conjugate_transpose is not supported for complex types. See cherk
             and zherk.
 
@@ -16650,7 +16650,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrk_64(rocblas_handle                han
     transA  [rocblas_operation]
             - rocblas_operation_transpose:           op(A) = A^T
             - rocblas_operation_none:                op(A) = A
-            - rocblas_operation_conjugate_transpose: op(A) = A^H
+            - rocblas_operation_conjugate_transpose: op(A) = A^T
             - rocblas_operation_conjugate_transpose is not supported for complex types. See cherk
             and zherk.
 
@@ -16827,7 +16827,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrk_batched_64(rocblas_handle           
     transA  [rocblas_operation]
             - rocblas_operation_transpose:           op(A) = A^T
             - rocblas_operation_none:                op(A) = A
-            - rocblas_operation_conjugate_transpose: op(A) = A^H
+            - rocblas_operation_conjugate_transpose: op(A) = A^T
             - rocblas_operation_conjugate_transpose is not supported for complex types. See cherk
             and zherk.
 
@@ -17030,7 +17030,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrk_strided_batched_64(rocblas_handle   
     trans  [rocblas_operation]
             - rocblas_operation_transpose:           op( A ) = A^T, op( B ) = B^T
             - rocblas_operation_none:                op( A ) = A, op( B ) = B
-            - rocblas_operation_conjugate_transpose: op( A ) = A^H, op( B ) = B^H
+            - rocblas_operation_conjugate_transpose: op( A ) = A^T, op( B ) = B^T
             - rocblas_operation_conjugate_transpose is not supported for complex types in csyr2k and zsyr2k.
 
     @param[in]
@@ -17664,7 +17664,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2k_strided_batched_64(rocblas_handle  
     trans  [rocblas_operation]
             - rocblas_operation_transpose:           op( A ) = A^T, op( B ) = B^T
             - rocblas_operation_none:                op( A ) = A, op( B ) = B
-            - rocblas_operation_conjugate_transpose: op( A ) = A^H, op( B ) = B^H
+            - rocblas_operation_conjugate_transpose: op( A ) = A^T, op( B ) = B^T
             - rocblas_operation_conjugate_transpose is not supported for complex types in csyrkx and zsyrkx.
 
     @param[in]
@@ -19162,7 +19162,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrtri(rocblas_handle                handl
               - 'rocblas_diagonal_unit': A is unit triangular.
     @param[in]
     n         [rocblas_int]
-              n specifies the number of rows and columns of A. n >= 0.
+              the number of rows and columns of matrix A. n >= 0.
     @param[in]
     A         device array of device pointers storing each matrix A_i.
     @param[in]
@@ -19245,7 +19245,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrtri_batched(rocblas_handle             
               - 'rocblas_diagonal_unit': A is unit triangular.
     @param[in]
     n         [rocblas_int]
-              n specifies the number of rows and columns of A. n >= 0.
+              the number of rows and columns of matrix A. n >= 0.
     @param[in]
     A         device pointer pointing to address of first matrix A_1.
     @param[in]
@@ -23862,7 +23862,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_trsm_strided_batched_ex(rocblas_handle    
     transA  [rocblas_operation]
             - rocblas_operation_transpose:           op(A) = A^T
             - rocblas_operation_none:                op(A) = A
-            - rocblas_operation_conjugate_transpose: op(A) = A^H
+            - rocblas_operation_conjugate_transpose: op(A) = A^T
             - rocblas_operation_conjugate_transpose is not supported for complex types. See cherk
             and zherk.
 

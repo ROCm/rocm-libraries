@@ -9013,7 +9013,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZhpr2StridedBatched_64(hipblasHandle_t    
               - If HIPBLAS_FILL_MODE_LOWER, the upper part of A is not referenced.
     @param[in]
     n         [int]
-              n specifies the number of rows and columns of A. n >= 0.
+              the number of rows and columns of matrix A. n >= 0.
     @param[in]
     k         [int]
               specifies the number of sub- and super-diagonals.
@@ -9374,7 +9374,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDsbmvStridedBatched_64(hipblasHandle_t   h
               - If HIPBLAS_FILL_MODE_LOWER, the upper part of A is not referenced.
     @param[in]
     n         [int]
-              n specifies the number of rows and columns of A. n >= 0.
+              the number of rows and columns of matrix A. n >= 0.
     @param[in]
     alpha
               specifies the scalar alpha.
@@ -10482,7 +10482,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasDspr2StridedBatched_64(hipblasHandle_t   h
               - If HIPBLAS_FILL_MODE_LOWER, the upper part of A is not referenced.
     @param[in]
     n         [int]
-              n specifies the number of rows and columns of A. n >= 0.
+              the number of rows and columns of matrix A. n >= 0.
     @param[in]
     alpha
               specifies the scalar alpha.
@@ -17472,7 +17472,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZsymmStridedBatched_64(hipblasHandle_t    
     transA  [hipblasOperation_t]
             - HIPBLAS_OP_T: op(A) = A^T
             - HIPBLAS_OP_N: op(A) = A
-            - HIPBLAS_OP_C: op(A) = A^H
+            - HIPBLAS_OP_C: op(A) = A^T
             - HIPBLAS_OP_C is not supported for complex types. See cherk
             and zherk.
 
@@ -17644,7 +17644,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZsyrk_64(hipblasHandle_t         handle,
     transA  [hipblasOperation_t]
             - HIPBLAS_OP_T: op(A) = A^T
             - HIPBLAS_OP_N: op(A) = A
-            - HIPBLAS_OP_C: op(A) = A^H
+            - HIPBLAS_OP_C: op(A) = A^T
             - HIPBLAS_OP_C is not supported for complex types. See cherk
             and zherk.
 
@@ -17826,7 +17826,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZsyrkBatched_64(hipblasHandle_t           
     transA  [hipblasOperation_t]
             - HIPBLAS_OP_T: op(A) = A^T
             - HIPBLAS_OP_N: op(A) = A
-            - HIPBLAS_OP_C: op(A) = A^H
+            - HIPBLAS_OP_C: op(A) = A^T
             - HIPBLAS_OP_C is not supported for complex types. See cherk
             and zherk.
 
@@ -21765,7 +21765,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrtri(hipblasHandle_t         handle,
               - 'HIPBLAS_DIAG_UNIT', A is unit triangular.
     @param[in]
     n         [int]
-              n specifies the number of rows and columns of A. n >= 0.
+              the number of rows and columns of matrix A. n >= 0.
     @param[in]
     AP         device array of device pointers storing each matrix A_i.
     @param[in]
@@ -21852,7 +21852,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrtriBatched(hipblasHandle_t             
               - 'HIPBLAS_DIAG_UNIT', A is unit triangular.
     @param[in]
     n         [int]
-              n specifies the number of rows and columns of A. n >= 0.
+              the number of rows and columns of matrix A. n >= 0.
     @param[in]
     AP         device pointer pointing to address of first matrix A_1.
     @param[in]
