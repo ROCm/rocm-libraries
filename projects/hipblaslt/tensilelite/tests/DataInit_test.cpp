@@ -718,6 +718,64 @@ TEST(DataInitializationMafScales, Maf1_0ScalesDefaultToHalf)
               (std::array<float, 2>{2.0f, 2.0f}));
 }
 
+// hipBLASLt fills each pointer-array batch as its own matrix, seeded A/B/C + 3 * batch. In
+// pointer-array mode the client must draw the same data: batch b of each tensor equals a Maf2_0
+// fill of one batch with seed index tensor + 3 * b. The first A value of batch 1 is the one
+// hipblaslt-bench draws there, 0.914811 (thread 0 starts at element 0 for any thread count).
+TEST(DataInitializationMafPointerArray, Maf2_0SeedsEachBatchLikeHipblaslt)
+{
+    using namespace TensileLite::Client;
+    auto args = makeMinimalClientArgs(/*mxScaleFormat=*/0);
+    for(auto const* name : {"type",
+                            "a-type",
+                            "b-type",
+                            "c-type",
+                            "d-type",
+                            "alpha-type",
+                            "beta-type",
+                            "compute-input-type-A",
+                            "compute-input-type-B",
+                            "f32-xdl-math-op",
+                            "activation-compute-type"})
+        setOption(args, name, rocisa::DataType::Double);
+    setOption(args, "problem-size", std::vector<std::vector<size_t>>{{4, 3, 2, 5}});
+    setOption(args, "batch-mode", 1);
+    for(auto const* name : {"init-a", "init-b", "init-c"})
+        setOption(args, name, InitMode::Maf2_0);
+    ClientProblemFactory factory(args);
+    CPUInputProbe        dataInit(args, factory);
+    auto const&          gemm = dynamic_cast<ContractionProblemGemm const&>(*factory.problems()[0]);
+    ASSERT_EQ(gemm.batchMode(), ContractionProblemGemm::BATCHMODE::POINTER_ARRAY);
+    dataInit.initializeCPUInputs(gemm);
+
+    auto const& batch = gemm.batchIndices().at(0);
+    for(int tensor : {ContractionProblemGemm::TENSOR::A,
+                      ContractionProblemGemm::TENSOR::B,
+                      ContractionProblemGemm::TENSOR::C})
+    {
+        auto const&  desc = gemm.tensors()[tensor];
+        size_t const dim  = tensor == ContractionProblemGemm::TENSOR::A   ? batch.a
+                            : tensor == ContractionProblemGemm::TENSOR::B ? batch.b
+                                                                          : batch.c;
+        ASSERT_EQ(desc.sizes()[dim], 2u);
+        size_t const batchElements = desc.totalAllocatedElements() - desc.strides()[dim];
+        auto const   bytes         = dataInit.cpuBytes(
+            tensor, rocisa::DataType::Double, desc.totalAllocatedElements() * sizeof(double));
+        std::vector<double> data(desc.totalAllocatedElements());
+        std::memcpy(data.data(), bytes.data(), bytes.size());
+        for(size_t b = 0; b < 2; b++)
+        {
+            std::vector<double> expected(batchElements);
+            DataInitialization::initArrayMaf2_0(expected.data(), batchElements, tensor + 3 * b);
+            std::vector<double> const got(data.begin() + b * desc.strides()[dim],
+                                          data.begin() + b * desc.strides()[dim] + batchElements);
+            EXPECT_EQ(got, expected) << "tensor " << tensor << " batch " << b;
+            if(tensor == ContractionProblemGemm::TENSOR::A && b == 1)
+                EXPECT_NEAR(got[0], 0.914811, 5e-7);
+        }
+    }
+}
+
 // B is K = 32 (one MX block) by N = 2 with a leading dimension of 64, so the client allocates
 // 64 + 32 = 96 bytes. The generated data must stay inside them; a generator buffer of
 // ldb * N = 128 bytes would spill 32 bytes past the end.

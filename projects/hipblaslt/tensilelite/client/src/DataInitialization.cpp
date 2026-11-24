@@ -1982,11 +1982,11 @@ namespace TensileLite
                         if(p.second.initDescriptor[0] != tensors[i])
                         {
                             p.second.initDescriptor[0] = tensors[i];
-                            initArray(p.first,
-                                      m_vdata[i].init,
-                                      p.second.cpuInput.valid.get(),
-                                      tensors[i],
-                                      i);
+                            initProblemTensor(problem,
+                                              p.first,
+                                              m_vdata[i].init,
+                                              p.second.cpuInput.valid.get(),
+                                              i);
                             if((problem.sparse() == 1 && i == ContractionProblemGemm::TENSOR::A)
                                || (problem.sparse() == 2 && i == ContractionProblemGemm::TENSOR::B))
                             {
@@ -2175,6 +2175,48 @@ namespace TensileLite
             std::memset(buffer + compactRow, 0x00, padTail);
         }
 
+        void DataInitialization::initProblemTensor(ContractionProblemGemm const& problem,
+                                                   rocisa::DataType              dataType,
+                                                   InitMode                      initMode,
+                                                   void*                         array,
+                                                   size_t                        i)
+        {
+            TensorDescriptor const& tensor = problem.tensors()[i];
+            bool const              perBatch
+                = (initMode == InitMode::Maf2_0 || initMode == InitMode::Maf2_0UnitScale)
+                  && problem.batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY
+                  && i <= ContractionProblemGemm::TENSOR::C && problem.batchIndices().size() == 1;
+            if(!perBatch)
+            {
+                initArray(dataType, initMode, array, tensor, i);
+                return;
+            }
+            // hipBLASLt fills each pointer-array batch as its own matrix of M + ld * (N - 1)
+            // elements, seeded i + 3 * batch. A broadcast batch (stride 0) is one matrix and keeps
+            // batch 0's data; overlapping batches are filled in order, so the last one wins.
+            auto const&  batch   = problem.batchIndices()[0];
+            size_t const dim     = i == ContractionProblemGemm::TENSOR::A   ? batch.a
+                                   : i == ContractionProblemGemm::TENSOR::B ? batch.b
+                                                                            : batch.c;
+            auto         sizes   = tensor.sizes();
+            auto const&  strides = tensor.strides();
+            size_t const batches = strides[dim] == 0 ? 1 : sizes[dim];
+            size_t const stride  = strides[dim] * DataTypeInfo::Get(dataType).elementSize;
+            sizes[dim]           = 1;
+            TensorDescriptor const slice(tensor.getName().c_str(),
+                                         tensor.dataType(),
+                                         sizes.begin(),
+                                         sizes.end(),
+                                         strides.begin(),
+                                         strides.end());
+            for(size_t b = 0; b < batches; b++)
+                initArray(dataType,
+                          initMode,
+                          static_cast<uint8_t*>(array) + b * stride,
+                          slice,
+                          i + 3 * b);
+        }
+
         void DataInitialization::initializeMXData(ContractionProblemGemm const& problem)
         {
             // Seeds A, B, MXSA, MXSB so the default-init loop in initializeCPUInputs
@@ -2190,11 +2232,8 @@ namespace TensileLite
                     if(p.second.initDescriptor[0] != tensors[i])
                     {
                         p.second.initDescriptor[0] = tensors[i];
-                        initArray(p.first,
-                                  m_vdata[i].init,
-                                  p.second.cpuInput.valid.get(),
-                                  tensors[i],
-                                  i);
+                        initProblemTensor(
+                            problem, p.first, m_vdata[i].init, p.second.cpuInput.valid.get(), i);
                     }
                 }
             };

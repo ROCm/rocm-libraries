@@ -518,8 +518,8 @@ namespace TensileLite
                                          std::shared_ptr<ProblemInputs> inputs,
                                          hipStream_t                    stream);
 
-            // tensorIndex (ContractionProblemGemm::TENSOR) only seeds Maf2_0 and picks the
-            // Maf1_0 function.
+            // tensorIndex (ContractionProblemGemm::TENSOR) picks the Maf1_0 function and seeds
+            // Maf2_0 (initProblemTensor passes tensorIndex + 3 * batch for pointer-array batches).
             template <typename S>
             void initArray(rocisa::DataType dataType,
                            InitMode         initMode,
@@ -971,9 +971,10 @@ namespace TensileLite
             // Maf2_0 seeding mirrors mxDataGenerator (DataGenerator.hpp) so data is reproducible:
             // one std::mt19937 per OpenMP thread seeded seed + tid, using
             // min(32, omp_get_max_threads()) threads that each fill a contiguous chunk. Each tensor
-            // gets its own seed range (seed + 32 * tensorIndex), matching hipBLASLt's maf2_0.
+            // and pointer-array batch gets its own seed range, seed + 32 * seedIndex with seedIndex
+            // = tensorIndex + 3 * batch (batch 0 when strided), matching hipBLASLt's maf2_0.
             template <typename T>
-            static void initArrayMaf2_0(T* array, size_t elements, size_t tensorIndex)
+            static void initArrayMaf2_0(T* array, size_t elements, size_t seedIndex)
             {
                 // Draws in double and rounds each draw once to nearest even (roundMaf1_0; FP8
                 // saturates finite values to the largest finite one).
@@ -985,7 +986,7 @@ namespace TensileLite
                     constexpr uint32_t baseSeed = 1713573849u; // generateMXInput's fixed seed
                     constexpr int      maxThreads = 32;
                     const uint32_t     seed
-                        = baseSeed + maxThreads * static_cast<uint32_t>(tensorIndex);
+                        = baseSeed + maxThreads * static_cast<uint32_t>(seedIndex);
                     const int numThreads = std::min(maxThreads, omp_get_max_threads());
 #pragma omp parallel num_threads(numThreads)
                     {
@@ -1341,6 +1342,14 @@ namespace TensileLite
             void initializeConstantInputs(ContractionProblemGemm const& problem);
 
             void initializeMXData(ContractionProblemGemm const& problem);
+
+            // initArray for tensor i of problem. In pointer-array batch mode Maf2_0 fills A, B and
+            // C one batch at a time with seed index i + 3 * batch, as hipBLASLt does.
+            void initProblemTensor(ContractionProblemGemm const& problem,
+                                   rocisa::DataType              dataType,
+                                   InitMode                      initMode,
+                                   void*                         array,
+                                   size_t                        i);
 
             void initNonMXSideWithMXGenerator(int                     dataTensorEnum,
                                               int                     scaleTensorEnum,
