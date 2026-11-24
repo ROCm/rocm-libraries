@@ -71,7 +71,7 @@
  * EngineModelBinding does), and a census that passes ProbeGraphs also asks each model once
  * about a graph its engine serves (L1: an AVAILABLE, finite prediction through
  * EngineModelBinding::predict(); L2: a ranking of the packs' kernels that leads with a
- * positive score), host-only.
+ * finite, non-zero score), host-only.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
@@ -419,9 +419,10 @@ inline std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>
 
 /// Ranks every kernel the packs ship for @p archKey with @p scorer, the engine's L2 for it, on
 /// the probe graphs the engine serves. For at least one of them the ranking must hold the same
-/// candidates and lead with a finite positive score: a ranking that fails (a feature the
-/// graph does not give, a kernel the model cannot encode) falls back to declared order,
-/// whose every score is 0. When none does, each graph's outcome is named.
+/// candidates and lead with a finite non-zero score (negative for an objective "min" ranker,
+/// whose scores carry the objective's sign): a ranking that fails (a feature the graph does
+/// not give, a kernel the model cannot encode) falls back to declared order, whose every
+/// score is 0. When none does, each graph's outcome is named.
 inline void expectRankerRanks(const hipdnn_plugin_sdk::ingestor::DescriptorSet& set,
                               const hipdnn_plugin_sdk::ingestor::HeuristicDescriptor& model,
                               const hipdnn_plugin_sdk::ingestor::UhdKernelHeuristic& scorer,
@@ -455,7 +456,7 @@ inline void expectRankerRanks(const hipdnn_plugin_sdk::ingestor::DescriptorSet& 
         context.rankingMetric = metric;
         const auto ranking = scorer.rankScored(catalog, context);
         if(ranking.size() == kernels.size() && std::isfinite(ranking.front().score)
-           && ranking.front().score > 0.0)
+           && ranking.front().score != 0.0)
         {
             return;
         }
