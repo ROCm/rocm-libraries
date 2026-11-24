@@ -36,6 +36,7 @@ class Parser:
         default_max_feval: Optional[int] = None,
         default_output_dir: str = "../output",
         default_strategy: Optional[str] = None,
+        default_tune_baseline: Optional[str] = None,
     ):
         parser = argparse.ArgumentParser()
 
@@ -58,10 +59,14 @@ class Parser:
             help=f"Output directory for JSON files (default: {default_output_dir})",
         )
         parser.add_argument(
-            "--exclude-default-config",
-            action="store_true",
-            default=False,
-            help="Include default configs of previous tuning in the new results (default: off)",
+            "--tune-baseline",
+            choices=["skip", "current", "fallback", "both"],
+            default=default_tune_baseline,
+            help="Which existing configs to also benchmark, so the config generator can "
+            "keep them when the tuned config isn't clearly faster: 'current' is the "
+            "config the library picks for this arch, 'fallback' is the config of the "
+            "generic target, 'both' runs both, 'skip' runs neither "
+            f"(default: {default_tune_baseline or 'current'})",
         )
         parser.add_argument(
             "--strategy",

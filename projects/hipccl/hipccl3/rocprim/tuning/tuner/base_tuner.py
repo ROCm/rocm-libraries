@@ -33,7 +33,9 @@ from hip import hip  # type: ignore (pyright doesn't detect hip-python correctly
 import warnings
 from dataclasses import dataclass
 import confgen.parse
+import confgen.generate
 import pathlib
+import re
 
 """
 The following base class is used when implementing the tuning for new algorithms
@@ -131,8 +133,10 @@ class TunerArgs:
     """Directory path to store tuning results and metadata.
     """
 
-    exclude_default_config: bool = False
-    """Whether to also test default configurations.
+    tune_baseline: str = "current"
+    """Which existing configs to also benchmark: "current" (the config the library
+    picks for this arch), "fallback" (the config of the generic target), "both" or
+    "skip".
     """
 
     save_metadata: bool = False
@@ -186,7 +190,7 @@ class BaseTuner(ABC):
                 args.arch_name
             ), "Simulation mode requires --arch-name to be specified"
             self.arch_name = args.arch_name
-        self.exclude_default_config = args.exclude_default_config
+        self.tune_baseline = args.tune_baseline
         self.max_fevals = args.max_fevals
         self.save_metadata = args.save_metadata
         self.strategy = args.strategy
@@ -195,13 +199,16 @@ class BaseTuner(ABC):
             json.loads(args.param_overrides) if args.param_overrides else {}
         )
 
-        if not self.exclude_default_config:
+        if self.tune_baseline != "skip":
             with open(
                 f"{BASE_DIR}/../rocprim/include/rocprim/device/detail/config/{self.algo_full_name}.hpp"
             ) as f:
-                self.existing_config = confgen.parse.parse_lines(f.readlines())
+                header = f.read()
+            self.existing_config = confgen.parse.parse_lines(header.splitlines())
+            self.fallback_target = self._parse_fallback_target(header)
         else:
             self.existing_config = None
+            self.fallback_target = None
 
     @classmethod
     @abstractmethod
@@ -218,6 +225,7 @@ class BaseTuner(ABC):
                 default_max_feval=defaults.max_fevals,
                 default_output_dir=defaults.output_dir,
                 default_strategy=defaults.strategy,
+                default_tune_baseline=defaults.tune_baseline,
             )
             .parse_args()
             ._get_kwargs()
@@ -269,88 +277,130 @@ class BaseTuner(ABC):
         # p["time"] is measured in ms/GiB
         return {"GiB/s": lambda p: (1000.0 / p["time"])}
 
-    def _run_default_config(
-        self, tune_kernel_args: Dict, types: Dict[str, Any]
-    ) -> None:
-        """Runs the default configuration if enabled."""
-        if self.exclude_default_config or self.simulation_mode:
-            return
+    @staticmethod
+    def _parse_fallback_target(header: str) -> Optional[frozenset]:
+        """Returns the target that the generic (unknown) target of a config header
+        forwards to, or None if it returns the algorithm's base config instead."""
+        start = header.find("// TARGET: {'gen': 'unknown'")
+        if start < 0:
+            return None
+        # Only look inside the generic target's config picker.
+        end = header.find("\n}\n", start)
+        picker = header[start : end if end >= 0 else len(header)]
+        pattern = r"comp_target<\s*gen::(\w+),\s*target_arch::(\w+),\s*gpu::(\w+),\s*rep::(\w+)\s*>"
+        for gen, arch, gpu, rep in re.findall(pattern, picker):
+            if arch != "unknown":
+                return frozenset(
+                    {("gen", gen), ("arch", arch), ("gpu", gpu), ("rep", rep)}
+                )
+        return None
 
-        target_arch = self.arch_name
+    def _get_baseline_targets(self) -> Dict[str, frozenset]:
+        """Returns the targets selected by --tune-baseline, whose configs the library
+        uses on the current arch: 'current' is the target most_common_config() picks
+        (config_types.hpp), and 'fallback' is the target the generic target forwards to
+        (usually gfx908). They are the same target when the header has no entry for
+        this arch or generation."""
+        targets = {}
+        if self.tune_baseline in ("fallback", "both"):
+            if self.fallback_target is not None:
+                targets["fallback"] = self.fallback_target
+            else:
+                warnings.warn(
+                    "The generic target returns the base config, which has no values to "
+                    "benchmark. Skipping the fallback baseline."
+                )
+        if self.tune_baseline not in ("current", "both"):
+            return targets
+
+        current_gen = confgen.generate.derive_gen(self.arch_name)
+        best_score = 0
+        current = None
+        for target in self.existing_config.keys():
+            t = dict(target)
+            # The library prefers an exact GPU match (score 3), but the tuner only knows
+            # the arch. For now assume there is only one GPU per arch.
+            score = (
+                2
+                if t["arch"] == self.arch_name
+                else 1 if t["gen"] == current_gen else 0
+            )
+            # Like the library, strictly better wins and on ties the later entry wins.
+            if score > 0 and score >= best_score:
+                best_score = score
+                current = target
+        if current is None:
+            current = self.fallback_target
+        if current is not None:
+            targets["current"] = current
+        return targets
+
+    def _run_baseline_configs(self, types: Dict[str, Any]) -> Dict[str, Dict]:
+        """Benchmarks the configs the library uses on the current arch today (see
+        _get_baseline_targets), so the config generator can keep them when the tuned
+        winner isn't clearly faster. Returns the baselines that were found."""
+        if (
+            self.tune_baseline == "skip"
+            or self.simulation_mode
+            or self.existing_config is None
+        ):
+            return {}
+
         if self.arch_name is None:
             warnings.warn(f"Could not detect current architecture!")
-            return
+            return {}
 
-        if self.existing_config is None:
-            return
-
-        # TODO: tuner currently does not have enough information to completely
-        # derive the full target specifier. For now just assume there is only one GPU
-        # per arch.
-        targets = [
-            t for t in self.existing_config.keys() if dict(t)["arch"] == target_arch
-        ]
-        target = None
-        if len(targets) > 0:
-            target = targets[0]
-        if len(targets) > 1:
-            warnings.warn(
-                f"More than one default config for current target {target_arch} found, picking {targets[0]}"
+        required_keys = list(self._get_tune_params(types).keys())
+        baselines = {}
+        for name, target in self._get_baseline_targets().items():
+            # Get first matching config
+            config = next(
+                (
+                    c
+                    for c in self.existing_config.get(target, [])
+                    if all(
+                        str(c.get(k, "empty_type")) == str(v) for k, v in types.items()
+                    )
+                ),
+                None,
             )
-        if target is None:
-            warnings.warn(
-                f"No appropiate default config for current target {target_arch}!"
+            target_arch = dict(target)["arch"]
+            if config is None:
+                warnings.warn(
+                    f"No {name} configuration ({target_arch}) found for types '{types}'"
+                )
+                continue
+
+            # If any tunable parameter is not in the existing config, we can't run it.
+            if any(k not in config for k in required_keys):
+                warnings.warn(
+                    f"The {name} configuration ({target_arch}) does not match the tunable parameters."
+                )
+                continue
+
+            params = {k: config[k] for k in required_keys}
+            baselines[name] = {"target": dict(target), "config": params}
+            if any(b["config"] == params for n, b in baselines.items() if n != name):
+                # Same config as the other baseline, it's already in the cache.
+                continue
+
+            # Force the tune parameters to the existing config, and run it with
+            # bruteforce. The library already builds this config, so the restrictions
+            # of the search grid don't apply to it.
+            tune_kernel_args = self._get_base_tune_kernel_args(types)
+            tune_kernel_args.update(
+                {
+                    "tune_params": {k: [v] for k, v in params.items()},
+                    "strategy": "brute_force",
+                    "strategy_options": {},
+                    "restrictions": None,
+                }
             )
-            return
 
-        arch_config = self.existing_config[target]
+            print(f"Benchmarking {name} configuration ({target_arch}): {params}")
+            kernel_tuner.tune_kernel(**tune_kernel_args)
 
-        # Get first matching config
-        config = next(
-            (
-                c
-                for c in arch_config
-                if all(str(c.get(k, "empty_type")) == str(v) for k, v in types.items())
-            ),
-            None,
-        )
-        if config is None:
-            warnings.warn(f"No existing configuration found for types '{types}'")
-            return
-
-        # Get the base tuning archs and force set the range of the tune parameters
-        # to the single-element lists 'default_tune_params'. We also change the
-        # strategy to bruteforce and clear any set strategy options.
-
-        # This contains the key-values of the existing config.
-        default_tune_params = {
-            k: [v] for k, v in config.items() if k not in set(types.keys())
-        }
-
-        # The required keys contain all the keys a matching pre-existing config needs.
-        required_keys = self._get_tune_params(types).keys()
-
-        # If any required key is not in the pre-existing config, then we need to warn the user
-        # and skip running the default case.
-        if any(
-            (not required_key in default_tune_params) for required_key in required_keys
-        ):
-            warnings.warn(
-                "Existing default configuration does not match tunable parameters."
-            )
-            return
-
-        tune_kernel_args = self._get_base_tune_kernel_args(types).copy()
-        tune_kernel_args.update(
-            {
-                "tune_params": default_tune_params,
-                "strategy": "brute_force",
-                "strategy_options": {},
-            }
-        )
-
-        print(f"Found existing configuration: {default_tune_params}")
-        kernel_tuner.tune_kernel(**tune_kernel_args)
+        return baselines
 
     def tune_type(
         self,
@@ -372,11 +422,11 @@ class BaseTuner(ABC):
             tune_kernel_args = self._get_base_tune_kernel_args(types)
             # Run main tuning
             results, _ = kernel_tuner.tune_kernel(**tune_kernel_args)
-            # Run default config if enabled
-            self._run_default_config(tune_kernel_args, types)
+            # Run the configs the library currently uses, if enabled
+            baselines = self._run_baseline_configs(types)
 
             cache_file_path = self._get_cache_file_path(types)
-            self._save_output(cache_file_path, types, results)
+            self._save_output(cache_file_path, types, results, baselines)
 
         except Exception as e:
             print(f"Failed tuning for {' '.join([str(x) for x in types.values()])}")
@@ -515,6 +565,7 @@ class BaseTuner(ABC):
         cache_file: str | pathlib.Path,
         types: Dict[str, Any],
         results: List | object | Any | None = None,
+        baselines: Optional[Dict[str, Dict]] = None,
     ):
         """Save tuning results and metadata to files."""
         if self.simulation_mode:
@@ -541,6 +592,18 @@ class BaseTuner(ABC):
                     new_content += "\n"
             new_content += content.lstrip()[1:]
 
+            with open(cache_file, "w") as f:
+                f.write(new_content)
+
+        if not self.simulation_mode and baselines is not None:
+            # Record which cache entries are the baselines, for the config generator.
+            # Inserted as a single line (replacing the one from an earlier run), so the
+            # rest of kernel tuner's cache file stays as it wrote it.
+            with open(cache_file, "r") as f:
+                content = f.read()
+            content = re.sub(r'^"baselines": .*,\n', "", content, flags=re.M)
+            new_content = "{\n" + f'"baselines": {json.dumps(baselines)},'
+            new_content += content.lstrip()[1:]
             with open(cache_file, "w") as f:
                 f.write(new_content)
 

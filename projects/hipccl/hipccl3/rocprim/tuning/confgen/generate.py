@@ -200,6 +200,37 @@ def resolve_shadowed_configs(targets, new_type_hashes):
         targets[target_hash] = {h: c for h, c in configs.items() if h not in dropped}
 
 
+def keep_baseline_if_close(
+    data: dict[str, ty.Any],
+    candidates: list[dict[str, ty.Any]],
+    winner: dict[str, ty.Any],
+    margin: float,
+) -> dict[str, ty.Any]:
+    """Returns the fastest baseline entry (the configs the library used on this arch
+    when tuning, recorded by the tuner) unless the tuned winner is more than 'margin'
+    faster than it. Times are in ms/GiB, so lower is better."""
+    keys = data.get("tune_params_keys", [])
+    best_name = None
+    best = None
+    for name, baseline in data.get("baselines", {}).items():
+        for c in candidates:
+            if all(str(c.get(k)) == str(baseline["config"].get(k)) for k in keys):
+                if best is None or c["time"] < best["time"]:
+                    best_name = name
+                    best = c
+    if best is None:
+        return winner
+
+    speedup = best["time"] / winner["time"] - 1
+    if speedup > margin:
+        log.info(f"Tuned config is {speedup:.1%} faster than the {best_name} config")
+        return winner
+    log.info(
+        f"Keeping the {best_name} config: the tuned config is only {speedup:.1%} faster"
+    )
+    return best
+
+
 def derive_gen(arch: str) -> str:
     """Derives the hardware generation from a given architecture."""
     arch_mapping = {
@@ -269,6 +300,14 @@ def main():
         "config (*_config_params_base), 'fastest' aliases to the tuned configs "
         "of the lowest tuned architecture.",
     )
+    cli.add_argument(
+        "--baseline-margin",
+        type=float,
+        default=0.05,
+        help="Keep the config the library used on the tuned arch (current or "
+        "fallback, whichever is faster) unless the tuned config is faster by more "
+        "than this fraction (default: 0.05).",
+    )
 
     args = cli.parse_args()
 
@@ -324,6 +363,9 @@ def main():
 
             # Find best config
             config_data = min(data_filter, key=lambda c: c["time"])
+            config_data = keep_baseline_if_close(
+                data, data_filter, config_data, args.baseline_margin
+            )
             # Drop unrelated entries
             config_ignored_names = [
                 "time",
