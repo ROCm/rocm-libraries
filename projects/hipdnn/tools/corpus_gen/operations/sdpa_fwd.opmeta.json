@@ -30,9 +30,13 @@
       "type": "int64",
       "range": [
         8,
-        512
+        576
       ],
-      "description": "Per-head width. 8 and up: narrower is not an attention head, and without a range the search spends half its draws below 16."
+      "common_values": [
+        192,
+        576
+      ],
+      "description": "Per-head width. 8 and up: narrower is not an attention head, and without a range the search spends half its draws below 16. Up to 576 for absorbed MLA's Q and K (value_head_dim mla); a V as wide as Q stays at 512 or less. The common values are the two MLA widths, beside the regime buckets 64, 128 and 256, so the search is seeded where an MLA combination can hold a problem: the constraints admit no other width there, which a walk does not find by stepping."
     },
     "value_head_dim": {
       "type": "enum",
@@ -44,7 +48,7 @@
         "same": 3,
         "mla": 1
       },
-      "description": "Width of V, and so of O (and dO, dV), against Q and K's head_dim. same (default): equal, as nearly every model has. mla: 64 narrower, DeepSeek's multi-head latent attention, whose Q and K carry a 64-wide rotary part that V does not -- 192/128 in prefill and training, 576/512 with the latent absorbed in decode. hipDNN requires only Q and K's last dims to agree (SdpaFwdNode Rule 2, SdpaBwdNode Rule 3; O, dO and dV take V's), and ASM SDPA and FlyDSL ship kernels for such pairs. Declared only with head_dim >= 128, so V keeps 64 or more."
+      "description": "Width of V, and so of O (and dO, dV), against Q and K's head_dim. same (default): equal, as nearly every model has. mla: 64 narrower, DeepSeek's multi-head latent attention, whose Q and K carry a 64-wide rotary part that V does not -- 192/128 in prefill and training, 576/512 with the latent absorbed in decode. hipDNN requires only Q and K's last dims to agree (SdpaFwdNode Rule 2, SdpaBwdNode Rule 3; O, dO and dV take V's), and ASM SDPA and FlyDSL ship kernels for such pairs. Declared at those two widths only (head_dim 192 or 576): the other widths the 64 offset gives (128/64, 129/65) are no model's, and the deepseek_v3 archetypes anchor both pairs."
     },
     "is_causal": {
       "type": "bool",
@@ -535,9 +539,31 @@
           ]
         },
         {
+          "==": [
+            "$q.head_dim",
+            192
+          ]
+        },
+        {
+          "==": [
+            "$q.head_dim",
+            576
+          ]
+        }
+      ]
+    },
+    {
+      "or": [
+        {
+          "==": [
+            "$q.value_head_dim",
+            "mla"
+          ]
+        },
+        {
           "<=": [
-            128,
-            "$q.head_dim"
+            "$q.head_dim",
+            512
           ]
         }
       ]
@@ -590,6 +616,22 @@
           "==": [
             "$q.seqlen_q",
             "$q.seqlen_k"
+          ]
+        }
+      ]
+    },
+    {
+      "or": [
+        {
+          "!=": [
+            "$q.layout",
+            "qkv_packed"
+          ]
+        },
+        {
+          "==": [
+            "$q.alignment",
+            "top_left"
           ]
         }
       ]
@@ -2545,7 +2587,7 @@
     },
     {
       "name": "cross_attention",
-      "note": "more queries than keys, from different tensors: diffusion and encoder-decoder attention over a short text or memory sequence. Bidirectional, as such attention is; a causal mask over more queries than keys is declared too (top-left, where every query row keeps a key), reached by exploration",
+      "note": "more queries than keys, from different tensors: diffusion and encoder-decoder attention over a short text or memory sequence. Bidirectional, as such attention is, and causal too: the mask over more queries than keys anchored top-left, where every query row keeps a key, which exploration alone reaches a few times in thousands of graphs",
       "values": {
         "batch": [
           1,
@@ -2577,7 +2619,83 @@
           160
         ],
         "is_causal": [
-          false
+          false,
+          true
+        ]
+      }
+    },
+    {
+      "name": "deepseek_v3_mla_prefill",
+      "source": "DeepSeek-V3 config.json (qk_nope_head_dim 128, qk_rope_head_dim 64, v_head_dim 128, 128 heads)",
+      "note": "multi-head latent attention with the latent expanded: Q and K 192 wide (128 + the 64-wide rotary part), V 128, one KV head per query head; all 128 heads, or the 16 of a tensor-parallel shard (and DeepSeek-V2-Lite)",
+      "values": {
+        "batch": [
+          1,
+          4,
+          8
+        ],
+        "heads": [
+          16,
+          128
+        ],
+        "heads_kv": [
+          "$q.heads"
+        ],
+        "seqlen_q": [
+          2048,
+          4096,
+          8192
+        ],
+        "seqlen_k": [
+          "$q.seqlen_q"
+        ],
+        "head_dim": [
+          192
+        ],
+        "value_head_dim": [
+          "mla"
+        ],
+        "is_causal": [
+          true
+        ]
+      }
+    },
+    {
+      "name": "deepseek_v3_mla_decode",
+      "source": "DeepSeek-V3 config.json (kv_lora_rank 512, qk_rope_head_dim 64); FlashMLA's absorbed decode",
+      "note": "multi-head latent attention with the up-projections absorbed: every query head against the one shared latent KV head, Q and K 576 wide (the 512 latent + the 64-wide rotary part), V the 512 latent",
+      "values": {
+        "batch": [
+          1,
+          8,
+          32,
+          64,
+          128
+        ],
+        "heads": [
+          16,
+          128
+        ],
+        "heads_kv": [
+          1
+        ],
+        "seqlen_q": [
+          1
+        ],
+        "seqlen_k": [
+          1024,
+          4096,
+          16384,
+          32768
+        ],
+        "head_dim": [
+          576
+        ],
+        "value_head_dim": [
+          "mla"
+        ],
+        "is_causal": [
+          true
         ]
       }
     }
@@ -2639,7 +2757,8 @@
         128,
         160,
         192,
-        256
+        256,
+        576
       ]
     }
   },
@@ -2649,6 +2768,6 @@
     "exploration": 0.2
   },
   "// archetypes": "Recorded transformer configurations (RFC 0019.13 \u00a712.3). Decode and prefill are the same operation and different problems -- seqlen_q of 1 against a long cache is memory bound, and a square prefill is compute bound -- so each is anchored separately rather than left to a range over seqlen_q.",
-  "// neighbourhood": "head_dim moves among the widths shipped models use rather than scaling, since an interpolated 100 or 144 is not a configuration anyone ships. seqlen_k mirrors seqlen_q at ratios >= 1, the relation of decoder attention (prefill and append); more queries than keys comes from exploration and the cross attention archetype.",
+  "// neighbourhood": "head_dim moves among the widths shipped models use rather than scaling, since an interpolated 100 or 144 is not a configuration anyone ships; 576 is absorbed MLA's Q and K, which the constraints keep to value_head_dim mla. seqlen_k mirrors seqlen_q at ratios >= 1, the relation of decoder attention (prefill and append); more queries than keys comes from exploration and the cross attention archetype.",
   "// mixture": "Same shares as conv_fwd; see the note there."
 }

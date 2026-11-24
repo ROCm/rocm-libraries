@@ -339,7 +339,8 @@ TEST(TestCorpusRealism, EveryShippedMirrorKeepsItsArchetypesProportion)
 
         std::mt19937_64 rng(31);
         size_t total = 0;
-        const auto combinations = detail::categoricalCombinations(metadata.parameters, 64, total);
+        const auto combinations
+            = detail::categoricalCombinations(metadata.parameters, 64, 0, total);
         for(const auto& archetype : metadata.archetypes)
         {
             for(const auto& combination : combinations)
@@ -470,37 +471,70 @@ TEST_P(TestShippedSdpaRealism, CorpusCoversHeadDimsLayoutsAndSequenceRelationsAM
 TEST_P(TestShippedSdpaRealism, ArchetypesAnchorCrossAttentionAndTheHeadWidthsOfRealModels)
 {
     // The anchors are what a large corpus is mostly made of, so they must themselves hold the
-    // cross-attention and the head widths the model-pinned archetypes (D of 64 and 128) lack.
+    // cross-attention (causal too: exploration alone reached it in 2 of 2000 forward graphs), the
+    // head widths the model-pinned archetypes (D of 64 and 128) lack, and every MLA pair the
+    // declaration admits: with none anchored, the MLA rows took whatever width the search drew.
     const auto metadata = test::shippedOperation(GetParam());
+    const std::set<int64_t> mlaWidths
+        = GetParam() == "sdpa_fwd" ? std::set<int64_t>{192, 576} : std::set<int64_t>{192};
 
     std::mt19937_64 rng(11);
     std::set<int64_t> headDims;
+    std::set<int64_t> mlaAnchored;
     size_t cross = 0;
+    size_t causalCross = 0;
     for(const bool causal : {true, false})
     {
-        const auto categorical = test::withDefaultCategoricals(
-            metadata, ProblemPoint{{"dtype", std::string("bf16")}, {"is_causal", causal}});
-        for(const auto& archetype : metadata.archetypes)
+        for(const std::string valueHead : {"same", "mla"})
         {
-            for(int i = 0; i < 40; ++i)
+            const auto categorical
+                = test::withDefaultCategoricals(metadata,
+                                                ProblemPoint{{"dtype", std::string("bf16")},
+                                                             {"is_causal", causal},
+                                                             {"value_head_dim", valueHead}});
+            for(const auto& archetype : metadata.archetypes)
             {
-                const auto drawn = detail::drawFromArchetype(metadata, archetype, categorical, rng);
-                if(!drawn.has_value())
+                // Enough that each of head_dim_sweep's eleven widths is drawn under either mask.
+                for(int i = 0; i < 100; ++i)
                 {
-                    continue; // the archetype fixes the other mask
+                    const auto drawn
+                        = detail::drawFromArchetype(metadata, archetype, categorical, rng);
+                    if(!drawn.has_value())
+                    {
+                        continue; // the archetype fixes the other mask or value width
+                    }
+                    const bool admitted = detail::satisfiesConstraints(metadata, *drawn);
+                    if(valueHead == "mla")
+                    {
+                        // Every archetype is tried for an MLA combination; those that are not
+                        // an MLA model draw widths the declaration refuses, which are dropped.
+                        if(admitted)
+                        {
+                            EXPECT_EQ(mlaWidths.count(at(*drawn, "head_dim")), 1U)
+                                << archetype.name << " anchors MLA at head_dim "
+                                << at(*drawn, "head_dim");
+                            mlaAnchored.insert(at(*drawn, "head_dim"));
+                        }
+                        continue;
+                    }
+                    EXPECT_TRUE(admitted)
+                        << archetype.name
+                        << " draws a point the declaration's own constraints refuse";
+                    headDims.insert(at(*drawn, "head_dim"));
+                    const bool isCross = at(*drawn, "seqlen_q") > at(*drawn, "seqlen_k");
+                    cross += isCross ? 1 : 0;
+                    causalCross += isCross && causal ? 1 : 0;
                 }
-                EXPECT_TRUE(detail::satisfiesConstraints(metadata, *drawn))
-                    << archetype.name << " draws a point the declaration's own constraints refuse";
-                headDims.insert(at(*drawn, "head_dim"));
-                cross += at(*drawn, "seqlen_q") > at(*drawn, "seqlen_k") ? 1 : 0;
             }
         }
     }
     EXPECT_GT(cross, 0U) << "no archetype anchors cross attention";
+    EXPECT_GT(causalCross, 0U) << "no archetype anchors causal cross attention";
     for(const int64_t width : {40, 48, 80, 96, 112, 160, 192, 256})
     {
         EXPECT_EQ(headDims.count(width), 1U) << "no archetype anchors head_dim " << width;
     }
+    EXPECT_EQ(mlaAnchored, mlaWidths) << "an MLA pair no archetype anchors";
 }
 
 INSTANTIATE_TEST_SUITE_P(SdpaDeclarations,

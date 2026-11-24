@@ -18,6 +18,7 @@
 #include "OperationsDir.hpp"
 #include <algorithm>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <numeric>
 #include <set>
@@ -784,7 +785,7 @@ TEST(TestProblemSpace, EveryShippedSdpaCombinationIsExploredAndNoDeclaredValueIs
         const auto metadata = test::shippedOperation(operation);
 
         size_t total = 0;
-        const auto all = detail::categoricalCombinations(metadata.parameters, 0, total);
+        const auto all = detail::categoricalCombinations(metadata.parameters, 0, 0, total);
         EXPECT_EQ(all.size(), total) << operation;
         // is_causal 2 x alignment 2 x dtype (the forward's 7, the backward's 3) x value_head_dim
         // 2 x layout 5 x scale 3 x window 4, then the forward's 8 forms and generate_stats 2,
@@ -795,6 +796,7 @@ TEST(TestProblemSpace, EveryShippedSdpaCombinationIsExploredAndNoDeclaredValueIs
         const auto sampled = detail::categoricalCombinations(
             metadata.parameters,
             ExplorationRequest{}.maxCombinations,
+            ExplorationRequest{}.seed,
             sampledTotal,
             [&metadata](const ProblemPoint& combination) {
                 return !detail::excludedByCategoricals(metadata, combination);
@@ -855,6 +857,93 @@ TEST(TestProblemSpace, EveryShippedSdpaCombinationIsExploredAndNoDeclaredValueIs
     }
 }
 
+TEST(TestProblemSpace, TheScatteredOrderIsABijectionOfTheProductUnderEverySeed)
+{
+    // Cycle-walked, the Feistel network visits each index of the product exactly once whatever
+    // its size (an odd product, one past a power of two, the forward's 53760) and seed.
+    for(const size_t total : {size_t{1}, size_t{2}, size_t{3}, size_t{1025}, size_t{53760}})
+    {
+        for(const uint64_t seed : {uint64_t{0}, uint64_t{1}, uint64_t{0xfeedULL}})
+        {
+            const detail::ScatteredOrder order(total, seed);
+            std::vector<bool> visited(total, false);
+            for(size_t step = 0; step < total; ++step)
+            {
+                const auto index = order(step);
+                ASSERT_LT(index, total) << total << " seed " << seed;
+                EXPECT_FALSE(visited[index]) << total << " seed " << seed << ": " << index;
+                visited[index] = true;
+            }
+        }
+    }
+}
+
+TEST(TestProblemSpace, TheSampledCombinationsAreTheSeedsOwn)
+{
+    // Past the bound a seed reproduces its own sample and another seed samples other
+    // combinations, so a corpus regenerated under a new seed reaches combinations the first did
+    // not. Keyed by its round number alone, the walk gave every seed the same 1024 of the
+    // forward's 34300 combinations that can hold a problem. Each seed's sample keeps every
+    // form at half its due share or more, as the default seed's does.
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        const auto metadata = test::shippedOperation(operation);
+        const auto live = [&metadata](const ProblemPoint& combination) {
+            return !detail::excludedByCategoricals(metadata, combination);
+        };
+        size_t total = 0;
+        std::map<std::string, double> liveForms;
+        double liveTotal = 0.0;
+        for(const auto& combination :
+            detail::categoricalCombinations(metadata.parameters, 0, 0, total))
+        {
+            if(live(combination))
+            {
+                liveForms[std::get<std::string>(combination.at("form"))] += 1.0;
+                liveTotal += 1.0;
+            }
+        }
+
+        const auto sample = [&](uint64_t seed) {
+            size_t sampledTotal = 0;
+            const auto sampled
+                = detail::categoricalCombinations(metadata.parameters,
+                                                  ExplorationRequest{}.maxCombinations,
+                                                  seed,
+                                                  sampledTotal,
+                                                  live);
+            std::map<std::string, double> forms;
+            std::set<std::string> described;
+            for(const auto& combination : sampled)
+            {
+                forms[std::get<std::string>(combination.at("form"))] += 1.0;
+                described.insert(detail::describe(combination));
+            }
+            for(const auto& [form, held] : liveForms)
+            {
+                const auto due = held / liveTotal * static_cast<double>(sampled.size());
+                EXPECT_GE(forms[form], due / 2.0) << operation << " seed " << seed << " " << form
+                                                  << ": " << forms[form] << " of " << due << " due";
+            }
+            return described;
+        };
+
+        const auto first = sample(1);
+        EXPECT_EQ(sample(1), first) << operation << ": a seed reproduces its sample";
+        for(const uint64_t seed : {uint64_t{2}, uint64_t{3}})
+        {
+            const auto other = sample(seed);
+            std::vector<std::string> shared;
+            std::set_intersection(
+                first.begin(), first.end(), other.begin(), other.end(), std::back_inserter(shared));
+            // Two independent samples of 1024 from 6126 or more share about 170 at most.
+            EXPECT_LT(shared.size(), first.size() / 4)
+                << operation << " seeds 1 and " << seed << " share " << shared.size() << " of "
+                << first.size() << " combinations";
+        }
+    }
+}
+
 TEST(TestProblemSpace, AKeepOnACategoricalAxisNarrowsTheCombinationsBeforeTheBoundApplies)
 {
     const auto metadata = test::shippedOperation("sdpa_fwd");
@@ -862,7 +951,7 @@ TEST(TestProblemSpace, AKeepOnACategoricalAxisNarrowsTheCombinationsBeforeTheBou
 
     size_t total = 0;
     auto combinations = detail::categoricalCombinations(
-        metadata.parameters, ExplorationRequest{}.maxCombinations, total, {}, narrow);
+        metadata.parameters, ExplorationRequest{}.maxCombinations, 0, total, {}, narrow);
     EXPECT_EQ(total, 8U);
     ASSERT_EQ(combinations.size(), 8U) << "the bound is 1024, so every admitted one is explored";
     for(const auto& combination : combinations)
@@ -874,19 +963,23 @@ TEST(TestProblemSpace, AKeepOnACategoricalAxisNarrowsTheCombinationsBeforeTheBou
     auto widened = narrow;
     widened.push_back({"form", "padded"});
     combinations = detail::categoricalCombinations(
-        metadata.parameters, ExplorationRequest{}.maxCombinations, total, {}, widened);
+        metadata.parameters, ExplorationRequest{}.maxCombinations, 0, total, {}, widened);
     EXPECT_EQ(total, 16U);
     EXPECT_EQ(combinations.size(), 16U);
 
     // A clause on a numeric parameter leaves the categorical product alone; the oracle applies it.
-    combinations
-        = detail::categoricalCombinations(metadata.parameters, 0, total, {}, {{"head_dim", "64"}});
+    combinations = detail::categoricalCombinations(
+        metadata.parameters, 0, 0, total, {}, {{"head_dim", "64"}});
     EXPECT_EQ(total, 53760U);
 
     // A value the declaration does not hold admits nothing, and says so with a total of 0 rather
     // than sampling combinations that every point would then fail.
-    combinations = detail::categoricalCombinations(
-        metadata.parameters, ExplorationRequest{}.maxCombinations, total, {}, {{"form", "nope"}});
+    combinations = detail::categoricalCombinations(metadata.parameters,
+                                                   ExplorationRequest{}.maxCombinations,
+                                                   0,
+                                                   total,
+                                                   {},
+                                                   {{"form", "nope"}});
     EXPECT_EQ(total, 0U);
     EXPECT_TRUE(combinations.empty());
 }
@@ -953,12 +1046,12 @@ TEST(TestProblemSpace, AKeepOnAnFp8DtypeReachesItsProblemsLikeAKeepOnALayout)
     ASSERT_NE(std::find(dtype->values.begin(), dtype->values.end(), fp8), dtype->values.end());
 
     size_t everything = 0;
-    detail::categoricalCombinations(metadata.parameters, 0, everything);
+    detail::categoricalCombinations(metadata.parameters, 0, 0, everything);
     size_t total = 0;
-    detail::categoricalCombinations(metadata.parameters, 0, total, {}, {{"dtype", fp8}});
+    detail::categoricalCombinations(metadata.parameters, 0, 0, total, {}, {{"dtype", fp8}});
     EXPECT_EQ(total, everything / dtype->values.size()) << "one value of the declared dtypes";
     detail::categoricalCombinations(
-        metadata.parameters, 0, total, {}, {{"dtype", fp8}, {"dtype", "fp8_e5m2"}});
+        metadata.parameters, 0, 0, total, {}, {{"dtype", fp8}, {"dtype", "fp8_e5m2"}});
     EXPECT_EQ(total, 2U * everything / dtype->values.size());
 
     // The narrow keeps of the other facets with the dtype swapped: 8 combinations, 6 of them
@@ -1042,7 +1135,7 @@ TEST(TestProblemSpace, TheConstraintEmptyCombinationsAreCountedOverTheWholeProdu
         return !detail::excludedByCategoricals(metadata, combination);
     };
     size_t total = 0;
-    const auto everything = detail::categoricalCombinations(metadata.parameters, 0, total);
+    const auto everything = detail::categoricalCombinations(metadata.parameters, 0, 0, total);
     const auto empty = static_cast<size_t>(
         std::count_if(everything.begin(), everything.end(), [&](const ProblemPoint& combination) {
             return !live(combination);
@@ -1053,6 +1146,7 @@ TEST(TestProblemSpace, TheConstraintEmptyCombinationsAreCountedOverTheWholeProdu
     size_t counted = 0;
     const auto sampled = detail::categoricalCombinations(metadata.parameters,
                                                          ExplorationRequest{}.maxCombinations,
+                                                         ExplorationRequest{}.seed,
                                                          sampledTotal,
                                                          live,
                                                          {},
@@ -1062,7 +1156,7 @@ TEST(TestProblemSpace, TheConstraintEmptyCombinationsAreCountedOverTheWholeProdu
 
     size_t underTheBound = 0;
     detail::categoricalCombinations(
-        metadata.parameters, 0, sampledTotal, live, test::narrowSdpaFwdKeeps(), &underTheBound);
+        metadata.parameters, 0, 0, sampledTotal, live, test::narrowSdpaFwdKeeps(), &underTheBound);
     EXPECT_EQ(underTheBound, 2U);
 
     ExplorationRequest request;
@@ -1093,7 +1187,7 @@ TEST(TestProblemSpace, ACombinationTheConstraintsEmptyHasNoSizeWhetherOrNotAnyth
       "constraints": [ { "!=": ["$q.layout", "c"] } ]
     })");
     size_t total = 0;
-    const auto combinations = detail::categoricalCombinations(metadata.parameters, 0, total);
+    const auto combinations = detail::categoricalCombinations(metadata.parameters, 0, 0, total);
     ASSERT_EQ(combinations.size(), 3U);
 
     EXPECT_EQ(detail::combinationSizes(metadata, combinations),
@@ -1165,10 +1259,20 @@ TEST_P(TestShippedSdpaConstraints, KeepOnlyProblemsThatAreDistinctAndHaveKeys)
     // A fused QKV projection is self-attention.
     EXPECT_TRUE(admits({2048, 2048, 8, 8, true, "none", "qkv_packed"}));
     EXPECT_FALSE(admits({128, 4096, 8, 8, true, "none", "qkv_packed"}));
-    // An MLA value head is 64 narrower than Q and K, and kept at 64 or more.
+    // An MLA value head is 64 narrower than Q and K, at the widths DeepSeek's MLA has: 192/128
+    // in both directions, and the absorbed 576/512 in the forward, which no training runs. The
+    // other widths the offset gives are no model's, and a V as wide as Q stays at 512.
+    const bool forward = GetParam() == "sdpa_fwd";
     EXPECT_TRUE(admits({2048, 2048, 8, 8, true, "none", "bshd", "top_left", 1, 192, "mla"}));
-    EXPECT_TRUE(admits({2048, 2048, 8, 8, true, "none", "bshd", "top_left", 1, 128, "mla"}));
-    EXPECT_FALSE(admits({2048, 2048, 8, 8, true, "none", "bshd", "top_left", 1, 120, "mla"}));
+    EXPECT_EQ(admits({1, 4096, 128, 1, true, "none", "bshd", "top_left", 1, 576, "mla"}), forward);
+    EXPECT_FALSE(admits({2048, 2048, 8, 8, true, "none", "bshd", "top_left", 1, 128, "mla"}));
+    EXPECT_FALSE(admits({2048, 2048, 8, 8, true, "none", "bshd", "top_left", 1, 129, "mla"}));
+    EXPECT_FALSE(admits({2048, 2048, 8, 8, true, "none", "bshd", "top_left", 1, 256, "mla"}));
+    EXPECT_TRUE(admits({2048, 2048, 8, 8, true, "none", "bshd", "top_left", 1, 512}));
+    if(forward)
+    {
+        EXPECT_FALSE(admits({1, 4096, 128, 1, true, "none", "bshd", "top_left", 1, 576}));
+    }
 
     EXPECT_TRUE(admits({2048, 2048, 8, 8, true, "local_1024"}));
     // The frontend accepts a left bound under any mask.
@@ -1467,13 +1571,14 @@ TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
     // constraints, while its windowed twins are not, so sizes taken as a product of weights over
     // every combination leave window none under its declared 50%. The forms empty more: a scale
     // the form does not state (scale_unset, scale_tensor) other than inv_sqrt_d, and a ragged
-    // form over a layout that is not token-major (bshd, qkv_packed). The raking has to hold all
+    // form over a layout that is not token-major (bshd, qkv_packed); and a fused QKV projection
+    // is square, so its diagonal is anchored top-left. The raking has to hold all
     // five weighted facets (dtype, value_head_dim, layout, scale, window) at once over what is
     // left. The form is not weighted.
     const auto metadata = test::shippedOperation("sdpa_fwd");
 
     size_t total = 0;
-    const auto combinations = detail::categoricalCombinations(metadata.parameters, 0, total);
+    const auto combinations = detail::categoricalCombinations(metadata.parameters, 0, 0, total);
     ASSERT_EQ(combinations.size(), 53760U);
     const auto sizes = detail::combinationSizes(metadata, combinations);
 
@@ -1495,7 +1600,8 @@ TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
                && text("window") == "none")
               || (scaleIgnored && text("scale") != "inv_sqrt_d")
               || (text("form") == "ragged" && text("layout") != "bshd"
-                  && text("layout") != "qkv_packed");
+                  && text("layout") != "qkv_packed")
+              || (text("layout") == "qkv_packed" && text("alignment") == "bottom_right");
         if(emptyByDeclaration)
         {
             EXPECT_EQ(sizes[i], 0.0) << detail::describe(c);
@@ -1514,11 +1620,12 @@ TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
         form[text("form")] += sizes[i];
     }
     // Per form, 6720 combinations: 420 are the bottom_right, non-causal, no-window sixteenth of
-    // the product. Five forms leave it at that; scale_unset and scale_tensor also lose the 4480
-    // whose scale is not inv_sqrt_d (280 of them already in the 420), and ragged the 4032 whose
+    // the product, and qkv_packed at bottom_right, a tenth, adds the 588 of its 672 not already
+    // among them. Five forms leave it at that; scale_unset and scale_tensor also lose the 4480
+    // whose scale is not inv_sqrt_d (672 of them already counted), and ragged the 4032 whose
     // layout is not token-major (252 already in the 420):
-    // 5 * 420 + 2 * (4480 + 420 - 280) + (4032 + 420 - 252) = 15540.
-    EXPECT_EQ(empty, 15540U);
+    // 5 * 1008 + 2 * (4480 + 1008 - 672) + (4032 + 1008 - 252) = 19460.
+    EXPECT_EQ(empty, 19460U);
     EXPECT_NEAR(window["none"] / all, 0.5, 1e-6);
     EXPECT_NEAR(window["local_128"] / all, 1.0 / 6.0, 1e-6);
     EXPECT_NEAR(layout["bshd"] / all, 2.0 / 6.0, 1e-6);
@@ -1538,8 +1645,8 @@ TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
     EXPECT_NEAR(dtype["fp8_e5m2_fnuz"] / all, 1.0 / 29.0, 1e-6);
     // The form carries no weight: a form's share is its share of the combinations that can hold
     // a problem, less for the three that the declaration's constraints leave fewer of than the
-    // other five (those hold 6300 of their 6720 combinations each; scale_unset and scale_tensor
-    // 2100, ragged 2520), and no form is left out.
+    // other five (those hold 5712 of their 6720 combinations each; scale_unset and scale_tensor
+    // 1904, ragged 1932), and no form is left out.
     EXPECT_TRUE(metadata.find("form")->weights.empty());
     for(const auto& [name, held] : form)
     {
@@ -1617,7 +1724,7 @@ TEST(TestProblemSpace, TheFirstPassDrawsEveryDeclaredValueAndKeepsItsBudgetWhere
     // (10 points for each of the two dtypes).
     request.pointsPerCombination = 10;
     const auto skewed = weightedToy(R"(, "weights": {"a": 1000, "b": 1, "c": 1})");
-    const auto skewedCombinations = detail::categoricalCombinations(skewed.parameters, 0, total);
+    const auto skewedCombinations = detail::categoricalCombinations(skewed.parameters, 0, 0, total);
     const auto skewedTargets = detail::firstPassTargets(
         skewed, request, skewedCombinations, detail::combinationSizes(skewed, skewedCombinations));
     EXPECT_EQ(sum(skewedTargets), 20);
@@ -1629,14 +1736,14 @@ TEST(TestProblemSpace, TheFirstPassDrawsEveryDeclaredValueAndKeepsItsBudgetWhere
     // Three values and one point: none may give theirs up, so the first pass is the three owed.
     request.pointsPerCombination = 1;
     const auto three = threeEqualLayouts();
-    const auto threeCombinations = detail::categoricalCombinations(three.parameters, 0, total);
+    const auto threeCombinations = detail::categoricalCombinations(three.parameters, 0, 0, total);
     const auto threeTargets = detail::firstPassTargets(
         three, request, threeCombinations, detail::combinationSizes(three, threeCombinations));
     EXPECT_EQ(threeTargets, std::vector<int64_t>(3, 1));
 
     // Nothing weighted: pointsPerCombination for each combination, as ever.
     const auto plain = weightedToy("");
-    const auto plainCombinations = detail::categoricalCombinations(plain.parameters, 0, total);
+    const auto plainCombinations = detail::categoricalCombinations(plain.parameters, 0, 0, total);
     request.pointsPerCombination = 9;
     EXPECT_EQ(
         detail::firstPassTargets(
@@ -1657,7 +1764,7 @@ TEST(TestProblemSpace, ACombinationLeftWithoutAFirstPassPointStillGrowsToTheTarg
         request.pointsPerCombination = 2;
         request.seed = seed;
         size_t total = 0;
-        const auto combinations = detail::categoricalCombinations(metadata.parameters, 0, total);
+        const auto combinations = detail::categoricalCombinations(metadata.parameters, 0, 0, total);
         const auto targets = detail::firstPassTargets(
             metadata, request, combinations, detail::combinationSizes(metadata, combinations));
         ASSERT_NE(std::count(targets.begin(), targets.end(), 0), 0) << "seed " << seed;
@@ -1740,6 +1847,7 @@ TEST_P(TestShippedFirstPass, TheShippedSdpaDeclarationsKeepTheDefaultFirstPassNe
     const auto combinations = detail::categoricalCombinations(
         metadata.parameters,
         request.maxCombinations,
+        request.seed,
         total,
         [&metadata](const ProblemPoint& combination) {
             return !detail::excludedByCategoricals(metadata, combination);
