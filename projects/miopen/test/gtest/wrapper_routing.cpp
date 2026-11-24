@@ -248,12 +248,23 @@ TEST_P(CPU_WrapperRoutingForwardingSet_NONE, EmptySetMatchesNothing)
 // so the addition is deliberate rather than silent. It cannot check that the new entry
 // point has a HipdnnShim test; the checklist above kForwardingEntries in
 // src/private/routing.cpp requires one, so review must check.
-TEST_P(CPU_WrapperRoutingForwardingSet_NONE, DefaultSetIsTheConvolutionFamily)
+TEST_P(CPU_WrapperRoutingForwardingSet_NONE, DefaultSetIsTheForwardedFamily)
 {
-    EXPECT_EQ(DefaultForwardingSet().size(), 4u);
-    EXPECT_TRUE(IsInForwardingSet("miopenConvolutionForward"));
-    EXPECT_TRUE(IsInForwardingSet("miopenConvolutionBackwardData"));
-    EXPECT_TRUE(IsInForwardingSet("miopenConvolutionBackwardWeights"));
+    EXPECT_EQ(DefaultForwardingSet().size(), 29u);
+    for(const char* direction : {"Forward", "BackwardData", "BackwardWeights"})
+    {
+        const std::string d(direction);
+        for(const std::string& entry : {"miopenConvolution" + d,
+                                        "miopenConvolution" + d + "Immediate",
+                                        "miopenFindConvolution" + d + "Algorithm",
+                                        "miopenConvolution" + d + "GetWorkSpaceSize",
+                                        "miopenConvolution" + d + "GetWorkSpaceSizeRange",
+                                        "miopenConvolution" + d + "GetSolutionCount",
+                                        "miopenConvolution" + d + "GetSolution",
+                                        "miopenConvolution" + d + "GetSolutionWorkspaceSize",
+                                        "miopenConvolution" + d + "CompileSolution"})
+            EXPECT_TRUE(IsInForwardingSet(entry.c_str())) << entry;
+    }
     EXPECT_TRUE(IsInForwardingSet("miopenConvolutionBiasActivationForward"));
 
     // The bias-only entry points are standalone bias kernels rather than
@@ -261,8 +272,54 @@ TEST_P(CPU_WrapperRoutingForwardingSet_NONE, DefaultSetIsTheConvolutionFamily)
     EXPECT_FALSE(IsInForwardingSet("miopenConvolutionForwardBias"));
     EXPECT_FALSE(IsInForwardingSet("miopenConvolutionBackwardBias"));
 
+    // Batch norm: only the inference entry point PyTorch calls in eval mode.
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormalizationForwardInference"));
+    EXPECT_FALSE(IsInForwardingSet("miopenBatchNormalizationForwardInference_V2"));
+    EXPECT_FALSE(IsInForwardingSet("miopenBatchNormalizationForwardInferenceInvVariance"));
+    EXPECT_FALSE(IsInForwardingSet("miopenBatchNormalizationForwardTraining"));
+    EXPECT_FALSE(IsInForwardingSet("miopenBatchNormalizationBackward"));
+
     EXPECT_FALSE(IsInForwardingSet("miopenSetTensorDescriptor"));
     EXPECT_FALSE(IsInForwardingSet("miopenCreate"));
+}
+
+// A query stays in MIOpen while its execution entry point does, so a caller never pairs a
+// native algorithm, solution or workspace with a forwarded execution, or the reverse.
+TEST_P(CPU_WrapperRoutingForwardingSet_NONE, QueryFollowsItsExecutionEntryPoint)
+{
+    DisabledSet disabled;
+    disabled.Add("miopenConvolutionForward");
+    disabled.Add("miopenConvolutionBackwardDataImmediate");
+    const auto route = [&](const char* entryPoint) {
+        return ResolveRouteWithReason(
+                   ForwardingMode::Enabled, entryPoint, DefaultForwardingSet(), disabled, true)
+            .route;
+    };
+    EXPECT_EQ(route("miopenFindConvolutionForwardAlgorithm"), Route::Miopen);
+    EXPECT_EQ(route("miopenConvolutionForwardGetWorkSpaceSize"), Route::Miopen);
+    EXPECT_EQ(route("miopenConvolutionForwardGetWorkSpaceSizeRange"), Route::Miopen);
+    EXPECT_EQ(route("miopenConvolutionForwardGetSolution"), Route::Hipdnn);
+    EXPECT_EQ(route("miopenConvolutionBackwardDataGetSolution"), Route::Miopen);
+    EXPECT_EQ(route("miopenConvolutionBackwardDataCompileSolution"), Route::Miopen);
+    EXPECT_EQ(route("miopenFindConvolutionBackwardDataAlgorithm"), Route::Hipdnn);
+}
+
+// Batch-norm inference has no paired query, so the deny list takes it off the hipDNN path on its
+// own and leaves the convolution family where it was.
+TEST_P(CPU_WrapperRoutingForwardingSet_NONE, BatchNormInferenceIsDisabledOnItsOwn)
+{
+    std::ostringstream diagnostics;
+    const DisabledSet disabled = ParseDisabledSet(
+        "miopenBatchNormalizationForwardInference", DefaultForwardingSet(), diagnostics);
+    EXPECT_TRUE(diagnostics.str().empty()) << diagnostics.str();
+    const auto route = [&](const char* entryPoint) {
+        return ResolveRouteWithReason(
+                   ForwardingMode::Enabled, entryPoint, DefaultForwardingSet(), disabled, true)
+            .route;
+    };
+    EXPECT_EQ(route("miopenBatchNormalizationForwardInference"), Route::Miopen);
+    EXPECT_EQ(route("miopenConvolutionForward"), Route::Hipdnn);
+    EXPECT_EQ(route("miopenFindConvolutionForwardAlgorithm"), Route::Hipdnn);
 }
 
 INSTANTIATE_TEST_SUITE_P(Quick, CPU_WrapperRoutingForwardingSet_NONE, ::testing::Values(0));
@@ -318,9 +375,13 @@ using CPU_WrapperRoutingResolveDefault_NONE = ::testing::TestWithParam<int>;
 
 // Kept separate from the injected-set cases so the difference between "the logic
 // works" and "this build forwards these four names" stays explicit.
-TEST_P(CPU_WrapperRoutingResolveDefault_NONE, DefaultSetRoutesTheConvolutionFamily)
+TEST_P(CPU_WrapperRoutingResolveDefault_NONE, DefaultSetRoutesTheForwardedFamily)
 {
     EXPECT_EQ(ResolveRoute(ForwardingMode::Enabled, "miopenConvolutionForward"), Route::Hipdnn);
+    EXPECT_EQ(ResolveRoute(ForwardingMode::Enabled, "miopenBatchNormalizationForwardInference"),
+              Route::Hipdnn);
+    EXPECT_EQ(ResolveRoute(ForwardingMode::Disabled, "miopenBatchNormalizationForwardInference"),
+              Route::Miopen);
     EXPECT_EQ(ResolveRoute(ForwardingMode::Enabled, "miopenSetTensorDescriptor"), Route::Miopen);
     EXPECT_EQ(ResolveRoute(ForwardingMode::Disabled, "miopenConvolutionForward"), Route::Miopen);
 }
@@ -712,6 +773,7 @@ TEST_P(CPU_WrapperRoutingDispatch_NONE, AgreesWithResolveRoute)
 INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_WrapperRoutingDispatch_NONE,
                          ::testing::Values("miopenConvolutionForward",
+                                           "miopenBatchNormalizationForwardInference",
                                            "miopenCreate",
                                            "miopenGetErrorString"));
 
@@ -1253,44 +1315,24 @@ struct Acquire
 struct Run
 {
     std::mutex mutex;
-    int64_t needed             = 0;
-    int workspaceQueries       = 0;
-    int ensures                = 0;
+    size_t needed              = 0;
     int executions             = 0;
-    int recordedEnds           = 0;
     bool inHipdnnDuringExecute = false;
-    void* handleBuffer         = reinterpret_cast<void*>(0x2000);
     void* executedOn           = nullptr;
 
     template <typename Execute>
-    miopenStatus_t Go(Execute&& execute,
-                      void* callerWorkspace  = nullptr,
-                      size_t callerSize      = 0,
-                      int queryResult        = 0,
-                      bool recordEndSucceeds = true)
+    miopenStatus_t Go(Execute&& execute, void* callerWorkspace = nullptr, size_t callerSize = 0)
     {
         return hipdnn::RunGraphWith(
             mutex,
+            needed,
             callerWorkspace,
             callerSize,
-            [&](int64_t& out) {
-                ++workspaceQueries;
-                out = needed;
-                return queryResult;
-            },
-            [&](size_t) -> void* {
-                ++ensures;
-                return handleBuffer;
-            },
             [&](void* workspace) {
                 ++executions;
                 executedOn            = workspace;
                 inHipdnnDuringExecute = hipdnn::InHipdnnCall();
                 return execute();
-            },
-            [&] {
-                ++recordedEnds;
-                return recordEndSucceeds;
             },
             FailureOf);
     }
@@ -1409,7 +1451,6 @@ TEST_P(CPU_WrapperRoutingReentry_NONE, AGraphRunsInsideAHipdnnCallAndClearsEarli
     EXPECT_TRUE(run.inHipdnnDuringExecute);
     EXPECT_FALSE(hipdnn::InHipdnnCall());
     EXPECT_FALSE(hipdnn::LastForwardedFailure(&recorded));
-    EXPECT_EQ(run.recordedEnds, 1);
 }
 
 TEST_P(CPU_WrapperRoutingReentry_NONE, AReentryDuringAnExecuteFailsTheCallEvenIfHipdnnSucceeded)
@@ -1426,8 +1467,6 @@ TEST_P(CPU_WrapperRoutingReentry_NONE, AReentryDuringAnExecuteFailsTheCallEvenIf
     miopenStatus_t recorded = miopenStatusSuccess;
     EXPECT_TRUE(hipdnn::LastForwardedFailure(&recorded));
     EXPECT_EQ(recorded, miopenStatusInternalError);
-    // The work it queued is still marked on the handle's stream.
-    EXPECT_EQ(run.recordedEnds, 1);
     hipdnn::ClearForwardedFailure();
 }
 
@@ -1445,7 +1484,7 @@ TEST_P(CPU_WrapperRoutingReentry_NONE, AReentryDuringAnExecuteOutranksHipdnnsOwn
     hipdnn::ClearForwardedFailure();
 }
 
-TEST_P(CPU_WrapperRoutingReentry_NONE, AHipdnnExecuteFailureIsReportedAfterTheEndIsMarked)
+TEST_P(CPU_WrapperRoutingReentry_NONE, AHipdnnExecuteFailureIsReported)
 {
     const graph_steps::SilencedStderr silenced;
     graph_steps::Run run;
@@ -1453,24 +1492,13 @@ TEST_P(CPU_WrapperRoutingReentry_NONE, AHipdnnExecuteFailureIsReportedAfterTheEn
     const auto status = run.Go([] { return 1; });
 
     EXPECT_EQ(status, miopenStatusBadParm);
-    EXPECT_EQ(run.recordedEnds, 1);
     hipdnn::ClearForwardedFailure();
 }
 
-TEST_P(CPU_WrapperRoutingReentry_NONE, AWorkspaceQueryFailureStopsBeforeTheExecute)
-{
-    const graph_steps::SilencedStderr silenced;
-    graph_steps::Run run;
-
-    const auto status = run.Go([] { return 0; }, nullptr, 0, 1);
-
-    EXPECT_EQ(status, miopenStatusBadParm);
-    EXPECT_EQ(run.executions, 0);
-    EXPECT_EQ(run.recordedEnds, 0);
-    hipdnn::ClearForwardedFailure();
-}
-
-TEST_P(CPU_WrapperRoutingReentry_NONE, ACallersWorkspaceIsUsedOnlyWhenItIsBigEnough)
+// The wrapper never allocates a workspace: the plan was chosen to fit the caller's, so a
+// caller's workspace that is still too small fails the call without running it. The pointer
+// values are never dereferenced; they only show which buffer the run was handed.
+TEST_P(CPU_WrapperRoutingReentry_NONE, ARunUsesOnlyTheCallersWorkspace)
 {
     const graph_steps::SilencedStderr silenced;
     void* const callerBuffer = reinterpret_cast<void*>(0x1000);
@@ -1478,39 +1506,17 @@ TEST_P(CPU_WrapperRoutingReentry_NONE, ACallersWorkspaceIsUsedOnlyWhenItIsBigEno
     big.needed = 64;
     graph_steps::Run small;
     small.needed = 64;
+    graph_steps::Run none;
+    none.needed = 64;
 
     EXPECT_EQ(big.Go([] { return 0; }, callerBuffer, 64), miopenStatusSuccess);
     EXPECT_EQ(big.executedOn, callerBuffer);
-    EXPECT_EQ(big.ensures, 0);
 
-    EXPECT_EQ(small.Go([] { return 0; }, callerBuffer, 63), miopenStatusSuccess);
-    EXPECT_EQ(small.executedOn, small.handleBuffer);
-    EXPECT_EQ(small.ensures, 1);
-    hipdnn::ClearForwardedFailure();
-}
+    EXPECT_EQ(small.Go([] { return 0; }, callerBuffer, 63), miopenStatusUnknownError);
+    EXPECT_EQ(small.executions, 0);
 
-TEST_P(CPU_WrapperRoutingReentry_NONE, ARunThatCannotGetItsWorkspaceIsNeverExecuted)
-{
-    const graph_steps::SilencedStderr silenced;
-    graph_steps::Run run;
-    run.needed       = 64;
-    run.handleBuffer = nullptr;
-
-    const auto status = run.Go([] { return 0; });
-
-    EXPECT_EQ(status, miopenStatusAllocFailed);
-    EXPECT_EQ(run.executions, 0);
-    hipdnn::ClearForwardedFailure();
-}
-
-TEST_P(CPU_WrapperRoutingReentry_NONE, AnEndThatCannotBeMarkedFailsTheCall)
-{
-    const graph_steps::SilencedStderr silenced;
-    graph_steps::Run run;
-
-    const auto status = run.Go([] { return 0; }, nullptr, 0, 0, false);
-
-    EXPECT_EQ(status, miopenStatusInternalError);
+    EXPECT_EQ(none.Go([] { return 0; }), miopenStatusUnknownError);
+    EXPECT_EQ(none.executions, 0);
     hipdnn::ClearForwardedFailure();
 }
 

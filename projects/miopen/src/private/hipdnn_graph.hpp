@@ -4,7 +4,7 @@
 // The part of the hipDNN forwarding that does not depend on the operation. The
 // first half is what the rest of the wrapper calls: probing the backend,
 // releasing a handle's hipDNN state and prefixing forwarded error messages. The
-// second half is what each operation's file (hipdnn_conv.cpp) uses: it
+// second half is what each operation's file (hipdnn_conv.cpp, hipdnn_batchnorm.cpp) uses: it
 // describes its problem as a PlanKey and supplies the function that builds the
 // graph for it, and RunCachedGraph does the rest.
 //
@@ -20,6 +20,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
@@ -156,6 +157,7 @@ enum class GraphKind : int64_t
     ConvDgrad,
     ConvWgrad,
     ConvBiasActivation,
+    BatchnormInference,
 };
 
 // Identifies one cached graph. `problem` is everything that tells two problems
@@ -164,12 +166,13 @@ enum class GraphKind : int64_t
 // different problems never flatten to the same sequence.
 struct PlanKey
 {
-    miopenHandle_t handle = nullptr;
     std::vector<int64_t> problem;
+    // The largest workspace the plan may need, or -1 for no limit: hipDNN's best plan.
+    int64_t workspaceLimit = -1;
 
     bool operator==(const PlanKey& other) const
     {
-        return handle == other.handle && problem == other.problem;
+        return problem == other.problem && workspaceLimit == other.workspaceLimit;
     }
 };
 
@@ -223,49 +226,30 @@ AcquireGraphWith(Cache& cache,
     return {graph, miopenStatusSuccess};
 }
 
-// Runs a built graph under `mutex`. `queryWorkspace(needed)` reports the bytes needed,
-// `ensureWorkspace(bytes)` returns a buffer owned by the handle or null, `execute` runs the
-// graph on the given workspace, `recordEnd` marks the end of the work and returns whether it
-// worked, and `failureOf` turns what hipDNN returned into a recorded failure, or nullopt.
-template <typename QueryWorkspace,
-          typename EnsureWorkspace,
-          typename Execute,
-          typename RecordEnd,
-          typename FailureOf>
+// Runs a built graph under `mutex`. `needed` is the plan's workspace in bytes, read when
+// the plan was acquired; `execute` runs the graph on the given workspace, and `failureOf`
+// turns what hipDNN returned into a recorded failure, or nullopt.
+template <typename Execute, typename FailureOf>
 miopenStatus_t RunGraphWith(std::mutex& mutex,
+                            size_t needed,
                             void* callerWorkspace,
                             size_t callerWorkspaceSize,
-                            QueryWorkspace&& queryWorkspace,
-                            EnsureWorkspace&& ensureWorkspace,
                             Execute&& execute,
-                            RecordEnd&& recordEnd,
                             FailureOf&& failureOf)
 {
     const std::lock_guard<std::mutex> lock(mutex);
 
-    int64_t needed = 0;
-    if(const auto failure = failureOf(queryWorkspace(needed)))
-        return *failure;
+    // The workspace is always the caller's: the plan was chosen to fit it (RunCachedGraph), as
+    // MIOpen chooses a solver that fits, and the wrapper never allocates one of its own.
+    const size_t given = callerWorkspace == nullptr ? 0 : callerWorkspaceSize;
+    if(given < needed)
+        return RecordFailure(miopenStatusUnknownError,
+                             "Not enough workspace for the hipDNN plan: " + std::to_string(needed) +
+                                 " bytes needed, " + std::to_string(given) + " given");
 
-    void* workspace = callerWorkspace;
-    if(needed > 0 &&
-       (callerWorkspace == nullptr || callerWorkspaceSize < static_cast<size_t>(needed)))
-    {
-        workspace = ensureWorkspace(static_cast<size_t>(needed));
-        if(workspace == nullptr)
-            return RecordFailure(miopenStatusAllocFailed, "hipDNN workspace allocation failed");
-    }
-
-    const auto executed = CallInsideHipdnn([&] { return execute(workspace); });
-    // Recorded even when execute failed, because it may have queued work first, so it comes
-    // before the failure is reported.
-    const bool recorded = recordEnd();
+    const auto executed = CallInsideHipdnn([&] { return execute(callerWorkspace); });
     if(const auto failure = FailureOfGuardedCall(executed, failureOf))
         return *failure;
-    if(!recorded)
-        return RecordFailure(miopenStatusInternalError,
-                             "could not record the end of the hipDNN work on the MIOpen "
-                             "handle's stream");
 
     ClearForwardedFailure();
     return miopenStatusSuccess;
@@ -275,15 +259,35 @@ using PopulateGraphFn = std::function<bool(hipdnn_frontend::graph::Graph&)>;
 using VariantPack     = std::unordered_map<int64_t, void*>;
 
 // Runs the graph for `key` on `handle`'s stream. On a cache miss, `populate`
-// fills in a new graph, which is then built and cached. The caller's workspace
-// is used when it is big enough, and a buffer owned by the handle otherwise.
-// Failures are recorded with RecordFailure.
+// fills in a new graph, which is then built and cached. The plan is the best one
+// whose workspace fits the caller's (hipDNN's best plan when it fits), and runs in
+// the caller's workspace; when no engine fits, the call fails, as MIOpen's does.
+// The wrapper never allocates a workspace. Failures are recorded with RecordFailure.
 miopenStatus_t RunCachedGraph(miopenHandle_t handle,
                               const PlanKey& key,
                               const PopulateGraphFn& populate,
                               VariantPack& variantPack,
                               void* workspace,
                               size_t workspaceSize);
+
+// The workspace of the plan for `key` that fits `limit` bytes (no limit: hipDNN's best
+// plan), building and caching it on first use exactly as RunCachedGraph does, without
+// running it. Serves the forwarded Find, workspace-size and solution queries, so the size
+// they report is the one the forwarded execution, given that workspace, will use. Fails as
+// MIOpen does when no engine fits.
+miopenStatus_t CachedGraphWorkspaceSize(miopenHandle_t handle,
+                                        const PlanKey& key,
+                                        const PopulateGraphFn& populate,
+                                        std::optional<size_t> limit,
+                                        size_t& workspaceSize);
+
+// The smallest workspace any engine can run the problem in (at or above it a plan always
+// fits), and hipDNN's best plan's workspace, which is the most a caller ever needs.
+miopenStatus_t CachedGraphWorkspaceRange(miopenHandle_t handle,
+                                         const PlanKey& key,
+                                         const PopulateGraphFn& populate,
+                                         size_t& minWorkspaceSize,
+                                         size_t& maxWorkspaceSize);
 
 } // namespace hipdnn
 } // namespace wrapper

@@ -170,6 +170,7 @@ miopenGetSolverIdConvAlgorithm
 miopenGetStream
 miopenGetT5LayerNormBackwardWorkspaceSize
 miopenGetTensorDescriptor
+miopenGetTensorDescriptorDetails
 miopenGetTensorDescriptorSize
 miopenGetTensorNumBytes
 miopenGetTuningPolicy

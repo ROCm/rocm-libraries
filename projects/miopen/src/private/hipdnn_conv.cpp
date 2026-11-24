@@ -8,6 +8,7 @@
 
 #include "hipdnn_conv.hpp"
 #include "hipdnn_graph.hpp"
+#include "hipdnn_tensor.hpp"
 #include "hipdnn_types.hpp"
 
 #include "miopen_impl.h"
@@ -17,6 +18,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace miopen {
@@ -34,18 +36,6 @@ constexpr int64_t kUidB    = 2; // w for fprop and dgrad, x for wgrad
 constexpr int64_t kUidOut  = 3;
 constexpr int64_t kUidBias = 4;
 
-struct TensorInfo
-{
-    miopenDataType_t dataType{};
-    std::vector<int64_t> dims;
-    std::vector<int64_t> strides;
-    // Above 1 only for NCHWc4, NCHWc8, CHWNc4 and CHWNc8.
-    int64_t vectorLength = 1;
-    // Set when a dim or stride is above INT_MAX, which the int getter cuts down.
-    // dims, strides and vectorLength are then unusable.
-    bool truncated = false;
-};
-
 struct ConvInfo
 {
     std::vector<int64_t> pads;
@@ -56,6 +46,7 @@ struct ConvInfo
     int fp16AltImpl     = -1;
     int deterministic   = 0;
     int fp8RoundingMode = miopenF8RoundingModeStochastic;
+    int mathType        = miopenMathPedantic;
 };
 
 // Tensors in node order: the two convolution inputs, the result, then the bias
@@ -67,74 +58,6 @@ struct ConvProblem
     ConvInfo conv;
     miopenActivationMode_t act = miopenActivationPASTHRU;
 };
-
-size_t TypeSize(miopenDataType_t type)
-{
-    switch(type)
-    {
-    case miopenInt8:
-    case miopenFloat8_fnuz:
-    case miopenBFloat8_fnuz: return 1;
-    case miopenHalf:
-    case miopenBFloat16: return 2;
-    case miopenFloat:
-    case miopenInt32: return 4;
-    case miopenDouble:
-    case miopenInt64: return 8;
-    }
-    return 0;
-}
-
-// miopenGetTensorDescriptor fills caller-provided int arrays, so the size query
-// has to come first.
-miopenStatus_t ReadTensor(miopenTensorDescriptor_t desc, TensorInfo& out)
-{
-    int size = 0;
-    if(miopenGetTensorDescriptorSize_impl(desc, &size) != miopenStatusSuccess || size <= 0)
-        return miopenStatusInvalidValue;
-
-    std::vector<int> dims(static_cast<size_t>(size));
-    std::vector<int> strides(static_cast<size_t>(size));
-    miopenDataType_t dataType{};
-    if(miopenGetTensorDescriptor_impl(desc, &dataType, dims.data(), strides.data()) !=
-       miopenStatusSuccess)
-        return miopenStatusInvalidValue;
-
-    out.dataType = dataType;
-    out.dims.assign(dims.begin(), dims.end());
-    out.strides.assign(strides.begin(), strides.end());
-
-    // MIOpen stores no dim or stride below 1, so one here was cut down by the
-    // int getter.
-    const auto belowOne = [](int value) { return value < 1; };
-    if(std::any_of(dims.begin(), dims.end(), belowOne) ||
-       std::any_of(strides.begin(), strides.end(), belowOne))
-    {
-        out.truncated = true;
-        return miopenStatusSuccess;
-    }
-
-    // No getter exposes the vector length, but MIOpen's byte count is
-    // typeSize * (vectorLength + sum of (dim - 1) * stride), so it can be solved for.
-    // The sum is unsigned, as in MIOpen, so a cut-down value gives a wrong
-    // answer rather than signed overflow.
-    size_t numBytes       = 0;
-    const size_t typeSize = TypeSize(dataType);
-    if(miopenGetTensorNumBytes_impl(desc, &numBytes) != miopenStatusSuccess || typeSize == 0)
-        return miopenStatusInvalidValue;
-    uint64_t span = 0;
-    for(size_t i = 0; i < dims.size(); ++i)
-        span += static_cast<uint64_t>(dims[i] - 1) * static_cast<uint64_t>(strides[i]);
-    const uint64_t vectorLength = numBytes / typeSize - span;
-    // MIOpen allows only these, so any other answer means a value was cut down.
-    if(vectorLength != 1 && vectorLength != 4 && vectorLength != 8)
-    {
-        out.truncated = true;
-        return miopenStatusSuccess;
-    }
-    out.vectorLength = static_cast<int64_t>(vectorLength);
-    return miopenStatusSuccess;
-}
 
 miopenStatus_t ReadConvolution(miopenConvolutionDescriptor_t desc, ConvInfo& out)
 {
@@ -166,6 +89,7 @@ miopenStatus_t ReadConvolution(miopenConvolutionDescriptor_t desc, ConvInfo& out
     };
     if(!readAttribute(MIOPEN_CONVOLUTION_ATTRIB_FP16_ALT_IMPL, out.fp16AltImpl) ||
        !readAttribute(MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, out.deterministic) ||
+       !readAttribute(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, out.mathType) ||
        !readAttribute(MIOPEN_CONVOLUTION_ATTRIB_FP8_ROUNDING_MODE, out.fp8RoundingMode))
         return miopenStatusInvalidValue;
 
@@ -203,77 +127,74 @@ const char* CheckSupported(const std::vector<TensorInfo>& tensors, const ConvInf
     {
         if(!ToHipdnnDataType(tensor.dataType, unused))
             return "this data type has no hipDNN convolution";
-        if(tensor.truncated)
-            return "tensors with a dim or stride above INT_MAX are not forwarded to hipDNN";
+        // A cast type asks MIOpen to convert the elements (to FP8) before the
+        // convolution; a hipDNN graph has no per-tensor conversion.
+        if(tensor.castType != tensor.dataType)
+            return "a tensor cast type (miopenSetTensorCastType) is not forwarded to hipDNN";
         // hipDNN describes a tensor only by dims and strides, which cannot
         // express a vector packed into each element.
         if(tensor.vectorLength != 1)
             return "vectorized tensor layouts (NCHWc4, NCHWc8, CHWNc4, CHWNc8) are not "
                    "forwarded to hipDNN";
     }
-    if(conv.groupCount != 1)
-        return "grouped convolution is not forwarded to hipDNN";
+    // Grouped convolution is forwarded: MIOpen's weight descriptor is (K, C/g, ...), and hipDNN's
+    // conv nodes derive the group count from the input and weight channel counts. The group count
+    // is part of the plan key.
     if(conv.pads.size() < kMinSpatialDims || conv.pads.size() > kMaxSpatialDims)
         return "only 2-D and 3-D convolutions are forwarded to hipDNN";
-    // A transposed convolution is not a forward-convolution op: it maps to the
-    // backward-data node and is a different graph.
-    if(conv.mode == miopenTranspose)
-        return "transposed convolution is not forwarded to hipDNN";
-    // hipDNN has no setting for these, so a forwarded call would ignore them. Any
-    // non-default value is declined: whether it changes the result depends on the
+    // Transposed convolution is accepted: ToOrdinaryRoles maps it onto the
+    // ordinary convolution that computes it. DETERMINISTIC and MATH_TYPE are honoured by the
+    // engines the graph deselects (ExcludedNotes). The two attributes below have no
+    // hipDNN setting, so a forwarded call would ignore them; any non-default
+    // value is declined, because whether it changes the result depends on the
     // data type and device, and copying MIOpen's rules for that here would drift.
-    if(conv.deterministic != 0)
-        return "a non-default MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC is not forwarded to hipDNN";
     if(conv.fp16AltImpl != -1)
         return "a non-default MIOPEN_CONVOLUTION_ATTRIB_FP16_ALT_IMPL is not forwarded to hipDNN";
     if(conv.fp8RoundingMode != miopenF8RoundingModeStochastic)
         return "a non-default MIOPEN_CONVOLUTION_ATTRIB_FP8_ROUNDING_MODE is not forwarded to "
                "hipDNN";
-    // MATH_TYPE is not checked: its non-default value only allows TF32, so the
-    // full-precision result the default asks for satisfies both values. The
-    // graph never uses TF32, though, so a caller who allows it gets no speed-up.
-    // A tensor's cast type is not checked either: no public getter reports it.
-    // A forwarded call with one runs in the data type instead of the cast type.
     return nullptr;
 }
 
-void AppendList(std::vector<int64_t>& out, const std::vector<int64_t>& values)
+// TF32 applies to fp32 convolutions only, and only when the caller sets
+// MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE to miopenMathDefault; the default math type,
+// miopenMathPedantic, asks for full fp32.
+bool AllowsTf32(const ConvProblem& problem)
 {
-    out.push_back(static_cast<int64_t>(values.size()));
-    out.insert(out.end(), values.begin(), values.end());
+    return problem.tensors.front().dataType == miopenFloat &&
+           problem.conv.mathType == miopenMathDefault;
 }
 
-PlanKey MakePlanKey(miopenHandle_t handle, const ConvProblem& problem)
+// The engines a forwarded call must not run, by the numerical notes they report, as PyTorch
+// filters cuDNN's engines: never one that down-converts its inputs, no TF32 (TENSOR_CORE) on
+// fp32 unless TF32 is allowed, and no non-deterministic one when DETERMINISTIC is set.
+std::vector<fe::NumericalNote> ExcludedNotes(const ConvProblem& problem)
+{
+    std::vector<fe::NumericalNote> notes{fe::NumericalNote::DOWN_CONVERT_INPUTS};
+    if(problem.tensors.front().dataType == miopenFloat && !AllowsTf32(problem))
+        notes.push_back(fe::NumericalNote::TENSOR_CORE);
+    if(problem.conv.deterministic != 0)
+        notes.push_back(fe::NumericalNote::NONDETERMINISTIC);
+    return notes;
+}
+
+PlanKey MakePlanKey(const ConvProblem& problem)
 {
     PlanKey key;
-    key.handle = handle;
-
     std::vector<int64_t>& out = key.problem;
     out.push_back(static_cast<int64_t>(problem.kind));
     out.push_back(static_cast<int64_t>(problem.act));
     out.push_back(static_cast<int64_t>(problem.tensors.size()));
     for(const TensorInfo& tensor : problem.tensors)
-    {
-        out.push_back(static_cast<int64_t>(tensor.dataType));
-        AppendList(out, tensor.dims);
-        AppendList(out, tensor.strides);
-    }
+        AppendTensor(out, tensor);
     AppendList(out, problem.conv.pads);
     AppendList(out, problem.conv.strides);
     AppendList(out, problem.conv.dilations);
     out.push_back(static_cast<int64_t>(problem.conv.mode));
     out.push_back(problem.conv.groupCount);
+    out.push_back(problem.conv.deterministic != 0 ? 1 : 0);
+    out.push_back(AllowsTf32(problem) ? 1 : 0);
     return key;
-}
-
-std::shared_ptr<fe::graph::TensorAttributes>
-MakeTensor(const TensorInfo& info, fe::DataType dataType, int64_t uid)
-{
-    return fe::graph::Graph::tensor(fe::graph::TensorAttributes()
-                                        .set_dim(info.dims)
-                                        .set_stride(info.strides)
-                                        .set_data_type(dataType)
-                                        .set_uid(uid));
 }
 
 // Builds the graph for one problem. `a` and `b` are the two convolution inputs
@@ -298,6 +219,7 @@ bool PopulateGraph(const ConvProblem& problem, fe::graph::Graph& graph)
     graph.set_io_data_type(types.front())
         .set_compute_data_type(computeType)
         .set_intermediate_data_type(computeType);
+    graph.deselect_numeric_notes(ExcludedNotes(problem));
 
     auto a                    = MakeTensor(problem.tensors[0], types[0], kUidA);
     auto b                    = MakeTensor(problem.tensors[1], types[1], kUidB);
@@ -335,6 +257,7 @@ bool PopulateGraph(const ConvProblem& problem, fe::graph::Graph& graph)
         out = graph.conv_wgrad(a, b, conv);
         break;
     }
+    case GraphKind::BatchnormInference: return false;
     }
 
     if(out == nullptr)
@@ -380,15 +303,83 @@ miopenStatus_t RunProblem(miopenHandle_t handle,
 {
     return RunCachedGraph(
         handle,
-        MakePlanKey(handle, problem),
+        MakePlanKey(problem),
         [&problem](fe::graph::Graph& graph) { return PopulateGraph(problem, graph); },
         variantPack,
         workspace,
         workspaceSize);
 }
 
-// Shared tail of the three plain convolution entry points. `a`, `b` and `out`
-// are the node's inputs and result in node order.
+// MIOpen's transposed convolution is the ordinary convolution with forward and
+// backward data exchanged, as convolution_api.cpp maps it: the transposed forward
+// is the ordinary backward data with x as dy and y as dx, the transposed backward
+// data is the ordinary forward with dy as x and dx as y, and the transposed
+// backward weights is the ordinary backward weights with x and dy exchanged. The
+// weight tensor, (C, K/g, ...), is already the ordinary one. Output padding only
+// lengthens the transposed output, which the ordinary node's shape rule, a floor
+// division by the stride, accepts. Returns whether the two inputs were exchanged,
+// so the caller exchanges their data pointers too.
+bool ToOrdinaryRoles(ConvProblem& problem)
+{
+    if(problem.conv.mode != miopenTranspose)
+        return false;
+    switch(problem.kind)
+    {
+    case GraphKind::ConvFprop: problem.kind = GraphKind::ConvDgrad; return false;
+    case GraphKind::ConvDgrad: problem.kind = GraphKind::ConvFprop; return false;
+    case GraphKind::ConvWgrad: std::swap(problem.tensors[0], problem.tensors[1]); return true;
+    case GraphKind::ConvBiasActivation:
+    case GraphKind::BatchnormInference: return false;
+    }
+    return false;
+}
+
+// Reads the descriptors of one plain call. `a`, `b` and `out` are the call's
+// inputs and result in the order of its own direction; for a transposed call the
+// problem comes back in the ordinary convolution's roles, and `swapInputs` says
+// whether `a` and `b` were exchanged. Returns the status to fail with, or success.
+miopenStatus_t ReadPlainProblem(GraphKind kind,
+                                miopenTensorDescriptor_t aDesc,
+                                miopenTensorDescriptor_t bDesc,
+                                miopenConvolutionDescriptor_t convDesc,
+                                miopenTensorDescriptor_t outDesc,
+                                ConvProblem& problem,
+                                bool& swapInputs)
+{
+    if(!IsAvailable())
+        return RecordFailure(miopenStatusInternalError, "hipDNN forwarding is unavailable");
+
+    problem.kind = kind;
+    problem.tensors.resize(3);
+    if(ReadTensor(aDesc, problem.tensors[0]) != miopenStatusSuccess ||
+       ReadTensor(bDesc, problem.tensors[1]) != miopenStatusSuccess ||
+       ReadTensor(outDesc, problem.tensors[2]) != miopenStatusSuccess ||
+       ReadConvolution(convDesc, problem.conv) != miopenStatusSuccess)
+        return RecordFailure(miopenStatusBadParm, "could not read the MIOpen descriptors");
+
+    if(const char* reason = CheckSupported(problem.tensors, problem.conv))
+        return RecordFailure(miopenStatusUnsupportedOp, reason);
+    swapInputs = ToOrdinaryRoles(problem);
+    return miopenStatusSuccess;
+}
+
+miopenStatus_t RunPlainProblem(miopenHandle_t handle,
+                               const ConvProblem& problem,
+                               const void* aData,
+                               const void* bData,
+                               void* outData,
+                               void* workspace,
+                               size_t workspaceSize)
+{
+    VariantPack variantPack{
+        {kUidA, const_cast<void*>(aData)},
+        {kUidB, const_cast<void*>(bData)},
+        {kUidOut, outData},
+    };
+    return RunProblem(handle, problem, variantPack, workspace, workspaceSize);
+}
+
+// Shared tail of the three plain convolution entry points.
 miopenStatus_t ForwardConvolution(miopenHandle_t handle,
                                   GraphKind kind,
                                   const void* alpha,
@@ -403,17 +394,14 @@ miopenStatus_t ForwardConvolution(miopenHandle_t handle,
                                   void* workspace,
                                   size_t workspaceSize)
 {
-    if(!IsAvailable())
-        return RecordFailure(miopenStatusInternalError, "hipDNN forwarding is unavailable");
-
     ConvProblem problem;
-    problem.kind = kind;
-    problem.tensors.resize(3);
-    if(ReadTensor(aDesc, problem.tensors[0]) != miopenStatusSuccess ||
-       ReadTensor(bDesc, problem.tensors[1]) != miopenStatusSuccess ||
-       ReadTensor(outDesc, problem.tensors[2]) != miopenStatusSuccess ||
-       ReadConvolution(convDesc, problem.conv) != miopenStatusSuccess)
-        return RecordFailure(miopenStatusBadParm, "could not read the MIOpen descriptors");
+    bool swapInputs = false;
+    if(const auto status =
+           ReadPlainProblem(kind, aDesc, bDesc, convDesc, outDesc, problem, swapInputs);
+       status != miopenStatusSuccess)
+        return status;
+    if(swapInputs)
+        std::swap(aData, bData);
 
     // MIOpen reads alpha and beta as the output tensor's type. Its own 2-D
     // convolution returns the same status.
@@ -422,15 +410,57 @@ miopenStatus_t ForwardConvolution(miopenHandle_t handle,
         return RecordFailure(miopenStatusNotImplemented,
                              "hipDNN convolution supports only alpha=1, beta=0");
 
-    if(const char* reason = CheckSupported(problem.tensors, problem.conv))
-        return RecordFailure(miopenStatusUnsupportedOp, reason);
+    return RunPlainProblem(handle, problem, aData, bData, outData, workspace, workspaceSize);
+}
 
-    VariantPack variantPack{
-        {kUidA, const_cast<void*>(aData)},
-        {kUidB, const_cast<void*>(bData)},
-        {kUidOut, outData},
-    };
-    return RunProblem(handle, problem, variantPack, workspace, workspaceSize);
+// The workspace of the plan the forwarded execution will run when given `limit`
+// bytes (no limit: hipDNN's best plan). Builds and caches the graph, so a problem
+// hipDNN cannot serve fails here, at query time, as it would on execution.
+miopenStatus_t PlainWorkspaceSize(miopenHandle_t handle,
+                                  GraphKind kind,
+                                  miopenTensorDescriptor_t aDesc,
+                                  miopenTensorDescriptor_t bDesc,
+                                  miopenConvolutionDescriptor_t convDesc,
+                                  miopenTensorDescriptor_t outDesc,
+                                  std::optional<size_t> limit,
+                                  size_t& workspaceSize)
+{
+    ConvProblem problem;
+    bool swapInputs = false;
+    if(const auto status =
+           ReadPlainProblem(kind, aDesc, bDesc, convDesc, outDesc, problem, swapInputs);
+       status != miopenStatusSuccess)
+        return status;
+    return CachedGraphWorkspaceSize(
+        handle,
+        MakePlanKey(problem),
+        [&problem](fe::graph::Graph& graph) { return PopulateGraph(problem, graph); },
+        limit,
+        workspaceSize);
+}
+
+// The smallest workspace any engine runs the problem in, and the best plan's.
+miopenStatus_t PlainWorkspaceRange(miopenHandle_t handle,
+                                   GraphKind kind,
+                                   miopenTensorDescriptor_t aDesc,
+                                   miopenTensorDescriptor_t bDesc,
+                                   miopenConvolutionDescriptor_t convDesc,
+                                   miopenTensorDescriptor_t outDesc,
+                                   size_t& minWorkspaceSize,
+                                   size_t& maxWorkspaceSize)
+{
+    ConvProblem problem;
+    bool swapInputs = false;
+    if(const auto status =
+           ReadPlainProblem(kind, aDesc, bDesc, convDesc, outDesc, problem, swapInputs);
+       status != miopenStatusSuccess)
+        return status;
+    return CachedGraphWorkspaceRange(
+        handle,
+        MakePlanKey(problem),
+        [&problem](fe::graph::Graph& graph) { return PopulateGraph(problem, graph); },
+        minWorkspaceSize,
+        maxWorkspaceSize);
 }
 
 } // namespace
@@ -522,6 +552,232 @@ miopenStatus_t ConvolutionBackwardWeights(miopenHandle_t handle,
                               workSpaceSize);
 }
 
+miopenStatus_t ConvolutionImmediate(miopenHandle_t handle,
+                                    GraphKind kind,
+                                    miopenTensorDescriptor_t aDesc,
+                                    const void* a,
+                                    miopenTensorDescriptor_t bDesc,
+                                    const void* b,
+                                    miopenConvolutionDescriptor_t convDesc,
+                                    miopenTensorDescriptor_t outDesc,
+                                    void* out,
+                                    void* workSpace,
+                                    size_t workSpaceSize)
+{
+    ConvProblem problem;
+    bool swapInputs = false;
+    if(const auto status =
+           ReadPlainProblem(kind, aDesc, bDesc, convDesc, outDesc, problem, swapInputs);
+       status != miopenStatusSuccess)
+        return status;
+    if(swapInputs)
+        std::swap(a, b);
+    return RunPlainProblem(handle, problem, a, b, out, workSpace, workSpaceSize);
+}
+
+miopenStatus_t ConvolutionWorkspaceSize(miopenHandle_t handle,
+                                        GraphKind kind,
+                                        miopenTensorDescriptor_t aDesc,
+                                        miopenTensorDescriptor_t bDesc,
+                                        miopenConvolutionDescriptor_t convDesc,
+                                        miopenTensorDescriptor_t outDesc,
+                                        size_t* workSpaceSize)
+{
+    if(workSpaceSize == nullptr)
+        return RecordFailure(miopenStatusBadParm, "workSpaceSize is null");
+    size_t size = 0;
+    if(const auto status =
+           PlainWorkspaceSize(handle, kind, aDesc, bDesc, convDesc, outDesc, std::nullopt, size);
+       status != miopenStatusSuccess)
+        return status;
+    *workSpaceSize = size;
+    return miopenStatusSuccess;
+}
+
+miopenStatus_t ConvolutionWorkspaceSizeRange(miopenHandle_t handle,
+                                             GraphKind kind,
+                                             miopenTensorDescriptor_t aDesc,
+                                             miopenTensorDescriptor_t bDesc,
+                                             miopenConvolutionDescriptor_t convDesc,
+                                             miopenTensorDescriptor_t outDesc,
+                                             size_t* minWorkspaceSize,
+                                             size_t* maxWorkspaceSize)
+{
+    if(minWorkspaceSize == nullptr || maxWorkspaceSize == nullptr)
+        return miopenStatusBadParm;
+    return PlainWorkspaceRange(
+        handle, kind, aDesc, bDesc, convDesc, outDesc, *minWorkspaceSize, *maxWorkspaceSize);
+}
+
+miopenStatus_t FindConvolution(miopenHandle_t handle,
+                               GraphKind kind,
+                               miopenTensorDescriptor_t aDesc,
+                               miopenTensorDescriptor_t bDesc,
+                               miopenConvolutionDescriptor_t convDesc,
+                               miopenTensorDescriptor_t outDesc,
+                               int requestAlgoCount,
+                               int* returnedAlgoCount,
+                               miopenConvAlgoPerf_t* perfResults,
+                               void* workSpace,
+                               size_t workSpaceSize)
+{
+    if(requestAlgoCount < 1 || returnedAlgoCount == nullptr || perfResults == nullptr)
+        return RecordFailure(miopenStatusBadParm,
+                             "Find needs requestAlgoCount >= 1 and non-null result pointers");
+    // As MIOpen's Find returns only what fits the workspace it is given, the result is the
+    // plan the forwarded execution will run in that workspace.
+    const size_t given = workSpace == nullptr ? 0 : workSpaceSize;
+    size_t size        = 0;
+    if(const auto status =
+           PlainWorkspaceSize(handle, kind, aDesc, bDesc, convDesc, outDesc, given, size);
+       status != miopenStatusSuccess)
+        return status;
+
+    // One result: hipDNN's choice. Its algorithm value is never read back, since
+    // the forwarded execution ignores the algorithm argument. No time is measured.
+    miopenConvAlgoPerf_t result{};
+    switch(kind)
+    {
+    case GraphKind::ConvFprop: result.fwd_algo = miopenConvolutionFwdAlgoDirect; break;
+    case GraphKind::ConvDgrad: result.bwd_data_algo = miopenConvolutionBwdDataAlgoDirect; break;
+    case GraphKind::ConvWgrad:
+        result.bwd_weights_algo = miopenConvolutionBwdWeightsAlgoDirect;
+        break;
+    case GraphKind::ConvBiasActivation:
+    case GraphKind::BatchnormInference:
+        return RecordFailure(miopenStatusBadParm,
+                             "Find serves only the three plain convolution directions");
+    }
+    result.time        = 0.0f;
+    result.memory      = size;
+    perfResults[0]     = result;
+    *returnedAlgoCount = 1;
+    return miopenStatusSuccess;
+}
+
+namespace {
+
+// The solutions the solution queries report: hipDNN's best plan, and, when some engine
+// runs in less workspace, the plan for the smallest workspace, so a caller choosing a
+// solution by the workspace it can afford finds one, as with MIOpen's solution list. The
+// immediate call picks the plan by the workspace it is given, not by the id.
+struct SolutionSizes
+{
+    size_t best    = 0;
+    size_t minimum = 0;
+    size_t Count() const { return minimum < best ? 2 : 1; }
+};
+
+miopenStatus_t ReadSolutionSizes(miopenHandle_t handle,
+                                 GraphKind kind,
+                                 miopenTensorDescriptor_t aDesc,
+                                 miopenTensorDescriptor_t bDesc,
+                                 miopenConvolutionDescriptor_t convDesc,
+                                 miopenTensorDescriptor_t outDesc,
+                                 SolutionSizes& sizes)
+{
+    return PlainWorkspaceRange(
+        handle, kind, aDesc, bDesc, convDesc, outDesc, sizes.minimum, sizes.best);
+}
+
+} // namespace
+
+miopenStatus_t ConvolutionSolutionCount(miopenHandle_t handle,
+                                        GraphKind kind,
+                                        miopenTensorDescriptor_t aDesc,
+                                        miopenTensorDescriptor_t bDesc,
+                                        miopenConvolutionDescriptor_t convDesc,
+                                        miopenTensorDescriptor_t outDesc,
+                                        size_t* solutionCount)
+{
+    if(solutionCount == nullptr)
+        return RecordFailure(miopenStatusBadParm, "solutionCount is null");
+    SolutionSizes sizes;
+    if(const auto status = ReadSolutionSizes(handle, kind, aDesc, bDesc, convDesc, outDesc, sizes);
+       status != miopenStatusSuccess)
+        return status;
+    *solutionCount = sizes.Count();
+    return miopenStatusSuccess;
+}
+
+miopenStatus_t ConvolutionSolutions(miopenHandle_t handle,
+                                    GraphKind kind,
+                                    miopenTensorDescriptor_t aDesc,
+                                    miopenTensorDescriptor_t bDesc,
+                                    miopenConvolutionDescriptor_t convDesc,
+                                    miopenTensorDescriptor_t outDesc,
+                                    size_t maxSolutionCount,
+                                    size_t* solutionCount,
+                                    miopenConvSolution_t* solutions)
+{
+    SolutionSizes sizes;
+    if(const auto status = ReadSolutionSizes(handle, kind, aDesc, bDesc, convDesc, outDesc, sizes);
+       status != miopenStatusSuccess)
+        return status;
+
+    // As MIOpen's own query: at most maxSolutionCount solutions, best first, and a null
+    // pointer leaves that output unwritten.
+    const size_t returned = std::min(maxSolutionCount, sizes.Count());
+    if(solutions != nullptr)
+    {
+        for(size_t i = 0; i < returned; ++i)
+        {
+            miopenConvSolution_t solution{};
+            solution.time           = 0.0f;
+            solution.workspace_size = i == 0 ? sizes.best : sizes.minimum;
+            solution.solution_id    = kHipdnnSolutionId + i;
+            solution.algorithm      = miopenConvolutionAlgoDirect;
+            solutions[i]            = solution;
+        }
+    }
+    if(solutionCount != nullptr)
+        *solutionCount = returned;
+    return miopenStatusSuccess;
+}
+
+miopenStatus_t ConvolutionSolutionWorkspaceSize(miopenHandle_t handle,
+                                                GraphKind kind,
+                                                miopenTensorDescriptor_t aDesc,
+                                                miopenTensorDescriptor_t bDesc,
+                                                miopenConvolutionDescriptor_t convDesc,
+                                                miopenTensorDescriptor_t outDesc,
+                                                uint64_t solutionId,
+                                                size_t* workSpaceSize)
+{
+    if(workSpaceSize == nullptr)
+        return RecordFailure(miopenStatusBadParm, "workSpaceSize is null");
+    SolutionSizes sizes;
+    if(const auto status = ReadSolutionSizes(handle, kind, aDesc, bDesc, convDesc, outDesc, sizes);
+       status != miopenStatusSuccess)
+        return status;
+    *workSpaceSize = solutionId == kHipdnnSolutionId + 1 ? sizes.minimum : sizes.best;
+    return miopenStatusSuccess;
+}
+
+miopenStatus_t CompileConvolutionSolution(miopenHandle_t handle,
+                                          GraphKind kind,
+                                          miopenTensorDescriptor_t aDesc,
+                                          miopenTensorDescriptor_t bDesc,
+                                          miopenConvolutionDescriptor_t convDesc,
+                                          miopenTensorDescriptor_t outDesc,
+                                          uint64_t solutionId)
+{
+    // Builds the plan the solution's workspace selects.
+    SolutionSizes sizes;
+    if(const auto status = ReadSolutionSizes(handle, kind, aDesc, bDesc, convDesc, outDesc, sizes);
+       status != miopenStatusSuccess)
+        return status;
+    size_t unused = 0;
+    return PlainWorkspaceSize(handle,
+                              kind,
+                              aDesc,
+                              bDesc,
+                              convDesc,
+                              outDesc,
+                              solutionId == kHipdnnSolutionId + 1 ? sizes.minimum : sizes.best,
+                              unused);
+}
+
 miopenStatus_t ConvolutionBiasActivationForward(miopenHandle_t handle,
                                                 const void* alpha1,
                                                 const miopenTensorDescriptor_t xDesc,
@@ -570,6 +826,11 @@ miopenStatus_t ConvolutionBiasActivationForward(miopenHandle_t handle,
 
     if(const char* reason = CheckSupported(problem.tensors, problem.conv))
         return RecordFailure(miopenStatusUnsupportedOp, reason);
+    // The fused graph is a forward convolution; a transposed one would be a
+    // backward-data node followed by the bias and activation.
+    if(problem.conv.mode == miopenTranspose)
+        return RecordFailure(miopenStatusUnsupportedOp,
+                             "transposed fused convolution is not forwarded to hipDNN");
 
     // RELU, the only mode accepted, ignores these. The getter just needs
     // somewhere to write them.

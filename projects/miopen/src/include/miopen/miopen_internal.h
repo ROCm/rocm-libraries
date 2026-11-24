@@ -115,6 +115,23 @@ miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange(miopenHandle_t handle,
                                                       size_t* minWorkspaceSize,
                                                       size_t* maxWorkspaceSize);
 
+/* Everything a tensor descriptor holds that the convolution entry points read, at full width.
+ * miopenGetTensorDescriptor returns int dims and strides, which cannot hold a length or stride
+ * above INT_MAX, and no public getter reports the cast type or the vector length.
+ *
+ * dimsA and stridesA must each hold miopenGetTensorDescriptorSize() entries. castType receives
+ * the type set with miopenSetTensorCastType, or the data type when none is set. vectorLength
+ * receives 1, or 4 or 8 for the vectorized layouts (NCHWc4, NCHWc8, CHWNc4, CHWNc8). Any output
+ * pointer may be null.
+ */
+MIOPEN_EXPORT extern "C" miopenStatus_t
+miopenGetTensorDescriptorDetails(miopenTensorDescriptor_t tensorDesc,
+                                 miopenDataType_t* dataType,
+                                 miopenDataType_t* castType,
+                                 size_t* dimsA,
+                                 size_t* stridesA,
+                                 size_t* vectorLength);
+
 /* Raw-int find-mode accessors that predate the typed miopen{Get,Set}ConvolutionFindMode
  * in miopen.h. MIGraphX probes for and calls the Set variant; a build that does not
  * export it makes MIGraphX silently drop that call.

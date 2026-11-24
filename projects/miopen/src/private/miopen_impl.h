@@ -1991,6 +1991,12 @@ miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange_impl(miopenHandle_t handle
                                                            miopenTensorDescriptor_t dwDesc,
                                                            size_t* minWorkspaceSize,
                                                            size_t* maxWorkspaceSize);
+extern "C" miopenStatus_t miopenGetTensorDescriptorDetails_impl(miopenTensorDescriptor_t tensorDesc,
+                                                                miopenDataType_t* dataType,
+                                                                miopenDataType_t* castType,
+                                                                size_t* dimsA,
+                                                                size_t* stridesA,
+                                                                size_t* vectorLength);
 extern "C" miopenStatus_t
 miopenHiddenSetConvolutionFindMode_impl(miopenConvolutionDescriptor_t convDesc, int findMode);
 extern "C" miopenStatus_t

@@ -408,6 +408,13 @@ struct ProblemDescription : ProblemDescriptionBase
         Visit(std::forward<Self>(self), [&](int64_t value, std::string name) { f(value, name); });
         Visit(std::forward<Self>(self),
               [&](std::string value, std::string name) { f(value, name); });
+        // The text perf-db key (DbRecord::SerializeKey) ends here. A deterministic problem gets
+        // its own record: a config tuned in one mode is slow in the other (deterministic tuning
+        // stores split-K = 1, which a default-mode run would then load and run). Default-mode
+        // keys stay unchanged, so existing records stay valid; the sqlite system perf-db reads
+        // Visit only and keeps its schema.
+        if(self.GetConv().attribute.deterministic)
+            f(std::string("DET"), "deterministic");
     }
 
     MIOPEN_INTERNALS_EXPORT void SetupFloats(ExecutionContext& ctx) const;

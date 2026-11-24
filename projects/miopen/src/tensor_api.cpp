@@ -31,6 +31,7 @@
 #include <miopen/tensor.hpp>
 #include <miopen/seq_tensor.hpp>
 #include <miopen/tensor_ops.hpp>
+#include <miopen/miopen_internal.h>
 
 extern "C" miopenStatus_t miopenCreateTensorDescriptor(miopenTensorDescriptor_t* tensorDesc)
 {
@@ -308,6 +309,29 @@ extern "C" miopenStatus_t miopenGetTensorDescriptor(miopenTensorDescriptor_t ten
                       miopen::deref(tensorDesc).GetStrides().end(),
                       stridesA);
         }
+    });
+}
+
+extern "C" miopenStatus_t miopenGetTensorDescriptorDetails(miopenTensorDescriptor_t tensorDesc,
+                                                           miopenDataType_t* dataType,
+                                                           miopenDataType_t* castType,
+                                                           size_t* dimsA,
+                                                           size_t* stridesA,
+                                                           size_t* vectorLength)
+{
+    MIOPEN_LOG_FUNCTION(tensorDesc);
+    return miopen::try_([&] {
+        const auto& desc = miopen::deref(tensorDesc);
+        if(dataType != nullptr)
+            *dataType = desc.GetType();
+        if(castType != nullptr)
+            *castType = desc.GetCastType().value_or(desc.GetType());
+        if(dimsA != nullptr)
+            std::copy(desc.GetLengths().begin(), desc.GetLengths().end(), dimsA);
+        if(stridesA != nullptr)
+            std::copy(desc.GetStrides().begin(), desc.GetStrides().end(), stridesA);
+        if(vectorLength != nullptr)
+            *vectorLength = desc.GetVectorLength();
     });
 }
 

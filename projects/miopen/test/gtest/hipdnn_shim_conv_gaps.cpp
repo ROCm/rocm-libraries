@@ -5,8 +5,8 @@
 // what each mode did, so every gap is one known-divergence entry in the parity run.
 //
 // Every call runs Find first, because natively grouped, depthwise and transposed calls fail
-// without it. Find's status is not asserted: Find is never forwarded, and for some of these
-// problems it fails in both modes.
+// without it. Find's status is not asserted: for some of these problems it fails in both
+// modes.
 
 #include "hipdnn_shim_helpers.hpp"
 

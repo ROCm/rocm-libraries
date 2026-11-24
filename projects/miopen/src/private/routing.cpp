@@ -45,7 +45,7 @@ constexpr int kInfo2LogLevel   = 6;
 //      point through the public miopen.h API only and checks the result against a CPU
 //      reference (see "hipDNN shim surface" in test/gtest/README.md). Without one, the
 //      parity run replays nothing for it, so a swap that changes results goes unnoticed.
-//   4. Update DefaultSetIsTheConvolutionFamily in test/gtest/wrapper_routing.cpp.
+//   4. Update DefaultSetIsTheForwardedFamily in test/gtest/wrapper_routing.cpp.
 //
 // The forwarding parity tests (script/run_forwarding_parity.py) run the shim
 // tests once with forwarding disabled and once enabled and require the two runs
@@ -57,12 +57,93 @@ constexpr int kInfo2LogLevel   = 6;
 //
 // constexpr so it lands in .rodata: no initialization order or exit-time
 // destructor to worry about.
-constexpr std::array<std::string_view, 4> kForwardingEntries{
+constexpr std::array<std::string_view, 29> kForwardingEntries{
     "miopenConvolutionForward",
     "miopenConvolutionBackwardData",
     "miopenConvolutionBackwardWeights",
     "miopenConvolutionBiasActivationForward",
+    // Immediate mode: the solution id is ignored, as the algorithm is above.
+    "miopenConvolutionForwardImmediate",
+    "miopenConvolutionBackwardDataImmediate",
+    "miopenConvolutionBackwardWeightsImmediate",
+    // Queries. Each answers for the forwarded execution, so none runs a MIOpen
+    // solver; each is forwarded only while its execution entry point is (see
+    // kPairedEntries).
+    "miopenFindConvolutionForwardAlgorithm",
+    "miopenFindConvolutionBackwardDataAlgorithm",
+    "miopenFindConvolutionBackwardWeightsAlgorithm",
+    "miopenConvolutionForwardGetWorkSpaceSize",
+    "miopenConvolutionBackwardDataGetWorkSpaceSize",
+    "miopenConvolutionBackwardWeightsGetWorkSpaceSize",
+    "miopenConvolutionForwardGetWorkSpaceSizeRange",
+    "miopenConvolutionBackwardDataGetWorkSpaceSizeRange",
+    "miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange",
+    "miopenConvolutionForwardGetSolutionCount",
+    "miopenConvolutionBackwardDataGetSolutionCount",
+    "miopenConvolutionBackwardWeightsGetSolutionCount",
+    "miopenConvolutionForwardGetSolution",
+    "miopenConvolutionBackwardDataGetSolution",
+    "miopenConvolutionBackwardWeightsGetSolution",
+    "miopenConvolutionForwardGetSolutionWorkspaceSize",
+    "miopenConvolutionBackwardDataGetSolutionWorkspaceSize",
+    "miopenConvolutionBackwardWeightsGetSolutionWorkspaceSize",
+    "miopenConvolutionForwardCompileSolution",
+    "miopenConvolutionBackwardDataCompileSolution",
+    "miopenConvolutionBackwardWeightsCompileSolution",
+    // Batch-norm inference with running statistics, the entry point PyTorch calls in eval
+    // mode. The _V2 and InvVariance variants and training stay in MIOpen.
+    "miopenBatchNormalizationForwardInference",
 };
+
+// A query and the execution entry point it answers for. A query is forwarded only
+// while that entry point is: MIOPEN_DISABLE_HIPDNN_FOR naming the execution keeps
+// its queries in MIOpen too, so the algorithm, solution and workspace a caller
+// gets always come from the path that executes them.
+struct PairedEntry
+{
+    std::string_view query;
+    std::string_view execution;
+};
+constexpr std::array<PairedEntry, 21> kPairedEntries{{
+    {"miopenFindConvolutionForwardAlgorithm", "miopenConvolutionForward"},
+    {"miopenFindConvolutionBackwardDataAlgorithm", "miopenConvolutionBackwardData"},
+    {"miopenFindConvolutionBackwardWeightsAlgorithm", "miopenConvolutionBackwardWeights"},
+    {"miopenConvolutionForwardGetWorkSpaceSize", "miopenConvolutionForward"},
+    {"miopenConvolutionBackwardDataGetWorkSpaceSize", "miopenConvolutionBackwardData"},
+    {"miopenConvolutionBackwardWeightsGetWorkSpaceSize", "miopenConvolutionBackwardWeights"},
+    {"miopenConvolutionForwardGetWorkSpaceSizeRange", "miopenConvolutionForward"},
+    {"miopenConvolutionBackwardDataGetWorkSpaceSizeRange", "miopenConvolutionBackwardData"},
+    {"miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange", "miopenConvolutionBackwardWeights"},
+    {"miopenConvolutionForwardGetSolutionCount", "miopenConvolutionForwardImmediate"},
+    {"miopenConvolutionBackwardDataGetSolutionCount", "miopenConvolutionBackwardDataImmediate"},
+    {"miopenConvolutionBackwardWeightsGetSolutionCount",
+     "miopenConvolutionBackwardWeightsImmediate"},
+    {"miopenConvolutionForwardGetSolution", "miopenConvolutionForwardImmediate"},
+    {"miopenConvolutionBackwardDataGetSolution", "miopenConvolutionBackwardDataImmediate"},
+    {"miopenConvolutionBackwardWeightsGetSolution", "miopenConvolutionBackwardWeightsImmediate"},
+    {"miopenConvolutionForwardGetSolutionWorkspaceSize", "miopenConvolutionForwardImmediate"},
+    {"miopenConvolutionBackwardDataGetSolutionWorkspaceSize",
+     "miopenConvolutionBackwardDataImmediate"},
+    {"miopenConvolutionBackwardWeightsGetSolutionWorkspaceSize",
+     "miopenConvolutionBackwardWeightsImmediate"},
+    {"miopenConvolutionForwardCompileSolution", "miopenConvolutionForwardImmediate"},
+    {"miopenConvolutionBackwardDataCompileSolution", "miopenConvolutionBackwardDataImmediate"},
+    {"miopenConvolutionBackwardWeightsCompileSolution",
+     "miopenConvolutionBackwardWeightsImmediate"},
+}};
+
+// The execution entry point `entryPoint` answers for, or null when it is not a query.
+const char* PairedExecution(const char* entryPoint)
+{
+    if(entryPoint == nullptr)
+        return nullptr;
+    for(const auto& entry : kPairedEntries)
+    {
+        if(entry.query == entryPoint)
+            return entry.execution.data();
+    }
+    return nullptr;
+}
 
 std::string ToLower(std::string_view value)
 {
@@ -342,7 +423,9 @@ RouteDecision ResolveRouteWithReason(ForwardingMode mode,
         return {Route::Miopen, RouteReason::ForwardingOff};
     if(!IsInForwardingSet(entryPoint, set))
         return {Route::Miopen, RouteReason::NotInForwardingSet};
-    if(disabled.DisablesEverything() || disabled.Contains(entryPoint))
+    const char* const execution = PairedExecution(entryPoint);
+    if(disabled.DisablesEverything() || disabled.Contains(entryPoint) ||
+       (execution != nullptr && disabled.Contains(execution)))
         return {Route::Miopen, RouteReason::DisabledByEnv};
     if(!hipdnnAvailable)
     {

@@ -6,7 +6,6 @@
 
 #include "erase_outside_lock.hpp"
 #include "insert_outside_lock.hpp"
-#include "lru_cache.hpp"
 #include "miopen_impl.h"
 #include "routing.hpp"
 
@@ -14,16 +13,19 @@
 
 #include <hip/hip_runtime_api.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <exception>
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace miopen {
 namespace wrapper {
@@ -37,53 +39,49 @@ struct PlanKeyHash
 {
     size_t operator()(const PlanKey& key) const
     {
-        size_t seed = std::hash<const void*>{}(key.handle);
+        size_t seed = 0;
         for(const int64_t value : key.problem)
             seed ^= static_cast<size_t>(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        seed ^= static_cast<size_t>(key.workspaceLimit) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
         return seed;
     }
 };
 
-// Everything hipDNN needs that is tied to one MIOpen handle. Reusing one
-// workspace across calls is safe only because the calls are ordered: they share
-// a stream, and AcquireHandleState orders them when the stream changes.
+using GraphPtr = std::shared_ptr<fe::graph::Graph>;
+
+// One handle's built graphs, one per problem. Not capped: a cached graph holds only host
+// bookkeeping (its loaded kernels live in the engine plugins' shared caches), and a cap
+// below a workload's working set would rebuild graphs on every call, since a training
+// step visits its problems in the same order every step.
+class PlanMap
+{
+public:
+    const GraphPtr* Find(const PlanKey& key) const
+    {
+        const auto found = plans_.find(key);
+        return found == plans_.end() ? nullptr : &found->second;
+    }
+    void Insert(const PlanKey& key, GraphPtr graph)
+    {
+        plans_.insert_or_assign(key, std::move(graph));
+    }
+
+private:
+    std::unordered_map<PlanKey, GraphPtr, PlanKeyHash> plans_;
+};
+
+// Everything hipDNN needs that is tied to one MIOpen handle. Work on the handle is
+// ordered by its stream alone: every call runs in the caller's workspace, so
+// after a stream switch nothing the wrapper owns is shared with work still queued on the
+// old stream, and ordering across the switch is the caller's.
 struct HandleState
 {
     fe::HipdnnHandlePtr hipdnnHandle;
     hipStream_t stream = nullptr;
-    // Marks the end of the last call's work. A call on a new stream waits on this
-    // instead of the old stream, which the caller may have destroyed.
-    hipEvent_t lastWork  = nullptr;
-    void* workspace      = nullptr;
-    size_t workspaceSize = 0;
     std::mutex mutex;
-
-    ~HandleState()
-    {
-        if(workspace != nullptr)
-            static_cast<void>(hipFree(workspace));
-        if(lastWork != nullptr)
-            static_cast<void>(hipEventDestroy(lastWork));
-    }
-
-    bool EnsureWorkspace(size_t bytes)
-    {
-        if(bytes <= workspaceSize)
-            return true;
-        void* grown = nullptr;
-        if(hipMalloc(&grown, bytes) != hipSuccess)
-            return false;
-        // Work queued by an earlier call may still be using the old buffer.
-        // hipFree happens to wait for it, but that is not a documented promise.
-        if(workspace != nullptr)
-        {
-            static_cast<void>(hipStreamSynchronize(stream));
-            static_cast<void>(hipFree(workspace));
-        }
-        workspace     = grown;
-        workspaceSize = bytes;
-        return true;
-    }
+    // Declared after the hipDNN handle so the graphs built with it are destroyed first.
+    PlanMap plans;
+    std::mutex plansMutex;
 };
 
 std::mutex& HandleMapMutex()
@@ -92,10 +90,17 @@ std::mutex& HandleMapMutex()
     return mutex;
 }
 
+// Never destroyed, and with it the graphs each handle's state holds. Destroying a hipDNN
+// handle runs the engine plugins' teardown, and the MIOpen provider's destroys its MIOpen
+// handle, which unloads HIP modules. At process exit the HIP runtime has already torn its state
+// down by the time a static destructor here would run, so that unload frees freed memory. The OS
+// reclaims what is left at exit; a handle released through miopenDestroy is still torn down then,
+// while HIP is alive.
 std::unordered_map<miopenHandle_t, std::unique_ptr<HandleState>>& HandleMap()
 {
-    static std::unordered_map<miopenHandle_t, std::unique_ptr<HandleState>> handles;
-    return handles;
+    static auto* const handles =
+        new std::unordered_map<miopenHandle_t, std::unique_ptr<HandleState>>;
+    return *handles;
 }
 
 class ScopedDevice
@@ -137,11 +142,7 @@ std::pair<std::unique_ptr<HandleState>, miopenStatus_t> CreateHandleState(hipStr
     if(!error.is_good() || created == nullptr)
         return {nullptr,
                 RecordFailure(miopenStatusInternalError, "could not create a hipDNN handle")};
-    auto state = std::make_unique<HandleState>();
-    if(hipEventCreateWithFlags(&state->lastWork, hipEventDisableTiming) != hipSuccess)
-        return {nullptr,
-                RecordFailure(miopenStatusInternalError,
-                              "could not create the HIP event that orders hipDNN work")};
+    auto state          = std::make_unique<HandleState>();
     state->hipdnnHandle = std::move(created);
     state->stream       = stream;
     return {std::move(state), miopenStatusSuccess};
@@ -164,13 +165,6 @@ std::pair<HandleState*, miopenStatus_t> AcquireHandleState(miopenHandle_t handle
                 HandleState& state = *found->second;
                 if(state.stream != stream)
                 {
-                    // Work still queued on the old stream may be using the shared workspace.
-                    if(hipStreamWaitEvent(stream, state.lastWork, 0) != hipSuccess)
-                        return {nullptr,
-                                RecordFailure(
-                                    miopenStatusInternalError,
-                                    "could not make the MIOpen handle's new stream wait for the "
-                                    "hipDNN work queued on its old stream")};
                     if(!fe::setHipdnnHandleStream(state.hipdnnHandle, stream).is_good())
                         return {nullptr,
                                 RecordFailure(miopenStatusInternalError,
@@ -190,26 +184,6 @@ std::pair<HandleState*, miopenStatus_t> AcquireHandleState(miopenHandle_t handle
                HandleMap(), HandleMapMutex(), handle, std::move(created)))
             return {raw, miopenStatusSuccess};
     }
-}
-
-using GraphPtr = std::shared_ptr<fe::graph::Graph>;
-
-std::mutex& PlanMutex()
-{
-    static std::mutex mutex;
-    return mutex;
-}
-
-// Capped because a workload with changing shapes (varying batch size or input
-// size) makes a new key per shape, and each built graph holds backend state for
-// as long as it is cached. Evicting is always safe: a miss just rebuilds, and a
-// call still running an evicted graph holds its own reference to it.
-constexpr size_t kPlanCacheCapacity = 128;
-
-LruCache<PlanKey, GraphPtr, PlanKeyHash>& PlanCache()
-{
-    static LruCache<PlanKey, GraphPtr, PlanKeyHash> plans(kPlanCacheCapacity);
-    return plans;
 }
 
 struct LastForwardedError
@@ -260,35 +234,83 @@ std::optional<miopenStatus_t> FailureOfHipdnnResult(const fe::Error& error)
 }
 
 std::pair<GraphPtr, miopenStatus_t>
-AcquireGraph(const PlanKey& key, const PopulateGraphFn& populate, hipdnnHandle_t hipdnnHandle)
+AcquireGraph(HandleState& state, const PlanKey& key, const PopulateGraphFn& populate)
 {
     return AcquireGraphWith<fe::graph::Graph>(
-        PlanCache(),
-        PlanMutex(),
+        state.plans,
+        state.plansMutex,
         key,
         populate,
-        [&](fe::graph::Graph& graph) { return graph.build(hipdnnHandle); },
+        [&](fe::graph::Graph& graph) { return graph.build(*state.hipdnnHandle); },
         FailureOfHipdnnResult);
+}
+
+// The plugin SDK's global knob that bounds the workspace an engine's plan may use; an engine
+// that offers it chooses its kernel within the bound when the plan runs.
+constexpr const char* kWorkspaceSizeLimitKnob = "global.workspace_size_limit";
+
+// Builds the best plan whose workspace is within `limit`, walking hipDNN's ranked engine configs:
+// a config whose workspace is within the limit is used as it is; one that is not, but whose
+// engine offers the workspace-limit knob, is used with the knob set to the limit, so the engine
+// picks its kernel within it (the MIOpen provider runs MIOpen's Find with that workspace). The
+// engine filters set by `populate` still apply. Returns the last failure when no config fits.
+fe::Error BuildWithinWorkspace(fe::graph::Graph& graph, hipdnnHandle_t handle, int64_t limit)
+{
+    fe::Error result = graph.build_operation_graph(handle);
+    std::vector<fe::EngineConfigInfo> configs;
+    if(result.is_good())
+        result = graph.get_engine_configs(handle, configs);
+    if(result.is_bad())
+        return result;
+
+    result = {fe::ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED,
+              "no hipDNN engine fits the " + std::to_string(limit) + "-byte workspace given"};
+    for(const auto& config : configs)
+    {
+        std::vector<fe::KnobSetting> settings;
+        if(config.estimatedWorkspaceSize > limit)
+        {
+            const bool limitable =
+                std::any_of(config.knobs.begin(), config.knobs.end(), [](const auto& knob) {
+                    return knob.knobId() == kWorkspaceSizeLimitKnob;
+                });
+            if(!limitable)
+                continue;
+            settings.emplace_back(kWorkspaceSizeLimitKnob, limit);
+        }
+        fe::Error attempt = graph.create_execution_plan_ext(config.engineId, settings);
+        if(attempt.is_good())
+            attempt = graph.check_support();
+        if(attempt.is_good())
+            attempt = graph.build_plans();
+        int64_t needed = 0;
+        if(attempt.is_good())
+            attempt = graph.get_workspace_size(needed);
+        if(attempt.is_good() && needed > limit)
+            attempt = {fe::ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED,
+                       "the plan needs " + std::to_string(needed) + " bytes of workspace"};
+        result = attempt;
+        if(result.is_good())
+            break;
+    }
+    return result;
 }
 
 miopenStatus_t RunGraph(HandleState& state,
                         const GraphPtr& graph,
                         VariantPack& variantPack,
+                        size_t needed,
                         void* callerWorkspace,
                         size_t callerWorkspaceSize)
 {
     return RunGraphWith(
         state.mutex,
+        needed,
         callerWorkspace,
         callerWorkspaceSize,
-        [&](int64_t& needed) { return graph->get_workspace_size(needed); },
-        [&](size_t bytes) -> void* {
-            return state.EnsureWorkspace(bytes) ? state.workspace : nullptr;
-        },
         [&](void* workspace) {
             return graph->execute(*state.hipdnnHandle, variantPack, workspace);
         },
-        [&] { return hipEventRecord(state.lastWork, state.stream) == hipSuccess; },
         FailureOfHipdnnResult);
 }
 
@@ -432,12 +454,15 @@ miopenStatus_t RecordReentryFailure() noexcept
     return RecordReentryFailureTo(ErrorLoggingEnabled(), std::cerr);
 }
 
-miopenStatus_t RunCachedGraph(miopenHandle_t handle,
-                              const PlanKey& key,
-                              const PopulateGraphFn& populate,
-                              VariantPack& variantPack,
-                              void* workspace,
-                              size_t workspaceSize)
+// The part every forwarded call shares: make the handle's device current, then
+// find or create the handle's hipDNN state and the problem's built graph.
+// `scopedDevice` keeps that device current until the caller returns.
+static miopenStatus_t AcquireHandleAndGraph(miopenHandle_t handle,
+                                            const PlanKey& key,
+                                            const PopulateGraphFn& populate,
+                                            ScopedDevice& scopedDevice,
+                                            HandleState*& state,
+                                            GraphPtr& graph)
 {
     hipStream_t stream = nullptr;
     if(miopenGetStream_impl(handle, &stream) != miopenStatusSuccess)
@@ -449,20 +474,172 @@ miopenStatus_t RunCachedGraph(miopenHandle_t handle,
     // stream reports the current device, so a handle on the null stream runs on
     // whichever device the caller has current.
     hipDevice_t device = 0;
-    ScopedDevice scopedDevice;
     if(hipStreamGetDevice(stream, &device) != hipSuccess || !scopedDevice.Set(device))
         return RecordFailure(miopenStatusInternalError,
                              "could not make the MIOpen handle's device current");
 
-    auto [state, acquired] = AcquireHandleState(handle, stream);
-    if(state == nullptr)
+    auto [acquiredState, acquired] = AcquireHandleState(handle, stream);
+    if(acquiredState == nullptr)
         return acquired;
+    state = acquiredState;
 
-    auto [graph, status] = AcquireGraph(key, populate, *state->hipdnnHandle);
-    if(graph == nullptr)
+    auto [acquiredGraph, status] = AcquireGraph(*state, key, populate);
+    if(acquiredGraph == nullptr)
+        return status;
+    graph = std::move(acquiredGraph);
+    return miopenStatusSuccess;
+}
+
+// The plan's workspace in bytes.
+static miopenStatus_t PlanWorkspace(const GraphPtr& graph, size_t& workspaceSize)
+{
+    int64_t needed     = 0;
+    const auto queried = CallInsideHipdnn([&] { return graph->get_workspace_size(needed); });
+    if(const auto failure = FailureOfGuardedCall(queried, FailureOfHipdnnResult))
+        return *failure;
+    workspaceSize = needed > 0 ? static_cast<size_t>(needed) : 0;
+    return miopenStatusSuccess;
+}
+
+// The best plan whose workspace fits `limit` bytes: hipDNN's best plan when it fits, otherwise
+// the first of hipDNN's ranked engine configs that can run within the limit
+// (BuildWithinWorkspace), cached under the limit. A caller may give less workspace than the size
+// query reported; then the best choice that fits is wanted, and the call fails only when nothing
+// fits. No limit (nullopt) is hipDNN's best plan.
+static miopenStatus_t AcquireFittingGraph(miopenHandle_t handle,
+                                          const PlanKey& key,
+                                          const PopulateGraphFn& populate,
+                                          std::optional<size_t> limit,
+                                          ScopedDevice& scopedDevice,
+                                          HandleState*& state,
+                                          GraphPtr& graph,
+                                          size_t& workspaceSize)
+{
+    if(const auto status = AcquireHandleAndGraph(handle, key, populate, scopedDevice, state, graph);
+       status != miopenStatusSuccess)
+        return status;
+    if(const auto status = PlanWorkspace(graph, workspaceSize); status != miopenStatusSuccess)
+        return status;
+    if(!limit || workspaceSize <= *limit)
+        return miopenStatusSuccess;
+
+    PlanKey bounded        = key;
+    bounded.workspaceLimit = static_cast<int64_t>(*limit);
+    const int64_t bound    = bounded.workspaceLimit;
+    HandleState& owner     = *state;
+    auto [fitting, status] = AcquireGraphWith<fe::graph::Graph>(
+        owner.plans,
+        owner.plansMutex,
+        bounded,
+        populate,
+        [&](fe::graph::Graph& g) { return BuildWithinWorkspace(g, *owner.hipdnnHandle, bound); },
+        FailureOfHipdnnResult);
+    if(fitting == nullptr)
+        return RecordFailure(miopenStatusUnknownError,
+                             "No suitable algorithm was found to execute the required "
+                             "convolution: no hipDNN engine fits the " +
+                                 std::to_string(*limit) + "-byte workspace given");
+    graph = std::move(fitting);
+    return PlanWorkspace(graph, workspaceSize);
+}
+
+miopenStatus_t RunCachedGraph(miopenHandle_t handle,
+                              const PlanKey& key,
+                              const PopulateGraphFn& populate,
+                              VariantPack& variantPack,
+                              void* workspace,
+                              size_t workspaceSize)
+{
+    ScopedDevice scopedDevice;
+    HandleState* state = nullptr;
+    GraphPtr graph;
+    size_t needed      = 0;
+    const size_t given = workspace == nullptr ? 0 : workspaceSize;
+    if(const auto status =
+           AcquireFittingGraph(handle, key, populate, given, scopedDevice, state, graph, needed);
+       status != miopenStatusSuccess)
         return status;
 
-    return RunGraph(*state, graph, variantPack, workspace, workspaceSize);
+    return RunGraph(*state, graph, variantPack, needed, workspace, workspaceSize);
+}
+
+miopenStatus_t CachedGraphWorkspaceSize(miopenHandle_t handle,
+                                        const PlanKey& key,
+                                        const PopulateGraphFn& populate,
+                                        std::optional<size_t> limit,
+                                        size_t& workspaceSize)
+{
+    ScopedDevice scopedDevice;
+    HandleState* state = nullptr;
+    GraphPtr graph;
+    if(const auto status = AcquireFittingGraph(
+           handle, key, populate, limit, scopedDevice, state, graph, workspaceSize);
+       status != miopenStatusSuccess)
+        return status;
+    ClearForwardedFailure();
+    return miopenStatusSuccess;
+}
+
+miopenStatus_t CachedGraphWorkspaceRange(miopenHandle_t handle,
+                                         const PlanKey& key,
+                                         const PopulateGraphFn& populate,
+                                         size_t& minWorkspaceSize,
+                                         size_t& maxWorkspaceSize)
+{
+    ScopedDevice scopedDevice;
+    HandleState* state = nullptr;
+    GraphPtr graph;
+    size_t best = 0;
+    if(const auto status = AcquireFittingGraph(
+           handle, key, populate, std::nullopt, scopedDevice, state, graph, best);
+       status != miopenStatusSuccess)
+        return status;
+
+    // Each engine's config bounds the workspace of every plan built from it, so a limit at
+    // an engine's estimate admits that engine. The smallest limit that yields a plan is the
+    // smallest workspace any engine can run in; at or above it a plan always fits.
+    std::vector<fe::EngineConfigInfo> configs;
+    {
+        fe::graph::Graph probe;
+        if(!populate(probe))
+            return RecordFailure(miopenStatusUnsupportedOp,
+                                 "could not build a hipDNN graph for this problem");
+        const auto listed = CallInsideHipdnn([&]() -> fe::Error {
+            if(auto error = probe.build_operation_graph(*state->hipdnnHandle); error.is_bad())
+                return error;
+            return probe.get_engine_configs(*state->hipdnnHandle, configs);
+        });
+        if(const auto failure = FailureOfGuardedCall(listed, FailureOfHipdnnResult))
+            return *failure;
+    }
+    std::vector<size_t> candidates{0};
+    for(const auto& config : configs)
+    {
+        if(config.estimatedWorkspaceSize > 0 &&
+           static_cast<size_t>(config.estimatedWorkspaceSize) < best)
+            candidates.push_back(static_cast<size_t>(config.estimatedWorkspaceSize));
+    }
+    std::sort(candidates.begin(), candidates.end());
+    candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
+
+    minWorkspaceSize = best;
+    for(const size_t candidate : candidates)
+    {
+        if(candidate >= best)
+            break;
+        GraphPtr fitting;
+        size_t needed = 0;
+        if(AcquireFittingGraph(
+               handle, key, populate, candidate, scopedDevice, state, fitting, needed) ==
+           miopenStatusSuccess)
+        {
+            minWorkspaceSize = needed;
+            break;
+        }
+    }
+    maxWorkspaceSize = best;
+    ClearForwardedFailure();
+    return miopenStatusSuccess;
 }
 
 bool IsAvailable()
@@ -490,11 +667,7 @@ void ReleaseHandle(miopenHandle_t handle) noexcept
 {
     try
     {
-        {
-            const std::lock_guard<std::mutex> lock(PlanMutex());
-            PlanCache().EraseIf([handle](const PlanKey& key) { return key.handle == handle; });
-        }
-
+        // The handle's built graphs go with its state.
         EraseDestroyingOutsideLock(HandleMap(), HandleMapMutex(), handle);
     }
     catch(...)

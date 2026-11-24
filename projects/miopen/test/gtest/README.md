@@ -113,6 +113,11 @@ family:
   numbers below 17, checked with the `float` threshold.
 - **`int8` input.** There is no tolerance: the result is integer-valued and compared for
   equality.
+- **Batch-norm inference** (`hipdnn_shim_batchnorm.cpp`). x is whole numbers below 17, the
+  parameters are small whole numbers and the variances perfect squares, so the only rounding is
+  in the square root of the variance plus epsilon and the final store. The result's magnitude
+  stays below 60, where that rounding is a few units in the last place of each type, well
+  inside every threshold.
 
 If a new shim test needs a different threshold, add it next to the case that needs it with
 the reason, rather than raising `Tolerance<T>()` for every test.
@@ -150,7 +155,7 @@ should check each one:
    above for what qualifies.
 3. A tolerance note for the new operation family in "Tolerances" above, if its data or
    accumulation differs from the families listed there.
-4. An update to `DefaultSetIsTheConvolutionFamily` in `wrapper_routing.cpp`. It makes the
+4. An update to `DefaultSetIsTheForwardedFamily` in `wrapper_routing.cpp`. It makes the
    addition deliberate; it does not check that item 2 exists.
 5. A `known_forwarding_divergences.txt` line for any case where forwarding serves a call that
    MIOpen declines, or the reverse.
@@ -193,7 +198,7 @@ Why it is set up this way:
   checked. It needs the bare parity entry, so it runs only on a `MIOPEN_TEST_DISCRETE=OFF`
   configure (a build tree also needs a GPU or a `MIOPEN_TEST_GFX*` option).
   `test_check_wrapper_registration` covers the check itself.
-- **In a discrete build, only the `test_hipdnn_shim_conv*` binaries get entries.** Any other binary would
+- **In a discrete build, only the `test_hipdnn_shim_*` binaries get entries.** Any other binary would
   replay a filter that matches nothing, and the comparison rejects two empty runs.
 - **No build-tree entry without a GPU.** The shim tests are all `GPU_` tests.
 

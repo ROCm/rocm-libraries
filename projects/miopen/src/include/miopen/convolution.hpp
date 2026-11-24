@@ -94,10 +94,12 @@ struct ConvolutionAttribute
 
     struct FP8RoundingMode
     {
-        inline uint32_t InitSeed()
+        // One generator per thread, seeded once: seeding a new generator from
+        // std::random_device for every descriptor costs tens of microseconds, and
+        // frameworks construct a descriptor per convolution call.
+        static uint32_t InitSeed()
         {
-            std::random_device rd;
-            std::mt19937 gen(rd());
+            thread_local std::mt19937 gen(std::random_device{}());
             std::uniform_int_distribution<uint32_t> distribution(0, 0xFFFFFFFF);
             return distribution(gen);
         }
