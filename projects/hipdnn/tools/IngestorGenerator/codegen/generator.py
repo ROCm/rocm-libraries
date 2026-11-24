@@ -466,6 +466,14 @@ def build_uhd(config: IngestorConfig, ids: dict) -> dict | None:
     }
 
 
+def _builtin_engine_key(config: IngestorConfig) -> dict:
+    """The UED's ``builtin_engine`` key, present only when the engine takes one over, so
+    every other engine's UED stays byte-identical."""
+    if not config.engine.builtin_engine:
+        return {}
+    return {"builtin_engine": config.engine.builtin_engine}
+
+
 def build_ued(config: IngestorConfig, ids: dict) -> dict:
     """The engine descriptor. ``sdk_version`` is always emitted, including the
     ``"1.0.0"`` baseline, because ``GenericPlanBuilder::understandsGraph()``
@@ -476,6 +484,7 @@ def build_ued(config: IngestorConfig, ids: dict) -> dict:
         "version": "1.0",
         "id": ids["ued"],
         "name": config.engine.name,
+        **_builtin_engine_key(config),
         "sdk_version": config.engine.sdk_version,
         "graph_match": {"native": config.graph_match_symbol},
         "metadata": ids["kmd"],
@@ -516,6 +525,7 @@ def _build_slotted_ued(config: IngestorConfig, ids: dict) -> dict:
         "version": SLOT_FILE_VERSION,
         "id": ids["ued"],
         "name": config.engine.name,
+        **_builtin_engine_key(config),
         "sdk_version": config.engine.sdk_version,
         "graph_match": {"native": config.graph_match_symbol},
     }

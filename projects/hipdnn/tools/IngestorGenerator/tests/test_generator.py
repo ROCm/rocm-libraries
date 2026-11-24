@@ -610,6 +610,32 @@ class TestFragmentsNameRealFiles:
                 ddir / name
             ).exists(), f"fragment names {name}, which the generator never wrote"
 
+    def test_a_builtin_takeover_reaches_the_ued_and_only_then(
+        self, generator, scale_add_config, tmp_path
+    ):
+        plain = tmp_path / "plain"
+        generator.render(scale_add_config, plain)
+        ued = json.loads(
+            next(
+                (plain / scale_add_config.descriptor_dir).glob("*.ued.json")
+            ).read_text()
+        )
+        assert "builtin_engine" not in ued
+
+        config = dataclasses.replace(
+            scale_add_config,
+            engine=dataclasses.replace(
+                scale_add_config.engine, builtin_engine="HIP_MLOPS_ENGINE"
+            ),
+        )
+        taken = tmp_path / "taken"
+        generator.render(config, taken)
+        ued = json.loads(
+            next((taken / config.descriptor_dir).glob("*.ued.json")).read_text()
+        )
+        assert ued["builtin_engine"] == "HIP_MLOPS_ENGINE"
+        assert ued["name"] == scale_add_config.engine.name
+
     def test_shipped_direct_load_bundle_lands_under_descriptors(
         self, generator, scale_add_config, tmp_path
     ):

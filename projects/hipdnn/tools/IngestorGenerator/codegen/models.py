@@ -449,6 +449,11 @@ class EngineSpec:
     sdk_version: str = "1.0.0"
     behavior_notes: list[str] = field(default_factory=list)
     knobs: list[str] = field(default_factory=list)
+    #: The unscoped built-in engine (``HIP_MLOPS_ENGINE``) whose name and id this
+    #: engine takes over, emitted as the UED's ``builtin_engine``. The loader
+    #: requires it to be registered with ``HIPDNN_REGISTER_ENGINE``. Empty: the
+    #: engine is identified by its own scoped ``name``.
+    builtin_engine: str = ""
     #: "native" emits a UHD scoring on a symbol; "none" omits the UHD, which is
     #: legal for an engine with no ranking model. A slotted engine's rankers
     #: are per slot (`SlotSpec.ranker`), so its engine-level value is "none".

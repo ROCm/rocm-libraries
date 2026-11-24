@@ -268,7 +268,8 @@ TEST(TestIngestorDescriptors, HeuristicDescriptorDefaultsToStaticOrder)
                                       f11,
                                       f12,
                                       f13,
-                                      f14]
+                                      f14,
+                                      f15]
             = EngineDescriptor{};
     }
     {
@@ -606,6 +607,11 @@ std::vector<EqualityCase> allEqualityCases()
         append({
             fieldRow(type, "Id", true, baseline, [](auto& v) { v.id = testId(0x5A); }),
             fieldRow(type, "Name", true, baseline, [](auto& v) { v.name += "!"; }),
+            fieldRow(type,
+                     "BuiltinEngine",
+                     true,
+                     baseline,
+                     [](auto& v) { v.builtinEngine = "TEST_BUILTIN"; }),
             fieldRow(type,
                      "HeuristicId",
                      false,

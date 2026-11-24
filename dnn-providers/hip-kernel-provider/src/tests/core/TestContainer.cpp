@@ -184,7 +184,8 @@ TEST(TestContainer, ExposesAnEngineForEveryDiscoveredDescriptorSet)
 
     for(const auto& set : sets)
     {
-        const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(set.engine.name);
+        const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(
+            hipdnn_plugin_sdk::ingestor::engineIdentityName(set.engine));
         EXPECT_NE(std::find(allEngineIds.begin(), allEngineIds.end(), engineId), allEngineIds.end())
             << "no engine for descriptor set '" << set.engine.name << "'";
     }
@@ -201,7 +202,8 @@ TEST(TestContainer, AContainerRebuiltFromTheRetainedSetsExposesEveryIngestorEngi
         const auto engineIds = container.getEngineManager().getAllEngineIds();
         for(const auto& set : sets)
         {
-            const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(set.engine.name);
+            const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(
+                hipdnn_plugin_sdk::ingestor::engineIdentityName(set.engine));
             EXPECT_NE(std::find(engineIds.begin(), engineIds.end(), engineId), engineIds.end())
                 << which << " Container has no engine for descriptor set '" << set.engine.name
                 << "'";
@@ -355,7 +357,8 @@ TEST(TestContainer, RediscoveryReplacesTheSharedStateWithoutInvalidatingALiveCon
     const auto& sets = discoverDescriptorSets();
     ASSERT_FALSE(sets.empty());
     const auto& engineId = sets.front().engine.id;
-    const auto engineIdValue = hipdnn_data_sdk::utilities::engineNameToId(sets.front().engine.name);
+    const auto engineIdValue = hipdnn_data_sdk::utilities::engineNameToId(
+        hipdnn_plugin_sdk::ingestor::engineIdentityName(sets.front().engine));
 
     const auto before = discoveredSharedState(engineId);
     ASSERT_NE(before.get(), nullptr);
@@ -388,13 +391,15 @@ TEST(TestContainer, GetEngineNameReturnsTheDeclaredNameForEveryIngestorEngine)
 
     for(const auto& set : sets)
     {
-        const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(set.engine.name);
+        const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(
+            hipdnn_plugin_sdk::ingestor::engineIdentityName(set.engine));
 
         const char* name = nullptr;
         EXPECT_EQ(Container::getEngineName(engineId, &name), HIPDNN_PLUGIN_STATUS_SUCCESS)
             << "no name for descriptor set '" << set.engine.name << "'";
         ASSERT_NE(name, nullptr);
-        EXPECT_EQ(std::string(name), set.engine.name);
+        // The advertised name: a set taking over a built-in is reported under its name.
+        EXPECT_EQ(std::string(name), hipdnn_plugin_sdk::ingestor::engineIdentityName(set.engine));
 
         // What hipDNN checks before it admits the engine: a name that does not hash back
         // to the ID it was reported for drops the engine at load time.

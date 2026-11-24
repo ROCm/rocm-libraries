@@ -153,6 +153,19 @@ The UED `name` is therefore load-bearing only where the engine surfaces outside 
 graph (selection, logs, diagnostics, and the hash into the engine-id space); internally, the
 UUID `id` binds. Names must be **globally unique** and should be scoped, e.g. `rocke:SDPA`.
 
+**Taking over a built-in engine (`builtin_engine`).** A hand-written engine that moves onto
+descriptors would otherwise change its 64-bit id, because a UED `name` must be scoped and every
+built-in name is not. Callers pin that id (support claims, preferred-engine settings,
+`HIPDNN_DISABLE_ENGINES`), so a UED may name the built-in it replaces in the optional string
+`builtin_engine`. The engine then takes that built-in's name and id: it is reported to the host
+under the built-in name, and its id is the FNV-1a of that name. The UED keeps its own scoped
+`name` for descriptor diagnostics. The loader requires `builtin_engine` to be unscoped and
+already registered with `HIPDNN_REGISTER_ENGINE`, which is what keeps § 4.2's guarantee: the id
+is one the provider owns, not one a vendor picked. Two UEDs naming the same built-in collide as
+two UEDs of one name do (§ 13.2.1), and `HIPDNN_DISABLE_ENGINES` accepts the built-in name
+(§ 12). The provider must not instantiate the hand-written engine in the same build; if it does,
+the duplicate id is reported when the engines are added.
+
 ## 4. The UED Schema
 
 This section **defines** the UED schema: § 4.1 an example instance, § 4.2 the normative
@@ -224,6 +237,7 @@ structure, and it holds whichever of the two arms (§ 4.3, § 4.5) this engine m
 | `version` | yes | string | `<major>.<minor>`, both numeric, and one of the values the schema enumerates (§ 14.3), e.g. `1.0`. The compatibility field the accept rule gates on (§ 14). |
 | `id` | yes | string | A UUID (RFC 4122) in canonical `8-4-4-4-12` hex form. Unique across all loaded descriptors, except that content-identical UEDs may share an `id` (§ 13.2.1). The cross-reference key a KDP's `engine` field uses (§ 3a). |
 | `name` | yes | string | Globally-unique, scoped engine name matching `^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$` (a `namespace:local` form, e.g. `rocke:SDPA`). Hashed (FNV-1a, 64-bit) into the hipDNN engine-id space (§ 3b). Non-empty; unique by both literal name and by hash. |
+| `builtin_engine` | no | string | The unscoped name of a built-in engine, registered with `HIPDNN_REGISTER_ENGINE`, whose name and id this engine takes over (§ 3). When present the engine is reported under this name and its id is the FNV-1a of it; `name` stays the descriptor's own. |
 | `sdk_version` | no | string | `<major>.<minor>.<patch>`, the hipDNN graph schema version this engine's pattern was authored against (RFC 0017 § 4). Defaults to `1.0.0` when omitted. The loader parses and stores it. At match time it is compared numerically by `(major, minor, patch)` with the graph's reported floor: if the floor is above it, the whole engine declines the graph before binding, and so does every pack naming it ([RFC 0018 § 10](0018_UniversalMatchDescriptor.md#10-serialization-and-versioning)). The loader does not refuse a value newer than the runtime's own graph schema. This is the **only** graph-schema floor in the system: no UMD carries one, and a matcher runs under the floor of the engine of each pack that lists it, so raising this field is a review point for every matcher on the engine. Independent of `version`, which gates the UED *format*. |
 | `sort_kernel_catalog` | no | object (arch → UUID or [UUID]) | The **kernel-selection heuristic** map (§ 4.6): each key a plausible gfx arch base id or the literal `default`, each value a UHD UUID, or a non-empty list of them with no duplicates — at most one per ranking metric (RFC 0019 § 3.1, § 4.4). Each id must resolve at load (§ 13.2). Absent => the engine ships no kernel-selection heuristic and its catalog is ordered by the declared fallback, `priority` then descriptor `id` (§ 8, RFC 0017 § 5). An empty map or an empty list is a load error. |
 | `predict_engine` | no | object (arch → UUID or [UUID]) | Optional **engine-estimate** map (§ 4.6): cheap `f(graph) → expected metric value` UHDs, one per ranking metric, consulted at engine selection, before any catalog is ranked. Same arch-key form and resolution. Each UHD must declare a `score.metric`. |
@@ -297,6 +311,12 @@ provider's native registry (is this symbol registered) is semantic and runs in �
     "name": {
       "type": "string",
       "pattern": "^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$",
+      "addedInVersion": "1.0"
+    },
+    "builtin_engine": {
+      "description": "Unscoped built-in engine, registered with HIPDNN_REGISTER_ENGINE, whose name and id this engine takes over (see RFC 0020 section 3).",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_]+$",
       "addedInVersion": "1.0"
     },
     "sdk_version": {

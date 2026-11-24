@@ -714,6 +714,14 @@ def _validate_ued(desc):
                 f"{where}.numerical_notes has unknown note '{note}' "
                 f"(expected one of {', '.join(_NUMERICAL_NOTES)})"
             )
+    # RFC 0020 §3: the unscoped built-in this engine takes over. Whether it is registered
+    # is the runtime loader's to check; the packer checks the shape.
+    if "builtin_engine" in doc:
+        builtin = doc["builtin_engine"]
+        if not isinstance(builtin, str) or not re.fullmatch(r"[A-Za-z0-9_]+", builtin):
+            raise HkpPackError(
+                f"{where}.builtin_engine {builtin!r} is not the unscoped name of a built-in engine"
+            )
     if "sdk_version" in doc:
         version = doc["sdk_version"]
         if not isinstance(version, str) or not _sdk_version_fits(version):
@@ -870,6 +878,7 @@ _UED_KEYS = (
     "revision",
     "id",
     "name",
+    "builtin_engine",
     "sdk_version",
     *_UHD_ROLES,
     "slots",

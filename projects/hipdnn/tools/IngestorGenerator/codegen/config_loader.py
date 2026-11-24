@@ -227,6 +227,7 @@ def load_config(path: Path) -> IngestorConfig:
             engine_raw.get("behavior_notes"), "engine.behavior_notes"
         ),
         knobs=_require_sequence(engine_raw.get("knobs"), "engine.knobs"),
+        builtin_engine=_builtin_engine(engine_raw),
         heuristic="none" if slotted else engine_raw.get("heuristic", "native"),
         census_name_symbol=engine_raw.get("census_name_symbol"),
         native_symbols_from=engine_raw.get("native_symbols_from", ""),
@@ -759,6 +760,28 @@ def _expand_axis_kernels(pack_raw: dict, kmd_field_names: set) -> list:
             }
         )
     return expanded
+
+
+_BUILTIN_ENGINE_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+def _builtin_engine(engine_raw: dict) -> str:
+    """``engine.builtin_engine``: the unscoped built-in engine this one takes over.
+
+    Checked for shape only; whether the name is registered with
+    ``HIPDNN_REGISTER_ENGINE`` is the loader's to check, against the build that loads it.
+    """
+    value = engine_raw.get("builtin_engine", "")
+    if value == "":
+        return ""
+    if not isinstance(value, str) or not _BUILTIN_ENGINE_PATTERN.match(value):
+        raise ConfigError(
+            f"engine.builtin_engine must be the unscoped name of a built-in engine "
+            f"(e.g. HIP_MLOPS_ENGINE), matching {_BUILTIN_ENGINE_PATTERN.pattern}; "
+            f"got {value!r}. A scoped 'namespace:local' name is the engine's own "
+            f"'engine.name'."
+        )
+    return value
 
 
 def _require_sequence(value, scope: str, what: str = "field names") -> list:
@@ -1476,6 +1499,7 @@ _KNOWN_TOP = frozenset(
 _KNOWN_ENGINE = frozenset(
     {
         "name",
+        "builtin_engine",
         "sdk_version",
         "behavior_notes",
         "knobs",

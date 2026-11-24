@@ -1682,6 +1682,35 @@ class TestShippedDirectLoadAuthoredSubpath:
         assert "'descriptors/<subpath>'" in str(excinfo.value)
 
 
+class TestBuiltinEngine:
+    """``engine.builtin_engine`` names the unscoped built-in a descriptor engine takes over;
+    the loader checks it is registered, so the config checks only its shape."""
+
+    def _load(self, tmp_path, builtin):
+        raw = TestDeprecatedKeys()._base_raw()
+        if builtin is not None:
+            raw["engine"]["builtin_engine"] = builtin
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        return load_config(path)
+
+    def test_an_unscoped_builtin_is_read(self, tmp_path):
+        config = self._load(tmp_path, "HIP_MLOPS_ENGINE")
+        assert config.engine.builtin_engine == "HIP_MLOPS_ENGINE"
+        assert config.engine.name == "hipkernel:Test"
+
+    def test_absent_means_none(self, tmp_path):
+        assert self._load(tmp_path, None).engine.builtin_engine == ""
+
+    def test_a_scoped_name_is_rejected(self, tmp_path):
+        with pytest.raises(ConfigError, match="engine.builtin_engine"):
+            self._load(tmp_path, "hipkernel:Other")
+
+    def test_a_non_string_is_rejected(self, tmp_path):
+        with pytest.raises(ConfigError, match="engine.builtin_engine"):
+            self._load(tmp_path, 7)
+
+
 class TestPackKernelDefaults:
     """A pack may hoist what every kernel repeats; a kernel overrides by restating.
     Without it a generated variant set restates `kind`, `source`, `builder` once per

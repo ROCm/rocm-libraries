@@ -109,7 +109,7 @@ public:
         typename BenchmarkPlan<THandle>::Timer timer = {})
         : _engine(std::move(engine))
         , _stateManager(std::move(stateManager))
-        , _id(hipdnn_data_sdk::utilities::engineNameToId(_engine.name))
+        , _id(hipdnn_data_sdk::utilities::engineNameToId(engineIdentityName(_engine)))
         , _planBuilder(_engine, *_stateManager, deviceResolver, std::move(timer))
         , _selectorRevision(selectorRevision.empty() ? "generic-untuned-v1/" + toString(_engine.id)
                                                            + "/" + _engine.revision.str()
@@ -272,7 +272,7 @@ public:
 
         auto knobs = builder.CreateVector(knobOffsets);
         auto behaviorNotes = builder.CreateVector(_engine.behaviorNotes);
-        auto name = builder.CreateString(_engine.name);
+        auto name = builder.CreateString(engineIdentityName(_engine));
         // Only an authored claim is written; an absent field tells the backend the
         // engine's numerical behavior is unknown.
         flatbuffers::Offset<flatbuffers::Vector<int32_t>> numericalNotes;
@@ -359,7 +359,7 @@ public:
         std::string arch;
         const auto features = _planBuilder.predictionFeatures(handle, graph, config, arch);
         auto result = _binding.predict(_id,
-                                       _engine.name,
+                                       engineIdentityName(_engine),
                                        _selectorRevision,
                                        metric,
                                        arch,
