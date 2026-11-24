@@ -388,11 +388,15 @@ def knob_fields(op: str, fields: Any) -> list[str]:
 # The estimate is the expected tflops of the engine's own pick, which engine selection reads
 # before any catalog is enumerated. An engine with no model installed has no `predict_engine`
 # at all: no placeholder document stands in for it, and an arch without a model reports the
-# estimate unavailable when it is asked for one. A new engine gets its first L1 through the
-# UHD pipeline's request (`add_l1`), whose `uhd_gen promote` then creates the role. FlyDSL's
-# engines compete for graphs: on gfx1201 sdpa_rdna, sdpa_rdna_decode and sdpa_aiw each match
-# nearly every graph of the others' corpora, so an arch with a trained estimate orders them
-# by it and one without orders them by static rules.
+# estimate unavailable when it is asked for one. An engine, or an arch, gets its L1 when a
+# model is trained for it and `uhd_gen promote` installs it, which creates the role or the arch
+# key. With no `default` estimate, an arch keyed only by a ranker has no estimate binding: a
+# tool that takes an engine's arches from its role-map keys and needs every role to cover them
+# (the UHD pipeline does) refuses the engine until that arch has an estimate too, so install an
+# arch's estimate with or before its ranker. FlyDSL's engines compete for graphs: on gfx1201
+# sdpa_rdna, sdpa_rdna_decode and sdpa_aiw each match nearly every graph of the others'
+# corpora, so an arch with a trained estimate orders them by it and one without orders them by
+# static rules.
 #
 # Trained models live beside the op's descriptors where `uhd_gen promote` installs them,
 # `heuristics/<ued-id>/<role>/<arch>/<metric>/` (a metric-less model directly under
