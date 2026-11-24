@@ -377,8 +377,13 @@ namespace
     // Runs the trinary contraction E[m,n] = A[m,k] * B[k,q] * C[q,n] + D[m,n] once on
     // handle, which adds its kernel to the handle's plan cache. A to D are packed and
     // stay the same; E has 4 x 5 elements and the given strides.
+    // With created, it stores the status of creating the contraction there and returns
+    // without running when the device has no FP32 contraction (ARCH_MISMATCH), so the
+    // caller can skip. Without created, creating the contraction must succeed.
     // Call it through ASSERT_NO_FATAL_FAILURE.
-    void runTrinary(hiptensorHandle_t handle, int64_t const stridesE[2])
+    void runTrinary(hiptensorHandle_t  handle,
+                    int64_t const      stridesE[2],
+                    hiptensorStatus_t* created = nullptr)
     {
         constexpr int64_t M = 4, N = 5, K = 3, Q = 2;
         int64_t const     lensA[]{M, K}, lensB[]{K, Q}, lensC[]{Q, N}, lensD[]{M, N};
@@ -419,24 +424,32 @@ namespace
         ASSERT_EQ(hiptensorCreateTensorDescriptor(
                       handle, &descE, 2, lensD, stridesE, HIPTENSOR_R_32F, 128),
                   HIPTENSOR_STATUS_SUCCESS);
-        ASSERT_EQ(hiptensorCreateContractionTrinary(handle,
-                                                    &opDesc,
-                                                    descA,
-                                                    modeA,
-                                                    HIPTENSOR_OP_IDENTITY,
-                                                    descB,
-                                                    modeB,
-                                                    HIPTENSOR_OP_IDENTITY,
-                                                    descC,
-                                                    modeC,
-                                                    HIPTENSOR_OP_IDENTITY,
-                                                    descD,
-                                                    modeD,
-                                                    HIPTENSOR_OP_IDENTITY,
-                                                    descE,
-                                                    modeD,
-                                                    HIPTENSOR_COMPUTE_DESC_32F),
-                  HIPTENSOR_STATUS_SUCCESS);
+        auto const status = hiptensorCreateContractionTrinary(handle,
+                                                              &opDesc,
+                                                              descA,
+                                                              modeA,
+                                                              HIPTENSOR_OP_IDENTITY,
+                                                              descB,
+                                                              modeB,
+                                                              HIPTENSOR_OP_IDENTITY,
+                                                              descC,
+                                                              modeC,
+                                                              HIPTENSOR_OP_IDENTITY,
+                                                              descD,
+                                                              modeD,
+                                                              HIPTENSOR_OP_IDENTITY,
+                                                              descE,
+                                                              modeD,
+                                                              HIPTENSOR_COMPUTE_DESC_32F);
+        if(created)
+        {
+            *created = status;
+            if(status == HIPTENSOR_STATUS_ARCH_MISMATCH)
+            {
+                return;
+            }
+        }
+        ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
         ASSERT_EQ(hiptensorCreatePlanPreference(
                       handle, &pref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE),
                   HIPTENSOR_STATUS_SUCCESS);
@@ -491,7 +504,12 @@ TEST_F(PlanCacheFileTest, SameTrinaryContractionOneCacheLine)
     ASSERT_EQ(hiptensorCreate(&handle), HIPTENSOR_STATUS_SUCCESS);
     ScopeExit destroyHandle{[&] { hiptensorDestroy(handle); }};
 
-    ASSERT_NO_FATAL_FAILURE(runTrinary(handle, kPackedE));
+    hiptensorStatus_t created{};
+    ASSERT_NO_FATAL_FAILURE(runTrinary(handle, kPackedE, &created));
+    if(created == HIPTENSOR_STATUS_ARCH_MISMATCH)
+    {
+        GTEST_SKIP() << "no FP32 contraction on this device";
+    }
     ASSERT_NO_FATAL_FAILURE(runTrinary(handle, kPackedE));
 
     std::size_t count = 0;
@@ -508,7 +526,12 @@ TEST_F(PlanCacheFileTest, TrinaryContractionsDifferingInEStridesTwoCacheLines)
     ASSERT_EQ(hiptensorCreate(&handle), HIPTENSOR_STATUS_SUCCESS);
     ScopeExit destroyHandle{[&] { hiptensorDestroy(handle); }};
 
-    ASSERT_NO_FATAL_FAILURE(runTrinary(handle, kPackedE));
+    hiptensorStatus_t created{};
+    ASSERT_NO_FATAL_FAILURE(runTrinary(handle, kPackedE, &created));
+    if(created == HIPTENSOR_STATUS_ARCH_MISMATCH)
+    {
+        GTEST_SKIP() << "no FP32 contraction on this device";
+    }
     ASSERT_NO_FATAL_FAILURE(runTrinary(handle, kPaddedE));
 
     std::size_t count = 0;
