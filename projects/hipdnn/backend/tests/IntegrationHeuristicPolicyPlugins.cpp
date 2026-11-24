@@ -73,10 +73,10 @@ inline auto makeScopedPolicyDescriptor(const HeuristicPlugin& plugin,
 std::filesystem::path getTestPluginDirectory()
 {
     // First, check for environment variable override
-    auto envPath = hipdnn_data_sdk::utilities::getEnv("HIPDNN_HEURISTIC_PLUGIN_DIR");
+    const auto envPath = hipdnn_data_sdk::utilities::getEnv("HIPDNN_HEURISTIC_PLUGIN_DIR");
     if(!envPath.empty())
     {
-        return std::filesystem::path{std::move(envPath)};
+        return std::filesystem::path{envPath};
     }
 
     // Get the directory containing the test binary
