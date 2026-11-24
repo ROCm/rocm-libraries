@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -90,6 +90,12 @@ const vector<vector<int>> large_size_range = {{120, 100}, {300, 120}, {100, 120}
 const vector<vector<int>> large_opt_range
     = {{0, 0, 0, 0, 0}, {1, 0, 0, 1, 1}, {0, 1, 0, 2, 0}, {0, 0, 1, 0, 2}};
 
+// for weekly_lapack tests (large batch_count)
+// each size_range vector is a {m, n};
+const vector<vector<int>> large_batch_size_range = {{17, 9}, {9, 17}};
+const vector<vector<int>> large_batch_opt_range
+    = {{0, 0, 0, 0, 0}, {1, 0, 0, 1, 1}, {0, 1, 0, 2, 0}, {0, 0, 1, 0, 2}};
+
 Arguments gesvdj_setup_arguments(gesvdj_tuple tup, bool notransv)
 {
     vector<int> size = std::get<0>(tup);
@@ -136,7 +142,8 @@ Arguments gesvdj_setup_arguments(gesvdj_tuple tup, bool notransv)
     return arg;
 }
 
-class GESVDJ : public ::TestWithParam<gesvdj_tuple>
+template <int BATCH_COUNT = 3>
+class GESVDJ_BASE : public ::TestWithParam<gesvdj_tuple>
 {
 protected:
     void TearDown() override
@@ -147,18 +154,19 @@ protected:
     template <bool BATCHED, bool STRIDED, typename T>
     void run_tests()
     {
-        Arguments arg = gesvdj_setup_arguments(GetParam(), false);
+        Arguments arg = gesvdj_setup_arguments(this->GetParam(), false);
 
         if(arg.peek<rocblas_int>("m") == 0 && arg.peek<rocblas_int>("n") == 0
            && arg.peek<char>("left_svect") == 'N' && arg.peek<char>("right_svect") == 'N')
             testing_gesvdj_bad_arg<BATCHED, STRIDED, T>();
 
-        arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
+        arg.batch_count = (BATCHED || STRIDED ? BATCH_COUNT : 1);
         testing_gesvdj<BATCHED, STRIDED, T>(arg);
     }
 };
 
-class GESVDJ_NOTRANSV : public ::TestWithParam<gesvdj_tuple>
+template <int BATCH_COUNT = 3>
+class GESVDJ_NOTRANSV_BASE : public ::TestWithParam<gesvdj_tuple>
 {
 protected:
     void TearDown() override
@@ -169,15 +177,36 @@ protected:
     template <bool BATCHED, bool STRIDED, typename T>
     void run_tests()
     {
-        Arguments arg = gesvdj_setup_arguments(GetParam(), true);
+        Arguments arg = gesvdj_setup_arguments(this->GetParam(), true);
 
         if(arg.peek<rocblas_int>("m") == 0 && arg.peek<rocblas_int>("n") == 0
            && arg.peek<char>("left_svect") == 'N' && arg.peek<char>("right_svect") == 'N')
             testing_gesvdj_notransv_bad_arg<BATCHED, STRIDED, T>();
 
-        arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
+        arg.batch_count = (BATCHED || STRIDED ? BATCH_COUNT : 1);
         testing_gesvdj_notransv<BATCHED, STRIDED, T>(arg);
     }
+};
+
+int constexpr GESVDJ_BCOUNT = 64 * 1024 + 1;
+int constexpr GESVDJ_BCOUNT_SMALL = 3;
+
+class GESVDJ : public GESVDJ_BASE<GESVDJ_BCOUNT_SMALL>
+{
+};
+
+class GESVDJ_LARGE_BATCH : public GESVDJ_BASE<GESVDJ_BCOUNT>
+{
+};
+
+class GESVDJ_NOTRANSV : public GESVDJ_NOTRANSV_BASE<GESVDJ_BCOUNT_SMALL>
+{
+};
+
+// TODO: batched version for GESVDJ_NOTRANSV is not implemented
+//
+class GESVDJ_NOTRANSV_LARGE_BATCH : public GESVDJ_NOTRANSV_BASE<GESVDJ_BCOUNT>
+{
 };
 
 // non-batch tests
@@ -266,22 +295,68 @@ TEST_P(GESVDJ, strided_batched__double_complex)
     run_tests<false, true, rocblas_double_complex>();
 }
 
-TEST_P(GESVDJ_NOTRANSV, strided_batched__float)
+// large batch_count tests
+
+TEST_P(GESVDJ_LARGE_BATCH, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(GESVDJ_LARGE_BATCH, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(GESVDJ_LARGE_BATCH, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(GESVDJ_LARGE_BATCH, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
+// strided batched
+
+TEST_P(GESVDJ_LARGE_BATCH, strided_batched__float)
 {
     run_tests<false, true, float>();
 }
 
-TEST_P(GESVDJ_NOTRANSV, strided_batched__double)
+TEST_P(GESVDJ_LARGE_BATCH, strided_batched__double)
 {
     run_tests<false, true, double>();
 }
 
-TEST_P(GESVDJ_NOTRANSV, strided_batched__float_complex)
+TEST_P(GESVDJ_LARGE_BATCH, strided_batched__float_complex)
 {
     run_tests<false, true, rocblas_float_complex>();
 }
 
-TEST_P(GESVDJ_NOTRANSV, strided_batched__double_complex)
+TEST_P(GESVDJ_LARGE_BATCH, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
+// gesvdj_notransv
+
+TEST_P(GESVDJ_NOTRANSV_LARGE_BATCH, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(GESVDJ_NOTRANSV_LARGE_BATCH, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(GESVDJ_NOTRANSV_LARGE_BATCH, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(GESVDJ_NOTRANSV_LARGE_BATCH, strided_batched__double_complex)
 {
     run_tests<false, true, rocblas_double_complex>();
 }
@@ -299,3 +374,11 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          GESVDJ_NOTRANSV,
                          Combine(ValuesIn(size_range), ValuesIn(opt_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         GESVDJ_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_size_range), ValuesIn(large_batch_opt_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         GESVDJ_NOTRANSV_LARGE_BATCH,
+                         Combine(ValuesIn(large_batch_size_range), ValuesIn(large_batch_opt_range)));
