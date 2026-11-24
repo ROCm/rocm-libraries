@@ -1123,6 +1123,7 @@ TEST_F(RegisterAllocationPassTest, WithoutAShapeRuleShapeIsRefusedAndAutoIsThePi
         ASSERT_TRUE(result.hasError());
         EXPECT_TRUE(contains(result.getError(), "needs a rule that keeps the producer's grouping"))
             << result.getError();
+        EXPECT_TRUE(contains(result.getError(), "this architecture has none")) << result.getError();
     }
 
     options.matrix = Matrix::Auto;
@@ -1138,6 +1139,31 @@ TEST_F(RegisterAllocationPassTest, WithoutAShapeRuleShapeIsRefusedAndAutoIsThePi
     ASSERT_TRUE(allocateRegisters(*func, allocator, options, &report).hasValue());
     EXPECT_TRUE(contains(report, " matrix[auto pin]")) << report;
     EXPECT_FALSE(contains(report, "was refused")) << report;
+}
+
+TEST_F(RegisterAllocationPassTest, AShapePlacementUnderNoRulesBlamesNoRules) {
+    // This table has a shape rule, so a refusal blaming the architecture would
+    // send the reader looking for a rule that is there.
+    const ScopedArchRules rules(matrixRoleTable());
+    createVAddInBlock(block("entry"), kRaTestArch, 2, 0, 1);
+    ASSERT_TRUE(liftForAllocation(*func));
+
+    RegisterAllocationOptions options = legacyApply();
+    options.rules.disableAll = true;
+    LegacyIdentityAllocator allocator;
+    const struct {
+        Matrix placement;
+        const char* spelling;
+    } cases[] = {{Matrix::Shape, "shape"}, {Matrix::Accumulators, "accumulators"}};
+    for (const auto& c : cases) {
+        options.matrix = c.placement;
+        Expected<AllocationResult> result = allocateRegisters(*func, allocator, options);
+        ASSERT_TRUE(result.hasError());
+        EXPECT_EQ(result.getError(),
+                  std::string("@kernel: matrix=") + c.spelling +
+                      " needs a rule that keeps the producer's grouping of matrix operands, and "
+                      "noRules removes every rule");
+    }
 }
 
 TEST_F(RegisterAllocationPassTest, MatrixShapeColoursAsNamingTheGfx1250RulesDoes) {

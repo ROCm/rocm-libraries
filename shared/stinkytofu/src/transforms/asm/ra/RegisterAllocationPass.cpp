@@ -478,18 +478,19 @@ Expected<AllocationRules> resolveRules(const Function& function,
     rules.force(options.rules);
     // After the overrides, which can leave nothing to place by: noRules empties
     // the table.
+    const std::string missing =
+        options.rules.disableAll ? "noRules removes every rule" : "this architecture has none";
     const bool wantsShape =
         options.matrix == Matrix::Shape || options.matrix == Matrix::Accumulators;
     if (wantsShape && !rules.hasRole(MatrixRole::Shape)) {
         return Expected<AllocationRules>::Error(
             "@" + function.getName() + ": " + placement +
-            " needs a rule that keeps the producer's grouping of matrix operands, and this "
-            "architecture has none");
+            " needs a rule that keeps the producer's grouping of matrix operands, and " + missing);
     }
     if (options.matrix == Matrix::Accumulators && !rules.hasRole(MatrixRole::PinAccumulator)) {
         return Expected<AllocationRules>::Error(
             "@" + function.getName() + ": " + placement +
-            " needs a rule that pins only the accumulators, and this architecture has none");
+            " needs a rule that pins only the accumulators, and " + missing);
     }
     return rules;
 }
