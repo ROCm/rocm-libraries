@@ -4377,17 +4377,13 @@ class Solution(collections.abc.Mapping):
 
     # StinkyTofu expert scheduling mode2 (EnableStinkyTofuESM2) — independent of the rocisa ExpertSchedulingMode rules.
     def evaluateStinkyTofuESM2() -> bool:
-      if not isaInfoMap[isa].archCaps["HasSchedMode"]: return False
-      # stinkytofu does not yet support f64 (double / double-complex) datatypes
-      if state["ProblemType"]["MacDataTypeA"].isDouble() or state["ProblemType"]["MacDataTypeA"].isDoubleComplex(): return False
-      if state["ProblemType"]["MacDataTypeB"].isDouble() or state["ProblemType"]["MacDataTypeB"].isDoubleComplex(): return False
-      if state["ProblemType"]["ComputeDataType"].isDouble() or state["ProblemType"]["ComputeDataType"].isDoubleComplex(): return False
-      return True
+      # Currently on for every data type.
+      return bool(isaInfoMap[isa].archCaps["HasSchedMode"])
 
     # Let WMMAs issue back to back (SCHED_MODE DISABLE_XDL_ARB_STALL).
-    # Skipped for sparse and for persistent (StreamK or DataParallel) kernels.
+    # Skipped for sparse kernels.
     def evaluateDisableXdlArbStall() -> bool:
-      return not state["ProblemType"]["Sparse"] and not isPersistent(state)
+      return not state["ProblemType"]["Sparse"]
 
     # Track VALU source operands on VA_VDST (src-operand WAR hazard).
     def evaluateEnableESM2TrackValuVsrc() -> bool:
