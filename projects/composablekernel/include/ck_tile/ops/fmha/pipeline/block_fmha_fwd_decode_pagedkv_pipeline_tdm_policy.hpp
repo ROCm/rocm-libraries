@@ -8,7 +8,7 @@
 
 namespace ck_tile {
 
-// LDS layout and the KV cache copies of BlockFmhaFwdDecodePagedKVPipelineTdm.
+// LDS layout of BlockFmhaFwdDecodePagedKVPipelineTdm.
 //
 // K and V pages are copied to LDS with TDM gathers of rows of 16-byte vectors of one kv head. In
 // the vectorized cache layout those bytes are WMMA operands as they are (S^T = K Q^T and
@@ -97,41 +97,6 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdmPolicy
             ignore = q;
             return &sm.v[st][i_wave][0];
         }
-    }
-
-    // TDM gather of kCount rows of kRowBytes (row indices up to 2^31) to consecutive LDS rows
-    template <index_t kRowBytes, index_t kCount>
-    CK_TILE_DEVICE static void
-    TdmGatherRows(const uint8_t* base, uint8_t* lds, const int32_t (&rows)[kCount])
-    {
-        static_assert(kCount <= 8 && kRowBytes % 8 == 0);
-        TDM_GROUP0 g0{static_cast<uint32_t>(reinterpret_cast<uintptr_t>(to_lds(lds))),
-                      reinterpret_cast<uintptr_t>(base),
-                      static_cast<uint32_t>(TDMGatherIndexSize::Row32bit_Index),
-                      1};
-        TDM_GROUP1 g1;
-        g1.data_size = 3; // 8-byte units
-        g1.tensorDim0(kRowBytes / 8);
-        g1.tensorDim1(0x7fffffff);
-        g1.tensorDim0Stride(kRowBytes / 8);
-        g1.tile_dim0 = kRowBytes / 8;
-        g1.tile_dim1 = kCount; // row indices
-        TDM_GROUP2 g2;
-        TDM_GROUP3 g3;
-        for(index_t i = 0; i < kCount; ++i)
-        {
-            if(i < 4)
-                g2.mode1.setRowIndex32(i, static_cast<uint32_t>(rows[i]));
-            else
-                g3.mode1.setRowIndex32(i - 4, static_cast<uint32_t>(rows[i]));
-        }
-        __builtin_amdgcn_tensor_load_to_lds(
-            bit_cast<uint32x4_t>(amd_wave_read_first_lane(g0.bitfield)),
-            bit_cast<uint32x8_t>(amd_wave_read_first_lane(g1.bitfield)),
-            bit_cast<uint32x4_t>(amd_wave_read_first_lane(g2.bitfield)),
-            bit_cast<uint32x4_t>(amd_wave_read_first_lane(g3.bitfield)),
-            uint32x8_t{},
-            0);
     }
 #endif
 };

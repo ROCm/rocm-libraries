@@ -272,9 +272,16 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
         const auto vbuf = [&](index_t st, index_t q) -> uint8_t* {
             return Policy::template GetVPage<Problem>(sm, w, st, q);
         };
+        // their LDS addresses, the destinations of the TDM gathers
+        const auto kdst = [&](index_t st) {
+            return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(to_lds(kbuf(st, 0))));
+        };
+        const auto vdst = [&](index_t st) {
+            return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(to_lds(vbuf(st, 0))));
+        };
         constexpr index_t kKChunkStride = Policy::template kKChunkStride<Problem>;
-        const uint8_t* const k8         = ptr_as<uint8_t>(k_ptr);
-        const uint8_t* const v8         = ptr_as<uint8_t>(v_ptr);
+        const uint64_t k_addr           = reinterpret_cast<uintptr_t>(k_ptr);
+        const uint64_t v_addr           = reinterpret_cast<uintptr_t>(v_ptr);
         // page index (within the range) of wave w's q-th page of step t
         const auto page_idx = [&](index_t t, index_t q) {
             return (t * kNumWarps + w) * kWavePages + q;
@@ -293,8 +300,8 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
                 int32_t rows[kWavePages];
                 for(index_t q = 0; q < kWavePages; ++q)
                     rows[q] = block_of(min(page_idx(t, q), last)) * nhead_k + i_nhead_k;
-                Policy::template TdmGatherRows<kPageBytes>(k8, kbuf(t % kStages, 0), rows);
-                Policy::template TdmGatherRows<kPageBytes>(v8, vbuf(t % kStages, 0), rows);
+                amd_tdm_gather_rows<kPageBytes>(kdst(t % kStages), k_addr, rows);
+                amd_tdm_gather_rows<kPageBytes>(vdst(t % kStages), v_addr, rows);
             }
             else if constexpr(kWaveSplit)
             {
@@ -307,8 +314,8 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
                 for(index_t c = 0; c < 8; ++c)
                     krows[c] = (row * 8 + c) * (kSubPages / 4) + qtr;
                 const int32_t vrows[1] = {row * (kSubPages / 4) + qtr};
-                Policy::template TdmGatherRows<4 * 256>(k8, kbuf(t % kStages, 0), krows);
-                Policy::template TdmGatherRows<4 * kPageBytes>(v8, vbuf(t % kStages, 0), vrows);
+                amd_tdm_gather_rows<4 * 256>(kdst(t % kStages), k_addr, krows);
+                amd_tdm_gather_rows<4 * kPageBytes>(vdst(t % kStages), v_addr, vrows);
             }
             else
             {
@@ -320,8 +327,8 @@ struct BlockFmhaFwdDecodePagedKVPipelineTdm
                 for(index_t c = 0; c < 8; ++c)
                     krows[c] = (row * 8 + c) * kSubPages + sub;
                 const int32_t vrows[1] = {row * kSubPages + sub};
-                Policy::template TdmGatherRows<256>(k8, kbuf(t % kStages, 0), krows);
-                Policy::template TdmGatherRows<kPageBytes>(v8, vbuf(t % kStages, 0), vrows);
+                amd_tdm_gather_rows<256>(kdst(t % kStages), k_addr, krows);
+                amd_tdm_gather_rows<kPageBytes>(vdst(t % kStages), v_addr, vrows);
             }
         };
         index_t issued = min(steps, kStages);

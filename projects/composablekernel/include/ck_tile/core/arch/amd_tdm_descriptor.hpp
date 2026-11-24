@@ -459,6 +459,43 @@ union TDM_GROUP3
     int32x4_t bitfield;
 };
 
+/// TENSOR_LOAD_TO_LDS in gather mode: rows[i] of a global tensor of kRowBytes-byte rows (a
+/// multiple of 8, row indices below 2^31) goes to LDS row i from lds_addr on. Up to 8 rows: the
+/// indices are 32-bit and travel in groups 2 and 3.
+template <index_t kRowBytes, index_t kCount>
+CK_TILE_DEVICE void amd_tdm_gather_rows([[maybe_unused]] uint32_t lds_addr,
+                                        [[maybe_unused]] uint64_t global_addr,
+                                        [[maybe_unused]] const int32_t (&rows)[kCount])
+{
+    static_assert(1 <= kCount && kCount <= 8 && kRowBytes % 8 == 0);
+#if CK_TILE_ENABLE_TDM_FEATURE
+    TDM_GROUP0 g0{
+        lds_addr, global_addr, static_cast<uint32_t>(TDMGatherIndexSize::Row32bit_Index), 1};
+    TDM_GROUP1 g1;
+    g1.data_size = 3; // 8-byte units
+    g1.tensorDim0(kRowBytes / 8);
+    g1.tensorDim1(0x7fffffff);
+    g1.tensorDim0Stride(kRowBytes / 8);
+    g1.tile_dim0 = kRowBytes / 8;
+    g1.tile_dim1 = kCount; // row indices
+    TDM_GROUP2 g2;
+    TDM_GROUP3 g3;
+    for(index_t i = 0; i < kCount; ++i)
+    {
+        if(i < 4)
+            g2.mode1.setRowIndex32(i, static_cast<uint32_t>(rows[i]));
+        else
+            g3.mode1.setRowIndex32(i - 4, static_cast<uint32_t>(rows[i]));
+    }
+    __builtin_amdgcn_tensor_load_to_lds(bit_cast<uint32x4_t>(amd_wave_read_first_lane(g0.bitfield)),
+                                        bit_cast<uint32x8_t>(amd_wave_read_first_lane(g1.bitfield)),
+                                        bit_cast<uint32x4_t>(amd_wave_read_first_lane(g2.bitfield)),
+                                        bit_cast<uint32x4_t>(amd_wave_read_first_lane(g3.bitfield)),
+                                        uint32x8_t{},
+                                        0);
+#endif
+}
+
 /**
  * @brief The unit in which the TDM counts a tensor of T.
  *
