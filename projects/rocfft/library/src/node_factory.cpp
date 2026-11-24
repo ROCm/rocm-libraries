@@ -429,6 +429,8 @@ std::unique_ptr<TreeNode> NodeFactory::CreateNodeFromScheme(ComputeScheme s, Tre
         return std::unique_ptr<CC1DNode>(new CC1DNode(parent));
     case CS_L1D_CRT:
         return std::unique_ptr<CRT1DNode>(new CRT1DNode(parent));
+    case CS_1D_TRANSPOSE:
+        return std::unique_ptr<Transpose1DNode>(new Transpose1DNode(parent));
     case CS_2D_RTRT:
         return std::unique_ptr<RTRT2DNode>(new RTRT2DNode(parent));
     case CS_2D_RC:

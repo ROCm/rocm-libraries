@@ -68,6 +68,7 @@ enum ComputeScheme
     CS_L1D_TRTRT,
     CS_L1D_CC,
     CS_L1D_CRT,
+    CS_1D_TRANSPOSE,
 
     CS_2D_STRAIGHT, // not implemented yet
     CS_2D_RTRT,

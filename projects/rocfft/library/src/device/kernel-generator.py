@@ -211,9 +211,9 @@ def merge_kernel_list(kernels, all_precisions):
 
 def set_bytes_per_element(kernels):
     """Default behavior for bytes_per_element calculation is to use the highest precision
-    for a given kernel key (length, scheme, lds_size_bytes). bytes_per_element is used to
-    calculate transforms_per_block and workgroup_size later on. This behavior for tpb and 
-    wgs calculation can be overridden by using wgs_is_derived = true in kernel config.
+    for a given kernel key (length, scheme, lds_size_bytes, gcn_arch_name),
+    unless the configuration specifies its own bytes_per_element. This value
+    is used to calculate transforms_per_block and workgroup_size.
     NOTE: Once all kernels are tuned by precision, this function can most likely go away.
     """
 
@@ -232,6 +232,8 @@ def set_bytes_per_element(kernels):
         d[key].append(kernel.precision)
 
     for kernel in kernels:
+        if hasattr(kernel, 'bytes_per_element'):
+            continue
         key = get_kernel_key(kernel)
         precisions = d[key]
         if 'dp' in precisions:

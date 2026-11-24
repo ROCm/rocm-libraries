@@ -72,6 +72,7 @@ static const std::map<ComputeScheme, const char*>& ComputeSchemetoStringMap()
            {ENUMSTR(CS_L1D_TRTRT)},
            {ENUMSTR(CS_L1D_CC)},
            {ENUMSTR(CS_L1D_CRT)},
+           {ENUMSTR(CS_1D_TRANSPOSE)},
 
            {ENUMSTR(CS_2D_STRAIGHT)},
            {ENUMSTR(CS_2D_RTRT)},
@@ -126,6 +127,7 @@ static const std::set<ComputeScheme>& ProblemScheme()
                                                              (CS_L1D_TRTRT),
                                                              (CS_L1D_CC),
                                                              (CS_L1D_CRT),
+                                                             (CS_1D_TRANSPOSE),
                                                              (CS_2D_RTRT),
                                                              (CS_2D_RC),
                                                              (CS_KERNEL_2D_SINGLE),

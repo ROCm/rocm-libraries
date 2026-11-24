@@ -1605,6 +1605,79 @@ static bool DimensionSplitInField(size_t length, size_t dimIdx, const rocfft_fie
     return false;
 }
 
+// SBCC tiles along the first non-transformed axis, not along the batch.
+// Keep the user's logical layout until after probing the solution map.
+static ComputeScheme PrepareInnerBatch1D(NodeMetaData& data, ComputeScheme defaultScheme)
+{
+    if(data.dimension != 1 || !dft_is_complex(data.rootTransformType)
+       || !array_type_is_complex_but_not_hermitian(data.inArrayType)
+       || !array_type_is_complex_but_not_hermitian(data.outArrayType))
+        return CS_NONE;
+
+    size_t innerAxis   = 0;
+    size_t innerStride = std::numeric_limits<size_t>::max();
+    auto   consider    = [&](size_t axis, size_t length, size_t istride, size_t ostride) {
+        if(length <= 1)
+            return;
+        if(istride < data.inStride[0] && istride < innerStride)
+        {
+            innerAxis   = axis;
+            innerStride = istride;
+        }
+        if(ostride < data.outStride[0] && ostride < innerStride)
+        {
+            innerAxis   = axis;
+            innerStride = ostride;
+        }
+    };
+
+    const auto rank = data.inStride.size();
+    for(size_t i = 1; i < rank; ++i)
+        consider(i, data.length[i], data.inStride[i], data.outStride[i]);
+    consider(rank, data.batch, data.iDist, data.oDist);
+    if(innerAxis == 0)
+        return CS_NONE;
+
+    const auto innerLength = innerAxis == rank ? data.batch : data.length[innerAxis];
+    // For small one-sided batches, keep row-contiguous accesses on that side.
+    // The row kernel also wins for some wide length-192 layouts, where an
+    // extent cutoff does not help.
+    if(defaultScheme == CS_KERNEL_STOCKHAM
+       && (data.length[0] == 192
+           || (innerLength < 4096 && (data.inStride[0] == 1 || data.outStride[0] == 1))))
+        return CS_NONE;
+
+    const function_pool pool(data.deviceProp);
+    auto                scheme = CS_KERNEL_STOCKHAM_BLOCK_CC;
+    if(!pool.has_SBCC_kernel(data.length[0], data.precision))
+    {
+        // Repack only when a wide unit-stride inner axis makes the extra
+        // transposes worthwhile over the ordinary row kernel.
+        if(defaultScheme != CS_KERNEL_STOCKHAM || innerStride != 1 || innerLength < 4096
+           || data.length[0] < 512)
+            return CS_NONE;
+        scheme = CS_1D_TRANSPOSE;
+    }
+
+    // The default large-1D scheme may have appended a factor after the real axes.
+    data.length.resize(rank);
+    if(data.batch > 1)
+    {
+        data.length.push_back(data.batch);
+        data.inStride.push_back(data.iDist);
+        data.outStride.push_back(data.oDist);
+        data.batch = 1;
+    }
+    std::swap(data.length[1], data.length[innerAxis]);
+    std::swap(data.inStride[1], data.inStride[innerAxis]);
+    std::swap(data.outStride[1], data.outStride[innerAxis]);
+    if(!data.outputLength.empty())
+        data.outputLength = data.length;
+    data.iDist = compute_ptrdiff(data.length, data.inStride);
+    data.oDist = compute_ptrdiff(data.length, data.outStride);
+    return scheme;
+}
+
 // Construct a single-device execPlan - fill out the provided
 // execPlan with nodes to implement the FFT.
 template <bool probe_solution_map>
@@ -1640,6 +1713,14 @@ std::unique_ptr<ExecPlan>
                         rootPlanData, nullptr, execPlan.rootScheme->curScheme);
                 }
             }
+        }
+
+        auto& tuning = TuningBenchmarker::GetSingleton();
+        if(!execPlan.rootScheme && !tuning.IsInitializingTuning() && !tuning.IsProcessingTuning())
+        {
+            const auto scheme = PrepareInnerBatch1D(rootPlanData, execPlan.rootPlan->scheme);
+            if(scheme != CS_NONE)
+                execPlan.rootPlan = NodeFactory::CreateExplicitNode(rootPlanData, nullptr, scheme);
         }
 
         execPlan.iLength = rootPlanData.length;

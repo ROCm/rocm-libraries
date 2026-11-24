@@ -23,6 +23,22 @@
 
 #include "tree_node.h"
 
+// A 1D FFT with a layout transpose on each non-unit-stride side.
+class Transpose1DNode : public InternalNode
+{
+    friend class NodeFactory;
+
+protected:
+    explicit Transpose1DNode(TreeNode* p)
+        : InternalNode(p)
+    {
+        scheme = CS_1D_TRANSPOSE;
+    }
+
+    void AssignParams_internal() override;
+    void BuildTree_internal(SchemeTreeVec& child_scheme_trees) override;
+};
+
 /*****************************************************
  * L1D_TRTRT  *
  *****************************************************/

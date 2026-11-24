@@ -28,6 +28,88 @@
 #include "tuning_helper.h"
 #include <numeric>
 
+void Transpose1DNode::BuildTree_internal(SchemeTreeVec&)
+{
+    if(inStride[0] != 1)
+    {
+        auto transpose    = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
+        transpose->length = length;
+        std::swap(transpose->length[0], transpose->length[1]);
+        transpose->dimension = 2;
+        transpose->SetTransposeOutputLength();
+        if(outStride[0] != 1)
+            transpose->allowedOutBuf = OB_TEMP;
+        childNodes.emplace_back(std::move(transpose));
+    }
+
+    NodeMetaData rowData(this);
+    rowData.length = length;
+    auto row       = NodeFactory::CreateExplicitNode(rowData, this);
+    if(outStride[0] != 1)
+        row->allowedOutBuf = OB_TEMP;
+    row->RecursiveBuildTree();
+    childNodes.emplace_back(std::move(row));
+
+    if(outStride[0] != 1)
+    {
+        auto transpose       = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, this);
+        transpose->length    = length;
+        transpose->dimension = 2;
+        // Buffer assignment needs this footprint before AssignParams runs.
+        transpose->outStride = outStride;
+        transpose->SetTransposeOutputLength();
+        childNodes.emplace_back(std::move(transpose));
+    }
+}
+
+void Transpose1DNode::AssignParams_internal()
+{
+    const bool transposeIn  = inStride[0] != 1;
+    const bool transposeOut = outStride[0] != 1;
+    const bool scratchInput = transposeIn && childNodes.front()->obOut == OB_TEMP;
+    auto&      row          = childNodes[transposeIn ? 1 : 0];
+
+    // Packed rows in scratch, or the user's row layout if the first transpose
+    // can write to the output buffer and the FFT can run there in place.
+    std::vector<size_t> packedStride;
+    size_t              packedDist = 1;
+    if(scratchInput || transposeOut)
+    {
+        packedStride.reserve(length.size());
+        for(auto len : length)
+        {
+            packedStride.push_back(packedDist);
+            packedDist *= len;
+        }
+    }
+
+    row->inStride = transposeIn ? (scratchInput ? packedStride : outStride) : inStride;
+    row->iDist    = transposeIn ? (scratchInput ? packedDist : oDist) : iDist;
+    if(transposeIn)
+    {
+        auto& transpose      = childNodes.front();
+        transpose->inStride  = inStride;
+        transpose->outStride = row->inStride;
+        transpose->iDist     = iDist;
+        transpose->oDist     = row->iDist;
+        std::swap(transpose->inStride[0], transpose->inStride[1]);
+        std::swap(transpose->outStride[0], transpose->outStride[1]);
+    }
+
+    row->outStride = transposeOut ? packedStride : outStride;
+    row->oDist     = transposeOut ? packedDist : oDist;
+    row->AssignParams();
+
+    if(transposeOut)
+    {
+        auto& transpose      = childNodes.back();
+        transpose->inStride  = row->outStride;
+        transpose->outStride = outStride;
+        transpose->iDist     = row->oDist;
+        transpose->oDist     = oDist;
+    }
+}
+
 /*****************************************************
  * L1D_TRTRT  *
  *****************************************************/
