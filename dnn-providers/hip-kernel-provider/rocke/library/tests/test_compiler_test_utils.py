@@ -8,9 +8,10 @@ compiler whose LLVM major the table records as refusing the option
 (``CompilerOptionNotAccepted``), or one the table has no answer for (a plain
 ``ValueError``). These tests pin that a refusal skips, that it fails when
 ``ROCKE_REQUIRE_COMPILER_TOOLS=1`` requires the tools, and that no other error
-is turned into a skip. They also pin that ``compile_or_skip``, the compile
-helper of the attention backward tests, applies the same policy to a real
-``compile_kernel`` call.
+is turned into a skip, and the same two outcomes for a missing tool reported
+straight to ``require_tools_or_skip``. They also pin that ``compile_or_skip``,
+the compile helper of the attention backward tests, applies the same policy to
+a real ``compile_kernel`` call.
 """
 
 from __future__ import annotations
@@ -27,13 +28,36 @@ from . import _attention_bwd_resources
 from ._attention_bwd_resources import compile_or_skip
 from ._compiler_test_utils import (
     REQUIRE_COMPILER_TOOLS_ENV,
+    require_tools_or_skip,
     skip_where_compiler_refuses_option,
+    skip_where_compiler_refuses_processor,
 )
 
 OPTION = "-amdgpu-mfma-vgpr-form"
 # How the refusal starts, and how the policy introduces it.
 REFUSAL = f"kernel 'probe' needs the compiler option '-mllvm {OPTION}'"
 SKIP_REASON = f"loaded compiler cannot build this kernel: {REFUSAL}"
+MISSING_TOOL = "llvm-objdump not found"
+
+
+def test_missing_tool_skips(monkeypatch):
+    monkeypatch.delenv(REQUIRE_COMPILER_TOOLS_ENV, raising=False)
+    with pytest.raises(unittest.SkipTest, match=f"^{MISSING_TOOL}$"):
+        require_tools_or_skip(MISSING_TOOL)
+
+
+def test_missing_tool_fails_where_tools_are_required(monkeypatch):
+    monkeypatch.setenv(REQUIRE_COMPILER_TOOLS_ENV, "1")
+    try:
+        with pytest.raises(
+            AssertionError,
+            match=f"^{REQUIRE_COMPILER_TOOLS_ENV}=1 but {MISSING_TOOL}$",
+        ):
+            require_tools_or_skip(MISSING_TOOL)
+    except unittest.SkipTest as skipped:
+        # A skip escaping here would be reported as a skip, not a failure,
+        # hiding a helper that lost its fail branch.
+        pytest.fail(f"skipped where the tools are required: {skipped}")
 
 
 def _compiler(llvm_major: int) -> CompilerInfo:
@@ -147,3 +171,44 @@ def test_compile_or_skip_applies_the_policy(
         # Its own toolchain-gap skip would hide the refusal here, and pytest
         # would report this test as skipped rather than failed.
         pytest.fail(f"compile_or_skip skipped outside the shared policy: {skipped}")
+
+
+# The ValueError rocke.core.arch.target raises for a processor the loaded
+# compiler cannot target (the text test_arch_target_identity.py pins).
+PROCESSOR_REFUSAL = (
+    "the llvm20 compiler does not accept the processor 'gfx1250', and its "
+    "arch_specs.json row points at no generic target that compiler accepts -- "
+    "compile with an LLVM flavor whose compiler accepts 'gfx1250'"
+)
+
+
+def test_refused_processor_skips(monkeypatch):
+    monkeypatch.delenv(REQUIRE_COMPILER_TOOLS_ENV, raising=False)
+    with pytest.raises(unittest.SkipTest, match="cannot target this processor"):
+        with skip_where_compiler_refuses_processor():
+            raise ValueError(PROCESSOR_REFUSAL)
+
+
+def test_refused_processor_fails_where_tools_are_required(monkeypatch):
+    monkeypatch.setenv(REQUIRE_COMPILER_TOOLS_ENV, "1")
+    with pytest.raises(AssertionError, match=REQUIRE_COMPILER_TOOLS_ENV):
+        with skip_where_compiler_refuses_processor():
+            raise ValueError(PROCESSOR_REFUSAL)
+
+
+@pytest.mark.parametrize("required", ["0", "1"])
+@pytest.mark.parametrize(
+    "message",
+    [
+        "variant rejected",
+        # One of the two phrases alone is not the refusal.
+        "the llvm20 compiler does not accept the processor 'gfx1250'",
+    ],
+)
+def test_other_value_errors_propagate_from_the_processor_policy(
+    monkeypatch, required, message
+):
+    monkeypatch.setenv(REQUIRE_COMPILER_TOOLS_ENV, required)
+    with pytest.raises(ValueError, match="variant rejected|does not accept"):
+        with skip_where_compiler_refuses_processor():
+            raise ValueError(message)

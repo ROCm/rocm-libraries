@@ -331,8 +331,26 @@ _CONFIGS = {
         use_conflict_free_v_store=True,
         use_i64_kv_addr=True,
     ),
-    # Fast paged-KV descriptor (bounded V tail per call).
+    # idx20: additive bias on gfx942; both engines reject it (BOTH_REJECTED).
+    # The gfx942 Python spec has no use_additive_bias field at all, so this
+    # raises TypeError at construction. The C twin's spec_validate() rejects
+    # it too, but nothing in the provider tree calls that function on the
+    # real build path (rocke_build_unified_attention_2d_tiled_scalar ->
+    # rocke_gfx942_attn2d_build_ctx_init); the reject this config pins lives
+    # in the ctx-init itself.
     20: dict(
+        head_size=64,
+        block_size=32,
+        num_query_heads=32,
+        num_kv_heads=32,
+        dtype="bf16",
+        use_sinks=True,
+        sliding_window=2048,
+        has_softcap=False,
+        use_additive_bias=True,
+    ),
+    # Fast paged-KV descriptor (bounded V tail per call).
+    21: dict(
         head_size=64,
         block_size=32,
         num_query_heads=64,
@@ -348,7 +366,7 @@ _CONFIGS = {
     # Page copies whose copy spans pages (one 8-warp copy is two 16-token pages
     # of head size 32): each copy's page comes from the wave, and each lane sits
     # at the same row of its page in every copy.
-    21: dict(
+    22: dict(
         head_size=32,
         block_size=16,
         num_query_heads=32,
@@ -362,10 +380,18 @@ _CONFIGS = {
         tile_size=64,
     ),
 }
-# cfg21 with i64 K/V (one resource per page), and cfg11 with i64 K/V: copies
+
+# Configs both engines must reject, with the reason each one pins: run_diff
+# requires the regex in both engines' stderr (BOTH_REJECTED alone accepts any
+# reason, a typo included).
+_EXPECTED_REJECTIONS = {
+    # The Python gfx942 spec has no bias field, so Python fails on the keyword.
+    20: r"unexpected keyword argument 'use_additive_bias'|does not emit additive bias",
+}
+# cfg22 with i64 K/V (one resource per page), and cfg11 with i64 K/V: copies
 # that end mid-row on a per-page resource.
-_CONFIGS[22] = {**_CONFIGS[21], "use_i64_kv_addr": True}
-_CONFIGS[23] = {**_CONFIGS[11], "use_i64_kv_addr": True}
+_CONFIGS[23] = {**_CONFIGS[22], "use_i64_kv_addr": True}
+_CONFIGS[24] = {**_CONFIGS[11], "use_i64_kv_addr": True}
 
 
 def _kernel(idx: int):

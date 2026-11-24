@@ -328,10 +328,12 @@ def test_reduce_segment_bound_is_the_arch_lds_capacity(arch):
     literal: the last count that fits is admitted and the next one refused."""
     from rocke.core.arch.target import ArchTarget
 
-    from kernels.common.attention_split_kv_reduce import split_kv_reduce_lds_bytes
+    from kernels.common.attention_split_kv_reduce import (
+        reduce_max_segments,
+        split_kv_reduce_lds_bytes,
+    )
     from kernels.gfx950.attention_tiled_3d import (
         UnifiedAttentionReduceTiledSpec,
-        reduce_max_segments,
         supports_tiled_reduce_spec,
     )
 

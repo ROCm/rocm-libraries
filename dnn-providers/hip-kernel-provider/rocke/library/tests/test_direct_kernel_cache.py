@@ -1969,6 +1969,7 @@ def test_measure_plans_skips_a_plan_whose_kernargs_do_not_fit(monkeypatch, capsy
         u8=None,
         chunks=[1],
         per_chunk={pl.label: [pl] for pl in plans},
+        tol=dks.direct_verify_tol("fp16", "gfx942"),
     )
     assert (results, rc) == ([], 0)
     assert len(measured) == 1

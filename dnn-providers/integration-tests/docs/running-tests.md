@@ -364,7 +364,7 @@ Otherwise, you test the old tree.
 |---|---|---|---|
 | `--test-article`, `--ta` | | plugin discovery | Path to the engine plugin (`.so` / `.dll`). The binary loads only that plugin. |
 | `--test-engine`, `--te` | | none | Pin the run to one engine. If the engine is not loaded, the binary exits 1 before any test: `Error: Engine '<name>' is not loaded. Check the plugin path.` |
-| `--test-config`, `--tc` | | none | The engine's TOML ([format](file-formats.md#per-engine-test-config--configengine_nametoml)). A missing path or invalid TOML exits 1. |
+| `--test-config`, `--tc` | | none | The engine's TOML ([format](file-formats.md#engine-test-config--configengine_nametoml)). A missing path or invalid TOML exits 1. |
 | `--verification-mode`, `--vm` | `HIPDNN_TEST_VERIFICATION_MODE` | `auto` | How bundle output is checked; see [Verification modes](#verification-modes). |
 | `--validator` | `HIPDNN_TEST_VALIDATOR` | `auto` | Where the comparison runs: `auto` (follow the reference), `cpu`, `gpu`. |
 | `--reference-executor` | `HIPDNN_TEST_REFERENCE_EXECUTOR` | `cpu` | Reference for C++ graph tests only. |
@@ -490,6 +490,10 @@ It differs for each lane:
 Because `-L` is a regex, `-L quick` also selects these suites
 ([above](#1-ctest-by-tier-what-ci-does)).
 
+The hip-kernel-provider FlyDSL lanes (`hipkernel_flydsl_*_test_categories_integration.yaml`)
+define neither `quick` nor `ffm-quick`: no FlyDSL device test runs in those tiers, so
+each lane registers `standard`, `comprehensive` and `full` only.
+
 The timeouts come from `execution_settings.category_timeouts` in each YAML file.
 They are different in each file.
 
@@ -576,7 +580,7 @@ decision moves. The host always builds the failure reports. A
 `[[validator_overrides]]` entry that uses `allclose_matching_infinities` has a
 host validator only in a C++ graph test. A comparison that resolves to the
 device therefore fails that tensor
-([details](file-formats.md#per-engine-test-config--configengine_nametoml)). In a
+([details](file-formats.md#engine-test-config--configengine_nametoml)). In a
 bundle test, the `allclose` comparison of a floating-point output treats two
 infinities of the same sign as equal on the host; on the device this applies
 only to `FLOAT`, `HALF`, `BFLOAT16` and `DOUBLE` (an FP8 output is graded

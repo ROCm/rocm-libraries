@@ -510,6 +510,18 @@ int rocke_arch_max_vector_load_dwords(const rocke_arch_target_t* t, const char* 
  * this arch can do, in dwords (0 = no buffer_load_lds at all). */
 int rocke_arch_async_lds_max_dwords(const rocke_arch_target_t* t);
 
+/* Python: LDS_DMA_ENCODED_DWORDS. The per-lane widths, in dwords, that the
+ * buffer_load ... lds encoding has (4, 12 and 16 bytes; no 2-dword form). */
+#define ROCKE_LDS_DMA_ENCODED_DWORDS_N 3
+extern const int rocke_lds_dma_encoded_dwords[ROCKE_LDS_DMA_ENCODED_DWORDS_N];
+
+/* ArchTarget.async_lds_dwords property: the encoded widths up to
+ * async_lds_max_dwords, ascending; none where the arch has no
+ * buffer_load ... lds. Writes them to out (room for
+ * ROCKE_LDS_DMA_ENCODED_DWORDS_N) and returns how many. */
+int rocke_arch_async_lds_dwords(const rocke_arch_target_t* t,
+                                int out[ROCKE_LDS_DMA_ENCODED_DWORDS_N]);
+
 /* ArchTarget.max_threads_per_block property. */
 int rocke_arch_max_threads_per_block(const rocke_arch_target_t* t);
 

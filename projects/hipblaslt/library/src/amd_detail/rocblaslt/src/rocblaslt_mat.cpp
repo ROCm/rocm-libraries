@@ -1249,6 +1249,8 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
         effective_uniform_summation_order(handle, nullptr)};
     problem.int4EncodingA = problemtype.int4_encoding_a;
     problem.deviceScalarAlpha = inputs.deviceScalarAlpha;
+    if constexpr(std::is_same<Inputs, rocblaslt::RocGemmInputsV2>::value)
+        problem.dPeer = inputs.dPeer;
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -1707,8 +1709,8 @@ rocblaslt_status
             return rocblaslt_status_invalid_handle;
         }
 
-        if(matA[i]->type != matB[i]->type || matC[i]->type != matD[i]->type
-           || matA[0]->type != matA[i]->type || matC[0]->type != matC[i]->type)
+        if(matC[i]->type != matD[i]->type || matA[0]->type != matA[i]->type
+           || matB[0]->type != matB[i]->type || matC[0]->type != matC[i]->type)
         {
             log_error(__func__, "invalid  matrix datatype");
             return rocblaslt_status_type_mismatch;

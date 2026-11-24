@@ -21,8 +21,6 @@ from typing import Tuple
 from kernels.common.attention_unified import (
     select_auto_path,
     supports_native_unified_attention,
-    supports_native_unified_attention_coverage,
-    unified_lse_path_gate,
 )
 from rocke.core.arch import arches_with_own_facts
 from rocke.dispatch.core import (
@@ -45,6 +43,7 @@ from .common import (
     attention_problem,
     _request_errors,
     _selector_matches,
+    _unified_path_coverage,
 )
 
 # The unified paths are portable, so they declare every known target rather than
@@ -69,13 +68,16 @@ _UNIFIED_CAPABILITY = Capability(
     # Unified kernels shift the causal diagonal by the runtime difference
     # between each sequence's KV and query lengths (bottom-right); top-left
     # cross-length selects the ``causal_top_left`` kernel variant on gfx950 and
-    # the scalar kernel elsewhere (tiled gates reject it off gfx950).
-    supports_features=ATTENTION_FEATURES,
+    # the scalar kernel elsewhere (tiled gates reject it off gfx950). Additive
+    # bias runs on the tiled kernels only; the tiled gate limits it to gfx950.
+    supports_features=ATTENTION_FEATURES | {"attn_bias"},
 )
-# Both unified paths write the optional LSE output; each path's own gate (in
-# ``support`` below) still refuses it on arches/features that cannot.
+# Both unified paths write the optional LSE output; each path's own gate (run
+# by ``_unified_path_coverage`` in ``support`` below) still refuses it on
+# arches/features that cannot.
 _UNIFIED_LSE_CAPABILITY = dataclasses.replace(
-    _UNIFIED_CAPABILITY, supports_features=ATTENTION_FEATURES | {"lse"}
+    _UNIFIED_CAPABILITY,
+    supports_features=_UNIFIED_CAPABILITY.supports_features | {"lse"},
 )
 
 # The two generic unified-path algorithms this module registers, named so a
@@ -102,9 +104,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         if not ok:
             return False, why
         problem = attention_problem(req)
-        # The scalar gate refuses LSE (the scalar kernel writes none), so coverage
-        # is asked with LSE off; the path's own gate rules on LSE below.
-        ok, why = supports_native_unified_attention_coverage(problem, arch=req.arch)
+        ok, why = _unified_path_coverage(req, problem, path, req.arch)
         if not ok:
             return False, why
         # Split-KV also takes the LSE requests that ``select_path(arch)`` sends
@@ -116,11 +116,6 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
             return False, (
                 f"problem routes to {problem.select_path(req.arch)!r} path, not {path!r}"
             )
-        if problem.emit_lse:
-            # The path's own gate owns which arches and features can write LSE.
-            ok, why = unified_lse_path_gate(path)(problem, arch=req.arch)
-            if not ok:
-                return False, why
         return True, "ok"
 
     def select(req: OperatorRequest) -> AttentionSpec:
@@ -142,6 +137,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
             right_bound=problem.right_bound,
             sliding_window=problem.sliding_window,
             emit_lse=problem.emit_lse,
+            use_additive_bias=problem.use_additive_bias,
         )
 
     candidate = KernelCandidate(

@@ -1,7 +1,7 @@
 {
   "version": "1.0",
-  "id": "df4ca2de-53c4-44d4-b92c-ead86e287fa5",
-  "name": "Generated UHD",
+  "id": "a1e85dc0-4c37-495a-b8d3-5b49a1b5f8f8",
+  "name": "Generated UHD (tflops)",
   "adapter": "tree_data",
   "features_signature": [
     "$kernel.block_m",
@@ -109,6 +109,6 @@
   },
   "tree_data": {
     "artifact": "model.bin",
-    "hash": "99ca3c70363f05b4e4249f8b6b77ddd7ee9d61f71ace54b837d89d163523c6d2"
+    "hash": "3d8a13c38e2e745e930e4a0c7f7a580f9a294c123dae073b263f6513014ac4e3"
   }
 }

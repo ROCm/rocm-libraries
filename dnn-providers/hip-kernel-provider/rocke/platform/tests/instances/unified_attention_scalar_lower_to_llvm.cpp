@@ -16,6 +16,10 @@
  * kernels are arch-neutral (no MMA atom, no LDS, no cross-lane op), so the text
  * is the same on every gfx9 target: the comparison pins the wrapper's behavior,
  * not which gfx9 constant it names.
+ *
+ * The scalar 2D and 3D kernels have no additive-bias score site, so every public
+ * entry (wrapper, _new, raw builder) must refuse a biased problem rather than
+ * build a kernel that drops the bias. The reduce kernel takes no bias and builds.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -176,6 +180,103 @@ done:
     return rc;
 }
 
+static int expect_refusal(kind_t kind, const char* entry, rocke_status_t st, const char* err)
+{
+    const char* want
+        = kind == KIND_2D ? "scalar 2D kernel: additive bias runs on the gfx950 tiled kernels only"
+                          : "scalar 3D kernel: additive bias runs on the gfx950 tiled kernels only";
+    if(st == ROCKE_OK || strstr(err, want) == NULL)
+    {
+        fprintf(stderr,
+                "%-14s %s: biased problem not refused as \"%s\": status=%d err=%s\n",
+                kind_name(kind),
+                entry,
+                want,
+                (int)st,
+                err[0] != '\0' ? err : "<none>");
+        return 1;
+    }
+    return 0;
+}
+
+static int run_bias_case(kind_t kind)
+{
+    rocke_unified_attention_problem_t p = make_problem();
+    char* ll = NULL;
+    char err[ERR_CAP];
+    rocke_status_t st;
+    int failures = 0;
+
+    p.use_additive_bias = true;
+    err[0] = '\0';
+    st = lower_through_wrapper(kind, &p, &ll, err, sizeof err);
+    if(kind == KIND_REDUCE)
+    {
+        if(st != ROCKE_OK || ll == NULL || ll[0] == '\0')
+        {
+            fprintf(stderr,
+                    "%-14s the reduce kernel takes no bias and must still build: status=%d "
+                    "err=%s\n",
+                    kind_name(kind),
+                    (int)st,
+                    err[0] != '\0' ? err : "<none>");
+            failures = 1;
+        }
+        free(ll);
+        if(failures == 0)
+            printf("%-14s -> OK biased problem still builds\n", kind_name(kind));
+        return failures;
+    }
+    failures += expect_refusal(kind, "_lower_to_llvm", st, err);
+    if(ll != NULL)
+    {
+        fprintf(
+            stderr, "%-14s _lower_to_llvm: returned text for a refused problem\n", kind_name(kind));
+        failures += 1;
+        free(ll);
+    }
+
+    /* The _new entry and the raw builder (which a C caller reaches without the
+     * wrapper's error plumbing). */
+    {
+        rocke_ir_builder_t b;
+        rocke_kernel_def_t* k
+            = kind == KIND_2D
+                  ? rocke_build_unified_attention_2d_scalar_new(&b, &p, NULL)
+                  : rocke_build_unified_attention_3d_scalar_new(&b, &p, NULL, NUM_SEGMENTS);
+        if(k != NULL)
+        {
+            fprintf(stderr, "%-14s _new: built a kernel for a biased problem\n", kind_name(kind));
+            failures += 1;
+        }
+        else
+            failures += expect_refusal(
+                kind, "_new", rocke_ir_builder_status(&b), rocke_ir_builder_error(&b));
+        rocke_ir_builder_free(&b);
+    }
+    {
+        rocke_ir_builder_t b;
+        rocke_kernel_def_t* k;
+        rocke_ir_builder_init(&b, "scalar_bias_refusal");
+        k = kind == KIND_2D ? rocke_build_unified_attention_2d_scalar(&b, &p, NULL)
+                            : rocke_build_unified_attention_3d_scalar(&b, &p, NULL, NUM_SEGMENTS);
+        if(k != NULL)
+        {
+            fprintf(stderr,
+                    "%-14s raw builder: built a kernel for a biased problem\n",
+                    kind_name(kind));
+            failures += 1;
+        }
+        else
+            failures += expect_refusal(
+                kind, "raw builder", rocke_ir_builder_status(&b), rocke_ir_builder_error(&b));
+        rocke_ir_builder_free(&b);
+    }
+    if(failures == 0)
+        printf("%-14s -> OK biased problem refused by every entry\n", kind_name(kind));
+    return failures;
+}
+
 int main(void)
 {
     static const kind_t kinds[] = {KIND_2D, KIND_3D, KIND_REDUCE};
@@ -183,7 +284,7 @@ int main(void)
     size_t i;
 
     for(i = 0; i < sizeof kinds / sizeof kinds[0]; ++i)
-        failures += run_case(kinds[i]);
+        failures += run_case(kinds[i]) + run_bias_case(kinds[i]);
 
     if(failures != 0)
     {

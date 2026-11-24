@@ -5,6 +5,12 @@ Documentation for rocFFT is available at
 
 ## (Unreleased) rocFFT 1.0.42
 
+### Added
+
+* Extended the optional RCCL backend to multi-process plans when built with both `ROCFFT_RCCL_ENABLE` and 
+  `ROCFFT_MPI_ENABLE`. RCCL is used for the transpose data plane when every MPI rank's bricks use exactly
+  one device; otherwise the existing MPI paths remain. Set the
+  `ROCFFT_RCCL_DISABLE` environment variable to `1` to force the MPI fallback.
 ### Changed
 
 * Multi-device plans are now built as independent per-brick transforms, without any data movement
@@ -22,6 +28,8 @@ Documentation for rocFFT is available at
   factors silently falling back to running the transform on a single device.  Such plans may now
   perform better.
 * Fixed a crash in `rocfft_execute` for in-place multi-device plans when `out_buffer` is null.
+* Fixed data races on work memory that could cause sporadic incorrect results for
+  multi-device transforms requiring work memory.
 
 ## rocFFT 1.0.41 for ROCm 10.2
 

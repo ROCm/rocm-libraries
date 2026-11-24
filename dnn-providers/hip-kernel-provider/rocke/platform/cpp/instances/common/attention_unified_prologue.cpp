@@ -28,6 +28,7 @@
  * is freed individually.
  */
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "rocke/helper_helper_rocke.helpers.attention.h" /* rocke_binary_search_seq_idx */
@@ -39,15 +40,31 @@
  *  Python: the head of each build_unified_attention_*:
  *      p = spec.problem
  *      if p.dtype not in ("fp16", "bf16"): raise ValueError(...)   (2D only)
+ *      if p.use_additive_bias: raise ValueError(...)               (2D, 3D)
  *      dtype = spec.dtype_ir
  *  plus deriving num_queries_per_kv (= p.num_query_heads // num_kv_heads, which
  *  raises on a non-divisible ratio).
  *
  *  Zero-inits the ctx, copies the problem/spec slice into it, mirrors `p` into
  *  the selector-helper problem shape (ctx->sel_p) so the ported emit/descriptor
- *  helpers can be called, then validates. On a non-divisible head ratio or an
- *  unsupported dtype, sets b's sticky error and returns false.
+ *  helpers can be called, then validates. On a non-divisible head ratio, an
+ *  unsupported dtype or an additive-bias problem for a scalar 2D/3D kernel,
+ *  sets b's sticky error and returns false.
  * ===================================================================== */
+const char* rocke_attn_unified_scalar_bias_refusal(rocke_attn_unified_kind_t kind)
+{
+    switch(kind)
+    {
+    case ROCKE_ATTN_UNIFIED_2D:
+        return "scalar 2D kernel: additive bias runs on the gfx950 tiled kernels only";
+    case ROCKE_ATTN_UNIFIED_3D:
+        return "scalar 3D kernel: additive bias runs on the gfx950 tiled kernels only";
+    case ROCKE_ATTN_UNIFIED_REDUCE:
+        break;
+    }
+    return NULL;
+}
+
 bool rocke_attn_unified_ctx_init(rocke_attn_unified_build_ctx_t* ctx,
                                  rocke_ir_builder_t* b,
                                  rocke_attn_unified_kind_t kind,
@@ -90,6 +107,7 @@ bool rocke_attn_unified_ctx_init(rocke_attn_unified_build_ctx_t* ctx,
         sp->use_sinks = p->use_sinks;
         sp->use_alibi = p->use_alibi;
         sp->use_qq_bias = p->use_qq_bias;
+        sp->use_additive_bias = p->use_additive_bias;
         sp->use_fp8 = p->use_fp8;
         sp->num_cus = p->num_cus;
         sp->num_kv_blocks = p->num_kv_blocks;
@@ -109,6 +127,19 @@ bool rocke_attn_unified_ctx_init(rocke_attn_unified_build_ctx_t* ctx,
              * IR is emitted; on an unsupported dtype the build aborts without
              * emitting ops (matching the sibling 2D builder's NULL-on-bad-dtype
              * gate). Return false; the driver returns NULL to the caller. */
+            return false;
+        }
+    }
+
+    /* The scalar 2D/3D kernels have no bias score site: refuse a biased problem
+     * instead of building a kernel that drops the bias. */
+    if(p->use_additive_bias)
+    {
+        const char* why = rocke_attn_unified_scalar_bias_refusal(kind);
+        if(why != NULL)
+        {
+            b->status = ROCKE_ERR_VALUE;
+            (void)snprintf(b->err, ROCKE_ERR_MSG_CAP, "%s", why);
             return false;
         }
     }

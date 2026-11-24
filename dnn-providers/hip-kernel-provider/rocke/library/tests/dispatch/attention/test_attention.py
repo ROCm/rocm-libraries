@@ -36,7 +36,9 @@ _GFX950_DENSE_FEATURES = {
     "sinks",
     "sliding_window",
 }
+# The additive bias is served by the grid body only.
 _GFX950_DENSE_GRID_BODY_FEATURES = _GFX950_DENSE_FEATURES | {
+    "attn_bias",
     "causal_bottom_right",
     "layout_paged",
 }
@@ -74,6 +76,7 @@ EXPECTED_FEATURES = {
         "sliding_window",
     },
     "attention_gfx942_dense": {
+        "attn_bias",
         "causal",
         "causal_bottom_right",
         "layout_dense",
@@ -83,6 +86,7 @@ EXPECTED_FEATURES = {
         "sliding_window",
     },
     "attention_gfx942_dense_qbminor": {
+        "attn_bias",
         "causal",
         "causal_bottom_right",
         "layout_dense",
@@ -136,6 +140,8 @@ EXPECTED_FEATURES = {
     },
     "attention_gfx950_d256": {"causal", "causal_bottom_right"},
     "attention_unified_2d": {
+        # Served by the tiled kernels; the tiled gate limits it to gfx950.
+        "attn_bias",
         "band",
         "causal",
         "causal_bottom_right",
@@ -146,6 +152,7 @@ EXPECTED_FEATURES = {
         "lse",
     },
     "attention_unified_3d": {
+        "attn_bias",
         "band",
         "causal",
         "causal_bottom_right",
@@ -539,10 +546,16 @@ class TestAttentionDispatch(unittest.TestCase):
         tuning = [c for c in attention_candidates() if c.algorithm == "unified_tuning"]
         self.assertTrue(tuning)
         for candidate in tuning:
-            # Every unified geometry writes LSE except the gfx942 4-warp GQA one.
+            # Every unified geometry writes LSE except the gfx942 4-warp GQA one,
+            # and every gfx950 geometry but the non-transposed 32x32 one takes
+            # an additive bias.
             expected = set(ATTENTION_FEATURES) | (
                 set() if "_u2d_gfx942_4warp_" in candidate.name else {"lse"}
             )
+            if candidate.name.startswith("attention_gfx950_") and (
+                "_wide32_" not in candidate.name
+            ):
+                expected.add("attn_bias")
             with self.subTest(candidate=candidate.name):
                 self.assertEqual(set(candidate.capability.supports_features), expected)
 

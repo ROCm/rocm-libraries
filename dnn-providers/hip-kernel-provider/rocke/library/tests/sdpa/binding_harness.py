@@ -38,6 +38,8 @@ def bind_tensors(case, dev, req):
     import torch
 
     tensors = {n: dev[n] for n in ("q", "k", "v", "o")}
+    if dev["bias"] is not None:
+        tensors["bias"] = dev["bias"]
     for key, src in (
         ("seq_len_q", "seq_len_q"),
         ("seq_len_kv", "seq_len_kv"),

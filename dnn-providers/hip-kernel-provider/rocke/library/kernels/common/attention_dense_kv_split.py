@@ -38,28 +38,55 @@ def segment_extent(batch, seqlen_q, num_query_heads, head_size, segments) -> int
     )
 
 
-def max_kv_segments_for_extent(
-    batch, seqlen_q, num_query_heads, head_size, max_segments=MAX_KV_SEGMENTS
+def max_segments_for_extent(
+    rows, num_query_heads, head_size, max_segments, max_extent
 ) -> int:
-    """Largest power of two ``S <= max_segments`` whose workspace extent stays below
-    the 32-bit addressing limit (at least 1)."""
+    """Largest power of two ``S <= max_segments`` whose ``[rows, Hq, S, D]`` fp32
+    segment workspace holds at most ``max_extent`` elements (at least 1).
+
+    Shared with the split-KV 3D path (``_num_segments``), whose workspace has the
+    same layout with ``rows = total_q``. ``max_extent`` is the caller's, because
+    the two routes do not currently agree on it: the 3D route allows the extent
+    whose last index is ``INT32_MAX``, which is where the fault was measured,
+    and the dense route stays one element stricter pending a parity run of its
+    own kernel pair at that boundary.
+
+    At least 1 is always returned: a single segment that does not fit is the
+    caller's to refuse, since there is no smaller split to fall back to.
+    """
     s = 1
     while s * 2 <= max_segments and (
-        segment_extent(batch, seqlen_q, num_query_heads, head_size, s * 2) < INT32_LIMIT
+        int(rows) * int(num_query_heads) * (s * 2) * int(head_size) <= max_extent
     ):
         s *= 2
     return s
 
 
+def max_kv_segments_for_extent(
+    batch, seqlen_q, num_query_heads, head_size, max_segments=MAX_KV_SEGMENTS
+) -> int:
+    """Largest power of two ``S <= max_segments`` whose workspace extent stays below
+    the 32-bit addressing limit (at least 1)."""
+    return max_segments_for_extent(
+        int(batch) * int(seqlen_q),
+        num_query_heads,
+        head_size,
+        max_segments,
+        max_extent=INT32_LIMIT - 1,
+    )
+
+
 def kv_split_admits(spec) -> bool:
     """Whether ``spec``'s grid and features admit ``kv_segments > 1``: the default
-    grid only, without a sliding window, sinks or LSE output (each would need its
-    own segment rule), ragged, varlen or paged."""
+    grid only, without a sliding window, sinks, LSE output or an additive bias
+    (each would need its own segment rule), ragged, varlen or paged."""
     return not (
         spec.persistent
         or spec.sliding_window
         or spec.use_sinks
         or spec.emit_lse
+        # The gfx950 and gfx942 dense specs carry the field; the base spec does not.
+        or getattr(spec, "use_additive_bias", False)
         or spec.ragged
         or spec.varlen
         or spec.paged
@@ -74,7 +101,7 @@ def check_kv_segments(spec) -> tuple[bool, str]:
     if s > 1 and not kv_split_admits(spec):
         return False, (
             "kv_segments > 1 runs on the default grid only, without sliding window, "
-            "sinks, LSE output, ragged, varlen or paged"
+            "sinks, LSE output, additive bias, ragged, varlen or paged"
         )
     extent = segment_extent(
         spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size, s
