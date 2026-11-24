@@ -213,7 +213,7 @@ copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt
 
   copy_if_kernel<items_per_thread>
     <<<grid_size, threads_per_block, 0, stream>>>(first, flags.begin(), pos.begin(), num_items, output);
-  hip_rocprim::throw_on_error(hipPeekAtLastError(), "copy_if failed on scatter");
+  hip_rocprim::throw_on_error(hipGetLastError(), "copy_if failed on scatter");
   if (debug_sync)
   {
     hip_rocprim::throw_on_error(hipStreamSynchronize(stream), "copy_if failed to synchronize after scatter");
