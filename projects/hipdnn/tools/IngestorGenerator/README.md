@@ -364,9 +364,10 @@ an exported constant; their census uses the literal `engine.name`.
 
 Review descriptor diffs with `--diff-algorithm=histogram` (or `patience`). Kernel entries
 are near-identical blocks, and Git's default (Myers) algorithm can pair the wrong ones:
-inserting 52 entries between existing ones in the 840-entry gfx950 KDP reads as 5249
-insertions and 2493 deletions by default, and as 2756 insertions and 0 deletions under
-histogram or patience. To make that the default for KDPs in your clone only:
+inserting 52 entries between existing ones in an 840-entry KDP (the gfx950 dense catalog
+before its head-count collapse) reads as 5249 insertions and 2493 deletions by default,
+and as 2756 insertions and 0 deletions under histogram or patience. To make that the
+default for KDPs in your clone only:
 
 ```bash
 git config diff.kdp.algorithm histogram
@@ -836,7 +837,7 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 |---|---|
 | `configs/scale_add.yaml` | Single-pack engine, like the shipped `conv_fwd`: one pack, one operation, its `graph_match` both admits the node type and validates shape |
 | `configs/binary_ops.yaml` | Multi-pack engine, like the shipped `pointwise`: one pack per operation sharing one KMD/UED/UHD/UDD, each naming its own operation-scoped UMD via `discriminator` |
-| `configs/gfx950_attention_dense.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionDense` descriptors: 840 rocKE kernels in the `variants` form, a builder lowered by `hkp_pack` at build time |
+| `configs/gfx950_attention_dense.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionDense` descriptors: 52 rocKE kernels in the `variants` form, a builder lowered by `hkp_pack` at build time |
 | `configs/gfx950_attention_dense.engine.yaml` | That engine's manifest: the registry space the selection is drawn from, its `reduction:` classification, ground-truth graph template and `launch_surface:` audit |
 | `configs/gfx950_conv_fwd_aot_seed.yaml` | Sharded multi-pack engine: one pack per dtype and no `discriminator`, so no operation-scoped UMD. It is also an engine that names another engine's native symbols (`native_symbols_from`): the test-only seed of `hipkernel:Gfx950ConvFwdAot`, written by `tools/make_conv_aot_config.py` |
 | `configs/gfx950_attention_unified_2d.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionUnified2D` descriptors: rocKE prefill kernels per head/dtype/mask cell, served through a host-derived identity paged-KV block table. Kernel and geometry counts: the bundle README, `rocKE/gfx950_attention_unified_2d/README.md` |
@@ -1049,17 +1050,19 @@ enumerate:
   space: slice | full             # full: every sweep spec sharing the cell's feature fields
   free_fields: [block_m, block_n] # slice only: fields that may differ from select_spec
   spec_fields: [dtype, head_size] # slice only: spec fields the KDP carries
-  max_kernels: 840                # slice only: more is an error
+  max_kernels: 52                 # slice only: more is an error
   # The two keys below serve a rule-driven candidate (attention_dense is not one); see
   # configs/gfx942_attention_unified_3d.engine.yaml and the text below.
   # selector_fields: [batch, seqlen_k, kv_block_size]  # optional: cell fields that only steer select_spec
   # neutral_fields: [num_seqs]    # optional: spec fields proven not to change the kernel
   # spec_overrides: {kv_cache_policy: stream}  # optional: pin a spec field the candidate picks
   # cell_keyed_by: [num_queries_per_kv]  # optional: spec attributes of the pick that key a merged cell
+  # hold_fields: [use_k_sliced_ring]  # optional, per section (inherited): performance fields kept at the default spec
   also:                           # optional: more sections in the same pack, each its own
     - pin: {...}                  #   pin/fixed/cells/free_fields/spec_fields/max_kernels;
       space: full                 #   candidates/request/sweep_level/space inherited unless set;
-                                  #   selector_fields/cell_keyed_by inherited, a different list exits 2
+                                  #   selector_fields/cell_keyed_by/hold_fields inherited, a different
+                                  #   selector_fields/cell_keyed_by list exits 2
       spec_overrides: {emit_lse: true}  # optional: spec fields this section's kernels take
       kernel_name_template: "..."       # optional: this section's own names (needed when
                                         #   an override would otherwise repeat a name)
@@ -1097,7 +1100,7 @@ or flat kernel may carry `default: true`, the variant its cell always keeps. An 
 kernel's `kernel_source`, making each one a multi-launch descriptor; its rules are the
 config's `launches` rules below, checked when the generated config loads.
 
-Four optional `enumerate` keys serve a rule-driven candidate, one that returns one spec per
+Five optional `enumerate` keys serve a rule-driven candidate, one that returns one spec per
 request and picks a knob from request fields (rocKE's strided split-KV decode picks
 `num_segments` from `batch` and `seqlen_k`, and its spec `block_size` from the request
 field `kv_block_size`, the KV keys per inner-loop step). Without them each request combo
@@ -1127,11 +1130,13 @@ is a cell, so many cells name the same kernel and `--out` fails on duplicate nam
   to ship: the gfx942 split-KV decode pins `kv_cache_policy: stream` (why: the header of
   `configs/gfx942_attention_unified_3d.engine.yaml`). The spec's own validation decides whether
   the value builds; a value it refuses exits 2 naming the request. An overridden field must
-  be a spec field, and must not be a `performance` or neutral field. It must not be a
-  `feature` field either, unless another section pins it differently (another value, or
-  none): then the field takes more than one value across the catalog, so it is a feature
-  axis. The gfx950 unified engines' `also` sections override `emit_lse` for their LSE-on
-  twins this way, beside a primary section that leaves it off. The g3
+  be a spec field, and must not be a neutral field. It may be a `performance` field: each
+  section then pins one value of it (`hold_fields` below keeps the sections that do not
+  override it from sweeping it). It must not be a `feature` field, unless another section
+  pins it differently (another value, or none): then the field takes more than one value
+  across the catalog, so it is a feature axis. The gfx950 unified engines' `also` sections
+  override `emit_lse` for their LSE-on twins this way, beside a primary section that leaves
+  it off. `spec_overrides` is not inherited by `also` sections: each sets its own. The g3
   regeneration gate compares the shipped catalog against the overridden picks.
 - `cell_keyed_by` lists attributes of each combo's `select_spec` (a property is fine)
   that also key the merged cell, so combos merge only when they agree on them. It serves
@@ -1144,8 +1149,20 @@ is a cell, so many cells name the same kernel and `--out` fails on duplicate nam
   keys a shape by its own pick's value. A keyed attribute must not be a cell field, and
   every spec a cell holds must keep the cell's values, or the run exits 2: a neutral
   field or sweep spec that moves one would silently file a kernel in the wrong cell.
+- `hold_fields` lists `performance` fields a section keeps at its default spec's value
+  instead of varying and projecting them, so a section that leaves a stack of codegen
+  flags alone does not also sweep it. It applies to `space: full` sections only: a `slice`
+  section projects no performance field, so one that sets it (or inherits it, where an `also`
+  section's `hold_fields: []` opts out) exits 2. It is inherited by `also` sections unless they
+  set their own, must name spec fields (checked when the section is read, in every section),
+  and applies after `spec_overrides` (a section may
+  override and hold the same field: the override moves the default, the hold keeps every spec
+  there). The gfx942 unified 2D engine uses the pair for rocKE's production stacks: three
+  `also` sections override the stack on the geometry rocKE selects (D64 for both dtypes,
+  fp16 D128, bf16 D128), while every geometry section holds the five stack fields
+  (`configs/gfx942_attention_unified_2d.engine.yaml`).
 
-Without any of the four keys (or with all empty) the output is byte-identical to a manifest
+Without any of the five keys (or with all empty) the output is byte-identical to a manifest
 that never had them. `--plan-space` counts merged cells and prints the combo count beside
 them; duplicate kernel names after merging still exit 2.
 

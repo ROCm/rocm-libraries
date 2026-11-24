@@ -15,6 +15,9 @@ struct ArchEntry;
 // treat it as a copyable value.
 using ArchHandle = const ArchEntry*;
 
+// Largest cu_count a Device may carry; far above any GPU's.
+inline constexpr int MAX_CU_COUNT = 1024;
+
 // Target device for selecting and launching a layer.
 //
 // Every function that takes a Device reads the device's properties from it, so a caller can

@@ -13,12 +13,14 @@
 # A test that is in library/tests but in no list here does not run in CI.
 #
 # A pytest entry starts its command with ${_ROCKE_INSTALLED_PYTEST}, which
-# platform/CMakeLists.txt defines. The explicit gates do not.
+# platform/CMakeLists.txt defines. The explicit gates do not. The configure
+# fails for any other pytest entry that does not.
 
-# Oracle-free uniform-probability launches of the shipped dense kernels. Only
-# the GPU module runs here; its CPU contracts run in the attention CPU lane.
+# Oracle-free launches of the shipped dense kernels: the uniform-probability
+# gate and the key-permutation relation. Only the GPU modules run here; their
+# CPU contracts run in the attention CPU lane.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_oracle_free_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_analytical_dense.py\" -v -rs)\n")
+       "add_test(rocke_oracle_free_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_analytical_dense.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_permutation_dense.py\" -v -rs)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_oracle_free_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;gpu\\;quick\"\n"
@@ -53,6 +55,8 @@ set(_ROCKE_LIBRARY_CONV_TEST_RELPATHS
     "tests/library/tests/test_direct_dgrad_wmma.py"
     "tests/library/tests/test_direct_dgrad_pp_mfma.py"
     "tests/library/tests/test_direct_fwd_wmma.py"
+    "tests/library/tests/test_direct_fwd_pp_mfma.py"
+    "tests/library/tests/test_direct_fwd_flex_mfma.py"
     "tests/library/tests/test_conv_fwd_split_k.py"
     "tests/library/tests/test_conv_winograd_fwd_cpu.py"
     "tests/library/tests/test_conv_winograd_fwd_rt_cpu.py"
@@ -102,7 +106,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # per-test pytest-timeout and its cumulative CTest TIMEOUT, the dgrad twin above gets
 # the same shared budget only because its own sample is smaller.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_library_conv_fwd_aot_packaging_pytest python -m pytest "
+       "add_test(rocke_library_conv_fwd_aot_packaging_pytest ${_ROCKE_INSTALLED_PYTEST} "
        "\"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_convolution_forward_aot_packaging.py\" "
        "-v -rs --timeout=600)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
@@ -204,17 +208,19 @@ else()
 endif()
 
 # Library attention CPU tests (no GPU required): gfx950 LDS budget model,
-# dense block-order decodes, spec-wrapper parity gate, the 3D decode split rule
-# and K/V cache policy, the scalar fallback's cache key and block-table
-# stride kernarg, the unified attention running-max carry and keyless
+# dense block-order decodes, the dense paged launch checks, spec-wrapper
+# parity gate, the 3D decode split rule and K/V cache policy, the scalar
+# fallback's cache key and block-table stride kernarg, the unified attention running-max carry and keyless
 # guards on the emitted IR, the tiled 2D LSE store on the emitted IR, the
+# gfx950 tiled-2D K reads from LDS on the emitted IR, the
 # gfx942 cfvst V loader's i64 K/V addressing on the emitted IR, the
 # LDS alignment claims of the backward kernel with the slices dK / dV sink, the
 # backward/gfx1250 MMA accumulator-input versus result-role regressions, the
 # gfx1250 3D kernel's paged reads staying bounded to the sequence's last page, the
 # host-side SDPA sequence-length and padding-mask adapters/specs, the
 # fmha_mfma free-stride ABI and layout contracts, the 2D/3D mask_type spec
-# fields, the 3D segment+reduce module's pairing, the reduce's LDS segment
+# fields, the gfx942 2D head counts and batch being IR-neutral at a fixed GQA
+# ratio, the 3D segment+reduce module's pairing, the reduce's LDS segment
 # bound against the compiled code object, the tiled C++ entries' head-count
 # and arch refusals, the dense segment-combine launch ABI, the drift guard
 # that pins the shared dense spec's C++ mirror to the Python, the
@@ -233,6 +239,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_dense_decode.py"
     "tests/library/tests/test_attention_dense_gfx942_golden.py"
     "tests/library/tests/test_attention_dense_gfx950_lds.py"
+    "tests/library/tests/test_attention_dense_paged_launch.py"
     "tests/library/tests/test_attention_dense_gfx950_varlen_kv_bound.py"
     "tests/library/tests/test_attention_dense_spec_vectors.py"
     "tests/library/tests/test_attention_dense_gfx942_golden.py"
@@ -241,6 +248,8 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_scalar_cache_key.py"
     "tests/library/tests/test_attention_spec_predicate_parity.py"
     "tests/library/tests/test_attention_tiled_2d_mask_type.py"
+    "tests/library/tests/test_attention_tiled_2d_head_counts_gfx942.py"
+    "tests/library/tests/test_attn_tiled_2d_gfx950_k_lds_read.py"
     "tests/library/tests/test_attention_tiled_3d_decode_split.py"
     "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
     "tests/library/tests/test_attention_tiled_launch_signature.py"
@@ -260,7 +269,17 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_fmha_mfma_free_stride.py"
     "tests/library/tests/test_sdpa_free_stride_layouts.py"
     "tests/library/tests/test_bwd_memo_bound.py"
-    "tests/library/tests/oracle_free/test_contracts.py")
+    "tests/library/tests/oracle_free/test_contracts.py"
+    "tests/library/tests/oracle_free/test_permutation_contracts.py"
+    "tests/library/tests/test_attention_dense_gfx942.py"
+    "tests/library/tests/test_attention_combo_sweep_fp8.py"
+    "tests/library/tests/test_dense_prefill_emit_shapes.py"
+    "tests/library/tests/dispatch/attention/test_review_followups.py"
+    # One node id, not the file: the rest of test_attention_builds.py
+    # disassembles HSACO, so it needs the compiler tools this lane does not
+    # inject, and its budget sentinel turns a missing-tool skip into a
+    # failure. This test is pure host-side signature/params mirroring.
+    "tests/library/tests/test_attention_builds.py::TestAttentionHelpers::test_gfx950_signature_matches_the_built_kernels_params")
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
 foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
   string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS
@@ -312,6 +331,12 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # discovery. The structural gate is host-only; the compiler gate additionally
 # requires the reference COMGR/LLVM toolchain and llvm-objdump. They share a
 # lock to cap aggregate host memory and compiler pressure in parallel runs.
+# The gate conftest stops a partial run, so the gates run whole on every CI shard
+# and must not load the shard plugin. platform/CMakeLists.txt reads this list
+# when it checks the installed pytest entries.
+set(_ROCKE_EXPLICIT_PYTEST_GATES
+    rocke_library_counted_structural_gate
+    rocke_library_counted_compiler_gate)
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_counted_structural_gate python -m pytest -p pytest_timeout \"${ROCKE_TEST_CTEST_REL}tests/library/tests/gates/attention_bwd_counted_structural_gate.py\" -v -rs --timeout=60)\n"
        "set_tests_properties(rocke_library_counted_structural_gate PROPERTIES\n"
@@ -515,6 +540,7 @@ endif()
 # install tree.
 set(_ROCKE_LIBRARY_ATTENTION_GPU_TEST_RELPATHS
     "tests/library/tests/test_attention_dense_gfx950_numeric.py"
+    "tests/library/tests/test_attn_tiled_2d_gfx950_fp8_k_lds_numeric.py"
     "tests/library/tests/test_extended_parity_attention.py")
 set(_ROCKE_LIBRARY_ATTENTION_GPU_TESTS "")
 foreach(_rocke_attn_gpu_test ${_ROCKE_LIBRARY_ATTENTION_GPU_TEST_RELPATHS})

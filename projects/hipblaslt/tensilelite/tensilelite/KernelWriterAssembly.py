@@ -75,7 +75,7 @@ from .ir import BranchInstruction, BufferLoadB128, BufferLoadB32, \
 
 from .Component import Component, TensorDataMover, GL2Prefetch
 from .Components.TensorDataMover import TensorDataMoverLoad
-from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxIssueTpList, mxLdsKStride, mxTdmTile0, mxTdmTileM, \
+from .Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxIssueTpList, mxLdsKStride, mxReadVectorWidth, mxTdmTile0, mxTdmTileM, \
   mxLraFreeShift, mxSegmentSplit
 from .Components.LraTileAssignment import mx2dFreeOffset
 from .Components.GL2Prefetch import GL2PrefetchLoad
@@ -111,6 +111,7 @@ from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, D
 from .Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal, tdmCacheModifiers
 from .Common.DataType import DataType
 from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar
+from .Common.LdsReadPlan import fp32_lds_read_bytes, validate_gfx1250_fp32_lds_read_width
 from .Common.MatrixInstructionNaming import dataTypeNameAbbrevToInstType, matrixInstructionTypes
 from .Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
 from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk, \
@@ -213,7 +214,7 @@ def _fp8D16UsesHighWord(isCvtHighBits, inTailLoop, tailPacksPairs):
 
 from math import ceil, floor, log, prod
 from contextlib import contextmanager
-from copy import deepcopy
+from copy import copy as shallowCopy, deepcopy
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import List, Mapping, NamedTuple, Optional, Tuple, Union
@@ -339,17 +340,33 @@ class KernelWriterAssembly(KernelWriter):
     return self.states.regCaps["PhysicalMaxSgpr"]//sgprs
 
   def getVgprOccupancy(self, numThreads, vgprs, doubleVgpr=False):
-    multiplier = int(ceil(max(numThreads, 256) / 256.0)) # example: wg=512 multiplier=2, 1024=4
-    maxOccupancy = self.states.archCaps["MaxWavesPerSimd"]//multiplier
+    version = tuple(self.states.version[:2])
+    # TODO: gfx10, gfx117x and gfx1250 keep the legacy model until their occupancy is validated.
+    legacyModel = version[0] == 10 or version in ((11, 7), (12, 5))
+    if legacyModel or version[0] == 12:
+      # TODO: gfx12 keeps the legacy wave64-based (256) divisor for historic reasons; it should
+      # use the wave-size-aware divisor below (wavefront * 4 SIMDs = 128 for wave32) once gfx12
+      # occupancy has been benchmarked.
+      wavesPerSimdPerWorkgroup = int(ceil(max(numThreads, 256) / 256.0))
+    else:
+      # A workgroup's waves spread over the 4 SIMDs of a CU (CDNA) / WGP (RDNA).
+      wavesPerSimdPerWorkgroup = int(ceil(numThreads / float(self.states.kernel["WavefrontSize"] * 4)))
+    maxWorkgroups = self.states.archCaps["MaxWavesPerSimd"]//wavesPerSimdPerWorkgroup
 
-    vgprAllocateAligned = 4    if not doubleVgpr else 8
-    totalVgprs = self.states.regCaps["MaxVgpr"] if not doubleVgpr else self.states.regCaps["MaxVgpr"]*2
+    if legacyModel:
+      totalVgprs = self.states.regCaps["MaxVgpr"] if not doubleVgpr else self.states.regCaps["MaxVgpr"]*2
+      vgprAllocateAligned = 4 if not doubleVgpr else 8
+    else:
+      # doubleVgpr is set for ArchAccUnifiedRegs or wave32; only wave64 halves the file.
+      totalVgprs = self.states.regCaps["PhysicalMaxVgpr"] if doubleVgpr else self.states.regCaps["PhysicalMaxVgpr"]//2
+      # The per-SIMD VGPR file splits into 64 allocation blocks.
+      vgprAllocateAligned = totalVgprs // 64
     vgprsAligned = int(ceil(vgprs/vgprAllocateAligned))*vgprAllocateAligned
-    vgprsAligned *= multiplier
+    vgprsAligned *= wavesPerSimdPerWorkgroup
 
     if   vgprsAligned > totalVgprs:  return 0
-    elif vgprsAligned < 1:           return maxOccupancy
-    occupancy = min(totalVgprs//vgprsAligned, maxOccupancy)
+    elif vgprsAligned < 1:           return maxWorkgroups
+    occupancy = min(totalVgprs//vgprsAligned, maxWorkgroups)
 
     #print("vgprs = ", vgprs, "vgprsAligned = ", vgprsAligned, "unifiedVgprRegs = " ,unifiedVgprRegs, "Occupancy = ", occupancy)
 
@@ -980,7 +997,8 @@ class KernelWriterAssembly(KernelWriter):
         localReadWidth = (self.states.lrvwUnrollB * tP["bpeDS"]) / bpr
       elif tChar == "MXSA":
         if self.states.asmCaps["HasWMMA_V3"] and kernel["MXScaleFormat"] == "InMemorySwizzle":
-          localReadWidth = (self.states.lrvwUnrollMXSA * kernel["VectorWidthA"] * tP["bpeDS"]) / bpr
+          vectorWidth = mxReadVectorWidth(kernel, tChar) if kernel.get("WaveTileContiguousA") else kernel["VectorWidthA"]
+          localReadWidth = (self.states.lrvwUnrollMXSA * vectorWidth * tP["bpeDS"]) / bpr
         else:
           localReadWidth = (self.states.lrvwUnrollMXSA * tP["bpeDS"]) / bpr
       elif tChar == "MXSB":
@@ -1040,6 +1058,18 @@ class KernelWriterAssembly(KernelWriter):
     tP["localRead2Perpendicular"]  = localRead2Perpendicular
     tP["localReadStrideCoalesced"] = localReadStrideCoalesced
     tP["localReadInstruction"]     = instructions[lrInstPoolName][localReadInstructionIdx]
+
+    if (tChar in ("A", "B") and self.states.asmCaps["HasWMMA_V3"]
+        and tP["bpeDS"] == 4 and kernel.get("enableTDM%s" % tChar, False)
+        and not kernel["UnrollMajorLDS%s" % tChar]):
+      lrvwTile = getattr(self.states, "lrvwTile%s" % tChar)
+      if kernel["LdsPad%s" % tChar] != 0:
+        validate_gfx1250_fp32_lds_read_width(lrvwTile, kernel["UseF32XEmulation"])
+      readBytes = fp32_lds_read_bytes(lrvwTile)
+      actual = tP["localReadInstruction"]
+      if (actual.inst.__name__ != f"DSLoadB{readBytes * 8}"
+          or actual.blockWidth * bpr != readBytes or actual.numOffsets != 1):
+        raise RuntimeError(f"FP32 LDS padding/read instruction mismatch for {tChar}")
 
   def _reportTmpSgprOverflow(self, num, tag):
     """A temporary allocation past MaxSgpr is an SGPR overflow; say so as the defined-SGPR check does."""
@@ -3417,6 +3447,165 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(SSetRegIMM32B32(HWRegContainer(reg="26", value=[bitPos, 1]), src=1, comment="Disable WMMA arb stall"))
     return mod
 
+  def groupedGemmWaveSearchSupported(self, kernel) -> bool:
+    """
+    The wave search computes tile counts with shifts and replaces the linear
+    search loop, so it needs power-of-two macro tiles and no per-gemm GSU code
+    in that loop (GSUOn.defineAndResources). Limited to gfx942 and gfx950, the
+    targets it has been validated on.
+    """
+    mt0, mt1 = kernel["MacroTile0"], kernel["MacroTile1"]
+    gsuOn = kernel["GlobalSplitU"] > 0 or kernel["GlobalSplitU"] == -1
+    gsuPerGemmCode = gsuOn and (kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"
+                                or kernel["AdaptiveGemmGSUA"] == 1)
+    return self.states.version in [(9,4,2), (9,5,0)] \
+      and kernel["WavefrontSize"] == 64 \
+      and mt0 & (mt0 - 1) == 0 and mt1 & (mt1 - 1) == 0 \
+      and not gsuPerGemmCode
+
+  def groupedGemmWaveSearchChunks(self, kernel, maxChunksPerLoad=6) -> int:
+    """
+    Chunks of 64 gemm headers to load per round trip: the largest count whose
+    4 header VGPRs per chunk and 5 scratch VGPRs fit without lowering the
+    kernel's occupancy, or 0 if not even one chunk fits.
+    """
+    vgprBudget, _ = self.getMaxRegsForOccupancy(kernel["NumThreads"], self.vgprPool.size(), self.sgprPool.size(),
+                                                self.getLdsSize(kernel), self.agprPool.size(), self.states.doubleVgpr)
+    return next((u for u in range(maxChunksPerLoad, 0, -1)
+                 if self.vgprPool.availableBlockMaxVgpr(vgprBudget, 4 * u + 5, 4) >= 4 * u + 5), 0)
+
+  def groupedGemmWaveSearch(self, kernel, sgprNumsOfGemm, tmpSgpr, tmpSgprM, sgprChunk, sgprStride, labelFound,
+                            U) -> Module:
+    """
+    Find the gemm that owns WorkGroup0, 64 gemms per chunk: each lane loads the
+    (M, N, B, K) header of one gemm, the wave prefix-sums the tile counts and
+    v_cmp + ff1 picks the first gemm whose inclusive tile prefix exceeds
+    WorkGroup0. The headers of U chunks (groupedGemmWaveSearchChunks) are
+    loaded per memory round trip. Leaves the same state at labelFound as the
+    linear search:
+    SizesFree/SizesSum = header, NumWG0 = tiles, AccumTiles = inclusive
+    prefix, LoopCounter (sgprChunk) = gemm index + 1. Workgroups past the last
+    tile resolve to the last gemm, as in the linear search.
+    """
+    module = Module("GroupedGemm wave search")
+    sgprBase  = tmpSgpr.idx
+    sgprCmp   = tmpSgpr.idx + 2
+    sgprScr   = tmpSgpr.idx + 4
+    sgprLane  = tmpSgpr.idx + 5
+    sgprAddrM = tmpSgpr.idx + 6
+    sgprAccum = tmpSgpr.idx + 7
+    sgprNumWG0 = sgprScr
+    rowEnds = [tmpSgprM + i for i in range(4)]
+
+    vHdr = self.vgprPool.checkOutAligned(4 * U + 5, 4, tag="ggWaveSearch")
+    vLane, vOff, vTiles, vPre, vRow = [vHdr + 4 * U + i for i in range(5)]
+
+    labelLoop      = Label("GG_WaveSearch_Loop", "")
+    labelLoadsDone = Label("GG_WaveSearch_LoadsDone", "")
+    labelHit    = [Label("GG_WaveSearch_Hit%u" % u, "") for u in range(U)]
+    labelLast   = [Label("GG_WaveSearch_Last%u" % u, "") for u in range(U)]
+    labelSelect = [Label("GG_WaveSearch_Select%u" % u, "") for u in range(U)]
+
+    def gemmIndex(u):
+      module.add(VAddU32(dst=vgpr(vOff), src0=sgpr(sgprChunk), src1=vgpr(vLane), comment="gemm index"))
+      if u:
+        module.add(VAddU32(dst=vgpr(vOff), src0=64 * u, src1=vgpr(vOff)))
+      module.add(VCmpGtU32(dst=sgpr(sgprCmp, 2), src0=sgpr(sgprNumsOfGemm), src1=vgpr(vOff), comment="index < gemm count"))
+
+    module.addComment1("Grouped Gemm:: wave-parallel search, 64 gemms per chunk, %u chunks per load" % U)
+    module.add(SWaitCnt(kmcnt=0))
+    module.add(VAndB32(dst=vgpr(vLane), src0=63, src1=vgpr("Serial"), comment="lane id"))
+    module.add(SMovB32(dst=sgpr(sgprChunk), src=0, comment="first gemm of the load"))
+    module.add(SMovB32(dst=sgpr(sgprAccum), src=0, comment="tiles before the chunk"))
+    module.add(labelLoop)
+    for u in range(U):
+      if u:
+        module.add(SAddU32(dst=sgpr(sgprScr), src0=sgpr(sgprChunk), src1=64 * u))
+        module.add(SCmpGeU32(src0=sgpr(sgprScr), src1=sgpr(sgprNumsOfGemm), comment="chunk %u past the last gemm?" % u))
+        module.add(SCBranchSCC1(labelName=labelLoadsDone.getLabelName()))
+      gemmIndex(u)
+      module.add(VCndMaskB32(dst=vgpr(vOff), src0=0, src1=vgpr(vOff), src2=sgpr(sgprCmp, 2), comment="out-of-range lanes read gemm 0"))
+      module.add(VMulLOU32(dst=vgpr(vOff), src0=vgpr(vOff), src1=sgpr(sgprStride), comment="gemm index * arg stride"))
+      module.add(VAddU32(dst=vgpr(vOff), src0=sgpr(sgprAddrM), src1=vgpr(vOff), comment="+ offset of the first gemm"))
+      module.add(GlobalLoadB128(dst=vgpr(vHdr + 4 * u, 4), vaddr=vgpr(vOff), saddr=sgpr(sgprBase, 2),
+                                modifier=GLOBALModifiers(offset=0), comment="chunk %u: load M, N, B, K" % u))
+    module.add(labelLoadsDone)
+    module.add(SWaitCnt(vlcnt=0))
+
+    for u in range(U):
+      hdr = vHdr + 4 * u
+      module.addComment0("chunk %u" % u)
+      gemmIndex(u)
+      # Divide before rounding up: adding MT - 1 to a uint32 dimension can wrap.
+      for dst, remainder, size, tile in ((vTiles, vRow, hdr, kernel["MacroTile0"]),
+                                         (vRow, vOff, hdr + 1, kernel["MacroTile1"])):
+        module.add(VLShiftRightB32(dst=vgpr(dst), shiftHex=log2(tile), src=vgpr(size)))
+        module.add(VAndB32(dst=vgpr(remainder), src0=tile - 1, src1=vgpr(size)))
+        module.add(VCmpLtU32(dst=VCC(), src0=0, src1=vgpr(remainder)))
+        module.add(VAddCCOU32(dst=vgpr(dst), dst1=VCC(), src0=vgpr(dst), src1=0, src2=VCC(), comment="ceil(size / MT)"))
+      module.add(VMulLOU32(dst=vgpr(vTiles), src0=vgpr(vTiles), src1=vgpr(vRow)))
+      module.add(VMulLOU32(dst=vgpr(vTiles), src0=vgpr(vTiles), src1=vgpr(hdr + 2), comment="* batch"))
+      if kernel["GlobalSplitU"] != 0:
+        module.add(SAndB32(dst=sgpr(sgprScr), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
+        module.add(VMulLOU32(dst=vgpr(vTiles), src0=vgpr(vTiles), src1=sgpr(sgprScr), comment="* GSU"))
+      module.add(VCndMaskB32(dst=vgpr(vTiles), src0=0, src1=vgpr(vTiles), src2=sgpr(sgprCmp, 2), comment="out-of-range lanes own no tiles"))
+
+      module.addComment0("inclusive scan within each row of 16 lanes")
+      module.add(VMovB32(dst=vgpr(vPre), src=vgpr(vTiles)))
+      for shift in (1, 2, 4, 8):
+        module.add(VMovB32(dst=vgpr(vRow), src=0))
+        module.add(SNop(waitState=1, comment="VALU write -> DPP read"))
+        module.add(VMovB32(dst=vgpr(vRow), src=vgpr(vPre), dpp=DPPModifiers(row_shr=shift, bound_ctrl=0)))
+        module.add(VAddU32(dst=vgpr(vPre), src0=vgpr(vPre), src1=vgpr(vRow)))
+      module.add(SNop(waitState=1))
+      for row, sgprRowEnd in enumerate(rowEnds):
+        module.add(VReadlaneB32(dst=sgpr(sgprRowEnd), src0=vgpr(vPre), src1=16 * row + 15, comment="row %u total" % row))
+      module.add(SNop(waitState=4))
+      module.add(SAddU32(dst=sgpr(rowEnds[0]), src0=sgpr(rowEnds[0]), src1=sgpr(sgprAccum)))
+      for row in range(1, 4):
+        module.add(SAddU32(dst=sgpr(rowEnds[row]), src0=sgpr(rowEnds[row]), src1=sgpr(rowEnds[row - 1]), comment="tiles through row %u" % row))
+      module.add(VMovB32(dst=vgpr(vOff), src=sgpr(sgprAccum), comment="tiles before this lane's row"))
+      for row in range(1, 4):
+        module.add(VMovB32(dst=vgpr(vRow), src=sgpr(rowEnds[row - 1])))
+        module.add(VCmpLtU32(dst=sgpr(sgprCmp, 2), src0=16 * row - 1, src1=vgpr(vLane)))
+        module.add(VCndMaskB32(dst=vgpr(vOff), src0=vgpr(vOff), src1=vgpr(vRow), src2=sgpr(sgprCmp, 2)))
+      module.add(VAddU32(dst=vgpr(vPre), src0=vgpr(vPre), src1=vgpr(vOff), comment="inclusive tile prefix"))
+
+      module.add(VCmpLtU32(dst=sgpr(sgprCmp, 2), src0=sgpr("WorkGroup0"), src1=vgpr(vPre), comment="wg < prefix"))
+      module.add(SOrB32(dst=sgpr(sgprScr), src0=sgpr(sgprCmp), src1=sgpr(sgprCmp + 1)))
+      module.add(SCBranchSCC1(labelName=labelHit[u].getLabelName()))
+      module.add(SMovB32(dst=sgpr(sgprAccum), src=sgpr(rowEnds[3])))
+      module.add(SAddU32(dst=sgpr(sgprScr), src0=sgpr(sgprChunk), src1=64 * (u + 1)))
+      module.add(SCmpGeU32(src0=sgpr(sgprScr), src1=sgpr(sgprNumsOfGemm), comment="last chunk?"))
+      module.add(SCBranchSCC1(labelName=labelLast[u].getLabelName()))
+    module.add(SAddU32(dst=sgpr(sgprChunk), src0=sgpr(sgprChunk), src1=64 * U))
+    module.add(SBranch(labelName=labelLoop.getLabelName()))
+
+    for u in range(U):
+      hdr = vHdr + 4 * u
+      module.add(labelLast[u])
+      module.add(SSubU32(dst=sgpr(sgprLane), src0=sgpr(sgprNumsOfGemm), src1=1 + 64 * u))
+      module.add(SSubU32(dst=sgpr(sgprLane), src0=sgpr(sgprLane), src1=sgpr(sgprChunk), comment="past the last tile: last gemm"))
+      module.add(SBranch(labelName=labelSelect[u].getLabelName()))
+      module.add(labelHit[u])
+      module.add(SFf1B32(dst=sgpr(sgprScr), src=sgpr(sgprCmp + 1), comment="ff1(cmp_hi)"))
+      module.add(SAddU32(dst=sgpr(sgprScr), src0=sgpr(sgprScr), src1=32))
+      module.add(SFf1B32(dst=sgpr(sgprLane), src=sgpr(sgprCmp), comment="ff1(cmp_lo)"))
+      module.add(SCmpEQI32(src0=sgpr(sgprLane), src1=-1))
+      module.add(SCSelectB32(dst=sgpr(sgprLane), src0=sgpr(sgprScr), src1=sgpr(sgprLane)))
+      module.add(labelSelect[u])
+      for i in range(4):
+        module.add(VReadlaneB32(dst=sgpr(tmpSgprM + i), src0=vgpr(hdr + i), src1=sgpr(sgprLane)))
+      module.add(VReadlaneB32(dst=sgpr(sgprNumWG0), src0=vgpr(vTiles), src1=sgpr(sgprLane), comment="tiles of the gemm"))
+      module.add(VReadlaneB32(dst=sgpr(sgprAccum), src0=vgpr(vPre), src1=sgpr(sgprLane), comment="inclusive tile prefix"))
+      module.add(SAddU32(dst=sgpr(sgprChunk), src0=sgpr(sgprChunk), src1=sgpr(sgprLane)))
+      module.add(SAddU32(dst=sgpr(sgprChunk), src0=sgpr(sgprChunk), src1=1 + 64 * u, comment="gemm index + 1"))
+      module.add(SNop(waitState=4))
+      module.add(SBranch(labelName=labelFound.getLabelName()))
+
+    self.vgprPool.checkIn(vHdr)
+    return module
+
   def defineAndResources(self, kernel, tPA, tPB, tPM):
     module = Module("allocateResources")
     module.add(self.macroAndSet(kernel, tPA, tPB))
@@ -3956,47 +4145,58 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SMulI32(dst=sgpr(tmpSgprAddrM), src0=sgpr(sgprNumsOfGemm), src1=4)) # offset wgTable
           module.add(SMovB64(dst=sgpr(tmpSgprArgAddress0,2), src=sgpr("KernArgAddress",2)))
 
+        label_FOUND = Label("FOUND", "")
+        gsuComponent = Component.GSU.find(self)
+        gsuModule = gsuComponent.defineAndResources(self, kernel, tmpSgpr0, tmpSgprM, tmpSgprN, tmpSgprNumWG0, tmpSgprAccumTiles)
+        waveSearchChunks = self.groupedGemmWaveSearchChunks(kernel) if self.groupedGemmWaveSearchSupported(kernel) else 0
+        if waveSearchChunks:
+          label_oneGemm = Label("GG_WaveSearch_OneGemm", "")
+          module.add(self.getSCMPKInstruction("EQU32", sgprNumsOfGemm, 1, comment="if gemm_count is 1?"))
+          module.add(SCBranchSCC1(labelName=label_oneGemm.getLabelName(), comment="one gemm: the scalar path below"))
+          module.add(self.groupedGemmWaveSearch(kernel, sgprNumsOfGemm, tmpSgpr, tmpSgprM, tmpSgprLoopCounter, tmpSgprArgOffsett, label_FOUND,
+                                                waveSearchChunks))
+          module.add(label_oneGemm)
+
         # prefetch 1 arg load
         module.addComment1("Grouped Gemm:: prefetch 1 arg load")
         module.add(SMovB32(dst=sgpr(tmpSgprLoopCounter), src=1))
         module.add(SMovB32(dst=sgpr(tmpSgprAccumTiles), src=0))
         module.add(self.argLoader.loadKernArg(tmpSgprM, tmpSgprArgAddress0, sgpr(tmpSgprAddrM), dword=4))
-        #module.add(SCmpKEQU32(src=sgpr(sgprNumsOfGemm), simm16=1, comment="if gemm_count is 1?"))
-        module.add(self.getSCMPKInstruction("EQU32", sgprNumsOfGemm, 1, comment="if gemm_count is 1?"))
         label_noLoadLoop = Label("wgTable_noLoadLoop", "")
-        module.add(SCBranchSCC1(labelName=label_noLoadLoop.getLabelName()))
+        if not waveSearchChunks:
+          #module.add(SCmpKEQU32(src=sgpr(sgprNumsOfGemm), simm16=1, comment="if gemm_count is 1?"))
+          module.add(self.getSCMPKInstruction("EQU32", sgprNumsOfGemm, 1, comment="if gemm_count is 1?"))
+          module.add(SCBranchSCC1(labelName=label_noLoadLoop.getLabelName()))
 
-        # Start to search
-        module.addComment1("Grouped Gemm:: accumulate numTiles for each gemm")
-        module.addComment0("Grouped Gemm:: loop start")
-        label_Loop_gemm_count = Label(self.rapLabel("Loop_GemmCount"), "")
-        module.add(label_Loop_gemm_count)
-        module.add(SWaitCnt(kmcnt=0))
-        # calculate numTiles
-        regStateRes = ContinuousRegister(idx=tmpSgpr0, size=2)
-        module.add(scalarStaticCeilDivide(qReg=sgpr(tmpSgprNumWG0), dReg=sgpr(tmpSgprM), divisor=kernel["MacroTile0"], tmpSgprRes=regStateRes))
-        module.add(scalarStaticCeilDivide(qReg=sgpr(tmpSgprNumWG1), dReg=sgpr(tmpSgprN), divisor=kernel["MacroTile1"], tmpSgprRes=regStateRes))
-        # accumulate tiles of each gemm
-        module.add(SMulI32(dst=sgpr(tmpSgprNumWG0), src0=sgpr(tmpSgprNumWG0), src1=sgpr(tmpSgprNumWG1)))
-        module.add(SMulI32(dst=sgpr(tmpSgprNumWG0), src0=sgpr(tmpSgprNumWG0), src1=sgpr(tmpSgprB)))
-        if kernel["GlobalSplitU"] != 0:
-          module.add(SAndB32(dst=sgpr(tmpSgprNumWG1), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
+          # Start to search
+          module.addComment1("Grouped Gemm:: accumulate numTiles for each gemm")
+          module.addComment0("Grouped Gemm:: loop start")
+          label_Loop_gemm_count = Label(self.rapLabel("Loop_GemmCount"), "")
+          module.add(label_Loop_gemm_count)
+          module.add(SWaitCnt(kmcnt=0))
+          # calculate numTiles
+          regStateRes = ContinuousRegister(idx=tmpSgpr0, size=2)
+          module.add(scalarStaticCeilDivide(qReg=sgpr(tmpSgprNumWG0), dReg=sgpr(tmpSgprM), divisor=kernel["MacroTile0"], tmpSgprRes=regStateRes))
+          module.add(scalarStaticCeilDivide(qReg=sgpr(tmpSgprNumWG1), dReg=sgpr(tmpSgprN), divisor=kernel["MacroTile1"], tmpSgprRes=regStateRes))
+          # accumulate tiles of each gemm
           module.add(SMulI32(dst=sgpr(tmpSgprNumWG0), src0=sgpr(tmpSgprNumWG0), src1=sgpr(tmpSgprNumWG1)))
-        module.add(SAddU32(dst=sgpr(tmpSgprAccumTiles), src0=sgpr(tmpSgprAccumTiles), src1=sgpr(tmpSgprNumWG0)))
-        # check wgIndex >= AccumTiles?
-        module.add(SCmpLtU32(src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgprAccumTiles)))
-        label_FOUND = Label("FOUND", "")
-        module.add(SCBranchSCC1(labelName=label_FOUND.getLabelName()))
+          module.add(SMulI32(dst=sgpr(tmpSgprNumWG0), src0=sgpr(tmpSgprNumWG0), src1=sgpr(tmpSgprB)))
+          if kernel["GlobalSplitU"] != 0:
+            module.add(SAndB32(dst=sgpr(tmpSgprNumWG1), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
+            module.add(SMulI32(dst=sgpr(tmpSgprNumWG0), src0=sgpr(tmpSgprNumWG0), src1=sgpr(tmpSgprNumWG1)))
+          module.add(SAddU32(dst=sgpr(tmpSgprAccumTiles), src0=sgpr(tmpSgprAccumTiles), src1=sgpr(tmpSgprNumWG0)))
+          # check wgIndex >= AccumTiles?
+          module.add(SCmpLtU32(src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgprAccumTiles)))
+          module.add(SCBranchSCC1(labelName=label_FOUND.getLabelName()))
 
-        gsuComponent = Component.GSU.find(self)
-        module.add(gsuComponent.defineAndResources(self, kernel, tmpSgpr0, tmpSgprM, tmpSgprN, tmpSgprNumWG0, tmpSgprAccumTiles))
+          module.add(gsuModule)
 
-        module.add(SAddU32(dst=sgpr(tmpSgprAddrM), src0=sgpr(tmpSgprAddrM), src1=sgpr(tmpSgprArgOffsett)))
-        module.add(self.argLoader.loadKernArg(tmpSgprM, tmpSgprArgAddress0, sgpr(tmpSgprAddrM), dword=4))
-        module.add(SAddU32(dst=sgpr(tmpSgprLoopCounter), src0=sgpr(tmpSgprLoopCounter), src1=1))
-        # loop gemm count
-        module.add(SCmpLtU32(src0=sgpr(tmpSgprLoopCounter), src1=sgpr(sgprNumsOfGemm)))
-        module.add(SCBranchSCC1(labelName=label_Loop_gemm_count.getLabelName()))
+          module.add(SAddU32(dst=sgpr(tmpSgprAddrM), src0=sgpr(tmpSgprAddrM), src1=sgpr(tmpSgprArgOffsett)))
+          module.add(self.argLoader.loadKernArg(tmpSgprM, tmpSgprArgAddress0, sgpr(tmpSgprAddrM), dword=4))
+          module.add(SAddU32(dst=sgpr(tmpSgprLoopCounter), src0=sgpr(tmpSgprLoopCounter), src1=1))
+          # loop gemm count
+          module.add(SCmpLtU32(src0=sgpr(tmpSgprLoopCounter), src1=sgpr(sgprNumsOfGemm)))
+          module.add(SCBranchSCC1(labelName=label_Loop_gemm_count.getLabelName()))
 
         # noLoadLoop
         module.addComment1("Grouped Gemm:: noLoadLoop")
@@ -5976,7 +6176,7 @@ class KernelWriterAssembly(KernelWriter):
   # K_pad = 1 for A/B, 256 for MX scale (matches host rearrangePaddedMXScaleLayout).
   # Precondition: upstream Srd+2 is computeLoadSrd's tile-boundary limit
   # (useFixedSrd2 + non-isConstUnitStride); PGR/mainloop GR_INC only touch Srd+0/+1.
-  # tPs must share kPad and bpe_K_byteStride (delta emitted once, reused).
+  # tPs must share kPad (delta_K emitted once); bpe_K_byteStride may differ.
   ##############################################################################
   def computeTailLoopSrdLimit(self, kernel, tPs):
     module = Module("computeTailLoopSrdLimit")
@@ -5998,8 +6198,8 @@ class KernelWriterAssembly(KernelWriter):
     MX_PAD_K = 256
     depthU = int(kernel["DepthU"])
 
-    # Gather per-tc (kPad, bpeForLimit, kRowStride). kPad and bpeForLimit must
-    # agree across tPs, otherwise bail. kRowStride is None when K is the
+    # Gather per-tc (kPad, bpeForLimit, kRowStride). kPad must agree across
+    # tPs, otherwise bail. kRowStride is None when K is the
     # contiguous dimension and the unroll stride when it is not (TLU=1), where
     # the window set up in computeLoadSrd spans DepthU K rows.
     tcKpadBpeList = []
@@ -6038,11 +6238,13 @@ class KernelWriterAssembly(KernelWriter):
           kRowStride = self.strideRef(tc, kernel["ProblemType"]["IndexUnroll"])
       tcKpadBpeList.append((tc, kPad, bpeForLimit, kRowStride))
 
-    # Joint emission requires uniform kPad/bpe across all tPs (true for A/B
-    # symmetric configs and for MXSA/MXSB scale pairs in the gauntlet).
+    # Joint emission requires uniform kPad across all tPs (true for A/B and for
+    # MXSA/MXSB scale pairs). bpe may differ between A and B with mixed MX
+    # operands (e.g. MXFP4 x MXFP8); delta_K is shared and delta_bytes is
+    # computed per bpe.
     kPad = tcKpadBpeList[0][1]
     bpeForLimit = tcKpadBpeList[0][2]
-    if any(kp != kPad or bp != bpeForLimit for _, kp, bp, _ in tcKpadBpeList):
+    if any(kp != kPad for _, kp, _, _ in tcKpadBpeList):
       return module
     tcs = [t for t, _, _, _ in tcKpadBpeList]
     isMx = tcs[0] in ("MXSA", "MXSB")
@@ -6071,15 +6273,15 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SSubU32(dst=sgpr(stmp), src0=depthU, src1=sgpr(loopCounterName),
                            comment="delta_K = DepthU - K_rem"))
 
-      for tc, _, _, kRowStride in tcKpadBpeList:
+      for tc, _, bpe, kRowStride in tcKpadBpeList:
         # delta_bytes = delta_K [* K-row stride] * bpe (handles bpe=0.5 via SShr 1)
         if kRowStride is None:
-          module.add(scalarMultiplyBpe(sbytes, stmp, bpeForLimit,
+          module.add(scalarMultiplyBpe(sbytes, stmp, bpe,
                                        comment="delta_bytes"))
         else:
           module.add(SMulI32(dst=sgpr(sbytes), src0=sgpr(stmp), src1=kRowStride,
                              comment="delta_K rows * %s K-row stride" % tc))
-          module.add(scalarMultiplyBpe(sbytes, sbytes, bpeForLimit,
+          module.add(scalarMultiplyBpe(sbytes, sbytes, bpe,
                                        comment="delta_bytes"))
         module.add(SSubU32(dst=sgpr("Srd%s+2" % tc), src0=sgpr("Srd%s+2" % tc),
                            src1=sgpr(sbytes),
@@ -10445,8 +10647,21 @@ class KernelWriterAssembly(KernelWriter):
             # PGR=2 and EPS and no SuppressNoLoadLoop case, need to jump to EvenExit
             jumpLabel = Label(self.rapLabel("LoopEnd%s_evenexit%s%s"%(loopChar, strNta, strNtb)), "" )
 
-        module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
-                  comment="do not enter Loop%s"%loopChar ))
+        if self._needsLoopSkipPGRSync(kernel):
+          # The token planner walks the loop body linearly, so the first NGLL is
+          # planned as if entered from the loop exit. Skipping the loop enters it
+          # straight from the prologue, with the second prefetched tile still in
+          # flight: drain it and sync before the NGLL reads it.
+          continueLabel = Label(self.labels.getUniqueNamePrefix("AfterLoopSkipPGRSync"), "")
+          module.add(SCBranchSCC0(labelName=continueLabel.getLabelName(), \
+                    comment="enter Loop%s, skip loop-skip PGR synchronization"%loopChar))
+          module.add(self._wait(kernel, tPA, tPB, 0, -1, -1, "wait for prefetched PGR TDM loads"))
+          module.add(self._syncThreads(kernel, "loop-skip PGR bypass sync", skipForceWaitcnt0=True))
+          module.add(SBranch(labelName=jumpLabel.getLabelName(), comment="do not enter Loop%s"%loopChar))
+          module.add(continueLabel)
+        else:
+          module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
+                    comment="do not enter Loop%s"%loopChar ))
 
       # A one-trip loop has no preceding closeLoop.  Prefetch the next
       # persistent tile before entering its sole/final trip.
@@ -11282,6 +11497,11 @@ class KernelWriterAssembly(KernelWriter):
         self.argLoader.setOffset(argOffset) # Restore offset
         module.add(SBranch(extReadEpilogueLabelEnd.getLabelName()))
         module.add(extReadEpilogueLabel)
+        if kernel["ProblemType"]["OutputPeerD"]:
+          # The device user-args struct has no peer D. A zero distance keeps the peer store
+          # inside D (it repeats the D store) instead of using an unloaded register.
+          module.add(SMovB32(dst=sgpr("DeltaPeerD+0"), src=0, comment="no peer D with user args"))
+          module.add(SMovB32(dst=sgpr("DeltaPeerD+1"), src=0))
         extArgOffset = self.externalArgLoader.getOffset()
         backupExtArgOffset = extArgOffset
         loadList = [[-1, 0, extArgOffset]]
@@ -11448,6 +11668,14 @@ class KernelWriterAssembly(KernelWriter):
     if self.states.useGateResidual:
       self.defineSgpr("SrdGate", 4, 4)
       module.add(RegSet("s", "sgprSrdGate", self.sgprs["SrdGate"]))
+
+    if kernel["ProblemType"]["OutputPeerD"]:
+      # SrdPeerD is rebuilt from SrdD before each peer store: SrdPeerD = SrdD + DeltaPeerD,
+      # so it follows every SrdD update. DeltaPeerD (peer D - D, in bytes) is a store kernel
+      # argument, so the peer store does not depend on what AddressD holds: D's base for a
+      # strided batch, the pointer array for a pointer-array batch.
+      self.defineSgpr("SrdPeerD", 4, 4)
+      module.add(RegSet("s", "sgprSrdPeerD", self.sgprs["SrdPeerD"]))
 
     if kernel["ProblemType"]["UseE"]:
       self.defineSgpr("SrdE", 4, 4)
@@ -16596,7 +16824,27 @@ class KernelWriterAssembly(KernelWriter):
 
       with self.allocTmpSgpr(1, tag="localReadInc_tmpSgprInfo") as tmpSgprInfo:
         tmpSgpr = tmpSgprInfo.idx
-        module.add(SMovB32(dst=sgpr(tmpSgpr), src=int(inc + padd), comment="inc"))
+        scaleBlock = kernel["LdsBlockSizePerPad%s" % tc]
+        if tc in ("MXSA", "MXSB") and scaleBlock and kernel["LdsPad%s" % tc] and inc % scaleBlock:
+          # The tail body repeats at runtime; iui alone cannot track padding crossings.
+          innerUnroll = kernel["InnerUnroll"] if kernel["AssertSummationElementMultiple"] % (kernel["MatrixInstK"] * kernel["InnerUnroll"]) == 0 else 1
+          coalesced = max(self.states.numReadsIterCoalescedMXSA, self.states.numReadsIterCoalescedMXSB)
+          module.add(SLShiftRightB32(dst=sgpr(tmpSgpr), src=sgpr("OrigLoopCounter"),
+                                    shiftHex=log2(kernel["MatrixInstK"]), comment="completed scale K steps"))
+          module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=inc // coalesced,
+                             comment="raw scale K offset"))
+          if iui % innerUnroll:
+            module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=(iui % innerUnroll) * inc))
+          module.add(SAndB32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=scaleBlock - 1,
+                            comment="scale padding phase"))
+          module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=inc))
+          module.add(SLShiftRightB32(dst=sgpr(tmpSgpr), src=sgpr(tmpSgpr), shiftHex=log2(scaleBlock)))
+          module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr),
+                             src1=int(kernel["LdsPad%s" % tc] * tP["bpeDS"])))
+          module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=inc,
+                            comment="scale increment with crossed padding blocks"))
+        else:
+          module.add(SMovB32(dst=sgpr(tmpSgpr), src=int(inc + padd), comment="inc"))
         numLra = 0
         if tP["isA"]:
           numLra = self.states.a.numVgprLocalReadAddr
@@ -20055,6 +20303,81 @@ class KernelWriterAssembly(KernelWriter):
     vgprActCopy: int = -1
     calleeLabelsByGwvw: Optional[Mapping[int, Tuple[str, ...]]] = None
 
+  def pureGemmEpilogueTerms(self, kernel, gsuLimit, gsuBackup):
+    """Runtime tests that select the pure-gemm store pass, or None if the kernel has none.
+
+    The pass is a copy of the final (GSU1) store pass with bias, scaleAlphaVec and
+    activation compiled out and no beta variant. It is generated only with CompactLoopStore
+    (keeps the copy small). Beta alone is not worth a copy: the beta==0 tree is already it.
+    """
+    pt = kernel["ProblemType"]
+    if not kernel["CompactLoopStore"] or not (gsuLimit > 1 or gsuBackup == 1):
+      return None
+    if kernel.get("UseSubtileImpl") or self.states.subtileFusedFullTileStore:
+      return None
+    if self.states.useGateResidual or self.states.FactorDim == 3 or kernel["StoreRemapVectorWidth"]:
+      return None
+    if kernel["AdaptiveGemmGSUA"] or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
+      return None
+    if pt["Gradient"] or pt["UseE"] or pt["UseScaleAB"] or pt["UseScaleCD"] or pt["OutputAmaxD"] or pt["Sparse"]:
+      return None
+    # A fixed activation is always applied; only 'all' has a runtime "none".
+    activationType = pt["ActivationType"].value
+    if activationType not in ("none", "all", "hipblaslt_all"):
+      return None
+    # Device-scalar alpha reads alpha through the ScaleAlphaVec pointer.
+    if pt["UseScaleAlphaVec"] and scaleAlphaSupportsDeviceScalar(pt["UseScaleAlphaVec"]):
+      return None
+    terms = []
+    if self.states.useBias == DataDirection.READ:
+      terms.append("AddressBias")
+    if pt["UseScaleAlphaVec"]:
+      terms.append("AddressScaleAlphaVec")
+    if activationType != "none" and kernel["ActivationFused"]:
+      terms.append("ActivationType")
+    if not terms:
+      return None
+    if pt["UseBeta"]:
+      terms.insert(0, "Beta")
+    return terms
+
+  def pureGemmEpilogueFlag(self, kernel, terms, flagSgpr):
+    """Set sgpr *flagSgpr* to 1 when every term says "feature off", else 0.
+
+    Must be emitted while the pointers are still defined (the prelude undefines
+    AddressScaleAlphaVec), so persistent kernels hold the flag until the trees.
+    """
+    module = Module("PureGemmEpilogueFlag")
+    module.addComment1("Pure-gemm store pass: %s all off -> flag" % ", ".join(terms))
+    module.add(SMovB32(dst=sgpr(flagSgpr), src=1, comment="pure-gemm flag"))
+    for term in terms:
+      if term == "Beta":
+        if self.states.bpeCinternal <= self.states.bpr:
+          module.add(self.getSCMPKInstruction("EQU32", "Beta", 0, comment="Beta == 0 ?"))
+        else:
+          with self.allocTmpSgpr(1, tag="pureGemmBetaTmp") as tmpSgprInfo:
+            module.add(SMovB32(dst=sgpr(tmpSgprInfo.idx), src=sgpr("Beta+0"), comment="tmp = Beta[0]"))
+            for i in range(1, self.states.bpeCinternal // self.states.bpr):
+              module.add(SOrB32(dst=sgpr(tmpSgprInfo.idx), src0=sgpr("Beta+%u" % i), src1=sgpr(tmpSgprInfo.idx), comment="tmp |= Beta[%u]" % i))
+            module.add(self.getSCMPKInstruction("EQU32", tmpSgprInfo.idx, 0, comment="Beta == 0 ?"))
+      elif term == "ActivationType":
+        module.add(self.getSCMPKInstruction("EQU32", "ActivationType", 0, comment="activationType == none ?"))
+      else:
+        module.add(SCmpEQU64(src0=sgpr(term, 2), src1=0, comment="%s == 0 (null) ?" % term))
+      module.add(SCSelectB32(dst=sgpr(flagSgpr), src0=sgpr(flagSgpr), src1=0, comment="%s set -> not pure" % term))
+    return module
+
+  def pureGemmEpilogueBranch(self, flagSgpr, pureLabel):
+    """Branch to *pureLabel* when the flag is set, else fall through."""
+    module = Module("PureGemmEpilogueBranch")
+    notPure = Label(self.labels.getNameInc("GW_NotPure"), "")
+    module.add(SCmpEQU32(src0=sgpr(flagSgpr), src1=1, comment="pure-gemm flag == 1 ?"))
+    module.add(SCBranchSCC0(labelName=notPure.getLabelName(), comment="not pure -> full epilogue"))
+    with self.allocTmpSgpr(3, tag="pureGemmBranchTmp") as tmpSgprInfo:
+      module.add(SLongBranchPositive(pureLabel, tmpSgprInfo, comment="pure-gemm store pass"))
+    module.add(notPure)
+    return module
+
   def globalWriteElements(self, kernel, tPA, tPB, vectorWidths_2, vectorWidths_1, elements_2, elements_1,
                           noGSUBranch=False,
                           applyAlpha=True, # defaults to generating *=alpha codes
@@ -20154,8 +20477,18 @@ class KernelWriterAssembly(KernelWriter):
         else:
           module.add(SCBranchSCC1(labelName=gsuLabel.getLabelName(), comment="branch if GSU == 1"))
 
-    gsuLimitRange = range(0, gsuLimit) # generate GSU1 and GSUM label
-    for gsuLimitIdx in gsuLimitRange:
+    # Passes: GSU0 (if any), the full final pass, then (CLS only) a pure-gemm copy of the
+    # final pass that the full pass branches to when beta/bias/scaleAlphaVec/activation are off.
+    pureTerms = self.pureGemmEpilogueTerms(kernel, gsuLimit, gsuBackup)
+    pureLabel = Label(self.labels.getNameInc("GW_Pure"), "") if pureTerms else None
+    pureEndLabel = Label(self.labels.getNameInc("GW_PureEnd"), "") if pureTerms else None
+    # Persistent kernels route through storeBranches (fixup/partials) first, so the pure
+    # pass can only be entered after it; otherwise enter before the bias/scale prelude.
+    pureAtTrees = bool(pureTerms) and isPersistent(kernel)
+    gsuPasses = [(idx, False) for idx in range(gsuLimit)] # generate GSU1 and GSUM label
+    if pureTerms:
+      gsuPasses.append((gsuLimit - 1, True))
+    for gsuLimitIdx, isPurePass in gsuPasses:
       # Redirect GSU0 output to deferred module, keeping original label as stub
       if deferGSU0 and gsuLimitIdx == 0:
         # Keep original GW_B0 label inline as a stub with jump to deferred
@@ -20197,7 +20530,8 @@ class KernelWriterAssembly(KernelWriter):
           vectorWidths = vectorWidths_2
           elements     = elements_2
         else:
-          module.add(gsuLabel)
+          if not isPurePass:
+            module.add(gsuLabel)
           self.states.bpeCexternal = self.states.bpeCexternalGSU1
           self.states.useBias = useBiasBackup
           kernel["LdsOffsetBias"] = kernel["LdsOffsetBiasNonGSU"]
@@ -20223,6 +20557,22 @@ class KernelWriterAssembly(KernelWriter):
           kernel["LdsOffsetBias"] = kernel["LdsOffsetBiasNonGSU"]
           vectorWidths = vectorWidths_1
           elements     = elements_1
+      pureRestore = None
+      pureFlagHeld = False
+      if isPurePass:
+        module.add(pureLabel)
+        module.addComment1("Pure-gemm store pass: beta, bias, scaleAlphaVec and activation compiled out")
+        # Work on a copy so a failed generation cannot leave the shared ProblemType altered.
+        pureRestore = (kernel["ProblemType"], self.states.useBias, kernel["ActivationFuncCall"])
+        pureProblemType = shallowCopy(kernel["ProblemType"])
+        pureProblemType.state = dict(kernel["ProblemType"].state)
+        pureProblemType["UseBias"] = 0
+        pureProblemType["UseScaleAlphaVec"] = 0
+        pureProblemType["ActivationType"] = ActivationType("none")
+        kernel["ProblemType"] = pureProblemType
+        self.states.useBias = DataDirection.NONE
+        kernel["ActivationFuncCall"] = False
+        betas = [False]
       '''
       Post process for loop
       '''
@@ -20242,6 +20592,15 @@ class KernelWriterAssembly(KernelWriter):
         if kernel["ProblemType"]["UseScaleAlphaVec"]:
           module.add(self.setSgprToInUseState("AddressScaleAlphaVec"))
           module.add(self.setSgprToInUseState("SrdScaleAlphaVec"))
+
+      if pureTerms and not isPurePass and gsuLimitIdx == gsuLimit - 1:
+        if pureAtTrees:
+          pureFlagSgpr = self.sgprPool.checkOut(1, tag="globalWriteElements_pureFlag", preventOverflow=False)
+          module.add(self.pureGemmEpilogueFlag(kernel, pureTerms, pureFlagSgpr))
+        else:
+          with self.allocTmpSgpr(1, tag="globalWriteElements_pureFlagTmp") as pureFlagTmp:
+            module.add(self.pureGemmEpilogueFlag(kernel, pureTerms, pureFlagTmp.idx))
+            module.add(self.pureGemmEpilogueBranch(pureFlagTmp.idx, pureLabel))
 
       isSingleKernel = ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel') or isPersistent(kernel)
       # Issue read scale A/B value for later use
@@ -20616,7 +20975,7 @@ class KernelWriterAssembly(KernelWriter):
       gateModes = (True, False) if self.states.useGateResidual else (False,)
       writeLabels = {}
       for emitGateResidual in gateModes:
-        gateSuffix = "_G%u" % int(emitGateResidual) if self.states.useGateResidual else ""
+        gateSuffix = ("_G%u" % int(emitGateResidual) if self.states.useGateResidual else "") + ("_P" if isPurePass else "")
         writeLabels[emitGateResidual] = {}
         for beta in betas:
           writeLabels[emitGateResidual][beta] = {}
@@ -20824,7 +21183,7 @@ class KernelWriterAssembly(KernelWriter):
       skPartialsLabel = Label(label=self.labels.getNameInc("SK_Partials"), comment="")
       # GSU0 temporarily selects the ordinary policy; resolve this store branch's
       # strategy rather than reusing the kernel's allocation capabilities.
-      processingComponent = Component.TileProcessingStrategy.find(self) if isPersistent(kernel) else None
+      processingComponent = Component.TileProcessingStrategy.find(self) if isPersistent(kernel) and not isPurePass else None
       # PostLoopStoreInNll: the FUSED NLL store runs only for a StreamK full-tile
       # OWNER (front guard: StreamKLocalStart==0 && StreamKLocalEnd==ItersPerTile),
       # which computed the entire tile and writes D directly -- no workspace
@@ -20924,7 +21283,7 @@ class KernelWriterAssembly(KernelWriter):
           }
         for emitGateResidual in gateModes:
           gateLabels = writeLabels[emitGateResidual]
-          gateSuffix = "_G%u" % int(emitGateResidual) if self.states.useGateResidual else ""
+          gateSuffix = ("_G%u" % int(emitGateResidual) if self.states.useGateResidual else "") + ("_P" if isPurePass else "")
           for beta in betas:
             gateLabels[beta][globalWriteMode] = {}
             gateLabels[beta][globalWriteMode]["Label"] = Label(self.labels.getNameInc("GW_B%u%s_%s" % (beta, gateSuffix, globalWriteMode)), "")
@@ -20938,6 +21297,15 @@ class KernelWriterAssembly(KernelWriter):
                 labels["NonEdgeEnd"] = Label(self.labels.getNameInc("GW_B%u_FD%u_VW%u%s_%s_NonEdgeEnd" % (beta, factorDim, vectorWidth, gateSuffix, globalWriteMode)), "")
                 labels["Then"] = Label(self.labels.getNameInc("GW_B%u_FD%u_VW%u%s_%s_Then" % (beta, factorDim, vectorWidth, gateSuffix, globalWriteMode)), "")
                 labels["Else"] = Label(self.labels.getNameInc("GW_B%u_FD%u_VW%u%s_%s_Else" % (beta, factorDim, vectorWidth, gateSuffix, globalWriteMode)), "")
+
+      if pureAtTrees and not isPurePass and gsuLimitIdx == gsuLimit - 1:
+        module.add(self.pureGemmEpilogueBranch(pureFlagSgpr, pureLabel))
+        if arrivalFixup:
+          # The last arriving part runs writePartials, then falls back through SK_Store into
+          # this branch, so writePartials (generated below) must not reuse the flag sgpr.
+          pureFlagHeld = True
+        else:
+          self.sgprPool.checkIn(pureFlagSgpr)
 
       # Generate beta modules for each global write mode
       activationLabelListBackup = activationLabelList
@@ -21056,6 +21424,10 @@ class KernelWriterAssembly(KernelWriter):
           self._assertStillCheckedOut(liveAcrossPartials, "writePartials (StreamK arrival fixup)")
         module.add(processingComponent.writePartials(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct, endLabel))
 
+      if pureFlagHeld:
+        self.sgprPool.checkIn(pureFlagSgpr)
+        pureFlagHeld = False
+
       if activationLabelList and arrivalFixup:
         self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetActivation)
         self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetBack)
@@ -21095,6 +21467,13 @@ class KernelWriterAssembly(KernelWriter):
         else:
           with self.allocTmpSgpr(3, tag="globalWriteElements_tmpSgprInfo2") as tmpSgprInfo:
             module.add(SLongBranchPositive(Label("KernelEnd", ""), tmpSgprInfo))
+      if isPurePass:
+        kernel["ProblemType"], self.states.useBias, kernel["ActivationFuncCall"] = pureRestore
+        module.add(pureEndLabel)
+      elif pureTerms and gsuLimitIdx == gsuLimit - 1:
+        # The pure pass follows the full final pass.
+        with self.allocTmpSgpr(3, tag="globalWriteElements_tmpSgprInfoPure") as tmpSgprInfo:
+          module.add(SLongBranchPositive(pureEndLabel, tmpSgprInfo, comment="full store pass done, skip pure pass"))
 
     kernel["GlobalSplitU"] = gsuBackup
     kernel["_GlobalAccumulation"] = gsuAccumBackup
@@ -21116,12 +21495,26 @@ class KernelWriterAssembly(KernelWriter):
     requiredSgprs = min(self.sgprPool.size() + 5, self.states.regCaps["MaxSgpr"])
     maxVgprs, occupancy = self.getMaxRegsForOccupancy(kernel["NumThreads"], self.vgprPool.size(), requiredSgprs, \
                                                       self.getLdsSize(kernel), self.agprPool.size(), self.states.doubleVgpr)
-    # Set occupancy limit for register pools
-    # TODO: Support gfx12 and gfx117x
-    if kernel["ISA"][0] != 12 and kernel["ISA"][:2] != (11, 7):
-      self.vgprPool.setOccupancyLimit(self.states.regCaps["MaxVgpr"], self.states.regCaps["PhysicalMaxVgpr"] // occupancy)
-      self.sgprPool.setOccupancyLimit(self.states.regCaps["MaxSgpr"], self.states.regCaps["PhysicalMaxSgpr"] // occupancy)
+    self.setOccupancyLimits(kernel, maxVgprs, occupancy)
     return maxVgprs, occupancy
+
+  def setOccupancyLimits(self, kernel, maxVgprs, occupancy):
+    """Cap register-pool growth so codegen cannot drop below the modeled occupancy."""
+    # TODO: Support gfx12 and gfx117x
+    if kernel["ISA"][0] == 12 or kernel["ISA"][:2] == (11, 7):
+      return
+    # gfx11 occupancy counts workgroups, each taking several waves per SIMD, so
+    # PhysicalMaxVgpr // occupancy over-allows; cap at the model's per-wave budget.
+    # If even the current allocation does not fit, keep the legacy (non-binding) limit.
+    # TODO: CDNA has the same over-allowance for >256-thread workgroups (and ignores the
+    # allocation granule); move it to maxVgprs too once its codegen change is benchmarked.
+    if kernel["ISA"][0] == 11 and \
+       self.getVgprOccupancy(kernel["NumThreads"], maxVgprs, self.states.doubleVgpr) > 0:
+      vgprLimit = maxVgprs
+    else:
+      vgprLimit = self.states.regCaps["PhysicalMaxVgpr"] // occupancy
+    self.vgprPool.setOccupancyLimit(self.states.regCaps["MaxVgpr"], vgprLimit)
+    self.sgprPool.setOccupancyLimit(self.states.regCaps["MaxSgpr"], self.states.regCaps["PhysicalMaxSgpr"] // occupancy)
 
   def refineOccupancy(self, kernel, atomic, element, actPCMaxTempSgpr, \
                       gwvw, maxVgprs, ss, beta=False, edge=False):
@@ -22041,7 +22434,8 @@ class KernelWriterAssembly(KernelWriter):
 
   ##############################################################################
   def addStore(self, kernel, ss, tc: str, addrCalc, sumIdx, tmpS01, edge, elementIdx=None, batchIdx=None,
-               wsOffset=0, overrideAfterPrimerRows=0, comment="addStore", forceSlc: bool = False):
+               wsOffset=0, overrideAfterPrimerRows=0, comment="addStore", forceSlc: bool = False,
+               peerD: bool = False):
     """
     Add stores for the element with addrCalc and sumIdx.
     tmpS01 is a single :temp sGPR
@@ -22049,6 +22443,9 @@ class KernelWriterAssembly(KernelWriter):
     CompactLoopStore: elementIdx lets elt0 (rowInc==0) seed incrementToNextRow.
     overrideAfterPrimerRows is the next emitting elt's rowInc (0 = no override).
     forceSlc forces slc on the D store regardless of NonTemporalD; tc == 'D' only.
+    peerD (OutputPeerD): the same D store into the peer D buffer. SrdPeerD is SrdD plus the
+    distance between the two buffers, taken from the SrdD that the regular store just used,
+    with a system-scope store so that another device sees the data.
     """
     module = Module("addStore sumIdx %s"%(str(sumIdx)))
     if self.do["GlobalWrite"]:
@@ -22070,14 +22467,19 @@ class KernelWriterAssembly(KernelWriter):
         bps = self.states.bpeCexternal * ss.cfg.gwvw
         rpv = self.states.bpeCexternal * ss.cfg.gwvw / self.states.bpr
 
+        if peerD:
+          module.add(SAddU32(dst=sgpr("SrdPeerD+0"), src0=sgpr("SrdD+0"), src1=sgpr("DeltaPeerD+0"), comment="peer SRD = SrdD + delta"))
+          module.add(SAddCU32(dst=sgpr("SrdPeerD+1"), src0=sgpr("SrdD+1"), src1=sgpr("DeltaPeerD+1")))
+          module.add(SMovB64(dst=sgpr("SrdPeerD+2", 2), src=sgpr("SrdD+2", 2), comment="same limit and flags"))
+          scope = CacheScope.SCOPE_SYS
         if kernel["BufferStore"]:
           addr0 = vgpr(addrCalc.addrDVgpr)
-          addr1 = sgpr("SrdD", 4)
+          addr1 = sgpr("SrdPeerD" if peerD else "SrdD", 4)
         else:
           addr0 = vgpr(addrCalc.addrDVgpr,2)
           addr1 = ""
         # CLS: also seed the SRD chain on elt0/batch0 (rowInc==0).
-        if (ss.optSrdIncForRow and (addrCalc.rowInc or (kernel["CompactLoopStore"] and elementIdx == 0 and batchIdx == 0))):
+        if (not peerD and ss.optSrdIncForRow and (addrCalc.rowInc or (kernel["CompactLoopStore"] and elementIdx == 0 and batchIdx == 0))):
           module.add(addrCalc.incrementToNextRow(kernel, "D", ss, tmpS01, forceinitrow0=1,
                                                  overrideAfterPrimerRows=overrideAfterPrimerRows))
 
@@ -22192,6 +22594,9 @@ class KernelWriterAssembly(KernelWriter):
           module.add(self.chooseGlobalWrite(useBuffer, bps, sumIdx, rpv, \
               addr0, addr1, globalOffset, soffset=wsOffset, \
               glc=isGlc, slc=isSlc, nt=isNT, dlc=isDlc, comment=comment, scope=scope, th=th, nv=nv))
+    if tc == 'D' and not peerD and kernel["ProblemType"]["OutputPeerD"]:
+      module.add(self.addStore(kernel, ss, tc, addrCalc, sumIdx, tmpS01, edge, elementIdx, batchIdx,
+                               wsOffset, overrideAfterPrimerRows, comment + " (peer D)", forceSlc, peerD=True))
     return module
 
   ##############################################################################

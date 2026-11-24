@@ -4,6 +4,9 @@
 #include "MiopenEngine.hpp"
 #include "plans/MiopenBatchnormPlanBuilder.hpp"
 
+#include <algorithm>
+#include <string>
+
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
@@ -188,26 +191,21 @@ void MiopenEngine::initializeExecutionContext(
     HipdnnMiopenSettings executionSettings;
     initializeMiopenSettings(engineConfig, executionSettings);
 
-    for(const auto& planBuilder : _planBuilders)
+    const auto applicableBuilder
+        = std::find_if(_planBuilders.begin(), _planBuilders.end(), [&](const auto& planBuilder) {
+              return planBuilder->isApplicable(handle, opGraph);
+          });
+    if(applicableBuilder == _planBuilders.end())
     {
-        if(planBuilder->isApplicable(handle, opGraph))
-        {
-            planBuilder->initializeExecutionSettings(
-                handle, opGraph, engineConfig, executionSettings);
-            break;
-        }
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "No MIOpen plan builder is applicable to the graph for engine " + std::to_string(_id));
     }
 
+    (*applicableBuilder)
+        ->initializeExecutionSettings(handle, opGraph, engineConfig, executionSettings);
     executionContext.setExecutionSettings(executionSettings);
-
-    for(const auto& planBuilder : _planBuilders)
-    {
-        if(planBuilder->isApplicable(handle, opGraph))
-        {
-            planBuilder->buildPlan(handle, opGraph, engineConfig, executionContext);
-            break;
-        }
-    }
+    (*applicableBuilder)->buildPlan(handle, opGraph, engineConfig, executionContext);
 }
 
 void MiopenEngine::addPlanBuilder(

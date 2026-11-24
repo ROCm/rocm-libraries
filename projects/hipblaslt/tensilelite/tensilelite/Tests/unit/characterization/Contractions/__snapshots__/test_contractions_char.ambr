@@ -57,7 +57,7 @@
 # ---
 # name: test_problem_type_predicates
   dict({
-    'count': 29,
+    'count': 30,
     'tags': list([
       'Activation',
       'ActivationComputeType',
@@ -75,6 +75,7 @@
       'MXBlockA',
       'MXBlockB',
       'OperationIdentifierEqual',
+      'PeerDCheck',
       'Sparse',
       'StridedBatched',
       'SupportDeviceUserArguments',

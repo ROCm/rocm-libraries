@@ -1,21 +1,24 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Compile the SDPA backward tail-zero objects (gfx950 and gfx11-generic): the kernel that zeroes the padded rows of dense gradients.
+"""Compile the SDPA backward tail-zero objects (gfx950, gfx11-generic, gfx942 and gfx90a): the kernel that zeroes the padded rows of dense gradients.
 
     python -m generators.gen_sdpa_bwd_tailzero --arch gfx950 --out-dir <scratch root>
 
-One object per arch family and dtype (``f16``, ``bf16``, ``fp32``; six in all), and one V-head object per arch family and 16-bit dtype
-(``tailzero_hv``: ``f16``, ``bf16``; four in all; fp32 U2 declines): the kernel with a separate ``Hv`` (dV head count) after ``Hkv``, for
+One object per arch and dtype (``f16``, ``bf16``, ``fp32``), and one V-head object per arch and 16-bit dtype
+(``tailzero_hv``: ``f16``, ``bf16``; there is no fp32 ``u2`` row): the kernel with a separate ``Hv`` (dV head count) after ``Hkv``, for
 graphs whose V has its own head count. The kernels are ``fmha_bwd_tailzero_gfx950`` and ``fmha_bwd_tailzero_gfx11``
-(``fmha_bwd_tailzero_hv_gfx950``, ``fmha_bwd_tailzero_hv_gfx11``) under ``kernels_src/kernels/attention_bwd_{cdna,rdna}/``. The objects are
+(``fmha_bwd_tailzero_hv_gfx950``, ``fmha_bwd_tailzero_hv_gfx11``) under ``kernels_src/kernels/attention_bwd_{cdna,rdna}/``: the kernel of an
+object is the one of its builder family (``_sdpa_bwd_spec.family``): gfx950 is all CDNA, gfx11-generic all RDNA, and gfx942 and gfx90a
+take the gfx11 kernel for the 16-bit objects and the gfx950 kernel for fp32 (``_kernel_arch``). The objects are
 companions of the dQ and merged rows (``companion_entries``: the dQ and merged builds write them into the dQ arch folder and list them
-under ``companions`` of the dQ manifest, role ``tailzero``). They have no pin: this generator is their provenance, so each is built
-twice in fresh processes and the two builds must be byte-identical, its kernarg layout must be ``PARAMS`` (``PARAMS_HV``) and, on gfx950, the R-MIR scan
-of ``tools/sdpa_bwd_gate.py`` must not be red (the gfx11 gates read gfx950 objects only). The resource row of a gfx950 object is recorded.
+under ``companions`` of the dQ manifest, role ``tailzero``; gfx942 and gfx90a: ``_sdpa_bwd_split_build``). They have no pin: this generator is
+their provenance, so each is built twice in fresh processes and the two builds must be byte-identical, its kernarg layout must be
+``PARAMS`` (``PARAMS_HV``) and, on every arch but gfx11-generic, the R-MIR scan of ``tools/sdpa_bwd_gate.py`` must not be red (the gfx11
+gates read the gfx950, gfx942 and gfx90a objects only). The resource row of such an object is recorded.
 
-The command line writes ``<out-dir>/sdpa_bwd_tailzero/<arch>/`` (objects, ``manifest.json``, ``SOURCE.md``) for inspection and for the
-spike that measures them; it is not shipped content.
+The command line writes ``<out-dir>/sdpa_bwd_tailzero/<arch>/`` (objects, ``manifest.json``, ``SOURCE.md``) for inspection and for
+measuring them (gfx950 and gfx11-generic; gfx942 and gfx90a have no content of their own); it is not shipped content.
 """
 
 from __future__ import annotations
@@ -41,21 +44,25 @@ from ._codeobject import (
 )
 from ._extract_hsaco import HsacoExtractionError, extract_bin_attr
 from ._instances import (
+    SDPA_BWD_CDNA9_TARGETS,
     SDPA_BWD_GFX11_TARGET,
     SDPA_BWD_TAILZERO_DTYPES,
+    SDPA_BWD_TAILZERO_TARGETS,
     SDPA_BWD_TAILZERO_THREADS,
     SDPA_BWD_TARGET,
     instances_for,
 )
 from ._manifest import FLYDSL_DIR, refresh_source_md, sha256, write_op_manifest
+from ._sdpa_bwd_spec import family
 
 OP = "sdpa_bwd_tailzero"
 ROLE = "tailzero"
 ROLE_HV = "tailzero_hv"
 HV_DTYPES = ("f16", "bf16")
-ARCHES = (SDPA_BWD_TARGET, SDPA_BWD_GFX11_TARGET)
+ARCHES = (SDPA_BWD_TARGET, SDPA_BWD_GFX11_TARGET, *SDPA_BWD_CDNA9_TARGETS)
 
-# The kernel's name in each family's object (a one-kernel object: FlyDSL suffixes it ``_kernel_0``).
+# The kernel's name in each kernel family's object (a one-kernel object: FlyDSL suffixes it ``_kernel_0``), keyed by the arch whose kernel
+# file it is (``_kernel_arch``).
 SYMBOL = {
     SDPA_BWD_TARGET: "fmha_bwd_tailzero_gfx950_kernel_0",
     SDPA_BWD_GFX11_TARGET: "fmha_bwd_tailzero_gfx11_kernel_0",
@@ -107,8 +114,25 @@ GRID_RULE = "blocks_by_planes"
 _BUILDS = 2
 
 
+def _kernel_arch(arch: str, dtype: str) -> str:
+    """The arch whose kernel file builds the @p dtype object of @p arch: ``SDPA_BWD_TARGET`` (the CDNA kernel) for a ``cdna`` row,
+    ``SDPA_BWD_GFX11_TARGET`` (the RDNA kernel) for an ``rdna`` row (``_sdpa_bwd_spec.family``).
+    """
+    return SDPA_BWD_TARGET if family(arch, dtype) == "cdna" else SDPA_BWD_GFX11_TARGET
+
+
+def _gated(arch: str) -> bool:
+    """Whether the objects of @p arch go through the CDNA gates (R-MIR: every arch but gfx11-generic, the gate reads gfx950, gfx942 and gfx90a objects only)."""
+    return arch != SDPA_BWD_GFX11_TARGET
+
+
+def symbol_of(arch: str, dtype: str, hv: bool = False) -> str:
+    """The kernel symbol of the @p dtype object of @p arch (the V-head object when @p hv)."""
+    return (SYMBOL_HV if hv else SYMBOL)[_kernel_arch(arch, dtype)]
+
+
 def spec_key(arch: str, dtype: str, hv: bool = False) -> str:
-    """The companion's ``spec`` string: role (``tailzero_hv`` when @p hv), dtype, and the arch for gfx11-generic (as the gfx11 reduce
+    """The companion's ``spec`` string: role (``tailzero_hv`` when @p hv), dtype, and the arch unless it is gfx950 (as the gfx11 reduce
     companions spell theirs)."""
     key = f"{ROLE_HV if hv else ROLE},{dtype}"
     return key if arch == SDPA_BWD_TARGET else f"{key};arch={arch}"
@@ -124,8 +148,8 @@ def object_name(arch: str, dtype: str, hv: bool = False) -> str:
 
 
 def _launcher(arch: str, dtype: str, hv: bool = False):
-    """(module, launcher) of the family's builder for @p dtype. Static imports only: the inputs digest follows import statements."""
-    if arch == SDPA_BWD_TARGET:
+    """(module, launcher) of the kernel family's builder for @p dtype on @p arch. Static imports only: the inputs digest follows import statements."""
+    if _kernel_arch(arch, dtype) == SDPA_BWD_TARGET:
         from kernels.attention_bwd_cdna import fmha_bwd_tailzero_gfx950 as mod
 
         if hv:
@@ -138,8 +162,10 @@ def _launcher(arch: str, dtype: str, hv: bool = False):
     return mod, mod.build_fmha_bwd_tailzero_gfx11_module_primary(dtype)
 
 
-def _run_gate(blob: bytes, greedy: Path, dtype: str, hv: bool = False) -> dict:
-    """The gfx950 gates of ``tools/sdpa_bwd_gate.py`` over @p blob and the greedy dump of its compile."""
+def _run_gate(
+    blob: bytes, greedy: Path, arch: str, dtype: str, hv: bool = False
+) -> dict:
+    """The gates of ``tools/sdpa_bwd_gate.py`` over @p blob (an object of @p arch) and the greedy dump of its compile."""
     obj = greedy.with_name("obj.hsaco")
     obj.write_bytes(blob)
     done = subprocess.run(
@@ -151,7 +177,7 @@ def _run_gate(blob: bytes, greedy: Path, dtype: str, hv: bool = False) -> dict:
             "--greedy-dump",
             str(greedy),
             "--spec",
-            spec_key(SDPA_BWD_TARGET, dtype, hv),
+            spec_key(arch, dtype, hv),
         ],
         capture_output=True,
         text=True,
@@ -166,7 +192,7 @@ def _run_gate(blob: bytes, greedy: Path, dtype: str, hv: bool = False) -> dict:
 
 
 def _compile_one(task: tuple[str, str, bool]) -> cdna.Outcome:
-    """Compile one object (and gate it on gfx950). Never raises for a build failure.
+    """Compile one object (and gate it on a gated arch, ``_gated``). Never raises for a build failure.
 
     Cache mode, as every backward object is built: no IR dump is requested, and the object is read back from the one artifact this
     compile wrote to a fresh cache directory.
@@ -181,7 +207,7 @@ def _compile_one(task: tuple[str, str, bool]) -> cdna.Outcome:
             os.environ.pop("FLYDSL_DUMP_IR", None)
             os.environ["FLYDSL_RUNTIME_CACHE_DIR"] = str(work / "cache")
             greedy = work / "greedy.txt"
-            if arch == SDPA_BWD_TARGET:
+            if _gated(arch):
                 with cdna._stderr_to(greedy):
                     cdna._print_after_greedy()
                     jf(*cdna.synth_compile_args(jf))
@@ -192,8 +218,8 @@ def _compile_one(task: tuple[str, str, bool]) -> cdna.Outcome:
             blob = extract_bin_attr(artifact._ir_text, label)
             if blob[:4] != b"\x7fELF":
                 raise GeneratorError(f"{label}: the extracted object is not an ELF")
-            if arch == SDPA_BWD_TARGET:
-                gate = _run_gate(blob, greedy, dtype, hv)
+            if _gated(arch):
+                gate = _run_gate(blob, greedy, arch, dtype, hv)
         finally:
             shutil.rmtree(work, ignore_errors=True)
     except HsacoExtractionError as exc:
@@ -206,10 +232,10 @@ def _compile_one(task: tuple[str, str, bool]) -> cdna.Outcome:
     return cdna.Outcome("ok", blob, gate=gate)
 
 
-def verify(blob: bytes, arch: str, where: str, hv: bool = False) -> dict:
-    """The facts of @p blob, or ``GeneratorError``: target, symbol, kernarg layout and block size must be the declared ones
-    (the V-head object's: ``SYMBOL_HV`` and ``PARAMS_HV``)."""
-    symbol = (SYMBOL_HV if hv else SYMBOL)[arch]
+def verify(blob: bytes, arch: str, dtype: str, where: str, hv: bool = False) -> dict:
+    """The facts of the @p dtype object @p blob of @p arch, or ``GeneratorError``: target, symbol, kernarg layout and block size must be
+    the declared ones (the V-head object's: ``SYMBOL_HV`` and ``PARAMS_HV``)."""
+    symbol = symbol_of(arch, dtype, hv)
     params = PARAMS_HV if hv else PARAMS
     described = describe(blob, where)
     verify_arch(described, arch, where)
@@ -245,7 +271,7 @@ def build_objects(arch: str, hv: bool = False) -> dict[str, tuple[bytes, dict | 
     """The object of each dtype for @p arch: ``{dtype: (bytes, gate or None)}``; the V-head objects (``HV_DTYPES``) when @p hv.
 
     Every object is built ``_BUILDS`` times (``FLYDSL_GEN_JOBS`` workers, each build in a process of its own); the builds must be
-    byte-identical, the object must be its declared self (``verify``) and a gfx950 object's R-MIR verdict must not be red.
+    byte-identical, the object must be its declared self (``verify``) and a gated object's (``_gated``) R-MIR verdict must not be red.
     """
     if arch not in ARCHES:
         raise GeneratorError(f"{OP} is built for {', '.join(ARCHES)}, not {arch!r}")
@@ -276,7 +302,7 @@ def build_objects(arch: str, hv: bool = False) -> dict[str, tuple[bytes, dict | 
             reasons.append(f"{where}: R-MIR is {outcome.gate['rmir']['verdict']}")
     for dtype, (blob, _) in built.items():
         try:
-            verify(blob, arch, f"{arch}/{spec_key(arch, dtype, hv)}", hv)
+            verify(blob, arch, dtype, f"{arch}/{spec_key(arch, dtype, hv)}", hv)
         except GeneratorError as exc:
             reasons.append(" ".join(str(exc).split())[:500])
     if reasons:
@@ -292,11 +318,10 @@ def companion_entries(arch: str, folder: Path) -> list[dict]:
     ``companions`` entries.
 
     An entry is ``hash``, ``spec`` (``spec_key``: its first field is the role), ``file``, ``symbol`` and ``sha256``, as the gfx11 reduce
-    companions are; a gfx950 entry also carries ``resources``, the resource row of its object.
+    companions are; the entry of a gated object (``_gated``) also carries ``resources``, the resource row of its object.
     """
     entries = []
     for hv in (False, True):
-        symbol = (SYMBOL_HV if hv else SYMBOL)[arch]
         for dtype, (blob, gate) in build_objects(arch, hv).items():
             name = object_name(arch, dtype, hv)
             (folder / name).write_bytes(blob)
@@ -304,7 +329,7 @@ def companion_entries(arch: str, folder: Path) -> list[dict]:
                 "hash": spec_hash(arch, dtype, hv),
                 "spec": spec_key(arch, dtype, hv),
                 "file": name,
-                "symbol": symbol,
+                "symbol": symbol_of(arch, dtype, hv),
                 "sha256": sha256((folder / name).read_bytes()),
             }
             if gate is not None:
@@ -316,7 +341,13 @@ def companion_entries(arch: str, folder: Path) -> list[dict]:
 def generate(arch: str, out_root: Path) -> int:
     """Write ``<out_root>/sdpa_bwd_tailzero/<arch>/``: the objects (the V-head ones beside them, listed by no manifest row),
     ``manifest.json`` (the rows of ``_instances`` with their object) and ``SOURCE.md``. The directory must not hold files already. Returns 0.
+    Only the arches with rows of their own (``SDPA_BWD_TAILZERO_TARGETS``); gfx942 and gfx90a have companions only (``companion_entries``).
     """
+    if arch not in SDPA_BWD_TAILZERO_TARGETS:
+        raise GeneratorError(
+            f"{OP} has content for {', '.join(SDPA_BWD_TAILZERO_TARGETS)}, not {arch!r}: the objects of {arch} are "
+            "companions of its sdpa_bwd_dq manifest (companion_entries)"
+        )
     op_dir = out_root / OP / arch
     if op_dir.is_dir() and any(op_dir.iterdir()):
         raise GeneratorError(f"{op_dir} is not empty")
@@ -326,13 +357,13 @@ def generate(arch: str, out_root: Path) -> int:
     for dtype, (blob, _) in built_hv.items():
         name = object_name(arch, dtype, hv=True)
         (op_dir / name).write_bytes(blob)
-        verify(blob, arch, f"{arch}/{name}", hv=True)
+        verify(blob, arch, dtype, f"{arch}/{name}", hv=True)
     records = []
     for instance in instances_for(OP, arch):
         blob, gate = built[instance.dtype]
         name = object_name(arch, instance.dtype)
         (op_dir / name).write_bytes(blob)
-        described = verify(blob, arch, f"{arch}/{name}")
+        described = verify(blob, arch, instance.dtype, f"{arch}/{name}")
         _, names = cdna._signature(PARAMS)
         record = instance.to_record()
         record.update(
@@ -341,7 +372,7 @@ def generate(arch: str, out_root: Path) -> int:
                 "spec": spec_key(arch, instance.dtype),
                 "spec_hash": spec_hash(arch, instance.dtype),
                 "file": name,
-                "symbol": SYMBOL[arch],
+                "symbol": symbol_of(arch, instance.dtype),
                 "sha256": sha256((op_dir / name).read_bytes()),
                 "block": [described["block_threads"], 1, 1],
                 "grid_rule": GRID_RULE,
@@ -378,9 +409,9 @@ def main(argv: list[str] | None = None) -> int:
         help="scratch root to write sdpa_bwd_tailzero/<arch>/ under; it must be empty",
     )
     args = parser.parse_args(argv)
-    if args.arch not in ARCHES:
+    if args.arch not in SDPA_BWD_TAILZERO_TARGETS:
         print(
-            f"error: {OP} builds {', '.join(ARCHES)}, not {args.arch!r}",
+            f"error: {OP} writes content for {', '.join(SDPA_BWD_TAILZERO_TARGETS)}, not {args.arch!r}",
             file=sys.stderr,
         )
         return 1

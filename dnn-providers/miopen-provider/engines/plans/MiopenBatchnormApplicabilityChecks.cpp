@@ -1,7 +1,12 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <numeric>
+#include <optional>
+#include <string>
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
@@ -457,8 +462,151 @@ void checkTensorShapesSupported(
 
 // --- High-Level Configuration Validators ---
 
+std::vector<int64_t> BatchnormTensorGroups::all() const
+{
+    std::vector<int64_t> uids;
+    uids.reserve(io.size() + affine.size() + stat.size());
+    uids.insert(uids.end(), io.begin(), io.end());
+    uids.insert(uids.end(), affine.begin(), affine.end());
+    uids.insert(uids.end(), stat.begin(), stat.end());
+    return uids;
+}
+
 namespace
 {
+
+void appendIfPresent(std::vector<int64_t>& uids, const std::optional<int64_t>& uid)
+{
+    if(uid.has_value())
+    {
+        uids.push_back(*uid);
+    }
+}
+
+} // namespace
+
+BatchnormTensorGroups batchnormTensorGroups(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr)
+{
+    return {{bnInfAttr.x_tensor_uid(), bnInfAttr.y_tensor_uid()},
+            {bnInfAttr.scale_tensor_uid(), bnInfAttr.bias_tensor_uid()},
+            {bnInfAttr.mean_tensor_uid(), bnInfAttr.inv_variance_tensor_uid()}};
+}
+
+BatchnormTensorGroups batchnormTensorGroups(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr)
+{
+    return {{bnInfAttr.x_tensor_uid(), bnInfAttr.y_tensor_uid()},
+            {bnInfAttr.scale_tensor_uid(), bnInfAttr.bias_tensor_uid()},
+            {bnInfAttr.mean_tensor_uid(), bnInfAttr.variance_tensor_uid()}};
+}
+
+BatchnormTensorGroups
+    batchnormTensorGroups(const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr)
+{
+    BatchnormTensorGroups groups{{bnAttr.x_tensor_uid(), bnAttr.y_tensor_uid()},
+                                 {bnAttr.scale_tensor_uid(), bnAttr.bias_tensor_uid()},
+                                 {}};
+    appendIfPresent(groups.stat, bnAttr.mean_tensor_uid());
+    appendIfPresent(groups.stat, bnAttr.inv_variance_tensor_uid());
+    appendIfPresent(groups.stat, bnAttr.prev_running_mean_tensor_uid());
+    appendIfPresent(groups.stat, bnAttr.prev_running_variance_tensor_uid());
+    appendIfPresent(groups.stat, bnAttr.next_running_mean_tensor_uid());
+    appendIfPresent(groups.stat, bnAttr.next_running_variance_tensor_uid());
+    return groups;
+}
+
+BatchnormTensorGroups batchnormTensorGroups(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr)
+{
+    BatchnormTensorGroups groups{
+        {bnBwdAttr.x_tensor_uid(), bnBwdAttr.dy_tensor_uid(), bnBwdAttr.dx_tensor_uid()},
+        {bnBwdAttr.scale_tensor_uid(), bnBwdAttr.dscale_tensor_uid(), bnBwdAttr.dbias_tensor_uid()},
+        {}};
+    appendIfPresent(groups.stat, bnBwdAttr.mean_tensor_uid());
+    appendIfPresent(groups.stat, bnBwdAttr.inv_variance_tensor_uid());
+    return groups;
+}
+
+bool hasPairedSavedStatistics(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr)
+{
+    return bnAttr.mean_tensor_uid().has_value() == bnAttr.inv_variance_tensor_uid().has_value();
+}
+
+bool hasUnrequestedSavedPair(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    if(!bnAttr.mean_tensor_uid().has_value() || !bnAttr.inv_variance_tensor_uid().has_value())
+    {
+        return false;
+    }
+
+    if(bnAttr.prev_running_mean_tensor_uid().has_value()
+       || bnAttr.prev_running_variance_tensor_uid().has_value()
+       || bnAttr.next_running_mean_tensor_uid().has_value()
+       || bnAttr.next_running_variance_tensor_uid().has_value()
+       || bnAttr.momentum_tensor_uid().has_value())
+    {
+        return false;
+    }
+
+    return miopen_utils::findTensorAttributes(tensorMap, *bnAttr.mean_tensor_uid()).virtual_()
+           && miopen_utils::findTensorAttributes(tensorMap, *bnAttr.inv_variance_tensor_uid())
+                  .virtual_();
+}
+
+BatchnormTensorGroups batchnormTensorGroups(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    if(!hasUnrequestedSavedPair(bnAttr, tensorMap))
+    {
+        return batchnormTensorGroups(bnAttr);
+    }
+
+    BatchnormTensorGroups groups{{bnAttr.x_tensor_uid(), bnAttr.y_tensor_uid()},
+                                 {bnAttr.scale_tensor_uid(), bnAttr.bias_tensor_uid()},
+                                 {}};
+    appendIfPresent(groups.stat, bnAttr.prev_running_mean_tensor_uid());
+    appendIfPresent(groups.stat, bnAttr.prev_running_variance_tensor_uid());
+    appendIfPresent(groups.stat, bnAttr.next_running_mean_tensor_uid());
+    appendIfPresent(groups.stat, bnAttr.next_running_variance_tensor_uid());
+    return groups;
+}
+
+namespace
+{
+
+// Batchnorm reads x, y, scale, bias and the statistics from device buffers. A pass-by-value role
+// is legal only for the epsilon and momentum scalars, which are not part of any tensor group.
+void checkBuffersNotPassByValue(
+    const std::vector<std::vector<int64_t>>& tensorIdGroups,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    for(const auto& group : tensorIdGroups)
+    {
+        for(const auto uid : group)
+        {
+            if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(
+                   &miopen_utils::findTensorAttributes(tensorMap, uid)))
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    "Batchnorm does not support pass-by-value tensors for device-buffer roles "
+                    "(tensor uid "
+                        + std::to_string(uid) + ")");
+            }
+        }
+    }
+}
 
 void checkBatchnormTensorConfigSupported(
     const std::vector<int64_t>& ioTensorIds,
@@ -470,6 +618,8 @@ void checkBatchnormTensorConfigSupported(
         tensorMap,
     bool isTraining)
 {
+    checkBuffersNotPassByValue({ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds},
+                               tensorMap);
     checkTensorLayoutsAndDimsSupported(tensorMap);
     checkTensorDataTypesSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, tensorMap);
@@ -478,20 +628,57 @@ void checkBatchnormTensorConfigSupported(
 
 } // namespace
 
+// The training plan honours running statistics only as a complete set, and saved mean /
+// inv_variance only as a pair; any other subset would be dropped silently at execute time.
+// The plan passes null saved-statistic descriptors to the running-statistics (V3) and activation
+// (V2) MIOpen entry points, which dereference them (null saved pointers are legal), so those
+// paths additionally require the saved pair to be present. That is a limitation of this
+// provider's plan, not of MIOpen.
+void checkBatchnormFwdTrainingStatisticsSupported(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr, bool hasActivation)
+{
+    const std::array<bool, 5> runningStatsPresent
+        = {bnAttr.prev_running_mean_tensor_uid().has_value(),
+           bnAttr.prev_running_variance_tensor_uid().has_value(),
+           bnAttr.momentum_tensor_uid().has_value(),
+           bnAttr.next_running_mean_tensor_uid().has_value(),
+           bnAttr.next_running_variance_tensor_uid().has_value()};
+    const auto runningStatsCount
+        = std::count(runningStatsPresent.begin(), runningStatsPresent.end(), true);
+    if(runningStatsCount != 0
+       && runningStatsCount != static_cast<std::ptrdiff_t>(runningStatsPresent.size()))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm running statistics require prev/next running mean, prev/next running "
+            "variance and momentum together");
+    }
+
+    if(!hasPairedSavedStatistics(bnAttr))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm saved mean and inv_variance must be provided together");
+    }
+
+    if((runningStatsCount != 0 || hasActivation) && !bnAttr.mean_tensor_uid().has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm training with running statistics or a fused activation requires saved "
+            "mean and inv_variance");
+    }
+}
+
 void checkBatchnormInferenceTensorConfigSupported(
     const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
-    const std::vector<int64_t> ioTensorIds = {bnInfAttr.x_tensor_uid(), bnInfAttr.y_tensor_uid()};
-    const std::vector<int64_t> affineTensorIds
-        = {bnInfAttr.scale_tensor_uid(), bnInfAttr.bias_tensor_uid()};
-    const std::vector<int64_t> statTensorIds
-        = {bnInfAttr.mean_tensor_uid(), bnInfAttr.inv_variance_tensor_uid()};
-
+    const auto groups = batchnormTensorGroups(bnInfAttr);
     checkBatchnormTensorConfigSupported(
-        ioTensorIds, affineTensorIds, statTensorIds, {}, tensorMap, false);
+        groups.io, groups.affine, groups.stat, {}, tensorMap, false);
 }
 
 void checkBatchnormInferenceVarianceExtTensorConfigSupported(
@@ -500,14 +687,9 @@ void checkBatchnormInferenceVarianceExtTensorConfigSupported(
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
-    const std::vector<int64_t> ioTensorIds = {bnInfAttr.x_tensor_uid(), bnInfAttr.y_tensor_uid()};
-    const std::vector<int64_t> affineTensorIds
-        = {bnInfAttr.scale_tensor_uid(), bnInfAttr.bias_tensor_uid()};
-    const std::vector<int64_t> statTensorIds
-        = {bnInfAttr.mean_tensor_uid(), bnInfAttr.variance_tensor_uid()};
-
+    const auto groups = batchnormTensorGroups(bnInfAttr);
     checkBatchnormTensorConfigSupported(
-        ioTensorIds, affineTensorIds, statTensorIds, {}, tensorMap, false);
+        groups.io, groups.affine, groups.stat, {}, tensorMap, false);
 }
 
 void checkBatchnormInferenceVarianceExtActivationTensorConfigSupported(
@@ -519,16 +701,13 @@ void checkBatchnormInferenceVarianceExtActivationTensorConfigSupported(
 {
     checkBatchnormFwdActivationModeSupported(actAttr);
 
+    const auto groups = batchnormTensorGroups(bnInfAttr);
     const std::vector<int64_t> ioTensorIds = {bnInfAttr.x_tensor_uid(), actAttr.out_0_tensor_uid()};
-    const std::vector<int64_t> affineTensorIds
-        = {bnInfAttr.scale_tensor_uid(), bnInfAttr.bias_tensor_uid()};
-    const std::vector<int64_t> statTensorIds
-        = {bnInfAttr.mean_tensor_uid(), bnInfAttr.variance_tensor_uid()};
     const std::vector<int64_t> intermediateTensorIds
         = {bnInfAttr.y_tensor_uid(), actAttr.in_0_tensor_uid()};
 
     checkBatchnormTensorConfigSupported(
-        ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, tensorMap, false);
+        ioTensorIds, groups.affine, groups.stat, intermediateTensorIds, tensorMap, false);
 }
 
 void checkBatchnormInferenceActivationTensorConfigSupported(
@@ -540,16 +719,13 @@ void checkBatchnormInferenceActivationTensorConfigSupported(
 {
     checkBatchnormFwdActivationModeSupported(actAttr);
 
+    const auto groups = batchnormTensorGroups(bnInfAttr);
     const std::vector<int64_t> ioTensorIds = {bnInfAttr.x_tensor_uid(), actAttr.out_0_tensor_uid()};
-    const std::vector<int64_t> affineTensorIds
-        = {bnInfAttr.scale_tensor_uid(), bnInfAttr.bias_tensor_uid()};
-    const std::vector<int64_t> statTensorIds
-        = {bnInfAttr.mean_tensor_uid(), bnInfAttr.inv_variance_tensor_uid()};
     const std::vector<int64_t> intermediateTensorIds
         = {bnInfAttr.y_tensor_uid(), actAttr.in_0_tensor_uid()};
 
     checkBatchnormTensorConfigSupported(
-        ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, tensorMap, false);
+        ioTensorIds, groups.affine, groups.stat, intermediateTensorIds, tensorMap, false);
 }
 
 void checkBatchnormFwdTrainingTensorConfigSupported(
@@ -562,21 +738,8 @@ void checkBatchnormFwdTrainingTensorConfigSupported(
         bnAttr.peer_stats_tensor_uid(),
         "Batchnorm forward training does not support peer statistics");
 
-    const std::vector<int64_t> ioTensorIds = {bnAttr.x_tensor_uid(), bnAttr.y_tensor_uid()};
-    const std::vector<int64_t> affineTensorIds
-        = {bnAttr.scale_tensor_uid(), bnAttr.bias_tensor_uid()};
-    std::vector<int64_t> statTensorIds;
-    if(bnAttr.mean_tensor_uid().has_value())
-    {
-        statTensorIds.push_back(bnAttr.mean_tensor_uid().value());
-    }
-    if(bnAttr.inv_variance_tensor_uid().has_value())
-    {
-        statTensorIds.push_back(bnAttr.inv_variance_tensor_uid().value());
-    }
-
-    checkBatchnormTensorConfigSupported(
-        ioTensorIds, affineTensorIds, statTensorIds, {}, tensorMap, true);
+    const auto groups = batchnormTensorGroups(bnAttr, tensorMap);
+    checkBatchnormTensorConfigSupported(groups.io, groups.affine, groups.stat, {}, tensorMap, true);
 }
 
 void checkBatchnormFwdTrainingActivationTensorConfigSupported(
@@ -590,23 +753,13 @@ void checkBatchnormFwdTrainingActivationTensorConfigSupported(
         bnAttr.peer_stats_tensor_uid(),
         "Batchnorm forward training activation does not support peer statistics");
 
+    const auto groups = batchnormTensorGroups(bnAttr);
     const std::vector<int64_t> ioTensorIds = {bnAttr.x_tensor_uid(), actAttr.out_0_tensor_uid()};
-    const std::vector<int64_t> affineTensorIds
-        = {bnAttr.scale_tensor_uid(), bnAttr.bias_tensor_uid()};
-    std::vector<int64_t> statTensorIds;
-    if(bnAttr.mean_tensor_uid().has_value())
-    {
-        statTensorIds.push_back(bnAttr.mean_tensor_uid().value());
-    }
-    if(bnAttr.inv_variance_tensor_uid().has_value())
-    {
-        statTensorIds.push_back(bnAttr.inv_variance_tensor_uid().value());
-    }
     const std::vector<int64_t> intermediateTensorIds
         = {bnAttr.y_tensor_uid(), actAttr.in_0_tensor_uid()};
 
     checkBatchnormTensorConfigSupported(
-        ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds, tensorMap, true);
+        ioTensorIds, groups.affine, groups.stat, intermediateTensorIds, tensorMap, true);
 }
 
 void checkBatchnormBackwardTensorConfigSupported(
@@ -618,22 +771,8 @@ void checkBatchnormBackwardTensorConfigSupported(
     validators::validatePeerStatsNotPopulated(
         bnBwdAttr.peer_stats_tensor_uid(), "Batchnorm backward does not support peer statistics");
 
-    const std::vector<int64_t> ioTensorIds
-        = {bnBwdAttr.x_tensor_uid(), bnBwdAttr.dy_tensor_uid(), bnBwdAttr.dx_tensor_uid()};
-    const std::vector<int64_t> affineTensorIds = {
-        bnBwdAttr.scale_tensor_uid(), bnBwdAttr.dscale_tensor_uid(), bnBwdAttr.dbias_tensor_uid()};
-    std::vector<int64_t> statTensorIds;
-    if(bnBwdAttr.mean_tensor_uid().has_value())
-    {
-        statTensorIds.push_back(bnBwdAttr.mean_tensor_uid().value());
-    }
-    if(bnBwdAttr.inv_variance_tensor_uid().has_value())
-    {
-        statTensorIds.push_back(bnBwdAttr.inv_variance_tensor_uid().value());
-    }
-
-    checkBatchnormTensorConfigSupported(
-        ioTensorIds, affineTensorIds, statTensorIds, {}, tensorMap, true);
+    const auto groups = batchnormTensorGroups(bnBwdAttr);
+    checkBatchnormTensorConfigSupported(groups.io, groups.affine, groups.stat, {}, tensorMap, true);
 }
 
 void checkBatchnormInferenceActivationBackwardTensorConfigSupported(
@@ -700,13 +839,24 @@ void checkBatchnormActivationModeSupported(
        == (isBwd ? hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD
                  : hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD))
     {
-        if(!miopen_utils::hasLeakyReluSlope(activAttr))
+        if(miopen_utils::hasLeakyReluSlope(activAttr))
         {
-            return;
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Batchnorm fused activation does not support Leaky ReLU.");
         }
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Batchnorm fused activation does not support Leaky ReLU.");
+
+        // The provider's activation mapping does not yet express a lower-only clip (see
+        // MiopenUtils::mapPointwiseModeToMiopenActivation).
+        if(!activAttr.relu_upper_clip().has_value() && activAttr.relu_lower_clip().has_value()
+           && *activAttr.relu_lower_clip() != 0.f)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Batchnorm fused ReLU with a non-zero lower_clip and no upper_clip is not "
+                "supported.");
+        }
+        return;
     }
 
     throw hipdnn_plugin_sdk::HipdnnPluginException(

@@ -148,8 +148,8 @@ int override_num_splits_if_necessary(int batch,
                                      [[maybe_unused]] int hdim_v,
                                      float p_drop,
                                      int num_splits,
-                                     [[maybe_unused]] int kv_elem_bytes   = 2,
-                                     [[maybe_unused]] bool pingpong_split = true)
+                                     [[maybe_unused]] int kv_elem_bytes = 2,
+                                     [[maybe_unused]] bool merge_heads  = false)
 {
     int device;
     auto status = hipGetDevice(&device);
@@ -194,14 +194,14 @@ int override_num_splits_if_necessary(int batch,
             // MX pingpong ones need whole 8-element head dims: keep other head dims whole.
             if(hdim_q % 8 != 0 || hdim_v % 8 != 0)
                 return 1;
-            // The workgroups the split kernel launches a split. pingpong_split: the call takes
-            // qr_tdm_pingpong's split-KV (batch mode, no bias, soft cap, KV cache or sink
-            // tokens), whose dispatch folds a KV head's single-query heads (up to 16) into one
-            // 16-row tile; its 16-row tile takes every query of fp8 / MX and of d512 (no
-            // other split-kv tile there), else queries past 16 rows take qr_tdm's 64-row one.
-            const int ratio  = nhead / std::max(nhead_k, 1);
-            const bool merge = pingpong_split && max_seqlen_q == 1 && ratio > 1 && ratio <= 16;
-            const int rows   = merge ? ratio : max_seqlen_q;
+            // The workgroups the split kernel launches a split. merge_heads: the split kernel
+            // folds a KV head's single-query heads into one tile's rows (the caller knows
+            // which instance takes the call); qr_tdm_pingpong's 16-row tile takes every query
+            // of fp8 / MX and of d512 (no other split-kv tile there), else queries past 16
+            // rows take qr_tdm's 64-row one.
+            const int ratio             = nhead / std::max(nhead_k, 1);
+            const bool merge            = merge_heads;
+            const int rows              = merge ? ratio : max_seqlen_q;
             const bool only_decode_tile = kv_elem_bytes == 1 || hdim_q > 256;
             const int tile              = rows <= 16 || only_decode_tile ? 16 : 64;
             const int blocks            = batch * (merge ? std::max(nhead_k, 1) : nhead) *
@@ -894,25 +894,56 @@ fwd_result fmha_fwd_run(mode_enum mode,
     {
         const bool packed = pack_gqa_nhead != nhead;
         const int rows_q  = packed ? pack_gqa_seqlen_q : max_seqlen_q;
-        // a sliding window bounds the keys each query visits (an unbounded side, all of them)
-        const int window_keys =
-            mask.left >= 0 && mask.right >= 0
-                ? std::min<int>(max_seqlen_k, mask.left + mask.right + 1 + rows_q)
-                : max_seqlen_k;
+        // gfx125's split-KV instances are TDM ones (qr_tdm_pingpong, qr_tdm): they split only
+        // the tiles inside the mask range, and decide on whole tiles of 64 keys whether the
+        // sink reaches the window
+        const bool tdm             = ck_tile::is_gfx125_supported();
+        const int seqlen_k_in_mask = [&]() {
+            if(mask.type == mask_enum::no_mask || !tdm)
+                return max_seqlen_k;
+            const ck_tile::SimplifiedGenericAttentionMask<true> range_mask{
+                ck_tile::make_generic_attention_mask_coordinates_from_lr_window(
+                    mask.left,
+                    mask.right,
+                    mask.sink,
+                    max_seqlen_q,
+                    max_seqlen_k,
+                    mask.type == mask_enum::mask_top_left)};
+            const int start =
+                range_mask.GetSinkTileRangeAlongX(0, ck_tile::number<1>{}, ck_tile::number<64>{})
+                    .at(ck_tile::number<1>{});
+            const int end = range_mask
+                                .GetSinkTileRangeAlongX(
+                                    max_seqlen_q - 1, ck_tile::number<1>{}, ck_tile::number<64>{})
+                                .at(ck_tile::number<2>{});
+            return std::max(end - start, 0);
+        }();
         // the calls qr_tdm_pingpong's split-KV takes (else qr_tdm's)
-        const bool pingpong_split = mode == mode_enum::batch && bias.type == bias_enum::no_bias &&
-                                    logits_soft_cap == 0.f && !use_kvcache && mask.sink == 0;
-        num_splits = override_num_splits_if_necessary(batch,
+        const bool pingpong_split = tdm && mode == mode_enum::batch &&
+                                    bias.type == bias_enum::no_bias && logits_soft_cap == 0.f &&
+                                    !use_kvcache && mask.sink == 0;
+        // single-query GQA heads the split kernel folds into one tile's rows: pingpong up to
+        // 16 a KV head; the others without a bias, with a mask or a sink only the TDM ones
+        // and not with both
+        const int ratio     = nhead / std::max(nhead_k, 1);
+        const bool has_sink = mask.sink > 0 || init_sink_value != 0;
+        const bool merge_rule =
+            pingpong_split
+                ? ratio <= 16
+                : bias.type == bias_enum::no_bias &&
+                      (mask.type == mask_enum::no_mask ? (!has_sink || tdm) : (tdm && !has_sink));
+        const bool merge_heads = !packed && max_seqlen_q == 1 && ratio > 1 && merge_rule;
+        num_splits             = override_num_splits_if_necessary(batch,
                                                       pack_gqa_nhead,
                                                       nhead_k,
                                                       rows_q,
-                                                      window_keys,
+                                                      seqlen_k_in_mask,
                                                       hdim_q,
                                                       hdim_v,
                                                       p_drop,
                                                       num_splits,
                                                       static_cast<int>(sizeof(KDataType)),
-                                                      pingpong_split);
+                                                      merge_heads);
     }
 
     const ck_tile::index_t num_block_scale_q =
@@ -1767,6 +1798,12 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     (use_cache_batch_idx ? cache_batch_idx_buf.GetDeviceBuffer() : nullptr);
 
                 args.num_splits = num_splits;
+                // the kernel reads each group's seqlen_q, so the grid and the head merging
+                // choice need the longest one rather than the total
+                if(mode == mode_enum::group)
+                {
+                    args.max_seqlen_q = max_seqlen_q;
+                }
 
                 args.stride_o_acc         = stride_o_acc;
                 args.nhead_stride_lse_acc = nhead_stride_lse_acc;

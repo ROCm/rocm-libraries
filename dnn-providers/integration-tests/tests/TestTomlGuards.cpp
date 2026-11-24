@@ -3,19 +3,61 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
+#include <fstream>
+#include <optional>
+#include <string>
+#include <vector>
+
+#include <hipdnn_data_sdk/types.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
+
+#include "harness/TestSettings.hpp"
 #include "harness/TomlGuards.hpp"
+#include "harness/ValidationSite.hpp"
+#include "harness/bundle/OutputComparison.hpp"
+#include "harness/tolerance/ToleranceResolver.hpp"
 
 using hipdnn_integration_tests::applyTomlToleranceOverride;
 using hipdnn_integration_tests::checkTomlSkip;
 using hipdnn_integration_tests::currentTestName;
+using hipdnn_integration_tests::findTomlToleranceOverride;
 using hipdnn_integration_tests::findTomlValidatorOverride;
 using hipdnn_integration_tests::gradingForTensor;
+using hipdnn_integration_tests::TestSettings;
 using hipdnn_integration_tests::ToleranceOverride;
 using hipdnn_integration_tests::ValidatorOverride;
 using hipdnn_integration_tests::ValidatorOverrideKind;
 using hipdnn_integration_tests::bundle::ValidatorKind;
 
 // NOLINTBEGIN(readability-identifier-naming) -- gtest macro-generated names
+
+namespace
+{
+
+// The engine TOML the fp8 output test grades under. Its filter matches no other test.
+TestSettings fp8OverrideSettings()
+{
+    const auto dir = hipdnn_test_sdk::utilities::claimScratchDirectory("toml_guards");
+    const auto path = dir.path() / "settings.toml";
+    {
+        std::ofstream ofs(path);
+        ofs << R"(
+[meta]
+version = 1
+
+[[tolerance_overrides]]
+filters = ["TestTomlGuards.GradingForTensorFp8Output*"]
+atol = 0.5
+rtol = 0.25
+)";
+    }
+    return TestSettings(path);
+}
+
+} // namespace
 
 // ---------------------------------------------------------------------------
 // currentTestName — pure gtest, no TestConfig dependency
@@ -53,7 +95,7 @@ TEST(TestTomlGuards, ApplyTomlToleranceOverrideReturnsFalseForEmptyName)
 
 TEST(TestTomlGuards, FindTomlValidatorOverrideReturnsNulloptForEmptyName)
 {
-    EXPECT_FALSE(findTomlValidatorOverride("", "LayernormBackward_0::DSCALE").has_value());
+    EXPECT_FALSE(findTomlValidatorOverride(nullptr, "", "LayernormBackward_0::DSCALE").has_value());
 }
 
 // ---------------------------------------------------------------------------
@@ -82,8 +124,8 @@ TEST(TestTomlGuards, ApplyTomlToleranceOverrideReturnsFalseWhenNoSettings)
 // entry that expresses it — no config, no selected validator, on either harness.
 TEST(TestTomlGuards, FindTomlValidatorOverrideReturnsNulloptWhenNoSettings)
 {
-    EXPECT_FALSE(
-        findTomlValidatorOverride("SomeTest.Name", "LayernormBackward_0::DSCALE").has_value());
+    EXPECT_FALSE(findTomlValidatorOverride(nullptr, "SomeTest.Name", "LayernormBackward_0::DSCALE")
+                     .has_value());
 }
 
 // Both harnesses grade every output tensor through gradingForTensor, so the no-config
@@ -92,7 +134,7 @@ TEST(TestTomlGuards, FindTomlValidatorOverrideReturnsNulloptWhenNoSettings)
 TEST(TestTomlGuards, GradingForTensorKeepsTheCallersToleranceWhenNoSettings)
 {
     const auto grading
-        = gradingForTensor("SomeTest.Name", "LayernormBackward_0::DSCALE", 1e-3f, 2e-3f);
+        = gradingForTensor("SomeTest.Name", "LayernormBackward_0::DSCALE", nullptr, 1e-3f, 2e-3f);
 
     EXPECT_EQ(grading.kind, ValidatorKind::ALLCLOSE);
     EXPECT_FLOAT_EQ(grading.atol, 1e-3f);
@@ -130,6 +172,214 @@ TEST(TestTomlGuards, GradingForTensorMatchingInfinitiesAppliesTheToleranceOverri
     EXPECT_EQ(grading.kind, ValidatorKind::ALLCLOSE_MATCHING_INFINITIES);
     EXPECT_FLOAT_EQ(grading.atol, 5e-2f);
     EXPECT_FLOAT_EQ(grading.rtol, 6e-2f);
+}
+
+// The tolerance the harness resolves for a half or bfloat16 convolution-forward output is the
+// dynamic one, passed here as the fallback. A [[tolerance_overrides]] entry replaces it, and
+// replaces it whole: neither of the dynamic atol and rtol survives.
+TEST(TestTomlGuards, GradingForTensorToleranceOverrideReplacesTheCallersTolerance)
+{
+    const ToleranceOverride tomlTolerance{0.5f, 0.25f};
+
+    const auto grading = gradingForTensor("ConvolutionFwd.Fp16Case",
+                                          "ConvolutionFwd_0::Y",
+                                          std::nullopt,
+                                          tomlTolerance,
+                                          2.3e-2f,
+                                          1.95e-3f);
+
+    EXPECT_EQ(grading.kind, ValidatorKind::ALLCLOSE);
+    EXPECT_FLOAT_EQ(grading.atol, 0.5f);
+    EXPECT_FLOAT_EQ(grading.rtol, 0.25f);
+}
+
+// An explicit allclose entry takes the same path as no entry, so a tolerance override still
+// applies to it.
+TEST(TestTomlGuards, GradingForTensorExplicitAllcloseKeepsTheToleranceOverride)
+{
+    const ValidatorOverride allclose{ValidatorOverrideKind::ALLCLOSE, 0.0f};
+    const ToleranceOverride tomlTolerance{0.5f, 0.25f};
+
+    const auto grading = gradingForTensor("ConvolutionFwd.Fp16Case",
+                                          "ConvolutionFwd_0::Y",
+                                          allclose,
+                                          tomlTolerance,
+                                          2.3e-2f,
+                                          1.95e-3f);
+
+    EXPECT_EQ(grading.kind, ValidatorKind::ALLCLOSE);
+    EXPECT_FLOAT_EQ(grading.atol, 0.5f);
+    EXPECT_FLOAT_EQ(grading.rtol, 0.25f);
+}
+
+// A [[validator_overrides]] entry outranks a [[tolerance_overrides]] one: an rms entry grades by
+// its threshold and ignores both tolerances.
+TEST(TestTomlGuards, GradingForTensorRmsValidatorOutranksTheToleranceOverride)
+{
+    const ValidatorOverride rms{ValidatorOverrideKind::RMS, 1e-4f};
+    const ToleranceOverride tomlTolerance{0.5f, 0.25f};
+
+    const auto grading = gradingForTensor(
+        "ConvolutionFwd.Fp16Case", "ConvolutionFwd_0::Y", rms, tomlTolerance, 2.3e-2f, 1.95e-3f);
+
+    EXPECT_EQ(grading.kind, ValidatorKind::RMS);
+    EXPECT_FLOAT_EQ(grading.rmsThreshold, 1e-4f);
+}
+
+// ---------------------------------------------------------------------------
+// gradingForTensor with settings loaded — the overload both harnesses call
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+constexpr const char* const K_OVERRIDES = R"([meta]
+version = 1
+
+[[tolerance_overrides]]
+filters = ["ConvolutionFwd.Fp16*"]
+atol = 0.5
+rtol = 0.25
+
+[[validator_overrides]]
+filters = ["ConvolutionFwd.Fp16Rms*"]
+tensors = ["*::Y"]
+validator = "rms"
+rms_threshold = 1e-4
+)";
+
+class TestTomlGuardsWithSettings : public ::testing::Test
+{
+protected:
+    std::optional<hipdnn_test_sdk::utilities::ScopedDirectory> _scopedDir;
+    std::optional<TestSettings> _settings;
+
+    void SetUp() override
+    {
+        _scopedDir.emplace(hipdnn_test_sdk::utilities::claimScratchDirectory("toml_guards"));
+        useSettings(K_OVERRIDES);
+    }
+
+    void useSettings(const std::string& toml)
+    {
+        const auto path = _scopedDir->path() / "settings.toml";
+        std::ofstream(path) << toml;
+        _settings.emplace(path);
+    }
+};
+
+} // namespace
+
+// The tolerance the harness resolved is the fallback, and the entry that matches the test
+// replaces it whole.
+TEST_F(TestTomlGuardsWithSettings, ToleranceOverrideOfTheSettingsReplacesTheCallersTolerance)
+{
+    const auto grading = gradingForTensor(
+        "ConvolutionFwd.Fp16Case", "ConvolutionFwd_0::Y", &*_settings, 2.3e-2f, 1.95e-3f);
+
+    EXPECT_EQ(grading.kind, ValidatorKind::ALLCLOSE);
+    EXPECT_FLOAT_EQ(grading.atol, 0.5f);
+    EXPECT_FLOAT_EQ(grading.rtol, 0.25f);
+}
+
+TEST_F(TestTomlGuardsWithSettings, UnmatchedNameKeepsTheCallersTolerance)
+{
+    const auto grading = gradingForTensor(
+        "ConvolutionFwd.Bf16Case", "ConvolutionFwd_0::Y", &*_settings, 2.3e-2f, 1.95e-3f);
+
+    EXPECT_EQ(grading.kind, ValidatorKind::ALLCLOSE);
+    EXPECT_FLOAT_EQ(grading.atol, 2.3e-2f);
+    EXPECT_FLOAT_EQ(grading.rtol, 1.95e-3f);
+}
+
+TEST_F(TestTomlGuardsWithSettings, ValidatorOverrideOfTheSettingsOutranksTheToleranceOverride)
+{
+    const auto grading = gradingForTensor(
+        "ConvolutionFwd.Fp16RmsCase", "ConvolutionFwd_0::Y", &*_settings, 2.3e-2f, 1.95e-3f);
+
+    EXPECT_EQ(grading.kind, ValidatorKind::RMS);
+    EXPECT_FLOAT_EQ(grading.rmsThreshold, 1e-4f);
+}
+
+TEST_F(TestTomlGuardsWithSettings, ValidatorOverrideIsPerTensor)
+{
+    const auto grading = gradingForTensor(
+        "ConvolutionFwd.Fp16RmsCase", "ConvolutionFwd_0::Z", &*_settings, 2.3e-2f, 1.95e-3f);
+
+    EXPECT_EQ(grading.kind, ValidatorKind::ALLCLOSE);
+    EXPECT_FLOAT_EQ(grading.atol, 0.5f);
+}
+
+// An entry whose glob matches everything still does not apply to a test with no name.
+TEST_F(TestTomlGuardsWithSettings, EmptyNameMatchesNoEntry)
+{
+    useSettings(R"([meta]
+version = 1
+
+[[tolerance_overrides]]
+filters = ["*"]
+atol = 0.5
+rtol = 0.25
+
+[[validator_overrides]]
+filters = ["*"]
+tensors = ["*"]
+validator = "rms"
+rms_threshold = 1e-4
+)");
+    ASSERT_TRUE(findTomlToleranceOverride(&*_settings, "Any.Name").has_value());
+    ASSERT_TRUE(findTomlValidatorOverride(&*_settings, "Any.Name", "Any_0::Y").has_value());
+    EXPECT_FALSE(findTomlToleranceOverride(&*_settings, "").has_value());
+    EXPECT_FALSE(findTomlValidatorOverride(&*_settings, "", "ConvolutionFwd_0::Y").has_value());
+}
+
+// ---------------------------------------------------------------------------
+// gradingForTensor — a [[tolerance_overrides]] entry on an fp8 output
+//
+// The settings are a local TestSettings, never the TestConfig singleton, so nothing
+// here is visible to any other test.
+// ---------------------------------------------------------------------------
+
+TEST(TestTomlGuards, GradingForTensorFp8OutputTakesTheToleranceOverrideInOrder)
+{
+    using hipdnn_data_sdk::types::fp8_e4m3;
+    using hipdnn_data_sdk::utilities::Tensor;
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+
+    const auto fp8Step
+        = hipdnn_integration_tests::tolerance::fp8OutputTolerance(DataType::FP8_E4M3);
+    ASSERT_TRUE(fp8Step.has_value());
+
+    const auto settings = fp8OverrideSettings();
+    const auto testName = currentTestName();
+    const std::string label = "SdpaFwd_0::O";
+
+    const auto grading = gradingForTensor(testName,
+                                          label,
+                                          settings.findValidatorOverride(testName, label),
+                                          settings.findToleranceOverride(testName),
+                                          fp8Step->atol,
+                                          fp8Step->rtol);
+
+    EXPECT_EQ(grading.kind, ValidatorKind::ALLCLOSE);
+    EXPECT_EQ(grading.atol, 0.5f);
+    EXPECT_EQ(grading.rtol, 0.25f);
+
+    const auto selection = hipdnn_integration_tests::bundle::makeValidator(
+        DataType::FP8_E4M3, label, grading, hipdnn_integration_tests::ValidationSite::HOST);
+    ASSERT_NE(selection.validator, nullptr) << selection.error;
+
+    // Against a reference of 8, the override allows |diff| <= 0.5 + 0.25 * 8 = 2.5.
+    // The fp8 default allows about 1, swapped values 4.25, and atol for both 4.5.
+    const auto allCloseToEight = [&selection](float value) {
+        Tensor<fp8_e4m3> reference(std::vector<int64_t>{1});
+        Tensor<fp8_e4m3> actual(std::vector<int64_t>{1});
+        reference.setHostValue(fp8_e4m3(8.0f), 0);
+        actual.setHostValue(fp8_e4m3(value), 0);
+        return selection.validator->allClose(reference, actual);
+    };
+    EXPECT_TRUE(allCloseToEight(10.0f));
+    EXPECT_FALSE(allCloseToEight(12.0f));
 }
 
 // NOLINTEND(readability-identifier-naming)

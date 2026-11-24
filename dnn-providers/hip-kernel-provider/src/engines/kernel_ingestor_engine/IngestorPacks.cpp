@@ -16,6 +16,9 @@ const std::vector<IngestorPack>& ingestorPacks()
     // in a way that matters before main().
     static const std::vector<IngestorPack> s_packs = {
         {"hipkernel:Pointwise", &registerPointwiseSymbols, &resetPointwiseModuleCache},
+        {"hipkernel:StandalonePointwise",
+         &registerStandalonePointwiseSymbols,
+         &resetStandalonePointwiseModuleCache},
         {"hipkernel:ConvFwd", &registerConvFwdSymbols, &resetConvFwdModuleCache},
 #ifdef HIPDNN_ENGINE_FLYDSL
         // Compiled only when FlyDSL staged a shard; see the gate in this directory's
@@ -65,6 +68,9 @@ const std::vector<IngestorPack>& ingestorPacks()
         {GFX950_ATTENTION_UNIFIED_3D_ENGINE_NAME,
          &registerGfx950AttentionUnified3DSymbols,
          &resetGfx950AttentionUnified3DModuleCache},
+        {GFX942_ATTENTION_UNIFIED_2D_ENGINE_NAME,
+         &registerGfx942AttentionUnified2DSymbols,
+         &resetGfx942AttentionUnified2DModuleCache},
         {"hipkernel:Gfx950ConvFwdAot",
          &registerGfx950ConvFwdAotSymbols,
          &resetGfx950ConvFwdAotModuleCache},

@@ -312,6 +312,18 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             SubtractsInTheRightDirection
     )
 
+    hkp_product_offers_engine(_standalone_pointwise_available "hipkernel:StandalonePointwise")
+    if(_standalone_pointwise_available)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            SUITES TestStandalonePointwisePacks
+            EXPECTED_CASES
+                ShipsOneShapeDynamicKernelPerArchitecture
+                EveryKernelDeclaresTheDynamicLaunchSignature
+        )
+    endif()
+
     # FlyDSL's kernels ship in the production shard, so their census addresses that
     # pack, narrowed to the architectures FlyDSL ships for: the product pack may be
     # wired for an architecture FlyDSL has no objects for, where these suites would find
@@ -437,8 +449,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     endif()
     # The split engine's slots are ops of their own (prep, dkdv, dq); its descriptor-only
     # engine folder has none. The census reads a shard only for an arch where all three slots
-    # ship, and the suite keys its inventory on the arch the entry names: gfx950 content for
-    # gfx950, gfx11-generic content for every gfx11 member. The merged engine's census above
+    # ship, and the suite keys its inventory on the arch the entry names: its own content for
+    # gfx950, gfx942 and gfx90a, gfx11-generic content for every gfx11 member. The merged engine's census above
     # is registered only where merged content ships (gfx950).
     set(_hkp_split_arches)
     foreach(_arch IN LISTS HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dq)
@@ -463,35 +475,37 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 ServesStampedRaggedGraphsAndDeclinesTheFieldsTheMatcherRejects
                 RefusesPlanSerialization
                 TheChunkContractKeepsAnAlignedBiasOffDirectRowsWithAStagedAlternative
+                PrepVecTailIsOneOnTheCdna9RowsAndTheKmdDefaultElsewhere
                 EveryProbeGraphIsServedByTheRowsTheModelNames
                 TheCoverageConstantsAreTheHeadDimsTheShippedParityRowsServe
         )
     endif()
-    # The host half of the split engine's parity cases checks the gfx11 shard against the
-    # matcher contract. The suite is compiled into the census binary whatever GPU_TARGETS
+    # The host half of the split engine's parity cases checks the gfx11, gfx90a and gfx942
+    # shards against the matcher contract. The suite is compiled into the census binary whatever GPU_TARGETS
     # holds: TheRock installs one copy of that binary for every family's test job, so a
     # copy built without gfx11 targets must still contain the suite a gfx11 entry runs. The
     # suite skips, which a census entry reports as a failure, when the shard it is handed
-    # holds no gfx11 pack. Only the registration is per arch: an entry for each gfx11 arch
-    # the three slot ops ship for, and none in a configuration without one.
+    # holds no pack of the entry's family. Only the registration is per arch: an entry for each
+    # gfx11, gfx90a and gfx942 arch the three slot ops ship for, and none in a configuration
+    # without one.
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         target_sources(hip_kernel_provider_census_tests PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestFlydslSdpaBwdParityGraphs.cpp
         )
     endif()
-    set(_hkp_gfx11_split_arches)
+    set(_hkp_parity_split_arches)
     foreach(_arch IN LISTS _hkp_split_arches)
-        if(_arch MATCHES "^gfx11")
-            list(APPEND _hkp_gfx11_split_arches ${_arch})
+        if(_arch MATCHES "^gfx11" OR _arch STREQUAL "gfx90a" OR _arch STREQUAL "gfx942")
+            list(APPEND _hkp_parity_split_arches ${_arch})
         endif()
     endforeach()
-    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND _hkp_gfx11_split_arches)
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND _hkp_parity_split_arches)
         # The pin names the parameterised cases of FlydslSdpaBwdParityCases.hpp, one per
         # case of the shared list the device half also launches.
         hkp_register_census_tests(
             TARGET hip_kernel_provider_census_tests
             PACK_NAME product
-            ARCHES ${_hkp_gfx11_split_arches}
+            ARCHES ${_hkp_parity_split_arches}
             SUITES TestFlydslSdpaBwdParityGraphs
             EXPECTED_CASES
                 IsServedOrDeclinedAsTheMatcherContractStates/ComputesBottomRightCausalCrossAttentionWithFewerQueriesThanKeys
@@ -560,6 +574,28 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 EveryKernelDeclaresTheFortyFourSlotSignature
         )
     endif()
+    # The trained models of every FlyDSL engine, over every architecture a FlyDSL op ships
+    # for: one suite, because each case checks whichever FlyDSL engines the shard holds.
+    # HKP_REQUIRE_DVC_DESCRIPTORS is set on the file with the rocKE ModelBinding files below.
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
+        set(_hkp_flydsl_model_arches "")
+        foreach(_hkp_op rmsnorm rmsnorm_bwd sdpa_aiw sdpa_cdna sdpa_cdna_decode sdpa_cdna_dualwave
+                        sdpa_rdna sdpa_rdna_decode sdpa_bwd_merged sdpa_bwd_split)
+            list(APPEND _hkp_flydsl_model_arches ${HIPKERNELPROVIDER_FLYDSL_ARCHS_${_hkp_op}})
+        endforeach()
+        list(REMOVE_DUPLICATES _hkp_flydsl_model_arches)
+        if(_hkp_flydsl_model_arches)
+            hkp_register_census_tests(
+                TARGET hip_kernel_provider_census_tests
+                PACK_NAME product
+                ARCHES ${_hkp_flydsl_model_arches}
+                SUITES TestFlydslModelBinding
+                EXPECTED_CASES
+                    EveryBoundL2KernelRankerLoads
+                    EveryBoundL1EnginePredictorLoadsAndMatchesThisBuild
+            )
+        endif()
+    endif()
 
     # The cases every generated Test<Engine>Packs suite below registers, shared by the
     # attention and RDNA calls.
@@ -617,7 +653,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(_hkp_companion_suites CatalogTiles catalog_tiles ModelBinding model_binding)
     set_source_files_properties(
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dModelBinding.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseModelBinding.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx1250ConvDgradAotModelBinding.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestFlydslModelBinding.cpp"
         PROPERTIES COMPILE_DEFINITIONS
             "HKP_REQUIRE_DVC_DESCRIPTORS=$<BOOL:${HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS}>")
     set(_hkp_catalog_tiles_cases_gfx950_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
@@ -627,7 +665,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         EveryShippedKernelsGeometryIsOneTheEngineLaunches
         EveryEntryLaunchesItsSegmentAndReduceKernels)
     set(_hkp_catalog_tiles_cases_gfx942_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
+    set(_hkp_catalog_tiles_cases_gfx942_unified_2d
+        EveryShippedKernelsGeometryIsOneTheEngineLaunches
+        EveryCellShipsItsHeadSizesDefaultGeometry
+        EveryCellRockeServesWithItsProductionStackShipsIt
+        EveryShippedKernelIsBottomRightCausalWithoutAWindow
+        TheShippedGqaRatioListIsTheCatalogsRatios)
     set(_hkp_model_binding_cases_gfx942_unified_3d
+        TheBoundL2KernelRankerLoads
+        TheBoundL1EnginePredictorLoadsAndMatchesThisBuild)
+    set(_hkp_model_binding_cases_gfx942_dense
         TheBoundL2KernelRankerLoads
         TheBoundL1EnginePredictorLoadsAndMatchesThisBuild)
 
@@ -746,6 +793,19 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             SUITES TestGfx950AttentionUnified2DDecodeHandoff
             EXPECTED_CASES
                 EveryDecodeCellHandedToUnified3DHasAUnified3DKernel
+        )
+    endif()
+
+    # The same boundary on gfx942: Unified2D hands decode at every GQA group Unified3d ships to
+    # Unified3d, so with both engines shipped each such 2D cell must have a 3D kernel.
+    if(_hkp_gfx942_attention_unified_2d AND _hkp_gfx942_attention_unified_3d)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx942
+            SUITES TestGfx942AttentionUnified2DDecodeHandoff
+            EXPECTED_CASES
+                EveryDecodeCellHandedToUnified3dHasAUnified3dKernel
         )
     endif()
 

@@ -166,6 +166,7 @@ def lds_bytes(block_q, block_kv):
 class BwdDkDvKnobs:
     """The resolved configuration of one fp32 dK/dV object (the record `bwd_dkdv_knobs` returns)."""
 
+    arch: str  # the Philox width table's key
     num_waves: int
     waves_per_eu: int | None
     block_q: int
@@ -234,6 +235,7 @@ def bwd_dkdv_knobs(arch, dtype, tile, cls, dropout, padded, hdim_qk, hdim_vo, **
     if lds > LDS_LIMIT:
         why.append(f"LDS {lds} B over the {LDS_LIMIT} B cap")
     return BwdDkDvKnobs(
+        arch=arch,
         num_waves=waves,
         waves_per_eu=wpe,
         block_q=bq,

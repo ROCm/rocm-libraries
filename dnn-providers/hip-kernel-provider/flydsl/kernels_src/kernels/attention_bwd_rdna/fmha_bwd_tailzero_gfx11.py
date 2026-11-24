@@ -1,5 +1,5 @@
 # Not vendored: written for this provider; it has no upstream.
-"""FlyDSL padded-row zeroing for the gfx11-generic (RDNA) SDPA backward: zero the logical rows `seq_len <= row < S` of the dense gradient outputs.
+"""FlyDSL padded-row zeroing for the RDNA-family SDPA backward (gfx11-generic, and the 16-bit objects of gfx942 and gfx90a): zero the logical rows `seq_len <= row < S` of the dense gradient outputs.
 
 A graph with `padding_mask` has per-batch lengths `seq_len_q[b]` and `seq_len_kv[b]`. The backward kernels write only the rows below
 them, so the rows past them of a dense dQ, dK or dV keep whatever the allocation held; the reference and cuDNN define them as zero.
