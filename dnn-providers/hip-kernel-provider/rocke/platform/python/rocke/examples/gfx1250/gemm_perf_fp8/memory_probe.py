@@ -21,7 +21,7 @@
 
 Both use the peak protocol (idle gap before each sample, short burst, median
 over samples) and report throughput; keep absolute figures out of the
-repository. Needs ``amdclang++`` (``$HIP_COMPILER``, ``PATH`` or ``$ROCM_PATH/bin``) and a
+repository. Needs ``amdclang++`` (``PATH`` or ``$ROCM_PATH/bin``) and a
 gfx1250 device.
 
   python3 -m rocke.examples.gfx1250.gemm_perf_fp8.memory_probe
