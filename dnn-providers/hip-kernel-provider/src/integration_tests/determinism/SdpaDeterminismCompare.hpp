@@ -183,7 +183,7 @@ enum class FindingKind
 {
     UNWRITTEN,
     NOT_A_NUMBER,
-    INFINITE,
+    INFINITE_VALUE,
     DIFFERS,
 };
 
@@ -207,7 +207,7 @@ struct Finding
         case FindingKind::NOT_A_NUMBER:
             what = "is not a number";
             break;
-        case FindingKind::INFINITE:
+        case FindingKind::INFINITE_VALUE:
             what = "is infinite";
             break;
         case FindingKind::DIFFERS:
@@ -311,7 +311,7 @@ inline std::optional<Finding> findInvalidElement(const std::string& tensor,
             }
             if(!allowInfinity && detail::isInfinity(type, at))
             {
-                return Finding{FindingKind::INFINITE, tensor, element, 0};
+                return Finding{FindingKind::INFINITE_VALUE, tensor, element, 0};
             }
         }
     }

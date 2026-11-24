@@ -48,7 +48,7 @@ inline float fp8E4M3FnuzToFloat(uint8_t bits)
 inline uint8_t fp8E4M3FnuzFromFloat(float value)
 {
     // The 127 nonzero magnitudes in increasing order, by code 1..127.
-    static const std::array<float, 127> MAGNITUDES = [] {
+    static const std::array<float, 127> s_magnitudes = [] {
         std::array<float, 127> table{};
         for(size_t code = 1; code <= 127; ++code)
         {
@@ -61,13 +61,13 @@ inline uint8_t fp8E4M3FnuzFromFloat(float value)
     {
         throw std::invalid_argument("fp8E4M3FnuzFromFloat: NaN has no finite encoding");
     }
-    const float magnitude = std::min(std::abs(value), MAGNITUDES.back());
+    const float magnitude = std::min(std::abs(value), s_magnitudes.back());
     // The first magnitude not below the value; the code before it is the one just below.
-    const auto upper = std::lower_bound(MAGNITUDES.begin(), MAGNITUDES.end(), magnitude);
-    const auto upperCode = static_cast<size_t>(upper - MAGNITUDES.begin()) + 1;
+    const auto upper = std::lower_bound(s_magnitudes.begin(), s_magnitudes.end(), magnitude);
+    const auto upperCode = static_cast<size_t>(upper - s_magnitudes.begin()) + 1;
     const size_t lowerCode = upperCode - 1;
-    const float lowerValue = lowerCode == 0 ? 0.0F : MAGNITUDES[lowerCode - 1];
-    const float upperValue = MAGNITUDES[upperCode - 1];
+    const float lowerValue = lowerCode == 0 ? 0.0F : s_magnitudes[lowerCode - 1];
+    const float upperValue = s_magnitudes[upperCode - 1];
 
     size_t code = upperCode;
     const float belowGap = magnitude - lowerValue;

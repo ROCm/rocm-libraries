@@ -570,7 +570,7 @@ inline std::string deriveBackwardOutputs(const DeterminismBwdSpec& spec,
     {
         return "the forward graph has no workspace size: " + result.err_msg;
     }
-    hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+    const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
     auto variantPack = forwardBundle.toDeviceVariantPack();
     result = built.graph->execute(handle, variantPack, workspace.get());
     if(result.code != hipdnn_frontend::ErrorCode::OK)
@@ -1116,7 +1116,7 @@ private:
 
     void reportMeasurement(const PreparedGraph& prepared,
                            const std::map<int64_t, OutputReport>& reports,
-                           size_t launches)
+                           size_t launches) const
     {
         bool anyDifference = false;
         for(const auto& [uid, output] : prepared.outputs)
@@ -1172,17 +1172,17 @@ struct RegisteredRow
 
 inline std::vector<RegisteredRow>& registeredDeterminismRows()
 {
-    static std::vector<RegisteredRow> rows;
-    return rows;
+    static std::vector<RegisteredRow> s_rows;
+    return s_rows;
 }
 
 /// Registers every row of @p rows as a gtest case under the names in the file comment. Called
 /// from a static initializer of the row's own file, before main() runs the tests. A row name
 /// registered twice is a defect of the tables and terminates the process.
-inline bool registerRows(std::vector<DeterminismRow> rows)
+inline bool registerRows(const std::vector<DeterminismRow>& rows)
 {
-    static std::set<std::string> registered;
-    for(auto& row : rows)
+    static std::set<std::string> s_registered;
+    for(const auto& row : rows)
     {
         std::string suite;
         std::string test;
@@ -1199,7 +1199,10 @@ inline bool registerRows(std::vector<DeterminismRow> rows)
         }
         registeredDeterminismRows().push_back(
             {row.meta.engine, row.meta.archs, row.meta.disposition});
-        if(!registered.insert(suite + "." + test).second)
+        std::string key = suite;
+        key += ".";
+        key += test;
+        if(!s_registered.insert(key).second)
         {
             std::cerr << "SDPA determinism row registered twice: " << suite << "." << test << "\n";
             std::terminate();

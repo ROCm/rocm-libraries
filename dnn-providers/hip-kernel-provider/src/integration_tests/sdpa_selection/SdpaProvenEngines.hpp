@@ -140,9 +140,9 @@ inline std::vector<SelectionRow> selectionRows()
     std::vector<std::string> bwdUnclaimedArchs;
     std::vector<std::string> bwdUnclaimed;
 #ifdef HKP_SDPA_SELECTION_ASM_ONLY
-    bwdUnclaimedArchs.push_back("gfx942");
-    bwdUnclaimedArchs.push_back("gfx950");
-    bwdUnclaimed.push_back("ASM_SDPA_ENGINE");
+    bwdUnclaimedArchs.emplace_back("gfx942");
+    bwdUnclaimedArchs.emplace_back("gfx950");
+    bwdUnclaimed.emplace_back("ASM_SDPA_ENGINE");
 #endif
     cases.push_back({"BwdBf16Hd128",
                      GraphKind::BACKWARD,

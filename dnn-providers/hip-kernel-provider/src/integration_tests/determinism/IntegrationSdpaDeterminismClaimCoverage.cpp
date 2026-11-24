@@ -54,8 +54,8 @@ struct ClaimedEngine
 /// comment above).
 const std::set<std::string>& provenButUnclaimedEngines()
 {
-    static const std::set<std::string> engines = {"ASM_SDPA_ENGINE", "HIP_FLASH2_ENGINE"};
-    return engines;
+    static const std::set<std::string> s_engines = {"ASM_SDPA_ENGINE", "HIP_FLASH2_ENGINE"};
+    return s_engines;
 }
 
 /// The 16 claimed engines and the architectures their descriptors ship, read from the catalog

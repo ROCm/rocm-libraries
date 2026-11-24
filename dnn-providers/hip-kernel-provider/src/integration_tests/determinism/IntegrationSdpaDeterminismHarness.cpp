@@ -208,7 +208,7 @@ void infinityIsRejectedUnlessAllowed()
                 = findInvalidElement("LSE", type, buffer.data(), everything(32), false);
             ASSERT_TRUE(rejected.has_value())
                 << elementBytes(type) << "-byte infinity, negative " << negative;
-            EXPECT_EQ(rejected->kind, FindingKind::INFINITE);
+            EXPECT_EQ(rejected->kind, FindingKind::INFINITE_VALUE);
             EXPECT_EQ(rejected->element, 4U);
             EXPECT_FALSE(findInvalidElement("LSE", type, buffer.data(), everything(32), true))
                 << "allowed infinity was rejected";
