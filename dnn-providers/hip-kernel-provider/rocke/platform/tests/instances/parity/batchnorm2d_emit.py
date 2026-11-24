@@ -84,6 +84,15 @@ CONFIGS = [
     (2, 8, 14, 14, 256, 4, "f16", True, False, 1, 1, False, True),  # 40 training, HW tail
     (1, 16, 8, 8, 64, 2, "f16", False, False, 1, 1, False, True),  # 41 inference
     (2, 8, 16, 16, 64, 2, "f16", True, True, 1, 1, True, True),  # 42 save_mv + fast_reduce
+    # --- dynamic + channels_per_block > 1 (needs no kernel-body masking) ---
+    (2, 8, 14, 14, 256, 4, "f16", True, False, 2, 1, False, True),  # 43 cpb=2, training
+    (1, 16, 8, 8, 64, 2, "f16", False, False, 4, 1, False, True),  # 44 cpb=4, inference
+    (2, 8, 16, 16, 64, 2, "bf16", True, True, 2, 1, True, True),  # 45 cpb=2, save_mv+fast_reduce
+    # --- dynamic + n_groups > 1 (runtime og-loop, masked hw_threads tail) ---
+    (4, 4, 14, 14, 256, 2, "f16", True, False, 1, 2, False, True),  # 46 ng=2, training
+    (4, 4, 7, 7, 256, 2, "f16", True, False, 1, 4, False, True),  # 47 ng=4, HW=49 pure tail
+    (4, 4, 16, 16, 256, 2, "f16", False, False, 1, 2, False, True),  # 48 ng=2, inference
+    (4, 8, 14, 14, 256, 2, "bf16", True, True, 2, 2, True, True),  # 49 cpb=2+ng=2, save_mv+fast_reduce
 ]
 
 

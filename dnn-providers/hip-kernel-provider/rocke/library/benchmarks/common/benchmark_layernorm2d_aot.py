@@ -40,7 +40,7 @@ from benchmarks.common.norm_bench_common import (
     rank_candidates,
     time_candidate,
 )
-from benchmarks.common.norm_sweep_space import norm_combos
+from benchmarks.common.norm_sweep_space import norm_combos, norm_dynamic_combos
 
 
 def _parse_args(argv):
@@ -77,8 +77,28 @@ def _parse_args(argv):
         "pre-warming the cache across many CPU workers before a GPU-pinned "
         "run_norm_shards.py pass",
     )
+    dyn = p.add_mutually_exclusive_group()
+    dyn.add_argument(
+        "--dynamic", dest="dynamic", action="store_true", default=None,
+        help="sweep the AOT-generic (dynamic=True) candidates: one compiled "
+        "binary per (block_size, vec) tuning config serves any runtime "
+        "row width instead of being built fresh per shape -- see "
+        "instances/common/layernorm2d.py's LayerNorm2DSpec.dynamic and "
+        "norm_kernel_cache.py's dynamic cache-key note. Default for "
+        "--kind layernorm (rmsnorm has no dynamic variant yet, so it "
+        "defaults to --static)",
+    )
+    dyn.add_argument(
+        "--static", dest="dynamic", action="store_false",
+        help="sweep the shape-specialized candidates instead (one compile "
+        "per exact rows/cols) -- the old default, kept for comparison/"
+        "debugging",
+    )
     add_fast_rank_args(p)
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    if args.dynamic is None:
+        args.dynamic = args.kind == "layernorm"
+    return args
 
 
 def _compile(spec, candidate, *, args, dims):
@@ -127,7 +147,12 @@ def _validate_norm2d(artifact, *, grid, block, x, y, gamma, beta, kind, dtype, k
 def main(argv=None) -> int:
     args = _parse_args(argv or sys.argv[1:])
 
-    combos = norm_combos(
+    if args.dynamic and args.kind != "layernorm":
+        print("--dynamic only has a layernorm candidate set (no dynamic rmsnorm yet)",
+              file=sys.stderr)
+        return 1
+    combo_fn = norm_dynamic_combos if args.dynamic else norm_combos
+    combos = combo_fn(
         rows=args.rows, cols=args.cols, dtype=args.dtype,
         arch=args.arch, kind=args.kind,
     )

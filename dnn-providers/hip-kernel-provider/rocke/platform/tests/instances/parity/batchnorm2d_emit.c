@@ -101,6 +101,15 @@ static const bn_cfg_t CONFIGS[] = {
     {2, 8, 14, 14, 256, 4, "f16", true, false, 1, 1, false, true},
     {1, 16, 8, 8, 64, 2, "f16", false, false, 1, 1, false, true},
     {2, 8, 16, 16, 64, 2, "f16", true, true, 1, 1, true, true},
+    /* 43..45 dynamic + channels_per_block > 1 (needs no kernel-body masking) */
+    {2, 8, 14, 14, 256, 4, "f16", true, false, 2, 1, false, true},
+    {1, 16, 8, 8, 64, 2, "f16", false, false, 4, 1, false, true},
+    {2, 8, 16, 16, 64, 2, "bf16", true, true, 2, 1, true, true},
+    /* 46..49 dynamic + n_groups > 1 (runtime og-loop, masked hw_threads tail) */
+    {4, 4, 14, 14, 256, 2, "f16", true, false, 1, 2, false, true},
+    {4, 4, 7, 7, 256, 2, "f16", true, false, 1, 4, false, true},
+    {4, 4, 16, 16, 256, 2, "f16", false, false, 1, 2, false, true},
+    {4, 8, 14, 14, 256, 2, "bf16", true, true, 2, 2, true, true},
 };
 
 #define NCFG ((int)(sizeof(CONFIGS) / sizeof(CONFIGS[0])))

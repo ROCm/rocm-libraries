@@ -30,6 +30,7 @@ from ...instances.common import batchnorm2d as _bn
 from ..core import (
     Capability,
     CandidateRegistry,
+    DimRelation,
     DispatchResult,
     KernelCandidate,
     KernelId,
@@ -369,6 +370,174 @@ def _default_ranker(
         return (tier, _spec_has_tail(req, spec), c.priority)
 
     return sorted(candidates, key=key)
+
+
+# ===================================================================== #
+# Dynamic (AOT-generic) candidates -- capability-admission scaffolding
+# ===================================================================== #
+#
+# conv's AOT instances (library/dispatch/grouped_convolution.py's _admits) are
+# served by one compiled binary per tuning config that *admits* any runtime
+# problem its declared capability covers, instead of one build per exact
+# shape. instances/common/batchnorm2d.py's ``dynamic=True`` kernels
+# (BatchNorm2DSpec.dynamic) now do the same at the kernel-body level: N/H/W
+# are runtime kernargs, and channels_per_block/n_groups generalize via a
+# dispatch-time "does this request's C/N divide evenly" check rather than a
+# build-time one (see is_valid_spec's dynamic branch).
+#
+# This section is that dispatch-time check, built on the SAME Capability /
+# DimRelation data the framework already has (core.py) -- no bespoke
+# "_admits" needed, since DimRelation's "multiple_of" op already expresses
+# exactly "this candidate's C must divide the request's C" as data.
+#
+# Deliberately NOT wired into BATCHNORM_REGISTRY / dispatch_batchnorm:
+# dynamic_batchnorm_candidates_for() is gated by
+# ENABLE_DYNAMIC_BATCHNORM_DISPATCH (False) and returns () unconditionally
+# while that flag is off, so production dispatch is completely unaffected.
+# The admission machinery (capability relations + support()) is real and
+# exercisable directly (flip the flag, or call the candidates' own
+# .admits()) -- this is scaffolding ahead of actually routing production
+# traffic through it, not a placeholder stub.
+
+ENABLE_DYNAMIC_BATCHNORM_DISPATCH = False
+
+
+def _make_dynamic_candidate(
+    *,
+    block_size: int,
+    vec: int,
+    channels_per_block: int,
+    n_groups: int,
+    fast_reduce: bool,
+    priority: int,
+) -> KernelCandidate:
+    cpb_suffix = f"_cpb{channels_per_block}" if channels_per_block != 1 else ""
+    ng_suffix = f"_ng{n_groups}" if n_groups != 1 else ""
+    fr_suffix = "_fr" if fast_reduce else ""
+    spec_id = f"batchnorm_dyn_b{block_size}_v{vec}{cpb_suffix}{ng_suffix}{fr_suffix}"
+    name = f"batchnorm2d_{spec_id}"
+
+    def _placeholder_spec(req: BatchNormRequest) -> _bn.BatchNorm2DSpec:
+        # n/c/h/w are capacity placeholders, never read in-kernel in
+        # dynamic mode (see BatchNorm2DSpec.dynamic's docstring) -- the
+        # real runtime N/C/H/W come from the request at launch time, not
+        # from this spec. c=channels_per_block is the smallest value that
+        # satisfies channels_per_block's own "c positive and (when not
+        # dynamic) divisible by cpb" shape here.
+        dtype = _bn_dtype(req.dtype)
+        wave = ArchTarget.from_gfx(req.arch).wave_size
+        return _bn.BatchNorm2DSpec(
+            n=max(n_groups, 1),
+            c=max(channels_per_block, 1),
+            h=1,
+            w=1,
+            block_size=block_size,
+            vec=vec,
+            dtype=dtype,
+            training=bool(req.training),
+            channels_per_block=channels_per_block,
+            n_groups=n_groups,
+            fast_reduce=fast_reduce,
+            wave_size=wave,
+            dynamic=True,
+        )
+
+    def support(req: OperatorRequest) -> Tuple[bool, str]:
+        errors = _request_errors(req)
+        if errors:
+            return False, "; ".join(errors)
+        assert isinstance(req, BatchNormRequest)
+        ok, why = selector_matches(req, candidate)
+        if not ok:
+            return False, why
+        spec = _placeholder_spec(req)
+        return _bn.is_valid_spec(spec, arch=req.arch)
+
+    def select(req: OperatorRequest) -> _bn.BatchNorm2DSpec:
+        ok, why = candidate.admits(req)
+        if not ok:
+            raise ValueError(f"{name} does not support request: {why}")
+        assert isinstance(req, BatchNormRequest)
+        return _placeholder_spec(req)
+
+    candidate = KernelCandidate(
+        name=name,
+        family=_FAMILY,
+        algorithm="batchnorm",
+        spec_id=spec_id,
+        abi_version=BATCHNORM_ABI_VERSION,
+        priority=priority,
+        capability=Capability(
+            arches=_BATCHNORM_ARCHES,
+            dtypes=("f16", "bf16"),
+            relations=(
+                DimRelation(lhs="c", op="multiple_of", rhs=channels_per_block),
+                DimRelation(lhs="n", op="multiple_of", rhs=n_groups),
+            ),
+        ),
+        _supports=support,
+        select_spec=select,
+        signature=lambda _spec: (),
+        grid=_grid,
+        block=lambda spec: (int(spec.block_size), 1, 1),
+        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+        build=_build,
+        opt_in=True,
+    )
+    return candidate
+
+
+def _build_dynamic_candidates() -> Tuple[KernelCandidate, ...]:
+    cands = []
+    for cpb_rank, cpb in enumerate(_CHANNELS_PER_BLOCK):
+        for ng_rank, ng in enumerate(_N_GROUPS):
+            for fr_rank, fr in enumerate(_FAST_REDUCE):
+                prio = 10 + cpb_rank * 100000 + ng_rank * 1000 + fr_rank * 100
+                for bs in _BLOCK_SIZES:
+                    for v in _VECS:
+                        cands.append(
+                            _make_dynamic_candidate(
+                                block_size=bs,
+                                vec=v,
+                                channels_per_block=cpb,
+                                n_groups=ng,
+                                fast_reduce=fr,
+                                priority=prio,
+                            )
+                        )
+                        prio += 1
+    return tuple(cands)
+
+
+_DYNAMIC_BATCHNORM_CANDIDATES = _build_dynamic_candidates()
+
+
+def dynamic_batchnorm_candidates() -> Tuple[KernelCandidate, ...]:
+    """Every registered dynamic (AOT-generic) batchnorm2d candidate,
+    unfiltered by any request -- for introspection and direct testing of
+    the admission machinery regardless of :data:`ENABLE_DYNAMIC_BATCHNORM_DISPATCH`.
+    """
+    return _DYNAMIC_BATCHNORM_CANDIDATES
+
+
+def dynamic_batchnorm_candidates_for(
+    req: BatchNormRequest,
+) -> Tuple[KernelCandidate, ...]:
+    """Dynamic candidates admitting ``req``, gated by
+    :data:`ENABLE_DYNAMIC_BATCHNORM_DISPATCH`.
+
+    Returns ``()`` unconditionally while that flag is ``False`` (its
+    default): the dynamic kernel path has not yet been validated/benchmarked
+    enough to route real dispatch traffic through it, so this is
+    intentionally inert in production today, not an oversight. Flip the
+    flag (or call a candidate's own ``.admits(req)``) to exercise the real
+    admission logic directly.
+    """
+    if not ENABLE_DYNAMIC_BATCHNORM_DISPATCH:
+        return ()
+    if _request_errors(req):
+        return ()
+    return tuple(c for c in _DYNAMIC_BATCHNORM_CANDIDATES if c.admits(req)[0])
 
 
 def dispatch_batchnorm(

@@ -303,6 +303,125 @@ def dispatch_norm_all(req: NormRequest) -> Tuple[DispatchResult, ...]:
     return NORM_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
 
 
+# ===================================================================== #
+# Dynamic (AOT-generic) candidates -- capability-admission scaffolding
+# ===================================================================== #
+#
+# Same pattern as dispatch/families/batchnorm.py's dynamic-candidate
+# section (see its module comment for the full rationale): layernorm2d's
+# ``dynamic=True`` kernels (LayerNorm2DSpec.dynamic) make the row width a
+# runtime kernarg instead of a compile-time shape, so one compiled binary
+# admits any ``cols`` -- no DimRelation needed here (unlike batchnorm's
+# channels_per_block/n_groups), since the dynamic layernorm2d kernel body
+# enforces no capacity ceiling on ``cols`` at all (see
+# _build_layernorm2d_dynamic's docstring). ``rmsnorm`` has no dynamic
+# variant yet (RMSNorm2DSpec has no ``dynamic`` field), so only
+# ``kind="layernorm"`` dynamic candidates exist.
+#
+# Deliberately NOT wired into NORM_REGISTRY / dispatch_norm:
+# dynamic_norm_candidates_for() is gated by ENABLE_DYNAMIC_NORM_DISPATCH
+# (False) and returns () unconditionally while that flag is off, so
+# production dispatch is completely unaffected.
+
+ENABLE_DYNAMIC_NORM_DISPATCH = False
+
+
+def _make_dynamic_candidate(*, block_size: int, vec: int, priority: int) -> KernelCandidate:
+    spec_id = f"layernorm_dyn_b{block_size}_v{vec}"
+    name = f"norm2d_{spec_id}"
+
+    def _placeholder_spec(req: NormRequest) -> _ln.LayerNorm2DSpec:
+        # n_per_block is a capacity placeholder: the dynamic kernel body
+        # never enforces it as a ceiling on the real runtime ``cols`` (see
+        # _build_layernorm2d_dynamic's docstring), so any positive multiple
+        # of block_size*vec here is fine -- block_size*vec itself is the
+        # smallest legal value.
+        dtype = _norm_dtype(req.dtype)
+        wave = ArchTarget.from_gfx(req.arch).wave_size
+        return _ln.LayerNorm2DSpec(
+            n_per_block=block_size * vec,
+            block_size=block_size,
+            vec=vec,
+            dtype=dtype,
+            wave_size=wave,
+            dynamic=True,
+        )
+
+    def support(req: OperatorRequest) -> Tuple[bool, str]:
+        errors = _request_errors(req)
+        if errors:
+            return False, "; ".join(errors)
+        assert isinstance(req, NormRequest)
+        if req.kind.lower() != "layernorm":
+            return False, f"candidate kind 'layernorm' != request kind {req.kind!r}"
+        ok, why = selector_matches(req, candidate)
+        if not ok:
+            return False, why
+        spec = _placeholder_spec(req)
+        return _ln.is_valid_spec(spec, arch=req.arch)
+
+    def select(req: OperatorRequest) -> _ln.LayerNorm2DSpec:
+        ok, why = candidate.admits(req)
+        if not ok:
+            raise ValueError(f"{name} does not support request: {why}")
+        assert isinstance(req, NormRequest)
+        return _placeholder_spec(req)
+
+    candidate = KernelCandidate(
+        name=name,
+        family=_FAMILY,
+        algorithm="layernorm",
+        spec_id=spec_id,
+        abi_version=NORM_ABI_VERSION,
+        priority=priority,
+        capability=Capability(arches=_NORM_ARCHES, dtypes=("f16", "bf16")),
+        _supports=support,
+        select_spec=select,
+        signature=lambda _spec: (),
+        grid=_grid,
+        block=lambda spec: (int(spec.block_size), 1, 1),
+        sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+        build=_build,
+        opt_in=True,
+    )
+    return candidate
+
+
+def _build_dynamic_candidates() -> Tuple[KernelCandidate, ...]:
+    cands = []
+    for bs in _BLOCK_SIZES:
+        for v in _VECS:
+            prio = _candidate_priority(block_size=bs, vec=v)
+            cands.append(_make_dynamic_candidate(block_size=bs, vec=v, priority=prio))
+    return tuple(cands)
+
+
+_DYNAMIC_NORM_CANDIDATES = _build_dynamic_candidates()
+
+
+def dynamic_norm_candidates() -> Tuple[KernelCandidate, ...]:
+    """Every registered dynamic (AOT-generic) layernorm2d candidate,
+    unfiltered by any request -- for introspection and direct testing of
+    the admission machinery regardless of :data:`ENABLE_DYNAMIC_NORM_DISPATCH`.
+    """
+    return _DYNAMIC_NORM_CANDIDATES
+
+
+def dynamic_norm_candidates_for(req: NormRequest) -> Tuple[KernelCandidate, ...]:
+    """Dynamic candidates admitting ``req``, gated by
+    :data:`ENABLE_DYNAMIC_NORM_DISPATCH`.
+
+    Returns ``()`` unconditionally while that flag is ``False`` (its
+    default) -- see :func:`rocke.dispatch.families.batchnorm.dynamic_batchnorm_candidates_for`
+    for the identical rationale.
+    """
+    if not ENABLE_DYNAMIC_NORM_DISPATCH:
+        return ()
+    if _request_errors(req):
+        return ()
+    return tuple(c for c in _DYNAMIC_NORM_CANDIDATES if c.admits(req)[0])
+
+
 def dispatch_norm(req: NormRequest, *, ranker: Ranker | None = None) -> DispatchResult:
     """Select a registered norm2d candidate for ``req``."""
     candidate = NORM_REGISTRY.select(req, ranker=ranker)

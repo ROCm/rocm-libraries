@@ -244,11 +244,18 @@ def is_valid_spec(spec: BatchNorm2DSpec, arch: str = "gfx950") -> Tuple[bool, st
 
     if spec.channels_per_block <= 0:
         return False, "channels_per_block must be positive"
-    if spec.c % spec.channels_per_block != 0:
+    if not spec.dynamic and spec.c % spec.channels_per_block != 0:
         return False, (
             f"c {spec.c} not divisible by channels_per_block "
             f"{spec.channels_per_block}"
         )
+    # In dynamic mode spec.c is a capacity placeholder, not the real shape:
+    # CPB needs no kernel-body change (C is never read in-kernel, only for
+    # host-side grid sizing), so "CPB divides C" moves from a build-time
+    # check here to a dispatch-time admission check against the REAL
+    # runtime C (see dispatch/families/batchnorm.py) -- exactly how conv's
+    # tile-shape capabilities are admitted against a runtime problem
+    # instead of baked into the build.
 
     if spec.n_groups <= 0:
         return False, "n_groups must be positive"
@@ -257,14 +264,13 @@ def is_valid_spec(spec: BatchNorm2DSpec, arch: str = "gfx950") -> Tuple[bool, st
             f"block_size {spec.block_size} not divisible by n_groups "
             f"{spec.n_groups}"
         )
-    if spec.n % spec.n_groups != 0:
+    if not spec.dynamic and spec.n % spec.n_groups != 0:
         return False, f"n {spec.n} not divisible by n_groups {spec.n_groups}"
-
-    if spec.dynamic and (spec.channels_per_block != 1 or spec.n_groups != 1):
-        return False, (
-            "dynamic=True requires channels_per_block == 1 and n_groups == 1 "
-            "(their masked-tail/multi-group machinery is not yet shape-generic)"
-        )
+    # Dynamic mode's "N divides n_groups evenly" requirement moves from
+    # this build-time check to a dispatch-time admission check against
+    # the REAL runtime N, same as channels_per_block above -- the kernel
+    # body's og-loop (N // NG, computed at runtime) needs no masking for
+    # it, it just must never be dispatched against an N it doesn't divide.
 
     if spec.fast_reduce and not spec.training:
         return False, "fast_reduce requires training=True (inference has no reduction to speed up)"
@@ -942,10 +948,29 @@ def build_batchnorm2d(spec: BatchNorm2DSpec) -> KernelDef:
 
 def _build_batchnorm2d_dynamic(spec: BatchNorm2DSpec) -> KernelDef:
     """AOT-generic BatchNorm2D: one compiled binary serves any runtime
-    ``N/H/W`` (``C`` only ever mattered for row addressing and host-side
-    grid sizing, both already runtime-safe -- see ``batchnorm2d_grid``).
-    Requires ``channels_per_block == n_groups == 1`` (enforced by
-    :func:`is_valid_spec`): one CTA per channel, no sub-group split.
+    ``N/H/W``. ``C`` only ever mattered for row addressing and host-side
+    grid sizing (``batchnorm2d_grid = C // channels_per_block``), both
+    already runtime-safe -- so ``channels_per_block > 1`` needs no kernel
+    change at all: the CPB loop below is identical to
+    ``build_batchnorm2d``'s, Python-unrolled over the compile-time CPB,
+    and dispatch (not this function) is what must only ever launch a
+    dynamic CPB>1 candidate against a runtime ``C`` that divides it
+    evenly (see :func:`is_valid_spec`'s dynamic branch and
+    ``dispatch/families/batchnorm.py``).
+
+    ``n_groups > 1`` DOES need kernel-body work (unlike CPB): the
+    ``for og in range(N // NG):`` outer step in ``build_batchnorm2d``'s
+    static ``n_groups>1`` branch has a Python-time trip count today, so it
+    becomes a genuine runtime ``scf.for`` here too (``N // NG`` computed
+    at runtime via ``b.div``), with each ``og`` step's
+    ``hw_threads = BS // NG``-wide row sweep going through the same
+    ``sweep_row_chunks_dynamic`` + masked-tail machinery as the
+    ``n_groups == 1`` path, just scoped to ``hw_threads`` instead of
+    ``BS`` and to ``tid_within_row`` instead of ``tid`` -- mirroring how
+    ``build_batchnorm2d``'s two branches are already a full duplication of
+    each other rather than one parameterized over ``hw_threads`` (per
+    that function's own comment: keeping them separate is what lets the
+    ``n_groups == 1`` emission stay untouched).
 
     The N-loop (``build_batchnorm2d``'s Python-unrolled ``for n in
     range(N)``) becomes a genuine runtime ``scf.for``
@@ -958,11 +983,11 @@ def _build_batchnorm2d_dynamic(spec: BatchNorm2DSpec) -> KernelDef:
 
     Always streams X twice (no per-sample register cache: a runtime trip
     count can't back one sized at build time), and gamma/beta/running
-    stats are loaded exactly once (they are per-channel scalars, same as
-    the static path).
+    stats are loaded exactly once per channel (they are per-channel
+    scalars, same as the static path).
     """
     io_ty = io_ir_type(spec.dtype)
-    BS, VEC = spec.block_size, spec.vec
+    BS, VEC, CPB, NG = spec.block_size, spec.vec, spec.channels_per_block, spec.n_groups
     cap = spec.n * spec.c  # capacity placeholder; not used for addressing
 
     b = IRBuilder(spec.kernel_name())
@@ -992,7 +1017,7 @@ def _build_batchnorm2d_dynamic(spec: BatchNorm2DSpec) -> KernelDef:
 
     HW = b.mul(p_h, p_w)
     tid = b.thread_id_x()
-    channel = b.block_id_x()  # channels_per_block == 1: no CPB loop
+    base_channel = b.block_id_x()
 
     # Row stride is the runtime HW (not a compile-time shape): the
     # TensorDescriptor already accepts an SSA Value stride (see
@@ -1008,152 +1033,350 @@ def _build_batchnorm2d_dynamic(spec: BatchNorm2DSpec) -> KernelDef:
             b, dtype=F32, shape=(BS,), name_hint="lds_count"
         ).base
 
-    if spec.training:
-        # --- Pass 1: runtime N-loop of runtime-trip-count row sweeps -----
-        def pass1_body(_n_off, x_scalars, iter_vars):
-            sum_p, sumsq_p = iter_vars
-            sq_scalars = [b.fmul(xi, xi) for xi in x_scalars]
-            sum_p = b.fadd(sum_p, tree_reduce(b, b.fadd, list(x_scalars)))
-            sumsq_p = b.fadd(sumsq_p, tree_reduce(b, b.fadd, sq_scalars))
-            return [sum_p, sumsq_p]
-
-        def outer_pass1_body(n, outer_iter_vars):
-            sum_p, sumsq_p, tail_count_p = outer_iter_vars
-            row_n = b.add(b.mul(n, p_c), channel)
-            x_tile_n = make_tile_window(
-                x_view, lengths=(1, 1), origin=(row_n, b.const_i32(0))
-            )
-            (sum_p, sumsq_p), main_elems, _tail = sweep_row_chunks_dynamic(
-                b,
-                x_tile_n,
-                tid=tid,
-                block_size=BS,
-                vec=VEC,
-                length=HW,
-                iter_args=[("sum_p_hw", sum_p), ("sumsq_p_hw", sumsq_p)],
-                body=pass1_body,
-                iv_name="hw0",
-            )
-            for tc in range(VEC):
-                idx_col = b.add(b.add(main_elems, b.const_i32(tc * BS)), tid)
-                valid = b.cmp_lt(idx_col, HW)
-                idx_safe = b.smin(idx_col, b.sub(HW, b.const_i32(1)))
-                flat = b.add(b.mul(row_n, HW), idx_safe)
-                x_raw = load_scalar_as_f32(b, X, flat, dtype=spec.dtype)
-                x_masked = b.select(valid, x_raw, b.const_f32(0.0))
-                valid_f = b.select(valid, b.const_f32(1.0), b.const_f32(0.0))
-                sum_p = b.fadd(sum_p, x_masked)
-                sumsq_p = b.fadd(sumsq_p, b.fmul(x_masked, x_masked))
-                tail_count_p = b.fadd(tail_count_p, valid_f)
-            return [sum_p, sumsq_p, tail_count_p]
-
-        for_op = b.scf_for_iter(
-            b.const_i32(0),
-            p_n,
-            b.const_i32(1),
-            [
-                ("sum_p", b.const_f32(0.0)),
-                ("sumsq_p", b.const_f32(0.0)),
-                ("tail_count_p", b.const_f32(0.0)),
-            ],
-            iv_name="n0",
-        )
-        with for_op as (n_iv, outer_iter_vars):
-            new_vals = outer_pass1_body(n_iv, outer_iter_vars)
-            b.scf_yield(*new_vals)
-        sum_p, sumsq_p, tail_count_p = for_op.results
-
-        # Loop-invariant across samples: every n sweeps the same HW, so the
-        # per-thread main-loop element count is the same each iteration --
-        # compute the total once rather than carrying it through the loop.
-        trip_count = b.div(HW, b.const_i32(BS * VEC))
-        main_per_thread_total = b.mul(p_n, b.mul(trip_count, b.const_i32(VEC)))
-        count_val = b.fadd(b.sitofp_f32(main_per_thread_total), tail_count_p)
-
-        mean_p = b.fdiv(sum_p, count_val)
-        m2_p = b.fsub(sumsq_p, b.fmul(mean_p, sum_p))
-
-        if spec.fast_reduce:
-            mean, var = welford_block_reduce_stable_wave_prologue(
-                b,
-                mean_p,
-                m2_p,
-                count_val,
-                lds_mean,
-                lds_m2,
-                lds_count,
-                tid,
-                block_size=BS,
-                wave_size=spec.wave_size,
-            )
+    # CPB channels, one fully resolved at a time, same shape as
+    # build_batchnorm2d's own CPB loop (including the "every lane done
+    # reading channel cb's LDS before any lane writes channel cb+1's LDS"
+    # sync) -- CPB==1 collapses back to exactly the pre-CPB-support
+    # emission, so this is byte-identical to before for the default case.
+    for cb in range(CPB):
+        if CPB == 1:
+            channel = base_channel
         else:
-            mean, var = welford_block_reduce_stable(
-                b, mean_p, m2_p, count_val, lds_mean, lds_m2, lds_count, tid, block_size=BS
+            channel = b.add(b.mul(base_channel, b.const_i32(CPB)), b.const_i32(cb))
+            if spec.training and cb > 0:
+                b.sync()
+
+        if NG == 1:
+            if spec.training:
+                # --- Pass 1: runtime N-loop of runtime-trip-count row sweeps -
+                def pass1_body(_n_off, x_scalars, iter_vars):
+                    sum_p, sumsq_p = iter_vars
+                    sq_scalars = [b.fmul(xi, xi) for xi in x_scalars]
+                    sum_p = b.fadd(sum_p, tree_reduce(b, b.fadd, list(x_scalars)))
+                    sumsq_p = b.fadd(sumsq_p, tree_reduce(b, b.fadd, sq_scalars))
+                    return [sum_p, sumsq_p]
+
+                def outer_pass1_body(n, outer_iter_vars, _channel=channel):
+                    sum_p, sumsq_p, tail_count_p = outer_iter_vars
+                    row_n = b.add(b.mul(n, p_c), _channel)
+                    x_tile_n = make_tile_window(
+                        x_view, lengths=(1, 1), origin=(row_n, b.const_i32(0))
+                    )
+                    (sum_p, sumsq_p), main_elems, _tail = sweep_row_chunks_dynamic(
+                        b,
+                        x_tile_n,
+                        tid=tid,
+                        block_size=BS,
+                        vec=VEC,
+                        length=HW,
+                        iter_args=[("sum_p_hw", sum_p), ("sumsq_p_hw", sumsq_p)],
+                        body=pass1_body,
+                        iv_name="hw0",
+                    )
+                    for tc in range(VEC):
+                        idx_col = b.add(b.add(main_elems, b.const_i32(tc * BS)), tid)
+                        valid = b.cmp_lt(idx_col, HW)
+                        idx_safe = b.smin(idx_col, b.sub(HW, b.const_i32(1)))
+                        flat = b.add(b.mul(row_n, HW), idx_safe)
+                        x_raw = load_scalar_as_f32(b, X, flat, dtype=spec.dtype)
+                        x_masked = b.select(valid, x_raw, b.const_f32(0.0))
+                        valid_f = b.select(valid, b.const_f32(1.0), b.const_f32(0.0))
+                        sum_p = b.fadd(sum_p, x_masked)
+                        sumsq_p = b.fadd(sumsq_p, b.fmul(x_masked, x_masked))
+                        tail_count_p = b.fadd(tail_count_p, valid_f)
+                    return [sum_p, sumsq_p, tail_count_p]
+
+                for_op = b.scf_for_iter(
+                    b.const_i32(0),
+                    p_n,
+                    b.const_i32(1),
+                    [
+                        ("sum_p", b.const_f32(0.0)),
+                        ("sumsq_p", b.const_f32(0.0)),
+                        ("tail_count_p", b.const_f32(0.0)),
+                    ],
+                    iv_name="n0",
+                )
+                with for_op as (n_iv, outer_iter_vars):
+                    new_vals = outer_pass1_body(n_iv, outer_iter_vars)
+                    b.scf_yield(*new_vals)
+                sum_p, sumsq_p, tail_count_p = for_op.results
+
+                # Loop-invariant across samples: every n sweeps the same HW,
+                # so the per-thread main-loop element count is the same each
+                # iteration -- compute the total once rather than carrying it
+                # through the loop.
+                trip_count = b.div(HW, b.const_i32(BS * VEC))
+                main_per_thread_total = b.mul(p_n, b.mul(trip_count, b.const_i32(VEC)))
+                count_val = b.fadd(b.sitofp_f32(main_per_thread_total), tail_count_p)
+
+                mean_p = b.fdiv(sum_p, count_val)
+                m2_p = b.fsub(sumsq_p, b.fmul(mean_p, sum_p))
+
+                if spec.fast_reduce:
+                    mean, var = welford_block_reduce_stable_wave_prologue(
+                        b,
+                        mean_p,
+                        m2_p,
+                        count_val,
+                        lds_mean,
+                        lds_m2,
+                        lds_count,
+                        tid,
+                        block_size=BS,
+                        wave_size=spec.wave_size,
+                    )
+                else:
+                    mean, var = welford_block_reduce_stable(
+                        b, mean_p, m2_p, count_val, lds_mean, lds_m2, lds_count, tid, block_size=BS
+                    )
+
+                with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
+                    old_mean = b.global_load_f32(RunningMean, channel)
+                    old_var = b.global_load_f32(RunningVar, channel)
+                    one_minus_mom = b.fsub(b.const_f32(1.0), momentum)
+                    new_running_mean = b.fadd(
+                        b.fmul(one_minus_mom, old_mean), b.fmul(momentum, mean)
+                    )
+                    new_running_var = b.fadd(
+                        b.fmul(one_minus_mom, old_var), b.fmul(momentum, var)
+                    )
+                    b.global_store(RunningMean, channel, new_running_mean)
+                    b.global_store(RunningVar, channel, new_running_var)
+                    if spec.save_mean_invstd:
+                        inv_std_save = b.rsqrt(b.fadd(var, eps))
+                        store_scalar_from_f32(b, Mean, channel, mean, dtype=spec.dtype)
+                        store_scalar_from_f32(
+                            b, InvStd, channel, inv_std_save, dtype=spec.dtype
+                        )
+            else:
+                mean = b.global_load_f32(RunningMean, channel)
+                var = b.global_load_f32(RunningVar, channel)
+
+            inv_std = b.rsqrt(b.fadd(var, eps))
+            gamma_v = load_scalar_as_f32(b, Gamma, channel, dtype=spec.dtype)
+            beta_v = load_scalar_as_f32(b, Beta, channel, dtype=spec.dtype)
+            scale = b.fmul(inv_std, gamma_v)
+
+            # --- Pass 2: runtime N-loop (no carried state) of runtime write
+            # sweeps ----------------------------------------------------
+            def pass2_body(n_off, x_tile_n, _mean=mean, _scale=scale, _beta_v=beta_v):
+                x_scalars = x_tile_n.load_vec_as_f32(b, b.const_i32(0), n_off, n=VEC)
+                return [
+                    b.fadd(b.fmul(b.fsub(x_scalars[i], _mean), _scale), _beta_v)
+                    for i in range(VEC)
+                ]
+
+            outer_for = b.scf_for(b.const_i32(0), p_n, b.const_i32(1), iv_name="n1")
+            with outer_for as n_iv:
+                row_n = b.add(b.mul(n_iv, p_c), channel)
+                x_tile_n = make_tile_window(
+                    x_view, lengths=(1, 1), origin=(row_n, b.const_i32(0))
+                )
+                y_tile_n = make_tile_window(
+                    y_view, lengths=(1, 1), origin=(row_n, b.const_i32(0))
+                )
+                trip_count2 = b.div(HW, b.const_i32(BS * VEC))
+                main_elems2 = b.mul(trip_count2, b.const_i32(BS * VEC))
+                pass2_row_chunks_dynamic(
+                    b,
+                    y_tile_n,
+                    tid=tid,
+                    block_size=BS,
+                    vec=VEC,
+                    main_elems_per_row=main_elems2,
+                    trip_count=trip_count2,
+                    body=lambda n_off, _x_tile_n=x_tile_n: pass2_body(n_off, _x_tile_n),
+                    iv_name="hw1",
+                )
+                for tc in range(VEC):
+                    idx_col = b.add(b.add(main_elems2, b.const_i32(tc * BS)), tid)
+                    valid = b.cmp_lt(idx_col, HW)
+                    with b.scf_if(valid):
+                        flat = b.add(b.mul(row_n, HW), idx_col)
+                        x_raw = load_scalar_as_f32(b, X, flat, dtype=spec.dtype)
+                        y_val = b.fadd(b.fmul(b.fsub(x_raw, mean), scale), beta_v)
+                        store_scalar_from_f32(b, Y, flat, y_val, dtype=spec.dtype)
+        else:
+            # --- n_groups > 1: N and H*W split across the CTA's threads
+            # simultaneously, runtime-generic counterpart of
+            # build_batchnorm2d's n_groups>1 branch. ``og`` ranges over a
+            # RUNTIME ``N // NG`` (b.div(p_n, NG)) instead of a Python-time
+            # one; each thread's sample index is still
+            # ``n_runtime = og*NG + lidihw``, and the per-og row sweep is
+            # the same sweep_row_chunks_dynamic + masked-tail idiom the
+            # n_groups==1 branch uses, just scoped to
+            # ``hw_threads = BS // NG`` threads and ``tid_within_row``
+            # instead of the full block/``tid``.
+            hw_threads = BS // NG
+            c_hw_threads = b.const_i32(hw_threads)
+            lidihw = b.div(tid, c_hw_threads)
+            tid_within_row = b.mod(tid, c_hw_threads)
+            n_outer_trip = b.div(p_n, b.const_i32(NG))
+
+            if spec.training:
+
+                def pass1_body_ng(_n_off, x_scalars, iter_vars):
+                    sum_p, sumsq_p = iter_vars
+                    sq_scalars = [b.fmul(xi, xi) for xi in x_scalars]
+                    sum_p = b.fadd(sum_p, tree_reduce(b, b.fadd, list(x_scalars)))
+                    sumsq_p = b.fadd(sumsq_p, tree_reduce(b, b.fadd, sq_scalars))
+                    return [sum_p, sumsq_p]
+
+                def outer_pass1_body_ng(og, outer_iter_vars, _channel=channel):
+                    sum_p, sumsq_p, tail_count_p = outer_iter_vars
+                    n_runtime = b.add(b.mul(og, b.const_i32(NG)), lidihw)
+                    row_n = b.add(b.mul(n_runtime, p_c), _channel)
+                    x_tile_n = make_tile_window(
+                        x_view, lengths=(1, 1), origin=(row_n, b.const_i32(0))
+                    )
+                    (sum_p, sumsq_p), main_elems, _tail = sweep_row_chunks_dynamic(
+                        b,
+                        x_tile_n,
+                        tid=tid_within_row,
+                        block_size=hw_threads,
+                        vec=VEC,
+                        length=HW,
+                        iter_args=[("sum_p_hw_ng", sum_p), ("sumsq_p_hw_ng", sumsq_p)],
+                        body=pass1_body_ng,
+                        iv_name="hw0_ng",
+                    )
+                    for tc in range(VEC):
+                        idx_col = b.add(
+                            b.add(main_elems, b.const_i32(tc * hw_threads)),
+                            tid_within_row,
+                        )
+                        valid = b.cmp_lt(idx_col, HW)
+                        idx_safe = b.smin(idx_col, b.sub(HW, b.const_i32(1)))
+                        flat = b.add(b.mul(row_n, HW), idx_safe)
+                        x_raw = load_scalar_as_f32(b, X, flat, dtype=spec.dtype)
+                        x_masked = b.select(valid, x_raw, b.const_f32(0.0))
+                        valid_f = b.select(valid, b.const_f32(1.0), b.const_f32(0.0))
+                        sum_p = b.fadd(sum_p, x_masked)
+                        sumsq_p = b.fadd(sumsq_p, b.fmul(x_masked, x_masked))
+                        tail_count_p = b.fadd(tail_count_p, valid_f)
+                    return [sum_p, sumsq_p, tail_count_p]
+
+                for_op_ng = b.scf_for_iter(
+                    b.const_i32(0),
+                    n_outer_trip,
+                    b.const_i32(1),
+                    [
+                        ("sum_p", b.const_f32(0.0)),
+                        ("sumsq_p", b.const_f32(0.0)),
+                        ("tail_count_p", b.const_f32(0.0)),
+                    ],
+                    iv_name="og0",
+                )
+                with for_op_ng as (og_iv, outer_iter_vars_ng):
+                    new_vals_ng = outer_pass1_body_ng(og_iv, outer_iter_vars_ng)
+                    b.scf_yield(*new_vals_ng)
+                sum_p, sumsq_p, tail_count_p = for_op_ng.results
+
+                # Same loop-invariant-total shortcut as n_groups==1, scoped
+                # to hw_threads. Always uses the NaN-safe max(count,1) form
+                # (build_batchnorm2d's static NG>1 path only needs it when
+                # Python build-time arithmetic proves a tail exists; here
+                # HW is runtime, so whether a tail exists can't be known at
+                # build time -- the safe form covers both cases uniformly).
+                trip_count_ng = b.div(HW, b.const_i32(hw_threads * VEC))
+                main_per_thread_total_ng = b.mul(
+                    n_outer_trip, b.mul(trip_count_ng, b.const_i32(VEC))
+                )
+                count_val = b.fadd(b.sitofp_f32(main_per_thread_total_ng), tail_count_p)
+                count_safe = b.fmax(count_val, b.const_f32(1.0))
+
+                mean_p = b.fdiv(sum_p, count_safe)
+                m2_p = b.fsub(sumsq_p, b.fmul(mean_p, sum_p))
+
+                if spec.fast_reduce:
+                    mean, var = welford_block_reduce_stable_wave_prologue(
+                        b,
+                        mean_p,
+                        m2_p,
+                        count_val,
+                        lds_mean,
+                        lds_m2,
+                        lds_count,
+                        tid,
+                        block_size=BS,
+                        wave_size=spec.wave_size,
+                    )
+                else:
+                    mean, var = welford_block_reduce_stable(
+                        b, mean_p, m2_p, count_val, lds_mean, lds_m2, lds_count, tid, block_size=BS
+                    )
+
+                with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
+                    old_mean = b.global_load_f32(RunningMean, channel)
+                    old_var = b.global_load_f32(RunningVar, channel)
+                    one_minus_mom = b.fsub(b.const_f32(1.0), momentum)
+                    new_running_mean = b.fadd(
+                        b.fmul(one_minus_mom, old_mean), b.fmul(momentum, mean)
+                    )
+                    new_running_var = b.fadd(
+                        b.fmul(one_minus_mom, old_var), b.fmul(momentum, var)
+                    )
+                    b.global_store(RunningMean, channel, new_running_mean)
+                    b.global_store(RunningVar, channel, new_running_var)
+                    if spec.save_mean_invstd:
+                        inv_std_save = b.rsqrt(b.fadd(var, eps))
+                        store_scalar_from_f32(b, Mean, channel, mean, dtype=spec.dtype)
+                        store_scalar_from_f32(
+                            b, InvStd, channel, inv_std_save, dtype=spec.dtype
+                        )
+            else:
+                mean = b.global_load_f32(RunningMean, channel)
+                var = b.global_load_f32(RunningVar, channel)
+
+            inv_std = b.rsqrt(b.fadd(var, eps))
+            gamma_v = load_scalar_as_f32(b, Gamma, channel, dtype=spec.dtype)
+            beta_v = load_scalar_as_f32(b, Beta, channel, dtype=spec.dtype)
+            scale = b.fmul(inv_std, gamma_v)
+
+            def pass2_body_ng(n_off, x_tile_n, _mean=mean, _scale=scale, _beta_v=beta_v):
+                x_scalars = x_tile_n.load_vec_as_f32(b, b.const_i32(0), n_off, n=VEC)
+                return [
+                    b.fadd(b.fmul(b.fsub(x_scalars[i], _mean), _scale), _beta_v)
+                    for i in range(VEC)
+                ]
+
+            outer_for_ng = b.scf_for(
+                b.const_i32(0), n_outer_trip, b.const_i32(1), iv_name="og1"
             )
-
-        with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
-            old_mean = b.global_load_f32(RunningMean, channel)
-            old_var = b.global_load_f32(RunningVar, channel)
-            one_minus_mom = b.fsub(b.const_f32(1.0), momentum)
-            new_running_mean = b.fadd(
-                b.fmul(one_minus_mom, old_mean), b.fmul(momentum, mean)
-            )
-            new_running_var = b.fadd(
-                b.fmul(one_minus_mom, old_var), b.fmul(momentum, var)
-            )
-            b.global_store(RunningMean, channel, new_running_mean)
-            b.global_store(RunningVar, channel, new_running_var)
-            if spec.save_mean_invstd:
-                inv_std_save = b.rsqrt(b.fadd(var, eps))
-                store_scalar_from_f32(b, Mean, channel, mean, dtype=spec.dtype)
-                store_scalar_from_f32(b, InvStd, channel, inv_std_save, dtype=spec.dtype)
-    else:
-        mean = b.global_load_f32(RunningMean, channel)
-        var = b.global_load_f32(RunningVar, channel)
-
-    inv_std = b.rsqrt(b.fadd(var, eps))
-    gamma_v = load_scalar_as_f32(b, Gamma, channel, dtype=spec.dtype)
-    beta_v = load_scalar_as_f32(b, Beta, channel, dtype=spec.dtype)
-    scale = b.fmul(inv_std, gamma_v)
-
-    # --- Pass 2: runtime N-loop (no carried state) of runtime write sweeps
-    def pass2_body(n_off, x_tile_n):
-        x_scalars = x_tile_n.load_vec_as_f32(b, b.const_i32(0), n_off, n=VEC)
-        return [
-            b.fadd(b.fmul(b.fsub(x_scalars[i], mean), scale), beta_v)
-            for i in range(VEC)
-        ]
-
-    outer_for = b.scf_for(b.const_i32(0), p_n, b.const_i32(1), iv_name="n1")
-    with outer_for as n_iv:
-        row_n = b.add(b.mul(n_iv, p_c), channel)
-        x_tile_n = make_tile_window(
-            x_view, lengths=(1, 1), origin=(row_n, b.const_i32(0))
-        )
-        y_tile_n = make_tile_window(
-            y_view, lengths=(1, 1), origin=(row_n, b.const_i32(0))
-        )
-        trip_count2 = b.div(HW, b.const_i32(BS * VEC))
-        main_elems2 = b.mul(trip_count2, b.const_i32(BS * VEC))
-        pass2_row_chunks_dynamic(
-            b,
-            y_tile_n,
-            tid=tid,
-            block_size=BS,
-            vec=VEC,
-            main_elems_per_row=main_elems2,
-            trip_count=trip_count2,
-            body=lambda n_off, _x_tile_n=x_tile_n: pass2_body(n_off, _x_tile_n),
-            iv_name="hw1",
-        )
-        for tc in range(VEC):
-            idx_col = b.add(b.add(main_elems2, b.const_i32(tc * BS)), tid)
-            valid = b.cmp_lt(idx_col, HW)
-            with b.scf_if(valid):
-                flat = b.add(b.mul(row_n, HW), idx_col)
-                x_raw = load_scalar_as_f32(b, X, flat, dtype=spec.dtype)
-                y_val = b.fadd(b.fmul(b.fsub(x_raw, mean), scale), beta_v)
-                store_scalar_from_f32(b, Y, flat, y_val, dtype=spec.dtype)
+            with outer_for_ng as og_iv:
+                n_runtime = b.add(b.mul(og_iv, b.const_i32(NG)), lidihw)
+                row_n = b.add(b.mul(n_runtime, p_c), channel)
+                x_tile_n = make_tile_window(
+                    x_view, lengths=(1, 1), origin=(row_n, b.const_i32(0))
+                )
+                y_tile_n = make_tile_window(
+                    y_view, lengths=(1, 1), origin=(row_n, b.const_i32(0))
+                )
+                trip_count2_ng = b.div(HW, b.const_i32(hw_threads * VEC))
+                main_elems2_ng = b.mul(trip_count2_ng, b.const_i32(hw_threads * VEC))
+                pass2_row_chunks_dynamic(
+                    b,
+                    y_tile_n,
+                    tid=tid_within_row,
+                    block_size=hw_threads,
+                    vec=VEC,
+                    main_elems_per_row=main_elems2_ng,
+                    trip_count=trip_count2_ng,
+                    body=lambda n_off, _x_tile_n=x_tile_n: pass2_body_ng(n_off, _x_tile_n),
+                    iv_name="hw1_ng",
+                )
+                for tc in range(VEC):
+                    idx_col = b.add(
+                        b.add(main_elems2_ng, b.const_i32(tc * hw_threads)),
+                        tid_within_row,
+                    )
+                    valid = b.cmp_lt(idx_col, HW)
+                    with b.scf_if(valid):
+                        flat = b.add(b.mul(row_n, HW), idx_col)
+                        x_raw = load_scalar_as_f32(b, X, flat, dtype=spec.dtype)
+                        y_val = b.fadd(b.fmul(b.fsub(x_raw, mean), scale), beta_v)
+                        store_scalar_from_f32(b, Y, flat, y_val, dtype=spec.dtype)
 
     return b.kernel
 

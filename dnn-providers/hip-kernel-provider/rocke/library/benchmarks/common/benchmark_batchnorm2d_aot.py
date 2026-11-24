@@ -50,7 +50,7 @@ from benchmarks.common.norm_bench_common import (
     rank_candidates,
     time_candidate,
 )
-from benchmarks.common.norm_sweep_space import batchnorm_combos
+from benchmarks.common.norm_sweep_space import batchnorm_combos, batchnorm_dynamic_combos
 
 
 def _parse_args(argv):
@@ -96,6 +96,21 @@ def _parse_args(argv):
         "inline (see norm_kernel_cache.py); pairs with norm_compile_all.py "
         "pre-warming the cache across many CPU workers before a GPU-pinned "
         "run_norm_shards.py pass",
+    )
+    dyn = p.add_mutually_exclusive_group()
+    dyn.add_argument(
+        "--dynamic", dest="dynamic", action="store_true", default=True,
+        help="sweep the AOT-generic (dynamic=True) candidates (default): one "
+        "compiled binary per tuning config "
+        "(block_size/vec/channels_per_block/n_groups/fast_reduce) serves any "
+        "runtime shape instead of being built fresh per shape -- see "
+        "instances/common/batchnorm2d.py's BatchNorm2DSpec.dynamic and "
+        "norm_kernel_cache.py's dynamic cache-key note",
+    )
+    dyn.add_argument(
+        "--static", dest="dynamic", action="store_false",
+        help="sweep the shape-specialized candidates instead (one compile per "
+        "exact N/C/H/W) -- the old default, kept for comparison/debugging",
     )
     add_fast_rank_args(p)
     return p.parse_args(argv)
@@ -156,7 +171,8 @@ def _validate_batchnorm(artifact, *, grid, block, x, y, gamma, beta, running_mea
 def main(argv=None) -> int:
     args = _parse_args(argv or sys.argv[1:])
 
-    combos = batchnorm_combos(
+    combo_fn = batchnorm_dynamic_combos if args.dynamic else batchnorm_combos
+    combos = combo_fn(
         n=args.n, c=args.c, h=args.h, w=args.w,
         dtype=args.dtype, arch=args.arch, training=args.training,
     )
