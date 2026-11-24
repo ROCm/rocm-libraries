@@ -1044,17 +1044,24 @@ class TestRealSchema2Document:
         return row
 
     @pytest.mark.parametrize("kind", ["timing", "correctness"])
-    def test_the_real_document_passes_every_gate(self, tmp_path, kind):
-        outcome = self.evaluate(tmp_path, kind)
+    @pytest.mark.parametrize("version", [2, 3])
+    def test_the_real_document_passes_every_gate(self, tmp_path, kind, version):
+        def as_schema3(doc):
+            doc["schema_version"] = 3
+            # Schema 3 uses geometry hashes. The sweep joins by graph name.
+            doc["graphs"][0]["graph_id"] = "a" * 64
+
+        outcome = self.evaluate(
+            tmp_path, kind, edit=as_schema3 if version == 3 else None
+        )
         assert outcome["success"], (outcome["gates"], outcome["errors"])
         expected = self.engine_row(json.loads(_REAL_V2.read_text()))["ootb"]["kernel"]
         assert [e["mean_ms"] for e in outcome["ledger"]] == [expected["median_ms"]]
 
     def test_an_unknown_schema_version_is_refused(self, tmp_path):
-        outcome = self.evaluate(tmp_path, edit=lambda d: d.update(schema_version=3))
+        outcome = self.evaluate(tmp_path, edit=lambda d: d.update(schema_version=4))
         assert not outcome["success"]
         assert {e["outcome"] for e in outcome["ledger"]} == {"missing"}
-        assert any("schema_version 3 is not supported" in e for e in outcome["errors"])
 
     @pytest.mark.parametrize(
         "count", ["failed", "errors", "graph_errors", "no_engine_graphs"]

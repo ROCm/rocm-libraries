@@ -586,25 +586,23 @@ def _is_reference(row, provider):
 def _result_schema(doc):
     """The dnn-benchmark result schema of `doc`: 1 has no `schema_version`.
 
-    Schema 2 (dnn-benchmarking docs/results-schema.md) is read through
-    `_schema1_row` and `_schema2_metadata`; any other version is refused rather than
-    misread.
+    Schemas 2 and 3 share the fields the sweep reads. The sweep joins by
+    graph_name, so the new graph_id format in schema 3 does not affect it.
     """
     version = doc["schema_version"] if "schema_version" in doc else 1
-    if type(version) is not int or version not in (1, 2):
+    if type(version) is not int or version not in (1, 2, 3):
         raise ValueError(
             f"dnn-benchmark result schema_version {version!r} is not supported; "
-            "the sweep reads schema 1 and 2"
+            "the sweep reads schemas 1, 2, and 3"
         )
     return version
 
 
-def _schema2_metadata(doc):
-    """Schema-2 `summary` and `environment` as the schema-1 `metadata` keys read here.
+def _summary_metadata(doc):
+    """Read `summary` and `environment` under the schema-1 `metadata` keys.
 
-    Schema 1 wrote a graph-level error, and a graph with no selected engine, as an
-    engine error row, so its `error_combinations` counted both; schema 2 counts them
-    apart.
+    Schema 1 counted graph-level errors and graphs with no selected engine
+    as engine error rows. Schemas 2 and 3 count them separately.
     """
     summary = doc["summary"]
     return {
@@ -618,9 +616,9 @@ def _schema2_metadata(doc):
 
 
 def _schema1_row(row, plugin_paths):
-    """A schema-2 result row under the schema-1 keys `evaluate_phase` reads.
+    """A schema-2 or schema-3 row under the schema-1 keys `evaluate_phase` reads.
 
-    Schema 2 names the row's runtime (`hipdnn` or `pytorch`) in `runtime`, nests
+    The row names its runtime (`hipdnn` or `pytorch`) in `runtime`, nests
     `engine`, writes its ID as `0x` plus 16 upper-case hex digits of the unsigned
     value, and labels an unnamed engine with that hex ID. The default plan's timing
     and comparison are in `ootb.kernel` and `ootb.correctness`; the kernel stats have
@@ -684,7 +682,7 @@ def evaluate_phase(
 ):
     """Evaluate real graph-first dnn-benchmark JSON, independently of command status.
 
-    Reads result schema 1 and 2; see `_result_schema`.
+    Reads result schemas 1, 2, and 3; see `_result_schema`.
     """
     gates = {
         "command": command_exit == 0,
@@ -734,8 +732,8 @@ def evaluate_phase(
                 raise ValueError("duplicate graph name or invalid results list")
             rows[name] = graph
         gates["parsed_inventory"] = set(rows) == {g["graph_name"] for g in inventory}
-        metadata = doc["metadata"] if schema == 1 else _schema2_metadata(doc)
-        plugin_paths = doc["run"]["config"]["plugin_paths"] if schema == 2 else None
+        metadata = doc["metadata"] if schema == 1 else _summary_metadata(doc)
+        plugin_paths = doc["run"]["config"]["plugin_paths"] if schema != 1 else None
         if not isinstance(metadata, dict):
             raise ValueError("metadata must be a mapping")
     except (OSError, ValueError, KeyError, TypeError) as exc:
@@ -763,7 +761,7 @@ def evaluate_phase(
             if not isinstance(row, dict):
                 entry.update(outcome="ambiguous", reason="non-mapping result row")
                 continue
-            if schema == 2:
+            if schema != 1:
                 row = _schema1_row(row, plugin_paths)
             if _is_reference(row, wanted):
                 references.append(row)
