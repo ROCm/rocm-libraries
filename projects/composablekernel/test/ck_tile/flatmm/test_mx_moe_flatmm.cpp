@@ -1,0 +1,82 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+//
+// MX (a4w4) MoE GEMM on gfx1250: MoeFlatmmKernel on MXFlatmmPipelineAGmemBGmemCRegV1, one FFN
+// GEMM per launch (gemm1_gate_up, gemm2), checked against a CPU reference. The problem setup
+// (random top-k routing sorted into 32-row expert tiles, MX data and scale layouts, reference)
+// is shared with tile_example_mx_moe_flatmm.
+//
+// The cases cover the token gather (row-mapping data), padding rows (token counts that are not a
+// multiple of the tile), experts spanning several tiles, many small experts, and one token.
+
+#include <gtest/gtest.h>
+
+#include "mx_moe_flatmm.hpp"
+
+namespace {
+
+struct MoeCase
+{
+    const char* name;
+    int experts;
+    int num_tokens;
+    int topk;
+    int N;
+    int K;
+    int init; // 0 random, 1 constant, 2 row r of A = v(r)
+};
+
+std::ostream& operator<<(std::ostream& os, const MoeCase& c) { return os << c.name; }
+
+// gemm1_gate_up: N = 2 x intermediate, K = hidden. gemm2: N = hidden, K = intermediate.
+const MoeCase kCases[] = {
+    {"Constant", 4, 128, 2, 512, 512, 1},
+    {"RowMapping", 4, 128, 2, 512, 512, 2},
+    {"Random", 4, 128, 2, 512, 512, 0},
+    {"SeveralTilesPerExpert", 2, 256, 2, 512, 512, 0},
+    {"PaddingRows", 8, 37, 2, 512, 512, 0},
+    {"ManyExperts", 64, 64, 8, 1536, 768, 0},
+    {"OneToken", 8, 1, 2, 512, 512, 0},
+};
+
+template <ck_tile::MoeFlatmmKind kind>
+void run_case(const MoeCase& t)
+{
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "the MX MoE path is implemented for gfx1250 only";
+
+    MxMoeCase c;
+    c.experts    = t.experts;
+    c.num_tokens = t.num_tokens;
+    c.topk       = t.topk;
+    c.N          = t.N;
+    c.K          = t.K;
+    c.init       = t.init;
+    c.verbose    = false;
+
+    const MxMoeResult r = run_mx_moe_case<kind>(c);
+    EXPECT_TRUE(r.pass);
+    if(std::string(t.name) == "SeveralTilesPerExpert")
+        EXPECT_GT(r.max_rows_per_expert, MXMoeFlatmmConfig::M_Tile)
+            << "the case must route more rows to one expert than one M tile holds";
+}
+
+class MxMoeFlatmm : public ::testing::TestWithParam<MoeCase>
+{
+};
+
+TEST_P(MxMoeFlatmm, Gemm1GateUp)
+{
+    run_case<ck_tile::MoeFlatmmKind::kFFN_gemm1_gate_up>(GetParam());
+}
+
+TEST_P(MxMoeFlatmm, Gemm2) { run_case<ck_tile::MoeFlatmmKind::kFFN_gemm2>(GetParam()); }
+
+INSTANTIATE_TEST_SUITE_P(Fp4xFp4,
+                         MxMoeFlatmm,
+                         ::testing::ValuesIn(kCases),
+                         [](const ::testing::TestParamInfo<MoeCase>& param_info) {
+                             return std::string(param_info.param.name);
+                         });
+
+} // namespace
