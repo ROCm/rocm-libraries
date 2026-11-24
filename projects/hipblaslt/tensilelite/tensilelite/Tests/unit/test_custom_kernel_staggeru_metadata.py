@@ -1130,3 +1130,21 @@ def test_declare_stagger_leaves_the_packed_argument_intact(pgr):
     assert not written
     for mask in sorted(_PACKED_MASKS):
         assert re.search(r"s_and_b32 s\d+, s\[sgprStaggerU\], %s\b" % mask, text), mask
+
+
+# ------------------------------------------------ stagger that cannot run ---
+@pytest.mark.parametrize("useScaleAB, staggerU, custom, dropped", [
+    ("Block", 0, False, True),
+    ("Block", 16, False, False),
+    ("Block", 0, True, False),
+    ("", 0, False, False),
+    ("Scalar", 0, False, False),
+])
+def test_only_w4a16_kernels_drop_a_stagger_the_host_cannot_set(useScaleAB, staggerU, custom, dropped):
+    """A W4A16 block-scaled kernel with StaggerU 0 and no SupportCustomStaggerU
+    never staggers, so it drops the stagger code and the StaggerU SGPR. Every
+    other kernel keeps both: dropping them changes its global-read increments,
+    which custom main-loop schedules count."""
+    kernel = {"StaggerU": staggerU, "ProblemType": {"UseScaleAB": useScaleAB},
+              "InternalSupportParams": {"SupportCustomStaggerU": custom}}
+    assert KernelWriterAssembly._noStaggerUAtRunTime(kernel) is dropped

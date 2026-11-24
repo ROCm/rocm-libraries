@@ -7704,6 +7704,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   ##############################################################################
   # Init Kernel
   ##############################################################################
+  @staticmethod
+  def _noStaggerUAtRunTime(kernel):
+    """A W4A16 block-scaled kernel built with StaggerU 0 that the host cannot set
+    never staggers, so it carries neither the stagger code nor the StaggerU SGPR.
+    Other kernels keep both."""
+    return kernel["ProblemType"]["UseScaleAB"] == "Block" and kernel["StaggerU"] == 0 \
+      and not kernel["InternalSupportParams"]["SupportCustomStaggerU"]
+
   def _initKernel(self, kernel, tensorParametersA, tensorParametersB):
     assert kernel["KernelLanguage"] == "Assembly"
     if isPersistentDataParallel(kernel):
@@ -7823,11 +7831,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # - workgroup cluster: staggerU offsets each WG's K start so WGs sharing the
     #   same B never request the same address at the same time, which defeats
     #   cross-WG multicast. Disable stagger so K phases stay aligned.
-    # - StaggerU 0 that the host cannot override (no SupportCustomStaggerU): the
-    #   code would never run, and its SGPRs are what a Stream-K kernel lacks.
+    # - W4A16 block-scaled kernel with StaggerU 0 that the host cannot override (no
+    #   SupportCustomStaggerU): the code would never run, and its SGPRs are what a
+    #   Stream-K kernel lacks.
     self.states.staggerUCode = True
     if self.states.tailloopInNll or \
-       (kernel["StaggerU"] == 0 and not kernel["InternalSupportParams"]["SupportCustomStaggerU"]) or \
+       self._noStaggerUAtRunTime(kernel) or \
        not kernel["BufferLoad"] or \
        (isPersistent(kernel) and \
         hasMx and isgfx950) or \
@@ -10305,8 +10314,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.defineSgpr("GSUSumIdx", 2, 2)
       self.defineSgpr("GSULog2BpeC", 1)
       self.defineSgpr("GSULog2BpeD", 1)
-    if self.states.staggerUCode or kernel["StaggerU"] != 0 \
-       or kernel["InternalSupportParams"]["SupportCustomStaggerU"]:
+    if self.states.staggerUCode or not self._noStaggerUAtRunTime(kernel):
       self.defineSgpr("StaggerU", 1)
     self.defineSgpr("WGM", 1)
 
