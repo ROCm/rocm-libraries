@@ -735,10 +735,34 @@ def test_brotate_rejects_mx_matrix_inst_and_sparse():
 def test_brotate_rejects_each_unsupported_knob():
     for key in ("UseSubtileImpl", "DirectToVgprA", "DirectToVgprB", "DirectToLdsB", "enableLDSTrA",
                 "enableLDSTrB", "UseDotInstruction", "UseCustomMainLoopSchedule",
-                "PrefetchAcrossPersistent", "TDMFuse"):
+                "PrefetchAcrossPersistent"):
         _brot_rejects(_brot_state(**{key: 1}), key)
     _brot_rejects(_brot_state(LocalSplitU=2), "LocalSplitU")
     _brot_rejects(_brot_state(NumWaveSplitK=2), "NumWaveSplitK")
+
+
+def test_brotate_admits_the_unfused_groupings_only():
+    """Rows 0/1 give each data tensor its own set, which the per-set swap masks carry.
+
+    `TDMInst=3` is load-bearing: without it every row declines to the fused default, and a state
+    where all values collapse would assert nothing -- so require the unfused shape to appear.
+    """
+    from tensilelite.Components.TDMFuse import liveGroups, tdmPairedSwapMask, tdmSetOwner
+    shapes = set()
+    for fuse in (0, 1):
+        state = _brot_tight_state(TDMFuse=fuse, TDMInst=3)
+        assert b_rotate_reason(state) is None, fuse
+        shapes.add(tuple(sorted(tuple(group) for group in liveGroups(state))))
+        # Two DISTINCT descriptor sets sharing one mask is the clobber the per-set masks removed.
+        owners = {}
+        for tc in ("A", "B"):
+            owners.setdefault(tdmPairedSwapMask(state, tc), set()).add(tdmSetOwner(state, tc))
+        assert all(len(v) == 1 for v in owners.values()), (fuse, owners)
+    assert (("A",), ("B",)) in shapes, shapes
+    # 2/3 share a block-layout set and put a scale on one wave; 4 stages a later region.
+    for fuse in (2, 3, 4):
+        _brot_rejects(_brot_tight_state(TDMFuse=fuse, TDMInst=3), "TDMFuse=%d" % fuse)
+
 def test_brotate_uses_per_component_buffer_masks():
     # Tight layouts use paired StoreSwapAddr masks; aligned layouts retain
     # whole-buffer swapping. The BRotate gate accepts either layout.

@@ -496,6 +496,54 @@ bool GirFrameAnalysis::Result::insideOneGirBlock(const BasicBlock* from,
     return source->second == target->second;
 }
 
+BasicBlock* GirFrameAnalysis::Result::girSkipSource(const BasicBlock* block) const {
+    auto owner = girBlockOf.find(block);
+    if (owner == girBlockOf.end()) return nullptr;
+    const uint64_t anchor = owner->second;
+    const auto inGroup = [&](const BasicBlock* candidate) {
+        auto found = girBlockOf.find(candidate);
+        return found != girBlockOf.end() && found->second == anchor;
+    };
+
+    // Walk the GIR block from where it is ENTERED, refusing `block`. Starting anywhere else would
+    // call the group's own entry skippable, since leaving by the exit trivially avoids it.
+    std::deque<BasicBlock*> work;
+    std::unordered_set<const BasicBlock*> seen{block};
+    for (const auto& [candidate, candidateAnchor] : girBlockOf) {
+        if (candidateAnchor != anchor || candidate == block) continue;
+        auto* entry = const_cast<BasicBlock*>(candidate);
+        const auto& predecessors = entry->getPredecessors();
+        if (!predecessors.empty() && std::none_of(predecessors.begin(), predecessors.end(),
+                                                  [&](BasicBlock* pred) { return !inGroup(pred); }))
+            continue;
+        if (seen.insert(entry).second) work.push_back(entry);
+    }
+
+    bool escapes = false;
+    while (!work.empty()) {
+        BasicBlock* node = work.front();
+        work.pop_front();
+        for (BasicBlock* successor : node->getSuccessors()) {
+            if (successor == block) continue;
+            if (!inGroup(successor)) {
+                escapes = true;  // an agent left the GIR block without running `block`
+                continue;
+            }
+            if (seen.insert(successor).second) work.push_back(successor);
+        }
+    }
+    if (!escapes) return nullptr;
+
+    // The branch that does the skipping enters `block`, so it is one of its PREDECESSORS. Reading
+    // the answer off them, rather than off the blocks the walk reached, keeps the same candidates
+    // in a CFG order: a hash map of pointers has none, and the seam must be the same every run.
+    for (BasicBlock* predecessor : block->getPredecessors())
+        if (predecessor != block && seen.contains(predecessor) &&
+            predecessor->getSuccessors().size() > 1)
+            return predecessor;
+    return nullptr;
+}
+
 const std::vector<GirFrame>& GirFrameAnalysis::Result::frames(const BasicBlock* block) const {
     static const std::vector<GirFrame> empty;
     auto it = blockFrames.find(const_cast<BasicBlock*>(block));
@@ -807,8 +855,10 @@ GirFrameAnalysis::Result GirFrameAnalysis::run(Function& function, AnalysisManag
                 }
                 generation %= access.ring;
                 if (generation < 0) generation += access.ring;
-                result.occurrences.push_back({inst, instructionIndex.at(inst), accessIndex, frame,
-                                              concreteStorage(access, generation, storageIds)});
+                const int storage = concreteStorage(access, generation, storageIds);
+                result.storageRing[storage] = access.operand;
+                result.occurrences.push_back(
+                    {inst, instructionIndex.at(inst), accessIndex, frame, storage});
             }
         }
         // An action that survived lowering but whose kind matches none of its instructions drops

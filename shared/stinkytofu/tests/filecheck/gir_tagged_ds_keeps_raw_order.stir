@@ -1,0 +1,25 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --print-output
+#
+# A GIR-tagged DS op leaves the hasSideEffect() region cuts, so the frame model -- not the cut --
+# has to order it. The model is only real when a contract is loaded: here one is, so the frame
+# slot token (LDS0) carries the store -> load dependency and the pair keeps program order.
+# Without the token the scheduler sees only register deps and hoists the load above the store,
+# reading the slot before it is written.
+
+st.metadata "gir.frame_contract" {
+gir-frame-contract
+
+gen 0  ring=1 entry=0
+}
+
+# CHECK-LABEL: @gir_tagged_raw
+# CHECK: "st.ds_store_b32"
+# CHECK: "st.ds_load_b128"
+
+st.func @gir_tagged_raw() {
+^entry:
+  v30 = "st.v_add_f32"(v1, 1.0) { issueCycles = 1, latencyCycles = 40 }
+  "st.ds_store_b32"(v100, v30) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 1, anchor = 1, kind = ds, access0_write = 1, access0_operand = 0, access0_ring = 1, access0_abs = 0 } }
+  v[20:23] = "st.ds_load_b128"(v100) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 2, anchor = 2, kind = ds, access0_write = 0, access0_operand = 0, access0_ring = 1, access0_abs = 0 } }
+  acc[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[20:27], v[20:27], acc[0:7]) { issueCycles = 4, latencyCycles = 16 }
+}

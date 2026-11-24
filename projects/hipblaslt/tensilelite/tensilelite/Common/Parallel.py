@@ -398,9 +398,17 @@ def ParallelMapReturnAsGenerator(function, objects, message="", enable=True, mul
             yield result.result()
 
 
+def _lengthOrMaterialise(objects):
+    """The task count when the input can state one without being consumed, else None."""
+    try:
+        return len(objects)
+    except TypeError:
+        return None
+
+
 def ParallelMap2(
     function, objects, message="", enable=True, multiArg=True, return_as="list", procs=None,
-    spawn_worker=False,
+    spawn_worker=False, count=None,
 ):
     """
     Generally equivalent to list(map(function, objects)), possibly executing in parallel.
@@ -420,8 +428,12 @@ def ParallelMap2(
     from .GlobalParameters import globalParameters
 
     threadCount = CPUThreadCount(enable)
-    objects = list(objects)
-    threadCount = min(threadCount, max(len(objects), 1))
+    # Only the COUNT is wanted here; materialising costs 949 bytes per task before one has run.
+    objectCount = count if count is not None else _lengthOrMaterialise(objects)
+    if objectCount is None:
+        objects = list(objects)
+        objectCount = len(objects)
+    threadCount = min(threadCount, max(objectCount, 1))
     if procs is not None and procs > 0:
         threadCount = min(threadCount, procs)
     # One task would stay in this process. A worker handoff needs a new
@@ -431,11 +443,12 @@ def ParallelMap2(
 
     if threadCount <= 1 and globalParameters["ShowProgressBar"]:
         # Provide a progress bar for single-threaded operation.
-        return [function(*args) if multiArg else function(args) for args in tqdm(objects, message)]
+        return [function(*args) if multiArg else function(args)
+                for args in tqdm(objects, message, total=objectCount)]
 
     if message != "":
         message += ": "
-    print("{0}Launching {1} threads for {2} tasks...".format(message, threadCount, len(objects)))
+    print("{0}Launching {1} threads for {2} tasks...".format(message, threadCount, objectCount))
     sys.stdout.flush()
     currentTime = time.time()
 

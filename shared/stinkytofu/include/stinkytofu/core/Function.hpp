@@ -23,6 +23,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <iosfwd>
 #include <memory>
 #include <optional>
@@ -55,6 +56,10 @@ class STINKYTOFU_EXPORT Function {
     std::unordered_map<std::string, std::pair<const void*, std::shared_ptr<const void>>>
         structMetadata_;
     bool isCallable = false;
+    /// Called just before an IR node is freed by BasicBlock::eraseIR, with (node, next, prev).
+    /// Lets an owner holding raw node pointers (StinkyAsmModule's instruction-group endpoints)
+    /// move them off the dying node instead of being left with a dangling pointer.
+    std::function<void(IRBase*, IRBase*, IRBase*)> onEraseIR_;
 
    public:
     explicit Function(const std::string& name = "");
@@ -238,6 +243,13 @@ class STINKYTOFU_EXPORT Function {
     /// Drop instruction/block SSA metadata and arena values. Physical operands
     /// are left unchanged.
     void clearAttachedSSA();
+
+    void setEraseObserver(std::function<void(IRBase*, IRBase*, IRBase*)> observer) {
+        onEraseIR_ = std::move(observer);
+    }
+    const std::function<void(IRBase*, IRBase*, IRBase*)>& eraseObserver() const {
+        return onEraseIR_;
+    }
 
     void dump(std::ostream& out) const;
 
