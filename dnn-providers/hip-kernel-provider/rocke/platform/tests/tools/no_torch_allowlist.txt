@@ -11,7 +11,6 @@ library/benchmarks/common/attention_combo_sweep.py: import torch_api torch_objec
 library/benchmarks/common/attention_sweep.py: import torch_object
 library/benchmarks/common/benchmark_rocke_unified_attention.py: import torch_api
 library/benchmarks/common/benchmark_winograd_conv.py: import torch_api
-library/benchmarks/common/grouped_conv/benchmark_grouped_conv.py: import torch_object
 library/benchmarks/gfx1250/attention/prefill/benchmark_prefill2d_live.py: import torch_api torch_object
 library/benchmarks/gfx942/attention/decode/benchmark_decode_live.py: import torch_api torch_object
 library/benchmarks/gfx942/attention/prefill/benchmark_dense_prefill_live.py: import torch_api torch_object
