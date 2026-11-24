@@ -170,6 +170,6 @@ TEST_P(GPU_Conv2dDefaultIGemmDynamicDLops_FP16, HalfTest_conv_igemm_dynamic_dlop
     }
 };
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_Conv2dDefaultIGemmDynamicDLops_FP16,
                          testing::Values(GetTestCases()));
