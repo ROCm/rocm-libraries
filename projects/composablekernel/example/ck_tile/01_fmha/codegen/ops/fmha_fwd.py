@@ -2327,7 +2327,11 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             problem_ctx: ProblemContext, kernel_ctx: KernelContext
         ) -> bool:
             p = kernel_ctx.pipeline
-            if kernel_ctx.mask_impl == "simplified" and p.tag == "qr_tdm":
+            if (
+                (problem_ctx.hdim, problem_ctx.hdim_v) == (64, 64)
+                and kernel_ctx.mask_impl == "simplified"
+                and p.tag == "qr_tdm"
+            ):
                 if p.F_mask == "causal" and p.F_lse == "t":
                     return kernel_ctx.tile.F_bm0 == 64
             return True
