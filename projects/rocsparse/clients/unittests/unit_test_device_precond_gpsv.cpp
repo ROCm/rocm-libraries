@@ -573,7 +573,7 @@ namespace
         s.rhs  = {make_value<T>(1.0),
                  make_value<T>(1.0),
                  make_value<T>(1.0),
-                make_value<T>(half_max, half_max)};
+                 make_value<T>(half_max, half_max)};
         s.want = {make_value<T>(1.0),
                   make_value<T>(1.0),
                   make_value<T>(1.0),
